@@ -28,17 +28,17 @@ namespace milvus::test {
 template <typename T>
 inline constexpr bool always_false = false;
 
-inline ColumnVectorPtr
+inline ColumnVectorPtr<int8_t>
 GetColumnVectorForTest(const VectorPtr& result) {
     if (auto convert_vector =
-            std::dynamic_pointer_cast<milvus::ColumnVector>(result)) {
+            std::dynamic_pointer_cast<milvus::ColumnVector<int8_t>>(result)) {
         return convert_vector;
     }
 
     if (result != nullptr &&
         std::string_view(typeid(*result).name()) ==
-            std::string_view(typeid(milvus::ColumnVector).name())) {
-        return std::static_pointer_cast<milvus::ColumnVector>(result);
+            std::string_view(typeid(milvus::ColumnVector<int8_t>).name())) {
+        return std::static_pointer_cast<milvus::ColumnVector<int8_t>>(result);
     }
 
     return milvus::exec::GetColumnVector(result);
@@ -166,7 +166,7 @@ CreateSearchPlanByExpr(std::shared_ptr<milvus::expr::ITypeExpr> expr) {
     return plannode;
 }
 
-inline ColumnVectorPtr
+inline ColumnVectorPtr<int8_t>
 gen_filter_res(milvus::plan::PlanNode* plan_node,
                const milvus::segcore::SegmentInternalInterface* segment,
                uint64_t active_count,

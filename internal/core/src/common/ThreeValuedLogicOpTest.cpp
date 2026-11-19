@@ -32,8 +32,8 @@
 using namespace milvus;
 using namespace milvus::common;
 
-// Helper function to create a ColumnVector with given data and valid bitmaps
-ColumnVectorPtr
+// Helper function to create a ColumnVector<int8_t> with given data and valid bitmaps
+ColumnVectorPtr<int8_t>
 CreateColumnVector(const std::vector<bool>& data,
                    const std::vector<bool>& valid) {
     size_t size = data.size();
@@ -47,13 +47,13 @@ CreateColumnVector(const std::vector<bool>& data,
             valid_bitmap.set(i);
         }
     }
-    return std::make_shared<ColumnVector>(std::move(data_bitmap),
-                                          std::move(valid_bitmap));
+    return std::make_shared<ColumnVector<int8_t>>(std::move(data_bitmap),
+                                                  std::move(valid_bitmap));
 }
 
-// Helper function to extract results from ColumnVector
+// Helper function to extract results from ColumnVector<int8_t>
 void
-ExtractResults(const ColumnVectorPtr& vec,
+ExtractResults(const ColumnVectorPtr<int8_t>& vec,
                std::vector<bool>& data,
                std::vector<bool>& valid) {
     size_t size = vec->size();

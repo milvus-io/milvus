@@ -993,10 +993,12 @@ EvalExprSetOverAllBatches(ExprSet& expr_set,
         AssertInfo(results.size() == 1 && results[0] != nullptr,
                    "{}: filter expr returned null result",
                    what);
-        auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
+        auto col_vec =
+            std::dynamic_pointer_cast<ColumnVector<int8_t>>(results[0]);
         if (col_vec == nullptr) {
-            ThrowInfo(
-                UnexpectedError, "{}: result should be ColumnVector", what);
+            ThrowInfo(UnexpectedError,
+                      "{}: result should be ColumnVector<int8_t>",
+                      what);
         }
         if (!col_vec->IsBitmap()) {
             ThrowInfo(UnexpectedError, "{}: result should be bitmap", what);

@@ -140,8 +140,8 @@ class CountingRawExpr final : public SegmentExpr {
             data[i] = valid[i] && Matches(row) &&
                       (bitmap_input.empty() || bitmap_input[i]);
         }
-        result =
-            std::make_shared<ColumnVector>(std::move(data), std::move(valid));
+        result = std::make_shared<ColumnVector<int8_t>>(std::move(data),
+                                                        std::move(valid));
         if (offsets == nullptr) {
             MoveCursor();
         }
@@ -261,7 +261,8 @@ class RawExprCacheAdapterTest : public ::testing::Test {
         while (processed < kActiveCount) {
             VectorPtr result;
             adapter->Eval(context, result);
-            auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+            auto column =
+                std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
             EXPECT_NE(column, nullptr);
             if (column == nullptr) {
                 break;
@@ -702,7 +703,7 @@ TEST_F(RawExprCacheAdapterTest, CacheHitGathersOffsetsAndValidity) {
     VectorPtr result;
     hit_adapter->Eval(offset_context, result);
 
-    auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+    auto column = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
     ASSERT_NE(column, nullptr);
     ASSERT_EQ(column->size(), offsets.size());
     TargetBitmapView data(column->GetRawData(), column->size());
@@ -736,8 +737,8 @@ TEST_F(RawExprCacheAdapterTest, CacheHitPreservesEmptyOffsetExhaustion) {
     OffsetVector offsets;
     EvalCtx offset_context(&exec_context, &offsets);
     auto [hit_input, hit_adapter] = MakeAdapter("raw:empty-offsets");
-    VectorPtr result = std::make_shared<ColumnVector>(TargetBitmap(1, true),
-                                                      TargetBitmap(1, true));
+    VectorPtr result = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(1, true), TargetBitmap(1, true));
     hit_adapter->Eval(offset_context, result);
 
     EXPECT_EQ(result, nullptr);
@@ -764,7 +765,7 @@ TEST_F(RawExprCacheAdapterTest, CacheHitReturnsLogicalValueDespiteWorkMask) {
     VectorPtr result;
     hit_adapter->Eval(hit_context, result);
 
-    auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+    auto column = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
     ASSERT_NE(column, nullptr);
     ASSERT_EQ(column->size(), kBatchSize);
     TargetBitmapView data(column->GetRawData(), column->size());
@@ -908,7 +909,7 @@ TEST_F(RawExprCacheAdapterTest, ScalarPrefetchLoadsStorageBeforeEvaluation) {
     EvalCtx eval_context(&exec_context);
     VectorPtr result;
     compiled[0]->Eval(eval_context, result);
-    auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+    auto column = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
     ASSERT_NE(column, nullptr);
     ASSERT_EQ(column->size(), 3);
     TargetBitmapView matches(column->GetRawData(), column->size());
@@ -1139,7 +1140,8 @@ TEST_F(RawExprCacheAdapterTest, GrowingAdmissionSkipsCaptureForNewSnapshots) {
         while (processed < active_count) {
             VectorPtr result;
             adapter->Eval(eval_context, result);
-            auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+            auto column =
+                std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
             ASSERT_NE(column, nullptr);
             ASSERT_GT(column->size(), 0);
             TargetBitmapView data(column->GetRawData(), column->size());
@@ -1498,7 +1500,8 @@ TEST_P(RawExprCacheNullRejectionTest, SkippedNullsRemainUnknownUnderNot) {
             std::vector<VectorPtr> results;
             expressions.Eval(eval_context, results);
             ASSERT_EQ(results.size(), 1);
-            auto column = std::dynamic_pointer_cast<ColumnVector>(results[0]);
+            auto column =
+                std::dynamic_pointer_cast<ColumnVector<int8_t>>(results[0]);
             ASSERT_NE(column, nullptr);
             ASSERT_GT(column->size(), 0);
             data.append(TargetBitmapView(column->GetRawData(), column->size()));
@@ -1586,7 +1589,7 @@ TEST_F(RawExprCacheAdapterTest, CachedLikeChildrenStillUseBatchNgram) {
     EvalCtx eval_context(&exec_context);
     VectorPtr result;
     conjunction->Eval(eval_context, result);
-    auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+    auto column = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
     ASSERT_NE(column, nullptr);
     ASSERT_EQ(column->size(), rows.size());
     TargetBitmapView matches(column->GetRawData(), column->size());
@@ -1623,7 +1626,8 @@ TEST_F(RawExprCacheAdapterTest, UnaryAllSkipRawResultIsCapturedAndReused) {
         while (static_cast<int64_t>(data.size()) < kActiveCount) {
             VectorPtr result;
             physical_expr->Eval(eval_context, result);
-            auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+            auto column =
+                std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
             EXPECT_NE(column, nullptr);
             if (column == nullptr) {
                 break;

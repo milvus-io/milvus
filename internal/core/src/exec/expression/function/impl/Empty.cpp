@@ -41,22 +41,19 @@ EmptyVarchar(const RowVector& args, FilterFunctionReturn& result) {
                   args.childrens().size());
     }
     const auto& arg = args.childrens()[0];
-    auto vec = std::dynamic_pointer_cast<SimpleVector>(arg);
-    Assert(vec != nullptr);
+    auto vec = AsSimpleVector<std::string>(arg);
     CheckVarcharOrStringType(vec);
     TargetBitmap bitmap(vec->size(), false);
     TargetBitmap valid_bitmap(vec->size(), true);
     for (size_t i = 0; i < vec->size(); ++i) {
         if (vec->ValidAt(i)) {
-            bitmap[i] = reinterpret_cast<std::string*>(
-                            vec->RawValueAt(i, sizeof(std::string)))
-                            ->empty();
+            bitmap[i] = vec->ValueAt(i).empty();
         } else {
             valid_bitmap[i] = false;
         }
     }
-    result = std::make_shared<ColumnVector>(std::move(bitmap),
-                                            std::move(valid_bitmap));
+    result = std::make_shared<ColumnVector<int8_t>>(std::move(bitmap),
+                                                    std::move(valid_bitmap));
 }
 
 }  // namespace function

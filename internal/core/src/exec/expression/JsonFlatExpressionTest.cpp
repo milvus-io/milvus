@@ -134,7 +134,7 @@ class JsonFlatContainsExpressionTest : public ::testing::Test {
         exec::ExprResCacheManager::SetEnabled(false);
     }
 
-    ColumnVectorPtr
+    ColumnVectorPtr<int8_t>
     Evaluate(proto::plan::JSONContainsExpr_JSONOp op,
              std::vector<int64_t> values,
              bool negate = false) {
@@ -158,7 +158,7 @@ class JsonFlatContainsExpressionTest : public ::testing::Test {
     }
 
     void
-    CheckResult(const ColumnVectorPtr& result,
+    CheckResult(const ColumnVectorPtr<int8_t>& result,
                 const std::vector<bool>& expected_result,
                 const std::vector<bool>& expected_valid) {
         ASSERT_EQ(result->size(), expected_result.size());
@@ -342,7 +342,7 @@ TEST_F(JsonFlatContainsExpressionTest,
                                               true,
                                               true,
                                               true};
-    const auto check_validity = [&](const ColumnVectorPtr& result) {
+    const auto check_validity = [&](const ColumnVectorPtr<int8_t>& result) {
         ASSERT_EQ(result->size(), expected_valid.size());
         TargetBitmapView valid(result->GetValidRawData(), result->size());
         for (size_t row = 0; row < expected_valid.size(); ++row) {

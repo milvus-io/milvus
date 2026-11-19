@@ -21,6 +21,7 @@
 #include "exec/expression/function/FunctionFactory.h"
 #include "exec/QueryContext.h"
 #include "common/Consts.h"
+#include "common/DictionaryVector.h"
 #include "common/Exception.h"
 #include "common/FieldData.h"
 #include "pb/plan.pb.h"
@@ -178,7 +179,9 @@ class QueryOrderByTest : public testing::TestWithParam<bool> {
     RowVectorPtr
     runProjectOnlyPlan(const std::vector<FieldId>& field_ids,
                        const std::vector<std::string>& field_names,
-                       const std::vector<DataType>& field_types) {
+                       const std::vector<DataType>& field_types,
+                       const SegmentInternalInterface* source = nullptr) {
+        source = source == nullptr ? segment_.get() : source;
         std::vector<PlanNodePtr> sources;
         PlanNodePtr mvcc_node =
             std::make_shared<MvccNode>(GetNextPlanNodeId(), sources);
@@ -191,7 +194,7 @@ class QueryOrderByTest : public testing::TestWithParam<bool> {
                                           sources);
         auto query_context = std::make_shared<milvus::exec::QueryContext>(
             "test_project_node",
-            segment_.get(),
+            source,
             num_rows_,
             MAX_TIMESTAMP,
             0,
@@ -199,14 +202,14 @@ class QueryOrderByTest : public testing::TestWithParam<bool> {
             query::PlanOptions{false},
             std::make_shared<milvus::exec::QueryConfig>(
                 std::unordered_map<std::string, std::string>{}));
-        milvus::OpContext op_context;
-        query_context->set_op_context(&op_context);
+        query_context->set_op_context(&project_op_context_);
+        query_context->set_read_snapshot(source->CaptureReadSnapshot());
         auto plan_fragment = plan::PlanFragment(project_node);
         return milvus::query::ExecPlanNodeVisitor::ExecuteTask(plan_fragment,
                                                                query_context);
     }
 
-    ColumnVectorPtr
+    ColumnVectorPtr<int64_t>
     createInt64FieldDataColumn(const std::vector<int64_t>& data,
                                TargetBitmap&& valid,
                                size_t null_count) {
@@ -214,7 +217,7 @@ class QueryOrderByTest : public testing::TestWithParam<bool> {
         std::copy(data.begin(), data.end(), values.begin());
         auto field_data = std::make_shared<FieldData<int64_t>>(
             DataType::INT64, false, std::move(values));
-        return std::make_shared<ColumnVector>(
+        return std::make_shared<ColumnVector<int64_t>>(
             std::move(field_data), std::move(valid), null_count);
     }
 
@@ -284,11 +287,87 @@ class QueryOrderByTest : public testing::TestWithParam<bool> {
     std::shared_ptr<Schema> schema_;
     std::map<std::string, FieldId> field_map_;
     GeneratedData raw_data_;
+    milvus::OpContext project_op_context_;
 };
 
 INSTANTIATE_TEST_SUITE_P(QueryOrderBySuite,
                          QueryOrderByTest,
                          ::testing::Values(true, false));
+
+TEST_P(QueryOrderByTest, ProjectProducesDictionaryColumns) {
+    const auto integer_id = field_map_.at(int64_field);
+    const auto string_id = field_map_.at(string_field);
+    auto output = runProjectOnlyPlan(
+        {integer_id, string_id, SegmentOffsetFieldID},
+        {int64_field, string_field, "__segment_offset__"},
+        {DataType::INT64, DataType::VARCHAR, DataType::INT64});
+    ASSERT_NE(output, nullptr);
+    ASSERT_EQ(output->size(), num_rows_);
+    ASSERT_NE(dynamic_cast<DictionaryVector<int64_t>*>(output->child(0).get()),
+              nullptr);
+    ASSERT_NE(
+        dynamic_cast<DictionaryVector<std::string>*>(output->child(1).get()),
+        nullptr);
+    EXPECT_NE(dynamic_cast<ColumnVector<int64_t>*>(output->child(2).get()),
+              nullptr);
+    auto numbers = AsSimpleVector<int64_t>(output->child(0));
+    auto strings = AsSimpleVector<std::string>(output->child(1));
+    auto expected_numbers = raw_data_.get_col<int64_t>(integer_id);
+    auto expected_strings = raw_data_.get_col<std::string>(string_id);
+    auto validity = GetParam() ? raw_data_.get_col_valid(integer_id)
+                               : FixedVector<bool>(num_rows_, true);
+    for (int64_t i = 0; i < num_rows_; ++i) {
+        EXPECT_EQ(numbers->ValidAt(i), validity[i]);
+        EXPECT_TRUE(strings->ValidAt(i));
+        if (numbers->ValidAt(i)) {
+            EXPECT_EQ(numbers->ValueAt(i), expected_numbers[i]);
+        }
+        if (strings->ValidAt(i)) {
+            EXPECT_EQ(strings->ValueAt(i), expected_strings[i]);
+        }
+    }
+    // ExecuteTask has already destroyed its operators. The batch still owns
+    // the storage generation and can outlive the segment while OpContext lives.
+    const auto null_count = numbers->nullCount();
+    segment_.reset();
+    EXPECT_EQ(numbers->nullCount(), null_count);
+    for (int64_t i = 0; i < num_rows_; ++i) {
+        if (strings->ValidAt(i)) {
+            EXPECT_EQ(strings->ValueAt(i), expected_strings[i]);
+        }
+    }
+}
+
+TEST_P(QueryOrderByTest, ProjectFallsBackToFlatForGrowingSegment) {
+    auto growing = CreateGrowingWithFieldDataLoaded(
+        schema_, empty_index_meta, SegcoreConfig::default_config(), raw_data_);
+    const auto integer_id = field_map_.at(int64_field);
+    const auto string_id = field_map_.at(string_field);
+    ASSERT_EQ(growing->GetChunkedColumn(integer_id), nullptr);
+    auto output = runProjectOnlyPlan(
+        {integer_id, string_id, SegmentOffsetFieldID},
+        {int64_field, string_field, "__segment_offset__"},
+        {DataType::INT64, DataType::VARCHAR, DataType::INT64},
+        growing.get());
+    ASSERT_NE(output, nullptr);
+    auto numbers = AsColumnVector<int64_t>(output->child(0));
+    auto strings = AsColumnVector<std::string>(output->child(1));
+    auto offsets = AsSimpleVector<int64_t>(output->child(2));
+    auto expected_numbers = raw_data_.get_col<int64_t>(integer_id);
+    auto expected_strings = raw_data_.get_col<std::string>(string_id);
+    auto validity = GetParam() ? raw_data_.get_col_valid(integer_id)
+                               : FixedVector<bool>(num_rows_, true);
+    // Growing selection can deduplicate primary keys; compare by the emitted
+    // segment offset rather than assuming the original row count/order.
+    for (int64_t i = 0; i < output->size(); ++i) {
+        const auto source_row = offsets->ValueAt(i);
+        EXPECT_EQ(numbers->ValidAt(i), validity[source_row]);
+        if (numbers->ValidAt(i)) {
+            EXPECT_EQ(numbers->ValueAt(i), expected_numbers[source_row]);
+        }
+        EXPECT_EQ(strings->ValueAt(i), expected_strings[source_row]);
+    }
+}
 
 TEST_P(QueryOrderByTest, ProjectNodeSegmentOffsetColumnAppendsAfterProjection) {
     auto output = runProjectOnlyPlan(
@@ -296,18 +375,18 @@ TEST_P(QueryOrderByTest, ProjectNodeSegmentOffsetColumnAppendsAfterProjection) {
     ASSERT_NE(output, nullptr);
     ASSERT_EQ(output->size(), num_rows_);
 
-    auto col = std::dynamic_pointer_cast<ColumnVector>(output->child(0));
+    auto col = AsColumnVector<int64_t>(output->child(0));
     ASSERT_NE(col, nullptr);
     ASSERT_EQ(col->size(), num_rows_);
     for (int64_t i = 0; i < num_rows_; ++i) {
-        EXPECT_EQ(col->ValueAt<int64_t>(i), i);
+        EXPECT_EQ(col->ValueAt(i), i);
     }
 
     auto other =
         createInt64FieldDataColumn({num_rows_}, TargetBitmap(1, true), 0);
     ASSERT_NO_THROW(col->append(*other));
     EXPECT_EQ(col->size(), num_rows_ + 1);
-    EXPECT_EQ(col->ValueAt<int64_t>(num_rows_), num_rows_);
+    EXPECT_EQ(col->ValueAt(num_rows_), num_rows_);
 }
 
 TEST_P(QueryOrderByTest,
@@ -318,7 +397,7 @@ TEST_P(QueryOrderByTest,
     ASSERT_NE(output, nullptr);
     ASSERT_EQ(output->size(), num_rows_);
 
-    auto col = std::dynamic_pointer_cast<ColumnVector>(output->child(0));
+    auto col = AsColumnVector<int64_t>(output->child(0));
     ASSERT_NE(col, nullptr);
     ASSERT_EQ(col->size(), num_rows_);
     ASSERT_EQ(col->nullCount(), num_rows_);

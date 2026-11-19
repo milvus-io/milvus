@@ -2894,7 +2894,7 @@ TEST_P(ElementFilterZeroElementBatch, FullModeAdvancesPastZeroElementBatches) {
         for (auto expected_size : {0, 0, 2}) {
             physical->Eval(eval_context, result);
             auto column_result =
-                std::dynamic_pointer_cast<ColumnVector>(result);
+                std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
             ASSERT_NE(column_result, nullptr);
             EXPECT_EQ(column_result->size(), expected_size);
         }
@@ -2923,7 +2923,7 @@ TEST_P(ElementFilterZeroElementBatch, FullModeAdvancesPastZeroElementBatches) {
                                                   &element_offsets);
             deferred_offset_physical->Eval(deferred_offset_context, result);
             auto offset_column =
-                std::dynamic_pointer_cast<ColumnVector>(result);
+                std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
             ASSERT_NE(offset_column, nullptr);
             EXPECT_EQ(offset_column->size(), element_offsets.size());
             EXPECT_EQ(deferred_offset_physical->prefetch_count(), 1);
@@ -2933,7 +2933,8 @@ TEST_P(ElementFilterZeroElementBatch, FullModeAdvancesPastZeroElementBatches) {
             exec::EvalCtx iterative_offset_context(&exec_context,
                                                    &element_offsets);
             iterative_offset_physical->Eval(iterative_offset_context, result);
-            offset_column = std::dynamic_pointer_cast<ColumnVector>(result);
+            offset_column =
+                std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
             ASSERT_NE(offset_column, nullptr);
             EXPECT_EQ(offset_column->size(), element_offsets.size());
             EXPECT_EQ(iterative_offset_physical->prefetch_count(), 0);
@@ -2954,7 +2955,7 @@ TEST_P(ElementFilterZeroElementBatch, FullModeAdvancesPastZeroElementBatches) {
         for (auto expected_size : {0, 0}) {
             zero_tail_physical->Eval(zero_tail_eval_context, result);
             auto column_result =
-                std::dynamic_pointer_cast<ColumnVector>(result);
+                std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
             ASSERT_NE(column_result, nullptr);
             EXPECT_EQ(column_result->size(), expected_size);
         }
@@ -2972,12 +2973,14 @@ TEST_P(ElementFilterZeroElementBatch, FullModeAdvancesPastZeroElementBatches) {
         exec::EvalCtx skipped_eval_context(&skipped_exec_context);
 
         skipped_batch_physical->Eval(skipped_eval_context, result);
-        auto skipped_column = std::dynamic_pointer_cast<ColumnVector>(result);
+        auto skipped_column =
+            std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
         ASSERT_NE(skipped_column, nullptr);
         EXPECT_EQ(skipped_column->size(), 0);
         skipped_batch_physical->MoveCursor();
         skipped_batch_physical->Eval(skipped_eval_context, result);
-        skipped_column = std::dynamic_pointer_cast<ColumnVector>(result);
+        skipped_column =
+            std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
         ASSERT_NE(skipped_column, nullptr);
         EXPECT_EQ(skipped_column->size(), 2);
         EXPECT_EQ(skipped_batch_physical->prefetch_count(),
@@ -6989,8 +6992,8 @@ class CandidateRecordingExprSet : public ExprSet {
                 valid[i] = (starts_[row_] + i) % 5 != 1;
             }
         }
-        results = {
-            std::make_shared<ColumnVector>(std::move(data), std::move(valid))};
+        results = {std::make_shared<ColumnVector<int8_t>>(std::move(data),
+                                                          std::move(valid))};
         row_ = end_row;
     }
 
@@ -7017,8 +7020,8 @@ class ConstantElementBitmapExpr : public Expr {
     void
     Eval(EvalCtx&, VectorPtr& result) override {
         ++evals;
-        result = std::make_shared<ColumnVector>(TargetBitmap(2, data_),
-                                                TargetBitmap(2, valid_));
+        result = std::make_shared<ColumnVector<int8_t>>(
+            TargetBitmap(2, data_), TargetBitmap(2, valid_));
     }
     void
     MoveCursor() override {
@@ -7050,8 +7053,8 @@ class UnknownOffsetExprSet : public ExprSet {
                 std::find(valid_ids_.begin(), valid_ids_.end(), (*input)[i]) !=
                 valid_ids_.end();
         }
-        results = {
-            std::make_shared<ColumnVector>(std::move(data), std::move(valid))};
+        results = {std::make_shared<ColumnVector<int8_t>>(std::move(data),
+                                                          std::move(valid))};
     }
     std::vector<OffsetVector> inputs;
 
@@ -7344,7 +7347,7 @@ class ElementFilterBitsNodeCandidateTest : public ::testing::Test {
                 EXPECT_EQ(later->moves, inner_not ? 0 : 1);
                 ASSERT_EQ(results.size(), 1);
                 auto output =
-                    std::dynamic_pointer_cast<ColumnVector>(results[0]);
+                    std::dynamic_pointer_cast<ColumnVector<int8_t>>(results[0]);
                 ASSERT_NE(output, nullptr);
                 ASSERT_EQ(output->size(), 2);
                 TargetBitmapView data(output->GetRawData(), 2);

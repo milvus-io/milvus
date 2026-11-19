@@ -1156,7 +1156,7 @@ TEST(JsonStatsThreeValuedAuditTest,
         return milvus::test::gen_filter_res(
             plan.get(), segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
     };
-    auto check = [](const ColumnVectorPtr& result,
+    auto check = [](const ColumnVectorPtr<int8_t>& result,
                     const std::vector<bool>& expected_result,
                     const std::vector<bool>& expected_valid) {
         TargetBitmapView result_view(result->GetRawData(), result->size());
@@ -1294,8 +1294,8 @@ TEST(JsonStatsBinaryRangeTest, ShreddingMatchesRawData) {
         return milvus::test::gen_filter_res(
             plan.get(), segment, json_raw_data.size(), MAX_TIMESTAMP, offsets);
     };
-    auto expect_same = [](const ColumnVectorPtr& raw,
-                          const ColumnVectorPtr& shredded) {
+    auto expect_same = [](const ColumnVectorPtr<int8_t>& raw,
+                          const ColumnVectorPtr<int8_t>& shredded) {
         ASSERT_EQ(raw->size(), shredded->size());
         TargetBitmapView raw_result(raw->GetRawData(), raw->size());
         TargetBitmapView raw_valid(raw->GetValidRawData(), raw->size());
@@ -1446,14 +1446,16 @@ TEST(JsonStatsThreeValuedAuditTest,
         return milvus::test::gen_filter_res(
             plan.get(), segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
     };
-    auto check_non_matches_are_known = [](const ColumnVectorPtr& result) {
-        TargetBitmapView result_view(result->GetRawData(), result->size());
-        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
-        for (size_t i : {0, 1}) {
-            EXPECT_TRUE(valid_view[i]) << "row " << i;
-            EXPECT_FALSE(result_view[i]) << "row " << i;
-        }
-    };
+    auto check_non_matches_are_known =
+        [](const ColumnVectorPtr<int8_t>& result) {
+            TargetBitmapView result_view(result->GetRawData(), result->size());
+            TargetBitmapView valid_view(result->GetValidRawData(),
+                                        result->size());
+            for (size_t i : {0, 1}) {
+                EXPECT_TRUE(valid_view[i]) << "row " << i;
+                EXPECT_FALSE(result_view[i]) << "row " << i;
+            }
+        };
 
     proto::plan::GenericValue value;
     value.set_int64_val(9007199254740993LL);

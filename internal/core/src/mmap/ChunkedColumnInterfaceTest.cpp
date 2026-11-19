@@ -33,6 +33,7 @@
 #include "mmap/ChunkedColumnFilter.h"
 #include "mmap/ChunkedColumnGroup.h"
 #include "test_utils/cachinglayer_test_utils.h"
+#include "common/DictionaryVector.h"
 
 namespace milvus {
 namespace {
@@ -642,6 +643,141 @@ class ChunkedColumnInterfaceTest : public ::testing::Test {};
 using Factories =
     ::testing::Types<ChunkedColumnFactory, ProxyChunkColumnFactory>;
 TYPED_TEST_SUITE(ChunkedColumnInterfaceTest, Factories);
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           DictionaryVectorKeepsSelectionAndPinsAcrossLogicalReads) {
+    ColumnSpec spec{
+        {2, 2, 2}, {{true, false}, {true, true}, {false, true}}, true};
+    spec.data_type = DataType::INT32;
+    spec.dense_nullable_payload = true;
+    auto fx = TypeParam::Create(spec);
+    auto offsets = std::make_shared<const std::vector<int64_t>>(
+        std::initializer_list<int64_t>{5, 1, 4, 0, 5, 1});
+    std::weak_ptr<const std::vector<int64_t>> selection = offsets;
+    auto vector =
+        TryMakeDictionaryVector(nullptr, DataType::INT32, fx.column, offsets);
+    ASSERT_NE(dynamic_cast<DictionaryVector<int32_t>*>(vector.get()), nullptr);
+    offsets.reset();
+    EXPECT_FALSE(selection.expired());
+    EXPECT_EQ(*fx.pin_requests, (std::vector<std::vector<int64_t>>{{2, 0}}));
+    auto* values = AsSimpleVector<int32_t>(vector.get());
+    EXPECT_EQ(values->nullCount(), 3);
+    EXPECT_FALSE(values->ValidAt(1));
+    EXPECT_FALSE(values->ValidAt(2));
+    EXPECT_FALSE(values->ValidAt(5));
+    const int64_t source_offsets[]{0, 5};
+    auto evict = [&] {
+        if (fx.group) {
+            fx.group->ManualEvictCache();
+        } else {
+            fx.column->ManualEvictCache();
+        }
+    };
+    for (int repeat = 0; repeat < 4; ++repeat) {
+        evict();
+        EXPECT_TRUE(fx.column->CellsLoaded(source_offsets, 2));
+        EXPECT_EQ(values->ValueAt(0), 5);
+        EXPECT_EQ(values->ValueAt(3), 0);
+        EXPECT_EQ(values->ValueAt(4), 5);
+    }
+    EXPECT_EQ(fx.pin_requests->size(), 1);
+    EXPECT_THROW(vector->resize(7), SegcoreError);
+    EXPECT_THROW(vector->resize(2), SegcoreError);
+    EXPECT_NO_THROW(vector->resize(6));
+    EXPECT_THROW(vector->cloneEmpty(6), SegcoreError);
+    vector.reset();
+    EXPECT_TRUE(selection.expired());
+    evict();
+    EXPECT_FALSE(fx.column->CellsLoaded(source_offsets, 2));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           DictionaryVectorHandlesEmptyAndAllNullSelections) {
+    ColumnSpec spec{{2, 2}, {{true, false}, {false, true}}, true};
+    spec.data_type = DataType::INT32;
+    spec.dense_nullable_payload = true;
+    auto fx = TypeParam::Create(spec);
+    auto offsets = std::make_shared<const std::vector<int64_t>>();
+    auto empty =
+        TryMakeDictionaryVector(nullptr, DataType::INT32, fx.column, offsets);
+    ASSERT_NE(empty, nullptr);
+    EXPECT_EQ(empty->size(), 0);
+    EXPECT_EQ(empty->nullCount(), 0);
+    EXPECT_TRUE(fx.pin_requests->empty());
+    offsets = std::make_shared<const std::vector<int64_t>>(
+        std::initializer_list<int64_t>{2, 1, 2});
+    auto nulls =
+        TryMakeDictionaryVector(nullptr, DataType::INT32, fx.column, offsets);
+    EXPECT_EQ(nulls->nullCount(), 3);
+    // Unsupported representation is a fallback; invalid bindings and offsets
+    // are errors and must not be silently retried through materialization.
+    EXPECT_EQ(
+        TryMakeDictionaryVector(nullptr, DataType::ARRAY, fx.column, offsets),
+        nullptr);
+    EXPECT_EQ(
+        TryMakeDictionaryVector(nullptr, DataType::INT32, nullptr, offsets),
+        nullptr);
+    EXPECT_THROW(
+        TryMakeDictionaryVector(nullptr, DataType::INT64, fx.column, offsets),
+        SegcoreError);
+    offsets = std::make_shared<const std::vector<int64_t>>(
+        std::initializer_list<int64_t>{4});
+    EXPECT_THROW(
+        TryMakeDictionaryVector(nullptr, DataType::INT32, fx.column, offsets),
+        SegcoreError);
+}
+
+TEST(DictionaryVectorTest,
+     StringViewsBorrowPayloadAcrossCellsAndSourceRelease) {
+    const std::vector<std::vector<std::string>> strings{
+        {std::string(128, 'a'), ""}, {std::string(128, 'z')}};
+    std::vector<std::vector<char>> buffers;
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    std::vector<int64_t> counts;
+    for (const auto& values : strings) {
+        buffers.push_back(BuildStringChunkBuffer(values));
+        auto& buffer = buffers.back();
+        counts.push_back(values.size());
+        chunks.push_back(std::make_unique<StringChunk>(
+            values.size(),
+            buffer.data(),
+            buffer.size(),
+            false,
+            std::make_shared<ChunkMmapGuard>(nullptr, 0, "")));
+    }
+    auto translator = std::make_unique<TestChunkTranslator>(
+        counts, "dictionary_strings", std::move(chunks));
+    auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
+        std::move(translator), nullptr);
+    FieldMeta meta(FieldName("strings"),
+                   FieldId(kTestFieldId),
+                   DataType::VARCHAR,
+                   false,
+                   std::nullopt);
+    auto pins = std::make_shared<std::vector<std::vector<int64_t>>>();
+    auto column =
+        std::make_shared<ScanCountingStringColumn>(std::move(slot), meta, pins);
+    auto offsets = std::make_shared<const std::vector<int64_t>>(
+        std::initializer_list<int64_t>{2, 0, 2, 1});
+    auto vector =
+        TryMakeDictionaryVector(nullptr, DataType::VARCHAR, column, offsets);
+    auto* values = AsSimpleVector<std::string>(vector.get());
+    const auto last = values->ValueAt(0);
+    const auto first = values->ValueAt(1);
+    // Compare actual addresses in the original chunk buffers, not only values.
+    EXPECT_EQ(last.data(), buffers[1].data() + 2 * sizeof(uint32_t));
+    EXPECT_EQ(first.data(), buffers[0].data() + 3 * sizeof(uint32_t));
+    EXPECT_EQ(values->ValueAt(2).data(), last.data());
+    EXPECT_TRUE(values->ValueAt(3).empty());
+    column->ManualEvictCache();
+    column.reset();
+    offsets.reset();
+    EXPECT_EQ(last, strings[1][0]);
+    EXPECT_EQ(first, strings[0][0]);
+    EXPECT_EQ(values->ValueAt(0), last);
+    EXPECT_EQ(values->nullCount(), 0);
+    EXPECT_EQ(pins->size(), 1);
+}
 
 TYPED_TEST(ChunkedColumnInterfaceTest, BuildValidRowIdsBuildsFullMapping) {
     ColumnSpec spec{{5, 3, 4},

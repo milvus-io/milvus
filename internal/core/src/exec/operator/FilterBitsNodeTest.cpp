@@ -87,8 +87,8 @@ TEST(FilterBitsNodeTest, PredicateConversionUsesFastPathForAllValidResults) {
 TEST(FilterBitsNodeTest, PredicateConversionUsesLiveAllValidBitmap) {
     auto data = MakeBitmap({true, false, true, false});
     TargetBitmap valid(data.size(), true);
-    auto col_vec =
-        std::make_shared<ColumnVector>(std::move(data), std::move(valid));
+    auto col_vec = std::make_shared<ColumnVector<int8_t>>(std::move(data),
+                                                          std::move(valid));
 
     TargetBitmapView data_view(col_vec->GetRawData(), col_vec->size());
     TargetBitmapView valid_view(col_vec->GetValidRawData(), col_vec->size());
@@ -104,8 +104,8 @@ TEST(FilterBitsNodeTest, PredicateConversionUsesLiveAllValidBitmap) {
 TEST(FilterBitsNodeTest, PredicateConversionUsesLiveInvalidBitmap) {
     auto data = MakeBitmap({true, false, true, false});
     auto valid = MakeBitmap({true, true, false, false});
-    auto col_vec =
-        std::make_shared<ColumnVector>(std::move(data), std::move(valid));
+    auto col_vec = std::make_shared<ColumnVector<int8_t>>(std::move(data),
+                                                          std::move(valid));
 
     TargetBitmapView data_view(col_vec->GetRawData(), col_vec->size());
     TargetBitmapView valid_view(col_vec->GetValidRawData(), col_vec->size());
@@ -162,7 +162,7 @@ TEST(FilterBitsNodeTest, PredicateConversionPreservesUnalignedViewBoundaries) {
 
 void
 PartialTracePredicate(const RowVector&, VectorPtr& result) {
-    result = std::make_shared<ColumnVector>(
+    result = std::make_shared<ColumnVector<int8_t>>(
         MakeBitmap({true, false, true, true, false, true, false, true}),
         MakeBitmap({true, true, false, true, true, true, true, false}));
 }
@@ -173,14 +173,14 @@ AllTracePredicate(const RowVector& args, VectorPtr& result) {
     if (!args.childrens().empty()) {
         EXPECT_LE(rows, 3);
     }
-    result = std::make_shared<ColumnVector>(TargetBitmap(rows, true),
-                                            TargetBitmap(rows, true));
+    result = std::make_shared<ColumnVector<int8_t>>(TargetBitmap(rows, true),
+                                                    TargetBitmap(rows, true));
 }
 
 void
 NoneTracePredicate(const RowVector&, VectorPtr& result) {
-    result = std::make_shared<ColumnVector>(TargetBitmap(8, false),
-                                            TargetBitmap(8, true));
+    result = std::make_shared<ColumnVector<int8_t>>(TargetBitmap(8, false),
+                                                    TargetBitmap(8, true));
 }
 
 class FilterBitsTraceTest : public testing::Test {
@@ -257,8 +257,8 @@ class FilterBitsTraceTest : public testing::Test {
         auto output = node.GetOutput();
         EXPECT_NE(output, nullptr);
         if (output != nullptr) {
-            auto column =
-                std::static_pointer_cast<ColumnVector>(output->child(0));
+            auto column = std::static_pointer_cast<ColumnVector<int8_t>>(
+                output->child(0));
             EXPECT_EQ(ToVector(TargetBitmapView(column->GetRawData(),
                                                 column->size())),
                       expected);

@@ -312,7 +312,8 @@ PhyGISCoarseConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
     // See PR #50675 review.
     TargetBitmap valid(real_batch_size, true);
 
-    result = std::make_shared<ColumnVector>(std::move(out), std::move(valid));
+    result = std::make_shared<ColumnVector<int8_t>>(std::move(out),
+                                                    std::move(valid));
     MoveCursor();
 }
 
@@ -499,8 +500,8 @@ PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
     }
 
-    result =
-        std::make_shared<ColumnVector>(std::move(res), std::move(valid_res));
+    result = std::make_shared<ColumnVector<int8_t>>(std::move(res),
+                                                    std::move(valid_res));
     MoveCursor();
 }
 

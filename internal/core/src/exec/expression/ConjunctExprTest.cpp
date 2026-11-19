@@ -48,7 +48,8 @@ class FixedBitmapExpr : public Expr {
     void
     Eval(EvalCtx&, VectorPtr& result) override {
         ++eval_count_;
-        result = std::make_shared<ColumnVector>(data_.clone(), valid_.clone());
+        result = std::make_shared<ColumnVector<int8_t>>(data_.clone(),
+                                                        valid_.clone());
     }
 
     void
@@ -157,8 +158,8 @@ class MaskAwareExpr : public Expr {
         if (offsets == nullptr) {
             cursor_ += size;
         }
-        result =
-            std::make_shared<ColumnVector>(std::move(data), std::move(valid));
+        result = std::make_shared<ColumnVector<int8_t>>(std::move(data),
+                                                        std::move(valid));
     }
 
     void
@@ -200,7 +201,7 @@ ExpectMask(const EvalCtx& context, const TargetBitmap& expected) {
 }
 
 void
-ExpectTruth(const ColumnVectorPtr& output, size_t row, Truth expected) {
+ExpectTruth(const ColumnVectorPtr<int8_t>& output, size_t row, Truth expected) {
     ASSERT_NE(output, nullptr);
     ASSERT_LT(row, output->size());
     TargetBitmapView data(output->GetRawData(), output->size());
@@ -335,7 +336,8 @@ TEST(ConjunctExprTest, NestedMasksPreserveCandidatesAndThreeValuedLogic) {
                 VectorPtr result;
                 root->Eval(eval_context, result);
 
-                auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+                auto output =
+                    std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
                 ASSERT_NE(output, nullptr);
                 ASSERT_EQ(output->size(), size);
                 std::vector<size_t> expected_b, expected_c;
@@ -459,7 +461,7 @@ TEST(ConjunctExprTest, NestedMaskSkipsKeepCursorsAlignedThroughTail) {
     for (size_t start = 0; start < size; start += batch_size) {
         VectorPtr result;
         outer.Eval(eval_context, result);
-        auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+        auto output = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
         ASSERT_NE(output, nullptr);
         ASSERT_EQ(output->size(), std::min(batch_size, size - start));
         for (size_t i = 0; i < output->size(); ++i) {
@@ -513,7 +515,7 @@ TEST(ConjunctExprTest, NestedOffsetMasksUseCandidatePositions) {
     VectorPtr result;
     outer.Eval(eval_context, result);
 
-    auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+    auto output = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
     ASSERT_NE(output, nullptr);
     ASSERT_EQ(output->size(), offsets.size());
     ExpectTruth(output, 0, Truth::True);
@@ -531,7 +533,7 @@ TEST(ConjunctExprTest, NestedOffsetMasksUseCandidatePositions) {
     TargetBitmap next_parent(offsets.size(), true);
     eval_context.set_bitmap_input(next_parent.clone());
     outer.Eval(eval_context, result);
-    output = std::dynamic_pointer_cast<ColumnVector>(result);
+    output = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
     ASSERT_NE(output, nullptr);
     ASSERT_EQ(output->size(), offsets.size());
     ExpectTruth(output, 0, Truth::True);
@@ -554,7 +556,7 @@ TEST(ConjunctExprTest, NestedOffsetMasksUseCandidatePositions) {
     EXPECT_EQ(first->cursor_, 65);
     EXPECT_EQ(second->cursor_, 65);
     EXPECT_EQ(third->cursor_, 65);
-    output = std::dynamic_pointer_cast<ColumnVector>(result);
+    output = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
     ASSERT_EQ(output->size(), 65);
     for (size_t i = 0; i < 65; ++i) {
         ExpectTruth(output, i, Truth::False);
@@ -572,7 +574,7 @@ TEST(ConjunctExprTest, NestedOrSkipKeepsNonnullableNullTailAligned) {
         Eval(EvalCtx& context, VectorPtr& result) override {
             PhyNullExpr::Eval(context, result);
             last_batch_size_ =
-                std::dynamic_pointer_cast<ColumnVector>(result)->size();
+                std::dynamic_pointer_cast<ColumnVector<int8_t>>(result)->size();
         }
 
         size_t last_batch_size_ = 0;
@@ -613,13 +615,13 @@ TEST(ConjunctExprTest, NestedOrSkipKeepsNonnullableNullTailAligned) {
 
     VectorPtr result;
     outer.Eval(eval_context, result);
-    auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+    auto output = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
     ASSERT_NE(output, nullptr);
     ASSERT_EQ(output->size(), batch_size);
     ExpectTruth(output, 1, Truth::True);
 
     outer.Eval(eval_context, result);
-    output = std::dynamic_pointer_cast<ColumnVector>(result);
+    output = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
     ASSERT_NE(output, nullptr);
     ASSERT_EQ(output->size(), 1);
     EXPECT_EQ(null_expr->last_batch_size_, 1);
@@ -641,7 +643,7 @@ TEST(ConjunctExprTest, AndKeepsUnknownRowsActiveForFollowingFalse) {
     VectorPtr result;
     conjunct.Eval(eval_context, result);
 
-    auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+    auto output = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
     ASSERT_NE(output, nullptr);
     ASSERT_TRUE(output->IsBitmap());
 
@@ -673,7 +675,7 @@ TEST(ConjunctExprTest, NullRejectingAndSkipsFollowingForAllUnknown) {
     VectorPtr result;
     conjunct->Eval(eval_context, result);
 
-    auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+    auto output = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
     ASSERT_NE(output, nullptr);
     TargetBitmapView data(output->GetRawData(), output->size());
     TargetBitmapView valid(output->GetValidRawData(), output->size());
@@ -710,7 +712,7 @@ TEST(ConjunctExprTest, NullRejectingAndStillEvaluatesForTrueRows) {
     EXPECT_EQ(second->eval_count_, 1);
     EXPECT_EQ(second->move_count_, 0);
 
-    auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+    auto output = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
     ASSERT_NE(output, nullptr);
     TargetBitmapView data(output->GetRawData(), output->size());
     TargetBitmapView valid(output->GetValidRawData(), output->size());
@@ -740,7 +742,7 @@ TEST(ConjunctExprTest, NullRejectingMatchesDefaultIncludedSet) {
         EvalCtx eval_context(&exec_context);
         VectorPtr result;
         conjunct->Eval(eval_context, result);
-        auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+        auto output = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
         TargetBitmapView data(output->GetRawData(), output->size());
         TargetBitmapView valid(output->GetValidRawData(), output->size());
         std::vector<bool> included;
@@ -773,7 +775,7 @@ TEST(ConjunctExprTest, NullRejectingOrKeepsUnknownRowsActive) {
 
     EXPECT_EQ(true_expr->eval_count_, 1);
 
-    auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+    auto output = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
     ASSERT_NE(output, nullptr);
     TargetBitmapView data(output->GetRawData(), output->size());
     TargetBitmapView valid(output->GetValidRawData(), output->size());
@@ -808,7 +810,7 @@ TEST(ConjunctExprTest, OffsetInputErasesUnmaterializedReservedLikeSlot) {
     VectorPtr result;
     conjunct->Eval(eval_context, result);
 
-    auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+    auto output = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
     ASSERT_NE(output, nullptr);
     TargetBitmapView data(output->GetRawData(), output->size());
     TargetBitmapView valid(output->GetValidRawData(), output->size());

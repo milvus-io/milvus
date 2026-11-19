@@ -153,10 +153,11 @@ ComputeScorerScores(exec::ExecContext* exec_context,
                    "offsets size: {}, filter: {}",
                    offsets.size(),
                    filter->ToString());
-        auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
+        auto col_vec =
+            std::dynamic_pointer_cast<ColumnVector<int8_t>>(results[0]);
         AssertInfo(col_vec != nullptr,
                    "ComputeScorerScores: failed to cast result to "
-                   "ColumnVector, filter: {}",
+                   "ColumnVector<int8_t>, filter: {}",
                    filter->ToString());
         auto col_vec_size = col_vec->size();
         TargetBitmapView bitsetview(col_vec->GetRawData(), col_vec_size);

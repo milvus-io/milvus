@@ -40,43 +40,44 @@ class SortBufferTest : public ::testing::Test {
     }
 
     // Helper to create ColumnVector with int64 data
-    ColumnVectorPtr
+    ColumnVectorPtr<int64_t>
     CreateInt64Column(const std::vector<int64_t>& data) {
-        auto col = std::make_shared<ColumnVector>(DataType::INT64, data.size());
+        auto col = std::make_shared<ColumnVector<int64_t>>(DataType::INT64,
+                                                           data.size());
         for (size_t i = 0; i < data.size(); ++i) {
-            col->SetValueAt<int64_t>(i, data[i]);
+            col->SetValueAt(i, data[i]);
         }
         return col;
     }
 
-    ColumnVectorPtr
+    ColumnVectorPtr<int64_t>
     CreateTimestamptzColumn(const std::vector<int64_t>& data) {
-        auto col =
-            std::make_shared<ColumnVector>(DataType::TIMESTAMPTZ, data.size());
+        auto col = std::make_shared<ColumnVector<int64_t>>(
+            DataType::TIMESTAMPTZ, data.size());
         for (size_t i = 0; i < data.size(); ++i) {
-            col->SetValueAt<int64_t>(i, data[i]);
+            col->SetValueAt(i, data[i]);
         }
         return col;
     }
 
     // Helper to create ColumnVector with double data
-    ColumnVectorPtr
+    ColumnVectorPtr<double>
     CreateDoubleColumn(const std::vector<double>& data) {
-        auto col =
-            std::make_shared<ColumnVector>(DataType::DOUBLE, data.size());
+        auto col = std::make_shared<ColumnVector<double>>(DataType::DOUBLE,
+                                                          data.size());
         for (size_t i = 0; i < data.size(); ++i) {
-            col->SetValueAt<double>(i, data[i]);
+            col->SetValueAt(i, data[i]);
         }
         return col;
     }
 
     // Helper to create ColumnVector with string data
-    ColumnVectorPtr
+    ColumnVectorPtr<std::string>
     CreateStringColumn(const std::vector<std::string>& data) {
-        auto col =
-            std::make_shared<ColumnVector>(DataType::VARCHAR, data.size());
+        auto col = std::make_shared<ColumnVector<std::string>>(
+            DataType::VARCHAR, data.size());
         for (size_t i = 0; i < data.size(); ++i) {
-            col->SetValueAt<std::string>(i, data[i]);
+            col->SetValueAt(i, data[i]);
         }
         return col;
     }
@@ -88,12 +89,12 @@ class SortBufferTest : public ::testing::Test {
         if (output.empty() || col_idx >= output.size()) {
             return result;
         }
-        auto col = std::dynamic_pointer_cast<ColumnVector>(output[col_idx]);
+        auto col = AsColumnVector<int64_t>(output[col_idx]);
         if (!col) {
             return result;
         }
         for (size_t i = 0; i < col->size(); ++i) {
-            result.push_back(col->ValueAt<int64_t>(i));
+            result.push_back(col->ValueAt(i));
         }
         return result;
     }
@@ -111,7 +112,7 @@ TEST_F(SortBufferTest, BasicSortAscending) {
     // Add unsorted data
     std::vector<int64_t> data = {5, 2, 8, 1, 9, 3};
     auto col = CreateInt64Column(data);
-    std::vector<ColumnVectorPtr> columns = {col};
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < data.size(); ++i) {
         buffer.AddRow(columns, i);
@@ -142,7 +143,7 @@ TEST_F(SortBufferTest, SortTimestamptzAscending) {
 
     std::vector<int64_t> data = {3000000000000, 1000000000000, 2000000000000};
     auto col = CreateTimestamptzColumn(data);
-    std::vector<ColumnVectorPtr> columns = {col};
+    std::vector<VectorPtr> columns = {col};
 
     buffer.AddRows(columns, data.size());
     buffer.NoMoreInput();
@@ -166,7 +167,7 @@ TEST_F(SortBufferTest, BasicSortDescending) {
 
     std::vector<int64_t> data = {5, 2, 8, 1, 9, 3};
     auto col = CreateInt64Column(data);
-    std::vector<ColumnVectorPtr> columns = {col};
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < data.size(); ++i) {
         buffer.AddRow(columns, i);
@@ -193,7 +194,7 @@ TEST_F(SortBufferTest, SortWithLimit) {
 
     std::vector<int64_t> data = {5, 2, 8, 1, 9, 3, 7, 4, 6};
     auto col = CreateInt64Column(data);
-    std::vector<ColumnVectorPtr> columns = {col};
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < data.size(); ++i) {
         buffer.AddRow(columns, i);
@@ -231,7 +232,7 @@ TEST_F(SortBufferTest, MultiFieldSort) {
 
     auto col1 = CreateInt64Column(col1_data);
     auto col2 = CreateInt64Column(col2_data);
-    std::vector<ColumnVectorPtr> columns = {col1, col2};
+    std::vector<VectorPtr> columns = {col1, col2};
 
     for (size_t i = 0; i < col1_data.size(); ++i) {
         buffer.AddRow(columns, i);
@@ -264,7 +265,7 @@ TEST_F(SortBufferTest, BatchedOutput) {
 
     std::vector<int64_t> data = {5, 2, 8, 1, 9, 3, 7, 4, 6};
     auto col = CreateInt64Column(data);
-    std::vector<ColumnVectorPtr> columns = {col};
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < data.size(); ++i) {
         buffer.AddRow(columns, i);
@@ -296,23 +297,23 @@ TEST_F(SortBufferTest, ExtractedBatchesAppendWithoutOverwritingRows) {
         data[i] = i;
     }
     auto col = CreateInt64Column(data);
-    std::vector<ColumnVectorPtr> columns = {col};
+    std::vector<VectorPtr> columns = {col};
     buffer.AddRows(columns, data.size());
     buffer.NoMoreInput();
 
     auto first_output = buffer.GetOutput(1024);
     auto second_output = buffer.GetOutput(476);
-    auto first_col = std::dynamic_pointer_cast<ColumnVector>(first_output[0]);
-    auto second_col = std::dynamic_pointer_cast<ColumnVector>(second_output[0]);
+    auto first_col = AsColumnVector<int64_t>(first_output[0]);
+    auto second_col = AsColumnVector<int64_t>(second_output[0]);
     ASSERT_EQ(first_col->size(), 1024);
     ASSERT_EQ(second_col->size(), 476);
 
     ASSERT_NO_THROW(first_col->append(*second_col));
     ASSERT_EQ(first_col->size(), 1500);
-    EXPECT_EQ(first_col->ValueAt<int64_t>(0), 0);
-    EXPECT_EQ(first_col->ValueAt<int64_t>(1023), 1023);
-    EXPECT_EQ(first_col->ValueAt<int64_t>(1024), 1024);
-    EXPECT_EQ(first_col->ValueAt<int64_t>(1499), 1499);
+    EXPECT_EQ(first_col->ValueAt(0), 0);
+    EXPECT_EQ(first_col->ValueAt(1023), 1023);
+    EXPECT_EQ(first_col->ValueAt(1024), 1024);
+    EXPECT_EQ(first_col->ValueAt(1499), 1499);
 }
 
 TEST_F(SortBufferTest, ExtractedNullableBatchesAppendWithoutLosingValidity) {
@@ -332,14 +333,14 @@ TEST_F(SortBufferTest, ExtractedNullableBatchesAppendWithoutLosingValidity) {
     value_col->nullAt(1024);
     value_col->nullAt(1499);
 
-    std::vector<ColumnVectorPtr> columns = {sort_col, value_col};
+    std::vector<VectorPtr> columns = {sort_col, value_col};
     buffer.AddRows(columns, sort_data.size());
     buffer.NoMoreInput();
 
     auto first_output = buffer.GetOutput(1024);
     auto second_output = buffer.GetOutput(476);
-    auto first_col = std::dynamic_pointer_cast<ColumnVector>(first_output[1]);
-    auto second_col = std::dynamic_pointer_cast<ColumnVector>(second_output[1]);
+    auto first_col = AsColumnVector<int64_t>(first_output[1]);
+    auto second_col = AsColumnVector<int64_t>(second_output[1]);
     ASSERT_EQ(first_col->size(), 1024);
     ASSERT_EQ(second_col->size(), 476);
     ASSERT_EQ(first_col->nullCount(), 1);
@@ -354,9 +355,9 @@ TEST_F(SortBufferTest, ExtractedNullableBatchesAppendWithoutLosingValidity) {
     EXPECT_FALSE(first_col->ValidAt(1024));
     EXPECT_TRUE(first_col->ValidAt(1498));
     EXPECT_FALSE(first_col->ValidAt(1499));
-    EXPECT_EQ(first_col->ValueAt<int64_t>(0), 0);
-    EXPECT_EQ(first_col->ValueAt<int64_t>(1023), 1023);
-    EXPECT_EQ(first_col->ValueAt<int64_t>(1498), 1498);
+    EXPECT_EQ(first_col->ValueAt(0), 0);
+    EXPECT_EQ(first_col->ValueAt(1023), 1023);
+    EXPECT_EQ(first_col->ValueAt(1498), 1498);
 }
 
 TEST_F(SortBufferTest, EmptyInput) {
@@ -388,7 +389,7 @@ TEST_F(SortBufferTest, SingleRow) {
 
     std::vector<int64_t> data = {42};
     auto col = CreateInt64Column(data);
-    std::vector<ColumnVectorPtr> columns = {col};
+    std::vector<VectorPtr> columns = {col};
     buffer.AddRow(columns, 0);
 
     buffer.NoMoreInput();
@@ -418,7 +419,7 @@ TEST_F(SortBufferTest, LargeDataSet) {
     std::shuffle(data.begin(), data.end(), g);
 
     auto col = CreateInt64Column(data);
-    std::vector<ColumnVectorPtr> columns = {col};
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < data.size(); ++i) {
         buffer.AddRow(columns, i);
@@ -447,7 +448,7 @@ TEST_F(SortBufferTest, DoubleSort) {
 
     std::vector<double> data = {3.14, 1.41, 2.71, 0.57, 1.73};
     auto col = CreateDoubleColumn(data);
-    std::vector<ColumnVectorPtr> columns = {col};
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < data.size(); ++i) {
         buffer.AddRow(columns, i);
@@ -456,15 +457,15 @@ TEST_F(SortBufferTest, DoubleSort) {
     buffer.NoMoreInput();
 
     auto output = buffer.GetOutput(100);
-    auto col_out = std::dynamic_pointer_cast<ColumnVector>(output[0]);
+    auto col_out = AsColumnVector<double>(output[0]);
 
     ASSERT_NE(col_out, nullptr);
     ASSERT_EQ(col_out->size(), 5);
 
     // Verify ascending order
-    double prev = col_out->ValueAt<double>(0);
+    double prev = col_out->ValueAt(0);
     for (size_t i = 1; i < col_out->size(); ++i) {
-        double curr = col_out->ValueAt<double>(i);
+        double curr = col_out->ValueAt(i);
         EXPECT_LE(prev, curr);
         prev = curr;
     }
@@ -484,14 +485,14 @@ TEST_F(SortBufferTest, NullsFirst_Ascending) {
     SortBuffer buffer(column_types, sort_keys);
 
     // Data: [5, NULL, 2, NULL, 8, 1]
-    auto col = std::make_shared<ColumnVector>(DataType::INT64, 6);
-    col->SetValueAt<int64_t>(0, 5);
+    auto col = std::make_shared<ColumnVector<int64_t>>(DataType::INT64, 6);
+    col->SetValueAt(0, 5);
     col->nullAt(1);
-    col->SetValueAt<int64_t>(2, 2);
+    col->SetValueAt(2, 2);
     col->nullAt(3);
-    col->SetValueAt<int64_t>(4, 8);
-    col->SetValueAt<int64_t>(5, 1);
-    std::vector<ColumnVectorPtr> columns = {col};
+    col->SetValueAt(4, 8);
+    col->SetValueAt(5, 1);
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < 6; ++i) {
         buffer.AddRow(columns, i);
@@ -499,7 +500,7 @@ TEST_F(SortBufferTest, NullsFirst_Ascending) {
     buffer.NoMoreInput();
 
     auto output = buffer.GetOutput(100);
-    auto out_col = std::dynamic_pointer_cast<ColumnVector>(output[0]);
+    auto out_col = AsColumnVector<int64_t>(output[0]);
     ASSERT_NE(out_col, nullptr);
     ASSERT_EQ(out_col->size(), 6);
 
@@ -508,10 +509,10 @@ TEST_F(SortBufferTest, NullsFirst_Ascending) {
     EXPECT_FALSE(out_col->ValidAt(1));
     // Remaining should be sorted ASC: 1, 2, 5, 8
     EXPECT_TRUE(out_col->ValidAt(2));
-    EXPECT_EQ(out_col->ValueAt<int64_t>(2), 1);
-    EXPECT_EQ(out_col->ValueAt<int64_t>(3), 2);
-    EXPECT_EQ(out_col->ValueAt<int64_t>(4), 5);
-    EXPECT_EQ(out_col->ValueAt<int64_t>(5), 8);
+    EXPECT_EQ(out_col->ValueAt(2), 1);
+    EXPECT_EQ(out_col->ValueAt(3), 2);
+    EXPECT_EQ(out_col->ValueAt(4), 5);
+    EXPECT_EQ(out_col->ValueAt(5), 8);
 }
 
 TEST_F(SortBufferTest, NullsLast_Ascending) {
@@ -523,14 +524,14 @@ TEST_F(SortBufferTest, NullsLast_Ascending) {
 
     SortBuffer buffer(column_types, sort_keys);
 
-    auto col = std::make_shared<ColumnVector>(DataType::INT64, 6);
-    col->SetValueAt<int64_t>(0, 5);
+    auto col = std::make_shared<ColumnVector<int64_t>>(DataType::INT64, 6);
+    col->SetValueAt(0, 5);
     col->nullAt(1);
-    col->SetValueAt<int64_t>(2, 2);
+    col->SetValueAt(2, 2);
     col->nullAt(3);
-    col->SetValueAt<int64_t>(4, 8);
-    col->SetValueAt<int64_t>(5, 1);
-    std::vector<ColumnVectorPtr> columns = {col};
+    col->SetValueAt(4, 8);
+    col->SetValueAt(5, 1);
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < 6; ++i) {
         buffer.AddRow(columns, i);
@@ -538,15 +539,15 @@ TEST_F(SortBufferTest, NullsLast_Ascending) {
     buffer.NoMoreInput();
 
     auto output = buffer.GetOutput(100);
-    auto out_col = std::dynamic_pointer_cast<ColumnVector>(output[0]);
+    auto out_col = AsColumnVector<int64_t>(output[0]);
     ASSERT_EQ(out_col->size(), 6);
 
     // First 4 should be sorted ASC: 1, 2, 5, 8
     EXPECT_TRUE(out_col->ValidAt(0));
-    EXPECT_EQ(out_col->ValueAt<int64_t>(0), 1);
-    EXPECT_EQ(out_col->ValueAt<int64_t>(1), 2);
-    EXPECT_EQ(out_col->ValueAt<int64_t>(2), 5);
-    EXPECT_EQ(out_col->ValueAt<int64_t>(3), 8);
+    EXPECT_EQ(out_col->ValueAt(0), 1);
+    EXPECT_EQ(out_col->ValueAt(1), 2);
+    EXPECT_EQ(out_col->ValueAt(2), 5);
+    EXPECT_EQ(out_col->ValueAt(3), 8);
     // Last 2 should be NULL
     EXPECT_FALSE(out_col->ValidAt(4));
     EXPECT_FALSE(out_col->ValidAt(5));
@@ -561,13 +562,13 @@ TEST_F(SortBufferTest, NullsFirst_Descending) {
 
     SortBuffer buffer(column_types, sort_keys);
 
-    auto col = std::make_shared<ColumnVector>(DataType::INT64, 5);
-    col->SetValueAt<int64_t>(0, 3);
+    auto col = std::make_shared<ColumnVector<int64_t>>(DataType::INT64, 5);
+    col->SetValueAt(0, 3);
     col->nullAt(1);
-    col->SetValueAt<int64_t>(2, 7);
-    col->SetValueAt<int64_t>(3, 1);
+    col->SetValueAt(2, 7);
+    col->SetValueAt(3, 1);
     col->nullAt(4);
-    std::vector<ColumnVectorPtr> columns = {col};
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < 5; ++i) {
         buffer.AddRow(columns, i);
@@ -575,16 +576,16 @@ TEST_F(SortBufferTest, NullsFirst_Descending) {
     buffer.NoMoreInput();
 
     auto output = buffer.GetOutput(100);
-    auto out_col = std::dynamic_pointer_cast<ColumnVector>(output[0]);
+    auto out_col = AsColumnVector<int64_t>(output[0]);
     ASSERT_EQ(out_col->size(), 5);
 
     // First 2 should be NULL
     EXPECT_FALSE(out_col->ValidAt(0));
     EXPECT_FALSE(out_col->ValidAt(1));
     // Then DESC: 7, 3, 1
-    EXPECT_EQ(out_col->ValueAt<int64_t>(2), 7);
-    EXPECT_EQ(out_col->ValueAt<int64_t>(3), 3);
-    EXPECT_EQ(out_col->ValueAt<int64_t>(4), 1);
+    EXPECT_EQ(out_col->ValueAt(2), 7);
+    EXPECT_EQ(out_col->ValueAt(3), 3);
+    EXPECT_EQ(out_col->ValueAt(4), 1);
 }
 
 TEST_F(SortBufferTest, NullsLast_Descending) {
@@ -596,13 +597,13 @@ TEST_F(SortBufferTest, NullsLast_Descending) {
 
     SortBuffer buffer(column_types, sort_keys);
 
-    auto col = std::make_shared<ColumnVector>(DataType::INT64, 5);
-    col->SetValueAt<int64_t>(0, 3);
+    auto col = std::make_shared<ColumnVector<int64_t>>(DataType::INT64, 5);
+    col->SetValueAt(0, 3);
     col->nullAt(1);
-    col->SetValueAt<int64_t>(2, 7);
-    col->SetValueAt<int64_t>(3, 1);
+    col->SetValueAt(2, 7);
+    col->SetValueAt(3, 1);
     col->nullAt(4);
-    std::vector<ColumnVectorPtr> columns = {col};
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < 5; ++i) {
         buffer.AddRow(columns, i);
@@ -610,13 +611,13 @@ TEST_F(SortBufferTest, NullsLast_Descending) {
     buffer.NoMoreInput();
 
     auto output = buffer.GetOutput(100);
-    auto out_col = std::dynamic_pointer_cast<ColumnVector>(output[0]);
+    auto out_col = AsColumnVector<int64_t>(output[0]);
     ASSERT_EQ(out_col->size(), 5);
 
     // DESC: 7, 3, 1
-    EXPECT_EQ(out_col->ValueAt<int64_t>(0), 7);
-    EXPECT_EQ(out_col->ValueAt<int64_t>(1), 3);
-    EXPECT_EQ(out_col->ValueAt<int64_t>(2), 1);
+    EXPECT_EQ(out_col->ValueAt(0), 7);
+    EXPECT_EQ(out_col->ValueAt(1), 3);
+    EXPECT_EQ(out_col->ValueAt(2), 1);
     // Last 2 should be NULL
     EXPECT_FALSE(out_col->ValidAt(3));
     EXPECT_FALSE(out_col->ValidAt(4));
@@ -631,11 +632,11 @@ TEST_F(SortBufferTest, AllNulls) {
 
     SortBuffer buffer(column_types, sort_keys);
 
-    auto col = std::make_shared<ColumnVector>(DataType::INT64, 4);
+    auto col = std::make_shared<ColumnVector<int64_t>>(DataType::INT64, 4);
     for (size_t i = 0; i < 4; ++i) {
         col->nullAt(i);
     }
-    std::vector<ColumnVectorPtr> columns = {col};
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < 4; ++i) {
         buffer.AddRow(columns, i);
@@ -643,7 +644,7 @@ TEST_F(SortBufferTest, AllNulls) {
     buffer.NoMoreInput();
 
     auto output = buffer.GetOutput(100);
-    auto out_col = std::dynamic_pointer_cast<ColumnVector>(output[0]);
+    auto out_col = AsColumnVector<int64_t>(output[0]);
     ASSERT_EQ(out_col->size(), 4);
 
     // All should be NULL
@@ -669,33 +670,33 @@ TEST_F(SortBufferTest, MixedNullMultiKey) {
     // row2: (NULL, 30)
     // row3: (1,    10)
     // row4: (NULL, 40)
-    auto col0 = std::make_shared<ColumnVector>(DataType::INT64, 5);
-    auto col1 = std::make_shared<ColumnVector>(DataType::INT64, 5);
+    auto col0 = std::make_shared<ColumnVector<int64_t>>(DataType::INT64, 5);
+    auto col1 = std::make_shared<ColumnVector<int64_t>>(DataType::INT64, 5);
 
-    col0->SetValueAt<int64_t>(0, 1);
+    col0->SetValueAt(0, 1);
     col1->nullAt(0);
 
-    col0->SetValueAt<int64_t>(1, 1);
-    col1->SetValueAt<int64_t>(1, 20);
+    col0->SetValueAt(1, 1);
+    col1->SetValueAt(1, 20);
 
     col0->nullAt(2);
-    col1->SetValueAt<int64_t>(2, 30);
+    col1->SetValueAt(2, 30);
 
-    col0->SetValueAt<int64_t>(3, 1);
-    col1->SetValueAt<int64_t>(3, 10);
+    col0->SetValueAt(3, 1);
+    col1->SetValueAt(3, 10);
 
     col0->nullAt(4);
-    col1->SetValueAt<int64_t>(4, 40);
+    col1->SetValueAt(4, 40);
 
-    std::vector<ColumnVectorPtr> columns = {col0, col1};
+    std::vector<VectorPtr> columns = {col0, col1};
     for (size_t i = 0; i < 5; ++i) {
         buffer.AddRow(columns, i);
     }
     buffer.NoMoreInput();
 
     auto output = buffer.GetOutput(100);
-    auto out0 = std::dynamic_pointer_cast<ColumnVector>(output[0]);
-    auto out1 = std::dynamic_pointer_cast<ColumnVector>(output[1]);
+    auto out0 = AsColumnVector<int64_t>(output[0]);
+    auto out1 = AsColumnVector<int64_t>(output[1]);
     ASSERT_EQ(out0->size(), 5);
 
     // Expected order by (col0 ASC NULLS LAST, col1 DESC NULLS FIRST):
@@ -707,24 +708,24 @@ TEST_F(SortBufferTest, MixedNullMultiKey) {
 
     // First 3 rows: col0 = 1
     EXPECT_TRUE(out0->ValidAt(0));
-    EXPECT_EQ(out0->ValueAt<int64_t>(0), 1);
+    EXPECT_EQ(out0->ValueAt(0), 1);
     EXPECT_TRUE(out0->ValidAt(1));
-    EXPECT_EQ(out0->ValueAt<int64_t>(1), 1);
+    EXPECT_EQ(out0->ValueAt(1), 1);
     EXPECT_TRUE(out0->ValidAt(2));
-    EXPECT_EQ(out0->ValueAt<int64_t>(2), 1);
+    EXPECT_EQ(out0->ValueAt(2), 1);
 
     // row0 has NULL in col1 (NULLS FIRST), so it comes first among col0=1
     EXPECT_FALSE(out1->ValidAt(0));
     // Then 20, 10 DESC
-    EXPECT_EQ(out1->ValueAt<int64_t>(1), 20);
-    EXPECT_EQ(out1->ValueAt<int64_t>(2), 10);
+    EXPECT_EQ(out1->ValueAt(1), 20);
+    EXPECT_EQ(out1->ValueAt(2), 10);
 
     // Last 2 rows: col0 = NULL
     EXPECT_FALSE(out0->ValidAt(3));
     EXPECT_FALSE(out0->ValidAt(4));
     // col1 DESC: 40, 30
-    EXPECT_EQ(out1->ValueAt<int64_t>(3), 40);
-    EXPECT_EQ(out1->ValueAt<int64_t>(4), 30);
+    EXPECT_EQ(out1->ValueAt(3), 40);
+    EXPECT_EQ(out1->ValueAt(4), 30);
 }
 
 // =========================================================================
@@ -737,12 +738,12 @@ TEST_F(SortBufferTest, DataType_Bool) {
 
     SortBuffer buffer(column_types, sort_keys);
 
-    auto col = std::make_shared<ColumnVector>(DataType::BOOL, 4);
-    col->SetValueAt<bool>(0, true);
-    col->SetValueAt<bool>(1, false);
-    col->SetValueAt<bool>(2, true);
-    col->SetValueAt<bool>(3, false);
-    std::vector<ColumnVectorPtr> columns = {col};
+    auto col = std::make_shared<ColumnVector<bool>>(DataType::BOOL, 4);
+    col->SetValueAt(0, true);
+    col->SetValueAt(1, false);
+    col->SetValueAt(2, true);
+    col->SetValueAt(3, false);
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < 4; ++i) {
         buffer.AddRow(columns, i);
@@ -750,14 +751,14 @@ TEST_F(SortBufferTest, DataType_Bool) {
     buffer.NoMoreInput();
 
     auto output = buffer.GetOutput(100);
-    auto out_col = std::dynamic_pointer_cast<ColumnVector>(output[0]);
+    auto out_col = AsColumnVector<bool>(output[0]);
     ASSERT_EQ(out_col->size(), 4);
 
     // ASC: false(0), false(0), true(1), true(1)
-    EXPECT_EQ(out_col->ValueAt<bool>(0), false);
-    EXPECT_EQ(out_col->ValueAt<bool>(1), false);
-    EXPECT_EQ(out_col->ValueAt<bool>(2), true);
-    EXPECT_EQ(out_col->ValueAt<bool>(3), true);
+    EXPECT_EQ(out_col->ValueAt(0), false);
+    EXPECT_EQ(out_col->ValueAt(1), false);
+    EXPECT_EQ(out_col->ValueAt(2), true);
+    EXPECT_EQ(out_col->ValueAt(3), true);
 }
 
 TEST_F(SortBufferTest, DataType_Int8) {
@@ -766,13 +767,13 @@ TEST_F(SortBufferTest, DataType_Int8) {
 
     SortBuffer buffer(column_types, sort_keys);
 
-    auto col = std::make_shared<ColumnVector>(DataType::INT8, 5);
-    col->SetValueAt<int8_t>(0, 10);
-    col->SetValueAt<int8_t>(1, -5);
-    col->SetValueAt<int8_t>(2, 127);
-    col->SetValueAt<int8_t>(3, -128);
-    col->SetValueAt<int8_t>(4, 0);
-    std::vector<ColumnVectorPtr> columns = {col};
+    auto col = std::make_shared<ColumnVector<int8_t>>(DataType::INT8, 5);
+    col->SetValueAt(0, 10);
+    col->SetValueAt(1, -5);
+    col->SetValueAt(2, 127);
+    col->SetValueAt(3, -128);
+    col->SetValueAt(4, 0);
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < 5; ++i) {
         buffer.AddRow(columns, i);
@@ -780,15 +781,15 @@ TEST_F(SortBufferTest, DataType_Int8) {
     buffer.NoMoreInput();
 
     auto output = buffer.GetOutput(100);
-    auto out_col = std::dynamic_pointer_cast<ColumnVector>(output[0]);
+    auto out_col = AsColumnVector<int8_t>(output[0]);
     ASSERT_EQ(out_col->size(), 5);
 
     // DESC: 127, 10, 0, -5, -128
-    EXPECT_EQ(out_col->ValueAt<int8_t>(0), 127);
-    EXPECT_EQ(out_col->ValueAt<int8_t>(1), 10);
-    EXPECT_EQ(out_col->ValueAt<int8_t>(2), 0);
-    EXPECT_EQ(out_col->ValueAt<int8_t>(3), -5);
-    EXPECT_EQ(out_col->ValueAt<int8_t>(4), -128);
+    EXPECT_EQ(out_col->ValueAt(0), 127);
+    EXPECT_EQ(out_col->ValueAt(1), 10);
+    EXPECT_EQ(out_col->ValueAt(2), 0);
+    EXPECT_EQ(out_col->ValueAt(3), -5);
+    EXPECT_EQ(out_col->ValueAt(4), -128);
 }
 
 TEST_F(SortBufferTest, DataType_Int16) {
@@ -797,12 +798,12 @@ TEST_F(SortBufferTest, DataType_Int16) {
 
     SortBuffer buffer(column_types, sort_keys);
 
-    auto col = std::make_shared<ColumnVector>(DataType::INT16, 4);
-    col->SetValueAt<int16_t>(0, 300);
-    col->SetValueAt<int16_t>(1, -200);
-    col->SetValueAt<int16_t>(2, 100);
-    col->SetValueAt<int16_t>(3, -400);
-    std::vector<ColumnVectorPtr> columns = {col};
+    auto col = std::make_shared<ColumnVector<int16_t>>(DataType::INT16, 4);
+    col->SetValueAt(0, 300);
+    col->SetValueAt(1, -200);
+    col->SetValueAt(2, 100);
+    col->SetValueAt(3, -400);
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < 4; ++i) {
         buffer.AddRow(columns, i);
@@ -810,14 +811,14 @@ TEST_F(SortBufferTest, DataType_Int16) {
     buffer.NoMoreInput();
 
     auto output = buffer.GetOutput(100);
-    auto out_col = std::dynamic_pointer_cast<ColumnVector>(output[0]);
+    auto out_col = AsColumnVector<int16_t>(output[0]);
     ASSERT_EQ(out_col->size(), 4);
 
     // ASC: -400, -200, 100, 300
-    EXPECT_EQ(out_col->ValueAt<int16_t>(0), -400);
-    EXPECT_EQ(out_col->ValueAt<int16_t>(1), -200);
-    EXPECT_EQ(out_col->ValueAt<int16_t>(2), 100);
-    EXPECT_EQ(out_col->ValueAt<int16_t>(3), 300);
+    EXPECT_EQ(out_col->ValueAt(0), -400);
+    EXPECT_EQ(out_col->ValueAt(1), -200);
+    EXPECT_EQ(out_col->ValueAt(2), 100);
+    EXPECT_EQ(out_col->ValueAt(3), 300);
 }
 
 TEST_F(SortBufferTest, DataType_Int32) {
@@ -826,12 +827,12 @@ TEST_F(SortBufferTest, DataType_Int32) {
 
     SortBuffer buffer(column_types, sort_keys);
 
-    auto col = std::make_shared<ColumnVector>(DataType::INT32, 4);
-    col->SetValueAt<int32_t>(0, 100000);
-    col->SetValueAt<int32_t>(1, -50000);
-    col->SetValueAt<int32_t>(2, 0);
-    col->SetValueAt<int32_t>(3, 999999);
-    std::vector<ColumnVectorPtr> columns = {col};
+    auto col = std::make_shared<ColumnVector<int32_t>>(DataType::INT32, 4);
+    col->SetValueAt(0, 100000);
+    col->SetValueAt(1, -50000);
+    col->SetValueAt(2, 0);
+    col->SetValueAt(3, 999999);
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < 4; ++i) {
         buffer.AddRow(columns, i);
@@ -839,13 +840,13 @@ TEST_F(SortBufferTest, DataType_Int32) {
     buffer.NoMoreInput();
 
     auto output = buffer.GetOutput(100);
-    auto out_col = std::dynamic_pointer_cast<ColumnVector>(output[0]);
+    auto out_col = AsColumnVector<int32_t>(output[0]);
     ASSERT_EQ(out_col->size(), 4);
 
-    EXPECT_EQ(out_col->ValueAt<int32_t>(0), -50000);
-    EXPECT_EQ(out_col->ValueAt<int32_t>(1), 0);
-    EXPECT_EQ(out_col->ValueAt<int32_t>(2), 100000);
-    EXPECT_EQ(out_col->ValueAt<int32_t>(3), 999999);
+    EXPECT_EQ(out_col->ValueAt(0), -50000);
+    EXPECT_EQ(out_col->ValueAt(1), 0);
+    EXPECT_EQ(out_col->ValueAt(2), 100000);
+    EXPECT_EQ(out_col->ValueAt(3), 999999);
 }
 
 TEST_F(SortBufferTest, DataType_Float) {
@@ -854,13 +855,13 @@ TEST_F(SortBufferTest, DataType_Float) {
 
     SortBuffer buffer(column_types, sort_keys);
 
-    auto col = std::make_shared<ColumnVector>(DataType::FLOAT, 5);
-    col->SetValueAt<float>(0, 3.14f);
-    col->SetValueAt<float>(1, -1.5f);
-    col->SetValueAt<float>(2, 0.0f);
-    col->SetValueAt<float>(3, 2.71f);
-    col->SetValueAt<float>(4, -0.001f);
-    std::vector<ColumnVectorPtr> columns = {col};
+    auto col = std::make_shared<ColumnVector<float>>(DataType::FLOAT, 5);
+    col->SetValueAt(0, 3.14f);
+    col->SetValueAt(1, -1.5f);
+    col->SetValueAt(2, 0.0f);
+    col->SetValueAt(3, 2.71f);
+    col->SetValueAt(4, -0.001f);
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < 5; ++i) {
         buffer.AddRow(columns, i);
@@ -868,15 +869,15 @@ TEST_F(SortBufferTest, DataType_Float) {
     buffer.NoMoreInput();
 
     auto output = buffer.GetOutput(100);
-    auto out_col = std::dynamic_pointer_cast<ColumnVector>(output[0]);
+    auto out_col = AsColumnVector<float>(output[0]);
     ASSERT_EQ(out_col->size(), 5);
 
     // ASC: -1.5, -0.001, 0.0, 2.71, 3.14
-    EXPECT_FLOAT_EQ(out_col->ValueAt<float>(0), -1.5f);
-    EXPECT_FLOAT_EQ(out_col->ValueAt<float>(1), -0.001f);
-    EXPECT_FLOAT_EQ(out_col->ValueAt<float>(2), 0.0f);
-    EXPECT_FLOAT_EQ(out_col->ValueAt<float>(3), 2.71f);
-    EXPECT_FLOAT_EQ(out_col->ValueAt<float>(4), 3.14f);
+    EXPECT_FLOAT_EQ(out_col->ValueAt(0), -1.5f);
+    EXPECT_FLOAT_EQ(out_col->ValueAt(1), -0.001f);
+    EXPECT_FLOAT_EQ(out_col->ValueAt(2), 0.0f);
+    EXPECT_FLOAT_EQ(out_col->ValueAt(3), 2.71f);
+    EXPECT_FLOAT_EQ(out_col->ValueAt(4), 3.14f);
 }
 
 TEST_F(SortBufferTest, StringSort) {
@@ -888,7 +889,7 @@ TEST_F(SortBufferTest, StringSort) {
 
     std::vector<std::string> data = {"banana", "apple", "cherry", "", "date"};
     auto col = CreateStringColumn(data);
-    std::vector<ColumnVectorPtr> columns = {col};
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < data.size(); ++i) {
         buffer.AddRow(columns, i);
@@ -896,7 +897,7 @@ TEST_F(SortBufferTest, StringSort) {
     buffer.NoMoreInput();
 
     auto output = buffer.GetOutput(100);
-    auto out_col = std::dynamic_pointer_cast<ColumnVector>(output[0]);
+    auto out_col = AsColumnVector<std::string>(output[0]);
     ASSERT_EQ(out_col->size(), 5);
 
     // ASC: "", "apple", "banana", "cherry", "date"
@@ -916,7 +917,7 @@ TEST_F(SortBufferTest, StringSortDescending) {
 
     std::vector<std::string> data = {"banana", "apple", "cherry"};
     auto col = CreateStringColumn(data);
-    std::vector<ColumnVectorPtr> columns = {col};
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < data.size(); ++i) {
         buffer.AddRow(columns, i);
@@ -924,7 +925,7 @@ TEST_F(SortBufferTest, StringSortDescending) {
     buffer.NoMoreInput();
 
     auto output = buffer.GetOutput(100);
-    auto out_col = std::dynamic_pointer_cast<ColumnVector>(output[0]);
+    auto out_col = AsColumnVector<std::string>(output[0]);
     ASSERT_EQ(out_col->size(), 3);
 
     auto* raw = reinterpret_cast<std::string*>(out_col->GetRawData());
@@ -940,12 +941,13 @@ TEST_F(SortBufferTest, StringWithNulls) {
 
     SortBuffer buffer(column_types, sort_keys);
 
-    auto col = std::make_shared<ColumnVector>(DataType::VARCHAR, 4);
-    col->SetValueAt<std::string>(0, "banana");
+    auto col =
+        std::make_shared<ColumnVector<std::string>>(DataType::VARCHAR, 4);
+    col->SetValueAt(0, "banana");
     col->nullAt(1);
-    col->SetValueAt<std::string>(2, "apple");
+    col->SetValueAt(2, "apple");
     col->nullAt(3);
-    std::vector<ColumnVectorPtr> columns = {col};
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < 4; ++i) {
         buffer.AddRow(columns, i);
@@ -953,7 +955,7 @@ TEST_F(SortBufferTest, StringWithNulls) {
     buffer.NoMoreInput();
 
     auto output = buffer.GetOutput(100);
-    auto out_col = std::dynamic_pointer_cast<ColumnVector>(output[0]);
+    auto out_col = AsColumnVector<std::string>(output[0]);
     ASSERT_EQ(out_col->size(), 4);
 
     // ASC NULLS LAST: "apple", "banana", NULL, NULL
@@ -980,7 +982,7 @@ TEST_F(SortBufferTest, LimitZero) {
 
     std::vector<int64_t> data = {5, 2, 8, 1};
     auto col = CreateInt64Column(data);
-    std::vector<ColumnVectorPtr> columns = {col};
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < data.size(); ++i) {
         buffer.AddRow(columns, i);
@@ -1005,7 +1007,7 @@ TEST_F(SortBufferTest, LimitLargerThanRows) {
 
     std::vector<int64_t> data = {5, 2, 8};
     auto col = CreateInt64Column(data);
-    std::vector<ColumnVectorPtr> columns = {col};
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < data.size(); ++i) {
         buffer.AddRow(columns, i);
@@ -1029,7 +1031,7 @@ TEST_F(SortBufferTest, NoMoreInputIdempotent) {
 
     std::vector<int64_t> data = {3, 1, 2};
     auto col = CreateInt64Column(data);
-    std::vector<ColumnVectorPtr> columns = {col};
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < data.size(); ++i) {
         buffer.AddRow(columns, i);
@@ -1054,7 +1056,7 @@ TEST_F(SortBufferTest, ExhaustedOutput) {
 
     std::vector<int64_t> data = {2, 1};
     auto col = CreateInt64Column(data);
-    std::vector<ColumnVectorPtr> columns = {col};
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < data.size(); ++i) {
         buffer.AddRow(columns, i);
@@ -1080,7 +1082,7 @@ TEST_F(SortBufferTest, AddRowsHelper) {
 
     std::vector<int64_t> data = {5, 2, 8, 1};
     auto col = CreateInt64Column(data);
-    std::vector<ColumnVectorPtr> columns = {col};
+    std::vector<VectorPtr> columns = {col};
 
     buffer.AddRows(columns, 4);
     buffer.NoMoreInput();
@@ -1102,14 +1104,14 @@ TEST_F(SortBufferTest, NullsWithLimit) {
 
     SortBuffer buffer(column_types, sort_keys, 3);
 
-    auto col = std::make_shared<ColumnVector>(DataType::INT64, 6);
+    auto col = std::make_shared<ColumnVector<int64_t>>(DataType::INT64, 6);
     col->nullAt(0);
-    col->SetValueAt<int64_t>(1, 5);
+    col->SetValueAt(1, 5);
     col->nullAt(2);
-    col->SetValueAt<int64_t>(3, 2);
-    col->SetValueAt<int64_t>(4, 8);
-    col->SetValueAt<int64_t>(5, 1);
-    std::vector<ColumnVectorPtr> columns = {col};
+    col->SetValueAt(3, 2);
+    col->SetValueAt(4, 8);
+    col->SetValueAt(5, 1);
+    std::vector<VectorPtr> columns = {col};
 
     for (size_t i = 0; i < 6; ++i) {
         buffer.AddRow(columns, i);
@@ -1117,14 +1119,14 @@ TEST_F(SortBufferTest, NullsWithLimit) {
     buffer.NoMoreInput();
 
     auto output = buffer.GetOutput(100);
-    auto out_col = std::dynamic_pointer_cast<ColumnVector>(output[0]);
+    auto out_col = AsColumnVector<int64_t>(output[0]);
     ASSERT_EQ(out_col->size(), 3);
 
     // Top 3 with ASC NULLS FIRST: NULL, NULL, 1
     EXPECT_FALSE(out_col->ValidAt(0));
     EXPECT_FALSE(out_col->ValidAt(1));
     EXPECT_TRUE(out_col->ValidAt(2));
-    EXPECT_EQ(out_col->ValueAt<int64_t>(2), 1);
+    EXPECT_EQ(out_col->ValueAt(2), 1);
 }
 
 TEST_F(SortBufferTest, NonSortColumnPreserved) {
@@ -1137,7 +1139,7 @@ TEST_F(SortBufferTest, NonSortColumnPreserved) {
 
     auto col0 = CreateInt64Column({3, 1, 2});
     auto col1 = CreateStringColumn({"three", "one", "two"});
-    std::vector<ColumnVectorPtr> columns = {col0, col1};
+    std::vector<VectorPtr> columns = {col0, col1};
 
     for (size_t i = 0; i < 3; ++i) {
         buffer.AddRow(columns, i);
@@ -1146,7 +1148,7 @@ TEST_F(SortBufferTest, NonSortColumnPreserved) {
 
     auto output = buffer.GetOutput(100);
     auto sorted_int = ExtractInt64Values(output, 0);
-    auto out_str = std::dynamic_pointer_cast<ColumnVector>(output[1]);
+    auto out_str = AsColumnVector<std::string>(output[1]);
 
     // After sorting by col0 ASC: (1, "one"), (2, "two"), (3, "three")
     std::vector<int64_t> expected_int = {1, 2, 3};
@@ -1177,44 +1179,47 @@ struct TopKSpec {
 // Columns: [pk, key, (key2 varchar), row_id (int64)]
 struct TopKTable {
     std::vector<DataType> types;
-    std::vector<std::vector<ColumnVectorPtr>> batches;
+    std::vector<std::vector<VectorPtr>> batches;
     std::vector<vector_size_t> batch_rows;
 };
 
 void
-SetKey(const ColumnVectorPtr& col, size_t i, DataType type, int64_t v) {
+SetKey(const VectorPtr& col, size_t i, DataType type, int64_t v) {
     switch (type) {
         case DataType::BOOL:
-            col->SetValueAt<bool>(i, (v & 1) != 0);
+            AsColumnVector<bool>(col)->SetValueAt(i, (v & 1) != 0);
             break;
         case DataType::INT8:
-            col->SetValueAt<int8_t>(i, static_cast<int8_t>(v));
+            AsColumnVector<int8_t>(col)->SetValueAt(i, static_cast<int8_t>(v));
             break;
         case DataType::INT16:
-            col->SetValueAt<int16_t>(i, static_cast<int16_t>(v));
+            AsColumnVector<int16_t>(col)->SetValueAt(i,
+                                                     static_cast<int16_t>(v));
             break;
         case DataType::INT32:
-            col->SetValueAt<int32_t>(i, static_cast<int32_t>(v));
+            AsColumnVector<int32_t>(col)->SetValueAt(i,
+                                                     static_cast<int32_t>(v));
             break;
         case DataType::INT64:
         case DataType::TIMESTAMPTZ:
-            col->SetValueAt<int64_t>(i, v);
+            AsColumnVector<int64_t>(col)->SetValueAt(i, v);
             break;
         case DataType::FLOAT:
             // every 13th value is NaN, which sorts as the largest value
-            col->SetValueAt<float>(i,
-                                   v % 13 == 0
-                                       ? std::numeric_limits<float>::quiet_NaN()
-                                       : static_cast<float>(v % 100000) / 3);
+            AsColumnVector<float>(col)->SetValueAt(
+                i,
+                v % 13 == 0 ? std::numeric_limits<float>::quiet_NaN()
+                            : static_cast<float>(v % 100000) / 3);
             break;
         case DataType::DOUBLE:
-            col->SetValueAt<double>(
+            AsColumnVector<double>(col)->SetValueAt(
                 i,
                 v % 13 == 0 ? std::numeric_limits<double>::quiet_NaN()
                             : static_cast<double>(v) / 7);
             break;
         default:  // VARCHAR
-            col->SetValueAt<std::string>(i, "k" + std::to_string(v));
+            AsColumnVector<std::string>(col)->SetValueAt(
+                i, "k" + std::to_string(v));
     }
 }
 
@@ -1234,20 +1239,22 @@ GenerateTopKTable(const TopKSpec& spec,
     std::mt19937_64 rng(seed);
     for (int64_t start = 0; start < num_rows; start += batch_size) {
         auto n = std::min(batch_size, num_rows - start);
-        std::vector<ColumnVectorPtr> cols;
+        std::vector<VectorPtr> cols;
         for (auto type : table.types) {
-            cols.push_back(std::make_shared<ColumnVector>(type, n));
+            cols.push_back(MakeColumnVector(type, n));
         }
         for (int64_t i = 0; i < n; ++i) {
             int64_t id = start + i;
             uint64_t r = rng();
             if (spec.varchar_pk) {
-                cols[0]->SetValueAt<std::string>(i, "pk-" + std::to_string(id));
+                AsColumnVector<std::string>(cols[0])->SetValueAt(
+                    i, "pk-" + std::to_string(id));
             } else {
-                cols[0]->SetValueAt<int64_t>(i, id);
+                AsColumnVector<int64_t>(cols[0])->SetValueAt(i, id);
             }
             if (spec.nullable && r % 10 == 0) {
-                cols[1]->nullAt(i);
+                VisitColumnVector(cols[1],
+                                  [&](const auto& typed) { typed->nullAt(i); });
             } else {
                 int64_t v =
                     spec.sorted_input > 0   ? id
@@ -1259,13 +1266,14 @@ GenerateTopKTable(const TopKSpec& spec,
             }
             if (spec.second_key) {
                 if (spec.nullable && r % 7 == 0) {
-                    cols[2]->nullAt(i);
+                    VisitColumnVector(
+                        cols[2], [&](const auto& typed) { typed->nullAt(i); });
                 } else {
-                    cols[2]->SetValueAt<std::string>(
+                    AsColumnVector<std::string>(cols[2])->SetValueAt(
                         i, "s" + std::to_string((r >> 40) % 5));
                 }
             }
-            cols.back()->SetValueAt<int64_t>(i, id);
+            AsColumnVector<int64_t>(cols.back())->SetValueAt(i, id);
         }
         table.batches.push_back(std::move(cols));
         table.batch_rows.push_back(static_cast<vector_size_t>(n));
@@ -1285,28 +1293,30 @@ RenderFloat(T v) {
 }
 
 std::string
-RenderCell(const ColumnVectorPtr& col, size_t i, DataType type) {
-    if (!col->ValidAt(i)) {
+RenderCell(const VectorPtr& col, size_t i, DataType type) {
+    if (!VisitColumnVector(
+            col, [&](const auto& typed) { return typed->ValidAt(i); })) {
         return "<null>";
     }
     switch (type) {
         case DataType::BOOL:
-            return std::to_string(col->ValueAt<bool>(i));
+            return std::to_string(AsColumnVector<bool>(col)->ValueAt(i));
         case DataType::INT8:
-            return std::to_string(col->ValueAt<int8_t>(i));
+            return std::to_string(AsColumnVector<int8_t>(col)->ValueAt(i));
         case DataType::INT16:
-            return std::to_string(col->ValueAt<int16_t>(i));
+            return std::to_string(AsColumnVector<int16_t>(col)->ValueAt(i));
         case DataType::INT32:
-            return std::to_string(col->ValueAt<int32_t>(i));
+            return std::to_string(AsColumnVector<int32_t>(col)->ValueAt(i));
         case DataType::INT64:
         case DataType::TIMESTAMPTZ:
-            return std::to_string(col->ValueAt<int64_t>(i));
+            return std::to_string(AsColumnVector<int64_t>(col)->ValueAt(i));
         case DataType::FLOAT:
-            return RenderFloat(col->ValueAt<float>(i));
+            return RenderFloat(AsColumnVector<float>(col)->ValueAt(i));
         case DataType::DOUBLE:
-            return RenderFloat(col->ValueAt<double>(i));
+            return RenderFloat(AsColumnVector<double>(col)->ValueAt(i));
         default:  // VARCHAR
-            return reinterpret_cast<std::string*>(col->GetRawData())[i];
+            return AsColumnVector<std::string>(col)
+                ->RawAsValues<std::string>()[i];
     }
 }
 
@@ -1334,9 +1344,7 @@ RunSortBuffer(const TopKTable& table,
         if (out.empty()) {
             break;
         }
-        auto col = [&](size_t c) {
-            return std::dynamic_pointer_cast<ColumnVector>(out[c]);
-        };
+        auto col = [&](size_t c) { return out[c]; };
         for (size_t i = 0; i < out[0]->size(); ++i) {
             std::string row;
             for (const auto& sk : sort_keys) {

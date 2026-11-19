@@ -417,7 +417,8 @@ TEST_F(GISIndexRefinementTest, BitmapInputLimitsIndexedDWithinRefinement) {
             context.set_bitmap_input(std::move(input));
             VectorPtr result;
             physical.Eval(context, result);
-            auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+            auto column =
+                std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
             ASSERT_NE(column, nullptr);
             ASSERT_EQ(column->size(), expected.size());
             TargetBitmapView bits(column->GetRawData(), column->size());
@@ -537,7 +538,7 @@ TEST_F(GISIndexRefinementTest, BitmapInputSkipsRawGeometryParsing) {
                     VectorPtr result;
                     physical.Eval(context, result);
                     auto column =
-                        std::dynamic_pointer_cast<ColumnVector>(result);
+                        std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
                     ASSERT_NE(column, nullptr);
                     ASSERT_EQ(column->size(), mask.size());
                     TargetBitmapView bits(column->GetRawData(), column->size());

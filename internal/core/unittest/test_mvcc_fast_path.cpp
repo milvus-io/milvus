@@ -132,7 +132,8 @@ TEST_F(MvccFastPathTest, Level1_SealedNoDeletes_SkipFilter) {
 
     // Verify output bitmap is all zeros (no rows filtered out)
     ASSERT_NE(result.output, nullptr);
-    auto col = std::static_pointer_cast<ColumnVector>(result.output->child(0));
+    auto col =
+        std::static_pointer_cast<ColumnVector<int8_t>>(result.output->child(0));
     ASSERT_NE(col, nullptr);
     TargetBitmapView view(col->GetRawData(), col->size());
     EXPECT_EQ(view.count(), 0)
@@ -154,7 +155,8 @@ TEST_F(MvccFastPathTest, Level2_SealedWithDeletes_DeleteMaskOnly) {
 
     // Verify output bitmap has some bits set (deleted rows marked)
     ASSERT_NE(result.output, nullptr);
-    auto col = std::static_pointer_cast<ColumnVector>(result.output->child(0));
+    auto col =
+        std::static_pointer_cast<ColumnVector<int8_t>>(result.output->child(0));
     ASSERT_NE(col, nullptr);
     TargetBitmapView view(col->GetRawData(), col->size());
     EXPECT_GT(view.count(), 0)
@@ -290,8 +292,8 @@ TEST_F(MvccFastPathTest, Level1_NoCachePollution_SequentialQueries) {
     // First query – Level 1
     auto result1 = RunMvccPlan(segment.get());
     ASSERT_TRUE(result1.all_rows_visible);
-    auto col1 =
-        std::static_pointer_cast<ColumnVector>(result1.output->child(0));
+    auto col1 = std::static_pointer_cast<ColumnVector<int8_t>>(
+        result1.output->child(0));
     ASSERT_NE(col1, nullptr);
     TargetBitmapView view1(col1->GetRawData(), col1->size());
     EXPECT_EQ(view1.count(), 0);
@@ -303,8 +305,8 @@ TEST_F(MvccFastPathTest, Level1_NoCachePollution_SequentialQueries) {
     // Second query on the same thread – must NOT see the flipped bits
     auto result2 = RunMvccPlan(segment.get());
     ASSERT_TRUE(result2.all_rows_visible);
-    auto col2 =
-        std::static_pointer_cast<ColumnVector>(result2.output->child(0));
+    auto col2 = std::static_pointer_cast<ColumnVector<int8_t>>(
+        result2.output->child(0));
     ASSERT_NE(col2, nullptr);
     TargetBitmapView view2(col2->GetRawData(), col2->size());
     EXPECT_EQ(view2.count(), 0)

@@ -22,6 +22,6 @@
 namespace milvus::exec::expression::function {
 
 void
-CheckVarcharOrStringType(std::shared_ptr<SimpleVector>& vec);
+CheckVarcharOrStringType(std::shared_ptr<SimpleVector<std::string>>& vec);
 
 }  // namespace milvus::exec::expression::function

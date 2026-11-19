@@ -34,53 +34,6 @@ namespace {
 // over the (factor - 1) * limit rows accepted in between.
 constexpr int64_t kCandidateBufferFactor = 2;
 
-// Left-hand side of SortBuffer::CompareImpl(): a row stored in the
-// RowContainer.
-struct StoredRow {
-    const char* row;
-
-    bool
-    IsNull(int32_t, const RowColumn& column) const {
-        return RowContainer::isNullAt(
-            row, column.nullByte(), column.nullMask());
-    }
-    template <typename T>
-    T
-    ValueAt(int32_t, const RowColumn& column) const {
-        return RowContainer::valueAt<T>(row, column.offset());
-    }
-    const std::string*
-    StrAt(int32_t, const RowColumn& column) const {
-        return RowContainer::strAt(row, column.offset());
-    }
-};
-
-// Left-hand side of SortBuffer::CompareImpl(): an input row that has not been
-// stored, read straight from its column vectors. Values are read exactly as
-// RowContainer::storeWithNull()/storeNoNulls() read them (ValidAt and
-// RawValueAt), so comparing in place equals comparing the stored row, and
-// strings are viewed without being copied.
-struct InputRow {
-    const std::vector<ColumnVectorPtr>& columns;
-    vector_size_t index;
-
-    bool
-    IsNull(int32_t column_index, const RowColumn&) const {
-        return !columns[column_index]->ValidAt(index);
-    }
-    template <typename T>
-    T
-    ValueAt(int32_t column_index, const RowColumn&) const {
-        return *static_cast<const T*>(
-            columns[column_index]->RawValueAt(index, sizeof(T)));
-    }
-    const std::string*
-    StrAt(int32_t column_index, const RowColumn&) const {
-        return static_cast<const std::string*>(
-            columns[column_index]->RawValueAt(index, sizeof(std::string)));
-    }
-};
-
 }  // namespace
 
 SortBuffer::SortBuffer(const std::vector<DataType>& column_types,
@@ -115,7 +68,7 @@ SortBuffer::SortBuffer(const std::vector<DataType>& column_types,
 }
 
 void
-SortBuffer::AddRow(const std::vector<ColumnVectorPtr>& columns,
+SortBuffer::AddRow(const std::vector<VectorPtr>& columns,
                    vector_size_t row_index) {
     AssertInfo(!sorted_, "Cannot add input after NoMoreInput()");
     AssertInfo(columns.size() == column_types_.size(),
@@ -123,9 +76,11 @@ SortBuffer::AddRow(const std::vector<ColumnVectorPtr>& columns,
                column_types_.size(),
                columns.size());
 
+    const auto input = BindInput(columns);
+
     // With a limit, only rows that can still make the top limit_ are stored
     if (limit_ > 0) {
-        OfferRow(columns, row_index);
+        OfferRow(input, row_index);
         num_input_rows_++;
         return;
     }
@@ -135,14 +90,14 @@ SortBuffer::AddRow(const std::vector<ColumnVectorPtr>& columns,
 
     // Store each column value into the row
     for (size_t col = 0; col < columns.size(); ++col) {
-        data_->store(columns[col], row_index, row, static_cast<int32_t>(col));
+        input.columns[col].store(row_index, row);
     }
 
     num_input_rows_++;
 }
 
 void
-SortBuffer::AddRows(const std::vector<ColumnVectorPtr>& columns,
+SortBuffer::AddRows(const std::vector<VectorPtr>& columns,
                     vector_size_t num_rows) {
     AssertInfo(!sorted_, "Cannot add input after NoMoreInput()");
     AssertInfo(columns.size() == column_types_.size(),
@@ -154,10 +109,12 @@ SortBuffer::AddRows(const std::vector<ColumnVectorPtr>& columns,
         return;
     }
 
+    const auto input = BindInput(columns);
+
     // With a limit, rows go through OfferRow() instead of being stored in bulk
     if (limit_ > 0) {
         for (vector_size_t i = 0; i < num_rows; ++i) {
-            OfferRow(columns, i);
+            OfferRow(input, i);
         }
         num_input_rows_ += num_rows;
         return;
@@ -174,8 +131,7 @@ SortBuffer::AddRows(const std::vector<ColumnVectorPtr>& columns,
     // in memory, so writing all columns of the same row is cache-friendly.
     for (vector_size_t i = 0; i < num_rows; ++i) {
         for (size_t col = 0; col < columns.size(); ++col) {
-            data_->store(
-                columns[col], i, new_rows[i], static_cast<int32_t>(col));
+            input.columns[col].store(i, new_rows[i]);
         }
     }
 
@@ -186,15 +142,14 @@ SortBuffer::AddRows(const std::vector<ColumnVectorPtr>& columns,
 // candidate unless it can no longer make the top limit_; when the candidates
 // are full, first shrinks them back to limit_ with a selection algorithm.
 void
-SortBuffer::OfferRow(const std::vector<ColumnVectorPtr>& columns,
-                     vector_size_t row_index) {
+SortBuffer::OfferRow(const InputBatch& input, vector_size_t row_index) {
     // A row that is not strictly better than the threshold can never make the
     // top limit_: at least limit_ candidates already compare <= it, and the
     // threshold only improves. Such rows are compared in place and never
     // stored. Ties are rejected too; as with the (unstable) sort, no
     // particular row among equal keys is guaranteed to be kept.
     if (threshold_row_ != nullptr &&
-        CompareInput(columns, row_index, threshold_row_) >= 0) {
+        CompareInput(input, row_index, threshold_row_) >= 0) {
         return;
     }
 
@@ -211,8 +166,8 @@ SortBuffer::OfferRow(const std::vector<ColumnVectorPtr>& columns,
     } else {
         row = data_->newRow();
     }
-    for (size_t col = 0; col < columns.size(); ++col) {
-        data_->store(columns[col], row_index, row, static_cast<int32_t>(col));
+    for (size_t col = 0; col < input.columns.size(); ++col) {
+        input.columns[col].store(row_index, row);
     }
     sorted_rows_.push_back(row);
 }
@@ -315,21 +270,21 @@ SortBuffer::Sort() {
 }
 
 // TODO(performance): The switch-case on data_type runs on every comparison
-// (sorting, plus one CompareInput() per input row with a limit). Since sort
+// between stored rows. Input comparisons are bound per batch. Since sort
 // key types are fixed at construction time,
 // we could pre-bind typed comparators to eliminate the runtime dispatch.
 // In practice, branch prediction handles this well (type never changes),
 // so this is low-priority unless profiling shows it as a bottleneck.
-template <typename Lhs>
 int
-SortBuffer::CompareImpl(const Lhs& lhs, const char* rhs) const {
+SortBuffer::Compare(const char* lhs, const char* rhs) const {
     for (const auto& sort_key : sort_keys_) {
         const auto col = sort_key.column_index;
         const auto& row_column = data_->columnAt(col);
         const auto data_type = column_types_[col];
 
         // Check for nulls first
-        bool lhs_null = lhs.IsNull(col, row_column);
+        bool lhs_null = RowContainer::isNullAt(
+            lhs, row_column.nullByte(), row_column.nullMask());
         bool rhs_null = RowContainer::isNullAt(
             rhs, row_column.nullByte(), row_column.nullMask());
 
@@ -347,7 +302,8 @@ SortBuffer::CompareImpl(const Lhs& lhs, const char* rhs) const {
         int result = 0;
         switch (data_type) {
             case DataType::BOOL: {
-                auto lhs_val = lhs.template ValueAt<bool>(col, row_column);
+                auto lhs_val =
+                    RowContainer::valueAt<bool>(lhs, row_column.offset());
                 auto rhs_val =
                     RowContainer::valueAt<bool>(rhs, row_column.offset());
                 result = CompareNonNullValues<bool>(
@@ -355,7 +311,8 @@ SortBuffer::CompareImpl(const Lhs& lhs, const char* rhs) const {
                 break;
             }
             case DataType::INT8: {
-                auto lhs_val = lhs.template ValueAt<int8_t>(col, row_column);
+                auto lhs_val =
+                    RowContainer::valueAt<int8_t>(lhs, row_column.offset());
                 auto rhs_val =
                     RowContainer::valueAt<int8_t>(rhs, row_column.offset());
                 result = CompareNonNullValues<int8_t>(
@@ -363,7 +320,8 @@ SortBuffer::CompareImpl(const Lhs& lhs, const char* rhs) const {
                 break;
             }
             case DataType::INT16: {
-                auto lhs_val = lhs.template ValueAt<int16_t>(col, row_column);
+                auto lhs_val =
+                    RowContainer::valueAt<int16_t>(lhs, row_column.offset());
                 auto rhs_val =
                     RowContainer::valueAt<int16_t>(rhs, row_column.offset());
                 result = CompareNonNullValues<int16_t>(
@@ -371,7 +329,8 @@ SortBuffer::CompareImpl(const Lhs& lhs, const char* rhs) const {
                 break;
             }
             case DataType::INT32: {
-                auto lhs_val = lhs.template ValueAt<int32_t>(col, row_column);
+                auto lhs_val =
+                    RowContainer::valueAt<int32_t>(lhs, row_column.offset());
                 auto rhs_val =
                     RowContainer::valueAt<int32_t>(rhs, row_column.offset());
                 result = CompareNonNullValues<int32_t>(
@@ -380,7 +339,8 @@ SortBuffer::CompareImpl(const Lhs& lhs, const char* rhs) const {
             }
             case DataType::INT64:
             case DataType::TIMESTAMPTZ: {
-                auto lhs_val = lhs.template ValueAt<int64_t>(col, row_column);
+                auto lhs_val =
+                    RowContainer::valueAt<int64_t>(lhs, row_column.offset());
                 auto rhs_val =
                     RowContainer::valueAt<int64_t>(rhs, row_column.offset());
                 result = CompareNonNullValues<int64_t>(
@@ -388,7 +348,8 @@ SortBuffer::CompareImpl(const Lhs& lhs, const char* rhs) const {
                 break;
             }
             case DataType::FLOAT: {
-                auto lhs_val = lhs.template ValueAt<float>(col, row_column);
+                auto lhs_val =
+                    RowContainer::valueAt<float>(lhs, row_column.offset());
                 auto rhs_val =
                     RowContainer::valueAt<float>(rhs, row_column.offset());
                 result = CompareNonNullValues<float>(
@@ -396,7 +357,8 @@ SortBuffer::CompareImpl(const Lhs& lhs, const char* rhs) const {
                 break;
             }
             case DataType::DOUBLE: {
-                auto lhs_val = lhs.template ValueAt<double>(col, row_column);
+                auto lhs_val =
+                    RowContainer::valueAt<double>(lhs, row_column.offset());
                 auto rhs_val =
                     RowContainer::valueAt<double>(rhs, row_column.offset());
                 result = CompareNonNullValues<double>(
@@ -406,7 +368,8 @@ SortBuffer::CompareImpl(const Lhs& lhs, const char* rhs) const {
             case DataType::VARCHAR:
             case DataType::STRING: {
                 // Use string_view to avoid copying strings on every comparison
-                const std::string* lhs_str = lhs.StrAt(col, row_column);
+                const std::string* lhs_str =
+                    RowContainer::strAt(lhs, row_column.offset());
                 const std::string* rhs_str =
                     RowContainer::strAt(rhs, row_column.offset());
                 std::string_view lhs_val =
@@ -432,16 +395,64 @@ SortBuffer::CompareImpl(const Lhs& lhs, const char* rhs) const {
     return 0;  // All sort keys are equal
 }
 
-int
-SortBuffer::Compare(const char* lhs, const char* rhs) const {
-    return CompareImpl(StoredRow{lhs}, rhs);
+SortBuffer::InputBatch
+SortBuffer::BindInput(const std::vector<VectorPtr>& columns) const {
+    InputBatch input;
+    input.columns.reserve(columns.size());
+    for (size_t i = 0; i < columns.size(); ++i) {
+        input.columns.push_back(data_->bindColumn(columns[i], i));
+    }
+    if (limit_ <= 0) {
+        return input;
+    }
+    input.compare.reserve(sort_keys_.size());
+    for (const auto& key : sort_keys_) {
+        const auto location = data_->columnAt(key.column_index);
+        VisitSimpleVector(columns[key.column_index], [&](const auto* column) {
+            using T = typename std::decay_t<decltype(*column)>::ValueType;
+            if constexpr (std::is_same_v<T, Json>) {
+                ThrowInfo(UnexpectedError,
+                          "JSON keys are not supported by SortBuffer");
+            } else {
+                input.compare.emplace_back([column, location, key](
+                                               vector_size_t index,
+                                               const char* row) {
+                    const bool lhs_null = !column->ValidAt(index);
+                    const bool rhs_null = RowContainer::isNullAt(
+                        row, location.nullByte(), location.nullMask());
+                    if (lhs_null || rhs_null) {
+                        return CompareNulls(
+                            lhs_null, rhs_null, key.nulls_first);
+                    }
+                    if constexpr (std::is_same_v<T, std::string>) {
+                        return CompareNonNullValues<std::string_view>(
+                            column->ValueAt(index),
+                            *RowContainer::strAt(row, location.offset()),
+                            key.ascending);
+                    } else {
+                        return CompareNonNullValues<T>(
+                            column->ValueAt(index),
+                            RowContainer::valueAt<T>(row, location.offset()),
+                            key.ascending);
+                    }
+                });
+            }
+        });
+    }
+    return input;
 }
 
 int
-SortBuffer::CompareInput(const std::vector<ColumnVectorPtr>& columns,
+SortBuffer::CompareInput(const InputBatch& input,
                          vector_size_t row_index,
                          const char* row) const {
-    return CompareImpl(InputRow{columns, row_index}, row);
+    for (const auto& compare : input.compare) {
+        const int result = compare(row_index, row);
+        if (result != 0) {
+            return result;
+        }
+    }
+    return 0;
 }
 
 bool

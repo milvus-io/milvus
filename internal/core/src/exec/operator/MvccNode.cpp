@@ -85,7 +85,7 @@ PhyMvccNode::GetOutput() {
     if (is_source_node_ && segment_->type() == SegmentType::Sealed &&
         collection_ttl_timestamp_ == 0 &&
         query_timestamp_ >= segment_->get_max_timestamp()) {
-        auto col_input = std::make_shared<ColumnVector>(
+        auto col_input = std::make_shared<ColumnVector<int8_t>>(
             TargetBitmap(active_count_), TargetBitmap(active_count_));
         TargetBitmapView data(col_input->GetRawData(), col_input->size());
         segment_->mask_with_delete(data, active_count_, query_timestamp_);
@@ -101,7 +101,7 @@ PhyMvccNode::GetOutput() {
     // Default path (has filter / growing / TTL)
     // the first vector is filtering result and second bitset is a valid bitset
     // if valid_bitset[i]==false, means result[i] is null
-    auto col_input = is_source_node_ ? std::make_shared<ColumnVector>(
+    auto col_input = is_source_node_ ? std::make_shared<ColumnVector<int8_t>>(
                                            TargetBitmap(active_count_),
                                            TargetBitmap(active_count_))
                                      : GetColumnVector(input_);

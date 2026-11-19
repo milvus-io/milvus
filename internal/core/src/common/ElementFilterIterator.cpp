@@ -98,9 +98,9 @@ ElementFilterIterator::FetchAndFilterBatch() {
                "exactly one result");
 
     // Step 3: Extract evaluation results as bitmap
-    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
+    auto col_vec = std::dynamic_pointer_cast<ColumnVector<int8_t>>(results[0]);
     AssertInfo(col_vec != nullptr,
-               "ElementFilterIterator: result should be ColumnVector");
+               "ElementFilterIterator: result should be ColumnVector<int8_t>");
     AssertInfo(col_vec->IsBitmap(),
                "ElementFilterIterator: result should be bitmap");
 

@@ -2685,8 +2685,8 @@ TEST(EntryPoolV2Test, InvertedValidityBoundaryPreservesNullsUnderNot) {
     AssertBitsEqual(result, out_result);
     AssertBitsEqual(valid, out_valid);
 
-    auto column = std::make_shared<milvus::ColumnVector>(std::move(out_result),
-                                                         std::move(out_valid));
+    auto column = std::make_shared<milvus::ColumnVector<int8_t>>(
+        std::move(out_result), std::move(out_valid));
     milvus::common::ThreeValuedLogicOp::Not(column);
     milvus::TargetBitmapView matches(column->GetRawData(), column->size());
     EXPECT_EQ(matches.count(), rows - null_count);
@@ -4887,7 +4887,9 @@ TEST_P(ExprCacheGenerationTest, RetiredTokenRejectsWritesBeforeDetachment) {
     manager_.Put(next, value_);
     EXPECT_TRUE(Hit(next));
     EXPECT_EQ(manager_.GetEntryCount(), 2);
-    { auto retired = manager_.RetireGeneration(old.segment_id, generation); }
+    {
+        auto retired = manager_.RetireGeneration(old.segment_id, generation);
+    }
     EXPECT_EQ(manager_.GetEntryCount(), 1);
     EXPECT_TRUE(Hit(next));
 }
@@ -5134,8 +5136,8 @@ TEST_P(ExprCacheGenerationTest, NullBackfillRecomputesRawAndWholeFilter) {
             auto fragment = plan::PlanFragment(plan);
             auto result =
                 query::ExecPlanNodeVisitor::ExecuteTask(fragment, context);
-            auto column =
-                std::dynamic_pointer_cast<ColumnVector>(result->childrens()[0]);
+            auto column = std::dynamic_pointer_cast<ColumnVector<int8_t>>(
+                result->childrens()[0]);
             return TargetBitmapView(column->GetRawData(), column->size())
                 .count();
         };

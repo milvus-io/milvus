@@ -54,14 +54,14 @@ class VectorHasher {
 
     template <DataType type>
     void
-    hashValues(const ColumnVectorPtr& column_data, bool mix, uint64_t* result);
+    hashValues(const VectorPtr& column_data, bool mix, uint64_t* result);
 
     void
-    setColumnData(const ColumnVectorPtr& column_data) {
+    setColumnData(const VectorPtr& column_data) {
         column_data_ = column_data;
     }
 
-    const ColumnVectorPtr&
+    const VectorPtr&
     columnData() const {
         return column_data_;
     }
@@ -69,7 +69,7 @@ class VectorHasher {
  private:
     const column_index_t channel_idx_;
     const DataType channel_type_;
-    ColumnVectorPtr column_data_;
+    VectorPtr column_data_;
 };
 
 std::vector<std::unique_ptr<VectorHasher>>

@@ -440,7 +440,8 @@ class RawExprCacheExtendedTest : public ::testing::TestWithParam<Backend> {
         while (data.size() < rows) {
             VectorPtr result;
             input->Eval(context, result);
-            auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+            auto column =
+                std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
             EXPECT_NE(column, nullptr);
             if (!column || column->size() == 0) {
                 break;
@@ -544,7 +545,7 @@ TEST_P(RawExprCacheExtendedTest, MissHitAndOffsetsPreserveRawResults) {
         context.set_offset_input(&offsets);
         VectorPtr result;
         gathered->Eval(context, result);
-        auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+        auto column = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
         ASSERT_NE(column, nullptr);
         ASSERT_EQ(column->size(), offsets.size());
         TargetBitmapView data(column->GetRawData(), column->size());

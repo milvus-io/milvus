@@ -166,7 +166,7 @@ PhyVectorSearchNode::GetOutput() {
             }
 
             std::vector<VectorPtr> col_res;
-            col_res.push_back(std::make_shared<ColumnVector>(
+            col_res.push_back(std::make_shared<ColumnVector<int8_t>>(
                 std::move(element_bitset), std::move(valid_element_bitset)));
             input_ = std::make_shared<RowVector>(std::move(col_res));
             query_context_->set_bitset_is_element_level(true);

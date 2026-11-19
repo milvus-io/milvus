@@ -128,10 +128,7 @@ class MaxStringAggregate final : public Aggregate {
     extractValues(char** groups,
                   int32_t numGroups,
                   VectorPtr* result) override {
-        auto result_column = std::dynamic_pointer_cast<ColumnVector>(*result);
-        AssertInfo(result_column != nullptr,
-                   "input vector for extracting aggregation must be of Type "
-                   "ColumnVector");
+        auto result_column = AsColumnVector<std::string>(*result);
         result_column->resize(numGroups);
         for (auto i = 0; i < numGroups; i++) {
             char* group = groups[i];
@@ -143,7 +140,7 @@ class MaxStringAggregate final : public Aggregate {
                 AssertInfo(ptr != nullptr,
                            "max string aggregate should not have null pointer "
                            "when group is not null");
-                result_column->SetValueAt<std::string>(i, *ptr);
+                result_column->SetValueAt(i, *ptr);
                 delete ptr;
                 ptr = nullptr;
             }
@@ -156,16 +153,14 @@ class MaxStringAggregate final : public Aggregate {
                 const std::vector<VectorPtr>& input) override {
         AssertInfo(input.size() == 1,
                    "max aggregate expects exactly one input column");
-        auto column = std::dynamic_pointer_cast<ColumnVector>(input[0]);
-        AssertInfo(column != nullptr,
-                   "max aggregate input must be of type ColumnVector");
-        auto raw = column->RawAsValues<std::string>();
-        for (auto i = 0; i < column->size(); i++) {
-            if (!column->ValidAt(i)) {
-                continue;
+        VisitSimpleVector<std::string>(input[0], [&](const auto* column) {
+            for (auto i = 0; i < column->size(); i++) {
+                if (!column->ValidAt(i)) {
+                    continue;
+                }
+                updateOne(groups[i], column->ValueAt(i));
             }
-            updateOne(groups[i], raw[i]);
-        }
+        });
     }
 
     void
@@ -174,16 +169,14 @@ class MaxStringAggregate final : public Aggregate {
                            const std::vector<VectorPtr>& input) override {
         AssertInfo(input.size() == 1,
                    "max aggregate expects exactly one input column");
-        auto column = std::dynamic_pointer_cast<ColumnVector>(input[0]);
-        AssertInfo(column != nullptr,
-                   "max aggregate input must be of type ColumnVector");
-        auto raw = column->RawAsValues<std::string>();
-        for (auto i = 0; i < column->size(); i++) {
-            if (!column->ValidAt(i)) {
-                continue;
+        VisitSimpleVector<std::string>(input[0], [&](const auto* column) {
+            for (auto i = 0; i < column->size(); i++) {
+                if (!column->ValidAt(i)) {
+                    continue;
+                }
+                updateOne(group, column->ValueAt(i));
             }
-            updateOne(group, raw[i]);
-        }
+        });
     }
 
     void
@@ -197,7 +190,7 @@ class MaxStringAggregate final : public Aggregate {
 
  private:
     inline void
-    updateOne(char* group, const std::string& candidate) {
+    updateOne(char* group, std::string_view candidate) {
         if (isNull(group)) {
             clearNull(group);
             *value<std::string*>(group) = new std::string(candidate);

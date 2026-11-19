@@ -200,7 +200,7 @@ PhyFilterBitsNode::GetOutput() {
             }
 
             std::vector<VectorPtr> col_res;
-            col_res.push_back(std::make_shared<ColumnVector>(
+            col_res.push_back(std::make_shared<ColumnVector<int8_t>>(
                 cached.result->clone(),
                 cached.valid_result ? cached.valid_result->clone()
                                     : TargetBitmap(need_process_rows_, true)));
@@ -214,8 +214,9 @@ PhyFilterBitsNode::GetOutput() {
             if (recording) {
                 span.SetAttribute("cache_hit", true);
                 span.SetAttribute("prefetch_wait_us", 0.0);
-                const auto cached = std::static_pointer_cast<ColumnVector>(
-                    cached_output->child(0));
+                const auto cached =
+                    std::static_pointer_cast<ColumnVector<int8_t>>(
+                        cached_output->child(0));
                 record_result(
                     TargetBitmapView(cached->GetRawData(), cached->size()),
                     0.0);
@@ -253,9 +254,11 @@ PhyFilterBitsNode::GetOutput() {
         AssertInfo(results_.size() == 1 && results_[0] != nullptr,
                    "PhyFilterBitsNode result size should be size one and not "
                    "be nullptr");
-        auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results_[0]);
-        AssertInfo(col_vec && col_vec->IsBitmap(),
-                   "PhyFilterBitsNode result should be bitmap ColumnVector");
+        auto col_vec =
+            std::dynamic_pointer_cast<ColumnVector<int8_t>>(results_[0]);
+        AssertInfo(
+            col_vec && col_vec->IsBitmap(),
+            "PhyFilterBitsNode result should be bitmap ColumnVector<int8_t>");
 
         auto col_vec_size = col_vec->size();
         TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
@@ -305,7 +308,7 @@ PhyFilterBitsNode::GetOutput() {
                    "be nullptr");
 
         if (auto col_vec =
-                std::dynamic_pointer_cast<ColumnVector>(results_[0])) {
+                std::dynamic_pointer_cast<ColumnVector<int8_t>>(results_[0])) {
             if (col_vec->IsBitmap()) {
                 auto col_vec_size = col_vec->size();
                 TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
@@ -319,8 +322,9 @@ PhyFilterBitsNode::GetOutput() {
                           "PhyFilterBitsNode result should be bitmap");
             }
         } else {
-            ThrowInfo(UnexpectedError,
-                      "PhyFilterBitsNode result should be ColumnVector");
+            ThrowInfo(
+                UnexpectedError,
+                "PhyFilterBitsNode result should be ColumnVector<int8_t>");
         }
     }
     TargetBitmapView bitset_view(bitset);
@@ -336,7 +340,7 @@ PhyFilterBitsNode::GetOutput() {
 
     // Cache write: clone bitset into ExprResCacheManager — Stage 1 of two-stage
     // search. Must clone before move since Stage 1 still owns the bitset for
-    // the ColumnVector return value below.
+    // the ColumnVector<int8_t> return value below.
     if (can_use_cache) {
         RunExprCacheBestEffort([&]() {
             auto key = ExprCacheHelper::MakeKey(
@@ -354,8 +358,8 @@ PhyFilterBitsNode::GetOutput() {
 
     // num_processed_rows_ = need_process_rows_;
     std::vector<VectorPtr> col_res;
-    col_res.push_back(std::make_shared<ColumnVector>(std::move(bitset),
-                                                     std::move(valid_bitset)));
+    col_res.push_back(std::make_shared<ColumnVector<int8_t>>(
+        std::move(bitset), std::move(valid_bitset)));
     std::chrono::high_resolution_clock::time_point scalar_end =
         std::chrono::high_resolution_clock::now();
     double scalar_cost =

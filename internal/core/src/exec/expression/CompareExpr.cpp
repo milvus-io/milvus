@@ -181,9 +181,9 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             return nullptr;
         }
 
-        auto res_vec =
-            std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                           TargetBitmap(real_batch_size, true));
+        auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+            TargetBitmap(real_batch_size, false),
+            TargetBitmap(real_batch_size, true));
         TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
@@ -241,7 +241,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             return nullptr;
         }
 
-        auto res_vec = std::make_shared<ColumnVector>(
+        auto res_vec = std::make_shared<ColumnVector<int8_t>>(
             TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
         TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
@@ -276,7 +276,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             return nullptr;
         }
 
-        auto res_vec = std::make_shared<ColumnVector>(
+        auto res_vec = std::make_shared<ColumnVector<int8_t>>(
             TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
         TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
@@ -429,9 +429,9 @@ PhyCompareFilterExpr::ExecCompareWithValueLookup(OpType, EvalCtx& context) {
         };
     };
 
-    auto result =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto result = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView bits(result->GetRawData(), real_batch_size);
     TargetBitmapView valid(result->GetValidRawData(), real_batch_size);
     // Only the typed read/compare loop participates in the type cross-product.
@@ -621,22 +621,23 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
     }
 
     const auto& bitmap_input = context.get_bitmap_input();
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
     auto expr_type = expr_->op_type_;
     size_t processed_cursor = 0;
-    auto execute_sub_batch =
-        [ expr_type, &bitmap_input, &
-          processed_cursor ]<FilterType filter_type = FilterType::sequential>(
-            const T* left,
-            const U* right,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res) {
+    auto execute_sub_batch = [expr_type,
+                              &bitmap_input,
+                              &processed_cursor]<FilterType filter_type =
+                                                     FilterType::sequential>(
+                                 const T* left,
+                                 const U* right,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res) {
         switch (expr_type) {
             case proto::plan::GreaterThan: {
                 CompareElementFunc<T, U, proto::plan::GreaterThan, filter_type>

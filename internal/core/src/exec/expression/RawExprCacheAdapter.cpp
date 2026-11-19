@@ -164,15 +164,15 @@ RawExprCacheAdapter::TryServeCacheHit(EvalCtx& context, VectorPtr& result) {
         return true;
     }
 
-    ColumnVectorPtr sliced_result;
+    ColumnVectorPtr<int8_t> sliced_result;
     try {
         TargetBitmap sliced;
         TargetBitmap sliced_valid;
         sliced.append(*state_.result, state_.sequential_pos, actual_rows);
         sliced_valid.append(
             *state_.valid_result, state_.sequential_pos, actual_rows);
-        sliced_result = std::make_shared<ColumnVector>(std::move(sliced),
-                                                       std::move(sliced_valid));
+        sliced_result = std::make_shared<ColumnVector<int8_t>>(
+            std::move(sliced), std::move(sliced_valid));
     } catch (...) {
         abandon_hit();
         return false;
@@ -257,7 +257,7 @@ RawExprCacheAdapter::CaptureResult(EvalCtx& context,
         return;
     }
 
-    auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+    auto column = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
     if (column == nullptr || !column->IsBitmap()) {
         AbortCapture();
         return;

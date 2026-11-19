@@ -101,23 +101,7 @@ PhyQueryOrderByNode::AddInput(RowVectorPtr& input) {
         return;
     }
 
-    // Extract column vectors from input RowVector
-    const auto& children = input->childrens();
-    std::vector<ColumnVectorPtr> columns;
-    columns.reserve(children.size());
-
-    for (size_t i = 0; i < children.size(); ++i) {
-        auto col_vec = std::dynamic_pointer_cast<ColumnVector>(children[i]);
-        if (col_vec) {
-            columns.push_back(std::move(col_vec));
-        } else {
-            // Handle case where child is not a ColumnVector
-            // This shouldn't happen in normal operation
-            ThrowInfo(Unsupported,
-                      "QueryOrderByNode input child {} is not a ColumnVector",
-                      i);
-        }
-    }
+    const auto& columns = input->childrens();
 
     AssertInfo(columns.size() == column_types_.size(),
                "QueryOrderByNode: input column count ({}) differs from "

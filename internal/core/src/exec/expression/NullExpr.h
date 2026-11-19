@@ -95,10 +95,10 @@ class PhyNullExpr : public SegmentExpr {
     }
 
  private:
-    ColumnVectorPtr
+    ColumnVectorPtr<int8_t>
     PreCheckNullable(OffsetVector* input);
 
-    ColumnVectorPtr
+    ColumnVectorPtr<int8_t>
     BuildNullResult(TargetBitmap&& field_valid) const;
 
     VectorPtr

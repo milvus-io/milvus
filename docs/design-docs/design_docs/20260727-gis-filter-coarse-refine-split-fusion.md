@@ -79,7 +79,7 @@ void PhyGISCoarseConjunctExpr::Eval(EvalCtx& ctx, VectorPtr& result) {
   }
   TargetBitmap out; out.append(*st_->coarse_candidates, current_pos_, bs);
   current_pos_ += bs;
-  result = std::make_shared<ColumnVector>(std::move(out), TargetBitmap(bs, true));
+  result = std::make_shared<ColumnVector<int8_t>>(std::move(out), TargetBitmap(bs, true));
 }
 ```
 
@@ -122,7 +122,7 @@ void PhyGISRefineConjunctExpr::Eval(EvalCtx& ctx, VectorPtr& result) {
     }
   }
   current_pos_ += bs;
-  result = std::make_shared<ColumnVector>(std::move(res), TargetBitmap(bs, true));
+  result = std::make_shared<ColumnVector<int8_t>>(std::move(res), TargetBitmap(bs, true));
 }
 ```
 

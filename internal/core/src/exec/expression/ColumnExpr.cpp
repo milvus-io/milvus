@@ -229,9 +229,9 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
             return nullptr;
         }
 
-        auto res_vec = std::make_shared<ColumnVector>(
+        auto res_vec = std::make_shared<ColumnVector<T>>(
             expr_->GetColumn().data_type_, real_batch_size);
-        T* res_value = res_vec->RawAsValues<T>();
+        T* res_value = res_vec->template RawAsValues<T>();
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
         valid_res.set();
 
@@ -272,9 +272,9 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
             return nullptr;
         }
 
-        auto res_vec = std::make_shared<ColumnVector>(
+        auto res_vec = std::make_shared<ColumnVector<T>>(
             expr_->GetColumn().data_type_, real_batch_size);
-        T* res_value = res_vec->RawAsValues<T>();
+        T* res_value = res_vec->template RawAsValues<T>();
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
         valid_res.set();
         auto cda = segment_chunk_reader_.GetMultipleChunkDataAccessor(
@@ -297,9 +297,9 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
             return nullptr;
         }
 
-        auto res_vec = std::make_shared<ColumnVector>(
+        auto res_vec = std::make_shared<ColumnVector<T>>(
             expr_->GetColumn().data_type_, real_batch_size);
-        T* res_value = res_vec->RawAsValues<T>();
+        T* res_value = res_vec->template RawAsValues<T>();
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
         valid_res.set();
 
@@ -361,9 +361,9 @@ PhyColumnExpr::DoEvalFromValueReader(OffsetVector* input) {
         }
     }
 
-    auto result = std::make_shared<ColumnVector>(expr_->GetColumn().data_type_,
-                                                 real_batch_size);
-    auto* values = result->RawAsValues<T>();
+    auto result = std::make_shared<ColumnVector<T>>(
+        expr_->GetColumn().data_type_, real_batch_size);
+    auto* values = result->template RawAsValues<T>();
     TargetBitmapView valid(result->GetValidRawData(), real_batch_size);
     valid.set();
     if (!GatherFromValueReader(

@@ -262,7 +262,7 @@ PhyNullExpr::ExecVisitorImpl(OffsetVector* input) {
 
 // if nullable is false, no need to process chunks
 // res is all false when is null, and is all true when is not null
-ColumnVectorPtr
+ColumnVectorPtr<int8_t>
 PhyNullExpr::PreCheckNullable(OffsetVector* input) {
     if (expr_->column_.nullable_) {
         return nullptr;
@@ -281,7 +281,7 @@ PhyNullExpr::PreCheckNullable(OffsetVector* input) {
     return BuildNullResult(TargetBitmap(batch_size, true));
 }
 
-ColumnVectorPtr
+ColumnVectorPtr<int8_t>
 PhyNullExpr::BuildNullResult(TargetBitmap&& field_valid) const {
     auto size = field_valid.size();
     switch (expr_->op_) {
@@ -297,8 +297,8 @@ PhyNullExpr::BuildNullResult(TargetBitmap&& field_valid) const {
                       "unsupported null expr type {}",
                       proto::plan::NullExpr_NullOp_Name(expr_->op_));
     }
-    return std::make_shared<ColumnVector>(std::move(field_valid),
-                                          TargetBitmap(size, true));
+    return std::make_shared<ColumnVector<int8_t>>(std::move(field_valid),
+                                                  TargetBitmap(size, true));
 }
 
 }  //namespace exec

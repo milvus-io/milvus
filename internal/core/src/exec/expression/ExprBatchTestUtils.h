@@ -30,7 +30,7 @@ namespace milvus::test {
 
 struct ExprBatchEvalResult {
     std::vector<int64_t> batch_sizes;
-    ColumnVectorPtr result;
+    ColumnVectorPtr<int8_t> result;
 };
 
 class ExprBatchSizeGuard {
@@ -73,7 +73,7 @@ EvalExprInBatches(const expr::TypedExprPtr& logical_expr,
                    "expression evaluation stopped after {} of {} rows",
                    processed_rows,
                    active_count);
-        auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+        auto column = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
         AssertInfo(column != nullptr && column->IsBitmap(),
                    "expected bitmap column result");
         const auto batch_size = column->size();
@@ -90,7 +90,7 @@ EvalExprInBatches(const expr::TypedExprPtr& logical_expr,
             TargetBitmapView(column->GetValidRawData(), batch_size));
         processed_rows += batch_size;
     }
-    evaluation.result = std::make_shared<ColumnVector>(
+    evaluation.result = std::make_shared<ColumnVector<int8_t>>(
         std::move(combined_result), std::move(combined_validity));
     return evaluation;
 }

@@ -24,30 +24,34 @@ using namespace milvus::exec;
 
 class RowContainerTest : public ::testing::Test {
  protected:
-    ColumnVectorPtr
+    ColumnVectorPtr<int64_t>
     CreateInt64Column(const std::vector<int64_t>& data) {
-        auto col = std::make_shared<ColumnVector>(DataType::INT64, data.size());
+        auto col = std::make_shared<ColumnVector<int64_t>>(DataType::INT64,
+                                                           data.size());
         for (size_t i = 0; i < data.size(); ++i) {
-            col->SetValueAt<int64_t>(i, data[i]);
+            col->SetValueAt(i, data[i]);
         }
         return col;
     }
 
-    ColumnVectorPtr
+    ColumnVectorPtr<std::string>
     CreateStringColumn(const std::vector<std::string>& data) {
-        auto col =
-            std::make_shared<ColumnVector>(DataType::VARCHAR, data.size());
+        auto col = std::make_shared<ColumnVector<std::string>>(
+            DataType::VARCHAR, data.size());
         for (size_t i = 0; i < data.size(); ++i) {
-            col->SetValueAt<std::string>(i, data[i]);
+            col->SetValueAt(i, data[i]);
         }
         return col;
     }
 
-    ColumnVectorPtr
+    template <typename T>
+    ColumnVectorPtr<T>
     ExtractColumn(RowContainer& rows, int32_t column_idx) {
         const auto& all_rows = rows.allRows();
-        return rows.extractColumnVector(
-            all_rows.data(), static_cast<int32_t>(all_rows.size()), column_idx);
+        return AsColumnVector<T>(
+            rows.extractColumnVector(all_rows.data(),
+                                     static_cast<int32_t>(all_rows.size()),
+                                     column_idx));
     }
 };
 
@@ -60,22 +64,23 @@ TEST_F(RowContainerTest, ExtractColumnVectorReturnsFilledInt64Values) {
         rows.store(input, i, row, 0);
     }
 
-    auto output = ExtractColumn(rows, 0);
+    auto output = ExtractColumn<int64_t>(rows, 0);
     ASSERT_EQ(output->size(), 3);
     EXPECT_TRUE(output->ValidAt(0));
     EXPECT_TRUE(output->ValidAt(1));
     EXPECT_TRUE(output->ValidAt(2));
-    EXPECT_EQ(output->ValueAt<int64_t>(0), 10);
-    EXPECT_EQ(output->ValueAt<int64_t>(1), 20);
-    EXPECT_EQ(output->ValueAt<int64_t>(2), 30);
+    EXPECT_EQ(output->ValueAt(0), 10);
+    EXPECT_EQ(output->ValueAt(1), 20);
+    EXPECT_EQ(output->ValueAt(2), 30);
 }
 
 TEST_F(RowContainerTest, ExtractColumnVectorReturnsFilledTimestamptzValues) {
     RowContainer rows({DataType::TIMESTAMPTZ}, {});
-    auto input = std::make_shared<ColumnVector>(DataType::TIMESTAMPTZ, 3);
+    auto input =
+        std::make_shared<ColumnVector<int64_t>>(DataType::TIMESTAMPTZ, 3);
     std::vector<int64_t> data{1000000000000, 2000000000000, 3000000000000};
     for (size_t i = 0; i < data.size(); ++i) {
-        input->SetValueAt<int64_t>(i, data[i]);
+        input->SetValueAt(i, data[i]);
     }
 
     for (size_t i = 0; i < input->size(); ++i) {
@@ -83,14 +88,14 @@ TEST_F(RowContainerTest, ExtractColumnVectorReturnsFilledTimestamptzValues) {
         rows.store(input, i, row, 0);
     }
 
-    auto output = ExtractColumn(rows, 0);
+    auto output = ExtractColumn<int64_t>(rows, 0);
     ASSERT_EQ(output->size(), 3);
     EXPECT_TRUE(output->ValidAt(0));
     EXPECT_TRUE(output->ValidAt(1));
     EXPECT_TRUE(output->ValidAt(2));
-    EXPECT_EQ(output->ValueAt<int64_t>(0), data[0]);
-    EXPECT_EQ(output->ValueAt<int64_t>(1), data[1]);
-    EXPECT_EQ(output->ValueAt<int64_t>(2), data[2]);
+    EXPECT_EQ(output->ValueAt(0), data[0]);
+    EXPECT_EQ(output->ValueAt(1), data[1]);
+    EXPECT_EQ(output->ValueAt(2), data[2]);
 }
 
 TEST_F(RowContainerTest, ExtractColumnVectorPreservesNullValidity) {
@@ -104,14 +109,14 @@ TEST_F(RowContainerTest, ExtractColumnVectorPreservesNullValidity) {
         rows.store(input, i, row, 0);
     }
 
-    auto output = ExtractColumn(rows, 0);
+    auto output = ExtractColumn<int64_t>(rows, 0);
     ASSERT_EQ(output->size(), 4);
     EXPECT_TRUE(output->ValidAt(0));
     EXPECT_FALSE(output->ValidAt(1));
     EXPECT_TRUE(output->ValidAt(2));
     EXPECT_FALSE(output->ValidAt(3));
-    EXPECT_EQ(output->ValueAt<int64_t>(0), 10);
-    EXPECT_EQ(output->ValueAt<int64_t>(2), 30);
+    EXPECT_EQ(output->ValueAt(0), 10);
+    EXPECT_EQ(output->ValueAt(2), 30);
 }
 
 TEST_F(RowContainerTest, ExtractColumnVectorCopiesStringValues) {
@@ -123,14 +128,14 @@ TEST_F(RowContainerTest, ExtractColumnVectorCopiesStringValues) {
         rows.store(input, i, row, 0);
     }
 
-    auto output = ExtractColumn(rows, 0);
+    auto output = ExtractColumn<std::string>(rows, 0);
     rows.clear();
 
     ASSERT_EQ(output->size(), 3);
     EXPECT_TRUE(output->ValidAt(0));
     EXPECT_TRUE(output->ValidAt(1));
     EXPECT_TRUE(output->ValidAt(2));
-    EXPECT_EQ(output->ValueAt<std::string>(0), "alpha");
-    EXPECT_EQ(output->ValueAt<std::string>(1), "beta");
-    EXPECT_EQ(output->ValueAt<std::string>(2), "gamma");
+    EXPECT_EQ(output->ValueAt(0), "alpha");
+    EXPECT_EQ(output->ValueAt(1), "beta");
+    EXPECT_EQ(output->ValueAt(2), "gamma");
 }

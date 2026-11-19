@@ -39,7 +39,7 @@ createVectorHashers(const RowTypePtr& rowType,
 
 template <DataType Type>
 void
-VectorHasher::hashValues(const ColumnVectorPtr& column_data,
+VectorHasher::hashValues(const VectorPtr& column_data,
                          bool mix,
                          uint64_t* result) {
     if constexpr (Type == DataType::ROW || Type == DataType::ARRAY ||
@@ -49,24 +49,26 @@ VectorHasher::hashValues(const ColumnVectorPtr& column_data,
                   Type);
     } else {
         using T = typename TypeTraits<Type>::NativeType;
-        for (size_t row_idx = 0; row_idx < column_data->size(); ++row_idx) {
-            if (!column_data->ValidAt(row_idx)) {
-                result[row_idx] =
-                    mix ? milvus::bits::hashMix(result[row_idx], kNullHash)
-                        : kNullHash;
-            } else {
-                T raw_value = column_data->ValueAt<T>(row_idx);
-                uint64_t hash_value = kNullHash;
-                if constexpr (std::is_floating_point_v<T>) {
-                    hash_value = milvus::NaNAwareHash<T>()(raw_value);
+        VisitSimpleVector<T>(column_data, [&](const auto* column) {
+            for (size_t row_idx = 0; row_idx < column_data->size(); ++row_idx) {
+                if (!column->ValidAt(row_idx)) {
+                    result[row_idx] =
+                        mix ? milvus::bits::hashMix(result[row_idx], kNullHash)
+                            : kNullHash;
                 } else {
-                    hash_value = folly::hasher<T>()(raw_value);
+                    T raw_value(column->ValueAt(row_idx));
+                    uint64_t hash_value = kNullHash;
+                    if constexpr (std::is_floating_point_v<T>) {
+                        hash_value = milvus::NaNAwareHash<T>()(raw_value);
+                    } else {
+                        hash_value = folly::hasher<T>()(raw_value);
+                    }
+                    result[row_idx] =
+                        mix ? milvus::bits::hashMix(result[row_idx], hash_value)
+                            : hash_value;
                 }
-                result[row_idx] =
-                    mix ? milvus::bits::hashMix(result[row_idx], hash_value)
-                        : hash_value;
             }
-        }
+        });
     }
 }
 

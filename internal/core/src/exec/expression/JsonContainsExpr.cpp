@@ -158,17 +158,17 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 expr_->op_ == proto::plan::JSONContainsExpr_JSONOp_ContainsAll;
             TargetBitmap value_result(real_batch_size, empty_matches);
             value_result &= valid_result;
-            result = std::make_shared<ColumnVector>(std::move(value_result),
-                                                    std::move(valid_result));
+            result = std::make_shared<ColumnVector<int8_t>>(
+                std::move(value_result), std::move(valid_result));
             return;
         }
 
         if (expr_->op_ == proto::plan::JSONContainsExpr_JSONOp_ContainsAll) {
-            result = std::make_shared<ColumnVector>(
+            result = std::make_shared<ColumnVector<int8_t>>(
                 TargetBitmap(real_batch_size, true),
                 TargetBitmap(real_batch_size, true));
         } else {
-            result = std::make_shared<ColumnVector>(
+            result = std::make_shared<ColumnVector<int8_t>>(
                 TargetBitmap(real_batch_size, false),
                 TargetBitmap(real_batch_size, true));
         }
@@ -385,9 +385,9 @@ PhyJsonContainsFilterExpr::ExecArrayContainsImpl(EvalCtx& context) {
     const int nested_index =
         ArrayContainsNestedIndex<ArrayType, ElementLevel>();
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
@@ -403,16 +403,17 @@ PhyJsonContainsFilterExpr::ExecArrayContainsImpl(EvalCtx& context) {
     auto elements = std::static_pointer_cast<TypedSet>(arg_cached_set_);
 
     int processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &bitmap_input,
-         nested_index ]<FilterType filter_type = FilterType::sequential>(
-            const ArrayType* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const TypedSet& elements) {
+    auto execute_sub_batch = [&processed_cursor,
+                              &bitmap_input,
+                              nested_index]<FilterType filter_type =
+                                                FilterType::sequential>(
+                                 const ArrayType* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 const TypedSet& elements) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -528,9 +529,9 @@ PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
@@ -541,17 +542,18 @@ PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
     }
 
     size_t processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const milvus::Json* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const std::string& pointer,
-            const std::shared_ptr<MultiElement>& elements) {
+    auto execute_sub_batch = [&processed_cursor,
+                              &bitmap_input]<FilterType filter_type =
+                                                 FilterType::sequential>(
+                                 const milvus::Json* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 const std::string& pointer,
+                                 const std::shared_ptr<MultiElement>&
+                                     elements) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -653,7 +655,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
 
     if (arg_set_->Empty()) {
         MoveCursor();
-        return std::make_shared<ColumnVector>(
+        return std::make_shared<ColumnVector<int8_t>>(
             TargetBitmap(real_batch_size, false),
             TargetBitmap(real_batch_size, true));
     }
@@ -775,9 +777,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(EvalCtx& context) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
@@ -795,17 +797,18 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(EvalCtx& context) {
     auto elements = std::static_pointer_cast<std::vector<proto::plan::Array>>(
         arg_cached_set_);
     size_t processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const milvus::Json* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const std::string& pointer,
-            const std::vector<proto::plan::Array>& elements) {
+    auto execute_sub_batch = [&processed_cursor,
+                              &bitmap_input]<FilterType filter_type =
+                                                 FilterType::sequential>(
+                                 const milvus::Json* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 const std::string& pointer,
+                                 const std::vector<proto::plan::Array>&
+                                     elements) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -900,7 +903,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
     }
     if (elements.empty()) {
         MoveCursor();
-        return std::make_shared<ColumnVector>(
+        return std::make_shared<ColumnVector<int8_t>>(
             TargetBitmap(real_batch_size, false),
             TargetBitmap(real_batch_size, true));
     }
@@ -1034,9 +1037,9 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
                expr_->column_.element_level_,
                ElementLevel);
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
@@ -1055,21 +1058,19 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
     ContainsAllMatcher<GetType> matcher(*elements);
     std::vector<uint64_t> found_large(
         matcher.use_small() ? 0 : matcher.num_words());
-    auto execute_sub_batch =
-        [
-            &processed_cursor,
-            &bitmap_input,
-            &matcher,
-            &found_large,
-            nested_index
-        ]<FilterType filter_type = FilterType::sequential>(
-            const ArrayType* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const std::set<GetType>& elements) {
+    auto execute_sub_batch = [&processed_cursor,
+                              &bitmap_input,
+                              &matcher,
+                              &found_large,
+                              nested_index]<FilterType filter_type =
+                                                FilterType::sequential>(
+                                 const ArrayType* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 const std::set<GetType>& elements) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -1211,9 +1212,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
@@ -1233,17 +1234,19 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
     ContainsAllMatcher<GetType> matcher(*elements);
     std::vector<uint64_t> found_large(
         matcher.use_small() ? 0 : matcher.num_words());
-    auto execute_sub_batch =
-        [&processed_cursor, &bitmap_input, &matcher, &
-         found_large ]<FilterType filter_type = FilterType::sequential>(
-            const milvus::Json* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const std::string& pointer,
-            const std::set<GetType>& elements) {
+    auto execute_sub_batch = [&processed_cursor,
+                              &bitmap_input,
+                              &matcher,
+                              &found_large]<FilterType filter_type =
+                                                FilterType::sequential>(
+                                 const milvus::Json* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 const std::string& pointer,
+                                 const std::set<GetType>& elements) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -1384,7 +1387,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
         std::static_pointer_cast<std::set<GetType>>(arg_cached_set_);
     if (elements->empty()) {
         MoveCursor();
-        return std::make_shared<ColumnVector>(
+        return std::make_shared<ColumnVector<int8_t>>(
             TargetBitmap(real_batch_size, false),
             TargetBitmap(real_batch_size, true));
     }
@@ -1542,9 +1545,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
@@ -1557,18 +1560,20 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
     }
 
     int processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const milvus::Json* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const std::string& pointer,
-            const std::vector<proto::plan::GenericValue>& elements,
-            const std::unordered_set<int>& elements_index) {
+    auto execute_sub_batch = [&processed_cursor,
+                              &bitmap_input]<FilterType filter_type =
+                                                 FilterType::sequential>(
+                                 const milvus::Json* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 const std::string& pointer,
+                                 const std::vector<proto::plan::GenericValue>&
+                                     elements,
+                                 const std::unordered_set<int>&
+                                     elements_index) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -1723,7 +1728,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
     }
     if (elements.empty()) {
         MoveCursor();
-        return std::make_shared<ColumnVector>(
+        return std::make_shared<ColumnVector<int8_t>>(
             TargetBitmap(real_batch_size, false),
             TargetBitmap(real_batch_size, true));
     }
@@ -1900,9 +1905,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(EvalCtx& context) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
@@ -1915,17 +1920,18 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(EvalCtx& context) {
     }
 
     size_t processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const milvus::Json* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const std::string& pointer,
-            const std::vector<proto::plan::Array>& elements) {
+    auto execute_sub_batch = [&processed_cursor,
+                              &bitmap_input]<FilterType filter_type =
+                                                 FilterType::sequential>(
+                                 const milvus::Json* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 const std::string& pointer,
+                                 const std::vector<proto::plan::Array>&
+                                     elements) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -2026,7 +2032,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
     }
     if (elements.empty()) {
         MoveCursor();
-        return std::make_shared<ColumnVector>(
+        return std::make_shared<ColumnVector<int8_t>>(
             TargetBitmap(real_batch_size, false),
             TargetBitmap(real_batch_size, true));
     }
@@ -2147,9 +2153,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    auto res_vec = std::make_shared<ColumnVector<int8_t>>(
+        TargetBitmap(real_batch_size, false),
+        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
@@ -2158,17 +2164,18 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
     const auto& elements = expr_->vals_;
 
     size_t processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const milvus::Json* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const std::string& pointer,
-            const std::vector<proto::plan::GenericValue>& elements) {
+    auto execute_sub_batch = [&processed_cursor,
+                              &bitmap_input]<FilterType filter_type =
+                                                 FilterType::sequential>(
+                                 const milvus::Json* data,
+                                 ValidityView valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 const std::string& pointer,
+                                 const std::vector<proto::plan::GenericValue>&
+                                     elements) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -2309,7 +2316,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
     const auto& elements = expr_->vals_;
     if (elements.empty()) {
         MoveCursor();
-        return std::make_shared<ColumnVector>(
+        return std::make_shared<ColumnVector<int8_t>>(
             TargetBitmap(real_batch_size, false),
             TargetBitmap(real_batch_size, true));
     }

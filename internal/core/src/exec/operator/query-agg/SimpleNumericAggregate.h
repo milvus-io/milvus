@@ -30,11 +30,7 @@ class SimpleNumericAggregate : public exec::Aggregate {
                     ExtractOneValue extractOneValue) {
         AssertInfo((*result)->elementSize() == sizeof(TData),
                    "Incorrect type size of input result vector");
-        ColumnVectorPtr result_column =
-            std::dynamic_pointer_cast<ColumnVector>(*result);
-        AssertInfo(result_column != nullptr,
-                   "input vector for extracting aggregation must be of Type "
-                   "ColumnVector");
+        auto result_column = AsColumnVector<TData>(*result);
         result_column->resize(numGroups);
         TData* rawValues = static_cast<TData*>(result_column->GetRawData());
         for (auto i = 0; i < numGroups; i++) {
@@ -51,17 +47,16 @@ class SimpleNumericAggregate : public exec::Aggregate {
     template <bool tableHasNulls,
               typename TData = TResult,
               typename TValue = TInput,
-              typename UpdateSingle>
+              typename UpdateSingle,
+              typename TVector>
     void
     updateOneGroupAtIndex(char* group,
-                          const ColumnVectorPtr& column_data,
+                          const TVector* column_data,
                           int32_t index,
                           UpdateSingle updateSingleValue) {
         if (column_data->ValidAt(index)) {
             updateNonNullValue<tableHasNulls, TData>(
-                group,
-                TData(column_data->ValueAt<TValue>(index)),
-                updateSingleValue);
+                group, TData(column_data->ValueAt(index)), updateSingleValue);
         }
     }
 
@@ -72,14 +67,12 @@ class SimpleNumericAggregate : public exec::Aggregate {
     updateOneGroup(char* group,
                    const VectorPtr& vector,
                    UpdateSingle updateSingleValue) {
-        auto column_data = std::dynamic_pointer_cast<ColumnVector>(vector);
-        AssertInfo(
-            column_data != nullptr,
-            "input column data for upgrading groups should not be nullptr");
-        for (auto i = 0; i < column_data->size(); i++) {
-            updateOneGroupAtIndex<true, TData, TValue>(
-                group, column_data, i, updateSingleValue);
-        }
+        VisitSimpleVector<TValue>(vector, [&](const auto* column_data) {
+            for (auto i = 0; i < column_data->size(); i++) {
+                updateOneGroupAtIndex<true, TData, TValue>(
+                    group, column_data, i, updateSingleValue);
+            }
+        });
     }
 
     template <bool tableHasNulls,
@@ -90,14 +83,12 @@ class SimpleNumericAggregate : public exec::Aggregate {
     updateGroups(char** groups,
                  const VectorPtr& vector,
                  UpdateSingleValue updateSingleValue) {
-        auto column_data = std::dynamic_pointer_cast<ColumnVector>(vector);
-        AssertInfo(
-            column_data != nullptr,
-            "input column data for upgrading groups should not be nullptr");
-        for (auto i = 0; i < column_data->size(); i++) {
-            updateOneGroupAtIndex<tableHasNulls, TData, TValue>(
-                groups[i], column_data, i, updateSingleValue);
-        }
+        VisitSimpleVector<TValue>(vector, [&](const auto* column_data) {
+            for (auto i = 0; i < column_data->size(); i++) {
+                updateOneGroupAtIndex<tableHasNulls, TData, TValue>(
+                    groups[i], column_data, i, updateSingleValue);
+            }
+        });
     }
 
     template <bool tableHasNulls,

@@ -1003,8 +1003,8 @@ TEST(CountAggregateTest, SingleGroupAllValid) {
     agg.initializeNewGroups(&group, indices);
 
     // 100 rows, all valid
-    auto col =
-        std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64, 100);
+    auto col = std::make_shared<milvus::ColumnVector<int64_t>>(
+        milvus::DataType::INT64, 100);
     std::vector<milvus::VectorPtr> input = {col};
     agg.addSingleGroupRawInput(group, 100, input);
 
@@ -1021,8 +1021,8 @@ TEST(CountAggregateTest, SingleGroupAllNull) {
     const std::vector<milvus::vector_size_t> indices = {0};
     agg.initializeNewGroups(&group, indices);
 
-    auto col =
-        std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64, 100);
+    auto col = std::make_shared<milvus::ColumnVector<int64_t>>(
+        milvus::DataType::INT64, 100);
     for (size_t i = 0; i < 100; i++) {
         col->nullAt(i);
     }
@@ -1043,8 +1043,8 @@ TEST(CountAggregateTest, SingleGroupMixedNulls) {
     agg.initializeNewGroups(&group, indices);
 
     // 100 rows, even indices are null
-    auto col =
-        std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64, 100);
+    auto col = std::make_shared<milvus::ColumnVector<int64_t>>(
+        milvus::DataType::INT64, 100);
     for (size_t i = 0; i < 100; i += 2) {
         col->nullAt(i);
     }
@@ -1064,8 +1064,8 @@ TEST(CountAggregateTest, SingleGroupSingleRow) {
     const std::vector<milvus::vector_size_t> indices = {0};
     agg.initializeNewGroups(&group, indices);
 
-    auto col =
-        std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64, 1);
+    auto col = std::make_shared<milvus::ColumnVector<int64_t>>(
+        milvus::DataType::INT64, 1);
     std::vector<milvus::VectorPtr> input = {col};
     agg.addSingleGroupRawInput(group, 1, input);
 
@@ -1083,8 +1083,8 @@ TEST(CountAggregateTest, SingleGroupNon64Multiple) {
     agg.initializeNewGroups(&group, indices);
 
     // 65 rows, last row is null
-    auto col =
-        std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64, 65);
+    auto col = std::make_shared<milvus::ColumnVector<int64_t>>(
+        milvus::DataType::INT64, 65);
     col->nullAt(64);
     std::vector<milvus::VectorPtr> input = {col};
     agg.addSingleGroupRawInput(group, 65, input);
@@ -1110,8 +1110,8 @@ TEST(CountAggregateTest, GroupByAllValid) {
     agg.initializeNewGroups(init_groups, indices);
 
     // 6 rows, all valid, round-robin across 3 groups
-    auto col =
-        std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64, 6);
+    auto col = std::make_shared<milvus::ColumnVector<int64_t>>(
+        milvus::DataType::INT64, 6);
     std::vector<milvus::VectorPtr> input = {col};
     agg.addRawInput(groups, 6, input);
 
@@ -1137,8 +1137,8 @@ TEST(CountAggregateTest, GroupByMixedNulls) {
     char* init_groups[] = {g0.data(), g1.data()};
     agg.initializeNewGroups(init_groups, indices);
 
-    auto col =
-        std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64, 6);
+    auto col = std::make_shared<milvus::ColumnVector<int64_t>>(
+        milvus::DataType::INT64, 6);
     col->nullAt(1);  // g1 row null
     col->nullAt(4);  // g0 row null
     std::vector<milvus::VectorPtr> input = {col};
@@ -1163,8 +1163,8 @@ TEST(CountAggregateTest, GroupByAllNull) {
     char* init_groups[] = {g0.data()};
     agg.initializeNewGroups(init_groups, indices);
 
-    auto col =
-        std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64, 3);
+    auto col = std::make_shared<milvus::ColumnVector<int64_t>>(
+        milvus::DataType::INT64, 3);
     col->nullAt(0);
     col->nullAt(1);
     col->nullAt(2);
@@ -1189,8 +1189,8 @@ TEST(CountAggregateTest, GroupByNon64Multiple) {
     std::vector<char*> groups_vec(numRows, g0.data());
     char** groups = groups_vec.data();
 
-    auto col = std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64,
-                                                      numRows);
+    auto col = std::make_shared<milvus::ColumnVector<int64_t>>(
+        milvus::DataType::INT64, numRows);
     col->nullAt(63);
     col->nullAt(64);
     std::vector<milvus::VectorPtr> input = {col};
@@ -1203,7 +1203,7 @@ TEST(CountAggregateTest, GroupByNon64Multiple) {
 TEST(CountAggregateTest, NullCountMatchesValidAt) {
     // Verify that size() - nullCount() equals the number of ValidAt()==true
     for (int size : {1, 7, 63, 64, 65, 127, 128, 129, 200}) {
-        auto col = std::make_shared<milvus::ColumnVector>(
+        auto col = std::make_shared<milvus::ColumnVector<int64_t>>(
             milvus::DataType::INT64, size);
         // null every 3rd element
         for (int i = 0; i < size; i += 3) {
@@ -1401,7 +1401,7 @@ createInt64HashTable(
 
 milvus::RowVectorPtr
 makeInt64Input(const std::vector<int64_t>& values) {
-    auto column = std::make_shared<milvus::ColumnVector>(
+    auto column = std::make_shared<milvus::ColumnVector<int64_t>>(
         milvus::DataType::INT64,
         static_cast<milvus::vector_size_t>(values.size()));
     auto* data = reinterpret_cast<int64_t*>(column->GetRawData());
@@ -1476,7 +1476,7 @@ createAndInsertGroups(int64_t numGroups,
     int64_t inserted = 0;
     while (inserted < numGroups) {
         int64_t thisCount = std::min((int64_t)batchSize, numGroups - inserted);
-        auto col = std::make_shared<milvus::ColumnVector>(
+        auto col = std::make_shared<milvus::ColumnVector<int64_t>>(
             milvus::DataType::INT64, thisCount);
         auto* data = reinterpret_cast<int64_t*>(col->GetRawData());
         for (int64_t i = 0; i < thisCount; i++) {
@@ -1694,8 +1694,8 @@ TEST(HashTableRehashTest, TestHashTableRehashCorrectness) {
         std::move(hashers), accumulators, 1000000);
 
     // Insert numGroups distinct values
-    auto col = std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64,
-                                                      numGroups);
+    auto col = std::make_shared<milvus::ColumnVector<int64_t>>(
+        milvus::DataType::INT64, numGroups);
     auto* data = reinterpret_cast<int64_t*>(col->GetRawData());
     for (int64_t i = 0; i < numGroups; i++) {
         data[i] = i;
@@ -1711,8 +1711,8 @@ TEST(HashTableRehashTest, TestHashTableRehashCorrectness) {
     std::vector<char*> firstHits(lookup1.hits_.begin(), lookup1.hits_.end());
 
     // Re-probe with the same keys — should get the same row pointers
-    auto col2 = std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64,
-                                                       numGroups);
+    auto col2 = std::make_shared<milvus::ColumnVector<int64_t>>(
+        milvus::DataType::INT64, numGroups);
     auto* data2 = reinterpret_cast<int64_t*>(col2->GetRawData());
     for (int64_t i = 0; i < numGroups; i++) {
         data2[i] = i;
@@ -1763,8 +1763,8 @@ TEST(HashTableRehashTest, TestHashTableRehashMultipleRounds) {
     EXPECT_EQ(table->rows()->allRows().size(), numGroups);
 
     // Verify we can look up all groups
-    auto col = std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64,
-                                                      numGroups);
+    auto col = std::make_shared<milvus::ColumnVector<int64_t>>(
+        milvus::DataType::INT64, numGroups);
     auto* data = reinterpret_cast<int64_t*>(col->GetRawData());
     for (int64_t i = 0; i < numGroups; i++) {
         data[i] = i;

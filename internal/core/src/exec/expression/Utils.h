@@ -47,24 +47,27 @@ IsPatternMatchOpType(proto::plan::OpType op) {
            op == proto::plan::OpType::RegexMatch;
 }
 
-[[maybe_unused]] static ColumnVectorPtr
+[[maybe_unused]] static ColumnVectorPtr<int8_t>
 GetColumnVector(const VectorPtr& result) {
-    ColumnVectorPtr res;
-    if (auto convert_vector = std::dynamic_pointer_cast<ColumnVector>(result)) {
+    ColumnVectorPtr<int8_t> res;
+    if (auto convert_vector =
+            std::dynamic_pointer_cast<ColumnVector<int8_t>>(result)) {
         res = convert_vector;
     } else if (auto convert_vector =
                    std::dynamic_pointer_cast<RowVector>(result)) {
-        if (auto convert_flat_vector = std::dynamic_pointer_cast<ColumnVector>(
-                convert_vector->child(0))) {
+        if (auto convert_flat_vector =
+                std::dynamic_pointer_cast<ColumnVector<int8_t>>(
+                    convert_vector->child(0))) {
             res = convert_flat_vector;
         } else {
-            ThrowInfo(
-                UnexpectedError,
-                "RowVector result must have a first ColumnVector children");
+            ThrowInfo(UnexpectedError,
+                      "RowVector result must have a first ColumnVector<int8_t> "
+                      "children");
         }
     } else {
-        ThrowInfo(UnexpectedError,
-                  "expr result must have a ColumnVector or RowVector result");
+        ThrowInfo(
+            UnexpectedError,
+            "expr result must have a ColumnVector<int8_t> or RowVector result");
     }
     return res;
 }

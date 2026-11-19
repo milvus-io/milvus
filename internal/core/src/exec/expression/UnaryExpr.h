@@ -1077,7 +1077,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     // Check overflow and cache result for performace
     template <typename T>
-    ColumnVectorPtr
+    ColumnVectorPtr<int8_t>
     PreCheckOverflow(int64_t batch_size, OffsetVector* input = nullptr);
 
     template <typename T>

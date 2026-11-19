@@ -31,14 +31,16 @@ BaseHashTable::prepareForGroupProbe(HashLookup& lookup,
                                     const RowVectorPtr& input) {
     auto& hashers = lookup.hashers_;
     int numKeys = hashers.size();
+    lookup.columns_.clear();
+    lookup.columns_.reserve(numKeys);
     // set up column vector to each column
     for (auto i = 0; i < numKeys; i++) {
         auto& hasher = hashers[i];
         auto column_idx = hasher->ChannelIndex();
-        ColumnVectorPtr column_ptr =
-            std::dynamic_pointer_cast<ColumnVector>(input->child(column_idx));
+        auto column_ptr = input->child(column_idx);
         AssertInfo(column_ptr != nullptr,
                    "Failed to get column vector from row vector input");
+        lookup.columns_.push_back(rows_->bindColumn(column_ptr, i));
         hasher->setColumnData(column_ptr);
     }
     lookup.reset(input->size());
@@ -201,9 +203,7 @@ HashTable::compareKeys(const char* group,
                        milvus::vector_size_t row) {
     int32_t numKeys = lookup.hashers_.size();
     for (int32_t i = 0; i < numKeys; i++) {
-        auto& hasher = lookup.hashers_[i];
-        if (!rows_->equals(
-                group, rows()->columnAt(i), hasher->columnData(), row)) {
+        if (!lookup.columns_[i].equals(group, row)) {
             return false;
         }
     }
@@ -214,8 +214,7 @@ void
 HashTable::storeKeys(milvus::exec::HashLookup& lookup,
                      milvus::vector_size_t row) {
     for (int32_t i = 0; i < lookup.hashers_.size(); i++) {
-        auto& hasher = lookup.hashers_[i];
-        rows_->store(hasher->columnData(), row, lookup.hits_[row], i);
+        lookup.columns_[i].store(row, lookup.hits_[row]);
     }
 }
 

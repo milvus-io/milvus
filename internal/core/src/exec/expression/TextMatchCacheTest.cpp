@@ -193,8 +193,9 @@ ExecuteFilterBitsWithFullCache(
     auto row = ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
     AssertInfo(row != nullptr,
                "ExecuteTask returned null row vector for query expression");
-    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(row->childrens()[0]);
-    AssertInfo(col_vec != nullptr, "failed to cast to ColumnVector");
+    auto col_vec =
+        std::dynamic_pointer_cast<ColumnVector<int8_t>>(row->childrens()[0]);
+    AssertInfo(col_vec != nullptr, "failed to cast to ColumnVector<int8_t>");
     BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
     BitsetType query_view(view);
     query_view.flip();

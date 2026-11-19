@@ -498,8 +498,8 @@ BuildProjectAndAggregationNodes(
     plan::PlanNodePtr plannode = sources.empty() ? nullptr : sources[0];
 
     // Always build ProjectNode when aggregation is present.
-    // ProjectNode consumes the MVCC bitmap from upstream and materializes
-    // filtered rows, so AggregationNode always receives input where
+    // ProjectNode consumes the MVCC bitmap and exposes selected logical rows
+    // through scalar vectors, so AggregationNode always receives input where
     // size() == number of existing rows (needed for count(*)).
     {
         plannode = std::make_shared<plan::ProjectNode>(

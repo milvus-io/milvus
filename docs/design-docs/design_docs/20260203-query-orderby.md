@@ -135,6 +135,16 @@ Any variable-width column causes ALL non-sort output columns to be deferred. Thi
 
 The pipeline returns columns in a fixed positional order. SegmentOffsetFieldID is always appended as the last column.
 
+Project delivers aligned logical columns in a RowVector. For ordinary scalar
+fields with a supported column `Take` implementation, DictionaryVector retains
+the selected offsets and the TakeResult instead of copying values into FieldData.
+Raw storage retains Batch pins; decoding backends retain their decoded values.
+SortBuffer and aggregation consume these inputs through SimpleVector reads.
+System columns, missing fields, element-level projection, and unsupported storage
+paths keep the materialized ColumnVector path. Stored sort/group keys and final
+outputs still own their values. This does not change Project's single-batch
+execution or eliminate offset-mapping and pin memory.
+
 ```
 Pipeline output: [pk, B, C, (A if single-project), SegOffset]
                   ^   ^----^   ^                      ^

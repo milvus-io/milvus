@@ -1193,7 +1193,7 @@ TEST_P(TestLazyManifest, LazyManifestMatchCancellationDuringMetadataOpen) {
         exec::EvalCtx eval_context(&exec_context);
         VectorPtr result;
         physical->Eval(eval_context, result);
-        auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+        auto output = std::dynamic_pointer_cast<ColumnVector<int8_t>>(result);
         ASSERT_NE(output, nullptr);
         ASSERT_EQ(output->size(), rows);
         TargetBitmapView values(output->GetRawData(), rows);
@@ -2475,8 +2475,8 @@ TEST_P(TestLazyManifest, LazyManifestReopenInvalidatesExpressionCache) {
             auto fragment = plan::PlanFragment(filter);
             auto result =
                 query::ExecPlanNodeVisitor::ExecuteTask(fragment, context);
-            auto column =
-                std::dynamic_pointer_cast<ColumnVector>(result->childrens()[0]);
+            auto column = std::dynamic_pointer_cast<ColumnVector<int8_t>>(
+                result->childrens()[0]);
             return TargetBitmapView(column->GetRawData(), column->size())
                 .count();
         };
@@ -3384,7 +3384,7 @@ TEST_P(TestChunkSegmentStorageV2, TestColumnExprWithScalarIndexValueLookup) {
         expr_set.Eval(eval_context, results);
         ASSERT_EQ(1, results.size());
 
-        auto column = std::dynamic_pointer_cast<ColumnVector>(results[0]);
+        auto column = AsColumnVector<int64_t>(results[0]);
         ASSERT_NE(column, nullptr);
         auto expected_batch_size = std::min<int64_t>(4096, RowCount() - offset);
         ASSERT_EQ(expected_batch_size, column->size());
@@ -3435,8 +3435,9 @@ TEST_P(TestChunkSegmentStorageV2,
             std::vector<VectorPtr> results;
             expr_set.Eval(eval_context, results);
             ASSERT_EQ(results.size(), 2);
-            auto values = std::dynamic_pointer_cast<ColumnVector>(results[0]);
-            auto matches = std::dynamic_pointer_cast<ColumnVector>(results[1]);
+            auto values = AsColumnVector<std::string>(results[0]);
+            auto matches =
+                std::dynamic_pointer_cast<ColumnVector<int8_t>>(results[1]);
             ASSERT_NE(values, nullptr);
             ASSERT_NE(matches, nullptr);
             const auto count = std::min<int64_t>(17, RowCount() - offset);
@@ -3460,8 +3461,9 @@ TEST_P(TestChunkSegmentStorageV2,
         std::vector<VectorPtr> results;
         offset_expr_set.Eval(offset_context, results);
         ASSERT_EQ(results.size(), 2);
-        auto values = std::dynamic_pointer_cast<ColumnVector>(results[0]);
-        auto matches = std::dynamic_pointer_cast<ColumnVector>(results[1]);
+        auto values = AsColumnVector<std::string>(results[0]);
+        auto matches =
+            std::dynamic_pointer_cast<ColumnVector<int8_t>>(results[1]);
         ASSERT_NE(values, nullptr);
         ASSERT_NE(matches, nullptr);
         TargetBitmapView bits(matches->GetRawData(), offsets.size());
@@ -3532,7 +3534,7 @@ TEST_P(TestChunkSegmentStorageV2,
     expr_set.Eval(eval_context, results);
     ASSERT_EQ(1, results.size());
 
-    auto column = std::dynamic_pointer_cast<ColumnVector>(results[0]);
+    auto column = AsColumnVector<int64_t>(results[0]);
     ASSERT_NE(column, nullptr);
     ASSERT_EQ(offsets.size(), column->size());
 
@@ -3615,7 +3617,8 @@ TEST_P(TestChunkSegmentStorageV2,
         query::ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
     ASSERT_NE(row, nullptr);
     ASSERT_EQ(row->childrens().size(), 1);
-    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(row->childrens()[0]);
+    auto col_vec =
+        std::dynamic_pointer_cast<ColumnVector<int8_t>>(row->childrens()[0]);
     ASSERT_NE(col_vec, nullptr);
     BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
     BitsetType final(view);

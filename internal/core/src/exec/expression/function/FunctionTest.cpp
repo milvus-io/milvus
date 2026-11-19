@@ -39,8 +39,8 @@ class FunctionTest : public ::testing::Test {
 
 TEST_F(FunctionTest, Empty) {
     std::vector<milvus::VectorPtr> arg_vec;
-    auto col1 =
-        std::make_shared<milvus::ColumnVector>(milvus::DataType::STRING, 15);
+    auto col1 = std::make_shared<milvus::ColumnVector<std::string>>(
+        milvus::DataType::STRING, 15);
     auto* col1_data = col1->RawAsValues<std::string>();
     for (int i = 0; i <= 10; ++i) {
         col1_data[i] = std::to_string(i);
@@ -53,7 +53,7 @@ TEST_F(FunctionTest, Empty) {
     VectorPtr result;
     EmptyVarchar(args, result);
 
-    auto result_vec = std::dynamic_pointer_cast<milvus::ColumnVector>(result);
+    auto result_vec = milvus::AsColumnVector<int8_t>(result);
     ASSERT_NE(result_vec, nullptr);
     TargetBitmapView bitmap(result_vec->GetRawData(), result_vec->size());
     for (int i = 0; i < 15; ++i) {
@@ -64,14 +64,14 @@ TEST_F(FunctionTest, Empty) {
 
 TEST_F(FunctionTest, EmptyNull) {
     std::vector<milvus::VectorPtr> arg_vec;
-    auto col1 = std::make_shared<milvus::ColumnVector>(
+    auto col1 = std::make_shared<milvus::ColumnVector<std::string>>(
         milvus::DataType::STRING, 15, 15);
     arg_vec.push_back(col1);
     milvus::RowVector args(std::move(arg_vec));
     VectorPtr result;
     EmptyVarchar(args, result);
 
-    auto result_vec = std::dynamic_pointer_cast<milvus::ColumnVector>(result);
+    auto result_vec = milvus::AsColumnVector<int8_t>(result);
     ASSERT_NE(result_vec, nullptr);
     TargetBitmapView bitmap(result_vec->GetRawData(), result_vec->size());
     for (int i = 0; i < 15; ++i) {
@@ -88,7 +88,7 @@ TEST_F(FunctionTest, EmptyConstant) {
     VectorPtr result;
     EmptyVarchar(args, result);
 
-    auto result_vec = std::dynamic_pointer_cast<milvus::ColumnVector>(result);
+    auto result_vec = milvus::AsColumnVector<int8_t>(result);
     ASSERT_NE(result_vec, nullptr);
     TargetBitmapView bitmap(result_vec->GetRawData(), result_vec->size());
     for (int i = 0; i < 15; ++i) {
@@ -107,7 +107,7 @@ TEST_F(FunctionTest, EmptyIncorrectArgs) {
     EXPECT_ANY_THROW(EmptyVarchar(empty_args, result));
 
     // incorrect type, expected string or varchar
-    arg_vec.push_back(std::make_shared<milvus::ColumnVector>(
+    arg_vec.push_back(std::make_shared<milvus::ColumnVector<int32_t>>(
         milvus::DataType::INT32, 15, 15));
     milvus::RowVector int_args(arg_vec);
     EXPECT_ANY_THROW(EmptyVarchar(int_args, result));
@@ -115,9 +115,9 @@ TEST_F(FunctionTest, EmptyIncorrectArgs) {
     arg_vec.clear();
 
     // incorrect size, expected 1
-    arg_vec.push_back(std::make_shared<milvus::ColumnVector>(
+    arg_vec.push_back(std::make_shared<milvus::ColumnVector<std::string>>(
         milvus::DataType::STRING, 15, 15));
-    arg_vec.push_back(std::make_shared<milvus::ColumnVector>(
+    arg_vec.push_back(std::make_shared<milvus::ColumnVector<std::string>>(
         milvus::DataType::STRING, 15, 15));
     milvus::RowVector multi_args(arg_vec);
     EXPECT_ANY_THROW(EmptyVarchar(multi_args, result));
@@ -125,7 +125,7 @@ TEST_F(FunctionTest, EmptyIncorrectArgs) {
 
 static constexpr int64_t STARTS_WITH_ROW_COUNT = 8;
 static void
-InitStrsForStartWith(std::shared_ptr<milvus::ColumnVector> col1) {
+InitStrsForStartWith(milvus::ColumnVectorPtr<std::string> col1) {
     auto* col1_data = col1->RawAsValues<std::string>();
     col1_data[0] = "123";
     col1_data[1] = "";
@@ -141,7 +141,7 @@ InitStrsForStartWith(std::shared_ptr<milvus::ColumnVector> col1) {
 
 static void
 StartWithCheck(VectorPtr result, bool valid[], bool expected[]) {
-    auto result_vec = std::dynamic_pointer_cast<milvus::ColumnVector>(result);
+    auto result_vec = milvus::AsColumnVector<int8_t>(result);
     ASSERT_NE(result_vec, nullptr);
     TargetBitmapView bitmap(result_vec->GetRawData(), result_vec->size());
     for (int i = 0; i < STARTS_WITH_ROW_COUNT; ++i) {
@@ -153,13 +153,13 @@ StartWithCheck(VectorPtr result, bool valid[], bool expected[]) {
 TEST_F(FunctionTest, StartsWithColumnVector) {
     std::vector<milvus::VectorPtr> arg_vec;
 
-    auto col1 = std::make_shared<milvus::ColumnVector>(milvus::DataType::STRING,
-                                                       STARTS_WITH_ROW_COUNT);
+    auto col1 = std::make_shared<milvus::ColumnVector<std::string>>(
+        milvus::DataType::STRING, STARTS_WITH_ROW_COUNT);
     InitStrsForStartWith(col1);
     arg_vec.push_back(col1);
 
-    auto col2 = std::make_shared<milvus::ColumnVector>(milvus::DataType::STRING,
-                                                       STARTS_WITH_ROW_COUNT);
+    auto col2 = std::make_shared<milvus::ColumnVector<std::string>>(
+        milvus::DataType::STRING, STARTS_WITH_ROW_COUNT);
     auto* col2_data = col2->RawAsValues<std::string>();
     col2_data[0] = "12";
     col2_data[1] = "1";
@@ -187,8 +187,8 @@ TEST_F(FunctionTest, StartsWithColumnVector) {
 TEST_F(FunctionTest, StartsWithColumnAndConstantVector) {
     std::vector<milvus::VectorPtr> arg_vec;
 
-    auto col1 = std::make_shared<milvus::ColumnVector>(milvus::DataType::STRING,
-                                                       STARTS_WITH_ROW_COUNT);
+    auto col1 = std::make_shared<milvus::ColumnVector<std::string>>(
+        milvus::DataType::STRING, STARTS_WITH_ROW_COUNT);
     InitStrsForStartWith(col1);
     arg_vec.push_back(col1);
 
@@ -219,9 +219,9 @@ TEST_F(FunctionTest, StartsWithIncorrectArgs) {
     EXPECT_ANY_THROW(StartsWithVarchar(empty_args, result));
 
     // incorrect type, expected string or varchar
-    arg_vec.push_back(std::make_shared<milvus::ColumnVector>(
+    arg_vec.push_back(std::make_shared<milvus::ColumnVector<std::string>>(
         milvus::DataType::STRING, 15, 15));
-    arg_vec.push_back(std::make_shared<milvus::ColumnVector>(
+    arg_vec.push_back(std::make_shared<milvus::ColumnVector<int32_t>>(
         milvus::DataType::INT32, 15, 15));
     milvus::RowVector string_int_args(arg_vec);
     EXPECT_ANY_THROW(StartsWithVarchar(string_int_args, result));
@@ -229,17 +229,17 @@ TEST_F(FunctionTest, StartsWithIncorrectArgs) {
     arg_vec.clear();
 
     // incorrect size, expected 2
-    arg_vec.push_back(std::make_shared<milvus::ColumnVector>(
+    arg_vec.push_back(std::make_shared<milvus::ColumnVector<std::string>>(
         milvus::DataType::STRING, 15, 15));
     milvus::RowVector single_args(arg_vec);
     EXPECT_ANY_THROW(StartsWithVarchar(single_args, result));
 
     arg_vec.clear();
-    arg_vec.push_back(std::make_shared<milvus::ColumnVector>(
+    arg_vec.push_back(std::make_shared<milvus::ColumnVector<std::string>>(
         milvus::DataType::STRING, 15, 15));
-    arg_vec.push_back(std::make_shared<milvus::ColumnVector>(
+    arg_vec.push_back(std::make_shared<milvus::ColumnVector<std::string>>(
         milvus::DataType::STRING, 15, 15));
-    arg_vec.push_back(std::make_shared<milvus::ColumnVector>(
+    arg_vec.push_back(std::make_shared<milvus::ColumnVector<std::string>>(
         milvus::DataType::STRING, 15, 15));
     milvus::RowVector three_args(arg_vec);
     EXPECT_ANY_THROW(StartsWithVarchar(three_args, result));

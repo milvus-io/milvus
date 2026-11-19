@@ -31,8 +31,111 @@
 
 using namespace milvus;
 
+TEST(TypedSimpleVectorTest, ReadsFlatAndConstantThroughTheSameInterface) {
+    auto flat = std::make_shared<ColumnVector<int64_t>>(DataType::INT64, 3);
+    flat->SetValueAt(0, 11);
+    flat->SetValueAt(1, 22);
+    flat->SetValueAt(2, 33);
+    flat->nullAt(1);
+    auto constant =
+        std::make_shared<ConstantVector<int64_t>>(DataType::INT64, 3, 7);
+    std::vector<SimpleVectorPtr<int64_t>> columns{flat, constant};
+    std::vector<int64_t> sums;
+    for (const auto& column : columns) {
+        const SimpleVector<int64_t>& input = *column;
+        int64_t sum = 0;
+        for (size_t i = 0; i < input.size(); ++i) {
+            if (input.ValidAt(i)) {
+                sum += input.ValueAt(i);
+            }
+        }
+        sums.push_back(sum);
+    }
+    EXPECT_EQ(sums, (std::vector<int64_t>{44, 21}));
+}
+
+TEST(TypedSimpleVectorTest, UntypedNullLiteralPreservesItsLogicalType) {
+    ConstantVector<bool> literal(DataType::NONE, 4, false, 1);
+    const SimpleVector<bool>& input = literal;
+    EXPECT_EQ(input.type(), DataType::NONE);
+    EXPECT_EQ(input.size(), 4);
+    for (size_t i = 0; i < input.size(); ++i) {
+        EXPECT_FALSE(input.ValidAt(i));
+    }
+}
+
+TEST(TypedSimpleVectorTest, StringsBorrowOwnedPayloadWithoutCopyingIt) {
+    auto flat =
+        std::make_shared<ColumnVector<std::string>>(DataType::VARCHAR, 2);
+    const std::string long_value(1024, 'x');
+    flat->SetValueAt(0, long_value);
+    flat->SetValueAt(1, "");
+    const SimpleVector<std::string>& input = *flat;
+    static_assert(std::is_same_v<decltype(input.ValueAt(0)), std::string_view>);
+    auto view = input.ValueAt(0);
+    EXPECT_EQ(view, long_value);
+    EXPECT_EQ(view.data(), flat->RawAsValues<std::string>()[0].data());
+    EXPECT_TRUE(input.ValueAt(1).empty());
+
+    auto constant = std::make_shared<ConstantVector<std::string>>(
+        DataType::VARCHAR, 2, long_value);
+    const SimpleVector<std::string>& constant_input = *constant;
+    EXPECT_EQ(constant_input.ValueAt(0), long_value);
+    EXPECT_EQ(constant_input.ValueAt(1).data(), constant->GetValue().data());
+}
+
+TEST(TypedSimpleVectorTest,
+     FactoryPreservesLogicalAliasesAndRejectsWrongTypes) {
+    for (auto type : {DataType::INT64, DataType::TIMESTAMPTZ}) {
+        auto vector = MakeColumnVector(type, 1);
+        EXPECT_EQ(vector->type(), type);
+        auto column = AsColumnVector<int64_t>(vector);
+        column->SetValueAt(0, 123);
+        EXPECT_EQ(AsSimpleVector<int64_t>(vector)->ValueAt(0), 123);
+        EXPECT_THROW(AsColumnVector<int32_t>(vector), SegcoreError);
+        EXPECT_THROW(AsSimpleVector<int32_t>(vector), SegcoreError);
+    }
+    for (auto type : {DataType::STRING,
+                      DataType::VARCHAR,
+                      DataType::TEXT,
+                      DataType::GEOMETRY}) {
+        auto vector = MakeColumnVector(type, 1);
+        EXPECT_EQ(vector->type(), type);
+        AsColumnVector<std::string>(vector)->SetValueAt(0, "value");
+        EXPECT_EQ(AsSimpleVector<std::string>(vector)->ValueAt(0), "value");
+    }
+    EXPECT_THROW((ColumnVector<int64_t>(DataType::INT32, 1)), SegcoreError);
+    auto values = InitScalarFieldDataWithLength(DataType::INT32, 1);
+    EXPECT_THROW(
+        (ColumnVector<int64_t>(std::move(values), TargetBitmap(1, true), 0)),
+        SegcoreError);
+}
+
+TEST(TypedSimpleVectorTest, BitmapAndInt8HaveDifferentPhysicalAccess) {
+    auto flat = std::make_shared<ColumnVector<int8_t>>(DataType::INT8, 65);
+    flat->SetValueAt(0, -7);
+    flat->SetValueAt(64, 42);
+    TargetBitmap bits(65, false);
+    bits.set(0, true);
+    bits.set(64, true);
+    TargetBitmap valid(65, true);
+    valid.set(1, false);
+    auto bitmap = std::make_shared<ColumnVector<int8_t>>(std::move(bits),
+                                                         std::move(valid));
+    const SimpleVector<int8_t>& input = *bitmap;
+    EXPECT_EQ(flat->ValueAt(0), -7);
+    EXPECT_EQ(flat->ValueAt(64), 42);
+    EXPECT_EQ(input.ValueAt(0), 1);
+    EXPECT_EQ(input.ValueAt(63), 0);
+    EXPECT_EQ(input.ValueAt(64), 1);
+    EXPECT_FALSE(input.ValidAt(1));
+    bitmap->SetValueAt(64, 0);
+    EXPECT_FALSE(TargetBitmapView(bitmap->GetRawData(), bitmap->size())[64]);
+    EXPECT_THROW(bitmap->resize(66), SegcoreError);
+}
+
 // Helper function to create a bitmap ColumnVector with given data and valid bitmaps
-static ColumnVectorPtr
+static ColumnVectorPtr<int8_t>
 CreateBitmapColumnVector(const std::vector<bool>& data,
                          const std::vector<bool>& valid) {
     size_t size = data.size();
@@ -46,8 +149,8 @@ CreateBitmapColumnVector(const std::vector<bool>& data,
             valid_bitmap.set(i);
         }
     }
-    return std::make_shared<ColumnVector>(std::move(data_bitmap),
-                                          std::move(valid_bitmap));
+    return std::make_shared<ColumnVector<int8_t>>(std::move(data_bitmap),
+                                                  std::move(valid_bitmap));
 }
 
 // ============================================================================
@@ -202,7 +305,7 @@ TEST(ColumnVectorTest, FieldDataBackedConstructorRejectsInvalidNullCount) {
             auto field_data = std::make_shared<FieldData<int64_t>>(
                 DataType::INT64, false, std::move(values));
             TargetBitmap valid(3, true);
-            auto vec = std::make_shared<ColumnVector>(
+            auto vec = std::make_shared<ColumnVector<int64_t>>(
                 std::move(field_data), std::move(valid), 4);
         },
         std::runtime_error);
@@ -211,8 +314,8 @@ TEST(ColumnVectorTest, FieldDataBackedConstructorRejectsInvalidNullCount) {
 TEST(ColumnVectorTest, AllMethodsOnNonBitmapThrows) {
     // AllTrue and AllFalse should only work on bitmap ColumnVectors
     // Create a non-bitmap ColumnVector (regular scalar vector)
-    auto non_bitmap_vec =
-        std::make_shared<ColumnVector>(DataType::INT32, 10, std::nullopt);
+    auto non_bitmap_vec = std::make_shared<ColumnVector<int32_t>>(
+        DataType::INT32, 10, std::nullopt);
 
     // Verify it's not a bitmap
     EXPECT_FALSE(non_bitmap_vec->IsBitmap());
