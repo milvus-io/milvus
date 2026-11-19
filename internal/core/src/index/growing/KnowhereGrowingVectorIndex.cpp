@@ -19,6 +19,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <future>
+#include <folly/executors/CPUThreadPoolExecutor.h>
+#include <folly/executors/FunctionScheduler.h>
+#include <folly/executors/thread_factory/NamedThreadFactory.h>
 #include <limits>
 #include <memory>
 #include <span>
@@ -36,7 +40,7 @@
 #include "knowhere/expected.h"
 #include "log/Log.h"
 #include "monitor/Monitor.h"
-#include "storage/ThreadPool.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::index {
 std::function<void(GrowingBuildPhase)> growing_build_test_hook;
@@ -56,23 +60,47 @@ BuildHook(GrowingBuildPhase phase) {
     }
 }
 
-milvus::ThreadPool&
+// The growing-build queue remains independent of the storage load executors.
+// Drain accepted tasks before destroying the executor, after stopping metrics.
+struct GrowingBuildExecutor {
+    explicit GrowingBuildExecutor(float ratio)
+        : executor(
+              std::pair<size_t, size_t>{
+                  static_cast<size_t>(ComputeThreadPoolMaxThreads(ratio)), 1},
+              std::make_shared<folly::NamedThreadFactory>(
+                  "growing_index_build")) {
+        executor.setThreadDeathTimeout(std::chrono::seconds(2));
+        monitor::internal_core_growing_index_pool_capacity.Set(
+            executor.numThreads());
+        sampler.addFunction(
+            [this] {
+                const auto stats = executor.getPoolStats();
+                monitor::internal_core_growing_index_pool_active_threads.Set(
+                    stats.activeThreadCount);
+                monitor::internal_core_growing_index_pool_idle_threads.Set(
+                    stats.idleThreadCount);
+                monitor::internal_core_growing_index_pool_queue_depth.Set(
+                    stats.pendingTaskCount);
+            },
+            std::chrono::seconds(2),
+            "growing_index_build_metrics",
+            std::chrono::seconds(2));
+        sampler.start();
+    }
+
+    ~GrowingBuildExecutor() {
+        sampler.shutdown();
+        executor.join();
+    }
+
+    folly::CPUThreadPoolExecutor executor;
+    folly::FunctionScheduler sampler;
+};
+
+folly::CPUThreadPoolExecutor&
 GrowingBuildPool(float ratio) {
-    static milvus::ThreadPool pool(ratio, "growing_index_build");
-    static const bool wired = [] {
-        using namespace milvus::monitor;
-        pool.SetMetrics(&internal_core_growing_index_pool_capacity,
-                        &internal_core_growing_index_pool_active_threads,
-                        &internal_core_growing_index_pool_idle_threads,
-                        &internal_core_growing_index_pool_queue_depth,
-                        nullptr,
-                        nullptr,
-                        nullptr,
-                        nullptr);
-        return true;
-    }();
-    (void)wired;
-    return pool;
+    static GrowingBuildExecutor pool(ratio);
+    return pool.executor;
 }
 
 template <typename T>
@@ -520,29 +548,29 @@ KnowhereGrowingVectorIndex<T>::StartAsyncBuild() {
     }
     try {
         task_ = std::make_shared<GrowingBuildTask>();
-        completion_ =
-            GrowingBuildPool(async_build_.pool_ratio)
-                .Submit([this, lifetime = task_] {
-                    std::lock_guard running(lifetime->lifetime);
-                    if (lifetime->cancelled.load()) {
-                        return;
-                    }
-                    monitor::internal_core_growing_index_inflight_builds
-                        .Increment();
-                    try {
-                        BuildAndCatchUp();
-                    } catch (const std::exception& e) {
-                        std::lock_guard lock(writer_mutex_);
-                        DisableAsyncBuild(e.what());
-                    } catch (...) {
-                        std::lock_guard lock(writer_mutex_);
-                        DisableAsyncBuild("unknown build failure");
-                    }
-                    monitor::internal_core_growing_index_inflight_builds
-                        .Decrement();
-                })
-                .share();
-        // The executor may reject a submission and return a broken promise.
+        auto build = std::make_shared<std::packaged_task<void()>>([this,
+                                                                   lifetime =
+                                                                       task_] {
+            std::lock_guard running(lifetime->lifetime);
+            if (lifetime->cancelled.load()) {
+                return;
+            }
+            monitor::internal_core_growing_index_inflight_builds.Increment();
+            try {
+                BuildAndCatchUp();
+            } catch (const std::exception& e) {
+                std::lock_guard lock(writer_mutex_);
+                DisableAsyncBuild(e.what());
+            } catch (...) {
+                std::lock_guard lock(writer_mutex_);
+                DisableAsyncBuild("unknown build failure");
+            }
+            monitor::internal_core_growing_index_inflight_builds.Decrement();
+        });
+        completion_ = build->get_future().share();
+        GrowingBuildPool(async_build_.pool_ratio)
+            .add([build = std::move(build)] { (*build)(); });
+        // A rejected submission may throw or leave a broken promise.
         // A successful worker must take writer_mutex_ before doing any work.
         if (completion_.wait_for(std::chrono::seconds(0)) ==
             std::future_status::ready) {

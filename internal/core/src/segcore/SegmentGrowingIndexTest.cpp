@@ -75,7 +75,7 @@
 #include "storage/FileManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
-#include "storage/ThreadPool.h"
+#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/SegcoreConfigUtils.h"
@@ -3395,6 +3395,23 @@ TEST(GrowingIndexAsyncBuildTest, DestroyWhileQueuedReturnsImmediately) {
         FAIL() << "raced the pool while sizing it: " << running
                << " parked builds for " << queued_index + 1 << " segments";
     }
+
+    // Native executor migration must preserve the growing pool gauges while
+    // workers are occupied and one build remains queued.
+    const auto metrics_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    auto metrics_ready = [&] {
+        using namespace milvus::monitor;
+        return internal_core_growing_index_pool_capacity.Value() == running &&
+               internal_core_growing_index_pool_active_threads.Value() ==
+                   running &&
+               internal_core_growing_index_pool_queue_depth.Value() == 1;
+    };
+    while (!metrics_ready() &&
+           std::chrono::steady_clock::now() < metrics_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_TRUE(metrics_ready());
 
     // Safety net for the sizing decision above: if the "queued" task were in
     // fact already running, the reset() below would join a build that parks
