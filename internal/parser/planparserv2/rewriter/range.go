@@ -137,7 +137,7 @@ func resolveBinaryRangeEffectiveType(col *planpb.ColumnInfo, lower, upper *planp
 	return lowerType, true
 }
 
-func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr {
+func combineAndRangePredicates(parts []*planpb.Expr, canFoldEmpty func(*planpb.ColumnInfo) bool) []*planpb.Expr {
 	type group struct {
 		col    *planpb.ColumnInfo
 		effDt  schemapb.DataType // effective type for comparison
@@ -237,7 +237,7 @@ func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr
 				}
 			}
 
-			if isEmpty && !canFoldPredicateToBoolConstant(g.col) {
+			if isEmpty && !canFoldEmpty(g.col) {
 				continue
 			}
 

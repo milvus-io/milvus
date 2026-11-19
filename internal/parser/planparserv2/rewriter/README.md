@@ -102,7 +102,7 @@ The rewriter can be configured via the following parameter (refreshable at runti
 ### General Notes
 - All merges require operands to target the same column (same `ColumnInfo`, including nested path/element type).
 - Rewrite runs after template value filling; template placeholders do not appear here.
-- Optional visitor rewrites do not descend into `MatchExpr` predicates.
+- Each `MatchExpr` rewrites same-element OR equalities to IN and tightens AND bounds. Conflicting equalities or empty intervals at the predicate root can become FALSE because only TRUE contributes a hit. The quantifier retains parent validity and empty-array semantics. Emitting constant children is controlled by `common.enableMatchConstantPredicate` during rolling upgrades.
 - Sorting/dedup for IN/NOT IN is deterministic; duplicates are removed post-sort.
 - Numeric-threshold for OR→IN / AND≠→NOT IN is defined in `util.go` (`defaultConvertOrToInNumericLimit`, default 150).
 - Nullable fields keep contradiction/tautology predicates instead of folding to valid `true`/`false`, because NULL must remain unknown under outer logical operators such as `NOT`. Fixed JSON/array paths also avoid domain-wide folds that assume every path/index exists.

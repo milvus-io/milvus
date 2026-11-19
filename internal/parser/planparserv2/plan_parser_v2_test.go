@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -6140,4 +6141,84 @@ func TestArrayTextMatchOperand(t *testing.T) {
 		_, err := ParseExpr(helper, filter, nil)
 		require.Error(t, err, filter)
 	}
+}
+
+func TestMatchPredicateRewrite(t *testing.T) {
+	schema := newTestSchema(false)
+	sub := schema.StructArrayFields[0].Fields[0]
+	sub.ElementNullable = true
+	tags := &schemapb.FieldSchema{FieldID: 952, Name: "tags", DataType: schemapb.DataType_Array,
+		ElementType: schemapb.DataType_VarChar, Nullable: true, ElementNullable: true}
+	schema.Fields = append(schema.Fields, tags, &schemapb.FieldSchema{
+		FieldID: 953, Name: "weights", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float,
+	})
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	cfg := &paramtable.Get().CommonCfg
+	saved := cfg.EnableMatchConstantPredicate.SwapTempValue("true")
+	defer cfg.EnableMatchConstantPredicate.SwapTempValue(saved)
+	savedOpt := cfg.EnabledOptimizeExpr.SwapTempValue("true")
+	defer cfg.EnabledOptimizeExpr.SwapTempValue(savedOpt)
+	parse := func(filter string) *planpb.Expr {
+		t.Helper()
+		expr, err := ParseExpr(helper, filter, nil)
+		require.NoError(t, err, filter)
+		return expr
+	}
+	for _, tc := range []struct {
+		target, el string
+		field      int64
+	}{
+		{"tags", "$", tags.FieldID}, {"struct_array", "$[sub_str]", sub.FieldID},
+	} {
+		anyMatch := func(predicate string) *planpb.Expr {
+			return parse("MATCH_ANY(" + tc.target + ", " + strings.ReplaceAll(predicate, "@", tc.el) + ")")
+		}
+		contradiction := `@ == "new" && @ == "york"`
+		m := anyMatch(contradiction).GetMatchExpr()
+		require.NotNil(t, m)
+		require.True(t, rewriter.IsAlwaysFalseExpr(m.GetPredicate()), "%v", m)
+		if tc.target == "tags" {
+			require.Equal(t, tc.field, m.GetTargetFieldId())
+		} else {
+			require.Equal(t, tc.target, m.GetStructName())
+			require.EqualValues(t, structArrayFieldID, m.GetTargetFieldId())
+		}
+		root := parse(fmt.Sprintf(`NOT MATCH_EXACT(%s, %s, threshold=0)`, tc.target, strings.ReplaceAll(contradiction, "@", tc.el)))
+		exact := root.GetUnaryExpr().GetChild().GetMatchExpr()
+		require.Equal(t, planpb.MatchType_MatchExact, exact.GetMatchType())
+		require.Zero(t, exact.GetCount())
+		require.True(t, rewriter.IsAlwaysFalseExpr(exact.GetPredicate()))
+		term := anyMatch(`@ == "new" || @ == "york"`).GetMatchExpr().GetPredicate().GetTermExpr()
+		require.Len(t, term.GetValues(), 2)
+		require.Equal(t, tc.field, term.GetColumnInfo().GetFieldId())
+		require.True(t, term.GetColumnInfo().GetIsElementLevel())
+		require.True(t, term.GetColumnInfo().GetNullable())
+		bounds := anyMatch(`@ >= "a" && @ < "z"`).GetMatchExpr().GetPredicate().GetBinaryRangeExpr()
+		require.Equal(t, tc.field, bounds.GetColumnInfo().GetFieldId())
+		require.True(t, bounds.GetLowerInclusive())
+		require.False(t, bounds.GetUpperInclusive())
+		require.True(t, rewriter.IsAlwaysFalseExpr(anyMatch(`@ >= "z" && @ < "a"`).GetMatchExpr().GetPredicate()))
+		innerNot := anyMatch("not (" + contradiction + ")").GetMatchExpr().GetPredicate().GetUnaryExpr()
+		require.NotNil(t, innerNot.GetChild().GetBinaryExpr())
+		require.NotNil(t, anyMatch(`@ == "new" && @ == "new"`).GetMatchExpr().GetPredicate().GetBinaryExpr())
+	}
+	bound, err := ParseExpr(helper, `MATCH_ANY(tags, $ == {first} && $ == {second})`, map[string]*schemapb.TemplateValue{
+		"first":  {Val: &schemapb.TemplateValue_StringVal{StringVal: "new"}},
+		"second": {Val: &schemapb.TemplateValue_StringVal{StringVal: "york"}},
+	})
+	require.NoError(t, err)
+	require.True(t, rewriter.IsAlwaysFalseExpr(bound.GetMatchExpr().GetPredicate()))
+	// Both literals round to the same FLOAT element value.
+	require.NotNil(t, parse(`MATCH_ANY(weights, $ == 16777216.0 && $ == 16777217.0)`).GetMatchExpr().GetPredicate().GetBinaryExpr())
+	// Equalities on different StructArray children can both match the same element.
+	require.NotNil(t, parse(`MATCH_ANY(struct_array, $[sub_str] == "new" && $[sub_int] == 1)`).GetMatchExpr().GetPredicate().GetBinaryExpr())
+	separate := parse(`MATCH_ANY(tags, $ == "new") && MATCH_ANY(tags, $ == "york")`).GetBinaryExpr()
+	require.NotNil(t, separate.GetLeft().GetMatchExpr())
+	require.NotNil(t, separate.GetRight().GetMatchExpr())
+	cfg.EnableMatchConstantPredicate.SwapTempValue("false")
+	require.NotNil(t, parse(`MATCH_ANY(tags, $ == "new" && $ == "york")`).GetMatchExpr().GetPredicate().GetBinaryExpr())
+	require.NotNil(t, parse(`MATCH_ANY(tags, $ == "new" || $ == "york")`).GetMatchExpr().GetPredicate().GetTermExpr())
+	cfg.EnabledOptimizeExpr.SwapTempValue("false")
+	require.NotNil(t, parse(`MATCH_ANY(tags, $ == "new" || $ == "york")`).GetMatchExpr().GetPredicate().GetBinaryExpr())
 }
