@@ -212,7 +212,7 @@ func (m *DeleteMerger) Merge(ctx context.Context, paths []string, start, end uin
 			version = storage.StorageV1
 		}
 		consumed, err := m.mergeFile(ctx, path, start, end, version)
-		if err != nil && legacy && !consumed && ctx.Err() == nil {
+		if err != nil && legacy && !consumed && ctx.Err() == nil && !storage.IsImportBinlogDecryptionError(err) {
 			// Preserve legacy V1/V2 probing only before a record was accepted.
 			// Once decoding began, a terminal read/merge error must fail the job;
 			// retrying another decoder could retain deletes from a corrupt prefix.

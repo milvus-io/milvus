@@ -172,6 +172,9 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 
 		// try v1 first
 		tempData, errv1 := readInternal(path, v1opts)
+		if storage.IsImportBinlogDecryptionError(errv1) {
+			return nil, errv1
+		}
 		if errv1 != nil {
 			// try v2 if v1 failed
 			tempData, errv2 := readInternal(path, v2opts)

@@ -258,7 +258,7 @@ func WithImportReadContext(source *indexcgopb.StoragePluginContext) RwOption {
 	return func(options *rwOptions) {
 		options.pluginContext = source
 		options.pluginContextSet = true
-		options.importReadKeyset = source != nil
+		options.importReadKeyset = true
 	}
 }
 
@@ -266,17 +266,7 @@ func (o *rwOptions) importBinlogReaderOptions() []BinlogReaderOption {
 	if !o.importReadKeyset {
 		return nil
 	}
-	return []BinlogReaderOption{func(file *BinlogReader) error {
-		if _, encrypted := file.GetEdek(); !encrypted {
-			return nil
-		}
-		if err := hookutil.RegisterImportReadKeys(o.pluginContext); err != nil {
-			return err
-		}
-		// The source collection is recorded in the file; the task's collection
-		// is the destination. The EDEK identifies the historical wrapping key.
-		return WithReaderDecryptionContext(o.pluginContext.GetEncryptionZoneId(), file.CollectionID)(file)
-	}}
+	return []BinlogReaderOption{withImportBinlogDecryption(o.pluginContext)}
 }
 
 func (o *rwOptions) packedReaderOptions() []packed.ReaderOption {

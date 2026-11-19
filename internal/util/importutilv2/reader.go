@@ -91,13 +91,13 @@ func newReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb
 			if err := ctx.Err(); err != nil {
 				return readerStorage{}, err
 			}
-			artifact, _ := GetEZK(options)
-			if encryption.Dispatched && artifact != "" && encryption.PluginContext == nil {
-				return readerStorage{}, merr.WrapErrServiceInternalMsg("encrypted backup is missing its dispatched source keyset")
-			}
 			if HasSourceStorageOptions(options) {
 				sourceCM, sourceCfg, err := ResolveSourceStorage(ctx, options, cm, cfg)
 				return readerStorage{cm: sourceCM, cfg: sourceCfg}, err
+			}
+			artifact, _ := GetEZK(options)
+			if encryption.Dispatched && artifact != "" && encryption.PluginContext == nil {
+				return readerStorage{}, merr.WrapErrServiceInternalMsg("encrypted backup is missing its dispatched source keyset")
 			}
 			if !IsSnapshotSource(options) {
 				return readerStorage{cm: cm, cfg: cfg, encryption: encryption}, nil
@@ -145,7 +145,7 @@ func (f *ReaderFactory) NewReader(ctx context.Context, schema *schemapb.Collecti
 		}
 	}
 	resolved := readerStorage{cm: f.cm, cfg: f.cfg}
-	if f.dispatched || IsSnapshotSource(f.options) || HasSourceStorageOptions(f.options) {
+	if (f.dispatched && IsBackup(f.options)) || IsSnapshotSource(f.options) || HasSourceStorageOptions(f.options) {
 		// Validate the descriptor before accessing storage or the key retriever.
 		// Source storage is resolved once for this task attempt. Each reader
 		// still owns its stream; writes retain the task's target storage.

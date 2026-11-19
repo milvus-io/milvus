@@ -31,7 +31,10 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -70,4 +73,50 @@ func TestBackupPlaintextDoesNotBorrowTargetKey(t *testing.T) {
 	require.NoError(t, err)
 	defer reader.Close()
 	require.Zero(t, cipher.lookups, "a plaintext source must not resolve the destination's key")
+}
+
+func TestL0ReaderPreservesEncryptedLegacyError(t *testing.T) {
+	ctx := context.Background()
+	cm := storage.NewLocalChunkManager()
+	root := t.TempDir()
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
+	path := root + "/delta/1"
+	// A valid encrypted binlog descriptor is sufficient. Registration fails
+	// before the reader opens the first event.
+	writer := storage.NewDeleteBinlogWriter(schemapb.DataType_String, 31, 1, 2, storage.WithWriterEncryptionContext(17, []byte("EDEK"), nil))
+	defer writer.Close()
+	writer.AddExtra("original_size", "0")
+	writer.SetEventTimeStamp(1, 2)
+	require.NoError(t, writer.Finish())
+	data, err := writer.GetBuffer()
+	require.NoError(t, err)
+	require.NoError(t, cm.Write(ctx, path, data))
+	register := mockey.Mock(hookutil.RegisterImportReadKeys).Return(merr.ErrServiceUnavailable).Build()
+	defer register.UnPatch()
+	packedOpen := mockey.Mock(packed.NewPackedReaderWithExtfs).Return(nil, merr.ErrDataIntegrity).Build()
+	defer packedOpen.UnPatch()
+	for _, tc := range []struct {
+		name   string
+		source *indexcgopb.StoragePluginContext
+		want   error
+	}{
+		{"plaintext task", nil, merr.ErrDataIntegrity},
+		{"other zone", &indexcgopb.StoragePluginContext{EncryptionZoneId: 9, EncryptionKey: "c291cmNl"}, merr.ErrDataIntegrity},
+		{"registration failed", &indexcgopb.StoragePluginContext{EncryptionZoneId: 17, EncryptionKey: "c291cmNl"}, merr.ErrServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opt := storage.WithImportReadContext(tc.source)
+			r, err := NewL0Reader(ctx, cm, cfg, &schemapb.FieldSchema{IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				&internalpb.ImportFile{Paths: []string{root + "/delta"}}, 1024, 0, math.MaxUint64, opt)
+			require.NoError(t, err)
+			_, err = r.Read()
+			require.ErrorIs(t, err, tc.want)
+			merger, err := NewDeleteMerger(cm, cfg, schemapb.DataType_Int64, 1, 1024, opt)
+			require.NoError(t, err)
+			_, err = merger.Merge(ctx, []string{path}, 0, math.MaxUint64, true)
+			require.ErrorIs(t, err, tc.want)
+			require.Zero(t, packedOpen.Times())
+		})
+	}
+	require.EqualValues(t, 2, register.Times())
 }

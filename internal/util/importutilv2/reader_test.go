@@ -413,8 +413,7 @@ func TestTaskReaderOpensPackedBackupWithDispatchedSource(t *testing.T) {
 		Fields:     []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64}},
 		Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}},
 	}
-	options := Options{{Key: BackupFlag, Value: "true"}, {Key: StorageVersion, Value: "2"}, {Key: EZK, Value: "opaque on worker"}}
-	source := &indexcgopb.StoragePluginContext{EncryptionZoneId: 17, EncryptionKey: "c291cmNl"}
+	var source *indexcgopb.StoragePluginContext
 	ordinary := mockey.Mock(hookutil.GetCPluginContextByEzID).Return(nil, merr.ErrServiceUnavailable).Build()
 	defer ordinary.UnPatch()
 	footer := mockey.Mock(packed.GetImportPackedFileFieldIDs).To(func(paths []string, _ *indexpb.StorageConfig, got *indexcgopb.StoragePluginContext) ([][]int64, error) {
@@ -432,14 +431,21 @@ func TestTaskReaderOpensPackedBackupWithDispatchedSource(t *testing.T) {
 		return nil, merr.ErrIoPermissionDenied
 	}).Build()
 	defer open.UnPatch()
-	factory := NewTaskReaderFactory(ctx, cm, cfg, options, source)
-	r, err := factory.NewReader(ctx, schema, file, 1024, 0, nil)
-	require.NoError(t, err)
-	defer r.Close()
-	_, err = r.Read()
-	require.ErrorIs(t, err, merr.ErrIoPermissionDenied)
-	require.EqualValues(t, 1, footer.Times())
-	require.EqualValues(t, 1, open.Times())
+	for _, encrypted := range []bool{false, true} {
+		options := Options{{Key: BackupFlag, Value: "true"}, {Key: StorageVersion, Value: "2"}}
+		if encrypted {
+			options = append(options, &commonpb.KeyValuePair{Key: EZK, Value: "opaque on worker"})
+			source = &indexcgopb.StoragePluginContext{EncryptionZoneId: 17, EncryptionKey: "c291cmNl"}
+		}
+		factory := NewTaskReaderFactory(ctx, cm, cfg, options, source)
+		r, err := factory.NewReader(ctx, schema, file, 1024, 0, nil)
+		require.NoError(t, err)
+		_, err = r.Read()
+		r.Close()
+		require.ErrorIs(t, err, merr.ErrIoPermissionDenied)
+	}
+	require.EqualValues(t, 2, footer.Times())
+	require.EqualValues(t, 2, open.Times())
 	require.Zero(t, ordinary.Times())
 }
 
@@ -448,6 +454,28 @@ func TestTaskReaderRejectsMissingDispatchedSource(t *testing.T) {
 	factory := NewTaskReaderFactory(context.Background(), nil, nil, options, nil)
 	_, err := factory.NewReader(context.Background(), nil, &internalpb.ImportFile{Paths: []string{"backup/segment"}}, 1024, 0, nil)
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestTaskReaderOpensOrdinaryCSV(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	path := root + "/rows.csv"
+	require.NoError(t, cm.Write(ctx, path, []byte("pk\n42\n")))
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+	}}
+	f := NewTaskReaderFactory(ctx, cm, nil, nil, nil)
+	f.storage = func() (readerStorage, error) {
+		t.Fatal("ordinary CSV opened backup storage")
+		return readerStorage{}, nil
+	}
+	reader, err := f.NewReader(ctx, schema, &internalpb.ImportFile{Paths: []string{path}}, 1024, 0, nil)
+	require.NoError(t, err)
+	defer reader.Close()
+	rows, err := reader.Read()
+	require.NoError(t, err)
+	require.EqualValues(t, 42, rows.Data[100].GetRow(0))
 }
 
 func TestSnapshotReaderFactoryPathValidationError(t *testing.T) {
