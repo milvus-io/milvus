@@ -1,0 +1,127 @@
+{
+  "name": "fresh_popular",
+  "stage": "FunctionChainStageL2Rerank",
+  "ops": [
+    {
+      "op": "map",
+      "expr": {
+        "name": "decay",
+        "args": [
+          {
+            "column": {
+              "name": "published_at"
+            }
+          }
+        ],
+        "params": {
+          "offset": {
+            "int64Value": "0"
+          },
+          "scale": {
+            "int64Value": "86400"
+          },
+          "origin": {
+            "int64Value": "1700000000"
+          },
+          "decay": {
+            "doubleValue": 0.5
+          },
+          "function": {
+            "stringValue": "exp"
+          }
+        }
+      },
+      "outputs": [
+        "freshness"
+      ]
+    },
+    {
+      "op": "map",
+      "expr": {
+        "name": "num_combine",
+        "args": [
+          {
+            "column": {
+              "name": "$score"
+            }
+          },
+          {
+            "column": {
+              "name": "freshness"
+            }
+          }
+        ],
+        "params": {
+          "mode": {
+            "stringValue": "weighted"
+          },
+          "weights": {
+            "arrayValue": {
+              "values": [
+                {
+                  "doubleValue": 0.7
+                },
+                {
+                  "doubleValue": 0.3
+                }
+              ]
+            }
+          }
+        }
+      },
+      "outputs": [
+        "$score"
+      ]
+    },
+    {
+      "op": "map",
+      "expr": {
+        "name": "round_decimal",
+        "args": [
+          {
+            "column": {
+              "name": "$score"
+            }
+          }
+        ],
+        "params": {
+          "decimal": {
+            "int64Value": "4"
+          }
+        }
+      },
+      "outputs": [
+        "$score"
+      ]
+    },
+    {
+      "op": "sort",
+      "inputs": [
+        "$score",
+        "$id"
+      ],
+      "params": {
+        "tie_break_col": {
+          "stringValue": "$id"
+        },
+        "desc": {
+          "boolValue": true
+        },
+        "column": {
+          "stringValue": "$score"
+        }
+      }
+    },
+    {
+      "op": "limit",
+      "params": {
+        "limit": {
+          "int64Value": "10"
+        },
+        "offset": {
+          "int64Value": "2"
+        }
+      }
+    }
+  ]
+}

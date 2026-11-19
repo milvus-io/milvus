@@ -2,8 +2,6 @@ package dml
 
 import (
 	"context"
-	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -15,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
@@ -24,21 +23,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestComplexDeleteQueryViewBatch(t *testing.T) {
-	for _, scenario := range []string{"int64", "varchar", "empty", "cold", "cold_disabled", "cold_load_error", "query_error", "incomplete", "missing_size", "rate_limit", "enqueue_error", "write_error"} {
+	for _, scenario := range []string{"int64", "varchar", "empty", "query_error", "incomplete", "missing_size", "rate_limit", "enqueue_error", "write_error"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
-			cold := strings.HasPrefix(scenario, "cold")
-			if cold {
-				params := paramtable.Get()
-				key := params.ProxyCfg.EnableAutoLoad.Key
-				require.NoError(t, params.Save(key, strconv.FormatBool(scenario != "cold_disabled")))
-				t.Cleanup(func() { require.NoError(t, params.Reset(key)) })
-			}
 			pkType := schemapb.DataType_Int64
 			values := []any{int64(1), int64(2), int64(3)}
 			if scenario == "varchar" {
@@ -77,9 +68,6 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 			query := mockey.Mock(mockey.GetMethod(client.Legacy(), "Query")).To(func(_ context.Context, req *queryclient.LegacyQueryRequest) (*queryclient.LegacyQueryResult, error) {
 				captured = proto.Clone(req.Req).(*internalpb.RetrieveRequest)
 				queryCalls++
-				if cold && queryCalls == 1 {
-					return nil, merr.WrapErrCollectionNotLoaded(int64(10))
-				}
 				if scenario == "query_error" {
 					return nil, merr.ErrServiceUnavailable
 				}
@@ -87,18 +75,6 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 			}).Build()
 			defer query.UnPatch()
 			// Transient query errors consult the authoritative load config.
-			coord := mocks.NewMockMixCoordClient(t)
-			if scenario == "cold" || scenario == "cold_load_error" {
-				status := merr.Success()
-				if scenario == "cold_load_error" {
-					status = merr.Status(merr.ErrServiceUnavailable)
-				}
-				coord.EXPECT().EnsureCollectionReady(mock.Anything, &querypb.EnsureCollectionReadyRequest{
-					CollectionID: 10, ExpectedVchannels: []string{"batch_shard"},
-				}).Return(status, nil).Once()
-			}
-			mixCoord := mockey.Mock((*mockTaskNode).MixCoord).Return(coord).Build()
-			defer mixCoord.UnPatch()
 			loadInfo := mockey.Mock((*mocks.MockMixCoordClient).GetQueryViewLoadInfo).Return(&querypb.GetQueryViewLoadInfoResponse{
 				Status: merr.Success(), PartitionIDs: []int64{11},
 			}, nil).Build()
@@ -142,7 +118,7 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 			defer produce.UnPatch()
 
 			runner := &DeleteRunner{
-				node: &mockTaskNode{}, vChannels: []string{"batch_shard"},
+				node:   &mockUpsertNode{mixCoord: &mocks.MockMixCoordClient{}},
 				req:    &milvuspb.DeleteRequest{CollectionName: "batch_delete", ConsistencyLevel: commonpb.ConsistencyLevel_Strong},
 				result: &milvuspb.MutationResult{Status: merr.Success()},
 				schema: schema, plan: plan, dbID: 9, collectionID: 10, partitionIDs: []int64{11},
@@ -153,10 +129,8 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 			runner.MeasurePayload()
 			err = runner.Run(ctx)
 			switch scenario {
-			case "query_error", "enqueue_error", "write_error", "cold_load_error":
+			case "query_error", "enqueue_error", "write_error":
 				require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-			case "cold_disabled":
-				require.ErrorIs(t, err, merr.ErrCollectionNotLoaded)
 			case "incomplete", "missing_size":
 				require.ErrorIs(t, err, merr.ErrServiceInternal)
 			case "rate_limit":
@@ -182,12 +156,8 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 			require.NoError(t, proto.Unmarshal(captured.GetSerializedExprPlan(), parsed))
 			require.EqualValues(t, typeutil.Unlimited, parsed.GetQuery().GetLimit())
 			require.True(t, proto.Equal(plan.GetQuery().GetPredicates(), parsed.GetQuery().GetPredicates()))
-			if scenario == "cold" {
-				require.Equal(t, 2, queryCalls)
-			} else {
-				require.Equal(t, 1, queryCalls)
-			}
-			wrote := scenario == "int64" || scenario == "varchar" || scenario == "cold"
+			require.Equal(t, 1, queryCalls)
+			wrote := scenario == "int64" || scenario == "varchar"
 			if wrote {
 				require.Equal(t, 1, produce.Times())
 				require.True(t, proto.Equal(ids(values...), produced), "overlapping worker results must produce each PK once")
@@ -203,7 +173,7 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 			if err == nil {
 				require.EqualValues(t, 12000, runner.CollectionSizeBytes())
 			}
-			if scenario == "query_error" || scenario == "incomplete" || scenario == "empty" {
+			if scenario == "query_error" || scenario == "incomplete" || scenario == "missing_size" || scenario == "empty" {
 				require.Zero(t, limitCalls)
 			}
 			if !wrote && scenario != "enqueue_error" && scenario != "write_error" {
@@ -211,4 +181,112 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A failed read says nothing about the metadata it was bound to. The next attempt
+// must resolve the request again and read at a new snapshot, and only the final
+// attempt's rows are deleted. The request still counts once.
+func TestComplexDeleteQueryViewReplansEachAttempt(t *testing.T) {
+	ctx := context.Background()
+	enabled := featureusage.Enabled()
+	t.Cleanup(func() { featureusage.SetEnabled(enabled) })
+	featureusage.SetEnabled(true)
+	newSchema := func(version int32, valueID int64) *schemaInfo {
+		return mustNewSchemaInfo(&schemapb.CollectionSchema{Version: version, Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: valueID, Name: "value", DataType: schemapb.DataType_Int64},
+		}})
+	}
+	retired, current := newSchema(7, 101), newSchema(8, 102)
+
+	cache := NewMockCache(t)
+	cache.EXPECT().GetDatabaseInfo(mock.Anything, "db").Return(&databaseInfo{DBID: 9}, nil)
+	cache.EXPECT().GetCollectionID(mock.Anything, "db", "tenant").Return(int64(10), nil)
+	cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "tenant", int64(10)).Return(&collectionInfo{
+		CollID: 10, VChannels: []string{"v-retired"}, Schema: retired,
+	}, nil).Once()
+	cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "tenant", int64(10)).Return(&collectionInfo{
+		CollID: 10, VChannels: []string{"v-current"}, Schema: current,
+	}, nil).Once()
+
+	client := queryclient.NewLegacyViewQueryClient(queryclient.ViewQueryClientConfig{}, nil, nil, nil)
+	var reads []*queryclient.LegacyQueryRequest
+	query := mockey.Mock(mockey.GetMethod(client.Legacy(), "Query")).To(func(_ context.Context, req *queryclient.LegacyQueryRequest) (*queryclient.LegacyQueryResult, error) {
+		reads = append(reads, req)
+		if len(reads) == 1 {
+			return nil, merr.WrapErrServiceInternalMsg("read failed")
+		}
+		return &queryclient.LegacyQueryResult{Results: []*internalpb.RetrieveResults{
+			{Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2}}}}, AllRetrieveCount: 2},
+		}}, nil
+	}).Build()
+	defer query.UnPatch()
+	var produced []*schemapb.IDs
+	produce := mockey.Mock((*DeleteRunner).produce).To(func(dr *DeleteRunner, ctx context.Context, primaryKeys *schemapb.IDs, _ int64) (*DeleteTask, error) {
+		require.Equal(t, []vChan{"v-current"}, dr.vChannels, "the write follows the attempt that read the rows")
+		produced = append(produced, proto.Clone(primaryKeys).(*schemapb.IDs))
+		task := &DeleteTask{Condition: NewTaskCondition(ctx), count: int64(typeutil.GetSizeOfIDs(primaryKeys))}
+		task.Notify(nil)
+		return task, nil
+	}).Build()
+	defer produce.UnPatch()
+
+	runner := &DeleteRunner{
+		node: &mockUpsertNode{retryOnce: true}, metaCache: cache,
+		req: &milvuspb.DeleteRequest{
+			DbName: "db", CollectionName: "tenant", Expr: "value < {limit}",
+			ExprTemplateValues: map[string]*schemapb.TemplateValue{"limit": {Val: &schemapb.TemplateValue_Int64Val{Int64Val: 3}}},
+		},
+		idAllocator: &mockIDAllocatorInterface{}, tsoAllocatorIns: &mockTsoAllocator{},
+	}
+	runner.SetViewQueryClient(client)
+
+	before := featureCounts()
+	require.NoError(t, runner.Init(ctx))
+	// What the first attempt resolved must not survive into the replan.
+	runner.partitionIDs = []int64{11}
+	require.NoError(t, runner.Run(ctx))
+
+	counted := featureDelta(before, featureCounts())
+	require.Contains(t, counted, "delete_mode=filter")
+	require.Contains(t, counted, featureusage.FeatureExprTemplateValues.Name())
+	for name, count := range counted {
+		require.EqualValues(t, 1, count, name)
+	}
+	require.Len(t, reads, 2)
+	require.EqualValues(t, 7, reads[0].Req.GetSchemaVersion())
+	require.EqualValues(t, 8, reads[1].Req.GetSchemaVersion())
+	require.Equal(t, []int64{11}, reads[0].Req.GetPartitionIDs())
+	require.Empty(t, reads[1].Req.GetPartitionIDs())
+	require.Same(t, current.CollectionSchema, reads[1].Schema)
+	require.Greater(t, reads[1].BarrierMVCC, reads[0].BarrierMVCC)
+	require.Equal(t, reads[1].BarrierMVCC, reads[1].Req.GetGuaranteeTimestamp())
+	parsed := &planpb.PlanNode{}
+	require.NoError(t, proto.Unmarshal(reads[1].Req.GetSerializedExprPlan(), parsed))
+	require.EqualValues(t, typeutil.Unlimited, parsed.GetQuery().GetLimit())
+	require.EqualValues(t, 102, parsed.GetQuery().GetPredicates().GetUnaryRangeExpr().GetColumnInfo().GetFieldId())
+	require.Len(t, produced, 1)
+	require.Equal(t, []int64{1, 2}, produced[0].GetIntId().GetData())
+	require.EqualValues(t, 2, runner.Result().GetDeleteCnt())
+	require.EqualValues(t, 2, runner.AllQueryCnt())
+}
+
+func TestComplexDeleteQueryViewRequiresQueryRunner(t *testing.T) {
+	runner := &DeleteRunner{node: &mockTaskNode{}}
+	require.ErrorIs(t, runner.complexDeleteByQueryView(context.Background()), merr.ErrServiceInternal)
+}
+
+// A drop and recreate, or an alias reassignment, must not redirect the delete.
+func TestComplexDeleteRetryRejectsReplacementCollection(t *testing.T) {
+	cache := NewMockCache(t)
+	cache.EXPECT().GetDatabaseInfo(mock.Anything, "db").Return(&databaseInfo{DBID: 9}, nil)
+	cache.EXPECT().GetCollectionID(mock.Anything, "db", "tenant").Return(int64(11), nil)
+	runner := &DeleteRunner{
+		node: &mockUpsertNode{}, metaCache: cache,
+		req:          &milvuspb.DeleteRequest{DbName: "db", CollectionName: "tenant", Expr: "value < 3"},
+		collectionID: 10, readAttempted: true,
+	}
+
+	require.ErrorIs(t, runner.complexDeleteByQueryView(t.Context()), merr.ErrCollectionNotFound)
+	require.EqualValues(t, 10, runner.collectionID)
 }

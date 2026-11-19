@@ -22,6 +22,20 @@ func (i immutableIndex[T]) get(key []byte) (T, bool) {
 	return zero, false
 }
 
+func (i immutableIndex[T]) getShard(id qviews.ShardID) (T, bool) {
+	// Keep ordinary channel names on the stack without imposing a length limit
+	// or retaining a scratch buffer. Only oversized lookups allocate.
+	var buffer [128]byte
+	size := 8 + len(id.VChannel)
+	key := buffer[:]
+	if size > len(buffer) {
+		key = make([]byte, size)
+	}
+	key = key[:size]
+	putShardKey(key, id)
+	return i.get(key)
+}
+
 func (i immutableIndex[T]) set(key []byte, value T) immutableIndex[T] {
 	tree := i.tree
 	if tree == nil {
@@ -52,9 +66,22 @@ func (i immutableIndex[T]) len() int {
 	return i.tree.Len()
 }
 
-func idKey(id int64) []byte {
+// Fixed-size keys are returned by value so lookups can keep their buffers on
+// the stack. Insert retains the slice, so its array must not be reused for a
+// different key.
+func idKey(id int64) [8]byte {
 	var key [8]byte
 	binary.BigEndian.PutUint64(key[:], uint64(id))
-	return key[:]
+	return key
 }
-func shardKey(id qviews.ShardID) []byte { return append(idKey(id.ReplicaID), id.VChannel...) }
+
+func shardKey(id qviews.ShardID) []byte {
+	key := make([]byte, 8+len(id.VChannel))
+	putShardKey(key, id)
+	return key
+}
+
+func putShardKey(key []byte, id qviews.ShardID) {
+	binary.BigEndian.PutUint64(key[:8], uint64(id.ReplicaID))
+	copy(key[8:], id.VChannel)
+}

@@ -156,6 +156,14 @@ Root confinement still applies. Referenced snapshots retain source identity
 validation. Worker-side conversion to object keys does not define the restore
 fingerprint.
 
+Snapshot-source import without `external_spec` also accepts a bucket-relative
+metadata object key (`[prefix/]snapshots/<collection_id>/metadata/<snapshot_id>.json`)
+resolved against the active instance's configured bucket. Same-prefix
+self-contained bundles normalize origin-matching URIs to bare object keys during
+import preparation, while any remaining scheme-bearing internal reference is
+rejected by `ValidateSnapshotImportPaths`. Restore retains its URI-preserving
+behavior.
+
 - Configuration initialization requires an absolute local root and freezes it
   against runtime configuration updates.
 - Metadata loading resolves recognized legacy paths and checks their identity.

@@ -93,14 +93,15 @@ func (b *DefaultBalancer) recoverPublishedSchemas(ctx context.Context, p *planni
 		}
 		retained := *p
 		retained.recovery = newPublishedRecoveryBase(id, recovery)
-		baseRows := withoutRows(initialProjectedRows(p.NodesMap()), currentShardRows(p, id))
+		baseRows := initialProjectedRows(p.NodesMap())
+		subtractRows(baseRows, currentShardRows(p, id))
 		allocation := allocate(&retained, id, baseRows, false)
 		var err error
 		if allocation == nil {
 			err = merr.WrapErrServiceUnavailableMsg("published schema placement for shard %s is not ready", id.String())
 		} else {
 			source := qviews.FromProtoQueryViewVersion(recovery.View.GetMeta().GetVersion())
-			err = manager.AddPublishedRecovery(ctx, allocation.builder, source)
+			err = manager.AddPublishedRecovery(ctx, allocation.materialize(&retained, id), source)
 		}
 		if err != nil {
 			result = errors.CombineErrors(result, err)

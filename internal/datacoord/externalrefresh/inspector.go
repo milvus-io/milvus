@@ -42,7 +42,7 @@ type externalCollectionRefreshInspector struct {
 	scheduler   task.GlobalScheduler
 	closeChan   chan struct{}
 	// wrapTask builds a scheduler-facing task wrapper with all callbacks
-	// wired (processFinishedJob → checker.processJobByID). The manager owns
+	// wired (processFinishedJob → checker.requestJobProcessing). The manager owns
 	// the wiring logic and injects this factory so the inspector doesn't
 	// need a direct reference to the checker (avoids construction-order
 	// circular dependency).

@@ -4,6 +4,7 @@ import (
 	"math"
 	"sort"
 
+	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 )
@@ -122,13 +123,26 @@ func newAllocationContext(p *planningContext, id qviews.ShardID, base map[int64]
 	for _, n := range nodes {
 		ctx.collectionBase[n] = c.ReplicaSize(id.ReplicaID, n) + p.replicaDelta[id.ReplicaID][n] - old[n]
 	}
+	// Reuse evidence and its version must come from the same pinned collection.
+	// Published-schema recovery can still allocate without a current DataView,
+	// but cannot claim compatible resources in that case.
+	data := c.DataView()
+	key := coordview.ResourceKey{LoadInfoVersion: c.ConfigVersion()}
+	var placements []*balancercache.PlacementNode
+	if data != nil {
+		key.DataVersion = data.DataVersion
+		// Pin each eligible node once instead of looking it up for every segment.
+		placements = make([]*balancercache.PlacementNode, len(nodes))
+		for i, node := range nodes {
+			placements[i] = c.PlacementNode(node)
+		}
+	}
 	for _, segment := range entries {
 		ctx.segments[segment.SegmentID] = segment
-		ready := make(map[int64]bool)
-		for node := range reusableResources(p, id, segment, nodes) {
-			ready[node] = true
+		if data != nil {
+			key.PartitionID, key.SegmentID = segment.PartitionID, segment.SegmentID
+			ctx.reusable[segment.SegmentID] = reusableResources(placements, key)
 		}
-		ctx.reusable[segment.SegmentID] = ready
 	}
 	return ctx
 }
@@ -274,16 +288,11 @@ func (ctx *allocationContext) migrationCost(original map[int64]int64) float64 {
 }
 
 // reusableResources only credits confirmed, protected, exact-compatible loads.
-func reusableResources(p *planningContext, id qviews.ShardID, segment *SegmentDataView, nodes []int64) map[int64]coordview.SegmentState {
-	c := p.collectionForShard(id)
-	states := make(map[int64]coordview.SegmentState)
-	if c == nil || c.DataView() == nil {
-		return states
-	}
-	key := coordview.ResourceKey{PartitionID: segment.PartitionID, SegmentID: segment.SegmentID, DataVersion: c.DataView().DataVersion, LoadInfoVersion: c.ConfigVersion()}
-	for _, n := range nodes {
-		if resources := c.PlacementNode(n); resources != nil && resources.HasResource(key) {
-			states[n] = coordview.SegmentStateReady
+func reusableResources(placements []*balancercache.PlacementNode, key coordview.ResourceKey) map[int64]bool {
+	states := make(map[int64]bool)
+	for _, node := range placements {
+		if node != nil && node.HasResource(key) {
+			states[node.ID()] = true
 		}
 	}
 	return states

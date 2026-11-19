@@ -41,12 +41,15 @@ type ReplicaFeedbackStore struct {
 	replicas            map[int64]*replicaFeedback
 	shardCounts         map[int64]int
 	globalRates         *RequestRates
+	planning            *PlanningSnapshot
 	rateContributors    int
 	unregister          func()
 	unregisterDataViews func()
 }
 
 type replicaFeedback struct {
+	replicaID           int64
+	resourceGroup       string
 	collectionID        int64
 	lastAccessUnixNanos int64
 	snapshot            *Snapshot
@@ -69,7 +72,7 @@ type feedbackContribution struct {
 
 // New replays configured replicas before the caller starts receiving reports.
 func New(configs *loadmgr.LoadConfigStore, dataViews api.DataViewPublisher) *ReplicaFeedbackStore {
-	s := &ReplicaFeedbackStore{collections: make(map[int64][]int64), replicas: make(map[int64]*replicaFeedback), shardCounts: make(map[int64]int), globalRates: &RequestRates{}, stop: make(chan struct{}), done: make(chan struct{})}
+	s := &ReplicaFeedbackStore{collections: make(map[int64][]int64), replicas: make(map[int64]*replicaFeedback), shardCounts: make(map[int64]int), globalRates: &RequestRates{}, planning: &PlanningSnapshot{}, stop: make(chan struct{}), done: make(chan struct{})}
 	s.unregisterDataViews = dataViews.RegisterDataViewListener(s.onDataView)
 	s.unregister = configs.RegisterLoadConfigListener(s.onLoadConfig)
 	go s.expireLoop()
@@ -109,7 +112,12 @@ func (s *ReplicaFeedbackStore) onLoadConfig(collectionID int64, config *loadmgr.
 			ids = append(ids, id)
 			kept[id] = struct{}{}
 			if s.replicas[id] == nil {
-				s.replicas[id] = &replicaFeedback{collectionID: collectionID, shards: make(map[qviews.ShardID]*shardFeedback)}
+				s.replicas[id] = &replicaFeedback{replicaID: id, collectionID: collectionID, shards: make(map[qviews.ShardID]*shardFeedback)}
+			}
+			r := s.replicas[id]
+			if r.resourceGroup != replica.ResourceGroup {
+				s.planning = s.planning.replaceReplica(id, replica.ResourceGroup, r.snapshot)
+				r.resourceGroup = replica.ResourceGroup
 			}
 		}
 	}
@@ -190,8 +198,17 @@ func (s *ReplicaFeedbackStore) GetGlobalRequestRates() *RequestRates {
 	return s.globalRates
 }
 
-// Replace one Replica's contribution in O(1), under the store's write lock.
+// GetPlanningSnapshot returns one immutable version containing replica feedback
+// and pre-aggregated RG rates. Reads allocate nothing and traverse no replicas.
+func (s *ReplicaFeedbackStore) GetPlanningSnapshot() *PlanningSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.planning
+}
+
+// Replace one Replica's contributions under the store's write lock.
 func (s *ReplicaFeedbackStore) replaceSnapshot(r *replicaFeedback, next *Snapshot) {
+	s.planning = s.planning.replaceReplica(r.replicaID, r.resourceGroup, next)
 	var before, after RequestRates
 	if r.snapshot != nil {
 		before = r.snapshot.RequestRates
@@ -321,6 +338,7 @@ func (s *ReplicaFeedbackStore) Close() {
 		clear(s.shardCounts)
 		clear(s.replicas)
 		s.globalRates = &RequestRates{}
+		s.planning = &PlanningSnapshot{}
 		s.rateContributors = 0
 		s.mu.Unlock()
 	})

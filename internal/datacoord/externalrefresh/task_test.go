@@ -314,11 +314,11 @@ func TestRefreshExternalCollectionTask_UpdateStateWithMeta(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	// Eager synchronous contract: when the task transitions to a terminal
-	// state, processFinishedJob must fire BEFORE UpdateStateWithMeta returns,
-	// with the correct jobID. This guarantees callers polling progress see a
-	// consistent state (schema update has already been applied).
-	t.Run("terminal_finished_fires_process_finished_job_synchronously", func(t *testing.T) {
+	// When the task transitions to a terminal state, processFinishedJob must
+	// fire with the correct jobID, so the checker processes the job without
+	// waiting for its periodic tick. The callback itself must not block; see
+	// TestRefreshTaskTerminalStateDoesNotWaitForJobProcessing.
+	t.Run("terminal_finished_fires_process_finished_job", func(t *testing.T) {
 		task, refreshMeta := createTestRefreshTaskWithStubs(t, 1001, 42, 100)
 		err := refreshMeta.AddTask(task.ExternalCollectionRefreshTask)
 		assert.NoError(t, err)
@@ -333,7 +333,7 @@ func TestRefreshExternalCollectionTask_UpdateStateWithMeta(t *testing.T) {
 		err = task.UpdateStateWithMeta(indexpb.JobState_JobStateFinished, "")
 		assert.NoError(t, err)
 
-		// Callback fired exactly once, with correct jobID, before return.
+		// Callback fired exactly once, with correct jobID.
 		assert.Equal(t, 1, callbackCount, "processFinishedJob must fire exactly once")
 		assert.Equal(t, int64(42), callbackJobID, "processFinishedJob must receive the task's jobID")
 	})
