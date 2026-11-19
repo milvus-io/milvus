@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -63,19 +62,19 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 	attempt := 0
 	// prepareFailed ends the request on a failure met before the first append,
 	// and leaves a later one to retryPreparation.
-	prepareFailed := func(err error) (bool, error) {
+	prepareFailed := func(ctx context.Context, err error) (bool, error) {
 		if attempt > 1 {
 			return fence.retryPreparation(ctx, it.GetMetaCache(), collID, err)
 		}
 		packErr = err
 		return false, err
 	}
-	appendErr := retry.Handle(ctx, func() (bool, error) {
+	appendErr := fence.run(ctx, func(ctx context.Context) (bool, error) {
 		route, err := resolveWriteRoute(ctx, it.GetMetaCache(), collID)
 		attempt++
 		if err != nil {
 			mlog.Warn(ctx, "resolve the write route failed", mlog.FieldCollectionID(collID), mlog.Err(err))
-			return prepareFailed(err)
+			return prepareFailed(ctx, err)
 		}
 
 		mlog.Debug(ctx, "send insert request to virtual channels",
@@ -108,7 +107,7 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 					// backs off and refreshes even on the first attempt.
 					return fence.retryProbeAnswer(ctx, it.GetMetaCache(), collID, answerErr)
 				}
-				return prepareFailed(err)
+				return prepareFailed(ctx, err)
 			}
 			if pending.done() {
 				return false, nil
@@ -118,20 +117,20 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 		// the owner of its offset's residue under the routing it writes against.
 		if err := it.repinPendingAutoIDs(route, pending); err != nil {
 			mlog.Warn(ctx, "re-pin the auto ids of the pending rows failed", mlog.Err(err))
-			return prepareFailed(err)
+			return prepareFailed(ctx, err)
 		}
 
 		// start to repack insert data
 		var msgs []message.MutableMessage
 		var msgOffsets [][]int
 		if it.partitionKeys == nil {
-			msgs, msgOffsets, err = repackInsertDataForStreamingService(it.TraceCtx(), it.GetMetaCache(), route.vchannels, route.table, it.insertMsg, it.result, ez, it.schemaVersion, nil, idempotency, pending)
+			msgs, msgOffsets, err = repackInsertDataForStreamingService(ctx, it.GetMetaCache(), route.vchannels, route.table, it.insertMsg, it.result, ez, it.schemaVersion, nil, idempotency, pending)
 		} else {
-			msgs, msgOffsets, err = repackInsertDataWithPartitionKeyForStreamingService(it.TraceCtx(), it.GetMetaCache(), route.vchannels, route.table, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion, nil, idempotency, pending)
+			msgs, msgOffsets, err = repackInsertDataWithPartitionKeyForStreamingService(ctx, it.GetMetaCache(), route.vchannels, route.table, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion, nil, idempotency, pending)
 		}
 		if err != nil {
 			mlog.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
-			return prepareFailed(err)
+			return prepareFailed(ctx, err)
 		}
 		fence.routedBy(route)
 		resp := streaming.WAL().AppendMessagesWithOptions(ctx, msgs, streaming.AppendOption{
@@ -152,7 +151,7 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 			return false, nil
 		}
 		return fence.refresh(ctx, it.GetMetaCache(), collID, nil)
-	}, shardFencedRetryOptions()...)
+	})
 	if packErr != nil {
 		// The failing attempt appended nothing; report its error as the
 		// request's failure, as a repack failure always was.

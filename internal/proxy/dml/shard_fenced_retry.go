@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 // A shard split fences its source vchannel S with one WAL message. From then on
@@ -81,16 +80,35 @@ const (
 	shardFencedRetryMaxBackoff     = 2 * time.Second
 )
 
-// shardFencedRetryOptions are the retry options of every write that retries
-// refused rows: no attempt limit, bounded by the context of the request and by
-// splitFence.refresh, with a back-off doubling from
-// shardFencedRetryInitialBackoff up to shardFencedRetryMaxBackoff.
-func shardFencedRetryOptions() []retry.Option {
-	return []retry.Option{
-		retry.Attempts(0),
-		retry.Sleep(shardFencedRetryInitialBackoff),
-		retry.MaxSleepTime(shardFencedRetryMaxBackoff),
+// run gives the initial write the caller's full budget. The first refresh
+// starts a separate deadline shared by backoff, metadata reads and WAL appends.
+// Return the current attempt's error if it submitted a write: an earlier fence
+// cannot say whether a later append whose RPC timed out committed.
+func (f *splitFence) run(ctx context.Context, attempt func(context.Context) (bool, error)) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
+	again, err := attempt(ctx)
+	if !again {
+		return err
+	}
+	retryCtx, cancel := context.WithDeadline(ctx, f.deadline)
+	defer cancel()
+	deadline, _ := retryCtx.Deadline()
+	for delay := shardFencedRetryInitialBackoff; time.Until(deadline) >= delay; delay = min(2*delay, shardFencedRetryMaxBackoff) {
+		timer := time.NewTimer(delay)
+		select {
+		case <-retryCtx.Done():
+			timer.Stop()
+			return err
+		case <-timer.C:
+		}
+		again, err = attempt(retryCtx)
+		if !again {
+			return err
+		}
+	}
+	return err
 }
 
 // rowSet is a set of row offsets.
@@ -404,9 +422,8 @@ type splitFence struct {
 	// refusal is the retriable error a write reports if its budget runs out.
 	refusal     error
 	maxTimeTick uint64
-	// firstRefresh is when the write first had to refresh, which is where the
-	// wait of a request with no deadline is measured from.
-	firstRefresh time.Time
+	// deadline bounds all work from the first refresh.
+	deadline time.Time
 	// probed lists the fenced vchannels whose idempotency window already
 	// answered for this write's key (see probeFencedWindows).
 	probed map[string]struct{}
@@ -538,6 +555,9 @@ func (f *splitFence) settle(resp streaming.AppendResponses, msgs []message.Mutab
 		}
 		if err := answer.Error; err != nil {
 			if !isShardRefusal(err) {
+				if f.refused() && merr.IsCanceledOrTimeout(err) {
+					err = merr.Wrap(err, "WAL append outcome is unknown")
+				}
 				fail(err)
 				continue
 			}
@@ -657,21 +677,9 @@ type writtenPart struct {
 	pending *pendingRows
 }
 
-// finalError is the error a write reports when its retry loop ends with err.
-// Before splits, and on a collection no split touches before any refusal, it
-// is err as it was. Otherwise it adds what the client needs to act on it:
-//
-//   - when the context of the request ended while the write was waiting for
-//     the shards of a split, retry.Handle returns the last refusal rather than
-//     the context's error; the context's reason is logged and added to the
-//     message, and the refusal's code is kept;
-//   - when some rows or tombstones are already durable, the message says the
-//     request was partially applied and how much of it. The code is kept: the
-//     error stays retriable, exactly as a multi-vchannel append that failed on
-//     one vchannel is on master. A client that resends the whole request
-//     writes the landed rows again (an unkeyed insert) or re-applies the
-//     landed tombstones at a later tick (a delete); the message is what lets
-//     it decide.
+// finalError reports the number of durable rows or tombstones after a split.
+// A schema mismatch permits SDK replay only if every shard definitively
+// rejected the data. Other failures retain their original classification.
 func (f *splitFence) finalError(ctx context.Context, collectionID int64, err error, parts ...writtenPart) error {
 	schemaMismatch := errors.Is(err, merr.ErrCollectionSchemaMismatch)
 	if err == nil || (!f.strict && !schemaMismatch) {
@@ -743,7 +751,7 @@ func classifyUncodedCause(cause error) error {
 }
 
 // refresh drops the collection from the proxy's cache, so the next attempt
-// re-describes it, and asks retry.Handle for that attempt. cause is what the
+// re-describes it, and requests another attempt. cause is what the
 // write reports if its deadline ends the retry; it defaults to the latest
 // refusal.
 //
@@ -758,26 +766,16 @@ func (f *splitFence) refresh(ctx context.Context, cache Cache, collectionID int6
 	if cause == nil {
 		cause = merr.WrapErrServiceUnavailableMsg("the write left rows unplaced after a shard split fence")
 	}
-	// A cause with no Milvus code at all -- a transport error, as
-	// retryPreparation's doc describes -- must still fail the request as a
-	// retriable ServiceUnavailable if the deadline ends the retry before
-	// another attempt runs (see the comment atop this file). Classifying here,
-	// once, covers both places that can surface cause unwrapped: this
-	// function's own no-deadline timeout below, and retry.Handle returning it
-	// verbatim when the context's deadline is too close for another sleep.
-	// retryPreparation's own already-ended-context exit uses the same
-	// classifyUncodedCause so it reports a failure the same way.
 	cause = classifyUncodedCause(cause)
-	now := time.Now()
-	if f.firstRefresh.IsZero() {
-		f.firstRefresh = now
+	if f.deadline.IsZero() {
+		f.deadline = time.Now().Add(paramtable.Get().ProxyCfg.ShardSplitMaxFenceRetryWait.GetAsDurationByParse())
 	}
-	if maxWait := paramtable.Get().ProxyCfg.ShardSplitMaxFenceRetryWait.GetAsDurationByParse(); now.Sub(f.firstRefresh) >= maxWait {
-		mlog.Warn(ctx, "write gave up waiting for the shards of a split to take its rows",
-			mlog.FieldCollectionID(collectionID), mlog.Duration("maxWait", maxWait), mlog.Err(cause))
+	refreshCtx, cancel := context.WithDeadline(ctx, f.deadline)
+	defer cancel()
+	if refreshCtx.Err() != nil {
 		return false, cause
 	}
-	f.evictIfRoutedEntryIsCached(ctx, cache, collectionID)
+	f.evictIfRoutedEntryIsCached(refreshCtx, cache, collectionID)
 	mlog.RatedInfo(ctx, 1, "write not fully placed after a shard split fence, refreshing the routing and retrying",
 		mlog.FieldCollectionID(collectionID), mlog.Err(cause))
 	return true, cause
