@@ -79,6 +79,18 @@ GetStructNameForArrayField(const FieldMeta& field_meta) {
     return field_name.substr(0, left);
 }
 
+// Struct children share one row-to-element mapping. A scalar ARRAY owns one
+// mapping, keyed by its stable field id across renames. '#' cannot start a
+// user field name.
+inline std::optional<std::string>
+GetElementOffsetsGroup(const FieldMeta& meta) {
+    auto parent = GetStructNameForArrayField(meta);
+    if (!parent && meta.get_data_type() == DataType::ARRAY) {
+        return "#" + std::to_string(meta.get_id().get());
+    }
+    return parent;
+}
+
 ArrowSchemaPtr
 BuildFieldArrowSchema(const std::unordered_map<FieldId, FieldMeta>& fields,
                       const std::vector<FieldId>& field_ids,

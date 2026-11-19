@@ -617,6 +617,8 @@ class SegmentExpr : public Expr {
                                 field_meta.is_native_list_array();
         is_nested_array_field_ = field_meta.is_nested_array();
         is_element_nullable_ = field_meta.is_element_nullable();
+        is_scalar_array_ = field_type_ == DataType::ARRAY &&
+                           !GetStructNameForArrayField(field_meta);
 
         if (segment_->is_primary_field(field_id_) &&
             IsPrimaryKeyDataType(field_meta.get_data_type())) {
@@ -4239,8 +4241,13 @@ class SegmentExpr : public Expr {
             // so cleanup's second call would wait forever after prefetch fails.
             try {
                 auto self = const_cast<SegmentExpr*>(this);
-                self->DetermineExecPath();
-                self->FallbackToJsonStatsIfEligible();
+                if (is_scalar_array_ && IsElementLevelExpression()) {
+                    // Ordinary ARRAY indexes produce row ids; MATCH consumes element ids.
+                    self->exec_path_ = ExprExecPath::RawData;
+                } else {
+                    self->DetermineExecPath();
+                    self->FallbackToJsonStatsIfEligible();
+                }
                 self->RecordExecPath();
             } catch (...) {
                 determine_exec_path_error_ = std::current_exception();
@@ -4627,6 +4634,7 @@ class SegmentExpr : public Expr {
     // The field's elements (ARRAY leaves, nested inner Arrays, VECTOR_ARRAY
     // vectors) may be null.
     bool is_element_nullable_{false};
+    bool is_scalar_array_{false};
     // Set when a null-rejecting parent (top-level filter / AND / OR) consumes
     // this expr's output, so result validity (valid_res) is never observed and
     // even a nullable skipped chunk needs no validity fetch. See MarkNullRejecting.

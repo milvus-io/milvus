@@ -255,11 +255,16 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                       : context.get_exec_context()
                             ->get_query_context()
                             ->get_read_schema();
-    const auto& field_meta =
-        schema->GetFirstArrayFieldInStruct(expr_->get_struct_name());
+    auto array_field = expr_->get_array_field();
+    const auto& field_meta = array_field
+        ? (*schema)[*array_field]
+        : schema->GetFirstArrayFieldInStruct(expr_->get_struct_name());
 
     auto struct_element_offsets =
         segment_chunk_reader_.GetStructElementOffsets(field_meta.get_id());
+    if (array_field && !struct_element_offsets) {
+        ThrowInfo(ExprInvalid, "MATCH requires raw data for ARRAY field {}", array_field->get());
+    }
     AssertInfo(struct_element_offsets != nullptr,
                "Struct element offsets not available");
 

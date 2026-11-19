@@ -1424,8 +1424,19 @@ ProtoParser::ParseMatchExprs(const proto::plan::MatchExpr& expr_pb) {
     auto match_type = expr_pb.match_type();
     auto count = expr_pb.count();
     auto predicate = this->ParseExprs(expr_pb.predicate());
+    std::optional<FieldId> array_field;
+    if (expr_pb.has_array_field_id()) {
+        auto id = FieldId(expr_pb.array_field_id());
+        if (!schema->has_field(id) ||
+            (*schema)[id].get_data_type() != DataType::ARRAY ||
+            GetStructNameForArrayField((*schema)[id]).has_value() ||
+            !struct_name.empty()) {
+            ThrowInfo(ExprInvalid, "invalid scalar ARRAY MATCH target {}", id.get());
+        }
+        array_field = id;
+    }
     return std::make_shared<expr::MatchExpr>(
-        struct_name, match_type, count, predicate);
+        struct_name, match_type, count, predicate, array_field);
 }
 
 expr::TypedExprPtr
