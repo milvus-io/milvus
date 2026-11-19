@@ -23,6 +23,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
@@ -135,4 +136,40 @@ func TestAllocNewGrowingSegment_ManifestPath(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Empty(t, segment.ManifestPath)
 	})
+}
+
+func TestGrowingWALBirthCursorIsDurableAndRetrySafe(t *testing.T) {
+	ctx := t.Context()
+	paramtable.Init()
+	mt, err := meta.NewMemoryMeta(t)
+	require.NoError(t, err)
+	manager := NewSegmentManager(mt)
+	for i, tc := range []struct {
+		name        string
+		streaming   bool
+		birth, want uint64
+	}{
+		{"new WAL base", true, 200, 200},
+		{"legacy caller", true, 0, 0},
+		{"non-WAL caller", false, 200, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			id := int64(i + 100)
+			mt.AddCollection(&meta.CollectionInfo{ID: 100, Schema: meta.NewTestSchema()})
+			req := AllocNewGrowingSegmentRequest{CollectionID: 100, PartitionID: 10, SegmentID: id, ChannelName: "p_100v1", StorageVersion: storage.StorageV2, IsCreatedByStreaming: tc.streaming, CreateSegmentTimeTick: tc.birth}
+			_, err := manager.AllocNewGrowingSegment(ctx, req)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, mt.GetSegment(ctx, id).GetTransformStartAfterTimetick())
+			// A lost Alloc response retried with the same WAL birth cannot
+			// replace or lower the already persisted coverage certificate.
+			want := tc.want
+			if want > 0 {
+				require.NoError(t, manager.meta.UpdateSegmentsInfo(ctx, meta.AdvanceL0TransformCursor(id, 300)))
+				want = 300
+			}
+			_, err = manager.AllocNewGrowingSegment(ctx, req)
+			require.NoError(t, err)
+			require.Equal(t, want, mt.GetSegment(ctx, id).GetTransformStartAfterTimetick())
+		})
+	}
 }

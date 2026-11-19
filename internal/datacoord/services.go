@@ -273,13 +273,14 @@ func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentReque
 	segmentInfo, err := s.segmentManager.AllocNewGrowingSegment(
 		ctx,
 		segment.AllocNewGrowingSegmentRequest{
-			CollectionID:         req.GetCollectionId(),
-			PartitionID:          req.GetPartitionId(),
-			SegmentID:            req.GetSegmentId(),
-			ChannelName:          req.GetVchannel(),
-			StorageVersion:       req.GetStorageVersion(),
-			IsCreatedByStreaming: req.GetIsCreatedByStreaming(),
-			SchemaVersion:        req.GetSchemaVersion(),
+			CollectionID:          req.GetCollectionId(),
+			PartitionID:           req.GetPartitionId(),
+			SegmentID:             req.GetSegmentId(),
+			ChannelName:           req.GetVchannel(),
+			StorageVersion:        req.GetStorageVersion(),
+			IsCreatedByStreaming:  req.GetIsCreatedByStreaming(),
+			SchemaVersion:         req.GetSchemaVersion(),
+			CreateSegmentTimeTick: req.GetCreateSegmentTimeTick(),
 		},
 	)
 	if err != nil {

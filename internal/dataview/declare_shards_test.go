@@ -257,3 +257,28 @@ func TestDeclareShardsSurvivesRecovery(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 0, compareDataVersion(declared, again))
 }
+
+func TestSplitDeclarationPublishesEpochAndLineageAtomically(t *testing.T) {
+	manager, _ := newTestManager()
+	_, err := manager.OnCreateCollection(t.Context(), CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"s"}, TransformStarts: map[string]uint64{"s": 50}})
+	require.NoError(t, err)
+	event := declareTargets(100)
+	event.Source = "s"
+	event.Lineage = &viewpb.QueryViewLineage{Vchannels: []string{"t-1", "t-2"}, SwitchTimetick: 100}
+	_, err = manager.DeclareShards(t.Context(), event)
+	require.NoError(t, err)
+	ref, err := manager.Latest(t.Context(), 1)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, ref.DataView().GetShardSetEpoch())
+	require.Equal(t, event.Lineage.GetVchannels(), shardOf(ref.DataView(), "s").GetLineage().GetVchannels())
+	ref.Deref()
+	_, err = manager.DeclareShards(t.Context(), event)
+	require.NoError(t, err)
+	segment := segmentWithManifestVersion(10, "s", 100, 3)
+	segment.TransformStartAfterTimetick = 100
+	flushAndCommit(t, manager, FlushDataViewEvent{CollectionID: 1, Segments: []LoadableSegment{segment}})
+	ref, err = manager.Latest(t.Context(), 1)
+	require.NoError(t, err)
+	defer ref.Deref()
+	require.EqualValues(t, 2, ref.DataView().GetShardSetEpoch(), "replay and segment publication do not change the shard set")
+}

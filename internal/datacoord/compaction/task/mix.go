@@ -477,6 +477,7 @@ func (t *MixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		PlanID:                    taskProto.GetPlanID(),
 		StartTime:                 taskProto.GetStartTime(),
 		Type:                      taskProto.GetType(),
+		SplitRewrite:              sourceSplitRewrite(t.Meta, taskProto),
 		Channel:                   taskProto.GetChannel(),
 		CollectionTtl:             taskProto.GetCollectionTtl(),
 		TotalRows:                 taskProto.GetTotalRows(),

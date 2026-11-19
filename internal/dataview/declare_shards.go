@@ -19,6 +19,8 @@ package dataview
 import (
 	"context"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -26,6 +28,8 @@ import (
 // DeclareShardsDataViewEvent adds empty shards to the DataView of a collection
 // that already has one. A shard split declares its two target shards with it.
 type DeclareShardsDataViewEvent struct {
+	Source       string
+	Lineage      *viewpb.QueryViewLineage
 	CollectionID int64
 	VChannels    []string
 	// TransformStarts is the Transform frontier each new shard starts with: W
@@ -79,9 +83,23 @@ func (m *dataViewManager) DeclareShards(ctx context.Context, event DeclareShards
 		})
 		added = true
 	}
+	if event.Lineage != nil {
+		source := shardOfDeclaration(next, event.Source)
+		if source == nil {
+			return nil, merr.WrapErrDataIntegrityMsg("split source %s is absent from collection %d", event.Source, event.CollectionID)
+		}
+		if source.Lineage != nil && !proto.Equal(source.Lineage, event.Lineage) {
+			return nil, merr.WrapErrDataIntegrityMsg("split source %s has conflicting lineage", event.Source)
+		}
+		if source.Lineage == nil {
+			source.Lineage = proto.Clone(event.Lineage).(*viewpb.QueryViewLineage)
+			added = true
+		}
+	}
 	if !added {
 		return dataVersionFromView(base), nil
 	}
+	next.ShardSetEpoch = max(base.GetShardSetEpoch(), 1) + 1
 	canonicalizeDataView(next)
 	next.DataVersion = nextDataVersion(base, dataViewAdvanceCompact)
 
@@ -96,4 +114,13 @@ func (m *dataViewManager) DeclareShards(ctx context.Context, event DeclareShards
 	}
 	state.changed.NotifyAll()
 	return dataVersionFromView(next), nil
+}
+
+func shardOfDeclaration(view *viewpb.DataViewOfCollection, channel string) *viewpb.DataViewOfShard {
+	for _, shard := range view.GetShards() {
+		if shard.GetVchannel() == channel {
+			return shard
+		}
+	}
+	return nil
 }

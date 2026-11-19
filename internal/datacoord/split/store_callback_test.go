@@ -309,10 +309,14 @@ func TestStoreSourceAckedAndAdvance(t *testing.T) {
 	require.True(t, store.IsL0CompactionSuspended(testTarget1))
 	require.NotNil(t, store.TransformPins(testCollection))
 	require.NoError(t, store.Advance(ctx, 7, datapb.SplitShardTaskState_SplitShardTaskAdopted))
-	// From the adoption on the window is closed: the pin and the suspension
-	// are released, the source is still to be retired.
+	// Adoption closes the data window, but L0 and history stay protected
+	// until the coordinator revokes g1 and the accumulated history is folded.
 	require.Nil(t, store.WindowOf(testCollection))
 	require.Zero(t, store.WindowCount())
+	require.True(t, store.IsL0CompactionSuspended(testTarget1))
+	require.NotEmpty(t, store.TransformPins(testCollection))
+	require.NoError(t, store.ResumeL0(ctx, 7))
+	require.NoError(t, store.ReleasePins(ctx, 7))
 	require.False(t, store.IsL0CompactionSuspended(testTarget1))
 	require.Nil(t, store.TransformPins(testCollection))
 	require.Equal(t, []string{testSource}, store.Sources(testCollection, datapb.SplitShardTaskState_SplitShardTaskRetired))
@@ -653,9 +657,11 @@ func TestCallbackFlushOnATargetFindsItsShard(t *testing.T) {
 	require.EqualValues(t, 100, target.GetGrowingTransformStartAfterTimetick())
 	require.EqualValues(t, 130, target.GetCompactedTransformStartAfterTimetick())
 
-	// After the adoption the pin is released and the next certificate counts.
+	// After adoption, g2 publication and history folding release the pin.
 	require.NoError(t, store.MarkSourceAcked(ctx, 7, testCollection, testSource, nil))
 	require.NoError(t, store.Advance(ctx, 7, datapb.SplitShardTaskState_SplitShardTaskAdopted))
+	require.NoError(t, store.ResumeL0(ctx, 7))
+	require.NoError(t, store.ReleasePins(ctx, 7))
 	flush(21, 160, 200)
 	require.EqualValues(t, 200, shardOf(t, manager, testTarget1).GetGrowingTransformStartAfterTimetick())
 }

@@ -51,8 +51,10 @@ type Callback struct {
 }
 
 // recordOf reads a split from the result of its broadcast. T_switch and the
-// genesis time ticks are those of the copies in the WAL of this cluster.
-func recordOf(result message.BroadcastResultSplitShardMessageV2) (Record, error) {
+// genesis time ticks are those of the copies in the WAL of this cluster. The
+// residues of the targets and their modulus are those the message carries,
+// the same on every cluster.
+func recordOf(ctx context.Context, result message.BroadcastResultSplitShardMessageV2) (Record, error) {
 	header := result.Message.Header()
 	record := Record{
 		TaskID:       header.GetSplitTaskId(),
@@ -76,7 +78,38 @@ func recordOf(result message.BroadcastResultSplitShardMessageV2) (Record, error)
 	if len(record.Targets) == 0 {
 		return Record{}, merr.WrapErrServiceInternalMsg("shard split task %d names no target", record.TaskID)
 	}
+	body, err := result.Message.Body(ctx)
+	if err != nil {
+		return Record{}, merr.Wrapf(err, "read the body of shard split task %d", record.TaskID)
+	}
+	if err := fillTargetResidues(&record, body.GetRouting()); err != nil {
+		return Record{}, err
+	}
 	return record, nil
+}
+
+// fillTargetResidues copies, from the routing the message carries, the
+// residues each target owns and their modulus. A message without routing
+// leaves them empty: the rewrite of such a split refuses to start
+// (RewritePlanner), nothing else reads them.
+func fillTargetResidues(record *Record, routing *message.SplitShardRouting) error {
+	if routing == nil || routing.GetRoutingModulus() == 0 {
+		return nil
+	}
+	residues := make(map[string][]uint64, len(routing.GetShards()))
+	for _, shard := range routing.GetShards() {
+		residues[shard.GetVchannelName()] = shard.GetHashRouting().GetBuckets()
+	}
+	record.RoutingModulus = routing.GetRoutingModulus()
+	for i := range record.Targets {
+		owned, ok := residues[record.Targets[i].VChannel]
+		if !ok || len(owned) == 0 {
+			return merr.WrapErrServiceInternalMsg("the routing of shard split task %d gives no residue to its target %q",
+				record.TaskID, record.Targets[i].VChannel)
+		}
+		record.Targets[i].Residues = owned
+	}
+	return nil
 }
 
 // OnAcked runs once every copy of the SplitShard message is appended, before
@@ -96,7 +129,7 @@ func recordOf(result message.BroadcastResultSplitShardMessageV2) (Record, error)
 // Both steps are idempotent. A recorded split keeps its record, so a callback
 // entered again declares nothing and writes nothing.
 func (c *Callback) OnAcked(ctx context.Context, result message.BroadcastResultSplitShardMessageV2) error {
-	record, err := recordOf(result)
+	record, err := recordOf(ctx, result)
 	if err != nil {
 		return err
 	}

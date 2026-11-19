@@ -84,6 +84,8 @@ type Dependencies struct {
 	// ShardStats returns the bytes and the rows of the healthy segments of a
 	// vchannel.
 	ShardStats func(vchannel string) (size int64, rows int64)
+	// CheckRewrite checks local atomic-adoption capacity before the WAL message.
+	CheckRewrite func(context.Context, int64, string) error
 	// DataViewShards returns the shards of the collection in its DataView. A
 	// split source stays one until its adoption.
 	DataViewShards func(ctx context.Context, collectionID int64) ([]string, error)
@@ -404,6 +406,11 @@ func (m *Manager) admit(ctx context.Context, request Request) error {
 			return merr.WrapErrServiceNotReadyMsg("shard split target %s has no ready read-write WAL", target)
 		}
 	}
+	if m.deps.CheckRewrite != nil {
+		if err := m.deps.CheckRewrite(ctx, request.CollectionID, request.Source); err != nil {
+			return err
+		}
+	}
 	if err := m.checkState(ctx, request.CollectionID); err != nil {
 		return err
 	}
@@ -445,6 +452,11 @@ func (m *Manager) Split(ctx context.Context, collectionID int64, source string) 
 	}
 	if err := m.CheckAdmission(ctx, collection); err != nil {
 		return Request{}, err
+	}
+	if m.deps.CheckRewrite != nil {
+		if err := m.deps.CheckRewrite(ctx, collectionID, source); err != nil {
+			return Request{}, err
+		}
 	}
 	targets, err := m.placeTargets(ctx, collection)
 	if err != nil {

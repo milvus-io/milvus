@@ -255,6 +255,8 @@ message AllocSegmentRequest {
   int64 storage_version = 5;
   bool is_created_by_streaming = 6;
   int32 schema_version = 7;
+  // WAL CreateSegment birth; zero from legacy callers remains unknown.
+  uint64 create_segment_time_tick = 8;
 }
 
 message AllocSegmentResponse {
@@ -503,6 +505,12 @@ message SegmentInfo {
   // Canonical manifest identity at which DataCoord last verified stats.field_logical_sizes.
   // Older coordinators may retain unknown stats fields when replacing a manifest at the same row count.
   string field_logical_sizes_manifest = 44;
+  // The target vchannel of a shard split this segment of the split source
+  // belongs to: every row of it routes to that target. Set by the rewrite
+  // compaction of the split, kept by single-input compactions of the segment,
+  // and cleared when the adoption of the split moves the segment to the
+  // target. Empty on every other segment.
+  string split_target = 45;
 }
 
 // Completed index inventory. File ownership remains in the pinned manifest.
@@ -829,6 +837,10 @@ enum CompactionType {
   BumpSchemaVersionCompaction = 12;
   // Coordinator restore task; workers execute the ordinary L0 delete plan.
   RestoreLevel0DeleteCompaction = 13;
+  // The rewrite of the segments of a shard split source: each input row is
+  // written to the output of the target its primary key routes to. The
+  // outputs stay segments of the source, labelled with their target.
+  SplitShardRewriteCompaction = 14;
 }
 
 message CompactionStateRequest {
@@ -918,7 +930,12 @@ message CompactionPlan {
   // The requesting DataCoord can commit schema-bump manifest deltas. Absent
   // or false preserves the legacy worker-produced complete manifest response.
   bool enable_manifest_delta = 32;
+  // Set only for SplitShardRewriteCompaction: how the rows of the inputs are
+  // routed to the targets of the split.
+  SplitShardRewritePlan split_rewrite = 33;
 }
+
+
 
 // ManifestColumnGroupFile is one loon/parquet file belonging to a column
 // group, in the serializable form the datanode ships to DataCoord so DataCoord
@@ -1007,6 +1024,9 @@ message CompactionSegment {
   SegmentManifestDelta manifest_delta = 17;
   // All fields materialized in place. Clear the old size for each ID without a new entry.
   repeated int64 field_logical_size_update_ids = 18;
+  // Set only by SplitShardRewriteCompaction: the split target every row of
+  // this output routes to.
+  string split_target = 19;
 }
 
 message CompactionPlanResult {
@@ -1922,6 +1942,8 @@ message CompactionTask{
   // Preserve the task outcome after state advances to cleaned. Older cleaned
   // tasks leave this as unknown and are treated as successfully completed.
   CompactionTaskState terminal_state = 31;
+  // Set only for SplitShardRewriteCompaction, copied onto its plan.
+  SplitShardRewritePlan split_rewrite = 32;
 }
 
 message PartitionStatsInfo {
@@ -2514,6 +2536,10 @@ message SplitShardTaskTarget {
   // The time tick of the SplitShard copy on this target, in the WAL of this
   // cluster.
   uint64 genesis_time_tick = 2;
+  // The residues this target owns, taken against the routing modulus of the
+  // split. They come from the SplitShard message, so they are the same on
+  // every cluster.
+  repeated uint64 residues = 3;
 }
 
 // SplitShardTask is the record DataCoord keeps of one shard split. It is
@@ -2535,4 +2561,21 @@ message SplitShardTask {
   // no decision reads them.
   int64  record_time                    = 8;
   int64  residual_flushed_time          = 9;
+  // The routing modulus the residues of the targets are taken against, from
+  // the SplitShard message.
+  uint64 routing_modulus                = 10;
+  // Local lifecycle, persisted independently of adoption.
+  bool l0_resumed = 11;
+  bool pins_released = 12;
+}
+
+
+// SplitShardRewritePlan is how a rewrite compaction of a shard split source
+// routes its rows: the residue of a primary key, taken against the modulus,
+// names the one target that owns it.
+message SplitShardRewritePlan {
+  uint64 routing_modulus                = 1;
+  repeated SplitShardTaskTarget targets = 2;
+  // Fixed source snapshot boundary; TTL filtering must never use execution time.
+  uint64 ttl_cutoff_timetick = 3;
 }
