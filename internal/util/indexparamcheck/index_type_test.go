@@ -35,6 +35,10 @@ func TestIsScalarIndexType_FMINDEX(t *testing.T) {
 }
 
 func TestIsScalarMmapIndex(t *testing.T) {
+	t.Run("STL_SORT", func(t *testing.T) {
+		assert.True(t, IsScalarMmapIndex(IndexSTLSORT))
+		assert.NoError(t, ValidateMmapIndexParams(IndexSTLSORT, map[string]string{common.MmapEnabledKey: "true"}))
+	})
 	t.Run("inverted index", func(t *testing.T) {
 		assert.True(t, IsScalarMmapIndex(IndexINVERTED))
 	})
