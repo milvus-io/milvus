@@ -496,6 +496,9 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string, useElem
 		if err != nil {
 			return nil, r.wrapTypeError(obj, field)
 		}
+		if field.GetElementNullable() {
+			return common.StructSubFieldRow(field, vec, 0)
+		}
 		maxCapacity, err := parameterutil.GetMaxCapacity(field)
 		if err != nil {
 			return nil, err

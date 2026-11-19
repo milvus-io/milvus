@@ -1061,7 +1061,7 @@ func TestValidateFieldNestedArrayElementNullable(t *testing.T) {
 		field := nestedField(innerArray())
 		field.ElementNullable = true
 		require.ErrorContains(t, ValidateField(field, schema),
-			"element_nullable is only supported for Array and ArrayOfVector sub-fields")
+			"nested array can only be in a struct array field")
 	})
 }
 
@@ -1107,5 +1107,5 @@ func TestValidateStructArrayFieldNestedNullable(t *testing.T) {
 	}
 	require.NoError(t, ValidateStructArrayField(&schemapb.StructArrayFieldSchema{Name: "items", Nullable: true, Fields: []*schemapb.FieldSchema{single}}, schema))
 	require.True(t, single.GetNullable())
-	require.ErrorContains(t, ValidateField(single, schema), "element_nullable is only supported")
+	require.NoError(t, ValidateField(single, schema))
 }
