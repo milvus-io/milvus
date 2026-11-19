@@ -109,7 +109,7 @@ func TestDataViewCatalogLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, allViews, 1)
 
-	require.NoError(t, catalog.DropDataView(ctx, 100, dataView.GetDataVersion()))
+	require.NoError(t, catalog.DropDataView(ctx, dataView))
 	views, err = catalog.ListDataViews(ctx, 100)
 	require.NoError(t, err)
 	require.Empty(t, views)
@@ -132,7 +132,7 @@ func TestDataViewCatalogUsesTwoPartVersionKey(t *testing.T) {
 
 	require.NoError(t, catalog.SaveDataView(ctx, dataView))
 	require.Contains(t, store.values, "coord/dv/100/versions/2/1")
-	require.NoError(t, catalog.DropDataView(ctx, 100, dataView.GetDataVersion()))
+	require.NoError(t, catalog.DropDataView(ctx, dataView))
 	require.Empty(t, store.values)
 }
 

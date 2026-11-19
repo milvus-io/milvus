@@ -117,6 +117,9 @@ func (it *ImportTask) PreExecute(ctx context.Context) error {
 	if colInfo == nil || colInfo.Schema == nil || colInfo.Schema.CollectionSchema == nil {
 		return merr.WrapErrImportSysFailed("collection schema is unavailable")
 	}
+	if err := refuseImportIntoSplitCollection(colInfo); err != nil {
+		return err
+	}
 	canonicalDBName := colInfo.DBName
 	if canonicalDBName == "" {
 		canonicalDBName = req.GetDbName()
@@ -327,4 +330,27 @@ func GetImportFiles(internals []*internalpb.ImportFile) []*msgpb.ImportFile {
 
 func (it *ImportTask) PostExecute(ctx context.Context) error {
 	return nil
+}
+
+// refuseImportIntoSplitCollection refuses an import into a collection that has
+// been split (one with a routing modulus).
+//
+// The design refuses an import while a split is in progress on the cluster
+// (20261109-shard_split_on_queryview.md, 10.1). The proxy cannot tell that: its
+// routing table changes once, when the split is applied, and whether the
+// cluster has finished the split is known only to the coordinators. What the
+// proxy can tell is that the collection has been split at all, and that is
+// refused here for a reason of its own: the import path places rows by
+// hash % (number of vchannels), which after a split is not the residue table
+// the shards own, so imported rows would land on shards that do not own them.
+// Until the import path places rows by the table, the request is refused
+// rather than misplaced. It is a System error: the split is the doing of
+// Milvus, not of the request.
+func refuseImportIntoSplitCollection(info *collectionInfo) error {
+	if info == nil || info.RoutingModulus == 0 {
+		return nil
+	}
+	return merr.WrapErrOperationNotSupportedMsg(
+		"import into collection %d is not supported after a shard split (routing modulus %d); insert the rows instead",
+		info.CollID, info.RoutingModulus)
 }

@@ -317,6 +317,10 @@ func Test_ListSegments(t *testing.T) {
 			if strings.HasPrefix(s, SegmentBM25logPathPrefix) {
 				return nil
 			}
+			// This ordinary collection has no committed split ownership overlay.
+			if s == adoptionPrefix(collectionID) {
+				return nil
+			}
 			return errors.New("should not reach here")
 		})
 

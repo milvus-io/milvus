@@ -128,6 +128,13 @@ type DataCoordCatalog interface {
 	GcConfirm(ctx context.Context, collectionID, partitionID typeutil.UniqueID) bool
 
 	ListCompactionTask(ctx context.Context) ([]*datapb.CompactionTask, error)
+	// SaveSplitShardTask writes the record of one shard split, keyed by its
+	// collection and split task id. ListSplitShardTask returns every record.
+	// DropSplitShardTask removes one; a missing record is not an error.
+	SaveSplitShardTask(ctx context.Context, task *datapb.SplitShardTask) error
+	ListSplitShardTask(ctx context.Context) ([]*datapb.SplitShardTask, error)
+	DropSplitShardTask(ctx context.Context, task *datapb.SplitShardTask) error
+
 	SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
 	DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
 	ListCompactionTargets(ctx context.Context) ([]*datapb.CompactionTarget, error)

@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type TickerType int8
@@ -60,6 +61,7 @@ const (
 type TriggerManager interface {
 	Start()
 	Stop()
+	TriggerL0Segments(ctx context.Context, collectionID int64, segmentIDs []int64) error
 	OnCollectionUpdate(collectionID int64)
 	ManualTrigger(ctx context.Context, req *milvuspb.ManualCompactionRequest) (UniqueID, error)
 	InitForceMergeMemoryQuerier(nodeManager session.NodeManager, mixCoord types.MixCoord, session sessionutil.SessionInterface)
@@ -281,6 +283,20 @@ func (m *CompactionTriggerManager) scheduleRequiredGroupSort(ctx context.Context
 			return
 		}
 	}
+}
+
+// TriggerL0Segments drains the materialized L0s that block a fixed split
+// boundary, subject to ordinary growing-segment, reservation and queue limits.
+func (m *CompactionTriggerManager) TriggerL0Segments(ctx context.Context, collectionID int64, segmentIDs []int64) error {
+	selected := typeutil.NewSet(segmentIDs...)
+	views, _, err := m.l0Policy.TriggerOneCollection(ctx, collectionID, meta.SegmentFilterFunc(func(segment *meta.SegmentInfo) bool {
+		return selected.Contain(segment.GetID())
+	}))
+	if err != nil {
+		return err
+	}
+	m.notify(ctx, policy.TriggerTypeLevelZeroViewManual, views, true)
+	return nil
 }
 
 func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, req *milvuspb.ManualCompactionRequest) (UniqueID, error) {

@@ -49,6 +49,7 @@ import (
 )
 
 var maxCompactionTaskExecutionDuration = map[datapb.CompactionType]time.Duration{
+	datapb.CompactionType_SplitShardRewriteCompaction:   30 * time.Minute,
 	datapb.CompactionType_RestoreLevel0DeleteCompaction: 30 * time.Minute,
 	datapb.CompactionType_MixCompaction:                 30 * time.Minute,
 	datapb.CompactionType_Level0DeleteCompaction:        30 * time.Minute,
@@ -234,7 +235,7 @@ func (c *Inspector) schedule() []ctask.CompactionTask {
 		switch t.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction, datapb.CompactionType_RestoreLevel0DeleteCompaction:
 			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
-		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_BumpSchemaVersionCompaction:
+		case datapb.CompactionType_SplitShardRewriteCompaction, datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_BumpSchemaVersionCompaction:
 			mixChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			mixLabelExcludes.Insert(t.GetLabel())
 		case datapb.CompactionType_ClusteringCompaction:
@@ -261,6 +262,10 @@ func (c *Inspector) schedule() []ctask.CompactionTask {
 			break // 1. no more task to schedule
 		}
 
+		if guard, ok := c.meta.(interface{ IsL0CompactionSuspended(string) bool }); ok && t.GetTaskProto().GetType() == datapb.CompactionType_Level0DeleteCompaction && guard.IsL0CompactionSuspended(t.GetTaskProto().GetChannel()) {
+			excluded = append(excluded, t)
+			continue
+		}
 		switch t.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction, datapb.CompactionType_RestoreLevel0DeleteCompaction:
 			if t.GetTaskProto().GetType() == datapb.CompactionType_Level0DeleteCompaction && stagedL0Excludes.Contain(t.GetTaskProto().GetChannel()) {
@@ -289,7 +294,7 @@ func (c *Inspector) schedule() []ctask.CompactionTask {
 			}
 			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			selected = append(selected, t)
-		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_BumpSchemaVersionCompaction:
+		case datapb.CompactionType_SplitShardRewriteCompaction, datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_BumpSchemaVersionCompaction:
 			// BumpSchemaVersionCompaction shares the same exclusion rules as Mix/Sort:
 			// - Channel-level mutual exclusion with L0 (L0 may write delta logs to any segment on the channel)
 			// - Label-level exclusion registered for Clustering awareness
@@ -576,7 +581,7 @@ func (c *Inspector) EnqueueCompaction(task *datapb.CompactionTask) error {
 func (c *Inspector) newCompactionTask(t *datapb.CompactionTask) (ctask.CompactionTask, error) {
 	var task ctask.CompactionTask
 	switch t.GetType() {
-	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
+	case datapb.CompactionType_SplitShardRewriteCompaction, datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
 		task = ctask.NewMixCompactionTask(t, c.allocator, c.meta, c.compactionTaskMeta, c.ievm)
 	case datapb.CompactionType_Level0DeleteCompaction, datapb.CompactionType_RestoreLevel0DeleteCompaction:
 		l0 := ctask.NewL0CompactionTask(t, c.allocator, c.meta, c.compactionTaskMeta)

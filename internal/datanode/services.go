@@ -290,6 +290,8 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 	binlogIO := io.NewBinlogIO(cm)
 	namespaceEnabled := req.GetSchema().GetEnableNamespace()
 	switch req.GetType() {
+	case datapb.CompactionType_SplitShardRewriteCompaction:
+		task = compactor.NewSplitShardRewriteCompactionTask(taskCtx, binlogIO, req, compactionParams)
 	case datapb.CompactionType_Level0DeleteCompaction:
 		task = compactor.NewLevelZeroCompactionTask(
 			taskCtx,

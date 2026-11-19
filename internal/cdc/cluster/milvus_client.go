@@ -42,6 +42,11 @@ type MilvusClient interface {
 type CreateMilvusClientFunc func(ctx context.Context, cluster *commonpb.MilvusCluster) (MilvusClient, error)
 
 func NewMilvusClient(ctx context.Context, cluster *commonpb.MilvusCluster) (MilvusClient, error) {
+	return NewPeerClient(ctx, cluster)
+}
+
+// NewPeerClient opens an authenticated connection using the peer's CDC settings.
+func NewPeerClient(ctx context.Context, cluster *commonpb.MilvusCluster) (*milvusclient.Client, error) {
 	connParam := cluster.GetConnectionParam()
 	config := &milvusclient.ClientConfig{
 		Address: connParam.GetUri(),
