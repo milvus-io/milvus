@@ -222,12 +222,14 @@ func TestDDLCallbacksPropertyOnlyAlterSkipsSchemaEvolutionValidation(t *testing.
 func TestMappedFieldAdditionAdmission(t *testing.T) {
 	paramtable.Init()
 	for _, tc := range []struct {
-		name    string
-		source  string
-		spec    string
-		mapping string
+		name               string
+		source             string
+		spec               string
+		mapping            string
+		wantMissingMapping bool
 	}{
 		{name: "milvus table", source: "s3://bucket/snapshot", spec: `{"format":"milvus-table"}`, mapping: "extra"},
+		{name: "milvus table without mapping", source: "s3://bucket/snapshot", spec: `{"format":"milvus-table"}`, wantMissingMapping: true},
 		{name: "parquet", source: "s3://bucket/data", spec: `{"format":"parquet"}`, mapping: "extra"},
 		{name: "internal"},
 	} {
@@ -277,8 +279,14 @@ func TestMappedFieldAdditionAdmission(t *testing.T) {
 					require.NoError(t, marshalErr)
 					err = core.broadcastAlterCollectionForAddField(context.Background(), &milvuspb.AddCollectionFieldRequest{DbName: "db", CollectionName: coll.Name, Schema: encoded})
 				}
-				require.ErrorIs(t, err, boundary)
-				require.Equal(t, 1, cacheCalls)
+				if tc.wantMissingMapping {
+					require.ErrorIs(t, err, merr.ErrParameterInvalid)
+					require.ErrorContains(t, err, "requires external_field mapping")
+					require.Zero(t, cacheCalls, "unmapped fields must fail before publication")
+				} else {
+					require.ErrorIs(t, err, boundary)
+					require.Equal(t, 1, cacheCalls)
+				}
 				require.True(t, proto.Equal(before, coll.ToCollectionSchemaPB()), "DDL admission must not mutate committed schema")
 			})
 		}

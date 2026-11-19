@@ -4364,17 +4364,21 @@ func TestRefreshExternalCollectionMilvusTableFunctionOutputFieldIDCollision(t *t
 	flush, err := mc.Flush(ctx, client.NewFlushOption(sourceName))
 	require.NoError(t, err)
 	require.NoError(t, flush.Await(ctx))
-	snapshotName := common.GenRandomString("mt_fn_id_snap", 6)
-	require.NoError(t, mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, sourceName)))
-	t.Cleanup(func() {
-		_ = mc.DropSnapshot(context.Background(), client.NewDropSnapshotOption(snapshotName, sourceName))
-	})
-	snapshot, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(snapshotName, sourceName))
-	require.NoError(t, err)
-	require.NotEmpty(t, snapshot.GetS3Location())
+	makeSnapshot := func() string {
+		t.Helper()
+		name := common.GenRandomString("mt_fn_id_snap", 6)
+		require.NoError(t, mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(name, sourceName)))
+		t.Cleanup(func() { _ = mc.DropSnapshot(context.Background(), client.NewDropSnapshotOption(name, sourceName)) })
+		snapshot, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(name, sourceName))
+		require.NoError(t, err)
+		require.NotEmpty(t, snapshot.GetS3Location())
+		return snapshot.GetS3Location()
+	}
+	firstSnapshot := makeSnapshot()
+	spec := extTestSpec(getMinIOConfig(), "milvus-table")
 
 	targetSchema := entity.NewSchema().WithName(targetName).
-		WithExternalSource(snapshot.GetS3Location()).WithExternalSpec(extTestSpec(getMinIOConfig(), "milvus-table")).
+		WithExternalSource(firstSnapshot).WithExternalSpec(spec).
 		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).
 			WithIsPrimaryKey(true).WithExternalField("id")).
 		WithField(textField("doc", "text")).
@@ -4463,13 +4467,77 @@ func TestRefreshExternalCollectionMilvusTableFunctionOutputFieldIDCollision(t *t
 	checkResults()
 
 	refresh, err = mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(targetName).
-		WithExternalSource(snapshot.GetS3Location()).WithExternalSpec(extTestSpec(getMinIOConfig(), "milvus-table")))
+		WithExternalSource(firstSnapshot).WithExternalSpec(spec))
 	require.NoError(t, err)
 	waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
 	load, err = mc.LoadCollection(ctx, client.NewLoadCollectionOption(targetName).WithRefresh(true))
 	require.NoError(t, err)
 	require.NoError(t, load.Await(ctx))
 	checkResults()
+
+	// Remove the test fixture's old source segments so every segment in the next
+	// snapshot physically stores the added column. The target stays loaded.
+	require.NoError(t, mc.TruncateCollection(ctx, client.NewTruncateCollectionOption(sourceName)))
+	require.NoError(t, mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(sourceName,
+		entity.NewField().WithName("extra").WithDataType(entity.FieldTypeInt64).WithNullable(true))))
+	sourceDesc, err = mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(sourceName))
+	require.NoError(t, err)
+	require.Equal(t, int64(104), fieldID(sourceDesc.Schema, "extra"), "the new source column must use the former BM25 output ID")
+
+	// Exceed the small-segment threshold so the refreshed data can build indexes.
+	ids = []int64{51}
+	docs = []string{"refresh collision sentinel"}
+	vectors = [][]float32{{51, 52, 53, 54}}
+	unused := []int64{151}
+	extra := []int64{701}
+	for i := 1; i < 2048; i++ {
+		ids = append(ids, int64(1000+i))
+		docs = append(docs, "parquet external table")
+		vectors = append(vectors, []float32{1000 + float32(i), 1, 2, 3})
+		unused = append(unused, int64(20000+i))
+		extra = append(extra, int64(30000+i))
+	}
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(sourceName,
+		column.NewColumnInt64("id", ids),
+		column.NewColumnInt64("unused", unused),
+		column.NewColumnVarChar("text", docs),
+		column.NewColumnFloatVector("vec", testVecDim, vectors),
+		column.NewColumnInt64("extra", extra)))
+	require.NoError(t, err)
+	flush, err = mc.Flush(ctx, client.NewFlushOption(sourceName))
+	require.NoError(t, err)
+	require.NoError(t, flush.Await(ctx))
+	secondSnapshot := makeSnapshot()
+
+	require.NoError(t, mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(targetName,
+		entity.NewField().WithName("extra").WithDataType(entity.FieldTypeInt64).WithNullable(true).WithExternalField("extra"))))
+	refresh, err = mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(targetName).
+		WithExternalSource(secondSnapshot).WithExternalSpec(spec))
+	require.NoError(t, err)
+	waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+	load, err = mc.LoadCollection(ctx, client.NewLoadCollectionOption(targetName).WithRefresh(true))
+	require.NoError(t, err)
+	require.NoError(t, load.Await(ctx))
+
+	rows, err := mc.Query(ctx, client.NewQueryOption(targetName).WithFilter("id == 51").WithOutputFields("extra").
+		WithConsistencyLevel(entity.ClStrong))
+	require.NoError(t, err)
+	require.Equal(t, 1, rows.ResultCount)
+	value, err := rows.GetColumn("extra").GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(701), value)
+
+	results, err := mc.Search(ctx, client.NewSearchOption(targetName, 1, []entity.Vector{entity.Text("sentinel")}).
+		WithANNSField("sparse").WithOutputFields("id", "extra"))
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, 1, results[0].ResultCount)
+	id, err := results[0].GetColumn("id").GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(51), id)
+	value, err = results[0].GetColumn("extra").GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(701), value)
 }
 
 func TestRefreshExternalCollectionMilvusTableMappedFieldIDsAndAddField(t *testing.T) {

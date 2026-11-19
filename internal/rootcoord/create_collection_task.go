@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
@@ -46,6 +47,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+const milvusTableFunctionOutputFieldIDStart int64 = 10000
 
 type createCollectionTask struct {
 	*Core
@@ -300,24 +303,23 @@ func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.Collect
 		}
 	}
 
-	// Source files retain numeric source IDs. Generated outputs are target-owned
-	// physical columns in the same manifest and must not alias source columns.
-	nextID := int64(idx + StartOfUserFieldID)
-	for _, field := range schema.GetFields() {
-		if !typeutil.IsFunctionOutputField(schema, field) {
-			continue
-		}
-		if _, conflict := t.milvusTableSourceFieldIDs[field.GetFieldID()]; !conflict {
-			continue
-		}
-		for {
-			if _, occupied := t.milvusTableSourceFieldIDs[nextID]; !occupied {
-				break
+	// Source and target-owned columns share numeric names in the manifest. Start
+	// function outputs above ordinary allocations to leave room for source growth.
+	if t.milvusTableSourceFieldIDs != nil {
+		nextID := max(int64(idx+StartOfUserFieldID), milvusTableFunctionOutputFieldIDStart)
+		for _, field := range schema.GetFields() {
+			if !typeutil.IsFunctionOutputField(schema, field) {
+				continue
 			}
+			for {
+				if _, occupied := t.milvusTableSourceFieldIDs[nextID]; !occupied {
+					break
+				}
+				nextID++
+			}
+			field.FieldID = nextID
 			nextID++
 		}
-		field.FieldID = nextID
-		nextID++
 	}
 
 	return assignFunctionIDsFromFieldNames(schema)
@@ -833,12 +835,36 @@ func (t *createCollectionTask) validateIfCollectionExists(ctx context.Context) e
 	existedCollInfo, err := t.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err == nil {
 		newCollInfo := newCollectionModel(t.header, t.body, 0)
-		if equal := existedCollInfo.Equal(*newCollInfo); !equal {
+		if !existedCollInfo.Equal(*newCollInfo) && !t.matchesExistingMilvusTable(existedCollInfo, newCollInfo) {
 			return merr.WrapErrParameterInvalidMsg("create duplicate collection with different parameters, collection: %s", t.Req.GetCollectionName())
 		}
 		return errIgnoredCreateCollection
 	}
 	return nil
+}
+
+func (t *createCollectionTask) matchesExistingMilvusTable(existing, candidate *model.Collection) bool {
+	if t.milvusTableSourceFieldIDs == nil || existing.ExternalSource != candidate.ExternalSource || existing.ExternalSpec != candidate.ExternalSpec {
+		return false
+	}
+
+	// Compare the proposed schema using committed function output IDs so
+	// repeated creates work across changes to the allocation policy.
+	outputIDs := make(map[string]int64)
+	for _, field := range existing.Fields {
+		if field.IsFunctionOutput {
+			outputIDs[field.Name] = field.FieldID
+		}
+	}
+	for _, field := range candidate.Fields {
+		if id, ok := outputIDs[field.Name]; field.IsFunctionOutput && ok {
+			field.FieldID = id
+		}
+	}
+	schema := candidate.ToCollectionSchemaPB()
+	schema.Properties = t.Req.GetProperties()
+	_, candidate.Properties = mustConsumeConsistencyLevel(updateMaxFieldIDProperty(schema.Properties, maxAssignedFieldIDFromSchema(schema)))
+	return existing.Equal(*candidate)
 }
 
 func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema, infos *[]*querypb.AnalyzerInfo) error {

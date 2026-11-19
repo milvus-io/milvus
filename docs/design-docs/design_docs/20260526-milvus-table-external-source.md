@@ -116,11 +116,12 @@ target field name -> external_field source field name -> source field ID
 At create time, RootCoord validates source names and field definitions. Target
 IDs are allocated normally; they need not match source IDs. The collection
 schema retains names in `external_field`, not numeric source IDs.
-Target function outputs are physical columns in the same manifest. If their
-normal allocation collides with a source field ID, RootCoord assigns them an
-unused target ID outside the source ID set before binding function inputs and
-outputs. The already-read snapshot supplies this temporary allocation constraint;
-only the resulting target schema is persisted and replayed.
+Target function outputs are physical columns in the same manifest. For new
+milvus-table collections, RootCoord allocates their IDs starting at 10000,
+skipping IDs assigned to target fields or present in the creation snapshot.
+This leaves room for the source schema to grow. Refresh still rejects a mapped
+source column whose ID collides with an existing function output. The resulting
+target schema is persisted and replayed with its assigned IDs.
 
 Every newly imported segment carries the refresh task's schema version.
 

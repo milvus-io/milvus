@@ -1024,8 +1024,21 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 					"alter collection schema operation is not supported for external collection %s", request.GetCollectionName())),
 			}, nil
 		}
-		plan, parseErr := schemautil.ParseAlterSchemaAddRequest(request.GetAction().GetAddRequest())
-		if parseErr != nil || plan.Kind != schemautil.AlterSchemaAddField {
+		action := request.GetAction()
+		if action == nil {
+			return &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Status(merr.WrapErrParameterInvalidMsg("action is nil"))}, nil
+		}
+		var plan *schemautil.AlterSchemaAddPlan
+		switch op := action.GetOp().(type) {
+		case *milvuspb.AlterCollectionSchemaRequest_Action_AddRequest:
+			plan, err = schemautil.ParseAlterSchemaAddRequest(op.AddRequest)
+			if err != nil {
+				return &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Status(err)}, nil
+			}
+		case nil:
+			return &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Status(merr.WrapErrParameterInvalidMsg("unknown action type in alter collection schema request"))}, nil
+		}
+		if plan == nil || plan.Kind != schemautil.AlterSchemaAddField {
 			return &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Status(merr.WrapErrOperationNotSupportedMsg("external collections support only mapped milvus-table top-level field additions"))}, nil
 		}
 	}

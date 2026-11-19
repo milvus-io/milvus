@@ -1813,10 +1813,9 @@ func TestPrepareMilvusTableSnapshotSchemaFunctionOutputAvoidsSourceColumns(t *te
 		sourceStructLeafID int64
 		wantOutputID       int64
 	}{
-		{name: "first free target ID", sourceVectorID: 105, sourceTextID: 103, wantOutputID: 104},
-		{name: "skip occupied source ID", sourceVectorID: 104, sourceTextID: 103, wantOutputID: 105},
-		{name: "noncolliding output keeps normal ID", sourceVectorID: 105, sourceTextID: 106, wantOutputID: 103},
-		{name: "unmapped struct child reserves physical ID", sourceVectorID: 105, sourceTextID: 106, sourceStructLeafID: 103, wantOutputID: 104},
+		{name: "function output starts at 10000", sourceVectorID: 105, sourceTextID: 106, wantOutputID: 10000},
+		{name: "skip occupied source IDs", sourceVectorID: 10000, sourceTextID: 10001, wantOutputID: 10002},
+		{name: "unmapped struct child reserves physical ID", sourceVectorID: 105, sourceTextID: 106, sourceStructLeafID: 10000, wantOutputID: 10001},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var sourceStructs []*schemapb.StructArrayFieldSchema
@@ -1912,6 +1911,44 @@ func TestPrepareMilvusTableSnapshotSchemaFunctionOutputAvoidsSourceColumns(t *te
 			assert.Equal(t, []int64{tc.wantOutputID}, schema.GetFunctions()[0].GetOutputFieldIds())
 		})
 	}
+}
+
+func TestCreateMilvusTableRetryPreservesExistingFunctionOutputIDs(t *testing.T) {
+	ctx := context.Background()
+	properties := []*commonpb.KeyValuePair{{Key: common.ConsistencyLevel, Value: "Strong"}}
+	header := &message.CreateCollectionMessageHeader{DbId: 1, CollectionId: 2}
+	body := &message.CreateCollectionRequest{CollectionSchema: &schemapb.CollectionSchema{
+		Name:           "target",
+		ExternalSource: "s3://bucket/snapshot.json",
+		ExternalSpec:   `{"format":"milvus-table"}`,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "pk"},
+			{FieldID: 101, Name: "doc", DataType: schemapb.DataType_VarChar, ExternalField: "text"},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Properties: updateMaxFieldIDProperty(properties, 102),
+	}}
+	existing := newCollectionModel(header, body, 0)
+	read := mockey.Mock((*MetaTable).GetCollectionByName).Return(existing, nil).Build()
+	defer read.UnPatch()
+	alias := mockey.Mock((*MetaTable).DescribeAlias).Return("", merr.ErrCollectionNotFound).Build()
+	defer alias.UnPatch()
+
+	task := &createCollectionTask{
+		Core:                      &Core{meta: &MetaTable{}},
+		Req:                       &milvuspb.CreateCollectionRequest{CollectionName: "target", Properties: properties},
+		header:                    header,
+		body:                      body,
+		milvusTableSourceFieldIDs: map[int64]struct{}{100: {}, 101: {}},
+	}
+	require.NoError(t, task.assignFieldAndFunctionID(body.CollectionSchema))
+	body.CollectionSchema.Properties = updateMaxFieldIDProperty(properties, milvusTableFunctionOutputFieldIDStart)
+	require.ErrorIs(t, task.validateIfCollectionExists(ctx), errIgnoredCreateCollection)
+	require.Equal(t, milvusTableFunctionOutputFieldIDStart, body.CollectionSchema.Fields[2].GetFieldID())
+	require.Equal(t, int64(102), existing.Fields[2].FieldID)
+
+	body.CollectionSchema.Fields[1].ExternalField = "different_text"
+	require.ErrorIs(t, task.validateIfCollectionExists(ctx), merr.ErrParameterInvalid)
 }
 
 // Milvus-table uses the normal function validation after allocating logical IDs.

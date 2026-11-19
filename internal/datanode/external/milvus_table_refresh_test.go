@@ -41,6 +41,28 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+func TestInitializeMilvusTableFieldMappingRejectsFunctionOutputCollision(t *testing.T) {
+	task := NewRefreshExternalCollectionTask(context.Background(), &datapb.RefreshExternalCollectionTaskRequest{
+		Schema: &schemapb.CollectionSchema{
+			ExternalSource: "s3://bucket/snapshot.json",
+			ExternalSpec:   `{"format":"milvus-table"}`,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "id"},
+				{FieldID: 10000, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+				{FieldID: 10001, Name: "extra", DataType: schemapb.DataType_Int64, ExternalField: "extra"},
+			},
+		},
+	})
+	task.milvusTableSourceSchema = &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 10000, Name: "extra", DataType: schemapb.DataType_Int64},
+	}}
+
+	err := task.initializeMilvusTableFieldMapping()
+	require.ErrorIs(t, err, merr.ErrOperationNotSupported)
+	require.ErrorContains(t, err, "source physical column 10000 conflicts with a target function output column")
+}
+
 func TestMilvusTableRefreshReadsTargetManifestOnce(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
