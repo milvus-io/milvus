@@ -35,11 +35,13 @@
 #include "common/common_type_c.h"
 #include "gtest/gtest.h"
 #include "milvus-storage/common/constants.h"
+#include "milvus-storage/reader.h"
 #include "segcore/column_groups_c.h"
 #include "segcore/packed_reader_c.h"
 #include "segcore/packed_writer_c.h"
 #include "storage/PluginLoader.h"
 #include "storage/loon_ffi/ffi_reader_c.h"
+#include "storage/loon_ffi/property_singleton.h"
 #include "test_utils/Constants.h"
 #include "test_utils/PlannerCipherPlugin.h"
 
@@ -161,7 +163,6 @@ WriteInt64File(const std::string& file_path,
                       arrow::key_value_metadata(
                           {milvus_storage::ARROW_FIELD_ID_KEY}, {"100"}))});
     *out_schema = schema;
-    auto batch = arrow::RecordBatch::Make(schema, array->length(), {array});
 
     struct ArrowSchema c_write_schema;
     ASSERT_TRUE(arrow::ExportSchema(*schema, &c_write_schema).ok());
@@ -195,7 +196,7 @@ WriteInt64File(const std::string& file_path,
 
     struct ArrowArray carray;
     struct ArrowSchema cschema;
-    ASSERT_TRUE(arrow::ExportRecordBatch(*batch, &carray, &cschema).ok());
+    ASSERT_TRUE(arrow::ExportArray(*array, &carray, &cschema).ok());
     struct ArrowArray arrays[] = {carray};
     struct ArrowSchema array_schemas[] = {cschema};
     status = WriteRecordBatch(writer, arrays, array_schemas, &c_origin_schema);
@@ -238,6 +239,39 @@ class PackedImportCipher : public milvus::test::PlannerCipherPlugin,
                 (const, override));
 };
 
+arrow::Result<int64_t>
+ReadImportFFIFile(const std::string& path,
+                  std::shared_ptr<arrow::Schema> schema,
+                  const CPluginContext* source) {
+    using namespace milvus_storage::api;
+    auto groups = std::make_shared<ColumnGroups>();
+    auto group = std::make_shared<ColumnGroup>();
+    group->columns = {"int64"};
+    group->format = "parquet";
+    group->files.push_back({path, 0, 3, {}});
+    groups->push_back(group);
+    auto reader = Reader::create(
+        groups,
+        schema,
+        nullptr,
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .GetProperties());
+    ArrowArrayStream stream{};
+    auto status = RegisterPackedImportReadKeyset(source, reader.get());
+    if (status.error_code == 0) {
+        status = GetFFIReaderStream(reader.get(), 1024, &stream);
+    }
+    if (status.error_code != 0) {
+        auto error = arrow::Status::Invalid(status.error_msg);
+        free(const_cast<char*>(status.error_msg));
+        return error;
+    }
+    ARROW_ASSIGN_OR_RAISE(auto batch_reader,
+                          arrow::ImportRecordBatchReader(&stream));
+    ARROW_ASSIGN_OR_RAISE(auto batch, batch_reader->Next());
+    return batch ? batch->num_rows() : 0;
+}
+
 }  // namespace
 
 TEST(CPackedTest, ImportWriterAndReadersUseTaskKeysets) {
@@ -254,7 +288,7 @@ TEST(CPackedTest, ImportWriterAndReadersUseTaskKeysets) {
     auto dek = std::make_shared<TestParquetKey>();
     CPluginContext target{17, 23, "dGFyZ2V0"};
     CPluginContext source{17, 0, "c291cmNl"};
-    EXPECT_CALL(*cipher, RegisterReadKeyset(17, 0, "c291cmNl")).Times(2);
+    EXPECT_CALL(*cipher, RegisterReadKeyset(17, 0, "c291cmNl")).Times(3);
     EXPECT_CALL(*cipher, GetEncryptorForKeyset(17, 23, "dGFyZ2V0"))
         .WillOnce(testing::Return(
             PackedImportCipher::EncryptorResult{dek, "target-edek"}));
@@ -267,11 +301,10 @@ TEST(CPackedTest, ImportWriterAndReadersUseTaskKeysets) {
     ASSERT_NO_FATAL_FAILURE(WriteInt64File(path, 3, &schema, &target));
     char* paths[] = {path.data()};
     // Each open can register an older source for the same EZ independently.
-    auto status = RegisterPackedImportReadKeyset(&source, nullptr);
-    ASSERT_EQ(status.error_code, 0) << status.error_msg;
     int64_t* ids = nullptr;
     int64_t* counts = nullptr;
-    status = GetPackedFileFieldIDs(paths, 1, nullptr, nullptr, &ids, &counts);
+    auto status =
+        GetImportPackedFileFieldIDs(paths, 1, nullptr, &source, &ids, &counts);
     ASSERT_EQ(status.error_code, 0) << status.error_msg;
     auto free_footer = folly::makeGuard([&] {
         free(ids);
@@ -280,13 +313,19 @@ TEST(CPackedTest, ImportWriterAndReadersUseTaskKeysets) {
     ASSERT_EQ(counts[0], 1);
     EXPECT_EQ(ids[0], 100);
 
-    status = RegisterPackedImportReadKeyset(&source, nullptr);
-    ASSERT_EQ(status.error_code, 0) << status.error_msg;
     ArrowSchema read_schema{};
     ASSERT_TRUE(arrow::ExportSchema(*schema, &read_schema).ok());
     CPackedReader reader = nullptr;
-    status = NewPackedReader(
-        paths, 1, &read_schema, 1 << 20, false, &reader, nullptr);
+    status = NewImportPackedReader(paths,
+                                   1,
+                                   &read_schema,
+                                   1 << 20,
+                                   false,
+                                   nullptr,
+                                   nullptr,
+                                   nullptr,
+                                   &reader,
+                                   &source);
     ASSERT_EQ(status.error_code, 0) << status.error_msg;
     auto close_reader = folly::makeGuard([&] { CloseReader(reader); });
     ArrowArray batch{};
@@ -295,6 +334,90 @@ TEST(CPackedTest, ImportWriterAndReadersUseTaskKeysets) {
     auto read = arrow::ImportRecordBatch(&batch, &read_schema);
     ASSERT_TRUE(read.ok()) << read.status().ToString();
     EXPECT_EQ((*read)->num_rows(), 3);
+    auto ffi_rows = ReadImportFFIFile(path, schema, &source);
+    ASSERT_TRUE(ffi_rows.ok()) << ffi_rows.status();
+    EXPECT_EQ(*ffi_rows, 3);
+
+    // The global plugin can decrypt this file. Neither a different source EZ
+    // nor a plaintext-only dispatch may look up that decryptor.
+    testing::Mock::VerifyAndClearExpectations(cipher.get());
+    CPluginContext other{29, 0, "b3RoZXI="};
+    EXPECT_CALL(*cipher, RegisterReadKeyset(29, 0, "b3RoZXI=")).Times(3);
+    EXPECT_CALL(*cipher, GetDecryptor(testing::_, testing::_, testing::_))
+        .Times(0);
+    for (auto* rejected : {&other, static_cast<CPluginContext*>(nullptr)}) {
+        int64_t* unknown_ids = nullptr;
+        int64_t* unknown_counts = nullptr;
+        status = GetImportPackedFileFieldIDs(
+            paths, 1, nullptr, rejected, &unknown_ids, &unknown_counts);
+        ASSERT_NE(status.error_code, 0);
+        EXPECT_THAT(status.error_msg,
+                    testing::HasSubstr("import source encryption zone"));
+        free(const_cast<char*>(status.error_msg));
+        ASSERT_TRUE(arrow::ExportSchema(*schema, &read_schema).ok());
+        CPackedReader blocked = nullptr;
+        status = NewImportPackedReader(paths,
+                                       1,
+                                       &read_schema,
+                                       1 << 20,
+                                       false,
+                                       nullptr,
+                                       nullptr,
+                                       nullptr,
+                                       &blocked,
+                                       rejected);
+        ASSERT_NE(status.error_code, 0);
+        EXPECT_THAT(status.error_msg,
+                    testing::HasSubstr("import source encryption zone"));
+        free(const_cast<char*>(status.error_msg));
+        EXPECT_EQ(blocked, nullptr);
+        auto blocked_ffi = ReadImportFFIFile(path, schema, rejected);
+        ASSERT_FALSE(blocked_ffi.ok());
+        EXPECT_THAT(blocked_ffi.status().ToString(),
+                    testing::HasSubstr("import source encryption zone"));
+    }
+}
+
+TEST(CPackedTest, PlaintextImportOpensPackedDataAndFooterWithoutCipher) {
+    auto path = TestLocalPath + "plaintext_import_source";
+    std::shared_ptr<arrow::Schema> schema;
+    ASSERT_NO_FATAL_FAILURE(WriteInt64File(path, 3, &schema));
+    char* paths[] = {path.data()};
+    int64_t* ids = nullptr;
+    int64_t* counts = nullptr;
+    auto status =
+        GetImportPackedFileFieldIDs(paths, 1, nullptr, nullptr, &ids, &counts);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    auto free_footer = folly::makeGuard([&] {
+        free(ids);
+        free(counts);
+    });
+    ASSERT_EQ(counts[0], 1);
+    EXPECT_EQ(ids[0], 100);
+    ArrowSchema read_schema{};
+    ASSERT_TRUE(arrow::ExportSchema(*schema, &read_schema).ok());
+    CPackedReader reader = nullptr;
+    status = NewImportPackedReader(paths,
+                                   1,
+                                   &read_schema,
+                                   1 << 20,
+                                   false,
+                                   nullptr,
+                                   nullptr,
+                                   nullptr,
+                                   &reader,
+                                   nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    auto close_reader = folly::makeGuard([&] { CloseReader(reader); });
+    ArrowArray batch{};
+    status = ReadNext(reader, &batch, &read_schema);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    auto rows = arrow::ImportRecordBatch(&batch, &read_schema);
+    ASSERT_TRUE(rows.ok()) << rows.status();
+    EXPECT_EQ((*rows)->num_rows(), 3);
+    auto ffi_rows = ReadImportFFIFile(path, schema, nullptr);
+    ASSERT_TRUE(ffi_rows.ok()) << ffi_rows.status();
+    EXPECT_EQ(*ffi_rows, 3);
 }
 
 // The eager mode must return the same rows, in the same order, as the lazy

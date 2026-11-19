@@ -269,18 +269,6 @@ func openFFIPackedReader(
 	}, nil
 }
 
-// V2 readers and footer probes already retrieve DEKs from file metadata.
-// After import registration, passing nil keeps their ordinary Update path idle.
-func packedReadContext(context *indexcgopb.StoragePluginContext, forImport bool) (*C.CPluginContext, func(), error) {
-	cContext, release := newCPluginContext(context)
-	if !forImport {
-		return cContext, release, nil
-	}
-	status := C.RegisterPackedImportReadKeyset(cContext, nil)
-	release()
-	return nil, func() {}, ConsumeCStatusIntoError(&status)
-}
-
 func newCPluginContext(storagePluginContext *indexcgopb.StoragePluginContext) (*C.CPluginContext, func()) {
 	if storagePluginContext == nil {
 		return nil, func() {}

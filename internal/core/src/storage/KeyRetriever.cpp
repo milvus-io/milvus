@@ -75,16 +75,29 @@ GetPackedWriterKeys(const CPluginContext* context, bool for_import) {
             context->ez_id, context->collection_id, std::move(result.second))};
 }
 
+KeyRetriever::KeyRetriever(const CPluginContext* import_source)
+    : for_import_(true) {
+    if (import_source) {
+        RegisterImportReadKeyset(import_source);
+        source_ez_id_ = import_source->ez_id;
+    }
+}
+
 std::string
 KeyRetriever::GetKey(const std::string& key_metadata) {
-    auto plugin = PluginLoader::GetInstance().getCipherPlugin();
-    AssertInfo(plugin != nullptr, "cipher plugin not found");
     auto context = DecodeKeyMetadata(key_metadata);
-    if (!(context != nullptr)) {
+    if (!context) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "invalid key metadata: {}",
                   key_metadata);
     }
+    if (for_import_ && source_ez_id_ != context->ez_id) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "encrypted file does not match the dispatched import source "
+                  "encryption zone");
+    }
+    auto plugin = PluginLoader::GetInstance().getCipherPlugin();
+    AssertInfo(plugin != nullptr, "cipher plugin not found");
     auto decryptor = plugin->GetDecryptor(
         context->ez_id, context->collection_id, std::string(context->key));
     if (!decryptor) {
@@ -96,10 +109,14 @@ KeyRetriever::GetKey(const std::string& key_metadata) {
 
 parquet::ReaderProperties
 GetReaderProperties() {
+    return GetReaderProperties(std::make_shared<KeyRetriever>());
+}
+
+parquet::ReaderProperties
+GetReaderProperties(
+    std::shared_ptr<parquet::DecryptionKeyRetriever> key_retriever) {
     parquet::ReaderProperties reader_properties =
         parquet::default_reader_properties();
-    std::shared_ptr<milvus::storage::KeyRetriever> key_retriever =
-        std::make_shared<milvus::storage::KeyRetriever>();
     parquet::FileDecryptionProperties::Builder builder;
     reader_properties.file_decryption_properties(
         builder.key_retriever(key_retriever)

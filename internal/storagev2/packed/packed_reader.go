@@ -149,60 +149,20 @@ func NewPackedReaderWithExtfs(
 	var cPackedReader C.CPackedReader
 	var status C.CStatus
 
-	pluginContextPtr, releasePluginContext, err := packedReadContext(storagePluginContext, options.importReadKeyset)
-	if err != nil {
-		return nil, err
-	}
+	pluginContextPtr, releasePluginContext := newCPluginContext(storagePluginContext)
 	defer releasePluginContext()
-
-	if cProperties != nil {
+	var cConfig *C.CStorageConfig
+	if cProperties == nil && storageConfig != nil {
+		config, release := newCStorageConfig(storageConfig)
+		defer release()
+		cConfig = &config
+	}
+	if options.importReadKeyset {
+		status = C.NewImportPackedReader(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerPrebuffer, cConfig, cProperties, cFilesystemPath, &cPackedReader, pluginContextPtr)
+	} else if cProperties != nil {
 		status = C.NewPackedReaderWithProperties(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerPrebuffer, cProperties, cFilesystemPath, &cPackedReader, pluginContextPtr)
-	} else if storageConfig != nil {
-		cStorageConfig := C.CStorageConfig{
-			address:                         C.CString(storageConfig.GetAddress()),
-			bucket_name:                     C.CString(storageConfig.GetBucketName()),
-			access_key_id:                   C.CString(storageConfig.GetAccessKeyID()),
-			access_key_value:                C.CString(storageConfig.GetSecretAccessKey()),
-			root_path:                       C.CString(storageConfig.GetRootPath()),
-			storage_type:                    C.CString(storageConfig.GetStorageType()),
-			cloud_provider:                  C.CString(storageConfig.GetCloudProvider()),
-			iam_endpoint:                    C.CString(storageConfig.GetIAMEndpoint()),
-			log_level:                       C.CString("warn"),
-			useSSL:                          C.bool(storageConfig.GetUseSSL()),
-			sslCACert:                       C.CString(storageConfig.GetSslCACert()),
-			useIAM:                          C.bool(storageConfig.GetUseIAM()),
-			region:                          C.CString(storageConfig.GetRegion()),
-			useVirtualHost:                  C.bool(storageConfig.GetUseVirtualHost()),
-			requestTimeoutMs:                C.int64_t(storageConfig.GetRequestTimeoutMs()),
-			gcp_credential_json:             C.CString(storageConfig.GetGcpCredentialJSON()),
-			use_custom_part_upload:          true,
-			max_connections:                 C.uint32_t(storageConfig.GetMaxConnections()),
-			tls_min_version:                 C.CString(tlsMinVersionForStorage(storageConfig.GetSslTlsMinVersion())),
-			use_crc32c_checksum:             C.bool(storageConfig.GetUseCrc32CChecksum()),
-			talon_mode:                      C.uint32_t(storageConfig.GetTalonMode()),
-			talon_enabled_stages:            C.uint32_t(storageConfig.GetTalonEnabledStages()),
-			talon_small_read_threshold:      C.uint32_t(storageConfig.GetTalonSmallReadThreshold()),
-			talon_coordinator:               C.CString(storageConfig.GetTalonCoordinator()),
-			talon_block_size:                C.uint32_t(storageConfig.GetTalonBlockSize()),
-			talon_max_idle_per_addr:         C.uint32_t(storageConfig.GetTalonMaxIdlePerAddr()),
-			talon_enable_for_external_table: C.bool(storageConfig.GetTalonEnableForExternalTable()),
-		}
-		defer C.free(unsafe.Pointer(cStorageConfig.address))
-		defer C.free(unsafe.Pointer(cStorageConfig.bucket_name))
-		defer C.free(unsafe.Pointer(cStorageConfig.access_key_id))
-		defer C.free(unsafe.Pointer(cStorageConfig.access_key_value))
-		defer C.free(unsafe.Pointer(cStorageConfig.root_path))
-		defer C.free(unsafe.Pointer(cStorageConfig.storage_type))
-		defer C.free(unsafe.Pointer(cStorageConfig.cloud_provider))
-		defer C.free(unsafe.Pointer(cStorageConfig.iam_endpoint))
-		defer C.free(unsafe.Pointer(cStorageConfig.log_level))
-		defer C.free(unsafe.Pointer(cStorageConfig.sslCACert))
-		defer C.free(unsafe.Pointer(cStorageConfig.region))
-		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
-		defer C.free(unsafe.Pointer(cStorageConfig.tls_min_version))
-		defer C.free(unsafe.Pointer(cStorageConfig.talon_coordinator))
-
-		status = C.NewPackedReaderWithStorageConfig(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerPrebuffer, cStorageConfig, &cPackedReader, pluginContextPtr)
+	} else if cConfig != nil {
+		status = C.NewPackedReaderWithStorageConfig(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerPrebuffer, *cConfig, &cPackedReader, pluginContextPtr)
 	} else {
 		status = C.NewPackedReader(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerPrebuffer, &cPackedReader, pluginContextPtr)
 	}
@@ -295,16 +255,18 @@ func getPackedFileFieldIDs(filePaths []string, storageConfig *indexpb.StorageCon
 		defer release()
 		cStorageConfigPtr = &cStorageConfig
 	}
-	cPluginContext, releasePluginContext, err := packedReadContext(storagePluginContext, forImport)
-	if err != nil {
-		return nil, err
-	}
+	cPluginContext, releasePluginContext := newCPluginContext(storagePluginContext)
 	defer releasePluginContext()
 
 	var cFieldIDs *C.int64_t
 	var cFieldCounts *C.int64_t
-	status := C.GetPackedFileFieldIDs((**C.char)(unsafe.Pointer(&cFilePaths[0])), C.int64_t(len(filePaths)),
-		cStorageConfigPtr, cPluginContext, &cFieldIDs, &cFieldCounts)
+	paths := (**C.char)(unsafe.Pointer(&cFilePaths[0]))
+	var status C.CStatus
+	if forImport {
+		status = C.GetImportPackedFileFieldIDs(paths, C.int64_t(len(filePaths)), cStorageConfigPtr, cPluginContext, &cFieldIDs, &cFieldCounts)
+	} else {
+		status = C.GetPackedFileFieldIDs(paths, C.int64_t(len(filePaths)), cStorageConfigPtr, cPluginContext, &cFieldIDs, &cFieldCounts)
+	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
 	}

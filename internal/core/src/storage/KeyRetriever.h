@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <optional>
 #include <utility>
 
 #include "common/type_c.h"
@@ -21,8 +22,16 @@ namespace milvus::storage {
 
 class KeyRetriever : public parquet::DecryptionKeyRetriever {
  public:
+    KeyRetriever() = default;
+    // A null import source permits plaintext files only.
+    explicit KeyRetriever(const CPluginContext* import_source);
+
     std::string
     GetKey(const std::string& key_metadata) override;
+
+ private:
+    bool for_import_ = false;
+    std::optional<int64_t> source_ez_id_;
 };
 
 // Register Base64 source material only in the plugin's read cache.
@@ -36,6 +45,10 @@ GetPackedWriterKeys(const CPluginContext* context, bool for_import);
 
 parquet::ReaderProperties
 GetReaderProperties();
+
+parquet::ReaderProperties
+GetReaderProperties(
+    std::shared_ptr<parquet::DecryptionKeyRetriever> key_retriever);
 
 parquet::ArrowReaderProperties
 GetArrowReaderProperties();

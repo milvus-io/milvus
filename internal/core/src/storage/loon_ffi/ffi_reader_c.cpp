@@ -42,8 +42,8 @@
 
 namespace {
 void
-SetKeyRetriever(milvus_storage::api::Reader& reader) {
-    auto key_retriever = std::make_shared<milvus::storage::KeyRetriever>();
+SetKeyRetriever(milvus_storage::api::Reader& reader,
+                std::shared_ptr<milvus::storage::KeyRetriever> key_retriever) {
     reader.set_keyretriever(
         [key_retriever](const std::string& metadata) -> std::string {
             return key_retriever->GetKey(metadata);
@@ -55,10 +55,11 @@ CStatus
 RegisterPackedImportReadKeyset(const CPluginContext* source,
                                CFFIPackedReader ffi_reader) {
     try {
-        milvus::storage::RegisterImportReadKeyset(source);
+        auto keys = std::make_shared<milvus::storage::KeyRetriever>(source);
         if (ffi_reader != nullptr) {
             SetKeyRetriever(
-                *static_cast<milvus_storage::api::Reader*>(ffi_reader));
+                *static_cast<milvus_storage::api::Reader*>(ffi_reader),
+                std::move(keys));
         }
         return milvus::SuccessCStatus();
     }
@@ -113,7 +114,8 @@ GetLoonReader(
         plugin_ptr->Update(c_plugin_context->ez_id,
                            c_plugin_context->collection_id,
                            std::string(c_plugin_context->key));
-        SetKeyRetriever(*reader);
+        SetKeyRetriever(*reader,
+                        std::make_shared<milvus::storage::KeyRetriever>());
     }
 
     return reader;
