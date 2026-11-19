@@ -2899,7 +2899,11 @@ type proxyConfig struct {
 	DDLConcurrency                    ParamItem `refreshable:"true"`
 	DCLConcurrency                    ParamItem `refreshable:"true"`
 	ShardLeaderCacheInterval          ParamItem `refreshable:"false"`
-	ReplicaSelectionPolicy            ParamItem `refreshable:"false"`
+	ReplicaSelectionPolicy            ParamItem `refreshable:"true"`
+	LatencyWeightedDecay              ParamItem `refreshable:"true"`
+	LatencyWeightedMinShare           ParamItem `refreshable:"true"`
+	HedgingEnabled                    ParamItem `refreshable:"true"`
+	HedgingMinDelay                   ParamItem `refreshable:"true"`
 	CheckQueryNodeHealthInterval      ParamItem `refreshable:"false"`
 	CostMetricsExpireTime             ParamItem `refreshable:"false"`
 	CheckWorkloadRequestNum           ParamItem `refreshable:"false"`
@@ -3407,9 +3411,34 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.replicaSelectionPolicy",
 		Version:      "2.3.0",
 		DefaultValue: "look_aside",
-		Doc:          "replica selection policy in multiple replicas load balancing, support round_robin, look_aside and refined_look_aside",
+		Doc:          "Replica selection policy: round_robin, look_aside, refined_look_aside, or latency_weighted. Live changes apply to new shard requests. QueryView uses its existing round-robin router unless latency_weighted is selected.",
+		Export:       true,
 	}
 	p.ReplicaSelectionPolicy.Init(base.mgr)
+
+	p.LatencyWeightedDecay = ParamItem{
+		Key: "proxy.latencyWeighted.decay", DefaultValue: "10s", Version: "3.0.0",
+		Doc: "Time constant of the exponential decay for replica latency samples and failure penalties.", Export: true,
+	}
+	p.LatencyWeightedDecay.Init(base.mgr)
+
+	p.LatencyWeightedMinShare = ParamItem{
+		Key: "proxy.latencyWeighted.minShare", DefaultValue: "0.001", Version: "3.0.0",
+		Doc: "Minimum selection share of each eligible replica so slow or recovering replicas keep being probed.", Export: true,
+	}
+	p.LatencyWeightedMinShare.Init(base.mgr)
+
+	p.HedgingEnabled = ParamItem{
+		Key: "proxy.hedging.enabled", DefaultValue: "false", Version: "3.0.0",
+		Doc: "Enable hedged Search/Query attempts across replicas, independent of proxy.replicaSelectionPolicy. Sends at most one hedge per shard request across all retry rounds.", Export: true,
+	}
+	p.HedgingEnabled.Init(base.mgr)
+
+	p.HedgingMinDelay = ParamItem{
+		Key: "proxy.hedging.minDelay", DefaultValue: "200ms", Version: "3.0.0",
+		Doc: "Minimum wait before dispatching a hedged attempt; actual delay is max(minDelay, recent p99 latency).", Export: true,
+	}
+	p.HedgingMinDelay.Init(base.mgr)
 
 	p.CheckQueryNodeHealthInterval = ParamItem{
 		Key:          "proxy.checkQueryNodeHealthInterval",

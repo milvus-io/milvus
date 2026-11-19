@@ -18,6 +18,8 @@ const defaultMaxRetries = 3
 
 // ViewQueryClientConfig holds configuration for the ViewQueryClient.
 type ViewQueryClientConfig struct {
+	// ReplicaSelection supplies live settings; nil preserves round-robin routing.
+	ReplicaSelection func() ReplicaSelectionConfig
 	// QueryHook is initialized and owned by the hosting process.
 	QueryHook optimizers.QueryHook
 	// LoadInfoClient confirms current load state when an initialized directory is empty.
@@ -63,6 +65,7 @@ func NewViewQueryClient(
 	}
 	shardClient := newShardViewQueryClient(cfg.MaxRetries, queryPlanClient, queryServiceClient)
 	shardClient.queryHook = cfg.QueryHook
+	shardClient.selectionConfig = cfg.ReplicaSelection
 	shardClient.loadChecks = newCollectionLoadChecks(cfg.LoadInfoClient)
 	return &viewQueryClientImpl{
 		shardClient:            shardClient,
