@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/datacoord/ddl"
+	"github.com/milvus-io/milvus/internal/datacoord/split"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -69,13 +70,16 @@ func (s *Server) splitRetirementProgress(ctx context.Context, _ *milvuspb.GetMet
 	result := splitRetirement{
 		Cluster: Params.CommonCfg.ClusterPrefix.GetValue(), Topology: version,
 		CollectionID: task.GetCollectionId(), TaskID: task.GetTaskId(), Source: task.GetSourceVchannel(),
-		Retired: task.GetState() == datapb.SplitShardTaskState_SplitShardTaskRetired,
+		Retired: task.GetState() == datapb.SplitShardTaskState_SplitShardTaskRetired && split.HasSourceFenceProof(task),
 	}
 	payload, err := json.Marshal(result)
 	return string(payload), err
 }
 
 func (s *Server) checkSplitParentRetired(ctx context.Context, parent *datapb.SplitShardTask) error {
+	if !split.HasSourceFenceProof(parent) {
+		return merr.WrapErrServiceNotReadyMsg("source fence for parent split %d remains unconfirmed", parent.GetTaskId())
+	}
 	cfg, err := ddl.GetReplicationTopology(ctx)
 	if err != nil || len(cfg.GetClusters()) <= 1 {
 		return err
