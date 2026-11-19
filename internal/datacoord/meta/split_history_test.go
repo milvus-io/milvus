@@ -51,7 +51,13 @@ func TestSplitFiniteHistoryPartitionHoles(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{ID: 1, CollectionID: 100, PartitionID: 1, InsertChannel: "p_100v1", Level: datapb.SegmentLevel_L1, State: commonpb.SegmentState_Flushed, TransformStartAfterTimetick: 100})))
 			require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{ID: 2, CollectionID: 100, PartitionID: tc.partition, InsertChannel: "p_100v1", Level: datapb.SegmentLevel_L0, State: commonpb.SegmentState_Flushed, StartPosition: &msgpb.MsgPosition{Timestamp: tc.start}, DmlPosition: &msgpb.MsgPosition{Timestamp: 400}, IsImporting: tc.importing, CommitTimestamp: tc.commit})))
-			require.NoError(t, m.AdvanceSplitFoldedCursors(ctx, 100, "p_100v1", 200))
+			blockers, err := m.AdvanceSplitFoldedCursors(ctx, 100, "p_100v1", 200)
+			require.NoError(t, err)
+			if tc.blocked {
+				require.Equal(t, []int64{2}, blockers)
+			} else {
+				require.Empty(t, blockers)
+			}
 			want := uint64(200)
 			if tc.blocked {
 				want = 100

@@ -21,11 +21,14 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction"
+	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/split"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -132,7 +135,26 @@ func TestSplitNoDeletePinReleaseRequiresRealFlushedCertificate(t *testing.T) {
 	previous := streaming.WAL()
 	streaming.SetWALForTest(accesser)
 	t.Cleanup(func() { streaming.SetWALForTest(previous) })
-	server := &Server{meta: mt, splitStore: store}
+	Params.Save(Params.DataCoordCfg.EnableAutoCompaction.Key, "false")
+	t.Cleanup(func() { Params.Reset(Params.DataCoordCfg.EnableAutoCompaction.Key) })
+	collection := &meta.CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{}}
+	mt.AddCollection(collection)
+	handler := meta.NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(collection, nil).Maybe()
+	inspector := compaction.NewMockCompactionInspector(t)
+	inspector.On("isFull").Return(false).Maybe()
+	var queued *datapb.CompactionTask
+	inspector.EXPECT().EnqueueCompaction(mock.Anything).RunAndReturn(func(task *datapb.CompactionTask) error {
+		require.Equal(t, []int64{20}, task.GetInputSegments())
+		require.Equal(t, splitTestTarget1, task.GetChannel())
+		require.EqualValues(t, 1, task.GetPartitionID())
+		mt.SetSegmentsCompacting(ctx, task.GetInputSegments(), true)
+		queued = task
+		return nil
+	}).Once()
+	alloc := meta.NewMockAllocator(t)
+	trigger := compaction.NewCompactionTriggerManager(alloc, handler, inspector, mt, nil, nil, nil, nil, nil)
+	server := &Server{meta: mt, splitStore: store, compactionTriggerManager: trigger}
 	require.NoError(t, server.ResumeShardSplitL0(ctx, 7))
 	require.Equal(t, 2, appends)
 	require.Len(t, scheduler.tasks, 2)
@@ -145,6 +167,10 @@ func TestSplitNoDeletePinReleaseRequiresRealFlushedCertificate(t *testing.T) {
 	done, err := server.ReleaseShardSplitPins(ctx, 7)
 	require.NoError(t, err)
 	require.False(t, done, "append success is not materialization proof")
+	// A straddling L0 remains a hole even when its end exceeds F. In contrast,
+	// continuous new L0 after F must not extend the split's finite obligation.
+	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 20, CollectionID: 100, PartitionID: 1, InsertChannel: splitTestTarget1, Level: datapb.SegmentLevel_L0, State: commonpb.SegmentState_Flushed, StartPosition: &msgpb.MsgPosition{Timestamp: 200}, DmlPosition: &msgpb.MsgPosition{Timestamp: 300}})))
+	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 21, CollectionID: 100, PartitionID: 1, InsertChannel: splitTestTarget1, Level: datapb.SegmentLevel_L0, State: commonpb.SegmentState_Flushed, StartPosition: &msgpb.MsgPosition{Timestamp: 300}, DmlPosition: &msgpb.MsgPosition{Timestamp: 400}})))
 	for _, task := range scheduler.tasks {
 		require.NoError(t, task.Execute(ctx))
 	}
@@ -161,20 +187,22 @@ func TestSplitNoDeletePinReleaseRequiresRealFlushedCertificate(t *testing.T) {
 	observePinFlushModule(t, modules[splitTestTarget1], pinFlushImmutable(later, 500))
 	require.NoError(t, scheduler.tasks[len(scheduler.tasks)-1].Execute(ctx))
 	persistPinFlushModule(t, mt.StreamingNodeCatalog, modules[splitTestTarget1])
-	// A straddling L0 remains a hole even when its end exceeds F. In contrast,
-	// continuous new L0 after F must not extend the split's finite obligation.
-	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 20, CollectionID: 100, PartitionID: 1, InsertChannel: splitTestTarget1, Level: datapb.SegmentLevel_L0, State: commonpb.SegmentState_Flushed, StartPosition: &msgpb.MsgPosition{Timestamp: 200}, DmlPosition: &msgpb.MsgPosition{Timestamp: 300}})))
-	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 21, CollectionID: 100, PartitionID: 1, InsertChannel: splitTestTarget1, Level: datapb.SegmentLevel_L0, State: commonpb.SegmentState_Flushed, StartPosition: &msgpb.MsgPosition{Timestamp: 300}, DmlPosition: &msgpb.MsgPosition{Timestamp: 400}})))
+
 	done, err = server.ReleaseShardSplitPins(ctx, 7)
 	require.NoError(t, err)
 	require.False(t, done, "straddling L0 still needs folding")
 	require.EqualValues(t, 100, mt.GetSegment(ctx, 10).GetTransformStartAfterTimetick())
-	require.NoError(t, mt.DropSegment(ctx, 20))
+	require.NotNil(t, queued)
+	done, err = server.ReleaseShardSplitPins(ctx, 7)
+	require.NoError(t, err)
+	require.False(t, done, "compacting inputs wait for publication")
+	task := ctask.NewL0CompactionTask(queued, alloc, mt, nil)
+	require.NoError(t, task.SaveSegmentMeta([]*datapb.CompactionSegment{{SegmentID: 10}}))
 	done, err = server.ReleaseShardSplitPins(ctx, 7)
 	require.NoError(t, err)
 	require.True(t, done, "newer L0 must not block finite history closure")
 	require.Empty(t, server.splitStore.TransformPins(100))
-	require.EqualValues(t, 201, mt.GetSegment(ctx, 10).GetTransformStartAfterTimetick(), "closure uses fixed F even after real M reaches 500")
+	require.EqualValues(t, 299, mt.GetSegment(ctx, 10).GetTransformStartAfterTimetick(), "compaction covered the prefix before segment 21; closure does not chase M=500")
 }
 
 func TestSplitPinFlushFailureDoesNotPersistResume(t *testing.T) {
