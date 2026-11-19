@@ -54,6 +54,21 @@ func TestCommittedAdoptionRecoveryPrecedesProjection(t *testing.T) {
 	before := reopen()
 	require.Equal(t, "s", before.GetSegment(ctx, 10).GetInsertChannel(), "prepared batches are invisible during real MetaStore recovery")
 	view := &viewpb.DataViewOfCollection{CollectionId: 100, DataVersion: &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 1}, ShardSetEpoch: 3, Shards: []*viewpb.DataViewOfShard{{Vchannel: "t", Partitions: []*viewpb.DataViewOfPartition{{PartitionId: 1, SegmentIds: []int64{10}, SegmentManifestVersions: []int64{0}, SegmentTransformStartAfterTimeticks: []uint64{100}}}}}}
+	// The former coordinator's transaction reaches the store after recovery
+	// and an unrelated target flush. It cannot replace the new active view.
+	flush := &viewpb.DataViewOfCollection{CollectionId: 100, DataVersion: view.DataVersion, Shards: []*viewpb.DataViewOfShard{{Vchannel: "t", Partitions: []*viewpb.DataViewOfPartition{{PartitionId: 1, SegmentIds: []int64{20}}}}}}
+	require.NoError(t, concrete.SaveDataView(ctx, flush))
+	require.Error(t, catalog.CommitSplitAdoption(ctx, record, view))
+	views, err := concrete.ListDataViews(ctx, 100)
+	require.NoError(t, err)
+	require.Len(t, views, 1)
+	require.Equal(t, []int64{20}, views[0].GetShards()[0].GetPartitions()[0].GetSegmentIds())
+	record, err = catalog.PrepareSplitAdoption(ctx, record)
+	require.NoError(t, err)
+	view.DataVersion = &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 2}
+	view.Shards[0].Partitions[0].SegmentIds = []int64{10, 20}
+	view.Shards[0].Partitions[0].SegmentManifestVersions = []int64{0, 0}
+	view.Shards[0].Partitions[0].SegmentTransformStartAfterTimeticks = []uint64{100, 100}
 	require.NoError(t, catalog.CommitSplitAdoption(ctx, record, view))
 	// No canonical SegmentInfo write and no task-state advancement has occurred.
 	// The actual startup loader must install effective ownership before callers

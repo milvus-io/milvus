@@ -47,6 +47,7 @@ type SplitAdoption struct {
 // SplitAdoptionCatalog is optional only for legacy/test catalogs. Production
 // split admission requires it; ordinary collections retain their old catalog API.
 type SplitAdoptionCatalog interface {
+	FencePreparedSplitAdoptions(context.Context) error
 	LoadSplitAdoption(context.Context, int64, int64) (*SplitAdoption, error)
 	PrepareSplitAdoption(context.Context, *SplitAdoption) (*SplitAdoption, error)
 	CommitSplitAdoption(context.Context, *SplitAdoption, *viewpb.DataViewOfCollection) error

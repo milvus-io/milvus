@@ -199,6 +199,11 @@ func NewMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// its IDs (Dropping included) drive per-collection loading in both
 	// MetaStore.LoadFromCatalog and indexMeta.
 	collectionIDs := metaStore.GetCollectionIDs()
+	if adoptions, ok := catalog.(model.SplitAdoptionCatalog); ok {
+		if err := adoptions.FencePreparedSplitAdoptions(ctx); err != nil {
+			return nil, err
+		}
+	}
 
 	var (
 		indexCatalog SegmentIndexCatalog

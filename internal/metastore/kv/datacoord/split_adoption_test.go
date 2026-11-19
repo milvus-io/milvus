@@ -335,3 +335,28 @@ func TestAdoptionReprepareCannotOverwriteLateCommittedAttempt(t *testing.T) {
 	require.Equal(t, durable.AttemptID, resumed.AttemptID)
 	require.Equal(t, "Committed", resumed.State)
 }
+
+func TestRecoveryFenceLosesToPreviousCommit(t *testing.T) {
+	ctx := t.Context()
+	store := &adoptionPrepareRaceKV{adoptionKV: &adoptionKV{dataViewMetaKV: newDataViewMetaKV()}}
+	catalog := NewCatalog(store, "", "")
+	record, err := catalog.PrepareSplitAdoption(ctx, adoptionFixture(1))
+	require.NoError(t, err)
+	view := &viewpb.DataViewOfCollection{CollectionId: 100, DataVersion: &viewpb.DataVersion{CompactVersion: 1}}
+	store.before = func() error { return catalog.CommitSplitAdoption(ctx, record, view) }
+	require.Error(t, catalog.FencePreparedSplitAdoptions(ctx))
+	require.NoError(t, catalog.FencePreparedSplitAdoptions(ctx))
+	rows := []*datapb.SegmentInfo{{ID: 1, CollectionID: 100, PartitionID: 3, InsertChannel: "s", SplitTarget: "t"}}
+	require.NoError(t, catalog.applyCommittedAdoptions(ctx, 100, rows))
+	require.Equal(t, "t", rows[0].GetInsertChannel())
+	views, err := catalog.ListDataViews(ctx, 100)
+	require.NoError(t, err)
+	require.Len(t, views, 1)
+	require.True(t, proto.Equal(view, views[0]))
+
+	key := adoptionKey(100, 7)
+	store.values[key] = "{"
+	require.ErrorIs(t, catalog.FencePreparedSplitAdoptions(ctx), merr.ErrDataIntegrity)
+	store.values[key] = `{"TaskID":8,"CollectionID":100,"State":"Prepared"}`
+	require.ErrorIs(t, catalog.FencePreparedSplitAdoptions(ctx), merr.ErrDataIntegrity)
+}
