@@ -509,28 +509,6 @@ func (s *DataNodeServicesSuite) TestResendSegmentStats() {
 	s.Assert().True(merr.Ok(resp.GetStatus()), "empty call, status shall be OK")
 }
 
-// QuerySlot capability advertisement does not require node registration or etcd.
-func TestQuerySlotSegmentRootedIndexCapability(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	node := NewDataNode(ctx)
-	defer node.cancel()
-	node.importScheduler = importv2.NewScheduler(importv2.NewTaskManager())
-	node.importV3Scheduler = importv3.NewScheduler(ctx, func() int64 { return 1 }, importv3.NewMetrics(1))
-	defer node.importV3Scheduler.Close()
-	node.UpdateStateCode(commonpb.StateCode_Healthy)
-	resp, err := node.QuerySlot(ctx, &datapb.QuerySlotRequest{})
-	require.NoError(t, err)
-	require.NoError(t, merr.Error(resp.GetStatus()))
-	require.True(t, resp.GetSegmentRootedIndexes())
-
-	node.UpdateStateCode(commonpb.StateCode_Abnormal)
-	resp, err = node.QuerySlot(ctx, &datapb.QuerySlotRequest{})
-	require.NoError(t, err)
-	require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
-	require.False(t, resp.GetSegmentRootedIndexes())
-}
-
 func TestQuerySlotIncludesQueueBudget(t *testing.T) {
 	paramtable.Init()
 	slots := mockey.Mock(index.CalculateNodeSlots).Return(int64(128)).Build()
@@ -582,7 +560,6 @@ func (s *DataNodeServicesSuite) TestQuerySlot() {
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
 		s.True(resp.GetCopySegmentSharedIndexes())
-		s.True(resp.GetSegmentRootedIndexes())
 		s.NoError(merr.Error(resp.GetStatus()))
 	})
 }

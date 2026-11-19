@@ -1526,58 +1526,29 @@ func TestCopySegmentSharedDefinitionsPayloadSize(t *testing.T) {
 	t.Logf("100 segments, 27 definitions: shared=%d bytes, legacy=%d bytes", sharedSize, legacySize)
 }
 
-func TestClusterSegmentRootedIndexCapability(t *testing.T) {
-	for _, operation := range []string{"build", "copy"} {
-		for _, tc := range []struct {
-			name       string
-			version    indexpb.IndexStorePathVersion
-			capability bool
-			rpcErr     error
-			status     *commonpb.Status
-		}{
-			{name: "legacy v0", version: 0},
-			{name: "legacy v1", version: 1},
-			{name: "old worker rejects v2", version: 2, status: merr.Success()},
-			{name: "new worker accepts v2", version: 2, capability: true, status: merr.Success()},
-			{name: "capability RPC fails", version: 2, rpcErr: errors.New("timeout")},
-			{name: "worker not ready", version: 2, status: merr.Status(merr.WrapErrServiceNotReady("datanode", 1, "Initializing"))},
-		} {
-			t.Run(operation+"/"+tc.name, func(t *testing.T) {
-				manager := NewMockNodeManager(t)
-				cluster := NewCluster(manager)
-				client := mocks.NewMockDataNodeClient(t)
-				manager.EXPECT().GetClient(int64(1)).Return(client, nil)
-				if tc.version == 2 {
-					client.EXPECT().QuerySlot(mock.Anything, mock.Anything).Return(&datapb.QuerySlotResponse{
-						Status: tc.status, SegmentRootedIndexes: tc.capability,
-					}, tc.rpcErr).Once()
-				}
-				canDispatch := tc.version != 2 || tc.capability
-				if canDispatch {
-					client.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
-				}
-				var err error
-				if operation == "build" {
-					err = cluster.CreateIndex(1, &workerpb.CreateJobRequest{BuildID: 123, IndexStorePathVersion: tc.version})
-				} else {
-					err = cluster.CreateCopySegment(1, &datapb.CopySegmentRequest{
-						TaskID:  123,
-						Targets: []*datapb.CopySegmentTarget{{SegmentId: 1, IndexStorePathVersion: tc.version.Enum()}},
-					}, 300, false)
-				}
-				if canDispatch {
-					require.NoError(t, err)
-				} else {
-					require.Error(t, err)
-					client.AssertNotCalled(t, "CreateTask", mock.Anything, mock.Anything)
-					if tc.name == "old worker rejects v2" {
-						require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
-						require.Contains(t, err.Error(), "upgrade all datanodes")
-					} else {
-						require.NotErrorIs(t, err, merr.ErrServiceUnimplemented)
-					}
-				}
-			})
-		}
+func TestClusterDispatchSegmentRootedIndexes(t *testing.T) {
+	const version = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+	manager := NewMockNodeManager(t)
+	cluster := NewCluster(manager)
+	client := mocks.NewMockDataNodeClient(t)
+	manager.EXPECT().GetClient(int64(1)).Return(client, nil)
+
+	build := &workerpb.CreateJobRequest{BuildID: 123, IndexStorePathVersion: version}
+	client.EXPECT().CreateTask(mock.Anything, mock.Anything).Run(func(_ context.Context, wire *workerpb.CreateTaskRequest, _ ...grpc.CallOption) {
+		decoded := &workerpb.CreateJobRequest{}
+		require.NoError(t, proto.Unmarshal(wire.GetPayload(), decoded))
+		require.True(t, proto.Equal(build, decoded))
+	}).Return(merr.Success(), nil).Once()
+	require.NoError(t, cluster.CreateIndex(1, build))
+
+	restore := &datapb.CopySegmentRequest{
+		TaskID:  124,
+		Targets: []*datapb.CopySegmentTarget{{SegmentId: 1, IndexStorePathVersion: version.Enum()}},
 	}
+	client.EXPECT().CreateTask(mock.Anything, mock.Anything).Run(func(_ context.Context, wire *workerpb.CreateTaskRequest, _ ...grpc.CallOption) {
+		decoded := &datapb.CopySegmentRequest{}
+		require.NoError(t, proto.Unmarshal(wire.GetPayload(), decoded))
+		require.True(t, proto.Equal(restore, decoded))
+	}).Return(merr.Success(), nil).Once()
+	require.NoError(t, cluster.CreateCopySegment(1, restore, 300, false))
 }
