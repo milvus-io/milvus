@@ -239,6 +239,7 @@ struct OpenedDiskIndex {
 };
 
 struct DiskBuildCase {
+    std::string index_type = knowhere::IndexEnum::INDEX_DISKANN;
     std::string metric = "L2";
     int64_t dim = kDim;
     int64_t logical_rows = kRows;
@@ -268,7 +269,7 @@ BuildDisk(const std::string& raw_path,
     const bool nullable =
         !build.validity_path.empty() || !build.legacy_validity.empty();
     auto adapted = AdaptIndexType({
-        .index_type = knowhere::IndexEnum::INDEX_DISKANN,
+        .index_type = build.index_type,
         .field_type = vector_array ? DataType::VECTOR_ARRAY : PhysicalType<T>(),
         .element_type = vector_array ? PhysicalType<T>() : DataType::NONE,
         .index_engine_version =
@@ -749,6 +750,47 @@ TEST(VectorDiskFamilyTest, RejectsQueryListSmallerThanTopK) {
                                     result));
 }
 
+// Regression: the client-facing "search_list" must reach knowhere as
+// "search_list_size" for AISAQ too. If it is dropped, knowhere defaults to
+// max(topk, 16) and never rejects a list smaller than topk.
+TEST(VectorDiskFamilyTest, AisaqMapsQueryListToSearchListSize) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_aisaq_list_XXXXXX", "vector aisaq test");
+    const auto raw_path = files->Path() + "/raw";
+    auto values = MakeRows<float>();
+    WriteRaw(raw_path, values, kRows, kDim);
+    OpenedDiskIndex<float> opened;
+    BuildDisk(raw_path,
+              files->Path(),
+              opened,
+              {.index_type = knowhere::IndexEnum::INDEX_AISAQ});
+    ASSERT_NE(opened.base, nullptr);
+    const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
+    ASSERT_NE(reader, nullptr);
+    ASSERT_EQ(reader->KnowhereIndexType(), knowhere::IndexEnum::INDEX_AISAQ);
+    auto query = GenDataset(1, kDim, values.data());
+
+    VectorSearchParams too_small{
+        .search_params_ = {{DISK_ANN_QUERY_LIST, 2}},
+        .metric_type_ = "L2",
+        .topk_ = 4,
+    };
+    SearchResult rejected;
+    EXPECT_ANY_THROW(
+        reader->Search(query, too_small, BitsetView{}, nullptr, rejected));
+
+    VectorSearchParams ok{
+        .search_params_ = {{DISK_ANN_QUERY_LIST, 32},
+                           {DISK_ANN_QUERY_BEAMWIDTH, 4}},
+        .metric_type_ = "L2",
+        .topk_ = 4,
+    };
+    SearchResult result;
+    reader->Search(query, ok, BitsetView{}, nullptr, result);
+    ASSERT_EQ(result.seg_offsets_.size(), 4);
+    EXPECT_GE(result.seg_offsets_[0], 0);
+}
+
 TEST(VectorDiskFamilyTest, EmbeddingListsPreserveTrailingEmptyParents) {
     auto files = storage::LocalDirectory::CreateOwned(
         "/tmp", "vector_disk_array_XXXXXX", "vector disk array test");
@@ -903,11 +945,27 @@ RunNullableElementLevelDiskSearch(bool more_rows_than_vectors,
 }
 
 TEST(VectorDiskFamilyTest, NullableElementLevelLoadsRowValidity) {
+    // EXPERIMENT BUILD ONLY, NOT FOR MERGE: knowhere is pinned to db95984
+    // (pre-#1940) to isolate the AISAQ disk-index load regression. That
+    // revision has no embedding_list field in knowhere::LoadOptions, so the
+    // row->element validity restore for element-level nullable VECTOR_ARRAY
+    // (#54899) is unavailable and MakeNullableLoadInput drops the flag. Skip
+    // until knowhere is restored to a revision that supports it.
+    GTEST_SKIP() << "embedding_list element-level validity unsupported by "
+                    "pinned knowhere db95984 (pre-#1940)";
     RunNullableElementLevelDiskSearch(false, false);
     RunNullableElementLevelDiskSearch(true, false);
 }
 
 TEST(VectorDiskFamilyTest, MmapNullableElementLevelLoadsRowValidity) {
+    // EXPERIMENT BUILD ONLY, NOT FOR MERGE: knowhere is pinned to db95984
+    // (pre-#1940) to isolate the AISAQ disk-index load regression. That
+    // revision has no embedding_list field in knowhere::LoadOptions, so the
+    // row->element validity restore for element-level nullable VECTOR_ARRAY
+    // (#54899) is unavailable and MakeNullableLoadInput drops the flag. Skip
+    // until knowhere is restored to a revision that supports it.
+    GTEST_SKIP() << "embedding_list element-level validity unsupported by "
+                    "pinned knowhere db95984 (pre-#1940)";
     RunNullableElementLevelDiskSearch(false, true);
     RunNullableElementLevelDiskSearch(true, true);
 }

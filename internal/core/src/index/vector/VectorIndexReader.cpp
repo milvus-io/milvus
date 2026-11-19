@@ -638,6 +638,16 @@ VectorIndexReader::SearchDisk(const DatasetPtr& dataset,
         search_config[DISK_ANN_QUERY_BEAMWIDTH] =
             static_cast<int32_t>(disk_ann_beamwidth_);
         search_config[DISK_ANN_PQ_CODE_BUDGET] = 0.0;
+    } else if (engine_.KnowhereIndexType() ==
+               knowhere::IndexEnum::INDEX_AISAQ) {
+        // Knowhere reads "search_list_size" and ignores the client-facing
+        // "search_list"; without this mapping AISAQ silently falls back to
+        // max(topk, 16). "beamwidth" and "vectors_beamwidth" are search-time
+        // knowhere keys and pass through from the client unchanged.
+        if (params.search_params_.contains(DISK_ANN_QUERY_LIST)) {
+            search_config[DISK_ANN_SEARCH_LIST_SIZE] =
+                params.search_params_.at(DISK_ANN_QUERY_LIST);
+        }
     }
 
     auto final = [&] {
