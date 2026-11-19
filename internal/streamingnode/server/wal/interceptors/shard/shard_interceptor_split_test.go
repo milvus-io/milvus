@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
@@ -429,6 +430,10 @@ func TestSplitShardGenesisCreatesTheTargetVChannel(t *testing.T) {
 	_, err := interceptor.DoAppend(ctx, newSplitShardCopy(splitTestTarget1, splitTestTaskID, 300), failing.append)
 	require.Error(t, err)
 	require.ErrorIs(t, manager.CheckIfCollectionExists(splitTestCollectionID), shards.ErrCollectionNotFound)
+	conflicting := &appendRecorder{}
+	_, err = interceptor.DoAppend(ctx, newSplitShardCopy(splitTestTarget1, splitTestTaskID+1, 305), conflicting.append)
+	require.True(t, status.AsStreamingError(err).IsUnrecoverable())
+	require.Empty(t, conflicting.appended)
 
 	wal := &appendRecorder{}
 	_, err = interceptor.DoAppend(ctx, newSplitShardCopy(splitTestTarget1, splitTestTaskID, 310), wal.append)
@@ -463,6 +468,18 @@ func TestSplitShardGenesisCreatesTheTargetVChannel(t *testing.T) {
 	require.Len(t, wal.appended, 3)
 	holder, _ = manager.CollectionVChannel(splitTestCollectionID)
 	require.Equal(t, splitTestTarget1, holder)
+
+	// A different task or parent is a conflict even with the same target name.
+	otherSource := newSplitShardCopy(splitTestTarget1, splitTestTaskID, 346)
+	changed := message.MustAsMutableSplitShardMessageV2(otherSource)
+	header := changed.Header()
+	header.SourceVchannel = "other-source"
+	changed.OverwriteHeader(header)
+	for _, conflict := range []message.MutableMessage{newSplitShardCopy(splitTestTarget1, splitTestTaskID+1, 345), otherSource} {
+		_, err := interceptor.DoAppend(ctx, conflict, wal.append)
+		require.True(t, status.AsStreamingError(err).IsUnrecoverable())
+	}
+	require.Len(t, wal.appended, 3)
 
 	// The second target cannot be created on the same pchannel.
 	_, err = interceptor.DoAppend(ctx, newSplitShardCopy(splitTestTarget2, splitTestTaskID, 350), wal.append)
@@ -543,4 +560,30 @@ func TestSplitShardFenceRefusesBeginTxn(t *testing.T) {
 	t.Run("a shard manager that cannot tell", func(t *testing.T) {
 		require.False(t, shards.IsSplitFenced(nil, splitTestSource))
 	})
+}
+
+func TestSplitShardGenesisRestoresOriginalTaskAndSource(t *testing.T) {
+	ctx := context.Background()
+	manager := newSplitTestTargetManager(t)
+	rec := &appendRecorder{}
+	_, err := newSplitTestInterceptor(manager).DoAppend(ctx, newSplitShardCopy(splitTestTarget1, splitTestTaskID, 300), rec.append)
+	require.NoError(t, err)
+	recoverTarget := func(task int64, source string) interceptors.Interceptor {
+		return NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
+			ShardManager: manager,
+			InitialRecoverSnapshot: &recovery.RecoverySnapshot{WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+				VChannels: map[string]moduleapi.VChannelWritePathRecoveryState{splitTestTarget1: {
+					CollectionID: splitTestCollectionID, SplitGenesisTaskID: task, SplitSourceVChannel: source,
+				}},
+			}},
+		})
+	}
+	restored := recoverTarget(splitTestTaskID, splitTestSource)
+	_, err = restored.DoAppend(ctx, newSplitShardCopy(splitTestTarget1, splitTestTaskID, 310), rec.append)
+	require.NoError(t, err)
+	for _, node := range []interceptors.Interceptor{recoverTarget(splitTestTaskID+1, splitTestSource), recoverTarget(splitTestTaskID, "other-source"), recoverTarget(0, "")} {
+		_, err = node.DoAppend(ctx, newSplitShardCopy(splitTestTarget1, splitTestTaskID, 320), rec.append)
+		require.True(t, status.AsStreamingError(err).IsUnrecoverable())
+	}
+	require.Len(t, rec.appended, 2)
 }

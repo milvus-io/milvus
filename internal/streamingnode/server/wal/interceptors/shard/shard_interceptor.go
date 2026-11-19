@@ -2,6 +2,7 @@ package shard
 
 import (
 	"context"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 
@@ -27,6 +28,7 @@ var _ interceptors.InterceptorWithMetrics = (*shardInterceptor)(nil)
 
 // shardInterceptor is the implementation of shard management interceptor.
 type shardInterceptor struct {
+	genesis      sync.Map // collection ID -> splitGenesis on this PChannel
 	shardManager shards.ShardManager
 	// txnManager ends the session a refused BeginTxn opened. Nil in tests
 	// that do not append transactions.
@@ -136,6 +138,7 @@ func (impl *shardInterceptor) handleDropCollection(ctx context.Context, msg mess
 		return msgID, err
 	}
 	impl.shardManager.DropCollection(message.MustAsImmutableDropCollectionMessageV1(msg.IntoImmutableMessage(msgID)))
+	impl.genesis.Delete(dropCollectionMessage.Header().GetCollectionId())
 	function.GetManager().Release(dropCollectionMessage.Header().GetCollectionId(), WALFunctionRunnerKey(dropCollectionMessage.VChannel()))
 	return msgID, nil
 }
