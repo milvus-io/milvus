@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -83,18 +84,53 @@ func TestReOrderByTimeTickBufferDoesNotDeduplicateTimeTick(t *testing.T) {
 	require.Len(t, result, 2)
 }
 
-func TestReOrderByTimeTickBufferClearsSeenTimeTicksAfterPop(t *testing.T) {
-	buf := NewReOrderBuffer()
+func TestReOrderByTimeTickBufferDeduplicatesConfirmedTimeTick(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		msg     message.MutableMessage
+		dropped bool
+	}{
+		{"insert", message.CreateTestEmptyInsertMesage(1, nil), true},
+		{"alter WAL", message.NewAlterWALMessageBuilderV2().WithAllVChannel().
+			WithHeader(&message.AlterWALMessageHeader{}).
+			WithBody(&message.AlterWALMessageBody{}).MustBuildMutable(), true},
+		{"time tick", message.NewTimeTickMessageBuilderV1().WithAllVChannel().
+			WithHeader(&message.TimeTickMessageHeader{}).
+			WithBody(&msgpb.TimeTickMsg{}).MustBuildMutable(), false},
+		{"old insert", message.CreateTestEmptyInsertMesage(1, nil).WithOldVersion(), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			buf := NewReOrderBuffer()
+			first := tc.msg.WithTimeTick(10).WithLastConfirmedUseMessageID().
+				IntoImmutableMessage(newReorderBufferTestMessageID(1))
+			result, err := buf.Push(first)
+			require.NoError(t, err)
+			require.False(t, result.Dropped)
+			require.Equal(t, []message.ImmutableMessage{first}, buf.PopUtilTimeTick(10))
 
-	pushResult, err := buf.Push(newReorderBufferTestMessage(t, 1, 10, message.MessageTypeInsert))
-	require.NoError(t, err)
-	require.False(t, pushResult.Dropped)
-	require.Len(t, buf.PopUtilTimeTick(10), 1)
+			// The original has left the buffer. A retry can have a different
+			// physical ID but still belongs to the already confirmed prefix.
+			second := message.NewImmutableMesasge(newReorderBufferTestMessageID(2), first.Payload(), first.Properties().ToRawMap())
+			result, err = buf.Push(second)
+			require.NoError(t, err)
+			require.Equal(t, tc.dropped, result.Dropped)
+			if tc.dropped {
+				require.Equal(t, ReOrderByTimeTickBufferDropReasonDuplicateTimeTick, result.DropReason)
+				require.Empty(t, buf.PopUtilTimeTick(10))
+			} else {
+				require.Equal(t, []message.ImmutableMessage{second}, buf.PopUtilTimeTick(10))
+			}
+			require.Zero(t, buf.Bytes())
 
-	pushResult, err = buf.Push(newReorderBufferTestMessage(t, 2, 10, message.MessageTypeInsert))
-	require.NoError(t, err)
-	require.False(t, pushResult.Dropped)
-	assert.Equal(t, 1, buf.Len())
+			// Later logical messages are unaffected by the confirmed boundary.
+			next := message.CreateTestEmptyInsertMesage(3, nil).WithTimeTick(11).
+				WithLastConfirmedUseMessageID().IntoImmutableMessage(newReorderBufferTestMessageID(3))
+			result, err = buf.Push(next)
+			require.NoError(t, err)
+			require.False(t, result.Dropped)
+			require.Equal(t, []message.ImmutableMessage{next}, buf.PopUtilTimeTick(11))
+		})
+	}
 }
 
 func newReorderBufferTestMessage(t *testing.T, id int64, timetick uint64, msgType message.MessageType) *mock_message.MockImmutableMessage {

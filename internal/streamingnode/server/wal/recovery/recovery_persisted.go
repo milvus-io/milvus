@@ -136,7 +136,7 @@ func (r *recoveryStorageImpl) migrateLegacyRecoveryInfo(
 	if r.checkpoint == nil {
 		return false, merr.WrapErrDataIntegrityMsg("missing recovery checkpoint")
 	}
-	if r.checkpoint.Magic == utility.RecoveryMagicRecoveryStorageV2 || r.checkpoint.Magic == utility.RecoveryMagicSchemaMetadataAligned {
+	if r.checkpoint.Magic == utility.RecoveryMagicRecoveryStorageV2 || r.checkpoint.Magic == utility.RecoveryMagicSchemaMetadataAligned || r.checkpoint.Magic == utility.RecoveryMagicHotWALSwitch {
 		return false, nil
 	}
 	if r.checkpoint.Magic != utility.RecoveryMagicStreamingInitialized {

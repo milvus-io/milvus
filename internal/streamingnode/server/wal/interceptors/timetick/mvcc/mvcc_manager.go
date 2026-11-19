@@ -4,7 +4,6 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
@@ -71,7 +70,7 @@ func (cm *MVCCManager) UpdateMVCC(msg message.MutableMessage) {
 	defer cm.mu.Unlock()
 	// Confirmation can race ahead of this callback: Acker.Ack runs before
 	// UpdateMVCC. Never discard a successful write merely because tt <= C.
-	if messageutil.IsTimeTickConfirmBarrier(msgType) {
+	if message.IsTimeTickConfirmBarrier(msg) {
 		cm.pchannelMVCCTimestamp = max(cm.pchannelMVCCTimestamp, tt)
 		return
 	}

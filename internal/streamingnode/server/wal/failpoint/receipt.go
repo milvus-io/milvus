@@ -35,14 +35,14 @@ import (
 // GO_FAILPOINTS supplies a config-file path. Receipts and releases use a private
 // directory shared with the integration controller, so no HTTP listener is
 // exposed. A missing config disarms the point without changing process state.
-func Hit(ctx context.Context, value any, point string, msg message.MutableMessage, id message.MessageID, result *messagespb.IdempotentInsertResult) bool {
+func Hit(ctx context.Context, value any, msg message.MutableMessage, id message.MessageID, result *messagespb.IdempotentInsertResult) {
 	configPath, ok := value.(string)
 	if !ok {
 		panic("WAL failpoint requires a config-file path")
 	}
 	data, err := os.ReadFile(configPath)
 	if errors.Is(err, os.ErrNotExist) {
-		return false
+		return
 	}
 	must(err)
 	var config Config
@@ -50,19 +50,16 @@ func Hit(ctx context.Context, value any, point string, msg message.MutableMessag
 	if config.PID != os.Getpid() || config.Key != string(message.IdempotencyKeyOf(msg)) ||
 		(config.VChannel != "" && config.VChannel != msg.VChannel()) ||
 		config.MessageType != msg.MessageType().String() {
-		return false
+		return
 	}
-	if config.Action != "observe" && config.Action != "pause" && config.Action != "error" {
+	if config.Action != "observe" && config.Action != "pause" {
 		panic("unknown WAL failpoint action")
-	}
-	if config.Action == "error" && point != AfterBackendAppend {
-		panic("append errors must be injected below the backend retry loop")
 	}
 	hash := sha256.Sum256([]byte(msg.VChannel()))
 	base := filepath.Join(config.Directory, hex.EncodeToString(hash[:]))
 	claim, err := os.OpenFile(base+".claim", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if errors.Is(err, os.ErrExist) {
-		return false
+		return
 	}
 	must(err)
 	must(claim.Close())
@@ -79,7 +76,7 @@ func Hit(ctx context.Context, value any, point string, msg message.MutableMessag
 	must(os.WriteFile(base+".tmp", data, 0o600))
 	must(os.Rename(base+".tmp", base+".json"))
 	if config.Action != "pause" {
-		return config.Action == "error"
+		return
 	}
 	// A bounded barrier cannot leave a failed test's process hung indefinitely.
 	timer := time.NewTimer(2 * time.Minute)
@@ -88,13 +85,13 @@ func Hit(ctx context.Context, value any, point string, msg message.MutableMessag
 	defer ticker.Stop()
 	for {
 		if _, err := os.Stat(filepath.Join(config.Directory, "release")); err == nil {
-			return false
+			return
 		} else if !errors.Is(err, os.ErrNotExist) {
 			panic(err)
 		}
 		select {
 		case <-ctx.Done():
-			return false
+			return
 		case <-timer.C:
 			panic("WAL failpoint barrier timed out")
 		case <-ticker.C:

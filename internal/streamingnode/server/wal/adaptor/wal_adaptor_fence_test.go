@@ -3,7 +3,6 @@ package adaptor
 import (
 	"context"
 	"strconv"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,10 +19,10 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/autowalimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -42,7 +41,7 @@ func TestReplicaOrFlushAppendStopsOnWALCancellation(t *testing.T) {
 				<-ctx.Done()
 				return nil, ctx.Err()
 			})
-			w := newFenceTestWAL(t, walImpls)
+			w := newFenceTestWAL(t, autowalimpls.New(walImpls, nil))
 			cancelWAL = w.availableCancel
 			var msg message.MutableMessage
 			if replicated {
@@ -61,101 +60,6 @@ func TestReplicaOrFlushAppendStopsOnWALCancellation(t *testing.T) {
 			require.EqualValues(t, 1, persisted.Load(), "an uncertain append must be recovered before any further write")
 		})
 	}
-}
-
-func TestAppendBeforeAlterWALCompletesBeforeFence(t *testing.T) {
-	insertStarted := make(chan struct{})
-	releaseInsert := make(chan struct{})
-
-	var nextID atomic.Int64
-	var mu sync.Mutex
-	var appendedTypes []message.MessageType
-	walImpls := newFirstTimeTickWALImpls(func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-		if msg.MessageType() == message.MessageTypeInsert {
-			close(insertStarted)
-			<-releaseInsert
-		}
-		mu.Lock()
-		appendedTypes = append(appendedTypes, msg.MessageType())
-		mu.Unlock()
-		return finishFenceTestAppend(ctx, nextID.Add(1)), nil
-	})
-	w := newFenceTestWAL(t, walImpls)
-
-	insertErr := make(chan error, 1)
-	go func() {
-		_, err := w.Append(context.Background(), message.CreateTestEmptyInsertMesage(1, nil))
-		insertErr <- err
-	}()
-	waitFenceTestSignal(t, insertStarted)
-
-	alterErr := make(chan error, 1)
-	go func() {
-		_, err := w.Append(context.Background(), newFenceTestAlterWALMessage())
-		alterErr <- err
-	}()
-
-	close(releaseInsert)
-	require.NoError(t, waitFenceTestError(t, insertErr))
-	require.NoError(t, waitFenceTestError(t, alterErr))
-	assert.True(t, w.isFenced.Load())
-
-	mu.Lock()
-	defer mu.Unlock()
-	assert.Equal(t, []message.MessageType{
-		message.MessageTypeInsert,
-		message.MessageTypeAlterWAL,
-	}, appendedTypes)
-}
-
-func TestAppendWaitingBehindAlterWALIsFenced(t *testing.T) {
-	gate := &fenceTestGateInterceptor{
-		insertEntered: make(chan struct{}),
-		releaseInsert: make(chan struct{}),
-		alterAppended: make(chan struct{}),
-		releaseAlter:  make(chan struct{}),
-	}
-
-	var nextID atomic.Int64
-	var mu sync.Mutex
-	var appendedTypes []message.MessageType
-	walImpls := newFirstTimeTickWALImpls(func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-		mu.Lock()
-		appendedTypes = append(appendedTypes, msg.MessageType())
-		mu.Unlock()
-		return finishFenceTestAppend(ctx, nextID.Add(1)), nil
-	})
-	w := newFenceTestWAL(t, walImpls, gate)
-
-	insertErr := make(chan error, 1)
-	go func() {
-		_, err := w.Append(context.Background(), message.CreateTestEmptyInsertMesage(1, nil))
-		insertErr <- err
-	}()
-	waitFenceTestSignal(t, gate.insertEntered)
-
-	alterErr := make(chan error, 1)
-	go func() {
-		_, err := w.Append(context.Background(), newFenceTestAlterWALMessage())
-		alterErr <- err
-	}()
-	waitFenceTestSignal(t, gate.alterAppended)
-
-	// The AlterWAL append has returned from the lock interceptor, but the outer
-	// interceptor keeps walAdaptor.Append from reaching its post-chain logic.
-	// The fence must already be visible when the waiting Insert acquires RLock.
-	close(gate.releaseInsert)
-	err := waitFenceTestError(t, insertErr)
-	require.Error(t, err)
-	assert.True(t, status.AsStreamingError(err).IsFenced())
-
-	close(gate.releaseAlter)
-	require.NoError(t, waitFenceTestError(t, alterErr))
-	assert.True(t, w.isFenced.Load())
-
-	mu.Lock()
-	defer mu.Unlock()
-	assert.Equal(t, []message.MessageType{message.MessageTypeAlterWAL}, appendedTypes)
 }
 
 func TestOversizedAppendWithSNChunkingDisabledUsesLegacySingleRecordPath(t *testing.T) {

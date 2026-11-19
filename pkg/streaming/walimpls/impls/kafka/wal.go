@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 var _ walimpls.WALImpls = (*walImpl)(nil)
@@ -61,6 +62,9 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 }
 
 func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls.ScannerImpls, err error) {
+	if _, latest := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_Latest); latest {
+		return nil, merr.WrapErrParameterInvalidMsg("latest delivery policy is deprecated; use All, StartFrom or StartAfter")
+	}
 	// The scanner is stateless, so we can create a scanner with an anonymous consumer.
 	// and there's no commit opeartions.
 	consumerConfig := cloneKafkaConfig(w.consumerConfig)
@@ -79,8 +83,6 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 	switch t := opt.DeliverPolicy.GetPolicy().(type) {
 	case *streamingpb.DeliverPolicy_All:
 		seekPosition.Offset = kafka.OffsetBeginning
-	case *streamingpb.DeliverPolicy_Latest:
-		seekPosition.Offset = kafka.OffsetEnd
 	case *streamingpb.DeliverPolicy_StartFrom:
 		id, err := unmarshalMessageID(t.StartFrom.GetId())
 		if err != nil {
