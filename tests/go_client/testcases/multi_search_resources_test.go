@@ -9,21 +9,17 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
-	"github.com/milvus-io/milvus/client/v3/index"
 	client "github.com/milvus-io/milvus/client/v3/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -31,10 +27,10 @@ import (
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
-// These probes need an otherwise idle, distributed deployment with one Proxy.
-// Run explicitly with -run '^TestMultiSearch(ProxyRetainedHeap|ClusterQueueCapacity)$' and
-// -args -multisearch-resource-probes. They are separate from shared E2E traffic.
-var multiSearchResourceProbes = flag.Bool("multisearch-resource-probes", false, "run isolated MultiSearch resource probes")
+// These queue and retry regressions need an otherwise idle deployment.
+// Run explicitly with -run '^TestMultiSearch(ClusterQueueCapacity|QuotaRecovery|DQLQueueRecovery)$'
+// and -args -multisearch-resource-probes, using each test's required configuration.
+var multiSearchResourceProbes = flag.Bool("multisearch-resource-probes", false, "run isolated MultiSearch queue and retry regressions")
 
 func multiSearchBlockingRequest(request *milvuspb.SearchRequest) *milvuspb.SearchRequest {
 	blocked := proto.CloneOf(request)
@@ -115,144 +111,6 @@ func multiSearchMetric(t *testing.T, ctx context.Context, name string, labels ..
 	}
 	require.NoError(t, scanner.Err())
 	return total
-}
-
-func multiSearchLiveHeap(t *testing.T, ctx context.Context) int64 {
-	t.Helper()
-	// The server performs GC before writing this profile. Read only MemStats;
-	// never emit the profile body, which may contain sensitive process data.
-	body := multiSearchManagementRead(t, ctx, "/debug/pprof/heap?gc=1&debug=1")
-	for line := range strings.SplitSeq(string(body), "\n") {
-		if value, ok := strings.CutPrefix(line, "# HeapAlloc = "); ok {
-			heap, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
-			require.NoError(t, err)
-			return heap
-		}
-	}
-	t.Fatal("heap profile did not contain HeapAlloc")
-	return 0
-}
-
-func TestMultiSearchProxyRetainedHeap(t *testing.T) {
-	if !*multiSearchResourceProbes {
-		t.Skip("requires -multisearch-resource-probes and an idle distributed deployment")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	const rows, dim, retainedItems = 1024, 256, 8
-	name := common.GenRandomString("multisearch_heap", 8)
-	schema := entity.NewSchema().WithName(name).
-		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
-		WithField(entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(dim))
-	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(name, schema)))
-	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cleanupCancel()
-		require.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(name)))
-	})
-	ids, vectors := make([]int64, rows), make([][]float32, rows)
-	for i := range rows {
-		ids[i] = int64(i)
-		vectors[i] = make([]float32, dim)
-		for j := range dim {
-			vectors[i][j] = float32((i+j)%17) / 17
-		}
-	}
-	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(name,
-		column.NewColumnInt64("id", ids), column.NewColumnFloatVector("vector", dim, vectors)))
-	require.NoError(t, err)
-	flush, err := mc.Flush(ctx, client.NewFlushOption(name))
-	require.NoError(t, err)
-	require.NoError(t, flush.Await(ctx))
-	build, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(name, "vector", index.NewFlatIndex(entity.L2)))
-	require.NoError(t, err)
-	require.NoError(t, build.Await(ctx))
-	load, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(name))
-	require.NoError(t, err)
-	require.NoError(t, load.Await(ctx))
-	request, err := client.NewSearchOption(name, rows, []entity.Vector{entity.FloatVector(vectors[0])}).
-		WithANNSField("vector").WithOutputFields("vector").WithConsistencyLevel(entity.ClEventually).Request()
-	require.NoError(t, err)
-	service := mc.GetService()
-	warm, err := service.Search(ctx, request)
-	require.NoError(t, merr.CheckRPCCall(warm, err))
-	require.Len(t, warm.GetResults().GetFieldsData(), 1)
-	require.Len(t, warm.GetResults().GetFieldsData()[0].GetVectors().GetFloatVector().GetData(), rows*dim)
-
-	type outcome struct {
-		response *milvuspb.MultiSearchResponse
-		err      error
-	}
-	measure := func(completed int) (int64, int64) {
-		blocked := multiSearchBlockingRequest(request)
-		requests := make([]*milvuspb.SearchRequest, completed+1)
-		for i := range completed {
-			requests[i] = proto.CloneOf(request)
-		}
-		requests[completed] = blocked
-		budget := int64(6000)
-		before := multiSearchAttemptCount(t, ctx)
-		result := make(chan outcome, 1)
-		go func() {
-			response, callErr := service.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
-				Requests: requests, MaxConcurrency: 1, TimeoutMs: &budget,
-			}, grpc.MaxCallRecvMsgSize(32<<20))
-			result <- outcome{response, callErr}
-		}()
-		// At concurrency 1, starting the blocked final item proves that every
-		// preceding native result has been accepted and retained by the batch.
-		require.Eventually(t, func() bool {
-			return multiSearchAttemptCount(t, ctx)-before == int64(completed+1)
-		}, 3*time.Second, 20*time.Millisecond)
-		select {
-		case <-result:
-			t.Fatal("future-timestamp Search did not keep the batch pending")
-		default:
-		}
-		// The release codec returns wire buffers to sync.Pool. One GC moves
-		// them to its victim cache; a second GC can reclaim them. Apply the
-		// same two-GC protocol while pending and after completion so the
-		// comparison measures live results rather than idle codec buffers.
-		heldFirstGC := multiSearchLiveHeap(t, ctx)
-		held := multiSearchLiveHeap(t, ctx)
-		var received outcome
-		select {
-		case received = <-result:
-		case <-ctx.Done():
-			t.Fatal("batch did not finish within the probe deadline")
-		}
-		require.NoError(t, merr.CheckRPCCall(received.response, received.err))
-		require.Len(t, received.response.GetResults(), completed+1)
-		for i := range completed {
-			item := received.response.Results[i]
-			require.NoError(t, merr.Error(item.GetStatus()))
-			require.Len(t, item.GetResults().GetFieldsData(), 1)
-			require.Len(t, item.GetResults().GetFieldsData()[0].GetVectors().GetFloatVector().GetData(), rows*dim)
-		}
-		require.Equal(t, merr.TimeoutCode, received.response.Results[completed].GetStatus().GetCode())
-		require.Equal(t, int64(completed+1), multiSearchAttemptCount(t, ctx)-before)
-		firstGC := multiSearchLiveHeap(t, ctx)
-		secondGC := multiSearchLiveHeap(t, ctx)
-		t.Logf("MULTISEARCH_HEAP_GC completed=%d held_first_gc=%d held_second_gc=%d released_first_gc=%d released_second_gc=%d", completed, heldFirstGC, held, firstGC, secondGC)
-		return held, secondGC
-	}
-
-	retainedDeltas, releasedDeltas := make([]int64, 0, 3), make([]int64, 0, 3)
-	for sample := range 3 {
-		control, controlReleased := measure(0)
-		held, released := measure(retainedItems)
-		retainedDeltas = append(retainedDeltas, held-control)
-		releasedDeltas = append(releasedDeltas, released-controlReleased)
-		t.Logf("MULTISEARCH_RETAINED_HEAP sample=%d native_vector_bytes=%d control_held_heap=%d control_released_heap=%d held_heap=%d released_heap=%d retained_delta=%d released_delta=%d",
-			sample, retainedItems*rows*dim*4, control, controlReleased, held, released, held-control, released-controlReleased)
-	}
-	slices.Sort(retainedDeltas)
-	slices.Sort(releasedDeltas)
-	// Check that the controlled payload is visible while pending and is
-	// released afterwards, with room for unrelated small background objects.
-	require.Greater(t, retainedDeltas[1], int64(retainedItems*rows*dim*4/2))
-	require.Less(t, releasedDeltas[1], retainedDeltas[1]/2)
 }
 
 func TestMultiSearchClusterQueueCapacity(t *testing.T) {

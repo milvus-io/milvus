@@ -91,9 +91,7 @@ go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/kv/.
 
 function test_mq()
 {
-pushd pkg
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test $(go list "${PKG_DIR}/mq/..." | grep -v kafka)  -failfast -count=1 -ldflags="-r ${RPATH}"
-popd
+go test -gcflags="all=-N -l" -race -cover -tags dynamic,test $(go list "${MILVUS_DIR}/mq/..." | grep -v kafka)  -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_storage()
@@ -134,7 +132,7 @@ pushd pkg
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${PKG_DIR}/common/..." -failfast -count=1   -ldflags="-r ${RPATH}"
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${PKG_DIR}/config/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${PKG_DIR}/eventlog/..." -failfast -count=1  -ldflags="-r ${RPATH}"
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${PKG_DIR}/mlog/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${PKG_DIR}/log/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${PKG_DIR}/metrics/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${PKG_DIR}/mq/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${PKG_DIR}/tracer/..." -failfast -count=1  -ldflags="-r ${RPATH}"
@@ -173,9 +171,6 @@ go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/meta
 
 function test_cmd()
 {
-if [[ ! -f "${ROOT_DIR}/cmd/tools/migration/legacy/legacypb/legacy.pb.go" ]]; then
-  make -C "${ROOT_DIR}" generated-proto-without-cpp
-fi
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${ROOT_DIR}/cmd/tools/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${ROOT_DIR}/cmd/milvus/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }

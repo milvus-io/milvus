@@ -3870,15 +3870,11 @@ class TestMinHashBulkImport(TestMilvusClientV2Base):
         """
         from pymilvus.bulk_writer import bulk_import, get_import_progress
 
-        url = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
-        api_key = cf.param_info.param_token or (
-            f"{cf.param_info.param_user}:{cf.param_info.param_password}" if cf.param_info.param_user else ""
-        )
+        url = f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
 
         log.info(f"Starting bulk import to collection '{collection_name}'")
         resp = bulk_import(
             url=url,
-            api_key=api_key,
             collection_name=collection_name,
             files=batch_files,
         )
@@ -3892,7 +3888,7 @@ class TestMinHashBulkImport(TestMilvusClientV2Base):
         while time.time() - start_time < timeout:
             time.sleep(5)
 
-            resp = get_import_progress(url=url, job_id=job_id, api_key=api_key)
+            resp = get_import_progress(url=url, job_id=job_id)
             state = resp.json()["data"]["state"]
             progress = resp.json()["data"].get("progress", 0)
 

@@ -970,7 +970,7 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
         int64_values, float_values = [], []
         scalar_fields = vectors[0]
         for i in range(pos):
-            int64_values.append(int(scalar_fields[0][i]))
+            int64_values.append(scalar_fields[0][i])
             float_values.append(scalar_fields[5][i])
         res = [
             {ct.default_int64_field_name: int64_values[i], default_float_field_name: float_values[i]}

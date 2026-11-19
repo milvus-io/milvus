@@ -464,9 +464,6 @@ class TestMilvusClientAnalyzer(TestMilvusClientV2Base):
                 endpoint = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
                 response = requests.post(
                     endpoint + "/v2/vectordb/common/run_analyzer",
-                    headers={"Authorization": f"Bearer {cf.param_info.param_token}"}
-                    if cf.param_info.param_token
-                    else {},
                     json={
                         "text": ["Hello world"],
                         "collectionName": name,

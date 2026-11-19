@@ -479,7 +479,6 @@ class TestCompactionOperation(TestcaseBase):
         # search
         ids.pop(0)
         ids.pop(-1)
-        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
         collection_w.load()
         search_res, _ = collection_w.search(
             cf.gen_vectors(ct.default_nq, ct.default_dim),
@@ -501,12 +500,11 @@ class TestCompactionOperation(TestcaseBase):
                 5.load and search
         expected: Verify two delta compaction plans
         """
-        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), shards_num=2)
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
         df = cf.gen_default_dataframe_data(2 * tmp_nb)
         insert_res, _ = collection_w.insert(df)
         assert collection_w.num_entities == 2 * tmp_nb
 
-        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
         collection_w.load()
         log.debug(self.utility_wrap.get_query_segment_info(collection_w.name))
 
@@ -748,7 +746,6 @@ class TestCompactionOperation(TestcaseBase):
         collection_w.get_compaction_plans(check_task=CheckTasks.check_delete_compact)
 
         # search
-        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
         collection_w.load()
         search_res, _ = collection_w.search(
             cf.gen_vectors(ct.default_nq, ct.default_dim),
@@ -861,7 +858,6 @@ class TestCompactionOperation(TestcaseBase):
         collection_w.wait_for_compaction_completed()
         collection_w.get_compaction_plans(check_task=CheckTasks.check_delete_compact)
 
-        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
         collection_w.load()
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 

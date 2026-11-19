@@ -245,10 +245,8 @@ func TestCapacityScanRecoversDroppedSealNotification(t *testing.T) {
 func TestStatsManagerRuntimeFlushSizeForMemoryPressure(t *testing.T) {
 	paramtable.Init()
 	m := NewStatsManager()
-	m.mu.Lock()
 	m.cfg.growingBytesHWM = 10_000
 	m.cfg.growingBytesLWM = 250
-	m.mu.Unlock()
 
 	sealOperator := mock_utils.NewMockSealOperator(t)
 	sealOperator.EXPECT().Channel().Return(types.PChannelInfo{Name: "pchannel"})
@@ -425,6 +423,7 @@ func TestStatsManagerSelectSegmentsWithBlockingL0PolicyRows(t *testing.T) {
 	defer params.Reset(params.DataCoordCfg.BlockingL0SizeInMB.Key)
 
 	m := NewStatsManager()
+	m.cfg = newStatsConfig()
 
 	sealOperator := mock_utils.NewMockSealOperator(t)
 	sealOperator.EXPECT().Channel().Return(types.PChannelInfo{Name: "pchannel"}).Maybe()
@@ -463,6 +462,7 @@ func TestStatsManagerSelectSegmentsWithBlockingL0PolicySizeOnly(t *testing.T) {
 	defer params.Reset(params.DataCoordCfg.BlockingL0SizeInMB.Key)
 
 	m := NewStatsManager()
+	m.cfg = newStatsConfig()
 
 	sealOperator := mock_utils.NewMockSealOperator(t)
 	sealOperator.EXPECT().Channel().Return(types.PChannelInfo{Name: "pchannel"}).Maybe()
@@ -491,6 +491,7 @@ func TestStatsManagerSelectSegmentsWithBlockingL0PolicyDisabled(t *testing.T) {
 	defer params.Reset(params.DataCoordCfg.BlockingL0SizeInMB.Key)
 
 	m := NewStatsManager()
+	m.cfg = newStatsConfig()
 
 	sealOperator := mock_utils.NewMockSealOperator(t)
 	sealOperator.EXPECT().Channel().Return(types.PChannelInfo{Name: "pchannel"}).Maybe()
@@ -517,6 +518,7 @@ func TestStatsManagerSelectSegmentsWithBlockingL0PolicySkipsUnknownCreateTimeTic
 	defer params.Reset(params.DataCoordCfg.BlockingL0SizeInMB.Key)
 
 	m := NewStatsManager()
+	m.cfg = newStatsConfig()
 
 	sealOperator := mock_utils.NewMockSealOperator(t)
 	sealOperator.EXPECT().Channel().Return(types.PChannelInfo{Name: "pchannel"}).Maybe()
@@ -621,6 +623,7 @@ func TestStatsManagerBlockingL0PolicyScopesDeletePressureByPChannel(t *testing.T
 	defer params.Reset(params.DataCoordCfg.BlockingL0SizeInMB.Key)
 
 	m := NewStatsManager()
+	m.cfg = newStatsConfig()
 
 	sealOperator1 := mock_utils.NewMockSealOperator(t)
 	sealOperator1.EXPECT().Channel().Return(types.PChannelInfo{Name: "pchannel1"}).Maybe()

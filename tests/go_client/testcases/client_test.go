@@ -1,12 +1,9 @@
 package testcases
 
 import (
-	"net/url"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/require"
 
 	client "github.com/milvus-io/milvus/client/v3/milvusclient"
 	"github.com/milvus-io/milvus/tests/go_client/base"
@@ -41,21 +38,14 @@ func TestConnectClose(t *testing.T) {
 	common.CheckErr(t, errList3, true)
 }
 
-func genInvalidClientConfig(t *testing.T) []client.ClientConfig {
-	t.Helper()
-	address := hp.GetURI()
-	if !strings.Contains(address, "://") {
-		address = "http://" + address
-	}
-	endpoint, err := url.Parse(address)
-	require.NoError(t, err)
+func genInvalidClientConfig() []client.ClientConfig {
 	invalidClientConfigs := []client.ClientConfig{
-		{Address: "aaa"},                                          // not exist address
-		{Address: endpoint.Hostname()},                            // Address=localhost
-		{Address: endpoint.Port()},                                // Address=19530
-		{Address: hp.GetURI(), Username: "aaa"},                   // not exist username
-		{Address: hp.GetURI(), Username: "root", Password: "aaa"}, // wrong password
-		{Address: hp.GetURI(), DBName: "aaa"},                     // not exist db
+		{Address: "aaa"}, // not exist address
+		{Address: strings.Split(hp.GetAddr(), ":")[0]},             // Address=localhost
+		{Address: strings.Split(hp.GetAddr(), ":")[1]},             // Address=19530
+		{Address: hp.GetAddr(), Username: "aaa"},                   // not exist username
+		{Address: hp.GetAddr(), Username: "root", Password: "aaa"}, // wrong password
+		{Address: hp.GetAddr(), DBName: "aaa"},                     // not exist db
 	}
 	return invalidClientConfigs
 }
@@ -66,7 +56,7 @@ func TestConnectInvalidAddr(t *testing.T) {
 
 	// connect
 	ctx := hp.CreateContext(t, time.Second*5)
-	for _, invalidCfg := range genInvalidClientConfig(t) {
+	for _, invalidCfg := range genInvalidClientConfig() {
 		cfg := invalidCfg
 		_, errConnect := base.NewMilvusClient(ctx, &cfg)
 		common.CheckErr(t, errConnect, false, "context deadline exceeded")
