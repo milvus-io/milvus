@@ -71,7 +71,7 @@ ifdef TANTIVY_ANALYZER_REMOTE_TLS
 endif
 
 
-use_svs = OFF
+use_svs = AUTO
 ifdef USE_SVS
 	use_svs = ${USE_SVS}
 endif
