@@ -55,3 +55,24 @@ func (s *transformStartSegment) Collection() *segments.Collection {
 	}
 	return readable.Collection()
 }
+
+// lineageStreamSegment is the registration identity of a physical segment on
+// one lineage stream: the same segment and the same ApplyTransform, replayed
+// from the split's switch tick on another vchannel's TransformLog.
+type lineageStreamSegment struct {
+	TransformSegment
+	vchannel   string
+	startAfter uint64
+}
+
+func (s *lineageStreamSegment) UnwrapTransformSegment() TransformSegment {
+	return s.TransformSegment
+}
+
+func (s *lineageStreamSegment) VChannel() string {
+	return s.vchannel
+}
+
+func (s *lineageStreamSegment) TransformStartAfterTimeTick() uint64 {
+	return s.startAfter
+}

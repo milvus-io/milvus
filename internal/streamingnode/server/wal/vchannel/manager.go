@@ -30,6 +30,9 @@ type PChannelManagerConfig struct {
 	QueryStatsChunkManager     storage.ChunkManager
 	QueryRuntimeModuleBuilders []queryresource.QueryRuntimeModuleBuilder
 	QueryViewLoadInfoProvider  queryresource.LoadInfoProvider
+	// LineageTransformLogStreams opens the TransformLog streams of the targets
+	// of a split source, on this or another StreamingNode.
+	LineageTransformLogStreams wal.TransformLogStreamManager
 
 	PChannel string
 
@@ -335,6 +338,7 @@ func (m *PChannelRecoveryManager) newModule(vchannel string) (*VChannelRecoveryM
 		QueryStatsChunkManager:     m.config.QueryStatsChunkManager,
 		QueryDispatcher:            m.queryDispatcher,
 		TransformLogStream:         m.queryTransformLogStream,
+		LineageTransformLogStreams: m.config.LineageTransformLogStreams,
 		SummaryManager:             m.config.SummaryManager,
 		PChannel:                   m.pchannel,
 		VChannel:                   vchannel,

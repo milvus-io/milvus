@@ -8,7 +8,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -226,4 +228,62 @@ func TestSchemaGCRescanDoesNotCopySegments(t *testing.T) {
 	schemas := module.vchannelView.AssignmentMeta().GetCollectionInfo().GetSchemas()
 	require.Equal(t, streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL, schemas[0].GetState(), "the segments pin the first version")
 	require.Equal(t, streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED, schemas[1].GetState())
+}
+
+// Split g1 targets can have no growing segments. Their serving schema still
+// backs the subsequent g2 preparation after an ALTER has advanced the WAL.
+func TestSchemaGCRetainsQueryViewReadSchema(t *testing.T) {
+	for _, recovered := range []bool{false, true} {
+		t.Run(map[bool]string{false: "preparing", true: "recovered serving"}[recovered], func(t *testing.T) {
+			manager, err := NewPChannelRecoveryManager(PChannelManagerConfig{
+				PChannel: "p1", VChannelMetas: map[string]*streamingpb.VChannelMeta{"v1": restoreSchemaTestMeta()},
+			})
+			require.NoError(t, err)
+			t.Cleanup(manager.Close)
+			module := manager.Module("v1")
+			// Defer physical preparation; exercise registration and schema ownership.
+			module.queryTransformLogStream = nil
+			meta := &viewpb.QueryViewMeta{
+				CollectionId: 1, ReplicaId: 1, Vchannel: "v1", SchemaVersion: 0,
+				Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1}},
+				State:   viewpb.QueryViewState_QueryViewStateUp,
+			}
+			key := qviews.QueryViewKey{ShardID: qviews.NewShardIDFromQVMeta(meta), QueryViewVersion: qviews.FromProtoQueryViewVersion(meta.GetVersion())}
+			if recovered {
+				handler := snview.RecoverPChannelSNQueryViewHandler(t.Context(), "p1", nil, manager,
+					[]*viewpb.QueryViewOfShard{{Meta: meta, StreamingNode: &viewpb.QueryViewOfStreamingNode{}}})
+				t.Cleanup(handler.CloseForHandoff)
+			} else {
+				manager.Acquire(snview.AcquireResource{Key: key, Meta: meta})
+			}
+			cleanup := moduleapi.CleanupContext{PhysicalTimeTick: 40}
+			require.Empty(t, manager.ConsumeCleanupSnapshots(cleanup))
+			schema, err := module.GetSchemaVersion(1, 0)
+			require.NoError(t, err, "live QueryViews retain their exact read schema without segment references")
+			require.Zero(t, schema.GetSchema().GetVersion())
+
+			// The g2 reference is installed under the same owner lock as cleanup.
+			// Releasing g1 must not open a gap before the replacement can capture 0.
+			replacement := proto.Clone(meta).(*viewpb.QueryViewMeta)
+			replacement.Version.QueryVersion++
+			replacementKey := qviews.QueryViewKey{ShardID: qviews.NewShardIDFromQVMeta(replacement), QueryViewVersion: qviews.FromProtoQueryViewVersion(replacement.GetVersion())}
+			manager.Acquire(snview.AcquireResource{Key: replacementKey, Meta: replacement})
+			manager.Release(snview.ReleaseResource{Key: key})
+			require.Empty(t, manager.ConsumeCleanupSnapshots(cleanup))
+			_, err = module.GetSchemaVersion(1, 0)
+			require.NoError(t, err)
+
+			manager.Release(snview.ReleaseResource{Key: replacementKey})
+			require.Empty(t, manager.ConsumeCleanupSnapshots(cleanup), "first persist a tombstone")
+			for _, snapshot := range manager.ConsumeDirtySnapshots() {
+				snapshot.MarkPersisted()
+			}
+			deletions := manager.ConsumeCleanupSnapshots(cleanup)
+			require.Len(t, deletions, 1)
+			require.Equal(t, moduleapi.SnapshotOpDeleteSchemas, deletions[0].Op())
+			deletions[0].MarkPersisted()
+			require.Len(t, module.vchannelView.AssignmentMeta().GetCollectionInfo().GetSchemas(), 1)
+			require.EqualValues(t, 1, module.vchannelView.AssignmentMeta().GetCollectionInfo().GetSchemas()[0].GetSchema().GetVersion())
+		})
+	}
 }

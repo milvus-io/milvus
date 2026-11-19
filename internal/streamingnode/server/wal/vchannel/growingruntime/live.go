@@ -56,6 +56,11 @@ func (r *Runtime) applyLiveMessage(ctx context.Context, msg message.ImmutableMes
 	if applyTransform {
 		r.markTransformTimeTick(timeTick)
 	}
+	if applyGrowing && messageutil.IsSplitShardFence(msg) {
+		// From the fence on, deletes of the residual's rows are written to
+		// the targets of the split.
+		r.observeSplitLineage(lineageSpecFromFence(msg))
+	}
 	mlog.Debug(ctx, "applied live message to growing runtime",
 		mlog.FieldVChannel(msg.VChannel()),
 		mlog.String("messageType", msg.MessageType().String()),

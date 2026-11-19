@@ -78,6 +78,17 @@ func (cm *QueryMVCCManager) Minimum(channel string, strong bool) uint64 {
 	return minimum
 }
 
+// Prefix samples, under one lock, the complete published prefix of the PChannel,
+// the prefix a Strong read of channel must cover, and the channel's frontiers at
+// the published prefix. It never waits: a caller that fixes one read point
+// across several channels takes its bounds from here and then establishes the
+// point through SnapshotAt. A zero pair denotes an absent channel.
+func (cm *QueryMVCCManager) Prefix(channel string) (through uint64, strongMinimum uint64, snapshot QueryVChannelMVCC) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	return cm.through, max(cm.through, cm.pending[channel], cm.pendingAll), cm.frontiers[channel]
+}
+
 // Snapshot returns one pair from one complete prefix, never append-time maxima.
 // A ready zero pair denotes an absent channel. The caller's minimum is fixed
 // while waiting, so concurrent writes cannot keep moving the wait target.

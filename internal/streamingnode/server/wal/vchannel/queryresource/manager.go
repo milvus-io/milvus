@@ -265,6 +265,27 @@ func (m *Manager) OldestDataVersion() (qviews.DataVersion, bool) {
 	return minQueryViewDataVersion(m.refs)
 }
 
+// ReferencedSchemaVersions includes Preparing and recovered Views: they need to
+// capture the exact read schema again even if a shared runtime already owns it.
+// The caller holds the VChannel owner lock, also held by AcquireLocked, so a
+// cleanup decision cannot race a new registration.
+func (m *Manager) ReferencedSchemaVersions() []int32 {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	versions := make(map[int32]struct{})
+	for _, ref := range m.refs {
+		versions[ref.meta.GetSchemaVersion()] = struct{}{}
+	}
+	result := make([]int32, 0, len(versions))
+	for version := range versions {
+		result = append(result, version)
+	}
+	return result
+}
+
 func (m *Manager) Close() {
 	if m == nil {
 		return

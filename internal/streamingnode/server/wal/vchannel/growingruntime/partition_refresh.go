@@ -85,6 +85,7 @@ func (r *Runtime) PreparePartitions(ctx context.Context, meta *viewpb.QueryViewM
 		return merr.WrapErrServiceNotReadyMsg("growing partition snapshot is not ready")
 	}
 	next := newRuntime()
+	next.stage = true
 	next.collection, next.loadedPartitions = collection, missing
 	next.writeSchema = view.WriteSchema
 	if next.writeSchema == nil {
@@ -124,9 +125,18 @@ func (r *Runtime) PreparePartitions(ctx context.Context, meta *viewpb.QueryViewM
 			}
 			continue
 		}
+		// Merged segments of a split source take the target deletes the
+		// residual has applied so far; the lock keeps new ones out until the
+		// merge is visible to the stream goroutines.
+		unlockLineage, err := r.replayLineageInto(ctx, next.segmentsSnapshot())
+		if err != nil {
+			r.eventMu.Unlock()
+			return err
+		}
 		r.mu.Lock()
 		if r.closed {
 			r.mu.Unlock()
+			unlockLineage()
 			r.eventMu.Unlock()
 			return context.Canceled
 		}
@@ -140,7 +150,9 @@ func (r *Runtime) PreparePartitions(ctx context.Context, meta *viewpb.QueryViewM
 		next.segments = nil
 		next.segmentIDs = nil
 		r.refresh = nil
+		r.restartLineageIfResidualReturnedLocked()
 		r.mu.Unlock()
+		unlockLineage()
 		r.eventMu.Unlock()
 		return nil
 	}

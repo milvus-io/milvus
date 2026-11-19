@@ -168,6 +168,8 @@ type ShardSearchRequest struct {
 	retryErrors     []error
 	setupCtx        context.Context          // Cancels initial shard setup if another vchannel fails.
 	registerCancel  func(context.CancelFunc) // Registers worker cancellation during initial setup only.
+	// OnPlan, when set, observes every plan Phase 1 returns for this shard.
+	OnPlan func(*viewpb.QueryPlan)
 }
 
 // ShardQueryRequest contains the parameters for a shard-level query (retrieve) execution.
@@ -181,6 +183,8 @@ type ShardQueryRequest struct {
 	retryErrors    []error
 	setupCtx       context.Context          // Cancels initial shard setup if another vchannel fails.
 	registerCancel func(context.CancelFunc) // Registers worker cancellation during initial setup only.
+	// OnPlan, when set, observes every plan Phase 1 returns for this shard.
+	OnPlan func(*viewpb.QueryPlan)
 }
 
 // Search executes Phase 1 + Phase 2 for a single shard's search.
@@ -193,6 +197,7 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 		consistencyLevel: req.Req.ConsistencyLevel,
 		mvcc:             req.MVCC,
 		barrierMVCC:      req.BarrierMVCC,
+		observePlan:      req.OnPlan,
 		buildPlanReq: func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
 				CollectionId: req.Req.CollectionID,
@@ -442,6 +447,7 @@ func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest
 		consistencyLevel: req.Req.ConsistencyLevel,
 		mvcc:             req.MVCC,
 		barrierMVCC:      req.BarrierMVCC,
+		observePlan:      req.OnPlan,
 		buildPlanReq: func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
 				CollectionId: req.Req.CollectionID,
@@ -599,6 +605,8 @@ type shardExecParams struct {
 	retryErrors      []error                   // Worker failures from previous whole-Proxy attempts.
 	retryState       *shardRetryState          // Streaming keeps setup and receive retries in one budget.
 	cancelStreams    func()                    // Cancels worker opens in a failed streaming attempt.
+	// observePlan sees every plan Phase 1 returns, before any dispatch.
+	observePlan func(*viewpb.QueryPlan)
 	// buildPlanReq creates the GetQueryPlanRequest for a target shard.
 	buildPlanReq func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest
 	// consumeResponse accepts inline SN results before worker dispatch.
@@ -730,6 +738,9 @@ func (s *shardViewQueryClient) executeShard(
 		plan := response.GetPlan()
 		if err := qviews.RestoreQueryPlanPayloads(response, planReq); err != nil {
 			return nil, err
+		}
+		if params.observePlan != nil {
+			params.observePlan(plan)
 		}
 		// A newer advertised version does not certify removal of a dead QN.
 		// Recheck the actual exact-schema plan before accepting inline results.
@@ -881,7 +892,8 @@ func legacyMVCCForNode(mvcc *viewpb.QueryPlanMVCC, node qviews.WorkNode) uint64 
 	if node.NodeType() == qviews.NodeTypeStreamingNode {
 		return mvcc.GetGrowingTimetick()
 	}
-	return mvcc.GetTransformingTimetick()
+	// The transform frontier, or the common read point of a lineage group.
+	return qviews.SealedReadTimestamp(mvcc)
 }
 
 func isEmptySuccessfulQueryResponse(resp *viewpb.QueryOnViewResponse) bool {

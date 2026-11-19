@@ -30,6 +30,9 @@ type ModuleConfig struct {
 	QueryViewLoadInfoProvider  queryresource.LoadInfoProvider
 	QueryDispatcher            *queryresource.Dispatcher
 	TransformLogStream         wal.TransformLogStream
+	// LineageTransformLogStreams opens the TransformLog streams of the targets
+	// of a split source, local or remote.
+	LineageTransformLogStreams wal.TransformLogStreamManager
 	SummaryManager             *walsummary.Manager
 
 	PChannel string
@@ -53,10 +56,13 @@ type ModuleConfig struct {
 type VChannelRecoveryModule struct {
 	queryResources          *queryresource.Manager
 	queryTransformLogStream wal.TransformLogStream
-	queryObservedTimeTick   uint64
-	queryBarrierTimeTick    uint64
-	querySealed             map[int64]bool
-	summaryManager          *walsummary.Manager
+	// lineageTransformLogStreams is handed to the growing runtime of a split
+	// source, which follows the delete streams of the split targets.
+	lineageTransformLogStreams wal.TransformLogStreamManager
+	queryObservedTimeTick      uint64
+	queryBarrierTimeTick       uint64
+	querySealed                map[int64]bool
+	summaryManager             *walsummary.Manager
 
 	// mu serializes WAL observation with snapshot state transitions. In
 	// particular, segments may grow when CreateSegment is observed while the
@@ -108,19 +114,20 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		return nil, merr.WrapErrServiceInternalMsg("vchannel recovery module vchannel is empty")
 	}
 	module := &VChannelRecoveryModule{
-		pchannel:                config.PChannel,
-		querySealed:             make(map[int64]bool),
-		queryTransformLogStream: config.TransformLogStream,
-		summaryManager:          config.SummaryManager,
-		queryResources:          queryresource.NewManager(queryresource.Config{ChunkManager: config.QueryStatsChunkManager, Builders: config.QueryRuntimeModuleBuilders, Scheduler: config.Runtime.Scheduler, Dispatcher: config.QueryDispatcher, LoadInfoProvider: config.QueryViewLoadInfoProvider}),
-		vchannel:                config.VChannel,
-		runtime:                 config.Runtime,
-		logger:                  config.Logger,
-		segments:                make(map[int64]*segment.SegmentView),
-		segmentLifecycle:        config.SegmentLifecycle,
-		segmentPackWriter:       config.SegmentPackWriter,
-		onCleanup:               config.OnCleanup,
-		onL0Materialized:        config.OnL0Materialized,
+		pchannel:                   config.PChannel,
+		querySealed:                make(map[int64]bool),
+		queryTransformLogStream:    config.TransformLogStream,
+		lineageTransformLogStreams: config.LineageTransformLogStreams,
+		summaryManager:             config.SummaryManager,
+		queryResources:             queryresource.NewManager(queryresource.Config{ChunkManager: config.QueryStatsChunkManager, Builders: config.QueryRuntimeModuleBuilders, Scheduler: config.Runtime.Scheduler, Dispatcher: config.QueryDispatcher, LoadInfoProvider: config.QueryViewLoadInfoProvider}),
+		vchannel:                   config.VChannel,
+		runtime:                    config.Runtime,
+		logger:                     config.Logger,
+		segments:                   make(map[int64]*segment.SegmentView),
+		segmentLifecycle:           config.SegmentLifecycle,
+		segmentPackWriter:          config.SegmentPackWriter,
+		onCleanup:                  config.OnCleanup,
+		onL0Materialized:           config.OnL0Materialized,
 	}
 	if config.VChannelMeta != nil {
 		if adoptVChannelMeta {
@@ -776,7 +783,7 @@ func (m *VChannelRecoveryModule) ConsumeCleanupSnapshots(cleanup moduleapi.Clean
 				segments = append(segments, view.SchemaReference())
 			}
 			owner := m.vchannelView
-			deleted, changed := owner.SchemaCleanupPlan(cleanup.PhysicalTimeTick, segments)
+			deleted, changed := owner.SchemaCleanupPlan(cleanup.PhysicalTimeTick, segments, m.queryResources.ReferencedSchemaVersions()...)
 			vchannelChanged = changed || vchannelChanged
 			if deleted != nil {
 				snapshots = append(snapshots, newDirtySnapshot(

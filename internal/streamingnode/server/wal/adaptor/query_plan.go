@@ -288,11 +288,36 @@ func (w *walAdaptorImpl) GetMVCCTimestamp(ctx context.Context, req *viewpb.GetMV
 	if w.Channel().AccessMode != types.AccessModeRW {
 		return nil, viewerror.NewNotPrimaryError("wal %s is not primary", w.Channel().String())
 	}
+	if req.GetPrefixOnly() {
+		return w.getQueryMVCCPrefix(req.GetVchannel())
+	}
 	mvcc, err := w.GetLatestQueryPlanMVCC(ctx, req.GetVchannel())
 	if err != nil {
 		return nil, err
 	}
-	return &viewpb.GetMVCCTimestampResponse{Mvcc: mvcc}, nil
+	// Sampled after the wait above: through already covers the Strong minimum
+	// that wait was fixed on, and strong_minimum reflects writes completed since.
+	through, strongMinimum, _ := w.param.MVCCManager.QueryMVCC().Prefix(req.GetVchannel())
+	return &viewpb.GetMVCCTimestampResponse{Mvcc: mvcc, Through: through, StrongMinimum: strongMinimum}, nil
+}
+
+// getQueryMVCCPrefix answers without waiting and without triggering a sync. The
+// caller derives a read point from through and strong_minimum, possibly of
+// several vchannels, and establishes it with a barrier_mvcc query plan.
+func (w *walAdaptorImpl) getQueryMVCCPrefix(vchannel string) (*viewpb.GetMVCCTimestampResponse, error) {
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, viewerror.NewOnShutdownError("wal is on shutdown")
+	}
+	defer w.lifetime.Done()
+	through, strongMinimum, current := w.param.MVCCManager.QueryMVCC().Prefix(vchannel)
+	if current.GrowingTimetick == 0 && current.TransformingTimetick == 0 {
+		return nil, viewerror.NewViewNotFound("query mvcc for vchannel %s is unavailable", vchannel)
+	}
+	return &viewpb.GetMVCCTimestampResponse{
+		Mvcc:          &viewpb.QueryPlanMVCC{GrowingTimetick: current.GrowingTimetick, TransformingTimetick: current.TransformingTimetick},
+		Through:       through,
+		StrongMinimum: strongMinimum,
+	}, nil
 }
 
 func (w *walAdaptorImpl) resolveQueryPlanMVCC(ctx context.Context, req *viewpb.GetQueryPlanRequest, vchannel string) (*viewpb.QueryPlanMVCC, error) {
