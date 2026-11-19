@@ -2467,10 +2467,19 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	// resolution above and lock acquisition; in that case this request must
 	// terminate before broadcasting a CreateSnapshot message whose ack callback
 	// can no longer generate a valid snapshot.
-	if !s.meta.GetCollection(req.GetCollectionId()).IsCreated() {
+	current := s.meta.GetCollection(req.GetCollectionId())
+	if !current.IsCreated() {
 		mlog.Warn(context.TODO(), "CreateSnapshot: collection not found after lock")
 		return merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionId())), nil
 	}
+
+	if current.DatabaseName != dbName || current.Schema.GetName() != collectionName {
+		return merr.Status(merr.WrapErrServiceNotReadyMsg("collection %d changed database or name while waiting for its snapshot lock; retry with current metadata", req.GetCollectionId())), nil
+	}
+	// A split can finish while this request waits for the lock. Its channels,
+	// schema and routing must come from this same immutable publication, which
+	// GenSnapshot reads while the callback still owns the resource key.
+	coll = current
 
 	// Under the collection resource key: a shard split holds it from its
 	// broadcast until its record exists, so the record is seen here.

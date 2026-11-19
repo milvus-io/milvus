@@ -6,7 +6,8 @@ import (
 
 // Shard is one entry of the serving list of a collection.
 type Shard struct {
-	VChannel string
+	ShardSetEpoch uint64
+	VChannel      string
 	// Lineage is set for a split source shard that is still served: rows it
 	// holds are deleted through the shards named here. Nil for every other shard.
 	Lineage *ShardLineage

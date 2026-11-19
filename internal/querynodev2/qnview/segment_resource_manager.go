@@ -76,6 +76,7 @@ type segmentBinding struct {
 }
 
 type preparedSegmentRead struct {
+	vchannel string
 	schema   int32
 	load     uint64
 	manifest int64
@@ -536,6 +537,9 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 }
 
 func readMatchesBinding(read *preparedSegmentRead, b *segmentBinding) bool {
+	if read.vchannel != "" && read.vchannel != b.view.req.Meta.GetVchannel() {
+		return false
+	}
 	if b.manifest == 0 && (b.snapshot == nil || !proto.Equal(read.snapshot, b.snapshot.LoadInfo)) {
 		return false
 	}
@@ -620,7 +624,7 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 	if err != nil {
 		return nil, err
 	}
-	return &preparedSegmentRead{schema: b.view.req.Meta.GetSchemaVersion(), load: b.view.req.Meta.GetLoadInfoVersion(), manifest: snapshotManifestVersion(snapshot), base: base, read: read}, nil
+	return &preparedSegmentRead{vchannel: b.view.req.Meta.GetVchannel(), schema: b.view.req.Meta.GetSchemaVersion(), load: b.view.req.Meta.GetLoadInfoVersion(), manifest: snapshotManifestVersion(snapshot), base: base, read: read}, nil
 }
 
 func (r *segmentResource) catchup(base *segmentBase) {

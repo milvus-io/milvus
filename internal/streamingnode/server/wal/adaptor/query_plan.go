@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
@@ -107,14 +108,21 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 	}
 	var lease *snview.QueryViewLease
 	if req.GetStatisticsRequest() != nil {
-		lease, err = w.queryViewHandler.AcquireLatestUpView(ctx, shardID)
+		lease, err = w.queryViewHandler.AcquireUpViewAtGeneration(ctx, shardID, nil, req.GetShardSetEpoch())
 	} else {
-		lease, err = w.queryViewHandler.AcquireUpViewAtSchema(ctx, shardID, schemaVersion)
+		lease, err = w.queryViewHandler.AcquireUpViewAtGeneration(ctx, shardID, &schemaVersion, req.GetShardSetEpoch())
 	}
 	if err != nil {
 		return nil, err
 	}
 	defer lease.Release()
+	fenced := false
+	if w.param != nil {
+		fenced = shards.IsSplitFenced(w.param.ShardManager, shardID.VChannel)
+	}
+	if err := requireSplitReadLineage(fenced, lease.Meta); err != nil {
+		return nil, err
+	}
 	if req.GetStatisticsRequest() == nil && schemaVersion != lease.Meta.GetSchemaVersion() {
 		return nil, viewerror.NewViewNotFound("query view schema is not ready")
 	}
@@ -133,6 +141,18 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		return nil, err
 	}
 
+	// A fixed barrier can race the first fence check. If the fence was assigned
+	// at or below B, its acker must complete before through covers B, and its
+	// append-side flag was installed before that acknowledgment. Conversely a
+	// fence installed after this check is allocated above the completed barrier.
+	if w.param != nil {
+		if err := requireSplitReadLineage(shards.IsSplitFenced(w.param.ShardManager, shardID.VChannel), lease.Meta); err != nil {
+			return nil, err
+		}
+	}
+	if err := requireSplitReadSnapshot(lease.Meta, mvcc); err != nil {
+		return nil, err
+	}
 	var readRuntime *queryresource.ReadRuntime
 	if w.viewResourceManager != nil {
 		readRuntime, _ = w.viewResourceManager.GetQueryReadRuntime(qviews.QueryViewKey{
@@ -560,4 +580,16 @@ func queryPlanSealedSegmentCount(plan *viewpb.QueryPlan, view *viewpb.QueryViewO
 		}
 	}
 	return count
+}
+
+// Target replication may run before the source consumer/callback has built
+// g1. The append-side fence is installed before persistence and survives
+// recovery, so an old g0 view must stop planning immediately on every cluster.
+// A plan may survive only if its MVCC resolution finishes before the fence;
+// the caller checks again after resolution to close explicit-barrier races.
+func requireSplitReadLineage(fenced bool, meta *viewpb.QueryViewMeta) error {
+	if fenced && meta.GetLineage() == nil {
+		return viewerror.NewViewInvalidated("split source read generation has not attached target delete streams")
+	}
+	return nil
 }

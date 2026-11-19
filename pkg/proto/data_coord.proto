@@ -2131,6 +2131,10 @@ message CollectionDescription {
   repeated common.KeyValuePair properties = 5; // properties
   map<string, int64> partitions = 6; // partition name to id mapping
   repeated string virtual_channel_names = 7; // virtual channel names for restore to preserve pchannel mapping
+  // Explicit placement after shard splits. Absent on legacy modulo-N snapshots.
+  uint64 routing_modulus = 8;
+  string shard_by = 9;
+  repeated schema.CollectionShardInfo shard_infos = 10;
 }
 
 message SnapshotInfo {

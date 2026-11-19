@@ -3824,7 +3824,7 @@ func TestServer_CreateSnapshotFlushBroadcast(t *testing.T) {
 	server := &Server{
 		snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		handler:         &embeddedHandler{},
-		meta:            meta.NewMetaWithCollections(&meta.CollectionInfo{ID: 100}),
+		meta:            meta.NewMetaWithCollections(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "collection"}, VChannelNames: []string{"p1_100v0", "p2_100v1"}}),
 	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	resp, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{Name: "snap", CollectionId: 100})
@@ -3999,7 +3999,7 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		server := &Server{
 			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 			handler:         fakeHandler,
-			meta:            meta.NewMetaWithCollections(&meta.CollectionInfo{ID: 100}),
+			meta:            meta.NewMetaWithCollections(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_collection"}}),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -7874,7 +7874,7 @@ func TestServer_CreateSnapshot_PreparationFailures(t *testing.T) {
 			publish := mockey.Mock((*embeddedBroadcastAPI).Broadcast).Return((*types2.BroadcastAppendResult)(nil), merr.ErrServiceNotReady).Build()
 			defer publish.UnPatch()
 			server := seedCollections(&Server{snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil), handler: &embeddedHandler{}, broker: &meta.EmbeddedBroker{}},
-				&meta.CollectionInfo{ID: 100})
+				&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "books"}, VChannelNames: []string{"p1_100v0"}})
 			server.stateCode.Store(commonpb.StateCode_Healthy)
 			status, err := server.CreateSnapshot(context.Background(), &datapb.CreateSnapshotRequest{Name: "backup", CollectionId: 100, Description: "daily"})
 			require.NoError(t, err)
@@ -7885,6 +7885,67 @@ func TestServer_CreateSnapshot_PreparationFailures(t *testing.T) {
 				require.ErrorIs(t, merr.Error(status), merr.ErrParameterInvalid)
 			default:
 				require.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
+			}
+		})
+	}
+}
+
+func TestCreateSnapshotRefreshesCollectionAfterLockWait(t *testing.T) {
+	for _, identityChange := range []string{"split retired", "rename", "move database"} {
+		t.Run(identityChange, func(t *testing.T) {
+			old := &meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "books"}, VChannelNames: []string{"p0_100v0"}}
+			current := *old
+			current.VChannelNames = []string{"p1_100v1", "p2_100v2"}
+			switch identityChange {
+			case "rename":
+				current.Schema = &schemapb.CollectionSchema{Name: "renamed"}
+			case "move database":
+				current.DatabaseName = "other"
+			}
+			server := &Server{snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil), handler: &embeddedHandler{}, meta: meta.NewMetaWithCollections(old)}
+			server.stateCode.Store(commonpb.StateCode_Healthy)
+			lookup := mockey.Mock((*snapshot.Manager).GetSnapshot).Return(nil, merr.WrapErrSnapshotNotFound("snap", "not found")).Build()
+			defer lookup.UnPatch()
+			collection := mockey.Mock((*embeddedHandler).GetCollection).Return(old, nil).Build()
+			defer collection.UnPatch()
+			beforeLock, acquire := make(chan struct{}), make(chan struct{})
+			start := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(func(context.Context, ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+				close(beforeLock)
+				<-acquire
+				return &embeddedBroadcastAPI{}, nil
+			}).Build()
+			defer start.UnPatch()
+			closeAPI := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
+			defer closeAPI.UnPatch()
+			var channels []string
+			publish := mockey.Mock((*embeddedBroadcastAPI).Broadcast).To(func(_ *embeddedBroadcastAPI, _ context.Context, msg message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+				channels = append([]string(nil), msg.BroadcastHeader().VChannels...)
+				return &types2.BroadcastAppendResult{}, nil
+			}).Build()
+			defer publish.UnPatch()
+			type response struct {
+				status *commonpb.Status
+				err    error
+			}
+			done := make(chan response, 1)
+			go func() {
+				status, err := server.CreateSnapshot(t.Context(), &datapb.CreateSnapshotRequest{Name: "snap", CollectionId: 100})
+				done <- response{status, err}
+			}()
+			<-beforeLock
+			// Freeze after the pre-lock lookup, then publish the immutable view
+			// of a completed split (or rename/move) before granting the lock.
+			server.meta.AddCollection(&current)
+			close(acquire)
+			result := <-done
+			require.NoError(t, result.err)
+			if identityChange == "split retired" {
+				require.NoError(t, merr.Error(result.status))
+				require.Equal(t, current.VChannelNames, channels, "snapshot must fence the same generation GenSnapshot reads")
+			} else {
+				require.ErrorIs(t, merr.Error(result.status), merr.ErrServiceNotReady)
+				require.True(t, result.status.GetRetriable(), "identity TOCTOU is a transient System failure")
+				require.Empty(t, channels, "the acquired old-name resource key cannot protect the new identity")
 			}
 		})
 	}

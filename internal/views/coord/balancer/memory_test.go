@@ -11,6 +11,7 @@ import (
 	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 func TestMemoryPlanRollbackAndLazyMaterialization(t *testing.T) {
@@ -66,8 +67,10 @@ func TestMemoryNativeBuilderMatchesProto(t *testing.T) {
 	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	c.PublishLoadConfig(1, cfgFor(1, 10, []int64{1}, nil), 7)
 	data := cacheData(1, id.VChannel, 10, 20, 30)
+	data.ShardSetEpoch = 2
 	data.SchemaVersion = 9
 	shard := data.Shards[0]
+	shard.Lineage = &viewpb.QueryViewLineage{Vchannels: []string{"target-a", "target-b"}, SwitchTimetick: 90}
 	shard.GrowingTransformStartAfterTimetick = 90
 	shard.CompactedTransformStartAfterTimetick = 60
 	shard.Partitions[0].PartitionStatsVersion = 42
@@ -86,6 +89,7 @@ func TestMemoryNativeBuilderMatchesProto(t *testing.T) {
 	c.PublishDataView(1, cacheData(1, id.VChannel, 999))
 	builder := result.materialize(p, id)
 	expectedData := syntheticDataView(p.ConfigForShard(id), data.DataVersion, shard)
+	expectedData.ShardSetEpoch = data.ShardSetEpoch
 	expectedData.SchemaVersion = data.SchemaVersion
 	expected := qviews.NewQueryViewAtCoordBuilder(10, expectedData, id.VChannel).SetLoadInfoVersion(7).SetAssignments(builder.Assignments()).SetPreparationPriority(p.preparationPriority(id)).Build()
 	require.True(t, proto.Equal(expected, builder.Build()))

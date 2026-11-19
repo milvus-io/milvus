@@ -182,6 +182,9 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		EarlierSegmentsFlushed: module.earlierSegmentsFlushed,
 	})
 	module.refreshQueryRetentionLocked()
+	if module.vchannelView != nil && module.vchannelView.IsSplitRetired() {
+		module.CloseQueryResources()
+	}
 	return module, nil
 }
 
@@ -213,13 +216,17 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 	m.mu.Lock()
 	defer func() {
 		completed := m.completeDropsLocked()
+		retired := m.vchannelView != nil && m.vchannelView.IsSplitRetired()
 		m.mu.Unlock()
 		releaseDropHandles(completed)
+		if retired {
+			m.CloseQueryResources()
+		}
 	}()
 	if m.removed {
 		return false
 	}
-	if m.vchannelView != nil && (m.vchannelView.IsClosing() || m.vchannelView.IsTombstoned()) {
+	if m.vchannelView != nil && (m.vchannelView.IsClosing() || m.vchannelView.IsTombstoned() || m.vchannelView.IsSplitRetired()) {
 		return true
 	}
 	switch msg.MessageType() {
@@ -228,6 +235,10 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 	case message.MessageTypeRestoreSnapshot:
 		if created := messageutil.RestoreCollectionMessage(msg); created != nil {
 			m.handleCreateCollectionMessage(created)
+		}
+	case message.MessageTypeRetireSplitShard:
+		if m.vchannelView != nil && m.vchannelView.ObserveRetireSplitShard(message.MustAsImmutableRetireSplitShardMessageV2(msg)) {
+			m.releaseSplitQueryRetentionLocked()
 		}
 	case message.MessageTypeSplitShard:
 		m.handleSplitShardMessage(ctx, retained)

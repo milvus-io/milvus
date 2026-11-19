@@ -62,6 +62,7 @@ func NewViewQueryClient(
 	shardClient := newShardViewQueryClient(cfg.MaxRetries, queryPlanClient, queryServiceClient)
 	shardClient.queryHook = cfg.QueryHook
 	shardClient.loadChecks = newCollectionLoadChecks(cfg.LoadInfoClient)
+	shardResolver = withServingResolver(shardResolver, cfg.LoadInfoClient)
 	return &viewQueryClientImpl{
 		shardClient:            shardClient,
 		legacyClient:           &legacyClient{shardClient: shardClient, shardResolver: shardResolver},
@@ -80,8 +81,7 @@ func (c *viewQueryClientImpl) Legacy() LegacyClient {
 }
 
 // Search implements ViewQueryClient.Search.
-func (c *viewQueryClientImpl) Search(ctx context.Context, req *SearchRequest) (result *SearchResult, err error) {
-	defer func() { err = toMilvusError(err) }()
+func (c *viewQueryClientImpl) search(ctx context.Context, req *SearchRequest) (result *SearchResult, err error) {
 	// === Stage: Plan ===
 
 	// Resolve shards first — the provider reports the collection's shard layout;
@@ -180,8 +180,7 @@ func (c *viewQueryClientImpl) Search(ctx context.Context, req *SearchRequest) (r
 }
 
 // Query implements ViewQueryClient.Query.
-func (c *viewQueryClientImpl) Query(ctx context.Context, req *QueryRequest) (result *QueryResult, err error) {
-	defer func() { err = toMilvusError(err) }()
+func (c *viewQueryClientImpl) query(ctx context.Context, req *QueryRequest) (result *QueryResult, err error) {
 	// === Stage: Plan ===
 
 	// Resolve shards first — the provider reports the collection's shard layout;
@@ -312,4 +311,22 @@ func (c *viewQueryClientImpl) queryAllShards(
 
 func (c *viewQueryClientImpl) Close() {
 	c.shardClient.replicas.Close()
+}
+
+func (c *viewQueryClientImpl) Search(ctx context.Context, req *SearchRequest) (result *SearchResult, err error) {
+	attempts := defaultMaxRetries
+	if c.shardClient != nil {
+		attempts = c.shardClient.maxRetries
+	}
+	err = retryServingGeneration(ctx, c.shardResolver, attempts, req.Req.CollectionID, func() error { result, err = c.search(ctx, req); return err })
+	return result, toMilvusError(err)
+}
+
+func (c *viewQueryClientImpl) Query(ctx context.Context, req *QueryRequest) (result *QueryResult, err error) {
+	attempts := defaultMaxRetries
+	if c.shardClient != nil {
+		attempts = c.shardClient.maxRetries
+	}
+	err = retryServingGeneration(ctx, c.shardResolver, attempts, req.Req.CollectionID, func() error { result, err = c.query(ctx, req); return err })
+	return result, toMilvusError(err)
 }

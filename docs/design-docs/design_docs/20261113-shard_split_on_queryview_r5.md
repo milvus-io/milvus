@@ -319,6 +319,10 @@ residue collection 的 import 路由目前未实现。现有实现即使 adoptio
 
 snapshot/restore 与窗口内再次切分保持保护；CDC 落后集群上的对应语义属于第 14 节待讨论项。
 
+窗口结束后的 snapshot 必须保存当前写 shard 的 routing modulus、ShardBy 和逐 shard residue，不能只保存 shard 数。snapshot 的 schema、properties、routing 从 collection 资源锁内的同一个 RootCoord immutable view 取得。restore 复用复制段的确定性旧 channel→新 channel 映射来重命名 routing，把完整 post-image 放入原 RestoreSnapshot WAL recipe，与 CollectionRestoring 元数据一次创建持久化，不复制旧集群的 split lineage 或再发一次路由更新。回调重放和重启保持相同 owner；恢复后的 collection 可以继续 split。无 routing 字段的旧快照继续按原 modulo-N 语义恢复。含 residue 的新快照需要理解这些字段的恢复端；旧版本忽略新增 JSON 字段不能证明恢复兼容。
+
+RestoreSnapshot 当前是本集群的 `_ur` 消息。对显式 residue 路由快照，在持有广播的 SharedCluster 锁后、准备目标 collection 之前读取最新复制配置；已配置跨集群拓扑或多个 cluster 则明确拒绝，不能创建仅存在于 Primary 的用户 collection。配置读取失败原样传播，不能当作未配置复制。快照 pin 继续保护读取，拒绝时沿既有失败清理释放；旧无 routing 快照的既有行为不在本次扩展范围。
+
 新消息、元数据字段、有效归属解析、epoch 和多流执行都需要所有参与角色兼容。版本门禁须选择真实可辨认的发布版本或能力边界；相同 beta 版本号不能证明节点理解本协议。rollback 到旧节点不在未经验证时承诺。
 
 默认关闭自动触发；关闭触发不应停止已进入 WAL 的任务恢复。首次上线需明确支持的数据规模、最大窗口、资源预算和操作限制。
@@ -407,3 +411,19 @@ Go 测试使用 -tags dynamic,test、-gcflags="all=-N -l"、-count=1。还需真
 窗口内源清洗及源替换任务的 TTL 过滤使用冻结截止点。固定时间点请求早于当前 view 的保留基线或谱系切换点时明确失效，不提升 B；这不构成任意历史 iterator 的跨分页快照保留服务。
 
 自动触发和未确定的版本门禁继续关闭；CDC 多代协议仍待讨论。原生引擎、实际对象存储和真实集群/CDC 的验收结论必须与 Go 回归区分。
+
+## 22. R6 端到端验证后的约束补全
+
+空 Summary 必须持久化第一次未知历史前缀，包括有效的零起点；原始边界发布前，global checkpoint 不能继续越过它。重启不能用更晚 checkpoint 重建更晚的初始 floor。真实 GC watermark 仍严格检查，已经丢失旧起点的草稿状态不能凭空修复。
+
+WAL growing base 的初始 C 来自真实 CreateSegment 消息的 TimeTick，经已有 AllocSegment 生命周期持久化。首次 data pack 尚未写出 StartPosition 时，L0 筛选可使用这个显式下界；legacy 零值和非 streaming 请求继续保守处理，重试不能覆盖已有更高 C。
+
+存活 Preparing/Up QueryView 的读 schema 引用必须参加 schema GC 保留集，不能仅依赖 segment 引用。注册和 GC 使用同一个 owner 锁，恢复先重建引用再启后台清理。DropCollection 的加载义务撤销应在等待 split lifecycle guard 前完成，后续物理及元数据清理继续受 guard 保护。
+
+Snapshot 等 collection 资源锁期间可能完成 split、rename 或 move。取得锁后重新读取 immutable collection view，并核验所锁 DB/name 仍匹配；构造广播的 channel 列表不得沿用锁前版本。
+
+R6 累计 54 个独立 e2e 场景取得通过记录：功能/查询/实际物理合并 9、恢复/历史/存储故障 22、准入/DDL/TTL/快照恢复 18、MQ/独立集群 3、大 moves/未加载并发 2。真实环境包含精确 30c7552 原生库、MinIO、RocksMQ/Pulsar/Kafka，以及 2 SN/2 QN/2 replica 独立进程集群。39 个主要场景在最终两次构建中复测；14 个额外恢复阶段沿用较早修复版本证据，最后 CDC 保护增加一个独立场景。记录按实际源码、binary SHA、native 和运行目录区分，不声称 54 项均在同一个二进制重跑。
+
+验证包含持续全 DML 下有限 F 退休、同 PK 并发更新的 search/requery 一致性、1100 项真实两页 adoption 的 Prepared 崩溃恢复、单条 19 MB 历史回放与队列溢出、S3 503、提交成功丢响应、Pulsar topic quota，以及不对称三 shard 快照恢复后删写和再次 split。六项问题有真实 e2e 红绿证据；Snapshot 锁前代际竞态另有确定性 service-entry 红绿回归，不冒充窄竞态的真实网络注入。
+
+这些结果不代表生产部署、CDC 数据复制、旧 reader 恢复新 residue 快照、任意历史 iterator 保留、最大规模或长期压力已验收。修复前实验 split 快照缺失 routing 的需要重新生成；生产默认开关和未声明的版本门禁继续关闭。

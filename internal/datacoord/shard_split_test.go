@@ -521,6 +521,8 @@ func TestSplitSourceIsDroppedAndTruncatedWithItsCollection(t *testing.T) {
 	require.NoError(t, s.DropCollectionDataView(ctx, 100))
 	require.Equal(t, commonpb.SegmentState_Dropped, mt.GetSegment(ctx, 44).GetState())
 	require.True(t, funcutil.IsDroppedChannelCheckpoint(mt.GetChannelCheckpoint(splitTestSource)))
+	require.True(t, funcutil.IsDroppedChannelCheckpoint(mt.GetChannelCheckpoint(splitTestTarget1)))
+	require.Equal(t, commonpb.SegmentState_Dropped, mt.GetSegment(ctx, 43).GetState())
 	require.Empty(t, store.List())
 	// Dropped again by a retried callback: nothing left to do.
 	require.NoError(t, s.DropCollectionDataView(ctx, 100))

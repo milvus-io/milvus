@@ -496,6 +496,7 @@ User Request
 - `PreserveFieldId=true`: Ensures new collection field IDs match those in snapshot
 - RootCoord handles rollback on failure (drops collection/partitions if restore fails)
 - Schema properties are completely copied, including consistency level, num_shards, etc.
+- A post-split snapshot also carries `routing_modulus`, `shard_by`, and named shard residues. Restore applies the same sorted channel mapping to both segment owners and routing, then persists the complete routing post-image in the original RestoreSnapshot creation recipe. The target starts with its own physical owners and no source-cluster split lineage. Legacy snapshots without routing retain modulo-N placement. Readers that ignore explicit routing cannot safely restore such new snapshots.
 
 #### Phase 3: Data and Index Restoration (DataCoord Layer)
 

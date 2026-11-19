@@ -63,6 +63,11 @@ func (c *Core) broadcastTruncateCollection(ctx context.Context, req *milvuspb.Tr
 
 // truncateCollectionV2AckCallback is called when the truncate collection message is acknowledged
 func (c *DDLCallback) truncateCollectionV2AckCallback(ctx context.Context, result message.BroadcastResultTruncateCollectionMessageV2) error {
+	releaseLifecycle, err := qvresource.AcquireSplitLifecycle(ctx, result.Message.Header().CollectionId)
+	if err != nil {
+		return err
+	}
+	defer releaseLifecycle()
 	msg := result.Message
 	header := msg.Header()
 

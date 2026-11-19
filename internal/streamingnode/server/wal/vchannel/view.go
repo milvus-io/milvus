@@ -122,6 +122,13 @@ func (info *VChannelView) AssignmentMeta() *streamingpb.VChannelMeta {
 func (info *VChannelView) WritePathRecoveryState() (moduleapi.VChannelWritePathRecoveryState, bool) {
 	info.mu.Lock()
 	defer info.mu.Unlock()
+	if info.meta.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED && info.meta.GetSplitLineage().GetSplitTaskId() != 0 {
+		return moduleapi.VChannelWritePathRecoveryState{
+			VChannel: info.meta.GetVchannel(), CollectionID: info.meta.GetCollectionInfo().GetCollectionId(),
+			SplitTaskID:         info.meta.GetSplitLineage().GetSplitTaskId(),
+			SplitSourceVChannel: info.meta.GetSplitSourceVchannel(), SplitGenesisTaskID: info.meta.GetSplitGenesisTaskId(),
+		}, true
+	}
 	if info.closingLocked(0) || info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL || info.meta.GetCollectionInfo() == nil {
 		return moduleapi.VChannelWritePathRecoveryState{}, false
 	}
@@ -578,6 +585,16 @@ func (info *VChannelView) ObserveSchemaChangeMessageV2(msg message.ImmutableSche
 	}
 	if info.closingLocked(0) || info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
 		return false
+	}
+	// Replaying an ALTER callback appends a fresh local record. The same
+	// forwarded schema must not grow history or regress the target version.
+	if msg.IsUnreplicable() && info.meta.GetSplitLineage() != nil {
+		incoming := msg.MustBody().GetSchema()
+		if existing := info.canonicalReadSchemaLocked(incoming.GetVersion()); existing != nil && proto.Equal(existing.GetSchema(), incoming) {
+			info.meta.CheckpointTimeTick = msg.TimeTick()
+			info.dirty = true
+			return true
+		}
 	}
 	if info.hasSchemaVersionLocked(msg.TimeTick(), msg.MustBody().Schema) {
 		return false

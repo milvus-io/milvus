@@ -448,6 +448,8 @@ func TestSplitShardGenesisCreatesTheTargetVChannel(t *testing.T) {
 	require.NoError(t, manager.CheckIfPartitionExists(shards.PartitionUniqueKey{CollectionID: splitTestCollectionID, PartitionID: splitTestPartitionID}))
 	require.Equal(t, "c", manager.GetCollectionSchemaSnapshot(splitTestCollectionID).GetName())
 
+	// The local read generation has published and opened target admission.
+	interceptor.splitGates[splitTestTarget1].opened.Store(true)
 	// The target takes DML. A delete is appended.
 	_, err = interceptor.DoAppend(ctx, newSplitTestDelete(splitTestTarget1, 320), wal.append)
 	require.NoError(t, err)

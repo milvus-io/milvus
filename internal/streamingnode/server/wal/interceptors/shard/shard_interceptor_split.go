@@ -140,6 +140,7 @@ func (impl *shardInterceptor) handleSplitShardOnTarget(ctx context.Context, msg 
 		return msgID, nil
 	}
 	created := messageutil.SplitShardGenesisMessage(msg.IntoImmutableMessage(msgID))
+	impl.addSplitTargetGate(msg.VChannel(), header.GetCollectionId(), header.GetSourceVchannel())
 	impl.shardManager.CreateCollection(created)
 	impl.allocFunctionRunners(header.GetCollectionId(), msg.VChannel(), impl.shardManager.GetCollectionSchemaSnapshot(header.GetCollectionId()))
 	return msgID, nil

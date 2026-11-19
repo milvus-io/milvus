@@ -149,11 +149,14 @@ func (c *Callback) OnAcked(ctx context.Context, result message.BroadcastResultSp
 		return merr.WrapErrServiceNotReadyMsg("DataView manager is not ready to declare the targets of shard split task %d", record.TaskID)
 	}
 	event := dataview.DeclareShardsDataViewEvent{
+		Source:          record.Source,
+		Lineage:         &viewpb.QueryViewLineage{SwitchTimetick: record.SwitchTimeTick},
 		CollectionID:    record.CollectionID,
 		TransformStarts: make(map[string]uint64, len(record.Targets)),
 	}
 	for _, target := range record.Targets {
 		event.VChannels = append(event.VChannels, target.VChannel)
+		event.Lineage.Vchannels = append(event.Lineage.Vchannels, target.VChannel)
 		event.TransformStarts[target.VChannel] = TransformPin(record.SwitchTimeTick, target.GenesisTimeTick)
 	}
 	version, err := manager.DeclareShards(ctx, event)

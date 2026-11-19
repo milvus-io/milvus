@@ -784,6 +784,7 @@ func (m *dataViewManager) collectionDataViewLocked(state *collectionState) *api.
 	view := entry.view
 
 	coll := &api.CollectionDataView{
+		ShardSetEpoch: view.GetShardSetEpoch(),
 		SchemaVersion: view.GetSchemaVersion(),
 		CollectionID:  view.GetCollectionId(),
 		DataVersion:   qviews.FromProtoDataVersion(view.GetDataVersion()),
@@ -794,6 +795,7 @@ func (m *dataViewManager) collectionDataViewLocked(state *collectionState) *api.
 			continue
 		}
 		nativeShard := &api.ShardDataView{
+			Lineage:                              shard.GetLineage(),
 			VChannel:                             shard.GetVchannel(),
 			GrowingTransformStartAfterTimetick:   shard.GetGrowingTransformStartAfterTimetick(),
 			CompactedTransformStartAfterTimetick: shard.GetCompactedTransformStartAfterTimetick(),

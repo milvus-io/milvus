@@ -743,3 +743,38 @@ func TestLineageStreamSegmentIdentity(t *testing.T) {
 	require.Equal(t, testVChannel, base.VChannel())
 	require.EqualValues(t, 60, base.TransformStartAfterTimeTick())
 }
+
+func TestAdoptionReusesPhysicalSegmentAndTargetRegistration(t *testing.T) {
+	mockey.PatchConvey("adoption keeps g1 pins and g2 waits on the target stream", t, func() {
+		f := setupLineageResourceTest(t)
+		source := f.lineageRequest(1, 1, lineageSwitchTick)
+		f.manager.Acquire(source)
+		f.await(t, 1)
+		own := f.buffer.awaitRegistrations(t, testVChannel, 1)[0]
+		target := f.buffer.awaitRegistrations(t, lineageTarget1, 1)[0]
+		target.advance(160)
+		own.advance(lineageSwitchTick)
+		adopted := f.plainRequest(2, 1)
+		adopted.Meta.Vchannel = lineageTarget1
+		adopted.Meta.TransformStartAfterTimetick = lineageSwitchTick
+		adopted.Key = qviews.NewQueryViewAtQueryNode(adopted.Meta, adopted.View).QueryViewKey()
+		f.manager.Acquire(adopted)
+		f.await(t, 1)
+		require.EqualValues(t, 1, f.loads.Load())
+		require.Len(t, f.buffer.registrations(lineageTarget1), 1)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		handles, err := f.manager.AcquireSealedSegmentHandles(ctx, adopted.Key, adopted.View, 150)
+		require.NoError(t, err)
+		require.Same(t, target, handles[0].(*resourceSegmentHandle).registration)
+		handles[0].Release()
+		// Releasing S must retain the target subscription now owned by g2.
+		f.drop(t, source)
+		require.False(t, target.isUnregistered())
+		handles, err = f.manager.AcquireSealedSegmentHandles(ctx, adopted.Key, adopted.View, 160)
+		require.NoError(t, err)
+		handles[0].Release()
+		f.drop(t, adopted)
+		require.True(t, target.isUnregistered())
+	})
+}

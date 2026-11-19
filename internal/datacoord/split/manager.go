@@ -169,7 +169,7 @@ func (m *Manager) issuingCount() int {
 func (m *Manager) activeCount() int {
 	collections := make(map[int64]struct{})
 	for _, task := range m.deps.Store.List() {
-		if InWindow(task.GetState()) {
+		if task.GetState() < datapb.SplitShardTaskState_SplitShardTaskRetired {
 			collections[task.GetCollectionId()] = struct{}{}
 		}
 	}
@@ -359,7 +359,7 @@ func hasProperty(properties []*commonpb.KeyValuePair, key string) bool {
 // checkState refuses a collection with a split in its window, or an import or
 // a restore that is not finished.
 func (m *Manager) checkState(ctx context.Context, collectionID int64) error {
-	if task := m.deps.Store.WindowOf(collectionID); task != nil {
+	if task := m.activeSplitOf(collectionID); task != nil {
 		return merr.WrapErrServiceUnavailableMsg("shard split task %d of collection %d is in its window, in state %s",
 			task.GetTaskId(), collectionID, task.GetState().String())
 	}
@@ -565,4 +565,13 @@ func (m *Manager) issue(request Request) {
 	}
 	metrics.DataCoordShardSplitTriggered.WithLabelValues(resultIssued).Inc()
 	logger.Info(m.ctx, "shard split issued, the residual of its source has flushed", mlog.Duration("elapsed", time.Since(start)))
+}
+
+func (m *Manager) activeSplitOf(collectionID int64) *datapb.SplitShardTask {
+	for _, task := range m.deps.Store.List() {
+		if task.GetCollectionId() == collectionID && task.GetState() < datapb.SplitShardTaskState_SplitShardTaskRetired {
+			return task
+		}
+	}
+	return nil
 }

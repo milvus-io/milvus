@@ -23,8 +23,13 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/split"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
+
+// Keep parallel layer integration honest: the serving driver must be wired
+// to the real data plane rather than silently losing an optional interface.
+var _ qvresource.SplitLifecycle = (*datacoord.Server)(nil)
 
 // registerShardSplit connects the two coordinators that take part in a shard
 // split. RootCoord owns the SplitShard ack callback and the collection

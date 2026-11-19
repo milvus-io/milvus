@@ -252,3 +252,19 @@ func (m *TxnManager) GracefulClose(ctx context.Context) error {
 		return nil
 	}
 }
+
+// FailTxn ends exactly one refused Begin. Other transactions of its vchannel
+// may already have passed admission concurrently and must remain intact.
+func (m *TxnManager) FailTxn(id message.TxnID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if session := m.sessions[id]; session != nil {
+		session.abort()
+		delete(m.sessions, id)
+		delete(m.recoveredSessions, id)
+	}
+	if len(m.sessions) == 0 && m.closed != nil {
+		m.closed.Close()
+	}
+	m.notifyRecoverDone()
+}

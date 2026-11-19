@@ -18,6 +18,7 @@ package rootcoord
 
 import (
 	"context"
+	"slices"
 
 	"google.golang.org/protobuf/proto"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	streamingbroadcaster "github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -116,10 +118,17 @@ func (c *DDLCallback) createCollectionV1AckCallback(ctx context.Context, result 
 	return c.applyCollectionCreation(ctx, result, etcdpb.CollectionState_CollectionCreated)
 }
 
-func (c *DDLCallback) applyCollectionCreation(ctx context.Context, result message.BroadcastResultCreateCollectionMessageV1, state etcdpb.CollectionState) error {
+func (c *DDLCallback) applyCollectionCreation(ctx context.Context, result message.BroadcastResultCreateCollectionMessageV1, state etcdpb.CollectionState, restoredRouting ...*message.SplitShardRouting) error {
 	msg := result.Message
 	header := msg.Header()
 	body := msg.MustBody()
+	newCollInfo := newCollectionModelWithMessage(header, body, result)
+	newCollInfo.State = state
+	if len(restoredRouting) != 0 {
+		if err := applyRestoredCollectionRouting(newCollInfo, restoredRouting[0]); err != nil {
+			return err
+		}
+	}
 	for vchannel, result := range result.Results {
 		if !funcutil.IsControlChannel(vchannel) {
 			// create shard info when virtual channel is created.
@@ -139,8 +148,6 @@ func (c *DDLCallback) applyCollectionCreation(ctx context.Context, result messag
 	} else if err := creator.CreateCollectionDataView(ctx, header.CollectionId, body.VirtualChannelNames); err != nil {
 		return merr.Wrap(err, "failed to create collection data view")
 	}
-	newCollInfo := newCollectionModelWithMessage(header, body, result)
-	newCollInfo.State = state
 	if err := c.meta.AddCollection(ctx, newCollInfo); err != nil {
 		return merr.Wrap(err, "failed to add collection to meta table")
 	}
@@ -262,4 +269,28 @@ func mustConsumeConsistencyLevel(properties []*commonpb.KeyValuePair) (commonpb.
 		newProperties = append(newProperties, property)
 	}
 	return consistencyLevel, newProperties
+}
+
+// The restore WAL recipe carries the complete placement for this new collection.
+// All roots persist with creation, so callback retry cannot expose modulo-N in
+// between collection creation and a second routing metadata update.
+func applyRestoredCollectionRouting(collection *model.Collection, postImage *message.SplitShardRouting) error {
+	if postImage == nil {
+		return nil
+	}
+	r, err := routing.RoutingFromShardInfos(postImage.GetRoutingModulus(), postImage.GetShardBy(), postImage.GetShards())
+	if err != nil {
+		return merr.Wrap(err, "invalid restore routing recipe")
+	}
+	if r.Modulus == 0 || len(r.Shards) != len(postImage.GetShards()) || !slices.Equal(r.VChannels(), collection.VirtualChannelNames) {
+		return merr.WrapErrDataIntegrityMsg("restore routing recipe does not match its collection channels")
+	}
+	if _, err := r.Table(); err != nil {
+		return merr.Wrap(err, "invalid restore routing ownership")
+	}
+	collection.RoutingModulus, collection.ShardBy = r.Modulus, r.ShardBy
+	for _, shard := range r.Shards {
+		collection.ShardInfos[shard.VChannel].Buckets = slices.Clone(shard.Buckets)
+	}
+	return nil
 }

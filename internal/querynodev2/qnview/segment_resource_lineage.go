@@ -91,15 +91,15 @@ func (b *segmentBase) lineageRunning() bool {
 // rebuilt view registers again. Only reconcile calls this: it holds an
 // operation of the resource, which admits the catch-up goroutines.
 func (r *segmentResource) lineageReadyLocked(base *segmentBase, v *viewResources) bool {
-	lineage := v.req.Meta.GetLineage()
+	streams := requiredTransformStreams(base, v)
 	ready := true
-	for _, vchannel := range lineage.GetVchannels() {
+	for vchannel, startAfter := range streams {
 		current := base.lineage[vchannel]
 		if current == nil {
 			ctx, cancel := context.WithCancel(base.ctx) //nolint:gosec // Ownership transfers to the entry; release cancels it.
-			current = &lineageCatchup{startAfter: lineage.GetSwitchTimetick(), running: true, ctx: ctx, cancel: cancel}
+			current = &lineageCatchup{startAfter: startAfter, running: true, ctx: ctx, cancel: cancel}
 			if base.lineage == nil {
-				base.lineage = make(map[string]*lineageCatchup, len(lineage.GetVchannels()))
+				base.lineage = make(map[string]*lineageCatchup, len(streams))
 			}
 			base.lineage[vchannel] = current
 			r.operations.Add(1)
@@ -111,7 +111,7 @@ func (r *segmentResource) lineageReadyLocked(base *segmentBase, v *viewResources
 			ready = false
 			continue
 		}
-		if err := r.lineageErrorLocked(base, vchannel, current, lineage.GetSwitchTimetick()); err != nil {
+		if err := r.lineageErrorLocked(base, vchannel, current, startAfter); err != nil {
 			go r.manager.failView(v, err)
 			ready = false
 			continue
@@ -124,13 +124,12 @@ func (r *segmentResource) lineageReadyLocked(base *segmentBase, v *viewResources
 // lineageIntactLocked verifies a published binding: every lineage registration
 // it was published with must still be the live, caught-up one.
 func (r *segmentResource) lineageIntactLocked(base *segmentBase, v *viewResources) error {
-	lineage := v.req.Meta.GetLineage()
-	for _, vchannel := range lineage.GetVchannels() {
+	for vchannel, startAfter := range requiredTransformStreams(base, v) {
 		current := base.lineage[vchannel]
 		if current == nil || !current.caughtUp {
 			return merr.WrapErrServiceInternalMsg("segment %d lost its registration on lineage stream %s", r.id, vchannel)
 		}
-		if err := r.lineageErrorLocked(base, vchannel, current, lineage.GetSwitchTimetick()); err != nil {
+		if err := r.lineageErrorLocked(base, vchannel, current, startAfter); err != nil {
 			return err
 		}
 	}
@@ -164,7 +163,13 @@ func (r *segmentResource) pruneLineageLocked() []*lineageCatchup {
 		if b.view.failed {
 			continue
 		}
-		for _, vchannel := range b.view.req.Meta.GetLineage().GetVchannels() {
+		streams := make(map[string]uint64)
+		for _, base := range r.bases {
+			for channel, tick := range requiredTransformStreams(base, b.view) {
+				streams[channel] = tick
+			}
+		}
+		for vchannel := range streams {
 			if wanted == nil {
 				wanted = make(map[string]struct{})
 			}
@@ -247,4 +252,35 @@ func (r *segmentResource) catchupLineage(base *segmentBase, vchannel string, lin
 			m.mu.Unlock()
 		})
 	}
+}
+
+// requiredTransformStreams includes the target's own stream after adoption.
+// The physical segment and S's registration remain shared with in-flight g1
+// views; g2 waits on the target registration instead. No physical reload or
+// destructive mutation of a registration borrowed by another generation occurs.
+func requiredTransformStreams(base *segmentBase, v *viewResources) map[string]uint64 {
+	streams := make(map[string]uint64)
+	lineage := v.req.Meta.GetLineage()
+	for _, channel := range lineage.GetVchannels() {
+		streams[channel] = lineage.GetSwitchTimetick()
+	}
+	if channel := v.req.Meta.GetVchannel(); channel != base.segment.VChannel() {
+		if existing := base.lineage[channel]; existing != nil {
+			streams[channel] = existing.startAfter
+		} else {
+			streams[channel] = v.req.Meta.GetTransformStartAfterTimetick()
+		}
+	}
+	return streams
+}
+
+func registrationForView(base *segmentBase, v *viewResources) TransformRegistration {
+	channel := v.req.Meta.GetVchannel()
+	if channel == base.segment.VChannel() {
+		return base.registration
+	}
+	if stream := base.lineage[channel]; stream != nil && stream.err == nil && stream.caughtUp {
+		return stream.heldRegistration()
+	}
+	return nil
 }
