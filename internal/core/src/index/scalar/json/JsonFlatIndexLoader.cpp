@@ -286,7 +286,10 @@ ReadNullOffsets(bool use_async,
         co_return co_await run_io();
     co_return co_await folly::coro::co_withExecutor(
         storage::ResolveAsyncLoadExecutor(
-            storage::LocalFileIOPool::GetInstance().GetExecutor(), priority),
+            storage::LocalFileIOPool::GetInstance().GetExecutor(),
+            priority,
+            storage::GetAsyncLoadSequence(
+                co_await folly::coro::co_current_executor)),
         run_io());
 }
 

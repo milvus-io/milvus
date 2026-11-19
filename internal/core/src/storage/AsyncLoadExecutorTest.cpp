@@ -16,8 +16,12 @@
 
 #include "storage/AsyncLoadExecutor.h"
 
+#include <atomic>
+#include <array>
 #include <chrono>
+#include <thread>
 #include <future>
+#include <vector>
 
 #ifdef __linux__
 #include <sys/resource.h>
@@ -25,6 +29,9 @@
 
 #include "common/EasyAssert.h"
 #include "folly/ScopeGuard.h"
+#include "folly/coro/Baton.h"
+#include "folly/coro/BlockingWait.h"
+#include "folly/coro/Task.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
 #include "gtest/gtest.h"
 
@@ -131,6 +138,307 @@ TEST(AsyncLoadExecutorTest, InvalidSizePreservesConfiguration) {
         EXPECT_THROW(SetAsyncLoadThreadPoolSize(value), milvus::SegcoreError);
         EXPECT_EQ(GetAsyncLoadThreadPoolSize(), previous);
     }
+}
+
+TEST(AsyncLoadExecutorTest, OrdersPriorityThenSequenceWithStableTies) {
+    const int previous = GetAsyncLoadThreadPoolSize();
+    auto restore =
+        folly::makeGuard([&] { SetAsyncLoadThreadPoolSize(previous); });
+    SetAsyncLoadThreadPoolSize(1);
+    std::promise<void> blocked, release, finished;
+    auto released = release.get_future().share();
+    auto executor =
+        ResolveAsyncLoadExecutor({}, proto::common::LoadPriority::HIGH);
+    executor->add([&] {
+        blocked.set_value();
+        released.wait();
+    });
+    blocked.get_future().get();
+    auto unblock = folly::makeGuard([&] { release.set_value(); });
+    std::vector<int> order;
+    order.reserve(6);
+    const auto record = [&](int id) {
+        order.push_back(id);
+        if (order.size() == 6) {
+            finished.set_value();
+        }
+    };
+    const auto submit =
+        [&](proto::common::LoadPriority priority, uint64_t sequence, int id) {
+            ResolveAsyncLoadExecutor({}, priority, sequence)->add([&, id] {
+                record(id);
+            });
+        };
+    submit(proto::common::LoadPriority::LOW, 1, 5);
+    auto bound =
+        ResolveAsyncLoadExecutor({}, proto::common::LoadPriority::LOW, 20);
+    auto rebound = ResolveAsyncLoadExecutor(std::move(bound),
+                                            proto::common::LoadPriority::HIGH);
+    EXPECT_EQ(GetAsyncLoadSequence(rebound.get()), 20);
+    rebound->add([&] { record(2); });
+    submit(proto::common::LoadPriority::HIGH, 0, 4);
+    submit(proto::common::LoadPriority::HIGH, 10, 1);
+    submit(proto::common::LoadPriority::LOW, 0, 6);
+    submit(proto::common::LoadPriority::HIGH, 20, 3);
+    release.set_value();
+    unblock.dismiss();
+    finished.get_future().get();
+    EXPECT_EQ(order, (std::vector<int>{1, 2, 3, 4, 5, 6}));
+}
+
+// One worker makes task reservations observable in execution order. Keep all
+// classes backlogged for two complete rounds, then verify empty-class skipping.
+TEST(AsyncLoadExecutorTest, WeightedPrioritiesKeepSequenceAndMakeProgress) {
+    const int previous = GetAsyncLoadThreadPoolSize();
+    auto restore =
+        folly::makeGuard([&] { SetAsyncLoadThreadPoolSize(previous); });
+    SetAsyncLoadThreadPoolSize(1);
+    for (int burst = 0; burst < 2; ++burst) {
+        std::promise<void> blocked, release, finished;
+        auto released = release.get_future().share();
+        ResolveAsyncLoadExecutor({}, AsyncLoadPriority::High)->add([&] {
+            blocked.set_value();
+            released.wait();
+        });
+        blocked.get_future().get();
+        auto unblock = folly::makeGuard([&] { release.set_value(); });
+        std::vector<std::pair<int, int>> order;
+        order.reserve(192);
+        const std::array priorities{AsyncLoadPriority::Urgent,
+                                    AsyncLoadPriority::High,
+                                    AsyncLoadPriority::Low};
+        // Enqueue later loads first, so sequence ordering is tested separately
+        // from both priority selection and enqueue order.
+        for (int cls = 2; cls >= 0; --cls) {
+            for (int seq : {2, 1}) {
+                auto executor =
+                    ResolveAsyncLoadExecutor({}, priorities[cls], seq);
+                for (int n = 0; n < 32; ++n) {
+                    executor->add([&, cls, seq, n] {
+                        order.emplace_back(cls, (seq - 1) * 32 + n);
+                        if (order.size() == 192)
+                            finished.set_value();
+                    });
+                }
+            }
+        }
+        release.set_value();
+        unblock.dismiss();
+        finished.get_future().get();
+        size_t pos = 0;
+        for (int round = 0; round < 2; ++round) {
+            for (int cls = 0; cls < 3; ++cls) {
+                const int quota = std::array{32, 8, 1}[cls];
+                for (int n = 0; n < quota; ++n) {
+                    EXPECT_EQ(order[pos++].first, cls);
+                }
+            }
+        }
+        std::array<int, 3> seen{};
+        for (const auto& [cls, ordinal] : order) {
+            EXPECT_EQ(ordinal, seen[cls]++);
+        }
+        EXPECT_EQ(seen, (std::array{64, 64, 64}));
+    }
+}
+
+TEST(AsyncLoadExecutorTest, WeightedPrioritySurvivesCoroutineResumption) {
+    const int previous = GetAsyncLoadThreadPoolSize();
+    auto restore =
+        folly::makeGuard([&] { SetAsyncLoadThreadPoolSize(previous); });
+    SetAsyncLoadThreadPoolSize(1);
+    folly::coro::Baton resume;
+    std::promise<void> suspended, blocked, release, done;
+    auto released = release.get_future().share();
+    std::vector<int> order;
+    auto urgent = [&]() -> folly::coro::Task<void> {
+        suspended.set_value();
+        co_await resume;
+        EXPECT_EQ(
+            GetAsyncLoadSequence(co_await folly::coro::co_current_executor), 9);
+        order.push_back(0);
+    };
+    auto task = folly::coro::co_withExecutor(
+                    ResolveAsyncLoadExecutor({}, AsyncLoadPriority::Urgent, 9),
+                    urgent())
+                    .start();
+    suspended.get_future().get();
+    ResolveAsyncLoadExecutor({}, AsyncLoadPriority::High)->add([&] {
+        blocked.set_value();
+        released.wait();
+    });
+    blocked.get_future().get();
+    auto unblock = folly::makeGuard([&] { release.set_value(); });
+    ResolveAsyncLoadExecutor({}, AsyncLoadPriority::High, 1)->add([&] {
+        order.push_back(1);
+        done.set_value();
+    });
+    resume.post();
+    release.set_value();
+    unblock.dismiss();
+    std::move(task).get();
+    done.get_future().get();
+    EXPECT_EQ(order, (std::vector<int>{0, 1}));
+}
+
+TEST(AsyncLoadExecutorTest, CoroutineResumeAndExecutorSwitchRetainSequence) {
+    const int previous = GetAsyncLoadThreadPoolSize();
+    auto restore =
+        folly::makeGuard([&] { SetAsyncLoadThreadPoolSize(previous); });
+    SetAsyncLoadThreadPoolSize(1);
+    folly::CPUThreadPoolExecutor other(1);
+    folly::coro::Baton resume;
+    std::promise<void> suspended, blocked, release, later_done;
+    auto released = release.get_future().share();
+    std::vector<int> order;
+    order.reserve(2);
+    auto old_load = [&]() -> folly::coro::Task<void> {
+        EXPECT_EQ(
+            GetAsyncLoadSequence(co_await folly::coro::co_current_executor),
+            10);
+        auto on_other = [&]() -> folly::coro::Task<void> {
+            EXPECT_EQ(
+                GetAsyncLoadSequence(co_await folly::coro::co_current_executor),
+                10);
+            co_return;
+        };
+        co_await folly::coro::co_withExecutor(
+            ResolveAsyncLoadExecutor(
+                folly::getKeepAliveToken(&other),
+                proto::common::LoadPriority::HIGH,
+                GetAsyncLoadSequence(
+                    co_await folly::coro::co_current_executor)),
+            on_other());
+        suspended.set_value();
+        co_await resume;
+        order.push_back(1);
+    };
+    auto old_result = std::async(std::launch::async, [&] {
+        folly::coro::blockingWait(folly::coro::co_withExecutor(
+            ResolveAsyncLoadExecutor({}, proto::common::LoadPriority::HIGH, 10),
+            old_load()));
+    });
+    suspended.get_future().get();
+    auto executor =
+        ResolveAsyncLoadExecutor({}, proto::common::LoadPriority::HIGH);
+    executor->add([&] {
+        blocked.set_value();
+        released.wait();
+    });
+    blocked.get_future().get();
+    auto unblock = folly::makeGuard([&] { release.set_value(); });
+    ResolveAsyncLoadExecutor({}, proto::common::LoadPriority::HIGH, 20)
+        ->add([&] {
+            order.push_back(2);
+            later_done.set_value();
+        });
+    // The producer has no load context; the resuming executor must supply it.
+    resume.post();
+    release.set_value();
+    unblock.dismiss();
+    old_result.get();
+    later_done.get_future().get();
+    EXPECT_EQ(order, (std::vector<int>{1, 2}));
+}
+
+TEST(AsyncLoadExecutorTest, ConcurrentSubmissionsAndGroupReactivation) {
+    const int previous = GetAsyncLoadThreadPoolSize();
+    auto restore =
+        folly::makeGuard([&] { SetAsyncLoadThreadPoolSize(previous); });
+    SetAsyncLoadThreadPoolSize(8);
+    constexpr size_t producers = 8;
+    constexpr size_t per_producer = 2048;
+    constexpr size_t total = producers * per_producer;
+    std::vector<folly::Executor::KeepAlive<>> executors;
+    executors.reserve(producers);
+    // Several independently created adapters share the same load and priority.
+    for (size_t i = 0; i < producers; ++i) {
+        executors.push_back(
+            ResolveAsyncLoadExecutor({},
+                                     i < 4 ? proto::common::LoadPriority::HIGH
+                                           : proto::common::LoadPriority::LOW,
+                                     100 + i % 2));
+    }
+    for (int round = 0; round < 8; ++round) {
+        std::vector<std::atomic<int>> seen(total);
+        std::atomic<size_t> remaining{total};
+        std::promise<void> done;
+        auto completion = done.get_future();
+        std::vector<std::thread> threads;
+        threads.reserve(producers);
+        for (size_t producer = 0; producer < producers; ++producer) {
+            threads.emplace_back([&, producer] {
+                for (size_t i = 0; i < per_producer; ++i) {
+                    const auto id = producer * per_producer + i;
+                    executors[producer]->add([&, id] {
+                        seen[id].fetch_add(1, std::memory_order_relaxed);
+                        if (remaining.fetch_sub(1, std::memory_order_acq_rel) ==
+                            1) {
+                            done.set_value();
+                        }
+                    });
+                    if (i % 32 == 0) {
+                        std::this_thread::yield();
+                    }
+                }
+            });
+        }
+        for (auto& thread : threads) {
+            thread.join();
+        }
+        EXPECT_EQ(completion.wait_for(std::chrono::seconds(30)),
+                  std::future_status::ready);
+        // Keep captured state alive if a failure leaves callbacks running.
+        completion.get();
+        for (const auto& count : seen) {
+            EXPECT_EQ(count.load(std::memory_order_relaxed), 1);
+        }
+    }
+}
+
+TEST(AsyncLoadExecutorTest, RecreatedBindingsKeepEqualSequenceFifo) {
+    const int previous = GetAsyncLoadThreadPoolSize();
+    auto restore =
+        folly::makeGuard([&] { SetAsyncLoadThreadPoolSize(previous); });
+    SetAsyncLoadThreadPoolSize(1);
+    std::promise<void> started, release, done;
+    auto released = release.get_future().share();
+    auto first =
+        ResolveAsyncLoadExecutor({}, proto::common::LoadPriority::HIGH, 10);
+    first->add([&] {
+        started.set_value();
+        released.wait();
+    });
+    started.get_future().get();
+    auto unblock = folly::makeGuard([&] { release.set_value(); });
+    std::vector<int> seen;
+    constexpr int count = 1024;
+    seen.reserve(count);
+    for (int i = 0; i < count; ++i) {
+        ResolveAsyncLoadExecutor({}, proto::common::LoadPriority::HIGH, 10)
+            ->add([&, i] {
+                seen.push_back(i);
+                if (seen.size() == count) {
+                    done.set_value();
+                }
+            });
+    }
+    first.reset();
+    release.set_value();
+    unblock.dismiss();
+    done.get_future().get();
+    ASSERT_EQ(seen.size(), count);
+    for (int i = 0; i < count; ++i) {
+        EXPECT_EQ(seen[i], i);
+    }
+}
+
+TEST(AsyncLoadExecutorTest, SequencesIncreaseAcrossCallers) {
+    const auto first = NextLoadSequence();
+    const auto second = std::async(std::launch::async, NextLoadSequence).get();
+    EXPECT_NE(first, 0);
+    EXPECT_LT(first, second);
+    EXPECT_LT(second, NextLoadSequence());
 }
 
 }  // namespace

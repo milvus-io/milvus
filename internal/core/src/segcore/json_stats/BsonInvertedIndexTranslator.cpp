@@ -99,7 +99,8 @@ BsonInvertedIndexTranslator::BsonInvertedIndexTranslator(
                 {},
                 load_ctx.ctx.runtime_load_priority.value_or(0) != 0
                     ? proto::common::LoadPriority::LOW
-                    : proto::common::LoadPriority::HIGH),
+                    : proto::common::LoadPriority::HIGH,
+                load_ctx.ctx.load_seq),
             inspect()));
         if (meta_.cache_warmup_policy ==
             CacheWarmupPolicy::CacheWarmupPolicy_Disable) {
@@ -244,7 +245,9 @@ BsonInvertedIndexTranslator::get_cells_async(
         // Files are absolute remote paths (basePath already prepended by caller)
         if (use_async) {
             index = co_await folly::coro::co_withExecutor(
-                storage::ResolveAsyncLoadExecutor({}, priority), load());
+                storage::ResolveAsyncLoadExecutor(
+                    {}, priority, load_ctx.ctx.load_seq),
+                load());
         } else {
             index = co_await load();
         }

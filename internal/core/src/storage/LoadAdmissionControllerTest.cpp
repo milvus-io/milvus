@@ -768,6 +768,61 @@ TEST_F(LoadAdmissionControllerAsyncTest, GrantsHighPriorityBeforeLowPriority) {
     low_lease.Release();
 }
 
+TEST_F(LoadAdmissionControllerAsyncTest,
+       OrdersSequencesAndCancelsSortedWaiter) {
+    budget_.SetCapacityBytes(1);
+    auto running = folly::coro::blockingWait(
+        budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High));
+    auto low = budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::Low, {}, 1);
+    auto newer =
+        budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High, {}, 30);
+    folly::CancellationSource cancel;
+    auto cancelled = budget_.AcquireAsync(
+        {1, 1}, LoadAdmissionPriority::High, cancel.getToken(), 20);
+    auto older =
+        budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High, {}, 10);
+    auto equal =
+        budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High, {}, 10);
+    auto unspecified =
+        budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High);
+    cancel.requestCancellation();
+    EXPECT_THROW(folly::coro::blockingWait(std::move(cancelled)),
+                 folly::OperationCancelled);
+    running.Release();
+    EXPECT_TRUE(older.isReady());
+    EXPECT_FALSE(equal.isReady());
+    EXPECT_FALSE(newer.isReady());
+    EXPECT_FALSE(low.isReady());
+    folly::coro::blockingWait(std::move(older)).Release();
+    EXPECT_TRUE(equal.isReady());
+    EXPECT_FALSE(newer.isReady());
+    folly::coro::blockingWait(std::move(equal)).Release();
+    EXPECT_TRUE(newer.isReady());
+    EXPECT_FALSE(unspecified.isReady());
+    folly::coro::blockingWait(std::move(newer)).Release();
+    EXPECT_TRUE(unspecified.isReady());
+    EXPECT_FALSE(low.isReady());
+    folly::coro::blockingWait(std::move(unspecified)).Release();
+    EXPECT_TRUE(low.isReady());
+    folly::coro::blockingWait(std::move(low)).Release();
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest, OlderSequenceCanUseAvailableCapacity) {
+    budget_.SetCapacitySlots(1);
+    folly::CancellationSource cancel;
+    auto newer = budget_.AcquireAsync(
+        {0, 2}, LoadAdmissionPriority::High, cancel.getToken(), 20);
+    // A newer, oversized waiter must not block an older load that can run now.
+    auto older =
+        budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::High, {}, 10);
+    EXPECT_TRUE(older.isReady());
+    EXPECT_FALSE(newer.isReady());
+    cancel.requestCancellation();
+    EXPECT_THROW(folly::coro::blockingWait(std::move(newer)),
+                 folly::OperationCancelled);
+    folly::coro::blockingWait(std::move(older)).Release();
+}
+
 TEST_F(LoadAdmissionControllerAsyncTest, CancelsPendingAdmission) {
     budget_.SetCapacityBytes(1);
 

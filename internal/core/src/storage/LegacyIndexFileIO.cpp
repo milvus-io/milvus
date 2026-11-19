@@ -142,7 +142,8 @@ Admit(size_t bytes,
             priority == proto::common::LoadPriority::LOW
                 ? LoadAdmissionPriority::Low
                 : LoadAdmissionPriority::High,
-            token);
+            token,
+            GetAsyncLoadSequence(co_await folly::coro::co_current_executor));
     } catch (const folly::OperationCancelled&) {
         ThrowInfo(FollyCancel, "Legacy index admission cancelled");
     }
@@ -618,7 +619,10 @@ StreamLegacyIndexFilesAsync(std::span<const LegacyIndexFile> files,
     if (files.empty()) {
         co_return;
     }
-    auto executor = ResolveAsyncLoadExecutor({}, priority);
+    auto executor = ResolveAsyncLoadExecutor(
+        {},
+        priority,
+        GetAsyncLoadSequence(co_await folly::coro::co_current_executor));
     if (files.size() == 1 &&
         (!files.front().info.raw_payload ||
          files.front().info.payload_bytes <= DefaultStreamSliceSize())) {

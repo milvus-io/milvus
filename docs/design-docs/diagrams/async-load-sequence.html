@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Segment 加载：同一序号贯穿两处调度</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Geist:wght@400;600&family=Geist+Mono&family=Noto+Sans+SC:wght@400;600&display=swap">
+<style>
+*{box-sizing:border-box}body{margin:0;padding:24px;background:#f5f5f5;color:#2d3142;font-family:'Geist','Noto Sans SC',sans-serif}.frame{max-width:1280px;margin:auto}.diagram-container{overflow-x:auto;width:100%}svg{display:block;width:100%;min-width:1280px}text{fill:#2d3142;font-family:'Geist','Noto Sans SC',sans-serif}.name{font-size:22px;font-weight:600}.body{font-size:18px}.small{font-size:16px;fill:#4f5d75}.tech{font-family:'Geist Mono','Noto Sans SC',monospace;font-size:16px;fill:#4f5d75}.heading{font-family:'Instrument Serif','Noto Sans SC',serif;font-size:32px}.edge{fill:none;stroke:#4f5d75;stroke-width:2;marker-end:url(#arrow)}.box{fill:#fff;stroke:#bfc0c0;stroke-width:1.5}.focal{fill:#fbeee9;stroke:#bf4520;stroke-width:2}@media print{svg{min-width:0}.diagram-container{overflow-x:visible}}
+</style></head><body><main class="frame"><div class="diagram-container">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" role="img" aria-labelledby="async-load-sequence-title async-load-sequence-desc">
+<title id="async-load-sequence-title">Segment 加载：同一序号贯穿两处调度</title>
+<desc id="async-load-sequence-desc">加载入口分配序号，CPU 就绪队列和资源等待队列均按优先级及序号调度，异步 I/O 完成后保留序号回到 CPU 队列，不抢占已运行任务。</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#4f5d75"/></marker></defs>
+<rect width="1280" height="720" fill="#f5f5f5"/>
+<text x="48" y="60" class="heading">Segment 加载：同一序号贯穿两处调度</text>
+<text x="48" y="96" class="body" fill="#4f5d75">先选优先级，再选较早提交的加载请求；同组任务保持 FIFO。</text>
+<!-- Connectors precede nodes. -->
+<path class="edge" d="M328 248 H416"/>
+<path class="edge" d="M804 248 H892"/>
+<path class="edge" d="M1056 344 V424"/>
+<path class="edge" d="M892 496 H804"/>
+<path class="edge" stroke-dasharray="5 4" d="M612 424 V344"/>
+<rect x="336" y="208" width="72" height="28" fill="#f5f5f5"/><text x="372" y="228" text-anchor="middle" class="small">入队</text>
+<rect x="812" y="208" width="72" height="28" fill="#f5f5f5"/><text x="848" y="228" text-anchor="middle" class="small">取任务</text>
+<rect x="1072" y="368" width="144" height="28" fill="#f5f5f5"/><text x="1144" y="388" text-anchor="middle" class="small">读取前申请</text>
+<rect x="812" y="456" width="72" height="28" fill="#f5f5f5"/><text x="848" y="476" text-anchor="middle" class="small">获准</text>
+<rect x="436" y="368" width="160" height="28" fill="#f5f5f5"/><text x="516" y="388" text-anchor="middle" class="small">I/O 完成，恢复</text>
+<!-- Request entry -->
+<rect class="box" x="48" y="160" width="280" height="184" rx="8"/>
+<text x="72" y="200" class="name">加载 / Reopen 入口</text>
+<text x="72" y="236" class="tech">load_seq = 1, 2, 3…</text>
+<text x="72" y="272" class="body">写入 OpContext</text>
+<text x="72" y="304" class="small">字段、索引等子任务继承序号</text>
+<!-- Ordered runnable groups -->
+<rect class="focal" x="416" y="160" width="388" height="184" rx="8"/>
+<text x="440" y="200" class="name">① CPU 就绪任务队列</text>
+<text x="440" y="232" class="tech">ASYNC_LOAD · (priority, load_seq)</text>
+<text x="440" y="268" class="body">HIGH 先于 LOW；较小序号优先</text>
+<text x="440" y="300" class="small">就绪组堆排序；组内并发 FIFO</text>
+<text x="440" y="324" class="small">只选择已经就绪的任务</text>
+<!-- CPU -->
+<rect class="box" x="892" y="160" width="340" height="184" rx="8"/>
+<text x="916" y="200" class="name">CPU 工作线程</text>
+<text x="916" y="236" class="body">执行加载协程 / 数据处理</text>
+<text x="916" y="272" class="tech">ThrottledLifoSem</text>
+<text x="916" y="304" class="small">控制等待与唤醒；不改变排序</text>
+<!-- Admission -->
+<rect class="focal" x="892" y="424" width="340" height="156" rx="8"/>
+<text x="916" y="464" class="name">② 资源申请与等待队列</text>
+<text x="916" y="496" class="tech">LoadAdmissionController</text>
+<text x="916" y="528" class="body">内存预算 + 并发名额</text>
+<text x="916" y="556" class="small">同一排序规则；等待时不预占资源</text>
+<!-- IO -->
+<rect class="box" x="416" y="424" width="388" height="156" rx="8"/>
+<text x="440" y="464" class="name">异步 I/O</text>
+<text x="440" y="500" class="body">专用执行器保留自己的队列策略</text>
+<text x="440" y="532" class="small">恢复时保留 load_seq，重新进入 CPU 队列</text>
+<text x="440" y="560" class="small">处理完成后归还资源，推进后续读取</text>
+<!-- One explanatory callout -->
+<text x="48" y="444" class="name">不会把 segment 串行化</text>
+<text x="48" y="480" class="body">早提交者等待 I/O 时，</text>
+<text x="48" y="512" class="body">后面的就绪任务仍可运行。</text>
+<text x="48" y="552" class="small">不抢占运行中的任务，也不按大小排序。</text>
+<path d="M48 620 H1232" stroke="#bfc0c0"/>
+<text x="48" y="652" class="small">橙色框：两处使用一致排序的调度点　　实线：提交 / 调用　　虚线：异步恢复</text>
+<text x="48" y="684" class="small">图示为调度关系，非独立线程划分；省略取消、异常和缓存分支。多线程下不保证 segment 的完成顺序。</text>
+</svg></div></main></body></html>

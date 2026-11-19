@@ -85,7 +85,8 @@ MakeRemoteSource(const index::IndexFamily& requested_family,
             ? proto::common::LoadPriority::LOW
             : proto::common::LoadPriority::HIGH;
     return folly::coro::blockingWait(folly::coro::co_withExecutor(
-        storage::ResolveAsyncLoadExecutor({}, priority),
+        storage::ResolveAsyncLoadExecutor(
+            {}, priority, options.op_ctx ? options.op_ctx->load_seq : 0),
         storage::V1RemoteSource::OpenAsync(
             context,
             remote_paths,
@@ -222,7 +223,8 @@ SealedIndexLoader::SealedIndexLoader(
         if (*file_manager_context_.use_async_load) {
             resolved_family =
                 folly::coro::blockingWait(folly::coro::co_withExecutor(
-                    storage::ResolveAsyncLoadExecutor({}, priority),
+                    storage::ResolveAsyncLoadExecutor(
+                        {}, priority, metadata_ctx.ctx.load_seq),
                     index::ResolveLoadFamilyAsync(
                         adapted.family, *source, config_)));
         } else {
@@ -263,7 +265,8 @@ SealedIndexLoader::SealedIndexLoader(
                 folly::coro::blockingWait(folly::coro::co_withExecutor(
                     storage::ResolveAsyncLoadExecutor(
                         storage::LocalFileIOPool::GetInstance().GetExecutor(),
-                        priority),
+                        priority,
+                        metadata_ctx.ctx.load_seq),
                     index::LegacyScalarIndexLoadResourceAsync(
                         index_load_info_.field_type,
                         index_load_info_.index_size,
@@ -305,7 +308,8 @@ SealedIndexLoader::SealedIndexLoader(
             folly::coro::blockingWait(folly::coro::co_withExecutor(
                 storage::ResolveAsyncLoadExecutor(
                     storage::LocalFileIOPool::GetInstance().GetExecutor(),
-                    priority),
+                    priority,
+                    metadata_ctx.ctx.load_seq),
                 index::LegacyVectorFileLoadResourceAsync(
                     load_resource_request_,
                     Family() == index::families::kVectorDisk,

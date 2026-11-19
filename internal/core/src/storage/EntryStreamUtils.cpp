@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "storage/EntryStreamUtils.h"
+#include "storage/AsyncLoadExecutor.h"
 #include "folly/OperationCancelled.h"
 #include "folly/coro/WithCancellation.h"
 
@@ -29,7 +30,8 @@ AcquireMetadataLoadSlotAsync(proto::common::LoadPriority priority,
             {0, 1},
             LoadAdmissionPriorityForThreadPool(
                 milvus::PriorityForLoad(priority)),
-            token);
+            token,
+            GetAsyncLoadSequence(co_await folly::coro::co_current_executor));
     } catch (const folly::OperationCancelled&) {
         ThrowInfo(ErrorCode::FollyCancel, "Metadata load admission cancelled");
     }

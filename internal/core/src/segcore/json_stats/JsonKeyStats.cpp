@@ -1678,7 +1678,9 @@ JsonKeyStats::LoadMetaFile(const std::string& remote_path, OpContext* ctx) {
                 ctx->cancellation_token);
         };
         folly::coro::blockingWait(folly::coro::co_withExecutor(
-            storage::ResolveAsyncLoadExecutor({}, priority), read()));
+            storage::ResolveAsyncLoadExecutor(
+                {}, priority, ctx ? ctx->load_seq : 0),
+            read()));
     } else {
         content.resize(rcm_->Size(remote_path));
         rcm_->Read(remote_path, content.data(), content.size());
@@ -1953,7 +1955,9 @@ JsonKeyStats::LoadShreddingMeta(
             co_return std::move(result).value();
         };
         metadata = folly::coro::blockingWait(folly::coro::co_withExecutor(
-            storage::ResolveAsyncLoadExecutor({}, priority), inspect()));
+            storage::ResolveAsyncLoadExecutor(
+                {}, priority, ctx ? ctx->load_seq : 0),
+            inspect()));
     } else {
         auto& pool = ThreadPools::GetExecutor(milvus::ThreadPoolPriority::HIGH);
         metadata.resize(files.size());
@@ -2024,7 +2028,8 @@ JsonKeyStats::LoadShreddingMeta(
         };
         if (*file_manager_context_.use_async_load) {
             folly::coro::blockingWait(folly::coro::co_withExecutor(
-                storage::ResolveAsyncLoadExecutor({}, priority),
+                storage::ResolveAsyncLoadExecutor(
+                    {}, priority, ctx ? ctx->load_seq : 0),
                 read_layout()));
         } else {
             folly::coro::blockingWait(read_layout());

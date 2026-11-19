@@ -96,7 +96,8 @@ InspectPackedIndexFile(const std::vector<std::string>& files,
         priority,
         op_ctx ? op_ctx->cancellation_token : folly::CancellationToken{});
     return use_async ? folly::coro::blockingWait(folly::coro::co_withExecutor(
-                           storage::ResolveAsyncLoadExecutor({}, priority),
+                           storage::ResolveAsyncLoadExecutor(
+                               {}, priority, op_ctx ? op_ctx->load_seq : 0),
                            std::move(task)))
                      : folly::coro::blockingWait(std::move(task));
 }

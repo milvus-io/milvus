@@ -83,6 +83,7 @@
 #include "segcore/TextLobSpillover.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
+#include "storage/AsyncLoadExecutor.h"
 #include "storage/FileManager.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
@@ -339,15 +340,18 @@ AsyncReopenSegment(CTraceContext c_trace,
         auto segment =
             static_cast<milvus::segcore::SegmentInterface*>(c_segment);
 
+        const auto load_seq = milvus::storage::NextLoadSequence();
         auto future = milvus::futures::Future<bool>::async(
             milvus::futures::getLoadCPUExecutor(),
             milvus::futures::ExecutePriority::NORMAL,
             [c_trace,
              segment,
+             load_seq,
              load_info = std::move(load_info),
              schema = std::move(schema)](
                 folly::CancellationToken cancel_token) -> bool* {
                 milvus::OpContext op_ctx(cancel_token);
+                op_ctx.load_seq = load_seq;
                 segment->Reopen(&op_ctx, load_info, schema);
                 return nullptr;
             },
@@ -441,14 +445,17 @@ CFuture*
 AsyncSegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment) {
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
 
+    const auto load_seq = milvus::storage::NextLoadSequence();
     auto future = milvus::futures::Future<bool>::async(
         milvus::futures::getLoadCPUExecutor(),
         milvus::futures::ExecutePriority::NORMAL,
-        [c_trace, segment](folly::CancellationToken cancel_token) -> bool* {
+        [c_trace, segment, load_seq](
+            folly::CancellationToken cancel_token) -> bool* {
             auto trace_ctx = milvus::tracer::TraceContext{
                 c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
 
             milvus::OpContext op_ctx(cancel_token);
+            op_ctx.load_seq = load_seq;
             segment->Load(trace_ctx, &op_ctx);
 
             return nullptr;
