@@ -4414,6 +4414,9 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
 	)
+	if metricType == metricsinfo.SplitRetirementKey {
+		return node.mixCoord.GetMetrics(ctx, req)
+	}
 	if metricType == metricsinfo.SystemInfoMetrics {
 		metrics, err := node.metricsCacheManager.GetSystemInfoMetrics()
 		if err != nil {

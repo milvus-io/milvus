@@ -949,6 +949,9 @@ func (s *mixCoordImpl) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRe
 
 	// If a processing role is specified, the corresponding role will be used for processing
 	ret := gjson.Parse(in.GetRequest())
+	if ret.Get(metricsinfo.MetricTypeKey).String() == metricsinfo.SplitRetirementKey {
+		return s.GetDcMetrics(ctx, in)
+	}
 	processRole, _ := metricsinfo.ParseMetricProcessInRole(ret)
 	if len(processRole) > 0 && processRole == typeutil.QueryCoordRole {
 		return s.GetQcMetrics(ctx, in)

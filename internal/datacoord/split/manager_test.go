@@ -743,3 +743,31 @@ func TestSplitRechecksTargetReadinessBeforeFence(t *testing.T) {
 	require.Empty(t, env.issued, "no fence may be emitted after a target loses readiness")
 	require.Equal(t, 1, env.admitted)
 }
+
+func TestAdmitChildWaitsForParentRetirementOnPeers(t *testing.T) {
+	enableTrigger(t)
+	ctx := context.Background()
+	env := newTriggerEnv(t)
+	record := testRecord(7)
+	_, err := env.store.Record(ctx, record)
+	require.NoError(t, err)
+	require.NoError(t, env.store.MarkSourceAcked(ctx, 7, testCollection, testSource, []string{testTarget1, testTarget2}))
+	require.NoError(t, env.store.Advance(ctx, 7, datapb.SplitShardTaskState_SplitShardTaskRetired))
+	ready := false
+	checks := 0
+	env.manager.deps.CheckParentRetired = func(_ context.Context, parent *datapb.SplitShardTask) error {
+		checks++
+		require.EqualValues(t, 7, parent.GetTaskId())
+		if !ready {
+			return context.DeadlineExceeded
+		}
+		return nil
+	}
+	req := Request{CollectionID: testCollection, Source: testTarget1, Targets: [2]string{testTarget1, testTarget2}}
+	require.ErrorIs(t, env.manager.admit(ctx, req), context.DeadlineExceeded)
+	ready = true
+	require.NoError(t, env.manager.admit(ctx, req))
+	req.Source = "independent"
+	require.NoError(t, env.manager.admit(ctx, req))
+	require.Equal(t, 2, checks)
+}

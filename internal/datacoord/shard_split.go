@@ -153,7 +153,8 @@ func (s *Server) newSplitManager(ctx context.Context) *split.Manager {
 // splitDependencies is what the trigger reads and calls of the server.
 func (s *Server) splitDependencies() split.Dependencies {
 	return split.Dependencies{
-		Store: s.splitStore,
+		Store:              s.splitStore,
+		CheckParentRetired: s.checkSplitParentRetired,
 		Collections: func() []split.Collection {
 			collections := make([]split.Collection, 0)
 			for _, collection := range s.meta.GetCollections() {
