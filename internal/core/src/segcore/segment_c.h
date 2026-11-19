@@ -196,6 +196,23 @@ int64_t
 GetSearchResultValidCount(CSearchResult search_result);
 
 /**
+ * @brief Get the number of operator types the search spent time in
+ */
+int64_t
+GetSearchResultOperatorCostCount(CSearchResult search_result);
+
+/**
+ * @brief Get the i-th operator type the search spent time in and the
+ *        nanoseconds it spent there. The name stays valid until the search
+ *        result is deleted.
+ */
+void
+GetSearchResultOperatorCost(CSearchResult search_result,
+                            int64_t i,
+                            const char** operator_type,
+                            int64_t* ns);
+
+/**
  * @brief Execute search on a segment
  *
  * @param c_trace: Tracing context for distributed tracing

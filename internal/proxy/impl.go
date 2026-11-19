@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -2778,6 +2779,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		if spanPerNq >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			mlog.Info(ctx, rpcSlow(method), mlog.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
 				mlog.Int64("nq", qt.GetNq()), mlog.Duration("duration", span), mlog.Duration("durationPerNq", spanPerNq),
+				mlog.String("stages", searchprofile.Format(qt.StageCosts())),
 				mlog.Stringer("consistency_level", accesslog.NewConsistencyLevelHelper(ctx, request)))
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
@@ -2997,6 +2999,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		if spanPerNq >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			mlog.Info(ctx, rpcSlow(method), mlog.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
 				mlog.Int64("totalNq", totalNq), mlog.Duration("duration", span), mlog.Duration("durationPerNq", spanPerNq),
+				mlog.String("stages", searchprofile.Format(qt.StageCosts())),
 				mlog.Stringer("consistency_level", accesslog.NewConsistencyLevelHelper(ctx, newSearchReq)))
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""

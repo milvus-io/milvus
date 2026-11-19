@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -515,6 +516,38 @@ func TestShardSearchUsesBatchPathForUnsupportedSearch(t *testing.T) {
 	require.Zero(t, queryService.searchStreamCalls)
 }
 
+// A shard search profiles its GetQueryPlan and each work node RPC, and takes
+// the stages the node reported out of its result before the reducer.
+func TestShardSearchRecordsStagesBeforeReduce(t *testing.T) {
+	setupTestReplicaRouting(t)
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	planClient := &fakeQueryPlanClient{plan: newTestSearchQueryPlan(shardID, &viewpb.QueryPlanMVCC{GrowingTimetick: 100})}
+	result := &internalpb.SearchResults{Status: merr.Success()}
+	searchprofile.Attach(result.Status, []searchprofile.Stage{
+		{Name: searchprofile.QNSegmentSearch, SumUs: 5, MaxUs: 5, Count: 1, MaxNodeID: 11},
+	})
+	queryService := &fakeViewQueryServiceClient{searchResponse: &viewpb.SearchOnViewResponse{LegacyResults: result}}
+	client := newShardViewQueryClient(1, planClient, queryService)
+	profile := searchprofile.NewRecorder(1)
+
+	_, err := client.Search(searchprofile.WithRecorder(context.Background(), profile), &ShardSearchRequest{
+		VChannel: shardID.VChannel,
+		Req:      &internalpb.SearchRequest{CollectionID: 100, ConsistencyLevel: commonpb.ConsistencyLevel_Bounded},
+		Reducer:  fakeSearchResultReducer{},
+	})
+	require.NoError(t, err)
+
+	stages := make(map[string]searchprofile.Stage)
+	for _, s := range profile.Stages() {
+		stages[s.Name] = s
+	}
+	require.EqualValues(t, 1, stages[searchprofile.ProxyQueryPlan].Count)
+	require.EqualValues(t, 1, stages[searchprofile.ProxyShardRPC].Count)
+	require.EqualValues(t, 11, stages[searchprofile.ProxyShardRPC].MaxID)
+	require.EqualValues(t, 11, stages[searchprofile.QNSegmentSearch].MaxNodeID)
+	require.NotContains(t, result.GetStatus().GetExtraInfo(), searchprofile.ExtraInfoKey)
+}
+
 type fakeQueryPlanClient struct {
 	QueryPlanClient
 	clientOptimizeInfo    *viewpb.QueryPlanClientOptimizeInfo
@@ -792,4 +825,147 @@ func newTestSearchQueryPlan(shardID qviews.ShardID, mvcc *viewpb.QueryPlanMVCC) 
 			},
 		},
 	}
+}
+
+func newStreamTestPlan(shardID qviews.ShardID, request *internalpb.SearchRequest, nodes ...qviews.QueryNode) (*viewpb.QueryPlan, *viewpb.GetQueryPlanResponse) {
+	plan := newTestSearchQueryPlan(shardID, &viewpb.QueryPlanMVCC{})
+	plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: proto.Clone(request).(*internalpb.SearchRequest)}
+	planResponse := &viewpb.GetQueryPlanResponse{Plan: plan}
+	qviews.OmitUnchangedQueryPayloads(planResponse, &viewpb.GetQueryPlanRequest{
+		Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: request},
+	})
+	plan.WorkNodes = nil
+	for _, node := range nodes {
+		plan.WorkNodes = append(plan.WorkNodes, &viewpb.QueryPlanWorkNode{
+			Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: node.ID}},
+		})
+	}
+	return plan, planResponse
+}
+
+// stagedSearchChunk is a node's first Chunk carrying the stages it recorded.
+func stagedSearchChunk(ids []int64, scores []float32, nodeID, segmentID, us int64) *internalpb.SearchResults {
+	chunk := newTestSearchChunk(3, ids, scores)
+	searchprofile.Attach(chunk.Status, []searchprofile.Stage{
+		{Name: searchprofile.QNSegmentSearch, SumUs: us, MaxUs: us, Count: 1, MaxNodeID: nodeID, MaxID: segmentID},
+	})
+	return chunk
+}
+
+func drainSearchStream(t *testing.T, stream searchreducestream.ReduceStream) {
+	t.Helper()
+	for {
+		chunk, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return
+		}
+		require.NoError(t, err)
+		require.NotContains(t, chunk.GetStatus().GetExtraInfo(), searchprofile.ExtraInfoKey)
+	}
+}
+
+func stagesByName(profile *searchprofile.Recorder) map[string]searchprofile.Stage {
+	stages := make(map[string]searchprofile.Stage)
+	for _, s := range profile.Stages() {
+		stages[s.Name] = s
+	}
+	return stages
+}
+
+// A streamed shard search takes the stages each work node attached to its first
+// Chunk out before the reducer, and merges them into the profile when the shard's
+// stream is closed, even if the reducer stopped reading before EOF.
+func TestShardSearchStreamTakesStagesFromFirstChunk(t *testing.T) {
+	setupTestReplicaRouting(t)
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	leftNode, rightNode := qviews.NewQueryNode(11), qviews.NewQueryNode(12)
+	request := newTestSearchRequest(3)
+	plan, planResponse := newStreamTestPlan(shardID, request, leftNode, rightNode)
+
+	leftFirst := stagedSearchChunk([]int64{1, 2}, []float32{0.9, 0.8}, 11, 101, 5)
+	rightFirst := stagedSearchChunk([]int64{4}, []float32{0.85}, 12, 102, 7)
+	streams := map[string]*fakeSearchStream{
+		leftNode.Key():  {recv: []fakeSearchStreamRecv{{chunk: leftFirst}}},
+		rightNode.Key(): {recv: []fakeSearchStreamRecv{{chunk: rightFirst}, {chunk: newTestSearchChunk(3, []int64{3}, []float32{0.7})}}},
+	}
+	queryService := &fakeViewQueryServiceClient{
+		searchOnViewStream: func(_ context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
+			return streams[node.Key()], nil
+		},
+	}
+	client := newShardViewQueryClient(1, &fakeQueryPlanClient{plan: plan, clientOptimizeInfo: planResponse.ClientOptimizeInfo}, queryService)
+	profile := searchprofile.NewRecorder(1)
+
+	shardStreams, _, err := client.SearchStreams(searchprofile.WithRecorder(context.Background(), profile), &ShardSearchRequest{
+		VChannel: shardID.VChannel, Req: request, BarrierMVCC: 123,
+	}, 20)
+	require.NoError(t, err)
+	require.Len(t, shardStreams, 1)
+
+	// Read one Chunk only, as a reducer that has enough results would, then close.
+	chunk, err := shardStreams[0].Recv()
+	require.NoError(t, err)
+	require.NotContains(t, chunk.GetStatus().GetExtraInfo(), searchprofile.ExtraInfoKey)
+	require.NotContains(t, stagesByName(profile), searchprofile.ProxyShardRPC, "worker stages are merged when the shard stream ends")
+	require.NoError(t, shardStreams[0].Close())
+
+	stages := stagesByName(profile)
+	require.EqualValues(t, 1, stages[searchprofile.ProxyQueryPlan].Count)
+	require.EqualValues(t, 2, stages[searchprofile.ProxyShardRPC].Count)
+	require.Equal(t, searchprofile.Stage{
+		Name: searchprofile.QNSegmentSearch, SumUs: 12, MaxUs: 7, Count: 2, MaxNodeID: 12, MaxID: 102,
+	}, stages[searchprofile.QNSegmentSearch])
+	require.NotContains(t, leftFirst.GetStatus().GetExtraInfo(), searchprofile.ExtraInfoKey)
+	require.NotContains(t, rightFirst.GetStatus().GetExtraInfo(), searchprofile.ExtraInfoKey)
+}
+
+// When a worker fails before the shard returns its first Chunk, the shard
+// retries; the stages of the failed attempt, including those of a worker that
+// finished, are dropped, and only the attempt whose results are kept counts.
+func TestShardSearchStreamRetryKeepsOnlyWinningAttempt(t *testing.T) {
+	setupTestReplicaRouting(t)
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	leftNode, rightNode := qviews.NewQueryNode(11), qviews.NewQueryNode(12)
+	request := newTestSearchRequest(3)
+	plan, planResponse := newStreamTestPlan(shardID, request, leftNode, rightNode)
+
+	var mu sync.Mutex
+	opens := 0
+	queryService := &fakeViewQueryServiceClient{
+		searchOnViewStream: func(_ context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			opens++
+			if opens <= 2 { // first attempt
+				if node.Key() == leftNode.Key() {
+					return &fakeSearchStream{recv: []fakeSearchStreamRecv{{chunk: stagedSearchChunk([]int64{1}, []float32{0.9}, 11, 101, 5)}}}, nil
+				}
+				return &fakeSearchStream{recv: []fakeSearchStreamRecv{{err: status.Error(codes.Unavailable, "worker disconnected")}}}, nil
+			}
+			if node.Key() == leftNode.Key() {
+				return &fakeSearchStream{recv: []fakeSearchStreamRecv{{chunk: stagedSearchChunk([]int64{1}, []float32{0.9}, 11, 101, 7)}}}, nil
+			}
+			return &fakeSearchStream{recv: []fakeSearchStreamRecv{{chunk: stagedSearchChunk([]int64{2}, []float32{0.8}, 12, 102, 9)}}}, nil
+		},
+	}
+	planClient := &fakeQueryPlanClient{plan: plan, clientOptimizeInfo: planResponse.ClientOptimizeInfo}
+	// Two attempts: the shard may retry once after the worker fails.
+	client := newShardViewQueryClient(2, planClient, queryService)
+	profile := searchprofile.NewRecorder(1)
+
+	// A large Chunk size buffers the shard's output, so the failure comes
+	// before its first Chunk and the shard may retry.
+	shardStreams, _, err := client.SearchStreams(searchprofile.WithRecorder(context.Background(), profile), &ShardSearchRequest{
+		VChannel: shardID.VChannel, Req: request, BarrierMVCC: 123,
+	}, 1<<20)
+	require.NoError(t, err)
+	drainSearchStream(t, shardStreams[0])
+
+	require.Equal(t, 2, planClient.planReqCount, "the shard retried once")
+	stages := stagesByName(profile)
+	require.EqualValues(t, 2, stages[searchprofile.ProxyQueryPlan].Count, "query_plan counts every attempt")
+	require.EqualValues(t, 2, stages[searchprofile.ProxyShardRPC].Count, "only the winning attempt's RPCs")
+	require.Equal(t, searchprofile.Stage{
+		Name: searchprofile.QNSegmentSearch, SumUs: 16, MaxUs: 9, Count: 2, MaxNodeID: 12, MaxID: 102,
+	}, stages[searchprofile.QNSegmentSearch])
 }

@@ -37,7 +37,7 @@ PhyMvccNode::PhyMvccNode(int32_t operator_id,
                mvcc_node->output_type(),
                operator_id,
                mvcc_node->id(),
-               "PhyIterativeFilterNode") {
+               "PhyMvccNode") {
     ExecContext* exec_context = operator_context_->get_exec_context();
     QueryContext* query_context = exec_context->get_query_context();
     segment_ = query_context->get_segment();
