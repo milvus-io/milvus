@@ -42,6 +42,7 @@
 #include "storage/StorageV2FSCache.h"
 #include "storage/Util.h"
 #include "storage/plugin/PluginInterface.h"
+#include "storage/StatusToErrorCode.h"
 
 namespace {
 
@@ -59,7 +60,7 @@ ConvertLoonProperties(const LoonProperties* properties) {
 }
 
 void
-UpdateCipherPluginIfNeeded(CPluginContext* c_plugin_context) {
+UpdateCipherPluginIfNeeded(const CPluginContext* c_plugin_context) {
     auto plugin_ptr =
         milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
     if (plugin_ptr != nullptr && c_plugin_context != nullptr) {
@@ -96,6 +97,22 @@ GetFsFromStorageConfig(const CStorageConfig& c_storage_config) {
             : "",
         c_storage_config.use_crc32c_checksum,
     });
+}
+
+milvus_storage::ArrowFileSystemPtr
+GetFsFromProperties(const LoonProperties* properties, const char* path) {
+    auto converted = ConvertLoonProperties(properties);
+    if (!converted.ok()) {
+        ThrowInfo(milvus::ErrorCode::FileReadFailed,
+                  "{}",
+                  converted.status().ToString());
+    }
+    auto fs = milvus_storage::FilesystemCache::getInstance().get(
+        converted.ValueUnsafe(), path ? path : "");
+    if (!fs.ok()) {
+        throw milvus_storage::ToSegcoreError(fs.status());
+    }
+    return fs.ValueUnsafe();
 }
 
 }  // namespace
@@ -151,20 +168,7 @@ NewPackedReaderWithProperties(char** paths,
 
     try {
         auto truePaths = std::vector<std::string>(paths, paths + num_paths);
-        auto properties_result = ConvertLoonProperties(c_properties);
-        if (!properties_result.ok()) {
-            return milvus::FailureCStatus(
-                milvus::ErrorCode::FileReadFailed,
-                properties_result.status().ToString());
-        }
-        auto properties = properties_result.ValueOrDie();
-        auto fs_result = milvus_storage::FilesystemCache::getInstance().get(
-            properties, filesystem_path != nullptr ? filesystem_path : "");
-        if (!fs_result.ok()) {
-            auto error = milvus_storage::ToSegcoreError(fs_result.status());
-            return milvus::FailureCStatus(&error);
-        }
-        auto trueFs = fs_result.ValueOrDie();
+        auto trueFs = GetFsFromProperties(c_properties, filesystem_path);
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
         UpdateCipherPluginIfNeeded(c_plugin_context);
 
@@ -219,6 +223,59 @@ NewPackedReader(char** paths,
 }
 
 CStatus
+NewImportPackedReader(char** paths,
+                      int64_t num_paths,
+                      struct ArrowSchema* schema,
+                      int64_t buffer_size,
+                      bool eager_prebuffer,
+                      const CStorageConfig* storage_config,
+                      const LoonProperties* properties,
+                      const char* filesystem_path,
+                      CPackedReader* reader,
+                      const CPluginContext* source) {
+    SCOPE_CGO_CALL_METRIC();
+    try {
+        auto reader_properties = milvus::storage::GetReaderProperties(
+            std::make_shared<milvus::storage::KeyRetriever>(source));
+        milvus_storage::ArrowFileSystemPtr fs;
+        if (properties) {
+            fs = GetFsFromProperties(properties, filesystem_path);
+        } else if (storage_config) {
+            fs = GetFsFromStorageConfig(*storage_config);
+        } else {
+            fs = milvus::segcore::GetDefaultArrowFileSystem();
+        }
+        if (!fs) {
+            return milvus::FailureCStatus(
+                milvus::ErrorCode::FileReadFailed,
+                "[StorageV2] Failed to get filesystem");
+        }
+        auto schema_result = arrow::ImportSchema(schema);
+        if (!schema_result.ok()) {
+            ThrowInfo(
+                milvus::storage::ArrowStatusToErrorCode(schema_result.status()),
+                "failed to import arrow schema: {}",
+                schema_result.status().ToString());
+        }
+        std::vector<std::string> files(paths, paths + num_paths);
+        auto result = milvus_storage::PackedRecordBatchReader::Make(
+            fs,
+            files,
+            schema_result.ValueUnsafe(),
+            buffer_size,
+            reader_properties,
+            milvus::storage::GetArrowReaderProperties(eager_prebuffer));
+        if (!result.ok()) {
+            auto error = milvus_storage::ToSegcoreError(result.status());
+            return milvus::FailureCStatus(&error);
+        }
+        *reader = result.ValueUnsafe().release();
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
 ReadNext(CPackedReader c_packed_reader,
          struct ArrowArray* out_array,
          struct ArrowSchema* out_schema) {
@@ -269,15 +326,15 @@ CloseReader(CPackedReader c_packed_reader) {
     }
 }
 
+namespace {
 CStatus
-GetPackedFileFieldIDs(char** paths,
-                      int64_t num_paths,
-                      const CStorageConfig* c_storage_config,
-                      CPluginContext* c_plugin_context,
-                      int64_t** field_ids,
-                      int64_t** field_counts) {
-    SCOPE_CGO_CALL_METRIC();
-
+ReadPackedFileFieldIDs(char** paths,
+                       int64_t num_paths,
+                       const CStorageConfig* c_storage_config,
+                       const CPluginContext* c_plugin_context,
+                       int64_t** field_ids,
+                       int64_t** field_counts,
+                       bool for_import) {
     *field_ids = nullptr;
     *field_counts = nullptr;
     try {
@@ -289,14 +346,23 @@ GetPackedFileFieldIDs(char** paths,
                 milvus::ErrorCode::FileReadFailed,
                 "[StorageV2] Failed to get filesystem");
         }
-        UpdateCipherPluginIfNeeded(c_plugin_context);
+        std::shared_ptr<milvus::storage::KeyRetriever> keys;
+        if (for_import) {
+            keys = std::make_shared<milvus::storage::KeyRetriever>(
+                c_plugin_context);
+        } else {
+            UpdateCipherPluginIfNeeded(c_plugin_context);
+            keys = std::make_shared<milvus::storage::KeyRetriever>();
+        }
+        auto reader_properties =
+            milvus::storage::GetReaderProperties(std::move(keys));
 
         std::vector<int64_t> ids;
         std::vector<int64_t> counts;
         counts.reserve(num_paths);
         for (int64_t i = 0; i < num_paths; ++i) {
-            auto file_ids =
-                milvus::storage::GetPackedFileColumnFieldIDs(fs, paths[i]);
+            auto file_ids = milvus::storage::GetPackedFileColumnFieldIDs(
+                fs, paths[i], reader_properties);
             ids.insert(ids.end(), file_ids.begin(), file_ids.end());
             counts.push_back(static_cast<int64_t>(file_ids.size()));
         }
@@ -318,4 +384,39 @@ GetPackedFileFieldIDs(char** paths,
         return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS
+}
+}  // namespace
+
+CStatus
+GetPackedFileFieldIDs(char** paths,
+                      int64_t num_paths,
+                      const CStorageConfig* storage_config,
+                      CPluginContext* context,
+                      int64_t** field_ids,
+                      int64_t** field_counts) {
+    SCOPE_CGO_CALL_METRIC();
+    return ReadPackedFileFieldIDs(paths,
+                                  num_paths,
+                                  storage_config,
+                                  context,
+                                  field_ids,
+                                  field_counts,
+                                  false);
+}
+
+CStatus
+GetImportPackedFileFieldIDs(char** paths,
+                            int64_t num_paths,
+                            const CStorageConfig* storage_config,
+                            const CPluginContext* source,
+                            int64_t** field_ids,
+                            int64_t** field_counts) {
+    SCOPE_CGO_CALL_METRIC();
+    return ReadPackedFileFieldIDs(paths,
+                                  num_paths,
+                                  storage_config,
+                                  source,
+                                  field_ids,
+                                  field_counts,
+                                  true);
 }

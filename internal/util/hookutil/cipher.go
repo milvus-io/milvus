@@ -52,6 +52,12 @@ type BackupInterface interface {
 	Backup(ezID int64) (string, error)
 }
 
+// ImportEZResolver decrypts this backup with its source credentials on each call.
+// The result is the original EZ ID and raw keyset for this artifact.
+type ImportEZResolver interface {
+	ResolveImportEZ(artifact string) (int64, []byte, error)
+}
+
 // GetCipher returns singleton hook.Cipher instance.
 // If Milvus is not built with cipher plugin, it will return nil
 // If Milvus is built with cipher plugin, it will return hook.Cipher
@@ -329,16 +335,6 @@ func GetCollectionPluginContext(collProps []*commonpb.KeyValuePair, collectionID
 		CollectionId:     collectionID,
 		EncryptionKey:    base64.StdEncoding.EncodeToString(key),
 	}, nil
-}
-
-// Non nill return
-func GetReadStoragePluginContext(importEzk string) []*commonpb.KeyValuePair {
-	readContext, err := ImportEZ(importEzk)
-	if err != nil {
-		mlog.Error(context.TODO(), "failed to import ezk", mlog.Err(err))
-		return []*commonpb.KeyValuePair{}
-	}
-	return readContext
 }
 
 // RegisterEZsFromPluginContext registers all EZ contexts from plugin context.

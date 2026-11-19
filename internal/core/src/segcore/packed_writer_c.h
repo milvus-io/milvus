@@ -52,6 +52,18 @@ NewPackedWriter(struct ArrowSchema* schema,
                 CPackedWriter* c_packed_writer,
                 CPluginContext* c_plugin_context);
 
+// Uses the task's target keyset. A null storage config selects the default filesystem.
+CStatus
+NewImportPackedWriter(struct ArrowSchema* schema,
+                      const int64_t buffer_size,
+                      char** paths,
+                      int64_t num_paths,
+                      int64_t part_upload_size,
+                      CColumnSplits column_splits,
+                      const CStorageConfig* c_storage_config,
+                      CPackedWriter* c_packed_writer,
+                      CPluginContext* c_plugin_context);
+
 CStatus
 WriteRecordBatch(CPackedWriter c_packed_writer,
                  struct ArrowArray* arrays,

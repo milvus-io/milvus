@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2/numpy"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -56,10 +57,11 @@ type Reader interface {
 // are shared; each NewReader call owns its stream, decoder and request context.
 // Options and storage configuration must remain immutable during execution.
 type ReaderFactory struct {
-	cm      storage.ChunkManager
-	cfg     *indexpb.StorageConfig
-	options Options
-	storage func() (readerStorage, error)
+	cm         storage.ChunkManager
+	cfg        *indexpb.StorageConfig
+	options    Options
+	dispatched bool
+	storage    func() (readerStorage, error)
 }
 
 type readerStorage struct {
@@ -69,8 +71,20 @@ type readerStorage struct {
 }
 
 func NewReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb.StorageConfig, options Options) *ReaderFactory {
+	return newReaderFactory(ctx, cm, cfg, options, binlog.SourceEncryption{})
+}
+
+// NewTaskReaderFactory uses the validated source from this dispatch for every
+// file in both phases, including an explicit nil for a plaintext backup.
+func NewTaskReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb.StorageConfig, options Options, source *indexcgopb.StoragePluginContext) *ReaderFactory {
+	return newReaderFactory(ctx, cm, cfg, options, binlog.SourceEncryption{
+		Encrypted: source != nil, PluginContext: source, Dispatched: true,
+	})
+}
+
+func newReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb.StorageConfig, options Options, encryption binlog.SourceEncryption) *ReaderFactory {
 	return &ReaderFactory{
-		cm: cm, cfg: cfg, options: options,
+		cm: cm, cfg: cfg, options: options, dispatched: encryption.Dispatched,
 		storage: sync.OnceValues(func() (readerStorage, error) {
 			// Use the task context, never the first file's context. Cache a
 			// resolution error for this attempt too; a retry creates a new factory.
@@ -81,15 +95,25 @@ func NewReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb
 				sourceCM, sourceCfg, err := ResolveSourceStorage(ctx, options, cm, cfg)
 				return readerStorage{cm: sourceCM, cfg: sourceCfg}, err
 			}
+			artifact, _ := GetEZK(options)
+			if encryption.Dispatched && artifact != "" && encryption.PluginContext == nil {
+				return readerStorage{}, merr.WrapErrServiceInternalMsg("encrypted backup is missing its dispatched source keyset")
+			}
+			if !IsSnapshotSource(options) {
+				return readerStorage{cm: cm, cfg: cfg, encryption: encryption}, nil
+			}
 			uri, _ := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotSourceURI, options)
 			sourceCM, sourceCfg, err := ResolveSnapshotImportStorage(ctx, cm, cfg, uri, options)
 			if err != nil {
 				return readerStorage{}, err
 			}
-			resolved := readerStorage{cm: sourceCM, cfg: sourceCfg}
-			if ezk, _ := GetEZK(options); ezk != "" {
+			resolved := readerStorage{cm: sourceCM, cfg: sourceCfg, encryption: encryption}
+			if encryption.Dispatched {
+				return resolved, nil
+			}
+			if artifact != "" {
 				resolved.encryption.Encrypted = true
-				ezID, err := hookutil.GetEzIDByImportEzk(ezk)
+				ezID, err := hookutil.GetEzIDByImportEzk(artifact)
 				if err != nil {
 					return readerStorage{}, err
 				}
@@ -121,7 +145,7 @@ func (f *ReaderFactory) NewReader(ctx context.Context, schema *schemapb.Collecti
 		}
 	}
 	resolved := readerStorage{cm: f.cm, cfg: f.cfg}
-	if IsSnapshotSource(f.options) || HasSourceStorageOptions(f.options) {
+	if (f.dispatched && IsBackup(f.options)) || IsSnapshotSource(f.options) || HasSourceStorageOptions(f.options) {
 		// Validate the descriptor before accessing storage or the key retriever.
 		// Source storage is resolved once for this task attempt. Each reader
 		// still owns its stream; writes retain the task's target storage.
@@ -254,6 +278,9 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		storageVersion, err := GetStorageVersion(options)
 		if err != nil {
 			return nil, err
+		}
+		if encryption.Dispatched {
+			return binlog.NewBackupReader(ctx, cm, schema, storageConfig, storageVersion, paths, tsStart, tsEnd, bufferSize, encryption)
 		}
 		importEz, _ := GetEZK(options)
 		return binlog.NewReader(ctx, cm, schema, storageConfig, storageVersion, paths, tsStart, tsEnd, bufferSize, importEz, nil)

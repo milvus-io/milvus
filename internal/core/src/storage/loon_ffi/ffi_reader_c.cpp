@@ -18,9 +18,9 @@
 #include <string>
 #include <vector>
 
-#include "PluginInterface.h"
 #include "arrow/result.h"
 #include "arrow/status.h"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
 #include "milvus-storage/column_groups.h"
@@ -33,10 +33,37 @@
 #include "monitor/scope_metric.h"
 #include "storage/KeyRetriever.h"
 #include "storage/PluginLoader.h"
+#include "storage/plugin/PluginInterface.h"
 #include "storage/loon_ffi/ffi_reader_c.h"
 #include "storage/loon_ffi/util.h"
 #include <arrow/array.h>
 #include <arrow/record_batch.h>
+
+namespace {
+void
+SetKeyRetriever(milvus_storage::api::Reader& reader,
+                std::shared_ptr<milvus::storage::KeyRetriever> key_retriever) {
+    reader.set_keyretriever(
+        [key_retriever](const std::string& metadata) -> std::string {
+            return key_retriever->GetKey(metadata);
+        });
+}
+}  // namespace
+
+CStatus
+RegisterPackedImportReadKeyset(const CPluginContext* source,
+                               CFFIPackedReader ffi_reader) {
+    try {
+        auto keys = std::make_shared<milvus::storage::KeyRetriever>(source);
+        if (ffi_reader != nullptr) {
+            SetKeyRetriever(
+                *static_cast<milvus_storage::api::Reader*>(ffi_reader),
+                std::move(keys));
+        }
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
 
 /**
  * @brief Creates a Loon reader with optional CMEK decryption support.
@@ -83,11 +110,8 @@ GetLoonReader(
         plugin_ptr->Update(c_plugin_context->ez_id,
                            c_plugin_context->collection_id,
                            std::string(c_plugin_context->key));
-        auto key_retriever = std::make_shared<milvus::storage::KeyRetriever>();
-        reader->set_keyretriever(
-            [key_retriever](const std::string& metadata) -> std::string {
-                return key_retriever->GetKey(metadata);
-            });
+        SetKeyRetriever(*reader,
+                        std::make_shared<milvus::storage::KeyRetriever>());
     }
 
     return reader;

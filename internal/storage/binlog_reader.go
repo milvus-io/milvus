@@ -20,11 +20,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"io"
 
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -111,6 +113,43 @@ func (reader *BinlogReader) Close() {
 }
 
 type BinlogReaderOption func(base *BinlogReader) error
+
+type importBinlogDecryptionError struct{ error }
+
+func (e *importBinlogDecryptionError) Unwrap() error { return e.error }
+
+// IsImportBinlogDecryptionError identifies a recognized legacy file. Its key
+// failure must reach the task even when mixed-format deltalogs are being probed.
+func IsImportBinlogDecryptionError(err error) bool {
+	var failure *importBinlogDecryptionError
+	return errors.As(err, &failure)
+}
+
+func withImportBinlogDecryption(source *indexcgopb.StoragePluginContext) BinlogReaderOption {
+	return func(file *BinlogReader) error {
+		edek, hasEDEK := file.GetEdek()
+		_, hasZone := file.Extras[ezIDKey]
+		if !hasEDEK && !hasZone {
+			return nil
+		}
+		zone, ok := file.GetEzID()
+		if edek == "" || !ok || zone <= 0 {
+			return &importBinlogDecryptionError{merr.WrapErrDataIntegrityMsg("backup binlog has invalid encryption metadata")}
+		}
+		if source == nil || zone != source.GetEncryptionZoneId() {
+			return &importBinlogDecryptionError{merr.WrapErrDataIntegrityMsg("backup binlog EZ %d does not match the dispatched source", zone)}
+		}
+		if err := hookutil.RegisterImportReadKeys(source); err != nil {
+			return &importBinlogDecryptionError{err}
+		}
+		// The source collection and EDEK are recorded in the file. The
+		// collection in the task request belongs to the destination.
+		if err := WithReaderDecryptionContext(zone, file.CollectionID)(file); err != nil {
+			return &importBinlogDecryptionError{err}
+		}
+		return nil
+	}
+}
 
 func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
 	return func(base *BinlogReader) error {

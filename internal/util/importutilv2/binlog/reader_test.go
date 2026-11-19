@@ -445,7 +445,7 @@ func TestSnapshotBitmapPreparationFailures(t *testing.T) {
 			defer open.UnPatch()
 			load := mockey.Mock(loadSnapshotL0Deletes).To(func(ctx context.Context, _ storage.ChunkManager, _ *schemapb.CollectionSchema,
 				_ *indexpb.StorageConfig, _ *internalpb.SnapshotImportL0Source, _, _ uint64, _ int64,
-				consume func(map[any]uint64) error, _ func(string) error,
+				consume func(map[any]uint64) error, _ func(string) error, _ ...storage.RwOption,
 			) (*DeleteMerger, error) {
 				if mode == "shared" {
 					return nil, merr.ErrIoKeyNotFound

@@ -38,6 +38,15 @@ import (
 )
 
 func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedWriter, error) {
+	return newPackedWriter(filePaths, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false)
+}
+
+// NewImportPackedWriter uses the target keyset from the import task for this file.
+func NewImportPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, target *indexcgopb.StoragePluginContext) (*PackedWriter, error) {
+	return newPackedWriter(filePaths, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, target, true)
+}
+
+func newPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, forImport bool) (*PackedWriter, error) {
 	cFilePaths := make([]*C.char, len(filePaths))
 	for i, path := range filePaths {
 		cFilePaths[i] = C.CString(path)
@@ -56,6 +65,10 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 	cMultiPartUploadSize := C.int64_t(multiPartUploadSize)
 
 	cColumnSplits := C.NewCColumnSplits()
+	if cColumnSplits == nil {
+		return nil, merr.WrapErrServiceInternalMsg("failed to allocate column splits")
+	}
+	defer C.FreeCColumnSplits(cColumnSplits)
 	for _, group := range columnGroups {
 		cGroup := C.malloc(C.size_t(len(group.Columns)) * C.size_t(unsafe.Sizeof(C.int(0))))
 		if cGroup == nil {
@@ -72,55 +85,18 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 	var cPackedWriter C.CPackedWriter
 	var status C.CStatus
 
-	var pluginContextPtr *C.CPluginContext
-	if storagePluginContext != nil {
-		ckey := C.CString(storagePluginContext.EncryptionKey)
-		defer C.free(unsafe.Pointer(ckey))
-
-		var pluginContext C.CPluginContext
-		pluginContext.ez_id = C.int64_t(storagePluginContext.EncryptionZoneId)
-		pluginContext.collection_id = C.int64_t(storagePluginContext.CollectionId)
-		pluginContext.key = ckey
-		pluginContextPtr = &pluginContext
-	}
-
+	pluginContextPtr, release := newCPluginContext(storagePluginContext)
+	defer release()
+	var config *C.CStorageConfig
 	if storageConfig != nil {
-		cStorageConfig := C.CStorageConfig{
-			address:                C.CString(storageConfig.GetAddress()),
-			bucket_name:            C.CString(storageConfig.GetBucketName()),
-			access_key_id:          C.CString(storageConfig.GetAccessKeyID()),
-			access_key_value:       C.CString(storageConfig.GetSecretAccessKey()),
-			root_path:              C.CString(storageConfig.GetRootPath()),
-			storage_type:           C.CString(storageConfig.GetStorageType()),
-			cloud_provider:         C.CString(storageConfig.GetCloudProvider()),
-			iam_endpoint:           C.CString(storageConfig.GetIAMEndpoint()),
-			log_level:              C.CString("warn"),
-			useSSL:                 C.bool(storageConfig.GetUseSSL()),
-			sslCACert:              C.CString(storageConfig.GetSslCACert()),
-			useIAM:                 C.bool(storageConfig.GetUseIAM()),
-			region:                 C.CString(storageConfig.GetRegion()),
-			useVirtualHost:         C.bool(storageConfig.GetUseVirtualHost()),
-			requestTimeoutMs:       C.int64_t(storageConfig.GetRequestTimeoutMs()),
-			gcp_credential_json:    C.CString(storageConfig.GetGcpCredentialJSON()),
-			use_custom_part_upload: true,
-			max_connections:        C.uint32_t(storageConfig.GetMaxConnections()),
-			tls_min_version:        C.CString(tlsMinVersionForStorage(storageConfig.GetSslTlsMinVersion())),
-			use_crc32c_checksum:    C.bool(storageConfig.GetUseCrc32CChecksum()),
-		}
-		defer C.free(unsafe.Pointer(cStorageConfig.address))
-		defer C.free(unsafe.Pointer(cStorageConfig.bucket_name))
-		defer C.free(unsafe.Pointer(cStorageConfig.access_key_id))
-		defer C.free(unsafe.Pointer(cStorageConfig.access_key_value))
-		defer C.free(unsafe.Pointer(cStorageConfig.root_path))
-		defer C.free(unsafe.Pointer(cStorageConfig.storage_type))
-		defer C.free(unsafe.Pointer(cStorageConfig.cloud_provider))
-		defer C.free(unsafe.Pointer(cStorageConfig.iam_endpoint))
-		defer C.free(unsafe.Pointer(cStorageConfig.log_level))
-		defer C.free(unsafe.Pointer(cStorageConfig.sslCACert))
-		defer C.free(unsafe.Pointer(cStorageConfig.region))
-		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
-		defer C.free(unsafe.Pointer(cStorageConfig.tls_min_version))
-		status = C.NewPackedWriterWithStorageConfig(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnSplits, cStorageConfig, &cPackedWriter, pluginContextPtr)
+		cConfig, release := newCStorageConfig(storageConfig)
+		defer release()
+		config = &cConfig
+	}
+	if forImport {
+		status = C.NewImportPackedWriter(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnSplits, config, &cPackedWriter, pluginContextPtr)
+	} else if config != nil {
+		status = C.NewPackedWriterWithStorageConfig(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnSplits, *config, &cPackedWriter, pluginContextPtr)
 	} else {
 		status = C.NewPackedWriter(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnSplits, &cPackedWriter, pluginContextPtr)
 	}

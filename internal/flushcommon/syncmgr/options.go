@@ -5,6 +5,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
@@ -36,6 +37,11 @@ func (t *SyncTask) WithSyncPack(pack *SyncPack) *SyncTask {
 
 func (t *SyncTask) WithChunkManager(cm storage.ChunkManager) *SyncTask {
 	t.chunkManager = cm
+	return t
+}
+
+func (t *SyncTask) WithImportTarget(target *indexcgopb.StoragePluginContext) *SyncTask {
+	t.importTarget = target
 	return t
 }
 

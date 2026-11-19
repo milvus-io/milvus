@@ -33,6 +33,12 @@ extern "C" {
  */
 typedef void* CFFIPackedReader;
 
+// Bind the FFI reader to its dispatched source before opening its stream.
+// A null source permits plaintext only, even on a worker with cached keys.
+CStatus
+RegisterPackedImportReadKeyset(const CPluginContext* source,
+                               CFFIPackedReader ffi_reader);
+
 /**
  * @brief Creates a new packed FFI reader from manifest content directly.
  *

@@ -18,17 +18,25 @@ package bulkimport
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"math"
+	"net"
+	"net/http"
 	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"google.golang.org/api/googleapi"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -38,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -55,6 +64,9 @@ import (
 
 // An immutable job/task source mismatch cannot be repaired by rescheduling.
 var errSnapshotTaskSource = errors.New("invalid snapshot task source")
+
+// Mark source resolution separately from target and inventory failures.
+var errImportSourceKey = errors.New("cannot resolve backup encryption key")
 
 func WrapTaskLog(task ImportTask, fields ...mlog.Field) []mlog.Field {
 	res := []mlog.Field{
@@ -388,10 +400,118 @@ func AssemblePreImportV3Request(task *preImportV3Task, job ImportJob) (*datapb.P
 	return assemblePreImportRequest(task, job, importFiles)
 }
 
+func resolveImportReadContext(options importutilv2.Options) ([]*commonpb.KeyValuePair, error) {
+	ctx, err := meta.GetReadPluginContext(options)
+	if err != nil {
+		return nil, merr.Mark(err, errImportSourceKey)
+	}
+	return ctx, nil
+}
+
+func retryableImportSourceError(err error) bool {
+	if !errors.Is(err, errImportSourceKey) {
+		return false
+	}
+	// ResolveImportEZ can join the original SDK error to its own decryption
+	// error. An authoritative KMS response takes precedence over transport hints.
+	if code := sourceKMSHTTPStatus(err); code != 0 {
+		switch code {
+		case http.StatusRequestTimeout, http.StatusTooManyRequests, http.StatusInternalServerError,
+			http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+			return true
+		default:
+			return false
+		}
+	}
+	if rpc, ok := status.FromError(err); ok {
+		switch rpc.Code() {
+		case codes.Canceled, codes.DeadlineExceeded, codes.Unavailable, codes.ResourceExhausted:
+			return true
+		default:
+			return false
+		}
+	}
+	// This branch's cockroachdb/errors v1.9.1 cannot traverse errors.Join.
+	// Locate the classified cause before asking merr for its retry flag.
+	var milvusErr interface {
+		error
+		merr.ErrorClassifier
+	}
+	if stderrors.As(err, &milvusErr) {
+		return merr.IsRetryableErr(milvusErr)
+	}
+	// The AWS v1 SDK puts a network failure in OrigErr without implementing Unwrap.
+	var awsCause interface{ OrigErr() error }
+	if stderrors.As(err, &awsCause) && awsCause.OrigErr() != nil {
+		err = awsCause.OrigErr()
+	}
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded, syscall.ECONNRESET, syscall.ECONNREFUSED, syscall.EPIPE} {
+		if stderrors.Is(err, cause) {
+			return true
+		}
+	}
+	var network net.Error
+	return stderrors.As(err, &network) && network.Timeout()
+}
+
+func sourceKMSHTTPStatus(err error) int {
+	var azure *azcore.ResponseError
+	var google *googleapi.Error
+	var aws interface{ StatusCode() int }
+	switch {
+	case stderrors.As(err, &azure):
+		return azure.StatusCode
+	case stderrors.As(err, &google):
+		return google.Code
+	case stderrors.As(err, &aws):
+		return aws.StatusCode()
+	default:
+		return 0
+	}
+}
+
+// New workers report a deterministic backup cipher rejection as an import
+// system error at CreateTask. Older workers and transient RPC failures retain
+// their existing retry behavior.
+func isBackupCipherRejection(options importutilv2.Options, err error) bool {
+	if !errors.Is(err, merr.ErrImportSysFailed) || merr.IsRetryableErr(err) {
+		return false
+	}
+	artifact, _ := importutilv2.GetEZK(options)
+	return artifact != "" || importutilv2.IsBackup(options) || importutilv2.IsL0Import(options)
+}
+
+func failImportDispatch(task ImportTask, im ImportMeta, cause error) {
+	if err := im.UpdateJob(context.TODO(), task.GetJobID(),
+		UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(cause.Error())); err != nil {
+		mlog.Warn(context.TODO(), "failed to persist import dispatch failure", WrapTaskLog(task, mlog.Err(err))...)
+	}
+}
+
+// The separate Import V3 scheduler still uses its legacy backup key registration.
+func getImportV3ReadPluginContext(options importutilv2.Options) []*commonpb.KeyValuePair {
+	artifact, _ := importutilv2.GetEZK(options)
+	readContext, err := hookutil.ImportEZ(artifact)
+	if err != nil {
+		mlog.Error(context.TODO(), "failed to import ezk", mlog.Err(err))
+		return []*commonpb.KeyValuePair{}
+	}
+	return readContext
+}
+
 func assemblePreImportRequest(task ImportTask, job ImportJob, importFiles []*internalpb.ImportFile) (*datapb.PreImportRequest, error) {
 	l0Source, err := importutilv2.SnapshotTaskL0Source(importFiles, job.GetSnapshotL0Sources())
 	if err != nil {
 		return nil, err
+	}
+	var readContext []*commonpb.KeyValuePair
+	if task.GetType() == PreImportTaskV3Type {
+		readContext = getImportV3ReadPluginContext(job.GetOptions())
+	} else {
+		readContext, err = resolveImportReadContext(job.GetOptions())
+		if err != nil {
+			return nil, err
+		}
 	}
 	req := &datapb.PreImportRequest{
 		JobID:            task.GetJobID(),
@@ -404,7 +524,7 @@ func assemblePreImportRequest(task ImportTask, job ImportJob, importFiles []*int
 		Options:          job.GetOptions(),
 		TaskSlot:         task.GetTaskSlot(),
 		StorageConfig:    meta.CreateStorageConfig(),
-		PluginContext:    meta.GetReadPluginContext(job.GetOptions()),
+		PluginContext:    readContext,
 		SnapshotL0Source: l0Source,
 	}
 	if err := meta.WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
@@ -420,6 +540,10 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 	l0Source, err := importutilv2.SnapshotTaskL0Source(importFiles, job.GetSnapshotL0Sources())
 	if err != nil {
 		return nil, merr.Mark(err, errSnapshotTaskSource)
+	}
+	readContext, err := resolveImportReadContext(job.GetOptions())
+	if err != nil {
+		return nil, err
 	}
 	requestSegments := make([]*datapb.ImportRequestSegment, 0)
 	for _, segmentID := range task.(*Task).GetSegmentIDs() {
@@ -485,7 +609,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 		StorageConfig:    meta.CreateStorageConfig(),
 		TaskSlot:         task.GetTaskSlot(),
 		StorageVersion:   storageVersion,
-		PluginContext:    meta.GetReadPluginContext(job.GetOptions()),
+		PluginContext:    readContext,
 		UseLoonFfi:       useLoonFFI,
 		SnapshotL0Source: l0Source,
 	}

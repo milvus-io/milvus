@@ -30,6 +30,20 @@ struct ArrowArray;
 
 typedef void* CPackedReader;
 
+// A null source limits this import reader to plaintext files. Properties
+// select an external filesystem; otherwise use the config or the default FS.
+CStatus
+NewImportPackedReader(char** paths,
+                      int64_t num_paths,
+                      struct ArrowSchema* schema,
+                      int64_t buffer_size,
+                      bool eager_prebuffer,
+                      const CStorageConfig* storage_config,
+                      const LoonProperties* properties,
+                      const char* filesystem_path,
+                      CPackedReader* reader,
+                      const CPluginContext* source);
+
 CStatus
 NewPackedReaderWithStorageConfig(char** paths,
                                  int64_t num_paths,
@@ -115,6 +129,14 @@ GetPackedFileFieldIDs(char** paths,
                       CPluginContext* c_plugin_context,
                       int64_t** field_ids,
                       int64_t** field_counts);
+
+CStatus
+GetImportPackedFileFieldIDs(char** paths,
+                            int64_t num_paths,
+                            const CStorageConfig* storage_config,
+                            const CPluginContext* source,
+                            int64_t** field_ids,
+                            int64_t** field_counts);
 
 #ifdef __cplusplus
 }

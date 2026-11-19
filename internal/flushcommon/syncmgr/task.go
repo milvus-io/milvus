@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -102,6 +103,7 @@ type SyncTask struct {
 	// storage config used in pooled tasks, optional
 	// use singleton config for non-pooled tasks
 	storageConfig *indexpb.StorageConfig
+	importTarget  *indexcgopb.StoragePluginContext
 }
 
 func (t *SyncTask) getLogger() *mlog.Logger {
@@ -160,6 +162,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		// New sync task means needs to flush data immediately, so do not need to buffer data in writer again.
 		writer := NewBulkPackWriterV2(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
 			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, t.writeRetryOpts...)
+		writer.importTarget = t.importTarget
 		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, flushedSize, t.stats, err = writer.Write(ctx, t.pack)
 		statsWriter = writer
 	case storage.StorageV3:
@@ -170,6 +173,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 			// attempt may publish the batch in the manifest.
 			writer = NewBulkPackWriterV3(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
 				packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, segmentInfo.ManifestPath(), t.writeRetryOpts...)
+			writer.importTarget = t.importTarget
 			t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, flushedSize, t.stats, err = writer.Write(ctx, t.pack)
 			return err
 		}

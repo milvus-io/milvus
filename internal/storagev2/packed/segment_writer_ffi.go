@@ -86,7 +86,7 @@ func NewFFISegmentWriter(
 	}
 
 	extra := segmentWriterProperties(schema, config)
-	encryptionProperties, err := writerEncryptionProperties(storagePluginContext)
+	encryptionProperties, err := writerEncryptionProperties(storagePluginContext, false)
 	if err != nil {
 		return nil, err
 	}

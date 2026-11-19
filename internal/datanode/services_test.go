@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -554,6 +555,51 @@ func (s *DataNodeServicesSuite) TestDropCompactionPlan() {
 		s.NoError(err)
 		s.True(merr.Ok(status))
 	})
+}
+
+func TestOrdinaryFileImportUsesCollectionKey(t *testing.T) {
+	properties := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}}
+	entries := []*commonpb.KeyValuePair{{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:bGl2ZQ=="}}
+	var registered []*commonpb.KeyValuePair
+	register := mockey.Mock(hookutil.RegisterEZsFromPluginContext).To(func(context []*commonpb.KeyValuePair) error {
+		registered = context
+		return nil
+	}).Build()
+	defer register.UnPatch()
+
+	keys, err := prepareV2ImportCipher(nil, properties, entries, 23)
+	require.NoError(t, err)
+	require.Equal(t, entries, registered)
+	require.Nil(t, keys.Target)
+
+	registered = nil
+	keys, err = prepareV2ImportCipher([]*commonpb.KeyValuePair{{Key: "backup", Value: "true"}}, properties, entries, 23)
+	require.NoError(t, err)
+	require.Nil(t, registered)
+	require.Equal(t, "bGl2ZQ==", keys.Target.GetEncryptionKey())
+}
+
+func (s *DataNodeServicesSuite) TestImportRejectsIncompleteCipherContext() {
+	properties := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}}
+	options := []*commonpb.KeyValuePair{{Key: "ezk", Value: "eyJlel9pZCI6MTd9"}}
+	entries := []*commonpb.KeyValuePair{{Key: "cipher.ezk", Value: "17:b2xk"}}
+	for kind, req := range map[string]proto.Message{
+		taskcommon.PreImport: &datapb.PreImportRequest{TaskID: 73, Options: options, Schema: &schemapb.CollectionSchema{Properties: properties}, PluginContext: entries},
+		taskcommon.Import:    &datapb.ImportRequest{TaskID: 73, Options: options, Schema: &schemapb.CollectionSchema{Properties: properties}, PluginContext: entries},
+	} {
+		s.Run(kind, func() {
+			payload, err := proto.Marshal(req)
+			s.Require().NoError(err)
+			status, err := s.node.CreateTask(s.ctx, &workerpb.CreateTaskRequest{
+				Properties: map[string]string{taskcommon.ClusterIDKey: "cluster-0", taskcommon.TypeKey: kind},
+				Payload:    payload,
+			})
+			s.Require().NoError(err)
+			s.Contains(status.GetReason(), "missing a keyset")
+			s.Equal(merr.Code(merr.ErrImportSysFailed), status.GetCode())
+			s.Nil(s.node.importTaskMgr.Get(73))
+		})
+	}
 }
 
 func (s *DataNodeServicesSuite) TestCreateTask() {

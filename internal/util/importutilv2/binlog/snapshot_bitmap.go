@@ -283,7 +283,7 @@ func BuildSnapshotDeleteMasksWithV2(ctx context.Context, cm storage.ChunkManager
 				}
 			}
 			return nil
-		}, validate)
+		}, validate, encryption.readerOption())
 	if err != nil {
 		return nil, err
 	}

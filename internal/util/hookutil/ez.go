@@ -148,12 +148,40 @@ func GetPluginContext(ezID int64, collectionID int64) ([]*commonpb.KeyValuePair,
 	if err != nil {
 		return nil, err
 	}
+	return ezPluginContext(ezID, key), nil
+}
+
+// GetReadStoragePluginContext resolves the backup's own keyset for this dispatch.
+func GetReadStoragePluginContext(artifact string) ([]*commonpb.KeyValuePair, error) {
+	if artifact == "" {
+		return nil, nil
+	}
+	cipher := GetCipher()
+	if cipher == nil {
+		return nil, merr.Wrap(merr.ErrServiceUnavailable, "cipher plugin is unavailable for encrypted backup")
+	}
+	resolver, ok := cipher.(ImportEZResolver)
+	if !ok {
+		return nil, merr.Wrap(merr.ErrServiceUnimplemented, "cipher plugin does not support ResolveImportEZ")
+	}
+	ezID, key, err := resolver.ResolveImportEZ(artifact)
+	if err != nil {
+		return nil, merr.Wrap(err, "resolve backup EZK")
+	}
+	if len(key) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("cipher plugin returned an empty keyset for backup EZ %d", ezID)
+	}
+	return ezPluginContext(ezID, key), nil
+}
+
+func ezPluginContext(ezID int64, key []byte) []*commonpb.KeyValuePair {
 	return []*commonpb.KeyValuePair{{
 		Key:   CipherConfigUnsafeEZK,
 		Value: encodeEZContext(ezID, key),
-	}}, nil
+	}}
 }
 
+// ImportEZ is the legacy key registration used by the Import V3 pipeline.
 func ImportEZ(importEzk string) ([]*commonpb.KeyValuePair, error) {
 	cipher := GetCipher()
 	if cipher == nil || importEzk == "" {

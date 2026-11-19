@@ -54,7 +54,6 @@ type reader struct {
 	storageVersion   int64
 	importEz         string
 	sourceEncryption SourceEncryption
-	pluginContext    *indexcgopb.StoragePluginContext
 
 	fileSize         *atomic.Int64
 	bufferSize       int
@@ -85,6 +84,16 @@ type reader struct {
 type SourceEncryption struct {
 	Encrypted     bool
 	PluginContext *indexcgopb.StoragePluginContext
+	// Dispatched contexts are read-only. Legacy direct callers may still
+	// provide a context from the ordinary local key manager.
+	Dispatched bool
+}
+
+func (s SourceEncryption) readerOption() storage.RwOption {
+	if s.Dispatched {
+		return storage.WithImportReadContext(s.PluginContext)
+	}
+	return storage.WithPluginContext(s.PluginContext)
 }
 
 func NewReader(ctx context.Context,
@@ -100,9 +109,22 @@ func NewReader(ctx context.Context,
 	pluginContext *indexcgopb.StoragePluginContext,
 ) (*reader, error) {
 	r := newReader(ctx, cm, schema, storageConfig, storageVersion, bufferSize, importEz)
-	r.pluginContext = pluginContext
-	err := r.init(paths, tsStart, tsEnd)
-	if err != nil {
+	r.sourceEncryption.PluginContext = pluginContext
+	return r.open(paths, tsStart, tsEnd)
+}
+
+// NewBackupReader opens a legacy prefix backup using the task's resolved
+// source. It never looks up an ordinary key by encryption zone.
+func NewBackupReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema,
+	cfg *indexpb.StorageConfig, version int64, paths []string, start, end uint64, bufferSize int, encryption SourceEncryption,
+) (*reader, error) {
+	r := newReader(ctx, cm, schema, cfg, version, bufferSize, "")
+	r.sourceEncryption = encryption
+	return r.open(paths, start, end)
+}
+
+func (r *reader) open(paths []string, start, end uint64) (*reader, error) {
+	if err := r.init(paths, start, end); err != nil {
 		return nil, err
 	}
 	return r, nil
@@ -297,25 +319,19 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 		storage.WithStorageConfig(r.storageConfig),
 	}
 
-	// A caller-resolved plugin context takes precedence over deriving one from
-	// the EZK: the Import V3 reshard source resolves encryption once per task.
-	if r.pluginContext != nil {
-		rwOptions = append(rwOptions, storage.WithPluginContext(r.pluginContext))
-	} else if len(r.importEz) > 0 {
+	// Older direct callers without a dispatched source use their ordinary
+	// local key manager. An import task never takes this branch.
+	if r.sourceEncryption.PluginContext == nil && len(r.importEz) > 0 {
 		ezID, err := hookutil.GetEzIDByImportEzk(r.importEz)
 		if err != nil {
 			return err
 		}
-		pluginContext, err := hookutil.GetCPluginContextByEzID(ezID)
+		r.sourceEncryption.PluginContext, err = hookutil.GetCPluginContextByEzID(ezID)
 		if err != nil {
 			return err
 		}
-		rwOptions = append(rwOptions, storage.WithPluginContext(pluginContext))
-	} else {
-		// schema describes the target collection. A plaintext backup must
-		// not inherit its encryption context.
-		rwOptions = append(rwOptions, storage.WithPluginContext(nil))
 	}
+	rwOptions = append(rwOptions, r.sourceEncryption.readerOption())
 
 	rr, err := storage.NewBinlogRecordReader(r.ctx, binlogs, r.schema, rwOptions...)
 	if err != nil {
@@ -403,7 +419,7 @@ func (r *reader) prepareStorageV3Manifest(manifestPath string) ([]storage.RwOpti
 	// Never fall back to destination CMEK properties. A nil context alone does
 	// not prove the source is plaintext; the factory also supplies Encrypted.
 	// The target writer resolves its own key independently.
-	rwOptions = append(rwOptions, storage.WithPluginContext(r.sourceEncryption.PluginContext))
+	rwOptions = append(rwOptions, r.sourceEncryption.readerOption())
 	if typeutil.HasTextField(r.schema) {
 		rwOptions = append(rwOptions, storage.WithResolveTextLob())
 	}
@@ -549,6 +565,7 @@ func (r *reader) collectStorageV3Files(manifestPath string) error {
 func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]typeutil.Timestamp, error) {
 	v1opts := []storage.RwOption{
 		storage.WithVersion(storage.StorageV1),
+		r.sourceEncryption.readerOption(),
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 			return r.multiReadWithRetry(ctx, paths)
 		}),
@@ -556,6 +573,7 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]
 	v2opts := []storage.RwOption{
 		storage.WithVersion(storage.StorageV2),
 		storage.WithStorageConfig(r.storageConfig),
+		r.sourceEncryption.readerOption(),
 	}
 
 	deleteData := make(map[any]typeutil.Timestamp)
@@ -607,6 +625,9 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]
 	for _, path := range deltaLogs {
 		// try v1 first
 		tempData, errv1 := readInternal(path, v1opts)
+		if storage.IsImportBinlogDecryptionError(errv1) {
+			return nil, errv1
+		}
 		if errv1 != nil {
 			// try v2 if v1 failed
 			tempData, errv2 := readInternal(path, v2opts)
@@ -642,7 +663,7 @@ func (r *reader) readDeleteV3(
 		return nil, err
 	}
 	if r.snapshotSource != nil {
-		merger, err := NewDeleteMerger(r.cm, r.storageConfig, pkField.GetDataType(), r.retryAttempts, r.deleteBudget)
+		merger, err := NewDeleteMerger(r.cm, r.storageConfig, pkField.GetDataType(), r.retryAttempts, r.deleteBudget, r.sourceEncryption.readerOption())
 		if err != nil {
 			return nil, err
 		}
@@ -651,6 +672,7 @@ func (r *reader) readDeleteV3(
 	options := []storage.RwOption{
 		storage.WithVersion(storage.StorageV3),
 		storage.WithStorageConfig(r.storageConfig),
+		r.sourceEncryption.readerOption(),
 	}
 	// GetDeltaLogPathsFromManifest has already removed zero-entry manifest
 	// markers. Read the remaining physical files through the shared path reader
@@ -963,7 +985,7 @@ func (r *reader) prepareStorageV2Snapshot(segment *datapb.SegmentDescription, bu
 	}
 	options := []storage.RwOption{
 		storage.WithVersion(storage.StorageV2), storage.WithStorageConfig(r.storageConfig),
-		storage.WithBufferSize(32 * 1024 * 1024), storage.WithPluginContext(r.sourceEncryption.PluginContext),
+		storage.WithBufferSize(32 * 1024 * 1024), r.sourceEncryption.readerOption(),
 	}
 	present, err := storage.PackedBinlogPresentFields(r.ctx, input.binlogs, r.schema, options...)
 	if err != nil {
@@ -1028,7 +1050,7 @@ func NewStorageV2SnapshotReader(ctx context.Context, cm storage.ChunkManager, sc
 		if err != nil {
 			return nil, err
 		}
-		merger, err := NewDeleteMerger(cm, cfg, pk.GetDataType(), r.retryAttempts, deleteBudget)
+		merger, err := NewDeleteMerger(cm, cfg, pk.GetDataType(), r.retryAttempts, deleteBudget, r.sourceEncryption.readerOption())
 		if err != nil {
 			return nil, err
 		}

@@ -18,6 +18,7 @@ package syncmgr
 
 import (
 	"context"
+	"errors"
 	"math"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -43,6 +44,7 @@ import (
 
 type BulkPackWriterV2 struct {
 	*BulkPackWriter
+	importTarget        *indexcgopb.StoragePluginContext
 	bufferSize          int64
 	multiPartUploadSize int64
 
@@ -172,6 +174,9 @@ func (bw *BulkPackWriterV2) getBucketName() string {
 }
 
 func (bw *BulkPackWriterV2) getPluginContext(ctx context.Context, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
+	if bw.importTarget != nil {
+		return bw.importTarget, nil
+	}
 	var pluginContext *indexcgopb.StoragePluginContext
 	// Key lookup is part of the critical write path. Use the same retry policy
 	// as storage writes before surfacing an error to SyncTask.HandleError.
@@ -236,6 +241,9 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 				mlog.FieldCollectionID(pack.collectionID),
 				mlog.FieldSegmentID(pack.segmentID),
 				mlog.Err(err))
+			if bw.importTarget != nil && (errors.Is(err, merr.ErrSegcoreUnsupported) || errors.Is(err, merr.ErrServiceUnimplemented)) {
+				return retry.Unrecoverable(err)
+			}
 			return err
 		}
 		return nil
@@ -296,7 +304,11 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 		return result
 	}
 
-	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
+	open := storage.NewPackedRecordWriter
+	if bw.importTarget != nil {
+		open = storage.NewImportPackedRecordWriter
+	}
+	w, err := open(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
 	if err != nil {
 		return nil, "", err
 	}

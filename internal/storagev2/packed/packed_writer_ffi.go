@@ -85,6 +85,15 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 // groups, which the caller passes to packed.CommitManifestUpdates to
 // register them with a manifest version.
 func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, extraProperties ...map[string]string) (*FFIPackedWriter, error) {
+	return newFFIPackedWriter(basePath, schema, columnGroups, storageConfig, storagePluginContext, false, extraProperties...)
+}
+
+// NewImportFFIPackedWriter creates a writer pinned to the supplied target keyset.
+func NewImportFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, target *indexcgopb.StoragePluginContext, extraProperties ...map[string]string) (*FFIPackedWriter, error) {
+	return newFFIPackedWriter(basePath, schema, columnGroups, storageConfig, target, true, extraProperties...)
+}
+
+func newFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, forImport bool, extraProperties ...map[string]string) (*FFIPackedWriter, error) {
 	cBasePath := C.CString(basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 
@@ -112,7 +121,7 @@ func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []st
 		}
 	}
 
-	encryptionProperties, err := writerEncryptionProperties(storagePluginContext)
+	encryptionProperties, err := writerEncryptionProperties(storagePluginContext, forImport)
 	if err != nil {
 		return nil, err
 	}
