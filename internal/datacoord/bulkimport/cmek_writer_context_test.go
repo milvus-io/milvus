@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -49,7 +50,7 @@ type writerContextCipher struct {
 
 func (c *writerContextCipher) GetUnsafeKey(int64, int64) []byte { return c.key }
 
-func newPreImportWriterContextTask(t *testing.T, job *datapb.ImportJob) (ImportTask, ImportMeta) {
+func newWriterContextImportMeta(t *testing.T, job *datapb.ImportJob) ImportMeta {
 	t.Helper()
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
@@ -61,13 +62,19 @@ func newPreImportWriterContextTask(t *testing.T, job *datapb.ImportJob) (ImportT
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 	im, err := NewImportMeta(context.Background(), catalog, allocator.NewMockAllocator(t), nil)
 	require.NoError(t, err)
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().SavePreImportTaskV3(mock.Anything, mock.Anything).Return(nil).Maybe()
 	require.NoError(t, im.AddJob(context.Background(), &Job{
 		ImportJob: job,
-		Tr:        timerecord.NewTimeRecorder("preimport key test"),
+		Tr:        timerecord.NewTimeRecorder("import key test"),
 	}))
+	return im
+}
 
+func newPreImportWriterContextTask(t *testing.T, job *datapb.ImportJob) (ImportTask, ImportMeta) {
+	t.Helper()
+	im := newWriterContextImportMeta(t, job)
 	var task ImportTask
 	if job.GetVersion() == internalpb.ImportVersion_ImportVersionV3 {
 		stats := make([]*datapb.ImportV3FileStats, 0, len(job.GetFiles()))
@@ -90,6 +97,23 @@ func newPreImportWriterContextTask(t *testing.T, job *datapb.ImportJob) (ImportT
 		})
 		task = p
 	}
+	require.NoError(t, im.AddTask(context.Background(), task))
+	return task, im
+}
+
+func newImportWriterContextTask(t *testing.T, job *datapb.ImportJob) (ImportTask, ImportMeta) {
+	t.Helper()
+	job.State = internalpb.ImportJobState_Importing
+	job.DataTs = 1000
+	im := newWriterContextImportMeta(t, job)
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().AllocN(mock.Anything).Return(1000, 2000, nil).Maybe()
+	task := &Task{ImportMeta: im, alloc: alloc, Tr: timerecord.NewTimeRecorder("import key test"), times: taskcommon.NewTimes()}
+	task.Task.Store(&datapb.ImportTaskV2{
+		JobID: job.GetJobID(), TaskID: 32, CollectionID: job.GetCollectionID(),
+		NodeID: meta.NullNodeID, State: datapb.ImportTaskStateV2_Pending,
+		FileStats: []*datapb.ImportFileStats{{ImportFile: job.GetFiles()[0], TotalRows: 1}},
+	})
 	require.NoError(t, im.AddTask(context.Background(), task))
 	return task, im
 }
@@ -162,7 +186,13 @@ func TestPreImportWriterContext(t *testing.T) {
 type backupContextCipher struct {
 	writerContextCipher
 	artifacts []string
+	targets   [][2]int64
 	sourceErr error
+}
+
+func (c *backupContextCipher) GetUnsafeKey(ezID, collectionID int64) []byte {
+	c.targets = append(c.targets, [2]int64{ezID, collectionID})
+	return c.key
 }
 
 func (c *backupContextCipher) Init(map[string]string) error { return errors.New("legacy import init") }
@@ -172,35 +202,138 @@ func (c *backupContextCipher) ResolveImportEZ(artifact string) (int64, []byte, e
 	return 17, []byte("historical"), c.sourceErr
 }
 
-func TestPreImportResolvesSourceOnEachDispatch(t *testing.T) {
-	const artifact = "eyJlel9pZCI6MTd9"
-	job := preImportWriterContextJob(internalpb.ImportVersion_ImportVersionV2)
-	job.Options = []*commonpb.KeyValuePair{
+const backupArtifact = "eyJlel9pZCI6MTd9" // base64 of {"ez_id":17}
+
+func backupContextOptions() []*commonpb.KeyValuePair {
+	return []*commonpb.KeyValuePair{
 		{Key: importutilv2.BackupFlag, Value: "true"},
 		{Key: importutilv2.StorageVersion, Value: "2"},
-		{Key: importutilv2.EZK, Value: artifact},
+		{Key: importutilv2.EZK, Value: backupArtifact},
 	}
+}
+
+type importContextFixture func(*testing.T, *datapb.ImportJob) (ImportTask, ImportMeta)
+
+func TestPreImportResolvesSourceOnEachDispatch(t *testing.T) {
+	testBackupSourceOnEachDispatch(t, newPreImportWriterContextTask, "CreatePreImport")
+}
+
+func TestImportResolvesSourceOnEachDispatch(t *testing.T) {
+	testBackupSourceOnEachDispatch(t, newImportWriterContextTask, "CreateImport")
+}
+
+func testBackupSourceOnEachDispatch(t *testing.T, newTask importContextFixture, rpc string) {
+	t.Helper()
+	job := preImportWriterContextJob(internalpb.ImportVersion_ImportVersionV2)
+	job.Options = backupContextOptions()
 	cipher := &backupContextCipher{writerContextCipher: writerContextCipher{key: []byte("ordinary")}}
 	patch := mockey.Mock(hookutil.GetCipher).Return(cipher).Build()
 	t.Cleanup(func() { patch.UnPatch() })
-	task, im := newPreImportWriterContextTask(t, job)
+	task, im := newTask(t, job)
 	cluster := session.NewMockCluster(t)
-	cluster.EXPECT().CreatePreImport(int64(41), mock.Anything, mock.Anything).RunAndReturn(
-		func(_ int64, req *datapb.PreImportRequest, _ int64) error {
-			require.Equal(t, []*commonpb.KeyValuePair{
-				{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:aGlzdG9yaWNhbA=="},
-				{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:b3JkaW5hcnk="},
-			}, req.GetPluginContext())
-			return errors.New("worker unavailable")
-		}).Once()
+	cluster.On(rpc, int64(41), mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		req := args.Get(1).(interface {
+			GetPluginContext() []*commonpb.KeyValuePair
+		})
+		require.Equal(t, []*commonpb.KeyValuePair{
+			{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:aGlzdG9yaWNhbA=="},
+			{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:b3JkaW5hcnk="},
+		}, req.GetPluginContext())
+	}).Return(errors.New("worker unavailable")).Once()
 
 	task.CreateTaskOnWorker(41, cluster)
 	cipher.sourceErr = errors.New("source KMS denied Decrypt")
 	task.CreateTaskOnWorker(42, cluster)
 
-	require.Equal(t, []string{artifact, artifact}, cipher.artifacts)
+	require.Equal(t, []string{backupArtifact, backupArtifact}, cipher.artifacts)
 	failed := im.GetJob(context.Background(), job.GetJobID())
 	require.Equal(t, internalpb.ImportJobState_Failed, failed.GetState())
 	require.Contains(t, failed.GetReason(), cipher.sourceErr.Error())
-	cluster.AssertNotCalled(t, "CreatePreImport", int64(42), mock.Anything, mock.Anything)
+	cluster.AssertNotCalled(t, rpc, int64(42), mock.Anything, mock.Anything)
+}
+
+func TestImportRetriesTransientSourceError(t *testing.T) {
+	job := preImportWriterContextJob(internalpb.ImportVersion_ImportVersionV2)
+	job.Options = backupContextOptions()
+	cipher := &backupContextCipher{writerContextCipher: writerContextCipher{key: []byte("ordinary")}, sourceErr: merr.ErrServiceUnavailable}
+	patch := mockey.Mock(hookutil.GetCipher).Return(cipher).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	task, im := newImportWriterContextTask(t, job)
+	cluster := session.NewMockCluster(t)
+
+	task.CreateTaskOnWorker(41, cluster)
+	pending := im.GetJob(context.Background(), job.GetJobID())
+	require.Equal(t, internalpb.ImportJobState_Importing, pending.GetState())
+	require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+	cluster.AssertNotCalled(t, "CreateImport", int64(41), mock.Anything, mock.Anything)
+
+	cipher.sourceErr = nil
+	cluster.EXPECT().CreateImport(int64(42), mock.Anything, mock.Anything).Return(nil).Once()
+	task.CreateTaskOnWorker(42, cluster)
+	require.Equal(t, []string{backupArtifact, backupArtifact}, cipher.artifacts)
+	require.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
+}
+
+func TestBackupImportPluginContexts(t *testing.T) {
+	source := &commonpb.KeyValuePair{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:aGlzdG9yaWNhbA=="}
+	target := &commonpb.KeyValuePair{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:b3JkaW5hcnk="}
+	for _, stage := range []struct {
+		rpc     string
+		newTask importContextFixture
+	}{
+		{"CreatePreImport", newPreImportWriterContextTask},
+		{"CreateImport", newImportWriterContextTask},
+	} {
+		t.Run(stage.rpc, func(t *testing.T) {
+			for _, tc := range []struct {
+				name   string
+				source bool
+				target bool
+				want   []*commonpb.KeyValuePair
+			}{
+				{"plaintext", false, false, nil},
+				{"source only", true, false, []*commonpb.KeyValuePair{source}},
+				{"target only", false, true, []*commonpb.KeyValuePair{target}},
+				{"same EZ different keysets", true, true, []*commonpb.KeyValuePair{source, target}},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					job := preImportWriterContextJob(internalpb.ImportVersion_ImportVersionV2)
+					job.Options = []*commonpb.KeyValuePair{
+						{Key: importutilv2.BackupFlag, Value: "true"},
+						{Key: importutilv2.StorageVersion, Value: "2"},
+					}
+					if tc.source {
+						job.Options = append(job.Options, &commonpb.KeyValuePair{Key: importutilv2.EZK, Value: backupArtifact})
+					}
+					if !tc.target {
+						job.Schema.Properties = nil
+					}
+					cipher := &backupContextCipher{writerContextCipher: writerContextCipher{key: []byte("ordinary")}}
+					patch := mockey.Mock(hookutil.GetCipher).Return(cipher).Build()
+					t.Cleanup(func() { patch.UnPatch() })
+					task, _ := stage.newTask(t, job)
+					cluster := session.NewMockCluster(t)
+					cluster.On(stage.rpc, int64(42), mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+						req := args.Get(1).(interface {
+							GetPluginContext() []*commonpb.KeyValuePair
+						})
+						require.Equal(t, tc.want, req.GetPluginContext())
+					}).Return(nil).Once()
+
+					task.CreateTaskOnWorker(42, cluster)
+					require.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
+					if tc.source {
+						require.Equal(t, []string{backupArtifact}, cipher.artifacts)
+					} else {
+						require.Empty(t, cipher.artifacts)
+					}
+					if tc.target {
+						require.Equal(t, [][2]int64{{17, job.GetCollectionID()}}, cipher.targets)
+					} else {
+						require.Empty(t, cipher.targets)
+					}
+				})
+			}
+		})
+	}
 }

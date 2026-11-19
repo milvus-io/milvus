@@ -57,6 +57,9 @@ import (
 // An immutable job/task source mismatch cannot be repaired by rescheduling.
 var errSnapshotTaskSource = errors.New("invalid snapshot task source")
 
+// Preserve a source-key rejection as the cause of a terminal import job.
+var errImportSourceKey = errors.New("cannot resolve backup encryption key")
+
 func WrapTaskLog(task ImportTask, fields ...mlog.Field) []mlog.Field {
 	res := []mlog.Field{
 		mlog.FieldTaskID(task.GetTaskID()),
@@ -442,6 +445,13 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 	if err != nil {
 		return nil, merr.Mark(err, errSnapshotTaskSource)
 	}
+	readContext, err := meta.GetReadPluginContext(job.GetOptions())
+	if err != nil {
+		if !merr.IsRetryableErr(err) && !merr.IsCanceledOrTimeout(err) {
+			err = merr.Mark(err, errImportSourceKey)
+		}
+		return nil, err
+	}
 	requestSegments := make([]*datapb.ImportRequestSegment, 0)
 	for _, segmentID := range task.(*Task).GetSegmentIDs() {
 		segment := mt.GetSegment(context.TODO(), segmentID)
@@ -490,10 +500,6 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 	storageVersion := importStorageVersion(isL0Import)
 	useLoonFFI := importUseLoonFFI(isL0Import)
 
-	readContext, err := meta.GetReadPluginContext(job.GetOptions())
-	if err != nil {
-		return nil, err
-	}
 	req := &datapb.ImportRequest{
 		ClusterID:        Params.CommonCfg.ClusterPrefix.GetValue(),
 		JobID:            task.GetJobID(),
