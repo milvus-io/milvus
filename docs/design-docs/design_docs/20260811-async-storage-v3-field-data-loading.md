@@ -6,6 +6,7 @@
 - **Component:** QueryNode, Segcore, Storage, Caching Layer
 - **Related Issues:** [milvus-io/milvus#51245](https://github.com/milvus-io/milvus/issues/51245)
 - **Implementation:** [milvus-io/milvus#51246](https://github.com/milvus-io/milvus/pull/51246)
+- **Internal-wait and configuration follow-up:** [milvus-io/milvus#55541](https://github.com/milvus-io/milvus/pull/55541)
 
 ## Summary
 
@@ -37,11 +38,13 @@ The design has six main properties:
 
 The path is guarded by the internal
 `queryNode.segcore.load.asyncReadEnabled` switch, which defaults to
-`false`. The legacy `LoadCellBatchAsync` path remains the default. Enabling
-async reads by default requires separate rollout validation.
+`false`. The default path uses `LoadCellBatchesAsync` to await admission and
+HIGH/LOW tasks that perform synchronous reads and finalization. The retired
+future-returning `LoadCellBatchAsync` API and `CellLoadFuture` alias are removed.
+Enabling native async reads by default requires separate rollout validation.
 
-This PR covers Storage V3 field data and JSON key-stat column groups. It does
-not make scalar-index loading asynchronous.
+This document covers Storage V3 field data and JSON key-stat column groups.
+Index loading is covered by the [index loader design](../legacy-index-async-loading.md).
 
 ## Terminology
 
@@ -58,17 +61,20 @@ This document follows the names used by the current Segcore implementation:
 | admission slot | One admitted, unfinished load window, legacy field-data batch, index stream slice, or async metadata preparation operation. It is released with the transient-byte reservation. |
 | finalization | Converting Arrow record batches into Milvus `GroupChunk` data, including local mmap-file materialization when enabled. |
 
-This feature is part of the Storage V3 load path. Some existing implementation
-identifiers still use the historical `storageV2` name, including the
-`storagev2translator` namespace and the
-`queryNode.segcore.storageV2.*` configuration keys. Those identifiers are kept
-for compatibility and do not define the feature's public terminology.
+This feature is part of the Storage V3 load path. The `storagev2translator`
+namespace retains its historical name; it does not define the feature's public
+terminology. Loading configuration now lives under `queryNode.segcore.load`,
+with native settings in `storage/LoadConfig`. The old
+`queryNode.segcore.storageV2.*` loading keys and `common` admission keys are
+removed without compatibility aliases. Existing overrides must migrate as
+described under [Configuration and Rollout](#configuration-and-rollout).
 
 ## Motivation
 
-### Existing behavior
+### Original behavior
 
-The existing manifest translator loads cells through `LoadCellBatchAsync`:
+Before the coroutine refactor, the manifest translator loaded cells through
+the now-removed `LoadCellBatchAsync` API:
 
 ```text
 cache miss
@@ -80,8 +86,10 @@ cache miss
   -> return futures to the synchronous translator
 ```
 
-This path already merges adjacent row groups and applies load admission, but a
-worker executing a batch remains tied to the synchronous storage call. For a
+This path already merged adjacent row groups and applied load admission.
+The current synchronous backend retains those properties and still occupies a
+HIGH/LOW worker during each synchronous storage call, even though its caller
+awaits completion through `LoadCellBatchesAsync`. For a
 wide schema, many row groups, or high object-storage latency, useful parallelism
 therefore depends on occupying more load threads.
 
@@ -117,8 +125,9 @@ semantics, and error categories across coroutine and executor boundaries.
 
 ## Non-Goals
 
-- Async scalar-index loading. That is a follow-up under issue #51245.
-- Removing `LoadCellBatchAsync` or the legacy translator path in this PR.
+- Index-loader design, which is documented separately.
+- Removing the synchronous storage backend. Its caller now uses
+  `LoadCellBatchesAsync`; the old future-returning batch API is removed.
 - Changing the public caching-layer `Translator` interface to return a future
   or coroutine.
 - Making the entire segment-load API asynchronous. Top-level `Reader::create()`
@@ -148,20 +157,24 @@ A cache miss then selects one of two implementations:
 
 ```text
 ManifestGroupTranslator::get_cells()
-  |
-  +-- enable_async_load_ == false
-  |     -> get_cells_legacy()
-  |     -> LoadCellBatchAsync()
-  |
-  +-- enable_async_load_ == true
-        -> get_cells_via_async_pipeline()
-        -> blockingWait(LoadCellsAsync())
+  -> blockingWait(get_cells_async())
+       |
+       +-- enable_async_load_ == false
+       |     -> co_await get_cells_legacy()
+       |     -> co_await LoadCellBatchesAsync()
+       |          -> await admission and HIGH/LOW task completion
+       |          -> tasks perform synchronous reads and finalization
+       |
+       +-- enable_async_load_ == true
+             -> co_await get_cells_via_async_pipeline()
+             -> co_await LoadCellsAsync()
 ```
 
 The outer call is still synchronous because the caching-layer contract is
-unchanged. During cell loading, storage waits and sibling windows compose
-inside `LoadCellsAsync` as coroutines on dedicated executors rather than as one
-blocking storage operation per load task.
+unchanged. Both branches await their internal work, but only the enabled branch
+uses native asynchronous storage reads through `LoadCellsAsync`. The disabled
+branch still performs blocking I/O inside HIGH/LOW tasks. Outer synchronous
+wrappers and MIDDLE scheduling remain in place; removing them is separate work.
 
 The switch is passed into translators created for:
 
@@ -827,7 +840,10 @@ Planned rollout validation sequence:
 - The caching-layer translator API and returned `GroupChunk` representation do
   not change.
 - Cache keys, cell IDs, warmup policy, and eviction support are unchanged.
-- The legacy path remains the default.
+- Synchronous storage reads remain the default, with internal admission and
+  task-completion waits handled by `LoadCellBatchesAsync`.
+- The retired batch API and old loading configuration keys are not retained
+  for compatibility; existing configuration overrides must migrate.
 - Batch manifest and JSON key-stat paths use async reader opening when the
   experimental switch is enabled; the outer load interfaces still wait for
   preparation to finish before installing translators.
