@@ -1782,7 +1782,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 
 		var err error
 		if manifestResident {
-			err = indexMeta.AddSegmentIndexFromManifest(ctx, segIndex, result.GetManifestPath())
+			err = indexMeta.AddSegmentIndexFromManifest(ctx, segIndex)
 		} else {
 			err = indexMeta.AddSegmentIndex(ctx, segIndex)
 		}

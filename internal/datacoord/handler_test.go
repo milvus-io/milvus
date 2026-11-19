@@ -2425,6 +2425,56 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid manifest path for segment 2004")
 }
 
+func TestIndexDescriptorsFollowCurrentSegmentManifest(t *testing.T) {
+	for _, consumer := range []string{"snapshot", "query view"} {
+		t.Run(consumer, func(t *testing.T) {
+			ctx := t.Context()
+			m, _, store, _ := index.RollbackFixture(t)
+			s := &Server{meta: m, domainMetas: domainMetas{indexMeta: m.IndexCatalog.(*index.IndexMeta)}}
+			s.UpdateStateCode(commonpb.StateCode_Healthy)
+			before := m.GetSegment(ctx, meta.RestartSegID).Clone()
+			before.InsertChannel = "ch"
+			before.TransformStartAfterTimetick = 1
+			m.Segments.SetSegment(before.GetID(), before)
+			seedCollections(s, &meta.CollectionInfo{ID: before.GetCollectionID(), Schema: meta.NewTestSchema()})
+			current, err := meta.AdvanceManifest(before.GetManifestPath(), 1)
+			require.NoError(t, err)
+			store.Revisions[current] = store.BackfillEntriesAt(before.GetManifestPath())
+			// Advance the segment after the consumer has taken its descriptor.
+			advance := mockey.Mock((*meta.Meta).SegmentIndexFilePaths).When(func(_ *meta.Meta, _ context.Context, _ *model.SegmentIndex, desc *datapb.SegmentInfo) bool {
+				if desc.GetManifestPath() == before.GetManifestPath() {
+					require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifest(before.GetID(), current)))
+					delete(store.Revisions, before.GetManifestPath())
+				}
+				return false
+			}).Build()
+			defer advance.UnPatch()
+			read := mockey.Mock((*meta.Meta).ReadManifestIndexesWithIO).When(func(_ *meta.Meta, _ context.Context, _ *packed.ManifestIOContext, manifest string, _ *indexpb.StorageConfig) bool {
+				require.Equal(t, current, manifest)
+				return false
+			}).Build()
+			defer read.UnPatch()
+			if consumer == "snapshot" {
+				snap, err := (&ServerHandler{s: s}).GenSnapshot(ctx, before.GetCollectionID(), []*msgpb.MsgPosition{{ChannelName: "ch", Timestamp: 1000}})
+				require.NoError(t, err)
+				require.Len(t, snap.Segments, 1)
+				require.Equal(t, current, snap.Segments[0].GetManifestPath())
+				require.Len(t, snap.Segments[0].GetIndexFiles(), 1)
+				require.Len(t, snap.Segments[0].GetIndexFiles()[0].GetIndexFilePaths(), 2)
+			} else {
+				views, _, err := s.GetQueryViewSegmentLoadInfos(ctx, before.GetCollectionID(), []int64{before.GetID()})
+				require.NoError(t, err)
+				require.Len(t, views, 1)
+				require.NoError(t, merr.Error(views[0].GetStatus()))
+				require.Equal(t, current, views[0].GetLoadInfo().GetManifestPath())
+				require.Len(t, views[0].GetLoadInfo().GetIndexInfos(), 1)
+				require.Len(t, views[0].GetLoadInfo().GetIndexInfos()[0].GetIndexFilePaths(), 2)
+			}
+			require.Positive(t, read.Times())
+		})
+	}
+}
+
 func TestGenSnapshotDependencyErrors(t *testing.T) {
 	type snapshotBroker struct{ broker.Broker }
 	for _, stage := range []string{"collection_missing", "empty_positions", "empty_channel", "decompress", "compact_delta", "index_files", "success"} {
@@ -2611,13 +2661,14 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, indexFiles[0].GetIndexStorePathVersion())
 	assert.Equal(t, []string{"files/index_v1/1/20/2/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
 
-	// There is no segment store in this handler. The selected snapshot segment
-	// must be sufficient, including when its base differs from the current root.
+	// A relocated segment keeps the base from its current segment record.
 	version = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
 	segment := &datapb.SegmentInfo{
-		CollectionID: 1, ID: 2,
+		CollectionID: 1, PartitionID: 20, ID: 2,
 		ManifestPath: packed.MarshalManifestPath("/data/legacy/insert_log/1/20/2", 1),
 	}
+	currentSegment := mockey.Mock((*meta.Meta).GetSegment).Return(meta.NewSegmentInfo(segment)).Build()
+	defer currentSegment.UnPatch()
 	indexFiles, err = uncompressIndexFiles(t.Context(), handler, segment)
 	require.NoError(t, err)
 	require.Len(t, indexFiles, 1)

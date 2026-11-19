@@ -545,7 +545,7 @@ func TestIndexTaskCountsManifestInstallAvoidsDDLLock(t *testing.T) {
 	require.Empty(t, storedIndexSizeSeries(t), "staging must not publish sizes")
 	m.fieldIndexLock.Lock()
 	done := make(chan func(), 1)
-	go func() { done <- staged.Install("") }()
+	go func() { done <- staged.Install() }()
 	var observe func()
 	select {
 	case observe = <-done:
@@ -563,7 +563,7 @@ func TestIndexTaskCountsManifestInstallAvoidsDDLLock(t *testing.T) {
 	removed, err := m.stageSegmentIndexMutation(t.Context(), meta.SegmentIndexMutation{Type: meta.SegmentIndexRemove, BuildID: 30})
 	require.NoError(t, err)
 	require.Equal(t, indexTaskStateCounts{0, 0, 0, 1}, m.indexTaskCountsSnapshot())
-	deferred := removed.Install("")
+	deferred := removed.Install()
 	require.Equal(t, indexTaskStateCounts{}, m.indexTaskCountsSnapshot())
 	deferred()
 	assertIndexTaskCounts(t, m)
@@ -604,7 +604,7 @@ func TestIndexTaskCountsPublishDuringScrape(t *testing.T) {
 	installed := make(chan struct{})
 	var observe func()
 	go func() {
-		observe = staged.Install("")
+		observe = staged.Install()
 		m.indexTaskCountsSnapshot()
 		close(installed)
 	}()

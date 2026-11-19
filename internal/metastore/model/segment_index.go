@@ -20,12 +20,8 @@ type SegmentIndex struct {
 	IsDeleted      bool
 	CreatedUTCTime uint64
 	IndexFileKeys  []string
-	// IndexFilesManifest records the publication namespace and the verified
-	// manifest of a copy that has yet to publish its target. Live reads select
-	// the segment's manifest. A superseded build keeps its displaced keys
-	// until rollback or GC. Both fields are process-local.
-	IndexFileCount     int
-	IndexFilesManifest string
+	// IndexFileCount preserves the cardinality when the cache releases the file names.
+	IndexFileCount int
 	// The byte size of serialized index data at oos. (compressed)
 	IndexSerializedSize uint64
 	// The byte size of index data in memory. (uncompressed)
@@ -59,10 +55,9 @@ func (s *SegmentIndex) NumIndexFiles() int {
 	return len(s.IndexFileKeys)
 }
 
-// CacheIndexFileSource releases the file names after their source is durable.
-func (s *SegmentIndex) CacheIndexFileSource(manifest string) {
+// CompactFileKeys releases the cached file names once the build is durable.
+func (s *SegmentIndex) CompactFileKeys() {
 	s.IndexFileCount = s.NumIndexFiles()
-	s.IndexFilesManifest = manifest
 	s.IndexFileKeys = nil
 }
 

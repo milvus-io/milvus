@@ -28,7 +28,10 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func indexRecordWithFiles(t *testing.T, m *meta.Meta, record *model.SegmentIndex) *model.SegmentIndex {
@@ -38,7 +41,6 @@ func indexRecordWithFiles(t *testing.T, m *meta.Meta, record *model.SegmentIndex
 	copy := *record
 	copy.IndexFileKeys = keys
 	copy.IndexFileCount = 0
-	copy.IndexFilesManifest = ""
 	return &copy
 }
 
@@ -92,6 +94,43 @@ func TestManifestIndexMigrationRetainsLayoutAliases(t *testing.T) {
 	for _, file := range files {
 		require.True(t, gc.newIndexFileReclaimChecker(ctx)(file, meta.RestartCollID, meta.RestartSegID, meta.RestartBuildID), file)
 	}
+}
+
+func TestManifestIndexRetirementAfterSegmentRemoval(t *testing.T) {
+	ctx := t.Context()
+	m, _, store, _ := index.RollbackFixture(t)
+	record, ok := m.IndexCatalog.GetIndexJob(meta.RestartBuildID)
+	require.True(t, ok)
+	require.Empty(t, record.IndexFileKeys)
+	chunks := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	gc := NewGarbageCollector(m, nil, GcOption{Cli: chunks, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
+	t.Cleanup(gc.Close)
+
+	want := make(map[string]struct{})
+	for _, layout := range []indexpb.IndexStorePathVersion{
+		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+	} {
+		artifact := *record
+		artifact.IndexStorePathVersion = layout
+		artifact.IndexFileKeys = []string{"orphan"}
+		for _, version := range []int64{record.IndexVersion, record.IndexVersion * 10} {
+			artifact.IndexVersion = version
+			file := meta.MigrationIndexPaths(chunks.RootPath(), "", &artifact)[0]
+			require.NoError(t, chunks.Write(ctx, file, []byte("artifact")))
+			if version == record.IndexVersion {
+				want[file] = struct{}{}
+			}
+		}
+	}
+	require.NoError(t, m.DropSegment(ctx, record.SegmentID))
+	reads := store.ReadCount
+	_, err := m.SegmentIndexFilePaths(ctx, record, nil)
+	require.ErrorIs(t, err, merr.ErrSegmentNotFound)
+	files, err := gc.resolveRetainedIndexFiles(ctx, nil, record)
+	require.NoError(t, err)
+	require.Equal(t, want, files)
+	require.Equal(t, reads, store.ReadCount)
 }
 
 func TestManifestIndexMigrationWaitsForGCRetirement(t *testing.T) {

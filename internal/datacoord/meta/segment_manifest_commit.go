@@ -143,12 +143,11 @@ type SegmentIndexMutation struct {
 	// rollbackEntry is prepared only by rollbackSegmentIndexes under the
 	// segment lock from the published manifest, then checked under BuildID lock.
 	rollbackEntry *packed.ManifestIndexInfo
-	rollbackIO    *packed.ManifestIOContext
 }
 
 // RollbackFileKeys runs under the segment and build locks. A replacement
 // captures the old keys before it publishes the new segment revision.
-func (m *Meta) RollbackFileKeys(ctx context.Context, mut SegmentIndexMutation, record *model.SegmentIndex) ([]string, error) {
+func (mut SegmentIndexMutation) RollbackFileKeys(record *model.SegmentIndex) ([]string, error) {
 	if entry := mut.rollbackEntry; entry != nil {
 		if record.BuildID != entry.BuildID || record.IndexID != entry.IndexID || record.IndexVersion != entry.IndexVersion ||
 			record.IndexStorePathVersion != entry.IndexStorePathVersion || record.NumIndexFiles() != len(entry.IndexFileKeys) {
@@ -159,9 +158,7 @@ func (m *Meta) RollbackFileKeys(ctx context.Context, mut SegmentIndexMutation, r
 	if len(record.IndexFileKeys) != 0 || record.IndexFileCount == 0 {
 		return record.IndexFileKeys, nil
 	}
-	// Older or externally advanced state can lack both the selected entry
-	// and a captured file list. Restore it only if its original entry is readable.
-	return m.readManifestIndexFileKeys(ctx, mut.rollbackIO, record, record.IndexFilesManifest)
+	return nil, merr.Wrapf(merr.ErrDataIntegrity, "no file list for displaced index build %d", record.BuildID)
 }
 
 // stagedSegmentIndexMutation carries a SegmentIndex change from its projection
@@ -182,7 +179,7 @@ type StagedSegmentIndexMutation struct {
 	Source  *model.SegmentIndex
 	Action  *metastore.UpdateAction
 	Record  *model.SegmentIndex
-	Install func(manifest string) (deferredMetric func())
+	Install func() (deferredMetric func())
 }
 
 // errSegmentIndexRecordGone reports that the SegmentIndex record a staged
@@ -617,7 +614,7 @@ func (m *Meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 		}
 		m.Segments.SetSegment(commit.SegmentID, updated)
 		for _, stagedIndex := range stagedIndexes {
-			deferredIndexMetrics = append(deferredIndexMetrics, stagedIndex.Install(manifestPath))
+			deferredIndexMetrics = append(deferredIndexMetrics, stagedIndex.Install())
 		}
 		return nil
 	}(); err != nil {

@@ -43,7 +43,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -1274,13 +1273,7 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 			ret.SegmentInfo[segID].EnableIndex = true
 			for _, segIdx := range segIdxes {
 				if segIdx.IndexState == commonpb.IndexState_Finished {
-					var segmentInfo *datapb.SegmentInfo
-					if metautil.IsSegmentRooted(segIdx.IndexStorePathVersion) {
-						if segment := s.meta.GetSegment(ctx, segID); segment != nil {
-							segmentInfo = segment.SegmentInfo
-						}
-					}
-					indexFilePaths, err := s.meta.SegmentIndexFilePaths(ctx, segIdx, segmentInfo)
+					indexFilePaths, err := s.meta.SegmentIndexFilePaths(ctx, segIdx, nil)
 					if err != nil {
 						return &indexpb.GetIndexInfoResponse{Status: merr.Status(err)}, nil
 					}

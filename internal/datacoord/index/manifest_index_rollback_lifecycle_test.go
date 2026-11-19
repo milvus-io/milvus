@@ -186,7 +186,7 @@ func TestManifestIndexRollbackLeavesUninstalledCopyIndex(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackReady) == 1
 	}, 5*time.Second, time.Millisecond)
-	require.NoError(t, m.IndexCatalog.(*IndexMeta).AddSegmentIndexFromManifest(ctx, late, before))
+	require.NoError(t, m.IndexCatalog.(*IndexMeta).AddSegmentIndexFromManifest(ctx, late))
 	require.Eventually(t, func() bool {
 		record, ok := m.IndexCatalog.(*IndexMeta).GetIndexJob(late.BuildID)
 		return ok && !record.ManifestPublished && testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackReady) == 1

@@ -185,6 +185,7 @@ func TestManifestIndexRollbackNoopUsesSourceMarker(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifest(meta.RestartSegID, before)))
 			entry := store.Revisions[published][0]
+			m.IndexCatalog.RetainReplacedIndexFiles(meta.RestartSegID, entry)
 			store.Revisions[before] = nil
 			if unselected {
 				entry.BuildID++
@@ -195,7 +196,7 @@ func TestManifestIndexRollbackNoopUsesSourceMarker(t *testing.T) {
 			n, err := m.RollbackSegmentIndexes(ctx, newMigrationManifestReadIO(t), meta.RestartSegID, meta.RestartBuildID)
 			require.NoError(t, err)
 			assert.Equal(t, 1, n)
-			assert.Equal(t, reads+2, store.ReadCount, "the pointer was advanced without a replacement record, so rollback recovers the missing build from its original entry")
+			assert.Equal(t, reads+1, store.ReadCount, "the current marker and retained keys suffice for rollback")
 			assert.Equal(t, commits, store.CommitCount, "no manifest write when the selected build is absent")
 			assert.Equal(t, before, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath())
 			assert.Equal(t, unselected, m.GetSegment(ctx, meta.RestartSegID).GetManifestHasIndex())
@@ -207,18 +208,19 @@ func TestManifestIndexRollbackNoopUsesSourceMarker(t *testing.T) {
 	}
 }
 
-func TestManifestIndexRollbackWithoutSurvivingFileList(t *testing.T) {
+func TestManifestIndexRollbackDoesNotReadOldRevision(t *testing.T) {
 	ctx := t.Context()
 	m, catalog, store, _ := RollbackFixture(t)
 	published := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
 	after, err := meta.AdvanceManifest(published, 1)
 	require.NoError(t, err)
 	store.Revisions[after] = nil
-	delete(store.Revisions, published)
+	require.NotEmpty(t, store.BackfillEntriesAt(published))
 	require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifest(meta.RestartSegID, after)))
-	commits := store.CommitCount
+	reads, commits := store.ReadCount, store.CommitCount
 	count, err := m.RollbackSegmentIndexes(ctx, newMigrationManifestReadIO(t), meta.RestartSegID, meta.RestartBuildID)
-	require.Error(t, err)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.Equal(t, reads+1, store.ReadCount)
 	require.Zero(t, count)
 	require.Equal(t, commits, store.CommitCount)
 	require.Equal(t, after, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath())

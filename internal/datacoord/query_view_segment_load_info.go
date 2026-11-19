@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
@@ -40,6 +42,9 @@ func (s *Server) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID 
 		}
 		seen[segmentID] = struct{}{}
 		info, err := s.getQueryViewSegmentLoadInfo(ctx, collectionID, segmentID, indexInfos, segmentIndexes[segmentID])
+		if errors.Is(err, meta.ErrSegmentManifestStale) && ctx.Err() == nil {
+			info, err = s.getQueryViewSegmentLoadInfo(ctx, collectionID, segmentID, indexInfos, s.indexMeta.GetSegmentIndexes(collectionID, segmentID))
+		}
 		results = append(results, &querypb.QueryViewSegmentLoadInfoResult{SegmentID: segmentID, Status: merr.Status(err), LoadInfo: info})
 	}
 	return results, indexInfos, nil

@@ -188,7 +188,7 @@ func TestIndexFileLookupRejectsWrongBuild(t *testing.T) {
 	m, _, store, _ := RollbackFixture(t)
 	job, ok := m.IndexCatalog.GetIndexJob(meta.RestartBuildID)
 	require.True(t, ok)
-	revision := job.IndexFilesManifest
+	revision := m.GetSegment(ctx, job.SegmentID).GetManifestPath()
 	entries := store.BackfillEntriesAt(revision)
 	require.Len(t, entries, 1)
 	for _, change := range []func(*packed.ManifestIndexInfo){

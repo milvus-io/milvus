@@ -300,7 +300,7 @@ func TestManifestIndexBackfillIgnoresCopiedManifestRecord(t *testing.T) {
 		IndexState:            commonpb.IndexState_Finished,
 		IndexFileKeys:         []string{"0"},
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
-	}, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()))
+	}))
 
 	work, pending := NewMigrationBackfillInspector(ctx, m).scan(ctx)
 	assert.Empty(t, work)

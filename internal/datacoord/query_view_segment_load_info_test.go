@@ -116,6 +116,8 @@ func TestQueryViewSegmentLoadInfoIndexPaths(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &Server{meta: &meta.Meta{ChunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files"))}}
 			segment := &datapb.SegmentInfo{ID: 10, CollectionID: 1, PartitionID: 2, StorageVersion: storage.StorageV3, ManifestPath: tc.manifest}
+			current := mockey.Mock((*meta.Meta).GetSegment).Return(meta.NewSegmentInfo(segment)).Build()
+			defer current.UnPatch()
 			indexes := []*indexpb.IndexInfo{{CollectionID: 1, FieldID: 100, IndexID: 5}}
 			segmentIndexes := map[int64]*model.SegmentIndex{5: {
 				CollectionID: 1, PartitionID: 2, SegmentID: 10, IndexID: 5, BuildID: 30, IndexVersion: 4,

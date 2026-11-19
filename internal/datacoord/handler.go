@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
@@ -568,6 +569,15 @@ func (h *ServerHandler) ListLoadedSegments(ctx context.Context) ([]int64, error)
 // - Point-in-time restore for data rollback
 // - Collection cloning to different database/cluster
 func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, channelSeekPositions []*msgpb.MsgPosition) (*snapshotstorage.SnapshotData, error) {
+	data, err := h.genSnapshot(ctx, collectionID, channelSeekPositions)
+	if errors.Is(err, meta.ErrSegmentManifestStale) && ctx.Err() == nil {
+		// Recapture the segment descriptors at the same snapshot boundary.
+		return h.genSnapshot(ctx, collectionID, channelSeekPositions)
+	}
+	return data, err
+}
+
+func (h *ServerHandler) genSnapshot(ctx context.Context, collectionID UniqueID, channelSeekPositions []*msgpb.MsgPosition) (*snapshotstorage.SnapshotData, error) {
 	// get coll info
 	collInfo, err := h.s.meta.GetCollectionOrNotFound(collectionID)
 	if err != nil {
@@ -752,8 +762,7 @@ func uncompressIndexFiles(ctx context.Context, h *ServerHandler, segment *datapb
 			fieldID := h.s.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
 			indexName := h.s.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
 
-			// Use the segment already selected for this snapshot, rather than
-			// looking it up again while metadata may be changing.
+			// Never combine a snapshot descriptor with index files from a different revision.
 			indexFilePaths, err := h.s.meta.SegmentIndexFilePaths(ctx, segIdx, segment)
 			if err != nil {
 				return nil, err

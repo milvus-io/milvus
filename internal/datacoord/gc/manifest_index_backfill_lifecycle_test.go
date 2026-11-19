@@ -179,6 +179,15 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 			}))
 			current := m.GetSegment(ctx, meta.RestartSegID)
 			require.NotEqual(t, published, current.GetManifestPath())
+			// An object-store commit alone does not advance the segment record.
+			unpublished, err := packed.CommitManifestUpdates(current.GetManifestPath(), cfg, &packed.ManifestUpdates{
+				DropIndexes: []packed.DropIndexEntry{{IndexID: first.IndexID, ExpectedBuildID: first.BuildID}},
+			})
+			require.NoError(t, err)
+			require.NotEqual(t, current.GetManifestPath(), unpublished)
+			orphanEntries, err := packed.GetManifestIndexInfos(unpublished, cfg)
+			require.NoError(t, err)
+			require.Len(t, orphanEntries, 1)
 			oldFile, err := packed.ManifestFilePath(published)
 			require.NoError(t, err)
 			require.NoError(t, m.ChunkManager.Remove(ctx, oldFile))
@@ -214,7 +223,8 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 			build, ok := m.IndexCatalog.GetIndexJob(first.BuildID)
 			require.True(t, ok)
 			_, err = m.SegmentIndexFilePaths(ctx, build, beforeStats.SegmentInfo)
-			require.ErrorIs(t, err, merr.ErrIoKeyNotFound, "reading a snapshot whose own revision was deleted must fail")
+			require.ErrorIs(t, err, meta.ErrSegmentManifestStale, "a snapshot must recapture its segment instead of mixing revisions")
+			require.Zero(t, missing.MockTimes(), "the old segment revision must never be opened")
 			meta.WithSegmentIndexManifestWrites(t, false)
 			restarted := boot()
 			for _, record := range []*model.SegmentIndex{first, second} {

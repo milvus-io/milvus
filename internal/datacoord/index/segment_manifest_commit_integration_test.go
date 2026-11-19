@@ -160,7 +160,7 @@ func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
 	require.Equal(t, commonpb.IndexState_Finished, published.IndexState)
 	require.Empty(t, published.IndexFileKeys)
 	require.Equal(t, 2, published.NumIndexFiles())
-	require.Equal(t, newManifest, published.IndexFilesManifest)
+	require.True(t, published.ManifestPublished)
 	require.EqualValues(t, 2000, published.IndexSerializedSize)
 	// The same physical-index commit must drive a new DataView even though
 	// SegmentID and SchemaVersion did not change. Retained Views keep revision 3.
@@ -567,7 +567,7 @@ func TestCommitSegmentManifestRetiresIndexEtcdRowWhenGated(t *testing.T) {
 	assert.Equal(t, commonpb.IndexState_Finished, published.IndexState)
 	assert.Empty(t, published.IndexFileKeys)
 	assert.Equal(t, 1, published.NumIndexFiles())
-	assert.Equal(t, newManifest, published.IndexFilesManifest)
+	assert.True(t, published.ManifestPublished)
 }
 
 // Regression test for a stall between the manifest commit and every index DDL.

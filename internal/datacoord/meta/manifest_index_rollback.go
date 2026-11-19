@@ -112,7 +112,7 @@ func (m *Meta) RollbackSegmentIndexes(ctx context.Context, io *packed.ManifestIO
 		}
 		mutations = append(mutations, SegmentIndexMutation{
 			Type: SegmentIndexRollback, BuildID: buildID,
-			rollbackEntry: entry, rollbackIO: io,
+			rollbackEntry: entry,
 		})
 	}
 	if err := ctx.Err(); err != nil {

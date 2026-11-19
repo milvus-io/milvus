@@ -434,7 +434,7 @@ func TestManifestIndexBackfillScansRecordsBeforeSegments(t *testing.T) {
 	require.True(t, ok)
 	replacement = materializedTestIndex(t, m, replacement)
 	replacement.BuildID++
-	require.NoError(t, m.IndexCatalog.(*IndexMeta).AddSegmentIndexFromManifest(ctx, replacement, m.GetSegment(ctx, replacement.SegmentID).GetManifestPath()))
+	require.NoError(t, m.IndexCatalog.(*IndexMeta).AddSegmentIndexFromManifest(ctx, replacement))
 	var segmentLookups atomic.Int32
 	patch := mockey.Mock((*meta.Meta).GetSegment).When(func(_ *meta.Meta, _ context.Context, _ int64) bool {
 		segmentLookups.Add(1)

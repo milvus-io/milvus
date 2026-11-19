@@ -264,6 +264,7 @@ func TestManifestIndexRollbackRestoresSupersededBuilds(t *testing.T) {
 	m, catalog, store, kv := RollbackFixture(t)
 	ctx := context.TODO()
 	old, _ := m.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID)
+	published := m.GetSegment(ctx, old.SegmentID).GetManifestPath()
 	replacement := materializedTestIndex(t, m, old)
 	replacement.IndexFileKeys = []string{"replacement-a", "replacement-b"}
 	replacement.BuildID = 10000 // sorts before 8100 as an etcd key, but is newer
@@ -283,8 +284,8 @@ func TestManifestIndexRollbackRestoresSupersededBuilds(t *testing.T) {
 	entries := store.BackfillEntriesAt(current)
 	require.Len(t, entries, 1)
 	require.Equal(t, replacement.BuildID, entries[0].BuildID)
-	require.NotEqual(t, current, old.IndexFilesManifest)
-	delete(store.Revisions, old.IndexFilesManifest)
+	require.NotEqual(t, current, published)
+	delete(store.Revisions, published)
 	requireIndexFiles(t, m, old, "0", "1")
 	requireIndexFiles(t, m, replacement, "replacement-a", "replacement-b")
 	retired, ok := m.IndexCatalog.GetIndexJob(old.BuildID)
@@ -325,6 +326,7 @@ func TestManifestIndexRollbackIgnoresMarkerOnlySegments(t *testing.T) {
 	m, catalog, store, _ := RollbackFixture(t)
 	ctx := context.TODO()
 	first := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
+	m.IndexCatalog.RetainReplacedIndexFiles(meta.RestartSegID, store.BackfillEntriesAt(first)[0])
 	empty, err := meta.AdvanceManifest(first, 1)
 	require.NoError(t, err)
 	store.Revisions[empty] = nil

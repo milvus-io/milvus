@@ -2333,13 +2333,11 @@ func (gc *GarbageCollector) GetAllIndexFilesOfIndex(segmentIndex *model.SegmentI
 		segmentIndex.PartitionID, segmentIndex.SegmentID,
 		segmentIndex.BuildID, segmentIndex.IndexVersion)
 	if metautil.IsSegmentRooted(segmentIndex.IndexStorePathVersion) {
-		manifest := segmentIndex.IndexFilesManifest
-		if manifest == "" {
-			if segment := gc.Meta.GetSegment(context.TODO(), segmentIndex.SegmentID); segment != nil {
-				manifest = segment.GetManifestPath()
-			}
+		segment := gc.Meta.GetSegment(context.TODO(), segmentIndex.SegmentID)
+		if segment == nil || segment.GetManifestPath() == "" {
+			return nil
 		}
-		builder.WithManifestPath(manifest)
+		builder.WithManifestPath(segment.GetManifestPath())
 	}
 
 	filesMap := make(map[string]struct{})
@@ -2356,14 +2354,16 @@ func (gc *GarbageCollector) resolveRetainedIndexFiles(ctx context.Context, io *p
 	keys, err := gc.Meta.ResolveIndexFileKeys(ctx, io, index)
 	if err != nil {
 		segment := gc.Meta.GetSegment(ctx, index.SegmentID)
-		if index.IndexFilesManifest == "" || meta.IsSegmentHealthy(segment) ||
-			gc.manifestExists(ctx, index.SegmentID, gc.Meta.IndexFileManifest(ctx, index)) {
+		if !index.ManifestPublished {
 			return nil, err
 		}
-		// A dropped segment may have already lost its manifests in a previous
-		// GC attempt. Enumerate only this build/version's placement aliases.
+		if segment != nil && (segment.GetState() != commonpb.SegmentState_Dropped || gc.manifestExists(ctx, index.SegmentID, segment.GetManifestPath())) {
+			return nil, err
+		}
+		// A dropped segment can lose its manifest during retirement. With no
+		// segment row, only the build- and collection-rooted prefixes are known.
 		files := make(map[string]struct{})
-		for _, prefix := range gc.indexAttemptPrefixes(index, index.IndexFilesManifest) {
+		for _, prefix := range gc.indexAttemptPrefixes(index, segment) {
 			if err := gc.Option.Cli.WalkWithPrefix(ctx, prefix, true, func(obj *storage.ChunkObjectInfo) bool {
 				files[obj.FilePath] = struct{}{}
 				return true
@@ -2378,9 +2378,10 @@ func (gc *GarbageCollector) resolveRetainedIndexFiles(ctx context.Context, io *p
 	return gc.getRetainedIndexFilesOfIndex(&record), nil
 }
 
-func (gc *GarbageCollector) indexAttemptPrefixes(index *model.SegmentIndex, manifest string) []string {
-	if index.IndexFilesManifest != "" {
-		manifest = index.IndexFilesManifest
+func (gc *GarbageCollector) indexAttemptPrefixes(index *model.SegmentIndex, segment *meta.SegmentInfo) []string {
+	var manifest string
+	if segment != nil {
+		manifest = segment.GetManifestPath()
 	}
 	prefixes := make([]string, 0, 3)
 	for _, layout := range []indexpb.IndexStorePathVersion{
@@ -2388,6 +2389,9 @@ func (gc *GarbageCollector) indexAttemptPrefixes(index *model.SegmentIndex, mani
 		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
 		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
 	} {
+		if metautil.IsSegmentRooted(layout) && segment == nil {
+			continue
+		}
 		prefix := metautil.NewIndexPathBuilder(gc.Option.Cli.RootPath(), layout, index.CollectionID,
 			index.PartitionID, index.SegmentID, index.BuildID, index.IndexVersion).
 			WithManifestPath(manifest).BuildPrefix()
@@ -2403,7 +2407,7 @@ func (gc *GarbageCollector) finishedIndexFileRetention(ctx context.Context, inde
 	if segment != nil && segment.GetStorageVersion() == storage.StorageV3 {
 		var prefixes []string
 		if index.NumIndexFiles() > 0 {
-			prefixes = gc.indexAttemptPrefixes(index, segment.GetManifestPath())
+			prefixes = gc.indexAttemptPrefixes(index, segment)
 		}
 		return func(file string) bool {
 			for _, prefix := range prefixes {
@@ -2430,12 +2434,14 @@ func (gc *GarbageCollector) finishedIndexFileRetention(ctx context.Context, inde
 // still run before retirement. Keeping them independent of placement also
 // makes the orphan scanner's cached decision safe during long copies/retries.
 func (gc *GarbageCollector) getRetainedIndexFilesOfIndex(segmentIndex *model.SegmentIndex) map[string]struct{} {
-	filesMap := gc.GetAllIndexFilesOfIndex(segmentIndex)
-	if segment := gc.Meta.GetSegment(context.TODO(), segmentIndex.SegmentID); segment != nil && segment.GetStorageVersion() == storage.StorageV3 {
-		for _, prefix := range gc.indexAttemptPrefixes(segmentIndex, segment.GetManifestPath()) {
-			for _, name := range segmentIndex.IndexFileKeys {
-				filesMap[prefix+name] = struct{}{}
-			}
+	segment := gc.Meta.GetSegment(context.TODO(), segmentIndex.SegmentID)
+	if (segment == nil && !segmentIndex.ManifestPublished) || (segment != nil && segment.GetStorageVersion() != storage.StorageV3) {
+		return gc.GetAllIndexFilesOfIndex(segmentIndex)
+	}
+	filesMap := make(map[string]struct{})
+	for _, prefix := range gc.indexAttemptPrefixes(segmentIndex, segment) {
+		for _, name := range segmentIndex.IndexFileKeys {
+			filesMap[prefix+name] = struct{}{}
 		}
 	}
 	return filesMap
