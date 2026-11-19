@@ -53,7 +53,7 @@ These operations distinguish four milestones:
 | Milestone | Meaning and boundary |
 | --- | --- |
 | Target visible | After the Broadcast task is persisted, `GetPendingSchemaTarget()` exposes its immutable target, even before append or ACK completion. Known business-channel ACK TimeTicks may be incomplete or absent. This does not prove any channel has applied the schema. |
-| Write schema effective | Each VChannel switches its write schema at its own WAL ALTER boundary. Consuming-side `AckSyncUp` also waits for pre-ALTER L1 final publication before the ordered callback can run. Neither event publishes the read schema. |
+| Write schema effective | Each VChannel switches its write schema at its own WAL ALTER boundary. Consuming-side `AckSyncUp` waits for pre-ALTER L1 durable registration and L0 completion; sealed query publication may still be pending. Neither event publishes the read schema. |
 | Data preparation complete | In that callback, `PrepareSchema` applies target load intent and calls DataCoord's implemented `PrepareDataViewSchema`. `AdvanceSchema` certifies and publishes the supported DataView schema, directly or after materialization. Loaded collections must additionally reach exact-schema Up coverage through `WaitAtSchema`. |
 | Read schema public | Only after preparation and any serving obligation complete does `MetaTable.AlterCollection` durably publish the read schema. `PublishCollectionSchema` then notifies View managers so superseded schema coverage can retire. |
 
@@ -63,6 +63,13 @@ destructive compaction cleanup remains gated by direct schema publication.
 W/A Transform coverage follows its own frontier contract and cannot be inferred
 from schema readiness. See [schema handoff](schema_evolution.md) for callback
 replay, public cache invalidation and retained read generations.
+
+A materialized transition also waits for old-encoding streaming flush groups to
+finish publication: an empty sealed projection alone is not evidence that no
+historical rows exist. Required preparation of private outputs and an unfinished
+ALTER target bypasses the optional automatic schema-bump cleanup switch. A
+direct NULL/default transition retains its logical publication path. An owning
+WAL Drop can retire a pending source instead of waiting for its preparation.
 
 Implementation: `internal/views/coord/resource/schema.go`,
 `internal/datacoord/dataview_schema.go`, `internal/dataview/schema.go`,

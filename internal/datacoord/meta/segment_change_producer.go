@@ -210,10 +210,36 @@ func (m *Meta) FailedImportGroupsHaveCommitFence(jobID int64) bool {
 	return false
 }
 
-// Explicit DDL owns row retirement. The caller holds the selected segment
-// writer locks. Keep source/current-output records with the terminal group in
-// the final catalog transaction, so startup never mistakes half a DDL drop
-// for corruption of accepted WAL rows.
+// RetireStreamingFlush locks the current group members before retiring rows
+// owned by explicit DDL. Publication or a prior retirement may win the race.
+func (m *Meta) RetireStreamingFlush(ctx context.Context, sourceID int64) error {
+	locks := newSegmentLockSet(m.GetSegmentLocks())
+	defer locks.release()
+	selected := lockSelection(locks, func() []int64 {
+		g := m.GetSegmentChangeGroup(ctx, 0, sourceID)
+		if g == nil || g.Source != model.SegmentChangeSourceStreamingFlush || g.IsTerminal() {
+			return nil
+		}
+		return append([]int64{sourceID}, g.NewSegmentIDs...)
+	})
+	if len(selected) == 0 {
+		return nil // Publication or a prior retirement won the race.
+	}
+	segments := make([]*SegmentInfo, 0, len(selected))
+	for _, id := range selected {
+		if segment := m.Segments.GetSegment(id); segment != nil {
+			segment = segment.Clone()
+			UpdateSegState(segment, commonpb.SegmentState_Dropped)
+			segments = append(segments, segment)
+		}
+	}
+	_, err := m.dropStreamingFlushGroupsLocked(ctx, segments)
+	return err
+}
+
+// The caller holds the selected segment writer locks. Persist source/current
+// outputs together with the terminal group, so recovery never mistakes a
+// partially persisted DDL drop for corruption of accepted WAL rows.
 func (m *Meta) dropStreamingFlushGroupsLocked(ctx context.Context, segments []*SegmentInfo) (bool, error) {
 	m.groupMu.Lock()
 	defer m.groupMu.Unlock()

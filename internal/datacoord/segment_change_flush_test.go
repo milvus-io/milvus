@@ -222,6 +222,31 @@ func TestStreamingFlushPollPublishesReadyOutputs(t *testing.T) {
 	require.False(t, pending, "publication polling must not wait for the periodic inspector")
 	require.NotNil(t, version)
 	require.Equal(t, model.SegmentChangeStateCommitted, s.meta.GetSegmentChangeGroup(t.Context(), 1, 1).State)
+	drop := proto.CloneOf(req)
+	drop.Dropped = true
+	drop.Base.Properties[dataview.FlushGroupRetire] = "1"
+	status, err = s.SaveBinlogPaths(t.Context(), drop)
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	racedVersion, pending, err := dataview.ParseStagedFlushResult(status)
+	require.NoError(t, err)
+	require.False(t, pending)
+	require.True(t, proto.Equal(version, racedVersion), "publication wins a later Drop retirement request without changing its immutable handoff")
+	require.False(t, s.meta.GetSegmentChangeGroup(t.Context(), 1, 1).StreamingDataRetired)
+}
+
+func TestStreamingFlushNotifiesStatsWithoutSort(t *testing.T) {
+	s, req := newStreamingFlushTest(t)
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.EnableCompaction, "false")
+	meta.DrainStatsBuildChForTest()
+	t.Cleanup(func() { meta.DrainStatsBuildChForTest() })
+	status, err := s.SaveBinlogPaths(t.Context(), proto.CloneOf(req))
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	require.Equal(t, []int64{req.GetSegmentID()}, meta.DrainStatsBuildChForTest())
+	// A lost notification or coordinator restart must not wait ten inspector
+	// intervals for the full stats reconciliation scan.
+	status, err = s.SaveBinlogPaths(t.Context(), proto.CloneOf(req))
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	require.Equal(t, []int64{req.GetSegmentID()}, meta.DrainStatsBuildChForTest())
 }
 
 func TestStreamingFlushPollRetriesLostSortNotification(t *testing.T) {
@@ -377,7 +402,7 @@ func TestStreamingFlushPrivateSchemaPreparation(t *testing.T) {
 }
 
 func TestStreamingFlushRetiredByDDL(t *testing.T) {
-	for _, kind := range []string{"partition", "truncate"} {
+	for _, kind := range []string{"partition", "truncate", "writer_drop"} {
 		t.Run(kind, func(t *testing.T) {
 			s, req := newStreamingFlushTest(t)
 			ctx := t.Context()
@@ -391,6 +416,24 @@ func TestStreamingFlushRetiredByDDL(t *testing.T) {
 			require.NoError(t, err)
 			if kind == "partition" {
 				require.NoError(t, s.NotifyDropPartition(ctx, req.Channel, 1, []int64{1}))
+			} else if kind == "writer_drop" {
+				drop := proto.CloneOf(req)
+				drop.Dropped = true
+				status, err = s.SaveBinlogPaths(ctx, drop)
+				require.NoError(t, merr.CheckRPCCall(status, err))
+				require.False(t, s.meta.GetSegmentChangeGroup(ctx, 1, 1).StreamingDataRetired, "an empty-flush retry without owning Drop intent must not retire accepted rows")
+				drop.Base.Properties[dataview.FlushGroupRetire] = "1"
+				failure := mockey.Mock((*kvcatalog.Catalog).Update).Return(context.DeadlineExceeded).Build()
+				t.Cleanup(func() { failure.UnPatch() })
+				failedCtx, cancel := context.WithTimeout(ctx, 30*time.Millisecond)
+				status, err = s.SaveBinlogPaths(failedCtx, drop)
+				cancel()
+				failure.UnPatch()
+				require.Error(t, merr.CheckRPCCall(status, err))
+				require.False(t, s.meta.GetSegmentChangeGroup(ctx, 1, 1).StreamingDataRetired)
+				require.Equal(t, commonpb.SegmentState_Flushed, s.meta.GetSegment(ctx, 1).GetState())
+				status, err = s.SaveBinlogPaths(ctx, drop)
+				require.NoError(t, merr.CheckRPCCall(status, err))
 			} else {
 				// A private physical rewrite's checkpoint must not evade the
 				// source's logical truncate boundary.

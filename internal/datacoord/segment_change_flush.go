@@ -38,6 +38,9 @@ func (s *Server) progressStreamingFlushPublication(ctx context.Context, segmentI
 	if source == nil || !meta.IsFlushState(source.GetState()) {
 		return
 	}
+	if g.State == model.SegmentChangeStateStaged {
+		notifyStreamingFlushStats(g.NewSegmentIDs...)
+	}
 	if g.State == model.SegmentChangeStateStaged && meta.EnableSortCompaction() {
 		// Notifications are best effort. Re-issue required sort work on polling
 		// after queue saturation or a restart between registration and postFlush.
@@ -153,11 +156,23 @@ func (s *Server) stageStreamingFlush(ctx context.Context, req *datapb.SaveBinlog
 		// queue must not delay the durable registration receipt.
 	}
 	meta.NotifySegmentIndexBuild(req.GetSegmentID())
+	notifyStreamingFlushStats(group.NewSegmentIDs...)
 	result, handled := s.streamingFlushResult(ctx, req)
 	if !handled {
 		return nil, merr.WrapErrServiceUnavailableMsg("streaming flush %d registration is not durable yet", req.GetSegmentID())
 	}
 	return result, nil
+}
+
+// A full preparation queue must not delay the durability receipt. Publication
+// polling retries these notifications, including after coordinator recovery.
+func notifyStreamingFlushStats(ids ...int64) {
+	for _, id := range ids {
+		select {
+		case meta.GetStatsBuildChSingleton() <- id:
+		default:
+		}
+	}
 }
 
 func (s *Server) streamingFlushAdmitted(ctx context.Context, segmentID int64) bool {

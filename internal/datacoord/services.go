@@ -614,6 +614,16 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		return merr.Status(err), nil
 	}
 	if req.GetFlushed() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
+		if req.GetDropped() && req.GetBase().GetProperties()[dataview.FlushGroupRetire] == "1" {
+			if g := s.meta.GetSegmentChangeGroup(ctx, 0, req.GetSegmentID()); g != nil && g.Source == model.SegmentChangeSourceStreamingFlush {
+				if g.CollectionID != req.GetCollectionID() || g.PartitionID != req.GetPartitionID() || g.VChannel != req.GetChannel() {
+					return merr.Status(merr.WrapErrDataIntegrityMsg("streaming flush %d drop changed its producer identity", req.GetSegmentID())), nil
+				}
+				if err := s.meta.RetireStreamingFlush(ctx, req.GetSegmentID()); err != nil {
+					return merr.Status(err), nil
+				}
+			}
+		}
 		s.progressStreamingFlushPublication(ctx, req.GetSegmentID())
 		if result, handled := s.streamingFlushResult(ctx, req); handled {
 			return result, nil

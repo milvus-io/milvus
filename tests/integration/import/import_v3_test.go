@@ -94,9 +94,9 @@ func (s *importV3SemanticBase) verifyEquivalentImport(ctx context.Context) {
 	mlog.Info(ctx, "import started", mlog.String("jobID", importResp.GetJobID()))
 	s.NoError(WaitForImportDone(ctx, c, importResp.GetJobID()))
 
-	// Every produced segment must carry a positive commit timestamp.
-	segments, err := c.ShowSegments(collectionName)
-	s.NoError(err)
+	// Only the published import frontier carries the commit timestamp. Retired
+	// sort inputs keep their original private metadata until GC.
+	segments := s.WaitForPublishedSegments(ctx, "", collectionName)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
 		s.Greater(segment.GetCommitTimestamp(), uint64(0),

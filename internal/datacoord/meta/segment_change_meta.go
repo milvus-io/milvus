@@ -423,12 +423,23 @@ func (m *Meta) AcknowledgeStreamingFlush(ctx context.Context, groupID int64, ver
 // Group membership and its segment replacements are installed under groupMu;
 // reading them together avoids reporting Finished between the two snapshots.
 func (m *Meta) SelectSegmentsWithChangeGroups(ctx context.Context, filters ...SegmentFilter) ([]*SegmentInfo, []*model.SegmentChangeGroup) {
+	return m.selectSegmentsWithChangeGroups(ctx, false, filters...)
+}
+
+// SelectSegmentsWithAllChangeGroups also captures terminal private ownership
+// while failed/aborted members await cleanup. Transform projection must not
+// mistake those members for unregistered live data.
+func (m *Meta) SelectSegmentsWithAllChangeGroups(ctx context.Context, filters ...SegmentFilter) ([]*SegmentInfo, []*model.SegmentChangeGroup) {
+	return m.selectSegmentsWithChangeGroups(ctx, true, filters...)
+}
+
+func (m *Meta) selectSegmentsWithChangeGroups(ctx context.Context, includeTerminal bool, filters ...SegmentFilter) ([]*SegmentInfo, []*model.SegmentChangeGroup) {
 	m.groupMu.RLock()
 	defer m.groupMu.RUnlock()
 	segments := m.SelectSegments(ctx, filters...)
 	groups := make([]*model.SegmentChangeGroup, 0)
 	for _, g := range m.segmentChangeGroups {
-		if !g.IsTerminal() {
+		if includeTerminal || !g.IsTerminal() {
 			groups = append(groups, g.Clone())
 		}
 	}

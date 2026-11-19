@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type stagedFlushTestLifecycle struct {
@@ -38,6 +39,65 @@ type stagedFlushTestLifecycle struct {
 	err             error
 	registrations   int
 	acknowledgments int
+}
+
+type retiringFlushTestLifecycle struct {
+	stagedFlushTestLifecycle
+	retirements int
+}
+
+func (l *retiringFlushTestLifecycle) RetireL1Segment(context.Context, *streamingpb.SegmentAssignmentMeta) (*viewpb.DataVersion, error) {
+	l.retirements++
+	return nil, l.err
+}
+
+func TestStagedFlushOwnerDropRetiresWithoutPublication(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		partition      int64
+		collectionDrop bool
+	}{
+		{name: "owner partition", partition: 1},
+		{name: "other partition", partition: 2},
+		{name: "collection", partition: 2, collectionDrop: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lifecycle := &retiringFlushTestLifecycle{stagedFlushTestLifecycle: stagedFlushTestLifecycle{pending: true, result: &viewpb.DataVersion{StreamingVersion: 1}}}
+			view := newSegmentViewFromMeta(&streamingpb.SegmentAssignmentMeta{
+				SegmentId: 1, CollectionId: 1, PartitionId: tc.partition, Vchannel: "v1", CheckpointTimeTick: 20,
+				State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED, FlushDataDurable: true,
+				Stat: &streamingpb.SegmentAssignmentStat{CreateSegmentTimeTick: 5, ModifiedRows: 2},
+			}, nil, runtimeConfig{lifecycle: lifecycle, owner: testSegmentOwner{}, runtime: moduleapi.Runtime{Scheduler: &recordingSegmentScheduler{}}})
+			view.ResumePendingRecovery()
+			raw := message.NewDropPartitionMessageBuilderV1().WithVChannel("v1").
+				WithHeader(&message.DropPartitionMessageHeader{CollectionId: 1, PartitionId: 1}).WithBody(&message.DropPartitionRequest{}).
+				MustBuildMutable().WithTimeTick(30).IntoImmutableMessage(walimplstest.NewTestMessageID(30))
+			if tc.collectionDrop {
+				raw = message.NewDropCollectionMessageBuilderV1().WithVChannel("v1").
+					WithHeader(&message.DropCollectionMessageHeader{CollectionId: 1}).WithBody(&message.DropCollectionRequest{}).
+					MustBuildMutable().WithTimeTick(30).IntoImmutableMessage(walimplstest.NewTestMessageID(30))
+			}
+			owned := message.NewOwnedImmutableMessage(raw, nil)
+			dispatch := owned.Clone()
+			view.Flush(t.Context(), dispatch)
+			dispatch.Release()
+			owned.Release()
+			if tc.partition == 2 && !tc.collectionDrop {
+				require.Error(t, view.pendingTasks[0].Execute(t.Context()))
+				require.Zero(t, lifecycle.retirements, "a different partition's Drop must preserve this source")
+				require.False(t, view.finalCommitDone.Load())
+				return
+			}
+			lifecycle.err = merr.WrapErrServiceUnavailableMsg("retirement persistence failed")
+			require.Error(t, view.pendingTasks[0].Execute(t.Context()))
+			require.False(t, view.finalCommitDone.Load(), "failed retirement cannot install a child tombstone")
+			lifecycle.err = nil
+			require.NoError(t, view.pendingTasks[0].Execute(t.Context()))
+			require.True(t, view.finalCommitDone.Load())
+			require.Nil(t, view.meta.GetSealedAtDataVersion(), "Drop must not invent a query handoff version")
+			require.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED, view.ConsumeDirtyAndGetSnapshot().GetState())
+		})
+	}
 }
 
 func TestStagedFlushRepeatedFlushReleasesAtDurability(t *testing.T) {

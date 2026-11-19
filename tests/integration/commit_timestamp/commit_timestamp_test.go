@@ -566,6 +566,7 @@ func (s *CommitTimestampSuite) TestCompaction_NormalizesCommitTs() {
 		flushTs := flushResp.GetCollFlushTs()[collName]
 		s.WaitForFlush(ctx, segIDs, flushTs, "", collName)
 	}
+	s.WaitForPublishedSegments(ctx, "", collName)
 
 	showResp, err := s.Cluster.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
 		CollectionNames: []string{collName},

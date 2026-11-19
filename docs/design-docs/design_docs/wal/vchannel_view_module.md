@@ -112,7 +112,12 @@ tombstones, and L0 has completed through that boundary. For DropPartition, only
 the target partition's children must be tombstoned. Earlier segments in other
 partitions must be durable for the VChannel-wide L0 boundary, but their query
 publication does not block the Drop ACK or later conflicting broadcasts.
-DropCollection still joins every earlier child. The child-snapshot
+DropCollection still joins every earlier child. An owning WAL Drop authorizes
+the pending flush task to request durable retirement of its DataCoord source
+and private output group; it need not wait for query publication. Failed
+retirement leaves the child untombstoned and retries. A Drop in another
+partition grants no such permission. Runtime retirement intent is reconstructed
+by Drop replay until the stable child tombstone is persisted. The child-snapshot
 publication dependency is required because the catalog's chunked fallback saves
 VChannel ownership before Segment metadata: a terminal parent must never become
 recoverable before its terminal children. It does not wait for child GC or a

@@ -172,6 +172,7 @@ func (s *ClusteringCompactionNullDataSuite) TestClusteringCompactionNullData() {
 	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
 
 	s.WaitForIndexBuilt(ctx, collectionName, fVecColumn.FieldName)
+	s.WaitForPublishedSegments(ctx, dbName, collectionName)
 
 	// load
 	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
@@ -205,6 +206,7 @@ func (s *ClusteringCompactionNullDataSuite) TestClusteringCompactionNullData() {
 	for !compacted() {
 		time.Sleep(3 * time.Second)
 	}
+	s.WaitForPublishedSegments(ctx, dbName, collectionName)
 	desCollResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		CollectionName: collectionName,
 		CollectionID:   0,
