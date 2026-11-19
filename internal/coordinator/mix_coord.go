@@ -276,6 +276,9 @@ func (s *mixCoordImpl) enableExternalAccess() {
 	// invoke DataCoord or QueryCoord callbacks while handling collection DDLs.
 	datacoord.RegisterDDLCallbacks(s.datacoordServer)
 	querycoordv2.RegisterDDLCallbacks(s.queryCoordServer)
+	// Before RootCoord registers the SplitShard ack callback: a callback that
+	// is recovered must find DataCoord's hooks.
+	registerShardSplit(s.datacoordServer, s.rootcoordServer)
 	rootcoord.RegisterDDLCallbacks(s.rootcoordServer)
 	RegisterWALCallbacks(s)
 

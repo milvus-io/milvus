@@ -2,6 +2,7 @@ package channel
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -36,6 +37,13 @@ type (
 	AllocVChannelParam struct {
 		CollectionID int64
 		Num          int
+		// RequireReady excludes channels whose read-write WAL has not finished
+		// opening. SplitShard must validate its targets before fencing a source;
+		// ordinary collection allocation retains its existing behavior.
+		RequireReady bool
+		// AllowPartial returns up to Num candidates in one snapshot. Split
+		// planning must not retry allocation once per unopened channel.
+		AllowPartial bool
 	}
 
 	WatchChannelAssignmentsCallbackParam struct {
@@ -398,11 +406,17 @@ func (cm *ChannelManager) AllocVirtualChannels(ctx context.Context, param AllocV
 	defer cm.cond.L.Unlock()
 
 	availableChannels := cm.sortAvailableChannelsByVChannelCount()
-	if len(availableChannels) < param.Num {
+	if param.RequireReady {
+		availableChannels = slices.DeleteFunc(availableChannels, func(candidate withVChannelCount) bool {
+			meta := cm.channels[candidate.id]
+			return !meta.IsAssigned() || meta.ChannelInfo().AccessMode != types.AccessModeRW
+		})
+	}
+	if len(availableChannels) < param.Num && !param.AllowPartial {
 		return nil, status.NewInner("not enough pchannels to allocate, expected: %d, got: %d", param.Num, len(availableChannels))
 	}
 
-	vchannels := make([]string, 0, param.Num)
+	vchannels := make([]string, 0, min(param.Num, len(availableChannels)))
 	for _, channel := range availableChannels {
 		if len(vchannels) >= param.Num {
 			break

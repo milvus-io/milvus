@@ -6847,6 +6847,16 @@ type dataCoordConfig struct {
 	AutoBalance                    ParamItem `refreshable:"true"`
 	CheckAutoBalanceConfigInterval ParamItem `refreshable:"false"`
 
+	// Online shard split. Every parameter is hidden (Export: false).
+	ShardSplitEnable                     ParamItem `refreshable:"true"`
+	ShardSplitCheckInterval              ParamItem `refreshable:"true"`
+	ShardSplitMaxShardSize               ParamItem `refreshable:"true"`
+	ShardSplitMaxShardRows               ParamItem `refreshable:"true"`
+	ShardSplitMaxConcurrent              ParamItem `refreshable:"true"`
+	ShardSplitFlushBeforeSplit           ParamItem `refreshable:"true"`
+	ShardSplitAllowWithReplication       ParamItem `refreshable:"true"`
+	ShardSplitResidualWaitAlertThreshold ParamItem `refreshable:"true"`
+
 	// import
 	FilesPerPreImportTask           ParamItem `refreshable:"true"`
 	ImportTaskRetention             ParamItem `refreshable:"true"`
@@ -8455,6 +8465,82 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 		Export:       true,
 	}
 	p.EnableL0Import.Init(base.mgr)
+
+	p.ShardSplitEnable = ParamItem{
+		Key:     "dataCoord.shardSplit.enable",
+		Version: "3.0.0",
+		Doc: "Whether DataCoord splits a shard that grows over the shard split thresholds. " +
+			"It only gates the trigger: a split that was already issued, or that arrives through replication, is always carried on.",
+		DefaultValue: "false",
+		Export:       false,
+	}
+	p.ShardSplitEnable.Init(base.mgr)
+
+	p.ShardSplitCheckInterval = ParamItem{
+		Key:          "dataCoord.shardSplit.checkInterval",
+		Version:      "3.0.0",
+		Doc:          "The interval in seconds at which the shard split trigger inspects the shards.",
+		DefaultValue: "60",
+		Export:       false,
+	}
+	p.ShardSplitCheckInterval.Init(base.mgr)
+
+	p.ShardSplitMaxShardSize = ParamItem{
+		Key:          "dataCoord.shardSplit.maxShardSize",
+		Version:      "3.0.0",
+		Doc:          "A shard whose segments hold at least this many megabytes is split.",
+		DefaultValue: "1048576",
+		Export:       false,
+	}
+	p.ShardSplitMaxShardSize.Init(base.mgr)
+
+	p.ShardSplitMaxShardRows = ParamItem{
+		Key:          "dataCoord.shardSplit.maxShardRows",
+		Version:      "3.0.0",
+		Doc:          "A shard whose segments hold at least this many rows is split.",
+		DefaultValue: "1000000000",
+		Export:       false,
+	}
+	p.ShardSplitMaxShardRows.Init(base.mgr)
+
+	p.ShardSplitMaxConcurrent = ParamItem{
+		Key:          "dataCoord.shardSplit.maxConcurrent",
+		Version:      "3.0.0",
+		Doc:          "The trigger issues no split while this many splits are in their window on this cluster.",
+		DefaultValue: "1",
+		Export:       false,
+	}
+	p.ShardSplitMaxConcurrent.Init(base.mgr)
+
+	p.ShardSplitFlushBeforeSplit = ParamItem{
+		Key:     "dataCoord.shardSplit.flushBeforeSplit",
+		Version: "3.0.0",
+		Doc: "Whether the trigger flushes the source shard before it issues the split, " +
+			"so that less data is unflushed at the fence. The flush is local to this cluster.",
+		DefaultValue: "true",
+		Export:       false,
+	}
+	p.ShardSplitFlushBeforeSplit.Init(base.mgr)
+
+	p.ShardSplitAllowWithReplication = ParamItem{
+		Key:     "dataCoord.shardSplit.allowWithReplication",
+		Version: "3.0.0",
+		Doc: "Whether the shard split trigger may issue a split on a cluster that is part of a replicate topology. " +
+			"The versions of the nodes of a secondary cannot be seen from the primary: set it only when every cluster of the topology is upgraded.",
+		DefaultValue: "false",
+		Export:       false,
+	}
+	p.ShardSplitAllowWithReplication.Init(base.mgr)
+
+	p.ShardSplitResidualWaitAlertThreshold = ParamItem{
+		Key:     "dataCoord.shardSplit.residualWaitAlertThreshold",
+		Version: "3.0.0",
+		Doc: "The number of seconds after which a shard split that still waits for the residual of its source to flush, " +
+			"and so still keeps the resource key of its collection, is logged as an error.",
+		DefaultValue: "1800",
+		Export:       false,
+	}
+	p.ShardSplitResidualWaitAlertThreshold.Init(base.mgr)
 
 	p.ImportPreAllocIDExpansionFactor = ParamItem{
 		Key:          "dataCoord.import.preAllocateIDExpansionFactor",

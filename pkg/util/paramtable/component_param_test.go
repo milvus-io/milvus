@@ -1618,6 +1618,18 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, true, Params.WaitForIndex.GetAsBool())
 		assert.Equal(t, false, Params.ImportInReplicatingCluster.GetAsBool())
 		assert.Equal(t, false, Params.EnableL0Import.GetAsBool())
+
+		// The shard split trigger is off unless it is turned on explicitly.
+		assert.False(t, Params.ShardSplitEnable.GetAsBool())
+		assert.False(t, Params.ShardSplitEnable.Export)
+		assert.Equal(t, 60*time.Second, Params.ShardSplitCheckInterval.GetAsDuration(time.Second))
+		assert.EqualValues(t, 1048576, Params.ShardSplitMaxShardSize.GetAsInt64())
+		assert.EqualValues(t, 1000000000, Params.ShardSplitMaxShardRows.GetAsInt64())
+		assert.Equal(t, 1, Params.ShardSplitMaxConcurrent.GetAsInt())
+		assert.True(t, Params.ShardSplitFlushBeforeSplit.GetAsBool())
+		assert.False(t, Params.ShardSplitAllowWithReplication.GetAsBool())
+		assert.False(t, Params.ShardSplitAllowWithReplication.Export)
+		assert.Equal(t, 30*time.Minute, Params.ShardSplitResidualWaitAlertThreshold.GetAsDuration(time.Second))
 		assert.Equal(t, 4, Params.ImportFileNumPerSlot.GetAsInt())
 		assert.Equal(t, 160*1024*1024, Params.ImportMemoryLimitPerSlot.GetAsInt())
 

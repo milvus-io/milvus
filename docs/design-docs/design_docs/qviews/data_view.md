@@ -141,6 +141,16 @@ idempotent: if the Collection already has a latest snapshot, it returns that
 snapshot's version. The normal DDL path creates this snapshot before any
 membership mutation.
 
+`DeclareShards` adds empty shards to an active Collection, in one new
+DataVersion (CompactVersion +1). It is the only event besides creation and
+recovery bootstrap that adds a shard, and a shard split uses it to declare its
+two target VChannels. Each new shard starts with W = A = the frontier the
+event carries, as creation does with the creation TimeTick. A shard that
+exists is left unchanged and an event that adds nothing writes nothing, so a
+replayed declaration is a no-op. Segments, their statistics and the other
+shards are carried over from the latest snapshot. A Collection without any
+snapshot is refused with a not-ready error; a dropped Collection is a no-op.
+
 An active Collection owns a `latest` entry and a map of retained versions.
 Membership mutations are serialized by the Collection lock. `Recompute` clones
 the latest immutable snapshot, rebuilds membership and Manifest versions from
