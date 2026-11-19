@@ -8,7 +8,7 @@
 
 本轮收敛的事项：改挂分批准备、整体发布；源 L0 有限，目标持续产生的新 L0 不阻塞历史收尾；利用现有动态 PChannel 能力扩容；删除历史依赖持久 Summary，内存只做有界缓存；接受残余 flush 阶段的 DDL 锁等待；fence 后拒绝新 g0 计划，保留一致性并接受短暂读重试。
 
-待讨论事项：CDC 下多代切分、备集群物理进度落后时的后续操作。该问题尚未确定，不在本文中擅自选择“永久禁止 CDC”或“已经支持完整多代谱系”。在协议闭合并完成验证前，现有复制准入保护不能仅因本文更新就打开。
+CDC 场景下，子切分等待当前拓扑每个成员确认父任务退休。强制升主时，目标本地写需要原主真实源 Fence 的复制凭据。第 14 节给出两项准入的恢复条件；生产复制开关默认关闭。
 
 首版支持主键 hash 路由的内部 collection。namespace、TEXT 重写、residue collection 的 import、snapshot/restore 等未闭合能力见第 15 节。查询引擎不增加按行 shard 过滤，不增加第二条依赖物理清洗完成的可复制切换消息。
 
@@ -123,9 +123,11 @@ Split 的前置条件是两个目标 PChannel 已经完成必要的创建、分�
 
 源在 append 的串行化边界安装 DML fence，封存所有 growing 段，后续 Insert/Delete/CreateSegment 不能越过 fence；事务和 Commit 的锁顺序保证不能提交一笔穿越 fence 的旧事务。append 结果不确定时不能解除 fence，恢复决定实际持久状态。
 
+无持久幂等键的单条 DML 遇到源 WAL 应答丢失时，返回结果未知，停止自动重发。明确被 Fence 拒绝后，路由刷新及后续 WAL 尝试共用首次拒绝时设置的绝对截止时间。Insert 部分落盘后再遇 schema 变化时，返回部分写入状态、已持久行的索引与主键。Go SDK 据此停止整批重试。AutoID Partial Upsert 在 CAS 证明缺少新目的地时，刷新路由并重新执行 Strong 读。
+
 源残余段正常 flush，仍属于 S。其 SN 在残余服务期间从 T_switch 起订阅目标删除流。
 
-目标副本作为创世，复用 CreateCollection 的注册、schema、函数运行时、恢复模块和 MVCC 初始化机制，恢复重复创世必须幂等。
+目标副本作为创世，复用 CreateCollection 的注册、schema、函数运行时、恢复模块和 MVCC 初始化机制，目标持久记录首次创世的 task、源和目标 VChannel。只有三个标识全部相同的重放才可接受，append 结果未知及节点重启时继续检查这组标识。
 
 ### 7.3 回调及发布
 
@@ -149,7 +151,7 @@ fence 前新请求走普通 g0。fence 后，无论 primary 还是 secondary，�
 
 ### 8.2 统一 B
 
-proxy 对每个谱系组采样目标 through 及 Strong 最小前缀。Strong/Session 使用所需的新鲜度下限，Bounded/Customized 保留请求 guarantee，Eventually 无额外下限；固定时间点操作保留已有时间点。
+proxy 对每个谱系组采样目标 through 及 Strong 最小前缀。Session 取请求 guarantee 与参与目标 Strong 下限的较大值，Strong 使用参与目标的 Strong 下限，Bounded/Customized 保留请求 guarantee，Eventually 无额外下限；固定时间点操作保留已有时间点。
 
 分组发布或重建 DataView 移除已发布的物理段时，在受影响的 shard 上持久化发布时的 TSO 作为固定快照的保守下界。接管时所有目标继承源的下界，包括重写后没有剩余行的目标。SN 在 Phase 1 用请求的 B 校验该下界。失效的游标返回 ViewInvalidated。
 
@@ -253,7 +255,7 @@ prepare 批次写入暂存归属，不覆盖当前生效 InsertChannel。schema�
 
 以 S 的 resident placement 为种子构建目标 g2。QN 物理段按 ID/基线共享；每个 view 的流注册按其归属独立，不能破坏仍在服务的 g1 注册。
 
-每个所需 replica 全部 Up 后发布 g2，停止 g1 发放新计划，等待既定失效/引用退出完成。旧 g1 的资源查询要能从历史 DataView 确认其合法归属，不能因当前 SegmentMeta 已规范化到目标而拒绝合法旧引用。
+每个所需 replica 全部 Up 后发布 g2，停止 g1 发放新计划，等待既定失效/引用退出完成。旧 g1 的资源查询以被引用的精确历史 DataView、已提交的段改挂记录及受保留的实际资源验证归属；目标普通 compaction 替换该段后，SN 冷启动仍可重建旧 g1 的 BM25 IDF。
 
 ## 12. 有限历史收尾与退休
 
@@ -263,7 +265,7 @@ g2 发布且 g1 退出服务后，在每个目标追加本地不复制的 flush 
 
 ### 12.2 完成证明
 
-固定并记录 F_i 后恢复目标 L0 调度，使其可以执行所需折叠。此时 g1 已退出，源段已全部有效归属目标，不再有窗口内提前丢弃历史的问题；历史 pin 继续保留到证明完成。
+固定并记录 F_i 后恢复目标 L0 调度，使其可以执行所需折叠。物化进度到达 F_i 后，每次检查只对仍阻挡覆盖的目标及分区补调度，晚到的小 L0 可在关闭普通自动 compaction 的情况下完成折叠。此时 g1 已退出，源段已全部有效归属目标，不再有窗口内提前丢弃历史的问题；历史 pin 继续保留到证明完成。
 
 等待目标持久化 M_i 覆盖 F_i，证明截至 F_i 的删除都已可靠物化；再由 L0 compaction 为相关仍存活的段基线建立 C_s,i 覆盖 F_i 的证明。没有命中行或完全没有 Delete，也必须可以记录覆盖，不能要求生成实际非空删除文件才前进。
 
@@ -293,7 +295,7 @@ DropCollection 清理整个 collection，包含源、目标及本地准备/任�
 
 CreatePartition/Flush 主要作用于目标；源读 partition 选择仍须与本集群 load 配置一致。Release 后可停止读资源，但不能丢失恢复和后续 Load 所需的切分事实。
 
-## 14. 复制与待讨论问题
+## 14. 主备复制与切分准入
 
 ### 14.1 保留的协议方向
 
@@ -307,13 +309,13 @@ SplitShard 及后续目标 DML/DDL 可复制；接收端重命名源、目标、
 
 这描述单次 split 的设计方向，不构成完整 CDC 支持声明。空闲 secondary 的 barrier、角色切换后的目标准入和所有恢复边界均需独立验证。
 
-### 14.2 多代切分缺口
+### 14.2 子切分的全拓扑退休准入
 
 主集群已完成 S→T1/T2 后，可能继续 T1→U1/U2，而备集群仍保留 S 的旧行并只订阅 T1/T2。之后写到 U1/U2 的删除无法自然到达 S；当前单层谱系分组也拒绝一个 shard 同时为祖先目标与后继源。
 
-待讨论的决策包括：是否约束后续逻辑操作等待拓扑成员；是否引入多代谱系及按时间区间的流；如何处理切主、落后成员、import/restore 和动态 PChannel 扩容。任何选择都必须给出跨集群进度不同的恢复和删除投递证明。
+发起子切分时，在共享集群配置锁和 collection 广播资源锁内检查父任务。主站检查本地任务，按当前复制配置的 PChannel 槽位转换源 VChannel，并向每个远端成员并发查询持久退休记录。成员身份、拓扑指纹、collection、父 task 和源均须吻合。复制来的父任务还须具备真实源 Fence 凭据。拓扑指纹包含成员、PChannel 映射及复制方向，允许各站独立配置连接地址和凭据。
 
-第 4.1 版“备集群仍在窗口内不在范围内”不能继续作为正确性边界。正式开启复制准入前，必须解决或明确拒绝这些尚未支持的操作；本文暂不替该讨论作结论。
+成员缺席、超时、持有旧配置、任务尚未退休或缺少凭据时，推迟当前子切分。目标普通 DML 及复制继续按既有准入执行。下一次申请重新取证，首次切分无需跨站探测。
 
 ## 15. 功能与兼容性边界
 
@@ -323,7 +325,7 @@ TEXT 的 LOB 引用、manifest base 和重写语义尚未闭合，首版保持�
 
 residue collection 的 import 路由目前未实现。现有实现即使 adoption 后也可能继续拒绝；要解除拒绝必须明确 import 输出和提交按 residue 分配，不能默认 g2 自动恢复能力。
 
-snapshot/restore 与窗口内再次切分保持保护；CDC 落后集群上的对应语义属于第 14 节待讨论项。
+snapshot/restore 与窗口内再次切分保持保护。CDC 子切分还要满足第 14 节的全拓扑退休条件。
 
 窗口结束后的 snapshot 必须保存当前写 shard 的 routing modulus、ShardBy 和逐 shard residue，不能只保存 shard 数。snapshot 的 schema、properties、routing 从 collection 资源锁内的同一个 RootCoord immutable view 取得。restore 复用复制段的确定性旧 channel→新 channel 映射来重命名 routing，把完整 post-image 放入原 RestoreSnapshot WAL recipe，与 CollectionRestoring 元数据一次创建持久化，不复制旧集群的 split lineage 或再发一次路由更新。回调重放和重启保持相同 owner；恢复后的 collection 可以继续 split。无 routing 字段的旧快照继续按原 modulo-N 语义恢复。含 residue 的新快照需要理解这些字段的恢复端；旧版本忽略新增 JSON 字段不能证明恢复兼容。
 
@@ -366,7 +368,7 @@ QN/TransformLog：多流注册、物理段共享、有界缓存和分页 replay�
 
 Proxy/queryclient：写 fence/idempotency 重试、读列表和 epoch、统一 B、整请求重试及固定时间点操作语义。
 
-PChannel/CDC：复用现有动态新增能力，补齐可用性和扩容准入；多代 CDC 仍待讨论，不列为已实现。
+PChannel/CDC：复用现有动态新增能力，补齐可用性和扩容准入；子切分按当前拓扑检查所有成员的持久退休进度。
 
 ## 18. 验证与验收
 
@@ -383,7 +385,7 @@ PChannel/CDC：复用现有动态新增能力，补齐可用性和扩容准入�
 - PChannel 扩容成功/失败/尚未可用、进程恢复、预创建 topic 模式、MQ 配额失败；fence 前准入不破坏原写路径。
 - 所需时保留旧 generation 的历史资源、索引和 BM25；GC 不因当前归属规范化而回收旧引用。
 
-Go 测试使用 -tags dynamic,test、-gcflags="all=-N -l"、-count=1。还需真实原生库、对象存储及独立集群测试；stub 环境不能证明引擎删除可见性。CDC 验收在第 14 节定案后补全，不能用单集群测试替代。
+Go 测试使用 -tags dynamic,test、-gcflags="all=-N -l"、-count=1。还需真实原生库、对象存储及独立集群测试；stub 环境不能证明引擎删除可见性。CDC 验收需实际验证源流断流升主、备站落后时延迟子切分以及追平后的放行。
 
 ## 19. 可观测性与运维
 
@@ -401,12 +403,12 @@ Go 测试使用 -tags dynamic,test、-gcflags="all=-N -l"、-count=1。还需真
 - 将持久历史保留与内存缓存解绑，给出分页追赶、实时 gap 恢复和有界工作集方案。
 - 保留残余 flush 持锁的已接受可用性限制。
 - 明确 fence 后拒绝新 g0、整请求重试、固定时间点及旧代际保留边界。
-- CDC 多代切分仍为待讨论协议，未将其包装为已闭合支持。
+- CDC 子切分增加全拓扑退休准入，落后成员继续完成自己的接管和退休。
 
 
 ## 21. R5 实施说明与仍需保留的边界
 
-实现使用内容寻址的 256 KiB 元数据页和小根记录；只有已经切分的 DataView 启用分页写入，未切分 collection 保留原有持久化编码。共享页目前保守保留到 collection 删除，尚未实现单个历史版本的共享页引用回收。
+实现使用内容寻址的 256 KiB 元数据页和小根记录；只有已经切分的 DataView 启用分页写入，未切分 collection 保留原有持久化编码。已切分 DataView 的页归创建它的 streaming/compact 版本所有。历史版本进入 GC 后，一次 KV 事务删除该版本的根及专属页前缀，其他活跃版本继续保有自己的页。
 
 每次准备生成唯一 attempt ID；提交事务比较该次 Prepared 根，原子写入 Committed 根和 DataView 根。提交结果不确定且 KV 读回失败时，持续确认并保留内存发布屏障。仅仅读到 Prepared 不能证明旧请求不会稍后提交：必须以相同 Prepared 根为条件，将其变为 Preparing，以隔离迟到提交后才能返回失败。若原提交先赢，则恢复 Committed；若隔离应答丢失，则继续读回。下一次准备使用新的 attempt ID，避免相同 move 集合重建后旧事务再次满足条件。请求取消不代表事务未提交。这一安全策略可能在元数据长时间不可用时延迟优雅关闭，不能宣称取消请求即可解除等待。
 
@@ -416,7 +418,7 @@ Go 测试使用 -tags dynamic,test、-gcflags="all=-N -l"、-count=1。还需真
 
 窗口内源清洗及源替换任务的 TTL 过滤使用冻结截止点。固定时间点请求早于当前 view 的保留基线或谱系切换点时明确失效，不提升 B；这不构成任意历史 iterator 的跨分页快照保留服务。
 
-自动触发和未确定的版本门禁继续关闭；CDC 多代协议仍待讨论。原生引擎、实际对象存储和真实集群/CDC 的验收结论必须与 Go 回归区分。
+自动触发和未确定的版本门禁继续关闭；CDC 子切分遵循 §14.2 的全拓扑退休约束。原生引擎、实际对象存储和真实集群/CDC 的验收结论必须与 Go 回归区分。
 
 ## 22. R6 端到端验证后的约束补全
 
