@@ -58,7 +58,7 @@ func (c *taskCountsCatalog) ListSegmentIndexes(_ context.Context, collectionID i
 	var tasks []*model.SegmentIndex
 	for _, task := range c.tasks {
 		if task.CollectionID == collectionID {
-			tasks = append(tasks, task)
+			tasks = append(tasks, model.CloneSegmentIndex(task))
 		}
 	}
 	return tasks, c.err
@@ -306,16 +306,26 @@ func TestIndexTaskCountsLifecycle(t *testing.T) {
 
 func TestIndexTaskCountsRecoveryReplacement(t *testing.T) {
 	metrics.DataCoordStoredIndexFilesSize.Reset()
+	fileKeys := []string{"0", "1"}
+	finished := &model.SegmentIndex{
+		CollectionID: 1, IndexID: 10, SegmentID: 20, BuildID: 30,
+		IndexState: commonpb.IndexState_Finished, IndexSerializedSize: 300, IndexFileKeys: fileKeys,
+	}
 	catalog := &taskCountsCatalog{
 		indexes: []*model.Index{{CollectionID: 1, IndexID: 10}},
 		tasks: []*model.SegmentIndex{
 			{CollectionID: 1, IndexID: 10, SegmentID: 20, BuildID: 30, IndexState: commonpb.IndexState_Unissued, IndexSerializedSize: 100},
 			{CollectionID: 1, IndexID: 10, SegmentID: 20, BuildID: 30, IndexState: commonpb.IndexState_Finished, IndexSerializedSize: 200},
-			{CollectionID: 1, IndexID: 10, SegmentID: 20, BuildID: 30, IndexState: commonpb.IndexState_Finished, IndexSerializedSize: 300},
+			finished,
 		},
 	}
 	m, err := NewIndexMeta(context.Background(), catalog, []int64{1, 2, 3})
 	require.NoError(t, err)
+	recovered, ok := m.SegmentBuildInfo.Get(finished.BuildID)
+	require.True(t, ok)
+	require.Nil(t, recovered.IndexFileKeys)
+	require.Equal(t, len(fileKeys), recovered.IndexFileCount)
+	require.Equal(t, fileKeys, finished.IndexFileKeys)
 	assertIndexTaskCounts(t, m)
 	require.Equal(t, indexTaskStateCounts{0, 0, 0, 1}, m.indexTaskCountsSnapshot())
 	require.Equal(t, map[int64]int64{1: 300}, storedIndexSizeSeries(t))

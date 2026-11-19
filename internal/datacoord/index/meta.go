@@ -240,13 +240,10 @@ func (m *IndexMeta) reloadFromKV(collectionIDs []int64) error {
 			return err
 		}
 		for _, segIdxes := range collectionSegIdxes {
-			for i, source := range segIdxes {
+			for _, segIdx := range segIdxes {
 				// ListSegmentIndexes supplied a durable catalog row.
-				record := *source
-				segIdx := &record
 				segIdx.ManifestPublished = false
 				segIdx.CompactFileKeys()
-				segIdxes[i] = segIdx
 				if segIdx.IndexMemSize == 0 {
 					segIdx.IndexMemSize = segIdx.IndexSerializedSize * paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsUint64()
 				}
