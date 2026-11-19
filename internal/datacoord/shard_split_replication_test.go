@@ -64,11 +64,15 @@ func TestSplitRetirementAcrossCDCConnection(t *testing.T) {
 	require.ErrorIs(t, check(), merr.ErrServiceNotReady)
 	record := splitTestRecord(parent.TaskId)
 	record.Source = "p1_100v0"
+	record.ReplicatedFrom = "primary"
 	_, err = store.Record(ctx, record)
 	require.NoError(t, err)
 	require.ErrorIs(t, check(), merr.ErrServiceNotReady)
-	require.NoError(t, store.MarkSourceAcked(ctx, parent.TaskId, 100, record.Source, []string{splitTestTarget1, splitTestTarget2}))
+	require.NoError(t, store.MarkSourceAcked(ctx, parent.TaskId, 100, record.Source, []string{splitTestTarget1, splitTestTarget2}, nil, false))
 	require.NoError(t, store.Advance(ctx, parent.TaskId, datapb.SplitShardTaskState_SplitShardTaskRetired))
+	require.ErrorIs(t, check(), merr.ErrServiceNotReady)
+	proof := &commonpb.ReplicateCheckpoint{ClusterId: "primary", Pchannel: "p0", MessageId: &commonpb.MessageID{Id: "17"}, TimeTick: 500}
+	require.NoError(t, store.MarkSourceAcked(ctx, parent.TaskId, 100, record.Source, []string{splitTestTarget1, splitTestTarget2}, proof, true))
 	require.NoError(t, check())
 	cfg.Clusters[1].Pchannels = []string{"different"}
 	require.ErrorIs(t, check(), merr.ErrServiceNotReady)
@@ -93,11 +97,14 @@ func TestSplitRetirementRequiresSameMemberAndTask(t *testing.T) {
 func TestSplitRetirementUnavailableTopology(t *testing.T) {
 	ctx := context.Background()
 	s := &Server{}
-	parent := &datapb.SplitShardTask{TaskId: 1, CollectionId: 10, SourceVchannel: "p_10v0"}
+	parent := &datapb.SplitShardTask{TaskId: 1, CollectionId: 10, SourceVchannel: "p_10v0", State: datapb.SplitShardTaskState_SplitShardTaskRetired}
 	var cfg *commonpb.ReplicateConfiguration
 	var failure error
 	mock := mockey.Mock(ddl.GetReplicationTopology).To(func(context.Context) (*commonpb.ReplicateConfiguration, error) { return cfg, failure }).Build()
 	defer mock.UnPatch()
+	parent.ReplicatedFromClusterId = "old-primary"
+	require.ErrorIs(t, s.checkSplitParentRetired(ctx, parent), merr.ErrServiceNotReady)
+	parent.ReplicatedFromClusterId = ""
 	require.NoError(t, s.checkSplitParentRetired(ctx, parent))
 	_, err := s.splitRetirementProgress(ctx, nil, gjson.Result{})
 	require.ErrorIs(t, err, merr.ErrServiceNotReady)

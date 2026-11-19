@@ -772,7 +772,7 @@ func TestAdmitChildWaitsForParentRetirementOnPeers(t *testing.T) {
 	record := testRecord(7)
 	_, err := env.store.Record(ctx, record)
 	require.NoError(t, err)
-	require.NoError(t, env.store.MarkSourceAcked(ctx, 7, testCollection, testSource, []string{testTarget1, testTarget2}))
+	require.NoError(t, env.store.MarkSourceAcked(ctx, 7, testCollection, testSource, []string{testTarget1, testTarget2}, nil, false))
 	require.NoError(t, env.store.Advance(ctx, 7, datapb.SplitShardTaskState_SplitShardTaskRetired))
 	ready := false
 	checks := 0
