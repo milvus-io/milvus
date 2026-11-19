@@ -270,7 +270,8 @@ EstimateSegment(const proto::cgo::SegmentLoadResources& input,
             }
         }
         AssertInfo(index_type != nullptr, "index type is missing");
-        if (IndexRequiresGpu(*index_type, adapt_for_cpu)) {
+        if (IsVector(info.field()) &&
+            IndexRequiresGpu(*index_type, adapt_for_cpu)) {
             usage.add_field_gpu_memory_bytes(resource.max_memory_cost);
         }
         if (resource.has_raw_data &&
