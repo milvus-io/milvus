@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -187,9 +188,9 @@ func TestSearchStopsBeforeExecutionWhenAutoLoadFails(t *testing.T) {
 			return merr.ErrIndexNotFound
 		}).Build()
 	searchMock := mockey.Mock((*Proxy).search).To(
-		func(_ *Proxy, _ context.Context, _ *milvuspb.SearchRequest, _, _ bool, _ bool, _ *requestReport) (*milvuspb.SearchResults, bool, bool, bool, error) {
+		func(_ *Proxy, _ context.Context, _ *milvuspb.SearchRequest, _ searchOptions) (*milvuspb.SearchResults, searchAttempt, error) {
 			searchCalls++
-			return &milvuspb.SearchResults{Status: merr.Success()}, false, false, false, nil
+			return &milvuspb.SearchResults{Status: merr.Success()}, searchAttempt{}, nil
 		}).Build()
 	defer readinessMock.UnPatch()
 	defer searchMock.UnPatch()
@@ -218,9 +219,9 @@ func TestHybridSearchStopsBeforeExecutionWhenAutoLoadFails(t *testing.T) {
 			return merr.ErrIndexNotFound
 		}).Build()
 	hybridSearchMock := mockey.Mock((*Proxy).hybridSearch).To(
-		func(_ *Proxy, _ context.Context, _ *milvuspb.HybridSearchRequest, _ bool, _ bool, _ *requestReport) (*milvuspb.SearchResults, bool, bool, error) {
+		func(_ *Proxy, _ context.Context, _ *milvuspb.HybridSearchRequest, _ searchOptions) (*milvuspb.SearchResults, searchAttempt, error) {
 			hybridSearchCalls++
-			return &milvuspb.SearchResults{Status: merr.Success()}, false, false, nil
+			return &milvuspb.SearchResults{Status: merr.Success()}, searchAttempt{}, nil
 		}).Build()
 	defer readinessMock.UnPatch()
 	defer hybridSearchMock.UnPatch()
@@ -887,19 +888,21 @@ func TestDQLAutoLoadRetryPreservesSearchFallbackAndRecall(t *testing.T) {
 			}).Build()
 			defer ready.UnPatch()
 			calls := 0
-			search := mockey.Mock((*Proxy).search).To(func(_ *Proxy, _ context.Context, _ *milvuspb.SearchRequest, optimized, recall bool, _ bool, _ *requestReport) (*milvuspb.SearchResults, bool, bool, bool, error) {
+			search := mockey.Mock((*Proxy).search).To(func(_ *Proxy, _ context.Context, _ *milvuspb.SearchRequest, opts searchOptions) (*milvuspb.SearchResults, searchAttempt, error) {
 				calls++
 				if calls == 1 {
-					require.True(t, optimized)
-					return &milvuspb.SearchResults{Status: merr.Success()}, mode == "fallback", mode == "fallback", mode == "recall", nil
+					require.True(t, opts.optimized)
+					return &milvuspb.SearchResults{Status: merr.Success()}, searchAttempt{
+						resultSizeInsufficient: mode == "fallback", topKReduced: mode == "fallback", evaluateRecall: mode == "recall",
+					}, nil
 				}
 				if calls == 2 {
-					require.False(t, optimized)
-					require.Equal(t, mode == "recall", recall)
+					require.False(t, opts.optimized)
+					require.Equal(t, mode == "recall", opts.recallEvaluation)
 					err := merr.Wrap(merr.ErrQueryViewNotReady, "released during extra search")
-					return &milvuspb.SearchResults{Status: merr.Status(err)}, false, false, false, err
+					return &milvuspb.SearchResults{Status: merr.Status(err)}, searchAttempt{}, err
 				}
-				return &milvuspb.SearchResults{Status: merr.Success()}, false, false, false, nil
+				return &milvuspb.SearchResults{Status: merr.Success()}, searchAttempt{}, nil
 			}).Build()
 			defer search.UnPatch()
 			resp, err := node.Search(context.Background(), &milvuspb.SearchRequest{DbName: "db", CollectionName: "collection"})
@@ -916,19 +919,30 @@ func TestDQLAutoLoadRetryPreservesInconsistentRequery(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, Params.Reset(Params.ProxyCfg.EnableAutoLoad.Key)) })
 	node := &Proxy{metaCache: &MetaCache{}}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	reports := 0
+	enableUsageReport(t, func(info map[string]any) int {
+		reports++
+		require.Equal(t, hookutil.OpTypeHybridSearch, info[hookutil.OpTypeKey])
+		require.EqualValues(t, 200, info[hookutil.CollectionStorageBytesKey])
+		require.EqualValues(t, 6, info[hookutil.ReadCountKey])
+		return 1200
+	})
 	calls := 0
-	search := mockey.Mock((*Proxy).hybridSearch).To(func(*Proxy, context.Context, *milvuspb.HybridSearchRequest, bool, bool, *requestReport) (*milvuspb.SearchResults, bool, bool, error) {
+	search := mockey.Mock((*Proxy).hybridSearch).To(func(*Proxy, context.Context, *milvuspb.HybridSearchRequest, searchOptions) (*milvuspb.SearchResults, searchAttempt, error) {
 		calls++
+		size := int64(100 * calls)
+		attempt := searchAttempt{collectionBytes: &size, readCount: 6}
 		if calls == 1 {
-			return &milvuspb.SearchResults{Status: merr.Status(merr.ErrInconsistentRequery)}, false, false, nil
+			return &milvuspb.SearchResults{Status: merr.Status(merr.ErrInconsistentRequery)}, attempt, nil
 		}
-		return &milvuspb.SearchResults{Status: merr.Success()}, false, false, nil
+		return &milvuspb.SearchResults{Status: merr.Success()}, attempt, nil
 	}).Build()
 	defer search.UnPatch()
 	resp, err := node.HybridSearch(context.Background(), &milvuspb.HybridSearchRequest{DbName: "db", CollectionName: "collection"})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(resp.GetStatus()))
 	require.Equal(t, 2, calls)
+	require.Equal(t, 1, reports)
 }
 
 func TestDQLQueryRetryCountsRequestOnce(t *testing.T) {
@@ -942,9 +956,19 @@ func TestDQLQueryRetryCountsRequestOnce(t *testing.T) {
 	before := testutil.ToFloat64(counter)
 	ready := mockey.Mock((*Proxy).ensureCollectionReady).Return(nil).Build()
 	defer ready.UnPatch()
+	reports := 0
+	enableUsageReport(t, func(info map[string]any) int {
+		reports++
+		require.Equal(t, hookutil.OpTypeQuery, info[hookutil.OpTypeKey])
+		require.EqualValues(t, 300, info[hookutil.CollectionStorageBytesKey])
+		require.EqualValues(t, 1, info[hookutil.ReadCountKey])
+		return 300
+	})
 	calls := 0
-	query := mockey.Mock((*Proxy).query).To(func(*Proxy, context.Context, *queryTask, trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+	query := mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 		calls++
+		size := int64(100 * calls)
+		qt.CollectionSizeBytes = &size
 		if calls <= 2 {
 			err := merr.Wrap(merr.ErrQueryViewNotReady, "retry query")
 			return &milvuspb.QueryResults{Status: merr.Status(err)}, segcore.StorageCost{}, err
@@ -956,6 +980,7 @@ func TestDQLQueryRetryCountsRequestOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(resp.GetStatus()))
 	require.Equal(t, 3, calls)
+	require.Equal(t, 1, reports)
 	require.Equal(t, before+1, testutil.ToFloat64(counter))
 	rate, err := rateCol.Rate(internalpb.RateType_DQLQuery.String(), ratelimitutil.DefaultWindow)
 	require.NoError(t, err)

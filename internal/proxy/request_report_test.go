@@ -29,7 +29,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
+	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
@@ -38,83 +40,99 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-type requestReportExtension struct {
+type usageTestExtension struct {
 	hookutil.DefaultExtension
 	report func(map[string]any) int
 }
 
-func (e requestReportExtension) Report(info any) int { return e.report(info.(map[string]any)) }
+func (e usageTestExtension) Report(info any) int { return e.report(info.(map[string]any)) }
 
 func enableUsageReport(t *testing.T, report func(map[string]any) int) {
 	t.Helper()
 	paramtable.Init()
 	previous := extension.RequestUsageReporter()
-	extension.SetRequestUsageReporter(requestReportExtension{report: report})
+	extension.SetRequestUsageReporter(usageTestExtension{report: report})
 	t.Cleanup(func() { extension.SetRequestUsageReporter(previous) })
 }
 
-func TestRequestReport(t *testing.T) {
-	ctx := t.Context()
-	db := t.Name()
+func TestReportReadUsage(t *testing.T) {
+	ctx, db := t.Context(), t.Name()
 	size := int64(123)
-	reports := 0
+	var calls int
 	enableUsageReport(t, func(info map[string]any) int {
-		reports++
+		calls++
 		require.Equal(t, map[string]any{
 			hookutil.OpTypeKey: hookutil.OpTypeSearch, hookutil.DatabaseKey: db, hookutil.UsernameKey: "",
 			hookutil.CollectionStorageBytesKey: size, hookutil.ReadCountKey: int64(4),
 		}, info)
 		return int(size * 4)
 	})
+	reporter := extension.RequestUsageReporter()
 	counter := metrics.ProxyReportValue.WithLabelValues(paramtable.GetStringNodeID(), hookutil.OpTypeSearch, db, "")
 	before := testutil.ToFloat64(counter)
-	r := newRequestReport(ctx, hookutil.OpTypeSearch, db)
-	require.NotNil(t, r)
-	r.readCount, r.collectionSize = 3, &size
-	r.readCount = 4 // The final successful attempt supplies the measurement.
 	status := merr.Success()
-	require.Same(t, status, r.finish(ctx, status))
-	r.finish(ctx, status)
-	require.Equal(t, before+float64(size*4), testutil.ToFloat64(counter))
+	require.Same(t, status, reportReadUsage(ctx, reporter, hookutil.OpTypeSearch, db, status, &size, 4))
 	require.Empty(t, status.GetExtraInfo())
-	require.Equal(t, 1, reports)
 
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
 	for _, failure := range []struct {
 		ctx    context.Context
 		status *commonpb.Status
-	}{{canceled, merr.Success()}, {ctx, merr.Status(merr.ErrServiceRateLimit)}, {ctx, nil}} {
-		r = newRequestReport(ctx, hookutil.OpTypeSearch, db)
-		r.readCount, r.collectionSize = 4, &size
-		require.Same(t, failure.status, r.finish(failure.ctx, failure.status))
-		r.finish(ctx, merr.Success())
+	}{{canceled, status}, {ctx, merr.Status(merr.ErrServiceRateLimit)}, {ctx, nil}} {
+		require.Same(t, failure.status, reportReadUsage(failure.ctx, reporter, hookutil.OpTypeSearch, db, failure.status, nil, 4))
 	}
-	r = newRequestReport(ctx, hookutil.OpTypeSearch, db)
-	r.readCount = 1
-	require.ErrorIs(t, merr.Error(r.finish(ctx, status)), merr.ErrServiceInternal)
-	require.Equal(t, 1, reports)
+	require.Same(t, status, reportReadUsage(ctx, nil, hookutil.OpTypeSearch, db, status, nil, 4))
+	require.ErrorIs(t, merr.Error(reportReadUsage(ctx, reporter, hookutil.OpTypeSearch, db, status, nil, 4)), merr.ErrServiceInternal)
+	require.Equal(t, 1, calls)
 	require.Equal(t, before+float64(size*4), testutil.ToFloat64(counter))
 }
 
-func TestRequestReportKeepsReporterAcrossReload(t *testing.T) {
-	ctx, db := t.Context(), t.Name()
-	var ops []string
-	enableUsageReport(t, func(info map[string]any) int {
-		ops = append(ops, info[hookutil.OpTypeKey].(string))
-		return 0
-	})
-	r := newRequestReport(ctx, hookutil.OpTypeDelete, db)
-	size := int64(16)
-	r.writeBytes, r.readCount, r.collectionSize = 8, 1, &size
+func TestSearchReportsFinalAttemptAcrossReload(t *testing.T) {
+	node := &Proxy{}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	limitCheck := &Params.AutoIndexConfig.EnableResultLimitCheck
+	previous := limitCheck.GetValue()
+	require.NoError(t, Params.Save(limitCheck.Key, "true"))
+	t.Cleanup(func() { require.NoError(t, Params.Save(limitCheck.Key, previous)) })
+	ready := mockey.Mock((*Proxy).ensureCollectionReady).Return(nil).Build()
+	defer ready.UnPatch()
 
-	extension.SetRequestUsageReporter(nil)
-	require.Nil(t, newRequestReport(ctx, hookutil.OpTypeQuery, db))
-	require.True(t, merr.Ok(r.finish(ctx, merr.Success())))
-	require.Equal(t, []string{hookutil.OpTypeDelete, hookutil.OpTypeQuery}, ops)
+	const db = "final_search_attempt"
+	reports := 0
+	enableUsageReport(t, func(info map[string]any) int {
+		reports++
+		require.EqualValues(t, 200, info[hookutil.CollectionStorageBytesKey])
+		require.EqualValues(t, 2, info[hookutil.ReadCountKey])
+		return 400
+	})
+	calls := 0
+	search := mockey.Mock((*Proxy).search).To(func(_ *Proxy, _ context.Context, _ *milvuspb.SearchRequest, opts searchOptions) (*milvuspb.SearchResults, searchAttempt, error) {
+		calls++
+		require.False(t, opts.reportLegacy)
+		size := int64(calls * 100)
+		attempt := searchAttempt{collectionBytes: &size, readCount: 2}
+		switch calls {
+		case 1:
+			require.True(t, opts.optimized)
+			extension.SetRequestUsageReporter(nil)
+			attempt.resultSizeInsufficient, attempt.topKReduced = true, true
+		case 2:
+			require.False(t, opts.optimized)
+			attempt.evaluateRecall = true
+		case 3:
+			require.True(t, opts.recallEvaluation)
+		}
+		return &milvuspb.SearchResults{Status: merr.Success(), Results: &schemapb.SearchResultData{NumQueries: 2}}, attempt, nil
+	}).Build()
+	defer search.UnPatch()
+	result, err := node.Search(t.Context(), &milvuspb.SearchRequest{DbName: db, CollectionName: "search"})
+	require.NoError(t, merr.CheckRPCCall(result, err))
+	require.Equal(t, 3, calls)
+	require.Equal(t, 1, reports)
 }
 
-func TestRequestReportLargeRead(t *testing.T) {
+func TestReportReadUsageLargeProduct(t *testing.T) {
 	db, ctx := t.Name(), t.Context()
 	size := int64(1) << 62
 	enableUsageReport(t, func(info map[string]any) int {
@@ -124,9 +142,8 @@ func TestRequestReportLargeRead(t *testing.T) {
 	})
 	counter := metrics.ProxyReportValue.WithLabelValues(paramtable.GetStringNodeID(), hookutil.OpTypeSearch, db, "")
 	before := testutil.ToFloat64(counter)
-	r := newRequestReport(ctx, hookutil.OpTypeSearch, db)
-	r.collectionSize, r.readCount = &size, 4
-	require.True(t, merr.Ok(r.finish(ctx, merr.Success())))
+	status := reportReadUsage(ctx, extension.RequestUsageReporter(), hookutil.OpTypeSearch, db, merr.Success(), &size, 4)
+	require.True(t, merr.Ok(status))
 	require.Equal(t, before+math.Exp2(64), testutil.ToFloat64(counter))
 }
 
@@ -163,10 +180,34 @@ func TestSearchReportsRequestedIDsOnEmptyResult(t *testing.T) {
 
 func TestFilteredDeletePublishesSeparateReadAndWriteBytes(t *testing.T) {
 	ctx, db := t.Context(), t.Name()
+	const collection = "delete_bytes"
+	const size = int64(300)
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "score", DataType: schemapb.DataType_Int64},
+	}})
+	cache := NewMockCache(t)
+	cache.EXPECT().GetDatabaseInfo(mock.Anything, db).Return(&databaseInfo{DBID: 9}, nil)
+	cache.EXPECT().GetCollectionSchema(mock.Anything, db, collection).Return(schema, nil)
+	cache.EXPECT().GetCollectionID(mock.Anything, db, collection).Return(10, nil)
+	cache.EXPECT().GetCollectionInfo(mock.Anything, db, collection, int64(10)).Return(&collectionInfo{CollID: 10, Schema: schema}, nil)
+	node := &Proxy{metaCache: cache, sched: &scheduler.TaskScheduler{}}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	previous := rateCol
+	require.NoError(t, node.initRateCollector())
+	t.Cleanup(func() { rateCol = previous })
+
+	var matchedBytes int64
+	run := mockey.Mock((*deleteRunner).Run).Return(nil).Build()
+	defer run.UnPatch()
+	pkBytes := mockey.Mock((*deleteRunner).DeletedPKBytes).To(func(*deleteRunner) int64 { return matchedBytes }).Build()
+	defer pkBytes.UnPatch()
+	tableBytes := mockey.Mock((*deleteRunner).CollectionSizeBytes).Return(size).Build()
+	defer tableBytes.UnPatch()
+
 	write := metrics.ProxyReportValue.WithLabelValues(paramtable.GetStringNodeID(), hookutil.OpTypeDelete, db, "")
 	read := metrics.ProxyReportValue.WithLabelValues(paramtable.GetStringNodeID(), hookutil.OpTypeQuery, db, "")
 	beforeWrite, beforeRead := testutil.ToFloat64(write), testutil.ToFloat64(read)
-	size := int64(300)
 	var writes []int64
 	reads := 0
 	enableUsageReport(t, func(info map[string]any) int {
@@ -175,6 +216,7 @@ func TestFilteredDeletePublishesSeparateReadAndWriteBytes(t *testing.T) {
 			require.NotContains(t, info, hookutil.ReadCountKey)
 			n := info[hookutil.WriteBytesKey].(int64)
 			writes = append(writes, n)
+			extension.SetRequestUsageReporter(nil) // Reload between the write and the read report.
 			return int(n)
 		case hookutil.OpTypeQuery:
 			require.NotContains(t, info, hookutil.WriteBytesKey)
@@ -187,16 +229,19 @@ func TestFilteredDeletePublishesSeparateReadAndWriteBytes(t *testing.T) {
 			return 0
 		}
 	})
-	for _, written := range []int64{24, 0} {
-		r := newRequestReport(ctx, hookutil.OpTypeDelete, db)
-		r.writeBytes, r.readCount, r.collectionSize = written, 1, &size
-		status := merr.Success()
-		require.Same(t, status, r.finish(ctx, status))
-		r.finish(ctx, status)
-		require.Empty(t, status.GetExtraInfo())
+	reporter := extension.RequestUsageReporter()
+	for _, tc := range []struct {
+		expr       string
+		writeBytes int64
+	}{{"score > 10", 24}, {"score > 10", 0}, {"id in [42]", 8}} {
+		extension.SetRequestUsageReporter(reporter)
+		matchedBytes = tc.writeBytes
+		result, err := node.Delete(ctx, &milvuspb.DeleteRequest{DbName: db, CollectionName: collection, Expr: tc.expr})
+		require.NoError(t, merr.CheckRPCCall(result, err))
+		require.Empty(t, result.GetStatus().GetExtraInfo())
 	}
-	require.Equal(t, []int64{24, 0}, writes)
+	require.Equal(t, []int64{24, 0, 8}, writes)
 	require.Equal(t, 2, reads)
-	require.Equal(t, beforeWrite+24, testutil.ToFloat64(write))
+	require.Equal(t, beforeWrite+32, testutil.ToFloat64(write))
 	require.Equal(t, beforeRead+float64(size*2), testutil.ToFloat64(read))
 }

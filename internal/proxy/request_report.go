@@ -23,32 +23,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
-
-// A request keeps its measurements across attempts until the outer RPC completes.
-type requestReport struct {
-	reporter       hook.Extension
-	op, db, user   string
-	writeBytes     int64
-	readCount      int64
-	collectionSize *int64
-}
-
-func newRequestReport(ctx context.Context, op, db string) *requestReport {
-	reporter := extension.RequestUsageReporter()
-	if reporter == nil {
-		return nil
-	}
-	if db == "" {
-		db = GetCurDBNameFromContextOrDefault(ctx)
-	}
-	return &requestReport{reporter: reporter, op: op, db: db, user: GetCurUserFromContextOrDefault(ctx)}
-}
 
 // Existing extensions report each attempt at its original boundary.
 func reportLegacy(status *commonpb.Status, info map[string]any) {
@@ -62,48 +41,42 @@ func reportLegacy(status *commonpb.Status, info map[string]any) {
 	}
 }
 
-func (r *requestReport) finish(ctx context.Context, status *commonpb.Status) *commonpb.Status {
-	if r == nil || r.op == "" {
+// shouldReportUsage checks the final outcome before publishing byte measurements.
+func shouldReportUsage(ctx context.Context, status *commonpb.Status) bool {
+	return status != nil && merr.Ok(status) && ctx.Err() == nil
+}
+
+func reportReadUsage(ctx context.Context, reporter hook.Extension, op, db string, status *commonpb.Status, collectionBytes *int64, count int64) *commonpb.Status {
+	if reporter == nil || !shouldReportUsage(ctx, status) {
 		return status
 	}
-	op := r.op
-	r.op = ""
-	if status == nil || ctx.Err() != nil || !merr.Ok(status) {
-		return status
-	}
-	switch op {
-	case hookutil.OpTypeInsert, hookutil.OpTypeUpsert, hookutil.OpTypeDelete:
-		r.add(ctx, op, map[string]any{hookutil.WriteBytesKey: r.writeBytes}, 1)
-		if r.readCount == 0 {
-			return status
-		}
-		// Filtered Delete validated the lookup's size before writing any tombstones.
-		op = hookutil.OpTypeQuery
-	}
-	if r.collectionSize == nil {
+	if collectionBytes == nil {
 		return merr.Status(merr.WrapErrServiceInternalMsg("query plan missing collection size for request usage"))
 	}
-	count, copies := r.readCount, int64(1)
-	if count > 1 && *r.collectionSize > int64(math.MaxInt)/count {
-		// Report accepts an int increment. Identical query items have the
-		// same size, so one item's result can be added with its multiplicity.
-		count, copies = 1, count
+	copies := int64(1)
+	if count > 1 && *collectionBytes > int64(math.MaxInt)/count {
+		// Report returns an int. Report one item and apply its multiplicity to the counter.
+		copies, count = count, 1
 	}
-	r.add(ctx, op, map[string]any{
+	reportUsage(ctx, reporter, op, db, map[string]any{
+		hookutil.CollectionStorageBytesKey: *collectionBytes,
 		hookutil.ReadCountKey:              count,
-		hookutil.CollectionStorageBytesKey: *r.collectionSize,
 	}, copies)
 	return status
 }
 
-func (r *requestReport) add(ctx context.Context, op string, info map[string]any, copies int64) {
+func reportUsage(ctx context.Context, reporter hook.Extension, op, db string, info map[string]any, copies int64) {
+	if db == "" {
+		db = GetCurDBNameFromContextOrDefault(ctx)
+	}
+	user := GetCurUserFromContextOrDefault(ctx)
 	info[hookutil.OpTypeKey] = op
-	info[hookutil.DatabaseKey] = r.db
-	info[hookutil.UsernameKey] = r.user
-	bytes := r.reporter.Report(info)
+	info[hookutil.DatabaseKey] = db
+	info[hookutil.UsernameKey] = user
+	bytes := reporter.Report(info)
 	if bytes < 0 {
 		mlog.RatedWarn(ctx, 1, "request extension returned negative usage", mlog.String("operation", op), mlog.Int("bytes", bytes))
 		return
 	}
-	metrics.ProxyReportValue.WithLabelValues(paramtable.GetStringNodeID(), op, r.db, r.user).Add(float64(bytes) * float64(copies))
+	metrics.ProxyReportValue.WithLabelValues(paramtable.GetStringNodeID(), op, db, user).Add(float64(bytes) * float64(copies))
 }
