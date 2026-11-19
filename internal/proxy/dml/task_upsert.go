@@ -754,23 +754,7 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 				}
 			}
 		}
-		// Select the final write channels from the proofs captured by this read.
-		route, err := it.writeRoute(ctx)
-		if err != nil {
-			return nil, err
-		}
-		groups, err := it.buildPartialUpdateCASGroups(route)
-		if err != nil {
-			return nil, err
-		}
-		for channel := range groups {
-			meta := it.partialUpdateCASGroups[channel]
-			if meta == nil || meta.GetReadTs() == 0 {
-				return nil, merr.WrapErrServiceInternalMsg("partial update: read snapshot is missing for destination channel %q", channel)
-			}
-			groups[channel] = meta
-		}
-		it.partialUpdateCASGroups = groups
+
 	}
 	// 2. merge field data on update semantic
 	// Scalar nullable payloads are expanded before merge. Nullable vector payloads
@@ -1071,6 +1055,8 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Check the final destinations after AutoID allocation and row selection.
+		// A split between the Strong read and this lookup requires fresh proofs.
 		if route.split() {
 			if err := it.checkPartialUpdateProofsCoverRoute(ctx, route); err != nil {
 				return nil, err
@@ -1083,7 +1069,7 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 		for channel := range groups {
 			meta := it.partialUpdateCASGroups[channel]
 			if meta == nil || meta.ReadTs == 0 {
-				return nil, merr.WrapErrServiceInternalMsg("missing CAS proof for selected channel %s", channel)
+				return nil, merr.WrapErrServiceInternalMsg("partial update: read snapshot is missing for destination channel %q", channel)
 			}
 			groups[channel] = meta
 		}
