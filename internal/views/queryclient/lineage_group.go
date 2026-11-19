@@ -101,7 +101,7 @@ func groupShards(shards []resolver.Shard) (groups []lineageGroup, ordinary []int
 func (s *shardViewQueryClient) fanOutShards(ctx context.Context, shards []resolver.Shard, request requestReadPoint, run runShard) error {
 	originalRun := run
 	run = func(ctx context.Context, index int, read shardReadPoint) error {
-		return originalRun(context.WithValue(ctx, servingEpochContextKey{}, shards[index].ShardSetEpoch), index, read)
+		return originalRun(context.WithValue(ctx, servingShardContextKey{}, shards[index]), index, read)
 	}
 	groups, ordinary, err := groupShards(shards)
 	if err != nil {

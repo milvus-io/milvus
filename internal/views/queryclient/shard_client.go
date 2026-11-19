@@ -20,6 +20,7 @@ import (
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/views/queryclient/reducer"
+	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
@@ -747,8 +748,8 @@ func (s *shardViewQueryClient) executeShard(
 
 		// Phase 1: GetQueryPlan with consistency routing.
 		planReq := params.buildPlanReq(targetShardID)
-		if epoch, ok := ctx.Value(servingEpochContextKey{}).(uint64); ok {
-			planReq.ShardSetEpoch = epoch
+		if shard, ok := ctx.Value(servingShardContextKey{}).(resolver.Shard); ok {
+			planReq.ShardSetEpoch = shard.ShardSetEpoch
 		}
 		response, err := s.executeGetQueryPlan(ctx, targetShardID, planReq, params)
 		if err != nil {

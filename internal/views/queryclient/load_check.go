@@ -7,6 +7,8 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -33,10 +35,11 @@ type collectionLoadCheck struct {
 	collectionID int64
 	refs         int // protected by owner.mu
 	inflight     *loadStateCall
-	nextCheck    time.Time // only successful checks are cached
+	last         *loadStateCall // only successful checks are cached
 }
 
 type loadStateCall struct {
+	info          *querypb.GetQueryViewLoadInfoResponse
 	done          chan struct{}
 	err           error
 	ownerCanceled bool
@@ -87,13 +90,13 @@ func (s *collectionLoadCheck) check(ctx context.Context) (time.Time, error) {
 				if call.ownerCanceled {
 					continue
 				}
-				return call.nextCheck, call.err
+				return call.result(ctx)
 			}
 		}
-		if time.Now().Before(s.nextCheck) {
-			next := s.nextCheck
+		if s.last != nil && time.Now().Before(s.last.nextCheck) {
+			call := s.last
 			s.mu.Unlock()
-			return next, nil
+			return call.result(ctx)
 		}
 		call := &loadStateCall{done: make(chan struct{})}
 		s.inflight = call
@@ -103,6 +106,7 @@ func (s *collectionLoadCheck) check(ctx context.Context) (time.Time, error) {
 			call.err = merr.WrapErrServiceInternalMsg("query client requires a Coordinator load-info client")
 		} else {
 			info, err := s.owner.client.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: s.collectionID})
+			call.info = info
 			call.err = merr.CheckRPCCall(info, err)
 		}
 		// Use the RPC owner's context, not the transport's error representation,
@@ -113,12 +117,34 @@ func (s *collectionLoadCheck) check(ctx context.Context) (time.Time, error) {
 		}
 		s.mu.Lock()
 		if call.err == nil {
-			s.nextCheck = time.Now().Add(loadStateCheckInterval)
+			call.nextCheck = time.Now().Add(loadStateCheckInterval)
+			s.last = call
 		}
-		call.nextCheck = s.nextCheck
 		s.inflight = nil
 		close(call.done)
 		s.mu.Unlock()
+		return call.result(ctx)
+	}
+}
+
+// Interpret the shared publication separately for each waiting shard.
+func (call *loadStateCall) result(ctx context.Context) (time.Time, error) {
+	shard, planned := ctx.Value(servingShardContextKey{}).(resolver.Shard)
+	if call.err != nil || !planned || len(call.info.GetServingShards()) == 0 {
 		return call.nextCheck, call.err
 	}
+	published := call.info.GetShardSetEpoch()
+	if published > max(1, shard.ShardSetEpoch) {
+		return time.Time{}, viewerror.NewViewInvalidated("shard %s was planned at epoch %d, published epoch is %d", shard.VChannel, shard.ShardSetEpoch, published)
+	}
+	// A shared probe may predate another caller's newer plan.
+	if published == shard.ShardSetEpoch {
+		for _, member := range call.info.GetServingShards() {
+			if member.GetVchannel() == shard.VChannel {
+				return call.nextCheck, nil
+			}
+		}
+		return time.Time{}, viewerror.NewViewInvalidated("shard %s is absent from published epoch %d", shard.VChannel, published)
+	}
+	return call.nextCheck, nil
 }
