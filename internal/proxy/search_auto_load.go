@@ -37,40 +37,34 @@ func (node *Proxy) retryDQL(ctx context.Context, dbName, collectionName string, 
 	iteratorValue, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, params)
 	isIterator, _ := strconv.ParseBool(iteratorValue)
 	refreshes := 0
-	return node.retryDQLWithExecutionRetry(ctx, dbName, collectionName, func(ctx context.Context) (bool, error) {
-		again, err := execute(ctx)
-		if err == nil || isIterator || ctx.Err() != nil || merr.IsCanceledOrTimeout(err) || merr.GetErrorType(err) == merr.InputError || refreshes >= 3 {
-			return again, err
-		}
-		if !errors.Is(err, merr.ErrQueryViewNotReady) {
-			return again, err
-		}
-		refreshes++
-		node.GetMetaCache().RemoveCollection(ctx, dbName, collectionName)
-		return true, err
-	}, func(err error) bool {
-		// Iterators cannot switch schema on a whole-request retry. View
-		// refreshes above are bounded independently of AutoLoad.
-		return !isIterator && errors.Is(err, merr.ErrCollectionNotLoaded) && node.shouldRetryDQLLoad(err)
-	})
-}
-
-func (node *Proxy) retryDQLWithExecutionRetry(ctx context.Context, dbName, collectionName string, execute func(context.Context) (bool, error), retryExecution func(error) bool) error {
+	autoLoad := Params.ProxyCfg.EnableAutoLoad.GetAsBool()
 	var terminalErr error
 	err := retry.Handle(ctx, func() (bool, error) {
 		terminalErr = nil
 		if err := ctx.Err(); err != nil {
 			return false, context.Cause(ctx)
 		}
-		if err := node.ensureCollectionReady(ctx, dbName, collectionName); err != nil {
-			if node.shouldRetryDQLLoad(err) {
+		again, err := execute(ctx)
+		if autoLoad && ctx.Err() == nil && errors.Is(err, merr.ErrCollectionNotLoaded) {
+			if loadErr := node.ensureCollectionReady(ctx, dbName, collectionName); loadErr != nil {
+				terminalErr = loadErr
+				return false, loadErr
+			}
+			if ctx.Err() != nil {
+				return false, context.Cause(ctx)
+			}
+			again, err = execute(ctx)
+			if ctx.Err() == nil && errors.Is(err, merr.ErrCollectionNotLoaded) {
 				return true, err
 			}
-			terminalErr = err
-			return false, err
 		}
-		again, err := execute(ctx)
-		if again || retryExecution(err) {
+		if err != nil && !isIterator && ctx.Err() == nil && !merr.IsCanceledOrTimeout(err) &&
+			merr.GetErrorType(err) != merr.InputError && refreshes < 3 && errors.Is(err, merr.ErrQueryViewNotReady) {
+			refreshes++
+			node.GetMetaCache().RemoveCollection(ctx, dbName, collectionName)
+			again = true
+		}
+		if again {
 			return true, err
 		}
 		terminalErr = err
@@ -89,25 +83,11 @@ func (node *Proxy) retryDQLWithExecutionRetry(ctx context.Context, dbName, colle
 	return err
 }
 
-func (node *Proxy) shouldRetryDQLLoad(err error) bool {
-	if err == nil || !Params.ProxyCfg.EnableAutoLoad.GetAsBool() ||
-		merr.IsCanceledOrTimeout(err) || merr.GetErrorType(err) == merr.InputError {
-		return false
-	}
-	if errors.Is(err, merr.ErrCollectionNotLoaded) {
-		return true
-	}
-	return errors.Is(err, merr.ErrQueryViewNotReady)
-}
-
-// ensureCollectionReady sends one load-and-wait RPC per DQL attempt.
+// ensureCollectionReady sends the load-and-wait RPC before retrying a cold DQL.
 // QueryCoord owns load state, concurrent load submission and readiness waiting.
 func (node *Proxy) ensureCollectionReady(ctx context.Context, dbName, collectionName string) error {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return err
-	}
-	if !Params.ProxyCfg.EnableAutoLoad.GetAsBool() {
-		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()

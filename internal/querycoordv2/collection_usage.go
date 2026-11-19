@@ -27,6 +27,7 @@ import (
 	walbalance "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/coord/loadstatus"
+	"github.com/milvus-io/milvus/internal/views/coord/viewfeedback"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -47,9 +48,9 @@ const (
 )
 
 type releaseCandidate struct {
-	collectionID int64
-	lastActiveAt time.Time
-	reason       collectionReleaseReason
+	collectionID        int64
+	lastActiveUnixNanos int64
+	reason              collectionReleaseReason
 }
 
 type collectionMemoryUsage struct {
@@ -60,10 +61,10 @@ type collectionUsageManager struct {
 	s  *Server
 	mu sync.Mutex
 
-	enabled       bool
-	lastActiveAt  map[int64]time.Time
-	configWatcher config.EventHandler
-	configChanged chan struct{}
+	enabled             bool
+	lastActiveUnixNanos map[int64]int64
+	configWatcher       config.EventHandler
+	configChanged       chan struct{}
 
 	// Pressure is retained between the low and high watermarks, per pool.
 	memoryPressure map[string]bool
@@ -75,10 +76,10 @@ type collectionUsageManager struct {
 func newCollectionUsageManager(s *Server) *collectionUsageManager {
 	params := paramtable.Get()
 	m := &collectionUsageManager{
-		s:              s,
-		lastActiveAt:   make(map[int64]time.Time),
-		memoryPressure: make(map[string]bool),
-		configChanged:  make(chan struct{}, 1),
+		s:                   s,
+		lastActiveUnixNanos: make(map[int64]int64),
+		memoryPressure:      make(map[string]bool),
+		configChanged:       make(chan struct{}, 1),
 	}
 	s.qviewsRuntime.loadConfigStore.RegisterObserver(m.handleLoadConfigChange)
 	m.configWatcher = config.NewHandler(fmt.Sprintf("collection-usage-config-%p", m), func(*config.Event) {
@@ -100,7 +101,7 @@ func (m *collectionUsageManager) refreshConfig() {
 
 	m.enabled = autoReleaseEnabled && autoLoadEnabled
 	if !m.enabled {
-		clear(m.lastActiveAt)
+		clear(m.lastActiveUnixNanos)
 		clear(m.memoryPressure)
 	}
 	m.mu.Unlock()
@@ -179,7 +180,7 @@ func (m *collectionUsageManager) close() {
 	params.Unwatch(params.ProxyCfg.EnableAutoLoad.Key, m.configWatcher)
 	m.mu.Lock()
 	m.enabled = false
-	clear(m.lastActiveAt)
+	clear(m.lastActiveUnixNanos)
 	clear(m.memoryPressure)
 	m.mu.Unlock()
 	if m.stop != nil {
@@ -188,26 +189,12 @@ func (m *collectionUsageManager) close() {
 	m.wg.Wait()
 }
 
-// touch records a DQL attempt once the scanner has initialized this load's
-// idle timer from its load config.
-// Requests are not tracked individually; even a running query can outlive TTI.
-func (m *collectionUsageManager) touch(collectionID int64) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if !m.enabled {
-		return
-	}
-	if _, initialized := m.lastActiveAt[collectionID]; initialized {
-		m.lastActiveAt[collectionID] = time.Now()
-	}
-}
-
 func (m *collectionUsageManager) handleLoadConfigChange(collectionID int64, released bool) {
 	if !released {
 		return
 	}
 	m.mu.Lock()
-	delete(m.lastActiveAt, collectionID)
+	delete(m.lastActiveUnixNanos, collectionID)
 	m.mu.Unlock()
 }
 
@@ -232,32 +219,36 @@ func (m *collectionUsageManager) scan(ctx context.Context) {
 
 	snapshot := m.s.qviewsRuntime.loadConfigStore.Snapshot()
 	pressure := m.pressuredPools(ctx)
+	feedback := m.s.qviewsRuntime.viewFeedback.GetPlanningSnapshot()
 	limit := paramtable.Get().QueryCoordCfg.AutoReleaseLRUMaxEvictions.GetAsInt()
 	lru := typeutil.NewObjectArrayBasedMaximumHeap(nil, func(candidate releaseCandidate) int64 {
-		return candidate.lastActiveAt.UnixNano()
+		return candidate.lastActiveUnixNanos
 	})
 	candidates := make([]releaseCandidate, 0)
 	for collectionID, cfg := range snapshot.ConfigsMap() {
 		if ctx.Err() != nil {
 			return
 		}
-		candidate, tti, ok := m.releaseCandidate(ctx, collectionID)
+		if !cfg.AutoLoad || !m.collectionReady(collectionID) {
+			continue
+		}
+		candidate, tti, ok := m.releaseCandidate(ctx, cfg, feedback)
 		if !ok {
 			continue
 		}
 		if tti < 0 {
 			continue
 		}
-		if idleFor(candidate.lastActiveAt, tti) {
+		if idleFor(candidate.lastActiveUnixNanos, tti) {
 			candidate.reason = releaseReasonTTI
 			candidates = append(candidates, candidate)
 			continue
 		}
-		if underMemoryPressure(cfg, pressure) && m.collectionReady(collectionID) {
+		if underMemoryPressure(cfg, pressure) {
 			candidate.reason = releaseReasonMemoryPressure
 			if lru.Len() < limit {
 				lru.Push(candidate)
-			} else if candidate.lastActiveAt.Before(lru.Peek().lastActiveAt) {
+			} else if candidate.lastActiveUnixNanos < lru.Peek().lastActiveUnixNanos {
 				lru.Pop()
 				lru.Push(candidate)
 			}
@@ -303,27 +294,40 @@ func (m *collectionUsageManager) pressuredPools(ctx context.Context) map[string]
 	return pressure
 }
 
-func (m *collectionUsageManager) releaseCandidate(ctx context.Context, collectionID int64) (releaseCandidate, time.Duration, bool) {
+func (m *collectionUsageManager) releaseCandidate(ctx context.Context, cfg *loadmgr.LoadConfig, feedback *viewfeedback.PlanningSnapshot) (releaseCandidate, time.Duration, bool) {
+	collectionID := cfg.CollectionID
 	tti, err := m.tti(ctx, collectionID)
 	if err != nil {
 		mlog.RatedWarn(ctx, 1.0, "failed to get collection auto release TTI, skip this scan",
 			mlog.FieldCollectionID(collectionID), mlog.Err(err))
 		return releaseCandidate{}, 0, false
 	}
+	var lastReported int64
+	for _, replica := range cfg.Replicas {
+		if sample, _ := feedback.GetReplicaFeedback(replica.ReplicaID, replica.ResourceGroup); sample != nil {
+			lastReported = max(lastReported, sample.LastAccessUnixNanos)
+		}
+	}
 	m.mu.Lock()
-	lastActiveAt, initialized := m.lastActiveAt[collectionID]
+	lastActiveUnixNanos, initialized := m.lastActiveUnixNanos[collectionID]
+	if lastReported > lastActiveUnixNanos {
+		lastActiveUnixNanos = lastReported
+	} else if !initialized {
+		lastActiveUnixNanos = time.Now().UnixNano()
+	}
+	m.lastActiveUnixNanos[collectionID] = lastActiveUnixNanos
 	m.mu.Unlock()
 
-	// Start the TTI timer on the first scan and skip release for this round.
-	if !initialized {
-		m.initializeLastActiveAt(collectionID)
+	// A release may have removed the config before the timer was inserted.
+	if !initialized && !m.s.qviewsRuntime.loadConfigStore.Contains(collectionID) {
+		m.handleLoadConfigChange(collectionID, true)
 		return releaseCandidate{}, 0, false
 	}
-	return releaseCandidate{collectionID: collectionID, lastActiveAt: lastActiveAt, reason: releaseReasonTTI}, tti, true
+	return releaseCandidate{collectionID: collectionID, lastActiveUnixNanos: lastActiveUnixNanos, reason: releaseReasonTTI}, tti, true
 }
 
-func idleFor(lastActiveAt time.Time, tti time.Duration) bool {
-	return tti > 0 && time.Since(lastActiveAt) >= tti
+func idleFor(lastActiveUnixNanos int64, tti time.Duration) bool {
+	return tti > 0 && time.Now().UnixNano()-lastActiveUnixNanos >= tti.Nanoseconds()
 }
 
 func underMemoryPressure(cfg *loadmgr.LoadConfig, pressure map[string]bool) bool {
@@ -369,29 +373,6 @@ func (m *collectionUsageManager) releaseCollections(ctx context.Context, candida
 	_ = group.Wait()
 }
 
-func (m *collectionUsageManager) initializeLastActiveAt(collectionID int64) {
-	if !m.s.qviewsRuntime.loadConfigStore.Contains(collectionID) {
-		return
-	}
-	m.mu.Lock()
-	if !m.enabled {
-		m.mu.Unlock()
-		return
-	}
-	if _, initialized := m.lastActiveAt[collectionID]; !initialized {
-		m.lastActiveAt[collectionID] = time.Now()
-	}
-	m.mu.Unlock()
-
-	// Remove may finish between the first Contains and recording the timestamp.
-	// In that case its observer may have run before this record was added.
-	if !m.s.qviewsRuntime.loadConfigStore.Contains(collectionID) {
-		m.mu.Lock()
-		delete(m.lastActiveAt, collectionID)
-		m.mu.Unlock()
-	}
-}
-
 func (m *collectionUsageManager) tti(ctx context.Context, collectionID int64) (time.Duration, error) {
 	properties, err := m.s.broker.GetCollectionProperties(ctx, collectionID)
 	if err != nil {
@@ -409,6 +390,11 @@ func (m *collectionUsageManager) tti(ctx context.Context, collectionID int64) (t
 }
 
 func (m *collectionUsageManager) autoReleaseCollection(ctx context.Context, collectionID int64, reason collectionReleaseReason) error {
+	// A manual load or release may have changed the config while this candidate waited for a worker.
+	cfg := m.s.qviewsRuntime.loadConfigStore.GetConfig(collectionID)
+	if cfg == nil || !cfg.AutoLoad {
+		return nil
+	}
 	schema := m.s.meta.GetCollectionSchema(ctx, collectionID)
 	err := m.s.broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{
 		CollectionID: collectionID,
