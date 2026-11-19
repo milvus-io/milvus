@@ -88,7 +88,7 @@ func TestAdoptionUncertainReadbackKeepsProjectorBarrier(t *testing.T) {
 	store, _ := newSplitTestStore(t)
 	_, err = store.Record(ctx, splitTestRecord(7))
 	require.NoError(t, err)
-	require.NoError(t, store.MarkSourceAcked(ctx, 7, 100, splitTestSource, nil))
+	require.NoError(t, store.MarkSourceAcked(ctx, 7, 100, splitTestSource, nil, nil, false))
 	require.NoError(t, store.Advance(ctx, 7, datapb.SplitShardTaskState_SplitShardTaskRewriteDone))
 	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 10, CollectionID: 100, PartitionID: 1, InsertChannel: splitTestSource, SplitTarget: splitTestTarget1, Level: datapb.SegmentLevel_L1, State: commonpb.SegmentState_Flushed, NumOfRows: 1, TransformStartAfterTimetick: 50})))
 	catalog := mt.Catalog.(*kvdatacoord.Catalog)

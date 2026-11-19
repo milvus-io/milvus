@@ -2520,6 +2520,10 @@ message SplitShardTask {
   // Local lifecycle, persisted independently of adoption.
   bool l0_resumed = 11;
   bool pins_released = 12;
+  // Original cluster of a replicated broadcast, including one completed by ForcePromote.
+  string replicated_from_cluster_id = 13;
+  // Original source WAL position observed by the local source consumer.
+  common.ReplicateCheckpoint replicated_source_fence = 14;
 }
 
 
