@@ -29,6 +29,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
+func TestIsFileImport(t *testing.T) {
+	assert.True(t, IsFileImport(nil))
+	assert.True(t, IsFileImport(Options{{Key: EZK, Value: ""}}))
+	assert.True(t, IsFileImport(Options{{Key: BackupFlag, Value: "false"}}))
+	assert.False(t, IsFileImport(Options{{Key: EZK, Value: "backup"}}))
+	for _, flag := range []string{BackupFlag, L0Import} {
+		assert.False(t, IsFileImport(Options{{Key: flag, Value: "true"}, {Key: EZK, Value: ""}}))
+	}
+}
+
 func TestOption_GetTimeout(t *testing.T) {
 	const delta = 3 * time.Second
 

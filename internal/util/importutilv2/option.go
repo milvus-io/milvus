@@ -190,6 +190,12 @@ func IsL0Import(options Options) bool {
 	return true
 }
 
+// IsFileImport identifies regular data files for the legacy target cipher path.
+func IsFileImport(options Options) bool {
+	artifact, _ := GetEZK(options)
+	return artifact == "" && !IsBackup(options) && !IsL0Import(options)
+}
+
 func GetStorageVersion(options Options) (int64, error) {
 	storageVersion, err := funcutil.GetAttrByKeyFromRepeatedKV(StorageVersion, options)
 	if err != nil {

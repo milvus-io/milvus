@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
@@ -147,8 +148,15 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 			tsTo = ts
 		}
 	}
-	var pluginContextPtr *indexcgopb.StoragePluginContext
-	if hookutil.IsClusterEncryptionEnabled() {
+	pluginContextPtr := pack.importTarget
+	if pluginContextPtr != nil && bw.manifestPath != "" {
+		return nil, "", merr.WrapErrParameterInvalidMsg("import target keysets require a Storage V2 packed writer")
+	}
+	if pack.writerMode != packed.OrdinaryWrite && pluginContextPtr == nil &&
+		hookutil.GetEzByCollProperties(bw.schema.GetProperties(), pack.collectionID) != nil {
+		return nil, "", retry.Unrecoverable(merr.WrapErrImportFailed("missing dispatched import target keyset"))
+	}
+	if pack.writerMode == packed.OrdinaryWrite && hookutil.IsClusterEncryptionEnabled() {
 		ez := hookutil.GetEzByCollProperties(bw.schema.GetProperties(), pack.collectionID)
 		if ez != nil {
 			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
@@ -257,7 +265,7 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 			path := metautil.BuildInsertLogPath(bw.getRootPath(), pack.collectionID, pack.partitionID, pack.segmentID, columnGroup.GroupID, id)
 			paths = append(paths, path)
 		}
-		w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
+		w, err := storage.NewPackedRecordWriterWithMode(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr, pack.writerMode)
 		if err != nil {
 			return nil, "", err
 		}

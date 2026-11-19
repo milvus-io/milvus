@@ -96,15 +96,22 @@ func (data *descriptorEventData) GetEdek() (string, bool) {
 }
 
 func (data *descriptorEventData) GetEzID() (int64, bool) {
-	ezidInterface, ok := data.Extras[ezIDKey]
-	// previous descriptorEventData not store edek
+	value, ok := data.Extras[ezIDKey]
 	if !ok {
 		return 0, false
 	}
-
-	// won't be not ok, already checked format when write with FinishExtra
-	ezid, _ := ezidInterface.(int64)
-	return ezid, true
+	if id, ok := value.(int64); ok {
+		return id, true
+	}
+	// JSON numbers in Extras are float64 after a read. Recover the original
+	// int64 literal so adjacent zone IDs above 2^53 stay distinct.
+	var stored struct {
+		Zone *int64 `json:"encryption_zone"`
+	}
+	if err := json.Unmarshal(data.ExtraBytes, &stored); err != nil || stored.Zone == nil {
+		return 0, false
+	}
+	return *stored.Zone, true
 }
 
 // GetMemoryUsageInBytes returns the memory size of DescriptorEventDataFixPart.

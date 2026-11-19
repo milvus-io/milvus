@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -46,6 +47,7 @@ type L0PreImportTask struct {
 	vchannels    []string
 	schema       *schemapb.CollectionSchema
 	req          *datapb.PreImportRequest
+	source       *indexcgopb.StoragePluginContext
 
 	manager TaskManager
 	cm      storage.ChunkManager
@@ -54,6 +56,7 @@ type L0PreImportTask struct {
 func NewL0PreImportTask(req *datapb.PreImportRequest,
 	manager TaskManager,
 	cm storage.ChunkManager,
+	source *indexcgopb.StoragePluginContext,
 ) Task {
 	fileStats := lo.Map(req.GetImportFiles(), func(file *internalpb.ImportFile, _ int) *datapb.ImportFileStats {
 		return &datapb.ImportFileStats{
@@ -75,6 +78,7 @@ func NewL0PreImportTask(req *datapb.PreImportRequest,
 		vchannels:    req.GetVchannels(),
 		schema:       req.GetSchema(),
 		req:          req,
+		source:       source,
 		manager:      manager,
 		cm:           cm,
 	}
@@ -122,6 +126,7 @@ func (t *L0PreImportTask) Clone() Task {
 		vchannels:     t.GetVchannels(),
 		schema:        t.GetSchema(),
 		req:           t.req,
+		source:        t.source,
 		manager:       t.manager,
 		cm:            t.cm,
 	}
@@ -163,7 +168,7 @@ func (t *L0PreImportTask) Execute() []*conc.Future[any] {
 			return
 		}
 
-		reader, err := binlog.NewL0Reader(t.ctx, t.cm, pkField, file, bufferSize, tsStart, tsEnd)
+		reader, err := binlog.NewL0Reader(t.ctx, t.cm, pkField, file, bufferSize, tsStart, tsEnd, t.source)
 		if err != nil {
 			return
 		}

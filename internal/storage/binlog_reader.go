@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -144,6 +145,28 @@ func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
 		)
 		base.buffer = bytes.NewBuffer(decrypted)
 		return nil
+	}
+}
+
+// WithImportDecryptionContext opens an encrypted event with its file metadata and
+// the read keyset that DataCoord dispatched for this backup.
+func WithImportDecryptionContext(source *indexcgopb.StoragePluginContext) BinlogReaderOption {
+	return func(reader *BinlogReader) error {
+		if _, encrypted := reader.GetEdek(); !encrypted {
+			return nil
+		}
+		if source == nil {
+			return merr.WrapErrImportFailed("encrypted binlog requires a source import cipher context")
+		}
+		if _, hasZone := reader.Extras[ezIDKey]; hasZone {
+			if id, ok := reader.GetEzID(); !ok || id != source.GetEncryptionZoneId() {
+				return merr.WrapErrImportFailedMsg("binlog encryption zone does not match import source zone %d", source.GetEncryptionZoneId())
+			}
+		}
+		if err := hookutil.RegisterImportReadKeys(source); err != nil {
+			return err
+		}
+		return WithReaderDecryptionContext(source.GetEncryptionZoneId(), reader.CollectionID)(reader)
 	}
 }
 

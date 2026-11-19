@@ -47,6 +47,18 @@ NewPackedWriter(struct ArrowSchema* schema,
                 CPluginContext* c_plugin_context);
 
 CStatus
+NewImportPackedWriter(struct ArrowSchema* schema,
+                      int64_t buffer_size,
+                      char** paths,
+                      int64_t num_paths,
+                      int64_t part_upload_size,
+                      CColumnGroups groups,
+                      const CStorageConfig* config,
+                      CPackedWriter* writer,
+                      const CPluginContext* target,
+                      bool allow_legacy_cipher);
+
+CStatus
 WriteRecordBatch(CPackedWriter c_packed_writer,
                  struct ArrowArray* arrays,
                  struct ArrowSchema* array_schemas,

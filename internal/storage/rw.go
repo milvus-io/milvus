@@ -68,6 +68,7 @@ type rwOptions struct {
 	storageConfig       *indexpb.StorageConfig
 	neededFields        typeutil.Set[int64]
 	pluginContext       *indexcgopb.StoragePluginContext
+	importReader        bool
 }
 
 func (o *rwOptions) validate() error {
@@ -170,6 +171,15 @@ func WithPluginContext(pluginContext *indexcgopb.StoragePluginContext) RwOption 
 	}
 }
 
+// WithImportSource selects the dispatched backup context. A nil source means
+// plaintext, including when the destination collection is encrypted.
+func WithImportSource(source *indexcgopb.StoragePluginContext) RwOption {
+	return func(options *rwOptions) {
+		options.importReader = true
+		options.pluginContext = source
+	}
+}
+
 func makeBlobsReader(ctx context.Context, binlogs []*datapb.FieldBinlog, downloader downloaderFn) (ChunkedBlobsReader, error) {
 	if len(binlogs) == 0 {
 		return func() ([]*Blob, error) {
@@ -252,8 +262,10 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 
 	binlogReaderOpts := []BinlogReaderOption{}
 	var pluginContext *indexcgopb.StoragePluginContext
-	if hookutil.IsClusterEncryptionEnabled() {
-		// Reader pluginContext from import tasks
+	if rwOptions.importReader {
+		pluginContext = rwOptions.pluginContext
+		binlogReaderOpts = append(binlogReaderOpts, WithImportDecryptionContext(pluginContext))
+	} else if hookutil.IsClusterEncryptionEnabled() {
 		if rwOptions.pluginContext != nil {
 			pluginContext = rwOptions.pluginContext
 		} else {
@@ -303,7 +315,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 			}
 		}
 		// FIXME: add needed fields support
-		rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
+		rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.importReader)
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
 	}

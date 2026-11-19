@@ -41,13 +41,13 @@ func TestL0Reader_NewL0Reader(t *testing.T) {
 	t.Run("normal", func(t *testing.T) {
 		cm := mocks.NewChunkManager(t)
 		cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		r, err := NewL0Reader(ctx, cm, nil, &internalpb.ImportFile{Paths: []string{"mock-prefix"}}, 100, 0, math.MaxUint64)
+		r, err := NewL0Reader(ctx, cm, nil, &internalpb.ImportFile{Paths: []string{"mock-prefix"}}, 100, 0, math.MaxUint64, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, r)
 	})
 
 	t.Run("invalid path", func(t *testing.T) {
-		r, err := NewL0Reader(ctx, nil, nil, &internalpb.ImportFile{Paths: []string{"mock-prefix", "mock-prefix2"}}, 100, 0, math.MaxUint64)
+		r, err := NewL0Reader(ctx, nil, nil, &internalpb.ImportFile{Paths: []string{"mock-prefix", "mock-prefix2"}}, 100, 0, math.MaxUint64, nil)
 		assert.Error(t, err)
 		assert.Nil(t, r)
 	})
@@ -55,7 +55,7 @@ func TestL0Reader_NewL0Reader(t *testing.T) {
 	t.Run("list failed", func(t *testing.T) {
 		cm := mocks.NewChunkManager(t)
 		cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error"))
-		r, err := NewL0Reader(ctx, cm, nil, &internalpb.ImportFile{Paths: []string{"mock-prefix"}}, 100, 0, math.MaxUint64)
+		r, err := NewL0Reader(ctx, cm, nil, &internalpb.ImportFile{Paths: []string{"mock-prefix"}}, 100, 0, math.MaxUint64, nil)
 		assert.Error(t, err)
 		assert.Nil(t, r)
 	})
@@ -85,7 +85,7 @@ func TestL0Reader_Read(t *testing.T) {
 		})
 	cm.EXPECT().Read(mock.Anything, mock.Anything).Return(blob.Value, nil)
 
-	r, err := NewL0Reader(ctx, cm, nil, &internalpb.ImportFile{Paths: []string{"mock-prefix"}}, 100, 0, math.MaxUint64)
+	r, err := NewL0Reader(ctx, cm, nil, &internalpb.ImportFile{Paths: []string{"mock-prefix"}}, 100, 0, math.MaxUint64, nil)
 	assert.NoError(t, err)
 
 	res, err := r.Read()
@@ -127,7 +127,7 @@ func TestL0Reader_NoFilters(t *testing.T) {
 	defer mockRead.UnPatch()
 
 	// Create reader without any filters
-	r, err := NewL0Reader(ctx, mockChunkManager, nil, &internalpb.ImportFile{Paths: []string{"mock-prefix"}}, 100, 0, math.MaxUint64)
+	r, err := NewL0Reader(ctx, mockChunkManager, nil, &internalpb.ImportFile{Paths: []string{"mock-prefix"}}, 100, 0, math.MaxUint64, nil)
 	assert.NoError(t, err)
 
 	res, err := r.Read()

@@ -27,9 +27,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -47,7 +47,7 @@ type reader struct {
 	bufferSize    int
 	retryAttempts uint
 	storageConfig *indexpb.StorageConfig
-	importEz      string
+	source        *indexcgopb.StoragePluginContext
 	deleteData    map[any]typeutil.Timestamp // pk2ts
 	insertLogs    map[int64][]string         // fieldID (or fieldGroupID if storage v2) -> binlogs
 
@@ -64,7 +64,7 @@ func NewReader(ctx context.Context,
 	tsStart,
 	tsEnd uint64,
 	bufferSize int,
-	importEz string,
+	source *indexcgopb.StoragePluginContext,
 ) (*reader, error) {
 	systemFieldsAbsent := true
 	for _, field := range schema.Fields {
@@ -84,17 +84,17 @@ func NewReader(ctx context.Context,
 		fileSize:       atomic.NewInt64(0),
 		bufferSize:     bufferSize,
 		storageConfig:  storageConfig,
-		importEz:       importEz,
+		source:         source,
 		retryAttempts:  paramtable.Get().CommonCfg.StorageReadRetryAttempts.GetAsUint(),
 	}
-	err := r.init(paths, tsStart, tsEnd, storageConfig, importEz)
+	err := r.init(paths, tsStart, tsEnd)
 	if err != nil {
 		return nil, err
 	}
 	return r, nil
 }
 
-func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *indexpb.StorageConfig, importEZ string) error {
+func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	if tsStart != 0 || tsEnd != math.MaxUint64 {
 		r.filters = append(r.filters, FilterWithTimeRange(tsStart, tsEnd))
 	}
@@ -129,20 +129,10 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 			return r.multiReadWithRetry(ctx, paths)
 		}),
-		storage.WithStorageConfig(storageConfig),
+		storage.WithStorageConfig(r.storageConfig),
+		storage.WithImportSource(r.source),
 	}
 
-	if len(importEZ) > 0 {
-		ezID, err := hookutil.GetEzIDByImportEzk(importEZ)
-		if err != nil {
-			return err
-		}
-		pluginContext, err := hookutil.GetCPluginContextByEzID(ezID)
-		if err != nil {
-			return err
-		}
-		rwOptions = append(rwOptions, storage.WithPluginContext(pluginContext))
-	}
 	rr, err := storage.NewBinlogRecordReader(r.ctx, binlogs, r.schema, rwOptions...)
 	if err != nil {
 		return err
@@ -191,7 +181,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]typeutil.Timestamp, error) {
 	deleteData := make(map[any]typeutil.Timestamp)
 	for _, path := range deltaLogs {
-		reader, err := newBinlogReader(r.ctx, r.cm, path)
+		reader, err := newBinlogReader(r.ctx, r.cm, path, storage.WithImportDecryptionContext(r.source))
 		if err != nil {
 			return nil, err
 		}

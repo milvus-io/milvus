@@ -51,7 +51,7 @@ func TestImportNewReader(t *testing.T) {
 	}
 
 	checkFunc := func(name string, req *internalpb.ImportFile, options []*commonpb.KeyValuePair) {
-		_, err := NewReader(ctx, cm, schema, req, options, 1024, &indexpb.StorageConfig{})
+		_, err := NewReader(ctx, cm, schema, req, options, 1024, &indexpb.StorageConfig{}, nil)
 		assert.Error(t, err)
 		assert.True(t, strings.Contains(err.Error(), name))
 	}

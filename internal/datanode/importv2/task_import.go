@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -48,6 +49,7 @@ type ImportTask struct {
 	cancel       context.CancelFunc
 	segmentsInfo map[int64]*datapb.ImportSegmentInfo
 	req          *datapb.ImportRequest
+	importCipher hookutil.ImportCipherContexts
 
 	allocator  allocator.Interface
 	manager    TaskManager
@@ -60,6 +62,7 @@ func NewImportTask(req *datapb.ImportRequest,
 	manager TaskManager,
 	syncMgr syncmgr.SyncManager,
 	cm storage.ChunkManager,
+	importCipher hookutil.ImportCipherContexts,
 ) Task {
 	ctx, cancel := context.WithCancel(context.Background())
 	// During binlog import, even if the primary key's autoID is set to true,
@@ -80,6 +83,7 @@ func NewImportTask(req *datapb.ImportRequest,
 		cancel:       cancel,
 		segmentsInfo: make(map[int64]*datapb.ImportSegmentInfo),
 		req:          req,
+		importCipher: importCipher,
 		allocator:    alloc,
 		manager:      manager,
 		syncMgr:      syncMgr,
@@ -156,6 +160,7 @@ func (t *ImportTask) Clone() Task {
 		cancel:       t.cancel,
 		segmentsInfo: infos,
 		req:          t.req,
+		importCipher: t.importCipher,
 		allocator:    t.allocator,
 		manager:      t.manager,
 		syncMgr:      t.syncMgr,
@@ -177,7 +182,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	req := t.req
 
 	fn := func(file *internalpb.ImportFile) error {
-		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, req.GetOptions(), int(bufferSize), t.req.GetStorageConfig())
+		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, req.GetOptions(), int(bufferSize), t.req.GetStorageConfig(), t.importCipher.Source)
 		if err != nil {
 			log.Warn("new reader failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
@@ -307,7 +312,7 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 			}
 			syncTask, err := NewSyncTask(t.ctx, t.allocator, t.metaCaches, t.req.GetTs(),
 				segmentID, partitionID, t.GetCollectionID(), channel, data, nil,
-				bm25Stats, t.req.GetStorageVersion(), t.req.GetStorageConfig())
+				bm25Stats, t.req, t.importCipher.Target)
 			if err != nil {
 				return nil, nil, err
 			}

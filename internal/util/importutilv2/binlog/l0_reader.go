@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -39,6 +40,7 @@ type l0Reader struct {
 	ctx     context.Context
 	cm      storage.ChunkManager
 	pkField *schemapb.FieldSchema
+	source  *indexcgopb.StoragePluginContext
 
 	bufferSize int
 	deltaLogs  []string
@@ -55,11 +57,13 @@ func NewL0Reader(ctx context.Context,
 	bufferSize int,
 	tsStart,
 	tsEnd uint64,
+	source *indexcgopb.StoragePluginContext,
 ) (*l0Reader, error) {
 	r := &l0Reader{
 		ctx:        ctx,
 		cm:         cm,
 		pkField:    pkField,
+		source:     source,
 		bufferSize: bufferSize,
 	}
 
@@ -120,7 +124,7 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 			Value: bytes,
 		}}
 		// TODO: support multiple delta logs
-		reader, err := storage.CreateDeltalogReader(blobs)
+		reader, err := storage.CreateDeltalogReader(blobs, storage.WithImportDecryptionContext(r.source))
 		if err != nil {
 			log.Error("malformed delta file", zap.Error(err))
 			return nil, err
