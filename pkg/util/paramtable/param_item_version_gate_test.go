@@ -168,26 +168,29 @@ func TestVersionGateSwitcher_EffectiveValue(t *testing.T) {
 	})
 }
 
-func TestArraySortVersionGate(t *testing.T) {
+func TestArrayVersionGates(t *testing.T) {
 	params := &ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))
-	item := &params.DataCoordCfg.EnableArraySortIndex
-	assert.Contains(t, params.versionGateItems(), item)
-	assert.Equal(t, "auto", item.DefaultValue)
-	assert.Equal(t, "3.1.0", item.VersionGateSwitcher.GateVersion)
-	assert.Equal(t, time.Minute, item.VersionGateSwitcher.SwitchDelay)
-	assert.False(t, item.GetAsBool())
+	for _, item := range []*ParamItem{&params.DataCoordCfg.EnableArraySortIndex, &params.CommonCfg.EnableMatchConstantPredicate} {
+		t.Run(item.Key, func(t *testing.T) {
+			assert.Contains(t, params.versionGateItems(), item)
+			assert.Equal(t, "auto", item.DefaultValue)
+			assert.Equal(t, "3.1.0", item.VersionGateSwitcher.GateVersion)
+			assert.Equal(t, time.Minute, item.VersionGateSwitcher.SwitchDelay)
+			assert.False(t, item.GetAsBool())
 
-	// The existing switcher publishes TargetValue through the config manager.
-	assert.NoError(t, params.Save(item.Key, item.VersionGateSwitcher.TargetValue))
-	assert.True(t, item.GetAsBool())
-	assert.NoError(t, params.Save(item.Key, "auto"))
-	assert.False(t, item.GetAsBool())
+			// The existing switcher publishes TargetValue through the config manager.
+			assert.NoError(t, params.Save(item.Key, item.VersionGateSwitcher.TargetValue))
+			assert.True(t, item.GetAsBool())
+			assert.NoError(t, params.Save(item.Key, "auto"))
+			assert.False(t, item.GetAsBool())
 
-	for _, enabled := range []string{"true", "false"} {
-		old := item.SwapTempValue(enabled)
-		assert.Equal(t, enabled == "true", item.GetAsBool())
-		item.SwapTempValue(old)
+			for _, enabled := range []string{"true", "false"} {
+				old := item.SwapTempValue(enabled)
+				assert.Equal(t, enabled == "true", item.GetAsBool())
+				item.SwapTempValue(old)
+			}
+			assert.False(t, item.GetAsBool())
+		})
 	}
-	assert.False(t, item.GetAsBool())
 }

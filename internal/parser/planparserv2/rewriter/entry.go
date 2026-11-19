@@ -42,6 +42,17 @@ func (v *visitor) visitExpr(expr *planpb.Expr) interface{} {
 	case *planpb.Expr_RandomSampleExpr:
 		real.RandomSampleExpr.Predicate = v.visitExpr(real.RandomSampleExpr.GetPredicate()).(*planpb.Expr)
 		return expr
+	case *planpb.Expr_MatchExpr:
+		if v.optimizeEnabled {
+			m := real.MatchExpr
+			// Keep MATCH_ANY(arr, FALSE). Both [] and [NULL] have zero hits,
+			// but a NULL array yields UNKNOWN. Folding the whole MATCH to FALSE
+			// would make NOT MATCH_ANY select NULL arrays. MATCH_ALL also needs
+			// the array length: with zero hits, only an empty array matches.
+			foldZeroHits := paramtable.Get().CommonCfg.EnableMatchConstantPredicate.GetAsBool()
+			m.Predicate = v.rewriteMatchPredicate(m.GetPredicate(), foldZeroHits)
+		}
+		return expr
 	case *planpb.Expr_ElementFilterExpr:
 		real.ElementFilterExpr.ElementExpr = v.visitExpr(real.ElementFilterExpr.GetElementExpr()).(*planpb.Expr)
 		real.ElementFilterExpr.Predicate = v.visitExpr(real.ElementFilterExpr.GetPredicate()).(*planpb.Expr)
@@ -166,7 +177,7 @@ func dropLogicalConstants(parts []*planpb.Expr, op planpb.BinaryExpr_BinaryOp) (
 // of the merged operands.
 func (v *visitor) mergeAndParts(parts []*planpb.Expr) *planpb.Expr {
 	parts = combineArrayContains(parts, planpb.JSONContainsExpr_ContainsAll)
-	parts = v.combineAndRangePredicates(parts)
+	parts = combineAndRangePredicates(parts, canFoldPredicateToBoolConstant)
 	parts = v.combineAndBinaryRanges(parts)
 	parts = v.combineAndInWithIn(parts)
 	parts = v.combineAndInWithNotEqual(parts)
