@@ -11,7 +11,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -25,6 +27,103 @@ import (
 // fail proto.Unmarshal.
 
 func tombstone() string { return string(SuffixSnapshotTombstone) }
+
+type failOnceMigrationKV struct {
+	*memkv.MemoryKV
+	err    error
+	failed bool
+}
+
+func (kv *failOnceMigrationKV) MultiSaveAndRemove(
+	ctx context.Context,
+	saves map[string]string,
+	removals []string,
+	preds ...predicates.Predicate,
+) error {
+	if !kv.failed {
+		kv.failed = true
+		return kv.err
+	}
+	return kv.MemoryKV.MultiSaveAndRemove(ctx, saves, removals, preds...)
+}
+
+func TestCatalog_GetCollectionByID_LegacyMigrationErrorIsReturnedAndRetryable(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(42)
+	legacyKey := BuildCollectionKey(util.NonDBID, collectionID)
+	defaultKey := BuildCollectionKey(util.DefaultDBID, collectionID)
+	legacy := &pb.CollectionInfo{
+		ID:                         collectionID,
+		DbId:                       util.NonDBID,
+		PartitionIDs:               []int64{43},
+		PartitionNames:             []string{"_default"},
+		PartitionCreatedTimestamps: []uint64{1},
+		State:                      pb.CollectionState_CollectionCreated,
+		Schema: &schemapb.CollectionSchema{
+			Name:   "legacy-collection",
+			Fields: []*schemapb.FieldSchema{{FieldID: 1, Name: "field"}},
+		},
+	}
+	legacyValue, err := proto.Marshal(legacy)
+	require.NoError(t, err)
+
+	injected := merr.WrapErrIoFailedReason("injected migration failure")
+	store := &failOnceMigrationKV{
+		MemoryKV: memkv.NewMemoryKV(),
+		err:      injected,
+	}
+	require.NoError(t, store.Save(ctx, legacyKey, string(legacyValue)))
+
+	kc := NewCatalog(store)
+	got, err := kc.GetCollectionByID(ctx, util.DefaultDBID, 1, collectionID)
+	require.ErrorIs(t, err, injected)
+	assert.Nil(t, got)
+
+	_, err = store.Load(ctx, defaultKey)
+	assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+	_, err = store.Load(ctx, legacyKey)
+	require.NoError(t, err)
+
+	got, err = kc.GetCollectionByID(ctx, util.DefaultDBID, 1, collectionID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, util.DefaultDBID, got.DBID)
+
+	_, err = store.Load(ctx, defaultKey)
+	require.NoError(t, err)
+	_, err = store.Load(ctx, legacyKey)
+	assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+}
+
+func TestCatalog_ListCollections_LegacyMigrationErrorIsReturned(t *testing.T) {
+	ctx := context.Background()
+	collection := &pb.CollectionInfo{
+		ID:                         42,
+		DbId:                       util.NonDBID,
+		PartitionIDs:               []int64{43},
+		PartitionNames:             []string{"_default"},
+		PartitionCreatedTimestamps: []uint64{1},
+		State:                      pb.CollectionState_CollectionCreated,
+		Schema: &schemapb.CollectionSchema{
+			Name:   "legacy-collection",
+			Fields: []*schemapb.FieldSchema{{FieldID: 1, Name: "field"}},
+		},
+	}
+	value, err := proto.Marshal(collection)
+	require.NoError(t, err)
+	injected := merr.WrapErrIoFailedReason("injected migration failure")
+
+	kv := mocks.NewTxnKV(t)
+	kv.EXPECT().LoadWithPrefix(mock.Anything, getDatabasePrefix(util.NonDBID)).
+		Return([]string{BuildCollectionKey(util.NonDBID, collection.ID)}, []string{string(value)}, nil)
+	kv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		Return(injected).Once()
+
+	kc := NewCatalog(kv)
+	got, err := kc.ListCollections(ctx, util.NonDBID, 1)
+	require.ErrorIs(t, err, injected)
+	assert.Nil(t, got)
+}
 
 func TestCatalog_ListCollections_SkipsTombstone(t *testing.T) {
 	ctx := context.Background()
