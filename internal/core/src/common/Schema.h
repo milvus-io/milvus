@@ -79,9 +79,9 @@ GetStructNameForArrayField(const FieldMeta& field_meta) {
     return field_name.substr(0, left);
 }
 
-// Struct children share one row-to-element mapping. A scalar ARRAY owns one
-// mapping, keyed by its stable field id across renames. '#' cannot start a
-// user field name.
+// Segment-local key for sharing row-to-element offsets. StructArray children
+// use their parent name; a scalar ARRAY uses "#<field ID>" for its own group.
+// '#' cannot start a user field name. The key is never serialized.
 inline std::optional<std::string>
 GetElementOffsetsGroup(const FieldMeta& meta) {
     auto parent = GetStructNameForArrayField(meta);
