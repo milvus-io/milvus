@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -317,8 +316,8 @@ type MetaCache struct {
 
 	mu sync.RWMutex
 
-	sfGlobal conc.Singleflight[*CollectionInfo]
-	sfDB     conc.Singleflight[*DatabaseInfo]
+	sfGlobal cacheFillGroup[*CollectionInfo]
+	sfDB     cacheFillGroup[*DatabaseInfo]
 
 	idStart int64
 	idCount int64
@@ -352,11 +351,11 @@ type MetaCache struct {
 	// callbacks release the meta lock before the expiration fan-out, so a fill's
 	// describe RPC is never blocked by the DDL whose invalidation is waiting on
 	// that fill.
-	fillMu sync.RWMutex
+	fillMu fillBarrier
 
 	// testHookBeforeSingleflightReturn, when non-nil (tests only), runs after a
 	// collection fill has written back but before its singleflight callback
-	// returns. fillMu.RLock is still held across this hook and the subsequent
+	// returns. The fill read permit is still held across this hook and the subsequent
 	// singleflight cleanup.
 	testHookBeforeSingleflightReturn func()
 
@@ -373,7 +372,7 @@ type MetaCache struct {
 	// has no name filter), so a separate per-partition cache duplicated this data.
 	//
 	// A plain map guarded by m.mu and ordered against invalidations by fillMu,
-	// exactly like the primary store: a fill writes it back under fillMu.RLock,
+	// exactly like the primary store: a fill writes it back with a read permit,
 	// an invalidation deletes it under fillMu.Lock after draining in-flight
 	// fills. The list values are immutable once built and are handed out by
 	// pointer (Go's GC keeps a returned list alive independent of map
@@ -382,7 +381,7 @@ type MetaCache struct {
 	// delete is safe even while a request still routes over a list it already
 	// read.
 	partitionCache   map[string]*PartitionInfos
-	sfPartitionCache conc.Singleflight[*PartitionInfos]
+	sfPartitionCache cacheFillGroup[*PartitionInfos]
 
 	stopCh    chan struct{}
 	closeOnce sync.Once
@@ -392,6 +391,7 @@ type MetaCache struct {
 func NewMetaCache(mixCoord types.MixCoordClient) (*MetaCache, error) {
 	metaCache := &MetaCache{
 		mixCoord:       mixCoord,
+		fillMu:         newFillBarrier(),
 		dbInfo:         map[string]*DatabaseInfo{},
 		aliasInfo:      map[string]map[string]string{},
 		collections:    map[typeutil.UniqueID]*CollectionInfo{},
@@ -629,22 +629,15 @@ func (m *MetaCache) updateWithSingleflight(
 	collectionName string,
 	collectionID typeutil.UniqueID,
 ) (*CollectionInfo, error) {
-	// The read lock must cover the entire singleflight.Do call, not only update().
-	// singleflight keeps a completed callback in its map until its own cleanup
-	// runs. Releasing fillMu inside update would let an invalidation evict the
-	// write-back while a post-invalidation caller could still join that old flight
-	// and receive its pre-DDL result directly, bypassing the cache maps.
-	m.fillMu.RLock()
-	defer m.fillMu.RUnlock()
-
-	collection, err, _ := m.sfGlobal.Do(key, func() (*CollectionInfo, error) {
+	// Draining a flight includes removal of its completed result. Otherwise
+	// a caller after invalidation could still join the pre-DDL flight.
+	return m.sfGlobal.Do(ctx, m.fillMu, key, func() (*CollectionInfo, error) {
 		info, err := m.update(ctx, database, collectionName, collectionID)
 		if h := m.testHookBeforeSingleflightReturn; h != nil {
 			h()
 		}
 		return info, err
 	})
-	return collection, err
 }
 
 func (m *MetaCache) UpdateByName(ctx context.Context, database, collectionName string) (*CollectionInfo, error) {
@@ -987,9 +980,7 @@ func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionN
 	// Keep the fill lock through singleflight cleanup, not only its callback.
 	// Otherwise a partition invalidation can finish after the callback unlocks
 	// while a new caller still joins the completed pre-invalidation flight.
-	m.fillMu.RLock()
-	defer m.fillMu.RUnlock()
-	partitionsInfo, err, _ := m.sfPartitionCache.Do(key, func() (*PartitionInfos, error) {
+	partitionsInfo, err := m.sfPartitionCache.Do(ctx, m.fillMu, key, func() (*PartitionInfos, error) {
 		// Partition-key status is fixed at creation, so the resolved schema answers
 		// it; ShowPartitions stays ID-addressed so a same-name recreate cannot leak in.
 		isPartitionKey := collection.Schema.IsPartitionKeyCollection()
@@ -1014,7 +1005,7 @@ func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionN
 		//
 		// Only cache the list while the collection's PRIMARY entry is still live.
 		// The primary can be gone here in two ways: an invalidation in the
-		// resolve-to-lock gap (collectionID was resolved before fillMu.RLock was
+		// resolve-to-lock gap (collectionID was resolved before the read permit was
 		// taken), or RemoveDatabase's batched primary-store walk, which runs after
 		// it releases fillMu and so can overlap this RPC. Either way the
 		// collection may still exist and ShowPartitions succeeds, but writing
@@ -1474,9 +1465,7 @@ func (m *MetaCache) GetDatabaseInfo(ctx context.Context, database string) (*Data
 	// Keep the fill lock through singleflight cleanup, matching collection and
 	// partition fills. RemoveDatabase/RemoveDatabaseInfo must not finish while a
 	// new caller can still join a completed pre-invalidation database flight.
-	m.fillMu.RLock()
-	defer m.fillMu.RUnlock()
-	dbInfo, err, _ := m.sfDB.Do(database, func() (*DatabaseInfo, error) {
+	dbInfo, err := m.sfDB.Do(ctx, m.fillMu, database, func() (*DatabaseInfo, error) {
 		resp, err := m.describeDatabase(ctx, database)
 		if err != nil {
 			return nil, err
@@ -1593,7 +1582,7 @@ func (m *MetaCache) RemovePartition(ctx context.Context, database string, collec
 // pre-invalidation flight.
 func (m *MetaCache) stalePartitionCacheLocked(collectionID typeutil.UniqueID) {
 	key := buildPartitionCacheKey(collectionID)
-	m.sfPartitionCache.Forget(key)
+	m.sfPartitionCache.flights.Delete(key)
 	delete(m.partitionCache, key)
 }
 
