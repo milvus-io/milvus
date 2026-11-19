@@ -742,7 +742,7 @@ class Schema {
     // struct_name -> field ID of the struct array field (built in ParseFrom)
     std::unordered_map<std::string, FieldId> struct_field_ids_;
     // StructArray parent ID -> representative physical child in this schema.
-    std::unordered_map<FieldId, FieldId> struct_representative_ids_;
+    std::unordered_map<FieldId, FieldId> representative_child_by_parent_;
 
     // warmup policy settings
     // Valid values: "disable", "sync", "async" (empty string means no setting)
