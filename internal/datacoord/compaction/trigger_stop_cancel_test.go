@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
-	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metacache"
@@ -208,19 +207,6 @@ func TestCompactionTriggerStopCancelsGlobalBatchAndNotifiesWaiters(t *testing.T)
 	const groupCount = 20
 	m, im, _ := buildTestMetaWithCandidateGroups(t, groupCount, datapb.SegmentLevel_L1)
 
-	// Pre-populate an already-persisted compaction task in CompactionTaskMeta to verify
-	// stopping trigger planning leaves durable recovery state untouched.
-	taskMeta := ctask.NewCompactionTaskMetaOverCatalog(nil)
-	persistedTask := &datapb.CompactionTask{
-		PlanID:        777,
-		TriggerID:     888,
-		CollectionID:  1001,
-		State:         datapb.CompactionTaskState_pipelining,
-		Type:          datapb.CompactionType_MixCompaction,
-		InputSegments: []int64{42},
-	}
-	taskMeta.SaveCompactionTaskMemory(persistedTask)
-
 	var lookupCalls atomic.Int32
 	var enteredOnce sync.Once
 	enteredFirstLookup := make(chan struct{})
@@ -322,11 +308,6 @@ func TestCompactionTriggerStopCancelsGlobalBatchAndNotifiesWaiters(t *testing.T)
 
 	// Zero new compaction tasks may be enqueued after Stop().
 	require.Empty(t, inspector.snapshot())
-
-	// Pre-existing persisted compaction tasks in CompactionTaskMeta (indexed by TriggerID) remain intact for recovery.
-	recoveredTasks := taskMeta.GetCompactionTasks()[888]
-	require.Len(t, recoveredTasks, 1)
-	require.Equal(t, int64(777), recoveredTasks[0].GetPlanID())
 }
 
 func errorsIsServiceUnavailable(err error) bool {
@@ -671,4 +652,99 @@ func TestCompactionTriggerManagerStopDuringInFlightManualTriggerAfterViewGenerat
 	}
 
 	require.Empty(t, inspector.snapshot())
+}
+
+func TestCompactionTriggerCancelledQueuedManualSignalNotPlanned(t *testing.T) {
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.IndexBasedCompaction.Key, "false")
+	defer pt.Reset(pt.DataCoordCfg.IndexBasedCompaction.Key)
+
+	m, im, colls := buildTestMetaWithCandidateGroups(t, 2, datapb.SegmentLevel_L1)
+
+	enteredSignalA := make(chan struct{})
+	releaseSignalA := make(chan struct{})
+	var enteredOnce sync.Once
+	var coll1002Lookups atomic.Int32
+
+	handler := newFuncHandler(t, func(ctx context.Context, collID UniqueID) (*meta.CollectionInfo, error) {
+		if collID == 1001 {
+			enteredOnce.Do(func() {
+				close(enteredSignalA)
+			})
+			select {
+			case <-releaseSignalA:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		} else if collID == 1002 {
+			coll1002Lookups.Add(1)
+		}
+		return colls[collID], nil
+	})
+
+	_, alloc := newIncrementingRootCoordAllocator(t)
+	inspector := &recordingInspector{}
+
+	tr := NewCompactionTrigger(m, im, inspector, alloc, handler, index.NewTestVersionManager())
+	tr.testingOnly = true
+	tr.Start()
+	defer tr.Stop()
+
+	caller1Done := make(chan error, 1)
+	go func() {
+		_, err := tr.TriggerCompaction(context.Background(), NewCompactionSignal().WithCollectionID(1001).WithIsForce(true).WithWaitResult(true))
+		caller1Done <- err
+	}()
+
+	select {
+	case <-enteredSignalA:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for signal A to enter handleSignal")
+	}
+
+	ctxB, cancelB := context.WithCancel(context.Background())
+	defer cancelB()
+	type triggerRes struct {
+		id  UniqueID
+		err error
+	}
+	caller2Done := make(chan triggerRes, 1)
+	go func() {
+		sig := NewCompactionSignal().WithCollectionID(1002).WithIsForce(true).WithWaitResult(true)
+		id, err := tr.TriggerCompaction(ctxB, sig)
+		caller2Done <- triggerRes{id: id, err: err}
+	}()
+
+	require.Eventually(t, func() bool {
+		return len(tr.manualSignals) == 1
+	}, 2*time.Second, time.Millisecond)
+
+	cancelB()
+
+	select {
+	case res := <-caller2Done:
+		require.Equal(t, UniqueID(-1), res.id)
+		require.ErrorIs(t, res.err, context.Canceled)
+	case <-time.After(1 * time.Second):
+		t.Fatal("queued TriggerCompaction caller did not return after ctx cancel")
+	}
+
+	close(releaseSignalA)
+
+	select {
+	case err := <-caller1Done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("signal A did not complete")
+	}
+
+	require.Eventually(t, func() bool {
+		return len(tr.manualSignals) == 0
+	}, 2*time.Second, time.Millisecond)
+	tr.Stop()
+
+	require.Zero(t, coll1002Lookups.Load(), "cancelled queued manual signal must not be planned")
+	for _, task := range inspector.snapshot() {
+		require.NotEqual(t, int64(1002), task.GetCollectionID(), "cancelled queued manual signal must not enqueue tasks")
+	}
 }
