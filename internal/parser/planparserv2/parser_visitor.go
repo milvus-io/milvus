@@ -50,6 +50,7 @@ type ParserVisitor struct {
 	// currentStructArrayField stores the struct array field name while processing
 	// ElementFilter or MATCH_* predicates.
 	currentStructArrayField string
+	currentScalarArray      *schemapb.FieldSchema
 }
 
 func NewParserVisitor(schema *typeutil.SchemaHelper, args *ParserVisitorArgs) *ParserVisitor {
@@ -1460,6 +1461,17 @@ func validateElementLevelPredicate(expr *planpb.Expr, scope elementPredicateScop
 }
 
 func (v *ParserVisitor) getColumnInfoFromStructSubField(tokenText string) (*planpb.ColumnInfo, error) {
+	if tokenText == "$" {
+		field := v.currentScalarArray
+		if field == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("$ requires a scalar ARRAY MATCH_* target")
+		}
+		return &planpb.ColumnInfo{FieldId: field.GetFieldID(), DataType: field.GetElementType(),
+			ElementType: field.GetElementType(), Nullable: field.GetElementNullable(), IsElementLevel: true}, nil
+	}
+	if v.currentScalarArray != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("use $ to reference an element of scalar ARRAY %s", v.currentScalarArray.GetName())
+	}
 	if !isValidStructSubField(tokenText) {
 		return nil, merr.WrapErrParameterInvalidMsg("invalid struct sub-field syntax: %s", tokenText)
 	}
@@ -3464,49 +3476,15 @@ func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) int
 
 // VisitStructSubField handles $[fieldName] syntax within ElementFilter.
 func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) interface{} {
-	// Extract the field name from $[fieldName]
-	tokenText := ctx.StructSubFieldIdentifier().GetText()
-	if !isValidStructSubField(tokenText) {
-		return merr.WrapErrParameterInvalidMsg("invalid struct sub-field syntax: %s", tokenText)
-	}
-	// Remove "$[" prefix and "]" suffix
-	fieldName := tokenText[2 : len(tokenText)-1]
-
-	// Check if we're inside an ElementFilter or MATCH_* context
-	if v.currentStructArrayField == "" {
-		return merr.WrapErrParameterInvalidMsg("$[%s] syntax can only be used inside ElementFilter or MATCH_*", fieldName)
-	}
-
-	// Construct full field name for struct array field
-	fullFieldName := typeutil.ConcatStructFieldName(v.currentStructArrayField, fieldName)
-	// Get the struct array field info
-	field, err := v.schema.GetFieldFromName(fullFieldName)
+	info, err := v.getColumnInfoFromStructSubField(ctx.StructSubFieldIdentifier().GetText())
 	if err != nil {
-		return merr.WrapErrParameterInvalidMsg("array field not found: %s, error: %s", fullFieldName, err)
+		return err
 	}
-
-	// In element-level context, use Array as storage type, element type for operations
-	elementType := field.GetElementType()
-
+	// Predicates address the ARRAY column physically and type-check its element.
+	info.DataType = schemapb.DataType_Array
 	return &ExprWithType{
-		expr: &planpb.Expr{
-			Expr: &planpb.Expr_ColumnExpr{
-				ColumnExpr: &planpb.ColumnExpr{
-					Info: &planpb.ColumnInfo{
-						FieldId:         field.FieldID,
-						DataType:        schemapb.DataType_Array, // Storage type is Array
-						IsPrimaryKey:    field.IsPrimaryKey,
-						IsAutoID:        field.AutoID,
-						IsPartitionKey:  field.IsPartitionKey,
-						IsClusteringKey: field.IsClusteringKey,
-						ElementType:     elementType, // Element type for operations
-						Nullable:        v.structSubFieldElementNullable(field),
-						IsElementLevel:  true, // Mark as element-level access
-					},
-				},
-			},
-		},
-		dataType:      elementType, // Expression evaluates to element type
+		expr:          &planpb.Expr{Expr: &planpb.Expr_ColumnExpr{ColumnExpr: &planpb.ColumnExpr{Info: info}}},
+		dataType:      info.ElementType,
 		nodeDependent: true,
 	}
 }
@@ -3514,15 +3492,28 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 // parseMatchExpr is a helper function for parsing match expressions
 // matchType: the type of match operation (MatchAll, MatchAny, MatchLeast, MatchMost)
 // count: for MatchLeast/MatchMost, the count parameter (N); for MatchAll/MatchAny, this is ignored (0)
-func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx parser.IExprContext, matchType planpb.MatchType, count int64, funcName string) interface{} {
+func (v *ParserVisitor) parseMatchExpr(collectionName string, exprCtx parser.IExprContext, matchType planpb.MatchType, count int64, funcName string) interface{} {
 	// Check for nested match expression - not allowed
 	if v.currentStructArrayField != "" {
 		return merr.WrapErrParameterInvalidMsg("nested %s is not supported, already inside match expression for field: %s", funcName, v.currentStructArrayField)
 	}
 
-	// Set current context for element expression parsing
-	v.currentStructArrayField = structArrayFieldName
-	defer func() { v.currentStructArrayField = "" }()
+	match := &planpb.MatchExpr{MatchType: matchType, Count: count}
+	if v.schema.GetStructArrayFieldFromName(collectionName) != nil {
+		match.StructName = collectionName
+	} else {
+		field, err := v.schema.GetUserFieldFromName(collectionName)
+		if err != nil || field.GetDataType() != schemapb.DataType_Array || !typeutil.IsPrimitiveType(field.GetElementType()) {
+			return merr.WrapErrParameterInvalidMsg("%s requires a scalar ARRAY or StructArray target, got %s", funcName, collectionName)
+		}
+		match.Collection = &planpb.MatchExpr_ArrayFieldId{ArrayFieldId: field.GetFieldID()}
+		v.currentScalarArray = field
+	}
+	v.currentStructArrayField = collectionName
+	defer func() {
+		v.currentScalarArray = nil
+		v.currentStructArrayField = ""
+	}()
 
 	// Parse the predicate expression
 	predicate := exprCtx.Accept(v)
@@ -3557,17 +3548,10 @@ func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx pars
 			"membership_match filters are not supported inside %s element predicates", funcName)
 	}
 
-	// Build MatchExpr proto
+	match.Predicate = predicateExpr.expr
 	return &ExprWithType{
 		expr: &planpb.Expr{
-			Expr: &planpb.Expr_MatchExpr{
-				MatchExpr: &planpb.MatchExpr{
-					StructName: structArrayFieldName,
-					Predicate:  predicateExpr.expr,
-					MatchType:  matchType,
-					Count:      count,
-				},
-			},
+			Expr:       &planpb.Expr_MatchExpr{MatchExpr: match},
 			IsTemplate: predicateExpr.expr.GetIsTemplate(),
 		},
 		dataType: schemapb.DataType_Bool,

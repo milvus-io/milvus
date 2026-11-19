@@ -466,7 +466,7 @@ SegmentGrowingImpl::InitializeStructElementOffsets() {
 
     for (auto field_id : schema->get_field_ids()) {
         const auto& field_meta = (*schema)[field_id];
-        auto struct_name = GetStructNameForArrayField(field_meta);
+        auto struct_name = GetElementOffsetsGroup(field_meta);
         if (struct_name.has_value()) {
             struct_fields[*struct_name].push_back(field_id);
         }
@@ -3226,7 +3226,7 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
             std::shared_lock lock(struct_element_offsets_map_mutex_);
             std::unordered_set<std::string> represented_structs;
             for (auto field_id : sch->get_field_ids()) {
-                auto struct_name = GetStructNameForArrayField((*sch)[field_id]);
+                auto struct_name = GetElementOffsetsGroup((*sch)[field_id]);
                 if (struct_name &&
                     struct_element_offsets_map_.count(field_id) > 0 &&
                     represented_structs.insert(*struct_name).second) {
@@ -3852,7 +3852,7 @@ SegmentGrowingImpl::EnsureStructElementOffsetsForField(
 void
 SegmentGrowingImpl::EnsureStructElementOffsetsForField(
     const FieldMeta& field_meta, int64_t row_count, const Schema& schema) {
-    auto struct_name = GetStructNameForArrayField(field_meta);
+    auto struct_name = GetElementOffsetsGroup(field_meta);
     if (!struct_name.has_value()) {
         return;
     }
@@ -3864,7 +3864,7 @@ SegmentGrowingImpl::EnsureStructElementOffsetsForField(
     bool first_child = true;
     for (auto field_id : schema.get_field_ids()) {
         auto existing_struct_name =
-            GetStructNameForArrayField(schema[field_id]);
+            GetElementOffsetsGroup(schema[field_id]);
         if (existing_struct_name != struct_name) {
             continue;
         }

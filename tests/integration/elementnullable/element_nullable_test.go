@@ -1027,3 +1027,46 @@ func (s *ElementNullableSuite) TestTopLevelArrayPathReplace() {
 	s.Require().ErrorContains(replace(2, "[0]", longRow(nil, false)), "out of range")
 	s.Require().ErrorContains(replace(3, "[0]", longRow(nil, false)), "null parent")
 }
+
+// Exercise both physical scalar array layouts through the row-returning query API.
+func (s *ElementNullableSuite) TestScalarArrayMatch() {
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+	defer cancel()
+	name := "scalar_match_" + funcutil.RandomString(8)
+	schema := collectionSchema(name)
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		Name: "scores", FieldID: 110, DataType: schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64, Nullable: true, ElementNullable: true,
+		TypeParams: []*commonpb.KeyValuePair{kv(common.MaxCapacityKey, "8")},
+	})
+	s.Require().NoError(merr.Error(s.create(ctx, schema)))
+	s.indexAndLoad(ctx, name)
+	arr := scalarField("scores", 110, longRow([]int64{7, 7}, true, false, true), longRow(nil))
+	typeutil.SetFieldDataValidData(arr, []bool{true, true, false})
+	s.Require().NoError(s.insert(ctx, name, append(insertFields(), arr)))
+	for _, phase := range []string{"growing", "sealed"} {
+		if phase == "sealed" {
+			s.flushAndReload(ctx, name)
+		}
+		for _, tc := range []struct {
+			filter string
+			pks    []int64
+		}{
+			{"MATCH_ANY(scores, $ IS NULL)", []int64{1}},
+			{"MATCH_ALL(scores, $ == 7)", []int64{2}},
+			{"MATCH_LEAST(scores, $ == 7, threshold=2)", []int64{1}},
+			{"MATCH_MOST(scores, $ == 7, threshold=0)", []int64{2}},
+			{"MATCH_EXACT(scores, $ is not null, threshold=2)", []int64{1}},
+			{"not MATCH_ANY(scores, $ IS NULL)", []int64{2}},
+			{"MATCH_ALL(legacy, $ in [1, 3])", []int64{1, 2, 3}},
+			{"MATCH_ANY(legacy, 1 < $ <= 3)", []int64{3}},
+		} {
+			result, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
+				CollectionName: name, Expr: tc.filter, OutputFields: []string{"pk"},
+			})
+			s.Require().NoError(merr.CheckRPCCall(result, err), "%s: %s", phase, tc.filter)
+			s.Require().Len(result.GetFieldsData(), 1)
+			s.ElementsMatch(tc.pks, result.GetFieldsData()[0].GetScalars().GetLongData().GetData(), "%s: %s", phase, tc.filter)
+		}
+	}
+}

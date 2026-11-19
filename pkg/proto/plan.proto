@@ -279,6 +279,10 @@ message MatchExpr {
   Expr predicate = 2;          // The condition expression using $[field] syntax (e.g., $[intField] == 1 && $[strField] == "aaa")
   MatchType match_type = 3;    // Type of match operation
   int64 count = 4;             // For MatchLeast/MatchMost: the count parameter (N)
+  // Unset for existing StructArray plans, which bind through struct_name.
+  oneof collection {
+    int64 array_field_id = 5;
+  }
 }
 
 message AlwaysTrueExpr {}
