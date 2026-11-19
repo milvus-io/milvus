@@ -223,4 +223,7 @@ func TestTalonConstructorRejectsInvalidConfig(t *testing.T) {
 	}
 	_, err := NewTalonClient(&indexpb.StorageConfig{TalonCoordinator: "127.0.0.1:1"}, 0)
 	require.Error(t, err)
+	// The native client requires a UTF-8 namespace at construction.
+	_, err = NewTalonClient(&indexpb.StorageConfig{TalonCoordinator: "127.0.0.1:1", TalonNamespace: "\xff"}, 1)
+	require.ErrorContains(t, err, "Invalid Talon client options")
 }

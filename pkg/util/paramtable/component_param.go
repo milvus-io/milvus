@@ -331,6 +331,10 @@ func (p *ComponentParam) CleanEvent() {
 type commonConfig struct {
 	ClusterPrefix ParamItem `refreshable:"false"`
 
+	CloudClusterID    ParamItem `refreshable:"false"`
+	CloudInstanceType ParamItem `refreshable:"false"`
+	CloudClassType    ParamItem `refreshable:"false"`
+
 	RootCoordTimeTick   ParamItem `refreshable:"true"`
 	RootCoordStatistics ParamItem `refreshable:"true"`
 	RootCoordDml        ParamItem `refreshable:"false"`
@@ -529,6 +533,20 @@ func (p *commonConfig) ResolveLoadAdmissionLimits(asyncEnabled bool) (budgetByte
 	return resolve(&p.LoadTransientBudgetBytes), resolve(&p.LoadAdmissionSlots)
 }
 
+// TalonNamespace returns the cloud namespace shared by Talon reads and prewarming.
+// An empty cluster ID selects Talon's default namespace.
+func (p *commonConfig) TalonNamespace() string {
+	clusterID := p.CloudClusterID.GetValue()
+	if clusterID == "" {
+		return ""
+	}
+	caseMode := "meta"
+	if p.StorageTalonEnabledStages.GetAsUint32() == common.TalonStagesAll {
+		caseMode = "all"
+	}
+	return strings.Join([]string{clusterID, p.CloudInstanceType.GetValue(), p.CloudClassType.GetValue(), caseMode}, "-")
+}
+
 func (p *commonConfig) init(base *BaseTable) {
 	// must init cluster prefix first
 	p.ClusterPrefix = ParamItem{
@@ -544,6 +562,31 @@ To share a Pulsar instance among multiple Milvus instances, consider changing th
 		Export:       true,
 	}
 	p.ClusterPrefix.Init(base.mgr)
+
+	p.CloudClusterID = ParamItem{
+		Key:          "common.cloud.clusterId",
+		Version:      "3.0.1",
+		DefaultValue: "",
+		Doc:          "Cloud cluster ID. Leave empty to use Talon's default namespace.",
+		Export:       true,
+	}
+	p.CloudClusterID.Init(base.mgr)
+	p.CloudInstanceType = ParamItem{
+		Key:          "common.cloud.instanceType",
+		Version:      "3.0.1",
+		DefaultValue: "",
+		Doc:          "Cloud instance type used in the Talon namespace.",
+		Export:       true,
+	}
+	p.CloudInstanceType.Init(base.mgr)
+	p.CloudClassType = ParamItem{
+		Key:          "common.cloud.classType",
+		Version:      "3.0.1",
+		DefaultValue: "",
+		Doc:          "Cloud class type used in the Talon namespace.",
+		Export:       true,
+	}
+	p.CloudClassType.Init(base.mgr)
 
 	pulsarPartitionKeyword := "-partition-"
 	chanNamePrefix := func(prefix string) string {

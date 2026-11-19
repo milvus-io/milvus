@@ -70,6 +70,7 @@ AdaptStorageConfig(const proto::indexcgo::StorageConfig& config) {
     result.talon_enabled_stages = config.talon_enabled_stages();
     result.talon_small_read_threshold = config.talon_small_read_threshold();
     result.talon_coordinator = config.talon_coordinator();
+    result.talon_namespace = config.talon_namespace();
     result.talon_block_size = config.talon_block_size();
     result.talon_max_idle_per_addr = config.talon_max_idle_per_addr();
     result.talon_enable_for_external_table =

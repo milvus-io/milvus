@@ -336,6 +336,7 @@ func (it *indexBuildTask) createBuilder(ctx context.Context) error {
 		TalonEnabledStages:          it.req.GetStorageConfig().GetTalonEnabledStages(),
 		TalonSmallReadThreshold:     it.req.GetStorageConfig().GetTalonSmallReadThreshold(),
 		TalonCoordinator:            it.req.GetStorageConfig().GetTalonCoordinator(),
+		TalonNamespace:              it.req.GetStorageConfig().GetTalonNamespace(),
 		TalonBlockSize:              it.req.GetStorageConfig().GetTalonBlockSize(),
 		TalonMaxIdlePerAddr:         it.req.GetStorageConfig().GetTalonMaxIdlePerAddr(),
 		TalonEnableForExternalTable: it.req.GetStorageConfig().GetTalonEnableForExternalTable(),

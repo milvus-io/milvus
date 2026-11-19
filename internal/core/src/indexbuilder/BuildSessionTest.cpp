@@ -159,6 +159,7 @@ TEST_F(BuildSessionTest, ScalarAndTextManifestInputsKeepTalonConfiguration) {
                 config->set_talon_enabled_stages(stages);
                 config->set_talon_small_read_threshold(123);
                 config->set_talon_coordinator("coordinator:1234");
+                config->set_talon_namespace("request-namespace");
                 config->set_talon_block_size(456);
                 config->set_talon_max_idle_per_addr(7);
                 config->set_talon_enable_for_external_table(external_enabled);
@@ -183,6 +184,9 @@ TEST_F(BuildSessionTest, ScalarAndTextManifestInputsKeepTalonConfiguration) {
                     props, PROPERTY_FS_TALON_COORDINATOR);
                 ASSERT_TRUE(coordinator.ok());
                 EXPECT_EQ(*coordinator, "coordinator:1234");
+                EXPECT_EQ(std::get<std::string>(
+                              props->at(PROPERTY_FS_TALON_NAMESPACE)),
+                          "request-namespace");
                 auto external = milvus_storage::api::GetValue<std::string>(
                     props, "milvus.talon.external_mode");
                 ASSERT_TRUE(external.ok());
