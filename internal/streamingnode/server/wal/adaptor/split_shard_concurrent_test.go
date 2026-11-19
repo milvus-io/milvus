@@ -132,8 +132,8 @@ func TestSplitShardFenceConcurrentWithCommit(t *testing.T) {
 				require.NoError(t, b.err)
 				require.Less(t, a.result.TimeTick, b.result.TimeTick, "commit must be below the fence")
 			} else {
-				requireSplitTxnCommitUnknown(t, b.err)
-				require.Nil(t, b.result, "a commit with an unknown outcome must not report an append")
+				requireSplitTxnFenced(t, b.err)
+				require.Nil(t, b.result, "the source fence interrupted this transaction before it could append a commit")
 			}
 		})
 	}
