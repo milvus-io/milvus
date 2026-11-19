@@ -3197,9 +3197,11 @@ func (suite *ExternalSegmentEstimateSuite) TestExternalRawDataFactor() {
 
 	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	// PART 2 adds binlogSize (100000) to memory
-	// PART 2.5 adds extra = 100000 * (1.5 - 1.0) = 50000
-	suite.True(usage.MemorySize >= 150000, "should include raw data factor: got %d", usage.MemorySize)
+	baseline, err := estimateLoadingResourceUsageOfSegment(suite.schema, suite.externalLoadInfo(1000, 100000), resourceEstimateFactor{externalRawDataFactor: 1})
+	suite.NoError(err)
+	// The read margin stays in memory even when the mixed column group uses mmap.
+	suite.Equal(baseline.MemorySize+50000, usage.MemorySize)
+	suite.Equal(baseline.DiskSize, usage.DiskSize)
 }
 
 func (suite *ExternalSegmentEstimateSuite) TestExternalRawDataFactorSkippedWithTieredEviction() {
@@ -3230,8 +3232,10 @@ func (suite *ExternalSegmentEstimateSuite) TestExternalRawDataFactor_NoExtraWhen
 
 	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	// factor <= 1.0, no extra memory added by PART 2.5
-	suite.True(usage.MemorySize >= 100000, "should include base binlog size")
+	baseline, err := estimateLoadingResourceUsageOfSegment(suite.schema, suite.externalLoadInfo(1000, 100000), resourceEstimateFactor{externalRawDataFactor: 1})
+	suite.NoError(err)
+	suite.Equal(baseline.MemorySize, usage.MemorySize)
+	suite.Equal(baseline.DiskSize, usage.DiskSize)
 }
 
 func (suite *ExternalSegmentEstimateSuite) TestLazyLoadSubtractsRawData() {

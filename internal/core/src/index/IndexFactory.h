@@ -31,8 +31,16 @@
 #include "index/ScalarIndex.h"
 #include "storage/FileManager.h"
 #include "storage/IndexEntryReader.h"
+#include "pb/cgo_msg.pb.h"
 
 namespace milvus::index {
+
+// A batch planner caps the shared portion once across fields and indexes.
+struct IndexLoadResourceEstimate {
+    LoadResourceRequest resource{};
+    uint64_t shared_memory_bytes{0};
+    uint64_t max_shared_task_bytes{0};
+};
 
 class IndexFactory {
  public:
@@ -52,6 +60,10 @@ class IndexFactory {
 
     static bool
     CanUseIndexRawDataForField(DataType field_type, bool has_raw_data);
+
+    // Uses supplied metadata without reading index files.
+    IndexLoadResourceEstimate
+    IndexLoadResource(const proto::cgo::LoadIndexInfo& info);
 
     LoadResourceRequest
     IndexLoadResource(DataType field_type,
