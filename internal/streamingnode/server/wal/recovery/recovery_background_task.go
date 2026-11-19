@@ -33,13 +33,22 @@ func (rs *recoveryStorageImpl) backgroundTask() {
 		case <-rs.persistNotifier:
 		case <-ticker.C:
 		}
-		if err := rs.persistDirtySnapshot(rs.backgroundTaskNotifier.Context(), mlog.DebugLevel); err != nil {
+		if rs.persistence != nil && !rs.persistence.Enter() {
+			return
+		}
+		err := rs.persistDirtySnapshot(rs.backgroundTaskNotifier.Context(), mlog.DebugLevel)
+		if err == nil {
+			rs.gcSummaryStore(rs.backgroundTaskNotifier.Context())
+		}
+		if rs.persistence != nil {
+			rs.persistence.Leave()
+		}
+		if err != nil {
 			if rs.backgroundTaskNotifier.Context().Err() == nil && rs.onFatal != nil {
 				rs.onFatal(merr.Wrap(err, "recovery snapshot persistence stopped"))
 			}
 			return
 		}
-		rs.gcSummaryStore(rs.backgroundTaskNotifier.Context())
 	}
 }
 
@@ -119,6 +128,9 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlo
 			rs.tailController.Publish(snapshot.LogicalEndOffset, snapshot.LogicalEndMessageCount)
 		}
 		rs.metrics.ObServePersistedMetrics(snapshot.Checkpoint.TimeTick)
+		if rs.publishedCheckpoint != nil {
+			rs.publishedCheckpoint(snapshot.Checkpoint)
+		}
 		rs.simpleTruncateCheckpoint(ctx, snapshot.Checkpoint)
 	}
 	return

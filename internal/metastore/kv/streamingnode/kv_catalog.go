@@ -12,7 +12,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -240,6 +242,32 @@ func (c *catalog) ListQueryViews(ctx context.Context, pChannelName string) ([]*v
 
 // SaveQueryViews persists Up views and removes recovery records in every other state.
 func (c *catalog) SaveQueryViews(ctx context.Context, pChannelName string, views []*viewpb.QueryViewOfShard) error {
+	return c.saveQueryViews(ctx, pChannelName, views)
+}
+
+// CommitReplicaQueryView checks the desired topology and checkpoint ownership
+// in the transaction publishing Up or removing its durable record.
+func (c *catalog) CommitReplicaQueryView(ctx context.Context, t *streamingpb.WALReplicaTopology, v *viewpb.QueryViewOfShard) error {
+	topo, err := proto.Marshal(t)
+	if err != nil {
+		return err
+	}
+	key := buildConsumeCheckpointKey(t.Pchannel)
+	raw, err := c.metaKV.Load(ctx, key)
+	if err != nil {
+		return err
+	}
+	cp := &streamingpb.WALCheckpoint{}
+	if err := proto.Unmarshal([]byte(raw), cp); err != nil {
+		return err
+	}
+	if cp.Term != t.WriterTerm {
+		return merr.WrapErrServiceNotReadyMsg("checkpoint ownership changed for %s", t.Pchannel)
+	}
+	return c.saveQueryViews(ctx, t.Pchannel, []*viewpb.QueryViewOfShard{v}, predicates.ValueEqual(streamingcoord.BuildPChannelInfoPath(t.Pchannel), string(topo)), predicates.ValueEqual(key, raw))
+}
+
+func (c *catalog) saveQueryViews(ctx context.Context, pChannelName string, views []*viewpb.QueryViewOfShard, guards ...predicates.Predicate) error {
 	if len(views) == 0 {
 		return nil
 	}
@@ -264,7 +292,7 @@ func (c *catalog) SaveQueryViews(ctx context.Context, pChannelName string, views
 		delete(saves, key)
 		removals = append(removals, key)
 	}
-	return c.metaKV.MultiSaveAndRemove(ctx, saves, removals)
+	return c.metaKV.MultiSaveAndRemove(ctx, saves, removals, guards...)
 }
 
 // SaveSegmentAssignments saves the segment assignment info to meta storage.

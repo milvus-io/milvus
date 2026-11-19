@@ -28,6 +28,9 @@ func (s *PChannelViewSyncServer) SyncQueryView(stream viewpb.ViewSyncService_Syn
 	if err != nil {
 		return err
 	}
+	if pchannel.Term <= 0 {
+		return viewerror.NewNotPrimaryError("query view control stream requires a writer term")
+	}
 	rawWAL, err := s.walManager.GetAvailableWAL(pchannel)
 	if err != nil {
 		return err

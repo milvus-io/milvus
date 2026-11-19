@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -33,6 +34,8 @@ func TestServer(t *testing.T) {
 	metaKV := etcdkv.NewEtcdKV(c, "test")
 	f := syncutil.NewFuture[types.MixCoordClient]()
 	s := sessionutil.NewMockSession(t)
+	sessions := mockey.Mock((*sessionutil.MockSession).GetSessions).Return(map[string]*sessionutil.Session{}, int64(1), nil).Build()
+	defer sessions.UnPatch()
 	s.EXPECT().GetRegisteredRevision().Return(int64(1))
 	newServer := b.WithETCD(c).
 		WithMetaKV(metaKV).

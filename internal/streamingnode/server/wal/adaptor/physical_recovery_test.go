@@ -2,6 +2,7 @@ package adaptor
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/replica"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -186,5 +189,89 @@ func TestRecoveredWALAcceptsHistoricalReadOptions(t *testing.T) {
 	id := pulsar.NewPulsarID(pulsarclient.NewMessageID(1, 0, 0, 0))
 	for _, policy := range []options.DeliverPolicy{options.DeliverPolicyStartFrom(id), options.DeliverPolicyStartAfter(id)} {
 		require.NoError(t, reader.checkReadOptWALName(wal.ReadOption{DeliverPolicy: policy}))
+	}
+}
+
+func TestReplicaPromotionFollowsDurableSwitch(t *testing.T) {
+	for _, caughtUp := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reader_caught_up_%t", caughtUp), func(t *testing.T) {
+			mockey.PatchConvey("select the writer witnessed by the live scanner", t, func() {
+				old := &recoveryPhysicalWAL{name: message.WALNamePulsar}
+				target := &recoveryPhysicalWAL{name: message.WALNameWoodpecker}
+				start := wp.NewWpID(&wplog.LogMessageId{SegmentId: 1, EntryId: 0})
+				buf := replica.NewBuffer(10)
+				defer buf.Close()
+				cursor, _, err := buf.Pin(true)
+				require.NoError(t, err)
+				defer cursor.Close()
+				if caughtUp {
+					buf.ObserveSwitch(20, start)
+					buf.Truncate(30)
+				}
+				auto := autowalimpls.New(old, func(_ context.Context, name message.WALName, mode types.AccessMode) (walimpls.WALImpls, error) {
+					require.Equal(t, target.name, name)
+					require.Equal(t, types.AccessModeRW, mode)
+					return target, nil
+				})
+				builder := newRecoveryStreamBuilder(&roWALAdaptorImpl{roWALImpls: auto}, nil, nil)
+				var probes []message.WALName
+				mockey.Mock(sendFirstTimeTick).To(func(_ context.Context, l walimpls.WALImpls, anchor message.MessageID) (message.ImmutableMessage, error) {
+					probes = append(probes, l.WALName())
+					if l.WALName() == old.name {
+						// The old probe was appended past the link. It never appears
+						// on this logical scanner, even though Append succeeded.
+						buf.ObserveSwitch(20, start)
+						return recoveryTestMessage(t, message.MessageTypeRecoveryBarrier, 30).IntoImmutableMessage(pulsar.NewPulsarID(pulsarclient.NewMessageID(1, 3, 0, 0))), nil
+					}
+					require.True(t, start.EQ(anchor))
+					probe := recoveryTestMessage(t, message.MessageTypeRecoveryBarrier, 40).IntoImmutableMessage(wp.NewWpID(&wplog.LogMessageId{SegmentId: 1, EntryId: 2}))
+					buf.ObserveRecoveryBarrier(probe, utility.NewTxnBuffer(nil, nil))
+					buf.Observe([]message.ImmutableMessage{probe}, 40)
+					return probe, nil
+				}).Build()
+				result, err := prepareReplicaWriter(t.Context(), builder, cursor, buf, nil)
+				require.NoError(t, err)
+				require.Equal(t, target.name, result.WALName())
+				if caughtUp {
+					require.Equal(t, []message.WALName{target.name}, probes)
+				} else {
+					require.Equal(t, []message.WALName{old.name, target.name}, probes)
+				}
+				require.Equal(t, target.name, builder.RWWALImpls().WALName())
+			})
+		})
+	}
+}
+
+// A failed staging or authority check must leave the read side usable and
+// release the recovery pin so that the next checkpoint can truncate the tail.
+func TestReplicaPromotionReleasesPin(t *testing.T) {
+	for _, staleCheckpoint := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stale_checkpoint_%t", staleCheckpoint), func(t *testing.T) {
+			mockey.PatchConvey("keep the reader on a failed promotion", t, func() {
+				const floor = 10
+				buffer := replica.NewBuffer(floor)
+				reader := &roWALAdaptorImpl{replicaBuffer: buffer}
+				checkpoint := &utility.WALCheckpoint{TimeTick: floor}
+				if staleCheckpoint {
+					checkpoint.TimeTick--
+				}
+				mockey.Mock(recovery.ReadFrozenSnapshot).Return(&recovery.FrozenSnapshot{Checkpoint: checkpoint}, nil).Build()
+				buffer.Observe(nil, floor+1)
+				var activated bool
+				writer, err := reader.Promote(t.Context(), types.PChannelInfo{}, true, func(context.Context) error {
+					activated = true
+					return context.Canceled
+				})
+				require.Error(t, err)
+				require.Nil(t, writer)
+				require.Equal(t, !staleCheckpoint, activated)
+				buffer.Truncate(floor + 1)
+				cursor, actual, err := buffer.Pin(false)
+				require.NoError(t, err)
+				defer cursor.Close()
+				require.EqualValues(t, floor+1, actual)
+			})
+		})
 	}
 }

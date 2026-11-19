@@ -121,7 +121,7 @@ func shouldRetryRecoveredFinalCommit(meta *streamingpb.SegmentAssignmentMeta) bo
 }
 
 func newSegmentViewFromCreateSegmentMessage(msg message.ImmutableCreateSegmentMessageV2, schema *schemapb.CollectionSchema, configs ...runtimeConfig) *SegmentView {
-	meta := newSegmentAssignmentMetaFromCreateSegmentMessage(msg)
+	meta := NewSegmentAssignmentMetaFromCreateSegmentMessage(msg)
 	// Older CreateSegment messages did not carry an encoding version. Preserve
 	// the schema selected by the WAL timetick in the first durable snapshot so
 	// subsequent native recovery does not reinterpret an absent version as zero.
@@ -142,7 +142,7 @@ func NewSegmentViewFromCreateSegmentMessageWithConfig(msg message.ImmutableCreat
 	return newSegmentViewFromCreateSegmentMessage(msg, schema, runtimeConfigFromViewConfig(config))
 }
 
-func newSegmentAssignmentMetaFromCreateSegmentMessage(msg message.ImmutableCreateSegmentMessageV2) *streamingpb.SegmentAssignmentMeta {
+func NewSegmentAssignmentMetaFromCreateSegmentMessage(msg message.ImmutableCreateSegmentMessageV2) *streamingpb.SegmentAssignmentMeta {
 	header := msg.Header()
 	now := tsoutil.PhysicalTime(msg.TimeTick()).Unix()
 	return &streamingpb.SegmentAssignmentMeta{

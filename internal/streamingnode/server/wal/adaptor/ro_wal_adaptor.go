@@ -2,12 +2,17 @@ package adaptor
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/replica"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -21,6 +26,19 @@ import (
 var _ wal.WAL = (*roWALAdaptorImpl)(nil)
 
 type roWALAdaptorImpl struct {
+	readQueries       *vchannel.ReplicaQueries
+	readViews         *snview.SNQueryViewHandler
+	follower          *replicaFollower
+	followMu          sync.Mutex
+	stopFollow        context.CancelFunc
+	followDone        chan struct{}
+	closeOnce         sync.Once
+	replicaOpener     *openerAdaptorImpl
+	writerPersistence *replica.Admission
+	replicaPublisher  *replica.Publisher
+	replicaBuffer     *replica.Buffer
+	replicaScanner    *scannerAdaptorImpl
+	replicaReaderDone chan struct{}
 	*rate.WALRateLimitComponent
 	mlog.Binder
 
@@ -52,25 +70,25 @@ func (w *roWALAdaptorImpl) Metrics() types.WALMetrics {
 }
 
 func (w *roWALAdaptorImpl) GetLatestMVCCTimestamp(ctx context.Context, vchannel string) (uint64, error) {
-	panic("we cannot acquire lastest mvcc timestamp from a read only wal")
+	return 0, status.NewChannelFenced(w.Channel().Name)
 }
 
 func (w *roWALAdaptorImpl) GetReplicateCheckpoint() (*wal.ReplicateCheckpoint, error) {
-	panic("we cannot get replicate checkpoint from a read only wal")
+	return nil, status.NewChannelFenced(w.Channel().Name)
 }
 
 func (w *roWALAdaptorImpl) GetSalvageCheckpoint() []*wal.ReplicateCheckpoint {
-	panic("we cannot get salvage checkpoint from a read only wal")
+	return nil
 }
 
 // Append writes a record to the log.
 func (w *roWALAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage) (*wal.AppendResult, error) {
-	panic("we cannot append message into a read only wal")
+	return nil, status.NewChannelFenced(w.Channel().Name)
 }
 
 // Append a record to the log asynchronously.
 func (w *roWALAdaptorImpl) AppendAsync(ctx context.Context, msg message.MutableMessage, cb func(*wal.AppendResult, error)) {
-	panic("we cannot append message into a read only wal")
+	cb(nil, status.NewChannelFenced(w.Channel().Name))
 }
 
 // Read returns a scanner for reading records from the wal.
@@ -149,7 +167,15 @@ func (w *roWALAdaptorImpl) markUnavailable(err error) {
 }
 
 // Close overrides Scanner Close function.
-func (w *roWALAdaptorImpl) Close() {
+func (w *roWALAdaptorImpl) Close() { w.closeOnce.Do(w.closeReader) }
+
+func (w *roWALAdaptorImpl) closeReader() {
+	w.stopFollowing()
+	if w.readViews != nil {
+		w.availableCancel()
+		w.readViews.CloseForHandoff()
+	}
+
 	// begin to close the wal.
 	w.Logger().Info(context.TODO(), "wal begin to close...")
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
@@ -158,6 +184,19 @@ func (w *roWALAdaptorImpl) Close() {
 
 	w.Logger().Info(context.TODO(), "wal begin to close scanners...")
 
+	if w.replicaPublisher != nil {
+		w.replicaPublisher.Close()
+	}
+	if w.replicaScanner != nil {
+		w.replicaScanner.Close()
+		<-w.replicaReaderDone
+	}
+	if w.readQueries != nil {
+		w.readQueries.Close()
+	}
+	if w.replicaBuffer != nil {
+		w.replicaBuffer.Close()
+	}
 	// close all wal instances.
 	w.scanners.Range(func(id int64, s wal.Scanner) bool {
 		s.Close()
@@ -192,4 +231,34 @@ func (w *roWALAdaptorImpl) forceCancelAfterGracefulTimeout() {
 
 func (w *roWALAdaptorImpl) TransformLog() wal.TransformLogAccesser {
 	return wal.NewTransformLogErrorAccesser(status.NewUnrecoverableError("transform subscriptions require a read-write WAL"))
+}
+
+func (w *roWALAdaptorImpl) startFollowing() {
+	w.followMu.Lock()
+	defer w.followMu.Unlock()
+	if w.stopFollow != nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(w.availableCtx)
+	w.stopFollow = cancel
+	w.followDone = make(chan struct{})
+	go func() {
+		defer close(w.followDone)
+		resource.Resource().ReplicaClient().Follow(ctx, w.Channel(), func(ctx context.Context, state *streamingpb.WALReplicaState, snapshot bool) error {
+			if cp := state.Checkpoint; cp != nil {
+				w.replicaBuffer.Truncate(cp.TimeTick)
+			}
+			return w.follower.apply(ctx, state, snapshot)
+		}, w.follower.next)
+	}()
+}
+
+func (w *roWALAdaptorImpl) stopFollowing() {
+	w.followMu.Lock()
+	defer w.followMu.Unlock()
+	if w.stopFollow != nil {
+		w.stopFollow()
+		<-w.followDone
+		w.stopFollow = nil
+	}
 }

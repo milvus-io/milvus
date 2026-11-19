@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	worknodehandler "github.com/milvus-io/milvus/internal/views/worknode/handler"
@@ -200,4 +201,25 @@ func TestQueryPlanServiceRejectsUnavailableInputs(t *testing.T) {
 		})
 	}
 	require.NoError(t, normalizeQueryPlanError(nil))
+}
+
+func TestQueryPlanReplicaTermAdmission(t *testing.T) {
+	manager := &fakeWALManager{wal: &fakeProviderWAL{plan: &viewpb.QueryPlan{}}}
+	server := NewServer(manager)
+	route := types.PChannelInfo{Name: "by-dev-rootcoord-dml_0", WALReplicaID: 42, AccessMode: types.AccessModeRO}
+	out := worknodehandler.EncodeQueryViewPChannelToOutgoingContext(t.Context(), route)
+	md, _ := metadata.FromOutgoingContext(out)
+	ctx := metadata.NewIncomingContext(t.Context(), md)
+	req := &viewpb.GetQueryPlanRequest{ShardId: &viewpb.ShardID{ReplicaId: 1, Vchannel: testVChannel}}
+	for _, level := range []commonpb.ConsistencyLevel{commonpb.ConsistencyLevel_Session, commonpb.ConsistencyLevel_Eventually, commonpb.ConsistencyLevel_Bounded, commonpb.ConsistencyLevel_Customized} {
+		req.Mvcc = &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: level}
+		_, err := server.GetQueryPlan(ctx, req)
+		require.NoError(t, err)
+		require.Equal(t, route, manager.channel)
+	}
+	req.Mvcc = &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}
+	_, err := server.GetQueryPlan(ctx, req)
+	require.Equal(t, viewpb.ViewCode_VIEW_CODE_NOT_PRIMARY, viewerror.AsViewError(err).Code)
+	_, err = server.GetMVCCTimestamp(ctx, &viewpb.GetMVCCTimestampRequest{Vchannel: testVChannel})
+	require.Equal(t, viewpb.ViewCode_VIEW_CODE_NOT_PRIMARY, viewerror.AsViewError(err).Code)
 }

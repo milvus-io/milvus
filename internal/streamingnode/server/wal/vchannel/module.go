@@ -20,11 +20,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
 // ModuleConfig contains the initial state and dependencies for one vchannel
 // recovery module.
 type ModuleConfig struct {
+	QueryScheduler             nodescheduler.Scheduler
 	QueryStatsChunkManager     storage.ChunkManager
 	QueryRuntimeModuleBuilders []queryresource.QueryRuntimeModuleBuilder
 	QueryViewLoadInfoProvider  queryresource.LoadInfoProvider
@@ -107,12 +109,15 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 	if config.VChannel == "" {
 		return nil, merr.WrapErrServiceInternalMsg("vchannel recovery module vchannel is empty")
 	}
+	if config.QueryScheduler == nil {
+		config.QueryScheduler = config.Runtime.Scheduler
+	}
 	module := &VChannelRecoveryModule{
 		pchannel:                config.PChannel,
 		querySealed:             make(map[int64]bool),
 		queryTransformLogStream: config.TransformLogStream,
 		summaryManager:          config.SummaryManager,
-		queryResources:          queryresource.NewManager(queryresource.Config{ChunkManager: config.QueryStatsChunkManager, Builders: config.QueryRuntimeModuleBuilders, Scheduler: config.Runtime.Scheduler, Dispatcher: config.QueryDispatcher, LoadInfoProvider: config.QueryViewLoadInfoProvider}),
+		queryResources:          queryresource.NewManager(queryresource.Config{ChunkManager: config.QueryStatsChunkManager, Builders: config.QueryRuntimeModuleBuilders, Scheduler: config.QueryScheduler, Dispatcher: config.QueryDispatcher, LoadInfoProvider: config.QueryViewLoadInfoProvider}),
 		vchannel:                config.VChannel,
 		runtime:                 config.Runtime,
 		logger:                  config.Logger,

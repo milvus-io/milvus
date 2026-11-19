@@ -19,6 +19,9 @@ var (
 )
 
 func (w *walAdaptorImpl) QueryViewHandler() worknodehandler.QueryViewHandler {
+	if w.replicaViews != nil {
+		return w.replicaViews
+	}
 	return w.queryViewHandler
 }
 
@@ -71,4 +74,55 @@ func (w *walAdaptorImpl) queryViewTaskHandler(shardID qviews.ShardID) (*snview.S
 		return nil, viewerror.NewViewNotFound("query view handler is unavailable")
 	}
 	return w.queryViewHandler, nil
+}
+
+func (w *roWALAdaptorImpl) Statistics(ctx context.Context, req *viewpb.StatisticsOnViewRequest) (int64, error) {
+	h, err := w.queryViewTaskHandler(qviews.FromProtoShardID(req.GetShardId()))
+	if err != nil {
+		return 0, err
+	}
+	return h.Statistics(ctx, req)
+}
+
+func (w *roWALAdaptorImpl) AcquireSearchSegmentTasks(
+	ctx context.Context,
+	shardID qviews.ShardID,
+	version qviews.QueryViewVersion,
+	mvcc *viewpb.QueryPlanMVCC,
+	req *internalpb.SearchRequest,
+	selection *viewpb.SegmentSelection,
+) (viewquery.SearchSegmentTasks, error) {
+	h, err := w.queryViewTaskHandler(shardID)
+	if err != nil {
+		return nil, err
+	}
+	return h.AcquireSearchSegmentTasks(ctx, shardID, version, mvcc, req, selection)
+}
+
+func (w *roWALAdaptorImpl) AcquireQuerySegmentTasks(
+	ctx context.Context,
+	shardID qviews.ShardID,
+	version qviews.QueryViewVersion,
+	mvcc *viewpb.QueryPlanMVCC,
+	req *internalpb.RetrieveRequest,
+	selection *viewpb.SegmentSelection,
+) (viewquery.QuerySegmentTasks, error) {
+	h, err := w.queryViewTaskHandler(shardID)
+	if err != nil {
+		return nil, err
+	}
+	return h.AcquireQuerySegmentTasks(ctx, shardID, version, mvcc, req, selection)
+}
+
+func (w *roWALAdaptorImpl) queryViewTaskHandler(shardID qviews.ShardID) (*snview.SNQueryViewHandler, error) {
+	if !w.IsAvailable() {
+		return nil, viewerror.NewOnShutdownError("wal is on shutdown")
+	}
+	if funcutil.ToPhysicalChannel(shardID.VChannel) != w.Channel().Name {
+		return nil, viewerror.NewViewNotFound("query view shard %s is not on wal %s", shardID.String(), w.Channel().String())
+	}
+	if w.readViews == nil {
+		return nil, viewerror.NewViewNotFound("query view handler is unavailable")
+	}
+	return w.readViews, nil
 }

@@ -2,10 +2,14 @@ package adaptor
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
@@ -13,13 +17,17 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/replica"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/autowalimpls"
@@ -114,7 +122,7 @@ func (o *openerAdaptorImpl) Open(ctx context.Context, opt *wal.OpenOption) (wal.
 		if l.WALName() != message.WALNameTest {
 			l = autowalimpls.New(l, o.backendOpener(opt.Channel))
 		}
-		wal, err = o.openROWAL(l)
+		wal, err = o.openReadReplica(ctx, l)
 	default:
 		panic("unknown access mode")
 	}
@@ -198,6 +206,33 @@ func (o *openerAdaptorImpl) getOrCreateOpenerImpl(ctx context.Context, walName m
 
 // openRWWAL opens a read write wal instance for the channel.
 func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, opt *wal.OpenOption) (wal.WAL, error) {
+	if opt.Channel.WALReplicaID == 0 {
+		return o.openWriter(ctx, l, opt, nil, nil, nil)
+	}
+	readTarget := opt.Channel
+	readTarget.AccessMode = types.AccessModeRO
+	readTarget.Term = 0
+	reader, err := o.Open(ctx, &wal.OpenOption{Channel: readTarget})
+	if err != nil {
+		l.Close()
+		return nil, err
+	}
+	readSide := reader.(*roWALAdaptorImpl)
+	cursor, _, err := readSide.replicaBuffer.Pin(true)
+	if err != nil {
+		reader.Close()
+		l.Close()
+		return nil, err
+	}
+	writer, err := o.openWriter(ctx, l, opt, readSide, cursor, nil)
+	if err != nil {
+		cursor.Close()
+		reader.Close()
+	}
+	return writer, err
+}
+
+func (o *openerAdaptorImpl) openWriter(ctx context.Context, l walimpls.WALImpls, opt *wal.OpenOption, readSide *roWALAdaptorImpl, cursor *replica.RecoveryCursor, frozen *recovery.FrozenSnapshot) (opened wal.WAL, openErr error) {
 	l = autowalimpls.New(l, o.backendOpener(opt.Channel))
 	id := o.idAllocator.Allocate()
 	roWAL := adaptImplsToROWAL(l, func() {
@@ -210,15 +245,24 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get checkpoint from catalog")
 	}
+	if cpProto != nil && opt.Channel.WALReplicaID != 0 && cpProto.Term != opt.Channel.Term {
+		previous := cpProto
+		cpProto = proto.CloneOf(cpProto)
+		cpProto.Term = opt.Channel.Term
+		if err := resource.Resource().StreamingNodeCatalog().SaveRecoverySnapshot(ctx, opt.Channel.Name, &metastore.WALRecoverySnapshot{ConsumeCheckpoint: cpProto, ExpectedCheckpoint: previous}); err != nil {
+			return nil, merr.Wrap(err, "claim consume checkpoint before writer barrier")
+		}
+	}
 	cp := utility.NewWALCheckpointFromProto(cpProto)
+	if opt.Channel.WALReplicaID != 0 {
+		roWAL.writerPersistence = &replica.Admission{}
+
+		roWAL.replicaPublisher = replica.NewPublisher(cpProto)
+	}
 
 	var firstPosition message.MessageID
 	if cp != nil {
 		firstPosition = cp.MessageID
-	}
-	firstBarrier, err := sendFirstTimeTick(ctx, l, firstPosition)
-	if err != nil {
-		return nil, err
 	}
 	var param *interceptors.InterceptorBuildParam
 	queryViewCatalog := resource.Resource().StreamingNodeCatalog()
@@ -226,13 +270,44 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 	if err != nil {
 		return nil, merr.Wrap(err, "load streaming node query views")
 	}
+	if roWAL.replicaPublisher != nil {
+		desired, err := resource.Resource().QueryViewCatalog().ListQueryViews(ctx)
+		if err != nil {
+			return nil, merr.Wrap(err, "recover replica QueryView targets")
+		}
+		seedReplicaViews(roWAL.replicaPublisher, opt.Channel.Name, persistedViews, desired)
+	}
+	// Recovery may publish this term's manifest before Open returns. Cleanup
+	// discards the writer on failure, so Sync must not reopen the same term.
+	if opt.Channel.WALReplicaID != 0 {
+		defer func() {
+			if openErr != nil {
+				openErr = errors.Join(openErr, wal.ErrWriterTermConsumed)
+			}
+		}()
+	}
 	liveReady := make(chan struct{})
 	builder := newRecoveryStreamBuilder(roWAL, nil, liveReady)
-	rs, snapshot, err := recovery.RecoverRecoveryStorage(
+	var firstBarrier message.ImmutableMessage
+	if cursor == nil {
+		firstBarrier, err = sendFirstTimeTick(ctx, l, firstPosition)
+	} else {
+		firstBarrier, err = prepareReplicaWriter(ctx, builder, cursor, readSide.replicaBuffer, firstPosition)
+	}
+	if err != nil {
+		return nil, err
+	}
+	var streamBuilder recovery.RecoveryStreamBuilder = builder
+	if cursor != nil {
+		streamBuilder = &replicaRecoveryBuilder{WALImpls: l, cursor: cursor, ready: liveReady, onFatal: roWAL.markUnavailable}
+	}
+	rs, snapshot, err := frozen.Recover(
 		ctx,
-		builder,
+		streamBuilder,
 		cp,
 		firstBarrier,
+		recovery.WithWriterPersistence(roWAL.writerPersistence),
+		recovery.WithObservedWriterBarrier(cursor != nil),
 		recovery.WithRecoveryTailRateLimiter(roWAL.RecoveryStorage),
 		recovery.WithConsumedThrough(func(tt uint64) {
 			// Bounded recovery precedes WAB construction. Live input starts only
@@ -247,8 +322,17 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 			param.WriteAheadBuffer.SetPressureController(roWAL.MuxRateLimitObserverRegistryImpl)
 			builder.writeAheadBuffer = param.WriteAheadBuffer
 		}),
+		recovery.WithPublishedCheckpoint(func(cp *utility.WALCheckpoint) {
+			if readSide != nil {
+				readSide.replicaBuffer.Truncate(cp.TimeTick)
+				roWAL.replicaPublisher.PublishCheckpoint(cp.IntoProto())
+			}
+		}),
 		recovery.WithRecoveryFatalHandler(roWAL.markUnavailable),
 		recovery.WithQueryViewRecovery(func(manager *vchannel.PChannelRecoveryManager) {
+			if readSide != nil {
+				return
+			}
 			resources.queryViewHandler = snview.RecoverPChannelSNQueryViewHandler(roWAL.availableCtx, opt.Channel.Name, queryViewCatalog, manager, persistedViews)
 		}),
 	)
@@ -291,8 +375,15 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 		param.MVCCManager.ApplyRecoveryBarrier(vchannel, param.LastTimeTickMessage.TimeTick())
 	}
 	wal := adaptImplsToRWWAL(roWAL, o.interceptorBuilders, param)
+	wal.readSide = readSide
 	wal.queryViewHandler = resources.queryViewHandler
+
 	wal.viewResourceManager = rs.VChannelManager()
+	if readSide != nil {
+		readSide.stopFollowing()
+		wal.queryViewHandler = readSide.readViews
+		wal.replicaViews = newWriterViewControl(roWAL.availableCtx, readSide, roWAL.replicaPublisher, persistedViews)
+	}
 	close(liveReady)
 	o.walInstances.Insert(id, wal)
 	resources.Release()
@@ -311,6 +402,61 @@ func determineLastConfirmedMessageID(lastTimeTickMessageID message.MessageID, tx
 		}
 	}
 	return lastConfirmedMessageID
+}
+
+// openReadReplica starts one ordered reader from the checkpoint's physical anchor.
+func (o *openerAdaptorImpl) openReadReplica(ctx context.Context, l walimpls.WALImpls) (wal.WAL, error) {
+	if l.Channel().WALReplicaID == 0 {
+		return o.openROWAL(l)
+	}
+	stored, err := resource.Resource().StreamingNodeCatalog().GetConsumeCheckpoint(ctx, l.Channel().Name)
+	if err != nil {
+		l.Close()
+		return nil, err
+	}
+	policy := options.DeliverPolicyAll()
+	if cp := utility.NewWALCheckpointFromProto(stored); cp != nil {
+		policy = options.DeliverPolicyStartFrom(cp.MessageID)
+	}
+	id := o.idAllocator.Allocate()
+	r := adaptImplsToROWAL(l, func() { o.walInstances.Remove(id) })
+	r.replicaOpener = o
+	r.replicaBuffer = replica.NewBuffer(stored.GetTimeTick())
+	persisted, err := resource.Resource().StreamingNodeCatalog().ListQueryViews(ctx, l.Channel().Name)
+	if err != nil {
+		r.Close()
+		return nil, err
+	}
+	desired, err := resource.Resource().QueryViewCatalog().ListQueryViews(ctx)
+	if err != nil {
+		r.Close()
+		return nil, err
+	}
+	wanted := make(map[qviews.QueryViewKey]bool)
+	for _, v := range desired {
+		if v.Meta.State == viewpb.QueryViewState_QueryViewStateUp {
+			wanted[viewKey(v)] = true
+		}
+	}
+	kept := slices.DeleteFunc(persisted, func(v *viewpb.QueryViewOfShard) bool { return !wanted[viewKey(v)] })
+	r.readQueries = vchannel.NewReplicaQueries(r.availableCtx, l.Channel().Name, r.replicaBuffer, stored.GetTimeTick())
+	r.readViews = snview.RecoverPChannelSNQueryViewHandler(r.availableCtx, l.Channel().Name, nil, r.readQueries, kept)
+	r.follower = newFollower(l.Channel().Name, r.readViews, r.readQueries, kept)
+	r.replicaReaderDone = make(chan struct{})
+	r.replicaScanner = newScannerAdaptor(fmt.Sprintf("replica-%d", l.Channel().WALReplicaID), l,
+		wal.ReadOption{DeliverPolicy: policy, IgnorePauseConsumption: true}, r.scanMetrics.NewScannerMetrics(), nil, scannerConfig{replicaBuffer: r.replicaBuffer, replicaObserve: r.readQueries.Observe})
+	go func() {
+		defer close(r.replicaReaderDone)
+		for range r.replicaScanner.Chan() {
+		}
+		r.replicaBuffer.Close()
+		if err := r.replicaScanner.Error(); err != nil && r.availableCtx.Err() == nil {
+			r.markUnavailable(err)
+		}
+	}()
+	o.walInstances.Insert(id, r)
+	r.startFollowing()
+	return r, nil
 }
 
 // openROWAL opens a read only wal instance for the channel.
@@ -347,4 +493,53 @@ func (o *openerAdaptorImpl) Close() {
 	o.openerCache = nil
 
 	o.Logger().Info(context.TODO(), "wal opener closed")
+}
+
+// Promote installs a writer beside the long-lived read side. The source
+// persistence fence is already in effect when seal is supplied by the caller.
+func (r *roWALAdaptorImpl) Promote(ctx context.Context, target types.PChannelInfo, cooperative bool, activate func(context.Context) error) (wal.WAL, error) {
+	cursor, floor, err := r.replicaBuffer.Pin(true)
+	if err != nil {
+		return nil, err
+	}
+	var writer wal.WAL
+	defer func() {
+		if writer == nil {
+			cursor.Close()
+		}
+	}()
+	var snapshot *recovery.FrozenSnapshot
+	if cooperative {
+		snapshot, err = recovery.ReadFrozenSnapshot(ctx, target)
+		if err != nil {
+			return nil, err
+		}
+		if snapshot.Checkpoint != nil && floor > snapshot.Checkpoint.TimeTick {
+			return nil, merr.WrapErrServiceUnavailable("replica buffer no longer covers writer recovery checkpoint")
+		}
+		defer snapshot.Close()
+		if err := snapshot.Prepare(ctx, target, cursor); err != nil {
+			return nil, err
+		}
+	}
+	if err := activate(ctx); err != nil {
+		return nil, err
+	}
+	name, err := r.replicaOpener.determineWALName(ctx, &wal.OpenOption{Channel: target})
+	if err != nil {
+		return nil, err
+	}
+	if _, start := r.replicaBuffer.WriterPosition(); start != nil {
+		name = start.WALName()
+	}
+	impl, err := r.replicaOpener.getOrCreateOpenerImpl(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	backend, err := impl.Open(ctx, &walimpls.OpenOption{Channel: target})
+	if err != nil {
+		return nil, err
+	}
+	writer, err = r.replicaOpener.openWriter(ctx, backend, &wal.OpenOption{Channel: target}, r, cursor, snapshot)
+	return writer, err
 }

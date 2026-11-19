@@ -5,6 +5,7 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -65,10 +66,7 @@ func RecoverChannelManager(ctx context.Context, incomingChannel ...string) (*Cha
 	if err != nil {
 		return nil, err
 	}
-	channels, metrics, err := recoverFromConfigurationAndMeta(ctx, streamingVersion, replicateConfig, incomingChannel...)
-	if err != nil {
-		return nil, err
-	}
+	channels, metrics := recoverChannelNames(replicateConfig, incomingChannel)
 
 	globalVersion := resource.Resource().Session().GetRegisteredRevision()
 	cm := &ChannelManager{
@@ -141,41 +139,18 @@ func recoverCChannelMeta(ctx context.Context, incomingChannel ...string) (*strea
 	return cchannelMeta, nil
 }
 
-// recoverFromConfigurationAndMeta recovers the channel manager from configuration and meta.
-func recoverFromConfigurationAndMeta(ctx context.Context, streamingVersion *streamingpb.StreamingVersion, replicateConfig *replicateutil.ConfigHelper, incomingChannel ...string) (map[ChannelID]*PChannelMeta, *channelMetrics, error) {
-	// Recover metrics.
+// recoverChannelNames restores the physical channels. A writer enters the
+// assignment view only after its current session advertises it.
+func recoverChannelNames(config *replicateutil.ConfigHelper, names []string) (map[ChannelID]*PChannelMeta, *channelMetrics) {
 	metrics := newPChannelMetrics()
-
-	// Get all channels from meta.
-	channelMetas, err := resource.Resource().StreamingCatalog().ListPChannel(ctx)
-	if err != nil {
-		return nil, metrics, err
-	}
-
-	// TODO: only support rw channel here now, add ro channel in future.
-	channels := make(map[ChannelID]*PChannelMeta, len(channelMetas))
-	for _, channel := range channelMetas {
-		c := newPChannelMetaFromProto(channel, replicateConfig)
-		metrics.AssignPChannelStatus(c)
+	channels := make(map[ChannelID]*PChannelMeta, len(names))
+	for _, name := range names {
+		c := NewPChannelMeta(name, types.AccessModeRW)
+		c.availableInReplication = isChannelAvailableInReplication(name, config)
 		channels[c.ChannelID()] = c
+		metrics.AssignPChannelStatus(c)
 	}
-
-	// Get new incoming meta from configuration.
-	for _, newChannel := range incomingChannel {
-		var c *PChannelMeta
-		if streamingVersion == nil {
-			// if streaming service has never been enabled, we treat all channels as read-only.
-			c = NewPChannelMeta(newChannel, types.AccessModeRO)
-		} else {
-			// once the streaming service is enabled, we treat all channels as read-write.
-			c = NewPChannelMeta(newChannel, types.AccessModeRW)
-		}
-		c.availableInReplication = isChannelAvailableInReplication(c.Name(), replicateConfig)
-		if _, ok := channels[c.ChannelID()]; !ok {
-			channels[c.ChannelID()] = c
-		}
-	}
-	return channels, metrics, nil
+	return channels, metrics
 }
 
 func recoverReplicateConfiguration(ctx context.Context) (*replicateutil.ConfigHelper, error) {
@@ -279,40 +254,25 @@ func (cm *ChannelManager) AddPChannels(ctx context.Context, newChannels []string
 	cm.cond.L.Lock()
 	defer cm.cond.L.Unlock()
 
-	newMetas := make([]*streamingpb.PChannelMeta, 0, len(newChannels))
+	added := 0
 	for _, name := range newChannels {
 		id := ChannelID{Name: name}
 		if _, ok := cm.channels[id]; ok {
 			continue
 		}
-		var meta *PChannelMeta
-		if cm.streamingVersion == nil {
-			meta = NewPChannelMeta(name, types.AccessModeRO)
-		} else {
-			meta = NewPChannelMeta(name, types.AccessModeRW)
-		}
+		meta := NewPChannelMeta(name, types.AccessModeRW)
 		meta.availableInReplication = isChannelAvailableInReplication(name, cm.replicateConfig)
 		cm.channels[id] = meta
 		cm.metrics.AssignPChannelStatus(meta)
-		newMetas = append(newMetas, meta.CopyForWrite().IntoRawMeta())
+		added++
 	}
 
-	if len(newMetas) == 0 {
+	if added == 0 {
 		return nil
 	}
 
-	if err := resource.Resource().StreamingCatalog().SavePChannels(ctx, newMetas); err != nil {
-		// Rollback in-memory changes on persist failure
-		for _, m := range newMetas {
-			c := newPChannelMetaFromProto(m, cm.replicateConfig)
-			delete(cm.channels, c.ChannelID())
-		}
-		cm.Logger().Error(ctx, "failed to save new pchannels", mlog.Err(err))
-		return err
-	}
-
 	cm.Logger().Info(ctx, "dynamically added new pchannels",
-		mlog.Int("count", len(newMetas)),
+		mlog.Int("count", added),
 		mlog.Strings("channels", newChannels))
 	return nil
 }
@@ -441,117 +401,37 @@ func (cm *ChannelManager) sortAvailableChannelsByVChannelCount() []withVChannelC
 	return vchannelCounts
 }
 
-// AssignPChannels update the pchannels to servers and return the modified pchannels.
-// When the balancer want to assign a pchannel into a new server.
-// It should always call this function to update the pchannel assignment first.
-// Otherwise, the pchannel assignment tracing is lost at meta.
-func (cm *ChannelManager) AssignPChannels(ctx context.Context, pChannelToStreamingNode map[ChannelID]types.PChannelInfoAssigned) (map[ChannelID]*PChannelMeta, error) {
-	cm.cond.LockAndBroadcast()
+// ObserveWriters replaces the routing view with the current leased writer announcements.
+func (cm *ChannelManager) ObserveWriters(writers map[string]types.PChannelInfoAssigned) {
+	cm.cond.L.Lock()
 	defer cm.cond.L.Unlock()
-
-	// modified channels.
-	pChannelMetas := make([]*streamingpb.PChannelMeta, 0, len(pChannelToStreamingNode))
-	for id, assign := range pChannelToStreamingNode {
-		pchannel, ok := cm.channels[id]
-		if !ok {
-			return nil, ErrChannelNotExist
+	changed := false
+	for id, c := range cm.channels {
+		writer, found := writers[id.Name]
+		if !found && !c.IsAssigned() {
+			continue
 		}
-		mutablePchannel := pchannel.CopyForWrite()
-		if mutablePchannel.TryAssignToServerID(assign.Channel.AccessMode, assign.Node) {
-			pChannelMetas = append(pChannelMetas, mutablePchannel.IntoRawMeta())
+		if found && c.IsAssigned() && c.CurrentAssignment() == writer {
+			continue
 		}
-	}
-
-	err := cm.updatePChannelMeta(ctx, pChannelMetas)
-	if err != nil {
-		return nil, err
-	}
-	updates := make(map[ChannelID]*PChannelMeta, len(pChannelMetas))
-	for _, pchannel := range pChannelMetas {
-		meta := newPChannelMetaFromProto(pchannel, cm.replicateConfig)
-		updates[meta.ChannelID()] = meta
-		cm.metrics.AssignPChannelStatus(meta)
-	}
-	return updates, nil
-}
-
-// AssignPChannelsDone clear up the history data of the pchannels and transfer the state into assigned.
-// When the balancer want to cleanup the history data of a pchannel.
-// It should always remove the pchannel on the server first.
-// Otherwise, the pchannel assignment tracing is lost at meta.
-func (cm *ChannelManager) AssignPChannelsDone(ctx context.Context, pChannels []ChannelID) error {
-	cm.cond.LockAndBroadcast()
-	defer cm.cond.L.Unlock()
-
-	// modified channels.
-	pChannelMetas := make([]*streamingpb.PChannelMeta, 0, len(pChannels))
-	for _, channelID := range pChannels {
-		pchannel, ok := cm.channels[channelID]
-		if !ok {
-			return ErrChannelNotExist
+		next := NewPChannelMeta(id.Name, types.AccessModeRW)
+		next.availableInReplication = c.availableInReplication
+		if found {
+			next.inner.Channel = types.NewProtoFromPChannelInfo(writer.Channel)
+			next.inner.Node = types.NewProtoFromStreamingNodeInfo(writer.Node)
+			next.inner.State = streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED
+			next.inner.LastAssignTimestampSeconds = uint64(time.Now().Unix())
+			next.walReplicaID = writer.Channel.WALReplicaID
 		}
-		mutablePChannel := pchannel.CopyForWrite()
-		mutablePChannel.AssignToServerDone()
-		pChannelMetas = append(pChannelMetas, mutablePChannel.IntoRawMeta())
+		cm.channels[id] = next
+		cm.metrics.AssignPChannelStatus(next)
+		changed = true
 	}
-
-	if err := cm.updatePChannelMeta(ctx, pChannelMetas); err != nil {
-		return err
+	if changed {
+		cm.version.Local++
+		cm.metrics.UpdateAssignmentVersion(cm.version.Local)
+		cm.cond.UnsafeBroadcast()
 	}
-
-	// Update metrics.
-	for _, pchannel := range pChannelMetas {
-		cm.metrics.AssignPChannelStatus(newPChannelMetaFromProto(pchannel, cm.replicateConfig))
-	}
-	return nil
-}
-
-// MarkAsUnavailable mark the pchannels as unavailable.
-func (cm *ChannelManager) MarkAsUnavailable(ctx context.Context, pChannels []types.PChannelInfo) error {
-	cm.cond.LockAndBroadcast()
-	defer cm.cond.L.Unlock()
-
-	// modified channels.
-	pChannelMetas := make([]*streamingpb.PChannelMeta, 0, len(pChannels))
-	for _, channel := range pChannels {
-		pchannel, ok := cm.channels[channel.ChannelID()]
-		if !ok {
-			return ErrChannelNotExist
-		}
-		mutablePChannel := pchannel.CopyForWrite()
-		mutablePChannel.MarkAsUnavailable(channel.Term)
-		pChannelMetas = append(pChannelMetas, mutablePChannel.IntoRawMeta())
-	}
-
-	if err := cm.updatePChannelMeta(ctx, pChannelMetas); err != nil {
-		return err
-	}
-	for _, pchannel := range pChannelMetas {
-		cm.metrics.AssignPChannelStatus(newPChannelMetaFromProto(pchannel, cm.replicateConfig))
-	}
-	return nil
-}
-
-// updatePChannelMeta updates the pchannel metas.
-func (cm *ChannelManager) updatePChannelMeta(ctx context.Context, pChannelMetas []*streamingpb.PChannelMeta) error {
-	if len(pChannelMetas) == 0 {
-		return nil
-	}
-
-	if err := resource.Resource().StreamingCatalog().SavePChannels(ctx, pChannelMetas); err != nil {
-		cm.Logger().Error(ctx, "failed to save pchannels", mlog.Err(err))
-		return err
-	}
-
-	// update in-memory copy and increase the version.
-	for _, pchannel := range pChannelMetas {
-		c := newPChannelMetaFromProto(pchannel, cm.replicateConfig)
-		cm.channels[c.ChannelID()] = c
-	}
-	cm.version.Local++
-	// update metrics.
-	cm.metrics.UpdateAssignmentVersion(cm.version.Local)
-	return nil
 }
 
 // GetLatestWALLocated returns the server id of the node that the wal of the vChannel is located.

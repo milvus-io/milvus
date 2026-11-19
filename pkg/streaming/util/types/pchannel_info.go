@@ -30,8 +30,8 @@ func NewPChannelInfoFromProto(pchannel *streamingpb.PChannelInfo) PChannelInfo {
 	if pchannel.GetName() == "" {
 		panic("pchannel name is empty")
 	}
-	if pchannel.GetTerm() <= 0 {
-		panic("pchannel term is empty or negetive")
+	if pchannel.GetTerm() < 0 || (pchannel.GetTerm() == 0 && AccessMode(pchannel.GetAccessMode()) != AccessModeRO) {
+		panic("pchannel has an invalid term for its access mode")
 	}
 	accessMode := AccessMode(pchannel.GetAccessMode())
 	_ = accessMode.String() // assertion.
@@ -47,8 +47,8 @@ func NewProtoFromPChannelInfo(pchannel PChannelInfo) *streamingpb.PChannelInfo {
 	if pchannel.Name == "" {
 		panic("pchannel name is empty")
 	}
-	if pchannel.Term <= 0 {
-		panic("pchannel term is empty or negetive")
+	if pchannel.Term < 0 || (pchannel.Term == 0 && pchannel.AccessMode != AccessModeRO) {
+		panic("pchannel has an invalid term for its access mode")
 	}
 	return &streamingpb.PChannelInfo{
 		Name:       pchannel.Name,
@@ -78,9 +78,11 @@ func (id1 ChannelID) LT(id2 ChannelID) bool {
 
 // PChannelInfo is the struct for pchannel info.
 type PChannelInfo struct {
-	Name       string     // name of pchannel.
-	Term       int64      // term of pchannel.
-	AccessMode AccessMode // Access mode, if AccessModeRO, the wal impls should be read-only, the append operation will panics.
+	// WALReplicaID identifies a node-bound WAL instance across writer terms.
+	WALReplicaID int64
+	Name         string     // name of pchannel.
+	Term         int64      // term of pchannel.
+	AccessMode   AccessMode // Access mode, if AccessModeRO, the wal impls should be read-only, the append operation will panics.
 	// If accessMode is AccessModeRW, the wal impls should be read-write,
 	// and it will fence the old rw wal impls or wait the old rw wal impls close.
 }

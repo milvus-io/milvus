@@ -5,6 +5,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/queryplan/provider"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
@@ -29,7 +30,9 @@ func NewServer(walManager walManager) *Server {
 }
 
 func (s *Server) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
-	p, err := s.providerForVChannel(ctx, req.GetShardId().GetVchannel())
+	level, selectsMVCC := req.GetMvcc().(*viewpb.GetQueryPlanRequest_ConsistencyLevel)
+	strong := selectsMVCC && level.ConsistencyLevel == commonpb.ConsistencyLevel_Strong
+	p, err := s.providerForVChannel(ctx, req.GetShardId().GetVchannel(), strong)
 	if err != nil {
 		return nil, normalizeQueryPlanError(err)
 	}
@@ -41,7 +44,7 @@ func (s *Server) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryPlanReque
 }
 
 func (s *Server) GetMVCCTimestamp(ctx context.Context, req *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {
-	p, err := s.providerForVChannel(ctx, req.GetVchannel())
+	p, err := s.providerForVChannel(ctx, req.GetVchannel(), true)
 	if err != nil {
 		return nil, normalizeQueryPlanError(err)
 	}
@@ -52,7 +55,7 @@ func (s *Server) GetMVCCTimestamp(ctx context.Context, req *viewpb.GetMVCCTimest
 	return resp, nil
 }
 
-func (s *Server) providerForVChannel(ctx context.Context, vchannel string) (provider.QueryPlanProvider, error) {
+func (s *Server) providerForVChannel(ctx context.Context, vchannel string, strong bool) (provider.QueryPlanProvider, error) {
 	if s == nil || s.walManager == nil {
 		return nil, viewerror.NewOnShutdownError("query plan service is unavailable")
 	}
@@ -66,6 +69,9 @@ func (s *Server) providerForVChannel(ctx context.Context, vchannel string) (prov
 	expectedPChannel := funcutil.ToPhysicalChannel(vchannel)
 	if pchannel.Name != expectedPChannel {
 		return nil, viewerror.NewUnknownError("query view pchannel metadata mismatch, expected %s, got %s", expectedPChannel, pchannel.Name)
+	}
+	if strong && (pchannel.Term <= 0 || pchannel.AccessMode != types.AccessModeRW) {
+		return nil, viewerror.NewNotPrimaryError("strong read requires a writer term for %s", expectedPChannel)
 	}
 	rawWAL, err := s.walManager.GetAvailableWAL(pchannel)
 	if err != nil {

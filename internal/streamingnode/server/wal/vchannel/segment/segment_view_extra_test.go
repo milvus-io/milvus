@@ -173,7 +173,7 @@ func TestSegmentViewFromCreateSegmentMessage(t *testing.T) {
 		IntoImmutableMessage(walimplstest.NewTestMessageID(11))
 	msg := message.MustAsImmutableCreateSegmentMessageV2(raw)
 
-	meta := newSegmentAssignmentMetaFromCreateSegmentMessage(msg)
+	meta := NewSegmentAssignmentMetaFromCreateSegmentMessage(msg)
 	assert.Equal(t, int64(1), meta.GetCollectionId())
 	assert.Equal(t, int64(1), meta.GetPartitionId())
 	assert.Equal(t, int64(1), meta.GetSegmentId())

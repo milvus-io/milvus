@@ -54,6 +54,16 @@ type ManagerClient interface {
 
 // NewManagerClient creates a new manager client.
 func NewManagerClient(etcdCli *clientv3.Client) ManagerClient {
+	rb, conn := newSNConnection(etcdCli)
+	return &managerClientImpl{
+		lifetime: typeutil.NewLifetime(),
+		stopped:  make(chan struct{}),
+		rb:       rb,
+		service:  lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingNodeManagerServiceClient),
+	}
+}
+
+func newSNConnection(etcdCli *clientv3.Client) (resolver.Builder, lazygrpc.Conn) {
 	role := sessionutil.GetSessionPrefixByRole(typeutil.StreamingNodeRole)
 	rb := resolver.NewSessionBuilder(etcdCli, discoverer.OptSDPrefix(role), discoverer.OptSDVersionRange(">=2.6.0-dev"))
 	dialTimeout := paramtable.Get().StreamingNodeGrpcClientCfg.DialTimeout.GetAsDuration(time.Millisecond)
@@ -67,12 +77,7 @@ func NewManagerClient(etcdCli *clientv3.Client) ManagerClient {
 			dialOptions...,
 		)
 	})
-	return &managerClientImpl{
-		lifetime: typeutil.NewLifetime(),
-		stopped:  make(chan struct{}),
-		rb:       rb,
-		service:  lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingNodeManagerServiceClient),
-	}
+	return rb, conn
 }
 
 // getDialOptions returns grpc dial options.

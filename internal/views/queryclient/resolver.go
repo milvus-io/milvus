@@ -8,6 +8,7 @@ import (
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 // QueryPlanClient provides Phase 1 operations against StreamingNode.
@@ -17,7 +18,7 @@ type QueryPlanClient interface {
 	SubscribeReplicas(vchannel string, handler wal.ReplicaWatchHandler) (wal.ReplicaWatchSubscription, error)
 
 	// GetQueryPlan generates a shard-level query plan from the StreamingNode owning the given shard.
-	GetQueryPlan(ctx context.Context, shardID qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error)
+	GetQueryPlan(ctx context.Context, shardID qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, *types.PChannelInfoAssigned, error)
 
 	// GetMVCCTimestamp returns the MVCC frontiers from the primary replica's WAL.
 	// Used for cross-replica strong consistency.

@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 func statisticsResponse(version int64, rows int64, nodes ...int64) *viewpb.GetQueryPlanResponse {
@@ -35,16 +36,16 @@ func TestStatisticsRetriesEntireShardAndJoinsLateResults(t *testing.T) {
 		plans := 0
 		lateFinished := false
 		started := make(chan struct{})
-		mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, shard qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+		mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, shard qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, *types.PChannelInfoAssigned, error) {
 			require.EqualValues(t, 1, shard.ReplicaID)
 			require.IsType(t, &viewpb.GetQueryPlanRequest_BarrierMvcc{}, req.GetMvcc())
 			require.EqualValues(t, 99, req.GetBarrierMvcc())
 			plans++
 			if plans == 1 {
-				return statisticsResponse(1, 5, 11, 12), nil
+				return statisticsResponse(1, 5, 11, 12), nil, nil
 			}
 			require.True(t, lateFinished, "old workers must finish before another SN sample")
-			return statisticsResponse(2, 7, 11, 12), nil
+			return statisticsResponse(2, 7, 11, 12), nil, nil
 		}).Build()
 		mockey.Mock((*compositeViewQueryServiceClient).StatisticsOnView).To(func(_ *compositeViewQueryServiceClient, ctx context.Context, node qviews.WorkNode, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error) {
 			require.EqualValues(t, 3, req.GetShardId().GetReplicaId())

@@ -151,7 +151,7 @@ func (impl *timeTickSyncOperator) sendTsMsg(ctx context.Context, appender func(c
 	// Construct time tick message.
 	ts := impl.ackDetails.LastAllAcknowledgedTimestamp()
 	lastConfirmedMessageID := impl.ackDetails.EarliestLastConfirmedMessageID()
-	persist := (!impl.ackDetails.IsNoPersistedMessage() || forcePersisted)
+	persist := !impl.ackDetails.IsNoPersistedMessage() || forcePersisted || (len(impl.queryBarriers) > 0 && impl.Channel().WALReplicaID != 0)
 
 	return impl.sendTsMsgToWAL(ctx, ts, lastConfirmedMessageID, persist, appender)
 }

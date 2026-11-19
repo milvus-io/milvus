@@ -75,7 +75,7 @@ func TestQueryViewRPCWaitForReady(t *testing.T) {
 					require.True(t, proto.Equal(before, actual))
 					return &viewpb.GetQueryPlanResponse{}, viewerror.ConvertViewError("test", attempt(ctx))
 				}).Build()
-				_, err := client.QueryViewClient().GetQueryPlan(t.Context(), shard, req)
+				_, _, err := client.QueryViewClient().GetQueryPlan(t.Context(), shard, req)
 				require.NoError(t, err)
 			case "mvcc":
 				mockey.Mock((*fakeQueryPlanServiceClient).GetMVCCTimestamp).To(func(_ *fakeQueryPlanServiceClient, ctx context.Context, _ *viewpb.GetMVCCTimestampRequest, _ ...grpc.CallOption) (*viewpb.GetMVCCTimestampResponse, error) {
@@ -156,7 +156,7 @@ func TestQueryViewRPCWaitForReadyCancellation(t *testing.T) {
 			if scenario == "closed client" {
 				client.lifetime.SetState(typeutil.LifetimeStateStopped)
 			}
-			_, err := client.QueryViewClient().GetQueryPlan(ctx, qviews.ShardID{VChannel: "p0_100v0"}, &viewpb.GetQueryPlanRequest{})
+			_, _, err := client.QueryViewClient().GetQueryPlan(ctx, qviews.ShardID{VChannel: "p0_100v0"}, &viewpb.GetQueryPlanRequest{})
 			switch scenario {
 			case "closed client":
 				require.ErrorIs(t, err, ErrClientClosed)

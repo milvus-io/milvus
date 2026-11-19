@@ -19,11 +19,13 @@ import (
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -928,11 +930,12 @@ type legacyPlanClient struct {
 	getQueryPlan func(context.Context, qviews.ShardID, *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error)
 }
 
-func (c *legacyPlanClient) GetQueryPlan(ctx context.Context, shardID qviews.ShardID, request *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+func (c *legacyPlanClient) GetQueryPlan(ctx context.Context, shardID qviews.ShardID, request *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, *types.PChannelInfoAssigned, error) {
 	if c.getQueryPlan != nil {
-		return c.getQueryPlan(ctx, shardID, request)
+		resp, err := c.getQueryPlan(ctx, shardID, request)
+		return resp, nil, err
 	}
-	return &viewpb.GetQueryPlanResponse{Plan: c.plans[shardID.VChannel]}, nil
+	return &viewpb.GetQueryPlanResponse{Plan: c.plans[shardID.VChannel]}, nil, nil
 }
 
 func (c *legacyPlanClient) GetMVCCTimestamp(context.Context, qviews.ShardID, *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {
@@ -1036,14 +1039,16 @@ func TestLegacyRequeryUsesRetainedViewWithoutReplanning(t *testing.T) {
 	mockey.PatchConvey("requery preserves the exact parent plan, including failures", t, func() {
 		node := qviews.NewQueryNode(9)
 		plan := ShardPlan{ShardID: qviews.ShardID{VChannel: "p_1v0", ReplicaID: 2}, Version: &viewpb.QueryViewVersion{QueryVersion: 5}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 90}, WorkNodes: []qviews.WorkNode{node}}
+		plan.walReplica = &types.PChannelInfoAssigned{Channel: types.PChannelInfo{Name: "p", WALReplicaID: 7}}
 		selection := &viewpb.SegmentSelection{SegmentIds: []int64{777}, Mode: viewpb.SegmentSelection_Include}
 		plan.Selections = []*viewpb.QueryPlanWorkNode{{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: 9}}, SegmentSelection: selection}}
 		service := &fakeViewQueryServiceClient{}
 		client := &legacyClient{shardClient: &shardViewQueryClient{queryServiceClient: service}}
 		var failure error
 		calls := 0
-		mockey.Mock((*fakeViewQueryServiceClient).QueryOnView).To(func(_ *fakeViewQueryServiceClient, _ context.Context, selected qviews.WorkNode, request *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
+		mockey.Mock((*fakeViewQueryServiceClient).QueryOnView).To(func(_ *fakeViewQueryServiceClient, ctx context.Context, selected qviews.WorkNode, request *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
 			calls++
+			require.Equal(t, plan.walReplica, contextutil.QueryWALReplica(ctx))
 			require.Equal(t, node, selected)
 			require.True(t, proto.Equal(selection, request.GetSegmentSelection()))
 			require.True(t, proto.Equal(plan.Version, request.GetVersion()))

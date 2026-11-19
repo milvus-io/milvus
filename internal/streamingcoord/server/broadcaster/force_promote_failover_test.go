@@ -14,6 +14,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	coordcatalog "github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
@@ -218,7 +219,7 @@ func initForcePromoteTestGlobals(t *testing.T) {
 	balance.ResetBalancer()
 	// These scheduling tests have no persisted WAL checkpoints. GC must retain
 	// their tasks; dedicated tombstone tests exercise checkpoint publication.
-	checkpointPatch := mockey.Mock((*mock_metastore.MockStreamingCoordCataLog).ListPChannel).Return(nil, nil).Build()
+	checkpointPatch := mockey.Mock((*coordcatalog.ReplicaTopologyCatalog).List).Return(nil, nil).Build()
 	t.Cleanup(func() { checkpointPatch.UnPatch() })
 	oldWALBroadcasterTombstoneCheckInternal := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneCheckInternal.SwapTempValue("10ms")
 	t.Cleanup(func() {

@@ -160,6 +160,40 @@ func TestWAL(t *testing.T) {
 	}
 }
 
+func TestConcurrentWALReplicas(t *testing.T) {
+	cfg := &paramtable.Get().WoodpeckerCfg
+	require.NoError(t, paramtable.Get().Save(cfg.StorageType.Key, "local"))
+	require.NoError(t, paramtable.Get().Save(cfg.RootPath.Key, t.TempDir()))
+	t.Cleanup(func() {
+		paramtable.Get().Reset(cfg.StorageType.Key)
+		paramtable.Get().Reset(cfg.RootPath.Key)
+	})
+	opener, err := (&builderImpl{}).Build()
+	require.NoError(t, err)
+	defer func() {
+		opener.Close()
+		assert.NoError(t, woodpecker.StopEmbedLogStore())
+	}()
+	name := uniqueWpPChannel("replicas")
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	readOpts := &walimpls.OpenOption{Channel: types.PChannelInfo{Name: name, AccessMode: types.AccessModeRO, WALReplicaID: 2}}
+	_, err = opener.Open(ctx, readOpts)
+	require.Error(t, err, "opening a reader cannot create a missing log")
+	writer := openWpRWWAL(t, ctx, opener, name)
+	defer writer.Close()
+	reader, err := opener.Open(ctx, readOpts)
+	require.NoError(t, err)
+	defer reader.Close()
+	readOpts.Channel.WALReplicaID++
+	other, err := opener.Open(ctx, readOpts)
+	require.NoError(t, err)
+	defer other.Close()
+	ids := appendWpSeq(t, ctx, writer, 3, 0)
+	readExpectWpIDs(t, ctx, reader, "replica-a", options.DeliverPolicyAll(), ids)
+	readExpectWpIDs(t, ctx, other, "replica-b", options.DeliverPolicyAll(), ids)
+}
+
 // TestWpRetentionTruncateRead verifies the read semantics around woodpecker truncation.
 //
 // Milvus truncates the WAL aggressively (right after a flush), but truncation only

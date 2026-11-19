@@ -2,19 +2,22 @@ package balancer
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/topology"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
@@ -46,19 +49,28 @@ func RecoverBalancer(
 	logger := resource.Resource().Logger().With(mlog.FieldComponent("balancer"), mlog.String("policy", policyBuilder.Name()))
 	policy.SetLogger(logger)
 
-	// Recover the channel view from catalog.
-	manager, err := channel.RecoverChannelManager(ctx, provider.GetInitialChannels()...)
+	controller, err := topology.Recover(ctx, resource.Resource().TopologyCatalog(), resource.Resource().IDAllocator().Allocate)
 	if err != nil {
-		return nil, merr.Wrap(err, "fail to recover channel manager")
+		return nil, merr.Wrap(err, "recover WAL replica topologies")
+	}
+	names := append(slices.Clone(provider.GetInitialChannels()), controller.Channels()...)
+	manager, err := channel.RecoverChannelManager(ctx, names...)
+	if err != nil {
+		return nil, merr.Wrap(err, "recover channel manager")
 	}
 	manager.SetLogger(resource.Resource().Logger().With(mlog.FieldComponent("channel-manager")))
+	control, err := resource.Resource().StreamingCatalog().GetCChannel(ctx)
+	if err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithCancelCause(context.Background())
 	b := &balancerImpl{
-		ctx:                    ctx,
-		cancel:                 cancel,
-		lifetime:               typeutil.NewLifetime(),
-		provider:               provider,
-		channelMetaManager:     manager,
+		ctx:                ctx,
+		cancel:             cancel,
+		lifetime:           typeutil.NewLifetime(),
+		provider:           provider,
+		channelMetaManager: manager,
+		controller:         controller, control: control, peers: topology.NewPeers(resource.Resource().ReplicaClient().Sync),
 		policy:                 policy,
 		reqCh:                  make(chan *request, 5),
 		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
@@ -77,6 +89,9 @@ func RecoverBalancer(
 
 // balancerImpl is a implementation of Balancer.
 type balancerImpl struct {
+	controller *topology.Controller
+	control    *streamingpb.CChannelMeta
+	peers      *topology.Peers
 	mlog.Binder
 
 	ctx                    context.Context
@@ -320,6 +335,7 @@ func (b *balancerImpl) Close() {
 
 	b.backgroundTaskNotifier.Cancel()
 	b.backgroundTaskNotifier.BlockUntilFinish()
+	b.peers.Close()
 }
 
 // execute the balancer.
@@ -381,6 +397,8 @@ func (b *balancerImpl) execute(ready260Future *syncutil.Future[error]) {
 			// trigger the watch update.
 			b.channelMetaManager.TriggerWatchUpdate()
 			// balance triggered by new streaming node changed.
+		case <-b.peers.Changed():
+		// Re-evaluate the absorbing membership and readiness reports.
 		case <-channelChanged.WaitChan():
 			// balance triggered by channel changed.
 			channelChanged.Sync()
@@ -568,39 +586,75 @@ func (b *balancerImpl) balanceUntilNoChanged(ctx context.Context) error {
 // Return a nil chan to avoid
 // Return a channel to notify the balance trigger again.
 func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
-	b.Logger().Info(ctx, "start to balance")
-	pchannelView := b.channelMetaManager.CurrentPChannelsView()
+	return b.balanceWithTargets(ctx, nil)
+}
 
-	rgName := paramtable.Get().StreamingCfg.PrimaryResourceGroup.GetValue()
-	b.Logger().Info(ctx, "collect all status...", mlog.String("resourceGroupHint", rgName))
-	nodeStatus, err := b.fetchStreamingNodeStatus(ctx, rgName)
+func (b *balancerImpl) balanceWithTargets(ctx context.Context, requested map[types.ChannelID]types.PChannelInfoAssigned) (bool, error) {
+	// Use a single linearizable session snapshot for loss detection, confirmation
+	// and the first-advertisement rule. A cached routing watch can lag a new
+	// registration after a Coord restart.
+	sessions, _, err := resource.Resource().Session().GetSessions(ctx, typeutil.StreamingNodeRole)
 	if err != nil {
 		return false, err
 	}
-
-	// call the balance strategy to generate the expected layout.
-	accessMode := types.AccessModeRO
-	if b.channelMetaManager.IsStreamingEnabledOnce() {
-		accessMode = types.AccessModeRW
+	live := make(map[int64]*types.StreamingNodeInfoWithResourceGroup, len(sessions))
+	eligible := make(map[int64]*types.StreamingNodeInfoWithResourceGroup, len(sessions))
+	writers := make(map[string]types.PChannelInfoAssigned)
+	for _, s := range sessions {
+		rg := s.GetResourceGroupName()
+		if rg == "" {
+			rg = common.DefaultResourceGroupName
+		}
+		node := &types.StreamingNodeInfoWithResourceGroup{StreamingNodeInfo: types.StreamingNodeInfo{ServerID: s.ServerID, Address: s.Address}, ResourceGroup: rg}
+		live[s.ServerID] = node
+		if s.Stopping {
+			continue
+		}
+		if !b.freezeNodes.Contain(s.ServerID) {
+			eligible[s.ServerID] = node
+		}
+		for _, ad := range s.WALReplicas {
+			if ad.GetWriterTerm() <= 0 {
+				continue
+			}
+			if _, exists := writers[ad.Pchannel]; exists {
+				return false, status.NewInner("multiple active writer sessions for %s", ad.Pchannel)
+			}
+			writers[ad.Pchannel] = types.PChannelInfoAssigned{Channel: types.PChannelInfo{Name: ad.Pchannel, Term: ad.GetWriterTerm(), WALReplicaID: ad.WalReplicaId, AccessMode: types.AccessModeRW}, Node: node.StreamingNodeInfo}
+		}
 	}
-	currentLayout := generateCurrentLayout(pchannelView, nodeStatus, accessMode)
-	expectedLayout, err := b.policy.Balance(currentLayout)
+	b.channelMetaManager.ObserveWriters(writers)
+	reports := b.peers.Reports()
+	nodeStatus, err := b.fetchStreamingNodeStatus(ctx, paramtable.Get().StreamingCfg.PrimaryResourceGroup.GetValue())
 	if err != nil {
-		return false, merr.Wrap(err, "fail to balance")
+		return false, err
 	}
-
-	b.Logger().Info(ctx, "balance policy generate result success, try to assign...", mlog.Stringer("expectedLayout", expectedLayout))
-	// bookkeeping the meta assignment started.
-	modifiedChannels, err := b.channelMetaManager.AssignPChannels(ctx, expectedLayout.ChannelAssignment)
-	if err != nil {
-		return false, merr.Wrap(err, "fail to assign pchannels")
+	for id := range nodeStatus {
+		if eligible[id] == nil {
+			delete(nodeStatus, id)
+		}
 	}
-
-	if len(modifiedChannels) == 0 {
-		b.Logger().Info(ctx, "no change of balance result need to be applied")
-		return false, nil
+	layout := generateCurrentLayout(b.channelMetaManager.CurrentPChannelsView(), nodeStatus, types.AccessModeRW)
+	next, err := b.policy.Balance(layout)
+	if err == nil {
+		targets := make(map[string]int64, len(next.ChannelAssignment))
+		for id, assigned := range next.ChannelAssignment {
+			targets[id.Name] = assigned.Node.ServerID
+		}
+		for id, route := range requested {
+			if eligible[route.Node.ServerID] == nil || nodeStatus[route.Node.ServerID] == nil {
+				return false, merr.WrapErrServiceUnavailable("requested WAL transfer destination left")
+			}
+			targets[id.Name] = route.Node.ServerID
+		}
+		if err = b.controller.Plan(ctx, targets, eligible, live, reports, writers); err != nil {
+			return false, err
+		}
 	}
-	return true, b.applyBalanceResultToStreamingNode(ctx, modifiedChannels)
+	// Reissue the last durable topology even while no node is eligible for a
+	// new placement. A failed catalog CAS is reloaded before the next send.
+	b.peers.Broadcast(b.ctx, live, b.controller, b.control)
+	return false, err
 }
 
 // fetchStreamingNodeStatus fetch the streaming node status.
@@ -644,86 +698,7 @@ func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context, rgName stri
 	return nodeStatus, nil
 }
 
-// applyBalanceResultToStreamingNode apply the balance result to streaming node.
-func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, modifiedChannels map[types.ChannelID]*channel.PChannelMeta) error {
-	b.Logger().Info(ctx, "balance result need to be applied...", mlog.Int("modifiedChannelCount", len(modifiedChannels)))
-
-	// different channel can be execute concurrently.
-	g, _ := errgroup.WithContext(ctx)
-	opTimeout := paramtable.Get().StreamingCfg.WALBalancerOperationTimeout.GetAsDurationByParse()
-	// generate balance operations and applied them.
-	for _, channel := range modifiedChannels {
-		channel := channel
-		g.Go(func() error {
-			// ownerLost is true if the streaming node of any read-write assignment history has left the session view.
-			ownerLost := false
-			// all history channels should be remove from related nodes.
-			for _, assignment := range channel.AssignHistories() {
-				opCtx, cancel := context.WithTimeout(ctx, opTimeout)
-				defer cancel()
-				err := resource.Resource().StreamingNodeManagerClient().Remove(opCtx, assignment)
-				if errors.Is(err, types.ErrNotAlive) {
-					if assignment.Channel.AccessMode == types.AccessModeRW {
-						ownerLost = true
-					}
-					b.Logger().Warn(ctx, "streaming node of channel is not alive, wal close not confirmed", mlog.String("assignment", assignment.String()))
-					continue
-				}
-				if err != nil {
-					b.Logger().Warn(ctx, "fail to remove channel", mlog.String("assignment", assignment.String()), mlog.Err(err))
-					return err
-				}
-				b.Logger().Info(ctx, "remove channel success", mlog.String("assignment", assignment.String()))
-			}
-			if ownerLost {
-				if err := b.waitNodeLostGracePeriod(ctx, channel); err != nil {
-					return err
-				}
-			}
-
-			// assign the channel to the target node.
-			opCtx, cancel := context.WithTimeout(ctx, opTimeout)
-			defer cancel()
-			if err := resource.Resource().StreamingNodeManagerClient().Assign(opCtx, channel.CurrentAssignment()); err != nil {
-				b.Logger().Warn(ctx, "fail to assign channel", mlog.String("assignment", channel.CurrentAssignment().String()), mlog.Err(err))
-				return err
-			}
-			b.Logger().Info(ctx, "assign channel success", mlog.String("assignment", channel.CurrentAssignment().String()))
-
-			// bookkeeping the meta assignment done.
-			if err := b.channelMetaManager.AssignPChannelsDone(ctx, []types.ChannelID{channel.ChannelID()}); err != nil {
-				b.Logger().Warn(ctx, "fail to bookkeep pchannel assignment done", mlog.String("assignment", channel.CurrentAssignment().String()))
-				return err
-			}
-			return nil
-		})
-	}
-	// TODO: Current implementation recovery will wait for all node reply,
-	// huge unavaiable time may be caused by this,
-	// should be fixed in future.
-	return g.Wait()
-}
-
-// waitNodeLostGracePeriod blocks for streaming.walBalancer.nodeLostGracePeriod or until ctx is done.
-func (b *balancerImpl) waitNodeLostGracePeriod(ctx context.Context, meta *channel.PChannelMeta) error {
-	grace := paramtable.Get().StreamingCfg.WALBalancerNodeLostGracePeriod.GetAsDurationByParse()
-	if grace <= 0 {
-		return nil
-	}
-	b.Logger().Info(ctx, "wait grace period before assigning channel whose streaming node is lost",
-		mlog.String("target", meta.CurrentAssignment().String()),
-		mlog.Duration("gracePeriod", grace))
-	timer := time.NewTimer(grace)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-// generateCurrentLayout generate layout from all nodes info and meta.
+// generateCurrentLayout combines leased writer locations with node capacity and WAL metrics.
 func generateCurrentLayout(view *channel.PChannelView, allNodesStatus map[int64]*types.StreamingNodeStatus, accessMode types.AccessMode) (layout CurrentLayout) {
 	channelsToNodes := make(map[types.ChannelID]int64, len(view.Channels))
 	channels := make(map[channel.ChannelID]types.PChannelInfo, len(view.Channels))

@@ -8,7 +8,9 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/storage"
+	clientmanager "github.com/milvus-io/milvus/internal/streamingnode/client/manager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchantempstore"
@@ -47,6 +49,17 @@ func OptMixCoordClient(mixCoordClient *syncutil.Future[types.MixCoordClient]) op
 		r.vchannelTempStorage = vchantempstore.NewVChannelTempStorage(r.mixCoordClient)
 	}
 }
+
+func (r *resourceImpl) ReplicaClient() *clientmanager.WALReplicaClient { return r.replicaClient }
+func OptReplicaClient(etcd *clientv3.Client) optResourceInit {
+	return func(r *resourceImpl) { r.replicaClient = clientmanager.NewWALReplicaClient(etcd) }
+}
+
+func OptQueryViewCatalog(c queryview.QueryViewCatalog) optResourceInit {
+	return func(r *resourceImpl) { r.queryViewCatalog = c }
+}
+
+func (r *resourceImpl) QueryViewCatalog() queryview.QueryViewCatalog { return r.queryViewCatalog }
 
 // OptStreamingNodeCatalog provides the streaming node catalog to the resource.
 func OptStreamingNodeCatalog(catalog metastore.StreamingNodeCataLog) optResourceInit {
@@ -89,6 +102,9 @@ func Init(opts ...optResourceInit) {
 
 // Release releases the singleton of resources.
 func Release() {
+	if r.replicaClient != nil {
+		r.replicaClient.Close()
+	}
 	r.timeTickInspector.Close()
 	r.wbMgr.Stop()
 	r.syncMgr.Close()
@@ -102,6 +118,8 @@ func Resource() *resourceImpl {
 // resourceImpl is a basic resource dependency for streamingnode server.
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
+	replicaClient        *clientmanager.WALReplicaClient
+	queryViewCatalog     queryview.QueryViewCatalog
 	logger               *mlog.Logger
 	timestampAllocator   idalloc.Allocator
 	idAllocator          idalloc.Allocator

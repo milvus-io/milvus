@@ -3,6 +3,7 @@ package walmanager
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor"
@@ -14,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -24,7 +26,7 @@ var errWALManagerClosed = status.NewOnShutdownError("wal manager is closed")
 
 // OpenManager create a WAL Manager, which now uses dynamic opener that can handle multiple WALNames at runtime.
 // The specific WALName will be determined when opening each channel based on checkpoint's MessageID.WALName
-func OpenManager() (Manager, error) {
+func OpenManager() (*managerImpl, error) {
 	resource.Resource().Logger().Info(context.TODO(), "open wal manager with dynamic opener")
 	// Create dynamic opener directly with interceptors
 	opener := adaptor.NewOpenerAdaptor(newInterceptorBuilders())
@@ -50,7 +52,7 @@ func newInterceptorBuilders() []interceptors.InterceptorBuilder {
 }
 
 // newManager create a wal manager.
-func newManager(opener wal.Opener) Manager {
+func newManager(opener wal.Opener) *managerImpl {
 	openingCtx, cancelOpening := context.WithCancel(context.Background())
 	return &managerImpl{
 		lifetime:      typeutil.NewGenericLifetime[managerState](managerOpenable | managerRemoveable | managerGetable),
@@ -64,6 +66,7 @@ func newManager(opener wal.Opener) Manager {
 
 // All management operation for a wal will be serialized with order of term.
 type managerImpl struct {
+	replicas *ReplicaControl
 	lifetime *typeutil.GenericLifetime[managerState]
 
 	wltMap        *typeutil.ConcurrentMap[string, *walLifetime]
@@ -71,6 +74,27 @@ type managerImpl struct {
 	logger        *mlog.Logger
 	openingCtx    context.Context    // done when the manager is closing, all wal open operations are canceled.
 	cancelOpening context.CancelFunc // cancels openingCtx.
+}
+
+// EnableReplicaControl binds the node's inventory to its leased registration.
+func (m *managerImpl) EnableReplicaControl(session *sessionutil.Session, catalog *streamingcoord.ReplicaTopologyCatalog) *ReplicaControl {
+	m.replicas = newReplicaControl(session.ServerID, m.opener, session.SetWALAdvertisement)
+	m.replicas.authority = catalog.Get
+	m.replicas.sessions = session.GetSessions
+	m.replicas.peers = resource.Resource().ReplicaClient()
+	return m.replicas
+}
+
+func (m *managerImpl) localWAL(name string) wal.WAL {
+	if m.replicas != nil {
+		if w := m.replicas.lookup(name); w != nil {
+			return w
+		}
+	}
+	if lt, ok := m.wltMap.Get(name); ok {
+		return lt.GetWAL()
+	}
+	return nil
 }
 
 // Open opens a wal instance for the channel on this Manager.
@@ -118,13 +142,22 @@ func (m *managerImpl) GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, erro
 	}
 	defer m.lifetime.Done()
 
-	l := m.getWALLifetime(channel.Name).GetWAL()
+	l := m.localWAL(channel.Name)
+	if channel.WALReplicaID != 0 && channel.Term == 0 {
+		if writer, ok := l.(interface{ ReadReplica() wal.WAL }); ok {
+			l = writer.ReadReplica()
+		}
+	}
 	if l == nil || !l.IsAvailable() {
 		return nil, status.NewChannelNotExist(channel.Name)
 	}
 
-	currentTerm := l.Channel().Term
-	if currentTerm != channel.Term {
+	local := l.Channel()
+	if channel.WALReplicaID != 0 && local.WALReplicaID != channel.WALReplicaID {
+		return nil, status.NewChannelNotExist(channel.Name)
+	}
+	currentTerm := local.Term
+	if (channel.Term != 0 || channel.WALReplicaID == 0) && currentTerm != channel.Term {
 		return nil, status.NewUnmatchedChannelTerm(channel.Name, channel.Term, currentTerm)
 	}
 	// wal's lifetime is fully managed by wal manager,
@@ -139,7 +172,7 @@ func (m *managerImpl) GetAvailableRawWALByPChannel(pchannel string) (wal.WAL, er
 	}
 	defer m.lifetime.Done()
 
-	l := m.getWALLifetime(pchannel).GetWAL()
+	l := m.localWAL(pchannel)
 	if l == nil || !l.IsAvailable() {
 		return nil, status.NewChannelNotExist(pchannel)
 	}
@@ -159,6 +192,11 @@ func (m *managerImpl) Metrics() (*types.StreamingNodeMetrics, error) {
 		}
 		return true
 	})
+	if m.replicas != nil {
+		for _, instance := range m.replicas.instances() {
+			metrics[instance.Channel().ChannelID()] = instance.Metrics()
+		}
+	}
 	return &types.StreamingNodeMetrics{
 		WALMetrics: metrics,
 	}, nil
@@ -175,6 +213,9 @@ func (m *managerImpl) Close() {
 		wlt.Close()
 		return true
 	})
+	if m.replicas != nil {
+		m.replicas.Close()
+	}
 	m.lifetime.SetState(managerStopped)
 	m.lifetime.Wait()
 

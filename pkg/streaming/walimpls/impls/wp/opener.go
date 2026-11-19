@@ -21,15 +21,20 @@ type openerImpl struct {
 
 // Open opens a new wal.
 func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimpls.WALImpls, error) {
-	exists, err := o.c.LogExists(ctx, opt.Channel.Name)
-	if err != nil {
-		mlog.Error(ctx, "failed to check log exists", mlog.String("log_name", opt.Channel.Name), mlog.Err(err))
+	if err := opt.Validate(); err != nil {
 		return nil, err
 	}
-	if !exists {
-		if err := o.c.CreateLog(ctx, opt.Channel.Name); err != nil {
-			mlog.Error(ctx, "failed to create log", mlog.String("log_name", opt.Channel.Name), mlog.Err(err))
+	if opt.Channel.AccessMode == types.AccessModeRW {
+		exists, err := o.c.LogExists(ctx, opt.Channel.Name)
+		if err != nil {
+			mlog.Error(ctx, "failed to check log exists", mlog.String("log_name", opt.Channel.Name), mlog.Err(err))
 			return nil, err
+		}
+		if !exists {
+			if err := o.c.CreateLog(ctx, opt.Channel.Name); err != nil {
+				mlog.Error(ctx, "failed to create log", mlog.String("log_name", opt.Channel.Name), mlog.Err(err))
+				return nil, err
+			}
 		}
 	}
 	l, err := o.c.OpenLog(ctx, opt.Channel.Name)

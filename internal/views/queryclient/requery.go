@@ -6,11 +6,13 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 // ShardPlan holds the Phase 1 result for a shard, retained for use
 // in Requery stages that dispatch QueryOnView using the same view version and MVCC.
 type ShardPlan struct {
+	walReplica       *types.PChannelInfoAssigned
 	Selections       []*viewpb.QueryPlanWorkNode
 	ExecutionSummary *viewpb.ExecutionSummary
 	ShardID          qviews.ShardID

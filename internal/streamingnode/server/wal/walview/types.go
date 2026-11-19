@@ -25,6 +25,9 @@ type VChannelWALView struct {
 	// PrepareQueryView checks final commits and publishes sealed notifications.
 	// QueryRuntime calls it under WithResourceEventLock before its ready barrier.
 	PrepareQueryView func() bool
+	// RefreshSealedVersions reads the authority outside the event lock before
+	// ordering local sealed events and the view-ready barrier.
+	RefreshSealedVersions func(context.Context) error
 
 	PChannel     string
 	VChannel     string

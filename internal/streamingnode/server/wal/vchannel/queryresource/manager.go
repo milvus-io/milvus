@@ -21,7 +21,12 @@ import (
 
 type ViewBuilder func(meta *viewpb.QueryViewMeta) (walview.VChannelWALView, bool)
 
+// CaptureView prepares durable metadata outside the dispatcher lock, then calls
+// install while ordered WAL event delivery is paused at the captured frontier.
+type CaptureView func(context.Context, *viewpb.QueryViewMeta, func(walview.VChannelWALView)) error
+
 type Config struct {
+	CaptureView      CaptureView
 	ChunkManager     storage.ChunkManager
 	Builders         []QueryRuntimeModuleBuilder
 	Scheduler        nodescheduler.Scheduler
@@ -30,6 +35,7 @@ type Config struct {
 }
 
 type Manager struct {
+	captureView    CaptureView
 	chunkManager   storage.ChunkManager
 	partitionStats map[partitionStatsKey]*partitionStatsResource
 	mu             sync.Mutex
@@ -63,6 +69,7 @@ type queryViewRef struct {
 
 func NewManager(config Config) *Manager {
 	return &Manager{
+		captureView:      config.CaptureView,
 		chunkManager:     config.ChunkManager,
 		builders:         defaultQueryRuntimeModuleBuilders(config.Builders),
 		scheduler:        config.Scheduler,
@@ -298,12 +305,15 @@ func (m *Manager) ObserveEvent(ctx context.Context, event walview.VChannelResour
 }
 
 func (m *Manager) startBuildLocked(meta *viewpb.QueryViewMeta, build ViewBuilder) bool {
-	if build == nil {
-		panic("query resource view builder is nil")
-	}
-	view, ok := build(meta)
-	if !ok {
-		return false
+	var view walview.VChannelWALView
+	var runtime *QueryRuntime
+	if m.captureView == nil {
+		var ok bool
+		if view, ok = build(meta); !ok {
+			return false
+		}
+		runtime = newQueryRuntime(m.dispatcher, m.newModules()...)
+		m.runtime = runtime
 	}
 	if m.scheduler == nil {
 		m.scheduler = nodescheduler.Get()
@@ -311,8 +321,7 @@ func (m *Manager) startBuildLocked(meta *viewpb.QueryViewMeta, build ViewBuilder
 	if m.dispatcher == nil {
 		panic("query resource dispatcher is nil")
 	}
-	runtime := newQueryRuntime(m.dispatcher, m.newModules()...)
-	m.runtime = runtime
+
 	withOwnerLock := view.WithResourceEventLock
 	var task *resourceBuildTask
 	task = newResourceBuildTask(func(ctx context.Context) (*QueryRuntime, error) {
@@ -323,26 +332,44 @@ func (m *Manager) startBuildLocked(meta *viewpb.QueryViewMeta, build ViewBuilder
 			// Each retry captures a fresh snapshot and installs its live observer in
 			// the same owner critical section. Never Prepare a partially built module.
 			var captureErr error
-			capture := func() {
+			install := func(captured walview.VChannelWALView) {
 				m.mu.Lock()
 				defer m.mu.Unlock()
 				if m.closed || m.task == nil || m.task.task != task || len(m.refs) == 0 {
 					captureErr = context.Canceled
 					return
 				}
-				var ok bool
-				view, ok = build(m.oldestQueryViewMetaLocked())
-				if !ok {
-					captureErr = nodescheduler.ErrDelay
-					return
-				}
+				view = captured
 				runtime = newQueryRuntime(m.dispatcher, m.newModules()...)
 				m.runtime = runtime
 			}
-			if withOwnerLock != nil {
-				withOwnerLock(capture)
+			m.mu.Lock()
+			if len(m.refs) == 0 || m.closed {
+				m.mu.Unlock()
+				return nil, context.Canceled
+			}
+			target := m.oldestQueryViewMetaLocked()
+			m.mu.Unlock()
+			if m.captureView != nil {
+				if err := m.captureView(ctx, target, install); err != nil {
+					if ctx.Err() != nil {
+						return nil, ctx.Err()
+					}
+					return nil, errors.Mark(err, nodescheduler.ErrDelay)
+				}
 			} else {
-				capture()
+				capture := func() {
+					if snapshot, ok := build(target); ok {
+						install(snapshot)
+					} else {
+						captureErr = nodescheduler.ErrDelay
+					}
+				}
+				if withOwnerLock != nil {
+					withOwnerLock(capture)
+				} else {
+					capture()
+				}
 			}
 			if captureErr != nil {
 				return nil, captureErr

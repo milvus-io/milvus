@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -115,13 +116,13 @@ func TestTwoStageSearchRetriesEntireAttempt(t *testing.T) {
 	service := &fakeViewQueryServiceClient{}
 	var mu sync.Mutex
 	plans, filters, anns := 0, 0, 0
-	patchPlan := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+	patchPlan := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, *types.PChannelInfoAssigned, error) {
 		plans++
 		planResponse := twoStageResponse(id)
 		plan := planResponse.GetPlan()
 		plan.WorkNodes = plan.WorkNodes[:1]
 		plan.Version.QueryVersion = int64(plans)
-		return planResponse, nil
+		return planResponse, nil, nil
 	}).Build()
 	defer patchPlan.UnPatch()
 	patchRPC := mockey.Mock((*fakeViewQueryServiceClient).SearchOnView).To(func(_ *fakeViewQueryServiceClient, _ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
@@ -330,13 +331,13 @@ func TestTwoStageSearchStreamsRetryDiscardsFilterMetadata(t *testing.T) {
 	setupTestReplicaRouting(t)
 	id := qviews.ShardID{VChannel: "p_1v0", ReplicaID: 1}
 	var plans, filters, streams int
-	plan := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+	plan := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, *types.PChannelInfoAssigned, error) {
 		plans++
 		response := twoStageResponse(id)
 		response.Plan.WorkNodes = response.Plan.WorkNodes[:1]
 		response.Plan.GetLegacySearchRequest().Nq = 1
 		response.Plan.GetLegacySearchRequest().MetricType = "IP"
-		return response, nil
+		return response, nil, nil
 	}).Build()
 	defer plan.UnPatch()
 	filter := mockey.Mock((*fakeViewQueryServiceClient).SearchOnView).To(func(_ *fakeViewQueryServiceClient, _ context.Context, _ qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {

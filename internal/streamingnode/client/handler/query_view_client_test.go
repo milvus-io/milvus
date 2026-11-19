@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
@@ -45,10 +46,47 @@ func TestHandlerClientGetQueryPlanRoutesByShardPChannel(t *testing.T) {
 	}
 	client := newTestHandlerClient(queryPlanService, nil, nil)
 
-	resp, err := client.QueryViewClient().GetQueryPlan(context.Background(), shardID, planReq)
+	resp, _, err := client.QueryViewClient().GetQueryPlan(context.Background(), shardID, planReq)
 
 	require.NoError(t, err)
 	require.Same(t, planResp, resp)
+}
+
+func TestQueryPlanExecutionKeepsMVCCSourceAcrossAssignmentChange(t *testing.T) {
+	shard := qviews.ShardID{VChannel: "p0_100v0"}
+	source := types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "p0", AccessMode: types.AccessModeRO, WALReplicaID: 5},
+		Node:    types.StreamingNodeInfo{ServerID: 101},
+	}
+	planService := &fakeQueryPlanServiceClient{
+		getQueryPlan: func(context.Context, *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+			return &viewpb.GetQueryPlanResponse{}, nil
+		},
+	}
+	viewService := &fakeViewQueryServiceClient{
+		searchOnView: func(ctx context.Context, _ *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+			serverID, ok := contextutil.GetPickServerID(ctx)
+			require.True(t, ok)
+			require.EqualValues(t, 101, serverID)
+			channel, err := decodeOutgoingQueryViewPChannel(ctx)
+			require.NoError(t, err)
+			require.EqualValues(t, 5, channel.WALReplicaID)
+			require.Zero(t, channel.Term)
+			require.True(t, contextutil.IsFailFastPick(ctx))
+			return nil, viewerror.NewViewInvalidated("replica retired")
+		},
+	}
+	client := newTestHandlerClient(planService, viewService, nil)
+	client.watcher = fakeAssignmentWatcher{assignment: &source}
+	_, selected, err := client.QueryViewClient().GetQueryPlan(t.Context(), shard,
+		&viewpb.GetQueryPlanRequest{Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Bounded}})
+	require.NoError(t, err)
+	require.Equal(t, source, *selected)
+	source.Node.ServerID = 102
+	source.Channel.WALReplicaID = 6
+	ctx := contextutil.WithQueryWALReplica(t.Context(), selected)
+	_, err = client.QueryViewClient().SearchOnView(ctx, types.PChannelInfo{Name: "p0"}, &viewpb.SearchOnViewRequest{})
+	require.True(t, viewerror.AsViewError(err).IsRetryable())
 }
 
 func TestHandlerClientViewQueryRoutesByStreamingWorkNode(t *testing.T) {

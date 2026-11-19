@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -18,10 +19,12 @@ import (
 	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -55,6 +58,7 @@ func TestShardSearchReturnsQueryPlanMVCCForRequery(t *testing.T) {
 	}
 	selection := &viewpb.SegmentSelection{SegmentIds: []int64{100}, Mode: viewpb.SegmentSelection_Exclude}
 	subSelections := []*viewpb.SegmentSelection{{SegmentIds: []int64{101}, Mode: viewpb.SegmentSelection_Include}, {Mode: viewpb.SegmentSelection_All}}
+	planClient.source = &types.PChannelInfoAssigned{Channel: types.PChannelInfo{Name: "by-dev-rootcoord-dml_0", WALReplicaID: 9}}
 	planClient.executionSummary = &viewpb.ExecutionSummary{GlobalOptimizer: &viewpb.GlobalOptimizerExecutionSummary{Flags: 1 << viewpb.GlobalOptimizerExecutionSummary_PrunedByScalarFiltering}}
 	planClient.plan.WorkNodes[0].SegmentSelection = selection
 	planClient.plan.WorkNodes[0].SubSelections = subSelections
@@ -82,12 +86,13 @@ func TestShardSearchReturnsQueryPlanMVCCForRequery(t *testing.T) {
 	require.Equal(t, subSelections, queryService.searchReq.GetSubSelections())
 	require.Equal(t, planClient.plan.WorkNodes, shardPlan.Selections)
 	require.True(t, proto.Equal(planClient.executionSummary, shardPlan.ExecutionSummary))
+	require.Equal(t, planClient.source, shardPlan.walReplica)
 	require.True(t, proto.Equal(mvcc, shardPlan.Mvcc))
 	require.True(t, proto.Equal(mvcc, queryService.searchReq.GetMvcc()))
 	require.Equal(t, mvcc.GetTransformingTimetick(), queryService.searchReq.GetLegacyReq().GetMvccTimestamp())
 }
 
-func TestSessionSearchOnPrimaryLetsSNGenerateQueryPlanMVCC(t *testing.T) {
+func TestSessionSearchPreservesGuaranteeForShardPlanning(t *testing.T) {
 	setupTestReplicaRouting(t)
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	planClient := &fakeQueryPlanClient{
@@ -117,7 +122,8 @@ func TestSessionSearchOnPrimaryLetsSNGenerateQueryPlanMVCC(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.Equal(t, commonpb.ConsistencyLevel_Strong, planClient.planReq.GetConsistencyLevel())
+	require.Equal(t, commonpb.ConsistencyLevel_Session, planClient.planReq.GetConsistencyLevel())
+	require.EqualValues(t, 999, planClient.planReq.GetLegacySearchRequest().GetGuaranteeTimestamp())
 	require.Nil(t, planClient.planReq.GetQueryPlanMvcc())
 	require.Equal(t, 0, planClient.mvccReqCount)
 }
@@ -184,8 +190,10 @@ func TestShardSearchStreamReturnsPerVChannelReduceStream(t *testing.T) {
 		{chunk: newTestSearchChunk(3, []int64{1}, []float32{0.85})},
 		{chunk: newTestSearchChunk(3, []int64{3}, []float32{0.7})},
 	}}
+	source := &types.PChannelInfoAssigned{Channel: types.PChannelInfo{WALReplicaID: 7}}
 	queryService := &fakeViewQueryServiceClient{
-		searchOnViewStream: func(_ context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
+		searchOnViewStream: func(ctx context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
+			assert.Same(t, source, contextutil.QueryWALReplica(ctx))
 			switch node.Key() {
 			case leftNode.Key():
 				return leftStream, nil
@@ -196,7 +204,7 @@ func TestShardSearchStreamReturnsPerVChannelReduceStream(t *testing.T) {
 			}
 		},
 	}
-	planClient := &fakeQueryPlanClient{plan: plan, clientOptimizeInfo: planResponse.ClientOptimizeInfo}
+	planClient := &fakeQueryPlanClient{plan: plan, source: source, clientOptimizeInfo: planResponse.ClientOptimizeInfo}
 	client := newShardViewQueryClient(1, planClient, queryService)
 
 	streams, shardPlan, err := client.SearchStreams(context.Background(), &ShardSearchRequest{
@@ -255,8 +263,10 @@ func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
 	rightChunk.FieldsData = append(rightChunk.FieldsData, shardTestField(1, 20, 20, 20))
 	leftStream := &fakeQueryStream{recv: []fakeQueryStreamRecv{{chunk: leftChunk}}}
 	rightStream := &fakeQueryStream{recv: []fakeQueryStreamRecv{{chunk: rightChunk}}}
+	source := &types.PChannelInfoAssigned{Channel: types.PChannelInfo{WALReplicaID: 7}}
 	queryService := &fakeViewQueryServiceClient{
-		queryOnViewStream: func(_ context.Context, node qviews.WorkNode, _ *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error) {
+		queryOnViewStream: func(ctx context.Context, node qviews.WorkNode, _ *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error) {
+			assert.Same(t, source, contextutil.QueryWALReplica(ctx))
 			switch node.Key() {
 			case leftNode.Key():
 				return leftStream, nil
@@ -267,7 +277,7 @@ func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
 			}
 		},
 	}
-	planClient := &fakeQueryPlanClient{plan: plan, clientOptimizeInfo: planResponse.ClientOptimizeInfo}
+	planClient := &fakeQueryPlanClient{plan: plan, source: source, clientOptimizeInfo: planResponse.ClientOptimizeInfo}
 	client := newShardViewQueryClient(1, planClient, queryService)
 
 	chunkBytes := 2 * (8 + 8 + 8) // Two rows with int64 PK, value and timestamp.
@@ -516,6 +526,7 @@ func TestShardSearchUsesBatchPathForUnsupportedSearch(t *testing.T) {
 }
 
 type fakeQueryPlanClient struct {
+	source *types.PChannelInfoAssigned
 	QueryPlanClient
 	clientOptimizeInfo    *viewpb.QueryPlanClientOptimizeInfo
 	executionSummary      *viewpb.ExecutionSummary
@@ -528,10 +539,10 @@ type fakeQueryPlanClient struct {
 	mvccReqCount          int
 }
 
-func (f *fakeQueryPlanClient) GetQueryPlan(_ context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+func (f *fakeQueryPlanClient) GetQueryPlan(_ context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, *types.PChannelInfoAssigned, error) {
 	f.planReqCount++
 	f.planReq = proto.Clone(req).(*viewpb.GetQueryPlanRequest)
-	return &viewpb.GetQueryPlanResponse{Plan: f.plan, GrowingInlineResponse: f.growingInlineResponse, ExecutionSummary: f.executionSummary, ClientOptimizeInfo: f.clientOptimizeInfo}, nil
+	return &viewpb.GetQueryPlanResponse{Plan: f.plan, GrowingInlineResponse: f.growingInlineResponse, ExecutionSummary: f.executionSummary, ClientOptimizeInfo: f.clientOptimizeInfo}, f.source, nil
 }
 
 func (f *fakeQueryPlanClient) GetMVCCTimestamp(_ context.Context, shardID qviews.ShardID, req *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {

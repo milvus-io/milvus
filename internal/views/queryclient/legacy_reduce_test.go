@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -127,13 +128,13 @@ func TestLegacyExplicitMVCCSurvivesShardRetry(t *testing.T) {
 		fail.Store(true)
 		planClient := &fakeQueryPlanClient{}
 		service := &fakeViewQueryServiceClient{}
-		mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+		mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, *types.PChannelInfoAssigned, error) {
 			attempts.Add(1)
 			require.True(t, proto.Equal(fixed, req.GetQueryPlanMvcc()))
 			plan := legacyQueryPlan(id, qviews.NewQueryNode(1))
 			plan.Mvcc = proto.Clone(req.GetQueryPlanMvcc()).(*viewpb.QueryPlanMVCC)
 			plan.WorkNodes = append(plan.WorkNodes, &viewpb.QueryPlanWorkNode{Node: &viewpb.QueryPlanWorkNode_StreamingNode{StreamingNode: &viewpb.StreamingWorkNode{Pchannel: "p"}}})
-			return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
+			return &viewpb.GetQueryPlanResponse{Plan: plan}, nil, nil
 		}).Build()
 		mockey.Mock((*fakeViewQueryServiceClient).QueryOnView).To(func(_ *fakeViewQueryServiceClient, _ context.Context, node qviews.WorkNode, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
 			require.True(t, proto.Equal(fixed, req.Mvcc))
@@ -173,13 +174,13 @@ func TestLegacyBarrierMVCCSurvivesShardRetry(t *testing.T) {
 		fail.Store(true)
 		planClient := &fakeQueryPlanClient{}
 		service := &fakeViewQueryServiceClient{}
-		mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+		mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, *types.PChannelInfoAssigned, error) {
 			attempts.Add(1)
 			require.EqualValues(t, 100, req.GetBarrierMvcc())
 			plan := legacyQueryPlan(id, qviews.NewQueryNode(1))
 			plan.Mvcc = proto.Clone(fixed).(*viewpb.QueryPlanMVCC)
 			plan.WorkNodes = append(plan.WorkNodes, &viewpb.QueryPlanWorkNode{Node: &viewpb.QueryPlanWorkNode_StreamingNode{StreamingNode: &viewpb.StreamingWorkNode{Pchannel: "p"}}})
-			return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
+			return &viewpb.GetQueryPlanResponse{Plan: plan}, nil, nil
 		}).Build()
 		mockey.Mock((*fakeViewQueryServiceClient).QueryOnView).To(func(_ *fakeViewQueryServiceClient, _ context.Context, node qviews.WorkNode, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
 			require.True(t, proto.Equal(fixed, req.Mvcc))
@@ -207,7 +208,7 @@ func TestLegacyRetryDiscardsLateResultsAndRetainsEmptyShardSnapshot(t *testing.T
 		started := make(chan struct{})
 		planClient := &fakeQueryPlanClient{}
 		service := &fakeViewQueryServiceClient{}
-		mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+		mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, *types.PChannelInfoAssigned, error) {
 			attempt := attempts.Add(1)
 			require.Equal(t, commonpb.ConsistencyLevel_Strong, req.GetConsistencyLevel())
 			require.EqualValues(t, 3, req.GetLegacyRetrieveRequest().GetSchemaVersion())
@@ -218,7 +219,7 @@ func TestLegacyRetryDiscardsLateResultsAndRetainsEmptyShardSnapshot(t *testing.T
 			if attempt == 1 {
 				plan.WorkNodes = append(plan.WorkNodes, &viewpb.QueryPlanWorkNode{Node: &viewpb.QueryPlanWorkNode_StreamingNode{StreamingNode: &viewpb.StreamingWorkNode{Pchannel: "p"}}})
 			}
-			return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
+			return &viewpb.GetQueryPlanResponse{Plan: plan}, nil, nil
 		}).Build()
 		mockey.Mock((*fakeViewQueryServiceClient).QueryOnView).To(func(_ *fakeViewQueryServiceClient, ctx context.Context, node qviews.WorkNode, _ *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
 			if attempts.Load() == 1 {

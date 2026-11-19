@@ -95,6 +95,11 @@ func (r *QueryRuntime) Initialize(ctx context.Context, view walview.VChannelWALV
 	}
 	r.mu.Lock()
 	r.prepareView = func(ctx context.Context) error {
+		if view.RefreshSealedVersions != nil {
+			if err := view.RefreshSealedVersions(ctx); err != nil {
+				return err
+			}
+		}
 		return r.resourceEventBarrier(ctx, view.WithResourceEventLock, view.PrepareQueryView)
 	}
 	r.mu.Unlock()

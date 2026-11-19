@@ -22,6 +22,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,6 +35,7 @@ import (
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -773,6 +775,75 @@ func (s *Session) GetSessionsWithVersionRange(prefix string, r semver.Range) (ma
 	return res, resp.Header.Revision, nil
 }
 
+// SetWALAdvertisement publishes the current local route for a PChannel. A nil
+// advertisement withdraws it. The replica lifetime serializes changes for that
+// channel. Concurrent changes for different channels merge in the session key.
+func (s *Session) SetWALAdvertisement(ctx context.Context, pchannel string, advertisement *streamingpb.WALAdvertisement) error {
+	if s.LeaseID == nil || s.ServerName != typeutil.StreamingNodeRole {
+		return merr.WrapErrServiceUnavailable("WAL advertisement requires a registered StreamingNode")
+	}
+	if pchannel == "" || (advertisement != nil && (advertisement.Pchannel != pchannel || advertisement.WalReplicaId <= 0 ||
+		(advertisement.WriterTerm != nil && advertisement.GetWriterTerm() <= 0) ||
+		(advertisement.IsCchannel && advertisement.WriterTerm == nil))) {
+		return merr.WrapErrServiceInternalMsg("invalid WAL advertisement for channel %q", pchannel)
+	}
+	return s.updateWALRegistration(ctx, func(record *SessionRaw) (bool, error) {
+		if record.Stopping {
+			return false, merr.WrapErrServiceUnavailable("StreamingNode is stopping")
+		}
+		i := slices.IndexFunc(record.WALReplicas, func(a *streamingpb.WALAdvertisement) bool { return a.Pchannel == pchannel })
+		if i < 0 {
+			if advertisement == nil {
+				return false, nil
+			}
+			record.WALReplicas = append(record.WALReplicas, advertisement)
+		} else if advertisement == nil {
+			record.WALReplicas = slices.Delete(record.WALReplicas, i, i+1)
+		} else {
+			if proto.Equal(record.WALReplicas[i], advertisement) {
+				return false, nil
+			}
+			record.WALReplicas[i] = advertisement
+		}
+		return true, nil
+	})
+}
+
+// The revision comparison orders concurrent edits, including GoingStop. A lost
+// reply is resolved by reading the key again. The lease identifies this registration.
+func (s *Session) updateWALRegistration(ctx context.Context, update func(*SessionRaw) (bool, error)) error {
+	key := s.getCompleteKey()
+	return retry.Do(ctx, func() error {
+		for {
+			resp, err := s.etcdCli.Get(ctx, key)
+			if err != nil {
+				return err
+			}
+			if len(resp.Kvs) != 1 || resp.Kvs[0].Lease != int64(*s.LeaseID) {
+				return merr.WrapErrServiceUnavailable("StreamingNode registration has expired")
+			}
+			entry := resp.Kvs[0]
+			var record SessionRaw
+			if err := json.Unmarshal(entry.Value, &record); err != nil {
+				return err
+			}
+			changed, err := update(&record)
+			if err != nil || !changed {
+				return err
+			}
+			value, err := json.Marshal(&record)
+			if err != nil {
+				return err
+			}
+			result, err := s.etcdCli.Txn(ctx).If(clientv3.Compare(clientv3.ModRevision(key), "=", entry.ModRevision)).
+				Then(clientv3.OpPut(key, string(value), clientv3.WithIgnoreLease())).Commit()
+			if err != nil || result.Succeeded {
+				return err
+			}
+		}
+	}, retry.Attempts(0), retry.RetryErr(etcd.IsRetriableEtcdErr))
+}
+
 func (s *Session) GoingStop() error {
 	if s == nil || s.etcdCli == nil || s.LeaseID == nil {
 		return merr.WrapErrServiceInternalMsg("the session hasn't been init")
@@ -789,6 +860,13 @@ func (s *Session) GoingStop() error {
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, timeout)
 	defer cancel()
+	if s.ServerName == typeutil.StreamingNodeRole {
+		return s.updateWALRegistration(ctx, func(record *SessionRaw) (bool, error) {
+			changed := !record.Stopping
+			record.Stopping = true
+			return changed, nil
+		})
+	}
 	// Publishing Stopping is idempotent, including when a successful Put loses
 	// its response. Bound the entire operation so graceful shutdown cannot
 	// wait indefinitely for etcd to recover.
@@ -964,6 +1042,10 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 				continue
 			}
 			if !w.validate(session) {
+				continue
+			}
+			if session.ServerName == typeutil.StreamingNodeRole && !session.Stopping && ev.IsModify() {
+				// WAL route updates belong to the session resolver. Node membership is unchanged.
 				continue
 			}
 			if session.Stopping {
