@@ -117,3 +117,36 @@ func TestConditionalUpsertCanceledAfterPackingDoesNotSubmit(t *testing.T) {
 	require.False(t, task.partialState.appendAttempted)
 	require.False(t, task.conditionalWriteState().TryAppend())
 }
+
+func TestAutoIDPartialUpsertRefreshesDestinationAfterStrongRead(t *testing.T) {
+	task := partialUpdateAutoIDInsertTestTask(t, false)
+	pre, post := oneShardSplit()
+	fixture := newSplitFenceFixture(t, pre, post)
+	task.MetaCache = fixture.cache
+	task.collectionID = splitFenceTestCollectionID
+	wal := newPartialUpdateCASTestWAL(t, 9)
+	previous := streaming.WAL()
+	streaming.SetWALForTest(wal)
+	defer streaming.SetWALForTest(previous)
+	allocate := mockey.Mock((*allocator.IDAllocator).Alloc).Return(int64(1000), int64(1002), nil).Build()
+	defer allocate.UnPatch()
+	reads := 0
+	read := mockey.Mock(retrieveByPKs).To(func(_ context.Context, task *UpsertTask, _ *schemapb.IDs, _ []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+		reads++
+		bindPartialUpdateCASTestReadTimestamps(t, task, uint64(reads))
+		fixture.committed = true
+		return &milvuspb.QueryResults{Status: merr.Success(), FieldsData: []*schemapb.FieldData{partialUpdateCASPKFieldData(nil)}}, segcore.StorageCost{}, nil
+	}).Build()
+	defer read.UnPatch()
+	err := task.prepareUpsert(t.Context())
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.True(t, merr.Status(err).GetRetriable())
+	require.Equal(t, 1, fixture.evictions)
+	require.Zero(t, wal.appendCalls)
+	require.NoError(t, task.prepareUpsert(t.Context()))
+	require.Equal(t, 2, reads)
+	for channel, proof := range task.partialUpdateCASGroups {
+		require.Contains(t, post.VChannels, channel)
+		require.EqualValues(t, 2, proof.ReadTs)
+	}
+}
