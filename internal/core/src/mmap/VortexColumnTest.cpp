@@ -31,6 +31,7 @@
 #include "arrow/api.h"
 #include "arrow/filesystem/localfs.h"
 #include "common/Common.h"
+#include "common/DictionaryVector.h"
 #include "common/FieldMeta.h"
 #include "common/Geometry.h"
 #include "common/OpContext.h"
@@ -3538,6 +3539,66 @@ TEST(VortexColumnTest, CandidateTakePreservesLogicalPositions) {
                     FAIL() << "unexpected candidate Take target";
             }
         }
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST(VortexColumnTest, DictionaryVectorRetainsDecodedScalarValues) {
+    auto schema = MakeNullableSchema();
+    auto properties =
+        std::make_shared<milvus_storage::api::Properties>(MakeProperties());
+    auto dir = std::filesystem::temp_directory_path() /
+               ("milvus_dictionary_vortex_" + std::to_string(::getpid()));
+    std::filesystem::create_directories(dir);
+    const auto file = WriteNullableVortexFile(
+        (dir / "nullable.vx").string(), schema, *properties);
+    auto types = NullableLocalVortexTypes();
+    for (size_t i = 0; i < types.size(); ++i) {
+        const auto type = types[i];
+        if (type == DataType::TEXT || type == DataType::GEOMETRY ||
+            type == DataType::JSON || type == DataType::ARRAY) {
+            continue;
+        }
+        FieldId field_id(kNullableFieldIdBase + i);
+        auto column = std::make_shared<VortexColumn>(
+            field_id,
+            MakeNullableFieldMeta(field_id, type),
+            std::to_string(field_id.get()),
+            properties,
+            MakeColumnGroup(
+                {file}, properties, {std::to_string(field_id.get())}));
+        auto offsets = std::make_shared<const std::vector<int64_t>>(
+            std::initializer_list<int64_t>{15, 1, 0, 8, 15, 1});
+        auto vector = TryMakeDictionaryVector(nullptr, type, column, offsets);
+        ASSERT_NE(vector, nullptr) << type;
+        DispatchVectorType(type, [&]<typename T>() {
+            if constexpr (std::is_arithmetic_v<T> ||
+                          std::is_same_v<T, std::string>) {
+                auto expected = column->Take(
+                    nullptr,
+                    {OffsetView::From(offsets->data(), offsets->size()),
+                     TargetTypeOf<VectorValue<T>>(),
+                     nullptr,
+                     TakePinPolicy::Batch});
+                ASSERT_TRUE(expected->IsOwned());
+                const auto items = expected->Access<VectorValue<T>>();
+                column->ManualEvictCache();
+                column.reset();
+                offsets.reset();
+                auto* values = AsSimpleVector<T>(vector.get());
+                size_t nulls = 0;
+                for (size_t row = 0; row < vector->size(); ++row) {
+                    const auto item = items[row];
+                    EXPECT_EQ(values->ValidAt(row), item.is_valid);
+                    if (item.is_valid) {
+                        EXPECT_EQ(values->ValueAt(row), *item.value);
+                    } else {
+                        ++nulls;
+                    }
+                }
+                EXPECT_EQ(values->nullCount(), nulls);
+            }
+        });
     }
     std::filesystem::remove_all(dir);
 }

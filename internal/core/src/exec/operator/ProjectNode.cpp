@@ -21,6 +21,7 @@
 #include <utility>
 
 #include "common/Consts.h"
+#include "common/DictionaryVector.h"
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
 #include "common/FieldData.h"
@@ -160,7 +161,9 @@ PhyProjectNode::GetOutput() {
     }
 
     auto selected = SelectOffsets(raw_data_view, query_context_, segment_);
-    auto& selected_offsets = selected.row_offsets;
+    auto offsets = std::make_shared<const std::vector<int64_t>>(
+        std::move(selected.row_offsets));
+    const auto& selected_offsets = *offsets;
     auto& selected_element_indices = selected.element_indices;
     auto selected_count = selected_offsets.size();
     // When all rows are filtered out, return nullptr.
@@ -200,6 +203,19 @@ PhyProjectNode::GetOutput() {
                 std::move(field_data), std::move(valid_map), selected_count);
             column_vectors.emplace_back(std::move(col));
             continue;
+        }
+
+        if (!query_context_->bitset_is_element_level()) {
+            const auto& snapshot = query_context_->get_read_snapshot();
+            auto column = snapshot
+                              ? snapshot->GetDataScanResources(field_id).first
+                              : segment_->GetChunkedColumn(field_id);
+            auto dictionary = TryMakeDictionaryVector(
+                op_context_, column_type, std::move(column), offsets);
+            if (dictionary) {
+                column_vectors.emplace_back(std::move(dictionary));
+                continue;
+            }
         }
 
         TargetBitmap valid_map(selected_count);

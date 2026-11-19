@@ -21,6 +21,7 @@
 #include "exec/expression/function/FunctionFactory.h"
 #include "exec/QueryContext.h"
 #include "common/Consts.h"
+#include "common/DictionaryVector.h"
 #include "common/Exception.h"
 #include "common/FieldData.h"
 #include "pb/plan.pb.h"
@@ -199,8 +200,8 @@ class QueryOrderByTest : public testing::TestWithParam<bool> {
             query::PlanOptions{false},
             std::make_shared<milvus::exec::QueryConfig>(
                 std::unordered_map<std::string, std::string>{}));
-        milvus::OpContext op_context;
-        query_context->set_op_context(&op_context);
+        query_context->set_op_context(&project_op_context_);
+        query_context->set_read_snapshot(segment_->CaptureReadSnapshot());
         auto plan_fragment = plan::PlanFragment(project_node);
         return milvus::query::ExecPlanNodeVisitor::ExecuteTask(plan_fragment,
                                                                query_context);
@@ -284,11 +285,56 @@ class QueryOrderByTest : public testing::TestWithParam<bool> {
     std::shared_ptr<Schema> schema_;
     std::map<std::string, FieldId> field_map_;
     GeneratedData raw_data_;
+    milvus::OpContext project_op_context_;
 };
 
 INSTANTIATE_TEST_SUITE_P(QueryOrderBySuite,
                          QueryOrderByTest,
                          ::testing::Values(true, false));
+
+TEST_P(QueryOrderByTest, ProjectProducesDictionaryColumns) {
+    const auto integer_id = field_map_.at(int64_field);
+    const auto string_id = field_map_.at(string_field);
+    auto output = runProjectOnlyPlan(
+        {integer_id, string_id, SegmentOffsetFieldID},
+        {int64_field, string_field, "__segment_offset__"},
+        {DataType::INT64, DataType::VARCHAR, DataType::INT64});
+    ASSERT_NE(output, nullptr);
+    ASSERT_EQ(output->size(), num_rows_);
+    ASSERT_NE(dynamic_cast<DictionaryVector<int64_t>*>(output->child(0).get()),
+              nullptr);
+    ASSERT_NE(
+        dynamic_cast<DictionaryVector<std::string>*>(output->child(1).get()),
+        nullptr);
+    EXPECT_NE(dynamic_cast<ColumnVector<int64_t>*>(output->child(2).get()),
+              nullptr);
+    auto numbers = AsSimpleVector<int64_t>(output->child(0));
+    auto strings = AsSimpleVector<std::string>(output->child(1));
+    auto expected_numbers = raw_data_.get_col<int64_t>(integer_id);
+    auto expected_strings = raw_data_.get_col<std::string>(string_id);
+    auto validity = GetParam() ? raw_data_.get_col_valid(integer_id)
+                               : FixedVector<bool>(num_rows_, true);
+    for (int64_t i = 0; i < num_rows_; ++i) {
+        EXPECT_EQ(numbers->ValidAt(i), validity[i]);
+        EXPECT_TRUE(strings->ValidAt(i));
+        if (numbers->ValidAt(i)) {
+            EXPECT_EQ(numbers->ValueAt(i), expected_numbers[i]);
+        }
+        if (strings->ValidAt(i)) {
+            EXPECT_EQ(strings->ValueAt(i), expected_strings[i]);
+        }
+    }
+    // ExecuteTask has already destroyed its operators. The batch still owns
+    // the storage generation and can outlive the segment while OpContext lives.
+    const auto null_count = numbers->nullCount();
+    segment_.reset();
+    EXPECT_EQ(numbers->nullCount(), null_count);
+    for (int64_t i = 0; i < num_rows_; ++i) {
+        if (strings->ValidAt(i)) {
+            EXPECT_EQ(strings->ValueAt(i), expected_strings[i]);
+        }
+    }
+}
 
 TEST_P(QueryOrderByTest, ProjectNodeSegmentOffsetColumnAppendsAfterProjection) {
     auto output = runProjectOnlyPlan(
