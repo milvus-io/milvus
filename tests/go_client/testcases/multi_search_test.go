@@ -304,6 +304,20 @@ func TestMultiSearchOrderedResults(t *testing.T) {
 	require.Nil(t, failure.GetResults())
 	require.Empty(t, response.Results[3].GetResults().GetIds().GetIntId().GetData())
 
+	t.Run("high concurrency preserves every result", func(t *testing.T) {
+		requests := slices.Repeat(batch.Requests, 5)
+		resp, err := service.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
+			Requests: requests, MaxConcurrency: ^uint32(0),
+		})
+		require.NoError(t, merr.CheckRPCCall(resp, err))
+		require.Len(t, resp.GetResults(), len(requests))
+		for i, item := range resp.Results {
+			want := response.Results[i%len(batch.Requests)]
+			require.Equal(t, want.GetStatus().GetCode(), item.GetStatus().GetCode(), "item %d", i)
+			require.True(t, proto.Equal(want.GetResults(), item.GetResults()), "item %d", i)
+		}
+	})
+
 	t.Run("unused database metadata", func(t *testing.T) {
 		missingDB := metadata.AppendToOutgoingContext(ctx, "dbname", db+"_missing")
 		resp, err := service.MultiSearch(missingDB, &milvuspb.MultiSearchRequest{

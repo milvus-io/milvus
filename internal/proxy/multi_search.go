@@ -40,7 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-const multiSearchConcurrency = 4
+const defaultMultiSearchConcurrency = 4
 
 // MultiSearchOptions applies to the entire admitted batch. A zero deadline
 // leaves execution bounded only by the parent call and scheduler lifetime.
@@ -202,10 +202,12 @@ func (b *MultiSearchTask) PreExecute(ctx context.Context) error {
 	if err := contextutil.ErrOrDeadlineExceeded(ctx); err != nil {
 		return err
 	}
-	b.concurrency = min(multiSearchConcurrency, len(b.items))
-	if b.maxConcurrency != 0 {
-		b.concurrency = int(min(uint64(b.maxConcurrency), uint64(len(b.items))))
+	requested := b.maxConcurrency
+	if requested == 0 {
+		requested = defaultMultiSearchConcurrency
 	}
+	limit := max(1, paramtable.Get().ProxyCfg.MultiSearchMaxConcurrency.GetAsUint64())
+	b.concurrency = int(min(uint64(requested), limit, uint64(len(b.items))))
 	return nil
 }
 

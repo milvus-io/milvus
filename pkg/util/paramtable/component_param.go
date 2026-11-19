@@ -2895,6 +2895,7 @@ type proxyConfig struct {
 	NameValidationAllowedChars        ParamItem `refreshable:"true"`
 	RoleNameValidationAllowedChars    ParamItem `refreshable:"true"`
 	MaxTaskNum                        ParamItem `refreshable:"false"`
+	MultiSearchMaxConcurrency         ParamItem `refreshable:"true"`
 	EnableAutoLoad                    ParamItem `refreshable:"true"`
 	DDLConcurrency                    ParamItem `refreshable:"true"`
 	DCLConcurrency                    ParamItem `refreshable:"true"`
@@ -3193,6 +3194,15 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		Export:       true,
 	}
 	p.MaxTaskNum.Init(base.mgr)
+
+	p.MultiSearchMaxConcurrency = ParamItem{
+		Key:          "proxy.multiSearch.maxConcurrency",
+		Version:      "3.0.1",
+		DefaultValue: "16",
+		Doc:          "Maximum number of active Search items per MultiSearch batch. Values below 1 use 1.",
+		Export:       true,
+	}
+	p.MultiSearchMaxConcurrency.Init(base.mgr)
 
 	p.EnableAutoLoad = ParamItem{
 		Key:          "proxy.enableAutoLoad",

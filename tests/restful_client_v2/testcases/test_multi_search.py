@@ -123,6 +123,15 @@ class TestMultiSearch:
         assert all(item["code"] != 0 and "data" not in item for item in results[4:])
         assert all(item["code"] != 0 for item in run_batch(endpoint, token, searches[4:]))
 
+    def test_high_concurrency_preserves_every_result(self, endpoint, token, search_targets):
+        _, shared, other, _ = search_targets
+        targets = [(shared, BASE_ID), (other, 21), (shared, BASE_ID + 1)] * 7
+        searches = [search_request(name, filter=f"id == {pk}", data=[[1.0, 0.0]]) for name, pk in targets]
+        results = run_batch(endpoint, token, searches, {"maxConcurrency": 2**32 - 1})
+        for (_, pk), item in zip(targets, results):
+            assert item["code"] == 0, item
+            assert [int(hit["id"]) for hit in item["data"]] == [pk], item
+
     def test_database_precedence(self, endpoint, token, search_targets):
         db, shared, _, alias = search_targets
         headers = {"DB-Name": db}

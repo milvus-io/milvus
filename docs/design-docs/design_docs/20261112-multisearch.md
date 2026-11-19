@@ -94,11 +94,17 @@ mutable request state. An unused call-level database does not affect items
 that resolve their own targets. Every item checks ordinary Search privileges,
 including on a schema cache hit.
 
-Omitting the concurrency value or setting it to zero uses the Proxy default.
-Positive values bound the number of active items for the batch, up to the
-number of requests. Waiting in DQL and waiting between attempts both occupy
-one item slot. When an item reaches a terminal result, the batch can start the
-next item.
+The Proxy setting `proxy.multiSearch.maxConcurrency` limits active Search items
+per batch for both gRPC and REST. With eight batch workers, the factory value
+of 16 allows up to 128 active items on one Proxy. The
+[MultiSearch prototype](https://github.com/milvus-io/milvus/pull/54940)
+used the same per-batch limit. When the client omits the concurrency value
+or sets it to zero, the requested concurrency defaults to four. The Proxy
+uses the smallest of the requested concurrency, the configured maximum, and
+the number of items. If a batch requests more concurrency than allowed, the
+Proxy schedules all its items under the configured limit. Waiting in DQL and
+waiting between attempts both occupy one item slot. When an item reaches a
+terminal result, the batch can start the next item.
 
 Only a temporary rate-limit refusal or rejection at DQL admission triggers
 a batch-level retry. Each attempt repeats the ordinary quota check for the
@@ -156,6 +162,9 @@ parameters. Exercise mixed and all-item failures, multiple databases with the
 same collection name, multi-vector results, and authorization for each target.
 Control the scheduler and quota boundaries in Proxy tests to verify admission,
 requery progress, bounded retries, cancellation, and timeout finalization.
+Check the peak number of active items with omitted, zero, and explicit
+concurrency, including a configured maximum below the default. Verify that a
+batch requesting more concurrency than allowed still returns every item in order.
 List and cancel the batch while queued, preparing, executing and backing off;
 verify one stable registration, child completion isolation, cancellation/result
 races and capacity recovery. Exercise the public List/Cancel path against both

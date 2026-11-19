@@ -200,18 +200,29 @@ func TestMultiSearchKeepsInputOrder(t *testing.T) {
 }
 
 func TestMultiSearchLimitsActiveItems(t *testing.T) {
-	const itemCount = multiSearchConcurrency + 2
+	const itemCount = 18
 	for _, tt := range []struct {
 		name           string
+		configured     string
 		maxConcurrency uint32
 		wantActive     int
 	}{
-		{name: "default", wantActive: multiSearchConcurrency},
+		{name: "default", wantActive: 4},
 		{name: "one", maxConcurrency: 1, wantActive: 1},
-		{name: "above default", maxConcurrency: multiSearchConcurrency + 1, wantActive: multiSearchConcurrency + 1},
-		{name: "limited by batch size", maxConcurrency: ^uint32(0), wantActive: itemCount},
+		{name: "above default", maxConcurrency: 5, wantActive: 5},
+		{name: "factory maximum", maxConcurrency: ^uint32(0), wantActive: 16},
+		{name: "configured below default", configured: "2", wantActive: 2},
+		{name: "configured below explicit request", configured: "3", maxConcurrency: ^uint32(0), wantActive: 3},
+		{name: "limited by batch size", configured: "32", maxConcurrency: ^uint32(0), wantActive: itemCount},
+		{name: "nonpositive maximum still makes progress", configured: "0", maxConcurrency: 8, wantActive: 1},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.configured != "" {
+				params := paramtable.Get()
+				key := params.ProxyCfg.MultiSearchMaxConcurrency.Key
+				require.NoError(t, params.Save(key, tt.configured))
+				t.Cleanup(func() { require.NoError(t, params.Reset(key)) })
+			}
 			synctest.Test(t, func(t *testing.T) {
 				p := NewMultiSearchTestProxy(t, 1, 1)
 				items := make([]MultiSearchPrepare, itemCount)

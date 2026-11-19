@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -27,10 +29,9 @@ import (
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
-// These queue and retry regressions need an otherwise idle deployment.
-// Run explicitly with -run '^TestMultiSearch(ClusterQueueCapacity|QuotaRecovery|DQLQueueRecovery)$'
-// and -args -multisearch-resource-probes, using each test's required configuration.
-var multiSearchResourceProbes = flag.Bool("multisearch-resource-probes", false, "run isolated MultiSearch queue and retry regressions")
+// These regressions need an otherwise idle deployment. Select the test with
+// -run and pass -args -multisearch-resource-probes with its required configuration.
+var multiSearchResourceProbes = flag.Bool("multisearch-resource-probes", false, "run isolated MultiSearch resource regressions")
 
 func multiSearchBlockingRequest(request *milvuspb.SearchRequest) *milvuspb.SearchRequest {
 	blocked := proto.CloneOf(request)
@@ -85,6 +86,33 @@ func multiSearchManagementRead(t *testing.T, ctx context.Context, path string) [
 
 func multiSearchAttemptCount(t *testing.T, ctx context.Context) int64 {
 	return multiSearchMetric(t, ctx, "milvus_proxy_multisearch_attempts_total")
+}
+
+// Use proxy.multiSearch.maxConcurrency=2 and proxy.http.requestTimeoutMs=500.
+func TestMultiSearchConfiguredConcurrency(t *testing.T) {
+	if !*multiSearchResourceProbes {
+		t.Skip("requires -multisearch-resource-probes and an idle deployment with the documented Proxy limits")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	name := common.GenRandomString("multisearch_cap", 8)
+	createMultiSearchCollection(ctx, t, mc, name, 1)
+	ready, err := client.NewSearchOption(name, 1, []entity.Vector{entity.FloatVector{1, 0}}).WithANNSField("vector").Request()
+	require.NoError(t, err)
+	blocked := multiSearchBlockingRequest(ready)
+	for _, requested := range []uint32{0, ^uint32(0)} {
+		before := multiSearchAttemptCount(t, ctx)
+		callCtx, cancelCall := context.WithTimeout(ctx, 2*time.Second)
+		_, err := mc.GetService().MultiSearch(callCtx, &milvuspb.MultiSearchRequest{
+			Requests:       []*milvuspb.SearchRequest{blocked, blocked, blocked, blocked},
+			MaxConcurrency: requested,
+		})
+		cancelCall()
+		// Without timeout_ms, only the gRPC deadline can end these blocked searches.
+		require.Equal(t, codes.DeadlineExceeded, status.Code(err))
+		require.Equal(t, int64(2), multiSearchAttemptCount(t, ctx)-before, "requested concurrency %d", requested)
+	}
 }
 
 func multiSearchMetric(t *testing.T, ctx context.Context, name string, labels ...string) int64 {
