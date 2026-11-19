@@ -1428,7 +1428,8 @@ ProtoParser::ParseMatchExprs(const proto::plan::MatchExpr& expr_pb) {
             (*schema)[id].get_data_type() != DataType::ARRAY ||
             GetStructNameForArrayField((*schema)[id]).has_value() ||
             !struct_name.empty()) {
-            ThrowInfo(ExprInvalid, "invalid scalar ARRAY MATCH target {}", id.get());
+            ThrowInfo(
+                ExprInvalid, "invalid scalar ARRAY MATCH target {}", id.get());
         }
         array_field = id;
     }

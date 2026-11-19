@@ -928,17 +928,22 @@ class MatchExpr : public ITypeFilterExpr {
               int64_t count,
               const TypedExprPtr& predicate,
               std::optional<FieldId> array_field = std::nullopt)
-        : struct_name_(struct_name), match_type_(match_type), count_(count), array_field_(array_field) {
+        : struct_name_(struct_name),
+          match_type_(match_type),
+          count_(count),
+          array_field_(array_field) {
         inputs_.push_back(predicate);
     }
 
     std::string
     ToString() const override {
-        return fmt::format("MatchExpr(struct_name={}, array_field={}, match_type={}, count={})",
-                           struct_name_,
-                           array_field_ ? array_field_->get() : -1,
-                           proto::plan::MatchType_Name(match_type_),
-                           count_);
+        return fmt::format(
+            "MatchExpr(struct_name={}, array_field={}, match_type={}, "
+            "count={})",
+            struct_name_,
+            array_field_ ? array_field_->get() : -1,
+            proto::plan::MatchType_Name(match_type_),
+            count_);
     }
 
     const std::string&
