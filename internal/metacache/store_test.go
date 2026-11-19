@@ -150,7 +150,7 @@ func TestStore_PutCollectionAndGet(t *testing.T) {
 		Schema:        &schemapb.CollectionSchema{Name: "test_coll"},
 		Partitions:    []int64{10, 20},
 		VChannelNames: []string{"ch-0", "ch-1"},
-		Properties:    map[string]string{"ttl": "3600"},
+		Properties:    []*commonpb.KeyValuePair{{Key: "ttl", Value: "3600"}},
 	}
 	collectionsOf(s).Put(info)
 

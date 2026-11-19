@@ -311,8 +311,8 @@ func Test_compactionTrigger_force(t *testing.T) {
 	metaStore.PutCollection(&meta.CollectionInfo{
 		ID:     2,
 		Schema: schema,
-		Properties: map[string]string{
-			common.CollectionTTLConfigKey: "0",
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionTTLConfigKey, Value: "0"},
 		},
 	})
 	metaStore.PutCollection(&meta.CollectionInfo{
@@ -331,8 +331,8 @@ func Test_compactionTrigger_force(t *testing.T) {
 				},
 			},
 		},
-		Properties: map[string]string{
-			common.CollectionTTLConfigKey: "error",
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionTTLConfigKey, Value: "error"},
 		},
 	})
 	metaStore.PutCollection(&meta.CollectionInfo{
@@ -2058,8 +2058,8 @@ func Test_compactionTrigger_getCompactTime(t *testing.T) {
 		ID:         1,
 		Schema:     meta.NewTestSchema(),
 		Partitions: []UniqueID{1},
-		Properties: map[string]string{
-			common.CollectionTTLConfigKey: "10",
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionTTLConfigKey, Value: "10"},
 		},
 	}
 	now := tsoutil.ComposeTSByTime(time.Now())
@@ -2262,8 +2262,8 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		s.inspector.EXPECT().isFull().Return(false)
 		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&meta.CollectionInfo{
-			Properties: map[string]string{
-				common.CollectionAutoCompactionKey: "bad_value",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.CollectionAutoCompactionKey, Value: "bad_value"},
 			},
 			Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
@@ -2290,8 +2290,8 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		s.inspector.EXPECT().isFull().Return(false)
 		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&meta.CollectionInfo{
-			Properties: map[string]string{
-				common.CollectionAutoCompactionKey: "false",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.CollectionAutoCompactionKey, Value: "false"},
 			},
 			ID: s.collectionID,
 			Schema: &schemapb.CollectionSchema{
@@ -2325,8 +2325,8 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		})
 		s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&meta.CollectionInfo{
-			Properties: map[string]string{
-				common.CollectionAutoCompactionKey: "false",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.CollectionAutoCompactionKey, Value: "false"},
 			},
 			Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
@@ -2459,8 +2459,8 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&meta.CollectionInfo{
 			Schema: schema,
-			Properties: map[string]string{
-				common.CollectionAutoCompactionKey: "bad_value",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.CollectionAutoCompactionKey, Value: "bad_value"},
 			},
 		}, nil)
 		s.NotPanics(func() {
@@ -2478,8 +2478,8 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		s.inspector.EXPECT().isFull().Return(false)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&meta.CollectionInfo{
 			Schema: schema,
-			Properties: map[string]string{
-				common.CollectionAutoCompactionKey: "false",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.CollectionAutoCompactionKey, Value: "false"},
 			},
 		}, nil)
 		err := tr.handleSignal(NewCompactionSignal().
@@ -2500,8 +2500,8 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&meta.CollectionInfo{
 			Schema: schema,
-			Properties: map[string]string{
-				common.CollectionAutoCompactionKey: "false",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.CollectionAutoCompactionKey, Value: "false"},
 			},
 		}, nil)
 		err := tr.handleSignal(NewCompactionSignal().
@@ -2589,8 +2589,8 @@ func (s *CompactionTriggerSuite) TestGlobalSignalContinuesPastSkippedCollection(
 		run(&meta.CollectionInfo{
 			ID:     s.collectionID,
 			Schema: schema,
-			Properties: map[string]string{
-				common.CollectionAutoCompactionKey: "false",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.CollectionAutoCompactionKey, Value: "false"},
 			},
 		})
 	})
@@ -2620,8 +2620,8 @@ func (s *CompactionTriggerSuite) TestGlobalSignalContinuesPastSkippedCollection(
 		run(&meta.CollectionInfo{
 			ID:     s.collectionID,
 			Schema: schema,
-			Properties: map[string]string{
-				common.CollectionTTLConfigKey: "not-a-number",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.CollectionTTLConfigKey, Value: "not-a-number"},
 			},
 		})
 	})
@@ -2658,8 +2658,8 @@ func (s *CompactionTriggerSuite) TestCollectionScopedSignalKeepsEarlyReturn() {
 		s.NoError(run(&meta.CollectionInfo{
 			ID:     s.collectionID,
 			Schema: schema,
-			Properties: map[string]string{
-				common.CollectionAutoCompactionKey: "false",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.CollectionAutoCompactionKey, Value: "false"},
 			},
 		}))
 	})
@@ -2668,8 +2668,8 @@ func (s *CompactionTriggerSuite) TestCollectionScopedSignalKeepsEarlyReturn() {
 		s.Error(run(&meta.CollectionInfo{
 			ID:     s.collectionID,
 			Schema: schema,
-			Properties: map[string]string{
-				common.CollectionTTLConfigKey: "not-a-number",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.CollectionTTLConfigKey, Value: "not-a-number"},
 			},
 		}))
 	})
@@ -2856,8 +2856,8 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 	metaStore.PutCollection(&meta.CollectionInfo{
 		ID:     2,
 		Schema: schema,
-		Properties: map[string]string{
-			common.CollectionTTLConfigKey: "0",
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionTTLConfigKey, Value: "0"},
 		},
 	})
 
@@ -3344,8 +3344,8 @@ func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
 	metaStore.PutCollection(&meta.CollectionInfo{
 		ID:     2,
 		Schema: schema,
-		Properties: map[string]string{
-			common.CollectionTTLConfigKey: "0",
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionTTLConfigKey, Value: "0"},
 		},
 	})
 

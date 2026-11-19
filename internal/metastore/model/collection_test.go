@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -125,7 +127,7 @@ var (
 func TestUnmarshalCollectionModel(t *testing.T) {
 	ret := UnmarshalCollectionModel(deprecatedColPb)
 	ret.TenantID = tenantID
-	assert.Equal(t, ret, colModel)
+	assert.EqualExportedValues(t, colModel, ret)
 
 	assert.Nil(t, UnmarshalCollectionModel(nil))
 }
@@ -734,7 +736,7 @@ func TestCollection_ToCollectionSchemaPB(t *testing.T) {
 	assert.Equal(t, "db", schema.GetDbName())
 	assert.Equal(t, "desc", schema.GetDescription())
 	assert.True(t, schema.GetAutoID())
-	assert.Equal(t, MarshalFieldModels(coll.Fields), schema.GetFields())
+	assert.Equal(t, CloneFields(coll.Fields), schema.GetFields())
 	assert.Equal(t, MarshalStructArrayFieldModels(coll.StructArrayFields), schema.GetStructArrayFields())
 	assert.Equal(t, MarshalFunctionModels(coll.Functions), schema.GetFunctions())
 	assert.True(t, schema.GetEnableDynamicField())
@@ -744,4 +746,73 @@ func TestCollection_ToCollectionSchemaPB(t *testing.T) {
 	assert.Equal(t, []int64{11, 22}, schema.GetFileResourceIds())
 	assert.Equal(t, "s3://bucket/dataset", schema.GetExternalSource())
 	assert.Equal(t, `{"format":"parquet"}`, schema.GetExternalSpec())
+}
+
+// SchemaView reports what ToCollectionSchemaPB does, but shares the
+// model's field schemas instead of copying them.
+func TestSchemaView_SharesFields(t *testing.T) {
+	full := &Collection{
+		Name:        "c",
+		DBName:      "db",
+		Description: "desc",
+		AutoID:      true,
+		Fields: []*Field{
+			CloneField(fieldModel),
+			{FieldID: 102, Name: "creating", DataType: schemapb.DataType_Int64, State: schemapb.FieldState_FieldCreating},
+		},
+		StructArrayFields:  []*StructArrayField{structFieldModel.Clone()},
+		Functions:          []*Function{functionModel},
+		EnableDynamicField: true,
+		EnableNamespace:    true,
+		Properties:         []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
+		SchemaVersion:      7,
+		FileResourceIds:    []int64{11, 22},
+		ExternalSource:     "s3://bucket/dataset",
+		ExternalSpec:       `{"format":"parquet"}`,
+	}
+	tests := []struct {
+		name string
+		coll *Collection
+	}{
+		{"all schema fields set", full},
+		{"no fields", &Collection{Name: "empty"}},
+		{"empty struct field", &Collection{Name: "s", StructArrayFields: []*StructArrayField{{FieldID: 200, Name: "s"}}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			coll := tc.coll
+			view := coll.SchemaView()
+			assert.True(t, proto.Equal(coll.ToCollectionSchemaPB(), view))
+			require.Len(t, view.GetFields(), len(coll.Fields))
+			if len(coll.Fields) > 0 {
+				assert.True(t, &view.Fields[0] == &coll.Fields[0], "view shares the model's field slice")
+			}
+			for i, field := range coll.Fields {
+				assert.Same(t, field, view.Fields[i])
+			}
+			require.Len(t, view.GetStructArrayFields(), len(coll.StructArrayFields))
+			for i, structField := range coll.StructArrayFields {
+				require.Len(t, view.StructArrayFields[i].GetFields(), len(structField.Fields))
+				for j, sub := range structField.Fields {
+					assert.Same(t, sub, view.StructArrayFields[i].Fields[j])
+				}
+			}
+		})
+	}
+
+	// The view is clipped: appending to it reallocates rather than writing
+	// into the model's spare capacity.
+	coll := &Collection{Fields: make([]*Field, 1, 4)}
+	coll.Fields[0] = CloneField(fieldModel)
+	view := coll.SchemaView()
+	view.Fields = append(view.Fields, &Field{FieldID: 999})
+	assert.Nil(t, coll.Fields[:2][1])
+
+	// ToCollectionSchemaPB still copies: writes into it leave the model
+	// alone.
+	schema := full.ToCollectionSchemaPB()
+	schema.Fields[0].Description = "changed"
+	schema.StructArrayFields[0].Fields[0].Description = "changed"
+	assert.NotEqual(t, "changed", full.Fields[0].GetDescription())
+	assert.NotEqual(t, "changed", full.StructArrayFields[0].Fields[0].GetDescription())
 }

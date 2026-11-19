@@ -314,14 +314,14 @@ func (m *CollectionManager) GetCollectionLoadInfo(ctx context.Context, collectio
 	if err != nil {
 		return nil, 0, err
 	}
-	replicaNum, err := common.CollectionLevelReplicaNumber(collectionInfo.PropertyPairs)
+	replicaNum, err := common.CollectionLevelReplicaNumber(collectionInfo.Properties)
 	if err != nil {
 		mlog.Debug(ctx, "failed to get collection level load info", mlog.Int64("collectionID", collectionID), mlog.Err(err))
 	} else if replicaNum > 0 {
 		mlog.Info(ctx, "get collection level load info", mlog.Int64("collectionID", collectionID), mlog.Int64("replica_num", replicaNum))
 	}
 
-	rgs, err := common.CollectionLevelResourceGroups(collectionInfo.PropertyPairs)
+	rgs, err := common.CollectionLevelResourceGroups(collectionInfo.Properties)
 	if err != nil {
 		mlog.Debug(ctx, "failed to get collection level load info", mlog.Int64("collectionID", collectionID), mlog.Err(err))
 	} else if len(rgs) > 0 {
