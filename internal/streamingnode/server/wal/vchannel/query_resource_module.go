@@ -101,6 +101,8 @@ func (m *VChannelRecoveryModule) queryWALViewLocked(meta *viewpb.QueryViewMeta) 
 		LoadInfoVersion: meta.GetLoadInfoVersion(), Schema: schema.GetSchema(), WriteSchema: state.Schema,
 		SegmentSnapshot: snapshot, TransformLogStream: m.queryTransformLogStream,
 		DeleteReplayStartAfterTimeTick: start,
+		SplitLineage:                   m.vchannelView.SplitLineage(),
+		LineageStreams:                 m.lineageTransformLogStreams,
 	}, true
 }
 
@@ -185,6 +187,10 @@ func (m *VChannelRecoveryModule) refreshQueryRetentionLocked() {
 	var floor uint64
 	if m.vchannelView != nil {
 		floor = m.vchannelView.AssignmentMeta().GetCreateCollectionTimeTick()
+		// A split target did not exist at its parent switch tick. Exact
+		// replay may skip that empty pre-genesis interval, but never a
+		// prefix removed by GC. Recover this origin before serving Views.
+		m.summaryManager.SetTransformOrigin(m.vchannel, floor)
 	}
 	for _, segment := range m.segments {
 		created := segment.CreateTimeTick()

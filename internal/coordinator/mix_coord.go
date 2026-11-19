@@ -276,6 +276,9 @@ func (s *mixCoordImpl) enableExternalAccess() {
 	// invoke DataCoord or QueryCoord callbacks while handling collection DDLs.
 	datacoord.RegisterDDLCallbacks(s.datacoordServer)
 	querycoordv2.RegisterDDLCallbacks(s.queryCoordServer)
+	// Before RootCoord registers the SplitShard ack callback: a callback that
+	// is recovered must find DataCoord's hooks.
+	registerShardSplit(s.datacoordServer, s.rootcoordServer)
 	rootcoord.RegisterDDLCallbacks(s.rootcoordServer)
 	RegisterWALCallbacks(s)
 
@@ -946,6 +949,9 @@ func (s *mixCoordImpl) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRe
 
 	// If a processing role is specified, the corresponding role will be used for processing
 	ret := gjson.Parse(in.GetRequest())
+	if ret.Get(metricsinfo.MetricTypeKey).String() == metricsinfo.SplitRetirementKey {
+		return s.GetDcMetrics(ctx, in)
+	}
 	processRole, _ := metricsinfo.ParseMetricProcessInRole(ret)
 	if len(processRole) > 0 && processRole == typeutil.QueryCoordRole {
 		return s.GetQcMetrics(ctx, in)

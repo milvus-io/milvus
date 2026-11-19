@@ -34,18 +34,10 @@ import (
 // non-replicating configuration is an unambiguous "not replicating" → (RolePrimary,
 // false, nil), so a standalone cluster proceeds to allocate and broadcast.
 func GetReplicationRole(ctx context.Context) (replicateutil.Role, bool, error) {
-	balancer, err := balance.GetWithContext(ctx)
+	cfg, err := GetReplicationTopology(ctx)
 	if err != nil {
 		return replicateutil.RolePrimary, false, err
 	}
-	assignment, err := balancer.GetLatestChannelAssignment()
-	if err != nil {
-		return replicateutil.RolePrimary, false, err
-	}
-	if assignment == nil {
-		return replicateutil.RolePrimary, false, nil
-	}
-	cfg := assignment.ReplicateConfiguration
 	if !isReplicatingCluster(cfg) {
 		return replicateutil.RolePrimary, false, nil
 	}
@@ -54,6 +46,19 @@ func GetReplicationRole(ctx context.Context) (replicateutil.Role, bool, error) {
 		return replicateutil.RolePrimary, true, err
 	}
 	return helper.GetCurrentCluster().Role(), true, nil
+}
+
+// GetReplicationTopology reads the same live assignment used for DDL admission.
+func GetReplicationTopology(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
+	balancer, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	assignment, err := balancer.GetLatestChannelAssignment()
+	if err != nil || assignment == nil {
+		return nil, err
+	}
+	return assignment.ReplicateConfiguration, nil
 }
 
 func isReplicatingCluster(cfg *commonpb.ReplicateConfiguration) bool {

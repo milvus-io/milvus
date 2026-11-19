@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -82,6 +83,9 @@ func NewReplicateMessage(clustrID string, im *commonpb.ImmutableMessage) (Replic
 	m.properties.Delete(messageTimeTick)
 	m.properties.Delete(messageLastConfirmed)
 	m.properties.Delete(messageWALTerm)
+	// A barrier time tick is a bound against the TSO of the source cluster. It
+	// means nothing against the TSO of the cluster that receives the message.
+	m.properties.Delete(messageBarrierTimeTick)
 	m.WithReplicateHeader(&ReplicateHeader{
 		ClusterID:              clustrID,
 		MessageID:              msg.MessageID(),
@@ -198,7 +202,33 @@ type OptBuildBroadcast func(*messagespb.BroadcastHeader)
 // checkpoint publication; unfinished publication is recovered through WAL replay.
 func OptBuildBroadcastAckSyncUp() OptBuildBroadcast {
 	return func(bh *messagespb.BroadcastHeader) {
+		if len(bh.AppendFirstVchannels) > 0 {
+			panic("ack sync up cannot be combined with an append-first vchannel")
+		}
 		bh.AckSyncUp = true
+	}
+}
+
+// OptBuildBroadcastAppendFirst names one vchannel of the broadcast whose copy
+// the broadcaster appends and persists before any other copy. Every other copy
+// then takes a time tick greater than the time tick of that copy.
+//
+// A shard split names its source vchannel, so that the genesis of each target
+// is above the fence of the source. The option cannot be combined with
+// OptBuildBroadcastAckSyncUp: the order relies on the append result of the
+// first copy being acknowledged as soon as it is appended.
+func OptBuildBroadcastAppendFirst(vchannel string) OptBuildBroadcast {
+	return func(bh *messagespb.BroadcastHeader) {
+		if bh.AckSyncUp {
+			panic("an append-first vchannel cannot be combined with ack sync up")
+		}
+		if funcutil.IsControlChannel(vchannel) {
+			panic("the control channel cannot be an append-first vchannel")
+		}
+		if !slices.Contains(bh.Vchannels, vchannel) {
+			panic("append-first vchannel " + vchannel + " is not a vchannel of the broadcast")
+		}
+		bh.AppendFirstVchannels = []string{vchannel}
 	}
 }
 

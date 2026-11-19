@@ -315,3 +315,38 @@ func TestQueryMVCCRetainedACKsDoNotRegressPublishedBarrier(t *testing.T) {
 	require.True(t, ready)
 	require.Zero(t, got)
 }
+
+func TestQueryMVCCPrefixSamplesWithoutWaiting(t *testing.T) {
+	cm := NewQueryMVCCManager(100)
+	cm.ApplyRecoveryBarrier("v", 100)
+	cm.ApplyRecoveryBarrier("other", 100)
+
+	through, strongMinimum, snapshot := cm.Prefix("v")
+	require.EqualValues(t, 100, through)
+	require.EqualValues(t, 100, strongMinimum)
+	require.Equal(t, QueryVChannelMVCC{100, 100}, snapshot)
+
+	// A completed but unpublished delete raises only the Strong minimum of its
+	// own channel; through and the frontiers stay at the published prefix.
+	deletion := createQueryTestMessage(t, 127, "v", message.MessageTypeDelete, false, true)
+	cm.ObserveAppend(deletion)
+	through, strongMinimum, snapshot = cm.Prefix("v")
+	require.EqualValues(t, 100, through)
+	require.EqualValues(t, 127, strongMinimum)
+	require.Equal(t, cm.Minimum("v", true), strongMinimum)
+	require.Equal(t, QueryVChannelMVCC{100, 100}, snapshot)
+	_, strongMinimum, _ = cm.Prefix("other")
+	require.EqualValues(t, 100, strongMinimum)
+
+	publishQueryTestPrefix(t, cm, 135, deletion)
+	through, strongMinimum, snapshot = cm.Prefix("v")
+	require.EqualValues(t, 135, through)
+	require.EqualValues(t, 135, strongMinimum)
+	require.Equal(t, QueryVChannelMVCC{127, 127}, snapshot)
+
+	// An absent channel reports a zero pair, like Snapshot.
+	through, strongMinimum, snapshot = cm.Prefix("absent")
+	require.EqualValues(t, 135, through)
+	require.EqualValues(t, 135, strongMinimum)
+	require.Equal(t, QueryVChannelMVCC{}, snapshot)
+}

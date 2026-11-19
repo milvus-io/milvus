@@ -43,6 +43,23 @@ import (
 // or Type/Entry combinations it does not implement, are a caller programming
 // error and are rejected with a ServiceInternal error and no write.
 func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction) error {
+	if containsAtomicDataView(actions) {
+		// Conservative 1 MiB payload budget leaves headroom under the default
+		// etcd request limit. A smaller configured backend limit still rejects
+		// the one atomic transaction without exposing partial moves.
+		bytes := 0
+		for _, action := range actions {
+			switch e := action.Entry.(type) {
+			case metastore.SegmentEntry:
+				bytes += proto.Size(e.Segment) + 256
+			case metastore.DataViewEntry:
+				bytes += proto.Size(e.DataView) + 256
+			}
+		}
+		if bytes > 1<<20 {
+			return merr.WrapErrServiceNotReadyMsg("split adoption payload %d exceeds the atomic 1 MiB budget", bytes)
+		}
+	}
 	b := txn.New()
 	for _, action := range actions {
 		switch e := action.Entry.(type) {
@@ -137,12 +154,7 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			if e.DataView == nil || e.DataView.GetDataVersion() == nil {
 				return merr.WrapErrServiceInternalMsg("datacoord catalog: nil DataView or DataVersion in UpdateAction")
 			}
-			key := buildDataViewVersionKey(
-				e.DataView.GetCollectionId(),
-				e.DataView.GetDataVersion().GetStreamingVersion(),
-				e.DataView.GetDataVersion().GetCompactVersion(),
-			)
-			value, err := proto.Marshal(e.DataView)
+			key, value, err := kc.prepareDataView(ctx, e.DataView)
 			if err != nil {
 				return err
 			}
@@ -225,7 +237,7 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			return merr.WrapErrServiceInternalMsg("datacoord catalog cannot apply entry %T", action.Entry)
 		}
 	}
-	if containsSegmentIndexUpdate(actions) {
+	if containsSegmentIndexUpdate(actions) || containsAtomicDataView(actions) {
 		// A segment index removal and the segment manifest pointer that
 		// publishes or retracts its artifact must land together. Refuse a
 		// chunked fallback that could expose only half of the transition.
@@ -354,3 +366,16 @@ func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t meta
 func unsupportedAction(action metastore.UpdateAction) error {
 	return merr.WrapErrServiceInternalMsg("datacoord catalog cannot apply action type %v to entry %T", action.Type, action.Entry)
 }
+
+// Adoption must never expose a partially relocated source on restart.
+func containsAtomicDataView(actions []metastore.UpdateAction) bool {
+	for _, action := range actions {
+		if entry, ok := action.Entry.(metastore.DataViewEntry); ok && entry.Atomic {
+			return true
+		}
+	}
+	return false
+}
+
+// AtomicAdoptionLimit is used by the issuer's conservative capacity check.
+func (kc *Catalog) AtomicAdoptionLimit() int { return kc.MetaKv.MaxTxnOps() }

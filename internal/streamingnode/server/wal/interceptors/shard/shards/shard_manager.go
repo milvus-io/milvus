@@ -42,6 +42,9 @@ var (
 	ErrSegmentNotFound                 = errors.New("segment not found")
 	ErrSegmentOnGrowing                = errors.New("segment on growing")
 	ErrFencedAssign                    = errors.New("fenced assign")
+	// ErrShardFenced: the vchannel is the source of a shard split and accepts
+	// no DML and no new segment.
+	ErrShardFenced = errors.New("shard fenced by split")
 
 	ErrTimeTickTooOld    = errors.New("time tick is too old")
 	ErrWaitForNewSegment = errors.New("wait for new segment")
@@ -191,6 +194,7 @@ func newCollectionInfosFromWritePathRecovery(
 			VChannel:     vchannel,
 			PartitionIDs: partitionIDs,
 		}
+		collectionInfo.SplitTaskID = state.SplitTaskID
 		if state.Schema != nil {
 			collectionInfo.setSchema(&streamingpb.CollectionSchemaOfVChannel{Schema: state.Schema, CheckpointTimeTick: state.SchemaTimeTick})
 		}
@@ -221,6 +225,17 @@ type CollectionInfo struct {
 	PartitionIDs map[int64]struct{}
 	Schema       *streamingpb.CollectionSchemaOfVChannel
 	primaryKey   *PrimaryKeyDescriptor
+	// SplitTaskID is the id of the shard split this vchannel is the source of.
+	// It is never zero for a vchannel that was split, see SplitFenced.
+	SplitTaskID int64
+}
+
+// SplitFenced reports whether the vchannel is the source of a shard split.
+// The registration of such a vchannel is kept: the vchannel is still read, and
+// it still admits messages that are local to the cluster. Only DML and the
+// creation of new segments are refused.
+func (c *CollectionInfo) SplitFenced() bool {
+	return c != nil && c.SplitTaskID != 0
 }
 
 // PrimaryKeyDescriptor is the immutable PK information needed by WAL write

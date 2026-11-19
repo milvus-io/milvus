@@ -188,6 +188,8 @@ type SegmentChangeGroupEntry struct {
 // catalog.Update together with the SegmentMeta actions of the same mutation so
 // both catalogs commit atomically (flush). Only ActionAdd is wired.
 type DataViewEntry struct {
+	// Atomic forbids chunked publication of segment locations.
+	Atomic   bool
 	DataView *viewpb.DataViewOfCollection
 }
 

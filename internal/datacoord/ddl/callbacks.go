@@ -51,7 +51,10 @@ type Deps struct {
 	NotifyIndexChan                  chan UniqueID
 	// CreateImportJobFromAck creates the import job of an acked ImportMessageV1.
 	CreateImportJobFromAck func(ctx context.Context, result message.BroadcastResultImportMessageV1) (*internalpb.ImportResponse, error)
-	StageImportChange      func(context.Context, bulkimport.ImportJob, string, []int64, uint64, model.SegmentChangeSource) (bool, error)
+	// CheckSplitWindow refuses an operation this cluster originates on a
+	// collection that has a shard split in its window. Nil admits everything.
+	CheckSplitWindow  func(collectionID int64, operation string) error
+	StageImportChange func(context.Context, bulkimport.ImportJob, string, []int64, uint64, model.SegmentChangeSource) (bool, error)
 }
 
 // Callbacks holds the DDL ack callbacks and the helpers they share with the RPC handlers.

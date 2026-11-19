@@ -124,6 +124,11 @@ type IMetaTable interface {
 	BeginTruncateCollection(ctx context.Context, collectionID UniqueID) error
 	// TruncateCollection is called when the truncate collection message is acknowledged.
 	TruncateCollection(ctx context.Context, result message.BroadcastResultTruncateCollectionMessageV2) error
+	// CheckShardSplit reports whether the shard split of a SplitShard message is
+	// already applied to its collection, and refuses a message that cannot be applied.
+	CheckShardSplit(ctx context.Context, result message.BroadcastResultSplitShardMessageV2) (applied bool, err error)
+	// ApplyShardSplit is called when the split shard message is acknowledged.
+	ApplyShardSplit(ctx context.Context, result message.BroadcastResultSplitShardMessageV2) error
 	CheckIfCollectionRenamable(ctx context.Context, dbName string, oldName string, newDBName string, newName string) error
 	GetGeneralCount(ctx context.Context) int
 	GetAvailableCollectionCount(ctx context.Context, dbID int64) (dbCount int, totalCount int, dbExists bool)

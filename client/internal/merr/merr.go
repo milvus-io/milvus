@@ -93,11 +93,12 @@ var (
 	ErrServiceInternal      = newRPCError("service internal error", 5, commonpb.ErrorCode_UnexpectedError, false, false)
 	ErrServiceUnimplemented = newRPCError("service unimplemented", 10, commonpb.ErrorCode_UnexpectedError, false, false)
 
-	ErrCollectionNotFound       = newRPCError("collection not found", 100, commonpb.ErrorCode_CollectionNotExists, false, false)
-	ErrCollectionSchemaMismatch = newRPCError("collection schema mismatch", 109, commonpb.ErrorCode_SchemaMismatch, false, true)
-	ErrIndexNotFound            = newRPCError("index not found", 700, commonpb.ErrorCode_IndexNotExist, false, false)
-	ErrParameterInvalid         = newRPCError("invalid parameter", 1100, commonpb.ErrorCode_IllegalArgument, false, true)
-	ErrParameterMissing         = newRPCError("missing required parameters", 1101, commonpb.ErrorCode_IllegalArgument, false, true)
+	ErrCollectionNotFound           = newRPCError("collection not found", 100, commonpb.ErrorCode_CollectionNotExists, false, false)
+	ErrCollectionSchemaMismatch     = newRPCError("collection schema mismatch", 109, commonpb.ErrorCode_SchemaMismatch, false, true)
+	ErrCollectionMutationIncomplete = newRPCError("mutation incomplete", 113, commonpb.ErrorCode_UnexpectedError, false, false)
+	ErrIndexNotFound                = newRPCError("index not found", 700, commonpb.ErrorCode_IndexNotExist, false, false)
+	ErrParameterInvalid             = newRPCError("invalid parameter", 1100, commonpb.ErrorCode_IllegalArgument, false, true)
+	ErrParameterMissing             = newRPCError("missing required parameters", 1101, commonpb.ErrorCode_IllegalArgument, false, true)
 
 	errUnexpected = newRPCError("unexpected error", unexpectedCode, commonpb.ErrorCode_UnexpectedError, false, false)
 )

@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
@@ -54,6 +55,8 @@ func (r *lockAppendInterceptor) DoAppend(ctx context.Context, msg message.Mutabl
 	vchannel := msg.VChannel()
 	if vchannel == "" || vchannel == r.channel.Name || msg.IsPChannelLevel() {
 		r.txnManager.FailTxnAtVChannel("")
+	} else if messageutil.IsSplitShardFence(msg) {
+		r.txnManager.AbortAtSplitFence(vchannel)
 	} else if !funcutil.IsControlChannel(vchannel) {
 		r.txnManager.FailTxnAtVChannel(vchannel)
 	}

@@ -630,3 +630,24 @@ func TestWithIdempotencyKeyContext(t *testing.T) {
 func TestWrite(t *testing.T) {
 	suite.Run(t, new(WriteSuite))
 }
+
+func (s *WriteSuite) TestPartialInsertDoesNotReplayWholeBatch() {
+	collName := s.randString(8)
+	schema := entity.NewSchema().WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true))
+	s.setupCache(collName, schema)
+	s.mock.EXPECT().Insert(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, req *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
+		s.EqualValues(2, req.GetNumRows())
+		return &milvuspb.MutationResult{
+			Status:    merr.Status(merr.ErrCollectionMutationIncomplete),
+			SuccIndex: []uint32{1}, ErrIndex: []uint32{0},
+			IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{22}}}},
+		}, nil
+	}).Once()
+	result, err := s.client.Insert(context.Background(), NewColumnBasedInsertOption(collName).WithInt64Column("id", []int64{11, 22}))
+	s.Require().ErrorIs(err, ErrCollectionMutationIncomplete)
+	s.False(IsRetryableError(err))
+	s.EqualValues(1, result.InsertCount)
+	id, err := result.IDs.GetAsInt64(0)
+	s.NoError(err)
+	s.EqualValues(22, id)
+}

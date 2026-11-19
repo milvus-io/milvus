@@ -682,6 +682,8 @@ queryCoord:
 queryNode:
   queryView:
     transformLogDrainConcurrencyRatio: 0.25 # QueryNode-wide TransformLog backlog drain worker count is max(1, floor(CPU count * ratio)). Updates existing worker pools dynamically.
+    transformLogCacheBytes: 67108864 # Startup node-wide recent TransformLog cache budget in bytes; zero disables caching. Durable history and engine delete indexes are separate.
+    transformLogStreamCacheBytes: 8388608 # Startup per-VChannel recent cache budget in bytes, also constrained by the node-wide budget.
   groupBy:
     strictGroupStrategy: per_group # Strict group completion strategy: original or per_group. Independent phase-one and refinement controls still apply to original.
     strictGroupPhase1CandidateWeight: 0 # Strict group phase-one consumer Next limit is topk * group_size * weight; zero disables truncation. Overflow saturates at INT64_MAX. Only group discovery is limited; completion is not. May reduce recall.

@@ -462,3 +462,54 @@ func TestTopologyChangeAbortAfterAppend(t *testing.T) {
 		})
 	}
 }
+
+func TestOnlyLocallyAbortedSplitCommitCanReroute(t *testing.T) {
+	resource.InitForTest(t)
+	ctx := t.Context()
+	manager := txn.NewTxnManager(types.PChannelInfo{Name: testPChannelName}, nil)
+	interceptor := newTestInterceptor()
+	interceptor.txnManager = manager
+	begin := message.NewBeginTxnMessageBuilderV2().WithVChannel(testVChannel).
+		WithHeader(&message.BeginTxnMessageHeader{KeepaliveMilliseconds: 1000}).WithBody(&message.BeginTxnMessageBody{}).
+		MustBuildMutable().WithTimeTick(1)
+	newSession := func() *txn.TxnSession {
+		s, err := manager.BeginNewTxn(ctx, message.MustAsMutableBeginTxnMessageV2(begin))
+		require.NoError(t, err)
+		require.NoError(t, s.AddNewMessage(ctx, 2))
+		s.AddNewMessageDoneAndKeepalive(2, message.MessageTypeInsert)
+		return s
+	}
+	aborted, committing, committed := newSession(), newSession(), newSession()
+	require.NoError(t, committing.RequestCommitAndWait(ctx, 3, 1))
+	require.NoError(t, committed.RequestCommitAndWait(ctx, 3, 1))
+	committed.CommitDone()
+	fence := message.NewSplitShardMessageBuilderV2().WithVChannel(testVChannel).
+		WithHeader(&message.SplitShardMessageHeader{SourceVchannel: testVChannel}).
+		WithBody(&message.SplitShardMessageBody{}).MustBuildMutable()
+	appendWith := func(err error) interceptors.Append {
+		return func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			return walimplstest.NewTestMessageID(3), err
+		}
+	}
+	_, err := interceptor.DoAppend(ctx, fence, appendWith(context.Canceled))
+	require.ErrorIs(t, err, context.Canceled)
+	got, err := manager.GetSessionForCommit(testVChannel, aborted.TxnContext().TxnID)
+	require.NoError(t, err)
+	require.Same(t, aborted, got)
+	_, err = interceptor.DoAppend(ctx, fence, appendWith(nil))
+	require.NoError(t, err)
+	_, err = manager.GetSessionForCommit(testVChannel, aborted.TxnContext().TxnID)
+	require.True(t, status.AsStreamingError(err).IsShardFenced(), "a transaction interrupted before Commit is safe to reroute: %v", err)
+	for _, s := range []*txn.TxnSession{committing, committed} {
+		_, err = manager.GetSessionForCommit(testVChannel, s.TxnContext().TxnID)
+		require.True(t, status.AsStreamingError(err).IsTxnExpired(), "commit with a possible WAL attempt needs conservative handling")
+	}
+	_, err = manager.GetSessionForCommit("different-vchannel", aborted.TxnContext().TxnID)
+	require.True(t, status.AsStreamingError(err).IsTxnExpired())
+	manager.CleanupTxnUntil(2)
+	_, err = manager.GetSessionForCommit(testVChannel, aborted.TxnContext().TxnID)
+	require.True(t, status.AsStreamingError(err).IsShardFenced())
+	manager.CleanupTxnUntil(^uint64(0))
+	_, err = manager.GetSessionForCommit(testVChannel, aborted.TxnContext().TxnID)
+	require.True(t, status.AsStreamingError(err).IsTxnExpired())
+}

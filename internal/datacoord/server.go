@@ -55,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/segment"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
+	"github.com/milvus-io/milvus/internal/datacoord/split"
 	"github.com/milvus-io/milvus/internal/datacoord/stats"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/dataview"
@@ -203,6 +204,13 @@ type Server struct {
 	broker broker.Broker
 
 	ddl *ddl.Callbacks
+
+	// Shard split: the records of the splits this cluster has consumed, the
+	// trigger, and how a split is issued (set by MixCoord). See shard_split.go.
+	splitStore    *split.Store
+	splitManager  *split.Manager
+	splitIssuerMu sync.RWMutex
+	splitIssuer   SplitShardIssuer
 
 	metricsRequest *metricsinfo.MetricsRequest
 
@@ -922,6 +930,34 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		return err
 	}
 
+	// The split records are read by the DataView publication below (the pin of
+	// the Transform frontier of split targets), so they are recovered first.
+	var recoveredSplits *split.Store
+	if err := retry.Do(s.ctx, func() error {
+		var err error
+		recoveredSplits, err = split.NewStore(s.ctx, s.catalog)
+		return err
+	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
+		return err
+	}
+	recoveredMeta.L0CompactionSuspended = func(channel string) bool { return splitL0CompactionSuspended(recoveredMeta, recoveredSplits, channel) }
+	recoveredMeta.SplitSource = func(channel string) bool {
+		for _, task := range recoveredSplits.List() {
+			if split.InWindow(task.GetState()) && task.GetSourceVchannel() == channel {
+				return true
+			}
+		}
+		return false
+	}
+	recoveredMeta.SourceSplitRewrite = func(channel string) *datapb.SplitShardRewritePlan {
+		for _, task := range recoveredSplits.List() {
+			if split.InWindow(task.GetState()) && task.GetSourceVchannel() == channel {
+				return split.RewritePlan(task)
+			}
+		}
+		return nil
+	}
+
 	// Collections come from RootCoord's MetaTable through the shared
 	// CollectionSource. Recover DataViews for live collections only, as the
 	// ShowCollections walk this replaced did.
@@ -959,7 +995,11 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 				return transformFrontierBounds(ctx, recoveredMeta, recoveredImports, collectionID)
 			}),
 			dataview.WithPendingTransformProjector(func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
-				return pendingTransformBounds(ctx, recoveredMeta, recoveredImports, view)
+				bounds, err := pendingTransformBounds(ctx, recoveredMeta, recoveredImports, view)
+				if err != nil {
+					return nil, err
+				}
+				return s.splitTransformPins(recoveredSplits, view, bounds), nil
 			}),
 		)
 		if err != nil {
@@ -983,6 +1023,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	s.domainMetas = recoveredDomainMetas
 	s.importMeta = recoveredImports
 	s.dataViewManager = manager
+	s.splitStore = recoveredSplits
 	s.watchCollectionMetrics()
 	s.watchCollectionAlters()
 	return nil
@@ -1156,6 +1197,14 @@ func (s *Server) startServerLoop() {
 
 	// The DataView recompute worker was already started at RecoverManager
 	// construction (bounded by s.ctx); nothing to do here.
+
+	// The shard split trigger. Its loop issues nothing unless
+	// dataCoord.shardSplit.enable is set.
+	if s.splitStore != nil {
+		s.splitManager = s.newSplitManager(s.serverLoopCtx)
+		s.splitManager.Start()
+		s.startSplitRewriteLoop(s.serverLoopCtx)
+	}
 
 	s.garbageCollector.Start()
 	if s.pkindexGC != nil {
@@ -1590,6 +1639,9 @@ func (s *Server) CleanMeta() error {
 
 func (s *Server) stopServerLoop() {
 	s.serverLoopCancel()
+	if s.splitManager != nil {
+		s.splitManager.Stop()
+	}
 	s.serverLoopWg.Wait()
 }
 
@@ -1603,6 +1655,8 @@ func (s *Server) registerMetricsRequest() {
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.getDistJSON(ctx, req), nil
 		})
+
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SplitRetirementKey, s.splitRetirementProgress)
 
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ImportTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {

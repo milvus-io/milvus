@@ -8,13 +8,14 @@ import (
 )
 
 type resumableSubscription struct {
-	stream         *resumableStream
-	id             int64
-	vchannel       string
-	endTimeTick    uint64
-	nextStartAfter uint64
-	remote         wal.TransformLogSubscription
-	handler        *checkpointEventHandler
+	stream            *resumableStream
+	id                int64
+	vchannel          string
+	endTimeTick       uint64
+	requireExactStart bool
+	nextStartAfter    uint64
+	remote            wal.TransformLogSubscription
+	handler           *checkpointEventHandler
 
 	done  chan struct{}
 	ready chan struct{}
@@ -30,13 +31,14 @@ type resumableSubscription struct {
 
 func newResumableSubscription(stream *resumableStream, id int64, opt wal.TransformLogSubscriptionOption) *resumableSubscription {
 	sub := &resumableSubscription{
-		stream:         stream,
-		id:             id,
-		vchannel:       opt.VChannel,
-		endTimeTick:    opt.EndTimeTick,
-		nextStartAfter: opt.StartAfterTimeTick,
-		done:           make(chan struct{}),
-		ready:          make(chan struct{}),
+		stream:            stream,
+		id:                id,
+		vchannel:          opt.VChannel,
+		endTimeTick:       opt.EndTimeTick,
+		requireExactStart: opt.RequireExactStart,
+		nextStartAfter:    opt.StartAfterTimeTick,
+		done:              make(chan struct{}),
+		ready:             make(chan struct{}),
 	}
 	sub.handler = &checkpointEventHandler{sub: sub, inner: opt.Handler}
 	return sub
@@ -71,6 +73,7 @@ func (s *resumableSubscription) option() wal.TransformLogSubscriptionOption {
 		VChannel:           s.vchannel,
 		StartAfterTimeTick: s.nextStartAfter,
 		EndTimeTick:        s.endTimeTick,
+		RequireExactStart:  s.requireExactStart,
 	}
 }
 
