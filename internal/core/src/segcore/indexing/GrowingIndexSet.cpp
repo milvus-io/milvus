@@ -247,11 +247,15 @@ GrowingIndexSet::Initialize(const Schema& schema,
                             int64_t segment_id,
                             const InsertRecordGrowing& insert_record,
                             const std::function<bool(FieldId)>& include_field) {
-    growing_build_options_ = {
-        segcore_config.get_enable_async_growing_index_build(),
-        segcore_config.get_async_growing_index_finalize_budget_ms(),
-        segcore_config.get_async_growing_index_catchup_deadline_ms(),
-        segcore_config.get_growing_index_build_pool_ratio()};
+    // Initialize runs again when the first input reveals function outputs.
+    // Existing segments must retain the policy captured at construction.
+    std::call_once(growing_build_options_once_, [&] {
+        growing_build_options_ = {
+            segcore_config.get_enable_async_growing_index_build(),
+            segcore_config.get_async_growing_index_finalize_budget_ms(),
+            segcore_config.get_async_growing_index_catchup_deadline_ms(),
+            segcore_config.get_growing_index_build_pool_ratio()};
+    });
     AppenderMap staged;
     for (const auto& [field_id, field_meta] : schema.get_fields()) {
         if (!include_field(field_id)) {

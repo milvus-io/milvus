@@ -20,6 +20,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <shared_mutex>
 #include <string>
@@ -165,6 +166,7 @@ class GrowingIndexSet {
     AppenderMap appenders_;
     // Capture at segment construction; schema reopen on an existing segment
     // must not adopt a later hot update when staging a new field owner.
+    std::once_flag growing_build_options_once_;
     index::GrowingBuildOptions growing_build_options_;
 };
 

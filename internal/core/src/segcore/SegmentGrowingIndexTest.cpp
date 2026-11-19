@@ -1930,6 +1930,47 @@ class HookSegmentGate {
 
 }  // namespace
 
+TEST(GrowingIndexAsyncBuildTest,
+     DeferredFunctionOutputRetainsSegmentBuildPolicy) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    ScopedAsyncGrowingBuild restore_async(config, false);
+    ScopedAsyncGrowingCatchupPolicy catchup_policy(config, 20, 30000);
+    ApplyAsyncBuildConfig(config);
+
+    for (bool enabled_at_creation : {false, true}) {
+        SCOPED_TRACE(enabled_at_creation);
+        config.set_enable_async_growing_index_build(enabled_at_creation);
+        auto fixture =
+            MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                                  knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                                  knowhere::metric::L2,
+                                  /*nullable=*/false);
+        fixture.schema->add_function_output_field_id(fixture.vec);
+        std::atomic<int> async_builds{0};
+        ScopedBuildHook hook([&](GrowingBuildPhase phase) {
+            if (phase == GrowingBuildPhase::kBeforeBuild) {
+                async_builds.fetch_add(1);
+            }
+        });
+        // Destroy the segment (joining its worker) before clearing the hook.
+        auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+        auto* impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+        ASSERT_NE(impl, nullptr);
+        ASSERT_FALSE(segment->HasIndex(fixture.vec));
+
+        config.set_enable_async_growing_index_build(!enabled_at_creation);
+        InsertAsyncBatch(segment.get(), fixture.schema, 30000, 51);
+        ASSERT_TRUE(segment->HasIndex(fixture.vec));
+        if (!enabled_at_creation) {
+            EXPECT_TRUE(impl->PinGrowingIndex(nullptr, fixture.vec));
+        }
+        ASSERT_TRUE(WaitSynced(impl, fixture.vec, 30000));
+        EXPECT_EQ(IndexedRowCount(impl, fixture.vec), 30000);
+        EXPECT_EQ(async_builds.load(), enabled_at_creation ? 1 : 0);
+    }
+}
+
 TEST(GrowingIndexAsyncBuildTest, BuildOffInsertPathAndCatchesUp) {
     auto& config = SegcoreConfig::default_config();
     ScopedSegcoreConfigRestore config_restore(config);
