@@ -671,6 +671,12 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 	oldCollClone.EnableDynamicField = newColl.EnableDynamicField
 	oldCollClone.SchemaVersion = newColl.SchemaVersion
 	oldCollClone.ShardInfos = newColl.ShardInfos
+	// The routing fields are persisted together with the shard infos: the
+	// residues of a shard mean nothing without the modulus they are taken
+	// against, and the lineage records name the shards the infos replaced.
+	oldCollClone.RoutingModulus = newColl.RoutingModulus
+	oldCollClone.ShardBy = newColl.ShardBy
+	oldCollClone.SplitLineages = newColl.SplitLineages
 	oldCollClone.ExternalSource = newColl.ExternalSource
 	oldCollClone.ExternalSpec = newColl.ExternalSpec
 

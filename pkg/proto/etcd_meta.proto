@@ -73,11 +73,31 @@ message CollectionInfo {
   repeated common.KeyValuePair properties = 14;
   int64 db_id = 15;
   uint64 UpdateTimestamp = 16;
-  repeated CollectionShardInfo shard_infos = 17; // same length with virtual_channel_names, order one by one.
+  // Same length with virtual_channel_names, order one by one.
+  // The message was etcdpb.CollectionShardInfo, which had only
+  // last_truncate_time_tick = 1. schema.CollectionShardInfo keeps that field
+  // number, so records written before the change still decode.
+  repeated schema.CollectionShardInfo shard_infos = 17;
+  // The modulus the residues in shard_infos are taken against. Zero on a
+  // collection that was never split; it routes by hash % shards_num.
+  uint64 routing_modulus = 18;
+  // The routing key expression, "hash(<field>)". Empty if never declared.
+  string shard_by = 19;
+  // One record for every shard of this collection that was split. A record is
+  // written once, by the SplitShard message, and never changed. A split shard
+  // is not in virtual_channel_names.
+  repeated ShardSplitLineage split_lineages = 20;
 }
 
-message CollectionShardInfo {
-  uint64 last_truncate_time_tick = 1; // the last truncate time tick of the shard, if the shard is not truncated, the value is 0.
+// ShardSplitLineage records that a shard was split, and into which shards.
+message ShardSplitLineage {
+  string source_vchannel = 1;
+  string source_pchannel = 2;
+  repeated string target_vchannels = 3;
+  // The time tick of the SplitShard message on the source vchannel, in the WAL
+  // of the cluster that stores this record.
+  uint64 switch_time_tick = 4;
+  int64 split_task_id = 5;
 }
 
 message PartitionInfo {

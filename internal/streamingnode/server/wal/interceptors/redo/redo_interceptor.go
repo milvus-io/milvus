@@ -49,8 +49,37 @@ func (r *redoAppendInterceptor) DoAppend(ctx context.Context, msg message.Mutabl
 			}
 			continue
 		}
-		return msgID, err
+		return msgID, r.asShardFencedIfTxnOnSplitSource(msg, err)
 	}
+}
+
+// asShardFencedIfTxnOnSplitSource returns the fence error for a body or the
+// commit of a transaction that a shard split ended.
+//
+// The fence of a split is an exclusive message: once it is appended, the lock
+// interceptor ends every transaction of the vchannel, and a later body or
+// commit of one of them finds no session (TRANSACTION_EXPIRED). The writer
+// must not retry such a transaction on the same vchannel; it must place all of
+// its rows on the new shards, which is what the fence error tells it. None of
+// the rows of the transaction became visible: a commit appended before the
+// fence has a lower time tick, and no commit is appended after it.
+func (r *redoAppendInterceptor) asShardFencedIfTxnOnSplitSource(msg message.MutableMessage, err error) error {
+	if err == nil || msg.TxnContext() == nil {
+		return err
+	}
+	switch msg.MessageType() {
+	case message.MessageTypeBeginTxn, message.MessageTypeRollbackTxn:
+		// A Begin is refused with the fence error by the shard interceptor; a
+		// rollback of a transaction that is gone has nothing to retry.
+		return err
+	}
+	if streamingErr := status.AsStreamingError(err); streamingErr == nil || !streamingErr.IsTxnUnavilable() {
+		return err
+	}
+	if !shards.IsSplitFenced(r.shardManager, msg.VChannel()) {
+		return err
+	}
+	return status.NewShardFenced(msg.VChannel())
 }
 
 type callerContextKey struct{}
@@ -93,6 +122,11 @@ func (r *redoAppendInterceptor) waitUntilGrowingSegmentReady(ctx context.Context
 			uniqueKey := shards.PartitionUniqueKey{CollectionID: h.CollectionId, PartitionID: partition.PartitionId}
 			ready, err := r.shardManager.WaitUntilGrowingSegmentReady(uniqueKey)
 			if err != nil {
+				if errors.Is(err, shards.ErrShardFenced) {
+					// The vchannel became the source of a shard split while
+					// this insert was waiting. The rows belong to the new shards.
+					return status.NewShardFenced(msg.VChannel())
+				}
 				if errors.IsAny(err, shards.ErrCollectionNotFound, shards.ErrPartitionNotFound) {
 					return status.NewUnrecoverableError("fail to wait growing segment ready, %s", err.Error())
 				}

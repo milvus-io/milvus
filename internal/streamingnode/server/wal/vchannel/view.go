@@ -2,6 +2,7 @@ package vchannel
 
 import (
 	"math"
+	"slices"
 	"sync"
 
 	"google.golang.org/protobuf/proto"
@@ -139,7 +140,62 @@ func (info *VChannelView) WritePathRecoveryState() (moduleapi.VChannelWritePathR
 		state.Schema = schemas[len(schemas)-1].GetSchema()
 		state.SchemaTimeTick = schemas[len(schemas)-1].GetCheckpointTimeTick()
 	}
+	// A vchannel that was split keeps its registration on the write path, but
+	// it refuses DML there.
+	state.SplitTaskID = info.meta.GetSplitLineage().GetSplitTaskId()
 	return state, true
+}
+
+// SplitLineage returns the record of the shard split this vchannel is the
+// source of, or nil if the vchannel was not split.
+func (info *VChannelView) SplitLineage() *streamingpb.VChannelSplitLineage {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	if info.meta.GetSplitLineage() == nil {
+		return nil
+	}
+	return proto.Clone(info.meta.GetSplitLineage()).(*streamingpb.VChannelSplitLineage)
+}
+
+// ObserveSplitShardFenceMessageV2 records that this vchannel is the source of
+// a shard split: the vchannels that take its DML, and T_switch, the time tick
+// of the message. After T_switch the vchannel has no DML.
+//
+// The record is written once. A second SplitShard message on a vchannel that
+// already has a record leaves it as it is, whichever split sent it: the first
+// fence is the one that sealed the data, and nothing was written after it.
+//
+// The vchannel stays NORMAL. It is still served, and it still observes the
+// messages that are local to a cluster. Its retirement is a later, separate
+// observation.
+func (info *VChannelView) ObserveSplitShardFenceMessageV2(msg message.ImmutableSplitShardMessageV2) bool {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	if !info.shouldObserveLocked(msg.TimeTick()) {
+		return false
+	}
+	if info.closingLocked(0) || info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
+		return false
+	}
+	if info.meta.GetSplitLineage() == nil {
+		lineage := &streamingpb.VChannelSplitLineage{
+			SplitTaskId:     msg.Header().GetSplitTaskId(),
+			TargetVchannels: slices.Clone(msg.Header().GetTargetVchannels()),
+			SwitchTimeTick:  msg.TimeTick(),
+		}
+		info.meta.SplitLineage = lineage
+		// A pending partition drop publishes a snapshot taken before this
+		// message until the drop completes. The record must not wait for that:
+		// the recovery checkpoint can pass this message first, and a restart in
+		// between would recover a source that accepts DML again. The record is
+		// written once and never removed, so it is true of every later state.
+		for _, drop := range info.pendingDrops {
+			drop.before.SplitLineage = proto.Clone(lineage).(*streamingpb.VChannelSplitLineage)
+		}
+	}
+	info.meta.CheckpointTimeTick = msg.TimeTick()
+	info.dirty = true
+	return true
 }
 
 func (info *VChannelView) Name() string {

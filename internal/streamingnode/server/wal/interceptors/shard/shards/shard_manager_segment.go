@@ -49,6 +49,11 @@ func (m *shardManagerImpl) checkIfSegmentCanBeCreated(uniquePartitionKey Partiti
 	if err := m.checkIfPartitionExists(uniquePartitionKey); err != nil {
 		return err
 	}
+	// The source of a shard split takes no new segment: no insert can ever
+	// reach it, and an empty growing segment would never flush.
+	if m.collections[uniquePartitionKey.CollectionID].SplitFenced() {
+		return ErrShardFenced
+	}
 
 	if m := m.partitionManagers[uniquePartitionKey].GetSegmentManager(segmentID); m != nil {
 		return ErrSegmentExists
@@ -137,6 +142,9 @@ func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegm
 	if !ok {
 		return nil, ErrPartitionNotFound
 	}
+	if info := m.collections[req.CollectionID]; info.SplitFenced() {
+		return nil, ErrShardFenced
+	}
 
 	// Populate SchemaVersion from the current collection info into req.
 	// Callers construct req without knowing the schema version; this is the
@@ -160,6 +168,9 @@ func (m *shardManagerImpl) ApplyDelete(msg message.MutableDeleteMessageV1) error
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	if m.collections[msg.Header().GetCollectionId()].SplitFenced() {
+		return ErrShardFenced
+	}
 	rows := msg.Header().GetRows()
 	m.metrics.ObserveDelete(rows)
 	resource.Resource().SegmentStatsManager().RecordDelete(m.pchannel.Name, msg.VChannel(), msg.TimeTick(), rows, uint64(msg.EstimateSize()))
@@ -173,6 +184,12 @@ func (m *shardManagerImpl) WaitUntilGrowingSegmentReady(uniquePartitionKey Parti
 
 	if err := m.checkIfPartitionExists(uniquePartitionKey); err != nil {
 		return nil, err
+	}
+	// Checked here as well as in the shard interceptor: this call runs outside
+	// the vchannel lock, so a fence can be installed between two attempts of
+	// the same insert.
+	if m.collections[uniquePartitionKey.CollectionID].SplitFenced() {
+		return nil, ErrShardFenced
 	}
 	return m.partitionManagers[uniquePartitionKey].WaitPendingGrowingSegmentReady(), nil
 }

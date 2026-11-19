@@ -28,7 +28,10 @@ var _ interceptors.InterceptorWithMetrics = (*shardInterceptor)(nil)
 // shardInterceptor is the implementation of shard management interceptor.
 type shardInterceptor struct {
 	shardManager shards.ShardManager
-	ops          map[message.MessageType]interceptors.AppendInterceptorCall
+	// txnManager ends the session a refused BeginTxn opened. Nil in tests
+	// that do not append transactions.
+	txnManager *txn.TxnManager
+	ops        map[message.MessageType]interceptors.AppendInterceptorCall
 }
 
 // initOpTable initializes the operation table for the segment interceptor.
@@ -49,6 +52,8 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeFlush:              impl.handleFlushSegment,
 		message.MessageTypeFlushAll:           impl.handleFlushAllMessage,
 		message.MessageTypeTruncateCollection: impl.handleTruncateCollectionMessage,
+		message.MessageTypeSplitShard:         impl.handleSplitShard,
+		message.MessageTypeBeginTxn:           impl.handleBeginTxn,
 	}
 }
 
@@ -182,6 +187,11 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	schemaVersion := header.GetSchemaVersion()
 	correctSchemaVersion, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(header)
 	if err != nil {
+		if errors.Is(err, shards.ErrShardFenced) {
+			// The vchannel is the source of a shard split. The rows belong to
+			// the shards that own their keys now.
+			return nil, status.NewShardFenced(msg.VChannel())
+		}
 		if errors.Is(err, shards.ErrCollectionNotFound) {
 			return nil, status.NewUnrecoverableError("collection %d not found", collectionID)
 		}
@@ -254,6 +264,9 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			req.TxnSession = session
 		}
 		result, err := impl.shardManager.AssignSegment(req)
+		if errors.Is(err, shards.ErrShardFenced) {
+			return nil, status.NewShardFenced(msg.VChannel())
+		}
 		if errors.IsAny(err, shards.ErrTimeTickTooOld, shards.ErrWaitForNewSegment, shards.ErrFencedAssign) {
 			// 1. time tick is too old for segment assignment.
 			// 2. partition is fenced.
@@ -293,7 +306,11 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 		return nil, status.NewUnrecoverableError(err.Error())
 	}
 
-	impl.shardManager.ApplyDelete(deleteMessage)
+	if err := impl.shardManager.ApplyDelete(deleteMessage); errors.Is(err, shards.ErrShardFenced) {
+		// The vchannel is the source of a shard split. The delete belongs to
+		// the shards that own its keys now.
+		return nil, status.NewShardFenced(msg.VChannel())
+	}
 	return appendOp(ctx, msg)
 }
 

@@ -304,8 +304,12 @@ func (m *PChannelRecoveryManager) moduleForMessage(
 		return nil
 	}
 	module, _ := m.modules.Get(vchannel)
+	// A vchannel comes into existence by a CreateCollection message, by a
+	// RestoreSnapshot message that creates its collection, or as the target of
+	// a shard split.
 	createsCollection := msg.MessageType() == message.MessageTypeCreateCollection ||
-		(msg.MessageType() == message.MessageTypeRestoreSnapshot && messageutil.RestoreCollectionMessage(msg) != nil)
+		(msg.MessageType() == message.MessageTypeRestoreSnapshot && messageutil.RestoreCollectionMessage(msg) != nil) ||
+		messageutil.IsSplitShardGenesis(msg)
 	if module != nil || !createsCollection {
 		return module
 	}
