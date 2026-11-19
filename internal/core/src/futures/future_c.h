@@ -44,6 +44,9 @@ void
 executor_set_search_thread_num(int thread_num);
 
 void
+executor_set_search_fanout_thread_core_coefficient(float coefficient);
+
+void
 executor_set_load_thread_num(int thread_num);
 
 #ifdef __cplusplus

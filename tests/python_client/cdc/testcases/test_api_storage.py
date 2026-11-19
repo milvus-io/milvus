@@ -76,8 +76,7 @@ def external_collection(cdc_contract, storage):
 
 
 class TestCDCStorageAPI:
-    @pytest.mark.parametrize("role", ["upstream", "downstream"])
-    def test_file_resource_registration_and_removal_are_local(self, cdc_contract, storage, role):
+    def test_file_resource_registration_and_removal_replicate(self, cdc_contract, storage):
         c = cdc_contract
         configs, stores, prefix = storage
         name = c.name("stopwords")
@@ -85,23 +84,52 @@ class TestCDCStorageAPI:
         for config, store in zip(configs, stores):
             payload = b"canary\n"
             store.put_object(config["bucket"], path, io.BytesIO(payload), len(payload))
-        client = getattr(c, role)
-        peer = c.downstream if role == "upstream" else c.upstream
-        for target in (client, peer):
-            c.request.addfinalizer(lambda target=target: target.remove_file_resource(name))
+        c.request.addfinalizer(lambda: c.upstream.remove_file_resource(name))
 
-        def names(target):
-            return {resource.name for resource in target.list_file_resources(timeout=10)}
+        def resources(target):
+            return {resource.name: resource.path for resource in target.list_file_resources(timeout=10)}
 
-        client.add_file_resource(name, path)
+        c.upstream.add_file_resource(name, path)
+        # A control-channel barrier orders the resource callback before observation.
         c.control_barrier()
-        assert name in names(client)
-        assert name not in names(peer)
-        peer.add_file_resource(name, path)
-        client.remove_file_resource(name)
+        assert resources(c.upstream)[name] == path
+        assert resources(c.downstream)[name] == path
+        c.upstream.remove_file_resource(name)
         c.control_barrier()
-        assert name not in names(client)
-        assert name in names(peer)
+        assert name not in resources(c.upstream)
+        assert name not in resources(c.downstream)
+
+    def test_secondary_file_resource_mutations_rejected_without_changes(self, cdc_contract, storage):
+        c = cdc_contract
+        configs, stores, prefix = storage
+        name, rejected = c.name("stopwords"), c.name("stopwords_denied")
+        path = prefix + "/stop_words.txt"
+        for config, store in zip(configs, stores):
+            payload = b"canary\n"
+            store.put_object(config["bucket"], path, io.BytesIO(payload), len(payload))
+        for resource_name in (name, rejected):
+            c.request.addfinalizer(lambda resource_name=resource_name: c.upstream.remove_file_resource(resource_name))
+        c.upstream.add_file_resource(name, path)
+        c.control_barrier()
+
+        def state():
+            return [
+                {resource.name: resource.path for resource in client.list_file_resources(timeout=10)}
+                for client in (c.upstream, c.downstream)
+            ]
+
+        before = state()
+        assert before[0][name] == before[1][name]
+        with pytest.raises(MilvusException, match="(?i)not primary|secondary"):
+            c.downstream.add_file_resource(rejected, path, timeout=15)
+        with pytest.raises(MilvusException, match="(?i)not primary|secondary"):
+            c.downstream.remove_file_resource(name, timeout=15)
+        c.control_barrier()
+        assert state() == before
+        canary = c.collection()
+        c.upstream.insert(canary, c.data())
+        c.assert_rows(canary, c.data())
+        assert state() == before
 
     def test_external_refresh_data_stays_local_and_cdc_continues(self, cdc_contract, external_collection):
         """Refresh data stays local while unrelated collection writes keep replicating."""
