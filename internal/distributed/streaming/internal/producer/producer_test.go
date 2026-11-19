@@ -543,3 +543,52 @@ func TestResumableProducer_ProduceAfterClose(t *testing.T) {
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, errs.ErrClosed))
 }
+
+func TestAutocommitLostReplyBeforeShardFence(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		msg   message.MutableMessage
+		keyed bool
+	}{
+		{"insert", createRealInsertMessage(t, "p_1v0"), false},
+		{"delete", message.NewDeleteMessageBuilderV1().WithVChannel("p_1v0").
+			WithHeader(&message.DeleteMessageHeader{}).WithBody(&msgpb.DeleteRequest{}).MustBuildMutable(), false},
+		{"keyed insert", message.NewInsertMessageBuilderV1().WithVChannel("p_1v0").WithIdempotencyKey("request").
+			WithHeader(&message.InsertMessageHeader{}).WithBody(&msgpb.InsertRequest{}).MustBuildMutable(), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sn := mock_producer.NewMockProducer(t)
+			sn.EXPECT().IsAvailable().Return(true).Maybe()
+			sn.EXPECT().Available().Return(make(chan struct{})).Maybe()
+			sn.EXPECT().Close().Return().Maybe()
+			calls := 0
+			sn.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(context.Context, message.MutableMessage) (*types.AppendResult, error) {
+				calls++
+				if calls == 1 {
+					// The source stored this mutation before its response stream broke.
+					return nil, status.NewUnknownError("request sent but no response returned")
+				}
+				if tc.keyed {
+					// The source idempotency window answers before the fence.
+					return &types.AppendResult{TimeTick: 123}, nil
+				}
+				return nil, status.NewShardFenced("p_1v0")
+			})
+			rp := NewResumableProducer(func(context.Context, *handler.ProducerOptions) (producer.Producer, error) {
+				return sn, nil
+			}, &ProducerOptions{PChannel: "p"})
+			defer rp.Close()
+			guard := &ProduceGuard{producer: rp, msgs: []message.MutableMessage{tc.msg}}
+			result, err := guard.commit(t.Context())
+			if tc.keyed {
+				require.NoError(t, err)
+				require.EqualValues(t, 123, result.TimeTick)
+				require.Equal(t, 2, calls)
+			} else {
+				require.ErrorContains(t, err, "no response")
+				require.False(t, status.AsStreamingError(err).IsShardFenced())
+				require.Equal(t, 1, calls)
+			}
+		})
+	}
+}
