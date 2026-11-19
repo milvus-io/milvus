@@ -80,6 +80,9 @@ traversal and external namespaces are errors. Existing entries are not migrated.
 Builds retain their creation-time publication mode across switch changes and
 restarts: version 2 finishes in the manifest, while version 0/1 finishes in etcd.
 Readers and cleanup use each artifact's persisted version.
+DataCoord keeps file names in memory for every catalog-backed build. It can
+release them when the build is published to the segment manifest. Rollback
+restores the names to memory when it restores the catalog row.
 Resolving v2 index files requires the owning segment's manifest base; load and
 snapshot consumers report missing or invalid metadata instead of guessing the
 canonical base. `SegmentInfo.ManifestPath` is the sole source of the published

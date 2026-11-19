@@ -163,8 +163,10 @@ func TestCompactIndexPathsForLoadAndSnapshot(t *testing.T) {
 			m, domains := index.BootMetaForRestart(t, catalog, meta.RestartCollID)
 			index.SeedRestartFixture(t, m, domains.IndexMeta)
 			prefix := "/tmp/test-restart/index_files/8100/1/30/8001/"
+			cachedKeys := []string{"0", "1"}
 			if fromManifest {
 				prefix = "/tmp/test-restart/insert_log/300/30/8001/_index/8100/1/"
+				cachedKeys = nil
 			}
 			expected := []string{prefix + "0", prefix + "1"}
 			for _, restart := range []bool{false, true} {
@@ -176,11 +178,11 @@ func TestCompactIndexPathsForLoadAndSnapshot(t *testing.T) {
 				segment := m.GetSegment(ctx, meta.RestartSegID).SegmentInfo
 				jobs := domains.IndexMeta.GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID)
 				job := jobs[meta.RestartIndexID]
-				require.Empty(t, job.IndexFileKeys)
+				require.ElementsMatch(t, cachedKeys, job.IndexFileKeys)
 				require.Equal(t, 2, job.NumIndexFiles())
 				request := &indexpb.GetIndexInfoRequest{CollectionID: meta.RestartCollID, SegmentIDs: []int64{meta.RestartSegID}}
+				store.FailReadsFrom()
 				if fromManifest {
-					store.FailReadsFrom()
 					reply, err := s.GetIndexInfos(ctx, request)
 					require.NoError(t, err)
 					require.ErrorIs(t, merr.Error(reply.GetStatus()), merr.ErrIoFailed)
@@ -200,7 +202,8 @@ func TestCompactIndexPathsForLoadAndSnapshot(t *testing.T) {
 				require.Equal(t, expected, files[0].GetIndexFilePaths())
 				resident, ok := domains.IndexMeta.GetIndexJob(job.BuildID)
 				require.True(t, ok)
-				require.Empty(t, resident.IndexFileKeys)
+				require.ElementsMatch(t, cachedKeys, resident.IndexFileKeys)
+				store.ResumeReads()
 			}
 		})
 	}

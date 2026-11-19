@@ -36,7 +36,7 @@ type PartitionStatsPublication interface {
 // SegmentIndexCatalog is what the manifest commit path and the segment
 // readiness predicate need from the index meta. indexMeta implements it.
 type SegmentIndexCatalog interface {
-	FinishCatalogRecovery(*Meta)
+	SetIndexFileResolver(*Meta)
 	GetSegmentIndexState(collID, segmentID, indexID int64) *indexpb.SegmentIndexState
 	// GetIndexParams returns the index params of the index.
 	GetIndexParams(collID, indexID UniqueID) []*commonpb.KeyValuePair
@@ -77,7 +77,7 @@ type SegmentIndexCatalog interface {
 	// install returns an observability closure that can wait for a Prometheus
 	// scrape; the caller runs it after releasing the writer lock and before
 	// releasing the build-ID lock.
-	StageSegmentIndexMutation(ctx context.Context, mut SegmentIndexMutation) (*StagedSegmentIndexMutation, error)
+	StageSegmentIndexMutation(mut SegmentIndexMutation) (*StagedSegmentIndexMutation, error)
 
 	// RLockFieldIndexes takes the read side of fieldIndexLock, whose write side
 	// index DDL holds. Callers must not hold a segment writer lock.

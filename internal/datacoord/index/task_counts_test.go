@@ -33,12 +33,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
-	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -323,14 +321,10 @@ func TestIndexTaskCountsRecoveryReplacement(t *testing.T) {
 	}
 	m, err := NewIndexMeta(context.Background(), catalog, []int64{1, 2, 3})
 	require.NoError(t, err)
-	store := metacache.NewMetaStore(nil)
-	store.PutSegment(&datapb.SegmentInfo{ID: finished.SegmentID, StorageVersion: storage.StorageV3})
-	m.FinishCatalogRecovery(&meta.Meta{MetaStore: store})
 	recovered, ok := m.SegmentBuildInfo.Get(finished.BuildID)
 	require.True(t, ok)
-	require.Nil(t, recovered.IndexFileKeys)
-	require.Equal(t, len(fileKeys), recovered.IndexFileCount)
-	require.Equal(t, fileKeys, finished.IndexFileKeys)
+	require.Equal(t, fileKeys, recovered.IndexFileKeys)
+	require.Equal(t, len(fileKeys), recovered.NumIndexFiles())
 	assertIndexTaskCounts(t, m)
 	require.Equal(t, indexTaskStateCounts{0, 0, 0, 1}, m.indexTaskCountsSnapshot())
 	require.Equal(t, map[int64]int64{1: 300}, storedIndexSizeSeries(t))
@@ -551,7 +545,7 @@ func TestIndexTaskCountsManifestInstallAvoidsDDLLock(t *testing.T) {
 	require.NoError(t, m.AddSegmentIndex(ctx, &model.SegmentIndex{CollectionID: 1, IndexID: 10, SegmentID: 20, BuildID: 30}))
 	m.KeyLock.Lock(30)
 	defer m.KeyLock.Unlock(30)
-	staged, err := m.stageSegmentIndexMutation(t.Context(), meta.SegmentIndexMutation{
+	staged, err := m.stageSegmentIndexMutation(meta.SegmentIndexMutation{
 		Type: meta.SegmentIndexUpsert, BuildID: 30,
 		FinishedTask: &workerpb.IndexTaskInfo{BuildID: 30, State: commonpb.IndexState_Finished, SerializedSize: 4096},
 	})
@@ -576,7 +570,7 @@ func TestIndexTaskCountsManifestInstallAvoidsDDLLock(t *testing.T) {
 	assertIndexTaskCounts(t, m)
 	require.Equal(t, indexTaskStateCounts{0, 0, 0, 1}, m.indexTaskCountsSnapshot())
 	require.Equal(t, map[int64]int64{1: 4096}, storedIndexSizeSeries(t))
-	removed, err := m.stageSegmentIndexMutation(t.Context(), meta.SegmentIndexMutation{Type: meta.SegmentIndexRemove, BuildID: 30})
+	removed, err := m.stageSegmentIndexMutation(meta.SegmentIndexMutation{Type: meta.SegmentIndexRemove, BuildID: 30})
 	require.NoError(t, err)
 	require.Equal(t, indexTaskStateCounts{0, 0, 0, 1}, m.indexTaskCountsSnapshot())
 	deferred := removed.Install()
@@ -612,7 +606,7 @@ func TestIndexTaskCountsPublishDuringScrape(t *testing.T) {
 
 	m.KeyLock.Lock(2)
 	defer m.KeyLock.Unlock(2)
-	staged, err := m.stageSegmentIndexMutation(t.Context(), meta.SegmentIndexMutation{
+	staged, err := m.stageSegmentIndexMutation(meta.SegmentIndexMutation{
 		Type: meta.SegmentIndexUpsert, BuildID: 2,
 		FinishedTask: &workerpb.IndexTaskInfo{BuildID: 2, State: commonpb.IndexState_Finished, SerializedSize: 250},
 	})

@@ -112,24 +112,11 @@ func CollectionFieldName(m *Meta, collectionID, fieldID int64) string {
 	return ""
 }
 
-// ResolveIndexFileKeys materializes a build for migration or cleanup using the
-// segment's published manifest or the build's catalog row.
+// ResolveIndexFileKeys reads the segment manifest only for a build whose
+// published file names are absent from memory.
 func (m *Meta) ResolveIndexFileKeys(ctx context.Context, io *packed.ManifestIOContext, index *model.SegmentIndex) ([]string, error) {
-	if len(index.IndexFileKeys) != 0 || index.IndexFileCount == 0 {
+	if !index.ManifestPublished || len(index.IndexFileKeys) != 0 || index.IndexFileCount == 0 {
 		return index.IndexFileKeys, nil
-	}
-	if !index.ManifestPublished {
-		keys, err := m.catalogIndexFileKeys(ctx, index)
-		if !errors.Is(err, merr.ErrIoKeyNotFound) {
-			return keys, err
-		}
-		// The catalog row can disappear during backfill. Both layouts retain
-		// their files, so the same build can still supply the original names.
-		current := m.sameIndexBuild(index)
-		if current == nil || !current.ManifestPublished {
-			return nil, err
-		}
-		index = current
 	}
 	var keys []string
 	var err error
@@ -148,13 +135,9 @@ func (m *Meta) ResolveIndexFileKeys(ctx context.Context, io *packed.ManifestIOCo
 		return keys, nil
 	}
 	// A lifecycle reader may straddle replacement or rollback.
-	if current := m.sameIndexBuild(index); current != nil {
-		if len(current.IndexFileKeys) > 0 && current.IndexStorePathVersion == index.IndexStorePathVersion {
-			return current.IndexFileKeys, nil
-		}
-		if !current.ManifestPublished {
-			return m.catalogIndexFileKeys(ctx, current)
-		}
+	if current := m.sameIndexBuild(index); current != nil && len(current.IndexFileKeys) > 0 &&
+		(!current.ManifestPublished || current.IndexStorePathVersion == index.IndexStorePathVersion) {
+		return current.IndexFileKeys, nil
 	}
 	return nil, err
 }
@@ -220,18 +203,6 @@ func sameIndexArtifact(index, other *model.SegmentIndex) bool {
 		index.NumIndexFiles() == other.NumIndexFiles()
 }
 
-func (m *Meta) catalogIndexFileKeys(ctx context.Context, index *model.SegmentIndex) ([]string, error) {
-	record, err := m.Catalog.GetSegmentIndex(ctx, index.CollectionID, index.PartitionID, index.SegmentID, index.BuildID)
-	if err != nil {
-		return nil, merr.Wrapf(err, "get file keys for catalog index build %d", index.BuildID)
-	}
-	if !sameIndexArtifact(index, record) || record.IndexStorePathVersion != index.IndexStorePathVersion ||
-		len(record.IndexFileKeys) != index.IndexFileCount {
-		return nil, merr.Wrapf(merr.ErrDataIntegrity, "catalog index metadata disagrees with build %d", index.BuildID)
-	}
-	return record.IndexFileKeys, nil
-}
-
 func (m *Meta) readManifestIndexFileKeys(ctx context.Context, io *packed.ManifestIOContext, index *model.SegmentIndex, descriptor *datapb.SegmentInfo) ([]string, error) {
 	if io == nil {
 		io = packed.NewManifestIOContext(1)
@@ -269,15 +240,12 @@ func (m *Meta) SegmentIndexFilePaths(ctx context.Context, index *model.SegmentIn
 	if index.NumIndexFiles() == 0 {
 		return []string{}, nil
 	}
-	var keys []string
+	keys := index.IndexFileKeys
 	var err error
 	if index.ManifestPublished {
 		keys, err = m.indexFileKeysAtSegment(ctx, nil, index, descriptor)
-	} else {
-		keys, err = m.ResolveIndexFileKeys(ctx, nil, index)
-		if err == nil && metautil.IsSegmentRooted(index.IndexStorePathVersion) {
-			_, err = manifestForIndexBuild(index, descriptor)
-		}
+	} else if metautil.IsSegmentRooted(index.IndexStorePathVersion) {
+		_, err = manifestForIndexBuild(index, descriptor)
 	}
 	if err != nil {
 		return nil, err

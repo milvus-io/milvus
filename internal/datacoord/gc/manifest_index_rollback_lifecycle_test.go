@@ -158,10 +158,8 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 			for _, record := range records {
 				recovered, found := restarted.IndexCatalog.(*index.IndexMeta).GetIndexJob(record.BuildID)
 				require.True(t, found)
-				require.Empty(t, recovered.IndexFileKeys)
+				require.Equal(t, record.IndexFileKeys, recovered.IndexFileKeys)
 				require.Equal(t, len(record.IndexFileKeys), recovered.NumIndexFiles())
-				recovered = indexRecordWithFiles(t, restarted, recovered)
-				assert.Equal(t, record.IndexFileKeys, recovered.IndexFileKeys)
 				assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, recovered.IndexStorePathVersion)
 				for _, file := range meta.MigrationIndexPaths(root, restarted.GetSegment(ctx, meta.RestartSegID).GetManifestPath(), recovered) {
 					data, err := restarted.ChunkManager.Read(ctx, file)

@@ -71,6 +71,9 @@ func TestManifestIndexRollbackRoundTrip(t *testing.T) {
 			record.ManifestPublished = false
 			record.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
 			assert.Equal(t, record, rows[0])
+			cached, ok := m.IndexCatalog.GetIndexJob(record.BuildID)
+			require.True(t, ok)
+			require.Equal(t, rows[0], cached)
 			assert.False(t, IndexManifestPublished(t, m.IndexCatalog.(*IndexMeta), meta.RestartBuildID))
 			inspector.runOnce(ctx)
 			assert.True(t, inspector.ready)
@@ -291,6 +294,7 @@ func TestManifestIndexRollbackRestoresSupersededBuilds(t *testing.T) {
 	requireIndexFiles(t, m, replacement, "replacement-a", "replacement-b")
 	retired, ok := m.IndexCatalog.GetIndexJob(old.BuildID)
 	require.True(t, ok)
+	require.Equal(t, []string{"0", "1"}, retired.IndexFileKeys)
 	for _, oldRecord := range []*model.SegmentIndex{old, retired} {
 		_, err := m.SegmentIndexFilePaths(ctx, oldRecord, m.GetSegment(ctx, meta.RestartSegID).SegmentInfo)
 		require.ErrorIs(t, err, merr.ErrDataIntegrity, "a snapshot selecting the replacement revision cannot load the displaced build")

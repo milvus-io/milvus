@@ -55,7 +55,7 @@ func (s *SegmentIndex) NumIndexFiles() int {
 	return len(s.IndexFileKeys)
 }
 
-// CompactFileKeys releases the cached file names once the build is durable.
+// CompactFileKeys releases the cached file names after publication to a manifest.
 func (s *SegmentIndex) CompactFileKeys() {
 	s.IndexFileCount = s.NumIndexFiles()
 	s.IndexFileKeys = nil

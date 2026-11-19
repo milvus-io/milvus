@@ -378,7 +378,7 @@ func (m *Meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 			}
 			removedBuildIDs[indexMutation.BuildID] = struct{}{}
 		}
-		staged, err := m.IndexCatalog.StageSegmentIndexMutation(ctx, *indexMutation)
+		staged, err := m.IndexCatalog.StageSegmentIndexMutation(*indexMutation)
 		if err != nil {
 			if errors.Is(err, ErrSegmentIndexRecordGone) {
 				// Only an upsert whose task row vanished mid-commit produces

@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
-	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -177,7 +176,11 @@ func TestBuildManifestIndexInfoRespectsSegmentIndexTypeOverride(t *testing.T) {
 
 func requireIndexFiles(t *testing.T, m *meta.Meta, record *model.SegmentIndex, expected ...string) {
 	t.Helper()
-	require.Empty(t, record.IndexFileKeys, "file keys should only be materialized on demand")
+	if record.ManifestPublished {
+		require.Empty(t, record.IndexFileKeys)
+	} else {
+		require.Equal(t, expected, record.IndexFileKeys)
+	}
 	require.Equal(t, len(expected), record.NumIndexFiles())
 	keys, err := m.ResolveIndexFileKeys(t.Context(), nil, record)
 	require.NoError(t, err)
@@ -415,10 +418,7 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 	requireIndexFiles(t, m, recoveredOff, "0", "1")
 }
 
-// The control: with manifest writes off (the default), the same flow persists
-// the record to etcd, so the test above is discriminating rather than
-// trivially green.
-func TestCatalogIndexFileKeysBySegmentStorageVersion(t *testing.T) {
+func TestCatalogIndexFileKeysStayInMemory(t *testing.T) {
 	const v1, v2, v3, missing int64 = 11, 12, 13, 14
 	const buildOffset int64 = 100
 	ctx := t.Context()
@@ -435,21 +435,15 @@ func TestCatalogIndexFileKeysBySegmentStorageVersion(t *testing.T) {
 		require.NoError(t, m.AddSegment(ctx, meta.NewSegmentInfo(segment)))
 	}
 
-	// Only the V3 build should need a catalog read to resolve its file names.
-	reader := catalogmocks.NewDataCoordCatalog(t)
-	reader.EXPECT().GetSegmentIndex(ctx, meta.RestartCollID, RestartPartID, v3, buildOffset+v3).
-		RunAndReturn(catalog.GetSegmentIndex).Times(3)
-	resolver := &meta.Meta{Catalog: reader}
+	// Looking up names from a catalog build needs no storage access.
+	resolver := &meta.Meta{}
 	checkFiles := func(im *IndexMeta, id int64, want []string) {
 		t.Helper()
 		record, ok := im.GetIndexJob(buildOffset + id)
 		require.True(t, ok)
 		require.Equal(t, len(want), record.NumIndexFiles())
-		if id == v3 {
-			require.Empty(t, record.IndexFileKeys)
-		} else {
-			require.Equal(t, want, record.IndexFileKeys, "segment %d", id)
-		}
+		require.False(t, record.ManifestPublished)
+		require.Equal(t, want, record.IndexFileKeys, "segment %d", id)
 		keys, err := resolver.ResolveIndexFileKeys(ctx, nil, record)
 		require.NoError(t, err)
 		require.Equal(t, want, keys)
@@ -477,6 +471,8 @@ func TestCatalogIndexFileKeysBySegmentStorageVersion(t *testing.T) {
 	for _, id := range ids {
 		checkFiles(restarted.IndexMeta, id, finishedKeys)
 	}
+	require.NoError(t, restarted.IndexMeta.DeleteTask(buildOffset+v3, storage.StorageV3))
+	checkFiles(restarted.IndexMeta, v3, finishedKeys)
 }
 
 func TestSegmentIndexPersistedToEtcdWhenManifestWritesOff(t *testing.T) {
@@ -503,6 +499,7 @@ func TestSegmentIndexPersistedToEtcdWhenManifestWritesOff(t *testing.T) {
 	recovered, ok := restartedDomains.IndexMeta.GetIndexJob(meta.RestartBuildID)
 	require.True(t, ok)
 	assert.Equal(t, commonpb.IndexState_Finished, recovered.IndexState)
+	require.Equal(t, []string{"0", "1"}, recovered.IndexFileKeys)
 }
 
 // Regression test for an ABBA deadlock between the manifest commit and every

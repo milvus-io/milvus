@@ -1387,68 +1387,6 @@ func (_c *DataCoordCatalog_GetCurrentPartitionStatsVersion_Call) RunAndReturn(ru
 	return _c
 }
 
-// GetSegmentIndex provides a mock function with given fields: ctx, collectionID, partitionID, segmentID, buildID
-func (_m *DataCoordCatalog) GetSegmentIndex(ctx context.Context, collectionID int64, partitionID int64, segmentID int64, buildID int64) (*model.SegmentIndex, error) {
-	ret := _m.Called(ctx, collectionID, partitionID, segmentID, buildID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetSegmentIndex")
-	}
-
-	var r0 *model.SegmentIndex
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, int64, int64) (*model.SegmentIndex, error)); ok {
-		return rf(ctx, collectionID, partitionID, segmentID, buildID)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, int64, int64) *model.SegmentIndex); ok {
-		r0 = rf(ctx, collectionID, partitionID, segmentID, buildID)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*model.SegmentIndex)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, int64, int64, int64, int64) error); ok {
-		r1 = rf(ctx, collectionID, partitionID, segmentID, buildID)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// DataCoordCatalog_GetSegmentIndex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSegmentIndex'
-type DataCoordCatalog_GetSegmentIndex_Call struct {
-	*mock.Call
-}
-
-// GetSegmentIndex is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collectionID int64
-//   - partitionID int64
-//   - segmentID int64
-//   - buildID int64
-func (_e *DataCoordCatalog_Expecter) GetSegmentIndex(ctx interface{}, collectionID interface{}, partitionID interface{}, segmentID interface{}, buildID interface{}) *DataCoordCatalog_GetSegmentIndex_Call {
-	return &DataCoordCatalog_GetSegmentIndex_Call{Call: _e.mock.On("GetSegmentIndex", ctx, collectionID, partitionID, segmentID, buildID)}
-}
-
-func (_c *DataCoordCatalog_GetSegmentIndex_Call) Run(run func(ctx context.Context, collectionID int64, partitionID int64, segmentID int64, buildID int64)) *DataCoordCatalog_GetSegmentIndex_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].(int64), args[3].(int64), args[4].(int64))
-	})
-	return _c
-}
-
-func (_c *DataCoordCatalog_GetSegmentIndex_Call) Return(_a0 *model.SegmentIndex, _a1 error) *DataCoordCatalog_GetSegmentIndex_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *DataCoordCatalog_GetSegmentIndex_Call) RunAndReturn(run func(context.Context, int64, int64, int64, int64) (*model.SegmentIndex, error)) *DataCoordCatalog_GetSegmentIndex_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // ListAnalyzeTasks provides a mock function with given fields: ctx
 func (_m *DataCoordCatalog) ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error) {
 	ret := _m.Called(ctx)
