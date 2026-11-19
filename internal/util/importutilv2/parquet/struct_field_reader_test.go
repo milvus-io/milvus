@@ -154,8 +154,13 @@ func TestTopLevelArrayWithNullableFixedSizeListElements(t *testing.T) {
 	defer arr.Release()
 	chunked := arrow.NewChunked(arr.DataType(), []arrow.Array{arr})
 	defer chunked.Release()
-	field := &schemapb.FieldSchema{Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true,
-		TypeParams: []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "3"}}}
+	field := &schemapb.FieldSchema{
+		Name:            "scores",
+		DataType:        schemapb.DataType_Array,
+		ElementType:     schemapb.DataType_Int64,
+		ElementNullable: true,
+		TypeParams:      []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "3"}},
+	}
 	data, _, err := readScalarArrayRows(chunked, field, nil)
 	require.NoError(t, err)
 	row := data.([]*schemapb.ScalarField)[0]
