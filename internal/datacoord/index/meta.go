@@ -206,9 +206,9 @@ func (m *IndexMeta) reloadFromKV(collectionIDs []int64) error {
 
 	// Parallel load and process: ListIndexes and ListSegmentIndexes have no dependency,
 	// and they update completely separate data structures so memory updates can also run in parallel.
-	// collectionSegIdxes is hoisted to function scope for the metrics goroutine
-	// launched after g.Wait.
-	collectionSegIdxes := make([][]*model.SegmentIndex, len(collectionIDs))
+	// Keep only the counts for async metrics. Recovery may release V3 file
+	// keys as soon as both the segment and index catalogs have loaded.
+	buildsByFileCount := make(map[int]int)
 	g, _ := errgroup.WithContext(m.ctx)
 	g.Go(func() error {
 		fieldIndexes, err := m.Catalog.ListIndexes(m.ctx)
@@ -222,6 +222,7 @@ func (m *IndexMeta) reloadFromKV(collectionIDs []int64) error {
 		return nil
 	})
 	g.Go(func() error {
+		collectionSegIdxes := make([][]*model.SegmentIndex, len(collectionIDs))
 		pool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
 		defer pool.Release()
 		futures := make([]*conc.Future[any], 0, len(collectionIDs))
@@ -243,7 +244,7 @@ func (m *IndexMeta) reloadFromKV(collectionIDs []int64) error {
 			for _, segIdx := range segIdxes {
 				// ListSegmentIndexes supplied a durable catalog row.
 				segIdx.ManifestPublished = false
-				segIdx.CompactFileKeys()
+				buildsByFileCount[segIdx.NumIndexFiles()]++
 				if segIdx.IndexMemSize == 0 {
 					segIdx.IndexMemSize = segIdx.IndexSerializedSize * paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsUint64()
 				}
@@ -276,9 +277,10 @@ func (m *IndexMeta) reloadFromKV(collectionIDs []int64) error {
 	// size, so it cannot race a live update into a stale value.
 	go func() {
 		m.taskCounts.publishStoredSizes()
-		for _, segIdxes := range collectionSegIdxes {
-			for _, segIdx := range segIdxes {
-				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(segIdx.NumIndexFiles()))
+		for fileCount, builds := range buildsByFileCount {
+			histogram := metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel)
+			for range builds {
+				histogram.Observe(float64(fileCount))
 			}
 		}
 	}()
@@ -344,7 +346,7 @@ func (m *IndexMeta) alterSegmentIndexes(segIdxes []*model.SegmentIndex) error {
 		// A successful AlterSegmentIndexes creates or replaces the catalog
 		// row even when this record was previously manifest-resident.
 		cached := *full
-		cached.CompactFileKeys()
+		m.compactV3CatalogFileKeys(&cached)
 		cached.ManifestPublished = false
 		m.updateSegmentIndex(&cached)
 	}
@@ -409,8 +411,24 @@ func (m *IndexMeta) updateSegIndexMeta(segIdx *model.SegmentIndex, updateFunc fu
 	return updateFunc(full)
 }
 
-func (m *IndexMeta) SetIndexFileStore(store *meta.Meta) {
+// FinishCatalogRecovery runs after both catalogs have loaded, before the
+// records are visible to readers or the manifest recovery pass.
+func (m *IndexMeta) FinishCatalogRecovery(store *meta.Meta) {
 	m.fileStore = store
+	m.SegmentBuildInfo.buildID2SegmentIndex.Range(func(_ int64, index *model.SegmentIndex) bool {
+		m.compactV3CatalogFileKeys(index)
+		return true
+	})
+}
+
+func (m *IndexMeta) compactV3CatalogFileKeys(index *model.SegmentIndex) {
+	if len(index.IndexFileKeys) == 0 || m.fileStore == nil {
+		return
+	}
+	segment, _ := m.fileStore.MetaStore.GetSegment(index.SegmentID)
+	if segment.GetStorageVersion() == storage.StorageV3 {
+		index.CompactFileKeys()
+	}
 }
 
 // A replacement removes the old build from the manifest. Keep its exact names
@@ -770,6 +788,7 @@ func (m *IndexMeta) addSegmentIndex(ctx context.Context, segIndex *model.Segment
 		mlog.Int64("segmentID", segIndex.SegmentID), mlog.Int64("indexID", segIndex.IndexID),
 		mlog.Int64("buildID", buildID), mlog.String("indexType", segIndex.IndexType))
 
+	cached := *segIndex
 	if persist {
 		if err := m.Catalog.CreateSegmentIndex(ctx, segIndex); err != nil {
 			mlog.Warn(ctx, "meta update: adding segment index failed",
@@ -777,9 +796,11 @@ func (m *IndexMeta) addSegmentIndex(ctx context.Context, segIndex *model.Segment
 				mlog.Int64("buildID", segIndex.BuildID), mlog.String("indexType", segIndex.IndexType), mlog.Err(err))
 			return err
 		}
+		m.compactV3CatalogFileKeys(&cached)
+	} else {
+		// The copy result was verified against a StorageV3 manifest.
+		cached.CompactFileKeys()
 	}
-	cached := *segIndex
-	cached.CompactFileKeys()
 	cached.ManifestPublished = !persist
 
 	// Resident publication must be serialized with collection-index mutation and

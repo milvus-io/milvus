@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -417,6 +418,67 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 // The control: with manifest writes off (the default), the same flow persists
 // the record to etcd, so the test above is discriminating rather than
 // trivially green.
+func TestCatalogIndexFileKeysBySegmentStorageVersion(t *testing.T) {
+	const v1, v2, v3, missing int64 = 11, 12, 13, 14
+	const buildOffset int64 = 100
+	ctx := t.Context()
+	catalog := datacoord.NewCatalog(meta.NewMetaMemoryKV(), "", "")
+	m, domains := BootMetaForRestart(t, catalog, meta.RestartCollID)
+	for id, version := range map[int64]int64{v1: storage.StorageV1, v2: storage.StorageV2, v3: storage.StorageV3} {
+		segment := &datapb.SegmentInfo{
+			ID: id, CollectionID: meta.RestartCollID, PartitionID: RestartPartID,
+			State: commonpb.SegmentState_Flushed, StorageVersion: version,
+		}
+		if version == storage.StorageV3 {
+			segment.ManifestPath = packed.MarshalManifestPath(storage.SegmentManifestBasePath(m.ChunkManager.RootPath(), meta.RestartCollID, RestartPartID, id), 1)
+		}
+		require.NoError(t, m.AddSegment(ctx, meta.NewSegmentInfo(segment)))
+	}
+
+	// Only the V3 build should need a catalog read to resolve its file names.
+	reader := catalogmocks.NewDataCoordCatalog(t)
+	reader.EXPECT().GetSegmentIndex(ctx, meta.RestartCollID, RestartPartID, v3, buildOffset+v3).
+		RunAndReturn(catalog.GetSegmentIndex).Times(3)
+	resolver := &meta.Meta{Catalog: reader}
+	checkFiles := func(im *IndexMeta, id int64, want []string) {
+		t.Helper()
+		record, ok := im.GetIndexJob(buildOffset + id)
+		require.True(t, ok)
+		require.Equal(t, len(want), record.NumIndexFiles())
+		if id == v3 {
+			require.Empty(t, record.IndexFileKeys)
+		} else {
+			require.Equal(t, want, record.IndexFileKeys, "segment %d", id)
+		}
+		keys, err := resolver.ResolveIndexFileKeys(ctx, nil, record)
+		require.NoError(t, err)
+		require.Equal(t, want, keys)
+	}
+
+	initialKeys, finishedKeys := []string{"initial"}, []string{"part-0", "part-1"}
+	ids := []int64{v1, v2, v3, missing}
+	for _, id := range ids {
+		record := &model.SegmentIndex{
+			CollectionID: meta.RestartCollID, PartitionID: RestartPartID, SegmentID: id,
+			IndexID: meta.RestartIndexID, BuildID: buildOffset + id, IndexVersion: 1,
+			IndexState: commonpb.IndexState_Finished, IndexFileKeys: initialKeys,
+			IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		}
+		require.NoError(t, domains.IndexMeta.AddSegmentIndex(ctx, record))
+		checkFiles(domains.IndexMeta, id, initialKeys)
+		require.NoError(t, domains.IndexMeta.FinishTask(&workerpb.IndexTaskInfo{
+			BuildID: record.BuildID, State: commonpb.IndexState_Finished,
+			IndexFileKeys: finishedKeys, IndexStorePathVersion: record.IndexStorePathVersion,
+		}))
+		checkFiles(domains.IndexMeta, id, finishedKeys)
+	}
+
+	_, restarted := BootMetaForRestart(t, catalog, meta.RestartCollID)
+	for _, id := range ids {
+		checkFiles(restarted.IndexMeta, id, finishedKeys)
+	}
+}
+
 func TestSegmentIndexPersistedToEtcdWhenManifestWritesOff(t *testing.T) {
 	meta.WithSegmentIndexManifestWrites(t, false)
 	store := meta.NewFakeManifestStore(t)

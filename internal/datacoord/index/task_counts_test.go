@@ -33,10 +33,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -321,6 +323,9 @@ func TestIndexTaskCountsRecoveryReplacement(t *testing.T) {
 	}
 	m, err := NewIndexMeta(context.Background(), catalog, []int64{1, 2, 3})
 	require.NoError(t, err)
+	store := metacache.NewMetaStore(nil)
+	store.PutSegment(&datapb.SegmentInfo{ID: finished.SegmentID, StorageVersion: storage.StorageV3})
+	m.FinishCatalogRecovery(&meta.Meta{MetaStore: store})
 	recovered, ok := m.SegmentBuildInfo.Get(finished.BuildID)
 	require.True(t, ok)
 	require.Nil(t, recovered.IndexFileKeys)

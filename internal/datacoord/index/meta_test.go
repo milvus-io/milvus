@@ -1786,7 +1786,7 @@ func TestMeta_FinishTaskIndexStorePathVersion(t *testing.T) {
 		segIdx, ok := m.SegmentBuildInfo.Get(meta.BuildID)
 		assert.True(t, ok)
 		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, segIdx.IndexStorePathVersion)
-		assert.Empty(t, segIdx.IndexFileKeys)
+		assert.Equal(t, []string{"file1", "file2"}, segIdx.IndexFileKeys)
 		assert.Equal(t, 2, segIdx.NumIndexFiles())
 	})
 

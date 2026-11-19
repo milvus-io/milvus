@@ -36,7 +36,7 @@ type PartitionStatsPublication interface {
 // SegmentIndexCatalog is what the manifest commit path and the segment
 // readiness predicate need from the index meta. indexMeta implements it.
 type SegmentIndexCatalog interface {
-	SetIndexFileStore(*Meta)
+	FinishCatalogRecovery(*Meta)
 	GetSegmentIndexState(collID, segmentID, indexID int64) *indexpb.SegmentIndexState
 	// GetIndexParams returns the index params of the index.
 	GetIndexParams(collID, indexID UniqueID) []*commonpb.KeyValuePair
