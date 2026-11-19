@@ -60,6 +60,8 @@ func TestSplitShardTaskCatalog(t *testing.T) {
 				}
 				return nil
 			})
+		kv.EXPECT().RemoveWithPrefix(mock.Anything, "datacoord-meta/split-history/100/7/").Return(nil)
+		kv.EXPECT().Remove(mock.Anything, adoptionKey(100, 7)).Return(nil)
 		kv.EXPECT().Remove(mock.Anything, key).RunAndReturn(func(_ context.Context, k string) error {
 			delete(stored, k)
 			return nil

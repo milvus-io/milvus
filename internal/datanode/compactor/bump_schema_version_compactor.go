@@ -1557,6 +1557,6 @@ func NewBumpSchemaVersionCompactionTask(ctx context.Context, cm storage.ChunkMan
 		done:             make(chan struct{}, 1),
 		logIDAlloc:       allocator.NewLocalAllocator(plan.GetPreAllocatedLogIDs().GetBegin(), plan.GetPreAllocatedLogIDs().GetEnd()),
 		chunkManager:     cm,
-		currentTime:      time.Now(),
+		currentTime:      compactionTTLTime(plan, time.Now()),
 	}
 }

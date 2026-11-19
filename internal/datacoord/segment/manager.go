@@ -28,13 +28,14 @@ import (
 )
 
 type AllocNewGrowingSegmentRequest struct {
-	CollectionID         UniqueID
-	PartitionID          UniqueID
-	SegmentID            UniqueID
-	ChannelName          string
-	StorageVersion       int64
-	IsCreatedByStreaming bool
-	SchemaVersion        int32
+	CollectionID          UniqueID
+	PartitionID           UniqueID
+	SegmentID             UniqueID
+	ChannelName           string
+	StorageVersion        int64
+	IsCreatedByStreaming  bool
+	SchemaVersion         int32
+	CreateSegmentTimeTick uint64
 }
 
 // Manager registers the growing segments that the streaming node allocates.
@@ -70,18 +71,28 @@ func (s *SegmentManager) AllocNewGrowingSegment(ctx context.Context, req AllocNe
 		manifestPath = packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 	}
 
+	// A WAL base has no row older than its CreateSegment message. Carry that
+	// explicit coverage before its first data pack publishes StartPosition.
+	// Legacy callers leave the birth unknown; non-streaming allocations cannot
+	// supply this WAL certificate.
+	var transformStart uint64
+	if req.IsCreatedByStreaming {
+		transformStart = req.CreateSegmentTimeTick
+	}
+
 	segmentInfo := &datapb.SegmentInfo{
-		ID:                   req.SegmentID,
-		CollectionID:         req.CollectionID,
-		PartitionID:          req.PartitionID,
-		InsertChannel:        req.ChannelName,
-		NumOfRows:            0,
-		State:                commonpb.SegmentState_Growing,
-		Level:                datapb.SegmentLevel_L1,
-		StorageVersion:       req.StorageVersion,
-		IsCreatedByStreaming: req.IsCreatedByStreaming,
-		ManifestPath:         manifestPath,
-		SchemaVersion:        req.SchemaVersion,
+		ID:                          req.SegmentID,
+		CollectionID:                req.CollectionID,
+		PartitionID:                 req.PartitionID,
+		InsertChannel:               req.ChannelName,
+		NumOfRows:                   0,
+		State:                       commonpb.SegmentState_Growing,
+		Level:                       datapb.SegmentLevel_L1,
+		StorageVersion:              req.StorageVersion,
+		IsCreatedByStreaming:        req.IsCreatedByStreaming,
+		ManifestPath:                manifestPath,
+		SchemaVersion:               req.SchemaVersion,
+		TransformStartAfterTimetick: transformStart,
 	}
 	segment := meta.NewSegmentInfo(segmentInfo)
 	if err := s.meta.AddSegment(ctx, segment); err != nil {

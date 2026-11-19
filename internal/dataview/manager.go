@@ -78,6 +78,11 @@ type Manager interface {
 	// DeclareShards adds empty shards to a collection that already has a
 	// DataView (see declare_shards.go). Idempotent.
 	DeclareShards(ctx context.Context, event DeclareShardsDataViewEvent) (*viewpb.DataVersion, error)
+	// PrepareAdoptSplit builds the snapshot of the adoption of a shard split
+	// under the Collection lock, for the adoption atomic txn (see
+	// adopt_split.go for the commit/abort contract). It moves the segments of
+	// the source to their targets and removes the source in one version.
+	PrepareAdoptSplit(ctx context.Context, event AdoptSplitDataViewEvent) (view *viewpb.DataViewOfCollection, commit func(), abort func(), err error)
 	// PrepareFlush builds the post-flush snapshot under the Collection lock
 	// for the flush atomic txn (see implementation comment for the
 	// commit/abort contract).

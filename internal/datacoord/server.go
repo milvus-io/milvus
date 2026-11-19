@@ -940,7 +940,23 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
 		return err
 	}
-	recoveredMeta.L0CompactionSuspended = recoveredSplits.IsL0CompactionSuspended
+	recoveredMeta.L0CompactionSuspended = func(channel string) bool { return splitL0CompactionSuspended(recoveredMeta, recoveredSplits, channel) }
+	recoveredMeta.SplitSource = func(channel string) bool {
+		for _, task := range recoveredSplits.List() {
+			if split.InWindow(task.GetState()) && task.GetSourceVchannel() == channel {
+				return true
+			}
+		}
+		return false
+	}
+	recoveredMeta.SourceSplitRewrite = func(channel string) *datapb.SplitShardRewritePlan {
+		for _, task := range recoveredSplits.List() {
+			if split.InWindow(task.GetState()) && task.GetSourceVchannel() == channel {
+				return split.RewritePlan(task)
+			}
+		}
+		return nil
+	}
 
 	// Collections come from RootCoord's MetaTable through the shared
 	// CollectionSource. Recover DataViews for live collections only, as the
@@ -1187,6 +1203,7 @@ func (s *Server) startServerLoop() {
 	if s.splitStore != nil {
 		s.splitManager = s.newSplitManager(s.serverLoopCtx)
 		s.splitManager.Start()
+		s.startSplitRewriteLoop(s.serverLoopCtx)
 	}
 
 	s.garbageCollector.Start()

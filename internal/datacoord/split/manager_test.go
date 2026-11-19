@@ -731,6 +731,23 @@ func TestManagerStopDoesNotWaitForAnIssueInFlight(t *testing.T) {
 	<-done
 }
 
+func TestSplitCapacityRefusalRunsUnderTheCollectionKey(t *testing.T) {
+	enableTrigger(t)
+	env := newTriggerEnv(t)
+	calls := 0
+	env.manager.deps.CheckRewrite = func(context.Context, int64, string) error {
+		calls++
+		if calls == 1 {
+			return nil
+		} // early check passes, under-key recheck refuses
+		return merr.WrapErrOperationNotSupportedMsg("atomic adoption would exceed transaction capacity")
+	}
+	_, err := env.manager.Split(context.Background(), testCollection, testSource)
+	require.NoError(t, err)
+	require.Equal(t, 1, env.admitted)
+	require.Empty(t, env.issued, "capacity refusal must precede the SplitShard message")
+}
+
 func TestSplitRechecksTargetReadinessBeforeFence(t *testing.T) {
 	paramtable.Init()
 	env := newTriggerEnv(t)

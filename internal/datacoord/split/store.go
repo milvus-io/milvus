@@ -50,6 +50,9 @@ type Target struct {
 	VChannel string
 	// GenesisTimeTick is the time tick of the SplitShard copy on the target.
 	GenesisTimeTick uint64
+	// Residues are the residues of the primary keys the target owns, taken
+	// against Record.RoutingModulus.
+	Residues []uint64
 }
 
 // Record is one split as the SplitShard ack callback observes it. Every time
@@ -61,6 +64,9 @@ type Record struct {
 	Targets      []Target
 	// SwitchTimeTick is T_switch: the time tick of the copy on the source.
 	SwitchTimeTick uint64
+	// RoutingModulus is the modulus of the routing after the split, from the
+	// message. Zero when the message carries no routing.
+	RoutingModulus uint64
 }
 
 // Store is the record DataCoord keeps of every shard split this cluster has
@@ -156,14 +162,14 @@ func (s *Store) WindowCount() int {
 }
 
 // IsL0CompactionSuspended reports whether L0 compaction on the vchannel is
-// suspended: the vchannel is a target of a split that is not adopted yet. The
-// segments of the source are not targets of that compaction, so the L0
-// segments of a target must be kept until the adoption has moved them there.
+// suspended: its source has not been adopted and taken out of service yet.
+// The coordinator explicitly resumes L0 only after g2 is published and g1
+// views are Down; adoption alone does not release this guard.
 func (s *Store) IsL0CompactionSuspended(vchannel string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, task := range s.tasks {
-		if InWindow(task.GetState()) && slices.Contains(targetVChannels(task), vchannel) {
+		if !task.GetL0Resumed() && slices.Contains(targetVChannels(task), vchannel) {
 			return true
 		}
 	}
@@ -171,9 +177,8 @@ func (s *Store) IsL0CompactionSuspended(vchannel string) bool {
 }
 
 // TransformPins returns, for each target of a split of the collection that is
-// not adopted yet, the time tick its Transform frontier is pinned at. The
-// history of a target from that tick on is needed by every segment of the
-// source until the adoption.
+// still retains its history, the time tick its Transform frontier is pinned
+// at. The pin remains after adoption until accumulated L0 history is folded.
 //
 // The pin of a target is T_switch. The genesis of a target is above T_switch
 // when the copy on the source is appended first; if a cluster ever appended it
@@ -183,7 +188,7 @@ func (s *Store) TransformPins(collectionID int64) map[string]uint64 {
 	defer s.mu.RUnlock()
 	var pins map[string]uint64
 	for _, task := range s.tasks {
-		if task.GetCollectionId() != collectionID || !InWindow(task.GetState()) ||
+		if task.GetCollectionId() != collectionID || task.GetPinsReleased() ||
 			task.GetState() < datapb.SplitShardTaskState_SplitShardTaskWindowOpen {
 			continue
 		}
@@ -268,7 +273,11 @@ func (s *Store) Record(ctx context.Context, record Record) (*datapb.SplitShardTa
 			return nil, merr.WrapErrServiceInternalMsg("target %q of shard split task %d is recorded without its genesis time tick",
 				target.VChannel, record.TaskID)
 		}
-		targets = append(targets, &datapb.SplitShardTaskTarget{Vchannel: target.VChannel, GenesisTimeTick: target.GenesisTimeTick})
+		targets = append(targets, &datapb.SplitShardTaskTarget{
+			Vchannel:        target.VChannel,
+			GenesisTimeTick: target.GenesisTimeTick,
+			Residues:        slices.Clone(target.Residues),
+		})
 	}
 
 	s.mu.Lock()
@@ -279,6 +288,7 @@ func (s *Store) Record(ctx context.Context, record Record) (*datapb.SplitShardTa
 		SourceVchannel: record.Source,
 		Targets:        targets,
 		SwitchTimeTick: record.SwitchTimeTick,
+		RoutingModulus: record.RoutingModulus,
 		State:          datapb.SplitShardTaskState_SplitShardTaskWindowOpen,
 		RecordTime:     time.Now().Unix(),
 	}
@@ -465,4 +475,39 @@ func (s *Store) refreshMetricsLocked() {
 	for value, name := range datapb.SplitShardTaskState_name {
 		metrics.DataCoordShardSplitTasks.WithLabelValues(name).Set(float64(counts[datapb.SplitShardTaskState(value)]))
 	}
+}
+
+// ResumeL0 is called only after g2 is published and all g1 views are Down.
+func (s *Store) ResumeL0(ctx context.Context, taskID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	task := s.tasks[taskID]
+	if task == nil {
+		return merr.WrapErrServiceNotReadyMsg("split task %d is not recorded", taskID)
+	}
+	if task.GetState() < datapb.SplitShardTaskState_SplitShardTaskAdopted {
+		return merr.WrapErrServiceNotReadyMsg("split task %d has not been adopted", taskID)
+	}
+	if task.GetL0Resumed() {
+		return nil
+	}
+	next := proto.Clone(task).(*datapb.SplitShardTask)
+	next.L0Resumed = true
+	return s.saveLocked(ctx, next)
+}
+
+// ReleasePins records that the target history has been folded into every base.
+func (s *Store) ReleasePins(ctx context.Context, taskID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	task := s.tasks[taskID]
+	if task == nil || !task.GetL0Resumed() {
+		return merr.WrapErrServiceNotReadyMsg("split task %d has not resumed L0 compaction", taskID)
+	}
+	if task.GetPinsReleased() {
+		return nil
+	}
+	next := proto.Clone(task).(*datapb.SplitShardTask)
+	next.PinsReleased = true
+	return s.saveLocked(ctx, next)
 }

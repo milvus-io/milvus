@@ -172,6 +172,7 @@ func (s *Server) splitDependencies() split.Dependencies {
 			return splitCollectionOf(collection), true
 		},
 		ShardStats:     s.splitShardStats,
+		CheckRewrite:   s.checkSplitRewriteCapacity,
 		DataViewShards: s.dataViewShards,
 		PChannels:      availablePChannels,
 		AllocID:        s.allocator.AllocID,
@@ -421,11 +422,33 @@ func (s *Server) dropSplitSourcesOfCollection(ctx context.Context, collectionID 
 	if s.splitStore == nil {
 		return nil
 	}
-	for _, source := range s.splitStore.Sources(collectionID, datapb.SplitShardTaskState_SplitShardTaskRetired) {
-		if err := s.dropVirtualChannelData(ctx, source); err != nil {
-			return merr.Wrapf(err, "drop split source %s of collection %d", source, collectionID)
+	channels := make(map[string]struct{})
+	hasTask := false
+	for _, task := range s.splitStore.List() {
+		if task.GetCollectionId() == collectionID {
+			hasTask = true
+			channels[task.GetSourceVchannel()] = struct{}{}
 		}
-		mlog.Info(ctx, "split source dropped with its collection", mlog.FieldCollectionID(collectionID), mlog.String("vchannel", source))
+	}
+	if hasTask {
+		// A committed overlay may not yet have canonicalized the original S rows.
+		// Persist Dropped for every effective owner before deleting that overlay.
+		// This also makes a crash in the CChannel branch before the target branches
+		// recoverable: no raw source row can reappear after its task is removed.
+		for _, segment := range s.meta.SelectSegments(ctx, meta.WithCollection(collectionID)) {
+			channels[segment.GetInsertChannel()] = struct{}{}
+		}
+	}
+	ordered := make([]string, 0, len(channels))
+	for channel := range channels {
+		ordered = append(ordered, channel)
+	}
+	slices.Sort(ordered)
+	for _, channel := range ordered {
+		if err := s.dropVirtualChannelData(ctx, channel); err != nil {
+			return merr.Wrapf(err, "drop effective split channel %s of collection %d", channel, collectionID)
+		}
+		mlog.Info(ctx, "split channel dropped with its collection", mlog.FieldCollectionID(collectionID), mlog.String("vchannel", channel))
 	}
 	return s.splitStore.DropCollection(ctx, collectionID)
 }
@@ -464,4 +487,32 @@ func (s *Server) truncateSplitSources(ctx context.Context, collectionID int64, t
 		}
 	}
 	return nil
+}
+
+// A secondary can persist target L0 before the SplitShard callback records
+// the target. Unknown channels retain L0 from that first flush onward.
+func splitL0CompactionSuspended(mt *meta.Meta, store *split.Store, channel string) bool {
+	if store.IsL0CompactionSuspended(channel) {
+		return true
+	}
+	collection := mt.GetCollection(funcutil.GetCollectionIDFromVChannel(channel))
+	if collection == nil || len(collection.VChannelNames) == 0 {
+		// Source and target copies can be consumed while coordinator callbacks
+		// are still catching up. Absence is not proof of an ordinary channel.
+		return funcutil.GetCollectionIDFromVChannel(channel) > 0
+	}
+	if slices.Contains(collection.VChannelNames, channel) {
+		return false
+	}
+	for _, task := range store.List() {
+		if task.GetSourceVchannel() == channel {
+			return false
+		}
+		for _, target := range task.GetTargets() {
+			if target.GetVchannel() == channel {
+				return false
+			}
+		}
+	}
+	return true
 }

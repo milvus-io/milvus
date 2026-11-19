@@ -191,6 +191,13 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildCompactionRequest() {
 	s.NoError(err)
 
 	task := s.generateBasicTask()
+	// The task predates the split. Dispatch must still attach the current
+	// frozen source cutoff, rather than the worker execution wall clock.
+	s.Require().Nil(task.GetTaskProto().GetSplitRewrite())
+	s.meta.SourceSplitRewrite = func(channel string) *datapb.SplitShardRewritePlan {
+		s.Equal("ch-1", channel)
+		return &datapb.SplitShardRewritePlan{RoutingModulus: 2, TtlCutoffTimetick: 100}
+	}
 
 	// Build compaction request
 	plan, err := task.BuildCompactionRequest()
@@ -199,6 +206,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildCompactionRequest() {
 
 	// Verify plan
 	s.True(plan.GetEnableManifestDelta())
+	s.EqualValues(100, plan.GetSplitRewrite().GetTtlCutoffTimetick())
 	s.Equal(int64(1), plan.GetPlanID())
 	s.Equal(datapb.CompactionType_BumpSchemaVersionCompaction, plan.GetType())
 	s.Equal("ch-1", plan.GetChannel())
