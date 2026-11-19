@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/antlr4-go/antlr/v4"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
@@ -3500,16 +3501,19 @@ func (v *ParserVisitor) parseMatchExpr(collectionName string, exprCtx parser.IEx
 
 	match := &planpb.MatchExpr{MatchType: matchType, Count: count}
 	field, fieldErr := v.schema.GetFieldFromName(collectionName)
-	if fieldErr == nil && v.schema.GetStructArrayFieldFromName(collectionName) == nil {
+	structField := v.schema.GetStructArrayFieldFromName(collectionName)
+	if fieldErr == nil && structField == nil {
 		if field.GetDataType() != schemapb.DataType_Array || !typeutil.IsPrimitiveType(field.GetElementType()) {
 			return merr.WrapErrParameterInvalidMsg("%s requires a scalar ARRAY or StructArray target, got %s", funcName, collectionName)
 		}
-		match.Collection = &planpb.MatchExpr_ArrayFieldId{ArrayFieldId: field.GetFieldID()}
+		match.TargetFieldId = proto.Int64(field.GetFieldID())
 		v.currentScalarArray = field
 	} else {
-		// Older schemas can expose only the flattened children. Resolve the
-		// qualified child in the predicate just as existing StructArray plans do.
 		match.StructName = collectionName
+		// A flattened legacy schema only exposes the children, so it has no parent ID to send.
+		if structField.GetFieldID() != 0 {
+			match.TargetFieldId = proto.Int64(structField.GetFieldID())
+		}
 	}
 	v.currentStructArrayField = collectionName
 	defer func() {

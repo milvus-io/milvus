@@ -18,10 +18,11 @@ at least one hit. LEAST, MOST and EXACT compare the count with the threshold;
 LEAST takes a positive threshold and the other two accept zero. A null parent
 produces UNKNOWN for all five quantifiers.
 
-The plan identifies the scalar collection by field ID. Existing StructArray
-plans retain their original wire representation. Future kinds of collection
-target can extend the plan independently of element binding. JSON paths and
-their type and missing-value semantics are outside this change. Growing and
+The plan binds the target by field ID. StructArray writers send the parent ID
+and its name so older QueryNodes can read the plan. A reader uses the name
+only when the ID is absent, including plans from flattened legacy schemas.
+Scalar ARRAY writes only its field ID. A future JSON target will likewise
+bind by root field ID, with its path and missing-value semantics separate. Growing and
 sealed segments use the row-to-element offsets and evaluate the predicate
 against the raw array column. An ordinary scalar index returns row offsets and
 cannot supply these element hits.

@@ -629,6 +629,10 @@ class Schema {
     const FieldMeta&
     GetFirstArrayFieldInStruct(const std::string& struct_name) const;
 
+    // Column supplying the per-row element ranges for a logical MATCH target.
+    const FieldMeta&
+    GetMatchTargetField(FieldId target_id) const;
+
     // Field ID of the struct array field itself. Only schemas parsed from a
     // CollectionSchema proto know it.
     std::optional<FieldId>
@@ -737,6 +741,8 @@ class Schema {
 
     // struct_name -> field ID of the struct array field (built in ParseFrom)
     std::unordered_map<std::string, FieldId> struct_field_ids_;
+    // StructArray parent ID -> representative physical child in this schema.
+    std::unordered_map<FieldId, FieldId> struct_representative_ids_;
 
     // warmup policy settings
     // Valid values: "disable", "sync", "async" (empty string means no setting)
