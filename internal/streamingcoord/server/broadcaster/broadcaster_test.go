@@ -1348,7 +1348,17 @@ func TestForcePromoteSplitSourceProvenance(t *testing.T) {
 	}
 	metrics := newBroadcasterMetrics()
 	task := newBroadcastTaskFromImmutableMessage(copies[control], metrics, nil)
-	task = newBroadcastTaskFromProto(proto.Clone(task.task).(*streamingpb.BroadcastTask), metrics, nil)
+	task.copyAndSetAckedCheckpoints(copies[control])
+	require.True(t, task.isControlChannelAcked())
+	require.True(t, task.HasPendingMessagesInIncompleteState(), "the other streams are missing immediately after the control ACK clones the protobuf")
+	raw, err := proto.Marshal(task.task)
+	require.NoError(t, err)
+	stored := &streamingpb.BroadcastTask{}
+	require.NoError(t, proto.Unmarshal(raw, stored))
+	task = newBroadcastTaskFromProto(stored, metrics, nil)
+	task.copyAndSetAckedCheckpoints(copies[control]) // duplicate consumer ACK after restart
+	require.Len(t, task.PendingBroadcastMessages(), 2)
+	require.True(t, task.HasPendingMessagesInIncompleteState())
 	require.Equal(t, "A", task.BroadcastMessage().ReplicateHeader().ClusterID)
 	require.Equal(t, control, task.BroadcastMessage().ReplicateHeader().VChannel)
 	pending := newPendingBroadcastTask(task)
@@ -1379,4 +1389,25 @@ func TestForcePromoteSplitSourceProvenance(t *testing.T) {
 	require.Zero(t, observed)
 	require.NoError(t, bm.Ack(t.Context(), copies[source]))
 	require.Equal(t, 1, observed)
+}
+
+func TestBroadcastEmptyControlCheckpointAfterDataAck(t *testing.T) {
+	const control = "p2_vcchan"
+	msg := createNewBroadcastMsg([]string{"a", control}).WithBroadcastID(70)
+	task := newBroadcastTaskFromBroadcastMessage(msg, newBroadcasterMetrics(), nil)
+	id := walimplstest.NewTestMessageID(1)
+	for _, m := range msg.SplitIntoMutableMessage() {
+		if m.VChannel() != "a" {
+			continue
+		}
+		task.copyAndSetAckedCheckpoints(m.WithTimeTick(300).WithLastConfirmed(id).IntoImmutableMessage(id))
+	}
+	require.False(t, task.isControlChannelAcked(), "the nonnil empty repeated message is still pending")
+	require.Zero(t, task.ControlChannelTimeTick())
+	legacy := createNewWaitAckBroadcastTaskFromMessage(msg, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED, []byte{0, 1})
+	legacy.AckedCheckpoints = nil
+	task = newBroadcastTaskFromProto(legacy, newBroadcasterMetrics(), nil)
+	require.Len(t, task.PendingBroadcastMessages(), 1)
+	require.True(t, task.isControlChannelAcked())
+	require.Zero(t, task.ControlChannelTimeTick(), "legacy bitmap establishes ACK but no WAL position")
 }
