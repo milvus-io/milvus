@@ -311,10 +311,7 @@ func (m *Meta) segmentLoadNormalizer() metacache.SegmentNormalizer {
 				normalized.NumOfRows = corrected
 			}
 		}
-		if segment.GetStorageVersion() != storage.StorageV3 || segment.GetManifestPath() == "" {
-			return normalized, nil
-		}
-		if localStorage {
+		if localStorage && segment.GetStorageVersion() == storage.StorageV3 && segment.GetManifestPath() != "" {
 			manifestPath, err := NormalizeLocalManifestPath(segment.GetManifestPath(), local.RootPath(),
 				Params.MinioCfg.RootPath.GetValue(), segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 			if err != nil {
@@ -323,14 +320,6 @@ func (m *Meta) segmentLoadNormalizer() metacache.SegmentNormalizer {
 			if manifestPath != segment.GetManifestPath() {
 				clone()
 				normalized.ManifestPath = manifestPath
-			}
-		}
-		if hasInlineStatsFiles(normalized.TextStatsLogs) || hasInlineStatsFiles(normalized.JsonKeyStats) {
-			// Old catalog rows have no provenance marker. Retain their original
-			// lists if the manifest cannot confirm ownership. New rows skip I/O.
-			if entries, err := packed.GetManifestStats(normalized.GetManifestPath(), CreateStorageConfig()); err == nil && len(entries) > 0 {
-				clone()
-				compactCatalogStats(normalized, entries)
 			}
 		}
 		return normalized, nil

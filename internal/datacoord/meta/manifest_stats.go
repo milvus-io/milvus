@@ -42,7 +42,6 @@ func CompactManifestStats(segment *datapb.SegmentInfo) {
 
 type fieldStats interface {
 	GetFiles() []string
-	GetBuildID() int64
 	GetVersion() int64
 	GetFilesInManifest() bool
 }
@@ -63,16 +62,6 @@ func needsManifestStatsFiles[T fieldStats](fields map[int64]T) bool {
 		}
 	}
 	return false
-}
-
-// A catalog row from an older writer may contain files that never reached the
-// manifest. Compare build and version before releasing an unmarked list.
-func compactCatalogStats(segment *datapb.SegmentInfo, entries map[string]packed.ManifestStat) {
-	compactStatsFiles(segment, func(key string, s fieldStats) bool {
-		stat := entries[key]
-		return len(stat.Paths) > 0 && stat.Metadata["build_id"] == strconv.FormatInt(s.GetBuildID(), 10) &&
-			stat.Metadata["version"] == strconv.FormatInt(s.GetVersion(), 10)
-	})
 }
 
 // CompactCopiedStats checks older snapshot placeholders against the files in the

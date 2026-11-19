@@ -21,10 +21,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage/localmigrate"
@@ -54,25 +56,47 @@ func TestManifestStatsFileListsAfterReload(t *testing.T) {
 		{Key: "json_stats.102", Files: []string{jsonFile}, Metadata: map[string]string{"build_id": "82", "version": "1"}},
 	})
 	require.NoError(t, err)
-	old := proto.Clone(f.Segment).(*datapb.SegmentInfo)
-	old.ManifestPath = revision
-	old.TextStatsLogs = map[int64]*datapb.TextIndexStats{
-		101: {FieldID: 101, BuildID: 81, Version: 2, LogSize: 73, Files: []string{"old-catalog-name"}},
-		103: {FieldID: 103, BuildID: 83, Files: []string{"catalog-only"}},
+	stored := proto.Clone(f.Segment).(*datapb.SegmentInfo)
+	stored.ManifestPath = revision
+	stored.TextStatsLogs = map[int64]*datapb.TextIndexStats{
+		101: {FieldID: 101, BuildID: 81, Version: 2, LogSize: 73, Files: []string{text}},
 	}
-	old.JsonKeyStats = map[int64]*datapb.JsonKeyStats{
+	stored.JsonKeyStats = map[int64]*datapb.JsonKeyStats{
 		102: {FieldID: 102, BuildID: 82, Version: 1, JsonKeyStatsDataFormat: 3, Files: []string{"82/1/shared/index"}},
 	}
-	m := &Meta{ChunkManager: f.Cm}
-	cached, err := m.segmentLoadNormalizer()(old)
-	require.NoError(t, err)
+	reload := func(row *datapb.SegmentInfo) *datapb.SegmentInfo {
+		t.Helper()
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListSegments(mock.Anything, row.GetCollectionID()).Return([]*datapb.SegmentInfo{row}, nil).Once()
+		catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil).Once()
+		m := NewLocalManifestTestMeta(t, catalog, f.Cm)
+		reads := mockey.Mock(packed.GetManifestStats).Return(nil, merr.ErrIoFailed).Build()
+		defer reads.UnPatch()
+		require.NoError(t, LoadAndNormalize(t.Context(), m, []int64{row.GetCollectionID()}))
+		require.Zero(t, reads.Times())
+		return m.Segments.GetSegment(row.GetID()).SegmentInfo
+	}
+
+	// A copy target can persist its file names before publishing the worker's revision.
+	pending := proto.Clone(stored).(*datapb.SegmentInfo)
+	pending.State = commonpb.SegmentState_Importing
+	pending.IsImporting = true
+	pending.ManifestPath = packed.MarshalManifestPath(base, packed.ManifestEarliest)
+	loaded := reload(pending)
+	require.Equal(t, []string{text}, loaded.GetTextStatsLogs()[101].GetFiles())
+	require.Equal(t, []string{"82/1/shared/index"}, loaded.GetJsonKeyStats()[102].GetFiles())
+	require.False(t, loaded.GetTextStatsLogs()[101].GetFilesInManifest())
+	require.False(t, loaded.GetJsonKeyStats()[102].GetFilesInManifest())
+
+	CompactManifestStats(stored)
+	stored.TextStatsLogs[103] = &datapb.TextIndexStats{FieldID: 103, BuildID: 83, Files: []string{"catalog-only"}}
+	cached := reload(stored)
 	require.True(t, cached.TextStatsLogs[101].GetFilesInManifest())
 	require.Empty(t, cached.TextStatsLogs[101].GetFiles())
 	require.True(t, cached.JsonKeyStats[102].GetFilesInManifest())
 	require.Empty(t, cached.JsonKeyStats[102].GetFiles())
 	require.EqualValues(t, 73, cached.TextStatsLogs[101].GetLogSize())
 	require.Equal(t, []string{"catalog-only"}, cached.TextStatsLogs[103].GetFiles())
-	require.Equal(t, []string{"old-catalog-name"}, old.TextStatsLogs[101].GetFiles())
 	rpc := proto.Clone(cached).(*datapb.SegmentInfo)
 	require.NoError(t, ResolveSegmentStatsFiles(rpc))
 	require.Equal(t, []string{text}, rpc.TextStatsLogs[101].GetFiles())
