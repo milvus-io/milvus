@@ -214,9 +214,11 @@ func (b *broadcastTask) BroadcastMessage() message.BroadcastMutableMessage {
 
 // ControlChannelTimeTick returns the time tick of the control channel.
 func (b *broadcastTask) ControlChannelTimeTick() uint64 {
-	for idx, vc := range b.Header().VChannels {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for idx, vc := range b.header().VChannels {
 		if funcutil.IsControlChannel(vc) {
-			return b.task.AckedCheckpoints[idx].TimeTick
+			return b.task.AckedCheckpoints[idx].GetTimeTick()
 		}
 	}
 	return 0
@@ -246,12 +248,19 @@ func (b *broadcastTask) pendingBroadcastMessages() []message.MutableMessage {
 	// filter out the vchannel that has been acked.
 	pendingMessages := make([]message.MutableMessage, 0, len(msgs))
 	for i, msg := range msgs {
-		if b.task.AckedVchannelBitmap[i] != 0 || (b.task.AckedCheckpoints != nil && b.task.AckedCheckpoints[i] != nil) {
+		if b.channelAcked(i) {
 			continue
 		}
 		pendingMessages = append(pendingMessages, msg)
 	}
 	return pendingMessages
+}
+
+// channelAcked reads the legacy bitmap or a real WAL checkpoint. Cloning or
+// unmarshalling a repeated message field materializes its empty slots.
+// Caller holds b.mu.
+func (b *broadcastTask) channelAcked(idx int) bool {
+	return b.task.AckedVchannelBitmap[idx] != 0 || b.task.AckedCheckpoints[idx].GetTimeTick() != 0
 }
 
 // HasPendingMessagesInIncompleteState atomically checks whether this task is
@@ -467,7 +476,7 @@ func (b *broadcastTask) isControlChannelAcked() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for idx, vc := range b.header().VChannels {
-		if funcutil.IsControlChannel(vc) && b.task.AckedCheckpoints[idx] != nil {
+		if funcutil.IsControlChannel(vc) && b.channelAcked(idx) {
 			return true
 		}
 	}
