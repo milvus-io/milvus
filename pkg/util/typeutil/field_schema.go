@@ -42,8 +42,17 @@ func (h *FieldSchemaHelper) GetDim() (int64, error) {
 	return getDim(h.indexParams)
 }
 
+func (h *FieldSchemaHelper) supportsTextAnalysis() bool {
+	return IsStringType(h.schema.GetDataType()) || (h.schema.GetDataType() == schemapb.DataType_Array &&
+		h.schema.GetElementType() == schemapb.DataType_VarChar && IsStructSubField(h.schema.GetName()))
+}
+
 func (h *FieldSchemaHelper) EnableMatch() bool {
-	if !IsStringType(h.schema.GetDataType()) {
+	if !h.supportsTextAnalysis() {
+		return false
+	}
+	// Restored schemas can carry a formerly ignored match flag without an analyzer.
+	if h.schema.GetDataType() == schemapb.DataType_Array && !h.EnableAnalyzer() {
 		return false
 	}
 	s, err := h.typeParams.Get("enable_match")
@@ -59,7 +68,7 @@ func (h *FieldSchemaHelper) EnableJSONKeyStatsIndex() bool {
 }
 
 func (h *FieldSchemaHelper) EnableAnalyzer() bool {
-	if !IsStringType(h.schema.GetDataType()) {
+	if !h.supportsTextAnalysis() {
 		return false
 	}
 	s, err := h.typeParams.Get("enable_analyzer")

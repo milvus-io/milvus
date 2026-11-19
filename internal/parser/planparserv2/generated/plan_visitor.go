@@ -172,6 +172,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#fieldReference.
 	VisitFieldReference(ctx *FieldReferenceContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#textField.
+	VisitTextField(ctx *TextFieldContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#textMatchOption.
 	VisitTextMatchOption(ctx *TextMatchOptionContext) interface{}
 }

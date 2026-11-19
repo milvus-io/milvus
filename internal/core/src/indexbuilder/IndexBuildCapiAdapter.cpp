@@ -365,8 +365,13 @@ AdaptBuildIndexInfo(const proto::indexcgo::BuildIndexInfo& info,
                "index-build purpose does not match field type {}",
                field_type);
     if (purpose == BuildPurpose::TextIndex) {
-        AssertInfo(IsStringDataType(field_type),
-                   "text index build requires a string field");
+        AssertInfo(IsStringDataType(field_type) ||
+                       (field_type == DataType::ARRAY &&
+                        info.field_schema().element_type() ==
+                            proto::schema::DataType::VarChar &&
+                        IsStructSubField(info.field_schema().name())),
+                   "text index build requires a string field or VarChar struct "
+                   "sub-field");
     }
 
     auto params = AdaptParams(info);

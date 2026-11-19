@@ -17,6 +17,7 @@
 package meta
 
 import (
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -90,10 +91,10 @@ func (m *Meta) PrepareReadiness(collection *CollectionInfo) *segmentReadiness {
 	for _, field := range vectorFields {
 		vectorFieldIDs = append(vectorFieldIDs, field.GetFieldID())
 	}
-	// Text and JSON key stats are only built on top-level fields.
-	for _, field := range collection.Schema.GetFields() {
+	// Include match-enabled VarChar struct sub-fields in text readiness.
+	for _, field := range typeutil.GetAllFieldSchemas(collection.Schema) {
 		h := typeutil.CreateFieldSchemaHelper(field)
-		if h.EnableMatch() {
+		if schemautil.BuildTextStats(field) {
 			r.textStatsFieldIDs = append(r.textStatsFieldIDs, field.GetFieldID())
 		}
 		if h.EnableJSONKeyStatsIndex() && Params.CommonCfg.EnabledJSONKeyStats.GetAsBool() {

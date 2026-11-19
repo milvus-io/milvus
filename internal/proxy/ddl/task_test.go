@@ -6106,7 +6106,7 @@ func TestCreateCollectionTaskRejectsStructSubFieldTextMatch(t *testing.T) {
 			mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Maybe()
 			collectionName := "TestCreateCollectionTaskRejectsStructSubFieldTextMatch" + funcutil.GenRandomStr()
 			schema := constructCollectionSchemaWithStructArrayField(collectionName, testStructArrayField, false)
-			schema.StructArrayFields[0].Fields[0].TypeParams = append(schema.StructArrayFields[0].Fields[0].TypeParams,
+			schema.StructArrayFields[0].Fields[1].TypeParams = append(schema.StructArrayFields[0].Fields[1].TypeParams,
 				&commonpb.KeyValuePair{Key: key, Value: "true"})
 			marshaledSchema, err := proto.Marshal(schema)
 			require.NoError(t, err)
@@ -6125,7 +6125,7 @@ func TestCreateCollectionTaskRejectsStructSubFieldTextMatch(t *testing.T) {
 			require.NoError(t, task.OnEnqueue())
 			err = task.PreExecute(ctx)
 			require.ErrorIs(t, err, merr.ErrParameterInvalid)
-			require.ErrorContains(t, err, key+" is not supported on struct sub-field sub_text_array")
+			require.ErrorContains(t, err, key+" is not supported on struct sub-field sub_int_array")
 		})
 	}
 }
@@ -6141,8 +6141,12 @@ func TestCreateCollectionTaskWithStructArrayField(t *testing.T) {
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
 
-	// Test with StructArrayField
+	// Enable text matching on the VarChar child before its name is canonicalized.
 	schema := constructCollectionSchemaWithStructArrayField(collectionName, testStructArrayField, false)
+	text := schema.StructArrayFields[0].Fields[0]
+	text.TypeParams = append(text.TypeParams,
+		&commonpb.KeyValuePair{Key: common.EnableMatchKey, Value: "true"},
+		&commonpb.KeyValuePair{Key: common.EnableAnalyzerKey, Value: "true"})
 	marshaledSchema, err := proto.Marshal(schema)
 	assert.NoError(t, err)
 
@@ -6185,6 +6189,7 @@ func TestCreateCollectionTaskWithStructArrayField(t *testing.T) {
 		assert.Equal(t, fmt.Sprintf("%s[sub_text_array]", testStructArrayField), subFields[0].Name)
 		assert.Equal(t, schemapb.DataType_Array, subFields[0].DataType)
 		assert.Equal(t, schemapb.DataType_VarChar, subFields[0].ElementType)
+		assert.True(t, typeutil.CreateFieldSchemaHelper(subFields[0]).EnableMatch())
 
 		// sub_int_array -> testStructArrayField[sub_int_array]
 		assert.Equal(t, fmt.Sprintf("%s[sub_int_array]", testStructArrayField), subFields[1].Name)
