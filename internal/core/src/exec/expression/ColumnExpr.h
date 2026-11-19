@@ -81,6 +81,17 @@ class PhyColumnExpr : public Expr {
     Eval(EvalCtx& context, VectorPtr& result) override;
 
     void
+    SetQueryTimestamp(Timestamp timestamp) override {
+        has_updates_ = value_lookup_.BindUpdates(
+            segment_, expr_->GetColumn().field_id_, timestamp, active_count_);
+    }
+
+    bool
+    IsCacheable() const override {
+        return !has_updates_ && Expr::IsCacheable();
+    }
+
+    void
     SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) override {
         snapshot_ = snapshot;
     }
@@ -175,6 +186,7 @@ class PhyColumnExpr : public Expr {
     int64_t num_chunk_{0};
     int64_t current_chunk_id_{0};
     int64_t current_chunk_pos_{0};
+    bool has_updates_ = false;
     int64_t current_row_{0};
     const segcore::SegmentInternalInterface* segment_;
     const int64_t active_count_;

@@ -216,6 +216,24 @@ class PhyCompareFilterExpr : public Expr {
     Eval(EvalCtx& context, VectorPtr& result) override;
 
     void
+    SetQueryTimestamp(Timestamp timestamp) override {
+        const auto* segment = segment_;
+        const auto count = active_count_;
+        const bool left = left_value_lookup_.BindUpdates(
+            segment, left_field_, timestamp, count);
+        const bool right = right_value_lookup_.BindUpdates(
+            segment, right_field_, timestamp, count);
+        has_updates_ = left || right;
+        is_left_indexed_ = left_value_lookup_.HasReader();
+        is_right_indexed_ = right_value_lookup_.HasReader();
+    }
+
+    bool
+    IsCacheable() const override {
+        return !has_updates_ && Expr::IsCacheable();
+    }
+
+    void
     SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) override {
         snapshot_ = snapshot;
     }
@@ -937,6 +955,7 @@ class PhyCompareFilterExpr : public Expr {
     // segment offset so it does not depend on a later published chunk layout.
     int64_t current_data_global_pos_{0};
 
+    bool has_updates_ = false;
     const segcore::SegmentInternalInterface* segment_;
     const int64_t active_count_;
     const segcore::SegmentReadSnapshot* snapshot_{nullptr};

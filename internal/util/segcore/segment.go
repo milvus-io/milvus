@@ -263,6 +263,7 @@ func (s *cSegmentImpl) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan
 				plan.cRetrievePlan,
 				(*C.int64_t)(unsafe.Pointer(&plan.Offsets[0])),
 				C.int64_t(len(plan.Offsets)),
+				C.uint64_t(plan.Timestamp),
 			))
 		},
 		cgo.WithName("retrieve-by-offsets"),
