@@ -2535,9 +2535,9 @@ type MatchExpr struct {
 	// Compatibility for older readers and schemas with only flattened StructArray children.
 	// Writers with a StructArray parent ID send both its ID and name during rolling upgrades.
 	StructName string    `protobuf:"bytes,1,opt,name=struct_name,json=structName,proto3" json:"struct_name,omitempty"`
-	Predicate  *Expr     `protobuf:"bytes,2,opt,name=predicate,proto3" json:"predicate,omitempty"`                                                    // The condition expression using $[field] syntax (e.g., $[intField] == 1 && $[strField] == "aaa")
+	Predicate  *Expr     `protobuf:"bytes,2,opt,name=predicate,proto3" json:"predicate,omitempty"`                                                    // $ binds a scalar ARRAY element; $[field] binds a StructArray child.
 	MatchType  MatchType `protobuf:"varint,3,opt,name=match_type,json=matchType,proto3,enum=milvus.proto.plan.MatchType" json:"match_type,omitempty"` // Type of match operation
-	Count      int64     `protobuf:"varint,4,opt,name=count,proto3" json:"count,omitempty"`                                                           // For MatchLeast/MatchMost: the count parameter (N)
+	Count      int64     `protobuf:"varint,4,opt,name=count,proto3" json:"count,omitempty"`                                                           // Threshold for MatchLeast, MatchMost, and MatchExact.
 	// ID of the collection-valued field itself (the parent for StructArray).
 	// Readers use this ID when present and consult struct_name only when absent.
 	// Scalar ARRAY writes only the ID. A future JSON target will also use only the
