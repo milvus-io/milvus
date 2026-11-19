@@ -143,7 +143,20 @@ func (info *VChannelView) WritePathRecoveryState() (moduleapi.VChannelWritePathR
 	// A vchannel that was split keeps its registration on the write path, but
 	// it refuses DML there.
 	state.SplitTaskID = info.meta.GetSplitLineage().GetSplitTaskId()
+	state.SplitSourceVChannel = info.meta.GetSplitSourceVchannel()
+	state.SplitGenesisTaskID = info.meta.GetSplitGenesisTaskId()
 	return state, true
+}
+
+// ObserveSplitTarget records the origin that the write path checked before appending genesis.
+func (info *VChannelView) ObserveSplitTarget(header *message.SplitShardMessageHeader) {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	if info.meta.SplitGenesisTaskId == 0 {
+		info.meta.SplitGenesisTaskId = header.GetSplitTaskId()
+		info.meta.SplitSourceVchannel = header.GetSourceVchannel()
+		info.dirty = true
+	}
 }
 
 // SplitLineage returns the record of the shard split this vchannel is the

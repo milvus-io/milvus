@@ -914,6 +914,9 @@ message VChannelMeta {
     // accepts no DML after split_lineage.switch_time_tick. Its state stays
     // NORMAL, so local unreplicable messages are still observed.
     VChannelSplitLineage split_lineage = 8;
+    // Immutable origin of a target registered by SplitShard.
+    string split_source_vchannel = 9;
+    int64 split_genesis_task_id = 10;
 }
 
 // VChannelSplitLineage records that a vchannel was split, and into which vchannels.

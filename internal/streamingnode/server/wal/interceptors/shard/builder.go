@@ -20,6 +20,13 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 			shardInterceptor.allocFunctionRunners(collectionID, schemaInfo.VChannel, schemaInfo.Schema)
 		}
 	}
+	if snapshot := param.InitialRecoverSnapshot; snapshot != nil && snapshot.WritePathRecovery != nil {
+		for channel, state := range snapshot.WritePathRecovery.VChannels {
+			if state.SplitGenesisTaskID != 0 {
+				shardInterceptor.genesis.Store(state.CollectionID, splitGenesis{state.SplitGenesisTaskID, state.SplitSourceVChannel, channel})
+			}
+		}
+	}
 	shardInterceptor.initOpTable()
 	return shardInterceptor
 }

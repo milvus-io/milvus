@@ -81,6 +81,12 @@ func (impl *shardInterceptor) handleSplitShardOnSource(ctx context.Context, msg 
 	return appendOp(ctx, msg)
 }
 
+type splitGenesis struct {
+	task   int64
+	source string
+	target string
+}
+
 // handleSplitShardOnTarget creates a target vchannel. It registers the
 // collection on this pchannel for DML and segment assignment exactly as a
 // CreateCollection message does, through the same shard manager entry.
@@ -108,6 +114,18 @@ func (impl *shardInterceptor) handleSplitShardOnTarget(ctx context.Context, msg 
 			mlog.String("holder", holder), mlog.Int64("splitTaskID", header.GetSplitTaskId()))
 		return nil, status.NewUnrecoverableError("cannot create target vchannel %s of shard split task %d: the pchannel already holds vchannel %s of collection %d",
 			msg.VChannel(), header.GetSplitTaskId(), holder, header.GetCollectionId())
+	}
+
+	origin := splitGenesis{header.GetSplitTaskId(), header.GetSourceVchannel(), msg.VChannel()}
+	// Reserve before append: an error response can follow a durable WAL write.
+	// An already registered ordinary vchannel has no split origin.
+	previous, found := impl.genesis.Load(header.GetCollectionId())
+	if !exists {
+		previous, _ = impl.genesis.LoadOrStore(header.GetCollectionId(), origin)
+	}
+	if (exists && !found) || previous != origin {
+		return nil, status.NewUnrecoverableError("conflicting genesis for collection %d, target %s, source %s, split task %d",
+			header.GetCollectionId(), msg.VChannel(), header.GetSourceVchannel(), header.GetSplitTaskId())
 	}
 
 	msgID, err := appendOp(ctx, msg)

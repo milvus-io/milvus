@@ -393,6 +393,7 @@ func (m *VChannelRecoveryModule) handleSplitShardMessage(
 	msg := owned.Message()
 	if created := messageutil.SplitShardGenesisMessage(msg); created != nil {
 		m.handleCreateCollectionMessage(created)
+		m.vchannelView.ObserveSplitTarget(message.MustAsImmutableSplitShardMessageV2(msg).Header())
 		return
 	}
 	if !messageutil.IsSplitShardFence(msg) {

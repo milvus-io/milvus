@@ -143,8 +143,10 @@ func TestSplitShardGenesisCreatesTheVChannelModule(t *testing.T) {
 	observeOnManager(manager, newSplitShardCopy(splitTarget1, splitTaskID, 300))
 	meta := vchannelMetaOf(t, manager, splitTarget1)
 	require.True(t, proto.Equal(&streamingpb.VChannelMeta{
-		Vchannel: splitTarget1,
-		State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+		Vchannel:            splitTarget1,
+		SplitSourceVchannel: splitSource,
+		SplitGenesisTaskId:  splitTaskID,
+		State:               streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
 		CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
 			CollectionId: 1,
 			Partitions: []*streamingpb.PartitionInfoOfVChannel{
@@ -172,6 +174,8 @@ func TestSplitShardGenesisCreatesTheVChannelModule(t *testing.T) {
 	require.ElementsMatch(t, []int64{10, 11}, state.PartitionIDs)
 	require.Equal(t, uint64(300), state.SchemaTimeTick)
 	require.Zero(t, state.SplitTaskID)
+	require.EqualValues(t, splitTaskID, state.SplitGenesisTaskID)
+	require.Equal(t, splitSource, state.SplitSourceVChannel)
 
 	// The module is dirty, and its snapshot is what recovery reads back.
 	snapshots := manager.ConsumeDirtySnapshots()
