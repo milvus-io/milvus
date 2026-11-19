@@ -7,150 +7,148 @@
 # GLOBAL CONFIGURATIONS AND ALIASES
 # Define reusable conditions and patterns for better maintainability
 # ==============================================================================
-misc:
-  # Mixed E2E test suites run E2E + Go SDK, but no build/UT pipeline.
-  - mixed_e2e_test_files: &MIXED_E2E_TEST_FILES
-      - files~=^tests/go_client/(?!.*\.md$).+
-      - files~=^tests/(python_client|restful_client_v2)/(?!.*\.md$).+
-      - -files~=^(?!tests/(go_client|python_client|restful_client_v2)/|.*\.md$).+
+shared:
+  misc:
+    # Mixed E2E test suites run E2E + Go SDK, but no build/UT pipeline.
+    - mixed_e2e_test_files: &MIXED_E2E_TEST_FILES
+        - files~=^tests/go_client/(?!.*\.md$).+
+        - files~=^tests/(python_client|restful_client_v2)/(?!.*\.md$).+
+        - -files~=^(?!tests/(go_client|python_client|restful_client_v2)/|.*\.md$).+
 
-  # File pattern matchers
-  - &source_code_files files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
-  - &no_source_code_files -files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
-  - &only_go_unittest_files -files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
-  - &morethan_go_unittest_files files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
+    # File pattern matchers
+    - &source_code_files files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
+    - &no_source_code_files -files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
+    - &only_go_unittest_files -files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
+    - &morethan_go_unittest_files files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
   
-  # Build and test status conditions
-  - when_build_and_test_status_successs: &Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
-      - 'status-success=Build and test AMD64 Ubuntu 20.04'
-      - 'status-success=Build and test AMD64 Ubuntu 22.04'
-  - when_build_and_test_status_failed: &Build_AND_TEST_STATUS_FAILED_ON_UBUNTU_20_OR_UBUNTU_22
-      - &failed_on_ubuntu_20 'check-failure=Build and test AMD64 Ubuntu 20.04'
-      - &failed_on_ubuntu_22 'check-failure=Build and test AMD64 Ubuntu 22.04'
-  - when_go_sdk_status_success: &WHEN_GO_SDK_STATUS_SUCCESS
-      - 'status-success=go-sdk'
-      - 'status-success=milvus-sdk-go'
-      - 'status-success=ci-v2/go-sdk'
-  - when_cpp_unit_test_success: &WHEN_CPP_UNIT_TEST_SUCCESS
-      - 'status-success=cpp-unit-test'
-      - 'status-success=UT for Cpp'
-      - 'status-success=ci-v2/ut-cpp'
-  - when_go_unit_test_success: &WHEN_GO_UNIT_TEST_SUCCESS
-      - 'status-success=go-unit-test'
-      - 'status-success=UT for Go'
-      - 'status-success=ci-v2/ut-go'
-  - when_integration_unit_test_success: &WHEN_INTEGRATION_UNIT_TEST_SUCCESS
-      - 'status-success=integration-test'
-      - 'status-success=Integration Test'
-      - 'status-success=ci-v2/integration-test'
-  - when_e2e_test_success: &WHEN_E2E_TEST_SUCCESS
-      - 'status-success=cpu-e2e'
-      - 'status-success=ci-v2/e2e-default'
-  - when_build_success: &WHEN_BUILD_SUCCESS
-      - 'status-success=Build and test AMD64 Ubuntu 22.04'
-      - 'status-success=ci-v2/build'
-  - when_code_check_ubuntu_success: &WHEN_CODE_CHECK_UBUNTU_SUCCESS
-      - 'status-success=Code Checker AMD64 Ubuntu 22.04'
-      - 'status-success=ci-v2/code-check'
+    # Build and test status conditions
+    - when_build_and_test_status_successs: &Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
+        - 'status-success=Build and test AMD64 Ubuntu 20.04'
+        - 'status-success=Build and test AMD64 Ubuntu 22.04'
+    - when_build_and_test_status_failed: &Build_AND_TEST_STATUS_FAILED_ON_UBUNTU_20_OR_UBUNTU_22
+        - &failed_on_ubuntu_20 'check-failure=Build and test AMD64 Ubuntu 20.04'
+        - &failed_on_ubuntu_22 'check-failure=Build and test AMD64 Ubuntu 22.04'
+    - when_go_sdk_status_success: &WHEN_GO_SDK_STATUS_SUCCESS
+        - 'status-success=go-sdk'
+        - 'status-success=milvus-sdk-go'
+        - 'status-success=ci-v2/go-sdk'
+    - when_cpp_unit_test_success: &WHEN_CPP_UNIT_TEST_SUCCESS
+        - 'status-success=cpp-unit-test'
+        - 'status-success=UT for Cpp'
+        - 'status-success=ci-v2/ut-cpp'
+    - when_go_unit_test_success: &WHEN_GO_UNIT_TEST_SUCCESS
+        - 'status-success=go-unit-test'
+        - 'status-success=UT for Go'
+        - 'status-success=ci-v2/ut-go'
+    - when_integration_unit_test_success: &WHEN_INTEGRATION_UNIT_TEST_SUCCESS
+        - 'status-success=integration-test'
+        - 'status-success=Integration Test'
+        - 'status-success=ci-v2/integration-test'
+    - when_e2e_test_success: &WHEN_E2E_TEST_SUCCESS
+        - 'status-success=cpu-e2e'
+        - 'status-success=ci-v2/e2e-default'
+    - when_build_success: &WHEN_BUILD_SUCCESS
+        - 'status-success=Build and test AMD64 Ubuntu 22.04'
+        - 'status-success=ci-v2/build'
+    - when_code_check_ubuntu_success: &WHEN_CODE_CHECK_UBUNTU_SUCCESS
+        - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+        - 'status-success=ci-v2/code-check'
 
-  # CI-v2 checker conditions (3.0 branch)
-  - when_build_ut_cov_success: &WHEN_BUILD_UT_COV_SUCCESS
-      - 'status-success=ci-v2/build-ut-cov'
-  - when_e2e_amd_success: &WHEN_E2E_AMD_SUCCESS
-      - 'status-success=ci-v2/e2e-amd'
-  - when_master_legacy_build_ut_cov_success: &WHEN_MASTER_LEGACY_BUILD_UT_COV_SUCCESS
-      and:
-        - or: *WHEN_BUILD_SUCCESS
-        - or: *WHEN_CPP_UNIT_TEST_SUCCESS
-        - or: *WHEN_GO_UNIT_TEST_SUCCESS
-        - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
-        - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
-  - when_master_go_unit_legacy_build_ut_cov_success: &WHEN_MASTER_GO_UNIT_LEGACY_BUILD_UT_COV_SUCCESS
-      and:
-        - or: *WHEN_BUILD_SUCCESS
-        - or: *WHEN_GO_UNIT_TEST_SUCCESS
-        - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
-  - when_master_build_ut_cov_gate_success: &WHEN_MASTER_BUILD_UT_COV_GATE_SUCCESS
-      status-success=ci-v2/build-ut-cov
-  - when_master_go_unit_build_ut_cov_gate_success: &WHEN_MASTER_GO_UNIT_BUILD_UT_COV_GATE_SUCCESS
-      status-success=ci-v2/build-ut-cov
-  - when_master_legacy_build_ut_cov_failure: &WHEN_MASTER_LEGACY_BUILD_UT_COV_FAILURE
-      or:
-        - and:
-            - not:
-                or:
-                  - 'status-success=Build and test AMD64 Ubuntu 22.04'
-                  - 'status-success=ci-v2/build'
-            - or:
-                - 'status-failure=Build and test AMD64 Ubuntu 22.04'
-                - 'status-failure=ci-v2/build'
-        - and:
-            - not:
-                or:
-                  - 'status-success=UT for Go'
-                  - 'status-success=ci-v2/ut-go'
-            - or:
-                - 'status-failure=UT for Go'
-                - 'status-failure=ci-v2/ut-go'
-        - and:
-            - not:
-                or:
-                  - 'status-success=Integration Test'
-                  - 'status-success=ci-v2/integration-test'
-            - or:
-                - 'status-failure=Integration Test'
-                - 'status-failure=ci-v2/integration-test'
-        - and:
-            - *morethan_go_unittest_files
-            - not:
-                or:
-                  - 'status-success=cpp-unit-test'
-                  - 'status-success=ci-v2/ut-cpp'
-            - or:
-                - 'status-failure=cpp-unit-test'
-                - 'status-failure=ci-v2/ut-cpp'
-        - and:
-            - not:
-                or:
-                  - 'status-success=Code Checker AMD64 Ubuntu 22.04'
-                  - 'status-success=ci-v2/code-check'
-            - or:
-                - 'status-failure=Code Checker AMD64 Ubuntu 22.04'
-                - 'status-failure=ci-v2/code-check'
-  - when_master_go_unit_legacy_build_ut_cov_failure: &WHEN_MASTER_GO_UNIT_LEGACY_BUILD_UT_COV_FAILURE
-      or:
-        - and:
-            - not:
-                or:
-                  - 'status-success=Build and test AMD64 Ubuntu 22.04'
-                  - 'status-success=ci-v2/build'
-            - or:
-                - 'status-failure=Build and test AMD64 Ubuntu 22.04'
-                - 'status-failure=ci-v2/build'
-        - and:
-            - not:
-                or:
-                  - 'status-success=UT for Go'
-                  - 'status-success=ci-v2/ut-go'
-            - or:
-                - 'status-failure=UT for Go'
-                - 'status-failure=ci-v2/ut-go'
-        - and:
-            - not:
-                or:
-                  - 'status-success=Code Checker AMD64 Ubuntu 22.04'
-                  - 'status-success=ci-v2/code-check'
-            - or:
-                - 'status-failure=Code Checker AMD64 Ubuntu 22.04'
-                - 'status-failure=ci-v2/code-check'
-  - when_master_build_ut_cov_gate_not_success: &WHEN_MASTER_BUILD_UT_COV_GATE_NOT_SUCCESS
-      -status-success=ci-v2/build-ut-cov
+    # CI-v2 checker conditions (3.0 branch)
+    - when_build_ut_cov_success: &WHEN_BUILD_UT_COV_SUCCESS
+        - 'status-success=ci-v2/build-ut-cov'
+    - when_e2e_amd_success: &WHEN_E2E_AMD_SUCCESS
+        - 'status-success=ci-v2/e2e-amd'
+    - when_master_legacy_build_ut_cov_success: &WHEN_MASTER_LEGACY_BUILD_UT_COV_SUCCESS
+        and:
+          - or: *WHEN_BUILD_SUCCESS
+          - or: *WHEN_CPP_UNIT_TEST_SUCCESS
+          - or: *WHEN_GO_UNIT_TEST_SUCCESS
+          - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
+          - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
+    - when_master_go_unit_legacy_build_ut_cov_success: &WHEN_MASTER_GO_UNIT_LEGACY_BUILD_UT_COV_SUCCESS
+        and:
+          - or: *WHEN_BUILD_SUCCESS
+          - or: *WHEN_GO_UNIT_TEST_SUCCESS
+          - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
+    - when_master_build_ut_cov_gate_success: &WHEN_MASTER_BUILD_UT_COV_GATE_SUCCESS status-success=ci-v2/build-ut-cov
+    - when_master_go_unit_build_ut_cov_gate_success: &WHEN_MASTER_GO_UNIT_BUILD_UT_COV_GATE_SUCCESS status-success=ci-v2/build-ut-cov
+    - when_master_legacy_build_ut_cov_failure: &WHEN_MASTER_LEGACY_BUILD_UT_COV_FAILURE
+        or:
+          - and:
+              - not:
+                  or:
+                    - 'status-success=Build and test AMD64 Ubuntu 22.04'
+                    - 'status-success=ci-v2/build'
+              - or:
+                  - 'status-failure=Build and test AMD64 Ubuntu 22.04'
+                  - 'status-failure=ci-v2/build'
+          - and:
+              - not:
+                  or:
+                    - 'status-success=UT for Go'
+                    - 'status-success=ci-v2/ut-go'
+              - or:
+                  - 'status-failure=UT for Go'
+                  - 'status-failure=ci-v2/ut-go'
+          - and:
+              - not:
+                  or:
+                    - 'status-success=Integration Test'
+                    - 'status-success=ci-v2/integration-test'
+              - or:
+                  - 'status-failure=Integration Test'
+                  - 'status-failure=ci-v2/integration-test'
+          - and:
+              - *morethan_go_unittest_files
+              - not:
+                  or:
+                    - 'status-success=cpp-unit-test'
+                    - 'status-success=ci-v2/ut-cpp'
+              - or:
+                  - 'status-failure=cpp-unit-test'
+                  - 'status-failure=ci-v2/ut-cpp'
+          - and:
+              - not:
+                  or:
+                    - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+                    - 'status-success=ci-v2/code-check'
+              - or:
+                  - 'status-failure=Code Checker AMD64 Ubuntu 22.04'
+                  - 'status-failure=ci-v2/code-check'
+    - when_master_go_unit_legacy_build_ut_cov_failure: &WHEN_MASTER_GO_UNIT_LEGACY_BUILD_UT_COV_FAILURE
+        or:
+          - and:
+              - not:
+                  or:
+                    - 'status-success=Build and test AMD64 Ubuntu 22.04'
+                    - 'status-success=ci-v2/build'
+              - or:
+                  - 'status-failure=Build and test AMD64 Ubuntu 22.04'
+                  - 'status-failure=ci-v2/build'
+          - and:
+              - not:
+                  or:
+                    - 'status-success=UT for Go'
+                    - 'status-success=ci-v2/ut-go'
+              - or:
+                  - 'status-failure=UT for Go'
+                  - 'status-failure=ci-v2/ut-go'
+          - and:
+              - not:
+                  or:
+                    - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+                    - 'status-success=ci-v2/code-check'
+              - or:
+                  - 'status-failure=Code Checker AMD64 Ubuntu 22.04'
+                  - 'status-failure=ci-v2/code-check'
+    - when_master_build_ut_cov_gate_not_success: &WHEN_MASTER_BUILD_UT_COV_GATE_NOT_SUCCESS -status-success=ci-v2/build-ut-cov
 
-  # Branch configurations
-  - branch: &BRANCHES
-      - &MASTER_BRANCH base=master
-      - &2X_BRANCH base~=^2(\.\d+){1,2}$
-      - &3X_BRANCH base=3.0
+    # Branch configurations
+    - branch: &BRANCHES
+        - &MASTER_BRANCH base=master
+        - &2X_BRANCH base~=^2(\.\d+){1,2}$
+        - &3X_BRANCH base=3.0
 
 # ==============================================================================
 # PULL REQUEST RULES
