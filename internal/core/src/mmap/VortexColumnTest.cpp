@@ -3570,7 +3570,7 @@ TEST(VortexColumnTest, DictionaryVectorRetainsDecodedScalarValues) {
         auto offsets = std::make_shared<const std::vector<int64_t>>(
             std::initializer_list<int64_t>{15, 1, 0, 8, 15, 1});
         auto vector = TryMakeDictionaryVector(nullptr, type, column, offsets);
-        ASSERT_NE(vector, nullptr) << type;
+        ASSERT_NE(vector, nullptr) << static_cast<int>(type);
         DispatchVectorType(type, [&]<typename T>() {
             if constexpr (std::is_arithmetic_v<T> ||
                           std::is_same_v<T, std::string>) {
@@ -3581,7 +3581,7 @@ TEST(VortexColumnTest, DictionaryVectorRetainsDecodedScalarValues) {
                      nullptr,
                      TakePinPolicy::Batch});
                 ASSERT_TRUE(expected->IsOwned());
-                const auto items = expected->Access<VectorValue<T>>();
+                const auto items = expected->template Access<VectorValue<T>>();
                 column->ManualEvictCache();
                 column.reset();
                 offsets.reset();
