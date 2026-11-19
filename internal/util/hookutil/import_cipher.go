@@ -46,13 +46,19 @@ func RegisterImportReadKeys(source *indexcgopb.StoragePluginContext) error {
 	}
 	registrar, ok := cipher.(importReadKeyRegistrar)
 	if !ok {
-		return merr.Wrap(merr.ErrServiceUnimplemented, "cipher plugin does not support RegisterImportReadKeys")
+		return merr.WrapErrImportSysFailed("cipher plugin does not support RegisterImportReadKeys")
 	}
 	key, err := base64.StdEncoding.DecodeString(source.GetEncryptionKey())
 	if err != nil || len(key) == 0 {
-		return merr.WrapErrServiceInternalMsg("invalid source keyset for backup EZ %d", source.GetEncryptionZoneId())
+		return merr.WrapErrImportSysFailedMsg("invalid source keyset for backup EZ %d", source.GetEncryptionZoneId())
 	}
-	return merr.Wrap(registrar.RegisterImportReadKeys(source.GetEncryptionZoneId(), key), "register backup read keys")
+	err = registrar.RegisterImportReadKeys(source.GetEncryptionZoneId(), key)
+	if err != nil && !merr.IsRetryableErr(err) && !merr.IsCanceledOrTimeout(err) {
+		// Local registration can reject conflicting keysets. Give the worker
+		// reply the import failure code while preserving the plugin's reason.
+		err = merr.Combine(err, merr.ErrImportSysFailed)
+	}
+	return merr.Wrap(err, "register backup read keys")
 }
 
 // PrepareImportCipher validates the entire ordered wire context before making
@@ -68,16 +74,16 @@ func PrepareImportCipher(artifact string, properties, entries []*commonpb.KeyVal
 
 	take := func(ezID, collID int64) (*indexcgopb.StoragePluginContext, error) {
 		if len(cipherEntries) == 0 {
-			return nil, merr.WrapErrServiceInternalMsg("import task is missing a keyset for EZ %d", ezID)
+			return nil, merr.WrapErrImportSysFailedMsg("import task is missing a keyset for EZ %d", ezID)
 		}
 		zone, key, err := decodeEZContext(cipherEntries[0].GetValue())
 		cipherEntries = cipherEntries[1:]
 		if err != nil || ezID <= 0 || zone != ezID {
-			return nil, merr.WrapErrServiceInternalMsg("import task has an invalid key context for EZ %d", ezID)
+			return nil, merr.WrapErrImportSysFailedMsg("import task has an invalid key context for EZ %d", ezID)
 		}
 		decoded, err := base64.StdEncoding.DecodeString(key)
 		if err != nil || len(decoded) == 0 {
-			return nil, merr.WrapErrServiceInternalMsg("import task has an invalid keyset for EZ %d", ezID)
+			return nil, merr.WrapErrImportSysFailedMsg("import task has an invalid keyset for EZ %d", ezID)
 		}
 		return &indexcgopb.StoragePluginContext{EncryptionZoneId: zone, CollectionId: collID, EncryptionKey: key}, nil
 	}
@@ -86,7 +92,7 @@ func PrepareImportCipher(artifact string, properties, entries []*commonpb.KeyVal
 	if artifact != "" {
 		ezID, err := GetEzIDByImportEzk(artifact)
 		if err != nil {
-			return ImportCipherContext{}, err
+			return ImportCipherContext{}, merr.Combine(err, merr.ErrImportSysFailed)
 		}
 		result.Source, err = take(ezID, 0)
 		if err != nil {
@@ -101,7 +107,7 @@ func PrepareImportCipher(artifact string, properties, entries []*commonpb.KeyVal
 		}
 	}
 	if len(cipherEntries) != 0 {
-		return ImportCipherContext{}, merr.WrapErrServiceInternalMsg("import task has unexpected cipher.ezk entries")
+		return ImportCipherContext{}, merr.WrapErrImportSysFailedMsg("import task has unexpected cipher.ezk entries")
 	}
 	if err := RegisterImportReadKeys(result.Source); err != nil {
 		return ImportCipherContext{}, err

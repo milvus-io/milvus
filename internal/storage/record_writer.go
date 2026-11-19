@@ -387,7 +387,7 @@ func NewPackedRecordBatchWriter(
 	writerFormat string,
 	schemaBasedFormats []string,
 ) (*packedRecordBatchWriter, error) {
-	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, true, false, false, writerFormat, schemaBasedFormats)
+	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, true, false, writerFormat, schemaBasedFormats)
 }
 
 func NewImportPackedRecordBatchWriter(
@@ -401,7 +401,7 @@ func NewImportPackedRecordBatchWriter(
 	writerFormat string,
 	schemaBasedFormats []string,
 ) (*packedRecordBatchWriter, error) {
-	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, true, false, true, writerFormat, schemaBasedFormats)
+	return openPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, batchWriterOptions{validatePK: true, importTarget: true}, writerFormat, schemaBasedFormats)
 }
 
 func NewPartialPackedRecordBatchWriter(
@@ -415,7 +415,7 @@ func NewPartialPackedRecordBatchWriter(
 	writerFormat string,
 	schemaBasedFormats []string,
 ) (*packedRecordBatchWriter, error) {
-	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false, false, false, writerFormat, schemaBasedFormats)
+	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false, false, writerFormat, schemaBasedFormats)
 }
 
 // NewPartialPackedRecordBatchWriterWithTextRefsAsBinary creates a partial
@@ -434,7 +434,7 @@ func NewPartialPackedRecordBatchWriterWithTextRefsAsBinary(
 	writerFormat string,
 	schemaBasedFormats []string,
 ) (*packedRecordBatchWriter, error) {
-	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false, true, false, writerFormat, schemaBasedFormats)
+	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false, true, writerFormat, schemaBasedFormats)
 }
 
 func validatePackedRecordBatchWriterSchema(schema *schemapb.CollectionSchema) error {
@@ -449,6 +449,12 @@ func validatePackedRecordBatchWriterSchema(schema *schemapb.CollectionSchema) er
 	return nil
 }
 
+type batchWriterOptions struct {
+	validatePK       bool
+	textRefsAsBinary bool
+	importTarget     bool
+}
+
 func newPackedRecordBatchWriter(
 	basePath string,
 	schema *schemapb.CollectionSchema,
@@ -459,17 +465,32 @@ func newPackedRecordBatchWriter(
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	validatePK bool,
 	textRefsAsBinary bool,
-	importTarget bool,
 	writerFormat string,
 	schemaBasedFormats []string,
 ) (*packedRecordBatchWriter, error) {
-	if validatePK {
+	return openPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups,
+		storageConfig, storagePluginContext, batchWriterOptions{validatePK: validatePK, textRefsAsBinary: textRefsAsBinary}, writerFormat, schemaBasedFormats)
+}
+
+func openPackedRecordBatchWriter(
+	basePath string,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	multiPartUploadSize int64,
+	columnGroups []storagecommon.ColumnGroup,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+	opts batchWriterOptions,
+	writerFormat string,
+	schemaBasedFormats []string,
+) (*packedRecordBatchWriter, error) {
+	if opts.validatePK {
 		_, err := typeutil.GetPrimaryFieldSchema(schema)
 		if err != nil {
 			return nil, err
 		}
 	}
-	if !textRefsAsBinary {
+	if !opts.textRefsAsBinary {
 		if err := validatePackedRecordBatchWriterSchema(schema); err != nil {
 			return nil, err
 		}
@@ -480,7 +501,7 @@ func newPackedRecordBatchWriter(
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not convert collection schema %s to arrow schema: %s", schema.Name, err.Error()))
 	}
-	if textRefsAsBinary {
+	if opts.textRefsAsBinary {
 		arrowSchema = overrideTextFieldsToBinary(schema, arrowSchema)
 	}
 
@@ -496,12 +517,12 @@ func newPackedRecordBatchWriter(
 		extraProperties[packed.PropertyWriterSchemaBasedFormats] = strings.Join(schemaBasedFormats, ",")
 	}
 	open := packed.NewFFIPackedWriter
-	if importTarget {
+	if opts.importTarget {
 		open = packed.NewImportFFIPackedWriter
 	}
 	writer, err := open(basePath, arrowSchema, columnGroups, storageConfig, storagePluginContext, extraProperties)
 	if err != nil {
-		if importTarget {
+		if opts.importTarget {
 			return nil, merr.Wrap(err, "open packed import writer")
 		}
 		return nil, merr.WrapErrStorage(err, "can not new packed record writer")

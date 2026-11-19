@@ -406,6 +406,15 @@ func (node *DataNode) FlushChannels(ctx context.Context, req *datapb.FlushChanne
 	return merr.Success(), nil
 }
 
+func prepareV2ImportCipher(options, properties, entries []*commonpb.KeyValuePair, collectionID int64) (hookutil.ImportCipherContext, error) {
+	artifact, _ := importutilv2.GetEZK(options)
+	if artifact == "" && !importutilv2.IsBackup(options) && !importutilv2.IsL0Import(options) {
+		// Ordinary file imports only receive the destination's current key.
+		return hookutil.ImportCipherContext{}, hookutil.RegisterEZsFromPluginContext(entries)
+	}
+	return hookutil.PrepareImportCipher(artifact, properties, entries, collectionID)
+}
+
 func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportRequest) (*commonpb.Status, error) {
 	mlog.Info(context.TODO(), "datanode receive preimport request")
 
@@ -413,8 +422,7 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 		return merr.Status(err), nil
 	}
 
-	artifact, _ := importutilv2.GetEZK(req.GetOptions())
-	cipher, err := hookutil.PrepareImportCipher(artifact, req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID())
+	cipher, err := prepareV2ImportCipher(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID())
 	if err != nil {
 		return merr.Status(err), nil
 	}
@@ -469,8 +477,7 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 		return merr.Status(err), nil
 	}
 
-	artifact, _ := importutilv2.GetEZK(req.GetOptions())
-	cipher, err := hookutil.PrepareImportCipher(artifact, req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID())
+	cipher, err := prepareV2ImportCipher(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID())
 	if err != nil {
 		return merr.Status(err), nil
 	}

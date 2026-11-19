@@ -97,19 +97,23 @@ func TestPrepareImportCipher(t *testing.T) {
 			{source, {Key: CipherConfigUnsafeEZK, Value: "17:not-base64"}}, {source, {Key: CipherConfigUnsafeEZK, Value: "17:"}},
 		} {
 			_, err := PrepareImportCipher(artifact, properties, entries, 23)
-			require.Error(t, err)
+			require.ErrorIs(t, err, merr.ErrImportSysFailed)
 		}
 		require.Empty(t, cipher.reads)
 	})
 	t.Run("source requires read-only registration", func(t *testing.T) {
 		storeCipher(testCipher{})
 		_, err := PrepareImportCipher(artifact, nil, []*commonpb.KeyValuePair{source}, 23)
-		require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
+		require.ErrorIs(t, err, merr.ErrImportSysFailed)
 		storeCipher(nil)
 		_, err = PrepareImportCipher(artifact, nil, []*commonpb.KeyValuePair{source}, 23)
 		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 		storeCipher(&importReadCipher{err: merr.ErrServiceInternal})
 		_, err = PrepareImportCipher(artifact, nil, []*commonpb.KeyValuePair{source}, 23)
 		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.Equal(t, merr.Code(merr.ErrImportSysFailed), merr.Status(err).GetCode())
+		storeCipher(&importReadCipher{err: merr.ErrServiceUnavailable})
+		_, err = PrepareImportCipher(artifact, nil, []*commonpb.KeyValuePair{source}, 23)
+		require.Equal(t, merr.Code(merr.ErrServiceUnavailable), merr.Status(err).GetCode())
 	})
 }
