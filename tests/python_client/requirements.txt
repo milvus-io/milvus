@@ -26,7 +26,8 @@ pytest-sugar==0.9.5
 pytest-random-order
 
 # pymilvus
-pymilvus[bulk_writer] @ git+https://github.com/milvus-io/pymilvus.git@3d6d312e6a2bba86548498af30658b66e361bd48
+pymilvus==3.1.0rc108
+pymilvus[bulk_writer]==3.1.0rc108
 # for protobuf
 protobuf>=5.29.5
 
