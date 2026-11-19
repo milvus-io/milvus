@@ -1,15 +1,16 @@
-"""Single-Proxy smoke coverage for the running-request REST API."""
+"""Single-Proxy smoke coverage for the running-request Python SDK."""
 
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from time import monotonic, sleep
+from unittest.mock import Mock
 from uuid import uuid4
 
 import numpy as np
 import pytest
-import requests
 from common.common_type import CaseLabel
 from pymilvus import DataType, MilvusClient, MilvusException
+from pymilvus.exceptions import ParamError
 
 DIM = 128
 ROWS = 100_000
@@ -18,56 +19,39 @@ TOPK = 10
 
 
 @pytest.fixture
-def running_request_endpoint(host, port, token):
-    uri = f"http://{host}:{port}"
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
-
-    def post(action, payload):
-        response = requests.post(
-            f"{uri}/v2/vectordb/requests/running/{action}",
-            json=payload,
-            headers=headers,
-            timeout=10,
-        )
-        assert response.status_code == 200, response.text
-        return response.json()
-
-    return uri, token, post
-
-
-def successful_response(post, action, payload):
-    body = post(action, payload)
-    assert body["code"] == 0, body
-    return body["data"]
+def single_proxy_client(host, port, token):
+    with ExitStack() as resources:
+        app = MilvusClient(uri=f"http://{host}:{port}", token=token, dedicated=True)
+        resources.callback(app.close)
+        listed = app.list_running_requests(collection_name=f"missing_{uuid4().hex}", timeout=10)
+        node_id = single_node_id(listed)
+        yield app, node_id
 
 
 def single_node_id(result):
-    nodes = result["nodeResults"]
+    nodes = result.node_results
     if len(nodes) > 1:
         pytest.skip("Requires a single Proxy")
+    assert result.complete, result
     assert len(nodes) == 1, result
     node = nodes[0]
-    assert node["code"] == 0 and node["message"] == "", node
-    assert node["unimplemented"] is False, node
-    assert type(node["nodeId"]) is int and node["nodeId"] > 0, node
-    return node["nodeId"]
+    assert node.answered and not node.unimplemented, node
+    assert type(node.node_id) is int and node.node_id > 0, node
+    return node.node_id
 
 
 @pytest.mark.tags(CaseLabel.L0)
-def test_list_and_cancel_search_on_single_proxy(running_request_endpoint):
-    uri, token, post = running_request_endpoint
+def test_list_and_cancel_search_on_single_proxy(single_proxy_client):
+    app, node_id = single_proxy_client
     collection = f"running_requests_{uuid4().hex}"
-    filters = {"collectionName": collection}
-    node_id = single_node_id(successful_response(post, "list", filters))
+    filters = {"collection_name": collection}
 
     def records():
-        result = successful_response(post, "list", filters)
+        result = app.list_running_requests(timeout=10, **filters)
         assert single_node_id(result) == node_id
-        return result["requests"]
+        return result.requests
 
     with ExitStack() as resources:
-        app = MilvusClient(uri=uri, token=token, dedicated=True)
-        resources.callback(app.close)
         schema = app.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field("id", DataType.INT64, is_primary=True)
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=DIM)
@@ -106,7 +90,7 @@ def test_list_and_cancel_search_on_single_proxy(running_request_endpoint):
             call = pool.submit(search, vectors)
             deadline = monotonic() + 30
             while monotonic() < deadline:
-                matches = [row for row in records() if row["expr"] == expr]
+                matches = [row for row in records() if row.expr == expr]
                 if matches:
                     assert len(matches) == 1, matches
                     row = matches[0]
@@ -118,49 +102,48 @@ def test_list_and_cancel_search_on_single_proxy(running_request_endpoint):
             else:
                 pytest.fail("List did not capture the Search within 30 seconds")
 
-            assert row["type"] == "Search" and row["collectionName"] == collection, row
-            assert row["dbName"] == "default" and row["proxyId"] == node_id, row
-            assert row["nq"] == NQ and row["topk"] == TOPK and row["cancellable"], row
-            request_id = row["requestId"]
+            assert row.type == "Search" and row.collection_name == collection, row
+            assert row.db_name == "default" and row.proxy_id == node_id, row
+            assert row.nq == NQ and row.topk == TOPK and row.cancellable, row
+            request_id = row.request_id
             assert isinstance(request_id, str) and request_id, row
-            canceled = successful_response(post, "cancel", {"requestIds": [request_id], "reason": reason})
-            assert single_node_id(canceled) == node_id
-            assert [item["requestId"] for item in canceled["canceled"]] == [request_id], canceled
-            assert canceled["notFound"] == canceled["undetermined"] == [], canceled
+            canceled = app.cancel_requests([request_id], reason=reason, timeout=10)
+            assert len(canceled.node_results) == 1, canceled
+            node = canceled.node_results[0]
+            assert node.node_id == node_id and node.answered and not node.unimplemented, node
+            assert [item.request_id for item in canceled.canceled] == [request_id], canceled
+            assert canceled.not_found == canceled.undetermined == [], canceled
             with pytest.raises(MilvusException) as error:
                 call.result(timeout=60)
             assert error.value.code == 3002 and reason in error.value.message
 
-        assert all(row["requestId"] != request_id for row in records())
+        assert all(row.request_id != request_id for row in records())
         control = search(vectors[:1])
         assert len(control) == 1 and len(control[0]) == TOPK
 
 
 @pytest.mark.tags(CaseLabel.L0)
-def test_list_empty_result_and_cancel_unknown_id(running_request_endpoint):
-    _, _, post = running_request_endpoint
+def test_list_empty_result_and_cancel_unknown_id(single_proxy_client):
+    app, node_id = single_proxy_client
     missing = f"unknown_{uuid4().hex}"
-    result = successful_response(post, "list", {"collectionName": missing})
-    assert result["requests"] == [], result
-    node_id = single_node_id(result)
-    result = successful_response(post, "cancel", {"requestIds": [missing]})
+    result = app.list_running_requests(collection_name=missing, timeout=10)
     assert single_node_id(result) == node_id
-    assert result["notFound"] == [missing], result
-    assert result["canceled"] == result["undetermined"] == [], result
+    assert result.requests == [], result
+    canceled = app.cancel_requests([missing], timeout=10)
+    assert len(canceled.node_results) == 1, canceled
+    node = canceled.node_results[0]
+    assert node.node_id == node_id and node.answered and not node.unimplemented, node
+    assert canceled.not_found == [missing], canceled
+    assert not canceled.canceled and not canceled.undetermined, canceled
 
 
 @pytest.mark.tags(CaseLabel.L0)
-@pytest.mark.parametrize(
-    ("method", "payload", "code"),
-    [
-        pytest.param("list", {"collectionName": {}}, 1801, id="list-collection-type"),
-        pytest.param("list", {"minElapsedMs": "1"}, 1801, id="list-elapsed-type"),
-        pytest.param("cancel", {}, 1802, id="cancel-missing-ids"),
-        pytest.param("cancel", {"requestIds": []}, 1101, id="cancel-empty-ids"),
-        pytest.param("cancel", {"requestIds": [123]}, 1801, id="cancel-id-type"),
-    ],
-)
-def test_list_cancel_invalid_input(running_request_endpoint, method, payload, code):
-    _, _, post = running_request_endpoint
-    body = post(method, payload)
-    assert body["code"] == code, body
+def test_cancel_empty_ids_without_rpc(single_proxy_client, monkeypatch):
+    app, _ = single_proxy_client
+    rpc = Mock(side_effect=AssertionError("Invalid IDs reached CancelRequests RPC"))
+    monkeypatch.setattr(app._get_connection()._stub, "CancelRequests", rpc)
+    for ids in ([], None):
+        with pytest.raises(ParamError) as error:
+            app.cancel_requests(ids, timeout=10)
+        assert error.value.code == 1, error.value
+    rpc.assert_not_called()
