@@ -20,11 +20,17 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"net"
+	"net/http"
 	"testing"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/api/googleapi"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
@@ -252,26 +258,127 @@ func testBackupSourceOnEachDispatch(t *testing.T, newTask importContextFixture, 
 	cluster.AssertNotCalled(t, rpc, int64(42), mock.Anything, mock.Anything)
 }
 
+// The plugin's AWS SDK v1 exposes the HTTP status through StatusCode().
+type kmsResponseError struct {
+	error
+	status int
+}
+
+func (e kmsResponseError) StatusCode() int { return e.status }
+
+func (e kmsResponseError) OrigErr() error { return e.error }
+
+var backupDispatchStages = []struct {
+	rpc     string
+	newTask importContextFixture
+	state   internalpb.ImportJobState
+}{
+	{"CreatePreImport", newPreImportWriterContextTask, internalpb.ImportJobState_PreImporting},
+	{"CreateImport", newImportWriterContextTask, internalpb.ImportJobState_Importing},
+}
+
 func TestImportRetriesTransientSourceError(t *testing.T) {
-	job := preImportWriterContextJob(internalpb.ImportVersion_ImportVersionV2)
-	job.Options = backupContextOptions()
-	cipher := &backupContextCipher{writerContextCipher: writerContextCipher{key: []byte("ordinary")}, sourceErr: merr.ErrServiceUnavailable}
-	patch := mockey.Mock(hookutil.GetCipher).Return(cipher).Build()
-	t.Cleanup(func() { patch.UnPatch() })
-	task, im := newImportWriterContextTask(t, job)
-	cluster := session.NewMockCluster(t)
+	for _, stage := range backupDispatchStages {
+		t.Run(stage.rpc, func(t *testing.T) {
+			for _, tc := range []struct {
+				name  string
+				err   error
+				retry bool
+			}{
+				{"typed unavailable", merr.ErrServiceUnavailable, true},
+				{"Azure throttling", &azcore.ResponseError{StatusCode: http.StatusTooManyRequests, ErrorCode: "Throttled"}, true},
+				{"Azure unavailable", &azcore.ResponseError{StatusCode: http.StatusServiceUnavailable}, true},
+				{"Azure permission denied", &azcore.ResponseError{StatusCode: http.StatusForbidden, ErrorCode: "ForbiddenByRbac"}, false},
+				{"Google unavailable", &googleapi.Error{Code: http.StatusServiceUnavailable}, true},
+				{"Google permission denied", &googleapi.Error{Code: http.StatusForbidden, Message: "source access revoked"}, false},
+				{"AWS gateway timeout", kmsResponseError{errors.New("KMS request timed out"), http.StatusGatewayTimeout}, true},
+				{"AWS permission denied", kmsResponseError{errors.New("source access revoked"), http.StatusForbidden}, false},
+				{"AWS transport timeout", kmsResponseError{context.DeadlineExceeded, 0}, true},
+				{"HTTP denial takes precedence", errors.Join(&azcore.ResponseError{StatusCode: http.StatusForbidden}, context.DeadlineExceeded), false},
+				{"gRPC unavailable", status.Error(codes.Unavailable, "KMS unavailable"), true},
+				{"gRPC permission denied", status.Error(codes.PermissionDenied, "Decrypt permission revoked"), false},
+				{"network timeout", &net.DNSError{Err: "timeout", IsTimeout: true}, true},
+				{"untyped error text", errors.New("denied even though the message mentions HTTP 503"), false},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					job := preImportWriterContextJob(internalpb.ImportVersion_ImportVersionV2)
+					job.Options = backupContextOptions()
+					cipher := &backupContextCipher{
+						writerContextCipher: writerContextCipher{key: []byte("ordinary")},
+						sourceErr:           errors.Join(errors.New("KMS failed to decrypt"), tc.err),
+					}
+					patch := mockey.Mock(hookutil.GetCipher).Return(cipher).Build()
+					t.Cleanup(func() { patch.UnPatch() })
+					task, im := stage.newTask(t, job)
+					cluster := session.NewMockCluster(t)
+					task.CreateTaskOnWorker(41, cluster)
 
-	task.CreateTaskOnWorker(41, cluster)
-	pending := im.GetJob(context.Background(), job.GetJobID())
-	require.Equal(t, internalpb.ImportJobState_Importing, pending.GetState())
-	require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
-	cluster.AssertNotCalled(t, "CreateImport", int64(41), mock.Anything, mock.Anything)
+					got := im.GetJob(context.Background(), job.GetJobID())
+					cluster.AssertNotCalled(t, stage.rpc, int64(41), mock.Anything, mock.Anything)
+					if !tc.retry {
+						require.Equal(t, internalpb.ImportJobState_Failed, got.GetState())
+						require.Equal(t, "resolve backup EZK: "+cipher.sourceErr.Error(), got.GetReason())
+						return
+					}
+					require.Equal(t, stage.state, got.GetState())
+					require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+					cipher.sourceErr = nil
+					cluster.On(stage.rpc, int64(42), mock.Anything, mock.Anything).Return(nil).Once()
+					task.CreateTaskOnWorker(42, cluster)
+					require.Equal(t, []string{backupArtifact, backupArtifact}, cipher.artifacts)
+					require.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
+				})
+			}
+		})
+	}
+}
 
-	cipher.sourceErr = nil
-	cluster.EXPECT().CreateImport(int64(42), mock.Anything, mock.Anything).Return(nil).Once()
-	task.CreateTaskOnWorker(42, cluster)
-	require.Equal(t, []string{backupArtifact, backupArtifact}, cipher.artifacts)
-	require.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
+func TestImportWorkerCipherRejections(t *testing.T) {
+	backup := []*commonpb.KeyValuePair{{Key: importutilv2.BackupFlag, Value: "true"}}
+	malformed := merr.WrapErrImportSysFailedMsg("import task has an invalid keyset for EZ 17")
+	for _, stage := range backupDispatchStages {
+		t.Run(stage.rpc, func(t *testing.T) {
+			for _, tc := range []struct {
+				name     string
+				options  []*commonpb.KeyValuePair
+				err      error
+				terminal bool
+			}{
+				{"missing registrar", backupContextOptions(), merr.WrapErrImportSysFailedMsg("cipher plugin does not support RegisterImportReadKeys"), true},
+				{"malformed context", backup, malformed, true},
+				{"L0 with malformed context", []*commonpb.KeyValuePair{{Key: importutilv2.L0Import, Value: "true"}}, malformed, true},
+				{"source artifact only", []*commonpb.KeyValuePair{{Key: importutilv2.EZK, Value: backupArtifact}}, malformed, true},
+				{"ordinary import", nil, malformed, false},
+				{"worker not ready", backup, merr.ErrServiceNotReady, false},
+				{"old worker unimplemented", backup, merr.ErrServiceUnimplemented, false},
+				{"other worker internal error", backup, merr.ErrServiceInternal, false},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					job := preImportWriterContextJob(internalpb.ImportVersion_ImportVersionV2)
+					job.Options = tc.options
+					cipher := &backupContextCipher{writerContextCipher: writerContextCipher{key: []byte("ordinary")}}
+					patch := mockey.Mock(hookutil.GetCipher).Return(cipher).Build()
+					t.Cleanup(func() { patch.UnPatch() })
+					task, im := stage.newTask(t, job)
+					cluster := session.NewMockCluster(t)
+					// The coordinator sees the decoded application status from CreateTask.
+					workerErr := merr.CheckRPCCall(merr.Status(tc.err), nil)
+					cluster.On(stage.rpc, int64(41), mock.Anything, mock.Anything).Return(workerErr).Once()
+					task.CreateTaskOnWorker(41, cluster)
+					got := im.GetJob(context.Background(), job.GetJobID())
+					if tc.terminal {
+						require.Equal(t, internalpb.ImportJobState_Failed, got.GetState())
+						require.Equal(t, workerErr.Error(), got.GetReason())
+						return
+					}
+					require.Equal(t, stage.state, got.GetState())
+					cluster.On(stage.rpc, int64(42), mock.Anything, mock.Anything).Return(nil).Once()
+					task.CreateTaskOnWorker(42, cluster)
+					require.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
+				})
+			}
+		})
+	}
 }
 
 func TestBackupImportPluginContexts(t *testing.T) {

@@ -163,15 +163,11 @@ func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	req, err := AssembleImportRequest(t, job, t.meta, t.alloc)
 	if err != nil {
 		mlog.Warn(context.TODO(), "assemble import request failed", WrapTaskLog(t, mlog.Err(err))...)
-		if errors.IsAny(err, importid.ErrIDRangeTooSmall, errSnapshotTaskSource, errImportSourceKey) {
+		if errors.IsAny(err, importid.ErrIDRangeTooSmall, errSnapshotTaskSource) ||
+			(errors.Is(err, errImportSourceKey) && !retryableImportSourceError(err)) {
 			// Persist the source rejection or invalid reservation before the job
 			// times out and loses the cause. The checker fails its tasks on the next tick.
-			if updateErr := t.ImportMeta.UpdateJob(context.TODO(), t.GetJobID(),
-				UpdateJobState(internalpb.ImportJobState_Failed),
-				UpdateJobReason(err.Error())); updateErr != nil {
-				mlog.Warn(context.TODO(), "failed to mark import job failed after assemble error",
-					WrapTaskLog(t, mlog.Err(updateErr))...)
-			}
+			failImportDispatch(t, t.ImportMeta, err)
 			return
 		}
 		t.retryTimes++
@@ -180,6 +176,10 @@ func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())
 	if err != nil {
 		mlog.Warn(context.TODO(), "import failed", WrapTaskLog(t, mlog.Err(err))...)
+		if isBackupCipherRejection(req.GetOptions(), err) {
+			failImportDispatch(t, t.ImportMeta, err)
+			return
+		}
 		t.retryTimes++
 		return
 	}
