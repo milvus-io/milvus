@@ -20,7 +20,11 @@ func (r *Runtime) ApplyLiveEvent(ctx context.Context, event walview.VChannelReso
 		r.eventCond.Wait()
 	}
 	if stage := r.refresh; stage != nil && stage.err == nil && stage.includes(event) {
-		stage.pending = append(stage.pending, event)
+		if stage.live != nil {
+			stage.live.applyEvent(ctx, event)
+		} else {
+			stage.pending = append(stage.pending, event)
+		}
 	}
 	r.applyEvent(ctx, event)
 }
