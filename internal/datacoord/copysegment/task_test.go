@@ -555,37 +555,6 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerFailsUnsupportedExternalTas
 	s.Equal(updatedTask.GetReason(), updatedJob.GetReason())
 }
 
-func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerFailsUnsupportedSegmentRootedTask() {
-	task := CreateTestCopyTask(100, 2001).(*Task)
-	task.Task.Load().State = datapb.CopySegmentTaskState_CopySegmentTaskPending
-	copyMeta, _ := NewCopySegmentTaskTestMeta(s.T(), task)
-	task.CopyMeta = copyMeta
-
-	job := NewTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting).(*Job)
-	task.Task.Load().IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED.Enum()
-	task.Task.Load().IndexWriteToManifest = proto.Bool(true)
-	s.NoError(copyMeta.AddJob(context.Background(), job))
-
-	req := &datapb.CopySegmentRequest{TaskID: task.GetTaskId()}
-	assembleMock := mockey.Mock(AssembleCopySegmentRequest).Return(req, nil).Build()
-	defer assembleMock.UnPatch()
-
-	cluster := &copySegmentClusterMock{}
-	createMock := mockey.Mock((*copySegmentClusterMock).CreateCopySegment).
-		Return(merr.Wrapf(merr.ErrServiceUnimplemented,
-			"worker does not support segment-rooted index copy destinations")).Build()
-	defer createMock.UnPatch()
-
-	task.CreateTaskOnWorker(10, cluster)
-
-	updatedTask := copyMeta.GetTask(context.Background(), task.GetTaskId())
-	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updatedTask.GetState())
-	s.Contains(updatedTask.GetReason(), "datanode does not support the requested copy segment task")
-	updatedJob := copyMeta.GetJob(context.Background(), task.GetJobId())
-	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
-	s.Equal(updatedTask.GetReason(), updatedJob.GetReason())
-}
-
 func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerRetriesOtherErrors() {
 	tests := []struct {
 		name            string
@@ -604,9 +573,9 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerRetriesOtherErrors() {
 			err:             merr.ErrServiceNotReady,
 		},
 		{
-			name:     "legacy local unimplemented",
-			external: false,
-			err:      merr.Wrapf(merr.ErrServiceUnimplemented, "unsupported local task"),
+			name:            "segment rooted local unimplemented",
+			writeToManifest: true,
+			err:             merr.Wrapf(merr.ErrServiceUnimplemented, "unsupported local task"),
 		},
 	}
 
