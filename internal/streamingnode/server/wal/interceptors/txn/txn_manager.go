@@ -43,6 +43,7 @@ func NewTxnManager(pchannel types.PChannelInfo, uncommittedTxnBuilders map[messa
 		recoveredSessions:         recoveredSessions,
 		recoveredSessionsDoneChan: make(chan struct{}),
 		sessions:                  sessions,
+		splitAborts:               make(map[message.TxnID]splitAbort),
 		closed:                    nil,
 		metrics:                   m,
 	}
@@ -62,8 +63,17 @@ type TxnManager struct {
 	recoveredSessions         map[message.TxnID]struct{}
 	recoveredSessionsDoneChan chan struct{}
 	sessions                  map[message.TxnID]*TxnSession
+	splitAborts               map[message.TxnID]splitAbort
 	closed                    lifetime.SafeChan
 	metrics                   *metricsutil.TxnMetrics
+}
+
+// A local transaction in flight at a durable source fence has never entered
+// Commit. Keep that proof until its last lease ends, independently of WAL
+// checkpoint advancement. An absent proof after expiry or restart is unknown.
+type splitAbort struct {
+	vchannel string
+	expires  uint64
 }
 
 // RecoverDone returns a channel that is closed when all transactions are cleaned up.
@@ -127,13 +137,25 @@ func (m *TxnManager) buildTxnContext(ctx context.Context, msg message.MutableBeg
 // FailTxnAtVChannel aborts all transactions in the specified VChannel.
 // An empty VChannel covers the whole PChannel, regardless of transaction origin.
 func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
+	m.failTxnAtVChannel(vchannel, false)
+}
+
+// AbortAtSplitFence is called under the exclusive source WAL lock after append.
+func (m *TxnManager) AbortAtSplitFence(vchannel string) {
+	m.failTxnAtVChannel(vchannel, true)
+}
+
+func (m *TxnManager) failTxnAtVChannel(vchannel string, splitFence bool) {
 	// avoid the txn to be committed.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	ids := make([]int64, 0, len(m.sessions))
 	for id, session := range m.sessions {
 		if vchannel == "" || session.VChannel() == vchannel {
-			session.abort()
+			expires := session.abort()
+			if splitFence && expires != 0 {
+				m.splitAborts[id] = splitAbort{vchannel: vchannel, expires: expires}
+			}
 			delete(m.sessions, id)
 			delete(m.recoveredSessions, id)
 			ids = append(ids, int64(id))
@@ -153,6 +175,11 @@ func (m *TxnManager) CleanupTxnUntil(ts uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	for id, abort := range m.splitAborts {
+		if abort.expires <= ts {
+			delete(m.splitAborts, id)
+		}
+	}
 	for id, session := range m.sessions {
 		if session.IsExpiredOrDone(ts) {
 			session.Cleanup()
@@ -181,7 +208,22 @@ func (m *TxnManager) notifyRecoverDone() {
 func (m *TxnManager) GetSessionOfTxn(id message.TxnID) (*TxnSession, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.getSessionOfTxnLocked(id)
+}
 
+// GetSessionForCommit also reports transactions this WAL definitively aborted
+// before receiving a commit on the addressed split source.
+func (m *TxnManager) GetSessionForCommit(vchannel string, id message.TxnID) (*TxnSession, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if abort, ok := m.splitAborts[id]; ok && abort.vchannel == vchannel {
+		return nil, status.NewShardFenced(vchannel)
+	}
+	return m.getSessionOfTxnLocked(id)
+}
+
+func (m *TxnManager) getSessionOfTxnLocked(id message.TxnID) (*TxnSession, error) {
 	session, ok := m.sessions[id]
 	if !ok {
 		return nil, status.NewTransactionExpired("txn %d not found in manager", id)

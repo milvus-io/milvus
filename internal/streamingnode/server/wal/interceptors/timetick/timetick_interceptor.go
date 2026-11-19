@@ -162,7 +162,7 @@ func (impl *timeTickAppendInterceptor) handleCommit(ctx context.Context, msg mes
 	if err != nil {
 		return nil, err
 	}
-	session, err := impl.txnManager.GetSessionOfTxn(commitTxnMsg.TxnContext().TxnID)
+	session, err := impl.txnManager.GetSessionForCommit(msg.VChannel(), commitTxnMsg.TxnContext().TxnID)
 	if err != nil {
 		return nil, err
 	}
