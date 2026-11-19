@@ -62,6 +62,7 @@ type CompactionSignal struct {
 	pos          *msgpb.MsgPosition
 	resultCh     chan error
 	waitResult   bool
+	ctx          context.Context
 }
 
 func NewCompactionSignal() *CompactionSignal {
@@ -375,6 +376,7 @@ func (t *compactionTrigger) TriggerCompaction(ctx context.Context, signal *Compa
 	}
 
 	// force flag make sure signal is handle and returns error if any
+	signal.ctx = ctx
 	select {
 	case <-lifecycleCtx.Done():
 		return -1, stoppedErr
@@ -402,6 +404,11 @@ func (t *compactionTrigger) allocSignalID(ctx context.Context) (UniqueID, error)
 // handleSignal is the internal logic to convert compactionSignal into compaction tasks.
 func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 	ctx := t.lifecycleCtx()
+	if signal.waitResult && signal.ctx != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = contextutil.MergeContext(signal.ctx, ctx)
+		defer cancel()
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
