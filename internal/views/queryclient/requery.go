@@ -11,36 +11,12 @@ import (
 // ShardPlan holds the Phase 1 result for a shard, retained for use
 // in Requery stages that dispatch QueryOnView using the same view version and MVCC.
 type ShardPlan struct {
-	Selections          []*viewpb.QueryPlanWorkNode
-	ExecutionSummary    *viewpb.ExecutionSummary
-	CollectionSizeBytes *int64
-	ShardID             qviews.ShardID
-	Version             *viewpb.QueryViewVersion
-	Mvcc                *viewpb.QueryPlanMVCC
-	WorkNodes           []qviews.WorkNode
-}
-
-// CollectionSizeFromPlans returns a whole-collection sample from a successful
-// shard plan. During a view handoff shards can serve different DataVersions.
-// Prefer the newest measured DataVersion and break ties by channel so a
-// compaction that shrinks the collection is handled just like growth.
-func CollectionSizeFromPlans(plans []ShardPlan) *int64 {
-	var selected *ShardPlan
-	var latest qviews.DataVersion
-	for i := range plans {
-		p := &plans[i]
-		if p.CollectionSizeBytes == nil || *p.CollectionSizeBytes < 0 {
-			continue
-		}
-		version := qviews.FromProtoDataVersion(p.Version.GetDataVersion())
-		if selected == nil || version.GT(latest) || (version.EQ(latest) && p.ShardID.VChannel < selected.ShardID.VChannel) {
-			selected, latest = p, version
-		}
-	}
-	if selected == nil {
-		return nil
-	}
-	return selected.CollectionSizeBytes
+	Selections       []*viewpb.QueryPlanWorkNode
+	ExecutionSummary *viewpb.ExecutionSummary
+	ShardID          qviews.ShardID
+	Version          *viewpb.QueryViewVersion
+	Mvcc             *viewpb.QueryPlanMVCC
+	WorkNodes        []qviews.WorkNode
 }
 
 // RequeryRunner handles the Requery stage of the query pipeline.

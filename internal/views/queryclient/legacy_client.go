@@ -41,8 +41,9 @@ type LegacySearchRequest struct {
 }
 
 type LegacySearchResult struct {
-	Results []*internalpb.SearchResults
-	Plans   []ShardPlan
+	Results             []*internalpb.SearchResults
+	Plans               []ShardPlan
+	CollectionSizeBytes *int64
 }
 
 type LegacyQueryRequest struct {
@@ -60,8 +61,9 @@ type LegacyQueryRequest struct {
 }
 
 type LegacyQueryResult struct {
-	Results []*internalpb.RetrieveResults
-	Plans   []ShardPlan
+	Results             []*internalpb.RetrieveResults
+	Plans               []ShardPlan
+	CollectionSizeBytes *int64
 }
 
 type legacyOnlyClient struct {
@@ -116,27 +118,17 @@ func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (re
 	}
 
 	collector := newLegacySearchCollector()
-	shardPlans := make([]ShardPlan, len(vchannels))
-	g, gCtx := errgroup.WithContext(ctx)
-	for i := range vchannels {
-		i := i
-		g.Go(func() error {
-			plan, err := c.shardClient.Search(gCtx, &ShardSearchRequest{
-				TotalChannelNum: int32(len(vchannels)),
-				VChannel:        vchannels[i],
-				Req:             req.Req,
-				MVCC:            req.MVCC,
-				BarrierMVCC:     req.BarrierMVCC,
-				Reducer:         collector,
-			})
-			if err != nil {
-				return err
-			}
-			shardPlans[i] = *plan
-			return nil
+	shardPlans, size, err := executeShards(ctx, vchannels, func(ctx context.Context, vchannel string) (*shardResult, error) {
+		return c.shardClient.Search(ctx, &ShardSearchRequest{
+			TotalChannelNum: int32(len(vchannels)),
+			VChannel:        vchannel,
+			Req:             req.Req,
+			MVCC:            req.MVCC,
+			BarrierMVCC:     req.BarrierMVCC,
+			Reducer:         collector,
 		})
-	}
-	if err := g.Wait(); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
 	results, err := collector.Reduce(ctx, req.Req, shardPlans)
@@ -144,8 +136,9 @@ func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (re
 		return nil, err
 	}
 	return &LegacySearchResult{
-		Results: results,
-		Plans:   shardPlans,
+		Results:             results,
+		Plans:               shardPlans,
+		CollectionSizeBytes: size,
 	}, nil
 }
 
@@ -160,26 +153,16 @@ func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (resu
 	}
 
 	collector := newLegacyQueryCollector()
-	shardPlans := make([]ShardPlan, len(vchannels))
-	g, gCtx := errgroup.WithContext(ctx)
-	for i := range vchannels {
-		i := i
-		g.Go(func() error {
-			plan, err := c.shardClient.Query(gCtx, &ShardQueryRequest{
-				VChannel:    vchannels[i],
-				Req:         req.Req,
-				MVCC:        req.MVCC,
-				BarrierMVCC: req.BarrierMVCC,
-				Reducer:     collector,
-			})
-			if err != nil {
-				return err
-			}
-			shardPlans[i] = *plan
-			return nil
+	shardPlans, size, err := executeShards(ctx, vchannels, func(ctx context.Context, vchannel string) (*shardResult, error) {
+		return c.shardClient.Query(ctx, &ShardQueryRequest{
+			VChannel:    vchannel,
+			Req:         req.Req,
+			MVCC:        req.MVCC,
+			BarrierMVCC: req.BarrierMVCC,
+			Reducer:     collector,
 		})
-	}
-	if err := g.Wait(); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
 	results, err := collector.Reduce(ctx, req, shardPlans)
@@ -187,9 +170,45 @@ func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (resu
 		return nil, err
 	}
 	return &LegacyQueryResult{
-		Results: results,
-		Plans:   shardPlans,
+		Results:             results,
+		Plans:               shardPlans,
+		CollectionSizeBytes: size,
 	}, nil
+}
+
+// executeShards retains each successful plan for requery and selects one
+// whole-collection measurement for the request. Shards may serve different
+// DataVersions during handoff. Prefer the newest measured version, resolving
+// ties by vchannel so the result is independent of completion order.
+func executeShards(ctx context.Context, vchannels []string, execute func(context.Context, string) (*shardResult, error)) ([]ShardPlan, *int64, error) {
+	results := make([]*shardResult, len(vchannels))
+	group, ctx := errgroup.WithContext(ctx)
+	for i, vchannel := range vchannels {
+		group.Go(func() error {
+			result, err := execute(ctx, vchannel)
+			results[i] = result
+			return err
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return nil, nil, err
+	}
+
+	plans := make([]ShardPlan, len(results))
+	var size *int64
+	var latest qviews.DataVersion
+	var channel string
+	for i, result := range results {
+		plans[i] = result.ShardPlan
+		if result.collectionSizeBytes == nil || *result.collectionSizeBytes < 0 {
+			continue
+		}
+		version := qviews.FromProtoDataVersion(result.Version.GetDataVersion())
+		if size == nil || version.GT(latest) || (version.EQ(latest) && result.ShardID.VChannel < channel) {
+			size, latest, channel = result.collectionSizeBytes, version, result.ShardID.VChannel
+		}
+	}
+	return plans, size, nil
 }
 
 type legacySearchCollector struct {

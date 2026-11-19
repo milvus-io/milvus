@@ -70,10 +70,15 @@ type ShardQueryRequest struct {
 	Reducer     reducer.RetrieveResultReducer
 }
 
+// shardResult carries the retained plan and the measurement from the same successful attempt.
+type shardResult struct {
+	ShardPlan
+	collectionSizeBytes *int64
+}
+
 // Search executes Phase 1 + Phase 2 for a single shard's search.
 // Replica resolution is handled internally. Results are fed into the provided reducer.
-// Returns the ShardPlan for potential requery.
-func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchRequest) (*ShardPlan, error) {
+func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchRequest) (*shardResult, error) {
 	var stage twoStageSearch
 	return s.executeShard(ctx, req.VChannel, &shardExecParams{
 		collectionID:     req.Req.CollectionID,
@@ -116,8 +121,7 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 
 // Query executes Phase 1 + Phase 2 for a single shard's query (retrieve).
 // Replica resolution is handled internally. Results are fed into the provided reducer.
-// Returns the ShardPlan for potential requery.
-func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest) (*ShardPlan, error) {
+func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest) (*shardResult, error) {
 	return s.executeShard(ctx, req.VChannel, &shardExecParams{
 		collectionID:     req.Req.CollectionID,
 		consistencyLevel: req.Req.ConsistencyLevel,
@@ -187,7 +191,7 @@ func (s *shardViewQueryClient) executeShard(
 	ctx context.Context,
 	vchannel string,
 	params *shardExecParams,
-) (*ShardPlan, error) {
+) (*shardResult, error) {
 	var lastErr error
 	var loadCheck *collectionLoadCheck
 	defer func() {
@@ -296,14 +300,16 @@ func (s *shardViewQueryClient) executeShard(
 			return nil, err
 		}
 
-		return &ShardPlan{
-			ShardID:             shardID,
-			Version:             plan.Version,
-			Mvcc:                plan.GetMvcc(),
-			WorkNodes:           workNodes,
-			Selections:          plan.GetWorkNodes(),
-			ExecutionSummary:    response.GetExecutionSummary(),
-			CollectionSizeBytes: response.CollectionSizeBytes,
+		return &shardResult{
+			ShardPlan: ShardPlan{
+				ShardID:          shardID,
+				Version:          plan.Version,
+				Mvcc:             plan.GetMvcc(),
+				WorkNodes:        workNodes,
+				Selections:       plan.GetWorkNodes(),
+				ExecutionSummary: response.GetExecutionSummary(),
+			},
+			collectionSizeBytes: response.CollectionSizeBytes,
 		}, nil
 	}
 }

@@ -66,7 +66,7 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 				response.Results = nil
 			}
 			if scenario != "missing_size" {
-				response.Plans = []queryclient.ShardPlan{{CollectionSizeBytes: proto.Int64(12000)}}
+				response.CollectionSizeBytes = proto.Int64(12000)
 			}
 			if scenario == "incomplete" {
 				response.Results[1].HasMoreResult = true

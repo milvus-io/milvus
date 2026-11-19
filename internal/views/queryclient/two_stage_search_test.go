@@ -116,6 +116,7 @@ func TestTwoStageSearchRetriesEntireAttempt(t *testing.T) {
 	patchPlan := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 		plans++
 		planResponse := twoStageResponse(id)
+		planResponse.CollectionSizeBytes = proto.Int64(int64(1000 / plans))
 		plan := planResponse.GetPlan()
 		plan.WorkNodes = plan.WorkNodes[:1]
 		plan.Version.QueryVersion = int64(plans)
@@ -152,6 +153,7 @@ func TestTwoStageSearchRetriesEntireAttempt(t *testing.T) {
 	require.Equal(t, 2, filters)
 	require.Equal(t, 2, anns)
 	require.EqualValues(t, 2, plan.Version.QueryVersion)
+	require.Equal(t, proto.Int64(500), plan.collectionSizeBytes)
 }
 
 func TestTwoStageSearchSkipsIneligibleRequests(t *testing.T) {

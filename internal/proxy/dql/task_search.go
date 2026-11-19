@@ -129,6 +129,8 @@ type SearchTask struct {
 	queryInfos        []*planpb.QueryInfo
 	relatedDataSize   int64
 
+	collectionSizeBytes *int64 // Captured by the search that selected the shard plans.
+
 	// Rerank configuration metadata (nil means no rerank)
 	rerankMeta rerankMeta
 	rankParams *rankParams
@@ -1561,6 +1563,7 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 		t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
 	}
 	t.queryViewPlans = append([]queryclient.ShardPlan{}, result.Plans...)
+	t.collectionSizeBytes = result.CollectionSizeBytes
 	for _, searchResult := range result.Results {
 		t.resultBuf.Insert(searchResult)
 	}
@@ -1568,7 +1571,7 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 }
 
 func (t *SearchTask) CollectionSizeBytes() *int64 {
-	return queryclient.CollectionSizeFromPlans(t.queryViewPlans)
+	return t.collectionSizeBytes
 }
 
 // find the last bound based on reduced results and metric type

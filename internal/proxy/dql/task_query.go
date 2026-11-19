@@ -89,10 +89,9 @@ type QueryTask struct {
 	lb               shardclient.LBPolicy
 	viewQueryClient  queryclient.Client
 	queryViewPlans   []queryclient.ShardPlan
-	// CaptureCollectionSize requests the whole-collection sample from the successful plan.
-	CaptureCollectionSize bool
-	CollectionSizeBytes   *int64
-	channelsMvcc          map[string]Timestamp
+	// CollectionSizeBytes is the optional measurement from this query's planning phase.
+	CollectionSizeBytes *int64
+	channelsMvcc        map[string]Timestamp
 	// Output snapshots for internal partial-update reads, independent of the
 	// channelsMvcc input overrides. Only successful shard responses are recorded.
 	actualChannelsMvcc *typeutil.ConcurrentMap[string, uint64]
@@ -1175,9 +1174,7 @@ func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 	if err != nil {
 		return QueryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), err)
 	}
-	if t.CaptureCollectionSize {
-		t.CollectionSizeBytes = queryclient.CollectionSizeFromPlans(result.Plans)
-	}
+	t.CollectionSizeBytes = result.CollectionSizeBytes
 	for _, retrieveResult := range result.Results {
 		t.resultBuf.Insert(retrieveResult)
 	}

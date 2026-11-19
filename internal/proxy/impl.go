@@ -2760,9 +2760,6 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		}, false, false, false, err
 	}
 
-	if searchByPK != nil {
-		searchByPK.measureSize = report != nil && !isRecallEvaluation
-	}
 	validData, err := node.transformSearchByPK(ctx, request, searchByPK)
 	if err != nil {
 		return &milvuspb.SearchResults{Status: merr.Status(err)}, false, false, false, nil
@@ -3181,7 +3178,6 @@ func validateIDsType(pkField *schemapb.FieldSchema, ids *schemapb.IDs) error {
 
 type searchByPKPreflight struct {
 	collectionInfo *collectionInfo
-	measureSize    bool
 	collectionSize *int64
 }
 
@@ -3390,7 +3386,6 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 		QueryLabel:       metrics.QueryLabel,
 	}, node.GetMetaCache(), paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool())
 	qt.BindReadSchema(collectionInfo.CollID, collectionInfo.Schema)
-	qt.CaptureCollectionSize = preflight.measureSize
 	// The user issued a search, and the search path already counted it; this
 	// retrieval is how the Proxy serves it.
 	qt.MarkInternal()
@@ -3766,7 +3761,6 @@ func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequ
 	defer sp.End()
 	method := "Query"
 
-	qt.CaptureCollectionSize = report != nil
 	res, storageCost, err := node.query(ctx, qt, sp)
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {

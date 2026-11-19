@@ -140,7 +140,6 @@ func TestSearchReportsRequestedIDsOnEmptyResult(t *testing.T) {
 	size := int64(123)
 	queries := 0
 	query := mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
-		require.True(t, qt.CaptureCollectionSize)
 		qt.CollectionSizeBytes = &size
 		queries++
 		return searchByPKQueryResult([]int64{1, 2, 3}, []float32{}, []bool{false, false, false}), segcore.StorageCost{}, nil

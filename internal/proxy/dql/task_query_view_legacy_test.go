@@ -21,6 +21,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -67,6 +68,7 @@ func (c *fakeLegacyQueryClient) Query(ctx context.Context, req *queryclient.Lega
 func TestQueryTaskExecuteUsesQueryViewLegacyClient(t *testing.T) {
 	legacy := &fakeLegacyQueryClient{
 		queryResult: &queryclient.LegacyQueryResult{
+			CollectionSizeBytes: proto.Int64(0),
 			Results: []*internalpb.RetrieveResults{
 				{
 					Base:   commonpbutil.NewMsgBase(commonpbutil.WithSourceID(101)),
@@ -86,6 +88,7 @@ func TestQueryTaskExecuteUsesQueryViewLegacyClient(t *testing.T) {
 	}
 
 	require.NoError(t, task.Execute(context.Background()))
+	require.Equal(t, proto.Int64(0), task.CollectionSizeBytes)
 	require.Equal(t, 1, legacy.queryCalled)
 	require.Equal(t, 0, legacy.searchCalled)
 
@@ -100,6 +103,7 @@ func TestQueryTaskExecuteUsesQueryViewLegacyClient(t *testing.T) {
 func TestSearchTaskExecuteUsesQueryViewLegacyClient(t *testing.T) {
 	legacy := &fakeLegacyQueryClient{
 		searchResult: &queryclient.LegacySearchResult{
+			CollectionSizeBytes: proto.Int64(320),
 			Results: []*internalpb.SearchResults{
 				{
 					Base:   commonpbutil.NewMsgBase(commonpbutil.WithSourceID(202)),
@@ -121,6 +125,7 @@ func TestSearchTaskExecuteUsesQueryViewLegacyClient(t *testing.T) {
 	}
 
 	require.NoError(t, task.Execute(context.Background()))
+	require.Equal(t, proto.Int64(320), task.CollectionSizeBytes())
 	require.Equal(t, 1, legacy.searchCalled)
 	require.Equal(t, 0, legacy.queryCalled)
 

@@ -819,11 +819,10 @@ func (dr *DeleteRunner) complexDeleteByQueryView(ctx context.Context, serialized
 		return err
 	}
 	if dr.measurePayload && dr.IsFilterDelete() {
-		size := queryclient.CollectionSizeFromPlans(result.Plans)
-		if size == nil {
+		if result.CollectionSizeBytes == nil {
 			return merr.WrapErrServiceInternalMsg("query plan missing collection size for collection %d", dr.collectionID)
 		}
-		dr.collectionSizeBytes = *size
+		dr.collectionSizeBytes = *result.CollectionSizeBytes
 	}
 
 	primaryKeys := &schemapb.IDs{}
