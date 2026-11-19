@@ -24,7 +24,9 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -38,6 +40,7 @@ func (node *Proxy) retryDQL(ctx context.Context, dbName, collectionName string, 
 	isIterator, _ := strconv.ParseBool(iteratorValue)
 	refreshes := 0
 	autoLoad := Params.ProxyCfg.EnableAutoLoad.GetAsBool()
+	neededLoad := false
 	var terminalErr error
 	err := retry.Handle(ctx, func() (bool, error) {
 		terminalErr = nil
@@ -53,6 +56,7 @@ func (node *Proxy) retryDQL(ctx context.Context, dbName, collectionName string, 
 			if ctx.Err() != nil {
 				return false, context.Cause(ctx)
 			}
+			neededLoad = true
 			again, err = execute(ctx)
 			if ctx.Err() == nil && errors.Is(err, merr.ErrCollectionNotLoaded) {
 				return true, err
@@ -79,6 +83,13 @@ func (node *Proxy) retryDQL(ctx context.Context, dbName, collectionName string, 
 	// error while the parent request context is still valid.
 	if terminalErr != nil {
 		return terminalErr
+	}
+	if err == nil && autoLoad {
+		if dbName == "" {
+			dbName = util.DefaultDBName
+		}
+		mlog.Info(ctx, "collection access", mlog.String("event", "collection_access"),
+			mlog.FieldDbName(dbName), mlog.FieldCollectionName(collectionName), mlog.Bool("isColdSearch", neededLoad))
 	}
 	return err
 }

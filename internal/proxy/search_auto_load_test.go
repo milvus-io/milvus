@@ -19,6 +19,7 @@ package proxy
 import (
 	"context"
 	"net"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -49,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -172,6 +174,7 @@ func TestEnsureCollectionReadyRequiresQueryPrivilegeOnly(t *testing.T) {
 
 func TestSearchReturnsAutoLoadFailureAfterFirstAttempt(t *testing.T) {
 	enableAutoLoad(t)
+	logs := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "info"})
 	node := &Proxy{}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	readinessMock := mockey.Mock((*Proxy).ensureCollectionReady).To(
@@ -193,6 +196,7 @@ func TestSearchReturnsAutoLoadFailureAfterFirstAttempt(t *testing.T) {
 	require.ErrorIs(t, merr.Error(response.GetStatus()), merr.ErrIndexNotFound)
 	require.Equal(t, 1, readinessMock.Times())
 	require.Equal(t, 1, searchMock.Times())
+	require.NotContains(t, logs.String(), "[event=collection_access]")
 }
 
 func mockSearchCollectionMeta(t *testing.T, collectionID int64, vchannels []string) *MetaCache {
@@ -585,6 +589,7 @@ func TestDQLAutoLoadRetryThroughTaskAndGRPC(t *testing.T) {
 			t.Cleanup(func() { searchPost.UnPatch() })
 			require.NoError(t, node.sched.Start())
 
+			logs := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "info"})
 			var status *commonpb.Status
 			switch test.method {
 			case "HybridSearch":
@@ -604,16 +609,23 @@ func TestDQLAutoLoadRetryThroughTaskAndGRPC(t *testing.T) {
 				require.NoError(t, err)
 				status = resp.GetStatus()
 			}
+			const accessEvent = "[event=collection_access]"
+			const collectionAccess = accessEvent + " [dbName=db] [collectionName=collection]"
+			accessLogs := logs.String()
 			if test.phase == "wait" {
 				require.ErrorIs(t, merr.Error(status), merr.ErrCollectionNotLoaded)
+				require.NotContains(t, accessLogs, accessEvent)
 				require.True(t, client.server.injected.Load())
 				require.EqualValues(t, 1, searchTasks.Load())
 				return
 			}
 			require.NoError(t, merr.Error(status))
+			require.Equal(t, 1, strings.Count(accessLogs, accessEvent))
 			if test.phase == "hot" {
+				require.Contains(t, accessLogs, collectionAccess+" [isColdSearch=false]")
 				return
 			}
+			require.Contains(t, accessLogs, collectionAccess+" [isColdSearch=true]")
 			if test.phase != "unloaded" {
 				require.True(t, client.server.injected.Load())
 			}
@@ -632,6 +644,7 @@ func TestDQLAutoLoadRetryThroughTaskAndGRPC(t *testing.T) {
 
 func TestDQLAutoLoadRetriesImmediatelyAfterLoading(t *testing.T) {
 	enableAutoLoad(t)
+	logs := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "info"})
 	coord := mocks.NewMockMixCoordClient(t)
 	coord.EXPECT().EnsureCollectionReady(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 	node := &Proxy{metaCache: mockSearchCollectionMeta(t, 100, []string{"v0"}), mixCoord: coord}
@@ -639,7 +652,7 @@ func TestDQLAutoLoadRetriesImmediatelyAfterLoading(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		started := time.Now()
 		calls := 0
-		err := node.retryDQL(t.Context(), "db", "collection", nil, func(context.Context) (bool, error) {
+		err := node.retryDQL(t.Context(), "", "collection_alias", nil, func(context.Context) (bool, error) {
 			calls++
 			if calls == 1 {
 				return false, merr.WrapErrCollectionNotLoaded(100)
@@ -651,6 +664,8 @@ func TestDQLAutoLoadRetriesImmediatelyAfterLoading(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 2, calls)
 	})
+	require.Equal(t, 1, strings.Count(logs.String(), "[event=collection_access]"))
+	require.Contains(t, logs.String(), "[event=collection_access] [dbName=default] [collectionName=collection_alias] [isColdSearch=true]")
 }
 
 func TestDQLAutoLoadRetriesIteratorAfterRepeatedRelease(t *testing.T) {
