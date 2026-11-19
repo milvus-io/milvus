@@ -99,8 +99,8 @@ func TestEstimateSegmentFinalResourceUsesBinlogStatsAndTieredRatio(t *testing.T)
 		expectedMemory uint64
 		expectedDisk   uint64
 	}{
-		{name: "disabled uses full evictable resource", expectedMemory: 778, expectedDisk: 310},
-		{name: "enabled applies cache ratios", tieredEnabled: true, expectedMemory: 484, expectedDisk: 78},
+		{name: "disabled uses full evictable resource", expectedMemory: 578, expectedDisk: 310},
+		{name: "enabled applies cache ratios", tieredEnabled: true, expectedMemory: 384, expectedDisk: 78},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			usage, err := EstimateSegmentFinalResource(context.Background(), schema, loadInfo, SegmentFinalEstimateOptions{
@@ -251,7 +251,7 @@ func TestEstimateSegmentFinalResourceSkipsDroppedFields(t *testing.T) {
 	}
 
 	t.Run("index", func(t *testing.T) {
-		runnerCalled := false
+		calls := 0
 		usage, err := EstimateSegmentFinalResource(context.Background(), schema, &querypb.SegmentLoadInfo{
 			IndexInfos: []*querypb.FieldIndexInfo{
 				{FieldID: 999, IndexFilePaths: []string{"index"}},
@@ -260,12 +260,12 @@ func TestEstimateSegmentFinalResourceSkipsDroppedFields(t *testing.T) {
 				{FieldID: 100, Binlogs: []*datapb.Binlog{{MemorySize: 64}}},
 			},
 		}, SegmentFinalEstimateOptions{}, func(fn func() error) error {
-			runnerCalled = true
+			calls++
 			return fn()
 		})
 
 		require.NoError(t, err)
-		require.False(t, runnerCalled)
+		require.Equal(t, 1, calls)
 		require.EqualValues(t, 64, usage.MemoryBytes)
 		require.Zero(t, usage.DiskBytes)
 	})
@@ -337,8 +337,12 @@ func TestEstimateSegmentLoadingResourceSkipsCAGRAGPUMemoryWhenAdaptForCPU(t *tes
 		},
 	}
 
-	usage, err := EstimateSegmentLoadingResource(context.Background(), schema, loadInfo, SegmentLoadingEstimateOptions{}, func(func() error) error {
-		return nil
+	info, err := buildCLoadIndexInfo(schema.Fields[1], loadInfo, loadInfo.IndexInfos[0])
+	require.NoError(t, err)
+	require.Equal(t, metric.L2, info.GetIndexParams()[common.MetricTypeKey])
+	require.Equal(t, "true", info.GetIndexParams()["adapt_for_cpu"])
+	usage, err := EstimateSegmentLoadingResource(context.Background(), schema, loadInfo, SegmentLoadingEstimateOptions{}, func(fn func() error) error {
+		return fn()
 	})
 
 	require.NoError(t, err)
@@ -399,4 +403,57 @@ func TestEstimateSegmentLoadingResourceKeepsMilvusTableRealPKEager(t *testing.T)
 	require.EqualValues(t, 2000, usage.MemoryBytes)
 	require.Zero(t, usage.DiskBytes)
 	require.EqualValues(t, 100, loadInfo.GetEstimatedBytesPerRow())
+}
+
+func TestEstimateSegmentsLoadingResourceUsesOneCoreCall(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name:   "batch_resource",
+		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+	}
+	infos := []*querypb.SegmentLoadInfo{
+		{SegmentID: 1, BinlogPaths: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{MemorySize: 80, LogSize: 80, EntriesNum: 10}}}}, Statslogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{MemorySize: 30}}}}},
+		{SegmentID: 2, BinlogPaths: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{MemorySize: 160, LogSize: 160, EntriesNum: 20}}}}, Statslogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{MemorySize: 40}}}}},
+	}
+	for _, tiered := range []bool{false, true} {
+		calls := 0
+		total, segments, err := EstimateSegmentsLoadingResource(context.Background(), []*schemapb.CollectionSchema{schema, schema}, infos, SegmentLoadingEstimateOptions{TieredEvictionEnabled: tiered}, func(fn func() error) error { calls++; return fn() })
+		require.NoError(t, err)
+		require.Equal(t, 1, calls)
+		require.Len(t, segments, 2)
+		require.LessOrEqual(t, total.MemoryBytes, segments[0].MemoryBytes+segments[1].MemoryBytes)
+		if tiered {
+			require.EqualValues(t, 70, total.MemoryBytes)
+			require.EqualValues(t, 30, segments[0].MemoryBytes)
+			require.EqualValues(t, 40, segments[1].MemoryBytes)
+		} else {
+			require.GreaterOrEqual(t, total.MemoryBytes, uint64(80+160+70))
+		}
+	}
+}
+
+func TestEstimateSegmentsLoadingResourceValidatesInput(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Name: "empty"}
+	for _, test := range []struct {
+		name    string
+		schemas []*schemapb.CollectionSchema
+		infos   []*querypb.SegmentLoadInfo
+	}{
+		{name: "count mismatch", schemas: []*schemapb.CollectionSchema{schema}},
+		{name: "nil schema", schemas: []*schemapb.CollectionSchema{nil}, infos: []*querypb.SegmentLoadInfo{{}}},
+		{name: "nil segment", schemas: []*schemapb.CollectionSchema{schema}, infos: []*querypb.SegmentLoadInfo{nil}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, err := EstimateSegmentsLoadingResource(context.Background(), test.schemas, test.infos, SegmentLoadingEstimateOptions{}, func(fn func() error) error { t.Fatal("invalid metadata must not reach segcore"); return nil })
+			require.Error(t, err)
+		})
+	}
+	total, segments, err := EstimateSegmentsLoadingResource(context.Background(), nil, nil, SegmentLoadingEstimateOptions{}, func(fn func() error) error { t.Fatal("empty batch must not reach segcore"); return nil })
+	require.NoError(t, err)
+	require.Zero(t, total.MemoryBytes)
+	require.Empty(t, segments)
+}
+
+func TestEstimateSegmentsLoadingResourcePropagatesRunnerFailure(t *testing.T) {
+	_, _, err := EstimateSegmentsLoadingResource(context.Background(), []*schemapb.CollectionSchema{{Name: "runner_failure"}}, []*querypb.SegmentLoadInfo{{}}, SegmentLoadingEstimateOptions{}, func(fn func() error) error { return context.Canceled })
+	require.ErrorIs(t, err, context.Canceled)
 }

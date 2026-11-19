@@ -5,6 +5,7 @@ option go_package="github.com/milvus-io/milvus/pkg/v3/proto/cgopb";
 
 import "schema.proto";
 import "index_coord.proto";
+import "segcore.proto";
 
 message LoadIndexInfo {
   int64 collectionID = 1;
@@ -77,4 +78,40 @@ message Conditions {
   // At least two children. Tree-size budgets belong to extraction/planning,
   // not the protobuf schema; exceeding them disables or weakens index pruning.
   repeated LiteralCondition children = 1;
+}
+
+// Metadata-only field/index estimate for one complete loader request.
+message SegmentLoadResources {
+  schema.CollectionSchema schema = 1;
+  repeated segcore.FieldBinlog fields = 2;
+  repeated LoadIndexInfo indexes = 3;
+  int64 storage_version = 4;
+  bool external_collection = 5;
+  bool external_lazy_load = 6;
+}
+
+message BatchLoadResourceRequest {
+  repeated SegmentLoadResources segments = 1;
+  bool mmap_vector_field = 2;
+  bool mmap_scalar_field = 3;
+  bool prefer_field_data_when_index_has_raw_data = 4;
+  bool final_only = 5; // QueryCoord needs residency, without initializing load executors.
+}
+
+message CoreResourceUsage {
+  uint64 final_memory_bytes = 1;
+  uint64 final_disk_bytes = 2;
+  uint64 max_memory_bytes = 3;
+  uint64 max_disk_bytes = 4;
+  // Timestamp structures are not evictable; the other costs above are.
+  uint64 timestamp_memory_bytes = 5;
+  // Raw bytes eligible for an interim index; Go applies the build factor.
+  uint64 interim_index_bytes = 6;
+  repeated uint64 field_gpu_memory_bytes = 7;
+  uint64 mmap_field_count = 8;
+}
+
+message BatchLoadResourceResponse {
+  repeated CoreResourceUsage segments = 1;
+  CoreResourceUsage total = 2;
 }

@@ -25,6 +25,7 @@
 #include <limits>
 
 #include "common/Consts.h"
+#include "common/FieldMeta.h"
 #include "common/EasyAssert.h"
 #include "common/OpContext.h"
 #include "common/Utils.h"
@@ -485,6 +486,38 @@ bool
 CanUseIndexRawDataForField(DataType field_type, bool has_raw_data) {
     return has_raw_data && field_type != DataType::ARRAY &&
            field_type != DataType::VECTOR_ARRAY && field_type != DataType::JSON;
+}
+
+IndexLoadResourceEstimate
+IndexLoadResource(const proto::cgo::LoadIndexInfo& info) {
+    const auto field_type = static_cast<DataType>(info.field().data_type());
+    const auto element_type =
+        static_cast<DataType>(info.field().element_type());
+    const auto field = FieldMeta::ParseFrom(info.field());
+    const auto dim =
+        IsVectorDataType(field_type) && !IsSparseFloatVectorDataType(field_type)
+            ? field.get_dim()
+            : 1;
+    std::map<std::string, std::string> params(info.index_params().begin(),
+                                              info.index_params().end());
+    if (info.current_scalar_index_version() > 0) {
+        params[SCALAR_INDEX_ENGINE_VERSION] =
+            std::to_string(info.current_scalar_index_version());
+    }
+    if (params.find(INDEX_TYPE) == params.end()) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Can't find index type in index_params");
+    }
+    IndexLoadResourceEstimate result;
+    result.resource = IndexLoadResource(field_type,
+                                        element_type,
+                                        info.index_engine_version(),
+                                        info.index_file_size(),
+                                        params,
+                                        info.enable_mmap(),
+                                        info.num_rows(),
+                                        dim);
+    return result;
 }
 
 LoadResourceRequest

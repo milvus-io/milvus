@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "common/Types.h"
+#include "pb/cgo_msg.pb.h"
 #include "storage/artifact/FileSink.h"
 #include "storage/artifact/LoadOptions.h"
 #include "common/resource_c.h"
@@ -43,6 +44,17 @@ inline constexpr uint64_t kScalarIndexFixedResidentBytes = 2 * 1024;
 
 bool
 CanUseIndexRawDataForField(DataType field_type, bool has_raw_data);
+
+// Shared scratch is part of resource.max_memory_cost and capped once per batch.
+struct IndexLoadResourceEstimate {
+    LoadResourceRequest resource{};
+    uint64_t shared_memory_bytes{0};
+    uint64_t max_shared_task_bytes{0};
+};
+
+// Estimates from supplied metadata without opening index files.
+IndexLoadResourceEstimate
+IndexLoadResource(const proto::cgo::LoadIndexInfo& info);
 
 LoadResourceRequest
 IndexLoadResource(DataType field_type,
