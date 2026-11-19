@@ -99,6 +99,9 @@ IndexRequiresGpu(const std::string& type, std::string_view adapt_for_cpu) {
         }
         return true;
     }
+    // Keep this feature-only Knowhere boundary non-throwing.
+    static_assert(noexcept(knowhere::IndexFactory::Instance().FeatureCheck(
+        type, knowhere::feature::GPU)));
     return knowhere::IndexFactory::Instance().FeatureCheck(
         type, knowhere::feature::GPU);
 }
