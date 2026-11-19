@@ -644,7 +644,7 @@ func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, 
 		// classification is still caught — and stages the SegmentIndexRemove
 		// atomically; the batch path cannot retract records at all. Route
 		// every commit that drops columns through it.
-		if len(updates.DropColumns) > 0 || (Params.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() && len(updates.ColumnGroups) > 0) {
+		if len(updates.DropColumns) > 0 {
 			unit.singleCommit = true
 		}
 		return classifySegmentResult{unit: &unit}

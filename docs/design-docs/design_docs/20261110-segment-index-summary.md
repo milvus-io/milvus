@@ -17,11 +17,12 @@ The new mode is selected only when an empty cluster first starts and is persiste
 in the metadata namespace. Subsequent starts must select the same mode. Existing
 clusters cannot enable it, and summary-mode clusters cannot disable it. Manifest
 publication and `common.storage.useLoonFFI=true` are required. Summary mode
-pins the storage setting at startup. Historical migration, rollback, and
-conversion of incompatible snapshots are outside this version. Legacy direct
-manifest-version adoption (BatchUpdateManifest and pre-baked backfill results)
-is rejected before publication because it cannot update index inventory or fence
-active builds. Structured backfill remains supported by the commit framework.
+pins the storage, publication, backfill and rollback settings at startup.
+Historical migration, rollback and conversion of incompatible snapshots are
+outside this version. Legacy direct manifest-version adoption (BatchUpdateManifest
+and pre-baked backfill results) is rejected before publication because it cannot
+update index inventory or fence active builds. Structured backfill remains
+supported by the commit framework.
 
 Enable after both stack layers are installed, at the first startup, with both
 index migration switches disabled:

@@ -18,6 +18,7 @@ package index
 
 import (
 	"context"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -735,6 +736,66 @@ func TestCommitSegmentManifestPublishesIndexSizeOutsideSegmentLock(t *testing.T)
 	release()
 	require.NoError(t, <-committed)
 	require.Equal(t, map[int64]int64{meta.RestartCollID: 4096}, storedIndexSizeSeries(t))
+}
+
+func TestCommitSegmentManifestAddsColumnWithoutRetractingSummaries(t *testing.T) {
+	ctx := t.Context()
+	SetRollbackTestParam(t, &Params.DataCoordCfg.SegmentIndexSummariesEnabled, "true")
+	mt, _, err := NewMemoryMetaWithIndex(t)
+	require.NoError(t, err)
+
+	root := t.TempDir()
+	basePath := filepath.Join(root, "insert_log", "1", "10", "210")
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
+	columnGroup := func(field, file string) packed.ColumnGroupEntry {
+		return packed.ColumnGroupEntry{
+			Columns: []string{field},
+			Format:  "parquet",
+			Files: []packed.ColumnGroupFileEntry{{
+				Path: filepath.Join(basePath, "_data", file), EndIndex: 1,
+			}},
+		}
+	}
+	artifact := packed.ManifestIndexInfo{
+		ColumnName: "indexed_field", FieldID: 100, IndexID: 200, BuildID: 300, IndexVersion: 1, NumRows: 1,
+		IndexName: "idx", IndexType: "HNSW", Path: "300/1", IndexFileKeys: []string{"index"},
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+	}
+	original, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{
+		ColumnGroups: []packed.ColumnGroupEntry{columnGroup("100", "original.parquet")},
+		Indexes:      []packed.ManifestIndexInfo{artifact},
+	})
+	require.NoError(t, err)
+	summaries := []*datapb.SegmentIndexSummary{
+		{FieldId: 100, IndexId: 200, BuildId: 300, IndexVersion: 1, HasArtifact: true},
+		// A small segment can complete a build without artifacts before its
+		// new column is materialized. Adding the column does not add rows.
+		{FieldId: 101, IndexId: 201, BuildId: 301, IndexVersion: 1},
+	}
+	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 210, CollectionID: 1, PartitionID: 10, State: commonpb.SegmentState_Flushed, NumOfRows: 1,
+		StorageVersion: storage.StorageV3, ManifestPath: original, ManifestHasIndex: true, IndexSummaries: summaries,
+	})))
+	require.NoError(t, mt.CommitSegmentManifest(ctx, meta.SegmentManifestCommit{
+		SegmentID: 210, StorageConfig: cfg,
+		Mutation: meta.ManifestMutation{
+			Type: meta.ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{
+				ColumnGroups: []packed.ColumnGroupEntry{columnGroup("101", "added.parquet")},
+			},
+		},
+	}))
+	segment := mt.GetSegment(ctx, 210)
+	require.NotEqual(t, original, segment.GetManifestPath())
+	require.True(t, segment.GetManifestHasIndex())
+	require.Equal(t, summaries, segment.GetIndexSummaries())
+	fields, err := packed.GetManifestFieldIDs(segment.GetManifestPath(), cfg)
+	require.NoError(t, err)
+	require.Contains(t, fields, int64(101))
+	indexes, err := packed.GetManifestIndexInfos(segment.GetManifestPath(), cfg)
+	require.NoError(t, err)
+	require.Len(t, indexes, 1)
+	require.Equal(t, artifact.BuildID, indexes[0].BuildID)
 }
 
 // A backfill replace holds fieldIndexLock's read side across its publication

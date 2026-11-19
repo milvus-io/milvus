@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -36,31 +37,47 @@ func TestSegmentIndexSummariesConfig(t *testing.T) {
 	require.True(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
 }
 
-func TestSegmentIndexSummariesPinStorageV3AcrossRefresh(t *testing.T) {
-	for _, mode := range []string{"false", "true"} {
-		t.Run(mode, func(t *testing.T) {
+func TestSegmentIndexSummariesPinPrerequisitesAcrossRefresh(t *testing.T) {
+	for _, mode := range []bool{false, true} {
+		t.Run(strconv.FormatBool(mode), func(t *testing.T) {
 			base := &BaseTable{mgr: config.NewManager()}
 			defer base.mgr.Close()
 			require.NoError(t, base.Save("localStorage.path", t.TempDir()))
 			filename := filepath.Join(t.TempDir(), "milvus.yaml")
-			writeConfig := func(summaryMode, useLoonFFI string) {
+			writeConfig := func(summaryMode, prerequisites bool) {
 				t.Helper()
-				require.NoError(t, os.WriteFile(filename, []byte(
-					"dataCoord:\n  index:\n    segmentIndexSummariesEnabled: "+summaryMode+
-						"\ncommon:\n  storage:\n    useLoonFFI: "+useLoonFFI+"\n"), 0o600))
+				content := fmt.Sprintf(`dataCoord:
+  index:
+    segmentIndexSummariesEnabled: %t
+    writeSegmentIndexToManifest: %t
+    manifestIndexBackfill:
+      enabled: %t
+    manifestIndexRollback:
+      enabled: %t
+common:
+  storage:
+    useLoonFFI: %t
+`, summaryMode, prerequisites, !prerequisites, !prerequisites, prerequisites)
+				require.NoError(t, os.WriteFile(filename, []byte(content), 0o600))
 			}
-			writeConfig(mode, "true")
+			writeConfig(mode, true)
 			source := config.NewFileSource(&config.FileInfo{Files: []string{filename}})
 			require.NoError(t, base.mgr.AddSource(source))
 			var params ComponentParam
 			params.Init(base)
 			require.True(t, params.CommonCfg.UseLoonFFI.GetAsBool())
+			require.True(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
+			require.False(t, params.DataCoordCfg.ManifestIndexBackfillEnabled.GetAsBool())
+			require.False(t, params.DataCoordCfg.ManifestIndexRollbackEnabled.GetAsBool())
 
-			writeConfig(strconv.FormatBool(mode != "true"), "false")
+			writeConfig(!mode, false)
 			_, err := source.GetConfigurations()
 			require.NoError(t, err)
-			require.Equal(t, mode == "true", params.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool())
-			require.Equal(t, mode == "true", params.CommonCfg.UseLoonFFI.GetAsBool())
+			require.Equal(t, mode, params.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool())
+			require.Equal(t, mode, params.CommonCfg.UseLoonFFI.GetAsBool())
+			require.Equal(t, mode, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
+			require.Equal(t, !mode, params.DataCoordCfg.ManifestIndexBackfillEnabled.GetAsBool())
+			require.Equal(t, !mode, params.DataCoordCfg.ManifestIndexRollbackEnabled.GetAsBool())
 		})
 	}
 }

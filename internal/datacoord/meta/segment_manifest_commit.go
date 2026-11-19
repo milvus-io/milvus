@@ -726,10 +726,9 @@ func commitRetractsIndexEntry(commit SegmentManifestCommit, buildID int64) bool 
 // half of the backfill-replace index retraction; the record half is the paired
 // SegmentIndexRemove.
 func commitDropsColumnOfIndex(m *Meta, record *model.SegmentIndexSummary, commit SegmentManifestCommit) bool {
-	if record == nil {
+	if record == nil || !commitDropsColumns(commit) {
 		return false
 	}
-	columns := invalidatedIndexColumns(commit)
 	fid := m.IndexCatalog.GetFieldIDByIndexID(record.CollectionID, record.IndexID)
 	if fid == 0 && m.MetaStore != nil {
 		if segment, ok := m.MetaStore.GetSegment(commit.SegmentID); ok {
@@ -741,8 +740,7 @@ func commitDropsColumnOfIndex(m *Meta, record *model.SegmentIndexSummary, commit
 			}
 		}
 	}
-	_, found := columns[strconv.FormatInt(fid, 10)]
-	return found
+	return slices.Contains(commit.Mutation.Updates.DropColumns, strconv.FormatInt(fid, 10))
 }
 
 func commitRetractsIndexIdentity(commit SegmentManifestCommit, indexID, buildID int64) bool {
@@ -801,14 +799,10 @@ func droppedColumnFieldIDs(columns []string) []int64 {
 // the next stats pass rebuilds from the replaced data. Caller-supplied entries
 // are preserved (the caller's explicit value wins over a removal).
 func clearedStatsForDroppedColumns(segment *SegmentInfo, commit SegmentManifestCommit, textStats map[int64]*datapb.TextIndexStats, jsonKeyStats map[int64]*datapb.JsonKeyStats) (map[int64]*datapb.TextIndexStats, map[int64]*datapb.JsonKeyStats) {
-	if commit.Mutation.Type != ManifestMutationCommitUpdates || commit.Mutation.Updates == nil {
+	if !commitDropsColumns(commit) {
 		return textStats, jsonKeyStats
 	}
-	var columns []string
-	for column := range invalidatedIndexColumns(commit) {
-		columns = append(columns, column)
-	}
-	dropped := droppedColumnFieldIDs(columns)
+	dropped := droppedColumnFieldIDs(commit.Mutation.Updates.DropColumns)
 	if len(dropped) == 0 {
 		return textStats, jsonKeyStats
 	}
@@ -833,28 +827,9 @@ func clearedStatsForDroppedColumns(segment *SegmentInfo, commit SegmentManifestC
 	return textStats, jsonKeyStats
 }
 
-// commitDropsColumns includes column-group appends in summary mode: storage
-// invalidates their attached indexes as well as indexes on dropped columns.
 func commitDropsColumns(commit SegmentManifestCommit) bool {
-	return len(invalidatedIndexColumns(commit)) > 0
-}
-
-func invalidatedIndexColumns(commit SegmentManifestCommit) map[string]struct{} {
-	if commit.Mutation.Type != ManifestMutationCommitUpdates || commit.Mutation.Updates == nil {
-		return nil
-	}
-	columns := make(map[string]struct{})
-	for _, column := range commit.Mutation.Updates.DropColumns {
-		columns[column] = struct{}{}
-	}
-	if Params.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() {
-		for _, group := range commit.Mutation.Updates.ColumnGroups {
-			for _, column := range group.Columns {
-				columns[column] = struct{}{}
-			}
-		}
-	}
-	return columns
+	return commit.Mutation.Type == ManifestMutationCommitUpdates &&
+		commit.Mutation.Updates != nil && len(commit.Mutation.Updates.DropColumns) > 0
 }
 
 // indexIDsByDroppedColumns returns the set of index IDs whose field the commit
@@ -881,12 +856,12 @@ func (m *Meta) indexIDsByDroppedColumns(collectionID int64, commit SegmentManife
 // mutex (Go's RWMutex would block a reentrant read behind a pending writer).
 // Returns nil when the commit drops no columns.
 func (m *Meta) indexIDsByDroppedColumnsLocked(collectionID int64, commit SegmentManifestCommit) map[int64]struct{} {
-	if commit.Mutation.Type != ManifestMutationCommitUpdates || commit.Mutation.Updates == nil {
+	if !commitDropsColumns(commit) {
 		return nil
 	}
-	dropped := invalidatedIndexColumns(commit)
-	if len(dropped) == 0 {
-		return nil
+	dropped := make(map[string]struct{}, len(commit.Mutation.Updates.DropColumns))
+	for _, column := range commit.Mutation.Updates.DropColumns {
+		dropped[column] = struct{}{}
 	}
 	ids := m.IndexCatalog.LiveIndexIDsOnColumnsLocked(collectionID, dropped)
 	if ids == nil {

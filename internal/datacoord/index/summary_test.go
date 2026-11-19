@@ -255,7 +255,7 @@ func TestSummaryModeRecoveryPublishesStoredIndexSize(t *testing.T) {
 	require.Eventually(t, func() bool { return testutil.ToFloat64(gauge) == 4096 }, time.Second, 5*time.Millisecond)
 }
 
-func TestSummaryColumnChangeRetractsCompletedAndActiveBuilds(t *testing.T) {
+func TestSummaryColumnReplacementRetractsCompletedAndActiveBuilds(t *testing.T) {
 	mt, dm, err := NewMemoryMetaWithIndex(t)
 	require.NoError(t, err)
 	base := "/tmp/test-index-summary/insert_log/1/2/3"
@@ -279,6 +279,7 @@ func TestSummaryColumnChangeRetractsCompletedAndActiveBuilds(t *testing.T) {
 	require.NoError(t, mt.CommitSegmentManifest(t.Context(), meta.SegmentManifestCommit{
 		SegmentID: 3,
 		Mutation: meta.ManifestMutation{Type: meta.ManifestMutationCommitUpdates, Updates: &packed.ManifestUpdates{
+			DropColumns:  []string{"100"},
 			ColumnGroups: []packed.ColumnGroupEntry{{Columns: []string{"100"}, Format: "parquet", Files: []packed.ColumnGroupFileEntry{{Path: "data.parquet", StartIndex: 0, EndIndex: 10}}}},
 		}},
 	}))
