@@ -227,10 +227,29 @@ class TestMilvusClientStructArraySchemaValidation(StructArrayTestBase):
                 client.drop_collection(name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_create_top_level_array_with_nullable_elements(self):
+        client = self._client()
+        name = cf.gen_unique_str("nullable_array")
+        request, wire = self._nested_wire(client, name)
+        field = wire.fields.add(
+            name="plain_array", data_type=DataType.ARRAY, element_type=DataType.INT64, element_nullable=True
+        )
+        field.type_params.add(key="max_capacity", value="8")
+        request.schema = wire.SerializeToString()
+        stub = client._get_connection()._stub
+        try:
+            check_status(stub.CreateCollection(request, timeout=30))
+            response = stub.DescribeCollection(milvus_pb2.DescribeCollectionRequest(collection_name=name), timeout=30)
+            check_status(response.status)
+            actual = next(f for f in response.schema.fields if f.name == "plain_array")
+            assert actual.element_nullable and not actual.nullable
+        finally:
+            client.drop_collection(name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
         "violation,reason",
         [
-            ("top_nullable", "element_nullable"),
             ("top_nested", "nested array"),
             ("vector_leaf", "element type floatvector is not supported"),
             ("struct_leaf", "element type struct is not supported"),
@@ -248,12 +267,7 @@ class TestMilvusClientStructArraySchemaValidation(StructArrayTestBase):
         good, wire = self._nested_wire(client, name)
         bad = copy.deepcopy(good)
         field = wire.struct_array_fields[0].fields[0]
-        if violation == "top_nullable":
-            top = wire.fields.add(
-                name="plain_array", data_type=DataType.ARRAY, element_type=DataType.INT64, element_nullable=True
-            )
-            top.type_params.add(key="max_capacity", value="8")
-        elif violation == "top_nested":
+        if violation == "top_nested":
             top = wire.fields.add()
             top.CopyFrom(field)
             top.name = "nested_top"
