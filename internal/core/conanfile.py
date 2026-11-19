@@ -125,6 +125,8 @@ class MilvusConan(ConanFile):
         # GSSAPI/Kerberos is not.
         if self.conf.get("user.milvus:fips_strict", default=False, check_type=bool):
             self.options["librdkafka"].sasl_cyrus = False
+            # folly uses libsodium only for folly/crypto, which Milvus doesn't use.
+            self.options["folly"].with_libsodium = False
 
     def requirements(self):
         # Public necessary-literal API; Arrow and gRPC must use the same RE2.
@@ -150,9 +152,10 @@ class MilvusConan(ConanFile):
         )
         self.requires("abseil/20250127.0#481edcc75deb0efb16500f511f0f0a1c", force=True)
         self.requires("fmt/11.2.0#eb98daa559c7c59d591f4720dde4cd5c", force=True)
-        # Override milvus-common's older recipe pin to disable automatic exception stack tracing.
+        # Override milvus-common's older recipe pin to disable automatic exception stack tracing
+        # and to get the with_libsodium option.
         self.requires(
-            "folly/2026.04.20.00@milvus/dev#fe44332ddb5bb53bb297699d45d29f88",
+            "folly/2026.04.20.00@milvus/dev#828aa1f410eeeeb8a28dd51d67e748fc",
             force=True,
         )
         # libbson only (BSON C library) for JSON stats — NOT the full mongo-c-driver.

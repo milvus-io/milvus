@@ -125,7 +125,8 @@ endif
 # to also restrict Go TLS to FIPS settings, use the CMVP-validated OpenSSL FIPS
 # provider, not load OpenSSL's default provider, refuse to start without FIPS, and
 # compile rustls/ring out of tantivy-binding. It also builds librdkafka without
-# Cyrus SASL, so Kafka SASL/GSSAPI (Kerberos) is not available.
+# Cyrus SASL, so Kafka SASL/GSSAPI (Kerberos) is not available, and folly
+# without libsodium.
 # Exported so that scripts/3rdparty_build.sh sees it.
 export MILVUS_FIPS_STRICT
 ifeq ($(MILVUS_FIPS_STRICT),ON)
