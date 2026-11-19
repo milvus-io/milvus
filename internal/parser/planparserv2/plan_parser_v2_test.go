@@ -6079,3 +6079,15 @@ func TestScalarArrayMatchBinding(t *testing.T) {
 		})
 	}
 }
+
+func TestMatchWithFlattenedStructSchema(t *testing.T) {
+	schema := newTestSchema(false)
+	schema.Fields = append(schema.Fields, schema.StructArrayFields[0].GetFields()...)
+	schema.StructArrayFields = nil
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	expr, err := ParseExpr(helper, `MATCH_ANY(struct_array, $[sub_int] > 0)`, nil)
+	require.NoError(t, err)
+	require.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
+	require.Nil(t, expr.GetMatchExpr().GetCollection())
+}

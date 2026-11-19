@@ -3499,15 +3499,17 @@ func (v *ParserVisitor) parseMatchExpr(collectionName string, exprCtx parser.IEx
 	}
 
 	match := &planpb.MatchExpr{MatchType: matchType, Count: count}
-	if v.schema.GetStructArrayFieldFromName(collectionName) != nil {
-		match.StructName = collectionName
-	} else {
-		field, err := v.schema.GetFieldFromName(collectionName)
-		if err != nil || field.GetDataType() != schemapb.DataType_Array || !typeutil.IsPrimitiveType(field.GetElementType()) {
+	field, fieldErr := v.schema.GetFieldFromName(collectionName)
+	if fieldErr == nil && v.schema.GetStructArrayFieldFromName(collectionName) == nil {
+		if field.GetDataType() != schemapb.DataType_Array || !typeutil.IsPrimitiveType(field.GetElementType()) {
 			return merr.WrapErrParameterInvalidMsg("%s requires a scalar ARRAY or StructArray target, got %s", funcName, collectionName)
 		}
 		match.Collection = &planpb.MatchExpr_ArrayFieldId{ArrayFieldId: field.GetFieldID()}
 		v.currentScalarArray = field
+	} else {
+		// Older schemas can expose only the flattened children. Resolve the
+		// qualified child in the predicate just as existing StructArray plans do.
+		match.StructName = collectionName
 	}
 	v.currentStructArrayField = collectionName
 	defer func() {
