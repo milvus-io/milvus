@@ -39,6 +39,8 @@ type ChangeGroupDataViewEvent struct {
 	// snapshot in the same version the members enter, so the snapshot never
 	// lists a Dropped parent next to its replacement.
 	SupersededSegmentIDs []int64
+	// Publication timestamp allocated after the replacement outputs exist.
+	PublishTimestamp uint64
 }
 
 // PublishChange builds the post-batch-publish DataView snapshot while holding
@@ -87,7 +89,7 @@ func (m *dataViewManager) PublishChange(ctx context.Context, event ChangeGroupDa
 		unlock()
 		return nil, nil, nil, err
 	}
-	if err := removeSegments(next, event.SupersededSegmentIDs); err != nil {
+	if err := removeSegments(next, event.SupersededSegmentIDs, event.PublishTimestamp); err != nil {
 		unlock()
 		return nil, nil, nil, err
 	}
@@ -171,7 +173,7 @@ func rejectMemberSupersededOverlap(newSegments []LoadableSegment, supersededSegm
 // removeSegments removes the given Segment IDs from every shard/partition of
 // the snapshot. A missing Segment ID is a no-op (the superseded parent may have
 // been retired by an earlier replay); an invalid (non-positive) ID is rejected.
-func removeSegments(view *viewpb.DataViewOfCollection, segmentIDs []int64) error {
+func removeSegments(view *viewpb.DataViewOfCollection, segmentIDs []int64, published uint64) error {
 	if len(segmentIDs) == 0 {
 		return nil
 	}
@@ -193,6 +195,7 @@ func removeSegments(view *viewpb.DataViewOfCollection, segmentIDs []int64) error
 			keptStarts := starts[:0]
 			for idx, segmentID := range segments {
 				if _, ok := remove[segmentID]; ok {
+					shard.SnapshotHistoryFloor = max(shard.SnapshotHistoryFloor, published)
 					continue
 				}
 				keptSegments = append(keptSegments, segmentID)

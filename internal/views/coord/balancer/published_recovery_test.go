@@ -114,9 +114,11 @@ func TestPublishedRecoveryPreservesPartitionStats(t *testing.T) {
 		StreamingNode: &viewpb.QueryViewOfStreamingNode{PartitionStats: []*viewpb.ClusteredPartitionStats{{PartitionId: 2, Version: 7}}},
 		QueryNode:     []*viewpb.QueryViewOfQueryNode{{NodeId: 10, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 2, SegmentIds: []int64{101}, SegmentManifestVersions: []int64{4}}}}},
 	}
+	original.Meta.SnapshotHistoryFloor = 200
 	base := newPublishedRecoveryBase(id, &coordview.PublishedRecovery{View: original})
 	data := &viewpb.DataViewOfCollection{CollectionId: 1, DataVersion: original.Meta.Version.DataVersion, Shards: []*viewpb.DataViewOfShard{shardDataViewToProto(base.shard)}}
 	replacement := qviews.NewQueryViewAtCoordBuilder(1, data, id.VChannel).SetAssignments(map[int64]map[int64][]int64{20: {2: {101}}}).Build()
+	require.EqualValues(t, 200, replacement.GetMeta().GetSnapshotHistoryFloor())
 	require.Equal(t, original.StreamingNode.PartitionStats, replacement.StreamingNode.PartitionStats)
 	require.Equal(t, []int64{4}, replacement.QueryNode[0].Partitions[0].SegmentManifestVersions)
 }

@@ -150,6 +150,7 @@ func (r *allocationResult) materialize(p *planningContext, shardID qviews.ShardI
 		ShardSetEpoch: r.shardSetEpoch, Lineage: r.shard.Lineage,
 		SchemaVersion:               p.SchemaVersion(r.collectionID),
 		TransformStartAfterTimetick: r.shard.TransformStartAfterTimetick(),
+		SnapshotHistoryFloor:        r.shard.SnapshotHistoryFloor,
 		SegmentManifestVersions:     manifests, PartitionStatsVersions: stats,
 	}).SetAssignments(assignments).SetLoadInfoVersion(p.ConfigVersion(r.collectionID)).
 		SetPreparationPriority(p.preparationPriority(shardID))
@@ -201,6 +202,7 @@ func shardDataViewToProto(shard *ShardDataView) *viewpb.DataViewOfShard {
 	}
 	protoShard := &viewpb.DataViewOfShard{
 		Lineage:                              shard.Lineage,
+		SnapshotHistoryFloor:                 shard.SnapshotHistoryFloor,
 		Vchannel:                             shard.VChannel,
 		GrowingTransformStartAfterTimetick:   shard.GrowingTransformStartAfterTimetick,
 		CompactedTransformStartAfterTimetick: shard.CompactedTransformStartAfterTimetick,

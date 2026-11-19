@@ -471,7 +471,7 @@ func (s *ServerSuite) TestDualFrontierFlushTransactionAndCheckpointIsolation() {
 	t := s.T()
 	catalog := datacoordkv.NewCatalog(meta.NewMetaMemoryKV(), "", "")
 	manager := dataview.NewManager(catalog, nil,
-		dataview.WithFrontierProjector(func(context.Context, int64) (map[string]uint64, error) {
+		dataview.WithQueryViewFrontiers(func(context.Context) (uint64, error) { return 123, nil }, func(context.Context, int64) (map[string]uint64, error) {
 			t.Fatal("native Flush must not read collection cache or checkpoint")
 			return nil, nil
 		}),

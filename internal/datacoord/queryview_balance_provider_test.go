@@ -124,7 +124,7 @@ func TestRefreshDataViewChecksCollectionMetaWithoutSnapshot(t *testing.T) {
 				catalog := &catalogkv.Catalog{MetaKv: meta.NewMetaMemoryKV()}
 				manager, err := dataview.RecoverManager(t.Context(), catalog,
 					func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil,
-					dataview.WithFrontierProjector(func(context.Context, int64) (map[string]uint64, error) {
+					dataview.WithQueryViewFrontiers(func(context.Context) (uint64, error) { return 123, nil }, func(context.Context, int64) (map[string]uint64, error) {
 						return nil, nil
 					}))
 				require.NoError(t, err)

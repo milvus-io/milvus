@@ -91,6 +91,8 @@ message DataViewOfShard {
     // Recomputed for every membership/base change, including Flush. Empty shards use W.
     uint64 compacted_transform_start_after_timetick = 4;
     QueryViewLineage lineage = 5;
+    // Earliest fixed read certified after replacing physical segment bases.
+    uint64 snapshot_history_floor = 6;
 }
 
 message DataViewOfPartition {
@@ -145,6 +147,7 @@ message QueryViewMeta {
     // served. Absent lineage keeps the single-stream behaviour unchanged.
     QueryViewLineage lineage = 10;
     uint64 shard_set_epoch = 11;
+    uint64 snapshot_history_floor = 12;
 }
 
 // QueryViewOfStreamingNode is the StreamingNode-local part of a QueryView.

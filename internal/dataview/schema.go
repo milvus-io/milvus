@@ -57,7 +57,7 @@ func (m *dataViewManager) advanceSchemaLocked(ctx context.Context, state *collec
 	next := canonicalDataViewClone(base)
 	var stats map[int64]SegmentStats
 	if project != nil {
-		if err := rebuildSegments(next, segments); err != nil {
+		if err := m.rebuildSegmentBases(ctx, next, segments); err != nil {
 			return nil, nil, err
 		}
 		if err := m.advanceTransformFrontiers(ctx, next, nil); err != nil {

@@ -18,6 +18,7 @@ func NewQueryViewAtCoordBuilderFromView(view *viewpb.QueryViewOfShard) *QueryVie
 		collectionID:  m.GetCollectionId(), replicaID: m.GetReplicaId(), vchannel: m.GetVchannel(),
 		dataVersion: FromProtoDataVersion(m.GetVersion().GetDataVersion()), queryVersion: m.GetVersion().GetQueryVersion(),
 		transformStartAfterTimetick: m.GetTransformStartAfterTimetick(),
+		snapshotHistoryFloor:        m.GetSnapshotHistoryFloor(),
 		loadInfoVersion:             m.GetLoadInfoVersion(), schemaVersion: m.GetSchemaVersion(),
 		assignments: make(map[int64]map[int64][]int64), segmentManifestVersions: make(map[int64]int64),
 		streamingNode: proto.Clone(view.GetStreamingNode()).(*viewpb.QueryViewOfStreamingNode),
@@ -59,6 +60,7 @@ type QueryViewAtCoordBuilder struct {
 	vchannel                    string
 	dataVersion                 DataVersion
 	queryVersion                int64
+	snapshotHistoryFloor        uint64
 	transformStartAfterTimetick uint64
 	loadInfoVersion             uint64
 	schemaVersion               int32
@@ -99,6 +101,7 @@ func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfColl
 		replicaID:                   replicaID,
 		vchannel:                    vchannel,
 		dataVersion:                 FromProtoDataVersion(dataView.DataVersion),
+		snapshotHistoryFloor:        shardView.GetSnapshotHistoryFloor(),
 		transformStartAfterTimetick: min(shardView.GetGrowingTransformStartAfterTimetick(), shardView.GetCompactedTransformStartAfterTimetick()),
 		queryVersion:                1,
 		assignments:                 make(map[int64]map[int64][]int64),
@@ -116,6 +119,7 @@ type QueryViewBuilderMetadata struct {
 	CollectionID                int64
 	DataVersion                 DataVersion
 	SchemaVersion               int32
+	SnapshotHistoryFloor        uint64
 	TransformStartAfterTimetick uint64
 	SegmentManifestVersions     map[int64]int64
 	PartitionStatsVersions      map[int64]int64
@@ -129,6 +133,7 @@ func NewQueryViewAtCoordBuilderFromMetadata(id ShardID, metadata QueryViewBuilde
 		collectionID: metadata.CollectionID, replicaID: id.ReplicaID, vchannel: id.VChannel,
 		dataVersion: metadata.DataVersion, queryVersion: 1, schemaVersion: metadata.SchemaVersion,
 		transformStartAfterTimetick: metadata.TransformStartAfterTimetick,
+		snapshotHistoryFloor:        metadata.SnapshotHistoryFloor,
 		segmentManifestVersions:     metadata.SegmentManifestVersions,
 		partitionStatsVersions:      metadata.PartitionStatsVersions,
 	}
@@ -194,6 +199,7 @@ func (b *QueryViewAtCoordBuilder) Build() *viewpb.QueryViewOfShard {
 		},
 		State:                       viewpb.QueryViewState_QueryViewStatePreparing,
 		TransformStartAfterTimetick: b.transformStartAfterTimetick,
+		SnapshotHistoryFloor:        b.snapshotHistoryFloor,
 		LoadInfoVersion:             b.loadInfoVersion,
 		SchemaVersion:               b.schemaVersion,
 	}

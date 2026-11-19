@@ -20,6 +20,7 @@ type CollectionDataView struct {
 
 // ShardDataView is one vchannel's DataView within a collection.
 type ShardDataView struct {
+	SnapshotHistoryFloor                 uint64
 	Lineage                              *viewpb.QueryViewLineage
 	VChannel                             string
 	GrowingTransformStartAfterTimetick   uint64
