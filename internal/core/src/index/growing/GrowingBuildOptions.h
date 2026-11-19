@@ -25,6 +25,8 @@ struct GrowingBuildOptions {
     int64_t finalize_budget_ms{20};
     int64_t catchup_deadline_ms{30000};
     float pool_ratio{0.5f};
+    // A covering reader now owns its raw values independently of the source.
+    std::function<void(int64_t)> on_raw_owned{};
 };
 
 enum class GrowingBuildPhase {

@@ -151,12 +151,13 @@ class FloatVectorSource final : public GrowingVectorSource<float> {
                 static_cast<size_t>(row_count * 2)};
     }
 
-    void
+    std::shared_ptr<const void>
     CopyRows(int64_t physical_begin,
              int64_t row_count,
              float* output) const override {
         const auto rows = ContiguousRows(physical_begin, row_count);
         std::copy(rows.begin(), rows.end(), output);
+        return {};
     }
 
     const float*
@@ -185,12 +186,13 @@ class SparseVectorSource final : public GrowingVectorSource<SparseRow> {
         return {rows_.data() + physical_begin, static_cast<size_t>(row_count)};
     }
 
-    void
+    std::shared_ptr<const void>
     CopyRows(int64_t physical_begin,
              int64_t row_count,
              SparseRow* output) const override {
         const auto rows = ContiguousRows(physical_begin, row_count);
         std::copy(rows.begin(), rows.end(), output);
+        return {};
     }
 
     const SparseRow*

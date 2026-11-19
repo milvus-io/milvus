@@ -172,7 +172,8 @@ WithSourceRows(
     }
 
     std::vector<GrowingVectorStorageType<T>> copied(expected);
-    source->CopyRows(physical_begin, physical_rows, copied.data());
+    auto generation =
+        source->CopyRows(physical_begin, physical_rows, copied.data());
     consume(std::span<const GrowingVectorStorageType<T>>(copied.data(),
                                                          copied.size()));
 }
@@ -529,7 +530,13 @@ template <typename T>
 void
 KnowhereGrowingVectorIndex<T>::DisableAsyncBuild(const char* reason,
                                                  bool deadline) {
-    // Called under writer_mutex_, before any reader has seen this engine.
+    // Reclamation and metrics run after publication. An exception there
+    // must never discard an engine that already has readers.
+    if (built_) {
+        LOG_WARN("async growing index post-publication work failed: {}",
+                 reason);
+        return;
+    }
     async_disabled_ = true;
     engine_.reset();
     auto& counter = deadline
@@ -643,7 +650,7 @@ KnowhereGrowingVectorIndex<T>::BuildAndCatchUp() {
             BuildHook(GrowingBuildPhase::kAfterCatchupRound);
         }
         BuildHook(GrowingBuildPhase::kBeforeFinalize);
-        std::lock_guard lock(writer_mutex_);
+        std::unique_lock lock(writer_mutex_);
         const auto gap = accepted_row_end_ - logical;
         // No newly accepted vector does not mean no work: advancing a
         // nullable IdMap still materializes and consumes a logical bitmap.
@@ -659,10 +666,17 @@ KnowhereGrowingVectorIndex<T>::BuildAndCatchUp() {
         // Setting built_ last leaves failed first publication on raw fallback.
         auto reader = std::make_shared<VectorIndex>(
             *engine_, logical, physical, search_defaults_);
+        const bool release_raw =
+            async_build_.on_raw_owned && !retain_source_as_data_view_ &&
+            engine_->native_index.HasRawData(engine_->Metric());
         PublishSnapshot(std::move(reader), logical);
         built_ = true;
         if (!retain_source_as_data_view_) {
             source_.reset();
+        }
+        lock.unlock();
+        if (release_raw) {
+            async_build_.on_raw_owned(logical);
         }
         monitor::internal_core_growing_index_catchup_rows.Observe(
             physical - build_threshold_);

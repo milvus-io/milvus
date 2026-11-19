@@ -99,12 +99,13 @@ class FloatVectorBuildSource final : public index::GrowingVectorSource<float> {
                 static_cast<size_t>(row_count * dim_)};
     }
 
-    void
+    std::shared_ptr<const void>
     CopyRows(int64_t physical_begin,
              int64_t row_count,
              float* output) const override {
         const auto values = ContiguousRows(physical_begin, row_count);
         std::copy(values.begin(), values.end(), output);
+        return {};
     }
 
     const float*
@@ -2082,9 +2083,7 @@ TEST(GrowingIndexAsyncBuildTest, BuildOffInsertPathAndCatchesUp) {
     EXPECT_EQ(threshold_probe_sr->seg_offsets_[0], threshold_probe_offset);
     EXPECT_NEAR(threshold_probe_sr->distances_[0], 0.0f, 1e-5);
 
-    // A post-sync batch takes the kSynced Add branch; try_remove_chunks only
-    // runs on the insert path, so this batch is what reclaims the chunks
-    // (IVF_FLAT_CC keeps raw data, so the index owns it now).
+    // Later inserts go directly to the published index.
     InsertAsyncBatch(
         segment.get(), fixture.schema, per_batch, 42 + 10 * per_batch);
     auto* field_data =
@@ -2497,6 +2496,33 @@ TEST(GrowingIndexAsyncBuildTest, CatchupRechecksPolicyBetweenStagingSlices) {
     EXPECT_GE(catchup_rounds.load(), 2)
         << "a multi-slice backlog must return to the policy loop between "
            "staging slices";
+}
+
+TEST(GrowingIndexAsyncBuildTest, SparseCrossChunkStagePinsBorrowedPayloads) {
+    using Row = knowhere::sparse::SparseRow<SparseValueType>;
+    ConcurrentVector<milvus::SparseFloatVector> column(/*size_per_chunk=*/2);
+    std::vector<Row> input;
+    for (int i = 0; i < 4; ++i) {
+        input.emplace_back(1);
+        input.back().set_at(0, i, 10.0f + i);
+    }
+    column.set_data_raw(0, input.data(), input.size());
+    auto source = MakeSparseGrowingVectorSource(&column);
+    ASSERT_TRUE(source->ContiguousRows(1, 2).empty());
+    std::array<Row, 2> rows;
+    auto generation = source->CopyRows(1, rows.size(), rows.data());
+    ASSERT_NE(generation, nullptr);
+    for (size_t i = 0; i < rows.size(); ++i) {
+        ASSERT_EQ(rows[i].data(), source->Row(1 + i)->data());
+    }
+    column.clear();
+    source.reset();
+    for (size_t i = 0; i < rows.size(); ++i) {
+        EXPECT_EQ(std::memcmp(rows[i].data(),
+                              input[i + 1].data(),
+                              input[i + 1].data_byte_size()),
+                  0);
+    }
 }
 
 TEST(GrowingIndexAsyncBuildTest, SparseVectorBuildsAsynchronously) {
@@ -3099,6 +3125,13 @@ TEST(GrowingIndexAsyncBuildTest, SearchDuringBuildUsesBruteForce) {
     release_after_build.store(true);
     ASSERT_TRUE(WaitSynced(segment_impl, fixture.vec, /*timeout_ms=*/60000));
     EXPECT_EQ(IndexedRowCount(segment_impl, fixture.vec), per_batch);
+    // The final insert returned while the worker was parked. It must
+    // reclaim the raw generation without another insert or load.
+    for (int waited = 0; field_data->num_chunk() && waited < 5000;
+         waited += 5) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_EQ(field_data->num_chunk(), 0);
     expect_searchable("after the publish");
 }
 

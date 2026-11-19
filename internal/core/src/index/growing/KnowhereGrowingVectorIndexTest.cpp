@@ -233,10 +233,11 @@ class TestVectorSource final : public GrowingVectorSource<float> {
         return {values.data() + begin * 2, static_cast<size_t>(count * 2)};
     }
 
-    void
+    std::shared_ptr<const void>
     CopyRows(int64_t begin, int64_t count, float* output) const override {
         const auto rows = ContiguousRows(begin, count);
         std::copy(rows.begin(), rows.end(), output);
+        return {};
     }
 
     const float*

@@ -35,6 +35,7 @@
 #include "index/contracts/growing/IGrowingIndex.h"
 #include "index/contracts/query/ReaderCaps.h"
 #include "index/growing/GrowingBuildOptions.h"
+#include "index/growing/GrowingVectorSource.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/indexing/FieldIndexCapability.h"
 
@@ -54,8 +55,13 @@ ResolveGrowingBuildThreadNum(const SegcoreConfig& segcore_config);
 class InsertRecordGrowing;
 class VectorBase;
 
+std::shared_ptr<const index::GrowingVectorSource<
+    index::GrowingVectorStorageType<sparse_u32_f32>>>
+MakeSparseGrowingVectorSource(const VectorBase* column);
+
 class GrowingIndexSet {
  public:
+    struct DeferredColumnRelease;
     struct Appender {
         Appender(FieldId field_id,
                  index::ReaderCaps reader_caps,
@@ -68,6 +74,7 @@ class GrowingIndexSet {
         // families can release the column after a covering reader owns raw.
         bool source_backed{false};
         FieldIndexCapability capability;
+        std::shared_ptr<DeferredColumnRelease> deferred_release;
     };
 
     using AppenderMap = std::map<FieldId, Appender>;
@@ -102,6 +109,14 @@ class GrowingIndexSet {
     // reproduce original values without borrowing the growing column.
     bool
     CanReleaseVectorColumn(FieldId field_id, int64_t visible_row_end) const;
+
+    // Called under the segment feed mutex. A staged writer can touch raw
+    // storage until its input has been accepted by all registered owners.
+    void
+    SuspendRawColumnRelease();
+
+    void
+    ArmRawColumnRelease(FieldId field_id, VectorBase* column, int64_t row_end);
 
     // The insert path binds the checked IAppendable<Batch> capability from
     // owner using field schema. It must not retain an owning reader pointer.
@@ -162,6 +177,8 @@ class GrowingIndexSet {
     Capability(FieldId field_id) const;
 
  private:
+    struct RawReleaseWindow;
+    std::shared_ptr<RawReleaseWindow> release_window_;
     mutable std::shared_mutex mutex_;
     AppenderMap appenders_;
     // Capture at segment construction; schema reopen on an existing segment

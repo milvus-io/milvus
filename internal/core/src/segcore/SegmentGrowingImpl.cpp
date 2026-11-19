@@ -672,23 +672,18 @@ void
 SegmentGrowingImpl::try_remove_chunks(FieldId fieldId,
                                       const Schema& schema,
                                       int64_t covered_row_end) {
-    //remove the chunk data to reduce memory consumption
-    auto& field_meta = schema.operator[](fieldId);
-    auto data_type = field_meta.get_data_type();
-    if (IsVectorDataType(data_type)) {
-        if (growing_indexes_.CanReleaseVectorColumn(fieldId, covered_row_end)) {
-            auto vec_data_base = insert_record_.get_data_base(fieldId);
-            if (vec_data_base && vec_data_base->num_chunk() > 0) {
-                // No lock, and no try_lock: clear() swaps the container's
-                // internal chunk collection under the container's own mutex,
-                // and every reader holds a ChunkSnapshot pinning the
-                // generation it is walking. Reclamation therefore always
-                // proceeds -- the previous try_lock made it fail under query
-                // load and only retry on the next insert, so a segment that
-                // stopped taking writes never got its memory back.
-                vec_data_base->clear();
-            }
-        }
+    if (!schema[fieldId].is_vector() || !growing_indexes_.Has(fieldId)) {
+        return;
+    }
+    auto* column = insert_record_.get_data_base(fieldId);
+    if (!column || column->num_chunk() == 0) {
+        return;
+    }
+    // Arm first, then check for an already-published reader. Either side of
+    // the last write / first publication race can complete the handoff.
+    growing_indexes_.ArmRawColumnRelease(fieldId, column, covered_row_end);
+    if (growing_indexes_.CanReleaseVectorColumn(fieldId, covered_row_end)) {
+        column->clear();
     }
 }
 
@@ -744,6 +739,7 @@ SegmentGrowingImpl::StageInsertVectorInput(
     }
 
     std::lock_guard lock(growing_index_feed_mutex_);
+    growing_indexes_.SuspendRawColumnRelease();
     const auto result =
         pending_vector_inputs_.try_emplace(row_begin, std::move(pending));
     AssertInfo(result.second,
@@ -798,6 +794,7 @@ SegmentGrowingImpl::StageLoadedVectorInput(
     location.loaded_fields = std::move(retained);
 
     std::lock_guard lock(growing_index_feed_mutex_);
+    growing_indexes_.SuspendRawColumnRelease();
     auto [it, inserted] = pending_vector_inputs_.try_emplace(row_begin);
     auto& pending = it->second;
     if (inserted) {

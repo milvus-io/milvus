@@ -205,7 +205,7 @@ class ContiguousFloatSource final : public index::GrowingVectorSource<float> {
         return std::span<const float>(values_.data() + offset, count);
     }
 
-    void
+    std::shared_ptr<const void>
     CopyRows(int64_t physical_begin,
              int64_t row_count,
              float* output) const override {
@@ -214,6 +214,7 @@ class ContiguousFloatSource final : public index::GrowingVectorSource<float> {
             throw std::invalid_argument("null vector copy output");
         }
         std::copy(rows.begin(), rows.end(), output);
+        return {};
     }
 
     const float*
