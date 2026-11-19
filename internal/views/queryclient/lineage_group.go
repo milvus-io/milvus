@@ -170,7 +170,8 @@ func (s *shardViewQueryClient) runLineageGroup(ctx context.Context, shards []res
 // B = max(lower bound, min over targets of through), where through is the
 // complete published prefix of a target's PChannel.
 //
-//	Strong, Session      lower bound = largest Strong minimum prefix of the targets
+//	Strong               lower bound = largest Strong minimum prefix of the targets
+//	Session              lower bound = max(Strong minimum, request guarantee)
 //	Bounded, Customized  lower bound = the request's guarantee timestamp
 //	Eventually           no lower bound
 //
@@ -202,8 +203,10 @@ func (s *shardViewQueryClient) lineageReadPoint(ctx context.Context, shards []re
 	}
 	var lowerBound uint64
 	switch request.consistencyLevel {
-	case commonpb.ConsistencyLevel_Strong, commonpb.ConsistencyLevel_Session:
+	case commonpb.ConsistencyLevel_Strong:
 		lowerBound = strongMinimum
+	case commonpb.ConsistencyLevel_Session:
+		lowerBound = max(strongMinimum, request.guaranteeTimestamp)
 	case commonpb.ConsistencyLevel_Bounded, commonpb.ConsistencyLevel_Customized:
 		lowerBound = request.guaranteeTimestamp
 	}
