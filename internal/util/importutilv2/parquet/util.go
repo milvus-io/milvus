@@ -272,12 +272,13 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 	}
 
 	// this loop is for "are there any fields not provided in the parquet file?"
+	topLevel := lo.KeyBy(schema.GetFields(), func(f *schemapb.FieldSchema) int64 { return f.GetFieldID() })
 	for _, field := range nameToField {
 		// auto-id field, function output field already checked
 		// dynamic field, nullable field, default value field, not provided or provided both ok
 		// element-nullable struct sub-field, filled with null elements
 		if typeutil.IsAutoPKField(field) || field.GetIsDynamic() || field.GetIsFunctionOutput() ||
-			field.GetNullable() || field.GetDefaultValue() != nil || field.GetElementNullable() {
+			field.GetNullable() || field.GetDefaultValue() != nil || (field.GetElementNullable() && topLevel[field.GetFieldID()] == nil) {
 			continue
 		}
 		// the other field must be provided

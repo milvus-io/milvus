@@ -1230,15 +1230,17 @@ func TestPathReplaceNullableStructScalarElementCompactAndDense(t *testing.T) {
 	require.ErrorContains(t, validatePathReplaceStructChildRows(malformed, schema, 1), "malformed compact element payload")
 
 	updateNull := &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{}}, ValidData: []bool{false}}
+	require.NoError(t, validatePathReplaceArrayOperand(structScalarChildFieldData("values", updateNull), schema, 1))
+	require.ErrorContains(t, validatePathReplaceArrayOperand(malformed, schema, 1), "malformed compact element payload")
 	compact := &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 3}}}, ValidData: []bool{true, false, true}}
-	out, err := replaceNullableStructScalarElement(compact, updateNull, schema, 0)
+	out, err := replaceNullableArrayElement(compact, updateNull, schema, 0)
 	require.NoError(t, err)
 	assert.Equal(t, []bool{false, false, true}, out.GetValidData())
 	assert.Equal(t, []int64{3}, out.GetLongData().GetData())
 
 	updateValue := &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{9}}}, ValidData: []bool{true}}
 	dense := &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 0, 3}}}, ValidData: []bool{true, false, true}}
-	out, err = replaceNullableStructScalarElement(dense, updateValue, schema, 1)
+	out, err = replaceNullableArrayElement(dense, updateValue, schema, 1)
 	require.NoError(t, err)
 	assert.Equal(t, []bool{true, true, true}, out.GetValidData())
 	assert.Equal(t, []int64{1, 9, 3}, out.GetLongData().GetData())

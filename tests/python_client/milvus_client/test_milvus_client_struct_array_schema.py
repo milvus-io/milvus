@@ -139,11 +139,11 @@ class TestMilvusClientStructArraySchemaValidation(StructArrayTestBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("kind", ["element_nullable", "nested"])
-    def test_add_top_level_native_array_rejected(self, kind):
+    def test_add_top_level_native_array(self, kind):
         """
-        target: reject native-list placement at AddCollectionField as well as Create
+        target: allow single-level nullable elements when adding a top-level array
         method: raw schema alteration with a top-level element-nullable or nested array
-        expected: precise placement rejection, unchanged schema/data, ordinary Array control succeeds
+        expected: historical rows read as null and nested placement is rejected
         """
         client = self._client()
         name, schema = self.create_struct_collection(client, nullable_children())
@@ -167,14 +167,12 @@ class TestMilvusClientStructArraySchemaValidation(StructArrayTestBase):
             field.element_nullable = True
         raw = Prepare.alter_collection_schema_request(name, field_schema=field)
         status = client._get_connection()._stub.AlterCollectionSchema(raw, timeout=30).alter_status
-        assert status.code == 1100, status
-        reason = "element_nullable is only supported" if kind == "element_nullable" else "nested array can only"
-        assert reason in status.reason, status
-        assert client.describe_collection(name) == before
-        self.assert_rows(client, name, model)
-        client.add_collection_field(
-            name, "new_array", DataType.ARRAY, element_type=DataType.INT64, max_capacity=8, nullable=True
-        )
+        if kind == "nested":
+            assert status.code == 1100 and "nested array can only" in status.reason, status
+            assert client.describe_collection(name) == before
+            self.assert_rows(client, name, model)
+            return
+        assert status.code == 0, status
         for row in model.values():
             row["new_array"] = None
         self.reload_collection(client, name)

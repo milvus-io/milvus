@@ -243,11 +243,9 @@ func (s *ElementNullableSuite) TestSchemaRejections() {
 		name, want string
 		change     func(*schemapb.CollectionSchema)
 	}{
-		{"top_level_nullable_element", "element_nullable is only supported", func(schema *schemapb.CollectionSchema) {
+		{"non_array_nullable_element", "element_nullable", func(schema *schemapb.CollectionSchema) {
 			schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
-				FieldID: 110, Name: "bad_array",
-				DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
-				ElementNullable: true, TypeParams: []*commonpb.KeyValuePair{kv(common.MaxCapacityKey, "8")},
+				FieldID: 110, Name: "bad_scalar", DataType: schemapb.DataType_Int64, ElementNullable: true,
 			})
 		}},
 		{"top_level_nested", "nested array can only be in a struct array field", func(schema *schemapb.CollectionSchema) {
@@ -985,4 +983,44 @@ func (s *ElementNullableSuite) TestPathReplaceNestedArraySubField() {
 	})
 	s.Require().ErrorContains(merr.CheckRPCCall(result, err), "must contain exactly one element")
 	assertElementPath()
+}
+
+func (s *ElementNullableSuite) TestTopLevelArrayPathReplace() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	name := "nullable_array_" + funcutil.RandomString(8)
+	schema := collectionSchema(name)
+	schema.Fields[2].Nullable = true
+	schema.Fields[2].ElementNullable = true
+	s.Require().NoError(merr.Error(s.create(ctx, schema)))
+	s.indexAndLoad(ctx, name)
+	fields := insertFields()
+	fields[2] = scalarField("legacy", 102, longRow([]int64{7, 9}, false, true, true), longRow(nil))
+	typeutil.SetFieldDataValidData(fields[2], []bool{true, true, false})
+	s.Require().NoError(s.insert(ctx, name, fields))
+	replace := func(pk int64, path string, value *schemapb.ScalarField) error {
+		operand := scalarField("legacy", 102, value)
+		pkField := insertFields()[0]
+		pkField.GetScalars().GetLongData().Data = []int64{pk}
+		result, err := s.Cluster.MilvusClient.Upsert(ctx, &milvuspb.UpsertRequest{
+			CollectionName: name, NumRows: 1, PartialUpdate: true, HashKeys: integration.GenerateHashKeys(1),
+			FieldsData: []*schemapb.FieldData{pkField, operand},
+			FieldOps:   []*schemapb.FieldPartialUpdateOp{{FieldName: "legacy", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: path}},
+		})
+		return merr.CheckRPCCall(result, err)
+	}
+	assertRow := func(valid []bool, dense []int64) {
+		got := s.queryRow(ctx, name, 1)["legacy"].GetScalars().GetArrayData().GetData()[0]
+		s.Equal(valid, got.GetValidData())
+		s.Equal(dense, got.GetLongData().GetData())
+	}
+	assertRow([]bool{false, true, true}, []int64{0, 7, 9})
+	s.Require().NoError(replace(1, "[1]", longRow(nil, false)))
+	s.partialUpsertScore(ctx, name, []int64{1}, func(int64) int64 { return 42 })
+	assertRow([]bool{false, false, true}, []int64{0, 0, 9})
+	s.flushAndReload(ctx, name)
+	s.Require().NoError(replace(1, "[0]", longRow([]int64{5}, true)))
+	assertRow([]bool{true, false, true}, []int64{5, 0, 9})
+	s.Require().ErrorContains(replace(2, "[0]", longRow(nil, false)), "out of range")
+	s.Require().ErrorContains(replace(3, "[0]", longRow(nil, false)), "null parent")
 }

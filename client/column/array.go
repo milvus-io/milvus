@@ -436,7 +436,7 @@ func (c *ColumnVarCharArray) Slice(start, end int) Column {
 /* element-nullable arrays */
 
 // The NewElementNullableColumnXxxArray constructors create the column of an element-nullable
-// struct sub-field. values[i] holds the valid elements of row i (compact mode) and
+// scalar ARRAY. values[i] holds the valid elements of row i (compact mode) and
 // elementValidData[i] one flag per logical element. Use WithRowValidData for null rows and
 // WithElementSparseMode for values in sparse form.
 
