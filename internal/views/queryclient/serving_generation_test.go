@@ -61,7 +61,7 @@ func TestServingResolverPropagatesEpochThroughEveryShard(t *testing.T) {
 	// already exercised against the actual GetQueryPlan request in group tests.
 	shards[0].Lineage = nil
 	err = s.fanOutShards(t.Context(), shards, requestReadPoint{}, func(ctx context.Context, index int, read shardReadPoint) error {
-		require.EqualValues(t, 2, ctx.Value(servingEpochContextKey{}))
+		require.Equal(t, shards[index], ctx.Value(servingShardContextKey{}))
 		require.Equal(t, shards[index].VChannel, read.vchannel)
 		return nil
 	})

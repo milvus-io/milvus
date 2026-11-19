@@ -13,7 +13,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -125,7 +127,7 @@ func TestReplicaLoadCheckHonorsQueryDeadline(t *testing.T) {
 	defer cancel()
 	_, _, err := route.nextReplica(ctx, nil, nil, check.check)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.Zero(t, check.nextCheck, "a canceled probe must not cache a successful load check")
+	require.Zero(t, check.last, "a canceled probe must not cache a successful load check")
 }
 
 func TestReplicaLoadCheckDoesNotOverrideNewReplica(t *testing.T) {
@@ -280,4 +282,66 @@ func TestReplicaLoadCheckMissingDependency(t *testing.T) {
 	_, err := check.check(t.Context())
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
 	require.NotErrorIs(t, err, merr.ErrCollectionNotLoaded)
+}
+
+func TestRetiredSourceReplansWholeQueryAtPublishedGeneration(t *testing.T) {
+	sn := newLineageTestSN()
+	workers := newLineageTestWorkers()
+	targets := []*viewpb.DataViewOfShard{{Vchannel: lineageT1}, {Vchannel: lineageT2}}
+	generation := uint64(1)
+	checks := patchLoadCheck(t, func(context.Context, *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
+		generation++
+		info := &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success(), ServingShards: targets, ShardSetEpoch: 3}
+		if generation == 2 {
+			info.ShardSetEpoch = 2
+			info.ServingShards = append([]*viewpb.DataViewOfShard{{Vchannel: lineageS, Lineage: &viewpb.QueryViewLineage{Vchannels: []string{lineageT1, lineageT2}, SwitchTimetick: lineageSwitch}}}, targets...)
+		}
+		return info, nil
+	})
+	client := newLegacyClient(ViewQueryClientConfig{LoadInfoClient: checks.client, MaxRetries: 2}, sn, workers, nil)
+	for _, vc := range []string{lineageS, lineageT1, lineageT2} {
+		snapshot := qviews.ReplicaSnapshot{Valid: true}
+		if vc != lineageS {
+			snapshot.Replicas = []qviews.Replica{{ReplicaID: 1}}
+		}
+		client.shardClient.replicas.channels[vc] = &replicaRoute{changed: make(chan struct{}), snapshot: snapshot}
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 600*time.Millisecond)
+	defer cancel()
+	result, err := client.Query(ctx, &LegacyQueryRequest{Req: &internalpb.RetrieveRequest{CollectionID: 100}, BarrierMVCC: 150})
+	require.NoError(t, err)
+	require.Len(t, result.Plans, 2)
+	for _, target := range []string{lineageT1, lineageT2} {
+		plans := sn.planRequests(target)
+		require.Len(t, plans, 2)
+		require.EqualValues(t, 2, plans[0].GetShardSetEpoch())
+		require.EqualValues(t, 3, plans[1].GetShardSetEpoch())
+		require.EqualValues(t, 150, plans[1].GetBarrierMvcc())
+	}
+	require.Empty(t, sn.planRequests(lineageS))
+}
+
+func TestSharedLoadProbeChecksEachPlannedShard(t *testing.T) {
+	calls := 0
+	checks := patchLoadCheck(t, func(context.Context, *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
+		calls++
+		return &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success(), ShardSetEpoch: 2, ServingShards: []*viewpb.DataViewOfShard{{Vchannel: lineageT1}}}, nil
+	})
+	check := checks.acquire(100)
+	defer check.release()
+	for _, test := range []struct {
+		name    string
+		epoch   uint64
+		invalid bool
+	}{{lineageT1, 2, false}, {lineageS, 2, true}, {lineageS, 1, true}, {lineageT2, 3, false}} {
+		ctx := context.WithValue(t.Context(), servingShardContextKey{}, resolver.Shard{VChannel: test.name, ShardSetEpoch: test.epoch})
+		_, err := check.check(ctx)
+		if test.invalid {
+			require.Error(t, err)
+			require.True(t, viewerror.AsViewError(err).IsViewInvalidated())
+		} else {
+			require.NoError(t, err)
+		}
+	}
+	require.Equal(t, 1, calls)
 }

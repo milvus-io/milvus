@@ -12,7 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-type servingEpochContextKey struct{}
+type servingShardContextKey struct{}
 
 type servingGenerationRequirement interface {
 	RequiresServingGeneration(context.Context, int64) ([]string, bool, error)
