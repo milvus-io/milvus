@@ -19,6 +19,7 @@ package bulkimport
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -157,4 +159,51 @@ func TestPreImportWriterContext(t *testing.T) {
 			}
 		})
 	}
+}
+
+type backupContextCipher struct {
+	writerContextCipher
+	artifacts []string
+	sourceErr error
+}
+
+func (c *backupContextCipher) Init(map[string]string) error { return errors.New("legacy import init") }
+
+func (c *backupContextCipher) ResolveImportEZ(artifact string) (int64, []byte, error) {
+	c.artifacts = append(c.artifacts, artifact)
+	return 17, []byte("historical"), c.sourceErr
+}
+
+func TestPreImportResolvesSourceOnEachDispatch(t *testing.T) {
+	paramtable.Init()
+	const artifact = "eyJlel9pZCI6MTd9"
+	job := preImportWriterContextJob(internalpb.ImportVersion_ImportVersionV2)
+	job.Options = []*commonpb.KeyValuePair{
+		{Key: importutilv2.BackupFlag, Value: "true"},
+		{Key: importutilv2.StorageVersion, Value: "2"},
+		{Key: importutilv2.EZK, Value: artifact},
+	}
+	cipher := &backupContextCipher{writerContextCipher: writerContextCipher{key: []byte("ordinary")}}
+	patch := mockey.Mock(hookutil.GetCipher).Return(cipher).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	task, im := newPreImportWriterContextTask(t, job)
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().CreatePreImport(int64(41), mock.Anything, mock.Anything).RunAndReturn(
+		func(_ int64, req *datapb.PreImportRequest, _ int64) error {
+			require.Equal(t, []*commonpb.KeyValuePair{
+				{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:aGlzdG9yaWNhbA=="},
+				{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:b3JkaW5hcnk="},
+			}, req.GetPluginContext())
+			return errors.New("worker unavailable")
+		}).Once()
+
+	task.CreateTaskOnWorker(41, cluster)
+	cipher.sourceErr = errors.New("source KMS denied Decrypt")
+	task.CreateTaskOnWorker(42, cluster)
+
+	require.Equal(t, []string{artifact, artifact}, cipher.artifacts)
+	failed := im.GetJob(context.Background(), job.GetJobID())
+	require.Equal(t, internalpb.ImportJobState_Failed, failed.GetState())
+	require.Contains(t, failed.GetReason(), cipher.sourceErr.Error())
+	cluster.AssertNotCalled(t, "CreatePreImport", int64(42), mock.Anything, mock.Anything)
 }
