@@ -277,17 +277,7 @@ func (kc *Catalog) readSplitAdoptionOutcome(ctx context.Context, record *model.S
 		if err != nil {
 			return false, err
 		}
-		aborted := *durable
-		aborted.State = "Preparing"
-		fence, err := encodeAdoption(&aborted)
-		if err != nil {
-			return false, err
-		}
-		// Competes atomically with the pending publication on the same key.
-		// Once fenced, that attempt can never publish, even after reprepare.
-		err = kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{adoptionKey(record.CollectionID, record.TaskID): fence}, nil,
-			predicates.ValueEqual(adoptionKey(record.CollectionID, record.TaskID), prepared))
-		return false, err
+		return false, kc.fencePreparedAdoption(ctx, durable, prepared)
 	}
 	if durable.Digest != record.Digest {
 		return false, merr.WrapErrDataIntegrityMsg("split adoption commit identity mismatch")
@@ -300,6 +290,38 @@ func (kc *Catalog) readSplitAdoptionOutcome(ctx context.Context, record *model.S
 		return false, merr.WrapErrDataIntegrityMsg("split adoption DataView publication identity mismatch")
 	}
 	return true, nil
+}
+
+// FencePreparedSplitAdoptions runs before the new leader loads either
+// SegmentMeta or DataView. A prior leader's accepted commit can still be in
+// flight even when a linearizable read observes Prepared. If it wins the CAS,
+// startup retries the recovery phase and reads the committed owner and view.
+func (kc *Catalog) FencePreparedSplitAdoptions(ctx context.Context) error {
+	return kc.MetaKv.WalkWithPrefix(ctx, "datacoord-meta/split-adoption/", kc.paginationSize, func(key, value []byte) error {
+		var record model.SplitAdoption
+		if err := json.Unmarshal(value, &record); err != nil {
+			return merr.WrapErrDataIntegrityMsg("invalid split adoption root")
+		}
+		if record.State != "Prepared" {
+			return nil
+		}
+		if !adoptionWalkKeyMatches(string(key), adoptionKey(record.CollectionID, record.TaskID)) {
+			return merr.WrapErrDataIntegrityMsg("split adoption key identity mismatch")
+		}
+		return kc.fencePreparedAdoption(ctx, &record, string(value))
+	})
+}
+
+func (kc *Catalog) fencePreparedAdoption(ctx context.Context, record *model.SplitAdoption, expected string) error {
+	aborted := *record
+	aborted.State = "Preparing"
+	aborted.AttemptID = uuid.NewString()
+	fence, err := encodeAdoption(&aborted)
+	if err != nil {
+		return err
+	}
+	key := adoptionKey(record.CollectionID, record.TaskID)
+	return kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{key: fence}, nil, predicates.ValueEqual(key, expected))
 }
 
 func (kc *Catalog) SaveSplitAdoptionState(ctx context.Context, record *model.SplitAdoption, state string) error {
