@@ -17,6 +17,7 @@
 package adaptor
 
 import (
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -25,7 +26,18 @@ import (
 // earlier history through its own cursor. It cannot serve an older fixed B.
 // Invalidation lets the caller seek an executable retained view while keeping
 // its original B; it must never silently promote the snapshot to this floor.
-func requireSplitReadSnapshot(meta *viewpb.QueryViewMeta, mvcc *viewpb.QueryPlanMVCC) error {
+func requireSplitReadSnapshot(meta *viewpb.QueryViewMeta, mvcc *viewpb.QueryPlanMVCC, req *viewpb.GetQueryPlanRequest) error {
+	// Idle WAL frontiers can be below B: after covering B, SnapshotAt returns
+	// the actual last relevant event. Compare a barrier to its requested B.
+	// For a fixed executor plan use the timestamp its sealed segments read.
+	fixed := req.GetBarrierMvcc()
+	if req.GetQueryPlanMvcc() != nil {
+		fixed = qviews.SealedReadTimestamp(mvcc)
+	}
+	if fixed != 0 && fixed < meta.GetSnapshotHistoryFloor() {
+		return viewerror.NewViewInvalidated("fixed query snapshot %d precedes physical history floor %d", fixed, meta.GetSnapshotHistoryFloor())
+	}
+
 	floor := max(meta.GetTransformStartAfterTimetick(), meta.GetLineage().GetSwitchTimetick())
 	if mvcc.GetGrowingTimetick() < floor || mvcc.GetTransformingTimetick() < floor {
 		return viewerror.NewViewInvalidated("fixed query snapshot (%d,%d) precedes view history floor %d", mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick(), floor)

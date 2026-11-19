@@ -34,14 +34,17 @@ import (
 func TestSplitFixedSnapshotBelowBaselineFailsWithoutPromotion(t *testing.T) {
 	for _, meta := range []*viewpb.QueryViewMeta{
 		{TransformStartAfterTimetick: 100, Lineage: &viewpb.QueryViewLineage{SwitchTimetick: 200}},
-		{TransformStartAfterTimetick: 200}, // adopted target g2 has its own baseline
+		{TransformStartAfterTimetick: 200},                           // adopted target g2 has its own baseline
+		{TransformStartAfterTimetick: 40, SnapshotHistoryFloor: 200}, // another segment still replays from 40
 	} {
 		mvcc := &viewpb.QueryPlanMVCC{GrowingTimetick: 150, TransformingTimetick: 150}
-		err := requireSplitReadSnapshot(meta, mvcc)
+		req := &viewpb.GetQueryPlanRequest{Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: mvcc}}
+		err := requireSplitReadSnapshot(meta, mvcc, req)
+		require.Error(t, err)
 		require.True(t, viewerror.AsViewError(err).IsViewInvalidated())
 		require.EqualValues(t, 150, mvcc.GetGrowingTimetick())
 		require.EqualValues(t, 150, mvcc.GetTransformingTimetick())
-		require.NoError(t, requireSplitReadSnapshot(meta, &viewpb.QueryPlanMVCC{GrowingTimetick: 200, TransformingTimetick: 200}))
+		require.NoError(t, requireSplitReadSnapshot(meta, &viewpb.QueryPlanMVCC{GrowingTimetick: 200, TransformingTimetick: 200}, req))
 	}
 }
 
@@ -62,4 +65,22 @@ func TestSplitFixedSnapshotGuardRunsBeforeQueryRuntime(t *testing.T) {
 		require.EqualValues(t, 150, req.GetBarrierMvcc())
 		require.EqualValues(t, 150, mvcc.GetGrowingTimetick())
 	})
+}
+
+func TestPhysicalHistoryFloorUsesRequestedBarrierAndSourceReadPoint(t *testing.T) {
+	meta := &viewpb.QueryViewMeta{TransformStartAfterTimetick: 40, SnapshotHistoryFloor: 200}
+	mvcc := &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 100}
+	for _, b := range []uint64{199, 200, 250} {
+		barrier := &viewpb.GetQueryPlanRequest{Mvcc: &viewpb.GetQueryPlanRequest_BarrierMvcc{BarrierMvcc: b}}
+		source := &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 100, ReadTimetick: b}
+		executor := &viewpb.GetQueryPlanRequest{Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: source}}
+		for _, err := range []error{requireSplitReadSnapshot(meta, mvcc, barrier), requireSplitReadSnapshot(meta, source, executor)} {
+			if b < 200 {
+				require.Error(t, err)
+				require.True(t, viewerror.AsViewError(err).IsViewInvalidated())
+			} else {
+				require.NoError(t, err)
+			}
+		}
+	}
 }

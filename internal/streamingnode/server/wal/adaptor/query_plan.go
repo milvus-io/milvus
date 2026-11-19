@@ -150,7 +150,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 			return nil, err
 		}
 	}
-	if err := requireSplitReadSnapshot(lease.Meta, mvcc); err != nil {
+	if err := requireSplitReadSnapshot(lease.Meta, mvcc, req); err != nil {
 		return nil, err
 	}
 	var readRuntime *queryresource.ReadRuntime

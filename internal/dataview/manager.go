@@ -63,8 +63,12 @@ type PendingTransformProjector func(ctx context.Context, view *viewpb.DataViewOf
 
 type Option func(*dataViewManager)
 
-func WithFrontierProjector(project FrontierProjector) Option {
-	return func(m *dataViewManager) { m.frontierProjector = project }
+// WithQueryViewFrontiers enables WAL-certified replay and fixed-snapshot bounds.
+func WithQueryViewFrontiers(allocateTimestamp func(context.Context) (uint64, error), project FrontierProjector) Option {
+	return func(m *dataViewManager) {
+		m.frontierProjector = project
+		m.allocateTimestamp = allocateTimestamp
+	}
 }
 
 func WithPendingTransformProjector(project PendingTransformProjector) Option {
@@ -235,6 +239,7 @@ type dataViewManager struct {
 	// async Recompute worker runs against it. nil means the manager is not
 	// wired for async reconciliation (Recompute returns an error).
 	projector                 Projector
+	allocateTimestamp         func(context.Context) (uint64, error)
 	frontierProjector         FrontierProjector
 	pendingTransformProjector PendingTransformProjector
 	// workerCtx bounds the async Recompute worker's lifetime. NewManager uses
@@ -574,7 +579,7 @@ func (m *dataViewManager) recomputeNow(ctx context.Context, collectionID int64, 
 	if next == nil {
 		next = &viewpb.DataViewOfCollection{CollectionId: collectionID}
 	}
-	if err := rebuildSegments(next, segments); err != nil {
+	if err := m.rebuildSegmentBases(ctx, next, segments); err != nil {
 		return nil, err
 	}
 	if err := m.advanceTransformFrontiers(ctx, next, nil); err != nil {
@@ -795,6 +800,7 @@ func (m *dataViewManager) collectionDataViewLocked(state *collectionState) *api.
 			continue
 		}
 		nativeShard := &api.ShardDataView{
+			SnapshotHistoryFloor:                 shard.GetSnapshotHistoryFloor(),
 			Lineage:                              shard.GetLineage(),
 			VChannel:                             shard.GetVchannel(),
 			GrowingTransformStartAfterTimetick:   shard.GetGrowingTransformStartAfterTimetick(),
@@ -1191,7 +1197,7 @@ func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) 
 	return nil
 }
 
-// rebuildSegments replaces every Segment of the snapshot with the supplied
+// rebuildSegmentBases replaces every Segment of the snapshot with the supplied
 // projection. The Collection's vchannel skeleton is preserved (empty shards
 // stay), while every partition's Segment list is rebuilt from scratch, so
 // segments absent from the projection (compacted away, truncated, partition
@@ -1202,14 +1208,18 @@ func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) 
 // stored version, so an idempotent Recompute after an L0 manifest bump stays a
 // no-op instead of spuriously regressing the version to 0. A positive
 // projected version may only advance the stored version, never regress it.
-func rebuildSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) error {
-	known := make(map[int64]int64)
-	knownStarts := make(map[int64]uint64)
+func (m *dataViewManager) rebuildSegmentBases(ctx context.Context, view *viewpb.DataViewOfCollection, segments []LoadableSegment) error {
+	type base struct {
+		shard    *viewpb.DataViewOfShard
+		manifest int64
+		start    uint64
+		retained bool
+	}
+	known := make(map[int64]base)
 	for _, shard := range view.GetShards() {
 		for _, partition := range shard.GetPartitions() {
 			for idx, segmentID := range partition.GetSegmentIds() {
-				known[segmentID] = partition.GetSegmentManifestVersions()[idx]
-				knownStarts[segmentID] = partition.GetSegmentTransformStartAfterTimeticks()[idx]
+				known[segmentID] = base{shard: shard, manifest: partition.GetSegmentManifestVersions()[idx], start: partition.GetSegmentTransformStartAfterTimeticks()[idx]}
 			}
 		}
 	}
@@ -1220,8 +1230,12 @@ func rebuildSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegme
 		if segments[i].SegmentID == 0 {
 			continue
 		}
-		stored, exists := known[segments[i].SegmentID]
-		oldStart := knownStarts[segments[i].SegmentID]
+		previous, exists := known[segments[i].SegmentID]
+		if exists {
+			previous.retained = true
+			known[segments[i].SegmentID] = previous
+		}
+		stored, oldStart := previous.manifest, previous.start
 		// An unresolved projection keeps the known base revision, so it must
 		// also keep that revision's cursor rather than borrow newer coverage.
 		if segments[i].ManifestVersion == 0 && stored > 0 {
@@ -1247,7 +1261,28 @@ func rebuildSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegme
 			)
 		}
 	}
-	return addSegments(view, segments)
+	if err := addSegments(view, segments); err != nil {
+		return err
+	}
+	if m.frontierProjector != nil {
+		// The projector may retire every row-bearing output. Date the loss of
+		// its parent using one TSO after the physical projection has completed.
+		var stamp uint64
+		for _, previous := range known {
+			if previous.retained {
+				continue
+			}
+			if stamp == 0 {
+				var err error
+				stamp, err = m.allocateTimestamp(ctx)
+				if err != nil {
+					return err
+				}
+			}
+			previous.shard.SnapshotHistoryFloor = max(previous.shard.SnapshotHistoryFloor, stamp)
+		}
+	}
+	return nil
 }
 
 func validatePersistedSegmentManifestVersions(view *viewpb.DataViewOfCollection) error {

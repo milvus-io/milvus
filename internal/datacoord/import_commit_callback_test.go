@@ -162,7 +162,7 @@ func TestImportCommitCallbackAfterCollectionDrop(t *testing.T) {
 					// Production requires Create/Bootstrap before ordinary recompute.
 					server.dataViewManager, err = dataview.RecoverManager(ctx, catalog,
 						func(context.Context, int64) (bool, error) { return false, nil }, nil, nil, nil,
-						dataview.WithFrontierProjector(func(context.Context, int64) (map[string]uint64, error) {
+						dataview.WithQueryViewFrontiers(func(context.Context) (uint64, error) { return 123, nil }, func(context.Context, int64) (map[string]uint64, error) {
 							return nil, nil
 						}))
 					require.NoError(t, err)

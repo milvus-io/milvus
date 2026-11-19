@@ -68,6 +68,7 @@ func TestTargetPreemptsPublishedRecovery(t *testing.T) {
 		t.Run(map[bool]string{false: "preparing", true: "ready"}[ready], func(t *testing.T) {
 			old := testBuilder(1, 1, 1).SetLoadInfoVersion(99).Build()
 			old.Meta.State = viewpb.QueryViewState_QueryViewStateUnrecoverable
+			old.Meta.SnapshotHistoryFloor = 200
 			syncer := newMockSyncer()
 			manager := newTestManager(t, newMockCatalog(), syncer, old)
 			manager.PublishSchema(0)
@@ -77,6 +78,7 @@ func TestTargetPreemptsPublishedRecovery(t *testing.T) {
 			require.NoError(t, manager.AddPublishedRecovery(t.Context(), repair, source))
 			manager.waitFlush()
 			repaired := testVersion(1, 1, 2)
+			require.EqualValues(t, 200, manager.views[repaired].View().GetMeta().GetSnapshotHistoryFloor())
 			require.Equal(t, qviews.QueryViewStateDropping, manager.views[source].State())
 			require.Equal(t, repaired.IntoProto(), manager.PublishedRecovery(1).View.Meta.Version)
 			require.Error(t, manager.AddPublishedRecovery(t.Context(), repair, source), "a stale source cannot replace the latest view even at the same DataVersion")

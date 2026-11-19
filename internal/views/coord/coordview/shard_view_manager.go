@@ -508,7 +508,9 @@ func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.Que
 	builder.SetQueryVersion(qv)
 	view.Meta.Version.QueryVersion = qv
 	if source != nil {
-		view.Meta.TransformStartAfterTimetick = m.views[*source].View().GetMeta().GetTransformStartAfterTimetick()
+		retained := m.views[*source].View().GetMeta()
+		view.Meta.TransformStartAfterTimetick = retained.GetTransformStartAfterTimetick()
+		view.Meta.SnapshotHistoryFloor = retained.GetSnapshotHistoryFloor()
 	}
 	sm := NewCoordQueryViewStateMachineWithRef(view, ref)
 	sm.releaseLoadInfo = releaseLoadInfo

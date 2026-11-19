@@ -151,6 +151,8 @@ fence 前新请求走普通 g0。fence 后，无论 primary 还是 secondary，�
 
 proxy 对每个谱系组采样目标 through 及 Strong 最小前缀。Strong/Session 使用所需的新鲜度下限，Bounded/Customized 保留请求 guarantee，Eventually 无额外下限；固定时间点操作保留已有时间点。
 
+分组发布或重建 DataView 移除已发布的物理段时，在受影响的 shard 上持久化发布时的 TSO 作为固定快照的保守下界。接管时所有目标继承源的下界，包括重写后没有剩余行的目标。SN 在 Phase 1 用请求的 B 校验该下界。失效的游标返回 ViewInvalidated。
+
 非固定请求选择 B=max(一致性下限,min(through_i))。各目标以 barrier_mvcc=B 做 Phase 1，分别等待其完整前缀覆盖 B，返回该点的执行前沿及 X_i@B。
 
 S 的自身业务前沿固定为 T_switch，Phase 2 同时携带共同 B 和每条目标流的 X_i@B。QN sealed 与 SN 残余均先等待本流及全部谱系删除应用位置，再以 B 作为引擎读时间戳。

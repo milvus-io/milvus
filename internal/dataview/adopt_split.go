@@ -151,6 +151,14 @@ func (m *dataViewManager) PrepareAdoptSplit(ctx context.Context, event AdoptSpli
 		return base, commit, abort, nil
 	}
 
+	// Every child inherits the source history, including a child for which
+	// compaction removed every row. Its ordinary replay cursor can be older.
+	if source != nil {
+		for _, target := range source.GetLineage().GetVchannels() {
+			child := shards[target]
+			child.SnapshotHistoryFloor = max(child.SnapshotHistoryFloor, source.GetSnapshotHistoryFloor(), source.GetLineage().GetSwitchTimetick())
+		}
+	}
 	kept := next.Shards[:0]
 	for _, shard := range next.GetShards() {
 		if shard.GetVchannel() != event.Source {
