@@ -480,6 +480,7 @@ func TestSplitSourceIsDroppedAndTruncatedWithItsCollection(t *testing.T) {
 	segmentManager := segment.NewMockManager(t)
 	inspector := compaction.NewMockCompactionInspector(t)
 	inspector.EXPECT().RemoveTasksByChannel(splitTestSource).Return().Once()
+	inspector.EXPECT().RemoveTasksByChannel(splitTestTarget1).Return().Once()
 	s := &Server{splitStore: store, meta: mt, segmentManager: segmentManager, compactionInspector: inspector}
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 	s.dataViewManager = dataview.NewManager(catalog, nil)
