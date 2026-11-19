@@ -24,6 +24,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -142,4 +143,22 @@ func stringRows(rows []*schemapb.ScalarField) [][]string {
 		out = append(out, row.GetStringData().GetData())
 	}
 	return out
+}
+
+func TestTopLevelArrayWithNullableFixedSizeListElements(t *testing.T) {
+	builder := array.NewFixedSizeListBuilder(memory.DefaultAllocator, 3, arrow.PrimitiveTypes.Int64)
+	defer builder.Release()
+	builder.Append(true)
+	builder.ValueBuilder().(*array.Int64Builder).AppendValues([]int64{4, 0, 6}, []bool{true, false, true})
+	arr := builder.NewArray()
+	defer arr.Release()
+	chunked := arrow.NewChunked(arr.DataType(), []arrow.Array{arr})
+	defer chunked.Release()
+	field := &schemapb.FieldSchema{Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true,
+		TypeParams: []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "3"}}}
+	data, _, err := readScalarArrayRows(chunked, field, nil)
+	require.NoError(t, err)
+	row := data.([]*schemapb.ScalarField)[0]
+	require.Equal(t, []bool{true, false, true}, row.GetValidData())
+	require.Equal(t, []int64{4, 0, 6}, row.GetLongData().GetData())
 }

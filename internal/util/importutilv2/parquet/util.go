@@ -345,6 +345,11 @@ func isArrowDataTypeConvertible(src arrow.DataType, dst arrow.DataType, field *s
 	if isFP16BF16VectorField(field) && dstType == arrow.UINT8 && isArrowFloatingType(srcType) {
 		return true
 	}
+	// A list whose child type is null can represent a batch containing only
+	// null elements, including on a required list column.
+	if !allowFixedSizeList && srcType == arrow.NULL && field.GetDataType() == schemapb.DataType_Array && field.GetElementNullable() {
+		return true
+	}
 	switch srcType {
 	case arrow.BOOL:
 		return dstType == arrow.BOOL
