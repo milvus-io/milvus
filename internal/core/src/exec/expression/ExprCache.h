@@ -25,6 +25,7 @@
 #include <optional>
 #include <shared_mutex>
 #include <string>
+#include <span>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -123,7 +124,6 @@ struct CacheConfig {
     // Memory mode
     size_t mem_max_bytes{256ULL * 1024 * 1024};
     bool compression_enabled{true};
-    bool mem_enable_growing{false};
     int64_t mem_min_eval_duration_us{1000};
     // Disk mode
     std::string disk_base_path;
@@ -171,7 +171,7 @@ class ExprResCacheManager {
 
     struct Key {
         int64_t segment_id{0};
-        std::string signature;  // expr signature including parameters
+        ExprCacheSignature signature;
         ExprCacheGenerationPtr generation;
 
         ExprCacheSegmentKey
@@ -189,7 +189,7 @@ class ExprResCacheManager {
     struct KeyHasher {
         size_t
         operator()(const Key& k) const noexcept {
-            std::hash<std::string> h2;
+            ExprCacheSignatureHasher h2;
             return ExprCacheSegmentKeyHasher{}(k.SegmentKey()) ^
                    h2(k.signature);
         }
@@ -229,8 +229,7 @@ class ExprResCacheManager {
     CacheMode
     GetMode() const;
 
-    // Sealed segments are supported by both backends. Growing segments are
-    // opt-in and supported only by the memory backend.
+    // Both backends support only sealed snapshots.
     bool
     CanCacheSegment(SegmentType segment_type) const noexcept;
 
@@ -277,6 +276,26 @@ class ExprResCacheManager {
     LookupResult
     GetWithStatus(const Key& key, Value& out_value);
 
+    // A metadata-only lookup retains the backend, never a materialized pair.
+    // Prefetch can avoid source I/O while deferring bitmap allocation until
+    // the evaluator knows whether it needs a whole segment or a few offsets.
+    struct ReadHandle {
+        EntryPool::Handle memory;
+        std::shared_ptr<DiskSlotFile> disk;
+        ExprCacheSignature signature;
+        int64_t active_count{0};
+        explicit operator bool() const {
+            return memory || disk;
+        }
+    };
+    ReadHandle
+    Lookup(const Key& key, int64_t active_count);
+    LookupResult
+    ReadWithStatus(const ReadHandle& handle,
+                   Value& out_value,
+                   const std::span<const int32_t>* offsets = nullptr,
+                   const std::function<void()>& before_decode = {});
+
     // Insert or update cache entry. The provided value.result must be non-null.
     void
     Put(const Key& key, const Value& value) noexcept;
@@ -306,7 +325,7 @@ class ExprResCacheManager {
     // unrelated I/O. No allocation on the retirement path.
     struct RetiredGeneration {
         EntryPool::RetiredEntries memory;
-        std::unique_ptr<DiskSlotFile> disk;
+        std::shared_ptr<DiskSlotFile> disk;
         RetiredGeneration();
         RetiredGeneration(RetiredGeneration&&) noexcept;
         ~RetiredGeneration();
@@ -315,12 +334,6 @@ class ExprResCacheManager {
     RetiredGeneration
     RetireGeneration(int64_t segment_id,
                      const ExprCacheGenerationPtr& generation);
-
-    // Generation-zero legacy/growing cache only. Sealed lifecycle retirement
-    // must use its own token, never erase another incarnation of the same ID.
-    // Returns the number of erased entries (files in disk mode).
-    size_t
-    EraseLegacySegment(int64_t segment_id);
 
  private:
     ExprResCacheManager();
@@ -334,7 +347,8 @@ class ExprResCacheManager {
 
     size_t
     EvictDiskSegmentsUntilWithinBudget(
-        ExprCacheSegmentKey protected_segment_id);
+        ExprCacheSegmentKey protected_segment_id,
+        std::vector<std::shared_ptr<DiskSlotFile>>& detached);
 
     // Private injection points for testing disk-put exception safety.
     enum class DiskPutStage {
@@ -358,7 +372,8 @@ class ExprResCacheManager {
     RemoveDiskClockSegment(ExprCacheSegmentKey segment_id);
 
     size_t
-    RemoveDiskSegmentFile(ExprCacheSegmentKey segment_id);
+    RemoveDiskSegmentFile(ExprCacheSegmentKey segment_id,
+                          std::vector<std::shared_ptr<DiskSlotFile>>& detached);
 
     void
     SyncDiskUsageMetrics(size_t disk_bytes);
@@ -389,7 +404,7 @@ class ExprResCacheManager {
     // Disk mode backend
     mutable std::shared_mutex disk_files_mutex_;
     std::unordered_map<ExprCacheSegmentKey,
-                       std::unique_ptr<DiskSlotFile>,
+                       std::shared_ptr<DiskSlotFile>,
                        ExprCacheSegmentKeyHasher>
         disk_files_;
     std::unordered_set<ExprCacheSegmentKey, ExprCacheSegmentKeyHasher>

@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <vector>
+#include <span>
 
 #include "common/Types.h"
 
@@ -110,6 +111,16 @@ class CacheCompressor {
                uint8_t comp_type,
                TargetBitmap& out_result,
                TargetBitmap& out_valid);
+
+    // Gather in caller order without expanding a full segment bitmap.
+    static bool
+    Gather(const char* data,
+           uint32_t data_len,
+           uint8_t comp_type,
+           int64_t active_count,
+           std::span<const int32_t> offsets,
+           TargetBitmap& out_result,
+           TargetBitmap& out_valid);
 
  private:
     static std::vector<char>

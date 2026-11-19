@@ -440,5 +440,101 @@ CacheCompressor::Decompress(const char* data,
     return true;
 }
 
+bool
+CacheCompressor::Gather(const char* data,
+                        uint32_t data_len,
+                        uint8_t comp_type,
+                        int64_t active_count,
+                        std::span<const int32_t> offsets,
+                        TargetBitmap& out_result,
+                        TargetBitmap& out_valid) {
+    if (data_len < kHeaderSize || active_count < 0) {
+        return false;
+    }
+    uint32_t result_bits, valid_header;
+    std::memcpy(&result_bits, data, 4);
+    std::memcpy(&valid_header, data + 4, 4);
+    const auto valid_bits = valid_header & ~kValidAllOnesMask;
+    const bool all_valid = valid_header & kValidAllOnesMask;
+    if (result_bits != active_count || valid_bits != active_count) {
+        return false;
+    }
+    for (auto offset : offsets) {
+        if (offset < 0 || offset >= active_count) {
+            return false;
+        }
+    }
+    const char* payload = data + kHeaderSize;
+    size_t remaining = data_len - kHeaderSize;
+    uint8_t result_type = kCompTypeRaw, valid_type = kCompTypeRaw;
+    uint32_t result_size = ((size_t{result_bits} + 63) / 64) * 8;
+    if (comp_type == kCompTypeIndependent) {
+        if (remaining < kEncodingHeaderSize) {
+            return false;
+        }
+        result_type = static_cast<uint8_t>(payload[0]);
+        valid_type = static_cast<uint8_t>(payload[1]);
+        std::memcpy(&result_size, payload + 2, 4);
+        payload += kEncodingHeaderSize;
+        remaining -= kEncodingHeaderSize;
+    } else if (comp_type != kCompTypeRaw) {
+        return false;
+    }
+    if (result_size > remaining || (all_valid && (valid_type != kCompTypeRaw ||
+                                                  remaining != result_size))) {
+        return false;
+    }
+    auto gather = [&](const char* bytes,
+                      size_t size,
+                      uint8_t type,
+                      TargetBitmap& output) {
+        if (type == kCompTypeRaw) {
+            if (size != ((size_t{result_bits} + 63) / 64) * 8) {
+                return false;
+            }
+            TargetBitmap selected(offsets.size(), false);
+            for (size_t i = 0; i < offsets.size(); ++i) {
+                uint64_t word;
+                std::memcpy(&word, bytes + (offsets[i] / 64) * 8, 8);
+                selected[i] = (word >> (offsets[i] % 64)) & 1;
+            }
+            output = std::move(selected);
+            return true;
+        }
+        if (type != kCompTypeRoaring && type != kCompTypeRoaringInv) {
+            return false;
+        }
+        using namespace roaring::internal;
+        std::unique_ptr<roaring_bitmap_t, decltype(&roaring_bitmap_free)>
+            bitmap(roaring_bitmap_deserialize_safe(bytes, size),
+                   roaring_bitmap_free);
+        if (!bitmap) {
+            return false;
+        }
+        TargetBitmap selected(offsets.size(), false);
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            selected[i] = roaring_bitmap_contains(bitmap.get(), offsets[i]) !=
+                          (type == kCompTypeRoaringInv);
+        }
+        output = std::move(selected);
+        return true;
+    };
+    TargetBitmap result, valid;
+    if (!gather(payload, result_size, result_type, result)) {
+        return false;
+    }
+    if (all_valid) {
+        valid = TargetBitmap(offsets.size(), true);
+    } else if (!gather(payload + result_size,
+                       remaining - result_size,
+                       valid_type,
+                       valid)) {
+        return false;
+    }
+    out_result = std::move(result);
+    out_valid = std::move(valid);
+    return true;
+}
+
 }  // namespace exec
 }  // namespace milvus

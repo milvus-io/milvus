@@ -23,6 +23,7 @@
 
 #include "common/FeatureBits.h"
 #include "common/Types.h"
+#include "common/Vector.h"
 #include "exec/expression/ExprCache.h"
 #include "segcore/SegmentInterface.h"
 
@@ -31,7 +32,7 @@ namespace exec {
 
 // Wrapper around ExprResCacheManager to simplify the get→compute→put pattern
 // for expression implementations. Each expression only needs to:
-//   1. Provide a stable ToString() signature
+//   1. Provide a memoized logical expression signature
 //   2. Wrap its compute logic in a lambda
 //
 // The helper handles: cache lookup, miss path timing, put, and the
@@ -40,7 +41,7 @@ namespace exec {
 // Example usage in an expression:
 //
 //   auto cached = exec::ExprCacheHelper::GetOrCompute(
-//       segment_, snapshot_, [this]() { return this->ToString(); }, active_count_,
+//       segment_, snapshot_, [this]() { return CacheSignature(); }, active_count_,
 //       [&]() -> exec::ExprCacheHelper::ComputeResult {
 //           TargetBitmap res = do_actual_computation();
 //           TargetBitmap valid = compute_valid();
@@ -54,18 +55,39 @@ class ExprCacheHelper {
     static bool
     HasCacheIdentity(const segcore::SegmentInternalInterface* segment,
                      const segcore::SegmentReadSnapshot* snapshot) {
-        return segment != nullptr &&
-               (segment->type() != SegmentType::Sealed ||
-                (snapshot != nullptr && snapshot->GetExprCacheGeneration()));
+        return segment != nullptr && segment->type() == SegmentType::Sealed &&
+               snapshot != nullptr && snapshot->GetExprCacheGeneration();
     }
 
     static ExprResCacheManager::Key
     MakeKey(const segcore::SegmentInternalInterface* segment,
             const segcore::SegmentReadSnapshot* snapshot,
-            std::string signature) {
+            ExprCacheSignature signature) {
         return {segment->get_segment_id(),
                 std::move(signature),
                 snapshot ? snapshot->GetExprCacheGeneration() : nullptr};
+    }
+
+    // The cache's aliasing pointers own the materialization lease. Keep them
+    // with a moved output so destroying the evaluator cannot return the budget
+    // while its caller still holds the bitmap buffers.
+    static ColumnVectorPtr
+    MoveToColumn(std::shared_ptr<TargetBitmap> result,
+                 std::shared_ptr<TargetBitmap> valid) {
+        struct OwnedColumn {
+            std::shared_ptr<TargetBitmap> result_owner;
+            std::shared_ptr<TargetBitmap> valid_owner;
+            ColumnVector column;
+            OwnedColumn(std::shared_ptr<TargetBitmap> r,
+                        std::shared_ptr<TargetBitmap> v)
+                : result_owner(std::move(r)),
+                  valid_owner(std::move(v)),
+                  column(std::move(*result_owner), std::move(*valid_owner)) {
+            }
+        };
+        auto owner =
+            std::make_shared<OwnedColumn>(std::move(result), std::move(valid));
+        return ColumnVectorPtr(owner, &owner->column);
     }
 
     struct CachedBitmaps {
@@ -83,20 +105,16 @@ class ExprCacheHelper {
 
     // Try cache; on miss, call `compute`, put result into cache, return.
     // Backend semantics:
-    //   - Memory mode always supports sealed segments. Growing segments are
-    //     supported only when explicitly enabled.
+    //   - Both backends require a sealed snapshot generation.
     //   - Disk mode is sealed-segment only. DiskSlotFile uses fixed-size slots
     //     derived from row_count; if a segment's row_count changes, the manager
     //     drops that disk file and skips disk caching for the segment.
     //
-    // Skips the cache entirely if ExprResCacheManager is disabled. Disk mode
-    // also skips growing segments because DiskSlotFile has fixed row_count slots.
+    // Skips the cache entirely if disabled or the segment is growing.
     //
     // Correctness requirements for the caller:
-    //   - `make_signature` MUST return a string that uniquely identifies the
-    //     expression and its parameters. Same parameters → same signature.
-    //     Field order in the string must be fixed (don't rely on protobuf
-    //     DebugString).
+    //   - `make_signature` returns the memoized identity of the expression
+    //     and all its parameters, including any execution-domain distinction.
     //   - `active_count` MUST be the current segment row count. Used to
     //     detect staleness after insert/compaction.
     //   - `snapshot` MUST be the snapshot used by `compute`; sealed calls without
@@ -114,7 +132,7 @@ class ExprCacheHelper {
                  FeatureRecorder* recorder = nullptr) {
         ExprResCacheManager* manager = nullptr;
         bool cache_eligible = false;
-        std::string expr_signature;
+        ExprCacheSignature expr_signature;
         if (ExprResCacheManager::IsEnabled() &&
             HasCacheIdentity(segment, snapshot)) {
             RunExprCacheBestEffort([&]() {

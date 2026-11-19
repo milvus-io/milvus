@@ -35,8 +35,9 @@ class ExprCacheGeneration {
     const uint64_t id;
 
     // Logical retirement must not wait for backend locks or unrelated I/O.
-    // Backend detachment separately drains operations that already passed
-    // IsRetired() by taking the manager's exclusive state lock.
+    // Backend detachment excludes metadata publication with the manager's
+    // exclusive state lock. Readers/writers already owning a disk file may
+    // finish their I/O after detachment without republishing that file.
     void
     Retire() noexcept {
         retired_.store(true, std::memory_order_release);
@@ -54,7 +55,7 @@ class ExprCacheGeneration {
 using ExprCacheGenerationPtr = std::shared_ptr<ExprCacheGeneration>;
 
 struct ExprCacheSegmentKey {
-    // Generation zero is reserved for growing segments and backend unit tests.
+    // Zero denotes an invalid identity; manager entries require a live token.
     ExprCacheSegmentKey(int64_t segment = 0, uint64_t version = 0)
         : segment_id(segment), generation(version) {
     }
