@@ -10,6 +10,8 @@ package segcore
 import "C"
 
 import (
+	"time"
+
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 )
 
@@ -48,6 +50,33 @@ func (r *SearchResult) GetMetadata() SearchResultMetadata {
 			ScannedTotalBytes:  int64(total),
 		},
 	}
+}
+
+// OperatorCost is the time a segment search spent in one operator type of its
+// plan, e.g. PhyFilterBitsNode or PhyVectorSearchNode.
+type OperatorCost struct {
+	OperatorType string
+	Duration     time.Duration
+}
+
+// OperatorCosts returns the time the search spent in each operator type of
+// its plan, in the order the types first ran.
+func (r *SearchResult) OperatorCosts() []OperatorCost {
+	n := int64(C.GetSearchResultOperatorCostCount(r.cSearchResult))
+	if n == 0 {
+		return nil
+	}
+	costs := make([]OperatorCost, 0, n)
+	for i := int64(0); i < n; i++ {
+		var name *C.char
+		var ns C.int64_t
+		C.GetSearchResultOperatorCost(r.cSearchResult, C.int64_t(i), &name, &ns)
+		costs = append(costs, OperatorCost{
+			OperatorType: C.GoString(name),
+			Duration:     time.Duration(ns),
+		})
+	}
+	return costs
 }
 
 // ValidCount returns the count of rows that pass the filter (for two-stage search).

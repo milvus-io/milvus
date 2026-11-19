@@ -3,6 +3,7 @@ package viewquery
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
@@ -10,11 +11,13 @@ import (
 	"google.golang.org/grpc/status"
 
 	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -51,6 +54,11 @@ func (s *Server) SearchOnView(ctx context.Context, req *viewpb.SearchOnViewReque
 		result *internalpb.SearchResults
 		err    error
 	)
+	// The segment searches below, of every sub-search, record into profile
+	// through ctx; the stages go back to the Proxy in the result's Status.
+	profile := searchprofile.NewRecorder(paramtable.GetNodeID())
+	ctx = searchprofile.WithRecorder(ctx, profile)
+	start := time.Now()
 	if req.GetLegacyReq().GetIsAdvanced() {
 		result, err = s.executeAdvancedSearch(ctx, req)
 	} else {
@@ -59,6 +67,8 @@ func (s *Server) SearchOnView(ctx context.Context, req *viewpb.SearchOnViewReque
 	if err != nil {
 		return nil, err
 	}
+	profile.ObserveSince(searchprofile.QNExecute, start, 0)
+	searchprofile.Attach(result.GetStatus(), profile.Stages())
 	return &viewpb.SearchOnViewResponse{LegacyResults: result}, nil
 }
 
@@ -154,9 +164,16 @@ func (s *Server) SearchOnViewStream(stream viewpb.ViewQueryService_SearchOnViewS
 		return err
 	}
 	chunkBytes := int(request.GetStreamChunkBytes())
+	// Splitting rebuilds the Status of each Chunk, so the stages SearchOnView
+	// attached are moved to the first Chunk: the search has finished before any
+	// Chunk is sent, and a reducer may stop reading before the last one.
+	stages := searchprofile.Take(response.GetLegacyResults().GetStatus())
 	chunks, err := searchreducestream.SplitSearchResult(response.GetLegacyResults(), chunkBytes)
 	if err != nil {
 		return status.Errorf(codes.Internal, "split SearchOnView result: %v", err)
+	}
+	if len(chunks) > 0 {
+		searchprofile.Attach(chunks[0].GetStatus(), stages)
 	}
 	for _, chunk := range chunks {
 		if err := stream.Send(&viewpb.SearchOnViewStreamResponse{

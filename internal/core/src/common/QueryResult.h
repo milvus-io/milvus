@@ -415,6 +415,8 @@ struct SearchResult {
         vector_iterators_;
     // record the storage usage in search
     StorageCost search_storage_cost_;
+    // nanoseconds spent in each operator type of the search plan
+    std::vector<std::pair<std::string, int64_t>> operator_costs_;
 
     bool element_level_{false};
     // Execution features seen while producing this result, moved into the

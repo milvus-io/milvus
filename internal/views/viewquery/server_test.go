@@ -4,16 +4,71 @@ package viewquery
 
 import (
 	"context"
+	"io"
 	"testing"
+	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+// The response carries, in its Status, the node's whole search and the
+// segment searches recorded through the request context.
+func TestServerSearchOnViewReportsStages(t *testing.T) {
+	provider := &fakeTaskProvider{
+		searchTasks: &fakeSearchSegmentTasks{tasks: []SearchSegmentTask{struct{}{}}},
+	}
+	server := NewServer(provider, stageRecordingScheduler{})
+
+	resp, err := server.SearchOnView(context.Background(), validSearchRequest())
+
+	require.NoError(t, err)
+	stages := searchprofile.Take(resp.GetLegacyResults().GetStatus())
+	require.Len(t, stages, 2)
+	assert.Equal(t, searchprofile.Stage{Name: searchprofile.QNSegmentSearch, SumUs: 5000, MaxUs: 5000, Count: 1, MaxID: 11}, stages[0])
+	assert.Equal(t, searchprofile.QNExecute, stages[1].Name)
+}
+
+// A hybrid search reports the segment searches of every sub-search, which
+// share the request's profile.
+func TestServerAdvancedSearchOnViewReportsSubSearchStages(t *testing.T) {
+	// The sub-searches run concurrently, so use the provider that allows it.
+	server := NewServer(newAdvancedTaskProvider(), stageRecordingScheduler{})
+	req := validSearchRequest()
+	req.LegacyReq.IsAdvanced = true
+	req.LegacyReq.SubReqs = []*internalpb.SubSearchRequest{{Nq: 1, Topk: 1}, {Nq: 1, Topk: 1}}
+
+	resp, err := server.SearchOnView(context.Background(), req)
+
+	require.NoError(t, err)
+	require.True(t, resp.GetLegacyResults().GetIsAdvanced())
+	counts := make(map[string]int64)
+	for _, s := range searchprofile.Take(resp.GetLegacyResults().GetStatus()) {
+		counts[s.Name] = s.Count
+	}
+	assert.Equal(t, map[string]int64{searchprofile.QNExecute: 1, searchprofile.QNSegmentSearch: 2}, counts)
+}
+
+// stageRecordingScheduler records one segment search into the request's
+// profile, as the segment searches of a real node do, and returns a new
+// result for each search.
+type stageRecordingScheduler struct {
+	Scheduler
+}
+
+func (stageRecordingScheduler) Search(ctx context.Context, _ SearchSegmentTasks) (*internalpb.SearchResults, error) {
+	searchprofile.FromContext(ctx).Observe(searchprofile.QNSegmentSearch, 5*time.Millisecond, 11)
+	return &internalpb.SearchResults{Status: merr.Success()}, nil
+}
 
 func TestServerSearchOnViewDelegatesAndReleasesTasks(t *testing.T) {
 	provider := &fakeTaskProvider{
@@ -280,4 +335,46 @@ func TestServerSearchPassesExecutionOptionsAndReleasesOwner(t *testing.T) {
 	require.NoError(t, err)
 	require.Same(t, req.ExecutionOptions, SearchOptions(scheduler.searchTasks))
 	require.Equal(t, 1, provider.searchTasks.releaseCount)
+}
+
+// Splitting rebuilds each Chunk's Status, so the node's stages ride on the
+// first Chunk only, which every reducer reads.
+func TestSearchOnViewStreamSendsStagesOnFirstChunk(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		chunkBytes int64
+		chunks     int
+	}{
+		{name: "several chunks", chunkBytes: 20, chunks: 3},
+		{name: "one chunk", chunkBytes: 1 << 20, chunks: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tasks := &streamTestSearchTasks{tasks: []SearchSegmentTask{struct{}{}}}
+			server := NewServer(&streamTestProvider{searchTasks: tasks}, &streamTestScheduler{result: streamTestResult()})
+			client, cleanup := startSearchStreamTestServer(t, server)
+			defer cleanup()
+			request := streamTestRequest()
+			request.StreamChunkBytes = tc.chunkBytes
+			stream, err := reduce.NewSearchGRPCReduceStream(context.Background(), client, request)
+			require.NoError(t, err)
+
+			var chunks []*internalpb.SearchResults
+			for {
+				chunk, err := stream.Recv()
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				require.NoError(t, err)
+				chunks = append(chunks, chunk)
+			}
+			require.NoError(t, stream.Close())
+			require.Len(t, chunks, tc.chunks)
+			for _, chunk := range chunks[1:] {
+				require.NotContains(t, chunk.GetStatus().GetExtraInfo(), searchprofile.ExtraInfoKey)
+			}
+			stages := searchprofile.Take(chunks[0].GetStatus())
+			require.Len(t, stages, 1)
+			require.Equal(t, searchprofile.QNExecute, stages[0].Name)
+		})
+	}
 }

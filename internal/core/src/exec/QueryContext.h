@@ -17,7 +17,9 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <folly/Executor.h>
@@ -255,6 +257,28 @@ class QueryContext : public Context {
         return std::move(search_result_);
     }
 
+    // AddOperatorCost adds ns nanoseconds spent in an operator of
+    // operator_type to the query's cost for that type.
+    void
+    AddOperatorCost(const std::string& operator_type, int64_t ns) {
+        std::lock_guard<std::mutex> lock(operator_costs_mutex_);
+        for (auto& cost : operator_costs_) {
+            if (cost.first == operator_type) {
+                cost.second += ns;
+                return;
+            }
+        }
+        operator_costs_.emplace_back(operator_type, ns);
+    }
+
+    // get_operator_costs returns the nanoseconds spent in each operator type,
+    // in the order the types first ran.
+    std::vector<std::pair<std::string, int64_t>>
+    get_operator_costs() {
+        std::lock_guard<std::mutex> lock(operator_costs_mutex_);
+        return operator_costs_;
+    }
+
     void
     set_op_context(milvus::OpContext* op_context) {
         op_context_ = op_context;
@@ -413,6 +437,10 @@ class QueryContext : public Context {
 
     // used for save op context
     milvus::OpContext* op_context_{nullptr};
+
+    // time spent in each operator type, see AddOperatorCost
+    std::mutex operator_costs_mutex_;
+    std::vector<std::pair<std::string, int64_t>> operator_costs_;
 
     int32_t consistency_level_ = 0;
 
