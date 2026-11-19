@@ -397,9 +397,6 @@ func validateArrayOfVectorFieldSchema(collectionName string, field *schemapb.Fie
 }
 
 func validateArrayFieldSchema(collectionName string, field *schemapb.FieldSchema) error {
-	if err := schemautil.ValidateVarCharArrayTextMatch(field); err != nil {
-		return err
-	}
 	if field.GetTypeSchema() != nil {
 		rootCapacity, err := validateNestedArrayTypeParams(
 			collectionName, field.GetName(), field.GetTypeSchema())
@@ -603,6 +600,9 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 	// valid max capacity for array per row parameters
 	// if max_capacity not specified, return error
 	if field.DataType == schemapb.DataType_Array {
+		if err := schemautil.ValidateVarCharArrayTextMatch(field); err != nil {
+			return err
+		}
 		if err = validateArrayFieldSchema(schema.Name, field); err != nil {
 			return err
 		}

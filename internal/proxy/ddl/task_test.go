@@ -8285,6 +8285,15 @@ func TestAlterCollectionSchemaTask_StructSubFieldAdd(t *testing.T) {
 		assert.True(t, field.GetNullable())
 		assert.Equal(t, "profile[c]", field.GetName())
 	})
+	t.Run("stored text flags do not prevent adding a sibling", func(t *testing.T) {
+		schema := structSubFieldDDLTestSchema(true)
+		field := schema.StructArrayFields[0].Fields[0]
+		field.ElementType = schemapb.DataType_VarChar
+		field.TypeParams = append(field.TypeParams,
+			&commonpb.KeyValuePair{Key: common.MaxLengthKey, Value: "32"},
+			&commonpb.KeyValuePair{Key: common.EnableMatchKey, Value: "true"})
+		require.NoError(t, preExecute(schema, newField("profile[c]"), nil, ""))
+	})
 	t.Run("non nullable parent", func(t *testing.T) {
 		field := newField("profile[c]")
 		require.NoError(t, preExecute(structSubFieldDDLTestSchema(false), field, nil, ""))

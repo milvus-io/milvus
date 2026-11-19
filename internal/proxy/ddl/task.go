@@ -779,6 +779,9 @@ func validateAddStructSubFieldProperties(structFieldSchema *schemapb.StructArray
 		if subField.GetExternalField() != "" {
 			return merr.WrapErrParameterInvalidMsg("add struct field operation does not support external field mapping, field name = %s", subField.GetName())
 		}
+		if err := schemautil.ValidateStructSubFieldTextMatch(subField); err != nil {
+			return err
+		}
 	}
 	return nil
 }
