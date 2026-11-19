@@ -42,10 +42,10 @@ serialized sync operator applies successful ACK messages in TimeTick order and
 atomically publishes both frontiers with the complete ACK-prefix position. A pair
 is never assembled from append-time maxima sampled at different stages.
 
-Strong/Session fixes its minimum once from the completed query-relevant writes
+Strong fixes its minimum once from the completed query-relevant writes
 of this VChannel and global publication operations. Later appends do not move
 that attempt's target. Eventually may reuse the current completed snapshot;
-Bounded also requires the prefix to cover the request's GuaranteeTimestamp.
+Bounded and Session require the prefix to cover the request's GuaranteeTimestamp.
 An adequate snapshot returns without sync. Otherwise ordinary TimeTick sync is
 triggered and the query waits under caller and WAL-owner cancellation. Pure
 Growing writes do not increase TransformMVCC or QueryNode's wait target.

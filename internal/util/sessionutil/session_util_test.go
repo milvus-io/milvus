@@ -27,6 +27,7 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -382,6 +383,32 @@ func TestSesssionMarshal(t *testing.T) {
 	assert.Equal(t, s.ServerName, s2.ServerName)
 	assert.Equal(t, s.Address, s2.Address)
 	assert.Equal(t, s.Version.String(), s2.Version.String())
+}
+
+func TestSessionWALAdvertisements(t *testing.T) {
+	term := int64(8)
+	s := &Session{SessionRaw: SessionRaw{WALReplicas: []*streamingpb.WALAdvertisement{
+		{Pchannel: "control", WalReplicaId: 10, WriterTerm: &term, IsCchannel: true},
+		{Pchannel: "data", WalReplicaId: 20},
+	}}}
+
+	data, err := json.Marshal(s)
+	require.NoError(t, err)
+	var raw struct {
+		WALReplicas []map[string]interface{}
+	}
+	require.NoError(t, json.Unmarshal(data, &raw))
+	require.Len(t, raw.WALReplicas, 2)
+	assert.NotContains(t, raw.WALReplicas[1], "writer_term")
+	assert.NotContains(t, raw.WALReplicas[1], "is_cchannel")
+
+	var decoded Session
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	require.Len(t, decoded.WALReplicas, 2)
+	assert.Equal(t, term, decoded.WALReplicas[0].GetWriterTerm())
+	assert.True(t, decoded.WALReplicas[0].GetIsCchannel())
+	assert.Equal(t, int64(20), decoded.WALReplicas[1].GetWalReplicaId())
+	assert.Nil(t, decoded.WALReplicas[1].WriterTerm)
 }
 
 func TestSessionUnmarshal(t *testing.T) {

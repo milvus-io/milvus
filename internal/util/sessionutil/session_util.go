@@ -40,6 +40,7 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -139,8 +140,9 @@ type SessionRaw struct {
 	IndexNonEncoding         bool               `json:"IndexNonEncoding,omitempty"`
 	LeaseID                  *clientv3.LeaseID  `json:"LeaseID,omitempty"`
 
-	HostName     string            `json:"HostName,omitempty"`
-	ServerLabels map[string]string `json:"ServerLabels,omitempty"`
+	HostName     string                          `json:"HostName,omitempty"`
+	ServerLabels map[string]string               `json:"ServerLabels,omitempty"`
+	WALReplicas  []*streamingpb.WALAdvertisement `json:"WALReplicas,omitempty"`
 }
 
 func (s *SessionRaw) GetAddress() string {

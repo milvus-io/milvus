@@ -7,6 +7,12 @@ querying Coordinator for every request.
 The WAL-owned SNQueryViewHandler is authoritative for local View state; the RPC
 service owns only connection/subscription lifetimes. QN does not implement Watch.
 
+## WAL multi-replica integration (proposed)
+
+StreamingClient watches StreamingNode sessions to select physical WAL endpoints for a PChannel. Each endpoint advertises its WAL replica ID. A present writer term identifies the RW. Only the writer for the control PChannel sets is_cchannel. Strong requests require the advertised RW. Bounded queries select a serving RO that covers the guarantee timestamp. All WAL-side execution of a shard plan uses the WAL replica that supplied its MVCC. Each endpoint continues to publish its locally Up logical query replicas through `SubscribeReplicas`. A WAL advertisement can therefore appear before that endpoint can serve a particular View. On handoff the client updates writer routing from the session watch. Read discovery can retain a subscription to the same readable WAL replica across a role change. A newly recovered RO advertises a logical View only after loading its versioned resources and catching up locally. QueryView keys retain their existing logical replica IDs. [WAL session discovery protocol](../../wal/wal-replica-protocol.md#2-sn-session-发布-wal-路由)
+
+A Ready report for a logical View is scoped to the WAL replica on its active watch. The RW matches the shard and QueryView version; the RO opens query admission only after its own resources are ready and the View has been durably published Up. On process restart, a persisted Up resumes as UpRecovering without an inherited serving lease. [WAL replica confirmations](../../wal/wal-replica-protocol.md#4-up-和-down-的多副本确认)
+
 ## Extraction boundary
 
 This branch includes the directory, local/RPC watch, shared subscription manager,

@@ -582,3 +582,9 @@ message QueryOnViewStreamResponse {
         internal.RetrieveResults metadata = 2;
     }
 }
+
+// Logical identity of a QueryView, independent of its serving WAL replica.
+message QueryViewKey {
+    ShardID shard = 1;
+    QueryViewVersion version = 2;
+}
