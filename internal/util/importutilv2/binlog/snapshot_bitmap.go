@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -38,18 +39,28 @@ import (
 // and segment-local deletes. Only fully prepared masks are published to readers;
 // bounded timestamp batches remain private to preparation and are not retained.
 type SnapshotL0Deletes struct {
-	masks map[snapshotMaskKey]*rowDeleteMask
+	masks    map[snapshotMaskKey]*rowDeleteMask
+	v2Inputs map[snapshotMaskKey]*snapshotV2Input
 }
 
 // A manifest can be consumed with different source commit timestamps. Never
 // share a mask by manifest alone: identical PKs need different visibility tests.
 type snapshotMaskKey struct {
-	manifest string
-	commit   uint64
+	manifest       string
+	commit         uint64
+	segment        int64
+	format         int32
+	originalPrefix string
+	hasPrefix      bool
 }
 
 func maskKey(source *internalpb.SnapshotImportSource) snapshotMaskKey {
-	return snapshotMaskKey{source.GetManifestPath(), source.GetSourceCommitTimestamp()}
+	key := snapshotMaskKey{manifest: source.GetManifestPath(), commit: source.GetSourceCommitTimestamp()}
+	if ref := source.GetV2Reference(); ref != nil {
+		key.manifest, key.segment, key.format = ref.GetSnapshotManifestPath(), ref.GetSegmentId(), ref.GetSnapshotFormatVersion()
+		key.originalPrefix, key.hasPrefix = ref.GetOriginalKeyPrefix(), ref.OriginalKeyPrefix != nil
+	}
+	return key
 }
 
 const maskBlockWords = 64
@@ -105,6 +116,9 @@ func (m *rowDeleteMask) finish(rows int64) error {
 // A nil source or zero commit timestamp imposes no upper bound.
 func validateSnapshotRowTimestamp(source *internalpb.SnapshotImportSource, raw uint64) error {
 	if commit := source.GetSourceCommitTimestamp(); commit != 0 && raw > commit {
+		if ref := source.GetV2Reference(); ref != nil {
+			return merr.WrapErrDataIntegrityMsg("snapshot source manifest %s (segment %d) has raw row timestamp %d above segment commit timestamp %d", ref.GetSnapshotManifestPath(), ref.GetSegmentId(), raw, commit)
+		}
 		return merr.WrapErrDataIntegrityMsg("snapshot source manifest %s has raw row timestamp %d above segment commit timestamp %d", source.GetManifestPath(), raw, commit)
 	}
 	return nil
@@ -115,13 +129,20 @@ type snapshotMaskScan struct {
 	schema  *schemapb.CollectionSchema
 	options []storage.RwOption
 	mask    *rowDeleteMask
+	v2Input *snapshotV2Input
 }
 
 func (s *snapshotMaskScan) apply(ctx context.Context, deletes map[any]typeutil.Timestamp, budget *maskBudget) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	rr, err := storage.NewManifestRecordReader(ctx, s.source.GetManifestPath(), s.schema, s.options...)
+	var rr storage.RecordReader
+	var err error
+	if s.v2Input != nil {
+		rr, err = storage.NewBinlogRecordReader(ctx, append([]*datapb.FieldBinlog(nil), s.v2Input.binlogs...), s.schema, s.options...)
+	} else {
+		rr, err = storage.NewManifestRecordReader(ctx, s.source.GetManifestPath(), s.schema, s.options...)
+	}
 	if err != nil {
 		return err
 	}
@@ -175,9 +196,23 @@ func (s *snapshotMaskScan) apply(ctx context.Context, deletes map[any]typeutil.T
 // bounded batch is applied to ALL source segments before the decoder advances.
 // No reader may emit rows until shared and segment-local deletes both finish.
 // Both phases rebuild masks from their immutable input; nothing is persisted.
+// SnapshotV2Resolver resolves one Avro at a time; the builder charges and retains
+// only its prepared row/delete inputs before resolving the next source.
+type SnapshotV2Resolver func(context.Context, *internalpb.SnapshotImportSource) (*datapb.SegmentDescription, error)
+
 func BuildSnapshotDeleteMasks(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema,
 	cfg *indexpb.StorageConfig, sources []*internalpb.SnapshotImportSource, l0 *internalpb.SnapshotImportL0Source,
 	start, end uint64, deleteBudget, bitmapBudget int64, encryption SourceEncryption, validate func(string) error,
+) (*SnapshotL0Deletes, error) {
+	return BuildSnapshotDeleteMasksWithV2(ctx, cm, schema, cfg, sources, l0, start, end, deleteBudget, bitmapBudget, encryption, validate, nil)
+}
+
+// BuildSnapshotDeleteMasksWithV2 additionally resolves Avro-backed sources.
+// Keep the V3 entry point's contract unchanged for existing callers.
+func BuildSnapshotDeleteMasksWithV2(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema,
+	cfg *indexpb.StorageConfig, sources []*internalpb.SnapshotImportSource, l0 *internalpb.SnapshotImportL0Source,
+	start, end uint64, deleteBudget, bitmapBudget int64, encryption SourceEncryption, validate func(string) error,
+	resolveV2 SnapshotV2Resolver,
 ) (*SnapshotL0Deletes, error) {
 	pk, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
@@ -185,15 +220,13 @@ func BuildSnapshotDeleteMasks(ctx context.Context, cm storage.ChunkManager, sche
 	}
 	budget := &maskBudget{limit: bitmapBudget}
 	masks := make(map[snapshotMaskKey]*rowDeleteMask)
+	v2Inputs := make(map[snapshotMaskKey]*snapshotV2Input)
 	scans := make([]snapshotMaskScan, 0, len(sources))
 	for _, source := range sources {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		key := maskKey(source)
-		if err := validateStorageV3ManifestPath(key.manifest, validate); err != nil {
-			return nil, err
-		}
 		if _, exists := masks[key]; exists {
 			continue
 		}
@@ -202,9 +235,32 @@ func BuildSnapshotDeleteMasks(ctx context.Context, cm storage.ChunkManager, sche
 		}
 		r := newReader(ctx, cm, schema, cfg, storage.StorageV3, 0, "")
 		r.sourceEncryption, r.validatePath = encryption, validate
-		options, err := r.prepareStorageV3Manifest(source.GetManifestPath())
-		if err != nil {
-			return nil, err
+		var options []storage.RwOption
+		var input *snapshotV2Input
+		if source.GetV2Reference() != nil {
+			if resolveV2 == nil {
+				return nil, merr.WrapErrServiceInternalMsg("snapshot V2 source requires an Avro resolver")
+			}
+			segment, err := resolveV2(ctx, source)
+			if err != nil {
+				return nil, err
+			}
+			input, err = r.prepareStorageV2Snapshot(segment, budget.limit-budget.used)
+			if err != nil {
+				return nil, err
+			}
+			if err := budget.reserve(input.bytes); err != nil {
+				return nil, err
+			}
+			v2Inputs[key], options = input, input.options
+		} else {
+			if err := validateStorageV3ManifestPath(key.manifest, validate); err != nil {
+				return nil, err
+			}
+			options, err = r.prepareStorageV3Manifest(source.GetManifestPath())
+			if err != nil {
+				return nil, err
+			}
 		}
 		mask := &rowDeleteMask{rows: -1}
 		masks[key] = mask
@@ -212,7 +268,7 @@ func BuildSnapshotDeleteMasks(ctx context.Context, cm storage.ChunkManager, sche
 		// sequential column-group reader. LOB resolution replaces columns only;
 		// it never reorders/filters rows. Do not push predicates into this scan.
 		scans = append(scans, snapshotMaskScan{
-			source: source, mask: mask, options: options,
+			source: source, mask: mask, options: options, v2Input: input,
 			schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 				pk,
 				{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
@@ -233,12 +289,17 @@ func BuildSnapshotDeleteMasks(ctx context.Context, cm storage.ChunkManager, sche
 	}
 	for i := range scans {
 		scan := &scans[i]
-		paths, err := packed.GetDeltaLogPathsFromManifest(scan.source.GetManifestPath(), cfg)
-		if err != nil {
-			return nil, err
+		var paths []string
+		if scan.v2Input != nil {
+			paths = scan.v2Input.deltas
+		} else {
+			paths, err = packed.GetDeltaLogPathsFromManifest(scan.source.GetManifestPath(), cfg)
+			if err != nil {
+				return nil, err
+			}
 		}
 		for i, path := range paths {
-			if validate != nil {
+			if scan.v2Input == nil && validate != nil {
 				if err := validate(path); err != nil {
 					return nil, err
 				}
@@ -248,7 +309,7 @@ func BuildSnapshotDeleteMasks(ctx context.Context, cm storage.ChunkManager, sche
 		// Reuse the emptied batch map and its charged path inventory. Shared
 		// paths are skipped; local batches affect only this segment's bitmap.
 		merger.consume = func(batch map[any]typeutil.Timestamp) error { return scan.apply(ctx, batch, budget) }
-		if _, err := merger.Merge(ctx, paths, start, end, false); err != nil {
+		if _, err := merger.Merge(ctx, paths, start, end, scan.v2Input != nil); err != nil {
 			return nil, err
 		}
 		if err := merger.flush(); err != nil {
@@ -262,5 +323,5 @@ func BuildSnapshotDeleteMasks(ctx context.Context, cm storage.ChunkManager, sche
 			}
 		}
 	}
-	return &SnapshotL0Deletes{masks: masks}, nil
+	return &SnapshotL0Deletes{masks: masks, v2Inputs: v2Inputs}, nil
 }

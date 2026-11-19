@@ -52,6 +52,9 @@ func TestBalancerRecoversOnlyLatestView(t *testing.T) {
 	// The target is known, but DataView still certifies schema 0. Losing its
 	// QN must recover the published base despite target admission being gated.
 	cache.PublishNode(1, nil)
+	controller.Trigger()
+	require.Error(t, controller.Reconcile(t.Context()), "recovery without eligible nodes must remain retriable")
+	require.Equal(t, old, manager.Stats().UpBySchema[0].Version, "failed allocation must retain the published base")
 	cache.PublishNode(2, &NodeInfo{NodeID: 2, Alive: true, ResourceGroup: "rg1"})
 	controller.Trigger()
 	require.NoError(t, controller.Reconcile(t.Context()))

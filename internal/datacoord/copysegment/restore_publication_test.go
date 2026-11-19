@@ -24,6 +24,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metacache"
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -64,6 +65,48 @@ func TestRestorePublicationRetriesWithoutNewState(t *testing.T) {
 	patch.UnPatch()
 	checker.tryTimeoutJob(job) // Snapshot from before completion.
 	require.Equal(t, datapb.CopySegmentJobState_CopySegmentJobCompleted, recovered.GetJob(ctx, 100).GetState())
+}
+
+func TestRestorePublicationWakesManifestBackfill(t *testing.T) {
+	ctx := t.Context()
+	meta.WithSegmentIndexManifestWrites(t, false)
+	meta.NewFakeManifestStore(t)
+	catalog := kvdatacoord.NewCatalog(meta.NewMetaMemoryKV(), "", "")
+	m := index.BootMigrationMeta(t, catalog, meta.RestartCollID)
+	im := m.IndexCatalog.(*index.IndexMeta)
+	index.SeedLegacyBackfillRecord(t, m, meta.RestartSegID, meta.RestartBuildID)
+	require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateIsImporting(meta.RestartSegID, true)))
+	copies, err := NewCopySegmentMeta(ctx, catalog, m, im, nil, nil)
+	require.NoError(t, err)
+	task := CreateTestCopyTask(meta.RestartCollID, meta.RestartSegID).(*Task)
+	require.NoError(t, copies.AddTask(ctx, task))
+	require.NoError(t, copies.UpdateTask(ctx, task.GetTaskId(), UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskCompleted)))
+	job := NewTestCopyJob(task.GetJobId(), datapb.CopySegmentJobState_CopySegmentJobExecuting).(*Job)
+	job.CreatesCollection = true
+	job.CollectionId = meta.RestartCollID
+	job.IdMappings = task.GetIdMappings()
+	require.NoError(t, copies.AddJob(ctx, job))
+	select {
+	case <-im.ManifestIndexBackfillNotifyForTest():
+	default:
+	}
+	inspector := index.NewMigrationBackfillInspector(ctx, m)
+	work, pending := inspector.ScanForTest(ctx)
+	require.Empty(t, work)
+	require.Zero(t, pending)
+	complete := mockey.Mock((*restoreCollectionTarget).CompleteRestoreCollection).Return(nil).Build()
+	defer complete.UnPatch()
+	checker := &Checker{Ctx: ctx, CopyMeta: copies, Meta: m, CollectionRestorer: &restoreCollectionTarget{}}
+	checker.finishJob(job, 1000)
+	require.False(t, m.GetSegment(ctx, meta.RestartSegID).GetIsImporting())
+	select {
+	case <-im.ManifestIndexBackfillNotifyForTest():
+	default:
+		t.Fatal("restore publication did not wake manifest backfill")
+	}
+	work, pending = inspector.ScanForTest(ctx)
+	require.Len(t, work, 1)
+	require.Equal(t, 1, pending)
 }
 
 func TestRestoreCopyCoverageRequiresEveryExpectedSegment(t *testing.T) {

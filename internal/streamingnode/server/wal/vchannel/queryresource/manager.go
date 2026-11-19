@@ -111,6 +111,7 @@ func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) {
 			m.submitReadyLocked(req.Key, ref)
 		}
 	}
+	m.updateBuildPriorityLocked()
 	m.mu.Unlock()
 }
 
@@ -163,6 +164,8 @@ func (m *Manager) Release(req snview.ReleaseResource) {
 	}
 	if len(m.refs) == 0 {
 		runtime, task = m.takeRuntimeLocked()
+	} else {
+		m.updateBuildPriorityLocked()
 	}
 	if m.runtime != nil && m.task == nil {
 		m.runtime.mu.Lock()
@@ -205,17 +208,17 @@ func (m *Manager) Release(req snview.ReleaseResource) {
 			if req.OnDropped != nil {
 				req.OnDropped()
 			}
-		}})
+		}}, nodescheduler.WithPriority(5))
 	} else if hasAdvance && advanceRuntime != nil {
-		m.scheduler.Submit(resourceReleaseTask{runtime: advanceRuntime, resources: resources, version: advance, onDropped: req.OnDropped})
+		m.scheduler.Submit(resourceReleaseTask{runtime: advanceRuntime, resources: resources, version: advance, onDropped: req.OnDropped}, nodescheduler.WithPriority(5))
 	} else {
 		m.submitCallback(req.OnDropped)
 	}
 }
 
 // Reject completes an acquisition that cannot be reconstructed without
-// registering a QueryView reference. The callback is submitted to the node
-// scheduler to preserve the asynchronous ResourceManager contract.
+// registering a QueryView reference. Notify asynchronously to avoid reentering
+// the caller's shard/owner locks.
 func (m *Manager) Reject(req snview.AcquireResource) {
 	m.submitCallback(req.OnUnrecoverable)
 }
@@ -370,7 +373,7 @@ func (m *Manager) startBuildLocked(meta *viewpb.QueryViewMeta, build ViewBuilder
 		mlog.Warn(ctx, "retry query runtime preparation", mlog.FieldVChannel(view.VChannel), mlog.Err(err))
 		return nil, errors.Mark(merr.Wrap(err, "initialize query runtime"), nodescheduler.ErrDelay)
 	})
-	m.task = scheduleResourceBuild(m.scheduler, task, m.finishBuild)
+	m.task = scheduleResourceBuild(m.scheduler, task, m.finishBuild, nodescheduler.WithPriority(m.buildPriorityLocked()))
 	m.err = nil
 	return true
 }
@@ -475,7 +478,7 @@ func (m *Manager) submitReadyLocked(key qviews.QueryViewKey, ref queryViewRef) {
 		manager: m,
 		key:     key,
 		onReady: ref.onReady,
-	})
+	}, nodescheduler.WithPriority(ref.meta.GetControl().GetPreparationPriority()))
 }
 
 func (m *Manager) prepareViewRef(ctx context.Context, key qviews.QueryViewKey, ref queryViewRef, runtime *QueryRuntime, onReady func()) error {
@@ -577,13 +580,9 @@ func (m *Manager) submitCallback(callback func()) {
 	if callback == nil {
 		return
 	}
-	m.mu.Lock()
-	if m.scheduler == nil {
-		m.scheduler = nodescheduler.Get()
-	}
-	scheduler := m.scheduler
-	m.mu.Unlock()
-	scheduler.Submit(resourceCallbackTask(callback))
+	// Callers may hold shard/owner locks acquired again by the callback. Keep
+	// notifications asynchronous without waiting for resource-loading workers.
+	go callback()
 }
 
 func (m *Manager) takeRuntimeLocked() (*QueryRuntime, *scheduledBuild) {
@@ -592,4 +591,27 @@ func (m *Manager) takeRuntimeLocked() (*QueryRuntime, *scheduledBuild) {
 	m.task = nil
 	m.err = nil
 	return runtime, task
+}
+
+// A build serves all retained acquisitions without changing its oldest-view
+// snapshot. The score may fall as well as rise when a dependency leaves.
+func (m *Manager) buildPriorityLocked() int32 {
+	var priority int32
+	found := false
+	for _, ref := range m.refs {
+		if ref.prepared {
+			continue
+		}
+		value := ref.meta.GetControl().GetPreparationPriority()
+		if !found || value > priority {
+			priority, found = value, true
+		}
+	}
+	return priority
+}
+
+func (m *Manager) updateBuildPriorityLocked() {
+	if m.task != nil {
+		m.task.SetPriority(m.buildPriorityLocked())
+	}
 }

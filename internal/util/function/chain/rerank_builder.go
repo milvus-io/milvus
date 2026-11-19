@@ -82,6 +82,8 @@ type SearchParams struct {
 	Offset       int64
 	RoundDecimal int64
 
+	ScoresRewritten []bool
+
 	// Grouping parameters
 	GroupByField string      // Field to group by (empty means no grouping)
 	GroupSize    int64       // Maximum rows per group
@@ -300,7 +302,7 @@ func buildRerankChainInternal(
 
 	case WeightedRerankerName:
 		var err error
-		sortDescending, err = buildWeightedChain(fc, funcSchema, searchMetrics)
+		sortDescending, err = buildWeightedChain(fc, funcSchema, searchMetrics, searchParams.ScoresRewritten)
 		if err != nil {
 			return nil, err
 		}
@@ -424,7 +426,7 @@ func parseRRFWeights(funcSchema *schemapb.FunctionSchema) ([]float64, bool, erro
 // Weighted Builder
 // =============================================================================
 
-func buildWeightedChain(fc *FuncChain, funcSchema *schemapb.FunctionSchema, searchMetrics []string) (sortDescending bool, err error) {
+func buildWeightedChain(fc *FuncChain, funcSchema *schemapb.FunctionSchema, searchMetrics []string, scoresRewritten []bool) (sortDescending bool, err error) {
 	weights, normalize, err := parseWeightedParams(funcSchema)
 	if err != nil {
 		return true, err
@@ -441,6 +443,7 @@ func buildWeightedChain(fc *FuncChain, funcSchema *schemapb.FunctionSchema, sear
 	mergeOp := NewMergeOp(MergeStrategyWeighted,
 		WithWeights(weights),
 		WithMetricTypes(searchMetrics),
+		WithScoresRewritten(scoresRewritten),
 		WithNormalize(normalize))
 
 	fc.Add(mergeOp)

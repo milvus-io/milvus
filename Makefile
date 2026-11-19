@@ -150,11 +150,7 @@ PROTOC_GEN_GO_GRPC_OUTPUT := $(shell echo | $(INSTALL_PATH)/protoc-gen-go-grpc  
 INSTALL_PROTOC_GEN_GO_GRPC := $(findstring $(PROTOC_GEN_GO_GRPC_VERSION),$(PROTOC_GEN_GO_GRPC_OUTPUT))
 
 index_engine = knowhere
-ifeq ($(index_engine),cardinal)
-    WITH_GPU ?= ON
-else
-    WITH_GPU ?= OFF
-endif
+WITH_GPU ?= OFF
 unexport WITH_GPU
 
 ifneq ($(filter ON on TRUE True true 1,$(WITH_GPU)),)
@@ -167,9 +163,15 @@ ifneq ($(filter ON on TRUE True true 1,$(WITH_GPU)),)
 endif
 
 # Ensure git works inside containers where .git is owned by a different user.
-# Must use git config --global because git's ownership check runs before
-# both -c options and GIT_CONFIG_COUNT env vars are processed.
-$(shell git config --global --add safe.directory '*' 2>/dev/null)
+# Must use git config --global: git without 2.38's protected config reads
+# safe.directory only from system/global config, ignoring -c and
+# GIT_CONFIG_COUNT. That includes Ubuntu focal's git and jammy's before
+# 2.34.1-1ubuntu1.16; #47916 hit it in the CI build container.
+# Every make run parses this line, so write only when `git rev-parse` fails and
+# '*' is not in the global config yet. An unconditional --add appended a
+# duplicate entry to ~/.gitconfig on each run and disabled git's ownership
+# check for all repos on developer machines that never needed it.
+$(shell git rev-parse --git-dir >/dev/null 2>&1 || git config --global --get-all safe.directory 2>/dev/null | grep -qxF '*' || git config --global --add safe.directory '*' 2>/dev/null)
 
 export GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null | grep -v '^HEAD$$' || echo "$${GITHUB_REF_NAME:-$${BRANCH_NAME:-unknown}}")
 GIT_BRANCH_SAFE=$(shell echo "$(GIT_BRANCH)" | tr '/' '-')
@@ -229,6 +231,7 @@ tools/bin/revive: tools/check/go.mod
 cppcheck:
 	@#(env bash ${PWD}/scripts/core_build.sh -l)
 	@(env bash ${PWD}/scripts/check_cpp_fmt.sh)
+	@cmake -DWORK_DIR=$(PWD)/cmake_build/compile-checks -P $(PWD)/internal/core/unittest/check_compile_options.cmake
 
 rustfmt:
 	@echo  "Running cargo format"
@@ -695,7 +698,6 @@ generate-mockery-flushcommon: getdeps
 	$(INSTALL_PATH)/mockery --name=BufferManager --dir=$(PWD)/internal/flushcommon/writebuffer --output=$(PWD)/internal/flushcommon/writebuffer --filename=mock_manager.go --with-expecter --structname=MockBufferManager --outpkg=writebuffer --inpackage
 	$(INSTALL_PATH)/mockery --name=BinlogIO --dir=$(PWD)/internal/flushcommon/io --output=$(PWD)/internal/mocks/flushcommon/mock_util --filename=mock_binlogio.go --with-expecter --structname=MockBinlogIO --outpkg=mock_util --inpackage=false
 	$(INSTALL_PATH)/mockery --name=MsgHandler --dir=$(PWD)/internal/flushcommon/util --output=$(PWD)/internal/mocks/flushcommon/mock_util --filename=mock_MsgHandler.go --with-expecter --structname=MockMsgHandler --outpkg=mock_util --inpackage=false
-	$(INSTALL_PATH)/mockery --name=FlowgraphManager --dir=$(PWD)/internal/flushcommon/pipeline --output=$(PWD)/internal/flushcommon/pipeline --filename=mock_fgmanager.go --with-expecter --structname=MockFlowgraphManager --outpkg=pipeline --inpackage
 
 generate-mockery-metastore: getdeps
 	$(INSTALL_PATH)/mockery --name=RootCoordCatalog --dir=$(PWD)/internal/metastore --output=$(PWD)/internal/metastore/mocks --filename=mock_rootcoord_catalog.go --with-expecter --structname=RootCoordCatalog --outpkg=mocks

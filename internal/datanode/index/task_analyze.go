@@ -114,6 +114,7 @@ func buildAnalyzeInfo(req *workerpb.AnalyzeRequest) *clusteringpb.AnalyzeInfo {
 		SslTlsMinVersion:            req.GetStorageConfig().GetSslTlsMinVersion(),
 		UseCrc32CChecksum:           req.GetStorageConfig().GetUseCrc32CChecksum(),
 		TalonMode:                   req.GetStorageConfig().GetTalonMode(),
+		TalonEnabledStages:          req.GetStorageConfig().GetTalonEnabledStages(),
 		TalonSmallReadThreshold:     req.GetStorageConfig().GetTalonSmallReadThreshold(),
 		TalonCoordinator:            req.GetStorageConfig().GetTalonCoordinator(),
 		TalonBlockSize:              req.GetStorageConfig().GetTalonBlockSize(),

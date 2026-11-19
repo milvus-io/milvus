@@ -60,6 +60,8 @@ StorageV2FSCache::Get(const Key& key) {
     props[PROPERTY_FS_GCP_CREDENTIAL_JSON] = key.gcp_credential_json;
     props[PROPERTY_FS_USE_CUSTOM_PART_UPLOAD] = key.use_custom_part_upload;
     props[PROPERTY_FS_MAX_CONNECTIONS] = key.max_connections;
+    // Preserve SDK I/O and its configured TLS minimum across the SDK upgrade.
+    props[PROPERTY_FS_S3_USE_CRT] = false;
     props[PROPERTY_FS_S3_CRT_QUEUE_SIZES] =
         LoonFFIPropertiesSingleton::GetInstance().GetS3CrtQueueSizes();
     if (!key.tls_min_version.empty() && key.tls_min_version != "default") {
@@ -67,7 +69,13 @@ StorageV2FSCache::Get(const Key& key) {
     }
     props[PROPERTY_FS_USE_CRC32C_CHECKSUM] = key.use_crc32c_checksum;
     if (key.storage_type != "local") {
-        props[PROPERTY_FS_TALON_MODE] = key.talon_mode;
+        // This shared FS serves arbitrary operations. Restricted policies are
+        // selected only at the corresponding operation's reader entry point.
+        props[PROPERTY_FS_TALON_MODE] =
+            (key.talon_enabled_stages == 0 ||
+             key.talon_enabled_stages == kTalonStagesAll)
+                ? key.talon_mode
+                : uint32_t{0};
         props[PROPERTY_FS_TALON_COORDINATOR] = key.talon_coordinator;
         if (key.talon_small_read_threshold > 0) {
             props[PROPERTY_FS_TALON_SMALL_READ_THRESHOLD] =
@@ -91,7 +99,10 @@ StorageV2FSCache::Get(const Key& key) {
         fs_root_path,
         key.storage_type);
 
-    auto result = milvus_storage::FilesystemCache::getInstance().get(props, "");
+    auto result = milvus_storage::FilesystemCache::getInstance().get(
+        std::make_shared<const milvus_storage::api::Properties>(
+            std::move(props)),
+        "");
 
     if (!result.ok()) {
         LOG_WARN("create arrow file system failed, error: {}",

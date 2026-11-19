@@ -97,12 +97,15 @@ func (b *LookAsideBalancer) RegisterNodeInfo(nodeInfos []NodeInfo) {
 	}
 }
 
-func (b *LookAsideBalancer) SelectNode(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
+func (b *LookAsideBalancer) SelectNode(ctx context.Context, availableNodes []int64, nq int64) (nodeID int64, release func(), err error) {
 	targetNode := int64(-1)
 	defer func() {
-		if targetNode != -1 {
+		if err == nil {
 			metrics, _ := b.metricsMap.GetOrInsert(targetNode, &CostMetrics{})
 			metrics.executingNQ.Add(nq)
+			release = func() {
+				metrics.executingNQ.Sub(nq)
+			}
 		}
 	}()
 
@@ -119,11 +122,11 @@ func (b *LookAsideBalancer) SelectNode(ctx context.Context, availableNodes []int
 		}
 
 		if targetNode == -1 {
-			return targetNode, merr.WrapErrServiceUnavailable("all available nodes are unreachable")
+			return targetNode, nil, merr.WrapErrServiceUnavailable("all available nodes are unreachable")
 		}
 
 		b.idx.Inc()
-		return targetNode, nil
+		return targetNode, nil, nil
 	}
 
 	// compute each query node's workload score, select the one with least workload score
@@ -163,18 +166,10 @@ func (b *LookAsideBalancer) SelectNode(ctx context.Context, availableNodes []int
 	}
 
 	if targetNode == -1 {
-		return targetNode, merr.WrapErrServiceUnavailable("all available nodes are unreachable")
+		return targetNode, nil, merr.WrapErrServiceUnavailable("all available nodes are unreachable")
 	}
 
-	return targetNode, nil
-}
-
-// when task canceled, should reduce executing total nq cost
-func (b *LookAsideBalancer) CancelWorkload(node int64, nq int64) {
-	metrics, ok := b.metricsMap.Get(node)
-	if ok {
-		metrics.executingNQ.Sub(nq)
-	}
+	return targetNode, nil, nil
 }
 
 // UpdateCostMetrics used for cache some metrics of recent search/query cost
@@ -183,8 +178,7 @@ func (b *LookAsideBalancer) UpdateCostMetrics(node int64, cost *internalpb.CostA
 	if cost != nil {
 		metrics, ok := b.metricsMap.Get(node)
 		if !ok {
-			metrics = &CostMetrics{}
-			b.metricsMap.Insert(node, metrics)
+			metrics, _ = b.metricsMap.GetOrInsert(node, &CostMetrics{})
 		}
 		metrics.cost.Store(cost)
 		metrics.ts.Store(time.Now().UnixMilli())

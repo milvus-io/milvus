@@ -99,3 +99,20 @@ func TestExpansionFactorFallback(t *testing.T) {
 	require.Equal(t, DefaultExpansionFactor, Model{}.Expansion())
 	require.Equal(t, 2.5, Model{ExpansionFactor: 2.5}.Expansion())
 }
+
+// TestImportWorkingSet pins the final-merge charge: one reader per merge input
+// at 2R each, the merge output at 3R, the segment writer buffer, and the
+// per-TEXT-column LOB writer buffers. Every term is scaled by the expansion
+// factor, the same one the reshard charge uses.
+func TestImportWorkingSet(t *testing.T) {
+	const mib = int64(1024 * 1024)
+	m := Model{ReadBuffer: 16 * mib, ExpansionFactor: 1.5}
+	scaled := func(footprint int64) int64 { return int64(1.5 * float64(footprint)) }
+
+	// fanIn 2: 2 readers x 2R + 3R output + 32 MiB writer buffer.
+	base := 2*2*16*mib + 3*16*mib + 32*mib
+	require.Equal(t, scaled(base), m.ImportWorkingSet(32*mib, 0, 2))
+	// Three TEXT columns at the 16 MiB flush threshold add 48 MiB.
+	require.Equal(t, scaled(base+48*mib), m.ImportWorkingSet(32*mib, 48*mib, 2))
+	require.Greater(t, m.ImportWorkingSet(32*mib, 48*mib, 2), m.ImportWorkingSet(32*mib, 0, 2))
+}

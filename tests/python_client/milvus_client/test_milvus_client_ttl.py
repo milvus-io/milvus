@@ -39,7 +39,7 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
         2. Insert test data
         3. Wait for TTL to expire and verifies data becomes invisible
         4. Insert new data with the original TTL and verify it is visible
-        5. Alter TTL and verify expired data becomes visible again
+        5. Extend TTL and verify live data survives beyond the original TTL
 
         Parameters:
         - flush_enable: Whether to flush collection during testing
@@ -204,66 +204,51 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
             self.flush(client, collection_name)
             log.info(f"flush completed in {time.time() - t1}s")
 
-        # Verify both the restored rows and newly inserted rows after extending TTL.
+        collection_info = self.describe_collection(client, collection_name)[0]
+        assert collection_info["properties"]["collection.ttl.seconds"] == "2000"
+
+        # Expired rows may already have been removed by compaction. Extending
+        # TTL does not promise to restore them. Check the still-live rows after
+        # an entire original TTL interval has elapsed since the successful alter.
+        time.sleep(ttl + 2)
         consistency_levels = [CONSISTENCY_EVENTUALLY, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_STRONG]
         for consistency_level in consistency_levels:
             log.debug(f"start to search/query after alter ttl with {consistency_level}")
-            # search data after alter ttl
             res = self.search(
                 client,
                 collection_name,
                 search_vectors,
                 search_params={"metric_type": "COSINE"},
                 anns_field=vec_field,
-                filter="visible==False",
-                limit=10,
+                filter="visible==True",
+                limit=new_nb,
                 consistency_level=consistency_level,
                 output_fields=[bool_field],
             )[0]
             assert len(res[0]) > 0
             for hit in res[0]:
-                # keep `== False`: .get() yields None when the field is missing, and both
-                # `not ...` (would pass) and `is False` (would break on a numpy bool) change
-                # what this asserts
-                assert hit.get(bool_field) == False  # noqa: E712
+                assert hit.get(bool_field) == True  # noqa: E712
 
-            # hybrid search data after alter ttl
-            sub_search1 = AnnSearchRequest(search_vectors, vec_field, {"level": 1}, 20, expr="visible==False")
-            sub_search2 = AnnSearchRequest(search_vectors, vec_field_2, {"level": 1}, 20, expr="visible==False")
+            sub_search1 = AnnSearchRequest(search_vectors, vec_field, {"level": 1}, 20, expr="visible==True")
+            sub_search2 = AnnSearchRequest(search_vectors, vec_field_2, {"level": 1}, 20, expr="visible==True")
             res = self.hybrid_search(
                 client,
                 collection_name,
                 [sub_search1, sub_search2],
                 ranker,
-                limit=10,
+                limit=new_nb,
                 consistency_level=consistency_level,
             )[0]
             assert len(res[0]) > 0
 
-            # query count(*)
             res = self.query(
                 client,
                 collection_name,
-                filter="visible==False",
+                filter="visible==True",
                 output_fields=["count(*)"],
                 consistency_level=consistency_level,
             )[0]
-            assert res[0].get("count(*)", 0) == insert_times * nb
-            res = self.query(
-                client, collection_name, filter="", output_fields=["count(*)"], consistency_level=consistency_level
-            )[0]
-            if consistency_level != CONSISTENCY_STRONG:
-                assert res[0].get("count(*)", 0) >= insert_times * nb
-            else:
-                assert res[0].get("count(*)", 0) == insert_times * nb + new_nb
-                res = self.query(
-                    client,
-                    collection_name,
-                    filter="visible==True",
-                    output_fields=["count(*)"],
-                    consistency_level=consistency_level,
-                )[0]
-                assert res[0].get("count(*)", 0) == new_nb
+            assert res[0].get("count(*)", 0) == new_nb
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_ttl_edge(self):

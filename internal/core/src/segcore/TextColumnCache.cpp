@@ -54,7 +54,7 @@ std::shared_ptr<CachedTextLobReader>
 TextColumnCache::GetOrCreateReader(
     const std::string& lob_base_path,
     std::shared_ptr<arrow::fs::FileSystem> fs,
-    const milvus_storage::api::Properties& properties) {
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties) {
     {
         std::lock_guard<std::mutex> lock(reader_cache_mutex_);
         auto cached = reader_cache_.get(lob_base_path);
@@ -100,7 +100,7 @@ std::vector<std::string>
 TextColumnCache::ReadBatch(
     const std::string& lob_base_path,
     std::shared_ptr<arrow::fs::FileSystem> fs,
-    const milvus_storage::api::Properties& properties,
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties,
     const std::vector<milvus_storage::lob_column::EncodedRef>& encoded_refs) {
     if (encoded_refs.empty()) {
         return {};
@@ -161,7 +161,7 @@ void
 TextColumnCache::ReadBatchInto(
     const std::string& lob_base_path,
     std::shared_ptr<arrow::fs::FileSystem> fs,
-    const milvus_storage::api::Properties& properties,
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties,
     const std::vector<milvus_storage::lob_column::EncodedRef>& encoded_refs,
     google::protobuf::RepeatedPtrField<std::string>* dst) {
     if (encoded_refs.empty()) {

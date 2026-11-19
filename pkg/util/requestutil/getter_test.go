@@ -74,6 +74,52 @@ func TestGetCollectionNameFromRequest(t *testing.T) {
 	}
 }
 
+func TestConditionalWriteState(t *testing.T) {
+	assert.Nil(t, ConditionalWriteStateFromContext(context.Background()))
+	ctx, state := WithConditionalWriteState(context.Background())
+	nested, same := WithConditionalWriteState(ctx)
+	assert.Equal(t, ctx, nested)
+	assert.Same(t, state, same)
+	assert.Same(t, state, ConditionalWriteStateFromContext(ctx))
+	assert.True(t, state.TryAppend())
+	assert.True(t, state.TryAppend(), "later attempts retain the submission state")
+	err := state.Cancel(context.DeadlineExceeded)
+	assert.EqualValues(t, 112, merr.Code(err))
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Equal(t, err, state.Cancel(err))
+	assert.False(t, merr.IsRetryableErr(err))
+
+	var canceled ConditionalWriteState
+	assert.Equal(t, context.DeadlineExceeded, canceled.Cancel(context.DeadlineExceeded))
+	assert.Equal(t, context.Canceled, canceled.Cancel(context.Canceled))
+	assert.False(t, canceled.TryAppend(), "a pre-submission timeout must prevent a late append")
+}
+
+func TestConditionalWriteStateSubmissionRacesCancellation(t *testing.T) {
+	for range 100 {
+		var state ConditionalWriteState
+		start := make(chan struct{})
+		appended := make(chan bool, 1)
+		canceled := make(chan error, 1)
+		go func() {
+			<-start
+			appended <- state.TryAppend()
+		}()
+		go func() {
+			<-start
+			canceled <- state.Cancel(context.DeadlineExceeded)
+		}()
+		close(start)
+		won, err := <-appended, <-canceled
+		if won {
+			assert.EqualValues(t, 112, merr.Code(err))
+		} else {
+			assert.Equal(t, context.DeadlineExceeded, err)
+			assert.False(t, state.TryAppend())
+		}
+	}
+}
+
 func TestGetDbNameFromRequest(t *testing.T) {
 	type args struct {
 		req interface{}
@@ -623,6 +669,34 @@ func TestParseMetricLabel(t *testing.T) {
 	// was before the cause dimension existed; cause is what excludes it.
 	restCancel := merr.Status(context.Canceled)
 	assertLabels(metrics.FailLabel, metrics.CauseCancel, restCancel, merr.Error(restCancel))
+}
+
+// An operator cancel (CancelRequests) ends the request with
+// ErrRequestCanceled (3002) rather than the client cancellation code, so that
+// the client can tell the two apart. For the request metrics it is the same
+// kind of outcome: a cancellation, not a system failure, in each of the forms
+// the gRPC interceptor and the REST v2 wrapper hand over.
+func TestParseMetricLabelOperatorCancel(t *testing.T) {
+	operatorCancel := merr.WrapErrRequestCanceled("root", "too heavy")
+	st := merr.Status(operatorCancel)
+	assert.Equal(t, int32(3002), st.GetCode())
+
+	for _, tc := range []struct {
+		name       string
+		resp       any
+		err        error
+		wantStatus string
+	}{
+		{"gRPC: response carries the status, err nil", &milvuspb.SearchResults{Status: st}, nil, metrics.FailLabel},
+		{"REST v2: response status and err rebuilt from it", st, merr.Error(st), metrics.FailLabel},
+		{"err only", &commonpb.Status{}, operatorCancel, metrics.RejectedLabel},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			status, cause := ParseMetricLabel(tc.resp, tc.err)
+			assert.Equal(t, tc.wantStatus, status)
+			assert.Equal(t, metrics.CauseCancel, cause)
+		})
+	}
 }
 
 // The status label is a public monitoring contract: dashboards and alert rules

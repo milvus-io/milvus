@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -170,7 +169,7 @@ func (i *RestfulInfo) ErrorMsg() string {
 	if !ok {
 		return ""
 	}
-	return strings.ReplaceAll(message.(string), "\n", "\\n")
+	return message.(string)
 }
 
 func (i *RestfulInfo) ErrorType() string {
@@ -220,6 +219,9 @@ func (i *RestfulInfo) CollectionName() string {
 		// rename references both the source and target collection
 		return fmt.Sprintf("%s->%s", req.GetOldName(), req.GetNewName())
 	case *milvuspb.BatchDescribeCollectionRequest:
+		if len(req.GetCollectionName()) == 0 && len(req.GetCollectionID()) > 0 {
+			return fmt.Sprint(req.GetCollectionID())
+		}
 		return fmt.Sprint(req.GetCollectionName())
 	}
 

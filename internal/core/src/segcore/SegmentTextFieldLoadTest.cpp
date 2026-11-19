@@ -208,7 +208,7 @@ WriteLobReferences(const std::string& path,
     auto properties =
         storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties();
     AssertInfo(properties != nullptr, "LOB fixture properties missing");
-    config.properties = *properties;
+    config.properties = properties;
     auto manager_result = milvus_storage::lob_column::LobColumnManager::Create(
         GetDefaultArrowFileSystem(), config);
     AssertInfo(manager_result.ok(),
@@ -299,9 +299,12 @@ WriteLobManifest(const SchemaPtr& schema,
                                   LOON_COLUMN_GROUP_POLICY_SCHEMA_BASED);
     milvus_storage::api::SetValue(
         properties, PROPERTY_WRITER_SCHEMA_BASE_PATTERNS, "100|101");
+    auto shared_properties =
+        std::make_shared<const milvus_storage::api::Properties>(
+            std::move(properties));
     auto policy_result =
         milvus_storage::api::ColumnGroupPolicy::create_column_group_policy(
-            properties, loon_schema);
+            shared_properties, loon_schema);
     AssertInfo(policy_result.ok(),
                "LOB manifest policy failed: {}",
                policy_result.status().ToString());
@@ -309,7 +312,7 @@ WriteLobManifest(const SchemaPtr& schema,
         base_path,
         loon_schema,
         std::move(policy_result).ValueOrDie(),
-        properties);
+        shared_properties);
     auto status = writer->write(batch);
     AssertInfo(status.ok(), "LOB manifest write failed: {}", status.ToString());
     auto closed = writer->close();

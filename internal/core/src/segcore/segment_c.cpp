@@ -1743,11 +1743,12 @@ RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id) {
 }
 
 CStatus
-ExprResCacheEraseSegment(int64_t segment_id) {
+ExprResCacheEraseLegacySegment(int64_t segment_id) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
-        milvus::exec::ExprResCacheManager::Instance().EraseSegment(segment_id);
+        milvus::exec::ExprResCacheManager::Instance().EraseLegacySegment(
+            segment_id);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
@@ -3118,29 +3119,31 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         auto global_properties =
             milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                 .GetProperties();
-        if (global_properties) {
-            writer_config.properties = *global_properties;
-        }
+        auto writer_properties =
+            std::make_shared<milvus_storage::api::Properties>(
+                global_properties ? *global_properties
+                                  : milvus_storage::api::Properties{});
+        writer_config.properties = writer_properties;
 
         // set required properties for ColumnGroupPolicy
         if (config->schema_based_pattern &&
             config->schema_based_pattern[0] != '\0') {
             milvus_storage::api::SetValue(
-                writer_config.properties,
+                *writer_properties,
                 PROPERTY_WRITER_POLICY,
                 LOON_COLUMN_GROUP_POLICY_SCHEMA_BASED);
-            milvus_storage::api::SetValue(writer_config.properties,
+            milvus_storage::api::SetValue(*writer_properties,
                                           PROPERTY_WRITER_SCHEMA_BASE_PATTERNS,
                                           config->schema_based_pattern);
             if (config->schema_based_formats &&
                 config->schema_based_formats[0] != '\0') {
                 milvus_storage::api::SetValue(
-                    writer_config.properties,
+                    *writer_properties,
                     PROPERTY_WRITER_SCHEMA_BASE_FORMATS,
                     config->schema_based_formats);
             }
         } else {
-            milvus_storage::api::SetValue(writer_config.properties,
+            milvus_storage::api::SetValue(*writer_properties,
                                           PROPERTY_WRITER_POLICY,
                                           LOON_COLUMN_GROUP_POLICY_SINGLE);
         }
@@ -3148,9 +3151,8 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
             config->writer_format && config->writer_format[0] != '\0'
                 ? std::string(config->writer_format)
                 : std::string(LOON_FORMAT_PARQUET);
-        milvus_storage::api::SetValue(writer_config.properties,
-                                      PROPERTY_WRITER_FORMAT,
-                                      writer_format.c_str());
+        milvus_storage::api::SetValue(
+            *writer_properties, PROPERTY_WRITER_FORMAT, writer_format.c_str());
 
         // add TEXT column configs
         for (size_t i = 0; i < config->num_text_columns; i++) {

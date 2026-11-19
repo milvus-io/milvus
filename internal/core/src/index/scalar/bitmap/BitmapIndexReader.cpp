@@ -21,6 +21,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -55,6 +56,17 @@ UnionPosting(TargetBitmap& result, const roaring::Roaring& posting) {
 void
 UnionPosting(TargetBitmap& result, const TargetBitmap& posting) {
     result |= posting;
+}
+
+void
+ClearPosting(TargetBitmap& result, const roaring::Roaring& posting) {
+    for (auto coordinate : posting) {
+        AssertInfo(coordinate < result.size(),
+                   "bitmap posting coordinate {} exceeds count {}",
+                   coordinate,
+                   result.size());
+        result.reset(coordinate);
+    }
 }
 
 bool
@@ -93,6 +105,52 @@ PostingMapHeapBytes(const BitmapPostingMap<K, Posting>& postings,
         }
     }
     return total;
+}
+
+template <typename T, typename Posting>
+size_t
+Rank(const BitmapPostingStorage<T, Posting>& storage,
+     typename BitmapPostingMap<T, Posting>::const_iterator it) {
+    if (it == storage.postings.end()) {
+        return storage.range_keys.size();
+    }
+    const auto pos = std::lower_bound(
+        storage.range_keys.begin(),
+        storage.range_keys.end(),
+        it->first,
+        [](const T* key, const T& value) { return *key < value; });
+    return static_cast<size_t>(pos - storage.range_keys.begin());
+}
+
+// Unions [begin, end), or clears the postings outside it from a copy of the
+// valid bitset when fewer rows lie outside the range than inside it.
+template <typename T, typename Posting>
+TargetBitmap
+UnionKeyRange(const BitmapPostingStorage<T, Posting>& storage,
+              typename BitmapPostingMap<T, Posting>::const_iterator begin,
+              typename BitmapPostingMap<T, Posting>::const_iterator end) {
+    if constexpr (std::is_same_v<Posting, roaring::Roaring>) {
+        const auto& prefix = storage.range_prefix;
+        if (!prefix.empty()) {
+            const uint64_t inside =
+                prefix[Rank(storage, end)] - prefix[Rank(storage, begin)];
+            if (prefix.back() - inside < inside) {
+                auto result = storage.options.valid_bitset.clone();
+                for (auto it = storage.postings.begin(); it != begin; ++it) {
+                    ClearPosting(result, it->second);
+                }
+                for (auto it = end; it != storage.postings.end(); ++it) {
+                    ClearPosting(result, it->second);
+                }
+                return result;
+            }
+        }
+    }
+    TargetBitmap result(storage.options.total_num_rows, false);
+    for (auto it = begin; it != end; ++it) {
+        UnionPosting(result, it->second);
+    }
+    return result;
 }
 
 template <typename T, typename Posting>
@@ -260,7 +318,6 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
             return result;
         }
 
-        TargetBitmap result(storage.options.total_num_rows, false);
         auto begin = storage.postings.begin();
         auto end = storage.postings.end();
         switch (op) {
@@ -280,28 +337,21 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
             case CompareOp::NotEqual:
                 break;
         }
-        for (auto it = begin; it != end; ++it) {
-            UnionPosting(result, it->second);
-        }
-        return result;
+        return UnionKeyRange(storage, begin, end);
     }
 
     TargetBitmap
     Range(const T& lo, bool lo_inc, const T& hi, bool hi_inc) const override {
         const auto& pin = GetStorage();
         const auto& storage = *pin;
-        TargetBitmap result(storage.options.total_num_rows, false);
         if (hi < lo || (lo == hi && !(lo_inc && hi_inc))) {
-            return result;
+            return TargetBitmap(storage.options.total_num_rows, false);
         }
         const auto begin = lo_inc ? storage.postings.lower_bound(lo)
                                   : storage.postings.upper_bound(lo);
         const auto end = hi_inc ? storage.postings.upper_bound(hi)
                                 : storage.postings.lower_bound(hi);
-        for (auto it = begin; it != end; ++it) {
-            UnionPosting(result, it->second);
-        }
-        return result;
+        return UnionKeyRange(storage, begin, end);
     }
 
     std::optional<StoredT>
@@ -587,6 +637,22 @@ BitmapPostingStorage<T, Posting>::BitmapPostingStorage(
     if (options.value_type == DataType::NONE) {
         options.value_type = CppDataType<bitmap_query_t<T>>();
     }
+    // Complement range evaluation needs every valid row in exactly one
+    // posting: the loader enforces disjoint postings for value_lookup
+    // readers, and nested readers index element coordinates instead of
+    // rows. Frozen mmap and dense bitset layouts keep the forward path.
+    if constexpr (std::is_same_v<Posting, roaring::Roaring>) {
+        if (mmap_owner == nullptr && options.value_lookup && !options.nested) {
+            range_keys.reserve(postings.size());
+            range_prefix.reserve(postings.size() + 1);
+            range_prefix.push_back(0);
+            for (const auto& [key, posting] : postings) {
+                range_keys.push_back(&key);
+                range_prefix.push_back(range_prefix.back() +
+                                       posting.cardinality());
+            }
+        }
+    }
     options.offset_cache = options.offset_cache && options.value_lookup;
     if (!options.offset_cache) {
         return;
@@ -618,6 +684,8 @@ BitmapPostingStorage<T, Posting>::CellByteSize() const {
     auto total = static_cast<int64_t>(options.valid_bitset.size_in_bytes());
     total += PostingMapHeapBytes(postings, mmap_owner != nullptr);
     total += static_cast<int64_t>(offset_cache.capacity() * sizeof(const T*));
+    total += static_cast<int64_t>(range_keys.capacity() * sizeof(const T*) +
+                                  range_prefix.capacity() * sizeof(uint64_t));
     if (json_exists) {
         const auto bytes = static_cast<int64_t>(sizeof(TargetBitmap) +
                                                 json_exists->size_in_bytes());

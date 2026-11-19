@@ -138,10 +138,6 @@ func (s *RestfulAccessInfoSuite) TestErrorMsg() {
 	s.ctx.Set(ContextReturnMessage, merr.ErrChannelLack.Error())
 	result := Get(s.info, "$error_msg")
 	s.Equal(merr.ErrChannelLack.Error(), result[0])
-
-	s.ctx.Set(ContextReturnMessage, "test error. stack: 1:\n 2:\n 3:\n")
-	result = Get(s.info, "$error_msg")
-	s.Equal("test error. stack: 1:\\n 2:\\n 3:\\n", result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestDbName() {
@@ -194,6 +190,15 @@ func (s *RestfulAccessInfoSuite) TestCollectionName() {
 	s.info.req = &milvuspb.RenameCollectionRequest{OldName: "old_coll", NewName: "new_coll"}
 	result = Get(s.info, "$collection_name")
 	s.Equal("old_coll->new_coll", result[0])
+
+	// batch describe logs the names, or the IDs when described by ID
+	s.info.req = &milvuspb.BatchDescribeCollectionRequest{CollectionName: []string{"coll_a", "coll_b"}}
+	result = Get(s.info, "$collection_name")
+	s.Equal(fmt.Sprint([]string{"coll_a", "coll_b"}), result[0])
+
+	s.info.req = &milvuspb.BatchDescribeCollectionRequest{CollectionID: []int64{100, 200}}
+	result = Get(s.info, "$collection_name")
+	s.Equal(fmt.Sprint([]int64{100, 200}), result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestSdkInfo() {

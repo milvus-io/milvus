@@ -43,8 +43,9 @@ type snShardView struct {
 
 // snViewEntry pairs an ApplyView (carrying the OnReport callback) with its state machine.
 type snViewEntry struct {
-	advertisedUp bool
-	preparing    bool
+	leaseDisabled bool // Explicit Down control permanently closes this View's lease.
+	advertisedUp  bool
+	preparing     bool
 	handler.ApplyView
 	sm             *snQueryViewStateMachine
 	queryRefs      int
@@ -227,6 +228,10 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 	entry.ApplyView = *av
 	entry.sm.UpdateView(av.View.IntoProto())
 	if pushedState == qviews.QueryViewStateDown && entry.sm.State() == qviews.QueryViewStateUp {
+		if av.View.IntoProto().GetMeta().GetControl().GetPreemptServingLease() {
+			entry.disableServingLease()
+			s.publishReplicaLocked(entry)
+		}
 		entry.pendingDown = true
 		s.advancePendingDownLocked(key.QueryViewVersion, entry)
 		return
@@ -471,7 +476,7 @@ func (s *snShardView) tryAcquireUpViewForSchema(ctx context.Context, schema *int
 		if entry.sm.IsRecovering() {
 			recovering = true
 		}
-		if entry.sm.State() != qviews.QueryViewStateUp {
+		if entry.leaseDisabled || entry.sm.State() != qviews.QueryViewStateUp {
 			continue
 		}
 		if selected == nil || version.GT(selectedVersion) {
@@ -533,8 +538,8 @@ func (s *snShardView) releaseQueryViewLease(version qviews.QueryViewVersion) {
 	}
 }
 
-// publishReplicaLocked follows successful persistence and precedes entry cleanup.
-// Recovery, lease timers and Coord pushes all use the same transition drain.
+// publishReplicaLocked advertises local serving eligibility. State transitions
+// publish after persistence; lease closure can withdraw admission while calls drain.
 func (s *snShardView) publishReplicaLocked(entry *snViewEntry) {
 	state := entry.sm.State()
 	preparing := state == qviews.QueryViewStatePreparing || state == qviews.QueryViewStateReady || state == qviews.QueryViewStateUpRecovering
@@ -547,7 +552,7 @@ func (s *snShardView) publishReplicaLocked(entry *snViewEntry) {
 		}
 		entry.preparing = preparing
 	}
-	up := state == qviews.QueryViewStateUp
+	up := state == qviews.QueryViewStateUp && !entry.leaseDisabled
 	if entry.advertisedUp == up && !preparingChanged {
 		return
 	}

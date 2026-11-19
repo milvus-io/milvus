@@ -472,6 +472,16 @@ VectorDiskBuilder<T>::Build(const PreparedVectorBuildFiles<T>& input) && {
             auto dataset = input.tensor ? knowhere::GenDataSet(
                                               raw.rows, raw.dim, input.tensor)
                                         : knowhere::DataSetPtr{};
+            if (validity.present) {
+                // Pass the original row/list validity to Knowhere, which builds
+                // its own ID mapping. Keep any resident vector tensor.
+                if (!dataset) {
+                    dataset = GenDataset(raw.rows, engine_->Dim(), nullptr);
+                }
+                dataset->SetIdMapData(knowhere::IdMapData::FromValidBitmap(
+                    validity.bytes.data() + sizeof(uint64_t),
+                    validity.total_count));
+            }
             if constexpr (!std::is_same_v<T, sparse_u32_f32>) {
                 if (input.tensor && !input.raw_file_complete) {
                     // File-only engines request the payload through LoadFile.

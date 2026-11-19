@@ -59,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -834,26 +835,47 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 
 func (node *Proxy) BatchDescribeCollection(ctx context.Context, request *milvuspb.BatchDescribeCollectionRequest) (*milvuspb.BatchDescribeCollectionResponse, error) {
 	collectionNames := request.GetCollectionName()
-	if len(collectionNames) == 0 {
+	collectionIDs := request.GetCollectionID()
+	if len(collectionNames) == 0 && len(collectionIDs) == 0 {
 		return &milvuspb.BatchDescribeCollectionResponse{
-			Status: merr.Status(merr.WrapErrParameterMissingMsg("collection names cannot be empty")),
+			Status: merr.Status(merr.WrapErrParameterMissingMsg("collection names or collection IDs cannot be empty")),
 		}, nil
 	}
 
-	responses := make([]*milvuspb.DescribeCollectionResponse, 0, len(collectionNames))
-
-	for _, collectionName := range collectionNames {
-		describeCollectionRequest := &milvuspb.DescribeCollectionRequest{
-			DbName:         request.GetDbName(),
-			CollectionName: collectionName,
-		}
-
-		describeCollectionResponse, err := node.DescribeCollection(ctx, describeCollectionRequest)
-		// If there's an error, create a response with error status
-		if err != nil {
-			describeCollectionResponse = &milvuspb.DescribeCollectionResponse{
-				Status:         merr.Status(err),
+	// Each collection is described on its own, exactly as a single
+	// DescribeCollection request would. Names take precedence: collection IDs
+	// are used only when no name is given.
+	describeRequests := make([]*milvuspb.DescribeCollectionRequest, 0, len(collectionNames)+len(collectionIDs))
+	if len(collectionNames) > 0 {
+		for _, collectionName := range collectionNames {
+			describeRequests = append(describeRequests, &milvuspb.DescribeCollectionRequest{
+				DbName:         request.GetDbName(),
 				CollectionName: collectionName,
+			})
+		}
+	} else {
+		for _, collectionID := range collectionIDs {
+			describeRequests = append(describeRequests, &milvuspb.DescribeCollectionRequest{
+				DbName:       request.GetDbName(),
+				CollectionID: collectionID,
+			})
+		}
+	}
+
+	responses := make([]*milvuspb.DescribeCollectionResponse, 0, len(describeRequests))
+	for _, describeCollectionRequest := range describeRequests {
+		describeCollectionResponse, err := node.DescribeCollection(ctx, describeCollectionRequest)
+		if err != nil {
+			describeCollectionResponse = &milvuspb.DescribeCollectionResponse{Status: merr.Status(err)}
+		}
+		// A failed entry carries the name or ID it was requested by, so the
+		// caller can tell which collection it is about.
+		if !merr.Ok(describeCollectionResponse.GetStatus()) {
+			if describeCollectionResponse.GetCollectionName() == "" {
+				describeCollectionResponse.CollectionName = describeCollectionRequest.GetCollectionName()
+			}
+			if describeCollectionResponse.GetCollectionID() == 0 {
+				describeCollectionResponse.CollectionID = describeCollectionRequest.GetCollectionID()
 			}
 		}
 		responses = append(responses, describeCollectionResponse)
@@ -2552,17 +2574,20 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	}
 
 	// UpsertCnt always equals to the number of entities in the request
-	it.Result().UpsertCnt = int64(request.NumRows)
+	if request.GetWriteCondition() == nil {
+		it.Result().UpsertCnt = int64(request.NumRows)
+	}
 
 	username := GetCurUserFromContextOrDefault(ctx)
 	nodeID := paramtable.GetStringNodeID()
 	dbName := request.DbName
 	collectionName := request.CollectionName
+	requestSize, mutationSize := it.AccountingSizes()
 	v := hookutil.GetExtension().Report(map[string]any{
 		hookutil.OpTypeKey:          hookutil.OpTypeUpsert,
 		hookutil.DatabaseKey:        request.DbName,
 		hookutil.UsernameKey:        username,
-		hookutil.RequestDataSizeKey: proto.Size(it.Request()),
+		hookutil.RequestDataSizeKey: requestSize,
 		hookutil.SuccessCntKey:      it.Result().UpsertCnt,
 		hookutil.FailCntKey:         len(it.Result().ErrIndex),
 	})
@@ -2576,7 +2601,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeUpsert, dbName, username).Add(float64(v))
 	}
 
-	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(it.UpsertMsg().InsertMsg.Size()+it.UpsertMsg().DeleteMsg.Size()))
+	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(mutationSize))
 	successCnt := it.Result().UpsertCnt - int64(len(it.Result().ErrIndex))
 	metrics.ProxyUpsertVectors.
 		WithLabelValues(nodeID, dbName, collectionName).
@@ -2603,6 +2628,11 @@ func GetCollectionRateSubLabel(req any) string {
 
 // Search searches the most similar records of requests.
 func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	// Register the request before anything else so that it is listable and
+	// cancellable for its whole lifetime, including the retries below.
+	ctx, entry := node.registerRequest(ctx, searchRequestInfo(request))
+	defer node.unregisterRequest(entry)
+
 	var err error
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -2658,6 +2688,10 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	})
 	if err2 != nil {
 		rsp.Status = merr.Status(err2)
+	}
+	status := finishRequest(ctx, entry, rsp.GetStatus())
+	if rsp != nil {
+		rsp.Status = status
 	}
 	return rsp, nil
 }
@@ -2805,7 +2839,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	mlog.Debug(ctx, rpcDone(method))
 
 	metrics.ProxySearchVectors.
-		WithLabelValues(nodeID, dbName, collectionName).
+		WithLabelValues(nodeID, dbName, collectionName, extension.QueryResourceGroupFromContext(ctx)).
 		Add(float64(qt.Result().GetResults().GetNumQueries()))
 
 	searchDur := tr.ElapseSpan().Milliseconds()
@@ -2814,10 +2848,8 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		metrics.SearchLabel,
 		dbName,
 		collectionName,
+		extension.QueryResourceGroupFromContext(ctx),
 	).Observe(float64(searchDur))
-
-	observeResourceGroupSQLatency(ctx, metrics.SearchLabel, dbName, collectionName, searchDur)
-	observeResourceGroupSearchVectors(ctx, dbName, collectionName, qt.Result().GetResults().GetNumQueries())
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
@@ -2862,6 +2894,9 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 }
 
 func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
+	ctx, entry := node.registerRequest(ctx, hybridSearchRequestInfo(request))
+	defer node.unregisterRequest(entry)
+
 	var err error
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -2898,6 +2933,10 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	})
 	if err2 != nil {
 		rsp.Status = merr.Status(err2)
+	}
+	status := finishRequest(ctx, entry, rsp.GetStatus())
+	if rsp != nil {
+		rsp.Status = status
 	}
 	return rsp, nil
 }
@@ -3018,7 +3057,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	mlog.Debug(ctx, rpcDone(method))
 
 	metrics.ProxySearchVectors.
-		WithLabelValues(nodeID, dbName, collectionName).
+		WithLabelValues(nodeID, dbName, collectionName, extension.QueryResourceGroupFromContext(ctx)).
 		Add(float64(len(request.GetRequests()) * int(qt.GetNq())))
 
 	searchDur := tr.ElapseSpan().Milliseconds()
@@ -3027,10 +3066,8 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		metrics.HybridSearchLabel,
 		dbName,
 		collectionName,
+		extension.QueryResourceGroupFromContext(ctx),
 	).Observe(float64(searchDur))
-
-	observeResourceGroupSQLatency(ctx, metrics.HybridSearchLabel, dbName, collectionName, searchDur)
-	observeResourceGroupSearchVectors(ctx, dbName, collectionName, int64(len(request.GetRequests())*int(qt.GetNq())))
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
@@ -3622,10 +3659,8 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 			queryLabel,
 			request.GetDbName(),
 			request.GetCollectionName(),
+			extension.QueryResourceGroupFromContext(ctx),
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
-
-		observeResourceGroupSQLatency(ctx, queryLabel, request.GetDbName(), request.GetCollectionName(),
-			tr.ElapseSpan().Milliseconds())
 	}
 
 	succeeded = true
@@ -3634,6 +3669,11 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 // Query get the records by primary keys.
 func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+	// Register before the retry loop so that the request is listable and
+	// cancelable while it waits for an automatic load or a view refresh.
+	ctx, entry := node.registerRequest(ctx, queryRequestInfo(request))
+	defer node.unregisterRequest(entry)
+
 	subLabel := GetCollectionRateSubLabel(request)
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
@@ -3656,7 +3696,14 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		return false, merr.CheckRPCCall(result, err)
 	})
 	if err != nil {
-		return &milvuspb.QueryResults{Status: merr.Status(err)}, nil
+		return &milvuspb.QueryResults{Status: finishRequest(ctx, entry, merr.Status(err))}, nil
+	}
+	// A cancel can land after the last cancellation check of the query task,
+	// while the result is being reduced or on the way out of this method. It
+	// was reported as canceled to the operator, so the client must not get
+	// the result.
+	if status := finishRequest(ctx, entry, result.GetStatus()); !merr.Ok(status) {
+		return &milvuspb.QueryResults{Status: status}, nil
 	}
 	return result, nil
 }
@@ -7431,7 +7478,7 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	// that CreateCollection runs, otherwise alter-bypass via refresh would
 	// allow SSRF (file://, http://169.254.169.254/, userinfo URLs, etc.).
 	if srcSet {
-		if err := externalspec.ValidateSourceAndSpec(req.GetExternalSource(), req.GetExternalSpec()); err != nil {
+		if err := externalspec.ValidateSourceAndSpec(req.GetExternalSource(), req.GetExternalSpec(), paramtable.Get().CommonCfg.CredentialBrokerPolicy()); err != nil {
 			return &milvuspb.RefreshExternalCollectionResponse{
 				Status: merr.Status(err),
 			}, nil

@@ -68,35 +68,9 @@ func (t *RefreshExternalCollectionTask) addMilvusTableL0DeltalogsToManifest(
 	manifestPath string,
 	fragments []packed.Fragment,
 ) (string, error) {
-	var entries []packed.DeltaLogEntry
-	seen := make(map[string]struct{})
-	for _, fragment := range fragments {
-		for _, fieldBinlog := range fragment.Deltalogs {
-			for _, binlog := range fieldBinlog.GetBinlogs() {
-				sourcePath := binlog.GetLogPath()
-				if sourcePath == "" {
-					continue
-				}
-				if _, ok := seen[sourcePath]; ok {
-					continue
-				}
-				seen[sourcePath] = struct{}{}
-				if err := packed.ValidateMilvusTableSourceDeltalogPath(sourcePath); err != nil {
-					return "", err
-				}
-				logID := binlog.GetLogID()
-				if logID == 0 {
-					return "", merr.WrapErrServiceInternalMsg("milvus-table source deltalog %s has no allocated log ID", sourcePath)
-				}
-				if err := ensureContext(ctx); err != nil {
-					return "", err
-				}
-				entries = append(entries, packed.DeltaLogEntry{
-					Path:       sourcePath,
-					NumEntries: binlog.GetEntriesNum(),
-				})
-			}
-		}
+	entries, err := t.prepareMilvusTableL0Deltalogs(ctx, fragments)
+	if err != nil {
+		return "", err
 	}
 	if len(entries) == 0 {
 		return manifestPath, nil
@@ -112,6 +86,45 @@ func (t *RefreshExternalCollectionTask) addMilvusTableL0DeltalogsToManifest(
 		return "", err
 	}
 	return updatedManifestPath, nil
+}
+
+// prepareMilvusTableL0Deltalogs collects references without committing a
+// manifest, so delete-only refresh can publish them together with its artifacts.
+func (t *RefreshExternalCollectionTask) prepareMilvusTableL0Deltalogs(
+	ctx context.Context,
+	fragments []packed.Fragment,
+) ([]packed.DeltaLogEntry, error) {
+	var entries []packed.DeltaLogEntry
+	seen := make(map[string]struct{})
+	for _, fragment := range fragments {
+		for _, fieldBinlog := range fragment.Deltalogs {
+			for _, binlog := range fieldBinlog.GetBinlogs() {
+				sourcePath := binlog.GetLogPath()
+				if sourcePath == "" {
+					continue
+				}
+				if _, ok := seen[sourcePath]; ok {
+					continue
+				}
+				seen[sourcePath] = struct{}{}
+				if err := packed.ValidateMilvusTableSourceDeltalogPath(sourcePath); err != nil {
+					return nil, err
+				}
+				logID := binlog.GetLogID()
+				if logID == 0 {
+					return nil, merr.WrapErrServiceInternalMsg("milvus-table source deltalog %s has no allocated log ID", sourcePath)
+				}
+				if err := ensureContext(ctx); err != nil {
+					return nil, err
+				}
+				entries = append(entries, packed.DeltaLogEntry{
+					Path:       sourcePath,
+					NumEntries: binlog.GetEntriesNum(),
+				})
+			}
+		}
+	}
+	return entries, nil
 }
 
 // milvusTableDeltalogRef identifies one source StorageV3 deltalog that may
@@ -241,17 +254,35 @@ func (t *RefreshExternalCollectionTask) translateMilvusTableDeltalogsToVirtualPK
 	segmentID int64,
 	fragments []packed.Fragment,
 ) (string, error) {
-	refs, err := collectMilvusTableDeltalogRefs(fragments)
+	entries, err := t.prepareMilvusTableVirtualPKDeltalogs(ctx, basePath, segmentID, fragments)
 	if err != nil {
 		return "", err
 	}
-	if len(refs) == 0 {
+	if len(entries) == 0 {
 		return manifestPath, nil
+	}
+	return packed.AddDeltaLogsToManifestOverwrite(manifestPath, t.req.GetStorageConfig(), entries)
+}
+
+// prepareMilvusTableVirtualPKDeltalogs writes translated logs but does not create
+// a manifest. The caller registers the complete set in its final transaction.
+func (t *RefreshExternalCollectionTask) prepareMilvusTableVirtualPKDeltalogs(
+	ctx context.Context,
+	basePath string,
+	segmentID int64,
+	fragments []packed.Fragment,
+) ([]packed.DeltaLogEntry, error) {
+	refs, err := collectMilvusTableDeltalogRefs(fragments)
+	if err != nil {
+		return nil, err
+	}
+	if len(refs) == 0 {
+		return nil, nil
 	}
 
 	sourcePKField, err := t.getMilvusTableSourcePKField()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	var entries []packed.DeltaLogEntry
@@ -265,7 +296,7 @@ func (t *RefreshExternalCollectionTask) translateMilvusTableDeltalogsToVirtualPK
 		deletedSourcePKKeys := make(map[string]struct{})
 		for _, ref := range batchRefs {
 			if err := ensureContext(ctx); err != nil {
-				return "", err
+				return nil, err
 			}
 			deletes, refDeletedSourcePKKeys, err := t.loadMilvusTableSourceDeltalogDeletes(
 				ctx,
@@ -273,7 +304,7 @@ func (t *RefreshExternalCollectionTask) translateMilvusTableDeltalogsToVirtualPK
 				sourcePKField.GetDataType(),
 			)
 			if err != nil {
-				return "", err
+				return nil, err
 			}
 			batchDeletes = append(batchDeletes, deletes)
 			for key := range refDeletedSourcePKKeys {
@@ -283,11 +314,11 @@ func (t *RefreshExternalCollectionTask) translateMilvusTableDeltalogsToVirtualPK
 
 		sourcePKOffsets, err := t.loadMilvusTableSourcePKOffsets(ctx, fragments, sourcePKField, deletedSourcePKKeys)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		for _, deletes := range batchDeletes {
 			if err := ensureContext(ctx); err != nil {
-				return "", err
+				return nil, err
 			}
 			entry, err := t.writeMilvusTableVirtualPKDeltalog(
 				ctx,
@@ -297,15 +328,12 @@ func (t *RefreshExternalCollectionTask) translateMilvusTableDeltalogsToVirtualPK
 				deletes,
 			)
 			if err != nil {
-				return "", err
+				return nil, err
 			}
 			entries = append(entries, entry)
 		}
 	}
-	if len(entries) == 0 {
-		return manifestPath, nil
-	}
-	return packed.AddDeltaLogsToManifestOverwrite(manifestPath, t.req.GetStorageConfig(), entries)
+	return entries, nil
 }
 
 // collectMilvusTableDeltalogRefs collects unique source deltalog paths from the

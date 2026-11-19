@@ -127,7 +127,6 @@ type SegmentLoadInfoSnapshot struct {
 	CollectionID int64
 	SegmentID    int64
 	LoadInfo     *querypb.SegmentLoadInfo
-	IndexInfos   []*indexpb.IndexInfo
 }
 
 type PhysicalSegmentLoader interface {

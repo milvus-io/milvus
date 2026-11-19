@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
@@ -352,6 +353,17 @@ func (s *StructSubFieldSuite) restartQueryNode(ctx context.Context, name string)
 	s.Cluster.StopAllQueryNode()
 	s.Cluster.AddQueryNode()
 	s.WaitForLoad(ctx, name)
+
+	// Loading progress can still be 100% while the proxy routes to the stopped node.
+	s.Require().EventuallyWithT(func(t *assert.CollectT) {
+		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		resp, err := s.Cluster.MilvusClient.Query(probeCtx, &milvuspb.QueryRequest{
+			CollectionName: name,
+			OutputFields:   []string{"count(*)"},
+		})
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+	}, time.Minute, 200*time.Millisecond, "collection %s should serve queries after QueryNode restart", name)
 }
 
 func (s *StructSubFieldSuite) query(ctx context.Context, name string, pk int64, output ...string) *milvuspb.QueryResults {

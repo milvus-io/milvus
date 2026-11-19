@@ -197,6 +197,16 @@ func (t *BumpSchemaVersionTask) Clean() bool {
 }
 
 func (t *BumpSchemaVersionTask) doClean() error {
+	{
+		m := t.meta
+		g, err := m.GetCompactionChangeGroup(t.GetTaskProto())
+		if err != nil {
+			return err
+		}
+		if err := m.AbortProducerChange(m.CompactionContext(), g, "schema bump task cleaned before publication"); err != nil {
+			return err
+		}
+	}
 	log := mlog.With(mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
 		mlog.Int64("PlanID", t.GetTaskProto().GetPlanID()),
 		mlog.FieldCollectionID(t.GetTaskProto().GetCollectionID()))
@@ -259,6 +269,19 @@ func (t *BumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session
 }
 
 func (t *BumpSchemaVersionTask) QueryTaskOnWorker(cluster session.Cluster) {
+	{
+		m := t.meta
+		g, err := m.GetCompactionChangeGroup(t.GetTaskProto())
+		if err != nil {
+			return
+		}
+		if g != nil {
+			if err := t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_meta_saved), setResultSegments(meta.CompactionGroupResultIDs(g, t.GetTaskProto()))); err == nil {
+				t.processMetaSaved()
+			}
+			return
+		}
+	}
 	log := mlog.With(mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
 		mlog.Int64("PlanID", t.GetTaskProto().GetPlanID()),
 		mlog.FieldCollectionID(t.GetTaskProto().GetCollectionID()))
@@ -380,8 +403,9 @@ func (t *BumpSchemaVersionTask) SaveSegmentMeta(result *datapb.CompactionPlanRes
 	if isMaterializationResult(result) {
 		// In-place schema-bump materialization: DataCoord runs the StorageV3
 		// manifest transaction itself via CommitSegmentManifest, which acquires
-		// the per-segment lock then segMu and therefore MUST NOT run inside the
-		// segMu-held CompleteCompactionMutation. Commit it out here, mirroring how
+		// the per-segment manifest lock then the segment writer lock and
+		// therefore MUST NOT run inside CompleteCompactionMutation, which holds
+		// the writer locks. Commit it out here, mirroring how
 		// L0 commits V3 deltalogs (see l0CompactionTask.saveSegmentMeta).
 		ids, err := t.commitBumpV3Materialization(context.TODO(), result)
 		if err != nil {
@@ -402,8 +426,17 @@ func (t *BumpSchemaVersionTask) SaveSegmentMeta(result *datapb.CompactionPlanRes
 	// The SegmentMeta mutation is committed (schema bump rewrites manifests);
 	// schedule an asynchronous DataView snapshot reconciliation so consumers
 	// observe the new manifest versions.
-	if mt, ok := t.meta.(*meta.Meta); ok {
-		mt.RecomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+	{
+		mt := t.meta
+		g, err := mt.GetCompactionChangeGroup(t.GetTaskProto())
+		if err != nil {
+			return err
+		}
+		if g == nil {
+			mt.RecomputeCompactionDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+		} else {
+			newSegmentIDs = meta.CompactionGroupResultIDs(g, t.GetTaskProto())
+		}
 	}
 
 	err := t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_meta_saved), setResultSegments(newSegmentIDs))
@@ -427,13 +460,14 @@ func isMaterializationResult(result *datapb.CompactionPlanResult) bool {
 // commitBumpV3Materialization publishes an in-place schema-bump materialization
 // through CommitSegmentManifest: DataCoord runs the StorageV3 manifest
 // transaction on the segment's CURRENT manifest from the datanode-shipped
-// descriptors (rebasing against concurrent commits) and, atomically under segMu,
+// descriptors (rebasing against concurrent commits) and, atomically under the
+// segment writer lock,
 // upserts the new column groups, advances the schema version, and folds in the
 // Stats increment. It returns the segment IDs to enqueue for index building.
 //
 // This is the schema-bump analog of l0CompactionTask.buildL0V3ManifestCommit
 // (which now batches its targets through CommitSegmentManifests) and obeys the
-// same lock contract: it never runs while segMu is held.
+// same lock contract: it never runs while a segment writer lock is held.
 func (t *BumpSchemaVersionTask) commitBumpV3Materialization(ctx context.Context, result *datapb.CompactionPlanResult) ([]UniqueID, error) {
 	if len(t.GetTaskProto().GetInputSegments()) != 1 {
 		return nil, merr.WrapErrIllegalCompactionPlan("schema bump compaction should have exactly one input segment")
@@ -534,6 +568,17 @@ func (t *BumpSchemaVersionTask) commitBumpV3Materialization(ctx context.Context,
 }
 
 func (t *BumpSchemaVersionTask) processMetaSaved() bool {
+	{
+		m := t.meta
+		if g, err := m.GetCompactionChangeGroup(t.GetTaskProto()); err != nil {
+			return false
+		} else if g != nil {
+			mt := NewMixCompactionTask(t.GetTaskProto(), t.allocator, t.meta, t.compactionTaskMeta, t.ievm)
+			finished := mt.processMetaSaved()
+			t.SetTask(mt.GetTaskProto())
+			return finished
+		}
+	}
 	err := t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_completed))
 	if err != nil {
 		mlog.Warn(context.TODO(), "bumpSchemaVersionTask unable to processMetaSaved",

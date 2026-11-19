@@ -568,24 +568,33 @@ func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.Que
 // makes it eligible for registry removal. Resident views complete teardown
 // asynchronously through callbacks.
 func (m *ShardViewManager) RequestRelease(ctx context.Context) error {
+	return m.RequestReleaseWithControl(ctx, nil)
+}
+
+// RequestReleaseWithControl adds explicit collection teardown policy without
+// changing the ordinary balancer retirement contract.
+func (m *ShardViewManager) RequestReleaseWithControl(ctx context.Context, control *viewpb.QueryViewControl) error {
 	m.mu.Lock()
 	m.releaseRequested = true
 
 	for _, sm := range m.views {
 		key, before := m.keyForStateMachine(sm), sm.State()
+		changed := true
 		switch before {
-		case qviews.QueryViewStateUp:
-			sm.EnterDown()
+		case qviews.QueryViewStateUp, qviews.QueryViewStateDown:
+			changed = sm.EnterDownWithControl(control)
 		case qviews.QueryViewStatePreparing, qviews.QueryViewStateReady:
 			sm.EnterUnrecoverable()
 		default:
 			continue
 		}
-		qvobserve.Observe(ctx, qvobserve.CoordViewReleaseRequestedEvent{
-			ViewStateTransition: qvobserve.ViewStateTransition{
-				CollectionID: m.collectionIDForStateMachine(sm), View: key, From: before, To: sm.State(),
-			},
-		})
+		if changed {
+			qvobserve.Observe(ctx, qvobserve.CoordViewReleaseRequestedEvent{
+				ViewStateTransition: qvobserve.ViewStateTransition{
+					CollectionID: m.collectionIDForStateMachine(sm), View: key, From: before, To: sm.State(),
+				},
+			})
+		}
 		m.processStateMachine(sm)
 	}
 

@@ -320,7 +320,7 @@ func (bm *broadcastTaskManager) LegacyAck(ctx context.Context, broadcastID uint6
 	}
 	msg := task.GetImmutableMessageFromVChannel(vchannel)
 	if msg == nil {
-		task.Logger().Warn(ctx, "vchannel is already acked, ignore the ack request", mlog.String("vchannel", vchannel))
+		task.Logger().Warn(ctx, "vchannel is already acked, ignore the ack request", mlog.FieldMessage(task.BroadcastMessage()), mlog.String("vchannel", vchannel))
 		return nil
 	}
 	return bm.Ack(ctx, msg)

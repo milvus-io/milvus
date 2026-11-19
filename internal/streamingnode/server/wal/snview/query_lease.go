@@ -56,7 +56,7 @@ func (s *snShardView) acquireUpView(ctx context.Context, version qviews.QueryVie
 			}
 			continue
 		}
-		if entry.sm.State() != qviews.QueryViewStateUp {
+		if entry.leaseDisabled || entry.sm.State() != qviews.QueryViewStateUp {
 			state := entry.sm.State()
 			s.mu.Unlock()
 			return nil, viewerror.NewViewInvalidated("query view %s is not up, current state is %s", version.String(), state.String())
@@ -104,7 +104,7 @@ func (s *snShardView) newQueryViewLeaseLocked(version qviews.QueryViewVersion, e
 
 // Caller holds the shard mutex. Timers are only needed after a Down request.
 func (s *snShardView) renewServingLeaseLocked(entry *snViewEntry) {
-	if s.leaseDuration > 0 {
+	if !entry.leaseDisabled && s.leaseDuration > 0 {
 		deadline := time.Now().Add(s.leaseDuration)
 		if deadline.After(entry.leaseExpireAt) {
 			entry.leaseExpireAt = deadline
@@ -144,6 +144,18 @@ func (s *snShardView) advancePendingDownLocked(version qviews.QueryViewVersion, 
 
 func (entry *snViewEntry) cancelPendingDown() {
 	entry.pendingDown = false
+	if entry.downTimer != nil {
+		entry.downTimer.Stop()
+		entry.downTimer = nil
+	}
+}
+
+// disableServingLease closes time-based retention for this View. Existing call
+// references still gate Down through advancePendingDownLocked.
+// Caller holds the shard mutex.
+func (entry *snViewEntry) disableServingLease() {
+	entry.leaseDisabled = true
+	entry.leaseExpireAt = time.Time{}
 	if entry.downTimer != nil {
 		entry.downTimer.Stop()
 		entry.downTimer = nil

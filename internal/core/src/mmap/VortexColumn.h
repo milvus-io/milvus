@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -28,7 +29,6 @@
 #include "common/Json.h"
 #include "common/Types.h"
 #include "common/bson_view.h"
-#include "mmap/ChunkedColumn.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "mmap/VortexColumnGroup.h"
 #include "milvus-storage/format/vortex/vortex_format_reader.h"
@@ -55,12 +55,13 @@ class VortexColumn final : public ChunkedColumnInterface {
  public:
     using FileInfo = VortexColumnFileInfo;
 
-    VortexColumn(FieldId field_id,
-                 FieldMeta field_meta,
-                 std::string field_name,
-                 std::shared_ptr<milvus_storage::api::Properties> properties,
-                 std::shared_ptr<VortexColumnGroup> column_group,
-                 std::optional<size_t> data_byte_size = std::nullopt);
+    VortexColumn(
+        FieldId field_id,
+        FieldMeta field_meta,
+        std::string field_name,
+        std::shared_ptr<const milvus_storage::api::Properties> properties,
+        std::shared_ptr<VortexColumnGroup> column_group,
+        std::optional<size_t> data_byte_size = std::nullopt);
 
     ~VortexColumn() override;
 
@@ -201,12 +202,6 @@ class VortexColumn final : public ChunkedColumnInterface {
                       int64_t dim) override;
 
     void
-    BulkRawStringAt(milvus::OpContext* op_ctx,
-                    std::function<void(std::string_view, size_t, bool)> fn,
-                    const int64_t* offsets = nullptr,
-                    int64_t count = 0) const override;
-
-    void
     BulkRawBsonAt(milvus::OpContext* op_ctx,
                   std::function<void(BsonView, uint32_t, uint32_t)> fn,
                   const uint32_t* row_offsets,
@@ -232,8 +227,10 @@ class VortexColumn final : public ChunkedColumnInterface {
     Take(milvus::OpContext* op_ctx, TakeOptions options) const override;
 
  private:
-    std::unique_ptr<ColumnPlanner>
-    BuildPlanner() const override;
+    class PlannerState;
+
+    const PlannerState&
+    Planner() const;
 
     // Same contract as ChunkedArrayColumn: the legacy ArrayView of a field
     // with null elements is not served.
@@ -275,9 +272,10 @@ class VortexColumn final : public ChunkedColumnInterface {
     std::optional<std::string>
     BuildVortexPredicate(const ScanOptions& options) const;
 
-    static milvus_storage::api::Properties
+    static std::shared_ptr<const milvus_storage::api::Properties>
     MakeVortexReaderProperties(
-        const std::shared_ptr<milvus_storage::api::Properties>& properties);
+        const std::shared_ptr<const milvus_storage::api::Properties>&
+            properties);
 
     std::shared_ptr<milvus_storage::vortex::VortexFormatReader>
     BuildFileReader(const VortexColumnGroup::FileState& group_file) const;
@@ -360,21 +358,17 @@ class VortexColumn final : public ChunkedColumnInterface {
         const std::vector<int64_t>& original_positions,
         const std::vector<int64_t>& original_position_ends) const;
 
-    void
-    BulkStringLikeAt(
-        milvus::OpContext* op_ctx,
-        const std::function<void(std::string_view, size_t, bool)>& fn,
-        const int64_t* offsets,
-        int64_t count) const;
-
     FieldId field_id_;
     FieldMeta field_meta_;
     DataType data_type_;
     std::string field_name_;
-    milvus_storage::api::Properties local_format_properties_;
+    std::shared_ptr<const milvus_storage::api::Properties>
+        local_format_properties_;
     std::shared_ptr<VortexColumnGroup> column_group_;
     size_t data_byte_size_ = 0;
     std::vector<FileState> files_;
+    mutable std::once_flag planner_once_;
+    mutable std::unique_ptr<PlannerState> planner_;
 };
 
 }  // namespace milvus

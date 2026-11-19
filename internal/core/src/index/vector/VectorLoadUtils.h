@@ -411,15 +411,14 @@ ValidateLoadedShape(const NormalizedLoadMetadata& params,
                   engine.native_index.Count(),
                   valid.valid_count);
     }
-    // A normal VECTOR_ARRAY artifact is not compared with the row count either:
-    // an element-level one keeps element-domain validity, and indexes built
-    // before element-level builds became ordinary vector input carry the
-    // element-domain identity map knowhere derived from the vector count.
-    const bool row_domain_validity =
-        params.elem_type == DataType::NONE ||
+    // Element validity is not row-addressed. Normal disk indexes may restore
+    // validity without retaining the complete logical row count.
+    const bool check_validity_rows =
+        (backend == LoadBackend::Memory &&
+         params.elem_type == DataType::NONE) ||
         (state != ArtifactState::Normal && !element_level);
     if (params.num_rows.has_value()) {
-        if (valid.enabled && row_domain_validity &&
+        if (valid.enabled && check_validity_rows &&
             valid.total_count != *params.num_rows) {
             if (backend == LoadBackend::Memory) {
                 ThrowInfo(UnexpectedError,

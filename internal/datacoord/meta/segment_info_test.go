@@ -180,6 +180,25 @@ func TestCompactionTo(t *testing.T) {
 		assert.NotNil(t, compactTos)
 		assert.ElementsMatch(t, []int64{2, 3}, getCompactToIDs(compactTos))
 	})
+
+	t.Run("cluster_2_to_3_in_one_write", func(t *testing.T) {
+		segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
+		segments.PublishSegments(lo.Map([]int64{10, 11, 12}, func(id int64, _ int) *SegmentInfo {
+			return NewSegmentInfo(&datapb.SegmentInfo{ID: id, CompactionFrom: []int64{1, 2}})
+		}))
+		for _, from := range []int64{1, 2} {
+			list, _ := segments.compactionTo.Get(from)
+			assert.Equal(t, []int64{10, 11, 12}, list)
+		}
+
+		// A later write builds a new list instead of appending into the array
+		// a reader may hold.
+		held, _ := segments.compactionTo.Get(1)
+		segments.SetSegment(13, NewSegmentInfo(&datapb.SegmentInfo{ID: 13, CompactionFrom: []int64{1}}))
+		list, _ := segments.compactionTo.Get(1)
+		assert.Equal(t, []int64{10, 11, 12, 13}, list)
+		assert.NotSame(t, &held[0], &list[0])
+	})
 }
 
 func TestGetSegmentSize(t *testing.T) {

@@ -20,6 +20,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -101,4 +102,57 @@ func TestListFilesystemMetrics(t *testing.T) {
 func TestNilConfig(t *testing.T) {
 	_, err := GetFilesystemMetricsWithConfig(nil)
 	assert.Error(t, err)
+}
+
+func TestGetFilesystemMetricsWithConfig_RemoteSDK(t *testing.T) {
+	config := &indexpb.StorageConfig{
+		Address:                 "127.0.0.1:1",
+		BucketName:              "metrics-sdk-config",
+		AccessKeyID:             "test-key",
+		SecretAccessKey:         "test-secret",
+		RootPath:                "files",
+		StorageType:             "remote",
+		CloudProvider:           "aws",
+		IAMEndpoint:             "http://127.0.0.1:1",
+		Region:                  "us-east-1",
+		SslCACert:               "test-ca-path",
+		GcpCredentialJSON:       `{}`,
+		UseSSL:                  true,
+		UseVirtualHost:          true,
+		RequestTimeoutMs:        1000,
+		MaxConnections:          64,
+		SslTlsMinVersion:        "1.3",
+		UseCrc32CChecksum:       true,
+		TalonSmallReadThreshold: 1048576,
+		TalonBlockSize:          67108864,
+		TalonMaxIdlePerAddr:     10,
+		TalonCoordinator:        "unused:1234",
+	}
+	// Filesystem construction uses explicit credentials and region, with no I/O.
+	metrics, err := GetFilesystemMetricsWithConfig(config)
+	require.NoError(t, err)
+	require.Contains(t, metrics, "origin")
+
+	config.TalonSmallReadThreshold = 0
+	config.TalonBlockSize = 0
+	config.TalonMaxIdlePerAddr = 0
+	config.TalonCoordinator = ""
+	metrics, err = GetFilesystemMetricsWithConfig(config)
+	require.NoError(t, err)
+	require.Contains(t, metrics, "origin")
+
+	config.StorageType = "unsupported"
+	_, err = GetFilesystemMetricsWithConfig(config)
+	require.Error(t, err)
+}
+
+func TestGetFilesystemMetricsWithConfig_InvalidNativeProperties(t *testing.T) {
+	// Simulate an SDK key-export mismatch at the final local property. The native
+	// constructor must reject the duplicate and its error must reach the caller.
+	defer mockey.MockValue(&propUseCRC32CChecksum).To(propUseSSL).UnPatch()
+	_, err := GetFilesystemMetricsWithConfig(&indexpb.StorageConfig{
+		StorageType: "local",
+	})
+	require.Error(t, err)
+	require.ErrorContains(t, err, "failed to create properties")
 }

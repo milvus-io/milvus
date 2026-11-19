@@ -20,7 +20,7 @@ import (
 	"sort"
 
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -62,12 +62,13 @@ type externalRefreshOwnershipSummary struct {
 // surviving file of a segment is visible to its owner task. Manifest I/O and
 // task/segment ID allocation deliberately stay outside this pure planner.
 func planExternalRefreshOwnership(
-	files []*datapb.ExternalFileInfo,
+	format, baselineFormat string,
+	files []packed.FileInfo,
 	segmentFragments packed.SegmentFragments,
 	filesPerTask int64,
 ) ([]externalRefreshOwnershipTaskPlan, externalRefreshOwnershipSummary, error) {
 	summary := externalRefreshOwnershipSummary{}
-	if len(files) == 0 {
+	if len(files) == 0 && format != externalspec.FormatPaimonTable {
 		return nil, summary, merr.WrapErrServiceInternalMsg(
 			"external refresh ownership planning requires at least one explored file",
 		)
@@ -81,30 +82,36 @@ func planExternalRefreshOwnership(
 
 	// Files are keyed by ManifestPathKey, matching the DataNode's fragment
 	// identity, so a milvus-table source manifest is matched by revision.
-	fileIndexes := make(map[string]int64, len(files))
+	fileIndexes := make(map[externalRefreshFileKey]int64, len(files))
+	filePaths := make(map[string]struct{}, len(files))
 	for index, file := range files {
-		if file == nil || file.GetFilePath() == "" {
+		if file.FilePath == "" {
 			return nil, summary, merr.WrapErrDataIntegrityMsg(
 				"external refresh Explore result contains an invalid file at index %d",
 				index,
 			)
 		}
-		filePath := packed.ManifestPathKey(file.GetFilePath())
-		if previous, ok := fileIndexes[filePath]; ok {
+		key, err := externalRefreshOwnershipKey(format, file.FilePath, file.Properties)
+		if err != nil {
+			return nil, summary, err
+		}
+		if previous, ok := fileIndexes[key]; ok {
 			return nil, summary, merr.WrapErrDataIntegrityMsg(
 				"external refresh Explore result contains duplicate file path %q at indexes %d and %d",
-				filePath,
+				file.FilePath,
 				previous,
 				index,
 			)
 		}
-		fileIndexes[filePath] = int64(index)
+		fileIndexes[key] = int64(index)
+		filePaths[key.path] = struct{}{}
 	}
 
 	fileCount := int64(len(files))
 	// Use filesPerTask to choose the base task count, then rebalance the files
 	// into near-equal chunks instead of leaving one disproportionately small tail.
-	chunkCount := int((fileCount-1)/filesPerTask + 1)
+	// An empty Paimon snapshot still needs one task to retire its old segments.
+	chunkCount := max(1, int((fileCount-1)/filesPerTask+1))
 	summary.BaseTaskCount = chunkCount
 	chunkSize := (fileCount-1)/int64(chunkCount) + 1
 	mergeUntil := make([]int, chunkCount)
@@ -135,14 +142,18 @@ func planExternalRefreshOwnership(
 			if filePath != "" {
 				if _, ok := baselineFilePaths[filePath]; !ok {
 					baselineFilePaths[filePath] = struct{}{}
-					if _, ok := fileIndexes[filePath]; ok {
+					if _, ok := filePaths[filePath]; ok {
 						summary.UnchangedFilePaths++
 					} else {
 						summary.RemovedFilePaths++
 					}
 				}
 			}
-			if fileIndex, ok := fileIndexes[filePath]; ok {
+			key, err := externalRefreshOwnershipKey(baselineFormat, fragment.FilePath, fragment.Properties)
+			if err != nil {
+				return nil, summary, err
+			}
+			if fileIndex, ok := fileIndexes[key]; ok {
 				firstFileIndex = min(firstFileIndex, fileIndex)
 				lastFileIndex = max(lastFileIndex, fileIndex)
 			}
@@ -188,7 +199,7 @@ func planExternalRefreshOwnership(
 	summary.FinalTaskCount = len(tasks)
 	summary.ClosureRemovedBoundaries = summary.BaseTaskCount - summary.FinalTaskCount
 	summary.BaselineFilePaths = len(baselineFilePaths)
-	summary.AddedFilePaths = len(fileIndexes) - summary.UnchangedFilePaths
+	summary.AddedFilePaths = len(filePaths) - summary.UnchangedFilePaths
 	for _, task := range tasks {
 		summary.MaxTaskFiles = max(summary.MaxTaskFiles, int(task.FileIndexEnd-task.FileIndexBegin))
 		summary.MaxOwnedSegments = max(summary.MaxOwnedSegments, len(task.OwnedSegmentIDs))
@@ -197,4 +208,26 @@ func planExternalRefreshOwnership(
 		}
 	}
 	return tasks, summary, nil
+}
+
+type externalRefreshFileKey struct {
+	path          string
+	splitIdentity string
+}
+
+func externalRefreshOwnershipKey(format, filePath string, properties map[string]string) (externalRefreshFileKey, error) {
+	key := externalRefreshFileKey{path: packed.ManifestPathKey(filePath)}
+	if format != externalspec.FormatPaimonTable || filePath == "" {
+		return key, nil
+	}
+	readPath, _, err := packed.PaimonRoutingMeta(properties)
+	if err != nil {
+		return key, err
+	}
+	if readPath == packed.PaimonDataSplitReadPath {
+		// DataSplits share a table path but carry distinct immutable descriptors.
+		// Leave row ranges unset: ownership is per entry, not per fragment range.
+		key.splitIdentity = packed.FragmentIdentity(packed.Fragment{FilePath: filePath, Properties: properties})
+	}
+	return key, nil
 }

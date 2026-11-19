@@ -90,7 +90,7 @@ func (m *CollectionLoadManager) RefreshIndexes(ctx context.Context, collectionID
 
 // ReleaseCollection removes desired state. Existing views are intentionally
 // left in the registry; the Balancer sees "desired absent + current exists"
-// and releases them through ShardViewManager.RequestRelease.
+// and releases them through its plan and ShardViewManager.
 func (m *CollectionLoadManager) ReleaseCollection(
 	ctx context.Context,
 	msg *messagespb.DropLoadConfigMessageHeader,

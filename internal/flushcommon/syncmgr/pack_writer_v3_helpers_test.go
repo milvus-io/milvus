@@ -11,7 +11,6 @@
 package syncmgr
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -20,25 +19,36 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
-func TestClassifyLoonErr(t *testing.T) {
+func TestClassifyStorageV3Err(t *testing.T) {
 	t.Run("nil", func(t *testing.T) {
-		assert.NoError(t, classifyLoonErr(nil))
+		assert.NoError(t, classifyStorageV3Err(nil))
 	})
 	t.Run("transient stays retryable", func(t *testing.T) {
-		wrapped := fmt.Errorf("loon failed: %w", packed.ErrLoonTransient)
-		out := classifyLoonErr(wrapped)
+		wrapped := merr.Wrap(packed.ErrLoonTransient, "loon failed")
+		out := classifyStorageV3Err(wrapped)
 		require.Error(t, out)
 		assert.True(t, errors.Is(out, packed.ErrLoonTransient),
 			"transient error must remain retryable")
 		assert.True(t, retry.IsRecoverable(out),
 			"transient error must remain recoverable so retry.Do retries")
 	})
+	t.Run("mapped storage transient stays retryable", func(t *testing.T) {
+		out := classifyStorageV3Err(merr.Wrap(merr.ErrIoTooManyRequests, "delta write"))
+		require.ErrorIs(t, out, merr.ErrIoTooManyRequests)
+		assert.True(t, retry.IsRecoverable(out))
+	})
+	t.Run("post-commit marker survives classification", func(t *testing.T) {
+		out := classifyStorageV3Err(retry.Unrecoverable(packed.ErrLoonTransient))
+		require.ErrorIs(t, out, packed.ErrLoonTransient)
+		assert.False(t, retry.IsRecoverable(out))
+	})
 	t.Run("non-transient becomes unrecoverable", func(t *testing.T) {
-		out := classifyLoonErr(errors.New("permanent disk fault"))
+		out := classifyStorageV3Err(merr.Wrap(packed.ErrLoonPermanent, "permanent disk fault"))
 		require.Error(t, out)
 		assert.False(t, retry.IsRecoverable(out),
 			"non-transient error must be wrapped Unrecoverable so retry stops")

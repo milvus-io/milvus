@@ -4,6 +4,7 @@
 - **Status:** Implemented
 - **Component:** DataCoord, StorageV3
 - **Depends on:** [DataCoord Segment-Scoped Manifest Commit Framework](20260817-datacoord-segment-manifest-commit.md)
+- **Index metadata migration:** [StorageV3 Manifest Index Backfill and Rollback](20260901-storagev3-manifest-index-backfill.md)
 - **Related upstream change:** [milvus-storage#620](https://github.com/milvus-io/milvus-storage/pull/620/), [milvus-storage#622](https://github.com/milvus-io/milvus-storage/pull/622/)
 
 ## Summary
@@ -32,6 +33,12 @@ recovery and GC follow this marker, not the switch's current value, so disabling
 publication redirects newly created tasks to etcd without hiding or leaking
 indexes written while it was enabled. An
 all-etcd cluster has no marked segments and performs no manifest index reads.
+
+Historical eligible artifacts may be moved from etcd-only to manifest-only
+placement by the optional
+[manifest index backfill](20260901-storagev3-manifest-index-backfill.md). It
+uses this same publication transaction to add the entry and retire the row;
+there is no dual-write interval or separate index-prune phase.
 
 Index workers keep their existing responsibility — build the index and upload
 its files — and keep their existing result contract. They do not open a
@@ -81,13 +88,24 @@ the framework could use to publish a revision.
 `ManifestIndexInfo` uses the typed `LoonIndexInfo` fields: index name/type,
 field/index/build IDs, artifact and engine versions, row count, serialized and
 memory sizes, path-layout version, and the relative index-file keys.
-`properties` carries index-specific parameters such as metric type and Knowhere
-options. This preserves Milvus's multi-file index layout without encoding
-required load metadata as strings.
+Milvus leaves `properties` empty. Collection-level type/index parameters remain
+in the collection index definition in etcd: copying their current values into
+each segment manifest would not establish the artifact's build-time parameters.
+The typed `index_type` field remains, including a segment-specific override.
+Legacy entries with properties remain readable, but those properties are not
+used as segment parameters or compared with current collection parameters.
+The copy protocol retains its legacy properties field for wire compatibility;
+new coordinators leave it unset and new workers ignore it. Existing manifests
+are not rewritten just to remove properties. Full per-build parameter capture
+is outside this change; legacy `SegmentIndex` records do not contain that snapshot.
+When updating a deployment that already uses the previous properties-writing
+implementation, upgrade all DataCoord replicas before DataNode workers. The old
+coordinator's parameter-equality check rejects a new worker's property-free
+copy result; the new coordinator accepts both old and new entries.
 
 DataCoord builds every one of those fields from metadata it already owns: the
 collection schema (column name), the collection index definition (index name,
-type, params), and the index task record the worker result was projected onto
+type as a fallback), and the index task record the worker result was projected onto
 (file keys, sizes, engine versions, row count). No new field on the worker
 result is needed, and no worker-supplied value is trusted as a manifest
 revision.
@@ -190,7 +208,7 @@ records go to etcd like any legacy build. With it on the map flows and the
 worker republishes. Current workers acknowledge the completed rewrite and the
 build IDs actually published. An acknowledgement of an empty index section avoids
 read-back. For artifact-bearing results, DataCoord reads the manifest and checks
-the target index ID, field, name, parameters, artifact directory, version, layout,
+the target index ID, field, name, index type, artifact directory, version, layout,
 and file keys. Older workers always take this read-back path. A missing or
 mismatched entry fails before the target segment becomes visible. Installation
 keeps the verified index ID even if a same-name definition is replaced after the
@@ -280,6 +298,9 @@ when publication is enabled.
 - `CommitSegmentManifest` writes the segment pointer and deletes the completed
   `SegmentIndex` task row in one catalog transaction, and refuses a chunked
   fallback that could expose them separately.
+- Historical backfill uses that same atomic transition; after success the row
+  is absent from etcd, the record remains live in memory, and startup rebuilds
+  it from the marked manifest. There is no separate index prune task.
 - DataCoord read paths use `SegmentIndex` metadata with no manifest I/O at all,
   including for a segment with no records and for a finished record carrying no
   `index_file_keys`.

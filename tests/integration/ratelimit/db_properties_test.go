@@ -240,8 +240,13 @@ func (s *DBPropertiesSuite) TestDenyWringDB() {
 }
 
 func (s *DBPropertiesSuite) SetupSuite() {
+	// Keep consecutive Flush requests limited independently of the production default.
+	s.WithMilvusConfig(paramtable.Get().QuotaConfig.MaxFlushRatePerCollection.Key, "0.1")
 	s.WithMilvusConfig(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 	s.WithMilvusConfig(paramtable.Get().QuotaConfig.QuotaCenterCollectInterval.Key, "1")
+	// TestFlush bounds both RPCs to 30 seconds; a spent 0.01 QPS bucket
+	// needs at least 99 seconds to recover, independent of product defaults.
+	s.WithMilvusConfig(paramtable.Get().QuotaConfig.MaxFlushRatePerCollection.Key, "0.01")
 	s.MiniClusterSuite.SetupSuite()
 }
 

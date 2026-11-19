@@ -23,7 +23,8 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
-#include <future>
+#include <functional>
+#include <folly/futures/Future.h>
 #include <iosfwd>
 #include <memory>
 #include <optional>
@@ -64,7 +65,6 @@
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/RemoteOutputStream.h"
-#include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -304,17 +304,15 @@ DiskFileManagerImpl::CloseAndRemoveLocalDir(const std::string& dir) noexcept {
     }
 }
 
-bool
-DiskFileManagerImpl::AddFileInternal(
+void
+DiskFileManagerImpl::UploadFileInternal(
     const std::string& file,
     const std::function<std::string(const std::string&, int)>&
-        get_remote_path) noexcept {
+        get_remote_path) {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    FILEMANAGER_TRY
     if (!local_chunk_manager->Exist(file)) {
-        LOG_ERROR("local file {} not exists", file);
-        return false;
+        ThrowInfo(ErrorCode::PathNotExist, "local file {} not exists", file);
     }
 
     // record local file path
@@ -353,18 +351,24 @@ DiskFileManagerImpl::AddFileInternal(
         AddBatchIndexFiles(
             file, local_file_offsets, batch_remote_files, remote_file_sizes);
     }
+}
+
+bool
+DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
+    FILEMANAGER_TRY
+    AddFileOrThrow(file);
     FILEMANAGER_CATCH
     FILEMANAGER_END
 
     return true;
-}  // namespace knowhere
+}
 
-bool
-DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
-    return AddFileInternal(file,
-                           [this](const std::string& file_name, int slice_num) {
-                               return GetRemoteIndexPath(file_name, slice_num);
-                           });
+void
+DiskFileManagerImpl::AddFileOrThrow(const std::string& file) {
+    UploadFileInternal(file,
+                       [this](const std::string& file_name, int slice_num) {
+                           return GetRemoteIndexPath(file_name, slice_num);
+                       });
 }
 
 bool
@@ -376,22 +380,21 @@ DiskFileManagerImpl::AddFileMeta(const FileMeta& file_meta) {
     return true;
 }
 
-bool
-DiskFileManagerImpl::AddJsonSharedIndexLog(const std::string& file) noexcept {
-    return AddFileInternal(
+void
+DiskFileManagerImpl::AddJsonSharedIndexLog(const std::string& file) {
+    UploadFileInternal(
         file, [this](const std::string& file_name, int slice_num) {
             return GetRemoteJsonStatsSharedIndexPath(file_name, slice_num);
         });
 }
 
-bool
-DiskFileManagerImpl::AddJsonStatsMetaLog(const std::string& file) noexcept {
+void
+DiskFileManagerImpl::AddJsonStatsMetaLog(const std::string& file) {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    FILEMANAGER_TRY
     if (!local_chunk_manager->Exist(file)) {
-        LOG_ERROR("local meta file {} not exists", file);
-        return false;
+        ThrowInfo(
+            ErrorCode::PathNotExist, "local meta file {} not exists", file);
     }
 
     local_paths_.emplace_back(file);
@@ -410,18 +413,14 @@ DiskFileManagerImpl::AddJsonStatsMetaLog(const std::string& file) noexcept {
              file,
              remote_path,
              fileSize);
-
-    FILEMANAGER_CATCH
-    FILEMANAGER_END
-    return true;
 }
 
-bool
-DiskFileManagerImpl::AddTextLog(const std::string& file) noexcept {
-    return AddFileInternal(
-        file, [this](const std::string& file_name, int slice_num) {
-            return GetRemoteTextLogPath(file_name, slice_num);
-        });
+void
+DiskFileManagerImpl::AddTextLog(const std::string& file) {
+    UploadFileInternal(file,
+                       [this](const std::string& file_name, int slice_num) {
+                           return GetRemoteTextLogPath(file_name, slice_num);
+                       });
 }
 
 void
@@ -432,9 +431,9 @@ DiskFileManagerImpl::AddBatchIndexFiles(
     const std::vector<int64_t>& remote_file_sizes) {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+    auto& pool = ThreadPools::GetExecutor(milvus::ThreadPoolPriority::HIGH);
 
-    std::vector<std::future<std::shared_ptr<uint8_t[]>>> futures;
+    std::vector<folly::SemiFuture<std::shared_ptr<uint8_t[]>>> futures;
     futures.reserve(remote_file_sizes.size());
     AssertInfo(local_file_offsets.size() == remote_files.size(),
                "inconsistent size of offset slices with file slices");
@@ -442,18 +441,24 @@ DiskFileManagerImpl::AddBatchIndexFiles(
                "inconsistent size of file slices with size slices");
 
     for (int64_t i = 0; i < remote_files.size(); ++i) {
-        futures.push_back(pool.Submit(
-            [local_chunk_manager](
-                const std::string& file,
-                const int64_t offset,
-                const int64_t data_size) -> std::shared_ptr<uint8_t[]> {
-                auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[data_size]);
-                local_chunk_manager->Read(file, offset, buf.get(), data_size);
-                return buf;
-            },
-            local_file_name,
-            local_file_offsets[i],
-            remote_file_sizes[i]));
+        futures.push_back(
+            folly::via(
+                &pool,
+                std::bind(
+                    [local_chunk_manager](
+                        const std::string& file,
+                        const int64_t offset,
+                        const int64_t data_size) -> std::shared_ptr<uint8_t[]> {
+                        auto buf =
+                            std::shared_ptr<uint8_t[]>(new uint8_t[data_size]);
+                        local_chunk_manager->Read(
+                            file, offset, buf.get(), data_size);
+                        return buf;
+                    },
+                    local_file_name,
+                    local_file_offsets[i],
+                    remote_file_sizes[i]))
+                .semi());
     }
 
     // hold index data util upload index file done.

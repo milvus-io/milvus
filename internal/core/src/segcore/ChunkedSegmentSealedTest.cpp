@@ -599,7 +599,14 @@ TEST(test_chunk_segment, ViewReadStateRetainsColumnsAndSharesDeletes) {
         primary->CaptureReadSnapshot());
     auto retained_state = segcore::ChunkedSegmentSealedImpl::ToPublishedState(
         retained->CaptureReadSnapshot());
-    EXPECT_EQ(primary_state, retained_state);
+    // Forks own their cache lifetime while retaining the same immutable
+    // column/index resources. Copying metadata must not duplicate the data.
+    EXPECT_NE(primary_state, retained_state);
+    EXPECT_NE(primary_state->expr_cache_generation,
+              retained_state->expr_cache_generation);
+    EXPECT_EQ(primary_state->fields, retained_state->fields);
+    EXPECT_EQ(primary_state->load_info, retained_state->load_info);
+    EXPECT_EQ(primary_state->runtime, retained_state->runtime);
 
     query::Plan plan(schema);
     plan.target_entries_ = {pk_id, scalar_id};
@@ -3082,7 +3089,10 @@ WriteArrowVortexFile(const std::filesystem::path& path,
     auto batch = arrow::RecordBatch::Make(schema, array->length(), {array});
     auto fs = std::make_shared<arrow::fs::LocalFileSystem>();
     auto writer_result = milvus_storage::vortex::VortexFileWriter::Open(
-        fs, schema, path.string(), properties);
+        fs,
+        schema,
+        path.string(),
+        std::make_shared<const milvus_storage::api::Properties>(properties));
     EXPECT_TRUE(writer_result.ok()) << writer_result.status().ToString();
     if (!writer_result.ok()) {
         return {};

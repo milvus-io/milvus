@@ -484,7 +484,7 @@ func Test_CheckRowsEqual(t *testing.T) {
 		DataType: schemapb.DataType_Bool,
 	}
 	schema.Fields = append(schema.Fields, newField)
-	insertData.Data[newField.GetFieldID()], _ = storage.NewFieldData(newField.GetDataType(), newField, 1)
+	insertData.Data[newField.GetFieldID()], _ = storage.NewFieldDataBuilder(newField.GetDataType(), newField).WithCapacity(1).Build()
 	err = CheckRowsEqual(schema, insertData)
 	assert.Error(t, err)
 
@@ -1102,7 +1102,7 @@ func Test_AppendNullableDefaultFieldsData(t *testing.T) {
 			assert.Error(t, err)
 
 			// the new field data is empty, it will be filled by AppendNullableDefaultFieldsData
-			insertData.Data[fieldSchema.GetFieldID()], err = storage.NewFieldData(fieldSchema.GetDataType(), fieldSchema, 0)
+			insertData.Data[fieldSchema.GetFieldID()], err = storage.NewFieldData(fieldSchema.GetDataType(), fieldSchema)
 			assert.NoError(t, err)
 			err = AppendNullableDefaultFieldsData(schema, insertData, count)
 			assert.NoError(t, err)
@@ -1225,7 +1225,7 @@ func TestUtil_FillDynamicData(t *testing.T) {
 	schema.Fields = append(schema.Fields, dynamicField)
 
 	// the dynamic field has one row, which is illegal
-	insertData.Data[dynamicFieldID], err = storage.NewFieldData(dynamicField.DataType, dynamicField, count)
+	insertData.Data[dynamicFieldID], err = storage.NewFieldDataBuilder(dynamicField.DataType, dynamicField).WithCapacity(count).Build()
 	assert.NoError(t, err)
 	err = insertData.Data[dynamicFieldID].AppendRow([]byte("{}"))
 	assert.NoError(t, err)
@@ -1233,7 +1233,7 @@ func TestUtil_FillDynamicData(t *testing.T) {
 	assert.Error(t, err)
 
 	// the dynamic field is empty, dynamic data is filled
-	insertData.Data[dynamicFieldID], err = storage.NewFieldData(dynamicField.DataType, dynamicField, count)
+	insertData.Data[dynamicFieldID], err = storage.NewFieldDataBuilder(dynamicField.DataType, dynamicField).WithCapacity(count).Build()
 	assert.NoError(t, err)
 	err = FillDynamicData(schema, insertData, count)
 	assert.NoError(t, err)
@@ -1498,11 +1498,11 @@ func elementNullStructData(t *testing.T, structNullable bool) *storage.InsertDat
 	schema := elementNullStructSchema(structNullable)
 	subFields := schema.GetStructArrayFields()[0].GetFields()
 	counts := elementNullStructCounts(structNullable)
-	ids, err := storage.NewFieldData(schemapb.DataType_Array, subFields[0], len(counts))
+	ids, err := storage.NewFieldDataBuilder(schemapb.DataType_Array, subFields[0]).WithCapacity(len(counts)).Build()
 	require.NoError(t, err)
-	vecs, err := storage.NewFieldData(schemapb.DataType_ArrayOfVector, subFields[4], len(counts))
+	vecs, err := storage.NewFieldDataBuilder(schemapb.DataType_ArrayOfVector, subFields[4]).WithCapacity(len(counts)).Build()
 	require.NoError(t, err)
-	nested, err := storage.NewFieldData(schemapb.DataType_Array, subFields[2], 0)
+	nested, err := storage.NewFieldDataBuilder(schemapb.DataType_Array, subFields[2]).WithCapacity(0).Build()
 	require.NoError(t, err)
 	pks := make([]int64, len(counts))
 	for i, n := range counts {
@@ -1577,7 +1577,7 @@ func Test_CanBeZeroRowField_ElementNullable(t *testing.T) {
 	require.NoError(t, CheckRowsEqual(schema, data))
 	rows, _ := GetInsertDataRowCount(data, schema)
 	assert.Equal(t, 3, rows)
-	data.Data[enVecID], _ = storage.NewFieldData(schemapb.DataType_ArrayOfVector, subFields[4], 0)
+	data.Data[enVecID], _ = storage.NewFieldDataBuilder(schemapb.DataType_ArrayOfVector, subFields[4]).WithCapacity(0).Build()
 	assert.ErrorIs(t, CheckRowsEqual(schema, data), merr.ErrImportFailed)
 }
 
@@ -1648,7 +1648,7 @@ func Test_FillMissingStructSubFields(t *testing.T) {
 		schema := elementNullStructSchema(false)
 		subFields := schema.GetStructArrayFields()[0].GetFields()
 		data := elementNullStructData(t, false)
-		emb, err := storage.NewFieldData(schemapb.DataType_ArrayOfVector, subFields[3], 3)
+		emb, err := storage.NewFieldDataBuilder(schemapb.DataType_ArrayOfVector, subFields[3]).WithCapacity(3).Build()
 		require.NoError(t, err)
 		for _, valid := range [][]bool{{true, false}, {false}, {}} {
 			row := &schemapb.VectorField{
@@ -1734,11 +1734,11 @@ func Test_FillMissingStructSubFields(t *testing.T) {
 			ref := elementNullStructData(t, structNullable).Data[enLegacyID]
 			counts := elementNullStructCounts(structNullable)
 			for _, subField := range []*schemapb.FieldSchema{subFields[1], subFields[2], subFields[3]} {
-				tracked, err := storage.NewFieldDataWithMemoryTracking(subField.GetDataType(), subField, 0)
+				tracked, err := storage.NewFieldDataBuilder(subField.GetDataType(), subField).WithCapacity(0).WithMemoryTracking().Build()
 				require.NoError(t, err)
-				recomputed, err := storage.NewFieldData(subField.GetDataType(), subField, 0)
+				recomputed, err := storage.NewFieldDataBuilder(subField.GetDataType(), subField).WithCapacity(0).Build()
 				require.NoError(t, err)
-				chunk, err := storage.NewFieldData(schemapb.DataType_Array, subFields[0], 0)
+				chunk, err := storage.NewFieldDataBuilder(schemapb.DataType_Array, subFields[0]).WithCapacity(0).Build()
 				require.NoError(t, err)
 				for i := 0; i < ref.RowNum(); i++ {
 					require.NoError(t, chunk.AppendRow(ref.GetRow(i)))
@@ -1891,8 +1891,7 @@ func Test_ImportFlowFillsMissingStructSubFields(t *testing.T) {
 
 		// a missing required sub-field fails preimport
 		data = elementNullStructData(t, false)
-		data.Data[enVecID], _ = storage.NewFieldData(schemapb.DataType_ArrayOfVector,
-			schema.GetStructArrayFields()[0].GetFields()[4], 0)
+		data.Data[enVecID], _ = storage.NewFieldDataBuilder(schemapb.DataType_ArrayOfVector, schema.GetStructArrayFields()[0].GetFields()[4]).WithCapacity(0).Build()
 		err := task.readFileStat(newElementNullMockReader(t, data), 0)
 		assert.ErrorIs(t, err, merr.ErrImportFailed)
 	})

@@ -63,11 +63,15 @@ func getFieldBinlogs(id UniqueID, binlogs []*datapb.FieldBinlog) *datapb.FieldBi
 	return nil
 }
 
+// MergeFieldBinlogs merges newBinlogs into currentBinlogs, which the caller
+// owns, and leaves newBinlogs unchanged: a field's later entries are appended
+// to a copy of its first one, so an update operator that runs again merges the
+// same input.
 func MergeFieldBinlogs(currentBinlogs []*datapb.FieldBinlog, newBinlogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
 	for _, newBinlog := range newBinlogs {
 		fieldBinlogs := getFieldBinlogs(newBinlog.GetFieldID(), currentBinlogs)
 		if fieldBinlogs == nil {
-			currentBinlogs = append(currentBinlogs, newBinlog)
+			currentBinlogs = append(currentBinlogs, proto.Clone(newBinlog).(*datapb.FieldBinlog))
 		} else {
 			if len(fieldBinlogs.ChildFields) == 0 {
 				fieldBinlogs.ChildFields = newBinlog.GetChildFields()
@@ -161,6 +165,7 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 			// primary storage is local, so the connection cap still applies.
 			MaxConnections:              uint32(Params.MinioCfg.MaxConnections.GetAsInt()),
 			TalonMode:                   Params.CommonCfg.StorageTalonMode.GetAsUint32(),
+			TalonEnabledStages:          Params.CommonCfg.StorageTalonEnabledStages.GetAsUint32(),
 			TalonSmallReadThreshold:     Params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
 			TalonCoordinator:            Params.CommonCfg.StorageTalonCoordinator.GetValue(),
 			TalonBlockSize:              Params.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
@@ -188,6 +193,7 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 			SslTlsMinVersion:            Params.MinioCfg.SslTLSMinVersion.GetValue(),
 			UseCrc32CChecksum:           Params.MinioCfg.UseCRC32C.GetAsBool(),
 			TalonMode:                   Params.CommonCfg.StorageTalonMode.GetAsUint32(),
+			TalonEnabledStages:          Params.CommonCfg.StorageTalonEnabledStages.GetAsUint32(),
 			TalonSmallReadThreshold:     Params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
 			TalonCoordinator:            Params.CommonCfg.StorageTalonCoordinator.GetValue(),
 			TalonBlockSize:              Params.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
@@ -384,15 +390,16 @@ func NeedDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted bo
 		return false
 	}
 
+	return !hasRequiredTextStats(segment, fieldIDs)
+}
+
+func hasRequiredTextStats(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	for _, fieldID := range fieldIDs {
-		if segment.GetTextStatsLogs() == nil {
-			return true
-		}
 		if segment.GetTextStatsLogs()[fieldID] == nil {
-			return true
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func NeedDoJSONKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted bool) bool {
@@ -403,20 +410,21 @@ func NeedDoJSONKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted
 		return false
 	}
 
+	return !hasRequiredJSONKeyStats(segment, fieldIDs)
+}
+
+func hasRequiredJSONKeyStats(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	for _, fieldID := range fieldIDs {
-		if segment.GetJsonKeyStats() == nil {
-			return true
-		}
 		if segment.GetJsonKeyStats()[fieldID] == nil {
-			return true
+			return false
 		}
 		// if the data format version is less than the current version, we need to do the stats task again
 		// because the data format is updated, the old data format need to be converted to the new data format
 		if segment.GetJsonKeyStats()[fieldID].GetJsonKeyStatsDataFormat() < common.JSONStatsDataFormatVersion {
-			return true
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func CanBuildExternalJSONKeyIndex(segment *SegmentInfo) bool {

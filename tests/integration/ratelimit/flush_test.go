@@ -18,6 +18,7 @@ package ratelimit
 
 import (
 	"context"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -81,21 +82,26 @@ func (s *DBPropertiesSuite) TestFlush() {
 	err = merr.CheckRPCCall(insertResult.GetStatus(), err)
 	s.NoError(err)
 
+	// Share one deadline so the first Flush cannot take long enough to refill
+	// the explicit test quota before the second request checks throttling.
+	flushCtx, cancelFlush := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelFlush()
+
 	// flush 1
-	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(flushCtx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
-	err = merr.CheckRPCCall(flushResp.GetStatus(), err)
-	s.NoError(err)
+	s.Require().NoError(merr.CheckRPCCall(flushResp, err))
 
 	// flush 2
-	flushResp, err = c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err = c.MilvusClient.Flush(flushCtx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
-	s.NoError(err)
-	s.True(merr.ErrServiceRateLimit.Is(merr.Error(flushResp.GetStatus())))
+	s.Require().NoError(err)
+	s.Require().NotNil(flushResp)
+	s.True(merr.ErrServiceRateLimit.Is(merr.Error(flushResp.GetStatus())), "unexpected Flush status: %v", flushResp.GetStatus())
 
 	status, err := c.MilvusClient.DropCollection(ctx, &milvuspb.DropCollectionRequest{
 		CollectionName: collectionName,

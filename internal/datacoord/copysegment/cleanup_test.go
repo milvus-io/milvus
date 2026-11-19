@@ -61,6 +61,7 @@ func TestRejectedCopyCleanupSkipsActivePublication(t *testing.T) {
 	base := path.Join(root, "insert_log/100/10/2001")
 	dataFile := path.Join(base, "_data/data.parquet")
 	require.NoError(t, m.ChunkManager.Write(ctx, dataFile, []byte("completed worker output")))
+	originalManifest := m.GetSegment(ctx, 2001).GetManifestPath()
 	entered, release := make(chan struct{}), make(chan struct{})
 	var releaseOnce sync.Once
 	unblock := func() { releaseOnce.Do(func() { close(release) }) }
@@ -74,7 +75,7 @@ func TestRejectedCopyCleanupSkipsActivePublication(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		finished <- SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+		finished <- SyncCopySegmentTask(context.TODO(), task, &datapb.QueryCopySegmentResponse{
 			State:          datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 			SegmentResults: []*datapb.CopySegmentResult{{SegmentId: 2001, ManifestPath: packed.MarshalManifestPath(base, 3)}},
 		}, copies, m, nil)
@@ -96,14 +97,23 @@ func TestRejectedCopyCleanupSkipsActivePublication(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, exists, "cleanup must skip an in-flight publication")
 	unblock()
-	require.NoError(t, <-finished)
-	// This change preserves the old late-publication behavior, but cannot delete
-	// files from under it. A subsequent cleanup pass must recheck task state.
+	require.ErrorIs(t, <-finished, merr.ErrSegmentNotFound)
+	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskFailed, task.GetState())
+	require.Equal(t, commonpb.SegmentState_Dropped, m.GetSegment(ctx, 2001).GetState())
+	require.Equal(t, originalManifest, m.GetSegment(ctx, 2001).GetManifestPath())
 	require.NoError(t, CleanupRejectedCopy(ctx, task, m, copies))
 	exists, err = m.ChunkManager.Exist(ctx, dataFile)
 	require.NoError(t, err)
 	require.True(t, exists)
-	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskCompleted, task.GetState())
+	require.True(t, task.GetCleanupRequired())
+	// Ordinary segment GC's metadata retirement authorizes leftover-prefix cleanup.
+	require.NoError(t, m.DropSegment(ctx, 2001))
+	require.NoError(t, CleanupRejectedCopy(ctx, task, m, copies))
+	exists, err = m.ChunkManager.Exist(ctx, dataFile)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.False(t, task.GetCleanupRequired())
+	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskFailed, task.GetState())
 }
 
 func TestRejectedCopyCleanupDoesNotBlockDispatch(t *testing.T) {
@@ -143,7 +153,7 @@ func TestRejectedCopyCleanupDoesNotBlockDispatch(t *testing.T) {
 	// A late result must not make the scheduler wait for the cleanup worker.
 	lateResult := make(chan error, 1)
 	go func() {
-		lateResult <- SyncCopySegmentTask(failed, &datapb.QueryCopySegmentResponse{
+		lateResult <- SyncCopySegmentTask(context.TODO(), failed, &datapb.QueryCopySegmentResponse{
 			State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 		}, copies, m, nil)
 	}()

@@ -18,8 +18,17 @@ must not escape as a failed append on a live WAL after an earlier interceptor ch
 in-memory state. Only successful allocation publishes an acker and advances the allocated
 watermark.
 
-Retries occur outside both the shared allocator's mutex and the AckManager mutex.
-Barrier waits also remain outside the AckManager mutex: the allocator's slow barrier
+Each AckManager serializes timestamp allocation through acker registration with
+`allocateMu`. Its separate state mutex `mu` protects registration, acknowledgement
+and confirmed-prefix advancement; it is not held while waiting for the shared TSO
+allocator or its refill RPC. Completed appends can therefore acknowledge while a
+new allocation is blocked. Keeping allocation and registration serialized also
+prevents a background sync from confirming a later timestamp before an earlier
+timestamp has been registered. If both mutexes are needed, acquire `allocateMu`
+before `mu`.
+
+Retries occur outside the shared allocator's mutex and both AckManager mutexes.
+Barrier waits also remain outside both AckManager mutexes: the allocator's slow barrier
 path may need other allocations to advance it. Background TimeTick sync uses the
 single-attempt `Allocate()` entry and retries on the inspector's next sync; it has no
 preceding append mutation to preserve, and its context belongs to the process-wide
@@ -164,7 +173,7 @@ A property attached to every ImmutableMessage. **Guarantee**: reading from this 
 
 `lastConfirmedManager` maintains a min-heap of in-flight messages ordered by MessageID. A message can be popped from the heap (advancing `lastConfirmedMessageID`) only when **both** conditions are met:
 
-1. **No concurrent write in-flight**: `EndTimestamp` (= `lastAllocatedTimeTick` at ack time, recording which TimeTicks were already allocated when this message finished writing) < current confirmed TimeTick — all messages allocated up to that point have been confirmed, so no smaller MessageID can still enter the heap.
+1. **No concurrent write in-flight**: `EndTimestamp` (= `lastAllocatedTimeTick` at ack time, recording the latest registered TimeTick) < current confirmed TimeTick — all messages registered up to that point have been confirmed, so no smaller MessageID can still enter the heap. An allocation that has not registered its acker cannot start its WAL append yet and does not need to be included in this bound.
 2. **Txn resolved** (if transactional): the transaction is committed, rolled back, or expired — no more body messages can appear under this transaction.
 
 When both hold, no future message can have a MessageID smaller than this entry, so it is safe to advance.

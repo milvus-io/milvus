@@ -96,12 +96,16 @@ func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *da
 		}
 		manifestPath := segment.GetManifestPath()
 		if version, ok := manifestVersions[segmentID]; ok && version > 0 && manifestPath != "" {
-			base, _, err := packed.UnmarshalManifestPath(manifestPath)
+			base, current, err := packed.UnmarshalManifestPath(manifestPath)
 			if err != nil {
 				resp.Status = merr.Status(merr.Wrap(err, "decode query view segment manifest"))
 				return resp, nil
 			}
-			manifestPath = packed.MarshalManifestPath(base, version)
+			// Keep the current revision's path as is: its recorded size lets
+			// readers skip the HEAD and match the Talon prewarm key.
+			if version != current {
+				manifestPath = packed.MarshalManifestPath(base, version)
+			}
 		}
 		var bm25Logs []*datapb.FieldBinlog
 		if segment.GetStorageVersion() < storage.StorageV3 {

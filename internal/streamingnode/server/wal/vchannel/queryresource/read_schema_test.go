@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -183,17 +184,19 @@ func TestNativeHandleRetainsReadSchemaAfterLastView(t *testing.T) {
 		handles, err := read.AcquireGrowingSegmentHandles(t.Context(), qviews.DataVersion{}, nil)
 		require.NoError(t, err)
 		ref.retire()
-		require.NoError(t, ref.release())
-		require.Empty(t, pool.resources)
-		require.Equal(t, 1, read.schema.refs)
+		require.ErrorIs(t, ref.release(), nodescheduler.ErrDelay, "View cleanup waits for execution handles")
+		require.NotEmpty(t, pool.resources)
+		require.Equal(t, 2, read.schema.refs)
 		require.Same(t, read.schema.collection, handles[0].Collection())
 		handles[0].Release()
 		handles[0].Release()
 		require.Equal(t, 1, releases)
+		require.NoError(t, ref.release())
+		require.Empty(t, pool.resources)
 		require.Zero(t, read.schema.refs)
 		_, err = read.AcquireGrowingSegmentHandles(t.Context(), qviews.DataVersion{}, nil)
-		require.ErrorIs(t, err, merr.ErrServiceNotReady)
-		require.Equal(t, 2, releases, "late acquisition must release its physical handle when schema pin fails")
+		require.ErrorIs(t, err, context.Canceled)
+		require.Equal(t, 1, releases, "retired View rejects acquisition before touching physical resources")
 	})
 	mockey.PatchConvey("physical acquisition error is preserved", t, func() {
 		mockey.Mock((*QueryRuntime).AcquireGrowingSegmentHandles).Return(nil, context.Canceled).Build()

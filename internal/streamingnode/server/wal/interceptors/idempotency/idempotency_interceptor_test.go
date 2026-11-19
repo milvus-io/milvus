@@ -1125,7 +1125,7 @@ func TestInterceptorIdempotencyMetrics(t *testing.T) {
 		maxBytes = probeNext.bytes
 	}
 
-	interceptor := newInterceptor(WindowConfig{MaxBytes: maxBytes})
+	interceptor := newInterceptor(WindowConfig{MaxSize: maxBytes})
 	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
 
 	nodeID := paramtable.GetStringNodeID()

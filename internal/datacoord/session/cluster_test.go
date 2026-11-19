@@ -998,91 +998,103 @@ func TestCluster_CreateProperties(t *testing.T) {
 	})
 }
 
-func TestCluster_CreateProperties_CollectionID(t *testing.T) {
-	const expectedCollectionID int64 = 778899
+func TestCluster_CreateProperties_CollectionLabels(t *testing.T) {
+	const (
+		knownCollectionID   int64 = 778899
+		unknownCollectionID int64 = 112233
+	)
+	lookup := func(collectionID int64) (CollectionLabels, bool) {
+		if collectionID != knownCollectionID {
+			return CollectionLabels{}, false
+		}
+		return CollectionLabels{CollectionName: "docs", DatabaseID: 7, DatabaseName: "analytics"}, true
+	}
 
-	mockNodeManager := NewMockNodeManager(t)
-	cluster := NewCluster(mockNodeManager)
-	mockClient := mocks.NewMockDataNodeClient(t)
-	mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+	// Every task type that names a collection, so a new one that skips the
+	// names fails here.
+	creates := []struct {
+		name   string
+		create func(c Cluster, collectionID int64) error
+	}{
+		{"CreateCompaction", func(c Cluster, collectionID int64) error {
+			return c.CreateCompaction(1, &datapb.CompactionPlan{PlanID: 1, SlotUsage: 1}, collectionID)
+		}},
+		{"CreatePreImport", func(c Cluster, collectionID int64) error {
+			return c.CreatePreImport(1, &datapb.PreImportRequest{TaskID: 1, CollectionID: collectionID}, 1)
+		}},
+		{"CreateImport", func(c Cluster, collectionID int64) error {
+			return c.CreateImport(1, &datapb.ImportRequest{TaskID: 1, CollectionID: collectionID}, 1)
+		}},
+		{"CreatePreImportV3", func(c Cluster, collectionID int64) error {
+			return c.CreatePreImportV3(1, &datapb.PreImportRequest{TaskID: 1, CollectionID: collectionID}, 1)
+		}},
+		{"CreateReshard", func(c Cluster, collectionID int64) error {
+			return c.CreateReshard(1, &datapb.ReshardTaskRequest{}, collectionID)
+		}},
+		{"CreateImportV3", func(c Cluster, collectionID int64) error {
+			return c.CreateImportV3(1, &datapb.ImportTaskV3Request{}, collectionID)
+		}},
+		{"CreateIndex", func(c Cluster, collectionID int64) error {
+			return c.CreateIndex(1, &workerpb.CreateJobRequest{BuildID: 1, CollectionID: collectionID})
+		}},
+		{"CreateStats", func(c Cluster, collectionID int64) error {
+			return c.CreateStats(1, &workerpb.CreateStatsRequest{TaskID: 1, CollectionID: collectionID, SubJobType: indexpb.StatsSubJob_Sort})
+		}},
+		{"CreateAnalyze", func(c Cluster, collectionID int64) error {
+			return c.CreateAnalyze(1, &workerpb.AnalyzeRequest{TaskID: 1, CollectionID: collectionID})
+		}},
+		{"CreateRefreshExternalCollectionTask", func(c Cluster, collectionID int64) error {
+			return c.CreateRefreshExternalCollectionTask(1, &datapb.RefreshExternalCollectionTaskRequest{TaskID: 1, CollectionID: collectionID})
+		}},
+		{"CreateCopySegment", func(c Cluster, collectionID int64) error {
+			return c.CreateCopySegment(1, &datapb.CopySegmentRequest{TaskID: 1}, collectionID, false)
+		}},
+	}
 
-	// The expectation is intentionally shared by all sub-tests; testify/mock
-	// allows unlimited calls unless Once/Times is specified.
-	mockClient.EXPECT().CreateTask(mock.Anything, mock.MatchedBy(func(req *workerpb.CreateTaskRequest) bool {
-		props := taskcommon.NewProperties(req.GetProperties())
-		collectionID, err := props.GetCollectionID()
-		return assert.NoError(t, err) && assert.Equal(t, expectedCollectionID, collectionID,
-			"collection_id must be propagated into task properties")
-	})).Return(merr.Success(), nil)
+	// sent dispatches one task and returns the properties the worker received.
+	sent := func(t *testing.T, cluster func(NodeManager) Cluster, create func(Cluster, int64) error, collectionID int64) taskcommon.Properties {
+		mockNodeManager := NewMockNodeManager(t)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+		var props taskcommon.Properties
+		mockClient.EXPECT().CreateTask(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, req *workerpb.CreateTaskRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+				props = taskcommon.NewProperties(req.GetProperties())
+				return merr.Success(), nil
+			})
+		require.NoError(t, create(cluster(mockNodeManager), collectionID))
+		return props
+	}
+	withLookup := func(nm NodeManager) Cluster { return NewCluster(nm, WithCollectionLabels(lookup)) }
 
-	t.Run("CreateCompaction", func(t *testing.T) {
-		err := cluster.CreateCompaction(1, &datapb.CompactionPlan{PlanID: 1, SlotUsage: 1}, expectedCollectionID)
-		assert.NoError(t, err)
-	})
-
-	t.Run("CreatePreImport", func(t *testing.T) {
-		err := cluster.CreatePreImport(1, &datapb.PreImportRequest{
-			TaskID:       1,
-			CollectionID: expectedCollectionID,
-		}, 1)
-		assert.NoError(t, err)
-	})
-
-	t.Run("CreateImport", func(t *testing.T) {
-		err := cluster.CreateImport(1, &datapb.ImportRequest{
-			TaskID:       1,
-			CollectionID: expectedCollectionID,
-		}, 1)
-		assert.NoError(t, err)
-	})
-
-	t.Run("CreateIndex", func(t *testing.T) {
-		err := cluster.CreateIndex(1, &workerpb.CreateJobRequest{
-			BuildID:      1,
-			TaskSlot:     1,
-			NumRows:      1000,
-			IndexVersion: 1,
-			CollectionID: expectedCollectionID,
+	for _, tc := range creates {
+		t.Run(tc.name+"/known collection carries its names", func(t *testing.T) {
+			props := sent(t, withLookup, tc.create, knownCollectionID)
+			collectionID, err := props.GetCollectionID()
+			assert.NoError(t, err)
+			assert.Equal(t, knownCollectionID, collectionID)
+			assert.Equal(t, "docs", props.GetCollectionName())
+			assert.Equal(t, int64(7), props.GetDatabaseID())
+			assert.Equal(t, "analytics", props.GetDatabaseName())
 		})
+	}
+
+	assertNoNames := func(t *testing.T, props taskcommon.Properties, collectionID int64) {
+		got, err := props.GetCollectionID()
 		assert.NoError(t, err)
+		assert.Equal(t, collectionID, got)
+		assert.NotContains(t, props, taskcommon.CollectionNameKey)
+		assert.NotContains(t, props, taskcommon.DatabaseIDKey)
+		assert.NotContains(t, props, taskcommon.DatabaseNameKey)
+	}
+
+	t.Run("unknown collection keeps only its ID", func(t *testing.T) {
+		assertNoNames(t, sent(t, withLookup, creates[0].create, unknownCollectionID), unknownCollectionID)
 	})
 
-	t.Run("CreateStats", func(t *testing.T) {
-		err := cluster.CreateStats(1, &workerpb.CreateStatsRequest{
-			TaskID:       1,
-			TaskSlot:     1,
-			NumRows:      1000,
-			TaskVersion:  1,
-			SubJobType:   indexpb.StatsSubJob_Sort,
-			CollectionID: expectedCollectionID,
-		})
-		assert.NoError(t, err)
-	})
-
-	t.Run("CreateAnalyze", func(t *testing.T) {
-		err := cluster.CreateAnalyze(1, &workerpb.AnalyzeRequest{
-			TaskID:       1,
-			TaskSlot:     1,
-			Version:      1,
-			CollectionID: expectedCollectionID,
-		})
-		assert.NoError(t, err)
-	})
-
-	t.Run("CreateCopySegment", func(t *testing.T) {
-		err := cluster.CreateCopySegment(1, &datapb.CopySegmentRequest{
-			TaskID:   1,
-			TaskSlot: 1,
-		}, expectedCollectionID, false)
-		assert.NoError(t, err)
-	})
-
-	t.Run("CreateRefreshExternalCollectionTask", func(t *testing.T) {
-		err := cluster.CreateRefreshExternalCollectionTask(1, &datapb.RefreshExternalCollectionTaskRequest{
-			TaskID:       1,
-			CollectionID: expectedCollectionID,
-		})
-		assert.NoError(t, err)
+	t.Run("cluster without a lookup keeps only the ID", func(t *testing.T) {
+		withoutLookup := func(nm NodeManager) Cluster { return NewCluster(nm) }
+		assertNoNames(t, sent(t, withoutLookup, creates[0].create, knownCollectionID), knownCollectionID)
 	})
 }
 

@@ -59,7 +59,7 @@ score        = executeSpeed + workload
 | `pkg/util/paramtable/component_param.go` | New `WorkloadMetricSmoothingFactor` param |
 | `pkg/util/paramtable/component_param_test.go` | Default-value assertion |
 
-`RefinedLookAsideBalancer` embeds the existing `LookAsideBalancer` and reuses its health-check loop, round-robin index and node-reachability state, so the two balancers cannot drift apart on shared logic. Only the scoring-related behavior is overridden (`SelectNode`, `UpdateCostMetrics`, `CancelWorkload`, `calculateScore`).
+`RefinedLookAsideBalancer` embeds the existing `LookAsideBalancer` and reuses its health-check loop, round-robin index and node-reachability state, so the two balancers cannot drift apart on shared logic. Only the scoring-related behavior is overridden (`SelectNode`, `UpdateCostMetrics`, `calculateScore`). Both balancers return a reservation release function from `SelectNode`, retaining the counter used by that selection.
 
 ### B: Service-time quantization floor
 
@@ -175,7 +175,7 @@ The metric-expiry rule (`nowTs - ts <= metricExpireInterval`) is unchanged, prev
 
 **Availability.** Because the smoothed state lives in `refinedMetricsMap`, `SelectNode` also keeps an entry in the embedded balancer's `metricsMap` on every selection. Otherwise the inherited health loop could only mark a node unavailable if it had already returned cost metrics, and a node that never returned any (e.g. the proxy restarted while the query node is down) would never be skipped.
 
-**Eviction of smoothed state.** The embedded health loop removes offline nodes from its own maps and from `knownNodeInfos`, but it cannot reach `refinedMetricsMap` (method dispatch on the embedded receiver). Without a removal path the map would grow with historical node IDs on QN restarts or scaling. The refined balancer therefore runs a periodic sweep (`refinedMetricsCleanupInterval`) that removes any refined entry whose node is no longer in `knownNodeInfos`. A node removed here is permanently gone (evicted after repeated health-check failures), so an in-flight request on it completes and its `CancelWorkload` becomes a no-op — the same behavior as the original balancer, whose metrics entry is removed on eviction too.
+**Eviction of smoothed state.** The embedded health loop removes offline nodes from its own maps and from `knownNodeInfos`, but it cannot reach `refinedMetricsMap` (method dispatch on the embedded receiver). Without a removal path the map would grow with historical node IDs on QN restarts or scaling. The refined balancer therefore runs a periodic sweep (`refinedMetricsCleanupInterval`) that removes any refined entry whose node is no longer in `knownNodeInfos`. Eviction does not guarantee that the node stays absent: a later request can register it again. In-flight requests retain their original counters through their release functions, so completion after eviction debits the original state without affecting a replacement entry. Metrics creation uses `GetOrInsert` so concurrent cost updates cannot overwrite reservations.
 
 ### Parameter definition (component_param.go, after `WorkloadToleranceFactor`)
 

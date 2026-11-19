@@ -119,10 +119,10 @@ TEST(JsonProjectedHybridIndexBuilderTest, LowCardinalityStringsSelectBitmap) {
     ASSERT_NO_FATAL_FAILURE(ExpectSelector(persisted, ScalarIndexType::BITMAP));
     const auto& backend = ScalarReaderBackends().Get<std::string_view>(
         "JsonProjectedHybridVarchar");
-    auto reader = OpenV3(backend,
-                         persisted,
-                         {.row_count = static_cast<int64_t>(raw.size()),
-                          .values = {{JSON_PATH, "/x"}}});
+    auto reader =
+        OpenV3(backend,
+               persisted,
+               {.row_count = raw.size(), .values = {{JSON_PATH, "/x"}}});
     ASSERT_NE(reader, nullptr);
     const auto* json = dynamic_cast<const IJsonIndexReader*>(reader.get());
     ASSERT_NE(json, nullptr);
@@ -151,10 +151,10 @@ TEST(JsonProjectedHybridIndexBuilderTest, HighCardinalityNumbersSelectSorted) {
         ExpectSelector(persisted, ScalarIndexType::STLSORT));
     const auto& backend =
         ScalarReaderBackends().Get<double>("JsonProjectedHybridDouble");
-    auto reader = OpenV3(backend,
-                         persisted,
-                         {.row_count = static_cast<int64_t>(raw.size()),
-                          .values = {{JSON_PATH, "/n"}}});
+    auto reader =
+        OpenV3(backend,
+               persisted,
+               {.row_count = raw.size(), .values = {{JSON_PATH, "/n"}}});
     ASSERT_NE(reader, nullptr);
     const auto* json = dynamic_cast<const IJsonIndexReader*>(reader.get());
     ASSERT_NE(json, nullptr);
@@ -181,10 +181,10 @@ TEST(JsonProjectedHybridIndexBuilderTest,
     ASSERT_NO_FATAL_FAILURE(ExpectSelector(persisted, ScalarIndexType::BITMAP));
     const auto& backend =
         ScalarReaderBackends().Get<double>("JsonProjectedHybridDouble");
-    auto reader = OpenV3(backend,
-                         persisted,
-                         {.row_count = static_cast<int64_t>(raw.size()),
-                          .values = {{JSON_PATH, "/v"}}});
+    auto reader =
+        OpenV3(backend,
+               persisted,
+               {.row_count = raw.size(), .values = {{JSON_PATH, "/v"}}});
     ASSERT_NE(reader, nullptr);
     const auto* json = dynamic_cast<const IJsonIndexReader*>(reader.get());
     ASSERT_NE(json, nullptr);

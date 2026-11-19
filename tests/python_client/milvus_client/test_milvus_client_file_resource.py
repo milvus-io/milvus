@@ -321,18 +321,20 @@ class TestMilvusClientFileResourceAdd(FileResourceTestBase):
         """
         target: add with empty path
         method: add_file_resource(name=..., path="")
-        expected: raise Exception
+        expected: reject the request because path is required
         """
         client = self._client()
         # 1. add file resource with empty path
-        error = {ct.err_code: 1001, ct.err_msg: "Object name cannot be empty"}
-        self.add_file_resource(
+        error = {ct.err_code: 1101, ct.err_msg: "missing parameter[missing_param=file resource path]"}
+        res, _ = self.add_file_resource(
             client,
             cf.gen_unique_str(prefix),
             "",
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+        # err_res checks the message only; also enforce the parameter error code.
+        assert res.code == error[ct.err_code]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_add_multiple_file_resources(self, file_resource_env):

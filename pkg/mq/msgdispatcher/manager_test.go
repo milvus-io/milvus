@@ -24,10 +24,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -226,4 +230,69 @@ func TestManager(t *testing.T) {
 			return c.NumConsumer() >= 1
 		}, 3*time.Second, 10*time.Millisecond)
 	})
+}
+
+func TestUploadMetric(t *testing.T) {
+	newTestDispatcher := func(curTime time.Time, vchannel string) *Dispatcher {
+		d := &Dispatcher{targets: typeutil.NewConcurrentMap[string, *target]()}
+		d.curTs.Store(tsoutil.ComposeTSByTime(curTime))
+		d.targets.Insert(vchannel, &target{vchannel: vchannel})
+		return d
+	}
+	newTestManager := func(t *testing.T, role, mode string) *dispatcherManager {
+		previousMode := metrics.CollectionLevelMetricsMode()
+		metrics.SetCollectionLevelMetricsMode(mode)
+		t.Cleanup(func() {
+			metrics.SetCollectionLevelMetricsMode(previousMode)
+			metrics.DataNodeMsgDispatcherTtLag.Reset()
+			metrics.QueryNodeMsgDispatcherTtLag.Reset()
+		})
+		c := NewDispatcherManager("upload-metric-pchannel", role, 7, nil, false).(*dispatcherManager)
+		c.mainDispatcher = newTestDispatcher(time.Now().Add(-time.Minute), "main-vchannel")
+		c.deputyDispatchers[1] = newTestDispatcher(time.Now().Add(-2*time.Minute), "deputy-vchannel")
+		return c
+	}
+
+	for _, tc := range []struct {
+		role  string
+		gauge *metrics.CardinalityGaugeVec
+	}{
+		{role: typeutil.DataNodeRole, gauge: metrics.DataNodeMsgDispatcherTtLag},
+		{role: typeutil.QueryNodeRole, gauge: metrics.QueryNodeMsgDispatcherTtLag},
+	} {
+		t.Run(tc.role, func(t *testing.T) {
+			t.Run("full mode exports the lag of every target", func(t *testing.T) {
+				c := newTestManager(t, tc.role, metrics.CollectionLevelMetricsModeFull)
+				c.uploadMetric()
+
+				require.Equal(t, 2, testutil.CollectAndCount(tc.gauge))
+				const toleranceMs = float64(30 * time.Second / time.Millisecond)
+				assert.InDelta(t, float64(time.Minute/time.Millisecond),
+					testutil.ToFloat64(tc.gauge.WithLabelValues("7", "main-vchannel")), toleranceMs)
+				assert.InDelta(t, float64(2*time.Minute/time.Millisecond),
+					testutil.ToFloat64(tc.gauge.WithLabelValues("7", "deputy-vchannel")), toleranceMs)
+			})
+
+			t.Run("aggregate mode skips the scan under the manager lock", func(t *testing.T) {
+				c := newTestManager(t, tc.role, metrics.CollectionLevelMetricsModeAggregate)
+				require.True(t, tc.gauge.Suppressed())
+
+				// A target scan would block on c.mu.RLock while the test holds the lock.
+				c.mu.Lock()
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					c.uploadMetric()
+				}()
+				select {
+				case <-done:
+				case <-time.After(5 * time.Second):
+					t.Error("uploadMetric waited for the manager lock although its gauge is suppressed")
+				}
+				c.mu.Unlock()
+				<-done
+				assert.Equal(t, 0, testutil.CollectAndCount(tc.gauge))
+			})
+		})
+	}
 }

@@ -43,7 +43,7 @@ func TestIdempotencyMetricsObserveWindowInflightEntriesAndEvents(t *testing.T) {
 		maxBytes = probeNext.bytes
 	}
 
-	window := NewWindow(WindowConfig{MaxBytes: maxBytes})
+	window := NewWindow(WindowConfig{MaxSize: maxBytes})
 	begin := window.Begin("metrics-key", msg)
 	require.Equal(t, BeginDecisionOwner, begin.Decision)
 

@@ -149,20 +149,48 @@ PhyFilterBitsNode::GetOutput() {
         return nullptr;
     }
 
+    tracer::AutoSpan span(
+        "PhyFilterBitsNode::Execute", tracer::GetRootSpan(), true);
+    const bool recording =
+        tracer::IsTraceEnabled() && span.GetSpan()->IsRecording();
+    if (recording) {
+        span.SetAttribute("input_rows", need_process_rows_);
+        span.SetAttribute("cache_hit", false);
+        if (const auto* segment = query_context_->get_segment()) {
+            span.SetAttribute("segment_id", segment->get_segment_id());
+        }
+    }
+    const auto record_result = [&](TargetBitmapView filtered,
+                                   double scalar_work_us) {
+        if (recording) {
+            // The bitmap marks excluded rows, including UNKNOWN predicate
+            // results. Injected TTL predicates are included; downstream
+            // MVCC/delete visibility has not been applied yet.
+            span.SetAttribute(
+                "passed_rows",
+                static_cast<int64_t>(filtered.size() - filtered.count()));
+            span.SetAttribute("filter_scalar_work_us", scalar_work_us);
+        }
+    };
+
     // Cache read: Stage 2 of two-stage search reuses the bitset cached by Stage 1.
     // Cache lives in the process-level ExprResCacheManager keyed by
     // (segment_id, FilterBitsNode signature + dynamic filter context), so
     // cross-query reuse is automatic only when the effective predicate matches.
     auto* cache_segment = query_context_->get_segment();
-    const bool can_use_cache = enable_expr_cache_ && !expr_cache_key_.empty() &&
-                               cache_segment != nullptr &&
-                               cache_segment->type() == SegmentType::Sealed &&
-                               ExprResCacheManager::IsEnabled();
+    const bool can_use_cache =
+        enable_expr_cache_ && !expr_cache_key_.empty() &&
+        ExprCacheHelper::HasCacheIdentity(
+            cache_segment, query_context_->get_read_snapshot().get()) &&
+        cache_segment->type() == SegmentType::Sealed &&
+        ExprResCacheManager::IsEnabled();
     if (can_use_cache) {
         RowVectorPtr cached_output;
         RunExprCacheBestEffort([&]() {
-            ExprResCacheManager::Key key{cache_segment->get_segment_id(),
-                                         expr_cache_key_};
+            auto key = ExprCacheHelper::MakeKey(
+                cache_segment,
+                query_context_->get_read_snapshot().get(),
+                expr_cache_key_);
             ExprResCacheManager::Value cached;
             cached.active_count = need_process_rows_;
             if (!ExprResCacheManager::Instance().Get(key, cached) ||
@@ -183,15 +211,29 @@ PhyFilterBitsNode::GetOutput() {
             MarkFeature(
                 query_context_->get_plan_options().feature_recorder.get(),
                 FeatureBit::ExprCacheHit);
+            if (recording) {
+                span.SetAttribute("cache_hit", true);
+                span.SetAttribute("prefetch_wait_us", 0.0);
+                const auto cached = std::static_pointer_cast<ColumnVector>(
+                    cached_output->child(0));
+                record_result(
+                    TargetBitmapView(cached->GetRawData(), cached->size()),
+                    0.0);
+            }
             return cached_output;
         }
     }
 
-    tracer::AutoSpan span(
-        "PhyFilterBitsNode::Execute", tracer::GetRootSpan(), true);
-    tracer::AddEvent(fmt::format("input_rows: {}", need_process_rows_));
-
+    const auto prefetch_start = recording
+                                    ? std::chrono::steady_clock::now()
+                                    : std::chrono::steady_clock::time_point{};
     exprs_->WaitPrefetch();
+    if (recording) {
+        span.SetAttribute("prefetch_wait_us",
+                          std::chrono::duration<double, std::micro>(
+                              std::chrono::steady_clock::now() - prefetch_start)
+                              .count());
+    }
 
     std::chrono::high_resolution_clock::time_point scalar_start =
         std::chrono::high_resolution_clock::now();
@@ -228,8 +270,10 @@ PhyFilterBitsNode::GetOutput() {
 
         if (can_use_cache) {
             RunExprCacheBestEffort([&]() {
-                ExprResCacheManager::Key key{cache_segment->get_segment_id(),
-                                             expr_cache_key_};
+                auto key = ExprCacheHelper::MakeKey(
+                    cache_segment,
+                    query_context_->get_read_snapshot().get(),
+                    expr_cache_key_);
                 ExprResCacheManager::Value v;
                 v.result = std::make_shared<TargetBitmap>(view);
                 v.valid_result = std::make_shared<TargetBitmap>(valid_view);
@@ -248,6 +292,7 @@ PhyFilterBitsNode::GetOutput() {
                 .count();
         milvus::monitor::internal_core_search_latency_scalar.Observe(
             scalar_cost / 1000);
+        record_result(view, scalar_cost);
 
         return std::make_shared<RowVector>(std::move(col_res));
     }
@@ -294,8 +339,10 @@ PhyFilterBitsNode::GetOutput() {
     // the ColumnVector return value below.
     if (can_use_cache) {
         RunExprCacheBestEffort([&]() {
-            ExprResCacheManager::Key key{cache_segment->get_segment_id(),
-                                         expr_cache_key_};
+            auto key = ExprCacheHelper::MakeKey(
+                cache_segment,
+                query_context_->get_read_snapshot().get(),
+                expr_cache_key_);
             ExprResCacheManager::Value v;
             v.result = std::make_shared<TargetBitmap>(bitset.clone());
             v.valid_result =
@@ -316,6 +363,7 @@ PhyFilterBitsNode::GetOutput() {
             .count();
     milvus::monitor::internal_core_search_latency_scalar.Observe(scalar_cost /
                                                                  1000);
+    record_result(bitset_view, scalar_cost);
 
     return std::make_shared<RowVector>(std::move(col_res));
 }

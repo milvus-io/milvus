@@ -425,6 +425,15 @@ if ( BUILD_UNIT_TEST STREQUAL "ON" )
     add_subdirectory(benchmark)
 endif ()
 
+# Use the same checks in normal, verifier and coverage builds. These operate
+# on first-party targets only; no additional compiler or sanitizer build runs.
+include(CompileChecks)
+milvus_enable_cpp_compile_checks("${CMAKE_CURRENT_SOURCE_DIR}/src")
+if ( BUILD_UNIT_TEST STREQUAL "ON" )
+    milvus_enable_cpp_compile_checks("${CMAKE_CURRENT_SOURCE_DIR}/unittest")
+    milvus_enable_cpp_compile_checks("${CMAKE_CURRENT_SOURCE_DIR}/benchmark")
+endif ()
+
 add_custom_target( Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean )
 
 # **************************** Install ****************************

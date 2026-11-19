@@ -70,6 +70,9 @@ func (f queryViewFlush) Empty() bool {
 // (lifetime(QueryView) < lifetime(DataView)) until ReleaseRef at durable
 // removal.
 //
+// The caller transfers ownership of view and its placement payload to the state
+// machine and must not mutate them after construction.
+//
 // After construction, the pending flush contains the Preparing view for
 // write-ahead persistence and the Preparing targets for all work nodes.
 func NewCoordQueryViewStateMachineWithRef(view *viewpb.QueryViewOfShard, ref qviews.DataViewRef) *CoordQueryViewStateMachine {
@@ -95,6 +98,8 @@ func NewCoordQueryViewStateMachineWithRef(view *viewpb.QueryViewOfShard, ref qvi
 // ref is the DataView reference the Manager re-acquired for the persisted
 // version (nil when the version no longer exists, e.g. already GC'd); the
 // caller then decides terminal recovery based on that.
+//
+// The caller transfers ownership of view and must not mutate it afterwards.
 //
 // Recovery behavior by persisted state:
 //   - Preparing:     re-push Preparing to all nodes.
@@ -138,7 +143,7 @@ func (sm *CoordQueryViewStateMachine) State() qviews.QueryViewState {
 	return sm.state
 }
 
-// View returns the original query view proto definition.
+// View returns the immutable query view definition. Callers must not mutate it.
 func (sm *CoordQueryViewStateMachine) View() *viewpb.QueryViewOfShard {
 	return sm.view
 }
@@ -264,16 +269,33 @@ func (sm *CoordQueryViewStateMachine) OnQueryNodeLost(node qviews.QueryNode) {
 	}
 }
 
-// EnterDown is called by the Manager to transition this view from Up to Down.
-// Triggers: higher-version view is Up (Manager decision), or ReleaseCollection.
-// No-op if not in Up state.
+// EnterDown starts ordinary retirement with serving-lease protection.
 func (sm *CoordQueryViewStateMachine) EnterDown() {
-	if sm.state != qviews.QueryViewStateUp {
-		return
+	sm.EnterDownWithControl(nil)
+}
+
+// EnterDownWithControl can strengthen an already-published Down command. A
+// control-only update must be persisted and resent while SN still reports Up.
+// It reports whether the state or control changed, preserving pending effects on a no-op.
+func (sm *CoordQueryViewStateMachine) EnterDownWithControl(control *viewpb.QueryViewControl) bool {
+	if sm.state != qviews.QueryViewStateUp && sm.state != qviews.QueryViewStateDown {
+		return false
+	}
+	disableLease := control.GetPreemptServingLease() && !sm.view.Meta.GetControl().GetPreemptServingLease()
+	if sm.state == qviews.QueryViewStateDown && !disableLease {
+		return false
+	}
+	if disableLease {
+		sm.view = sm.viewWithState(qviews.QueryViewState(sm.view.Meta.State))
+		if sm.view.Meta.Control == nil {
+			sm.view.Meta.Control = &viewpb.QueryViewControl{}
+		}
+		sm.view.Meta.Control.PreemptServingLease = true
 	}
 	sm.state = qviews.QueryViewStateDown
 	sm.pending.Persist = sm.viewWithState(qviews.QueryViewStateDown)
 	sm.pending.Sync = sm.syncViewsForState(qviews.QueryViewStateDown)
+	return true
 }
 
 // EnterDropping is called by the Manager to transition this view from
@@ -473,9 +495,17 @@ func (sm *CoordQueryViewStateMachine) allNodesDropped() bool {
 	return true
 }
 
-// viewWithState clones the view and sets Meta.State to the given state.
+// viewWithState owns the envelope and metadata while sharing immutable placement.
+// State-machine inputs transfer ownership; neither transitions nor persistence
+// mutate placement. Sync constructors still detach their mutable transport data.
 func (sm *CoordQueryViewStateMachine) viewWithState(state qviews.QueryViewState) *viewpb.QueryViewOfShard {
-	v := proto.Clone(sm.view).(*viewpb.QueryViewOfShard)
+	v := &viewpb.QueryViewOfShard{
+		Meta:          proto.Clone(sm.view.Meta).(*viewpb.QueryViewMeta),
+		QueryNode:     sm.view.QueryNode,
+		StreamingNode: sm.view.StreamingNode,
+	}
+	// Preserve unknown wire fields without copying protobuf's internal mutex.
+	v.ProtoReflect().SetUnknown(sm.view.ProtoReflect().GetUnknown())
 	v.Meta.State = viewpb.QueryViewState(state)
 	return v
 }

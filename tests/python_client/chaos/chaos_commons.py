@@ -9,7 +9,9 @@ from chaos import constants
 from utils.util_log import test_log as log
 from yaml import full_load
 
-DEFAULT_MONITOR_JOIN_TIMEOUT_SECONDS = 180
+# Snapshot restore can poll for 300 seconds before verification and cleanup.
+# Keep a bounded shared drain deadline that covers an in-flight restore.
+DEFAULT_MONITOR_JOIN_TIMEOUT_SECONDS = 600
 
 
 def check_config(chaos_config):

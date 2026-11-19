@@ -28,6 +28,9 @@ import (
 const (
 	CanceledCode int32 = 10000
 	TimeoutCode  int32 = 10001
+	// RequestCanceledCode is the code of ErrRequestCanceled: a request an
+	// operator stopped with CancelRequests.
+	RequestCanceledCode int32 = 3002
 )
 
 type ErrorType int32
@@ -86,6 +89,9 @@ var (
 	// ErrCollectionPartialUpdateConflict prevents clients from automatically
 	// replaying non-idempotent relative updates after a CAS rejection.
 	ErrCollectionPartialUpdateConflict = newMilvusError("partial update conflict", 111, false)
+
+	// ErrCollectionConditionalUpsertExecution means the request may have partially committed.
+	ErrCollectionConditionalUpsertExecution = newMilvusError("conditional upsert execution failed", 112, false)
 
 	// Partition related
 	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false) // SystemError by default; the proxy GetPartitionInfo name chokepoint stamps InputError for user-supplied partition names, while id-based lookups stay system.
@@ -332,6 +338,15 @@ var (
 	ErrOperationNotSupported = newMilvusError("unsupported operation", 3000, false)
 
 	ErrOldSessionExists = newMilvusError("old session exists", 3001, false)
+
+	// Request lifecycle: an operator canceled an in-flight request through the
+	// CancelRequests API. Deliberately distinct from CanceledCode (10000), which
+	// merr synthesizes from context.Canceled and which therefore also covers a
+	// client that simply went away, and from ErrSegcoreFollyCancel (2038), which
+	// is a QueryNode-internal signal. Non-retriable: the request was stopped on
+	// purpose, so an SDK must not re-issue it.
+	ErrRequestCanceled = newMilvusError("request canceled", RequestCanceledCode, false)
+	ErrRequestNotFound = newMilvusError("request not found", 3003, false, WithErrorType(InputError))
 )
 
 type errorOption func(*milvusError)

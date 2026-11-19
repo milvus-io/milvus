@@ -27,7 +27,7 @@
 #include "folly/executors/ExecutorWithPriority.h"
 #include "folly/executors/thread_factory/NamedThreadFactory.h"
 #include "folly/executors/thread_factory/PriorityThreadFactory.h"
-#include "storage/ThreadPool.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::storage {
 namespace {

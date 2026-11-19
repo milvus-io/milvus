@@ -28,6 +28,27 @@ main(int argc, char** argv) {
         omp_destroy_lock(&lock);
         if (counter != 10000)
             return 3;
+    } else if (std::strcmp(argv[1], "omp-race-distinct-locks") == 0) {
+        omp_lock_t locks[4];
+        for (auto& lock : locks) omp_init_lock(&lock);
+#pragma omp parallel
+        {
+            auto& lock = locks[omp_get_thread_num()];
+            for (int i = 0; i < 10000; ++i) {
+                omp_set_lock(&lock);
+                tsan_openmp_increment();
+                omp_unset_lock(&lock);
+            }
+        }
+        for (auto& lock : locks) omp_destroy_lock(&lock);
+    } else if (std::strcmp(argv[1], "omp-race-memcpy") == 0) {
+        char destination[256] = {};
+        const char source[256] = {};
+        using Copy = void* (*)(void*, const void*, std::size_t);
+        Copy volatile copy = &std::memcpy;
+#pragma omp parallel for
+        for (int i = 0; i < 10000; ++i)
+            copy(destination, source, sizeof(source));
     } else if (std::strcmp(argv[1], "omp-clean-barrier") == 0) {
         int values[4] = {};
         int sums[4] = {};

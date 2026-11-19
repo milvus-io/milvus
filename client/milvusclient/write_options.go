@@ -23,6 +23,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -264,6 +265,13 @@ func (opt *columnBasedDataOption) WithInt32Column(colName string, data []int32) 
 
 func (opt *columnBasedDataOption) WithInt64Column(colName string, data []int64) *columnBasedDataOption {
 	column := column.NewColumnInt64(colName, data)
+	return opt.WithColumns(column)
+}
+
+// WithTimestamptzColumn appends a TIMESTAMPTZ column for Insert or Upsert.
+// Times are normalized to UTC and truncated to microsecond precision.
+func (opt *columnBasedDataOption) WithTimestamptzColumn(colName string, data []time.Time) *columnBasedDataOption {
+	column := column.NewColumnTimestamptz(colName, data)
 	return opt.WithColumns(column)
 }
 

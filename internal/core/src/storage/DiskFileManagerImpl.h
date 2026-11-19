@@ -75,6 +75,10 @@ class DiskFileManagerImpl : public FileManagerImpl {
     bool
     AddFile(const std::string& filename) noexcept override;
 
+    // Milvus-owned uploads preserve the original exception and error code.
+    void
+    AddFileOrThrow(const std::string& filename);
+
     bool
     AddFileMeta(const FileMeta& file_meta) override;
 
@@ -85,14 +89,14 @@ class DiskFileManagerImpl : public FileManagerImpl {
     RemoveFile(const std::string& filename) noexcept override;
 
  public:
-    bool
-    AddTextLog(const std::string& filename) noexcept;
+    void
+    AddTextLog(const std::string& filename);
 
-    bool
-    AddJsonSharedIndexLog(const std::string& filename) noexcept;
+    void
+    AddJsonSharedIndexLog(const std::string& filename);
 
-    bool
-    AddJsonStatsMetaLog(const std::string& filename) noexcept;
+    void
+    AddJsonStatsMetaLog(const std::string& filename);
 
  public:
     std::string
@@ -267,10 +271,10 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::shared_ptr<LocalDirState>
     GetOrCreateLocalDirState(const std::string& dir);
 
-    bool
-    AddFileInternal(const std::string& file_name,
-                    const std::function<std::string(const std::string&, int)>&
-                        get_remote_path) noexcept;
+    void
+    UploadFileInternal(const std::string& file_name,
+                       const std::function<std::string(const std::string&,
+                                                       int)>& get_remote_path);
 
     void
     CacheIndexToDiskInternal(const std::vector<std::string>& remote_files,

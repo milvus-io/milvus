@@ -435,7 +435,7 @@ func TestCommitSegmentManifestFailsStaleWhenPointerAdvancesDuringManifestIO(t *t
 	require.False(t, updated.GetIsImporting())
 }
 
-func TestCommitSegmentManifestSerializesCatalogWritesForDifferentSegments(t *testing.T) {
+func TestCommitSegmentManifestWritesDifferentSegmentsInParallel(t *testing.T) {
 	meta, err := NewMemoryMeta(t)
 	require.NoError(t, err)
 	basePaths := map[int64]string{
@@ -472,15 +472,14 @@ func TestCommitSegmentManifestSerializesCatalogWritesForDifferentSegments(t *tes
 		}(segmentID, basePath)
 	}
 
-	select {
-	case <-entered:
-	case <-time.After(time.Second):
-		require.FailNow(t, "first catalog write did not start")
-	}
-	select {
-	case <-entered:
-		require.FailNow(t, "different segment entered catalog write while segMu was held")
-	case <-time.After(200 * time.Millisecond):
+	// Each commit holds only its own segment's writer lock, so the catalog
+	// write of one segment does not wait for another's.
+	for range basePaths {
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			require.FailNow(t, "a catalog write waited for the write of a different segment")
+		}
 	}
 	close(release)
 	for range basePaths {
@@ -745,6 +744,39 @@ func TestCommitSegmentManifestRejectsAmbiguousSegmentIndexBatchBeforeManifestIO(
 			require.Error(t, err)
 			require.ErrorIs(t, err, merr.ErrServiceInternal)
 			assert.Zero(t, manifestCalls)
+		})
+	}
+}
+
+func TestBackfillBatchRejectsMixedOrUnmatchedMutations(t *testing.T) {
+	for _, shape := range []string{"foreground", "removal", "extra entry", "retraction", "duplicate index"} {
+		t.Run(shape, func(t *testing.T) {
+			commit := SegmentManifestCommit{
+				SegmentID: RestartSegID,
+				Mutation: ManifestMutation{Type: ManifestMutationCommitUpdates, Updates: &packed.ManifestUpdates{
+					Indexes: []packed.ManifestIndexInfo{{IndexID: 1, BuildID: 10}, {IndexID: 2, BuildID: 20}},
+				}},
+				CatalogMutation: SegmentCatalogMutation{SegmentIndexes: []SegmentIndexMutation{
+					{Type: SegmentIndexBackfill, BuildID: 10}, {Type: SegmentIndexBackfill, BuildID: 20},
+				}},
+			}
+			_, err := validateSegmentIndexMutations(commit)
+			require.NoError(t, err)
+			switch shape {
+			case "foreground":
+				commit.CatalogMutation.SegmentIndexes[1].Type = SegmentIndexUpsert
+			case "removal":
+				commit.CatalogMutation.SegmentIndexes[1].Type = SegmentIndexRemove
+				commit.Mutation.Updates.DropIndexes = []packed.DropIndexEntry{{IndexID: 2, ExpectedBuildID: 20}}
+			case "extra entry":
+				commit.Mutation.Updates.Indexes = append(commit.Mutation.Updates.Indexes, packed.ManifestIndexInfo{IndexID: 3, BuildID: 30})
+			case "retraction":
+				commit.Mutation.Updates.DropIndexes = []packed.DropIndexEntry{{IndexID: 3, ExpectedBuildID: 30}}
+			case "duplicate index":
+				commit.Mutation.Updates.Indexes[1].IndexID = 1
+			}
+			_, err = validateSegmentIndexMutations(commit)
+			require.Error(t, err)
 		})
 	}
 }

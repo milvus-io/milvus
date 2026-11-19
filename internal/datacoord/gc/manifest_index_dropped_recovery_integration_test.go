@@ -27,7 +27,9 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 )
 
 func TestManifestDroppedRecoveryAfterFilesDeleted(t *testing.T) {
@@ -39,7 +41,8 @@ func TestManifestDroppedRecoveryAfterFilesDeleted(t *testing.T) {
 	index.SeedRestartFixture(t, m, mDomains.IndexMeta)
 	require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateStatusOperator(meta.RestartSegID, commonpb.SegmentState_Dropped)))
 	segment := m.GetSegment(ctx, meta.RestartSegID)
-	gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(mDomains, GcOption{Cli: m.ChunkManager}))
+	local := storage.NewLocalChunkManager(objectstorage.RootPath(m.ChunkManager.RootPath()))
+	gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(mDomains, GcOption{Cli: local}))
 	defer gc.Option.RemoveObjectPool.Release()
 	job, ok := mDomains.IndexMeta.GetIndexJob(meta.RestartBuildID)
 	require.True(t, ok)
@@ -52,15 +55,23 @@ func TestManifestDroppedRecoveryAfterFilesDeleted(t *testing.T) {
 	require.NoError(t, m.ChunkManager.Write(ctx, manifestFile, []byte("manifest")))
 	// Crash after file removal but before either index/segment catalog removal.
 	require.NoError(t, gc.RemoveDroppedSegmentFiles(ctx, segment.Clone(), files))
+	for file := range files {
+		exists, err := local.Exist(ctx, file)
+		require.NoError(t, err)
+		require.False(t, exists)
+	}
+	exists, err := local.Exist(ctx, manifestFile)
+	require.NoError(t, err)
+	require.False(t, exists)
 	store.FailReadsFrom()
 	restarted, restartedDomains := snapshot.BootMetaForRestartWithSnapshot(t, catalog, meta.RestartCollID)
 	retained := restarted.GetSegment(ctx, meta.RestartSegID)
 	require.NotNil(t, retained)
 	require.True(t, retained.GetManifestHasIndex())
 	require.Empty(t, restartedDomains.IndexMeta.GetAllSegIndexes())
-	retryGC := NewGarbageCollector(restarted, meta.NewMockHandler(), GcTestDomainOption(restartedDomains, GcOption{Cli: restarted.ChunkManager}))
+	retryGC := NewGarbageCollector(restarted, meta.NewMockHandler(), GcTestDomainOption(restartedDomains, GcOption{Cli: local}))
 	defer retryGC.Option.RemoveObjectPool.Release()
-	retryGC.RecycleDroppedSegment(ctx, NewGCManifestReadIO(t), meta.RestartSegID, retained)
+	retryGC.RecycleDroppedSegment(ctx, NewGCManifestReadIO(t), meta.RestartSegID)
 	require.Nil(t, restarted.GetSegment(ctx, meta.RestartSegID), "pending GC must remove the remaining catalog row")
 	again, _ := snapshot.BootMetaForRestartWithSnapshot(t, catalog, meta.RestartCollID)
 	require.Nil(t, again.GetSegment(ctx, meta.RestartSegID))

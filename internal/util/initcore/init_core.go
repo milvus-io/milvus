@@ -32,6 +32,7 @@ import "C"
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"math"
 	"strconv"
 	"strings"
@@ -42,6 +43,7 @@ import (
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -81,7 +83,7 @@ func InitTraceConfig(params *paramtable.ComponentParam) {
 		otlpEndpoint:   endpoint,
 		otlpMethod:     otlpMethod,
 		otlpHeaders:    otlpHeaders,
-		oltpSecure:     (C.bool)(otlpSecure),
+		oltpSecure:     C.bool(otlpSecure),
 		nodeID:         nodeID,
 	}
 	// oltp grpc may hangs forever, add timeout logic at go side
@@ -115,7 +117,7 @@ func ResetTraceConfig(params *paramtable.ComponentParam) {
 		otlpEndpoint:   endpoint,
 		otlpMethod:     otlpMethod,
 		otlpHeaders:    otlpHeaders,
-		oltpSecure:     (C.bool)(otlpSecure),
+		oltpSecure:     C.bool(otlpSecure),
 		nodeID:         nodeID,
 	}
 
@@ -151,7 +153,12 @@ func InitS3CrtQueueSizes(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitS3CrtQueueSizes failed")
 }
 
+// InitStorageV2FileSystem preserves QueryNode's Talon mode and stage mask for
+// reader-open metadata. The native filesystem routes ordinary IO separately.
 func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
+	if err := InitCredentialBrokerPolicy(params); err != nil {
+		return err
+	}
 	if params.CommonCfg.StorageType.GetValue() == "local" {
 		return initLocalArrowFileSystem(params.LocalStorageCfg.Path.GetValue(), params)
 	}
@@ -183,6 +190,7 @@ func initLocalArrowFileSystem(path string, params *paramtable.ComponentParam) er
 		root_path:                       cRootPath,
 		storage_type:                    cStorageType,
 		talon_mode:                      C.uint32_t(params.CommonCfg.StorageTalonMode.GetAsUint32()),
+		talon_enabled_stages:            C.uint32_t(params.CommonCfg.StorageTalonEnabledStages.GetAsUint32()),
 		talon_small_read_threshold:      C.uint32_t(params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32()),
 		talon_coordinator:               cTalonCoordinator,
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
@@ -245,6 +253,7 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 		tls_min_version:                 cTLSMinVersion,
 		use_crc32c_checksum:             C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
 		talon_mode:                      C.uint32_t(params.CommonCfg.StorageTalonMode.GetAsUint32()),
+		talon_enabled_stages:            C.uint32_t(params.CommonCfg.StorageTalonEnabledStages.GetAsUint32()),
 		talon_small_read_threshold:      C.uint32_t(params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32()),
 		talon_coordinator:               cTalonCoordinator,
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
@@ -265,6 +274,7 @@ func SetArrowFSChunkManagerEnabled(params *paramtable.ComponentParam) {
 	C.SetArrowFileSystemChunkManagerEnabled(C.bool(params.CommonCfg.UseArrowFSChunkManager.GetAsBool()))
 }
 
+// InitRemoteChunkManager initializes the singleton used for ordinary QueryNode IO.
 func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	cAddress := C.CString(params.MinioCfg.Address.GetValue())
 	cBucketName := C.CString(params.MinioCfg.BucketName.GetValue())
@@ -320,6 +330,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 		tls_min_version:                 cTLSMinVersion,
 		use_crc32c_checksum:             C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
 		talon_mode:                      C.uint32_t(params.CommonCfg.StorageTalonMode.GetAsUint32()),
+		talon_enabled_stages:            C.uint32_t(params.CommonCfg.StorageTalonEnabledStages.GetAsUint32()),
 		talon_small_read_threshold:      C.uint32_t(params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32()),
 		talon_coordinator:               cTalonCoordinator,
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
@@ -455,8 +466,6 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	rejectRemoteVectorOutput := C.bool(params.QueryNodeCfg.TieredRejectRemoteVectorOutput.GetAsBool())
 	overloadedMemoryThresholdPercentage := C.float(memoryMaxRatio)
 	maxDiskUsagePercentage := C.float(diskMaxRatio)
-	diskPath := C.CString(params.LocalStorageCfg.Path.GetValue())
-	defer C.free(unsafe.Pointer(diskPath))
 
 	prefetchPoolThreads := C.uint32_t(hardware.GetCPUNum() * params.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt())
 
@@ -470,7 +479,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 		storageUsageTrackingEnabled,
 		evictionEnabled, cacheTouchWindowMs,
 		backgroundEvictionEnabled, evictionIntervalMs, cacheCellUnaccessedSurvivalTime,
-		overloadedMemoryThresholdPercentage, loadingResourceFactor, maxDiskUsagePercentage, diskPath,
+		overloadedMemoryThresholdPercentage, loadingResourceFactor, maxDiskUsagePercentage,
 		loadingTimeoutMs, warmupLoadingTimeoutMs, rejectRemoteVectorOutput, prefetchPoolThreads)
 
 	tieredEvictableMemoryCacheRatio := params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat()
@@ -597,7 +606,9 @@ var loonReaderConfigMu sync.Mutex
 // settings: the global reader thread pool size (chunk/file-level read
 // fan-out) and the index-build read window (how many bytes one prefetch
 // round may span, which bounds how many row groups download in parallel per
-// round). Both default to 0 = pre-existing sequential behavior.
+// round). -1 resolves both from the hardware on a DataNode, see
+// ResolveLoonReaderThreadPoolSize and ResolveIndexBuildReadWindowBytes; 0 is
+// the pre-existing sequential behavior.
 //
 // Both values are validated before either is applied. Resizing the global
 // reader pool is not revertible through config (it cannot be destroyed at
@@ -607,17 +618,13 @@ func InitLoonReaderConfig(params *paramtable.ComponentParam) error {
 	loonReaderConfigMu.Lock()
 	defer loonReaderConfigMu.Unlock()
 
-	poolSize := params.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64()
-	if poolSize < 0 || poolSize > maxStorageReaderThreadPoolSize {
-		return merr.WrapErrParameterInvalidMsg(
-			"common.storage.readerThreadPoolSize must be in [0, %d], got %d",
-			maxStorageReaderThreadPoolSize, poolSize)
+	poolSize, err := ResolveLoonReaderThreadPoolSize(params)
+	if err != nil {
+		return err
 	}
-	window := params.CommonCfg.IndexBuildReadWindowBytes.GetAsInt64()
-	if window < 0 || window > maxIndexBuildReadWindowBytes {
-		return merr.WrapErrParameterInvalidMsg(
-			"common.storage.indexBuildReadWindowBytes must be in [0, %d], got %d",
-			maxIndexBuildReadWindowBytes, window)
+	window, err := ResolveIndexBuildReadWindowBytes(params)
+	if err != nil {
+		return err
 	}
 	status := C.InitLoonReaderThreadPool(C.int32_t(poolSize))
 	if err := HandleCStatus(&status, "InitLoonReaderThreadPool failed"); err != nil {
@@ -758,6 +765,13 @@ func SetupCoreConfigChangelCallback() {
 			UpdateLowPriorityThreadCoreCoefficient(coefficient)
 			return nil
 		})
+
+		fanoutRatio := &paramtable.Get().QueryNodeCfg.SearchFanoutPoolSizeRatio
+		paramtable.Get().Watch(fanoutRatio.Key, config.NewHandler("querynode.searchfanout.poolsize", func(event *config.Event) {
+			if event.HasUpdated {
+				UpdateSearchFanoutThreadCoreCoefficient(fanoutRatio.GetAsFloat())
+			}
+		}))
 
 		paramtable.Get().CommonCfg.ThreadPoolMaxThreadsSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			size, err := strconv.Atoi(newValue)
@@ -1039,4 +1053,16 @@ func InitPluginLoader() error {
 
 func CleanPluginLoader() {
 	C.CleanPluginLoader()
+}
+
+// InitCredentialBrokerPolicy publishes the immutable startup allowlist to native readers.
+func InitCredentialBrokerPolicy(params *paramtable.ComponentParam) error {
+	data, err := json.Marshal(params.CommonCfg.CredentialBrokerPolicy().Endpoints())
+	if err != nil {
+		return merr.WrapErrServiceInternalErr(err, "encode credential broker policy")
+	}
+	value := C.CString(string(data))
+	defer C.free(unsafe.Pointer(value))
+	status := C.InitCredentialBrokerPolicy(value)
+	return HandleCStatus(&status, "InitCredentialBrokerPolicy failed")
 }

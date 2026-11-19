@@ -410,6 +410,34 @@ func SplitCollectionKey(key string) (dbID int64, collectionName string) {
 	return dbID, collectionName
 }
 
+// indexedEntitiesKey identifies an aggregate-mode indexed entity series.
+type indexedEntitiesKey struct {
+	dbName        string
+	indexName     string
+	isVectorIndex string
+}
+
+// publishAggregateEntityMetrics replaces the aggregate entity gauges with the
+// values of one complete refresh.
+func publishAggregateEntityMetrics(loadedByDB, totalByDB map[string]int64, indexedByKey map[indexedEntitiesKey]int64) {
+	metrics.RootCoordNumEntities.Reset()
+	metrics.RootCoordIndexedNumEntities.Reset()
+	for dbName, numEntity := range loadedByDB {
+		metrics.RootCoordNumEntities.WithLabelValues(dbName, metrics.AllLabel, metrics.LoadedLabel).Set(float64(numEntity))
+	}
+	for dbName, numEntity := range totalByDB {
+		metrics.RootCoordNumEntities.WithLabelValues(dbName, metrics.AllLabel, metrics.TotalLabel).Set(float64(numEntity))
+	}
+	for key, numEntity := range indexedByKey {
+		metrics.RootCoordIndexedNumEntities.WithLabelValues(
+			key.dbName,
+			metrics.AllLabel,
+			key.indexName,
+			key.isVectorIndex,
+		).Set(float64(numEntity))
+	}
+}
+
 // collectMetrics sends GetMetrics requests to DataCoord and QueryCoord to sync the metrics in DataNodes and QueryNodes.
 func (q *QuotaCenter) collectMetrics() error {
 	q.lock.Lock()
@@ -423,6 +451,14 @@ func (q *QuotaCenter) collectMetrics() error {
 	defer cancel()
 
 	group := &errgroup.Group{}
+
+	// In aggregate mode the entity gauges are built per database here and
+	// published only after every source answered, so a slow or failed refresh
+	// keeps the last complete values instead of exposing partial ones.
+	aggregateCollectionMetrics := metrics.IsCollectionLevelMetricsAggregateMode()
+	numEntitiesLoadedByDB := make(map[string]int64)
+	numEntitiesTotalByDB := make(map[string]int64)
+	indexedEntitiesByKey := make(map[indexedEntitiesKey]int64)
 
 	// get Query cluster metrics
 	group.Go(func() error {
@@ -471,7 +507,11 @@ func (q *QuotaCenter) collectMetrics() error {
 				lo.Map(coll.Partitions, func(part *model.Partition, _ int) int64 { return part.PartitionID })...)
 			q.collections.Insert(FormatCollectionKey(coll.DBID, coll.Name), collectionID)
 			if numEntity, ok := numEntitiesLoaded[collectionID]; ok {
-				metrics.RootCoordNumEntities.WithLabelValues(coll.DBName, coll.Name, metrics.LoadedLabel).Set(float64(numEntity))
+				if aggregateCollectionMetrics {
+					numEntitiesLoadedByDB[coll.DBName] += numEntity
+				} else {
+					metrics.RootCoordNumEntities.WithLabelValues(coll.DBName, coll.Name, metrics.LoadedLabel).Set(float64(numEntity))
+				}
 			}
 			return true
 		})
@@ -530,18 +570,32 @@ func (q *QuotaCenter) collectMetrics() error {
 				return true
 			}
 			if datacoordCollectionMetric, ok := collectionMetrics[collectionID]; ok {
-				metrics.RootCoordNumEntities.WithLabelValues(coll.DBName, coll.Name, metrics.TotalLabel).Set(float64(datacoordCollectionMetric.NumEntitiesTotal))
+				if aggregateCollectionMetrics {
+					numEntitiesTotalByDB[coll.DBName] += datacoordCollectionMetric.NumEntitiesTotal
+				} else {
+					metrics.RootCoordNumEntities.WithLabelValues(coll.DBName, coll.Name, metrics.TotalLabel).Set(float64(datacoordCollectionMetric.NumEntitiesTotal))
+				}
 				fields := lo.KeyBy(coll.Fields, func(v *model.Field) int64 { return v.FieldID })
 				for _, indexInfo := range datacoordCollectionMetric.IndexInfo {
 					if _, ok := fields[indexInfo.FieldID]; !ok {
 						continue
 					}
 					field := fields[indexInfo.FieldID]
-					metrics.RootCoordIndexedNumEntities.WithLabelValues(
-						coll.DBName,
-						coll.Name,
-						indexInfo.IndexName,
-						strconv.FormatBool(typeutil.IsVectorType(field.DataType))).Set(float64(indexInfo.NumEntitiesIndexed))
+					isVectorIndex := strconv.FormatBool(typeutil.IsVectorType(field.DataType))
+					if aggregateCollectionMetrics {
+						key := indexedEntitiesKey{
+							dbName:        coll.DBName,
+							indexName:     indexInfo.IndexName,
+							isVectorIndex: isVectorIndex,
+						}
+						indexedEntitiesByKey[key] += indexInfo.NumEntitiesIndexed
+					} else {
+						metrics.RootCoordIndexedNumEntities.WithLabelValues(
+							coll.DBName,
+							coll.Name,
+							indexInfo.IndexName,
+							isVectorIndex).Set(float64(indexInfo.NumEntitiesIndexed))
+					}
 				}
 			}
 			return true
@@ -588,6 +642,9 @@ func (q *QuotaCenter) collectMetrics() error {
 	err := group.Wait()
 	if err != nil {
 		return err
+	}
+	if aggregateCollectionMetrics {
+		publishAggregateEntityMetrics(numEntitiesLoadedByDB, numEntitiesTotalByDB, indexedEntitiesByKey)
 	}
 
 	for oldDN := range oldDataNodes {
@@ -1348,72 +1405,20 @@ func (q *QuotaCenter) calculateEzStates() error {
 }
 
 func (q *QuotaCenter) resetAllCurrentRates() error {
-	clusterLimiter := newParamLimiterFunc(internalpb.RateScope_Cluster, allOps)()
-	q.rateLimiter = rlinternal.NewRateLimiterTree(clusterLimiter)
-
+	clusterRates := quotaRateValues(internalpb.RateScope_Cluster)
+	databaseRates := quotaRateValues(internalpb.RateScope_Database)
+	collectionRates := quotaRateValues(internalpb.RateScope_Collection)
+	partitionRates := quotaRateValues(internalpb.RateScope_Partition)
 	enablePartitionRateLimit := false
-	for rt := range getRateTypes(internalpb.RateScope_Partition, allOps) {
-		r := quota.GetQuotaValue(internalpb.RateScope_Partition, rt, Params)
-		if Limit(r) != Inf {
-			enablePartitionRateLimit = true
-		}
+	for _, value := range partitionRates {
+		enablePartitionRateLimit = enablePartitionRateLimit || value != Inf
 	}
 
-	// updateLimiterHasUpdated checks all limiters in a RateLimiterNode and sets hasUpdated to true
-	// for those with non-Inf values
-	updateLimiterHasUpdated := func(node *rlinternal.RateLimiterNode) {
-		if node == nil {
-			return
-		}
-		node.GetLimiters().Range(func(rateType internalpb.RateType, limiter *ratelimitutil.Limiter) bool {
-			if limiter.Limit() != Inf {
-				limiter.SetHasUpdated(true)
-			}
-			return true
-		})
-	}
-
-	collectionRateTypes := getRateTypes(internalpb.RateScope_Collection, allOps)
-	initLimiters := func(sourceCollections map[int64]map[int64][]int64) {
-		for dbID, collections := range sourceCollections {
-			for collectionID, partitionIDs := range collections {
-				collectionLimitVals := make(map[internalpb.RateType]Limit, collectionRateTypes.Len())
-				collectionRateTypes.Range(func(rt internalpb.RateType) bool {
-					limitVal, err := q.getCollectionMaxLimit(rt, collectionID)
-					if err != nil {
-						limitVal = Limit(quota.GetQuotaValue(internalpb.RateScope_Collection, rt, Params))
-					}
-					collectionLimitVals[rt] = limitVal
-					return true
-				})
-
-				getCollectionLimitVal := func(rateType internalpb.RateType) Limit {
-					return collectionLimitVals[rateType]
-				}
-
-				collectionLimiter := q.rateLimiter.GetOrCreateCollectionLimiters(dbID, collectionID,
-					newParamLimiterFunc(internalpb.RateScope_Database, allOps),
-					newParamLimiterFuncWithLimitFunc(internalpb.RateScope_Collection, allOps, getCollectionLimitVal))
-				updateLimiterHasUpdated(collectionLimiter)
-
-				if !enablePartitionRateLimit {
-					continue
-				}
-				for _, partitionID := range partitionIDs {
-					partitionLimiter := q.rateLimiter.GetOrCreatePartitionLimiters(dbID, collectionID, partitionID,
-						newParamLimiterFunc(internalpb.RateScope_Database, allOps),
-						newParamLimiterFuncWithLimitFunc(internalpb.RateScope_Collection, allOps, getCollectionLimitVal),
-						newParamLimiterFunc(internalpb.RateScope_Partition, allOps))
-					updateLimiterHasUpdated(partitionLimiter)
-				}
-			}
-			if len(collections) == 0 {
-				dbLimiter := q.rateLimiter.GetOrCreateDatabaseLimiters(dbID, newParamLimiterFunc(internalpb.RateScope_Database, allOps))
-				updateLimiterHasUpdated(dbLimiter)
-			}
-		}
-	}
-	partitions := q.meta.ListAllAvailPartitions(q.ctx)
+	// Only the quota loop mutates this calculation tree. Wire snapshots contain
+	// copied values, never aliases to the mutable limiters or quota states.
+	root := q.rateLimiter.GetRootLimiters()
+	resetQuotaLimiter(root, clusterRates, false)
+	partitions := q.quotaPartitionSnapshot(enablePartitionRateLimit)
 	// Build the collection-to-DB mapping from the same metadata snapshot as the
 	// limiter tree. Node metrics omit unloaded or unflushed collections, while
 	// WAL lag protection still covers every collection on a pchannel.
@@ -1422,8 +1427,99 @@ func (q *QuotaCenter) resetAllCurrentRates() error {
 			q.collectionIDToDBID.Insert(collectionID, dbID)
 		}
 	}
-	initLimiters(partitions)
+	root.GetChildren().Range(func(dbID int64, _ *rlinternal.RateLimiterNode) bool {
+		if _, exists := partitions[dbID]; !exists {
+			root.GetChildren().Remove(dbID)
+		}
+		return true
+	})
+
+	// Reuse scratch maps across collections; no per-collection rate map/set.
+	livePartitions := make(map[int64]struct{})
+	newDatabaseLimiter := newParamLimiterFunc(internalpb.RateScope_Database, allOps)
+	newCollectionLimiter := newParamLimiterFunc(internalpb.RateScope_Collection, allOps)
+	newPartitionLimiter := newParamLimiterFunc(internalpb.RateScope_Partition, allOps)
+	for dbID, collections := range partitions {
+		dbLimiter := q.rateLimiter.GetOrCreateDatabaseLimiters(dbID, newDatabaseLimiter)
+		// Preserve the existing wire-update flags, including empty databases.
+		resetQuotaLimiter(dbLimiter, databaseRates, len(collections) == 0)
+		dbLimiter.GetChildren().Range(func(collectionID int64, _ *rlinternal.RateLimiterNode) bool {
+			if _, exists := collections[collectionID]; !exists {
+				dbLimiter.GetChildren().Remove(collectionID)
+			}
+			return true
+		})
+		for collectionID, partitionIDs := range collections {
+			for rt := range collectionRates {
+				// Flush has no collection-property override. Do not manufacture an
+				// unsupported-rate error for every collection just to use its default.
+				if rt == internalpb.RateType_DDLFlush {
+					continue
+				}
+				value, err := q.getCollectionMaxLimit(rt, collectionID)
+				if err != nil {
+					value = Limit(quota.GetQuotaValue(internalpb.RateScope_Collection, rt, Params))
+				}
+				collectionRates[rt] = value
+			}
+			collectionLimiter := q.rateLimiter.GetOrCreateCollectionLimiters(dbID, collectionID,
+				newDatabaseLimiter, newCollectionLimiter)
+			resetQuotaLimiter(collectionLimiter, collectionRates, true)
+
+			clear(livePartitions)
+			if enablePartitionRateLimit {
+				for _, partitionID := range partitionIDs {
+					livePartitions[partitionID] = struct{}{}
+					partitionLimiter := q.rateLimiter.GetOrCreatePartitionLimiters(dbID, collectionID, partitionID,
+						newDatabaseLimiter, newCollectionLimiter, newPartitionLimiter)
+					resetQuotaLimiter(partitionLimiter, partitionRates, true)
+				}
+			}
+			collectionLimiter.GetChildren().Range(func(partitionID int64, _ *rlinternal.RateLimiterNode) bool {
+				if _, exists := livePartitions[partitionID]; !exists {
+					collectionLimiter.GetChildren().Remove(partitionID)
+				}
+				return true
+			})
+		}
+	}
 	return nil
+}
+
+// quotaRateValues reads each scope's defaults once per calculation round.
+func quotaRateValues(scope internalpb.RateScope) map[internalpb.RateType]Limit {
+	rates := make(map[internalpb.RateType]Limit)
+	for rt := range getRateTypes(scope, allOps) {
+		rates[rt] = Limit(quota.GetQuotaValue(scope, rt, Params))
+	}
+	return rates
+}
+
+// resetQuotaLimiter restores the calculation baseline without replacing nodes.
+// This is not a reset of a Proxy's live admission/token-bucket state.
+func resetQuotaLimiter(node *rlinternal.RateLimiterNode, rates map[internalpb.RateType]Limit, markFinite bool) {
+	limiters := node.GetLimiters()
+	limiters.Range(func(rt internalpb.RateType, _ *ratelimitutil.Limiter) bool {
+		if _, exists := rates[rt]; !exists {
+			limiters.Remove(rt)
+		}
+		return true
+	})
+	for rt, value := range rates {
+		limiter, exists := limiters.Get(rt)
+		if !exists {
+			limiter = ratelimitutil.NewLimiter(value, 0)
+			limiters.Insert(rt, limiter)
+		} else if limiter.Limit() != value {
+			limiter.SetLimit(value)
+		}
+		limiter.SetHasUpdated(markFinite && value != Inf)
+	}
+	states := node.GetQuotaStates()
+	states.Range(func(state milvuspb.QuotaState, _ *rlinternal.QuotaStateInfo) bool {
+		states.Remove(state)
+		return true
+	})
 }
 
 // getCollectionMaxLimit get limit value from collection's properties.
@@ -1450,22 +1546,46 @@ func (q *QuotaCenter) getCollectionLimitProperties(collection int64) map[string]
 		return props
 	}
 
-	collectionInfo, err := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collection)
+	var properties map[string]string
+	var err error
+	if reader, ok := q.meta.(quotaMetadataReader); ok {
+		properties, err = reader.GetQuotaCollectionProperties(q.ctx, collection)
+	} else {
+		// Preserve compatibility with alternative metadata implementations.
+		var collectionInfo *model.Collection
+		collectionInfo, err = q.meta.GetCollectionByIDWithMaxTs(q.ctx, collection)
+		if err == nil && len(collectionInfo.Properties) > 0 {
+			properties = make(map[string]string, len(collectionInfo.Properties))
+			for _, pair := range collectionInfo.Properties {
+				properties[pair.GetKey()] = pair.GetValue()
+			}
+		}
+	}
 	if err != nil {
 		mlog.RatedWarn(q.ctx, rate.Limit(10), "failed to get rate limit properties from collection meta",
 			mlog.FieldCollectionID(collection),
 			mlog.Err(err))
-		return make(map[string]string)
-	}
-
-	properties := make(map[string]string)
-	for _, pair := range collectionInfo.Properties {
-		properties[pair.GetKey()] = pair.GetValue()
+		return nil
 	}
 
 	q.collectionProps[collection] = properties
 
 	return properties
+}
+
+// quotaMetadataReader avoids cloning collections and enumerating unused partition
+// IDs. IMetaTable implementations without this optional projection retain the
+// existing read path and semantics.
+type quotaMetadataReader interface {
+	GetQuotaCollectionProperties(context.Context, int64) (map[string]string, error)
+	ListQuotaPartitions(context.Context, bool) map[int64]map[int64][]int64
+}
+
+func (q *QuotaCenter) quotaPartitionSnapshot(includePartitions bool) map[int64]map[int64][]int64 {
+	if reader, ok := q.meta.(quotaMetadataReader); ok {
+		return reader.ListQuotaPartitions(q.ctx, includePartitions)
+	}
+	return q.meta.ListAllAvailPartitions(q.ctx)
 }
 
 // checkDiskQuota checks if disk quota exceeded.
@@ -1594,10 +1714,13 @@ func (q *QuotaCenter) checkDBDiskQuota(dbSizeInfo map[int64]int64) []int64 {
 }
 
 func (q *QuotaCenter) toRequestLimiter(limiter *rlinternal.RateLimiterNode) *proxypb.Limiter {
+	return q.toRequestLimiterForProxyCount(limiter, q.proxies.GetProxyCount())
+}
+
+func (q *QuotaCenter) toRequestLimiterForProxyCount(limiter *rlinternal.RateLimiterNode, proxyNum int) *proxypb.Limiter {
 	var rates []*internalpb.Rate
 	switch q.rateAllocateStrategy {
 	case Average:
-		proxyNum := q.proxies.GetProxyCount()
 		if proxyNum == 0 {
 			return nil
 		}
@@ -1637,23 +1760,29 @@ func (q *QuotaCenter) toRequestLimiter(limiter *rlinternal.RateLimiterNode) *pro
 
 func (q *QuotaCenter) toRatesRequest() *proxypb.SetRatesRequest {
 	clusterRateLimiter := q.rateLimiter.GetRootLimiters()
+	proxyNum := q.proxies.GetProxyCount()
+	toLimiter := func(node *rlinternal.RateLimiterNode) *proxypb.Limiter {
+		return q.toRequestLimiterForProxyCount(node, proxyNum)
+	}
 
 	// collect db rate limit if clusterRateLimiter has database limiter children
 	dbLimiters := make(map[int64]*proxypb.LimiterNode, clusterRateLimiter.GetChildren().Len())
 	clusterRateLimiter.GetChildren().Range(func(dbID int64, dbRateLimiters *rlinternal.RateLimiterNode) bool {
-		dbLimiter := q.toRequestLimiter(dbRateLimiters)
+		dbLimiter := toLimiter(dbRateLimiters)
 
 		// collect collection rate limit if dbRateLimiters has collection limiter children
 		collectionLimiters := make(map[int64]*proxypb.LimiterNode, dbRateLimiters.GetChildren().Len())
 		dbRateLimiters.GetChildren().Range(func(collectionID int64, collectionRateLimiters *rlinternal.RateLimiterNode) bool {
-			collectionLimiter := q.toRequestLimiter(collectionRateLimiters)
+			collectionLimiter := toLimiter(collectionRateLimiters)
 
 			// collect partitions rate limit if collectionRateLimiters has partition limiter children
-			partitionLimiters := make(map[int64]*proxypb.LimiterNode, collectionRateLimiters.GetChildren().Len())
+			var partitionLimiters map[int64]*proxypb.LimiterNode
+			if count := collectionRateLimiters.GetChildren().Len(); count > 0 {
+				partitionLimiters = make(map[int64]*proxypb.LimiterNode, count)
+			}
 			collectionRateLimiters.GetChildren().Range(func(partitionID int64, partitionRateLimiters *rlinternal.RateLimiterNode) bool {
 				partitionLimiters[partitionID] = &proxypb.LimiterNode{
-					Limiter:  q.toRequestLimiter(partitionRateLimiters),
-					Children: make(map[int64]*proxypb.LimiterNode, 0),
+					Limiter: toLimiter(partitionRateLimiters),
 				}
 				return true
 			})
@@ -1674,7 +1803,7 @@ func (q *QuotaCenter) toRatesRequest() *proxypb.SetRatesRequest {
 	})
 
 	clusterLimiter := &proxypb.LimiterNode{
-		Limiter:  q.toRequestLimiter(clusterRateLimiter),
+		Limiter:  toLimiter(clusterRateLimiter),
 		Children: dbLimiters,
 	}
 

@@ -275,7 +275,7 @@ func TestNullableVectorValidDataUsesLogicalRows(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Len(t, validData.([]bool), 2)
 
-			dst, err := storage.NewFieldData(tt.dataType, field, 0)
+			dst, err := storage.NewFieldData(tt.dataType, field)
 			assert.NoError(t, err)
 			assert.NoError(t, dst.AppendRows(data, validData))
 			assert.Equal(t, 2, dst.RowNum())

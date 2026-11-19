@@ -17,6 +17,7 @@
 package grpcproxyclient
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
@@ -181,7 +182,7 @@ func (c *Client) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 
 // SetRates notifies Proxy to limit rates of requests.
 func (c *Client) SetRates(ctx context.Context, req *proxypb.SetRatesRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
+	req = cloneSetRatesEnvelope(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
@@ -189,6 +190,22 @@ func (c *Client) SetRates(ctx context.Context, req *proxypb.SetRatesRequest, opt
 	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*commonpb.Status, error) {
 		return client.SetRates(ctx, req)
 	})
+}
+
+// cloneSetRatesEnvelope isolates the per-client routing header. The quota
+// snapshot is read-only for the entire fan-out, including retries and encoding.
+// Do not copy the generated struct: it contains protobuf runtime state.
+func cloneSetRatesEnvelope(req *proxypb.SetRatesRequest) *proxypb.SetRatesRequest {
+	if req == nil {
+		return nil
+	}
+	cloned := &proxypb.SetRatesRequest{
+		Base:        typeutil.Clone(req.GetBase()),
+		Rates:       req.GetRates(),
+		RootLimiter: req.GetRootLimiter(),
+	}
+	cloned.ProtoReflect().SetUnknown(bytes.Clone(req.ProtoReflect().GetUnknown()))
+	return cloned
 }
 
 func (c *Client) ListClientInfos(ctx context.Context, req *proxypb.ListClientInfosRequest, opts ...grpc.CallOption) (*proxypb.ListClientInfosResponse, error) {
@@ -258,6 +275,28 @@ func (c *Client) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearRe
 	)
 	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*internalpb.ClearReadTaskQueueResponse, error) {
 		return client.ClearReadTaskQueue(ctx, req)
+	})
+}
+
+func (c *Client) ListLocalRunningRequests(ctx context.Context, req *milvuspb.ListRunningRequestsRequest, opts ...grpc.CallOption) (*milvuspb.ListRunningRequestsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*milvuspb.ListRunningRequestsResponse, error) {
+		return client.ListLocalRunningRequests(ctx, req)
+	})
+}
+
+func (c *Client) CancelLocalRequests(ctx context.Context, req *milvuspb.CancelRequestsRequest, opts ...grpc.CallOption) (*milvuspb.CancelRequestsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*milvuspb.CancelRequestsResponse, error) {
+		return client.CancelLocalRequests(ctx, req)
 	})
 }
 

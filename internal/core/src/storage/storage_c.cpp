@@ -38,6 +38,7 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
+#include "storage/loon_ffi/util.h"
 #include "milvus-storage/thread_pool.h"
 
 CStatus
@@ -106,6 +107,8 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
         storage_config.use_crc32c_checksum =
             c_storage_config.use_crc32c_checksum;
         storage_config.talon_mode = c_storage_config.talon_mode;
+        storage_config.talon_enabled_stages =
+            c_storage_config.talon_enabled_stages;
         storage_config.talon_small_read_threshold =
             c_storage_config.talon_small_read_threshold;
         storage_config.talon_coordinator =
@@ -430,4 +433,19 @@ UnRefPluginContext(CPluginContext c_plugin_context) {
         return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
+InitCredentialBrokerPolicy(const char* endpoints_json) {
+    try {
+        const auto status = ::InitCredentialBrokerPolicy(
+            std::string(endpoints_json ? endpoints_json : "[]"));
+        if (!status.ok()) {
+            return milvus::FailureCStatus(milvus::ConfigInvalid,
+                                          status.ToString().c_str());
+        }
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
 }

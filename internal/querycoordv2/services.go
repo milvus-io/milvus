@@ -88,10 +88,11 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 	}
 
 	isGetAll := false
-	configs := s.qviewsRuntime.loadConfigStore.Snapshot().ConfigsMap()
 	collectionSet := typeutil.NewUniqueSet(req.GetCollectionIDs()...)
 	if len(req.GetCollectionIDs()) == 0 {
-		for collectionID := range configs {
+		// Only a request for every collection needs the full snapshot; the
+		// progress of each collection is read on its own below.
+		for collectionID := range s.qviewsRuntime.loadConfigStore.Snapshot().ConfigsMap() {
 			collectionSet.Insert(collectionID)
 		}
 		isGetAll = true
@@ -274,6 +275,11 @@ func qviewsLoadFieldIDs(cfg *loadmgr.LoadConfig) []int64 {
 }
 
 func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
+	return s.loadCollection(ctx, req, false)
+}
+
+// loadCollection shares load admission and metrics between manual and automatic loads.
+func (s *Server) loadCollection(ctx context.Context, req *querypb.LoadCollectionRequest, autoLoad bool) (*commonpb.Status, error) {
 	logger := mlog.With(
 		mlog.Int64("dbID", req.GetDbID()),
 		mlog.Int64("collectionID", req.GetCollectionID()),
@@ -306,7 +312,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		return merr.Success(), nil
 	}
 
-	if err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, req); err != nil {
+	if err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, autoLoad, req); err != nil {
 		logger.Warn(ctx, "failed to load collection", mlog.Err(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 		return statusWithLoadResourcePrecheckSuggestion(err), nil

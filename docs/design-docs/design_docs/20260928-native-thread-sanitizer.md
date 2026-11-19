@@ -124,10 +124,15 @@ CMake also installs `libomp.so.5`, `libarcher.so`, the shared compiler-rt and a
 `milvus-archer` marker. Launchers activate OMPT through `OMP_TOOL=enabled` and
 an absolute `OMP_TOOL_LIBRARIES` path.
 
-The installed `tsan.supp` suppresses reports originating in uninstrumented
-`libomp` internals by library name. Interceptor reports from Milvus and other
-libraries remain enabled. A memcpy race probe checks this along with the
-existing ordinary load/store and OpenMP probes.
+The installed `tsan.supp` ignores interceptor calls originating in uninstrumented
+`libomp` and `libarcher` internals by library name. Both libraries must be listed:
+Archer's mutex unlock can be tail-called, leaving a return address in `libomp`,
+while its matching lock has a return address in `libarcher`. Ignoring only one
+side leaves TSan with an incomplete lock history. Archer's explicit
+happens-before annotations remain active. Interceptor reports from Milvus and
+other libraries remain enabled. The probes check ordinary load/store and memcpy
+races, OpenMP synchronization, races under distinct OpenMP locks, and memcpy
+races inside OpenMP regions.
 
 External image builders must set `MILVUS_JEMALLOC_LIB` to an empty build
 argument, `MILVUS_ARCHER_LIB=/milvus/lib/libarcher.so`, and `MILVUS_TSAN_OPTIONS`

@@ -938,6 +938,9 @@ func (sd *shardDelegator) StreamForwardLevel0Deletions(bufferedForwarder *Buffer
 }
 
 func (sd *shardDelegator) RefreshLevel0DeletionStats() {
+	if metrics.QueryNodeNumSegments.Suppressed() && metrics.QueryNodeLevelZeroSize.Suppressed() {
+		return
+	}
 	level0Segments := sd.deleteBuffer.ListL0()
 	totalSize := int64(0)
 	for _, segment := range level0Segments {

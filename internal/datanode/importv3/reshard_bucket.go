@@ -88,6 +88,12 @@ func (b *bucket) spill(spill *SpillManager, bucketOrdinal int64) (int64, error) 
 		return 0, err
 	}
 	freed := b.bytes
+	// append reuses the backing array when it has room, so it overwrites only
+	// the slot at head and the drained pieces past the new len would keep their
+	// InsertData reachable -- the GC scans the whole allocation, not the slice
+	// length. Clearing first keeps every slot in [len, cap) at its zero value,
+	// so the accounted bytes this spill reports as freed really leave the heap.
+	clear(b.pieces[head:])
 	b.pieces = append(b.pieces[:head], piece{disk: &spillRange, logical: spillRange.Logical, rows: spillRange.Rows})
 	b.bytes = 0
 	return freed, nil

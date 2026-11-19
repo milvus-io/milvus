@@ -42,14 +42,13 @@ def create_collection(client, name):
     client.create_collection(name, schema=schema, index_params=index, shards_num=2, timeout=60)
 
 
-def row(pk, value):
-    past, future = "2020-01-01T00:00:00Z", "2099-01-01T00:00:00Z"
+def row(pk, value, *, expiry="2099-01-01T00:00:00Z", next_expiry="2099-01-01T00:00:00Z"):
     return {
         "id": pk,
         "value": value,
         "vector": [float(pk), 0.0, 0.0, 0.0],
-        "expiry": past if pk == 1 else future,
-        "next_expiry": future if pk == 1 else past,
+        "expiry": expiry,
+        "next_expiry": next_expiry,
     }
 
 
@@ -106,6 +105,8 @@ def test_proxy_schema_ttl_snapshots_and_mutations(schema_access_client):
     client.insert(name, [row(1, 10), row(2, 20)], timeout=60)
     assert ids(client, name) == [1, 2]
 
+    # Keep these rows live under every TTL snapshot: compaction may permanently
+    # remove expired rows, so switching or dropping TTL cannot resurrect them.
     # Warm both selectors before each ALTER. Identical updates/deletes are no-ops.
     transitions = [
         ({"collection.ttl.seconds": "3600"}, [], 1, [1, 2]),
@@ -113,9 +114,9 @@ def test_proxy_schema_ttl_snapshots_and_mutations(schema_access_client):
         ({"collection.ttl.seconds": "7200"}, [], 2, [1, 2]),
         ({}, ["collection.ttl.seconds"], 3, [1, 2]),
         ({}, ["collection.ttl.seconds"], 3, [1, 2]),
-        ({"ttl_field": "expiry"}, [], 4, [2]),
-        ({"ttl_field": "expiry"}, [], 4, [2]),
-        ({"ttl_field": "next_expiry"}, [], 5, [1]),
+        ({"ttl_field": "expiry"}, [], 4, [1, 2]),
+        ({"ttl_field": "expiry"}, [], 4, [1, 2]),
+        ({"ttl_field": "next_expiry"}, [], 5, [1, 2]),
         ({}, ["ttl_field"], 6, [1, 2]),
         ({}, ["ttl_field"], 6, [1, 2]),
     ]
@@ -145,6 +146,46 @@ def test_proxy_schema_ttl_snapshots_and_mutations(schema_access_client):
     assert ids(client, name) == [1]
     client.release_collection(name, timeout=60)
     client.delete(name, ids=[1], timeout=60)  # PK-only delete does not need load.
+
+
+@pytest.mark.tags(CaseLabel.L1)
+def test_proxy_schema_ttl_field_switch_replaces_warm_cache(schema_access_client):
+    """Switch a warm TTL field and filter a row that was live under the old field."""
+    client, stub, name = schema_access_client
+    create_collection(client, name)
+    client.alter_collection_properties(name, {"ttl_field": "expiry"}, timeout=60)
+    client.insert(name, [row(1, 10, next_expiry="2020-01-01T00:00:00Z"), row(2, 20)], timeout=60)
+    assert ids(client, name) == [1, 2]
+    client.upsert(name, row(2, 20), timeout=60)
+    collection_id, version = snapshot(stub, name)
+
+    client.alter_collection_properties(name, {"ttl_field": "next_expiry"}, timeout=60)
+    # Read before any write or DescribeCollection can refresh a stale selector.
+    assert ids(client, name) == [2]
+    assert snapshot(stub, name) == (collection_id, version + 1)
+
+
+@pytest.mark.tags(CaseLabel.L1)
+def test_proxy_schema_drop_ttl_field_accepts_past_timestamp(schema_access_client):
+    """Drop a warm TTL field and keep a new row with a past timestamp visible."""
+    client, stub, name = schema_access_client
+    create_collection(client, name)
+    client.alter_collection_properties(name, {"ttl_field": "expiry"}, timeout=60)
+    client.insert(name, row(2, 20), timeout=60)
+    assert ids(client, name) == [2]
+    client.upsert(name, row(2, 20), timeout=60)
+    collection_id, version = snapshot(stub, name)
+
+    client.drop_collection_properties(name, ["ttl_field"], timeout=60)
+    # This row is first written after TTL is removed; no expired data is revived.
+    client.insert(
+        name,
+        row(1, 10, expiry="2020-01-01T00:00:00Z", next_expiry="2020-01-01T00:00:00Z"),
+        timeout=60,
+    )
+    assert ids(client, name) == [1, 2]
+    assert snapshot(stub, name) == (collection_id, version + 1)
+    assert "ttl_field" not in client.describe_collection(name, timeout=60)["properties"]
 
 
 @pytest.mark.tags(CaseLabel.L1)

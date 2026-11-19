@@ -42,6 +42,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func UnindexedSegmentsForTest(ctx context.Context, mt *meta.Meta, im *IndexMeta) []int64 {
+	return (&IndexInspector{meta: mt, indexMeta: im}).getUnIndexTaskSegments(ctx)
+}
+
 func NewTestVersionManager() IndexEngineVersionManager {
 	return &VersionManagerImpl{}
 }
@@ -235,4 +239,54 @@ func NewTestIndexMeta(collID, segID, indexID int64, indexType string, segIdx *mo
 	segIdxMap.Insert(indexID, segIdx)
 	im.SegmentIndexes.Insert(segID, segIdxMap)
 	return im
+}
+
+func (i *ManifestIndexBackfillInspector) RunOnceForTest(ctx context.Context) bool {
+	return i.runOnce(ctx)
+}
+
+func (i *ManifestIndexBackfillInspector) BackfillIndexesForTest(ctx context.Context, segmentID int64, buildIDs ...int64) error {
+	return i.backfillIndexes(ctx, segmentID, buildIDs...)
+}
+
+func (i *ManifestIndexBackfillInspector) ScanForTest(ctx context.Context) ([]segmentManifestIndexBackfill, int) {
+	return i.scan(ctx)
+}
+
+func (i *ManifestIndexRollbackInspector) RunOnceForTest(ctx context.Context) bool {
+	return i.runOnce(ctx)
+}
+
+const RestartPartID = restartPartID
+
+func BootMigrationMeta(t *testing.T, catalog metastore.DataCoordCatalog, collectionID int64) *meta.Meta {
+	m, _ := BootMetaForRestart(t, catalog, collectionID)
+	return m
+}
+
+func NewMigrationBackfillInspector(ctx context.Context, m *meta.Meta) *ManifestIndexBackfillInspector {
+	return NewManifestIndexBackfillInspector(ctx, m, m.IndexCatalog.(*IndexMeta))
+}
+
+func NewMigrationRollbackInspector(ctx context.Context, m *meta.Meta) *ManifestIndexRollbackInspector {
+	return NewManifestIndexRollbackInspector(ctx, m, m.IndexCatalog.(*IndexMeta))
+}
+
+func (m *IndexMeta) AlterSegmentIndexesForTest(records []*model.SegmentIndex) error {
+	return m.alterSegmentIndexes(records)
+}
+
+func (m *IndexMeta) ManifestIndexBackfillNotifyForTest() <-chan struct{} {
+	return m.manifestIndexBackfillNotify
+}
+
+func (i *ManifestIndexRollbackInspector) ReadyForTest() bool {
+	return i.ready
+}
+
+func newMigrationManifestReadIO(t *testing.T) *packed.ManifestIOContext {
+	t.Helper()
+	io := packed.NewManifestIOContext(1)
+	t.Cleanup(io.Close)
+	return io
 }

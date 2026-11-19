@@ -3793,8 +3793,7 @@ func TestBuildTargetManifestIndexes(t *testing.T) {
 	assert.Equal(t, int64(2), entry.IndexVersion)
 	assert.Equal(t, int64(4096), entry.NumRows)
 	assert.Equal(t, []string{"a", "b"}, entry.IndexFileKeys)
-	assert.Equal(t, "16", entry.Properties["M"])
-	assert.Equal(t, "HNSW", entry.Properties[common.IndexTypeKey])
+	assert.Empty(t, entry.Properties, "ignore collection parameters even from older coordinators")
 
 	expectedPath, err := packed.ManifestIndexRelativePath("files/insert_log/100/200/300", "files/insert_log/100/200/300/_index/888/2")
 	assert.NoError(t, err)
@@ -3805,7 +3804,7 @@ func TestBuildTargetManifestIndexes(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
 	assert.Equal(t, "HNSW_SQ", entries[0].IndexType)
-	assert.Equal(t, "HNSW_SQ", entries[0].Properties[common.IndexTypeKey])
+	assert.Empty(t, entries[0].Properties)
 	assert.Equal(t, "vec_idx", entries[0].IndexName)
 	assert.Equal(t, "HNSW", target.TargetIndexes[0].IndexType)
 	assert.NotContains(t, target.TargetIndexes[0].Properties, common.IndexTypeKey)

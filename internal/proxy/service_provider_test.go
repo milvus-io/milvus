@@ -650,9 +650,9 @@ func TestInterceptorImpl_DoesNotCountRequestAtServiceLayer(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			method := "DescribeCollectionMetric_" + tc.name
 			totalCounter := metrics.ProxyFunctionCall.WithLabelValues(
-				nodeID, method, metrics.TotalLabel, metrics.CauseNA, request.GetDbName(), request.GetCollectionName())
+				nodeID, method, metrics.TotalLabel, metrics.CauseNA, request.GetDbName(), request.GetCollectionName(), "")
 			outcomeCounter := metrics.ProxyFunctionCall.WithLabelValues(
-				nodeID, method, metrics.FailLabel, metrics.CauseSystem, request.GetDbName(), request.GetCollectionName())
+				nodeID, method, metrics.FailLabel, metrics.CauseSystem, request.GetDbName(), request.GetCollectionName(), "")
 			latency := metrics.ProxyReqLatency.WithLabelValues(nodeID, method)
 			beforeOutcome := testutil.ToFloat64(outcomeCounter)
 			beforeTotal := testutil.ToFloat64(totalCounter)

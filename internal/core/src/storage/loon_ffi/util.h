@@ -78,7 +78,7 @@ ToCStorageConfig(const milvus::storage::StorageConfig& config);
 std::shared_ptr<milvus_storage::api::Manifest>
 GetLoonManifest(
     const std::string& path,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties);
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties);
 
 struct LoonManifestPath {
     std::string base_path;
@@ -146,3 +146,11 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
                              int64_t collection_id,
                              const std::string& external_source,
                              const std::string& external_spec);
+
+// Server-owned startup policy. An uninitialized or empty policy denies brokers.
+arrow::Result<std::string>
+NormalizeBrokerEndpoint(const std::string& raw);
+arrow::Status
+InitCredentialBrokerPolicy(const std::string& endpoints_json);
+arrow::Status
+CheckCredentialBrokerEndpoint(const std::string& endpoint);

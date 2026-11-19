@@ -192,4 +192,8 @@ func InsertTestSnapshot(sm *SnapshotMeta, info *datapb.SnapshotInfo, segmentIDs,
 	sm.addToSecondaryIndexes(info)
 }
 
+func (m *SnapshotMeta) PinSegmentForGCForTest(segmentID int64) {
+	m.segmentReferencedByGC.Insert(segmentID)
+}
+
 func (m *SnapshotExportManager) ContextForTest() context.Context { return m.ctx }

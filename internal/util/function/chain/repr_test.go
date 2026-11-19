@@ -20,6 +20,8 @@ package chain
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -36,6 +38,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestQueryNodeChainsWriteScore(t *testing.T) {
+	for _, stage := range []schemapb.FunctionChainStage{
+		schemapb.FunctionChainStage_FunctionChainStageL0Rerank,
+		schemapb.FunctionChainStage_FunctionChainStageL1Rerank,
+		schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+	} {
+		for _, output := range []string{"temporary", "$score", " $score "} {
+			t.Run(fmt.Sprintf("%s/%s", stage, output), func(t *testing.T) {
+				chains := []*schemapb.FunctionChain{nil, {Stage: stage, Ops: []*schemapb.FunctionChainOp{nil, {Op: "map", Outputs: []string{output}}}}}
+				expected := stage != schemapb.FunctionChainStage_FunctionChainStageL2Rerank && strings.TrimSpace(output) == "$score"
+				require.Equal(t, expected, QueryNodeChainsWriteScore(chains))
+			})
+		}
+	}
+	require.False(t, QueryNodeChainsWriteScore(nil))
+}
 
 func TestDisabledPyUDFErrorThroughFunctionChain(t *testing.T) {
 	item := &paramtable.Get().FunctionCfg.PyUDFEnabled

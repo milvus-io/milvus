@@ -1673,3 +1673,88 @@ func TestPreparing_AllQNReadyThenSNReady(t *testing.T) {
 	assertNoPendingPersist(t, sm)
 	assertPendingSyncState(t, sm, qviews.QueryViewStateUp)
 }
+
+func TestControlUpgradeOfPublishedDownIsPersistedAndResent(t *testing.T) {
+	view := buildTestView(2)
+	view.Meta.Control = &viewpb.QueryViewControl{PreparationPriority: -20}
+	view.Meta.State = viewpb.QueryViewState_QueryViewStateUp
+	sm := RecoverCoordQueryViewStateMachine(view)
+	sm.EnterDown()
+	sm.ConsumeFlush()
+	require.True(t, sm.EnterDownWithControl(&viewpb.QueryViewControl{PreemptServingLease: true}))
+	flush := sm.ConsumeFlush()
+	require.True(t, flush.Persist.Meta.GetControl().GetPreemptServingLease())
+	require.Equal(t, viewpb.QueryViewState_QueryViewStateDown, flush.Persist.Meta.State)
+	require.Len(t, flush.Sync, 1)
+	require.True(t, flush.Sync[0].IntoProto().Meta.GetControl().GetPreemptServingLease())
+	require.EqualValues(t, -20, flush.Persist.Meta.GetControl().GetPreparationPriority())
+	require.EqualValues(t, -20, flush.Sync[0].IntoProto().Meta.GetControl().GetPreparationPriority())
+	recovered := RecoverCoordQueryViewStateMachine(flush.Persist)
+	recovery := recovered.ConsumeFlush()
+	require.True(t, recovery.Sync[0].IntoProto().Meta.GetControl().GetPreemptServingLease())
+	require.EqualValues(t, -20, recovery.Sync[0].IntoProto().Meta.GetControl().GetPreparationPriority())
+	require.False(t, sm.EnterDownWithControl(nil))
+	require.True(t, sm.View().Meta.GetControl().GetPreemptServingLease())
+	require.False(t, sm.EnterDownWithControl(&viewpb.QueryViewControl{PreemptServingLease: true}))
+	require.True(t, sm.ConsumeFlush().Empty(), "replaying the same control is idempotent")
+}
+
+func TestDownRecoveryPreservesPendingSyncAcrossRepeatedRelease(t *testing.T) {
+	for _, preempt := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ordinary", true: "preemptive"}[preempt], func(t *testing.T) {
+			view := buildTestView(2)
+			view.Meta.State = viewpb.QueryViewState_QueryViewStateDown
+			view.Meta.Control = &viewpb.QueryViewControl{PreemptServingLease: preempt}
+			sm := RecoverCoordQueryViewStateMachine(view)
+
+			// A no-op must leave the unconsumed recovery sync intact.
+			require.False(t, sm.EnterDownWithControl(nil))
+			control := &viewpb.QueryViewControl{PreemptServingLease: true}
+			require.Equal(t, !preempt, sm.EnterDownWithControl(control))
+			require.False(t, sm.EnterDownWithControl(control))
+			flush := sm.ConsumeFlush()
+			if preempt {
+				require.Nil(t, flush.Persist, "persisted control needs replay, not another write")
+			} else {
+				require.NotNil(t, flush.Persist, "control upgrade after recovery must be durable")
+				require.True(t, flush.Persist.Meta.GetControl().GetPreemptServingLease())
+			}
+			require.Len(t, flush.Sync, 1)
+			require.True(t, flush.Sync[0].IntoProto().Meta.GetControl().GetPreemptServingLease())
+
+			// A reconnected/restarted SN reporting Up still receives controlled Down.
+			sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateUp))
+			require.False(t, sm.EnterDownWithControl(control))
+			flush = sm.ConsumeFlush()
+			require.Len(t, flush.Sync, 1)
+			require.True(t, flush.Sync[0].IntoProto().Meta.GetControl().GetPreemptServingLease())
+
+			// SN may already have completed teardown before Coord restarted.
+			sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateDropped))
+			require.Equal(t, qviews.QueryViewStateDropping, sm.State())
+			require.False(t, sm.EnterDownWithControl(control))
+			flush = sm.ConsumeFlush()
+			require.Len(t, flush.Sync, 3)
+			for _, target := range flush.Sync {
+				require.Equal(t, qviews.QueryViewStateDropped, target.State())
+			}
+		})
+	}
+}
+
+func TestControlledReleaseUpgradesAllDownViewsWithoutChangingHandoff(t *testing.T) {
+	older, newer := buildTestViewWithVersion(1, 1, 1, 1), buildTestViewWithVersion(1, 1, 1, 2)
+	older.Meta.State = viewpb.QueryViewState_QueryViewStateDown
+	newer.Meta.State = viewpb.QueryViewState_QueryViewStateUp
+	manager := newTestManager(t, newMockCatalog(), newMockSyncer(), older, newer)
+	require.NoError(t, manager.RequestRelease(t.Context()))
+	for _, sm := range manager.views {
+		require.False(t, sm.View().Meta.GetControl().GetPreemptServingLease())
+	}
+	require.NoError(t, manager.RequestReleaseWithControl(t.Context(), &viewpb.QueryViewControl{PreemptServingLease: true}))
+	manager.waitFlush()
+	for _, sm := range manager.views {
+		require.Equal(t, qviews.QueryViewStateDown, sm.State())
+		require.True(t, sm.View().Meta.GetControl().GetPreemptServingLease())
+	}
+}

@@ -124,9 +124,7 @@ func TestBuildManifestIndexInfoFromDataCoordMetadata(t *testing.T) {
 	require.EqualValues(t, 5, info.CurrentIndexVersion)
 	require.EqualValues(t, 6, info.CurrentScalarIndexVersion)
 	require.Equal(t, []string{"0", "1"}, info.IndexFileKeys)
-	require.Equal(t, "16", info.Properties["M"])
-	require.Equal(t, "8", info.Properties[common.DimKey])
-	require.Equal(t, "HNSW", info.Properties[common.IndexTypeKey])
+	require.Empty(t, info.Properties, "collection parameters are not segment build metadata")
 
 	// The stored path is relative to <basePath>/_index and resolves back to the
 	// segment index prefix, which is what milvus-storage reproduces on read.
@@ -170,7 +168,7 @@ func TestBuildManifestIndexInfoRespectsSegmentIndexTypeOverride(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "FLAT", info.IndexType)
-	require.Equal(t, "FLAT", info.Properties[common.IndexTypeKey])
+	require.Empty(t, info.Properties)
 	// A field the schema does not describe leaves ColumnName empty rather than
 	// inventing one; field_id stays the authoritative identity.
 	require.Empty(t, info.ColumnName)
@@ -318,6 +316,7 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 	manifestEntries := store.Revisions[m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()]
 	require.Len(t, manifestEntries, 1, "the index task must publish its artifact into the manifest")
 	assert.EqualValues(t, meta.RestartBuildID, manifestEntries[0].BuildID)
+	assert.Empty(t, manifestEntries[0].Properties)
 
 	// Nothing about this index reached etcd.
 	persisted, err := catalog.ListSegmentIndexes(ctx, meta.RestartCollID)
@@ -392,15 +391,15 @@ func TestSegmentIndexPersistedToEtcdWhenManifestWritesOff(t *testing.T) {
 // Regression test for an ABBA deadlock between the manifest commit and every
 // other SegmentIndex writer.
 //
-// CommitSegmentManifest must take keyLock before segMu, matching every other
-// SegmentIndex writer. Reversing that order forms a cycle on a shared buildID
-// and can hang DataCoord globally.
+// CommitSegmentManifest must take keyLock before the segment's writer lock,
+// matching every other SegmentIndex writer. Reversing that order forms a cycle
+// on a shared buildID.
 //
 // Rather than racing the two paths and hoping to hit a microsecond window,
 // this asserts the invariant that makes the cycle impossible: while blocked on
-// keyLock, the commit must NOT be holding segMu. Hold the key lock, let the
-// commit park on it, and check segMu is still free.
-func TestCommitSegmentManifestTakesKeyLockBeforeSegMu(t *testing.T) {
+// keyLock, the commit must NOT be holding the segment's writer lock. Hold the
+// key lock, let the commit park on it, and check the writer lock is still free.
+func TestCommitSegmentManifestTakesKeyLockBeforeSegmentLock(t *testing.T) {
 	meta.WithSegmentIndexManifestWrites(t, true)
 	meta.NewFakeManifestStore(t)
 	ctx := context.TODO()
@@ -459,11 +458,11 @@ func TestCommitSegmentManifestTakesKeyLockBeforeSegMu(t *testing.T) {
 	}
 
 	// The load-bearing assertion. Parked on keyLock, the commit must hold no
-	// segMu; if it does, any keyLock holder that reads segment state - which is
-	// what the manifest-backed gate does - closes the cycle.
-	acquired := m.SegMu.TryLock()
+	// writer lock of the segment; if it does, any keyLock holder that writes
+	// the segment closes the cycle.
+	acquired := m.GetSegmentLocks().TryLock(meta.RestartSegID)
 	if acquired {
-		m.SegMu.Unlock()
+		m.GetSegmentLocks().Unlock(meta.RestartSegID)
 	}
 	mDomains.IndexMeta.KeyLock.Unlock(meta.RestartBuildID)
 
@@ -475,7 +474,7 @@ func TestCommitSegmentManifestTakesKeyLockBeforeSegMu(t *testing.T) {
 	}
 
 	require.True(t, acquired,
-		"commit is holding segMu while blocked on keyLock: lock order is inverted against every other SegmentIndex writer")
+		"commit is holding the segment writer lock while blocked on keyLock: lock order is inverted against every other SegmentIndex writer")
 }
 
 // A manifest entry whose index definition is already gone MUST still be

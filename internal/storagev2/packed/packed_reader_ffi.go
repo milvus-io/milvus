@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -204,7 +205,10 @@ func openFFIPackedReader(
 	cNeededColumnArray, cNumColumns, cleanupNeededColumns := newCNeededColumns(neededColumns)
 	defer cleanupNeededColumns()
 
-	cExternalSource, cExternalSpec, cleanupExternalContext := newCExternalContext(extfs.Source, extfs.Spec)
+	cExternalSource, cExternalSpec, cleanupExternalContext, err := newCExternalContext(extfs.Source, extfs.Spec)
+	if err != nil {
+		return nil, err
+	}
 	defer cleanupExternalContext()
 
 	status := open(
@@ -282,6 +286,7 @@ func newCStorageConfig(storageConfig *indexpb.StorageConfig) (C.CStorageConfig, 
 		tls_min_version:                 C.CString(tlsMinVersionForStorage(storageConfig.GetSslTlsMinVersion())),
 		use_crc32c_checksum:             C.bool(storageConfig.GetUseCrc32CChecksum()),
 		talon_mode:                      C.uint32_t(storageConfig.GetTalonMode()),
+		talon_enabled_stages:            C.uint32_t(storageConfig.GetTalonEnabledStages()),
 		talon_small_read_threshold:      C.uint32_t(storageConfig.GetTalonSmallReadThreshold()),
 		talon_coordinator:               C.CString(storageConfig.GetTalonCoordinator()),
 		talon_block_size:                C.uint32_t(storageConfig.GetTalonBlockSize()),
@@ -322,21 +327,25 @@ func newCNeededColumns(neededColumns []string) (**C.char, C.int64_t, func()) {
 	return (**C.char)(unsafe.Pointer(&cNeededColumn[0])), C.int64_t(len(cNeededColumn)), cleanup
 }
 
-func newCExternalContext(externalSource, externalSpec string) (*C.char, *C.char, func()) {
+func newCExternalContext(externalSource, externalSpec string) (*C.char, *C.char, func(), error) {
 	if externalSource == "" {
-		return nil, nil, func() {}
+		return nil, nil, func() {}, nil
+	}
+	normalizedSpec, err := specutil.NormalizeExternalSpec(externalSpec)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	cExternalSource := C.CString(externalSource)
 	var cExternalSpec *C.char
 	if externalSpec != "" {
-		cExternalSpec = C.CString(externalSpec)
+		cExternalSpec = C.CString(normalizedSpec)
 	}
 	return cExternalSource, cExternalSpec, func() {
 		C.free(unsafe.Pointer(cExternalSource))
 		if cExternalSpec != nil {
 			C.free(unsafe.Pointer(cExternalSpec))
 		}
-	}
+	}, nil
 }
 
 func resolveFFIReaderFragments(
@@ -417,8 +426,8 @@ func (r *FFIPackedReader) Release() {
 	r.Close()
 }
 
-func GetManifestHandle(manifestPath string, storageConfig *indexpb.StorageConfig) (loonManifestHandle *C.LoonManifest, err error) {
-	return GetManifestHandleWithExtfs(manifestPath, storageConfig, ExternalSpecContext{})
+func GetManifestHandle(manifestPath string, storageConfig *indexpb.StorageConfig, talonStages ...uint32) (loonManifestHandle *C.LoonManifest, err error) {
+	return GetManifestHandleWithExtfs(manifestPath, storageConfig, ExternalSpecContext{}, talonStages...)
 }
 
 // GetManifestHandleWithExtfs opens a StorageV3 manifest with optional extfs
@@ -428,6 +437,7 @@ func GetManifestHandleWithExtfs(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
 	extfs ExternalSpecContext,
+	talonStages ...uint32,
 ) (loonManifestHandle *C.LoonManifest, err error) {
 	manifest, err := ParseManifestPath(manifestPath)
 	if err != nil {
@@ -435,7 +445,7 @@ func GetManifestHandleWithExtfs(
 	}
 	mlog.Debug(context.TODO(), "GetManifest", mlog.String("manifestPath", manifestPath), mlog.String("basePath", manifest.BasePath), mlog.Int64("version", manifest.ManifestVersion))
 
-	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil, talonStages...)
 	if err != nil {
 		return nil, err
 	}

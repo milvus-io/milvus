@@ -99,13 +99,23 @@ func (c *AssignmentServiceImpl) ReportAssignmentError(ctx context.Context, pchan
 	}
 	defer c.lifetime.Done()
 
-	// wait for service ready.
-	assignment, err := c.getAssignmentDiscoverOrWait(ctx)
-	if err != nil {
-		return merr.Wrap(err, "at creating assignment service")
+	var rejected *assignmentDiscoverClient
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		// The discover stream can close after it is selected. Retry only a
+		// rejected enqueue; an accepted report keeps its existing delivery policy.
+		assignment, err := c.getAssignmentDiscoverOrWait(ctx, rejected)
+		if err != nil {
+			return merr.Wrap(err, "at creating assignment service")
+		}
+		err = assignment.ReportAssignmentError(ctx, pchannel, assignmentErr)
+		if err == nil || !status.AsStreamingError(err).IsOnShutdown() {
+			return err
+		}
+		rejected = assignment
 	}
-	assignment.ReportAssignmentError(pchannel, assignmentErr)
-	return nil
 }
 
 // GetReplicateConfigurationOpt is the option for GetReplicateConfiguration.
@@ -204,9 +214,9 @@ func (c *AssignmentServiceImpl) Close() {
 }
 
 // getProducerOrWaitProducerReady get producer or wait the new producer is available.
-func (c *AssignmentServiceImpl) getAssignmentDiscoverOrWait(ctx context.Context) (*assignmentDiscoverClient, error) {
+func (c *AssignmentServiceImpl) getAssignmentDiscoverOrWait(ctx context.Context, rejected *assignmentDiscoverClient) (*assignmentDiscoverClient, error) {
 	c.cond.L.Lock()
-	for c.discoverer == nil || !c.discoverer.IsAvailable() {
+	for c.discoverer == nil || c.discoverer == rejected || !c.discoverer.IsAvailable() {
 		if err := c.cond.Wait(ctx); err != nil {
 			return nil, err
 		}

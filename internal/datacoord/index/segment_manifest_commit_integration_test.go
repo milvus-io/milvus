@@ -569,12 +569,12 @@ func TestCommitSegmentManifestRetiresIndexEtcdRowWhenGated(t *testing.T) {
 // Regression test for a stall between the manifest commit and every index DDL.
 //
 // Index DDL takes indexMeta.fieldIndexLock's write side to install field index
-// definitions. The commit installs its staged SegmentIndex mutations inside its
-// segMu critical section, so it must never wait for that lock: sync.RWMutex is
-// writer-preferring, and a commit parked on it with segMu held stalls every
-// GetSegment/SelectSegments/SaveBinlogPaths. The install updates indexMeta's
-// memory-only task counters, and the stored-index-size gauge is published from
-// them without the lock, so the whole commit completes while the lock is held.
+// definitions. The commit installs its staged SegmentIndex mutations under the
+// segment writer lock, so it must never wait for that lock: sync.RWMutex is
+// writer-preferring, and a commit parked on it with the writer lock held stalls
+// every writer of the segment. The install updates indexMeta's memory-only task
+// counters, and the stored-index-size gauge is published from them without the
+// lock, so the whole commit completes while the lock is held.
 func TestCommitSegmentManifestDoesNotWaitForIndexDDL(t *testing.T) {
 	meta.WithSegmentIndexManifestWrites(t, true)
 	meta.NewFakeManifestStore(t)
@@ -640,10 +640,10 @@ func TestCommitSegmentManifestDoesNotWaitForIndexDDL(t *testing.T) {
 // Regression test for a stall between the manifest commit and a Prometheus
 // scrape. A scrape holds the stored-index-size gauge vector's read lock while it
 // sends series, and creating or deleting a series waits for it, so a gauge write
-// inside the commit's segMu critical section would stall every segment reader
-// for the length of the scrape. The commit publishes the gauge only after segMu
+// under the segment writer lock would stall every writer of the segment for the
+// length of the scrape. The commit publishes the gauge only after the writer lock
 // is released.
-func TestCommitSegmentManifestPublishesIndexSizeOutsideSegMu(t *testing.T) {
+func TestCommitSegmentManifestPublishesIndexSizeOutsideSegmentLock(t *testing.T) {
 	meta.WithSegmentIndexManifestWrites(t, true)
 	meta.NewFakeManifestStore(t)
 	ctx := context.TODO()
@@ -673,12 +673,12 @@ func TestCommitSegmentManifestPublishesIndexSizeOutsideSegMu(t *testing.T) {
 	}()
 
 	require.Eventually(t, func() bool {
-		if !m.SegMu.TryLock() {
+		if !m.GetSegmentLocks().TryLock(meta.RestartSegID) {
 			return false
 		}
-		defer m.SegMu.Unlock()
-		return m.Segments.GetSegment(meta.RestartSegID).GetManifestPath() != baseManifest
-	}, 10*time.Second, time.Millisecond, "commit held segMu while its gauge write waited for the scrape")
+		defer m.GetSegmentLocks().Unlock(meta.RestartSegID)
+		return m.GetSegment(ctx, meta.RestartSegID).GetManifestPath() != baseManifest
+	}, 10*time.Second, time.Millisecond, "commit held the segment writer lock while its gauge write waited for the scrape")
 	require.Empty(t, committed, "the gauge write must wait for the scrape")
 	release()
 	require.NoError(t, <-committed)
@@ -720,7 +720,7 @@ func TestCommitSegmentManifestReplaceBlocksIndexCreationUntilPublished(t *testin
 	).Build()
 	defer commit.UnPatch()
 
-	// Park the commit inside its segMu publication section (blocked in the
+	// Park the commit inside its writer-lock publication section (blocked in the
 	// catalog write). At that point it holds fieldIndexLock's read side, which
 	// the fix keeps through the pointer advance.
 	enteredCatalog := make(chan struct{})

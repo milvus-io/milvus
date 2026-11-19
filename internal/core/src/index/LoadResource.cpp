@@ -19,6 +19,7 @@
 #include <algorithm>
 #include "yaml-cpp/yaml.h"
 #include "index/vector/VectorDiskLoader.h"
+#include "index/vector/VectorIndexValidDataUtils.h"
 #include "index/vector/KnowhereEngine.h"
 #include <cstring>
 #include <limits>
@@ -39,7 +40,10 @@
 #include "nlohmann/json.hpp"
 #include "storage/EntryStreamUtils.h"
 #include "storage/LoadAdmissionController.h"
-#include "storage/MemFileManagerImpl.h"
+#include "storage/artifact/FileSource.h"
+#include "storage/AsyncLoadExecutor.h"
+#include "folly/coro/BlockingWait.h"
+#include "folly/coro/WithCancellation.h"
 #include "storage/PluginLoader.h"
 
 #include "index/IndexLoadUtils.h"
@@ -262,18 +266,27 @@ ResolveLegacyHybridIndexType(const std::vector<std::string>& index_files,
         return {};
     }
     try {
-        storage::MemFileManagerImpl manager(context);
         const auto priority =
             op_ctx && op_ctx->runtime_load_priority.value_or(0) != 0
                 ? proto::common::LoadPriority::LOW
                 : proto::common::LoadPriority::HIGH;
-        auto data = manager.LoadIndexToMemory({*file}, priority, token);
+        auto read_type = [&]() -> folly::coro::Task<std::vector<uint8_t>> {
+            storage::LoadOptions options;
+            options.op_ctx = op_ctx;
+            std::vector<std::string> selector_files{*file};
+            auto source = co_await storage::V1RemoteSource::OpenAsync(
+                context,
+                std::move(selector_files),
+                options,
+                storage::ArtifactStorageNamespace::Index,
+                storage::V1SourceLayout::DiskFiles);
+            co_return co_await source->ReadEntryAsync(INDEX_TYPE);
+        };
+        const auto type =
+            folly::coro::blockingWait(folly::coro::co_withExecutor(
+                storage::ResolveAsyncLoadExecutor({}, priority), read_type()));
         storage::ThrowIfCancelled(token, "inspect legacy hybrid metadata");
-        BinarySet binary_set;
-        AssembleIndexDatas(data, binary_set);
-        const auto type = binary_set.GetByName(INDEX_TYPE);
-        if (type == nullptr || type->data == nullptr ||
-            type->size != sizeof(uint8_t)) {
+        if (type.size() != sizeof(uint8_t)) {
             LOG_WARN(
                 "invalid legacy hybrid index_type file {}, fallback to hybrid "
                 "estimate",
@@ -281,7 +294,7 @@ ResolveLegacyHybridIndexType(const std::vector<std::string>& index_files,
             return {};
         }
         return HybridInternalIndexTypeToIndexType(
-            static_cast<ScalarIndexType>(type->data[0]));
+            static_cast<ScalarIndexType>(type[0]));
     } catch (const std::exception& e) {
         storage::ThrowIfCancelled(token, "inspect legacy hybrid metadata");
         LOG_WARN(
@@ -618,8 +631,9 @@ LegacyScalarIndexLoadResourceAsync(
                 .value_or(false)) {
             resident = SaturatingAdd(
                 resident,
-                SaturatingMultiply(uint64_t{std::max<int64_t>(0, rows)},
-                                   sizeof(void*)));
+                SaturatingMultiply(
+                    static_cast<uint64_t>(std::max<int64_t>(0, rows)),
+                    sizeof(void*)));
         }
         request.final_memory_cost =
             std::max(request.final_memory_cost,
@@ -674,7 +688,23 @@ LegacyVectorFileLoadResourceAsync(LoadResourceRequest request,
     const auto names = disk_family
                            ? VectorDiskLoader::AsyncEntryNames(source, options)
                            : source.EntryNames();
-    const auto bytes = co_await source.InspectLoadBytesAsync(names);
+    auto bytes = co_await source.InspectLoadBytesAsync(names);
+    if (disk_family && source.HasEntry(VALID_DATA_KEY) &&
+        std::find(names.begin(), names.end(), VALID_DATA_KEY) == names.end()) {
+        const auto rows = ParseInt64Param(options.params.at(INDEX_NUM_ROWS_KEY),
+                                          INDEX_NUM_ROWS_KEY,
+                                          "vector row count");
+        const auto payload =
+            SaturatingAdd(uint64_t{sizeof(uint64_t)}, BitsetBytes(rows));
+        bytes.payload = SaturatingAdd(bytes.payload, payload);
+        // Reserve the sidecar even if the backend later skips it. Allow for
+        // wire/decode buffers (legacy INT8 can expand to INT32), descriptor
+        // parsing and aligned reads; this does not allocate or fetch data.
+        bytes.transient = SaturatingAdd(
+            bytes.transient,
+            SaturatingAdd(SaturatingMultiply(payload, uint64_t{20}),
+                          uint64_t{64 * 1024}));
+    }
     // BinarySet payloads coexist with native Deserialize state. For native
     // stream backends, names contains only eagerly prepared sidecars.
     const bool memory_mmap =

@@ -43,7 +43,7 @@
 #include "common/FastMem.h"
 #include "common/OpContext.h"
 #include "common/Span.h"
-#include "mmap/ChunkedColumnInterface.h"
+#include "mmap/ChunkedColumn.h"
 #include "mmap/ColumnOffsetLookup.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 
@@ -341,7 +341,7 @@ class ChunkedColumnGroup {
     std::unique_ptr<LazyInitState> lazy_init_;
 };
 
-class ProxyChunkColumn : public ChunkedColumnInterface {
+class ProxyChunkColumn : public RawColumnBase {
  public:
     explicit ProxyChunkColumn(std::shared_ptr<ChunkedColumnGroup> group,
                               FieldId field_id,
@@ -401,13 +401,13 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     ScanResult
     Scan(milvus::OpContext* op_ctx, const ScanOptions& options) const override {
         group_->Prepare(op_ctx);
-        return ChunkedColumnInterface::Scan(op_ctx, options);
+        return RawColumnBase::Scan(op_ctx, options);
     }
 
     TakeResultPtr
     Take(milvus::OpContext* op_ctx, TakeOptions options) const override {
         group_->Prepare(op_ctx);
-        return ChunkedColumnInterface::Take(op_ctx, std::move(options));
+        return RawColumnBase::Take(op_ctx, std::move(options));
     }
 
     PinWrapper<const char*>
@@ -451,8 +451,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             group_->Prepare(op_ctx);
             // Interface contract: null offsets means iterate over ALL rows
             // (see ChunkedColumnInterface::BulkIsValid). Scan chunk by chunk,
-            // pinning each group chunk once — mirrors the BulkRawStringAt
-            // full-scan branch.
+            // pinning each group chunk once.
             int64_t current_offset = 0;
             for (cid_t cid = 0; cid < num_chunks(); ++cid) {
                 auto group_chunk = group_->GetGroupChunk(op_ctx, cid);
@@ -829,47 +828,6 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     }
 
     void
-    BulkRawStringAt(milvus::OpContext* op_ctx,
-                    std::function<void(std::string_view, size_t, bool)> fn,
-                    const int64_t* offsets = nullptr,
-                    int64_t count = 0) const override {
-        if (!IsChunkedVariableColumnDataType(data_type_) ||
-            data_type_ == DataType::JSON) {
-            ThrowInfo(ErrorCode::Unsupported,
-                      "[StorageV2] BulkRawStringAt only supported for "
-                      "ProxyChunkColumn of "
-                      "variable length type(except Json)");
-        }
-        if (offsets == nullptr) {
-            group_->Prepare(op_ctx);
-            int64_t current_offset = 0;
-            for (cid_t cid = 0; cid < num_chunks(); ++cid) {
-                auto group_chunk = group_->GetGroupChunk(op_ctx, cid);
-                auto chunk = group_chunk.get()->GetChunk(field_id_);
-                auto chunk_rows = chunk->RowNums();
-                for (int64_t i = 0; i < chunk_rows; ++i) {
-                    auto valid = chunk->isValid(i);
-                    auto value =
-                        static_cast<StringChunk*>(chunk.get())->operator[](i);
-                    fn(value, current_offset + i, valid);
-                }
-                current_offset += chunk_rows;
-            }
-        } else {
-            ForEachResolvedRow(
-                op_ctx,
-                offsets,
-                count,
-                [&fn](Chunk* chunk, int64_t offset_in_chunk, int64_t i) {
-                    auto valid = chunk->isValid(offset_in_chunk);
-                    auto value = static_cast<StringChunk*>(chunk)->operator[](
-                        offset_in_chunk);
-                    fn(value, i, valid);
-                });
-        }
-    }
-
-    void
     BulkRawBsonAt(milvus::OpContext* op_ctx,
                   std::function<void(BsonView, uint32_t, uint32_t)> fn,
                   const uint32_t* row_offsets,
@@ -945,11 +903,9 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     }
 
  protected:
-    std::unique_ptr<ColumnPlanner>
-    BuildPlanner() const override {
-        return std::make_unique<ColumnPlanner>(
-            GetNumRowsUntilChunk(),
-            OffsetLookupOptions{OffsetLookupStrategy::BatchBinary});
+    detail::OffsetLookupOptions
+    GetOffsetLookupOptions() const override {
+        return {detail::OffsetLookupStrategy::BatchBinary};
     }
 
     void

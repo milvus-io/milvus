@@ -18,8 +18,22 @@ import (
 )
 
 func TestSearchAggregationPipelineMetricDirection(t *testing.T) {
-	for _, metricType := range []string{metric.L2, metric.HAMMING, metric.IP, metric.COSINE} {
-		t.Run(metricType, func(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		metricType string
+		rewritten  bool
+		direction  string
+	}{
+		{name: "L2", metricType: metric.L2},
+		{name: "HAMMING", metricType: metric.HAMMING},
+		{name: "IP", metricType: metric.IP},
+		{name: "COSINE", metricType: metric.COSINE},
+		{name: "L2 rewritten", metricType: metric.L2, rewritten: true},
+		{name: "L2 rewritten explicit asc", metricType: metric.L2, rewritten: true, direction: "asc"},
+		{name: "L2 rewritten explicit desc", metricType: metric.L2, rewritten: true, direction: "desc"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			metricType := tc.metricType
 			pk := &schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
 			task := &SearchTask{
 				ctx: context.Background(),
@@ -44,6 +58,17 @@ func TestSearchAggregationPipelineMetricDirection(t *testing.T) {
 					},
 				}},
 			}
+			if tc.rewritten {
+				task.request.FunctionChains = []*schemapb.FunctionChain{{
+					Stage: schemapb.FunctionChainStage_FunctionChainStageL0Rerank,
+					Ops:   []*schemapb.FunctionChainOp{{Op: "map", Outputs: []string{"$score"}}},
+				}}
+			}
+			if tc.direction != "" {
+				sort := []*commonpb.SortSpec{{FieldName: "_score", Direction: tc.direction}}
+				task.request.SearchAggregation.TopHits.Sort = sort
+				task.request.SearchAggregation.SubAggregation.TopHits.Sort = sort
+			}
 			require.NoError(t, task.initSearchAggregation())
 			task.Topk = task.aggCtx.DerivedTopK
 			task.queryInfos = []*planpb.QueryInfo{{
@@ -54,13 +79,13 @@ func TestSearchAggregationPipelineMetricDirection(t *testing.T) {
 			require.NoError(t, err)
 
 			rawScores := []float32{0.1, 0.2, 0.3, 0.9}
-			if metric.PositivelyRelated(metricType) {
+			if tc.rewritten || metric.PositivelyRelated(metricType) {
 				rawScores = []float32{0.9, 0.8, 0.3, 0.1}
 			}
 			shards := make([]*internalpb.SearchResults, 2)
 			for i := range shards {
 				scores := []float32{rawScores[i], rawScores[i+2]}
-				if !metric.PositivelyRelated(metricType) {
+				if !tc.rewritten && !metric.PositivelyRelated(metricType) {
 					// segcore normalizes distances to larger-is-better before reduce.
 					for j := range scores {
 						scores[j] = -scores[j]
@@ -93,13 +118,21 @@ func TestSearchAggregationPipelineMetricDirection(t *testing.T) {
 			require.Equal(t, int64(4), buckets[0].GetCount())
 			hits := buckets[0].GetHits()
 			require.Len(t, hits, 2)
+			wantPKs := []int64{1, 2}
+			if tc.direction == "asc" {
+				wantPKs = []int64{4, 3}
+			}
 			for i, hit := range hits {
-				require.Equal(t, int64(i+1), hit.GetIntPk())
-				require.Equal(t, rawScores[i], hit.GetScore())
+				require.Equal(t, wantPKs[i], hit.GetIntPk())
+				require.Equal(t, rawScores[wantPKs[i]-1], hit.GetScore())
 			}
 			sub := buckets[0].GetSubGroups()
 			require.Len(t, sub, 2)
-			for i, wantPK := range []int64{3, 1} { // blue, red
+			leafPKs := []int64{3, 1} // blue, red
+			if tc.direction == "asc" {
+				leafPKs = []int64{4, 2}
+			}
+			for i, wantPK := range leafPKs {
 				require.Len(t, sub[i].GetHits(), 1)
 				require.Equal(t, wantPK, sub[i].GetHits()[0].GetIntPk())
 				require.Equal(t, rawScores[wantPK-1], sub[i].GetHits()[0].GetScore())

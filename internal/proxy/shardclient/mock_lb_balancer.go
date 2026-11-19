@@ -22,40 +22,6 @@ func (_m *MockLBBalancer) EXPECT() *MockLBBalancer_Expecter {
 	return &MockLBBalancer_Expecter{mock: &_m.Mock}
 }
 
-// CancelWorkload provides a mock function with given fields: node, nq
-func (_m *MockLBBalancer) CancelWorkload(node int64, nq int64) {
-	_m.Called(node, nq)
-}
-
-// MockLBBalancer_CancelWorkload_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CancelWorkload'
-type MockLBBalancer_CancelWorkload_Call struct {
-	*mock.Call
-}
-
-// CancelWorkload is a helper method to define mock.On call
-//   - node int64
-//   - nq int64
-func (_e *MockLBBalancer_Expecter) CancelWorkload(node interface{}, nq interface{}) *MockLBBalancer_CancelWorkload_Call {
-	return &MockLBBalancer_CancelWorkload_Call{Call: _e.mock.On("CancelWorkload", node, nq)}
-}
-
-func (_c *MockLBBalancer_CancelWorkload_Call) Run(run func(node int64, nq int64)) *MockLBBalancer_CancelWorkload_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(int64))
-	})
-	return _c
-}
-
-func (_c *MockLBBalancer_CancelWorkload_Call) Return() *MockLBBalancer_CancelWorkload_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockLBBalancer_CancelWorkload_Call) RunAndReturn(run func(int64, int64)) *MockLBBalancer_CancelWorkload_Call {
-	_c.Run(run)
-	return _c
-}
-
 // Close provides a mock function with no fields
 func (_m *MockLBBalancer) Close() {
 	_m.Called()
@@ -122,7 +88,7 @@ func (_c *MockLBBalancer_RegisterNodeInfo_Call) RunAndReturn(run func([]NodeInfo
 }
 
 // SelectNode provides a mock function with given fields: ctx, availableNodes, nq
-func (_m *MockLBBalancer) SelectNode(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
+func (_m *MockLBBalancer) SelectNode(ctx context.Context, availableNodes []int64, nq int64) (int64, func(), error) {
 	ret := _m.Called(ctx, availableNodes, nq)
 
 	if len(ret) == 0 {
@@ -130,8 +96,9 @@ func (_m *MockLBBalancer) SelectNode(ctx context.Context, availableNodes []int64
 	}
 
 	var r0 int64
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, []int64, int64) (int64, error)); ok {
+	var r1 func()
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, []int64, int64) (int64, func(), error)); ok {
 		return rf(ctx, availableNodes, nq)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, []int64, int64) int64); ok {
@@ -140,13 +107,21 @@ func (_m *MockLBBalancer) SelectNode(ctx context.Context, availableNodes []int64
 		r0 = ret.Get(0).(int64)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, []int64, int64) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, []int64, int64) func()); ok {
 		r1 = rf(ctx, availableNodes, nq)
 	} else {
-		r1 = ret.Error(1)
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(func())
+		}
 	}
 
-	return r0, r1
+	if rf, ok := ret.Get(2).(func(context.Context, []int64, int64) error); ok {
+		r2 = rf(ctx, availableNodes, nq)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }
 
 // MockLBBalancer_SelectNode_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SelectNode'
@@ -169,12 +144,12 @@ func (_c *MockLBBalancer_SelectNode_Call) Run(run func(ctx context.Context, avai
 	return _c
 }
 
-func (_c *MockLBBalancer_SelectNode_Call) Return(_a0 int64, _a1 error) *MockLBBalancer_SelectNode_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *MockLBBalancer_SelectNode_Call) Return(nodeID int64, release func(), err error) *MockLBBalancer_SelectNode_Call {
+	_c.Call.Return(nodeID, release, err)
 	return _c
 }
 
-func (_c *MockLBBalancer_SelectNode_Call) RunAndReturn(run func(context.Context, []int64, int64) (int64, error)) *MockLBBalancer_SelectNode_Call {
+func (_c *MockLBBalancer_SelectNode_Call) RunAndReturn(run func(context.Context, []int64, int64) (int64, func(), error)) *MockLBBalancer_SelectNode_Call {
 	_c.Call.Return(run)
 	return _c
 }

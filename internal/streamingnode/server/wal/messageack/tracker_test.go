@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -45,6 +46,47 @@ func TestTrackerDerivesCheckpointFromMessage(t *testing.T) {
 	require.NotNil(t, point.MessageID)
 	assert.True(t, lastConfirmed.EQ(point.MessageID))
 	assert.Equal(t, uint64(200), point.TimeTick)
+}
+
+func TestTrackerCountsCompleteButUnpublishedMessages(t *testing.T) {
+	tracker := NewTracker(utility.WALCheckpoint{TimeTick: 10, MessageID: walimplstest.NewTestMessageID(1)}, nil, nil)
+	tracker.Track(testMessage(t, 1, 10)).Release()
+	_, _, count, initial := tracker.LogicalState()
+	require.Zero(t, count, "replayed checkpoint boundary must not be counted")
+	tracker.Track(testMessage(t, 2, 20)).Release()
+	tracker.Track(testMessage(t, 3, 30)).Release()
+	observed, completed, count, last := tracker.LogicalState()
+	require.Equal(t, uint64(2), count)
+	require.Equal(t, observed, completed)
+	require.Zero(t, tracker.Pending(), "completion does not erase the unpublished count")
+	require.Equal(t, initial, last, "TimeTick records do not refresh idle time")
+	point, offset, messages := tracker.CheckpointThroughWithCount(20)
+	require.Equal(t, uint64(20), point.TimeTick)
+	require.Equal(t, uint64(1), messages)
+	require.Less(t, offset, observed)
+	point, offset, messages = tracker.CheckpointThroughWithCount(30)
+	require.Equal(t, uint64(30), point.TimeTick)
+	require.Equal(t, uint64(2), messages)
+	require.Equal(t, observed, offset)
+	_, _, messages = tracker.CheckpointThroughWithCount(100)
+	require.Equal(t, uint64(2), messages, "consuming the same prefix twice keeps its count")
+}
+
+func TestTrackerIdleClockIgnoresTicksAndCheckpointReplay(t *testing.T) {
+	tracker := NewTracker(utility.WALCheckpoint{TimeTick: 10}, nil, nil)
+	idle := time.Now().Add(-time.Hour)
+	tracker.lastMessageAt = idle
+	tracker.Track(testMessage(t, 2, 20)).Release()
+	_, _, _, last := tracker.LogicalState()
+	require.Equal(t, idle, last)
+	tracker.Track(testBroadcastMessage(t, 3, 30)).Release()
+	_, _, count, last := tracker.LogicalState()
+	require.Equal(t, uint64(2), count)
+	require.True(t, last.After(idle), "a persisted non-TimeTick message refreshes idleness")
+	tracker.Track(testMessage(t, 2, 20)).Release()
+	_, _, afterCount, after := tracker.LogicalState()
+	require.Equal(t, count, afterCount)
+	require.Equal(t, last, after, "replaying an already completed point cannot refresh the clock")
 }
 
 func TestTrackerPoisonPinsCompletedPrefixAfterPayloadRelease(t *testing.T) {
@@ -337,3 +379,29 @@ func TestCheckpointThroughSelectsCoherentCompletedPosition(t *testing.T) {
 	require.Equal(t, point, older)
 	require.Equal(t, offset, olderOffset)
 }
+
+// Exercise the optional pressure interface without changing
+// legacy requesters used throughout the existing tracker tests.
+func TestTrackerPromotesPreviouslyRequestedPressurePrefix(t *testing.T) {
+	requester := &pressureTestRequester{}
+	var pressure []persistRequest
+	patch := mockey.Mock((*pressureTestRequester).RequestPersistThroughUnderPressure).To(func(_ *pressureTestRequester, v string, tt uint64) {
+		pressure = append(pressure, persistRequest{vchannel: v, targetTimeTick: tt})
+	}).Build()
+	defer patch.UnPatch()
+	tracker := NewTracker(utility.WALCheckpoint{}, nil, requester)
+	first := retainTrackedMessage(tracker, testVChannelMessage(t, "v1", 2, 20))
+	defer first.Release()
+	second := retainTrackedMessage(tracker, testVChannelMessage(t, "v2", 3, 30))
+	defer second.Release()
+	tracker.triggerVChannels(time.Now().Add(2*time.Hour), time.Hour, false)
+	require.Len(t, requester.snapshot(), 2)
+	require.Empty(t, pressure)
+	tracker.triggerVChannels(time.Now().Add(2*time.Hour), time.Hour, true)
+	require.Equal(t, []persistRequest{{vchannel: "v1", targetTimeTick: 20}}, pressure)
+	require.Len(t, requester.snapshot(), 2, "unrelated stalled VChannel is not promoted")
+}
+
+type pressureTestRequester struct{ recordingDataPersister }
+
+func (*pressureTestRequester) RequestPersistThroughUnderPressure(string, uint64) { panic("mocked") }

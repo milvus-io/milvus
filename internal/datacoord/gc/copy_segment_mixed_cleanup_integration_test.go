@@ -77,7 +77,7 @@ func TestRejectedCopyCleanupIncludesLegacySibling(t *testing.T) {
 			require.NoError(t, m.ChunkManager.Write(ctx, artifact, []byte("completed V2 copy artifact")))
 			patch := mockey.Mock(packed.GetManifestIndexInfosAsync).Return(nil, merr.ErrServiceUnavailable).Build()
 			defer patch.UnPatch()
-			err = copysegment.SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+			err = copysegment.SyncCopySegmentTask(context.TODO(), task, &datapb.QueryCopySegmentResponse{
 				State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 				SegmentResults: []*datapb.CopySegmentResult{
 					{SegmentId: 2002, ImportedRows: 100, Binlogs: copysegment.MakeTestCopySegmentBinlogs(), IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{6: {BuildId: 6, Version: 1, IndexName: "vec_idx", FieldId: 101, IndexFilePaths: []string{"index.bin"}, IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED}}},
@@ -97,9 +97,9 @@ func TestRejectedCopyCleanupIncludesLegacySibling(t *testing.T) {
 			gc := NewGarbageCollector(m, meta.NewMockHandler(), GcOption{Cli: m.ChunkManager, IndexMeta: dm.IndexMeta, AnalyzeMeta: dm.AnalyzeMeta, SnapshotMeta: dm.SnapshotMeta})
 			defer gc.Option.RemoveObjectPool.Release()
 			gc.recycleUnusedIndexFilesV1(ctx)
-			gc.RecycleDroppedSegment(ctx, NewGCManifestReadIO(t), 2001, m.GetSegment(ctx, 2001))
+			gc.RecycleDroppedSegment(ctx, NewGCManifestReadIO(t), 2001)
 			require.Nil(t, m.GetSegment(ctx, 2001))
-			gc.RecycleDroppedSegment(ctx, NewGCManifestReadIO(t), 2002, m.GetSegment(ctx, 2002))
+			gc.RecycleDroppedSegment(ctx, NewGCManifestReadIO(t), 2002)
 			require.Nil(t, m.GetSegment(ctx, 2002))
 			rebooted, rebootedDM := snapshot.BootMetaForRestartWithSnapshot(t, catalog, 100)
 			require.Nil(t, rebooted.GetSegment(ctx, 2002))

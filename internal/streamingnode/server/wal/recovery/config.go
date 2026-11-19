@@ -23,6 +23,10 @@ func newConfig() *config {
 		tailLowWatermarkBytes:  nonNegativeSize(tailLowWatermark),
 		tailSoftWatermarkBytes: nonNegativeSize(tailSoftWatermark),
 		tailHighWatermarkBytes: nonNegativeSize(tailHighWatermark),
+		flushSizeBytes:         nonNegativeSize(params.StreamingCfg.WALRecoveryFlushSizeThreshold.GetAsSize()),
+		flushMessageCount:      nonNegativeSize(int64(params.StreamingCfg.WALRecoveryFlushMessageThreshold.GetAsInt())),
+		flushIdleMinBytes:      nonNegativeSize(params.StreamingCfg.WALRecoveryFlushIdleMinSize.GetAsSize()),
+		flushIdleTimeout:       params.StreamingCfg.WALRecoveryFlushIdleTimeout.GetAsDurationByParse(),
 	}
 	if err := cfg.validate(); err != nil {
 		panic(err)
@@ -43,8 +47,12 @@ type config struct {
 	ackStallTimeout        time.Duration // ackStallTimeout is the maximum wait before requesting VChannel data persistence.
 	maxDirtyMessages       int           // maxDirtyMessages is the maximum number of dirty messages to be persisted.
 	tailLowWatermarkBytes  uint64        // tailLowWatermarkBytes releases append pressure after checkpoint publication catches up.
-	tailSoftWatermarkBytes uint64        // tailSoftWatermarkBytes triggers VChannel persistence and append slowdown.
+	tailSoftWatermarkBytes uint64        // tailSoftWatermarkBytes triggers append slowdown.
 	tailHighWatermarkBytes uint64        // tailHighWatermarkBytes rejects new DML appends.
+	flushSizeBytes         uint64        // unpublished bytes that trigger persistence; zero disables it.
+	flushMessageCount      uint64        // unpublished message count that triggers persistence; zero disables it.
+	flushIdleMinBytes      uint64        // minimum idle unpublished bytes for persistence; zero disables it.
+	flushIdleTimeout       time.Duration // time without new non-TimeTick WAL messages before idle persistence.
 }
 
 func (cfg *config) validate() error {

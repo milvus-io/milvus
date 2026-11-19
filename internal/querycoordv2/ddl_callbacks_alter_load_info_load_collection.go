@@ -40,7 +40,7 @@ import (
 )
 
 // broadcastAlterLoadConfigCollectionV2ForLoadCollection is called when the load collection request is received.
-func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) error {
+func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx context.Context, autoLoad bool, req *querypb.LoadCollectionRequest) error {
 	broadcaster, err := s.startBroadcastWithCollectionIDLock(ctx, req.GetCollectionID())
 	if err != nil {
 		return err
@@ -122,6 +122,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 			ExpectedRequiredFields:           loadmgr.FieldsToMessage(loadmgr.RequiredFieldsForSchema(coll.Schema)),
 			ExpectedPriority:                 req.GetPriority(),
 			ExpectedUserSpecifiedReplicaMode: userSpecifiedReplicaMode,
+			ExpectedAutoLoad:                 autoLoad,
 		},
 	}
 
@@ -133,6 +134,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 		LoadFields:               req.GetLoadFields(),
 		Priority:                 req.GetPriority(),
 		UserSpecifiedReplicaMode: userSpecifiedReplicaMode,
+		AutoLoad:                 autoLoad,
 	})
 	if err != nil {
 		return err
@@ -215,6 +217,7 @@ func getClusterLevelLoadConfigForForceOverride() (int32, []string, bool) {
 }
 
 type qviewsExpectedLoadConfig struct {
+	AutoLoad                 bool
 	PartitionIDs             []int64
 	ReplicaNumber            map[string]int
 	FieldIndexID             map[int64]int64
@@ -241,6 +244,7 @@ func (s *Server) generateAlterLoadConfigMessageForLoadCollection(
 		RequiredFields:           loadmgr.FieldsToMessage(loadmgr.RequiredFieldsForSchema(coll.Schema)),
 		Replicas:                 replicas,
 		UserSpecifiedReplicaMode: expected.UserSpecifiedReplicaMode,
+		AutoLoad:                 expected.AutoLoad,
 	}
 	if proto.Equal(loadConfigIntoAlterLoadConfigHeader(current), header) {
 		return nil, nil
@@ -321,6 +325,7 @@ func loadConfigIntoAlterLoadConfigHeader(cfg *loadmgr.LoadConfig) *messagespb.Al
 		RequiredFields:           loadmgr.FieldsToMessage(cloneAndSortLoadFields(cfg.RequiredFields)),
 		Replicas:                 replicas,
 		UserSpecifiedReplicaMode: cfg.UserSpecifiedReplicaMode,
+		AutoLoad:                 cfg.AutoLoad,
 	}
 }
 
@@ -434,6 +439,7 @@ func qviewsCurrentLoadConfig(cfg *loadmgr.LoadConfig) job.CurrentLoadConfig {
 		}
 	}
 	current.Collection = &meta.Collection{CollectionLoadInfo: info}
+	current.AutoLoad = cfg.AutoLoad
 	for _, id := range cfg.PartitionIDs {
 		current.Partitions[id] = &meta.Partition{PartitionLoadInfo: &querypb.PartitionLoadInfo{CollectionID: cfg.CollectionID, PartitionID: id, Status: querypb.LoadStatus_Loaded}}
 	}

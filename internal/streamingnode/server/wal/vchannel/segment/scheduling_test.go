@@ -27,6 +27,8 @@ type fakeSegmentTask struct {
 	failErr  error
 }
 
+func (t *fakeSegmentTask) timeTick() uint64 { return 0 }
+
 func (t *fakeSegmentTask) Execute(ctx context.Context) error {
 	return t.execute(ctx, func(ctx context.Context) error {
 		t.executed = true

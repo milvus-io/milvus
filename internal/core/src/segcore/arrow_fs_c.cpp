@@ -20,7 +20,7 @@ InitArrowFileSystem(CStorageConfig c_storage_config) {
                          .GetProperties();
         if (props) {
             auto result =
-                milvus_storage::FilesystemCache::getInstance().get(*props, "");
+                milvus_storage::FilesystemCache::getInstance().get(props, "");
             if (!result.ok()) {
                 auto error = milvus_storage::ToSegcoreError(result.status());
                 return milvus::FailureCStatus(&error);

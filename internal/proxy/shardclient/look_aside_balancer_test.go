@@ -277,7 +277,7 @@ func (suite *LookAsideBalancerSuite) TestSelectNode() {
 			}
 			counter := make(map[int64]int64)
 			for i := 0; i < c.requestCount; i++ {
-				node, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
+				node, _, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
 				suite.NoError(err)
 				counter[node]++
 			}
@@ -302,7 +302,7 @@ func (suite *LookAsideBalancerSuite) TestSelectNodeFastPathSkipsUnavailable() {
 	// Force fast path by ensuring idx % checkWorkloadRequestNum != 0
 	suite.balancer.idx.Store(1)
 
-	node, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
+	node, _, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
 	suite.NoError(err)
 	suite.Equal(int64(3), node)
 }
@@ -318,7 +318,7 @@ func (suite *LookAsideBalancerSuite) TestSelectNodeFastPathAllUnavailable() {
 	// Force fast path
 	suite.balancer.idx.Store(1)
 
-	node, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
+	node, _, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
 	suite.ErrorIs(err, merr.ErrServiceUnavailable)
 	suite.Equal(int64(-1), node)
 }
@@ -331,7 +331,7 @@ func (suite *LookAsideBalancerSuite) TestSelectNodeZeroScoreRoundRobin() {
 
 	counter := make(map[int64]int64)
 	for i := 0; i < 30; i++ {
-		node, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
+		node, _, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
 		suite.NoError(err)
 		counter[node]++
 	}
@@ -342,10 +342,10 @@ func (suite *LookAsideBalancerSuite) TestSelectNodeZeroScoreRoundRobin() {
 	suite.True(counter[3] >= 8, "node 3 should get roughly 1/3 of requests, got %d", counter[3])
 }
 
-func (suite *LookAsideBalancerSuite) TestCancelWorkload() {
-	node, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 10)
+func (suite *LookAsideBalancerSuite) TestReleaseWorkload() {
+	node, release, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 10)
 	suite.NoError(err)
-	suite.balancer.CancelWorkload(node, 10)
+	release()
 
 	metrics, ok := suite.balancer.metricsMap.Get(node)
 	suite.True(ok)
@@ -396,7 +396,7 @@ func (suite *LookAsideBalancerSuite) TestCheckHealthLoop() {
 		metrics, ok := suite.balancer.metricsMap.Get(1)
 		return ok && metrics.unavailable.Load()
 	}, 5*time.Second, 100*time.Millisecond)
-	targetNode, err := suite.balancer.SelectNode(context.Background(), []int64{1}, 1)
+	targetNode, _, err := suite.balancer.SelectNode(context.Background(), []int64{1}, 1)
 	suite.ErrorIs(err, merr.ErrServiceUnavailable)
 	suite.Equal(int64(-1), targetNode)
 
@@ -520,8 +520,8 @@ func BenchmarkSelectNode_QNWithSameWorkload(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			node, _ := balancer.SelectNode(ctx, nodeList, cost)
-			balancer.CancelWorkload(node, cost)
+			node, release, _ := balancer.SelectNode(ctx, nodeList, cost)
+			release()
 			balancer.UpdateCostMetrics(node, metrics)
 		}
 	})
@@ -553,8 +553,8 @@ func BenchmarkSelectNode_QNWithDifferentWorkload(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var i int
 		for pb.Next() {
-			node, _ := balancer.SelectNode(ctx, nodeList, cost)
-			balancer.CancelWorkload(node, cost)
+			node, release, _ := balancer.SelectNode(ctx, nodeList, cost)
+			release()
 			if i%2 == 0 {
 				balancer.UpdateCostMetrics(node, heavyMetric)
 			} else {

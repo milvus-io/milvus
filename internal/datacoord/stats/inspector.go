@@ -298,6 +298,7 @@ var statsSubJobs = []indexpb.StatsSubJob{indexpb.StatsSubJob_TextIndexJob, index
 type statsFields struct {
 	text, json []UniqueID
 	external   bool
+	staged     typeutil.UniqueSet
 }
 
 func getStatsFields(collection *meta.CollectionInfo) statsFields {
@@ -319,14 +320,15 @@ func getStatsFields(collection *meta.CollectionInfo) statsFields {
 }
 
 // segmentNeedsStats reports whether the segment itself lacks the stats of
-// subJobType. It reads only the segment, so it may run under meta.segMu.
+// subJobType. It reads only the segment, not the stats task meta.
 func segmentNeedsStats(segment *meta.SegmentInfo, fields statsFields, subJobType indexpb.StatsSubJob) bool {
+	allowUnsorted := fields.external || (!meta.EnableSortCompaction() && fields.staged.Contain(segment.GetID()))
 	switch subJobType {
 	case indexpb.StatsSubJob_TextIndexJob:
-		return meta.NeedDoTextIndex(segment, fields.text, fields.external)
+		return meta.NeedDoTextIndex(segment, fields.text, allowUnsorted)
 	case indexpb.StatsSubJob_JsonKeyIndexJob:
 		return (!fields.external || meta.CanBuildExternalJSONKeyIndex(segment)) &&
-			meta.NeedDoJSONKeyIndex(segment, fields.json, fields.external)
+			meta.NeedDoJSONKeyIndex(segment, fields.json, allowUnsorted)
 	default:
 		return false
 	}
@@ -345,12 +347,13 @@ func (si *Inspector) getStatsCandidateSegments(ctx context.Context, collections 
 	var segIDs []UniqueID
 	for _, collection := range collections {
 		fields := getStatsFields(collection)
+		fields.staged = si.mt.StagedSegmentMembers(collection.ID)
 		// No field to build stats for means no candidate segment, so skip the
 		// collection before scanning all of its segments.
 		if len(fields.text) == 0 && len(fields.json) == 0 {
 			continue
 		}
-		// Only segment-local checks run under segMu; the task lookups follow.
+		// Select by the segment-local checks; the task lookups follow.
 		segments := si.mt.SelectSegments(ctx, meta.WithCollection(collection.ID), meta.SegmentFilterFunc(func(segment *meta.SegmentInfo) bool {
 			return lo.SomeBy(statsSubJobs, func(subJobType indexpb.StatsSubJob) bool {
 				return segmentNeedsStats(segment, fields, subJobType)
@@ -383,6 +386,7 @@ func (si *Inspector) processStatsSegments(ctx context.Context, withPending bool)
 		fields, ok := fieldsByCollection[collection.ID]
 		if !ok {
 			fields = getStatsFields(collection)
+			fields.staged = si.mt.StagedSegmentMembers(collection.ID)
 			fieldsByCollection[collection.ID] = fields
 		}
 		for _, subJobType := range statsSubJobs {

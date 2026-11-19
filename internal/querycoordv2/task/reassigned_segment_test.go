@@ -69,19 +69,19 @@ func TestOrphanSegmentCleanupAfterNodeReassigned(t *testing.T) {
 			t.Cleanup(func() { patch.UnPatch() })
 
 			// A genuinely orphaned copy still needs cleanup.
-			require.NoError(t, scheduler.checkStale(cleanup, true))
+			require.NoError(t, scheduler.checkStale(cleanup))
 			action.rpcReturned.Store(rpcReturned)
 			require.False(t, action.IsFinished(dist))
 
 			// An RG change assigns this node to a new replica. Its copy is now
 			// owned again, possibly reloaded without an observed absent report.
 			owner = utils.CreateTestReplica(20, collectionID, []int64{nodeID})
-			require.ErrorContains(t, scheduler.checkStale(cleanup, true), "reassigned")
+			require.ErrorContains(t, scheduler.checkStale(cleanup), "cleanup task no longer matches replica assignment")
 
 			// ReleaseCollection removes load metadata before replicas. Cleanup
 			// must continue even while the replica still contains this node.
 			loaded = false
-			require.NoError(t, scheduler.checkStale(cleanup, true))
+			require.NoError(t, scheduler.checkStale(cleanup))
 			loaded = true
 			require.False(t, scheduler.preProcess(cleanup))
 			require.Equal(t, TaskStatusCanceled, cleanup.Status(), "retire the old cleanup instead of holding its task slot until timeout")

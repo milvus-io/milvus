@@ -3,6 +3,8 @@ package materialize
 import (
 	"fmt"
 	"math/rand"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"testing"
@@ -456,6 +458,20 @@ func TestEncodeFused_ReaderRoundTrip(t *testing.T) {
 // Allocations per call do not grow with the row count: the message buffer,
 // and nothing per row.
 func TestEncodeFused_AllocsIndependentOfRows(t *testing.T) {
+	const childEnv = "MILVUS_TEST_FUSED_ALLOCATIONS"
+	if os.Getenv(childEnv) != "1" {
+		// AllocsPerRun counts process-wide allocations. Config tests start
+		// background refreshers whose allocations can overlap this measurement.
+		// Re-exec only this test so those watchers never start in the child.
+		executable, err := os.Executable()
+		require.NoError(t, err)
+		cmd := exec.CommandContext(t.Context(), executable, "-test.run=^TestEncodeFused_AllocsIndependentOfRows$", "-test.count=1", "-test.timeout=1m", "-test.v") // #nosec G204 -- Re-exec this test binary with a fixed test filter.
+		cmd.Env = append(os.Environ(), childEnv+"=1")
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "%s", output)
+		t.Logf("isolated allocation check:\n%s", output)
+		return
+	}
 	cols := []fcol{{dt: arrow.BinaryTypes.String, nullRate: 0.3}, {dt: &arrow.FixedSizeBinaryType{ByteWidth: 64}}, {dt: arrow.FixedWidthTypes.Boolean}}
 	r := rand.New(rand.NewSource(29))
 	var allocs []float64
@@ -472,6 +488,7 @@ func TestEncodeFused_AllocsIndependentOfRows(t *testing.T) {
 			allocs = append(allocs, a)
 		}
 	}
+	t.Logf("allocs per call: %v", allocs)
 	for _, a := range allocs {
 		require.LessOrEqual(t, a, 2.0, "allocs per call: %v", allocs)
 	}

@@ -18,6 +18,7 @@ package meta
 
 import (
 	"context"
+	"slices"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/dataview"
@@ -32,7 +33,7 @@ import (
 // previous immutable snapshot is borrowed under the DataView collection lock;
 // it establishes admission, so later index DDL cannot roll a published segment
 // back to its ancestors. Neither this function nor its predicates reenter the
-// DataView manager. SegmentMeta is snapshotted under segMu before index reads.
+// DataView manager. SegmentMeta is snapshotted before index reads.
 func (m *Meta) LoadableProjection(ctx context.Context, collectionID int64, previous *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
 	admitted := typeutil.NewUniqueSet()
 	for _, shard := range previous.GetShards() {
@@ -40,14 +41,10 @@ func (m *Meta) LoadableProjection(ctx context.Context, collectionID int64, previ
 			admitted.Insert(partition.GetSegmentIds()...)
 		}
 	}
-	m.SegMu.RLock()
-	segments := m.Segments.GetSegmentsBySelector(WithCollection(collectionID))
+	segments := m.unstagedProjectionSegments(collectionID)
 	valid := make(map[int64]*SegmentInfo, len(segments))
 	flushed, dropped := typeutil.NewUniqueSet(), typeutil.NewUniqueSet()
 	for _, segment := range segments {
-		if _, staged := m.stagedSegmentToGroup[segment.GetID()]; staged {
-			continue
-		}
 		if segment.GetLevel() == datapb.SegmentLevel_L0 || segment.GetIsImporting() || segment.GetIsFake() ||
 			(len(segment.GetBinlogs()) == 0 && segment.GetManifestPath() == "") {
 			continue
@@ -72,7 +69,6 @@ func (m *Meta) LoadableProjection(ctx context.Context, collectionID int64, previ
 			flushed.Insert(segment.GetID())
 		}
 	}
-	m.SegMu.RUnlock()
 
 	var indexes []*model.Index
 	if m.IndexCatalog != nil {
@@ -155,4 +151,16 @@ func (m *Meta) LoadableProjection(ctx context.Context, collectionID int64, previ
 		result = append(result, segment)
 	}
 	return result, nil
+}
+
+func (m *Meta) unstagedProjectionSegments(collectionID int64) []*SegmentInfo {
+	// Snapshot segments first: if a group commits between the two reads, this
+	// snapshot still has its live parents. Reading group state first could
+	// exclude the new members from a snapshot whose parents are already retired.
+	segments := m.Segments.GetSegmentsBySelector(WithCollection(collectionID))
+	m.groupMu.RLock()
+	defer m.groupMu.RUnlock()
+	return slices.DeleteFunc(segments, func(segment *SegmentInfo) bool {
+		return m.hasStagedSegmentLocked(collectionID, segment.GetID())
+	})
 }

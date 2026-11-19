@@ -139,10 +139,8 @@ func (b *RefinedLookAsideBalancer) cleanupRefinedMetricsLoop(ctx context.Context
 }
 
 // cleanupEvictedMetrics removes the smoothed metrics of nodes that are no
-// longer registered. A node removed here is permanently gone (evicted after
-// repeated health-check failures), so any in-flight request on it completes
-// and its CancelWorkload becomes a no-op — the same behavior as the original
-// balancer, whose metrics entry is removed on eviction too.
+// longer registered. In-flight requests retain their original counters through
+// their release functions, even if the node is registered again after eviction.
 func (b *RefinedLookAsideBalancer) cleanupEvictedMetrics() {
 	b.refinedMetricsMap.Range(func(node int64, metrics *RefinedCostMetrics) bool {
 		if !b.knownNodeInfos.Contain(node) {
@@ -152,12 +150,15 @@ func (b *RefinedLookAsideBalancer) cleanupEvictedMetrics() {
 	})
 }
 
-func (b *RefinedLookAsideBalancer) SelectNode(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
+func (b *RefinedLookAsideBalancer) SelectNode(ctx context.Context, availableNodes []int64, nq int64) (nodeID int64, release func(), err error) {
 	targetNode := int64(-1)
 	defer func() {
-		if targetNode != -1 {
+		if err == nil {
 			metrics, _ := b.refinedMetricsMap.GetOrInsert(targetNode, &RefinedCostMetrics{})
 			metrics.executingNQ.Add(nq)
+			release = func() {
+				metrics.executingNQ.Sub(nq)
+			}
 			// keep an entry in the embedded balancer's metrics map so its
 			// health loop can mark this node unavailable even if it never
 			// returned cost metrics (e.g. proxy restarted while the QN is down)
@@ -178,11 +179,11 @@ func (b *RefinedLookAsideBalancer) SelectNode(ctx context.Context, availableNode
 		}
 
 		if targetNode == -1 {
-			return targetNode, merr.WrapErrServiceUnavailable("all available nodes are unreachable")
+			return targetNode, nil, merr.WrapErrServiceUnavailable("all available nodes are unreachable")
 		}
 
 		b.idx.Inc()
-		return targetNode, nil
+		return targetNode, nil, nil
 	}
 
 	// compute each query node's workload score, select the one with least workload score
@@ -225,18 +226,10 @@ func (b *RefinedLookAsideBalancer) SelectNode(ctx context.Context, availableNode
 	}
 
 	if targetNode == -1 {
-		return targetNode, merr.WrapErrServiceUnavailable("all available nodes are unreachable")
+		return targetNode, nil, merr.WrapErrServiceUnavailable("all available nodes are unreachable")
 	}
 
-	return targetNode, nil
-}
-
-// when task canceled, should reduce executing total nq cost
-func (b *RefinedLookAsideBalancer) CancelWorkload(node int64, nq int64) {
-	metrics, ok := b.refinedMetricsMap.Get(node)
-	if ok {
-		metrics.executingNQ.Sub(nq)
-	}
+	return targetNode, nil, nil
 }
 
 // UpdateCostMetrics caches the latest query node cost metrics and updates the
@@ -249,8 +242,7 @@ func (b *RefinedLookAsideBalancer) UpdateCostMetrics(node int64, cost *internalp
 	b.LookAsideBalancer.UpdateCostMetrics(node, cost)
 	metrics, ok := b.refinedMetricsMap.Get(node)
 	if !ok {
-		metrics = &RefinedCostMetrics{}
-		b.refinedMetricsMap.Insert(node, metrics)
+		metrics, _ = b.refinedMetricsMap.GetOrInsert(node, &RefinedCostMetrics{})
 	}
 	nowTs := time.Now().UnixMilli()
 	// Seed the smoothed value with the fresh sample when the previous one has

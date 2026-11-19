@@ -22,6 +22,7 @@
 #include "index/scalar/text/TextIndexLoader.h"
 #include "index/test_utils/StorageTestUtils.h"
 
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -387,18 +388,15 @@ TEST(TextIndexArtifactTest, LocalBuildStorageOutlivesArtifactAndInput) {
         data.validity.reset(1);
         const ScalarTestInput<std::string_view> input(data);
         const auto view = input.View();
-        TextIndexBuildSource source{.row_count = 3,
-                                    .produce = [&](const auto& consume) {
-                                        for (const auto& batch : view.batches) {
-                                            consume(batch);
-                                        }
-                                    }};
         TextIndexBuildParams params{
             .field_name = "text",
             .tantivy_index_version = TANTIVY_INDEX_LATEST_VERSION,
             .unique_id = "local-storage-test"};
-        auto artifact =
-            std::move(TextIndexBuilder(std::move(params))).Build(source);
+        TextIndexBuilder builder(std::move(params));
+        for (const auto& batch : view.batches) {
+            builder.AddBatch(batch);
+        }
+        auto artifact = std::move(builder).Finish(3);
         storage = std::move(*artifact).IntoStorage();
     }
     ASSERT_NE(storage, nullptr);
@@ -421,6 +419,67 @@ TEST(TextIndexArtifactTest, LocalBuildStorageOutlivesArtifactAndInput) {
     EXPECT_FALSE(is_null[0]);
     EXPECT_TRUE(is_null[1]);
     EXPECT_FALSE(is_null[2]);
+}
+
+TEST(TextIndexArtifactTest, IncrementalBuildConsumesBorrowedBatchImmediately) {
+    TextIndexBuildParams params{
+        .field_name = "text",
+        .tantivy_index_version = TANTIVY_INDEX_LATEST_VERSION,
+        .unique_id = "incremental-borrowed-input"};
+    TextIndexBuilder builder(std::move(params));
+    std::string value;
+    std::string_view view;
+    bool valid = true;
+    for (const auto& text : {"alpha", "ignored", "alpha beta"}) {
+        value = text;
+        view = value;
+        valid = value != "ignored";
+        builder.AddBatch({std::span<const std::string_view>(&view, 1),
+                          ValidityView::FromExpanded(&valid)});
+        value.clear();
+        view = {};
+        valid = false;
+    }
+    auto artifact = std::move(builder).Finish(3);
+    auto storage = std::move(*artifact).IntoStorage();
+    auto index = std::make_shared<TextIndex>(std::move(storage));
+    auto reader = index->CreateReader(nullptr);
+    const auto* text = dynamic_cast<const ITextMatchReader*>(reader.get());
+    ASSERT_NE(text, nullptr);
+    const auto matches = text->MatchQuery("alpha", 1);
+    ASSERT_EQ(matches.size(), 3);
+    EXPECT_TRUE(matches[0]);
+    EXPECT_FALSE(matches[1]);
+    EXPECT_TRUE(matches[2]);
+    const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
+    ASSERT_NE(nulls, nullptr);
+    const auto is_null = nulls->IsNull();
+    EXPECT_FALSE(is_null[0]);
+    EXPECT_TRUE(is_null[1]);
+    EXPECT_FALSE(is_null[2]);
+    EXPECT_THROW(builder.AddBatch({}), SegcoreError);
+    EXPECT_THROW(std::move(builder).Finish(0), SegcoreError);
+}
+
+TEST(TextIndexArtifactTest, IncrementalFinishChecksDeclaredRowCount) {
+    for (const size_t expected_rows : {0, 2}) {
+        TextIndexBuildParams params{
+            .field_name = "text",
+            .tantivy_index_version = TANTIVY_INDEX_LATEST_VERSION,
+            .unique_id = "incremental-row-count"};
+        TextIndexBuilder builder(std::move(params));
+        const std::string_view value = "alpha";
+        builder.AddBatch({std::span<const std::string_view>(&value, 1), {}});
+        EXPECT_THROW(std::move(builder).Finish(expected_rows), SegcoreError);
+    }
+    TextIndexBuildParams params{
+        .field_name = "text",
+        .tantivy_index_version = TANTIVY_INDEX_LATEST_VERSION,
+        .unique_id = "incremental-empty"};
+    TextIndexBuilder builder(std::move(params));
+    auto artifact = std::move(builder).Finish(0);
+    auto storage = std::move(*artifact).IntoStorage();
+    EXPECT_EQ(storage->count_, 0);
 }
 
 TEST(TextIndexArtifactTest, RamArtifactExplicitlyRejectsSerialization) {

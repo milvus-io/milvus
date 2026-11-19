@@ -131,7 +131,7 @@ var (
 			Help:      "number of QueryNodes managered by QueryCoord",
 		}, []string{})
 
-	QueryCoordCurrentTargetCheckpointUnixSeconds = prometheus.NewGaugeVec(
+	QueryCoordCurrentTargetCheckpointUnixSeconds = newVChannelGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
@@ -140,9 +140,9 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			channelNameLabelName,
-		})
+		}, collectionGaugeAggregateDisabled)
 
-	QueryCoordCurrentTargetAllReplicasCheckpointUnixSeconds = prometheus.NewGaugeVec(
+	QueryCoordCurrentTargetAllReplicasCheckpointUnixSeconds = newVChannelGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
@@ -151,9 +151,9 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			channelNameLabelName,
-		})
+		}, collectionGaugeAggregateDisabled)
 
-	QueryCoordTaskLatency = prometheus.NewHistogramVec(
+	QueryCoordTaskLatency = newCollectionVChannelHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,

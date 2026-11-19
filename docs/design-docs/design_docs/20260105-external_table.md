@@ -490,11 +490,68 @@ Supported formats:
 - `lance-table` - Lance dataset directory
 - `vortex` - Vortex files
 - `iceberg-table` - Apache Iceberg tables
+- `paimon-table` - Apache Paimon table snapshots
 - `milvus-table` - Milvus snapshot metadata and source segment manifests
 
 `external_spec` also supports `columns`, `extfs` storage overrides, and
 `snapshot_id` for Iceberg snapshot selection. Parsing and validation are defined
 in `pkg/util/externalspec/specutil/spec.go`.
+
+For Azure workload identity, use an external source such as
+`azure://core.windows.net/<container>/<prefix>` with:
+
+```json
+{
+    "format": "parquet",
+    "extfs": {
+        "cloud_provider": "azure",
+        "use_iam": "true",
+        "access_key_id": "mystorageacct"
+    }
+}
+```
+
+Here `access_key_id` is the required storage account name, not a credential.
+Omit `access_key_value`: a shared account key cannot be combined with workload
+identity. The Milvus pods accessing storage must have `AZURE_CLIENT_ID`,
+`AZURE_TENANT_ID`, and `AZURE_FEDERATED_TOKEN_FILE` configured for an identity
+with read access to the container. Do not set credential broker fields for
+native workload identity. Use `"format": "iceberg-table"` for an Iceberg table.
+This applies to master, where Iceberg reuses the C++ filesystem. See the
+[Azure workload identity E2E instructions](../../../tests/go_client/README_azure_workload_identity.md)
+for deployment prerequisites and verification; the 3.0 Iceberg backend does not
+support this path.
+
+### 4.3.1 Paimon
+
+`paimon-table` uses the Paimon table root as `external_source` and reuses the
+existing `snapshot_id`, `extfs`, create/refresh, index and query paths.
+
+The Paimon-only `scan_mode` selects the read path:
+
+| `scan_mode` | Behavior |
+|-------------|----------|
+| `auto` (default) | Use direct-file reads for eligible splits; otherwise use native DataSplit execution. |
+| `direct-file` | Require safe direct reads of Parquet/Vortex files, including deletion-vector filtering; fail if native Paimon semantics are needed. |
+| `data-split` | Always use the native Paimon reader. |
+
+Paimon descriptors are preserved in StorageV3 file properties (`metadata`).
+Fragment identity includes these properties; direct-file identity excludes only
+`snapshot_id`, so unchanged files can retain segments while deletion-vector
+changes invalidate them. DataSplit identity retains the complete descriptor,
+distinguishing splits that share the same table path.
+
+Direct files follow ordinary fragment and segment organization. Native
+DataSplits stay atomic and are grouped by descriptor bucket ID for segment
+packing, subject to `dataNode.externalCollection.paimon.maxDataSplitsPerSegment`.
+The target row count is not a hard cap for an indivisible DataSplit.
+
+Paimon follows the existing empty-refresh failure policy and retains existing
+segments. `scan_mode` does not trigger or wait for full compaction; Paimon's
+batch visibility rules can exclude uncompacted L0 data for first-row tables and
+deletion-vector tables without merge-on-read. The source must retain referenced
+data/deletion files and, for native DataSplits, snapshot and schema metadata;
+Milvus does not manage Paimon snapshot retention.
 
 ### 4.4 Fragment Structure
 
@@ -1076,6 +1133,7 @@ func ReadFragmentsFromManifest(
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `dataNode.externalCollection.targetRowsPerSegment` | Target rows per segment for ordinary file formats | 1000000 |
+| `dataNode.externalCollection.paimon.maxDataSplitsPerSegment` | Maximum native Paimon DataSplits per segment; must be positive | 64 |
 | `dataCoord.externalCollectionCheckInterval` | Refresh checker interval, in seconds | 10 |
 | `dataCoord.externalCollectionJobTimeout` | Refresh job timeout, in seconds | 3600 |
 | `dataCoord.externalCollectionJobRetention` | Retention of finished/failed jobs, in seconds | 86400 |

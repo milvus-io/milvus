@@ -46,7 +46,7 @@ type indexTaskStats struct {
 }
 
 // indexTaskCounts uses a short, memory-only lock independent of fieldIndexLock.
-// Manifest installs can update it under segMu without waiting for index DDL
+// Manifest installs can update it under a segment writer lock without waiting for index DDL
 // persistence. It adds no per-build objects or pointers.
 // Raw counts and sizes include orphaned/dropped field indexes; counts exclude
 // deleted tasks. Keeping them allows index DDL to adjust totals without visiting
@@ -172,10 +172,10 @@ func (c *indexTaskCounts) replaceIndex(old, current *model.Index) {
 // publishStoredSizes writes the current stored size of every dirty collection,
 // deleting the series of one that has none, so a series deleted by collection
 // cleanup is rebuilt correctly by the next change. Callers run it after
-// releasing segMu and fieldIndexLock: creating or deleting a series waits for an
-// in-flight scrape of the gauge vector. publishMu orders publications and each
-// reads the totals while holding it, so an older total never overwrites a newer
-// one.
+// releasing the segment writer lock and fieldIndexLock: creating or deleting a
+// series waits for an in-flight scrape of the gauge vector. publishMu orders
+// publications and each reads the totals while holding it, so an older total
+// never overwrites a newer one.
 func (c *indexTaskCounts) publishStoredSizes() {
 	c.mu.RLock()
 	idle := len(c.dirtySizes) == 0

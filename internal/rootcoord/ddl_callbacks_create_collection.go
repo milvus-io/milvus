@@ -44,7 +44,7 @@ type collectionDataViewCreator interface {
 }
 
 type collectionDataViewTransformCreator interface {
-	CreateCollectionDataViewWithTransformStarts(ctx context.Context, collectionID int64, vchannels []string, starts map[string]uint64) error
+	CreateCollectionDataViewWithTransformStarts(ctx context.Context, result message.BroadcastResultCreateCollectionMessageV1) error
 }
 
 func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.CreateCollectionRequest) error {
@@ -130,11 +130,7 @@ func (c *DDLCallback) applyCollectionCreation(ctx context.Context, result messag
 	}
 	creator, ok := c.mixCoord.(collectionDataViewCreator)
 	if transformCreator, supportsTransform := c.mixCoord.(collectionDataViewTransformCreator); supportsTransform {
-		starts := make(map[string]uint64, len(body.VirtualChannelNames))
-		for _, vchannel := range body.VirtualChannelNames {
-			starts[vchannel] = result.Results[vchannel].TimeTick
-		}
-		if err := transformCreator.CreateCollectionDataViewWithTransformStarts(ctx, header.CollectionId, body.VirtualChannelNames, starts); err != nil {
+		if err := transformCreator.CreateCollectionDataViewWithTransformStarts(ctx, result); err != nil {
 			return merr.Wrap(err, "failed to create collection data view")
 		}
 	} else if !ok {
@@ -243,7 +239,7 @@ func newCollectionModel(header *message.CreateCollectionMessageHeader, body *mes
 		EnableDynamicField:   body.CollectionSchema.EnableDynamicField,
 		EnableNamespace:      body.CollectionSchema.EnableNamespace,
 		UpdateTimestamp:      ts,
-		SchemaVersion:        0,
+		SchemaVersion:        body.CollectionSchema.GetVersion(),
 		ShardInfos:           shardInfos,
 		FileResourceIds:      body.CollectionSchema.GetFileResourceIds(),
 		ExternalSource:       body.CollectionSchema.ExternalSource,

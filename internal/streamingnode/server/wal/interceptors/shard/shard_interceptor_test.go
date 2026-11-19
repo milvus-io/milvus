@@ -261,21 +261,38 @@ func TestShardInterceptorSharesWriteSchemaWithFunctionRunners(t *testing.T) {
 	require.Same(t, recoverySchema, manager.allocated, "WAL registration must share recovery's schema")
 	require.Same(t, shardManager.GetCollectionSchemaSnapshot(1), manager.allocated)
 
-	t.Run("create", func(t *testing.T) {
-		const collectionID int64 = 2
-		manager.allocated = nil
-		msg := message.NewCreateCollectionMessageBuilderV1().WithVChannel("p0_2v0").
-			WithHeader(&message.CreateCollectionMessageHeader{CollectionId: collectionID}).
-			WithBody(&message.CreateCollectionRequest{CollectionSchema: schema}).
-			MustBuildMutable().WithTimeTick(2).WithLastConfirmedUseMessageID()
-		_, err := interceptor.DoAppend(t.Context(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
-			require.Nil(t, manager.allocated, "registration must follow a successful append")
-			return rmq.NewRmqID(10), nil
+	for _, test := range []struct {
+		name         string
+		collectionID int64
+		vchannel     string
+		restore      bool
+	}{
+		{name: "create", collectionID: 2, vchannel: "p0_2v0"},
+		{name: "restore", collectionID: 3, vchannel: "p0_3v0", restore: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			manager.allocated = nil
+			header := &message.CreateCollectionMessageHeader{CollectionId: test.collectionID}
+			body := &message.CreateCollectionRequest{CollectionSchema: schema}
+			var msg message.MutableMessage
+			if test.restore {
+				msg = message.NewRestoreSnapshotMessageBuilderV2().WithVChannel(test.vchannel).
+					WithHeader(&message.RestoreSnapshotMessageHeader{CollectionId: test.collectionID}).
+					WithBody(&message.RestoreSnapshotMessageBody{CollectionHeader: header, Collection: body}).MustBuildMutable()
+			} else {
+				msg = message.NewCreateCollectionMessageBuilderV1().WithVChannel(test.vchannel).
+					WithHeader(header).WithBody(body).MustBuildMutable()
+			}
+			msg = msg.WithTimeTick(2).WithLastConfirmedUseMessageID()
+			_, err := interceptor.DoAppend(t.Context(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+				require.Nil(t, manager.allocated, "registration must follow a successful append")
+				return rmq.NewRmqID(10), nil
+			})
+			require.NoError(t, err)
+			require.NotNil(t, manager.allocated)
+			require.Same(t, shardManager.GetCollectionSchemaSnapshot(test.collectionID), manager.allocated)
 		})
-		require.NoError(t, err)
-		require.NotNil(t, manager.allocated)
-		require.Same(t, shardManager.GetCollectionSchemaSnapshot(collectionID), manager.allocated)
-	})
+	}
 
 	for _, succeed := range []bool{true, false} {
 		updated := proto.Clone(schema).(*schemapb.CollectionSchema)

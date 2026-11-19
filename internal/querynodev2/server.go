@@ -74,6 +74,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -108,15 +109,16 @@ type QueryNode struct {
 	stopOnce  sync.Once
 
 	// internal components
-	queryViewSegments     atomic.Pointer[qnview.SegmentResourceManager]
-	queryViewHandler      atomic.Pointer[qnview.QNQueryViewHandler]
-	manager               *segments.Manager
-	clusterManager        cluster.Manager
-	pipelineManager       pipeline.Manager
-	subscribingChannels   *typeutil.ConcurrentSet[string]
-	unsubscribingChannels *typeutil.ConcurrentSet[string]
-	delegators            *typeutil.ConcurrentMap[string, delegator.ShardDelegator]
-	serverID              int64
+	queryViewSegments   atomic.Pointer[qnview.SegmentResourceManager]
+	queryViewHandler    atomic.Pointer[qnview.QNQueryViewHandler]
+	manager             *segments.Manager
+	collectionMetricsMu sync.Mutex // serializes aggregate-mode entity gauge publications
+	clusterManager      cluster.Manager
+	pipelineManager     pipeline.Manager
+	// Serializes channel watch/unwatch through mutation and delta publication.
+	channelOperations *channelOperations
+	delegators        *typeutil.ConcurrentMap[string, delegator.ShardDelegator]
+	serverID          int64
 
 	// segment loader
 	loader segments.Loader
@@ -313,6 +315,14 @@ func (node *QueryNode) registerMetricsRequest() {
 			return getSystemInfoMetrics(ctx, req, node)
 		})
 
+	node.metricsRequest.RegisterMetricsRequest(metricsinfo.NodeMemoryMetrics,
+		func(context.Context, *milvuspb.GetMetricsRequest, gjson.Result) (string, error) {
+			return metricsinfo.MarshalComponentInfos(metricsinfo.NodeMemory{
+				Memory:      hardware.GetMemoryCount(),
+				MemoryUsage: hardware.GetUsedMemoryCount(),
+			})
+		})
+
 	node.metricsRequest.RegisterMetricsRequest(metricsinfo.SegmentKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
@@ -405,8 +415,7 @@ func (node *QueryNode) Init() error {
 			})
 		})
 		node.delegators = typeutil.NewConcurrentMap[string, delegator.ShardDelegator]()
-		node.subscribingChannels = typeutil.NewConcurrentSet[string]()
-		node.unsubscribingChannels = typeutil.NewConcurrentSet[string]()
+		node.channelOperations = newChannelOperations()
 		node.manager = segments.NewManager()
 		node.loader = segments.NewLoader(node.ctx, node.manager, node.chunkManager)
 		node.manager.SetLoader(node.loader)

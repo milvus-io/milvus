@@ -148,6 +148,25 @@ routes it to the leaders whose replica lives in that group
 (`ShardLeadersList.resource_groups`) and the proxy attributes its latency to
 that group. Nothing in a stock binary sets it.
 
+The existing `milvus_proxy_req_count`, `milvus_proxy_search_vectors_count`
+and `milvus_proxy_sq_latency` families carry an `rg` label. Unscoped requests,
+including ordinary Milvus traffic, use `rg=""` and are still counted. These
+replace the three `milvus_proxy_resource_group_*` families; each observation
+is recorded only in the original family. Consumers that aggregate over RG
+continue to obtain the overall count or histogram; consumers needing a query
+cluster filter on `rg`. Existing queries of the removed families must migrate
+(or retain a fallback to the original names while old images are running).
+
+The gRPC and REST request counters remain outside the hook so that they see
+the final response, including Mock answers and Before/After refusals. A
+request-local attribution holder carries the admitted hook context's RG back
+to those counters without mutating the context value used for routing. Total
+and outcome are both recorded at completion with the same RG (gRPC previously
+recorded total at entry). A refusal before admission stays unscoped. Successful
+Search/HybridSearch vector counts and Search/HybridSearch/Query latency use
+the routing context directly at their existing observation sites.
+
+
 ### Form-gated behaviors
 
 A distribution declares the deployment shape its coordinator behaviors are
@@ -294,8 +313,8 @@ them through `user.yaml` or the environment.
 - querynode: a compiled-in query hook is used, `queryNode.soPath` ignored beside it,
   absent by default, initialized with the `autoIndex.params.*` configuration,
   and not installed when it cannot initialize.
-- proxy: a hook-pinned resource group reaches the search task; per-resource-
-  group latency series exist only for pinned requests; both streams consult
+- proxy: a hook-pinned resource group reaches the search task; latency, vector counts and request counts use the pinned RG, or an empty
+  label for unscoped requests; both streams consult
   the hook, and every stream the service declares is one of them.
 - mixcoord: the engine starts on activation only, receives the coordinator
   client, and is stopped once.

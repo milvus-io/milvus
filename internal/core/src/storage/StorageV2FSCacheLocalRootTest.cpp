@@ -89,7 +89,7 @@ TEST(StorageV2FSCacheLocalRootTest, InternalPropertiesUseSlashForLocal) {
     c_config.storage_type = "local";
     auto props = MakeInternalPropertiesFromStorageConfig(c_config);
     auto root = milvus_storage::api::GetValue<std::string>(
-        *props, PROPERTY_FS_ROOT_PATH);
+        props, PROPERTY_FS_ROOT_PATH);
     ASSERT_TRUE(root.ok());
     EXPECT_EQ(root.ValueOrDie(), "/");
 
@@ -98,7 +98,11 @@ TEST(StorageV2FSCacheLocalRootTest, InternalPropertiesUseSlashForLocal) {
     remote.storage_type = "remote";
     auto remote_props = MakeInternalPropertiesFromStorageConfig(remote);
     auto remote_root = milvus_storage::api::GetValue<std::string>(
-        *remote_props, PROPERTY_FS_ROOT_PATH);
+        remote_props, PROPERTY_FS_ROOT_PATH);
     ASSERT_TRUE(remote_root.ok());
     EXPECT_EQ(remote_root.ValueOrDie(), "files");
+    auto use_crt = milvus_storage::api::GetValue<bool>(remote_props,
+                                                       PROPERTY_FS_S3_USE_CRT);
+    ASSERT_TRUE(use_crt.ok());
+    EXPECT_FALSE(*use_crt);
 }

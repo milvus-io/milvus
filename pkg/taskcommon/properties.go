@@ -35,6 +35,11 @@ const (
 	NumRowsKey      = "num_row"      // optional, only for Index, Stats
 	TaskVersionKey  = "task_version" // optional, for version-aware tasks
 	CollectionIDKey = "collection_id"
+	// optional: the names of the collection a task works on; absent when the
+	// coordinator cannot resolve the collection.
+	CollectionNameKey = "collection_name"
+	DatabaseIDKey     = "database_id"
+	DatabaseNameKey   = "database_name"
 
 	// result
 	StateKey      = "task_state"
@@ -94,6 +99,18 @@ func (p Properties) AppendTaskVersion(version int64) {
 
 func (p Properties) AppendCollectionID(collectionID int64) {
 	p[CollectionIDKey] = fmt.Sprintf("%d", collectionID)
+}
+
+func (p Properties) AppendCollectionName(collectionName string) {
+	p[CollectionNameKey] = collectionName
+}
+
+func (p Properties) AppendDatabaseID(databaseID int64) {
+	p[DatabaseIDKey] = fmt.Sprintf("%d", databaseID)
+}
+
+func (p Properties) AppendDatabaseName(databaseName string) {
+	p[DatabaseNameKey] = databaseName
 }
 
 func (p Properties) AppendReason(reason string) {
@@ -216,6 +233,26 @@ func (p Properties) GetCollectionID() (int64, error) {
 		return 0, err
 	}
 	return collectionID, nil
+}
+
+// GetCollectionName returns "" when the coordinator sent no name.
+func (p Properties) GetCollectionName() string {
+	return p[CollectionNameKey]
+}
+
+// GetDatabaseID returns 0 when the coordinator sent no database ID or an
+// unparsable one.
+func (p Properties) GetDatabaseID() int64 {
+	databaseID, err := strconv.ParseInt(p[DatabaseIDKey], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return databaseID
+}
+
+// GetDatabaseName returns "" when the coordinator sent no name.
+func (p Properties) GetDatabaseName() string {
+	return p[DatabaseNameKey]
 }
 
 func (p Properties) GetCostTime() int64 {

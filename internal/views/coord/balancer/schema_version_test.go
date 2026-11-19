@@ -8,12 +8,48 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/dataview"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func testLatestSchema(context.Context, int64) (int32, error) { panic("mock with mockey") }
+
+func TestInitialNonzeroDataViewSchemaAllowsQueryViewPlanning(t *testing.T) {
+	const version int32 = 7
+	patch := mockey.Mock(testLatestSchema).Return(version, nil).Build()
+	defer patch.UnPatch()
+	reg := emptyRegistry(t)
+	c := newTestCache(cfgFor(1, 10, []int64{1}, nil))
+	id := cacheShard(1, 10)
+	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
+	t.Cleanup(reg.RegisterPublicationListener(c.PublishShard))
+	client, _ := kvfactory.GetEtcdAndPath()
+	store := etcdkv.NewEtcdKV(client, "55265-planner-"+funcutil.RandomString(12))
+	t.Cleanup(func() { require.NoError(t, store.RemoveWithPrefix(context.Background(), "")) })
+	manager, err := dataview.RecoverManager(t.Context(), datacoordkv.NewCatalog(store, "", ""), func(context.Context, int64) (bool, error) {
+		return true, nil
+	}, nil, nil, nil)
+	require.NoError(t, err)
+	t.Cleanup(manager.RegisterDataViewListener(c.PublishDataView))
+	_, err = manager.OnCreateCollection(t.Context(), dataview.CreateCollectionDataViewEvent{
+		CollectionID: 1, VChannels: []string{id.VChannel}, TransformStarts: map[string]uint64{id.VChannel: 100}, SchemaVersion: version,
+	})
+	require.NoError(t, err)
+	c.MarkReady()
+	b := NewDefaultBalancer(c, reg, nil, testLatestSchema)
+	b.Trigger()
+	require.NoError(t, b.Reconcile(t.Context()))
+	require.NotNil(t, reg.Get(id), "matching initial DataView schema must permit QueryView planning")
+	stats := reg.Get(id).Stats()
+	require.NotNil(t, stats.PreparingVersion)
+	require.Equal(t, version, stats.PreparingSchemaVersion)
+}
 
 func TestReconcileUsesDataViewSchemaAndPreemptsObsoletePreparing(t *testing.T) {
 	latest, reads := int32(1), 0

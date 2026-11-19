@@ -123,9 +123,9 @@ func TestSchedulerHonorsConcurrencyLimit(t *testing.T) {
 	}
 
 	handles := []TaskHandle{
-		scheduler.Submit(newTask()),
-		scheduler.Submit(newTask()),
-		scheduler.Submit(newTask()),
+		scheduler.Submit(newTask(), WithPriority(MaxPriority)),
+		scheduler.Submit(newTask(), WithPriority(MaxPriority)),
+		scheduler.Submit(newTask(), WithPriority(MaxPriority)),
 	}
 
 	for i := 0; i < 2; i++ {
@@ -161,8 +161,8 @@ func TestSchedulerResizeScalesUp(t *testing.T) {
 			return nil
 		})
 	}
-	first := scheduler.Submit(newTask())
-	second := scheduler.Submit(newTask())
+	first := scheduler.Submit(newTask(), WithPriority(MaxPriority))
+	second := scheduler.Submit(newTask(), WithPriority(MaxPriority))
 
 	select {
 	case <-started:
@@ -199,8 +199,8 @@ func TestSchedulerResizeScalesDownBetweenTasks(t *testing.T) {
 			return nil
 		})
 	}
-	first := scheduler.Submit(initialTask())
-	second := scheduler.Submit(initialTask())
+	first := scheduler.Submit(initialTask(), WithPriority(MaxPriority))
+	second := scheduler.Submit(initialTask(), WithPriority(MaxPriority))
 	for i := 0; i < 2; i++ {
 		select {
 		case <-initialStarted:
@@ -223,8 +223,8 @@ func TestSchedulerResizeScalesDownBetweenTasks(t *testing.T) {
 			return nil
 		})
 	}
-	third := scheduler.Submit(nextTask())
-	fourth := scheduler.Submit(nextTask())
+	third := scheduler.Submit(nextTask(), WithPriority(MaxPriority))
+	fourth := scheduler.Submit(nextTask(), WithPriority(MaxPriority))
 	select {
 	case <-nextStarted:
 	case <-time.After(time.Second):
@@ -253,8 +253,8 @@ func TestSchedulerResizeDoesNotOverProvisionPendingWorkers(t *testing.T) {
 			return nil
 		})
 	}
-	first := scheduler.Submit(newTask())
-	second := scheduler.Submit(newTask())
+	first := scheduler.Submit(newTask(), WithPriority(MaxPriority))
+	second := scheduler.Submit(newTask(), WithPriority(MaxPriority))
 	for i := 0; i < 2; i++ {
 		select {
 		case <-started:

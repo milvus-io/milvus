@@ -163,3 +163,42 @@ func TestQueryViewLoadProgressPublicAPIs(t *testing.T) {
 	require.NoError(t, err)
 	require.ErrorIs(t, merr.Error(response2.GetStatus()), merr.ErrServiceUnavailable)
 }
+
+// A snapshot copies every loaded collection after any load change, so only a
+// request for every collection may take one.
+func TestShowLoadCollectionsSnapshotsOnlyForEveryCollection(t *testing.T) {
+	paramtable.Init()
+	previousCache := meta.GlobalFailedLoadCache
+	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
+	t.Cleanup(func() { meta.GlobalFailedLoadCache = previousCache })
+	ctx := context.Background()
+	cfg := &loadmgr.LoadConfig{CollectionID: 1, Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 10}}}
+	version := uint64(2)
+	snapshots := 0
+	for _, patch := range []*mockey.Mocker{
+		mockey.Mock((*loadmgr.LoadConfigStore).Contains).Return(true).Build(),
+		mockey.Mock((*loadmgr.LoadConfigStore).GetConfigWithVersion).Return(cfg, version).Build(),
+		mockey.Mock((*loadmgr.LoadConfigStore).Snapshot).To(func(_ *loadmgr.LoadConfigStore) *loadmgr.LoadConfigSnapshot {
+			snapshots++
+			return loadmgr.NewLoadConfigSnapshotWithVersions(version, map[int64]*loadmgr.LoadConfig{1: cfg}, map[int64]uint64{1: version})
+		}).Build(),
+		mockey.Mock((*meta.CoordinatorBroker).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{VirtualChannelNames: []string{"v0"}}, nil).Build(),
+		mockey.Mock((*coordview.ShardViewRegistry).SnapshotForShards).Return(coordview.NewShardViewSnapshot(1, nil)).Build(),
+	} {
+		t.Cleanup(func() { patch.UnPatch() })
+	}
+	s := &Server{broker: &meta.CoordinatorBroker{}, qviewsRuntime: &qviewsRuntime{loadConfigStore: &loadmgr.LoadConfigStore{}, shardViewRegistry: &coordview.ShardViewRegistry{}}}
+	s.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	response, err := s.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{CollectionIDs: []int64{1}})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(response.GetStatus()))
+	require.Equal(t, []int64{1}, response.GetCollectionIDs())
+	require.Zero(t, snapshots)
+
+	response, err = s.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(response.GetStatus()))
+	require.Equal(t, []int64{1}, response.GetCollectionIDs())
+	require.Equal(t, 1, snapshots)
+}

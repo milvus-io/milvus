@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/segment"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -52,7 +53,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -99,19 +99,15 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		}, nil
 	}
 
-	var bc broadcaster.BroadcastAPI
-	if streamingutil.IsStreamingServiceEnabled() {
-		var err error
-		bc, err = s.ddl.StartLocalFlushBroadcast(ctx, req.GetCollectionID())
-		if err != nil {
-			return &datapb.FlushResponse{
-				Status: merr.Status(err),
-			}, nil
-		}
-		defer bc.Close()
+	bc, err := s.ddl.StartLocalFlushBroadcast(ctx, req.GetCollectionID())
+	if err != nil {
+		return &datapb.FlushResponse{
+			Status: merr.Status(err),
+		}, nil
 	}
+	defer bc.Close()
 
-	flushResult, err := s.flushCollection(ctx, req.GetCollectionID(), req.GetSegmentIDs(), bc)
+	flushResult, err := s.flushCollection(ctx, req.GetCollectionID(), bc)
 	if err != nil {
 		return &datapb.FlushResponse{Status: merr.Status(err)}, nil
 	}
@@ -140,7 +136,7 @@ func (s *Server) broadcastManualFlush(ctx context.Context, bc broadcaster.Broadc
 	return err
 }
 
-func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, toFlushSegments []UniqueID, bc broadcaster.BroadcastAPI) (*datapb.FlushResult, error) {
+func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, bc broadcaster.BroadcastAPI) (*datapb.FlushResult, error) {
 	channelCPs := make(map[string]*msgpb.MsgPosition, 0)
 	coll, err := s.handler.GetCollection(ctx, collectionID)
 	if err != nil {
@@ -156,31 +152,13 @@ func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, toF
 		channelCPs[vchannel] = cp
 	}
 
-	var flushTs uint64
 	timeOfSeal := time.Now()
-	sealedSegmentsIDDict := make(map[UniqueID]bool)
 
-	if bc != nil {
-		// AckSyncUp proves completion directly; zero tells GetFlushState that
-		// no independently reported channel checkpoint needs to be checked.
-		if err := s.broadcastManualFlush(ctx, bc, coll); err != nil {
-			return nil, err
-		}
-	} else {
-		flushTs, err = s.allocator.AllocTimestamp(ctx)
-		if err != nil {
-			return nil, err
-		}
-		timeOfSeal, _ = tsoutil.ParseTS(flushTs)
-		for _, channel := range coll.VChannelNames {
-			sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, channel, toFlushSegments)
-			if err != nil {
-				return nil, merr.Wrapf(err, "failed to flush collection %d", collectionID)
-			}
-			for _, sealedSegmentID := range sealedSegmentIDs {
-				sealedSegmentsIDDict[sealedSegmentID] = true
-			}
-		}
+	// AckSyncUp proves completion directly. The response therefore carries no
+	// flush timestamp: zero tells GetFlushState that no independently reported
+	// channel checkpoint needs to be checked.
+	if err := s.broadcastManualFlush(ctx, bc, coll); err != nil {
+		return nil, err
 	}
 
 	segments := s.meta.GetSegmentsOfCollection(ctx, collectionID)
@@ -188,26 +166,20 @@ func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, toF
 	for _, seg := range segments {
 		if seg != nil &&
 			meta.IsFlushState(seg.GetState()) &&
-			seg.GetLevel() != datapb.SegmentLevel_L0 && // SegmentLevel_Legacy, SegmentLevel_L1, SegmentLevel_L2
-			!sealedSegmentsIDDict[seg.GetID()] {
+			seg.GetLevel() != datapb.SegmentLevel_L0 { // SegmentLevel_Legacy, SegmentLevel_L1, SegmentLevel_L2
 			flushSegmentIDs = append(flushSegmentIDs, seg.GetID())
 		}
 	}
 
 	mlog.Info(ctx, "flush response with segments",
 		mlog.Int64("collectionID", collectionID),
-		mlog.Int64s("sealSegments", lo.Keys(sealedSegmentsIDDict)),
 		mlog.Int("flushedSegmentsCount", len(flushSegmentIDs)),
-		mlog.Time("timeOfSeal", timeOfSeal),
-		mlog.Uint64("flushTs", flushTs),
-		mlog.Time("flushTs in time", tsoutil.PhysicalTime(flushTs)))
+		mlog.Time("timeOfSeal", timeOfSeal))
 
 	return &datapb.FlushResult{
 		CollectionID:    collectionID,
-		SegmentIDs:      lo.Keys(sealedSegmentsIDDict),
 		TimeOfSeal:      timeOfSeal.Unix(),
 		FlushSegmentIDs: flushSegmentIDs,
-		FlushTs:         flushTs,
 		ChannelCps:      channelCPs,
 		DbName:          coll.DatabaseName,
 		CollectionName:  coll.Schema.GetName(),
@@ -273,63 +245,17 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 	}, nil
 }
 
-// AssignSegmentID applies for segment ids and make allocation for records.
+// AssignSegmentID was the row-quota allocation of the pre-streaming write
+// path. Growing segments are allocated by the streaming node through
+// AllocSegment now; the RPC is kept in the service definition only.
 func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.AssignSegmentIDResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
-
-	assigns := make([]*datapb.SegmentIDAssignment, 0, len(req.SegmentIDRequests))
-
-	for _, r := range req.SegmentIDRequests {
-		mlog.Info(context.TODO(), "handle assign segment request",
-			mlog.Int64("collectionID", r.GetCollectionID()),
-			mlog.Int64("partitionID", r.GetPartitionID()),
-			mlog.String("channelName", r.GetChannelName()),
-			mlog.Uint32("count", r.GetCount()),
-		)
-
-		// Load the collection info from Root Coordinator, if it is not found in server meta.
-		// Note: this request wouldn't be received if collection didn't exist.
-		_, err := s.handler.GetCollection(ctx, r.GetCollectionID())
-		if err != nil {
-			mlog.Warn(context.TODO(), "cannot get collection schema", mlog.Err(err))
-		}
-
-		// Have segment manager allocate and return the segment allocation info.
-		segmentAllocations, err := s.segmentManager.AllocSegment(ctx,
-			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count), r.GetStorageVersion())
-		if err != nil {
-			mlog.Warn(context.TODO(), "failed to alloc segment", mlog.Any("request", r), mlog.Err(err))
-			assigns = append(assigns, &datapb.SegmentIDAssignment{
-				ChannelName:  r.ChannelName,
-				CollectionID: r.CollectionID,
-				PartitionID:  r.PartitionID,
-				Status:       merr.Status(err),
-			})
-			continue
-		}
-
-		mlog.Info(context.TODO(), "success to assign segments", mlog.Int64("collectionID", r.GetCollectionID()), mlog.Any("assignments", segmentAllocations))
-
-		for _, allocation := range segmentAllocations {
-			result := &datapb.SegmentIDAssignment{
-				SegID:        allocation.SegmentID,
-				ChannelName:  r.ChannelName,
-				Count:        uint32(allocation.NumOfRows),
-				CollectionID: r.CollectionID,
-				PartitionID:  r.PartitionID,
-				ExpireTime:   allocation.ExpireTime,
-				Status:       merr.Success(),
-			}
-			assigns = append(assigns, result)
-		}
-	}
 	return &datapb.AssignSegmentIDResponse{
-		Status:           merr.Success(),
-		SegIDAssignments: assigns,
+		Status: merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "AssignSegmentID is removed, growing segments are allocated by the streaming node")),
 	}, nil
 }
 
@@ -728,11 +654,8 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 
 		// Set segment state
 		if req.GetDropped() {
-			// segmentManager manages growing segments
-			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
 			operators = append(operators, meta.UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Dropped))
 		} else if req.GetFlushed() {
-			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
 			// keep the original SegmentMeta persistence semantics: when sort
 			// compaction is enabled, a flushed non-L0 Segment stays invisible
 			// until its sorted output replaces it (see data_view.md TODO).
@@ -779,10 +702,10 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	// with SegmentMeta in one catalog txn (flush atomicity): the snapshot is
 	// prepared under the DataView Collection lock, composed into the same
 	// Update, and loaded into the manager memory only after the txn commits.
-	// Lock order is DataView Collection lock -> segMu (inside
-	// UpdateSegmentsInfoAndDataView); the queue worker's Recompute takes the
-	// same order (DataView lock -> segMu.RLock via loadableProjection), so no
-	// deadlock. On failure the lock is aborted and the StreamingNode retries
+	// Lock order is DataView Collection lock -> segment writer lock (inside
+	// UpdateSegmentsInfoAndDataView); the queue worker's Recompute takes only
+	// the DataView lock (loadableProjection reads without a segment lock), so
+	// no deadlock. On failure the lock is aborted and the StreamingNode retries
 	// the whole SaveBinlogPaths until the DataView version is durably
 	// published (the syncmgr meta writer retries indefinitely).
 	//
@@ -1031,7 +954,6 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	s.segmentManager.DropSegmentsOfChannel(ctx, channel)
 	s.compactionInspector.RemoveTasksByChannel(channel)
 	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(paramtable.GetStringNodeID(), channel)
 	s.meta.MarkChannelCheckpointDropped(ctx, channel)
@@ -1862,13 +1784,6 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 		return merr.Status(err), nil
 	}
 
-	for _, pos := range checkpoints {
-		if pos == nil || pos.GetMsgID() == nil || pos.GetChannelName() == "" {
-			continue
-		}
-		s.segmentManager.CleanZeroSealedSegmentsOfChannel(ctx, pos.GetChannelName(), pos.GetTimestamp())
-	}
-
 	return merr.Success(), nil
 }
 
@@ -2226,7 +2141,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 
 	// Persist malformed durable input as a Failed job rather than retrying the
 	// same ACK forever. This validation is pure: source reads belong to Pending.
-	sourceErr := importutilv2.ValidateSnapshotImportPlan(files, options, nil)
+	sourceErr := importutilv2.ValidateImportPlan(files, options, nil)
 	timeoutTs, err := importutilv2.GetTimeoutTs(options)
 	if err != nil {
 		if sourceErr == nil && !importutilv2.IsSnapshotSource(options) {
@@ -2438,7 +2353,6 @@ func (s *Server) NotifyDropPartition(ctx context.Context, channel string, collec
 		mlog.String("channelname", channel),
 		mlog.FieldCollectionID(collectionID),
 		mlog.Any("partitionID", partitionIDs))
-	s.segmentManager.DropSegmentsOfPartition(ctx, channel, partitionIDs)
 	// release all segments of the partition.
 	if err := s.meta.DropSegmentsOfPartition(ctx, partitionIDs); err != nil {
 		return err
@@ -3307,11 +3221,39 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job bulkimpor
 	if len(vchannels) == 0 {
 		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID())
 	}
+	isNotCreated := broadcaster.IsBroadcastTaskNotCreated
 	broadcaster, err := s.ddl.StartBroadcastWithCollectionID(ctx, job.GetCollectionID())
 	if err != nil {
 		return err
 	}
 	defer broadcaster.Close()
+	if err := s.prepareImportPublication(ctx, job); err != nil {
+		return err
+	}
+	markedByAttempt := false
+	if Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool() ||
+		(s.meta != nil && len(s.meta.ProducerChangeGroups(model.SegmentChangeSourceImportJob, job.GetJobID(), "")) > 0) {
+		// Preparation may have registered groups long before they became READY.
+		// Persist the point of no return immediately before starting the WAL
+		// broadcast. Timeout and other failure updates share importMeta's lock
+		// with this action and cannot reclaim a possibly durable commit.
+		if err := s.importMeta.UpdateJob(ctx, job.GetJobID(), func(current bulkimport.ImportJob) {
+			markedByAttempt = current.GetState() == internalpb.ImportJobState_Uncommitted && !current.GetCommitBroadcastStarted()
+			bulkimport.UpdateJobCommitBroadcastStarted(current)
+		}); err != nil {
+			return err
+		}
+		current := s.importMeta.GetJob(ctx, job.GetJobID())
+		if current == nil {
+			return merr.WrapErrServiceUnavailableMsg("import job %d disappeared before commit broadcast", job.GetJobID())
+		}
+		if current.GetState() == internalpb.ImportJobState_Committing || current.GetState() == internalpb.ImportJobState_Completed {
+			return nil
+		}
+		if current.GetState() != internalpb.ImportJobState_Uncommitted || !current.GetCommitBroadcastStarted() {
+			return merr.WrapErrServiceUnavailableMsg("import job %d became %s before commit broadcast", job.GetJobID(), current.GetState())
+		}
+	}
 
 	var opts []message.OptBuildBroadcast
 	if job.GetCommitByCoordinator() {
@@ -3331,6 +3273,20 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job bulkimpor
 		MustBuildBroadcast()
 
 	_, err = broadcaster.Broadcast(ctx, msg)
+	if err != nil && markedByAttempt && isNotCreated(err) {
+		// Only the broadcaster's explicit pre-registration result proves that
+		// this attempt cannot have reached the WAL. A prior attempt or an
+		// ambiguous error must keep the fence for recovery.
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if clearErr := s.importMeta.UpdateJob(cleanupCtx, job.GetJobID(), func(current bulkimport.ImportJob) {
+			if current.GetState() == internalpb.ImportJobState_Uncommitted {
+				current.(*bulkimport.Job).CommitBroadcastStarted = false
+			}
+		}); clearErr != nil {
+			mlog.Warn(ctx, "failed to clear import broadcast marker after rejected task", mlog.FieldJobID(job.GetJobID()), mlog.Err(clearErr))
+		}
+	}
 	return err
 }
 
@@ -3499,6 +3455,10 @@ func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest
 			if state == internalpb.ImportJobState_Failed && job.GetReason() == bulkimport.ImportJobReasonAbortedByUser {
 				return merr.Success()
 			}
+			if job.GetCommitBroadcastStarted() {
+				return merr.Status(merr.WrapErrImportFailed(
+					fmt.Sprintf("job %d commit broadcast may have started, abort not allowed", req.GetJobId())))
+			}
 			// Committed states are truly terminal and cannot be rolled back.
 			if bulkimport.UnfailableJobStates.Contain(state) {
 				return merr.Status(merr.WrapErrImportFailed(
@@ -3538,6 +3498,11 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	// reenter importMeta while updating segment visibility.
 	ids := bulkimport.GetImportSegmentIDsByVchannel(ctx, s.importMeta, s.meta, req.GetJobId(), req.GetVchannel())
 	err := s.importMeta.HandleCommitVchannel(ctx, req.GetJobId(), req.GetVchannel(), func() error {
+		if job != nil {
+			if staged, err := s.stageImportChange(ctx, job, req.GetVchannel(), ids, req.GetCommitTimestamp()); staged {
+				return err
+			}
+		}
 		ops := make([]meta.UpdateOperator, 0, len(ids)*2)
 		for _, id := range ids {
 			ops = append(ops, meta.UpdateCommitTimestamp(id, req.GetCommitTimestamp()), meta.UpdateIsImporting(id, false))

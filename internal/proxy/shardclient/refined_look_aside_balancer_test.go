@@ -311,7 +311,7 @@ func (suite *RefinedLookAsideBalancerSuite) TestSelectNodeSubMillisecondNoHerdin
 
 	counter := make(map[int64]int64)
 	for i := 0; i < 300; i++ {
-		node, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
+		node, _, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
 		suite.NoError(err)
 		counter[node]++
 	}
@@ -345,7 +345,7 @@ func (suite *RefinedLookAsideBalancerSuite) TestOldLookAsideHerdsWithoutFix() {
 
 	counter := make(map[int64]int64)
 	for i := 0; i < 300; i++ {
-		node, err := old.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
+		node, _, err := old.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
 		suite.NoError(err)
 		counter[node]++
 	}
@@ -379,9 +379,9 @@ func (suite *RefinedLookAsideBalancerSuite) TestSelectNodeSteeringConverges() {
 		if metrics1.executingNQ.Load() > 0 {
 			metrics1.executingNQ.Sub(1)
 		}
-		node, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
+		node, release, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
 		suite.NoError(err)
-		suite.balancer.CancelWorkload(node, 1)
+		release()
 		counter[node]++
 		if i < 20 && node == 1 {
 			earlyPicks++
@@ -407,7 +407,7 @@ func (suite *RefinedLookAsideBalancerSuite) TestSelectNodeFastPathSkipsUnavailab
 
 	suite.balancer.idx.Store(1)
 
-	node, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
+	node, _, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
 	suite.NoError(err)
 	suite.Equal(int64(3), node)
 }
@@ -421,15 +421,15 @@ func (suite *RefinedLookAsideBalancerSuite) TestSelectNodeFastPathAllUnavailable
 
 	suite.balancer.idx.Store(1)
 
-	node, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
+	node, _, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
 	suite.ErrorIs(err, merr.ErrServiceUnavailable)
 	suite.Equal(int64(-1), node)
 }
 
-func (suite *RefinedLookAsideBalancerSuite) TestCancelWorkload() {
-	node, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 10)
+func (suite *RefinedLookAsideBalancerSuite) TestReleaseWorkload() {
+	node, release, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 10)
 	suite.NoError(err)
-	suite.balancer.CancelWorkload(node, 10)
+	release()
 
 	metrics, ok := suite.balancer.refinedMetricsMap.Get(node)
 	suite.True(ok)
@@ -479,7 +479,7 @@ func (suite *RefinedLookAsideBalancerSuite) TestCheckHealthLoop() {
 		metrics, ok := suite.balancer.metricsMap.Get(1)
 		return ok && metrics.unavailable.Load()
 	}, 5*time.Second, 100*time.Millisecond)
-	targetNode, err := suite.balancer.SelectNode(context.Background(), []int64{1}, 1)
+	targetNode, _, err := suite.balancer.SelectNode(context.Background(), []int64{1}, 1)
 	suite.ErrorIs(err, merr.ErrServiceUnavailable)
 	suite.Equal(int64(-1), targetNode)
 
@@ -501,7 +501,7 @@ func (suite *RefinedLookAsideBalancerSuite) TestHealthLoopMarksUnavailableWithou
 	// SelectNode exists in the embedded metrics map. The inherited health
 	// loop must still be able to mark it unavailable after the configured
 	// number of failed health checks.
-	node, err := suite.balancer.SelectNode(context.TODO(), []int64{1}, 1)
+	node, _, err := suite.balancer.SelectNode(context.TODO(), []int64{1}, 1)
 	suite.NoError(err)
 	suite.Equal(int64(1), node)
 	suite.balancer.RegisterNodeInfo([]NodeInfo{
@@ -515,7 +515,7 @@ func (suite *RefinedLookAsideBalancerSuite) TestHealthLoopMarksUnavailableWithou
 		return ok && metrics.unavailable.Load()
 	}, 30*time.Second, 100*time.Millisecond)
 
-	targetNode, err := suite.balancer.SelectNode(context.Background(), []int64{1}, 1)
+	targetNode, _, err := suite.balancer.SelectNode(context.Background(), []int64{1}, 1)
 	suite.ErrorIs(err, merr.ErrServiceUnavailable)
 	suite.Equal(int64(-1), targetNode)
 }

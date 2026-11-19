@@ -190,6 +190,22 @@ func (s *LogFormatterSuite) TestFormatMethodResult() {
 	}
 }
 
+func (s *LogFormatterSuite) TestFormatEscapesLineBreaks() {
+	fmt := "$user_name: $method_expr: $error_msg: $collection_name"
+	formatter := NewFormatter(fmt)
+
+	md := metadata.Pairs(util.HeaderAuthorize, crypto.Base64Encode("evil\r\nuser:mockPass"))
+	ctx := metadata.NewIncomingContext(s.ctx, md)
+	req := &milvuspb.QueryRequest{
+		CollectionName: "test\\collection",
+		Expr:           "age > 10\n[ACCESS] <root: tcp-10.0.0.1:443> DropCollection",
+	}
+	i := info.NewGrpcAccessInfo(ctx, s.serverinfo, req)
+	i.SetResult(nil, merr.WrapErrParameterInvalidMsg("line1\nline2"))
+
+	s.Equal("evil\\r\\nuser: age > 10\\n[ACCESS] <root: tcp-10.0.0.1:443> DropCollection: line1\\nline2: invalid parameter: test\\collection\n", formatter.Format(i))
+}
+
 func (s *LogFormatterSuite) TestParseConfigKeyFailed() {
 	configKey := ".testf.invalidSub"
 	_, _, err := parseConfigKey(configKey)

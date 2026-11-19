@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -49,13 +50,11 @@ type refreshExternalCollectionTask struct {
 	refreshMeta *ExternalCollectionRefreshMeta
 	mt          *meta.Meta
 	allocator   allocator.Allocator
-	// processFinishedJob is the per-job entry point on the refresh checker.
-	// The task calls it synchronously after transitioning to a terminal state
-	// so the finished-callback (schema update + WAL broadcast) fires before
-	// the task method returns and progress polls observe a consistent state.
-	// The checker still runs the same logic on its periodic tick as a safety
-	// net for missed events. Set by the manager during task wrapping; nil in
-	// unit tests.
+	// processFinishedJob tells the refresh checker that a task reached a
+	// terminal state, so the job does not wait for the next periodic tick. It
+	// must not block: the task methods run on the global task scheduler, and
+	// the job processing publishes the schema through DDL. Set by the manager
+	// during task wrapping; nil in unit tests.
 	processFinishedJob func(jobID int64)
 }
 
@@ -152,14 +151,11 @@ func (t *refreshExternalCollectionTask) UpdateStateWithMeta(state indexpb.JobSta
 	}
 	t.SetState(state, failReason)
 
-	// When the task reaches a terminal state, synchronously drive per-job
-	// processing on the checker. processJob is the single aggregation point
-	// — it re-reads tasks, transitions job state, and fires the finish
-	// callback + schema update + WAL broadcast before this method returns.
-	// This guarantees that callers polling GetRefreshExternalCollectionProgress
-	// observe a consistent state: when the job appears Finished, the schema
-	// update has already been applied. The checker's periodic tick runs the
-	// same logic as a safety net for missed events (e.g., DataCoord restart).
+	// When the task reaches a terminal state, ask the checker to process the
+	// job. processJob is the single aggregation point — it re-reads tasks,
+	// transitions job state, and fires the finish callback + schema update +
+	// WAL broadcast on the checker goroutine. The checker's periodic tick runs
+	// the same logic as a safety net for missed events (e.g., DataCoord restart).
 	if state == indexpb.JobState_JobStateFinished || state == indexpb.JobState_JobStateFailed {
 		if t.processFinishedJob != nil {
 			t.processFinishedJob(t.GetJobId())
@@ -222,9 +218,28 @@ func applyExternalCollectionSegmentUpdateAtFence(
 	starts map[string]uint64,
 	logFields ...mlog.Field,
 ) error {
+	return applyExternalCollectionSegmentUpdateWithGroupAtFence(ctx, mt, collectionID, 0, baselineSegmentIDs, keptSegmentIDs, updatedSegments, starts, logFields...)
+}
+
+func applyExternalCollectionSegmentUpdateWithGroup(ctx context.Context, mt *meta.Meta, collectionID, jobID int64, baselineSegmentIDs, keptSegmentIDs []int64, updatedSegments []*datapb.SegmentInfo, logFields ...mlog.Field) error {
+	return applyExternalCollectionSegmentUpdateWithGroupAtFence(ctx, mt, collectionID, jobID, baselineSegmentIDs, keptSegmentIDs, updatedSegments, nil, logFields...)
+}
+
+func applyExternalCollectionSegmentUpdateWithGroupAtFence(ctx context.Context, mt *meta.Meta, collectionID, jobID int64, baselineSegmentIDs, keptSegmentIDs []int64, updatedSegments []*datapb.SegmentInfo, starts map[string]uint64, logFields ...mlog.Field) error {
 	if mt == nil {
 		return merr.WrapErrServiceInternalMsg("meta is nil, cannot update segments")
 	}
+	if g := mt.ProducerChangeGroup(model.SegmentChangeSourceExternalRefresh, jobID, ""); jobID != 0 && g != nil {
+		if g.State == model.SegmentChangeStateCommitted {
+			mt.RecomputeDataView(ctx, collectionID)
+			return nil
+		}
+		if g.IsTerminal() {
+			return mt.RequirePublishedChange(ctx, g)
+		}
+		return nil // The checker retains the job until this group publishes.
+	}
+	staging := jobID != 0 && Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool()
 	mlog.Info(ctx, "processing external collection update response",
 		append(logFields,
 			mlog.FieldCollectionID(collectionID),
@@ -364,6 +379,18 @@ func applyExternalCollectionSegmentUpdateAtFence(
 		normalizedUpsertSegmentMap[normalized.GetID()] = normalized
 	}
 	upsertSegmentMap = normalizedUpsertSegmentMap
+	// A same-ID patch changes a visible segment's manifest. The current group
+	// record carries only membership, so it cannot roll that patch back if
+	// publication fails. Keep mixed and patch-only refreshes on the legacy
+	// composite update until content patches are part of the group protocol.
+	if staging {
+		for id := range upsertSegmentMap {
+			if _, patch := baselineSegmentMap[id]; patch {
+				staging = false
+				break
+			}
+		}
+	}
 
 	// Build update operators
 	var operators []meta.UpdateOperator
@@ -373,8 +400,11 @@ func applyExternalCollectionSegmentUpdateAtFence(
 	alreadyAppliedSegments := make(map[int64]struct{})
 
 	validationOperator := func(modPack *meta.UpdateSegmentPack) bool {
+		// The operators run again when a run could not take a segment lock;
+		// the marks of a discarded run must not carry over.
+		clear(alreadyAppliedSegments)
 		for segmentID := range baselineSegmentMap {
-			existing := modPack.Meta.Segments.GetSegment(segmentID)
+			existing := modPack.Peek(segmentID)
 			incoming := upsertSegmentMap[segmentID]
 			kept := keptSegmentMap[segmentID]
 
@@ -404,11 +434,11 @@ func applyExternalCollectionSegmentUpdateAtFence(
 				continue
 			}
 			if externalRefreshManifestAlreadyApplied(existing, incoming) {
-				// Replaying a patch is NOT harmless: applyExternalRefreshPatch
-				// clears TextStatsLogs and JsonKeyStats, so a second write
-				// would discard a text index or JSON key stats built since the
-				// first one, orphaning their files. A genuine patch always
-				// installs a strictly newer manifest, so it still applies.
+				// Replaying a patch is NOT harmless: replacing placeholders
+				// from the same incoming result could discard text or JSON stats
+				// built since the first apply, orphaning their files. A genuine
+				// patch always installs a strictly newer manifest, so it still
+				// applies.
 				alreadyAppliedSegments[segmentID] = struct{}{}
 				mlog.Info(ctx, "external refresh segment patch already applied, skipping replay",
 					mlog.FieldSegmentID(segmentID))
@@ -426,7 +456,7 @@ func applyExternalCollectionSegmentUpdateAtFence(
 			if _, isPatch := baselineSegmentMap[segmentID]; isPatch {
 				continue
 			}
-			existing := modPack.Meta.Segments.GetSegment(segmentID)
+			existing := modPack.Peek(segmentID)
 			if existing == nil {
 				continue
 			}
@@ -448,8 +478,11 @@ func applyExternalCollectionSegmentUpdateAtFence(
 	// Operator 1: Drop only the segment IDs selected during validation. For an
 	// ownership plan this list is limited to its immutable baseline.
 	dropOperator := func(modPack *meta.UpdateSegmentPack) bool {
+		if staging {
+			return true
+		}
 		for _, segmentID := range segmentsToDrop {
-			current := modPack.Meta.Segments.GetSegment(segmentID)
+			current := modPack.Peek(segmentID)
 			if current == nil || current.GetState() == commonpb.SegmentState_Dropped {
 				continue
 			}
@@ -487,6 +520,9 @@ func applyExternalCollectionSegmentUpdateAtFence(
 			}
 
 			segInfo := meta.NewSegmentInfo(incoming)
+			if staging {
+				segInfo.IsInvisible = true
+			}
 			modPack.Segments[incoming.GetID()] = segInfo
 
 			modPack.Increments[incoming.GetID()] = metastore.BinlogsIncrement{
@@ -502,6 +538,25 @@ func applyExternalCollectionSegmentUpdateAtFence(
 	}
 
 	// Execute all operators atomically
+	if staging {
+		var newIDs []int64
+		for _, seg := range normalizedUpdatedSegments {
+			if _, patch := baselineSegmentMap[seg.GetID()]; !patch {
+				newIDs = append(newIDs, seg.GetID())
+			}
+		}
+		_, _, err := mt.StageAdmittedChange(mt.Ctx, &model.SegmentChangeGroup{
+			GroupID: jobID, SourceJobID: jobID,
+			Source: model.SegmentChangeSourceExternalRefresh, CollectionID: collectionID, NewSegmentIDs: newIDs, SupersededSegmentIDs: segmentsToDrop,
+		}, true, operators...)
+		if err != nil {
+			return err
+		}
+		// The checker nudges index builds once this refresh's source/spec is
+		// visible in collection meta. A build dispatched here can use the old
+		// external location and fail permanently.
+		return nil // Registration succeeded; publication is a later job phase.
+	}
 	if err := mt.UpdateSegmentsInfo(ctx, operators...); err != nil {
 		mlog.Warn(ctx, "failed to update segments atomically", mlog.Err(err))
 		return err
@@ -681,8 +736,11 @@ func applyExternalRefreshPatch(oldSeg *meta.SegmentInfo, incoming *datapb.Segmen
 	cloned.ManifestPath = incoming.GetManifestPath()
 	cloned.SchemaVersion = incoming.GetSchemaVersion()
 	cloned.Binlogs = incoming.GetBinlogs()
-	cloned.TextStatsLogs = nil
-	cloned.JsonKeyStats = nil
+	// The incoming placeholders describe the stats carried by the incoming
+	// manifest. Apply both atomically so deltalog-only refreshes do not trigger
+	// redundant text or JSON stats rebuilds.
+	cloned.TextStatsLogs = incoming.GetTextStatsLogs()
+	cloned.JsonKeyStats = incoming.GetJsonKeyStats()
 	if incoming.GetStorageVersion() != 0 {
 		cloned.StorageVersion = incoming.GetStorageVersion()
 	}
@@ -690,15 +748,13 @@ func applyExternalRefreshPatch(oldSeg *meta.SegmentInfo, incoming *datapb.Segmen
 }
 
 // getExternalRefreshSegmentSnapshots returns clones in the same order as
-// segmentIDs while holding segMu across the full read, preventing one worker
-// request from observing segment metadata from different update generations.
+// segmentIDs, read at one point in time, preventing one worker request from
+// observing segment metadata from different update generations.
 func getExternalRefreshSegmentSnapshots(mt *meta.Meta, segmentIDs []int64) []*meta.SegmentInfo {
-	mt.SegMu.RLock()
-	defer mt.SegMu.RUnlock()
-
+	segments := mt.Segments.GetSegmentsByIDs(segmentIDs)
 	result := make([]*meta.SegmentInfo, len(segmentIDs))
 	for i, segmentID := range segmentIDs {
-		if segment := mt.Segments.GetSegment(segmentID); segment != nil {
+		if segment := segments[segmentID]; segment != nil {
 			result[i] = segment.Clone()
 		}
 	}

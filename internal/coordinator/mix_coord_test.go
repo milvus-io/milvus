@@ -32,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
@@ -43,6 +44,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -50,11 +53,38 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestMixCoordCreateCollectionDataViewPreservesSchemaVersion(t *testing.T) {
+	ctx := t.Context()
+	server := &datacoord.Server{}
+	mix := &mixCoordImpl{datacoordServer: server}
+	var expected message.BroadcastResultCreateCollectionMessageV1
+	var createErr error
+	patch := mockey.Mock((*datacoord.Server).CreateCollectionDataViewWithTransformStarts).To(func(receiver *datacoord.Server, actualCtx context.Context, result message.BroadcastResultCreateCollectionMessageV1) (*viewpb.DataVersion, error) {
+		require.Same(t, server, receiver)
+		require.Equal(t, ctx, actualCtx)
+		require.Same(t, expected.Message, result.Message)
+		require.Equal(t, expected.Results, result.Results)
+		return nil, createErr
+	}).Build()
+	defer patch.UnPatch()
+	for _, version := range []int32{0, 7} {
+		msg := message.NewCreateCollectionMessageBuilderV1().WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1}).
+			WithBody(&message.CreateCollectionRequest{CollectionSchema: &schemapb.CollectionSchema{Version: version}}).
+			WithControlChannelBroadcast().MustBuildBroadcast()
+		expected = message.BroadcastResultCreateCollectionMessageV1{
+			Message: message.MustAsBroadcastCreateCollectionMessageV1(msg), Results: map[string]*message.AppendResult{"v1": {TimeTick: 100}},
+		}
+		require.NoError(t, mix.CreateCollectionDataViewWithTransformStarts(ctx, expected))
+	}
+	createErr = merr.ErrServiceUnavailable
+	require.ErrorIs(t, mix.CreateCollectionDataViewWithTransformStarts(ctx, expected), createErr)
+}
+
 func TestMixCoordGetCollectionProperties(t *testing.T) {
 	mockey.PatchConvey("collection properties use the in-process metadata reader", t, func() {
 		core := &rootcoord.Core{}
 		ctx := context.Background()
-		properties := []*commonpb.KeyValuePair{{Key: "collection.autorelease.ttl.seconds", Value: "20"}}
+		properties := []*commonpb.KeyValuePair{{Key: "collection.autorelease.tti.seconds", Value: "20"}}
 		mockey.Mock((*rootcoord.Core).GetCollectionProperties).To(func(receiver *rootcoord.Core, actualCtx context.Context, id int64) ([]*commonpb.KeyValuePair, error) {
 			require.Same(t, core, receiver)
 			require.Equal(t, ctx, actualCtx)

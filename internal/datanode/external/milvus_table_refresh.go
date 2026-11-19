@@ -196,24 +196,56 @@ func stringSetEqual(left, right map[string]struct{}) bool {
 	return true
 }
 
-// refreshMilvusTableSegmentManifest rebuilds a target segment manifest from the
-// latest source fragments and stores the new manifest path on SegmentInfo.
+// refreshMilvusTableSegmentManifest replaces the delete set and retains derived
+// artifacts in one manifest commit. outputColumns is resolved once by
+// organizeSegments for both the segment-reuse check and artifact retention.
 func (t *RefreshExternalCollectionTask) refreshMilvusTableSegmentManifest(
 	ctx context.Context,
 	seg *datapb.SegmentInfo,
 	fragments []packed.Fragment,
+	outputColumns []string,
 ) (*datapb.SegmentInfo, error) {
+	basePath, _, err := packed.UnmarshalManifestPath(seg.GetManifestPath())
+	if err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "parse refresh manifest path")
+	}
 	workFragments, err := t.prepareMilvusTableDeltalogFragments(fragments)
 	if err != nil {
 		return nil, err
 	}
-	manifestPath, err := t.createManifestForSegment(ctx, seg.GetID(), workFragments)
+	var deltas []packed.DeltaLogEntry
+	if packed.HasExternalPrimaryKey(t.req.GetSchema()) {
+		deltas, err = t.prepareMilvusTableL0Deltalogs(ctx, workFragments)
+	} else {
+		deltas, err = t.prepareMilvusTableVirtualPKDeltalogs(ctx, basePath, seg.GetID(), workFragments)
+	}
 	if err != nil {
 		return nil, err
 	}
+	result, err := packed.RefreshMilvusTableManifest(ctx, seg.GetManifestPath(),
+		t.columns, workFragments, t.req.GetStorageConfig(), packed.ExternalSpecContext{
+			CollectionID:      t.req.GetCollectionID(),
+			Source:            t.req.GetExternalSource(),
+			Spec:              t.req.GetExternalSpec(),
+			MilvusTablePKMode: packed.MilvusTablePrimaryKeyModeFromSchema(t.req.GetSchema()),
+		}, outputColumns, deltas)
+	if err != nil {
+		return nil, merr.Wrapf(err, "refresh milvus-table manifest for segment %d", seg.GetID())
+	}
+	// No intermediate manifest exists. On failure/cancellation, retain any
+	// translated logs or possibly committed manifest for segment-drop GC:
+	// deterministic delta paths may still be live, and removing the latest
+	// manifest could reuse its version and alias Loon's path-keyed cache.
+	if err := ensureContext(ctx); err != nil {
+		return nil, err
+	}
 	updated := proto.Clone(seg).(*datapb.SegmentInfo)
-	updated.ManifestPath = manifestPath
+	updated.ManifestPath = result.ManifestPath
 	updated.StorageVersion = storage.StorageV3
+	// Derived from the stats staged in the final transaction, not from possibly
+	// stale/missing SegmentInfo placeholders. Source imports only bloom stats.
+	updated.TextStatsLogs = result.TextStatsLogs
+	updated.JsonKeyStats = result.JSONKeyStats
 	return updated, nil
 }
 

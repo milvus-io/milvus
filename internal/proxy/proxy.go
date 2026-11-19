@@ -33,6 +33,7 @@ import (
 	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/internal/proxy/reqregistry"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
@@ -135,6 +136,10 @@ type Proxy struct {
 	enableComplexDeleteLimit bool
 
 	slowQueries *expirable.LRU[Timestamp, *metricsinfo.SlowQuery]
+
+	// requests holds the DQL requests this proxy is currently serving, for
+	// ListRunningRequests / CancelRequests.
+	requests *reqregistry.Registry
 }
 
 // Compile-time assertions that *Proxy satisfies the task-model contracts the
@@ -160,6 +165,7 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 		// lbPolicy:        lbPolicy,
 		resourceManager: resourceManager,
 		slowQueries:     expirable.NewLRU[Timestamp, *metricsinfo.SlowQuery](20, nil, time.Minute*15),
+		requests:        reqregistry.New(),
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	hookutil.SetHook(connection.GetManager())
@@ -258,6 +264,11 @@ func (node *Proxy) initSession() error {
 	}
 	node.session.Init(typeutil.ProxyRole, node.address, false)
 	sessionutil.SaveServerInfo(typeutil.ProxyRole, node.session.ServerID)
+	if node.requests != nil {
+		// Running-request ids carry the node id and this process's start, so
+		// they are set before the proxy serves anything.
+		node.requests.SetIdentity(node.session.ServerID, time.Now())
+	}
 	return nil
 }
 

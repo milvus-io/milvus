@@ -40,55 +40,6 @@ func (s *dataCoordSuite) resetMock() {
 	s.dc.ExpectedCalls = nil
 }
 
-func (s *dataCoordSuite) TestAssignSegmentID() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	reqs := []*datapb.SegmentIDRequest{
-		{CollectionID: 100, Count: 1000},
-		{CollectionID: 100, Count: 2000},
-	}
-
-	s.Run("normal_case", func() {
-		s.dc.EXPECT().AssignSegmentID(mock.Anything, mock.Anything).
-			Return(&datapb.AssignSegmentIDResponse{
-				Status: merr.Status(nil),
-				SegIDAssignments: lo.Map(reqs, func(req *datapb.SegmentIDRequest, _ int) *datapb.SegmentIDAssignment {
-					return &datapb.SegmentIDAssignment{
-						Status: merr.Status(nil),
-						SegID:  10001,
-						Count:  req.GetCount(),
-					}
-				}),
-			}, nil)
-
-		segmentIDs, err := s.broker.AssignSegmentID(ctx, reqs...)
-		s.NoError(err)
-		s.Equal(len(segmentIDs), len(reqs))
-		s.resetMock()
-	})
-
-	s.Run("datacoord_return_error", func() {
-		s.dc.EXPECT().AssignSegmentID(mock.Anything, mock.Anything).
-			Return(nil, errors.New("mock"))
-
-		_, err := s.broker.AssignSegmentID(ctx, reqs...)
-		s.Error(err)
-		s.resetMock()
-	})
-
-	s.Run("datacoord_return_failure_status", func() {
-		s.dc.EXPECT().AssignSegmentID(mock.Anything, mock.Anything).
-			Return(&datapb.AssignSegmentIDResponse{
-				Status: merr.Status(errors.New("mock")),
-			}, nil)
-
-		_, err := s.broker.AssignSegmentID(ctx, reqs...)
-		s.Error(err)
-		s.resetMock()
-	})
-}
-
 func (s *dataCoordSuite) TestReportTimeTick() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

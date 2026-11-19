@@ -84,6 +84,10 @@ func TestSimpleRateLimiter(t *testing.T) {
 	})
 
 	t.Run("test global static limit", func(t *testing.T) {
+		flushQuotaKey := Params.QuotaConfig.MaxFlushRatePerCollection.Key
+		flushQuota := Params.QuotaConfig.MaxFlushRatePerCollection.GetValue()
+		assert.NoError(t, Params.Save(flushQuotaKey, "0.1"))
+		t.Cleanup(func() { assert.NoError(t, Params.Save(flushQuotaKey, flushQuota)) })
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
 		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 		simpleLimiter := NewSimpleLimiter(0, 0)
@@ -120,7 +124,7 @@ func TestSimpleRateLimiter(t *testing.T) {
 
 		for _, rt := range internalpb.RateType_value {
 			if internalpb.RateType_DDLFlush == internalpb.RateType(rt) {
-				// the flush request has 0.1 rate limiter that means only allow to execute one request each 10 seconds.
+				// Explicit fractional quota: consecutive Flush requests must still be limited.
 				err := simpleLimiter.Check(0, collectionIDToPartIDs, internalpb.RateType_DDLFlush, 1)
 				assert.NoError(t, err)
 				err = simpleLimiter.Check(0, collectionIDToPartIDs, internalpb.RateType_DDLFlush, 1)

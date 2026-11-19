@@ -396,6 +396,29 @@ func (v *visitor) combineOrRangePredicates(parts []*planpb.Expr) []*planpb.Expr 
 	return out
 }
 
+// integerRangesAdjacent reports whether an interval ending at upper and the
+// next interval starting at lower (upper < lower) leave no value between them.
+// Only typed integer columns qualify: JSON numbers and float columns can hold
+// values between two integer literals. Normalizing exclusive bounds to
+// inclusive (x < u as x <= u-1, x > l as x >= l+1) only widens a gap, so the
+// intervals are adjacent exactly when both bounds are inclusive and
+// upper + 1 == lower. The merged interval reuses the input literals.
+func integerRangesAdjacent(dt schemapb.DataType, upper *planpb.GenericValue, upperInc bool, lower *planpb.GenericValue, lowerInc bool) bool {
+	switch dt {
+	case schemapb.DataType_Int8,
+		schemapb.DataType_Int16,
+		schemapb.DataType_Int32,
+		schemapb.DataType_Int64:
+	default:
+		return false
+	}
+	if !upperInc || !lowerInc {
+		return false
+	}
+	u := upper.GetInt64Val()
+	return u != math.MaxInt64 && u+1 == lower.GetInt64Val()
+}
+
 func newBinaryRangeExpr(col *planpb.ColumnInfo, lowerInclusive bool, upperInclusive bool, lower *planpb.GenericValue, upper *planpb.GenericValue) *planpb.Expr {
 	return &planpb.Expr{
 		Expr: &planpb.Expr_BinaryRangeExpr{
@@ -733,7 +756,8 @@ func (v *visitor) combineAndBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 	return out
 }
 
-// combineOrBinaryRanges merges BinaryRangeExpr nodes with OR semantics (union if overlapping/adjacent).
+// combineOrBinaryRanges merges BinaryRangeExpr nodes with OR semantics (union if overlapping/adjacent;
+// for integer columns [a, v] and [v+1, b] are adjacent).
 // Also handles mixing BinaryRangeExpr with UnaryRangeExpr.
 func (v *visitor) combineOrBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 	type interval struct {
@@ -896,7 +920,8 @@ func (v *visitor) combineOrBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 			}
 			last := &merged[len(merged)-1]
 			c := cmpGeneric(g.effDt, last.upper, iv.lower)
-			if c < 0 || (c == 0 && !last.upperInc && !iv.lowerInc) {
+			if (c < 0 && !integerRangesAdjacent(g.effDt, last.upper, last.upperInc, iv.lower, iv.lowerInc)) ||
+				(c == 0 && !last.upperInc && !iv.lowerInc) {
 				merged = append(merged, iv)
 				continue
 			}

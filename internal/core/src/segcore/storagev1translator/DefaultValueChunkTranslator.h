@@ -35,6 +35,9 @@ namespace milvus::segcore::storagev1translator {
 // This is to support add field.
 class DefaultValueChunkTranslator
     : public milvus::cachinglayer::Translator<milvus::Chunk> {
+    using CellResults = std::vector<
+        std::pair<cachinglayer::cid_t, std::unique_ptr<value_type>>>;
+
  public:
     DefaultValueChunkTranslator(
         int64_t segment_id,
@@ -59,6 +62,12 @@ class DefaultValueChunkTranslator
         std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
     get_cells(milvus::OpContext* ctx,
               const std::vector<milvus::cachinglayer::cid_t>& cids) override;
+
+    // Shared buffers complete inline; per-cell mmap construction awaits local I/O.
+    // Borrows this translator and cids until completion.
+    folly::coro::Task<CellResults>
+    get_cells_async(milvus::OpContext* ctx,
+                    const std::vector<cachinglayer::cid_t>& cids) override;
 
     milvus::cachinglayer::Meta*
     meta() override {

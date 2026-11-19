@@ -137,7 +137,7 @@ func TestSnapshotImportPartitionKeyDefaultBothPhases(t *testing.T) {
 							require.NoError(t, rows.Append(row))
 						}
 						if source == "empty" {
-							rows.Data[partID], err = storage.NewFieldData(fieldType, part, rowCount)
+							rows.Data[partID], err = storage.NewFieldDataBuilder(fieldType, part).WithCapacity(rowCount).Build()
 							require.NoError(t, err)
 						}
 						return rows
@@ -200,7 +200,7 @@ func TestGetRowsStatsPartitionKeyDefaultError(t *testing.T) {
 		100: &storage.Int64FieldData{Data: []int64{1, 2}},
 	}}
 	wantErr := errors.New("cannot create partition key field data")
-	fieldData := mockey.Mock(storage.NewFieldData).Return(nil, wantErr).Build()
+	fieldData := mockey.Mock((*storage.FieldDataBuilder).Build).Return(nil, wantErr).Build()
 	defer fieldData.UnPatch()
 	stats, err := GetRowsStats(pre, rows)
 	require.ErrorIs(t, err, wantErr)
@@ -719,7 +719,7 @@ func TestHashDataBySchemaFieldValuesAndNulls(t *testing.T) {
 // production routing closures and row-copy implementation.
 func assertHashRows(t *testing.T, schema *schemapb.CollectionSchema, channels []string, partitions []int64, input []map[int64]any) {
 	t.Helper()
-	source, err := storage.NewInsertDataWithFunctionOutputField(schema)
+	source, err := storage.NewInsertDataBuilder(schema).WithFunctionOutputFields().Build()
 	require.NoError(t, err)
 	want := make([][][]map[int64]any, len(channels))
 	for c := range want {

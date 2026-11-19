@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
@@ -99,7 +100,7 @@ func (c *Callbacks) ValidateImportRequest(ctx context.Context, files []*msgpb.Im
 		return err
 	}
 
-	if err := importutilv2.ValidateSnapshotSourceOptions(options); err != nil {
+	if err := importutilv2.ValidateImportSourceOptions(options); err != nil {
 		return err
 	}
 	// Validate timeout
@@ -159,6 +160,11 @@ func (c *Callbacks) ValidateImportReplication(ctx context.Context, options []*co
 	}
 	if !isReplicatingCluster(assignment.ReplicateConfiguration) {
 		return nil
+	}
+	// External credentials and source lifetime have no supported CDC contract
+	// yet. This is rechecked under the shared-cluster broadcast lock below.
+	if importutilv2.HasSourceStorageOptions(options) {
+		return merr.WrapErrOperationNotSupportedMsg("external source storage import is not supported on a replicating cluster")
 	}
 
 	if !paramtable.Get().DataCoordCfg.ImportInReplicatingCluster.GetAsBool() {
@@ -241,7 +247,7 @@ func (c *Callbacks) BroadcastImport(ctx context.Context,
 	idempotencyKey string,
 	version internalpb.ImportVersion,
 ) (duplicatedJobID int64, duplicated bool, err error) {
-	if err := importutilv2.ValidateSnapshotSourceRequest(options); err != nil {
+	if err := importutilv2.ValidateImportSourceRequest(options); err != nil {
 		return 0, false, err
 	}
 	// Convert files to msgpb format for validation
@@ -301,7 +307,7 @@ func (c *Callbacks) BroadcastImport(ctx context.Context,
 	if err != nil {
 		return 0, false, merr.Wrap(err, "failed to capture snapshot import source")
 	}
-	if err := importutilv2.ValidateSnapshotImportPlan(files, options, nil); err != nil {
+	if err := importutilv2.ValidateImportPlan(files, options, nil); err != nil {
 		return 0, false, err
 	}
 	// Snapshot preparation is pinned by body options. Empty legacy paths make
@@ -487,10 +493,19 @@ func (c *Callbacks) CommitImportV2AckCallback(ctx context.Context, result messag
 		return merr.WrapErrImportSysFailedMsg("job %d is in state %s, waiting for Uncommitted", jobID, job.GetState())
 	}
 
-	// Legacy callbacks only enter Committing. The message consumer still owns
-	// per-channel visibility and the checker observes the committed markers.
-	if !result.Message.Header().GetCommitByCoordinator() {
+	// Without staging, legacy callbacks only enter Committing and consumers
+	// own channel visibility. Opted-in jobs finish here so the collection
+	// resource key remains held through group publication; old SN RPCs safely
+	// join the same groups.
+	stagedCommit := Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool()
+	if c.Meta != nil && !stagedCommit {
+		stagedCommit = len(c.Meta.ProducerChangeGroups(model.SegmentChangeSourceImportJob, jobID, ""))+len(c.Meta.ProducerChangeGroups(model.SegmentChangeSourceCDCReplicated, jobID, "")) > 0
+	}
+	if !result.Message.Header().GetCommitByCoordinator() && !stagedCommit {
 		return nil
+	}
+	if stagedCommit && c.StageImportChange == nil {
+		return merr.WrapErrServiceUnavailableMsg("import segment change publisher is unavailable")
 	}
 
 	// Each business vchannel has its own WAL commit fence. Use that channel's
@@ -503,6 +518,18 @@ func (c *Callbacks) CommitImportV2AckCallback(ctx context.Context, result messag
 			continue
 		}
 		segIDs := bulkimport.GetImportSegmentIDsByVchannel(ctx, c.ImportMeta, c.Meta, jobID, vchannel)
+		source := model.SegmentChangeSourceImportJob
+		if result.Message.ReplicateHeader() != nil && result.Message.Header().GetCommitByCoordinator() {
+			source = model.SegmentChangeSourceCDCReplicated
+		}
+		if c.StageImportChange != nil {
+			if staged, err := c.StageImportChange(ctx, job, vchannel, segIDs, appendResult.TimeTick, source); staged {
+				if err != nil {
+					return err
+				}
+				continue
+			}
+		}
 		if len(segIDs) == 0 {
 			continue
 		}
@@ -572,10 +599,11 @@ func (c *Callbacks) RollbackImportV2AckCallback(ctx context.Context, result mess
 		return nil
 	}
 	state := job.GetState()
-	if state == internalpb.ImportJobState_Committing ||
+	if job.GetCommitBroadcastStarted() ||
+		state == internalpb.ImportJobState_Committing ||
 		state == internalpb.ImportJobState_Completed ||
 		state == internalpb.ImportJobState_Failed {
-		mlog.Info(ctx, "RollbackImport: job already in terminal/committed state, no-op",
+		mlog.Info(ctx, "RollbackImport: commit may have started or job is terminal, no-op",
 			mlog.FieldJobID(jobID), mlog.String("state", state.String()))
 		return nil
 	}

@@ -21,6 +21,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -58,6 +59,24 @@ struct AsyncLoadPipelineOptions {
     std::function<folly::Executor::KeepAlive<>()>
         finalization_executor_provider{};
 };
+
+// Invoked concurrently for independent cells. request_index identifies the
+// original request slot; captured state must outlive the task. Arrow buffers
+// must not be retained after this callback returns.
+using CellReadCallback =
+    std::function<void(std::span<std::shared_ptr<arrow::RecordBatch>>,
+                       const CellSpec&,
+                       size_t request_index)>;
+
+// Uses shared admission and concurrent windows, draining all started work on
+// failure. Callbacks run under the window lease; the first failure cancels peers.
+[[nodiscard]] folly::coro::Task<void>
+ReadCellsAsync(const milvus::OpContext* ctx,
+               int64_t segment_id,
+               std::vector<CellSpec> cells,
+               std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
+               CellReadCallback consume_cell,
+               AsyncLoadPipelineOptions options = {});
 
 using AsyncCellResult =
     std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::GroupChunk>>;

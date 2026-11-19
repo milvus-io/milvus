@@ -110,6 +110,7 @@ func TestReplicaLayoutIsolationSuspensionAndRestore(t *testing.T) {
 	lost := qviews.ShardID{ReplicaID: owners[1], VChannel: shard.VChannel}
 	plan = policy.Plan(c, []qviews.ShardID{lost})
 	require.Contains(t, plan.Releases, lost)
+	require.False(t, plan.ReleaseControls[lost].GetPreemptServingLease(), "suspension preserves ordinary lease protection")
 	require.Empty(t, plan.Retries)
 	require.NotContains(t, plan.Prepares, lost)
 	c.PublishShard(lost, nil)
@@ -223,18 +224,22 @@ func TestReplicaLayoutLoadingCostAndCompatibility(t *testing.T) {
 	layout := buildReplicaLayout(c.GetCollection(1), previous, previous.replicas, previous.nodes)
 	require.Equal(t, int64(10), layout.owners[3])
 	require.True(t, layout.owners[1] == 11 || layout.owners[2] == 11)
-	p := newPlanningContext(c)
-	states := reusableResources(p, cacheShard(1, 11), &SegmentDataView{SegmentID: 1000, PartitionID: 1}, []int64{1, 2, 3})
+	key := coordview.ResourceKey{SegmentID: 1000, PartitionID: 1, DataVersion: version, LoadInfoVersion: 1}
+	collection := c.GetCollection(1)
+	placements := []*balancercache.PlacementNode{collection.PlacementNode(1), collection.PlacementNode(2), collection.PlacementNode(3)}
+	states := reusableResources(placements, key)
 	require.Len(t, states, 2)
 	c.PublishLoadConfig(1, c.GetCollection(1).LoadConfig(), 2)
-	require.Empty(t, reusableResources(newPlanningContext(c), cacheShard(1, 11), &SegmentDataView{SegmentID: 1000, PartitionID: 1}, []int64{1, 2}))
+	key.LoadInfoVersion = c.GetCollection(1).ConfigVersion()
+	require.Empty(t, reusableResources(placements, key))
 	c.PublishLoadConfig(1, c.GetCollection(1).LoadConfig(), 1)
 	c.PublishDataView(1, cacheData(1, cacheShard(1, 10).VChannel, 100))
 	data := c.GetCollection(1).DataView()
 	next := *data
 	next.DataVersion = qviews.DataVersion{StreamingVersion: 2}
 	c.PublishDataView(1, &next)
-	require.Empty(t, reusableResources(newPlanningContext(c), cacheShard(1, 11), &SegmentDataView{SegmentID: 1000, PartitionID: 1}, []int64{1, 2}))
+	key.DataVersion, key.LoadInfoVersion = next.DataVersion, c.GetCollection(1).ConfigVersion()
+	require.Empty(t, reusableResources(placements, key))
 }
 
 func TestReplicaLayoutBudgetFallback(t *testing.T) {

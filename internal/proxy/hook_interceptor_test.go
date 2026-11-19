@@ -7,6 +7,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -15,8 +16,10 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -208,12 +211,31 @@ func TestHookInterceptorDoesNotLogCredentialRequests(t *testing.T) {
 	assert.NotContains(t, lowerOutput, "newpassword")
 }
 
-func TestUpdateProxyFunctionCallMetric(t *testing.T) {
-	assert.NotPanics(t, func() {
-		updateProxyFunctionCallMetric("/milvus.proto.milvus.MilvusService/Flush", errors.New("mock hook error"))
-		updateProxyFunctionCallMetric("Flush", merr.WrapErrParameterInvalidMsg("mock input error"))
-		updateProxyFunctionCallMetric("", nil)
-	})
+// The caller that wraps HookInterceptor counts the request in
+// ProxyFunctionCall, so a verdict the hook gives must not count it again.
+func TestHookInterceptorDoesNotCountFunctionCall(t *testing.T) {
+	const method = "HookVerdictProbe"
+	fullMethod := "/milvus.proto.milvus.MilvusService/" + method
+	handler := func(ctx context.Context, req any) (any, error) { return merr.Success(), nil }
+
+	hookutil.InitOnceHook()
+	t.Cleanup(func() { hookutil.SetTestHook(hookutil.DefaultHook{}) })
+	for _, tc := range []struct {
+		name string
+		hook hook.Hook
+	}{
+		{name: "mock answer", hook: mockHook{mockRes: merr.Success()}},
+		{name: "mock refusal", hook: mockHook{mockErr: errors.New("refused")}},
+		{name: "before refusal", hook: errorHook{beforeErr: errors.New("refused")}},
+		{name: "after refusal", hook: errorHook{afterErr: errors.New("refused")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hookutil.SetTestHook(tc.hook)
+			_, _ = HookInterceptor(context.Background(), &milvuspb.GetVersionRequest{}, "", fullMethod, handler)
+			// deleting the method's series also leaves none for the next case
+			assert.Zero(t, metrics.ProxyFunctionCall.DeletePartialMatch(prometheus.Labels{"function_name": method}))
+		})
+	}
 }
 
 func TestHookInterceptorRedactsImportCredentials(t *testing.T) {

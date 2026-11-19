@@ -24,7 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -109,11 +108,6 @@ func (s *GrpcAccessInfoSuite) TestErrorMsg() {
 	result = Get(s.info, "$error_msg")
 	s.Equal(merr.ErrChannelLack.Error(), result[0])
 
-	// replace line breaks
-	s.info.resp = merr.Status(errors.New("test error. stack: 1:\n 2:\n 3:\n"))
-	result = Get(s.info, "$error_msg")
-	s.Equal("test error. stack: 1:\\n 2:\\n 3:\\n", result[0])
-
 	s.info.err = status.Errorf(codes.Unavailable, "mock")
 	result = Get(s.info, "$error_msg")
 	s.Equal("rpc error: code = Unavailable desc = mock", result[0])
@@ -186,6 +180,13 @@ func (s *GrpcAccessInfoSuite) TestCollectionName() {
 	result = Get(s.info, "$collection_name")
 	s.Equal(fmt.Sprint([]string{"coll_a", "coll_b"}), result[0])
 	s.NotEqual(Unknown, result[0])
+
+	// a batch describe by ID logs the IDs
+	s.info.req = &milvuspb.BatchDescribeCollectionRequest{
+		CollectionID: []int64{100, 200},
+	}
+	result = Get(s.info, "$collection_name")
+	s.Equal(fmt.Sprint([]int64{100, 200}), result[0])
 }
 
 func (s *GrpcAccessInfoSuite) TestSdkInfo() {

@@ -50,6 +50,7 @@
 #include "common/SystemProperty.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
+#include "exec/expression/ExprCacheGeneration.h"
 #include "common/VectorArray.h"
 #include "common/protobuf_utils.h"
 #include "common/type_c.h"
@@ -101,6 +102,11 @@ NextSegmentInstanceUid() {
 class SegmentReadSnapshot {
  public:
     virtual ~SegmentReadSnapshot() = default;
+
+    virtual exec::ExprCacheGenerationPtr
+    GetExprCacheGeneration() const {
+        return nullptr;
+    }
 
     // Layout lookups can open lazy column-group metadata. Query callers must
     // supply their context even when no raw data is being pinned yet.
@@ -870,7 +876,8 @@ class SegmentInternalInterface : public SegmentInterface {
     FillOrderByResult(
         const query::RetrievePlan* plan,
         const std::unique_ptr<proto::segcore::RetrieveResults>& results,
-        RetrieveResult& retrieveResult) const;
+        RetrieveResult& retrieveResult,
+        milvus::OpContext* op_ctx) const;
 
     void
     FillTargetEntry(

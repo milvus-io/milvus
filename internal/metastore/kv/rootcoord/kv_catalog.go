@@ -267,7 +267,11 @@ func (kc *Catalog) loadCollectionFromDb(ctx context.Context, dbID int64, collect
 	collKey := BuildCollectionKey(dbID, collectionID)
 	collVal, err := kc.Txn.Load(ctx, collKey)
 	if err != nil {
-		return nil, merr.WrapErrCollectionNotFound(collectionID, err.Error())
+		// Return the storage error as is. The default-database compatibility
+		// fallback must distinguish a missing key from a tombstone or an I/O
+		// failure, and callers must still see a cancellation or a timeout as
+		// such.
+		return nil, err
 	}
 
 	// Legacy SuffixSnapshot deletion with ts!=0 overwrote the plain key with a
@@ -283,8 +287,12 @@ func (kc *Catalog) loadCollectionFromDb(ctx context.Context, dbID int64, collect
 }
 
 func (kc *Catalog) loadCollectionFromDefaultDb(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*pb.CollectionInfo, error) {
-	if info, err := kc.loadCollectionFromDb(ctx, util.DefaultDBID, collectionID, ts); err == nil {
+	info, err := kc.loadCollectionFromDb(ctx, util.DefaultDBID, collectionID, ts)
+	if err == nil {
 		return info, nil
+	}
+	if !errors.Is(err, merr.ErrIoKeyNotFound) {
+		return nil, err
 	}
 	// get collection from older version.
 	return kc.loadCollectionFromDb(ctx, util.NonDBID, collectionID, ts)
@@ -294,12 +302,19 @@ func (kc *Catalog) loadCollection(ctx context.Context, dbID int64, collectionID 
 	if isDefaultDB(dbID) {
 		info, err := kc.loadCollectionFromDefaultDb(ctx, collectionID, ts)
 		if err != nil {
+			if errors.Is(err, merr.ErrIoKeyNotFound) {
+				return nil, merr.WrapErrCollectionNotFound(collectionID)
+			}
 			return nil, err
 		}
 		kc.fixDefaultDBIDConsistency(ctx, info, ts)
 		return info, nil
 	}
-	return kc.loadCollectionFromDb(ctx, dbID, collectionID, ts)
+	info, err := kc.loadCollectionFromDb(ctx, dbID, collectionID, ts)
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
+	}
+	return info, err
 }
 
 func partitionVersionAfter210(collMeta *pb.CollectionInfo) bool {
@@ -1357,6 +1372,7 @@ func logicalGranteeKeyFromEtcdKey(ctx context.Context, granteePrefix string, key
 }
 
 func findOtherGranteeWithIDFromKeys(ctx context.Context, granteePrefix string, granteeKey string, idStr string, keys []string, values []string) (string, error) {
+	var ownerKeys []string
 	for i, key := range keys {
 		if i >= len(values) {
 			mlog.Warn(ctx, "grantee key has no matching id value while checking grantee id sharing",
@@ -1366,6 +1382,13 @@ func findOtherGranteeWithIDFromKeys(ctx context.Context, granteePrefix string, g
 		if values[i] != idStr {
 			continue
 		}
+		ownerKeys = append(ownerKeys, key)
+	}
+	return findOtherGranteeWithIDFromOwnerKeys(ctx, granteePrefix, granteeKey, idStr, ownerKeys)
+}
+
+func findOtherGranteeWithIDFromOwnerKeys(ctx context.Context, granteePrefix string, granteeKey string, idStr string, ownerKeys []string) (string, error) {
+	for _, key := range ownerKeys {
 		logicalKey, ok := logicalGranteeKeyFromEtcdKey(ctx, granteePrefix, key)
 		if !ok {
 			return "", newSharedGranteeIDError(idStr, granteeKey, key)
@@ -1976,6 +1999,8 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.G
 		mlog.Error(ctx, "fail to load all grant privilege entities", mlog.String("key", granteeKey), mlog.Err(err))
 		return []*milvuspb.GrantEntity{}, err
 	}
+	var granteeOwnerKeys, granteeIDKeys map[string][]string
+	var granteesValidated, idsLoaded bool
 
 	for i, key := range keys {
 		grantInfos := typeutil.AfterN(key, granteeKey, "/")
@@ -1986,11 +2011,77 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.G
 			mlog.Warn(ctx, "invalid grantee key", mlog.String("string", key), mlog.String("sub_string", granteeKey))
 			continue
 		}
+		// Validate only when a valid grantee is encountered, as in the per-ID
+		// loader. Empty or entirely malformed grantee lists need no privilege read.
+		if !granteesValidated {
+			if err := validateLoadedGrantees(keys, values); err != nil {
+				return []*milvuspb.GrantEntity{}, err
+			}
+			granteesValidated = true
+		}
 		logicalGranteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, grantInfos[0], grantInfos[1], grantInfos[2])
-		idKeys, _, granteeIDKey, err := kc.loadGranteeIDPrefixWithLoadedGrantees(ctx, tenant, logicalGranteeKey, values[i], keys, values)
-		if err != nil {
-			mlog.Error(ctx, "fail to load the grantee ids", mlog.String("key", granteeIDKey), mlog.Err(err))
-			return []*milvuspb.GrantEntity{}, err
+		idStr := values[i]
+		if isLegacyGranteeID(idStr) && idStr != crypto.GranteeID(logicalGranteeKey) {
+			// Modern IDs need no ownership index. Build it once when a legacy
+			// ID first requires a collision check, preserving the original order.
+			if granteeOwnerKeys == nil {
+				granteeOwnerKeys = make(map[string][]string)
+				for j, ownerKey := range keys {
+					granteeOwnerKeys[values[j]] = append(granteeOwnerKeys[values[j]], ownerKey)
+				}
+			}
+			legacyIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, idStr)
+			otherGranteeKey, err := findOtherGranteeWithIDFromOwnerKeys(ctx, granteeKey, logicalGranteeKey, idStr, granteeOwnerKeys[idStr])
+			if err != nil {
+				mlog.Error(ctx, "fail to load the grantee ids", mlog.String("key", legacyIDPrefix), mlog.Err(err))
+				return []*milvuspb.GrantEntity{}, err
+			}
+			if otherGranteeKey != "" {
+				err := newSharedGranteeIDError(idStr, logicalGranteeKey, otherGranteeKey)
+				mlog.Error(ctx, "fail to load the grantee ids", mlog.String("key", legacyIDPrefix), mlog.Err(err))
+				return []*milvuspb.GrantEntity{}, err
+			}
+		}
+
+		// Load lazily after this grantee's ownership check. Moving the read
+		// before that check would change which error is returned first.
+		if !idsLoaded {
+			// A tenant-wide scan trades fewer requests for reading and indexing
+			// all privilege keys, including orphaned IDs left by migrations/deletions.
+			granteeIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant)
+			allIDKeys, _, err := kc.Txn.LoadWithPrefix(ctx, granteeIDPrefix)
+			if err != nil {
+				if !errors.Is(err, merr.ErrIoKeyNotFound) {
+					mlog.Error(ctx, "fail to load all grantee ids", mlog.String("key", granteeIDPrefix), mlog.Err(err))
+					return []*milvuspb.GrantEntity{}, err
+				}
+				// The per-ID loader treats a missing prefix as an empty candidate.
+				allIDKeys = nil
+			}
+			granteeIDKeys = make(map[string][]string)
+			for _, idKey := range allIDKeys {
+				granteeIDInfos := typeutil.AfterN(idKey, granteeIDPrefix, "/")
+				if len(granteeIDInfos) < 2 || funcutil.IsEmptyString(granteeIDInfos[0]) {
+					mlog.Warn(ctx, "invalid grantee id", mlog.String("string", idKey), mlog.String("sub_string", granteeIDPrefix))
+					continue
+				}
+				granteeIDKeys[granteeIDInfos[0]] = append(granteeIDKeys[granteeIDInfos[0]], idKey)
+			}
+			idsLoaded = true
+		}
+
+		var idKeys []string
+		var granteeIDKey string
+		for _, candidate := range granteeIDCandidates(logicalGranteeKey, idStr) {
+			candidatePrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, candidate)
+			if granteeIDKey == "" {
+				granteeIDKey = candidatePrefix
+			}
+			if candidateKeys := granteeIDKeys[candidate]; len(candidateKeys) > 0 {
+				idKeys = candidateKeys
+				granteeIDKey = candidatePrefix
+				break
+			}
 		}
 		for _, idKey := range idKeys {
 			granteeIDInfos := typeutil.AfterN(idKey, granteeIDKey, "/")

@@ -92,7 +92,9 @@ func newTalonPrewarm(ctx context.Context, p *paramtable.ComponentParam, supplier
 	return NewTalonPrewarmInspector(ctx, supplier, client, resolve, time.Duration(interval)*time.Second, int(batchSize)), nil
 }
 
-func manifestPrewarmResolver(provider, bucket string) (func(string) (string, error), error) {
+// manifestPrewarmResolver returns the Talon URI of a descriptor's manifest
+// object and the object size the descriptor records, 0 when it records none.
+func manifestPrewarmResolver(provider, bucket string) (func(string) (string, uint64, error), error) {
 	scheme := ""
 	switch provider {
 	case objectstorage.CloudProviderAWS, objectstorage.CloudProviderAliyun,
@@ -109,23 +111,23 @@ func manifestPrewarmResolver(provider, bucket string) (func(string) (string, err
 		return nil, merr.WrapErrServiceInternalMsg("Talon prewarm requires a bucket")
 	}
 	prefix := (&url.URL{Scheme: scheme, Host: bucket, Path: "/"}).String()
-	return func(descriptor string) (string, error) {
-		_, version, err := packed.UnmarshalManifestPath(descriptor)
+	return func(descriptor string) (string, uint64, error) {
+		manifest, err := packed.ParseManifestPath(descriptor)
 		// Descriptors are internal persisted metadata; malformed JSON is not user
-		// input. UnmarshalManifestPath's validation error must be classified here.
+		// input. ParseManifestPath's validation error must be classified here.
 		if err != nil {
-			return "", merr.WrapErrDataIntegrity(err, "invalid manifest prewarm descriptor")
+			return "", 0, merr.WrapErrDataIntegrity(err, "invalid manifest prewarm descriptor")
 		}
 		// Growing V3 segments start at version 0 before publishing their first file.
-		if version <= 0 {
-			return "", nil
+		if manifest.ManifestVersion <= 0 {
+			return "", 0, nil
 		}
 		key, err := packed.ManifestFilePath(descriptor)
 		if err != nil {
-			return "", merr.Wrap(err, "resolve manifest prewarm object key")
+			return "", 0, merr.Wrap(err, "resolve manifest prewarm object key")
 		}
 		// Talon treats the key as literal bytes; URL escaping or path cleaning
 		// would change the object identity used by the normal storage reader.
-		return prefix + key, nil
+		return prefix + key, uint64(max(manifest.Size, 0)), nil
 	}, nil
 }

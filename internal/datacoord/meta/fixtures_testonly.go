@@ -78,6 +78,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// CommitSegmentChangeGroupForTest exercises the final metadata boundary.
+func (m *Meta) CommitSegmentChangeGroupForTest(ctx context.Context, g *model.SegmentChangeGroup, ts uint64) error {
+	return m.commitSegmentChangeGroup(ctx, g, ts, nil)
+}
+
+func (m *Meta) ApplySegmentCatalogMutationForTest(segmentID int64, mutation SegmentCatalogMutation) error {
+	defer m.LockSegments(segmentID)()
+	_, err := m.applySegmentCatalogMutation(m.Segments.GetSegment(segmentID), mutation)
+	return err
+}
+
+// SegmentChangeGroupLockedForTest reads a group while the caller holds groupMu.
+func (m *Meta) SegmentChangeGroupLockedForTest(id int64) *model.SegmentChangeGroup {
+	return m.segmentChangeGroups[id].Clone()
+}
+
 func GetFieldBinlogIDs(fieldID int64, logIDs ...int64) *datapb.FieldBinlog {
 	l := &datapb.FieldBinlog{
 		FieldID: fieldID,
@@ -385,7 +401,7 @@ func NewMemoryMeta(t *testing.T) (*Meta, error) {
 // so two calls with the same catalog model a DataCoord restart. newLoader returns the loader of the domain metas.
 func BootMetaWithLoader(t *testing.T, catalog metastore.DataCoordCatalog, collectionID int64, newLoader func(metastore.DataCoordCatalog, storage.ChunkManager) DomainMetaLoader) *Meta {
 	t.Helper()
-	cm := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart"))
+	cm := MetadataOnlyCopyManager{storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart"))}
 	m, err := NewMeta(context.TODO(), catalog, cm, NewMetaStoreWithCollections(catalog, collectionID), broker.NewMockBroker(t), newLoader(catalog, cm))
 	require.NoError(t, err)
 	t.Cleanup(m.CloseManifestCommitExecutor)
@@ -752,6 +768,14 @@ func (m *MockMixCoord) GetFeatureUsage(ctx context.Context, req *internalpb.GetF
 
 func (m *MockMixCoord) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
 	return &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}, nil
+}
+
+func (m *MockMixCoord) ListRunningRequests(ctx context.Context, req *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error) {
+	return &milvuspb.ListRunningRequestsResponse{Status: merr.Success()}, nil
+}
+
+func (m *MockMixCoord) CancelRequests(ctx context.Context, req *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
+	return &milvuspb.CancelRequestsResponse{Status: merr.Success()}, nil
 }
 
 func (m *MockMixCoord) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
@@ -1831,6 +1855,31 @@ func AssertNoStatsTaskEvent(t *testing.T) {
 		require.Failf(t, "unexpected stats task event", "segmentID=%d", segID)
 	default:
 	}
+}
+
+type (
+	FakeManifestStore       = fakeManifestStore
+	MetaMemoryKV            = metaMemoryKV
+	MetadataOnlyCopyManager struct{ storage.ChunkManager }
+)
+
+func (m MetadataOnlyCopyManager) Copy(context.Context, string, string) error { return nil }
+func (s *fakeManifestStore) BackfillEntriesAt(manifestPath string) []packed.ManifestIndexInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]packed.ManifestIndexInfo(nil), s.Revisions[manifestPath]...)
+}
+
+func (m *Meta) ManifestCommitIOForTest() *packed.ManifestIOContext {
+	return m.ManifestCommitExecutor.io
+}
+
+var CommitManifestMutationForTest = (*Meta).commitManifestMutation
+
+func (s *fakeManifestStore) ResumeReads() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failReads = false
 }
 
 func (s *MockMixCoord) EnsureCollectionReady(context.Context, *querypb.EnsureCollectionReadyRequest) (*commonpb.Status, error) {

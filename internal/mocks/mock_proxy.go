@@ -1149,6 +1149,65 @@ func (_c *MockProxy_CalcDistance_Call) RunAndReturn(run func(context.Context, *m
 	return _c
 }
 
+// CancelLocalRequests provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) CancelLocalRequests(_a0 context.Context, _a1 *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CancelLocalRequests")
+	}
+
+	var r0 *milvuspb.CancelRequestsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CancelRequestsRequest) *milvuspb.CancelRequestsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.CancelRequestsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CancelRequestsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_CancelLocalRequests_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CancelLocalRequests'
+type MockProxy_CancelLocalRequests_Call struct {
+	*mock.Call
+}
+
+// CancelLocalRequests is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CancelRequestsRequest
+func (_e *MockProxy_Expecter) CancelLocalRequests(_a0 interface{}, _a1 interface{}) *MockProxy_CancelLocalRequests_Call {
+	return &MockProxy_CancelLocalRequests_Call{Call: _e.mock.On("CancelLocalRequests", _a0, _a1)}
+}
+
+func (_c *MockProxy_CancelLocalRequests_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CancelRequestsRequest)) *MockProxy_CancelLocalRequests_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CancelRequestsRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_CancelLocalRequests_Call) Return(_a0 *milvuspb.CancelRequestsResponse, _a1 error) *MockProxy_CancelLocalRequests_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_CancelLocalRequests_Call) RunAndReturn(run func(context.Context, *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error)) *MockProxy_CancelLocalRequests_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CancelRequests provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) CancelRequests(_a0 context.Context, _a1 *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -7344,6 +7403,65 @@ func (_c *MockProxy_ListIndexedSegment_Call) Return(_a0 *federpb.ListIndexedSegm
 }
 
 func (_c *MockProxy_ListIndexedSegment_Call) RunAndReturn(run func(context.Context, *federpb.ListIndexedSegmentRequest) (*federpb.ListIndexedSegmentResponse, error)) *MockProxy_ListIndexedSegment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListLocalRunningRequests provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ListLocalRunningRequests(_a0 context.Context, _a1 *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListLocalRunningRequests")
+	}
+
+	var r0 *milvuspb.ListRunningRequestsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRunningRequestsRequest) *milvuspb.ListRunningRequestsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListRunningRequestsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListRunningRequestsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_ListLocalRunningRequests_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListLocalRunningRequests'
+type MockProxy_ListLocalRunningRequests_Call struct {
+	*mock.Call
+}
+
+// ListLocalRunningRequests is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListRunningRequestsRequest
+func (_e *MockProxy_Expecter) ListLocalRunningRequests(_a0 interface{}, _a1 interface{}) *MockProxy_ListLocalRunningRequests_Call {
+	return &MockProxy_ListLocalRunningRequests_Call{Call: _e.mock.On("ListLocalRunningRequests", _a0, _a1)}
+}
+
+func (_c *MockProxy_ListLocalRunningRequests_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListRunningRequestsRequest)) *MockProxy_ListLocalRunningRequests_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListRunningRequestsRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_ListLocalRunningRequests_Call) Return(_a0 *milvuspb.ListRunningRequestsResponse, _a1 error) *MockProxy_ListLocalRunningRequests_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_ListLocalRunningRequests_Call) RunAndReturn(run func(context.Context, *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error)) *MockProxy_ListLocalRunningRequests_Call {
 	_c.Call.Return(run)
 	return _c
 }

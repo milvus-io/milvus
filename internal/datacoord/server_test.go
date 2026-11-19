@@ -1443,7 +1443,6 @@ func TestDropVirtualChannel(t *testing.T) {
 			}
 			req.Segments = append(req.Segments, seg2Drop)
 		}
-		segmentManager.EXPECT().DropSegmentsOfChannel(mock.Anything, mock.Anything).Return()
 		resp, err := svr.DropVirtualChannel(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -3384,4 +3383,29 @@ func TestServer_InitMessageCallback(t *testing.T) {
 	},
 	)
 	assert.Error(t, err) // server not healthy
+}
+
+func TestServer_CollectionLabelsForTask(t *testing.T) {
+	t.Run("no meta yet", func(t *testing.T) {
+		_, ok := (&Server{}).collectionLabelsForTask(1)
+		assert.False(t, ok)
+	})
+
+	s := &Server{meta: meta.NewMetaWithCollections(&meta.CollectionInfo{
+		ID:           1,
+		Schema:       &schemapb.CollectionSchema{Name: "docs"},
+		DatabaseID:   7,
+		DatabaseName: "analytics",
+	})}
+
+	t.Run("cached collection", func(t *testing.T) {
+		got, ok := s.collectionLabelsForTask(1)
+		assert.True(t, ok)
+		assert.Equal(t, session.CollectionLabels{CollectionName: "docs", DatabaseID: 7, DatabaseName: "analytics"}, got)
+	})
+
+	t.Run("uncached collection", func(t *testing.T) {
+		_, ok := s.collectionLabelsForTask(2)
+		assert.False(t, ok)
+	})
 }

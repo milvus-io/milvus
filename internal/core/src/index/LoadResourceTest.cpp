@@ -157,7 +157,14 @@ class MetadataChunkManager : public storage::LocalChunkManager {
     }
     uint64_t
     Read(const std::string& path, void* data, uint64_t bytes) override {
-        const auto count = LocalChunkManager::Read(path, 0, data, bytes);
+        return Read(path, 0, data, bytes);
+    }
+    uint64_t
+    Read(const std::string& path,
+         uint64_t offset,
+         void* data,
+         uint64_t bytes) override {
+        const auto count = LocalChunkManager::Read(path, offset, data, bytes);
         if (after_read)
             after_read();
         return count;
@@ -500,13 +507,13 @@ TEST(LegacyLoadResourceTest, SegmentMetadataPreservesFileAwareEstimates) {
                 translator.EstimatedResources();
             const auto transient = private_overhead + shared_overhead;
             EXPECT_EQ(resident,
-                      (cachinglayer::ResourceUsage{expected.final_memory_cost,
-                                                   expected.final_disk_cost}));
+                      (cachinglayer::ResourceUsage(expected.final_memory_cost,
+                                                   expected.final_disk_cost)));
             EXPECT_EQ(
                 transient,
-                (cachinglayer::ResourceUsage{
+                (cachinglayer::ResourceUsage(
                     expected.max_memory_cost - expected.final_memory_cost,
-                    2 * expected.max_disk_cost - expected.final_disk_cost}));
+                    2 * expected.max_disk_cost - expected.final_disk_cost)));
         }
     }
 }
@@ -617,6 +624,14 @@ TEST(LegacyHybridResourceEstimate, ResolvesPersistedChildType) {
                                                            child_params,
                                                            mmap,
                                                            rows);
+                        const auto high_tasks =
+                            monitor::
+                                internal_storage_pool_task_submitted_total_high
+                                    .Value();
+                        const auto low_tasks =
+                            monitor::
+                                internal_storage_pool_task_submitted_total_low
+                                    .Value();
                         resources = ScalarIndexFileLoadResource(DataType::INT64,
                                                                 index_size,
                                                                 params,
@@ -624,6 +639,16 @@ TEST(LegacyHybridResourceEstimate, ResolvesPersistedChildType) {
                                                                 rows,
                                                                 sync_files,
                                                                 ctx);
+                        EXPECT_EQ(
+                            monitor::
+                                internal_storage_pool_task_submitted_total_high
+                                    .Value(),
+                            high_tasks);
+                        EXPECT_EQ(
+                            monitor::
+                                internal_storage_pool_task_submitted_total_low
+                                    .Value(),
+                            low_tasks);
                     }
                     EXPECT_EQ(resources.request.final_memory_cost,
                               expected.final_memory_cost);

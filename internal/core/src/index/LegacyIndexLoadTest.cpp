@@ -44,6 +44,7 @@
 #include "index/vector/KnowhereEngine.h"
 #include "index/vector/VectorMemBuilder.h"
 #include "index/vector/VectorDiskLoader.h"
+#include "index/vector/VectorIndexValidDataUtils.h"
 #include "storage/artifact/DiskEngineFileHandle.h"
 #include "index/Meta.h"
 #include "index/contracts/build/VectorBuildInput.h"
@@ -94,6 +95,20 @@ class LegacyTestFileSystem final : public arrow::fs::SubTreeFileSystem {
     }
     std::map<std::string, std::shared_ptr<ControlledFile>> files;
     std::atomic<size_t> opens{0};
+};
+
+// Opaque native bytes let estimation prove it never opens the main index.
+class ValidityEstimateArtifact final : public storage::Artifact {
+ public:
+    void
+    Serialize(storage::FileSink& sink) const override {
+        sink.WriteRawEntry("engine", arrow::Buffer::FromString("opaque"));
+        std::array<uint8_t, sizeof(uint64_t) + 1> validity{};
+        const uint64_t rows = 8;
+        std::memcpy(validity.data(), &rows, sizeof(rows));
+        validity.back() = 0x05;
+        sink.WriteEntry(VALID_DATA_KEY, validity.data(), validity.size());
+    }
 };
 
 class LegacyIndexLoadTest : public ::testing::Test {
@@ -2118,6 +2133,63 @@ TEST_F(LegacyIndexLoadTest,
             EXPECT_FALSE(file->DirectReadCalls().empty());
         }
     }
+}
+
+TEST_F(LegacyIndexLoadTest, DiskValidityEstimateDoesNotInspectNativeMetadata) {
+    Persist(ValidityEstimateArtifact{});
+    auto adapted = AdaptIndexType({
+        .index_type = "DISKANN",
+        .field_type = DataType::VECTOR_FLOAT,
+        .element_type = DataType::NONE,
+        .index_engine_version =
+            knowhere::Version::GetMaximumVersion().VersionNumber(),
+        .params = {{METRIC_TYPE, "L2"},
+                   {DIM_KEY, 4},
+                   {INDEX_NUM_ROWS_KEY, 8},
+                   {"nullable", true},
+                   {DISK_ANN_LOAD_THREAD_NUM, 1}},
+    });
+    auto options = Options(adapted.params, false);
+    auto source = Run(storage::V1RemoteSource::OpenAsync(
+        context_,
+        paths_,
+        options,
+        storage::ArtifactStorageNamespace::Index,
+        storage::V1SourceLayout::DiskFiles));
+    auto handle = source->OpenDiskEngineFiles(
+        storage::DiskEngineFileMode::LocalFiles, {"engine"});
+    KnowhereEngine engine(
+        DataType::VECTOR_FLOAT,
+        DataType::NONE,
+        "DISKANN",
+        "L2",
+        knowhere::Version::GetMaximumVersion().VersionNumber(),
+        handle,
+        knowhere::Pack(handle->Manager()),
+        true);
+    if (!engine.native_index.LoadIndexWithStream()) {
+        // Materialized backends still inspect every engine envelope.
+        EXPECT_EQ(VectorDiskLoader::AsyncEntryNames(*source, options),
+                  source->EntryNames());
+        return;
+    }
+    for (const auto& [path, file] : fs_->files) file->ResetCounters();
+    EXPECT_TRUE(VectorDiskLoader::AsyncEntryNames(*source, options).empty());
+    const auto estimated =
+        Run(LegacyVectorFileLoadResourceAsync({}, true, options, *source));
+    for (const auto& [path, file] : fs_->files) {
+        EXPECT_TRUE(file->DirectReadCalls().empty());
+        EXPECT_FALSE(file->WaitForSizeCall(std::chrono::milliseconds(1)));
+    }
+    // Without a row count, retain ordinary sidecar inspection. The estimate
+    // with known rows must cover that fixture's actual legacy buffers.
+    options.params.erase(INDEX_NUM_ROWS_KEY);
+    EXPECT_EQ(VectorDiskLoader::AsyncEntryNames(*source, options),
+              (std::vector<std::string>{VALID_DATA_KEY}));
+    const auto inspected =
+        Run(LegacyVectorFileLoadResourceAsync({}, true, options, *source));
+    EXPECT_GE(estimated.max_memory_cost, inspected.max_memory_cost);
+    EXPECT_GT(estimated.max_memory_cost, estimated.final_memory_cost);
 }
 
 TEST_F(LegacyIndexLoadTest, SliceMetadataCorruptionStopsBeforeEngineReads) {

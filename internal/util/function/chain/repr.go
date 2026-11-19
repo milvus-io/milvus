@@ -121,6 +121,22 @@ func ProtoChainToRepr(pb *schemapb.FunctionChain) (*ChainRepr, error) {
 	return repr, nil
 }
 
+func QueryNodeChainsWriteScore(chains []*schemapb.FunctionChain) bool {
+	for _, functionChain := range chains {
+		switch functionChain.GetStage() {
+		case schemapb.FunctionChainStage_FunctionChainStageL0Rerank, schemapb.FunctionChainStage_FunctionChainStageL1Rerank:
+			for _, op := range functionChain.GetOps() {
+				for _, output := range op.GetOutputs() {
+					if strings.TrimSpace(output) == types.ScoreFieldName {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
 // ProtoOpToRepr converts a public FunctionChainOp proto to the internal operator representation.
 func ProtoOpToRepr(pb *schemapb.FunctionChainOp) (*OperatorRepr, error) {
 	if pb == nil {

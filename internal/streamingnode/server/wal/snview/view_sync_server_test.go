@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	serviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	worknodehandler "github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -247,3 +248,9 @@ func TestViewSyncTransportUsesViewErrorProtocol(t *testing.T) {
 		})
 	}
 }
+
+func (fakeViewSyncQueryViewHandler) TakeViewFeedback() qviews.ViewFeedbackWindow {
+	return qviews.ViewFeedbackWindow{}
+}
+
+func (fakeViewSyncQueryViewHandler) ViewFeedbackReady() <-chan struct{} { return nil }

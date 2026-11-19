@@ -61,6 +61,12 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 				e.SegmentIndex.BuildID,
 			)
 			switch action.Type {
+			case metastore.ActionUpdate:
+				value, err := proto.Marshal(model.MarshalSegmentIndexModel(e.SegmentIndex))
+				if err != nil {
+					return merr.Wrap(err, "encode restored segment index")
+				}
+				b.Save(key, string(value))
 			case metastore.ActionDelete:
 				// Remove, not CommitRemove: an action set containing a segment
 				// index entry never takes the ordered fallback path (see
@@ -152,7 +158,7 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			if action.Type != metastore.ActionUpdate {
 				return unsupportedAction(action)
 			}
-			b.Save(buildCurrentPartitionStatsVersionPath(e.CollectionID, e.PartitionID, e.VChannel),
+			b.CommitSave(buildCurrentPartitionStatsVersionPath(e.CollectionID, e.PartitionID, e.VChannel),
 				strconv.FormatInt(e.Version, 10))
 		case metastore.PartitionStatsEntry:
 			if e.Info == nil {
@@ -161,11 +167,9 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			switch action.Type {
 			case metastore.ActionAdd:
 				// Same encoding as catalog.SavePartitionStatsInfo: clone, then
-				// buildPartitionStatsInfoKv. Paired with a trailing
-				// SavePartitionStatsVersion this is always two ops, so it
-				// always fits a single atomic txn - the chunked fallback (and
-				// thus the commit-marker ordering) never comes into play; the
-				// version pointer is still composed last as the logical marker.
+				// buildPartitionStatsInfoKv. In a clustering publication
+				// bundle the stats info is a preparatory write; the version
+				// pointer joins the group and DataView in the final commit set.
 				cloned := proto.Clone(e.Info).(*datapb.PartitionStatsInfo)
 				k, v, err := buildPartitionStatsInfoKv(cloned)
 				if err != nil {

@@ -2850,6 +2850,9 @@ func buildStructArrayFieldDataInternal(structSchema *schemapb.StructArrayFieldSc
 }
 
 type structArrayRowAccessor struct {
+	vectorEncoding       floatVectorEncoding
+	vectorEncodingBuffer *[]byte
+
 	fieldData    *schemapb.FieldData
 	subFields    []*schemapb.FieldData
 	subAccessors []*fieldDataRowAccessor
@@ -2943,7 +2946,13 @@ func (accessor *structArrayRowAccessor) row(rowIdx int, enableInt64 bool) ([]map
 	}
 	for subIdx, sub := range subs {
 		short := structFieldShortName(sub.GetFieldName())
+		encodeFloatVector := accessor.vectorEncoding == "base64" &&
+			sub.GetType() == schemapb.DataType_ArrayOfVector &&
+			sub.GetVectors().GetVectorArray().GetElementType() == schemapb.DataType_FloatVector
 		for i, v := range columns[subIdx] {
+			if encodeFloatVector && v != nil {
+				v = accessor.vectorEncoding.floatVector(v.([]float32), accessor.vectorEncodingBuffer)
+			}
 			out[i][short] = v
 		}
 	}
@@ -4432,9 +4441,15 @@ func scalarFieldToRESTAny(field *schemapb.ScalarField, enableInt64 bool) (any, e
 	}
 }
 
-//nolint:gosec // G602: slice indices are bounded by rowsNum which is derived from the data length
 func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
 	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema,
+) ([]map[string]interface{}, error) {
+	return buildQueryRespWithEncoding(rowsNum, needFields, fieldDataList, ids, scores, enableInt64, collectionSchema, "")
+}
+
+//nolint:gosec // G602: slice indices are bounded by rowsNum which is derived from the data length
+func buildQueryRespWithEncoding(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
+	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema, vectorEncoding floatVectorEncoding,
 ) ([]map[string]interface{}, error) {
 	nativeJSON := paramtable.Get().HTTPCfg.NativeJSONResponse.GetAsBool()
 	jsonFieldNames := make(map[string]struct{})
@@ -4466,6 +4481,10 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	if rowsNum == int64(0) {
 		return []map[string]interface{}{}, nil
 	}
+	var vectorEncodingBuffer *[]byte
+	if vectorEncoding == "base64" {
+		vectorEncodingBuffer = new([]byte)
+	}
 	fieldDataAccessors := make([]*fieldDataRowAccessor, 0, columnNum)
 	structArrayAccessors := make([]*structArrayRowAccessor, columnNum)
 	for idx, fieldData := range fieldDataList {
@@ -4480,6 +4499,8 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				return nil, wrapOutputFieldErr(fieldData.GetFieldName(), err)
 			}
 			structArrayAccessors[idx] = structAccessor
+			structAccessor.vectorEncoding = vectorEncoding
+			structAccessor.vectorEncodingBuffer = vectorEncodingBuffer
 		}
 	}
 	queryResp := make([]map[string]interface{}, 0, rowsNum)
@@ -4541,7 +4562,8 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				case schemapb.DataType_BinaryVector:
 					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetBinaryVector()[dataIdx*(fieldDataList[j].GetVectors().GetDim()/8) : (dataIdx+1)*(fieldDataList[j].GetVectors().GetDim()/8)]
 				case schemapb.DataType_FloatVector:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetFloatVector().GetData()[dataIdx*fieldDataList[j].GetVectors().GetDim() : (dataIdx+1)*fieldDataList[j].GetVectors().GetDim()]
+					vector := fieldDataList[j].GetVectors().GetFloatVector().GetData()[dataIdx*fieldDataList[j].GetVectors().GetDim() : (dataIdx+1)*fieldDataList[j].GetVectors().GetDim()]
+					row[fieldDataList[j].GetFieldName()] = vectorEncoding.floatVector(vector, vectorEncodingBuffer)
 				case schemapb.DataType_Float16Vector:
 					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetFloat16Vector()[dataIdx*(fieldDataList[j].GetVectors().GetDim()*2) : (dataIdx+1)*(fieldDataList[j].GetVectors().GetDim()*2)]
 				case schemapb.DataType_BFloat16Vector:
@@ -5278,7 +5300,7 @@ func RequestHandlerFunc(c *gin.Context) {
 	}
 	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 	c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-	c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, "+HTTPHeaderIdempotencyKey)
+	c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, "+HTTPHeaderIdempotencyKey+", "+HTTPHeaderFloatVectorEncoding)
 	c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH")
 	c.Writer.Header().Set("X-Content-Type-Options", "nosniff") // Prevents MIME sniffing
 

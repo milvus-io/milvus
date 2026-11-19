@@ -99,7 +99,7 @@ func HashString2LessUint32(v string) uint32 {
 		subString = v[:substringLengthForCRC]
 	}
 
-	return crc32.ChecksumIEEE([]byte(subString)) % math.MaxUint32
+	return crc32.ChecksumIEEE(unsafe.Slice(unsafe.StringData(subString), len(subString))) % math.MaxUint32
 }
 
 func newRoutingIndexValues(targetCount int) []routingIndex {

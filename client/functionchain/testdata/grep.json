@@ -1,0 +1,23 @@
+{
+  "name": "grep",
+  "stage": "FunctionChainStageQueryScan",
+  "ops": [
+    {
+      "op": "grep",
+      "inputs": [
+        "content"
+      ],
+      "outputs": [
+        "matches"
+      ],
+      "params": {
+        "arguments": {
+          "stringValue": "-i -e 'timeout'"
+        }
+      }
+    }
+  ],
+  "outputColumns": [
+    "matches"
+  ]
+}

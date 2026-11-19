@@ -1614,57 +1614,6 @@ func genTestCollectionMeta() *etcdpb.CollectionMeta {
 	}
 }
 
-func BenchmarkMixCompactor(b *testing.B) {
-	// Setup
-	s := new(MixCompactionTaskStorageV1Suite)
-
-	s.SetT(&testing.T{})
-	s.SetupSuite()
-	s.SetupTest()
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		b.StopTimer()
-		seq := int64(i * 100000)
-		segments := []int64{seq, seq + 1, seq + 2}
-		alloc := allocator.NewLocalAllocator(seq+3, math.MaxInt64)
-		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
-		s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0)
-		for _, segID := range segments {
-			s.initSegBuffer(100000, segID)
-			kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
-			s.Require().NoError(err)
-			s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
-				left, right := lo.Difference(keys, lo.Keys(kvs))
-				return len(left) == 0 && len(right) == 0
-			})).Return(lo.Values(kvs), nil).Once()
-
-			s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
-				CollectionID: 1,
-				SegmentID:    segID,
-				FieldBinlogs: lo.Values(fBinlogs),
-			})
-		}
-
-		b.StartTimer()
-
-		result, err := s.task.Compact()
-		s.NoError(err)
-		s.NotNil(result)
-		s.Equal(s.task.plan.GetPlanID(), result.GetPlanID())
-		s.Equal(1, len(result.GetSegments()))
-		segment := result.GetSegments()[0]
-		s.EqualValues(19531, segment.GetSegmentID())
-		s.EqualValues(3, segment.GetNumOfRows())
-		s.NotEmpty(segment.InsertLogs)
-		s.NotEmpty(segment.Field2StatslogPaths)
-		s.Empty(segment.Deltalogs)
-	}
-
-	s.TearDownTest()
-}
-
 func TestCanMergeSort(t *testing.T) {
 	params := compaction.Params{UseMergeSort: true, MaxSegmentMergeSort: 30}
 	// EnableNamespace is false here, so the merge key is [pk] and IsSorted is
@@ -1769,4 +1718,76 @@ func TestCanMergeSortMatchesMergeKey(t *testing.T) {
 		}
 		assert.False(t, canMergeSort(plan, params))
 	})
+}
+
+func TestMixCompactionDeferredBloomFilterSelection(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+	const key = "dataNode.compaction.enableDeferredBloomFilter"
+	defer paramtable.Get().Reset(key)
+	for _, tc := range []struct {
+		name      string
+		enabled   string
+		inputSize int64
+		outputs   int64
+		want      bool
+	}{
+		{name: "default multi output", inputSize: 1001, outputs: 2},
+		{name: "disabled multi output", enabled: "false", inputSize: 1001, outputs: 2},
+		{name: "enabled unknown output", enabled: "true"},
+		{name: "below segment boundary", enabled: "true", inputSize: 999, outputs: 1},
+		{name: "at segment boundary", enabled: "true", inputSize: 1000, outputs: 1},
+		{name: "above segment boundary", enabled: "true", inputSize: 1001, outputs: 2, want: true},
+		{name: "at second boundary", enabled: "true", inputSize: 2000, outputs: 2, want: true},
+		{name: "above second boundary", enabled: "true", inputSize: 2001, outputs: 3, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.enabled == "" {
+				paramtable.Get().Reset(key)
+			} else {
+				assert.NoError(t, paramtable.Get().Save(key, tc.enabled))
+			}
+			params := compaction.GenParams()
+			assert.NoError(t, paramtable.Get().Save(key, fmt.Sprint(!params.EnableDeferredBloomFilter)))
+			config := storage.DefaultPkStatsConfig(1000)
+			var configReads, optionCalls int
+			configPatch := mockey.Mock(storage.DefaultPkStatsConfig).To(func(rows int64) storage.PkStatsConfig {
+				configReads++
+				assert.EqualValues(t, 1000, rows)
+				return config
+			}).Build()
+			defer configPatch.UnPatch()
+			var got storage.PkStatsConfig
+			patch := mockey.Mock(storage.WithPkStatsConfig).To(func(config storage.PkStatsConfig) storage.RwOption {
+				optionCalls++
+				got = config
+				return nil
+			}).Build()
+			defer patch.UnPatch()
+			task := &mixCompactionTask{
+				ctx:              context.Background(),
+				compactionParams: params,
+				plan: &datapb.CompactionPlan{
+					MaxSize: 1000,
+					Schema:  &schemapb.CollectionSchema{},
+					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
+						FieldBinlogs: []*datapb.FieldBinlog{{
+							Binlogs: []*datapb.Binlog{{MemorySize: tc.inputSize, EntriesNum: 1000}},
+						}},
+					}},
+				},
+			}
+			assert.NoError(t, task.preCompact())
+			assert.Equal(t, tc.outputs, task.estimatedOutputSegmentCount)
+			task.buildWriterOptions(context.Background())
+			if tc.want {
+				assert.Equal(t, 1, configReads)
+				assert.Equal(t, 1, optionCalls)
+				config.UseDeferredBloomFilter = true
+				assert.Equal(t, config, got)
+			} else {
+				assert.Zero(t, configReads, "eager path must not read PK configuration while building options")
+				assert.Zero(t, optionCalls, "eager path must use the writer's default PK configuration")
+			}
+		})
+	}
 }

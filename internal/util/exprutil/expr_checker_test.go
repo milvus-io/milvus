@@ -410,9 +410,21 @@ func TestValidatePartitionKeyIsolation(t *testing.T) {
 			expectedErrorString: "partition key not found in expr or the expr is invalid when validating partition key isolation",
 		},
 		{
+			// Common-factor extraction moves key_field == 10 outside the OR,
+			// leaving only non-partition-key predicates in the OR branches.
 			name:                "partition key isolation complex OR",
 			expr:                "(key_field == 10 and int64_field == 11) or (key_field == 10 and varChar_field == 'a')",
-			expectedErrorString: "partition key isolation does not support",
+			expectedErrorString: "",
+		},
+		{
+			name:                "partition key isolation complex OR with different keys",
+			expr:                "(key_field == 10 and int64_field == 11) or (key_field == 20 and varChar_field == 'a')",
+			expectedErrorString: "partition key isolation does not support OR",
+		},
+		{
+			name:                "partition key isolation complex OR with missing key",
+			expr:                "(key_field == 10 and int64_field == 11) or varChar_field == 'a'",
+			expectedErrorString: "partition key isolation does not support OR",
 		},
 	}
 

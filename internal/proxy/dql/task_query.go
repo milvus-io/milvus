@@ -1009,7 +1009,6 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	guaranteeTs := t.request.GetGuaranteeTimestamp()
 	var consistencyLevel commonpb.ConsistencyLevel
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
-	t.ConsistencyLevel = t.request.GetConsistencyLevel()
 	if useDefaultConsistency {
 		consistencyLevel = collectionInfo.ConsistencyLevel
 		guaranteeTs = ParseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
@@ -1023,6 +1022,9 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 			guaranteeTs = ParseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
 		}
 	}
+	// Forward the resolved level: QueryView and the delegator plan the read by
+	// it, so it must match the level the guarantee timestamp was computed from.
+	t.ConsistencyLevel = consistencyLevel
 
 	// update actual consistency level
 	accesslog.SetActualConsistencyLevel(ctx, consistencyLevel)
@@ -1385,7 +1387,12 @@ func (t *QueryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 func (t *QueryTask) shardReplyError(ctx context.Context, log *mlog.Logger, rpc string, nodeID int64, status *commonpb.Status, err error) error {
 	if err != nil {
 		log.Warn(ctx, "QueryNode query return error", mlog.String("rpc", rpc), mlog.Err(err))
-		t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
+		// A request that was canceled fails here for that reason alone; the
+		// shard leader cache is still valid. A timed-out request keeps the
+		// previous behavior and invalidates it.
+		if !merr.IsCanceled(ctx.Err()) {
+			t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
+		}
 		return err
 	}
 	if status.GetErrorCode() == commonpb.ErrorCode_NotShardLeader {

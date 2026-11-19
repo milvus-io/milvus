@@ -18,6 +18,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -42,7 +44,13 @@ enum class Status : uint32_t {
     AllocationError = 9,
 };
 
-enum class Operation { Compile, CreateSession, Execute, ReadResult };
+enum class Operation {
+    Compile,
+    CreateSession,
+    Execute,
+    ReadResult,
+    ReadCondition
+};
 
 // Carries a Milvus error code from construction, retaining the original Grep
 // status and operation for diagnostics. InvalidUtf8 during Compile concerns a
@@ -68,6 +76,7 @@ struct MatchOptions {
     PatternKind pattern_kind = PatternKind::Regex;
     CaseMode case_mode = CaseMode::Sensitive;
     Boundary boundary = Boundary::None;
+    std::optional<uint64_t> max_count;
 };
 
 // Compile limits have no production defaults; callers supply positive budgets.
@@ -102,10 +111,15 @@ class Plan {
     Plan&
     operator=(const Plan&) = delete;
 
-    // Concurrent creation from an unchanged Plan is allowed. Do not move or
+    // Concurrent calls on an unchanged Plan are allowed. Do not move or
     // destroy this C++ object during a method call. Sessions retain Rust's Plan.
     Session
     CreateSession() const;
+
+    // An owning copy of the cached binary Protobuf condition, including NULs.
+    // The returned string outlives this Plan. No reader/regex parsing occurs.
+    std::string
+    ConditionPayload() const;
 
  private:
     explicit Plan(MgGrepPlan* handle) noexcept;

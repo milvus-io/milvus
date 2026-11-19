@@ -385,6 +385,31 @@ func validateRawObjectKey(objectKey string) error {
 	return nil
 }
 
+func validateSnapshotBareMetadataKey(raw string) error {
+	if raw == "" {
+		return merr.WrapErrParameterInvalidMsg("snapshot metadata object key is empty")
+	}
+	if strings.ContainsAny(raw, "?#") {
+		return merr.WrapErrParameterInvalidMsg("snapshot metadata object key must not include query parameters or fragments")
+	}
+	if u, err := url.Parse(raw); err == nil && u.Scheme != "" {
+		return merr.WrapErrParameterInvalidMsg(
+			"snapshot metadata URI scheme %q requires scheme://host/... format",
+			strings.ToLower(u.Scheme),
+		)
+	}
+	for _, part := range strings.Split(raw, "/") {
+		if part == "" {
+			return merr.WrapErrParameterInvalidMsg("snapshot metadata object key must be bucket-relative without leading, trailing, or empty path segments")
+		}
+		if part == "." || part == ".." {
+			return merr.WrapErrParameterInvalidMsg("foreign_uri object key must not contain path traversal")
+		}
+	}
+	_, err := DeriveForeignRoot(DirectionRestore, raw)
+	return err
+}
+
 func cleanURIPathSegments(escapedPath string) ([]string, error) {
 	unescaped, err := url.PathUnescape(escapedPath)
 	if err != nil {

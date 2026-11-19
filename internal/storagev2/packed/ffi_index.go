@@ -51,7 +51,8 @@ func ManifestIndexRelativePath(basePath, indexPrefix string) (string, error) {
 
 // ManifestIndexInfo identifies a completed index artifact registered in a
 // StorageV3 manifest. Path is the artifact root, IndexFileKeys are relative to
-// it, and Properties holds only index-specific parameters.
+// it. Properties preserves optional storage metadata from older manifests;
+// Milvus publishers leave it empty rather than copying collection parameters.
 //
 // The index bytes must already exist before this metadata is published. A
 // manifest transaction only makes the metadata visible atomically with a new

@@ -191,6 +191,8 @@ type Server struct {
 
 	statsInspector                   *stats.Inspector
 	indexInspector                   *index.IndexInspector
+	manifestIndexBackfillInspector   *index.ManifestIndexBackfillInspector
+	manifestIndexRollbackInspector   *index.ManifestIndexRollbackInspector
 	analyzeInspector                 *analyze.AnalyzeInspector
 	talonPrewarmInspector            *TalonPrewarmInspector
 	segmentChangeInspector           *segmentChangeInspector
@@ -399,8 +401,9 @@ func (s *Server) initDataCoord() (initErr error) {
 	if err != nil {
 		return err
 	}
-
-	s.initCompaction()
+	if err = s.initCompaction(); err != nil {
+		return err
+	}
 	mlog.Info(s.ctx, "init compaction done")
 
 	s.initAnalyzeInspector()
@@ -408,6 +411,10 @@ func (s *Server) initDataCoord() (initErr error) {
 
 	s.initIndexInspector(storageCli)
 	mlog.Info(s.ctx, "init task scheduler done")
+
+	s.manifestIndexRollbackInspector = index.NewManifestIndexRollbackInspector(s.ctx, s.meta, s.indexMeta)
+	s.initManifestIndexBackfillInspector()
+	mlog.Info(s.ctx, "init manifest index backfill inspector done")
 
 	s.initStatsInspector()
 	mlog.Info(s.ctx, "init statsJobManager done")
@@ -446,6 +453,7 @@ func (s *Server) initDataCoord() (initErr error) {
 		s.fileResourceObserver.InitDataCoord(s.nodeManager)
 	}
 
+	s.initSegmentChangeCleaner()
 	s.importInspector = bulkimport.NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler, s.copySegmentMeta)
 	s.copySegmentInspector = copysegment.NewCopySegmentInspector(
 		s.ctx,
@@ -502,6 +510,13 @@ func (s *Server) initDataCoord() (initErr error) {
 	return nil
 }
 
+func (s *Server) initSegmentChangeCleaner() {
+	s.segmentChangeInspector.cleaner = &segmentChangeCleaner{
+		mt: s.meta, importMeta: s.importMeta, copyMeta: s.copySegmentMeta,
+		refreshMeta: s.externalCollectionRefreshMeta, compactionMeta: s.compactionTaskMeta,
+	}
+}
+
 // Start initialize `Server` members and start loops, follow steps are taken:
 //  1. initialize message factory parameters
 //  2. initialize root coord client, meta, datanode cluster, segment info channel,
@@ -548,9 +563,27 @@ func (s *Server) initCluster() error {
 		s.nodeManager = session.NewNodeManager(s.dataNodeCreator)
 	}
 	if s.cluster2 == nil {
-		s.cluster2 = session.NewCluster(s.nodeManager)
+		s.cluster2 = session.NewCluster(s.nodeManager, session.WithCollectionLabels(s.collectionLabelsForTask))
 	}
 	return nil
+}
+
+// collectionLabelsForTask names a task's collection from the local collection
+// cache only: dispatch must not wait on RootCoord, and a task whose collection
+// is not cached is dispatched without the names, as before.
+func (s *Server) collectionLabelsForTask(collectionID int64) (session.CollectionLabels, bool) {
+	if s.meta == nil {
+		return session.CollectionLabels{}, false
+	}
+	collection := s.meta.GetCollection(collectionID)
+	if collection == nil {
+		return session.CollectionLabels{}, false
+	}
+	return session.CollectionLabels{
+		CollectionName: collection.Schema.GetName(),
+		DatabaseID:     collection.DatabaseID,
+		DatabaseName:   collection.DatabaseName,
+	}, true
 }
 
 func (s *Server) SetAddress(address string) {
@@ -706,11 +739,7 @@ func (s *Server) rewatchDataNodes(sessions map[string]*sessionutil.Session) erro
 
 func (s *Server) initSegmentManager() error {
 	if s.segmentManager == nil {
-		manager, err := segment.NewSegmentManager(s.meta, s.allocator)
-		if err != nil {
-			return err
-		}
-		s.segmentManager = manager
+		s.segmentManager = segment.NewSegmentManager(s.meta)
 	}
 	return nil
 }
@@ -876,6 +905,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	if err := retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime)); err != nil {
 		return err
 	}
+	recoveredMeta.PartitionStats = recoveredDomainMetas.partitionStatsMeta
 	defer func() {
 		if s.meta != recoveredMeta {
 			recoveredMeta.CloseManifestCommitExecutor()
@@ -895,6 +925,14 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	// Collections come from RootCoord's MetaTable through the shared
 	// CollectionSource. Recover DataViews for live collections only, as the
 	// ShowCollections walk this replaced did.
+	// Resolve interrupted group writes before RecoverManager projects any
+	// SegmentMeta or starts its asynchronous recompute worker.
+	if err := meta.RetrySegmentChangeRecovery(s.ctx, func() error {
+		return recoveredMeta.ReconcileSegmentChangeGroups(s.ctx, s.allocator, s.dataViewCollectionRecoveryValidator)
+	}); err != nil {
+		return err
+	}
+
 	collections := recoveredMeta.GetCollections()
 	collectionIDs := lo.Map(collections, func(c *meta.CollectionInfo, _ int) int64 { return c.ID })
 	collectionVChannels := lo.SliceToMap(collections, func(c *meta.CollectionInfo) (int64, []string) {
@@ -903,8 +941,15 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	var manager dataview.Manager
 	if err := retry.Do(s.ctx, func() error {
 		var err error
+		recoveryCtx, cancel := context.WithCancel(s.ctx)
+		recovered := false
+		defer func() {
+			if !recovered {
+				cancel()
+			}
+		}()
 		manager, err = dataview.RecoverManager(
-			s.ctx,
+			recoveryCtx,
 			catalog,
 			s.dataViewCollectionRecoveryValidator,
 			recoveredMeta.LoadableProjection,
@@ -917,7 +962,17 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 				return pendingTransformBounds(ctx, recoveredMeta, recoveredImports, view)
 			}),
 		)
-		return err
+		if err != nil {
+			return err
+		}
+		// RecoverManager's general rebuild is best-effort. Group recovery
+		// requires a confirmed snapshot before exposing the recovered meta.
+		if err := recoveredMeta.ReconcileSegmentChangeDataViews(s.ctx, manager); err != nil {
+			return err
+		}
+		// The successfully recovered manager lives until s.ctx is canceled.
+		recovered = true
+		return nil
 	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
 		return err
 	}
@@ -1001,6 +1056,12 @@ func (s *Server) initIndexInspector(storageCli storage.ChunkManager) {
 	}
 }
 
+func (s *Server) initManifestIndexBackfillInspector() {
+	if s.manifestIndexBackfillInspector == nil {
+		s.manifestIndexBackfillInspector = index.NewManifestIndexBackfillInspector(s.ctx, s.meta, s.indexMeta)
+	}
+}
+
 func (s *Server) initStatsInspector() {
 	if s.statsInspector == nil {
 		s.statsInspector = stats.NewStatsInspector(s.ctx, s.notifyStatsChan, s.meta, s.statsTaskMeta, s.globalScheduler, s.allocator, s.handler, s.compactionInspector, s.indexEngineVersionManager)
@@ -1021,7 +1082,7 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 	}
 }
 
-func (s *Server) initCompaction() {
+func (s *Server) initCompaction() error {
 	partitionStatsCleaner := partitionstats.NewPartitionStatsCleaner(s.meta.ChunkManager, s.catalog, s.analyzeMeta, s.partitionStatsMeta)
 	cph := compaction.NewCompactionInspector(s.meta, s.compactionTaskMeta, s.indexMeta, s.analyzeMeta, s.partitionStatsMeta, s.compactionTargetMeta, partitionStatsCleaner, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
 	cph.LookupRestoreJob = func(ctx context.Context, id int64) *datapb.CopySegmentJob {
@@ -1031,11 +1092,16 @@ func (s *Server) initCompaction() {
 		}
 		return job.(*copysegment.Job).CopySegmentJob
 	}
-	cph.LoadMeta()
+	cph.SetCopySegmentMeta(s.copySegmentMeta)
+	if err := cph.LoadMeta(); err != nil {
+		cph.Stop()
+		return err
+	}
 	s.compactionInspector = cph
 	s.compactionTriggerManager = compaction.NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexMeta, s.compactionTaskMeta, s.partitionStatsMeta, s.compactionTargetMeta, s.indexEngineVersionManager)
 	s.compactionTriggerManager.InitForceMergeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
 	s.compactionTrigger = compaction.NewCompactionTrigger(s.meta, s.indexMeta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
+	return nil
 }
 
 func (s *Server) stopCompaction() {
@@ -1124,6 +1190,12 @@ func (s *Server) collectMetaMetrics(ctx context.Context) {
 func (s *Server) startTaskScheduler() {
 	s.statsInspector.Start()
 	s.indexInspector.Start()
+	if s.manifestIndexBackfillInspector != nil {
+		s.manifestIndexBackfillInspector.Start()
+	}
+	if s.manifestIndexRollbackInspector != nil {
+		s.manifestIndexRollbackInspector.Start()
+	}
 	s.analyzeInspector.Start()
 	s.segmentChangeInspector.Start()
 	// Note: externalCollectionInspector.Start() is called in startServerLoop as a goroutine
@@ -1461,6 +1533,15 @@ func (s *Server) Stop() error {
 
 	s.indexInspector.Stop()
 	mlog.Info(s.ctx, "datacoord index inspector stopped")
+
+	if s.manifestIndexBackfillInspector != nil {
+		s.manifestIndexBackfillInspector.Stop()
+	}
+	mlog.Info(s.ctx, "datacoord manifest index backfill inspector stopped")
+	if s.manifestIndexRollbackInspector != nil {
+		s.manifestIndexRollbackInspector.Stop()
+	}
+	mlog.Info(s.ctx, "datacoord manifest index rollback inspector stopped")
 
 	s.analyzeInspector.Stop()
 	mlog.Info(s.ctx, "datacoord analyze inspector stopped")

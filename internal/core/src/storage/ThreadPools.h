@@ -17,12 +17,68 @@
 #ifndef MILVUS_THREADPOOLS_H
 #define MILVUS_THREADPOOLS_H
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <shared_mutex>
+#include <string>
+
+#include <folly/executors/CPUThreadPoolExecutor.h>
+#include <folly/executors/FunctionScheduler.h>
 
 #include "common/Common.h"
 #include "common/OpContext.h"
-#include "ThreadPool.h"
 namespace milvus {
+
+const int DEFAULT_CPU_NUM = 1;
+
+const int64_t DEFAULT_HIGH_PRIORITY_THREAD_CORE_COEFFICIENT = 10;
+const int64_t DEFAULT_MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT = 5;
+const int64_t DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT = 1;
+
+const int DEFAULT_THREAD_POOL_MAX_THREADS_SIZE = 16;
+
+extern std::atomic<float> HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
+extern std::atomic<float> MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
+extern std::atomic<float> LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
+
+extern int CPU_NUM;
+extern std::atomic<int> THREAD_POOL_MAX_THREADS_SIZE;
+
+void
+SetHighPriorityThreadCoreCoefficient(const float coefficient);
+
+void
+SetMiddlePriorityThreadCoreCoefficient(const float coefficient);
+
+void
+SetLowPriorityThreadCoreCoefficient(const float coefficient);
+
+void
+InitCpuNum(const int core);
+
+void
+SetThreadPoolMaxThreadsSize(const int size);
+
+inline int
+ClampThreadPoolMaxThreads(int size) {
+    size = std::max(1, size);
+    auto max_limit = THREAD_POOL_MAX_THREADS_SIZE.load();
+    if (max_limit > 0 && size > max_limit) {
+        size = max_limit;
+    }
+    return size;
+}
+
+inline int
+ComputeThreadPoolMaxThreads(float thread_core_coefficient) {
+    return ClampThreadPoolMaxThreads(
+        static_cast<int>(std::round(CPU_NUM * thread_core_coefficient)));
+}
 
 constexpr const char* LOAD_PRIORITY = "load_priority";
 
@@ -30,9 +86,6 @@ enum ThreadPoolPriority {
     HIGH = 0,
     MIDDLE = 1,
     LOW = 2,
-    // Isolate search fanout from MIDDLE's field/index loading queue.
-    // TODO: Migrate search fanout to global coroutines.
-    SEARCH_FANOUT = 3,
 };
 
 inline ThreadPoolPriority
@@ -62,10 +115,11 @@ ResolveLoadPriority(const milvus::OpContext* ctx,
 
 class ThreadPools {
  public:
-    static ThreadPool&
-    GetThreadPool(ThreadPoolPriority priority);
+    // Process-wide executor; submit work with folly::via(...).semi().
+    static folly::CPUThreadPoolExecutor&
+    GetExecutor(ThreadPoolPriority priority);
 
-    // MIDDLE and SEARCH_FANOUT share sizing, including before first use.
+    // Each priority keeps its own coefficient, including before first use.
     static void
     ResizeThreadPool(ThreadPoolPriority priority, float ratio);
 
@@ -89,13 +143,19 @@ class ThreadPools {
         static std::map<ThreadPoolPriority, std::string> name_map = {
             {HIGH, "HIGH_SEGC_POOL"},
             {MIDDLE, "MIDD_SEGC_POOL"},
-            {LOW, "LOW_SEGC_POOL"},
-            {SEARCH_FANOUT, "SRCH_FAN_POOL"}};
+            {LOW, "LOW_SEGC_POOL"}};
         return name_map;
     }
 
-    static std::map<ThreadPoolPriority, std::unique_ptr<ThreadPool>>
-        thread_pool_map;
+    // Native destruction stops queued tasks; explicitly drain after sampling stops.
+    struct ExecutorDeleter {
+        std::unique_ptr<folly::FunctionScheduler> metrics_sampler;
+        void
+        operator()(folly::CPUThreadPoolExecutor* executor) const;
+    };
+    using ExecutorPtr =
+        std::unique_ptr<folly::CPUThreadPoolExecutor, ExecutorDeleter>;
+    static std::map<ThreadPoolPriority, ExecutorPtr> thread_pool_map;
     static std::shared_mutex mutex_;
     static std::mutex resize_mutex_;
     static std::atomic<int64_t> load_executor_workers_;
@@ -117,9 +177,6 @@ struct fmt::formatter<milvus::ThreadPoolPriority> : formatter<std::string> {
                 break;
             case milvus::LOW:
                 name = "LOW";
-                break;
-            case milvus::SEARCH_FANOUT:
-                name = "SEARCH_FANOUT";
                 break;
             default:
                 name = "UNKNOWN";

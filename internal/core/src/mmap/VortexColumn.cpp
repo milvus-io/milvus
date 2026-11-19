@@ -35,6 +35,7 @@
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Utils.h"
 #include "common/ChunkWriter.h"
+#include "common/ColumnarArrayChunk.h"
 #include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "mmap/ChunkedColumnFilter.h"
@@ -424,124 +425,6 @@ MergeCellIds(const std::vector<uint64_t>& left,
     return cell_ids;
 }
 
-class VortexColumnPlanner final : public ColumnPlanner {
- public:
-    VortexColumnPlanner(const std::shared_ptr<VortexColumnGroup>& column_group,
-                        std::string_view field_name)
-        : ColumnPlanner(Boundaries(column_group)), column_group_(column_group) {
-        const auto& files = column_group_->files();
-        file_planner_delegates_.reserve(files.size());
-        for (size_t file_id = 0; file_id < files.size(); ++file_id) {
-            file_planner_delegates_.emplace_back(
-                column_group_->FieldPlanner(file_id, field_name));
-        }
-        AssertInfo(
-            static_cast<int64_t>(file_planner_delegates_.size()) == NumCells(),
-            "vortex Column planner files {} do not match logical "
-            "sources {}",
-            file_planner_delegates_.size(),
-            NumCells());
-    }
-
-    const milvus_storage::vortex::VortexPlanner&
-    FileDelegate(int64_t file_id) const {
-        AssertInfo(
-            file_id >= 0 &&
-                file_id < static_cast<int64_t>(file_planner_delegates_.size()),
-            "vortex planner file {} out of range {}",
-            file_id,
-            file_planner_delegates_.size());
-        return *file_planner_delegates_[file_id];
-    }
-
-    milvus_storage::vortex::VortexPlan
-    PlanRowRange(int64_t file_id,
-                 uint64_t row_start,
-                 uint64_t row_end,
-                 const std::string& predicate) const {
-        auto result = FileDelegate(file_id).PlanForRowRange(
-            row_start, row_end, predicate);
-        if (!result.ok()) {
-            ThrowVortexStatus(
-                result.status(),
-                ErrorCode::UnexpectedError,
-                fmt::format("failed to plan vortex file {} row range [{}, {})",
-                            file_id,
-                            row_start,
-                            row_end));
-        }
-        return std::move(result).ValueOrDie();
-    }
-
-    milvus_storage::vortex::VortexPlan
-    PlanOffsets(int64_t file_id, const std::vector<int64_t>& offsets) const {
-        auto result = FileDelegate(file_id).PlanForOffsets(offsets);
-        if (!result.ok()) {
-            ThrowVortexStatus(
-                result.status(),
-                ErrorCode::UnexpectedError,
-                fmt::format("failed to plan vortex file {} offsets", file_id));
-        }
-        return std::move(result).ValueOrDie();
-    }
-
- private:
-    static const std::vector<int64_t>&
-    Boundaries(const std::shared_ptr<VortexColumnGroup>& column_group) {
-        AssertInfo(column_group != nullptr,
-                   "vortex Column planner has no ColumnGroup");
-        return column_group->num_rows_until_chunk();
-    }
-
-    // The base planner borrows the immutable file-boundary table from this
-    // shared ColumnGroup generation.
-    std::shared_ptr<VortexColumnGroup> column_group_;
-    std::vector<std::shared_ptr<milvus_storage::vortex::VortexPlanner>>
-        file_planner_delegates_;
-};
-
-const VortexColumnPlanner&
-AsVortexPlanner(const ColumnPlanner& planner) {
-    return static_cast<const VortexColumnPlanner&>(planner);
-}
-
-std::optional<VortexReaderRange>
-NextVortexReaderRange(const ColumnPlanner& planner,
-                      int64_t* scan_pos,
-                      int64_t scan_end) {
-    AssertInfo(scan_pos != nullptr, "vortex scan position is null");
-    while (*scan_pos < scan_end) {
-        const auto location = planner.Locate(*scan_pos);
-        const auto chunk_id = location.cell_id;
-        const auto local_offset = location.cell_offset;
-        const auto chunk_start = planner.CellStart(chunk_id);
-        const auto chunk_rows = planner.CellRows(chunk_id);
-        const auto chunk_end = chunk_start + chunk_rows;
-        const auto local_end =
-            std::min<int64_t>(chunk_end, scan_end) - chunk_start;
-        const auto length = local_end - static_cast<int64_t>(local_offset);
-        if (length == 0) {
-            *scan_pos = chunk_end;
-            continue;
-        }
-        AssertInfo(length > 0,
-                   "invalid vortex scan chunk range, chunk {}, offset {}, "
-                   "end {}",
-                   chunk_id,
-                   local_offset,
-                   local_end);
-        return VortexReaderRange{
-            static_cast<int64_t>(chunk_id),
-            static_cast<int64_t>(local_offset),
-            length,
-            chunk_start,
-            *scan_pos,
-            chunk_start + local_end,
-        };
-    }
-    return std::nullopt;
-}
-
 void
 AppendRowIdPayloadEntry(ChunkedColumnInterface::ScanBatch* out,
                         TargetBitmap* validity,
@@ -587,6 +470,168 @@ FinalizeAllValidRowIdPayloadOutput(ChunkedColumnInterface::ScanBatch* out) {
 
 }  // namespace
 
+class VortexColumn::PlannerState final {
+ public:
+    PlannerState(const std::shared_ptr<VortexColumnGroup>& column_group,
+                 std::string_view field_name)
+        : column_group_(column_group) {
+        AssertInfo(column_group_ != nullptr,
+                   "vortex Column planner has no ColumnGroup");
+        file_boundaries_ = &column_group_->num_rows_until_chunk();
+        const auto& boundaries = FileBoundaries();
+        AssertInfo(boundaries.size() >= 2,
+                   "vortex planner requires at least one file boundary");
+        AssertInfo(boundaries.front() == 0,
+                   "vortex planner first file boundary is {}, expected 0",
+                   boundaries.front());
+        for (size_t i = 1; i < boundaries.size(); ++i) {
+            AssertInfo(
+                boundaries[i] >= boundaries[i - 1],
+                "vortex planner file boundaries are not monotonic at {}: "
+                "{} < {}",
+                i,
+                boundaries[i],
+                boundaries[i - 1]);
+        }
+        const auto& files = column_group_->files();
+        file_planner_delegates_.reserve(files.size());
+        for (size_t file_id = 0; file_id < files.size(); ++file_id) {
+            file_planner_delegates_.emplace_back(
+                column_group_->FieldPlanner(file_id, field_name));
+        }
+        AssertInfo(
+            static_cast<int64_t>(file_planner_delegates_.size()) == NumFiles(),
+            "vortex Column planner files {} do not match logical sources {}",
+            file_planner_delegates_.size(),
+            NumFiles());
+    }
+
+    std::pair<int64_t, int64_t>
+    Locate(int64_t segment_offset) const {
+        AssertInfo(segment_offset >= 0 && segment_offset < NumRows(),
+                   "segment offset {} out of planner rows {}",
+                   segment_offset,
+                   NumRows());
+        const auto& boundaries = FileBoundaries();
+        if (boundaries.size() == 2) {
+            return {0, segment_offset};
+        }
+        const auto it = std::upper_bound(
+            boundaries.begin(), boundaries.end(), segment_offset);
+        const auto file_id =
+            static_cast<int64_t>(std::distance(boundaries.begin(), it)) - 1;
+        return {file_id, segment_offset - boundaries[file_id]};
+    }
+
+    int64_t
+    FileStart(int64_t file_id) const {
+        AssertInfo(file_id >= 0 && file_id <= NumFiles(),
+                   "vortex planner file boundary {} out of range {}",
+                   file_id,
+                   NumFiles());
+        return FileBoundaries()[file_id];
+    }
+
+    int64_t
+    FileRows(int64_t file_id) const {
+        return FileStart(file_id + 1) - FileStart(file_id);
+    }
+
+    int64_t
+    NumFiles() const {
+        return static_cast<int64_t>(FileBoundaries().size()) - 1;
+    }
+
+    int64_t
+    NumRows() const {
+        return FileBoundaries().back();
+    }
+
+    const std::vector<int64_t>&
+    FileBoundaries() const {
+        return *file_boundaries_;
+    }
+
+    std::optional<VortexReaderRange>
+    NextReaderRange(int64_t* scan_pos, int64_t scan_end) const {
+        AssertInfo(scan_pos != nullptr, "vortex scan position is null");
+        while (*scan_pos < scan_end) {
+            const auto [file_id, local_offset] = Locate(*scan_pos);
+            const auto file_start = FileStart(file_id);
+            const auto file_end = file_start + FileRows(file_id);
+            const auto local_end =
+                std::min<int64_t>(file_end, scan_end) - file_start;
+            const auto length = local_end - local_offset;
+            if (length == 0) {
+                *scan_pos = file_end;
+                continue;
+            }
+            AssertInfo(length > 0,
+                       "invalid vortex scan file range, file {}, offset {}, "
+                       "end {}",
+                       file_id,
+                       local_offset,
+                       local_end);
+            return VortexReaderRange{file_id,
+                                     local_offset,
+                                     length,
+                                     file_start,
+                                     *scan_pos,
+                                     file_start + local_end};
+        }
+        return std::nullopt;
+    }
+
+    const milvus_storage::vortex::VortexPlanner&
+    FileDelegate(int64_t file_id) const {
+        AssertInfo(
+            file_id >= 0 &&
+                file_id < static_cast<int64_t>(file_planner_delegates_.size()),
+            "vortex planner file {} out of range {}",
+            file_id,
+            file_planner_delegates_.size());
+        return *file_planner_delegates_[file_id];
+    }
+
+    milvus_storage::vortex::VortexPlan
+    PlanRowRange(int64_t file_id,
+                 uint64_t row_start,
+                 uint64_t row_end,
+                 const std::string& predicate) const {
+        auto result = FileDelegate(file_id).PlanForRowRange(
+            row_start, row_end, predicate);
+        if (!result.ok()) {
+            ThrowVortexStatus(
+                result.status(),
+                ErrorCode::UnexpectedError,
+                fmt::format("failed to plan vortex file {} row range [{}, {})",
+                            file_id,
+                            row_start,
+                            row_end));
+        }
+        return std::move(result).ValueOrDie();
+    }
+
+    milvus_storage::vortex::VortexPlan
+    PlanOffsets(int64_t file_id, const std::vector<int64_t>& offsets) const {
+        auto result = FileDelegate(file_id).PlanForOffsets(offsets);
+        if (!result.ok()) {
+            ThrowVortexStatus(
+                result.status(),
+                ErrorCode::UnexpectedError,
+                fmt::format("failed to plan vortex file {} offsets", file_id));
+        }
+        return std::move(result).ValueOrDie();
+    }
+
+ private:
+    // Keep the immutable file boundaries and shared Storage planners together.
+    std::shared_ptr<VortexColumnGroup> column_group_;
+    const std::vector<int64_t>* file_boundaries_{nullptr};
+    std::vector<std::shared_ptr<milvus_storage::vortex::VortexPlanner>>
+        file_planner_delegates_;
+};
+
 struct VortexColumn::ArrowStringViewHolder {
     PinWrapper<std::shared_ptr<arrow::RecordBatchReader>> scan;
     std::vector<std::shared_ptr<arrow::RecordBatch>> batches;
@@ -619,7 +664,7 @@ struct VortexColumn::OrderedTakeOwner {
 template <bool HasCandidateMask>
 class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
     struct Selection {
-        const TargetBitmap* mask;
+        const TargetBitmapView* mask;
         std::vector<int64_t> value_indices;
         mutable std::optional<ChunkedColumnInterface::OwnedTakeData> dense;
     };
@@ -631,7 +676,7 @@ class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
                      std::shared_ptr<void> owner,
                      int64_t size,
                      DataType data_type,
-                     const TargetBitmap* candidate_mask,
+                     const TargetBitmapView* candidate_mask,
                      std::vector<int64_t> value_indices)
         : values_(values),
           validity_(validity),
@@ -1411,8 +1456,14 @@ class VortexDataBatchReader final {
                        "planned end {}",
                        row_id_start_ + batch->num_rows(),
                        range_end_);
-            auto array = PrepareBatchArray(batch->column(0));
-            FillOutput(array, batch->num_rows(), out);
+            auto array = batch->column(0);
+            if (array == nullptr || array->length() != batch->num_rows()) {
+                ThrowInfo(
+                    ErrorCode::DataFormatBroken,
+                    "vortex data scan column length does not match {} rows",
+                    batch->num_rows());
+            }
+            FillOutput(PrepareBatchArray(array), batch->num_rows(), out);
             return true;
         }
     }
@@ -1810,6 +1861,19 @@ class VortexScanCursor final : public ChunkedColumnInterface::ScanCursor {
                           static_cast<int>(column_->data_type_));
             }
         }
+        if (pin_policy_ == ChunkedColumnInterface::ScanPinPolicy::AllCells) {
+            const auto& planner = column_->Planner();
+            all_cell_pins_.resize(planner.NumFiles());
+            for (int64_t file_id = 0; file_id < planner.NumFiles(); ++file_id) {
+                const auto rows = planner.FileRows(file_id);
+                if (rows == 0) {
+                    continue;
+                }
+                const auto plan = column_->PlanRowRange(file_id, 0, rows);
+                all_cell_pins_[file_id] =
+                    column_->PinPlanCells(op_ctx_, file_id, plan.cell_ids);
+            }
+        }
     }
 
     int64_t
@@ -1872,6 +1936,9 @@ class VortexScanCursor final : public ChunkedColumnInterface::ScanCursor {
  private:
     VortexCellPin
     PinCells(int64_t chunk_id, const std::vector<uint64_t>& cell_ids) {
+        if (pin_policy_ == ChunkedColumnInterface::ScanPinPolicy::AllCells) {
+            return all_cell_pins_[chunk_id];
+        }
         if (cursor_pin_ != nullptr && cursor_chunk_id_ == chunk_id &&
             cursor_cell_ids_ == cell_ids) {
             return cursor_pin_;
@@ -1888,8 +1955,8 @@ class VortexScanCursor final : public ChunkedColumnInterface::ScanCursor {
              ChunkedColumnInterface::ScanReadMode mode,
              ChunkedColumnInterface::ScanBatch* out) {
         auto range_pos = position;
-        auto range = NextVortexReaderRange(
-            column_->Planner(), &range_pos, position + length);
+        auto range =
+            column_->Planner().NextReaderRange(&range_pos, position + length);
         AssertInfo(range.has_value(),
                    "vortex data scan has no reader range at {}",
                    position);
@@ -1951,8 +2018,8 @@ class VortexScanCursor final : public ChunkedColumnInterface::ScanCursor {
         std::vector<VortexRowIdScanSource> sources;
         auto range_pos = position;
         const auto scan_end = position + length;
-        while (auto range = NextVortexReaderRange(
-                   column_->Planner(), &range_pos, scan_end)) {
+        while (auto range =
+                   column_->Planner().NextReaderRange(&range_pos, scan_end)) {
             const auto row_start = static_cast<uint64_t>(range->local_offset);
             const auto row_end =
                 static_cast<uint64_t>(range->local_offset + range->length);
@@ -2042,6 +2109,7 @@ class VortexScanCursor final : public ChunkedColumnInterface::ScanCursor {
     detail::ColumnFilterPtr filter_;
     std::optional<std::string> predicate_;
     int64_t scan_pos_{0};
+    std::vector<VortexCellPin> all_cell_pins_;
     VortexCellPin cursor_pin_;
     int64_t cursor_chunk_id_{-1};
     std::vector<uint64_t> cursor_cell_ids_;
@@ -2053,7 +2121,7 @@ VortexColumn::VortexColumn(
     FieldId field_id,
     FieldMeta field_meta,
     std::string field_name,
-    std::shared_ptr<milvus_storage::api::Properties> properties,
+    std::shared_ptr<const milvus_storage::api::Properties> properties,
     std::shared_ptr<VortexColumnGroup> column_group,
     std::optional<size_t> data_byte_size)
     : field_id_(field_id),
@@ -2082,9 +2150,12 @@ VortexColumn::VortexColumn(
 
 VortexColumn::~VortexColumn() = default;
 
-std::unique_ptr<ColumnPlanner>
-VortexColumn::BuildPlanner() const {
-    return std::make_unique<VortexColumnPlanner>(column_group_, field_name_);
+const VortexColumn::PlannerState&
+VortexColumn::Planner() const {
+    std::call_once(planner_once_, [this]() {
+        planner_ = std::make_unique<PlannerState>(column_group_, field_name_);
+    });
+    return *planner_;
 }
 
 void
@@ -2118,7 +2189,7 @@ VortexColumn::NumRows() const {
 
 int64_t
 VortexColumn::num_chunks() const {
-    return Planner().NumCells();
+    return Planner().NumFiles();
 }
 
 size_t
@@ -2134,7 +2205,7 @@ VortexColumn::DataByteSize() const {
 int64_t
 VortexColumn::chunk_row_nums(int64_t chunk_id) const {
     CheckChunkId(chunk_id);
-    return Planner().CellRows(chunk_id);
+    return Planner().FileRows(chunk_id);
 }
 
 PinWrapper<const char*>
@@ -2178,17 +2249,18 @@ VortexColumn::BulkIsValid(milvus::OpContext* op_ctx,
     }
 
     if (offsets == nullptr) {
-        // TODO(local-format): The legacy complete-column validity API still
-        // materializes one temporary Chunk per file. Move its remaining
-        // consumers to validity-only Scan before removing this compatibility
-        // path; explicit sparse offsets already use Take below.
-        int64_t logical_offset = 0;
-        for (int64_t chunk_id = 0; chunk_id < num_chunks(); ++chunk_id) {
-            auto chunk = MaterializeChunk(op_ctx, chunk_id);
-            for (int64_t i = 0; i < chunk->RowNums(); ++i) {
-                fn(chunk->isValid(static_cast<int>(i)), logical_offset + i);
+        auto cursor =
+            Scan(op_ctx,
+                 ScanOptions::ForData(
+                     0, TargetType::None, ScanPinPolicy::CursorOwned));
+        ScanBatch batch;
+        while (cursor->Next(NumRows() - cursor->Position(),
+                            ScanReadMode::ValidityOnly,
+                            &batch)) {
+            for (int64_t i = 0; i < batch.size; ++i) {
+                fn(!batch.validity || batch.validity[i],
+                   batch.row_id_start + i);
             }
-            logical_offset += chunk->RowNums();
         }
         return;
     }
@@ -2252,8 +2324,7 @@ VortexColumn::PrefetchChunks(milvus::OpContext* op_ctx,
     for (auto chunk_id : chunk_ids) {
         CheckChunkId(chunk_id);
         std::vector<uint64_t> cell_ids;
-        const auto num_cells =
-            AsVortexPlanner(Planner()).FileDelegate(chunk_id).num_cells();
+        const auto num_cells = Planner().FileDelegate(chunk_id).num_cells();
         cell_ids.reserve(num_cells);
         for (size_t cell_id = 0; cell_id < num_cells; ++cell_id) {
             cell_ids.emplace_back(cell_id);
@@ -2405,8 +2476,8 @@ VortexColumn::StringViewsByOffsets(milvus::OpContext* op_ctx,
     }
 
     std::vector<int64_t> global_offsets(offsets.size());
-    const auto chunk_start = Planner().CellStart(chunk_id);
-    const auto chunk_rows = Planner().CellRows(chunk_id);
+    const auto chunk_start = Planner().FileStart(chunk_id);
+    const auto chunk_rows = Planner().FileRows(chunk_id);
     for (size_t i = 0; i < offsets.size(); ++i) {
         const auto offset = offsets[i];
         AssertInfo(offset >= 0 && offset < chunk_rows,
@@ -2485,8 +2556,8 @@ VortexColumn::ArrayViewsByOffsets(milvus::OpContext* op_ctx,
     }
 
     std::vector<int64_t> global_offsets(offsets.size());
-    const auto chunk_start = Planner().CellStart(chunk_id);
-    const auto chunk_rows = Planner().CellRows(chunk_id);
+    const auto chunk_start = Planner().FileStart(chunk_id);
+    const auto chunk_rows = Planner().FileRows(chunk_id);
     for (size_t i = 0; i < offsets.size(); ++i) {
         const auto offset = offsets[i];
         AssertInfo(offset >= 0 && offset < chunk_rows,
@@ -2541,8 +2612,8 @@ VortexColumn::ArrayValueViewsByOffsets(
     }
 
     std::vector<int64_t> global_offsets(offsets.size());
-    const auto chunk_start = Planner().CellStart(chunk_id);
-    const auto chunk_rows = Planner().CellRows(chunk_id);
+    const auto chunk_start = Planner().FileStart(chunk_id);
+    const auto chunk_rows = Planner().FileRows(chunk_id);
     for (size_t i = 0; i < offsets.size(); ++i) {
         const auto offset = offsets[i];
         AssertInfo(offset >= 0 && offset < chunk_rows,
@@ -2580,9 +2651,8 @@ VortexColumn::ArrayValueViewsByOffsets(
 
 std::pair<size_t, size_t>
 VortexColumn::GetChunkIDByOffset(int64_t offset) const {
-    const auto location = Planner().Locate(offset);
-    return {static_cast<size_t>(location.cell_id),
-            static_cast<size_t>(location.cell_offset)};
+    const auto [file_id, file_offset] = Planner().Locate(offset);
+    return {static_cast<size_t>(file_id), static_cast<size_t>(file_offset)};
 }
 
 std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
@@ -2598,10 +2668,10 @@ VortexColumn::GetChunkIDsByOffsets(const int64_t* offsets,
     cell_offsets.reserve(count);
     const auto& planner = Planner();
     for (int64_t i = 0; i < count; ++i) {
-        const auto location = planner.Locate(offsets[i]);
+        const auto [file_id, file_offset] = planner.Locate(offsets[i]);
         cell_ids.emplace_back(
-            static_cast<milvus::cachinglayer::cid_t>(location.cell_id));
-        cell_offsets.emplace_back(location.cell_offset);
+            static_cast<milvus::cachinglayer::cid_t>(file_id));
+        cell_offsets.emplace_back(file_offset);
     }
     return {std::move(cell_ids), std::move(cell_offsets)};
 }
@@ -2631,14 +2701,14 @@ VortexColumn::ApplyValidDataInChunk(milvus::OpContext* op_ctx,
     }
 
     CheckChunkId(chunk_id);
-    const auto chunk_rows = Planner().CellRows(chunk_id);
+    const auto chunk_rows = Planner().FileRows(chunk_id);
     AssertInfo(offset >= 0 && size >= 0 && offset + size <= chunk_rows,
                "vortex valid-data range [{}, {}) out of chunk rows {}",
                offset,
                offset + size,
                chunk_rows);
 
-    const auto global_start = Planner().CellStart(chunk_id) + offset;
+    const auto global_start = Planner().FileStart(chunk_id) + offset;
     auto cursor =
         Scan(op_ctx, ScanOptions::ForData(global_start, TargetType::None));
     AssertInfo(cursor != nullptr,
@@ -2682,12 +2752,12 @@ VortexColumn::ApplyValidDataInChunk(milvus::OpContext* op_ctx,
 
 int64_t
 VortexColumn::GetNumRowsUntilChunk(int64_t chunk_id) const {
-    return Planner().CellStart(chunk_id);
+    return Planner().FileStart(chunk_id);
 }
 
 const std::vector<int64_t>&
 VortexColumn::GetNumRowsUntilChunk() const {
-    return Planner().CellBoundaries();
+    return Planner().FileBoundaries();
 }
 
 void
@@ -2830,15 +2900,17 @@ VortexColumn::SupportsScanPushdown(const ScanOptions& options) const {
     }
 
     return options.output == ScanOutput::RowIds &&
+           options.pin_policy != ScanPinPolicy::AllCells &&
            options.predicate != ScanPredicate::None &&
            BuildVortexPredicate(options).has_value();
 }
 
-milvus_storage::api::Properties
+std::shared_ptr<const milvus_storage::api::Properties>
 VortexColumn::MakeVortexReaderProperties(
-    const std::shared_ptr<milvus_storage::api::Properties>& properties) {
-    auto reader_properties = *properties;
-    reader_properties[PROPERTY_READER_VORTEX_SPLIT_ROW_INDICES] =
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties) {
+    auto reader_properties =
+        std::make_shared<milvus_storage::api::Properties>(*properties);
+    (*reader_properties)[PROPERTY_READER_VORTEX_SPLIT_ROW_INDICES] =
         std::string("true");
     return reader_properties;
 }
@@ -2972,14 +3044,13 @@ VortexColumn::PlanRowRange(int64_t file_id,
                            uint64_t row_start,
                            uint64_t row_end,
                            const std::string& predicate) const {
-    return AsVortexPlanner(Planner()).PlanRowRange(
-        file_id, row_start, row_end, predicate);
+    return Planner().PlanRowRange(file_id, row_start, row_end, predicate);
 }
 
 milvus_storage::vortex::VortexPlan
 VortexColumn::PlanOffsets(int64_t file_id,
                           const std::vector<int64_t>& offsets) const {
-    return AsVortexPlanner(Planner()).PlanOffsets(file_id, offsets);
+    return Planner().PlanOffsets(file_id, offsets);
 }
 
 std::shared_ptr<Chunk>
@@ -2992,7 +3063,7 @@ VortexColumn::MaterializeChunk(
     // those callers move to Scan/Take and the public Column interface no
     // longer exposes Chunk-shaped access.
     CheckChunkId(chunk_id);
-    const auto chunk_rows = Planner().CellRows(chunk_id);
+    const auto chunk_rows = Planner().FileRows(chunk_id);
     int64_t start = 0;
     int64_t length = chunk_rows;
     if (offset_len.has_value()) {
@@ -3061,7 +3132,7 @@ VortexColumn::OpenDataScanForFile(milvus::OpContext* op_ctx,
                                   int64_t start_offset,
                                   int64_t length) const {
     CheckChunkId(chunk_id);
-    const auto file_rows = Planner().CellRows(chunk_id);
+    const auto file_rows = Planner().FileRows(chunk_id);
     AssertInfo(
         start_offset >= 0 && length >= 0 && start_offset + length <= file_rows,
         "vortex data scan range [{}, {}) out of chunk rows {}",
@@ -3154,7 +3225,7 @@ VortexColumn::ScanStringLikeViewsFromFile(
     int64_t chunk_id,
     std::optional<std::pair<int64_t, int64_t>> offset_len) const {
     CheckChunkId(chunk_id);
-    const auto chunk_rows = Planner().CellRows(chunk_id);
+    const auto chunk_rows = Planner().FileRows(chunk_id);
     int64_t start = 0;
     int64_t length = chunk_rows;
     if (offset_len.has_value()) {
@@ -3446,7 +3517,7 @@ VortexColumn::TakeUnchecked(milvus::OpContext* op_ctx,
     bool planned_cell_skipped = false;
     for (const auto& entry : entries) {
         if (has_filter) {
-            const auto cell_id = Planner().Locate(entry.segment_offset).cell_id;
+            const auto cell_id = Planner().Locate(entry.segment_offset).first;
             if (cell_id != planned_cell_id) {
                 planned_cell_skipped =
                     options.filter->CanSkipPhysicalCell(cell_id);
@@ -3889,20 +3960,6 @@ VortexColumn::BulkVectorValueAt(
 }
 
 void
-VortexColumn::BulkRawStringAt(
-    milvus::OpContext* op_ctx,
-    std::function<void(std::string_view, size_t, bool)> fn,
-    const int64_t* offsets,
-    int64_t count) const {
-    if (!IsChunkedVariableColumnDataType(data_type_) ||
-        data_type_ == DataType::JSON) {
-        ThrowInfo(ErrorCode::Unsupported,
-                  "VortexColumn::BulkRawStringAt only supports string fields");
-    }
-    BulkStringLikeAt(op_ctx, fn, offsets, count);
-}
-
-void
 VortexColumn::BulkRawBsonAt(
     milvus::OpContext* op_ctx,
     std::function<void(BsonView, uint32_t, uint32_t)> fn,
@@ -3922,16 +3979,22 @@ VortexColumn::BulkRawBsonAt(
     for (int64_t i = 0; i < count; ++i) {
         offsets[i] = row_offsets[i];
     }
-    BulkStringLikeAt(
-        op_ctx,
-        [&](std::string_view value, size_t index, bool) {
-            fn(BsonView(reinterpret_cast<const uint8_t*>(value.data()),
-                        value.size()),
-               row_offsets[index],
-               value_offsets[index]);
-        },
-        offsets.data(),
-        count);
+    auto take = Take(op_ctx,
+                     TakeOptions{OffsetView::From(offsets.data(), count),
+                                 TargetType::StringView});
+    AssertInfo(take != nullptr, "vortex BSON take is unsupported");
+    AssertInfo(take->Size() == count,
+               "vortex BSON take returned {} rows, expected {}",
+               take->Size(),
+               count);
+    const auto items = take->Access<std::string_view>();
+    for (int64_t i = 0; i < count; ++i) {
+        const auto value = items[i].value.value_or(std::string_view{});
+        fn(BsonView(reinterpret_cast<const uint8_t*>(value.data()),
+                    value.size()),
+           row_offsets[i],
+           value_offsets[i]);
+    }
 }
 
 void
@@ -3979,96 +4042,6 @@ VortexColumn::BulkVectorArrayAt(milvus::OpContext*,
               "VortexColumn does not support vector array fields");
 }
 
-void
-VortexColumn::BulkStringLikeAt(
-    milvus::OpContext* op_ctx,
-    const std::function<void(std::string_view, size_t, bool)>& fn,
-    const int64_t* offsets,
-    int64_t count) const {
-    if (offsets == nullptr) {
-        const auto& planner = Planner();
-        int64_t global_offset = 0;
-        for (int64_t chunk_id = 0; chunk_id < num_chunks(); ++chunk_id) {
-            const auto file_rows = planner.CellRows(chunk_id);
-            if (!SupportsDirectDataScan(chunk_id)) {
-                auto chunk = MaterializeChunk(op_ctx, chunk_id);
-                auto views = static_cast<StringChunk*>(chunk.get())
-                                 ->StringViews(std::nullopt);
-                for (int64_t i = 0;
-                     i < static_cast<int64_t>(views.first.size());
-                     ++i) {
-                    fn(views.first[i],
-                       global_offset + i,
-                       IsNullable() ? views.second[i] : true);
-                }
-            } else {
-                auto scan = OpenDataScanForFile(op_ctx, chunk_id, 0, file_rows);
-                int64_t row_offset = 0;
-                while (true) {
-                    std::shared_ptr<arrow::RecordBatch> batch;
-                    auto status = scan.get()->ReadNext(&batch);
-                    if (!status.ok()) {
-                        ThrowVortexStatus(
-                            status,
-                            ErrorCode::DataFormatBroken,
-                            "failed to read vortex string-like scan batch");
-                    }
-                    if (batch == nullptr) {
-                        break;
-                    }
-                    AssertInfo(
-                        batch->num_columns() == 1,
-                        "vortex string-like scan expects one column, got {}",
-                        batch->num_columns());
-                    ValidateVortexArrowArray(field_id_,
-                                             data_type_,
-                                             IsNullable(),
-                                             batch->column(0),
-                                             true);
-                    ArrowStringLikeColumn column(batch->column(0));
-                    for (int64_t i = 0; i < column.length(); ++i) {
-                        fn(column.ValueAt(i),
-                           global_offset + row_offset + i,
-                           column.IsValid(i));
-                    }
-                    row_offset += column.length();
-                }
-                if (row_offset != file_rows) {
-                    ThrowInfo(
-                        ErrorCode::DataFormatBroken,
-                        "vortex string-like scan field {} chunk {} returned "
-                        "{} rows, expected {}",
-                        field_id_.get(),
-                        chunk_id,
-                        row_offset,
-                        file_rows);
-                }
-            }
-            global_offset += file_rows;
-        }
-        return;
-    }
-
-    if (count == 0) {
-        return;
-    }
-    auto take = Take(
-        op_ctx,
-        TakeOptions{OffsetView::From(offsets, count), TargetType::StringView});
-    AssertInfo(take != nullptr,
-               "vortex string-like take is unsupported for type {}",
-               data_type_);
-    AssertInfo(take->Size() == count,
-               "vortex string-like take returned {} rows, expected {}",
-               take->Size(),
-               count);
-    const auto items = take->Access<std::string_view>();
-    for (int64_t i = 0; i < count; ++i) {
-        const auto item = items[i];
-        fn(item.value.value_or(std::string_view{}), i, item.is_valid);
-    }
-}
-
 ChunkedColumnInterface::ScanResult
 VortexColumn::Scan(milvus::OpContext* op_ctx,
                    const ScanOptions& options) const {
@@ -4091,7 +4064,8 @@ VortexColumn::Scan(milvus::OpContext* op_ctx,
 
     // RowId output is only meaningful for pushed-down predicates. Without a
     // predicate there is no sparse result to return, so let callers fall back.
-    if (options.predicate == ScanPredicate::None) {
+    if (options.predicate == ScanPredicate::None ||
+        options.pin_policy == ScanPinPolicy::AllCells) {
         return nullptr;
     }
     return std::make_unique<VortexScanCursor>(this, op_ctx, options);

@@ -115,6 +115,14 @@ the best-effort recompute queue. A waiter registers before reading the projectio
 so queue saturation and metadata-only changes cannot lose its wakeup. See
 [Schema evolution](schema_evolution.md).
 
+The CreateCollection callback forwards its complete broadcast result through
+MixCoord to DataCoord. The adapter derives CollectionID, SchemaVersion,
+business VChannels and each channel's initial W/A from that same result; the
+control-channel TimeTick is not a business-channel frontier. It does not read
+the initial version back from RootCoord metadata, which is published later in
+the callback. Restore uses the same creation projection with its original
+per-channel append results. Replaying creation preserves an existing DataView.
+
 ## Lifecycle
 
 The normal Collection lifecycle is:

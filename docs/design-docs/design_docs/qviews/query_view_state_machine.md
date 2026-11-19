@@ -537,3 +537,14 @@ zero query waiting after later writes; per-query MVCC checks remain required.
 3. Release its buffer/runtime references and report Dropped to Coord.
 
 **Transitions:** None (terminal state; state machine instance destroyed).
+
+## Collection teardown control
+
+State identifies the lifecycle stage; QueryViewMeta.control supplies monotonic
+transition policy. After explicit release/drop withdraws collection load intent, Balancer marks
+residual-shard release actions with preempt_serving_lease. Replica removal or
+suspension with collection intent still present retains default control.
+Up still enters Down. An existing Down persists and resends the new control.
+SN withdraws admission immediately and skips only the time-based lease gate;
+active call references and execution/resource completion remain mandatory.
+Dropping/Dropped never regress. Ordinary handoff retains default control.

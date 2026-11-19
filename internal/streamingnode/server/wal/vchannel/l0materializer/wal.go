@@ -63,6 +63,7 @@ type WALMaterializer struct {
 	pendingBytes           uint64
 	pendingSince           time.Time
 	flushThrough           uint64
+	pressureThrough        uint64
 	maxBytes               uint64
 	maxRows                uint64
 	runtime                moduleapi.Runtime
@@ -161,8 +162,23 @@ func deleteBytes(msg message.ImmutableMessage) uint64 {
 // RequestPersistThrough shares the SegmentView stall/pressure contract. A batch
 // may include later pending messages but never waits for additional input.
 func (m *WALMaterializer) RequestPersistThrough(through uint64) {
+	m.requestPersistThrough(through, false)
+}
+
+// RequestPersistThroughUnderPressure promotes persistence needed by the recovery tail.
+func (m *WALMaterializer) RequestPersistThroughUnderPressure(through uint64) {
+	m.requestPersistThrough(through, true)
+}
+
+func (m *WALMaterializer) requestPersistThrough(through uint64, underPressure bool) {
 	m.mu.Lock()
 	m.flushThrough = max(m.flushThrough, min(through, m.observed))
+	if underPressure && through > m.materialized {
+		m.pressureThrough = max(m.pressureThrough, min(through, m.observed))
+		if m.task != nil && m.task.handles[0].Message().TimeTick() <= through {
+			m.task.priority.Promote()
+		}
+	}
 	task := m.scheduleLocked()
 	m.mu.Unlock()
 	m.submit(task)
@@ -205,23 +221,27 @@ func (m *WALMaterializer) scheduleLocked() *walMaterializeTask {
 		m.pending = nil
 		m.pendingSince = time.Time{}
 	}
+	if handles[0].Message().TimeTick() <= m.pressureThrough {
+		task.priority.Promote()
+	}
 	m.task = task
 	return task
 }
 
 func (m *WALMaterializer) submit(task *walMaterializeTask) {
 	if task != nil {
-		m.runtime.Scheduler.Submit(task)
+		task.priority.Submit(m.runtime.Scheduler, task)
 	}
 }
 
 type walMaterializeTask struct {
-	mu      sync.Mutex
-	owner   *WALMaterializer
-	handles []message.RetainedImmutableMessage
-	through uint64
-	done    bool
-	err     error
+	priority moduleapi.DataTaskPriority
+	mu       sync.Mutex
+	owner    *WALMaterializer
+	handles  []message.RetainedImmutableMessage
+	through  uint64
+	done     bool
+	err      error
 }
 
 func (t *walMaterializeTask) Execute(ctx context.Context) error {

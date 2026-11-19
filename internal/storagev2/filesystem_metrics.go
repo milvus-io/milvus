@@ -30,6 +30,7 @@ import (
 	"strconv"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -124,6 +125,7 @@ var (
 	propUseCustomPartUpload = C.GoString(C.loon_properties_fs_use_custom_part_upload)
 	propRequestTimeoutMS    = C.GoString(C.loon_properties_fs_request_timeout_ms)
 	propMaxConnections      = C.GoString(C.loon_properties_fs_max_connections)
+	propS3UseCRT            = C.GoString(C.loon_properties_fs_s3_use_crt)
 	propTLSMinVersion       = C.GoString(C.loon_properties_fs_tls_min_version)
 	propUseCRC32CChecksum   = C.GoString(C.loon_properties_fs_use_crc32c_checksum)
 )
@@ -191,6 +193,9 @@ func makePropertiesFromConfig(storageConfig *indexpb.StorageConfig) (C.LoonPrope
 	values = append(values, strconv.FormatBool(storageConfig.GetUseVirtualHost()))
 	keys = append(keys, propUseCustomPartUpload)
 	values = append(values, "true")
+	// Match the SDK backend selected by the data I/O property producers.
+	keys = append(keys, propS3UseCRT)
+	values = append(values, "false")
 
 	keys = append(keys, propRequestTimeoutMS)
 	values = append(values, strconv.FormatInt(storageConfig.GetRequestTimeoutMs(), 10))
@@ -210,11 +215,16 @@ func makePropertiesFromConfig(storageConfig *indexpb.StorageConfig) (C.LoonPrope
 	values = append(values, strconv.FormatBool(storageConfig.GetUseCrc32CChecksum()))
 
 	if storageConfig.GetStorageType() != "local" {
+		// Match the shared filesystem, which cannot assume a caller's read stage.
+		var talonMode uint32
+		if mask := storageConfig.GetTalonEnabledStages(); mask == 0 || mask == common.TalonStagesAll {
+			talonMode = storageConfig.GetTalonMode()
+		}
 		for _, property := range []struct {
 			key   string
 			value uint32
 		}{
-			{"fs.talon.mode", storageConfig.GetTalonMode()},
+			{"fs.talon.mode", talonMode},
 			{"fs.talon.small_read_threshold", storageConfig.GetTalonSmallReadThreshold()},
 			{"fs.talon.block_size", storageConfig.GetTalonBlockSize()},
 			{"fs.talon.max_idle_per_addr", storageConfig.GetTalonMaxIdlePerAddr()},
@@ -232,10 +242,6 @@ func makePropertiesFromConfig(storageConfig *indexpb.StorageConfig) (C.LoonPrope
 	}
 
 	count := len(keys)
-	if count == 0 {
-		return C.LoonProperties{}, nil
-	}
-
 	cKeys := make([]*C.char, count)
 	cValues := make([]*C.char, count)
 	for i := 0; i < count; i++ {

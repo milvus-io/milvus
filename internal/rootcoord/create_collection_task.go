@@ -219,7 +219,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	// too. When a source is eventually supplied via alter/refresh, validation
 	// runs there.
 	if typeutil.IsExternalCollection(schema) && schema.GetExternalSource() != "" {
-		if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec()); err != nil {
+		if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec(), paramtable.Get().CommonCfg.CredentialBrokerPolicy()); err != nil {
 			return err
 		}
 	}
@@ -479,7 +479,7 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 	}
 	// Validate before reading snapshot metadata so RootCoord keeps the same
 	// external source boundary even if a request bypasses Proxy.
-	if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec()); err != nil {
+	if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec(), paramtable.Get().CommonCfg.CredentialBrokerPolicy()); err != nil {
 		return err
 	}
 	spec, err := externalspec.ParseExternalSpec(schema.GetExternalSpec())
@@ -580,6 +580,7 @@ func createMilvusTableSnapshotStorageConfig() *indexpb.StorageConfig {
 			// primary storage is local, so the connection cap still applies.
 			MaxConnections:              uint32(params.MinioCfg.MaxConnections.GetAsInt()),
 			TalonMode:                   params.CommonCfg.StorageTalonMode.GetAsUint32(),
+			TalonEnabledStages:          params.CommonCfg.StorageTalonEnabledStages.GetAsUint32(),
 			TalonSmallReadThreshold:     params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
 			TalonCoordinator:            params.CommonCfg.StorageTalonCoordinator.GetValue(),
 			TalonBlockSize:              params.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
@@ -607,6 +608,7 @@ func createMilvusTableSnapshotStorageConfig() *indexpb.StorageConfig {
 		SslTlsMinVersion:            params.MinioCfg.SslTLSMinVersion.GetValue(),
 		UseCrc32CChecksum:           params.MinioCfg.UseCRC32C.GetAsBool(),
 		TalonMode:                   params.CommonCfg.StorageTalonMode.GetAsUint32(),
+		TalonEnabledStages:          params.CommonCfg.StorageTalonEnabledStages.GetAsUint32(),
 		TalonSmallReadThreshold:     params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
 		TalonCoordinator:            params.CommonCfg.StorageTalonCoordinator.GetValue(),
 		TalonBlockSize:              params.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
