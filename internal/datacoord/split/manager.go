@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -74,6 +75,8 @@ type Request struct {
 // function so that the trigger runs without a coordinator in tests.
 type Dependencies struct {
 	Store *Store
+	// CheckParentRetired consults current CDC members under the collection broadcast lock.
+	CheckParentRetired func(context.Context, *datapb.SplitShardTask) error
 	// Collections lists the live collections.
 	Collections func() []Collection
 	// Collection returns one live collection, false if it does not exist.
@@ -401,7 +404,18 @@ func (m *Manager) admit(ctx context.Context, request Request) error {
 			return merr.WrapErrServiceNotReadyMsg("shard split target %s has no ready read-write WAL", target)
 		}
 	}
-	return m.checkState(ctx, request.CollectionID)
+	if err := m.checkState(ctx, request.CollectionID); err != nil {
+		return err
+	}
+	for _, parent := range m.deps.Store.List() {
+		if parent.GetCollectionId() == request.CollectionID && slices.Contains(targetVChannels(parent), request.Source) {
+			if parent.GetState() != datapb.SplitShardTaskState_SplitShardTaskRetired {
+				return merr.WrapErrServiceNotReadyMsg("parent split %d has not retired its source", parent.GetTaskId())
+			}
+			return m.deps.CheckParentRetired(ctx, parent)
+		}
+	}
+	return nil
 }
 
 // Split issues the split of one shard of a collection, whatever its size and

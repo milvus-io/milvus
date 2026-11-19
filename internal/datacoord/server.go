@@ -1673,6 +1673,8 @@ func (s *Server) registerMetricsRequest() {
 			return s.getDistJSON(ctx, req), nil
 		})
 
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SplitRetirementKey, s.splitRetirementProgress)
+
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ImportTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.importMeta.TaskStatsJSON(ctx), nil
