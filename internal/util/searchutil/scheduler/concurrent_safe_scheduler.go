@@ -146,6 +146,10 @@ func (s *scheduler) schedule() {
 
 		select {
 		case req, ok := <-s.receiveChan:
+			// The select may have blocked for long, on an idle node until
+			// this request came in: take the time again, it is the time the
+			// task is queued at.
+			now = time.Now()
 			if !ok {
 				log.Info("receiveChan closed, processing remaining request")
 				// drain policy maintained task

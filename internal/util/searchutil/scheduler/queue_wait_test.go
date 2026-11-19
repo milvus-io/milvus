@@ -182,3 +182,20 @@ func TestSchedulerFailsTaskOutOfTimeAsExpired(t *testing.T) {
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.NotErrorIs(t, err, merr.ErrServiceTooManyRequests)
 }
+
+// A task that arrives after the node was idle has not waited: the time the
+// schedule loop spent blocked before the task came in is not queue time.
+func TestSchedulerRunsTaskThatArrivesAfterIdleTime(t *testing.T) {
+	setQueueWait(t, "0.1", "20ms")
+	s := newScheduler(newFIFOPolicy()).(*scheduler)
+	s.Start()
+	defer s.Stop()
+
+	for i := 0; i < 3; i++ {
+		// idle for several times what a task may wait
+		time.Sleep(100 * time.Millisecond)
+		task := taskWithTimeout(t, time.Now(), 10*time.Second)
+		require.NoError(t, s.Add(task))
+		assert.NoError(t, task.Wait())
+	}
+}
