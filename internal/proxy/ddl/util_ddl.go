@@ -296,9 +296,12 @@ func validateMaxLengthPerRow(collectionName string, fieldName string, dataType s
 		}
 
 		var defaultMaxLength int64
-		if dataType == schemapb.DataType_Text {
+		switch dataType {
+		case schemapb.DataType_Text:
 			defaultMaxLength = paramtable.Get().ProxyCfg.MaxTextLength.GetAsInt64()
-		} else {
+		case schemapb.DataType_Blob:
+			defaultMaxLength = paramtable.Get().ProxyCfg.MaxBlobLength.GetAsInt64()
+		default:
 			defaultMaxLength = paramtable.Get().ProxyCfg.MaxVarCharLength.GetAsInt64()
 		}
 
@@ -596,6 +599,11 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 			return err
 		}
 	}
+	if typeutil.IsBlobType(field.GetDataType()) {
+		if err = validateBlobField(schema.Name, field); err != nil {
+			return err
+		}
+	}
 	// valid max capacity for array per row parameters
 	// if max_capacity not specified, return error
 	if field.DataType == schemapb.DataType_Array {
@@ -622,6 +630,17 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 	}
 
 	return nil
+}
+
+func validateBlobField(collectionName string, field *schemapb.FieldSchema) error {
+	if !paramtable.Get().ProxyCfg.EnableBlobType.GetAsBool() {
+		return merr.WrapErrParameterInvalidMsg("BLOB field %s is experimental and disabled; set %s to true to enable it",
+			field.GetName(), paramtable.Get().ProxyCfg.EnableBlobType.Key)
+	}
+	if field.GetDefaultValue() != nil {
+		return merr.WrapErrParameterInvalidMsg("BLOB field %s does not support default_value", field.GetName())
+	}
+	return validateMaxLengthPerRow(collectionName, field.GetName(), field.GetDataType(), field.GetTypeParams())
 }
 
 func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.CollectionSchema) error {

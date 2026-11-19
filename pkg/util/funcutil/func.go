@@ -687,6 +687,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetArrayData().GetData())
 	case schemapb.DataType_JSON:
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetJsonData().GetData())
+	case schemapb.DataType_Blob:
+		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetBytesData().GetData())
 	case schemapb.DataType_Geometry:
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetGeometryData().GetData())
 		if fieldNumRows == 0 {

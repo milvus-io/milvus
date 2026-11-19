@@ -209,6 +209,10 @@ func (v *ValidateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.Sch
 			if err := v.checkJSONFieldData(field, fieldSchema); err != nil {
 				return err
 			}
+		case schemapb.DataType_Blob:
+			if err := v.checkBlobFieldData(field, fieldSchema); err != nil {
+				return err
+			}
 		case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
 			if err := v.checkIntegerFieldData(field, fieldSchema); err != nil {
 				return err
@@ -655,6 +659,12 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 				return err
 			}
 
+		case *schemapb.ScalarField_BytesData:
+			sd.BytesData.Data, err = fillWithNullValueImpl(sd.BytesData.Data, validData)
+			if err != nil {
+				return err
+			}
+
 		case *schemapb.ScalarField_GeometryData:
 			sd.GeometryData.Data, err = fillWithNullValueImpl(sd.GeometryData.Data, validData)
 			if err != nil {
@@ -1041,6 +1051,26 @@ func (v *ValidateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSch
 		return nil
 	}
 
+	return nil
+}
+
+func (v *ValidateUtil) checkBlobFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	bytesArr := field.GetScalars().GetBytesData().GetData()
+	if bytesArr == nil && !fieldSchema.GetNullable() {
+		msg := fmt.Sprintf("blob field '%v' is illegal, array type mismatch", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need bytes array", "got nil", msg)
+	}
+
+	if v.checkMaxLen {
+		maxLength, err := parameterutil.GetMaxLength(fieldSchema)
+		if err != nil {
+			return err
+		}
+		if i, ok := verifyLengthPerRow(bytesArr, maxLength); !ok {
+			return merr.WrapErrParameterInvalidMsg("length of blob field %s exceeds max length, row number: %d, length: %d, max length: %d",
+				fieldSchema.GetName(), i, len(bytesArr[i]), maxLength)
+		}
+	}
 	return nil
 }
 

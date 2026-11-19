@@ -2125,6 +2125,9 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 	if err := dql.ValidateTextStorageV3Enabled(schema.CollectionSchema); err != nil {
 		return err
 	}
+	if err := typeutil.RejectBlobWrite(schema.CollectionSchema); err != nil {
+		return err
+	}
 	// Validate any FieldPartialUpdateOp directives attached to FieldData.
 	// A non-REPLACE op implicitly promotes the request to partial_update=true
 	// so users do not need to set both fields explicitly.

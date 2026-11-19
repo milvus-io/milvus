@@ -830,6 +830,7 @@ func (s *NumRowsWithSchemaSuite) SetupSuite() {
 					}},
 				}},
 			},
+			{FieldID: 118, Name: "blob", DataType: schemapb.DataType_Blob},
 			{FieldID: 999, Name: "unknown", DataType: schemapb.DataType_None},
 		},
 	}
@@ -955,6 +956,16 @@ func (s *NumRowsWithSchemaSuite) TestNormalCases() {
 				},
 			},
 			expect: 7,
+		},
+		{
+			tag: "blob",
+			input: &schemapb.FieldData{
+				FieldName: "blob",
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_BytesData{BytesData: &schemapb.BytesArray{Data: make([][]byte, 4)}}},
+				},
+			},
+			expect: 4,
 		},
 		{
 			tag: "float_vector",
