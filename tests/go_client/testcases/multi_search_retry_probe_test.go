@@ -144,11 +144,20 @@ func TestMultiSearchQuotaRecovery(t *testing.T) {
 			require.Equal(t, int64(1), readyCalls()-readyBefore, "the completed item must not run again")
 			t.Logf("MULTISEARCH_QUOTA route=%s scenario=recovery retries=%d elapsed_ms=%d ready_attempts=1", route, retryCount, time.Since(started).Milliseconds())
 
-			// Passing through zero lets the observed error distinguish the old
-			// limiter from the subsequently applied, very small positive rate.
+			// Use a fresh limiter: changing the recovery collection's rate preserves
+			// its token balance, which may refill during the retry window. After
+			// observing zero, consume four tokens at the small positive rate so
+			// the limiter stays depleted for the entire exhaustion/budget checks.
+			limitedName = common.GenRandomString("multisearch_exhausted", 8)
+			createMultiSearchCollection(ctx, t, mc, limitedName, 201)
+			limited = makeRequest(limitedName, 4)
 			setRate("0")
 			awaitRefusal(merr.ErrServiceQuotaExceeded)
 			setRate("0.001")
+			require.Eventually(t, func() bool {
+				response, callErr := service.Search(ctx, limited)
+				return merr.CheckRPCCall(response, callErr) == nil
+			}, 15*time.Second, 20*time.Millisecond, "consume the fresh limiter's first allowance")
 			awaitRefusal(merr.ErrServiceRateLimit)
 			attemptsBefore, retriesBefore = multiSearchAttemptCount(t, ctx), retries()
 			started = time.Now()

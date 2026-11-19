@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
@@ -26,8 +29,8 @@ import (
 
 // TestMultiSearchListAndCancel uses a WAL barrier for gRPC and a collection's
 // rate limit for REST, so neither case depends on a search happening to be slow.
-// Each caller has its own identity: listing and cancellation cannot select a
-// concurrent test's requests. Run on an auth- and DQL-quota-enabled deployment.
+// A unique caller (gRPC) or trace ID (REST) isolates the batch from concurrent
+// tests, including when REST authentication is disabled. DQL quotas must be enabled.
 func TestMultiSearchListAndCancel(t *testing.T) {
 	for _, transport := range []string{"grpc", "rest"} {
 		t.Run(transport, func(t *testing.T) {
@@ -68,6 +71,8 @@ func TestMultiSearchListAndCancel(t *testing.T) {
 				err        error
 			}
 			finished := make(chan outcome, 1)
+			listRequest := &milvuspb.ListRunningRequestsRequest{User: user, MinElapsedMs: 100}
+			batchTraceID := ""
 			if transport == "grpc" {
 				blocked := multiSearchBlockingRequest(ready)
 				go func() {
@@ -107,6 +112,12 @@ func TestMultiSearchListAndCancel(t *testing.T) {
 				require.NoError(t, requestErr)
 				request.Header.Set("Authorization", "Bearer "+user+":"+password)
 				request.Header.Set("Content-Type", "application/json")
+				// With auth disabled, HTTP ignores the credential header and
+				// registers an anonymous caller. The trace still identifies this
+				// batch without selecting another test's anonymous requests.
+				batchTraceID = strings.ReplaceAll(uuid.NewString(), "-", "")
+				request.Header.Set("traceparent", "00-"+batchTraceID+"-0123456789abcdef-00")
+				listRequest.User = ""
 				go func() {
 					response, callErr := http.DefaultClient.Do(request)
 					got := outcome{err: callErr}
@@ -125,26 +136,47 @@ func TestMultiSearchListAndCancel(t *testing.T) {
 				}()
 			}
 
+			selectBatch := func(list *milvuspb.ListRunningRequestsResponse) []*milvuspb.RunningRequestInfo {
+				return slices.DeleteFunc(list.GetRequests(), func(info *milvuspb.RunningRequestInfo) bool {
+					return batchTraceID != "" && info.GetTraceId() != batchTraceID
+				})
+			}
 			var batch *milvuspb.RunningRequestInfo
-			require.Eventually(t, func() bool {
-				list, callErr := service.ListRunningRequests(ctx, &milvuspb.ListRunningRequestsRequest{User: user, MinElapsedMs: 100})
+			for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
+				select {
+				case got := <-finished:
+					t.Fatalf("batch completed before cancellation: %+v", got)
+				default:
+				}
+				list, callErr := service.ListRunningRequests(ctx, listRequest)
 				require.NoError(t, merr.CheckRPCCall(list, callErr))
 				for _, node := range list.GetNodeResults() {
 					require.NoError(t, merr.Error(node.GetStatus()))
 					require.False(t, node.GetUnimplemented())
 				}
-				if len(list.GetRequests()) == 0 {
-					return false
+				requests := selectBatch(list)
+				if len(requests) == 0 {
+					time.Sleep(20 * time.Millisecond)
+					continue
 				}
-				require.Len(t, list.GetRequests(), 1, "a batch must not expose independent child Search requests")
-				batch = list.Requests[0]
-				require.Equal(t, "MultiSearch", batch.GetType())
-				require.Equal(t, user, batch.GetUser())
-				require.True(t, batch.GetCancellable())
+				require.Len(t, requests, 1, "a batch must not expose independent child Search requests")
+				candidate := requests[0]
+				require.Equal(t, "MultiSearch", candidate.GetType())
+				if transport == "rest" {
+					require.Contains(t, []string{user, ""}, candidate.GetUser())
+				} else {
+					require.Equal(t, user, candidate.GetUser())
+				}
+				require.True(t, candidate.GetCancellable())
 				// The first Search completed before the controlled wait. Its
 				// completion must not remove or finish the batch registration.
-				return batch.GetState() == "Running" && len(batch.GetTaskIds()) >= 2
-			}, 10*time.Second, 20*time.Millisecond)
+				if candidate.GetState() == "Running" && len(candidate.GetTaskIds()) >= 2 {
+					batch = candidate
+					break
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			require.NotNil(t, batch, "the running batch must remain listed after its first Search completes")
 			const reason = "cancel the complete MultiSearch batch"
 			canceled, err := service.CancelRequests(ctx, &milvuspb.CancelRequestsRequest{
 				RequestIds: []string{batch.GetRequestId()}, Reason: reason,
@@ -168,8 +200,8 @@ func TestMultiSearchListAndCancel(t *testing.T) {
 				t.Fatal("the canceled batch did not return")
 			}
 			require.Eventually(t, func() bool {
-				list, callErr := service.ListRunningRequests(ctx, &milvuspb.ListRunningRequestsRequest{User: user})
-				return merr.CheckRPCCall(list, callErr) == nil && len(list.GetRequests()) == 0
+				list, callErr := service.ListRunningRequests(ctx, &milvuspb.ListRunningRequestsRequest{User: listRequest.User})
+				return merr.CheckRPCCall(list, callErr) == nil && len(selectBatch(list)) == 0
 			}, 5*time.Second, 20*time.Millisecond)
 			again, err := service.CancelRequests(ctx, &milvuspb.CancelRequestsRequest{RequestIds: []string{batch.GetRequestId()}})
 			require.NoError(t, merr.CheckRPCCall(again, err))

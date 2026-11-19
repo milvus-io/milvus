@@ -153,10 +153,6 @@ class TestMultiSearch:
             response = post_search(endpoint, token, "multi_search", payload)
             assert response.json()["code"] != 0, response.text
             assert not response.json().get("data"), response.text
-        response = post_search(endpoint, "unknown:bad", "multi_search", {"requests": [valid_search]})
-        assert response.json()["code"] != 0, response.text
-        assert not response.json().get("data"), response.text
-
         results = run_batch(
             endpoint, token, [search_request(shared), search_request(shared)], {"timeoutMs": 0, "maxConcurrency": 1}
         )
@@ -167,6 +163,14 @@ class TestMultiSearch:
 
 @pytest.mark.tags(CaseLabel.RBAC)
 class TestMultiSearchRBAC:
+    def test_invalid_credentials_rejected(self, endpoint, search_targets):
+        _, shared, _, _ = search_targets
+        response = post_search(
+            endpoint, "unknown:bad", "multi_search", {"requests": [{"search": search_request(shared)}]}
+        )
+        assert response.json()["code"] != 0, response.text
+        assert not response.json().get("data"), response.text
+
     def test_cached_targets_still_require_search_privilege(self, endpoint, token, search_targets, request):
         db, shared, _, _ = search_targets
         user, role, password = gen_unique_str("searcher"), gen_unique_str("search_role"), "searcher123"
