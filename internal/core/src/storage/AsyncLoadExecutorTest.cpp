@@ -190,55 +190,64 @@ TEST(AsyncLoadExecutorTest, OrdersPriorityThenSequenceWithStableTies) {
 // classes backlogged for two complete rounds, then verify empty-class skipping.
 TEST(AsyncLoadExecutorTest, WeightedPrioritiesKeepSequenceAndMakeProgress) {
     const int previous = GetAsyncLoadThreadPoolSize();
-    auto restore =
-        folly::makeGuard([&] { SetAsyncLoadThreadPoolSize(previous); });
+    auto restore = folly::makeGuard([&] {
+        SetAsyncLoadThreadPoolSize(previous);
+        SetAsyncLoadSchedulingWeights(32, 8, 1);
+    });
     SetAsyncLoadThreadPoolSize(1);
-    for (int burst = 0; burst < 2; ++burst) {
-        std::promise<void> blocked, release, finished;
-        auto released = release.get_future().share();
-        ResolveAsyncLoadExecutor({}, AsyncLoadPriority::High)->add([&] {
-            blocked.set_value();
-            released.wait();
-        });
-        blocked.get_future().get();
-        auto unblock = folly::makeGuard([&] { release.set_value(); });
-        std::vector<std::pair<int, int>> order;
-        order.reserve(192);
-        const std::array priorities{AsyncLoadPriority::Urgent,
-                                    AsyncLoadPriority::High,
-                                    AsyncLoadPriority::Low};
-        // Enqueue later loads first, so sequence ordering is tested separately
-        // from both priority selection and enqueue order.
-        for (int cls = 2; cls >= 0; --cls) {
-            for (int seq : {2, 1}) {
-                auto executor =
-                    ResolveAsyncLoadExecutor({}, priorities[cls], seq);
-                for (int n = 0; n < 32; ++n) {
-                    executor->add([&, cls, seq, n] {
-                        order.emplace_back(cls, (seq - 1) * 32 + n);
-                        if (order.size() == 192)
-                            finished.set_value();
-                    });
+    for (const auto weights : {std::array{1, 1, 1},
+                               std::array{32, 8, 1},
+                               std::array{8, 2, 1},
+                               std::array{0, 1, 1}}) {
+        SetAsyncLoadSchedulingWeights(weights[0], weights[1], weights[2]);
+        const auto effective = weights[0] > 0 ? weights : std::array{32, 8, 1};
+        for (int burst = 0; burst < 2; ++burst) {
+            std::promise<void> blocked, release, finished;
+            auto released = release.get_future().share();
+            ResolveAsyncLoadExecutor({}, AsyncLoadPriority::High)->add([&] {
+                blocked.set_value();
+                released.wait();
+            });
+            blocked.get_future().get();
+            auto unblock = folly::makeGuard([&] { release.set_value(); });
+            std::vector<std::pair<int, int>> order;
+            order.reserve(192);
+            const std::array priorities{AsyncLoadPriority::Urgent,
+                                        AsyncLoadPriority::High,
+                                        AsyncLoadPriority::Low};
+            // Enqueue later loads first, so sequence ordering is tested separately
+            // from both priority selection and enqueue order.
+            for (int cls = 2; cls >= 0; --cls) {
+                for (int seq : {2, 1}) {
+                    auto executor =
+                        ResolveAsyncLoadExecutor({}, priorities[cls], seq);
+                    for (int n = 0; n < 32; ++n) {
+                        executor->add([&, cls, seq, n] {
+                            order.emplace_back(cls, (seq - 1) * 32 + n);
+                            if (order.size() == 192)
+                                finished.set_value();
+                        });
+                    }
                 }
             }
-        }
-        release.set_value();
-        unblock.dismiss();
-        finished.get_future().get();
-        size_t pos = 0;
-        for (int round = 0; round < 2; ++round) {
-            for (int cls = 0; cls < 3; ++cls) {
-                const int quota = std::array{32, 8, 1}[cls];
-                for (int n = 0; n < quota; ++n) {
-                    EXPECT_EQ(order[pos++].first, cls);
+            release.set_value();
+            unblock.dismiss();
+            finished.get_future().get();
+            size_t pos = 0;
+            for (int round = 0; round < 2; ++round) {
+                for (int cls = 0; cls < 3; ++cls) {
+                    const int quota = effective[cls];
+                    for (int n = 0; n < quota; ++n) {
+                        EXPECT_EQ(order[pos++].first, cls);
+                    }
                 }
             }
+            std::array<int, 3> seen{};
+            for (const auto& [cls, ordinal] : order) {
+                EXPECT_EQ(ordinal, seen[cls]++);
+            }
+            EXPECT_EQ(seen, (std::array{64, 64, 64}));
         }
-        std::array<int, 3> seen{};
-        for (const auto& [cls, ordinal] : order) {
-            EXPECT_EQ(ordinal, seen[cls]++);
-        }
-        EXPECT_EQ(seen, (std::array{64, 64, 64}));
     }
 }
 

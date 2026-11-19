@@ -182,6 +182,18 @@ class LoadTaskQueue final
     };
 
  public:
+    explicit LoadTaskQueue(std::array<size_t, 3> weights = {32, 8, 1})
+        : weights_(weights), remaining_(weights[0]) {
+    }
+
+    void
+    SetWeights(std::array<size_t, 3> weights) {
+        std::lock_guard lock(mutex_);
+        weights_ = weights;
+        next_priority_ = 0;
+        remaining_ = weights_[0];
+    }
+
     ~LoadTaskQueue() override {
         // A queued callable can own its adapter/group. Release callables before
         // dropping ready_ ownership, otherwise discarded work can form a cycle.
@@ -320,13 +332,13 @@ class LoadTaskQueue final
     // the round so a new burst starts with Urgent. No clock reads or allocation.
     size_t
     SelectPriority() noexcept {
-        for (size_t tried = 0; tried < kWeights.size(); ++tried) {
+        for (size_t tried = 0; tried < weights_.size(); ++tried) {
             if (remaining_ != 0 && !ready_[next_priority_].empty()) {
                 --remaining_;
                 return next_priority_;
             }
-            next_priority_ = (next_priority_ + 1) % kWeights.size();
-            remaining_ = kWeights[next_priority_];
+            next_priority_ = (next_priority_ + 1) % weights_.size();
+            remaining_ = weights_[next_priority_];
         }
         // The starting class may be the only ready class with an exhausted quota.
         assert(!ready_[next_priority_].empty());
@@ -367,7 +379,7 @@ class LoadTaskQueue final
                 if (ready_[0].empty() && ready_[1].empty() &&
                     ready_[2].empty()) {
                     next_priority_ = 0;
-                    remaining_ = kWeights[0];
+                    remaining_ = weights_[0];
                 }
             }
         }
@@ -379,11 +391,11 @@ class LoadTaskQueue final
     const std::shared_ptr<LoadGroupRegistry> registry_ =
         std::make_shared<LoadGroupRegistry>();
     std::mutex mutex_;
-    static constexpr std::array<size_t, 3> kWeights{32, 8, 1};
+    std::array<size_t, 3> weights_;
     std::array<std::vector<std::shared_ptr<Group>>, 3> ready_;
     size_t stop_tasks_{0};
     size_t next_priority_{0};
-    size_t remaining_{kWeights[0]};
+    size_t remaining_{weights_[0]};
     folly::ThrottledLifoSem available_;
 };
 
@@ -403,10 +415,16 @@ MakeAsyncLoadThreadFactory() {
 // Owns the process-wide priority queues used by async-load CPU work.
 class PriorityThreadPoolExecutor final : public folly::CPUThreadPoolExecutor {
  public:
-    explicit PriorityThreadPoolExecutor(const int threads)
+    explicit PriorityThreadPoolExecutor(const int threads,
+                                        std::array<size_t, 3> weights)
         : folly::CPUThreadPoolExecutor(threads,
-                                       std::make_unique<LoadTaskQueue>(),
+                                       std::make_unique<LoadTaskQueue>(weights),
                                        MakeAsyncLoadThreadFactory()) {
+    }
+
+    void
+    SetWeights(std::array<size_t, 3> weights) {
+        static_cast<LoadTaskQueue*>(getTaskQueue())->SetWeights(weights);
     }
 
     std::shared_ptr<LoadTaskGroup>
@@ -437,6 +455,7 @@ struct DefaultExecutorState {
     std::mutex executor_mutex;
     int initial_threads = std::max(
         1, std::min(milvus::CPU_NUM, DEFAULT_THREAD_POOL_MAX_THREADS_SIZE));
+    std::array<size_t, 3> weights{32, 8, 1};
     std::unique_ptr<PriorityThreadPoolExecutor> executor;
 };
 
@@ -468,14 +487,30 @@ GetDefaultAsyncLoadExecutor() {
     static auto& executor = []() -> PriorityThreadPoolExecutor& {
         auto& state = GetDefaultExecutorState();
         std::lock_guard lock(state.executor_mutex);
-        state.executor =
-            std::make_unique<PriorityThreadPoolExecutor>(state.initial_threads);
+        state.executor = std::make_unique<PriorityThreadPoolExecutor>(
+            state.initial_threads, state.weights);
         return *state.executor;
     }();
     return folly::getKeepAliveToken(&executor);
 }
 
 }  // namespace
+
+void
+SetAsyncLoadSchedulingWeights(int urgent, int high, int low) {
+    const std::array<size_t, 3> weights =
+        urgent > 0 && high > 0 && low > 0
+            ? std::array<size_t, 3>{static_cast<size_t>(urgent),
+                                    static_cast<size_t>(high),
+                                    static_cast<size_t>(low)}
+            : std::array<size_t, 3>{32, 8, 1};
+    auto& state = GetDefaultExecutorState();
+    std::lock_guard lock(state.executor_mutex);
+    if (state.executor) {
+        state.executor->SetWeights(weights);
+    }
+    state.weights = weights;
+}
 
 void
 SetAsyncLoadThreadPoolSize(const int threads) {

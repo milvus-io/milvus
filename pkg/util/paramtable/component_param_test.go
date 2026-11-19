@@ -2412,3 +2412,18 @@ func TestCredentialBrokerRejectsInvalidStartupQuery(t *testing.T) {
 		bt.mgr.Close()
 	}
 }
+
+func TestAsyncLoadSchedulingWeights(t *testing.T) {
+	pt := &ComponentParam{}
+	pt.Init(NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil)))
+	item := &pt.QueryNodeCfg.StorageV2AsyncLoadSchedulingWeights
+	assert.Equal(t, []string{"32", "8", "1"}, item.GetAsStrings())
+	for _, v := range []string{"0,8,1", "1,-1,1", "1,1", "1,1,1,1", "x,1,1", "2147483648,1,1", "1.5,1,1", ""} {
+		require.NoError(t, pt.Save(item.Key, v))
+		assert.Equal(t, []string{"32", "8", "1"}, item.GetAsStrings(), v)
+	}
+	require.NoError(t, pt.Save(item.Key, " 1, 1, 1 "))
+	assert.Equal(t, []string{"1", "1", "1"}, item.GetAsStrings())
+	require.NoError(t, pt.Remove(item.Key))
+	assert.Equal(t, []string{"32", "8", "1"}, item.GetAsStrings())
+}

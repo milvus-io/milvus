@@ -34,6 +34,7 @@ import "C"
 import (
 	"context"
 	"path"
+	"strconv"
 	"sync"
 	"unsafe"
 
@@ -175,6 +176,14 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	if paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool() {
 		UpdateExprResCacheConfig()
 	}
+
+	weights := paramtable.Get().QueryNodeCfg.StorageV2AsyncLoadSchedulingWeights.GetAsStrings()
+	urgent, _ := strconv.Atoi(weights[0]) // ParamItem validates all three positive int32 values.
+	high, _ := strconv.Atoi(weights[1])
+	low, _ := strconv.Atoi(weights[2])
+	C.SetStorageV2AsyncLoadSchedulingWeights(C.int(urgent), C.int(high), C.int(low))
+	mlog.Info(ctx, "Async load scheduling weights configured (restart required)",
+		mlog.Int("urgent", urgent), mlog.Int("high", high), mlog.Int("low", low))
 
 	cStorageV2CellTargetSizeBytes := C.int64_t(paramtable.Get().QueryNodeCfg.StorageV2CellTargetSizeBytes.GetAsInt64())
 	C.SetStorageV2CellTargetSizeBytes(cStorageV2CellTargetSizeBytes)

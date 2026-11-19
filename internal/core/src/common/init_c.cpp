@@ -260,6 +260,11 @@ SetStorageV2AsyncLoadThreadPoolSize(const int threads) {
     }
 }
 
+void
+SetStorageV2AsyncLoadSchedulingWeights(int urgent, int high, int low) {
+    milvus::storage::SetAsyncLoadSchedulingWeights(urgent, high, low);
+}
+
 int
 GetStorageV2AsyncLoadThreadPoolSize() {
     return milvus::storage::GetAsyncLoadThreadPoolSize();

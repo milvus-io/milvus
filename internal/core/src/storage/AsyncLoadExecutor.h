@@ -33,6 +33,11 @@ SetAsyncLoadThreadPoolSize(int threads);
 [[nodiscard]] int
 GetAsyncLoadThreadPoolSize();
 
+// Sets task-count weights in URGENT/HIGH/LOW order without creating the pool.
+// Non-positive values restore 32:8:1. Existing queues start a fresh quota round.
+void
+SetAsyncLoadSchedulingWeights(int urgent, int high, int low);
+
 // Allocates one process-local sequence per load/reopen operation before submission.
 [[nodiscard]] uint64_t
 NextLoadSequence() noexcept;
@@ -45,7 +50,7 @@ GetAsyncLoadSequence(const folly::Executor* executor) noexcept;
 enum class AsyncLoadPriority { Urgent, High, Low };
 
 // Binds priority and load_seq to every submission/resumption. The default pool
-// uses URGENT:HIGH:LOW task quotas of 32:8:1, skipping empty classes.
+// uses configured URGENT:HIGH:LOW task quotas (default 32:8:1), skipping empty classes.
 // Within a class: load_seq, then FIFO; 0 follows numbered loads.
 // Custom executors keep their own queue discipline but retain the bound sequence.
 // An already bound executor retains its sequence when load_seq is omitted.

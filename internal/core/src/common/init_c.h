@@ -124,6 +124,10 @@ SetStorageV2AsyncLoadEnabled(bool enabled);
 CStatus
 SetStorageV2AsyncLoadThreadPoolSize(int threads);
 
+// Startup POC CPU task weights; non-positive values restore 32:8:1.
+void
+SetStorageV2AsyncLoadSchedulingWeights(int urgent, int high, int low);
+
 // Returns the effective worker limit, including before first executor use.
 int
 GetStorageV2AsyncLoadThreadPoolSize();

@@ -4867,7 +4867,8 @@ type queryNodeConfig struct {
 	// Storage V3 async field-data pipeline.
 	StorageV2EnableAsyncLoad ParamItem `refreshable:"true"`
 	// StorageV2AsyncLoadThreadPoolSize bounds workers in the shared async executor.
-	StorageV2AsyncLoadThreadPoolSize ParamItem `refreshable:"true"`
+	StorageV2AsyncLoadThreadPoolSize    ParamItem `refreshable:"true"`
+	StorageV2AsyncLoadSchedulingWeights ParamItem `refreshable:"false"`
 	// StorageV2AsyncLoadReadWindowSizeBytes controls the estimated bytes read
 	// by one Storage V3 async window.
 	StorageV2AsyncLoadReadWindowSizeBytes ParamItem `refreshable:"true"`
@@ -6327,6 +6328,31 @@ user-task-polling:
 		},
 	}
 	p.StorageV2AsyncLoadThreadPoolSize.Init(base.mgr)
+
+	p.StorageV2AsyncLoadSchedulingWeights = ParamItem{
+		Key:          "queryNode.segcore.storageV2.asyncLoadSchedulingWeights",
+		Version:      "3.0.1",
+		DefaultValue: "32,8,1",
+		Doc:          "POC CPU task-count weights in URGENT,HIGH,LOW order. Three positive int32 values; restart QueryNode to apply. Does not change resource admission or assign Search to URGENT.",
+		Export:       true,
+		Formatter: func(v string) string {
+			parts := strings.Split(v, ",")
+			valid := len(parts) == 3
+			for i, part := range parts {
+				parts[i] = strings.TrimSpace(part)
+				n, err := strconv.ParseInt(parts[i], 10, 32)
+				if err != nil || n <= 0 {
+					valid = false
+				}
+			}
+			if !valid {
+				mlog.Warn(context.TODO(), "Invalid async load scheduling weights, using 32,8,1", mlog.String("configured", v))
+				return "32,8,1"
+			}
+			return strings.Join(parts, ",")
+		},
+	}
+	p.StorageV2AsyncLoadSchedulingWeights.Init(base.mgr)
 
 	p.StorageV2AsyncLoadReadWindowSizeBytes = ParamItem{
 		Key:          "queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes",

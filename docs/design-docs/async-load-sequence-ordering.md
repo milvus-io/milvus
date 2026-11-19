@@ -132,3 +132,25 @@ registry's total group count, retaining an upper bound of roughly three times
 the old ready-heap pointer capacity when all classes have many bindings.
 
 Measurements and their limitations: [weighted scheduling experiment](async-load-weighted-performance.md).
+
+## POC configuration for end-to-end comparisons
+
+```yaml
+queryNode:
+  segcore:
+    storageV2:
+      asyncLoadSchedulingWeights: "32,8,1"
+```
+
+The order is URGENT,HIGH,LOW. Set `"1,1,1"` for equal task-count shares.
+All three values must be positive int32 integers; malformed values fall back
+to `32,8,1` with a warning. Restart QueryNode (or standalone) after changing
+this startup-only setting. The startup log prints the applied weights.
+The native setter also applies to an already initialized pool without replacing
+it, but no configuration watcher is registered for this POC.
+
+Use identical async-load settings, input, worker count and admission limits
+for both runs. CPU weights affect only competing ready classes; admission still
+uses HIGH/LOW and load_seq. Search is not assigned to URGENT by this setting.
+If all real load tasks are HIGH, changing URGENT's weight alone cannot provide
+an URGENT-versus-load latency comparison.
