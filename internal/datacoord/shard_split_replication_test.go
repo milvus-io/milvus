@@ -15,8 +15,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord/ddl"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
 type splitRetirementPeer struct {
@@ -25,8 +29,7 @@ type splitRetirementPeer struct {
 }
 
 func (p *splitRetirementPeer) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	result, err := p.dc.splitRetirementProgress(ctx, req, gjson.Parse(req.GetRequest()))
-	return &milvuspb.GetMetricsResponse{Status: merr.Status(err), Response: result}, nil
+	return p.dc.GetMetrics(ctx, req)
 }
 
 func TestSplitRetirementAcrossCDCConnection(t *testing.T) {
@@ -42,11 +45,18 @@ func TestSplitRetirementAcrossCDCConnection(t *testing.T) {
 	replicaCfg := proto.Clone(cfg).(*commonpb.ReplicateConfiguration)
 	replicaCfg.Clusters[0], replicaCfg.Clusters[1] = replicaCfg.Clusters[1], replicaCfg.Clusters[0]
 	replicaCfg.Clusters[0].ConnectionParam = nil
-	cfgMock := mockey.Mock(ddl.GetReplicationTopology).Return(replicaCfg, nil).Build()
-	defer cfgMock.UnPatch()
+	assignment := &balancer.WatchChannelAssignmentsCallbackParam{ReplicateConfiguration: replicaCfg}
+	b := &mock_balancer.MockBalancer{}
+	balancerMock := mockey.Mock(balance.GetWithContext).Return(b, nil).Build()
+	defer balancerMock.UnPatch()
+	assignmentMock := mockey.Mock((*mock_balancer.MockBalancer).GetLatestChannelAssignment).Return(assignment, nil).Build()
+	defer assignmentMock.UnPatch()
 	store, _ := newSplitTestStore(t)
 	server := grpc.NewServer()
-	milvuspb.RegisterMilvusServiceServer(server, &splitRetirementPeer{dc: &Server{splitStore: store}})
+	dc := &Server{splitStore: store, metricsRequest: metricsinfo.NewMetricsRequest()}
+	dc.UpdateStateCode(commonpb.StateCode_Healthy)
+	dc.registerMetricsRequest()
+	milvuspb.RegisterMilvusServiceServer(server, &splitRetirementPeer{dc: dc})
 	go server.Serve(listener)
 	t.Cleanup(server.Stop)
 	parent := &datapb.SplitShardTask{TaskId: 123456789012345678, CollectionId: 100, SourceVchannel: "p0_100v0"}
@@ -107,4 +117,26 @@ func TestSplitRetirementUnavailableTopology(t *testing.T) {
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
 	require.Error(t, verifyPeerRetirement(cancelled, &commonpb.MilvusCluster{}, splitRetirement{}))
+}
+
+func TestSplitRetirementReadsLiveReplicationAssignment(t *testing.T) {
+	ctx := t.Context()
+	b := &mock_balancer.MockBalancer{}
+	var balancerErr, assignmentErr error
+	var assignment *balancer.WatchChannelAssignmentsCallbackParam
+	get := mockey.Mock(balance.GetWithContext).To(func(context.Context) (balancer.Balancer, error) { return b, balancerErr }).Build()
+	defer get.UnPatch()
+	latest := mockey.Mock((*mock_balancer.MockBalancer).GetLatestChannelAssignment).To(func(*mock_balancer.MockBalancer) (*balancer.WatchChannelAssignmentsCallbackParam, error) {
+		return assignment, assignmentErr
+	}).Build()
+	defer latest.UnPatch()
+	_, active, err := ddl.GetReplicationRole(ctx)
+	require.NoError(t, err)
+	require.False(t, active)
+	assignmentErr = merr.ErrServiceUnavailable
+	_, err = ddl.GetReplicationTopology(ctx)
+	require.ErrorIs(t, err, assignmentErr)
+	balancerErr = context.DeadlineExceeded
+	_, _, err = ddl.GetReplicationRole(ctx)
+	require.ErrorIs(t, err, balancerErr)
 }
