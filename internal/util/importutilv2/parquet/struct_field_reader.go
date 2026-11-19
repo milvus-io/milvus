@@ -583,18 +583,22 @@ func readScalarArrayRows(chunked *arrow.Chunked, field *schemapb.FieldSchema, pa
 	}
 
 	for _, chunk := range chunked.Chunks() {
-		switch listArray := chunk.(type) {
+		switch chunk.(type) {
 		case *array.Null:
 			if !field.GetNullable() {
 				return nil, nil, WrapNullRowErr(field)
 			}
-			for i := 0; i < listArray.Len(); i++ {
+			for i := 0; i < chunk.Len(); i++ {
 				if err := appendNullRow(); err != nil {
 					return nil, nil, err
 				}
 			}
-		case *array.List:
-			if !field.GetNullable() && listArray.NullN() > 0 {
+		case *array.List, *array.FixedSizeList:
+			listArray, err := newListLikeArray(chunk, field)
+			if err != nil {
+				return nil, nil, err
+			}
+			if !field.GetNullable() && chunk.NullN() > 0 {
 				return nil, nil, WrapNullRowErr(field)
 			}
 
