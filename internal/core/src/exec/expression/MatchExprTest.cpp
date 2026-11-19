@@ -2638,7 +2638,7 @@ TEST(MatchExprNullableStruct, ColdMatchCancellationAndFreshContextRetry) {
         dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
     auto state = sealed->TestGetPublishedStateSnapshot();
-    auto entry = state->runtime->struct_element_offsets_map.at(sub);
+    auto entry = state->runtime->element_offsets_by_field.at(sub);
     auto column = state->runtime->fields.at(sub);
     const int64_t first_row = 0;
     ASSERT_NE(entry, nullptr);
