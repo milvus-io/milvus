@@ -15,10 +15,12 @@
 #include <limits>
 #include <cmath>
 #include <unordered_map>
+#include <utility>
 #include <nlohmann/json.hpp>
 #include "common/CGoCatch.h"
 #include "grep/Grep.h"
 #include "grep/IndexCondition.h"
+#include "grep/SegmentGrepTestHooks.h"
 #include "index/contracts/query/INgramReader.h"
 #include "milvus-storage/lob_column/lob_reference.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
@@ -28,6 +30,10 @@
 namespace milvus::grep {
 using namespace milvus::segcore;
 namespace {
+#ifdef MILVUS_GREP_TEST_HOOKS
+thread_local std::function<void()> batch_observer_for_testing;
+#endif
+
 void
 CheckArrow(const arrow::Status& status) {
     if (!status.ok()) {
@@ -633,6 +639,11 @@ ExecuteGrepScan(const SegmentInternalInterface* segment,
     int64_t begin = 0;
     int64_t window_end = 0;
     while (begin < size && output.Count() < opt.limit) {
+#ifdef MILVUS_GREP_TEST_HOOKS
+        if (batch_observer_for_testing) {
+            batch_observer_for_testing();
+        }
+#endif
         check();
         if (begin == window_end) {
             // Validate the original window before any smaller probe reads.
@@ -700,6 +711,13 @@ ExecuteGrepScan(const SegmentInternalInterface* segment,
     return output.Finish();
 }
 }  // namespace
+
+#ifdef MILVUS_GREP_TEST_HOOKS
+std::function<void()>
+SetSegmentGrepBatchObserverForTesting(std::function<void()> observer) {
+    return std::exchange(batch_observer_for_testing, std::move(observer));
+}
+#endif
 }  // namespace milvus::grep
 
 CStatus

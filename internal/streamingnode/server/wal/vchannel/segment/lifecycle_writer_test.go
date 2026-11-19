@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -27,6 +28,42 @@ type coordStub struct {
 	types.MixCoordClient
 	allocSegment    func(ctx context.Context, req *datapb.AllocSegmentRequest) (*datapb.AllocSegmentResponse, error)
 	saveBinlogPaths func(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error)
+}
+
+func TestRetireL1SegmentPreservesPublicationAndRetryBoundaries(t *testing.T) {
+	version := &viewpb.DataVersion{StreamingVersion: 2}
+	for _, tc := range []struct {
+		name        string
+		status      *commonpb.Status
+		want        *viewpb.DataVersion
+		wantErr     bool
+		recoverable bool
+	}{
+		{name: "retired", status: dataview.FlushResultStatus(nil)},
+		{name: "publication won", status: dataview.FlushResultStatus(version), want: version},
+		{name: "pending cannot retire", status: dataview.PendingFlushResultStatus(version), wantErr: true, recoverable: true},
+		{name: "transient", status: merr.Status(merr.WrapErrServiceUnavailableMsg("catalog unavailable")), wantErr: true, recoverable: true},
+		{name: "stale owner", status: merr.Status(merr.WrapErrChannelMisrouted("v1", "owner changed")), wantErr: true},
+		{name: "already removed", status: merr.Status(merr.WrapErrSegmentNotFound(1))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := &segmentLifecycleWriter{serverID: 1, coord: &coordStub{saveBinlogPaths: func(_ context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
+				require.True(t, req.GetFlushed())
+				require.True(t, req.GetDropped())
+				require.Equal(t, "1", req.GetBase().GetProperties()[dataview.FlushGroupProtocol])
+				require.Equal(t, "1", req.GetBase().GetProperties()[dataview.FlushGroupRetire])
+				return tc.status, nil
+			}}}
+			got, err := w.RetireL1Segment(t.Context(), newCommitL1SegmentTestMeta())
+			if tc.wantErr {
+				require.Error(t, err)
+				require.Equal(t, tc.recoverable, retry.IsRecoverable(err))
+			} else {
+				require.NoError(t, err)
+				require.True(t, proto.Equal(tc.want, got))
+			}
+		})
+	}
 }
 
 func (c *coordStub) AllocSegment(ctx context.Context, req *datapb.AllocSegmentRequest, _ ...grpc.CallOption) (*datapb.AllocSegmentResponse, error) {

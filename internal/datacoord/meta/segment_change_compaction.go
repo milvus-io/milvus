@@ -305,6 +305,24 @@ func (m *Meta) CanPrepareStreamingSchema(id int64) bool {
 	return m.canPrepareStreamingSchemaLocked(id)
 }
 
+// Materialized ALTER must account for durable pre-ALTER growing data even
+// while it is absent from the sealed projection. Direct NULL/default schema
+// changes can keep their existing logical publication boundary.
+func (m *Meta) HasPendingStreamingSchema(collectionID int64, schemaVersion int32) bool {
+	m.groupMu.RLock()
+	defer m.groupMu.RUnlock()
+	for _, g := range m.segmentChangeGroups {
+		if g.CollectionID != collectionID || g.Source != model.SegmentChangeSourceStreamingFlush || g.IsTerminal() {
+			continue
+		}
+		source := m.Segments.GetSegment(g.StreamingSegmentID)
+		if source == nil || source.GetSchemaVersion() < schemaVersion {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Meta) ReserveStreamingSchema(task *datapb.CompactionTask) bool {
 	if task.GetType() != datapb.CompactionType_BumpSchemaVersionCompaction || len(task.GetInputSegments()) != 1 {
 		return false

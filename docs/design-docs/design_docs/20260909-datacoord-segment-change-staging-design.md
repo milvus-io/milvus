@@ -770,6 +770,13 @@ two inspector ticks or an automatic compaction sweep. These notifications are
 best effort and must not block the durability receipt. A poll never bypasses
 sort, schema, stats, or index readiness.
 
+Registration and polling also notify missing text/JSON stats when Sort is
+disabled; the ten-interval reconciliation scan is a recovery fallback. Required
+schema preparation of current private streaming outputs runs independently of
+the automatic schema-bump cleanup switch and ordinary compaction task budget.
+An outstanding ALTER target also requires preparation of visible stale bases,
+even when automatic cleanup is disabled.
+
 Flush durability and query handoff are separate facts:
 
 1. The registration receipt releases the WAL Flush handle after data is
@@ -807,6 +814,19 @@ records and terminal group in the final atomic transaction, one group at a
   time so deleting a large partition cannot exceed the transaction limit. Other preparation
 failures preserve the source and retry. The feature flag controls admission;
 existing groups finish even if it is subsequently disabled.
+
+An owning WAL DropCollection/DropPartition additionally authorizes SN's pending
+publication task to request `SaveBinlogPaths(Flushed, Dropped)` with
+`flush_group_retire=1`. An ordinary empty-flush retry grants no such permission.
+DataCoord retires
+the original source and current private outputs with `streaming_data_retired`
+and the terminal group in the same final transaction. Only after this succeeds
+does SN persist the child tombstone and finish the Drop ACK; it neither waits
+for indexes/schema publication nor fabricates a handoff version. A concurrent
+publication may win and return its actual version. DropPartition does not
+authorize retirement of sources in other partitions. Replay restores this
+runtime Drop intent; primary and CDC receiver derive retirement independently
+from the same WAL Drop, using their own physical segment identities.
 
 Snapshots use the durable original source while a flush group is pending,
 including after private Sort, instead of excluding both frontiers. Snapshot
@@ -919,6 +939,11 @@ After staging:
   DataView and `UpdateCommitTimestamp`. An aborted transaction exposes neither.
   Copy groups that own their publication timestamp use the same projection;
   copy groups preserving member timestamps retain their source cursors.
+  Pending-transform projection reads group ownership and SegmentMeta together.
+  Unselected sibling members use their owning group's WAL fence, or freeze the
+  accepted W before ACK, even after registration clears `IsImporting`. They must
+  not block each other on private zero cursors. Unowned zero coverage still
+  fails closed.
   With staging opted in it also completes legacy jobs; per-channel SN RPCs are
   idempotent participants. CDC receivers may prepare their local groups only
   when the replicated commit arrives and then wait for local artifacts.

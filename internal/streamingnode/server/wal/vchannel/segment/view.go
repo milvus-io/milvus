@@ -227,7 +227,10 @@ type SegmentView struct {
 	// durability alone does not prove coordinator acceptance. It is published atomically so the
 	// vchannel module can scan views without taking the per-view lock on the WAL
 	// observation hot path.
-	finalCommitDone     atomic.Bool
+	finalCommitDone atomic.Bool
+	// Runtime-only: Drop replay restores this intent until a stable child
+	// tombstone proves coordinator retirement. Other partitions never inherit it.
+	dropRequested       atomic.Bool
 	flushDataDurable    atomic.Bool
 	handoffAckScheduled bool
 	// createSegmentTimeTick mirrors meta.Stat.CreateSegmentTimeTick and is
@@ -382,6 +385,11 @@ func (s *SegmentView) Flush(
 		// consumer can handle it separately.
 		owned.IntoPoisoned()
 		return false
+	}
+	if msg.MessageType() == message.MessageTypeDropCollection ||
+		(msg.MessageType() == message.MessageTypeDropPartition &&
+			message.MustAsImmutableDropPartitionMessageV1(msg).Header().GetPartitionId() == s.meta.GetPartitionId()) {
+		s.dropRequested.Store(true)
 	}
 	// The first flush closes the source and durably registers all its data.
 	// Later ManualFlush/DDL messages need no further persistence from it, even

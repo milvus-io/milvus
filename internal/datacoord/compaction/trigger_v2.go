@@ -227,6 +227,16 @@ func (m *CompactionTriggerManager) handleSortSignal(ctx context.Context, segID i
 }
 
 func (m *CompactionTriggerManager) handleTicker(ctx context.Context, tickerType TickerType) {
+	if tickerType == BumpSchemaVersionTicker && m.meta != nil && m.bumpSchemaVersionPolicy != nil {
+		// Readiness of accepted WAL data is mandatory preparation, independent
+		// of the optional background cleanup switch and ordinary task budget.
+		events, err := m.bumpSchemaVersionPolicy.TriggerRequired(ctx)
+		if err != nil {
+			mlog.Warn(ctx, "failed to prepare streaming group schema", mlog.Err(err))
+		} else {
+			m.notify(ctx, policy.TriggerTypeBumpSchemaVersion, events[policy.TriggerTypeBumpSchemaVersion], false)
+		}
+	}
 	if tickerType == SingleTicker && m.meta != nil && m.singlePolicy != nil {
 		m.scheduleRequiredGroupSort(ctx)
 	}

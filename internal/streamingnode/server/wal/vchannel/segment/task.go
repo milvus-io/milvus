@@ -272,7 +272,14 @@ func (t *awaitFlushPublicationTask) Execute(ctx context.Context) error {
 		if !ok {
 			return merr.WrapErrServiceUnavailableMsg("streaming flush publication committer is unavailable")
 		}
-		version, pending, err := committer.CommitL1SegmentWithPublication(ctx, s.AssignmentMeta(), 0)
+		var version *viewpb.DataVersion
+		var pending bool
+		var err error
+		if retirer, ok := s.lifecycle.(FlushRetirer); ok && s.dropRequested.Load() {
+			version, err = retirer.RetireL1Segment(ctx, s.AssignmentMeta())
+		} else {
+			version, pending, err = committer.CommitL1SegmentWithPublication(ctx, s.AssignmentMeta(), 0)
+		}
 		if err != nil {
 			return err
 		}

@@ -19,6 +19,10 @@ const (
 // registration from the later, versioned growing-to-sealed handoff.
 const FlushGroupProtocol = "flush_group_protocol"
 
+// FlushGroupRetire distinguishes an owning WAL Drop from an ordinary empty
+// Flush. Dropped alone must not retire an existing nonempty private group.
+const FlushGroupRetire = "flush_group_retire"
+
 const FlushHandoffAck = "flush_group_handoff_ack"
 
 func FlushHandoffToken(version *viewpb.DataVersion) string {

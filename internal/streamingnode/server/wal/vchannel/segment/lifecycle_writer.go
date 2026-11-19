@@ -133,6 +133,27 @@ func (w *segmentLifecycleWriter) saveBinlogPaths(ctx context.Context, req *datap
 	return err
 }
 
+func (w *segmentLifecycleWriter) RetireL1Segment(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta) (*viewpb.DataVersion, error) {
+	req := buildCommitL1SegmentRequest(w.serverID, meta)
+	req.Dropped = true // The owning WAL Drop, not row count, authorizes retirement.
+	req.Base.Properties = map[string]string{dataview.FlushGroupProtocol: "1", dataview.FlushGroupRetire: "1"}
+	resp, err := w.coord.SaveBinlogPaths(retry.WithMaxAttemptsContext(ctx, maxRPCAttempts), req)
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
+			return nil, nil
+		}
+		if errors.Is(err, merr.ErrChannelMisrouted) || merr.GetErrorType(err) == merr.InputError {
+			err = retry.Unrecoverable(err)
+		}
+		return nil, err
+	}
+	version, pending, err := dataview.ParseStagedFlushResult(resp)
+	if err == nil && pending {
+		return nil, merr.WrapErrServiceUnavailableMsg("streaming flush %d retirement is not durable", meta.GetSegmentId())
+	}
+	return version, err
+}
+
 func buildEnsureGrowingSegmentRequest(meta *streamingpb.SegmentAssignmentMeta) *datapb.AllocSegmentRequest {
 	return &datapb.AllocSegmentRequest{
 		CollectionId:         meta.GetCollectionId(),

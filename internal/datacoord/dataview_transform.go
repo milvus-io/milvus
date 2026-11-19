@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -133,8 +134,44 @@ func pendingTransformBounds(ctx context.Context, metadata *meta.Meta, imports bu
 	}
 	// Read task pins before Segment metadata: completion first installs the
 	// Segment coverage, so a completed task cannot disappear from both sets.
-	for _, segment := range metadata.SelectSegments(ctx, meta.WithCollection(view.GetCollectionId())) {
-		if _, ok := selected[segment.GetID()]; ok || segment.GetLevel() == datapb.SegmentLevel_L0 || !meta.IsSegmentHealthy(segment) {
+	segments, groups := metadata.SelectSegmentsWithAllChangeGroups(ctx, meta.WithCollection(view.GetCollectionId()))
+	importFences := make(map[int64]uint64)
+	retiredImports := make(map[int64]bool)
+	for _, group := range groups {
+		if group.CollectionID != view.GetCollectionId() || !group.AwaitCommitFence ||
+			(group.Source != model.SegmentChangeSourceImportJob && group.Source != model.SegmentChangeSourceCDCReplicated) {
+			continue
+		}
+		if group.State == model.SegmentChangeStateFailed || group.State == model.SegmentChangeStateAborted {
+			for _, id := range group.NewSegmentIDs {
+				retiredImports[id] = true
+			}
+			continue
+		}
+		if group.State == model.SegmentChangeStateCommitted {
+			continue // Published members already carry their persisted cursor.
+		}
+		start := group.CommitTS
+		if start == 0 {
+			start = previousW[group.VChannel]
+		}
+		for _, id := range group.NewSegmentIDs {
+			importFences[id] = start
+		}
+	}
+	for _, segment := range segments {
+		if _, ok := selected[segment.GetID()]; ok || retiredImports[segment.GetID()] || segment.GetLevel() == datapb.SegmentLevel_L0 || !meta.IsSegmentHealthy(segment) {
+			continue
+		}
+		if start, owned := importFences[segment.GetID()]; owned {
+			// Registration clears IsImporting for async preparation before the
+			// publication transaction installs the member cursor. Sibling groups
+			// must use their durable WAL fence, rather than block each other on
+			// those private zero cursors. Before ACK, retain the accepted W.
+			if start == 0 {
+				return nil, merr.WrapErrServiceNotReadyMsg("import group member %d has no Transform fence", segment.GetID())
+			}
+			pin(segment.GetInsertChannel(), start)
 			continue
 		}
 		if segment.GetIsImporting() {
