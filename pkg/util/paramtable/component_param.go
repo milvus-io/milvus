@@ -2861,6 +2861,9 @@ type proxyConfig struct {
 	ExprParseCacheMaxEntries    ParamItem `refreshable:"false"`
 	ExprParseCacheMaxBytes      ParamItem `refreshable:"false"`
 	ExprParseCacheMaxEntryBytes ParamItem `refreshable:"false"`
+	// ShardSplitMaxFenceRetryWait caps how long a write keeps retrying what a
+	// shard refused during a shard split.
+	ShardSplitMaxFenceRetryWait ParamItem `refreshable:"true"`
 
 	TimeTickInterval               ParamItem `refreshable:"false"`
 	HealthCheckTimeout             ParamItem `refreshable:"true"`
@@ -2998,6 +3001,17 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		Export: true,
 	}
 	p.SplitChunkProxy.Init(base.mgr)
+
+	p.ShardSplitMaxFenceRetryWait = ParamItem{
+		Key:          "proxy.shardSplit.maxFenceRetryWait",
+		Version:      "3.0.0",
+		DefaultValue: "60s",
+		Doc: `The longest time a write keeps retrying the rows or tombstones that a shard refused during a shard split.
+The proxy refreshes the routing of the collection and sends again only what was refused, until the shards that own the keys take it.
+The retry also ends at the deadline of the request, if that comes first. The write then fails with a retriable error.`,
+		Export: false,
+	}
+	p.ShardSplitMaxFenceRetryWait.Init(base.mgr)
 
 	p.TimeTickInterval = ParamItem{
 		Key:          "proxy.timeTickInterval",

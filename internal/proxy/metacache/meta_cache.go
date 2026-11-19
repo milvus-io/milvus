@@ -19,6 +19,7 @@ package metacache
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -74,6 +76,14 @@ type Cache interface {
 	// ListShardLocation() map[int64]nodeInfo
 	RemoveCollection(ctx context.Context, database, collectionName string)
 	RemoveCollectionsByID(ctx context.Context, collectionID typeutil.UniqueID) []string
+	// RefreshCollectionByID drops the cached entry of one collection so that
+	// its next lookup describes it again. It is not an invalidation: it does
+	// not drain in-flight fills (see MetaCache.fillMu), so it never waits for a
+	// describe of any other collection, and a fill of this one that read an
+	// older snapshot may still write it back afterwards. For a caller that
+	// learned its entry is stale from a refusal it retries -- a write refused
+	// by a shard split's fence -- rather than from a DDL broadcast.
+	RefreshCollectionByID(ctx context.Context, collectionID typeutil.UniqueID)
 	// InvalidateCollectionMeta atomically applies the O(1) collection-cache
 	// invalidations carried by one expiration request: resolution by real name
 	// or alias, eviction by forwarded id, and optional alias-hint removal.
@@ -126,10 +136,124 @@ type CollectionInfo struct {
 	Properties            []*commonpb.KeyValuePair
 	// The routing of a collection that was split, as the coordinator reports
 	// it: the residues every vchannel owns and the modulus they are taken
-	// against. Empty on a collection that was never split.
+	// against. Empty on a collection that was never split. DescribeCollection
+	// returns them as they are; the write path routes by SplitRouting, which is
+	// derived from them.
 	ShardInfos     []*schemapb.CollectionShardInfo
 	RoutingModulus uint64
 	ShardBy        string
+	// SplitRouting is the routing of a collection that has been split (a
+	// non-zero RoutingModulus), derived once per describe so the write path does
+	// no per-request derivation. Nil for a collection that has never been split,
+	// which keeps the legacy hash % shardNum placement.
+	SplitRouting *SplitRouting
+}
+
+// SplitRouting is how the writes of a split collection are placed.
+type SplitRouting struct {
+	// Table maps the residue of a primary key to the vchannel that owns it.
+	// Nil when the routing metadata is malformed; Err then says why, and the
+	// write path refuses the collection rather than place its rows by position.
+	Table *routing.Table
+	Err   error
+	// Sources lists the split sources of the collection, which take no write
+	// but whose idempotency window may still answer for a keyed insert they
+	// took before their fence. RootCoord reports each one as a shard info in
+	// state ShardSplitting, next to the shards that take DML; a chain of
+	// splits lists every source of the chain. Empty means only that the
+	// describe named none.
+	Sources []SplitSource
+}
+
+// SplitSource is a split source of a collection as its describe names it.
+type SplitSource struct {
+	VChannel string
+	// Buckets are the residues, at the routing modulus of the collection, of
+	// the keys the source owned: a key of another residue was never written
+	// there. Empty when the shard info carries none or carries residues that
+	// are not below the modulus: the source may then hold any key.
+	Buckets []uint64
+}
+
+// MayHold reports whether the source can hold a key of the residue, taken at
+// the routing modulus of the collection.
+func (s SplitSource) MayHold(residue uint64) bool {
+	return len(s.Buckets) == 0 || slices.Contains(s.Buckets, residue)
+}
+
+// NewSplitRouting derives the routing of a split collection from its describe
+// response, or returns nil for one that was never split.
+//
+// The shard infos in state ShardNormal are the shards that take DML: they
+// must name exactly the vchannel list, in order, and their residues must tile
+// the modulus. The shard infos in state ShardSplitting are the split sources
+// (see SplitRouting.Sources): they are not in the vchannel list and never take
+// part in the routing. Anything else is malformed metadata.
+func NewSplitRouting(collection *milvuspb.DescribeCollectionResponse) *SplitRouting {
+	if collection.GetRoutingModulus() == 0 {
+		return nil
+	}
+	live := make([]*schemapb.CollectionShardInfo, 0, len(collection.GetShardInfos()))
+	var splitting []*schemapb.CollectionShardInfo
+	for _, info := range collection.GetShardInfos() {
+		if info.GetState() == schemapb.ShardState_ShardSplitting {
+			splitting = append(splitting, info)
+			continue
+		}
+		live = append(live, info)
+	}
+	r, err := routing.RoutingFromShardInfos(collection.GetRoutingModulus(), collection.GetShardBy(), live)
+	if err != nil {
+		return &SplitRouting{Err: err}
+	}
+	if !slices.Equal(r.VChannels(), collection.GetVirtualChannelNames()) {
+		return &SplitRouting{Err: merr.WrapErrServiceInternalMsg(
+			"the shard infos name the vchannels %v, the collection lists %v", r.VChannels(), collection.GetVirtualChannelNames())}
+	}
+	table, err := r.Table()
+	if err != nil {
+		return &SplitRouting{Err: err}
+	}
+	sources, err := splitSourcesOf(splitting, r.VChannels(), table.Modulus())
+	if err != nil {
+		return &SplitRouting{Err: err}
+	}
+	return &SplitRouting{Table: table, Sources: sources}
+}
+
+// splitSourcesOf reads the split sources from their shard infos. A source
+// with no vchannel, named twice, or also listed as a shard that takes DML is
+// malformed metadata. Residues that are not all below the modulus are
+// dropped rather than refused: they only narrow which sources a keyed insert
+// asks, and asking one more source is safe.
+func splitSourcesOf(infos []*schemapb.CollectionShardInfo, live []string, modulus uint64) ([]SplitSource, error) {
+	if len(infos) == 0 {
+		return nil, nil
+	}
+	sources := make([]SplitSource, 0, len(infos))
+	seen := make(map[string]struct{}, len(infos))
+	for i, info := range infos {
+		vchannel := info.GetVchannelName()
+		if vchannel == "" {
+			return nil, merr.WrapErrServiceInternalMsg("split source shard info %d carries no vchannel name", i)
+		}
+		if _, ok := seen[vchannel]; ok {
+			return nil, merr.WrapErrServiceInternalMsg("split source %s is listed twice", vchannel)
+		}
+		seen[vchannel] = struct{}{}
+		if slices.Contains(live, vchannel) {
+			return nil, merr.WrapErrServiceInternalMsg("vchannel %s is listed both as a split source and as a shard that takes DML", vchannel)
+		}
+		buckets := slices.Clone(info.GetHashRouting().GetBuckets())
+		for _, bucket := range buckets {
+			if bucket >= modulus {
+				buckets = nil
+				break
+			}
+		}
+		sources = append(sources, SplitSource{VChannel: vchannel, Buckets: buckets})
+	}
+	return sources, nil
 }
 
 type DatabaseInfo struct {
@@ -464,6 +588,7 @@ func newCollectionInfo(collection *milvuspb.DescribeCollectionResponse, schemaIn
 		ShardsNum:             collection.ShardsNum,
 		Aliases:               collection.Aliases,
 		Properties:            collection.Properties,
+		SplitRouting:          NewSplitRouting(collection),
 	}
 }
 
@@ -1175,6 +1300,19 @@ func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID type
 	defer m.mu.Unlock()
 
 	return m.removeCollectionByID(ctx, collectionID)
+}
+
+// RefreshCollectionByID evicts the collection's entry under m.mu alone. A
+// racing fill is tolerated as evictCollectionEntryLocked allows: a fill writes
+// its entry and hints together under m.mu, so it either lands before the
+// eviction and is removed with its hints, or after it and stays -- at worst a
+// snapshot as old as the one just dropped, which the caller's next refusal
+// refreshes again. Taking fillMu instead would make every retry of every
+// refused write wait for the slowest describe in flight on the proxy.
+func (m *MetaCache) RefreshCollectionByID(ctx context.Context, collectionID typeutil.UniqueID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.removeCollectionByID(ctx, collectionID)
 }
 
 // evictCollectionEntryLocked is THE single eviction routine: it removes the
