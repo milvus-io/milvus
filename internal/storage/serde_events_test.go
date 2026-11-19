@@ -787,6 +787,96 @@ func (fakeUnsafeKeyCipher) GetUnsafeKey(ezID, collectionID int64) []byte {
 	return []byte("unsafe-key")
 }
 
+type importBinlogCipher struct {
+	hook.Cipher
+	registered string
+}
+
+func (c *importBinlogCipher) RegisterImportReadKeys(ezID int64, keyset []byte) error {
+	if ezID != 17 || string(keyset) != "dispatched source" {
+		return merr.ErrServiceInternal
+	}
+	c.registered = string(keyset)
+	return nil
+}
+
+func (c *importBinlogCipher) GetDecryptor(ezID, collectionID int64, edek []byte) (hook.Decryptor, error) {
+	if c.registered == "" || ezID != 17 || collectionID != 31 || string(edek) != "safe key" {
+		return nil, merr.ErrDataIntegrity
+	}
+	return c.Cipher.GetDecryptor(ezID, collectionID, edek)
+}
+
+func TestImportReadContextReopensEncryptedBinlogs(t *testing.T) {
+	hookutil.InitTestCipher()
+	cipher := &importBinlogCipher{Cipher: hookutil.GetCipher()}
+	plugin := mockey.Mock(hookutil.GetCipher).Return(cipher).Build()
+	defer plugin.UnPatch()
+	encryptor, edek, err := cipher.GetEncryptor(17, 31)
+	require.NoError(t, err)
+	writer := NewInsertBinlogWriter(schemapb.DataType_Int64, 31, 1, 2, 100, false, WithWriterEncryptionContext(17, edek, encryptor))
+	defer writer.Close()
+	writer.SetEventTimeStamp(1, 2)
+	writer.AddExtra(originalSizeKey, "8")
+	event, err := writer.NextInsertEventWriter()
+	require.NoError(t, err)
+	event.SetEventTimestamp(1, 2)
+	require.NoError(t, event.AddInt64ToPayload([]int64{42}, nil))
+	require.NoError(t, writer.Finish())
+	data, err := writer.GetBuffer()
+	require.NoError(t, err)
+
+	source := &indexcgopb.StoragePluginContext{EncryptionZoneId: 17, EncryptionKey: base64.StdEncoding.EncodeToString([]byte("dispatched source"))}
+	schema := &schemapb.CollectionSchema{
+		Fields:     []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64}},
+		Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}},
+	}
+	reader, err := NewBinlogRecordReader(context.Background(), []*datapb.FieldBinlog{{
+		FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "first"}, {LogPath: "second"}},
+	}}, schema, WithVersion(StorageV1), WithCollectionID(53), WithImportReadContext(source),
+		WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) { return [][]byte{data}, nil }))
+	require.NoError(t, err)
+	defer reader.Close()
+	for range 2 {
+		// The worker may evict this EZ between opening two files in the same execution.
+		cipher.registered = ""
+		rec, err := reader.Next()
+		require.NoError(t, err)
+		require.EqualValues(t, 42, rec.Column(100).(*array.Int64).Value(0))
+	}
+}
+
+func TestImportReadContextDecryptsLegacyDelete(t *testing.T) {
+	hookutil.InitTestCipher()
+	cipher := &importBinlogCipher{Cipher: hookutil.GetCipher()}
+	plugin := mockey.Mock(hookutil.GetCipher).Return(cipher).Build()
+	defer plugin.UnPatch()
+	encryptor, edek, err := cipher.GetEncryptor(17, 31)
+	require.NoError(t, err)
+	writer := NewDeleteBinlogWriter(schemapb.DataType_String, 31, 1, 2, WithWriterEncryptionContext(17, edek, encryptor))
+	defer writer.Close()
+	writer.SetEventTimeStamp(1, 2)
+	writer.AddExtra(originalSizeKey, "8")
+	event, err := writer.NextDeleteEventWriter()
+	require.NoError(t, err)
+	event.SetEventTimestamp(1, 2)
+	require.NoError(t, event.AddOneStringToPayload(`{"pk":42,"ts":100,"pkType":5}`, true))
+	require.NoError(t, writer.Finish())
+	data, err := writer.GetBuffer()
+	require.NoError(t, err)
+
+	source := &indexcgopb.StoragePluginContext{EncryptionZoneId: 17, EncryptionKey: base64.StdEncoding.EncodeToString([]byte("dispatched source"))}
+	reader, err := NewDeltalogReader(context.Background(), schemapb.DataType_Int64, []string{"delta"},
+		WithVersion(StorageV1), WithImportReadContext(source),
+		WithDownloader(func(context.Context, []string) ([][]byte, error) { return [][]byte{data}, nil }))
+	require.NoError(t, err)
+	defer reader.Close()
+	record, err := reader.Next()
+	require.NoError(t, err)
+	require.EqualValues(t, 42, record.Column(0).(*array.Int64).Value(0))
+	require.EqualValues(t, 100, record.Column(1).(*array.Int64).Value(0))
+}
+
 // Both the field-presence probe and the data reader must use the resolved
 // source context, including explicit plaintext, instead of the target's key.
 func TestPackedBinlogReadersUseSourceContext(t *testing.T) {

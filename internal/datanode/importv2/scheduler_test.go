@@ -138,13 +138,15 @@ func TestSnapshotCMEKTargetOnlyNullableTextBothPhases(t *testing.T) {
 		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		{FieldID: 101, Name: "target_only_text", DataType: schemapb.DataType_Text, Nullable: true},
 	}}
-	pluginContext := &indexcgopb.StoragePluginContext{EncryptionZoneId: 10, EncryptionKey: "source-key"}
-	parsePatch := mockey.Mock(hookutil.GetEzIDByImportEzk).Return(int64(10), nil).Build()
-	defer parsePatch.UnPatch()
-	contextPatch := mockey.Mock(hookutil.GetCPluginContextByEzID).Return(pluginContext, nil).Build()
+	schema.Properties = []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "10"}}
+	cipher := hookutil.ImportCipherContext{
+		Source: &indexcgopb.StoragePluginContext{EncryptionZoneId: 10, EncryptionKey: "c291cmNl"},
+		Target: &indexcgopb.StoragePluginContext{EncryptionZoneId: 10, EncryptionKey: "dGFyZ2V0"},
+	}
+	contextPatch := mockey.Mock(hookutil.GetCPluginContextByEzID).Return(nil, merr.ErrServiceUnavailable).Build()
 	defer contextPatch.UnPatch()
-	encryptionPatch := mockey.Mock(hookutil.IsClusterEncryptionEnabled).Return(true).Build()
-	defer encryptionPatch.UnPatch()
+	memoryPatch := mockey.Mock(GetMemoryAllocator).Return(NewMemoryAllocator(4 << 30)).Build()
+	defer memoryPatch.UnPatch()
 	fieldIDsPatch := mockey.Mock(packed.GetManifestFieldIDs).
 		Return(map[int64]struct{}{common.RowIDField: {}, common.TimeStampField: {}, 100: {}}, nil).Build()
 	defer fieldIDsPatch.UnPatch()
@@ -175,8 +177,8 @@ func TestSnapshotCMEKTargetOnlyNullableTextBothPhases(t *testing.T) {
 		_ int64, _ *indexpb.StorageConfig, sourceContext *indexcgopb.StoragePluginContext, _ ...storage.RwOption,
 	) (storage.RecordReader, error) {
 		openCount++
-		require.Same(t, pluginContext, sourceContext)
-		require.False(t, typeutil.HasTextField(readSchema))
+		assert.Same(t, cipher.Source, sourceContext)
+		assert.False(t, typeutil.HasTextField(readSchema))
 		record, err := storage.ValueSerializer([]*storage.Value{{Value: map[int64]any{
 			common.RowIDField: int64(1), common.TimeStampField: int64(100), 100: int64(42),
 		}}}, readSchema)
@@ -187,9 +189,9 @@ func TestSnapshotCMEKTargetOnlyNullableTextBothPhases(t *testing.T) {
 	syncPatch := mockey.Mock((*ImportTask).sync).To(func(_ *ImportTask, data HashedData) ([]*conc.Future[struct{}], []syncmgr.Task, error) {
 		rows := data[0][0]
 		imported += rows.GetRowNum()
-		require.Equal(t, int64(42), rows.Data[100].GetRow(0))
-		require.Equal(t, []bool{false}, rows.Data[101].GetValidData())
-		require.Nil(t, rows.Data[101].GetRow(0), "the target-only TEXT must be NULL at the write boundary")
+		assert.Equal(t, int64(42), rows.Data[100].GetRow(0))
+		assert.Equal(t, []bool{false}, rows.Data[101].GetValidData())
+		assert.Nil(t, rows.Data[101].GetRow(0), "the target-only TEXT must be NULL at the write boundary")
 		return nil, nil, nil
 	}).Build()
 	defer syncPatch.UnPatch()
@@ -203,31 +205,23 @@ func TestSnapshotCMEKTargetOnlyNullableTextBothPhases(t *testing.T) {
 	}
 	manager := NewTaskManager()
 	pre := NewPreImportTask(&datapb.PreImportRequest{
-		TaskID: 1, Schema: schema, Options: options,
+		TaskID: 1, Schema: schema, Options: options, StorageConfig: &indexpb.StorageConfig{},
 		ImportFiles: []*internalpb.ImportFile{file}, PartitionIDs: []int64{10}, Vchannels: []string{"target"},
-	}, manager, nil).(*PreImportTask)
+	}, manager, nil, cipher)
 	defer pre.Cancel()
-	manager.Add(pre)
 	imp := NewImportTask(&datapb.ImportRequest{
-		TaskID: 2, Schema: schema, Options: options,
+		TaskID: 2, Schema: schema, Options: options, StorageConfig: &indexpb.StorageConfig{}, Files: []*internalpb.ImportFile{file},
 		Ts: 999, IDRange: &datapb.IDRange{Begin: 100, End: 110}, PartitionIDs: []int64{10}, Vchannels: []string{"target"},
-	}, manager, nil, nil).(*ImportTask)
+	}, manager, nil, nil, cipher)
 	defer imp.Cancel()
-	// Exercise the actual shared reader, statistics, NULL fill and row hashing.
-	// Only manifest/crypto dependencies and the final storage sync are mocked.
-	for _, read := range []func(importutilv2.Reader) error{
-		func(r importutilv2.Reader) error { return pre.readFileStat(r, 0) },
-		func(r importutilv2.Reader) error { return imp.importFile(r, nil) },
-	} {
-		r, err := importutilv2.NewReader(context.Background(), nil, schema, file, options, 1024, &indexpb.StorageConfig{}, 1024)
-		require.NoError(t, err)
-		err = read(r)
-		r.Close()
-		require.NoError(t, err)
+	for _, task := range []Task{pre, imp} {
+		manager.Add(task)
+		require.NoError(t, conc.AwaitAll(task.Execute()...))
 	}
 	require.EqualValues(t, 1, manager.Get(1).(*PreImportTask).GetFileStats()[0].GetTotalRows())
 	require.Equal(t, 1, imported)
 	require.Equal(t, 2, openCount)
+	require.Zero(t, contextPatch.Times())
 	require.True(t, typeutil.HasTextField(schema), "projection must not remove the target field")
 }
 

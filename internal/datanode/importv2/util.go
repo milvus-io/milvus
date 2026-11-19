@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -63,6 +64,7 @@ func NewSyncTask(ctx context.Context,
 	storageVersion int64,
 	useLoonFFI bool,
 	storageConfig *indexpb.StorageConfig,
+	importTarget *indexcgopb.StoragePluginContext,
 ) (syncmgr.Task, error) {
 	metaCache := metaCaches[vchannel]
 	if _, ok := metaCache.GetSegmentByID(segmentID); !ok {
@@ -111,6 +113,7 @@ func NewSyncTask(ctx context.Context,
 		WithSchema(metaCache.GetSchema(0)). // TODO specify import schema if needed
 		WithSyncPack(syncPack).
 		WithStorageConfig(storageConfig).
+		WithImportTarget(importTarget).
 		WithWriteRetryOptions(newWriteRetryOptions()...)
 	return task, nil
 }

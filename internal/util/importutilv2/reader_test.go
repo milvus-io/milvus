@@ -400,6 +400,56 @@ func TestSnapshotReaderFactoryEncryption(t *testing.T) {
 	}
 }
 
+func TestTaskReaderOpensPackedBackupWithDispatchedSource(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	root := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
+	file := &internalpb.ImportFile{Paths: []string{root + "/segment"}}
+	path := root + "/segment/0/1"
+	require.NoError(t, cm.Write(ctx, path, []byte("packed")))
+	schema := &schemapb.CollectionSchema{
+		Fields:     []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64}},
+		Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}},
+	}
+	options := Options{{Key: BackupFlag, Value: "true"}, {Key: StorageVersion, Value: "2"}, {Key: EZK, Value: "opaque on worker"}}
+	source := &indexcgopb.StoragePluginContext{EncryptionZoneId: 17, EncryptionKey: "c291cmNl"}
+	ordinary := mockey.Mock(hookutil.GetCPluginContextByEzID).Return(nil, merr.ErrServiceUnavailable).Build()
+	defer ordinary.UnPatch()
+	footer := mockey.Mock(packed.GetImportPackedFileFieldIDs).To(func(paths []string, _ *indexpb.StorageConfig, got *indexcgopb.StoragePluginContext) ([][]int64, error) {
+		require.Equal(t, []string{path}, paths)
+		require.Equal(t, source, got)
+		return [][]int64{{0, 1, 100}}, nil
+	}).Build()
+	defer footer.UnPatch()
+	open := mockey.Mock(packed.NewPackedReaderWithExtfs).To(func(paths []string, _ *arrow.Schema, _ int64, _ *indexpb.StorageConfig,
+		got *indexcgopb.StoragePluginContext, _ packed.ExternalReaderContext, opts ...packed.ReaderOption,
+	) (*packed.PackedReader, error) {
+		require.Equal(t, []string{path}, paths)
+		require.Equal(t, source, got)
+		require.NotEmpty(t, opts, "use the read-only native registration at data file open")
+		return nil, merr.ErrIoPermissionDenied
+	}).Build()
+	defer open.UnPatch()
+	factory := NewTaskReaderFactory(ctx, cm, cfg, options, source)
+	r, err := factory.NewReader(ctx, schema, file, 1024, 0, nil)
+	require.NoError(t, err)
+	defer r.Close()
+	_, err = r.Read()
+	require.ErrorIs(t, err, merr.ErrIoPermissionDenied)
+	require.EqualValues(t, 1, footer.Times())
+	require.EqualValues(t, 1, open.Times())
+	require.Zero(t, ordinary.Times())
+}
+
+func TestTaskReaderRejectsMissingDispatchedSource(t *testing.T) {
+	options := Options{{Key: BackupFlag, Value: "true"}, {Key: EZK, Value: "backup artifact"}}
+	factory := NewTaskReaderFactory(context.Background(), nil, nil, options, nil)
+	_, err := factory.NewReader(context.Background(), nil, &internalpb.ImportFile{Paths: []string{"backup/segment"}}, 1024, 0, nil)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
 func TestSnapshotReaderFactoryPathValidationError(t *testing.T) {
 	ctx := context.Background()
 	options := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}}

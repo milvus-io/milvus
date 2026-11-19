@@ -413,6 +413,12 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 		return merr.Status(err), nil
 	}
 
+	artifact, _ := importutilv2.GetEZK(req.GetOptions())
+	cipher, err := hookutil.PrepareImportCipher(artifact, req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
 		mlog.Error(ctx, "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
@@ -423,9 +429,9 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 
 	var task importv2.Task
 	if importutilv2.IsL0Import(req.GetOptions()) {
-		task = importv2.NewL0PreImportTask(req, node.importTaskMgr, cm)
+		task = importv2.NewL0PreImportTask(req, node.importTaskMgr, cm, cipher)
 	} else {
-		task = importv2.NewPreImportTask(req, node.importTaskMgr, cm)
+		task = importv2.NewPreImportTask(req, node.importTaskMgr, cm, cipher)
 	}
 	node.importTaskMgr.Add(task)
 
@@ -463,6 +469,12 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 		return merr.Status(err), nil
 	}
 
+	artifact, _ := importutilv2.GetEZK(req.GetOptions())
+	cipher, err := hookutil.PrepareImportCipher(artifact, req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
 		mlog.Error(ctx, "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
@@ -472,9 +484,9 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 	}
 	var task importv2.Task
 	if importutilv2.IsL0Import(req.GetOptions()) {
-		task = importv2.NewL0ImportTask(req, node.importTaskMgr, node.syncMgr, cm)
+		task = importv2.NewL0ImportTask(req, node.importTaskMgr, node.syncMgr, cm, cipher)
 	} else {
-		task = importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, cm)
+		task = importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, cm, cipher)
 	}
 	node.importTaskMgr.Add(task)
 
@@ -854,9 +866,6 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return invalidTaskPayload("PreImport", err), nil
 		}
-		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
-			return merr.Status(err), nil
-		}
 		return node.PreImport(ctx, req)
 	case taskcommon.PreImportV3:
 		req := &datapb.PreImportRequest{}
@@ -871,9 +880,6 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		req := &datapb.ImportRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return invalidTaskPayload("Import", err), nil
-		}
-		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
-			return merr.Status(err), nil
 		}
 		return node.ImportV2(ctx, req)
 	case taskcommon.Reshard:

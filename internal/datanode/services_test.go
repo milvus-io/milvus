@@ -589,6 +589,28 @@ func (s *DataNodeServicesSuite) TestDropCompactionPlan() {
 	})
 }
 
+func (s *DataNodeServicesSuite) TestImportRejectsIncompleteCipherContext() {
+	properties := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}}
+	options := []*commonpb.KeyValuePair{{Key: "ezk", Value: "eyJlel9pZCI6MTd9"}}
+	entries := []*commonpb.KeyValuePair{{Key: "cipher.ezk", Value: "17:b2xk"}}
+	for kind, req := range map[string]proto.Message{
+		taskcommon.PreImport: &datapb.PreImportRequest{TaskID: 73, Options: options, Schema: &schemapb.CollectionSchema{Properties: properties}, PluginContext: entries},
+		taskcommon.Import:    &datapb.ImportRequest{TaskID: 73, Options: options, Schema: &schemapb.CollectionSchema{Properties: properties}, PluginContext: entries},
+	} {
+		s.Run(kind, func() {
+			payload, err := proto.Marshal(req)
+			s.Require().NoError(err)
+			status, err := s.node.CreateTask(s.ctx, &workerpb.CreateTaskRequest{
+				Properties: map[string]string{taskcommon.ClusterIDKey: "cluster-0", taskcommon.TypeKey: kind},
+				Payload:    payload,
+			})
+			s.Require().NoError(err)
+			s.Contains(status.GetReason(), "missing a keyset")
+			s.Nil(s.node.importTaskMgr.Get(73))
+		})
+	}
+}
+
 func (s *DataNodeServicesSuite) TestCreateTask() {
 	s.Run("create pre-import task", func() {
 		preImportReq := &datapb.PreImportRequest{
