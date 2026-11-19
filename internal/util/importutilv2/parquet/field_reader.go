@@ -260,6 +260,17 @@ func (c *FieldReader) next(count int64) (any, any, error) {
 		}
 		return data, nil, nil
 	case schemapb.DataType_Array:
+		if c.field.GetElementNullable() {
+			chunked, err := c.columnReader.NextBatch(count)
+			if err != nil {
+				return nil, nil, err
+			}
+			defer chunked.Release()
+			if chunked.Len() == 0 {
+				return nil, nil, nil
+			}
+			return readScalarArrayRows(chunked, c.field, nil)
+		}
 		// array has not supported default_value
 		if c.field.GetNullable() {
 			return ReadNullableArrayData(c, count)

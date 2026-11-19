@@ -548,20 +548,25 @@ func (r *StructFieldReader) checkStructSlots(structArray *array.Struct, start, e
 // valid_data of the full row length; a legacy sub-field rejects null elements
 // and carries no valid_data.
 func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, error) {
+	return readScalarArrayRows(chunked, r.field, r)
+}
+
+// readScalarArrayRows preserves the list and child validity independently.
+func readScalarArrayRows(chunked *arrow.Chunked, field *schemapb.FieldSchema, parent *StructFieldReader) (any, any, error) {
 	result := make([]*schemapb.ScalarField, 0)
 	var validData []bool
-	if r.field.GetNullable() {
+	if field.GetNullable() {
 		validData = make([]bool, 0)
 	}
-	elementType := r.field.GetElementType()
-	elementNullable := r.field.GetElementNullable()
-	maxCapacity, err := parameterutil.GetMaxCapacity(r.field)
+	elementType := field.GetElementType()
+	elementNullable := field.GetElementNullable()
+	maxCapacity, err := parameterutil.GetMaxCapacity(field)
 	if err != nil {
 		return nil, nil, err
 	}
 	var maxLength int64
 	if typeutil.IsStringType(elementType) {
-		maxLength, err = parameterutil.GetMaxLength(r.field)
+		maxLength, err = parameterutil.GetMaxLength(field)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -580,8 +585,8 @@ func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, er
 	for _, chunk := range chunked.Chunks() {
 		switch listArray := chunk.(type) {
 		case *array.Null:
-			if !r.field.GetNullable() {
-				return nil, nil, WrapNullRowErr(r.field)
+			if !field.GetNullable() {
+				return nil, nil, WrapNullRowErr(field)
 			}
 			for i := 0; i < listArray.Len(); i++ {
 				if err := appendNullRow(); err != nil {
@@ -589,16 +594,20 @@ func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, er
 				}
 			}
 		case *array.List:
-			if !r.field.GetNullable() && listArray.NullN() > 0 {
-				return nil, nil, WrapNullRowErr(r.field)
+			if !field.GetNullable() && listArray.NullN() > 0 {
+				return nil, nil, WrapNullRowErr(field)
 			}
 
-			structArray, ok := listArray.ListValues().(*array.Struct)
-			if !ok {
-				return nil, nil, merr.WrapErrImportFailed("expected struct in list")
+			fieldArray := listArray.ListValues()
+			var structArray *array.Struct
+			if parent != nil {
+				var ok bool
+				structArray, ok = fieldArray.(*array.Struct)
+				if !ok {
+					return nil, nil, merr.WrapErrImportFailed("expected struct in list")
+				}
+				fieldArray = structArray.Field(parent.fieldIndex)
 			}
-
-			fieldArray := structArray.Field(r.fieldIndex)
 			// Only the element types the string data path supports go through the
 			// arena; a null-typed or mistyped child keeps the error from
 			// appendArrowScalar.
@@ -617,10 +626,12 @@ func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, er
 				}
 
 				startIdx, endIdx := listArray.ValueOffsets(i)
-				if err := r.checkStructSlots(structArray, startIdx, endIdx); err != nil {
-					return nil, nil, err
+				if parent != nil {
+					if err := parent.checkStructSlots(structArray, startIdx, endIdx); err != nil {
+						return nil, nil, err
+					}
 				}
-				if err := common.CheckArrayCapacity(int(endIdx-startIdx), maxCapacity, r.field); err != nil {
+				if err := common.CheckArrayCapacity(int(endIdx-startIdx), maxCapacity, field); err != nil {
 					return nil, nil, err
 				}
 
@@ -638,16 +649,16 @@ func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, er
 				for structIdx := startIdx; structIdx < endIdx; structIdx++ {
 					if isArrowNull(fieldArray, int(structIdx)) {
 						if !elementNullable {
-							return nil, nil, WrapNullElementErr(r.field)
+							return nil, nil, WrapNullElementErr(field)
 						}
 						appendZeroScalar(row)
 						elementValid = append(elementValid, false)
 						continue
 					}
 					if strValues != nil {
-						err = arena.appendString(row, r.field, maxLength, strValues, int(structIdx))
+						err = arena.appendString(row, field, maxLength, strValues, int(structIdx))
 					} else {
-						err = appendArrowScalar(row, r.field, elementType, maxLength, fieldArray, int(structIdx))
+						err = appendArrowScalar(row, field, elementType, maxLength, fieldArray, int(structIdx))
 					}
 					if err != nil {
 						return nil, nil, err
@@ -661,7 +672,7 @@ func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, er
 				}
 
 				result = append(result, row)
-				if r.field.GetNullable() {
+				if field.GetNullable() {
 					validData = append(validData, true)
 				}
 			}

@@ -869,8 +869,7 @@ type FieldSchema struct {
 	Fields            []FieldSchema          `json:"fields"`
 	Nullable          bool                   `json:"nullable"`
 	DefaultValue      interface{}            `json:"defaultValue"`
-	// ElementNullable lets an element of an Array / ArrayOfVector struct
-	// sub-field be null. For an Array<Array<T>> sub-field it is the nullability
+	// ElementNullable lets an element of an Array or ArrayOfVector field be null. For an Array<Array<T>> sub-field it is the nullability
 	// of an inner array.
 	ElementNullable bool `json:"elementNullable"`
 	// TypeSchema describes an Array<Array<T>> struct sub-field, which is
