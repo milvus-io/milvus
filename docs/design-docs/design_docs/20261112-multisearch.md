@@ -115,17 +115,21 @@ Permission, invalid parameter, and force-deny failures end the item immediately.
 
 ## Execution budget
 
-Omitting `timeoutMs` leaves REST execution governed by the parent request.
-An explicit timeout starts at batch receipt, before REST decodes the request
-body. It covers preparation, both queues, execution and retries. The budget
-accepts whole milliseconds from 0 to 9,223,372,036,854. Zero exhausts the
-budget immediately.
+When REST receives neither `timeoutMs` nor a `Request-Timeout` header, it
+uses `proxy.http.requestTimeoutMs` (30,000 ms by default) as the batch
+execution budget. With the header alone, the transport deadline governs the
+call. A gRPC request that omits `timeout_ms` inherits its parent deadline.
+An explicit execution budget on either transport accepts whole milliseconds
+from 0 to 9,223,372,036,854. Zero exhausts the budget immediately.
+
+The execution budget starts at batch receipt, before REST authentication and
+body decoding. It covers preparation, both queues, execution and retries.
 When time runs out, the Proxy stops dispatching and cancels outstanding work.
 It returns recorded results and reports timeouts for the remaining positions
 while the parent call can still receive a response. REST applies an explicit
 `Request-Timeout` header in seconds as a separate transport deadline through
-response delivery. The endpoint has no default HTTP request deadline. A parent
-cancellation ends the call and propagates to the searches.
+response delivery. A parent cancellation ends the call and propagates to
+the searches.
 
 Completed results are retained until the response is serialized. Per-Search
 limits and the concurrency setting bound individual work. Retained result
@@ -165,6 +169,9 @@ requery progress, bounded retries, cancellation, and timeout finalization.
 Check the peak number of active items with omitted, zero, and explicit
 concurrency, including a configured maximum below the default. Verify that a
 batch requesting more concurrency than allowed still returns every item in order.
+Exercise the REST default budget with completed, active and waiting items,
+including time spent reading the body. Check an explicit zero or longer
+budget, the transport header alone and both deadlines together.
 List and cancel the batch while queued, preparing, executing and backing off;
 verify one stable registration, child completion isolation, cancellation/result
 races and capacity recovery. Exercise the public List/Cancel path against both

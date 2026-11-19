@@ -141,6 +141,9 @@ func (h *HandlersV2) multiSearch(ctx context.Context, c *gin.Context, anyReq any
 	if err != nil {
 		return fail(err)
 	}
+	if req.TimeoutMs == nil && c.GetHeader(mhttp.HTTPHeaderRequestTimeout) == "" {
+		deadline = state.receivedAt.Add(paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond))
+	}
 	vectorEncoding, err := parseFloatVectorEncoding(c.Request.Header)
 	if err != nil {
 		return fail(err)

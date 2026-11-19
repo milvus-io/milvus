@@ -122,7 +122,6 @@ func newMultiSearchHTTPProxy(t *testing.T, onSchema func(context.Context, string
 	for key, value := range map[string]string{
 		params.QuotaConfig.QuotaAndLimitsEnabled.Key: "false",
 		params.CommonCfg.AuthorizationEnabled.Key:    "false",
-		params.HTTPCfg.RequestTimeoutMs.Key:          "1",
 	} {
 		require.NoError(t, params.Save(key, value))
 		t.Cleanup(func() { require.NoError(t, params.Reset(key)) })
@@ -315,15 +314,25 @@ func (r slowMultiSearchReader) Read(p []byte) (int, error) {
 
 func TestMultiSearchRESTBudgetStartsBeforeDecode(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
+		timeout := &paramtable.Get().HTTPCfg.RequestTimeoutMs
+		previous := timeout.SwapTempValue("5")
+		defer timeout.SwapTempValue(previous)
 		p := newMultiSearchHTTPProxy(t, func(context.Context, string) {
 			t.Error("prepared a search after the budget expired during decoding")
-		}, nil)
-		payload := slowMultiSearchReader{strings.NewReader(`{"timeoutMs":5,"requests":[` + readySearch + `]}`)}
-		status, body := recordMultiSearch(t, newMultiSearchRESTHandler(p), payload, "")
-		require.Equal(t, http.StatusOK, status)
-		require.Zero(t, body.Code)
-		require.Len(t, body.Data, 1)
-		require.Equal(t, merr.TimeoutCode, body.Data[0].Search.Code)
+		}, func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			return successfulSearchResult(), nil
+		})
+		handler := newMultiSearchRESTHandler(p)
+		for _, payload := range []string{
+			`{"requests":[` + readySearch + `]}`,
+			`{"timeoutMs":5,"requests":[` + readySearch + `]}`,
+		} {
+			status, body := recordMultiSearch(t, handler, slowMultiSearchReader{strings.NewReader(payload)}, "")
+			require.Equal(t, http.StatusOK, status)
+			require.Zero(t, body.Code)
+			require.Len(t, body.Data, 1)
+			require.Equal(t, merr.TimeoutCode, body.Data[0].Search.Code)
+		}
 	})
 }
 
@@ -345,6 +354,48 @@ func TestMultiSearchRESTReturnsAsSoonAsAllItemsFinish(t *testing.T) {
 			require.Len(t, body.Data, 1)
 			require.Zero(t, body.Data[0].Search.Code)
 			require.Equal(t, 100*time.Millisecond, time.Since(start))
+		}
+	})
+}
+
+func TestMultiSearchRESTDefaultBudgetAndOverrides(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		timeout := &paramtable.Get().HTTPCfg.RequestTimeoutMs
+		previous := timeout.SwapTempValue("50")
+		defer timeout.SwapTempValue(previous)
+		p := newMultiSearchHTTPProxy(t, nil, func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			if req.GetCollectionName() == "slow" {
+				select {
+				case <-time.After(200 * time.Millisecond):
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+			return successfulSearchResult(), nil
+		})
+		handler := newMultiSearchRESTHandler(p)
+		for _, tc := range []struct {
+			name, timeoutField, header string
+			wantCode                   int32
+			wantElapsed                time.Duration
+		}{
+			{"configured execution budget", "", "", merr.TimeoutCode, 50 * time.Millisecond},
+			{"body overrides default", `"timeoutMs":500,`, "", 0, 200 * time.Millisecond},
+			{"header alone", "", "1", 0, 200 * time.Millisecond},
+			{"body expires before header", `"timeoutMs":100,`, "1", merr.TimeoutCode, 100 * time.Millisecond},
+		} {
+			payload := `{` + tc.timeoutField + `"maxConcurrency":1,"requests":[` + readySearch +
+				`,{"search":{"collectionName":"slow","data":[[1,0]]}},` + readySearch + `]}`
+			start := time.Now()
+			status, body := recordMultiSearch(t, handler, strings.NewReader(payload), tc.header)
+			require.Equal(t, tc.wantElapsed, time.Since(start), tc.name)
+			require.Equal(t, http.StatusOK, status, tc.name)
+			require.Zero(t, body.Code, tc.name)
+			require.Len(t, body.Data, 3, tc.name)
+			require.Zero(t, body.Data[0].Search.Code, tc.name)
+			require.Len(t, body.Data[0].Search.Data, 1, tc.name)
+			require.Equal(t, tc.wantCode, body.Data[1].Search.Code, tc.name)
+			require.Equal(t, tc.wantCode, body.Data[2].Search.Code, tc.name)
 		}
 	})
 }
