@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 )
@@ -53,16 +54,11 @@ func (r *redoAppendInterceptor) DoAppend(ctx context.Context, msg message.Mutabl
 	}
 }
 
-// asShardFencedIfTxnOnSplitSource returns the fence error for a body or the
-// commit of a transaction that a shard split ended.
-//
-// The fence of a split is an exclusive message: once it is appended, the lock
-// interceptor ends every transaction of the vchannel, and a later body or
-// commit of one of them finds no session (TRANSACTION_EXPIRED). The writer
-// must not retry such a transaction on the same vchannel; it must place all of
-// its rows on the new shards, which is what the fence error tells it. None of
-// the rows of the transaction became visible: a commit appended before the
-// fence has a lower time tick, and no commit is appended after it.
+// asShardFencedIfTxnOnSplitSource reroutes an expired transaction body, but
+// never authorizes replay of an unknown Commit outcome. The producer waits for
+// every body response before sending Commit, so an expired body cannot have
+// committed. A missing Commit session proves less: both the split fence and
+// ordinary time tick cleanup remove committed sessions as well as aborted ones.
 func (r *redoAppendInterceptor) asShardFencedIfTxnOnSplitSource(msg message.MutableMessage, err error) error {
 	if err == nil || msg.TxnContext() == nil {
 		return err
@@ -73,11 +69,18 @@ func (r *redoAppendInterceptor) asShardFencedIfTxnOnSplitSource(msg message.Muta
 		// rollback of a transaction that is gone has nothing to retry.
 		return err
 	}
-	if streamingErr := status.AsStreamingError(err); streamingErr == nil || !streamingErr.IsTxnUnavilable() {
+	if !status.AsStreamingError(err).IsTxnExpired() {
 		return err
 	}
 	if !shards.IsSplitFenced(r.shardManager, msg.VChannel()) {
 		return err
+	}
+	if msg.MessageType() == message.MessageTypeCommitTxn {
+		// Expired triggers whole-transaction replay in the producer, and fence
+		// triggers rerouting in Proxy. Neither is safe without a commit outcome.
+		return status.New(streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE,
+			"transaction %d commit outcome is unknown on split source %s; it may have committed before the fence; automatic replay is unsafe",
+			msg.TxnContext().TxnID, msg.VChannel())
 	}
 	return status.NewShardFenced(msg.VChannel())
 }

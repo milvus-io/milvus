@@ -740,7 +740,11 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 			}
 		}
 		// Select the final write channels from the proofs captured by this read.
-		groups, err := it.buildPartialUpdateCASGroups()
+		route, err := it.writeRoute(ctx)
+		if err != nil {
+			return nil, err
+		}
+		groups, err := it.buildPartialUpdateCASGroups(route)
 		if err != nil {
 			return nil, err
 		}
@@ -1048,7 +1052,16 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 	}
 	if it.partialState != nil {
 		it.upsertMsg.InsertMsg.NumRows = uint64(len(it.partialState.writeRows))
-		groups, err := it.buildPartialUpdateCASGroups()
+		route, err := it.writeRoute(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if route.split() {
+			if err := it.checkPartialUpdateProofsCoverRoute(ctx, route); err != nil {
+				return nil, err
+			}
+		}
+		groups, err := it.buildPartialUpdateCASGroups(route)
 		if err != nil {
 			return nil, err
 		}

@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -154,11 +155,9 @@ func TestRedoInterceptorReturnsShardFencedForASplitSource(t *testing.T) {
 	require.False(t, streamingErr.IsUnrecoverable())
 }
 
-// A body or the commit of a transaction that a shard split ended finds no
-// session; the interceptor answers it with the fence error, so the writer
-// places the whole transaction on the new shards. Everything else keeps its
-// own error.
-func TestRedoInterceptorAnswersAnEndedTransactionOfASplitSourceAsFenced(t *testing.T) {
+// Only a body that expired before Commit may request rerouting. A missing
+// Commit outcome can also be a committed session removed by ordinary cleanup.
+func TestRedoInterceptorPreservesUnknownCommitOutcomeOnSplitSource(t *testing.T) {
 	paramtable.Init()
 	resource.InitForTest(t)
 
@@ -207,8 +206,21 @@ func TestRedoInterceptorAnswersAnEndedTransactionOfASplitSourceAsFenced(t *testi
 	for _, msg := range []message.MutableMessage{deleteBody, commit} {
 		_, err := fenced.DoAppend(context.Background(), msg, gone)
 		streamingErr := status.AsStreamingError(err)
-		require.True(t, streamingErr.IsShardFenced(), msg.MessageType().String())
-		require.False(t, streamingErr.IsUnrecoverable())
+		if msg.MessageType() == message.MessageTypeCommitTxn {
+			require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE, streamingErr.Code)
+			require.Contains(t, streamingErr.Cause, "outcome is unknown")
+			require.True(t, streamingErr.IsUnrecoverable())
+			require.False(t, streamingErr.IsTxnExpired())
+		} else {
+			require.True(t, streamingErr.IsShardFenced())
+			require.False(t, streamingErr.IsUnrecoverable())
+		}
+		require.False(t, streamingErr.IsPartialUpdateRetryableCAS())
+		invalid := status.NewInvalidTransactionState("commit", message.TxnStateInFlight, message.TxnStateCommitted)
+		_, err = fenced.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			return nil, invalid
+		})
+		require.Same(t, invalid, err, "an invalid session state never proves zero committed writes")
 
 		// The vchannel is not fenced: the transaction error stays.
 		_, err = unfenced.DoAppend(context.Background(), msg, gone)
@@ -216,6 +228,14 @@ func TestRedoInterceptorAnswersAnEndedTransactionOfASplitSourceAsFenced(t *testi
 		// Another error stays.
 		_, err = fenced.DoAppend(context.Background(), msg, other)
 		require.True(t, status.AsStreamingError(err).IsInvalidArgument())
+		// A real non-streaming append failure is not evidence that a
+		// transaction expired. Keep the original error at this boundary.
+		_, err = fenced.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			return nil, context.DeadlineExceeded
+		})
+		require.Equal(t, context.DeadlineExceeded, err)
+		require.False(t, status.AsStreamingError(err).IsShardFenced())
+		require.False(t, status.AsStreamingError(err).IsTxnUnavilable())
 	}
 	// A rollback has nothing to place elsewhere, and a message outside a
 	// transaction keeps its error.

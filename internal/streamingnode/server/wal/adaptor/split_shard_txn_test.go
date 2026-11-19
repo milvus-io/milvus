@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -33,9 +34,10 @@ const (
 // chain of a WAL (redo, lock, replicate, time tick, shard):
 //
 //   - a transaction committed before the fence keeps its time tick below it;
-//   - a transaction open at the fence cannot commit after it: its commit and
-//     every later body get the fence error, so none of its rows becomes
-//     visible above T_switch, where the source is no longer read;
+//   - a transaction open at the fence cannot commit after it; a missing
+//     Commit outcome is terminal, while its later body may request rerouting;
+//   - a committed transaction retried after the fence is never replayable,
+//     including when a time tick already cleaned up its session;
 //   - a transaction cannot be begun on the source after the fence, and the
 //     refused Begin leaves no session to expire.
 func TestSplitShardFenceEndsTheTransactionsOfTheSource(t *testing.T) {
@@ -67,6 +69,22 @@ func TestSplitShardFenceEndsTheTransactionsOfTheSource(t *testing.T) {
 	commitResult, err := w.Append(ctx, splitTxnCommit(*committed))
 	require.NoError(t, err)
 
+	// Ordinary time tick GC also removes a committed session. Before the split,
+	// the Expired response proves this path really ran through the manager.
+	_, err = w.Append(ctx, message.NewTimeTickMessageBuilderV1().WithAllVChannel().
+		WithHeader(&message.TimeTickMessageHeader{}).WithBody(&message.TimeTickMsg{}).MustBuildMutable().
+		WithTimeTick(commitResult.TimeTick+1).WithLastConfirmed(commitResult.MessageID))
+	require.NoError(t, err)
+	_, err = w.Append(ctx, splitTxnCommit(*committed))
+	require.True(t, status.AsStreamingError(err).IsTxnExpired())
+
+	// This committed session is instead removed by the fence itself.
+	committedAtFence := beginSplitTxn(ctx, t, w)
+	_, err = w.Append(ctx, splitTxnDelete().WithTxnContext(*committedAtFence))
+	require.NoError(t, err)
+	_, err = w.Append(ctx, splitTxnCommit(*committedAtFence))
+	require.NoError(t, err)
+
 	// Open at the fence: one body is in, the commit has not been sent.
 	open := beginSplitTxn(ctx, t, w)
 	_, err = w.Append(ctx, splitTxnDelete().WithTxnContext(*open))
@@ -76,9 +94,13 @@ func TestSplitShardFenceEndsTheTransactionsOfTheSource(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, fence.TimeTick, commitResult.TimeTick)
 
-	// The open transaction cannot commit, and takes no more body.
-	_, err = w.Append(ctx, splitTxnCommit(*open))
-	requireSplitTxnFenced(t, err)
+	// A missing Commit session cannot distinguish these three outcomes.
+	// None may authorize a whole-transaction replay on the new shards.
+	for _, txn := range []*message.TxnContext{committed, committedAtFence, open} {
+		_, err = w.Append(ctx, splitTxnCommit(*txn))
+		requireSplitTxnCommitUnknown(t, err)
+	}
+	// The open transaction cannot take another body.
 	_, err = w.Append(ctx, splitTxnDelete().WithTxnContext(*open))
 	requireSplitTxnFenced(t, err)
 
@@ -150,4 +172,15 @@ func requireSplitTxnFenced(t *testing.T, err error) {
 	streamingErr := status.AsStreamingError(err)
 	require.True(t, streamingErr.IsShardFenced(), err.Error())
 	require.False(t, streamingErr.IsUnrecoverable())
+}
+
+func requireSplitTxnCommitUnknown(t *testing.T, err error) {
+	t.Helper()
+	require.Error(t, err)
+	streamingErr := status.AsStreamingError(err)
+	require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE, streamingErr.Code)
+	require.True(t, streamingErr.IsUnrecoverable())
+	require.False(t, streamingErr.IsShardFenced())
+	require.False(t, streamingErr.IsTxnExpired())
+	require.False(t, streamingErr.IsPartialUpdateRetryableCAS())
 }

@@ -66,7 +66,7 @@ T_switch 不是 S 的最后一条本地控制消息。S 此后仍可能接收本
 
 若源拥有多个 residue，保持 M 不变并分配给两个目标。若只拥有一个 residue r，则将 M 翻倍，目标分别获得 r、r+M；其他 shard 的 residue 等价展开，不移动其主键归属。
 
-陈旧 proxy 写向 S 时得到 SHARD_FENCED，刷新路由后只重试确定未成功的行。事务以完整事务语义重试，不能把已提交的不确定结果当作被 fence 拒绝。已有 idempotency 窗口及跨 fence 的重复写检测必须保留。
+陈旧 proxy 写向 S 时得到 SHARD_FENCED，刷新路由后只重试确定未成功的行。事务 body 的 Expired 可在 split 源转换为 fence：producer 等待所有 body 成功后才发送 Commit，因此此时尚未提交。Commit 找不到 session 则不能推断零提交，split fence 和普通 TimeTick 清理都可能删除已提交 session；在 split 源返回终止的 INVALID_TRANSACTION_STATE（提交结果未知），保留原有 Invalid 状态，不投影为 fence、Expired 或 CAS 重试。此边界上确实被 abort 的 Commit 也可能明确失败，以避免相对更新重复应用。已有 idempotency 窗口及跨 fence 的重复写检测必须保留。
 
 ### 4.2 PChannel 放置与扩容
 
