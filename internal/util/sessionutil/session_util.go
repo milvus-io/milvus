@@ -317,13 +317,13 @@ func NewSessionWithEtcd(ctx context.Context, metaRoot string, client *clientv3.C
 
 // Init will initialize base struct of the Session, including ServerName, ServerID,
 // Address, Exclusive. ServerID is obtained in getServerID.
-func (s *Session) Init(serverName, address string, exclusive bool) {
+func (s *Session) Init(serverName, address string, exclusive bool) error {
 	s.ServerName = serverName
 	s.Address = address
 	s.Exclusive = exclusive
 	serverID, err := s.getServerID()
 	if err != nil {
-		panic(err)
+		return err
 	}
 	s.ServerID = serverID
 	s.ServerLabels = getServerLabelsFromEnv(serverName)
@@ -335,6 +335,7 @@ func (s *Session) Init(serverName, address string, exclusive bool) {
 		mlog.Int64("serverID", s.ServerID),
 		mlog.String("address", address),
 	))
+	return nil
 }
 
 // String makes Session struct able to be logged by zap
@@ -346,7 +347,10 @@ func (s *Session) String() string {
 func (s *Session) Register() error {
 	err := s.registerService()
 	if err != nil {
-		if s.ctx.Err() != nil {
+		if ctxErr := s.ctx.Err(); ctxErr != nil {
+			if !errors.Is(err, ctxErr) {
+				err = fmt.Errorf("%w: %w", ctxErr, err)
+			}
 			s.Logger().Info(s.ctx, "register canceled", mlog.Err(err))
 		} else {
 			s.Logger().Error(s.ctx, "register failed", mlog.Err(err))

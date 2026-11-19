@@ -97,7 +97,9 @@ func (r *Runner) init() {
 	// address not important here.
 	address := time.Now().String()
 	r.address = address
-	r.session.Init(Role, address, true)
+	if err := r.session.Init(Role, address, true); err != nil {
+		panic(err)
+	}
 	r.WatchSessions()
 }
 

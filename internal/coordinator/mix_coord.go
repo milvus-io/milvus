@@ -556,7 +556,9 @@ func (s *mixCoordImpl) initStreamingCoord() {
 
 func (s *mixCoordImpl) initSession() error {
 	s.session = sessionutil.NewSession(s.ctx)
-	s.session.Init(typeutil.MixCoordRole, s.address, true)
+	if err := s.session.Init(typeutil.MixCoordRole, s.address, true); err != nil {
+		return err
+	}
 	s.session.SetEnableActiveStandBy(true)
 	// Mark session as MixCoord mode so individual coordinator Stop() calls won't cancel it.
 	// MixCoord owns the session lifecycle and stops it after all coordinators have stopped.

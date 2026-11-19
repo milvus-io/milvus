@@ -1067,6 +1067,25 @@ func (l *blockingGrantLease) Grant(ctx context.Context, ttl int64) (*clientv3.Le
 	return nil, ctx.Err()
 }
 
+type failingOnceLease struct {
+	clientv3.Lease
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (l *failingOnceLease) Grant(ctx context.Context, ttl int64) (*clientv3.LeaseGrantResponse, error) {
+	first := false
+	l.once.Do(func() {
+		first = true
+		close(l.entered)
+	})
+	if first {
+		return nil, v3rpc.ErrTimeout
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
 type blockingTxn struct {
 	clientv3.Txn
 	entered chan struct{}
@@ -1222,6 +1241,66 @@ func TestRegisterCancellationAndCleanup(t *testing.T) {
 		_, live := liveSessions.Load(s2)
 		assert.False(t, live)
 	})
+
+	t.Run("cancel during retry backoff returns context.Canceled and etcd error", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+		defer etcdkv.NewEtcdKV(etcdCli, metaRoot).RemoveWithPrefix(context.Background(), "")
+
+		entered := make(chan struct{})
+		wrappedCli, cliErr := clientv3.New(clientv3.Config{Endpoints: etcdCli.Endpoints()})
+		require.NoError(t, cliErr)
+		defer wrappedCli.Close()
+		wrappedCli.Lease = &failingOnceLease{Lease: wrappedCli.Lease, entered: entered}
+
+		s := NewSessionWithEtcd(ctx, metaRoot, wrappedCli, WithResueNodeID(false), WithRetryTimes(5))
+		require.NoError(t, s.Init(typeutil.StreamingNodeRole, "127.0.0.1:0", false))
+
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- s.Register()
+		}()
+
+		<-entered
+		cancel()
+
+		err := <-errCh
+		require.ErrorIs(t, err, context.Canceled)
+		require.ErrorIs(t, err, v3rpc.ErrTimeout)
+		assert.False(t, s.Registered())
+		assert.Nil(t, s.LeaseID)
+		_, live := liveSessions.Load(s)
+		assert.False(t, live)
+	})
+}
+
+func TestInitCancellationReturnsErrorWithoutPanic(t *testing.T) {
+	paramtable.Init()
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+	defer etcdkv.NewEtcdKV(etcdCli, metaRoot).RemoveWithPrefix(context.Background(), "")
+
+	entered := make(chan struct{})
+	wrappedCli, cliErr := clientv3.New(clientv3.Config{Endpoints: etcdCli.Endpoints()})
+	require.NoError(t, cliErr)
+	defer wrappedCli.Close()
+	kv := &blockingTxnKV{KV: wrappedCli.KV, entered: entered}
+	kv.enabled.Store(true)
+	wrappedCli.KV = kv
+
+	s := NewSessionWithEtcd(ctx, metaRoot, wrappedCli, WithResueNodeID(false))
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.Init(typeutil.QueryNodeRole, "127.0.0.1:0", false)
+	}()
+
+	<-entered
+	cancel()
+
+	err := <-errCh
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestRevokeLeasesBeforeExit(t *testing.T) {

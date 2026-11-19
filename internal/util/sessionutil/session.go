@@ -25,7 +25,7 @@ type SessionInterface interface {
 	UnmarshalJSON(data []byte) error
 	MarshalJSON() ([]byte, error)
 
-	Init(serverName, address string, exclusive bool)
+	Init(serverName, address string, exclusive bool) error
 	String() string
 	Register() error
 

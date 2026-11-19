@@ -129,7 +129,9 @@ func (node *MockQueryNode) Start() error {
 	}).Maybe()
 
 	// Register
-	node.session.Init(typeutil.QueryNodeRole, node.addr, false)
+	if err := node.session.Init(typeutil.QueryNodeRole, node.addr, false); err != nil {
+		return err
+	}
 	node.session.ServerID = node.ID
 	if err := node.session.Register(); err != nil {
 		return err

@@ -274,7 +274,9 @@ func (s *Server) initSession() error {
 	if s.session == nil {
 		return merr.WrapErrServiceUnavailable("session is nil, the etcd client connection may have failed")
 	}
-	s.session.Init(typeutil.StreamingNodeRole, s.listener.Address(), false)
+	if err := s.session.Init(typeutil.StreamingNodeRole, s.listener.Address(), false); err != nil {
+		return merr.Wrap(err, "StreamingNode init session failed")
+	}
 	// Record the session so that the supervisor process (--run-with-subprocess) removes it as soon as
 	// this process exits abnormally. Otherwise the streamingnode session lingers until its lease
 	// expires, and every WAL owned by this node stays unavailable for up to common.session.ttl.
