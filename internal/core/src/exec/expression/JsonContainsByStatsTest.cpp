@@ -947,6 +947,14 @@ TEST(JsonStatsAsyncLoadTest, UsesFullColumnGroupProjectionWithWarmup) {
 }
 
 TEST(JsonStatsUnaryRangeTest, PreservesObjectKeysAndArrayOffsets) {
+    struct InspectableUnaryExpr : exec::PhyUnaryRangeFilterExpr {
+        using exec::PhyUnaryRangeFilterExpr::PhyUnaryRangeFilterExpr;
+
+        exec::ExprExecPath
+        GetExecPath() const {
+            return exec_path_;
+        }
+    };
     auto schema = std::make_shared<Schema>();
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
     auto segment = segcore::CreateSealedSegment(schema);
@@ -1004,14 +1012,14 @@ TEST(JsonStatsUnaryRangeTest, PreservesObjectKeysAndArrayOffsets) {
                 op,
                 one,
                 std::vector<proto::plan::GenericValue>{});
-            exec::PhyUnaryRangeFilterExpr phy({},
-                                              expression,
-                                              "pointer-probe",
-                                              nullptr,
-                                              segment.get(),
-                                              rows.size(),
-                                              rows.size(),
-                                              0);
+            InspectableUnaryExpr phy({},
+                                     expression,
+                                     "pointer-probe",
+                                     nullptr,
+                                     segment.get(),
+                                     rows.size(),
+                                     rows.size(),
+                                     0);
             phy.EnsureExecPathDetermined();
             EXPECT_EQ(phy.GetExecPath(),
                       uses_stats ? exec::ExprExecPath::JsonStats
