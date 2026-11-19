@@ -142,19 +142,26 @@ type SegmentIndexMutation struct {
 	FinishedTask *workerpb.IndexTaskInfo
 	// rollbackEntry is prepared only by rollbackSegmentIndexes under the
 	// segment lock from the published manifest, then checked under BuildID lock.
-	rollbackEntry    *packed.ManifestIndexInfo
-	rollbackManifest string
+	rollbackEntry *packed.ManifestIndexInfo
+	rollbackIO    *packed.ManifestIOContext
 }
 
-// RollbackFileKeys reuses the preparer's validated read when it covered the
-// same immutable revision as the locked record. A superseded build may need
-// an older revision.
-func (mut SegmentIndexMutation) RollbackFileKeys(record *model.SegmentIndex) []string {
-	if mut.rollbackEntry != nil && record.IndexFilesManifest == mut.rollbackManifest &&
-		record.IndexFileCount == len(mut.rollbackEntry.IndexFileKeys) {
-		return mut.rollbackEntry.IndexFileKeys
+// RollbackFileKeys runs under the segment and build locks. A replacement
+// captures the old keys before it publishes the new segment revision.
+func (m *Meta) RollbackFileKeys(ctx context.Context, mut SegmentIndexMutation, record *model.SegmentIndex) ([]string, error) {
+	if entry := mut.rollbackEntry; entry != nil {
+		if record.BuildID != entry.BuildID || record.IndexID != entry.IndexID || record.IndexVersion != entry.IndexVersion ||
+			record.IndexStorePathVersion != entry.IndexStorePathVersion || record.NumIndexFiles() != len(entry.IndexFileKeys) {
+			return nil, merr.Wrapf(merr.ErrDataIntegrity, "rollback source disagrees with index build %d", record.BuildID)
+		}
+		return entry.IndexFileKeys, nil
 	}
-	return nil
+	if len(record.IndexFileKeys) != 0 || record.IndexFileCount == 0 {
+		return record.IndexFileKeys, nil
+	}
+	// Older or externally advanced state can lack both the selected entry
+	// and a captured file list. Restore it only if its original entry is readable.
+	return m.readManifestIndexFileKeys(ctx, mut.rollbackIO, record, record.IndexFilesManifest)
 }
 
 // stagedSegmentIndexMutation carries a SegmentIndex change from its projection
@@ -448,6 +455,11 @@ func (m *Meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 	}
 
 	manifestPath := result.ManifestPath
+	for _, replaced := range result.ReplacedIndexes {
+		if _, valid := ManifestIndexFilePathInfoForSegment(m.ChunkManager.RootPath(), segment.SegmentInfo, replaced); !valid {
+			return nil, merr.Wrapf(merr.ErrDataIntegrity, "invalid file metadata for replaced index build %d", replaced.BuildID)
+		}
+	}
 	// A rollback Noop already proved index presence in its locked source read.
 	// A structured mutation instead supplies the marker of its committed result.
 	if result.HasIndexes != nil {
@@ -599,6 +611,9 @@ func (m *Meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 		// same writer lock still excludes competing full-record writers.
 		if segment.GetManifestPath() != updated.GetManifestPath() {
 			manifestUpdates = append(manifestUpdates, updated)
+		}
+		for _, replaced := range result.ReplacedIndexes {
+			m.IndexCatalog.RetainReplacedIndexFiles(commit.SegmentID, replaced)
 		}
 		m.Segments.SetSegment(commit.SegmentID, updated)
 		for _, stagedIndex := range stagedIndexes {

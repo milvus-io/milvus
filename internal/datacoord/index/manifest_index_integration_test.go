@@ -209,6 +209,26 @@ func TestIndexFileLookupRejectsWrongBuild(t *testing.T) {
 	requireIndexFiles(t, m, job, "0", "1")
 }
 
+func TestIndexFileLookupRetriesReclaimedLiveRevision(t *testing.T) {
+	ctx := t.Context()
+	m, _, store, _ := RollbackFixture(t)
+	job, ok := m.IndexCatalog.GetIndexJob(meta.RestartBuildID)
+	require.True(t, ok)
+	before := m.GetSegment(ctx, job.SegmentID).GetManifestPath()
+	after, err := meta.AdvanceManifest(before, 1)
+	require.NoError(t, err)
+	store.Revisions[after] = store.BackfillEntriesAt(before)
+	missing := mockey.Mock((*meta.Meta).ReadManifestIndexesWithIO).When(func(_ *meta.Meta, _ context.Context, _ *packed.ManifestIOContext, revision string, _ *indexpb.StorageConfig) bool {
+		return revision == before
+	}).To(func(_ *meta.Meta, _ context.Context, _ *packed.ManifestIOContext, _ string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+		require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifest(job.SegmentID, after)))
+		return nil, merr.ErrIoKeyNotFound
+	}).Build()
+	t.Cleanup(func() { missing.UnPatch() })
+	requireIndexFiles(t, m, job, "0", "1")
+	require.Equal(t, 1, missing.MockTimes())
+}
+
 func mockReloadManifestEntry(t *testing.T, buildID int64) {
 	t.Helper()
 	infos := mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{{

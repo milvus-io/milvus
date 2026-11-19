@@ -2357,7 +2357,7 @@ func (gc *GarbageCollector) resolveRetainedIndexFiles(ctx context.Context, io *p
 	if err != nil {
 		segment := gc.Meta.GetSegment(ctx, index.SegmentID)
 		if index.IndexFilesManifest == "" || meta.IsSegmentHealthy(segment) ||
-			gc.manifestExists(ctx, index.SegmentID, index.IndexFilesManifest) {
+			gc.manifestExists(ctx, index.SegmentID, gc.Meta.IndexFileManifest(ctx, index)) {
 			return nil, err
 		}
 		// A dropped segment may have already lost its manifests in a previous

@@ -82,7 +82,11 @@ restarts: version 2 finishes in the manifest, while version 0/1 finishes in etcd
 Readers and cleanup use each artifact's persisted version.
 Resolving v2 index files requires the owning segment's manifest base; load and
 snapshot consumers report missing or invalid metadata instead of guessing the
-canonical base. Snapshot generation uses its selected segment metadata.
+canonical base. QueryView and snapshots read manifest-backed index file names
+from their selected segment revision. Active builds can be loaded after an
+older publication revision is reclaimed. When a new build replaces the same
+index, DataCoord keeps the displaced build's exact keys with its retained task
+record until rollback or cleanup.
 See [design and compatibility](../../design-docs/design_docs/20261019-segment-rooted-index-artifacts.md).
 
 ## Expression cache files

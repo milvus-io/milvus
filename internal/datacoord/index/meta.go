@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -412,6 +413,23 @@ func (m *IndexMeta) updateSegIndexMeta(segIdx *model.SegmentIndex, updateFunc fu
 
 func (m *IndexMeta) SetIndexFileStore(store *meta.Meta) {
 	m.fileStore = store
+}
+
+// A replacement removes the old build from the manifest. Keep its exact names
+// with its existing build record until rollback or GC retires that record.
+func (m *IndexMeta) RetainReplacedIndexFiles(segmentID int64, entry packed.ManifestIndexInfo) {
+	locks := m.getSegmentIndexMapLocks()
+	locks.Lock(segmentID)
+	defer locks.Unlock(segmentID)
+	record, ok := m.SegmentBuildInfo.Get(entry.BuildID)
+	if !ok || !record.ManifestPublished || record.SegmentID != segmentID ||
+		record.IndexID != entry.IndexID || record.IndexVersion != entry.IndexVersion ||
+		record.IndexStorePathVersion != entry.IndexStorePathVersion || record.NumIndexFiles() != len(entry.IndexFileKeys) {
+		return
+	}
+	replaced := *record
+	replaced.IndexFileKeys = entry.IndexFileKeys
+	m.SegmentBuildInfo.buildID2SegmentIndex.Insert(record.BuildID, &replaced)
 }
 
 // segmentIndexWithFiles returns a private, writable record for operations
@@ -1467,15 +1485,14 @@ func (m *IndexMeta) stageSegmentIndexMutation(ctx context.Context, mut meta.Segm
 		if !previous.ManifestPublished {
 			return staged, meta.ErrSegmentIndexRollbackSkipped
 		}
-		if keys := mut.RollbackFileKeys(previous); keys != nil {
-			source := *previous
-			source.IndexFileKeys = keys
-			previous = &source
-		}
-		previous, err := m.segmentIndexWithFiles(ctx, previous)
+		keys, err := m.fileStore.RollbackFileKeys(ctx, mut, previous)
 		if err != nil {
 			return staged, err
 		}
+		previous = model.CloneSegmentIndex(previous)
+		previous.IndexFileKeys = common.CloneStringList(keys)
+		previous.IndexFileCount = 0
+		previous.IndexFilesManifest = ""
 		// Restore only records still known to have no catalog row.
 		// BuildID is locked until the atomic pointer + record PUT completes.
 		destination := model.CloneSegmentIndex(previous)

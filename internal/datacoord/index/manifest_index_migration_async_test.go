@@ -195,7 +195,7 @@ func TestManifestIndexRollbackNoopUsesSourceMarker(t *testing.T) {
 			n, err := m.RollbackSegmentIndexes(ctx, newMigrationManifestReadIO(t), meta.RestartSegID, meta.RestartBuildID)
 			require.NoError(t, err)
 			assert.Equal(t, 1, n)
-			assert.Equal(t, reads+2, store.ReadCount, "read the current marker and the superseded build's pinned file list")
+			assert.Equal(t, reads+2, store.ReadCount, "the pointer was advanced without a replacement record, so rollback recovers the missing build from its original entry")
 			assert.Equal(t, commits, store.CommitCount, "no manifest write when the selected build is absent")
 			assert.Equal(t, before, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath())
 			assert.Equal(t, unselected, m.GetSegment(ctx, meta.RestartSegID).GetManifestHasIndex())
@@ -205,4 +205,25 @@ func TestManifestIndexRollbackNoopUsesSourceMarker(t *testing.T) {
 			assert.Equal(t, meta.RestartBuildID, rows[0].BuildID)
 		})
 	}
+}
+
+func TestManifestIndexRollbackWithoutSurvivingFileList(t *testing.T) {
+	ctx := t.Context()
+	m, catalog, store, _ := RollbackFixture(t)
+	published := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
+	after, err := meta.AdvanceManifest(published, 1)
+	require.NoError(t, err)
+	store.Revisions[after] = nil
+	delete(store.Revisions, published)
+	require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifest(meta.RestartSegID, after)))
+	commits := store.CommitCount
+	count, err := m.RollbackSegmentIndexes(ctx, newMigrationManifestReadIO(t), meta.RestartSegID, meta.RestartBuildID)
+	require.Error(t, err)
+	require.Zero(t, count)
+	require.Equal(t, commits, store.CommitCount)
+	require.Equal(t, after, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath())
+	require.True(t, IndexManifestPublished(t, m.IndexCatalog.(*IndexMeta), meta.RestartBuildID))
+	rows, err := catalog.ListSegmentIndexes(ctx, meta.RestartCollID)
+	require.NoError(t, err)
+	require.Empty(t, rows)
 }

@@ -20,9 +20,10 @@ type SegmentIndex struct {
 	IsDeleted      bool
 	CreatedUTCTime uint64
 	IndexFileKeys  []string
-	// A resident record keeps the file count and the immutable manifest revision
-	// containing its build. An empty revision selects its durable catalog row.
-	// These fields are process-local. Catalog writes always carry the real keys.
+	// IndexFilesManifest records the publication namespace and the verified
+	// manifest of a copy that has yet to publish its target. Live reads select
+	// the segment's manifest. A superseded build keeps its displaced keys
+	// until rollback or GC. Both fields are process-local.
 	IndexFileCount     int
 	IndexFilesManifest string
 	// The byte size of serialized index data at oos. (compressed)
