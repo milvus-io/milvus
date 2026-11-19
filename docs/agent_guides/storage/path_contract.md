@@ -188,7 +188,10 @@ behavior.
   segments are skipped, even if an individual file is absent from the manifest.
 - A dedicated build-aware scan handles canonical `insert_log/.../_index`
   orphans, including those in live V3 segments; snapshot and import protections
-  still apply.
+  still apply. For a finished V3 build with files, its entire current build/version
+  directory is protected in each supported migration layout. Orphan scans can
+  classify a directory from the cached build record without opening a manifest.
+  Extra files in that directory become eligible when the version retires.
 - Malformed `_index` paths are skipped by the orphan scan because their build
   ownership cannot be established. Dropped-segment directory cleanup still
   covers them; malformed objects without a segment row can remain orphaned.
@@ -232,7 +235,7 @@ layout. Build IDs and file keys are unchanged.
 Copies use object-storage server-side Copy operations, concurrently with a shared
 bounded budget; no download/upload or local migration fallback is permitted.
 Copy failure/cancellation leaves visible metadata at the source. Source files
-and all three layout aliases of a retained V3 build's recorded keys/version stay
+and all three directory layout aliases of a retained V3 build/version stay
 protected from orphan scans until build retirement, subject to snapshot guards.
 This also protects partial destinations across failed attempts and restarts.
 See the [migration design](../../design-docs/design_docs/20260901-storagev3-manifest-index-backfill.md).

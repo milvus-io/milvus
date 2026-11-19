@@ -270,9 +270,10 @@ later if they meet the ordinary predicate.
 Snapshot metadata continues to pin build IDs and segments for GC. Migration
 keeps source files: old immutable manifests, loaded readers and snapshots can
 continue using their recorded paths. The orphan scanners protect all three
-layouts of the recorded file keys/version for a retained StorageV3 build,
-including unpublished or partially copied destinations. Build retirement removes
-these aliases under the existing snapshot protections. This intentionally trades
+layout directories of the retained StorageV3 build/version, including files
+from unpublished or partially copied destinations. After retirement, recorded
+files are explicitly removed and the orphan scanner can reclaim any remaining
+files under the existing snapshot protections. This intentionally trades
 extra storage until build retirement for safe retries and old-reader lifetime. External snapshot restore retains the publication PR's existing
 foreign-bucket behavior.
 

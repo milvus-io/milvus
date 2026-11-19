@@ -535,7 +535,7 @@ func TestIndexTaskCountsManifestInstallAvoidsDDLLock(t *testing.T) {
 	require.NoError(t, m.AddSegmentIndex(ctx, &model.SegmentIndex{CollectionID: 1, IndexID: 10, SegmentID: 20, BuildID: 30}))
 	m.KeyLock.Lock(30)
 	defer m.KeyLock.Unlock(30)
-	staged, err := m.stageSegmentIndexMutation(meta.SegmentIndexMutation{
+	staged, err := m.stageSegmentIndexMutation(t.Context(), meta.SegmentIndexMutation{
 		Type: meta.SegmentIndexUpsert, BuildID: 30,
 		FinishedTask: &workerpb.IndexTaskInfo{BuildID: 30, State: commonpb.IndexState_Finished, SerializedSize: 4096},
 	})
@@ -545,7 +545,7 @@ func TestIndexTaskCountsManifestInstallAvoidsDDLLock(t *testing.T) {
 	require.Empty(t, storedIndexSizeSeries(t), "staging must not publish sizes")
 	m.fieldIndexLock.Lock()
 	done := make(chan func(), 1)
-	go func() { done <- staged.Install() }()
+	go func() { done <- staged.Install("") }()
 	var observe func()
 	select {
 	case observe = <-done:
@@ -560,10 +560,10 @@ func TestIndexTaskCountsManifestInstallAvoidsDDLLock(t *testing.T) {
 	assertIndexTaskCounts(t, m)
 	require.Equal(t, indexTaskStateCounts{0, 0, 0, 1}, m.indexTaskCountsSnapshot())
 	require.Equal(t, map[int64]int64{1: 4096}, storedIndexSizeSeries(t))
-	removed, err := m.stageSegmentIndexMutation(meta.SegmentIndexMutation{Type: meta.SegmentIndexRemove, BuildID: 30})
+	removed, err := m.stageSegmentIndexMutation(t.Context(), meta.SegmentIndexMutation{Type: meta.SegmentIndexRemove, BuildID: 30})
 	require.NoError(t, err)
 	require.Equal(t, indexTaskStateCounts{0, 0, 0, 1}, m.indexTaskCountsSnapshot())
-	deferred := removed.Install()
+	deferred := removed.Install("")
 	require.Equal(t, indexTaskStateCounts{}, m.indexTaskCountsSnapshot())
 	deferred()
 	assertIndexTaskCounts(t, m)
@@ -596,7 +596,7 @@ func TestIndexTaskCountsPublishDuringScrape(t *testing.T) {
 
 	m.KeyLock.Lock(2)
 	defer m.KeyLock.Unlock(2)
-	staged, err := m.stageSegmentIndexMutation(meta.SegmentIndexMutation{
+	staged, err := m.stageSegmentIndexMutation(t.Context(), meta.SegmentIndexMutation{
 		Type: meta.SegmentIndexUpsert, BuildID: 2,
 		FinishedTask: &workerpb.IndexTaskInfo{BuildID: 2, State: commonpb.IndexState_Finished, SerializedSize: 250},
 	})
@@ -604,7 +604,7 @@ func TestIndexTaskCountsPublishDuringScrape(t *testing.T) {
 	installed := make(chan struct{})
 	var observe func()
 	go func() {
-		observe = staged.Install()
+		observe = staged.Install("")
 		m.indexTaskCountsSnapshot()
 		close(installed)
 	}()

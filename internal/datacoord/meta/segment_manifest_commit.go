@@ -142,7 +142,19 @@ type SegmentIndexMutation struct {
 	FinishedTask *workerpb.IndexTaskInfo
 	// rollbackEntry is prepared only by rollbackSegmentIndexes under the
 	// segment lock from the published manifest, then checked under BuildID lock.
-	rollbackEntry *packed.ManifestIndexInfo
+	rollbackEntry    *packed.ManifestIndexInfo
+	rollbackManifest string
+}
+
+// RollbackFileKeys reuses the preparer's validated read when it covered the
+// same immutable revision as the locked record. A superseded build may need
+// an older revision.
+func (mut SegmentIndexMutation) RollbackFileKeys(record *model.SegmentIndex) []string {
+	if mut.rollbackEntry != nil && record.IndexFilesManifest == mut.rollbackManifest &&
+		record.IndexFileCount == len(mut.rollbackEntry.IndexFileKeys) {
+		return mut.rollbackEntry.IndexFileKeys
+	}
+	return nil
 }
 
 // stagedSegmentIndexMutation carries a SegmentIndex change from its projection
@@ -163,7 +175,7 @@ type StagedSegmentIndexMutation struct {
 	Source  *model.SegmentIndex
 	Action  *metastore.UpdateAction
 	Record  *model.SegmentIndex
-	Install func() (deferredMetric func())
+	Install func(manifest string) (deferredMetric func())
 }
 
 // errSegmentIndexRecordGone reports that the SegmentIndex record a staged
@@ -362,7 +374,7 @@ func (m *Meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 			}
 			removedBuildIDs[indexMutation.BuildID] = struct{}{}
 		}
-		staged, err := m.IndexCatalog.StageSegmentIndexMutation(*indexMutation)
+		staged, err := m.IndexCatalog.StageSegmentIndexMutation(ctx, *indexMutation)
 		if err != nil {
 			if errors.Is(err, ErrSegmentIndexRecordGone) {
 				// Only an upsert whose task row vanished mid-commit produces
@@ -590,7 +602,7 @@ func (m *Meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 		}
 		m.Segments.SetSegment(commit.SegmentID, updated)
 		for _, stagedIndex := range stagedIndexes {
-			deferredIndexMetrics = append(deferredIndexMetrics, stagedIndex.Install())
+			deferredIndexMetrics = append(deferredIndexMetrics, stagedIndex.Install(manifestPath))
 		}
 		return nil
 	}(); err != nil {
@@ -1143,8 +1155,10 @@ func applySegmentCatalogTypedFields(segment *SegmentInfo, mutation SegmentCatalo
 	// A nil entry value retires the field's stats instead of installing one,
 	// so a commit that drops a column can invalidate its text/json-key stats
 	// atomically with the manifest pointer (see CommitSegmentManifest).
-	if mutation.TextStats != nil {
-		for fieldID, stats := range mutation.TextStats {
+	summaries := &datapb.SegmentInfo{TextStatsLogs: mutation.TextStats, JsonKeyStats: mutation.JSONKeyStats}
+	compactStatsFiles(summaries, nil)
+	if summaries.TextStatsLogs != nil {
+		for fieldID, stats := range summaries.TextStatsLogs {
 			if stats == nil {
 				delete(segment.TextStatsLogs, fieldID)
 				continue
@@ -1155,8 +1169,8 @@ func applySegmentCatalogTypedFields(segment *SegmentInfo, mutation SegmentCatalo
 			segment.TextStatsLogs[fieldID] = proto.Clone(stats).(*datapb.TextIndexStats)
 		}
 	}
-	if mutation.JSONKeyStats != nil {
-		for fieldID, stats := range mutation.JSONKeyStats {
+	if summaries.JsonKeyStats != nil {
+		for fieldID, stats := range summaries.JsonKeyStats {
 			if stats == nil {
 				delete(segment.JsonKeyStats, fieldID)
 				continue

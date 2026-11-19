@@ -1195,7 +1195,7 @@ func TestGetAllIndexFilesOfIndex_PathVersions(t *testing.T) {
 			IndexStorePathVersion: 0,
 			IndexFileKeys:         []string{"file1", "file2"},
 		}
-		files := gc.GetAllIndexFilesOfIndex(segIdx)
+		files := recordedIndexFiles(t, gc, segIdx)
 		assert.Contains(t, files, "root/index_files/1000/1/200/300/file1")
 		assert.Contains(t, files, "root/index_files/1000/1/200/300/file2")
 		assert.Len(t, files, 2)
@@ -1211,7 +1211,7 @@ func TestGetAllIndexFilesOfIndex_PathVersions(t *testing.T) {
 			IndexStorePathVersion: 1,
 			IndexFileKeys:         []string{"file1", "file2"},
 		}
-		files := gc.GetAllIndexFilesOfIndex(segIdx)
+		files := recordedIndexFiles(t, gc, segIdx)
 		assert.Contains(t, files, "root/index_v1/100/200/300/1000/1/file1")
 		assert.Contains(t, files, "root/index_v1/100/200/300/1000/1/file2")
 		assert.Len(t, files, 2)
@@ -1532,7 +1532,7 @@ func testRecycleUnusedIndexFiles(t *testing.T, version indexpb.IndexStorePathVer
 		cm.EXPECT().RootPath().Return("root")
 		cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(walk(map[string]time.Time{
 			"root/index_v1/100/200/300/2000/2/file1": old,        // recorded key: keep
-			"root/index_v1/100/200/300/2000/2/stale": old,        // finished build, unrecorded file: remove
+			"root/index_v1/100/200/300/2000/2/stale": old,        // live V3 attempt: retain until the version retires
 			"root/index_v1/100/200/300/2000/1/file1": old,        // earlier attempt of a finished build: remove
 			"root/index_v1/100/200/300/2001/2/part":  old,        // build still running: keep
 			"root/index_v1/100/200/300/2002/2/part":  old,        // aborted build whose record still exists: keep for now
@@ -1549,7 +1549,6 @@ func testRecycleUnusedIndexFiles(t *testing.T, version indexpb.IndexStorePathVer
 		recycle(gc)
 
 		assert.ElementsMatch(t, []string{
-			"root/index_v1/100/200/300/2000/2/stale",
 			"root/index_v1/100/200/300/2000/1/file1",
 			"root/index_v1/100/200/300/2003/2/part",
 		}, *removed)
@@ -1608,7 +1607,6 @@ func testRecycleUnusedIndexFiles(t *testing.T, version indexpb.IndexStorePathVer
 		gc := NewGarbageCollector(m, nil, GcTestDomainOption(dm, GcOption{Cli: cm, MissingTolerance: time.Hour}))
 		recycle(gc)
 		assert.ElementsMatch(t, []string{
-			"root/index_v1/100/200/300/2000/2/stale",
 			"root/index_v1/100/200/300/2003/2/part",
 			"root/index_v1/100/200/300/2003/2/part2",
 			"root/index_v1/100/200/300/2000/1/file1",
@@ -4765,7 +4763,7 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_UnionsRecordsAndManifest(t
 	require.Len(t, segIndexes, 1)
 	assert.Contains(t, indexFiles, "/tmp/test/index_files/6200/1/10/3201/manifest-file",
 		"the manifest-only entry's files must be in the delete list even though records exist")
-	for file := range gc.GetAllIndexFilesOfIndex(segIndexes[0]) {
+	for file := range recordedIndexFiles(t, gc, segIndexes[0]) {
 		assert.Contains(t, indexFiles, file,
 			"the record-derived files must survive the union with the manifest")
 	}

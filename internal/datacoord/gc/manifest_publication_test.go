@@ -65,7 +65,7 @@ func TestGarbageCollector_RefreshManifestAfterTaskCompletion(t *testing.T) {
 					index.PublishRestartTask(t, m, mDomains.IndexMeta)
 					job, ok := original(im, id)
 					require.True(t, ok)
-					files = gc.GetAllIndexFilesOfIndex(job)
+					files = recordedIndexFiles(t, gc, job)
 					for file := range files {
 						require.NoError(t, m.ChunkManager.Write(ctx, file, []byte("index")))
 					}

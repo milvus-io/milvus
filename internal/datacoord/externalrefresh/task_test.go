@@ -1622,8 +1622,11 @@ func TestApplyExternalRefreshPatchUsesIncomingStatsPlaceholders(t *testing.T) {
 
 	patched := applyExternalRefreshPatch(oldSeg, incoming)
 	assert.Equal(t, newManifest, patched.GetManifestPath())
-	assert.Equal(t, incoming.GetTextStatsLogs(), patched.GetTextStatsLogs())
-	assert.Equal(t, incoming.GetJsonKeyStats(), patched.GetJsonKeyStats())
+	assert.Empty(t, patched.GetTextStatsLogs()[500].GetFiles())
+	assert.True(t, patched.GetTextStatsLogs()[500].GetFilesInManifest())
+	assert.Empty(t, patched.GetJsonKeyStats()[500].GetFiles())
+	assert.True(t, patched.GetJsonKeyStats()[500].GetFilesInManifest())
+	assert.NotEmpty(t, incoming.GetTextStatsLogs()[500].GetFiles())
 	assert.False(t, meta.NeedDoTextIndex(patched, []UniqueID{500}, true))
 	assert.False(t, meta.NeedDoJSONKeyIndex(patched, []UniqueID{500}, true))
 

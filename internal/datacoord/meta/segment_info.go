@@ -656,10 +656,10 @@ func ValidateManifestSegment(info *SegmentInfo) string {
 	if len(info.GetBm25Statslogs()) > 0 {
 		nonEmpty = append(nonEmpty, fmt.Sprintf("bm25statslogs(%d)", len(info.GetBm25Statslogs())))
 	}
-	if len(info.GetTextStatsLogs()) > 0 {
+	if hasInlineStatsFiles(info.GetTextStatsLogs()) {
 		nonEmpty = append(nonEmpty, fmt.Sprintf("textStatsLogs(%d)", len(info.GetTextStatsLogs())))
 	}
-	if len(info.GetJsonKeyStats()) > 0 {
+	if hasInlineStatsFiles(info.GetJsonKeyStats()) {
 		nonEmpty = append(nonEmpty, fmt.Sprintf("jsonKeyStats(%d)", len(info.GetJsonKeyStats())))
 	}
 

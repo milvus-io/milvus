@@ -1326,7 +1326,12 @@ func (gc *GarbageCollector) GetDroppedSegmentIndexFiles(ctx context.Context, io 
 	}
 	indexFiles := make(map[string]struct{}, len(segIndexes))
 	for _, segIdx := range segIndexes {
-		for key := range gc.getRetainedIndexFilesOfIndex(segIdx) {
+		files, err := gc.resolveRetainedIndexFiles(ctx, io, segIdx)
+		if err != nil {
+			mlog.Warn(ctx, "cannot resolve retiring index files", mlog.FieldBuildID(segIdx.BuildID), mlog.Err(err))
+			return segIndexes, nil, gcBlockedByManifest
+		}
+		for key := range files {
 			indexFiles[key] = struct{}{}
 		}
 	}
@@ -1355,7 +1360,7 @@ func (gc *GarbageCollector) GetDroppedSegmentIndexFiles(ctx context.Context, io 
 		// manifest file itself is gone, in which case it is not unreadable but
 		// absent, there is nothing left to protect, and blocking would strand
 		// this segment's metadata forever.
-		if gc.manifestExists(ctx, segment) {
+		if gc.manifestExists(ctx, segment.GetID(), segment.GetManifestPath()) {
 			mlog.Warn(ctx, "failed to read dropped segment manifest index files, blocking GC, will retry",
 				mlog.FieldSegmentID(segmentID), mlog.Err(err))
 			return segIndexes, nil, gcBlockedByManifest
@@ -1380,15 +1385,15 @@ func (gc *GarbageCollector) GetDroppedSegmentIndexFiles(ctx context.Context, io 
 // transient class, so this is what separates "the manifest could not be read
 // right now" from "the manifest is gone". Anything other than a definitive
 // "absent" answer counts as present: under doubt, retry the segment later.
-func (gc *GarbageCollector) manifestExists(ctx context.Context, segment *meta.SegmentInfo) bool {
-	manifestFilePath, err := packed.ManifestFilePath(segment.GetManifestPath())
+func (gc *GarbageCollector) manifestExists(ctx context.Context, segmentID int64, manifest string) bool {
+	manifestFilePath, err := packed.ManifestFilePath(manifest)
 	if err != nil {
 		return true
 	}
 	exists, err := gc.Option.Cli.Exist(ctx, manifestFilePath)
 	if err != nil {
 		mlog.Warn(ctx, "failed to check dropped segment manifest existence",
-			mlog.FieldSegmentID(segment.GetID()),
+			mlog.FieldSegmentID(segmentID),
 			mlog.String("manifestFilePath", manifestFilePath), mlog.Err(err))
 		return true
 	}
@@ -1963,7 +1968,12 @@ func (gc *GarbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 				mlog.Int64("buildID", segIdx.BuildID))
 			continue
 		}
-		items = append(items, segmentIndexGCItem{segIdx: segIdx, files: gc.getRetainedIndexFilesOfIndex(segIdx)})
+		files, err := gc.resolveRetainedIndexFiles(ctx, io, segIdx)
+		if err != nil {
+			mlog.Warn(ctx, "cannot resolve retiring index files", mlog.FieldBuildID(segIdx.BuildID), mlog.Err(err))
+			continue
+		}
+		items = append(items, segmentIndexGCItem{segIdx: segIdx, files: files})
 	}
 	if len(items) == 0 {
 		return
@@ -2263,9 +2273,13 @@ func (gc *GarbageCollector) RecycleUnusedIndexFilesV0(ctx context.Context) {
 			}
 		}
 
-		filesMap := gc.getRetainedIndexFilesOfIndex(segIdx)
+		retain, err := gc.finishedIndexFileRetention(ctx, segIdx)
+		if err != nil {
+			logger.Warn(ctx, "cannot resolve retained index files", mlog.Err(err))
+			return true
+		}
 
-		logger.Info(ctx, "recycle index files", mlog.Int("meta files num", len(filesMap)))
+		logger.Info(ctx, "recycle index files", mlog.Int("meta files num", segIdx.NumIndexFiles()))
 		deletedFilesNum := atomic.NewInt32(0)
 		fileNum := 0
 
@@ -2273,7 +2287,7 @@ func (gc *GarbageCollector) RecycleUnusedIndexFilesV0(ctx context.Context) {
 		err = gc.Option.Cli.WalkWithPrefix(ctx, key, true, func(indexFile *storage.ChunkObjectInfo) bool {
 			fileNum++
 			file := indexFile.FilePath
-			if _, ok := filesMap[file]; !ok {
+			if !retain(file) {
 				future := gc.Option.RemoveObjectPool.Submit(func() (struct{}, error) {
 					logger := logger.With(mlog.String("file", file))
 					logger.Info(ctx, "garbageCollector recycleUnusedIndexFilesV0 remove file...")
@@ -2312,17 +2326,20 @@ func (gc *GarbageCollector) RecycleUnusedIndexFilesV0(ctx context.Context) {
 	log.Info(ctx, "recycleUnusedIndexFilesV0 done")
 }
 
-// getAllIndexFilesOfIndex returns all expected index files using the path version
-// recorded on the SegmentIndex: v0 builds index_files paths, v1 builds index_v1 paths.
+// GetAllIndexFilesOfIndex expands the keys of a hydrated record using its recorded layout.
 func (gc *GarbageCollector) GetAllIndexFilesOfIndex(segmentIndex *model.SegmentIndex) map[string]struct{} {
 	builder := metautil.NewIndexPathBuilder(gc.Option.Cli.RootPath(),
 		segmentIndex.IndexStorePathVersion, segmentIndex.CollectionID,
 		segmentIndex.PartitionID, segmentIndex.SegmentID,
 		segmentIndex.BuildID, segmentIndex.IndexVersion)
 	if metautil.IsSegmentRooted(segmentIndex.IndexStorePathVersion) {
-		if segment := gc.Meta.GetSegment(context.TODO(), segmentIndex.SegmentID); segment != nil {
-			builder.WithManifestPath(segment.GetManifestPath())
+		manifest := segmentIndex.IndexFilesManifest
+		if manifest == "" {
+			if segment := gc.Meta.GetSegment(context.TODO(), segmentIndex.SegmentID); segment != nil {
+				manifest = segment.GetManifestPath()
+			}
 		}
+		builder.WithManifestPath(manifest)
 	}
 
 	filesMap := make(map[string]struct{})
@@ -2333,6 +2350,80 @@ func (gc *GarbageCollector) GetAllIndexFilesOfIndex(segmentIndex *model.SegmentI
 	return filesMap
 }
 
+// Retirement needs exact keys for explicit deletes in historical namespaces.
+// Keep the hydrated record local to this sweep.
+func (gc *GarbageCollector) resolveRetainedIndexFiles(ctx context.Context, io *packed.ManifestIOContext, index *model.SegmentIndex) (map[string]struct{}, error) {
+	keys, err := gc.Meta.ResolveIndexFileKeys(ctx, io, index)
+	if err != nil {
+		segment := gc.Meta.GetSegment(ctx, index.SegmentID)
+		if index.IndexFilesManifest == "" || meta.IsSegmentHealthy(segment) ||
+			gc.manifestExists(ctx, index.SegmentID, index.IndexFilesManifest) {
+			return nil, err
+		}
+		// A dropped segment may have already lost its manifests in a previous
+		// GC attempt. Enumerate only this build/version's placement aliases.
+		files := make(map[string]struct{})
+		for _, prefix := range gc.indexAttemptPrefixes(index, index.IndexFilesManifest) {
+			if err := gc.Option.Cli.WalkWithPrefix(ctx, prefix, true, func(obj *storage.ChunkObjectInfo) bool {
+				files[obj.FilePath] = struct{}{}
+				return true
+			}); err != nil {
+				return nil, err
+			}
+		}
+		return files, nil
+	}
+	record := *index
+	record.IndexFileKeys = keys
+	return gc.getRetainedIndexFilesOfIndex(&record), nil
+}
+
+func (gc *GarbageCollector) indexAttemptPrefixes(index *model.SegmentIndex, manifest string) []string {
+	if index.IndexFilesManifest != "" {
+		manifest = index.IndexFilesManifest
+	}
+	prefixes := make([]string, 0, 3)
+	for _, layout := range []indexpb.IndexStorePathVersion{
+		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+	} {
+		prefix := metautil.NewIndexPathBuilder(gc.Option.Cli.RootPath(), layout, index.CollectionID,
+			index.PartitionID, index.SegmentID, index.BuildID, index.IndexVersion).
+			WithManifestPath(manifest).BuildPrefix()
+		prefixes = append(prefixes, prefix+"/")
+	}
+	return prefixes
+}
+
+// The retained V3 attempt owns its entire directory in every migration
+// layout. The trailing slash keeps versions such as 1 and 10 distinct.
+func (gc *GarbageCollector) finishedIndexFileRetention(ctx context.Context, index *model.SegmentIndex) (func(string) bool, error) {
+	segment := gc.Meta.GetSegment(ctx, index.SegmentID)
+	if segment != nil && segment.GetStorageVersion() == storage.StorageV3 {
+		var prefixes []string
+		if index.NumIndexFiles() > 0 {
+			prefixes = gc.indexAttemptPrefixes(index, segment.GetManifestPath())
+		}
+		return func(file string) bool {
+			for _, prefix := range prefixes {
+				if strings.HasPrefix(file, prefix) {
+					return true
+				}
+			}
+			return false
+		}, nil
+	}
+	files, err := gc.resolveRetainedIndexFiles(ctx, nil, index)
+	if err != nil {
+		return nil, err
+	}
+	return func(file string) bool {
+		_, recorded := files[file]
+		return recorded
+	}, nil
+}
+
 // getRetainedIndexFilesOfIndex protects both sides of migration, including
 // copies not yet published and source paths held by existing readers. Retain
 // these bounded aliases until the build itself is retired; snapshot guards
@@ -2341,15 +2432,9 @@ func (gc *GarbageCollector) GetAllIndexFilesOfIndex(segmentIndex *model.SegmentI
 func (gc *GarbageCollector) getRetainedIndexFilesOfIndex(segmentIndex *model.SegmentIndex) map[string]struct{} {
 	filesMap := gc.GetAllIndexFilesOfIndex(segmentIndex)
 	if segment := gc.Meta.GetSegment(context.TODO(), segmentIndex.SegmentID); segment != nil && segment.GetStorageVersion() == storage.StorageV3 {
-		for _, version := range []indexpb.IndexStorePathVersion{
-			indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
-			indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
-			indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
-		} {
-			retained := model.CloneSegmentIndex(segmentIndex)
-			retained.IndexStorePathVersion = version
-			for _, file := range meta.MigrationIndexPaths(gc.Option.Cli.RootPath(), segment.GetManifestPath(), retained) {
-				filesMap[file] = struct{}{}
+		for _, prefix := range gc.indexAttemptPrefixes(segmentIndex, segment.GetManifestPath()) {
+			for _, name := range segmentIndex.IndexFileKeys {
+				filesMap[prefix+name] = struct{}{}
 			}
 		}
 	}
@@ -2363,7 +2448,8 @@ func (gc *GarbageCollector) getRetainedIndexFilesOfIndex(segmentIndex *model.Seg
 // A file is reclaimed when meta no longer accounts for it: its buildID has no
 // SegmentIndex record (task aborted and recycled, DataCoord crashed before
 // FinishTask, worker restarted after uploading, ...), or the record is
-// Finished and does not list the file (an earlier attempt's index version).
+// Finished and the file falls outside the retained attempt (or outside the
+// recorded file list of a legacy segment).
 // Files of records that are not Finished are left alone: the task may still be
 // running, or the record is terminal and waiting for recycleUnusedSegIndexes,
 // which removes it and lets the next scan reclaim the files. Files younger
@@ -2388,8 +2474,8 @@ func (gc *GarbageCollector) newIndexFileReclaimChecker(ctx context.Context) func
 	// interleaves builds, the decision is simply recomputed.
 	type buildDecision struct {
 		buildID    int64
-		reclaimAll bool                // no record: everything under the build is garbage
-		recorded   map[string]struct{} // Finished record: only unlisted files are garbage
+		reclaimAll bool // no record: everything under the build is garbage
+		retain     func(string) bool
 	}
 	var current *buildDecision
 
@@ -2426,7 +2512,12 @@ func (gc *GarbageCollector) newIndexFileReclaimChecker(ctx context.Context) func
 			}
 			return d
 		}
-		d.recorded = gc.getRetainedIndexFilesOfIndex(segIdx)
+		retain, err := gc.finishedIndexFileRetention(ctx, segIdx)
+		if err != nil {
+			mlog.Warn(ctx, "cannot resolve retained index files", mlog.FieldBuildID(buildID), mlog.Err(err))
+			return d
+		}
+		d.retain = retain
 		return d
 	}
 
@@ -2435,8 +2526,7 @@ func (gc *GarbageCollector) newIndexFileReclaimChecker(ctx context.Context) func
 		if d.reclaimAll {
 			return true
 		}
-		_, listed := d.recorded[file]
-		return d.recorded != nil && !listed
+		return d.retain != nil && !d.retain(file)
 	}
 }
 

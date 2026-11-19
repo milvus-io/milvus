@@ -95,8 +95,8 @@ skip finalized targets even if the task completion write was lost.
 Recorded-file deletion uses version 2 and the segment's actual manifest base.
 The orphan scanner applies the existing build-state, import, age and snapshot
 protections to `insert_log/.../_index`. It skips ordinary data/stats/manifests,
-retains active builds and recorded finished files, and reclaims unrecorded builds
-or obsolete attempt files. This check runs inside the existing `insert_log`
+retains active builds and the complete current directory of each finished V3 build
+with files, and reclaims unknown builds and obsolete attempt versions. This check runs inside the existing `insert_log`
 traversal, before the generic registered-V3 skip; there is no second recursive
 LIST of the prefix. It remains active even when the write switch is off, because
 historical v2 files still need reclamation. Dropped-segment GC still owns whole

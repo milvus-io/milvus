@@ -561,25 +561,7 @@ func BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, deltalogs []*datap
 			s.StatsBinlogSize += l.GetMemorySize()
 		}
 	}
-	var deltaFrom uint64 = math.MaxUint64
-	var deltaTo uint64
-	for _, fb := range deltalogs {
-		for _, l := range fb.GetBinlogs() {
-			s.DeltaBinlogSize += l.GetMemorySize()
-			s.DeleteNumRows += l.GetEntriesNum()
-			s.DeltaBinlogCount++
-			if from := l.GetTimestampFrom(); from > 0 && from < deltaFrom {
-				deltaFrom = from
-			}
-			if to := l.GetTimestampTo(); to > deltaTo {
-				deltaTo = to
-			}
-		}
-	}
-	if deltaFrom != math.MaxUint64 {
-		s.DeltaTimestampFrom = deltaFrom
-	}
-	s.DeltaTimestampTo = deltaTo
+	AccumulateDeltalogStats(s, deltalogs)
 	if len(binlogs) > 0 {
 		s.LoadResource = BuildLoadResourceStatistics(binlogs)
 	}
@@ -748,4 +730,19 @@ func buildValidElementCounts(binlogs []*datapb.FieldBinlog) map[int64]int64 {
 		return nil
 	}
 	return counts
+}
+
+// AccumulateDeltalogStats adds new delete files to an existing segment summary.
+func AccumulateDeltalogStats(stats *datapb.Statistics, deltalogs []*datapb.FieldBinlog) {
+	for _, fb := range deltalogs {
+		for _, l := range fb.GetBinlogs() {
+			stats.DeltaBinlogSize += l.GetMemorySize()
+			stats.DeleteNumRows += l.GetEntriesNum()
+			stats.DeltaBinlogCount++
+			if from := l.GetTimestampFrom(); from > 0 && (stats.DeltaTimestampFrom == 0 || from < stats.DeltaTimestampFrom) {
+				stats.DeltaTimestampFrom = from
+			}
+			stats.DeltaTimestampTo = max(stats.DeltaTimestampTo, l.GetTimestampTo())
+		}
+	}
 }

@@ -2483,7 +2483,8 @@ func TestCopiedSegmentIndexType(t *testing.T) {
 			}
 			result := &datapb.CopySegmentResult{
 				SegmentId: 100, ImportedRows: 4096,
-				IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{5001: info},
+				ManifestPath: segment.GetManifestPath(),
+				IndexInfos:   map[int64]*datapb.VectorScalarIndexInfo{5001: info},
 			}
 			effectiveType := indexType
 			if effectiveType == "" {

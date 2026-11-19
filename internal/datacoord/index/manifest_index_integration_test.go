@@ -174,6 +174,41 @@ func TestBuildManifestIndexInfoRespectsSegmentIndexTypeOverride(t *testing.T) {
 	require.Empty(t, info.ColumnName)
 }
 
+func requireIndexFiles(t *testing.T, m *meta.Meta, record *model.SegmentIndex, expected ...string) {
+	t.Helper()
+	require.Empty(t, record.IndexFileKeys, "file keys should only be materialized on demand")
+	require.Equal(t, len(expected), record.NumIndexFiles())
+	keys, err := m.ResolveIndexFileKeys(t.Context(), nil, record)
+	require.NoError(t, err)
+	require.Equal(t, expected, keys)
+}
+
+func TestIndexFileLookupRejectsWrongBuild(t *testing.T) {
+	ctx := t.Context()
+	m, _, store, _ := RollbackFixture(t)
+	job, ok := m.IndexCatalog.GetIndexJob(meta.RestartBuildID)
+	require.True(t, ok)
+	revision := job.IndexFilesManifest
+	entries := store.BackfillEntriesAt(revision)
+	require.Len(t, entries, 1)
+	for _, change := range []func(*packed.ManifestIndexInfo){
+		func(entry *packed.ManifestIndexInfo) { entry.BuildID++ },
+		func(entry *packed.ManifestIndexInfo) { entry.IndexID++ },
+		func(entry *packed.ManifestIndexInfo) { entry.IndexVersion++ },
+		func(entry *packed.ManifestIndexInfo) { entry.IndexFileKeys = []string{"one"} },
+		func(entry *packed.ManifestIndexInfo) { entry.IndexFileKeys = []string{"../foreign", "one"} },
+	} {
+		invalid := entries[0]
+		change(&invalid)
+		store.Revisions[revision] = []packed.ManifestIndexInfo{invalid}
+		keys, err := m.ResolveIndexFileKeys(ctx, nil, job)
+		require.ErrorIs(t, err, merr.ErrDataIntegrity)
+		require.Empty(t, keys)
+	}
+	store.Revisions[revision] = entries
+	requireIndexFiles(t, m, job, "0", "1")
+}
+
 func mockReloadManifestEntry(t *testing.T, buildID int64) {
 	t.Helper()
 	infos := mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{{
@@ -212,7 +247,7 @@ func TestReloadSegmentIndexesFromManifests(t *testing.T) {
 	require.NotNil(t, recovered)
 	assert.Equal(t, commonpb.IndexState_Finished, recovered.IndexState)
 	assert.EqualValues(t, 5100, recovered.BuildID)
-	assert.Equal(t, []string{"f0"}, recovered.IndexFileKeys)
+	requireIndexFiles(t, m, recovered, "f0")
 	assert.EqualValues(t, 2000, recovered.IndexSerializedSize)
 	assert.EqualValues(t, 3000, recovered.IndexMemSize)
 	assert.Equal(t, "HNSW", recovered.IndexType)
@@ -260,7 +295,7 @@ func TestReloadSegmentIndexesFromManifests_EtcdRecordWins(t *testing.T) {
 
 	recovered := mDomains.IndexMeta.GetSegmentIndexes(100, 5001)[500]
 	require.NotNil(t, recovered)
-	assert.Equal(t, []string{"from-etcd"}, recovered.IndexFileKeys)
+	requireIndexFiles(t, m, recovered, "from-etcd")
 	assert.EqualValues(t, 77, recovered.NodeID, "task history must survive the manifest projection")
 	assert.EqualValues(t, 42, recovered.CreatedUTCTime)
 }
@@ -333,7 +368,7 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 	require.NotNil(t, segIdx)
 	assert.Equal(t, commonpb.IndexState_Finished, segIdx.IndexState)
 	assert.EqualValues(t, meta.RestartBuildID, segIdx.BuildID)
-	assert.Equal(t, []string{"0", "1"}, segIdx.IndexFileKeys)
+	requireIndexFiles(t, restartedDomains.IndexMeta.fileStore, segIdx, "0", "1")
 	assert.EqualValues(t, 4096, segIdx.IndexSerializedSize)
 	assert.EqualValues(t, 1000, segIdx.NumRows)
 	assert.Equal(t, "HNSW", segIdx.IndexType)
@@ -356,7 +391,7 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 	recoveredOff, ok := restartedOffDomains.IndexMeta.GetIndexJob(meta.RestartBuildID)
 	require.True(t, ok, "turning the switch off must not hide a manifest-resident index")
 	assert.Equal(t, commonpb.IndexState_Finished, recoveredOff.IndexState)
-	assert.Equal(t, []string{"0", "1"}, recoveredOff.IndexFileKeys)
+	requireIndexFiles(t, m, recoveredOff, "0", "1")
 }
 
 // The control: with manifest writes off (the default), the same flow persists
@@ -629,7 +664,7 @@ func TestPublishIndexToManifestDeclinesDroppedIndexDefinition(t *testing.T) {
 	finished, ok := mDomains.IndexMeta.GetIndexJob(meta.RestartBuildID)
 	require.True(t, ok)
 	assert.Equal(t, commonpb.IndexState_Finished, finished.IndexState)
-	assert.Equal(t, []string{"0", "1"}, finished.IndexFileKeys)
+	requireIndexFiles(t, m, finished, "0", "1")
 }
 
 // The writer-side backstop behind the gate above: an entry the fail-closed
@@ -779,7 +814,7 @@ func TestIndexPublicationModeSurvivesSwitchAndRestart(t *testing.T) {
 				require.True(t, ok)
 				require.Equal(t, commonpb.IndexState_Finished, finished.IndexState)
 				require.Equal(t, version, finished.IndexStorePathVersion)
-				require.Equal(t, []string{"0", "1"}, finished.IndexFileKeys)
+				requireIndexFiles(t, recoveredDomains.IndexMeta.fileStore, finished, "0", "1")
 			})
 		}
 	}

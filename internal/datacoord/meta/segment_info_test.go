@@ -379,12 +379,21 @@ func TestValidateManifestSegment(t *testing.T) {
 		assert.Contains(t, msg, "bm25statslogs")
 	})
 
+	t.Run("manifest stats metadata without inline files is valid", func(t *testing.T) {
+		info := NewSegmentInfo(&datapb.SegmentInfo{
+			ManifestPath:  "base/path@1",
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{10: {FieldID: 10, FilesInManifest: true}},
+			JsonKeyStats:  map[int64]*datapb.JsonKeyStats{20: {FieldID: 20, FilesInManifest: true}},
+		})
+		assert.Empty(t, ValidateManifestSegment(info))
+	})
+
 	t.Run("manifest with text stats is invalid", func(t *testing.T) {
 		info := NewSegmentInfo(&datapb.SegmentInfo{
 			ID:           5,
 			ManifestPath: "base/path@1",
 			TextStatsLogs: map[int64]*datapb.TextIndexStats{
-				10: {FieldID: 10},
+				10: {FieldID: 10, Files: []string{"text.bin"}},
 			},
 		})
 		msg := ValidateManifestSegment(info)
@@ -396,7 +405,7 @@ func TestValidateManifestSegment(t *testing.T) {
 			ID:           6,
 			ManifestPath: "base/path@1",
 			JsonKeyStats: map[int64]*datapb.JsonKeyStats{
-				20: {FieldID: 20},
+				20: {FieldID: 20, Files: []string{"json.bin"}},
 			},
 		})
 		msg := ValidateManifestSegment(info)
@@ -409,7 +418,7 @@ func TestValidateManifestSegment(t *testing.T) {
 			ManifestPath: "base/path@1",
 			Statslogs:    []*datapb.FieldBinlog{{FieldID: 100}},
 			TextStatsLogs: map[int64]*datapb.TextIndexStats{
-				10: {FieldID: 10},
+				10: {FieldID: 10, Files: []string{"text.bin"}},
 			},
 		})
 		msg := ValidateManifestSegment(info)

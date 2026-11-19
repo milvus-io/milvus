@@ -31,24 +31,55 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
+func indexRecordWithFiles(t *testing.T, m *meta.Meta, record *model.SegmentIndex) *model.SegmentIndex {
+	t.Helper()
+	keys, err := m.ResolveIndexFileKeys(t.Context(), nil, record)
+	require.NoError(t, err)
+	copy := *record
+	copy.IndexFileKeys = keys
+	copy.IndexFileCount = 0
+	copy.IndexFilesManifest = ""
+	return &copy
+}
+
+func recordedIndexFiles(t *testing.T, gc *GarbageCollector, record *model.SegmentIndex) map[string]struct{} {
+	t.Helper()
+	return gc.GetAllIndexFilesOfIndex(indexRecordWithFiles(t, gc.Meta, record))
+}
+
 func TestManifestIndexMigrationRetainsLayoutAliases(t *testing.T) {
-	m, _, _, _ := index.RollbackFixture(t)
+	m, _, store, _ := index.RollbackFixture(t)
 	ctx := context.Background()
 	segment := m.GetSegment(ctx, meta.RestartSegID)
 	record, _ := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
 	gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
 	defer gc.Close()
 	canReclaim := gc.newIndexFileReclaimChecker(ctx)
+	record = model.CloneSegmentIndex(record)
+	keys, err := m.ResolveIndexFileKeys(ctx, nil, record)
+	require.NoError(t, err)
+	require.NotEmpty(t, keys)
+	record.IndexFileKeys = keys
 	var files []string
 	for _, version := range []indexpb.IndexStorePathVersion{0, 1, 2} {
 		candidate := model.CloneSegmentIndex(record)
 		candidate.IndexStorePathVersion = version
 		files = append(files, meta.MigrationIndexPaths(m.ChunkManager.RootPath(), segment.GetManifestPath(), candidate)...)
 	}
+	beforeReads := store.ReadCount
 	for _, file := range files {
 		require.False(t, canReclaim(file, meta.RestartCollID, meta.RestartSegID, meta.RestartBuildID), file)
 	}
-	_, err := m.RollbackSegmentIndexes(ctx, NewGCManifestReadIO(t), meta.RestartSegID, meta.RestartBuildID)
+	require.Equal(t, beforeReads, store.ReadCount)
+	otherVersion := model.CloneSegmentIndex(record)
+	otherVersion.IndexVersion = record.IndexVersion * 10
+	for _, layout := range []indexpb.IndexStorePathVersion{0, 1, 2} {
+		otherVersion.IndexStorePathVersion = layout
+		for _, file := range meta.MigrationIndexPaths(m.ChunkManager.RootPath(), segment.GetManifestPath(), otherVersion) {
+			require.True(t, canReclaim(file, meta.RestartCollID, meta.RestartSegID, meta.RestartBuildID), file)
+		}
+	}
+	_, err = m.RollbackSegmentIndexes(ctx, NewGCManifestReadIO(t), meta.RestartSegID, meta.RestartBuildID)
 	require.NoError(t, err)
 	// Also exercise the decision cached before the placement change.
 	for _, check := range []func(string, int64, int64, int64) bool{canReclaim, gc.newIndexFileReclaimChecker(ctx)} {
@@ -56,7 +87,7 @@ func TestManifestIndexMigrationRetainsLayoutAliases(t *testing.T) {
 			require.False(t, check(file, meta.RestartCollID, meta.RestartSegID, meta.RestartBuildID), file)
 		}
 	}
-	require.True(t, gc.newIndexFileReclaimChecker(ctx)(files[0]+"-unrecorded", meta.RestartCollID, meta.RestartSegID, meta.RestartBuildID))
+	require.False(t, gc.newIndexFileReclaimChecker(ctx)(files[0]+"-unrecorded", meta.RestartCollID, meta.RestartSegID, meta.RestartBuildID))
 	require.NoError(t, m.IndexCatalog.(*index.IndexMeta).RemoveSegmentIndex(ctx, meta.RestartBuildID))
 	for _, file := range files {
 		require.True(t, gc.newIndexFileReclaimChecker(ctx)(file, meta.RestartCollID, meta.RestartSegID, meta.RestartBuildID), file)
@@ -77,9 +108,11 @@ func TestManifestIndexMigrationWaitsForGCRetirement(t *testing.T) {
 	}).Build()
 	defer patch.UnPatch()
 	retired := make(chan struct{})
+	files, err := gc.resolveRetainedIndexFiles(ctx, nil, record)
+	require.NoError(t, err)
 	go func() {
 		defer close(retired)
-		gc.recycleManifestSegmentIndexes(ctx, []segmentIndexGCItem{{segIdx: record, files: gc.getRetainedIndexFilesOfIndex(record)}})
+		gc.recycleManifestSegmentIndexes(ctx, []segmentIndexGCItem{{segIdx: record, files: files}})
 	}()
 	<-entered
 	restored := make(chan int, 1)

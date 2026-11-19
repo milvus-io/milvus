@@ -152,7 +152,7 @@ func TestManifestIndexRollbackLeavesUninstalledCopyIndex(t *testing.T) {
 	m, catalog, store, _ := RollbackFixture(t)
 	ctx := context.Background()
 	first, _ := m.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID)
-	late := model.CloneSegmentIndex(first)
+	late := materializedTestIndex(t, m, first)
 	late.BuildID++
 	late.IndexID++
 	definition := model.CloneIndex(m.IndexCatalog.(*IndexMeta).GetIndexesForCollection(meta.RestartCollID, "")[0])
@@ -186,7 +186,7 @@ func TestManifestIndexRollbackLeavesUninstalledCopyIndex(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackReady) == 1
 	}, 5*time.Second, time.Millisecond)
-	require.NoError(t, m.IndexCatalog.(*IndexMeta).AddSegmentIndexFromManifest(ctx, late))
+	require.NoError(t, m.IndexCatalog.(*IndexMeta).AddSegmentIndexFromManifest(ctx, late, before))
 	require.Eventually(t, func() bool {
 		record, ok := m.IndexCatalog.(*IndexMeta).GetIndexJob(late.BuildID)
 		return ok && !record.ManifestPublished && testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackReady) == 1
@@ -206,6 +206,7 @@ func TestManifestIndexRollbackRevalidatesSelectedRecord(t *testing.T) {
 			before := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
 			commits := store.CommitCount
 			record, _ := m.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID)
+			record = materializedTestIndex(t, m, record)
 			// Change the selected record after selection but before staging
 			// takes its BuildID lock. No manifest revision should be published.
 			patch := mockey.Mock((*meta.Meta).ReadManifestIndexesWithIO).When(func(_ *meta.Meta, _ context.Context, _ *packed.ManifestIOContext, _ string, _ *indexpb.StorageConfig) bool {

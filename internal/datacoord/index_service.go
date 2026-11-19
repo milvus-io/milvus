@@ -1280,7 +1280,7 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 							segmentInfo = segment.SegmentInfo
 						}
 					}
-					indexFilePaths, err := meta.SegmentIndexFilePaths(s.meta.ChunkManager.RootPath(), segIdx, segmentInfo)
+					indexFilePaths, err := s.meta.SegmentIndexFilePaths(ctx, segIdx, segmentInfo)
 					if err != nil {
 						return &indexpb.GetIndexInfoResponse{Status: merr.Status(err)}, nil
 					}

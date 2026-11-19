@@ -247,6 +247,9 @@ func NewMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 
 	// Install the index catalog and compaction protection after all goroutines complete
 	mt.IndexCatalog = indexCatalog
+	if indexCatalog != nil {
+		indexCatalog.SetIndexFileStore(mt)
+	}
 	if protection != nil {
 		mt.CompactionProtection = protection
 	}
@@ -308,17 +311,27 @@ func (m *Meta) segmentLoadNormalizer() metacache.SegmentNormalizer {
 				normalized.NumOfRows = corrected
 			}
 		}
-		if !localStorage || segment.GetStorageVersion() != storage.StorageV3 {
+		if segment.GetStorageVersion() != storage.StorageV3 || segment.GetManifestPath() == "" {
 			return normalized, nil
 		}
-		manifestPath, err := NormalizeLocalManifestPath(segment.GetManifestPath(), local.RootPath(),
-			Params.MinioCfg.RootPath.GetValue(), segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-		if err != nil {
-			return nil, err
+		if localStorage {
+			manifestPath, err := NormalizeLocalManifestPath(segment.GetManifestPath(), local.RootPath(),
+				Params.MinioCfg.RootPath.GetValue(), segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+			if err != nil {
+				return nil, err
+			}
+			if manifestPath != segment.GetManifestPath() {
+				clone()
+				normalized.ManifestPath = manifestPath
+			}
 		}
-		if manifestPath != segment.GetManifestPath() {
-			clone()
-			normalized.ManifestPath = manifestPath
+		if hasInlineStatsFiles(normalized.TextStatsLogs) || hasInlineStatsFiles(normalized.JsonKeyStats) {
+			// Old catalog rows have no provenance marker. Retain their original
+			// lists if the manifest cannot confirm ownership. New rows skip I/O.
+			if entries, err := packed.GetManifestStats(normalized.GetManifestPath(), CreateStorageConfig()); err == nil && len(entries) > 0 {
+				clone()
+				compactCatalogStats(normalized, entries)
+			}
 		}
 		return normalized, nil
 	}
@@ -1139,19 +1152,7 @@ func addDeltalogsToSegment(modPack *UpdateSegmentPack, segmentID int64, segment 
 	if segment.Stats == nil {
 		segment.Stats = &datapb.Statistics{}
 	}
-	for _, fb := range deltalogs {
-		for _, l := range fb.GetBinlogs() {
-			segment.Stats.DeltaBinlogSize += l.GetMemorySize()
-			segment.Stats.DeleteNumRows += l.GetEntriesNum()
-			segment.Stats.DeltaBinlogCount++
-			if from := l.GetTimestampFrom(); from > 0 && (segment.Stats.DeltaTimestampFrom == 0 || from < segment.Stats.DeltaTimestampFrom) {
-				segment.Stats.DeltaTimestampFrom = from
-			}
-			if to := l.GetTimestampTo(); to > segment.Stats.DeltaTimestampTo {
-				segment.Stats.DeltaTimestampTo = to
-			}
-		}
-	}
+	storage.AccumulateDeltalogStats(segment.Stats, deltalogs)
 	modPack.Increments[segmentID] = metastore.BinlogsIncrement{
 		Segment: segment.SegmentInfo,
 		UpdateMask: metastore.BinlogsUpdateMask{
@@ -1423,6 +1424,36 @@ func UpdateSegmentStats(segmentID int64, requestStats *datapb.Statistics) Update
 	}
 }
 
+// ReleaseFlushedL1Binlogs runs after the final checkpoint, manifest and writer
+// statistics have been applied to the transaction's private segment copy.
+func ReleaseFlushedL1Binlogs(segmentID int64) UpdateOperator {
+	return func(pack *UpdateSegmentPack) bool {
+		segment := pack.Get(segmentID)
+		if segment == nil || segment.GetLevel() != datapb.SegmentLevel_L1 ||
+			segment.GetState() != commonpb.SegmentState_Flushed || segment.GetIsImporting() || segment.GetIsFake() {
+			return false
+		}
+		committed, _ := HasCommittedManifest(segment)
+		if !committed {
+			return false
+		}
+		stats := segment.GetStats()
+		if stats.GetInsertBinlogCount() == 0 || len(stats.GetFormats()) == 0 || len(stats.GetLoadResource().GetColumnGroups()) == 0 {
+			return false // Older writers may omit the summaries needed by compaction and task sizing.
+		}
+		for _, group := range segment.GetBinlogs() {
+			if group.GetFormat() == "" {
+				return false // A partial format summary cannot describe this legacy group.
+			}
+		}
+		segment.Binlogs = nil
+		segment.Deltalogs = nil
+		segment.Statslogs = nil
+		segment.Bm25Statslogs = nil
+		return true
+	}
+}
+
 func UpdateBinlogsFromSaveBinlogPathsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs []*datapb.FieldBinlog) UpdateOperator {
 	return func(modPack *UpdateSegmentPack) bool {
 		modPack.fromSaveBinlogPathSegmentID = segmentID
@@ -1580,7 +1611,7 @@ func UpdateBumpSchemaVersionMaterializationOperator(segmentID int64, newSchemaVe
 		}
 
 		if statsDelta != nil {
-			segment.Stats = addStatsDelta(modPack.Meta.Ctx, segmentID, segment.GetStats(), statsDelta)
+			segment.Stats = addMaterializationStats(modPack.Meta.Ctx, segmentID, segment.GetStats(), statsDelta, newGroups)
 		}
 
 		// Bump DataVersion so querynodes with the segment loaded Reopen and pick
@@ -2779,6 +2810,7 @@ func (m *Meta) completeMixCompactionMutation(
 		// CompactionSegment. V3 outputs whose stats live in the manifest
 		// are populated correctly there; the receiver does not recompute.
 		compactToProto.Stats = compactToSegment.GetStats()
+		CompactManifestStats(compactToProto)
 		compactToSegmentInfo := NewSegmentInfo(compactToProto)
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -3317,6 +3349,7 @@ func (m *Meta) CompleteSortCompactionMutation(
 	// CompactionSegment. V3 outputs whose stats live in the manifest are
 	// populated correctly there; the receiver does not recompute.
 	segmentInfo.Stats = resultSegment.GetStats()
+	CompactManifestStats(segmentInfo)
 
 	segment := NewSegmentInfo(segmentInfo)
 	if segment.GetNumOfRows() == 0 {
@@ -3497,7 +3530,7 @@ func (m *Meta) CompleteBumpSchemaVersionCompactionMutation(
 	// runSchemaVersionBumpOnly ships nil, which preserves oldSegment.Stats.
 	if !replay {
 		if delta := resultSegment.GetStats(); delta != nil {
-			cloned.Stats = addStatsDelta(m.Ctx, segmentID, cloned.GetStats(), delta)
+			cloned.Stats = addMaterializationStats(m.Ctx, segmentID, cloned.GetStats(), delta, resultSegment.GetInsertLogs())
 			mlog.Info(m.Ctx, "meta update: applied schema bump stats increment",
 				mlog.Int64("segmentID", segmentID),
 				mlog.String("baseManifest", baseManifest),
@@ -3590,6 +3623,7 @@ func (m *Meta) completeBumpSchemaVersionReplacementMutation(
 		// CompactionSegment; the receiver copies it verbatim.
 		Stats: resultSegment.GetStats(),
 	})
+	CompactManifestStats(newSegment.SegmentInfo)
 	if newSegment.GetNumOfRows() <= 0 {
 		newSegment.State = commonpb.SegmentState_Dropped
 		newSegment.DroppedAt = uint64(time.Now().UnixNano())

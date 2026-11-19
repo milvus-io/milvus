@@ -44,7 +44,7 @@ func TestIndexGCManifestReadinessDeletedRecordWinsOnReload(t *testing.T) {
 	records := im.GetAllSegmentIndexes(5001)
 	require.Len(t, records, 1)
 	require.True(t, records[0].IsDeleted, "persisted GC tombstone wins over the stale Finished manifest entry")
-	require.Equal(t, []string{"from-etcd"}, records[0].IndexFileKeys)
+	requireIndexFiles(t, m, records[0], "from-etcd")
 	require.Empty(t, im.GetSegmentIndexes(100, 5001))
 	require.Nil(t, im.GetSegmentsIndexStates(100, []int64{5001})[5001][500])
 }

@@ -636,7 +636,7 @@ func (si *Inspector) estimateStatsTaskSize(coll *meta.CollectionInfo, segment *m
 	segmentSize := segment.GetSegmentSize()
 
 	readSize := segmentSize
-	if coll != nil && meta.SupportsFieldProjection(segment) && len(segment.GetBinlogs()) > 0 {
+	if coll != nil && meta.SupportsFieldProjection(segment) && segment.HasColumnGroupSizes() {
 		if fieldIDs := statsTaskFieldIDs(coll.Schema, subJobType); len(fieldIDs) > 0 {
 			fieldsSize, err := meta.EstimateFieldsReadSize(coll.Schema, segment, fieldIDs)
 			if err != nil {

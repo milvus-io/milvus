@@ -1226,6 +1226,14 @@ func TestIndexInspector_estimateIndexFieldSize(t *testing.T) {
 		assert.Equal(t, int64(128*4)*numRows, inspector.estimateIndexFieldSize(ctx, m.GetCollection(collID), externalSegment, vecField))
 	})
 
+	t.Run("manifest summary preserves projected field size", func(t *testing.T) {
+		coll := &meta.CollectionInfo{ID: collID, Schema: externalSchema}
+		segment := externalSegment.Clone()
+		want := inspector.estimateIndexFieldSize(ctx, coll, segment, vecField)
+		segment.Stats = segment.EnsureStats()
+		segment.Binlogs = nil
+		assert.Equal(t, want, inspector.estimateIndexFieldSize(ctx, coll, segment, vecField))
+	})
 	t.Run("single field column group keeps the measured size", func(t *testing.T) {
 		m.AddCollection(&meta.CollectionInfo{ID: collID, Schema: externalSchema})
 		segment := &meta.SegmentInfo{

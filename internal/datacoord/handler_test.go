@@ -2302,6 +2302,7 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		StorageVersion:  storage.StorageV3,
 		ManifestPath:    packed.MarshalManifestPath("/data/segments/2001", 3),
 		CommitTimestamp: 700,
+		Stats:           &datapb.Statistics{InsertBinlogSize: 8192, InsertBinlogCount: 2, DeltaBinlogSize: 5},
 	})
 	// A growing V3 segment only has an allocation placeholder and must be dropped.
 	growingSeg := meta.NewSegmentInfo(&datapb.SegmentInfo{
@@ -2379,7 +2380,12 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	defer mockSelectSegments.UnPatch()
 
 	mockCompactionTo := mockey.Mock((*meta.Meta).GetCompactionTo).To(func(m *meta.Meta, segmentID int64) ([]*meta.SegmentInfo, bool) {
-		return nil, false
+		if segmentID == manifestSeg.GetID() {
+			return []*meta.SegmentInfo{meta.NewSegmentInfo(&datapb.SegmentInfo{
+				ID: 9001, CollectionID: 200, Deltalogs: []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []*datapb.Binlog{{LogID: 102, MemorySize: 11, EntriesNum: 2}}}},
+			})}, true
+		}
+		return nil, true
 	}).Build()
 	defer mockCompactionTo.UnPatch()
 
@@ -2396,6 +2402,10 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	assert.Equal(t, int64(2001), snapshotData.Segments[0].GetSegmentId())
 	assert.NotEmpty(t, snapshotData.Segments[0].GetManifestPath())
 	assert.EqualValues(t, 700, snapshotData.Segments[0].GetCommitTimestamp())
+	assert.EqualValues(t, 8192, snapshotData.Segments[0].GetStats().GetInsertBinlogSize())
+	assert.EqualValues(t, 16, snapshotData.Segments[0].GetStats().GetDeltaBinlogSize())
+	assert.EqualValues(t, 2, snapshotData.Segments[0].GetStats().GetDeleteNumRows())
+	assert.EqualValues(t, 5, manifestSeg.GetStats().GetDeltaBinlogSize())
 	staged.UnPatch()
 
 	candidates = []*meta.SegmentInfo{meta.NewSegmentInfo(&datapb.SegmentInfo{
@@ -2590,7 +2600,7 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	mockTypeParams := mockey.Mock((*index.IndexMeta).GetTypeParams).Return(nil).Build()
 	defer mockTypeParams.UnPatch()
 
-	indexFiles, err := uncompressIndexFiles(handler, &datapb.SegmentInfo{CollectionID: 1, ID: 2})
+	indexFiles, err := uncompressIndexFiles(t.Context(), handler, &datapb.SegmentInfo{CollectionID: 1, ID: 2})
 	require.NoError(t, err)
 
 	require.Len(t, indexFiles, 1)
@@ -2608,7 +2618,7 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 		CollectionID: 1, ID: 2,
 		ManifestPath: packed.MarshalManifestPath("/data/legacy/insert_log/1/20/2", 1),
 	}
-	indexFiles, err = uncompressIndexFiles(handler, segment)
+	indexFiles, err = uncompressIndexFiles(t.Context(), handler, segment)
 	require.NoError(t, err)
 	require.Len(t, indexFiles, 1)
 	assert.Equal(t, "HNSW_SQ", indexFiles[0].GetIndexType())
@@ -2619,14 +2629,14 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	assert.Equal(t, []string{"/data/legacy/insert_log/1/20/2/_index/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
 
 	indexType = ""
-	indexFiles, err = uncompressIndexFiles(handler, segment)
+	indexFiles, err = uncompressIndexFiles(t.Context(), handler, segment)
 	require.NoError(t, err)
 	require.Len(t, indexFiles, 1)
 	assert.Empty(t, indexFiles[0].GetIndexType())
 	assert.Equal(t, "HNSW", meta.GetIndexType(indexFiles[0].GetIndexParams()))
 
 	segment.ManifestPath = ""
-	indexFiles, err = uncompressIndexFiles(handler, segment)
+	indexFiles, err = uncompressIndexFiles(t.Context(), handler, segment)
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 	assert.Empty(t, indexFiles)
 }

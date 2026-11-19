@@ -64,6 +64,13 @@ func IndexManifestPublished(t *testing.T, im *IndexMeta, buildID int64) bool {
 	return record.ManifestPublished
 }
 
+func materializedTestIndex(t *testing.T, m *meta.Meta, record *model.SegmentIndex) *model.SegmentIndex {
+	t.Helper()
+	full, err := m.IndexCatalog.(*IndexMeta).segmentIndexWithFiles(t.Context(), record)
+	require.NoError(t, err)
+	return full
+}
+
 func WithManifestIndexBackfillEnabled(t *testing.T, enabled bool) {
 	t.Helper()
 	key := Params.DataCoordCfg.ManifestIndexBackfillEnabled.Key
@@ -127,6 +134,7 @@ func SeedLegacyBackfillIndexes(t *testing.T, m *meta.Meta, count int) []*model.S
 	SeedLegacyBackfillRecord(t, m, meta.RestartSegID, meta.RestartBuildID)
 	first, ok := m.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID)
 	require.True(t, ok)
+	first = materializedTestIndex(t, m, first)
 	records := []*model.SegmentIndex{first}
 	for offset := 1; offset < count; offset++ {
 		definition := model.CloneIndex(m.IndexCatalog.(*IndexMeta).GetIndexesForCollection(meta.RestartCollID, "vec_idx")[0])

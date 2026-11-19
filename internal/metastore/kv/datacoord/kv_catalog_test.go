@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -1198,6 +1199,25 @@ func TestCatalog_CreateSegmentIndex(t *testing.T) {
 		err := catalog.CreateSegmentIndex(context.Background(), segIdx)
 		assert.Error(t, err)
 	})
+}
+
+func TestCatalog_GetSegmentIndex(t *testing.T) {
+	ctx := t.Context()
+	kv := mocks.NewMetaKv(t)
+	catalog := NewCatalog(kv, "", "")
+	key := BuildSegmentIndexKey(1, 2, 3, 4)
+	kv.EXPECT().Load(ctx, key).Return("", merr.ErrIoTooManyRequests).Once()
+	_, err := catalog.GetSegmentIndex(ctx, 1, 2, 3, 4)
+	require.ErrorIs(t, err, merr.ErrIoTooManyRequests)
+	kv.EXPECT().Load(ctx, key).Return("\xff", nil).Once()
+	_, err = catalog.GetSegmentIndex(ctx, 1, 2, 3, 4)
+	require.ErrorIs(t, err, merr.ErrSerializationFailed)
+	value, err := proto.Marshal(&indexpb.SegmentIndex{CollectionID: 1, PartitionID: 2, SegmentID: 3, BuildID: 4, IndexFileKeys: []string{"0", "1"}})
+	require.NoError(t, err)
+	kv.EXPECT().Load(ctx, key).Return(string(value), nil).Once()
+	record, err := catalog.GetSegmentIndex(ctx, 1, 2, 3, 4)
+	require.NoError(t, err)
+	require.Equal(t, []string{"0", "1"}, record.IndexFileKeys)
 }
 
 func TestCatalog_ListSegmentIndexes(t *testing.T) {

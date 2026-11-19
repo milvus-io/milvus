@@ -51,6 +51,7 @@ func TestManifestIndexRollbackRoundTrip(t *testing.T) {
 			before := m.GetSegment(ctx, meta.RestartSegID)
 			record, ok := m.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID)
 			require.True(t, ok)
+			record = materializedTestIndex(t, m, record)
 			published, ok := m.IndexCatalog.(*IndexMeta).SegmentBuildInfo.Get(meta.RestartBuildID)
 			require.True(t, ok)
 			require.True(t, published.ManifestPublished)
@@ -78,7 +79,8 @@ func TestManifestIndexRollbackRoundTrip(t *testing.T) {
 			restarted := BootMigrationMeta(t, catalog, meta.RestartCollID)
 			recovered, found := restarted.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID)
 			require.True(t, found, "catalog-only recovery must find the artifact")
-			assert.Equal(t, record, recovered)
+			requireIndexFiles(t, restarted, recovered, "0", "1")
+			assert.Equal(t, record, materializedTestIndex(t, restarted, recovered))
 		})
 	}
 }
@@ -121,6 +123,7 @@ func TestManifestIndexRollbackFailureAndRetry(t *testing.T) {
 			ctx := context.TODO()
 			before := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
 			originalRecord, _ := m.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID)
+			originalRecord = materializedTestIndex(t, m, originalRecord)
 			var original func(*meta.Meta, context.Context, *packed.ManifestIOContext, string, meta.SegmentManifestCommit) (packed.ManifestUpdateResult, error)
 			var patch *mockey.Mocker
 			switch scenario {
@@ -215,7 +218,8 @@ func TestManifestIndexRollbackPreservesCatalogAndReplacement(t *testing.T) {
 			m, catalog, _, _ := RollbackFixture(t)
 			ctx := context.TODO()
 			old, _ := m.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID)
-			current := model.CloneSegmentIndex(old)
+			current := materializedTestIndex(t, m, old)
+			current.IndexFileKeys = []string{}
 			current.IndexVersion++
 			current.IndexState = commonpb.IndexState_InProgress
 			if replacement {
@@ -260,7 +264,8 @@ func TestManifestIndexRollbackRestoresSupersededBuilds(t *testing.T) {
 	m, catalog, store, _ := RollbackFixture(t)
 	ctx := context.TODO()
 	old, _ := m.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID)
-	replacement := model.CloneSegmentIndex(old)
+	replacement := materializedTestIndex(t, m, old)
+	replacement.IndexFileKeys = []string{"replacement-file"}
 	replacement.BuildID = 10000 // sorts before 8100 as an etcd key, but is newer
 	require.NoError(t, m.IndexCatalog.(*IndexMeta).AddSegmentIndex(ctx, replacement))
 	require.NoError(t, NewMigrationBackfillInspector(ctx, m).backfillIndexes(ctx, meta.RestartSegID, replacement.BuildID))
@@ -272,6 +277,9 @@ func TestManifestIndexRollbackRestoresSupersededBuilds(t *testing.T) {
 	entries := store.BackfillEntriesAt(current)
 	require.Len(t, entries, 2)
 	store.Revisions[current] = entries[1:]
+	require.NotEqual(t, current, old.IndexFilesManifest)
+	requireIndexFiles(t, m, old, "0", "1")
+	requireIndexFiles(t, m, replacement, "replacement-file")
 	SetRollbackTestParam(t, &Params.MetaStoreCfg.MaxEtcdTxnNum, "2")
 	inspector := NewMigrationRollbackInspector(ctx, m)
 	inspector.runOnce(ctx)
@@ -279,6 +287,7 @@ func TestManifestIndexRollbackRestoresSupersededBuilds(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, old.BuildID, rows[0].BuildID)
+	assert.Equal(t, []string{"0", "1"}, rows[0].IndexFileKeys)
 	assert.Equal(t, current, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath(), "absent old entry requires only an atomic catalog publication")
 	assert.Equal(t, replacement, m.IndexCatalog.(*IndexMeta).GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID)[meta.RestartIndexID])
 	inspector.runOnce(ctx)
@@ -287,8 +296,12 @@ func TestManifestIndexRollbackRestoresSupersededBuilds(t *testing.T) {
 	store.FailReadsFrom()
 	restarted := BootMigrationMeta(t, catalog, meta.RestartCollID)
 	assert.Equal(t, replacement.BuildID, restarted.IndexCatalog.(*IndexMeta).GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID)[meta.RestartIndexID].BuildID)
-	_, present := restarted.IndexCatalog.(*IndexMeta).GetIndexJob(old.BuildID)
-	assert.True(t, present, "superseded artifact remains durably available to GC")
+	restoredOld, present := restarted.IndexCatalog.(*IndexMeta).GetIndexJob(old.BuildID)
+	require.True(t, present, "superseded artifact remains durably available to GC")
+	requireIndexFiles(t, restarted, restoredOld, "0", "1")
+	requireIndexFiles(t, restarted, restarted.IndexCatalog.(*IndexMeta).GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID)[meta.RestartIndexID], "replacement-file")
+	require.NoError(t, restarted.IndexCatalog.(*IndexMeta).DeleteTask(old.BuildID))
+	require.Equal(t, replacement.BuildID, restarted.IndexCatalog.(*IndexMeta).GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID)[meta.RestartIndexID].BuildID)
 	require.NoError(t, restarted.IndexCatalog.(*IndexMeta).RemoveSegmentIndex(ctx, old.BuildID))
 	assert.Equal(t, replacement.BuildID, restarted.IndexCatalog.(*IndexMeta).GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID)[meta.RestartIndexID].BuildID,
 		"retiring a restored superseded record must preserve the replacement slot")
@@ -298,8 +311,10 @@ func TestManifestIndexRollbackIgnoresMarkerOnlySegments(t *testing.T) {
 	m, catalog, store, _ := RollbackFixture(t)
 	ctx := context.TODO()
 	first := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
-	store.Revisions[first] = nil
-	require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.ClearEmptyManifestIndexMarker(meta.RestartSegID, first)))
+	empty, err := meta.AdvanceManifest(first, 1)
+	require.NoError(t, err)
+	store.Revisions[empty] = nil
+	require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifest(meta.RestartSegID, empty), meta.ClearEmptyManifestIndexMarker(meta.RestartSegID, empty)))
 	// A marker-only segment must not be read or considered rollback work.
 	SeedLegacyBackfillRecord(t, m, meta.RestartSegID-1, meta.RestartBuildID-1)
 	require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifestHasIndex(meta.RestartSegID-1), meta.UpdateManifest(meta.RestartSegID-1, "")))

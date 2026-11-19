@@ -46,7 +46,7 @@ func TestManifestIndexBackfillGCRechecksLegacyObservation(t *testing.T) {
 	record, _ := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
 	gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
 	t.Cleanup(gc.Close)
-	item := segmentIndexGCItem{segIdx: record, files: gc.GetAllIndexFilesOfIndex(record)}
+	item := segmentIndexGCItem{segIdx: record, files: recordedIndexFiles(t, gc, record)}
 	for file := range item.files {
 		require.NoError(t, m.ChunkManager.Write(ctx, file, []byte("artifact")))
 		t.Cleanup(func() { _ = m.ChunkManager.Remove(ctx, file) })
@@ -111,6 +111,7 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifest(meta.RestartSegID, initial)))
 			first, _ := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
+			first = indexRecordWithFiles(t, m, first)
 			first.IndexStorePathVersion = layout
 			require.NoError(t, m.IndexCatalog.(*index.IndexMeta).AlterSegmentIndexesForTest([]*model.SegmentIndex{first}))
 			definition := model.CloneIndex(m.IndexCatalog.(*index.IndexMeta).GetIndexesForCollection(meta.RestartCollID, "")[0])
@@ -124,7 +125,7 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 			gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
 			t.Cleanup(gc.Close)
 			for _, record := range []*model.SegmentIndex{first, second} {
-				for file := range gc.GetAllIndexFilesOfIndex(record) {
+				for file := range recordedIndexFiles(t, gc, record) {
 					require.NoError(t, m.ChunkManager.Write(ctx, file, []byte("artifact")))
 				}
 			}
@@ -163,6 +164,9 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 			for _, record := range []*model.SegmentIndex{first, second} {
 				recovered, ok := restarted.IndexCatalog.(*index.IndexMeta).GetIndexJob(record.BuildID)
 				require.True(t, ok)
+				require.Empty(t, recovered.IndexFileKeys)
+				require.Equal(t, len(record.IndexFileKeys), recovered.NumIndexFiles())
+				recovered = indexRecordWithFiles(t, restarted, recovered)
 				assert.Equal(t, record.IndexFileKeys, recovered.IndexFileKeys)
 				assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, recovered.IndexStorePathVersion)
 				assert.True(t, index.IndexManifestPublished(t, restarted.IndexCatalog.(*index.IndexMeta), record.BuildID))

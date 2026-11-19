@@ -46,7 +46,7 @@ func TestManifestDroppedRecoveryAfterFilesDeleted(t *testing.T) {
 	defer gc.Option.RemoveObjectPool.Release()
 	job, ok := mDomains.IndexMeta.GetIndexJob(meta.RestartBuildID)
 	require.True(t, ok)
-	files := gc.GetAllIndexFilesOfIndex(job)
+	files := recordedIndexFiles(t, gc, job)
 	for file := range files {
 		require.NoError(t, m.ChunkManager.Write(ctx, file, []byte("index")))
 	}

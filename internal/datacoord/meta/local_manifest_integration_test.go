@@ -43,6 +43,62 @@ func newLegacyLocalPackedFixture(t *testing.T) *legacyLocalPackedFixture {
 	return NewLocalPackedFixture(t, false)
 }
 
+func TestManifestStatsFileListsAfterReload(t *testing.T) {
+	f := newLegacyLocalPackedFixture(t)
+	base, _, err := packed.UnmarshalManifestPath(f.PhysicalManifest)
+	require.NoError(t, err)
+	text := base + "/_stats/text_index.101/81/2/packed.v3"
+	jsonFile := base + "/_stats/json_stats.102/82/1/shared/index"
+	revision, err := packed.AddStatsToManifest(f.PhysicalManifest, f.cfg, []packed.StatEntry{
+		{Key: "text_index.101", Files: []string{text}, Metadata: map[string]string{"build_id": "81", "version": "2"}},
+		{Key: "json_stats.102", Files: []string{jsonFile}, Metadata: map[string]string{"build_id": "82", "version": "1"}},
+	})
+	require.NoError(t, err)
+	old := proto.Clone(f.Segment).(*datapb.SegmentInfo)
+	old.ManifestPath = revision
+	old.TextStatsLogs = map[int64]*datapb.TextIndexStats{
+		101: {FieldID: 101, BuildID: 81, Version: 2, LogSize: 73, Files: []string{"old-catalog-name"}},
+		103: {FieldID: 103, BuildID: 83, Files: []string{"catalog-only"}},
+	}
+	old.JsonKeyStats = map[int64]*datapb.JsonKeyStats{
+		102: {FieldID: 102, BuildID: 82, Version: 1, JsonKeyStatsDataFormat: 3, Files: []string{"82/1/shared/index"}},
+	}
+	m := &Meta{ChunkManager: f.Cm}
+	cached, err := m.segmentLoadNormalizer()(old)
+	require.NoError(t, err)
+	require.True(t, cached.TextStatsLogs[101].GetFilesInManifest())
+	require.Empty(t, cached.TextStatsLogs[101].GetFiles())
+	require.True(t, cached.JsonKeyStats[102].GetFilesInManifest())
+	require.Empty(t, cached.JsonKeyStats[102].GetFiles())
+	require.EqualValues(t, 73, cached.TextStatsLogs[101].GetLogSize())
+	require.Equal(t, []string{"catalog-only"}, cached.TextStatsLogs[103].GetFiles())
+	require.Equal(t, []string{"old-catalog-name"}, old.TextStatsLogs[101].GetFiles())
+	rpc := proto.Clone(cached).(*datapb.SegmentInfo)
+	require.NoError(t, ResolveSegmentStatsFiles(rpc))
+	require.Equal(t, []string{text}, rpc.TextStatsLogs[101].GetFiles())
+	require.Equal(t, []string{"82/1/shared/index"}, rpc.JsonKeyStats[102].GetFiles())
+	require.Empty(t, cached.JsonKeyStats[102].GetFiles())
+	// A copy gets new build IDs and a different object root. Historical
+	// placeholders with no matching files must retain the original list.
+	restored := proto.Clone(rpc).(*datapb.SegmentInfo)
+	restored.TextStatsLogs[101].BuildID++
+	restored.JsonKeyStats[102].BuildID++
+	restored.TextStatsLogs[101].FilesInManifest = false
+	restored.JsonKeyStats[102].FilesInManifest = false
+	CompactCopiedStats(restored)
+	require.Empty(t, restored.TextStatsLogs[101].Files)
+	require.Empty(t, restored.JsonKeyStats[102].Files)
+	require.Equal(t, []string{"catalog-only"}, restored.TextStatsLogs[103].Files)
+	require.NoError(t, ResolveSegmentStatsFiles(restored))
+	require.Equal(t, rpc.JsonKeyStats[102].Files, restored.JsonKeyStats[102].Files)
+
+	// A caller pinned to another revision must not return an empty list for a
+	// known artifact or substitute the newest revision.
+	rpc = proto.Clone(cached).(*datapb.SegmentInfo)
+	rpc.ManifestPath = f.PhysicalManifest
+	require.ErrorIs(t, ResolveSegmentStatsFiles(rpc), merr.ErrDataIntegrity)
+}
+
 func TestReloadLocalManifestPreservesPackedReferences(t *testing.T) {
 	f := newLegacyLocalPackedFixture(t)
 	t.Chdir(f.Root)

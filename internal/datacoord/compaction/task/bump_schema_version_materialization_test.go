@@ -253,10 +253,10 @@ func TestUpdateBumpSchemaVersionMaterializationOperatorApplies(t *testing.T) {
 	mt, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	addMaterializationSegment(t, mt, packed.MarshalManifestPath("/tmp/milvus/insert_log/1/10/500", 5), 3, func(info *datapb.SegmentInfo) {
-		info.Binlogs = []*datapb.FieldBinlog{{FieldID: 100, ChildFields: []int64{100}, Binlogs: []*datapb.Binlog{{LogID: 1}}}}
+		info.Binlogs = []*datapb.FieldBinlog{{FieldID: 100, Format: "parquet", ChildFields: []int64{100}, Binlogs: []*datapb.Binlog{{LogID: 1}}}}
 	})
 
-	newGroups := []*datapb.FieldBinlog{{FieldID: materializationOutputFID, ChildFields: []int64{materializationOutputFID}, Binlogs: []*datapb.Binlog{{LogID: 9001}}}}
+	newGroups := []*datapb.FieldBinlog{{FieldID: materializationOutputFID, Format: "vortex", ChildFields: []int64{materializationOutputFID}, Binlogs: []*datapb.Binlog{{LogID: 9001, MemorySize: 100}}}}
 	err = mt.UpdateSegmentsInfo(context.Background(), meta.UpdateBumpSchemaVersionMaterializationOperator(
 		materializationSegmentID, 7, newGroups, &datapb.Statistics{InsertBinlogSize: 100},
 	))
@@ -270,6 +270,9 @@ func TestUpdateBumpSchemaVersionMaterializationOperatorApplies(t *testing.T) {
 	assert.ElementsMatch(t, []int64{100, materializationOutputFID}, fieldIDs)
 	assert.EqualValues(t, 7, updated.GetSchemaVersion())
 	assert.EqualValues(t, 100, updated.GetStats().GetInsertBinlogSize())
+	require.Equal(t, []string{"parquet", "vortex"}, updated.GetStats().GetFormats())
+	require.Len(t, updated.GetStats().GetLoadResource().GetColumnGroups(), 2)
+	assert.EqualValues(t, 100, updated.GetStats().GetLoadResource().GetColumnGroups()[1].GetMemorySize())
 	// Binlogs changed, so querynodes with the segment loaded must Reopen.
 	assert.EqualValues(t, 1, updated.GetDataVersion())
 }

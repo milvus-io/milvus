@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -33,7 +34,7 @@ func TestQueryViewSegmentLoadInfoPreservesV3ResourceStatistics(t *testing.T) {
 			}},
 		},
 	}
-	info, err := (&Server{}).packQueryViewSegmentLoadInfo(segment, nil, nil)
+	info, err := (&Server{}).packQueryViewSegmentLoadInfo(t.Context(), segment, nil, nil)
 	require.NoError(t, err)
 	require.True(t, proto.Equal(segment.GetStats(), info.GetStats()))
 	require.Empty(t, info.GetBinlogPaths())
@@ -121,7 +122,7 @@ func TestQueryViewSegmentLoadInfoIndexPaths(t *testing.T) {
 				IndexState: commonpb.IndexState_Finished, IndexStorePathVersion: tc.version,
 				IndexFileKeys: []string{"index.bin", "index.meta"},
 			}}
-			info, err := s.packQueryViewSegmentLoadInfo(segment, indexes, segmentIndexes)
+			info, err := s.packQueryViewSegmentLoadInfo(t.Context(), segment, indexes, segmentIndexes)
 			require.NoError(t, err)
 			require.Len(t, info.IndexInfos, 1)
 			require.Equal(t, []string{tc.prefix + "/index.bin", tc.prefix + "/index.meta"}, info.IndexInfos[0].IndexFilePaths)
@@ -132,20 +133,73 @@ func TestQueryViewSegmentLoadInfoIndexPaths(t *testing.T) {
 			// even when their owning segment has no usable manifest.
 			segment.ManifestPath = "invalid"
 			segmentIndexes[5].IndexState = commonpb.IndexState_InProgress
-			info, err = s.packQueryViewSegmentLoadInfo(segment, indexes, segmentIndexes)
+			info, err = s.packQueryViewSegmentLoadInfo(t.Context(), segment, indexes, segmentIndexes)
 			require.NoError(t, err)
 			require.Empty(t, info.IndexInfos)
 			segmentIndexes[5].IndexState = commonpb.IndexState_Finished
-			info, err = s.packQueryViewSegmentLoadInfo(segment, nil, segmentIndexes)
+			info, err = s.packQueryViewSegmentLoadInfo(t.Context(), segment, nil, segmentIndexes)
 			require.NoError(t, err)
 			require.Empty(t, info.IndexInfos)
 
 			// A finished index with no file keys needs no path resolution.
 			segmentIndexes[5].IndexFileKeys = nil
-			info, err = s.packQueryViewSegmentLoadInfo(segment, indexes, segmentIndexes)
+			info, err = s.packQueryViewSegmentLoadInfo(t.Context(), segment, indexes, segmentIndexes)
 			require.NoError(t, err)
 			require.Len(t, info.IndexInfos, 1)
 			require.Empty(t, info.IndexInfos[0].IndexFilePaths)
+		})
+	}
+}
+
+func TestCompactIndexPathsForLoadAndSnapshot(t *testing.T) {
+	for _, fromManifest := range []bool{false, true} {
+		t.Run(map[bool]string{false: "catalog", true: "manifest"}[fromManifest], func(t *testing.T) {
+			ctx := t.Context()
+			meta.WithSegmentIndexManifestWrites(t, fromManifest)
+			store := meta.NewFakeManifestStore(t)
+			catalog := catalogkv.NewCatalog(meta.NewMetaMemoryKV(), "", "")
+			m, domains := index.BootMetaForRestart(t, catalog, meta.RestartCollID)
+			index.SeedRestartFixture(t, m, domains.IndexMeta)
+			prefix := "/tmp/test-restart/index_files/8100/1/30/8001/"
+			if fromManifest {
+				prefix = "/tmp/test-restart/insert_log/300/30/8001/_index/8100/1/"
+			}
+			expected := []string{prefix + "0", prefix + "1"}
+			for _, restart := range []bool{false, true} {
+				if restart {
+					m, domains = index.BootMetaForRestart(t, catalog, meta.RestartCollID)
+				}
+				s := &Server{meta: m, domainMetas: domainMetas{indexMeta: domains.IndexMeta}}
+				s.UpdateStateCode(commonpb.StateCode_Healthy)
+				segment := m.GetSegment(ctx, meta.RestartSegID).SegmentInfo
+				jobs := domains.IndexMeta.GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID)
+				job := jobs[meta.RestartIndexID]
+				require.Empty(t, job.IndexFileKeys)
+				require.Equal(t, 2, job.NumIndexFiles())
+				request := &indexpb.GetIndexInfoRequest{CollectionID: meta.RestartCollID, SegmentIDs: []int64{meta.RestartSegID}}
+				if fromManifest {
+					store.FailReadsFrom()
+					reply, err := s.GetIndexInfos(ctx, request)
+					require.NoError(t, err)
+					require.ErrorIs(t, merr.Error(reply.GetStatus()), merr.ErrIoFailed)
+					require.Empty(t, reply.GetSegmentInfo())
+					store.ResumeReads()
+				}
+				reply, err := s.GetIndexInfos(ctx, request)
+				require.NoError(t, err)
+				require.NoError(t, merr.Error(reply.GetStatus()))
+				require.Equal(t, expected, reply.GetSegmentInfo()[meta.RestartSegID].GetIndexInfos()[0].GetIndexFilePaths())
+				indexes := []*indexpb.IndexInfo{{IndexID: meta.RestartIndexID, FieldID: meta.RestartFieldID}}
+				view, err := s.packQueryViewSegmentLoadInfo(ctx, segment, indexes, jobs)
+				require.NoError(t, err)
+				require.Equal(t, expected, view.GetIndexInfos()[0].GetIndexFilePaths())
+				files, err := uncompressIndexFiles(ctx, &ServerHandler{s: s}, segment)
+				require.NoError(t, err)
+				require.Equal(t, expected, files[0].GetIndexFilePaths())
+				resident, ok := domains.IndexMeta.GetIndexJob(job.BuildID)
+				require.True(t, ok)
+				require.Empty(t, resident.IndexFileKeys)
+			}
 		})
 	}
 }

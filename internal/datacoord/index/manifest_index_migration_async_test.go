@@ -180,8 +180,11 @@ func TestManifestIndexRollbackNoopUsesSourceMarker(t *testing.T) {
 		t.Run(map[bool]string{false: "empty", true: "unselected entry"}[unselected], func(t *testing.T) {
 			m, catalog, store, _ := RollbackFixture(t)
 			ctx := context.Background()
-			before := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
-			entry := store.Revisions[before][0]
+			published := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
+			before, err := meta.AdvanceManifest(published, 1)
+			require.NoError(t, err)
+			require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifest(meta.RestartSegID, before)))
+			entry := store.Revisions[published][0]
 			store.Revisions[before] = nil
 			if unselected {
 				entry.BuildID++
@@ -192,7 +195,7 @@ func TestManifestIndexRollbackNoopUsesSourceMarker(t *testing.T) {
 			n, err := m.RollbackSegmentIndexes(ctx, newMigrationManifestReadIO(t), meta.RestartSegID, meta.RestartBuildID)
 			require.NoError(t, err)
 			assert.Equal(t, 1, n)
-			assert.Equal(t, reads+1, store.ReadCount, "reuse the locked source read for the Noop marker")
+			assert.Equal(t, reads+2, store.ReadCount, "read the current marker and the superseded build's pinned file list")
 			assert.Equal(t, commits, store.CommitCount, "no manifest write when the selected build is absent")
 			assert.Equal(t, before, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath())
 			assert.Equal(t, unselected, m.GetSegment(ctx, meta.RestartSegID).GetManifestHasIndex())

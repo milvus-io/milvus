@@ -252,6 +252,10 @@ func BuildJSONKeyStatsPaths(rootPath string, segInfo JSONStatsSegmentInfo, jsonK
 		for _, file := range stats.GetFiles() {
 			if IsJSONKeyStatsFullPath(file) {
 				files = append(files, file)
+			} else if stats.GetFilesInManifest() {
+				// Manifest paths are literal object keys. Cleaning a double
+				// slash or dot component changes which object the snapshot names.
+				files = append(files, basePath+"/"+file)
 			} else {
 				files = append(files, path.Join(basePath, file))
 			}

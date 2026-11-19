@@ -3397,3 +3397,34 @@ func TestUpdateStatusOperator_DroppedIsTerminal(t *testing.T) {
 		})
 	}
 }
+
+func TestReleaseFlushedL1BinlogsRequiresCommittedStats(t *testing.T) {
+	inserts := []*datapb.FieldBinlog{{FieldID: 100, Format: "parquet", Binlogs: []*datapb.Binlog{{LogID: 1, MemorySize: 20}}}}
+	base := &datapb.SegmentInfo{
+		ID: 10, Level: datapb.SegmentLevel_L1, State: commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3, ManifestPath: packed.MarshalManifestPath("root/10", 2),
+		Binlogs: inserts, Stats: storage.BuildStatsFromFieldBinlogs(inserts, nil, nil, nil),
+	}
+	for name, change := range map[string]func(*datapb.SegmentInfo){
+		"legacy":    func(s *datapb.SegmentInfo) { s.StorageVersion = storage.StorageV2 },
+		"growing":   func(s *datapb.SegmentInfo) { s.State = commonpb.SegmentState_Growing },
+		"L0":        func(s *datapb.SegmentInfo) { s.Level = datapb.SegmentLevel_L0 },
+		"importing": func(s *datapb.SegmentInfo) { s.IsImporting = true },
+		"fake":      func(s *datapb.SegmentInfo) { s.IsFake = true },
+		"allocation manifest": func(s *datapb.SegmentInfo) {
+			s.ManifestPath = packed.MarshalManifestPath("root/10", packed.ManifestEarliest)
+		},
+		"missing stats":        func(s *datapb.SegmentInfo) { s.Stats = nil },
+		"missing groups":       func(s *datapb.SegmentInfo) { s.Stats.LoadResource = nil },
+		"missing formats":      func(s *datapb.SegmentInfo) { s.Stats.Formats = nil },
+		"unknown group format": func(s *datapb.SegmentInfo) { s.Binlogs[0].Format = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := proto.Clone(base).(*datapb.SegmentInfo)
+			change(s)
+			pack := &UpdateSegmentPack{Segments: map[int64]*SegmentInfo{s.ID: {SegmentInfo: s}}}
+			require.False(t, ReleaseFlushedL1Binlogs(s.ID)(pack))
+			require.Len(t, s.GetBinlogs(), 1)
+		})
+	}
+}

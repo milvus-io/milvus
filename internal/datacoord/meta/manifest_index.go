@@ -21,6 +21,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -111,13 +112,81 @@ func CollectionFieldName(m *Meta, collectionID, fieldID int64) string {
 	return ""
 }
 
+// ResolveIndexFileKeys materializes a build's keys for one operation. A manifest
+// record pins the exact revision that contained this build, including after a
+// newer build replaces its index ID. Catalog records are read by their full key.
+func (m *Meta) ResolveIndexFileKeys(ctx context.Context, io *packed.ManifestIOContext, index *model.SegmentIndex) ([]string, error) {
+	if len(index.IndexFileKeys) != 0 || index.IndexFileCount == 0 {
+		return index.IndexFileKeys, nil
+	}
+	if index.IndexFilesManifest == "" {
+		record, err := m.Catalog.GetSegmentIndex(ctx, index.CollectionID, index.PartitionID, index.SegmentID, index.BuildID)
+		if err != nil {
+			// A reader can hold the old catalog snapshot across a backfill.
+			// Both layouts retain their files. Follow only this exact build to
+			// its newly published revision to obtain the original file names.
+			if errors.Is(err, merr.ErrIoKeyNotFound) && m.IndexCatalog != nil {
+				if current, ok := m.IndexCatalog.GetIndexJob(index.BuildID); ok && current.IndexFilesManifest != "" &&
+					current.CollectionID == index.CollectionID && current.PartitionID == index.PartitionID &&
+					current.SegmentID == index.SegmentID && current.IndexID == index.IndexID &&
+					current.IndexVersion == index.IndexVersion && current.IndexFileCount == index.IndexFileCount {
+					return m.ResolveIndexFileKeys(ctx, io, current)
+				}
+			}
+			return nil, merr.Wrapf(err, "get file keys for catalog index build %d", index.BuildID)
+		}
+		if record == nil || record.CollectionID != index.CollectionID || record.PartitionID != index.PartitionID ||
+			record.SegmentID != index.SegmentID || record.IndexID != index.IndexID || record.BuildID != index.BuildID ||
+			record.IndexVersion != index.IndexVersion || record.IndexStorePathVersion != index.IndexStorePathVersion ||
+			len(record.IndexFileKeys) != index.IndexFileCount {
+			return nil, merr.Wrapf(merr.ErrDataIntegrity, "catalog index metadata disagrees with build %d", index.BuildID)
+		}
+		return record.IndexFileKeys, nil
+	}
+	if io == nil {
+		io = packed.NewManifestIOContext(1)
+		defer io.Close()
+	}
+	cfg := CreateStorageConfig()
+	entries, err := m.ReadManifestIndexesWithIO(ctx, io, index.IndexFilesManifest, cfg)
+	if err != nil {
+		return nil, merr.Wrapf(err, "read index files for manifest build %d", index.BuildID)
+	}
+	root := cfg.GetRootPath()
+	if m.ChunkManager != nil {
+		root = m.ChunkManager.RootPath()
+	}
+	segment := &datapb.SegmentInfo{ID: index.SegmentID, CollectionID: index.CollectionID, PartitionID: index.PartitionID, ManifestPath: index.IndexFilesManifest}
+	var keys []string
+	for _, entry := range entries {
+		if entry.BuildID != index.BuildID {
+			continue
+		}
+		if _, ok := ManifestIndexFilePathInfoForSegment(root, segment, entry); !ok || keys != nil ||
+			entry.IndexID != index.IndexID || entry.IndexVersion != index.IndexVersion ||
+			entry.IndexStorePathVersion != index.IndexStorePathVersion || len(entry.IndexFileKeys) != index.IndexFileCount {
+			return nil, merr.Wrapf(merr.ErrDataIntegrity, "invalid file metadata for manifest index build %d", index.BuildID)
+		}
+		keys = entry.IndexFileKeys
+	}
+	if keys == nil {
+		return nil, merr.Wrapf(merr.ErrDataIntegrity, "index build %d missing from its manifest revision", index.BuildID)
+	}
+	return keys, nil
+}
+
 // segmentIndexFilePaths resolves stored index file keys for load and snapshot
 // consumers. A v2 build needs its owning segment's actual manifest base: a
 // missing row or invalid pointer must not silently select a different namespace.
-func SegmentIndexFilePaths(rootPath string, segIdx *model.SegmentIndex, segment *datapb.SegmentInfo) ([]string, error) {
+func (m *Meta) SegmentIndexFilePaths(ctx context.Context, segIdx *model.SegmentIndex, segment *datapb.SegmentInfo) ([]string, error) {
+	keys, err := m.ResolveIndexFileKeys(ctx, nil, segIdx)
+	if err != nil {
+		return nil, err
+	}
+	rootPath := m.ChunkManager.RootPath()
 	builder := metautil.NewIndexPathBuilder(rootPath, segIdx.IndexStorePathVersion,
 		segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.BuildID, segIdx.IndexVersion)
-	if metautil.IsSegmentRooted(segIdx.IndexStorePathVersion) && len(segIdx.IndexFileKeys) > 0 {
+	if metautil.IsSegmentRooted(segIdx.IndexStorePathVersion) && len(keys) > 0 {
 		if segment == nil {
 			return nil, merr.WrapErrSegmentNotFound(segIdx.SegmentID, "cannot resolve segment-rooted index files")
 		}
@@ -128,9 +197,18 @@ func SegmentIndexFilePaths(rootPath string, segIdx *model.SegmentIndex, segment 
 		if base == "" {
 			return nil, merr.WrapErrDataIntegrityMsg("empty manifest base for segment %d index files", segIdx.SegmentID)
 		}
+		if segIdx.IndexFilesManifest != "" {
+			indexBase, _, err := packed.UnmarshalManifestPath(segIdx.IndexFilesManifest)
+			if err != nil {
+				return nil, merr.Wrap(err, "parse index file source manifest")
+			}
+			if base != indexBase {
+				return nil, merr.Wrapf(merr.ErrDataIntegrity, "index build %d and segment %d have different manifest bases", segIdx.BuildID, segIdx.SegmentID)
+			}
+		}
 		builder.WithManifestPath(segment.GetManifestPath())
 	}
-	return builder.BuildFilePaths(segIdx.IndexFileKeys), nil
+	return builder.BuildFilePaths(keys), nil
 }
 
 // manifestIndexFilePathInfo projects one manifest index entry into the load
@@ -397,7 +475,8 @@ func segmentIndexFromManifest(segment *SegmentInfo, manifestIndex packed.Manifes
 		BuildID:                   manifestIndex.BuildID,
 		IndexVersion:              manifestIndex.IndexVersion,
 		IndexState:                commonpb.IndexState_Finished,
-		IndexFileKeys:             manifestIndex.IndexFileKeys,
+		IndexFileCount:            len(manifestIndex.IndexFileKeys),
+		IndexFilesManifest:        segment.GetManifestPath(),
 		IndexSerializedSize:       uint64(manifestIndex.SerializedSize),
 		IndexMemSize:              uint64(manifestIndex.MemSize),
 		CurrentIndexVersion:       manifestIndex.CurrentIndexVersion,

@@ -1785,7 +1785,8 @@ func TestMeta_FinishTaskIndexStorePathVersion(t *testing.T) {
 		segIdx, ok := m.SegmentBuildInfo.Get(meta.BuildID)
 		assert.True(t, ok)
 		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, segIdx.IndexStorePathVersion)
-		assert.Equal(t, []string{"file1", "file2"}, segIdx.IndexFileKeys)
+		assert.Empty(t, segIdx.IndexFileKeys)
+		assert.Equal(t, 2, segIdx.NumIndexFiles())
 	})
 
 	t.Run("actual higher than requested returns error and leaves metadata unchanged", func(t *testing.T) {
@@ -2116,7 +2117,7 @@ func TestSegmentIndexMapUpdatesDoNotBlockOtherSegments(t *testing.T) {
 						return
 					}
 					m.KeyLock.Lock(other.BuildID)
-					m.updateSegmentIndexManifestPublished(other, true)
+					m.updateSegmentIndexManifestPublished(other, true, "")
 					m.KeyLock.Unlock(other.BuildID)
 					record, ok := m.GetIndexJob(other.BuildID)
 					published = ok && record.ManifestPublished

@@ -285,7 +285,7 @@ func (i *ManifestIndexBackfillInspector) scan(ctx context.Context) ([]segmentMan
 func segmentIndexNeedsManifestBackfill(segIdx *model.SegmentIndex) bool {
 	return segIdx != nil && !segIdx.IsDeleted &&
 		segIdx.IndexState == commonpb.IndexState_Finished &&
-		len(segIdx.IndexFileKeys) > 0 &&
+		segIdx.NumIndexFiles() > 0 &&
 		!segIdx.ManifestPublished
 }
 
@@ -374,7 +374,10 @@ func (i *ManifestIndexBackfillInspector) backfillIndexes(ctx context.Context, se
 			!i.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
 			return meta.ErrSegmentIndexBackfillSkipped
 		}
-		destination := model.CloneSegmentIndex(segIdx)
+		destination, err := i.indexMeta.segmentIndexWithFiles(ctx, segIdx)
+		if err != nil {
+			return err
+		}
 		destination.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
 		manifestIndex, err := meta.BuildManifestIndexInfo(i.mt, segment, destination)
 		if err != nil {

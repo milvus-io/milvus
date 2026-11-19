@@ -661,18 +661,28 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 				mlog.Err(err))
 			return
 		}
+		if segInfo.GetStorageVersion() == storage.StorageV3 && segInfo.GetManifestPath() != "" && segInfo.GetStats() != nil {
+			storage.AccumulateDeltalogStats(segInfo.Stats, deltalogs)
+		}
 		segInfo.Deltalogs = append(segInfo.GetDeltalogs(), deltalogs...)
 	})
 
 	segDescList := make([]*datapb.SegmentDescription, 0, len(segmentInfos))
 	for _, segInfo := range segmentInfos {
-		indexesFiles, err := uncompressIndexFiles(h, segInfo)
+		if err := meta.ResolveSegmentStatsFiles(segInfo); err != nil {
+			return nil, err
+		}
+		indexesFiles, err := uncompressIndexFiles(ctx, h, segInfo)
 		if err != nil {
 			return nil, err
 		}
 		uncompressedJSONStats := make(map[int64]*datapb.JsonKeyStats)
 		for id, jsonStats := range segInfo.GetJsonKeyStats() {
 			uncompressedJSONStats[id] = uncompressJSONStats(h, segInfo, jsonStats)
+		}
+		var snapshotStats *datapb.Statistics
+		if segInfo.GetStorageVersion() == storage.StorageV3 && segInfo.GetManifestPath() != "" {
+			snapshotStats = segInfo.GetStats()
 		}
 		segDescList = append(segDescList, &datapb.SegmentDescription{
 			SegmentId:         segInfo.GetID(),
@@ -694,6 +704,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 			TextIndexFiles:    segInfo.GetTextStatsLogs(),
 			ManifestPath:      segInfo.GetManifestPath(),
 			ManifestHasIndex:  proto.Bool(segInfo.GetManifestHasIndex()),
+			Stats:             snapshotStats,
 		})
 	}
 
@@ -733,8 +744,8 @@ func uncompressJSONStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStat
 	return uncompressedJSONStats
 }
 
-func uncompressIndexFiles(h *ServerHandler, segment *datapb.SegmentInfo) ([]*indexpb.IndexFilePathInfo, error) {
-	segIdxes := h.s.indexMeta.GetSegmentIndexesUnsafe(segment.GetCollectionID(), segment.GetID())
+func uncompressIndexFiles(ctx context.Context, h *ServerHandler, segment *datapb.SegmentInfo) ([]*indexpb.IndexFilePathInfo, error) {
+	segIdxes := h.s.indexMeta.GetSegmentIndexes(segment.GetCollectionID(), segment.GetID())
 	indexesFiles := make([]*indexpb.IndexFilePathInfo, 0)
 	for _, segIdx := range segIdxes {
 		if segIdx.IndexState == commonpb.IndexState_Finished {
@@ -743,7 +754,7 @@ func uncompressIndexFiles(h *ServerHandler, segment *datapb.SegmentInfo) ([]*ind
 
 			// Use the segment already selected for this snapshot, rather than
 			// looking it up again while metadata may be changing.
-			indexFilePaths, err := meta.SegmentIndexFilePaths(h.s.meta.ChunkManager.RootPath(), segIdx, segment)
+			indexFilePaths, err := h.s.meta.SegmentIndexFilePaths(ctx, segIdx, segment)
 			if err != nil {
 				return nil, err
 			}

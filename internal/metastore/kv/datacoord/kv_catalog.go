@@ -818,6 +818,18 @@ func (kc *Catalog) CreateSegmentIndex(ctx context.Context, segIdx *model.Segment
 	return nil
 }
 
+func (kc *Catalog) GetSegmentIndex(ctx context.Context, collectionID, partitionID, segmentID, buildID int64) (*model.SegmentIndex, error) {
+	value, err := kc.MetaKv.Load(ctx, BuildSegmentIndexKey(collectionID, partitionID, segmentID, buildID))
+	if err != nil {
+		return nil, err
+	}
+	var entry indexpb.SegmentIndex
+	if err := proto.Unmarshal([]byte(value), &entry); err != nil {
+		return nil, merr.WrapErrSerializationFailed(err, "segment index build %d", buildID)
+	}
+	return model.UnmarshalSegmentIndexModel(&entry), nil
+}
+
 func (kc *Catalog) ListSegmentIndexes(ctx context.Context, collectionID int64) ([]*model.SegmentIndex, error) {
 	segIndexes := make([]*model.SegmentIndex, 0)
 	applyFn := func(key []byte, value []byte) error {

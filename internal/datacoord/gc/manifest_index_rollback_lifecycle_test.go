@@ -81,6 +81,7 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifest(meta.RestartSegID, initial)))
 			first, _ := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
+			first = indexRecordWithFiles(t, m, first)
 			first.IndexStorePathVersion = layout
 			require.NoError(t, m.IndexCatalog.(*index.IndexMeta).AlterSegmentIndexesForTest([]*model.SegmentIndex{first}))
 			records := []*model.SegmentIndex{first}
@@ -99,7 +100,7 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 			t.Cleanup(gc.Close)
 			files := make(map[string]struct{})
 			for _, record := range records {
-				for file := range gc.GetAllIndexFilesOfIndex(record) {
+				for file := range recordedIndexFiles(t, gc, record) {
 					files[file] = struct{}{}
 					require.NoError(t, m.ChunkManager.Write(ctx, file, []byte("artifact")))
 				}
@@ -155,6 +156,9 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 			for _, record := range records {
 				recovered, found := restarted.IndexCatalog.(*index.IndexMeta).GetIndexJob(record.BuildID)
 				require.True(t, found)
+				require.Empty(t, recovered.IndexFileKeys)
+				require.Equal(t, len(record.IndexFileKeys), recovered.NumIndexFiles())
+				recovered = indexRecordWithFiles(t, restarted, recovered)
 				assert.Equal(t, record.IndexFileKeys, recovered.IndexFileKeys)
 				assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, recovered.IndexStorePathVersion)
 				for _, file := range meta.MigrationIndexPaths(root, restarted.GetSegment(ctx, meta.RestartSegID).GetManifestPath(), recovered) {
@@ -338,7 +342,8 @@ func TestManifestIndexRollbackAfterDroppedIndexGC(t *testing.T) {
 			definition := model.CloneIndex(m.IndexCatalog.(*index.IndexMeta).GetIndexesForCollection(meta.RestartCollID, "")[0])
 			definition.IndexID++
 			definition.IndexName = "live_index"
-			live := model.CloneSegmentIndex(retired)
+			live := indexRecordWithFiles(t, m, retired)
+			live.ManifestPublished = false
 			live.IndexID = definition.IndexID
 			live.BuildID++
 			liveCount := 0
@@ -360,7 +365,7 @@ func TestManifestIndexRollbackAfterDroppedIndexGC(t *testing.T) {
 			require.NoError(t, m.IndexCatalog.(*index.IndexMeta).MarkIndexAsDeleted(ctx, meta.RestartCollID, []int64{meta.RestartIndexID}))
 			gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta), SnapshotMeta: sm})
 			t.Cleanup(gc.Close)
-			files := gc.GetAllIndexFilesOfIndex(retired)
+			files := recordedIndexFiles(t, gc, retired)
 			for file := range files {
 				require.NoError(t, m.ChunkManager.Write(ctx, file, []byte("retired artifact")))
 				t.Cleanup(func() { _ = m.ChunkManager.Remove(ctx, file) })

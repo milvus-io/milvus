@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -60,6 +61,11 @@ func TestManifestDroppedParentSurvivesRestart(t *testing.T) {
 			}))
 			job, ok = mDomains.IndexMeta.GetIndexJob(meta.RestartBuildID)
 			require.True(t, ok)
+			job = model.CloneSegmentIndex(job)
+			keys, err := m.ResolveIndexFileKeys(ctx, nil, job)
+			require.NoError(t, err)
+			require.NotEmpty(t, keys)
+			job.IndexFileKeys = keys
 			files := (&gc.GarbageCollector{Meta: m, Option: gc.GcTestDomainOption(mDomains, gc.GcOption{Cli: m.ChunkManager})}).GetAllIndexFilesOfIndex(job)
 			for file := range files {
 				require.NoError(t, m.ChunkManager.Write(ctx, file, []byte("index")))

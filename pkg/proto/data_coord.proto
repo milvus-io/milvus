@@ -662,6 +662,7 @@ message TextIndexStats {
   int64 memory_size = 5;
   int64 buildID = 6;
   int32 current_scalar_index_version = 7;
+  bool files_in_manifest = 8; // DataCoord can resolve files from this segment's selected manifest.
 }
 
 message JsonKeyStats {
@@ -672,6 +673,7 @@ message JsonKeyStats {
   int64 memory_size = 5;
   int64 buildID = 6;
   int64 json_key_stats_data_format =7;
+  bool files_in_manifest = 8;
 }
 
 message Binlog {
@@ -2100,6 +2102,7 @@ message SegmentDescription {
   // Index presence marker copied from SegmentInfo. Presence lets restore skip
   // manifest index reads when false; old snapshots leave it absent.
   optional bool manifest_has_index = 19;
+  Statistics stats = 20; // Cumulative statistics for a manifest-backed segment without FieldBinlogs.
 }
 
 message CollectionDescription {
@@ -2137,6 +2140,7 @@ message SnapshotInfo {
 message StorageV2SegmentManifest {
   int64 segment_id = 1;
   string manifest = 2; // Plain StorageV2 manifest object path.
+  Statistics stats = 3;
 }
 
 enum SnapshotLayout {

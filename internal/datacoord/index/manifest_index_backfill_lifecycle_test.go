@@ -48,7 +48,7 @@ func TestManifestIndexBackfillRevalidatesSelectedRecord(t *testing.T) {
 		}},
 		{"replaced build", func(ctx context.Context, m *meta.Meta) error {
 			old, _ := m.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID)
-			replacement := model.CloneSegmentIndex(old)
+			replacement := materializedTestIndex(t, m, old)
 			replacement.BuildID++
 			return m.IndexCatalog.(*IndexMeta).AddSegmentIndex(ctx, replacement)
 		}},
@@ -149,7 +149,7 @@ func TestManifestIndexBackfillPublicationPreservesReplacement(t *testing.T) {
 	SeedLegacyBackfillRecord(t, m, meta.RestartSegID, meta.RestartBuildID)
 	old, ok := m.IndexCatalog.(*IndexMeta).SegmentBuildInfo.Get(meta.RestartBuildID)
 	require.True(t, ok)
-	replacement := model.CloneSegmentIndex(old)
+	replacement := materializedTestIndex(t, m, old)
 	replacement.BuildID++
 	meta.WithSegmentIndexManifestWrites(t, true)
 
@@ -169,7 +169,8 @@ func TestManifestIndexBackfillPublicationPreservesReplacement(t *testing.T) {
 	assert.False(t, old.ManifestPublished, "a reader's existing snapshot must remain unchanged")
 	assert.True(t, IndexManifestPublished(t, m.IndexCatalog.(*IndexMeta), old.BuildID))
 	assert.False(t, IndexManifestPublished(t, m.IndexCatalog.(*IndexMeta), replacement.BuildID))
-	assert.Equal(t, replacement, m.IndexCatalog.(*IndexMeta).GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID)[meta.RestartIndexID])
+	current := m.IndexCatalog.(*IndexMeta).GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID)[meta.RestartIndexID]
+	assert.Equal(t, replacement, materializedTestIndex(t, m, current))
 	rows, err := catalog.ListSegmentIndexes(ctx, meta.RestartCollID)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
@@ -344,6 +345,7 @@ func TestManifestIndexBackfillIdleAndWake(t *testing.T) {
 			case "copy install":
 				record, ok := m.IndexCatalog.(*IndexMeta).GetIndexJob(buildID)
 				require.True(t, ok)
+				record = materializedTestIndex(t, m, record)
 				record.BuildID++
 				buildID = record.BuildID
 				require.NoError(t, m.IndexCatalog.(*IndexMeta).AddSegmentIndex(ctx, record))
@@ -409,6 +411,7 @@ func TestManifestIndexBackfillDoesNotLoseWakeAtIdleBoundary(t *testing.T) {
 	}
 	record, ok := m.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID)
 	require.True(t, ok)
+	record = materializedTestIndex(t, m, record)
 	record.BuildID++
 	require.NoError(t, m.IndexCatalog.(*IndexMeta).AddSegmentIndex(ctx, record))
 	once.Do(func() { close(release) })
@@ -429,8 +432,9 @@ func TestManifestIndexBackfillScansRecordsBeforeSegments(t *testing.T) {
 	// manifest-resident build. Neither record should cause a segment lookup.
 	replacement, ok := m.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID + 1)
 	require.True(t, ok)
+	replacement = materializedTestIndex(t, m, replacement)
 	replacement.BuildID++
-	require.NoError(t, m.IndexCatalog.(*IndexMeta).AddSegmentIndexFromManifest(ctx, replacement))
+	require.NoError(t, m.IndexCatalog.(*IndexMeta).AddSegmentIndexFromManifest(ctx, replacement, m.GetSegment(ctx, replacement.SegmentID).GetManifestPath()))
 	var segmentLookups atomic.Int32
 	patch := mockey.Mock((*meta.Meta).GetSegment).When(func(_ *meta.Meta, _ context.Context, _ int64) bool {
 		segmentLookups.Add(1)
