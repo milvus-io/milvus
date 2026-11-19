@@ -291,6 +291,23 @@ func (s *IndexSuite) TestDropIndexProperties() {
 	})
 }
 
+func TestCreateIndexOptionKeepsGenericIndexMetricType(t *testing.T) {
+	// A GenericIndex handed to CreateIndex has to carry the metric the caller
+	// asked for; the request is the last place it can get lost.
+	idx := index.NewGenericIndex("idx", map[string]string{index.IndexTypeKey: string(index.AUTOINDEX)})
+	idx.WithMetricType(index.MetricType(entity.L2))
+
+	req := NewCreateIndexOption("coll", "embedding", idx).Request()
+
+	params := make(map[string]string, len(req.GetExtraParams()))
+	for _, kv := range req.GetExtraParams() {
+		params[kv.GetKey()] = kv.GetValue()
+	}
+	if got := params[index.MetricTypeKey]; got != string(entity.L2) {
+		t.Fatalf("metric_type in CreateIndex request = %q, want %q", got, entity.L2)
+	}
+}
+
 func TestIndex(t *testing.T) {
 	suite.Run(t, new(IndexSuite))
 }

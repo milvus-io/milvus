@@ -39,6 +39,30 @@ func TestGenericIndex(t *testing.T) {
 	assert.Empty(t, idxWithoutType.IndexType())
 }
 
+func TestGenericIndexWithMetricType(t *testing.T) {
+	idx := NewGenericIndex("auto_index", map[string]string{IndexTypeKey: string(AUTOINDEX)})
+
+	idx.WithMetricType(MetricType(entity.L2))
+
+	// metric_type has to reach Params(), which is what the create-index
+	// request is built from.
+	assert.EqualValues(t, entity.L2, idx.Params()[MetricTypeKey])
+
+	// Calling it again replaces the previous value instead of appending.
+	idx.WithMetricType(MetricType(entity.IP))
+	assert.EqualValues(t, entity.IP, idx.Params()[MetricTypeKey])
+}
+
+func TestGenericIndexWithMetricTypeNoParams(t *testing.T) {
+	// An index built without params still has to accept a metric instead of
+	// panicking on the nil map.
+	idx := NewGenericIndex("no_params", nil)
+
+	idx.WithMetricType(MetricType(entity.COSINE))
+
+	assert.EqualValues(t, entity.COSINE, idx.Params()[MetricTypeKey])
+}
+
 func TestWithExtraIndexParams(t *testing.T) {
 	// A param the typed constructor does not model must reach the wire without
 	// giving up the constructor.

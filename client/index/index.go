@@ -68,12 +68,23 @@ func (gi GenericIndex) Params() map[string]string {
 	return m
 }
 
+// WithMetricType sets the metric type of the index.
+//
+// GenericIndex is a value type and Params() serves the params map, so the
+// metric has to go into that map: assigning it to a field here would only
+// touch a copy of the struct and the caller would never see it.
 func (gi GenericIndex) WithMetricType(metricType MetricType) {
-	gi.baseIndex.metricType = metricType
+	if gi.params == nil {
+		return
+	}
+	gi.params[MetricTypeKey] = string(metricType)
 }
 
 // NewGenericIndex create generic index instance
 func NewGenericIndex(name string, params map[string]string) GenericIndex {
+	if params == nil {
+		params = make(map[string]string, 1)
+	}
 	return GenericIndex{
 		baseIndex: baseIndex{
 			name:      name,
