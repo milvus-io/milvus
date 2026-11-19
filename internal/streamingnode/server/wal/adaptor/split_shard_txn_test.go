@@ -94,12 +94,14 @@ func TestSplitShardFenceEndsTheTransactionsOfTheSource(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, fence.TimeTick, commitResult.TimeTick)
 
-	// A missing Commit session cannot distinguish these three outcomes.
-	// None may authorize a whole-transaction replay on the new shards.
-	for _, txn := range []*message.TxnContext{committed, committedAtFence, open} {
+	// A retry after a durable Commit must never be placed on the targets.
+	for _, txn := range []*message.TxnContext{committed, committedAtFence} {
 		_, err = w.Append(ctx, splitTxnCommit(*txn))
 		requireSplitTxnCommitUnknown(t, err)
 	}
+	// This WAL specifically interrupted the open transaction before Commit.
+	_, err = w.Append(ctx, splitTxnCommit(*open))
+	requireSplitTxnFenced(t, err)
 	// The open transaction cannot take another body.
 	_, err = w.Append(ctx, splitTxnDelete().WithTxnContext(*open))
 	requireSplitTxnFenced(t, err)
