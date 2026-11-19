@@ -21,18 +21,25 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	kvmocks "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metacache"
+	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func jsonFlatTestSchema() *schemapb.CollectionSchema {
@@ -173,8 +180,70 @@ func TestJSONFlatPinnedQueryViewClassification(t *testing.T) {
 	for _, view := range []*schemapb.CollectionSchema{nil, jsonFlatTestSchema()} {
 		schema = view
 		infos := server.GetQueryViewCollectionIndexInfos(1, 10, 11)
-		require.Len(t, infos, 1)
-		assert.EqualValues(t, 11, infos[0].GetIndexID(), "retain a pinned typed index, exclude unknown/flat artifacts")
+		require.Len(t, infos, 2)
+		assert.EqualValues(t, 10, infos[0].GetIndexID(), "resolve the historical flat reference even before the schema cache warms")
+		assert.EqualValues(t, 11, infos[1].GetIndexID())
 		assert.Empty(t, server.GetQueryViewCollectionIndexInfos(1))
 	}
+}
+
+func TestJSONFlatQueryViewRestoresPersistedIndexReferences(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	flat := jsonFlatDefinition()
+	flat.IsDeleted = true // Pinned historical references survive logical deletion too.
+	typed := model.CloneIndex(flat)
+	typed.IndexID = 11
+	typed.IndexParams[1].Value = "DOUBLE"
+	im := index.NewSegmentIndexMeta(nil)
+	im.Indexes[1] = map[int64]*model.Index{10: flat, 11: typed}
+	im.SetCollectionSchemaGetter(func(int64) *schemapb.CollectionSchema { return jsonFlatTestSchema() })
+	server := &Server{domainMetas: domainMetas{indexMeta: im}}
+	persisted := &viewpb.CollectionLoadConfig{
+		CollectionID: 1, Version: 7,
+		RequiredFields: []*viewpb.LoadFieldConfig{{FieldId: 101, IndexIds: []int64{10, 11}}},
+		PreloadFields:  []*viewpb.LoadFieldConfig{{FieldId: 101, IndexIds: []int64{10, 11}}},
+	}
+	wire, err := proto.Marshal(persisted)
+	require.NoError(t, err)
+	storage := kvmocks.NewMetaKv(t)
+	storage.EXPECT().WalkWithPrefix(mock.Anything, catalogkv.VersionedLoadInfoPrefix+"/", mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ string, _ int, visit func([]byte, []byte) error) error {
+			return visit([]byte("coord/load_info/1/7"), wire)
+		})
+	deps := loadmgr.LoadConfigStoreDependencies{
+		Catalog: catalogkv.NewCollectionLoadInfoCatalog(storage),
+		Indexes: server.GetQueryViewCollectionIndexInfos,
+		AllocateVersion: func(context.Context) (uint64, error) {
+			t.Fatal("recovery must not allocate a new version")
+			return 0, nil
+		},
+	}
+	for range 2 { // Reconstruct the store, not merely a cached GetLoadInfo call.
+		store, err := loadmgr.RecoverLoadConfigStore(ctx, deps)
+		require.NoError(t, err)
+		info, err := store.GetLoadInfo(ctx, 1, 7)
+		require.NoError(t, err)
+		require.EqualValues(t, 7, info.Version)
+		require.True(t, proto.Equal(persisted.RequiredFields[0], info.RequiredFields[0]))
+		require.True(t, proto.Equal(persisted.PreloadFields[0], info.LoadFields[0]))
+		require.Len(t, info.IndexInfoList, 2)
+		require.EqualValues(t, 10, info.IndexInfoList[0].IndexID)
+		require.Empty(t, server.GetQueryViewCollectionIndexInfos(1), "new configurations do not select retired or deleted indexes")
+		for _, id := range []int64{10, 11} {
+			saved := im.Indexes[1][id]
+			delete(im.Indexes[1], id)
+			_, err := store.GetLoadInfo(ctx, 1, 7)
+			require.ErrorIs(t, err, merr.ErrServiceNotReady, "missing exact metadata, including non-flat metadata, must still fail")
+			im.Indexes[1][id] = saved
+		}
+		typed.FieldID = 102
+		_, err = store.GetLoadInfo(ctx, 1, 7)
+		require.ErrorIs(t, err, merr.ErrServiceNotReady, "an index on another field cannot satisfy the reference")
+		typed.FieldID = 101
+	}
+	// Only reads were expected on the backing KV: recovery did not rewrite history.
+	after, err := proto.Marshal(persisted)
+	require.NoError(t, err)
+	require.Equal(t, wire, after)
 }
