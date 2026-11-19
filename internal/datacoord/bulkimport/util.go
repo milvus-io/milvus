@@ -414,8 +414,11 @@ func retryableImportSourceError(err error) bool {
 	}
 	// ResolveImportEZ can join the original SDK error to its own decryption
 	// error. An authoritative KMS response takes precedence over transport hints.
-	if code := sourceKMSHTTPStatus(err); code != 0 {
+	if code, awsCode := sourceKMSHTTPStatus(err); code != 0 {
 		switch code {
+		case http.StatusBadRequest:
+			// AWS KMS reports throttling as HTTP 400 alongside permanent request errors.
+			return awsCode == "ThrottlingException"
 		case http.StatusRequestTimeout, http.StatusTooManyRequests, http.StatusInternalServerError,
 			http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 			return true
@@ -454,19 +457,22 @@ func retryableImportSourceError(err error) bool {
 	return stderrors.As(err, &network) && network.Timeout()
 }
 
-func sourceKMSHTTPStatus(err error) int {
+func sourceKMSHTTPStatus(err error) (int, string) {
 	var azure *azcore.ResponseError
 	var google *googleapi.Error
-	var aws interface{ StatusCode() int }
+	var aws interface {
+		StatusCode() int
+		Code() string
+	}
 	switch {
 	case stderrors.As(err, &azure):
-		return azure.StatusCode
+		return azure.StatusCode, ""
 	case stderrors.As(err, &google):
-		return google.Code
+		return google.Code, ""
 	case stderrors.As(err, &aws):
-		return aws.StatusCode()
+		return aws.StatusCode(), aws.Code()
 	default:
-		return 0
+		return 0, ""
 	}
 }
 

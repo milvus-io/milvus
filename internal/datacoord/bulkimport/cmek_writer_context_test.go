@@ -264,7 +264,10 @@ func testBackupSourceOnEachDispatch(t *testing.T, newTask importContextFixture, 
 type kmsResponseError struct {
 	error
 	status int
+	code   string
 }
+
+func (e kmsResponseError) Code() string { return e.code }
 
 func (e kmsResponseError) StatusCode() int { return e.status }
 
@@ -293,9 +296,11 @@ func TestImportRetriesTransientSourceError(t *testing.T) {
 				{"Azure permission denied", &azcore.ResponseError{StatusCode: http.StatusForbidden, ErrorCode: "ForbiddenByRbac"}, false},
 				{"Google unavailable", &googleapi.Error{Code: http.StatusServiceUnavailable}, true},
 				{"Google permission denied", &googleapi.Error{Code: http.StatusForbidden, Message: "source access revoked"}, false},
-				{"AWS gateway timeout", kmsResponseError{errors.New("KMS request timed out"), http.StatusGatewayTimeout}, true},
-				{"AWS permission denied", kmsResponseError{errors.New("source access revoked"), http.StatusForbidden}, false},
-				{"AWS transport timeout", kmsResponseError{context.DeadlineExceeded, 0}, true},
+				{"AWS throttling", kmsResponseError{error: errors.New("decrypt limited"), status: http.StatusBadRequest, code: "ThrottlingException"}, true},
+				{"AWS invalid ciphertext", kmsResponseError{error: errors.New("decrypt failed"), status: http.StatusBadRequest, code: "InvalidCiphertextException"}, false},
+				{"AWS gateway timeout", kmsResponseError{error: errors.New("KMS request timed out"), status: http.StatusGatewayTimeout}, true},
+				{"AWS permission denied", kmsResponseError{error: errors.New("source access revoked"), status: http.StatusForbidden}, false},
+				{"AWS transport timeout", kmsResponseError{error: context.DeadlineExceeded, status: 0}, true},
 				{"HTTP denial takes precedence", errors.Join(&azcore.ResponseError{StatusCode: http.StatusForbidden}, context.DeadlineExceeded), false},
 				{"gRPC unavailable", status.Error(codes.Unavailable, "KMS unavailable"), true},
 				{"gRPC permission denied", status.Error(codes.PermissionDenied, "Decrypt permission revoked"), false},
