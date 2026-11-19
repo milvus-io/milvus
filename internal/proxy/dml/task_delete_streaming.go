@@ -13,7 +13,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -53,17 +52,17 @@ func (dt *DeleteTask) Execute(ctx context.Context) (err error) {
 	attempt := 0
 	// prepareFailed ends the request on a failure met before the first append,
 	// and leaves a later one to retryPreparation.
-	prepareFailed := func(err error) (bool, error) {
+	prepareFailed := func(ctx context.Context, err error) (bool, error) {
 		if attempt > 1 {
 			return fence.retryPreparation(ctx, dt.GetMetaCache(), dt.collectionID, err)
 		}
 		return false, err
 	}
-	err = retry.Handle(ctx, func() (bool, error) {
+	err = fence.run(ctx, func(ctx context.Context) (bool, error) {
 		route, err := resolveWriteRoute(ctx, dt.GetMetaCache(), dt.collectionID)
 		attempt++
 		if err != nil {
-			return prepareFailed(err)
+			return prepareFailed(ctx, err)
 		}
 		dt.vChannels = route.vchannels
 
@@ -78,11 +77,11 @@ func (dt *DeleteTask) Execute(ctx context.Context) (err error) {
 			collectionSchema,
 		)
 		if err != nil {
-			return prepareFailed(err)
+			return prepareFailed(ctx, err)
 		}
 		msgs, msgOffsets, err := dt.buildDeleteMessages(result, offsets, ez)
 		if err != nil {
-			return prepareFailed(err)
+			return prepareFailed(ctx, err)
 		}
 
 		mlog.Debug(ctx, "send delete request to virtual channels",
@@ -103,7 +102,7 @@ func (dt *DeleteTask) Execute(ctx context.Context) (err error) {
 			return false, nil
 		}
 		return fence.refresh(ctx, dt.GetMetaCache(), dt.collectionID, nil)
-	}, shardFencedRetryOptions()...)
+	})
 	if err != nil {
 		mlog.Warn(ctx, "append messages to wal failed", mlog.Err(err))
 		return fence.finalError(ctx, dt.collectionID, err, writtenPart{what: "deletions", pending: pending})

@@ -20,7 +20,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -186,18 +185,18 @@ func (ut *UpsertTask) appendUpsertAttempt(ctx context.Context, ez *message.Ciphe
 	// prepareFailed ends the request on a failure met before the first append,
 	// and leaves a later one to retryPreparation. A partial update never
 	// retries, so it never gets here past its first attempt.
-	prepareFailed := func(err error) (bool, error) {
+	prepareFailed := func(ctx context.Context, err error) (bool, error) {
 		if attempt > 1 {
 			return fence.retryPreparation(ctx, ut.GetMetaCache(), ut.collectionID, err)
 		}
 		return false, err
 	}
-	appendErr := retry.Handle(ctx, func() (bool, error) {
+	appendErr := fence.run(ctx, func(ctx context.Context) (bool, error) {
 		attempt++
 		route, err := ut.writeRoute(ctx)
 		if err != nil {
 			logger.Warn(ctx, "resolve the write route failed", mlog.Err(err))
-			return prepareFailed(err)
+			return prepareFailed(ctx, err)
 		}
 		// On a collection that was never split the route cannot differ from
 		// the one the proofs were taken against, so nothing is checked there.
@@ -209,12 +208,12 @@ func (ut *UpsertTask) appendUpsertAttempt(ctx context.Context, ez *message.Ciphe
 		insertMsgs, insertOffsets, err := ut.packInsertMessage(ctx, ez, route, pendingInserts)
 		if err != nil {
 			logger.Warn(ctx, "pack insert message failed", mlog.Err(err))
-			return prepareFailed(err)
+			return prepareFailed(ctx, err)
 		}
 		deleteMsgs, deleteOffsets, err := ut.packDeleteMessage(ctx, ez, route, pendingDeletes)
 		if err != nil {
 			logger.Warn(ctx, "pack delete message failed", mlog.Err(err))
-			return prepareFailed(err)
+			return prepareFailed(ctx, err)
 		}
 
 		messages := make([]message.MutableMessage, 0, len(insertMsgs)+len(deleteMsgs))
@@ -270,7 +269,7 @@ func (ut *UpsertTask) appendUpsertAttempt(ctx context.Context, ez *message.Ciphe
 			return false, nil
 		}
 		return fence.refresh(ctx, ut.GetMetaCache(), ut.collectionID, nil)
-	}, shardFencedRetryOptions()...)
+	})
 	if appendErr != nil {
 		logger.Warn(ctx, "append messages to wal failed", mlog.Err(appendErr))
 		failure := appendErr
@@ -415,9 +414,9 @@ func (ut *UpsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 	var err error
 	// Upsert never carries an idempotency key, so it passes no header decorator.
 	if ut.partitionKeys == nil {
-		msgs, msgOffsets, err = repackInsertDataForStreamingService(ut.TraceCtx(), ut.GetMetaCache(), route.vchannels, route.table, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion, ut.partialUpdateCASGroups, nil, pending)
+		msgs, msgOffsets, err = repackInsertDataForStreamingService(ctx, ut.GetMetaCache(), route.vchannels, route.table, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion, ut.partialUpdateCASGroups, nil, pending)
 	} else {
-		msgs, msgOffsets, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), ut.GetMetaCache(), route.vchannels, route.table, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schema.CollectionSchema, ut.schemaVersion, ut.partialUpdateCASGroups, nil, pending)
+		msgs, msgOffsets, err = repackInsertDataWithPartitionKeyForStreamingService(ctx, ut.GetMetaCache(), route.vchannels, route.table, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schema.CollectionSchema, ut.schemaVersion, ut.partialUpdateCASGroups, nil, pending)
 	}
 	if err != nil {
 		log.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
