@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"maps"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -406,7 +407,12 @@ func (s *propagationImportSuite) TestBackup() {
 		if s.sourceEncrypted && (stage == "preimport" && s.protocol == 2 || stage == "reshard" || stage == "import" && s.protocol == 2) {
 			s.fixture.assertRegistration(s.T(), nodeID, sourceEZ, 0)
 		}
-		if s.targetEncrypted && stage != "preimport" {
+		if s.targetEncrypted && stage == "import" && s.protocol == 2 {
+			events := s.fixture.observations(s.T(), "cpp")
+			s.Require().True(slices.ContainsFunc(events, func(event keyObservation) bool {
+				return event.NodeID == nodeID && event.EZID == s.ezID && event.CollectionID == collectionID && event.Operation == "write_keyset"
+			}), "import writer did not use the target keyset on the executing DataNode")
+		} else if s.targetEncrypted && stage != "preimport" {
 			s.fixture.assertRegistration(s.T(), nodeID, s.ezID, collectionID)
 		}
 		if stage == "reshard" {

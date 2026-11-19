@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <utility>
+
 #include "common/type_c.h"
 #include "parquet/encryption/encryption.h"
 #include "parquet/properties.h"
@@ -22,6 +24,15 @@ class KeyRetriever : public parquet::DecryptionKeyRetriever {
     std::string
     GetKey(const std::string& key_metadata) override;
 };
+
+// Register Base64 source material only in the plugin's read cache.
+void
+RegisterImportReadKeyset(const CPluginContext* context);
+
+// Raw Parquet DEK and footer metadata. Import writers request a fresh DEK
+// from the supplied target keyset without changing the ordinary primary.
+std::pair<std::string, std::string>
+GetPackedWriterKeys(const CPluginContext* context, bool for_import);
 
 parquet::ReaderProperties
 GetReaderProperties();

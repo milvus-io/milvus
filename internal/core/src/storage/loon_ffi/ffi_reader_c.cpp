@@ -18,7 +18,6 @@
 #include <string>
 #include <vector>
 
-#include "PluginInterface.h"
 #include "arrow/result.h"
 #include "arrow/status.h"
 #include "common/CGoCatch.h"
@@ -34,11 +33,37 @@
 #include "monitor/scope_metric.h"
 #include "storage/KeyRetriever.h"
 #include "storage/PluginLoader.h"
+#include "storage/plugin/PluginInterface.h"
 #include "storage/loon_ffi/ffi_reader_c.h"
 #include "storage/loon_ffi/util.h"
 #include <arrow/array.h>
 #include <arrow/record_batch.h>
 #include "storage/StatusToErrorCode.h"
+
+namespace {
+void
+SetKeyRetriever(milvus_storage::api::Reader& reader) {
+    auto key_retriever = std::make_shared<milvus::storage::KeyRetriever>();
+    reader.set_keyretriever(
+        [key_retriever](const std::string& metadata) -> std::string {
+            return key_retriever->GetKey(metadata);
+        });
+}
+}  // namespace
+
+CStatus
+RegisterPackedImportReadKeyset(const CPluginContext* source,
+                               CFFIPackedReader ffi_reader) {
+    try {
+        milvus::storage::RegisterImportReadKeyset(source);
+        if (ffi_reader != nullptr) {
+            SetKeyRetriever(
+                *static_cast<milvus_storage::api::Reader*>(ffi_reader));
+        }
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
 
 /**
  * @brief Creates a Loon reader with optional CMEK decryption support.
@@ -88,11 +113,7 @@ GetLoonReader(
         plugin_ptr->Update(c_plugin_context->ez_id,
                            c_plugin_context->collection_id,
                            std::string(c_plugin_context->key));
-        auto key_retriever = std::make_shared<milvus::storage::KeyRetriever>();
-        reader->set_keyretriever(
-            [key_retriever](const std::string& metadata) -> std::string {
-                return key_retriever->GetKey(metadata);
-            });
+        SetKeyRetriever(*reader);
     }
 
     return reader;

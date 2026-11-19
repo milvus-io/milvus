@@ -86,22 +86,21 @@ var (
 	PropertyWriterEncAlgo   = C.GoString(C.loon_properties_writer_enc_algorithm) // Encryption algorithm (e.g., "AES_GCM_V1")
 )
 
-func writerEncryptionProperties(storagePluginContext *indexcgopb.StoragePluginContext) (map[string]string, error) {
-	if storagePluginContext == nil {
+func writerEncryptionProperties(storagePluginContext *indexcgopb.StoragePluginContext, forImport bool) (map[string]string, error) {
+	if storagePluginContext == nil && !forImport {
 		return nil, nil
 	}
 
 	var cKey *C.char
 	var cMeta *C.char
-	encKey := C.CString(storagePluginContext.EncryptionKey)
-	defer C.free(unsafe.Pointer(encKey))
-
-	pluginContext := C.CPluginContext{
-		ez_id:         C.int64_t(storagePluginContext.EncryptionZoneId),
-		collection_id: C.int64_t(storagePluginContext.CollectionId),
-		key:           encKey,
+	pluginContext, release := newCPluginContext(storagePluginContext)
+	defer release()
+	var status C.CStatus
+	if forImport {
+		status = C.GetImportEncParams(pluginContext, &cKey, &cMeta)
+	} else {
+		status = C.GetEncParams(pluginContext, &cKey, &cMeta)
 	}
-	status := C.GetEncParams(&pluginContext, &cKey, &cMeta)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
 	}

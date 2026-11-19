@@ -24,6 +24,8 @@
 #include <arrow/status.h>
 #include <arrow/type.h>
 #include <arrow/util/key_value_metadata.h>
+#include <folly/ScopeGuard.h>
+#include <gmock/gmock.h>
 #include <cstdint>
 #include <memory>
 #include <numeric>
@@ -36,7 +38,10 @@
 #include "segcore/column_groups_c.h"
 #include "segcore/packed_reader_c.h"
 #include "segcore/packed_writer_c.h"
+#include "storage/PluginLoader.h"
+#include "storage/loon_ffi/ffi_reader_c.h"
 #include "test_utils/Constants.h"
+#include "test_utils/PlannerCipherPlugin.h"
 
 TEST(CPackedTest, PackedWriterAndReader) {
     std::vector<int64_t> test_data(5);
@@ -141,7 +146,8 @@ namespace {
 void
 WriteInt64File(const std::string& file_path,
                int64_t num_rows,
-               std::shared_ptr<arrow::Schema>* out_schema) {
+               std::shared_ptr<arrow::Schema>* out_schema,
+               CPluginContext* target = nullptr) {
     std::vector<int64_t> values(num_rows);
     std::iota(values.begin(), values.end(), 0);
     arrow::Int64Builder builder;
@@ -168,9 +174,24 @@ WriteInt64File(const std::string& file_path,
     AddCColumnSplit(cgs, group, 1);
 
     CPackedWriter writer = nullptr;
-    auto status = NewPackedWriter(
-        &c_write_schema, 10 * 1024 * 1024, paths, 1, 0, cgs, &writer, nullptr);
-    ASSERT_EQ(status.error_code, 0);
+    auto status = target == nullptr ? NewPackedWriter(&c_write_schema,
+                                                      10 * 1024 * 1024,
+                                                      paths,
+                                                      1,
+                                                      0,
+                                                      cgs,
+                                                      &writer,
+                                                      nullptr)
+                                    : NewImportPackedWriter(&c_write_schema,
+                                                            10 * 1024 * 1024,
+                                                            paths,
+                                                            1,
+                                                            0,
+                                                            cgs,
+                                                            nullptr,
+                                                            &writer,
+                                                            target);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
 
     struct ArrowArray carray;
     struct ArrowSchema cschema;
@@ -184,7 +205,97 @@ WriteInt64File(const std::string& file_path,
     FreeCColumnSplits(cgs);
 }
 
+class TestParquetKey : public milvus::test::PlannerIdentityEncryptor,
+                       public milvus::test::PlannerIdentityDecryptor {
+ public:
+    std::string
+    GetKey() const override {
+        return std::string(32, '\0');
+    }
+};
+
+class PackedImportCipher : public milvus::test::PlannerCipherPlugin,
+                           public milvus::storage::plugin::IImportCipherPlugin {
+ public:
+    using EncryptorResult =
+        std::pair<std::shared_ptr<milvus::storage::plugin::IEncryptor>,
+                  std::string>;
+    MOCK_METHOD(void,
+                Update,
+                (int64_t, int64_t, const std::string&),
+                (override));
+    MOCK_METHOD(void,
+                RegisterReadKeyset,
+                (int64_t, int64_t, const std::string&),
+                (override));
+    MOCK_METHOD(EncryptorResult,
+                GetEncryptorForKeyset,
+                (int64_t, int64_t, const std::string&),
+                (const, override));
+    MOCK_METHOD(std::shared_ptr<milvus::storage::plugin::IDecryptor>,
+                GetDecryptor,
+                (int64_t, int64_t, const std::string&),
+                (const, override));
+};
+
 }  // namespace
+
+TEST(CPackedTest, ImportWriterAndReadersUseTaskKeysets) {
+    auto& loader = milvus::storage::PluginLoader::GetInstance();
+    auto previous = loader.getCipherPlugin();
+    auto restore = folly::makeGuard([&] {
+        loader.unregisterPluginForTest("CipherPlugin");
+        if (previous) {
+            loader.registerPluginForTest(previous);
+        }
+    });
+    auto cipher = std::make_shared<testing::StrictMock<PackedImportCipher>>();
+    loader.registerPluginForTest(cipher);
+    auto dek = std::make_shared<TestParquetKey>();
+    CPluginContext target{17, 23, "dGFyZ2V0"};
+    CPluginContext source{17, 0, "c291cmNl"};
+    EXPECT_CALL(*cipher, RegisterReadKeyset(17, 0, "c291cmNl")).Times(2);
+    EXPECT_CALL(*cipher, GetEncryptorForKeyset(17, 23, "dGFyZ2V0"))
+        .WillOnce(testing::Return(
+            PackedImportCipher::EncryptorResult{dek, "target-edek"}));
+    EXPECT_CALL(*cipher, GetDecryptor(17, 23, "target-edek"))
+        .Times(testing::AtLeast(2))
+        .WillRepeatedly(testing::Return(dek));
+
+    auto path = TestLocalPath + "import_task_keysets";
+    std::shared_ptr<arrow::Schema> schema;
+    ASSERT_NO_FATAL_FAILURE(WriteInt64File(path, 3, &schema, &target));
+    char* paths[] = {path.data()};
+    // Each open can register an older source for the same EZ independently.
+    auto status = RegisterPackedImportReadKeyset(&source, nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    int64_t* ids = nullptr;
+    int64_t* counts = nullptr;
+    status = GetPackedFileFieldIDs(paths, 1, nullptr, nullptr, &ids, &counts);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    auto free_footer = folly::makeGuard([&] {
+        free(ids);
+        free(counts);
+    });
+    ASSERT_EQ(counts[0], 1);
+    EXPECT_EQ(ids[0], 100);
+
+    status = RegisterPackedImportReadKeyset(&source, nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    ArrowSchema read_schema{};
+    ASSERT_TRUE(arrow::ExportSchema(*schema, &read_schema).ok());
+    CPackedReader reader = nullptr;
+    status = NewPackedReader(
+        paths, 1, &read_schema, 1 << 20, false, &reader, nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    auto close_reader = folly::makeGuard([&] { CloseReader(reader); });
+    ArrowArray batch{};
+    status = ReadNext(reader, &batch, &read_schema);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    auto read = arrow::ImportRecordBatch(&batch, &read_schema);
+    ASSERT_TRUE(read.ok()) << read.status().ToString();
+    EXPECT_EQ((*read)->num_rows(), 3);
+}
 
 // The eager mode must return the same rows, in the same order, as the lazy
 // mode. The last mode uses a read buffer smaller than the data, so the reader

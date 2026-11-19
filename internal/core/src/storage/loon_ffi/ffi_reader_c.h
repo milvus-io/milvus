@@ -33,6 +33,12 @@ extern "C" {
  */
 typedef void* CFFIPackedReader;
 
+// The V2 packed reader and footer probe already use a key retriever; pass
+// NULL for them. An FFI reader installs its retriever before opening its stream.
+CStatus
+RegisterPackedImportReadKeyset(const CPluginContext* source,
+                               CFFIPackedReader ffi_reader);
+
 /**
  * @brief Creates a new packed FFI reader from manifest content directly.
  *

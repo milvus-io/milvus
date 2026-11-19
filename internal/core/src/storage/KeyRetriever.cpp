@@ -5,7 +5,6 @@
 #include <exception>
 #include <mutex>
 
-#include "PluginInterface.h"
 #include "arrow/io/caching.h"
 #include "common/EasyAssert.h"
 #include "fmt/format.h"
@@ -13,13 +12,68 @@
 #include "log/Log.h"
 #include "parquet/properties.h"
 #include "storage/PluginLoader.h"
+#include "storage/plugin/PluginInterface.h"
 
 namespace milvus::storage {
 namespace {
 std::mutex arrow_reader_properties_mutex;
 parquet::ArrowReaderProperties arrow_reader_properties =
     parquet::default_arrow_reader_properties();
+
+std::shared_ptr<plugin::IImportCipherPlugin>
+RequireImportCipher(const CPluginContext* context) {
+    if (!context || !context->key || !*context->key) {
+        ThrowInfo(ErrorCode::ConfigInvalid, "missing import cipher keyset");
+    }
+    auto plugin = std::dynamic_pointer_cast<plugin::IImportCipherPlugin>(
+        PluginLoader::GetInstance().getCipherPlugin());
+    if (!plugin) {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "cipher plugin does not support import keysets");
+    }
+    return plugin;
+}
 }  // namespace
+
+void
+RegisterImportReadKeyset(const CPluginContext* context) {
+    auto plugin = RequireImportCipher(context);
+    plugin->RegisterReadKeyset(
+        context->ez_id, context->collection_id, context->key);
+}
+
+std::pair<std::string, std::string>
+GetPackedWriterKeys(const CPluginContext* context, bool for_import) {
+    std::pair<std::shared_ptr<plugin::IEncryptor>, std::string> result;
+    if (for_import) {
+        auto plugin = RequireImportCipher(context);
+        result = plugin->GetEncryptorForKeyset(
+            context->ez_id, context->collection_id, context->key);
+    } else {
+        AssertInfo(context != nullptr, "missing cipher context");
+        auto plugin = PluginLoader::GetInstance().getCipherPlugin();
+        AssertInfo(plugin != nullptr, "failed to get cipher plugin");
+        plugin->Update(context->ez_id, context->collection_id, context->key);
+        result = plugin->GetEncryptor(context->ez_id, context->collection_id);
+    }
+    if (!result.first) {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "cipher plugin returned no encryptor");
+    }
+    auto key = result.first->GetKey();
+    if (for_import &&
+        ((key.size() != 16 && key.size() != 24 && key.size() != 32) ||
+         result.second.empty() ||
+         result.second.find('\0') != std::string::npos)) {
+        ThrowInfo(
+            ErrorCode::Unsupported,
+            "cipher plugin returned unusable import encryption parameters");
+    }
+    return {
+        std::move(key),
+        EncodeKeyMetadata(
+            context->ez_id, context->collection_id, std::move(result.second))};
+}
 
 std::string
 KeyRetriever::GetKey(const std::string& key_metadata) {
@@ -33,6 +87,10 @@ KeyRetriever::GetKey(const std::string& key_metadata) {
     }
     auto decryptor = plugin->GetDecryptor(
         context->ez_id, context->collection_id, std::string(context->key));
+    if (!decryptor) {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "cipher plugin returned no decryptor");
+    }
     return decryptor->GetKey();
 }
 

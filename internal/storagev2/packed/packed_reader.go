@@ -51,7 +51,16 @@ import (
 type ReaderOption func(*readerOptions)
 
 type readerOptions struct {
-	eagerPrebuffer bool
+	eagerPrebuffer   bool
+	importReadKeyset bool
+}
+
+// WithImportReadKeyset registers the supplied source keyset for decrypting
+// packed files without changing the ordinary write keyset.
+func WithImportReadKeyset() ReaderOption {
+	return func(o *readerOptions) {
+		o.importReadKeyset = true
+	}
 }
 
 // WithEagerPrebuffer makes every read round fetch all of its byte ranges at
@@ -140,16 +149,11 @@ func NewPackedReaderWithExtfs(
 	var cPackedReader C.CPackedReader
 	var status C.CStatus
 
-	var pluginContextPtr *C.CPluginContext
-	if storagePluginContext != nil {
-		ckey := C.CString(storagePluginContext.EncryptionKey)
-		defer C.free(unsafe.Pointer(ckey))
-		var pluginContext C.CPluginContext
-		pluginContext.ez_id = C.int64_t(storagePluginContext.EncryptionZoneId)
-		pluginContext.collection_id = C.int64_t(storagePluginContext.CollectionId)
-		pluginContext.key = ckey
-		pluginContextPtr = &pluginContext
+	pluginContextPtr, releasePluginContext, err := packedReadContext(storagePluginContext, options.importReadKeyset)
+	if err != nil {
+		return nil, err
 	}
+	defer releasePluginContext()
 
 	if cProperties != nil {
 		status = C.NewPackedReaderWithProperties(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerPrebuffer, cProperties, cFilesystemPath, &cPackedReader, pluginContextPtr)
@@ -267,6 +271,15 @@ func (pr *PackedReader) Close() error {
 // NewPackedReader does. A failed read keeps the storage error code the C++
 // side attached (transient storage errors stay retriable).
 func GetPackedFileFieldIDs(filePaths []string, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) ([][]int64, error) {
+	return getPackedFileFieldIDs(filePaths, storageConfig, storagePluginContext, false)
+}
+
+// GetImportPackedFileFieldIDs decrypts each footer using the import read cache.
+func GetImportPackedFileFieldIDs(filePaths []string, storageConfig *indexpb.StorageConfig, source *indexcgopb.StoragePluginContext) ([][]int64, error) {
+	return getPackedFileFieldIDs(filePaths, storageConfig, source, true)
+}
+
+func getPackedFileFieldIDs(filePaths []string, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, forImport bool) ([][]int64, error) {
 	if len(filePaths) == 0 {
 		return nil, nil
 	}
@@ -282,7 +295,10 @@ func GetPackedFileFieldIDs(filePaths []string, storageConfig *indexpb.StorageCon
 		defer release()
 		cStorageConfigPtr = &cStorageConfig
 	}
-	cPluginContext, releasePluginContext := newCPluginContext(storagePluginContext)
+	cPluginContext, releasePluginContext, err := packedReadContext(storagePluginContext, forImport)
+	if err != nil {
+		return nil, err
+	}
 	defer releasePluginContext()
 
 	var cFieldIDs *C.int64_t
