@@ -75,6 +75,32 @@ answers from the lineage record of the collection. A copy that the replicate
 checkpoint already covers does not wait. The wait ends with the replicate
 stream; the stream delivers the copy again after it reconnects.
 
+## Consumer Ack Observer
+
+`registry.RegisterConsumerAckObserver(messageType, observer)` registers a
+function that the broadcaster calls for every acknowledgement a StreamingNode
+sends from the consuming side (`Broadcaster.Ack`), as long as the task is not a
+tombstone. It runs before the task records the acknowledgement. An error fails
+the `Ack` RPC and the StreamingNode sends the acknowledgement again, so an
+observer can make a durable note of it.
+
+The observed message types are a fixed set in the registry. An acknowledgement
+of an observed type waits until its observer is registered, as an ack callback
+waits for its registration: the broadcaster accepts acknowledgements before the
+coordinators have finished starting, and an acknowledgement that passed
+unobserved would not be sent again.
+
+It exists for a broadcast without `AckSyncUp` whose issuer still needs to know
+when the local work of one copy is durable. Such a broadcast is self-acked at
+append (FastAck), its ack callback runs at once, and the later consumer-side
+acknowledgement changes nothing in the task. `SplitShard` is the only user:
+DataCoord observes the acknowledgement of the copy on the source VChannel,
+which the StreamingNode sends after it has flushed the segments the fence
+sealed, and the last step of the `SplitShard` ack callback waits for it. The
+callback holds the collection's resource key while it waits, which keeps other
+DDL of the collection behind the split. An observer may run many times for one
+copy and must be idempotent.
+
 ## Idempotent Broadcast
 
 A broadcast message carrying the `_ik` idempotency key property is additionally indexed by that key. A later broadcast presenting the same key short-circuits: it creates no task, **waits for the original broadcast's ack callback to complete**, and returns the ORIGINAL broadcast's result, with the original message in `BroadcastAppendResult.Duplicated`. The lookup and the registration are one critical section on the manager's lock, so two concurrent same-key requests cannot both miss regardless of which resource keys they hold. The wait is what makes the duplicate answer equivalent to a fresh one: the original is not always serialized in front of the retry by a resource lock — a retry that raced a rename holds the stale name's lock, and a task recovered from a replicated WAL holds no lock at all — and without the wait such a retry would be answered with a broadcastID whose effects (for import, the job created in the ack callback) do not exist yet. After the wait, `AppendResults` is rebuilt from the original's persisted per-vchannel checkpoints and is never nil, so a caller that only reads append results cannot tell a duplicate from a fresh broadcast. The wait is bounded by the request context; a caller whose context expires gets its own timeout, not an unbacked ID.

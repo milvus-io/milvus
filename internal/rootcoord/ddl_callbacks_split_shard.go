@@ -45,6 +45,8 @@ type SplitShardAckHook func(ctx context.Context, result message.BroadcastResultS
 var (
 	splitShardAckHookMu sync.RWMutex
 	splitShardAckHook   SplitShardAckHook
+	// splitShardAppliedHook runs after the collection metadata is written.
+	splitShardAppliedHook SplitShardAckHook
 )
 
 // RegisterSplitShardAckHook sets the hook the SplitShard ack callback runs
@@ -54,6 +56,28 @@ func RegisterSplitShardAckHook(hook SplitShardAckHook) {
 	splitShardAckHookMu.Lock()
 	defer splitShardAckHookMu.Unlock()
 	splitShardAckHook = hook
+}
+
+// RegisterSplitShardAppliedHook sets the hook the SplitShard ack callback runs
+// last, after the collection metadata is written and the proxy caches are
+// invalidated. A nil hook removes it.
+//
+// The callback holds the broadcast resource key of the collection until it
+// returns, so a hook that waits keeps every other DDL of the collection behind
+// the split without delaying the write path, which already routes by the new
+// metadata. DataCoord registers one that waits until the residual of the
+// source has flushed. Like the first hook it runs on every cluster, possibly
+// many times, and an error makes the broadcaster run the whole callback again.
+func RegisterSplitShardAppliedHook(hook SplitShardAckHook) {
+	splitShardAckHookMu.Lock()
+	defer splitShardAckHookMu.Unlock()
+	splitShardAppliedHook = hook
+}
+
+func getSplitShardAppliedHook() SplitShardAckHook {
+	splitShardAckHookMu.RLock()
+	defer splitShardAckHookMu.RUnlock()
+	return splitShardAppliedHook
 }
 
 func getSplitShardAckHook() SplitShardAckHook {
@@ -78,6 +102,8 @@ func getSplitShardAckHook() SplitShardAckHook {
 //     collection that already records the split is left as it is.
 //  4. Invalidate the proxy caches of the collection, so that the proxies route
 //     by the new routing.
+//  5. Run the applied hook of the other coordinators. It may wait: the write
+//     path is switched already.
 //
 // Every failure is returned and the broadcaster runs the callback again. The
 // source is already fenced when the callback runs, so the split cannot be
@@ -139,7 +165,15 @@ func (c *DDLCallback) splitShardV2AckCallback(ctx context.Context, result messag
 		}
 		return merr.Wrap(err, "collect the proxy caches of the collection")
 	}
-	return c.ExpireCaches(ctx, expirations)
+	if err := c.ExpireCaches(ctx, expirations); err != nil {
+		return err
+	}
+	if hook := getSplitShardAppliedHook(); hook != nil {
+		if err := hook(ctx, result); err != nil {
+			return merr.Wrap(err, "run the shard split applied hook")
+		}
+	}
+	return nil
 }
 
 // splitShardAppliedResolver answers the broadcaster of a secondary cluster
@@ -185,6 +219,13 @@ type SplitShardRequest struct {
 	// ShardBy is the routing key expression to record if the collection has
 	// none yet. Ignored if Split is set.
 	ShardBy string
+	// Admit, if set, is the issuer's own admission of the split. It runs
+	// first while the exclusive resource key of the collection is held,
+	// before the collection is read and the message is built; an error ends
+	// the broadcast with nothing appended. Every DDL of the collection whose
+	// ack callback ran before is visible to it, and none starts until the
+	// split's own callback returns.
+	Admit func(ctx context.Context) error
 }
 
 // BroadcastSplitShard issues a shard split: it builds the SplitShard message
@@ -205,6 +246,11 @@ func (c *Core) BroadcastSplitShard(ctx context.Context, req *SplitShardRequest) 
 	}
 	dbName, collectionName := coll.DBName, coll.Name
 	return shardsplit.Broadcast(ctx, dbName, collectionName, func(ctx context.Context) (*shardsplit.Plan, error) {
+		if req.Admit != nil {
+			if err := req.Admit(ctx); err != nil {
+				return nil, err
+			}
+		}
 		coll, err := c.meta.GetCollectionByID(ctx, "", req.CollectionID, typeutil.MaxTimestamp, false)
 		if err != nil {
 			return nil, merr.Wrap(err, "read the collection to split a shard")

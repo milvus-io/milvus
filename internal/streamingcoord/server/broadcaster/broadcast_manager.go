@@ -345,6 +345,11 @@ func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMe
 			mlog.String("vchannel", msg.VChannel()))
 		return nil
 	}
+	// Before the task: an observer that fails leaves the copy unacknowledged,
+	// so the StreamingNode sends the acknowledgement again.
+	if err := registry.CallConsumerAckObserver(ctx, msg); err != nil {
+		return err
+	}
 	return t.Ack(ctx, msg)
 }
 

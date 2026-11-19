@@ -63,7 +63,10 @@ type splitShardTestEnv struct {
 func newSplitShardTestEnv(t *testing.T, properties ...*commonpb.KeyValuePair) *splitShardTestEnv {
 	mockQueryViewDDLResource(t)
 	core := initStreamingSystemAndCore(t)
-	t.Cleanup(func() { RegisterSplitShardAckHook(nil) })
+	t.Cleanup(func() {
+		RegisterSplitShardAckHook(nil)
+		RegisterSplitShardAppliedHook(nil)
+	})
 	ctx := context.Background()
 	env := &splitShardTestEnv{
 		t: t, core: core, callback: &DDLCallback{Core: core},
@@ -301,6 +304,46 @@ func TestSplitShardAckCallbackRunsTheHookBeforeTheMetaWrite(t *testing.T) {
 	require.Len(t, env.collection().SplitLineages, 1)
 }
 
+func TestSplitShardAckCallbackRunsTheAppliedHookLast(t *testing.T) {
+	env := newSplitShardTestEnv(t)
+	ctx := context.Background()
+	result := env.newResult(7, env.source, env.targets, [4]uint64{1000, 1010, 1020, 1030})
+
+	var order []string
+	RegisterSplitShardAckHook(func(context.Context, message.BroadcastResultSplitShardMessageV2) error {
+		order = append(order, "hook")
+		return nil
+	})
+	hookErr := errors.New("the residual has not flushed")
+	calls := 0
+	RegisterSplitShardAppliedHook(func(_ context.Context, got message.BroadcastResultSplitShardMessageV2) error {
+		calls++
+		order = append(order, "applied")
+		require.Equal(t, int64(7), got.Message.Header().GetSplitTaskId())
+		// The routing is published and the proxy caches are invalidated before
+		// the hook runs: a hook that waits does not hold the write path.
+		require.NotContains(t, env.collection().VirtualChannelNames, env.source)
+		require.Len(t, env.collection().SplitLineages, 1)
+		require.Equal(t, calls, env.expired)
+		if calls == 1 {
+			return hookErr
+		}
+		return nil
+	})
+
+	// A failing applied hook fails the callback: the broadcaster keeps the
+	// resource key and runs the callback again. The split stays applied.
+	require.ErrorIs(t, env.callback.splitShardV2AckCallback(ctx, result), hookErr)
+	require.Len(t, env.collection().SplitLineages, 1)
+	require.NoError(t, env.callback.splitShardV2AckCallback(ctx, result))
+	require.Equal(t, []string{"hook", "applied", "hook", "applied"}, order)
+
+	// A failed cache invalidation ends the callback before the hook.
+	env.expireErr = errors.New("proxy is down")
+	require.Error(t, env.callback.splitShardV2AckCallback(ctx, result))
+	require.Equal(t, 2, calls)
+}
+
 func TestSplitShardAckCallbackRefusesAMessageItCannotApply(t *testing.T) {
 	env := newSplitShardTestEnv(t)
 	ctx := context.Background()
@@ -515,6 +558,38 @@ func TestBroadcastSplitShard(t *testing.T) {
 	require.Equal(t, env.targets[0], coll.SplitLineages[1].SourceVChannel)
 	_, err = coll.Routing().Table()
 	require.NoError(t, err)
+}
+
+// The issuer's admission runs inside the plan, under the resource key, and a
+// refusal appends nothing.
+func TestBroadcastSplitShardRunsTheIssuerAdmissionFirst(t *testing.T) {
+	env := newSplitShardTestEnv(t)
+	ctx := context.Background()
+
+	refusal := merr.WrapErrServiceUnavailableMsg("an import of the collection is not finished")
+	admitted := 0
+	_, err := env.core.BroadcastSplitShard(ctx, &SplitShardRequest{
+		CollectionID: env.collID, SplitTaskID: 7, Source: env.source, Targets: env.targets,
+		Admit: func(context.Context) error {
+			admitted++
+			return refusal
+		},
+	})
+	require.ErrorIs(t, err, refusal)
+	require.Equal(t, 1, admitted)
+	require.Empty(t, env.collection().SplitLineages)
+	require.Zero(t, env.expired)
+
+	_, err = env.core.BroadcastSplitShard(ctx, &SplitShardRequest{
+		CollectionID: env.collID, SplitTaskID: 7, Source: env.source, Targets: env.targets,
+		Admit: func(context.Context) error {
+			admitted++
+			return nil
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, admitted)
+	require.Len(t, env.collection().SplitLineages, 1)
 }
 
 func TestBroadcastSplitShardRefusesANamespaceCollection(t *testing.T) {

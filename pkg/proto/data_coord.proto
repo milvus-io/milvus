@@ -2486,3 +2486,53 @@ message SnapshotSummary {
   int64 create_ts = 2;
   string description = 3;
 }
+
+// SplitShardTaskState is the local progress of one shard split on this
+// cluster. It only moves forward. Every cluster that consumes the SplitShard
+// message keeps its own record and advances it on its own schedule.
+enum SplitShardTaskState {
+  SplitShardTaskNone            = 0;
+  // The copy of the message on the source was consumed by its StreamingNode
+  // before the ack callback recorded the split. Only source_acked is known.
+  SplitShardTaskPending         = 1;
+  // The ack callback has declared the targets and recorded the split. The
+  // residual of the source may still be unflushed.
+  SplitShardTaskWindowOpen      = 2;
+  // Every segment of the source that was growing at the fence is flushed.
+  SplitShardTaskResidualFlushed = 3;
+  // Every segment of the source carries a target label.
+  SplitShardTaskRewriteDone     = 4;
+  // The segments of the source were moved to the targets in the DataView.
+  SplitShardTaskAdopted         = 5;
+  // The source vchannel is retired on this cluster.
+  SplitShardTaskRetired         = 6;
+}
+
+// SplitShardTaskTarget is one target shard of a shard split.
+message SplitShardTaskTarget {
+  string vchannel          = 1;
+  // The time tick of the SplitShard copy on this target, in the WAL of this
+  // cluster.
+  uint64 genesis_time_tick = 2;
+}
+
+// SplitShardTask is the record DataCoord keeps of one shard split. It is
+// written by the consumers of the SplitShard message, never by the trigger,
+// so that a cluster that received the message through replication ends with
+// the same record. Every time tick in it is one of this cluster's own WAL.
+message SplitShardTask {
+  int64  task_id                        = 1;
+  int64  collection_id                  = 2;
+  string source_vchannel                = 3;
+  repeated SplitShardTaskTarget targets = 4;
+  // T_switch: the time tick of the SplitShard copy on the source.
+  uint64 switch_time_tick               = 5;
+  SplitShardTaskState state             = 6;
+  // The StreamingNode of the source has acknowledged the copy on the source:
+  // it has flushed the residual and materialized the L0 data up to the fence.
+  bool   source_acked                   = 7;
+  // Wall clock of this coordinator, unix seconds. For metrics and logs only;
+  // no decision reads them.
+  int64  record_time                    = 8;
+  int64  residual_flushed_time          = 9;
+}

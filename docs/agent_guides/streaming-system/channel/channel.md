@@ -6,7 +6,7 @@ The WAL is partitioned into three channel types: **PChannel** (physical), **VCha
 
 A PChannel is the **fundamental unit of WAL partitioning**. Each PChannel maps 1:1 to a topic/partition in the WAL backend. A PChannel is assigned to exactly one StreamingNode at a time by the Balancer, identified by a monotonically increasing **Term** that fences stale writes from previous assignments.
 
-**Naming**: `<prefix>_<index>`, e.g. `by-dev-rootcoord-dml_0`. Count is fixed at startup, configured by `rootCoord.dmlChannelNum` (default: 16).
+**Naming**: `<prefix>_<index>`, e.g. `by-dev-rootcoord-dml_0`. The initial count comes from `rootCoord.dmlChannelNum` (default: 16). `ConfigChannelProvider` watches for newly discovered channel names and `ChannelManager.AddPChannels` persists them before assignment. Discovery alone does not mean a read-write WAL is ready. Shard split allocation uses `AllocVChannelParam.RequireReady` to exclude uninitialized, assigning and read-only channels; the split issuer rechecks its chosen targets before the source fence. This does not automatically expand the configured channel pool.
 
 ## VChannel (Virtual Channel)
 

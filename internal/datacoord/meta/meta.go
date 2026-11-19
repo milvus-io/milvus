@@ -101,6 +101,11 @@ type Meta struct {
 	// Installed by Coordinator before background planning starts. Standalone
 	// metadata users can continue using their supplied collection snapshots.
 	PreparationSchema func(context.Context, int64, *schemapb.CollectionSchema) (*schemapb.CollectionSchema, error)
+	// L0CompactionSuspended reports whether L0 compaction on a vchannel is
+	// suspended. The shard split manager sets it: the L0 segments of a split
+	// target are kept until the segments of the source are adopted. Nil means
+	// that no vchannel is suspended.
+	L0CompactionSuspended func(vchannel string) bool
 
 	Segments *SegmentsInfo // segment id to segment info
 	// segmentLocks are the segment writer locks (see segment_locks.go). The
@@ -2386,6 +2391,12 @@ func (m *Meta) BatchSaveDropSegments(ctx context.Context, channel string, modSeg
 }
 
 // GetSegmentsByChannel returns all segment info which insert channel equals provided `dmlCh`
+// IsL0CompactionSuspended reports whether the L0 segments of a vchannel must
+// not be compacted now, see L0CompactionSuspended.
+func (m *Meta) IsL0CompactionSuspended(vchannel string) bool {
+	return m.L0CompactionSuspended != nil && m.L0CompactionSuspended(vchannel)
+}
+
 func (m *Meta) GetSegmentsByChannel(channel string) []*SegmentInfo {
 	return m.SelectSegments(m.Ctx, SegmentFilterFunc(IsSegmentHealthy), WithChannel(channel))
 }
