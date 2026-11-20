@@ -71,15 +71,16 @@ func (s *Stream) read(ctx context.Context, opt wal.TransformLogSubscriptionOptio
 		if err != nil {
 			return err
 		}
+		if batch.FastForwardTimeTick > after && after < through {
+			return wal.ErrTransformLogStartPointTruncated
+		}
 		for _, entry := range batch.Entries {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 			opt.Handler.Handle(wal.TransformLogStreamEvent{SubscriptionID: opt.SubscriptionID, VChannel: opt.VChannel, Entry: entry})
 		}
-		// Accept Summary's retained lower bound, including an entirely retired
-		// bounded interval. Never advance beyond the requested end.
-		after = max(batch.CoveredThrough, min(batch.FastForwardTimeTick, through))
+		after = batch.CoveredThrough
 		if after >= through || after >= batch.ReadableThrough {
 			if opt.EndTimeTick == 0 || after >= through {
 				opt.Handler.Handle(wal.TransformLogStreamEvent{SubscriptionID: opt.SubscriptionID, VChannel: opt.VChannel, SyncUp: &wal.TransformLogSyncUp{TimeTick: after}})

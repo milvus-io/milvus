@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
@@ -116,7 +117,12 @@ func (r *Runtime) dispatchMessage(ctx context.Context, msg message.ImmutableMess
 			}
 		}
 		if applyTransform {
-			return r.applyLiveDeleteMessage(ctx, msg)
+			return r.applyTransformLogEntry(ctx, messageutil.BuildTransformLogEntry(msg, messageutil.TransformEntryOption{}))
+		}
+		return nil
+	case message.MessageTypeUpdate:
+		if applyTransform {
+			return r.applyTransformLogEntry(ctx, messageutil.BuildTransformLogEntry(msg, messageutil.TransformEntryOption{}))
 		}
 		return nil
 	case message.MessageTypeDelete:
@@ -156,44 +162,35 @@ func (r *Runtime) applyInsertMessage(ctx context.Context, raw message.ImmutableM
 }
 
 func (r *Runtime) applyLiveDeleteMessage(ctx context.Context, msg message.ImmutableMessage) error {
-	switch msg.MessageType() {
-	case message.MessageTypeDelete:
-		deleted := message.MustAsImmutableDeleteMessageV1(msg)
-		return r.applyDeleteRequest(ctx, msg.TimeTick(), deleted.MustBody())
-	case message.MessageTypeTxn:
-		txn := message.AsImmutableTxnMessage(msg)
-		if txn == nil {
-			return merr.WrapErrServiceInternalMsg("invalid txn WAL message")
-		}
-		return txn.RangeOver(func(inner message.ImmutableMessage) error {
-			if inner.MessageType() != message.MessageTypeDelete {
-				return nil
-			}
-			deleted := message.MustAsImmutableDeleteMessageV1(inner)
-			return r.applyDeleteRequest(ctx, msg.TimeTick(), deleted.MustBody())
-		})
-	default:
-		return nil
-	}
+	deleted := message.MustAsImmutableDeleteMessageV1(msg)
+	return r.applyDeleteRequest(ctx, msg.TimeTick(), deleted.MustBody())
 }
 
 func (r *Runtime) applyDeleteRequest(ctx context.Context, timeTick uint64, request *msgpb.DeleteRequest) error {
 	if request == nil {
 		return nil
 	}
-	return r.deleteFromSegments(ctx, request.GetPartitionID(), storage.ParseIDs2PrimaryKeysBatch(request.GetPrimaryKeys()), deleteTimestampsFromRequest(timeTick, request))
+	keys := request.GetPrimaryKeys()
+	if keys.GetIntId() == nil && keys.GetStrId() == nil {
+		return merr.WrapErrDataIntegrityMsg("missing WAL delete primary keys")
+	}
+	return r.deleteFromSegments(ctx, request.GetPartitionID(), storage.ParseIDs2PrimaryKeysBatch(keys), deleteTimestampsFromRequest(timeTick, request))
 }
 
 func (r *Runtime) applyTransformLogEntry(ctx context.Context, entry *streamingpb.TransformLogEntry) error {
-	if entry == nil || entry.GetDelete() == nil {
-		return nil
-	}
-	for _, block := range entry.GetDelete().GetBlocks() {
-		if err := r.deleteFromSegments(ctx, block.GetPartitionId(), storage.ParseIDs2PrimaryKeysBatch(block.GetPrimaryKeys()), deleteTimestampsFromTransformLogBlock(entry.GetTimeTick(), block)); err != nil {
-			return err
+	return messageutil.VisitTransformMutations(entry, func(block *streamingpb.TransformDeleteBlock) error {
+		return r.deleteFromSegments(ctx, block.GetPartitionId(), storage.ParseIDs2PrimaryKeysBatch(block.GetPrimaryKeys()), deleteTimestampsFromTransformLogBlock(entry.GetTimeTick(), block))
+	}, func(ordinal uint32, update *messagespb.UpdateMessageBody) error {
+		for _, segment := range r.segmentsSnapshot() {
+			if update.GetPartitionId() != common.AllPartitionsID && update.GetPartitionId() != segment.partitionID {
+				continue
+			}
+			if err := segment.applyUpdate(ctx, entry.GetTimeTick(), ordinal, update); err != nil {
+				return err
+			}
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 func (r *Runtime) deleteFromSegments(ctx context.Context, partitionID int64, primaryKeys storage.PrimaryKeys, timestamps []typeutil.Timestamp) error {

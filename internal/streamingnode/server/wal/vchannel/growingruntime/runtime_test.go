@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/util/initcore"
@@ -217,12 +218,13 @@ func TestDrainDeleteReplayUsesSharedTransformLogStream(t *testing.T) {
 	defer stream.Close()
 
 	for _, vchannel := range []string{"v1", "v2"} {
-		entries, err := drainDeleteReplay(ctx, walview.VChannelWALView{
+		var entries []*streamingpb.TransformLogEntry
+		err := drainDeleteReplay(ctx, walview.VChannelWALView{
 			VChannel:                       vchannel,
 			BaseTransformTimeTick:          10,
 			TransformLogStream:             stream,
 			DeleteReplayStartAfterTimeTick: 0,
-		})
+		}, func(e *streamingpb.TransformLogEntry) error { entries = append(entries, e); return nil })
 		require.NoError(t, err)
 		require.Len(t, entries, 1)
 		require.Equal(t, uint64(10), entries[0].GetTimeTick())
@@ -234,26 +236,16 @@ func TestDrainDeleteReplayUsesSharedTransformLogStream(t *testing.T) {
 	}
 }
 
-func TestDrainDeleteReplayAcceptsSummaryLowerBound(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+func TestDrainDeleteReplayRejectsMissingPrefix(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 	manager := walsummary.NewManager(walsummary.ManagerConfig{PChannel: "p1"})
 	manager.InitLastAcked(10)
 	manager.ObserveMessage(ctx, newTestTransformDeleteMessage(t, "v1", 20))
 	stream := walsummary.NewStream(manager)
 	defer stream.Close()
-	for _, end := range []uint64{5, 20} {
-		entries, err := drainDeleteReplay(ctx, walview.VChannelWALView{
-			VChannel: "v1", BaseTransformTimeTick: end, TransformLogStream: stream,
-		})
-		require.NoError(t, err)
-		if end <= 10 {
-			require.Empty(t, entries)
-		} else {
-			require.Len(t, entries, 1)
-			require.Equal(t, uint64(20), entries[0].GetTimeTick())
-		}
-	}
+	err := drainDeleteReplay(ctx, walview.VChannelWALView{VChannel: "v1", BaseTransformTimeTick: 20, TransformLogStream: stream}, func(*streamingpb.TransformLogEntry) error { t.Fatal("delivered incomplete history"); return nil })
+	require.ErrorIs(t, err, wal.ErrTransformLogStartPointTruncated)
 }
 
 func TestRecoveryBarrierAdvancesBothRuntimeFrontiers(t *testing.T) {
@@ -337,9 +329,7 @@ func TestRuntimeRejectsLiveInsertAfterFlush(t *testing.T) {
 	segmentID := int64(21)
 	runtime.applyLiveMessage(context.Background(), newTestFlushMessage(t, "ch", segmentID, 40))
 	require.True(t, runtime.SegmentFlushed(segmentID))
-	require.Panics(t, func() {
-		runtime.applyLiveMessage(context.Background(), newTestSegmentInsertMessage(t, "ch", segmentID, 2, 41, schema))
-	})
+	require.Error(t, runtime.applyLiveMessage(context.Background(), newTestSegmentInsertMessage(t, "ch", segmentID, 2, 41, schema)))
 	_, ok := runtime.Segment(segmentID)
 	require.False(t, ok)
 }
@@ -374,13 +364,7 @@ func TestRuntimeFlushedSegmentSkipsReplayUntilSafeToRelease(t *testing.T) {
 	require.False(t, ok)
 	require.Equal(t, []int64{100}, runtime.SegmentIDs())
 
-	require.Panics(t, func() {
-		runtime.applyLiveMessage(context.Background(), newTestSegmentInsertMessage(t, "ch", 100, 2, 52, schema))
-	})
-
-	require.NotPanics(t, func() {
-		runtime.applyLiveMessage(context.Background(), newTestSegmentInsertMessage(t, "ch", 100, 2, 40, schema))
-	})
+	require.NoError(t, runtime.applyLiveMessage(context.Background(), newTestSegmentInsertMessage(t, "ch", 100, 2, 40, schema)))
 	_, ok = runtime.Segment(100)
 	require.False(t, ok)
 	require.Equal(t, []int64{100}, runtime.SegmentIDs())

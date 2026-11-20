@@ -9,8 +9,9 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -66,14 +67,10 @@ func (s *queryViewTransformSegment) ApplyTransform(ctx context.Context, entry *s
 	if entry == nil {
 		return nil
 	}
-	deleteEntry := entry.GetDelete()
-	if deleteEntry == nil {
-		return nil
-	}
 	if ctx == nil {
 		ctx = context.TODO()
 	}
-	for _, block := range deleteEntry.GetBlocks() {
+	return messageutil.VisitTransformMutations(entry, func(block *streamingpb.TransformDeleteBlock) error {
 		blockPartitionID := block.GetPartitionId()
 		if blockPartitionID != common.AllPartitionsID && blockPartitionID != s.PartitionID() {
 			mlog.Debug(ctx, "querynode transform segment skipped delete block by partition",
@@ -82,12 +79,9 @@ func (s *queryViewTransformSegment) ApplyTransform(ctx context.Context, entry *s
 				mlog.Int64("blockPartitionID", blockPartitionID),
 				mlog.Uint64("timeTick", entry.GetTimeTick()),
 			)
-			continue
+			return nil
 		}
-		pks, err := parseTransformDeletePrimaryKeys(block.GetPrimaryKeys())
-		if err != nil {
-			return err
-		}
+		pks := storage.ParseIDs2PrimaryKeysBatch(block.GetPrimaryKeys())
 		originalPKCount := pks.Len()
 		timestamps := make([]typeutil.Timestamp, pks.Len())
 		for i := range timestamps {
@@ -102,7 +96,7 @@ func (s *queryViewTransformSegment) ApplyTransform(ctx context.Context, entry *s
 				mlog.Int("originalPKCount", originalPKCount),
 				mlog.Int("filteredPKCount", 0),
 			)
-			continue
+			return nil
 		}
 		mlog.Debug(ctx, "querynode transform segment applies delete block",
 			mlog.FieldSegmentID(s.ID()),
@@ -111,32 +105,25 @@ func (s *queryViewTransformSegment) ApplyTransform(ctx context.Context, entry *s
 			mlog.Int("originalPKCount", originalPKCount),
 			mlog.Int("filteredPKCount", pks.Len()),
 		)
-		if err := s.segment.Delete(ctx, pks, timestamps); err != nil {
+		return s.segment.Delete(ctx, pks, timestamps)
+	}, func(ordinal uint32, body *messagespb.UpdateMessageBody) error {
+		if body.GetPartitionId() != common.AllPartitionsID && body.GetPartitionId() != s.PartitionID() {
+			return nil
+		}
+		pks := storage.ParseIDs2PrimaryKeysBatch(body.GetPrimaryKeys())
+		candidates, _ := filterMaybeHitPrimaryKeys(s.segment, pks, nil)
+		if candidates.Len() == 0 {
+			return nil
+		}
+		if candidates.Len() == pks.Len() {
+			return s.segment.ApplyUpdates(ctx, entry.GetTimeTick(), ordinal, body)
+		}
+		ids, err := storage.ParsePrimaryKeysBatch2IDs(candidates)
+		if err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func parseTransformDeletePrimaryKeys(ids *schemapb.IDs) (pks storage.PrimaryKeys, err error) {
-	if ids == nil || ids.IdField == nil {
-		return nil, merr.WrapErrServiceInternalMsg("transform delete primary keys are empty")
-	}
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			pks = nil
-			if cause, ok := recovered.(error); ok {
-				err = merr.Wrap(cause, "failed to parse transform delete primary keys")
-			} else {
-				err = merr.WrapErrServiceInternalMsg("failed to parse transform delete primary keys: %v", recovered)
-			}
-		}
-	}()
-	pks = storage.ParseIDs2PrimaryKeysBatch(ids)
-	if pks == nil {
-		return nil, merr.WrapErrServiceInternalMsg("failed to parse transform delete primary keys")
-	}
-	return pks, nil
+		return s.segment.ApplyUpdates(ctx, entry.GetTimeTick(), ordinal, &messagespb.UpdateMessageBody{PartitionId: body.PartitionId, PrimaryKeys: ids, Assignments: body.Assignments})
+	})
 }
 
 func (s *queryViewTransformSegment) Release(ctx context.Context) error {
@@ -148,7 +135,7 @@ func (s *queryViewTransformSegment) Release(ctx context.Context) error {
 
 func filterMaybeHitPrimaryKeys(segment qvLoadedSegment, pks storage.PrimaryKeys, timestamps []typeutil.Timestamp) (storage.PrimaryKeys, []typeutil.Timestamp) {
 	candidate, ok := segment.(qvPKCandidateSegment)
-	if !ok || !candidate.PkCandidateExist() || pks == nil || pks.Len() == 0 || len(timestamps) != pks.Len() {
+	if !ok || !candidate.PkCandidateExist() || pks == nil || pks.Len() == 0 || (timestamps != nil && len(timestamps) != pks.Len()) {
 		return pks, timestamps
 	}
 
@@ -171,7 +158,9 @@ func filterMaybeHitPrimaryKeys(segment qvLoadedSegment, pks storage.PrimaryKeys,
 			continue
 		}
 		filtered.MustAppend(raw[i])
-		filteredTimestamps = append(filteredTimestamps, timestamps[i])
+		if timestamps != nil {
+			filteredTimestamps = append(filteredTimestamps, timestamps[i])
+		}
 	}
 	return filtered, filteredTimestamps
 }

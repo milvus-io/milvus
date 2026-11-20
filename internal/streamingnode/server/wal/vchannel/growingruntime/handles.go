@@ -21,7 +21,7 @@ func (r *Runtime) AcquireGrowingSegmentHandles(ctx context.Context, dataVersion 
 	selectedPartitions := selectedPartitionSet(partitionIDs)
 
 	r.mu.Lock()
-	if r.closed {
+	if r.closed || r.applyErr != nil {
 		r.mu.Unlock()
 		return nil, viewerror.NewViewInvalidated("growing runtime is closed")
 	}

@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // TransformLogKind describes how a WAL message affects TransformLog.
@@ -172,4 +173,51 @@ func PrimaryKeyCount(ids *schemapb.IDs) int {
 	default:
 		return 0
 	}
+}
+
+// VisitTransformMutations visits one complete entry in committed source order.
+// Barriers carry no body. Legacy delete entries and typed mixed entries share
+// the same apply callbacks and outer commit timestamp.
+func VisitTransformMutations(entry *streamingpb.TransformLogEntry, deleted func(*streamingpb.TransformDeleteBlock) error, updated func(uint32, *messagespb.UpdateMessageBody) error) error {
+	for _, block := range entry.GetDelete().GetBlocks() {
+		if block.GetPrimaryKeys().GetIntId() == nil && block.GetPrimaryKeys().GetStrId() == nil {
+			return merr.WrapErrDataIntegrityMsg("missing transform delete primary keys")
+		}
+		if err := deleted(block); err != nil {
+			return err
+		}
+	}
+	var previous uint32
+	for i, block := range entry.GetMutations().GetBlocks() {
+		if i > 0 && block.GetSourceOrdinal() <= previous {
+			return merr.WrapErrDataIntegrityMsg("unordered transform mutation ordinal")
+		}
+		previous = block.GetSourceOrdinal()
+		var err error
+		switch {
+		case block.GetDelete() != nil:
+			keys := block.GetDelete().GetPrimaryKeys()
+			if keys.GetIntId() == nil && keys.GetStrId() == nil {
+				return merr.WrapErrDataIntegrityMsg("missing transform delete primary keys")
+			}
+			err = deleted(block.GetDelete())
+		case block.GetUpdate() != nil:
+			update := block.GetUpdate()
+			if PrimaryKeyCount(update.GetPrimaryKeys()) == 0 || len(update.GetAssignments()) == 0 {
+				return merr.WrapErrDataIntegrityMsg("empty transform update")
+			}
+			for _, a := range update.GetAssignments() {
+				if a.GetLiteral() == nil {
+					return merr.WrapErrDataIntegrityMsg("missing transform update literal")
+				}
+			}
+			err = updated(block.GetSourceOrdinal(), update)
+		default:
+			return merr.WrapErrDataIntegrityMsg("missing transform mutation block")
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -394,6 +394,65 @@ func generateMappingsFromFiles(
 	return mappings, nil
 }
 
+// validateCopyDeltas checks source identities before copying files into a
+// new collection/channel. V3's pinned manifest can own all physical deltas.
+func validateCopyDeltas(ctx context.Context, cm storage.ChunkManager, cfg *indexpb.StorageConfig, source *datapb.CopySegmentSource) error {
+	for _, group := range source.GetDeltaBinlogs() {
+		for _, file := range group.GetBinlogs() {
+			if file.GetMutationCounts() != nil {
+				return merr.WrapErrImportFailedMsg("source-history remapping for typed mutation deltas is unsupported")
+			}
+		}
+	}
+	manifestFiles := make(map[string]struct{})
+	if source.GetStorageVersion() >= storage.StorageV3 {
+		base, version, err := packed.UnmarshalManifestPath(source.GetManifestPath())
+		if err != nil {
+			return err
+		}
+		manifest := packed.MarshalManifestPath(snapshotstorage.NormalizeSnapshotObjectPath(base), version)
+		paths, err := packed.GetDeltaLogPathsFromManifest(manifest, cfg)
+		if err != nil {
+			return merr.Wrap(err, "read copy source delta inventory")
+		}
+		for _, path := range paths {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			path = snapshotstorage.NormalizeSnapshotObjectPath(path)
+			manifestFiles[path] = struct{}{}
+			if err := storage.ValidateImportDelta(path, cfg); err != nil {
+				return err
+			}
+		}
+	}
+	for _, group := range source.GetDeltaBinlogs() {
+		for _, file := range group.GetBinlogs() {
+			path := snapshotstorage.NormalizeSnapshotObjectPath(file.GetLogPath())
+			if _, checked := manifestFiles[path]; checked {
+				continue
+			}
+			if path == "" && (source.GetStorageVersion() >= storage.StorageV3 || file.GetEntriesNum() == 0) {
+				continue
+			}
+			magic, err := cm.ReadAt(ctx, path, 0, 4)
+			if err != nil {
+				return merr.Wrap(err, "read copy source delta signature")
+			}
+			if len(magic) == 4 && int32(common.Endian.Uint32(magic)) == storage.MagicNumber {
+				continue
+			}
+			if string(magic) != "PAR1" && string(magic) != "PARE" {
+				return merr.WrapErrDataIntegrityMsg("unrecognized copy source delta signature")
+			}
+			if err := storage.ValidateImportDelta(path, cfg); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // CopySegmentAndIndexFiles copies all segment files and index files sequentially.
 func CopySegmentAndIndexFiles(
 	ctx context.Context,
@@ -449,6 +508,10 @@ func CopySegmentAndIndexFiles(
 		if _, err := buildTargetManifestIndexes(ctx, manifest, target, source.GetNumOfRows(), indexInfos); err != nil {
 			return nil, nil, err
 		}
+	}
+
+	if err := validateCopyDeltas(ctx, sourceCM, sourceStorageConfig, source); err != nil {
+		return nil, nil, err
 	}
 
 	// Step 3: Execute all copy operations

@@ -97,6 +97,20 @@ CLoadCancellationSource
 NewLoadCancellationSource();
 
 // The caller pins the segment and supplies a protected read boundary.
+typedef struct CUpdateStoreStats {
+    uint64_t fields;
+    uint64_t versions;
+    uint64_t distinct_field_offsets;
+    uint64_t entry_and_membership_bytes;
+    uint64_t reverse_scans;
+    uint64_t reverse_selected;
+    uint64_t overlay_batches;
+    uint64_t dictionary_probes;
+} CUpdateStoreStats;
+
+CStatus
+GetUpdateStoreStats(CSegmentInterface segment, CUpdateStoreStats* stats);
+
 CStatus
 GCUpdates(CSegmentInterface segment, uint64_t safe_ts);
 

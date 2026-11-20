@@ -41,11 +41,12 @@ type Manager struct {
 	dispatcher       *Dispatcher
 	loadInfoProvider LoadInfoProvider
 
-	refs    map[qviews.QueryViewKey]queryViewRef
-	runtime *QueryRuntime
-	task    *scheduledBuild
-	err     error
-	closed  bool
+	refs       map[qviews.QueryViewKey]queryViewRef
+	failedRefs map[qviews.QueryViewKey]*viewResources
+	runtime    *QueryRuntime
+	task       *scheduledBuild
+	err        error
+	closed     bool
 	// Admission watermark, distinct from the minimum retained reclamation version.
 	latestDataVersion qviews.DataVersion
 }
@@ -59,6 +60,7 @@ type queryViewRef struct {
 	meta            *viewpb.QueryViewMeta
 	onReady         func()
 	onUnrecoverable func()
+	onRuntimeFailed func()
 }
 
 func NewManager(config Config) *Manager {
@@ -83,6 +85,11 @@ func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) {
 		m.mu.Unlock()
 		panic("vchannel query resource is closed")
 	}
+	if _, failed := m.failedRefs[req.Key]; failed {
+		m.mu.Unlock()
+		m.Reject(req)
+		return
+	}
 	if _, ok := m.refs[req.Key]; !ok {
 		version := req.Key.QueryViewVersion.DataVersion
 		if m.err != nil || (len(m.refs) != 0 && m.latestDataVersion.GT(version) && !m.retainsReadBaseLocked(req.Meta)) {
@@ -96,11 +103,19 @@ func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) {
 		if m.refs == nil {
 			m.refs = make(map[qviews.QueryViewKey]queryViewRef)
 		}
+		var prepared sync.Once
+		once := func(fn func()) func() {
+			if fn == nil {
+				return nil
+			}
+			return func() { prepared.Do(fn) }
+		}
 		m.refs[req.Key] = queryViewRef{
 			statsResources:  m.acquirePartitionStatsLocked(snviewAcquireStats{req.Meta.GetCollectionId(), req.Meta.GetVchannel(), req.PartitionStats}),
 			meta:            proto.Clone(req.Meta).(*viewpb.QueryViewMeta),
-			onReady:         req.OnReady,
-			onUnrecoverable: req.OnUnrecoverable,
+			onReady:         once(req.OnReady),
+			onUnrecoverable: once(req.OnUnrecoverable),
+			onRuntimeFailed: req.OnRuntimeFailed,
 		}
 		if m.runtime == nil && m.task == nil {
 			m.startBuildLocked(m.oldestQueryViewMetaLocked(), build)
@@ -152,6 +167,19 @@ func (m *Manager) Release(req snview.ReleaseResource) {
 	var resources *viewResources
 
 	m.mu.Lock()
+	if retired, ok := m.failedRefs[req.Key]; ok {
+		delete(m.failedRefs, req.Key)
+		m.mu.Unlock()
+		m.submitCallback(func() {
+			if retired != nil {
+				<-retired.closed
+			}
+			if req.OnDropped != nil {
+				req.OnDropped()
+			}
+		})
+		return
+	}
 	if ref, ok := m.refs[req.Key]; ok {
 		resources = ref.resources
 		if resources != nil {
@@ -312,6 +340,7 @@ func (m *Manager) startBuildLocked(meta *viewpb.QueryViewMeta, build ViewBuilder
 		panic("query resource dispatcher is nil")
 	}
 	runtime := newQueryRuntime(m.dispatcher, m.newModules()...)
+	runtime.onFailure = m.runtimeFailed
 	m.runtime = runtime
 	withOwnerLock := view.WithResourceEventLock
 	var task *resourceBuildTask
@@ -337,6 +366,7 @@ func (m *Manager) startBuildLocked(meta *viewpb.QueryViewMeta, build ViewBuilder
 					return
 				}
 				runtime = newQueryRuntime(m.dispatcher, m.newModules()...)
+				runtime.onFailure = m.runtimeFailed
 				m.runtime = runtime
 			}
 			if withOwnerLock != nil {
@@ -450,6 +480,15 @@ func (m *Manager) finishBuild(task *scheduledBuild) {
 			ref.resources = runtime.bindView(ref.meta)
 			m.refs[key] = ref
 			m.submitReadyLocked(key, ref)
+		}
+	}
+	// Live dispatch can fail between Initialize and this build completion.
+	if err == nil && runtime != nil {
+		runtime.mu.Lock()
+		failed := runtime.applyErr != nil
+		runtime.mu.Unlock()
+		if failed {
+			go m.runtimeFailed(runtime)
 		}
 	}
 	if len(m.refs) == 0 {
@@ -614,4 +653,35 @@ func (m *Manager) updateBuildPriorityLocked() {
 	if m.task != nil {
 		m.task.SetPriority(m.buildPriorityLocked())
 	}
+}
+
+// runtimeFailed retires only the generation that stopped applying WAL. Its
+// references finish dropping independently while new Views capture a fresh base.
+func (m *Manager) runtimeFailed(runtime *QueryRuntime) {
+	m.mu.Lock()
+	if m.closed || m.runtime != runtime || m.task != nil {
+		m.mu.Unlock()
+		return
+	}
+	m.runtime = nil
+	var callbacks []func()
+	if m.failedRefs == nil {
+		m.failedRefs = make(map[qviews.QueryViewKey]*viewResources)
+	}
+	for key, ref := range m.refs {
+		m.failedRefs[key] = ref.resources
+		delete(m.refs, key)
+		m.releasePartitionStatsLocked(ref.statsResources)
+		if ref.prepared {
+			callbacks = append(callbacks, ref.onRuntimeFailed)
+		} else {
+			callbacks = append(callbacks, ref.onUnrecoverable)
+		}
+	}
+	m.releasing.Add(1)
+	m.mu.Unlock()
+	for _, cb := range callbacks {
+		m.submitCallback(cb)
+	}
+	go func() { defer m.releasing.Done(); runtime.Close() }()
 }

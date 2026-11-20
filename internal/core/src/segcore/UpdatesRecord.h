@@ -103,6 +103,16 @@ class UpdatesRecord {
            const int64_t* offsets,
            size_t count) const;
 
+    struct StoreStats {
+        uint64_t fields{};
+        uint64_t versions{};
+        uint64_t distinct_field_offsets{};
+        // Backing arrays only. Excludes variable-length payloads and hash nodes.
+        uint64_t entry_and_membership_bytes{};
+    };
+    StoreStats
+    StoreStatistics() const;
+
     struct FieldStats {
         size_t entries = 0;
         size_t distinct_offsets = 0;

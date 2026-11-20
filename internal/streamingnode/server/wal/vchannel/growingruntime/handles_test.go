@@ -11,6 +11,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 )
 
 func TestRuntimeAcquireGrowingSegmentHandlesFiltersPartitions(t *testing.T) {
@@ -139,3 +140,8 @@ func (fakeCSegment) DropJSONIndex(context.Context, int64, string) error {
 func (fakeCSegment) Reopen(context.Context, *segcore.ReopenRequest) error {
 	return nil
 }
+
+func (fakeCSegment) ApplyUpdates(context.Context, uint64, uint32, *messagespb.UpdateMessageBody) error {
+	panic("unexpected update")
+}
+func (fakeCSegment) GCUpdates(context.Context, uint64) error { panic("unexpected GC") }

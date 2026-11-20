@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -24,6 +25,7 @@ type qvSegmentManager interface {
 }
 
 type qvLoadedSegment interface {
+	ApplyUpdates(context.Context, uint64, uint32, *messagespb.UpdateMessageBody) error
 	ID() int64
 	Partition() int64
 	Delete(ctx context.Context, primaryKeys storage.PrimaryKeys, timestamps []typeutil.Timestamp) error

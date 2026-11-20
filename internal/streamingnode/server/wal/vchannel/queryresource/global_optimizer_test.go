@@ -214,7 +214,9 @@ type fakeIDFModule struct {
 }
 
 func (m fakeIDFModule) Prepare(context.Context, walview.VChannelWALView) error { return nil }
-func (m fakeIDFModule) ApplyLiveEvent(context.Context, walview.VChannelResourceEvent) {
+func (m fakeIDFModule) ApplyLiveEvent(context.Context, walview.VChannelResourceEvent) error {
+
+	return nil
 }
 func (m fakeIDFModule) Advance(qviews.DataVersion) {}
 func (m fakeIDFModule) Close()                     {}

@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -97,14 +98,8 @@ func (r *Runtime) prepareSegments(ctx context.Context, view walview.VChannelWALV
 			return context.Canceled
 		}
 	}
-	deleteEntries, err := drainDeleteReplay(ctx, view)
-	if err != nil {
+	if err := drainDeleteReplay(ctx, view, func(entry *streamingpb.TransformLogEntry) error { return r.applyTransformLogEntry(ctx, entry) }); err != nil {
 		return err
-	}
-	for _, entry := range deleteEntries {
-		if err := r.applyTransformLogEntry(ctx, entry); err != nil {
-			return err
-		}
 	}
 	r.markGrowingTimeTick(view.BaseGrowingTimeTick)
 	r.markTransformTimeTick(view.BaseTransformTimeTick)

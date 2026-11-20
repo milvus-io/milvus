@@ -10,9 +10,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func (r *Runtime) ApplyLiveEvent(ctx context.Context, event walview.VChannelResourceEvent) {
+func (r *Runtime) ApplyLiveEvent(ctx context.Context, event walview.VChannelResourceEvent) error {
 	if r == nil {
-		return
+		return nil
 	}
 	r.eventMu.Lock()
 	defer r.eventMu.Unlock()
@@ -22,33 +22,43 @@ func (r *Runtime) ApplyLiveEvent(ctx context.Context, event walview.VChannelReso
 	if stage := r.refresh; stage != nil && stage.err == nil && stage.includes(event) {
 		stage.pending = append(stage.pending, event)
 	}
-	r.applyEvent(ctx, event)
+	return r.applyEvent(ctx, event)
 }
 
-func (r *Runtime) applyEvent(ctx context.Context, event walview.VChannelResourceEvent) {
+func (r *Runtime) applyEvent(ctx context.Context, event walview.VChannelResourceEvent) error {
+	r.mu.RLock()
+	failed := r.applyErr
+	r.mu.RUnlock()
+	if failed != nil {
+		return failed
+	}
 	if event.QueryBarrier != nil {
 		r.markGrowingTimeTick(event.QueryBarrier.TimeTick)
 		r.markTransformTimeTick(event.QueryBarrier.TimeTick)
-		return
+		return nil
 	}
 	if event.Message != nil {
-		r.applyLiveMessage(ctx, event.Message)
-		return
+		return r.applyLiveMessage(ctx, event.Message)
 	}
 	if event.SegmentSealed != nil {
 		r.markSegmentSealed(event.SegmentSealed.SegmentID, event.SegmentSealed.SealedAtDataVersion)
 	}
+	return nil
 }
 
-func (r *Runtime) applyLiveMessage(ctx context.Context, msg message.ImmutableMessage) {
+func (r *Runtime) applyLiveMessage(ctx context.Context, msg message.ImmutableMessage) error {
 	if r == nil || msg == nil {
-		return
+		return nil
 	}
 	timeTick := msg.TimeTick()
 	applyGrowing := timeTick > r.appliedGrowingTimeTick.Load()
 	applyTransform := messageAdvancesTransformFrontier(msg) && timeTick > r.appliedTransformTimeTick.Load()
 	if err := r.dispatchMessage(ctx, msg, applyGrowing, applyTransform); err != nil {
-		panic(merr.Wrap(err, "failed to apply live message to growing runtime"))
+		r.mu.Lock()
+		r.applyErr = merr.Wrap(err, "failed to apply live message to growing runtime")
+		r.mvccCond.Broadcast()
+		r.mu.Unlock()
+		return err
 	}
 	if applyGrowing {
 		r.markGrowingTimeTick(timeTick)
@@ -65,6 +75,7 @@ func (r *Runtime) applyLiveMessage(ctx context.Context, msg message.ImmutableMes
 		mlog.Uint64("appliedGrowingTimeTick", r.appliedGrowingTimeTick.Load()),
 		mlog.Uint64("appliedTransformTimeTick", r.appliedTransformTimeTick.Load()),
 	)
+	return nil
 }
 
 func messageAdvancesTransformFrontier(msg message.ImmutableMessage) bool {

@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
@@ -124,4 +125,22 @@ func TestQueryViewTransformSegment_ReturnsErrorForMalformedDeletePrimaryKeys(t *
 	})
 	require.Error(t, err)
 	assert.Nil(t, segment.deletedPKs)
+}
+
+func TestMutationTransformUsesOuterTickScopeAndBloomCandidate(t *testing.T) {
+	local := &fakeQVSegment{id: 1, partitionID: 10, candidateOK: true, hits: []bool{false, true}}
+	segment := newQueryViewTransformSegment(local, "v", 50)
+	keys := &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"absent", "maybe"}}}}
+	assignment := &messagespb.UpdateAssignment{FieldId: 103, Literal: &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_NullValue{}}}
+	update := func(scope int64, ordinal uint32) *streamingpb.TransformMutationBlock {
+		return &streamingpb.TransformMutationBlock{SourceOrdinal: ordinal, Mutation: &streamingpb.TransformMutationBlock_Update{Update: &messagespb.UpdateMessageBody{PartitionId: scope, PrimaryKeys: keys, Assignments: []*messagespb.UpdateAssignment{assignment}}}}
+	}
+	entry := &streamingpb.TransformLogEntry{TimeTick: 70, Entry: &streamingpb.TransformLogEntry_Mutations{Mutations: &streamingpb.TransformMutationEntry{Blocks: []*streamingpb.TransformMutationBlock{update(11, 0), update(-1, 2), update(10, 4)}}}}
+	require.NoError(t, segment.ApplyTransform(t.Context(), entry))
+	require.Equal(t, []uint32{2, 4}, local.ordinals)
+	require.Equal(t, []uint64{70, 70}, local.updateTicks)
+	for _, body := range local.updates {
+		require.Equal(t, []string{"maybe"}, body.PrimaryKeys.GetStrId().Data)
+		require.Same(t, assignment, body.Assignments[0])
+	}
 }

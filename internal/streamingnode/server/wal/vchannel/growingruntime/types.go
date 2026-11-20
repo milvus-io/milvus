@@ -39,6 +39,7 @@ type Runtime struct {
 	mu         sync.RWMutex
 	mvccCond   *sync.Cond
 	closed     bool
+	applyErr   error
 	collection *segcore.CCollection
 	// Each replay owns its ordered write schema, even when partition refresh
 	// borrows a collection whose serving dispatcher has already advanced.

@@ -6,6 +6,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -16,6 +17,8 @@ const defaultLiveEventBufferSize = 1024
 type QueryRuntime struct {
 	views     map[*viewResources]struct{}
 	closeOnce sync.Once
+	applyErr  error
+	onFailure func(*QueryRuntime)
 	mu        sync.Mutex
 	cond      *sync.Cond
 	state     queryRuntimeState
@@ -104,7 +107,9 @@ func (r *QueryRuntime) Initialize(ctx context.Context, view walview.VChannelWALV
 		}
 	}
 	initial := r.takeInitialBatch()
-	r.applyBatch(ctx, initial)
+	if err := r.applyBatch(ctx, initial); err != nil {
+		return err
+	}
 	// Serialize the initial watermark with Advance and module event application.
 	r.applyMu.Lock()
 	r.mu.Lock()
@@ -194,7 +199,7 @@ func (r *QueryRuntime) PrepareQueryView(ctx context.Context) error {
 	r.mu.Lock()
 	if r.state != queryRuntimeReady {
 		r.mu.Unlock()
-		return context.Canceled
+		return r.closedError(ctx)
 	}
 	prepare := r.prepareView
 	r.mu.Unlock()
@@ -238,7 +243,7 @@ func (r *QueryRuntime) PrepareIndexMeta(ctx context.Context, meta *viewpb.QueryV
 	ready := r.state == queryRuntimeReady
 	r.mu.Unlock()
 	if !ready {
-		return context.Canceled
+		return r.closedError(ctx)
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -293,7 +298,7 @@ func (r *QueryRuntime) resourceEventBarrier(ctx context.Context, withOwnerLock f
 			return
 		}
 		if !r.ObserveEvent(ctx, walview.VChannelResourceEvent{Barrier: func() { close(done) }}) {
-			err = context.Canceled
+			err = r.closedError(ctx)
 		}
 	}
 	if withOwnerLock != nil {
@@ -308,7 +313,7 @@ func (r *QueryRuntime) resourceEventBarrier(ctx context.Context, withOwnerLock f
 	case <-done:
 		return nil
 	case <-r.closed:
-		return context.Canceled
+		return r.closedError(ctx)
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -408,7 +413,13 @@ func (r *QueryRuntime) drainReady() {
 		if !ok {
 			return
 		}
-		r.applyBatch(context.Background(), batch)
+		if err := r.applyBatch(r.ctx, batch); err != nil {
+			r.stop()
+			if r.onFailure != nil {
+				r.onFailure(r)
+			}
+			return
+		}
 	}
 }
 
@@ -426,10 +437,14 @@ func (r *QueryRuntime) takeDrainBatch() ([]walview.VChannelResourceEvent, bool) 
 	return batch, true
 }
 
-func (r *QueryRuntime) applyBatch(ctx context.Context, batch []walview.VChannelResourceEvent) {
+func (r *QueryRuntime) applyBatch(ctx context.Context, batch []walview.VChannelResourceEvent) error {
 	r.applyMu.Lock()
 	defer r.applyMu.Unlock()
 	r.mu.Lock()
+	if r.state == queryRuntimeClosed {
+		r.mu.Unlock()
+		return context.Canceled
+	}
 	modules := append([]QueryRuntimeModule(nil), r.modules...)
 	r.mu.Unlock()
 	for _, event := range batch {
@@ -439,10 +454,16 @@ func (r *QueryRuntime) applyBatch(ctx context.Context, batch []walview.VChannelR
 		}
 		for _, module := range modules {
 			if module != nil {
-				module.ApplyLiveEvent(ctx, event)
+				if err := module.ApplyLiveEvent(ctx, event); err != nil {
+					r.mu.Lock()
+					r.applyErr = err
+					r.mu.Unlock()
+					return err
+				}
 			}
 		}
 	}
+	return nil
 }
 
 // CheckWriteSchemaVersion checks WAL application after the event barrier.
@@ -458,4 +479,16 @@ func (r *QueryRuntime) CheckWriteSchemaVersion(version int32) error {
 		return err == nil
 	})
 	return err
+}
+
+func (r *QueryRuntime) closedError(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.applyErr != nil {
+		return viewerror.NewViewInvalidated("query runtime apply failed: %v", r.applyErr)
+	}
+	return context.Canceled
 }

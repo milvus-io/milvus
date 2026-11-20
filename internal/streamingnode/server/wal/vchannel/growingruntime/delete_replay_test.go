@@ -19,7 +19,7 @@ func TestDrainDeleteReplayReadFailure(t *testing.T) {
 	defer stream.Close()
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	_, err := drainDeleteReplay(ctx, walview.VChannelWALView{VChannel: "v", BaseTransformTimeTick: 10, TransformLogStream: stream})
+	err := drainDeleteReplay(ctx, walview.VChannelWALView{VChannel: "v", BaseTransformTimeTick: 10, TransformLogStream: stream}, nil)
 	require.ErrorIs(t, err, walsummary.ErrStoreCorrupted)
 	require.NoError(t, ctx.Err(), "read failure must wake the bootstrap caller without a data event")
 }

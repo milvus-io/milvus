@@ -1501,3 +1501,28 @@ func TestPreparationPrioritySurvivesDuplicateAndRecovery(t *testing.T) {
 		require.Equal(t, priority, recovered.Meta().GetControl().GetPreparationPriority())
 	}
 }
+
+func TestRuntimeFailureOnEitherSideOfPublication(t *testing.T) {
+	for _, published := range []bool{false, true} {
+		sm := newTestSM()
+		sm.ConsumeReport()
+		sm.OnReady()
+		sm.ConsumeReport()
+		if published {
+			sm.OnCoordStateDelivered(qviews.QueryViewStateUp)
+			sm.ConsumeReport()
+			sm.ConsumePersist()
+		}
+		sm.OnRuntimeFailed()
+		assert.Equal(t, qviews.QueryViewStateUnrecoverable, sm.State())
+		if published {
+			assertNoReport(t, sm)
+		} else {
+			assertReportState(t, sm, qviews.QueryViewStateUnrecoverable)
+		}
+		assertNoPersist(t, sm)
+		sm.OnReady()
+		sm.OnCoordStateDelivered(qviews.QueryViewStateUp)
+		assert.Equal(t, qviews.QueryViewStateUnrecoverable, sm.State())
+	}
+}

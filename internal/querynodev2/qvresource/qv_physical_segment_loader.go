@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -236,4 +237,8 @@ func (l *queryViewPhysicalSegmentLoader) PrepareReadState(ctx context.Context, s
 func (l *queryViewPhysicalSegmentLoader) AdoptReadState(segment qnview.TransformSegment, read segments.ReadState) error {
 	transform := qnview.UnwrapTransformSegment(segment).(*queryViewTransformSegment)
 	return transform.QuerySegment().(*segments.LocalSegment).AdoptReadState(read)
+}
+
+func (s *qvLocalSegment) ApplyUpdates(ctx context.Context, ts uint64, ordinal uint32, body *messagespb.UpdateMessageBody) error {
+	return s.segment.(*segments.LocalSegment).ApplyUpdates(ctx, ts, ordinal, body)
 }

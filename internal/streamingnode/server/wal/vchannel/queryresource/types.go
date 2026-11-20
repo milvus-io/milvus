@@ -12,10 +12,11 @@ import (
 // QueryRuntimeModule is a concrete vchannel resource module managed by
 // QueryRuntime. Modules do not observe WAL directly.
 // After preparation, live events, monotonic Advance calls and Close share one
-// serialized application path. Advance must not wait for owner callbacks or I/O.
+// serialized application path. An ApplyLiveEvent error stops the batch before
+// subsequent events and barriers. Advance must not wait for owner callbacks or I/O.
 type QueryRuntimeModule interface {
 	Prepare(context.Context, walview.VChannelWALView) error
-	ApplyLiveEvent(context.Context, walview.VChannelResourceEvent)
+	ApplyLiveEvent(context.Context, walview.VChannelResourceEvent) error
 	Advance(qviews.DataVersion)
 	Close()
 }

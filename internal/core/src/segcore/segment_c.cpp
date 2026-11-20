@@ -1668,6 +1668,28 @@ PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset) {
 }
 
 CStatus
+GetUpdateStoreStats(CSegmentInterface segment, CUpdateStoreStats* stats) {
+    try {
+        auto* native = dynamic_cast<milvus::segcore::SegmentInternalInterface*>(
+            static_cast<milvus::segcore::SegmentInterface*>(segment));
+        AssertInfo(native && stats, "missing segment update statistics target");
+        const auto& record = native->GetUpdatesRecord();
+        const auto store = record.StoreStatistics();
+        const auto read = record.Diagnostics();
+        *stats = {store.fields,
+                  store.versions,
+                  store.distinct_field_offsets,
+                  store.entry_and_membership_bytes,
+                  read.reverse_scans,
+                  read.reverse_selected,
+                  read.overlay_batches,
+                  read.dictionary_probes};
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
 GCUpdates(CSegmentInterface segment, uint64_t safe_ts) {
     SCOPE_CGO_CALL_METRIC();
     try {

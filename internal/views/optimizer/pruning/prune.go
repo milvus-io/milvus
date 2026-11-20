@@ -32,6 +32,11 @@ func Exclude(ctx context.Context, schema *schemapb.CollectionSchema, stats map[i
 	if field == nil || len(stats) == 0 {
 		return excluded, NoPruningFlags
 	}
+	// Statistics for a writable scalar cannot rule out a match introduced by
+	// an update. Current clustering/partition keys and vector fields are immutable.
+	if typeutil.SupportsPKUpdateType(field) && !field.GetIsClusteringKey() && !field.GetIsPartitionKey() && !field.GetIsPrimaryKey() {
+		return excluded, NoPruningFlags
+	}
 	vector := typeutil.IsVectorType(field.GetDataType())
 	var predicate Expr
 	var vectors [][]byte

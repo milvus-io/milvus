@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
@@ -122,6 +123,19 @@ func TestGrowingSegment(t *testing.T) {
 	assert.Equal(t, int64(100), segment.RowNum())
 	assertEqualCount(t, collection, segment, 100)
 
+	var scoreField int64
+	for _, field := range schema.GetFields() {
+		if field.GetDataType() == schemapb.DataType_Int32 {
+			scoreField = field.GetFieldID()
+			break
+		}
+	}
+	require.NotZero(t, scoreField)
+	update := &messagespb.UpdateMessageBody{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10}}}}, Assignments: []*messagespb.UpdateAssignment{{FieldId: scoreField, Literal: &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_ScalarValue{ScalarValue: &schemapb.ValueField{Data: &schemapb.ValueField_IntData{IntData: 42}}}}}}}
+	require.NoError(t, segment.ApplyUpdates(t.Context(), 999, 1, update))
+	require.NoError(t, segment.ApplyUpdates(t.Context(), 999, 1, update))
+	update.Assignments[0].Literal.GetScalarValue().Data = &schemapb.ValueField_IntData{IntData: 43}
+	require.Error(t, segment.ApplyUpdates(t.Context(), 999, 1, update), "conflicting replay must cross the native status boundary")
 	pk := storage.NewInt64PrimaryKeys(1)
 	pk.Append(storage.NewInt64PrimaryKey(10))
 	deleteResult, err := segment.Delete(context.Background(), &segcore.DeleteRequest{

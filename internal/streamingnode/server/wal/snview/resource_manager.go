@@ -26,6 +26,8 @@ type AcquireResource struct {
 	// persisted segment data-version summary.
 	// Must NOT be called synchronously during Acquire.
 	OnUnrecoverable func()
+	// OnRuntimeFailed invalidates this registration after successful preparation.
+	OnRuntimeFailed func()
 }
 
 // ReleaseResource describes a resource release request when a query view

@@ -97,6 +97,9 @@ func readSegmentMutations(ctx context.Context, source mutationSource, cfg *index
 			var rows []scopedMutation
 			var decodedSize int64
 			visit := func(l deltacodec.Layout, batch []deltacodec.Row) error {
+				if l.CollectionID != 0 && seg.GetLevel() == datapb.SegmentLevel_L0 && seg.GetCommitTimestamp() != 0 {
+					return merr.WrapErrDataIntegrityMsg("typed L0 mutation segment %d has an unsupported import commit timestamp", seg.GetSegmentID())
+				}
 				if l.CollectionID == 0 {
 					l.CollectionID, l.VChannel, l.PartitionID, l.SchemaVersion = seg.GetCollectionID(), plan.GetChannel(), seg.GetPartitionID(), plan.GetSchema().GetVersion()
 				} else if l.CollectionID != seg.GetCollectionID() || l.VChannel != plan.GetChannel() || l.PartitionID != seg.GetPartitionID() {

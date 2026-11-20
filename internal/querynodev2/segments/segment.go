@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
@@ -82,6 +83,7 @@ type IndexedFieldInfo struct {
 type baseSegment struct {
 	collection     *Collection
 	sealedMetadata *sealedRuntimeMetadata
+	updateFields   map[int64]UpdateField
 	version        *atomic.Int64
 
 	segmentType   SegmentType
@@ -541,6 +543,12 @@ func NewSegment(ctx context.Context,
 		insertCount:     atomic.NewInt64(0),
 	}
 
+	if segmentType == SegmentTypeSealed {
+		segment.updateFields = make(map[int64]UpdateField)
+		for _, f := range collection.UpdateCoverage() {
+			segment.updateFields[f.ID] = f
+		}
+	}
 	if err := segment.initializeSegment(); err != nil {
 		csegment.Release()
 		return nil, err
@@ -1852,4 +1860,30 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 		FieldNullCounts:        fieldNullCounts,
 		BM25Stats:              bm25Stats,
 	}, nil
+}
+
+func (s *LocalSegment) ApplyUpdates(ctx context.Context, ts uint64, ordinal uint32, body *messagespb.UpdateMessageBody) error {
+	if s.updateFields != nil {
+		assignments := make([]*messagespb.UpdateAssignment, 0, len(body.GetAssignments()))
+		for _, a := range body.GetAssignments() {
+			if _, tracked := s.updateFields[a.GetFieldId()]; tracked {
+				assignments = append(assignments, a)
+			}
+		}
+		if len(assignments) == 0 {
+			return nil
+		}
+		body = &messagespb.UpdateMessageBody{PartitionId: body.GetPartitionId(), PrimaryKeys: body.GetPrimaryKeys(), Assignments: assignments}
+	}
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+	defer s.ptrLock.Unpin()
+	s.deltaMut.Lock()
+	defer s.deltaMut.Unlock()
+	if err := s.csegment.ApplyUpdates(ctx, ts, ordinal, body); err != nil {
+		return err
+	}
+	s.memSize.Store(-1)
+	return nil
 }

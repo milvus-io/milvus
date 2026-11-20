@@ -35,11 +35,11 @@ func TestReusedRuntimeReadinessWaitsForCommitAndSealApplication(t *testing.T) {
 	applied, resume := make(chan struct{}), make(chan struct{})
 	unblock := sync.OnceFunc(func() { close(resume) })
 	defer unblock()
-	var applyOriginal func(*recordingModule, context.Context, walview.VChannelResourceEvent)
-	patch := mockey.Mock((*recordingModule).ApplyLiveEvent).To(func(m *recordingModule, ctx context.Context, event walview.VChannelResourceEvent) {
+	var applyOriginal func(*recordingModule, context.Context, walview.VChannelResourceEvent) error
+	patch := mockey.Mock((*recordingModule).ApplyLiveEvent).To(func(m *recordingModule, ctx context.Context, event walview.VChannelResourceEvent) error {
 		close(applied)
 		<-resume
-		applyOriginal(m, ctx, event)
+		return applyOriginal(m, ctx, event)
 	}).Origin(&applyOriginal).Build()
 	defer patch.UnPatch()
 	require.NoError(t, runtime.Initialize(ctx, walview.VChannelWALView{

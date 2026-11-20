@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -104,7 +103,7 @@ func (m *SyncMaterializer) Materialize(ctx context.Context, req MaterializeReque
 		return merr.WrapErrServiceInternalMsg("invalid vchannel %q for L0 materialization", req.VChannel)
 	}
 	var groups []materializeGroup
-	if message.PKUpdateEnabled || slices.ContainsFunc(req.Entries, func(e *streamingpb.TransformLogEntry) bool { return e.GetMutations() != nil }) {
+	if slices.ContainsFunc(req.Entries, func(e *streamingpb.TransformLogEntry) bool { return e.GetMutations() != nil }) {
 		var err error
 		groups, err = typedMaterializeGroups(req, collectionID)
 		if err != nil {

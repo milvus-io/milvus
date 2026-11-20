@@ -29,16 +29,21 @@ func (r *Runtime) WaitMVCCVisible(ctx context.Context, growingTimetick uint64, t
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for !r.mvccVisibleLocked(growingTimetick, transformTimetick) {
-		if r.closed {
-			return viewerror.NewViewInvalidated("growing runtime is closed")
-		}
+	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if r.applyErr != nil {
+			return viewerror.NewViewInvalidated("growing runtime apply failed: %v", r.applyErr)
+		}
+		if r.mvccVisibleLocked(growingTimetick, transformTimetick) {
+			return nil
+		}
+		if r.closed {
+			return viewerror.NewViewInvalidated("growing runtime is closed")
+		}
 		r.mvccCond.Wait()
 	}
-	return ctx.Err()
 }
 
 func (r *Runtime) MayHaveVisibleGrowingSegments(dataVersion qviews.DataVersion, growingTimetick uint64, transformTimetick uint64, partitionIDs []int64) bool {
@@ -49,7 +54,7 @@ func (r *Runtime) MayHaveVisibleGrowingSegments(dataVersion qviews.DataVersion, 
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.closed || !r.mvccVisibleLocked(growingTimetick, transformTimetick) {
+	if r.closed || r.applyErr != nil || !r.mvccVisibleLocked(growingTimetick, transformTimetick) {
 		return true
 	}
 	// Do not optimize an invalid partition request into a successful empty

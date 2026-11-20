@@ -51,9 +51,11 @@ func (r *readSchemas) Prepare(_ context.Context, view walview.VChannelWALView) e
 	r.capture = view.CaptureQueryView
 	return nil
 }
-func (*readSchemas) ApplyLiveEvent(context.Context, walview.VChannelResourceEvent) {}
-func (*readSchemas) Advance(qviews.DataVersion)                                    {}
-func (*readSchemas) Close()                                                        {} // View guards own the pool references.
+func (*readSchemas) ApplyLiveEvent(context.Context, walview.VChannelResourceEvent) error {
+	return nil
+}
+func (*readSchemas) Advance(qviews.DataVersion) {}
+func (*readSchemas) Close()                     {} // View guards own the pool references.
 func (r *readSchemas) BindView(meta *viewpb.QueryViewMeta) QueryViewResource {
 	return &readSchemaBinding{module: r, meta: meta}
 }

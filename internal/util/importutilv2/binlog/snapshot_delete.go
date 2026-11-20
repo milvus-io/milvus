@@ -225,7 +225,7 @@ func (m *DeleteMerger) Merge(ctx context.Context, paths []string, start, end uin
 }
 
 func (m *DeleteMerger) mergeFile(ctx context.Context, path string, start, end uint64, version int64) (bool, error) {
-	options := []storage.RwOption{
+	options := []storage.RwOption{storage.WithImportDelta(),
 		storage.WithVersion(version), storage.WithStorageConfig(m.cfg),
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 			return multiReadWithRetry(ctx, m.cm, m.retryAttempts, paths)

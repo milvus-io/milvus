@@ -413,7 +413,7 @@ func TestDispatchStreamSharesImmutableLivePayload(t *testing.T) {
 	m.mu.Unlock()
 }
 
-func TestDispatchStreamKeepsExistingFastForwardPolicy(t *testing.T) {
+func TestDispatchStreamRejectsTruncatedCursor(t *testing.T) {
 	m, _ := newTestManagerWithStore(t)
 	m.ObserveMessage(t.Context(), newTestDeleteMessage(t, "v", 10, 1, 10))
 	require.NoError(t, persistSummary(t.Context(), m))
@@ -427,10 +427,13 @@ func TestDispatchStreamKeepsExistingFastForwardPolicy(t *testing.T) {
 	sub, err := s.Subscribe(t.Context(), wal.TransformLogSubscriptionOption{VChannel: "v", Handler: h})
 	require.NoError(t, err)
 	defer sub.Close()
-	require.EqualValues(t, 20, nextTransformEvent(t, h).Entry.GetTimeTick())
-	require.EqualValues(t, 20, nextTransformEvent(t, h).SyncUp.TimeTick)
-	m.ObserveMessage(t.Context(), newTestDeleteMessage(t, "v", 30, 1, 30))
-	require.EqualValues(t, 30, nextTransformEvent(t, h).Entry.GetTimeTick())
+	select {
+	case <-s.Done():
+	case <-time.After(time.Second):
+		t.Fatal("truncated stream did not fail")
+	}
+	require.ErrorIs(t, s.Error(), wal.ErrTransformLogStartPointTruncated)
+	require.Empty(t, h.events)
 }
 
 // Insert-only transactions do not advance the Transform frontier or emit live

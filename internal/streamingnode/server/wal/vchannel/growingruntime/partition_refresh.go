@@ -120,7 +120,9 @@ func (r *Runtime) PreparePartitions(ctx context.Context, meta *viewpb.QueryViewM
 		if len(batch) != 0 {
 			r.eventMu.Unlock()
 			for _, event := range batch {
-				next.applyEvent(ctx, event)
+				if err := next.applyEvent(ctx, event); err != nil {
+					return err
+				}
 			}
 			continue
 		}

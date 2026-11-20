@@ -249,3 +249,25 @@ func TestWALMaterializerDroppedUpdatePayload(t *testing.T) {
 		})
 	}
 }
+
+func TestMixedTxnDeleteOnlyScopeKeepsOrdinal(t *testing.T) {
+	f := newTypedWALFixture(t)
+	walObserve(f.m, f.tracker, walTxn(t, walUpdate(100, 10, 55), walScopedDelete(101, common.AllPartitionsID)))
+	require.NoError(t, f.task.Execute(t.Context()))
+	require.Len(t, f.registry.files, 2)
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: f.dir}
+	scopes := map[int64]uint32{}
+	for _, file := range f.registry.files {
+		require.NotNil(t, file.MutationCounts)
+		require.NoError(t, storage.ReadMutationDelta(t.Context(), f.cm, file, storage.StorageV2, schemapb.DataType_Int64, nil, cfg, nil, func(layout deltacodec.Layout, rows []deltacodec.Row) error {
+			require.Len(t, rows, 1)
+			require.EqualValues(t, 300, rows[0].TimeTick)
+			scopes[layout.PartitionID] = rows[0].SourceOrdinal
+			if layout.PartitionID == common.AllPartitionsID {
+				require.Equal(t, deltacodec.Delete, rows[0].Operation)
+			}
+			return nil
+		}))
+	}
+	require.Equal(t, map[int64]uint32{10: 0, common.AllPartitionsID: 1}, scopes)
+}

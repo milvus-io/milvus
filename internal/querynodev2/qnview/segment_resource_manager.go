@@ -85,6 +85,7 @@ type preparedSegmentRead struct {
 }
 
 type segmentBase struct {
+	coverage       []segments.UpdateField
 	ctx            context.Context
 	cancel         context.CancelFunc
 	anchor         *preparedSegmentRead
@@ -567,8 +568,12 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 	var reuse segments.ReadState
 	// Normal sealed same-ID additive manifests preserve the row domain. External
 	// snapshots may replace it, so they require the same manifest revision to share.
+	coverage := collection.Collection().UpdateCoverage()
 	m.mu.Lock()
 	for _, candidate := range r.bases {
+		if !slices.Equal(candidate.coverage, coverage) {
+			continue
+		}
 		sameManifest := info.GetManifestPath() != "" && packed.SameManifestPath(candidate.snapshot.LoadInfo.GetManifestPath(), info.GetManifestPath())
 		if candidate.segment.TransformStartAfterTimeTick() <= info.GetTransformStartAfterTimetick() && (sameManifest || (!typeutil.IsExternalCollection(collection.Schema()) && candidate.snapshot.LoadInfo.GetNumOfRows() == info.GetNumOfRows())) {
 			base = candidate
@@ -590,7 +595,7 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 		}
 		segment = &transformStartSegment{TransformSegment: segment, startAfter: info.GetTransformStartAfterTimetick()}
 		baseCtx, cancel := context.WithCancel(r.ctx) //nolint:gosec // Ownership transfers to the base; resource closure or base retirement cancels it.
-		base = &segmentBase{segment: segment, snapshot: snapshot, ctx: baseCtx, cancel: cancel}
+		base = &segmentBase{coverage: coverage, segment: segment, snapshot: snapshot, ctx: baseCtx, cancel: cancel}
 		m.mu.Lock()
 		r.bases = append(r.bases, base)
 		r.operations.Add(1)

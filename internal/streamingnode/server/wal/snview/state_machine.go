@@ -179,6 +179,18 @@ func (sm *snQueryViewStateMachine) OnUnrecoverable() {
 	}
 }
 
+// OnRuntimeFailed retires a prepared physical runtime. Before publication
+// Coord must hear the failure. A published Up retains its restart record.
+func (sm *snQueryViewStateMachine) OnRuntimeFailed() {
+	switch sm.state {
+	case qviews.QueryViewStatePreparing, qviews.QueryViewStateReady:
+		sm.state = qviews.QueryViewStateUnrecoverable
+		sm.pendingReport = sm.buildReport()
+	case qviews.QueryViewStateUp, qviews.QueryViewStateUpRecovering:
+		sm.state = qviews.QueryViewStateUnrecoverable
+	}
+}
+
 // OnRecoveringDone reports that the WAL has caught up after crash recovery.
 // Only valid in UpRecovering state; ignored in other states.
 func (sm *snQueryViewStateMachine) OnRecoveringDone() {

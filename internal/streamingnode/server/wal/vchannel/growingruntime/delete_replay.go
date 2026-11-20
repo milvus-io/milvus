@@ -7,14 +7,15 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func drainDeleteReplay(ctx context.Context, view walview.VChannelWALView) ([]*streamingpb.TransformLogEntry, error) {
+func drainDeleteReplay(ctx context.Context, view walview.VChannelWALView, apply func(*streamingpb.TransformLogEntry) error) error {
 	if view.BaseTransformTimeTick == 0 {
-		return nil, nil
+		return nil
 	}
 	if view.TransformLogStream == nil {
-		return nil, wal.ErrTransformLogVChannelUnavailable
+		return wal.ErrTransformLogVChannelUnavailable
 	}
 	handler := newDeleteReplayHandler()
 	subscription, err := view.TransformLogStream.Subscribe(ctx, wal.TransformLogSubscriptionOption{
@@ -24,31 +25,38 @@ func drainDeleteReplay(ctx context.Context, view walview.VChannelWALView) ([]*st
 		Handler:            handler,
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer func() {
 		handler.abort()
 		_ = subscription.Close()
 	}()
 
-	entries := make([]*streamingpb.TransformLogEntry, 0)
 	for {
 		select {
 		case event, ok := <-handler.events:
 			if !ok {
 				if err := ctx.Err(); err != nil {
-					return nil, err
+					return err
 				}
-				return entries, view.TransformLogStream.Error()
+				if e := view.TransformLogStream.Error(); e != nil {
+					return e
+				}
+				return merr.WrapErrServiceNotReadyMsg("bounded transform replay closed before its end frontier")
 			}
 			if event.Entry != nil {
-				entries = append(entries, event.Entry)
+				if err := apply(event.Entry); err != nil {
+					return err
+				}
 			}
 			if event.SyncUp != nil {
-				return entries, nil
+				if event.SyncUp.TimeTick < view.BaseTransformTimeTick {
+					return merr.WrapErrServiceNotReadyMsg("incomplete bounded transform replay")
+				}
+				return nil
 			}
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return ctx.Err()
 		}
 	}
 }

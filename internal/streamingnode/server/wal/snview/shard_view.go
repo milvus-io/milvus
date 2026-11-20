@@ -111,10 +111,11 @@ func (s *snShardView) startRecoveryVersions(versions []qviews.QueryViewVersion) 
 			Meta:           entry.sm.Meta(),
 			PartitionStats: entry.sm.SNView().GetPartitionStats(),
 			OnReady: func() {
-				s.notifyRecoveringDone(v)
+				s.notifyRecoveringDone(v, entry)
 			},
+			OnRuntimeFailed: func() { s.notifyRuntimeFailed(v, entry) },
 			OnUnrecoverable: func() {
-				s.notifyUnrecoverable(v)
+				s.notifyUnrecoverable(v, entry)
 			},
 		})
 	}
@@ -197,10 +198,11 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 				Meta:           sm.Meta(),
 				PartitionStats: sm.SNView().GetPartitionStats(),
 				OnReady: func() {
-					s.notifyReady(version)
+					s.notifyReady(version, entry)
 				},
+				OnRuntimeFailed: func() { s.notifyRuntimeFailed(version, entry) },
 				OnUnrecoverable: func() {
-					s.notifyUnrecoverable(version)
+					s.notifyUnrecoverable(version, entry)
 				},
 			})
 		case qviews.QueryViewStateDown, qviews.QueryViewStateDropped:
@@ -265,12 +267,12 @@ func (s *snShardView) setCollectionIDLocked(collectionID int64) {
 
 // notifyReady is called by ResourceManager callback when resource preparation
 // completes. Drives the SM from Preparing → Ready.
-func (s *snShardView) notifyReady(version qviews.QueryViewVersion) {
+func (s *snShardView) notifyReady(version qviews.QueryViewVersion, expected *snViewEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	entry, exists := s.views[version]
-	if !exists {
+	if !exists || entry != expected {
 		return
 	}
 
@@ -290,12 +292,12 @@ func (s *snShardView) notifyReady(version qviews.QueryViewVersion) {
 
 // notifyUnrecoverable is called by ResourceManager when the requested
 // resources can no longer be reconstructed at the QueryView DataVersion.
-func (s *snShardView) notifyUnrecoverable(version qviews.QueryViewVersion) {
+func (s *snShardView) notifyUnrecoverable(version qviews.QueryViewVersion, expected *snViewEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	entry, exists := s.views[version]
-	if !exists {
+	if !exists || entry != expected {
 		return
 	}
 	entry.sm.OnUnrecoverable()
@@ -304,12 +306,12 @@ func (s *snShardView) notifyUnrecoverable(version qviews.QueryViewVersion) {
 
 // notifyRecoveringDone is called by ResourceManager callback when WAL catch-up
 // completes. Drives the SM from UpRecovering → Up.
-func (s *snShardView) notifyRecoveringDone(version qviews.QueryViewVersion) {
+func (s *snShardView) notifyRecoveringDone(version qviews.QueryViewVersion, expected *snViewEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	entry, exists := s.views[version]
-	if !exists {
+	if !exists || entry != expected {
 		return
 	}
 
@@ -581,4 +583,14 @@ func (s *snShardView) publishReplicaLocked(entry *snViewEntry) {
 
 func collectionIDForEntry(entry *snViewEntry) int64 {
 	return entry.sm.Meta().GetCollectionId()
+}
+
+func (s *snShardView) notifyRuntimeFailed(version qviews.QueryViewVersion, failed *snViewEntry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.views[version] != failed {
+		return
+	}
+	failed.sm.OnRuntimeFailed()
+	s.consumeReportPersistAndCleanup(version, failed)
 }

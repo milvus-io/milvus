@@ -225,14 +225,14 @@ func (r *Runtime) BeforeRelease(ctx context.Context, target qviews.DataVersion) 
 	return nil
 }
 
-func (r *Runtime) ApplyLiveEvent(ctx context.Context, event walview.VChannelResourceEvent) {
+func (r *Runtime) ApplyLiveEvent(ctx context.Context, event walview.VChannelResourceEvent) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for r.refresh != nil && r.refresh.err == nil && len(r.refresh.pending) >= 1024 && !r.closed {
 		r.cond.Wait()
 	}
 	if r.closed {
-		return
+		return nil
 	}
 	if stage := r.refresh; stage != nil && stage.err == nil && stage.includes(event) {
 		stage.pending = append(stage.pending, event)
@@ -242,6 +242,8 @@ func (r *Runtime) ApplyLiveEvent(ctx context.Context, event walview.VChannelReso
 			field.oracle.ApplyLiveEvent(ctx, event)
 		}
 	}
+
+	return nil
 }
 func (*Runtime) Advance(qviews.DataVersion) {}
 func (r *Runtime) Close() {

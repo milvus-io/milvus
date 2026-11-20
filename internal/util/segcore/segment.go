@@ -17,6 +17,8 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"google.golang.org/protobuf/proto"
@@ -28,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
@@ -119,9 +122,10 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 type cSegmentImpl struct {
 	// Coordinates GC with Release. Other operations retain their existing
 	// requirement that the caller holds the physical segment alive.
-	gcMu sync.Mutex
-	id   int64
-	ptr  C.CSegmentInterface
+	gcMu             sync.Mutex
+	nextUpdateReport atomic.Int64
+	id               int64
+	ptr              C.CSegmentInterface
 }
 
 // PinSealedReadState retains the current immutable columns and indexes. The
@@ -172,6 +176,7 @@ func (s *cSegmentImpl) HasFieldData(fieldID int64) bool {
 // Search requests a search on the segment.
 // If searchReq.FilterOnly() is true, only executes the filter and returns valid_count (Stage 1 of two-stage search).
 func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error) {
+	defer s.reportUpdateStats(ctx, 0)
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(searchReq)
@@ -211,6 +216,7 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 
 // Retrieve retrieves entities from the segment.
 func (s *cSegmentImpl) Retrieve(ctx context.Context, plan *RetrievePlan) (*RetrieveResult, error) {
+	defer s.reportUpdateStats(ctx, 0)
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(plan)
@@ -249,6 +255,7 @@ func (s *cSegmentImpl) Retrieve(ctx context.Context, plan *RetrievePlan) (*Retri
 
 // RetrieveByOffsets retrieves entities from the segment by offsets.
 func (s *cSegmentImpl) RetrieveByOffsets(ctx context.Context, plan *RetrievePlanWithOffsets) (*RetrieveResult, error) {
+	defer s.reportUpdateStats(ctx, 0)
 	if len(plan.Offsets) == 0 {
 		return nil, merr.WrapErrParameterInvalid("segment offsets", "empty offsets")
 	}
@@ -436,6 +443,79 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	defer future.Release()
 	_, err = future.BlockAndLeakyGet()
 	return err
+}
+
+func (s *cSegmentImpl) ApplyUpdates(ctx context.Context, timestamp uint64, ordinal uint32, update *messagespb.UpdateMessageBody) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	assignments := update.GetAssignments()
+	if len(assignments) == 0 {
+		return merr.WrapErrDataIntegrityMsg("update body has no assignments")
+	}
+	// C reads nested Go buffers synchronously. Pin their backing arrays for the
+	// whole call, including while constructing the array of CProto descriptors.
+	var pinned runtime.Pinner
+	defer pinned.Unpin()
+	marshal := func(msg proto.Message) (C.CProto, error) {
+		data, err := proto.Marshal(msg)
+		if err != nil {
+			return C.CProto{}, merr.Wrap(err, "marshal segment update")
+		}
+		if len(data) == 0 {
+			return C.CProto{}, merr.WrapErrDataIntegrityMsg("empty segment update protobuf")
+		}
+		pinned.Pin(&data[0])
+		return C.CProto{proto_blob: unsafe.Pointer(&data[0]), proto_size: C.int64_t(len(data))}, nil
+	}
+	ids, err := marshal(update.GetPrimaryKeys())
+	if err != nil {
+		return err
+	}
+	fields := make([]C.int64_t, len(assignments))
+	literals := make([]C.CProto, len(assignments))
+	for i, a := range assignments {
+		fields[i] = C.int64_t(a.GetFieldId())
+		literals[i], err = marshal(a.GetLiteral())
+		if err != nil {
+			return err
+		}
+	}
+	s.gcMu.Lock()
+	defer s.gcMu.Unlock()
+	if s.ptr == nil {
+		return merr.WrapErrSegmentNotLoaded(s.id)
+	}
+	guard := NewCancellationGuard(ctx)
+	defer guard.Close()
+	status := C.ApplySegmentUpdates(s.ptr, C.uint64_t(timestamp), C.uint32_t(ordinal), ids, &fields[0], &literals[0], C.int64_t(len(fields)), C.CLoadCancellationSource(guard.Source()))
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return err
+	}
+	s.reportUpdateStats(ctx, timestamp)
+	return nil
+}
+
+func (s *cSegmentImpl) reportUpdateStats(ctx context.Context, applied uint64) {
+	if !mlog.LevelEnabled(mlog.DebugLevel) {
+		return
+	}
+	now := time.Now().Unix()
+	next := s.nextUpdateReport.Load()
+	if now < next || !s.nextUpdateReport.CompareAndSwap(next, now+60) {
+		return
+	}
+	var stats C.CUpdateStoreStats
+	status := C.GetUpdateStoreStats(s.ptr, &stats)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		mlog.Warn(ctx, "read segment update statistics", mlog.FieldSegmentID(s.id), mlog.Err(err))
+		return
+	}
+	if stats.fields == 0 {
+		return
+	}
+	mlog.Debug(ctx, "segment update store statistics", mlog.FieldSegmentID(s.id), mlog.Uint64("sampledApplyTimeTick", applied),
+		mlog.Uint64("updatedFields", uint64(stats.fields)), mlog.Uint64("versions", uint64(stats.versions)), mlog.Uint64("distinctFieldOffsets", uint64(stats.distinct_field_offsets)), mlog.Uint64("entryAndMembershipBytes", uint64(stats.entry_and_membership_bytes)), mlog.Uint64("reverseScans", uint64(stats.reverse_scans)), mlog.Uint64("reverseSelected", uint64(stats.reverse_selected)), mlog.Uint64("overlayBatches", uint64(stats.overlay_batches)), mlog.Uint64("dictionaryProbes", uint64(stats.dictionary_probes)))
 }
 
 // GCUpdates completes synchronously once it enters native code.

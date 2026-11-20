@@ -413,3 +413,48 @@ func TestSegmentResourceManagerListsQueryViewCollections(t *testing.T) {
 		require.Empty(t, f.manager.CollectionIDs())
 	})
 }
+
+type scopedCollectionGuard struct {
+	*fakeCollectionRuntimeGuard
+	local *segments.Collection
+}
+
+func (g *scopedCollectionGuard) Collection() *segments.Collection { return g.local }
+
+func TestNewPhysicalCoverageRegistersFromFrozenCursor(t *testing.T) {
+	mockey.PatchConvey("expanded scope needs a new physical apply frontier", t, func() {
+		f := setupResourceTest(t, nil)
+		defer f.manager.Close()
+		f.dependencyMock.UnPatch()
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, IsPrimaryKey: true, DataType: schemapb.DataType_Int64}, {FieldID: 101, DataType: schemapb.DataType_Int64}, {FieldID: 102, DataType: schemapb.DataType_Int64}}}
+		owner := segments.NewTestCollection(1, querypb.LoadType_LoadCollection, schema)
+		mockey.Mock((*fakeQueryViewCollectionRuntimeManager).Acquire).To(func(_ *fakeQueryViewCollectionRuntimeManager, _ context.Context, view *qviews.QueryViewAtQueryNode) (CollectionRuntimeGuard, bool, error) {
+			version := view.IntoProto().Meta.SchemaVersion
+			fields := []int64{100, 101}
+			if version >= 2 {
+				fields = append(fields, 102)
+			}
+			return &scopedCollectionGuard{&fakeCollectionRuntimeGuard{schema: schema, schemaVersion: int64(version)}, owner.WithLoadScope(nil, fields)}, false, nil
+		}).Build()
+		f.registerMock.UnPatch()
+		cursors := make(chan uint64, 3)
+		mockey.Mock((*fakeTransformLogBuffer).RegisterSegment).To(func(_ *fakeTransformLogBuffer, _ context.Context, segment TransformSegment) (TransformRegistration, error) {
+			cursors <- segment.TransformStartAfterTimeTick()
+			return instantTransformRegistration{}, nil
+		}).Build()
+		first := f.acquire(1, 1, 1)
+		require.EqualValues(t, 1, <-f.ready)
+		require.EqualValues(t, 50, <-cursors)
+		second := f.acquire(2, 2, 2)
+		require.EqualValues(t, 2, <-f.ready)
+		require.EqualValues(t, 50, <-cursors)
+		third := f.acquire(3, 3, 3)
+		require.EqualValues(t, 3, <-f.ready)
+		require.EqualValues(t, 2, f.loads.Load())
+		require.Empty(t, cursors)
+		require.Zero(t, f.releases.Load())
+		f.drop(t, first)
+		f.drop(t, second)
+		f.drop(t, third)
+	})
+}

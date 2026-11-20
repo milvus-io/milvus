@@ -31,9 +31,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storage/deltacodec"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
@@ -64,8 +66,16 @@ func newCopySegmentCopierMock(
 	return target
 }
 
-func mockNoManifestLobFiles(t *testing.T) {
+type legacyDeltaSource struct{ storage.ChunkManager }
+
+func (legacyDeltaSource) ReadAt(context.Context, string, int64, int64) ([]byte, error) {
+	return common.Endian.AppendUint32(nil, uint32(storage.MagicNumber)), nil
+}
+
+func mockEmptyManifestSidecars(t *testing.T) {
 	t.Helper()
+	delta := mockey.Mock(packed.GetDeltaLogPathsFromManifest).Return([]string(nil), nil).Build()
+	t.Cleanup(func() { delta.UnPatch() })
 	mock := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo{}, nil).Build()
 	t.Cleanup(func() { mock.UnPatch() })
 }
@@ -2662,7 +2672,7 @@ func TestCopySegmentAndIndexFiles_StorageV2CopiesManifest(t *testing.T) {
 }
 
 func TestCopySegmentAndIndexFiles_ExternalTable(t *testing.T) {
-	mockNoManifestLobFiles(t)
+	mockEmptyManifestSidecars(t)
 	mockCopiedManifestIndexEntries(t, nil)
 
 	source := &datapb.CopySegmentSource{
@@ -2728,7 +2738,7 @@ func TestCopySegmentAndIndexFiles_ExternalTable(t *testing.T) {
 }
 
 func TestCollectSegmentFiles_WithManifest(t *testing.T) {
-	mockNoManifestLobFiles(t)
+	mockEmptyManifestSidecars(t)
 
 	ctx := context.Background()
 
@@ -2853,7 +2863,7 @@ func TestCollectSegmentFiles_ManifestLobFailure(t *testing.T) {
 }
 
 func TestCollectSegmentFiles_ManifestEmptyFiles(t *testing.T) {
-	mockNoManifestLobFiles(t)
+	mockEmptyManifestSidecars(t)
 
 	ctx := context.Background()
 
@@ -3113,7 +3123,7 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 	}
 
 	t.Run("successful copy with manifest", func(t *testing.T) {
-		mockNoManifestLobFiles(t)
+		mockEmptyManifestSidecars(t)
 		mockCopiedManifestIndexEntries(t, nil)
 
 		mList := mockey.Mock(listAllFiles).To(func(_ context.Context, _ storage.ChunkManager, basePath string) ([]string, error) {
@@ -3130,7 +3140,7 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 			return nil
 		})
 
-		cm := &struct{ storage.ChunkManager }{}
+		cm := legacyDeltaSource{}
 
 		result, copiedFiles, err := CopySegmentAndIndexFiles(
 			context.Background(),
@@ -3172,13 +3182,13 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 	})
 
 	t.Run("republished revision belongs to cleanup inventory", func(t *testing.T) {
-		mockNoManifestLobFiles(t)
+		mockEmptyManifestSidecars(t)
 		mockCopiedManifestIndexEntries(t, []packed.ManifestIndexInfo{{IndexID: 1}})
 		defer mockey.Mock(listAllFiles).Return([]string{"files/insert_log/111/222/333/_data/0"}, nil).Build().UnPatch()
 		republished := packed.MarshalManifestPath("files/insert_log/444/555/666", 3)
 		defer mockey.Mock(packed.CommitManifestUpdates).Return(republished, nil).Build().UnPatch()
 		copier := newCopySegmentCopierMock(t, func(context.Context, string, string, string, string) error { return nil })
-		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), &struct{ storage.ChunkManager }{},
+		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), legacyDeltaSource{},
 			&indexpb.StorageConfig{BucketName: "test-bucket"}, &indexpb.StorageConfig{BucketName: "test-bucket"},
 			copier, "test-bucket", "test-bucket", source, target, nil)
 		require.NoError(t, err)
@@ -3189,14 +3199,14 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 	})
 
 	t.Run("copy failure on physical file", func(t *testing.T) {
-		mockNoManifestLobFiles(t)
+		mockEmptyManifestSidecars(t)
 
 		mList := mockey.Mock(listAllFiles).To(func(_ context.Context, _ storage.ChunkManager, basePath string) ([]string, error) {
 			return []string{"files/insert_log/111/222/333/_data/0"}, nil
 		}).Build()
 		defer mList.UnPatch()
 
-		cm := &struct{ storage.ChunkManager }{}
+		cm := legacyDeltaSource{}
 		result, copiedFiles, err := CopySegmentAndIndexFiles(
 			context.Background(),
 			cm,
@@ -3219,7 +3229,7 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 	})
 
 	t.Run("step 3.5 fails on invalid pb path format", func(t *testing.T) {
-		mockNoManifestLobFiles(t)
+		mockEmptyManifestSidecars(t)
 
 		badPbSource := &datapb.CopySegmentSource{
 			CollectionId:   111,
@@ -3240,7 +3250,7 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 		mList := mockey.Mock(listAllFiles).Return([]string{"files/insert_log/111/222/333/_data/0"}, nil).Build()
 		defer mList.UnPatch()
 
-		cm := &struct{ storage.ChunkManager }{}
+		cm := legacyDeltaSource{}
 		result, _, err := CopySegmentAndIndexFiles(
 			context.Background(),
 			cm,
@@ -3263,7 +3273,7 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 // TestCopySegmentAndIndexFiles_WithManifest_NoPbBinlogs tests StorageV3 segment with no pb insert binlogs.
 // When InsertBinlogs in pb is empty but manifest has files, Step 3.5 has nothing to add (no logical paths).
 func TestCopySegmentAndIndexFiles_WithManifest_NoPbBinlogs(t *testing.T) {
-	mockNoManifestLobFiles(t)
+	mockEmptyManifestSidecars(t)
 	manifestIndexReads := 0
 	manifestIndexMock := mockey.Mock(packed.GetManifestIndexInfos).To(
 		func(string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
@@ -3406,7 +3416,7 @@ func TestListAllFiles(t *testing.T) {
 }
 
 func TestCopySegmentAndIndexFiles_LocalStorageV3UsesCompletePaths(t *testing.T) {
-	mockNoManifestLobFiles(t)
+	mockEmptyManifestSidecars(t)
 
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "local", "root")
@@ -3421,7 +3431,7 @@ func TestCopySegmentAndIndexFiles_LocalStorageV3UsesCompletePaths(t *testing.T) 
 	sourcePathlessDeltaPath := path.Join(root, sourcePathlessDeltaKey)
 	targetPathlessDeltaPath := path.Join(root, "insert_log/444/555/666/_delta/10003")
 	require.NoError(t, cm.Write(ctx, sourcePath, []byte("segment-data")))
-	require.NoError(t, cm.Write(ctx, sourceDeltaPath, []byte("delta-data")))
+	require.NoError(t, cm.Write(ctx, sourceDeltaPath, common.Endian.AppendUint32(nil, uint32(storage.MagicNumber))))
 	require.NoError(t, cm.Write(ctx, sourcePathlessDeltaPath, []byte("pathless-delta-data")))
 
 	source := &datapb.CopySegmentSource{
@@ -3506,7 +3516,7 @@ func TestCopySegmentAndIndexFiles_LocalStorageV3UsesCompletePaths(t *testing.T) 
 	assert.Equal(t, []byte("segment-data"), content)
 	deltaContent, err := cm.Read(ctx, targetDeltaPath)
 	require.NoError(t, err)
-	assert.Equal(t, []byte("delta-data"), deltaContent)
+	assert.Equal(t, common.Endian.AppendUint32(nil, uint32(storage.MagicNumber)), deltaContent)
 	pathlessDeltaContent, err := cm.Read(ctx, targetPathlessDeltaPath)
 	require.NoError(t, err)
 	assert.Equal(t, []byte("pathless-delta-data"), pathlessDeltaContent)
@@ -3546,6 +3556,8 @@ func TestCopySegmentAndIndexFiles_ExternalSourceToLocalCanonicalLayout(t *testin
 		}, nil
 	}).Build()
 	defer mList.UnPatch()
+	deltaInventory := mockey.Mock(packed.GetDeltaLogPathsFromManifest).Return([]string(nil), nil).Build()
+	defer deltaInventory.UnPatch()
 	mLob := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo{{Path: sourceLob, FieldID: 100}}, nil).Build()
 	defer mLob.UnPatch()
 	binlog := func(file string) []*datapb.FieldBinlog {
@@ -3575,7 +3587,7 @@ func TestCopySegmentAndIndexFiles_ExternalSourceToLocalCanonicalLayout(t *testin
 		copied[src] = dst
 		return cm.Write(ctx, dst, []byte(src))
 	})
-	result, copiedFiles, err := CopySegmentAndIndexFiles(ctx, &struct{ storage.ChunkManager }{},
+	result, copiedFiles, err := CopySegmentAndIndexFiles(ctx, legacyDeltaSource{},
 		&indexpb.StorageConfig{StorageType: "remote", RootPath: "source-root", BucketName: "source-bucket"},
 		&indexpb.StorageConfig{StorageType: "local", RootPath: root},
 		copier, "source-bucket", "", source, target, nil)
@@ -3647,7 +3659,7 @@ func TestGenerateMappingsFromFiles_RemoteCanonicalTargetRoot(t *testing.T) {
 // The fix skips pb path extraction for V3 (files already copied via manifest
 // basePath/_stats/) and passes metadata as placeholders.
 func TestCopySegmentAndIndexFiles_V3WithTextAndJsonStats(t *testing.T) {
-	mockNoManifestLobFiles(t)
+	mockEmptyManifestSidecars(t)
 	mockCopiedManifestIndexEntries(t, nil)
 
 	manifestPath := packed.MarshalManifestPath("files/insert_log/111/222/333", 2)
@@ -4244,4 +4256,60 @@ func TestBuildTargetManifestIndexes_RejectsExternalPaths(t *testing.T) {
 			IndexFilePaths: []string{"files/index_files/5/1/2/3/index.bin"},
 		}})
 	require.ErrorContains(t, err, "outside segment index directory")
+}
+
+func TestCopyRefusesSourceHistoryRemappingBeforeCopy(t *testing.T) {
+	paramtable.Init()
+	ctx := t.Context()
+	dir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(dir))
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+	src := &datapb.CopySegmentSource{CollectionId: 1, PartitionId: 2, SegmentId: 3}
+	target := &datapb.CopySegmentTarget{CollectionId: 4, PartitionId: 5, SegmentId: 6}
+	copied := 0
+	copier := newCopySegmentCopierMock(t, func(context.Context, string, string, string, string) error { copied++; return nil })
+	copySource := func() (*datapb.CopySegmentResult, error) {
+		res, files, err := CopySegmentAndIndexFiles(ctx, cm, cfg, cfg, copier, "", "", src, target, nil)
+		if err != nil {
+			require.Empty(t, files)
+			require.Nil(t, res)
+			require.Zero(t, copied)
+		}
+		return res, err
+	}
+	typed := &storage.MutationDelta{Layout: deltacodec.Layout{CollectionID: 1, VChannel: "v", PartitionID: 2, SchemaVersion: 1, PKType: schemapb.DataType_Int64}, Rows: []deltacodec.Row{{TimeTick: 10, SourceOrdinal: 1, Operation: deltacodec.Delete, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{11}}}}}}}
+	file := &datapb.Binlog{LogPath: path.Join(dir, "delta_log/1/2/3/8"), EntriesNum: 1, MutationCounts: &datapb.DeltaMutationCounts{DeleteKeys: 1}}
+	src.DeltaBinlogs = []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{file}}}
+	_, err := copySource()
+	require.ErrorContains(t, err, "source-history remapping")
+	_, err = storage.WriteMutationDelta(ctx, file.LogPath, *typed, cfg, nil)
+	require.NoError(t, err)
+	file.MutationCounts = nil
+	_, err = copySource()
+	require.ErrorContains(t, err, "source-history remapping")
+	base := path.Join(dir, "insert_log/1/2/3")
+	manifestDelta := path.Join(base, "_delta/9")
+	_, err = storage.WriteMutationDelta(ctx, manifestDelta, *typed, cfg, nil)
+	require.NoError(t, err)
+	src.StorageVersion = storage.StorageV3
+	src.ManifestPath, err = packed.AddDeltaLogsToManifest(packed.MarshalManifestPath(base, packed.ManifestLatest), cfg, []packed.DeltaLogEntry{{Path: manifestDelta, NumEntries: 1}})
+	require.NoError(t, err)
+	src.DeltaBinlogs = nil
+	_, err = copySource()
+	require.ErrorContains(t, err, "source-history remapping")
+	src.StorageVersion = storage.StorageV2
+	src.ManifestPath = ""
+	file.LogPath = path.Join(dir, "delta_log/1/2/3/10")
+	src.DeltaBinlogs = []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{file}}}
+	writer, err := storage.NewDeltalogWriter(ctx, 1, 2, 3, 10, schemapb.DataType_Int64, file.LogPath, storage.WithVersion(storage.StorageV2), storage.WithStorageConfig(cfg))
+	require.NoError(t, err)
+	rec, _, _, err := storage.BuildDeleteRecord([]storage.PrimaryKey{storage.NewInt64PrimaryKey(11)}, []uint64{10})
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(rec))
+	rec.Release()
+	require.NoError(t, writer.Close())
+	result, err := copySource()
+	require.NoError(t, err)
+	require.EqualValues(t, 6, result.SegmentId)
+	require.Equal(t, 1, copied)
 }

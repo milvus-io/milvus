@@ -315,3 +315,23 @@ func TestQueryMVCCRetainedACKsDoNotRegressPublishedBarrier(t *testing.T) {
 	require.True(t, ready)
 	require.Zero(t, got)
 }
+
+func TestUpdateFrontiersFollowStandaloneAndTxnCommit(t *testing.T) {
+	cm := NewQueryMVCCManager(100)
+	cm.ApplyRecoveryBarrier("v", 100)
+	standalone := createQueryTestMessage(t, 111, "v", message.MessageTypeUpdate, false, true)
+	publishQueryTestPrefix(t, cm, 111, standalone)
+	got, ready := cm.Snapshot("v", 111)
+	require.True(t, ready)
+	require.Equal(t, QueryVChannelMVCC{111, 111}, got)
+	body := createQueryTestMessage(t, 120, "v", message.MessageTypeUpdate, true, true)
+	publishQueryTestPrefix(t, cm, 120, body)
+	got, ready = cm.Snapshot("v", 120)
+	require.True(t, ready)
+	require.Equal(t, QueryVChannelMVCC{111, 111}, got)
+	commit := createQueryTestMessage(t, 130, "v", message.MessageTypeCommitTxn, true, true)
+	publishQueryTestPrefix(t, cm, 130, commit)
+	got, ready = cm.Snapshot("v", 130)
+	require.True(t, ready)
+	require.Equal(t, QueryVChannelMVCC{130, 130}, got)
+}

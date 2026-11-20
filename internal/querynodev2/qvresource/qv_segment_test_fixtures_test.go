@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -192,6 +193,9 @@ func (l *fakeQVLoader) Load(_ context.Context, collectionID int64, version int64
 }
 
 type fakeQVSegment struct {
+	updates      []*messagespb.UpdateMessageBody
+	ordinals     []uint32
+	updateTicks  []uint64
 	id           int64
 	partitionID  int64
 	deletedPKs   storage.PrimaryKeys
@@ -268,3 +272,10 @@ func (s *fakeQVSegment) BatchPkExist(*storage.BatchLocationsCache) []bool {
 }
 
 func (r fakeQVCollectionRuntime) IndexInfos() []*indexpb.IndexInfo { return nil }
+
+func (s *fakeQVSegment) ApplyUpdates(_ context.Context, ts uint64, ordinal uint32, body *messagespb.UpdateMessageBody) error {
+	s.updates = append(s.updates, body)
+	s.ordinals = append(s.ordinals, ordinal)
+	s.updateTicks = append(s.updateTicks, ts)
+	return s.err
+}

@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -511,6 +512,7 @@ func TestCopySegmentTaskExecute(t *testing.T) {
 
 	t.Run("successful copy with multiple segments", func(t *testing.T) {
 		mockCM := mocks.NewChunkManager(t)
+		mockCM.EXPECT().ReadAt(mock.Anything, mock.Anything, int64(0), int64(4)).Return(common.Endian.AppendUint32(nil, uint32(storage.MagicNumber)), nil).Once()
 		// Expect 4 copy operations (2 segments * 2 files each)
 		mockCM.EXPECT().Copy(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(4)
 
@@ -678,6 +680,7 @@ func TestCopySegmentTaskExecute(t *testing.T) {
 
 	t.Run("copy with only delta binlogs (no insert binlogs)", func(t *testing.T) {
 		mockCM := mocks.NewChunkManager(t)
+		mockCM.EXPECT().ReadAt(mock.Anything, mock.Anything, int64(0), int64(4)).Return(common.Endian.AppendUint32(nil, uint32(storage.MagicNumber)), nil).Once()
 		mockCM.EXPECT().Copy(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(1)
 
 		req := &datapb.CopySegmentRequest{
@@ -1118,6 +1121,7 @@ func TestCopySegmentTaskWithIndexFiles(t *testing.T) {
 
 	t.Run("copy with all types of binlogs and indexes", func(t *testing.T) {
 		mockCM := mocks.NewChunkManager(t)
+		mockCM.EXPECT().ReadAt(mock.Anything, mock.Anything, int64(0), int64(4)).Return(common.Endian.AppendUint32(nil, uint32(storage.MagicNumber)), nil).Once()
 		// Insert + Stats + Delta + BM25 + Index + Text + JsonKey = 7 files
 		mockCM.EXPECT().Copy(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(7)
 

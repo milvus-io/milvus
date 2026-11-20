@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -570,4 +571,13 @@ func primaryKeySamples(primaryKeys storage.PrimaryKeys, limit int) []string {
 		samples = append(samples, fmt.Sprint(primaryKeys.Get(i).GetValue()))
 	}
 	return samples
+}
+
+func (s *growingSegment) applyUpdate(ctx context.Context, ts uint64, ordinal uint32, body *messagespb.UpdateMessageBody) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.segment == nil {
+		return nil
+	}
+	return s.segment.ApplyUpdates(ctx, ts, ordinal, body)
 }

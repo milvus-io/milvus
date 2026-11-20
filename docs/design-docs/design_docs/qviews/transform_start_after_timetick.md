@@ -288,6 +288,24 @@ buffer, forward View evolution and Segment moves need no separate historical
 copy. Restart, a new node, or a destroyed buffer still requires initialization.
 Subscription success alone is not readiness: Segment application must catch up.
 
+### Applying field updates
+
+A registration consumes complete Transform entries in commit order. A mixed
+transaction retains each mutation body's source ordinal. Growing restores
+inserts, applies the bounded Transform suffix to its unpublished segments, and
+then consumes the existing ordered live event queue. Sealed loads the selected
+parent and child delta sources, including legacy deletes and typed updates,
+before registering the base cursor. A missing interval below the Summary
+retention floor fails recovery before SyncUp.
+
+A Sealed physical store tracks a fixed set of updateable field IDs and their
+logical types, array element types and nullability. Views with compatible row
+domains and the same coverage can share the store. A changed coverage builds a
+fresh physical store from its own base/cursor pair and replays the retained
+suffix in the shard buffer. Each store projects a mixed assignment onto its own
+fields and preserves its commit timestamp and source ordinal. An empty
+projection can advance only that particular registration.
+
 ## 6. Implementation and validation
 
 The producer is complete only after these pieces are wired:

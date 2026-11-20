@@ -101,6 +101,7 @@ func (r *RetrieveArrowResult) GetResult() (*segcorepb.RetrieveResults, arrow.Rec
 // See CRetrieveArrowResult in segment_c.h for
 // the split and its preconditions.
 func (s *cSegmentImpl) RetrieveAsArrow(ctx context.Context, plan *RetrievePlan) (*RetrieveArrowResult, error) {
+	defer s.reportUpdateStats(ctx, 0)
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(plan)

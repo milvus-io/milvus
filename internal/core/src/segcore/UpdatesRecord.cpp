@@ -594,6 +594,25 @@ UpdatesRecord::ReadBatch(FieldId field,
     return patches;
 }
 
+UpdatesRecord::StoreStats
+UpdatesRecord::StoreStatistics() const {
+    StoreStats stats;
+    std::shared_lock lock(impl_->mutex);
+    stats.fields = impl_->fields.size();
+    for (const auto& [id, field] : impl_->fields) {
+        std::visit(
+            [&](const auto& log) {
+                stats.versions += log.entries.size();
+                stats.distinct_field_offsets += log.positions.size();
+                stats.entry_and_membership_bytes +=
+                    log.entries.capacity() * sizeof(log.entries.front()) +
+                    (log.membership.capacity() + 7) / 8;
+            },
+            field);
+    }
+    return stats;
+}
+
 UpdatesRecord::FieldStats
 UpdatesRecord::Stats(FieldId field) const {
     std::shared_lock lock(impl_->mutex);

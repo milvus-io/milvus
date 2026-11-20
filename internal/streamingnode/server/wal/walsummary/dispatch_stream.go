@@ -361,12 +361,15 @@ func (s *dispatchSubscription) catchupPage() (bool, error) {
 		if err != nil {
 			return false, err
 		}
+		if batch.FastForwardTimeTick > after {
+			return false, wal.ErrTransformLogStartPointTruncated
+		}
 		for _, entry := range batch.Entries {
 			if err := s.stream.enqueue(s.ctx, s.delivery(entry, 0)); err != nil {
 				return false, err
 			}
 		}
-		s.replayAfter = max(batch.CoveredThrough, min(batch.FastForwardTimeTick, target))
+		s.replayAfter = batch.CoveredThrough
 		if s.replayAfter < target {
 			return false, nil
 		}

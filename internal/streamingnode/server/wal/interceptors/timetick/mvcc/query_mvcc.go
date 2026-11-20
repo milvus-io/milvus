@@ -2,8 +2,9 @@ package mvcc
 
 import (
 	"context"
-	"iter"
 	"sync"
+
+	"iter"
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
@@ -196,7 +197,7 @@ func (cm *QueryMVCCManager) applyLocked(msg message.ImmutableMessage, insertOnly
 		current.TransformingTimetick = tick
 	case message.MessageTypeInsert:
 		current.GrowingTimetick = max(current.GrowingTimetick, tick)
-	case message.MessageTypeDelete, message.MessageTypeCommitTxn:
+	case message.MessageTypeDelete, message.MessageTypeUpdate, message.MessageTypeCommitTxn:
 		current.TransformingTimetick = max(current.TransformingTimetick, tick)
 		current.GrowingTimetick = max(current.GrowingTimetick, tick)
 	default:

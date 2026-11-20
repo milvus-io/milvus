@@ -1298,6 +1298,9 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		}
 		metadata = newDeltaStorageMetadata(collection.Schema())
 	}
+	if local, ok := segment.(*LocalSegment); ok && local.Type() == SegmentTypeSealed && !metadata.external {
+		return loader.loadMutationDeltalogs(ctx, local, loadInfo, metadata)
+	}
 	deltaData, err := storage.NewDeltaDataWithPkType(rowNums, metadata.primaryKeyType)
 	if err != nil {
 		return err
