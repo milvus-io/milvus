@@ -231,8 +231,9 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 			}
 
 			if message.IsWALSwitch(msg) {
-				// Publish the new backend's budget before releasing the exclusive
+				// Publish the new backend's metrics and budget before releasing the exclusive
 				// PChannel lock and admitting any waiting business append.
+				w.writeMetrics.UpdateWALName(w.rwWALImpls.WALName())
 				w.chunkPayloadSizeAt.Store(0)
 			}
 
