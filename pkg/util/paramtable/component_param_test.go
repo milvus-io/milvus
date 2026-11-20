@@ -505,8 +505,20 @@ func TestComponentParam_StorageTalonParams(t *testing.T) {
 	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil)))
 	assert.Empty(t, params.CommonCfg.TalonNamespace())
 	require.NoError(t, params.Save("common.cloud.clusterId", "cluster-1"))
-	assert.Equal(t, "cluster-1---all", params.CommonCfg.TalonNamespace())
+	for _, tc := range []struct{ instanceType, classType, want string }{
+		{"", "", "others"},
+		{"Dedicated", "Tiered", "Tiered"},
+		{"VectorLake", "Standard", "VectorLake"},
+		{"Tiered", "VectorLake", "others"},
+		{"VectorLake", "Tiered", "VectorLake"},
+	} {
+		require.NoError(t, params.Save("common.cloud.instanceType", tc.instanceType))
+		require.NoError(t, params.Save("common.cloud.classType", tc.classType))
+		assert.Equal(t, "cluster-1-"+tc.want+"-all", params.CommonCfg.TalonNamespace(),
+			"instanceType=%q, classType=%q", tc.instanceType, tc.classType)
+	}
 	require.NoError(t, params.Reset("common.cloud.clusterId"))
+	assert.Empty(t, params.CommonCfg.TalonNamespace())
 	assert.False(t, params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool())
 	assert.Equal(t, uint32(524288), params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32())
 	for _, tc := range []struct {
@@ -575,7 +587,7 @@ func TestComponentParam_StorageTalonEnabledStages(t *testing.T) {
 			require.NoError(t, params.Save("common.cloud.classType", "standard"))
 			assert.Empty(t, params.CommonCfg.TalonNamespace())
 			require.NoError(t, params.Save("common.cloud.clusterId", "cluster-1"))
-			assert.Equal(t, "cluster-1-dedicated-standard-"+tc.suffix, params.CommonCfg.TalonNamespace())
+			assert.Equal(t, "cluster-1-others-"+tc.suffix, params.CommonCfg.TalonNamespace())
 			// Parsing the stage policy must not rewrite the mode that is sent
 			// alongside it in StorageConfig.
 			for _, mode := range []uint32{0, 1, 2} {

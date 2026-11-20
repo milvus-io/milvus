@@ -540,11 +540,18 @@ func (p *commonConfig) TalonNamespace() string {
 	if clusterID == "" {
 		return ""
 	}
+	namespaceType := "others"
+	switch {
+	case p.CloudInstanceType.GetValue() == "VectorLake":
+		namespaceType = "VectorLake"
+	case p.CloudClassType.GetValue() == "Tiered":
+		namespaceType = "Tiered"
+	}
 	caseMode := "meta"
 	if p.StorageTalonEnabledStages.GetAsUint32() == common.TalonStagesAll {
 		caseMode = "all"
 	}
-	return strings.Join([]string{clusterID, p.CloudInstanceType.GetValue(), p.CloudClassType.GetValue(), caseMode}, "-")
+	return strings.Join([]string{clusterID, namespaceType, caseMode}, "-")
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -567,7 +574,7 @@ To share a Pulsar instance among multiple Milvus instances, consider changing th
 		Key:          "common.cloud.clusterId",
 		Version:      "3.0.1",
 		DefaultValue: "",
-		Doc:          "Cloud cluster ID. Leave empty to use Talon's default namespace. Otherwise Talon uses <clusterId>-<instanceType>-<classType>-<case-mode>, with all for enabledStages=all and meta for manifest, load_open, or both.",
+		Doc:          "Cloud cluster ID. Leave empty to use Talon's default namespace. Otherwise Talon uses <clusterId>-<type>-<case-mode>, with all for enabledStages=all and meta for manifest, load_open, or both.",
 		Export:       true,
 	}
 	p.CloudClusterID.Init(base.mgr)
@@ -575,7 +582,7 @@ To share a Pulsar instance among multiple Milvus instances, consider changing th
 		Key:          "common.cloud.instanceType",
 		Version:      "3.0.1",
 		DefaultValue: "",
-		Doc:          "Cloud instance type used in the Talon namespace.",
+		Doc:          "Cloud instance type. VectorLake selects the VectorLake namespace type regardless of classType.",
 		Export:       true,
 	}
 	p.CloudInstanceType.Init(base.mgr)
@@ -583,7 +590,7 @@ To share a Pulsar instance among multiple Milvus instances, consider changing th
 		Key:          "common.cloud.classType",
 		Version:      "3.0.1",
 		DefaultValue: "",
-		Doc:          "Cloud class type used in the Talon namespace.",
+		Doc:          "Cloud class type. For non-VectorLake instances, Talon uses Tiered when classType is Tiered and others otherwise.",
 		Export:       true,
 	}
 	p.CloudClassType.Init(base.mgr)
