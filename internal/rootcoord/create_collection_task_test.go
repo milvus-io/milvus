@@ -3226,4 +3226,13 @@ func Test_createCollectionTask_prepareSchema_structSubFieldOriginMarker(t *testi
 		require.ErrorIs(t, err, merr.ErrParameterInvalid)
 		require.ErrorContains(t, err, "type param "+common.StructSubFieldAddedKey+" of field \"s[added]\" must be \"true\", got \"false\"")
 	})
+
+	t.Run("restore rejects added sub-field with field ID below original sibling", func(t *testing.T) {
+		task := buildTask(true)
+		task.body.CollectionSchema.StructArrayFields[0].Fields[0].FieldID = 112
+		task.body.CollectionSchema.StructArrayFields[0].Fields[1].FieldID = 106
+		err := task.prepareSchema(context.TODO())
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "added sub-field \"s[added]\" of struct field \"s\" has field ID 106, which must be greater than original sub-field ID 112")
+	})
 }
