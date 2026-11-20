@@ -17,6 +17,21 @@ type ShardManager interface {
 
 	CheckIfCollectionExists(collectionID int64) error
 
+	// CollectionVChannel returns the vchannel the collection is registered with
+	// on this pchannel.
+	CollectionVChannel(collectionID int64) (string, bool)
+
+	// FenceForSplit makes vchannel the source of the shard split splitTaskID:
+	// it seals every growing segment created before timetick and refuses DML
+	// and new segments from then on. It returns the sealed segments. The fence
+	// is never removed.
+	//
+	// A vchannel that the same split already fenced is left as it is, and
+	// alreadyFenced is true. It returns ErrCollectionNotFound if the collection
+	// is not registered with that vchannel on this pchannel, and ErrShardFenced
+	// if another split fenced the vchannel.
+	FenceForSplit(collectionID int64, vchannel string, splitTaskID int64, timetick uint64) (segmentIDs []int64, alreadyFenced bool, err error)
+
 	// GetCollectionSchemaSnapshot returns the current immutable schema, or nil
 	// when the collection or its schema is absent. Callers may retain the pointer
 	// across schema updates and collection removal, but must not mutate it.
@@ -44,6 +59,8 @@ type ShardManager interface {
 
 	AssignSegment(req *AssignSegmentRequest) (*AssignSegmentResult, error)
 
+	// ApplyDelete returns ErrShardFenced, and applies nothing, if the vchannel
+	// of the collection is the source of a shard split.
 	ApplyDelete(msg message.MutableDeleteMessageV1) error
 
 	WaitUntilGrowingSegmentReady(uniquePartitionKey PartitionUniqueKey) (<-chan struct{}, error)
@@ -60,6 +77,7 @@ type ShardManager interface {
 	AlterCollection(msg message.MutableAlterCollectionMessageV2) ([]int64, error)
 
 	// CheckIfCollectionSchemaVersionMatch validates insert header schema version against in-memory collection state.
+	// It returns ErrShardFenced if the vchannel of the collection is the source of a shard split.
 	CheckIfCollectionSchemaVersionMatch(header *message.InsertMessageHeader) (int32, error)
 
 	Close()

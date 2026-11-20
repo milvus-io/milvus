@@ -37,6 +37,7 @@ const (
 	MessageTypeImport                    MessageType = MessageType(messagespb.MessageType_Import)
 	MessageTypeCommitImport              MessageType = MessageType(messagespb.MessageType_CommitImport)
 	MessageTypeUpdateImport              MessageType = MessageType(messagespb.MessageType_UpdateImport)
+	MessageTypeSplitShard                MessageType = MessageType(messagespb.MessageType_SplitShard)
 	MessageTypeRollbackImport            MessageType = MessageType(messagespb.MessageType_RollbackImport)
 	MessageTypeCreateSegment             MessageType = MessageType(messagespb.MessageType_CreateSegment)
 	MessageTypeFlush                     MessageType = MessageType(messagespb.MessageType_Flush)
@@ -90,6 +91,7 @@ type (
 	PartitionSegmentAssignment       = messagespb.PartitionSegmentAssignment
 	SegmentAssignment                = messagespb.SegmentAssignment
 	ManualFlushExtraResponse         = messagespb.ManualFlushExtraResponse
+	SplitShardRouting                = messagespb.SplitShardRouting
 	RoleBinding                      = messagespb.RoleBinding
 	AlterLoadConfigOfAlterDatabase   = messagespb.AlterLoadConfigOfAlterDatabase
 	AlterLoadConfigOfAlterCollection = messagespb.AlterLoadConfigOfAlterCollection
@@ -127,6 +129,8 @@ type (
 	CommitImportMessageBody                = messagespb.CommitImportMessageBody
 	UpdateImportMessageHeader              = messagespb.UpdateImportMessageHeader
 	UpdateImportMessageBody                = messagespb.UpdateImportMessageBody
+	SplitShardMessageHeader                = messagespb.SplitShardMessageHeader
+	SplitShardMessageBody                  = messagespb.SplitShardMessageBody
 	RollbackImportMessageHeader            = messagespb.RollbackImportMessageHeader
 	RollbackImportMessageBody              = messagespb.RollbackImportMessageBody
 	CreateSegmentMessageHeader             = messagespb.CreateSegmentMessageHeader
@@ -870,6 +874,56 @@ var MustAsBroadcastUpdateImportMessageV2 = MustAsSpecializedBroadcastMessage[*Up
 
 // NewUpdateImportMessageBuilderV2 creates a new message builder for UpdateImportMessageV2
 var NewUpdateImportMessageBuilderV2 = newMutableMessageBuilder[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+
+// Type aliases for SplitShardMessageV2
+type (
+	MutableSplitShardMessageV2           = specializedMutableMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+	ImmutableSplitShardMessageV2         = SpecializedImmutableMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+	OwnedImmutableSplitShardMessageV2    = SpecializedOwnedImmutableMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+	RetainedImmutableSplitShardMessageV2 = SpecializedRetainedImmutableMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+	BroadcastSplitShardMessageV2         = SpecializedBroadcastMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+	BroadcastResultSplitShardMessageV2   = BroadcastResult[*SplitShardMessageHeader, *SplitShardMessageBody]
+	AckResultSplitShardMessageV2         = AckResult[*SplitShardMessageHeader, *SplitShardMessageBody]
+)
+
+// MessageTypeWithVersion for SplitShardMessageV2
+var MessageTypeSplitShardV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeSplitShard,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for SplitShardMessageV2
+var SpecializedTypeSplitShardV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*SplitShardMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*SplitShardMessageHeader)(nil)),
+}
+
+// AsMutableSplitShardMessageV2 converts a BasicMessage to MutableSplitShardMessageV2
+var AsMutableSplitShardMessageV2 = asSpecializedMutableMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+
+// MustAsMutableSplitShardMessageV2 converts a BasicMessage to MutableSplitShardMessageV2, panics on error
+var MustAsMutableSplitShardMessageV2 = mustAsSpecializedMutableMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+
+// AsImmutableSplitShardMessageV2 converts an ImmutableMessage to ImmutableSplitShardMessageV2
+var AsImmutableSplitShardMessageV2 = asSpecializedImmutableMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+
+// MustAsImmutableSplitShardMessageV2 converts an ImmutableMessage to ImmutableSplitShardMessageV2, panics on error
+var MustAsImmutableSplitShardMessageV2 = MustAsSpecializedImmutableMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+
+// MustAsOwnedImmutableSplitShardMessageV2 converts an OwnedImmutableMessage to OwnedImmutableSplitShardMessageV2, panics on error
+var MustAsOwnedImmutableSplitShardMessageV2 = MustAsSpecializedOwnedImmutableMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+
+// MustAsRetainedImmutableSplitShardMessageV2 converts a RetainedImmutableMessage to RetainedImmutableSplitShardMessageV2, panics on error
+var MustAsRetainedImmutableSplitShardMessageV2 = MustAsSpecializedRetainedImmutableMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+
+// AsBroadcastSplitShardMessageV2 converts a BasicMessage to BroadcastSplitShardMessageV2
+var AsBroadcastSplitShardMessageV2 = asSpecializedBroadcastMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+
+// MustAsBroadcastSplitShardMessageV2 converts a BasicMessage to BroadcastSplitShardMessageV2, panics on error
+var MustAsBroadcastSplitShardMessageV2 = MustAsSpecializedBroadcastMessage[*SplitShardMessageHeader, *SplitShardMessageBody]
+
+// NewSplitShardMessageBuilderV2 creates a new message builder for SplitShardMessageV2
+var NewSplitShardMessageBuilderV2 = newMutableMessageBuilder[*SplitShardMessageHeader, *SplitShardMessageBody]
 
 // Type aliases for RollbackImportMessageV2
 type (
@@ -3201,6 +3255,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.RollbackImportMessageHeader{}):            MessageTypeRollbackImport,
 	reflect.TypeOf(&messagespb.RollbackTxnMessageHeader{}):               MessageTypeRollbackTxn,
 	reflect.TypeOf(&messagespb.SchemaChangeMessageHeader{}):              MessageTypeSchemaChange,
+	reflect.TypeOf(&messagespb.SplitShardMessageHeader{}):                MessageTypeSplitShard,
 	reflect.TypeOf(&messagespb.TimeTickMessageHeader{}):                  MessageTypeTimeTick,
 	reflect.TypeOf(&messagespb.TruncateCollectionMessageHeader{}):        MessageTypeTruncateCollection,
 	reflect.TypeOf(&messagespb.TxnMessageHeader{}):                       MessageTypeTxn,
@@ -3280,6 +3335,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeRollbackImportV2:            SpecializedTypeRollbackImportV2,
 	MessageTypeRollbackTxnV2:               SpecializedTypeRollbackTxnV2,
 	MessageTypeSchemaChangeV2:              SpecializedTypeSchemaChangeV2,
+	MessageTypeSplitShardV2:                SpecializedTypeSplitShardV2,
 	MessageTypeTimeTickV1:                  SpecializedTypeTimeTickV1,
 	MessageTypeTruncateCollectionV2:        SpecializedTypeTruncateCollectionV2,
 	MessageTypeTxnV2:                       SpecializedTypeTxnV2,
@@ -3343,6 +3399,7 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeRollbackImportV2:            MessageTypeRollbackImportV2,
 	SpecializedTypeRollbackTxnV2:               MessageTypeRollbackTxnV2,
 	SpecializedTypeSchemaChangeV2:              MessageTypeSchemaChangeV2,
+	SpecializedTypeSplitShardV2:                MessageTypeSplitShardV2,
 	SpecializedTypeTimeTickV1:                  MessageTypeTimeTickV1,
 	SpecializedTypeTruncateCollectionV2:        MessageTypeTruncateCollectionV2,
 	SpecializedTypeTxnV2:                       MessageTypeTxnV2,

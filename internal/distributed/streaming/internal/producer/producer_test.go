@@ -482,6 +482,44 @@ func TestResumableProducerReturnsPartialUpdateCASError(t *testing.T) {
 	require.Equal(t, 1, appendCalls)
 }
 
+func TestResumableProducerReturnsShardFencedError(t *testing.T) {
+	rejectProducer := &partialUpdateCASRejectProducer{}
+	appendCalls := 0
+	m := mockey.Mock((*partialUpdateCASRejectProducer).Append).To(
+		func(*partialUpdateCASRejectProducer, context.Context, message.MutableMessage) (*types.AppendResult, error) {
+			appendCalls++
+			if appendCalls > 1 {
+				return nil, context.Canceled
+			}
+			return nil, status.NewShardFenced("test-v")
+		},
+	).Build()
+	defer m.UnPatch()
+	m = mockey.Mock((*partialUpdateCASRejectProducer).IsAvailable).Return(true).Build()
+	defer m.UnPatch()
+	m = mockey.Mock((*partialUpdateCASRejectProducer).Available).Return(make(chan struct{})).Build()
+	defer m.UnPatch()
+	m = mockey.Mock((*partialUpdateCASRejectProducer).Close).Return().Build()
+	defer m.UnPatch()
+
+	rp := NewResumableProducer(func(context.Context, *handler.ProducerOptions) (producer.Producer, error) {
+		return rejectProducer, nil
+	}, &ProducerOptions{PChannel: "shard-fenced"})
+	defer rp.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	result, err := rp.produceInternal(ctx, createRealInsertMessage(t, "test-v"))
+
+	// The producer does not append to a fenced vchannel again, and it hands the
+	// typed error back unmarked, so the caller can tell it from a terminal one.
+	require.Error(t, err)
+	require.True(t, status.AsStreamingError(err).IsShardFenced())
+	require.False(t, errors.Is(err, errs.ErrUnrecoverable))
+	require.Nil(t, result)
+	require.Equal(t, 1, appendCalls)
+}
+
 type partialUpdateCASRejectProducer struct {
 	producer.Producer
 }

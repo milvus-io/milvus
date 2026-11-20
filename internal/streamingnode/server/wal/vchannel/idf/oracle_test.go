@@ -274,6 +274,31 @@ func TestOracleManualFlushWaitsForFinalCommit(t *testing.T) {
 	require.Equal(t, int64(1), r.currentStats[102].NumRow())
 }
 
+func TestOracleSplitShardFenceMarksEarlierSegmentsFlushed(t *testing.T) {
+	newCopy := func(vchannel string) message.ImmutableMessage {
+		return message.NewSplitShardMessageBuilderV2().WithVChannel(vchannel).
+			WithHeader(&message.SplitShardMessageHeader{CollectionId: 1, SplitTaskId: 7, SourceVchannel: "v1", TargetVchannels: []string{"v2", "v3"}}).
+			WithBody(&message.SplitShardMessageBody{}).MustBuildMutable().
+			WithTimeTick(200).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(200))
+	}
+	ctx := context.Background()
+
+	// The fence of the source seals every growing segment created before it,
+	// the way a manual flush does.
+	r, _ := newTestOracle(t)
+	r.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{Message: bm25Insert(t, 20, 2)})
+	r.growingStore.registerSegment(21, 10, 200)
+	r.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{Message: newCopy("v1")})
+	require.True(t, r.growingStore.segments[20].flushed)
+	require.False(t, r.growingStore.segments[21].flushed)
+
+	// The genesis of a target seals nothing.
+	r, _ = newTestOracle(t)
+	r.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{Message: bm25Insert(t, 20, 2)})
+	r.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{Message: newCopy("v2")})
+	require.False(t, r.growingStore.segments[20].flushed)
+}
+
 func TestOraclePreservesResolvedEmptyPartitionScope(t *testing.T) {
 	base, resource := newTestOracle(t)
 	excluded := resource(20, 2)
