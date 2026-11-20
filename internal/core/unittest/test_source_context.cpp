@@ -106,11 +106,23 @@ TEST(SourceContextRouting, InvalidConfigurationCannotFallBackToLegacy) {
           "azure://core.windows.net/data/table/%2fescape",
           "azure://core.windows.net/data/table/../other",
           "azure://core.windows.net/data/table?sig=PRIVATE",
-          "az://data/table"}) {
+          "az://data/table",
+          "az://data/table/part",
+          "azure://data/table"}) {
         auto result = milvus::storage::SourceContextResource(source, kSpec);
         EXPECT_FALSE(result.ok()) << source;
         EXPECT_EQ(result.status().ToString().find("PRIVATE"),
                   std::string::npos);
+        milvus_storage::api::Properties properties;
+        EXPECT_THROW(InjectExternalSpecProperties(properties, 42, source, kSpec),
+                     milvus::SegcoreError);
+        LoonProperties c_properties{};
+        auto c_result = loon_properties_inject_external_spec(
+            &c_properties, 42, source, kSpec, 3000, 0);
+        EXPECT_NE(c_result.err_code, 0) << source;
+        EXPECT_EQ(c_properties.count, 0);
+        loon_ffi_free_result(&c_result);
+        loon_properties_free(&c_properties);
     }
 }
 

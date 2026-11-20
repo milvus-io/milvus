@@ -86,10 +86,15 @@ SourceContextResource(const std::string& source, const std::string& spec) {
         const auto slash = source.find('/', start);
         if (slash == std::string::npos)
             return invalid();
+        const auto suffix = source.substr(start, slash - start);
+        // Azure container names cannot contain dots. Require a dotted endpoint
+        // suffix here so a container-only alias cannot invent a new endpoint.
+        if (suffix.find('.') == std::string::npos)
+            return invalid();
         const auto end = source.find('/', slash + 1);
         const auto binding = AzureSourceStorageBinding::Create(
             account,
-            source.substr(start, slash - start),
+            suffix,
             source.substr(slash + 1, end - slash - 1));
         if (binding)
             resource = binding->ResolveUri(source);
