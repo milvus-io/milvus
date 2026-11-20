@@ -64,6 +64,10 @@ func (t *HighlightTask) Name() string {
 	return HighlightTaskName
 }
 
+func (*HighlightTask) IsSubTask() bool {
+	return true
+}
+
 func (t *HighlightTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
