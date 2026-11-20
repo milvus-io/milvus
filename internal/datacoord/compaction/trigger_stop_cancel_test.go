@@ -49,10 +49,11 @@ import (
 )
 
 type recordingInspector struct {
-	mu        sync.Mutex
-	tasks     []*datapb.CompactionTask
-	full      bool
-	onEnqueue func(*datapb.CompactionTask) error
+	mu           sync.Mutex
+	tasks        []*datapb.CompactionTask
+	full         bool
+	onEnqueue    func(*datapb.CompactionTask) error
+	onEnqueueCtx func(context.Context, *datapb.CompactionTask) error
 }
 
 func (r *recordingInspector) Start()                                            {}
@@ -67,13 +68,26 @@ func (r *recordingInspector) GetCompactionInfo(context.Context, int64) *policy.C
 }
 
 func (r *recordingInspector) EnqueueCompaction(task *datapb.CompactionTask) error {
+	return r.EnqueueCompactionWithContext(context.Background(), task)
+}
+
+func (r *recordingInspector) EnqueueCompactionWithContext(ctx context.Context, task *datapb.CompactionTask) error {
 	r.mu.Lock()
-	r.tasks = append(r.tasks, task)
+	cbCtx := r.onEnqueueCtx
 	cb := r.onEnqueue
 	r.mu.Unlock()
-	if cb != nil {
-		return cb(task)
+	if cbCtx != nil {
+		if err := cbCtx(ctx, task); err != nil {
+			return err
+		}
+	} else if cb != nil {
+		if err := cb(task); err != nil {
+			return err
+		}
 	}
+	r.mu.Lock()
+	r.tasks = append(r.tasks, task)
+	r.mu.Unlock()
 	return nil
 }
 
@@ -1180,4 +1194,62 @@ func TestInspectorEnqueueCompactionWithContextAndRollback(t *testing.T) {
 		require.False(t, m.GetSegment(context.Background(), 5002).IsCompacting)
 		require.True(t, m.GetSegment(context.Background(), 5001).IsCompacting)
 	})
+}
+
+func TestCompactionTriggerStopDuringOnlyBucketEnqueueReturnsServiceUnavailable(t *testing.T) {
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.IndexBasedCompaction.Key, "false")
+	defer pt.Reset(pt.DataCoordCfg.IndexBasedCompaction.Key)
+
+	m, im, colls := buildTestMetaWithCandidateGroups(t, 1, datapb.SegmentLevel_L1)
+	handler := newFuncHandler(t, func(_ context.Context, collID UniqueID) (*meta.CollectionInfo, error) {
+		return colls[collID], nil
+	})
+	_, alloc := newIncrementingRootCoordAllocator(t)
+
+	enteredEnqueue := make(chan struct{})
+	var enteredOnce sync.Once
+	inspector := &recordingInspector{
+		onEnqueueCtx: func(ctx context.Context, _ *datapb.CompactionTask) error {
+			enteredOnce.Do(func() {
+				close(enteredEnqueue)
+			})
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	}
+
+	tr := NewCompactionTrigger(m, im, inspector, alloc, handler, index.NewTestVersionManager())
+	tr.testingOnly = true
+	tr.Start()
+	defer tr.Stop()
+
+	type triggerRes struct {
+		id  UniqueID
+		err error
+	}
+	resCh := make(chan triggerRes, 1)
+	go func() {
+		id, err := tr.TriggerCompaction(context.Background(), NewCompactionSignal().WithCollectionID(1001).WithIsForce(true).WithWaitResult(true))
+		resCh <- triggerRes{id: id, err: err}
+	}()
+
+	select {
+	case <-enteredEnqueue:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for EnqueueCompactionWithContext")
+	}
+
+	stopStart := time.Now()
+	tr.Stop()
+	require.Less(t, time.Since(stopStart), 800*time.Millisecond)
+
+	select {
+	case res := <-resCh:
+		require.ErrorIs(t, res.err, merr.ErrServiceUnavailable)
+	case <-time.After(1 * time.Second):
+		t.Fatal("TriggerCompaction did not return after Stop() during enqueue")
+	}
+
+	require.Empty(t, inspector.snapshot())
 }

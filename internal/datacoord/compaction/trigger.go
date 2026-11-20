@@ -580,6 +580,9 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 					mlog.Int64("planID", task.GetPlanID()),
 					mlog.Int64s("inputSegments", inputSegmentIDs),
 					mlog.Err(err))
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return finishOnCtxErr(ctxErr)
+				}
 				continue
 			}
 			enqueued = true
