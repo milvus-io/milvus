@@ -2707,6 +2707,25 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         schema_snapshot->get_external_spec());
     std::vector<size_t> internal_groups;
     if (source_context) {
+        // A dropped output may share a file with a live output. Keep original
+        // group indices, but classify only the trusted schema projection that
+        // this reader can materialize; never mutate the cached manifest view.
+        column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
+            milvus_storage::api::copy_column_groups(*column_groups));
+        std::unordered_set<std::string> projected_columns(
+            needed_columns->begin(), needed_columns->end());
+        for (auto& group : *column_groups) {
+            if (!group)
+                continue;
+            auto& columns = group->columns;
+            columns.erase(
+                std::remove_if(columns.begin(),
+                               columns.end(),
+                               [&](const auto& column) {
+                                   return !projected_columns.count(column);
+                               }),
+                columns.end());
+        }
         std::unordered_set<std::string> generated_columns;
         for (const auto& field_id : schema_snapshot->get_field_ids()) {
             if (schema_snapshot->is_function_output(field_id) &&
