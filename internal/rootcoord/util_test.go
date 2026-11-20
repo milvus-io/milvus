@@ -18,6 +18,7 @@ package rootcoord
 
 import (
 	"context"
+	"math/rand"
 	"strconv"
 	"testing"
 	"time"
@@ -566,6 +567,156 @@ func Test_maxAssignedFieldIDFromSchema(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+// requireMaxFieldIDMatchesSchemaPath checks the model-based computation, and
+// ensureCollectionMaxFieldIDProperty built on it, against the schema-based one.
+func requireMaxFieldIDMatchesSchemaPath(t *testing.T, coll *model.Collection) int64 {
+	t.Helper()
+	want := maxAssignedFieldIDFromSchema(coll.ToCollectionSchemaPB())
+	require.Equal(t, want, maxAssignedFieldIDFromCollection(coll))
+
+	ensured := *coll
+	ensureCollectionMaxFieldIDProperty(&ensured)
+	require.Equal(t, updateMaxFieldIDProperty(coll.Properties, want), ensured.Properties)
+	return want
+}
+
+func TestMaxAssignedFieldIDFromCollectionMatchesSchemaPath(t *testing.T) {
+	maxFieldIDProperty := func(value string) *commonpb.KeyValuePair {
+		return &commonpb.KeyValuePair{Key: common.MaxFieldIDKey, Value: value}
+	}
+	tests := []struct {
+		name string
+		coll *model.Collection
+		want int64
+	}{
+		{name: "no fields", coll: &model.Collection{}, want: common.StartOfUserFieldID},
+		{
+			name: "system and nil fields",
+			coll: &model.Collection{Fields: []*model.Field{
+				{FieldID: common.RowIDField}, {FieldID: common.TimeStampField}, nil, {FieldID: 100}, {FieldID: 103},
+			}},
+			want: 103,
+		},
+		{
+			name: "dynamic field",
+			coll: &model.Collection{
+				EnableDynamicField: true,
+				Fields: []*model.Field{
+					{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+					{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector},
+					{FieldID: 102, Name: common.MetaFieldName, IsDynamic: true, DataType: schemapb.DataType_JSON},
+				},
+			},
+			want: 102,
+		},
+		{
+			name: "function IDs are not field IDs",
+			coll: &model.Collection{
+				Fields: []*model.Field{
+					{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar},
+					{FieldID: 101, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+				},
+				Functions: []*model.Function{
+					{ID: 500, Name: "bm25", Type: schemapb.FunctionType_BM25, InputFieldIDs: []int64{100}, OutputFieldIDs: []int64{101, 900}},
+					nil,
+				},
+			},
+			want: 101,
+		},
+		{
+			name: "struct array sub-field",
+			coll: &model.Collection{
+				Fields: []*model.Field{{FieldID: 100}},
+				StructArrayFields: []*model.StructArrayField{
+					nil,
+					{FieldID: 101, Fields: []*model.Field{{FieldID: 102}, nil, {FieldID: 110}}},
+					{FieldID: 105},
+				},
+			},
+			want: 110,
+		},
+		{
+			name: "struct array field",
+			coll: &model.Collection{
+				Fields:            []*model.Field{{FieldID: 100}},
+				StructArrayFields: []*model.StructArrayField{{FieldID: 120, Fields: []*model.Field{{FieldID: 102}}}},
+			},
+			want: 120,
+		},
+		{
+			name: "larger max_field_id property",
+			coll: &model.Collection{
+				Fields:     []*model.Field{{FieldID: 100}, {FieldID: 101}},
+				Properties: []*commonpb.KeyValuePair{nil, {Key: "other", Value: "999"}, maxFieldIDProperty("105")},
+			},
+			want: 105,
+		},
+		{
+			name: "smaller max_field_id property",
+			coll: &model.Collection{
+				Fields:     []*model.Field{{FieldID: 106}},
+				Properties: []*commonpb.KeyValuePair{maxFieldIDProperty("102")},
+			},
+			want: 106,
+		},
+		{
+			name: "only the first max_field_id property counts",
+			coll: &model.Collection{
+				Fields:     []*model.Field{{FieldID: 101}},
+				Properties: []*commonpb.KeyValuePair{maxFieldIDProperty("corrupted"), maxFieldIDProperty("200")},
+			},
+			want: 101,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, requireMaxFieldIDMatchesSchemaPath(t, tt.coll))
+		})
+	}
+
+	t.Run("random collections", func(t *testing.T) {
+		r := rand.New(rand.NewSource(1))
+		fieldID := func() int64 { return int64(r.Intn(130)) }
+		fields := func(n int) []*model.Field {
+			if n == 0 && r.Intn(2) == 0 {
+				return nil
+			}
+			result := make([]*model.Field, n)
+			for i := range result {
+				if r.Intn(8) != 0 {
+					result[i] = &model.Field{FieldID: fieldID(), IsDynamic: r.Intn(4) == 0}
+				}
+			}
+			return result
+		}
+		maxFieldIDValues := []string{"-1", "99", "100", "115", "125", "140"}
+		for i := 0; i < 500; i++ {
+			coll := &model.Collection{Fields: fields(r.Intn(6)), EnableDynamicField: r.Intn(2) == 0}
+			for j := r.Intn(3); j > 0; j-- {
+				var structField *model.StructArrayField
+				if r.Intn(6) != 0 {
+					structField = &model.StructArrayField{FieldID: fieldID(), Fields: fields(r.Intn(4))}
+				}
+				coll.StructArrayFields = append(coll.StructArrayFields, structField)
+			}
+			for j := r.Intn(3); j > 0; j-- {
+				coll.Functions = append(coll.Functions, &model.Function{ID: fieldID(), OutputFieldIDs: []int64{fieldID() + 200}})
+			}
+			for j := r.Intn(4); j > 0; j-- {
+				switch r.Intn(4) {
+				case 0:
+					coll.Properties = append(coll.Properties, nil)
+				case 1:
+					coll.Properties = append(coll.Properties, &commonpb.KeyValuePair{Key: "other", Value: "500"})
+				default:
+					coll.Properties = append(coll.Properties, maxFieldIDProperty(maxFieldIDValues[r.Intn(len(maxFieldIDValues))]))
+				}
+			}
+			requireMaxFieldIDMatchesSchemaPath(t, coll)
+		}
+	})
 }
 
 func Test_nextFunctionID(t *testing.T) {
