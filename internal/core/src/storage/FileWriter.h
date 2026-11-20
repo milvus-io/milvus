@@ -299,6 +299,9 @@ class FileWriter {
     size_t capacity_{0};
     size_t offset_{0};
     bool fdatasync_on_finish_{false};
+    // set when a write, truncate or sync failed: the file's contents are no
+    // longer what the caller wrote, so Finish() must not report success
+    bool write_failed_{false};
     // Used by FileWriterTestAccessor to block the sync point deterministically.
     std::function<void()> sync_file_data_hook_for_test_;
 
