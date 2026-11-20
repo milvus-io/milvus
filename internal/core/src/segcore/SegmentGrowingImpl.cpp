@@ -16,7 +16,7 @@
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/LoadAdmissionController.h"
 #include "segcore/storagev2translator/AsyncLoadPipeline.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "common/FastMem.h"
 #include <cxxabi.h>
 #include <algorithm>
@@ -4266,8 +4266,7 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
         return false;
     };
 
-    const bool enable_async_load =
-        storagev2translator::StorageV2AsyncLoadEnabled();
+    const bool enable_async_load = storage::LoadAsyncReadEnabled();
     auto& pool = ThreadPools::GetExecutor(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<folly::SemiFuture<
         std::unordered_map<FieldId, std::vector<FieldDataPtr>>>>
@@ -4451,9 +4450,8 @@ SegmentGrowingImpl::LoadColumnGroup(
     }
 
     const auto window_bytes = static_cast<size_t>(
-        enable_async_load
-            ? storagev2translator::StorageV2AsyncLoadReadWindowSizeBytes()
-            : FieldDataLoadBatchSplitTargetBytes());
+        enable_async_load ? storage::LoadFieldDataReadWindowSizeBytes()
+                          : FieldDataLoadBatchSplitTargetBytes());
     auto sizes_result = chunk_reader->get_chunk_estimated_size();
     if (!sizes_result.ok() && !sizes_result.status().IsNotImplemented()) {
         throw milvus_storage::ToSegcoreError(sizes_result.status());

@@ -176,16 +176,16 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 		UpdateExprResCacheConfig()
 	}
 
-	cStorageV2CellTargetSizeBytes := C.int64_t(paramtable.Get().QueryNodeCfg.StorageV2CellTargetSizeBytes.GetAsInt64())
-	C.SetStorageV2CellTargetSizeBytes(cStorageV2CellTargetSizeBytes)
-	if err := registerQueryNodeAsyncLoadThreadPoolConfig(ctx, paramtable.Get(), updateStorageV2AsyncLoadThreadPoolSize); err != nil {
+	cLoadFieldDataCellTargetSizeBytes := C.int64_t(paramtable.Get().QueryNodeCfg.LoadFieldDataCellTargetSizeBytes.GetAsInt64())
+	C.SetLoadFieldDataCellTargetSizeBytes(cLoadFieldDataCellTargetSizeBytes)
+	if err := registerQueryNodeAsyncLoadThreadPoolConfig(ctx, paramtable.Get(), updateLoadExecutorThreads); err != nil {
 		return err
 	}
 	if err := registerQueryNodeLoadConfig(ctx, paramtable.Get(), applyQueryNodeLoadConfig); err != nil {
 		return err
 	}
-	cStorageV2AsyncLoadReadWindowSizeBytes := C.int64_t(paramtable.Get().QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.GetAsInt64())
-	C.SetStorageV2AsyncLoadReadWindowSizeBytes(cStorageV2AsyncLoadReadWindowSizeBytes)
+	cLoadFieldDataReadWindowSizeBytes := C.int64_t(paramtable.Get().QueryNodeCfg.LoadFieldDataReadWindowSizeBytes.GetAsInt64())
+	C.SetLoadFieldDataReadWindowSizeBytes(cLoadFieldDataReadWindowSizeBytes)
 	enableParquetStatsSkipIndex := paramtable.Get().CommonCfg.ParquetStatsSkipIndex.GetAsBool()
 	C.SetDefaultEnableParquetStatsSkipIndex(C.bool(enableParquetStatsSkipIndex))
 
