@@ -123,7 +123,7 @@ func (s *Server) ensureCollectionReadyWithPath(ctx context.Context, req *querypb
 		}
 		callerTimer.End(r.Err)
 		if r.Err == nil {
-			// A long load gets a fresh idle TTL immediately before query execution.
+			// A long load gets a fresh TTI interval immediately before query execution.
 			s.collectionUsage.touch(collectionID)
 		}
 		return path, r.Err

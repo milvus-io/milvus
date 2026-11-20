@@ -786,7 +786,7 @@ func ensureCollectionMaxFieldIDProperty(coll *model.Collection) {
 	if coll == nil {
 		return
 	}
-	coll.Properties = updateMaxFieldIDProperty(coll.Properties, maxAssignedFieldIDFromSchema(coll.ToCollectionSchemaPB()))
+	coll.Properties = updateMaxFieldIDProperty(coll.Properties, maxAssignedFieldIDFromSchema(coll.SchemaView()))
 }
 
 func nextFunctionID(coll *model.Collection) int64 {

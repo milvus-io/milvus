@@ -2935,6 +2935,8 @@ type proxyConfig struct {
 
 	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
+	EnableReduceStream     ParamItem `refreshable:"true"`
+	ReduceStreamChunkBytes ParamItem `refreshable:"true"`
 
 	HybridSearchRequeryPolicy     ParamItem `refreshable:"true"`
 	SearchPlaceholderLogRateLimit ParamItem `refreshable:"true"`
@@ -3198,7 +3200,7 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		Key:          "proxy.enableAutoLoad",
 		Version:      "3.0.0",
 		DefaultValue: "false",
-		Doc:          "whether to automatically load an unloaded collection before DQL requests",
+		Doc:          "whether to automatically load an unloaded collection before DQL requests and before writes that read existing rows",
 		Export:       true,
 	}
 	p.EnableAutoLoad.Init(base.mgr)
@@ -3706,6 +3708,32 @@ Disabled if the value is less or equal to 0.`,
 		},
 	}
 	p.SearchPlaceholderLogMaxBytes.Init(base.mgr)
+
+	p.EnableReduceStream = ParamItem{
+		Key:          "proxy.queryView.enableReduceStream",
+		Version:      "3.1.0",
+		DefaultValue: "true",
+		Doc:          "Refreshable. Route supported new requests through Streaming Reduce.",
+		Export:       true,
+	}
+	p.EnableReduceStream.Init(base.mgr)
+
+	const defaultReduceStreamChunkBytes = "262144"
+	p.ReduceStreamChunkBytes = ParamItem{
+		Key:          "proxy.queryView.reduceStreamChunkBytes",
+		Version:      "3.1.0",
+		DefaultValue: defaultReduceStreamChunkBytes,
+		Doc:          "Refreshable. Reducible-payload byte threshold captured once per request. Invalid or non-positive values use the default of 262144 bytes.",
+		Export:       true,
+		Formatter: func(value string) string {
+			size, err := strconv.Atoi(value)
+			if err != nil || size <= 0 {
+				return defaultReduceStreamChunkBytes
+			}
+			return value
+		},
+	}
+	p.ReduceStreamChunkBytes.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -3758,9 +3786,13 @@ type queryCoordConfig struct {
 	HeartbeatAvailableInterval ParamItem `refreshable:"true"`
 	LoadTimeoutSeconds         ParamItem `refreshable:"true"`
 	AutoReleaseEnabled         ParamItem `refreshable:"true"`
-	AutoReleaseIdleTTLSeconds  ParamItem `refreshable:"true"`
+	AutoReleaseTTISeconds      ParamItem `refreshable:"true"`
 	AutoReleaseCheckInterval   ParamItem `refreshable:"true"`
 	AutoReleaseConcurrency     ParamItem `refreshable:"true"`
+
+	AutoReleaseLRUHighWatermark ParamItem `refreshable:"true"`
+	AutoReleaseLRULowWatermark  ParamItem `refreshable:"true"`
+	AutoReleaseLRUMaxEvictions  ParamItem `refreshable:"true"`
 
 	DistributionRequestTimeout  ParamItem `refreshable:"true"`
 	HeartBeatWarningLag         ParamItem `refreshable:"true"`
@@ -3823,6 +3855,17 @@ type queryCoordConfig struct {
 	UpdateTargetNeedSegmentDataReady ParamItem `refreshable:"true"`
 
 	AutoWarmupForNonPKIsolationCollection ParamItem `refreshable:"false"`
+}
+
+func autoReleaseWatermarkFormatter(defaultValue string) func(string) string {
+	return func(v string) string {
+		value, err := strconv.ParseFloat(v, 64)
+		if err != nil || !(value > 0 && value <= 100) {
+			mlog.Warn(context.TODO(), "collection LRU memory watermark must be in (0, 100], using default", mlog.String("configured", v))
+			return defaultValue
+		}
+		return v
+	}
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -4165,33 +4208,33 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Key:          "queryCoord.autoRelease.enabled",
 		Version:      "3.0.0",
 		DefaultValue: "false",
-		Doc:          "whether QueryCoord releases collections after an idle TTL; effective only when proxy.enableAutoLoad is true",
+		Doc:          "whether QueryCoord releases collections after the configured time to idle (TTI) or under Worker QN memory pressure; effective only when proxy.enableAutoLoad is true",
 		Export:       true,
 	}
 	p.AutoReleaseEnabled.Init(base.mgr)
 
-	p.AutoReleaseIdleTTLSeconds = ParamItem{
-		Key:          "queryCoord.autoRelease.idleTTLSeconds",
+	p.AutoReleaseTTISeconds = ParamItem{
+		Key:          "queryCoord.autoRelease.ttiSeconds",
 		Version:      "3.0.0",
-		DefaultValue: "600",
+		DefaultValue: "3600",
 		PanicIfEmpty: true,
 		Export:       true,
 		Formatter: func(v string) string {
 			seconds, err := strconv.ParseInt(v, 10, 64)
 			if err != nil || seconds <= 0 || seconds > math.MaxInt64/int64(time.Second) {
-				mlog.Warn(context.TODO(), "queryCoord.autoRelease.idleTTLSeconds must be positive and fit time.Duration, using default",
+				mlog.Warn(context.TODO(), "queryCoord.autoRelease.ttiSeconds must be positive and fit time.Duration, using default",
 					mlog.String("configured", v))
-				return "600"
+				return p.AutoReleaseTTISeconds.DefaultValue
 			}
 			return v
 		},
 	}
-	p.AutoReleaseIdleTTLSeconds.Init(base.mgr)
+	p.AutoReleaseTTISeconds.Init(base.mgr)
 
 	p.AutoReleaseCheckInterval = ParamItem{
 		Key:          "queryCoord.autoRelease.checkIntervalSeconds",
 		Version:      "3.0.0",
-		DefaultValue: "30",
+		DefaultValue: "10",
 		PanicIfEmpty: true,
 		Export:       true,
 		Formatter: func(v string) string {
@@ -4199,7 +4242,7 @@ If this parameter is set false, Milvus simply searches the growing segments with
 			if err != nil || seconds <= 0 || seconds > math.MaxInt64/int64(time.Second) {
 				mlog.Warn(context.TODO(), "queryCoord.autoRelease.checkIntervalSeconds must be positive and fit time.Duration, using default",
 					mlog.String("configured", v))
-				return "30"
+				return p.AutoReleaseCheckInterval.DefaultValue
 			}
 			return v
 		},
@@ -4211,7 +4254,7 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Version:      "3.0.0",
 		DefaultValue: "16",
 		PanicIfEmpty: true,
-		Doc:          "maximum concurrent automatic collection releases in one scan; changes apply to the next release batch",
+		Doc:          "maximum concurrent automatic collection releases per scan; runtime updates take effect on the next scan",
 		Export:       true,
 		Formatter: func(v string) string {
 			if getAsInt(v) <= 0 {
@@ -4223,6 +4266,41 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		},
 	}
 	p.AutoReleaseConcurrency.Init(base.mgr)
+
+	p.AutoReleaseLRUHighWatermark = ParamItem{
+		Key:          "queryCoord.autoRelease.lruHighWatermarkPercentage",
+		Version:      "3.0.0",
+		DefaultValue: "85",
+		Export:       true,
+		Doc:          "Worker QueryNode pool anonymous resident memory percentage that starts collection LRU release; takes effect on the next scan",
+		Formatter:    autoReleaseWatermarkFormatter("85"),
+	}
+	p.AutoReleaseLRUHighWatermark.Init(base.mgr)
+	p.AutoReleaseLRULowWatermark = ParamItem{
+		Key:          "queryCoord.autoRelease.lruLowWatermarkPercentage",
+		Version:      "3.0.0",
+		DefaultValue: "80",
+		Export:       true,
+		Doc:          "Worker QueryNode pool anonymous resident memory percentage that stops selecting collection LRU releases; must be below the high watermark",
+		Formatter:    autoReleaseWatermarkFormatter("80"),
+	}
+	p.AutoReleaseLRULowWatermark.Init(base.mgr)
+	p.AutoReleaseLRUMaxEvictions = ParamItem{
+		Key:          "queryCoord.autoRelease.lruMaxEvictionsPerScan",
+		Version:      "3.0.0",
+		DefaultValue: "64",
+		Export:       true,
+		Doc:          "maximum collection LRU releases selected per scan, independent of releaseConcurrency",
+		Formatter: func(v string) string {
+			value, err := strconv.Atoi(v)
+			if err != nil || value <= 0 {
+				mlog.Warn(context.TODO(), "queryCoord.autoRelease.lruMaxEvictionsPerScan must be positive, using default", mlog.String("configured", v))
+				return "64"
+			}
+			return v
+		},
+	}
+	p.AutoReleaseLRUMaxEvictions.Init(base.mgr)
 
 	p.HeartbeatAvailableInterval = ParamItem{
 		Key:          "queryCoord.heartbeatAvailableInterval",

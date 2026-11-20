@@ -36,7 +36,10 @@ namespace milvus {
 namespace {
 
 void
-CheckMarisaColumnComparisons(bool nullable_left, bool nullable_right) {
+CheckMarisaColumnComparisons(bool nullable_left,
+                             bool nullable_right,
+                             bool index_left = true,
+                             bool index_right = true) {
     const std::vector<std::string> left{
         "a", "b", "c", "", "z", "same", "a", "b", "c", "", "z", "same"};
     const std::vector<std::string> right{
@@ -61,8 +64,7 @@ CheckMarisaColumnComparisons(bool nullable_left, bool nullable_right) {
         schema->AddDebugField("right", DataType::VARCHAR, nullable_right);
     schema->set_primary_field_id(pk);
 
-    // Load only the primary key to establish the segment row count. Compared
-    // columns have no raw data, so execution must use the installed readers.
+    // Indexed operands have no raw data, so execution must use their readers.
     test::expr_index::RawFieldFiles raw_files;
     auto segment = segcore::CreateSealedSegment(schema);
     std::vector<int64_t> ids(count);
@@ -75,21 +77,29 @@ CheckMarisaColumnComparisons(bool nullable_left, bool nullable_right) {
         left, nullable_left, left_validity.data());
     auto right_data = test::expr_index::StringField(
         right, nullable_right, right_validity.data());
-    test::expr_index::InstallIndex(
-        *segment,
-        left_id,
-        DataType::VARCHAR,
-        test::expr_index::BuildIndex(
-            left_id, DataType::VARCHAR, index::MARISA_TRIE, {left_data}));
-    test::expr_index::InstallIndex(
-        *segment,
-        right_id,
-        DataType::VARCHAR,
-        test::expr_index::BuildIndex(
-            right_id, DataType::VARCHAR, index::MARISA_TRIE, {right_data}));
+    if (index_left) {
+        test::expr_index::InstallIndex(
+            *segment,
+            left_id,
+            DataType::VARCHAR,
+            test::expr_index::BuildIndex(
+                left_id, DataType::VARCHAR, index::MARISA_TRIE, {left_data}));
+    } else {
+        segment->LoadFieldData(raw_files.Prepare(left_id, {left_data}));
+    }
+    if (index_right) {
+        test::expr_index::InstallIndex(
+            *segment,
+            right_id,
+            DataType::VARCHAR,
+            test::expr_index::BuildIndex(
+                right_id, DataType::VARCHAR, index::MARISA_TRIE, {right_data}));
+    } else {
+        segment->LoadFieldData(raw_files.Prepare(right_id, {right_data}));
+    }
     ASSERT_EQ(segment->get_row_count(), count);
-    ASSERT_EQ(segment->num_chunk_data(left_id), 0);
-    ASSERT_EQ(segment->num_chunk_data(right_id), 0);
+    ASSERT_EQ(segment->num_chunk_data(left_id), index_left ? 0 : 1);
+    ASSERT_EQ(segment->num_chunk_data(right_id), index_right ? 0 : 1);
 
     exec::OffsetVector offsets;
     for (const int32_t row : {11, 0, 7, 4, 1, 7, 9, 2, 3}) {
@@ -188,6 +198,14 @@ TEST(MarisaCompareExpressionTest, NullableLeftColumn) {
 
 TEST(MarisaCompareExpressionTest, NullableBothColumns) {
     CheckMarisaColumnComparisons(true, true);
+}
+
+TEST(MarisaCompareExpressionTest, NullableIndexLeftRawRight) {
+    CheckMarisaColumnComparisons(true, true, true, false);
+}
+
+TEST(MarisaCompareExpressionTest, NullableRawLeftIndexRight) {
+    CheckMarisaColumnComparisons(true, true, false, true);
 }
 
 }  // namespace

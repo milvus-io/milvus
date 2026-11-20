@@ -2714,7 +2714,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		metrics.SearchLabel,
 		request.GetDbName(),
 		request.GetCollectionName(),
-	).Add(float64(request.GetNq()))
+	).Add(float64(searchRequestNq(request)))
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.SearchResults{

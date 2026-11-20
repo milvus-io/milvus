@@ -146,6 +146,11 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
 		return []*conc.Future[any]{conc.Go(func() (any, error) { return nil, err })}
 	}
+	sourceCM, err := importutilv2.NewSourceChunkManager(t.ctx, t.options, t.cm)
+	if err != nil {
+		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+		return []*conc.Future[any]{conc.Go(func() (any, error) { return nil, err })}
+	}
 	bufferSize := int(t.GetBufferSize())
 	mlog.Info(t.ctx, "start to preimport", WrapLogFields(t,
 		mlog.Int("bufferSize", bufferSize),
@@ -158,7 +163,7 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 		func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 			return fileStat.GetImportFile()
 		})
-	readers := importutilv2.NewReaderFactory(t.ctx, t.cm, t.req.GetStorageConfig(), t.options)
+	readers := importutilv2.NewReaderFactory(t.ctx, sourceCM, t.req.GetStorageConfig(), t.options)
 
 	fn := func(ctx context.Context, i int, file *internalpb.ImportFile, rowBuffer int, deleteBudget int64, shared *binlog.SnapshotL0Deletes) error {
 		reader, err := readers.NewReader(ctx, t.GetSchema(), file, rowBuffer, deleteBudget, shared)

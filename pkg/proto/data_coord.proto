@@ -1791,12 +1791,11 @@ message GetGcStatusResponse {
 message QuerySlotRequest {}
 
 message QuerySlotResponse {
+  reserved 5;  // removed: segment_rooted_indexes
   common.Status status = 1;
   int64 available_slots = 2;
   string version = 3; // Kept for wire compatibility; new schedulers do not use it
   bool copy_segment_shared_indexes = 4;
-  // Supports v2 index build and copy destinations under a segment's _index.
-  bool segment_rooted_indexes = 5;
 }
 
 enum CompactionTaskState {

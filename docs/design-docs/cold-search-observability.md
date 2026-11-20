@@ -65,7 +65,7 @@ cancellation cannot be distinguished from other cancellations at that boundary.
 | StreamingNode / view_load | prepare, catalog_save | View resource acquire to Ready; actual SaveQueryViews call returns before catalog_save ends |
 | StreamingNode / prepare | runtime_initialize, data_version | Runtime initialization/version preparation, including errors |
 | StreamingNode / bm25_stats | ensure_materialized, shared_wait, load, read_decode | Query-time lazy materialization, wait by a caller joining another's materialization, per-segment load, per-file streaming read and decode |
-| Proxy / shard_query | get_plan, fanout, node_dispatch | Each shard attempt and work-node dispatch; attempt/attempts counts retries too |
+| Proxy / shard_query | get_plan, fanout, node_dispatch | Each shard attempt and work-node dispatch, including retries. For streaming requests, fanout and node_dispatch end when streams open. Later chunk receives are outside these timers. |
 | StreamingNode / query_plan | total, lease, mvcc, global_optimize, build_nodes | One plan RPC; global optimizer includes lazy BM25 work |
 | QueryNode / query_acquire; StreamingNode / query_acquire | lease, local_optimize, visibility_wait, segment_handles | Each Search/Query acquire path |
 | Worker / Search | total, acquire_tasks, execute_tasks | Shared SearchOnView execution code; includes QN and SN, distinguish deployment via target labels |

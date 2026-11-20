@@ -2173,27 +2173,29 @@ class UpsertChecker(Checker):
 
     @trace()
     def upsert_entities(self):
-        try:
-            res = self.milvus_client.upsert(collection_name=self.c_name, data=self.data, timeout=timeout)
-            return res, True
-        except SchemaMismatchRetryableException:
-            # Schema changed concurrently (AddVectorFieldChecker). Invalidate the SDK schema cache
-            # so the next upsert_rows() fetches the new schema_timestamp, then retry once.
-            log.debug("[UpsertChecker] schema_timestamp stale, invalidating cache and retrying")
+        deadline = time.monotonic() + timeout
+        for attempt in range(3):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return "upsert schema retry deadline exceeded", False
             try:
-                self.milvus_client._get_connection()._invalidate_schema(self.c_name)
-            except Exception:
-                pass
-            self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
-            try:
-                res = self.milvus_client.upsert(collection_name=self.c_name, data=self.data, timeout=timeout)
+                res = self.milvus_client.upsert(collection_name=self.c_name, data=self.data, timeout=remaining)
                 return res, True
+            except SchemaMismatchRetryableException as e:
+                if attempt == 2:
+                    return str(e), False
+                # Concurrent scalar/vector additions can invalidate two successive schema versions.
+                # These rejections have not written data. Keep the original PKs and payload;
+                # newly added fields are nullable, so regenerating rows is unnecessary.
+                log.debug(f"[UpsertChecker] refreshing stale schema after attempt {attempt + 1}")
+                try:
+                    context = self.milvus_client._generate_call_context()
+                    self.milvus_client._get_connection()._invalidate_schema(self.c_name, db_name=context.get_db_name())
+                except Exception as refresh_error:
+                    return str(refresh_error), False
             except Exception as e:
-                log.info(f"upsert failed (retry): {e}")
+                log.info(f"upsert failed: {e}")
                 return str(e), False
-        except Exception as e:
-            log.info(f"upsert failed: {e}")
-            return str(e), False
 
     @exception_handler()
     def run_task(self):
