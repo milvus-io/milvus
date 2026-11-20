@@ -117,7 +117,10 @@ func (l realQVSegmentLoader) LoadDeltaLogs(ctx context.Context, segment qvLoaded
 	}
 	// The shared loader handles milvus-table source deletes and skips only
 	// external formats that do not carry historical deltalogs.
-	return l.loader.LoadDeltaLogsWithoutResource(ctx, local.segment, info)
+	if err := l.loader.LoadDeltaLogsWithoutResource(ctx, local.segment, info); err != nil {
+		return err
+	}
+	return local.segment.(*segments.LocalSegment).PreparePOCUpdates(ctx)
 }
 
 func (l realQVSegmentLoader) LoadPKCandidate(ctx context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo) error {

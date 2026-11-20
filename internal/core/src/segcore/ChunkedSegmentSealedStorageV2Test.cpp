@@ -1693,6 +1693,7 @@ TEST_P(TestLazyManifest, LazyManifestRetrieveSizeAndValuesAreCorrect) {
     auto status = FillRetrieveFieldsOrdered(&c_segment,
                                             1,
                                             plan.get(),
+                                            0,
                                             &segment_index,
                                             &segment_offset,
                                             1,
