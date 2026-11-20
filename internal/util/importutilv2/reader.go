@@ -91,10 +91,6 @@ func newReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb
 			if err := ctx.Err(); err != nil {
 				return readerStorage{}, err
 			}
-			if HasSourceStorageOptions(options) {
-				sourceCM, sourceCfg, err := ResolveSourceStorage(ctx, options, cm, cfg)
-				return readerStorage{cm: sourceCM, cfg: sourceCfg}, err
-			}
 			artifact, _ := GetEZK(options)
 			if encryption.Dispatched && artifact != "" && encryption.PluginContext == nil {
 				return readerStorage{}, merr.WrapErrServiceInternalMsg("encrypted backup is missing its dispatched source keyset")
@@ -139,16 +135,16 @@ func (f *ReaderFactory) NewReader(ctx context.Context, schema *schemapb.Collecti
 	if err := ValidateImportSourceOptions(f.options); err != nil {
 		return nil, err
 	}
-	if HasSourceStorageOptions(f.options) || file.GetSnapshotSource() != nil || HasExternalSource(f.options) {
-		if err := ValidateImportFiles([]*internalpb.ImportFile{file}, f.options); err != nil {
+	if file.GetSnapshotSource() != nil || HasExternalSource(f.options) {
+		if err := ValidateSnapshotImportFiles([]*internalpb.ImportFile{file}, f.options); err != nil {
 			return nil, err
 		}
 	}
 	resolved := readerStorage{cm: f.cm, cfg: f.cfg}
-	if (f.dispatched && IsBackup(f.options)) || IsSnapshotSource(f.options) || HasSourceStorageOptions(f.options) {
+	if (f.dispatched && IsBackup(f.options)) || IsSnapshotSource(f.options) {
 		// Validate the descriptor before accessing storage or the key retriever.
-		// Source storage is resolved once for this task attempt. Each reader
-		// still owns its stream; writes retain the task's target storage.
+		// Same-bucket and no-L0 snapshots use this path too. Ordinary import
+		// retains its existing storage and encryption initialization.
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -332,7 +328,7 @@ func resolveSnapshotV2Source(ctx context.Context, cm storage.ChunkManager, sourc
 	if err := snapshotstorage.ValidateSnapshotObjectPathForBucket(cm, "snapshot Avro", ref.GetSnapshotManifestPath(), ""); err != nil {
 		return nil, err
 	}
-	if err := snapshotstorage.ValidateExternalSnapshotPaths(uri, boundary, nil); err != nil {
+	if err := snapshotstorage.ValidateSnapshotImportPaths(uri, boundary, nil); err != nil {
 		return nil, err
 	}
 	segment, err := snapshotstorage.NewSnapshotReader(cm).ReadSegmentManifest(ctx, ref.GetSnapshotManifestPath(), int(ref.GetSnapshotFormatVersion()))

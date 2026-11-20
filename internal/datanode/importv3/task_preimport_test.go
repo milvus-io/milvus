@@ -145,7 +145,7 @@ func TestPreImportCheapRowCountDispatchesByFileType(t *testing.T) {
 	defer numpyMock.UnPatch()
 
 	t.Run("parquet reads the footer", func(t *testing.T) {
-		rows, bytes, size, cheap, err := task.simpleRowCount(context.Background(),
+		rows, bytes, size, cheap, err := task.simpleRowCount(context.Background(), task.cm,
 			&internalpb.ImportFile{Paths: []string{"a.parquet"}})
 		require.NoError(t, err)
 		require.True(t, cheap)
@@ -155,7 +155,7 @@ func TestPreImportCheapRowCountDispatchesByFileType(t *testing.T) {
 	})
 
 	t.Run("numpy reads the header", func(t *testing.T) {
-		rows, bytes, size, cheap, err := task.simpleRowCount(context.Background(),
+		rows, bytes, size, cheap, err := task.simpleRowCount(context.Background(), task.cm,
 			&internalpb.ImportFile{Id: 9, Paths: []string{"a.npy"}})
 		require.NoError(t, err)
 		require.True(t, cheap)
@@ -166,7 +166,7 @@ func TestPreImportCheapRowCountDispatchesByFileType(t *testing.T) {
 
 	t.Run("csv and json take the scan path", func(t *testing.T) {
 		for _, path := range []string{"a.csv", "a.jsonl"} {
-			rows, bytes, size, cheap, err := task.simpleRowCount(context.Background(),
+			rows, bytes, size, cheap, err := task.simpleRowCount(context.Background(), task.cm,
 				&internalpb.ImportFile{Paths: []string{path}})
 			require.NoError(t, err)
 			require.False(t, cheap, "%s has no metadata fast path", path)
@@ -177,7 +177,7 @@ func TestPreImportCheapRowCountDispatchesByFileType(t *testing.T) {
 	})
 
 	t.Run("unknown extension is rejected", func(t *testing.T) {
-		_, _, _, cheap, err := task.simpleRowCount(context.Background(),
+		_, _, _, cheap, err := task.simpleRowCount(context.Background(), task.cm,
 			&internalpb.ImportFile{Paths: []string{"a.txt"}})
 		require.Error(t, err)
 		require.False(t, cheap)

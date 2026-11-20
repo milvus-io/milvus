@@ -891,9 +891,16 @@ func TestImportMetaExternalCredentialsLifecycle(t *testing.T) {
 			assertOptionsEqual(options, saved.GetOptions())
 			active := meta.GetJob(ctx, 100)
 			require.NoError(t, meta.UpdateJob(ctx, 100, UpdateJobState(terminal)))
-			assertOptionsEqual([]*commonpb.KeyValuePair{{Key: "timeout", Value: "1h"}}, saved.GetOptions())
+			assertOptionsEqual([]*commonpb.KeyValuePair{
+				{Key: importutilv2.StorageEndpoint, Value: "source.example.com"},
+				{Key: importutilv2.StorageBucket, Value: "source-bucket"},
+				{Key: "timeout", Value: "1h"},
+			}, saved.GetOptions())
 			assertOptionsEqual(saved.GetOptions(), meta.GetJob(ctx, 100).GetOptions())
 			require.NotContains(t, saved.String(), "SENTINEL")
+			require.True(t, importutilv2.HasSourceStorageOptions(saved.GetOptions()))
+			_, parseErr := importutilv2.GetSourceStorageConfig(saved.GetOptions())
+			require.ErrorIs(t, parseErr, merr.ErrParameterInvalid)
 			// Do not mutate the options still held by an in-flight task.
 			assertOptionsEqual(options, active.GetOptions())
 		})

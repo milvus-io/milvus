@@ -133,6 +133,26 @@ func TestSnapshotDeferredPathBoundary(t *testing.T) {
 				require.Error(t, validate(path), path)
 			}
 			require.Error(t, ValidateImportSourceRequest(options), "clients cannot forge deferred validation context")
+
+			bareOptions := Options{
+				{Key: BackupFlag, Value: "true"},
+				{Key: SourceType, Value: SourceTypeSnapshot},
+				{Key: SnapshotSourceURI, Value: "root/snapshots/1/metadata/2.json"},
+				{Key: SnapshotLayout, Value: layout},
+			}
+			bareValidate, err := SnapshotPathValidator(bareOptions, cm)
+			require.NoError(t, err)
+			require.NoError(t, bareValidate("root/files/data"))
+			for _, path := range []string{
+				"s3://source/root/files/data",
+				"s3://other/root/files/data",
+				"minio://other:9000/source/root/files/data",
+				"other/files/data",
+				"root/../outside",
+				"",
+			} {
+				require.Error(t, bareValidate(path), path)
+			}
 		})
 	}
 	validate, err := SnapshotPathValidator(nil, cm)
@@ -1494,7 +1514,7 @@ func TestSnapshotV2CrossBucketRebase(t *testing.T) {
 	cm := &sourceCM{}
 	bucket := mockey.Mock((*sourceCM).BucketName).Return("new-bucket").Build()
 	defer bucket.UnPatch()
-	for _, mode := range []string{"moved", "same_prefix", "bucket_root", "unmatched_prefix", "credentials", "referenced"} {
+	for _, mode := range []string{"moved", "same_prefix", "same_prefix_bare_source", "bucket_root", "unmatched_prefix", "credentials", "referenced", "referenced_bare_source_endpoint_escape"} {
 		t.Run(mode, func(t *testing.T) {
 			source := &internalpb.SnapshotImportSource{Version: 10, V2Reference: &internalpb.SnapshotImportV2Reference{SegmentId: 20, SnapshotManifestPath: "new/snapshots/1/manifests/20.avro", SnapshotFormatVersion: 6, OriginalKeyPrefix: proto.String("old")}}
 			opts := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}, {Key: SnapshotSourceURI, Value: "s3://new-bucket/new/snapshots/1/metadata/2.json"}, {Key: SnapshotLayout, Value: "self-contained"}}
@@ -1502,6 +1522,11 @@ func TestSnapshotV2CrossBucketRebase(t *testing.T) {
 			wantPath := "new/files/insert"
 			if mode == "same_prefix" {
 				source.V2Reference.OriginalKeyPrefix = proto.String("new")
+				path = "s3://old-bucket/new/files/insert"
+			}
+			if mode == "same_prefix_bare_source" {
+				source.V2Reference.OriginalKeyPrefix = proto.String("new")
+				opts[2].Value = "new/snapshots/1/metadata/2.json"
 				path = "s3://old-bucket/new/files/insert"
 			}
 			if mode == "bucket_root" {
@@ -1520,6 +1545,12 @@ func TestSnapshotV2CrossBucketRebase(t *testing.T) {
 				source.V2Reference.OriginalKeyPrefix = nil
 				opts[len(opts)-1].Value = "referenced"
 			}
+			if mode == "referenced_bare_source_endpoint_escape" {
+				source.V2Reference.OriginalKeyPrefix = nil
+				opts[2].Value = "new/snapshots/1/metadata/2.json"
+				opts[len(opts)-1].Value = "referenced"
+				path = "minio://evil:9000/new-bucket/new/files/insert"
+			}
 			data, err := snapshotio.MarshalSegmentManifest(&datapb.SegmentDescription{
 				SegmentId: 20, StorageVersion: storage.StorageV2, SegmentLevel: datapb.SegmentLevel_L1,
 				Binlogs: []*datapb.FieldBinlog{{FieldID: 7, Binlogs: []*datapb.Binlog{{LogPath: path}}}},
@@ -1536,7 +1567,7 @@ func TestSnapshotV2CrossBucketRebase(t *testing.T) {
 			validate, err := SnapshotPathValidator(opts, cm)
 			require.NoError(t, err)
 			err = validate(segment.Binlogs[0].Binlogs[0].LogPath)
-			if mode == "unmatched_prefix" {
+			if mode == "unmatched_prefix" || mode == "referenced_bare_source_endpoint_escape" {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)

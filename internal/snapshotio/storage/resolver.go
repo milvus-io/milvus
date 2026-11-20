@@ -54,13 +54,27 @@ func InstanceConfigFromParamtable(params *paramtable.ComponentParam) *objectstor
 	return cfg
 }
 
-// ValidateInstanceSnapshotImportURI binds a public metadata URI to the client
-// that Import actually uses when external_spec is absent. Matching references
-// against the metadata URI alone is insufficient: both could name another
-// endpoint while ChunkManager still reads the instance's same-named objects.
-// Do not apply this admission check to shared readers or persisted task paths.
+// ValidateInstanceSnapshotImportURI binds a public metadata URI or
+// bucket-relative object key to the client that Import actually uses when
+// external_spec is absent. Matching references against the metadata URI alone
+// is insufficient: both could name another endpoint while ChunkManager still
+// reads the instance's same-named objects. A bare object key carries no bucket
+// or endpoint authority, so each cluster resolves it against its own configured
+// remote bucket while still enforcing remote-instance admission and canonical
+// bundle key shape. Do not apply this admission check to shared readers or
+// persisted task paths.
 func ValidateInstanceSnapshotImportURI(instanceCfg *objectstorage.Config, metadataURI string) error {
-	resolved, err := resolveForeignStorageConfig(instanceCfg, DirectionRestore, metadataURI, "")
+	trimmed := strings.TrimSpace(metadataURI)
+	if !hasURITransportScheme(trimmed) {
+		if instanceCfg == nil {
+			return merr.WrapErrParameterInvalidMsg("instance storage config is nil")
+		}
+		if !isRemoteInstanceConfig(instanceCfg) {
+			return merr.WrapErrServiceInternal(unsupportedServerSideCopyMessage)
+		}
+		return validateSnapshotBareMetadataKey(trimmed)
+	}
+	resolved, err := resolveForeignStorageConfig(instanceCfg, DirectionRestore, trimmed, "")
 	if err != nil {
 		return err
 	}

@@ -281,3 +281,44 @@ func TestDeletePartialMatch(t *testing.T) {
 	}
 	assert.Equal(t, 0, getMetricsCount())
 }
+
+func TestConditionalUpsertMetricsCleanup(t *testing.T) {
+	for _, scope := range []string{"collection", "database"} {
+		t.Run(scope, func(t *testing.T) {
+			registry := prometheus.NewRegistry()
+			registry.MustRegister(ProxyUpsertWriteConditionRows)
+			const database = "conditional_upsert_cleanup"
+			for _, node := range []string{"1", "2"} {
+				for _, db := range []string{database, "conditional_upsert_keep"} {
+					for _, collection := range []string{"drop", "keep"} {
+						for _, outcome := range []string{"written", "condition_not_met", "missing_skipped"} {
+							ProxyUpsertWriteConditionRows.WithLabelValues(node, db, collection, outcome).Inc()
+						}
+					}
+				}
+			}
+			t.Cleanup(func() {
+				for _, node := range []int64{1, 2} {
+					CleanupProxyDBMetrics(node, database)
+					CleanupProxyDBMetrics(node, "conditional_upsert_keep")
+				}
+			})
+			wantSeries := 7
+			if scope == "database" {
+				CleanupProxyDBMetrics(1, database)
+				wantSeries = 6
+			} else {
+				CleanupProxyCollectionMetrics(1, database, "drop")
+			}
+			families, err := registry.Gather()
+			assert.NoError(t, err)
+			for _, family := range families {
+				want := wantSeries
+				if family.GetName() == "milvus_proxy_upsert_write_condition_rows_total" {
+					want *= 3
+				}
+				assert.Len(t, family.GetMetric(), want)
+			}
+		})
+	}
+}
