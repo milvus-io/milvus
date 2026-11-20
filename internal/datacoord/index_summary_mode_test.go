@@ -19,10 +19,16 @@ package datacoord
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
+	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -46,6 +52,50 @@ func TestSummaryModeRejectsV2BeforePersistingMode(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
 	require.ErrorContains(t, err, "common.storage.useLoonFFI=true")
 	require.False(t, catalog.modeChecked)
+}
+
+func TestIndexMetadataModeStartupValidation(t *testing.T) {
+	mode := &Params.DataCoordCfg.SegmentIndexSummariesEnabled
+	setSegmentChangeTestParam(t, mode, "ture")
+	setSegmentChangeTestParam(t, &Params.CommonCfg.UseLoonFFI, "true")
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.WriteSegmentIndexToManifest, "true")
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.ManifestIndexBackfillEnabled, "false")
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.ManifestIndexRollbackEnabled, "false")
+	ctx := t.Context()
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints: Params.EtcdCfg.Endpoints.GetAsStrings(), DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	defer client.Close()
+	kv := etcdkv.NewEtcdKV(client, "index-mode-startup-"+uuid.NewString()+"/meta")
+	defer func() { _ = kv.RemoveWithPrefix(ctx, "") }()
+	catalog := kvdatacoord.NewCatalog(kv, "", "")
+	modeKey := kvdatacoord.MetaPrefix + "/index-metadata-mode"
+	startup := func() error {
+		s := &Server{ctx: ctx, catalog: catalog, metaStore: metacache.NewMetaStore(catalog)}
+		return s.initIndexMetadataMode()
+	}
+	err = startup()
+	require.ErrorContains(t, err, "requires a boolean value")
+	_, err = kv.Load(ctx, modeKey)
+	require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+
+	Params.Save(mode.Key, "true")
+	err = startup()
+	expected := "segment-summary-v1"
+	if !segmentIndexSummaryReadersReady {
+		require.ErrorContains(t, err, "require summary-aware readers and garbage collection")
+		_, err = kv.Load(ctx, modeKey)
+		require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+		Params.Save(mode.Key, "false")
+		err = startup()
+		expected = "legacy"
+	}
+	require.NoError(t, err)
+	require.NoError(t, startup())
+	persisted, err := kv.Load(ctx, modeKey)
+	require.NoError(t, err)
+	require.Equal(t, expected, persisted)
 }
 
 func TestSummaryModeRejectsDirectManifestAdoption(t *testing.T) {

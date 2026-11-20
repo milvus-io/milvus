@@ -24,8 +24,10 @@ and pre-baked backfill results) is rejected before publication because it cannot
 update index inventory or fence active builds. Structured backfill remains
 supported by the commit framework.
 
-Enable after both stack layers are installed, at the first startup, with both
-index migration switches disabled:
+The publication layer rejects summary mode before storing the durable choice.
+The consumer layer enables startup once summary-aware readers and garbage
+collection are present. Enable at the first startup with both index migration
+switches disabled:
 
 ```yaml
 dataCoord:
@@ -77,6 +79,10 @@ No full-cluster artifact metadata cache is introduced.
 
 Copy/restore verifies compatibility before creating work or copying files.
 Compatible targets publish their manifest and summaries before becoming visible.
+Restore checks incomplete index inventories against the pinned manifest and the
+snapshot's live definitions. An entry for a dropped index does not require files
+in the snapshot. Workers that do not report a separate copied-index memory
+estimate retain the serialized-size fallback.
 L0 delete segments keep their existing format. When a snapshot captures no
 index definitions, physical manifest entries left by dropped indexes are
 discarded during copy.

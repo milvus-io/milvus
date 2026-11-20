@@ -17,12 +17,15 @@
 package snapshot
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -32,21 +35,44 @@ func TestSummarySnapshotCompatibility(t *testing.T) {
 	empty := false
 	segment := &datapb.SegmentDescription{StorageVersion: storage.StorageV3, ManifestPath: "manifest", ManifestHasIndex: &empty}
 	data := &snapshotstorage.SnapshotData{Segments: []*datapb.SegmentDescription{segment}}
-	require.NoError(t, validateSummarySnapshot(data))
+	require.NoError(t, validateSummarySnapshot(t.Context(), nil, data, nil))
 	segment.StorageVersion = storage.StorageV2
-	require.ErrorIs(t, validateSummarySnapshot(data), merr.ErrServiceUnimplemented)
+	require.ErrorIs(t, validateSummarySnapshot(t.Context(), nil, data, nil), merr.ErrServiceUnimplemented)
 	segment.StorageVersion = storage.StorageV3
 	segment.ManifestHasIndex = nil
-	require.ErrorIs(t, validateSummarySnapshot(data), merr.ErrServiceUnimplemented)
+	require.ErrorIs(t, validateSummarySnapshot(t.Context(), nil, data, nil), merr.ErrServiceUnimplemented)
 	nonempty := true
 	segment.ManifestHasIndex = &nonempty
-	require.NoError(t, validateSummarySnapshot(data), "the manifest may retain physical entries after DropIndex")
+	require.NoError(t, validateSummarySnapshot(t.Context(), nil, data, nil), "the manifest may retain physical entries after DropIndex")
 	data.Indexes = []*indexpb.IndexInfo{{IndexID: 1}}
-	require.ErrorIs(t, validateSummarySnapshot(data), merr.ErrServiceUnimplemented)
 	segment.IndexFiles = []*indexpb.IndexFilePathInfo{{IndexID: 1, IndexFilePaths: []string{"index"}}}
-	require.ErrorIs(t, validateSummarySnapshot(data), merr.ErrServiceUnimplemented)
+	require.ErrorIs(t, validateSummarySnapshot(t.Context(), nil, data, nil), merr.ErrServiceUnimplemented)
 	segment.IndexFiles[0].IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
-	require.NoError(t, validateSummarySnapshot(data))
+	require.NoError(t, validateSummarySnapshot(t.Context(), nil, data, nil))
+}
+
+func TestSummarySnapshotChecksPinnedManifestIndexIdentities(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
+	base := filepath.Join(root, "insert_log", "1", "2", "3")
+	dropped := packed.ManifestIndexInfo{FieldID: 100, IndexID: 10, BuildID: 20, IndexName: "dropped", IndexType: "FLAT", Path: "20/1"}
+	live := packed.ManifestIndexInfo{FieldID: 101, IndexID: 11, BuildID: 21, IndexName: "live", IndexType: "FLAT", Path: "21/1"}
+	oldPath, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{
+		Indexes: []packed.ManifestIndexInfo{dropped},
+	})
+	require.NoError(t, err)
+	newPath, err := packed.CommitManifestUpdates(oldPath, cfg, &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{live}})
+	require.NoError(t, err)
+	present := true
+	segment := &datapb.SegmentDescription{SegmentId: 3, StorageVersion: storage.StorageV3, ManifestPath: oldPath, ManifestHasIndex: &present}
+	data := &snapshotstorage.SnapshotData{Segments: []*datapb.SegmentDescription{segment}, Indexes: []*indexpb.IndexInfo{{IndexID: 11}}}
+	mt := &meta.Meta{}
+	require.NoError(t, validateSummarySnapshot(ctx, mt, data, cfg), "the live definition has no artifact in the pinned revision")
+	segment.ManifestPath = newPath
+	err = validateSummarySnapshot(ctx, mt, data, cfg)
+	require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
+	require.ErrorContains(t, err, "segment 3 index 11")
 }
 
 func TestSummarySnapshotAllowsL0Deletes(t *testing.T) {
@@ -62,7 +88,7 @@ func TestSummarySnapshotAllowsL0Deletes(t *testing.T) {
 			l0,
 		},
 	}
-	require.NoError(t, validateSummarySnapshot(data))
+	require.NoError(t, validateSummarySnapshot(t.Context(), nil, data, nil))
 	l0.IndexFiles = []*indexpb.IndexFilePathInfo{{IndexFilePaths: []string{"index"}}}
-	require.ErrorIs(t, validateSummarySnapshot(data), merr.ErrServiceUnimplemented)
+	require.ErrorIs(t, validateSummarySnapshot(t.Context(), nil, data, nil), merr.ErrServiceUnimplemented)
 }

@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -796,6 +797,73 @@ func TestCommitSegmentManifestAddsColumnWithoutRetractingSummaries(t *testing.T)
 	require.NoError(t, err)
 	require.Len(t, indexes, 1)
 	require.Equal(t, artifact.BuildID, indexes[0].BuildID)
+}
+
+func TestSummaryModeLateCompletionRetiresOnlyObsoleteBuild(t *testing.T) {
+	ctx := t.Context()
+	mt, dm, err := NewMemoryMetaWithIndex(t)
+	require.NoError(t, err)
+	require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
+	require.NoError(t, dm.IndexMeta.CreateIndex(ctx, &model.Index{CollectionID: 1, IndexID: 10, FieldID: 100, IndexName: "idx"}))
+	root := t.TempDir()
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
+	cfgMock := mockey.Mock(meta.CreateStorageConfig).Return(cfg).Build()
+	defer cfgMock.UnPatch()
+	mt.ChunkManager = storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	mt.MetaStore.PutCollection(&meta.CollectionInfo{ID: 1, Schema: &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "indexed_field"}},
+	}})
+	basePath := filepath.Join(root, "insert_log", "1", "2", "3")
+	pathVersion := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 3, CollectionID: 1, PartitionID: 2, StorageVersion: storage.StorageV3, State: commonpb.SegmentState_Flushed,
+		ManifestPath: packed.MarshalManifestPath(basePath, packed.ManifestEarliest), NumOfRows: 10,
+	})))
+	newTask := func(buildID int64) *indexBuildTask {
+		require.NoError(t, dm.IndexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+			SegmentID: 3, CollectionID: 1, PartitionID: 2, IndexID: 10, BuildID: buildID, IndexVersion: 1, NumRows: 10,
+			IndexState: commonpb.IndexState_InProgress, IndexStorePathVersion: pathVersion, IndexType: "HNSW",
+		}))
+		record, ok := dm.IndexMeta.GetIndexJob(buildID)
+		require.True(t, ok)
+		return NewIndexBuildTask(record, 1, mt, dm.IndexMeta, nil, nil, nil)
+	}
+	lateArtifact := newTask(19)
+	lateEmpty := newTask(20)
+	newer := newTask(21)
+	complete := func(task *indexBuildTask, keys []string, size uint64) error {
+		return task.SetJobInfo(&workerpb.IndexTaskInfo{
+			BuildID: task.BuildID, State: commonpb.IndexState_Finished, IndexFileKeys: keys,
+			SerializedSize: size, MemSize: size * 4, IndexStorePathVersion: pathVersion,
+		})
+	}
+	require.NoError(t, complete(newer, []string{"new.bin"}, 64))
+	before := mt.GetSegment(ctx, 3)
+	require.EqualValues(t, 21, before.GetIndexSummaries()[0].GetBuildId())
+	dm.IndexMeta.taskCounts.mu.Lock()
+	sizeBefore := dm.IndexMeta.taskCounts.activeSizes[1]
+	dm.IndexMeta.taskCounts.mu.Unlock()
+	require.EqualValues(t, 64, sizeBefore)
+	require.NoError(t, complete(lateArtifact, []string{"old.bin"}, 32))
+	require.NoError(t, complete(lateEmpty, nil, 0))
+	for _, task := range []*indexBuildTask{lateArtifact, lateEmpty} {
+		require.Equal(t, commonpb.IndexState_Finished, task.IndexState)
+		require.False(t, dm.IndexMeta.HasBuildInfo(task.BuildID))
+	}
+	after := mt.GetSegment(ctx, 3)
+	require.Equal(t, before.GetManifestPath(), after.GetManifestPath())
+	require.Equal(t, before.GetIndexSummaries(), after.GetIndexSummaries())
+	entries, err := packed.GetManifestIndexInfos(after.GetManifestPath(), cfg)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, []string{"new.bin"}, entries[0].IndexFileKeys)
+	rows, err := mt.Catalog.ListSegmentIndexes(ctx, 1)
+	require.NoError(t, err)
+	require.Empty(t, rows)
+	dm.IndexMeta.taskCounts.mu.Lock()
+	sizeAfter := dm.IndexMeta.taskCounts.activeSizes[1]
+	dm.IndexMeta.taskCounts.mu.Unlock()
+	require.Equal(t, sizeBefore, sizeAfter)
 }
 
 // A backfill replace holds fieldIndexLock's read side across its publication

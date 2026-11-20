@@ -52,12 +52,17 @@ func (m *Meta) FinishTask(ctx context.Context, result *workerpb.IndexTaskInfo) e
 		ids := []int64{result.GetBuildID()}
 		m.IndexCatalog.LockBuildIDs(ids)
 		defer m.IndexCatalog.UnlockBuildIDs(ids)
-		staged, err := m.IndexCatalog.StageSegmentIndexMutation(SegmentIndexMutation{Type: SegmentIndexUpsert, BuildID: result.GetBuildID(), FinishedTask: result})
+		staged, err := m.IndexCatalog.StageSegmentIndexMutation(SegmentIndexMutation{
+			Type: SegmentIndexUpsert, BuildID: result.GetBuildID(), SegmentID: segmentID, FinishedTask: result,
+		})
 		if errors.Is(err, ErrSegmentIndexRecordGone) {
 			return nil
 		}
 		if err != nil {
 			return err
+		}
+		if staged.Obsolete {
+			return m.retireObsoleteIndexTask(ctx, staged)
 		}
 		var observe func()
 		defer func() {
@@ -82,9 +87,6 @@ func (m *Meta) FinishTask(ctx context.Context, result *workerpb.IndexTaskInfo) e
 			if summary.GetIndexId() == record.IndexID && summary.GetHasArtifact() {
 				return merr.WrapErrServiceInternalMsg("empty completion cannot replace a live index artifact")
 			}
-			if summary.GetIndexId() == record.IndexID && summary.GetBuildId() > record.BuildID {
-				return merr.WrapErrServiceInternalMsg("obsolete empty index completion for build %d", record.BuildID)
-			}
 		}
 		updated := segment.Clone()
 		ApplyIndexSummary(updated.SegmentInfo, staged.Summary, fieldID, true)
@@ -99,4 +101,13 @@ func (m *Meta) FinishTask(ctx context.Context, result *workerpb.IndexTaskInfo) e
 		return m.IndexCatalog.FinishTask(result)
 	}
 	return err
+}
+
+// The caller holds the segment manifest lock and the obsolete build's lock.
+func (m *Meta) retireObsoleteIndexTask(ctx context.Context, staged *StagedSegmentIndexMutation) error {
+	if err := m.Catalog.Update(ctx, *staged.Action); err != nil {
+		return merr.Wrap(err, "retire obsolete index task")
+	}
+	staged.Install()()
+	return nil
 }

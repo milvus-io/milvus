@@ -1527,9 +1527,21 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 	if m.UsesSegmentSummaries() {
 		if segment, exists := m.summarySource.GetSegment(previous.SegmentID); exists {
 			for _, summary := range segment.GetIndexSummaries() {
-				if summary.GetIndexId() == previous.IndexID && summary.GetBuildId() != previous.BuildID {
-					replacedSummary = model.SegmentIndexSummaryFromProto(segment, summary)
+				if summary.GetIndexId() != previous.IndexID || summary.GetBuildId() == previous.BuildID {
+					continue
 				}
+				if summary.GetBuildId() > previous.BuildID {
+					action := metastore.DropSegmentIndex(previous)
+					staged.Action = &action
+					staged.Summary = model.SummarizeSegmentIndex(previous)
+					staged.Obsolete = true
+					staged.Install = func() func() {
+						m.removeSegmentIndexRecordInMemory(previous)
+						return m.taskCounts.publishStoredSizes
+					}
+					return staged, nil
+				}
+				replacedSummary = model.SegmentIndexSummaryFromProto(segment, summary)
 			}
 		}
 	}

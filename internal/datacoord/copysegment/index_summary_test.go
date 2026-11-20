@@ -43,6 +43,8 @@ func TestSummaryCopyPublishesInventoryWithoutBuildRecords(t *testing.T) {
 	result.IndexInfos[9001].IndexId = 300
 	result.IndexInfos[9001].IndexType = "HNSW"
 	result.IndexInfos[9001].Version = 4
+	result.IndexInfos[9001].IndexSize = 64
+	result.IndexInfos[9001].MemSize = proto.Uint64(256)
 	result.IndexInfos[9001].IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
 	require.NoError(t, im.CreateIndex(t.Context(), &model.Index{CollectionID: 100, IndexID: 200, FieldID: 102, IndexName: "scalar_idx"}))
 	result.IndexInfos[9002] = &datapb.VectorScalarIndexInfo{IndexId: 200, BuildId: 9002, FieldId: 102, IndexName: "scalar_idx"}
@@ -63,6 +65,12 @@ func TestSummaryCopyPublishesInventoryWithoutBuildRecords(t *testing.T) {
 	require.EqualValues(t, 300, segment.GetIndexSummaries()[1].GetIndexId())
 	require.EqualValues(t, 9001, segment.GetIndexSummaries()[1].GetBuildId())
 	require.True(t, segment.GetIndexSummaries()[1].GetHasArtifact())
+	require.EqualValues(t, 64, segment.GetIndexSummaries()[1].GetSerializedSize())
+	require.EqualValues(t, 256, segment.GetIndexSummaries()[1].GetMemSize())
+	persisted, err := mt.Catalog.ListSegments(t.Context(), 100)
+	require.NoError(t, err)
+	require.Len(t, persisted, 1)
+	require.EqualValues(t, 256, persisted[0].GetIndexSummaries()[1].GetMemSize())
 	require.False(t, im.HasBuildInfo(9001))
 	require.Zero(t, im.SegmentIndexes.Len())
 	require.NoError(t, SyncCopySegmentTask(t.Context(), task, resp, copies, mt, im))

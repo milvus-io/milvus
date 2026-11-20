@@ -170,7 +170,9 @@ type StagedSegmentIndexMutation struct {
 	Summary *model.SegmentIndexSummary
 	// PublishSummary uses the same immutable mode as Install's record retirement.
 	PublishSummary bool
-	Install        func() (deferredMetric func())
+	// Obsolete upserts retire only their task row and leave the segment intact.
+	Obsolete bool
+	Install  func() (deferredMetric func())
 }
 
 // errSegmentIndexRecordGone reports that the SegmentIndex record a staged
@@ -388,6 +390,9 @@ func (m *Meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 			return nil, merr.WrapErrServiceInternalMsg(
 				"segment index mutation buildID=%d belongs to segment %d, not manifest segment %d",
 				indexMutation.BuildID, staged.Summary.SegmentID, commit.SegmentID)
+		}
+		if staged.Obsolete {
+			return nil, m.retireObsoleteIndexTask(ctx, staged)
 		}
 		if (indexMutation.Type == SegmentIndexBackfill || indexMutation.Type == SegmentIndexRollback) && staged.Record != nil &&
 			(staged.Record.CollectionID != segment.GetCollectionID() ||
