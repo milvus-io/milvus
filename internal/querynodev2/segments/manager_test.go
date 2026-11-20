@@ -7,6 +7,7 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -213,6 +214,22 @@ func (s *ManagerSuite) TestIncreaseVersion() {
 	segment.EXPECT().CASVersion(int64(0), int64(1)).Return(true)
 
 	s.True(action(segment), "version lt execute CAS")
+	segment.AssertExpectations(s.T())
+
+	// Another updater moves the version past the target between the first
+	// read and the CAS. The action must reload the version and stop instead
+	// of retrying the stale CAS forever.
+	version := atomic.NewInt64(0)
+	segment = NewMockSegment(s.T())
+	segment.EXPECT().ID().Return(100)
+	segment.EXPECT().Type().Return(commonpb.SegmentState_Sealed)
+	segment.EXPECT().Version().RunAndReturn(version.Load)
+	segment.EXPECT().CASVersion(int64(0), int64(1)).RunAndReturn(func(int64, int64) bool {
+		version.Store(2)
+		return false
+	}).Once()
+
+	s.False(action(segment), "version advanced concurrently, skip update")
 	segment.AssertExpectations(s.T())
 }
 
