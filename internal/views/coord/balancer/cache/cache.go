@@ -141,12 +141,18 @@ type (
 
 // NewFromSources attaches replaying hooks before declaring the cache ready.
 // It is component assembly only; production owners must supply the node/RG publisher.
+//
+// Nodes replay first. A node publication reselects the targets of every
+// collection in its resource groups, so replaying nodes last repeated that
+// pass once per node; replayed first, they find no collections, and the later
+// replays select each target against the same node facts. The final state
+// does not depend on this order.
 func NewFromSources(config *api.BalanceConfig, configs *loadmgr.LoadConfigStore, data api.DataViewPublisher, registry *coordview.ShardViewRegistry, nodes NodePublisher) *Cache {
 	c := New(config)
+	c.subscriptions = append(c.subscriptions, nodes.RegisterNodeListener(c.PublishNode))
 	c.subscriptions = append(c.subscriptions, configs.RegisterLoadConfigListener(c.PublishLoadConfig))
 	c.subscriptions = append(c.subscriptions, data.RegisterDataViewListener(c.PublishDataView))
 	c.subscriptions = append(c.subscriptions, registry.RegisterPublicationListener(c.PublishShard))
-	c.subscriptions = append(c.subscriptions, nodes.RegisterNodeListener(c.PublishNode))
 	c.MarkReady()
 	return c
 }

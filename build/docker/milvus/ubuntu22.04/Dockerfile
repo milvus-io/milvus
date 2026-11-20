@@ -45,8 +45,14 @@ RUN uv --no-cache python install 3.12.13 && \
         "setuptools>=78.1.1" "msgpack>=1.2.1" "urllib3>=2.8.0"
 
 # Add Tini
-RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \
-    chmod +x /tini
+RUN cd /tmp && \
+    asset="tini-${TARGETARCH}" && \
+    url="https://github.com/krallin/tini/releases/download/v0.19.0/${asset}" && \
+    curl -fL --retry 3 -o "${asset}" "${url}" && \
+    curl -fL --retry 3 -o "${asset}.sha256sum" "${url}.sha256sum" && \
+    sha256sum --strict -c "${asset}.sha256sum" && \
+    install -m 0755 "${asset}" /tini && \
+    rm "${asset}" "${asset}.sha256sum"
 
 RUN groupadd -r milvus && useradd -r -g milvus milvus && \
     install -d -o milvus -g milvus /milvus /milvus/bin /var/lib/milvus
