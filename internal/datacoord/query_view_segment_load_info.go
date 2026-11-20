@@ -30,7 +30,12 @@ func (s *Server) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID 
 	if len(segmentIDs) == 0 {
 		return nil, nil, nil
 	}
-
+	pending := make(map[int64]error)
+	for _, segmentID := range segmentIDs {
+		if err := s.meta.CheckSegmentManifestIndexes(segmentID); err != nil {
+			pending[segmentID] = err
+		}
+	}
 	indexes, segmentIndexes := s.indexMeta.GetQueryViewIndexSnapshot(collectionID, segmentIDs)
 	indexInfos := packQueryViewCollectionIndexInfos(indexes)
 	results := make([]*querypb.QueryViewSegmentLoadInfoResult, 0, len(segmentIDs))
@@ -40,6 +45,10 @@ func (s *Server) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID 
 			continue
 		}
 		seen[segmentID] = struct{}{}
+		if err := pending[segmentID]; err != nil {
+			results = append(results, &querypb.QueryViewSegmentLoadInfoResult{SegmentID: segmentID, Status: merr.Status(err)})
+			continue
+		}
 		info, err := s.getQueryViewSegmentLoadInfo(ctx, collectionID, segmentID, indexInfos, segmentIndexes[segmentID])
 		results = append(results, &querypb.QueryViewSegmentLoadInfoResult{SegmentID: segmentID, Status: merr.Status(err), LoadInfo: info})
 	}

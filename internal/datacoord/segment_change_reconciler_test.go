@@ -336,6 +336,34 @@ func TestSegmentChangeRecovery_RequiresSuccessfulDataViewRebuild(t *testing.T) {
 	require.NoError(t, m.ReconcileSegmentChangeDataViews(t.Context(), manager))
 }
 
+func TestResumeDataViewAfterManifestIndexRecovery(t *testing.T) {
+	ctx := t.Context()
+	mt, err := meta.NewMemoryMeta(t)
+	require.NoError(t, err)
+	mt.MetaStore.PutCollection(&meta.CollectionInfo{ID: 10, VChannelNames: []string{"ch-1", "empty-channel"}})
+	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1", State: commonpb.SegmentState_Flushed,
+		NumOfRows: 42,
+		Binlogs:   []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 1001, EntriesNum: 42}}}},
+	})))
+	manager, err := dataview.RecoverManager(ctx, mt.Catalog.(dataview.Catalog), liveSegmentChangeCollection, mt.LoadableProjection, nil, nil)
+	require.NoError(t, err)
+	server := &Server{
+		serverLoopCtx: ctx, dataViewManager: manager, meta: mt, dataViewCollectionRecoveryValidator: liveSegmentChangeCollection,
+	}
+	require.NoError(t, server.resumeDataViewAfterIndexRecovery(10))
+	ref, err := manager.Latest(ctx, 10)
+	require.NoError(t, err)
+	require.NotNil(t, ref)
+	defer ref.Deref()
+
+	shards := ref.DataView().GetShards()
+	require.Len(t, shards, 2)
+	require.Equal(t, "ch-1", shards[0].GetVchannel())
+	require.Equal(t, []int64{1001}, shards[0].GetPartitions()[0].GetSegmentIds())
+	require.Equal(t, "empty-channel", shards[1].GetVchannel())
+}
+
 func TestSegmentChangeRecovery_MissingMemberAndUnpublishedReady(t *testing.T) {
 	ctx := t.Context()
 	m, g := seedStagedInspectorMeta(t)

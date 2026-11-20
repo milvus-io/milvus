@@ -258,6 +258,9 @@ func (m *Meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 // retained Dropped segment. The caller notifies QueryView of returned updates
 // after releasing the segment lock. Public commit semantics remain unchanged.
 func (m *Meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentManifestCommit, rollbackSource string, lockWait time.Duration) ([]*SegmentInfo, error) {
+	if err := m.CheckSegmentManifestIndexes(commit.SegmentID); err != nil {
+		return nil, err
+	}
 	var manifestUpdates []*SegmentInfo
 	holdStart := time.Now()
 	for _, mutation := range commit.CatalogMutation.SegmentIndexes {
@@ -1296,6 +1299,9 @@ func (m *Meta) CommitSegmentManifests(ctx context.Context, commits []SegmentMani
 	defer func() { m.NotifyQueryViewSegmentUpdates(ctx, manifestUpdates) }()
 	idSet := make(map[int64]struct{}, len(commits))
 	for _, commit := range commits {
+		if err := m.CheckSegmentManifestIndexes(commit.SegmentID); err != nil {
+			return err
+		}
 		if commit.SegmentID == 0 {
 			return merr.WrapErrServiceInternalMsg("segment manifest commit requires a segment ID")
 		}

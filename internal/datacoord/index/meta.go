@@ -320,7 +320,10 @@ func (m *IndexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
 	}
 	indexes, ok := m.SegmentIndexes.Get(segIdx.SegmentID)
 	if ok {
-		indexes.Insert(segIdx.IndexID, segIdx)
+		current, exists := indexes.Get(segIdx.IndexID)
+		if !segIdx.ManifestPublished || !exists || current.BuildID <= segIdx.BuildID {
+			indexes.Insert(segIdx.IndexID, segIdx)
+		}
 	} else {
 		indexes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 		indexes.Insert(segIdx.IndexID, segIdx)

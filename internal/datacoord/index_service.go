@@ -502,6 +502,10 @@ func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 		}, nil
 	}
 
+	if err := s.meta.CheckCollectionManifestIndexes(req.GetCollectionID()); err != nil {
+		return &indexpb.GetIndexStateResponse{Status: merr.Status(err)}, nil
+	}
+
 	indexes := s.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
@@ -564,6 +568,9 @@ func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegme
 		}, nil
 	}
 	for _, segID := range req.GetSegmentIDs() {
+		if err := s.meta.CheckSegmentManifestIndexes(segID); err != nil {
+			return &indexpb.GetSegmentIndexStateResponse{Status: merr.Status(err)}, nil
+		}
 		for indexID := range indexID2CreateTs {
 			state := s.indexMeta.GetSegmentIndexState(req.GetCollectionID(), segID, indexID)
 			ret.States = append(ret.States, state)
@@ -977,6 +984,10 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 		}, nil
 	}
 
+	if err := s.meta.CheckCollectionManifestIndexes(req.GetCollectionID()); err != nil {
+		return &indexpb.GetIndexBuildProgressResponse{Status: merr.Status(err)}, nil
+	}
+
 	indexes := s.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
@@ -1044,6 +1055,10 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 		}, nil
 	}
 
+	if err := s.meta.CheckCollectionManifestIndexes(req.GetCollectionID()); err != nil {
+		return &indexpb.DescribeIndexResponse{Status: merr.Status(err)}, nil
+	}
+
 	indexes := s.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
@@ -1095,6 +1110,10 @@ func (s *Server) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexSt
 		return &indexpb.GetIndexStatisticsResponse{
 			Status: merr.Status(err),
 		}, nil
+	}
+
+	if err := s.meta.CheckCollectionManifestIndexes(req.GetCollectionID()); err != nil {
+		return &indexpb.GetIndexStatisticsResponse{Status: merr.Status(err)}, nil
 	}
 
 	indexes := s.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
@@ -1255,6 +1274,11 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 		return &indexpb.GetIndexInfoResponse{
 			Status: merr.Status(err),
 		}, nil
+	}
+	for _, segmentID := range req.GetSegmentIDs() {
+		if err := s.meta.CheckSegmentManifestIndexes(segmentID); err != nil {
+			return &indexpb.GetIndexInfoResponse{Status: merr.Status(err)}, nil
+		}
 	}
 	ret := &indexpb.GetIndexInfoResponse{
 		Status:      merr.Success(),

@@ -734,6 +734,9 @@ func uncompressJSONStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStat
 }
 
 func uncompressIndexFiles(h *ServerHandler, segment *datapb.SegmentInfo) ([]*indexpb.IndexFilePathInfo, error) {
+	if err := h.s.meta.CheckSegmentManifestIndexes(segment.GetID()); err != nil {
+		return nil, err
+	}
 	segIdxes := h.s.indexMeta.GetSegmentIndexesUnsafe(segment.GetCollectionID(), segment.GetID())
 	if h.s.indexMeta.UsesSegmentSummaries() {
 		var err error

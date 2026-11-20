@@ -49,6 +49,25 @@ func (gc *GarbageCollector) removeIndexRecordLocked(ctx context.Context, record 
 	return gc.Option.IndexMeta.RemoveSegmentIndex(ctx, record.BuildID)
 }
 
+func (gc *GarbageCollector) artifactSummaryBuildIDs(ctx context.Context) map[int64]struct{} {
+	if !gc.Option.IndexMeta.UsesSegmentSummaries() {
+		return nil
+	}
+	buildIDs := make(map[int64]struct{})
+	gc.Meta.Segments.RangeReused(func(segment *meta.SegmentInfo) bool {
+		if ctx.Err() != nil {
+			return false
+		}
+		for _, summary := range segment.GetIndexSummaries() {
+			if summary.GetHasArtifact() {
+				buildIDs[summary.GetBuildId()] = struct{}{}
+			}
+		}
+		return true
+	})
+	return buildIDs
+}
+
 // referencedSummaryBuild fails closed on every manifest read/validation error.
 func (gc *GarbageCollector) referencedSummaryBuild(ctx context.Context, segment *meta.SegmentInfo, buildID int64) (map[string]struct{}, bool) {
 	if segment == nil {
@@ -73,9 +92,11 @@ func (gc *GarbageCollector) referencedSummaryBuild(ctx context.Context, segment 
 		if !ok {
 			return nil, false
 		}
-		if files == nil {
-			files = make(map[string]struct{}, len(info.GetIndexFilePaths()))
-		}
+		files = gc.getRetainedIndexFilesOfIndex(&model.SegmentIndex{
+			SegmentID: segment.GetID(), CollectionID: segment.GetCollectionID(), PartitionID: segment.GetPartitionID(),
+			BuildID: buildID, IndexVersion: entry.IndexVersion, IndexStorePathVersion: entry.IndexStorePathVersion,
+			IndexFileKeys: entry.IndexFileKeys,
+		})
 		for _, file := range info.GetIndexFilePaths() {
 			files[file] = struct{}{}
 		}

@@ -1022,6 +1022,9 @@ func (gc *GarbageCollector) checkDroppedSegmentGC(segment *meta.SegmentInfo,
 	cpTimestamp Timestamp,
 ) bool {
 	log := mlog.With(mlog.Int64("segmentID", segment.ID))
+	if gc.Meta.CollectionManifestIndexesPending(segment.GetCollectionID()) {
+		return false
+	}
 	if segment.GetIsImporting() && segment.GetCompacted() {
 		// Restore owns retired L0 inputs until its publication finishes. They
 		// also prove an applied mutation after a crash before task-state save.
@@ -1316,6 +1319,9 @@ const (
 )
 
 func (gc *GarbageCollector) GetDroppedSegmentIndexFiles(ctx context.Context, io *packed.ManifestIOContext, segmentID int64) ([]*model.SegmentIndexSummary, map[string]struct{}, GcBlockReason) {
+	if gc.Meta.ManifestIndexesPending(segmentID) {
+		return nil, nil, gcBlockedByManifest
+	}
 	segIndexes := gc.getAllSegmentIndexSummariesForDroppedSegment(segmentID)
 	if snapshotMeta := gc.Option.SnapshotMeta; snapshotMeta != nil {
 		for _, segIdx := range segIndexes {
@@ -1926,6 +1932,9 @@ func (gc *GarbageCollector) RecycleUnusedSegIndexes(ctx context.Context, signal 
 func (gc *GarbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Context, io *packed.ManifestIOContext, segmentID int64,
 	candidates []*model.SegmentIndexSummary, signal <-chan gcCmd,
 ) {
+	if gc.Meta.ManifestIndexesPending(segmentID) {
+		return
+	}
 	segment := gc.Meta.GetSegment(ctx, segmentID)
 	summaries := make([]*model.SegmentIndexSummary, 0, len(candidates))
 	for _, candidate := range candidates {
@@ -2214,6 +2223,12 @@ func (gc *GarbageCollector) getLatestSegmentIndexSummaryForGC(candidate *model.S
 // v0 paths are rooted by buildID, so the first-level directory can be parsed and
 // checked against index meta directly.
 func (gc *GarbageCollector) RecycleUnusedIndexFilesV0(ctx context.Context) {
+	// The build-rooted listing has no segment ID. A missing task cannot prove
+	// that a legacy manifest does not own this build while recovery is pending.
+	if gc.Meta.HasPendingManifestIndexes() {
+		return
+	}
+	summaryBuilds := sync.OnceValue(func() map[int64]struct{} { return gc.artifactSummaryBuildIDs(ctx) })
 	start := time.Now()
 	log := mlog.With(mlog.String("gcName", "recycleUnusedIndexFilesV0"), mlog.Time("startAt", start))
 	log.Info(ctx, "start recycleUnusedIndexFilesV0...")
@@ -2248,6 +2263,13 @@ func (gc *GarbageCollector) RecycleUnusedIndexFilesV0(ctx context.Context) {
 			return true
 		}
 		if segIdx == nil {
+			_, retained := summaryBuilds()[buildID]
+			if ctx.Err() != nil {
+				return false
+			}
+			if retained {
+				return true
+			}
 			// buildID no longer exists in meta. Orphan buildID walk has no collection context,
 			// so IsBuildIDGCBlocked(-1, buildID) fail-closes on ANY unloaded RefIndex globally.
 			if snapshotMeta != nil && snapshotMeta.IsBuildIDGCBlocked(-1, buildID) {
@@ -2414,6 +2436,9 @@ func (gc *GarbageCollector) newIndexFileReclaimChecker(ctx context.Context) func
 		}
 		d := &buildDecision{buildID: buildID}
 		current = d
+		if gc.Meta.ManifestIndexesPending(segmentID) {
+			return d
+		}
 		if snapshotMeta != nil && snapshotMeta.IsBuildIDGCBlocked(collectionID, buildID) {
 			// Keep everything; nil decision fields mean "reclaim nothing".
 			return d

@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"path"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,8 +42,100 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestLegacyManifestIndexRecoveryProtectsArtifacts(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
+	catalog := kvdatacoord.NewCatalog(meta.NewMetaMemoryKV(), root, "")
+	boot := func() (*meta.Meta, *index.IndexMeta) {
+		dm := &index.IndexTestMetas{}
+		store := meta.NewMetaStoreWithCollections(catalog, 1)
+		mt, err := meta.NewMeta(ctx, catalog, cm, store, broker.NewMockBroker(t), index.LoadIndexTestMetas(catalog, dm))
+		require.NoError(t, err)
+		t.Cleanup(mt.CloseManifestCommitExecutor)
+		return mt, dm.IndexMeta
+	}
+	oldMeta, oldIndex := boot()
+	require.False(t, oldIndex.UsesSegmentSummaries())
+	for _, segmentID := range []int64{3, 8} {
+		base := path.Join(root, "insert_log", metautil.JoinIDPath(1, 2, segmentID))
+		require.NoError(t, oldMeta.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: segmentID, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3, ManifestPath: packed.MarshalManifestPath(base, 1), ManifestHasIndex: true,
+		})))
+	}
+	version := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
+	livePrefix := metautil.NewIndexPathBuilder(root, version, 1, 2, 3, 5, 1).BuildPrefix()
+	live := path.Join(livePrefix, "index.bin")
+	orphan := metautil.NewIndexPathBuilder(root, version, 1, 2, 3, 6, 1).BuildFilePath("index.bin")
+	for _, file := range []string{live, orphan} {
+		require.NoError(t, cm.Write(ctx, file, []byte("index")))
+	}
+	entry := packed.ManifestIndexInfo{
+		IndexID: 4, FieldID: 7, BuildID: 5, IndexVersion: 1, IndexName: "idx",
+		IndexType: "FLAT", Path: livePrefix, IndexFileKeys: []string{"index.bin"}, IndexStorePathVersion: version,
+	}
+	var reads atomic.Int32
+	var storageReady atomic.Bool
+	config := mockey.Mock(meta.CreateStorageConfig).Return(cfg).Build()
+	defer config.UnPatch()
+	reader := mockey.Mock(packed.SubmitManifestIndexInfos).To(func(_ context.Context, _ *packed.ManifestIOContext, manifest string, _ *indexpb.StorageConfig, complete func([]packed.ManifestIndexInfo, error)) error {
+		reads.Add(1)
+		if manifest == oldMeta.GetSegment(ctx, 8).GetManifestPath() {
+			complete(nil, nil)
+		} else if storageReady.Load() {
+			complete([]packed.ManifestIndexInfo{entry}, nil)
+		} else {
+			complete(nil, merr.ErrIoKeyNotFound)
+		}
+		return nil
+	}).Build()
+	defer reader.UnPatch()
+
+	mt, im := boot()
+	require.Zero(t, reads.Load(), "startup must not read a marked manifest")
+	require.True(t, mt.ManifestIndexesPending(3))
+	require.False(t, im.HasBuildInfo(5))
+	_, err := mt.LoadableProjection(ctx, 1, nil)
+	require.ErrorIs(t, err, merr.ErrServiceNotReady)
+
+	gc := NewGarbageCollector(mt, meta.NewMockHandler(), GcOption{IndexMeta: im, Cli: cm})
+	gc.RecycleUnusedIndexFilesV0(ctx)
+	require.FileExists(t, live)
+	require.FileExists(t, orphan)
+	require.False(t, gc.newIndexFileReclaimChecker(ctx)(live, 1, 3, 5))
+
+	workerCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		mt.RecoverPendingManifestIndexes(workerCtx, func(int64) error { return nil })
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	require.Eventually(t, func() bool {
+		return reads.Load() >= 2 && !mt.ManifestIndexesPending(8)
+	}, 5*time.Second, 10*time.Millisecond)
+	require.True(t, mt.ManifestIndexesPending(3), "an unreadable manifest stays protected")
+	require.False(t, mt.GetSegment(ctx, 8).GetManifestHasIndex(), "an empty revision clears the old marker")
+	require.False(t, gc.newIndexFileReclaimChecker(ctx)(live, 1, 3, 5))
+
+	storageReady.Store(true)
+	require.Eventually(t, func() bool { return !mt.HasPendingManifestIndexes() }, 5*time.Second, 10*time.Millisecond)
+	recovered, exists := im.GetIndexJob(5)
+	require.True(t, exists)
+	require.Equal(t, []string{"index.bin"}, recovered.IndexFileKeys)
+	gc.RecycleUnusedIndexFilesV0(ctx)
+	require.FileExists(t, live)
+	require.NoFileExists(t, orphan)
+}
 
 func TestSummaryGCKeepsPublishedArtifactAcrossRestart(t *testing.T) {
 	ctx := t.Context()
@@ -136,6 +229,8 @@ func TestSummaryGCProtectsManifestWithoutResidentBuild(t *testing.T) {
 	defer read.UnPatch()
 	reclaim := gc.newIndexFileReclaimChecker(ctx)
 	require.False(t, reclaim(path.Join(entry.Path, "index"), 1, 3, 5))
+	legacyAlias := metautil.NewIndexPathBuilder(root, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, 1, 2, 3, 5, 1).BuildFilePath("index")
+	require.False(t, reclaim(legacyAlias, 1, 3, 5))
 	require.True(t, reclaim(path.Join(entry.Path, "obsolete"), 1, 3, 5))
 	require.True(t, reclaim(path.Join(base, "_index/6/1/orphan"), 1, 3, 6))
 	require.False(t, dm.IndexMeta.HasBuildInfo(5))

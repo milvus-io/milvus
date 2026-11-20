@@ -541,13 +541,53 @@ func (s *Server) startDataCoord() {
 	s.importInspector.Reload()
 	s.startServerLoop()
 	s.afterStart()
+	started := make(chan struct{})
+	if s.meta.HasPendingManifestIndexes() {
+		s.serverLoopWg.Go(func() {
+			select {
+			case <-started:
+				s.meta.RecoverPendingManifestIndexes(s.serverLoopCtx, s.resumeDataViewAfterIndexRecovery)
+			case <-s.serverLoopCtx.Done():
+			}
+		})
+	}
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
+	close(started)
 	// The first prewarm round reads the recovered metadata through a healthy
 	// DataCoord; starting it earlier could skip that round as not ready.
 	if s.talonPrewarmInspector != nil {
 		s.talonPrewarmInspector.Start()
 	}
 	sessionutil.SaveServerInfo(typeutil.MixCoordRole, s.session.GetServerID())
+}
+
+func (s *Server) resumeDataViewAfterIndexRecovery(collectionID int64) error {
+	ctx := s.serverLoopCtx
+	live, err := s.dataViewCollectionRecoveryValidator(ctx, collectionID)
+	if err != nil || !live {
+		return err
+	}
+	ref, err := s.dataViewManager.Latest(ctx, collectionID)
+	if err != nil {
+		return err
+	}
+	if ref != nil {
+		ref.Deref()
+		_, err := s.dataViewManager.RecomputeNow(ctx, collectionID, s.meta.LoadableProjection)
+		return err
+	}
+	collection := s.meta.GetCollection(collectionID)
+	if collection == nil {
+		return nil
+	}
+	segments, err := s.meta.LoadableProjection(ctx, collectionID, nil)
+	if err != nil {
+		return err
+	}
+	_, err = s.dataViewManager.OnBootstrapCollection(ctx, dataview.BootstrapCollectionDataViewEvent{
+		CollectionID: collectionID, VChannels: collection.VChannelNames, Segments: segments,
+	})
+	return err
 }
 
 func (s *Server) GetServerID() int64 {

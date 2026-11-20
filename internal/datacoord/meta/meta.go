@@ -122,6 +122,7 @@ type Meta struct {
 	manifestCopyLimit      int
 	manifestReadOnce       sync.Once
 	manifestReadSlots      *semaphore.Weighted
+	manifestIndexRecovery  manifestIndexRecovery
 	DataViewManager        DataViewManager
 	StreamingNodeCatalog   metastore.StreamingNodeCataLog
 
@@ -251,10 +252,6 @@ func NewMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		mt.CompactionProtection = protection
 	}
 
-	// Recovery follows the durable storage location, not the current write
-	// mode. A segment marked manifest_has_index may contain records published
-	// while the switch was previously on, so it must still be loaded after the
-	// switch is turned off. Unmarked clusters perform no manifest reads.
 	if paramtable.Get().DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() {
 		source, ok := mt.IndexCatalog.(interface {
 			UseSegmentSummaries(metacache.MetaView) error
@@ -265,10 +262,8 @@ func NewMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		if err := source.UseSegmentSummaries(mt.MetaStore); err != nil {
 			return nil, err
 		}
-	} else if err := mt.ReloadSegmentIndexesFromManifests(ctx); err != nil {
-		// Object-store reads have already retried per segment. Re-entering
-		// initMeta's metastore retry would reread every successful manifest.
-		return nil, retry.Unrecoverable(err)
+	} else {
+		mt.prepareManifestIndexRecovery(ctx)
 	}
 
 	// Segment change groups load AFTER segments are in memory: the recovery
@@ -1722,6 +1717,9 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint,
 
 func UpdateManifest(segmentID int64, manifestPath string) UpdateOperator {
 	return func(modPack *UpdateSegmentPack) bool {
+		if err := modPack.Meta.CheckSegmentManifestIndexes(segmentID); err != nil {
+			return modPack.Fail(err)
+		}
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			mlog.Warn(modPack.Meta.Ctx, "meta update: update manifest failed - segment not found",
@@ -1787,6 +1785,9 @@ func ClearEmptyManifestIndexMarker(segmentID int64, expectedManifest string) Upd
 
 func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperator {
 	return func(modPack *UpdateSegmentPack) bool {
+		if err := modPack.Meta.CheckSegmentManifestIndexes(segmentID); err != nil {
+			return modPack.Fail(err)
+		}
 		// Inspect the pending value without registering a write for a stale/no-op
 		// manifest. Other operators in this batch may already have changed it.
 		segment := modPack.Segments[segmentID]

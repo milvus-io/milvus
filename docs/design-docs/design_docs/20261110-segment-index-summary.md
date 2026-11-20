@@ -104,6 +104,16 @@ and artifacts. No new replicated side effect or WAL message is introduced.
    snapshot extraction and GC. Read artifact details from the pinned manifest on
    demand, without rebuilding a resident completed-index cache. Validate consumers
    against the first layer's publications, including read failures and cleanup races.
+3. Remove manifest index reads from DataCoord startup. Register legacy segments
+   with marked manifests from catalog metadata alone. After DataCoord is healthy,
+   read their current revisions with the shared I/O budget and install the legacy
+   index records one segment at a time. During recovery, affected DataViews keep
+   their published frontiers, index RPCs report a retryable pending status, and
+   index scheduling and manifest publication wait for the segment's inventory.
+   Reads or catalog writes that fail leave that segment pending. GC retains
+   pending segments and their index files. The build-rooted orphan scan waits
+   while any inventory is pending because its prefix carries only a build ID.
+   Summary builds retain the equivalent historical file aliases during scans.
 
 Use the matching Milvus development container for generation, formatting, builds
 and tests. Check catalog failure leaves both pointer and summaries unchanged;

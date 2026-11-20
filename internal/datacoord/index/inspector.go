@@ -310,6 +310,10 @@ func (i *IndexInspector) canCreateIndexForSegmentNow(segment *meta.SegmentInfo) 
 }
 
 func (i *IndexInspector) createIndexesForSegment(ctx context.Context, segment *meta.SegmentInfo) error {
+	if i.meta.ManifestIndexesPending(segment.GetID()) {
+		// Recovery notifies the inspector after publishing the recovered records.
+		return nil
+	}
 	if meta.EnableSortCompaction() && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() && !i.isExternalCollection(segment.CollectionID) {
 		mlog.Debug(ctx, "segment is not sorted by pk, skip create indexes", mlog.FieldSegmentID(segment.GetID()))
 		return nil
