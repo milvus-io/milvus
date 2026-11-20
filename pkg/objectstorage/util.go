@@ -19,6 +19,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	awscredentials "github.com/zilliztech/woodpecker/common/credentials"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
@@ -99,7 +100,7 @@ func NewMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
 		}
 	default: // aws, minio
 		if c.UseIAM {
-			creds = credentials.NewIAM("")
+			creds = awscredentials.NewAWSIAM()
 		} else {
 			creds = credentials.NewStaticV4(c.AccessKeyID, c.SecretAccessKeyID, "")
 		}
