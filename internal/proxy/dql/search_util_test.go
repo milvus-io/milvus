@@ -103,6 +103,51 @@ func TestSearchTaskCheckNqCompatibility(t *testing.T) {
 	}
 }
 
+// A declared nq that disagrees with the placeholder group is refused by the
+// Proxy; it used to be forwarded and fail on a query node.
+func TestSearchTaskCheckNqMismatch(t *testing.T) {
+	placeholder, err := proto.Marshal(&commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{
+			{Tag: "$0", Type: commonpb.PlaceholderType_FloatVector, Values: [][]byte{{0, 0, 0, 0}, {0, 0, 0, 0}}},
+		},
+	})
+	require.NoError(t, err)
+	for _, advanced := range []bool{false, true} {
+		for _, nq := range []int64{1, 3} {
+			request := &milvuspb.SearchRequest{
+				Nq:          nq,
+				SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: placeholder},
+			}
+			if advanced {
+				request = ConvertHybridSearchToSearch(&milvuspb.HybridSearchRequest{
+					Requests: []*milvuspb.SearchRequest{request},
+				})
+			}
+			task := &SearchTask{
+				SearchRequest: &internalpb.SearchRequest{IsAdvanced: advanced},
+				request:       request,
+			}
+			_, err := task.checkNq(context.Background())
+			require.ErrorIs(t, err, merr.ErrParameterInvalid, "advanced=%v nq=%d", advanced, nq)
+			assert.Contains(t, err.Error(), "does not match the 2 query rows")
+		}
+	}
+
+	// A group the row counter refuses is judged by proto.Unmarshal, with its
+	// error: the counter alone never turns a request away.
+	invalidTag := []byte{0x0a, 0x03, 0x0a, 0x01, 0xff}
+	_, err = resolveNq(1, invalidTag, "failed to unmarshal placeholder group")
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorIs(t, err, proto.Error)
+	_, _, convertErr := ConvertPlaceholderGroup(invalidTag, &schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector})
+	require.Error(t, convertErr, "the pre-existing decode refuses the same bytes")
+
+	// Nothing to compare a declared nq with: left to the query nodes, as before.
+	nq, err := resolveNq(4, nil, "unused")
+	require.NoError(t, err)
+	assert.Equal(t, int64(4), nq)
+}
+
 func TestConvertHybridSearchToSearchKeepsNamespace(t *testing.T) {
 	namespace := "tenant_a"
 
@@ -298,6 +343,15 @@ func TestSearchInfoDetermineSearchTypeWithPluralGroupByFieldIDs(t *testing.T) {
 	}
 
 	assert.Equal(t, internalpb.SearchType_DEFAULT, info.DetermineSearchType(false))
+}
+
+func TestSearchInfoDetermineSearchTypeWithOrderBy(t *testing.T) {
+	info := &SearchInfo{
+		planInfo:      &planpb.QueryInfo{},
+		orderByFields: []OrderByField{{FieldName: "price"}},
+	}
+
+	assert.Equal(t, internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER, info.DetermineSearchType(false))
 }
 
 func TestParseGroupByInfoLegacyFieldPrecedence(t *testing.T) {

@@ -635,6 +635,12 @@ func (c *dqlRetryClient) expectAutoLoad(t *testing.T) {
 // shard retries, gRPC error transport, EnsureCollectionReady RPC and full DQL retries.
 // Parsing/reducing results and coordinator storage are replaced by test doubles.
 func TestDQLAutoLoadRetryThroughTaskAndGRPC(t *testing.T) {
+	// This test's gRPC client only implements the unary QueryView RPCs.
+	params := paramtable.Get()
+	key, old := params.ProxyCfg.EnableReduceStream.Key, params.ProxyCfg.EnableReduceStream.GetValue()
+	t.Cleanup(func() { require.NoError(t, params.Save(key, old)) })
+	require.NoError(t, params.Save(key, "false"))
+
 	for _, test := range []struct{ method, phase string }{
 		{"Search", "plan"},
 		{"Search", "search"},

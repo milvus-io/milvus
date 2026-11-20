@@ -2,6 +2,7 @@ package queryclient
 
 import (
 	"context"
+	"io"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -229,4 +231,272 @@ func TestTwoStageSearchMergesFilterCostsOnlyIntoItsWorker(t *testing.T) {
 	stage.mergeFeatures(qviews.NewQueryNode(12), other)
 	require.Zero(t, other.LegacyResults.ScannedTotalBytes)
 	stage.mergeFeatures(qviews.NewQueryNode(11), &viewpb.SearchOnViewResponse{})
+}
+
+func TestTwoStageSearchStreams(t *testing.T) {
+	enableTwoStageSearch(t)
+	setupTestReplicaRouting(t)
+	for _, tc := range []struct {
+		name      string
+		counts    []int64
+		empty     bool
+		completed bool
+	}{
+		{name: "multiple chunks", counts: []int64{2, 3}, completed: true},
+		{name: "empty result", counts: []int64{0, 0}, empty: true, completed: true},
+		{name: "incomplete statistics", counts: nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			id := qviews.ShardID{VChannel: "p_1v0", ReplicaID: 1}
+			response := twoStageResponse(id)
+			response.Plan.WorkNodes = response.Plan.WorkNodes[:1]
+			request := response.Plan.GetLegacySearchRequest()
+			request.Nq, request.MetricType = 1, "IP"
+			request.SerializedExprPlan = []byte("original")
+			planClient := &fakeQueryPlanClient{plan: response.Plan, clientOptimizeInfo: response.ClientOptimizeInfo}
+			first := newTestSearchChunk(5, []int64{1}, []float32{0.9})
+			second := newTestSearchChunk(5, []int64{2}, []float32{0.8})
+			if tc.empty {
+				first = newTestSearchChunk(5, nil, nil)
+			}
+			first.ScannedRemoteBytes, first.ScannedTotalBytes = 3, 5
+			first.CostAggregation = &internalpb.CostAggregation{ServiceTime: 2}
+			recv := []fakeSearchStreamRecv{{chunk: first}}
+			if !tc.empty {
+				recv = append(recv, fakeSearchStreamRecv{chunk: second})
+			}
+			service := &fakeViewQueryServiceClient{
+				searchOnViewStream: func(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
+					if tc.completed {
+						require.Equal(t, []byte("optimized"), req.GetLegacyReq().GetSerializedExprPlan())
+						require.True(t, req.GetExecutionOptions().GetEnableExprCache())
+					} else {
+						require.Equal(t, []byte("original"), req.GetLegacyReq().GetSerializedExprPlan())
+						require.Nil(t, req.GetExecutionOptions())
+					}
+					return &fakeSearchStream{recv: recv}, nil
+				},
+			}
+			filter := mockey.Mock((*fakeViewQueryServiceClient).SearchOnView).To(func(_ *fakeViewQueryServiceClient, _ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+				require.True(t, req.GetExecutionOptions().GetFilterOnly())
+				return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{
+					Status: merr.Success(), SealedSegmentIDsSearched: []int64{10, 20}, FilterValidCounts: tc.counts,
+					FeatureBits: 1, ScannedRemoteBytes: 7, ScannedTotalBytes: 9,
+					CostAggregation: &internalpb.CostAggregation{ServiceTime: 4},
+				}}, nil
+			}).Build()
+			defer filter.UnPatch()
+			tune := mockey.Mock(optimizers.OptimizeSearchParams).To(func(_ context.Context, req *querypb.SearchRequest, _ optimizers.QueryHook, _ int, _ bool, _ func(int64) int64, _ string) (*querypb.SearchRequest, error) {
+				req.Req.SerializedExprPlan = []byte("optimized")
+				return req, nil
+			}).Build()
+			defer tune.UnPatch()
+			client := newShardViewQueryClient(1, planClient, service)
+			defer client.replicas.Close()
+			streams, _, err := client.SearchStreams(t.Context(), &ShardSearchRequest{VChannel: id.VChannel, Req: request}, 1)
+			require.NoError(t, err)
+			require.Len(t, streams, 1)
+			defer streams[0].Close()
+			var bits uint64
+			var remote, total, serviceTime int64
+			chunks := 0
+			for {
+				chunk, err := streams[0].Recv()
+				if err == io.EOF {
+					break
+				}
+				require.NoError(t, err)
+				chunks++
+				bits |= chunk.GetFeatureBits()
+				remote += chunk.GetScannedRemoteBytes()
+				total += chunk.GetScannedTotalBytes()
+				serviceTime += chunk.GetCostAggregation().GetServiceTime()
+			}
+			if tc.empty {
+				require.Equal(t, 1, chunks)
+			} else {
+				require.Equal(t, 2, chunks)
+			}
+			bit, _ := featureusage.ExecBit(featureusage.FeatureTwoStageSearch)
+			require.Equal(t, tc.completed, bits&bit != 0)
+			require.NotZero(t, bits&1)
+			require.EqualValues(t, 10, remote)
+			require.EqualValues(t, 14, total)
+			require.EqualValues(t, 6, serviceTime)
+		})
+	}
+}
+
+func TestTwoStageSearchStreamsRetryDiscardsFilterMetadata(t *testing.T) {
+	enableTwoStageSearch(t)
+	setupTestReplicaRouting(t)
+	id := qviews.ShardID{VChannel: "p_1v0", ReplicaID: 1}
+	var plans, filters, streams int
+	plan := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+		plans++
+		response := twoStageResponse(id)
+		response.Plan.WorkNodes = response.Plan.WorkNodes[:1]
+		response.Plan.GetLegacySearchRequest().Nq = 1
+		response.Plan.GetLegacySearchRequest().MetricType = "IP"
+		return response, nil
+	}).Build()
+	defer plan.UnPatch()
+	filter := mockey.Mock((*fakeViewQueryServiceClient).SearchOnView).To(func(_ *fakeViewQueryServiceClient, _ context.Context, _ qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+		filters++
+		return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{
+			Status: merr.Success(), SealedSegmentIDsSearched: []int64{10, 20}, FilterValidCounts: []int64{2, 3}, ScannedRemoteBytes: int64(filters * 7),
+		}}, nil
+	}).Build()
+	defer filter.UnPatch()
+	tune := mockey.Mock(optimizers.OptimizeSearchParams).To(func(_ context.Context, req *querypb.SearchRequest, _ optimizers.QueryHook, _ int, _ bool, _ func(int64) int64, _ string) (*querypb.SearchRequest, error) {
+		return req, nil
+	}).Build()
+	defer tune.UnPatch()
+	service := &fakeViewQueryServiceClient{searchOnViewStream: func(_ context.Context, _ qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
+		streams++
+		if streams == 1 {
+			return &fakeSearchStream{recv: []fakeSearchStreamRecv{{err: viewerror.NewViewNotFound("retry")}}}, nil
+		}
+		return &fakeSearchStream{recv: []fakeSearchStreamRecv{{chunk: newTestSearchChunk(5, []int64{1}, []float32{0.9})}}}, nil
+	}}
+	client := newShardViewQueryClient(3, &fakeQueryPlanClient{}, service)
+	defer client.replicas.Close()
+	request := &internalpb.SearchRequest{Nq: 1, Topk: 5, MetricType: "IP", SearchType: internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER}
+	results, _, err := client.SearchStreams(t.Context(), &ShardSearchRequest{VChannel: id.VChannel, Req: request}, 1024)
+	require.NoError(t, err)
+	defer results[0].Close()
+	chunk, err := results[0].Recv()
+	require.NoError(t, err)
+	require.EqualValues(t, 14, chunk.GetScannedRemoteBytes())
+	require.Equal(t, 2, plans)
+	require.Equal(t, 2, filters)
+	require.Equal(t, 2, streams)
+}
+
+func TestTwoStageSearchStreamsMergeMultipleWorkerCosts(t *testing.T) {
+	enableTwoStageSearch(t)
+	setupTestReplicaRouting(t)
+	id := qviews.ShardID{VChannel: "p_1v0", ReplicaID: 1}
+	response := twoStageResponse(id)
+	response.Plan.GetLegacySearchRequest().Nq = 1
+	response.Plan.GetLegacySearchRequest().MetricType = "IP"
+	response.Plan.WorkNodes[1] = &viewpb.QueryPlanWorkNode{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: 12}}}
+	filter := mockey.Mock((*fakeViewQueryServiceClient).SearchOnView).To(func(_ *fakeViewQueryServiceClient, _ context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+		id, bytes := int64(10), int64(7)
+		if node.(qviews.QueryNode).ID == 12 {
+			id, bytes = 20, 11
+		}
+		return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{
+			Status: merr.Success(), SealedSegmentIDsSearched: []int64{id}, FilterValidCounts: []int64{1}, ScannedRemoteBytes: bytes,
+		}}, nil
+	}).Build()
+	defer filter.UnPatch()
+	tune := mockey.Mock(optimizers.OptimizeSearchParams).To(func(_ context.Context, req *querypb.SearchRequest, _ optimizers.QueryHook, _ int, _ bool, _ func(int64) int64, _ string) (*querypb.SearchRequest, error) {
+		return req, nil
+	}).Build()
+	defer tune.UnPatch()
+	service := &fakeViewQueryServiceClient{searchOnViewStream: func(_ context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
+		id, bytes := int64(1), int64(3)
+		if node.(qviews.QueryNode).ID == 12 {
+			id, bytes = 2, 5
+		}
+		chunk := newTestSearchChunk(5, []int64{id}, []float32{0.9})
+		chunk.ScannedRemoteBytes = bytes
+		return &fakeSearchStream{recv: []fakeSearchStreamRecv{{chunk: chunk}}}, nil
+	}}
+	client := newShardViewQueryClient(1, &fakeQueryPlanClient{plan: response.Plan, clientOptimizeInfo: response.ClientOptimizeInfo}, service)
+	defer client.replicas.Close()
+	streams, _, err := client.SearchStreams(t.Context(), &ShardSearchRequest{VChannel: id.VChannel, Req: response.Plan.GetLegacySearchRequest()}, 1024)
+	require.NoError(t, err)
+	defer streams[0].Close()
+	chunk, err := streams[0].Recv()
+	require.NoError(t, err)
+	require.EqualValues(t, 26, chunk.GetScannedRemoteBytes())
+	bit, _ := featureusage.ExecBit(featureusage.FeatureTwoStageSearch)
+	require.NotZero(t, chunk.GetFeatureBits()&bit)
+}
+
+func TestLegacyTwoStageSearchChannelCountWithRetry(t *testing.T) {
+	enableTwoStageSearch(t)
+	setupTestReplicaRouting(t)
+	channels := []string{"p_1v0", "p_1v1"}
+	var mu sync.Mutex
+	var counts []int32
+	optimize := mockey.Mock(optimizers.OptimizeSearchParams).To(func(_ context.Context, req *querypb.SearchRequest, _ optimizers.QueryHook, _ int, _ bool, _ func(int64) int64, _ string) (*querypb.SearchRequest, error) {
+		mu.Lock()
+		counts = append(counts, req.GetTotalChannelNum())
+		mu.Unlock()
+		return req, nil
+	}).Build()
+	defer optimize.UnPatch()
+
+	for _, streaming := range []bool{false, true} {
+		name := "batch"
+		if streaming {
+			name = "stream"
+		}
+		t.Run(name, func(t *testing.T) {
+			counts = nil
+			plans := make(map[string]int)
+			failed := false
+			planClient := &legacyPlanClient{getQueryPlan: func(_ context.Context, id qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+				mu.Lock()
+				plans[id.VChannel]++
+				mu.Unlock()
+				response := twoStageResponse(id)
+				response.Plan.WorkNodes = response.Plan.WorkNodes[:1]
+				response.Plan.GetLegacySearchRequest().Nq = 1
+				response.Plan.GetLegacySearchRequest().MetricType = "IP"
+				return response, nil
+			}}
+			failOnce := func(channel string) bool {
+				mu.Lock()
+				defer mu.Unlock()
+				if channel == channels[0] && !failed {
+					failed = true
+					return true
+				}
+				return false
+			}
+			service := &legacyServiceClient{
+				searchOnView: func(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+					if req.GetExecutionOptions().GetFilterOnly() {
+						return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: merr.Success(), SealedSegmentIDsSearched: []int64{10, 20}, FilterValidCounts: []int64{2, 3}}}, nil
+					}
+					if failOnce(req.GetShardId().GetVchannel()) {
+						return nil, viewerror.NewViewNotFound("retry")
+					}
+					return &viewpb.SearchOnViewResponse{LegacyResults: newTestSearchChunk(5, []int64{1}, []float32{0.9})}, nil
+				},
+				searchOnViewStream: func(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
+					if failOnce(req.GetShardId().GetVchannel()) {
+						return &fakeSearchStream{recv: []fakeSearchStreamRecv{{err: viewerror.NewViewNotFound("retry")}}}, nil
+					}
+					id := int64(1)
+					if req.GetShardId().GetVchannel() == channels[1] {
+						id = 2
+					}
+					return &fakeSearchStream{recv: []fakeSearchStreamRecv{{chunk: newTestSearchChunk(5, []int64{id}, []float32{0.9})}}}, nil
+				},
+			}
+			client := newLegacyClient(ViewQueryClientConfig{MaxRetries: 3}, planClient, service, &legacyResolver{vchannels: channels})
+			defer client.shardClient.replicas.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			result, err := client.Search(ctx, &LegacySearchRequest{Req: &internalpb.SearchRequest{Nq: 1, Topk: 5, MetricType: "IP", SearchType: internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER}, AllowStreaming: streaming, ReduceStreamChunkBytes: 1024})
+			require.NoError(t, err)
+			if streaming {
+				defer result.Stream.Close()
+				for {
+					_, err := result.Stream.Recv()
+					if err == io.EOF {
+						break
+					}
+					require.NoError(t, err)
+				}
+			}
+			require.Equal(t, map[string]int{channels[0]: 2, channels[1]: 1}, plans)
+			require.Equal(t, []int32{2, 2, 2}, counts)
+		})
+	}
 }

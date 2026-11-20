@@ -789,7 +789,7 @@ func (it *indexBuildTask) prepareOptionalFields(ctx context.Context, collectionI
 				DataIds:     meta.GetBinLogIDs(segment, partitionKeyField.FieldID),
 			})
 
-			iso, isoErr := common.IsPartitionKeyIsolationPropEnabled(collectionInfo.Properties)
+			iso, isoErr := common.IsPartitionKeyIsolationKvEnabled(collectionInfo.Properties...)
 			if isoErr != nil {
 				mlog.Warn(ctx, "failed to parse partition key isolation", mlog.Err(isoErr))
 			}

@@ -309,7 +309,7 @@ func (s *Server) requiredLoadResourceByRG(ctx context.Context, req *job.AlterLoa
 	expectedUsage, err := estimateLoadResourceForLoadConfig(
 		ctx,
 		req.CollectionInfo.Schema,
-		req.CollectionInfo.PropertyPairs,
+		req.CollectionInfo.Properties,
 		segments,
 		indexes,
 		req.Expected.ExpectedLoadFields,
@@ -333,7 +333,7 @@ func (s *Server) requiredLoadResourceByRG(ctx context.Context, req *job.AlterLoa
 				// cached on meta.Collection at load time, which was both a
 				// duplicate of DC's copy and staler than this one.
 				req.CollectionInfo.Schema,
-				req.CollectionInfo.PropertyPairs,
+				req.CollectionInfo.Properties,
 				currentSegments,
 				indexes,
 				req.Current.GetLoadFields(),

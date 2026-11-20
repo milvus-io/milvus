@@ -225,7 +225,7 @@ func newCollectionModel(header *message.CreateCollectionMessageHeader, body *mes
 		DBName:               body.DbName,
 		Description:          body.CollectionSchema.Description,
 		AutoID:               body.CollectionSchema.AutoID,
-		Fields:               model.UnmarshalFieldModels(body.CollectionSchema.Fields),
+		Fields:               model.CloneFields(body.CollectionSchema.Fields),
 		StructArrayFields:    model.UnmarshalStructArrayFieldModels(body.CollectionSchema.StructArrayFields),
 		Functions:            model.UnmarshalFunctionModels(body.CollectionSchema.Functions),
 		VirtualChannelNames:  body.VirtualChannelNames,

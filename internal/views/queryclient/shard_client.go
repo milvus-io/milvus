@@ -2,6 +2,8 @@ package queryclient
 
 import (
 	"context"
+	"io"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -11,11 +13,17 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/views/queryclient/reducer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
+	"github.com/milvus-io/milvus/internal/views/viewquery"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -26,8 +34,8 @@ import (
 // It owns replica resolution, consistency routing, Phase 1 (GetQueryPlan),
 // Phase 2 (SearchOnView/QueryOnView) dispatch, and shard-level retry.
 //
-// Both Search and Query share the same executeShard framework, differing only
-// in what request goes into the GetQueryPlanRequest and which Phase 2 RPC is called.
+// Search and Query use the existing batch executeShard path. SearchStreams
+// opens one request-scoped per-vchannel ReduceStream per Search sub-request.
 type shardViewQueryClient struct {
 	queryHook          optimizers.QueryHook
 	maxRetries         int
@@ -35,6 +43,104 @@ type shardViewQueryClient struct {
 	replicas           *replicaRouter
 	queryPlanClient    QueryPlanClient
 	queryServiceClient ViewQueryServiceClient
+}
+
+// workerReduceStream retains worker identity for shard or Proxy replica reselection.
+type workerReduceStream[T any] struct {
+	reduce.ReduceStream[T]
+	node         qviews.WorkNode
+	shardID      qviews.ShardID
+	onFirstChunk func(T) // Adds attempt-local Search filter metadata exactly once.
+}
+
+func (s *workerReduceStream[T]) Recv() (T, error) {
+	chunk, err := s.ReduceStream.Recv()
+	if err != nil && !errors.Is(err, io.EOF) {
+		return chunk, &workNodeFailure{node: s.node, shardID: s.shardID, err: err}
+	}
+	if err == nil && s.onFirstChunk != nil {
+		s.onFirstChunk(chunk)
+		s.onFirstChunk = nil
+	}
+	return chunk, err
+}
+
+// shardReduceStream can replace a failed vchannel attempt only before returning
+// its first Chunk. After that boundary, the parent must discard its own state too.
+type shardReduceStream[T any] struct {
+	recvMu       sync.Mutex                                                                    // Serializes receive, replacement and final cleanup.
+	stream       reduce.ReduceStream[T]                                                        // Owns the current per-vchannel reducer.
+	ctx          context.Context                                                               // Bounds both receiving and replanning.
+	cancel       context.CancelFunc                                                            // Cancels worker RPCs and a pending replan before Close waits.
+	plan         *shardResult                                                                  // Winning plan; callers read it only after Close.
+	workerCancel context.CancelFunc                                                            // Cancels the workers for the current attempt before a retry.
+	restart      func(error) (reduce.ReduceStream[T], context.CancelFunc, *shardResult, error) // Reopens with the same shard retry state.
+	emitted      bool                                                                          // Any returned Chunk, including metadata-only, forbids local retry.
+	terminal     error                                                                         // Preserves EOF or a terminal failure across later Recv calls.
+	closed       bool                                                                          // Rejects receives after Close completes.
+	closeOnce    sync.Once                                                                     // Runs cancellation and cleanup once.
+	closeErr     error                                                                         // Retains cleanup failure for repeated Close calls.
+}
+
+func (s *shardReduceStream[T]) Recv() (T, error) {
+	s.recvMu.Lock()
+	defer s.recvMu.Unlock()
+	var zero T
+	if s.closed {
+		return zero, io.ErrClosedPipe
+	}
+	for s.terminal == nil {
+		if err := s.ctx.Err(); err != nil {
+			s.terminal = err
+			break
+		}
+		chunk, err := s.stream.Recv()
+		if err == nil {
+			s.emitted = true
+			return chunk, nil
+		}
+		if errors.Is(err, io.EOF) || s.emitted || s.restart == nil || !retryableQueryError(err) {
+			s.terminal = err
+			break
+		}
+		if s.workerCancel != nil {
+			s.workerCancel()
+		}
+		if closeErr := s.stream.Close(); closeErr != nil {
+			mlog.Warn(s.ctx, "failed to close shard stream before retry", mlog.Err(closeErr))
+			s.terminal = err
+			break
+		}
+		next, workerCancel, plan, restartErr := s.restart(err)
+		if restartErr != nil {
+			s.terminal = restartErr
+			break
+		}
+		s.stream = next
+		s.workerCancel = workerCancel
+		*s.plan = *plan
+	}
+	return zero, s.terminal
+}
+
+func (s *shardReduceStream[T]) Close() error {
+	s.closeOnce.Do(func() {
+		s.cancel()
+		s.recvMu.Lock()
+		defer s.recvMu.Unlock()
+		s.closed = true
+		if s.workerCancel != nil {
+			s.workerCancel()
+		}
+		s.closeErr = s.stream.Close()
+	})
+	return s.closeErr
+}
+
+func (s *shardReduceStream[T]) Interrupt() (T, error) {
+	s.recvMu.Lock()
+	defer s.recvMu.Unlock()
+	return s.stream.Interrupt()
 }
 
 func newShardViewQueryClient(
@@ -59,15 +165,22 @@ type ShardSearchRequest struct {
 	MVCC            *viewpb.QueryPlanMVCC
 	BarrierMVCC     uint64
 	Reducer         reducer.SearchResultReducer
+	retryErrors     []error
+	setupCtx        context.Context          // Cancels initial shard setup if another vchannel fails.
+	registerCancel  func(context.CancelFunc) // Registers worker cancellation during initial setup only.
 }
 
 // ShardQueryRequest contains the parameters for a shard-level query (retrieve) execution.
 type ShardQueryRequest struct {
-	VChannel    string
-	Req         *internalpb.RetrieveRequest
-	MVCC        *viewpb.QueryPlanMVCC
-	BarrierMVCC uint64
-	Reducer     reducer.RetrieveResultReducer
+	VChannel       string
+	Req            *internalpb.RetrieveRequest
+	Schema         *schemapb.CollectionSchema
+	MVCC           *viewpb.QueryPlanMVCC
+	BarrierMVCC    uint64
+	Reducer        reducer.RetrieveResultReducer
+	retryErrors    []error
+	setupCtx       context.Context          // Cancels initial shard setup if another vchannel fails.
+	registerCancel func(context.CancelFunc) // Registers worker cancellation during initial setup only.
 }
 
 // shardResult carries the retained plan and the measurement from the same successful attempt.
@@ -119,6 +232,212 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 	})
 }
 
+// SearchStreams returns one per-vchannel ReduceStream per sub-search, or one
+// stream for ordinary Search. All streams share the same optimized QueryPlan.
+func (s *shardViewQueryClient) SearchStreams(
+	ctx context.Context,
+	req *ShardSearchRequest,
+	chunkBytes int,
+) ([]searchreducestream.ReduceStream, *shardResult, error) {
+	if req == nil || req.Req == nil {
+		return nil, nil, merr.WrapErrServiceInternalMsg("SearchStreams requires a Search request")
+	}
+	if ctx.Err() != nil {
+		return nil, nil, ctx.Err()
+	}
+	// Copy the request without setup coordination so the retry closure cannot retain it.
+	setupCtx, registerCancel := req.setupCtx, req.registerCancel
+	request := *req
+	request.setupCtx, request.registerCancel = nil, nil
+	req = &request
+
+	requests := []*internalpb.SearchRequest{req.Req}
+	var err error
+	if req.Req.GetIsAdvanced() {
+		requests, err = viewquery.BuildSubSearchRequests(req.Req)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	retry := &shardRetryState{}
+	open := func(planCtx context.Context, registerCancel func(context.CancelFunc)) ([]searchreducestream.ReduceStream, []context.CancelFunc, *shardResult, error) {
+		children := make([][]searchreducestream.ReduceStream, len(requests))
+		var mu sync.Mutex
+		var plannedRequests []*internalpb.SearchRequest
+		// Holds filter-stage results and ANN options for the current shard attempt.
+		var stage twoStageSearch
+		// Each sub-search owns its worker context; all its workers share it.
+		var workerContexts []context.Context
+		var workerCancels []context.CancelFunc
+		// A failed worker open cancels every sub-search in this vchannel attempt.
+		cancelWorkers := func() {
+			for _, cancel := range workerCancels {
+				cancel()
+			}
+		}
+		plan, err := s.executeShard(planCtx, req.VChannel, &shardExecParams{
+			collectionID:     req.Req.GetCollectionID(),
+			consistencyLevel: req.Req.GetConsistencyLevel(),
+			mvcc:             req.MVCC,
+			barrierMVCC:      req.BarrierMVCC,
+			retryErrors:      req.retryErrors,
+			retryState:       retry,
+			cancelStreams:    cancelWorkers,
+			buildPlanReq: func(shardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
+				return &viewpb.GetQueryPlanRequest{
+					CollectionId: req.Req.GetCollectionID(), ShardId: shardID.IntoProto(), PartitionIds: req.Req.GetPartitionIDs(),
+					Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: req.Req},
+				}
+			},
+			consumeResponse: func(response *viewpb.GetQueryPlanResponse) error {
+				plannedRequests = []*internalpb.SearchRequest{response.GetPlan().GetLegacySearchRequest()}
+				if req.Req.GetIsAdvanced() {
+					var err error
+					plannedRequests, err = viewquery.BuildSubSearchRequests(response.GetPlan().GetLegacySearchRequest())
+					if err != nil {
+						return err
+					}
+				}
+				if len(requests) != len(plannedRequests) {
+					return merr.WrapErrServiceInternalMsg("Hybrid QueryPlan changed the sub-search count")
+				}
+				return nil
+			},
+			beforeDispatch: func(planCtx context.Context, response *viewpb.GetQueryPlanResponse, shardID qviews.ShardID) error {
+				// Retry with fresh filter results; eligible searches prepare ANN parameters before opening streams.
+				stage = twoStageSearch{}
+				if err := s.prepareTwoStageSearch(planCtx, response, shardID, req.TotalChannelNum, &stage); err != nil {
+					return err
+				}
+				if !req.Req.GetIsAdvanced() {
+					// Preparation may replace the plan request captured by consumeResponse.
+					plannedRequests[0] = response.GetPlan().GetLegacySearchRequest()
+				}
+				// Workers of each sub-search share one context for this vchannel attempt.
+				workerContexts = make([]context.Context, len(requests))
+				workerCancels = make([]context.CancelFunc, len(requests))
+				for i := range requests {
+					workerContexts[i], workerCancels[i] = context.WithCancel(ctx) //nolint:gosec // G118: the shard stream owns the cancel after setup; failures cancel it earlier.
+					if registerCancel != nil {
+						registerCancel(workerCancels[i])
+					}
+				}
+				return nil
+			},
+			dispatchNode: func(_ context.Context, node qviews.WorkNode, plan *viewpb.QueryPlan, shardID qviews.ShardID) error {
+				selection := qviews.WorkNodeSelection(plan, node)
+				for index, plannedRequest := range plannedRequests {
+					if req.Req.GetIsAdvanced() && plan.GetLegacySearchRequest().GetSubReqs()[index].GetSkip() {
+						continue
+					}
+					segmentSelection := selection.GetSegmentSelection()
+					if req.Req.GetIsAdvanced() && len(selection.GetSubSelections()) > 0 {
+						if len(selection.GetSubSelections()) != len(requests) {
+							return merr.WrapErrServiceInternalMsg("Hybrid QueryPlan changed the sub-selection count")
+						}
+						segmentSelection = selection.GetSubSelections()[index]
+					}
+					workerRequest := proto.Clone(plannedRequest).(*internalpb.SearchRequest)
+					workerRequest.MvccTimestamp = legacyMVCCForNode(plan.GetMvcc(), node)
+					stream, err := s.queryServiceClient.SearchOnViewStream(workerContexts[index], node, &viewpb.SearchOnViewRequest{
+						LegacyReq: workerRequest, SegmentSelection: segmentSelection, ShardId: shardID.IntoProto(),
+						Version: plan.Version, Mvcc: plan.GetMvcc(), StreamChunkBytes: int64(chunkBytes), ExecutionOptions: stage.options,
+					})
+					if err != nil {
+						return err
+					}
+					if stream == nil {
+						return merr.WrapErrServiceInternalMsg("SearchOnViewStream returned a nil stream for work node %s", node.String())
+					}
+					mu.Lock()
+					child := &workerReduceStream[*internalpb.SearchResults]{
+						ReduceStream: stream, node: node, shardID: shardID,
+					}
+					if stage.filters != nil {
+						// Include filter costs and feature bits once per worker, not once per Chunk.
+						child.onFirstChunk = func(chunk *internalpb.SearchResults) {
+							stage.mergeFeatures(node, &viewpb.SearchOnViewResponse{LegacyResults: chunk})
+						}
+					}
+					children[index] = append(children[index], child)
+					mu.Unlock()
+				}
+				return nil
+			},
+			resetShard: func(qviews.ShardID) {
+				for index, streams := range children {
+					for _, stream := range streams {
+						stream.Close()
+					}
+					children[index] = nil
+				}
+			},
+		})
+		streams := make([]searchreducestream.ReduceStream, 0, len(requests))
+		for index, request := range requests {
+			var reducedStream searchreducestream.ReduceStream
+			if err == nil {
+				reducedStream, err = searchreducestream.NewShardReduceStream(request, children[index], chunkBytes)
+			}
+			if err != nil {
+				cancelWorkers()
+				for _, childStreams := range children {
+					for _, childStream := range childStreams {
+						if closeErr := childStream.Close(); closeErr != nil {
+							mlog.Warn(ctx, "failed to close Search child stream after setup failure", mlog.Err(closeErr))
+						}
+					}
+				}
+				for _, stream := range streams {
+					if closeErr := stream.Close(); closeErr != nil {
+						mlog.Warn(ctx, "failed to close Search shard stream after setup failure", mlog.Err(closeErr))
+					}
+				}
+				return nil, nil, nil, err
+			}
+			streams = append(streams, reducedStream)
+			children[index] = nil // Ownership transferred; avoid closing workers twice if a later constructor fails.
+		}
+
+		return streams, workerCancels, plan, nil
+	}
+	// Only initial setup uses setupCtx; receive-time retries use the shard context.
+	planCtx := setupCtx
+	if planCtx == nil {
+		planCtx = ctx
+	}
+	if req.Req.GetIsAdvanced() {
+		streams, cancels, plan, err := open(planCtx, registerCancel)
+		if err != nil {
+			return nil, nil, err
+		}
+		for i := range streams {
+			streams[i] = &shardReduceStream[*internalpb.SearchResults]{
+				stream: streams[i], ctx: ctx, cancel: cancels[i], plan: plan,
+			}
+		}
+		return streams, plan, nil
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	streams, workerCancels, plan, err := open(planCtx, registerCancel)
+	if err != nil {
+		cancel()
+		return nil, nil, err
+	}
+	streams[0] = &shardReduceStream[*internalpb.SearchResults]{
+		stream: streams[0], ctx: ctx, cancel: cancel, workerCancel: workerCancels[0], plan: plan,
+		restart: func(err error) (reduce.ReduceStream[*internalpb.SearchResults], context.CancelFunc, *shardResult, error) {
+			retry.recordFailure(err)
+			next, cancels, nextPlan, err := open(ctx, nil)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			return next[0], cancels[0], nextPlan, nil
+		},
+	}
+	return streams, plan, nil
+}
+
 // Query executes Phase 1 + Phase 2 for a single shard's query (retrieve).
 // Replica resolution is handled internally. Results are fed into the provided reducer.
 func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest) (*shardResult, error) {
@@ -157,17 +476,133 @@ func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest
 	})
 }
 
+// QueryStream opens the SN/QN child streams for one vchannel and returns its
+// request-scoped Query ReduceStream without consuming output.
+func (s *shardViewQueryClient) QueryStream(
+	ctx context.Context,
+	req *ShardQueryRequest,
+	chunkBytes int,
+) (queryreducestream.ReduceStream, *shardResult, error) {
+	if req == nil || req.Req == nil {
+		return nil, nil, merr.WrapErrServiceInternalMsg("QueryStream requires a Query request")
+	}
+
+	if ctx.Err() != nil {
+		return nil, nil, ctx.Err()
+	}
+	// Copy the request without setup coordination so the retry closure cannot retain it.
+	setupCtx, registerCancel := req.setupCtx, req.registerCancel
+	request := *req
+	request.setupCtx, request.registerCancel = nil, nil
+	req = &request
+	ctx, cancel := context.WithCancel(ctx)
+	retry := &shardRetryState{}
+	open := func(planCtx context.Context, registerCancel func(context.CancelFunc)) (queryreducestream.ReduceStream, context.CancelFunc, *shardResult, error) {
+		var children []queryreducestream.ReduceStream
+		var mu sync.Mutex
+		// The attempt's workers share this context, which the shard stream owns on success.
+		var workerCtx context.Context
+		var workerCancel context.CancelFunc
+		// The context is created only after planning succeeds.
+		cancelWorkers := func() {
+			if workerCancel != nil {
+				workerCancel()
+			}
+		}
+		plan, err := s.executeShard(planCtx, req.VChannel, &shardExecParams{
+			collectionID:     req.Req.GetCollectionID(),
+			consistencyLevel: req.Req.GetConsistencyLevel(),
+			mvcc:             req.MVCC,
+			barrierMVCC:      req.BarrierMVCC,
+			retryErrors:      req.retryErrors,
+			retryState:       retry,
+			cancelStreams:    cancelWorkers,
+			buildPlanReq: func(shardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
+				return &viewpb.GetQueryPlanRequest{
+					CollectionId: req.Req.GetCollectionID(), ShardId: shardID.IntoProto(), PartitionIds: req.Req.GetPartitionIDs(),
+					Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: req.Req},
+				}
+			},
+			beforeDispatch: func(context.Context, *viewpb.GetQueryPlanResponse, qviews.ShardID) error {
+				workerCtx, workerCancel = context.WithCancel(ctx)
+				if registerCancel != nil {
+					registerCancel(workerCancel)
+				}
+				return nil
+			},
+			dispatchNode: func(_ context.Context, node qviews.WorkNode, plan *viewpb.QueryPlan, shardID qviews.ShardID) error {
+				stream, err := s.queryServiceClient.QueryOnViewStream(workerCtx, node, &viewpb.QueryOnViewRequest{
+					LegacyReq: legacyRetrieveRequestForNode(plan, node), SegmentSelection: qviews.WorkNodeSelection(plan, node).GetSegmentSelection(),
+					ShardId: shardID.IntoProto(), Version: plan.Version, Mvcc: plan.GetMvcc(), StreamChunkBytes: int64(chunkBytes),
+				})
+				if err != nil {
+					return err
+				}
+				if stream == nil {
+					return merr.WrapErrServiceInternalMsg("QueryOnViewStream returned a nil stream for work node %s", node.String())
+				}
+				mu.Lock()
+				children = append(children, &workerReduceStream[*internalpb.RetrieveResults]{
+					ReduceStream: stream, node: node, shardID: shardID,
+				})
+				mu.Unlock()
+				return nil
+			},
+			resetShard: func(qviews.ShardID) {
+				for _, stream := range children {
+					stream.Close()
+				}
+				children = nil
+			},
+		})
+		var reducedStream queryreducestream.ReduceStream
+		if err == nil {
+			reducedStream, err = queryreducestream.NewShardReduceStream(req.Req, req.Schema, children, chunkBytes)
+		}
+		if err != nil {
+			cancelWorkers()
+			for _, childStream := range children {
+				if closeErr := childStream.Close(); closeErr != nil {
+					mlog.Warn(ctx, "failed to close Query child stream after setup failure", mlog.Err(closeErr))
+				}
+			}
+			return nil, nil, nil, err
+		}
+		return reducedStream, workerCancel, plan, nil
+	}
+	// Only initial setup uses setupCtx; receive-time retries use the shard context.
+	planCtx := setupCtx
+	if planCtx == nil {
+		planCtx = ctx
+	}
+	stream, workerCancel, plan, err := open(planCtx, registerCancel)
+	if err != nil {
+		cancel()
+		return nil, nil, err
+	}
+	return &shardReduceStream[*internalpb.RetrieveResults]{
+		stream: stream, ctx: ctx, cancel: cancel, workerCancel: workerCancel, plan: plan,
+		restart: func(err error) (reduce.ReduceStream[*internalpb.RetrieveResults], context.CancelFunc, *shardResult, error) {
+			retry.recordFailure(err)
+			return open(ctx, nil)
+		},
+	}, plan, nil
+}
+
 // ============================================================================
 // Shared shard execution framework
 // ============================================================================
 
 // shardExecParams parameterizes the per-shard Phase 1 + Phase 2 execution.
-// Both Search and Query use the same executeShard loop, differing only in these callbacks.
+// Search and Query use executeShard with these callbacks.
 type shardExecParams struct {
-	collectionID     int64
-	consistencyLevel commonpb.ConsistencyLevel
-	mvcc             *viewpb.QueryPlanMVCC
-	barrierMVCC      uint64
+	collectionID     int64                     // Collection used for load-state checks.
+	consistencyLevel commonpb.ConsistencyLevel // Consistency requested when MVCC is not supplied.
+	mvcc             *viewpb.QueryPlanMVCC     // Optional executor snapshot retained by the caller.
+	barrierMVCC      uint64                    // Optional consistency barrier, exclusive with mvcc.
+	retryErrors      []error                   // Worker failures from previous whole-Proxy attempts.
+	retryState       *shardRetryState          // Streaming keeps setup and receive retries in one budget.
+	cancelStreams    func()                    // Cancels worker opens in a failed streaming attempt.
 	// buildPlanReq creates the GetQueryPlanRequest for a target shard.
 	buildPlanReq func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest
 	// consumeResponse accepts inline SN results before worker dispatch.
@@ -181,18 +616,53 @@ type shardExecParams struct {
 	resetShard func(shardID qviews.ShardID)
 }
 
+// shardRetryState outlives executeShard only for request-scoped streaming retries.
+type shardRetryState struct {
+	attempt          int                     // Completed attempts, including successful stream openings.
+	lastErr          error                   // Original failure returned when the budget is exhausted.
+	tried            map[qviews.Replica]bool // Batch replica history; true requires a newer plan/session.
+	deadNodes        map[int64]struct{}      // QNs excluded only for missing sessions, not raw Unavailable.
+	sessionChanged   <-chan struct{}         // Wakes routing when excluded worker sessions change.
+	previousReplicas map[int64]struct{}      // Replicas to defer after earlier whole-Proxy failures.
+}
+
+func (r *shardRetryState) recordFailure(err error) {
+	r.lastErr = err
+	var failed *workNodeFailure
+	var sessionError *viewerror.NodeSessionUnavailable
+	missingSession := errors.As(err, &sessionError)
+	if errors.As(err, &failed) && (missingSession || picker.IsErrSubConnNoExist(failed.err)) {
+		if node, ok := failed.node.(qviews.QueryNode); ok {
+			r.deadNodes[node.ID] = struct{}{}
+			if missingSession && r.sessionChanged == nil {
+				r.sessionChanged = sessionError.Changed
+			}
+			for candidate := range r.tried {
+				if candidate.ReplicaID == failed.shardID.ReplicaID {
+					r.tried[candidate] = true
+				}
+			}
+		}
+	}
+}
+
 // executeShard runs Phase 1 + Phase 2 for a single shard with retry.
 // Candidates come from the WAL owner directory. GetQueryPlan selects the
 // exact-schema View within the explicitly selected replica.
 //
 // Shard-level retry handles ViewErrors (view invalidated, not found, etc.).
 // Transport unavailability also restarts the shard on another candidate.
+// Ordinary streams reuse this retry state before emitting their first Chunk.
+// Later failures and Hybrid receive failures restart the whole Proxy attempt.
 func (s *shardViewQueryClient) executeShard(
 	ctx context.Context,
 	vchannel string,
 	params *shardExecParams,
 ) (*shardResult, error) {
-	var lastErr error
+	retry := params.retryState
+	if retry == nil {
+		retry = &shardRetryState{}
+	}
 	var loadCheck *collectionLoadCheck
 	defer func() {
 		if loadCheck != nil {
@@ -209,29 +679,45 @@ func (s *shardViewQueryClient) executeShard(
 	if err != nil {
 		return nil, err
 	}
-	tried := make(map[qviews.Replica]bool)
-	deadNodes := make(map[int64]struct{})
-	var sessionChanged <-chan struct{}
-	for attempt := 0; ; attempt++ {
+	if retry.tried == nil {
+		retry.tried = make(map[qviews.Replica]bool)
+		retry.deadNodes = make(map[int64]struct{})
+		retry.previousReplicas = make(map[int64]struct{})
+		for _, retryErr := range params.retryErrors {
+			var failed *workNodeFailure
+			if !errors.As(retryErr, &failed) || failed.shardID.VChannel != vchannel {
+				continue
+			}
+			retry.previousReplicas[failed.shardID.ReplicaID] = struct{}{}
+			retry.recordFailure(retryErr)
+		}
+	}
+	for ; ; retry.attempt++ {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if s.maxRetries > 0 && attempt >= s.maxRetries && !route.hasUntried(tried) {
-			return nil, lastErr
+		if s.maxRetries > 0 && retry.attempt >= s.maxRetries && !route.hasUntried(retry.tried) {
+			return nil, retry.lastErr
 		}
 
-		candidate, sessionsUpdated, err := route.nextReplica(ctx, tried, sessionChanged, checkLoad)
+		candidate, sessionsUpdated, err := route.nextReplica(ctx, retry.tried, retry.sessionChanged, checkLoad)
 		if sessionsUpdated {
-			clear(deadNodes)
-			clear(tried)
-			sessionChanged = nil
-			attempt--
+			clear(retry.deadNodes)
+			clear(retry.tried)
+			clear(retry.previousReplicas)
+			retry.sessionChanged = nil
+			retry.attempt--
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
-		tried[candidate] = false
+		retry.tried[candidate] = false
+		if _, failed := retry.previousReplicas[candidate.ReplicaID]; failed && route.hasUntried(retry.tried) {
+			// Prefer another replica after a receive failure, without banning this one.
+			retry.attempt--
+			continue
+		}
 		targetShardID := qviews.ShardID{ReplicaID: candidate.ReplicaID, VChannel: vchannel}
 
 		// Phase 1: GetQueryPlan with consistency routing.
@@ -239,7 +725,7 @@ func (s *shardViewQueryClient) executeShard(
 		response, err := s.executeGetQueryPlan(ctx, targetShardID, planReq, params)
 		if err != nil {
 			if retryableQueryError(err) {
-				lastErr = err
+				retry.lastErr = err
 				continue
 			}
 			return nil, err
@@ -254,14 +740,14 @@ func (s *shardViewQueryClient) executeShard(
 		blocked := false
 		for _, worker := range plan.GetWorkNodes() {
 			if qn := worker.GetQueryNode(); qn != nil {
-				if _, dead := deadNodes[qn.GetNodeId()]; dead {
+				if _, dead := retry.deadNodes[qn.GetNodeId()]; dead {
 					blocked = true
 					break
 				}
 			}
 		}
 		if blocked {
-			tried[candidate] = true
+			retry.tried[candidate] = true
 			continue
 		}
 		if params.consumeResponse != nil {
@@ -277,29 +763,37 @@ func (s *shardViewQueryClient) executeShard(
 			err = params.beforeDispatch(ctx, response, shardID)
 		}
 		if err == nil {
-			err = s.fanOutToWorkNodes(ctx, workNodes, plan, shardID, params.dispatchNode)
+			dispatch := params.dispatchNode
+			var firstErr error  // Original worker failure, before sibling cancellation.
+			var first sync.Once // One worker records the failure and cancels its siblings.
+			if params.cancelStreams != nil {
+				dispatch = func(ctx context.Context, node qviews.WorkNode, plan *viewpb.QueryPlan, shardID qviews.ShardID) error {
+					err := params.dispatchNode(ctx, node, plan, shardID)
+					if err != nil {
+						// Keep the initiating error before canceling blocked siblings.
+						first.Do(func() {
+							firstErr = &workNodeFailure{node: node, shardID: shardID, err: err}
+							params.cancelStreams()
+						})
+					}
+					return err
+				}
+			}
+			err = s.fanOutToWorkNodes(ctx, workNodes, plan, shardID, dispatch)
+			if firstErr != nil {
+				err = firstErr
+			}
 		}
 		if err != nil {
 			if retryableQueryError(err) {
-				lastErr = err
-				var failed *workNodeFailure
-				var sessionError *viewerror.NodeSessionUnavailable
-				missingSession := errors.As(err, &sessionError)
-				if errors.As(err, &failed) && (missingSession || picker.IsErrSubConnNoExist(failed.err)) {
-					if node, ok := failed.node.(qviews.QueryNode); ok {
-						deadNodes[node.ID] = struct{}{}
-						if missingSession && sessionChanged == nil {
-							sessionChanged = sessionError.Changed
-						}
-						tried[candidate] = true
-					}
-				}
+				retry.recordFailure(err)
 				params.resetShard(shardID)
 				continue
 			}
 			return nil, err
 		}
 
+		retry.attempt++
 		return &shardResult{
 			ShardPlan: ShardPlan{
 				ShardID:          shardID,
@@ -367,7 +861,7 @@ func (s *shardViewQueryClient) fanOutToWorkNodes(
 		node := node
 		g.Go(func() error {
 			if err := dispatchNode(gCtx, node, plan, shardID); err != nil {
-				return &workNodeFailure{node: node, err: err}
+				return &workNodeFailure{node: node, shardID: shardID, err: err}
 			}
 			return nil
 		})
@@ -423,8 +917,9 @@ func workNodesFromPlan(plan *viewpb.QueryPlan) []qviews.WorkNode {
 
 // workNodeFailure retains the worker identity without masking its error code.
 type workNodeFailure struct {
-	node qviews.WorkNode
-	err  error
+	node    qviews.WorkNode
+	shardID qviews.ShardID
+	err     error
 }
 
 func (e *workNodeFailure) Error() string { return e.err.Error() }

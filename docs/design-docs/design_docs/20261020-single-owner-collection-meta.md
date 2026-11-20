@@ -216,9 +216,9 @@ M1.8 adds the fields its callers read from describe and ShowPartitions:
   one would write data that is about to be removed, so restore fails
   instead.
 - `UpdateTimestamp` (QC's schema barrier), `ShardsNum` (with
-  describe's one-per-vchannel fallback), `ConsistencyLevel`, and
-  `PropertyPairs`, the properties in RC's order, which snapshot restore
-  preserves.
+  describe's one-per-vchannel fallback) and `ConsistencyLevel`.
+  `Properties` is the property list in RC's order, which snapshot
+  restore preserves.
 
 `DatabaseInfo` holds a database's ID, name and properties. RC publishes
 it from `setDatabaseLocked` / `deleteDatabaseLocked`, which carry every

@@ -23,7 +23,6 @@ import (
 
 	"github.com/minio/minio-go/v7/pkg/s3utils"
 
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -38,13 +37,37 @@ const (
 	StorageUseVirtualHost  = "storage.useVirtualHost"
 )
 
-// GetSourceStorageConfig returns nil when no source storage is specified.
-// External storage is self-contained: never inherit the destination's credentials,
-// IAM settings, or root path when connecting to a user-supplied endpoint.
-func GetSourceStorageConfig(options Options) (*indexpb.StorageConfig, error) {
+// SourceStorageConfig describes a validated, self-contained external S3-compatible
+// source for ordinary file imports. It never inherits cluster credentials, IAM
+// settings, or root paths.
+type SourceStorageConfig struct {
+	Endpoint        string
+	Bucket          string
+	AccessKeyID     string
+	SecretAccessKey string
+	Region          string
+	UseSSL          bool
+	UseVirtualHost  bool
+}
+
+// GetSourceStorageConfig parses and validates storage.* options into a typed
+// SourceStorageConfig, returning (nil, nil) when no source storage option is set.
+func GetSourceStorageConfig(options Options) (*SourceStorageConfig, error) {
+	if !HasSourceStorageOptions(options) {
+		return nil, nil
+	}
+
 	values := make(map[string]string)
+	hasSnapshotContractOption := false
 	for _, option := range options {
+		if option == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("import option must not be nil")
+		}
 		key := option.GetKey()
+		if key == SourceType || key == ExternalSpec || key == SnapshotSourceURI ||
+			key == SnapshotLayout || key == PartitionMapping {
+			hasSnapshotContractOption = true
+		}
 		if !IsSourceStorageOption(key) {
 			continue
 		}
@@ -59,8 +82,9 @@ func GetSourceStorageConfig(options Options) (*indexpb.StorageConfig, error) {
 		}
 		values[key] = option.GetValue()
 	}
-	if len(values) == 0 {
-		return nil, nil
+
+	if IsBackup(options) || IsL0Import(options) || hasSnapshotContractOption {
+		return nil, merr.WrapErrParameterInvalidMsg("storage.* options are only supported for ordinary file imports")
 	}
 	if value, ok := values[StorageType]; ok && value != "remote" {
 		return nil, merr.WrapErrParameterInvalidMsg("storage.type must be remote")
@@ -70,9 +94,11 @@ func GetSourceStorageConfig(options Options) (*indexpb.StorageConfig, error) {
 			return nil, merr.WrapErrParameterInvalidMsg("%s is required for external import", key)
 		}
 	}
+
 	endpoint := values[StorageEndpoint]
 	u, err := url.Parse("https://" + endpoint)
-	if err != nil || u.Hostname() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.ContainsAny(endpoint, "/?#") {
+	if err != nil || u.Hostname() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" ||
+		u.ForceQuery || u.Fragment != "" || strings.ContainsAny(endpoint, "/?#") {
 		return nil, merr.WrapErrParameterInvalidMsg("storage.endpoint must be a host or host:port without a scheme or path")
 	}
 	if !s3utils.IsValidIP(u.Hostname()) && !s3utils.IsValidDomain(u.Hostname()) {
@@ -86,18 +112,18 @@ func GetSourceStorageConfig(options Options) (*indexpb.StorageConfig, error) {
 	} else if strings.HasSuffix(endpoint, ":") {
 		return nil, merr.WrapErrParameterInvalidMsg("storage.endpoint port must not be empty")
 	}
+
 	if err := s3utils.CheckValidBucketName(values[StorageBucket]); err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg("storage.bucket must be a valid S3 bucket name")
 	}
-	config := &indexpb.StorageConfig{
-		StorageType:     "remote",
-		CloudProvider:   "aws",
-		Address:         endpoint,
-		BucketName:      values[StorageBucket],
+
+	config := &SourceStorageConfig{
+		Endpoint:        endpoint,
+		Bucket:          values[StorageBucket],
 		AccessKeyID:     values[StorageAccessKeyID],
 		SecretAccessKey: values[StorageSecretAccessKey],
-		UseSSL:          true,
 		Region:          values[StorageRegion],
+		UseSSL:          true,
 	}
 	for _, option := range []struct {
 		key    string
@@ -131,28 +157,44 @@ func IsSourceStorageOption(key string) bool {
 	return strings.HasPrefix(strings.ToLower(key), "storage.")
 }
 
-// ValidateSourceStorageFilePaths preserves literal object keys, including dot
-// components and repeated separators. No filesystem normalization is applied.
+// ValidateSourceStorageFilePaths preserves literal S3 object keys, including
+// colons, dot components, and repeated separators. No filesystem normalization
+// or URI parsing is applied.
 func ValidateSourceStorageFilePaths(paths []string) error {
 	for _, key := range paths {
-		if err := validateSourceStorageFilePath(key); err != nil {
-			return err
+		if strings.HasPrefix(key, "/") || strings.Contains(key, "://") {
+			return merr.WrapErrParameterInvalidMsg("external import files must be relative object keys without a URI scheme")
+		}
+		if err := s3utils.CheckValidObjectName(key); err != nil {
+			return merr.WrapErrParameterInvalidErr(err, "invalid external import file key")
 		}
 	}
 	return nil
 }
 
-func validateSourceStorageFilePath(key string) error {
-	if strings.TrimSpace(key) == "" || strings.HasPrefix(key, "/") || strings.Contains(key, "://") {
-		return merr.WrapErrParameterInvalidMsg("external import files must be relative object keys without a URI scheme")
-	}
-	// A scheme can also be written without //, for example s3:bucket/key.
-	if colon := strings.IndexByte(key, ':'); colon >= 0 {
-		if slash := strings.IndexByte(key, '/'); slash < 0 || colon < slash {
-			if u, err := url.Parse(key); err == nil && u.Scheme != "" {
-				return merr.WrapErrParameterInvalidMsg("external import files must not contain a URI scheme")
+// RemoveSourceStorageCredentials removes secret credentials from terminal job
+// metadata while preserving non-secret structural storage.* keys so an
+// external-storage job retains its external-source identity and can never
+// silently fall back to cluster storage.
+func RemoveSourceStorageCredentials(options Options) Options {
+	filtered := make(Options, 0, len(options))
+	for _, option := range options {
+		if option == nil {
+			continue
+		}
+		key := option.GetKey()
+		if strings.EqualFold(key, ExternalSpec) || strings.EqualFold(key, SnapshotSourceURI) {
+			continue
+		}
+		if IsSourceStorageOption(key) {
+			switch key {
+			case StorageType, StorageEndpoint, StorageBucket,
+				StorageUseSSL, StorageRegion, StorageUseVirtualHost:
+			default:
+				continue
 			}
 		}
+		filtered = append(filtered, option)
 	}
-	return nil
+	return filtered
 }
