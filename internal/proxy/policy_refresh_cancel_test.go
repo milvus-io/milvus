@@ -211,7 +211,7 @@ func TestRefreshPolicyInfoCacheCancellationAndControls(t *testing.T) {
 				name:     "deadline exceeded",
 				grpcCode: codes.DeadlineExceeded,
 				setupCtx: func() (context.Context, context.CancelFunc, bool) {
-					c, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+					c, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 					return c, cancel, false
 				},
 				wantCode: merr.TimeoutCode,
@@ -241,15 +241,26 @@ func TestRefreshPolicyInfoCacheCancellationAndControls(t *testing.T) {
 					resCh <- rpcResult{status: st, err: err}
 				}()
 
-				<-entered
-				if triggerCancel {
-					reqCancel()
+				select {
+				case <-entered:
+					if triggerCancel {
+						reqCancel()
+					}
+					select {
+					case res := <-resCh:
+						require.NoError(t, res.err)
+						require.Equal(t, tc.wantCode, res.status.GetCode())
+						require.ErrorContains(t, merr.Error(res.status), tc.wantErr.Error())
+					case <-time.After(2 * time.Second):
+						t.Fatal("timed out waiting for RefreshPolicyInfoCache result")
+					}
+				case res := <-resCh:
+					require.NoError(t, res.err)
+					require.Equal(t, tc.wantCode, res.status.GetCode())
+					require.ErrorContains(t, merr.Error(res.status), tc.wantErr.Error())
+				case <-time.After(2 * time.Second):
+					t.Fatal("timed out waiting for ListPolicy entry or completion")
 				}
-
-				res := <-resCh
-				require.NoError(t, res.err)
-				require.Equal(t, tc.wantCode, res.status.GetCode())
-				require.ErrorContains(t, merr.Error(res.status), tc.wantErr.Error())
 				assertInitialCacheIntact()
 			})
 		}

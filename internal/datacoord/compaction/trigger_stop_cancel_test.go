@@ -763,6 +763,83 @@ func TestManualTriggerReturnsTriggerIDWhenEnqueuedBeforeStop(t *testing.T) {
 	require.Len(t, inspector.snapshot(), 1)
 }
 
+func TestCompactionTriggerReturnsSignalIDWhenEnqueuedBeforeStop(t *testing.T) {
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.IndexBasedCompaction.Key, "false")
+	defer pt.Reset(pt.DataCoordCfg.IndexBasedCompaction.Key)
+
+	m, im, colls := buildTestMetaWithCandidateGroups(t, 3, datapb.SegmentLevel_L1)
+
+	handler := newFuncHandler(t, func(ctx context.Context, collID UniqueID) (*meta.CollectionInfo, error) {
+		return colls[collID], nil
+	})
+
+	_, alloc := newIncrementingRootCoordAllocator(t)
+	enqueuedFirst := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var firstOnce sync.Once
+	inspector := &recordingInspector{
+		onEnqueue: func(_ *datapb.CompactionTask) error {
+			firstOnce.Do(func() {
+				close(enqueuedFirst)
+				<-releaseFirst
+			})
+			return nil
+		},
+	}
+
+	tr := NewCompactionTrigger(m, im, inspector, alloc, handler, index.NewTestVersionManager())
+	tr.testingOnly = true
+	tr.Start()
+	defer tr.Stop()
+
+	type triggerRes struct {
+		id  UniqueID
+		err error
+	}
+	resCh := make(chan triggerRes, 1)
+	go func() {
+		id, err := tr.TriggerCompaction(context.Background(), NewCompactionSignal().WithIsForce(true).WithWaitResult(true))
+		resCh <- triggerRes{id: id, err: err}
+	}()
+
+	select {
+	case <-enqueuedFirst:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first bucket EnqueueCompaction")
+	}
+
+	stopDone := make(chan struct{})
+	go func() {
+		tr.Stop()
+		close(stopDone)
+	}()
+
+	// Wait until Stop() has cancelled lifecycleCtx before releasing the in-flight EnqueueCompaction.
+	require.Eventually(t, func() bool {
+		return tr.isStopped()
+	}, 2*time.Second, time.Millisecond)
+
+	close(releaseFirst)
+
+	select {
+	case <-stopDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("compactionTrigger.Stop() did not finish")
+	}
+
+	select {
+	case res := <-resCh:
+		require.NoError(t, res.err)
+		require.Greater(t, res.id, UniqueID(0))
+	case <-time.After(1 * time.Second):
+		t.Fatal("TriggerCompaction did not return after Stop()")
+	}
+
+	// Only the first task should be enqueued; remaining groups stop planning cleanly.
+	require.Len(t, inspector.snapshot(), 1)
+}
+
 func TestCompactionTriggerCancelledQueuedManualSignalNotPlanned(t *testing.T) {
 	pt := paramtable.Get()
 	pt.Save(pt.DataCoordCfg.IndexBasedCompaction.Key, "false")
