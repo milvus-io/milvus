@@ -8,60 +8,27 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 )
 
-type Field struct {
-	FieldID          int64
-	Name             string
-	IsPrimaryKey     bool
-	Description      string
-	DataType         schemapb.DataType
-	TypeParams       []*commonpb.KeyValuePair
-	IndexParams      []*commonpb.KeyValuePair
-	AutoID           bool
-	State            schemapb.FieldState
-	IsDynamic        bool
-	IsPartitionKey   bool // partition key mode, multi logic partitions share a physical partition
-	IsClusteringKey  bool
-	IsFunctionOutput bool
-	DefaultValue     *schemapb.ValueField
-	ElementType      schemapb.DataType
-	ElementNullable  bool
-	TypeSchema       *schemapb.TypeSchema
-	Nullable         bool
-	ExternalField    string
-}
+// Field is the in-memory field schema held by model.Collection. It is the
+// protobuf FieldSchema itself, so the model and the collection view can
+// share it.
+type Field = schemapb.FieldSchema
 
-func (f *Field) Available() bool {
-	return f.State == schemapb.FieldState_FieldCreated
-}
-
-func (f *Field) Clone() *Field {
-	return &Field{
-		FieldID:          f.FieldID,
-		Name:             f.Name,
-		IsPrimaryKey:     f.IsPrimaryKey,
-		Description:      f.Description,
-		DataType:         f.DataType,
-		TypeParams:       common.CloneKeyValuePairs(f.TypeParams),
-		IndexParams:      common.CloneKeyValuePairs(f.IndexParams),
-		AutoID:           f.AutoID,
-		State:            f.State,
-		IsDynamic:        f.IsDynamic,
-		IsPartitionKey:   f.IsPartitionKey,
-		IsClusteringKey:  f.IsClusteringKey,
-		IsFunctionOutput: f.IsFunctionOutput,
-		DefaultValue:     f.DefaultValue,
-		ElementType:      f.ElementType,
-		ElementNullable:  f.ElementNullable,
-		TypeSchema:       cloneTypeSchema(f.TypeSchema),
-		Nullable:         f.Nullable,
-		ExternalField:    f.ExternalField,
+// CloneField returns a deep copy of the field.
+func CloneField(f *Field) *Field {
+	if f == nil {
+		return nil
 	}
+	return proto.Clone(f).(*Field)
 }
 
+// CloneFields returns a deep copy of each field; nil stays nil.
 func CloneFields(fields []*Field) []*Field {
-	clone := make([]*Field, 0, len(fields))
-	for _, field := range fields {
-		clone = append(clone, field.Clone())
+	if fields == nil {
+		return nil
+	}
+	clone := make([]*Field, len(fields))
+	for i, field := range fields {
+		clone[i] = CloneField(field)
 	}
 	return clone
 }
@@ -71,32 +38,26 @@ func checkParamsEqual(paramsA, paramsB []*commonpb.KeyValuePair) bool {
 	return A.Equal(paramsB)
 }
 
-func (f *Field) Equal(other Field) bool {
-	return f.FieldID == other.FieldID &&
-		f.Name == other.Name &&
-		f.IsPrimaryKey == other.IsPrimaryKey &&
-		f.Description == other.Description &&
-		f.DataType == other.DataType &&
-		checkParamsEqual(f.TypeParams, other.TypeParams) &&
-		checkParamsEqual(f.IndexParams, other.IndexParams) &&
-		f.AutoID == other.AutoID &&
-		f.IsPartitionKey == other.IsPartitionKey &&
-		f.IsDynamic == other.IsDynamic &&
-		f.IsClusteringKey == other.IsClusteringKey &&
-		proto.Equal(f.DefaultValue, other.DefaultValue) &&
-		f.ElementType == other.ElementType &&
-		f.ElementNullable == other.ElementNullable &&
-		proto.Equal(f.TypeSchema, other.TypeSchema) &&
-		f.IsFunctionOutput == other.IsFunctionOutput &&
-		f.Nullable == other.Nullable &&
-		f.ExternalField == other.ExternalField
-}
-
-func cloneTypeSchema(schema *schemapb.TypeSchema) *schemapb.TypeSchema {
-	if schema == nil {
-		return nil
-	}
-	return proto.Clone(schema).(*schemapb.TypeSchema)
+// FieldEqual reports whether two fields are equal, ignoring State.
+func FieldEqual(a, b *Field) bool {
+	return a.FieldID == b.FieldID &&
+		a.Name == b.Name &&
+		a.IsPrimaryKey == b.IsPrimaryKey &&
+		a.Description == b.Description &&
+		a.DataType == b.DataType &&
+		checkParamsEqual(a.TypeParams, b.TypeParams) &&
+		checkParamsEqual(a.IndexParams, b.IndexParams) &&
+		a.AutoID == b.AutoID &&
+		a.IsPartitionKey == b.IsPartitionKey &&
+		a.IsDynamic == b.IsDynamic &&
+		a.IsClusteringKey == b.IsClusteringKey &&
+		proto.Equal(a.DefaultValue, b.DefaultValue) &&
+		a.ElementType == b.ElementType &&
+		a.ElementNullable == b.ElementNullable &&
+		proto.Equal(a.TypeSchema, b.TypeSchema) &&
+		a.IsFunctionOutput == b.IsFunctionOutput &&
+		a.Nullable == b.Nullable &&
+		a.ExternalField == b.ExternalField
 }
 
 func CheckFieldsEqual(fieldsA, fieldsB []*Field) bool {
@@ -109,87 +70,9 @@ func CheckFieldsEqual(fieldsA, fieldsB []*Field) bool {
 	}
 
 	for _, f := range fieldsB {
-		if other, exists := mapA[f.FieldID]; !exists || !f.Equal(*other) {
+		if other, exists := mapA[f.FieldID]; !exists || !FieldEqual(f, other) {
 			return false
 		}
 	}
 	return true
-}
-
-func MarshalFieldModel(field *Field) *schemapb.FieldSchema {
-	if field == nil {
-		return nil
-	}
-
-	return &schemapb.FieldSchema{
-		FieldID:          field.FieldID,
-		Name:             field.Name,
-		IsPrimaryKey:     field.IsPrimaryKey,
-		Description:      field.Description,
-		DataType:         field.DataType,
-		TypeParams:       field.TypeParams,
-		IndexParams:      field.IndexParams,
-		AutoID:           field.AutoID,
-		IsDynamic:        field.IsDynamic,
-		IsPartitionKey:   field.IsPartitionKey,
-		IsClusteringKey:  field.IsClusteringKey,
-		IsFunctionOutput: field.IsFunctionOutput,
-		DefaultValue:     proto.Clone(field.DefaultValue).(*schemapb.ValueField),
-		ElementType:      field.ElementType,
-		ElementNullable:  field.ElementNullable,
-		TypeSchema:       cloneTypeSchema(field.TypeSchema),
-		Nullable:         field.Nullable,
-		ExternalField:    field.ExternalField,
-	}
-}
-
-func MarshalFieldModels(fields []*Field) []*schemapb.FieldSchema {
-	if fields == nil {
-		return nil
-	}
-
-	fieldSchemas := make([]*schemapb.FieldSchema, len(fields))
-	for idx, field := range fields {
-		fieldSchemas[idx] = MarshalFieldModel(field)
-	}
-	return fieldSchemas
-}
-
-func UnmarshalFieldModel(fieldSchema *schemapb.FieldSchema) *Field {
-	if fieldSchema == nil {
-		return nil
-	}
-
-	return &Field{
-		FieldID:          fieldSchema.FieldID,
-		Name:             fieldSchema.Name,
-		IsPrimaryKey:     fieldSchema.IsPrimaryKey,
-		Description:      fieldSchema.Description,
-		DataType:         fieldSchema.DataType,
-		TypeParams:       fieldSchema.TypeParams,
-		IndexParams:      fieldSchema.IndexParams,
-		AutoID:           fieldSchema.AutoID,
-		IsDynamic:        fieldSchema.IsDynamic,
-		IsPartitionKey:   fieldSchema.IsPartitionKey,
-		IsClusteringKey:  fieldSchema.IsClusteringKey,
-		IsFunctionOutput: fieldSchema.IsFunctionOutput,
-		DefaultValue:     fieldSchema.DefaultValue,
-		ElementType:      fieldSchema.ElementType,
-		ElementNullable:  fieldSchema.ElementNullable,
-		TypeSchema:       cloneTypeSchema(fieldSchema.TypeSchema),
-		Nullable:         fieldSchema.Nullable,
-		ExternalField:    fieldSchema.ExternalField,
-	}
-}
-
-func UnmarshalFieldModels(fieldSchemas []*schemapb.FieldSchema) []*Field {
-	if fieldSchemas == nil {
-		return nil
-	}
-
-	fields := make([]*Field, len(fieldSchemas))
-	for idx, fieldSchema := range fieldSchemas {
-		fields[idx] = UnmarshalFieldModel(fieldSchema)
-	}
-	return fields
 }

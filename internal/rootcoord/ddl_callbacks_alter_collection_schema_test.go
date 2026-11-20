@@ -2385,7 +2385,7 @@ func TestAlterCollectionSchemaDropKeepsOriginalStructSubField(t *testing.T) {
 	afterAdd := coll.Clone()
 	afterAdd.SchemaVersion = schema.GetVersion()
 	afterAdd.Properties = properties
-	afterAdd.StructArrayFields[0].Fields = append(afterAdd.StructArrayFields[0].Fields, model.UnmarshalFieldModel(subFields[1]))
+	afterAdd.StructArrayFields[0].Fields = append(afterAdd.StructArrayFields[0].Fields, model.CloneField(subFields[1]))
 
 	// Dropping the original sub-field passes the drop builder, which only
 	// rejects the last sub-field, and is then rejected by schema evolution.

@@ -7,6 +7,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -16,6 +17,9 @@ import (
 // current configuration only on failure; never turn a loaded collection's
 // transient view error into a terminal not-loaded error.
 func QueryViewLoadError(ctx context.Context, node taskmodel.TaskNode, collectionID int64, partitions []int64, queryErr error) error {
+	// Recv errors bypass the client's return-time conversion. Retry decisions must
+	// use the original error; only this terminal boundary maps it to public codes.
+	queryErr = queryclient.ToMilvusError(queryErr)
 	if !errors.IsAny(queryErr, merr.ErrQueryViewNotReady, merr.ErrServiceUnavailable) {
 		return queryErr
 	}
