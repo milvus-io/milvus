@@ -369,18 +369,43 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 }
 
 func AppendPrepareLoadParams(params *paramtable.ComponentParam, indexParams map[string]string) error {
+	indexType := indexParams[common.IndexTypeKey]
+	isCagra := indexType == "GPU_CAGRA" || indexType == "GPU_CUVS_CAGRA"
+	buildAdaptForCPU := indexParams["adapt_for_cpu"]
+	cpuFormat, parseErr := strconv.ParseBool(buildAdaptForCPU)
+
+	loadParams := make(map[string]string)
 	if params.AutoIndexConfig.Enable.GetAsBool() { // `enable` only for cloud instance.
-		// override prepare params by
 		for k, v := range params.AutoIndexConfig.PrepareParams.GetAsJSONMap() {
-			indexParams[k] = v
+			loadParams[k] = v
 		}
 
 		for k, v := range params.AutoIndexConfig.LoadAdaptParams.GetAsJSONMap() {
+			loadParams[k] = v
+		}
+	}
+
+	// Cloud load settings override index params; Knowhere load defaults only fill missing keys.
+	for k, v := range loadParams {
+		indexParams[k] = v
+	}
+	params.KnowhereConfig.MergeIndexParams(indexParams[common.IndexTypeKey], paramtable.LoadStage, loadParams)
+	for k, v := range loadParams {
+		if _, exists := indexParams[k]; !exists {
 			indexParams[k] = v
 		}
 	}
 
-	params.KnowhereConfig.MergeIndexParams(indexParams[common.IndexTypeKey], paramtable.LoadStage, indexParams)
+	if isCagra && parseErr == nil {
+		// CAGRA uses adapt_for_cpu for the saved format at build time and the
+		// execution mode at load time. Native format permits either load mode;
+		// CPU format requires CPU loading regardless of load configuration.
+		if cpuFormat {
+			indexParams["adapt_for_cpu"] = buildAdaptForCPU
+		} else if loadAdaptForCPU, exists := loadParams["adapt_for_cpu"]; exists {
+			indexParams["adapt_for_cpu"] = loadAdaptForCPU
+		}
+	}
 
 	return nil
 }
