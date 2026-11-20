@@ -38,7 +38,9 @@
 #include "common/protobuf_utils.h"
 #include "exec/expression/BinaryRangeExpr.h"
 #include "exec/expression/ExprBatchTestUtils.h"
+#include "exec/expression/ExprCache.h"
 #include "exec/expression/ExprIndexIntegrationTestUtils.h"
+#include "exec/expression/ExistsExpr.h"
 #include "exec/expression/JsonContainsExpr.h"
 #include "index/Meta.h"
 #include "exec/expression/TermExpr.h"
@@ -80,6 +82,16 @@ using namespace milvus::index;
 
 class JsonStatsProjectionTestAccessor {
  public:
+    static std::shared_ptr<ChunkedColumnInterface>&
+    ShreddingColumn(JsonKeyStats& stats, const std::string& field_name) {
+        return stats.shredding_columns_.at(field_name);
+    }
+
+    static std::shared_ptr<ChunkedColumnInterface>&
+    SharedColumn(JsonKeyStats& stats) {
+        return stats.shared_column_;
+    }
+
     static bool
     IsInMultiFieldColumnGroup(const JsonKeyStats& stats,
                               const std::string& field_name) {
@@ -89,6 +101,49 @@ class JsonStatsProjectionTestAccessor {
 };
 
 namespace {
+
+struct DisableExprCache {
+    bool was_enabled = exec::ExprResCacheManager::IsEnabled();
+    DisableExprCache() {
+        exec::ExprResCacheManager::SetEnabled(false);
+    }
+    ~DisableExprCache() {
+        exec::ExprResCacheManager::SetEnabled(was_enabled);
+    }
+};
+
+// Keep the real stats reads, but count entry into the expensive scan paths.
+class CountingExistsColumn : public ChunkedVariableColumn<std::string> {
+ public:
+    CountingExistsColumn(std::shared_ptr<cachinglayer::CacheSlot<Chunk>> slot,
+                         const FieldMeta& meta,
+                         std::shared_ptr<ChunkedColumnInterface> source)
+        : ChunkedVariableColumn<std::string>(std::move(slot), meta),
+          source_(std::move(source)) {
+    }
+
+    ScanResult
+    Scan(OpContext* ctx, const ScanOptions& options) const override {
+        ++array_scans;
+        return source_->Scan(ctx, options);
+    }
+
+    void
+    BulkRawBsonAt(OpContext* ctx,
+                  std::function<void(BsonView, uint32_t, uint32_t)> fn,
+                  const uint32_t* rows,
+                  const uint32_t* offsets,
+                  int64_t count) const override {
+        ++shared_reads;
+        source_->BulkRawBsonAt(ctx, std::move(fn), rows, offsets, count);
+    }
+
+    mutable int64_t array_scans = 0;
+    mutable int64_t shared_reads = 0;
+
+ private:
+    std::shared_ptr<ChunkedColumnInterface> source_;
+};
 
 bool
 IsValidAt(const std::vector<uint8_t>& valid_data, size_t i) {
@@ -228,7 +283,8 @@ BuildJsonStatsIndex(const std::vector<std::string>& json_strings,
                     int64_t field_id,
                     int64_t build_id,
                     int64_t version_id,
-                    const std::vector<uint8_t>* valid_data = nullptr) {
+                    const std::vector<uint8_t>* valid_data = nullptr,
+                    int64_t max_shredding_columns = 1024) {
     std::vector<milvus::Json> data;
     data.reserve(json_strings.size());
     for (const auto& s : json_strings) {
@@ -284,7 +340,8 @@ BuildJsonStatsIndex(const std::vector<std::string>& json_strings,
     Config build_config;
     build_config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
 
-    auto builder = std::make_shared<JsonKeyStats>(ctx, false);
+    auto builder =
+        std::make_shared<JsonKeyStats>(ctx, false, max_shredding_columns);
     builder->Build(build_config);
 
     const auto create_index_result = builder->Upload(build_config);
@@ -2052,5 +2109,291 @@ TEST(JsonStatsExecPathTest, TypedArrayIndexWinsOverJsonStatsForContains) {
 
         EXPECT_EQ(ContainsPath(ContainsInt(f, 9007199254740993), f),
                   exec::ExprExecPath::JsonStats);
+    }
+}
+
+class JsonStatsExistsOrderTest : public ::testing::TestWithParam<bool> {};
+
+TEST_P(JsonStatsExistsOrderTest, ResolvedParentSkipsRemainingColumns) {
+    DisableExprCache disable_cache;
+    milvus::test::ExprBatchSizeGuard batch_size(7);
+    constexpr int64_t n =
+        17;  // Exercise a partial bitmap word and final batch.
+    const bool array_first = GetParam();
+    const std::string scalar_key = array_first ? "z" : "a";
+    enum LastRow { Scalar, ComplementaryScalars, Array, Shared, Empty };
+    for (auto last_row : {Scalar, ComplementaryScalars, Array, Shared, Empty}) {
+        SCOPED_TRACE(last_row);
+        const int64_t id = 55594 + last_row + (array_first ? 10 : 0);
+        auto schema = std::make_shared<Schema>();
+        auto fid = schema->AddDebugField("json", DataType::JSON);
+        auto segment = segcore::CreateSealedSegment(schema);
+        auto nulls = nlohmann::json::array();
+        for (int i = 0; i < 1024; ++i) {
+            nulls.push_back(nullptr);
+        }
+        std::vector<std::string> rows;
+        for (int64_t i = 0; i < n; ++i) {
+            nlohmann::json parent = {
+                {scalar_key, 1}, {"b", nulls}, {"c", nullptr}, {"d", nulls}};
+            if (last_row == ComplementaryScalars) {
+                // Neither scalar alone covers every row, but their OR does.
+                parent[scalar_key] = nullptr;
+                parent["zz"] = nullptr;
+                parent[i % 2 == 0 ? scalar_key : "zz"] = 1;
+            } else if (i == n - 1 && last_row != Scalar) {
+                parent[scalar_key] = nullptr;
+                if (last_row == Array) {
+                    parent["b"] = nlohmann::json::array({1});
+                } else if (last_row == Shared) {
+                    parent["c"] = 1;
+                }
+            }
+            rows.push_back(nlohmann::json({{"parent", parent}}).dump());
+        }
+        auto stats = BuildAndLoadJsonKeyStats(
+            rows, fid, TestLocalPath, 55594, 55594, id, fid.get(), id, 1);
+        auto scalar =
+            stats->GetShreddingField("/parent/" + scalar_key, JSONType::INT64);
+        auto first_array =
+            stats->GetShreddingField("/parent/b", JSONType::ARRAY);
+        auto second_array =
+            stats->GetShreddingField("/parent/d", JSONType::ARRAY);
+        ASSERT_FALSE(scalar.empty());
+        ASSERT_FALSE(first_array.empty());
+        ASSERT_FALSE(second_array.empty());
+        if (array_first) {
+            ASSERT_LT(second_array, scalar);
+        } else {
+            ASSERT_LT(scalar, first_array);
+        }
+        ASSERT_LT(first_array, second_array);
+        if (last_row == ComplementaryScalars) {
+            auto other =
+                stats->GetShreddingField("/parent/zz", JSONType::INT64);
+            ASSERT_FALSE(other.empty());
+            ASSERT_LT(second_array, other);
+        }
+        ASSERT_TRUE(stats->GetShreddingFields("/parent/c").empty());
+
+        // The wrapper only needs row metadata; all reads delegate to the real
+        // loaded stats column. Keep a valid backing column for its base class.
+        arrow::BinaryBuilder builder;
+        for (const auto& row : rows) {
+            ASSERT_TRUE(builder.Append(row).ok());
+        }
+        std::shared_ptr<arrow::Array> values;
+        ASSERT_TRUE(builder.Finish(&values).ok());
+        std::vector<std::unique_ptr<Chunk>> chunks;
+        chunks.push_back(create_chunk((*schema)[fid], {values}, false));
+        auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
+            std::make_unique<TestChunkTranslator>(
+                std::vector<int64_t>{n},
+                fmt::format("exists_short_circuit_{}", id),
+                std::move(chunks)),
+            nullptr);
+        auto wrap = [&](std::shared_ptr<ChunkedColumnInterface>& column) {
+            auto counted = std::make_shared<CountingExistsColumn>(
+                slot, (*schema)[fid], column);
+            column = counted;
+            return counted;
+        };
+        auto array_b = wrap(JsonStatsProjectionTestAccessor::ShreddingColumn(
+            *stats, first_array));
+        auto array_d = wrap(JsonStatsProjectionTestAccessor::ShreddingColumn(
+            *stats, second_array));
+        ASSERT_NE(JsonStatsProjectionTestAccessor::SharedColumn(*stats),
+                  nullptr);
+        auto shared =
+            wrap(JsonStatsProjectionTestAccessor::SharedColumn(*stats));
+        auto* sealed =
+            dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        sealed->SetJsonStatsForTesting(fid,
+                                       MakeTestJsonStatsSlot(std::move(stats)));
+        auto field = milvus::test::expr_index::JsonField(rows);
+        auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                      .GetRemoteChunkManager();
+        segment->LoadFieldData(PrepareSingleFieldInsertBinlog(
+            55594, 55594, id, fid.get(), {field}, cm));
+
+        auto exists = std::make_shared<expr::ExistsExpr>(
+            expr::ColumnInfo(fid, DataType::JSON, {"parent"}));
+        exec::PhyExistsFilterExpr probe(
+            {}, exists, "exists-probe", nullptr, segment.get(), n, n, 0);
+        probe.EnsureExecPathDetermined();
+        ASSERT_EQ(probe.GetExecPath(), exec::ExprExecPath::JsonStats);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, exists);
+        auto result =
+            query::ExecuteQueryExpr(plan, segment.get(), n, MAX_TIMESTAMP);
+        ASSERT_EQ(result.size(), n);
+        for (int64_t i = 0; i < n; ++i) {
+            EXPECT_EQ(bool(result[i]), i != n - 1 || last_row != Empty) << i;
+            EXPECT_EQ(bool(result[i]),
+                      Json(simdjson::padded_string(rows[i])).exist("/parent"))
+                << i;
+        }
+        const bool scalars_resolve =
+            last_row == Scalar || last_row == ComplementaryScalars;
+        EXPECT_EQ(array_b->array_scans, scalars_resolve ? 0 : 1);
+        EXPECT_EQ(array_d->array_scans,
+                  scalars_resolve || last_row == Array ? 0 : 1);
+        EXPECT_EQ(shared->shared_reads == 0,
+                  scalars_resolve || last_row == Array);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(JsonStatsFieldNameOrder,
+                         JsonStatsExistsOrderTest,
+                         ::testing::Bool());
+
+// #55290: JSON path IS NOT NULL compiles to EXISTS, and IS NULL to NOT
+// EXISTS. Compare both plans with stats off/on/off after building and loading
+// actual stats files, including a layout that keeps all values in shared BSON.
+TEST(JsonStatsExistsTest, EmptyContainersMatchRawAfterReload) {
+    // Force every comparison through the selected execution path.
+    DisableExprCache disable_cache;
+    struct Row {
+        const char* json;
+        bool leaf_exists;
+        bool parent_exists;
+        bool valid = true;
+    };
+    const std::vector<Row> rows = {
+        {R"({"parent":{"a":[]}})", false, false},
+        {R"({"parent":{"a":[null]}})", false, false},
+        {R"({"parent":{"a":[null,null]}})", false, false},
+        {R"({"parent":{"a":[[]]}})", false, false},
+        {R"({"parent":{"a":[{}, {"x":null}]}})", false, false},
+        {R"({"parent":{"a":[null,[],{}]}})", false, false},
+        {R"({"parent":{"a":[{"x":[null,{}]}]}})", false, false},
+        {R"({"parent":{"a":[0]}})", true, true},
+        {R"({"parent":{"a":[false]}})", true, true},
+        {R"({"parent":{"a":[""]}})", true, true},
+        {R"({"parent":{"a":[null,[],{"x":1}]}})", true, true},
+        {R"({"parent":{"a":null}})", false, false},
+        {R"({"parent":{"a":{}}})", false, false},
+        {R"({"parent":{}})", false, false},
+        {R"({"parent":null})", false, false},
+        {R"({"parent2":{"a":[1]}})", false, false},
+        {R"({"parent":{"a":0}})", true, true},
+        {R"({"parent":{"a":false}})", true, true},
+        {R"({"parent":{"a":"value"}})", true, true},
+        // Shared empty siblings must not erase a shredded nonempty child.
+        {R"({"parent":{"a":[1],"empty":null}})", true, true},
+        {R"({"parent":{"a":[1],"empty":{}}})", true, true},
+        // A shared nonempty sibling makes the parent exist, not the array.
+        {R"({"parent":{"a":[],"other":1}})", false, true},
+        {R"({"parent":{"a":[1]}})", false, false, false},
+    };
+    std::vector<std::string> json_strings;
+    std::vector<uint8_t> valid_data((rows.size() + 7) / 8, 0);
+    for (size_t i = 0; i < rows.size(); ++i) {
+        json_strings.emplace_back(rows[i].json);
+        if (rows[i].valid) {
+            valid_data[i / 8] |= uint8_t(1 << (i % 8));
+        }
+    }
+
+    for (const int64_t max_columns : {0, 1024}) {
+        SCOPED_TRACE(fmt::format("max_shredding_columns={}", max_columns));
+        auto schema = std::make_shared<Schema>();
+        auto fid = schema->AddDebugField("json", DataType::JSON, true);
+        auto segment = segcore::CreateSealedSegment(schema);
+        auto built = BuildJsonStatsIndex(json_strings,
+                                         fid,
+                                         TestLocalPath,
+                                         55290,
+                                         55290,
+                                         55290 + max_columns,
+                                         fid.get(),
+                                         55290 + max_columns,
+                                         1,
+                                         &valid_data,
+                                         max_columns);
+        auto stats = LoadBuiltJsonStatsIndex(built);
+        ASSERT_EQ(
+            stats->GetShreddingField("/parent/a", JSONType::ARRAY).empty(),
+            max_columns == 0);
+        auto* sealed =
+            dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        sealed->SetJsonStatsForTesting(fid,
+                                       MakeTestJsonStatsSlot(std::move(stats)));
+        auto field = std::make_shared<FieldData<Json>>(DataType::JSON, true);
+        field->FillFieldData(MakeNullableJsonArray(json_strings, valid_data));
+        auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                      .GetRemoteChunkManager();
+        segment->LoadFieldData(PrepareSingleFieldInsertBinlog(
+            55290, 55290, 55290 + max_columns, fid.get(), {field}, cm));
+
+        milvus::test::ExprBatchSizeGuard batch_size(7);
+        for (const auto& path : {std::vector<std::string>{"parent", "a"},
+                                 std::vector<std::string>{"parent"}}) {
+            SCOPED_TRACE(Json::pointer(path));
+            auto exists = std::make_shared<expr::ExistsExpr>(
+                expr::ColumnInfo(fid, DataType::JSON, path));
+            for (bool use_stats : {false, true, false}) {
+                SCOPED_TRACE(fmt::format("stats={}", use_stats));
+                query::PlanOptions options;
+                options.expr_use_json_stats = use_stats;
+                for (bool negate : {false, true}) {
+                    SCOPED_TRACE(fmt::format("negate={}", negate));
+                    expr::TypedExprPtr logical = exists;
+                    if (negate) {
+                        logical = std::make_shared<expr::LogicalUnaryExpr>(
+                            expr::LogicalUnaryExpr::OpType::LogicalNot, exists);
+                    }
+                    exec::QueryContext query_context(DEAFULT_QUERY_ID,
+                                                     segment.get(),
+                                                     rows.size(),
+                                                     MAX_TIMESTAMP,
+                                                     0,
+                                                     0,
+                                                     options);
+                    query_context.set_read_snapshot(
+                        segment->CaptureReadSnapshot());
+                    exec::ExecContext exec_context(&query_context);
+                    auto compiled = exec::CompileExpressions(
+                        {logical}, &exec_context, {}, false);
+                    if (!negate) {
+                        auto physical = std::dynamic_pointer_cast<
+                            exec::PhyExistsFilterExpr>(compiled[0]);
+                        ASSERT_NE(physical, nullptr);
+                        physical->EnsureExecPathDetermined();
+                        ASSERT_EQ(physical->GetExecPath(),
+                                  use_stats ? exec::ExprExecPath::JsonStats
+                                            : exec::ExprExecPath::RawData);
+                    }
+                    exec::EvalCtx eval_context(&exec_context);
+                    size_t seen = 0;
+                    while (seen < rows.size()) {
+                        VectorPtr result;
+                        compiled[0]->Eval(eval_context, result);
+                        ASSERT_NE(result, nullptr);
+                        auto column =
+                            milvus::test::GetColumnVectorForTest(result);
+                        ASSERT_NE(column, nullptr);
+                        ASSERT_GT(column->size(), 0);
+                        ASSERT_LE(seen + column->size(), rows.size());
+                        TargetBitmapView actual(column->GetRawData(),
+                                                column->size());
+                        TargetBitmapView valid(column->GetValidRawData(),
+                                               column->size());
+                        for (size_t i = 0; i < column->size(); ++i) {
+                            const auto& row = rows[seen + i];
+                            bool expected = path.size() == 2
+                                                ? row.leaf_exists
+                                                : row.parent_exists;
+                            EXPECT_EQ(bool(actual[i]), negate != expected)
+                                << "row " << seen + i << ": " << row.json;
+                            EXPECT_TRUE(valid[i]);
+                        }
+                        seen += column->size();
+                    }
+                }
+            }
+        }
     }
 }
