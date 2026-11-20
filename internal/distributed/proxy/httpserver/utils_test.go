@@ -137,6 +137,20 @@ func TestCheckLimiter_ChargedRequestsRemainRateLimited(t *testing.T) {
 	defer getPartition.UnPatch()
 
 	insert := &milvuspb.InsertRequest{DbName: "target", CollectionName: "collection", PartitionName: "partition"}
+	// The handlers build search requests without nq; they are charged by the
+	// rows of their placeholder group.
+	placeholder, err := proto.Marshal(&commonpb.PlaceholderGroup{Placeholders: []*commonpb.PlaceholderValue{
+		{Tag: "$0", Type: commonpb.PlaceholderType_FloatVector, Values: [][]byte{{0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}}},
+	}})
+	require.NoError(t, err)
+	search := &milvuspb.SearchRequest{
+		DbName: "target", CollectionName: "collection",
+		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: placeholder},
+	}
+	hybridSearch := &milvuspb.HybridSearchRequest{
+		DbName: "target", CollectionName: "collection",
+		Requests: []*milvuspb.SearchRequest{search, search},
+	}
 	testCases := []struct {
 		name     string
 		request  proto.Message
@@ -145,6 +159,8 @@ func TestCheckLimiter_ChargedRequestsRemainRateLimited(t *testing.T) {
 	}{
 		{"create collection", &milvuspb.CreateCollectionRequest{DbName: "target", CollectionName: "collection"}, internalpb.RateType_DDLCollection, 1},
 		{"insert", insert, internalpb.RateType_DMLInsert, proto.Size(insert)},
+		{"search", search, internalpb.RateType_DQLSearch, 3},
+		{"hybrid search", hybridSearch, internalpb.RateType_DQLSearch, 6},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -173,7 +189,11 @@ func TestCheckLimiter_ChargedRequestsRemainRateLimited(t *testing.T) {
 					assert.Equal(t, totalBefore+1, testutil.ToFloat64(total))
 					if rejected {
 						require.ErrorIs(t, err, merr.ErrServiceQuotaExceeded)
-						assert.NotNil(t, resp)
+						// GetFailedResponse has no response type for a hybrid
+						// search; the error alone carries the rejection.
+						if _, hybrid := tc.request.(*milvuspb.HybridSearchRequest); !hybrid {
+							assert.NotNil(t, resp)
+						}
 						assert.Equal(t, successBefore, testutil.ToFloat64(success))
 						assert.Equal(t, failBefore+1, testutil.ToFloat64(fail))
 					} else {
