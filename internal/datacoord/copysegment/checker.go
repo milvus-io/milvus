@@ -660,8 +660,10 @@ func (c *Checker) finishJob(job CopySegmentJob, totalRows int64) {
 					continue
 				}
 				if c.Meta.IndexCatalog != nil {
-					for _, record := range c.Meta.IndexCatalog.GetAllSegmentIndexes(segID) {
-						c.Meta.IndexCatalog.NotifyManifestIndexMigration(record)
+					for _, summary := range c.Meta.IndexCatalog.GetAllSegmentIndexSummaries(segID) {
+						if record, ok := c.Meta.IndexCatalog.GetIndexJob(summary.BuildID); ok {
+							c.Meta.IndexCatalog.NotifyManifestIndexMigration(record)
+						}
 					}
 				}
 				meta.NotifySegmentIndexBuild(segID)

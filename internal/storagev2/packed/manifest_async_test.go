@@ -648,7 +648,7 @@ func TestManifestIndexesAfterUpdatesUsesFieldID(t *testing.T) {
 // Compare the in-memory marker with the actual native resolver's persisted
 // output. This also guards the adapter against drift in index invalidation rules.
 func TestAsyncManifestIndexMarkerResult(t *testing.T) {
-	for _, scenario := range []string{"drop_one", "drop_all", "absent_drop", "drop_and_add", "stale_drop_and_add", "version_drift", "append_columns", "append_segment", "append_and_add", "append_empty_name", "append_name_collision", "append_shared_field", "add_column_group", "column_group_entry", "delta_only", "empty_updates"} {
+	for _, scenario := range []string{"drop_one", "drop_all", "absent_drop", "drop_and_add", "stale_drop_and_add", "version_drift", "append_columns", "append_segment", "append_and_add", "append_empty_name", "append_name_collision", "append_shared_field", "add_column_group", "column_group_entry", "replace_last_indexed_column", "replace_indexed_column_with_survivor", "drop_missing_column", "delta_only", "empty_updates"} {
 		t.Run(scenario, func(t *testing.T) {
 			cfg := manifestTestStorageConfig(t)
 			io := NewManifestIOContext(1)
@@ -667,7 +667,15 @@ func TestAsyncManifestIndexMarkerResult(t *testing.T) {
 				indexes[1].FieldID = indexes[0].FieldID
 				indexes[1].ColumnName = indexes[0].ColumnName
 			}
-			initial, err := CommitManifestUpdates(MarshalManifestPath(base, 0), cfg, &ManifestUpdates{Indexes: indexes})
+			seed := &ManifestUpdates{Indexes: indexes}
+			field100 := ColumnGroupEntry{Columns: []string{"100"}, Format: "parquet"}
+			if scenario == "replace_last_indexed_column" || scenario == "replace_indexed_column_with_survivor" {
+				seed.ColumnGroups = []ColumnGroupEntry{field100, {Columns: []string{"101"}, Format: "parquet"}}
+			}
+			if scenario == "replace_last_indexed_column" {
+				seed.Indexes = indexes[:1]
+			}
+			initial, err := CommitManifestUpdates(MarshalManifestPath(base, 0), cfg, seed)
 			require.NoError(t, err)
 			updates := &ManifestUpdates{}
 			wantCount, wantMarker := 2, true
@@ -723,6 +731,13 @@ func TestAsyncManifestIndexMarkerResult(t *testing.T) {
 				}
 			case "column_group_entry":
 				updates.ColumnGroups = []ColumnGroupEntry{{Columns: []string{"100"}, Format: "parquet"}}
+				wantMarker = false
+			case "replace_last_indexed_column", "replace_indexed_column_with_survivor":
+				updates.DropColumns = []string{"100"}
+				updates.ColumnGroups = []ColumnGroupEntry{field100}
+				wantCount = len(seed.Indexes) - 1
+			case "drop_missing_column":
+				updates.DropColumns = []string{"100"}
 				wantMarker = false
 			case "empty_updates":
 				wantMarker = false

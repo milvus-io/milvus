@@ -144,6 +144,9 @@ func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
 }
 
 func (it *indexBuildTask) UpdateStateWithMeta(state indexpb.JobState, failReason string) error {
+	if it.indexMeta.UsesSegmentSummaries() && state == indexpb.JobState_JobStateFinished {
+		return it.SetJobInfo(&workerpb.IndexTaskInfo{BuildID: it.BuildID, State: commonpb.IndexState_Finished})
+	}
 	if err := it.indexMeta.UpdateIndexState(it.BuildID, commonpb.IndexState(state), failReason); err != nil {
 		return err
 	}
@@ -169,7 +172,7 @@ func (it *indexBuildTask) SetJobInfo(result *workerpb.IndexTaskInfo) error {
 		return err
 	}
 	if !published {
-		if err := it.indexMeta.FinishTask(result); err != nil {
+		if err := it.meta.FinishTask(it.meta.Ctx, result); err != nil {
 			return err
 		}
 	}
