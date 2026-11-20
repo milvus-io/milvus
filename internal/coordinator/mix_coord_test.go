@@ -206,8 +206,8 @@ func TestMixcoord_StopWhileStandby(t *testing.T) {
 			close(entered)
 			err := origin(s, standbyCtx, activateFunc)
 			// The Register goroutine decides between "shutdown" and panic on
-			// core.ctx right after this returns.
-			result <- standbyResult{err: err, ctxErr: core.ctx.Err()}
+			// s.standbyCtx right after this returns.
+			result <- standbyResult{err: err, ctxErr: core.standbyCtx.Err()}
 			return err
 		}).Origin(&origin).Build()
 	defer mocker.UnPatch()

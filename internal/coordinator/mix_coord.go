@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -66,15 +65,17 @@ type mixCoordImpl struct {
 	datacoordServer  *datacoord.Server
 	streamingCoord   *streamingcoord.Server
 
-	ctx           context.Context
-	cancel        context.CancelFunc
-	standbyCtx    context.Context
-	standbyCancel context.CancelFunc
-	wg            sync.WaitGroup
-	standbyWG     sync.WaitGroup
-	etcdCli       *clientv3.Client
-	tikvCli       *txnkv.Client
-	address       string
+	ctx                    context.Context
+	cancel                 context.CancelFunc
+	standbyCtx             context.Context
+	standbyCancel          context.CancelFunc
+	wg                     sync.WaitGroup
+	standbyWG              sync.WaitGroup
+	activationWG           sync.WaitGroup
+	streamingCoordStopOnce sync.Once
+	etcdCli                *clientv3.Client
+	tikvCli                *txnkv.Client
+	address                string
 
 	// stopTiKVGC stops the GC of a TiKV meta store, which runs on the active
 	// replica only; see startTiKVGCWorker.
@@ -160,10 +161,33 @@ func (s *mixCoordImpl) Register() error {
 	}
 	s.standbyWG.Add(1)
 	go func() {
-		defer s.standbyWG.Done()
-		if err := s.session.ProcessActiveStandBy(s.standbyCtx, s.activateFunc); err != nil {
-			if errors.Is(err, context.Canceled) && s.standbyCtx.Err() != nil {
+		standbyDone := false
+		finishStandby := func() {
+			if !standbyDone {
+				standbyDone = true
+				s.standbyWG.Done()
+			}
+		}
+		defer finishStandby()
+		if err := s.session.ProcessActiveStandBy(s.standbyCtx, nil); err != nil {
+			if s.standbyCtx.Err() != nil || s.ctx.Err() != nil {
 				mlog.Info(s.ctx, "standby process canceled due to server shutdown")
+				return
+			}
+			mlog.Error(s.ctx, "failed to activate standby server", mlog.Err(err))
+			panic(err)
+		}
+		finishStandby()
+
+		if s.standbyCtx.Err() != nil || s.ctx.Err() != nil {
+			mlog.Info(s.ctx, "standby activation skipped due to server shutdown")
+			return
+		}
+		s.activationWG.Add(1)
+		defer s.activationWG.Done()
+		if err := s.activateFunc(); err != nil {
+			if s.standbyCtx.Err() != nil || s.ctx.Err() != nil {
+				mlog.Info(s.ctx, "standby activation canceled due to server shutdown")
 				return
 			}
 			mlog.Error(s.ctx, "failed to activate standby server", mlog.Err(err))
@@ -236,8 +260,11 @@ func (s *mixCoordImpl) initInternal() error {
 	s.queryCoordServer.SetMetaView(s.metaStore)
 	s.fileResourceObserver = NewFileResourceObserver(s.ctx)
 
-	if err := s.streamingCoord.Start(s.ctx); err != nil {
+	if err := s.streamingCoord.Start(s.standbyCtx); err != nil {
 		mlog.Error(s.ctx, "streamCoord start failed", mlog.Err(err))
+		return err
+	}
+	if err := s.standbyCtx.Err(); err != nil {
 		return err
 	}
 
@@ -517,6 +544,13 @@ func (s *mixCoordImpl) Stop() error {
 	s.GracefulStop()
 	mlog.Info(s.ctx, "graceful stop done")
 
+	// When Stop() is called after s.ctx is canceled (grpcmixcoord.Server.Stop),
+	// any in-flight initInternal has already aborted; wait before reading
+	// datacoordServer / fileResourceObserver below.
+	if s.ctx.Err() != nil {
+		s.activationWG.Wait()
+	}
+
 	if err := s.queryCoordServer.Stop(); err != nil {
 		mlog.Error(s.ctx, "Failed to stop queryCoord", mlog.Err(err))
 	}
@@ -617,10 +651,11 @@ func (s *mixCoordImpl) GracefulStop() {
 		s.standbyCancel()
 	}
 	s.standbyWG.Wait()
-	if s.streamingCoord != nil {
-		s.streamingCoord.Stop()
-		s.streamingCoord = nil
-	}
+	s.streamingCoordStopOnce.Do(func() {
+		if s.streamingCoord != nil {
+			s.streamingCoord.Stop()
+		}
+	})
 }
 
 // RootCoordServer

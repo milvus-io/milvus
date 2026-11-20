@@ -400,8 +400,8 @@ func (s *Session) isCoordinator() bool {
 }
 
 // checkVersion checks the version of the session and returns the error if the version is not found or expired.
-func (s *Session) checkVersionForCoordinator() (*mvccpb.KeyValue, error) {
-	resp, err := s.etcdCli.Get(s.ctx, s.versionKey)
+func (s *Session) checkVersionForCoordinator(ctx context.Context) (*mvccpb.KeyValue, error) {
+	resp, err := s.etcdCli.Get(ctx, s.versionKey)
 	if err != nil {
 		return nil, err
 	}
@@ -570,7 +570,7 @@ func (s *Session) registerService() error {
 		// if enable active-standby, we don't need to check the version now,
 		// only check the version when the standby is activated.
 		if s.isCoordinator() && !s.enableActiveStandBy {
-			if ops, compareOps, err = s.getOpsForCoordinator(ops, compareOps, sessionJSON); err != nil {
+			if ops, compareOps, err = s.getOpsForCoordinator(s.ctx, ops, compareOps, sessionJSON); err != nil {
 				return err
 			}
 		}
@@ -597,8 +597,8 @@ func (s *Session) registerService() error {
 }
 
 // getOpsForCoordinator gets the ops and compare ops for coordinator.
-func (s *Session) getOpsForCoordinator(ops []clientv3.Op, compareOps []clientv3.Cmp, sessionJSON []byte) ([]clientv3.Op, []clientv3.Cmp, error) {
-	previousVersion, err := s.checkVersionForCoordinator()
+func (s *Session) getOpsForCoordinator(ctx context.Context, ops []clientv3.Op, compareOps []clientv3.Cmp, sessionJSON []byte) ([]clientv3.Op, []clientv3.Cmp, error) {
+	previousVersion, err := s.checkVersionForCoordinator(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1212,7 +1212,7 @@ func (s *Session) ProcessActiveStandBy(ctx context.Context, activateFunc func() 
 		}
 
 		if s.isCoordinator() {
-			if ops, compareOps, err = s.getOpsForCoordinator(ops, compareOps, sessionJSON); err != nil {
+			if ops, compareOps, err = s.getOpsForCoordinator(ctx, ops, compareOps, sessionJSON); err != nil {
 				return false, -1, err
 			}
 		}
@@ -1296,6 +1296,10 @@ func (s *Session) ProcessActiveStandBy(ctx context.Context, activateFunc func() 
 		select {
 		case <-watchCtx.Done():
 			cancel()
+			if ctx.Err() != nil {
+				s.updateStandby(false)
+				return ctx.Err()
+			}
 		case wresp, ok := <-watchChan:
 			if !ok {
 				cancel()
@@ -1315,8 +1319,16 @@ func (s *Session) ProcessActiveStandBy(ctx context.Context, activateFunc func() 
 		}
 		cancel()
 		mlog.Info(s.ctx, fmt.Sprintf("stop watching ACTIVE key %v", s.activeKey))
+		if err := ctx.Err(); err != nil {
+			s.updateStandby(false)
+			return err
+		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		s.updateStandby(false)
+		return err
+	}
 	s.updateStandby(false)
 	mlog.Info(s.ctx, fmt.Sprintf("serverName: %v quit STANDBY mode, this node will become ACTIVE, ID: %d", s.ServerName, s.ServerID))
 	if activateFunc != nil {
