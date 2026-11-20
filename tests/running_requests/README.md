@@ -25,6 +25,11 @@ T11 uses a separate two-Deployment instance. Enable it with
 `MILVUS_L1_NEW_IMAGE`, `MILVUS_T11_CORE_DEPLOYMENTS`, and a provider with
 `hold_proxy_search`. Run the T11 test file explicitly.
 
+For the T11 transport parity cases, point the deployment inputs at an existing
+mixed-version instance with newer Proxy A and older Proxy B, and set
+`MILVUS_T11_MIXED_TRANSPORT=1`. The tests exercise the older Proxy's
+`unimplemented` response using Java, Go and REST management calls.
+
 The T12 Proxy checkpoints live in `t12-failpoint/`. Apply the overlay to a
 compatible disposable source checkout with `python t12-failpoint/apply.py
 /path/to/milvus` before building the test server. Enable
