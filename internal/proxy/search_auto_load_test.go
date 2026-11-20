@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 )
 
 func TestEnsureCollectionReadyUsesOneRPC(t *testing.T) {
@@ -352,7 +353,7 @@ func newAutoLoadSchedulingProxy(t *testing.T) (*Proxy, *mocks.MockMixCoordClient
 	remove := mockey.Mock((*MockCache).RemoveCollection).Return().Build()
 	t.Cleanup(func() { remove.UnPatch() })
 	cache.EXPECT().GetCollectionID(mock.Anything, "db", "collection").Return(int64(100), nil).Maybe()
-	cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "collection", int64(0)).Return(&collectionInfo{
+	cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "collection", mock.Anything).Return(&collectionInfo{
 		CollID: 100, VChannels: []string{"v0"}, Schema: schema,
 	}, nil).Maybe()
 	cache.EXPECT().GetCollectionSchema(mock.Anything, "db", "collection").Return(schema, nil).Maybe()
@@ -463,6 +464,8 @@ type dqlRetryServer struct {
 	queries       atomic.Int32
 	failPhase     string
 	beforeViewRPC func(context.Context, string) error
+	// retrieved is what QueryOnView returns.
+	retrieved *schemapb.IDs
 }
 
 func (s *dqlRetryServer) failure(phase string) error {
@@ -484,7 +487,7 @@ func (s *dqlRetryServer) GetQueryPlan(_ context.Context, req *viewpb.GetQueryPla
 	plan := &viewpb.QueryPlan{
 		ShardId: &viewpb.ShardID{Vchannel: req.GetShardId().GetVchannel(), ReplicaId: 1},
 		Version: &viewpb.QueryViewVersion{},
-		Mvcc:    &viewpb.QueryPlanMVCC{},
+		Mvcc:    &viewpb.QueryPlanMVCC{GrowingTimetick: 1000, TransformingTimetick: 1000},
 		WorkNodes: []*viewpb.QueryPlanWorkNode{{Node: &viewpb.QueryPlanWorkNode_QueryNode{
 			QueryNode: &viewpb.QueryWorkNode{NodeId: 11},
 		}}},
@@ -520,7 +523,7 @@ func (s *dqlRetryServer) QueryOnView(ctx context.Context, _ *viewpb.QueryOnViewR
 			return nil, err
 		}
 	}
-	return &viewpb.QueryOnViewResponse{LegacyResults: &internalpb.RetrieveResults{Status: merr.Success()}}, nil
+	return &viewpb.QueryOnViewResponse{LegacyResults: &internalpb.RetrieveResults{Status: merr.Success(), Ids: s.retrieved}}, nil
 }
 
 type dqlRetryPlanClient struct {
@@ -556,8 +559,10 @@ func (c *dqlRetryServiceClient) QueryOnView(ctx context.Context, _ qviews.WorkNo
 
 type dqlRetryClient struct {
 	queryclient.Client
-	server *dqlRetryServer
-	checks atomic.Int32
+	server      *dqlRetryServer
+	coordinator *mocks.MockMixCoordClient
+	checks      atomic.Int32
+	loads       atomic.Int32
 }
 
 func (c *dqlRetryClient) ResolveVChannels(context.Context, int64) ([]string, error) {
@@ -590,10 +595,58 @@ func newDQLRetryClient(t *testing.T, phase string, loadInfo queryclient.LoadInfo
 	return client
 }
 
+// autoLoadTestRow is one row of the schema newAutoLoadSchedulingProxy creates.
+func autoLoadTestRow() []*schemapb.FieldData {
+	return []*schemapb.FieldData{
+		testutils.GenerateScalarFieldDataWithValue(schemapb.DataType_Int64, "id", 100, []int64{1}),
+		testutils.GenerateVectorFieldDataWithValue(schemapb.DataType_FloatVector, "vector", 101, []float32{1, 2, 3, 4}, 4),
+	}
+}
+
+// newDQLRetryProxy connects a scheduling Proxy to a dqlRetryClient whose coordinator
+// reports the server's load state.
+func newDQLRetryProxy(t *testing.T, phase string) (*Proxy, *dqlRetryClient) {
+	t.Helper()
+	node, coordinator := newAutoLoadSchedulingProxy(t)
+	oldRateCol := rateCol
+	require.NoError(t, node.initRateCollector())
+	t.Cleanup(func() { rateCol = oldRateCol })
+	client := newDQLRetryClient(t, phase, coordinator)
+	client.coordinator = coordinator
+	loadInfo := mockey.Mock((*mocks.MockMixCoordClient).GetQueryViewLoadInfo).To(func(_ *mocks.MockMixCoordClient, _ context.Context, _ *querypb.GetQueryViewLoadInfoRequest, _ ...grpc.CallOption) (*querypb.GetQueryViewLoadInfoResponse, error) {
+		if !client.server.loaded.Load() {
+			return nil, merr.WrapErrCollectionNotLoaded(100)
+		}
+		return &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success()}, nil
+	}).Build()
+	t.Cleanup(func() { loadInfo.UnPatch() })
+	node.viewQueryClient = client
+	return node, client
+}
+
+// expectAutoLoad makes EnsureCollectionReady load a released collection.
+func (c *dqlRetryClient) expectAutoLoad(t *testing.T) {
+	c.coordinator.EXPECT().EnsureCollectionReady(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, req *querypb.EnsureCollectionReadyRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+			require.EqualValues(t, 100, req.GetCollectionID())
+			c.checks.Add(1)
+			if !c.server.loaded.Load() {
+				c.loads.Add(1)
+				c.server.loaded.Store(true)
+			}
+			if c.server.failure("wait") != nil {
+				return merr.Status(merr.WrapErrCollectionNotLoaded(100)), nil
+			}
+			return merr.Success(), nil
+		})
+}
+
 // Use the real public Proxy entry, scheduler, task Execute, legacy query client,
 // shard retries, gRPC error transport, EnsureCollectionReady RPC and full DQL retries.
 // Parsing/reducing results and coordinator storage are replaced by test doubles.
 func TestDQLAutoLoadRetryThroughTaskAndGRPC(t *testing.T) {
+	useUnaryDQLRetryRPC(t)
+
 	for _, test := range []struct{ method, phase string }{
 		{"Search", "plan"},
 		{"Search", "search"},
@@ -611,7 +664,17 @@ func TestDQLAutoLoadRetryThroughTaskAndGRPC(t *testing.T) {
 	}
 }
 
+func useUnaryDQLRetryRPC(t *testing.T) {
+	t.Helper()
+	// This test's gRPC client only implements the unary QueryView RPCs.
+	params := paramtable.Get()
+	key, old := params.ProxyCfg.EnableReduceStream.Key, params.ProxyCfg.EnableReduceStream.GetValue()
+	t.Cleanup(func() { require.NoError(t, params.Save(key, old)) })
+	require.NoError(t, params.Save(key, "false"))
+}
+
 func TestDQLCancellationDuringInternalStage(t *testing.T) {
+	useUnaryDQLRetryRPC(t)
 	for _, tc := range []struct{ name, method, failPhase, cancelPhase string }{
 		{"requery", "Requery", "", "query"},
 		{"search_by_id", "SearchByPK", "", "query"},
@@ -625,11 +688,7 @@ func TestDQLCancellationDuringInternalStage(t *testing.T) {
 
 func checkDQLRetryThroughTaskAndGRPC(t *testing.T, method, failPhase, cancelPhase string) {
 	t.Helper()
-	node, coordinator := newAutoLoadSchedulingProxy(t)
-	oldRateCol := rateCol
-	require.NoError(t, node.initRateCollector())
-	t.Cleanup(func() { rateCol = oldRateCol })
-	client := newDQLRetryClient(t, failPhase, coordinator)
+	node, client := newDQLRetryProxy(t, failPhase)
 	if cancelPhase != "" {
 		node.requests = newTestRequests()
 	}
@@ -647,31 +706,10 @@ func checkDQLRetryThroughTaskAndGRPC(t *testing.T, method, failPhase, cancelPhas
 			return ctx.Err()
 		}
 	}
-	loadInfo := mockey.Mock((*mocks.MockMixCoordClient).GetQueryViewLoadInfo).To(func(_ *mocks.MockMixCoordClient, _ context.Context, _ *querypb.GetQueryViewLoadInfoRequest, _ ...grpc.CallOption) (*querypb.GetQueryViewLoadInfoResponse, error) {
-		if !client.server.loaded.Load() {
-			return nil, merr.WrapErrCollectionNotLoaded(100)
-		}
-		return &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success()}, nil
-	}).Build()
-	t.Cleanup(func() { loadInfo.UnPatch() })
-	node.viewQueryClient = client
 	if failPhase == "wait" {
 		client.server.loaded.Store(false)
 	}
-	var loads atomic.Int32
-	coordinator.EXPECT().EnsureCollectionReady(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, req *querypb.EnsureCollectionReadyRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
-			require.EqualValues(t, 100, req.GetCollectionID())
-			client.checks.Add(1)
-			if !client.server.loaded.Load() {
-				loads.Add(1)
-				client.server.loaded.Store(true)
-			}
-			if client.server.failure("wait") != nil {
-				return merr.Status(merr.WrapErrCollectionNotLoaded(100)), nil
-			}
-			return merr.Success(), nil
-		})
+	client.expectAutoLoad(t)
 
 	if method == "Requery" {
 		// Internal requery tasks use the scheduler's subtask path; their
@@ -704,10 +742,7 @@ func checkDQLRetryThroughTaskAndGRPC(t *testing.T, method, failPhase, cancelPhas
 	queryPost := mockey.Mock((*queryTask).PostExecute).To(func(qt *queryTask, _ context.Context) error {
 		queryResult = &milvuspb.QueryResults{Status: merr.Success()}
 		if method == "SearchByPK" {
-			queryResult.FieldsData = []*schemapb.FieldData{
-				{FieldId: 100, FieldName: "id", Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}}}}},
-				{FieldId: 101, FieldName: "vector", Type: schemapb.DataType_FloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 4, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}}}}},
-			}
+			queryResult.FieldsData = autoLoadTestRow()
 		}
 		return nil
 	}).Build()
@@ -821,10 +856,10 @@ func checkDQLRetryThroughTaskAndGRPC(t *testing.T, method, failPhase, cancelPhas
 	require.True(t, client.server.injected.Load())
 	require.EqualValues(t, 2, client.checks.Load())
 	if failPhase == "wait" {
-		require.EqualValues(t, 2, loads.Load())
+		require.EqualValues(t, 2, client.loads.Load())
 		require.EqualValues(t, 1, searchTasks.Load())
 	} else {
-		require.EqualValues(t, 1, loads.Load())
+		require.EqualValues(t, 1, client.loads.Load())
 		if method == "SearchByPK" && failPhase == "search" {
 			// qv recreates the PK lookup from the original IDs on each search attempt.
 			require.EqualValues(t, 2, queryTasks.Load())

@@ -381,7 +381,8 @@ func prepareAlterSchemaAddStructSubField(coll *model.Collection, plan *schemauti
 	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
 		field.TypeSchema.Nullable = parent.Nullable
 	}
-	merged := proto.Clone(model.MarshalStructArrayFieldModel(parent)).(*schemapb.StructArrayFieldSchema)
+	// MarshalStructArrayFieldModel already deep-copies the sub-fields.
+	merged := model.MarshalStructArrayFieldModel(parent)
 	merged.Fields = append(merged.Fields, proto.Clone(field).(*schemapb.FieldSchema))
 	if err := checkStructArrayFieldSchema([]*schemapb.StructArrayFieldSchema{merged}); err != nil {
 		return err
@@ -563,7 +564,7 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 			droppedField = f
 			continue
 		}
-		newFields = append(newFields, model.MarshalFieldModel(f))
+		newFields = append(newFields, model.CloneField(f))
 	}
 	if droppedField != nil {
 		// Mirror the proxy guard for direct-coord callers: a field a function
@@ -734,7 +735,7 @@ func buildSchemaForDropFunctionField(coll *model.Collection, functionName string
 	newFields := make([]*schemapb.FieldSchema, 0, len(coll.Fields))
 	for _, field := range coll.Fields {
 		if _, ok := outputFieldIDSet[field.FieldID]; !ok {
-			newFields = append(newFields, model.MarshalFieldModel(field))
+			newFields = append(newFields, model.CloneField(field))
 		}
 	}
 

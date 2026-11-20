@@ -190,6 +190,11 @@ func (r *reshardPlanExecutor) execute(ctx context.Context) error {
 	// directory).
 	defer r.writer.close()
 	r.buckets = newBucketTable(&r.fragment, int64(len(r.plan.GetPartitionIds())))
+	sourceCM, err := importutilv2.NewSourceChunkManager(r.ctx, r.plan.GetOptions(), r.cm)
+	if err != nil {
+		return err
+	}
+	r.source.cm = sourceCM
 	source := newReshardSourceStream(r.ctx, &r.source, r.plan.GetFiles(), r.writer, &r.stageTimings)
 	// Registered last, so a stopped run tears the source down before the writes
 	// it may have starved and before the spill manager its ranges live in.

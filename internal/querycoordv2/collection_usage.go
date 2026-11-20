@@ -24,16 +24,40 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	walbalance "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadstatus"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+type collectionReleaseReason string
+
+const (
+	releaseReasonTTI            collectionReleaseReason = "tti"
+	releaseReasonMemoryPressure collectionReleaseReason = "memory_pressure"
+)
+
+type releaseCandidate struct {
+	collectionID int64
+	lastActiveAt time.Time
+	reason       collectionReleaseReason
+}
+
+type collectionMemoryUsage struct {
+	used, total uint64
+}
+
 type collectionUsageManager struct {
+	s  *Server
 	mu sync.Mutex
 
 	enabled       bool
@@ -41,48 +65,43 @@ type collectionUsageManager struct {
 	configWatcher config.EventHandler
 	configChanged chan struct{}
 
-	loadConfigs *loadmgr.LoadConfigStore
-	broker      meta.Broker
-	release     func(context.Context, int64) error
+	// Pressure is retained between the low and high watermarks, per pool.
+	memoryPressure map[string]bool
 
 	stop context.CancelFunc
 	wg   sync.WaitGroup
 }
 
-func newCollectionUsageManager(
-	loadConfigs *loadmgr.LoadConfigStore,
-	broker meta.Broker,
-	release func(context.Context, int64) error,
-) *collectionUsageManager {
-	m := &collectionUsageManager{
-		lastActiveAt:  make(map[int64]time.Time),
-		loadConfigs:   loadConfigs,
-		broker:        broker,
-		release:       release,
-		configChanged: make(chan struct{}, 1),
-	}
-	loadConfigs.RegisterObserver(m.handleLoadConfigChange)
-	m.configWatcher = config.NewHandler(fmt.Sprintf("collection-usage-config-%p", m), func(*config.Event) {
-		m.refreshEnabled()
-	})
+func newCollectionUsageManager(s *Server) *collectionUsageManager {
 	params := paramtable.Get()
+	m := &collectionUsageManager{
+		s:              s,
+		lastActiveAt:   make(map[int64]time.Time),
+		memoryPressure: make(map[string]bool),
+		configChanged:  make(chan struct{}, 1),
+	}
+	s.qviewsRuntime.loadConfigStore.RegisterObserver(m.handleLoadConfigChange)
+	m.configWatcher = config.NewHandler(fmt.Sprintf("collection-usage-config-%p", m), func(*config.Event) {
+		m.refreshConfig()
+	})
 	params.Watch(params.QueryCoordCfg.AutoReleaseEnabled.Key, m.configWatcher)
 	params.Watch(params.ProxyCfg.EnableAutoLoad.Key, m.configWatcher)
 	// Read after subscribing so an update during construction cannot be missed.
-	m.refreshEnabled()
+	m.refreshConfig()
 	return m
 }
 
-func (m *collectionUsageManager) refreshEnabled() {
+func (m *collectionUsageManager) refreshConfig() {
 	params := paramtable.Get()
+	m.mu.Lock()
 	autoReleaseEnabled := params.QueryCoordCfg.AutoReleaseEnabled.GetAsBool()
 	autoLoadEnabled := params.ProxyCfg.EnableAutoLoad.GetAsBool()
 	misconfigured := autoReleaseEnabled && !autoLoadEnabled
 
-	m.mu.Lock()
 	m.enabled = autoReleaseEnabled && autoLoadEnabled
 	if !m.enabled {
 		clear(m.lastActiveAt)
+		clear(m.memoryPressure)
 	}
 	m.mu.Unlock()
 	if misconfigured {
@@ -158,6 +177,11 @@ func (m *collectionUsageManager) close() {
 	params := paramtable.Get()
 	params.Unwatch(params.QueryCoordCfg.AutoReleaseEnabled.Key, m.configWatcher)
 	params.Unwatch(params.ProxyCfg.EnableAutoLoad.Key, m.configWatcher)
+	m.mu.Lock()
+	m.enabled = false
+	clear(m.lastActiveAt)
+	clear(m.memoryPressure)
+	m.mu.Unlock()
 	if m.stop != nil {
 		m.stop()
 	}
@@ -166,7 +190,7 @@ func (m *collectionUsageManager) close() {
 
 // touch records a DQL attempt once the scanner has initialized this load's
 // idle timer from its load config.
-// Requests are not tracked individually; even a running query can outlive TTL.
+// Requests are not tracked individually; even a running query can outlive TTI.
 func (m *collectionUsageManager) touch(collectionID int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -195,55 +219,149 @@ func (m *collectionUsageManager) scan(ctx context.Context) {
 		return
 	}
 
-	snapshot := m.loadConfigs.Snapshot()
-	candidates := make([]int64, 0)
-	for collectionID := range snapshot.ConfigsMap() {
+	roleCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	b, err := walbalance.GetWithContext(roleCtx)
+	cancel()
+	if err != nil {
+		mlog.RatedWarn(ctx, 1.0, "failed to get cluster replication role, skip auto release scan", mlog.Err(err))
+		return
+	}
+	if b.ReplicateRole() != replicateutil.RolePrimary {
+		return
+	}
+
+	snapshot := m.s.qviewsRuntime.loadConfigStore.Snapshot()
+	pressure := m.pressuredPools(ctx)
+	limit := paramtable.Get().QueryCoordCfg.AutoReleaseLRUMaxEvictions.GetAsInt()
+	lru := typeutil.NewObjectArrayBasedMaximumHeap(nil, func(candidate releaseCandidate) int64 {
+		return candidate.lastActiveAt.UnixNano()
+	})
+	candidates := make([]releaseCandidate, 0)
+	for collectionID, cfg := range snapshot.ConfigsMap() {
 		if ctx.Err() != nil {
 			return
 		}
-		if m.shouldRelease(ctx, collectionID) {
-			candidates = append(candidates, collectionID)
+		candidate, tti, ok := m.releaseCandidate(ctx, collectionID)
+		if !ok {
+			continue
 		}
+		if tti < 0 {
+			continue
+		}
+		if idleFor(candidate.lastActiveAt, tti) {
+			candidate.reason = releaseReasonTTI
+			candidates = append(candidates, candidate)
+			continue
+		}
+		if underMemoryPressure(cfg, pressure) && m.collectionReady(collectionID) {
+			candidate.reason = releaseReasonMemoryPressure
+			if lru.Len() < limit {
+				lru.Push(candidate)
+			} else if candidate.lastActiveAt.Before(lru.Peek().lastActiveAt) {
+				lru.Pop()
+				lru.Push(candidate)
+			}
+		}
+	}
+	for lru.Len() > 0 {
+		candidates = append(candidates, lru.Pop())
 	}
 	m.releaseCollections(ctx, candidates)
 }
 
-func (m *collectionUsageManager) shouldRelease(ctx context.Context, collectionID int64) bool {
-	ttl, err := m.idleTTL(ctx, collectionID)
+func (m *collectionUsageManager) pressuredPools(ctx context.Context) map[string]bool {
+	params := &paramtable.Get().QueryCoordCfg
+	high := params.AutoReleaseLRUHighWatermark.GetAsFloat() / 100
+	low := params.AutoReleaseLRULowWatermark.GetAsFloat() / 100
+	if low >= high {
+		mlog.RatedWarn(ctx, 1.0, "collection LRU low watermark must be below high, skip LRU selection", mlog.Float64("low", low), mlog.Float64("high", high))
+		return nil
+	}
+	usages := m.collectMemoryUsageByRG(ctx)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.enabled {
+		return nil
+	}
+	pressure := make(map[string]bool, len(usages))
+	for pool, usage := range usages {
+		if usage.total == 0 {
+			continue
+		}
+		ratio := float64(usage.used) / float64(usage.total)
+		previous := m.memoryPressure[pool]
+		if ratio >= high {
+			m.memoryPressure[pool] = true
+		} else if ratio <= low {
+			m.memoryPressure[pool] = false
+		}
+		pressure[pool] = m.memoryPressure[pool]
+		if previous != pressure[pool] {
+			mlog.Info(ctx, "collection LRU memory pressure changed", mlog.String("resourceGroup", pool), mlog.Float64("memoryRatio", ratio), mlog.Bool("pressure", pressure[pool]))
+		}
+	}
+	return pressure
+}
+
+func (m *collectionUsageManager) releaseCandidate(ctx context.Context, collectionID int64) (releaseCandidate, time.Duration, bool) {
+	tti, err := m.tti(ctx, collectionID)
 	if err != nil {
-		mlog.RatedWarn(ctx, 1.0, "failed to get collection auto release TTL, skip this scan",
+		mlog.RatedWarn(ctx, 1.0, "failed to get collection auto release TTI, skip this scan",
 			mlog.FieldCollectionID(collectionID), mlog.Err(err))
-		return false
+		return releaseCandidate{}, 0, false
 	}
 	m.mu.Lock()
 	lastActiveAt, initialized := m.lastActiveAt[collectionID]
 	m.mu.Unlock()
 
-	// Start the idle TTL on the first scan and skip release for this round.
+	// Start the TTI timer on the first scan and skip release for this round.
 	if !initialized {
 		m.initializeLastActiveAt(collectionID)
-		return false
+		return releaseCandidate{}, 0, false
 	}
-	return ttl > 0 && time.Since(lastActiveAt) >= ttl
+	return releaseCandidate{collectionID: collectionID, lastActiveAt: lastActiveAt, reason: releaseReasonTTI}, tti, true
 }
 
-func (m *collectionUsageManager) releaseCollections(ctx context.Context, collectionIDs []int64) {
-	if len(collectionIDs) == 0 {
+func idleFor(lastActiveAt time.Time, tti time.Duration) bool {
+	return tti > 0 && time.Since(lastActiveAt) >= tti
+}
+
+func underMemoryPressure(cfg *loadmgr.LoadConfig, pressure map[string]bool) bool {
+	for _, replica := range cfg.Replicas {
+		if pressure[replica.ResourceGroup] {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *collectionUsageManager) collectionReady(collectionID int64) bool {
+	coll, err := m.s.meta.GetCollectionInfo(collectionID)
+	if err != nil {
+		return false
+	}
+	runtime := m.s.qviewsRuntime
+	return loadstatus.Get(runtime.loadConfigStore, runtime.shardViewRegistry, collectionID, coll.VChannelNames).Ready()
+}
+
+// releaseCollections reads the latest concurrency limit for this scan and waits
+// for the entire batch. Neither submission nor release holds the activity lock.
+func (m *collectionUsageManager) releaseCollections(ctx context.Context, candidates []releaseCandidate) {
+	if len(candidates) == 0 {
 		return
 	}
 	var group errgroup.Group
-	group.SetLimit(min(paramtable.Get().QueryCoordCfg.AutoReleaseConcurrency.GetAsInt(), len(collectionIDs)))
-	for _, collectionID := range collectionIDs {
+	group.SetLimit(min(paramtable.Get().QueryCoordCfg.AutoReleaseConcurrency.GetAsInt(), len(candidates)))
+	for _, candidate := range candidates {
 		if ctx.Err() != nil {
 			break
 		}
 		group.Go(func() error {
-			if ctx.Err() != nil {
-				return nil
-			}
-			if err := m.release(ctx, collectionID); err != nil {
-				mlog.Warn(ctx, "failed to auto release idle collection",
-					mlog.FieldCollectionID(collectionID), mlog.Err(err))
+			if ctx.Err() == nil {
+				if err := m.autoReleaseCollection(ctx, candidate.collectionID, candidate.reason); err != nil {
+					mlog.Warn(ctx, "failed to auto release collection",
+						mlog.FieldCollectionID(candidate.collectionID), mlog.String("releaseReason", string(candidate.reason)), mlog.Err(err))
+				}
 			}
 			return nil
 		})
@@ -252,7 +370,7 @@ func (m *collectionUsageManager) releaseCollections(ctx context.Context, collect
 }
 
 func (m *collectionUsageManager) initializeLastActiveAt(collectionID int64) {
-	if !m.loadConfigs.Contains(collectionID) {
+	if !m.s.qviewsRuntime.loadConfigStore.Contains(collectionID) {
 		return
 	}
 	m.mu.Lock()
@@ -267,36 +385,106 @@ func (m *collectionUsageManager) initializeLastActiveAt(collectionID int64) {
 
 	// Remove may finish between the first Contains and recording the timestamp.
 	// In that case its observer may have run before this record was added.
-	if !m.loadConfigs.Contains(collectionID) {
+	if !m.s.qviewsRuntime.loadConfigStore.Contains(collectionID) {
 		m.mu.Lock()
 		delete(m.lastActiveAt, collectionID)
 		m.mu.Unlock()
 	}
 }
 
-func (m *collectionUsageManager) idleTTL(ctx context.Context, collectionID int64) (time.Duration, error) {
-	properties, err := m.broker.GetCollectionProperties(ctx, collectionID)
+func (m *collectionUsageManager) tti(ctx context.Context, collectionID int64) (time.Duration, error) {
+	properties, err := m.s.broker.GetCollectionProperties(ctx, collectionID)
 	if err != nil {
 		return 0, err
 	}
-	ttl, err := common.GetCollectionAutoReleaseIdleTTL(properties)
+	tti, err := common.GetCollectionAutoReleaseTTI(properties)
 	if err != nil {
-		mlog.RatedWarn(ctx, 1.0, "invalid collection auto release TTL, use global default",
+		mlog.RatedWarn(ctx, 1.0, "invalid collection auto release TTI, use global default",
 			mlog.FieldCollectionID(collectionID), mlog.Err(err))
 	}
-	if err != nil || ttl == 0 {
-		ttl = paramtable.Get().QueryCoordCfg.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second)
+	if err != nil || tti == 0 {
+		tti = paramtable.Get().QueryCoordCfg.AutoReleaseTTISeconds.GetAsDuration(time.Second)
 	}
-	return ttl, nil
+	return tti, nil
 }
 
-func (s *Server) autoReleaseCollection(ctx context.Context, collectionID int64) error {
-	err := s.broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{
+func (m *collectionUsageManager) autoReleaseCollection(ctx context.Context, collectionID int64, reason collectionReleaseReason) error {
+	schema := m.s.meta.GetCollectionSchema(ctx, collectionID)
+	err := m.s.broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{
 		CollectionID: collectionID,
 	})
 	if err != nil {
 		return err
 	}
-	mlog.Info(ctx, "broadcast auto release for idle collection", mlog.FieldCollectionID(collectionID))
+	mlog.Info(ctx, "broadcast auto release for collection", mlog.String("event", "collection_auto_released"),
+		mlog.FieldCollectionID(collectionID), mlog.FieldDbName(schema.GetDbName()), mlog.FieldCollectionName(schema.GetName()),
+		mlog.String("releaseReason", string(reason)))
 	return nil
+}
+
+// collectMemoryUsageByRG reads node memory usage and capacity, independent of
+// admission thresholds and cache accounting. Only balanceable Worker QNs count.
+// A missing reading invalidates its entire pool for this scan.
+func (m *collectionUsageManager) collectMemoryUsageByRG(ctx context.Context) map[string]collectionMemoryUsage {
+	nodes := m.s.onlineQueryNodes()
+	groups := make([]string, len(nodes))
+	readings := make([]collectionMemoryUsage, len(nodes))
+	for i, node := range nodes {
+		groups[i] = m.s.meta.GetResourceGroupByNodeID(node.ID())
+	}
+	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.NodeMemoryMetrics)
+	if err != nil {
+		mlog.Warn(ctx, "failed to construct collection LRU memory metrics request", mlog.Err(err))
+		return nil
+	}
+	metricsCtx := retry.WithMaxAttemptsContext(ctx, 1)
+	var group errgroup.Group
+	group.SetLimit(maxConcurrentQueryNodeMetrics)
+	for i, node := range nodes {
+		if groups[i] == "" {
+			continue
+		}
+		group.Go(func() error {
+			rpcCtx, cancel := context.WithTimeout(metricsCtx, queryNodeMetricsTimeout)
+			defer cancel()
+			resp, err := m.s.cluster.GetMetrics(rpcCtx, node.ID(), req)
+			if err := merr.CheckRPCCall(resp, err); err != nil {
+				mlog.RatedWarn(ctx, 1.0, "collection LRU memory metrics unavailable, skip resource group", mlog.FieldNodeID(node.ID()), mlog.Err(err))
+				return nil
+			}
+			var info metricsinfo.NodeMemory
+			if err := metricsinfo.UnmarshalComponentInfos(resp.GetResponse(), &info); err != nil {
+				mlog.RatedWarn(ctx, 1.0, "invalid collection LRU memory metrics, skip resource group", mlog.FieldNodeID(node.ID()), mlog.Err(err))
+				return nil
+			}
+			// GetUsedMemoryCount returns zero when the process reading fails.
+			if info.Memory == 0 || info.MemoryUsage == 0 {
+				mlog.RatedWarn(ctx, 1.0, "collection LRU memory reading unavailable, skip resource group", mlog.FieldNodeID(node.ID()))
+				return nil
+			}
+			readings[i] = collectionMemoryUsage{used: info.MemoryUsage, total: info.Memory}
+			return nil
+		})
+	}
+	_ = group.Wait() // Individual failures invalidate their pools below.
+	usage := make(map[string]collectionMemoryUsage)
+	missing := make(map[string]bool)
+	for i, reading := range readings {
+		rg := groups[i]
+		if rg == "" {
+			continue
+		}
+		if reading.total == 0 {
+			missing[rg] = true
+			continue
+		}
+		pool := usage[rg]
+		pool.used += reading.used
+		pool.total += reading.total
+		usage[rg] = pool
+	}
+	for rg := range missing {
+		delete(usage, rg)
+	}
+	return usage
 }

@@ -2324,6 +2324,54 @@ func TestValidateExternalSnapshotPaths_ValidatesURIIdentityBeforeNormalization(t
 	}
 }
 
+func TestValidateSnapshotImportPaths_BareMetadataRejectsURIScheme(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		metadataPath string
+		manifestPath string
+		dataPath     string
+		wantErr      bool
+	}{
+		{
+			name:         "bare metadata with bare references",
+			metadataPath: "root/snapshots/100/metadata/1.json",
+			manifestPath: "root/snapshots/100/manifests/1/1001.avro",
+			dataPath:     "root/files/insert_log/100/1/1001/1",
+		},
+		{
+			name:         "bare metadata rejects URI manifest",
+			metadataPath: "root/snapshots/100/metadata/1.json",
+			manifestPath: "s3://source-bucket/root/snapshots/100/manifests/1/1001.avro",
+			dataPath:     "root/files/insert_log/100/1/1001/1",
+			wantErr:      true,
+		},
+		{
+			name:         "bare metadata rejects URI data reference",
+			metadataPath: "root/snapshots/100/metadata/1.json",
+			manifestPath: "root/snapshots/100/manifests/1/1001.avro",
+			dataPath:     "minio://other:9000/source-bucket/root/files/insert_log/100/1/1001/1",
+			wantErr:      true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot := &snapshotstorage.SnapshotData{
+				Layout:        datapb.SnapshotLayout_SnapshotLayoutReferenced,
+				ManifestPaths: []string{tt.manifestPath},
+			}
+			refs := []snapshotstorage.SnapshotFileRef{{
+				Path:           tt.dataPath,
+				NormalizedPath: snapshotstorage.NormalizeSnapshotObjectPath(tt.dataPath),
+			}}
+			err := snapshotstorage.ValidateSnapshotImportPaths(tt.metadataPath, snapshot, refs)
+			if !tt.wantErr {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+		})
+	}
+}
+
 func TestSnapshotWriter_SaveAllowsEmptyRoot(t *testing.T) {
 	t.Chdir(t.TempDir())
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))

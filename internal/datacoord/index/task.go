@@ -450,11 +450,6 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	// Send request to worker
 	if err = cluster.CreateIndex(nodeID, req); err != nil {
 		log.Warn(ctx, "failed to send job to worker", mlog.Err(err))
-		if metautil.IsSegmentRooted(req.GetIndexStorePathVersion()) && errors.Is(err, merr.ErrServiceUnimplemented) {
-			if updateErr := it.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, err.Error()); updateErr != nil {
-				log.Warn(ctx, "failed to persist unsupported index task failure", mlog.Err(updateErr))
-			}
-		}
 		return
 	}
 
@@ -794,7 +789,7 @@ func (it *indexBuildTask) prepareOptionalFields(ctx context.Context, collectionI
 				DataIds:     meta.GetBinLogIDs(segment, partitionKeyField.FieldID),
 			})
 
-			iso, isoErr := common.IsPartitionKeyIsolationPropEnabled(collectionInfo.Properties)
+			iso, isoErr := common.IsPartitionKeyIsolationKvEnabled(collectionInfo.Properties...)
 			if isoErr != nil {
 				mlog.Warn(ctx, "failed to parse partition key isolation", mlog.Err(isoErr))
 			}

@@ -49,7 +49,7 @@ func (s *SchedulerSuite) TestExternalSourcePreservesDestination() {
 		switch r.URL.Path {
 		case "/source-bucket/", "/source-bucket":
 			w.WriteHeader(http.StatusOK)
-		case "/source-bucket/external/data.json":
+		case "/source-bucket/external/v1:2026/data.json":
 			http.ServeContent(w, r, "data.json", time.Unix(1, 0), bytes.NewReader(data))
 		default:
 			s.T().Errorf("unexpected source path: %s", r.URL.Path)
@@ -72,7 +72,7 @@ func (s *SchedulerSuite) TestExternalSourcePreservesDestination() {
 		RootPath: "milvus", AccessKeyID: "destination-key", SecretAccessKey: "destination-secret",
 	}
 	originalConfig := proto.Clone(config)
-	files := []*internalpb.ImportFile{{Paths: []string{"external/data.json"}}}
+	files := []*internalpb.ImportFile{{Paths: []string{"external/v1:2026/data.json"}}}
 	pre := NewPreImportTask(&datapb.PreImportRequest{
 		JobID: 10, TaskID: 11, CollectionID: 12, PartitionIDs: []int64{13},
 		Vchannels: []string{"v0"}, Schema: s.schema, ImportFiles: files,

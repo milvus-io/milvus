@@ -437,8 +437,7 @@ func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	if err != nil {
 		mlog.Warn(ctx, "failed to create copy segment task on datanode",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
-		version, _ := t.GetIndexStorePathVersion()
-		if (job.GetExternal() || metautil.IsSegmentRooted(version)) && errors.Is(err, merr.ErrServiceUnimplemented) {
+		if job.GetExternal() && errors.Is(err, merr.ErrServiceUnimplemented) {
 			t.markTaskAndJobFailed(merr.Wrap(err,
 				"datanode does not support the requested copy segment task").Error())
 		}

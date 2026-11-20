@@ -224,6 +224,59 @@ func TestCommonConfigCollectionLevelMetricsMode(t *testing.T) {
 	assert.Equal(t, metrics.CollectionLevelMetricsModeAggregate, aggregateConfig.CollectionLevelMetricsMode.GetValue())
 }
 
+func TestProxyQueryViewStreamingConfig(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	t.Cleanup(base.mgr.Close)
+	config := proxyConfig{}
+	config.init(base)
+	assert.Equal(t, "true", config.EnableReduceStream.DefaultValue)
+	assert.True(t, config.EnableReduceStream.GetAsBool())
+	assert.Equal(t, 256*1024, config.ReduceStreamChunkBytes.GetAsInt())
+	assert.NoError(t, base.Save(config.EnableReduceStream.Key, "false"))
+	assert.NoError(t, base.Save(config.ReduceStreamChunkBytes.Key, "128"))
+	assert.False(t, config.EnableReduceStream.GetAsBool())
+	assert.Equal(t, 128, config.ReduceStreamChunkBytes.GetAsInt())
+
+	t.Setenv("PROXY_QUERYVIEW_ENABLEREDUCESTREAM", "false")
+	t.Setenv("PROXY_QUERYVIEW_REDUCESTREAMCHUNKBYTES", "256")
+	envBase := NewBaseTable(SkipRemote(true))
+	t.Cleanup(envBase.mgr.Close)
+	envConfig := proxyConfig{}
+	envConfig.init(envBase)
+	assert.False(t, envConfig.EnableReduceStream.GetAsBool())
+	assert.Equal(t, 256, envConfig.ReduceStreamChunkBytes.GetAsInt())
+}
+
+func TestProxyQueryViewStreamingConfigFileRefresh(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MILVUSCONF", dir)
+	path := filepath.Join(dir, "milvus.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("proxy:\n  queryView:\n    enableReduceStream: true\n    reduceStreamChunkBytes: 0\n"), 0o600))
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{"milvus.yaml"}), Interval(10*time.Millisecond))
+	t.Cleanup(base.mgr.Close)
+	cfg := proxyConfig{}
+	cfg.init(base)
+	for _, name := range []string{"EnableReduceStream", "ReduceStreamChunkBytes"} {
+		field, ok := reflect.TypeOf(&cfg).Elem().FieldByName(name)
+		require.True(t, ok)
+		require.Equal(t, "true", field.Tag.Get("refreshable"))
+	}
+	require.True(t, cfg.EnableReduceStream.GetAsBool())
+	require.Equal(t, 256*1024, cfg.ReduceStreamChunkBytes.GetAsInt())
+	for _, tc := range []struct {
+		enabled   bool
+		bytes     string
+		wantBytes int
+	}{{true, "64", 64}, {true, "256KB", 256 * 1024}, {true, "128", 128}, {true, "-1", 256 * 1024}, {false, "256", 256}} {
+		body := fmt.Sprintf("proxy:\n  queryView:\n    enableReduceStream: %t\n    reduceStreamChunkBytes: %s\n", tc.enabled, tc.bytes)
+		require.NoError(t, os.WriteFile(path+".tmp", []byte(body), 0o600))
+		require.NoError(t, os.Rename(path+".tmp", path))
+		require.Eventually(t, func() bool {
+			return cfg.EnableReduceStream.GetAsBool() == tc.enabled && cfg.ReduceStreamChunkBytes.GetAsInt() == tc.wantBytes
+		}, 5*time.Second, 10*time.Millisecond)
+	}
+}
+
 func TestComponentParam_DataCoordBumpSchemaVersionCompactionParams(t *testing.T) {
 	Init()
 	params := Get()
@@ -422,7 +475,7 @@ func TestQueryCoordAutoRelease(t *testing.T) {
 	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
 	params := queryCoordConfig{}
 	params.init(base)
-	for _, name := range []string{"AutoReleaseEnabled", "AutoReleaseIdleTTLSeconds", "AutoReleaseCheckInterval", "AutoReleaseConcurrency"} {
+	for _, name := range []string{"AutoReleaseEnabled", "AutoReleaseTTISeconds", "AutoReleaseCheckInterval", "AutoReleaseConcurrency", "AutoReleaseLRUHighWatermark", "AutoReleaseLRULowWatermark", "AutoReleaseLRUMaxEvictions"} {
 		field, ok := reflect.TypeOf(&params).Elem().FieldByName(name)
 		assert.True(t, ok)
 		assert.Equal(t, "true", field.Tag.Get("refreshable"), name)
@@ -430,30 +483,50 @@ func TestQueryCoordAutoRelease(t *testing.T) {
 
 	assert.Equal(t, "queryCoord.autoRelease.enabled", params.AutoReleaseEnabled.Key)
 	assert.False(t, params.AutoReleaseEnabled.GetAsBool())
-	assert.Equal(t, 600*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
-	assert.Equal(t, 30*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+	assert.Equal(t, "queryCoord.autoRelease.ttiSeconds", params.AutoReleaseTTISeconds.Key)
+	assert.Equal(t, time.Hour, params.AutoReleaseTTISeconds.GetAsDuration(time.Second))
+	assert.Equal(t, 10*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
 	assert.Equal(t, 16, params.AutoReleaseConcurrency.GetAsInt())
+	assert.Equal(t, 85.0, params.AutoReleaseLRUHighWatermark.GetAsFloat())
+	assert.Equal(t, 80.0, params.AutoReleaseLRULowWatermark.GetAsFloat())
+	assert.Equal(t, 64, params.AutoReleaseLRUMaxEvictions.GetAsInt())
+	assert.NoError(t, base.Save(params.AutoReleaseLRUHighWatermark.Key, "95"))
+	assert.Equal(t, 95.0, params.AutoReleaseLRUHighWatermark.GetAsFloat())
+	assert.NoError(t, base.Save(params.AutoReleaseLRULowWatermark.Key, "85"))
+	assert.Equal(t, 85.0, params.AutoReleaseLRULowWatermark.GetAsFloat())
+	assert.NoError(t, base.Save(params.AutoReleaseLRUMaxEvictions.Key, "7"))
+	assert.Equal(t, 7, params.AutoReleaseLRUMaxEvictions.GetAsInt())
+	for _, value := range []string{"invalid", "NaN", "+Inf", "0", "101"} {
+		assert.NoError(t, base.Save(params.AutoReleaseLRUHighWatermark.Key, value))
+		assert.Equal(t, 85.0, params.AutoReleaseLRUHighWatermark.GetAsFloat())
+		assert.NoError(t, base.Save(params.AutoReleaseLRULowWatermark.Key, value))
+		assert.Equal(t, 80.0, params.AutoReleaseLRULowWatermark.GetAsFloat())
+	}
+	for _, value := range []string{"invalid", "0", "-1"} {
+		assert.NoError(t, base.Save(params.AutoReleaseLRUMaxEvictions.Key, value))
+		assert.Equal(t, 64, params.AutoReleaseLRUMaxEvictions.GetAsInt())
+	}
 	assert.NoError(t, base.Save(params.AutoReleaseEnabled.Key, "true"))
 	assert.True(t, params.AutoReleaseEnabled.GetAsBool())
-	assert.NoError(t, base.Save(params.AutoReleaseIdleTTLSeconds.Key, "120"))
-	assert.Equal(t, 120*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseTTISeconds.Key, "120"))
+	assert.Equal(t, 120*time.Second, params.AutoReleaseTTISeconds.GetAsDuration(time.Second))
 	assert.NoError(t, base.Save(params.AutoReleaseCheckInterval.Key, "5"))
 	assert.Equal(t, 5*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
 	assert.NoError(t, base.Save(params.AutoReleaseConcurrency.Key, "4"))
 	assert.Equal(t, 4, params.AutoReleaseConcurrency.GetAsInt())
 
-	assert.NoError(t, base.Save(params.AutoReleaseIdleTTLSeconds.Key, "0"))
-	assert.Equal(t, 600*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseTTISeconds.Key, "0"))
+	assert.Equal(t, time.Hour, params.AutoReleaseTTISeconds.GetAsDuration(time.Second))
 	assert.NoError(t, base.Save(params.AutoReleaseCheckInterval.Key, "-1"))
-	assert.Equal(t, 30*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+	assert.Equal(t, 10*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
 	assert.NoError(t, base.Save(params.AutoReleaseConcurrency.Key, "0"))
 	assert.Equal(t, 16, params.AutoReleaseConcurrency.GetAsInt())
 
 	// 9,223,372,036 is the largest whole number of seconds that fits time.Duration.
-	assert.NoError(t, base.Save(params.AutoReleaseIdleTTLSeconds.Key, "9223372037"))
-	assert.Equal(t, 600*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseTTISeconds.Key, "9223372037"))
+	assert.Equal(t, time.Hour, params.AutoReleaseTTISeconds.GetAsDuration(time.Second))
 	assert.NoError(t, base.Save(params.AutoReleaseCheckInterval.Key, "9223372037"))
-	assert.Equal(t, 30*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+	assert.Equal(t, 10*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
 }
 
 func TestComponentParam_StorageIopsParams(t *testing.T) {

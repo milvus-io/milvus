@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -114,21 +115,14 @@ func validateStructFieldAlterKeys(schema *schemapb.CollectionSchema, req *milvus
 	return schemautil.ValidateStructFieldAlterKeys(target, req.GetFieldName(), keys)
 }
 
-func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Context, req *milvuspb.AlterCollectionFieldRequest) error {
-	broadcastAPI, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
-	if err != nil {
-		return err
-	}
-	defer broadcastAPI.Close()
-
-	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
-	if err != nil {
-		return err
-	}
-
+// buildAlterCollectionFieldSchema returns the schema an
+// alter_collection_field request produces for coll. It works on a copy
+// from ToCollectionSchemaPB, so coll and any view sharing its fields stay
+// unchanged. It returns errIgnoredAlterCollection when nothing changes.
+func buildAlterCollectionFieldSchema(coll *model.Collection, req *milvuspb.AlterCollectionFieldRequest) (*schemapb.CollectionSchema, error) {
 	oldFieldProperties, err := GetFieldProperties(coll, req.GetFieldName())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// The struct sub-field origin marker is internal; a property request can
 	// neither set nor delete it.
@@ -138,13 +132,13 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 	}
 	propertyKeys = append(propertyKeys, req.GetDeleteKeys()...)
 	if err := schemautil.RejectStructSubFieldOriginMarkerKeys(req.GetFieldName(), propertyKeys...); err != nil {
-		return err
+		return nil, err
 	}
 	// Check struct targets before the no-change shortcut below, so a rejected
 	// key is reported even when it would not change anything.
 	schema := coll.ToCollectionSchemaPB()
 	if err := validateStructFieldAlterKeys(schema, req); err != nil {
-		return err
+		return nil, err
 	}
 	oldFieldPropertiesMap := common.CloneKeyValuePairs(oldFieldProperties).ToMap()
 	var desc *commonpb.KeyValuePair = nil
@@ -165,7 +159,7 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 	propertiesChanged := !newFieldProperties.Equal(oldFieldProperties)
 	if !propertiesChanged && desc == nil {
 		// if there's no change, return nil directly to promise idempotent.
-		return errIgnoredAlterCollection
+		return nil, errIgnoredAlterCollection
 	}
 
 	// build new collection schema.
@@ -192,16 +186,35 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 	}
 	if targetField == nil {
 		if err := applyStructFieldAlter(schema, req, newFieldProperties, desc); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if err := validateSchemaEvolution(coll, schema); err != nil {
-		return err
+		return nil, err
 	}
 	if targetField != nil {
 		if err := checkNestedArrayTypeSchemaCapacity(targetField); err != nil {
-			return err
+			return nil, err
 		}
+	}
+	return schema, nil
+}
+
+func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Context, req *milvuspb.AlterCollectionFieldRequest) error {
+	broadcastAPI, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		return err
+	}
+	defer broadcastAPI.Close()
+
+	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
+	if err != nil {
+		return err
+	}
+
+	schema, err := buildAlterCollectionFieldSchema(coll, req)
+	if err != nil {
+		return err
 	}
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {

@@ -143,24 +143,7 @@ class TrackingVirtualPKChunkedColumn : public VirtualPKChunkedColumn {
         return VirtualPKChunkedColumn::GetChunk(op_ctx, chunk_id);
     }
 
-    TakeCellAccess
-    MakeTakeCellAccess(milvus::OpContext*,
-                       const std::vector<int64_t>* = nullptr) const override {
-        ++make_take_access_calls;
-        return {};
-    }
-
- protected:
-    std::unique_ptr<ColumnPlanner>
-    BuildPlanner() const override {
-        ++build_planner_calls;
-        return ChunkedColumnInterface::BuildPlanner();
-    }
-
- public:
     mutable int get_chunk_calls{0};
-    mutable int make_take_access_calls{0};
-    mutable int build_planner_calls{0};
 };
 
 TEST_F(VirtualPKChunkedColumnTest, TakeCandidateMaskSkipsUnrequestedOffsets) {
@@ -184,8 +167,6 @@ TEST_F(VirtualPKChunkedColumnTest, TakeCandidateMaskSkipsUnrequestedOffsets) {
         EXPECT_EQ(*take->Get<int64_t>(2).value, GetVirtualPK(12345, 3));
         EXPECT_THROW(take->IsValid(1), SegcoreError);
         EXPECT_EQ(take->GetOwn().size, 4);
-        EXPECT_EQ(column.build_planner_calls, 0);
-        EXPECT_EQ(column.make_take_access_calls, 0);
         EXPECT_EQ(column.get_chunk_calls, 0);
         TargetBitmap wrong_size(1, true);
         const auto wrong_size_view = wrong_size.view();
@@ -341,8 +322,6 @@ TEST_F(VirtualPKChunkedColumnTest,
         std::exception);
 
     EXPECT_EQ(column.get_chunk_calls, 0);
-    EXPECT_EQ(column.make_take_access_calls, 0);
-    EXPECT_EQ(column.build_planner_calls, 0);
 }
 
 TEST_F(VirtualPKChunkedColumnTest,
