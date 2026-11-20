@@ -25,6 +25,11 @@ import (
 )
 
 var (
+	ProxyUpsertWriteConditionRows = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: milvusNamespace, Subsystem: typeutil.ProxyRole, Name: "upsert_write_condition_rows_total",
+		Help: "Confirmed row-level outcomes of conditional upserts, including failed RPCs; unknown outcomes are excluded.",
+	}, []string{nodeIDLabelName, databaseLabelName, collectionName, outcomeLabelName})
+
 	ProxyReceivedNQ = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -482,6 +487,7 @@ var (
 
 // RegisterProxy registers Proxy metrics
 func RegisterProxy(registry *prometheus.Registry) {
+	registry.MustRegister(ProxyUpsertWriteConditionRows)
 	registry.MustRegister(ProxyReceivedNQ)
 	registry.MustRegister(ProxySearchVectors)
 	registry.MustRegister(ProxyInsertVectors)
@@ -554,6 +560,10 @@ func RegisterProxy(registry *prometheus.Registry) {
 }
 
 func CleanupProxyDBMetrics(nodeID int64, dbName string) {
+	ProxyUpsertWriteConditionRows.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+	})
 	ProxyPathReplaceParentOperations.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
@@ -593,6 +603,11 @@ func CleanupProxyDBMetrics(nodeID int64, dbName string) {
 }
 
 func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection string) {
+	ProxyUpsertWriteConditionRows.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+		collectionName:    collection,
+	})
 	ProxyPathReplaceParentOperations.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
