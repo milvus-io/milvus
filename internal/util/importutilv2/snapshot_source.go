@@ -257,10 +257,13 @@ type snapshotSourceScope struct {
 	partitionID int64
 }
 
-// validateSnapshotImportPlan checks shared L0 inventories after file validation.
-// Empty exact-scope entries are intentional:
+// ValidateImportPlan checks the complete durable representation before
+// publication and after ACK/recovery. Empty exact-scope entries are intentional:
 // a missing inventory is corruption, not evidence that a segment has no L0.
-func validateSnapshotImportPlan(files []*internalpb.ImportFile, options Options, sources []*internalpb.SnapshotImportL0Source) error {
+func ValidateImportPlan(files []*internalpb.ImportFile, options Options, sources []*internalpb.SnapshotImportL0Source) error {
+	if err := ValidateSnapshotImportFiles(files, options); err != nil {
+		return err
+	}
 	scopes := make(map[snapshotSourceScope]bool)
 	channels := make(map[string]bool)
 	size := 0
