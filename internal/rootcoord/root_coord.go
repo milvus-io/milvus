@@ -3529,7 +3529,7 @@ func isVisibleCollectionForCurUser(collectionName string, visibleCollections typ
 }
 
 func (c *Core) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
-	return c.quotaCenter.getQuotaMetrics(), nil
+	return c.quotaCenter.getQuotaMetrics(ctx), nil
 }
 
 // GetFeatureUsage computes the collection-derived groups of the feature usage
