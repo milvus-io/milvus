@@ -162,6 +162,12 @@ type SearchInfo struct {
 	collectionID    int64
 	orderByFields   []OrderByField
 	iterativeFilter bool
+	// isRangeSearch is reported so the caller can count the feature; the parse
+	// happens here and nothing else reconstructs it.
+	isRangeSearch bool
+	// requestedLimit is the limit the client asked for, before an iterator
+	// clamps it or the offset is added, reported for the limit distribution.
+	requestedLimit int64
 }
 
 const (
@@ -507,6 +513,8 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		}
 	}
 
+	requestedLimit := topK
+
 	isIteratorStr, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, searchParamsPair)
 	isIterator := (isIteratorStr == "True") || (isIteratorStr == "true")
 
@@ -668,6 +676,8 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		collectionID:    collectionId,
 		orderByFields:   orderByFields,
 		iterativeFilter: isIterativeFilter,
+		isRangeSearch:   isRangeSearch,
+		requestedLimit:  requestedLimit,
 	}, nil
 }
 
@@ -684,37 +694,44 @@ func getOutputFieldIDs(schema *schemaInfo, outputFields []string) (outputFieldID
 }
 
 func getNqFromSubSearch(req *milvuspb.SubSearchRequest) (int64, error) {
-	if req.GetNq() == 0 {
-		// keep compatible with older client version.
-		x := &commonpb.PlaceholderGroup{}
-		err := proto.Unmarshal(req.GetPlaceholderGroup(), x)
-		if err != nil {
-			return 0, err
-		}
-		total := int64(0)
-		for _, h := range x.GetPlaceholders() {
-			total += int64(len(h.Values))
-		}
-		return total, nil
-	}
-	return req.GetNq(), nil
+	return resolveNq(req.GetNq(), req.GetPlaceholderGroup(), "failed to unmarshal placeholder group for sub search")
 }
 
 func getNq(req *milvuspb.SearchRequest) (int64, error) {
-	if req.GetNq() == 0 {
-		// keep compatible with older client version.
-		x := &commonpb.PlaceholderGroup{}
-		err := proto.Unmarshal(req.GetPlaceholderGroup(), x)
-		if err != nil {
-			return 0, err
-		}
-		total := int64(0)
-		for _, h := range x.GetPlaceholders() {
-			total += int64(len(h.Values))
-		}
-		return total, nil
+	return resolveNq(req.GetNq(), req.GetPlaceholderGroup(), "failed to unmarshal placeholder group")
+}
+
+// resolveNq returns the number of query rows of a search. The placeholder
+// group is what the query nodes execute, so its row count is the answer; the
+// nq a client declares is optional (older clients and the RESTful API leave it
+// at 0) and has to agree with that count when both are present. A request
+// whose nq disagreed used to be forwarded and fail on a query node while
+// reducing results.
+//
+// A declared nq with no placeholder group at all is passed through unchanged:
+// that request carries nothing to search with and the query nodes refuse it.
+func resolveNq(declared int64, placeholderGroup []byte, malformedMsg string) (int64, error) {
+	if declared != 0 && len(placeholderGroup) == 0 {
+		return declared, nil
 	}
-	return req.GetNq(), nil
+	rows, err := funcutil.CountPlaceholderGroupValues(placeholderGroup)
+	if err != nil {
+		// Let the decoder name what is wrong with the bytes. Should it accept
+		// them after all, its count stands.
+		group := &commonpb.PlaceholderGroup{}
+		if err := proto.Unmarshal(placeholderGroup, group); err != nil {
+			return 0, merr.WrapErrParameterInvalidErr(err, "%s", malformedMsg)
+		}
+		rows = 0
+		for _, placeholder := range group.GetPlaceholders() {
+			rows += int64(len(placeholder.GetValues()))
+		}
+	}
+	if declared != 0 && declared != rows {
+		return 0, merr.WrapErrParameterInvalidMsg(
+			"nq %d does not match the %d query rows in the placeholder group", declared, rows)
+	}
+	return rows, nil
 }
 
 func GetPartitionIDs(ctx context.Context, metaCache Cache, dbName string, collectionName string, partitionNames []string) (partitionIDs []UniqueID, err error) {
