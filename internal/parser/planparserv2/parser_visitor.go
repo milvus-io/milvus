@@ -60,7 +60,6 @@ type ParserVisitor struct {
 	// ElementFilter or MATCH_* predicates.
 	currentStructArrayField string
 	currentScalarArray      *schemapb.FieldSchema
-	inMatchPredicate        bool
 }
 
 func NewParserVisitor(schema *typeutil.SchemaHelper, args *ParserVisitorArgs) *ParserVisitor {
@@ -1055,9 +1054,6 @@ func (v *ParserVisitor) VisitRegexNotMatch(ctx *parser.RegexNotMatchContext) int
 func (v *ParserVisitor) parseTextMatchOperand(identifier string, queryExpr parser.IExprContext, opName string, argName string) (*planpb.ColumnInfo, *planpb.GenericValue, string, bool, error) {
 	var columnInfo *planpb.ColumnInfo
 	if identifier == "$" || isValidStructSubField(identifier) {
-		if !v.inMatchPredicate {
-			return nil, nil, "", false, merr.WrapErrParameterInvalidMsg("%s on an array element requires MATCH_*", opName)
-		}
 		info, err := v.getColumnInfoFromStructSubField(identifier)
 		if err != nil {
 			return nil, nil, "", false, err
@@ -3785,9 +3781,7 @@ func (v *ParserVisitor) parseMatchExpr(collectionName string, exprCtx parser.IEx
 		}
 	}
 	v.currentStructArrayField = collectionName
-	v.inMatchPredicate = true
 	defer func() {
-		v.inMatchPredicate = false
 		v.currentScalarArray = nil
 		v.currentStructArrayField = ""
 	}()

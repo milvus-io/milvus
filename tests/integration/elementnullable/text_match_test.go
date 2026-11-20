@@ -53,7 +53,11 @@ func (s *ElementNullableSuite) TestArrayTextMatchLifecycle() {
 		{FieldID: 101, Name: "embedding", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{kv(common.DimKey, "8")}},
 		varcharArray(102, "tags", true, false),
 	}, StructArrayFields: []*schemapb.StructArrayFieldSchema{{
-		FieldID: 103, Name: "reviews", Nullable: true, Fields: []*schemapb.FieldSchema{varcharArray(104, "body", true, true), varcharArray(105, "lang", false, false)},
+		FieldID: 103, Name: "reviews", Nullable: true, Fields: []*schemapb.FieldSchema{
+			varcharArray(104, "body", true, true), varcharArray(105, "lang", false, false),
+			{FieldID: 106, Name: "vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector,
+				Nullable: true, TypeParams: []*commonpb.KeyValuePair{kv(common.DimKey, "8"), kv(common.MaxCapacityKey, "8")}},
+		},
 	}}}
 	s.Require().NoError(merr.Error(s.create(ctx, schema)))
 	defer func() {
@@ -61,6 +65,7 @@ func (s *ElementNullableSuite) TestArrayTextMatchLifecycle() {
 		s.NoError(merr.CheckRPCCall(resp, err))
 	}()
 	s.vsCreateIndex(ctx, name, "embedding")
+	s.vsCreateIndex(ctx, name, "reviews[vec]")
 	s.vsLoad(ctx, name)
 
 	insert := func(pks []int64, tags, body, lang []*schemapb.ScalarField, valid []bool) {
@@ -68,38 +73,44 @@ func (s *ElementNullableSuite) TestArrayTextMatchLifecycle() {
 		for _, pk := range pks {
 			embedding = append(embedding, vector(float32(pk))...)
 		}
-		for _, row := range body {
+		var reviewVectors []*schemapb.VectorField
+		for i, row := range body {
 			if row.ValidData == nil {
 				for range row.GetStringData().GetData() {
 					row.ValidData = append(row.ValidData, true)
 				}
 			}
+			var values []float32
+			for j := range row.ValidData {
+				values = append(values, vsVector(float32(i+j+1), int64(i), j)...)
+			}
+			reviewVectors = append(reviewVectors, vectorRow(values))
 		}
+		vecData := vectorField("vec", 106, reviewVectors...)
 		tagData, bodyData, langData := scalarField("tags", 102, tags...), scalarField("body", 104, body...), scalarField("lang", 105, lang...)
-		for _, field := range []*schemapb.FieldData{tagData, bodyData, langData} {
+		for _, field := range []*schemapb.FieldData{tagData, bodyData, langData, vecData} {
 			typeutil.SetFieldDataValidData(field, valid)
 		}
 		fields := []*schemapb.FieldData{
 			{FieldName: "pk", FieldId: 100, Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: pks}}}}},
 			{FieldName: "embedding", FieldId: 101, Type: schemapb.DataType_FloatVector, Field: &schemapb.FieldData_Vectors{Vectors: vectorRow(embedding)}},
 			tagData,
-			{FieldName: "reviews", FieldId: 103, Type: schemapb.DataType_ArrayOfStruct, Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{bodyData, langData}}}},
+			{FieldName: "reviews", FieldId: 103, Type: schemapb.DataType_ArrayOfStruct, Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{bodyData, langData, vecData}}}},
 		}
 		s.Require().NoError(s.insert(ctx, name, fields))
 	}
-	query := func(expr string, ignoreGrowing bool) ([]int64, error) {
+	query := func(t *testing.T, expr string, ignoreGrowing bool) ([]int64, []*milvuspb.ElementIndices) {
+		t.Helper()
 		req := &milvuspb.QueryRequest{CollectionName: name, Expr: expr, OutputFields: []string{"pk"}}
 		if ignoreGrowing {
 			req.QueryParams = []*commonpb.KeyValuePair{kv("ignore_growing", "true")}
 		}
 		resp, err := s.Cluster.MilvusClient.Query(ctx, req)
-		if err := merr.CheckRPCCall(resp, err); err != nil {
-			return nil, err
-		}
+		require.NoError(t, merr.CheckRPCCall(resp, err), expr)
 		if len(resp.GetFieldsData()) == 0 {
 			return nil, nil
 		}
-		return resp.GetFieldsData()[0].GetScalars().GetLongData().GetData(), nil
+		return resp.GetFieldsData()[0].GetScalars().GetLongData().GetData(), resp.GetElementIndices()
 	}
 	check := func(t *testing.T, lastPK int64, ignoreGrowing bool) {
 		for _, tc := range []struct {
@@ -124,9 +135,53 @@ func (s *ElementNullableSuite) TestArrayTextMatchLifecycle() {
 					want = append(want, id)
 				}
 			}
-			got, err := query(tc.expr, ignoreGrowing)
-			require.NoError(t, err, tc.expr)
+			got, _ := query(t, tc.expr, ignoreGrowing)
 			require.ElementsMatch(t, want, got, tc.expr)
+		}
+		type hit struct{ pk, offset int64 }
+		for _, tc := range []struct {
+			expr string
+			hits []hit
+		}{
+			{`ELEMENT_FILTER(reviews, TEXT_MATCH($[body], "new york"))`, []hit{{1, 0}, {2, 0}, {2, 1}, {4, 0}, {6, 1}}},
+			{`ELEMENT_FILTER(reviews, PHRASE_MATCH($[body], "new york", 99))`, []hit{{1, 0}, {4, 0}, {6, 1}}},
+			{`pk >= 2 && ELEMENT_FILTER(reviews, TEXT_MATCH($[body], "new york", minimum_should_match=2) && $[lang] == "en")`, []hit{{4, 0}}},
+			{`MATCH_ANY(tags, PHRASE_MATCH($, "new york")) && ELEMENT_FILTER(reviews, PHRASE_MATCH($[body], "new york"))`, []hit{{4, 0}}},
+			{`ELEMENT_FILTER(reviews, NOT TEXT_MATCH($[body], "york"))`, []hit{{1, 1}, {2, 0}}},
+		} {
+			var want []hit
+			for _, h := range tc.hits {
+				if h.pk <= lastPK {
+					want = append(want, h)
+				}
+			}
+			pks, indices := query(t, tc.expr, ignoreGrowing)
+			require.Len(t, indices, len(pks), tc.expr)
+			var got []hit
+			for i, pk := range pks {
+				for _, offset := range indices[i].GetIndices().GetData() {
+					got = append(got, hit{pk, offset})
+				}
+			}
+			require.ElementsMatch(t, want, got, tc.expr)
+
+			for _, hint := range []string{"", "iterative_filter"} {
+				var params []*commonpb.KeyValuePair
+				if hint != "" {
+					params = append(params, kv(common.HintsKey, hint))
+				}
+				if ignoreGrowing {
+					params = append(params, kv("ignore_growing", "true"))
+				}
+				request := vsSearchRequest(name, "reviews[vec]", tc.expr, true, vsLimit, nil, params...)
+				resp, err := s.Cluster.MilvusClient.Search(ctx, request)
+				require.NoError(t, merr.CheckRPCCall(resp, err), "%s hint=%q", tc.expr, hint)
+				var found []hit
+				for _, h := range vsHits(resp.GetResults()) {
+					found = append(found, hit{h.pk, h.offset})
+				}
+				require.ElementsMatch(t, want, found, "%s hint=%q", tc.expr, hint)
+			}
 		}
 	}
 	insert([]int64{1, 2, 3},
@@ -135,14 +190,9 @@ func (s *ElementNullableSuite) TestArrayTextMatchLifecycle() {
 		[]*schemapb.ScalarField{stringRow("fr", "en"), stringRow("en", "en"), stringRow()}, []bool{true, true, true})
 	s.Run("growing", func() {
 		check(s.T(), 3, false)
-		ids, err := query("pk > 0", true)
-		s.Require().NoError(err)
+		ids, _ := query(s.T(), "pk > 0", true)
 		s.Empty(ids, "growing rows must disappear with ignore_growing")
 	})
-	for _, expr := range []string{`ELEMENT_FILTER(reviews, TEXT_MATCH($[body], "york"))`, `ELEMENT_FILTER(reviews, PHRASE_MATCH($[body], "new york"))`} {
-		_, err := query(expr, false)
-		s.Require().ErrorContains(err, "on an array element requires MATCH_*")
-	}
 	s.vsFlush(ctx, name)
 	nullAndPhrase := stringRow("new york")
 	nullAndPhrase.ValidData = []bool{false, true}
@@ -152,8 +202,7 @@ func (s *ElementNullableSuite) TestArrayTextMatchLifecycle() {
 		[]*schemapb.ScalarField{stringRow("en"), stringRow("en", "fr")}, []bool{true, false, true})
 	s.Run("second_batch_growing", func() {
 		check(s.T(), 6, false)
-		ids, err := query("pk >= 4", true)
-		s.Require().NoError(err)
+		ids, _ := query(s.T(), "pk >= 4", true)
 		s.Empty(ids, "the second batch must still be growing")
 	})
 	s.flushAndReload(ctx, name)

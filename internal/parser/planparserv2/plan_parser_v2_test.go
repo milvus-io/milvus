@@ -6236,6 +6236,8 @@ func TestArrayTextMatchOperand(t *testing.T) {
 		filter  string
 		fieldID int64
 	}{
+		{`ELEMENT_FILTER(struct_array, TEXT_MATCH($[sub_str], "a b", minimum_should_match=2))`, field.GetFieldID()},
+		{`ELEMENT_FILTER(struct_array, PHRASE_MATCH($[sub_str], "a b", 2))`, field.GetFieldID()},
 		{`MATCH_ANY(struct_array, TEXT_MATCH($[sub_str], "a b", minimum_should_match=2))`, field.GetFieldID()},
 		{`MATCH_EXACT(struct_array, PHRASE_MATCH($[sub_str], "a b", 2), threshold=1)`, field.GetFieldID()},
 		{`MATCH_LEAST(tags, TEXT_MATCH($, "a b", minimum_should_match=2), threshold=2)`, tags.GetFieldID()},
@@ -6243,7 +6245,11 @@ func TestArrayTextMatchOperand(t *testing.T) {
 	} {
 		plan, err := ParseExpr(helper, tc.filter, nil)
 		require.NoError(t, err)
-		leaf := plan.GetMatchExpr().GetPredicate().GetUnaryRangeExpr()
+		predicate := plan.GetMatchExpr().GetPredicate()
+		if ef := plan.GetElementFilterExpr(); ef != nil {
+			predicate = ef.GetElementExpr()
+		}
+		leaf := predicate.GetUnaryRangeExpr()
 		require.Equal(t, tc.fieldID, leaf.GetColumnInfo().GetFieldId())
 		require.True(t, leaf.GetColumnInfo().GetIsElementLevel())
 		require.True(t, leaf.GetColumnInfo().GetNullable())
@@ -6254,10 +6260,14 @@ func TestArrayTextMatchOperand(t *testing.T) {
 		`TEXT_MATCH($, "x")`, `MATCH_ANY(tags, TEXT_MATCH($[sub_str], "x"))`,
 		`MATCH_ANY(struct_array, PHRASE_MATCH($, "x"))`,
 		`MATCH_ANY(struct_array, PHRASE_MATCH($[sub_int], "x"))`,
-		`element_filter(struct_array, TEXT_MATCH($[sub_str], "x"))`,
-		`element_filter(struct_array, PHRASE_MATCH($[sub_str], "new york"))`,
+		`element_filter(tags, TEXT_MATCH($, "x"))`,
+		`element_filter(struct_array, PHRASE_MATCH($[sub_int], "x"))`,
+		`element_filter(struct_array, TEXT_MATCH($[missing], "x"))`,
 	} {
 		_, err := ParseExpr(helper, filter, nil)
 		require.Error(t, err, filter)
 	}
+	disabled := newTestSchemaHelper(t)
+	_, err = ParseExpr(disabled, `ELEMENT_FILTER(struct_array, TEXT_MATCH($[sub_str], "x"))`, nil)
+	require.ErrorContains(t, err, "does not enable match")
 }
