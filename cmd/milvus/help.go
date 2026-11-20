@@ -13,7 +13,7 @@ const (
 
 var (
 	usageLine = fmt.Sprintf("Usage:\n"+
-		"%s\n%s\n%s\n%s\n", runLine, stopLine, mckLine, serverTypeLine)
+		"%s\n%s\n%s\n%s\n%s\n", runLine, stopLine, mckLine, explainLine, serverTypeLine)
 
 	serverTypeLine = `
 [server type]
@@ -66,5 +66,20 @@ milvus mck run [flags]
 milvus mck cleanTrash [flags]
 	Clean the back inconsistent data
 	Tips: The flags is the same as its of the 'milvus mck [flags]'
+`
+	explainLine = `
+milvus explain [flags]
+	Show the plan a search would run, without running it.
+	The search request body (the JSON a POST to /v2/vectordb/entities/search takes)
+	is sent to the explain API of a running Milvus and the answer is printed.
+[flags]
+	-address 'http://localhost:19530'
+		Base URL of the Milvus RESTful API.
+	-token ''
+		Credentials, sent as a bearer token, e.g. 'root:Milvus'.
+	-format 'json'
+		Output format: json or text. Replaces a 'format' key in the body.
+	-file '-'
+		File holding the search request body; '-' reads it from stdin.
 `
 )

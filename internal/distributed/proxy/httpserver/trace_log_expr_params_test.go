@@ -85,6 +85,19 @@ func TestTraceLogRedactsExprParams(t *testing.T) {
 		assertAllRedacted(t, out.ExprParams)
 	})
 
+	t.Run("explain", func(t *testing.T) {
+		// logged as the search body it embeds
+		out := redact(&ExplainReqV2{
+			SearchReqV2: SearchReqV2{
+				CollectionName: "c",
+				Filter:         "membership_match(id, {ids}, type=roaring)",
+				ExprParams:     map[string]json.RawMessage{"ids": secretJSON},
+			},
+			Format: ExplainFormatText,
+		}).(*SearchReqV2)
+		assertAllRedacted(t, out.ExprParams)
+	})
+
 	t.Run("hybrid search sub-requests", func(t *testing.T) {
 		out := redact(&HybridSearchReq{
 			CollectionName: "c",
