@@ -1,0 +1,23 @@
+// Run from the Go SDK module with CancelRequests support:
+// go run /absolute/path/manual_go_cancel_empty_ids.go
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+
+	"github.com/milvus-io/milvus/client/v3/milvusclient"
+)
+
+func main() {
+	// Validation occurs before the SDK uses a connection.
+	client := &milvusclient.Client{}
+	_, err := client.CancelRequests(context.Background(), milvusclient.NewCancelRequestsOption())
+	var codedError interface{ Code() int32 }
+	if !errors.As(err, &codedError) || codedError.Code() != 1101 {
+		log.Fatalf("expected code=1101, got %v", err)
+	}
+	fmt.Printf("Go CancelRequests([]): code=%d error=%v\n", codedError.Code(), err)
+}

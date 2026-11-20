@@ -163,5 +163,4 @@ def test_rest_search_cancel_lifecycle(rest, request):
     assert all(item["requestId"] != request_id for item in remaining), remaining
     control = search(vectors[:1])
     assert control["code"] == 0 and len(control["data"]) == TOPK, control
-    # Keep the observed NQ defect visible: https://github.com/milvus-io/milvus/issues/55691.
     assert row["nq"] == NQ and row["topk"] == TOPK, row
