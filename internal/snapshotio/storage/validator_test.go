@@ -49,6 +49,19 @@ func validateSnapshotForeignStorageForTest(
 	return cfg, bucket, root, scheme, nil
 }
 
+func TestSnapshotStorageCannotSupplySourceBinding(t *testing.T) {
+	for _, spec := range []string{
+		`{"credential_binding":null}`,
+		`{"credential_\u0062inding":{}}`,
+		`{"credential_binding":{},"credential_binding":null}`,
+		`{"credential_binding":null,"extfs":{"source_sas_token":"synthetic-sas"}}`,
+	} {
+		_, err := parseSnapshotExternalSpec(spec)
+		require.Error(t, err)
+		require.NotContains(t, err.Error(), "synthetic-sas")
+	}
+}
+
 func TestValidateSnapshotForeignStorageRejectsUnsupportedAuthKeys(t *testing.T) {
 	foreignURI := "s3://foreign-bucket/root/snapshots/100/metadata/1.json"
 	tests := []struct {

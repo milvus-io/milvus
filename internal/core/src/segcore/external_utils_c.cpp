@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "storage/StatusToErrorCode.h"
+#include "storage/loon_ffi/source_context.h"
 #include "segcore/external_utils_c.h"
 #include "common/FastMem.h"
 
@@ -104,7 +106,7 @@ ReadManifestColumnGroupsWithFFI(const char* manifest_path,
     auto status = milvus_storage::column_groups_import(
         &manifest.manifest->column_groups, cgs.get());
     if (!status.ok()) {
-        auto error = milvus_storage::ToSegcoreError(status);
+        auto error = milvus::storage::SourceAwareStorageError(status);
         ThrowInfo(error.get_error_code(),
                   "import external segment column groups: {}",
                   error.what());
@@ -166,8 +168,17 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
         }
 
         // 4. Create schemaless Reader (nullptr schema → types from file)
-        auto reader = milvus_storage::api::Reader::create(
-            cgs, nullptr, nullptr, properties);
+        milvus::proto::schema::CollectionSchema source_schema;
+        if (collection_schema.proto_blob != nullptr &&
+            collection_schema.proto_size > 0 &&
+            !source_schema.ParseFromArray(collection_schema.proto_blob,
+                                          collection_schema.proto_size)) {
+            return MakeCStatusError("failed to parse collection schema");
+        }
+        auto source_context = milvus::storage::OpenSourceReadContext(
+            source_schema.external_source(), source_schema.external_spec());
+        auto reader = milvus::storage::CreateSourceReader(
+            cgs, nullptr, nullptr, properties, source_context);
 
         // 5. Take sample rows [0, 1, ..., actual-1]
         std::vector<int64_t> indices(actual);
@@ -175,7 +186,8 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
 
         auto result = reader->take(indices, 1);
         if (!result.ok()) {
-            auto error = milvus_storage::ToSegcoreError(result.status());
+            auto error =
+                milvus::storage::SourceAwareStorageError(result.status());
             return milvus::FailureCStatus(&error);
         }
         auto table = result.ValueOrDie();

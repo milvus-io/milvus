@@ -194,6 +194,7 @@ func FetchFragmentsFromExternalSourceWithRange(
 	}
 
 	extfs := ExternalSpecContext{
+		Context:      ctx,
 		CollectionID: opts.CollectionID,
 		Source:       externalSource,
 		Spec:         opts.ExternalSpec,

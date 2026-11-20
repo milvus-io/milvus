@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/milvus-io/milvus/pkg/v3/sourceauth"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -71,11 +72,12 @@ const (
 
 // ExternalSpec represents the parsed external collection specification.
 type ExternalSpec struct {
-	Format     string            `json:"format"`          // one of Format* constants
-	Columns    []string          `json:"columns"`         // optional: specific columns to load
-	Extfs      map[string]string `json:"extfs,omitempty"` // optional: extfs config overrides
-	SnapshotID *int64            `json:"snapshot_id,omitempty"`
-	ScanMode   string            `json:"scan_mode,omitempty"` // Paimon: auto, direct-file, or data-split
+	Format            string              `json:"format"`          // one of Format* constants
+	Columns           []string            `json:"columns"`         // optional: specific columns to load
+	Extfs             map[string]string   `json:"extfs,omitempty"` // optional: extfs config overrides
+	SnapshotID        *int64              `json:"snapshot_id,omitempty"`
+	ScanMode          string              `json:"scan_mode,omitempty"` // Paimon: auto, direct-file, or data-split
+	CredentialBinding *sourceauth.Binding `json:"credential_binding,omitempty"`
 }
 
 // UnmarshalJSON accepts snapshot_id as either a JSON number or a decimal

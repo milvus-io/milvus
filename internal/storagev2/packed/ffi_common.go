@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/sourceauth"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -396,6 +397,8 @@ func (m MilvusTablePrimaryKeyMode) usesExternalPrimaryKey() bool {
 // signals an internal (non-external) collection — injectExternalSpecProperties
 // treats it as a no-op.
 type ExternalSpecContext struct {
+	// Reader/job context, never the original Proxy authorization request.
+	Context      context.Context
 	CollectionID int64
 	Source       string
 	Spec         string // raw JSON; C++ InjectExternalSpecProperties parses
@@ -449,9 +452,23 @@ func injectExternalSpecProperties(properties *C.LoonProperties, collectionID int
 	return nil
 }
 
+func (e ExternalSpecContext) operationContext() context.Context {
+	if e.Context != nil {
+		return e.Context
+	}
+	return context.Background()
+}
+
 func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 	defer C.loon_ffi_free_result(&ffiResult)
 	if C.loon_ffi_is_success(&ffiResult) == 0 {
+		if err, ok := sourceauth.ErrorFromNativeCode(int(ffiResult.err_code)); ok {
+			marker := ErrLoonPermanent
+			if sourceauth.StatusFromError(err) == sourceauth.CredentialTransient {
+				marker = ErrLoonTransient
+			}
+			return errors.Join(err, marker)
+		}
 		errMsg := C.loon_ffi_get_errmsg(&ffiResult)
 		errStr := "Unknown error"
 		if errMsg != nil {

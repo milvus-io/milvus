@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "milvus-storage/source_read_context.h"
 #include <algorithm>
 #include "common/FastMem.h"
 #include "common/Consts.h"
@@ -454,7 +455,8 @@ VisitFieldDataFromManifest(
     std::optional<DataType> element_type,
     std::optional<StorageColumnMapping> storage_column_mapping,
     const FieldDataVisitor& visitor,
-    int64_t max_inflight_bytes = kStreamingInflightBytes);
+    int64_t max_inflight_bytes = kStreamingInflightBytes,
+    milvus_storage::SourceReadContextPtr source_context = nullptr);
 
 // Visits a Milvus-written TEXT column of a manifest as logical UTF-8 values.
 // Such a column stores LOB-encoded cells: a value below the inline threshold
@@ -484,7 +486,8 @@ IterateFieldDataFromManifest(
     const std::function<void(FieldDataPtr)>& consumer,
     int64_t max_inflight_bytes = kStreamingInflightBytes,
     size_t max_rows = 0,
-    size_t offset = 0);
+    size_t offset = 0,
+    milvus_storage::SourceReadContextPtr source_context = nullptr);
 
 std::vector<FieldDataPtr>
 GetFieldDatasFromManifest(
@@ -497,7 +500,8 @@ GetFieldDatasFromManifest(
     std::optional<DataType> element_type,
     size_t max_rows = 0,
     size_t offset = 0,
-    std::optional<StorageColumnMapping> storage_column_mapping = std::nullopt);
+    std::optional<StorageColumnMapping> storage_column_mapping = std::nullopt,
+    milvus_storage::SourceReadContextPtr source_context = nullptr);
 
 std::vector<FieldDataPtr>
 GetTextFieldDatasFromManifest(

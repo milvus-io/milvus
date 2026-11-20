@@ -989,6 +989,12 @@ func (m *Manager) createTasksForJob(
 				"cannot explore external collection %d, object=%q: %s",
 				job.GetCollectionId(), objectPath, err.Error())
 		}
+		if errors.Is(err, merr.ErrSourceAuthTransient) {
+			return nil, merr.Wrap(err, "source authorization temporarily unavailable during exploration")
+		}
+		if merr.IsPermanentSourceAuthErr(err) {
+			return nil, newNonRetriableJobError("source authorization failed: %v", err)
+		}
 		// Hard explore failures are terminal for this job: the source is
 		// unreachable, denied, malformed, absent, or its snapshot metadata
 		// is incompatible with the requested external format. Surface them
@@ -1284,6 +1290,7 @@ func (m *Manager) exploreExternalFiles(
 	columns := packed.GetColumnNamesFromSchema(collInfo.Schema)
 	storageConfig := meta.CreateStorageConfig()
 	extfs := packed.ExternalSpecContext{
+		Context:           ctx,
 		CollectionID:      job.GetCollectionId(),
 		Source:            job.GetExternalSource(),
 		Spec:              job.GetExternalSpec(),

@@ -50,6 +50,7 @@
 #include "storage/Types.h"
 #include "storage/loon_ffi/external_spec_c.h"
 #include "storage/loon_ffi/property_singleton.h"
+#include "storage/loon_ffi/source_context.h"
 #include "storage/loon_ffi/util.h"
 #include "storage/loon_ffi/loon_error_code.h"
 
@@ -636,6 +637,9 @@ InjectExternalSpecProperties(
 
     // External origin filesystems retain the same SDK backend as internal I/O.
     properties[extfs_prefix + "s3.use_crt"] = std::string("false");
+    ARROW_ASSIGN_OR_RAISE(
+        auto bound_resource,
+        milvus::storage::SourceContextResource(external_source, external_spec));
 
     // Layer 0: zero-init bool fields only (milvus-storage rejects empty
     // strings on enum-constrained keys like cloud_provider).
@@ -1001,6 +1005,16 @@ InjectExternalSpecProperties(
     auto final_cp = milvus_storage::api::GetValue<std::string>(
         final_properties, (extfs_prefix + "cloud_provider").c_str());
     bool is_azure = final_cp.ok() && *final_cp == "azure";
+    if (bound_resource) {
+        // The legacy derivation above interprets ABFSS authority and HTTPS
+        // account endpoints incorrectly. Context mode accepts only the narrow
+        // configuration validated before mutation and uses native URI routing.
+        // Properties grant no access: get_with_context checks them and the
+        // original, unmodified URI against the context's authorized roots.
+        properties[extfs_prefix + "address"] = bound_resource->endpoint_suffix;
+        properties[extfs_prefix + "bucket_name"] = bound_resource->container;
+        properties[extfs_prefix + "use_ssl"] = std::string("true");
+    }
     auto final_use_ssl = milvus_storage::api::GetValue<std::string>(
         final_properties, (extfs_prefix + "use_ssl").c_str());
     auto final_address = milvus_storage::api::GetValue<std::string>(

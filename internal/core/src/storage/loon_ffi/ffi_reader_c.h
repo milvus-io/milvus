@@ -74,7 +74,8 @@ NewPackedFFIReaderWithManifest(const LoonManifest* loon_manifest,
                                CPluginContext* c_plugin_context,
                                int64_t collection_id,
                                const char* external_source,
-                               const char* external_spec);
+                               const char* external_spec,
+                               uintptr_t source_context);
 
 /**
  * @brief Creates a new packed FFI reader from explicit column groups.
@@ -93,7 +94,8 @@ NewPackedFFIReaderWithColumnGroups(const LoonColumnGroups* column_groups,
                                    CPluginContext* c_plugin_context,
                                    int64_t collection_id,
                                    const char* external_source,
-                                   const char* external_spec);
+                                   const char* external_spec,
+                                   uintptr_t source_context);
 
 /**
  * @brief Gets an ArrowArrayStream from the FFI reader for streaming data access.
@@ -125,6 +127,11 @@ GetFFIReaderStream(CFFIPackedReader c_packed_reader,
  *
  * @return CStatus indicating success or failure.
  */
+// Arrow C Stream erases StatusDetail. Read this typed status after get_next
+// fails so source authorization outcomes survive the Arrow bridge.
+CStatus
+GetFFIReaderLastError(CFFIPackedReader c_packed_reader);
+
 CStatus
 CloseFFIReader(CFFIPackedReader c_packed_reader);
 

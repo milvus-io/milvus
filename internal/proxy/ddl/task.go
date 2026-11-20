@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/sourceauth"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -347,10 +348,24 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 	if err := typeutil.NormalizeAndValidateExternalCollectionSchema(t.schema); err != nil {
 		return err
 	}
+	if err := sourceauth.RejectClientBinding(t.schema.GetExternalSpec()); err != nil {
+		return err
+	}
 	if t.schema.GetExternalSource() != "" {
-		if err := externalspec.ValidateSourceAndSpec(t.schema.GetExternalSource(), t.schema.GetExternalSpec(), paramtable.Get().CommonCfg.CredentialBrokerPolicy()); err != nil {
+		if err := externalspec.ValidateRequestSourceAndSpec(t.schema.GetExternalSource(), t.schema.GetExternalSpec(), sourceauth.HasAuthorizer(t.TraceCtx()), paramtable.Get().CommonCfg.CredentialBrokerPolicy()); err != nil {
 			return err
 		}
+		authorizedSpec, err := sourceauth.Prepare(t.TraceCtx(), sourceauth.Operation{
+			Database: t.GetDbName(), Collection: t.GetCollectionName(),
+			Source: t.schema.GetExternalSource(), Spec: t.schema.GetExternalSpec(),
+		}, true)
+		if err != nil {
+			return err
+		}
+		if err := externalspec.ValidateSourceAndSpec(t.schema.GetExternalSource(), authorizedSpec, paramtable.Get().CommonCfg.CredentialBrokerPolicy()); err != nil {
+			return err
+		}
+		t.schema.ExternalSpec = authorizedSpec
 	}
 	if err := validateTextStorageV3Enabled(t.schema); err != nil {
 		return err

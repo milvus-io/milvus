@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "storage/StatusToErrorCode.h"
+#include "storage/loon_ffi/source_context.h"
+#include "storage/loon_ffi/tracked_batch_reader.h"
 #include <arrow/c/bridge.h>
 #include <exception>
+#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
@@ -39,6 +43,14 @@
 #include <arrow/array.h>
 #include <arrow/record_batch.h>
 #include "storage/StatusToErrorCode.h"
+
+namespace {
+struct PackedReaderState {
+    std::unique_ptr<milvus_storage::api::Reader> reader;
+    std::shared_ptr<std::atomic<int>> last_error =
+        std::make_shared<std::atomic<int>>(0);
+};
+}  // namespace
 
 /**
  * @brief Creates a Loon reader with optional CMEK decryption support.
@@ -66,19 +78,21 @@ GetLoonReader(
     char** needed_columns,
     int64_t needed_columns_size,
     const std::shared_ptr<const milvus_storage::api::Properties>& properties,
-    CPluginContext* c_plugin_context) {
+    CPluginContext* c_plugin_context,
+    const milvus_storage::SourceReadContextPtr& source_context) {
     auto result = arrow::ImportSchema(schema);
     if (!result.ok()) {
         ThrowInfo(milvus::storage::ArrowStatusToErrorCode(result),
                   "Import arrow schema failed");
     }
     auto arrow_schema = result.ValueOrDie();
-    auto reader = milvus_storage::api::Reader::create(
+    auto reader = milvus::storage::CreateSourceReader(
         column_groups,
         arrow_schema,
         std::make_shared<std::vector<std::string>>(
             needed_columns, needed_columns + needed_columns_size),
-        properties);
+        properties,
+        source_context);
 
     // Configure CMEK decryption if plugin context is provided
     if (c_plugin_context != nullptr) {
@@ -108,7 +122,8 @@ NewPackedFFIReaderWithManifest(const LoonManifest* loon_manifest,
                                CPluginContext* c_plugin_context,
                                int64_t collection_id,
                                const char* external_source,
-                               const char* external_spec) {
+                               const char* external_spec,
+                               uintptr_t source_context) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -127,18 +142,31 @@ NewPackedFFIReaderWithManifest(const LoonManifest* loon_manifest,
         auto status = milvus_storage::column_groups_import(
             &loon_manifest->column_groups, column_groups.get());
         if (!status.ok()) {
-            auto error = milvus_storage::ToSegcoreError(status);
+            auto error = milvus::storage::SourceAwareStorageError(status);
             return milvus::FailureCStatus(&error);
         }
 
-        auto reader = GetLoonReader(column_groups,
-                                    schema,
-                                    needed_columns,
-                                    needed_columns_size,
-                                    properties,
-                                    c_plugin_context);
+        if (source_context &&
+            !milvus_storage::GetSourceReadContext(source_context)) {
+            ThrowInfo(static_cast<milvus::ErrorCode>(117),
+                      "invalid source context handle");
+        }
+        auto reader = GetLoonReader(
+            column_groups,
+            schema,
+            needed_columns,
+            needed_columns_size,
+            properties,
+            c_plugin_context,
+            source_context
+                ? milvus_storage::GetSourceReadContext(source_context)
+                : milvus::storage::OpenSourceReadContext(
+                      external_source ? external_source : "",
+                      external_spec ? external_spec : ""));
 
-        *c_loon_reader = static_cast<CFFIPackedReader>(reader.release());
+        auto state = std::make_unique<PackedReaderState>();
+        state->reader = std::move(reader);
+        *c_loon_reader = static_cast<CFFIPackedReader>(state.release());
         return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS
@@ -154,7 +182,8 @@ NewPackedFFIReaderWithColumnGroups(const LoonColumnGroups* column_groups,
                                    CPluginContext* c_plugin_context,
                                    int64_t collection_id,
                                    const char* external_source,
-                                   const char* external_spec) {
+                                   const char* external_spec,
+                                   uintptr_t source_context) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -173,18 +202,31 @@ NewPackedFFIReaderWithColumnGroups(const LoonColumnGroups* column_groups,
         auto status = milvus_storage::column_groups_import(
             column_groups, imported_column_groups.get());
         if (!status.ok()) {
-            auto error = milvus_storage::ToSegcoreError(status);
+            auto error = milvus::storage::SourceAwareStorageError(status);
             return milvus::FailureCStatus(&error);
         }
 
-        auto reader = GetLoonReader(imported_column_groups,
-                                    schema,
-                                    needed_columns,
-                                    needed_columns_size,
-                                    properties,
-                                    c_plugin_context);
+        if (source_context &&
+            !milvus_storage::GetSourceReadContext(source_context)) {
+            ThrowInfo(static_cast<milvus::ErrorCode>(117),
+                      "invalid source context handle");
+        }
+        auto reader = GetLoonReader(
+            imported_column_groups,
+            schema,
+            needed_columns,
+            needed_columns_size,
+            properties,
+            c_plugin_context,
+            source_context
+                ? milvus_storage::GetSourceReadContext(source_context)
+                : milvus::storage::OpenSourceReadContext(
+                      external_source ? external_source : "",
+                      external_spec ? external_spec : ""));
 
-        *c_loon_reader = static_cast<CFFIPackedReader>(reader.release());
+        auto state = std::make_unique<PackedReaderState>();
+        state->reader = std::move(reader);
+        *c_loon_reader = static_cast<CFFIPackedReader>(state.release());
         return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS
@@ -197,19 +239,20 @@ GetFFIReaderStream(CFFIPackedReader c_packed_reader,
     SCOPE_CGO_CALL_METRIC();
 
     try {
-        auto reader =
-            static_cast<milvus_storage::api::Reader*>(c_packed_reader);
-
-        auto result = reader->get_record_batch_reader();
+        auto state = static_cast<PackedReaderState*>(c_packed_reader);
+        auto result = state->reader->get_record_batch_reader();
         if (!result.ok()) {
-            auto error = milvus_storage::ToSegcoreError(result.status());
+            auto error =
+                milvus::storage::SourceAwareStorageError(result.status());
             return milvus::FailureCStatus(&error);
         }
 
         auto array_stream = result.ValueOrDie();
 
-        arrow::Status status =
-            arrow::ExportRecordBatchReader(array_stream, out_stream);
+        arrow::Status status = arrow::ExportRecordBatchReader(
+            std::make_shared<milvus::storage::TrackedBatchReader>(
+                array_stream, state->last_error),
+            out_stream);
         if (!status.ok()) {
             ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
                       "failed to export record batch reader, {}",
@@ -229,11 +272,23 @@ CloseFFIReader(CFFIPackedReader c_packed_reader) {
         if (c_packed_reader == nullptr) {
             return milvus::SuccessCStatus();
         }
-        auto reader =
-            static_cast<milvus_storage::api::Reader*>(c_packed_reader);
+        auto reader = static_cast<PackedReaderState*>(c_packed_reader);
         AssertInfo(reader, "cannot close nullptr ffi reader");
         delete reader;
         return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
+GetFFIReaderLastError(CFFIPackedReader c_packed_reader) {
+    if (!c_packed_reader)
+        return milvus::SuccessCStatus();
+    auto state = static_cast<PackedReaderState*>(c_packed_reader);
+    auto code = state->last_error->load();
+    if (!code)
+        return milvus::SuccessCStatus();
+    milvus::SegcoreError error{static_cast<milvus::ErrorCode>(code),
+                               "native record batch read failed"};
+    return milvus::FailureCStatus(&error);
 }

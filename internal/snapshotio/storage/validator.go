@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/sourceauth"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -350,6 +351,11 @@ func applySnapshotURILocationToConfig(
 func parseSnapshotExternalSpec(externalSpec string) (*externalspec.ExternalSpec, error) {
 	if strings.TrimSpace(externalSpec) == "" {
 		return externalspec.ParseExternalSpec(externalSpec)
+	}
+	// Check the original JSON before typed normalization can discard a null or
+	// duplicate binding key. Snapshot storage has no source authorization hook.
+	if err := sourceauth.RejectClientBinding(externalSpec); err != nil {
+		return nil, err
 	}
 	var snapshotSpec externalspec.ExternalSpec
 	if err := json.Unmarshal([]byte(externalSpec), &snapshotSpec); err != nil {

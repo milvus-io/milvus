@@ -70,6 +70,7 @@ func ExecuteFunctionsForSegment(
 		fragments,
 		storageConfig,
 		packed.ExternalSpecContext{
+			Context:           ctx,
 			CollectionID:      collectionID,
 			Source:            schema.GetExternalSource(),
 			Spec:              schema.GetExternalSpec(),
@@ -224,6 +225,7 @@ func openInputReader(
 		storage.WithBufferSize(defaultReadBufferSize),
 		storage.WithStorageConfig(storageConfig),
 		storage.WithExternalReaderContext(packed.ExternalReaderContext{
+			Context:      ctx,
 			CollectionID: collectionID,
 			Source:       schema.GetExternalSource(),
 			Spec:         schema.GetExternalSpec(),

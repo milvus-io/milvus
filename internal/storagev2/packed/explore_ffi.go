@@ -19,6 +19,7 @@ package packed
 #include <stdlib.h>
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/ffi_exttable_c.h"
+#include "milvus-storage/ffi_source_read_context_c.h"
 #include "milvus-storage/ffi_filesystem_c.h"
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
@@ -33,9 +34,11 @@ import (
 	"strings"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/util/sourcecontext"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/sourceauth"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -128,10 +131,20 @@ func GetFileInfo(
 
 	var numRows C.uint64_t
 
-	// GetFileInfo stats an external object; blocking storage I/O on this
-	// goroutine's OS thread, bounded process-wide like the other FFI calls.
-	acquireManifestFFI(context.Background())
-	result := C.loon_exttable_get_file_info(cFormat, cFilePath, cProperties, &numRows)
+	sourceContext, err := sourcecontext.Open(extfs.operationContext(), extfs.Source, extfs.Spec)
+	if err != nil {
+		return nil, err
+	}
+	defer sourceContext.Close()
+	if err := acquireManifestFFI(extfs.operationContext()); err != nil {
+		return nil, err
+	}
+	var result C.LoonFFIResult
+	if sourceContext != nil {
+		result = C.loon_exttable_get_file_info_with_context(cFormat, cFilePath, cProperties, C.LoonSourceReadContextHandle(sourceContext.Handle()), &numRows)
+	} else {
+		result = C.loon_exttable_get_file_info(cFormat, cFilePath, cProperties, &numRows)
+	}
 	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, merr.WrapErrStorage(err, "loon_exttable_get_file_info failed")
@@ -169,6 +182,11 @@ func normalizeExternalPath(
 	extfs ExternalSpecContext,
 	pathForm externalPathForm,
 ) (string, error) {
+	if binding, err := sourceauth.Read(extfs.Source, extfs.Spec); err != nil {
+		return "", err
+	} else if binding != nil {
+		return path, nil
+	}
 	if extfs.Source == "" || path == "" || properties == nil {
 		return path, nil
 	}
@@ -235,6 +253,11 @@ func resolveExternalRelativePath(
 	extfs ExternalSpecContext,
 	pathForm externalPathForm,
 ) (string, error) {
+	if binding, err := sourceauth.Read(extfs.Source, extfs.Spec); err != nil {
+		return "", err
+	} else if binding != nil {
+		return sourcePath, nil
+	}
 	if sourcePath == "" || extfs.Source == "" || properties == nil {
 		return sourcePath, nil
 	}
@@ -424,14 +447,21 @@ func ExploreFilesReturnManifestPath(
 		cColumnsPtr = &cColumns[0]
 	}
 
-	// Explore lists/reads the external source and writes an explore manifest;
-	// blocking storage I/O bounded process-wide like the other FFI calls.
-	acquireManifestFFI(context.Background())
-	result := C.loon_exttable_explore(
-		cColumnsPtr, C.size_t(len(columns)),
-		cFormat, cBaseDir, cExploreDir, cProperties,
-		&numFiles, &outColumnGroupsPath,
-	)
+	sourceContext, err := sourcecontext.Open(extfs.operationContext(), extfs.Source, extfs.Spec)
+	if err != nil {
+		return nil, "", err
+	}
+	defer sourceContext.Close()
+	if err := acquireManifestFFI(extfs.operationContext()); err != nil {
+		return nil, "", err
+	}
+	var result C.LoonFFIResult
+	if sourceContext != nil {
+		result = C.loon_exttable_explore_with_context(cColumnsPtr, C.size_t(len(columns)), cFormat, cBaseDir, cExploreDir, cProperties,
+			C.LoonSourceReadContextHandle(sourceContext.Handle()), &numFiles, &outColumnGroupsPath)
+	} else {
+		result = C.loon_exttable_explore(cColumnsPtr, C.size_t(len(columns)), cFormat, cBaseDir, cExploreDir, cProperties, &numFiles, &outColumnGroupsPath)
+	}
 	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, "", merr.WrapErrStorage(err, "loon_exttable_explore failed")

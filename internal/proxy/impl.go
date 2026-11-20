@@ -69,6 +69,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/sourceauth"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -7478,7 +7479,7 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	// that CreateCollection runs, otherwise alter-bypass via refresh would
 	// allow SSRF (file://, http://169.254.169.254/, userinfo URLs, etc.).
 	if srcSet {
-		if err := externalspec.ValidateSourceAndSpec(req.GetExternalSource(), req.GetExternalSpec(), paramtable.Get().CommonCfg.CredentialBrokerPolicy()); err != nil {
+		if err := externalspec.ValidateRequestSourceAndSpec(req.GetExternalSource(), req.GetExternalSpec(), sourceauth.HasAuthorizer(ctx), paramtable.Get().CommonCfg.CredentialBrokerPolicy()); err != nil {
 			return &milvuspb.RefreshExternalCollectionResponse{
 				Status: merr.Status(err),
 			}, nil
@@ -7523,12 +7524,29 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 
 	collectionID := collectionInfo.CollID
 
+	// Authorize the effective source before it enters the durable refresh path.
+	// An omitted source is still a new read by this caller, not permission to
+	// reuse the previous caller's authorization reference.
+	effectiveSource, authorizedSpec, err := sourceauth.PrepareRefresh(ctx, sourceauth.Operation{
+		Database: req.GetDbName(), Collection: req.GetCollectionName(), CollectionID: collectionID,
+		Source: collectionInfo.Schema.GetExternalSource(), Spec: collectionInfo.Schema.GetExternalSpec(),
+	}, req.GetExternalSource(), req.GetExternalSpec())
+	if err != nil {
+		return &milvuspb.RefreshExternalCollectionResponse{Status: merr.Status(err)}, nil
+	}
+	if effectiveSource != "" {
+		if err := externalspec.ValidateSourceAndSpec(effectiveSource, authorizedSpec, paramtable.Get().CommonCfg.CredentialBrokerPolicy()); err != nil {
+			return &milvuspb.RefreshExternalCollectionResponse{Status: merr.Status(err)}, nil
+		}
+	}
+
 	// Call DataCoord to refresh the external collection
+	ctx = sourceauth.RefreshRPCContext(ctx, collectionInfo.Schema.GetExternalSource(), collectionInfo.Schema.GetExternalSpec(), !srcSet)
 	resp, err := node.mixCoord.RefreshExternalCollection(ctx, &datapb.RefreshExternalCollectionRequest{
 		CollectionId:   collectionID,
 		CollectionName: req.GetCollectionName(),
-		ExternalSource: req.GetExternalSource(),
-		ExternalSpec:   req.GetExternalSpec(),
+		ExternalSource: effectiveSource,
+		ExternalSpec:   authorizedSpec,
 	})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
 		mlog.Warn(context.TODO(), "failed to refresh external collection", mlog.Err(err))

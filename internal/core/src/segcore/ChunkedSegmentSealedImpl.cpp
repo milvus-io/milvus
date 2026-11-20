@@ -11,6 +11,8 @@
 
 #include <numeric>
 #include "index/scalar/sort/SortedMembership.h"
+#include "storage/StatusToErrorCode.h"
+#include "storage/loon_ffi/source_context.h"
 #include "ChunkedSegmentSealedImpl.h"
 #include "exec/expression/ExprCache.h"
 #include "segcore/default_fs.h"
@@ -221,8 +223,8 @@ OpenChunkReaderSync(
     auto chunk_reader_result =
         reader.get_chunk_reader(column_group_index, needed_columns);
     if (!chunk_reader_result.ok()) {
-        const auto error =
-            milvus_storage::ToSegcoreError(chunk_reader_result.status());
+        auto error = milvus::storage::SourceAwareStorageError(
+            chunk_reader_result.status());
         ThrowInfo(error.get_error_code(),
                   "get chunk reader failed, segment {}, column group index "
                   "{}, status: {}",
@@ -2699,12 +2701,17 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         properties = std::move(external_properties);
     }
 
-    const auto needed_columns = schema_snapshot->GetExternalColumnNames();
-    const auto reader = std::shared_ptr<milvus_storage::api::Reader>(
-        milvus_storage::api::Reader::create(column_groups,
-                                            /*arrow_schema=*/nullptr,
-                                            needed_columns,
-                                            properties));
+    auto needed_columns = schema_snapshot->GetExternalColumnNames();
+    auto reader = std::shared_ptr<milvus_storage::api::Reader>(
+        milvus::storage::CreateSourceReader(
+            column_groups,
+            /*arrow_schema=*/nullptr,
+            needed_columns,
+            properties,
+            milvus::storage::OpenSourceReadContext(
+                schema_snapshot->get_external_source(),
+                schema_snapshot->get_external_spec()))
+            .release());
     // QueryNode registers the collection's cipher context before loading.
     // Resolve encrypted Parquet keys through that context when opening files.
     if (storage::PluginLoader::GetInstance().getCipherPlugin()) {

@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "milvus-storage/source_read_context.h"
 #include <exception>
 #include <memory>
 #include <optional>
@@ -129,6 +130,7 @@ struct FileManagerContext {
     std::shared_ptr<const milvus_storage::api::Properties> loon_ffi_properties;
     std::string stats_base_path;
     StorageColumnMappings storage_column_mappings;
+    milvus_storage::SourceReadContextPtr source_read_context;
 };
 
 #define FILEMANAGER_TRY try {
@@ -422,6 +424,7 @@ class FileManagerImpl : public milvus::FileManager {
     std::shared_ptr<const milvus_storage::api::Properties> loon_ffi_properties_;
     std::shared_ptr<CPluginContext> plugin_context_;
     StorageColumnMappings storage_column_mappings_;
+    milvus_storage::SourceReadContextPtr source_read_context_;
 
     // stats base path computed by Go caller; when non-empty, overrides
     // the internally computed remote prefix for text/json stats files.

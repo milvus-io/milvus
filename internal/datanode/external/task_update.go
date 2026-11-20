@@ -1188,6 +1188,7 @@ func (t *RefreshExternalCollectionTask) createManifestForSegment(
 		fragments,
 		t.req.GetStorageConfig(),
 		packed.ExternalSpecContext{
+			Context:           ctx,
 			CollectionID:      t.req.GetCollectionID(),
 			Source:            t.req.GetExternalSource(),
 			Spec:              t.req.GetExternalSpec(),
