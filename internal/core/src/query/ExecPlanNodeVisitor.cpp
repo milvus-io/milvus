@@ -295,6 +295,7 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
 
     // Do task execution
     auto result = ExecuteTask(plan, query_context);
+    retrieve_result.read_snapshot_ = query_context->get_read_snapshot();
     setupRetrieveResult(
         result, op_context, node, retrieve_result, segment, query_context);
 }

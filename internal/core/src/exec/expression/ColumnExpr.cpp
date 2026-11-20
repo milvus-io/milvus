@@ -97,33 +97,57 @@ PhyColumnExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     auto input = context.get_offset_input();
     SetHasOffsetInput(input != nullptr);
+    const auto start = input ? 0 : GetCurrentRows();
+    const auto mask = context.get_bitmap_input();
+    auto evaluate = [&]<typename T>() -> VectorPtr {
+        auto native = DoEval<T>(input);
+        if constexpr (CanOverlay<T>) {
+            if (updates_ && native) {
+                auto column = std::static_pointer_cast<ColumnVector>(native);
+                auto patches =
+                    updates_->Patches(start,
+                                      native->size(),
+                                      input ? input->data() : nullptr,
+                                      &mask);
+                auto* values = column->template RawAsValues<T>();
+                TargetBitmapView valid(column->GetValidRawData(),
+                                       native->size());
+                for (const auto& [i, value] : patches) {
+                    valid[i] = !std::holds_alternative<std::monostate>(value);
+                    if (valid[i])
+                        values[i] = UpdateScalar<T>(value);
+                }
+            }
+        }
+        return native;
+    };
     switch (this->expr_->type()) {
         case DataType::BOOL:
-            result = DoEval<bool>(input);
+            result = evaluate.template operator()<bool>();
             break;
         case DataType::INT8:
-            result = DoEval<int8_t>(input);
+            result = evaluate.template operator()<int8_t>();
             break;
         case DataType::INT16:
-            result = DoEval<int16_t>(input);
+            result = evaluate.template operator()<int16_t>();
             break;
         case DataType::INT32:
-            result = DoEval<int32_t>(input);
+            result = evaluate.template operator()<int32_t>();
             break;
         case DataType::INT64:
         case DataType::TIMESTAMPTZ:
-            result = DoEval<int64_t>(input);
+            result = evaluate.template operator()<int64_t>();
             break;
         case DataType::FLOAT:
-            result = DoEval<float>(input);
+            result = evaluate.template operator()<float>();
             break;
         case DataType::DOUBLE:
-            result = DoEval<double>(input);
+            result = evaluate.template operator()<double>();
             break;
         case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT: {
-            result = DoEval<std::string>(input);
+            result = evaluate.template operator()<std::string>();
             break;
         }
         default:

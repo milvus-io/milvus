@@ -39,6 +39,9 @@ namespace exec {
 
 void
 PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    update_candidates_ = context.get_bitmap_input();
+    auto reset_mask = folly::makeGuard([&] { update_candidates_ = {}; });
+
     WaitPrefetch();
     tracer::AutoSpan span(
         "PhyBinaryArithOpEvalRangeExpr::Eval", tracer::GetRootSpan(), true);
@@ -54,33 +57,34 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
     if (expr_->column_.element_level_ && !is_nested_array) {
         data_type = expr_->column_.element_type_;
     }
+    const auto bitmap_input = context.get_bitmap_input();
     switch (data_type) {
         case DataType::BOOL: {
-            result = ExecRangeVisitorImpl<bool>(input);
+            result = ExecRangeVisitorImpl<bool>(input, &bitmap_input);
             break;
         }
         case DataType::INT8: {
-            result = ExecRangeVisitorImpl<int8_t>(input);
+            result = ExecRangeVisitorImpl<int8_t>(input, &bitmap_input);
             break;
         }
         case DataType::INT16: {
-            result = ExecRangeVisitorImpl<int16_t>(input);
+            result = ExecRangeVisitorImpl<int16_t>(input, &bitmap_input);
             break;
         }
         case DataType::INT32: {
-            result = ExecRangeVisitorImpl<int32_t>(input);
+            result = ExecRangeVisitorImpl<int32_t>(input, &bitmap_input);
             break;
         }
         case DataType::INT64: {
-            result = ExecRangeVisitorImpl<int64_t>(input);
+            result = ExecRangeVisitorImpl<int64_t>(input, &bitmap_input);
             break;
         }
         case DataType::FLOAT: {
-            result = ExecRangeVisitorImpl<float>(input);
+            result = ExecRangeVisitorImpl<float>(input, &bitmap_input);
             break;
         }
         case DataType::DOUBLE: {
-            result = ExecRangeVisitorImpl<double>(input);
+            result = ExecRangeVisitorImpl<double>(input, &bitmap_input);
             break;
         }
         case DataType::JSON: {
@@ -1412,6 +1416,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecArrayLength(OffsetVector* input) {
 
 bool
 PhyBinaryArithOpEvalRangeExpr::UseArrayChunkLengths() const {
+    // Chunk lengths and null bits describe base values. The ordinary
+    // ArrayView Scan/Take evaluates visible replacements and their validity.
+    if (HasUpdates()) {
+        return false;
+    }
     if (use_array_chunk_lengths_.has_value()) {
         return *use_array_chunk_lengths_;
     }
@@ -1547,11 +1556,12 @@ PhyBinaryArithOpEvalRangeExpr::ExecArrayLengthFromChunks(
 
 template <typename T>
 VectorPtr
-PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImpl(OffsetVector* input) {
+PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImpl(
+    OffsetVector* input, const TargetBitmapView* candidates) {
     if (exec_path_ == ExprExecPath::ScalarIndex) {
         return ExecRangeVisitorImplForIndex<T>(input);
     } else {
-        return ExecRangeVisitorImplForData<T>(input);
+        return ExecRangeVisitorImplForData<T>(input, candidates);
     }
 }
 
@@ -2474,7 +2484,9 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
 template <typename T>
 VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
-    OffsetVector* input) {
+    OffsetVector* input, const TargetBitmapView* candidates) {
+    const TargetBitmapView empty_mask;
+    const auto& bitmap_input = candidates ? *candidates : empty_mask;
     typedef std::conditional_t<std::is_integral_v<T> &&
                                    !std::is_same_v<bool, T>,
                                int64_t,
@@ -3173,13 +3185,14 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                                              value,
                                                              right_operand);
         } else {
-            processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
-                                                     skip_index_func,
-                                                     input,
-                                                     res,
-                                                     valid_res,
-                                                     value,
-                                                     right_operand);
+            processed_size = ProcessDataByOffsetsWithMask<T>(execute_sub_batch,
+                                                             skip_index_func,
+                                                             input,
+                                                             res,
+                                                             valid_res,
+                                                             bitmap_input,
+                                                             value,
+                                                             right_operand);
         }
     } else {
         if (expr_->column_.element_level_) {
@@ -3192,12 +3205,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                                     value,
                                                     right_operand);
         } else {
-            processed_size = ProcessDataChunks<T>(execute_sub_batch,
-                                                  skip_index_func,
-                                                  res,
-                                                  valid_res,
-                                                  value,
-                                                  right_operand);
+            processed_size = ProcessDataChunksWithMask<T>(execute_sub_batch,
+                                                          skip_index_func,
+                                                          res,
+                                                          valid_res,
+                                                          bitmap_input,
+                                                          value,
+                                                          right_operand);
         }
     }
     AssertInfo(processed_size == real_batch_size,
@@ -3210,7 +3224,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
 
 template VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImpl<int64_t>(
-    OffsetVector*);  // add this for macos
+    OffsetVector*, const TargetBitmapView*);  // add this for macos
 
 }  //namespace exec
 }  // namespace milvus

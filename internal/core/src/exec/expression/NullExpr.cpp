@@ -40,6 +40,9 @@ namespace exec {
 
 void
 PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    update_candidates_ = context.get_bitmap_input();
+    auto reset_mask = folly::makeGuard([&] { update_candidates_ = {}; });
+
     WaitPrefetch();
     tracer::AutoSpan span("PhyNullExpr::Eval", tracer::GetRootSpan(), true);
     span.SetAttribute("data_type", static_cast<int>(expr_->column_.data_type_));

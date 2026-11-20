@@ -156,6 +156,9 @@ class SegmentInterface {
     virtual ~SegmentInterface() = default;
 
     virtual void
+    GCUpdates(Timestamp safe_ts) = 0;
+
+    virtual void
     FillPrimaryKeys(const query::Plan* plan,
                     SearchResult& results,
                     milvus::OpContext* op_ctx = nullptr) const = 0;
@@ -231,7 +234,8 @@ class SegmentInterface {
              const int64_t* offsets,
              int64_t size,
              const folly::CancellationToken& cancel_token =
-                 folly::CancellationToken()) const = 0;
+                 folly::CancellationToken(),
+             std::optional<Timestamp> query_timestamp = std::nullopt) const = 0;
 
     virtual size_t
     GetMemoryUsageInBytes() const = 0;
@@ -422,8 +426,34 @@ class SegmentInterface {
 
 // internal API for DSL calculation
 // only for implementation
+class UpdatesRecord;
+struct UpdateAssignment;
+
 class SegmentInternalInterface : public SegmentInterface {
  public:
+    SegmentInternalInterface();
+
+    void
+    GCUpdates(Timestamp safe_ts) override;
+
+    const UpdatesRecord&
+    GetUpdatesRecord() const {
+        return *updates_record_;
+    }
+
+    // The caller routes this mutation to a physical segment in its collection,
+    // partition and VChannel, after publishing all preceding inserts/deletes.
+    virtual void
+    ApplyUpdates(const IdArray& keys,
+                 Timestamp timestamp,
+                 uint32_t source_ordinal,
+                 const std::vector<UpdateAssignment>& assignments,
+                 OpContext* op_ctx = nullptr);
+
+    virtual std::vector<int64_t>
+    ResolveUpdateOffsets(const std::vector<PkType>& keys,
+                         Timestamp timestamp) const;
+
     // Process-unique id for THIS segment OBJECT, distinct from
     // get_segment_id() which identifies the logical segment.
     //
@@ -656,11 +686,13 @@ class SegmentInternalInterface : public SegmentInterface {
              int64_t entity_ttl_physical_time_us = 0) const override;
 
     std::unique_ptr<proto::segcore::RetrieveResults>
-    Retrieve(tracer::TraceContext* trace_ctx,
-             const query::RetrievePlan* Plan,
-             const int64_t* offsets,
-             int64_t size,
-             const folly::CancellationToken& cancel_token) const override;
+    Retrieve(
+        tracer::TraceContext* trace_ctx,
+        const query::RetrievePlan* Plan,
+        const int64_t* offsets,
+        int64_t size,
+        const folly::CancellationToken& cancel_token,
+        std::optional<Timestamp> query_timestamp = std::nullopt) const override;
 
     // Materialize only PK and timestamp for rows surviving Grep, independently
     // of the output projection. IDs, offsets and timestamp preserve row order.
@@ -877,7 +909,8 @@ class SegmentInternalInterface : public SegmentInterface {
         const query::RetrievePlan* plan,
         const std::unique_ptr<proto::segcore::RetrieveResults>& results,
         RetrieveResult& retrieveResult,
-        milvus::OpContext* op_ctx) const;
+        milvus::OpContext* op_ctx,
+        std::optional<Timestamp> query_timestamp = std::nullopt) const;
 
     void
     FillTargetEntry(
@@ -888,7 +921,9 @@ class SegmentInternalInterface : public SegmentInterface {
         int64_t size,
         bool ignore_non_pk,
         bool fill_ids,
-        milvus::OpContext* op_ctx = nullptr) const;
+        milvus::OpContext* op_ctx = nullptr,
+        std::optional<Timestamp> query_timestamp = std::nullopt,
+        std::shared_ptr<const SegmentReadSnapshot> snapshot = nullptr) const;
 
     // return whether field mmap or not
     virtual bool
@@ -1025,6 +1060,17 @@ class SegmentInternalInterface : public SegmentInterface {
                     BitsetTypeView& bitset) const = 0;
 
  protected:
+    void
+    ApplyUpdatesWithSchema(const Schema& fields,
+                           DataType pk_type,
+                           const IdArray& ids,
+                           Timestamp timestamp,
+                           uint32_t ordinal,
+                           const std::vector<UpdateAssignment>& assignments,
+                           OpContext* op_ctx);
+
+    std::shared_ptr<UpdatesRecord> updates_record_;
+
     // mutex protecting rw options on schema_
     mutable std::shared_mutex sch_mutex_;
 
@@ -1057,7 +1103,8 @@ BulkSubscriptWithSnapshot(
     const milvus::FieldMeta& field_meta,
     const int64_t* seg_offsets,
     int64_t count,
-    const std::vector<std::string>* dynamic_field_names = nullptr);
+    const std::vector<std::string>* dynamic_field_names = nullptr,
+    std::optional<Timestamp> query_timestamp = std::nullopt);
 
 }  // namespace milvus::segcore
 

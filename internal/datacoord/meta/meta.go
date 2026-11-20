@@ -1121,36 +1121,26 @@ func addDeltalogsToSegment(modPack *UpdateSegmentPack, segmentID int64, segment 
 	// inflate hasTooManyDeletions / GetResidualSegmentSize. Dedup by (fieldID,
 	// logID) keeps both the Deltalogs array and the delta Stats idempotent.
 	deltalogs = FilterDuplicateFieldBinlogs(segment.GetDeltalogs(), deltalogs)
-	if len(deltalogs) == 0 {
-		return false
-	}
-
 	segment.Deltalogs = MergeFieldBinlogs(segment.GetDeltalogs(), deltalogs)
-	// Accumulate the incoming deltalogs onto the existing delta Stats instead
-	// of recomputing from segment.GetDeltalogs(). For V3 segments AlterSegments
-	// skips persisting per-FieldBinlog KVs, so after a DataCoord restart the
-	// in-memory Deltalogs array is empty and the cumulative deltas live only in
-	// the persisted Stats. A full recompute over the (post-restart empty array
-	// + new batch) would overwrite e.g. DeleteNumRows=1000 with just the new
-	// batch and permanently undercount deletes — feeding hasTooManyDeletions,
-	// GetResidualSegmentSize, view counts and getSegmentSize. Incremental
-	// addition is correct both within a process lifetime and across restart;
-	// the L0 compaction commit applies each batch exactly once.
 	if segment.Stats == nil {
 		segment.Stats = &datapb.Statistics{}
 	}
-	for _, fb := range deltalogs {
-		for _, l := range fb.GetBinlogs() {
-			segment.Stats.DeltaBinlogSize += l.GetMemorySize()
-			segment.Stats.DeleteNumRows += l.GetEntriesNum()
-			segment.Stats.DeltaBinlogCount++
-			if from := l.GetTimestampFrom(); from > 0 && (segment.Stats.DeltaTimestampFrom == 0 || from < segment.Stats.DeltaTimestampFrom) {
-				segment.Stats.DeltaTimestampFrom = from
-			}
-			if to := l.GetTimestampTo(); to > segment.Stats.DeltaTimestampTo {
-				segment.Stats.DeltaTimestampTo = to
-			}
-		}
+	if segment.GetManifestPath() == "" {
+		// A restart between the per-field KV and the segment record can
+		// recover a complete delta list with the previous counters. V1/V2
+		// arrays are authoritative, including when all new files duplicate.
+		segment.Stats.DeltaBinlogCount = 0
+		segment.Stats.DeltaBinlogSize = 0
+		segment.Stats.DeleteNumRows = 0
+		segment.Stats.DeltaTimestampFrom = 0
+		segment.Stats.DeltaTimestampTo = 0
+		storage.AccumulateDeltaStatistics(segment.Stats, segment.GetDeltalogs())
+	} else {
+		// V3 arrays may be empty after restart; keep the durable summary.
+		storage.AccumulateDeltaStatistics(segment.Stats, deltalogs)
+	}
+	if len(deltalogs) == 0 {
+		return false
 	}
 	modPack.Increments[segmentID] = metastore.BinlogsIncrement{
 		Segment: segment.SegmentInfo,
@@ -1325,7 +1315,11 @@ func (u *L0ManifestUpdate) apply(modPack *UpdateSegmentPack) bool {
 			return modPack.Fail(err)
 		}
 	}
-	return applyL0Deltalogs(modPack, u.SegmentID, u.Segment, u.deltalogs)
+	// prepare already found the target and validated a nonempty result.
+	// Duplicate files need no binlog rewrite, but their statistics, cursors
+	// and other targets in this prepared batch still have to commit.
+	applyL0Deltalogs(modPack, u.SegmentID, u.Segment, u.deltalogs)
+	return modPack.err == nil
 }
 
 // applyL0Deltalogs is the catalog half of an L0 result. Both the legacy L0

@@ -109,7 +109,8 @@ PhySearchGroupByNode::GetOutput() {
                                         : nullptr,
                                     &search_result,
                                     query_context_->get_read_snapshot().get(),
-                                    use_json_stats);
+                                    use_json_stats,
+                                    query_context_->get_query_timestamp());
         if (search_result.strict_group_phase2_used_) {
             MarkFeature(
                 query_context_->get_plan_options().feature_recorder.get(),

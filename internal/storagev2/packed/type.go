@@ -26,7 +26,6 @@ import "C"
 
 import (
 	"github.com/apache/arrow/go/v17/arrow"
-	"github.com/apache/arrow/go/v17/arrow/arrio"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
 )
 
@@ -58,7 +57,9 @@ type PackedReader struct {
 
 type FFIPackedReader struct {
 	cPackedReader C.CFFIPackedReader
-	recordReader  arrio.Reader
+	stream        *cdata.CArrowArrayStream
+	streamSchema  *arrow.Schema
+	currentBatch  arrow.Record
 	schema        *arrow.Schema
 }
 

@@ -12,12 +12,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// resolveLatestDeletePos returns the position used as the L0 trigger Pos.
+// ResolveLatestDeletePos returns the position used as the L0 trigger Pos.
 // When dataCoord.compaction.levelzero.forceSelectAllSegments is enabled, it
 // returns a max-timestamp position so that all L1/L2 segments pass the
 // startPos < taskPos filter in selectFlushedSegment — used during repair to
 // recover from wrong StartPosition metadata caused by the import position bug.
-func resolveLatestDeletePos(latestL0DmlPos *msgpb.MsgPosition) *msgpb.MsgPosition {
+func ResolveLatestDeletePos(latestL0DmlPos *msgpb.MsgPosition) *msgpb.MsgPosition {
 	if paramtable.Get().DataCoordCfg.LevelZeroCompactionForceSelectAll.GetAsBool() {
 		channel := ""
 		if latestL0DmlPos != nil {
@@ -38,10 +38,11 @@ func resolveLatestDeletePos(latestL0DmlPos *msgpb.MsgPosition) *msgpb.MsgPositio
 //
 // Given the same l0Segments, Trigger is idempotent, it'll give consist result.
 type LevelZeroCompactionView struct {
-	TriggerID       int64
-	Label           *CompactionGroupLabel
-	L0Segments      []*SegmentView
-	LatestDeletePos *msgpb.MsgPosition
+	MaterializedThrough uint64
+	TriggerID           int64
+	Label               *CompactionGroupLabel
+	L0Segments          []*SegmentView
+	LatestDeletePos     *msgpb.MsgPosition
 }
 
 var _ CompactionView = (*LevelZeroCompactionView)(nil)
@@ -99,6 +100,9 @@ func (v *LevelZeroCompactionView) GetCollectionTTL() time.Duration {
 
 // ForceTrigger triggers all qualified LevelZeroSegments according to views
 func (v *LevelZeroCompactionView) ForceTrigger() (CompactionView, string) {
+	if v.MaterializedThrough != 0 && len(v.L0Segments) != 0 {
+		return v, "complete materialized prefix"
+	}
 	sort.Slice(v.L0Segments, func(i, j int) bool {
 		return v.L0Segments[i].DmlPos.GetTimestamp() < v.L0Segments[j].DmlPos.GetTimestamp()
 	})
@@ -113,7 +117,7 @@ func (v *LevelZeroCompactionView) ForceTrigger() (CompactionView, string) {
 		return &LevelZeroCompactionView{
 			Label:           v.Label,
 			L0Segments:      targetViews,
-			LatestDeletePos: resolveLatestDeletePos(latestL0.DmlPos),
+			LatestDeletePos: ResolveLatestDeletePos(latestL0.DmlPos),
 			TriggerID:       v.TriggerID,
 		}, reason
 	}
@@ -126,6 +130,9 @@ func (v *LevelZeroCompactionView) ForceTriggerAll() ([]CompactionView, string) {
 		return v.L0Segments[i].DmlPos.GetTimestamp() < v.L0Segments[j].DmlPos.GetTimestamp()
 	})
 
+	if v.MaterializedThrough != 0 && len(v.L0Segments) != 0 {
+		return []CompactionView{v}, "complete materialized prefix"
+	}
 	var resultViews []CompactionView
 	remainingSegments := v.L0Segments
 
@@ -144,7 +151,7 @@ func (v *LevelZeroCompactionView) ForceTriggerAll() ([]CompactionView, string) {
 		roundView := &LevelZeroCompactionView{
 			Label:           v.Label,
 			L0Segments:      targetViews,
-			LatestDeletePos: resolveLatestDeletePos(latestL0.DmlPos),
+			LatestDeletePos: ResolveLatestDeletePos(latestL0.DmlPos),
 			TriggerID:       v.TriggerID,
 		}
 		resultViews = append(resultViews, roundView)
@@ -172,11 +179,14 @@ func (v *LevelZeroCompactionView) Trigger() (CompactionView, string) {
 	})
 
 	targetViews, reason := v.minCountSizeTrigger(v.L0Segments)
+	if v.MaterializedThrough != 0 && len(targetViews) != 0 {
+		return v, "complete materialized prefix"
+	}
 	if len(targetViews) > 0 {
 		return &LevelZeroCompactionView{
 			Label:           v.Label,
 			L0Segments:      targetViews,
-			LatestDeletePos: resolveLatestDeletePos(latestL0.DmlPos),
+			LatestDeletePos: ResolveLatestDeletePos(latestL0.DmlPos),
 			TriggerID:       v.TriggerID,
 		}, reason
 	}

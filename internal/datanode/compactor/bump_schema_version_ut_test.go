@@ -1997,8 +1997,8 @@ func TestBumpUTFaultFullRewriteNoPrimaryKey(t *testing.T) {
 func TestBumpUTFaultFullRewriteComposeDeltaError(t *testing.T) {
 	setupBumpUTEnv(t)
 	fix := fullRewriteFixture(t)
-	patch := mockey.Mock(compaction.ComposeDeleteFromDeltalogs).
-		Return(map[any]typeutil.Timestamp(nil), errBumpUTInjected).Build()
+	patch := mockey.Mock(loadRewriteMutations).
+		Return((*segmentMutations)(nil), errBumpUTInjected).Build()
 	defer patch.UnPatch()
 
 	_, err := fix.task.Compact()

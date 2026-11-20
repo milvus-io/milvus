@@ -58,6 +58,9 @@ namespace exec {
 
 void
 PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    update_candidates_ = context.get_bitmap_input();
+    auto reset_mask = folly::makeGuard([&] { update_candidates_ = {}; });
+
     WaitPrefetch();
     tracer::AutoSpan span(
         "PhyTermFilterExpr::Eval", tracer::GetRootSpan(), true);
@@ -1224,12 +1227,13 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
                                                              valid_res,
                                                              arg_set_);
         } else {
-            processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
-                                                     skip_index_func,
-                                                     input,
-                                                     res,
-                                                     valid_res,
-                                                     arg_set_);
+            processed_size = ProcessDataByOffsetsWithMask<T>(execute_sub_batch,
+                                                             skip_index_func,
+                                                             input,
+                                                             res,
+                                                             valid_res,
+                                                             bitmap_input,
+                                                             arg_set_);
         }
     } else {
         if (expr_->column_.element_level_) {
@@ -1237,8 +1241,12 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
             processed_size = ProcessDataChunksForElementLevel<T>(
                 execute_sub_batch, skip_index_func, res, valid_res, arg_set_);
         } else {
-            processed_size = ProcessDataChunks<T>(
-                execute_sub_batch, skip_index_func, res, valid_res, arg_set_);
+            processed_size = ProcessDataChunksWithMask<T>(execute_sub_batch,
+                                                          skip_index_func,
+                                                          res,
+                                                          valid_res,
+                                                          bitmap_input,
+                                                          arg_set_);
         }
     }
     AssertInfo(processed_size == real_batch_size,

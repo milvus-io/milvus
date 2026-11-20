@@ -320,14 +320,16 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 // retirement: a retired L0 is no longer counted as a gap by other completions.
 // When the bundle fits, all three stages still commit in one transaction.
 func (kc *Catalog) saveAlteredSegments(ctx context.Context, segments []*datapb.SegmentInfo, kvs map[string]string) error {
-	retiringL0 := false
+	ordered := false
 	for _, segment := range segments {
-		if isRetiringL0(segment) {
-			retiringL0 = true
+		// A certified task publishes target prefixes before it retires its
+		// inputs. Either a replay cursor or a retirement needs ordered KVs.
+		if segment.GetTransformStartAfterTimetick() != 0 || isRetiringL0(segment) {
+			ordered = true
 			break
 		}
 	}
-	if !retiringL0 {
+	if !ordered {
 		return kc.SaveByBatch(ctx, kvs)
 	}
 	b := txn.New()

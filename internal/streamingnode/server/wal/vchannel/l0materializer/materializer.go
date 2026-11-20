@@ -18,6 +18,9 @@ package l0materializer
 
 import (
 	"context"
+	"maps"
+	"slices"
+	"sort"
 
 	"google.golang.org/protobuf/proto"
 
@@ -29,11 +32,14 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storage/deltacodec"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -50,6 +56,8 @@ type Materializer interface {
 }
 
 type MaterializeRequest struct {
+	// Historical schemas pinned while the WAL bodies are observed.
+	Schemas        map[uint64]*schemapb.CollectionSchema
 	VChannel       string
 	TargetTimeTick uint64
 	Entries        []*streamingpb.TransformLogEntry
@@ -95,7 +103,17 @@ func (m *SyncMaterializer) Materialize(ctx context.Context, req MaterializeReque
 	if collectionID <= 0 {
 		return merr.WrapErrServiceInternalMsg("invalid vchannel %q for L0 materialization", req.VChannel)
 	}
-	for _, group := range splitMaterializeGroups(req) {
+	var groups []materializeGroup
+	if message.PKUpdateEnabled || slices.ContainsFunc(req.Entries, func(e *streamingpb.TransformLogEntry) bool { return e.GetMutations() != nil }) {
+		var err error
+		groups, err = typedMaterializeGroups(req, collectionID)
+		if err != nil {
+			return err
+		}
+	} else {
+		groups = splitMaterializeGroups(req)
+	}
+	for _, group := range groups {
 		if err := m.materializeGroup(ctx, req, collectionID, group); err != nil {
 			return err
 		}
@@ -123,6 +141,9 @@ func (m *SyncMaterializer) materializeGroup(
 		checkpoint = proto.Clone(pos).(*msgpb.MsgPosition)
 	}
 	schema := materializeSchema(group.pkType)
+	if group.delta != nil {
+		schema.Properties = req.Schemas[group.fromTimeTick].GetProperties()
+	}
 	metaCache := newMaterializeMetaCache(collectionID, vchannel, schema)
 	metaCache.AddSegment(&datapb.SegmentInfo{
 		ID:             segmentID,
@@ -138,7 +159,6 @@ func (m *SyncMaterializer) materializeGroup(
 	}, metacache.NoneBm25StatsFactory, metacache.SetStartPosRecorded(false))
 
 	pack := (&syncmgr.SyncPack{}).
-		WithDeleteData(storage.NewDeleteData(group.pks, group.timestamps)).
 		WithCollectionID(collectionID).
 		WithPartitionID(group.partitionID).
 		WithChannelName(vchannel).
@@ -151,6 +171,11 @@ func (m *SyncMaterializer) materializeGroup(
 		WithBatchRows(0).
 		WithFlush()
 
+	if group.delta != nil {
+		pack.WithMutationDelta(group.delta, group.bytes)
+	} else {
+		pack.WithDeleteData(storage.NewDeleteData(group.pks, group.timestamps))
+	}
 	task := syncmgr.NewSyncTask().
 		WithAllocator(m.allocator).
 		WithChunkManager(m.chunkManager).
@@ -174,6 +199,8 @@ func (m *SyncMaterializer) materializeGroup(
 }
 
 type materializeGroup struct {
+	delta        *storage.MutationDelta
+	logicalRows  uint64
 	partitionID  int64
 	pkType       schemapb.DataType
 	pks          []storage.PrimaryKey
@@ -300,4 +327,129 @@ func newMaterializeMetaCache(collectionID int64, vchannel string, schema *schema
 	}, func(_ *datapb.SegmentInfo) pkoracle.PkStat {
 		return pkoracle.NewBloomFilterSet()
 	}, metacache.NoneBm25StatsFactory)
+}
+
+// typedMaterializeGroups validates every mutation before writing any output.
+// A TimeTick may exceed the limits but never straddles files in the same scope.
+func typedMaterializeGroups(req MaterializeRequest, collectionID int64) ([]materializeGroup, error) {
+	maxRows, maxBytes := req.MaxRows, req.MaxBytes
+	if maxRows == 0 {
+		maxRows = defaultMaterializeMaxRows
+	}
+	if maxBytes == 0 {
+		maxBytes = defaultMaterializeMaxBytes
+	}
+	var groups []materializeGroup
+	current := map[int64]*materializeGroup{}
+	finish := func(scope int64) {
+		g := current[scope]
+		sort.Slice(g.delta.Layout.Fields, func(i, j int) bool { return g.delta.Layout.Fields[i].ID < g.delta.Layout.Fields[j].ID })
+		groups = append(groups, *g)
+		delete(current, scope)
+	}
+	type tickGroup struct {
+		rows        []deltacodec.Row
+		bytes, keys uint64
+		fields      map[int64]deltacodec.Field
+	}
+	for begin := 0; begin < len(req.Entries); {
+		tt := req.Entries[begin].GetTimeTick()
+		schema := req.Schemas[tt]
+		if schema == nil {
+			return nil, merr.WrapErrDataIntegrityMsg("missing delta schema at %d", tt)
+		}
+		pk, err := typeutil.GetPrimaryFieldSchema(schema)
+		if err != nil {
+			return nil, merr.Wrap(err, "delta PK schema")
+		}
+		fields := map[int64]*schemapb.FieldSchema{}
+		for _, f := range schema.GetFields() {
+			fields[f.GetFieldID()] = f
+		}
+		scopes := map[int64]*tickGroup{}
+		var ordered []int64
+		add := func(scope int64, r deltacodec.Row, bytes int) error {
+			count := messageutil.PrimaryKeyCount(r.PrimaryKeys)
+			if count == 0 || (pk.GetDataType() == schemapb.DataType_Int64) != (r.PrimaryKeys.GetIntId() != nil) {
+				return merr.WrapErrDataIntegrityMsg("delta primary keys mismatch schema at %d", tt)
+			}
+			g := scopes[scope]
+			if g == nil {
+				g = &tickGroup{fields: map[int64]deltacodec.Field{}}
+				scopes[scope] = g
+				ordered = append(ordered, scope)
+			}
+			for _, a := range r.Assignments {
+				f := fields[a.GetFieldId()]
+				if f == nil {
+					return merr.WrapErrDataIntegrityMsg("missing delta field %d at %d", a.GetFieldId(), tt)
+				}
+				g.fields[f.GetFieldID()] = deltacodec.Field{ID: f.GetFieldID(), Type: f.GetDataType(), Element: f.GetElementType()}
+			}
+			g.rows = append(g.rows, r)
+			g.bytes += uint64(bytes)
+			g.keys += uint64(count)
+			return nil
+		}
+		addDelete := func(block *streamingpb.TransformDeleteBlock, index uint32) error {
+			return add(block.GetPartitionId(), deltacodec.Row{TimeTick: tt, SourceOrdinal: index, Operation: deltacodec.Delete, PrimaryKeys: block.GetPrimaryKeys()}, proto.Size(block))
+		}
+		for begin < len(req.Entries) && req.Entries[begin].GetTimeTick() == tt {
+			e := req.Entries[begin]
+			begin++
+			for _, b := range e.GetDelete().GetBlocks() {
+				if err := addDelete(b, b.GetSourceOrdinal()); err != nil {
+					return nil, err
+				}
+			}
+			for _, b := range e.GetMutations().GetBlocks() {
+				if b.GetDelete() != nil {
+					if err := addDelete(b.GetDelete(), b.GetSourceOrdinal()); err != nil {
+						return nil, err
+					}
+					continue
+				}
+				u := b.GetUpdate()
+				if u == nil || len(u.GetAssignments()) == 0 || b.SchemaVersion == nil || b.GetSchemaVersion() != schema.GetVersion() {
+					return nil, merr.WrapErrDataIntegrityMsg("invalid delta payload or schema version at %d", tt)
+				}
+				if err := add(u.GetPartitionId(), deltacodec.Row{TimeTick: tt, SourceOrdinal: b.GetSourceOrdinal(), Operation: deltacodec.Update, PrimaryKeys: u.GetPrimaryKeys(), Assignments: u.GetAssignments()}, proto.Size(b)); err != nil {
+					return nil, err
+				}
+			}
+		}
+		if len(scopes) == 0 {
+			return nil, merr.WrapErrDataIntegrityMsg("empty delta payload at %d", tt)
+		}
+		for _, scope := range ordered {
+			batch := scopes[scope]
+			g := current[scope]
+			if g != nil && (g.delta.Layout.SchemaVersion != schema.GetVersion() || g.bytes+batch.bytes > maxBytes || g.logicalRows+batch.keys > maxRows) {
+				finish(scope)
+				g = nil
+			}
+			if g == nil {
+				layout := deltacodec.Layout{CollectionID: collectionID, VChannel: req.VChannel, PartitionID: scope, SchemaVersion: schema.GetVersion(), PKType: pk.GetDataType()}
+				if err := layout.ValidateIdentity(); err != nil {
+					return nil, err
+				}
+				g = &materializeGroup{partitionID: scope, pkType: pk.GetDataType(), fromTimeTick: tt, delta: &storage.MutationDelta{Layout: layout}}
+				current[scope] = g
+			}
+			g.toTimeTick = tt
+			g.logicalRows += batch.keys
+			g.bytes += batch.bytes
+			g.delta.Rows = append(g.delta.Rows, batch.rows...)
+			for _, f := range g.delta.Layout.Fields {
+				delete(batch.fields, f.ID)
+			}
+			for _, f := range batch.fields {
+				g.delta.Layout.Fields = append(g.delta.Layout.Fields, f)
+			}
+		}
+	}
+	for _, scope := range slices.Sorted(maps.Keys(current)) {
+		finish(scope)
+	}
+	return groups, nil
 }

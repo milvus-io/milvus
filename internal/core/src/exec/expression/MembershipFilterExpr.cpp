@@ -198,8 +198,8 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImpl(
                                                          valid_res,
                                                          bitmap_input);
     } else {
-        processed_size = ProcessDataChunks<T>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res);
+        processed_size = ProcessDataChunksWithMask<T>(
+            execute_sub_batch, std::nullptr_t{}, res, valid_res, bitmap_input);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: {} processed rows {} not equal expect batch "

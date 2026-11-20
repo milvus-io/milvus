@@ -125,6 +125,9 @@ class ContainsAllMatcher {
 
 void
 PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    update_candidates_ = context.get_bitmap_input();
+    auto reset_mask = folly::makeGuard([&] { update_candidates_ = {}; });
+
     WaitPrefetch();
     tracer::AutoSpan span(
         "PhyJsonContainsFilterExpr::Eval", tracer::GetRootSpan(), true);
@@ -2570,8 +2573,23 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
     auto validity_mode = field_type_ == DataType::JSON
                              ? IndexValidityMode::JsonExactPath
                              : IndexValidityMode::Default;
-    auto res = ProcessIndexChunksWithRowLevel<GetType>(execute_sub_batch,
-                                                       validity_mode);
+    auto matches = [&](const Array& row) {
+        auto contains = [&](const auto& literal) {
+            const auto wanted = GetValueWithCastNumber<GetType>(literal);
+            for (int i = 0; i < row.length(); ++i) {
+                if (row.is_element_valid(i) &&
+                    row.template get_data_unchecked<GetType>(i) == wanted)
+                    return true;
+            }
+            return false;
+        };
+        if (expr_->op_ == proto::plan::JSONContainsExpr_JSONOp_ContainsAll)
+            return std::all_of(
+                expr_->vals_.begin(), expr_->vals_.end(), contains);
+        return std::any_of(expr_->vals_.begin(), expr_->vals_.end(), contains);
+    };
+    auto res = ProcessIndexChunksWithRowLevel<GetType>(
+        execute_sub_batch, validity_mode, matches);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",

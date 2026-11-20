@@ -32,6 +32,12 @@ class ITextMatchReader {
  public:
     virtual ~ITextMatchReader() = default;
 
+    // Build a query-private snapshot over the supplied dense text rows with
+    // this reader's actual field analyzer.
+    virtual std::unique_ptr<ITextMatchReader>
+    CreateBatchReader(const std::vector<std::shared_ptr<const std::string>>&
+                          values) const = 0;
+
     // 1 = hit; output has Count() bits in the reader's coordinate domain.
     virtual TargetBitmap
     MatchQuery(std::string_view query, uint32_t min_should_match) const = 0;

@@ -118,11 +118,17 @@ ComputeScorerScores(exec::ExecContext* exec_context,
                output_scores.size(),
                offsets.size());
 
+    auto* query_context =
+        exec_context ? exec_context->get_query_context() : nullptr;
     auto function_mode = proto::plan::FunctionModeSum;
     auto filter = scorer->filter();
     if (!filter) {
-        scorer->batch_score(
-            op_context, segment, function_mode, offsets, output_scores);
+        scorer->batch_score(op_context,
+                            segment,
+                            function_mode,
+                            offsets,
+                            output_scores,
+                            query_context);
         return;
     }
 
@@ -132,7 +138,8 @@ ComputeScorerScores(exec::ExecContext* exec_context,
                             function_mode,
                             offsets,
                             *filter_bitset,
-                            output_scores);
+                            output_scores,
+                            query_context);
         return;
     }
 
@@ -171,11 +178,17 @@ ComputeScorerScores(exec::ExecContext* exec_context,
                             function_mode,
                             offsets,
                             bitsetview,
-                            output_scores);
+                            output_scores,
+                            query_context);
     } else {
         auto bitset = EvalFilterOverAllBatches(exec_context, *expr_set);
-        scorer->batch_score(
-            op_context, segment, function_mode, offsets, bitset, output_scores);
+        scorer->batch_score(op_context,
+                            segment,
+                            function_mode,
+                            offsets,
+                            bitset,
+                            output_scores,
+                            query_context);
     }
 }
 

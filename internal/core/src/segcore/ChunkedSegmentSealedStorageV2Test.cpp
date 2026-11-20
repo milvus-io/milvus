@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "segcore/UpdatesRecord.h"
 #include <arrow/api.h>
 #include <arrow/c/abi.h>
 #include <arrow/array/array_base.h>
@@ -1599,6 +1600,60 @@ TEST_P(TestLazyManifest,
     EXPECT_TRUE(column->CellsLoaded(&first_offset, 1));
 }
 
+TEST_P(TestLazyManifest, TakePreservesHistoricalOutputAndDuplicates) {
+    const auto base_path = UniqueManifestTestPath("update_take");
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, base_path);
+    milvus::test::V3SegmentTestData data(schema_,
+                                         1,
+                                         64,
+                                         128,
+                                         TestLocalPath,
+                                         base_path,
+                                         LazyManifestTestGroupPattern(schema_));
+    auto segment = CreateSegmentByLoadInfo(
+        MakeV3ManifestLoadInfo(data, 88433), false, 1000);
+    auto* chunked = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(chunked, nullptr);
+    chunked->SetUseTakeForOutputForTesting(true);
+    const auto field = fields.at("string1");
+    const auto pk = fields.at("pk");
+    const int64_t offsets[] = {2, 1, 2};
+    auto base = segment->bulk_subscript(nullptr, field, offsets, 3);
+    auto key = segment->bulk_subscript(nullptr, pk, offsets, 1);
+    IdArray ids;
+    if (GetParam())
+        ids.mutable_str_id()->add_data(key->scalars().string_data().data(0));
+    else
+        ids.mutable_int_id()->add_data(key->scalars().long_data().data(0));
+    UpdateAssignment a{field, {}};
+    a.literal.mutable_scalar_value()->set_string_data("new");
+    segment->ApplyUpdates(ids, 2000, 0, {a});
+    query::RetrievePlan retrieve(schema_);
+    retrieve.field_ids_ = {field};
+    query::Plan search(schema_);
+    search.target_entries_ = {field};
+    for (auto ts : {1999, 2000}) {
+        auto result = std::make_unique<proto::segcore::RetrieveResults>();
+        ASSERT_TRUE(chunked->TryTakeForRetrieve(
+            &retrieve, result, offsets, 3, false, false, nullptr, nullptr, ts));
+        SearchResult hits;
+        hits.query_timestamp_ = ts;
+        ASSERT_TRUE(chunked->TestTryTakeForSearch(&search, offsets, 3, hits));
+        for (auto* col : {&result->fields_data(0),
+                          static_cast<const DataArray*>(
+                              hits.output_fields_data_.at(field).get())}) {
+            const auto& out = col->scalars().string_data();
+            ASSERT_EQ(out.data_size(), 3);
+            for (int i : {0, 2})
+                EXPECT_EQ(
+                    out.data(i),
+                    ts < 2000 ? base->scalars().string_data().data(i) : "new");
+            EXPECT_EQ(out.data(1), base->scalars().string_data().data(1));
+        }
+    }
+}
+
 TEST_P(TestLazyManifest, LazyManifestRetrieveSizeAndValuesAreCorrect) {
     LazyColumnGroupGuard lazy_group_guard(true);
     auto warmup_policies =
@@ -1693,6 +1748,7 @@ TEST_P(TestLazyManifest, LazyManifestRetrieveSizeAndValuesAreCorrect) {
     auto status = FillRetrieveFieldsOrdered(&c_segment,
                                             1,
                                             plan.get(),
+                                            0,
                                             &segment_index,
                                             &segment_offset,
                                             1,

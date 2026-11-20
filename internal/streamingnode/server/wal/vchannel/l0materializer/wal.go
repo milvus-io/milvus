@@ -25,6 +25,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -37,6 +38,7 @@ import (
 
 // WALConfig wires the temporary retained-message consumer.
 type WALConfig struct {
+	SchemaAt             func(uint64) *schemapb.CollectionSchema
 	VChannel             string
 	MaterializedTimeTick uint64
 	MaterializeMaxBytes  uint64
@@ -54,6 +56,8 @@ type WALConfig struct {
 // TODO: Remove after enabling queryview and reconnect the Summary materializer.
 // Materialization waits for earlier L1 final commits across all partitions.
 type WALMaterializer struct {
+	schemaAt               func(uint64) *schemapb.CollectionSchema
+	pendingSchemas         map[uint64]*schemapb.CollectionSchema
 	earlierSegmentsFlushed func(uint64) bool
 	mu                     sync.Mutex
 	vchannel               string
@@ -75,6 +79,7 @@ type WALMaterializer struct {
 
 func NewWALMaterializer(config WALConfig) *WALMaterializer {
 	return &WALMaterializer{
+		schemaAt: config.SchemaAt, pendingSchemas: make(map[uint64]*schemapb.CollectionSchema),
 		vchannel:               config.VChannel,
 		materialized:           config.MaterializedTimeTick,
 		observed:               config.MaterializedTimeTick,
@@ -96,11 +101,11 @@ func (m *WALMaterializer) MaterializedTimeTick() uint64 {
 func (m *WALMaterializer) ObserveMessage(retained message.RetainedImmutableMessage) {
 	msg := retained.Message()
 	flush := isL0FlushMessage(msg.MessageType())
-	deleted := messageutil.ClassifyTransformLogMessage(msg) == messageutil.TransformLogKindDelete
+	mutation := messageutil.ClassifyTransformLogMessage(msg).HasPayload()
 	m.mu.Lock()
 	if m.terminalErr != nil {
 		m.mu.Unlock()
-		if deleted || flush {
+		if mutation || flush {
 			retained.IntoPoisoned()
 		}
 		return
@@ -110,7 +115,7 @@ func (m *WALMaterializer) ObserveMessage(retained message.RetainedImmutableMessa
 		return
 	}
 	m.observed = msg.TimeTick()
-	if !deleted && !flush {
+	if !mutation && !flush {
 		m.mu.Unlock()
 		return
 	}
@@ -118,9 +123,12 @@ func (m *WALMaterializer) ObserveMessage(retained message.RetainedImmutableMessa
 		m.pendingSince = time.Now()
 	}
 	m.pending = append(m.pending, retained.Clone())
-	if deleted {
-		// Account only Delete payloads, even for mixed Insert/Delete transactions.
-		m.pendingBytes += deleteBytes(msg)
+	if mutation {
+		if m.schemaAt != nil {
+			m.pendingSchemas[msg.TimeTick()] = m.schemaAt(msg.TimeTick())
+		}
+		// Inserts in mixed transactions have a different persistence owner.
+		m.pendingBytes += mutationBytes(msg)
 	}
 	if flush {
 		m.flushThrough = msg.TimeTick()
@@ -142,10 +150,13 @@ func isL0FlushMessage(t message.MessageType) bool {
 	}
 }
 
-func deleteBytes(msg message.ImmutableMessage) uint64 {
+func mutationBytes(msg message.ImmutableMessage) uint64 {
 	var size uint64
 	count := func(msg message.ImmutableMessage) error {
-		if msg.MessageType() == message.MessageTypeDelete {
+		switch msg.MessageType() {
+		case message.MessageTypeUpdate:
+			size += uint64(proto.Size(message.MustAsImmutableUpdateMessageV2(msg).MustBody()))
+		case message.MessageTypeDelete:
 			body := message.MustAsImmutableDeleteMessageV1(msg).MustBody()
 			size += uint64(proto.Size(body.GetPrimaryKeys()) + 8*messageutil.PrimaryKeyCount(body.GetPrimaryKeys()))
 		}
@@ -213,9 +224,13 @@ func (m *WALMaterializer) scheduleLocked() *walMaterializeTask {
 	}
 	handles := m.pending[:end:end]
 	task := &walMaterializeTask{owner: m, handles: handles, through: handles[len(handles)-1].Message().TimeTick()}
+	task.schemas = make(map[uint64]*schemapb.CollectionSchema)
 	m.pending = m.pending[end:]
 	for _, handle := range handles {
-		m.pendingBytes -= deleteBytes(handle.Message())
+		tt := handle.Message().TimeTick()
+		task.schemas[tt] = m.pendingSchemas[tt]
+		delete(m.pendingSchemas, tt)
+		m.pendingBytes -= mutationBytes(handle.Message())
 	}
 	if len(m.pending) == 0 {
 		m.pending = nil
@@ -235,6 +250,7 @@ func (m *WALMaterializer) submit(task *walMaterializeTask) {
 }
 
 type walMaterializeTask struct {
+	schemas  map[uint64]*schemapb.CollectionSchema
 	priority moduleapi.DataTaskPriority
 	mu       sync.Mutex
 	owner    *WALMaterializer
@@ -242,6 +258,48 @@ type walMaterializeTask struct {
 	through  uint64
 	done     bool
 	err      error
+}
+
+// verifyWALMutationEntry checks the extracted operation and ordinal against each
+// retained WAL body before any sibling scope can reach registration.
+func verifyWALMutationEntry(msg message.ImmutableMessage, entry *streamingpb.TransformLogEntry) error {
+	if entry.GetTimeTick() != msg.TimeTick() {
+		return merr.WrapErrDataIntegrityMsg("missing WAL mutation entry at TimeTick %d", msg.TimeTick())
+	}
+	deletes := entry.GetDelete().GetBlocks()
+	mutations := entry.GetMutations().GetBlocks()
+	var ordinal uint64
+	check := func(body message.ImmutableMessage) error {
+		index := ordinal
+		ordinal++
+		op := body.MessageType()
+		if op != message.MessageTypeDelete && op != message.MessageTypeUpdate {
+			return nil
+		}
+		if len(mutations) > 0 {
+			block := mutations[0]
+			mutations = mutations[1:]
+			if uint64(block.GetSourceOrdinal()) == index &&
+				(op == message.MessageTypeUpdate && block.GetUpdate() != nil || op == message.MessageTypeDelete && block.GetDelete() != nil) {
+				return nil
+			}
+		} else if len(deletes) > 0 && op == message.MessageTypeDelete && deletes[0] != nil && uint64(deletes[0].GetSourceOrdinal()) == index {
+			deletes = deletes[1:]
+			return nil
+		}
+		return merr.WrapErrDataIntegrityMsg("missing or mismatched WAL %s at TimeTick %d body %d", op, msg.TimeTick(), index)
+	}
+	if msg.MessageType() == message.MessageTypeTxn {
+		if err := message.AsImmutableTxnMessage(msg).RangeOver(check); err != nil {
+			return err
+		}
+	} else if err := check(msg); err != nil {
+		return err
+	}
+	if len(deletes) != 0 || len(mutations) != 0 {
+		return merr.WrapErrDataIntegrityMsg("unexpected extra WAL mutation blocks at TimeTick %d", msg.TimeTick())
+	}
+	return nil
 }
 
 func (t *walMaterializeTask) Execute(ctx context.Context) error {
@@ -260,11 +318,17 @@ func (t *walMaterializeTask) Execute(ctx context.Context) error {
 	var entries []*streamingpb.TransformLogEntry
 	positions := make(map[uint64]*msgpb.MsgPosition)
 	for _, handle := range t.handles {
-		entry := messageutil.BuildTransformLogEntry(handle.Message(), messageutil.TransformEntryOption{})
-		if entry != nil && entry.GetDelete() != nil {
-			entries = append(entries, entry)
-			positions[entry.GetTimeTick()] = utility.NewMessagePosition(handle.Message(), m.vchannel)
+		msg := handle.Message()
+		// ObserveMessage retains only mutation messages and explicit flush boundaries.
+		if isL0FlushMessage(msg.MessageType()) {
+			continue
 		}
+		entry := messageutil.BuildTransformLogEntry(msg, messageutil.TransformEntryOption{})
+		if err := verifyWALMutationEntry(msg, entry); err != nil {
+			return err
+		}
+		entries = append(entries, entry)
+		positions[entry.GetTimeTick()] = utility.NewMessagePosition(msg, m.vchannel)
 	}
 	if len(entries) > 0 {
 		if m.writer == nil {
@@ -273,7 +337,7 @@ func (t *walMaterializeTask) Execute(ctx context.Context) error {
 		if err := m.writer.Materialize(ctx, MaterializeRequest{
 			VChannel: m.vchannel, TargetTimeTick: t.through,
 			Entries: entries, MaxRows: m.maxRows, MaxBytes: m.maxBytes,
-			DeletePositions: positions,
+			DeletePositions: positions, Schemas: t.schemas,
 		}); err != nil {
 			if errors.Is(err, merr.ErrChannelMisrouted) {
 				t.poison(ctx, err)
@@ -297,6 +361,7 @@ func (t *walMaterializeTask) Execute(ctx context.Context) error {
 		handle.Release()
 	}
 	t.handles = nil
+	t.schemas = nil
 	m.submit(next)
 	return nil
 }
@@ -309,6 +374,7 @@ func (t *walMaterializeTask) poison(ctx context.Context, err error) {
 	m.terminalErr = err
 	pending := m.pending
 	m.pending = nil
+	clear(m.pendingSchemas)
 	m.pendingBytes = 0
 	m.pendingSince = time.Time{}
 	m.task = nil
@@ -320,6 +386,7 @@ func (t *walMaterializeTask) poison(ctx context.Context, err error) {
 		handle.PoisonedRelease()
 	}
 	t.handles = nil
+	t.schemas = nil
 	for _, handle := range pending {
 		handle.PoisonedRelease()
 	}

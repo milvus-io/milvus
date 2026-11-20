@@ -25,6 +25,7 @@
 #include "common/QueryResult.h"
 #include "fmt/core.h"
 #include "query/Utils.h"
+#include "segcore/UpdatesRecord.h"
 
 namespace milvus {
 
@@ -72,7 +73,8 @@ MultiFieldDataGetter::MultiFieldDataGetter(
     const std::optional<DataType>& json_type,
     bool strict_cast,
     const segcore::SegmentReadSnapshot* snapshot,
-    bool use_json_stats)
+    bool use_json_stats,
+    std::optional<Timestamp> timestamp)
     : field_count_(field_ids.size()) {
     getters_.reserve(field_ids.size());
 
@@ -200,6 +202,37 @@ MultiFieldDataGetter::MultiFieldDataGetter(
                               "unsupported data type {} for group by operator",
                               data_type));
         }
+        const auto& store = segment.GetUpdatesRecord();
+        if (store.Stats(field_id).entries) {
+            AssertInfo(timestamp.has_value(),
+                       "updated group key requires a query timestamp");
+            getter = [base = std::move(getter),
+                      &store,
+                      field_id,
+                      ts = *timestamp](int64_t row) -> GroupByValueType {
+                auto value = store.Lookup(field_id, row, ts);
+                if (!value)
+                    return base(row);
+                return std::visit(
+                    [](const auto& item) -> GroupByValueType {
+                        using T = std::decay_t<decltype(item)>;
+                        if constexpr (std::is_same_v<T, std::monostate>)
+                            return std::nullopt;
+                        else if constexpr (std::is_same_v<
+                                               T,
+                                               segcore::UpdateString>)
+                            return *item;
+                        else if constexpr (std::is_same_v<
+                                               T,
+                                               segcore::UpdateArray>) {
+                            ThrowInfo(UnexpectedError,
+                                      "array in scalar search group key");
+                        } else
+                            return item;
+                    },
+                    *value);
+            };
+        }
         getters_.push_back(std::move(getter));
     }
 }
@@ -299,7 +332,8 @@ SearchGroupBy(milvus::OpContext* op_ctx,
               std::vector<int32_t>* element_indices,
               SearchResult* search_result,
               const segcore::SegmentReadSnapshot* snapshot,
-              bool use_json_stats) {
+              bool use_json_stats,
+              std::optional<Timestamp> timestamp) {
     if (TryStrictGroupFilteredSearch(op_ctx,
                                      iterators,
                                      search_info,
@@ -336,7 +370,8 @@ SearchGroupBy(milvus::OpContext* op_ctx,
                                                search_info.json_type_,
                                                search_info.strict_cast_,
                                                snapshot,
-                                               use_json_stats);
+                                               use_json_stats,
+                                               timestamp);
 
     topk_per_nq_prefix_sum.push_back(0);
     for (const auto& iterator : iterators) {

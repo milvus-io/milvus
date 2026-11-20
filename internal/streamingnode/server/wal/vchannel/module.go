@@ -165,6 +165,13 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		}
 	}
 	module.l0Materializer = l0materializer.NewWALMaterializer(l0materializer.WALConfig{
+		SchemaAt: func(tt uint64) *schemapb.CollectionSchema {
+			if module.vchannelView == nil {
+				return nil
+			}
+			_, schema := module.vchannelView.GetSchema(tt)
+			return schema
+		},
 		VChannel:               config.VChannel,
 		MaterializedTimeTick:   config.VChannelMeta.GetTransformMaterializedTimeTick(),
 		MaterializeMaxRows:     config.L0MaterializeRows,

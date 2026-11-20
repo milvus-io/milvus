@@ -690,3 +690,19 @@ func SegmentEffectiveDmlTs(seg *datapb.SegmentInfo) uint64 {
 	}
 	return seg.GetDmlPosition().GetTimestamp()
 }
+
+// L0MutationTimeRange bounds all effective mutation times represented by the
+// segment and its files. Imported records are visible at max(raw, commit).
+func L0MutationTimeRange(seg *datapb.SegmentInfo) (uint64, uint64) {
+	start, end := SegmentEffectiveTs(seg), SegmentEffectiveDmlTs(seg)
+	for _, field := range seg.GetDeltalogs() {
+		for _, file := range field.GetBinlogs() {
+			end = max(end, file.GetTimestampTo())
+			ts := max(file.GetTimestampFrom(), seg.GetCommitTimestamp())
+			if ts != 0 && (start == 0 || ts < start) {
+				start = ts
+			}
+		}
+	}
+	return start, end
+}

@@ -176,6 +176,18 @@ func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 	return nil
 }
 
+// AddMetadata attaches a footer key to each physical column group.
+func (pw *PackedWriter) AddMetadata(key, value string) error {
+	if pw.cPackedWriter == nil {
+		return merr.WrapErrStorageMsg("packed writer is closed")
+	}
+	k, v := C.CString(key), C.CString(value)
+	defer C.free(unsafe.Pointer(k))
+	defer C.free(unsafe.Pointer(v))
+	status := C.AddPackedWriterMetadata(pw.cPackedWriter, k, v)
+	return ConsumeCStatusIntoError(&status)
+}
+
 func (pw *PackedWriter) Close() error {
 	if pw.cPackedWriter == nil {
 		return nil

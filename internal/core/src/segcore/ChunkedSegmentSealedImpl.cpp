@@ -12,6 +12,7 @@
 #include <numeric>
 #include "index/scalar/sort/SortedMembership.h"
 #include "ChunkedSegmentSealedImpl.h"
+#include "segcore/UpdatesRecord.h"
 #include "exec/expression/ExprCache.h"
 #include "segcore/default_fs.h"
 
@@ -1701,21 +1702,106 @@ ChunkedSegmentSealedImpl::ToPublishedState(
         snapshot, sealed->GetPublishedState().get());
 }
 
-std::unique_ptr<DataArray>
-BulkSubscriptWithSnapshot(
+static void
+SetOutputCell(const FieldMeta& meta,
+              DataArray& output,
+              int64_t count,
+              size_t position,
+              const UpdateValue& value) {
+    bool valid = !std::holds_alternative<std::monostate>(value);
+    if (meta.is_nullable()) {
+        if (output.valid_data_size()) {
+            // A populated legacy mask is authoritative for other rows.
+            *output.mutable_scalars()->mutable_valid_data() =
+                output.valid_data();
+        }
+        auto* validity = MutableFieldDataRowValidData(&output);
+        if (validity->empty())
+            validity->Resize(count, true);
+        validity->Set(position, valid);
+    }
+    auto* scalars = output.mutable_scalars();
+    switch (meta.get_data_type()) {
+        case DataType::BOOL:
+            scalars->mutable_bool_data()->set_data(
+                position, valid ? std::get<bool>(value) : 0);
+            break;
+        case DataType::INT8:
+            scalars->mutable_int_data()->set_data(
+                position, valid ? std::get<int8_t>(value) : 0);
+            break;
+        case DataType::INT16:
+            scalars->mutable_int_data()->set_data(
+                position, valid ? std::get<int16_t>(value) : 0);
+            break;
+        case DataType::INT32:
+            scalars->mutable_int_data()->set_data(
+                position, valid ? std::get<int32_t>(value) : 0);
+            break;
+        case DataType::INT64:
+            scalars->mutable_long_data()->set_data(
+                position, valid ? std::get<int64_t>(value) : 0);
+            break;
+        case DataType::TIMESTAMPTZ:
+            scalars->mutable_timestamptz_data()->set_data(
+                position, valid ? std::get<int64_t>(value) : 0);
+            break;
+        case DataType::VARCHAR: {
+            auto* item = scalars->mutable_string_data()->mutable_data(position);
+            if (valid)
+                *item = *std::get<UpdateString>(value);
+            else
+                item->clear();
+            break;
+        }
+        case DataType::ARRAY: {
+            auto* item = scalars->mutable_array_data()->mutable_data(position);
+            if (valid)
+                *item = *std::get<UpdateArray>(value);
+            else
+                item->Clear();
+            break;
+        }
+        default:
+            ThrowInfo(UnexpectedError,
+                      "invalid updated output type {}",
+                      meta.get_data_type());
+    }
+}
+
+// Native bulk readers and Take produce one scalar slot per logical row.
+static void
+ApplyOutputUpdates(const SegmentInternalInterface& segment,
+                   FieldId field,
+                   const FieldMeta& meta,
+                   const int64_t* offsets,
+                   int64_t count,
+                   std::optional<Timestamp> timestamp,
+                   DataArray& output) {
+    const auto& store = segment.GetUpdatesRecord();
+    if (!timestamp) {
+        AssertInfo(store.Stats(field).entries == 0,
+                   "updated output field requires a query timestamp");
+        return;
+    }
+    for (const auto& [position, value] :
+         store.Gather(field, *timestamp, offsets, count)) {
+        SetOutputCell(meta, output, count, position, value);
+    }
+}
+
+static std::unique_ptr<DataArray>
+ReadBaseWithSnapshot(
     const SegmentInternalInterface* segment,
-    const std::shared_ptr<const SegmentReadSnapshot>& snapshot,
+    const ChunkedSegmentSealedImpl* chunked,
+    const std::shared_ptr<
+        const ChunkedSegmentSealedImpl::PublishedSegmentState>& pinned,
     milvus::OpContext* op_ctx,
     FieldId field_id,
     const FieldMeta& field_meta,
     const int64_t* seg_offsets,
     int64_t count,
     const std::vector<std::string>* dynamic_field_names) {
-    auto* chunked = dynamic_cast<const ChunkedSegmentSealedImpl*>(segment);
-    auto pinned =
-        chunked ? ChunkedSegmentSealedImpl::ToPublishedState(snapshot)
-                : std::shared_ptr<
-                      const ChunkedSegmentSealedImpl::PublishedSegmentState>();
     // Dynamic-field extraction bypasses the field-exists gate: the requested
     // sub-fields are read from the JSON column even when the field is absent
     // from the schema (matching the pre-helper dispatch).
@@ -1744,6 +1830,85 @@ BulkSubscriptWithSnapshot(
             op_ctx, field_id, seg_offsets, count, *dynamic_field_names);
     }
     return segment->bulk_subscript(op_ctx, field_id, seg_offsets, count);
+}
+
+static std::unique_ptr<DataArray>
+ReadOutputWithSnapshot(
+    const SegmentInternalInterface* segment,
+    const ChunkedSegmentSealedImpl* chunked,
+    const std::shared_ptr<
+        const ChunkedSegmentSealedImpl::PublishedSegmentState>& pinned,
+    milvus::OpContext* op_ctx,
+    FieldId field,
+    const FieldMeta& meta,
+    const int64_t* offsets,
+    int64_t count,
+    const std::vector<std::string>* names,
+    std::optional<Timestamp> timestamp) {
+    // Some native scalar readers require physical row IDs. Use an actual
+    // requested row for padded slots, then restore their empty values.
+    const auto type = meta.get_data_type();
+    const bool supports_updates =
+        IsIntegerDataType(type) || type == DataType::BOOL ||
+        type == DataType::TIMESTAMPTZ || type == DataType::VARCHAR ||
+        type == DataType::ARRAY;
+    std::vector<int64_t> padded;
+    if (count > 0 && supports_updates &&
+        std::find(offsets, offsets + count, INVALID_SEG_OFFSET) !=
+            offsets + count) {
+        auto row = std::find_if(offsets, offsets + count, [](auto offset) {
+            return offset != INVALID_SEG_OFFSET;
+        });
+        if (row == offsets + count)
+            return CreateEmptyScalarDataArray(count, meta);
+        padded.assign(offsets, offsets + count);
+        std::replace(
+            padded.begin(), padded.end(), int64_t(INVALID_SEG_OFFSET), *row);
+    }
+    auto output = ReadBaseWithSnapshot(segment,
+                                       chunked,
+                                       pinned,
+                                       op_ctx,
+                                       field,
+                                       meta,
+                                       padded.empty() ? offsets : padded.data(),
+                                       count,
+                                       names);
+    if (!padded.empty()) {
+        for (int64_t i = 0; i < count; ++i) {
+            if (offsets[i] == INVALID_SEG_OFFSET)
+                SetOutputCell(meta, *output, count, i, {});
+        }
+    }
+    ApplyOutputUpdates(
+        *segment, field, meta, offsets, count, timestamp, *output);
+    return output;
+}
+
+std::unique_ptr<DataArray>
+BulkSubscriptWithSnapshot(
+    const SegmentInternalInterface* segment,
+    const std::shared_ptr<const SegmentReadSnapshot>& snapshot,
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const FieldMeta& field_meta,
+    const int64_t* seg_offsets,
+    int64_t count,
+    const std::vector<std::string>* dynamic_field_names,
+    std::optional<Timestamp> timestamp) {
+    auto* chunked = dynamic_cast<const ChunkedSegmentSealedImpl*>(segment);
+    auto pinned = chunked ? ChunkedSegmentSealedImpl::ToPublishedState(snapshot)
+                          : nullptr;
+    return ReadOutputWithSnapshot(segment,
+                                  chunked,
+                                  pinned,
+                                  op_ctx,
+                                  field_id,
+                                  field_meta,
+                                  seg_offsets,
+                                  count,
+                                  dynamic_field_names,
+                                  timestamp);
 }
 
 std::shared_ptr<const ChunkedSegmentSealedImpl::RuntimeResourceState>
@@ -4842,6 +5007,40 @@ ChunkedSegmentSealedImpl::search_pks(BitsetType& bitset,
     }
 }
 
+void
+ChunkedSegmentSealedImpl::ApplyUpdates(
+    const IdArray& keys,
+    Timestamp timestamp,
+    uint32_t ordinal,
+    const std::vector<UpdateAssignment>& assignments,
+    OpContext* op_ctx) {
+    // Reopen can replace the PK resources, physical schema and effective birth
+    // timestamp. Resolve and publish against one physical state.
+    std::lock_guard guard(reopen_mutex_);
+    AssertInfo(!read_state_fork_, "cannot apply an update through a read fork");
+    auto layout = CaptureFieldLayout();
+    ApplyUpdatesWithSchema(*layout->MakeUpdateSchema(),
+                           layout->get_primary_field_type(),
+                           keys,
+                           timestamp,
+                           ordinal,
+                           assignments,
+                           op_ctx);
+}
+
+std::vector<int64_t>
+ChunkedSegmentSealedImpl::ResolveUpdateOffsets(const std::vector<PkType>& keys,
+                                               Timestamp timestamp) const {
+    std::vector<int64_t> rows;
+    search_batch_pks(
+        keys,
+        [timestamp](size_t) { return timestamp; },
+        false,
+        [&](SegOffset offset, Timestamp) { rows.push_back(offset.get()); },
+        true);
+    return rows;
+}
+
 // Reports a row's matches in ascending timestamp order, which is their
 // input order for the timestamp-sorted batches DeletedRecord pushes;
 // DeletedRecord relies on it.
@@ -4851,7 +5050,8 @@ ChunkedSegmentSealedImpl::search_batch_pks(
     const std::function<Timestamp(const size_t idx)>& get_timestamp,
     bool include_same_ts,
     const std::function<void(const SegOffset offset, const Timestamp ts)>&
-        callback) const {
+        callback,
+    bool require_ready) const {
     // Helper to read a single timestamp by segment offset.
     // For import/CDC segments with commit_ts_ set: every row carries commit_ts_,
     // so short-circuit without touching the raw timestamp column.
@@ -4892,6 +5092,10 @@ ChunkedSegmentSealedImpl::search_batch_pks(
         if (offset < ts_chunk_base || offset >= ts_chunk_limit) {
             if (!ts_column) {
                 ts_column = get_column(runtime, TimestampFieldID);
+                if (!ts_column && require_ready) {
+                    ThrowInfo(FieldNotLoaded,
+                              "timestamp data is not ready for updates");
+                }
                 AssertInfo(ts_column != nullptr, "timestamp data is not ready");
             }
             auto [cid, off_in_chunk] = ts_column->GetChunkIDByOffset(offset);
@@ -4933,6 +5137,9 @@ ChunkedSegmentSealedImpl::search_batch_pks(
         auto pk_index = PinPkIndex(runtime, nullptr);
         auto* pk_cell = pk_index.get();
         if (pk_cell == nullptr || !pk_cell->has_pk2offset()) {
+            if (require_ready) {
+                ThrowInfo(FieldNotLoaded, "PK index is not ready for updates");
+            }
             return;
         }
         auto timestamp_hit =
@@ -4955,6 +5162,10 @@ ChunkedSegmentSealedImpl::search_batch_pks(
     auto pk_field_id = primary_key_field_id_;
     AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
     auto pk_column = get_column(snapshot->runtime, pk_field_id);
+    if (!pk_column && require_ready) {
+        ThrowInfo(FieldNotLoaded,
+                  "primary key column is not ready for updates");
+    }
     AssertInfo(pk_column != nullptr, "primary key column not loaded");
 
     auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
@@ -5448,6 +5659,7 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       segcore_config_(source.segcore_config_),
       is_sorted_by_pk_(source.is_sorted_by_pk_),
       reader_mutex_(source.reader_mutex_) {
+    updates_record_ = source.updates_record_;
 }
 
 std::unique_ptr<ChunkedSegmentSealedImpl>
@@ -10324,24 +10536,23 @@ ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
 
     auto fetch_one = [this, plan, snapshot, &results, size](
                          FieldId field_id, milvus::OpContext* field_ctx) {
-        auto& field_meta = plan->schema_->operator[](field_id);
-        if (plan->schema_->get_dynamic_field_id().has_value() &&
-            plan->schema_->get_dynamic_field_id().value() == field_id &&
-            !plan->target_dynamic_fields_.empty()) {
-            auto& target_dynamic_fields = plan->target_dynamic_fields_;
-            return bulk_subscript_from_state(snapshot,
-                                             field_ctx,
-                                             field_id,
-                                             results.seg_offsets_.data(),
-                                             size,
-                                             target_dynamic_fields);
-        }
-        if (!snapshot->fields->has_field(field_id)) {
-            return bulk_subscript_not_exist_field(
-                field_meta, results.seg_offsets_.data(), size);
-        }
-        return bulk_subscript_from_state(
-            snapshot, field_ctx, field_id, results.seg_offsets_.data(), size);
+        const auto& meta = plan->schema_->operator[](field_id);
+        auto dynamic_id = plan->schema_->get_dynamic_field_id();
+        const auto* dynamic_names =
+            dynamic_id && *dynamic_id == field_id &&
+                    !plan->target_dynamic_fields_.empty()
+                ? &plan->target_dynamic_fields_
+                : nullptr;
+        return ReadOutputWithSnapshot(this,
+                                      this,
+                                      snapshot,
+                                      field_ctx,
+                                      field_id,
+                                      meta,
+                                      results.seg_offsets_.data(),
+                                      size,
+                                      dynamic_names,
+                                      results.query_timestamp_);
     };
     auto fetched_fields =
         FetchOutputFields(fields_to_fetch, get_segment_id(), op_ctx, fetch_one);
@@ -10953,7 +11164,8 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
     bool ignore_non_pk,
     bool fill_ids,
     std::shared_ptr<const PublishedSegmentState> snapshot,
-    milvus::OpContext* op_ctx) const {
+    milvus::OpContext* op_ctx,
+    std::optional<Timestamp> query_timestamp) const {
     // Fallback for callers without a pinned snapshot (direct tests).
     if (!snapshot) {
         snapshot = CapturePublishedState();
@@ -11206,6 +11418,13 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
             results->clear_ids();
             return false;
         }
+        ApplyOutputUpdates(*this,
+                           field_id,
+                           field_meta,
+                           offsets,
+                           size,
+                           query_timestamp,
+                           *data_array);
         data_array->set_field_id(field_id.get());
 
         if (fill_ids && is_pk_field(field_id)) {
@@ -11302,6 +11521,10 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(
         }
     }
 
+    if (std::find(seg_offsets, seg_offsets + size, INVALID_SEG_OFFSET) !=
+        seg_offsets + size) {
+        return false;
+    }
     auto ctx = BuildTakeContext(seg_offsets, size);
     if (SegcoreConfig::default_config().get_reject_remote_vector_output() &&
         has_vector_output) {
@@ -11427,6 +11650,13 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(
             results.output_fields_data_.clear();
             return false;
         }
+        ApplyOutputUpdates(*this,
+                           field_id,
+                           field_meta,
+                           seg_offsets,
+                           size,
+                           results.query_timestamp_,
+                           *data_array);
         data_array->set_field_id(field_id.get());
         results.output_fields_data_[field_id] = std::move(data_array);
     }

@@ -197,17 +197,17 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		return err
 	}
 
-	getDataCount := func(binlogs ...*datapb.FieldBinlog) int64 {
-		count := int64(0)
-		for _, binlog := range binlogs {
-			for _, fbinlog := range binlog.GetBinlogs() {
-				count += fbinlog.GetEntriesNum()
-			}
-		}
-		return count
+	var deletes, updates int64
+	for _, binlog := range t.deltaBinlog.GetBinlogs() {
+		deletes += binlog.DeleteKeyCount()
+		updates += binlog.GetMutationCounts().GetUpdateKeys()
 	}
-	metrics.DataNodeWriteDataCount.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource, metrics.InsertLabel, fmt.Sprint(t.collectionID)).Add(float64(t.batchRows))
-	metrics.DataNodeWriteDataCount.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource, metrics.DeleteLabel, fmt.Sprint(t.collectionID)).Add(float64(getDataCount(t.deltaBinlog)))
+	nodeID, collection := paramtable.GetStringNodeID(), fmt.Sprint(t.collectionID)
+	metrics.DataNodeWriteDataCount.WithLabelValues(nodeID, t.dataSource, metrics.InsertLabel, collection).Add(float64(t.batchRows))
+	metrics.DataNodeWriteDataCount.WithLabelValues(nodeID, t.dataSource, metrics.DeleteLabel, collection).Add(float64(deletes))
+	if updates > 0 {
+		metrics.DataNodeWriteDataCount.WithLabelValues(nodeID, t.dataSource, metrics.UpdateLabel, collection).Add(float64(updates))
+	}
 	metrics.DataNodeFlushedSize.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource, t.level.String()).Add(float64(t.flushedSize))
 
 	metrics.DataNodeFlushedRows.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource).Add(float64(t.batchRows))

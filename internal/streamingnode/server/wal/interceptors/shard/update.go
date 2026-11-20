@@ -1,0 +1,74 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package shard
+
+import (
+	"context"
+
+	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+)
+
+func (impl *shardInterceptor) handleUpdateMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	update, err := message.AsMutableUpdateMessageV2(msg)
+	if err != nil {
+		return nil, status.NewInvalidArgument("invalid UPDATE message: %s", err)
+	}
+	h := update.Header()
+	if h.SchemaVersion == nil {
+		return nil, status.NewInvalidArgument("UPDATE requires an explicit schema version")
+	}
+	if h.GetCollectionId() <= 0 || funcutil.GetCollectionIDFromVChannel(msg.VChannel()) != h.GetCollectionId() {
+		return nil, status.NewInvalidArgument("UPDATE collection does not match its VChannel")
+	}
+	// Reuse the existing explicit-version checker; no insert or segment
+	// allocation occurs. The enclosing WAL lock fences concurrent schema DDL.
+	version, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
+		CollectionId: h.GetCollectionId(), SchemaVersion: h.SchemaVersion,
+	})
+	if errors.Is(err, shards.ErrCollectionSchemaVersionNotMatch) {
+		return nil, status.NewSchemaVersionMismatch("update schema version %d differs from current version %d", h.GetSchemaVersion(), version)
+	}
+	if err != nil {
+		return nil, status.NewUnrecoverableError("cannot validate update schema: %s", err)
+	}
+	body, err := update.Body(ctx)
+	if err != nil {
+		if errors.Is(err, message.ErrMalformedBody) {
+			return nil, status.NewInvalidArgument("invalid UPDATE payload: %s", err)
+		}
+		return nil, err
+	}
+	if body.GetPartitionId() != common.AllPartitionsID {
+		if body.GetPartitionId() <= 0 {
+			return nil, status.NewInvalidArgument("invalid UPDATE partition scope")
+		}
+		if err := impl.shardManager.CheckIfPartitionExists(shards.PartitionUniqueKey{CollectionID: h.GetCollectionId(), PartitionID: body.GetPartitionId()}); err != nil {
+			return nil, status.NewUnrecoverableError("cannot validate update partition: %s", err)
+		}
+	}
+	if !message.PKUpdateEnabled {
+		return nil, status.NewUnrecoverableError("PK-update consumers are not enabled")
+	}
+	return appendOp(ctx, msg)
+}

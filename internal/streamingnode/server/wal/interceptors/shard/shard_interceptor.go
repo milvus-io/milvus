@@ -41,6 +41,7 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeDropPartition:      impl.handleDropPartition,
 		message.MessageTypeInsert:             impl.handleInsertMessage,
 		message.MessageTypeDelete:             impl.handleDeleteMessage,
+		message.MessageTypeUpdate:             impl.handleUpdateMessage,
 		message.MessageTypeManualFlush:        impl.handleManualFlushMessage,
 		message.MessageTypeCreateSnapshot:     impl.handleCreateSnapshotMessage,
 		message.MessageTypeSchemaChange:       impl.handleSchemaChange,
@@ -78,6 +79,9 @@ func (impl *shardInterceptor) Name() string {
 
 // DoAppend assigns segment for every partition in the message.
 func (impl *shardInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (msgID message.MessageID, err error) {
+	if msg.MessageType() == message.MessageTypeUpdate && (funcutil.IsControlChannel(msg.VChannel()) || msg.IsPChannelLevel()) {
+		return nil, status.NewInvalidArgument("PK-update requires a business VChannel")
+	}
 	op, ok := impl.ops[msg.MessageType()]
 	if ok && (!funcutil.IsControlChannel(msg.VChannel()) || msg.IsPChannelLevel()) {
 		// If the message type is registered in the interceptor, use the registered operation.

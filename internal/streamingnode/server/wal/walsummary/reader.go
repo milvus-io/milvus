@@ -168,7 +168,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 			return TransformBatch{}, err
 		}
 		for _, record := range records {
-			if !appendEntry(&streamingpb.TransformLogEntry{TimeTick: record.GetTimeTick(), Entry: &streamingpb.TransformLogEntry_Delete{Delete: record.GetDelete()}}, false) {
+			if !appendEntry(transformEntryFromRecord(record), false) {
 				return batch, nil
 			}
 		}

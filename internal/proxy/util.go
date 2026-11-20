@@ -2347,7 +2347,7 @@ func GetRequestInfo(ctx context.Context, metaCache Cache, req proto.Message) (in
 	case *milvuspb.InsertRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, metaCache, req.(reqPartName))
 		return dbID, collToPartIDs, internalpb.RateType_DMLInsert, proto.Size(r), err
-	case *milvuspb.UpsertRequest:
+	case *milvuspb.UpsertRequest, *milvuspb.UpdateRecordsRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, metaCache, req.(reqPartName))
 		return dbID, collToPartIDs, internalpb.RateType_DMLInsert, proto.Size(r), err
 	case *milvuspb.DeleteRequest:
@@ -2459,7 +2459,7 @@ func GetRequestInfo(ctx context.Context, metaCache Cache, req proto.Message) (in
 // GetFailedResponse returns failed response.
 func GetFailedResponse(req any, err error) any {
 	switch req.(type) {
-	case *milvuspb.InsertRequest, *milvuspb.DeleteRequest, *milvuspb.UpsertRequest:
+	case *milvuspb.InsertRequest, *milvuspb.DeleteRequest, *milvuspb.UpsertRequest, *milvuspb.UpdateRecordsRequest:
 		return failedMutationResult(err)
 	case *milvuspb.ImportRequest:
 		return &milvuspb.ImportResponse{

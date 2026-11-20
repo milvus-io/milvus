@@ -81,6 +81,53 @@ func (_c *MockCSegment_Delete_Call) RunAndReturn(run func(context.Context, *segc
 	return _c
 }
 
+// GCUpdates provides a mock function with given fields: ctx, safeTS
+func (_m *MockCSegment) GCUpdates(ctx context.Context, safeTS uint64) error {
+	ret := _m.Called(ctx, safeTS)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GCUpdates")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, uint64) error); ok {
+		r0 = rf(ctx, safeTS)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCSegment_GCUpdates_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GCUpdates'
+type MockCSegment_GCUpdates_Call struct {
+	*mock.Call
+}
+
+// GCUpdates is a helper method to define mock.On call
+//   - ctx context.Context
+//   - safeTS uint64
+func (_e *MockCSegment_Expecter) GCUpdates(ctx interface{}, safeTS interface{}) *MockCSegment_GCUpdates_Call {
+	return &MockCSegment_GCUpdates_Call{Call: _e.mock.On("GCUpdates", ctx, safeTS)}
+}
+
+func (_c *MockCSegment_GCUpdates_Call) Run(run func(ctx context.Context, safeTS uint64)) *MockCSegment_GCUpdates_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(uint64))
+	})
+	return _c
+}
+
+func (_c *MockCSegment_GCUpdates_Call) Return(_a0 error) *MockCSegment_GCUpdates_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCSegment_GCUpdates_Call) RunAndReturn(run func(context.Context, uint64) error) *MockCSegment_GCUpdates_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // HasFieldData provides a mock function with given fields: fieldID
 func (_m *MockCSegment) HasFieldData(fieldID int64) bool {
 	ret := _m.Called(fieldID)

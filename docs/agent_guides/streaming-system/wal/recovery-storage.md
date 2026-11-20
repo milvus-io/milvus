@@ -7,8 +7,8 @@ Persists WAL consumer state to the catalog (etcd) and object storage. The author
 - **WALCheckpoint** (etcd): safe `LastConfirmedMessageID` and logical `TimeTick`, publisher term, replication configuration/progress, and AlterWAL state. Publication is bounded by both AckTracker's successful continuous prefix and WALSummary's `LastAcked`.
 - **VChannel metadata** (etcd): Per-VChannel collection info, partition list, schema history, state (NORMAL / DROPPED).
 - **Segment assignments** (etcd): Per-segment growing/flushed status with row count and binary size stats.
-- **Segment data** (object storage): SegmentView writes L1 binlogs and statistics; [L0Materializer](../../../design-docs/design_docs/wal/l0_materializer.md) owns Delete-to-L0 materialization. Index building is outside RecoveryStorage.
-- **WALSummary** (object storage): PChannel-scoped immutable chunks and term manifests, storing keyed-write summaries and Delete records independently of source-message handles.
+- **Segment data** (object storage): SegmentView writes L1 binlogs and statistics; [L0Materializer](../../../design-docs/design_docs/wal/l0_materializer.md) owns Delete and PK-update materialization into L0. Index building is outside RecoveryStorage.
+- **WALSummary** (object storage): PChannel-scoped immutable chunks and term manifests, storing keyed-write summaries and committed Delete/PK-update records independently of source-message handles.
 
 ## Recovery Flow
 
@@ -38,7 +38,7 @@ PChannel. This compatibility work is deferred; the current migration is not
 rollback-safe.
 
 1. RW WAL opening appends a RecoveryBarrier to fence the old writer.
-2. **Metadata recovery** (`recoverRecoveryInfoFromMeta`): Claim the checkpoint with the assignment term, load component metadata and restore WALSummary. WALMaterializer restores its cursor and rebuilds unmaterialized Delete handles through WAL replay.
+2. **Metadata recovery** (`recoverRecoveryInfoFromMeta`): Claim the checkpoint with the assignment term, load component metadata and restore WALSummary. WALMaterializer restores its cursor and rebuilds unmaterialized mutation handles through WAL replay.
 3. **Startup recovery** (`runBoundedRecovery`): Use the ordinary scanner to observe the WAL from the checkpoint through this open's exact barrier. Capture the write-path snapshot and an independent copy of unfinished transaction builders, and restore idempotency snapshots from retained Summary history plus replayed records (retrying transient object reads until recovery or cancellation, and failing WAL open on permanent errors or cancellation); pause further raw input until write-path initialization finishes. Asynchronous persistence need not have finished.
 4. Resume the same scanner exclusively after the barrier through the opener-provided WAB, retaining its ordering and transaction state. An empty WAB needs no additional persisted TimeTick to switch. WAB retains the live suffix until RecoveryStorage reports complete consumption; capacity/keepalive cannot evict that suffix. After observing each confirmation, including Summary and ordered VChannel query-barrier dispatch, mark its complete prefix eligible for WAB eviction. Capacity/TTL still determines actual eviction, and the latest durable confirmation is retained separately for catchup handoff without pinning consumed volatile barriers in the queue. This consumption boundary is separate from persistence completion. WAB occupancy directly controls producer backpressure; scanner catchup/tailing transitions do not. Run AckTracker stall checks, independent Summary backlog checks, and catalog publication. Component snapshots precede checkpoint publication and WAL truncation. Poisoned messages remain incomplete and block the checkpoint.
 
@@ -69,6 +69,13 @@ prefix in its scope, regardless of replication origin or the `_ur` marker.
 Explicitly ignored topology records have no abort effect. The old session is not reset
 for another Commit attempt on the cancelled writer. See
 [Append retry and writer lifetime](../walbackend/walbackend.md#append-retry-and-writer-lifetime).
+
+A transaction containing a PK update carries ordered mutation blocks through
+WALSummary and the active WAL materializer. Each block uses the commit TimeTick
+and its original transaction body index, including gaps left by inserts.
+Materialization pins the historical collection schema while observing these
+messages. All partition outputs must register before the cursor advances.
+Delete-only traffic retains the legacy output during the PK-update rollout fence.
 
 The temporary WAL L0 materializer retains Delete/Txn and explicit Flush handles.
 Size, buffer age, explicit Flush and recovery-tail requests trigger output.

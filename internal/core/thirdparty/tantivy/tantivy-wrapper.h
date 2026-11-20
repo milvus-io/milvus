@@ -258,6 +258,17 @@ struct TantivyIndexWrapper {
         return snapshot;
     }
 
+    std::unique_ptr<TantivyIndexWrapper>
+    create_text_batch_writer() const {
+        auto writer = std::make_unique<TantivyIndexWrapper>();
+        auto res = RustResultWrapper(tantivy_create_text_batch_writer(
+            reader_, GROWING_TEXT_MEMORY_BUDGET_IN_BYTES));
+        AssertTantivyOk(
+            res, "failed to clone text analyzer: {}", res.result_->error);
+        writer->writer_ = res.result_->value.ptr._0;
+        return writer;
+    }
+
     ~TantivyIndexWrapper() {
         free();
     }

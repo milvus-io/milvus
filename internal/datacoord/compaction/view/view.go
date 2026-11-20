@@ -147,11 +147,14 @@ func GetViewsByInfo(segments ...*meta.SegmentInfo) []*SegmentView {
 		stats := segment.EnsureStats()
 		numOfRows := segment.GetNumOfRows()
 		if segment.GetLevel() == datapb.SegmentLevel_L0 {
-			// L0 segments record deleted-row count under numOfRows for view
-			// purposes (no inserts). DeleteNumRows on Statistics is the
-			// persisted equivalent of the legacy CalcDelRowCountFromDeltaLog
-			// iteration.
+			// Both operations probe a bloom filter per logical key. Keep the
+			// delete ratio independent from the estimate used for worker slots.
 			numOfRows = stats.GetDeleteNumRows()
+			for _, group := range segment.GetDeltalogs() {
+				for _, file := range group.GetBinlogs() {
+					numOfRows += file.GetMutationCounts().GetUpdateKeys()
+				}
+			}
 		}
 		return &SegmentView{
 			ID: segment.ID,

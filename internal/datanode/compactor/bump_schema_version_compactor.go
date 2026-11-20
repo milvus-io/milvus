@@ -689,17 +689,18 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 	if err != nil {
 		return nil, err
 	}
-	delta, err := compaction.ComposeDeleteFromDeltalogs(t.ctx, pkField.GetDataType(), segment,
-		storage.WithDownloader(t.chunkManager.MultiRead),
-		storage.WithStorageConfig(t.compactionParams.StorageConfig))
+	mutations, err := loadRewriteMutations(t.ctx, mutationSource{cm: t.chunkManager}, t.compactionParams.StorageConfig, t.plan, segment, pkField)
 	if err != nil {
 		return nil, err
 	}
-	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime, segment.GetCommitTimestamp())
+	if len(mutations.updates) > 0 {
+		return nil, merr.Wrap(merr.ErrServiceUnimplemented, "schema-bump full rewrite with pending PK updates")
+	}
+	entityFilter := compaction.NewEntityFilter(mutations.deletes, t.plan.GetCollectionTtl(), t.currentTime, segment.GetCommitTimestamp())
 	ttlFieldID := getTTLFieldID(t.plan.GetSchema())
 	_, ttlFieldPhysicallyPresent := existingFields[ttlFieldID]
 	sourceHasTTLField := ttlFieldID >= common.StartOfUserFieldID && ttlFieldPhysicallyPresent
-	preMaterializeFilter := len(delta) > 0 || t.plan.GetCollectionTtl() > 0 || sourceHasTTLField
+	preMaterializeFilter := len(mutations.deletes) > 0 || t.plan.GetCollectionTtl() > 0 || sourceHasTTLField
 
 	// Prepare LOB (TEXT) handling before opening the source reader: a legacy
 	// partition namespace needs a TEXT-decoding reader rooted at the source.

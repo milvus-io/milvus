@@ -36,6 +36,13 @@ func (c *Inspector) recoverCompactionTask(t *datapb.CompactionTask) (ctask.Compa
 	if err != nil {
 		return nil, err
 	}
+	if t.GetL0Targets().GetPublished() {
+		// All target deltas and cursors are durable. Some input drops may
+		// already have committed. Resume retirement without validating those
+		// inputs as live worker sources.
+		c.meta.SetSegmentsCompacting(context.TODO(), t.GetInputSegments(), true)
+		return task, nil
+	}
 	group, err := c.meta.GetCompactionChangeGroup(t)
 	if err != nil {
 		return nil, err
@@ -102,7 +109,7 @@ func (c *Inspector) LoadMeta() error {
 				failedTasks = append(failedTasks, task)
 				continue
 			}
-			if t.NeedReAssignNodeID() {
+			if t.NeedReAssignNodeID() && t.GetTaskProto().GetL0Targets() == nil {
 				if err = c.submitTask(t); err != nil {
 					mlog.Info(context.TODO(), "compactionInspector loadMeta submit task failed, defer cleanup",
 						mlog.Int64("planID", task.GetPlanID()),

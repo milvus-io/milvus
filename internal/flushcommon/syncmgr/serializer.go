@@ -36,8 +36,10 @@ type Serializer interface {
 
 // SyncPack is the struct contains buffer sync data.
 type SyncPack struct {
-	metacache  metacache.MetaCache
-	metawriter MetaWriter
+	mutationDelta *storage.MutationDelta
+	mutationBytes uint64
+	metacache     metacache.MetaCache
+	metawriter    MetaWriter
 	// data
 	insertData []*storage.InsertData
 	deltaData  *storage.DeleteData
@@ -151,7 +153,14 @@ func (p *SyncPack) WithDataSource(source string) *SyncPack {
 	return p
 }
 
+func (p *SyncPack) WithMutationDelta(delta *storage.MutationDelta, size uint64) *SyncPack {
+	p.mutationDelta = delta
+	p.mutationBytes = size
+	return p
+}
+
 func (p *SyncPack) ReleaseData() {
+	p.mutationDelta = nil
 	p.insertData = nil
 	p.deltaData = nil
 	p.bm25Stats = nil

@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
@@ -159,11 +160,12 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 	}
 
 	result := &datapb.CompactionPlanResult{
-		PlanID:   t.plan.GetPlanID(),
-		State:    datapb.CompactionTaskState_completed,
-		Segments: resultSegments,
-		Channel:  t.plan.GetChannel(),
-		Type:     t.plan.GetType(),
+		MaterializedThrough: t.plan.GetMaterializedThrough(),
+		PlanID:              t.plan.GetPlanID(),
+		State:               datapb.CompactionTaskState_completed,
+		Segments:            resultSegments,
+		Channel:             t.plan.GetChannel(),
+		Type:                t.plan.GetType(),
 	}
 
 	metrics.DataNodeCompactionLatency.WithLabelValues(paramtable.GetStringNodeID(), t.plan.GetType().String()).
@@ -250,120 +252,64 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 			continue
 		}
 
-		result, err := func() (*datapb.CompactionSegment, error) {
-			segment := allSeg[segmentID]
-			logID, err := t.allocator.AllocOne()
-			if err != nil {
-				mlog.Warn(context.TODO(), "L0 compaction allocate log ID fail", mlog.Int64("segmentID", segmentID), mlog.Err(err))
-				return nil, err
-			}
-
-			// Use V2 storage for segments with manifest, V1 otherwise
-			storageVersion := storage.StorageV1
-			var path string
-			if segment.GetManifest() != "" {
-				storageVersion = storage.StorageV2
-				// V3: build deltalog path under basePath/_delta/
-				basePath, _, err := packed.UnmarshalManifestPath(segment.GetManifest())
-				if err != nil {
-					mlog.Warn(context.TODO(), "L0 compaction failed to parse manifest path", mlog.Int64("segmentID", segmentID), mlog.Err(err))
-					return nil, err
-				}
-				path = metautil.BuildDeltaLogPathV3(basePath, logID)
-			} else {
-				path = metautil.BuildDeltaLogPath(
-					t.compactionParams.StorageConfig.GetRootPath(), segment.GetCollectionID(), segment.GetPartitionID(), segment.GetSegmentID(), logID)
-			}
-
-			writer, err := storage.NewDeltalogWriter(ctx,
-				segment.GetCollectionID(), segment.GetPartitionID(), segment.GetSegmentID(),
-				logID, pkField.GetDataType(), path,
-				storage.WithUploader(t.Upload),
-				storage.WithStorageConfig(t.compactionParams.StorageConfig),
-				storage.WithVersion(storageVersion),
-			)
-			if err != nil {
-				mlog.Warn(context.TODO(), "L0 compaction create deltalog writer fail", mlog.Int64("segmentID", segmentID), mlog.Err(err))
-				return nil, err
-			}
-
-			// Create Arrow record from collected deletes
-			record, tsFrom, tsTo, err := storage.BuildDeleteRecord(deletes.pks, deletes.tss)
-			if err != nil {
-				mlog.Warn(context.TODO(), "L0 compaction build delete record fail", mlog.Int64("segmentID", segmentID), mlog.Err(err))
-				return nil, err
-			}
-			defer record.Release()
-
-			// Write the entire record at once
-			if err := writer.Write(record); err != nil {
-				mlog.Warn(context.TODO(), "L0 compaction write record fail", mlog.Int64("segmentID", segmentID), mlog.Err(err))
-				return nil, err
-			}
-
-			if err := writer.Close(); err != nil {
-				mlog.Warn(context.TODO(), "L0 compaction close writer fail", mlog.Int64("segmentID", segmentID), mlog.Err(err))
-				return nil, err
-			}
-
-			mlog.Info(context.TODO(), "L0 compaction write record success", mlog.String("path", path), mlog.Int64("entries", int64(len(deletes.pks))))
-
-			// Check if this is a manifest segment
-			if segment.GetManifest() != "" {
-				deltalogs := []*datapb.FieldBinlog{{
-					Binlogs: []*datapb.Binlog{{
-						LogID:         logID,
-						LogPath:       path,
-						EntriesNum:    int64(len(deletes.pks)),
-						MemorySize:    int64(writer.GetWrittenUncompressed()),
-						TimestampFrom: tsFrom,
-						TimestampTo:   tsTo,
-					}},
-				}}
-				return &datapb.CompactionSegment{
-					SegmentID: segmentID,
-					Channel:   t.plan.GetChannel(),
-					NumOfRows: int64(len(deletes.pks)),
-					// Delta summary for compaction trigger decisions and datacoord manifest commit.
-					Deltalogs: deltalogs,
-					// L0 output: only delta side has data; no stats blobs
-					// are written so statsBlobSize is 0. Insert aggregates
-					// are zero by construction since insertLogs is nil.
-					Stats: buildCompactionOutputStats(nil, deltalogs, 0),
-				}, nil
-			}
-			// V1: Return deltalog in FieldBinlog format
-			deltalogs := []*datapb.FieldBinlog{
-				{
-					Binlogs: []*datapb.Binlog{
-						{
-							LogPath:       path,
-							LogID:         logID,
-							LogSize:       int64(writer.GetWrittenUncompressed()),
-							MemorySize:    int64(writer.GetWrittenUncompressed()),
-							EntriesNum:    int64(len(deletes.pks)),
-							TimestampFrom: tsFrom,
-							TimestampTo:   tsTo,
-						},
-					},
-				},
-			}
-			return &datapb.CompactionSegment{
-				SegmentID: segmentID,
-				Channel:   t.plan.GetChannel(),
-				Deltalogs: deltalogs,
-				NumOfRows: int64(len(deletes.pks)),
-				// L0 output: only delta side has data; no stats blobs.
-				Stats: buildCompactionOutputStats(nil, deltalogs, 0),
-			}, nil
-		}()
+		file, err := t.writeLegacyDeletes(ctx, allSeg[segmentID], pkField.GetDataType(), deletes.pks, deletes.tss)
 		if err != nil {
 			return nil, err
 		}
+		logs := []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{file}}}
+		result := &datapb.CompactionSegment{SegmentID: segmentID, Channel: t.plan.GetChannel(), NumOfRows: file.GetEntriesNum(), Deltalogs: logs, Stats: buildCompactionOutputStats(nil, logs, 0)}
 		results = append(results, result)
 	}
 
 	return results, nil
+}
+
+func (t *LevelZeroCompactionTask) deltaPath(target *datapb.CompactionSegmentBinlogs, id int64) (string, error) {
+	if manifest := target.GetManifest(); manifest != "" {
+		base, _, err := packed.UnmarshalManifestPath(manifest)
+		if err != nil {
+			return "", err
+		}
+		return metautil.BuildDeltaLogPathV3(base, id), nil
+	}
+	return metautil.BuildDeltaLogPath(t.compactionParams.StorageConfig.GetRootPath(), target.GetCollectionID(), target.GetPartitionID(), target.GetSegmentID(), id), nil
+}
+
+func (t *LevelZeroCompactionTask) writeLegacyDeletes(ctx context.Context, target *datapb.CompactionSegmentBinlogs, pkType schemapb.DataType, keys []storage.PrimaryKey, ticks []uint64) (*datapb.Binlog, error) {
+	id, err := t.allocator.AllocOne()
+	if err != nil {
+		return nil, err
+	}
+	path, err := t.deltaPath(target, id)
+	if err != nil {
+		return nil, err
+	}
+	version := storage.StorageV1
+	if target.GetManifest() != "" {
+		version = storage.StorageV2
+	}
+	record, from, to, err := storage.BuildDeleteRecord(keys, ticks)
+	if err != nil {
+		return nil, err
+	}
+	defer record.Release()
+	writer, err := storage.NewDeltalogWriter(ctx, target.GetCollectionID(), target.GetPartitionID(), target.GetSegmentID(), id, pkType, path, storage.WithUploader(t.Upload), storage.WithStorageConfig(t.compactionParams.StorageConfig), storage.WithVersion(version))
+	if err != nil {
+		return nil, err
+	}
+	if err := writer.Write(record); err != nil {
+		_ = writer.Close()
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	size := int64(writer.GetWrittenUncompressed())
+	file := &datapb.Binlog{LogID: id, LogPath: path, EntriesNum: int64(len(keys)), MemorySize: size, TimestampFrom: from, TimestampTo: to}
+	if target.GetManifest() == "" {
+		file.LogSize = size
+	}
+	return file, nil
 }
 
 type BatchApplyRet = struct {
@@ -426,7 +372,7 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, l0MemSize int64, 
 
 	ratio := paramtable.Get().DataNodeCfg.L0BatchMemoryRatio.GetAsFloat()
 	memLimit := float64(hardware.GetFreeMemoryCount()) * ratio
-	if float64(l0MemSize) > memLimit {
+	if t.plan.GetMaterializedThrough() == 0 && float64(l0MemSize) > memLimit {
 		return nil, merr.Wrap(merr.ErrServiceMemoryLimitExceeded, fmt.Sprintf("L0 compaction failed, not enough memory, request memory size: %v, memory limit: %v", l0MemSize, memLimit))
 	}
 
@@ -436,6 +382,18 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, l0MemSize int64, 
 		return nil, err
 	}
 
+	if t.plan.GetMaterializedThrough() != 0 {
+		return t.dispatchMutations(ctx, pkField, targetSegments, l0Segments, int64(memLimit))
+	}
+	for _, source := range l0Segments {
+		for _, group := range source.GetDeltalogs() {
+			for _, file := range group.GetBinlogs() {
+				if file.GetMutationCounts() != nil {
+					return nil, merr.WrapErrServiceInternalMsg("typed L0 input %d requires a certified dispatch round", source.GetSegmentID())
+				}
+			}
+		}
+	}
 	allDelta, err := compaction.ComposeDeleteDataFromSegments(ctx, pkField.DataType, l0Segments,
 		storage.WithDownloader(t.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig))
@@ -546,6 +504,11 @@ func (t *LevelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*
 					mlog.Int64("segmentID", segment.GetSegmentID()),
 					mlog.Err(err))
 				return err, err
+			}
+			if t.plan.GetMaterializedThrough() != 0 && len(pks) == 0 {
+				// Without a filter, no key can be ruled out. Legacy bases may
+				// lack PK stats; conservatively send every scope-eligible key.
+				return nil, nil
 			}
 			bf := pkoracle.NewBloomFilterSet(pks...)
 			mu.Lock()

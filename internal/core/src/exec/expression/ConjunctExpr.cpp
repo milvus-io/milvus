@@ -136,7 +136,10 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 if (unary_expr) {
                     unary_expr->EnsureExecPathDetermined();
                 }
-                if (unary_expr && unary_expr->CanUseNgramIndex()) {
+                // The fused node emits all-valid results. Updated rows need
+                // the individual predicate's snapshot-correct SQL validity.
+                if (unary_expr && !unary_expr->HasUpdates() &&
+                    unary_expr->CanUseNgramIndex()) {
                     ngram_exprs.push_back(unary_expr);
                     batch_ngram_indices_.insert(idx);
                 }

@@ -31,6 +31,14 @@ struct ArrowArray;
 typedef void* CPackedReader;
 
 CStatus
+ReadParquetDeltaFooter(const char* path,
+                       CStorageConfig config,
+                       CPluginContext* plugin_context,
+                       struct ArrowSchema* schema,
+                       int64_t* rows,
+                       char** metadata);
+
+CStatus
 NewPackedReaderWithStorageConfig(char** paths,
                                  int64_t num_paths,
                                  struct ArrowSchema* schema,

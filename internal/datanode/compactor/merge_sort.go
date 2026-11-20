@@ -25,6 +25,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	plan *datapb.CompactionPlan,
 	collectionID, partitionID, maxRows int64,
 	binlogIO io.BinlogIO,
+	cm storage.ChunkManager,
 	binlogs []*datapb.CompactionSegmentBinlogs,
 	tr *timerecord.TimeRecorder,
 	currentTime time.Time,
@@ -91,14 +92,13 @@ func mergeSortMultipleSegments(ctx context.Context,
 			return nil, err
 		}
 		reader = newMaterializedRecordReader(reader, materializer)
-		segmentReaders[i] = wrapReaderWithTimestampOverwrite(reader, s.GetCommitTimestamp())
-		delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField.DataType, s,
-			storage.WithDownloader(binlogIO.Download),
-			storage.WithStorageConfig(compactionParams.StorageConfig))
+		segmentReaders[i] = reader
+		mutations, err := loadRewriteMutations(ctx, compactionMutationSource(cm, binlogIO), compactionParams.StorageConfig, plan, s, pkField)
 		if err != nil {
 			return nil, err
 		}
-		segmentFilters[i] = compaction.NewEntityFilter(delta, collectionTTL, currentTime, s.GetCommitTimestamp())
+		segmentReaders[i] = wrapReaderWithTimestampOverwrite(mutations.wrapReader(reader), s.GetCommitTimestamp())
+		segmentFilters[i] = compaction.NewEntityFilter(mutations.deletes, collectionTTL, currentTime, s.GetCommitTimestamp())
 	}
 
 	var predicate func(r storage.Record, ri, i int) bool
@@ -136,7 +136,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 		log.Warn(ctx, "compaction only support int64 and varchar pk field")
 	}
 
-	if _, err = storage.MergeSort(compactionParams.BinLogMaxSize, writerSchema, segmentReaders, writer, predicate, sortByFields); err != nil {
+	if _, err = storage.MergeSort(compactionParams.BinLogMaxSize, resolvedCopySchema(writerSchema), segmentReaders, writer, predicate, sortByFields); err != nil {
 		// segmentReaders[i] is built from binlogs[i], so the reader index the
 		// error names, when it names one, indexes into this list.
 		segmentIDs := make([]int64, len(binlogs))

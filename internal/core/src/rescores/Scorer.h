@@ -33,6 +33,10 @@
 #include "pb/plan.pb.h"
 #include "segcore/SegmentInterface.h"
 
+namespace milvus::exec {
+class QueryContext;
+}
+
 namespace milvus::rescores {
 class Scorer {
  public:
@@ -49,7 +53,8 @@ class Scorer {
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
                 const TargetBitmapView& bitmap,
-                std::vector<std::optional<float>>& boost_scores) = 0;
+                std::vector<std::optional<float>>& boost_scores,
+                exec::QueryContext* query_context = nullptr) = 0;
 
     // score by bitmap
     // filter result of offset[i] was bitmap[offset[i]]
@@ -60,7 +65,8 @@ class Scorer {
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
                 const TargetBitmap& bitmap,
-                std::vector<std::optional<float>>& boost_scores) = 0;
+                std::vector<std::optional<float>>& boost_scores,
+                exec::QueryContext* query_context = nullptr) = 0;
 
     // score for all offset
     // used when no filter
@@ -69,7 +75,8 @@ class Scorer {
                 const segcore::SegmentInternalInterface* segment,
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
-                std::vector<std::optional<float>>& boost_scores) = 0;
+                std::vector<std::optional<float>>& boost_scores,
+                exec::QueryContext* query_context = nullptr) = 0;
 
     virtual float
     weight() = 0;
@@ -91,7 +98,8 @@ class WeightScorer : public Scorer {
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
                 const TargetBitmapView& bitmap,
-                std::vector<std::optional<float>>& boost_scores) override;
+                std::vector<std::optional<float>>& boost_scores,
+                exec::QueryContext* query_context = nullptr) override;
 
     void
     batch_score(milvus::OpContext* op_ctx,
@@ -99,14 +107,16 @@ class WeightScorer : public Scorer {
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
                 const TargetBitmap& bitmap,
-                std::vector<std::optional<float>>& boost_scores) override;
+                std::vector<std::optional<float>>& boost_scores,
+                exec::QueryContext* query_context = nullptr) override;
 
     void
     batch_score(milvus::OpContext* op_ctx,
                 const segcore::SegmentInternalInterface* segment,
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
-                std::vector<std::optional<float>>& boost_scores) override;
+                std::vector<std::optional<float>>& boost_scores,
+                exec::QueryContext* query_context = nullptr) override;
 
     float
     weight() override {
@@ -165,7 +175,8 @@ class RandomScorer : public Scorer {
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
                 const TargetBitmapView& bitmap,
-                std::vector<std::optional<float>>& boost_scores) override;
+                std::vector<std::optional<float>>& boost_scores,
+                exec::QueryContext* query_context = nullptr) override;
 
     void
     batch_score(milvus::OpContext* op_ctx,
@@ -173,14 +184,16 @@ class RandomScorer : public Scorer {
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
                 const TargetBitmap& bitmap,
-                std::vector<std::optional<float>>& boost_scores) override;
+                std::vector<std::optional<float>>& boost_scores,
+                exec::QueryContext* query_context = nullptr) override;
 
     void
     batch_score(milvus::OpContext* op_ctx,
                 const segcore::SegmentInternalInterface* segment,
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
-                std::vector<std::optional<float>>& boost_scores) override;
+                std::vector<std::optional<float>>& boost_scores,
+                exec::QueryContext* query_context = nullptr) override;
 
     float
     weight() override {
@@ -199,7 +212,8 @@ class RandomScorer : public Scorer {
                  const proto::plan::FunctionMode& mode,
                  const FixedVector<int64_t>& target_offsets,
                  const FixedVector<int>* idx,
-                 std::vector<std::optional<float>>& boost_scores);
+                 std::vector<std::optional<float>>& boost_scores,
+                 exec::QueryContext* query_context = nullptr);
 
     expr::TypedExprPtr filter_;
     float weight_;

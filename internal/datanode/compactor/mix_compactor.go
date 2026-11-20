@@ -286,14 +286,12 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	mWriter *MultiSegmentWriter, pkField *schemapb.FieldSchema,
 	writerSchema *schemapb.CollectionSchema,
 ) (deletedRowCount, expiredRowCount int64, err error) {
-	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField.DataType, seg,
-		storage.WithDownloader(t.binlogIO.Download),
-		storage.WithStorageConfig(t.compactionParams.StorageConfig))
+	mutations, err := loadRewriteMutations(ctx, compactionMutationSource(t.cm, t.binlogIO), t.compactionParams.StorageConfig, t.plan, seg, pkField)
 	if err != nil {
 		mlog.Warn(context.TODO(), "compact wrong, fail to merge deltalogs", mlog.Err(err))
 		return
 	}
-	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime, seg.GetCommitTimestamp())
+	entityFilter := compaction.NewEntityFilter(mutations.deletes, t.plan.GetCollectionTtl(), t.currentTime, seg.GetCommitTimestamp())
 
 	textDecodeConfigs, err := t.lobContext.GetSourceTextColumnConfigs(seg.GetManifest())
 	if err != nil {
@@ -309,6 +307,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		mlog.Warn(context.TODO(), "compact wrong, failed to new insert binlogs reader", mlog.Err(err))
 		return
 	}
+	reader = mutations.wrapReader(reader)
 	defer reader.Close()
 
 	materializer, err := NewRecordMaterializer(writerSchema, writerSchema.GetFunctions(), existingFields)
@@ -376,7 +375,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 			}
 			if entityFilter.Filtered(pk, ts, expireTs) {
 				if rb == nil {
-					rb = storage.NewRecordBuilder(writerSchema)
+					rb = storage.NewRecordBuilder(resolvedCopySchema(writerSchema))
 				}
 				if sliceStart != -1 {
 					// Append is not atomic: a failed builder may hold a partial
@@ -435,7 +434,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		cleanupMaterializedRecord(r)
 	}
 
-	deltalogDeleteEntriesCount := len(delta)
+	deltalogDeleteEntriesCount := len(mutations.deletes)
 	deletedRowCount = int64(entityFilter.GetDeletedCount())
 	expiredRowCount = int64(entityFilter.GetExpiredCount())
 
@@ -491,7 +490,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	if useMergeSort {
 		mlog.Info(context.TODO(), "compact by merge sort")
 		writerOpts := t.buildWriterOptions(ctx)
-		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
+		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO, t.cm,
 			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams,
 			writerOpts, t.lobContext, t.sortByFieldIDs)
 		if err != nil {

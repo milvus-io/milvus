@@ -33,6 +33,8 @@
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/PlanProto.h"
 #include "test_utils/GenExprProto.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 
@@ -394,6 +396,93 @@ TEST_P(FmIndexPatternExpressionTest, BatchesAndBitmap) {
     }
     EXPECT_FALSE(got[kLateFalsePositive]);
     EXPECT_TRUE(got[kLateTrueMatch]);
+}
+
+TEST_P(FmIndexPatternExpressionTest, MaskedCompactTakeAtHistoricalSnapshots) {
+    const auto op = GetParam();
+    const std::string pattern =
+        op == proto::plan::Match ? "QOP%ZEBRA" : "^QOP.*ZEBRA$";
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto text = schema->AddDebugField("text", DataType::VARCHAR, true);
+    constexpr int nb = 1000;
+    auto rows = MakeLongTextZebraRows(nb);
+    rows[750] = "QOP" + rows[750];
+    auto data = segcore::DataGen(schema, nb);
+    std::fill(data.timestamps_.begin(), data.timestamps_.end(), 1);
+    for (auto& field : *data.raw_->mutable_fields_data()) {
+        for (int i = 0; i < nb; ++i) {
+            if (field.field_id() == pk.get()) {
+                field.mutable_scalars()->mutable_long_data()->set_data(i, i);
+            } else {
+                field.mutable_scalars()->mutable_string_data()->set_data(
+                    i, rows[i]);
+            }
+        }
+        if (field.field_id() == text.get()) {
+            field.clear_valid_data();
+            for (int i = 0; i < nb; ++i) field.add_valid_data(true);
+        }
+    }
+    // Both native candidate families must replace stale postings with the
+    // visible rows before their native recheck consumes the parent mask.
+    for (const bool fm : {true, false}) {
+        SCOPED_TRACE(fm ? "FM" : "NGRAM");
+        auto segment = segcore::CreateSealedSegment(schema);
+        LoadGeneratedDataIntoSegment(data, segment.get());
+        std::vector<uint8_t> valid((nb + 7) / 8, 0xff);
+        auto opened = test::expr_index::BuildIndex(
+            text,
+            DataType::VARCHAR,
+            fm ? index::FMINDEX_INDEX_TYPE : index::NGRAM_INDEX_TYPE,
+            {test::expr_index::StringField(rows, true, valid.data())},
+            fm ? Config{{index::FM_SA_SAMPLE_RATE, 8}}
+               : Config{{index::MIN_GRAM, 2}, {index::MAX_GRAM, 4}});
+        test::expr_index::InstallIndex(
+            *segment, text, DataType::VARCHAR, std::move(opened));
+        auto typed = MakeMatchTypedExpr(schema, text, pattern, true, op);
+        auto check = [&](uint64_t ts, bool visible) {
+            ASSERT_TRUE(CompiledUseIndexCursor(typed, segment.get(), nb));
+            exec::QueryContext query_context(
+                DEAFULT_QUERY_ID, segment.get(), nb, ts);
+            exec::ExecContext exec_context(&query_context);
+            exec::ExprSet exprs({typed}, &exec_context);
+            exec::EvalCtx ctx(&exec_context);
+            TargetBitmap mask(nb, true);
+            mask[2] = false;  // A new match outside the parent's candidate set.
+            mask[250] = false;
+            ctx.set_bitmap_input(std::move(mask));
+            std::vector<VectorPtr> result;
+            exprs.Eval(0, 1, true, ctx, result);
+            auto col = std::static_pointer_cast<ColumnVector>(result.at(0));
+            ASSERT_EQ(col->size(), nb);
+            TargetBitmapView hits(col->GetRawData(), nb);
+            TargetBitmapView validity(col->GetValidRawData(), nb);
+            for (int i = 0; i < nb; ++i) {
+                EXPECT_EQ(hits[i], visible ? i == 500 : i == 0 || i == 750)
+                    << i;
+                EXPECT_EQ(validity[i], !(visible && i == 750)) << i;
+            }
+        };
+        ASSERT_NO_FATAL_FAILURE(check(19, false));
+        auto set = [&](int offset, const char* value) {
+            IdArray ids;
+            ids.mutable_int_id()->add_data(offset);
+            segcore::UpdateAssignment a{text, {}};
+            if (value)
+                a.literal.mutable_scalar_value()->set_string_data(value);
+            else
+                a.literal.set_null_value(google::protobuf::NULL_VALUE);
+            segment->ApplyUpdates(ids, 20, 0, {a});
+        };
+        set(0, "gone");
+        set(500, "QOP.middle.ZEBRA");
+        set(2, "QOP.ZEBRA");
+        set(750, nullptr);
+        ASSERT_NO_FATAL_FAILURE(check(20, true));
+        ASSERT_NO_FATAL_FAILURE(check(19, false));
+    }
 }
 
 TEST_P(FmIndexPatternExpressionTest, MultiChunk) {

@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "SegmentInterface.h"
+#include "segcore/UpdatesRecord.h"
 
 #include <folly/CancellationToken.h>
 #include <folly/ExceptionWrapper.h>
@@ -106,6 +107,76 @@ FillEmptyRetrieveFields(const Schema& schema,
 
 }  // namespace
 
+SegmentInternalInterface::SegmentInternalInterface()
+    : updates_record_(std::make_shared<UpdatesRecord>()) {
+}
+
+void
+SegmentInternalInterface::GCUpdates(Timestamp safe_ts) {
+    updates_record_->GC(safe_ts);
+}
+
+std::vector<int64_t>
+SegmentInternalInterface::ResolveUpdateOffsets(const std::vector<PkType>&,
+                                               Timestamp) const {
+    ThrowInfo(Unsupported, "Segment does not support PK update resolution");
+}
+
+void
+SegmentInternalInterface::ApplyUpdates(
+    const IdArray& ids,
+    Timestamp timestamp,
+    uint32_t ordinal,
+    const std::vector<UpdateAssignment>& assignments,
+    OpContext* op_ctx) {
+    auto schema = get_schema_snapshot();
+    const auto pk = schema->get_primary_field_id();
+    ApplyUpdatesWithSchema(*schema,
+                           pk ? (*schema)[*pk].get_data_type() : DataType::NONE,
+                           ids,
+                           timestamp,
+                           ordinal,
+                           assignments,
+                           op_ctx);
+}
+
+void
+SegmentInternalInterface::ApplyUpdatesWithSchema(
+    const Schema& fields,
+    DataType pk_type,
+    const IdArray& ids,
+    Timestamp timestamp,
+    uint32_t ordinal,
+    const std::vector<UpdateAssignment>& assignments,
+    OpContext* op_ctx) {
+    auto check_cancel = [&] {
+        CheckCancellation(op_ctx, get_segment_id(), "ApplyUpdates");
+    };
+    check_cancel();
+    if (pk_type == DataType::NONE) {
+        ThrowInfo(FieldNotLoaded, "PK field unavailable for update");
+    }
+    if (!((pk_type == DataType::INT64 && ids.has_int_id()) ||
+          (pk_type == DataType::VARCHAR && ids.has_str_id())) ||
+        GetSizeOfIdArray(ids) == 0) {
+        ThrowInfo(DataFormatBroken, "Invalid primary keys for update");
+    }
+    std::vector<PkType> keys(GetSizeOfIdArray(ids));
+    ParsePksFromIDs(keys, pk_type, ids);
+    const int64_t count = get_row_count();
+    auto rows = ResolveUpdateOffsets(keys, timestamp);
+    // Growing PK insertion precedes publication of its contiguous ACK prefix.
+    std::erase_if(rows, [count](int64_t row) { return row >= count; });
+    if (!rows.empty() && get_deleted_count()) {
+        BitsetType deleted(count, false);
+        BitsetTypeView view(deleted);
+        mask_with_delete(view, count, timestamp);
+        std::erase_if(rows, [&](int64_t row) { return deleted[row]; });
+    }
+    updates_record_->Apply(
+        fields, count, rows, timestamp, ordinal, assignments, check_cancel);
+}
+
 std::shared_ptr<milvus::exec::SimpleGeometryCache>
 SegmentInternalInterface::GetGeometryCache(FieldId field_id) const {
     return milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(
@@ -182,7 +253,8 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
                                          field_meta,
                                          results.seg_offsets_.data(),
                                          size,
-                                         dynamic_fields);
+                                         dynamic_fields,
+                                         results.query_timestamp_);
     };
     auto fetched_fields = FetchOutputFields(
         plan->target_entries_, get_segment_id(), op_ctx, fetch_one);
@@ -226,6 +298,7 @@ SegmentInternalInterface::Search(
     auto results = std::make_unique<SearchResult>();
     *results = visitor.get_moved_result(*plan->plan_node_);
     results->segment_ = (void*)this;
+    results->query_timestamp_ = timestamp;
     return results;
 }
 
@@ -372,7 +445,9 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                         retrieve_results.result_offsets_.size(),
                         ignore_non_pk,
                         true,
-                        &fte_op_ctx);
+                        &fte_op_ctx,
+                        timestamp,
+                        retrieve_results.read_snapshot_);
     } else if (!plan->plan_node_->pipeline_field_ids_.empty()) {
         // Non-aggregation ORDER BY (single-project or two-project mode):
         // Pipeline output contains [pk, sort_cols, ..., hidden columns].
@@ -383,7 +458,8 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
         //
         // Aggregation + ORDER BY does NOT set pipeline_field_ids_ and produces
         // final columns directly, falling through to FillTargetEntryDirectly.
-        FillOrderByResult(plan, results, retrieve_results, &fte_op_ctx);
+        FillOrderByResult(
+            plan, results, retrieve_results, &fte_op_ctx, timestamp);
     } else {
         FillTargetEntryDirectly(trace_ctx, results, retrieve_results);
     }
@@ -417,7 +493,8 @@ SegmentInternalInterface::FillOrderByResult(
     const query::RetrievePlan* plan,
     const std::unique_ptr<proto::segcore::RetrieveResults>& results,
     RetrieveResult& retrieveResult,
-    milvus::OpContext* op_ctx) const {
+    milvus::OpContext* op_ctx,
+    std::optional<Timestamp> query_timestamp) const {
     auto fields_data = results->mutable_fields_data();
     auto& deferred = plan->plan_node_->deferred_field_ids_;
 
@@ -501,7 +578,12 @@ SegmentInternalInterface::FillOrderByResult(
         }
     }
 
-    auto fetch_one = [this, plan, &offset_data, topk_count](
+    auto fetch_one = [this,
+                      plan,
+                      &offset_data,
+                      topk_count,
+                      query_timestamp,
+                      snapshot = retrieveResult.read_snapshot_](
                          FieldId field_id, milvus::OpContext* field_ctx) {
         if (SystemProperty::Instance().IsSystem(field_id)) {
             auto system_type =
@@ -525,23 +607,20 @@ SegmentInternalInterface::FillOrderByResult(
         }
 
         auto dynamic_field_id = plan->schema_->get_dynamic_field_id();
-        std::unique_ptr<DataArray> col;
-        if (dynamic_field_id.has_value() &&
-            dynamic_field_id.value() == field_id &&
-            !plan->target_dynamic_fields_.empty()) {
-            col = bulk_subscript(field_ctx,
-                                 field_id,
-                                 offset_data.data(),
-                                 topk_count,
-                                 plan->target_dynamic_fields_);
-        } else if (!is_field_exist(field_id)) {
-            auto& field_meta = plan->schema_->operator[](field_id);
-            col = bulk_subscript_not_exist_field(
-                field_meta, offset_data.data(), topk_count);
-        } else {
-            col = bulk_subscript(
-                field_ctx, field_id, offset_data.data(), topk_count);
-        }
+        const auto* names = dynamic_field_id && *dynamic_field_id == field_id &&
+                                    !plan->target_dynamic_fields_.empty()
+                                ? &plan->target_dynamic_fields_
+                                : nullptr;
+        auto col =
+            BulkSubscriptWithSnapshot(this,
+                                      snapshot,
+                                      field_ctx,
+                                      field_id,
+                                      plan->schema_->operator[](field_id),
+                                      offset_data.data(),
+                                      topk_count,
+                                      names,
+                                      query_timestamp);
         auto& field_meta = plan->schema_->operator[](field_id);
         if (field_meta.get_data_type() == DataType::ARRAY) {
             col->mutable_scalars()->mutable_array_data()->set_element_type(
@@ -602,7 +681,9 @@ SegmentInternalInterface::FillTargetEntry(
     int64_t size,
     bool ignore_non_pk,
     bool fill_ids,
-    milvus::OpContext* op_ctx) const {
+    milvus::OpContext* op_ctx,
+    std::optional<Timestamp> query_timestamp,
+    std::shared_ptr<const SegmentReadSnapshot> snapshot) const {
     tracer::AutoSpan span("FillTargetEntry", tracer::GetRootSpan());
 
     if (size == 0) {
@@ -621,7 +702,8 @@ SegmentInternalInterface::FillTargetEntry(
     // published state. Growing segments return a null snapshot and fall back
     // to the virtual bulk_subscript with identical semantics.
     auto chunked = dynamic_cast<const ChunkedSegmentSealedImpl*>(this);
-    auto snapshot = CaptureReadSnapshot();
+    if (!snapshot)
+        snapshot = CaptureReadSnapshot();
     auto pinned =
         chunked ? ChunkedSegmentSealedImpl::ToPublishedState(snapshot)
                 : std::shared_ptr<
@@ -638,7 +720,8 @@ SegmentInternalInterface::FillTargetEntry(
                                         ignore_non_pk,
                                         fill_ids,
                                         pinned,
-                                        op_ctx)) {
+                                        op_ctx,
+                                        query_timestamp)) {
             return;
         }
     }
@@ -660,7 +743,7 @@ SegmentInternalInterface::FillTargetEntry(
         }
     }
 
-    auto fetch_one = [this, plan, offsets, size, snapshot](
+    auto fetch_one = [this, plan, offsets, size, snapshot, query_timestamp](
                          FieldId field_id, milvus::OpContext* field_ctx) {
         if (SystemProperty::Instance().IsSystem(field_id)) {
             auto system_type =
@@ -695,7 +778,8 @@ SegmentInternalInterface::FillTargetEntry(
                                              field_meta,
                                              offsets,
                                              size,
-                                             dynamic_field_names);
+                                             dynamic_field_names,
+                                             query_timestamp);
         // todo(SpadeA): consider vector array?
         if (field_meta.get_data_type() == DataType::ARRAY) {
             col->mutable_scalars()->mutable_array_data()->set_element_type(
@@ -765,7 +849,8 @@ SegmentInternalInterface::Retrieve(
     const query::RetrievePlan* Plan,
     const int64_t* offsets,
     int64_t size,
-    const folly::CancellationToken& cancel_token) const {
+    const folly::CancellationToken& cancel_token,
+    std::optional<Timestamp> query_timestamp) const {
     tracer::AutoSpan span("RetrieveByOffsets", tracer::GetRootSpan());
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     std::chrono::high_resolution_clock::time_point get_target_entry_start =
@@ -776,8 +861,15 @@ SegmentInternalInterface::Retrieve(
     fte_op_ctx.runtime_load_priority =
         milvus::proto::common::LoadPriority::HIGH;
     fte_op_ctx.cancellation_token = cancel_token;
-    FillTargetEntry(
-        trace_ctx, Plan, results, offsets, size, false, false, &fte_op_ctx);
+    FillTargetEntry(trace_ctx,
+                    Plan,
+                    results,
+                    offsets,
+                    size,
+                    false,
+                    false,
+                    &fte_op_ctx,
+                    query_timestamp);
     std::chrono::high_resolution_clock::time_point get_target_entry_end =
         std::chrono::high_resolution_clock::now();
     double get_entry_cost = std::chrono::duration<double, std::micro>(
