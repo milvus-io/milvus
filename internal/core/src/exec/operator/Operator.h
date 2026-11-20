@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include "common/PrefetchExecutor.h"
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "common/Vector.h"
@@ -169,8 +170,7 @@ class Operator : public std::enable_shared_from_this<Operator> {
     }
 
     virtual void
-    PrefetchAsync(
-        const std::shared_ptr<folly::CPUThreadPoolExecutor> prefetch_pool) {
+    PrefetchAsync(const milvus::PrefetchExecutor& prefetch_pool) {
     }
 
     virtual void

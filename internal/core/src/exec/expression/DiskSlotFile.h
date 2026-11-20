@@ -88,6 +88,9 @@ class DiskSlotFile {
     DiskSlotFile&
     operator=(const DiskSlotFile&) = delete;
 
+    bool
+    Contains(const std::string& signature, int64_t active_count) const;
+
     // Get cached bitsets. Returns false on miss/mismatch.
     // Runs before_materialize only after a matching slot is found, while
     // holding its shared lock and before any pread or bitmap allocation.

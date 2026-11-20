@@ -340,12 +340,14 @@ void
 RawExprCacheAdapter::Eval(EvalCtx& context, VectorPtr& result) {
     const bool has_offset_input = context.get_offset_input() != nullptr;
     SetHasOffsetInput(has_offset_input);
+    if (has_offset_input && !prefetch_future_) {
+        input_->SetHasOffsetInput(true);
+    }
+    WaitPrefetch();
     // A cache hit bypasses input_->Eval(), so mirror the offset mode that the
     // wrapped evaluator would otherwise record for its MoveCursor() guard.
     input_->SetHasOffsetInput(has_offset_input);
 
-    WaitPrefetch();
-    EnsureLookup();
     if (TryServeCacheHit(context, result)) {
         return;
     }
@@ -397,6 +399,7 @@ RawExprCacheAdapter::Eval(EvalCtx& context, VectorPtr& result) {
 
 void
 RawExprCacheAdapter::MoveCursor() {
+    WaitPrefetch();
     if (!has_offset_input_) {
         const auto rows = input_->GetNextBatchSize();
         if (rows > 0) {
@@ -456,45 +459,48 @@ RawExprCacheAdapter::GetColumnInfo() const {
 
 void
 RawExprCacheAdapter::PrefetchAsync(
-    const std::shared_ptr<folly::CPUThreadPoolExecutor> prefetch_pool) {
+    const milvus::PrefetchExecutor& prefetch_pool,
+    std::shared_ptr<index::JsonStatsPrefetchBatch> batch) {
     auto self =
         std::static_pointer_cast<RawExprCacheAdapter>(shared_from_this());
-    prefetch_future_.emplace(folly::via(prefetch_pool.get(), [self]() {
-        if (self->op_ctx_ != nullptr &&
-            self->op_ctx_->cancellation_token.isCancellationRequested()) {
-            return;
-        }
-        self->EnsureLookup();
-        if (self->state_.lookup_state != LookupState::Hit) {
-            const bool measure_prefetch =
-                self->state_.lookup_state == LookupState::Miss;
-            // Measure where the work executes: WaitPrefetch() observes only
-            // whatever wait remains when the Driver eventually joins it.
-            const auto prefetch_start = std::chrono::steady_clock::now();
-            self->input_->PrefetchOnCurrentThread();
-            if (measure_prefetch) {
-                self->state_.prefetch_duration_us = std::max<int64_t>(
-                    std::chrono::duration_cast<std::chrono::microseconds>(
-                        std::chrono::steady_clock::now() - prefetch_start)
-                        .count(),
-                    1);
+    prefetch_future_.emplace(
+        prefetch_pool.Submit([self, batch = std::move(batch)]() {
+            if (self->op_ctx_ != nullptr &&
+                self->op_ctx_->cancellation_token.isCancellationRequested()) {
+                return;
             }
-        }
-    }));
+            self->EnsureLookup();
+            if (self->state_.lookup_state != LookupState::Hit) {
+                const bool measure_prefetch =
+                    self->state_.lookup_state == LookupState::Miss;
+                // Measure where the work executes: WaitPrefetch() observes only
+                // whatever wait remains when the Driver eventually joins it.
+                const auto prefetch_start = std::chrono::steady_clock::now();
+                self->input_->PrefetchOnCurrentThread(batch.get());
+                if (measure_prefetch) {
+                    self->state_.prefetch_duration_us = std::max<int64_t>(
+                        std::chrono::duration_cast<std::chrono::microseconds>(
+                            std::chrono::steady_clock::now() - prefetch_start)
+                            .count(),
+                        1);
+                }
+            }
+        }));
 }
 
 void
-RawExprCacheAdapter::WaitPrefetch() {
+RawExprCacheAdapter::WaitPrefetch(PrefetchWait mode) {
+    PrefetchWaitTimer wait_timer;
     if (prefetch_future_.has_value()) {
         auto future = std::move(*prefetch_future_);
         prefetch_future_.reset();
         std::move(future).get();
-    } else {
+    } else if (mode == PrefetchWait::Demand) {
         EnsureLookup();
     }
 
     if (state_.lookup_state != LookupState::Hit) {
-        input_->WaitPrefetch();
+        input_->WaitPrefetch(mode);
     }
 }
 

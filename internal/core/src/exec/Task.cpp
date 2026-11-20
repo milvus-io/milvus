@@ -147,6 +147,13 @@ Task::CreateDriversLocked(std::shared_ptr<Task>& self,
 
 void
 Task::Terminate(TaskState state) {
+    // A driver can still be draining an in-flight shared read. Signal the
+    // others before waiting for any one of them.
+    for (const auto& driver : drivers_) {
+        if (driver) {
+            driver->StopPrefetch();
+        }
+    }
     for (auto& driver_ptr : drivers_) {
         // RemoveDriver clears the entry while CloseByTask is running. Keep a
         // local owner so the Driver cannot be destroyed inside its own method.

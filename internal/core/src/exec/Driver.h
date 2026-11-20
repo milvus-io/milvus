@@ -206,6 +206,11 @@ class Driver : public std::enable_shared_from_this<Driver> {
          std::vector<std::shared_ptr<Operator>> operators);
 
     void
+    StopPrefetch() noexcept {
+        prefetch_stop_.requestCancellation();
+    }
+
+    void
     CloseByTask() noexcept;
 
  private:
@@ -244,6 +249,7 @@ class Driver : public std::enable_shared_from_this<Driver> {
 
     friend struct DriverFactory;
     std::once_flag once_;
+    folly::CancellationSource prefetch_stop_;
 };
 
 using Consumer = std::function<BlockingReason(RowVectorPtr, ContinueFuture*)>;

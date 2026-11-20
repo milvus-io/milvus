@@ -79,11 +79,10 @@ class PhyVectorSearchNode : public Operator {
     }
 
     void
-    PrefetchAsync(const std::shared_ptr<folly::CPUThreadPoolExecutor>
-                      prefetch_pool) override {
+    PrefetchAsync(const milvus::PrefetchExecutor& prefetch_pool) override {
         auto self =
             std::static_pointer_cast<PhyVectorSearchNode>(shared_from_this());
-        prefetch_future_.emplace(folly::via(prefetch_pool.get(), [self]() {
+        prefetch_future_.emplace(prefetch_pool.Submit([self]() {
             auto* op_ctx = self->query_context_->get_op_context();
             if (op_ctx != nullptr &&
                 op_ctx->cancellation_token.isCancellationRequested()) {

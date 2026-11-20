@@ -42,6 +42,14 @@ namespace milvus {
 namespace exec {
 
 void
+PhyExistsFilterExpr::PrefetchJsonStatsPath(
+    index::JsonKeyStats& stats,
+    const std::string& pointer,
+    index::JsonStatsPrefetchBatch* batch) const {
+    stats.PrefetchExistsColumns(op_ctx_, pointer, batch);
+}
+
+void
 PhyExistsFilterExpr::DetermineExecPath() {
     // JsonStats is the fallback applied by EnsureExecPathDetermined() when no
     // index serves this path; see SegmentExpr::FallbackToJsonStatsIfEligible().

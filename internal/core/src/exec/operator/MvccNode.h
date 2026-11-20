@@ -70,10 +70,9 @@ class PhyMvccNode : public Operator {
     }
 
     void
-    PrefetchAsync(const std::shared_ptr<folly::CPUThreadPoolExecutor>
-                      prefetch_pool) override {
+    PrefetchAsync(const milvus::PrefetchExecutor& prefetch_pool) override {
         auto self = std::static_pointer_cast<PhyMvccNode>(shared_from_this());
-        prefetch_future_.emplace(folly::via(prefetch_pool.get(), [self]() {
+        prefetch_future_.emplace(prefetch_pool.Submit([self]() {
             self->segment_->prefetch_chunks(
                 self->operator_context_->get_exec_context()
                     ->get_query_context()

@@ -35,6 +35,7 @@
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -100,6 +101,21 @@ struct JsonStatsRowRange {
 std::vector<JsonStatsRowRange>
 CreateJsonStatsRowRanges(const std::vector<FieldDataPtr>& field_datas,
                          int64_t max_rows_per_range);
+
+// One expression set shares a batch across its prefetch workers. Holding a
+// column/slot identity keeps it stable across reopen, without pinning its cells.
+class JsonStatsPrefetchBatch {
+ public:
+    bool
+    Claim(std::shared_ptr<const void> resource) {
+        std::lock_guard lock(mutex_);
+        return resources_.insert(std::move(resource)).second;
+    }
+
+ private:
+    std::mutex mutex_;
+    std::unordered_set<std::shared_ptr<const void>> resources_;
+};
 
 // Segment-owned JSON shredding layout and per-path statistics, not a scalar
 // predicate index. Execution uses its concrete shredding/shared-data accessors.
@@ -361,7 +377,7 @@ class JsonKeyStats {
     // return all shredding fields whose pointers start with the given prefix
     // for example, prefix "/a/b" will include fields for "/a/b" and "/a/b/..."
     std::set<std::string>
-    GetShreddingFieldsWithPrefix(const std::string& prefix) {
+    GetShreddingFieldsWithPrefix(const std::string& prefix) const {
         std::set<std::string> fields;
         for (const auto& [path, field_names] : key_field_map_) {
             if (path.size() >= prefix.size() &&
@@ -379,19 +395,31 @@ class JsonKeyStats {
     }
 
     std::string
-    GetShreddingField(const std::string& pointer, JSONType type) {
-        if (key_field_map_.find(pointer) == key_field_map_.end()) {
+    GetShreddingField(const std::string& pointer, JSONType type) const {
+        auto fields = key_field_map_.find(pointer);
+        if (fields == key_field_map_.end()) {
             return "";
         }
-        for (const auto& field : key_field_map_[pointer]) {
-            if (shred_field_data_type_map_.find(field) !=
-                    shred_field_data_type_map_.end() &&
-                shred_field_data_type_map_[field] == type) {
+        for (const auto& field : fields->second) {
+            auto field_type = shred_field_data_type_map_.find(field);
+            if (field_type != shred_field_data_type_map_.end() &&
+                field_type->second == type) {
                 return field;
             }
         }
         return "";
     }
+
+    void
+    PrefetchTypedColumns(OpContext* ctx,
+                         const std::string& pointer,
+                         std::initializer_list<JSONType> types,
+                         JsonStatsPrefetchBatch* batch = nullptr) const;
+
+    void
+    PrefetchExistsColumns(OpContext* ctx,
+                          const std::string& pointer,
+                          JsonStatsPrefetchBatch* batch = nullptr) const;
 
     bool
     HasAllShreddingFields(const std::string& pointer,
@@ -436,6 +464,9 @@ class JsonKeyStats {
     }
 
  private:
+    void
+    PrefetchBsonIndex(OpContext* ctx, JsonStatsPrefetchBatch* batch) const;
+
     void
     CollectSingleJsonStatsInfo(std::string_view json_str,
                                std::map<JsonKey, KeyStatsInfo>& infos);

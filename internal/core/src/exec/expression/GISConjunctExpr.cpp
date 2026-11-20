@@ -161,12 +161,7 @@ PhyGISCoarseConjunctExpr::RunRTreeQuery(GISGroupState::Pred& p) {
 
 void
 PhyGISCoarseConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
-    // Self-guard like every other SegmentExpr subclass: block until the
-    // prefetch-pool DetermineExecPath() has finished before RunRTreeQuery()
-    // selects and pins the exact spatial entry on the query thread. No-op once
-    // the future is drained (subsequent batches hit the cheap
-    // EnsureExecPathDetermined() branch). FilterBits already waits before the
-    // first Eval, so this only hardens direct/other callers.
+    // Finish path selection before RunRTreeQuery uses the spatial index.
     WaitPrefetch();
     auto real_batch_size = NextBatchSize();
     if (real_batch_size == 0) {
@@ -362,9 +357,7 @@ PhyGISRefineConjunctExpr::PrefetchRawData() {
 
 void
 PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
-    // Self-guard like every other SegmentExpr subclass (see the Coarse node):
-    // drain the prefetch future before reading the raw column so a direct
-    // caller that skipped the operator-level wait still sees a warmed column.
+    // Join this predicate's prefetch before reading the raw column.
     WaitPrefetch();
     auto real_batch_size = NextBatchSize();
     if (real_batch_size == 0) {

@@ -2852,6 +2852,9 @@ PhyUnaryRangeFilterExpr::PrefetchRawData() {
         using ValueType = std::decay_t<decltype(val)>;
         std::vector<int64_t> chunks_may_hit;
         for (size_t i = RawDataPrefetchStartChunk(); i < num_data_chunk_; i++) {
+            if (PrefetchExecutor::IsStopped()) {
+                return;
+            }
             const bool skip =
                 skip_view_.CanSkipUnaryRange<ValueType>(i, op_type, val);
             if (skip) {
