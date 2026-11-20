@@ -49,6 +49,14 @@ func (r *redoAppendInterceptor) DoAppend(ctx context.Context, msg message.Mutabl
 			}
 			continue
 		}
+		var wait *interceptors.WaitRequiredError
+		if errors.As(err, &wait) {
+			// The inner chain has released the WAL lock before it returned.
+			if err := waitRunner(ctx, wait); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		return msgID, err
 	}
 }
@@ -56,18 +64,32 @@ func (r *redoAppendInterceptor) DoAppend(ctx context.Context, msg message.Mutabl
 type callerContextKey struct{}
 
 // WithCallerContext preserves the caller's cancellation before the WAL detaches
-// it for mutation safety. Only preparation uses it; accepted writes still use
-// the WAL-owned context.
+// it for mutation safety. Only preparation and waits use it, because nothing
+// is appended yet; accepted writes still use the WAL-owned context.
 func WithCallerContext(ctx context.Context) context.Context {
 	return context.WithValue(ctx, callerContextKey{}, ctx)
 }
 
-func prepareRunner(ctx context.Context, preparation *function.PreparationRequiredError) error {
+// withCallerContext merges the caller's cancellation into ctx when the caller
+// preserved it with WithCallerContext.
+func withCallerContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if caller, ok := ctx.Value(callerContextKey{}).(context.Context); ok {
-		var cancel context.CancelFunc
-		ctx, cancel = contextutil.MergeContext(caller, ctx)
-		defer cancel()
+		return contextutil.MergeContext(caller, ctx)
 	}
+	return ctx, func() {}
+}
+
+// waitRunner waits for the condition of wait. The caller's cancellation ends
+// the wait: nothing of the message is appended yet.
+func waitRunner(ctx context.Context, wait *interceptors.WaitRequiredError) error {
+	ctx, cancel := withCallerContext(ctx)
+	defer cancel()
+	return wait.Wait(ctx)
+}
+
+func prepareRunner(ctx context.Context, preparation *function.PreparationRequiredError) error {
+	ctx, cancel := withCallerContext(ctx)
+	defer cancel()
 	err := preparation.Prepare(ctx)
 	if ctx.Err() != nil {
 		return ctx.Err()

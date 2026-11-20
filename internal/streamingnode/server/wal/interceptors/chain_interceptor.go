@@ -71,13 +71,13 @@ func chainAppendInterceptors(interceptors []Interceptor) AppendInterceptorCall {
 		}
 	} else if len(interceptors) == 1 {
 		if i, ok := interceptors[0].(InterceptorWithMetrics); ok {
-			return adaptAppendWithMetricCollecting(i.Name(), interceptors[0].DoAppend)
+			return CollectAppendMetrics(i.Name(), interceptors[0].DoAppend)
 		}
 		return interceptors[0].DoAppend
 	}
 	return func(ctx context.Context, msg message.MutableMessage, invoker Append) (message.MessageID, error) {
 		if i, ok := interceptors[0].(InterceptorWithMetrics); ok {
-			return adaptAppendWithMetricCollecting(i.Name(), interceptors[0].DoAppend)(ctx, msg, getChainAppendInvoker(interceptors, 0, invoker))
+			return CollectAppendMetrics(i.Name(), interceptors[0].DoAppend)(ctx, msg, getChainAppendInvoker(interceptors, 0, invoker))
 		}
 		return interceptors[0].DoAppend(ctx, msg, getChainAppendInvoker(interceptors, 0, invoker))
 	}
@@ -93,14 +93,15 @@ func getChainAppendInvoker(interceptors []Interceptor, idx int, finalInvoker App
 	return func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 		idx := idx + 1
 		if i, ok := interceptors[idx].(InterceptorWithMetrics); ok {
-			return adaptAppendWithMetricCollecting(i.Name(), i.DoAppend)(ctx, msg, getChainAppendInvoker(interceptors, idx, finalInvoker))
+			return CollectAppendMetrics(i.Name(), i.DoAppend)(ctx, msg, getChainAppendInvoker(interceptors, idx, finalInvoker))
 		}
 		return interceptors[idx].DoAppend(ctx, msg, getChainAppendInvoker(interceptors, idx, finalInvoker))
 	}
 }
 
-// adaptAppendWithMetricCollecting adapts the append interceptor with metric collecting.
-func adaptAppendWithMetricCollecting(name string, append AppendInterceptorCall) AppendInterceptorCall {
+// CollectAppendMetrics records the work before and after downstream appends.
+// Composite interceptors use it to retain metrics for their internal stages.
+func CollectAppendMetrics(name string, append AppendInterceptorCall) AppendInterceptorCall {
 	return func(ctx context.Context, msg message.MutableMessage, invoker Append) (message.MessageID, error) {
 		c := utility.MustGetAppendMetrics(ctx).StartInterceptorCollector(name)
 		msgID, err := append(ctx, msg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
