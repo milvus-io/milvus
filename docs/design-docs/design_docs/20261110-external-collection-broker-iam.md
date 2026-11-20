@@ -4,9 +4,9 @@ Issue: [#54803](https://github.com/milvus-io/milvus/issues/54803).
 This extends the Broker framework from [#54986](https://github.com/milvus-io/milvus/pull/54986)
 and the native credential APIs from [milvus-storage #779](https://github.com/milvus-io/milvus-storage/pull/779).
 [Storage #785](https://github.com/milvus-io/milvus-storage/pull/785) supplies
-Aliyun/Tencent target-role request routing for the native S3 filesystem. Until
-it merges, this change pins its immutable fork revision; restore the upstream
-merge commit before merge.
+Aliyun/Tencent target-role request routing for the native S3 filesystem.
+Milvus pins its upstream merge commit `68d39ac`, which also includes
+[Azure SAS renewal between SDK retries](https://github.com/milvus-io/milvus-storage/pull/827).
 
 ## Common mode selection
 
