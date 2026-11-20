@@ -2259,7 +2259,9 @@ func (v *ParserVisitor) foldOr2(left, right interface{}) interface{} {
 			otherExpr = getExpr(left)
 		}
 		if boolLiteral.GetBoolVal() {
-			if otherExpr.expr.GetIsTemplate() {
+			// Keep the discarded operand until its template and element scope
+			// have been validated. The rewriter can then fold the constant.
+			if otherExpr.expr.GetIsTemplate() || v.currentStructArrayField != "" {
 				return newLogicalBinaryExpr(getExpr(left), getExpr(right), planpb.BinaryExpr_LogicalOr)
 			}
 			// true or expr → always true
@@ -2345,7 +2347,9 @@ func (v *ParserVisitor) foldAnd2(left, right interface{}) interface{} {
 			otherExpr = getExpr(left)
 		}
 		if !boolLiteral.GetBoolVal() {
-			if otherExpr.expr.GetIsTemplate() {
+			// Keep the discarded operand until its template and element scope
+			// have been validated. The rewriter can then fold the constant.
+			if otherExpr.expr.GetIsTemplate() || v.currentStructArrayField != "" {
 				return newLogicalBinaryExpr(getExpr(left), getExpr(right), planpb.BinaryExpr_LogicalAnd)
 			}
 			// false and expr → always false
@@ -3674,6 +3678,9 @@ func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) int
 
 	// Get struct array field name (first parameter)
 	arrayFieldName := ctx.FieldName().GetText()
+	if !v.schema.HasStructArrayField(arrayFieldName) {
+		return merr.WrapErrParameterInvalidMsg("element_filter requires a StructArray target, got %s", arrayFieldName)
+	}
 
 	// Set current context for element expression parsing
 	v.currentStructArrayField = arrayFieldName
@@ -3730,7 +3737,9 @@ func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) int
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_ElementFilterExpr{
 				ElementFilterExpr: &planpb.ElementFilterExpr{
-					ElementExpr: exprWithType.expr,
+					// A predicate such as 1 == 1 may already be a boolean ValueExpr.
+					// Element filters always consume bitmaps, even with optimization off.
+					ElementExpr: normalizeLogicalOperand(exprWithType.expr),
 					StructName:  arrayFieldName,
 				},
 			},

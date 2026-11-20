@@ -3977,6 +3977,12 @@ func TestExpr_ElementFilterPredicateValidation(t *testing.T) {
 		{expr: `element_filter(struct_array, $[sub_int] + 1)`, want: "element_filter predicate must be a boolean expression, got $[sub_int]+1 of type Int64"},
 		{expr: `element_filter(struct_array, $[sub_str])`, want: "element_filter predicate must be a boolean expression, got $[sub_str] of type VarChar"},
 		{expr: `element_filter(struct_array, {flag})`, values: map[string]*schemapb.TemplateValue{"flag": {Val: &schemapb.TemplateValue_BoolVal{BoolVal: true}}}, want: "element_filter predicate must be a boolean expression, got {flag} of type None"},
+		{expr: `element_filter(struct_array, true || Int64Field > 5)`, want: rowLevel},
+		{expr: `element_filter(struct_array, (Int64Field > 5 && false) || $[en] == 1)`, want: rowLevel},
+		{expr: `element_filter(struct_array, false && empty($[sub_str]))`, want: "function calls are not supported"},
+		{expr: `element_filter(Int64Field, 1 == 1)`, want: "requires a StructArray target"},
+		{expr: `element_filter(StringArrayField, 1 == 2)`, want: "requires a StructArray target"},
+		{expr: `element_filter(missing, 1 == 1)`, want: "requires a StructArray target"},
 		{expr: `element_filter(struct_array, Int64Field > 5)`, want: rowLevel},
 		{expr: `element_filter(struct_array, BoolField)`, want: rowLevel},
 		{expr: `element_filter(struct_array, $[sub_int] > 1 && Int64Field > 5)`, want: rowLevel},
@@ -6273,6 +6279,17 @@ func TestArrayTextMatchOperand(t *testing.T) {
 	require.ErrorContains(t, err, "does not enable match")
 }
 
+func TestElementFilterConstantOnFlattenedStruct(t *testing.T) {
+	schema := newTestSchema(false)
+	schema.Fields = append(schema.Fields, schema.StructArrayFields[0].Fields...)
+	schema.StructArrayFields = nil
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	expr, err := ParseExpr(helper, "ELEMENT_FILTER(struct_array, 1 == 1)", nil)
+	require.NoError(t, err)
+	require.Equal(t, "struct_array", expr.GetElementFilterExpr().GetStructName())
+}
+
 func TestElementPredicateRewrite(t *testing.T) {
 	schema := newTestSchema(false)
 	sub := schema.StructArrayFields[0].Fields[0]
@@ -6368,6 +6385,15 @@ func TestElementPredicateRewrite(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, term.GetElementFilterExpr().GetElementExpr().GetTermExpr().GetValues(), 2)
+	// IN uses stored FLOAT values. 2^24 and 2^24+1 compare equal there.
+	for _, predicate := range []string{
+		`$[weight] in [16777217.0, 9.0] && $[weight] == 16777216.0`,
+		`$[weight] in [16777216.0, 9.0] && $[weight] == 16777217.0`,
+		`$[weight] in [16777217.0, 9.0] && $[weight] in [16777216.0, 10.0]`,
+		`$[weight] in [16777217.0, 9.0] && $[weight] != 16777216.0`,
+	} {
+		require.NotNil(t, elementFilter(predicate).GetElementExpr().GetBinaryExpr(), predicate)
+	}
 	cfg.EnableMatchConstantPredicate.SwapTempValue("false")
 	require.NotNil(t, parse(`MATCH_ANY(tags, $ == "new" && $ == "york")`).GetMatchExpr().GetPredicate().GetBinaryExpr())
 	require.NotNil(t, parse(`MATCH_ANY(tags, $ == "new" || $ == "york")`).GetMatchExpr().GetPredicate().GetTermExpr())
@@ -6376,4 +6402,6 @@ func TestElementPredicateRewrite(t *testing.T) {
 	cfg.EnabledOptimizeExpr.SwapTempValue("false")
 	require.NotNil(t, parse(`MATCH_ANY(tags, $ == "new" || $ == "york")`).GetMatchExpr().GetPredicate().GetBinaryExpr())
 	require.NotNil(t, elementFilter(conflict).GetElementExpr().GetBinaryExpr())
+	require.True(t, rewriter.IsAlwaysTrueExpr(elementFilter("1 == 1").GetElementExpr()))
+	require.True(t, rewriter.IsAlwaysFalseExpr(elementFilter("1 == 2").GetElementExpr()))
 }
