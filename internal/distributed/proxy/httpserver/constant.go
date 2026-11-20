@@ -64,6 +64,7 @@ const (
 	InsertAction         = "insert"
 	UpsertAction         = "upsert"
 	SearchAction         = "search"
+	MultiSearchAction    = "multi_search"
 	AdvancedSearchAction = "advanced_search"
 	CancelAction         = "cancel"
 	HybridSearchAction   = "hybrid_search"

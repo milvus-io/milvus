@@ -174,6 +174,18 @@ func MergeContext(ctx1 context.Context, ctx2 context.Context) (context.Context, 
 	}
 }
 
+// ErrOrDeadlineExceeded checks the deadline even if the context's timer has
+// not run yet. Use it when completion can race with the deadline.
+func ErrOrDeadlineExceeded(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
 type queryLabelKey struct{}
 
 // WithQueryLabel sets the query label in context for metrics differentiation.

@@ -238,9 +238,8 @@ func (node *Proxy) CheckClusterPrivilege(ctx context.Context, req interface{}, f
 	return CheckClusterPrivilege(ctx, req, fullMethod, objectPrivilege)
 }
 
-// IsDQLQueueFull reports whether the next DQL enqueue would be rejected with
-// TooManyRequests. The REST layer probes it (via interface assertion, like
-// GetMetaCache) to reject search/query before paying for body decoding.
+// IsDQLQueueFull reports whether the main queue would reject a Search or Query
+// with TooManyRequests. REST probes it before decoding the request body.
 func (node *Proxy) IsDQLQueueFull() bool {
 	return node.sched != nil && node.sched.DqQueue.IsFull()
 }
@@ -412,6 +411,11 @@ func (node *Proxy) Start() error {
 	}
 	mlog.Debug(node.ctx, "start id allocator done", mlog.String("role", typeutil.ProxyRole))
 
+	nodeID := paramtable.GetStringNodeID()
+	metrics.ProxyMultiSearchAttemptsTotal.WithLabelValues(nodeID)
+	metrics.ProxyMultiSearchRetriesTotal.WithLabelValues(nodeID, multiSearchRetryRateLimit)
+	metrics.ProxyMultiSearchRetriesTotal.WithLabelValues(nodeID, multiSearchRetryQueueFull)
+
 	// Start callbacks
 	for _, cb := range node.startCallbacks {
 		cb()
@@ -454,14 +458,14 @@ func (node *Proxy) Stop() error {
 		mlog.Warn(node.ctx, "PyUDF supervisor cleanup failed; continuing Proxy shutdown", mlog.Err(err))
 	}
 
-	if node.rowIDAllocator != nil {
-		node.rowIDAllocator.Close()
-		mlog.Info(node.ctx, "close id allocator", mlog.String("role", typeutil.ProxyRole))
-	}
-
 	if node.sched != nil {
 		node.sched.Close()
 		mlog.Info(node.ctx, "close scheduler", mlog.String("role", typeutil.ProxyRole))
+	}
+
+	if node.rowIDAllocator != nil {
+		node.rowIDAllocator.Close()
+		mlog.Info(node.ctx, "close id allocator", mlog.String("role", typeutil.ProxyRole))
 	}
 
 	if err := pyudf.CloseClients(); err != nil {

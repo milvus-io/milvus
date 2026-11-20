@@ -35,7 +35,7 @@ type ListRunningRequestsResult struct {
 	NodeResults []entity.RequestNodeResult
 }
 
-// ListRunningRequests lists the Search, HybridSearch and Query requests the
+// ListRunningRequests lists the Search, HybridSearch, Query and MultiSearch requests the
 // cluster is executing. It succeeds as long as one proxy answered; inspect
 // NodeResults to tell a complete answer from a partial one.
 func (c *Client) ListRunningRequests(ctx context.Context, option ListRunningRequestsOption, callOptions ...grpc.CallOption) (*ListRunningRequestsResult, error) {

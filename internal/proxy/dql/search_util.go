@@ -714,6 +714,17 @@ func resolveNq(declared int64, placeholderGroup []byte, malformedMsg string) (in
 	if declared != 0 && len(placeholderGroup) == 0 {
 		return declared, nil
 	}
+	rows, err := countPlaceholderGroupNQ(placeholderGroup, malformedMsg)
+	if err != nil {
+		return 0, err
+	}
+	if err := validateDeclaredNq(declared, rows); err != nil {
+		return 0, err
+	}
+	return rows, nil
+}
+
+func countPlaceholderGroupNQ(placeholderGroup []byte, malformedMsg string) (int64, error) {
 	rows, err := funcutil.CountPlaceholderGroupValues(placeholderGroup)
 	if err != nil {
 		// Let the decoder name what is wrong with the bytes. Should it accept
@@ -727,11 +738,51 @@ func resolveNq(declared int64, placeholderGroup []byte, malformedMsg string) (in
 			rows += int64(len(placeholder.GetValues()))
 		}
 	}
+	return rows, nil
+}
+
+func validateDeclaredNq(declared, rows int64) error {
 	if declared != 0 && declared != rows {
-		return 0, merr.WrapErrParameterInvalidMsg(
+		return merr.WrapErrParameterInvalidMsg(
 			"nq %d does not match the %d query rows in the placeholder group", declared, rows)
 	}
-	return rows, nil
+	return nil
+}
+
+// NormalizeMultiSearchNQ validates a plain Search and sets its quota cost
+// from the actual input before any attempt enters the Search path.
+func NormalizeMultiSearchNQ(request *milvuspb.SearchRequest) error {
+	if len(request.GetSubReqs()) != 0 {
+		return merr.WrapErrParameterInvalidMsg("MultiSearch supports only ordinary Search requests")
+	}
+	declared := request.GetNq()
+	if declared < 0 {
+		return merr.WrapErrParameterInvalidMsg("nq must be nonnegative, got %d", declared)
+	}
+	if input, ok := request.GetSearchInput().(*milvuspb.SearchRequest_Ids); ok {
+		// Charge input IDs before Search resolves them into vectors.
+		nq := int64(typeutil.GetSizeOfIDs(input.Ids))
+		if nq == 0 {
+			return merr.WrapErrParameterInvalidMsg("search by primary key requires at least one ID")
+		}
+		if err := validateNQLimit(nq); err != nil {
+			return err
+		}
+		request.Nq = nq
+		return nil
+	}
+	nq, err := countPlaceholderGroupNQ(request.GetPlaceholderGroup(), "failed to unmarshal placeholder group")
+	if err != nil {
+		return err
+	}
+	if err := validateNQLimit(nq); err != nil {
+		return err
+	}
+	if err := validateDeclaredNq(declared, nq); err != nil {
+		return err
+	}
+	request.Nq = nq
+	return nil
 }
 
 func GetPartitionIDs(ctx context.Context, metaCache Cache, dbName string, collectionName string, partitionNames []string) (partitionIDs []UniqueID, err error) {

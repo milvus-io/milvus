@@ -96,22 +96,37 @@ func (queue *BaseTaskQueue) IsFull() bool {
 	return queue.utFull()
 }
 
+// Queue saturation is also reported by downstream components. Keep the local
+// admission source available to callers that decide whether to retry a task.
+var errAdmissionQueueFull = errors.New("proxy task admission queue full")
+
+// IsAdmissionQueueFull reports an error from the local Proxy task queue.
+func IsAdmissionQueueFull(err error) bool {
+	return errors.Is(err, errAdmissionQueueFull)
+}
+
+func (queue *BaseTaskQueue) admissionQueueFull() error {
+	return merr.Mark(merr.WrapErrTooManyRequests(int32(queue.GetMaxTaskNum())), errAdmissionQueueFull)
+}
+
 func (queue *BaseTaskQueue) addUnissuedTask(t taskmodel.Task) (*list.Element, error) {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
 
 	if queue.utFull() {
-		return nil, merr.WrapErrTooManyRequests(int32(queue.GetMaxTaskNum()))
+		return nil, queue.admissionQueueFull()
 	}
 	element := queue.unissuedTasks.PushBack(t)
-	// utBufChan is an edge-triggered, capacity-1 notifier: a pending token
-	// means "the unissued list is non-empty, wake the scheduler". Concurrent
-	// sends coalesce; the scheduler drains the list on each wake.
+	queue.notify()
+	return element, nil
+}
+
+// notify coalesces wakeups; consumers drain the list or wake the next worker.
+func (queue *BaseTaskQueue) notify() {
 	select {
 	case queue.utBufChan <- 1:
 	default:
 	}
-	return element, nil
 }
 
 func (queue *BaseTaskQueue) FrontUnissuedTask() taskmodel.Task {
@@ -229,7 +244,7 @@ func (queue *BaseTaskQueue) enqueue(t taskmodel.Task) (*list.Element, error) {
 	full := queue.utFull()
 	queue.utLock.RUnlock()
 	if full {
-		return nil, merr.WrapErrTooManyRequests(int32(queue.GetMaxTaskNum()))
+		return nil, queue.admissionQueueFull()
 	}
 
 	// A task whose request is already canceled or timed out must not take a
@@ -344,19 +359,33 @@ func (queue *DmTaskQueue) Enqueue(t taskmodel.Task) error {
 
 // DqTaskQueue represents queue for DQL task such as search/query
 type DqTaskQueue struct {
+	// The main queue is also the admission check for external Search and Query.
 	*BaseTaskQueue
+	subTasks  *BaseTaskQueue
+	metricsMu sync.Mutex
 }
 
 func (queue *DqTaskQueue) Enqueue(t taskmodel.Task) error {
-	element, err := queue.enqueue(t)
+	lane := queue.BaseTaskQueue
+	if t.IsSubTask() {
+		lane = queue.subTasks
+	}
+	element, err := lane.enqueue(t)
 	if err != nil {
 		return err
 	}
 
 	t.SetOnContextDone(func() {
-		queue.removeUnissuedTask(element)
+		lane.removeUnissuedTask(element)
 	})
 	return nil
+}
+
+func (queue *DqTaskQueue) getTaskByReqID(reqID taskmodel.UniqueID) taskmodel.Task {
+	if task := queue.BaseTaskQueue.getTaskByReqID(reqID); task != nil {
+		return task
+	}
+	return queue.subTasks.getTaskByReqID(reqID)
 }
 
 type ClearTaskQueueResult struct {
@@ -384,32 +413,36 @@ func clearTaskQueueError(reason string) error {
 }
 
 func (queue *DqTaskQueue) clearQueuedTasks(taskType string, reason string) ClearTaskQueueResult {
-	removed := queue.popUnissuedTasks(func(t taskmodel.Task) bool {
+	filter := func(t taskmodel.Task) bool {
 		return isDQLTaskMatched(t, taskType)
-	})
-	if len(removed) == 0 {
-		queue.updateMetrics()
-		return ClearTaskQueueResult{}
 	}
-
-	clearErr := clearTaskQueueError(reason)
-	for _, task := range removed {
-		task.Notify(clearErr)
+	removed := queue.popUnissuedTasks(filter)
+	removed = append(removed, queue.subTasks.popUnissuedTasks(filter)...)
+	if len(removed) > 0 {
+		clearErr := clearTaskQueueError(reason)
+		for _, task := range removed {
+			task.Notify(clearErr)
+		}
 	}
 	queue.updateMetrics()
 	return ClearTaskQueueResult{QueuedCleared: int64(len(removed))}
 }
 
 func (queue *DqTaskQueue) updateMetrics() {
-	queue.utLock.RLock()
-	unissuedTasksNum := queue.unissuedTasks.Len()
-	queue.utLock.RUnlock()
-	queue.atLock.RLock()
-	activateTaskNum := len(queue.activeTasks)
-	queue.atLock.RUnlock()
+	queue.metricsMu.Lock()
+	defer queue.metricsMu.Unlock()
+	var unissuedTasksNum, activeTaskNum int
+	for _, lane := range []*BaseTaskQueue{queue.BaseTaskQueue, queue.subTasks} {
+		lane.utLock.RLock()
+		unissuedTasksNum += lane.unissuedTasks.Len()
+		lane.utLock.RUnlock()
+		lane.atLock.RLock()
+		activeTaskNum += len(lane.activeTasks)
+		lane.atLock.RUnlock()
+	}
 
 	metrics.ProxyQueueTaskNum.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "dql", metrics.UnissuedIndexTaskLabel).Set(float64(unissuedTasksNum))
-	metrics.ProxyQueueTaskNum.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "dql", metrics.InProgressIndexTaskLabel).Set(float64(activateTaskNum))
+	metrics.ProxyQueueTaskNum.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "dql", metrics.InProgressIndexTaskLabel).Set(float64(activeTaskNum))
 }
 
 func (queue *DdTaskQueue) Enqueue(t taskmodel.Task) error {
@@ -433,14 +466,16 @@ func newDmTaskQueue(tsoAllocatorIns taskmodel.TsoAllocator) *DmTaskQueue {
 func newDqTaskQueue(tsoAllocatorIns taskmodel.TsoAllocator) *DqTaskQueue {
 	return &DqTaskQueue{
 		BaseTaskQueue: newBaseTaskQueue(tsoAllocatorIns),
+		subTasks:      newBaseTaskQueue(tsoAllocatorIns),
 	}
 }
 
 // TaskScheduler schedules the gRPC tasks.
 type TaskScheduler struct {
-	DdQueue *DdTaskQueue
-	DmQueue *DmTaskQueue
-	DqQueue *DqTaskQueue
+	DdQueue      *DdTaskQueue
+	DmQueue      *DmTaskQueue
+	DqQueue      *DqTaskQueue
+	MSearchQueue *MSearchTaskQueue
 
 	// data control queue, use for such as flush operation, which control the data status
 	DcQueue *DdTaskQueue
@@ -464,6 +499,12 @@ func NewTaskScheduler(ctx context.Context,
 	s.DdQueue = newDdTaskQueue(tsoAllocatorIns)
 	s.DmQueue = newDmTaskQueue(tsoAllocatorIns)
 	s.DqQueue = newDqTaskQueue(tsoAllocatorIns)
+	s.MSearchQueue = &MSearchTaskQueue{
+		BaseTaskQueue: newBaseTaskQueue(tsoAllocatorIns),
+		ctx:           ctx1,
+		workers:       8,
+	}
+	s.MSearchQueue.SetMaxTaskNum(64)
 
 	s.DcQueue = newDdTaskQueue(tsoAllocatorIns)
 
@@ -484,10 +525,6 @@ func (sched *TaskScheduler) scheduleDcTask() taskmodel.Task {
 
 func (sched *TaskScheduler) scheduleDmTask() taskmodel.Task {
 	return sched.DmQueue.PopUnissuedTask()
-}
-
-func (sched *TaskScheduler) scheduleDqTask() taskmodel.Task {
-	return sched.DqQueue.PopUnissuedTask()
 }
 
 func (sched *TaskScheduler) ClearDQLQueue(taskType string, reason string) ClearTaskQueueResult {
@@ -680,34 +717,27 @@ func (sched *TaskScheduler) manipulationLoop() {
 	}
 }
 
-func (sched *TaskScheduler) queryLoop() {
+func (sched *TaskScheduler) queryLoop(queue *BaseTaskQueue) {
 	defer sched.wg.Done()
 
 	poolSize := paramtable.Get().ProxyCfg.MaxTaskNum.GetAsInt()
 	pool := conc.NewPool[struct{}](poolSize, conc.WithExpiryDuration(time.Minute))
-	subTaskPool := conc.NewPool[struct{}](poolSize, conc.WithExpiryDuration(time.Minute))
 	defer pool.Release()
-	defer subTaskPool.Release()
 
 	for {
 		select {
 		case <-sched.ctx.Done():
 			return
-		case <-sched.DqQueue.utChan():
-			for t := sched.scheduleDqTask(); t != nil; t = sched.scheduleDqTask() {
+		case <-queue.utChan():
+			for t := queue.PopUnissuedTask(); t != nil; t = queue.PopUnissuedTask() {
 				task := t
-				p := pool
-				// if task is sub task spawned by another, use sub task pool in case of deadlock
-				if task.IsSubTask() {
-					p = subTaskPool
-				}
-				p.Submit(func() (struct{}, error) {
+				pool.Submit(func() (struct{}, error) {
 					// Submit may wait for a worker after the task has left the queue.
 					if err := task.TraceCtx().Err(); err != nil {
 						task.Notify(err)
 						return struct{}{}, nil
 					}
-					sched.processTask(task, sched.DqQueue)
+					sched.processTask(task, queue)
 					return struct{}{}, nil
 				})
 			}
@@ -720,38 +750,72 @@ func (sched *TaskScheduler) Start() error {
 	sched.wg.Add(1)
 	go sched.definitionLoop()
 
+	// Fixed workers pop only when free: all waiting batches remain in the
+	// bounded queue, including while canceled execution is still unwinding.
+	sched.wg.Add(sched.MSearchQueue.workers)
+	for range sched.MSearchQueue.workers {
+		go sched.multiSearchLoop()
+	}
+
 	sched.wg.Add(1)
 	go sched.controlLoop()
 
 	sched.wg.Add(1)
 	go sched.manipulationLoop()
 
-	sched.wg.Add(1)
-	go sched.queryLoop()
+	// Search can wait for a nested DQL task while holding a worker. Each
+	// dispatcher waits only on its own pool so nested work can still run.
+	sched.wg.Add(2)
+	go sched.queryLoop(sched.DqQueue.BaseTaskQueue)
+	go sched.queryLoop(sched.DqQueue.subTasks)
 
 	return nil
 }
+
+// Context bounds orchestration tasks by the scheduler's lifetime as well as
+// their caller's context. Close cancels it before waiting for workers.
+func (sched *TaskScheduler) Context() context.Context { return sched.ctx }
 
 func (sched *TaskScheduler) Close() {
 	sched.cancel()
 	sched.wg.Wait()
 }
 
-func (sched *TaskScheduler) getTaskQueueMetrics(queue *BaseTaskQueue, queueType string) metricsinfo.TaskQueueMetrics {
+func (sched *TaskScheduler) getTaskQueueMetrics(queueType string, queues ...*BaseTaskQueue) metricsinfo.TaskQueueMetrics {
 	pendingTaskStats := make(map[string]*TaskStatsTracker, 0)
 	executingTaskStats := make(map[string]*TaskStatsTracker, 0)
-	queue.atLock.RLock()
-	atNum := len(queue.activeTasks)
-	for _, task := range queue.activeTasks {
-		taskType := task.Name()
-		executingTime := task.GetDurationInExecuting().Milliseconds()
+	var atNum, utNum int64
+	for _, queue := range queues {
+		queue.atLock.RLock()
+		atNum += int64(len(queue.activeTasks))
+		for _, task := range queue.activeTasks {
+			taskType := task.Name()
+			executingTime := task.GetDurationInExecuting().Milliseconds()
 
-		tracker, ok := executingTaskStats[taskType]
-		if !ok {
-			tracker = NewTaskStatsTracker(taskType)
-			executingTaskStats[taskType] = tracker
+			tracker, ok := executingTaskStats[taskType]
+			if !ok {
+				tracker = NewTaskStatsTracker(taskType)
+				executingTaskStats[taskType] = tracker
+			}
+			tracker.AddSample(executingTime)
 		}
-		tracker.AddSample(executingTime)
+		queue.atLock.RUnlock()
+
+		queue.utLock.RLock()
+		utNum += int64(queue.unissuedTasks.Len())
+		for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
+			task := e.Value.(taskmodel.Task)
+			taskType := task.Name()
+			queueTimeMs := task.GetDurationInQueue().Milliseconds()
+
+			tracker, ok := pendingTaskStats[taskType]
+			if !ok {
+				tracker = NewTaskStatsTracker(taskType)
+				pendingTaskStats[taskType] = tracker
+			}
+			tracker.AddSample(queueTimeMs)
+		}
+		queue.utLock.RUnlock()
 	}
 	executingTaskMetrics := make([]metricsinfo.TaskMetrics, 0, len(executingTaskStats))
 	for _, tracker := range executingTaskStats {
@@ -763,26 +827,6 @@ func (sched *TaskScheduler) getTaskQueueMetrics(queue *BaseTaskQueue, queueType 
 			Count:        tracker.Count,
 		})
 	}
-	queue.atLock.RUnlock()
-
-	queue.utLock.RLock()
-	defer queue.utLock.RUnlock()
-	utNum := queue.unissuedTasks.Len()
-
-	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
-		task := e.Value.(taskmodel.Task)
-		taskType := task.Name()
-		queueTimeMs := task.GetDurationInQueue().Milliseconds()
-
-		tracker, ok := pendingTaskStats[taskType]
-		if !ok {
-			tracker = NewTaskStatsTracker(taskType)
-			pendingTaskStats[taskType] = tracker
-		}
-
-		tracker.AddSample(queueTimeMs)
-	}
-
 	pendingTaskMetrics := make([]metricsinfo.TaskMetrics, 0, len(pendingTaskStats))
 	for _, tracker := range pendingTaskStats {
 		pendingTaskMetrics = append(pendingTaskMetrics, metricsinfo.TaskMetrics{
@@ -796,8 +840,8 @@ func (sched *TaskScheduler) getTaskQueueMetrics(queue *BaseTaskQueue, queueType 
 
 	return metricsinfo.TaskQueueMetrics{
 		Type:           queueType,
-		PendingCount:   int64(utNum),
-		ExecutingCount: int64(atNum),
+		PendingCount:   utNum,
+		ExecutingCount: atNum,
 		PendingTasks:   pendingTaskMetrics,
 		ExecutingTasks: executingTaskMetrics,
 	}
@@ -836,10 +880,10 @@ func (t *TaskStatsTracker) AvgQueueTime() int64 {
 }
 
 func (sched *TaskScheduler) GetMetrics() []metricsinfo.TaskQueueMetrics {
-	dmlQueueMetrics := sched.getTaskQueueMetrics(sched.DmQueue.BaseTaskQueue, "dml")
-	ddlQueueMetrics := sched.getTaskQueueMetrics(sched.DdQueue.BaseTaskQueue, "ddl")
-	dqlQueueMetrics := sched.getTaskQueueMetrics(sched.DqQueue.BaseTaskQueue, "dql")
-	dcQueueMetrics := sched.getTaskQueueMetrics(sched.DcQueue.BaseTaskQueue, "dc")
+	dmlQueueMetrics := sched.getTaskQueueMetrics("dml", sched.DmQueue.BaseTaskQueue)
+	ddlQueueMetrics := sched.getTaskQueueMetrics("ddl", sched.DdQueue.BaseTaskQueue)
+	dqlQueueMetrics := sched.getTaskQueueMetrics("dql", sched.DqQueue.BaseTaskQueue, sched.DqQueue.subTasks)
+	dcQueueMetrics := sched.getTaskQueueMetrics("dc", sched.DcQueue.BaseTaskQueue)
 	return []metricsinfo.TaskQueueMetrics{
 		dmlQueueMetrics,
 		ddlQueueMetrics,

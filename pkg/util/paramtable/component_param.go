@@ -2898,6 +2898,7 @@ type proxyConfig struct {
 	EnableAutoLoad                    ParamItem `refreshable:"true"`
 	DDLConcurrency                    ParamItem `refreshable:"true"`
 	DCLConcurrency                    ParamItem `refreshable:"true"`
+	MultiSearchMaxConcurrency         ParamItem `refreshable:"true"`
 	ShardLeaderCacheInterval          ParamItem `refreshable:"false"`
 	ReplicaSelectionPolicy            ParamItem `refreshable:"false"`
 	CheckQueryNodeHealthInterval      ParamItem `refreshable:"false"`
@@ -3222,6 +3223,15 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		Export:       true,
 	}
 	p.DCLConcurrency.Init(base.mgr)
+
+	p.MultiSearchMaxConcurrency = ParamItem{
+		Key:          "proxy.multiSearch.maxConcurrency",
+		Version:      "3.0.1",
+		DefaultValue: "16",
+		Doc:          "Maximum number of active Search items per MultiSearch batch. Values below 1 use 1.",
+		Export:       true,
+	}
+	p.MultiSearchMaxConcurrency.Init(base.mgr)
 
 	p.GinLogging = ParamItem{
 		Key:          "proxy.ginLogging",
