@@ -65,7 +65,7 @@ func GetSourceStorageConfig(options Options) (*SourceStorageConfig, error) {
 		}
 		key := option.GetKey()
 		if key == SourceType || key == ExternalSpec || key == SnapshotSourceURI ||
-			key == SnapshotLayout || key == PartitionMapping {
+			key == SnapshotLayout || key == PartitionMapping || key == SnapshotPChannelEndTs {
 			hasSnapshotContractOption = true
 		}
 		if !IsSourceStorageOption(key) {
