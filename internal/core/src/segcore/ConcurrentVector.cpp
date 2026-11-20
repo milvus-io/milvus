@@ -157,7 +157,11 @@ VectorBase::set_data_raw(ssize_t element_offset,
                 data_raw.emplace_back(simdjson::padded_string(json_bytes));
             }
 
-            return set_data_raw(element_offset, data_raw.data(), element_count);
+            auto* json_vector = dynamic_cast<ConcurrentVector<Json>*>(this);
+            AssertInfo(json_vector != nullptr,
+                       "JSON field must use ConcurrentVector<Json>");
+            return json_vector->move_data_raw(
+                element_offset, data_raw.data(), element_count);
         }
         case DataType::GEOMETRY: {
             // get the geometry array of a column from proto message
