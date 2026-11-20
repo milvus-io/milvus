@@ -25,6 +25,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
@@ -185,6 +187,72 @@ func TestRefreshPolicyInfoCacheCancellationAndControls(t *testing.T) {
 		require.ErrorContains(t, merr.Error(st), context.Canceled.Error())
 		require.Equal(t, beforeCalls, coord.listCall.Load())
 		assertInitialCacheIntact()
+	})
+
+	t.Run("maps gRPC Canceled and DeadlineExceeded from ListPolicy via caller ctx", func(t *testing.T) {
+		for _, tc := range []struct {
+			name     string
+			grpcCode codes.Code
+			setupCtx func() (context.Context, context.CancelFunc, bool)
+			wantCode int32
+			wantErr  error
+		}{
+			{
+				name:     "canceled",
+				grpcCode: codes.Canceled,
+				setupCtx: func() (context.Context, context.CancelFunc, bool) {
+					c, cancel := context.WithCancel(context.Background())
+					return c, cancel, true
+				},
+				wantCode: merr.CanceledCode,
+				wantErr:  context.Canceled,
+			},
+			{
+				name:     "deadline exceeded",
+				grpcCode: codes.DeadlineExceeded,
+				setupCtx: func() (context.Context, context.CancelFunc, bool) {
+					c, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+					return c, cancel, false
+				},
+				wantCode: merr.TimeoutCode,
+				wantErr:  context.DeadlineExceeded,
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				entered := make(chan struct{})
+				coord.setListPolicy(func(innerCtx context.Context, _ *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+					close(entered)
+					<-innerCtx.Done()
+					return nil, status.Error(tc.grpcCode, tc.wantErr.Error())
+				})
+
+				reqCtx, reqCancel, triggerCancel := tc.setupCtx()
+				defer reqCancel()
+
+				type rpcResult struct {
+					status *commonpb.Status
+					err    error
+				}
+				resCh := make(chan rpcResult, 1)
+				go func() {
+					st, err := node.RefreshPolicyInfoCache(reqCtx, &proxypb.RefreshPolicyInfoCacheRequest{
+						OpType: int32(typeutil.CacheRefresh),
+					})
+					resCh <- rpcResult{status: st, err: err}
+				}()
+
+				<-entered
+				if triggerCancel {
+					reqCancel()
+				}
+
+				res := <-resCh
+				require.NoError(t, res.err)
+				require.Equal(t, tc.wantCode, res.status.GetCode())
+				require.ErrorContains(t, merr.Error(res.status), tc.wantErr.Error())
+				assertInitialCacheIntact()
+			})
+		}
 	})
 
 	t.Run("normal CacheRefresh replaces policies, roles, and visibility", func(t *testing.T) {
