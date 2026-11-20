@@ -1765,6 +1765,29 @@ func syncVectorScalarIndexesWithSummary(ctx context.Context, result *datapb.Copy
 		hasArtifact := len(indexInfo.GetIndexFilePaths()) > 0
 		manifestResident := storageV3 && published && hasArtifact
 
+		if summaryMode {
+			if hasArtifact && !manifestResident {
+				return merr.Wrap(merr.ErrServiceUnimplemented, "copied index is incompatible with segment summary mode")
+			}
+			if _, exists := seenIndexIDs[targetIndexID]; exists {
+				return merr.WrapErrServiceInternalMsg("copied indexes contain a duplicate index ID")
+			}
+			seenIndexIDs[targetIndexID] = struct{}{}
+			*summaries = append(*summaries, &datapb.SegmentIndexSummary{
+				IndexId:             targetIndexID,
+				FieldId:             indexInfo.GetFieldId(),
+				BuildId:             indexInfo.GetBuildId(),
+				HasArtifact:         hasArtifact,
+				IndexVersion:        indexInfo.GetVersion(),
+				SerializedSize:      uint64(indexInfo.GetIndexSize()),
+				MemSize:             metautil.CopiedIndexMemSize(indexInfo),
+				VectorEngineVersion: indexInfo.GetCurrentIndexVersion(),
+				ScalarEngineVersion: indexInfo.GetCurrentScalarIndexVersion(),
+				IndexType:           indexInfo.GetIndexType(),
+			})
+			continue
+		}
+
 		now := time.Now().Unix()
 		segIndex := &model.SegmentIndex{
 			SegmentID:                 result.GetSegmentId(),
@@ -1786,17 +1809,6 @@ func syncVectorScalarIndexesWithSummary(ctx context.Context, result *datapb.Copy
 			IndexStorePathVersion:     indexInfo.GetIndexStorePathVersion(),
 		}
 
-		if summaryMode {
-			if hasArtifact && !manifestResident {
-				return merr.Wrap(merr.ErrServiceUnimplemented, "copied index is incompatible with segment summary mode")
-			}
-			if _, exists := seenIndexIDs[targetIndexID]; exists {
-				return merr.WrapErrServiceInternalMsg("copied indexes contain a duplicate index ID")
-			}
-			seenIndexIDs[targetIndexID] = struct{}{}
-			*summaries = append(*summaries, model.MarshalSegmentIndexSummary(model.SummarizeSegmentIndex(segIndex), indexInfo.GetFieldId()))
-			continue
-		}
 		var err error
 		if manifestResident {
 			err = indexMeta.AddSegmentIndexFromManifest(ctx, segIndex)
