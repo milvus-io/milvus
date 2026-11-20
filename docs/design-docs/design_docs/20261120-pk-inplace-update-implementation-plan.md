@@ -118,6 +118,7 @@ Master supplies native column Scan/Take, scalar indexes and Delete MVCC, but not
 - For raw expressions, retain native Scan/Take. Use `ReadRangeUpdates()` to select updated candidates in the current batch, copy a private batch only when patches exist, and overlay values/validity before evaluation.
 - Fix ColumnExpr and CompareExpr to use the same sparse overlay; unchanged rows must not call the update dictionary. Honor candidate masks before MVCC lookup.
 - Return all-valid for non-nullable fields. Bypass stale index min/max, empty-result and all-null shortcuts, and disable unsafe expression caching on updated fields.
+- Preserve native text matching on mutable VARCHAR. Evaluate selected visible delta values in bounded query-private Tantivy batches using the bound reader's registered analyzer and original MATCH/PHRASE/FUZZY options. Release each temporary batch after correction; do not add a segment-owned text delta index.
 
 ### 4.3 Lookup and output fill
 

@@ -367,7 +367,7 @@ PK apply resolves applicable offsets and appends their assigned fields to the ve
 
 #### Expression evaluation and output lookup
 
-Bind TS-vector correction and ValueReader to the same admitted query timestamp, physical segment and applied generation. Native indexes retain their existing supported operators; other expressions use the native evaluator.
+Bind TS-vector correction and ValueReader to the same admitted query timestamp, physical segment and applied generation. Native indexes retain their existing supported operators; other expressions use the native evaluator. For native text predicates on VARCHAR, reuse the bound reader's registered analyzer and query options in bounded query-private Tantivy batches over visible delta values. These temporary execution objects are released after correction, rather than retained as another segment index.
 
 | Existing access opportunity | Execution with updates |
 | --- | --- |

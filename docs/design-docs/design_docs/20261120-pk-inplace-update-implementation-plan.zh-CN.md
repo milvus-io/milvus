@@ -118,6 +118,7 @@ master 提供原生列 Scan/Take、scalar index 和 Delete MVCC，但没有这�
 - raw expression 保留原生 Scan/Take。通过 `ReadRangeUpdates()` 选出当前 batch 中需要更新的候选行；仅在存在 patches 时复制私有 batch，覆盖 values/validity 后执行 evaluator。
 - 修正 ColumnExpr 和 CompareExpr，使其使用相同的稀疏 overlay。未更新行不查询 update dictionary；MVCC lookup 前先应用 candidate mask。
 - 非 nullable 字段直接返回 all-valid。绕过过期 index 的 min/max、empty-result 和 all-null 快捷判断；对更新字段禁用不安全的 expression cache。
+- 保留可更新 VARCHAR 的原生全文匹配语义。将选中的可见 delta values 放入有界、查询私有的 Tantivy 临时批次，使用已绑定 reader 实际注册的分析器和原 MATCH/PHRASE/FUZZY 参数；矫正完成后释放批次，不增加 segment 持有的 text delta index。
 
 ### 4.3 按 offset 读取和 output fill
 
