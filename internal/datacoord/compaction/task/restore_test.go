@@ -41,7 +41,7 @@ func TestRestoreL0CommitAndTaskSaveCrash(t *testing.T) {
 		task := NewL0CompactionTask(plan, nil, m, &CompactionTaskMeta{})
 		mockey.Mock((*CompactionTaskMeta).SaveCompactionTask).Return(nil).Build()
 		require.True(t, task.restoreMutationApplied())
-		task.CreateTaskOnWorker(8, nil) // must not read or resend the retired L0
+		task.CreateTaskOnWorker(8, nil, task.GetTaskResource()) // must not read or resend the retired L0
 		require.Equal(t, datapb.CompactionTaskState_meta_saved, task.GetTaskProto().State)
 		require.True(t, task.Process())
 		require.Equal(t, datapb.CompactionTaskState_completed, task.GetTaskProto().GetTerminalState())
