@@ -295,10 +295,10 @@ func (t *compactionTrigger) work() {
 
 func (t *compactionTrigger) Stop() {
 	_ = t.lifecycleCtx()
+	t.cancel()
 	if t.closeCh != nil {
 		t.closeCh.Close()
 	}
-	t.cancel()
 	t.closeWaiter.Wait()
 	t.closeWorkDone()
 }
@@ -574,7 +574,7 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 				MaxSize:                bucket.maxSize,
 				PreAllocatedSegmentIDs: preAllocatedSegmentIDs,
 			}
-			err = t.inspector.EnqueueCompaction(task)
+			err = enqueueCompaction(ctx, t.inspector, task)
 			if err != nil {
 				log.Warn(ctx, "failed to execute compaction task",
 					mlog.Int64("planID", task.GetPlanID()),
