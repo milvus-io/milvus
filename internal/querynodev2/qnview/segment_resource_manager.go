@@ -95,6 +95,8 @@ type segmentBase struct {
 	caughtUp       bool
 	catchupRunning bool
 	catchupErr     error
+	// Prewarm requests borrow the same resources as queries; no View owns them.
+	warmUses map[*segmentWarmUse]struct{}
 }
 
 // A resource remains in the registry through Closing. Bindings arriving during
@@ -265,6 +267,7 @@ func (m *SegmentResourceManager) failView(v *viewResources, err error) {
 
 func (r *segmentResource) wakeLocked() {
 	r.dirty = true
+	r.cancelIdleWarmsLocked()
 	if r.closing {
 		return
 	}
@@ -641,6 +644,7 @@ func (r *segmentResource) closeLocked() {
 	r.closing = true
 	r.stopRetryLocked()
 	r.cancel()
+	r.cancelIdleWarmsLocked()
 	go r.close()
 }
 

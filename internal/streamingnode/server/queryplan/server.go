@@ -86,3 +86,12 @@ func normalizeQueryPlanError(err error) error {
 	}
 	return err
 }
+
+func (s *Server) GetPrewarmPlan(ctx context.Context, req *viewpb.GetPrewarmPlanRequest) (*viewpb.GetPrewarmPlanResponse, error) {
+	p, err := s.providerForVChannel(ctx, req.GetShardId().GetVchannel())
+	if err != nil {
+		return nil, normalizeQueryPlanError(err)
+	}
+	resp, err := p.GetPrewarmPlan(ctx, req)
+	return resp, normalizeQueryPlanError(err)
+}

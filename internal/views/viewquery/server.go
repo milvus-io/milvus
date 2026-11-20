@@ -206,6 +206,17 @@ func subSelection(req *viewpb.SearchOnViewRequest, index int) *viewpb.SegmentSel
 	return req.GetSegmentSelection()
 }
 
+// PrewarmOnView is a read operation: it does not publish or mutate a View.
+func (s *Server) PrewarmOnView(ctx context.Context, req *viewpb.PrewarmOnViewRequest) (*viewpb.PrewarmOnViewResponse, error) {
+	if err := validateViewIdentity(req.GetShardId(), req.GetVersion()); err != nil {
+		return nil, err
+	}
+	if err := s.provider.Prewarm(ctx, req); err != nil {
+		return nil, err
+	}
+	return &viewpb.PrewarmOnViewResponse{}, nil
+}
+
 func (s *Server) QueryOnViewStream(stream viewpb.ViewQueryService_QueryOnViewStreamServer) error {
 	initial, err := stream.Recv()
 	if err != nil {

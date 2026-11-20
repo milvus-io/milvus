@@ -667,6 +667,12 @@ func (t *AddCollectionStructFieldTask) OldSchema() *schemapb.CollectionSchema { 
 func (t *AddCollectionStructFieldTask) SetOldSchema(schema *schemapb.CollectionSchema) {
 	t.oldSchema = schema
 }
+
+// PrewarmTarget identifies the load admitted for this optional request.
+func (t *LoadCollectionTask) PrewarmTarget() (int64, uint64, bool) {
+	return t.collectionID, t.loadInfoVersion, t.warmupHint
+}
+
 func (t *AlterCollectionTask) Result() *commonpb.Status                              { return t.result }
 func (t *AlterCollectionFunctionTask) Result() *commonpb.Status                      { return t.result }
 func (t *AlterCollectionFieldTask) Result() *commonpb.Status                         { return t.result }

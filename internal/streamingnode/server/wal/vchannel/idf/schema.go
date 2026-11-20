@@ -244,6 +244,18 @@ func (b *viewBinding) advance(ctx context.Context, target qviews.DataVersion) er
 	return nil
 }
 
+// Prewarm materializes only the target selected by this request. A later
+// target never extends the request or causes another materialization pass.
+func (b *viewBinding) Prewarm(ctx context.Context) error {
+	target := qviews.FromProtoDataVersion(b.meta.GetVersion().GetDataVersion())
+	for _, field := range b.fields {
+		if _, err := field.oracle.awaitMaterializationAt(ctx, &target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (b *viewBinding) Release() {
 	r := b.runtime
 	// TODO: Make resource release retryable so waiting for another View's

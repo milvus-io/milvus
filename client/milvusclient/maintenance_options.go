@@ -36,16 +36,21 @@ type loadCollectionOption struct {
 	skipLoadDynamicField bool
 	isRefresh            bool
 	resourceGroups       []string
+	warmupHint           bool
 }
 
 func (opt *loadCollectionOption) Request() *milvuspb.LoadCollectionRequest {
-	return &milvuspb.LoadCollectionRequest{
+	req := &milvuspb.LoadCollectionRequest{
 		CollectionName:       opt.collectionName,
 		ReplicaNumber:        int32(opt.replicaNum),
 		LoadFields:           opt.loadFields,
 		SkipLoadDynamicField: opt.skipLoadDynamicField,
 		ResourceGroups:       opt.resourceGroups,
 	}
+	if opt.warmupHint {
+		req.LoadParams = map[string]string{"warmup_hint": "true"}
+	}
+	return req
 }
 
 func (opt *loadCollectionOption) CheckInterval() time.Duration {
@@ -87,6 +92,15 @@ func NewLoadCollectionOption(collectionName string) *loadCollectionOption {
 		// replicaNum:     1, The default value of the replicaNum should be set on the server side
 		interval: time.Millisecond * 200,
 	}
+}
+
+// WithWarmupHint requests a separate background pass after ordinary load admission,
+// starting as each shard becomes Up. Later balance, flush and restart do not repeat it. Each explicit
+// call can warm an already loaded collection again. Await does not wait for the
+// pass; queries can share its cache reads, and warmed data remains evictable.
+func (opt *loadCollectionOption) WithWarmupHint() *loadCollectionOption {
+	opt.warmupHint = true
+	return opt
 }
 
 type LoadPartitionsOption interface {
