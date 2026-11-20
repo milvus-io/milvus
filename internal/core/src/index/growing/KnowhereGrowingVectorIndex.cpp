@@ -158,6 +158,14 @@ KnowhereGrowingVectorIndex<T>::KnowhereGrowingVectorIndex(
 template <typename T>
 KnowhereEngine
 KnowhereGrowingVectorIndex<T>::CreateEngine() const {
+    AssertInfo(source_ != nullptr,
+               "source-backed growing vector engine lost its source");
+    auto source = source_;
+    knowhere::ViewDataOp view_data =
+        [source = std::move(source)](size_t physical_offset) {
+            return static_cast<const void*>(
+                source->Row(static_cast<int64_t>(physical_offset)));
+        };
     KnowhereEngine engine = [&]() {
         if (!retain_source_as_data_view_) {
             return KnowhereEngine(PhysicalVectorDataType<T>(),
@@ -167,23 +175,21 @@ KnowhereGrowingVectorIndex<T>::CreateEngine() const {
                                   version_,
                                   /*use_knowhere_build_pool=*/true);
         }
-        AssertInfo(source_ != nullptr,
-                   "source-backed growing vector engine lost its source");
-        auto source = source_;
-        knowhere::ViewDataOp view_data =
-            [source = std::move(source)](size_t physical_offset) {
-                return static_cast<const void*>(
-                    source->Row(static_cast<int64_t>(physical_offset)));
-            };
         return KnowhereEngine(PhysicalVectorDataType<T>(),
                               DataType::NONE,
                               index_type_,
                               metric_type_,
                               version_,
-                              std::move(view_data),
+                              view_data,
                               /*use_knowhere_build_pool=*/true);
     }();
     engine.SetDim(dim_);
+    knowhere::ViewDataScopeOp view_data_scope;
+    if (view_data) {
+        view_data_scope = [view_data = std::move(view_data)](
+                              milvus::OpContext*) { return view_data; };
+    }
+    ConfigureMRL(engine, dim_, build_params_, std::move(view_data_scope));
     return engine;
 }
 
