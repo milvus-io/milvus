@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -31,6 +32,64 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
+
+func TestSearchFanoutPoolSizeRatio(t *testing.T) {
+	params := &ComponentParam{}
+	base := NewBaseTable(SkipRemote(true))
+	t.Cleanup(base.mgr.Close)
+	params.Init(base)
+	cfg := &params.CommonCfg
+	fanout := &params.QueryNodeCfg.SearchFanoutPoolSizeRatio
+	assert.Equal(t, "queryNode.segcore.searchFanoutPoolSizeRatio", fanout.Key)
+	assert.Equal(t, float64(2), fanout.GetAsFloat())
+	require.NoError(t, params.Save(cfg.MiddlePriorityThreadCoreCoefficient.Key, "8"))
+	require.NoError(t, params.Save(cfg.ThreadPoolMaxThreadsSize.Key, "1"))
+	require.NoError(t, params.Save(params.QueryNodeCfg.CGOPoolSizeRatio.Key, "3"))
+	assert.Equal(t, float64(2), fanout.GetAsFloat())
+	require.NoError(t, params.Save(fanout.Key, "3.5"))
+	assert.Equal(t, 3.5, fanout.GetAsFloat())
+	assert.Equal(t, "8", cfg.MiddlePriorityThreadCoreCoefficient.GetValue())
+	assert.Equal(t, "1", cfg.ThreadPoolMaxThreadsSize.GetValue())
+	assert.Equal(t, "3", params.QueryNodeCfg.CGOPoolSizeRatio.GetValue())
+}
+
+func TestSearchFanoutPoolSizeRatioValidation(t *testing.T) {
+	patch := mockey.Mock(hardware.GetCPUNum).Return(2).Build()
+	defer patch.UnPatch()
+	params := &ComponentParam{}
+	base := NewBaseTable(SkipRemote(true))
+	t.Cleanup(base.mgr.Close)
+	key := "queryNode.segcore.searchFanoutPoolSizeRatio"
+	require.NoError(t, base.Save(key, "NaN"))
+	params.Init(base)
+	fanout := &params.QueryNodeCfg.SearchFanoutPoolSizeRatio
+	assert.Equal(t, float64(DefaultSearchFanoutPoolSizeRatio), fanout.GetAsFloat())
+
+	for _, tc := range []struct {
+		value string
+		want  float64
+	}{
+		{"0.1", 0.1},
+		{"3.5", 3.5},
+		{"1e-20", 1e-20},
+		{"1073741760", 1073741760}, // Largest safe float32 ratio with two cores.
+		{"1073741823.5", 2},        // Rounds up to an overflowing float32 worker count.
+		{"2147483647", 2},
+		{"1e100", 2},
+		{"NaN", 2},
+		{"+Inf", 2},
+		{"-Inf", 2},
+		{"0", 2},
+		{"-1", 2},
+		{"1e-50", 2}, // Underflows to zero at the C.float boundary.
+		{"invalid", 2},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			require.NoError(t, params.Save(key, tc.value))
+			assert.Equal(t, tc.want, fanout.GetAsFloat())
+		})
+	}
+}
 
 func TestDataNodeConcurrencyAndImportMemoryFallbacks(t *testing.T) {
 	params := &ComponentParam{}
@@ -368,6 +427,9 @@ func TestComponentParam(t *testing.T) {
 		params.Save(Params.LoadTransientBudgetBytes.Key, "67108864")
 		assert.Equal(t, int64(67108864), Params.LoadTransientBudgetBytes.GetAsInt64())
 
+		assert.Equal(t, 1.0, Params.ArrowIOThreadPoolCoefficient.GetAsFloat())
+		assert.Equal(t, 0, Params.ArrowIOThreadPoolMaxCapacity.GetAsInt())
+
 		assert.Equal(t, int64(0), Params.ArrowReaderHoleSizeLimitBytes.GetAsInt64())
 		assert.Equal(t, int64(0), Params.ArrowReaderRangeSizeLimitBytes.GetAsInt64())
 		params.Save(Params.ArrowReaderHoleSizeLimitBytes.Key, "1048576")
@@ -375,8 +437,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(1048576), Params.ArrowReaderHoleSizeLimitBytes.GetAsInt64())
 		assert.Equal(t, int64(67108864), Params.ArrowReaderRangeSizeLimitBytes.GetAsInt64())
 
-		assert.Equal(t, int32(0), Params.StorageReaderThreadPoolSize.GetAsInt32())
-		assert.Equal(t, int64(0), Params.IndexBuildReadWindowBytes.GetAsInt64())
+		assert.Equal(t, int32(-1), Params.StorageReaderThreadPoolSize.GetAsInt32())
+		assert.Equal(t, int64(-1), Params.IndexBuildReadWindowBytes.GetAsInt64())
 		params.Save(Params.StorageReaderThreadPoolSize.Key, "16")
 		params.Save(Params.IndexBuildReadWindowBytes.Key, "536870912")
 		assert.Equal(t, int32(16), Params.StorageReaderThreadPoolSize.GetAsInt32())
@@ -440,6 +502,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, "Milvus", Params.DefaultRootPassword.GetValue())
 		params.Save("common.security.defaultRootPassword", "defaultMilvus")
 		assert.Equal(t, "defaultMilvus", Params.DefaultRootPassword.GetValue())
+
+		assert.Equal(t, "bcrypt", Params.PasswordHashAlgorithm.GetValue())
 
 		params.Save("common.security.superUsers", "")
 		assert.Equal(t, []string{}, Params.SuperUsers.GetAsStrings())
@@ -1522,6 +1586,27 @@ func TestImportIdempotencyParams(t *testing.T) {
 	assert.GreaterOrEqual(t,
 		params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second),
 		2*params.StreamingCfg.WALBroadcasterTombstoneMaxLifetime.GetAsDurationByParse())
+}
+
+func TestManifestFFIConcurrency(t *testing.T) {
+	params := ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+
+	// Process-wide budget for blocking manifest FFI calls; a sane default that
+	// still leaves headroom above the per-context datacoord pools (commits 16,
+	// reads 64, GC 1) so they keep independent throughput while the process
+	// wide ceiling caps cgo thread growth.
+	assert.Equal(t, 128, params.CommonCfg.ManifestFFIConcurrency.GetAsInt())
+
+	// A zero or negative budget would deadlock every manifest FFI call.
+	params.Save(params.CommonCfg.ManifestFFIConcurrency.Key, "0")
+	assert.Equal(t, 1, params.CommonCfg.ManifestFFIConcurrency.GetAsInt())
+	params.Save(params.CommonCfg.ManifestFFIConcurrency.Key, "-3")
+	assert.Equal(t, 1, params.CommonCfg.ManifestFFIConcurrency.GetAsInt())
+
+	// Excessive concurrency defeats the thread cap and is clamped.
+	params.Save(params.CommonCfg.ManifestFFIConcurrency.Key, "100000")
+	assert.Equal(t, 2048, params.CommonCfg.ManifestFFIConcurrency.GetAsInt())
 }
 
 func TestPartialUpdateEnableCASConfig(t *testing.T) {

@@ -283,6 +283,41 @@ func ValidateExternalSnapshotPaths(
 	return nil
 }
 
+// ValidateSnapshotImportPaths enforces snapshot root confinement and, when
+// snapshot-source Import addresses metadata by a bucket-relative object key,
+// rejects internal references carrying any URI transport scheme so bare-key
+// imports remain cluster-neutral and cannot strip cross-storage URIs onto the
+// instance bucket.
+func ValidateSnapshotImportPaths(
+	metadataFilePath string,
+	snapshot *SnapshotData,
+	refs []SnapshotFileRef,
+) error {
+	if err := ValidateExternalSnapshotPaths(metadataFilePath, snapshot, refs); err != nil {
+		return err
+	}
+	if hasURITransportScheme(metadataFilePath) {
+		return nil
+	}
+	for _, manifestPath := range snapshot.ManifestPaths {
+		if hasURITransportScheme(manifestPath) {
+			return merr.WrapErrDataIntegrityMsg(
+				"snapshot object URI %q does not match metadata source storage",
+				RedactSnapshotObjectPath(manifestPath),
+			)
+		}
+	}
+	for _, ref := range refs {
+		if hasURITransportScheme(ref.Path) {
+			return merr.WrapErrDataIntegrityMsg(
+				"snapshot object URI %q does not match metadata source storage",
+				RedactSnapshotObjectPath(ref.Path),
+			)
+		}
+	}
+	return nil
+}
+
 // DeriveSnapshotRootPath returns the bundle root before the terminal
 // snapshots/{collectionID}/metadata/{snapshotID}.json anchor. An empty root
 // with found=true represents a bundle at the bucket root.

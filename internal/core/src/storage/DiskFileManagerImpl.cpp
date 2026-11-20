@@ -438,26 +438,28 @@ DiskFileManagerImpl::AddFileMeta(const FileMeta& file_meta) {
     auto local_file_name = GetFileName(file_meta.file_path);
     auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
 
-    remote_paths_to_size_[remote_file_path] = file_meta.file_size;
+    auto& recorded_size = remote_paths_to_size_[remote_file_path];
+    added_total_file_size_ -= recorded_size;
+    recorded_size = file_meta.file_size;
+    added_total_file_size_ += recorded_size;
     return true;
 }
 
-bool
-DiskFileManagerImpl::AddJsonSharedIndexLog(const std::string& file) noexcept {
-    return AddFileInternal(
+void
+DiskFileManagerImpl::AddJsonSharedIndexLog(const std::string& file) {
+    UploadFileInternal(
         file, [this](const std::string& file_name, int slice_num) {
             return GetRemoteJsonStatsSharedIndexPath(file_name, slice_num);
         });
 }
 
-bool
-DiskFileManagerImpl::AddJsonStatsMetaLog(const std::string& file) noexcept {
+void
+DiskFileManagerImpl::AddJsonStatsMetaLog(const std::string& file) {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    FILEMANAGER_TRY
     if (!local_chunk_manager->Exist(file)) {
-        LOG_ERROR("local meta file {} not exists", file);
-        return false;
+        ThrowInfo(
+            ErrorCode::PathNotExist, "local meta file {} not exists", file);
     }
 
     local_paths_.emplace_back(file);
@@ -476,18 +478,14 @@ DiskFileManagerImpl::AddJsonStatsMetaLog(const std::string& file) noexcept {
              file,
              remote_path,
              fileSize);
-
-    FILEMANAGER_CATCH
-    FILEMANAGER_END
-    return true;
 }
 
-bool
-DiskFileManagerImpl::AddTextLog(const std::string& file) noexcept {
-    return AddFileInternal(
-        file, [this](const std::string& file_name, int slice_num) {
-            return GetRemoteTextLogPath(file_name, slice_num);
-        });
+void
+DiskFileManagerImpl::AddTextLog(const std::string& file) {
+    UploadFileInternal(file,
+                       [this](const std::string& file_name, int slice_num) {
+                           return GetRemoteTextLogPath(file_name, slice_num);
+                       });
 }
 
 void
@@ -509,7 +507,8 @@ DiskFileManagerImpl::AddBatchIndexFiles(
 
     for (int64_t i = 0; i < remote_files.size(); ++i) {
         futures.push_back(pool.Submit(
-            [&](const std::string& file,
+            [local_chunk_manager](
+                const std::string& file,
                 const int64_t offset,
                 const int64_t data_size) -> std::shared_ptr<uint8_t[]> {
                 auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[data_size]);
@@ -521,13 +520,14 @@ DiskFileManagerImpl::AddBatchIndexFiles(
             remote_file_sizes[i]));
     }
 
-    // hold index data util upload index file done
-    std::vector<std::shared_ptr<uint8_t[]>> index_datas;
+    // hold index data util upload index file done.
+    // WaitAllFutures drains every task before rethrowing, so a failed read
+    // cannot unwind this frame while remaining tasks are still running.
+    auto index_datas = WaitAllFutures(std::move(futures));
     std::vector<const uint8_t*> data_slices;
-    for (auto& future : futures) {
-        auto res = future.get();
-        index_datas.emplace_back(res);
-        data_slices.emplace_back(res.get());
+    data_slices.reserve(index_datas.size());
+    for (auto& index_data : index_datas) {
+        data_slices.emplace_back(index_data.get());
     }
 
     std::map<std::string, int64_t> res;

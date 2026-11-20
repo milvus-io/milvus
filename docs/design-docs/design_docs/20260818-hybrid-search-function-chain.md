@@ -505,6 +505,32 @@ score after that sub-search's L0 and L1 stages:
 ANN score_i -> L0_i -> reduce_i -> L1_i -> Proxy sub-result_i -> top-level fusion
 ```
 
+For the **L2 distance metric**, a sub-search's L0 input `$score` is the negated
+distance `-d`. L1 reads L0's resulting score; if L0 did not write `$score`, this
+is still `-d`. A chain that writes `$score * 1.2` therefore produces `-1.2d`,
+which Proxy preserves as the sub-search's business score rather than flipping
+it to `1.2d`. If neither L0 nor L1 writes `$score`, Proxy restores the raw L2
+distance to `d`. These are inputs to subsequent collapse and fusion, not a
+promise that HybridSearch returns them unchanged. See the ordinary Search
+API's [L2 distance and score-write contract](20260624-function-chain-api.md#l2-distance-and-score-writes).
+
+Proxy derives whether each sub-search wrote `$score` from that sub-search's
+L0/L1 outputs. Proxy reduce emits the original metric, the score-rewritten
+flag, and the effective score direction together for each sub-search. Aggregation
+uses this direction for default `top_hits` score ordering, and row-level element
+collapse uses it to select the best elements. Rerank consumes the same metadata
+and passes the rewritten state to Merge through runtime build context. Explicit
+`top_hits` sort directions remain authoritative. Internal reduction continues to
+compare larger-is-better scores before distance restoration.
+Rewritten scores are larger-is-better business values. With `norm_score=true`,
+Merge normalizes them with the IP-style formula `0.5 + atan(score) / pi`,
+regardless of the original metric. With `norm_score=false`, Merge preserves
+rewritten scores in their original scale; a mixture of raw
+distances and business scores converts only the raw distances to the
+larger-is-better direction. Untouched metric scores retain their existing
+normalization and ordering rules. Legacy weighted fusion uses the same state;
+RRF continues to use ranks. The original metric and public protobuf are unchanged.
+
 L0 is segment-local. L1 sees the QueryNode worker's cross-segment reduced
 candidates; an L1 `limit` therefore changes that sub-search's candidate budget
 before Proxy-level distributed reduction and top-level fusion. Existing

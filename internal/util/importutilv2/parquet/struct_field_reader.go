@@ -20,6 +20,7 @@ import (
 	"context"
 	"math"
 	"strings"
+	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -489,6 +490,47 @@ func appendArrowScalar(row *schemapb.ScalarField, field *schemapb.FieldSchema, e
 	return nil
 }
 
+// stringRowArena holds one row's string elements in a single buffer. Copying
+// element by element would cost one heap object per element; not copying would
+// make the row alias the arrow value buffer, where one retained element keeps
+// the whole buffer alive. One buffer per row keeps both the object count and
+// the retained bytes minimal.
+type stringRowArena struct {
+	buf []byte
+}
+
+// reset sizes the arena for the elements [start, end) of values. The value
+// buffer holds the elements back to back, so the offsets give the size without
+// walking the row a second time.
+func (a *stringRowArena) reset(values *array.String, start, end int64) {
+	size := 0
+	if start < end {
+		offsets := values.ValueOffsets()
+		if span := int(offsets[end]) - int(offsets[start]); span > 0 {
+			size = span
+		}
+	}
+	a.buf = make([]byte, 0, size)
+}
+
+// appendString copies value i of values into the arena and appends it to row.
+// The buffer is sized from the offsets, so append only grows when a null slot
+// carries bytes of its own; a string handed out earlier keeps pointing into the
+// buffer that already holds it, which stays alive with the string.
+func (a *stringRowArena) appendString(row *schemapb.ScalarField, field *schemapb.FieldSchema,
+	maxLength int64, values *array.String, i int,
+) error {
+	value := values.Value(i)
+	off := len(a.buf)
+	a.buf = append(a.buf, value...)
+	value = unsafe.String(unsafe.SliceData(a.buf[off:]), len(value))
+	if err := common.CheckValidString(value, maxLength, field); err != nil {
+		return err
+	}
+	row.GetStringData().Data = append(row.GetStringData().Data, value)
+	return nil
+}
+
 // checkStructSlots rejects a null struct element in the slots [start, end) of
 // one row.
 func (r *StructFieldReader) checkStructSlots(structArray *array.Struct, start, end int64) error {
@@ -557,6 +599,14 @@ func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, er
 			}
 
 			fieldArray := structArray.Field(r.fieldIndex)
+			// Only the element types the string data path supports go through the
+			// arena; a null-typed or mistyped child keeps the error from
+			// appendArrowScalar.
+			var strValues *array.String
+			if elementType == schemapb.DataType_String || elementType == schemapb.DataType_VarChar {
+				strValues, _ = fieldArray.(*array.String)
+			}
+			var arena stringRowArena
 
 			for i := 0; i < listArray.Len(); i++ {
 				if listArray.IsNull(i) {
@@ -582,6 +632,9 @@ func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, er
 				if elementNullable {
 					elementValid = make([]bool, 0, endIdx-startIdx)
 				}
+				if strValues != nil {
+					arena.reset(strValues, startIdx, endIdx)
+				}
 				for structIdx := startIdx; structIdx < endIdx; structIdx++ {
 					if isArrowNull(fieldArray, int(structIdx)) {
 						if !elementNullable {
@@ -591,7 +644,12 @@ func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, er
 						elementValid = append(elementValid, false)
 						continue
 					}
-					if err := appendArrowScalar(row, r.field, elementType, maxLength, fieldArray, int(structIdx)); err != nil {
+					if strValues != nil {
+						err = arena.appendString(row, r.field, maxLength, strValues, int(structIdx))
+					} else {
+						err = appendArrowScalar(row, r.field, elementType, maxLength, fieldArray, int(structIdx))
+					}
+					if err != nil {
 						return nil, nil, err
 					}
 					if elementNullable {

@@ -151,7 +151,7 @@ func (j *reader) Init() error {
 }
 
 func (j *reader) Read() (*storage.InsertData, error) {
-	insertData, err := storage.NewInsertDataWithFunctionOutputField(j.schema)
+	insertData, err := storage.NewInsertDataBuilder(j.schema).WithFunctionOutputFields().Build()
 	if err != nil {
 		return nil, err
 	}

@@ -42,6 +42,12 @@ type TaskCondition struct {
 func (tc *TaskCondition) WaitToFinish() error {
 	select {
 	case <-tc.ctx.Done():
+		// Preserve a completed result when both channels are ready.
+		select {
+		case err := <-tc.done:
+			return err
+		default:
+		}
 		return errors.Wrap(tc.ctx.Err(), "proxy TaskCondition context Done")
 	case err := <-tc.done:
 		return err

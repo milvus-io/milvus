@@ -143,7 +143,8 @@ type FunctionArgValidator interface {
 // while constructing a function chain. MetricTypes are ordered exactly like
 // the DataFrames passed to multi-input operators.
 type SearchRuntimeInfo struct {
-	MetricTypes []string
+	MetricTypes     []string
+	ScoresRewritten []bool
 }
 
 // FunctionBuildContext contains runtime-only context used while constructing a

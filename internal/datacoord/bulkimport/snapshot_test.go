@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +36,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	idallocator "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -47,9 +49,12 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -157,7 +162,7 @@ func TestImportCheckerDispatchesCommittingJob(t *testing.T) {
 func TestPrepareSnapshotImportAdmissionErrors(t *testing.T) {
 	paramtable.Init()
 	type sourceCM struct{ milvusstorage.ChunkManager }
-	for _, mode := range []string{"ordinary", "legacy_backup", "invalid_options", "nil_cm", "files", "empty_paths", "multiple_files", "multiple_paths", "invalid_uri", "bare_path", "instance", "resolve", "read", "metadata", "location", "boundary", "schema", "external_source", "encryption", "target", "mapping", "layout"} {
+	for _, mode := range []string{"ordinary", "legacy_backup", "invalid_options", "nil_cm", "files", "empty_paths", "multiple_files", "multiple_paths", "invalid_uri", "bare_path_external", "instance", "resolve", "read", "metadata", "location", "boundary", "schema", "external_source", "encryption", "target", "mapping", "layout"} {
 		t.Run(mode, func(t *testing.T) {
 			snapshot := SnapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
 			metadata := &datapb.SnapshotMetadata{
@@ -189,8 +194,9 @@ func TestPrepareSnapshotImportAdmissionErrors(t *testing.T) {
 				files[0].Paths = append(files[0].Paths, files[0].Paths[0])
 			case "invalid_uri":
 				files[0].Paths[0] = "s3://["
-			case "bare_path":
+			case "bare_path_external":
 				files[0].Paths[0] = "root/snapshots/1/metadata/2.json"
+				options = append(options, &commonpb.KeyValuePair{Key: importutilv2.ExternalSpec, Value: `{"extfs":{"region":"us-east-1"}}`})
 			case "instance":
 				instanceErr = merr.ErrParameterInvalid
 			case "resolve":
@@ -383,7 +389,7 @@ func TestSnapshotPreparationPersistence(t *testing.T) {
 				require.False(t, importutilv2.IsSnapshotPreparation(got.GetFiles()))
 				require.Len(t, got.GetFiles(), 2)
 				require.EqualValues(t, 100, got.GetFiles()[0].Id)
-				require.NoError(t, importutilv2.ValidateSnapshotImportPlan(got.GetFiles(), got.GetOptions(), got.GetSnapshotL0Sources()))
+				require.NoError(t, importutilv2.ValidateImportPlan(got.GetFiles(), got.GetOptions(), got.GetSnapshotL0Sources()))
 			}
 			require.Empty(t, m.tasks.ListTasks(), "preparation must not create tasks before durable publication")
 		})
@@ -671,7 +677,7 @@ func TestSnapshotImportL0URIRead(t *testing.T) {
 		PartitionId: 10, ChannelName: "source", StorageVersion: milvusstorage.StorageV1,
 		Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "s3://source/" + key}, {LogPath: key}}}},
 	}}
-	files := []*internalpb.ImportFile{{}}
+	files := []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{Version: 5, ManifestPath: manifest}}}
 	l0Sources, err := attachSnapshotImportSources(ctx, cm, "s3://source/"+strings.TrimPrefix(root, "/")+"/snapshots/1/metadata/2.json",
 		snapshot, data, deltas, files)
 	require.NoError(t, err)
@@ -763,6 +769,7 @@ func TestExpandSnapshotImportExternalStorage(t *testing.T) {
 				SegmentLevel: datapb.SegmentLevel_L0, StorageVersion: milvusstorage.StorageV3,
 				ManifestPath: packed.MarshalManifestPath("root/files/l0", 1),
 			})
+			snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/extra.avro")
 			foreignCM := milvusstorage.NewRemoteChunkManagerForTesting(nil, "source", "root")
 			foreignCfg := &indexpb.StorageConfig{BucketName: "source"}
 			resolve := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).Return(&snapshotstorage.ResolvedForeignStorage{
@@ -817,6 +824,7 @@ func TestExpandSnapshotImportExternalStorage(t *testing.T) {
 			// External jobs without L0 still need a typed descriptor so older
 			// workers cannot ignore the source credentials and read target keys.
 			snapshot.Segments = snapshot.Segments[:len(snapshot.Segments)-1]
+			snapshot.ManifestPaths = snapshot.ManifestPaths[:len(snapshot.ManifestPaths)-1]
 			files, _, _, err = expandSnapshotImportFiles(context.Background(), nil, milvusstorage.NewLocalChunkManager(), SnapshotImportTestSchema(),
 				"s3://source/root/snapshots/1/metadata/2.json", options, &datapb.SnapshotMetadata{})
 			require.NoError(t, err)
@@ -880,7 +888,11 @@ func TestExpandSnapshotImportMetadataAdmission(t *testing.T) {
 	}).Build()
 	defer patch.UnPatch()
 	for _, uri := range []string{
-		"root/snapshots/1/metadata/2.json",
+		"/root/snapshots/1/metadata/2.json",
+		"root//snapshots/1/metadata/2.json",
+		"s3:/source/root/snapshots/1/metadata/2.json",
+		"root/other.json",
+		"root/../snapshots/1/metadata/2.json",
 		"s3:///root/snapshots/1/metadata/2.json",
 		"s3://other/root/snapshots/1/metadata/2.json",
 		"minio://other:9000/source/root/snapshots/1/metadata/2.json",
@@ -904,6 +916,11 @@ func TestExpandSnapshotImportMetadataAdmission(t *testing.T) {
 		"minio://localhost:9000/source/root/snapshots/1/metadata/2.json", SnapshotImportTestOptions(), &datapb.SnapshotMetadata{})
 	require.ErrorIs(t, err, merr.ErrIoKeyNotFound, "valid admission must preserve the actual IO failure")
 	require.Equal(t, 1, readCalls)
+
+	_, _, _, err = expandSnapshotImportFiles(context.Background(), nil, milvusstorage.NewLocalChunkManager(), SnapshotImportTestSchema(),
+		"root/snapshots/1/metadata/2.json", SnapshotImportTestOptions(), &datapb.SnapshotMetadata{})
+	require.ErrorIs(t, err, merr.ErrIoKeyNotFound, "valid bare metadata key without external_spec must reach snapshot reader")
+	require.Equal(t, 2, readCalls)
 }
 
 func TestSnapshotPartitionMappingResolution(t *testing.T) {
@@ -975,6 +992,7 @@ func TestExpandSnapshotImportPartitionMapping(t *testing.T) {
 							PartitionId: id, ChannelName: "source", SegmentLevel: datapb.SegmentLevel_L0, StorageVersion: milvusstorage.StorageV1,
 							Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: fmt.Sprintf("root/files/delete-%d", id)}}}},
 						})
+						snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/extra.avro")
 					}
 				}
 				read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
@@ -1038,6 +1056,7 @@ func TestExpandSnapshotImportMultiplePartitionsL0(t *testing.T) {
 					StorageVersion: milvusstorage.StorageV1,
 					Deltalogs:      []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: delta.path}}}},
 				})
+				snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/extra.avro")
 			}
 			read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
 			defer read.UnPatch()
@@ -1097,6 +1116,7 @@ func TestExpandSnapshotImportL0(t *testing.T) {
 					}
 				}
 				snapshot.Segments = append(snapshot.Segments, delta)
+				snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/extra.avro")
 				readPatch := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
 				defer readPatch.UnPatch()
 				validationPatch := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).Return(nil).Build()
@@ -1160,6 +1180,7 @@ func TestExpandSnapshotImportPathValidationLinear(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/%d", layout, count), func(t *testing.T) {
 				snapshot := SnapshotImportTestData(layout)
 				snapshot.Segments = nil
+				snapshot.ManifestPaths = nil
 				for i := 0; i < count; i++ {
 					snapshot.ManifestPaths = append(snapshot.ManifestPaths, fmt.Sprintf("root/snapshots/1/manifests/2/%d", i))
 					snapshot.Segments = append(snapshot.Segments, &datapb.SegmentDescription{
@@ -1170,6 +1191,7 @@ func TestExpandSnapshotImportPathValidationLinear(t *testing.T) {
 						StorageVersion: milvusstorage.StorageV2,
 						Deltalogs:      []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: fmt.Sprintf("root/files/l0/%d", i)}}}},
 					})
+					snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/extra.avro")
 				}
 				read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
 				defer read.UnPatch()
@@ -1184,7 +1206,7 @@ func TestExpandSnapshotImportPathValidationLinear(t *testing.T) {
 				_, _, _, err := expandSnapshotImportFiles(context.Background(), nil, milvusstorage.NewLocalChunkManager(), SnapshotImportTestSchema(),
 					"s3://source/root/snapshots/1/metadata/2.json", SnapshotImportTestOptions(), &datapb.SnapshotMetadata{})
 				require.NoError(t, err)
-				require.Equal(t, count, manifestVisits, "metadata references must be scanned once regardless of data/L0 counts")
+				require.Equal(t, 2*count, manifestVisits, "metadata references must be scanned once regardless of data/L0 counts")
 				require.Equal(t, 2*count, refVisits, "every data and legacy L0 reference must still be checked")
 				for _, invalid := range []string{"metadata_root", "data_root", "data_bucket", "l0_root", "l0_bucket", "l0_scheme"} {
 					t.Run(invalid, func(t *testing.T) {
@@ -1315,7 +1337,7 @@ func TestSnapshotSharedL0PlanAndTasks(t *testing.T) {
 			SegmentId: int64(i + 1), PartitionId: 10, ChannelName: "source", CommitTimestamp: uint64(i + 100),
 			ManifestPath: packed.MarshalManifestPath(fmt.Sprintf("root/data/%d", i), 7),
 		})
-		files = append(files, &internalpb.ImportFile{Id: int64(i + 1)})
+		files = append(files, &internalpb.ImportFile{Id: int64(i + 1), SnapshotSource: &internalpb.SnapshotImportSource{Version: 5, ManifestPath: data[i].ManifestPath}})
 	}
 	var paths []string
 	var logs []*datapb.Binlog
@@ -1337,7 +1359,7 @@ func TestSnapshotSharedL0PlanAndTasks(t *testing.T) {
 	}
 	// Pending preparation persists the expanded plan directly to the catalog;
 	// only the metadata URI and options cross the WAL/CDC boundary.
-	require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, sources))
+	require.NoError(t, importutilv2.ValidateImportPlan(files, options, sources))
 	encoded, err := proto.Marshal(&datapb.ImportJob{
 		JobID: 1, Files: files, Options: options, Schema: SnapshotImportTestSchema(),
 		PartitionIDs: []int64{20}, Vchannels: []string{"target"}, DataTs: 100, SnapshotL0Sources: sources,
@@ -1506,7 +1528,7 @@ func TestSnapshotPartitionMappingTasksAndRecovery(t *testing.T) {
 			ManifestPath: packed.MarshalManifestPath(fmt.Sprintf("root/data/%d", i), 7), SourceCommitTimestamp: 100,
 		}})
 	}
-	require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, opts, nil))
+	require.NoError(t, importutilv2.ValidateImportPlan(files, opts, nil))
 	encoded, err := proto.Marshal(&datapb.ImportJob{
 		JobID: 1, CollectionID: 2, Files: files, Options: opts,
 		PartitionIDs: []int64{300, 100, 200}, Vchannels: []string{"target_v1"}, Schema: SnapshotImportTestSchema(), DataTs: 100, AutoCommit: false,
@@ -1771,6 +1793,7 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 			StorageVersion: milvusstorage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath("root/files/segment/30", 9),
 		})
+		snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/extra.avro")
 		readPatch := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).
 			Return(snapshot, nil).Build()
 		defer readPatch.UnPatch()
@@ -1929,6 +1952,7 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 			name: "empty snapshot",
 			mutate: func(snapshot *snapshotstorage.SnapshotData) {
 				snapshot.Segments = nil
+				snapshot.ManifestPaths = nil
 			},
 			expected: merr.ErrImportFailed,
 			message:  "snapshot contains no data segments",
@@ -1938,11 +1962,12 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 			mutate: func(snapshot *snapshotstorage.SnapshotData) {
 				snapshot.Collection.Partitions["second"] = 20
 				snapshot.Segments = append(snapshot.Segments, &datapb.SegmentDescription{
-					SegmentId: 30, PartitionId: 20, SegmentLevel: datapb.SegmentLevel_L1, StorageVersion: milvusstorage.StorageV2,
+					SegmentId: 30, PartitionId: 20, SegmentLevel: datapb.SegmentLevel_L1, StorageVersion: milvusstorage.StorageV1,
 				})
+				snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/extra.avro")
 			},
 			expected: merr.ErrOperationNotSupported,
-			message:  "only supports StorageV3",
+			message:  "only supports StorageV2 and StorageV3",
 		},
 		{
 			name: "reject l0 without channel identity",
@@ -1953,12 +1978,12 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 			message:  "requires source channel identity",
 		},
 		{
-			name: "reject non v3",
+			name: "reject V1",
 			mutate: func(snapshot *snapshotstorage.SnapshotData) {
-				snapshot.Segments[0].StorageVersion = milvusstorage.StorageV2
+				snapshot.Segments[0].StorageVersion = milvusstorage.StorageV1
 			},
 			expected: merr.ErrOperationNotSupported,
-			message:  "only supports StorageV3",
+			message:  "only supports StorageV2 and StorageV3",
 		},
 		{
 			name: "reject latest manifest",
@@ -2025,9 +2050,6 @@ func TestPrepareSnapshotImportOptions_Schema(t *testing.T) {
 	_, err := prepareSnapshotImportOptions(target, source, SnapshotImportTestOptions())
 	assert.NoError(t, err)
 
-	source.Fields[1].Nullable = true
-	_, err = prepareSnapshotImportOptions(target, source, SnapshotImportTestOptions())
-	assert.NoError(t, err, "backup import applies the target schema rather than requiring equality")
 	source.Fields[0].AutoID = true
 	source.Fields[1].IsPartitionKey = true
 	source.Fields[1].IsClusteringKey = true
@@ -2065,6 +2087,297 @@ func TestPrepareSnapshotImportOptions_Schema(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestPrepareSnapshotImportOptions_Nullable(t *testing.T) {
+	defaultValue := &schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: "default"}}
+	for _, tc := range []struct {
+		name           string
+		sourceNullable bool
+		targetNullable bool
+		targetDefault  *schemapb.ValueField
+		missingSource  bool
+		wantErr        bool
+	}{
+		{name: "both_required"},
+		{name: "both_nullable", sourceNullable: true, targetNullable: true},
+		{name: "nullable_to_required", sourceNullable: true, wantErr: true},
+		{name: "required_to_nullable", targetNullable: true, wantErr: true},
+		{name: "nullable_to_required_with_default", sourceNullable: true, targetDefault: defaultValue, wantErr: true},
+		{name: "required_to_nullable_with_default", targetNullable: true, targetDefault: defaultValue, wantErr: true},
+		{name: "same_nullable_different_default", sourceNullable: true, targetNullable: true, targetDefault: defaultValue},
+		{name: "missing_source_nullable", targetNullable: true, missingSource: true},
+		{name: "missing_source_default", targetDefault: defaultValue, missingSource: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source, target := SnapshotImportTestSchema(), SnapshotImportTestSchema()
+			source.Fields[1].Nullable = tc.sourceNullable
+			target.Fields[1].Nullable = tc.targetNullable
+			target.Fields[1].DefaultValue = tc.targetDefault
+			target.Fields[1].Name = "renamed_text"
+			if tc.missingSource {
+				source.Fields = source.Fields[:1]
+			}
+			beforeSource, beforeTarget := proto.Clone(source), proto.Clone(target)
+			_, err := prepareSnapshotImportOptions(target, source, SnapshotImportTestOptions())
+			if tc.wantErr {
+				require.ErrorIs(t, err, merr.ErrImportFailed)
+				require.ErrorContains(t, err, "nullable mismatch for field renamed_text (ID 101)")
+				require.Equal(t, merr.InputError, merr.GetErrorType(err))
+				require.Equal(t, merr.InputError, merr.GetErrorType(merr.Error(merr.Status(err))))
+			} else {
+				require.NoError(t, err)
+			}
+			require.True(t, proto.Equal(beforeSource, source))
+			require.True(t, proto.Equal(beforeTarget, target))
+		})
+	}
+}
+
+func TestPrepareSnapshotImportOptions_VectorElementNullable(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		sourceNullable bool
+		targetNullable bool
+		wantErr        bool
+	}{
+		{name: "both_required"},
+		{name: "both_nullable", sourceNullable: true, targetNullable: true},
+		{name: "nullable_to_required", sourceNullable: true, wantErr: true},
+		{name: "required_to_nullable", targetNullable: true, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := SnapshotImportTestSchema()
+			source.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 102, Name: "group", Fields: []*schemapb.FieldSchema{{
+				FieldID: 103, Name: "vectors", DataType: schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector, ElementNullable: tc.sourceNullable,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}},
+			}}}}
+			target := proto.Clone(source).(*schemapb.CollectionSchema)
+			target.StructArrayFields[0].Fields[0].ElementNullable = tc.targetNullable
+			beforeSource, beforeTarget := proto.Clone(source), proto.Clone(target)
+			_, err := prepareSnapshotImportOptions(target, source, SnapshotImportTestOptions())
+			if tc.wantErr {
+				require.ErrorIs(t, err, merr.ErrImportFailed)
+				require.ErrorContains(t, err, "vector element nullable mismatch for field vectors (ID 103)")
+				require.Equal(t, merr.InputError, merr.GetErrorType(err))
+				require.Equal(t, merr.InputError, merr.GetErrorType(merr.Error(merr.Status(err))))
+			} else {
+				require.NoError(t, err)
+			}
+			require.True(t, proto.Equal(beforeSource, source))
+			require.True(t, proto.Equal(beforeTarget, target))
+		})
+	}
+}
+
+func TestPrepareSnapshotImportOptions_VarcharMaxLength(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		sourceLength  string
+		targetLength  string
+		wantErr       error
+		wantErrorType merr.ErrorType
+		wantMessage   string
+	}{
+		{name: "equal", sourceLength: "64", targetLength: "64"},
+		{name: "wider_target", sourceLength: "6", targetLength: "64"},
+		{
+			name: "narrower_target", sourceLength: "64", targetLength: "6",
+			wantErr: merr.ErrImportFailed, wantErrorType: merr.InputError, wantMessage: "max_length",
+		},
+		{
+			name: "source_missing", targetLength: "64",
+			wantErr: merr.ErrParameterInvalid, wantErrorType: merr.InputError, wantMessage: "snapshot source field",
+		},
+		{
+			name: "target_missing", sourceLength: "64",
+			wantErr: merr.ErrParameterInvalid, wantErrorType: merr.SystemError, wantMessage: "snapshot target field",
+		},
+		{
+			name: "source_invalid", sourceLength: "invalid", targetLength: "64",
+			wantErr: merr.ErrParameterInvalid, wantErrorType: merr.InputError, wantMessage: "snapshot source field",
+		},
+		{
+			name: "target_invalid", sourceLength: "64", targetLength: "invalid",
+			wantErr: merr.ErrParameterInvalid, wantErrorType: merr.SystemError, wantMessage: "snapshot target field",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source, target := SnapshotImportTestSchema(), SnapshotImportTestSchema()
+			source.Fields[1].TypeParams = nil
+			target.Fields[1].TypeParams = nil
+			target.Fields[1].Name = "renamed_text"
+			if tc.sourceLength != "" {
+				source.Fields[1].TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: tc.sourceLength}}
+			}
+			if tc.targetLength != "" {
+				target.Fields[1].TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: tc.targetLength}}
+			}
+			beforeSource, beforeTarget := proto.Clone(source), proto.Clone(target)
+			_, err := prepareSnapshotImportOptions(target, source, SnapshotImportTestOptions())
+			if tc.wantErr == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, tc.wantErr)
+				require.ErrorContains(t, err, tc.wantMessage)
+				require.Equal(t, tc.wantErrorType, merr.GetErrorType(err))
+				require.Equal(t, tc.wantErrorType, merr.GetErrorType(merr.Error(merr.Status(err))))
+			}
+			require.True(t, proto.Equal(beforeSource, source))
+			require.True(t, proto.Equal(beforeTarget, target))
+		})
+	}
+}
+
+func TestPrepareSnapshotImportOptions_VectorDimensions(t *testing.T) {
+	for _, dataType := range []schemapb.DataType{
+		schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
+		schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector,
+		schemapb.DataType_Int8Vector, schemapb.DataType_ArrayOfVector,
+	} {
+		for _, tc := range []struct {
+			name          string
+			sourceDim     string
+			targetDim     string
+			sourceType    schemapb.DataType
+			missingSource bool
+			structChild   bool
+			wantErr       error
+			wantMessage   string
+			wantErrorType merr.ErrorType
+		}{
+			{name: "matching", sourceDim: "32", targetDim: "32"},
+			{name: "smaller", sourceDim: "32", targetDim: "16", wantErr: merr.ErrImportFailed, wantMessage: "vector dimension mismatch", wantErrorType: merr.InputError},
+			{name: "larger", sourceDim: "32", targetDim: "64", wantErr: merr.ErrImportFailed, wantMessage: "vector dimension mismatch", wantErrorType: merr.InputError},
+			{name: "missing_source", sourceDim: "32", targetDim: "32", missingSource: true},
+			{
+				name: "different_type", sourceDim: "32", targetDim: "32", sourceType: schemapb.DataType_Int64,
+				wantErr: merr.ErrImportFailed, wantMessage: "vector data type mismatch", wantErrorType: merr.InputError,
+			},
+			{name: "source_dim_missing", targetDim: "32", wantErr: merr.ErrParameterInvalid, wantErrorType: merr.InputError},
+			{name: "target_dim_missing", sourceDim: "32", wantErr: merr.ErrParameterInvalid, wantErrorType: merr.SystemError},
+			{name: "source_dim_invalid", sourceDim: "invalid", targetDim: "32", wantErr: merr.ErrParameterInvalid, wantErrorType: merr.InputError},
+			{name: "target_dim_invalid", sourceDim: "32", targetDim: "invalid", wantErr: merr.ErrParameterInvalid, wantErrorType: merr.SystemError},
+			{
+				name: "struct_child", sourceDim: "32", targetDim: "16", structChild: true,
+				wantErr: merr.ErrImportFailed, wantMessage: "vector dimension mismatch", wantErrorType: merr.InputError,
+			},
+		} {
+			t.Run(dataType.String()+"/"+tc.name, func(t *testing.T) {
+				source, target := SnapshotImportTestSchema(), SnapshotImportTestSchema()
+				vector := &schemapb.FieldSchema{FieldID: 102, Name: "source_vector", DataType: dataType}
+				if dataType == schemapb.DataType_ArrayOfVector {
+					vector.ElementType = schemapb.DataType_FloatVector
+				}
+				targetVector := proto.Clone(vector).(*schemapb.FieldSchema)
+				targetVector.Name = "renamed_vector"
+				if tc.sourceDim != "" {
+					vector.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: tc.sourceDim}}
+				}
+				if tc.targetDim != "" {
+					targetVector.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: tc.targetDim}}
+				}
+				if tc.sourceType != schemapb.DataType_None {
+					vector.DataType = tc.sourceType
+				}
+				if tc.structChild {
+					source.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 103, Fields: []*schemapb.FieldSchema{vector}}}
+					target.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 103, Fields: []*schemapb.FieldSchema{targetVector}}}
+				} else {
+					if !tc.missingSource {
+						source.Fields = append(source.Fields, vector)
+					}
+					target.Fields = append([]*schemapb.FieldSchema{targetVector}, target.Fields...)
+				}
+				beforeSource, beforeTarget := proto.Clone(source), proto.Clone(target)
+				_, err := prepareSnapshotImportOptions(target, source, SnapshotImportTestOptions())
+				if tc.wantErr == nil {
+					require.NoError(t, err)
+				} else {
+					require.ErrorIs(t, err, tc.wantErr)
+					require.Equal(t, tc.wantErrorType, merr.GetErrorType(err))
+					require.Equal(t, tc.wantErrorType, merr.GetErrorType(merr.Error(merr.Status(err))))
+					if tc.wantMessage != "" {
+						require.ErrorContains(t, err, tc.wantMessage)
+					}
+				}
+				require.True(t, proto.Equal(beforeSource, source))
+				require.True(t, proto.Equal(beforeTarget, target))
+			})
+		}
+	}
+	t.Run("sparse_has_no_dimension", func(t *testing.T) {
+		source, target := SnapshotImportTestSchema(), SnapshotImportTestSchema()
+		field := &schemapb.FieldSchema{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector}
+		source.Fields = append(source.Fields, field)
+		target.Fields = append(target.Fields, proto.Clone(field).(*schemapb.FieldSchema))
+		_, err := prepareSnapshotImportOptions(target, source, SnapshotImportTestOptions())
+		require.NoError(t, err)
+	})
+	t.Run("vector_data_types", func(t *testing.T) {
+		for _, sourceType := range []schemapb.DataType{
+			schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
+			schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector,
+			schemapb.DataType_SparseFloatVector, schemapb.DataType_Int64,
+		} {
+			for _, targetType := range []schemapb.DataType{
+				schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
+				schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector,
+				schemapb.DataType_SparseFloatVector, schemapb.DataType_Int64,
+			} {
+				t.Run(sourceType.String()+"_to_"+targetType.String(), func(t *testing.T) {
+					source, target := SnapshotImportTestSchema(), SnapshotImportTestSchema()
+					field := &schemapb.FieldSchema{
+						FieldID: 102, Name: "vector", DataType: sourceType,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}},
+					}
+					source.Fields = append(source.Fields, field)
+					targetField := proto.Clone(field).(*schemapb.FieldSchema)
+					targetField.DataType = targetType
+					target.Fields = append(target.Fields, targetField)
+					_, err := prepareSnapshotImportOptions(target, source, SnapshotImportTestOptions())
+					if sourceType == targetType {
+						require.NoError(t, err)
+					} else {
+						require.ErrorIs(t, err, merr.ErrImportFailed)
+						require.ErrorContains(t, err, "vector data type mismatch")
+					}
+				})
+			}
+		}
+	})
+
+	t.Run("array_element_types", func(t *testing.T) {
+		for _, sourceType := range []schemapb.DataType{
+			schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
+			schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector,
+		} {
+			for _, targetType := range []schemapb.DataType{
+				schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
+				schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector,
+			} {
+				t.Run(sourceType.String()+"_to_"+targetType.String(), func(t *testing.T) {
+					source, target := SnapshotImportTestSchema(), SnapshotImportTestSchema()
+					field := &schemapb.FieldSchema{
+						FieldID: 103, Name: "vectors", DataType: schemapb.DataType_ArrayOfVector,
+						ElementType: sourceType, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}},
+					}
+					source.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 102, Fields: []*schemapb.FieldSchema{field}}}
+					targetField := proto.Clone(field).(*schemapb.FieldSchema)
+					targetField.ElementType = targetType
+					target.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 102, Fields: []*schemapb.FieldSchema{targetField}}}
+					_, err := prepareSnapshotImportOptions(target, source, SnapshotImportTestOptions())
+					if sourceType == targetType {
+						require.NoError(t, err)
+					} else {
+						require.ErrorIs(t, err, merr.ErrImportFailed)
+						require.ErrorContains(t, err, "vector element type mismatch")
+					}
+				})
+			}
+		}
+	})
 }
 
 func TestPrepareSnapshotImportOptions_FieldIdentity(t *testing.T) {
@@ -2140,6 +2453,7 @@ func TestExpandSnapshotImportFiles_AdmissionFailures(t *testing.T) {
 				snapshot.Collection.Schema = nil
 			case "nil_segment":
 				snapshot.Segments = append(snapshot.Segments, nil)
+				snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/extra.avro")
 			case "too_many_segments":
 				item := &paramtable.Get().DataCoordCfg.MaxFilesPerImportReq
 				previous := item.SwapTempValue("1")
@@ -2199,6 +2513,7 @@ func TestExpandSnapshotImportCommitTimestamps(t *testing.T) {
 						SegmentId: 30, PartitionId: 10, ChannelName: "source", SegmentLevel: datapb.SegmentLevel_L0,
 						StorageVersion: milvusstorage.StorageV3, ManifestPath: packed.MarshalManifestPath("root/files/l0", 1),
 					})
+					snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/extra.avro")
 				}
 				options := SnapshotImportTestOptions()
 				var targetPartitions []int64
@@ -2250,6 +2565,19 @@ func TestExpandSnapshotImportCommitTimestamps(t *testing.T) {
 					require.Empty(t, files[0].Paths)
 					require.EqualValues(t, tc.commit, files[0].GetSnapshotSource().GetSourceCommitTimestamp())
 					require.NotNil(t, files[1].SnapshotSource, "timestamp context uses uniform job-wide descriptors")
+					expectedVersion := uint32(1)
+					if tc.l0 {
+						expectedVersion += 4
+					}
+					if tc.name == "external_source" {
+						expectedVersion++
+					}
+					if tc.name == "partition_mapping" {
+						expectedVersion += 2
+					}
+					for _, file := range files {
+						require.Equal(t, expectedVersion, file.GetSnapshotSource().GetVersion())
+					}
 				}
 				if tc.name == "external_source" {
 					require.EqualValues(t, 2, files[0].GetSnapshotSource().GetVersion())
@@ -2325,6 +2653,7 @@ func TestSnapshotImportManifestDeleteTimestamps(t *testing.T) {
 						SegmentId: 20, PartitionId: 10, SegmentLevel: datapb.SegmentLevel_L1,
 						StorageVersion: milvusstorage.StorageV3, ManifestPath: manifest, CommitTimestamp: tc.commit,
 					}}
+					snapshot.ManifestPaths = snapshot.ManifestPaths[:1]
 					read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
 					defer read.UnPatch()
 					uri := "s3://source/root/snapshots/1/metadata/2.json"
@@ -2367,5 +2696,583 @@ func TestSnapshotImportManifestDeleteTimestamps(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+func TestExpandSnapshotV2References(t *testing.T) {
+	paramtable.Init()
+	PatchSnapshotImportInstance(t)
+	for _, mixed := range []bool{false, true} {
+		for _, prefix := range []*string{nil, proto.String(""), proto.String("old/root")} {
+			for _, withL0 := range []bool{false, true} {
+				t.Run(fmt.Sprintf("mixed=%t/prefix=%v/l0=%t", mixed, prefix, withL0), func(t *testing.T) {
+					layout := datapb.SnapshotLayout_SnapshotLayoutReferenced
+					if prefix != nil {
+						layout = datapb.SnapshotLayout_SnapshotLayoutSelfContained
+					}
+					snapshot := SnapshotImportTestData(layout)
+					// The returned reader view has already overwritten S3Location.
+					uri := "s3://source/root/snapshots/1/metadata/2.json"
+					snapshot.SnapshotInfo.S3Location = uri
+					metadata := &datapb.SnapshotMetadata{FormatVersion: 6, SnapshotInfo: &datapb.SnapshotInfo{}}
+					if prefix != nil {
+						metadata.SnapshotInfo.S3Location = "s3://source/" + strings.TrimPrefix(*prefix+"/snapshots/1/metadata/2.json", "/")
+					}
+					for i, segment := range snapshot.Segments {
+						segment.ChannelName, segment.CommitTimestamp = "source", 300
+						if !mixed || i == 0 {
+							segment.StorageVersion, segment.ManifestPath = milvusstorage.StorageV2, ""
+						}
+					}
+					snapshot.ManifestPaths = []string{"root/snapshots/1/manifests/arbitrary-first.avro", "root/snapshots/1/manifests/arbitrary-second.avro"}
+					if withL0 {
+						snapshot.Segments = append(snapshot.Segments, &datapb.SegmentDescription{
+							SegmentId: 99, PartitionId: 10, ChannelName: "source", SegmentLevel: datapb.SegmentLevel_L0, StorageVersion: milvusstorage.StorageV2,
+							Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "root/files/delta"}}}},
+						})
+						snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/l0.avro")
+					}
+					read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
+					defer read.UnPatch()
+					opts := append(SnapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.SnapshotSourceURI, Value: uri}, &commonpb.KeyValuePair{Key: importutilv2.SnapshotLayout, Value: "referenced"})
+					if prefix != nil {
+						opts[len(opts)-1].Value = "self-contained"
+					}
+					files, normalized, l0, err := expandSnapshotImportFiles(context.Background(), nil, milvusstorage.NewLocalChunkManager(), SnapshotImportTestSchema(), uri, opts, metadata)
+					require.NoError(t, err)
+					require.Len(t, files, 2)
+					require.NoError(t, importutilv2.ValidateImportPlan(files, normalized, l0))
+					for _, file := range files {
+						require.Empty(t, file.Paths)
+						version := uint32(10)
+						if withL0 {
+							version += 4
+						}
+						require.Equal(t, version, file.SnapshotSource.Version)
+						require.EqualValues(t, 300, file.SnapshotSource.SourceCommitTimestamp)
+						wire, err := proto.Marshal(file)
+						require.NoError(t, err)
+						var recovered internalpb.ImportFile
+						require.NoError(t, proto.Unmarshal(wire, &recovered))
+						require.True(t, proto.Equal(file, &recovered))
+					}
+					// Sorted segment 20 still references the first, unsorted Avro.
+					ref := files[1].SnapshotSource.V2Reference
+					require.EqualValues(t, 20, ref.SegmentId)
+					require.Equal(t, snapshot.ManifestPaths[0], ref.SnapshotManifestPath)
+					require.Equal(t, prefix, ref.OriginalKeyPrefix)
+					if mixed {
+						require.Nil(t, files[0].SnapshotSource.V2Reference)
+						require.Equal(t, snapshot.Segments[1].ManifestPath, files[0].SnapshotSource.ManifestPath)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestExpandSnapshotManifestCountValidation(t *testing.T) {
+	paramtable.Init()
+	PatchSnapshotImportInstance(t)
+	for _, version := range []int64{milvusstorage.StorageV2, milvusstorage.StorageV3} {
+		for _, count := range []int{1, 3} {
+			t.Run(fmt.Sprintf("version=%d/count=%d", version, count), func(t *testing.T) {
+				snapshot := SnapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
+				for _, segment := range snapshot.Segments {
+					segment.StorageVersion = version
+				}
+				snapshot.ManifestPaths = make([]string, count)
+				read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
+				defer read.UnPatch()
+				files, _, sources, err := expandSnapshotImportFiles(context.Background(), nil, milvusstorage.NewLocalChunkManager(),
+					SnapshotImportTestSchema(), "s3://source/root/snapshots/1/metadata/2.json", SnapshotImportTestOptions(), &datapb.SnapshotMetadata{FormatVersion: 6})
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+				require.Contains(t, err.Error(), "manifest counts differ")
+				require.Nil(t, files)
+				require.Nil(t, sources)
+			})
+		}
+	}
+}
+
+func TestAttachSnapshotImportSourcesPreservesVersion(t *testing.T) {
+	snapshot := SnapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
+	files := []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{Version: 12}}, {}}
+	_, err := attachSnapshotImportSources(context.Background(), milvusstorage.NewLocalChunkManager(),
+		"root/snapshots/1/metadata/2.json", snapshot, snapshot.Segments, nil, files)
+	require.NoError(t, err)
+	require.EqualValues(t, 12, files[0].SnapshotSource.Version)
+	require.Zero(t, files[1].SnapshotSource.Version, "the expansion boundary owns capability encoding")
+}
+
+func TestExpandSnapshotV2ReferenceValidation(t *testing.T) {
+	paramtable.Init()
+	PatchSnapshotImportInstance(t)
+	for _, mode := range []string{"avro_count", "malformed_storage_manifest", "outside_v2_manifest", "foreign_v2_manifest", "plain_v3_manifest"} {
+		t.Run(mode, func(t *testing.T) {
+			snapshot := SnapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
+			snapshot.Segments[0].StorageVersion = milvusstorage.StorageV2
+			snapshot.Segments[0].ManifestPath = ""
+			snapshot.ManifestPaths = []string{"root/snapshots/1/manifests/20.avro", "root/snapshots/1/manifests/10.avro"}
+			if mode == "avro_count" {
+				snapshot.ManifestPaths = snapshot.ManifestPaths[:1]
+			} else {
+				switch mode {
+				case "malformed_storage_manifest":
+					snapshot.Segments[0].ManifestPath = "{invalid"
+				case "outside_v2_manifest":
+					snapshot.Segments[0].ManifestPath = "outside/manifest.json"
+				case "foreign_v2_manifest":
+					snapshot.Segments[0].ManifestPath = "s3://other/root/files/manifest.json"
+				case "plain_v3_manifest":
+					snapshot.Segments[1].ManifestPath = "root/files/manifest.json"
+				}
+			}
+			read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
+			defer read.UnPatch()
+			files, _, sources, err := expandSnapshotImportFiles(context.Background(), nil, milvusstorage.NewLocalChunkManager(),
+				SnapshotImportTestSchema(), "s3://source/root/snapshots/1/metadata/2.json", SnapshotImportTestOptions(), &datapb.SnapshotMetadata{FormatVersion: 6})
+			require.Error(t, err)
+			require.Nil(t, files)
+			require.Nil(t, sources)
+			if mode == "avro_count" {
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+				require.Contains(t, err.Error(), "manifest counts differ")
+			}
+		})
+	}
+}
+
+func TestExpandSnapshotV2StorageManifestRoundTrip(t *testing.T) {
+	paramtable.Init()
+	PatchSnapshotImportInstance(t)
+	type sourceCM struct{ milvusstorage.ChunkManager }
+	for _, mixed := range []bool{false, true} {
+		for _, manifestKind := range []string{"empty", "plain", "packed"} {
+			t.Run(fmt.Sprintf("mixed=%t/manifest=%s", mixed, manifestKind), func(t *testing.T) {
+				ctx := context.Background()
+				const root = "root"
+				cm := &sourceCM{}
+				objects := make(map[string][]byte)
+				rootPath := mockey.Mock((*sourceCM).RootPath).Return(root).Build()
+				defer rootPath.UnPatch()
+				write := mockey.Mock((*sourceCM).Write).To(func(_ *sourceCM, _ context.Context, key string, data []byte) error {
+					objects[key] = append([]byte(nil), data...)
+					return nil
+				}).Build()
+				defer write.UnPatch()
+				read := mockey.Mock((*sourceCM).Read).To(func(_ *sourceCM, _ context.Context, key string) ([]byte, error) {
+					data, ok := objects[key]
+					if !ok {
+						return nil, merr.ErrIoKeyNotFound
+					}
+					return data, nil
+				}).Build()
+				defer read.UnPatch()
+				snapshot := SnapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
+				for i, segment := range snapshot.Segments {
+					base := path.Join(root, "files", "segment", strconv.FormatInt(segment.SegmentId, 10))
+					segment.ChannelName = "source"
+					segment.ManifestPath = packed.MarshalManifestPath(base, 7)
+					if !mixed || i == 0 {
+						segment.StorageVersion = milvusstorage.StorageV2
+						switch manifestKind {
+						case "empty":
+							segment.ManifestPath = ""
+						case "plain":
+							segment.ManifestPath = path.Join(base, "manifest.json")
+						}
+					}
+				}
+				metadataPath, err := snapshotstorage.NewSnapshotWriter(cm).Save(ctx, snapshot)
+				require.NoError(t, err)
+				uri := "s3://source/" + metadataPath
+				metadata, err := snapshotstorage.NewSnapshotReader(cm).ReadMetadata(ctx, uri)
+				require.NoError(t, err)
+				files, options, l0, err := expandSnapshotImportFiles(ctx, nil, cm, SnapshotImportTestSchema(), uri, SnapshotImportTestOptions(), metadata)
+				require.NoError(t, err)
+				require.NoError(t, importutilv2.ValidateImportPlan(files, options, l0))
+				require.Len(t, files, 2)
+				require.NotNil(t, files[1].SnapshotSource.V2Reference)
+				require.Empty(t, files[1].SnapshotSource.ManifestPath)
+				if mixed {
+					require.Nil(t, files[0].SnapshotSource.V2Reference)
+					require.Equal(t, snapshot.Segments[1].ManifestPath, files[0].SnapshotSource.ManifestPath)
+				}
+			})
+		}
+	}
+}
+
+func TestSnapshotImportBucketOnlyRelocation(t *testing.T) {
+	paramtable.Init()
+	PatchSnapshotImportInstance(t)
+	ctx := context.Background()
+	for _, bareURI := range []bool{false, true} {
+		for _, root := range []string{"root", ""} {
+			for _, representation := range []string{"keys", "avro_uri", "manifest_uri", "l0_uri", "all_uri"} {
+				for _, versions := range [][]int64{{2}, {2, 3}, {3}} {
+					t.Run(fmt.Sprintf("bare=%t/root=%s/%s/versions=%v", bareURI, root, representation, versions), func(t *testing.T) {
+						metadataKey := path.Join(root, "snapshots/1/metadata/2.json")
+						uri := "s3://source/" + metadataKey
+						if bareURI {
+							uri = metadataKey
+						}
+						metadata := &datapb.SnapshotMetadata{
+							FormatVersion: 6, Layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained,
+							SnapshotInfo: &datapb.SnapshotInfo{Id: 2, CollectionId: 1, S3Location: "s3://old-bucket/" + metadataKey},
+							Collection:   &datapb.CollectionDescription{Schema: SnapshotImportTestSchema(), Partitions: map[string]int64{"p": 10}},
+						}
+						objects := make(map[string][]byte)
+						reference := func(key, kind string) string {
+							if representation == kind || representation == "all_uri" {
+								return "s3://old-bucket/" + key
+							}
+							return key
+						}
+						addSegment := func(segment *datapb.SegmentDescription) {
+							key := path.Join(root, fmt.Sprintf("snapshots/1/manifests/%d.avro", segment.SegmentId))
+							data, err := snapshotio.MarshalSegmentManifest(segment)
+							require.NoError(t, err)
+							objects[key] = data
+							metadata.ManifestList = append(metadata.ManifestList, reference(key, "avro_uri"))
+							metadata.SegmentIds = append(metadata.SegmentIds, segment.SegmentId)
+						}
+						for i, version := range versions {
+							id := int64(20 + i)
+							manifest := path.Join(root, fmt.Sprintf("files/segment/%d", id))
+							if version == 2 {
+								manifest = reference(manifest, "manifest_uri")
+							} else {
+								manifest = packed.MarshalManifestPath(reference(manifest, "manifest_uri"), 7)
+							}
+							metadata.Storagev2ManifestList = append(metadata.Storagev2ManifestList, &datapb.StorageV2SegmentManifest{SegmentId: id, Manifest: manifest})
+							addSegment(&datapb.SegmentDescription{SegmentId: id, PartitionId: 10, ChannelName: "channel", StorageVersion: version, SegmentLevel: datapb.SegmentLevel_L1})
+						}
+						deltaKey := path.Join(root, "files/l0/delta")
+						addSegment(&datapb.SegmentDescription{
+							SegmentId: 30, PartitionId: 10, ChannelName: "channel", StorageVersion: 2, SegmentLevel: datapb.SegmentLevel_L0,
+							Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: reference(deltaKey, "l0_uri")}}}},
+						})
+						frozen := proto.Clone(metadata)
+						raw, err := protojson.Marshal(metadata)
+						require.NoError(t, err)
+						objects[metadataKey] = raw
+						cm := milvusstorage.NewLocalChunkManager()
+						read := mockey.Mock((*milvusstorage.LocalChunkManager).Read).To(func(_ *milvusstorage.LocalChunkManager, _ context.Context, key string) ([]byte, error) {
+							data, ok := objects[key]
+							require.True(t, ok, "unexpected object read: %s", key)
+							return data, nil
+						}).Build()
+						defer read.UnPatch()
+						// Exercise real Create admission and Pending expansion, including
+						// Avro parsing and storage identity validation in both phases.
+						pending, options, err := PrepareSnapshotImportFiles(ctx, []int64{100}, cm, SnapshotImportTestSchema(),
+							[]*internalpb.ImportFile{{Paths: []string{uri}}}, SnapshotImportTestOptions())
+						require.NoError(t, err)
+						require.True(t, importutilv2.IsSnapshotPreparation(pending))
+						files, options, l0, err := expandSnapshotImportFiles(ctx, []int64{100}, cm, SnapshotImportTestSchema(), uri, options, metadata)
+						require.NoError(t, err)
+						require.Len(t, files, len(versions))
+						require.NoError(t, importutilv2.ValidateImportPlan(files, options, l0))
+						require.Len(t, l0, 1)
+						require.Equal(t, []string{deltaKey}, l0[0].LegacyL0Deltalogs)
+						for i, file := range files {
+							if versions[i] == 2 {
+								ref := file.GetSnapshotSource().GetV2Reference()
+								require.Equal(t, path.Join(root, fmt.Sprintf("snapshots/1/manifests/%d.avro", 20+i)), ref.GetSnapshotManifestPath())
+								require.NotNil(t, ref.OriginalKeyPrefix)
+								require.Equal(t, root, ref.GetOriginalKeyPrefix())
+							} else {
+								require.Equal(t, packed.MarshalManifestPath(path.Join(root, fmt.Sprintf("files/segment/%d", 20+i)), 7), file.GetSnapshotSource().GetManifestPath())
+							}
+						}
+						require.True(t, proto.Equal(frozen, metadata), "preparation must not mutate captured metadata")
+					})
+				}
+			}
+		}
+	}
+}
+
+type bucketMemoryChunkManager struct {
+	milvusstorage.ChunkManager
+	bucket  string
+	objects map[string][]byte
+	reads   []string
+}
+
+func (m *bucketMemoryChunkManager) BucketName() string {
+	return m.bucket
+}
+
+func (m *bucketMemoryChunkManager) Read(_ context.Context, key string) ([]byte, error) {
+	m.reads = append(m.reads, key)
+	data, ok := m.objects[key]
+	if !ok {
+		return nil, merr.WrapErrIoKeyNotFound(key)
+	}
+	return data, nil
+}
+
+func TestSnapshotImportBareKeyAcrossPrimaryAndSecondaryBuckets(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	var activeInstance *objectstorage.Config
+	instancePatch := mockey.Mock(snapshotstorage.InstanceConfigFromParamtable).To(func(*paramtable.ComponentParam) *objectstorage.Config {
+		return activeInstance
+	}).Build()
+	defer instancePatch.UnPatch()
+
+	for _, tc := range []struct {
+		name            string
+		layout          datapb.SnapshotLayout
+		bareMetadataKey string
+		storedLocation  string
+		segmentDataBase string
+		l0DeltaPath     string
+		expectedRoot    string
+	}{
+		{
+			name:            "referenced_custom_prefix",
+			layout:          datapb.SnapshotLayout_SnapshotLayoutReferenced,
+			bareMetadataKey: "backup-sync/snapshots/1/metadata/2.json",
+			storedLocation:  "s3://origin-cluster/backup-sync/snapshots/1/metadata/2.json",
+			segmentDataBase: "backup-sync/insert_log/1/10/101",
+			l0DeltaPath:     "backup-sync/delta_log/1/10/201/1",
+			expectedRoot:    "backup-sync",
+		},
+		{
+			name:            "self_contained_relocated_prefix",
+			layout:          datapb.SnapshotLayout_SnapshotLayoutSelfContained,
+			bareMetadataKey: "restored-bundle/snapshots/1/metadata/2.json",
+			storedLocation:  "s3://origin-export/exported-bundle/snapshots/1/metadata/2.json",
+			segmentDataBase: "exported-bundle/files/insert_log/1/10/101",
+			l0DeltaPath:     "exported-bundle/files/delta_log/1/10/201/1",
+			expectedRoot:    "restored-bundle",
+		},
+		{
+			name:            "referenced_bucket_root",
+			layout:          datapb.SnapshotLayout_SnapshotLayoutReferenced,
+			bareMetadataKey: "snapshots/1/metadata/2.json",
+			storedLocation:  "s3://origin-cluster/snapshots/1/metadata/2.json",
+			segmentDataBase: "files/insert_log/1/10/101",
+			l0DeltaPath:     "files/delta_log/1/10/201/1",
+			expectedRoot:    "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manifestPrefix := strings.TrimSuffix(tc.bareMetadataKey, "metadata/2.json") + "manifests/2"
+			if tc.layout == datapb.SnapshotLayout_SnapshotLayoutSelfContained {
+				manifestPrefix = "exported-bundle/snapshots/1/manifests/2"
+			}
+			v2AvroStoredKey := manifestPrefix + "/100.avro"
+			v3AvroStoredKey := manifestPrefix + "/101.avro"
+			l0AvroStoredKey := manifestPrefix + "/201.avro"
+
+			v2AvroObjectKey := v2AvroStoredKey
+			v3AvroObjectKey := v3AvroStoredKey
+			l0AvroObjectKey := l0AvroStoredKey
+			expectedDataBase := tc.segmentDataBase
+			expectedDeltaPath := tc.l0DeltaPath
+			if tc.layout == datapb.SnapshotLayout_SnapshotLayoutSelfContained {
+				v2AvroObjectKey = strings.Replace(v2AvroStoredKey, "exported-bundle/", tc.expectedRoot+"/", 1)
+				v3AvroObjectKey = strings.Replace(v3AvroStoredKey, "exported-bundle/", tc.expectedRoot+"/", 1)
+				l0AvroObjectKey = strings.Replace(l0AvroStoredKey, "exported-bundle/", tc.expectedRoot+"/", 1)
+				expectedDataBase = strings.Replace(tc.segmentDataBase, "exported-bundle/", tc.expectedRoot+"/", 1)
+				expectedDeltaPath = strings.Replace(tc.l0DeltaPath, "exported-bundle/", tc.expectedRoot+"/", 1)
+			}
+
+			v2Seg := &datapb.SegmentDescription{
+				SegmentId:       100,
+				PartitionId:     10,
+				ChannelName:     "src_v1",
+				SegmentLevel:    datapb.SegmentLevel_L1,
+				StorageVersion:  milvusstorage.StorageV2,
+				CommitTimestamp: 290,
+				Binlogs: []*datapb.FieldBinlog{{
+					FieldID: 0,
+					Binlogs: []*datapb.Binlog{{LogPath: tc.segmentDataBase + "/v2_insert"}},
+				}},
+			}
+			v2Bytes, err := snapshotio.MarshalSegmentManifest(v2Seg)
+			require.NoError(t, err)
+
+			v3Seg := &datapb.SegmentDescription{
+				SegmentId:       101,
+				PartitionId:     10,
+				ChannelName:     "src_v1",
+				SegmentLevel:    datapb.SegmentLevel_L1,
+				StorageVersion:  milvusstorage.StorageV3,
+				CommitTimestamp: 300,
+			}
+			v3Bytes, err := snapshotio.MarshalSegmentManifest(v3Seg)
+			require.NoError(t, err)
+
+			l0Seg := &datapb.SegmentDescription{
+				SegmentId:      201,
+				PartitionId:    10,
+				ChannelName:    "src_v1",
+				SegmentLevel:   datapb.SegmentLevel_L0,
+				StorageVersion: milvusstorage.StorageV2,
+				Deltalogs: []*datapb.FieldBinlog{{
+					Binlogs: []*datapb.Binlog{{LogPath: tc.l0DeltaPath, EntriesNum: 2}},
+				}},
+			}
+			l0Bytes, err := snapshotio.MarshalSegmentManifest(l0Seg)
+			require.NoError(t, err)
+
+			metadata := &datapb.SnapshotMetadata{
+				FormatVersion: int32(snapshotstorage.SnapshotFormatVersion),
+				Layout:        tc.layout,
+				SnapshotInfo: &datapb.SnapshotInfo{
+					Id:           2,
+					CollectionId: 1,
+					Name:         "snap",
+					S3Location:   tc.storedLocation,
+				},
+				Collection: &datapb.CollectionDescription{
+					Schema:     SnapshotImportTestSchema(),
+					Partitions: map[string]int64{"_default": 10},
+				},
+				ManifestList: []string{v2AvroStoredKey, v3AvroStoredKey, l0AvroStoredKey},
+				Storagev2ManifestList: []*datapb.StorageV2SegmentManifest{{
+					SegmentId: 101,
+					Manifest:  packed.MarshalManifestPath(tc.segmentDataBase, 8),
+				}},
+				SegmentIds: []int64{100, 101, 201},
+			}
+			metadataBytes, err := protojson.Marshal(metadata)
+			require.NoError(t, err)
+
+			buildObjects := func() map[string][]byte {
+				return map[string][]byte{
+					tc.bareMetadataKey: metadataBytes,
+					v2AvroObjectKey:    v2Bytes,
+					v3AvroObjectKey:    v3Bytes,
+					l0AvroObjectKey:    l0Bytes,
+				}
+			}
+
+			primaryCM := &bucketMemoryChunkManager{bucket: "bucket-p", objects: buildObjects()}
+			secondaryCM := &bucketMemoryChunkManager{bucket: "bucket-s", objects: buildObjects()}
+
+			// 1. Primary admission validates bare key against bucket-p without external_spec.
+			activeInstance = &objectstorage.Config{
+				Address:       "primary-s3.internal:9000",
+				BucketName:    "bucket-p",
+				RootPath:      "primary-files",
+				CloudProvider: "aws",
+			}
+			prepFiles, prepOptions, err := PrepareSnapshotImportFiles(
+				ctx,
+				nil,
+				primaryCM,
+				SnapshotImportTestSchema(),
+				[]*internalpb.ImportFile{{Paths: []string{tc.bareMetadataKey}}},
+				SnapshotImportTestOptions(),
+			)
+			require.NoError(t, err)
+			require.True(t, importutilv2.IsSnapshotPreparation(prepFiles))
+			require.Equal(t, []string{tc.bareMetadataKey}, primaryCM.reads)
+			require.Empty(t, secondaryCM.reads)
+
+			// 2. Broadcast to WAL and replicate via CDC to Secondary.
+			wal := message.NewImportMessageBuilderV1().
+				WithHeader(&message.ImportMessageHeader{}).
+				WithBody(&msgpb.ImportMsg{
+					Files:   []*msgpb.ImportFile{{}},
+					Options: funcutil.KeyValuePair2Map(prepOptions),
+				}).
+				WithBroadcast([]string{"primary_v1"}).
+				MustBuildBroadcast()
+			msgID := walimplstest.NewTestMessageID(1)
+			immutable := wal.WithBroadcastID(1).SplitIntoMutableMessage()[0].WithTimeTick(100).WithLastConfirmed(msgID).IntoImmutableMessage(msgID)
+			replicated := message.MustNewReplicateMessage("primary-cluster", immutable.IntoImmutableMessageProto())
+			replicated.OverwriteReplicateVChannel("secondary_v1", []string{"secondary_v1"})
+			replicaMsg := message.MustAsMutableImportMessageV1(replicated)
+			replicaOptions := funcutil.Map2KeyValuePair(replicaMsg.MustBody().GetOptions())
+			replicaPrepFiles := []*internalpb.ImportFile{{
+				SnapshotSource: &internalpb.SnapshotImportSource{Version: importutilv2.SnapshotPreparationVersion},
+			}}
+			require.NoError(t, importutilv2.ValidateImportPlan(replicaPrepFiles, replicaOptions, nil))
+
+			// 3. Both Primary (bucket-p) and Secondary (bucket-s, different endpoint & RootPath)
+			// independently expand the Pending job from their own buckets.
+			for _, cluster := range []struct {
+				name string
+				cfg  *objectstorage.Config
+				cm   *bucketMemoryChunkManager
+				opts importutilv2.Options
+			}{
+				{
+					name: "primary",
+					cfg: &objectstorage.Config{
+						Address:       "primary-s3.internal:9000",
+						BucketName:    "bucket-p",
+						RootPath:      "primary-files",
+						CloudProvider: "aws",
+					},
+					cm:   primaryCM,
+					opts: prepOptions,
+				},
+				{
+					name: "secondary",
+					cfg: &objectstorage.Config{
+						Address:       "secondary-s3.internal:9000",
+						BucketName:    "bucket-s",
+						RootPath:      "secondary-files",
+						CloudProvider: "aws",
+						UseSSL:        true,
+					},
+					cm:   secondaryCM,
+					opts: replicaOptions,
+				},
+			} {
+				t.Run(cluster.name, func(t *testing.T) {
+					activeInstance = cluster.cfg
+					cluster.cm.reads = nil
+
+					loadedMeta, err := readSnapshotImportMetadata(ctx, cluster.cm, cluster.opts)
+					require.NoError(t, err)
+					uri, err := funcutil.GetAttrByKeyFromRepeatedKV(importutilv2.SnapshotSourceURI, cluster.opts)
+					require.NoError(t, err)
+					require.Equal(t, tc.bareMetadataKey, uri)
+
+					expandedFiles, expandedOpts, l0Sources, err := expandSnapshotImportFiles(
+						ctx, nil, cluster.cm, SnapshotImportTestSchema(), uri, cluster.opts, loadedMeta,
+					)
+					require.NoError(t, err)
+					require.Len(t, expandedFiles, 2)
+					expandedFiles[0].Id = 1
+					expandedFiles[1].Id = 2
+					require.NoError(t, importutilv2.ValidateImportPlan(expandedFiles, expandedOpts, l0Sources))
+					require.Equal(t, v2AvroObjectKey, expandedFiles[0].GetSnapshotSource().GetV2Reference().GetSnapshotManifestPath())
+					require.Equal(t, packed.MarshalManifestPath(expectedDataBase, 8), expandedFiles[1].GetSnapshotSource().GetManifestPath())
+					require.Len(t, l0Sources, 1)
+					require.Equal(t, []string{expectedDeltaPath}, l0Sources[0].GetLegacyL0Deltalogs())
+					require.Equal(t, []string{tc.bareMetadataKey, v2AvroObjectKey, v3AvroObjectKey, l0AvroObjectKey}, cluster.cm.reads)
+
+					// DataNode deferred path validator accepts bare references under root
+					// and rejects any scheme-bearing URI when top-level source is a bare key.
+					validator, err := importutilv2.SnapshotPathValidator(expandedOpts, cluster.cm)
+					require.NoError(t, err)
+					require.NoError(t, validator(expectedDataBase+"/_data/0"))
+					require.Error(t, validator("s3://"+cluster.cfg.BucketName+"/"+expectedDataBase+"/_data/0"))
+					require.Error(t, validator("s3://other-bucket/"+expectedDataBase+"/_data/0"))
+				})
+			}
+
+			// 4. Reject internal unrelated scheme-bearing manifest URI when top-level key is bare.
+			tampered := proto.Clone(metadata).(*datapb.SnapshotMetadata)
+			tampered.ManifestList[0] = "s3://unrelated-bucket/" + v2AvroStoredKey
+			if tc.layout == datapb.SnapshotLayout_SnapshotLayoutReferenced {
+				_, _, _, err = expandSnapshotImportFiles(
+					ctx, nil, secondaryCM, SnapshotImportTestSchema(), tc.bareMetadataKey, replicaOptions, tampered,
+				)
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			}
+		})
 	}
 }

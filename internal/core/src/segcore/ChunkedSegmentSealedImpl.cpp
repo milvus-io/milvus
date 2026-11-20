@@ -125,6 +125,7 @@
 #include "query/SearchOnSealed.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/DeletedRecord.h"
+#include "segcore/OutputFields.h"
 #include "segcore/SealedIndexingRecord.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/TimestampIndex.h"
@@ -139,6 +140,7 @@
 #include "segcore/TextColumnCache.h"
 #include "storage/FileManager.h"
 #include "storage/KeyRetriever.h"
+#include "storage/PluginLoader.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
@@ -2487,6 +2489,13 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
                                             needed_columns,
                                             *properties)
             .release());
+    // QueryNode registers the collection's cipher context before loading.
+    // Resolve encrypted Parquet keys through that context when opening files.
+    if (storage::PluginLoader::GetInstance().getCipherPlugin()) {
+        reader->set_keyretriever([](const std::string& key_metadata) {
+            return storage::KeyRetriever().GetKey(key_metadata);
+        });
+    }
     committer.Commit([reader](RuntimeResourceState& runtime,
                               PublishedSegmentState&) mutable {
         runtime.reader = std::move(reader);
@@ -2982,6 +2991,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 GroupChunkType::DEFAULT,
                 field_metas,
                 column_group_info,
+                fs,
                 std::move(insert_files),
                 std::move(metadata.row_group_meta_list),
                 info.enable_mmap,
@@ -7671,6 +7681,11 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                 milvus_storage::api::Reader::create(
                     column_groups, arrow_schema, needed_columns, *properties)
                     .release());
+            if (storage::PluginLoader::GetInstance().getCipherPlugin()) {
+                reader->set_keyretriever([](const std::string& key_metadata) {
+                    return storage::KeyRetriever().GetKey(key_metadata);
+                });
+            }
             committer.Commit(
                 [reader = std::move(reader)](RuntimeResourceState& runtime,
                                              PublishedSegmentState&) mutable {
@@ -9309,53 +9324,47 @@ ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
     bool used_take = TryTakeForSearch(
         plan, results.seg_offsets_.data(), size, results, snapshot, op_ctx);
 
-    std::unique_ptr<DataArray> field_data;
-    // Per-call OpContext keeps storage_usage scoped to this segment;
-    // sharing op_ctx across segments would double-count bytes. See
-    // SegmentInternalInterface::FillPrimaryKeys for the same pattern.
-    milvus::OpContext local_ctx;
-    local_ctx.runtime_load_priority = milvus::proto::common::LoadPriority::HIGH;
-    if (op_ctx != nullptr) {
-        local_ctx.cancellation_token = op_ctx->cancellation_token;
-        local_ctx.runtime_load_priority =
-            op_ctx->runtime_load_priority.value_or(
-                milvus::proto::common::LoadPriority::HIGH);
-    }
+    std::vector<FieldId> fields_to_fetch;
+    fields_to_fetch.reserve(plan->target_entries_.size());
     for (auto field_id : plan->target_entries_) {
-        // Skip fields already filled by take
         if (used_take && results.output_fields_data_.count(field_id) > 0) {
             continue;
         }
-        segcore::CheckCancellation(
-            op_ctx, get_segment_id(), field_id.get(), "FillTargetEntry");
+        fields_to_fetch.push_back(field_id);
+    }
+
+    auto fetch_one = [this, plan, snapshot, &results, size](
+                         FieldId field_id, milvus::OpContext* field_ctx) {
         auto& field_meta = plan->schema_->operator[](field_id);
         if (plan->schema_->get_dynamic_field_id().has_value() &&
             plan->schema_->get_dynamic_field_id().value() == field_id &&
             !plan->target_dynamic_fields_.empty()) {
             auto& target_dynamic_fields = plan->target_dynamic_fields_;
-            field_data = bulk_subscript_from_state(snapshot,
-                                                   &local_ctx,
-                                                   field_id,
-                                                   results.seg_offsets_.data(),
-                                                   size,
-                                                   target_dynamic_fields);
-        } else if (snapshot->schema->get_fields().find(field_id) ==
-                   snapshot->schema->get_fields().end()) {
-            field_data = bulk_subscript_not_exist_field(
-                field_meta, results.seg_offsets_.data(), size);
-        } else {
-            field_data = bulk_subscript_from_state(snapshot,
-                                                   &local_ctx,
-                                                   field_id,
-                                                   results.seg_offsets_.data(),
-                                                   size);
+            return bulk_subscript_from_state(snapshot,
+                                             field_ctx,
+                                             field_id,
+                                             results.seg_offsets_.data(),
+                                             size,
+                                             target_dynamic_fields);
         }
-        results.output_fields_data_[field_id] = std::move(field_data);
+        if (snapshot->schema->get_fields().find(field_id) ==
+            snapshot->schema->get_fields().end()) {
+            return bulk_subscript_not_exist_field(
+                field_meta, results.seg_offsets_.data(), size);
+        }
+        return bulk_subscript_from_state(
+            snapshot, field_ctx, field_id, results.seg_offsets_.data(), size);
+    };
+    auto fetched_fields =
+        FetchOutputFields(fields_to_fetch, get_segment_id(), op_ctx, fetch_one);
+    for (auto& fetched : fetched_fields) {
+        results.output_fields_data_[fetched.field_id] =
+            std::move(fetched.field_data);
+        results.search_storage_cost_.scanned_remote_bytes +=
+            fetched.scanned_remote_bytes;
+        results.search_storage_cost_.scanned_total_bytes +=
+            fetched.scanned_total_bytes;
     }
-    results.search_storage_cost_.scanned_remote_bytes +=
-        local_ctx.storage_usage.scanned_cold_bytes.load();
-    results.search_storage_cost_.scanned_total_bytes +=
-        local_ctx.storage_usage.scanned_total_bytes.load();
 }
 
 // ---- Shared helpers for TryTakeForRetrieve / TryTakeForSearch ----

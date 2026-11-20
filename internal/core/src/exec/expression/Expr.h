@@ -290,6 +290,22 @@ class Expr : public std::enable_shared_from_this<Expr> {
         return true;
     }
 
+    // Opt-in for evaluating a sequential batch by explicit element offsets.
+    // The subtree must leave its sequential cursors untouched during Eval,
+    // then advance them exactly once through AdvanceSequentialBatch().
+    virtual bool
+    CanUseOffsetsForSequentialBatch() {
+        return false;
+    }
+
+    virtual void
+    AdvanceSequentialBatch() {
+        SetHasOffsetInput(false);
+        for (auto& input : inputs_) {
+            input->AdvanceSequentialBatch();
+        }
+    }
+
     virtual std::string
     ToString() const {
         ThrowInfo(ErrorCode::NotImplemented, "not implemented");
@@ -313,6 +329,17 @@ class Expr : public std::enable_shared_from_this<Expr> {
     virtual bool
     IsSource() const {
         return false;
+    }
+
+    // Called when this expression's output feeds a null-rejecting consumer:
+    // one that treats an UNKNOWN (NULL) row exactly like FALSE, such as the
+    // top-level filter, which folds UNKNOWN into the excluded set. Nodes
+    // whose operands keep that property (AND/OR) override this to accept the
+    // mark and propagate it to their inputs; everywhere else (in particular
+    // NOT, where FALSE and UNKNOWN produce different results) the default
+    // no-op stops the propagation.
+    virtual void
+    MarkNullRejecting() {
     }
 
     // Whether this expression's result may be cached by ExprResCacheManager.
@@ -745,6 +772,12 @@ class SegmentExpr : public Expr {
     }
 
     void
+    AdvanceSequentialBatch() override {
+        SetHasOffsetInput(false);
+        MoveCursor();
+    }
+
+    void
     MoveCursor() override {
         if (!has_offset_input_) {
             if (execute_all_at_once_) {
@@ -1021,7 +1054,7 @@ class SegmentExpr : public Expr {
                                         OffsetVector* input,
                                         TargetBitmapView res,
                                         TargetBitmapView valid_res,
-                                        const TargetBitmap& candidate_mask,
+                                        const TargetBitmapView& candidate_mask,
                                         const ValTypes&... values) {
         return ProcessIndexLookupByOffsetsImpl<T>(
             evaluate_batch, input, res, valid_res, &candidate_mask, values...);
@@ -1038,7 +1071,7 @@ class SegmentExpr : public Expr {
                                          int64_t batch_size,
                                          TargetBitmapView res,
                                          TargetBitmapView valid_res,
-                                         const TargetBitmap& candidate_mask,
+                                         const TargetBitmapView& candidate_mask,
                                          const ValTypes&... values) {
         AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
         using IndexInnerType = std::
@@ -1103,7 +1136,7 @@ class SegmentExpr : public Expr {
                                     OffsetVector* input,
                                     TargetBitmapView res,
                                     TargetBitmapView valid_res,
-                                    const TargetBitmap* candidate_mask,
+                                    const TargetBitmapView* candidate_mask,
                                     const ValTypes&... values) {
         AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
         using IndexInnerType = std::
@@ -1202,7 +1235,7 @@ class SegmentExpr : public Expr {
         OffsetVector* input,
         TargetBitmapView res,
         TargetBitmapView valid_res,
-        const TargetBitmap& candidate_mask,
+        const TargetBitmapView& candidate_mask,
         const ValTypes&... values) {
         return ProcessDataByOffsetsImpl<T>(evaluate_batch,
                                            skip_func,
@@ -1221,7 +1254,7 @@ class SegmentExpr : public Expr {
         OffsetVector* input,
         TargetBitmapView res,
         TargetBitmapView valid_res,
-        const TargetBitmap* candidate_mask,
+        const TargetBitmapView* candidate_mask,
         const ValTypes&... values) {
         int64_t processed_size = 0;
 
@@ -3189,9 +3222,14 @@ class SegmentExpr : public Expr {
         return PinnedIndexIsNested();
     }
 
+    // Ask the pinned scalar index whether `op` should run through it or fall
+    // back to the raw-data scan. Pass the concrete query literal in `pattern`
+    // when the caller has one (string pattern ops): an index with a cheap
+    // per-literal cost bound (FMINDEX's count-first guard) uses it to decline
+    // degenerate high-hit literals whose enumeration would lose to the scan.
     template <typename T>
     bool
-    CanUseIndexForOp(OpType op) const {
+    CanUseIndexForOp(OpType op, const std::string& pattern = "") const {
         typedef std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
                 IndexInnerType;
@@ -3205,7 +3243,7 @@ class SegmentExpr : public Expr {
                    num_index_chunk_);
         auto scalar_index = dynamic_cast<const Index*>(pinned_index_[0].get());
         AssertInfo(scalar_index != nullptr, "invalid scalar index type");
-        return scalar_index->ShouldUseOp(op);
+        return scalar_index->ShouldUseOp(op, pattern);
     }
 
     template <typename T>
@@ -3664,10 +3702,20 @@ CompileExpression(const expr::TypedExprPtr& expr,
 
 class ExprSet {
  public:
+    // null_rejecting: the consumer of these expressions' output treats
+    // UNKNOWN rows exactly like FALSE (e.g. a filter that folds UNKNOWN into
+    // the excluded set); lets conjunctions drop UNKNOWN rows from their
+    // active sets early. See Expr::MarkNullRejecting.
     explicit ExprSet(const std::vector<expr::TypedExprPtr>& logical_exprs,
-                     ExecContext* exec_ctx)
+                     ExecContext* exec_ctx,
+                     bool null_rejecting = false)
         : exec_ctx_(exec_ctx) {
         exprs_ = CompileExpressions(logical_exprs, exec_ctx);
+        if (null_rejecting) {
+            for (auto& compiled_expr : exprs_) {
+                compiled_expr->MarkNullRejecting();
+            }
+        }
     }
 
     virtual ~ExprSet() = default;

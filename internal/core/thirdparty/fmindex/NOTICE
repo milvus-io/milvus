@@ -1,0 +1,31 @@
+fm-index-lite
+Copyright 2026 Xiaofan Luan
+
+This product includes software developed as part of the fm-index-lite project,
+licensed under the Apache License, Version 2.0.
+
+Source: https://github.com/xiaofan-luan/fm-index-lite
+Vendored revision: 0612c95ca34824f671dabb153ed9ed963b2b106f
+Vendored sources: internal/core/thirdparty/fmindex/index/fmindex/
+
+--------------------------------------------------------------------------------
+Third-party components
+--------------------------------------------------------------------------------
+
+libsais  (internal/core/thirdparty/libsais/)
+  Linear-time suffix-array / BWT construction. Both the 32-bit build
+  (libsais.c/.h) and the 64-bit build (libsais64.c/.h) are vendored.
+  Copyright (c) 2021-2025 Ilya Grebnov <ilya.grebnov@gmail.com>
+  Licensed under the Apache License, Version 2.0.
+  Source: https://github.com/IlyaGrebnov/libsais (v2.10.4)
+  Vendored unmodified; see internal/core/thirdparty/libsais/LICENSE.
+
+--------------------------------------------------------------------------------
+Clean-room implementations (no third-party code copied)
+--------------------------------------------------------------------------------
+
+The rank/select bit vector (rank9), the wavelet matrix, and the 4-ary quad
+wavelet matrix in internal/core/thirdparty/fmindex/index/fmindex/ are clean-room
+implementations. Provenance and references are documented in the upstream
+fm-index-lite repository at the pinned revision:
+https://github.com/xiaofan-luan/fm-index-lite/blob/0612c95ca34824f671dabb153ed9ed963b2b106f/DESIGN.md

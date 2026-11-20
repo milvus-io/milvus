@@ -231,6 +231,9 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		mlog.Warn(context.TODO(), "failed to get collection", mlog.Err(err))
 		return nil, err
 	}
+	schema := collection.Schema()
+	hasVirtualPK := typeutil.IsExternalCollection(schema) &&
+		(!typeutil.NewStorageColumnResolver(schema).IsMilvusTable() || !HasExternalPrimaryKey(schema))
 	for _, segment := range segments {
 		configureUseTakeForOutput(segment, collection.Schema())
 	}
@@ -324,60 +327,13 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			return merr.Wrap(err, "At LoadDeltaLogs")
 		}
 
-		schema := collection.Schema()
-		isExternalCollection := typeutil.IsExternalCollection(schema)
-		isMilvusTableRealPK := typeutil.NewStorageColumnResolver(schema).IsMilvusTable() &&
-			HasExternalPrimaryKey(schema)
-		if !segment.PkCandidateExist() {
-			mlog.Debug(context.TODO(), "loading PK candidate for segment", mlog.Int64("segmentID", segment.ID()))
-			if isExternalCollection {
-				var candidate pkoracle.Candidate
-				if isMilvusTableRealPK {
-					bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type())
-					if err != nil {
-						return merr.Wrap(err, "At LoadBloomFilter")
-					}
-					if bfs.PkCandidateExist() {
-						segment.SetPKCandidate(bfs)
-						bfs.Charge()
-						mlog.Info(context.TODO(), "using external real-PK bloom filter candidate",
-							mlog.FieldSegmentID(loadInfo.GetSegmentID()))
-					}
-					if !segment.PkCandidateExist() {
-						return merr.WrapErrServiceInternalMsg("milvus-table real-PK segment missing bloom filter stats")
-					}
-				} else {
-					candidate = pkoracle.NewExternalSegmentCandidate(
-						loadInfo.GetSegmentID(),
-						loadInfo.GetPartitionID(),
-						segment.Type(),
-					)
-				}
-				if candidate != nil {
-					segment.SetPKCandidate(candidate)
-					mlog.Info(context.TODO(), "using external collection PK candidate",
-						mlog.FieldSegmentID(loadInfo.GetSegmentID()),
-						mlog.Bool("realPK", isMilvusTableRealPK))
-				}
-
-				// Check for truncated segment ID collision with other segments being loaded.
-				if !isMilvusTableRealPK {
-					collisions := detectVirtualPKCollisions(loadInfo.GetSegmentID(), infos)
-					for _, collidingID := range collisions {
-						mlog.Warn(context.TODO(), "virtual PK collision detected: two segments share truncated segment ID",
-							mlog.Int64("segmentID1", loadInfo.GetSegmentID()),
-							mlog.Int64("segmentID2", collidingID),
-							mlog.Int64("truncatedID", loadInfo.GetSegmentID()&0xFFFFFFFF))
-					}
-				}
-			} else if paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() {
-				bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type())
-				if err != nil {
-					return merr.Wrap(err, "At LoadBloomFilter")
-				}
-				segment.SetPKCandidate(bfs)
-				// Charge bloom filter resource
-				bfs.Charge()
+		// Collision diagnostics depend only on load metadata, not PK candidates.
+		if hasVirtualPK {
+			for _, collidingID := range detectVirtualPKCollisions(segmentID, infos) {
+				mlog.Warn(ctx, "virtual PK collision detected: two segments share truncated segment ID",
+					mlog.Int64("segmentID1", segmentID),
+					mlog.Int64("segmentID2", collidingID),
+					mlog.Int64("truncatedID", segmentID&0xFFFFFFFF))
 			}
 		}
 
@@ -479,7 +435,7 @@ func (loader *segmentLoader) notifyLoadFinish(segments ...*querypb.SegmentLoadIn
 
 // requestResource requests memory & storage to load segments,
 // returns the memory usage, disk usage and concurrency with the gained memory.
-func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*querypb.SegmentLoadInfo) (requestResourceResult, error) {
+func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*querypb.SegmentLoadInfo) (_ requestResourceResult, err error) {
 	// we need to deal with empty infos case separately,
 	// because the following judgement for requested resources are based on current status and static config
 	// which may block empty-load operations by accident
@@ -499,6 +455,18 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 		logger.Warn(ctx, "no sufficient physical resource to load segments", mlog.Err(err))
 		return requestResourceResult{}, err
 	}
+
+	resource := LoadResource{MemorySize: loadingUsage.MemorySize, DiskSize: loadingUsage.DiskSize}
+	tieredEvictionEnabled := paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool()
+	reservedLoadingResource := false
+	if tieredEvictionEnabled {
+		reservedLoadingResource = tryReserveLoadingResource(resource)
+	}
+	defer func() {
+		if reservedLoadingResource && err != nil {
+			releaseLoadingResource(resource)
+		}
+	}()
 
 	loader.mut.Lock()
 	defer loader.mut.Unlock()
@@ -523,6 +491,20 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 	}
 
 	result.ConcurrencyLevel = funcutil.Min(hardware.GetCPUNum(), len(infos))
+
+	if tieredEvictionEnabled && !reservedLoadingResource {
+		memUsage := physicalMemoryUsage + loader.committedResource.MemorySize
+		diskUsage := uint64(physicalDiskUsage) + loader.committedResource.DiskSize
+		return result, merr.WrapErrSegmentRequestResourceFailed("memory/disk",
+			fmt.Sprintf("failed to reserve loading resource from caching layer, predictMemUsage = %v MB, predictDiskUsage = %v MB, memUsage = %v MB, diskUsage = %v MB, memoryThresholdFactor = %f, diskThresholdFactor = %f",
+				logutil.ToMB(float64(memUsage+loadingUsage.MemorySize)),
+				logutil.ToMB(float64(diskUsage+loadingUsage.DiskSize)),
+				logutil.ToMB(float64(memUsage)),
+				logutil.ToMB(float64(diskUsage)),
+				paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat(),
+				paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat(),
+			))
+	}
 
 	// TODO: disable logical resource checking for now
 	// lmu, ldu, err := loader.checkLogicalSegmentSize(ctx, infos, totalMemory)
@@ -554,22 +536,30 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 
 // freeRequestResource returns request memory & storage usage request.
 func (loader *segmentLoader) freeRequestResource(requestResourceResult requestResourceResult) {
-	loader.mut.Lock()
-	defer loader.mut.Unlock()
-
 	resource := requestResourceResult.Resource
-	// logicalResource := requestResourceResult.LogicalResource
+	loader.mut.Lock()
+	loader.committedResource.Sub(resource)
+	loader.mut.Unlock()
 
 	if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() {
-		C.ReleaseLoadingResource(C.CResourceUsage{
-			memory_bytes: C.int64_t(resource.MemorySize),
-			disk_bytes:   C.int64_t(resource.DiskSize),
-		})
+		releaseLoadingResource(resource)
 	}
 
-	loader.committedResource.Sub(resource)
-	// loader.committedLogicalResource.Sub(logicalResource)
 	loader.committedResourceNotifier.NotifyAll()
+}
+
+func tryReserveLoadingResource(resource LoadResource) bool {
+	return bool(C.TryReserveLoadingResourceWithTimeout(C.CResourceUsage{
+		memory_bytes: C.int64_t(resource.MemorySize),
+		disk_bytes:   C.int64_t(resource.DiskSize),
+	}, 1000))
+}
+
+func releaseLoadingResource(resource LoadResource) {
+	C.ReleaseLoadingResource(C.CResourceUsage{
+		memory_bytes: C.int64_t(resource.MemorySize),
+		disk_bytes:   C.int64_t(resource.DiskSize),
+	})
 }
 
 func (loader *segmentLoader) waitSegmentLoadDone(ctx context.Context, segmentType SegmentType, segmentIDs []int64, version int64) error {
@@ -608,56 +598,6 @@ func (loader *segmentLoader) waitSegmentLoadDone(ctx context.Context, segmentTyp
 
 func (loader *segmentLoader) GetChunkManager() storage.ChunkManager {
 	return loader.cm
-}
-
-// load single bloom filter
-func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, collectionID int64, loadInfo *querypb.SegmentLoadInfo, segtype SegmentType) (*pkoracle.BloomFilterSet, error) {
-	partitionID := loadInfo.PartitionID
-	segmentID := loadInfo.SegmentID
-	bfs := pkoracle.NewBloomFilterSet(segmentID, partitionID, segtype)
-
-	collection := loader.manager.Collection.Get(collectionID)
-	if collection == nil {
-		err := merr.WrapErrCollectionNotFound(collectionID)
-		mlog.Warn(context.TODO(), "failed to get collection while loading segment", mlog.Err(err))
-		return nil, err
-	}
-
-	mlog.Debug(ctx, "start loading remote...", mlog.Int("segmentNum", 1))
-
-	schema := collection.Schema()
-	isExternalCollection := typeutil.IsExternalCollection(schema)
-	isMilvusTableRealPK := typeutil.NewStorageColumnResolver(schema).IsMilvusTable() &&
-		HasExternalPrimaryKey(schema)
-	if !paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() && !isMilvusTableRealPK {
-		mlog.Info(context.TODO(), "skip loading bloom filter for remote segment because bloom filter is disabled")
-		return bfs, nil
-	}
-	if isExternalCollection && !isMilvusTableRealPK {
-		mlog.Debug(context.TODO(), "virtual-PK external collection: returning empty bloom filter set")
-		return bfs, nil
-	}
-
-	pkField := GetPkField(schema)
-	mlog.Debug(ctx, "loading bloom filter for remote...")
-	pkStatsBinlogs, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BloomFilterPaths(pkField.GetFieldID())
-	if err != nil {
-		return nil, err
-	}
-	err = loader.loadBloomFilter(ctx, segmentID, bfs, pkStatsBinlogs, loader.bloomFilterDownloader(collection, isMilvusTableRealPK))
-	if err != nil {
-		mlog.Warn(context.TODO(), "load remote segment bloom filter failed",
-			mlog.Int64("partitionID", partitionID),
-			mlog.Int64("segmentID", segmentID),
-			mlog.Err(err),
-		)
-		return nil, err
-	}
-	if isMilvusTableRealPK && !bfs.PkCandidateExist() {
-		return nil, merr.WrapErrServiceInternalMsg("milvus-table real-PK segment missing bloom filter stats")
-	}
-
-	return bfs, nil
 }
 
 func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
@@ -1833,28 +1773,7 @@ func (loader *segmentLoader) checkLoadingResource(
 		mlog.Int("mmapFieldCount", loadingUsage.MmapFieldCount),
 	)
 
-	var loadingResource C.CResourceUsage
-	reservedLoadingResource := false
-	if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() {
-		loadingResource = C.CResourceUsage{
-			memory_bytes: C.int64_t(loadingUsage.MemorySize),
-			disk_bytes:   C.int64_t(loadingUsage.DiskSize),
-		}
-
-		// try to reserve loading resource from caching layer
-		if ok := C.TryReserveLoadingResourceWithTimeout(loadingResource, 1000); !ok {
-			return merr.WrapErrSegmentRequestResourceFailed("memory/disk",
-				fmt.Sprintf("failed to reserve loading resource from caching layer, predictMemUsage = %v MB, predictDiskUsage = %v MB, memUsage = %v MB, diskUsage = %v MB, memoryThresholdFactor = %f, diskThresholdFactor = %f",
-					logutil.ToMB(float64(predictMemUsage)),
-					logutil.ToMB(float64(predictDiskUsage)),
-					logutil.ToMB(float64(memUsage)),
-					logutil.ToMB(float64(diskUsage)),
-					paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat(),
-					paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat(),
-				))
-		}
-		reservedLoadingResource = true
-	} else {
+	if !paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() {
 		// fallback to original segment loading logic
 		if predictMemUsage > uint64(float64(totalMem)*paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
 			mlog.Warn(context.TODO(), "load segment failed, OOM if load",
@@ -1880,15 +1799,7 @@ func (loader *segmentLoader) checkLoadingResource(
 		}
 	}
 
-	err := checkSegmentGpuMemSize(loadingUsage.FieldGpuMemorySize, float32(paramtable.Get().GpuConfig.OverloadedMemoryThresholdPercentage.GetAsFloat()))
-	if err != nil {
-		if reservedLoadingResource {
-			C.ReleaseLoadingResource(loadingResource)
-		}
-		return err
-	}
-
-	return nil
+	return checkSegmentGpuMemSize(loadingUsage.FieldGpuMemorySize, float32(paramtable.Get().GpuConfig.OverloadedMemoryThresholdPercentage.GetAsFloat()))
 }
 
 // this function is used to estimate the logical resource usage of a segment, which should only be used when tiered eviction is enabled

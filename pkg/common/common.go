@@ -129,9 +129,15 @@ const (
 	//   cannot load a nested STL_SORT physical index
 	//   (see MinScalarIndexVersionForNestedHybridStlSort)
 	// - On-disk file format is unchanged from v3
+	//
+	// Scalar index engine version 5:
+	// - FMINDEX scalar index (exact LIKE prefix/infix/suffix on VARCHAR).
+	//   An older QueryNode does not recognize FMINDEX and would fail to load
+	//   such a segment, so creation is gated on the whole cluster reporting >= 5
+	//   (see MinScalarIndexVersionForFMINDEX).
 	MinimalScalarIndexEngineVersion = int32(0)
-	CurrentScalarIndexEngineVersion = int32(3)
-	MaximumScalarIndexEngineVersion = int32(4)
+	CurrentScalarIndexEngineVersion = int32(5)
+	MaximumScalarIndexEngineVersion = int32(5)
 
 	// MinScalarIndexVersionForJsonPathMultiType is the minimum scalar index
 	// engine version that supports STL_SORT / BITMAP / HYBRID on JSON fields.
@@ -145,6 +151,11 @@ const (
 	// cardinality so that an older reader (e.g. 2.6, whose ScalarIndexSort
 	// predates nested-index support) can still load the index.
 	MinScalarIndexVersionForNestedHybridStlSort = int32(4)
+
+	// MinScalarIndexVersionForFMINDEX is the minimum scalar index engine version
+	// that recognizes FMINDEX. Creating an FMINDEX while any node still reports a
+	// lower version would break rolling upgrade (old QueryNodes cannot load it).
+	MinScalarIndexVersionForFMINDEX = int32(5)
 )
 
 // ClampScalarIndexVersion clamps the given scalar index version to MaximumScalarIndexEngineVersion.

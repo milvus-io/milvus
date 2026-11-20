@@ -1632,3 +1632,25 @@ func TestWrapParquetErr(t *testing.T) {
 	alreadyInput := merr.WrapErrImportFailedMsg("bad value")
 	require.Same(t, alreadyInput, wrapParquetErr(alreadyInput), "an existing classification is not rewritten")
 }
+
+// TestValidateJSONRow pins the per-row JSON check: every row must be valid JSON,
+// and a dynamic row must additionally be a JSON object. The dynamic case is
+// parsed once, and that one parse still rejects malformed input.
+func TestValidateJSONRow(t *testing.T) {
+	jsonField := &schemapb.FieldSchema{DataType: schemapb.DataType_JSON}
+	dynamicField := &schemapb.FieldSchema{DataType: schemapb.DataType_JSON, IsDynamic: true}
+
+	for _, valid := range []string{`{"a": 1}`, `[1, 2]`, `"str"`, `123`, `null`} {
+		assert.NoError(t, validateJSONRow(jsonField, valid), valid)
+	}
+	for _, invalid := range []string{``, `{"a": 1,}`, `{"a": 1}{"b": 2}`, `1e999`} {
+		assert.Error(t, validateJSONRow(jsonField, invalid), invalid)
+	}
+
+	for _, valid := range []string{`{"a": 1}`, `{}`, `null`} {
+		assert.NoError(t, validateJSONRow(dynamicField, valid), valid)
+	}
+	for _, invalid := range []string{`[1, 2]`, `"str"`, `123`, `{"a": 1,}`} {
+		assert.Error(t, validateJSONRow(dynamicField, invalid), invalid)
+	}
+}

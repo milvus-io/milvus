@@ -4,11 +4,13 @@ ARG TARGETARCH
 ARG MILVUS_RUNTIME_USER=milvus:milvus
 
 # Install ca-certificates first, then switch to HTTPS and install other packages
+# Limit OS updates to the named packages; a full upgrade also replaces CUDA libraries.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
     sed -i 's/http:/https:/g' /etc/apt/sources.list && \
     apt-get update && \
-    apt-get upgrade -y --no-install-recommends openssl libssl3 curl libcurl4 tar zlib1g libc6 libc-bin && \
+    apt-get install -y --no-install-recommends --only-upgrade \
+        apt openssl libssl3 curl libcurl4 tar zlib1g libc6 libc-bin && \
     apt-get install -y --no-install-recommends curl libaio-dev libgomp1 && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
         ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \

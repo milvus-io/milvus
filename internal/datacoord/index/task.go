@@ -617,7 +617,9 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *meta.S
 		ExternalSpec:              schema.GetExternalSpec(),
 	}
 
-	meta.WrapPluginContext(segment.GetCollectionID(), schema.GetProperties(), req)
+	if err := meta.WrapPluginContext(segment.GetCollectionID(), schema.GetProperties(), req); err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }

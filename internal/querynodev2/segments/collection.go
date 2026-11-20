@@ -65,8 +65,8 @@ type collectionSchemaUpdatePlan struct {
 	// logicalSchemaVersion is schema.Version from the accepted schema payload.
 	// It is the Go-side structural schema freshness key.
 	logicalSchemaVersion uint64
-	// schemaBarrierTs fences stale load results and orders same-version schema
-	// payload refreshes such as collection property snapshots.
+	// schemaBarrierTs orders same-version schema payload refreshes, including
+	// legacy TTL DDLs that did not advance the logical schema version.
 	schemaBarrierTs uint64
 	// segcoreSchemaVersion is only passed to C++ segcore UpdateSchema. Segcore
 	// still has a single increasing version gate, so QueryNode keeps this
@@ -181,7 +181,7 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 	// - schema.Version is the logical collection schema version and prevents
 	//   older schema payloads from overwriting newer fields/functions.
 	// - schemaBarrierTs is the DDL barrier timestamp and advances for
-	//   properties-only schema snapshots such as ttl_field changes.
+	//   legacy properties-only schema snapshots such as ttl_field changes.
 	_, _, err := collection.applySchemaUpdate(schema, logicalSchemaVersion, schemaBarrierTs)
 	return err
 }
@@ -335,6 +335,10 @@ type Collection struct {
 	isGpuIndex bool
 	loadFields typeutil.Set[int64]
 
+	// Protected by schemaTransitionMu. A native schema can commit before a
+	// later hint update fails, so even failed attempts must consume a version.
+	lastAttemptedSegcoreSchemaVersion uint64
+
 	refCount *atomic.Uint32
 }
 
@@ -440,7 +444,20 @@ func (c *Collection) updateSchema(schema *schemapb.CollectionSchema, version uin
 	if c.ccollection == nil {
 		return merr.WrapErrServiceInternal("update schema on released collection")
 	}
-	return c.ccollection.UpdateSchema(schema, version)
+	// Keep old exclusions and add only this schema transition's default hints.
+	// Collection::set_schema historically copies all old schema fields, so
+	// replace that inherited set before publishing the new Go schema snapshot.
+	fields := typeutil.NewSet(c.loadFields.Collect()...)
+	fields.Insert(common.GetAddedLoadFieldIDs(c.Schema(), schema)...)
+	if err := c.ccollection.UpdateSchema(schema, version); err != nil {
+		return err
+	}
+	if err := c.ccollection.UpdateLoadFields(fields.Collect()); err != nil {
+		return err
+	}
+	c.loadFields = fields
+
+	return nil
 }
 
 func (c *Collection) applySchemaUpdate(schema *schemapb.CollectionSchema, logicalSchemaVersion uint64, schemaBarrierTs uint64) (collectionSchemaUpdatePlan, bool, error) {
@@ -475,6 +492,10 @@ func (c *Collection) applySchemaUpdateLocked(schema *schemapb.CollectionSchema, 
 	if !shouldUpdate {
 		return collectionSchemaUpdatePlan{}, false, nil
 	}
+	if plan.segcoreSchemaVersion <= c.lastAttemptedSegcoreSchemaVersion {
+		plan.segcoreSchemaVersion = c.lastAttemptedSegcoreSchemaVersion + 1
+	}
+	c.lastAttemptedSegcoreSchemaVersion = plan.segcoreSchemaVersion
 	if err := c.updateSchema(schema, plan.segcoreSchemaVersion); err != nil {
 		return collectionSchemaUpdatePlan{}, false, err
 	}

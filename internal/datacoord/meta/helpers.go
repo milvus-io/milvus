@@ -19,6 +19,7 @@ package meta
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -29,7 +30,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -54,10 +54,13 @@ func GetReadPluginContext(options importutilv2.Options) []*commonpb.KeyValuePair
 	return hookutil.GetReadStoragePluginContext(importEzk)
 }
 
-func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, msg proto.Message) {
-	pluginContext := hookutil.GetStoragePluginContext(properties, collectionID)
+func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, msg proto.Message) error {
+	pluginContext, err := hookutil.GetStoragePluginContext(properties, collectionID)
+	if err != nil {
+		return err
+	}
 	if pluginContext == nil {
-		return
+		return nil
 	}
 
 	switch msg := msg.(type) {
@@ -86,8 +89,9 @@ func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, 
 		job := msg
 		job.PluginContext = append(job.PluginContext, pluginContext...)
 	default:
-		return
+		return nil
 	}
+	return nil
 }
 
 func GetZeroTime() time.Time {
@@ -183,7 +187,7 @@ func MergeFieldBinlogs(currentBinlogs []*datapb.FieldBinlog, newBinlogs []*datap
 }
 
 func CanBuildExternalJSONKeyIndex(segment *SegmentInfo) bool {
-	return segment.GetStorageVersion() == storage.StorageV3 && segment.GetManifestPath() != ""
+	return SupportsFieldProjection(segment)
 }
 
 // filterDuplicateFieldBinlogs removes FieldBinlog entries from newLogs whose (fieldID, logID)
@@ -407,4 +411,32 @@ func GetSortStatus(sorted bool) string {
 		return "sorted"
 	}
 	return "unsorted"
+}
+
+func SaturatingAdd(values ...int64) int64 {
+	var result int64
+	for _, value := range values {
+		if value > math.MaxInt64-result {
+			return math.MaxInt64
+		}
+		result += value
+	}
+	return result
+}
+
+func SaturatingMul(left, right int64) int64 {
+	if left <= 0 || right <= 0 {
+		return 0
+	}
+	if left > math.MaxInt64/right {
+		return math.MaxInt64
+	}
+	return left * right
+}
+
+func CeilDiv(value, divisor int64) int64 {
+	if value <= 0 {
+		return 0
+	}
+	return 1 + (value-1)/divisor
 }

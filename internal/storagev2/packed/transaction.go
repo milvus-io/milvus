@@ -111,7 +111,12 @@ func addDeltaLogsToManifest(
 
 	// Start transaction
 	var transactionHandle C.LoonTransactionHandle
+	// The open reads the manifest revision from storage and blocks the calling
+	// goroutine's OS thread; bound it process-wide like every other blocking
+	// manifest FFI call so concurrent commits cannot explode thread count.
+	acquireManifestFFI(context.Background())
 	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), resolveID /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", merr.WrapErrStorage(err, "failed to begin transaction")
 	}
@@ -135,7 +140,11 @@ func addDeltaLogsToManifest(
 
 	// Commit transaction
 	var commitVersion C.int64_t
+	// The commit writes the manifest revision and blocks the calling
+	// goroutine's OS thread; bound it process-wide like the open above.
+	acquireManifestFFI(context.Background())
 	result = C.loon_transaction_commit(transactionHandle, &commitVersion)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", merr.WrapErrStorage(err, "failed to commit transaction")
 	}
@@ -228,7 +237,12 @@ func GetDeltaLogsFromManifestWithExtfs(
 	defer C.free(unsafe.Pointer(cBasePath))
 
 	var cTransactionHandle C.LoonTransactionHandle
+	// The open reads the manifest revision from storage and blocks the calling
+	// goroutine's OS thread; bound it process-wide like every other blocking
+	// manifest FFI call so concurrent commits cannot explode thread count.
+	acquireManifestFFI(context.Background())
 	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, merr.WrapErrStorage(err, "failed to begin transaction")
 	}
@@ -332,7 +346,12 @@ func AddStatsToManifest(
 	defer C.free(unsafe.Pointer(cBasePath))
 
 	var transactionHandle C.LoonTransactionHandle
+	// The open reads the manifest revision from storage and blocks the calling
+	// goroutine's OS thread; bound it process-wide like every other blocking
+	// manifest FFI call so concurrent commits cannot explode thread count.
+	acquireManifestFFI(context.Background())
 	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.LOON_TRANSACTION_RESOLVE_OVERWRITE /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", merr.WrapErrStorage(err, "failed to begin transaction")
 	}
@@ -349,7 +368,11 @@ func AddStatsToManifest(
 	}
 
 	var commitVersion C.int64_t
+	// The commit writes the manifest revision and blocks the calling
+	// goroutine's OS thread; bound it process-wide like the open above.
+	acquireManifestFFI(context.Background())
 	result = C.loon_transaction_commit(transactionHandle, &commitVersion)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", merr.WrapErrStorage(err, "failed to commit transaction")
 	}

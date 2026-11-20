@@ -75,10 +75,12 @@
 #include "storage/MemFileManagerImpl.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/KeyRetriever.h"
+#include "storage/PluginLoader.h"
 #include "segcore/memory_planner.h"
 #include "mmap/Types.h"
 #include "storage/loon_ffi/ffi_reader_c.h"
 #include "storage/loon_ffi/util.h"
+#include "storage/StatusToErrorCode.h"
 #include "milvus-storage/common/arrow_util.h"
 #include "parquet/arrow/reader.h"
 #include "milvus-storage/common/constants.h"
@@ -1688,15 +1690,24 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
     for (auto& column_group_file : remote_chunk_files) {
         // get all row groups for each file
         std::vector<std::vector<int64_t>> row_group_lists;
-        auto result = milvus_storage::FileRowGroupReader::Make(
-            fs,
-            column_group_file,
-            milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-            GetReaderProperties(),
-            GetArrowReaderProperties());
-        AssertInfo(result.ok(),
-                   "[StorageV2] Failed to create file row group reader: " +
-                       result.status().ToString());
+        auto prepared_result = milvus_storage::PreparedParquetFile::Open(
+            fs, column_group_file, GetReaderProperties());
+        if (!prepared_result.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(prepared_result.status()),
+                      "[StorageV2] Failed to prepare file {}: {}",
+                      column_group_file,
+                      prepared_result.status().ToString());
+        }
+        auto prepared = std::move(prepared_result).ValueOrDie();
+        auto result =
+            prepared->MakeReader(nullptr,
+                                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+                                 GetArrowReaderProperties());
+        if (!result.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(result.status()),
+                      "[StorageV2] Failed to create file row group reader: " +
+                          result.status().ToString());
+        }
         auto reader = result.ValueOrDie();
 
         auto row_group_num =
@@ -1734,7 +1745,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         // split row groups for parallel reading
         auto strategy = std::make_unique<segcore::ParallelDegreeSplitStrategy>(
             parallel_degree);
-        auto load_future = pool.Submit([&]() {
+        auto load_future = pool.Submit([&, prepared]() {
             return LoadWithStrategy(std::vector<std::string>{column_group_file},
                                     field_data_info.arrow_reader_channel,
                                     DEFAULT_FIELD_MAX_MEMORY_LIMIT,
@@ -1742,26 +1753,44 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                                     row_group_lists,
                                     fs,
                                     nullptr,
-                                    milvus::proto::common::LoadPriority::HIGH);
+                                    milvus::proto::common::LoadPriority::HIGH,
+                                    {prepared});
         });
         // read field data from channel
-        std::shared_ptr<milvus::ArrowDataWrapper> r;
-        while (field_data_info.arrow_reader_channel->pop(r)) {
-            size_t num_rows = 0;
-            std::vector<std::shared_ptr<arrow::ChunkedArray>> chunked_arrays;
-            for (const auto& table_info : r->arrow_tables) {
-                num_rows += table_info.table->num_rows();
-                chunked_arrays.push_back(table_info.table->column(col_offset));
+        try {
+            std::shared_ptr<milvus::ArrowDataWrapper> r;
+            while (field_data_info.arrow_reader_channel->pop(r)) {
+                size_t num_rows = 0;
+                std::vector<std::shared_ptr<arrow::ChunkedArray>>
+                    chunked_arrays;
+                for (const auto& table_info : r->arrow_tables) {
+                    num_rows += table_info.table->num_rows();
+                    chunked_arrays.push_back(
+                        table_info.table->column(col_offset));
+                }
+                auto field_data =
+                    storage::CreateFieldData(data_type,
+                                             element_type,
+                                             field_schema->nullable(),
+                                             dim,
+                                             num_rows);
+                for (const auto& chunked_array : chunked_arrays) {
+                    field_data->FillFieldData(chunked_array);
+                }
+                field_data_list.push_back(field_data);
             }
-            auto field_data = storage::CreateFieldData(data_type,
-                                                       element_type,
-                                                       field_schema->nullable(),
-                                                       dim,
-                                                       num_rows);
-            for (const auto& chunked_array : chunked_arrays) {
-                field_data->FillFieldData(chunked_array);
+        } catch (...) {
+            // The load task captures this frame by reference and may be
+            // blocked pushing into the bounded channel. Unblock it, then
+            // wait for it to finish before unwinding (see #46958).
+            try {
+                std::shared_ptr<milvus::ArrowDataWrapper> discard;
+                while (field_data_info.arrow_reader_channel->pop(discard)) {
+                }
+            } catch (...) {
             }
-            field_data_list.push_back(field_data);
+            DrainFuture(load_future);
+            throw;
         }
         // access underlying feature to get exception if any
         load_future.get();
@@ -1878,6 +1907,11 @@ IterateFieldDataFromManifest(
         column_groups, reader_schema, needed_cols_ptr, *loon_ffi_properties);
 
     AssertInfo(reader != nullptr, "Failed to create reader");
+    if (PluginLoader::GetInstance().getCipherPlugin()) {
+        reader->set_keyretriever([](const std::string& key_metadata) {
+            return KeyRetriever().GetKey(key_metadata);
+        });
+    }
 
     auto reader_result = reader->get_record_batch_reader("");
     if (!reader_result.ok()) {

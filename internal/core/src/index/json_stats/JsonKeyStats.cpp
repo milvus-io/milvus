@@ -1539,10 +1539,7 @@ JsonKeyStats::Upload(const Config& config) {
 
     // upload meta file
     auto meta_file_path = GetMetaFilePath();
-    AssertInfo(disk_file_manager_->AddJsonStatsMetaLog(meta_file_path),
-               "failed to upload meta file: {} for segment {}",
-               meta_file_path,
-               segment_id_);
+    disk_file_manager_->AddJsonStatsMetaLog(meta_file_path);
 
     // upload parquet file, parquet writer has already upload file to remote
     const auto& shredding_remote_paths_to_size =

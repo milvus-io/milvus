@@ -415,7 +415,9 @@ func (t *L0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		mlog.Any("target segments count", len(flushedSegBinlogs)),
 		mlog.Any("PreAllocatedLogIDs", logIDRange))
 
-	meta.WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan)
+	if err := meta.WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan); err != nil {
+		return nil, err
+	}
 	return plan, nil
 }
 

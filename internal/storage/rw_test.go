@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/bytedance/mockey"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -36,14 +37,17 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -1502,4 +1506,65 @@ func TestBinlogFieldIDSet(t *testing.T) {
 	}
 	_, reliable = binlogFieldIDSet(noChildren)
 	require.False(t, reliable)
+}
+
+func TestBinlogReaderSourceEncryptionContext(t *testing.T) {
+	enabled := mockey.Mock(hookutil.IsClusterEncryptionEnabled).Return(true).Build()
+	defer enabled.UnPatch()
+	schema := &schemapb.CollectionSchema{Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "99"}}}
+	for _, mode := range []string{"explicit_plaintext", "explicit_source_key", "legacy_target_fallback"} {
+		t.Run(mode, func(t *testing.T) {
+			calls := 0
+			target := mockey.Mock(hookutil.GetEzByCollProperties).To(func([]*commonpb.KeyValuePair, int64) *hookutil.EZ { calls++; return nil }).Build()
+			defer target.UnPatch()
+			opts := DefaultReaderOptions()
+			var expected *indexcgopb.StoragePluginContext
+			switch mode {
+			case "explicit_plaintext":
+				WithPluginContext(nil)(opts)
+			case "explicit_source_key":
+				expected = &indexcgopb.StoragePluginContext{EncryptionZoneId: 7}
+				WithPluginContext(expected)(opts)
+			}
+			_, got := binlogReaderEncryption(schema, opts)
+			require.Same(t, expected, got)
+			if mode == "legacy_target_fallback" {
+				require.Equal(t, 1, calls)
+			} else {
+				require.Zero(t, calls)
+			}
+		})
+	}
+}
+
+func TestBinlogReaderSourceEncryptionContextLegacyKey(t *testing.T) {
+	type fallbackCipher struct{ hook.Cipher }
+	enabled := mockey.Mock(hookutil.IsClusterEncryptionEnabled).Return(true).Build()
+	defer enabled.UnPatch()
+	ez := mockey.Mock(hookutil.GetEzByCollProperties).Return(&hookutil.EZ{EzID: 99, CollectionID: 123}).Build()
+	defer ez.UnPatch()
+	cipher := mockey.Mock(hookutil.GetCipher).Return(&fallbackCipher{}).Build()
+	defer cipher.UnPatch()
+	for _, hasKey := range []bool{false, true} {
+		t.Run(strconv.FormatBool(hasKey), func(t *testing.T) {
+			key := mockey.Mock((*fallbackCipher).GetUnsafeKey).To(func(_ *fallbackCipher, ezID, collectionID int64) []byte {
+				require.EqualValues(t, 99, ezID)
+				require.EqualValues(t, 123, collectionID)
+				if hasKey {
+					return []byte{1, 2, 3}
+				}
+				return nil
+			}).Build()
+			defer key.UnPatch()
+			opts := DefaultReaderOptions()
+			WithCollectionID(123)(opts)
+			decryption, plugin := binlogReaderEncryption(&schemapb.CollectionSchema{}, opts)
+			require.Len(t, decryption, 1, "legacy binlog decryption must retain the collection context")
+			if hasKey {
+				require.Equal(t, &indexcgopb.StoragePluginContext{EncryptionZoneId: 99, CollectionId: 123, EncryptionKey: "AQID"}, plugin)
+			} else {
+				require.Nil(t, plugin)
+			}
+		})
+	}
 }

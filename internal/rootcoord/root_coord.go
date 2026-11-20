@@ -159,6 +159,8 @@ type Core struct {
 	quotaCenter    *QuotaCenter
 	keyManager     *KeyManager
 
+	schemaLoadFieldsUpdater schemaLoadFieldsUpdateFunc
+
 	stateCode atomic.Int32
 	initOnce  sync.Once
 	startOnce sync.Once

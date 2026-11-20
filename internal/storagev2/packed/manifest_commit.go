@@ -19,6 +19,7 @@ package packed
 import "C"
 
 import (
+	"context"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -56,6 +57,10 @@ type ManifestUpdates struct {
 	// NewFiles is the column-groups / LOB payload returned by an FFI
 	// writer's Close. nil if no insert files were written.
 	NewFiles WriterOutput
+	// ColumnGroups registers existing groups from Go-owned descriptors. This
+	// is needed by external refresh to retain Function outputs without owning
+	// the original writer's C payload or changing the refreshed delete set.
+	ColumnGroups []ColumnGroupEntry
 	// DeltaLogs is the list of delta-log entries to register.
 	DeltaLogs []DeltaLogEntry
 	// Stats is the list of stat entries (bloom filter, bm25, etc.) to
@@ -76,7 +81,7 @@ func (u *ManifestUpdates) isEmpty() bool {
 	if u.NewFiles != nil {
 		return false
 	}
-	return len(u.DeltaLogs) == 0 && len(u.Stats) == 0
+	return len(u.ColumnGroups) == 0 && len(u.DeltaLogs) == 0 && len(u.Stats) == 0
 }
 
 // CommitManifestUpdates opens a loon transaction at (basePath, baseVersion),
@@ -110,10 +115,15 @@ func CommitManifestUpdates(basePath string, baseVersion int64,
 	// resolve mode keeps the API simple and matches the prior
 	// AddStatsToManifest behavior.
 	var handle C.LoonTransactionHandle
+	// The open reads the manifest revision from storage and blocks the calling
+	// goroutine's OS thread; bound it process-wide like every other blocking
+	// manifest FFI call so concurrent commits cannot explode thread count.
+	acquireManifestFFI(context.Background())
 	res := C.loon_transaction_begin(cBasePath, cProperties,
 		C.int64_t(baseVersion),
 		C.LOON_TRANSACTION_RESOLVE_OVERWRITE,
 		getRetryLimit(), &handle)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(res); err != nil {
 		// HandleLoonFFIResult returns a bare ErrLoonTransient chain; give it the
 		// storage wire code like transaction.go does, instead of leaking 65535.
@@ -126,7 +136,11 @@ func CommitManifestUpdates(basePath string, baseVersion int64,
 	}
 
 	var commitVersion C.int64_t
+	// The commit writes the manifest revision and blocks the calling
+	// goroutine's OS thread; bound it process-wide like the open above.
+	acquireManifestFFI(context.Background())
 	res = C.loon_transaction_commit(handle, &commitVersion)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(res); err != nil {
 		return "", merr.WrapErrStorage(err, "commit manifest commit")
 	}
@@ -140,6 +154,9 @@ func applyManifestUpdates(handle C.LoonTransactionHandle, updates *ManifestUpdat
 		if err := updates.NewFiles.applyTo(handle); err != nil {
 			return err
 		}
+	}
+	if err := addColumnGroupEntries(handle, updates.ColumnGroups); err != nil {
+		return err
 	}
 
 	for _, entry := range updates.DeltaLogs {

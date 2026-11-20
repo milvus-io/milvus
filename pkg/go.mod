@@ -4,8 +4,8 @@ go 1.26.9
 
 require (
 	cloud.google.com/go/storage v1.56.0
-	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.11.1
-	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.6.0
+	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.0
+	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.10.1
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.1.0
 	github.com/RoaringBitmap/roaring/v2 v2.8.0
 	github.com/aliyun/credentials-go v1.2.7
@@ -22,7 +22,7 @@ require (
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12
 	github.com/klauspost/compress v1.18.7
-	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.6-0.20261102085948-fdb7f859a14b
+	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.7-0.20261116062001-b8211b28c617
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/prometheus/client_golang v1.20.5
@@ -86,7 +86,7 @@ require (
 	cloud.google.com/go/iam v1.5.3 // indirect
 	cloud.google.com/go/monitoring v1.24.3 // indirect
 	github.com/AthenZ/athenz v1.12.13 // indirect
-	github.com/Azure/azure-sdk-for-go/sdk/internal v1.9.0 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/internal v1.11.2 // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.5.0 // indirect
 	github.com/DataDog/zstd v1.5.2 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.34.0 // indirect

@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/dml"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -56,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -337,12 +339,16 @@ func TestTraceLogRequestFieldRedactsRESTImportCredentials(t *testing.T) {
 			PartitionName:  "p1",
 			Files:          [][]string{{"s3://bucket/snapshot.json"}},
 			Options: map[string]string{
-				"backup":        "true",
-				"source_type":   "snapshot",
-				"external_spec": spec,
-				"EXTERNAL_SPEC": spec,
-				"ezk":           "IMPORT_EZK_SENTINEL",
-				"EzK":           "IMPORT_EZK_MIXED_SENTINEL",
+				"backup":                  "true",
+				"source_type":             "snapshot",
+				"external_spec":           spec,
+				"EXTERNAL_SPEC":           spec,
+				"ezk":                     "IMPORT_EZK_SENTINEL",
+				"storage.endpoint":        "ENDPOINT_SENTINEL",
+				"storage.accessKeyID":     "ACCESS_SENTINEL",
+				"storage.secretAccessKey": "SECRET_SENTINEL",
+				"STORAGE.secretAccessKey": "MIXED_SECRET_SENTINEL",
+				"EzK":                     "IMPORT_EZK_MIXED_SENTINEL",
 			},
 		}
 		before, err := json.Marshal(req)
@@ -354,12 +360,16 @@ func TestTraceLogRequestFieldRedactsRESTImportCredentials(t *testing.T) {
 		require.True(t, ok)
 		want := *req
 		want.Options = map[string]string{
-			"backup":        "true",
-			"source_type":   "snapshot",
-			"external_spec": "<redacted>",
-			"EXTERNAL_SPEC": "<redacted>",
-			"ezk":           "<redacted>",
-			"EzK":           "<redacted>",
+			"backup":                  "true",
+			"source_type":             "snapshot",
+			"external_spec":           "<redacted>",
+			"EXTERNAL_SPEC":           "<redacted>",
+			"ezk":                     "<redacted>",
+			"storage.endpoint":        "<redacted>",
+			"storage.accessKeyID":     "<redacted>",
+			"storage.secretAccessKey": "<redacted>",
+			"STORAGE.secretAccessKey": "<redacted>",
+			"EzK":                     "<redacted>",
 		}
 		assert.Equal(t, &want, redacted)
 		after, err := json.Marshal(req)
@@ -388,10 +398,14 @@ func TestCreateImportJobTraceLogRedactsCredentials(t *testing.T) {
 				require.NoError(t, params.Save(params.CommonCfg.TraceLogMode.Key, mode))
 				logs := captureHTTPServerLogs(t)
 				options := map[string]string{
-					"backup":        "true",
-					"source_type":   "snapshot",
-					"external_spec": `{"extfs":{"access_key_id":"IMPORT_ACCESS_SENTINEL","access_key_value":"IMPORT_SECRET_SENTINEL","future_password":"IMPORT_FUTURE_SENTINEL"}}`,
-					"ezk":           "IMPORT_EZK_SENTINEL",
+					"backup":                  "true",
+					"source_type":             "snapshot",
+					"external_spec":           `{"extfs":{"access_key_id":"IMPORT_ACCESS_SENTINEL","access_key_value":"IMPORT_SECRET_SENTINEL","future_password":"IMPORT_FUTURE_SENTINEL"}}`,
+					"ezk":                     "IMPORT_EZK_SENTINEL",
+					"storage.endpoint":        "ENDPOINT_SENTINEL",
+					"storage.accessKeyID":     "ACCESS_SENTINEL",
+					"storage.secretAccessKey": "SECRET_SENTINEL",
+					"STORAGE.secretAccessKey": "MIXED_SECRET_SENTINEL",
 				}
 				fakeProxy := &importProxy{}
 				called := false
@@ -422,7 +436,7 @@ func TestCreateImportJobTraceLogRedactsCredentials(t *testing.T) {
 				assert.Contains(t, output, "trace info:")
 				assert.Contains(t, output, "import_trace_target")
 				assert.Contains(t, output, "redacted")
-				for _, secret := range []string{"IMPORT_ACCESS_SENTINEL", "IMPORT_SECRET_SENTINEL", "IMPORT_FUTURE_SENTINEL", "IMPORT_EZK_SENTINEL"} {
+				for _, secret := range []string{"IMPORT_ACCESS_SENTINEL", "IMPORT_SECRET_SENTINEL", "IMPORT_FUTURE_SENTINEL", "IMPORT_EZK_SENTINEL", "ENDPOINT_SENTINEL", "ACCESS_SENTINEL", "SECRET_SENTINEL", "MIXED_SECRET_SENTINEL"} {
 					assert.NotContains(t, output, secret)
 				}
 			})
@@ -1049,6 +1063,7 @@ func TestTimeoutMiddlewareLateHandlerWritesUseCopiedContext(t *testing.T) {
 		c.Next()
 	})
 	ginHandler.POST(path, timeoutMiddleware(func(c *gin.Context) {
+		assert.Nil(t, requestutil.ConditionalWriteStateFromContext(c.Request.Context()))
 		handlerCtx <- c
 		<-c.Request.Context().Done()
 		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: int32(12345), HTTPReturnMessage: "late write"})
@@ -1146,11 +1161,67 @@ func TestRestfulSizeMiddlewarePreservesRequestContextCancel(t *testing.T) {
 	assert.True(t, errors.Is(<-observed, context.Canceled))
 }
 
+func TestConditionalUpsertTimeoutResponse(t *testing.T) {
+	paramtable.Init()
+	for _, timerExit := range []bool{false, true} {
+		for _, submitted := range []bool{false, true} {
+			t.Run(fmt.Sprintf("timer=%t/submitted=%t", timerExit, submitted), func(t *testing.T) {
+				key := paramtable.Get().HTTPCfg.RequestTimeoutMs.Key
+				require.NoError(t, paramtable.Get().Save(key, "20"))
+				t.Cleanup(func() { paramtable.Get().Reset(key) })
+				timer := time.NewTimer(time.Hour)
+				defer timer.Stop()
+				patch := mockey.Mock(time.NewTimer).Return(timer).Build()
+				defer patch.UnPatch()
+				release, done := make(chan struct{}), make(chan struct{})
+				defer func() {
+					close(release)
+					<-done
+				}()
+				router := gin.New()
+				router.POST("/upsert", upsertTimeoutMiddleware(func(c *gin.Context) {
+					defer close(done)
+					state := requestutil.ConditionalWriteStateFromContext(c.Request.Context())
+					if submitted {
+						assert.True(t, state.TryAppend())
+					}
+					if timerExit {
+						timer.Reset(0)
+						<-release
+						assert.Equal(t, submitted, state.TryAppend(), "a pre-submission timeout must close the append gate")
+						return
+					}
+					task := dml.NewUpsertTask(c.Request.Context(), &proxy.Proxy{}, &milvuspb.UpsertRequest{
+						WriteCondition: &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT},
+					}, nil)
+					err := task.WaitToFinish()
+					HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+				}))
+				response := httptest.NewRecorder()
+				router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/upsert", nil))
+				var body ReturnErrMsg
+				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+				want := merr.TimeoutCode
+				if submitted {
+					want = 112
+				}
+				require.Equal(t, want, body.Code)
+				if timerExit {
+					require.Equal(t, http.StatusRequestTimeout, response.Code)
+				} else {
+					require.Equal(t, http.StatusOK, response.Code)
+				}
+			})
+		}
+	}
+}
+
 func TestTimeoutMiddlewarePassesDeadline(t *testing.T) {
 	ginHandler := gin.Default()
 	app := ginHandler.Group("")
 	path := "/middleware/timeout/deadline"
 	app.POST(path, timeoutMiddleware(func(c *gin.Context) {
+		assert.Nil(t, requestutil.ConditionalWriteStateFromContext(c.Request.Context()))
 		deadline, ok := c.Request.Context().Deadline()
 		assert.True(t, ok)
 		assert.LessOrEqual(t, time.Until(deadline), 3*time.Second)

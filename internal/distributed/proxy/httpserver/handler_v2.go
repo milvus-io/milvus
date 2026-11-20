@@ -106,9 +106,9 @@ func (h *HandlersV2) dqlAdmission(handler gin.HandlerFunc) gin.HandlerFunc {
 			// series.
 			if methodTag, ok := routeToMethod[c.FullPath()]; ok {
 				nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
-				metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, metrics.TotalLabel, metrics.CauseNA, "", "").Inc()
+				metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, metrics.TotalLabel, metrics.CauseNA, "", "", "").Inc()
 				label, cause := requestutil.ParseMetricLabel(nil, err)
-				metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, label, cause, "", "").Inc()
+				metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, label, cause, "", "", "").Inc()
 			}
 			c.Header("Retry-After", "1")
 			// Retry-After is not CORS-safelisted; expose it so browser
@@ -315,7 +315,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 		return &CollectionDataReq{}
 	}, wrapperTraceLog(h.insert))), false))
 	// Upsert
-	router.POST(EntityCategory+UpsertAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+UpsertAction, restfulSizeMiddleware(upsertTimeoutMiddleware(wrapperPost(func() any {
 		return &CollectionDataReq{}
 	}, wrapperTraceLog(h.upsert))), false))
 	// Search
@@ -489,11 +489,13 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 		mlog.Debug(ctx, "high level restful api, read parameters from request body, then start to handle.",
 			mlog.Any("url", gCtx.Request.URL.Path))
 
+		ctx, requestMetrics := proxy.WithRequestMetrics(ctx)
 		resp, err := v2(ctx, gCtx, req, dbName)
 		methodTag, ok := routeToMethod[gCtx.FullPath()]
 		if !ok {
 			return
 		}
+		resourceGroup := requestMetrics.ResourceGroup()
 		metrics.ProxyFunctionCall.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
 			methodTag,
@@ -501,6 +503,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			metrics.CauseNA,
 			dbName,
 			collectionName,
+			resourceGroup,
 		).Inc()
 		label, cause := requestutil.ParseMetricLabel(resp, err)
 		// set metrics for state code
@@ -511,6 +514,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			cause,
 			dbName,
 			collectionName,
+			resourceGroup,
 		).Inc()
 
 		// Mirror the metric's cause into the logs so a failed REST request can be
@@ -1597,6 +1601,11 @@ func matchCountRule(outputs []string) bool {
 }
 
 func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	vectorEncoding, err := parseFloatVectorEncoding(c.Request.Header)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
 	httpReq := anyReq.(*QueryReqV2)
 	req := &milvuspb.QueryRequest{
 		DbName:         dbName,
@@ -1606,7 +1615,6 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		PartitionNames: httpReq.PartitionNames,
 		QueryParams:    []*commonpb.KeyValuePair{},
 	}
-	var err error
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
 		return nil, err
@@ -1653,7 +1661,7 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	if err == nil {
 		queryResp := resp.(*milvuspb.QueryResults)
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
+		outputData, err := buildQueryRespWithEncoding(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema, vectorEncoding)
 		if err == nil {
 			err = setQueryElementOffsets(outputData, queryResp.GetElementIndices())
 		}
@@ -1687,6 +1695,11 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 }
 
 func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	vectorEncoding, err := parseFloatVectorEncoding(c.Request.Header)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
 	httpReq := anyReq.(*CollectionIDReq)
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
@@ -1725,7 +1738,7 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 	if err == nil {
 		queryResp := resp.(*milvuspb.QueryResults)
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
+		outputData, err := buildQueryRespWithEncoding(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema, vectorEncoding)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, fail to deal with get result", mlog.Any("response", resp), mlog.Err(err))
 			HTTPReturn(c, http.StatusOK, gin.H{
@@ -1887,6 +1900,15 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 		PartialUpdate:  httpReq.PartialUpdate,
 		// PartitionName:  "_default",
 	}
+	condition, err := httpReq.WriteCondition.toProto()
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+	req.WriteCondition = condition
+	if condition != nil {
+		req.PartialUpdate = true
+	}
 	fieldOps, err := buildFieldPartialUpdateOpsV2(httpReq.FieldOps)
 	if err != nil {
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -1950,7 +1972,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 				if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
 					HTTPReturn(c, http.StatusOK, gin.H{
 						HTTPReturnCode:               merr.Code(nil),
-						HTTPReturnData:               gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data},
+						HTTPReturnData:               conditionalUpsertData(req.GetWriteCondition(), gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data}, upsertResp),
 						HTTPReturnCost:               cost,
 						HTTPReturnScannedRemoteBytes: scannedRemoteBytes,
 						HTTPReturnScannedTotalBytes:  scannedTotalBytes,
@@ -1959,7 +1981,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 				} else {
 					HTTPReturn(c, http.StatusOK, gin.H{
 						HTTPReturnCode: merr.Code(nil),
-						HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data},
+						HTTPReturnData: conditionalUpsertData(req.GetWriteCondition(), gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data}, upsertResp),
 						HTTPReturnCost: cost,
 					})
 				}
@@ -1967,7 +1989,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 				if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
 					HTTPReturn(c, http.StatusOK, gin.H{
 						HTTPReturnCode:               merr.Code(nil),
-						HTTPReturnData:               gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": formatInt64(upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)},
+						HTTPReturnData:               conditionalUpsertData(req.GetWriteCondition(), gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": formatInt64(upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)}, upsertResp),
 						HTTPReturnCost:               cost,
 						HTTPReturnScannedRemoteBytes: scannedRemoteBytes,
 						HTTPReturnScannedTotalBytes:  scannedTotalBytes,
@@ -1976,7 +1998,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 				} else {
 					HTTPReturn(c, http.StatusOK, gin.H{
 						HTTPReturnCode: merr.Code(nil),
-						HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": formatInt64(upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)},
+						HTTPReturnData: conditionalUpsertData(req.GetWriteCondition(), gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": formatInt64(upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)}, upsertResp),
 						HTTPReturnCost: cost,
 					})
 				}
@@ -1985,7 +2007,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 			if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
 				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:               merr.Code(nil),
-					HTTPReturnData:               gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data},
+					HTTPReturnData:               conditionalUpsertData(req.GetWriteCondition(), gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data}, upsertResp),
 					HTTPReturnCost:               cost,
 					HTTPReturnScannedRemoteBytes: scannedRemoteBytes,
 					HTTPReturnScannedTotalBytes:  scannedTotalBytes,
@@ -1994,7 +2016,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 			} else {
 				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode: merr.Code(nil),
-					HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data},
+					HTTPReturnData: conditionalUpsertData(req.GetWriteCondition(), gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data}, upsertResp),
 					HTTPReturnCost: cost,
 				})
 			}
@@ -2119,6 +2141,11 @@ func appendGroupParams(params []*commonpb.KeyValuePair, groupByField string, gro
 }
 
 func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	vectorEncoding, err := parseFloatVectorEncoding(c.Request.Header)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
 	httpReq := anyReq.(*SearchReqV2)
 	req := &milvuspb.SearchRequest{
 		DbName:         dbName,
@@ -2128,7 +2155,6 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		OutputFields:   httpReq.OutputFields,
 		PartitionNames: httpReq.PartitionNames,
 	}
-	var err error
 	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, search with consistency_level invalid", mlog.Err(err))
@@ -2394,7 +2420,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
+			outputData, err := buildQueryRespWithEncoding(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema, vectorEncoding)
 			if err == nil {
 				err = setSearchElementOffsets(outputData, searchResp.Results.GetElementIndices())
 			}
@@ -2453,6 +2479,11 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 }
 
 func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	vectorEncoding, err := parseFloatVectorEncoding(c.Request.Header)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
 	httpReq := anyReq.(*HybridSearchReq)
 	req := &milvuspb.HybridSearchRequest{
 		DbName:         dbName,
@@ -2461,7 +2492,6 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		Requests:       []*milvuspb.SearchRequest{},
 		OutputFields:   httpReq.OutputFields,
 	}
-	var err error
 	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, search with consistency_level invalid", mlog.Err(err))
@@ -2586,7 +2616,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
+			outputData, err := buildQueryRespWithEncoding(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema, vectorEncoding)
 			if err == nil {
 				err = setSearchElementOffsets(outputData, searchResp.Results.GetElementIndices())
 			}

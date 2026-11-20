@@ -208,14 +208,6 @@ func TestHookInterceptorDoesNotLogCredentialRequests(t *testing.T) {
 	assert.NotContains(t, lowerOutput, "newpassword")
 }
 
-func TestUpdateProxyFunctionCallMetric(t *testing.T) {
-	assert.NotPanics(t, func() {
-		updateProxyFunctionCallMetric("/milvus.proto.milvus.MilvusService/Flush", errors.New("mock hook error"))
-		updateProxyFunctionCallMetric("Flush", merr.WrapErrParameterInvalidMsg("mock input error"))
-		updateProxyFunctionCallMetric("", nil)
-	})
-}
-
 func TestHookInterceptorRedactsImportCredentials(t *testing.T) {
 	for _, stage := range []string{"before", "after"} {
 		t.Run(stage, func(t *testing.T) {

@@ -25,6 +25,11 @@ import (
 )
 
 var (
+	ProxyUpsertWriteConditionRows = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: milvusNamespace, Subsystem: typeutil.ProxyRole, Name: "upsert_write_condition_rows_total",
+		Help: "Confirmed row-level outcomes of conditional upserts, including failed RPCs; unknown outcomes are excluded.",
+	}, []string{nodeIDLabelName, databaseLabelName, collectionName, outcomeLabelName})
+
 	ProxyReceivedNQ = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -33,14 +38,15 @@ var (
 			Help:      "counter of nq of received search and query requests",
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 
-	// ProxySearchVectors record the number of vectors search successfully.
+	// ProxySearchVectors records the number of vectors searched successfully.
+	// rg is empty for requests not scoped by a hook.
 	ProxySearchVectors = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
 			Name:      "search_vectors_count",
 			Help:      "counter of vectors successfully searched",
-		}, []string{nodeIDLabelName, databaseLabelName, collectionName})
+		}, []string{nodeIDLabelName, databaseLabelName, collectionName, ResourceGroupLabelName})
 
 	// ProxyInsertVectors record the number of vectors insert successfully.
 	ProxyInsertVectors = prometheus.NewCounterVec(
@@ -85,7 +91,7 @@ var (
 			Buckets:   buckets, // unit: ms
 		}, []string{nodeIDLabelName, databaseLabelName, collectionName})
 
-	// ProxySQLatency record the latency of search successfully.
+	// ProxySQLatency records successful search/query latency; rg is empty for unscoped requests.
 	ProxySQLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -93,48 +99,7 @@ var (
 			Name:      "sq_latency",
 			Help:      "latency of search or query successfully",
 			Buckets:   buckets,
-		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
-
-	// ProxyResourceGroupSQLatency records the latency of a search or query
-	// attributed to the resource group that served it.
-	//
-	// It is a family of its own rather than an rg label on ProxySQLatency
-	// because only a deployment form that scopes its queries to a resource group
-	// can attribute anything: adding the label to the existing family would give
-	// every stock milvus an extra, permanently empty dimension on a metric its
-	// dashboards and recording rules already read. Nothing scopes a query in a
-	// binary with no provider installed, so it exposes no series here at all.
-	ProxyResourceGroupSQLatency = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.ProxyRole,
-			Name:      "resource_group_sq_latency",
-			Help:      "latency of search or query successfully, per resource group",
-			Buckets:   buckets,
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName, ResourceGroupLabelName})
-
-	// ProxyResourceGroupFunctionCall counts the requests scoped to a resource
-	// group, by the group, with the labels ProxyFunctionCall carries. A family of
-	// its own for the reason ProxyResourceGroupSQLatency is one; only requests a
-	// hook scoped to a resource group are counted.
-	ProxyResourceGroupFunctionCall = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.ProxyRole,
-			Name:      "resource_group_req_count",
-			Help:      "count of operation executed, per resource group",
-		}, []string{nodeIDLabelName, functionLabelName, statusLabelName, causeLabelName, databaseLabelName, collectionName, ResourceGroupLabelName})
-
-	// ProxyResourceGroupSearchVectors counts the vectors searched by requests
-	// scoped to a resource group, by the group: ProxySearchVectors per resource
-	// group, for the same reason as the two families above.
-	ProxyResourceGroupSearchVectors = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.ProxyRole,
-			Name:      "resource_group_search_vectors_count",
-			Help:      "counter of vectors successfully searched, per resource group",
-		}, []string{nodeIDLabelName, databaseLabelName, collectionName, ResourceGroupLabelName})
 
 	// ProxyMutationLatency record the latency that mutate successfully.
 	ProxyMutationLatency = prometheus.NewHistogramVec(
@@ -260,7 +225,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "req_count",
 			Help:      "count of operation executed",
-		}, []string{nodeIDLabelName, functionLabelName, statusLabelName, causeLabelName, databaseLabelName, collectionName})
+		}, []string{nodeIDLabelName, functionLabelName, statusLabelName, causeLabelName, databaseLabelName, collectionName, ResourceGroupLabelName})
 
 	// ProxyReqLatency records the latency for each grpc request.
 	ProxyGRPCLatency = prometheus.NewHistogramVec(
@@ -522,6 +487,7 @@ var (
 
 // RegisterProxy registers Proxy metrics
 func RegisterProxy(registry *prometheus.Registry) {
+	registry.MustRegister(ProxyUpsertWriteConditionRows)
 	registry.MustRegister(ProxyReceivedNQ)
 	registry.MustRegister(ProxySearchVectors)
 	registry.MustRegister(ProxyInsertVectors)
@@ -531,9 +497,6 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyPathReplaceMergeLatency)
 
 	registry.MustRegister(ProxySQLatency)
-	registry.MustRegister(ProxyResourceGroupSQLatency)
-	registry.MustRegister(ProxyResourceGroupFunctionCall)
-	registry.MustRegister(ProxyResourceGroupSearchVectors)
 	registry.MustRegister(ProxyMutationLatency)
 
 	registry.MustRegister(ProxyWaitForSearchResultLatency)
@@ -597,6 +560,10 @@ func RegisterProxy(registry *prometheus.Registry) {
 }
 
 func CleanupProxyDBMetrics(nodeID int64, dbName string) {
+	ProxyUpsertWriteConditionRows.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+	})
 	ProxyPathReplaceParentOperations.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
@@ -625,18 +592,6 @@ func CleanupProxyDBMetrics(nodeID int64, dbName string) {
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
 	})
-	ProxyResourceGroupSQLatency.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		databaseLabelName: dbName,
-	})
-	ProxyResourceGroupFunctionCall.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		databaseLabelName: dbName,
-	})
-	ProxyResourceGroupSearchVectors.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		databaseLabelName: dbName,
-	})
 	ProxyMutationLatency.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
@@ -648,6 +603,11 @@ func CleanupProxyDBMetrics(nodeID int64, dbName string) {
 }
 
 func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection string) {
+	ProxyUpsertWriteConditionRows.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+		collectionName:    collection,
+	})
 	ProxyPathReplaceParentOperations.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
@@ -674,21 +634,6 @@ func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection strin
 		collectionName:    collection,
 	})
 	ProxySQLatency.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyResourceGroupSQLatency.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyResourceGroupFunctionCall.DeletePartialMatch(prometheus.Labels{
-		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
-		databaseLabelName: dbName,
-		collectionName:    collection,
-	})
-	ProxyResourceGroupSearchVectors.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
 		collectionName:    collection,

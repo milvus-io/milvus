@@ -7,7 +7,7 @@ PyYAML==6.0.2
 numpy==2.2.6
 allure-pytest>=2.8.18
 Faker==19.2.0
-pymilvus
+pymilvus==3.0.4rc1
 scikit-learn>=1.5.2
 pytest-xdist==2.5.0
 # Required by pytest-xdist 2.5.0 for parallel execution.
@@ -28,3 +28,5 @@ substrait==0.26.0; python_version >= "3.11"
 pyiceberg[sql-sqlite]==0.8.1
 # for geometry data type
 shapely>=2.0.0
+
+pytest-timeout==2.3.1

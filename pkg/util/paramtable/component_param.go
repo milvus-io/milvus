@@ -53,16 +53,17 @@ const (
 	// at a time.
 	defaultSortReadConcurrencyCap              = 8
 	DefaultLoadTransientBudgetBytes            = 0
-	DefaultGracefulTime                        = 5000 // ms
-	DefaultGracefulStopTimeout                 = 1800 // s, for node
-	DefaultProxyGracefulStopTimeout            = 30   // s，for proxy
-	DefaultCoordGracefulStopTimeout            = 5    // s，for coord
+	DefaultGracefulTime                        = 60000 // ms
+	DefaultGracefulStopTimeout                 = 1800  // s, for node
+	DefaultProxyGracefulStopTimeout            = 30    // s，for proxy
+	DefaultCoordGracefulStopTimeout            = 5     // s，for coord
 	DefaultHighPriorityThreadCoreCoefficient   = 10
 	DefaultMiddlePriorityThreadCoreCoefficient = 5
 	DefaultLowPriorityThreadCoreCoefficient    = 1
 	DefaultThreadPoolMaxThreadsSize            = 16
 	DefaultStorageIopsInitialRate              = uint32(2000)
 	DefaultStorageIopsMaxRate                  = uint32(5000)
+	DefaultSearchFanoutPoolSizeRatio           = 2
 
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
@@ -361,6 +362,7 @@ type commonConfig struct {
 
 	StorageType                   ParamItem `refreshable:"false"`
 	ManifestTransactionRetryLimit ParamItem `refreshable:"true"`
+	ManifestFFIConcurrency        ParamItem `refreshable:"false"`
 	SimdType                      ParamItem `refreshable:"false"`
 
 	DiskWriteMode         ParamItem `refreshable:"true"`
@@ -378,6 +380,7 @@ type commonConfig struct {
 	AdminAuthEnabled      ParamItem `refreshable:"true"`
 	SuperUsers            ParamItem `refreshable:"true"`
 	DefaultRootPassword   ParamItem `refreshable:"false"`
+	PasswordHashAlgorithm ParamItem `refreshable:"true"`
 	RootShouldBindRole    ParamItem `refreshable:"true"`
 	EnablePublicPrivilege ParamItem `refreshable:"false"`
 
@@ -804,6 +807,23 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	}
 	p.ManifestTransactionRetryLimit.Init(base.mgr)
 
+	p.ManifestFFIConcurrency = ParamItem{
+		Key:          "common.storage.manifestFFIConcurrency",
+		Version:      "3.0.0",
+		DefaultValue: "128",
+		Formatter: func(v string) string {
+			return strconv.Itoa(min(2048, max(1, getAsInt(v))))
+		},
+		Doc: "Maximum number of goroutines that may concurrently execute blocking milvus-storage manifest FFI calls " +
+			"in one process. cgo pins each such goroutine to an OS thread, so unbounded concurrency across the " +
+			"synchronous manifest transaction/filesystem entry points and the async manifest executor workers inflates " +
+			"thread count and process RSS (observed 1500+ cgo threads / multiple GBs on coordinators). The budget is " +
+			"process-wide and shared by every component in the process. Values are clamped to [1, 2048]; read once at " +
+			"first manifest I/O, changes require restart.",
+		Export: false,
+	}
+	p.ManifestFFIConcurrency.Init(base.mgr)
+
 	p.HighPriorityThreadCoreCoefficient = ParamItem{
 		Key:          "common.threadCoreCoefficient.highPriority",
 		Version:      "2.0.0",
@@ -818,9 +838,8 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Key:          "common.threadCoreCoefficient.middlePriority",
 		Version:      "2.0.0",
 		DefaultValue: strconv.Itoa(DefaultMiddlePriorityThreadCoreCoefficient),
-		Doc: "Thread-to-core ratio for each of the independent middle priority " +
-			"and search fanout pools; both follow maxThreadsSize.",
-		Export: true,
+		Doc:          "Thread-to-core ratio for the middle priority pool; follows maxThreadsSize.",
+		Export:       true,
 	}
 	p.MiddlePriorityThreadCoreCoefficient.Init(base.mgr)
 
@@ -838,7 +857,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Key:          "common.threadCoreCoefficient.maxThreadsSize",
 		Version:      "2.6.13",
 		DefaultValue: strconv.Itoa(DefaultThreadPoolMaxThreadsSize),
-		Doc:          "The maximum number of threads in the thread pool, only effective when greater than 0",
+		Doc:          "Maximum thread count for the high, middle and low priority pools; only effective when greater than 0. Does not limit the search fanout pool.",
 		Export:       true,
 	}
 	p.ThreadPoolMaxThreadsSize.Init(base.mgr)
@@ -846,16 +865,16 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	p.ArrowIOThreadPoolCoefficient = ParamItem{
 		Key:          "common.arrow.ioThreadPoolCoefficient",
 		Version:      "3.0.0",
-		DefaultValue: "0",
+		DefaultValue: "1",
 		Doc: `Coefficient for arrow's internal IO thread pool size ` +
 			`(threads = CPU cores × coefficient, then clamped by ` +
 			`common.arrow.ioThreadPoolMaxCapacity when > 0). Arrow runs async ` +
 			`range reads (ReadRangeCache) on this pool, which issue the actual ` +
 			`S3 GetObject requests — it is the real ceiling on parallel ` +
 			`object-storage reads, independent of segcore HIGH/MIDDLE pools and ` +
-			`minio.maxConnections. Arrow's built-in default is a fixed constant ` +
-			`of 8, which is almost always undersized. Typical range 2–8. 0 keeps ` +
-			`arrow's default (and the cap is ignored).`,
+			`minio.maxConnections. The default 1 gives one thread per core. ` +
+			`0 keeps arrow's built-in fixed pool of 8 threads (and the cap is ` +
+			`ignored), which is undersized on most hosts.`,
 		Export: false,
 	}
 	p.ArrowIOThreadPoolCoefficient.Init(base.mgr)
@@ -900,11 +919,13 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	p.StorageReaderThreadPoolSize = ParamItem{
 		Key:          "common.storage.readerThreadPoolSize",
 		Version:      "3.0.0",
-		DefaultValue: "0",
+		DefaultValue: "-1",
 		Doc: `Size of milvus-storage's global reader thread pool. When > 0, chunk ` +
 			`(row-group) reads issued by one storage-v3/external reader may be ` +
-			`fanned out across this pool. 0 keeps the pre-existing sequential ` +
-			`behavior. ` +
+			`fanned out across this pool. -1 (auto, the default) uses one ` +
+			`thread per CPU core on a dedicated DataNode and 0 in any other ` +
+			`process (standalone, mixed roles). 0 keeps the pre-existing ` +
+			`sequential behavior. ` +
 			`Only DataNode's segcore init creates the pool, but the pool itself ` +
 			`is a process-wide singleton in milvus-storage. In a cluster ` +
 			`deployment QueryNode runs in its own process, never creates one, ` +
@@ -912,13 +933,19 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 			`standalone all roles share one process, so QueryNode readers ` +
 			`opened after DataNode's segcore init pick up this pool too and ` +
 			`fan out on it — size it with the co-located search traffic in ` +
-			`mind. ` +
+			`mind. On a DataNode every storage-v3/external reader in the process ` +
+			`uses the pool once it exists, not only index build: compaction, ` +
+			`import and sort reads keep the 32MB window but can fan out on it ` +
+			`when a round holds more chunks than the pool (e.g. small row groups ` +
+			`across several column groups); the effect on those paths has not ` +
+			`been measured. ` +
 			`IMPORTANT: milvus-storage splits a round's chunks into contiguous ` +
 			`blocks and merges them without limit when the chunk count does not ` +
 			`exceed the pool size, so a round whose chunks are contiguous and ` +
-			`fewer than or equal to this value is submitted as a SINGLE task and ` +
-			`gains no fan-out. To get real per-chunk parallelism the number of ` +
-			`chunks per round must exceed this value — see ` +
+			`fewer than or equal to this value is submitted as a SINGLE task, ` +
+			`exactly as a disabled pool reads it. Only rounds holding more ` +
+			`chunks than this value fan out, which is expected, not measured, ` +
+			`to be no slower than 0 — see ` +
 			`common.storage.indexBuildReadWindowBytes. Range-level parallelism ` +
 			`from arrow's parquet prebuffer (common.arrow.ioThreadPoolCoefficient) ` +
 			`is independent of this pool. ` +
@@ -937,20 +964,36 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	p.IndexBuildReadWindowBytes = ParamItem{
 		Key:          "common.storage.indexBuildReadWindowBytes",
 		Version:      "3.0.0",
-		DefaultValue: "0",
+		DefaultValue: "-1",
 		Doc: `Per-round read window in bytes (milvus-storage reader.record_batch_max_size) ` +
-			`for index-build manifest reads. The default window (0 = milvus-storage's ` +
-			`32MB) admits a single 64MB-class parquet row group per prefetch round, ` +
-			`serializing the raw-data download to one object-storage range read at a ` +
-			`time. Set to N x row-group-size so one round spans multiple row groups, ` +
-			`whose column chunks are then prefetched in parallel by arrow ` +
-			`(common.arrow.ioThreadPoolCoefficient). ` +
+			`for index-build manifest reads. -1 (auto, the default) sizes it on a ` +
+			`dedicated DataNode so every arrow IO thread has two coalesced read ` +
+			`ranges in flight per round: 2 x arrow IO threads ` +
+			`(common.arrow.ioThreadPoolCoefficient, arrow's 8 when 0) x read range size ` +
+			`(common.arrow.reader.rangeSizeLimitBytes, arrow's 32MB when 0), capped ` +
+			`at 4GB — e.g. 768MB with 12 IO threads. The IO pool is the ceiling on ` +
+			`concurrent object-storage reads, so a larger window buys no extra ` +
+			`concurrency. In any other process (standalone, mixed roles) -1 means 0. ` +
+			`0 keeps milvus-storage's 32MB, which admits a single 64MB-class parquet ` +
+			`row group per prefetch round and serializes the raw-data download to ` +
+			`one object-storage range read at a time. A value > 0 is used as is. ` +
 			`If you also want per-chunk fan-out on the milvus-storage reader pool, ` +
-			`N must be strictly greater than common.storage.readerThreadPoolSize: ` +
-			`at or below the pool size, contiguous chunks are merged into one task ` +
-			`(e.g. a 1GB window over 64MB row groups is 16 chunks, which a 16-thread ` +
-			`pool executes as a single task). Memory cost: up to this many bytes ` +
-			`buffered per running build task, on top of the decode window. Max 4GB. ` +
+			`the window must span strictly more row groups than ` +
+			`common.storage.readerThreadPoolSize: at or below the pool size, ` +
+			`contiguous chunks are merged into one task (e.g. a 1GB window over ` +
+			`64MB row groups is 16 chunks, which a 16-thread pool executes as a ` +
+			`single task). With both settings automatic and the default arrow IO ` +
+			`pool (common.arrow.ioThreadPoolCoefficient=1, ` +
+			`common.arrow.ioThreadPoolMaxCapacity=0) that holds for row groups ` +
+			`under 64MB (2 x 32MB ranges per IO thread, one IO and one reader ` +
+			`thread per core); a capped IO pool shrinks the window and with it ` +
+			`that row-group bound. Memory cost: up to this many bytes buffered ` +
+			`per CONCURRENT build task, on top of the decode window, so K tasks ` +
+			`running at once may buffer K windows (the IO pool, and so read ` +
+			`concurrency, is shared by all of them). The automatic window grows ` +
+			`with the core count (512MB on 8 cores, 2GB on 32, the 4GB cap from ` +
+			`64) and is not part of DataCoord's task slot estimate; set an ` +
+			`explicit value on memory-tight DataNodes. Max 4GB. ` +
 			`Only affects index build; query-node loads keep the default window. ` +
 			`Batch decode for these reads runs on the segcore LOW-priority pool ` +
 			`(common.threadCoreCoefficient.lowPriority), deliberately not the ` +
@@ -1155,6 +1198,19 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Sensitivity: Sensitive,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
+
+	p.PasswordHashAlgorithm = ParamItem{
+		Key:     "common.security.passwordHashAlgorithm",
+		Version: "3.1.0",
+		Doc: `Algorithm used to hash newly created or updated passwords: bcrypt or pbkdf2-sha512.
+pbkdf2-sha512 is a FIPS-approved key derivation function. On a build with MILVUS_FIPS_ENABLED=ON it runs on BoringCrypto.
+Existing hashes keep working after a change and are rehashed only when the password is updated, including the root hash created at first startup.
+Upgrade every node, and every cluster in a CDC topology, before selecting pbkdf2-sha512: older versions cannot verify these hashes, and they stop verifying after a downgrade.`,
+		DefaultValue: "bcrypt",
+		Export:       true,
+		Sensitivity:  NonSensitive,
+	}
+	p.PasswordHashAlgorithm.Init(base.mgr)
 
 	p.RootShouldBindRole = ParamItem{
 		Key:          "common.security.rootShouldBindRole",
@@ -4134,7 +4190,9 @@ type queryNodeConfig struct {
 	// segcore
 	KnowhereFetchThreadPoolSize        ParamItem `refreshable:"true"`
 	KnowhereThreadPoolSize             ParamItem `refreshable:"true"`
+	SearchFanoutPoolSizeRatio          ParamItem `refreshable:"true"`
 	ChunkRows                          ParamItem `refreshable:"false"`
+	FmindexCostRatio                   ParamItem `refreshable:"false"`
 	EnableInterminSegmentIndex         ParamItem `refreshable:"false"`
 	InterimIndexNlist                  ParamItem `refreshable:"false"`
 	InterimIndexNProbe                 ParamItem `refreshable:"false"`
@@ -4758,6 +4816,24 @@ If set to 0, time based eviction is disabled.`,
 	}
 	p.KnowhereThreadPoolSize.Init(base.mgr)
 
+	p.SearchFanoutPoolSizeRatio = ParamItem{
+		Key:          "queryNode.segcore.searchFanoutPoolSizeRatio",
+		Version:      "3.0.0",
+		DefaultValue: strconv.Itoa(DefaultSearchFanoutPoolSizeRatio),
+		Formatter: func(value string) string {
+			ratio, err := strconv.ParseFloat(value, 64)
+			// C++ multiplies the core count and ratio as floats before rounding to int.
+			threads := math.Round(float64(float32(hardware.GetCPUNum()) * float32(ratio)))
+			if err != nil || math.IsNaN(threads) || math.IsInf(threads, 0) || float32(ratio) <= 0 || threads > math.MaxInt32 {
+				return strconv.Itoa(DefaultSearchFanoutPoolSizeRatio)
+			}
+			return value
+		},
+		Doc:    "Thread-to-core ratio for the search fanout pool; independent of the search executor and not limited by common.threadCoreCoefficient.maxThreadsSize. Invalid, non-positive, non-finite or overflowing values use the default ratio of 2.",
+		Export: true,
+	}
+	p.SearchFanoutPoolSizeRatio.Init(base.mgr)
+
 	p.KnowhereFetchThreadPoolSize = ParamItem{
 		Key:          "queryNode.segcore.knowhereFetchThreadPoolNumRatio",
 		Version:      "2.6.0",
@@ -4795,6 +4871,31 @@ If set to 0, time based eviction is disabled.`,
 		Export: true,
 	}
 	p.ChunkRows.Init(base.mgr)
+
+	p.FmindexCostRatio = ParamItem{
+		Key:          "queryNode.fmindexCostRatio",
+		Version:      "3.0.0",
+		DefaultValue: "0.001",
+		Formatter: func(v string) string {
+			// The value is pushed to segcore as a C float (float32), and the C++
+			// setter asserts it is in (0, 1]. Validate the NARROWED value so a
+			// bad config never crashes the query node at init:
+			//   - NaN must be rejected explicitly (ParseFloat accepts "NaN", and
+			//     both NaN<=0 and NaN>1 are false, so it would slip through);
+			//   - a tiny-but-positive float64 like 1e-50 underflows to 0.0f as a
+			//     float32 and would trip the `ratio > 0` assert — checking the
+			//     float32 value (not the float64) catches it.
+			ratio := getAsFloat(v)
+			f := float32(ratio)
+			if math.IsNaN(ratio) || math.IsInf(ratio, 0) || f <= 0 || f > 1 {
+				return "0.001"
+			}
+			return v
+		},
+		Doc:    `FM-index count-first guard threshold. An FMINDEX-accelerated LIKE (prefix/infix/suffix and general LIKE with interior wildcards) runs through the index only when occ * sa_sample_rate < fmindexCostRatio * total_tokens; otherwise it falls back to the raw-data scan (all paths are exact, this only picks the cheaper one). For the anchored forms the index answer is exact; for general LIKE it is candidate generation followed by an exact recheck of the candidate rows on the original VARCHAR data. The bound prices only FM locate, not the recheck bytes, so it stays row-length invariant only for the anchored forms; very long rows with unselective fragments may be routed to a path slower than the scan. Must be in (0, 1]; larger favors the index. Default 0.001 is the conservative crossover measured in benchmarks.`,
+		Export: true,
+	}
+	p.FmindexCostRatio.Init(base.mgr)
 
 	p.EnableInterminSegmentIndex = ParamItem{
 		Key:          "queryNode.segcore.interimIndex.enableIndex",

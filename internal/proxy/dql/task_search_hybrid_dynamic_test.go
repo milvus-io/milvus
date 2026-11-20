@@ -162,7 +162,11 @@ func TestHybridDynamicPipeline(t *testing.T) {
 							return []any{[]*milvuspb.SearchResults{
 								makeResult([]int64{1, 2}, []int64{2, 0}),
 								makeResult([]int64{2, 3, 1, 3}, []int64{2, 2}),
-							}, []string{metric.IP, metric.IP}}, nil
+							}, []searchScoreInfo{
+								// Both nested chains write $score (L0 and L1 respectively).
+								newSearchScoreInfo(metric.IP, true),
+								newSearchScoreInfo(metric.IP, true),
+							}}, nil
 						}), nil
 					}
 					queryMock := mockey.Mock((*requeryOperator).requery).To(func(_ *requeryOperator, _ context.Context, _ trace.Span, ids *schemapb.IDs, fields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {

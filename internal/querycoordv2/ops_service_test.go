@@ -18,6 +18,7 @@ package querycoordv2
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -980,4 +981,156 @@ func (suite *OpsServiceSuite) TestTransferChannel() {
 
 func TestOpsService(t *testing.T) {
 	suite.Run(t, new(OpsServiceSuite))
+}
+
+// setupTransferOutsideReplica loads two collections whose replicas share
+// source node 1. Node 2 serves only collection 1, node 3 only collection 2,
+// and node 4 serves neither.
+func (suite *OpsServiceSuite) setupTransferOutsideReplica(ctx context.Context) {
+	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
+	for _, node := range []int64{1, 2, 3, 4} {
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   node,
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
+	}
+	// Update replaces a node's whole distribution, so publish it once.
+	var segments []*meta.Segment
+	for _, collectionID := range []int64{1, 2} {
+		suite.meta.Put(ctx, utils.CreateTestReplica(collectionID, collectionID, []int64{1, collectionID + 1}))
+		suite.meta.PutCollection(ctx, utils.CreateTestCollection(collectionID, 1), utils.CreateTestPartition(collectionID, collectionID))
+		channel := &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: fmt.Sprintf("channel-%d", collectionID)}
+		segment := &datapb.SegmentInfo{
+			ID:            collectionID * 10,
+			CollectionID:  collectionID,
+			PartitionID:   collectionID,
+			InsertChannel: channel.GetChannelName(),
+			NumOfRows:     1,
+		}
+		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).
+			Return([]*datapb.VchannelInfo{channel}, []*datapb.SegmentInfo{segment}, nil).Maybe()
+		suite.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+		suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
+		segments = append(segments, &meta.Segment{SegmentInfo: segment, Node: 1})
+	}
+	suite.dist.SegmentDistManager.Update(1, segments...)
+	suite.dist.ChannelDistManager.Update(1,
+		&meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel-1"}, Node: 1},
+		&meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 2, ChannelName: "channel-2"}, Node: 1},
+	)
+	assign.InitGlobalAssignPolicyFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
+	balance.InitGlobalBalancerFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.targetMgr)
+}
+
+func (suite *OpsServiceSuite) TestTransferSegmentRejectsTargetOutsideReplica() {
+	ctx := context.Background()
+	suite.setupTransferOutsideReplica(ctx)
+
+	// A single segment whose replica does not contain the target fails
+	// without creating a task.
+	resp, err := suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
+		SourceNodeID: 1,
+		TargetNodeID: 3,
+		SegmentID:    10,
+	})
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
+
+	// No replica on the source node contains the target.
+	resp, err = suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
+		SourceNodeID: 1,
+		TargetNodeID: 4,
+		TransferAll:  true,
+	})
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
+
+	// Transfer all moves only the segments of the replica that owns the target.
+	var added []task.Task
+	suite.taskScheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
+		added = append(added, t)
+		return nil
+	})
+	resp, err = suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
+		SourceNodeID: 1,
+		TargetNodeID: 3,
+		TransferAll:  true,
+	})
+	suite.NoError(err)
+	suite.True(merr.Ok(resp))
+	suite.Require().Len(added, 1)
+	suite.Equal(int64(2), added[0].CollectionID())
+	suite.Equal(int64(3), added[0].Actions()[0].Node())
+
+	// A single segment is found whichever replica of the source node is
+	// visited first, and a missing one is still reported.
+	resp, err = suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
+		SourceNodeID: 1,
+		TargetNodeID: 3,
+		SegmentID:    20,
+	})
+	suite.NoError(err)
+	suite.True(merr.Ok(resp))
+	resp, err = suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
+		SourceNodeID: 1,
+		TargetNodeID: 3,
+		SegmentID:    99,
+	})
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(resp), merr.ErrSegmentNotFound)
+}
+
+func (suite *OpsServiceSuite) TestTransferChannelRejectsTargetOutsideReplica() {
+	ctx := context.Background()
+	suite.setupTransferOutsideReplica(ctx)
+
+	resp, err := suite.server.TransferChannel(ctx, &querypb.TransferChannelRequest{
+		SourceNodeID: 1,
+		TargetNodeID: 3,
+		ChannelName:  "channel-1",
+	})
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
+
+	resp, err = suite.server.TransferChannel(ctx, &querypb.TransferChannelRequest{
+		SourceNodeID: 1,
+		TargetNodeID: 4,
+		TransferAll:  true,
+	})
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
+
+	var added []task.Task
+	suite.taskScheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
+		added = append(added, t)
+		return nil
+	})
+	resp, err = suite.server.TransferChannel(ctx, &querypb.TransferChannelRequest{
+		SourceNodeID: 1,
+		TargetNodeID: 3,
+		TransferAll:  true,
+	})
+	suite.NoError(err)
+	suite.True(merr.Ok(resp))
+	suite.Require().Len(added, 1)
+	suite.Equal(int64(2), added[0].CollectionID())
+	suite.Equal(int64(3), added[0].Actions()[0].Node())
+
+	// A single channel is found whichever replica of the source node is
+	// visited first, and a missing one is still reported.
+	resp, err = suite.server.TransferChannel(ctx, &querypb.TransferChannelRequest{
+		SourceNodeID: 1,
+		TargetNodeID: 3,
+		ChannelName:  "channel-2",
+	})
+	suite.NoError(err)
+	suite.True(merr.Ok(resp))
+	resp, err = suite.server.TransferChannel(ctx, &querypb.TransferChannelRequest{
+		SourceNodeID: 1,
+		TargetNodeID: 3,
+		ChannelName:  "channel-9",
+	})
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(resp), merr.ErrChannelNotFound)
 }

@@ -99,7 +99,7 @@ func gatherHashRows(schema *schemapb.CollectionSchema, src *storage.InsertData, 
 	for c, partitions := range selections {
 		res[c] = make([]*storage.InsertData, len(partitions))
 		for p, indices := range partitions {
-			data, err := storage.NewInsertDataWithCap(schema, len(indices), true)
+			data, err := storage.NewInsertDataBuilder(schema).WithCapacity(len(indices)).WithFunctionOutputFields().Build()
 			if err != nil {
 				return nil, err
 			}

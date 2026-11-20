@@ -74,13 +74,49 @@ class FixedBitmapExpr : public Expr {
     TargetBitmap valid_;
 };
 
+// Each row given as {data, valid}.
 std::shared_ptr<FixedBitmapExpr>
-FixedBool(const bool data, const bool valid) {
-    TargetBitmap data_bitmap(1, data);
-    TargetBitmap valid_bitmap(1, valid);
+FixedRows(std::initializer_list<std::pair<bool, bool>> rows) {
+    TargetBitmap data_bitmap(rows.size(), false);
+    TargetBitmap valid_bitmap(rows.size(), false);
+    size_t i = 0;
+    for (const auto& [data, valid] : rows) {
+        data_bitmap[i] = data;
+        valid_bitmap[i] = valid;
+        ++i;
+    }
     return std::make_shared<FixedBitmapExpr>(std::move(data_bitmap),
                                              std::move(valid_bitmap));
 }
+
+std::shared_ptr<FixedBitmapExpr>
+FixedBool(const bool data, const bool valid) {
+    return FixedRows({{data, valid}});
+}
+
+// A boolean node that is not a conjunction (stand-in for NOT in the
+// null-rejection propagation tests).
+class PassThroughExpr : public Expr {
+ public:
+    explicit PassThroughExpr(ExprPtr input)
+        : Expr(DataType::BOOL, {std::move(input)}, "PassThroughExpr", nullptr) {
+    }
+
+    void
+    Eval(EvalCtx& context, VectorPtr& result) override {
+        inputs_[0]->Eval(context, result);
+    }
+
+    std::string
+    ToString() const override {
+        return "PassThroughExpr";
+    }
+
+    std::optional<milvus::expr::ColumnInfo>
+    GetColumnInfo() const override {
+        return std::nullopt;
+    }
+};
 
 enum class Truth { False, Unknown, True };
 
@@ -177,8 +213,59 @@ ExpectTruth(const ColumnVectorPtr& output, size_t row, Truth expected) {
 
 }  // namespace
 
+TEST(ConjunctExprTest, BorrowedMaskSurvivesNestedReplacementAndExceptions) {
+    constexpr size_t size = 67;
+    TargetBitmap backing(size + 13, false);
+    for (size_t i = 0; i < size; ++i) {
+        backing[i + 7] = i % 3 != 1;
+    }
+    const auto snapshot = backing.clone();
+    QueryContext query("borrowed_mask", nullptr, size, 0);
+    ExecContext exec(&query);
+    for (bool fail : {false, true}) {
+        EvalCtx ctx(&exec);
+        const auto parent = backing.view(7, size);
+        ctx.set_bitmap_input(parent);
+        // Move an owning mask in and out before restoring a borrowed mask.
+        auto saved = ctx.take_bitmap_input();
+        ctx.set_bitmap_input(TargetBitmap(size, true));
+        ctx.set_bitmap_input(std::move(saved));
+        auto first = std::make_shared<MaskAwareExpr>(
+            std::vector<Truth>(size, Truth::True), size);
+        auto last = std::make_shared<MaskAwareExpr>(
+            std::vector<Truth>(size, Truth::True), size);
+        last->throw_on_eval_ = fail;
+        auto inner = std::make_shared<PhyConjunctFilterExpr>(
+            std::vector<ExprPtr>{first, last}, true, nullptr);
+        PhyConjunctFilterExpr outer(
+            {inner,
+             std::make_shared<FixedBitmapExpr>(TargetBitmap(size, false),
+                                               TargetBitmap(size, true))},
+            false,
+            nullptr);
+        VectorPtr result;
+        if (fail) {
+            EXPECT_THROW(outer.Eval(ctx, result), std::runtime_error);
+        } else {
+            outer.Eval(ctx, result);
+        }
+        const auto restored = ctx.get_bitmap_input();
+        EXPECT_EQ(restored.data(), backing.data());
+        EXPECT_EQ(restored.offset(), 7);
+        EXPECT_EQ(restored.size(), size);
+        for (size_t i = 0; i < size; ++i) {
+            EXPECT_EQ(restored[i], parent[i]);
+        }
+        EXPECT_TRUE(backing == snapshot);
+        ctx.clear_bitmap_input();
+        EXPECT_TRUE(ctx.get_bitmap_input().empty());
+        EXPECT_TRUE(backing == snapshot);
+    }
+}
+
 TEST(ConjunctExprTest, NestedMasksPreserveCandidatesAndThreeValuedLogic) {
-    // Enumerate the complete truth table for A AND (B OR C), including NOT.
+    // Enumerate the complete truth table for A AND (B OR C), both directly
+    // and below a real NOT, with and without a null-rejecting consumer.
     constexpr size_t size = 27;
     std::vector<Truth> a(size), b(size), c(size);
     for (size_t i = 0; i < size; ++i) {
@@ -188,60 +275,78 @@ TEST(ConjunctExprTest, NestedMasksPreserveCandidatesAndThreeValuedLogic) {
     }
     for (const bool inherited_mask : {false, true}) {
         for (const bool negate : {false, true}) {
-            SCOPED_TRACE(::testing::Message()
-                         << "inherited_mask=" << inherited_mask
-                         << " negate=" << negate);
-            auto first = std::make_shared<MaskAwareExpr>(a, size);
-            auto second = std::make_shared<MaskAwareExpr>(b, size);
-            auto third = std::make_shared<MaskAwareExpr>(c, size);
-            auto inner = std::make_shared<PhyConjunctFilterExpr>(
-                std::vector<ExprPtr>{second, third}, false, nullptr);
-            auto outer = std::make_shared<PhyConjunctFilterExpr>(
-                std::vector<ExprPtr>{first, inner}, true, nullptr);
-            ExprPtr root = outer;
-            if (negate) {
-                auto logical_not = std::make_shared<expr::LogicalUnaryExpr>(
-                    expr::LogicalUnaryExpr::OpType::LogicalNot,
-                    std::make_shared<expr::AlwaysTrueExpr>());
-                root = std::make_shared<PhyLogicalUnaryExpr>(
-                    std::vector<ExprPtr>{outer}, logical_not, "NOT", nullptr);
-            }
-            QueryContext query_context("conjunct_test", nullptr, size, 0);
-            ExecContext exec_context(&query_context);
-            EvalCtx eval_context(&exec_context);
-            TargetBitmap parent(inherited_mask ? size : 0, false);
-            for (size_t i = 0; i < parent.size(); ++i) {
-                parent[i] = i % 4 != 0;
-            }
-            eval_context.set_bitmap_input(parent.clone());
-
-            VectorPtr result;
-            root->Eval(eval_context, result);
-
-            auto output = std::dynamic_pointer_cast<ColumnVector>(result);
-            ASSERT_NE(output, nullptr);
-            ASSERT_EQ(output->size(), size);
-            std::vector<size_t> expected_b, expected_c;
-            for (size_t i = 0; i < size; ++i) {
-                if (!parent.empty() && !parent[i]) {
-                    continue;
+            for (const bool null_rejecting : {false, true}) {
+                SCOPED_TRACE(::testing::Message()
+                             << "inherited_mask=" << inherited_mask
+                             << " negate=" << negate
+                             << " null_rejecting=" << null_rejecting);
+                auto first = std::make_shared<MaskAwareExpr>(a, size);
+                auto second = std::make_shared<MaskAwareExpr>(b, size);
+                auto third = std::make_shared<MaskAwareExpr>(c, size);
+                auto inner = std::make_shared<PhyConjunctFilterExpr>(
+                    std::vector<ExprPtr>{second, third}, false, nullptr);
+                auto outer = std::make_shared<PhyConjunctFilterExpr>(
+                    std::vector<ExprPtr>{first, inner}, true, nullptr);
+                ExprPtr root = outer;
+                if (negate) {
+                    auto logical_not = std::make_shared<expr::LogicalUnaryExpr>(
+                        expr::LogicalUnaryExpr::OpType::LogicalNot,
+                        std::make_shared<expr::AlwaysTrueExpr>());
+                    root = std::make_shared<PhyLogicalUnaryExpr>(
+                        std::vector<ExprPtr>{outer},
+                        logical_not,
+                        "NOT",
+                        nullptr);
                 }
-                if (a[i] != Truth::False) {
-                    expected_b.push_back(i);
-                    if (b[i] != Truth::True) {
-                        expected_c.push_back(i);
+                if (null_rejecting) {
+                    root->MarkNullRejecting();
+                }
+                QueryContext query_context("conjunct_test", nullptr, size, 0);
+                ExecContext exec_context(&query_context);
+                EvalCtx eval_context(&exec_context);
+                TargetBitmap parent(inherited_mask ? size : 0, false);
+                for (size_t i = 0; i < parent.size(); ++i) {
+                    parent[i] = i % 4 != 0;
+                }
+                eval_context.set_bitmap_input(parent.clone());
+
+                VectorPtr result;
+                root->Eval(eval_context, result);
+
+                auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+                ASSERT_NE(output, nullptr);
+                ASSERT_EQ(output->size(), size);
+                std::vector<size_t> expected_b, expected_c;
+                const bool reject_unknown = null_rejecting && !negate;
+                for (size_t i = 0; i < size; ++i) {
+                    if (!parent.empty() && !parent[i]) {
+                        continue;
+                    }
+                    if (a[i] == Truth::True ||
+                        (!reject_unknown && a[i] == Truth::Unknown)) {
+                        expected_b.push_back(i);
+                        if (b[i] != Truth::True) {
+                            expected_c.push_back(i);
+                        }
+                    }
+                    auto expected = std::min(a[i], std::max(b[i], c[i]));
+                    if (negate && expected != Truth::Unknown) {
+                        expected = expected == Truth::True ? Truth::False
+                                                           : Truth::True;
+                    }
+                    if (reject_unknown) {
+                        TargetBitmapView data(output->GetRawData(), size);
+                        TargetBitmapView valid(output->GetValidRawData(), size);
+                        EXPECT_EQ(data[i] && valid[i], expected == Truth::True)
+                            << "row " << i;
+                    } else {
+                        ExpectTruth(output, i, expected);
                     }
                 }
-                auto expected = std::min(a[i], std::max(b[i], c[i]));
-                if (negate && expected != Truth::Unknown) {
-                    expected =
-                        expected == Truth::True ? Truth::False : Truth::True;
-                }
-                ExpectTruth(output, i, expected);
+                EXPECT_EQ(second->evaluated_rows_, expected_b);
+                EXPECT_EQ(third->evaluated_rows_, expected_c);
+                ExpectMask(eval_context, parent);
             }
-            EXPECT_EQ(second->evaluated_rows_, expected_b);
-            EXPECT_EQ(third->evaluated_rows_, expected_c);
-            ExpectMask(eval_context, parent);
         }
     }
 }
@@ -410,11 +515,28 @@ TEST(ConjunctExprTest, NestedOffsetMasksUseCandidatePositions) {
     ExpectTruth(output, 0, Truth::True);
     ExpectTruth(output, 1, Truth::True);
     EXPECT_EQ(third->eval_count_, 1);
-    EXPECT_EQ(third->move_count_, 1);
+    EXPECT_EQ(third->move_count_, 0);
     EXPECT_EQ(first->cursor_, 0);
     EXPECT_EQ(second->cursor_, 0);
     EXPECT_EQ(third->cursor_, 0);
     ExpectMask(eval_context, next_parent);
+
+    // Direct offset evaluation leaves every sequential cursor at its origin.
+    eval_context.set_offset_input(nullptr);
+    eval_context.clear_bitmap_input();
+    for (const auto& node : std::vector<ExprPtr>{first, second, third, inner}) {
+        node->SetHasOffsetInput(false);
+    }
+    outer.SetHasOffsetInput(false);
+    outer.Eval(eval_context, result);
+    EXPECT_EQ(first->cursor_, 65);
+    EXPECT_EQ(second->cursor_, 65);
+    EXPECT_EQ(third->cursor_, 65);
+    output = std::dynamic_pointer_cast<ColumnVector>(result);
+    ASSERT_EQ(output->size(), 65);
+    for (size_t i = 0; i < 65; ++i) {
+        ExpectTruth(output, i, Truth::False);
+    }
 }
 
 TEST(ConjunctExprTest, NestedOrSkipKeepsNonnullableNullTailAligned) {
@@ -511,6 +633,198 @@ TEST(ConjunctExprTest, AndKeepsUnknownRowsActiveForFollowingFalse) {
     EXPECT_EQ(true_expr->eval_count_, 1);
     EXPECT_EQ(false_expr->eval_count_, 1);
     EXPECT_EQ(false_expr->move_count_, 0);
+}
+
+TEST(ConjunctExprTest, NullRejectingAndSkipsFollowingForAllUnknown) {
+    auto unknown = FixedBool(false, false);
+    auto heavy = FixedBool(true, true);
+
+    std::vector<ExprPtr> inputs{unknown, heavy};
+    auto conjunct = std::make_shared<PhyConjunctFilterExpr>(
+        std::move(inputs), true, nullptr);
+    conjunct->MarkNullRejecting();
+
+    QueryContext query_context("conjunct_test", nullptr, 1, 0);
+    ExecContext exec_context(&query_context);
+    EvalCtx eval_context(&exec_context);
+
+    VectorPtr result;
+    conjunct->Eval(eval_context, result);
+
+    auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+    ASSERT_NE(output, nullptr);
+    TargetBitmapView data(output->GetRawData(), output->size());
+    TargetBitmapView valid(output->GetValidRawData(), output->size());
+    ASSERT_EQ(output->size(), 1);
+    // The row stays UNKNOWN, which the null-rejecting consumer treats as
+    // FALSE.
+    EXPECT_FALSE(data[0]);
+    EXPECT_FALSE(valid[0]);
+
+    // The UNKNOWN row can never become TRUE under AND, so the following
+    // expression must be skipped, not evaluated.
+    EXPECT_EQ(unknown->eval_count_, 1);
+    EXPECT_EQ(heavy->eval_count_, 0);
+    EXPECT_EQ(heavy->move_count_, 1);
+}
+
+TEST(ConjunctExprTest, NullRejectingAndStillEvaluatesForTrueRows) {
+    auto first = FixedRows({{false, false}, {true, true}});
+    auto second = FixedRows({{true, true}, {false, true}});
+
+    std::vector<ExprPtr> inputs{first, second};
+    auto conjunct = std::make_shared<PhyConjunctFilterExpr>(
+        std::move(inputs), true, nullptr);
+    conjunct->MarkNullRejecting();
+
+    QueryContext query_context("conjunct_test", nullptr, 2, 0);
+    ExecContext exec_context(&query_context);
+    EvalCtx eval_context(&exec_context);
+
+    VectorPtr result;
+    conjunct->Eval(eval_context, result);
+
+    // Row 1 is TRUE after the first expression, so the second must run.
+    EXPECT_EQ(second->eval_count_, 1);
+    EXPECT_EQ(second->move_count_, 0);
+
+    auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+    ASSERT_NE(output, nullptr);
+    TargetBitmapView data(output->GetRawData(), output->size());
+    TargetBitmapView valid(output->GetValidRawData(), output->size());
+    ASSERT_EQ(output->size(), 2);
+    // Row 1: TRUE AND FALSE = FALSE.
+    EXPECT_FALSE(data[1]);
+    EXPECT_TRUE(valid[1]);
+    // Row 0 is excluded either way (UNKNOWN or FALSE).
+    EXPECT_FALSE(data[0] && valid[0]);
+}
+
+TEST(ConjunctExprTest, NullRejectingMatchesDefaultIncludedSet) {
+    // The included set (definite TRUE rows) must be identical with and
+    // without null-rejection; only excluded rows may differ between
+    // UNKNOWN and FALSE.
+    auto build_and_eval = [](bool null_rejecting) {
+        auto first = FixedRows({{false, false}, {true, true}, {false, true}});
+        auto second = FixedRows({{false, true}, {true, true}, {true, true}});
+        std::vector<ExprPtr> inputs{first, second};
+        auto conjunct = std::make_shared<PhyConjunctFilterExpr>(
+            std::move(inputs), true, nullptr);
+        if (null_rejecting) {
+            conjunct->MarkNullRejecting();
+        }
+        QueryContext query_context("conjunct_test", nullptr, 3, 0);
+        ExecContext exec_context(&query_context);
+        EvalCtx eval_context(&exec_context);
+        VectorPtr result;
+        conjunct->Eval(eval_context, result);
+        auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+        TargetBitmapView data(output->GetRawData(), output->size());
+        TargetBitmapView valid(output->GetValidRawData(), output->size());
+        std::vector<bool> included;
+        for (size_t i = 0; i < output->size(); ++i) {
+            included.push_back(data[i] && valid[i]);
+        }
+        return included;
+    };
+
+    EXPECT_EQ(build_and_eval(true), build_and_eval(false));
+}
+
+TEST(ConjunctExprTest, NullRejectingOrKeepsUnknownRowsActive) {
+    // Under OR an UNKNOWN row can still become TRUE (UNKNOWN OR TRUE =
+    // TRUE), so null-rejection must not skip the following expression.
+    auto unknown = FixedBool(false, false);
+    auto true_expr = FixedBool(true, true);
+
+    std::vector<ExprPtr> inputs{unknown, true_expr};
+    auto disjunct = std::make_shared<PhyConjunctFilterExpr>(
+        std::move(inputs), false, nullptr);
+    disjunct->MarkNullRejecting();
+
+    QueryContext query_context("conjunct_test", nullptr, 1, 0);
+    ExecContext exec_context(&query_context);
+    EvalCtx eval_context(&exec_context);
+
+    VectorPtr result;
+    disjunct->Eval(eval_context, result);
+
+    EXPECT_EQ(true_expr->eval_count_, 1);
+
+    auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+    ASSERT_NE(output, nullptr);
+    TargetBitmapView data(output->GetRawData(), output->size());
+    TargetBitmapView valid(output->GetValidRawData(), output->size());
+    // UNKNOWN OR TRUE = TRUE: the row must be included.
+    EXPECT_TRUE(data[0]);
+    EXPECT_TRUE(valid[0]);
+}
+
+TEST(ConjunctExprTest, OffsetInputErasesUnmaterializedReservedLikeSlot) {
+    // ReorderConjunctExpr reserves index inputs_.size() for a runtime
+    // PhyLikeConjunctExpr and records the LIKE positions via SetLikeIndices.
+    // The batch-ngram path cannot be used with an offset input, so the init
+    // block must erase the reserved slot on that path too — otherwise both
+    // the Eval loop and the early-exit path (SkipFollowingExprs) would
+    // index inputs_ past its end.
+    auto first = FixedBool(false, true);  // definite FALSE -> early exit
+    auto second = FixedBool(true, true);
+
+    std::vector<ExprPtr> inputs{first, second};
+    auto conjunct = std::make_shared<PhyConjunctFilterExpr>(
+        std::move(inputs), true, nullptr);
+    conjunct->SetLikeIndices({0, 1});
+    conjunct->Reorder({0, 1, 2});
+
+    QueryContext query_context("conjunct_test", nullptr, 1, 0);
+    ExecContext exec_context(&query_context);
+    EvalCtx eval_context(&exec_context);
+    OffsetVector offsets;
+    offsets.push_back(0);
+    eval_context.set_offset_input(&offsets);
+
+    VectorPtr result;
+    conjunct->Eval(eval_context, result);
+
+    auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+    ASSERT_NE(output, nullptr);
+    TargetBitmapView data(output->GetRawData(), output->size());
+    TargetBitmapView valid(output->GetValidRawData(), output->size());
+    ASSERT_EQ(output->size(), 1);
+    EXPECT_FALSE(data[0]);
+    EXPECT_TRUE(valid[0]);
+    // The definite-FALSE first input early-exits: the second expression is
+    // skipped without moving its sequential cursor. The erased reserved slot
+    // is never touched.
+    EXPECT_EQ(first->eval_count_, 1);
+    EXPECT_EQ(second->eval_count_, 0);
+    EXPECT_EQ(second->move_count_, 0);
+}
+
+TEST(ConjunctExprTest, MarkNullRejectingStopsAtNonConjunctNodes) {
+    std::vector<ExprPtr> inner_inputs{FixedBool(true, true),
+                                      FixedBool(true, true)};
+    auto inner_and = std::make_shared<PhyConjunctFilterExpr>(
+        std::move(inner_inputs), true, nullptr);
+
+    std::vector<ExprPtr> hidden_inputs{FixedBool(true, true),
+                                       FixedBool(true, true)};
+    auto hidden_and = std::make_shared<PhyConjunctFilterExpr>(
+        std::move(hidden_inputs), true, nullptr);
+    auto wrapper = std::make_shared<PassThroughExpr>(hidden_and);
+
+    std::vector<ExprPtr> outer_inputs{inner_and, wrapper};
+    auto outer_or = std::make_shared<PhyConjunctFilterExpr>(
+        std::move(outer_inputs), false, nullptr);
+
+    outer_or->MarkNullRejecting();
+
+    // Propagates through nested AND/OR ...
+    EXPECT_TRUE(outer_or->IsNullRejecting());
+    EXPECT_TRUE(inner_and->IsNullRejecting());
+    // ... but stops at any non-conjunct node (e.g. NOT), where FALSE and
+    // UNKNOWN produce different results.
+    EXPECT_FALSE(hidden_and->IsNullRejecting());
 }
 
 }  // namespace milvus::exec

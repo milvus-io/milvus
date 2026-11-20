@@ -3,8 +3,8 @@ module github.com/milvus-io/milvus
 go 1.26.9
 
 require (
-	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.11.1
-	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.6.0 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.0
+	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.10.1 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.1.0
 	github.com/aliyun/credentials-go v1.2.7 // indirect
 	github.com/bits-and-blooms/bloom/v3 v3.3.1
@@ -33,6 +33,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865 // indirect
 	github.com/tikv/client-go/v2 v2.0.8-0.20260610031342-e999c1f9c7c3
+	github.com/tklauser/go-sysconf v0.3.15
 	go.etcd.io/etcd/api/v3 v3.5.33
 	go.etcd.io/etcd/client/v3 v3.5.33
 	go.etcd.io/etcd/server/v3 v3.5.33
@@ -70,7 +71,7 @@ require (
 	github.com/hamba/avro/v2 v2.29.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/magiconair/properties v1.8.7
-	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.6-0.20261102085948-fdb7f859a14b
+	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.7-0.20261116062001-b8211b28c617
 	github.com/milvus-io/milvus/client/v3 v3.0.0
 	github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
 	github.com/shirou/gopsutil/v4 v4.25.10
@@ -109,7 +110,7 @@ require (
 	cloud.google.com/go/iam v1.5.3 // indirect
 	cloud.google.com/go/monitoring v1.24.3 // indirect
 	github.com/AthenZ/athenz v1.12.13 // indirect
-	github.com/Azure/azure-sdk-for-go/sdk/internal v1.9.0 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/internal v1.11.2 // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.5.0 // indirect
 	github.com/DataDog/zstd v1.5.2 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.34.0 // indirect
@@ -249,7 +250,6 @@ require (
 	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/tikv/pd/client v0.0.0-20260609141937-b01426f6b08b // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
-	github.com/tklauser/go-sysconf v0.3.15 // indirect
 	github.com/tklauser/numcpus v0.10.0 // indirect
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20201229170055-e5319fda7802 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect

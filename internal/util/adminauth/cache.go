@@ -127,7 +127,7 @@ func (l *comparisonLimiter) do(ctx context.Context, fn func() error) error {
 	cancel()
 	// Decremented as soon as the wait is over, not when fn returns: counting a
 	// goroutine that already holds a slot as a waiter would shrink the queue by
-	// however long bcrypt takes.
+	// however long the hash takes.
 	l.waiting.Add(-1)
 	if err != nil {
 		return errComparisonSaturated()
@@ -138,11 +138,11 @@ func (l *comparisonLimiter) do(ctx context.Context, fn func() error) error {
 
 func compareBounded(ctx context.Context, storedHash, password string) error {
 	return passwordComparisons().do(ctx, func() error {
-		return crypto.VerifyStoredPassword(storedHash, password)
+		return crypto.VerifyStoredPassword(ctx, storedHash, password)
 	})
 }
 
-// CachedRootVerifier answers root credential checks from a cached bcrypt hash,
+// CachedRootVerifier answers root credential checks from a cached password hash,
 // refreshing it through fetch. Proxy, coordinator and worker all use it.
 type CachedRootVerifier struct {
 	fetch func(ctx context.Context) (string, error)
@@ -162,7 +162,7 @@ type CachedRootVerifier struct {
 	mu   sync.Mutex
 	hash string
 	// verifiedSha is the salted SHA of the password that last matched hash, so
-	// a repeated correct password costs a lookup instead of another bcrypt.
+	// a repeated correct password costs a lookup instead of another hash.
 	// Dropped whenever hash changes, so a rotation cannot leave a stale
 	// password accepted. Same trade privilege.privilegeCache already makes.
 	verifiedSha     string
@@ -182,7 +182,7 @@ type credentialSnapshot struct {
 	generation uint64
 }
 
-// NewCachedRootVerifier wraps fetch, which must return root's stored bcrypt
+// NewCachedRootVerifier wraps fetch, which must return root's stored password
 // hash or an error meaning "could not look it up".
 func NewCachedRootVerifier(fetch func(ctx context.Context) (string, error)) *CachedRootVerifier {
 	return &CachedRootVerifier{
@@ -205,6 +205,8 @@ func (c *CachedRootVerifier) Verify(ctx context.Context, username, password stri
 		return merr.WrapErrPrivilegeNotPermitted("only root user can access this endpoint")
 	}
 	// Reject oversized candidates before hashing or fetching the root hash.
+	// crypto.PasswordEncrypt enforces this limit under every algorithm, so no
+	// stored root hash can match a longer password.
 	if len(password) > crypto.BcryptMaxPasswordBytes {
 		return merr.WrapErrPrivilegeNotAuthenticated("invalid root password")
 	}
@@ -382,7 +384,7 @@ func (c *CachedRootVerifier) storeHash(gen uint64, hash string) {
 	now := c.now()
 	if c.hash != hash {
 		// A rotation invalidates the short-circuit; the new password must go
-		// through bcrypt once before it is trusted again.
+		// through the hash once before it is trusted again.
 		c.verifiedSha = ""
 	}
 	c.hash = hash

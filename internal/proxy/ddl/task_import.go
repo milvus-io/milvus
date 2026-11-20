@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/internal/util/importutilv2/numpy"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -103,7 +102,11 @@ func (it *ImportTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	if err := importutilv2.ValidateSnapshotSourceRequest(req.GetOptions()); err != nil {
+	if err := importutilv2.ValidateImportSourceRequest(req.GetOptions()); err != nil {
+		return err
+	}
+	source, err := importutilv2.GetSourceStorageConfig(req.GetOptions())
+	if err != nil {
 		return err
 	}
 	collectionID, err := it.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
@@ -243,6 +246,13 @@ func (it *ImportTask) PreExecute(ctx context.Context) error {
 	if len(req.Files) == 0 {
 		return merr.WrapErrParameterInvalidMsg("import request is empty")
 	}
+	if source != nil {
+		for _, file := range req.GetFiles() {
+			if err := importutilv2.ValidateSourceStorageFilePaths(file.GetPaths()); err != nil {
+				return err
+			}
+		}
+	}
 	if importutilv2.IsSnapshotSource(req.GetOptions()) &&
 		(len(req.Files) != 1 || len(req.Files[0].GetPaths()) != 1) {
 		return merr.WrapErrImportFailedMsg(
@@ -256,14 +266,9 @@ func (it *ImportTask) PreExecute(ctx context.Context) error {
 	if !isBackup && !isL0Import {
 		// check file type
 		for _, file := range req.GetFiles() {
-			fileType, err := importutilv2.GetFileType(file)
+			_, err = importutilv2.GetFileType(file)
 			if err != nil {
 				return err
-			}
-			if fileType == importutilv2.FileTypeNumpy {
-				if err := numpy.ValidateSchema(schema.CollectionSchema, file.GetPaths()); err != nil {
-					return err
-				}
 			}
 		}
 	}

@@ -57,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -831,26 +832,47 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 
 func (node *Proxy) BatchDescribeCollection(ctx context.Context, request *milvuspb.BatchDescribeCollectionRequest) (*milvuspb.BatchDescribeCollectionResponse, error) {
 	collectionNames := request.GetCollectionName()
-	if len(collectionNames) == 0 {
+	collectionIDs := request.GetCollectionID()
+	if len(collectionNames) == 0 && len(collectionIDs) == 0 {
 		return &milvuspb.BatchDescribeCollectionResponse{
-			Status: merr.Status(merr.WrapErrParameterMissingMsg("collection names cannot be empty")),
+			Status: merr.Status(merr.WrapErrParameterMissingMsg("collection names or collection IDs cannot be empty")),
 		}, nil
 	}
 
-	responses := make([]*milvuspb.DescribeCollectionResponse, 0, len(collectionNames))
-
-	for _, collectionName := range collectionNames {
-		describeCollectionRequest := &milvuspb.DescribeCollectionRequest{
-			DbName:         request.GetDbName(),
-			CollectionName: collectionName,
-		}
-
-		describeCollectionResponse, err := node.DescribeCollection(ctx, describeCollectionRequest)
-		// If there's an error, create a response with error status
-		if err != nil {
-			describeCollectionResponse = &milvuspb.DescribeCollectionResponse{
-				Status:         merr.Status(err),
+	// Each collection is described on its own, exactly as a single
+	// DescribeCollection request would. Names take precedence: collection IDs
+	// are used only when no name is given.
+	describeRequests := make([]*milvuspb.DescribeCollectionRequest, 0, len(collectionNames)+len(collectionIDs))
+	if len(collectionNames) > 0 {
+		for _, collectionName := range collectionNames {
+			describeRequests = append(describeRequests, &milvuspb.DescribeCollectionRequest{
+				DbName:         request.GetDbName(),
 				CollectionName: collectionName,
+			})
+		}
+	} else {
+		for _, collectionID := range collectionIDs {
+			describeRequests = append(describeRequests, &milvuspb.DescribeCollectionRequest{
+				DbName:       request.GetDbName(),
+				CollectionID: collectionID,
+			})
+		}
+	}
+
+	responses := make([]*milvuspb.DescribeCollectionResponse, 0, len(describeRequests))
+	for _, describeCollectionRequest := range describeRequests {
+		describeCollectionResponse, err := node.DescribeCollection(ctx, describeCollectionRequest)
+		if err != nil {
+			describeCollectionResponse = &milvuspb.DescribeCollectionResponse{Status: merr.Status(err)}
+		}
+		// A failed entry carries the name or ID it was requested by, so the
+		// caller can tell which collection it is about.
+		if !merr.Ok(describeCollectionResponse.GetStatus()) {
+			if describeCollectionResponse.GetCollectionName() == "" {
+				describeCollectionResponse.CollectionName = describeCollectionRequest.GetCollectionName()
+			}
+			if describeCollectionResponse.GetCollectionID() == 0 {
+				describeCollectionResponse.CollectionID = describeCollectionRequest.GetCollectionID()
 			}
 		}
 		responses = append(responses, describeCollectionResponse)
@@ -2549,17 +2571,20 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	}
 
 	// UpsertCnt always equals to the number of entities in the request
-	it.Result().UpsertCnt = int64(request.NumRows)
+	if request.GetWriteCondition() == nil {
+		it.Result().UpsertCnt = int64(request.NumRows)
+	}
 
 	username := GetCurUserFromContextOrDefault(ctx)
 	nodeID := paramtable.GetStringNodeID()
 	dbName := request.DbName
 	collectionName := request.CollectionName
+	requestSize, mutationSize := it.AccountingSizes()
 	v := hookutil.GetExtension().Report(map[string]any{
 		hookutil.OpTypeKey:          hookutil.OpTypeUpsert,
 		hookutil.DatabaseKey:        request.DbName,
 		hookutil.UsernameKey:        username,
-		hookutil.RequestDataSizeKey: proto.Size(it.Request()),
+		hookutil.RequestDataSizeKey: requestSize,
 		hookutil.SuccessCntKey:      it.Result().UpsertCnt,
 		hookutil.FailCntKey:         len(it.Result().ErrIndex),
 	})
@@ -2573,7 +2598,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeUpsert, dbName, username).Add(float64(v))
 	}
 
-	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(it.UpsertMsg().InsertMsg.Size()+it.UpsertMsg().DeleteMsg.Size()))
+	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(mutationSize))
 	successCnt := it.Result().UpsertCnt - int64(len(it.Result().ErrIndex))
 	metrics.ProxyUpsertVectors.
 		WithLabelValues(nodeID, dbName, collectionName).
@@ -2793,7 +2818,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	mlog.Debug(ctx, rpcDone(method))
 
 	metrics.ProxySearchVectors.
-		WithLabelValues(nodeID, dbName, collectionName).
+		WithLabelValues(nodeID, dbName, collectionName, extension.QueryResourceGroupFromContext(ctx)).
 		Add(float64(qt.Result().GetResults().GetNumQueries()))
 
 	searchDur := tr.ElapseSpan().Milliseconds()
@@ -2802,10 +2827,8 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		metrics.SearchLabel,
 		dbName,
 		collectionName,
+		extension.QueryResourceGroupFromContext(ctx),
 	).Observe(float64(searchDur))
-
-	observeResourceGroupSQLatency(ctx, metrics.SearchLabel, dbName, collectionName, searchDur)
-	observeResourceGroupSearchVectors(ctx, dbName, collectionName, qt.Result().GetResults().GetNumQueries())
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
@@ -3003,7 +3026,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	mlog.Debug(ctx, rpcDone(method))
 
 	metrics.ProxySearchVectors.
-		WithLabelValues(nodeID, dbName, collectionName).
+		WithLabelValues(nodeID, dbName, collectionName, extension.QueryResourceGroupFromContext(ctx)).
 		Add(float64(len(request.GetRequests()) * int(qt.GetNq())))
 
 	searchDur := tr.ElapseSpan().Milliseconds()
@@ -3012,10 +3035,8 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		metrics.HybridSearchLabel,
 		dbName,
 		collectionName,
+		extension.QueryResourceGroupFromContext(ctx),
 	).Observe(float64(searchDur))
-
-	observeResourceGroupSQLatency(ctx, metrics.HybridSearchLabel, dbName, collectionName, searchDur)
-	observeResourceGroupSearchVectors(ctx, dbName, collectionName, int64(len(request.GetRequests())*int(qt.GetNq())))
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
@@ -3603,10 +3624,8 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 			queryLabel,
 			request.GetDbName(),
 			request.GetCollectionName(),
+			extension.QueryResourceGroupFromContext(ctx),
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
-
-		observeResourceGroupSQLatency(ctx, queryLabel, request.GetDbName(), request.GetCollectionName(),
-			tr.ElapseSpan().Milliseconds())
 	}
 
 	succeeded = true

@@ -3055,3 +3055,31 @@ func newMemoryMetaWithDomainMetas(t *testing.T) (*meta.Meta, *domainMetas, error
 	m, err := meta.NewMeta(context.Background(), catalog, nil, b, loadDomainMetas(catalog, nil, dm))
 	return m, dm, err
 }
+
+func TestServer_CollectionLabelsForTask(t *testing.T) {
+	t.Run("no meta yet", func(t *testing.T) {
+		_, ok := (&Server{}).collectionLabelsForTask(1)
+		assert.False(t, ok)
+	})
+
+	m, _, err := newMemoryMetaWithDomainMetas(t)
+	require.NoError(t, err)
+	m.AddCollection(&meta.CollectionInfo{
+		ID:           1,
+		Schema:       &schemapb.CollectionSchema{Name: "docs"},
+		DatabaseID:   7,
+		DatabaseName: "analytics",
+	})
+	s := &Server{meta: m}
+
+	t.Run("cached collection", func(t *testing.T) {
+		got, ok := s.collectionLabelsForTask(1)
+		assert.True(t, ok)
+		assert.Equal(t, session.CollectionLabels{CollectionName: "docs", DatabaseID: 7, DatabaseName: "analytics"}, got)
+	})
+
+	t.Run("uncached collection", func(t *testing.T) {
+		_, ok := s.collectionLabelsForTask(2)
+		assert.False(t, ok)
+	})
+}

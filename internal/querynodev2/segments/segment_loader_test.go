@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -54,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -694,6 +697,42 @@ func (suite *SegmentLoaderSuite) TestLoadFail() {
 	suite.Error(err)
 }
 
+func (suite *SegmentLoaderSuite) TestLoadSealedNilCandidateFailureCleanup() {
+	for _, stage := range []string{"data", "delta"} {
+		suite.Run(stage, func() {
+			ctx := context.Background()
+			loader := suite.loader.(*segmentLoader)
+			loadErr := errors.New("injected load failure")
+			var captured *LocalSegment
+			loadData := mockey.Mock((*segmentLoader).LoadSegment).To(
+				func(_ *segmentLoader, _ context.Context, segment Segment, _ *querypb.SegmentLoadInfo) error {
+					captured = segment.(*LocalSegment)
+					suite.Nil(captured.pkCandidate)
+					if stage == "data" {
+						return loadErr
+					}
+					return nil
+				}).Build()
+			defer loadData.UnPatch()
+			loadDeltas := mockey.Mock((*segmentLoader).loadDeltalogs).Return(loadErr).Build()
+			defer loadDeltas.UnPatch()
+
+			loaded, err := loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+				SegmentID: suite.segmentID, PartitionID: suite.partitionID, CollectionID: suite.collectionID,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+			})
+			suite.Require().ErrorIs(err, loadErr)
+			suite.Empty(loaded)
+			suite.Require().NotNil(captured)
+			suite.False(captured.ptrLock.PinIfNotReleased())
+			suite.NotPanics(func() { captured.Release(ctx) })
+			suite.Nil(loader.manager.Segment.GetWithType(suite.segmentID, SegmentTypeSealed))
+			suite.False(loader.loadingSegments.Contain(suite.segmentID))
+			suite.True(loader.committedResource.IsZero())
+		})
+	}
+}
+
 func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	ctx := context.Background()
 	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
@@ -725,15 +764,10 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfos...)
 	suite.NoError(err)
 
-	// Will load bloom filter with sealed segments
+	// Regular sealed workers do not load PK candidates.
+	suite.Require().Len(segments, suite.segmentNum)
 	for _, segment := range segments {
-		for pk := 0; pk < 100; pk++ {
-			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
-			pkReady := segment.PkCandidateExist()
-			suite.Require().True(pkReady)
-			exist := segment.MayPkExist(lc)
-			suite.Require().True(exist)
-		}
+		suite.False(segment.PkCandidateExist())
 	}
 
 	// Load growing
@@ -993,6 +1027,139 @@ func (suite *SegmentLoaderSuite) TestLoadBloomFilter() {
 	}
 }
 
+func TestLoadGrowingStatsPreservesBloomFilterBehavior(t *testing.T) {
+	type statsChunkManager struct{ storage.ChunkManager }
+	paramtable.Init()
+	require.NoError(t, initcore.InitTieredStorage(paramtable.Get()))
+	ctx := context.Background()
+	schema := mock_segcore.GenTestCollectionSchema("growing-stats", schemapb.DataType_Int64, false)
+	pkField := GetPkField(schema)
+	const bm25FieldID int64 = 200
+	pkStats, err := storage.NewPrimaryKeyStats(pkField.GetFieldID(), int64(schemapb.DataType_Int64), 1)
+	require.NoError(t, err)
+	pkStats.Update(storage.NewInt64PrimaryKey(42))
+	writer := &storage.StatsWriter{}
+	require.NoError(t, writer.Generate(pkStats))
+	bm25Stats := storage.NewBM25Stats()
+	bm25Stats.Append(map[uint32]float32{1: 2})
+	bm25Bytes, err := bm25Stats.Serialize()
+	require.NoError(t, err)
+	injected := errors.New("stats unavailable")
+
+	for _, tc := range []struct {
+		name      string
+		enabled   bool
+		skip      bool
+		failStage string
+	}{
+		{name: "BF enabled", enabled: true},
+		{name: "skip growing BF", enabled: true, skip: true},
+		{name: "global BF disabled"},
+		{name: "global BF disabled and skip growing BF", skip: true},
+		{name: "BF read fails", enabled: true, failStage: "bf"},
+		{name: "BF read fails with global BF disabled", failStage: "bf"},
+		{name: "BF read fails with skip growing BF", enabled: true, skip: true, failStage: "bf"},
+		{name: "BM25 read fails with global BF enabled", enabled: true, failStage: "bm25"},
+		{name: "BM25 read fails with global BF disabled", failStage: "bm25"},
+		{name: "BM25 path resolution fails with global BF disabled", failStage: "paths"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := paramtable.Get()
+			oldEnabled := params.CommonCfg.BloomFilterEnabled.SwapTempValue(fmt.Sprint(tc.enabled))
+			defer params.CommonCfg.BloomFilterEnabled.SwapTempValue(oldEnabled)
+			oldSkip := params.QueryNodeCfg.SkipGrowingSegmentBF.SwapTempValue(fmt.Sprint(tc.skip))
+			defer params.QueryNodeCfg.SkipGrowingSegmentBF.SwapTempValue(oldSkip)
+			info := &querypb.SegmentLoadInfo{
+				CollectionID: 100, PartitionID: 10, SegmentID: 1,
+				InsertChannel: "by-dev-rootcoord-dml_0_100v0",
+				Statslogs: []*datapb.FieldBinlog{{
+					FieldID: pkField.GetFieldID(),
+					Binlogs: []*datapb.Binlog{{LogPath: "bf/100"}},
+				}},
+				Bm25Logs: []*datapb.FieldBinlog{{
+					FieldID: bm25FieldID,
+					Binlogs: []*datapb.Binlog{{LogPath: "bm25/100"}},
+				}},
+			}
+			collection := NewCollectionWithoutSegcoreForTest(100, schema)
+			manager := NewManager()
+			manager.Collection.(*collectionManager).collections[100] = collection
+			base, err := newBaseSegment(collection, SegmentTypeGrowing, 0, info)
+			require.NoError(t, err)
+			// Preserve the existing behavior: both switches leave initial BF loading unchanged.
+			assert.Equal(t, tc.skip, base.skipGrowingBF)
+			require.NotNil(t, base.pkCandidate)
+			segment := &LocalSegment{
+				baseSegment: base, manager: manager.Segment,
+				bm25StatsHolder: newBM25StatsHolder(),
+				relatedDataSize: atomic.NewInt64(0), binlogSize: atomic.NewInt64(0),
+			}
+			defer segment.Refund()
+			loadData := mockey.Mock((*LocalSegment).Load).Return(nil).Build()
+			defer loadData.UnPatch()
+			cm := &statsChunkManager{}
+			var reads []string
+			read := mockey.Mock((*statsChunkManager).MultiRead).To(
+				func(_ *statsChunkManager, _ context.Context, paths []string) ([][]byte, error) {
+					require.Len(t, paths, 1)
+					reads = append(reads, paths[0])
+					switch paths[0] {
+					case "bf/100":
+						if tc.failStage == "bf" {
+							return nil, injected
+						}
+						return [][]byte{writer.GetBuffer()}, nil
+					case "bm25/100":
+						if tc.failStage == "bm25" {
+							return nil, injected
+						}
+						return [][]byte{bm25Bytes}, nil
+					default:
+						t.Fatalf("unexpected stats path %q", paths[0])
+						return nil, nil
+					}
+				}).Build()
+			defer read.UnPatch()
+			if tc.failStage == "paths" {
+				paths := mockey.Mock((*packed.StatsResolver).BM25StatsPaths).Return(nil, injected).Build()
+				defer paths.UnPatch()
+			}
+			loader := &segmentLoader{cm: cm, manager: manager}
+			err = loader.LoadSegment(ctx, segment, info)
+			wantReads := []string{"bf/100"}
+			if tc.failStage != "bf" && tc.failStage != "paths" {
+				wantReads = append(wantReads, "bm25/100")
+			}
+			assert.Equal(t, wantReads, reads)
+			if tc.failStage != "" {
+				require.ErrorIs(t, err, injected)
+				assert.Empty(t, segment.GetBM25Stats())
+				return
+			}
+			require.NoError(t, err)
+			stats := segment.GetBM25Stats()
+			require.Contains(t, stats, bm25FieldID)
+			assert.Equal(t, int64(1), stats[bm25FieldID].NumRow())
+			assert.Equal(t, int64(2), stats[bm25FieldID].NumToken())
+			assert.True(t, segment.PkCandidateExist())
+			segment.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(84)})
+			segment.baseSegment.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(85)})
+			// SkipGrowingSegmentBF only bypasses subsequent maintenance and filtering.
+			for _, pk := range []int64{84, 85} {
+				assert.Equal(t, !tc.skip, segment.pkCandidate.MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(pk))))
+			}
+			for _, pk := range []int64{42, 84, 85} {
+				assert.True(t, segment.MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(pk))))
+			}
+			missing := storage.NewInt64PrimaryKey(1000)
+			assert.Equal(t, tc.skip, segment.MayPkExist(storage.NewLocationsCache(missing)))
+			assert.Equal(t, []bool{tc.skip}, segment.BatchPkExist(storage.NewBatchLocationsCache([]storage.PrimaryKey{missing})))
+			assert.True(t, segment.PkCandidateExist())
+			require.NotNil(t, segment.pkCandidate)
+		})
+	}
+}
+
 func (suite *SegmentLoaderSuite) TestLoadWithoutBloomFilter() {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.BloomFilterEnabled.Key)
@@ -1093,6 +1260,11 @@ func (suite *SegmentLoaderSuite) TestLoadVirtualPKExternalCollectionLoadsDeltaLo
 	pkField := GetPkField(suite.schema)
 	suite.Require().NotNil(pkField)
 	pkField.Name = common.VirtualPKFieldName
+	for _, field := range suite.schema.GetFields() {
+		if !field.GetIsPrimaryKey() && field.GetFieldID() >= common.StartOfUserFieldID {
+			field.ExternalField = field.GetName()
+		}
+	}
 	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema, 1))
 
 	msgLength := 100
@@ -1126,6 +1298,155 @@ func (suite *SegmentLoaderSuite) TestLoadVirtualPKExternalCollectionLoadsDeltaLo
 	suite.Require().NoError(err)
 	suite.Require().Len(segments, 1)
 	suite.Equal(int64(msgLength-2), segments[0].RowNum())
+	suite.False(segments[0].PkCandidateExist())
+}
+
+func (suite *SegmentLoaderSuite) TestLoadSealedExternalRealPKSkipsBloomFilter() {
+	ctx := context.Background()
+	loadInfo, _, _ := suite.makeExternalRealPKBFLoadInfo(ctx)
+	pkField := GetPkField(suite.schema)
+	pkField.ExternalField = pkField.GetName()
+	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema, 1))
+
+	loader := suite.loader.(*segmentLoader)
+	// Isolate candidate loading from segcore and delta-file I/O.
+	loadData := mockey.Mock((*segmentLoader).LoadSegment).Return(nil).Build()
+	defer loadData.UnPatch()
+	loadDeltas := mockey.Mock((*segmentLoader).loadDeltalogs).Return(nil).Build()
+	defer loadDeltas.UnPatch()
+	readBF := mockey.Mock(packed.ReadFileWithExternalSpec).
+		Return(nil, errors.New("worker must not load sealed bloom filters")).Build()
+	defer readBF.UnPatch()
+
+	segments, err := loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfo)
+	suite.Require().NoError(err)
+	suite.Require().Len(segments, 1)
+	suite.False(segments[0].PkCandidateExist())
+	suite.Zero(readBF.Times())
+}
+
+func TestDetectVirtualPKCollisions(t *testing.T) {
+	const segmentID int64 = 42
+	const collidingID int64 = segmentID + 1<<32
+	for _, tc := range []struct {
+		name string
+		ids  []int64
+		want []int64
+	}{
+		{name: "empty batch"},
+		{name: "same segment", ids: []int64{segmentID}},
+		{name: "different truncated IDs", ids: []int64{segmentID, segmentID + 1}},
+		{name: "one collision", ids: []int64{segmentID, collidingID}, want: []int64{collidingID}},
+		{name: "multiple collisions", ids: []int64{collidingID, segmentID + 1, collidingID + 1<<32}, want: []int64{collidingID, collidingID + 1<<32}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var infos []*querypb.SegmentLoadInfo
+			for _, id := range tc.ids {
+				infos = append(infos, &querypb.SegmentLoadInfo{SegmentID: id})
+			}
+			assert.Equal(t, tc.want, detectVirtualPKCollisions(segmentID, infos))
+		})
+	}
+}
+
+func (suite *SegmentLoaderSuite) TestLoadVirtualPKCollisionWarnings() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	baseSchema := proto.Clone(suite.schema).(*schemapb.CollectionSchema)
+	for i, tc := range []struct {
+		name          string
+		format        string
+		realPK        bool
+		distinctIDs   bool
+		disableBF     bool
+		alreadyLoaded bool
+		wantWarnings  bool
+	}{
+		{name: "virtual milvus-table", format: "milvus-table", wantWarnings: true},
+		{name: "virtual parquet", format: "parquet", wantWarnings: true},
+		{name: "BF disabled", format: "milvus-table", disableBF: true, wantWarnings: true},
+		{name: "distinct truncated IDs", format: "milvus-table", distinctIDs: true},
+		{name: "internal collection"},
+		{name: "real PK milvus-table", format: "milvus-table", realPK: true},
+		{name: "already loaded segment excluded", format: "milvus-table", alreadyLoaded: true},
+	} {
+		suite.Run(tc.name, func() {
+			t := suite.T()
+			schema := proto.Clone(baseSchema).(*schemapb.CollectionSchema)
+			if tc.format != "" {
+				schema.ExternalSource = "s3://bucket/source"
+				schema.ExternalSpec = fmt.Sprintf(`{"format":%q}`, tc.format)
+				for _, field := range schema.GetFields() {
+					if field.GetIsPrimaryKey() && !tc.realPK {
+						field.Name = common.VirtualPKFieldName
+					} else if field.GetFieldID() >= common.StartOfUserFieldID {
+						field.ExternalField = field.GetName()
+					}
+				}
+			}
+			require.NoError(t, suite.manager.Collection.UpdateSchema(suite.collectionID, schema, uint64(i+1)))
+			if tc.disableBF {
+				item := &paramtable.Get().CommonCfg.BloomFilterEnabled
+				oldValue := item.SwapTempValue("false")
+				defer item.SwapTempValue(oldValue)
+			}
+			ids := []int64{suite.segmentID, suite.segmentID + 1<<32}
+			if tc.distinctIDs {
+				ids[1]++
+			}
+			var infos []*querypb.SegmentLoadInfo
+			for _, id := range ids {
+				infos = append(infos, &querypb.SegmentLoadInfo{
+					CollectionID: suite.collectionID, PartitionID: suite.partitionID, SegmentID: id,
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+				})
+				defer suite.manager.Segment.Remove(ctx, id, querypb.DataScope_All)
+			}
+			// Exercise Load with real segment creation while isolating data-file I/O.
+			loadData := mockey.Mock((*segmentLoader).LoadSegment).Return(nil).Build()
+			defer loadData.UnPatch()
+			loadDeltas := mockey.Mock((*segmentLoader).loadDeltalogs).Return(nil).Build()
+			defer loadDeltas.UnPatch()
+			readBF := mockey.Mock(packed.ReadFileWithExternalSpec).
+				Return(nil, errors.New("worker must not load sealed bloom filters")).Build()
+			defer readBF.UnPatch()
+			var mu sync.Mutex
+			var warnings [][]mlog.Field
+			warn := mockey.Mock(mlog.Warn).To(func(logCtx context.Context, msg string, fields ...mlog.Field) {
+				if msg == "virtual PK collision detected: two segments share truncated segment ID" {
+					assert.Same(t, ctx, logCtx)
+					mu.Lock()
+					warnings = append(warnings, fields)
+					mu.Unlock()
+				}
+			}).Build()
+			defer warn.UnPatch()
+
+			if tc.alreadyLoaded {
+				_, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, infos[0])
+				require.NoError(t, err)
+			}
+			loaded, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, infos...)
+			require.NoError(t, err)
+			if tc.alreadyLoaded {
+				require.Len(t, loaded, 1)
+			} else {
+				require.Len(t, loaded, 2)
+			}
+			for _, segment := range loaded {
+				assert.Nil(t, segment.(*LocalSegment).pkCandidate)
+			}
+			assert.Zero(t, readBF.Times())
+			if tc.wantWarnings {
+				assert.ElementsMatch(t, [][]mlog.Field{
+					{mlog.Int64("segmentID1", ids[0]), mlog.Int64("segmentID2", ids[1]), mlog.Int64("truncatedID", ids[0]&0xFFFFFFFF)},
+					{mlog.Int64("segmentID1", ids[1]), mlog.Int64("segmentID2", ids[0]), mlog.Int64("truncatedID", ids[0]&0xFFFFFFFF)},
+				}, warnings)
+			} else {
+				assert.Empty(t, warnings)
+			}
+		})
+	}
 }
 
 func (suite *SegmentLoaderSuite) TestLoadDupDeltaLogs() {
@@ -1492,58 +1813,6 @@ func (suite *SegmentLoaderSuite) makeExternalRealPKBFLoadInfo(ctx context.Contex
 		StorageVersion: storage.StorageV3,
 		InsertChannel:  fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 	}, externalStatsPaths, payload
-}
-
-func (suite *SegmentLoaderSuite) TestLoadSingleBloomFilterSetExternalRealPKUsesExternalStats() {
-	ctx := context.Background()
-	loadInfo, externalStatsPaths, payload := suite.makeExternalRealPKBFLoadInfo(ctx)
-
-	readCalls := atomic.NewInt32(0)
-	var gotPaths []string
-	patchRead := mockey.Mock(packed.ReadFileWithExternalSpec).
-		To(func(sc *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
-			readCalls.Inc()
-			gotPaths = append(gotPaths, filePath)
-			suite.Equal(suite.collectionID, extfs.CollectionID)
-			suite.Equal(suite.schema.GetExternalSource(), extfs.Source)
-			suite.Equal(suite.schema.GetExternalSpec(), extfs.Spec)
-			return payload, nil
-		}).Build()
-	defer patchRead.UnPatch()
-
-	bfs, err := suite.loader.(*segmentLoader).loadSingleBloomFilterSet(ctx, suite.collectionID, loadInfo, SegmentTypeSealed)
-
-	suite.NoError(err)
-	suite.EqualValues(2, readCalls.Load())
-	suite.Equal(externalStatsPaths, gotPaths)
-	suite.True(bfs.PkCandidateExist())
-	suite.True(bfs.MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(1))))
-}
-
-func (suite *SegmentLoaderSuite) TestLoadSingleBloomFilterSetExternalRealPKIgnoresBloomFilterDisable() {
-	paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterEnabled.Key, "false")
-	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.BloomFilterEnabled.Key)
-
-	ctx := context.Background()
-	loadInfo, externalStatsPaths, payload := suite.makeExternalRealPKBFLoadInfo(ctx)
-
-	readCalls := atomic.NewInt32(0)
-	var gotPaths []string
-	patchRead := mockey.Mock(packed.ReadFileWithExternalSpec).
-		To(func(sc *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
-			readCalls.Inc()
-			gotPaths = append(gotPaths, filePath)
-			return payload, nil
-		}).Build()
-	defer patchRead.UnPatch()
-
-	bfs, err := suite.loader.(*segmentLoader).loadSingleBloomFilterSet(ctx, suite.collectionID, loadInfo, SegmentTypeSealed)
-
-	suite.NoError(err)
-	suite.EqualValues(2, readCalls.Load())
-	suite.Equal(externalStatsPaths, gotPaths)
-	suite.True(bfs.PkCandidateExist())
-	suite.True(bfs.MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(1))))
 }
 
 func (suite *SegmentLoaderSuite) TestLoadBloomFilterSetExternalRealPKUsesExternalStats() {
@@ -2262,14 +2531,10 @@ func (suite *SegmentLoaderDetailSuite) TestCheckLoadingResourceWithGpuLimit() {
 	suite.True(errors.Is(err, merr.ErrSegmentRequestResourceFailed))
 }
 
-func (suite *SegmentLoaderDetailSuite) TestCheckLoadingResourceReleasesTieredReservationOnGpuLimit() {
+func (suite *SegmentLoaderDetailSuite) TestCheckLoadingResourceWithTieredGpuLimit() {
 	ctx := context.Background()
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.Key, "true")
-	suite.Require().NoError(initcore.InitTieredStorage(paramtable.Get()))
-	defer func() {
-		paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.Key)
-		suite.Require().NoError(initcore.InitTieredStorage(paramtable.Get()))
-	}()
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.Key)
 
 	patchGpu := mockey.Mock(hardware.GetAllGPUMemoryInfo).To(func() ([]hardware.GPUMemoryInfo, error) {
 		return []hardware.GPUMemoryInfo{{TotalMemory: 100, FreeMemory: 100}}, nil
@@ -3403,4 +3668,220 @@ func TestReopenSegmentsResourceAndMissingSegment(t *testing.T) {
 			}
 		})
 	}
+}
+
+// No manager, background disk fetcher, or object store is needed for admission.
+func newResourceTestLoader(t *testing.T, tiered bool, usage *ResourceUsage) *segmentLoader {
+	t.Helper()
+	paramtable.InitWithBaseTable(paramtable.NewBaseTable(
+		paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files([]string{})))
+	params := paramtable.Get()
+	for key, value := range map[string]string{
+		params.QueryNodeCfg.TieredEvictionEnabled.Key:               strconv.FormatBool(tiered),
+		params.QueryNodeCfg.OverloadedMemoryThresholdPercentage.Key: "90",
+		params.QueryNodeCfg.DiskCapacityLimit.Key:                   "1",
+	} {
+		original, err := paramtable.GetBaseTable().Load(key)
+		require.NoError(t, params.Save(key, value))
+		t.Cleanup(func() {
+			if err != nil {
+				require.NoError(t, params.Reset(key))
+			} else {
+				require.NoError(t, params.Save(key, original))
+			}
+		})
+	}
+	for _, patch := range []*mockey.Mocker{
+		mockey.Mock(hardware.GetUsedMemoryCount).Return(uint64(100)).Build(),
+		mockey.Mock(hardware.GetMemoryCount).Return(uint64(1000)).Build(),
+		mockey.Mock(hardware.GetAllGPUMemoryInfo).Return([]hardware.GPUMemoryInfo{{TotalMemory: 100, FreeMemory: 100}}, nil).Build(),
+		mockey.Mock((*segmentLoader).estimateSegmentLoadingResourceUsage).To(
+			func(_ *segmentLoader, _ context.Context, _ ...*querypb.SegmentLoadInfo) (*ResourceUsage, uint64, error) {
+				return usage, usage.MemorySize, nil
+			}).Build(),
+	} {
+		t.Cleanup(func() { patch.UnPatch() })
+	}
+	return &segmentLoader{
+		duf:                       &diskUsageFetcher{usage: atomic.NewInt64(0), err: atomic.NewError(nil)},
+		committedResourceNotifier: syncutil.NewVersionedNotifier(),
+	}
+}
+
+func TestLoadingResourceReturnUnlocksAccounting(t *testing.T) {
+	loader := newResourceTestLoader(t, true, &ResourceUsage{MemorySize: 10})
+	previous := LoadResource{MemorySize: 20}
+	loader.committedResource = previous
+	entered := make(chan LoadResource, 1)
+	resume := make(chan struct{})
+	releasePatch := mockey.Mock(releaseLoadingResource).To(func(resource LoadResource) {
+		entered <- resource
+		<-resume
+	}).Build()
+	defer releasePatch.UnPatch()
+	var workers sync.WaitGroup
+	defer workers.Wait()
+	defer close(resume)
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		loader.freeRequestResource(requestResourceResult{Resource: previous})
+	}()
+	require.Equal(t, previous, <-entered)
+	workers.Add(1)
+	done := make(chan LoadResource, 1)
+	go func() {
+		defer workers.Done()
+		loader.mut.Lock()
+		committed := loader.committedResource
+		loader.mut.Unlock()
+		done <- committed
+	}()
+	select {
+	case committed := <-done:
+		require.Zero(t, committed)
+	case <-time.After(2 * time.Second):
+		t.Fatal("native release held the Go accounting lock")
+	}
+}
+
+func TestLoadingResourceValidationDoesNotCommit(t *testing.T) {
+	for _, reason := range []string{"memory_limit", "disk_limit", "gpu_limit"} {
+		t.Run(reason, func(t *testing.T) {
+			usage := &ResourceUsage{MemorySize: 10, DiskSize: 2}
+			loader := newResourceTestLoader(t, false, usage)
+			initial := LoadResource{MemorySize: 20, DiskSize: 4}
+			switch reason {
+			case "memory_limit":
+				initial.MemorySize = 1000
+			case "disk_limit":
+				initial.DiskSize = paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
+			case "gpu_limit":
+				usage.FieldGpuMemorySize = []uint64{100}
+			}
+			loader.committedResource = initial
+			result, err := loader.requestResource(context.Background(), &querypb.SegmentLoadInfo{SegmentID: 1})
+			require.Error(t, err)
+			require.Zero(t, result.Resource)
+			require.Equal(t, initial, loader.committedResource)
+			switch reason {
+			case "memory_limit":
+				require.ErrorIs(t, err, merr.ErrServiceMemoryLimitExceeded)
+			case "disk_limit":
+				require.ErrorIs(t, err, merr.ErrServiceDiskLimitExceeded)
+			default:
+				require.ErrorIs(t, err, merr.ErrSegmentRequestResourceFailed)
+			}
+		})
+	}
+}
+
+func TestLoadingResourceTieredReservationRollback(t *testing.T) {
+	for _, reason := range []string{"memory_limit", "disk_limit", "gpu_limit", "disk_usage_error"} {
+		t.Run(reason, func(t *testing.T) {
+			usage := &ResourceUsage{MemorySize: 10, DiskSize: 2}
+			loader := newResourceTestLoader(t, true, usage)
+			initial := LoadResource{MemorySize: 20, DiskSize: 4}
+			diskErr := merr.WrapErrServiceInternalMsg("disk usage unavailable")
+			switch reason {
+			case "memory_limit":
+				initial.MemorySize = 1000
+			case "disk_limit":
+				initial.DiskSize = paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
+			case "gpu_limit":
+				usage.FieldGpuMemorySize = []uint64{100}
+			case "disk_usage_error":
+				loader.duf.err.Store(diskErr)
+			}
+			loader.committedResource = initial
+
+			reserveCalls := 0
+			reservePatch := mockey.Mock(tryReserveLoadingResource).To(func(resource LoadResource) bool {
+				reserveCalls++
+				require.Equal(t, LoadResource{MemorySize: 10, DiskSize: 2}, resource)
+				return true
+			}).Build()
+			defer reservePatch.UnPatch()
+			var released []LoadResource
+			unlocked := false
+			releasePatch := mockey.Mock(releaseLoadingResource).To(func(resource LoadResource) {
+				released = append(released, resource)
+				unlocked = loader.mut.TryLock()
+				if unlocked {
+					loader.mut.Unlock()
+				}
+			}).Build()
+			defer releasePatch.UnPatch()
+
+			result, err := loader.requestResource(context.Background(), &querypb.SegmentLoadInfo{SegmentID: 1})
+			require.Error(t, err)
+			require.Zero(t, result.Resource)
+			require.Equal(t, initial, loader.committedResource)
+			require.Equal(t, 1, reserveCalls)
+			require.Equal(t, []LoadResource{{MemorySize: 10, DiskSize: 2}}, released)
+			require.True(t, unlocked)
+			switch reason {
+			case "memory_limit":
+				require.ErrorIs(t, err, merr.ErrServiceMemoryLimitExceeded)
+			case "disk_limit":
+				require.ErrorIs(t, err, merr.ErrServiceDiskLimitExceeded)
+			case "gpu_limit":
+				require.ErrorIs(t, err, merr.ErrSegmentRequestResourceFailed)
+			case "disk_usage_error":
+				require.ErrorIs(t, err, diskErr)
+			}
+		})
+	}
+}
+
+func TestLoadingResourceTieredReservationFailure(t *testing.T) {
+	loader := newResourceTestLoader(t, true, &ResourceUsage{MemorySize: 10, DiskSize: 2})
+	initial := LoadResource{MemorySize: 20, DiskSize: 4}
+	loader.committedResource = initial
+	reservePatch := mockey.Mock(tryReserveLoadingResource).Return(false).Build()
+	defer reservePatch.UnPatch()
+	releaseCalls := 0
+	releasePatch := mockey.Mock(releaseLoadingResource).To(func(LoadResource) { releaseCalls++ }).Build()
+	defer releasePatch.UnPatch()
+
+	result, err := loader.requestResource(context.Background(), &querypb.SegmentLoadInfo{SegmentID: 1})
+	require.ErrorIs(t, err, merr.ErrSegmentRequestResourceFailed)
+	require.Zero(t, result.Resource)
+	require.Equal(t, initial, loader.committedResource)
+	require.Zero(t, releaseCalls)
+}
+
+func TestLoadingResourceConcurrentCommit(t *testing.T) {
+	loader := newResourceTestLoader(t, false, &ResourceUsage{MemorySize: 400})
+	var workers sync.WaitGroup
+	start := make(chan struct{})
+	results := make(chan requestResourceResult, 8)
+	errs := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			result, err := loader.requestResource(context.Background(), &querypb.SegmentLoadInfo{SegmentID: 1})
+			if err != nil {
+				errs <- err
+				return
+			}
+			results <- result
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+	close(errs)
+	require.Len(t, results, 2)
+	require.Len(t, errs, 6)
+	require.Equal(t, uint64(800), loader.committedResource.MemorySize)
+	for err := range errs {
+		require.ErrorIs(t, err, merr.ErrSegmentRequestResourceFailed)
+	}
+	for result := range results {
+		loader.freeRequestResource(result)
+	}
+	require.Zero(t, loader.committedResource)
 }

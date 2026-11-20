@@ -561,6 +561,17 @@ func (b *MultiTargetBalancer) balanceChannels(ctx context.Context, br *balanceRe
 // balanceSegments generates segment balance plans for a replica.
 // It requires at least 2 RW nodes to perform balancing.
 func (b *MultiTargetBalancer) balanceSegments(ctx context.Context, br *balanceReport, replica *meta.Replica) []assign.SegmentAssignPlan {
+	// The optimizer uses reported distributions, not pending task deltas. A
+	// second round can choose different segments before the first moves become
+	// visible and move the entire collection instead of balancing it. Wait for
+	// this replica's segment tasks to finish before taking a new snapshot.
+	if b.scheduler.GetSegmentTaskNum(func(t task.Task) bool {
+		return t.ReplicaID() == replica.GetID()
+	}) > 0 {
+		br.AddRecord(StrRecord("wait for pending segment tasks in replica"))
+		return nil
+	}
+
 	rwNodes := replica.GetRWNodes()
 	if len(rwNodes) < 2 {
 		br.AddRecord(StrRecord("no enough rwNodes to balance segments"))

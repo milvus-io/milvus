@@ -133,6 +133,14 @@ func TestIndexInspector_inspect(t *testing.T) {
 }
 
 func TestIndexInspector_ReloadFromMeta(t *testing.T) {
+	pt := paramtable.Get()
+	heavyKey := pt.DataCoordCfg.IndexTaskSlotUsage.Key
+	scalarKey := pt.DataCoordCfg.ScalarIndexTaskSlotUsage.Key
+	assert.NoError(t, pt.Save(heavyKey, "64"))
+	assert.NoError(t, pt.Save(scalarKey, "16"))
+	defer pt.Reset(heavyKey)
+	defer pt.Reset(scalarKey)
+
 	ctx := context.Background()
 	notifyChan := make(chan int64, 1)
 	scheduler := task.NewMockGlobalScheduler(t)
@@ -166,6 +174,10 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 			ID:           1,
 			CollectionID: 2,
 			State:        commonpb.SegmentState_Flushed,
+			Binlogs: []*datapb.FieldBinlog{{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{{MemorySize: 200 * 1024 * 1024}},
+			}},
 		},
 	}
 	mt.Segments.SetSegment(seg1.ID, seg1)
@@ -184,11 +196,68 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 			FieldID:      100,
 			IndexID:      3,
 			IndexName:    meta.IndexName,
+			IndexParams: []*commonpb.KeyValuePair{{
+				Key: common.IndexTypeKey, Value: "FMINDEX",
+			}},
 		},
 	}
 
-	scheduler.EXPECT().Enqueue(mock.Anything).Return()
+	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(scheduled task.Task) {
+		assert.Equal(t, int64(4), scheduled.GetTaskSlot())
+	}).Return()
 	inspector.reloadFromMeta()
+}
+
+func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *testing.T) {
+	pt := paramtable.Get()
+	heavyKey := pt.DataCoordCfg.IndexTaskSlotUsage.Key
+	scalarKey := pt.DataCoordCfg.ScalarIndexTaskSlotUsage.Key
+	assert.NoError(t, pt.Save(heavyKey, "64"))
+	assert.NoError(t, pt.Save(scalarKey, "16"))
+	defer pt.Reset(heavyKey)
+	defer pt.Reset(scalarKey)
+
+	ctx := context.Background()
+	scheduler := task.NewMockGlobalScheduler(t)
+	alloc := allocator.NewMockAllocator(t)
+	handler := meta.NewNMockHandler(t)
+	storageCli := mocks.NewChunkManager(t)
+	versionManager := NewIndexEngineVersionManager()
+	catalog := mocks2.NewDataCoordCatalog(t)
+
+	mt, im := newSlotTestMeta(catalog)
+	im.Indexes[2] = map[UniqueID]*model.Index{
+		5: {
+			CollectionID: 2,
+			FieldID:      101,
+			IndexID:      5,
+			IndexName:    meta.IndexName,
+			IndexParams: []*commonpb.KeyValuePair{{
+				Key: common.IndexTypeKey, Value: "FMINDEX",
+			}},
+		},
+	}
+
+	segment := &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:           1,
+		CollectionID: 2,
+		PartitionID:  3,
+		State:        commonpb.SegmentState_Flushed,
+		Binlogs: []*datapb.FieldBinlog{{
+			FieldID: 101,
+			Binlogs: []*datapb.Binlog{{MemorySize: 200 * 1024 * 1024}},
+		}},
+	}}
+	mt.Segments.SetSegment(segment.GetID(), segment)
+
+	inspector := NewIndexInspector(ctx, nil, mt, im, scheduler, alloc, handler, storageCli, versionManager)
+	alloc.EXPECT().AllocID(mock.Anything).Return(int64(12345), nil)
+	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
+	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(scheduled task.Task) {
+		assert.Equal(t, int64(4), scheduled.GetTaskSlot())
+	}).Return()
+
+	assert.NoError(t, inspector.createIndexForSegment(ctx, nil, segment, 5))
 }
 
 func TestIndexInspector_isExternalCollection(t *testing.T) {
@@ -410,7 +479,7 @@ func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {
 	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
 	scheduler.EXPECT().Enqueue(mock.Anything).Return()
 
-	err := inspector.createIndexForSegment(ctx, segment, 5)
+	err := inspector.createIndexForSegment(ctx, nil, segment, 5)
 	assert.NoError(t, err)
 
 	segIndexes := im.GetSegmentIndexes(segment.CollectionID, segment.ID)

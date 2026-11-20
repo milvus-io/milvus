@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <boost/iterator/counting_iterator.hpp>
+#include <folly/ScopeGuard.h>
 #include "common/FastMem.h"
 #include <cxxabi.h>
 #include <algorithm>
@@ -82,12 +83,14 @@
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/KeyRetriever.h"
+#include "storage/PluginLoader.h"
 #include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
+#include "storage/StatusToErrorCode.h"
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/common/constants.h"
@@ -1386,29 +1389,24 @@ SegmentGrowingImpl::load_column_group_data_internal(
         // Get all row groups for each file
         std::vector<std::vector<int64_t>> row_group_lists;
         row_group_lists.reserve(insert_files.size());
+        PreparedParquetFiles prepared_files;
+        prepared_files.reserve(insert_files.size());
         for (const auto& file : insert_files) {
-            auto result = milvus_storage::FileRowGroupReader::Make(
-                fs,
-                file,
-                milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-                storage::GetReaderProperties(),
-                storage::GetArrowReaderProperties());
-            AssertInfo(result.ok(),
-                       "[StorageV2] Failed to create file row group reader: " +
-                           result.status().ToString());
-            auto reader = result.ValueOrDie();
-            auto row_group_num =
-                reader->file_metadata()->GetRowGroupMetadataVector().size();
+            auto result = milvus_storage::PreparedParquetFile::Open(
+                fs, file, storage::GetReaderProperties());
+            if (!result.ok()) {
+                ThrowInfo(
+                    milvus::storage::ArrowStatusToErrorCode(result.status()),
+                    "[StorageV2] Failed to prepare file {}: {}",
+                    file,
+                    result.status().ToString());
+            }
+            auto prepared = std::move(result).ValueOrDie();
+            auto row_group_num = prepared->row_group_metadata().size();
             std::vector<int64_t> all_row_groups(row_group_num);
             std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
             row_group_lists.push_back(all_row_groups);
-            auto status = reader->Close();
-            AssertInfo(
-                status.ok(),
-                "[StorageV2] failed to close file reader when get row group "
-                "metadata from file {} with error {}",
-                file,
-                status.ToString());
+            prepared_files.push_back(std::move(prepared));
         }
 
         // create parallel degree split strategy
@@ -1423,7 +1421,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                     row_group_lists,
                                     fs,
                                     nullptr,
-                                    infos.load_priority);
+                                    infos.load_priority,
+                                    prepared_files);
         });
 
         LOG_INFO(
@@ -1431,6 +1430,24 @@ SegmentGrowingImpl::load_column_group_data_internal(
             "thread pool",
             this->get_segment_id(),
             column_group_id.get());
+
+        // The load task captures this frame by reference and may be blocked
+        // pushing into the bounded channel. If the consumer loop below
+        // throws, unblock the task and wait for it before unwinding
+        // (see #46958).
+        bool channel_exhausted = false;
+        auto drain_on_unwind = folly::makeGuard([&]() {
+            if (!channel_exhausted) {
+                try {
+                    std::shared_ptr<milvus::ArrowDataWrapper> discard;
+                    while (
+                        column_group_info.arrow_reader_channel->pop(discard)) {
+                    }
+                } catch (...) {
+                }
+            }
+            storage::DrainFuture(load_future);
+        });
 
         std::shared_ptr<milvus::ArrowDataWrapper> r;
 
@@ -1489,8 +1506,11 @@ SegmentGrowingImpl::load_column_group_data_internal(
                 }
             }
         }
+        // The loop consumed the close marker, even if the producer failed.
+        channel_exhausted = true;
         // access underlying feature to get exception if any
         load_future.get();
+        drain_on_unwind.dismiss();
 
         for (auto& [field_id, field_data] : field_data_map) {
             load_field_data_common(field_id,
@@ -3429,6 +3449,11 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
         schema->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
     reader_ = milvus_storage::api::Reader::create(
         column_groups, arrow_schema, nullptr, *properties);
+    if (storage::PluginLoader::GetInstance().getCipherPlugin()) {
+        reader_->set_keyretriever([](const std::string& key_metadata) {
+            return storage::KeyRetriever().GetKey(key_metadata);
+        });
+    }
 
     // A column group whose fields were all dropped from the segment schema
     // has an empty read projection; opening it violates the reader contract

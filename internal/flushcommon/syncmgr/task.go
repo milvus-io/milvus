@@ -163,9 +163,23 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, flushedSize, t.stats, err = writer.Write(ctx, t.pack)
 		statsWriter = writer
 	case storage.StorageV3:
-		writer := NewBulkPackWriterV3(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
-			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, segmentInfo.ManifestPath(), t.writeRetryOpts...)
-		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, flushedSize, t.stats, err = writer.Write(ctx, t.pack)
+		var writer *BulkPackWriterV3
+		write := func() error {
+			// Write/Close may consume the native writer even on failure. Rebuild
+			// the writer and its accounting for every attempt; only a complete
+			// attempt may publish the batch in the manifest.
+			writer = NewBulkPackWriterV3(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
+				packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, segmentInfo.ManifestPath(), t.writeRetryOpts...)
+			t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, flushedSize, t.stats, err = writer.Write(ctx, t.pack)
+			return err
+		}
+		if len(t.writeRetryOpts) == 0 {
+			err = write()
+		} else {
+			err = retry.Do(ctx, func() error {
+				return classifyStorageV3Err(write())
+			}, t.writeRetryOpts...)
+		}
 		statsWriter = writer
 	default:
 		writer, writerErr := NewBulkPackWriter(t.metacache, t.schema, t.chunkManager, t.allocator, t.writeRetryOpts...)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -22,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
@@ -565,6 +567,58 @@ func (suite *SegmentSuite) TestSegmentReleased() {
 	suite.False(sealed.HasRawData(101))
 }
 
+func (suite *SegmentSuite) TestSealedNilPKCandidateLifecycle() {
+	ctx := context.Background()
+	sealed := suite.sealed.(*LocalSegment)
+	suite.Nil(sealed.pkCandidate)
+	suite.False(sealed.PkCandidateExist())
+	suite.NotPanics(func() {
+		sealed.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(42)})
+		sealed.Charge()
+		sealed.Refund()
+	})
+	suite.Nil(sealed.pkCandidate)
+	suite.Nil(sealed.Stats())
+	suite.True(sealed.MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(42))))
+	suite.Equal([]bool{true}, sealed.BatchPkExist(storage.NewBatchLocationsCache(
+		[]storage.PrimaryKey{storage.NewInt64PrimaryKey(42)})))
+
+	suite.NotPanics(func() { sealed.Release(ctx, WithReleaseScope(ReleaseScopeData)) })
+	suite.Nil(sealed.pkCandidate)
+	suite.NotPanics(func() { sealed.Release(ctx) })
+	suite.False(sealed.ptrLock.PinIfNotReleased())
+	suite.NotPanics(func() { sealed.Release(ctx) })
+}
+
+func (suite *SegmentSuite) TestGrowingPKCandidateLifecycle() {
+	growing := suite.growing.(*LocalSegment)
+	bfs, ok := growing.pkCandidate.(*pkoracle.BloomFilterSet)
+	suite.Require().True(ok)
+	growing.skipGrowingBF = true
+	growing.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(42)})
+	suite.False(growing.PkCandidateExist())
+	suite.False(bfs.IsResourceCharged())
+	growing.skipGrowingBF = false
+	growing.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(42)})
+	suite.True(growing.PkCandidateExist())
+	suite.True(growing.MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(42))))
+	suite.True(bfs.IsResourceCharged())
+	growing.Release(context.Background())
+	suite.False(bfs.IsResourceCharged())
+}
+
+func (suite *SegmentSuite) TestSealedExplicitPKCandidateLifecycle() {
+	sealed := suite.sealed.(*LocalSegment)
+	suite.Nil(sealed.pkCandidate)
+	bfs := pkoracle.NewBloomFilterSet(sealed.ID(), sealed.Partition(), SegmentTypeSealed)
+	sealed.SetPKCandidate(bfs)
+	sealed.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(42)})
+	suite.True(sealed.PkCandidateExist())
+	suite.True(bfs.IsResourceCharged())
+	sealed.Release(context.Background())
+	suite.False(bfs.IsResourceCharged())
+}
+
 func (suite *SegmentSuite) TestFlushData() {
 	ctx := context.Background()
 
@@ -1017,4 +1071,74 @@ func TestBaseSegment_SkipGrowingBF(t *testing.T) {
 	blc := storage.NewBatchLocationsCache(pks)
 	results := bs.BatchPkExist(blc)
 	assert.Equal(t, []bool{true, true, true}, results)
+}
+
+type searchLoggingStringer struct {
+	calls atomic.Int64
+}
+
+func (s *searchLoggingStringer) String() string {
+	s.calls.Inc()
+	return "encoded"
+}
+
+func TestSearchLogging(t *testing.T) {
+	paramtable.Init()
+
+	segment := &LocalSegment{
+		baseSegment: baseSegment{
+			loadInfo:    atomic.NewPointer(&querypb.SegmentLoadInfo{CollectionID: 10, SegmentID: 20}),
+			segmentType: SegmentTypeSealed,
+		},
+		ptrLock:      state.NewLoadStateLock(state.LoadStateDataLoaded),
+		fieldIndexes: typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+	}
+	segment.fieldIndexes.Insert(1, &IndexedFieldInfo{IndexInfo: &querypb.FieldIndexInfo{FieldID: 0}})
+
+	for _, test := range []struct {
+		name     string
+		level    mlog.Level
+		err      error
+		messages []string
+	}{
+		{name: "debug_disabled", level: mlog.InfoLevel},
+		{name: "debug_enabled", level: mlog.DebugLevel, messages: []string{"search segment...", "search segment done"}},
+		{name: "warn_preserves_fields", level: mlog.InfoLevel, err: merr.ErrServiceInternal, messages: []string{"Search failed"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			output := mlog.CaptureGlobalLogs(t, &mlog.Config{
+				Level: test.level.String(), DisableTimestamp: true,
+			})
+			probe := &searchLoggingStringer{}
+			// An eager With on the search logger would encode this field even
+			// when Debug is disabled.
+			mlog.ReplaceGlobals(mlog.L().WithLazy(mlog.Stringer("encodingProbe", probe)), nil)
+			expected := &segcore.SearchResult{}
+			native := mock_segcore.NewMockCSegment(t)
+			native.EXPECT().Search(mock.Anything, mock.Anything).Return(expected, test.err).Once()
+			segment.csegment = native
+			result, err := segment.Search(context.Background(), &segcore.SearchRequest{})
+			if test.err != nil {
+				require.ErrorIs(t, err, test.err)
+				require.Nil(t, result)
+			} else {
+				require.NoError(t, err)
+				require.Same(t, expected, result)
+			}
+			if len(test.messages) == 0 {
+				require.Empty(t, output.String())
+				require.Zero(t, probe.calls.Load(), "disabled Debug must not encode bound logger fields")
+				return
+			}
+			require.Positive(t, probe.calls.Load(), "enabled logs must encode bound logger fields")
+			lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+			require.Len(t, lines, len(test.messages))
+			for i, line := range lines {
+				require.Contains(t, line, test.messages[i])
+				for _, field := range []string{"mvcc=0", "collectionID=10", "segmentID=20", "segmentType=Sealed", "filterOnly=false", "withIndex=true"} {
+					require.Contains(t, line, field)
+				}
+			}
+		})
+	}
 }

@@ -395,10 +395,9 @@ func (s *StructSubFieldSuite) TestBulkImportAfterAddingSubField() {
 	resp, err = s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: name, Files: []*internalpb.ImportFile{{Paths: []string{"numpy/pk.npy", "numpy/embedding.npy", "numpy/c.npy"}}},
 	})
-	s.Require().NoError(err)
-	err = merr.Error(resp.GetStatus())
-	s.Require().ErrorIs(err, merr.ErrImportFailed)
-	s.Require().ErrorContains(err, "numpy import does not support struct data: file 'numpy/c.npy' names struct field '"+structName+"'")
+	s.Require().NoError(merr.CheckRPCCall(resp.GetStatus(), err))
+	s.Require().Contains(s.waitImportFailed(ctx, resp.GetJobID()),
+		"numpy import does not support struct data: file 'numpy/c.npy' names struct field '"+structName+"'")
 
 	s.importJSON(ctx, name, []map[string]any{
 		{"pk": 1, "embedding": values(1), structName: []map[string]any{{"vec": values(1), "ints": 11}, {"vec": values(2), "ints": 12}}},
@@ -415,6 +414,25 @@ func (s *StructSubFieldSuite) TestBulkImportAfterAddingSubField() {
 	vec := s.child(ctx, name, 1, "vec").GetVectors().GetVectorArray().GetData()
 	s.Require().Len(vec, 1)
 	s.Require().Equal(append(values(1), values(2)...), vec[0].GetFloatVector().GetData())
+}
+
+// waitImportFailed returns the reason of a job that must end in Failed.
+func (s *StructSubFieldSuite) waitImportFailed(ctx context.Context, jobID string) string {
+	for {
+		progress, err := s.Cluster.ProxyClient.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{JobID: jobID})
+		s.Require().NoError(merr.CheckRPCCall(progress.GetStatus(), err))
+		switch progress.GetState() {
+		case internalpb.ImportJobState_Failed:
+			return progress.GetReason()
+		case internalpb.ImportJobState_Completed:
+			s.FailNow("import completed, want a failure", progress.GetReason())
+		}
+		select {
+		case <-ctx.Done():
+			s.FailNow("import did not fail before the deadline")
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 func (s *StructSubFieldSuite) importJSON(ctx context.Context, name string, rows []map[string]any) {
