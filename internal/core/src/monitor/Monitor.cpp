@@ -319,10 +319,6 @@ std::map<std::string, std::string> growingIndexBuildLabels{
     {"type", "first_build"}};
 std::map<std::string, std::string> growingIndexCatchupLabels{
     {"type", "catchup"}};
-std::map<std::string, std::string> growingIndexCatchupRowsLabels{
-    {"type", "catchup_rows"}};
-std::map<std::string, std::string> growingIndexInflightLabels{
-    {"type", "first_build"}};
 std::map<std::string, std::string> growingIndexSubmitFailureLabels{
     {"type", "submit"}};
 std::map<std::string, std::string> growingIndexFailureLabels{{"type", "build"}};
@@ -331,8 +327,6 @@ std::map<std::string, std::string> growingIndexDeadlineFailureLabels{
 
 const prometheus::Histogram::BucketBoundaries growingIndexLatencyBuckets = {
     1, 5, 10, 50, 100, 500, 1000, 5000, 10000, 60000};  // ms
-const prometheus::Histogram::BucketBoundaries growingIndexRowsBuckets = {
-    1024, 4096, 16384, 65536, 262144, 1048576, 4194304};
 
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(
     internal_core_growing_index_latency,
@@ -347,22 +341,6 @@ DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_core_growing_index_latency,
     growingIndexCatchupLabels,
     growingIndexLatencyBuckets)
-// Rows, not milliseconds: own family so a single metric name never mixes
-// units with internal_core_growing_index_latency.
-DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(
-    internal_core_growing_index_rows,
-    "[cpp]rows absorbed during growing interim index catch-up")
-DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
-    internal_core_growing_index_catchup_rows,
-    internal_core_growing_index_rows,
-    growingIndexCatchupRowsLabels,
-    growingIndexRowsBuckets)
-DEFINE_PROMETHEUS_GAUGE_FAMILY(
-    internal_core_growing_index_inflight,
-    "[cpp]in-flight growing interim index first builds")
-DEFINE_PROMETHEUS_GAUGE(internal_core_growing_index_inflight_builds,
-                        internal_core_growing_index_inflight,
-                        growingIndexInflightLabels)
 DEFINE_PROMETHEUS_COUNTER_FAMILY(
     internal_core_growing_index_failures,
     "[cpp]growing interim index failures (index disabled)")
@@ -376,30 +354,12 @@ DEFINE_PROMETHEUS_COUNTER(internal_core_growing_index_deadline_failures,
                           internal_core_growing_index_failures,
                           growingIndexDeadlineFailureLabels)
 
-// Saturation of the background build pool: queue_depth rising while capacity
-// stays flat is the signal that first builds are waiting on the executor
-// rather than on knowhere.
-std::map<std::string, std::string> growingIndexPoolCapacityLabels{
-    {"type", "capacity"}};
-std::map<std::string, std::string> growingIndexPoolActiveLabels{
-    {"type", "active_threads"}};
-std::map<std::string, std::string> growingIndexPoolIdleLabels{
-    {"type", "idle_threads"}};
 std::map<std::string, std::string> growingIndexPoolQueueDepthLabels{
     {"type", "queue_depth"}};
 
 DEFINE_PROMETHEUS_GAUGE_FAMILY(
     internal_core_growing_index_pool,
-    "[cpp]growing interim index async build thread pool")
-DEFINE_PROMETHEUS_GAUGE(internal_core_growing_index_pool_capacity,
-                        internal_core_growing_index_pool,
-                        growingIndexPoolCapacityLabels)
-DEFINE_PROMETHEUS_GAUGE(internal_core_growing_index_pool_active_threads,
-                        internal_core_growing_index_pool,
-                        growingIndexPoolActiveLabels)
-DEFINE_PROMETHEUS_GAUGE(internal_core_growing_index_pool_idle_threads,
-                        internal_core_growing_index_pool,
-                        growingIndexPoolIdleLabels)
+    "[cpp]growing interim index async build queue depth")
 DEFINE_PROMETHEUS_GAUGE(internal_core_growing_index_pool_queue_depth,
                         internal_core_growing_index_pool,
                         growingIndexPoolQueueDepthLabels)

@@ -3498,22 +3498,18 @@ TEST(GrowingIndexAsyncBuildTest, DestroyWhileQueuedReturnsImmediately) {
                << " parked builds for " << queued_index + 1 << " segments";
     }
 
-    // Native executor migration must preserve the growing pool gauges while
-    // workers are occupied and one build remains queued.
+    // A queued build must still be visible while all workers are occupied.
     const auto metrics_deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    auto metrics_ready = [&] {
-        using namespace milvus::monitor;
-        return internal_core_growing_index_pool_capacity.Value() == running &&
-               internal_core_growing_index_pool_active_threads.Value() ==
-                   running &&
-               internal_core_growing_index_pool_queue_depth.Value() == 1;
+    const auto queue_depth_is_one = [] {
+        return milvus::monitor::internal_core_growing_index_pool_queue_depth
+                   .Value() == 1;
     };
-    while (!metrics_ready() &&
+    while (!queue_depth_is_one() &&
            std::chrono::steady_clock::now() < metrics_deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    EXPECT_TRUE(metrics_ready());
+    EXPECT_TRUE(queue_depth_is_one());
 
     // Safety net for the sizing decision above: if the "queued" task were in
     // fact already running, the reset() below would join a build that parks

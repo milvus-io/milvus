@@ -70,17 +70,10 @@ struct GrowingBuildExecutor {
               std::make_shared<folly::NamedThreadFactory>(
                   "growing_index_build")) {
         executor.setThreadDeathTimeout(std::chrono::seconds(2));
-        monitor::internal_core_growing_index_pool_capacity.Set(
-            executor.numThreads());
         sampler.addFunction(
             [this] {
-                const auto stats = executor.getPoolStats();
-                monitor::internal_core_growing_index_pool_active_threads.Set(
-                    stats.activeThreadCount);
-                monitor::internal_core_growing_index_pool_idle_threads.Set(
-                    stats.idleThreadCount);
                 monitor::internal_core_growing_index_pool_queue_depth.Set(
-                    stats.pendingTaskCount);
+                    executor.getPoolStats().pendingTaskCount);
             },
             std::chrono::seconds(2),
             "growing_index_build_metrics",
@@ -582,7 +575,6 @@ KnowhereGrowingVectorIndex<T>::StartAsyncBuild() {
             if (lifetime->cancelled.load()) {
                 return;
             }
-            monitor::internal_core_growing_index_inflight_builds.Increment();
             try {
                 BuildAndCatchUp();
             } catch (const std::exception& e) {
@@ -592,7 +584,6 @@ KnowhereGrowingVectorIndex<T>::StartAsyncBuild() {
                 std::lock_guard lock(writer_mutex_);
                 DisableAsyncBuild("unknown build failure");
             }
-            monitor::internal_core_growing_index_inflight_builds.Decrement();
         });
         completion_ = build->get_future().share();
         BuildHook(GrowingBuildPhase::kBeforeSubmit);
@@ -712,8 +703,6 @@ KnowhereGrowingVectorIndex<T>::BuildAndCatchUp() {
         if (release_raw) {
             async_build_.on_raw_owned(logical);
         }
-        monitor::internal_core_growing_index_catchup_rows.Observe(
-            physical - build_threshold_);
         monitor::internal_core_growing_index_catchup_latency.Observe(
             ElapsedMs(catchup_start));
         return;
