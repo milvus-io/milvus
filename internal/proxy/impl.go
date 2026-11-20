@@ -4827,7 +4827,7 @@ func convertToV1GetImportResponse(rsp *internalpb.GetImportProgressResponse) *mi
 	}
 	convertState := func(state internalpb.ImportJobState) commonpb.ImportState {
 		switch state {
-		case internalpb.ImportJobState_Pending:
+		case internalpb.ImportJobState_Pending, internalpb.ImportJobState_SnapshotPreparing:
 			return commonpb.ImportState_ImportPending
 		case internalpb.ImportJobState_Importing:
 			return commonpb.ImportState_ImportStarted

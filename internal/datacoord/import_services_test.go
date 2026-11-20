@@ -1073,9 +1073,8 @@ func (s *ImportServicesSuite) TestImportV2_MessageVersionIsAuthoritative() {
 	s.Equal(int32(0), resp.GetStatus().GetCode())
 	s.Equal(internalpb.ImportVersion_ImportVersionV3, capturedVersion)
 
-	// A snapshot-sourced request stays on V2 even with the gate on: the V3
-	// pipeline has no snapshot source support, so routing one there would import
-	// the snapshot's rows without folding its L0 deletes.
+	// A snapshot-sourced request follows the same rollout gate: with the gate on
+	// it runs on V3, whose reshard stage folds the snapshot's L0 inventory.
 	snapshotReq := newReq(internalpb.ImportVersion_ImportVersionUnspecified)
 	snapshotReq.Options = append(snapshotReq.Options,
 		&commonpb.KeyValuePair{Key: importutilv2.BackupFlag, Value: "true"},
@@ -1083,8 +1082,8 @@ func (s *ImportServicesSuite) TestImportV2_MessageVersionIsAuthoritative() {
 	resp, err = server.ImportV2(ctx, snapshotReq)
 	s.NoError(err)
 	s.Equal(int32(0), resp.GetStatus().GetCode())
-	s.Equal(internalpb.ImportVersion_ImportVersionV2, capturedVersion,
-		"snapshot import must never be routed to Import V3")
+	s.Equal(internalpb.ImportVersion_ImportVersionV3, capturedVersion,
+		"a snapshot import follows the rollout gate")
 
 	resp, err = server.ImportV2(ctx, newReq(internalpb.ImportVersion_ImportVersionV2))
 	s.NoError(err)

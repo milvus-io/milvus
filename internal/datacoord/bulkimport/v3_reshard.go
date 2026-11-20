@@ -150,31 +150,57 @@ type reshardSource struct {
 //
 // The bin target mirrors RegroupImportFiles: one task holds at most one
 // segment's worth of data per (vchannel, partition) bucket, capped by
-// MaxSizeInMBPerImportTask. Import V3 never handles L0, so the segment target
-// comes straight from getExpectedSegmentSize.
+// MaxSizeInMBPerImportTask. The target is derived from the fragment size, not
+// getExpectedSegmentSize.
 //
 // Source size comes from the job's PreImportTaskV3 stats (preImportV3PackingSizes):
 // per file, the decoded total_memory_size when the worker measured one, else the
 // physical file_size. Both are measured on the DataNode — the backup path sizes
 // its expanded insert+delta object list without reading any content — so
 // DataCoord makes no object-store call while packing.
+//
+// Snapshot files are packed across source scopes. A task carries every L0
+// inventory its files need, so grouping by (source channel, source partition)
+// is not necessary and would turn a snapshot with many small source scopes into
+// many tiny tasks, each emitting one fragment per target bucket. Only an
+// explicit target partition splits a bin: the reshard router hashes into the
+// task's partition list, so a mapped file must stay in a single-partition task.
 func groupSources(jc *importV3JobContext, files []*internalpb.ImportFile) ([][]reshardSource, error) {
 	ctx, job := jc.ctx, jc.job
 	sizesByFile := preImportV3PackingSizes(jc.importMeta.GetTaskByJob(ctx, job.GetJobID(), WithType(PreImportTaskV3Type)))
-	sources := make([]reshardSource, 0, len(files))
+	byPartition := make(map[int64][]reshardSource)
+	partitionOrder := make([]int64, 0, 1)
 	for _, file := range files {
-		sources = append(sources, reshardSource{file: file, size: sizesByFile[file.GetId()]})
+		partitionID := file.GetSnapshotSource().GetTargetPartitionId()
+		if _, ok := byPartition[partitionID]; !ok {
+			partitionOrder = append(partitionOrder, partitionID)
+		}
+		byPartition[partitionID] = append(byPartition[partitionID], reshardSource{file: file, size: sizesByFile[file.GetId()]})
 	}
-	sort.SliceStable(sources, func(i, j int) bool {
-		return sources[i].size > sources[j].size
-	})
 	cfg := getImportV3Config()
 	fragmentTarget := cfg.fragmentSizeInMB * 1024 * 1024
 	threshold := cfg.maxSizeInMBPerImportTask * 1024 * 1024
-	target := min(fragmentTarget*int64(len(job.GetVchannels()))*int64(len(job.GetPartitionIDs())*2), threshold)
-	if target <= 0 {
-		return nil, merr.WrapErrImportSysFailedMsg("import v3 reshard BFD target must be positive")
+
+	var result [][]reshardSource
+	for _, partitionID := range partitionOrder {
+		partitionNum := int64(len(job.GetPartitionIDs()))
+		if partitionID != 0 {
+			partitionNum = 1
+		}
+		target := min(fragmentTarget*int64(len(job.GetVchannels()))*partitionNum*2, threshold)
+		if target <= 0 {
+			return nil, merr.WrapErrImportSysFailedMsg("import v3 reshard BFD target must be positive")
+		}
+		result = append(result, packReshardSources(byPartition[partitionID], target)...)
 	}
+	return result, nil
+}
+
+// packReshardSources runs stable one-dimensional BFD over one partition group.
+func packReshardSources(sources []reshardSource, target int64) [][]reshardSource {
+	sort.SliceStable(sources, func(i, j int) bool {
+		return sources[i].size > sources[j].size
+	})
 	type bin struct {
 		sources []reshardSource
 		size    int64
@@ -198,7 +224,7 @@ func groupSources(jc *importV3JobContext, files []*internalpb.ImportFile) ([][]r
 		bins[best].sources = append(bins[best].sources, source)
 		bins[best].size += source.size
 	}
-	return lo.Map(bins, func(b bin, _ int) []reshardSource { return b.sources }), nil
+	return lo.Map(bins, func(b bin, _ int) []reshardSource { return b.sources })
 }
 
 func calculateImportV3Slots(workingSet, memoryPerSlot int64) int64 {

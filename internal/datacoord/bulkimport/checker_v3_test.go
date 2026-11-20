@@ -350,6 +350,125 @@ func TestGroupSourcesSizesFromPreImportV3Stats(t *testing.T) {
 	})
 }
 
+// TestGroupSourcesSnapshotSpansScopesAndSplitsTargetPartition pins the two
+// snapshot grouping rules: source scopes never split a bin (one task can carry
+// several L0 inventories, so many small source scopes do not explode into many
+// tiny fragments), while an explicit target partition does split it because the
+// reshard router hashes into the task's partition list.
+func TestGroupSourcesSnapshotSpansScopesAndSplitsTargetPartition(t *testing.T) {
+	ctx := context.Background()
+	importMeta := NewMockImportMeta(t)
+	checker := &importCheckerV3{ctx: ctx, meta: &meta.Meta{ChunkManager: mocks2.NewChunkManager(t)}, importMeta: importMeta}
+	files := []*internalpb.ImportFile{
+		{Id: 1, SnapshotSource: &internalpb.SnapshotImportSource{Version: 5, SourceChannel: "ch1", SourcePartitionId: 10}},
+		{Id: 2, SnapshotSource: &internalpb.SnapshotImportSource{Version: 5, SourceChannel: "ch2", SourcePartitionId: 20}},
+		{Id: 3, SnapshotSource: &internalpb.SnapshotImportSource{Version: 5, SourceChannel: "ch1", SourcePartitionId: 10, TargetPartitionId: 7}},
+		{Id: 4, SnapshotSource: &internalpb.SnapshotImportSource{Version: 5, SourceChannel: "ch3", SourcePartitionId: 30, TargetPartitionId: 7}},
+	}
+	job := &Job{ImportJob: &datapb.ImportJob{
+		JobID: 1, CollectionID: 2, Vchannels: []string{"v0"}, PartitionIDs: []int64{3, 7}, Files: files,
+	}, Tr: timerecord.NewTimeRecorder("import job")}
+	sized := newPreImportTaskV3(&datapb.PreImportTaskV3{
+		JobId: 1, TaskId: 10, CollectionId: 2, State: datapb.ImportTaskStateV2_Completed,
+		FileStats: []*datapb.ImportV3FileStats{
+			{FileId: 1, FileSize: 10}, {FileId: 2, FileSize: 10}, {FileId: 3, FileSize: 10}, {FileId: 4, FileSize: 10},
+		},
+	}, importMeta)
+	preimportProbe := newPreImportTaskV3(&datapb.PreImportTaskV3{}, importMeta)
+	importMeta.EXPECT().GetTaskByJob(mock.Anything, int64(1), mock.Anything).
+		RunAndReturn(func(_ context.Context, _ int64, filters ...ImportTaskFilter) []ImportTask {
+			if len(filters) == 1 && filters[0](preimportProbe) {
+				return []ImportTask{sized}
+			}
+			return nil
+		}).Once()
+
+	groups, err := groupSources(newImportV3JobContext(checker, job), files)
+	require.NoError(t, err)
+	require.Len(t, groups, 2)
+	require.Equal(t, []int64{1, 2}, []int64{groups[0][0].file.GetId(), groups[0][1].file.GetId()},
+		"different source scopes must still share a bin when no target partition is bound")
+	require.Equal(t, []int64{3, 4}, []int64{groups[1][0].file.GetId(), groups[1][1].file.GetId()},
+		"an explicit target partition must split the bin")
+}
+
+// TestGroupSourcesSnapshotL0UsesFragmentTarget pins that a shared L0 inventory
+// does not change the BFD target: like any backup import, snapshot sources are
+// packed by their physical size against the fragment-derived target.
+func TestGroupSourcesSnapshotL0UsesFragmentTarget(t *testing.T) {
+	ctx := context.Background()
+	files := []*internalpb.ImportFile{
+		{Id: 1, SnapshotSource: &internalpb.SnapshotImportSource{Version: 5, SourceChannel: "ch", SourcePartitionId: 10}},
+		{Id: 2, SnapshotSource: &internalpb.SnapshotImportSource{Version: 5, SourceChannel: "ch", SourcePartitionId: 10}},
+		{Id: 3, SnapshotSource: &internalpb.SnapshotImportSource{Version: 5, SourceChannel: "ch", SourcePartitionId: 10}},
+	}
+	const gib = int64(1 << 30)
+	run := func(t *testing.T, l0Sources []*internalpb.SnapshotImportL0Source) [][]reshardSource {
+		importMeta := NewMockImportMeta(t)
+		checker := &importCheckerV3{ctx: ctx, meta: &meta.Meta{ChunkManager: mocks2.NewChunkManager(t)}, importMeta: importMeta}
+		job := &Job{ImportJob: &datapb.ImportJob{
+			JobID: 1, CollectionID: 2, Vchannels: []string{"v0"}, PartitionIDs: []int64{3},
+			Files: files, SnapshotL0Sources: l0Sources,
+		}, Tr: timerecord.NewTimeRecorder("import job")}
+		sized := newPreImportTaskV3(&datapb.PreImportTaskV3{
+			JobId: 1, TaskId: 10, CollectionId: 2, State: datapb.ImportTaskStateV2_Completed,
+			FileStats: []*datapb.ImportV3FileStats{
+				{FileId: 1, FileSize: gib}, {FileId: 2, FileSize: gib}, {FileId: 3, FileSize: gib},
+			},
+		}, importMeta)
+		preimportProbe := newPreImportTaskV3(&datapb.PreImportTaskV3{}, importMeta)
+		importMeta.EXPECT().GetTaskByJob(mock.Anything, int64(1), mock.Anything).
+			RunAndReturn(func(_ context.Context, _ int64, filters ...ImportTaskFilter) []ImportTask {
+				if len(filters) == 1 && filters[0](preimportProbe) {
+					return []ImportTask{sized}
+				}
+				return nil
+			}).Once()
+		groups, err := groupSources(newImportV3JobContext(checker, job), files)
+		require.NoError(t, err)
+		return groups
+	}
+
+	require.Len(t, run(t, nil), 3, "without shared L0 the 256MiB target keeps one 1GiB source per bin")
+	require.Len(t, run(t, []*internalpb.SnapshotImportL0Source{{SourceChannel: "ch", SourcePartitionId: 10}}), 3,
+		"a shared L0 inventory keeps the same 256MiB target")
+}
+
+// TestSnapshotL0Budgets pins the slot reservations frozen into the reshard
+// plan: non-snapshot jobs reserve nothing, a snapshot job without shared L0
+// reserves only the delete map it uses for segment-local deletes, and a
+// shared-L0 job reserves both the delete map and the bitmap pool.
+func TestSnapshotL0Budgets(t *testing.T) {
+	cfg := getImportV3Config()
+	budget := cfg.snapshotDeleteBudget
+	options := []*commonpb.KeyValuePair{
+		{Key: importutilv2.BackupFlag, Value: "true"},
+		{Key: importutilv2.SourceType, Value: importutilv2.SourceTypeSnapshot},
+	}
+
+	budgets := snapshotBudgets(&Job{ImportJob: &datapb.ImportJob{
+		Options: []*commonpb.KeyValuePair{{Key: importutilv2.BackupFlag, Value: "true"}},
+	}}, cfg)
+	require.Nil(t, budgets)
+
+	typed := &Job{ImportJob: &datapb.ImportJob{
+		Options: options,
+		Files:   []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{Version: 1}}},
+	}}
+	budgets = snapshotBudgets(typed, cfg)
+	require.Equal(t, budget, budgets.GetDeleteBudget())
+	require.Zero(t, budgets.GetBitmapBudget())
+
+	shared := &Job{ImportJob: &datapb.ImportJob{
+		Options:           options,
+		Files:             []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{Version: 5}}},
+		SnapshotL0Sources: []*internalpb.SnapshotImportL0Source{{SourceChannel: "ch", SourcePartitionId: 10}},
+	}}
+	budgets = snapshotBudgets(shared, cfg)
+	require.Equal(t, budget, budgets.GetDeleteBudget())
+	require.Equal(t, budget, budgets.GetBitmapBudget())
+}
+
 // TestPendingHandlerBackupCreatesPreImportV3Tasks pins the backup flow: a backup
 // job no longer skips preimport and goes straight to Resharding; its Pending
 // handler runs the count-only PreImportV3 stage like every other job.
@@ -394,6 +513,68 @@ func TestPendingHandlerBackupCreatesPreImportV3Tasks(t *testing.T) {
 	stats := preimport.GetV3FileStats()
 	require.Len(t, stats, 2)
 	require.Equal(t, []int64{1, 2}, []int64{stats[0].GetFileId(), stats[1].GetFileId()})
+	require.Equal(t, internalpb.ImportJobState_PreImporting, job.GetState())
+}
+
+// TestPendingHandlerSnapshotEntersSnapshotPreparing pins that Pending no longer
+// performs the snapshot expansion itself: an unprepared snapshot job moves to
+// SnapshotPreparing, which owns the expansion.
+func TestPendingHandlerSnapshotEntersSnapshotPreparing(t *testing.T) {
+	ctx := context.Background()
+	importMeta := NewMockImportMeta(t)
+	checker := &importCheckerV3{ctx: ctx, importMeta: importMeta}
+	job := &Job{ImportJob: &datapb.ImportJob{
+		JobID: 1, CollectionID: 2, Vchannels: []string{"v0"}, PartitionIDs: []int64{3},
+		State: internalpb.ImportJobState_Pending,
+		Files: []*internalpb.ImportFile{{
+			SnapshotSource: &internalpb.SnapshotImportSource{Version: importutilv2.SnapshotPreparationVersion},
+		}},
+	}, Tr: timerecord.NewTimeRecorder("import job")}
+	importMeta.EXPECT().UpdateJob(mock.Anything, int64(1), mock.Anything).RunAndReturn(
+		func(_ context.Context, _ int64, actions ...UpdateJobAction) error {
+			for _, a := range actions {
+				a(job)
+			}
+			return nil
+		}).Once()
+
+	require.NoError(t, pendingHandler{}.Handle(newImportV3JobContext(checker, job)))
+	require.Equal(t, internalpb.ImportJobState_SnapshotPreparing, job.GetState())
+}
+
+// TestSnapshotPreparingHandlerCreatesPreImportV3Tasks pins the second half of
+// the stage: once preparation has persisted the prepared files, the same state
+// creates the count-only PreImportV3 tasks and advances to PreImporting.
+func TestSnapshotPreparingHandlerCreatesPreImportV3Tasks(t *testing.T) {
+	ctx := context.Background()
+	importMeta := NewMockImportMeta(t)
+	alloc := allocator.NewMockAllocator(t)
+	checker := &importCheckerV3{ctx: ctx, importMeta: importMeta, alloc: alloc}
+	job := &Job{ImportJob: &datapb.ImportJob{
+		JobID: 1, CollectionID: 2, Vchannels: []string{"v0"}, PartitionIDs: []int64{3},
+		State: internalpb.ImportJobState_SnapshotPreparing,
+		Files: []*internalpb.ImportFile{
+			{Id: 1, SnapshotSource: &internalpb.SnapshotImportSource{Version: 5, SourceChannel: "ch", SourcePartitionId: 10}},
+			{Id: 2, SnapshotSource: &internalpb.SnapshotImportSource{Version: 5, SourceChannel: "ch", SourcePartitionId: 10}},
+		},
+	}, Tr: timerecord.NewTimeRecorder("import job")}
+
+	importMeta.EXPECT().GetTaskByJob(mock.Anything, int64(1), mock.Anything).Return(nil).Once()
+	alloc.EXPECT().AllocN(int64(1)).Return(int64(20), int64(21), nil).Once()
+	var added ImportTask
+	importMeta.EXPECT().AddTask(mock.Anything, mock.Anything).Run(func(_ context.Context, t ImportTask) {
+		added = t
+	}).Return(nil).Once()
+	importMeta.EXPECT().UpdateJob(mock.Anything, int64(1), mock.Anything).RunAndReturn(
+		func(_ context.Context, _ int64, actions ...UpdateJobAction) error {
+			for _, a := range actions {
+				a(job)
+			}
+			return nil
+		}).Once()
+
+	require.NoError(t, snapshotPreparingHandler{}.Handle(newImportV3JobContext(checker, job)))
+	require.NotNil(t, added, "the SnapshotPreparing handler must create a PreImportV3 task")
 	require.Equal(t, internalpb.ImportJobState_PreImporting, job.GetState())
 }
 

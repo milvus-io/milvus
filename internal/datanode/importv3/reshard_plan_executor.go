@@ -195,7 +195,22 @@ func (r *reshardPlanExecutor) execute(ctx context.Context) error {
 		return err
 	}
 	r.source.cm = sourceCM
-	source := newReshardSourceStream(r.ctx, &r.source, r.plan.GetFiles(), r.writer, &r.stageTimings)
+	var snapshot *snapshotRun
+	if r.source.snapshot {
+		// Resolve source storage once for the delete-mask builder and every
+		// per-file reader. This is a no-op for the instance storage and handles
+		// external snapshots without ever falling back to the target storage.
+		snapshot = &snapshotRun{factory: importutilv2.NewReaderFactory(r.ctx, r.source.cm, r.source.storageConfig, r.source.options)}
+		if len(r.source.snapshotL0Sources) > 0 {
+			snapshot.shared, err = snapshot.factory.PrepareSnapshotDeletes(r.ctx,
+				r.source.collectionSchema, r.plan.GetFiles(), r.source.snapshotL0Sources,
+				r.source.snapshotDeleteBudget, r.source.snapshotBitmapBudget)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	source := newReshardSourceStream(r.ctx, &r.source, r.plan.GetFiles(), r.writer, &r.stageTimings, snapshot)
 	// Registered last, so a stopped run tears the source down before the writes
 	// it may have starved and before the spill manager its ranges live in.
 	defer source.close()

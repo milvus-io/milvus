@@ -43,6 +43,32 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// expandSnapshotSource expands a snapshot preparation job's metadata reference
+// into its unnumbered executable files, normalized options, and L0 inventories.
+// It resolves the source storage once and performs only source I/O; callers own
+// file-ID allocation, final plan validation, persistence, and state transitions.
+func expandSnapshotSource(
+	ctx context.Context,
+	cm milvusstorage.ChunkManager,
+	job ImportJob,
+) ([]*internalpb.ImportFile, importutilv2.Options, []*internalpb.SnapshotImportL0Source, error) {
+	// Recovered jobs must validate the reference before doing source I/O.
+	if err := importutilv2.ValidateImportPlan(job.GetFiles(), job.GetOptions(), nil); err != nil {
+		return nil, nil, nil, err
+	}
+	uri, _ := funcutil.GetAttrByKeyFromRepeatedKV(importutilv2.SnapshotSourceURI, job.GetOptions())
+	sourceCM, metadataPath, err := resolveSnapshotImportSource(ctx, cm, uri, job.GetOptions())
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	metadata, err := storage.NewSnapshotReader(sourceCM).ReadMetadata(ctx, metadataPath)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return expandSnapshotImportFilesWithCM(ctx, job.GetPartitionIDs(), sourceCM,
+		job.GetSchema(), metadataPath, job.GetOptions(), metadata)
+}
+
 // cancelInactiveSnapshotPreparations is called each checker tick, including
 // for jobs whose channels are not ready. A terminal job must not keep doing I/O.
 func (c *Checker) cancelInactiveSnapshotPreparations() {
@@ -255,6 +281,46 @@ func PrepareSnapshotImportFiles(ctx context.Context, partitions []int64, cm milv
 // the top-level object. Only snapshot preparation jobs reach this
 // function; ordinary Import passthrough belongs to prepareSnapshotImportFiles.
 // Caller-owned options are never modified.
+func resolveSnapshotImportSource(
+	ctx context.Context,
+	cm milvusstorage.ChunkManager,
+	metadataURI string,
+	options importutilv2.Options,
+) (milvusstorage.ChunkManager, string, error) {
+	if err := importutilv2.ValidateImportSourceOptions(options); err != nil {
+		return nil, "", err
+	}
+	if cm == nil {
+		return nil, "", merr.WrapErrServiceInternalMsg("chunk manager cannot be nil")
+	}
+
+	metadataPath := strings.TrimSpace(metadataURI)
+	// Keep the captured URI's storage identity when resolving source readers
+	// for pending jobs, including retries and recovery. Already-expanded jobs
+	// skip preparation and retain their existing representation.
+	bucket, _, _, err := storage.ParseForeignURI(metadataPath)
+	if err != nil {
+		return nil, "", err
+	}
+	if importutilv2.HasExternalSource(options) {
+		if bucket == "" {
+			return nil, "", merr.WrapErrParameterInvalidMsg("snapshot-source import with external_spec requires a complete metadata URI; bare object keys are not supported")
+		}
+	} else {
+		if err := storage.ValidateInstanceSnapshotImportURI(storage.InstanceConfigFromParamtable(paramtable.Get()), metadataPath); err != nil {
+			return nil, "", err
+		}
+	}
+	cm, _, err = importutilv2.ResolveSnapshotImportStorage(ctx, cm, nil, metadataPath, options)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := storage.ValidateSnapshotObjectPathForBucket(cm, "snapshot_source", metadataPath, ""); err != nil {
+		return nil, "", err
+	}
+	return cm, metadataPath, nil
+}
+
 func expandSnapshotImportFiles(
 	ctx context.Context,
 	targetPartitionIDs []int64,
@@ -264,37 +330,22 @@ func expandSnapshotImportFiles(
 	options importutilv2.Options,
 	metadata *datapb.SnapshotMetadata,
 ) ([]*internalpb.ImportFile, importutilv2.Options, []*internalpb.SnapshotImportL0Source, error) {
-	if err := importutilv2.ValidateImportSourceOptions(options); err != nil {
+	sourceCM, metadataPath, err := resolveSnapshotImportSource(ctx, cm, metadataURI, options)
+	if err != nil {
 		return nil, nil, nil, err
 	}
-	if cm == nil {
-		return nil, nil, nil, merr.WrapErrServiceInternalMsg("chunk manager cannot be nil")
-	}
+	return expandSnapshotImportFilesWithCM(ctx, targetPartitionIDs, sourceCM, targetSchema, metadataPath, options, metadata)
+}
 
-	metadataPath := strings.TrimSpace(metadataURI)
-	// Keep the captured URI's storage identity when resolving source readers
-	// for pending jobs, including retries and recovery. Already-expanded jobs
-	// skip preparation and retain their existing representation.
-	bucket, _, _, err := storage.ParseForeignURI(metadataPath)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	if importutilv2.HasExternalSource(options) {
-		if bucket == "" {
-			return nil, nil, nil, merr.WrapErrParameterInvalidMsg("snapshot-source import with external_spec requires a complete metadata URI; bare object keys are not supported")
-		}
-	} else {
-		if err := storage.ValidateInstanceSnapshotImportURI(storage.InstanceConfigFromParamtable(paramtable.Get()), metadataPath); err != nil {
-			return nil, nil, nil, err
-		}
-	}
-	cm, _, err = importutilv2.ResolveSnapshotImportStorage(ctx, cm, nil, metadataPath, options)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	if err := storage.ValidateSnapshotObjectPathForBucket(cm, "snapshot_source", metadataPath, ""); err != nil {
-		return nil, nil, nil, err
-	}
+func expandSnapshotImportFilesWithCM(
+	ctx context.Context,
+	targetPartitionIDs []int64,
+	cm milvusstorage.ChunkManager,
+	targetSchema *schemapb.CollectionSchema,
+	metadataPath string,
+	options importutilv2.Options,
+	metadata *datapb.SnapshotMetadata,
+) ([]*internalpb.ImportFile, importutilv2.Options, []*internalpb.SnapshotImportL0Source, error) {
 	reader := storage.NewSnapshotReader(cm)
 	snapshot, err := reader.ReadSnapshotFromMetadata(ctx, metadataPath, metadata, true)
 	if err != nil {

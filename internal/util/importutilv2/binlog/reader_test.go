@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -133,8 +134,8 @@ func TestSnapshotBitmapTextAndLocalDeletes(t *testing.T) {
 			opens[path]++
 			return false
 		}).Return(false, nil).Build()
-		masks, err := BuildSnapshotDeleteMasks(ctx, cm, schema, cfg, []*internalpb.SnapshotImportSource{source}, input,
-			0, 300, batchBudget, 1<<20, SourceEncryption{}, nil)
+		masks, err := BuildSnapshotDeleteMasks(ctx, cm, schema, cfg, []*internalpb.SnapshotImportSource{source},
+			[]*internalpb.SnapshotImportL0Source{input}, 0, 300, batchBudget, 1<<20, SourceEncryption{}, nil)
 		patch.UnPatch()
 		require.NoError(t, err)
 		require.Equal(t, map[string]int{paths[0]: 1, paths[1]: 1}, opens)
@@ -205,7 +206,7 @@ func TestSnapshotBitmapBoundsAndBatchFailure(t *testing.T) {
 	mask := &rowDeleteMask{rows: -1}
 	require.NoError(t, mask.prepareRow(0, budget))
 	require.False(t, mask.deleted(0))
-	require.ErrorIs(t, mask.prepareRow(maskBlockWords*64, budget), merr.ErrServiceResourceInsufficient)
+	require.ErrorIs(t, mask.prepareRow(maskBlockWords*64, budget), merr.ErrImportFailed)
 	require.NoError(t, mask.finish(1))
 	require.NoError(t, mask.prepareRow(0, budget))
 	require.ErrorIs(t, mask.prepareRow(1, budget), merr.ErrDataIntegrity)
@@ -230,7 +231,7 @@ func TestSnapshotBitmapBoundsAndBatchFailure(t *testing.T) {
 			require.NoError(t, m.merge("a", 10))
 			require.NoError(t, m.merge("a", 20))
 			if mode == "oversized_key" {
-				require.ErrorIs(t, m.merge("long", 30), merr.ErrServiceResourceInsufficient)
+				require.ErrorIs(t, m.merge("long", 30), merr.ErrImportFailed)
 				return
 			}
 			err = m.merge("b", 30)
@@ -311,7 +312,7 @@ func TestSnapshotBitmapScanFailures(t *testing.T) {
 				}
 			case "bitmap_budget":
 				budget.limit = 1
-				want = merr.ErrServiceResourceInsufficient
+				want = merr.ErrImportFailed
 			case "shorter":
 				scan.mask.rows = 2
 			case "longer":
@@ -472,8 +473,8 @@ func TestSnapshotBitmapPreparationFailures(t *testing.T) {
 				}
 				return nil
 			}
-			result, err := BuildSnapshotDeleteMasks(ctx, nil, schema, nil, sources, &internalpb.SnapshotImportL0Source{},
-				0, 300, 1024, limit, SourceEncryption{}, validate)
+			result, err := BuildSnapshotDeleteMasks(ctx, nil, schema, nil, sources,
+				[]*internalpb.SnapshotImportL0Source{{}}, 0, 300, 1024, limit, SourceEncryption{}, validate)
 			if mode == "empty" || mode == "duplicate" {
 				require.NoError(t, err)
 				require.Len(t, result.masks, 1)
@@ -487,6 +488,13 @@ func TestSnapshotBitmapPreparationFailures(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSnapshotMaskBudgetExhaustionIsTerminal(t *testing.T) {
+	budget := &maskBudget{limit: 1}
+	err := budget.reserve(2)
+	require.Error(t, err)
+	require.True(t, importcommon.IsTerminalImportV3Err(err), "a plan-fixed reservation cannot succeed on retry")
 }
 
 func TestSnapshotL0Batches(t *testing.T) {
@@ -514,7 +522,7 @@ func TestSnapshotL0Batches(t *testing.T) {
 		return nil
 	}
 	_, err = loadSnapshotL0Deletes(ctx, cm, schema, cfg, inventory, 0, 450, pathCharge+130, consume, nil)
-	require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient, "one key and the retained inventory must fit the batch budget")
+	require.ErrorIs(t, err, merr.ErrImportFailed, "one key and the retained inventory must fit the batch budget")
 	require.Zero(t, batches)
 	merger, err := loadSnapshotL0Deletes(ctx, cm, schema, cfg, inventory, 0, 450, budget, consume, nil)
 	require.NoError(t, err)
@@ -742,7 +750,7 @@ func TestSnapshotDeleteMapBudget(t *testing.T) {
 	require.EqualValues(t, 200, m.data["key"], "updating an equal key must not retain borrowed Arrow memory")
 	require.EqualValues(t, 259, m.used, "replacement must not charge another key")
 	err = m.merge(int64(2), 100)
-	require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient)
+	require.ErrorIs(t, err, merr.ErrImportFailed)
 	require.Contains(t, err.Error(), "260 byte budget (accounted=259, next key=128)")
 	require.Contains(t, err.Error(), "dataNode.import.readDeleteBufferSizeInMB")
 	require.Contains(t, err.Error(), "dataNode.import.memoryLimitPercentage")
@@ -756,7 +764,7 @@ func TestDeleteMergerInvalidDependencies(t *testing.T) {
 		budget int64
 		want   error
 	}{
-		{"budget", schemapb.DataType_Int64, 0, merr.ErrServiceResourceInsufficient},
+		{"budget", schemapb.DataType_Int64, 0, merr.ErrImportFailed},
 		{"pk_type", schemapb.DataType_Float, 1024, merr.ErrDataIntegrity},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -854,7 +862,7 @@ func TestSnapshotDeleteReadErrors(t *testing.T) {
 				require.ErrorIs(t, err, context.Canceled)
 				require.Equal(t, 1, opens)
 			case "budget":
-				require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient)
+				require.ErrorIs(t, err, merr.ErrImportFailed)
 				require.Equal(t, 1, opens)
 			case "bad_pk", "bad_timestamp":
 				require.ErrorIs(t, err, merr.ErrDataIntegrity)
@@ -993,7 +1001,7 @@ func TestSnapshotL0RealFiles(t *testing.T) {
 			}
 			for _, batchBudget := range []int64{budget - 512 + 129, budget} {
 				masks, err := BuildSnapshotDeleteMasks(ctx, cm, schema, cfg, bitmapSources,
-					&internalpb.SnapshotImportL0Source{LegacyL0Deltalogs: paths[:1], ManifestL0Paths: []string{l0Manifest}},
+					[]*internalpb.SnapshotImportL0Source{{LegacyL0Deltalogs: paths[:1], ManifestL0Paths: []string{l0Manifest}}},
 					0, 450, batchBudget, 1<<20, SourceEncryption{}, nil)
 				require.NoError(t, err)
 				for i, source := range bitmapSources {
@@ -1020,7 +1028,7 @@ func TestSnapshotL0RealFiles(t *testing.T) {
 					Version: 1, ManifestPath: manifest, SourceCommitTimestamp: commit,
 				}
 				shared, err := BuildSnapshotDeleteMasks(ctx, cm, schema, cfg, []*internalpb.SnapshotImportSource{source},
-					&internalpb.SnapshotImportL0Source{LegacyL0Deltalogs: paths[:1], ManifestL0Paths: []string{l0Manifest}},
+					[]*internalpb.SnapshotImportL0Source{{LegacyL0Deltalogs: paths[:1], ManifestL0Paths: []string{l0Manifest}}},
 					0, 450, budget, 1<<20, SourceEncryption{}, nil)
 				require.NoError(t, err)
 				// Re-open twice to model the identical persisted input used by
@@ -1056,13 +1064,13 @@ func TestSnapshotL0RealFiles(t *testing.T) {
 			// V2 metadata can reference either legacy or packed files; the
 			// legacy inventory must retain its established V1/V2 fallback.
 			shared, err := BuildSnapshotDeleteMasks(ctx, cm, schema, cfg, []*internalpb.SnapshotImportSource{source},
-				&internalpb.SnapshotImportL0Source{LegacyL0Deltalogs: paths}, 0, 450, budget, 1<<20, SourceEncryption{}, nil)
+				[]*internalpb.SnapshotImportL0Source{{LegacyL0Deltalogs: paths}}, 0, 450, budget, 1<<20, SourceEncryption{}, nil)
 			require.NoError(t, err)
 			r, err := NewStorageV3ManifestReaderWithSharedL0(ctx, cm, schema, cfg, manifest, 0, 450, 1024, SourceEncryption{}, source, budget, shared, nil)
 			require.NoError(t, err)
 			r.Close()
 			_, err = NewStorageV3ManifestReaderWithSharedL0(ctx, cm, schema, cfg, manifest, 0, 450, 1024, SourceEncryption{}, source, 0, shared, nil)
-			require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient)
+			require.ErrorIs(t, err, merr.ErrImportFailed)
 			r, err = NewStorageV3ManifestReaderWithSharedL0(ctx, cm, schema, cfg, manifest, 0, 450, 1024, SourceEncryption{}, source, 1, shared, nil)
 			require.NoError(t, err, "prepared bitmaps must not be charged as another delete map")
 			r.Close()
@@ -2586,7 +2594,7 @@ func TestStorageV3Reader_DeleteMergerBoundary(t *testing.T) {
 				require.Error(t, err)
 				require.Nil(t, data)
 				if mode == "invalid_budget" {
-					require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient)
+					require.ErrorIs(t, err, merr.ErrImportFailed)
 				}
 				if openErr != nil {
 					require.ErrorIs(t, err, openErr)
@@ -3326,12 +3334,12 @@ func TestSnapshotV2PreparationValidation(t *testing.T) {
 	_, err = r.prepareStorageV2Snapshot(valid(), input.bytes)
 	require.NoError(t, err)
 	_, err = r.prepareStorageV2Snapshot(valid(), input.bytes-1)
-	require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient)
+	require.ErrorIs(t, err, merr.ErrImportFailed)
 	// Every insufficient reservation must fail, including during incremental
 	// group/path retention rather than only at the final combined check.
 	for budget := int64(0); budget < input.bytes; budget += 32 {
 		_, err := r.prepareStorageV2Snapshot(valid(), budget)
-		require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient)
+		require.ErrorIs(t, err, merr.ErrImportFailed)
 	}
 }
 
@@ -3422,9 +3430,9 @@ func TestSnapshotV2RealFilesAndMixedMasks(t *testing.T) {
 	inputBytes := r.v2Input.bytes
 	require.Equal(t, []int64{2, 1, 3, 4}, readPKs(r)) // equal timestamp survives; reinsertion survives
 	_, err = NewStorageV2SnapshotReader(ctx, cm, schema, cfg, segment, 0, math.MaxUint64, 1024, SourceEncryption{}, source, inputBytes, nil, nil)
-	require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient, "retained inputs cannot consume the delete merger's entire budget")
+	require.ErrorIs(t, err, merr.ErrImportFailed, "retained inputs cannot consume the delete merger's entire budget")
 	_, err = NewStorageV2SnapshotReader(ctx, cm, schema, cfg, segment, 0, math.MaxUint64, 1024, SourceEncryption{}, source, inputBytes+255, nil, nil)
-	require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient) // M < B, D < B, but M+D > B
+	require.ErrorIs(t, err, merr.ErrImportFailed) // M < B, D < B, but M+D > B
 	r, err = NewStorageV2SnapshotReader(ctx, cm, schema, cfg, segment, 0, math.MaxUint64, 1024, SourceEncryption{}, source, inputBytes+256, nil, nil)
 	require.NoError(t, err)
 	r.Close()
@@ -3464,7 +3472,7 @@ func TestSnapshotV2RealFilesAndMixedMasks(t *testing.T) {
 			}
 			l0 := &internalpb.SnapshotImportL0Source{LegacyL0Deltalogs: deltaPaths[1:]}
 			budget := int64(len(deltaPaths[1]) + 64 + 128) // Force several delete batches.
-			shared, err := BuildSnapshotDeleteMasksWithV2(ctx, cm, schema, cfg, sources, l0, 0, math.MaxUint64, budget, 1<<20, SourceEncryption{}, nil, resolve)
+			shared, err := BuildSnapshotDeleteMasksWithV2(ctx, cm, schema, cfg, sources, []*internalpb.SnapshotImportL0Source{l0}, 0, math.MaxUint64, budget, 1<<20, SourceEncryption{}, nil, resolve)
 			require.NoError(t, err)
 			r, err := NewStorageV2SnapshotReader(ctx, cm, schema, cfg, nil, 0, math.MaxUint64, 1024, SourceEncryption{}, source, budget, shared, nil)
 			require.NoError(t, err)
@@ -3482,10 +3490,10 @@ func TestSnapshotV2RealFilesAndMixedMasks(t *testing.T) {
 				require.Equal(t, []int64{1, 2, 1, 4}, readPKs(v3))
 			}
 			combined := inputBytes + int64(len(sources))*(256+maskBlockWords*8+64)
-			shared, err = BuildSnapshotDeleteMasksWithV2(ctx, cm, schema, cfg, sources, l0, 0, math.MaxUint64, budget, combined-1, SourceEncryption{}, nil, resolve)
-			require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient)
+			shared, err = BuildSnapshotDeleteMasksWithV2(ctx, cm, schema, cfg, sources, []*internalpb.SnapshotImportL0Source{l0}, 0, math.MaxUint64, budget, combined-1, SourceEncryption{}, nil, resolve)
+			require.ErrorIs(t, err, merr.ErrImportFailed)
 			require.Nil(t, shared)
-			shared, err = BuildSnapshotDeleteMasksWithV2(ctx, cm, schema, cfg, sources, l0, 0, math.MaxUint64, budget, combined, SourceEncryption{}, nil, resolve)
+			shared, err = BuildSnapshotDeleteMasksWithV2(ctx, cm, schema, cfg, sources, []*internalpb.SnapshotImportL0Source{l0}, 0, math.MaxUint64, budget, combined, SourceEncryption{}, nil, resolve)
 			require.NoError(t, err)
 			require.NotNil(t, shared)
 		})
@@ -3582,11 +3590,11 @@ func TestSnapshotV2BitmapResolutionFailures(t *testing.T) {
 					want = merr.ErrIoPermissionDenied
 				}
 				if mode == "input_budget" {
-					budget, want = 257, merr.ErrServiceResourceInsufficient
+					budget, want = 257, merr.ErrImportFailed
 				}
 			}
 			shared, err := BuildSnapshotDeleteMasksWithV2(context.Background(), nil, schema, nil, []*internalpb.SnapshotImportSource{source},
-				&internalpb.SnapshotImportL0Source{}, 0, math.MaxUint64, 1024, budget, SourceEncryption{}, nil, resolve)
+				[]*internalpb.SnapshotImportL0Source{{}}, 0, math.MaxUint64, 1024, budget, SourceEncryption{}, nil, resolve)
 			require.ErrorIs(t, err, want)
 			require.Nil(t, shared, "failed resolution must never publish partial preparation")
 			if resolve != nil {
