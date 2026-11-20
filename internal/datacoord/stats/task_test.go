@@ -856,8 +856,8 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 		handler := meta.NewNMockHandler(s.T())
 		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&meta.CollectionInfo{
 			ID: s.collID,
-			Properties: map[string]string{
-				common.CollectionTTLConfigKey: "3600",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.CollectionTTLConfigKey, Value: "3600"},
 			},
 			Schema: meta.NewTestSchema(),
 		}, nil)
@@ -1888,8 +1888,8 @@ func (s *statsTaskSuite) TestPrepareJobRequest() {
 		// Create a handler with valid collection
 		collection := &meta.CollectionInfo{
 			Schema: meta.NewTestSchema(),
-			Properties: map[string]string{
-				common.CollectionTTLConfigKey: "3600",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.CollectionTTLConfigKey, Value: "3600"},
 			},
 		}
 
@@ -1912,8 +1912,8 @@ func (s *statsTaskSuite) TestPrepareJobRequest() {
 		// Create a handler with valid collection
 		collection := &meta.CollectionInfo{
 			Schema: meta.NewTestSchema(),
-			Properties: map[string]string{
-				common.CollectionTTLConfigKey: "3600",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.CollectionTTLConfigKey, Value: "3600"},
 			},
 		}
 

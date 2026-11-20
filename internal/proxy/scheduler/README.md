@@ -21,8 +21,18 @@ The proxy exposes five task queues:
   independent of DQL. Workers pop only when free, so a saturated worker pool
   leaves all waiting batches inside the admission bound.
 
-RPC handlers and Search tasks enqueue work. The dispatcher runs each task's
-`PreExecute -> Execute -> PostExecute` lifecycle under a bounded worker pool.
+Each task is enqueued by the proxy's RPC handlers and, when picked up by its
+loop, runs `PreExecute -> Execute -> PostExecute` under bounded concurrency.
+DML uses execution slots: a read-dependent upsert releases its slot while waiting
+for readiness or read-retry backoff, and reacquires it for every read and before
+continuing the mutation. Suspended tasks retain their stack and appear in the
+active task registry, but do not count against `MaxTaskNum` execution slots.
+The unissued queue remains bounded. Read retries have a separate `MaxTaskNum`
+capacity; additional read-dependent upserts fail with `TooManyRequests` instead
+of queuing readiness waits ahead of ordinary DML. This bounds suspended requests
+without retaining the old pool's total in-flight limit. RPC cancellation and
+deadlines still apply. Scheduler shutdown cancels readiness waits and slot
+acquisition, without waiting for ordinary DML to finish.
 
 ## Responsibilities
 
