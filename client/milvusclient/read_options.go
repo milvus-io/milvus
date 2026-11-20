@@ -817,12 +817,16 @@ type queryOption struct {
 	useDefaultConsistencyLevel bool
 	expr                       string
 	templateParams             map[string]any
+	err                        error
 }
 
 // The returned request is NOT a snapshot of slice-valued template parameters:
 // it aliases the caller's backing arrays (see WithTemplateParam). Treat it as
 // valid only while those slices are unmodified.
 func (opt *queryOption) Request() (*milvuspb.QueryRequest, error) {
+	if opt.err != nil {
+		return nil, opt.err
+	}
 	chains, err := buildFunctionChains(opt.functionChains, "query", false)
 	if err != nil {
 		return nil, err
@@ -929,6 +933,28 @@ func (opt *queryOption) WithRLSPrincipal(principal string) *queryOption {
 
 func (opt *queryOption) WithSkipRLS(skip bool) *queryOption {
 	opt.skipRLS = skip
+	return opt
+}
+
+// WithCalcDistance requests a per-row distance/similarity column for the query.
+// The params map mirrors the server's calc_distance query param:
+//
+//	metric_type, field, vector, output_name
+//
+// The map is JSON-marshaled into the request's calc_distance query param
+// verbatim. The vector value may be a []float32 (dense), a map (sparse), or a
+// string (single-row expression). The marshal fails — and Request() returns the
+// error — when vector contains NaN/Inf, which the server would reject anyway.
+func (opt *queryOption) WithCalcDistance(params map[string]any) *queryOption {
+	s, err := json.Marshal(params)
+	if err != nil {
+		opt.err = err
+		return opt
+	}
+	if opt.queryParams == nil {
+		opt.queryParams = make(map[string]string)
+	}
+	opt.queryParams["calc_distance"] = string(s)
 	return opt
 }
 
