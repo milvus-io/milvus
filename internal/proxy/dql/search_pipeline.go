@@ -2459,6 +2459,12 @@ func isSameGroupByValue(field *schemapb.FieldData, i, j int) bool {
 			return false
 		}
 		return data[i] == data[j]
+	case schemapb.DataType_Timestamptz:
+		data := field.GetScalars().GetTimestamptzData().GetData()
+		if i >= len(data) || j >= len(data) {
+			return false
+		}
+		return data[i] == data[j]
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		data := field.GetScalars().GetStringData().GetData()
 		if i >= len(data) || j >= len(data) {
@@ -2818,7 +2824,42 @@ func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 			}
 			data.Data = newData
 		}
-	case schemapb.DataType_VarChar, schemapb.DataType_String:
+	case schemapb.DataType_Timestamptz:
+		// order_by runs before PostExecute formats TIMESTAMPTZ as ISO strings,
+		// so the column is still the internal int64 payload here.
+		if data := field.GetScalars().GetTimestamptzData(); data != nil && len(data.Data) > 0 {
+			newData := make([]int64, n)
+			for newIdx, oldIdx := range indices {
+				if oldIdx < 0 || oldIdx >= len(data.Data) {
+					return merr.WrapErrServiceInternalMsg("reorderFieldData: index %d out of bounds for Timestamptz field %s (len=%d)", oldIdx, field.GetFieldName(), len(data.Data))
+				}
+				newData[newIdx] = data.Data[oldIdx]
+			}
+			data.Data = newData
+		}
+	case schemapb.DataType_Geometry:
+		// A geometry column is WKB until PostExecute converts it to WKT; handle
+		// whichever payload is set.
+		if data := field.GetScalars().GetGeometryData(); data != nil && len(data.Data) > 0 {
+			newData := make([][]byte, n)
+			for newIdx, oldIdx := range indices {
+				if oldIdx < 0 || oldIdx >= len(data.Data) {
+					return merr.WrapErrServiceInternalMsg("reorderFieldData: index %d out of bounds for Geometry field %s (len=%d)", oldIdx, field.GetFieldName(), len(data.Data))
+				}
+				newData[newIdx] = data.Data[oldIdx]
+			}
+			data.Data = newData
+		} else if data := field.GetScalars().GetGeometryWktData(); data != nil && len(data.Data) > 0 {
+			newData := make([]string, n)
+			for newIdx, oldIdx := range indices {
+				if oldIdx < 0 || oldIdx >= len(data.Data) {
+					return merr.WrapErrServiceInternalMsg("reorderFieldData: index %d out of bounds for Geometry field %s (len=%d)", oldIdx, field.GetFieldName(), len(data.Data))
+				}
+				newData[newIdx] = data.Data[oldIdx]
+			}
+			data.Data = newData
+		}
+	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Text:
 		if data := field.GetScalars().GetStringData(); data != nil && len(data.Data) > 0 {
 			newData := make([]string, n)
 			for newIdx, oldIdx := range indices {
