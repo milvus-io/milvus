@@ -53,9 +53,22 @@ rm -rf "$PYUDF_RUNTIME_DIR"
 mkdir -p "$PYUDF_RUNTIME_DIR"
 cp "${PYUDF_WHEELS[0]}" "$PYUDF_RUNTIME_DIR/"
 
-for LIB_PATH in $(ldd ./bin/milvus | grep -E '(asan|tsan|atomic)' | awk '{print $3}'); do
-    cp "$LIB_PATH" "$LIBRARY_PATH" 2>/dev/null
-done
+# Ship the linked GCC runtimes; the runtime image may have an older compiler.
+if LINKED_LIBRARIES=$(ldd ./bin/milvus); then
+    ASAN_RUNTIME=
+    for LIB_PATH in $(printf '%s\n' "$LINKED_LIBRARIES" | grep -E '(asan|tsan|atomic|libstdc\+\+|libgcc_s|libgomp|libgfortran|libquadmath)' | awk '{print $3}'); do
+        if [[ ! "$LIB_PATH" -ef "$LIBRARY_PATH/${LIB_PATH##*/}" ]]; then
+            cp "$LIB_PATH" "$LIBRARY_PATH" 2>/dev/null
+        fi
+        case "${LIB_PATH##*/}" in libasan.so.*) ASAN_RUNTIME=${LIB_PATH##*/} ;; esac
+    done
+    # A compiler switch leaves old SONAMEs in lib; retain only the linked ASan.
+    for LIB_PATH in "$LIBRARY_PATH"/libasan.so.*; do
+        if [[ "${LIB_PATH##*/}" != "$ASAN_RUNTIME" ]]; then
+            rm -f -- "$LIB_PATH"
+        fi
+    done
+fi
 
 if [[ -f "$LIBRARY_PATH/milvus-archer" ]]; then
     python3 "$PWD/internal/core/milvus_tsan.py" verify "$LIBRARY_PATH"

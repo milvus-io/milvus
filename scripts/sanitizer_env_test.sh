@@ -215,6 +215,26 @@ for mode in none thread; do
     fi
 done
 
+# ASan packaging follows the installed compiler runtime, not the OS version.
+printf 'none\n' > "${test_root}/repo/lib/milvus-sanitizer"
+for version in 6 8; do
+    touch "${test_root}/repo/lib/libasan.so.${version}"
+    log="${test_root}/image-asan-${version}.log"
+    env -u USE_TSAN -u LD_PRELOAD -u BUILD_ARGS GOFLAGS= USE_ASAN=ON \
+        OS_NAME=ubuntu20.04 IMAGE_ARCH=amd64 \
+        PATH="${test_root}/bin:${PATH}" TEST_LOG="${log}" \
+        bash "${test_root}/repo/build/build_image.sh" > "${test_root}/image-output.log" 2>&1
+    grep -q -- "MILVUS_ASAN_LIB=/milvus/lib/libasan.so.${version}" "${log}"
+    rm "${test_root}/repo/lib/libasan.so.${version}"
+done
+if env -u USE_TSAN -u LD_PRELOAD -u BUILD_ARGS GOFLAGS= USE_ASAN=ON \
+    OS_NAME=ubuntu20.04 IMAGE_ARCH=amd64 PATH="${test_root}/bin:${PATH}" TEST_LOG="${log}" \
+    bash "${test_root}/repo/build/build_image.sh" > "${test_root}/image-output.log" 2>&1; then
+    echo 'Expected missing ASan runtime to fail before Docker' >&2
+    exit 1
+fi
+grep -q 'expected exactly one packaged libasan' "${test_root}/image-output.log"
+
 # An Archer image must check dependency hashes and runtime closure before Docker.
 printf 'llvm-20\n' > "${test_root}/repo/lib/milvus-archer"
 touch "${test_root}/repo/lib/libarcher.so" "${test_root}/repo/lib/libomp.so.5"

@@ -15,10 +15,13 @@ FROM amazonlinux:2023
 
 ARG TARGETARCH
 
-RUN dnf install -y wget g++ gcc gcc-gfortran gdb libatomic libstdc++-static ninja-build git make zip unzip tar which \
+RUN dnf install -y wget g++ gcc gcc-gfortran gdb libatomic libstdc++-static ninja-build git make zip unzip tar xz bzip2 diffutils which \
     autoconf automake perl-FindBin texinfo \
     pkg-config libuuid-devel libaio perl-IPC-Cmd perl-Digest-SHA libasan tzdata && \
     rm -rf /var/cache/yum/*
+
+COPY build/docker/builder/cpu/install-gcc.sh /tmp/install-gcc.sh
+RUN bash /tmp/install-gcc.sh && rm /tmp/install-gcc.sh
 
 COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python

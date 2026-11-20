@@ -88,6 +88,7 @@ endif ()
 set( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake" )
 include( Utils )
 include( DefineOptions )
+include( CheckCompiler )
 include( Sanitizers )
 
 # **************************** Build time, type and code version ****************************

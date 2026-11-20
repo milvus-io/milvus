@@ -32,8 +32,18 @@ mkdir -p "$repo_root/bin" "$repo_root/internal/core/output/lib/ossl-modules" \
 printf 'milvus fixture\n' > "$repo_root/bin/milvus"
 printf 'wheel fixture\n' > \
     "$repo_root/cmake_build/runtime/pyudf/wheels/milvus_pyudf_runtime-test.whl"
-printf '#!/usr/bin/env bash\nexit 0\n' > "$fake_bin/ldd"
+cat > "$fake_bin/ldd" <<'EOF'
+#!/usr/bin/env bash
+cat "$LDD_FIXTURE"
+EOF
 chmod +x "$fake_bin/ldd"
+ldd_fixture="$test_root/ldd.txt"
+compiler_lib_dir="$test_root/compiler-libs"
+mkdir -p "$compiler_lib_dir"
+for library in libstdc++.so.6 libgcc_s.so.1 libgomp.so.1 libgfortran.so.5 libquadmath.so.0 libasan.so.8 libtsan.so.2 libatomic.so.1 libc.so.6; do
+    printf 'compiler runtime fixture: %s\n' "$library" > "$compiler_lib_dir/$library"
+    printf '%s => %s/%s (0x1234)\n' "$library" "$compiler_lib_dir" "$library" >> "$ldd_fixture"
+done
 
 create_library() {
     local directory=$1
@@ -53,7 +63,7 @@ printf 'module fixture\n' > "$repo_root/internal/core/output/lib/ossl-modules/fi
 run_install() {
     (
         cd "$repo_root"
-        GOPATH="$test_root/gopath" LIBRARY_PATH="$runtime_dir" PATH="$fake_bin:$PATH" \
+        GOPATH="$test_root/gopath" LIBRARY_PATH="$runtime_dir" PATH="$fake_bin:$PATH" LDD_FIXTURE="$ldd_fixture" \
             bash "$script_dir/install_milvus.sh"
     )
 }
@@ -80,8 +90,14 @@ assert_install() {
         "$runtime_dir/ossl-modules/fips.so"
     cmp "$repo_root/cmake_build/runtime/pyudf/wheels/milvus_pyudf_runtime-test.whl" \
         "$runtime_dir/pyudf/milvus_pyudf_runtime-test.whl"
+    for library in libstdc++.so.6 libgcc_s.so.1 libgomp.so.1 libgfortran.so.5 libquadmath.so.0 libasan.so.8 libtsan.so.2 libatomic.so.1; do
+        cmp "$compiler_lib_dir/$library" "$runtime_dir/$library"
+    done
+    test ! -e "$runtime_dir/libc.so.6"
+    test ! -e "$runtime_dir/libasan.so.6"
 }
 
+printf 'stale GCC 11 ASan runtime\n' > "$runtime_dir/libasan.so.6"
 run_install
 assert_install
 
@@ -100,5 +116,17 @@ rm -rf "$repo_root/internal/core/output/lib64"
 rm "$repo_root/internal/core/output/lib/"*.dylib
 run_install
 assert_library libdemo.so libdemo.so.1 libdemo.so.1.2
+
+# Reinstallation may resolve the already packaged runtime through the loader.
+cp "$ldd_fixture" "$ldd_fixture.saved"
+sed "s|$compiler_lib_dir/libasan.so.8|$runtime_dir/libasan.so.8|" \
+    "$ldd_fixture.saved" > "$ldd_fixture"
+run_install
+cmp "$compiler_lib_dir/libasan.so.8" "$runtime_dir/libasan.so.8"
+
+# Switching back to a non-ASan build must not retain an obsolete preload.
+sed '/libasan/d' "$ldd_fixture.saved" > "$ldd_fixture"
+run_install
+test ! -e "$runtime_dir/libasan.so.8"
 
 echo "Runtime library symlink installation tests passed."
