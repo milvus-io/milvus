@@ -74,7 +74,7 @@ case "${unameOut}" in
         fi
       done
       if [ "${llvm_version}" = "NOT_FOUND" ] ; then
-        echo "ERROR: Valid LLVM (14-18) not installed. Run: brew install llvm@17"
+        echo "ERROR: Valid LLVM (14-21) not installed. Run: brew install llvm@19"
         exit 1
       fi
       llvm_prefix="$(brew --prefix llvm@${llvm_version})"

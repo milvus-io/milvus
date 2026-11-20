@@ -25,7 +25,8 @@
 #   - Amazon Linux 2023
 #
 # Compiler requirements:
-#   - macOS: LLVM/Clang 15-17
+#   - macOS: LLVM/Clang 14-21 (auto-detected by setenv.sh; prefer >= 19, whose
+#     libc++ resolves the chrono operator<< conflict with arrow's date library)
 #   - Linux: GCC 11-14
 #
 # Usage:
