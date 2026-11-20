@@ -24,6 +24,7 @@
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
 #include "common/FieldData.h"
+#include "common/Utils.h"
 #include "exec/QueryContext.h"
 #include "exec/expression/Utils.h"
 #include "exec/operator/Operator.h"
@@ -107,6 +108,63 @@ MakeElementIndexColumn(const std::vector<int32_t>& element_indices) {
         std::move(field_data), std::move(valid_map), 0);
 }
 
+// Native reverse lookup returns dense protobuf scalar slots. Project operators
+// own their typed storage after the request-local protobuf is released.
+ColumnVectorPtr
+MakeProjectedScalarColumn(const DataArray& output,
+                          DataType type,
+                          size_t count) {
+    auto data = InitScalarFieldDataWithLength(type, count);
+    auto copy = [&]<typename T>(const auto& values) {
+        AssertInfo(values.size() == count,
+                   "projected scalar output length mismatch");
+        std::copy(values.begin(), values.end(), static_cast<T*>(data->Data()));
+    };
+    const auto& scalars = output.scalars();
+    switch (type) {
+        case DataType::BOOL:
+            copy.operator()<bool>(scalars.bool_data().data());
+            break;
+        case DataType::INT8:
+            copy.operator()<int8_t>(scalars.int_data().data());
+            break;
+        case DataType::INT16:
+            copy.operator()<int16_t>(scalars.int_data().data());
+            break;
+        case DataType::INT32:
+            copy.operator()<int32_t>(scalars.int_data().data());
+            break;
+        case DataType::INT64:
+            copy.operator()<int64_t>(scalars.long_data().data());
+            break;
+        case DataType::TIMESTAMPTZ:
+            copy.operator()<int64_t>(scalars.timestamptz_data().data());
+            break;
+        case DataType::FLOAT:
+            copy.operator()<float>(scalars.float_data().data());
+            break;
+        case DataType::DOUBLE:
+            copy.operator()<double>(scalars.double_data().data());
+            break;
+        case DataType::STRING:
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+            copy.operator()<std::string>(scalars.string_data().data());
+            break;
+        default:
+            ThrowInfo(
+                UnexpectedError, "unsupported projected scalar type {}", type);
+    }
+    const auto& validity = GetFieldDataRowValidData(output);
+    AssertInfo(validity.empty() || validity.size() == count,
+               "projected scalar validity length mismatch");
+    TargetBitmap valid(count, true);
+    for (int i = 0; i < validity.size(); ++i) valid[i] = validity[i];
+    auto null_count = count - valid.count();
+    return std::make_shared<ColumnVector>(
+        std::move(data), std::move(valid), null_count);
+}
+
 }  // namespace
 
 PhyProjectNode::PhyProjectNode(
@@ -171,6 +229,7 @@ PhyProjectNode::GetOutput() {
         return nullptr;
     }
     auto row_type = OutputType();
+    auto snapshot = query_context_->get_read_snapshot();
     std::vector<VectorPtr> column_vectors;
     column_vectors.reserve(fields_to_project_.size());
     for (int i = 0; i < fields_to_project_.size(); i++) {
@@ -193,9 +252,29 @@ PhyProjectNode::GetOutput() {
             continue;
         }
 
+        const bool field_exists = segment_->is_field_exist(field_id);
+        // A Sealed snapshot may retain only a scalar value index for this
+        // field. Use the same pinned index selection and version overlay as
+        // output fill. The typed bulk reader below requires a resident column.
+        if (snapshot && !snapshot->GetColumn(field_id) && field_exists) {
+            const auto schema = query_context_->get_read_schema();
+            auto output = segcore::BulkSubscriptWithSnapshot(
+                segment_,
+                snapshot,
+                op_context_,
+                field_id,
+                (*schema)[field_id],
+                selected_offsets.data(),
+                selected_count,
+                nullptr,
+                query_context_->get_query_timestamp());
+            column_vectors.emplace_back(MakeProjectedScalarColumn(
+                *output, column_type, selected_count));
+            continue;
+        }
         TargetBitmap valid_map(selected_count, false);
         auto field_data =
-            segment_->is_field_exist(field_id)
+            field_exists
                 ? bulk_script_field_data(op_context_,
                                          field_id,
                                          column_type,

@@ -374,6 +374,97 @@ LoadTypedBaseIndex(SegmentSealed& segment, FieldId field, DataType type) {
     }
 }
 
+TEST(PkUpdateTypedEvaluation, IndexOnlyHistoricalSqlProjection) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto score = schema->AddDebugField("score", DataType::INT64, true);
+    schema->set_primary_field_id(pk);
+    auto data = DataGen(schema, 4);
+    std::fill(data.timestamps_.begin(), data.timestamps_.end(), 1);
+    for (auto& field : *data.raw_->mutable_fields_data()) {
+        if (field.field_id() == pk.get()) {
+            for (int i = 0; i < 4; ++i)
+                field.mutable_scalars()->mutable_long_data()->set_data(i, i);
+        }
+    }
+    auto segment = CreateSealedSegment(schema);
+    LoadGeneratedDataIntoSegment(data, segment.get(), false, {score.get()});
+    int64_t values[] = {10, 20, 20, 0};
+    bool valid[] = {true, true, true, false};
+    Config params = {{"field_type", static_cast<int>(DataType::INT64)},
+                     {index::FIELD_ID, score.get()}};
+    auto built =
+        BuildTestScalarIndex(index::families::kSort, 4, values, valid, params);
+    LoadIndexInfo info{};
+    info.field_id = score.get();
+    info.field_type = DataType::INT64;
+    info.index_params = GenIndexParams(built.get());
+    SetTestIndexMetadata(info, *built, index::families::kSort);
+    info.index = CreateTestIndex("sql-score", std::move(built));
+    segment->LoadIndex(info);
+    ASSERT_FALSE(segment->HasFieldData(score));
+    ASSERT_TRUE(
+        dynamic_cast<ChunkedSegmentSealedImpl&>(*segment).IndexHasRawData(
+            score));
+    ASSERT_EQ(segment->CaptureReadSnapshot()->GetColumn(score), nullptr);
+    for (auto [key, value] : {std::pair<int, std::optional<int>>{1, -8},
+                              {0, std::nullopt},
+                              {3, 20}}) {
+        IdArray ids;
+        ids.mutable_int_id()->add_data(key);
+        UpdateAssignment assignment{score, {}};
+        if (value)
+            assignment.literal.mutable_scalar_value()->set_long_data(*value);
+        else
+            assignment.literal.set_null_value(google::protobuf::NULL_VALUE);
+        segment->ApplyUpdates(ids, 20, key, {assignment});
+    }
+    proto::plan::PlanNode ordered, sum, grouped;
+    ordered.add_output_field_ids(pk.get());
+    ordered.add_output_field_ids(score.get());
+    auto* order = ordered.mutable_query()->add_order_by_fields();
+    order->set_field_id(score.get());
+    order->set_ascending(true);
+    order->set_nulls_first(false);
+    ordered.mutable_query()->set_limit(1);
+    auto* total = sum.mutable_query()->add_aggregates();
+    total->set_field_id(score.get());
+    total->set_op(proto::plan::sum);
+    grouped.mutable_query()->add_group_by_field_ids(score.get());
+    auto* count = grouped.mutable_query()->add_aggregates();
+    count->set_field_id(pk.get());
+    count->set_op(proto::plan::count);
+    for (auto ts : {19, 20}) {
+        auto query = [&](const proto::plan::PlanNode& node) {
+            auto plan = query::ProtoParser(schema).CreateRetrievePlan(node);
+            return segment->Retrieve(nullptr, plan.get(), ts, 1 << 20, false);
+        };
+        auto winners = query(ordered);
+        ASSERT_EQ(winners->ids().int_id().data_size(), 1);
+        EXPECT_EQ(winners->ids().int_id().data(0), ts == 19 ? 0 : 1);
+        auto totals = query(sum);
+        ASSERT_EQ(totals->fields_data_size(), 1);
+        EXPECT_EQ(totals->fields_data(0).scalars().long_data().data(0),
+                  ts == 19 ? 50 : 32);
+        auto groups = query(grouped);
+        ASSERT_EQ(groups->fields_data_size(), 2);
+        const auto& keys = groups->fields_data(0);
+        const auto& counts = groups->fields_data(1).scalars().long_data();
+        ASSERT_EQ(counts.data_size(), 3);
+        std::map<std::optional<int64_t>, int64_t> actual;
+        for (int i = 0; i < counts.data_size(); ++i) {
+            auto key =
+                GetFieldDataRowValidData(keys)[i]
+                    ? std::optional<int64_t>(keys.scalars().long_data().data(i))
+                    : std::nullopt;
+            actual[key] = counts.data(i);
+        }
+        decltype(actual) expected{
+            {std::nullopt, 1}, {ts == 19 ? 10 : -8, 1}, {20, 2}};
+        EXPECT_EQ(actual, expected);
+    }
+}
+
 TEST(PkUpdateTypedEvaluation, GrowingAndSealedScanTakeAndCandidateMask) {
     enum class Source { Growing, Sealed, Indexed };
     for (const auto source :
