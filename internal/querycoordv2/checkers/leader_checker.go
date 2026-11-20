@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
@@ -93,10 +92,7 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 
 		replicas := c.meta.GetByCollection(ctx, collectionID)
 		for _, replica := range replicas {
-			nodes := replica.GetRWNodes()
-			if streamingutil.UseStreamingQueryNodeAsDelegator() {
-				nodes = replica.GetRWSQNodes()
-			}
+			nodes := replica.GetRWSQNodes()
 			for _, node := range nodes {
 				delegatorList := c.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(node))
 				for _, d := range delegatorList {

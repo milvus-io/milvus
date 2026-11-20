@@ -276,6 +276,7 @@ func TestRoundRobinAssignPolicy_AssignChannel_EvenDistribution(t *testing.T) {
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	nodeManager := session.NewNodeManager()
+	useStreamingQueryNodes(t, nodeManager)
 
 	// Add 3 nodes
 	for i := int64(1); i <= 3; i++ {
@@ -325,6 +326,7 @@ func TestRoundRobinAssignPolicy_AssignChannel_EmptyChannels(t *testing.T) {
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	nodeManager := session.NewNodeManager()
+	useStreamingQueryNodes(t, nodeManager)
 	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -350,6 +352,7 @@ func TestRoundRobinAssignPolicy_AssignChannel_VerifyFrom(t *testing.T) {
 	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	nodeManager := session.NewNodeManager()
+	useStreamingQueryNodes(t, nodeManager)
 	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
