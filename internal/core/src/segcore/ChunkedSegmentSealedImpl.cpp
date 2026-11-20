@@ -1504,8 +1504,8 @@ ChunkedSegmentSealedImpl::GetStructElementOffsetsFromState(
         return nullptr;
     }
     const auto& runtime = *state.runtime;
-    auto it = runtime.struct_element_offsets_map.find(field_id);
-    if (it == runtime.struct_element_offsets_map.end()) {
+    auto it = runtime.element_offsets_by_field.find(field_id);
+    if (it == runtime.element_offsets_by_field.end()) {
         return nullptr;
     }
     AssertInfo(it->second != nullptr,
@@ -1522,25 +1522,24 @@ ChunkedSegmentSealedImpl::PrepareStructElementOffsets(
     RuntimeResourceState& runtime,
     milvus::OpContext* op_ctx) {
     try {
-        for (auto& [struct_name, offsets] : runtime.struct_to_element_offsets) {
+        for (auto& [group, offsets] : runtime.element_offsets_by_group) {
             if (offsets) {
                 continue;
             }
             auto source = SelectStructElementOffsetsSource(
-                runtime, schema, load_info, struct_name, {}, {});
+                runtime, schema, load_info, group, {}, {});
             AssertInfo(source.has_value(),
                        "no column available to build struct element offsets "
-                       "for struct {}",
-                       struct_name);
+                       "for group {}",
+                       group);
             offsets = StructElementOffsetsSealed::BuildFromColumn(
                 *runtime.fields.at(*source),
                 schema[*source],
                 runtime.row_count,
                 op_ctx);
-            for (auto& [field_id, alias] : runtime.struct_element_offsets_map) {
+            for (auto& [field_id, alias] : runtime.element_offsets_by_field) {
                 if (schema.has_field(field_id) &&
-                    GetStructNameForArrayField(schema[field_id]) ==
-                        struct_name) {
+                    GetElementOffsetsGroup(schema[field_id]) == group) {
                     alias = offsets;
                 }
             }
@@ -1759,8 +1758,8 @@ ChunkedSegmentSealedImpl::CloneRuntimeResourceState(
         return state;
     }
     state->fields = current->fields;
-    state->struct_to_element_offsets = current->struct_to_element_offsets;
-    state->struct_element_offsets_map = current->struct_element_offsets_map;
+    state->element_offsets_by_group = current->element_offsets_by_group;
+    state->element_offsets_by_field = current->element_offsets_by_field;
     state->indexes = current->indexes;
     state->next_local_index_registration_id =
         current->next_local_index_registration_id;
@@ -2092,8 +2091,8 @@ ChunkedSegmentSealedImpl::FreezeRuntimeResourceState(
     const RuntimeResourceState& current) {
     auto runtime = std::make_shared<RuntimeResourceState>();
     runtime->fields = current.fields;
-    runtime->struct_to_element_offsets = current.struct_to_element_offsets;
-    runtime->struct_element_offsets_map = current.struct_element_offsets_map;
+    runtime->element_offsets_by_group = current.element_offsets_by_group;
+    runtime->element_offsets_by_field = current.element_offsets_by_field;
     runtime->indexes = current.indexes;
     runtime->next_local_index_registration_id =
         current.next_local_index_registration_id;
@@ -4644,28 +4643,28 @@ ChunkedSegmentSealedImpl::DropFieldData(
     if (old_column) {
         old_column->CancelWarmup();
     }
-    auto prune_dropped_structs = [&](RuntimeResourceState& target_runtime) {
-        std::unordered_set<std::string> active_structs;
+    auto prune_dropped_groups = [&](RuntimeResourceState& target_runtime) {
+        std::unordered_set<std::string> active_groups;
         for (auto schema_field_id : schema_snapshot->get_field_ids()) {
-            if (auto name = GetStructNameForArrayField(
+            if (auto name = GetElementOffsetsGroup(
                     (*schema_snapshot)[schema_field_id])) {
-                active_structs.insert(std::move(*name));
+                active_groups.insert(std::move(*name));
             }
         }
-        for (auto it = target_runtime.struct_to_element_offsets.begin();
-             it != target_runtime.struct_to_element_offsets.end();) {
-            if (active_structs.count(it->first) > 0) {
+        for (auto it = target_runtime.element_offsets_by_group.begin();
+             it != target_runtime.element_offsets_by_group.end();) {
+            if (active_groups.count(it->first) > 0) {
                 ++it;
             } else {
-                it = target_runtime.struct_to_element_offsets.erase(it);
+                it = target_runtime.element_offsets_by_group.erase(it);
             }
         }
     };
     if (runtime != nullptr) {
         runtime->fields.erase(field_id);
         runtime->geometry_caches.erase(field_id);
-        runtime->struct_element_offsets_map.erase(field_id);
-        prune_dropped_structs(*runtime);
+        runtime->element_offsets_by_field.erase(field_id);
+        prune_dropped_groups(*runtime);
         runtime->mmap_field_ids.erase(field_id);
         // Average size describes the retrievable field value, not the
         // resident raw column. Keep it when an index with raw data remains
@@ -4677,8 +4676,8 @@ ChunkedSegmentSealedImpl::DropFieldData(
         auto next_runtime = CloneRuntimeResourceState(snapshot->runtime);
         next_runtime->fields.erase(field_id);
         next_runtime->geometry_caches.erase(field_id);
-        next_runtime->struct_element_offsets_map.erase(field_id);
-        prune_dropped_structs(*next_runtime);
+        next_runtime->element_offsets_by_field.erase(field_id);
+        prune_dropped_groups(*next_runtime);
         next_runtime->mmap_field_ids.erase(field_id);
         // See the staged-runtime branch above: only schema removal retires
         // field-level size metadata.
@@ -8050,50 +8049,50 @@ ChunkedSegmentSealedImpl::InvalidateStaleStructElementOffsets(
     const SealedFieldLayoutPtr& current_schema,
     const SealedFieldLayoutPtr& target_schema,
     RuntimeResourceState& runtime) {
-    if (runtime.struct_to_element_offsets.empty() &&
-        runtime.struct_element_offsets_map.empty()) {
+    if (runtime.element_offsets_by_group.empty() &&
+        runtime.element_offsets_by_field.empty()) {
         return;
     }
 
-    std::unordered_set<std::string> affected_structs;
+    std::unordered_set<std::string> affected_groups;
     for (auto field_id : current_schema->get_field_ids()) {
         const auto current_name =
-            GetStructNameForArrayField((*current_schema)[field_id]);
+            GetElementOffsetsGroup((*current_schema)[field_id]);
         if (!current_name) {
             continue;
         }
         const auto target_name =
             target_schema->has_field(field_id)
-                ? GetStructNameForArrayField((*target_schema)[field_id])
+                ? GetElementOffsetsGroup((*target_schema)[field_id])
                 : std::nullopt;
         if (current_name != target_name) {
-            affected_structs.insert(*current_name);
+            affected_groups.insert(*current_name);
             if (target_name) {
-                affected_structs.insert(*target_name);
+                affected_groups.insert(*target_name);
             }
         }
     }
     for (auto field_id : target_schema->get_field_ids()) {
         const auto target_name =
-            GetStructNameForArrayField((*target_schema)[field_id]);
+            GetElementOffsetsGroup((*target_schema)[field_id]);
         if (target_name && !current_schema->has_field(field_id)) {
-            affected_structs.insert(*target_name);
+            affected_groups.insert(*target_name);
         }
     }
-    for (const auto& name : affected_structs) {
-        runtime.struct_to_element_offsets.erase(name);
+    for (const auto& name : affected_groups) {
+        runtime.element_offsets_by_group.erase(name);
     }
-    for (auto it = runtime.struct_element_offsets_map.begin();
-         it != runtime.struct_element_offsets_map.end();) {
+    for (auto it = runtime.element_offsets_by_field.begin();
+         it != runtime.element_offsets_by_field.end();) {
         const auto field_id = it->first;
         const auto name =
             current_schema->has_field(field_id)
-                ? GetStructNameForArrayField((*current_schema)[field_id])
+                ? GetElementOffsetsGroup((*current_schema)[field_id])
                 : std::nullopt;
         if (!target_schema->has_field(field_id) ||
             !target_schema->IsFieldInLoadScope(field_id) ||
-            (name && affected_structs.count(*name) > 0)) {
-            it = runtime.struct_element_offsets_map.erase(it);
+            (name && affected_groups.count(*name) > 0)) {
+            it = runtime.element_offsets_by_field.erase(it);
         } else {
             ++it;
         }
@@ -8105,7 +8104,7 @@ ChunkedSegmentSealedImpl::SelectStructElementOffsetsSource(
     const RuntimeResourceState& runtime,
     const SealedFieldLayout& schema,
     const SegmentLoadInfo& load_info,
-    const std::string& struct_name,
+    const std::string& group,
     const std::unordered_set<FieldId>& newly_loaded_fields,
     const std::unordered_set<FieldId>& excluded_fields) {
     // Children with real data come first. Among them a scalar ARRAY beats a
@@ -8133,7 +8132,7 @@ ChunkedSegmentSealedImpl::SelectStructElementOffsetsSource(
     for (const auto& [field_id, column] : runtime.fields) {
         if (!column || excluded_fields.count(field_id) > 0 ||
             !schema.has_field(field_id) ||
-            GetStructNameForArrayField(schema[field_id]) != struct_name) {
+            GetElementOffsetsGroup(schema[field_id]) != group) {
             continue;
         }
         auto& source = load_info.IsFieldFilledWithDefault(field_id) &&
@@ -8157,23 +8156,23 @@ ChunkedSegmentSealedImpl::BuildStructElementOffsets(
     const std::unordered_set<FieldId>& newly_loaded_fields,
     const std::unordered_set<FieldId>& excluded_fields,
     bool rebuild_all) {
-    std::unordered_map<std::string, std::vector<FieldId>> struct_fields;
-    std::unordered_set<std::string> affected_structs;
+    std::unordered_map<std::string, std::vector<FieldId>> fields_by_group;
+    std::unordered_set<std::string> affected_groups;
     for (auto field_id : schema_snapshot->get_field_ids()) {
-        auto name = GetStructNameForArrayField((*schema_snapshot)[field_id]);
-        if (!name) {
+        auto group = GetElementOffsetsGroup((*schema_snapshot)[field_id]);
+        if (!group) {
             continue;
         }
-        struct_fields[*name].push_back(field_id);
+        fields_by_group[*group].push_back(field_id);
         if (affected_fields.count(field_id) > 0) {
-            affected_structs.insert(*name);
+            affected_groups.insert(*group);
         }
     }
 
     try {
-        for (const auto& [name, field_ids] : struct_fields) {
-            if (!rebuild_all && affected_structs.count(name) == 0 &&
-                runtime.struct_to_element_offsets.count(name) > 0) {
+        for (const auto& [group, field_ids] : fields_by_group) {
+            if (!rebuild_all && affected_groups.count(group) == 0 &&
+                runtime.element_offsets_by_group.count(group) > 0) {
                 continue;
             }
 
@@ -8181,7 +8180,7 @@ ChunkedSegmentSealedImpl::BuildStructElementOffsets(
             auto source = SelectStructElementOffsetsSource(runtime,
                                                            *schema_snapshot,
                                                            segment_load_info,
-                                                           name,
+                                                           group,
                                                            newly_loaded_fields,
                                                            excluded_fields);
             // Without a real source the offsets come from a backfilled
@@ -8194,7 +8193,7 @@ ChunkedSegmentSealedImpl::BuildStructElementOffsets(
             if (!real_source) {
                 CheckStructProviderNotDropped(*schema_snapshot,
                                               segment_load_info,
-                                              name,
+                                              group,
                                               segment_load_info.GetSegmentID());
             }
             if (source) {
@@ -8204,25 +8203,25 @@ ChunkedSegmentSealedImpl::BuildStructElementOffsets(
                     runtime.row_count,
                     op_ctx);
             } else {
-                auto existing = runtime.struct_to_element_offsets.find(name);
+                auto existing = runtime.element_offsets_by_group.find(group);
                 bool filling_default = false;
                 for (auto field_id : field_ids) {
                     filling_default |= excluded_fields.count(field_id) > 0;
                 }
-                if (existing != runtime.struct_to_element_offsets.end() &&
+                if (existing != runtime.element_offsets_by_group.end() &&
                     existing->second != nullptr && !filling_default) {
                     offsets = existing->second;
                 } else {
-                    // The children share the struct's nullable flag.
+                    // All fields in a group have the same row nullability.
                     offsets = StructElementOffsetsSealed::BuildAllZeros(
                         runtime.row_count,
                         !(*schema_snapshot)[field_ids.front()].is_nullable());
                 }
             }
-            runtime.struct_to_element_offsets[name] = offsets;
+            runtime.element_offsets_by_group[group] = offsets;
             for (auto field_id : field_ids) {
                 if (runtime.fields.count(field_id) > 0) {
-                    runtime.struct_element_offsets_map[field_id] = offsets;
+                    runtime.element_offsets_by_field[field_id] = offsets;
                 }
             }
         }
@@ -8923,8 +8922,8 @@ ChunkedSegmentSealedImpl::fill_empty_field(
     if (auto name = field_meta.is_element_nullable()
                         ? GetStructNameForArrayField(field_meta)
                         : std::nullopt) {
-        auto it = runtime.struct_to_element_offsets.find(*name);
-        if (it != runtime.struct_to_element_offsets.end()) {
+        auto it = runtime.element_offsets_by_group.find(*name);
+        if (it != runtime.element_offsets_by_group.end()) {
             AssertInfo(it->second != nullptr,
                        "struct element offsets for struct {} must be built "
                        "before filling sub-field {}",
@@ -8936,7 +8935,7 @@ ChunkedSegmentSealedImpl::fill_empty_field(
                 *schema_snapshot, segment_load_info, *name, id_);
             auto zeros = StructElementOffsetsSealed::BuildAllZeros(
                 size, !field_meta.is_nullable());
-            runtime.struct_to_element_offsets[*name] = zeros;
+            runtime.element_offsets_by_group[*name] = zeros;
             struct_offsets = zeros;
         }
     }
@@ -8973,22 +8972,22 @@ ChunkedSegmentSealedImpl::RegisterStructElementOffsetsForField(
     const FieldMeta& field_meta,
     RuntimeResourceState& runtime,
     bool is_replace) {
-    auto struct_name = GetStructNameForArrayField(field_meta);
-    if (!struct_name.has_value()) {
+    auto group = GetElementOffsetsGroup(field_meta);
+    if (!group.has_value()) {
         return;
     }
-    auto& entry = runtime.struct_to_element_offsets[*struct_name];
+    auto& entry = runtime.element_offsets_by_group[*group];
     if (is_replace && entry) {
         auto previous = std::move(entry);
         // Invalidate only the staged generation. Old snapshots retain the
         // already-built immutable mapping until their queries finish.
-        for (auto& [field_id, alias] : runtime.struct_element_offsets_map) {
+        for (auto& [field_id, alias] : runtime.element_offsets_by_field) {
             if (alias == previous) {
                 alias.reset();
             }
         }
     }
-    runtime.struct_element_offsets_map[field_meta.get_id()] = entry;
+    runtime.element_offsets_by_field[field_meta.get_id()] = entry;
 }
 
 void
@@ -8996,21 +8995,21 @@ ChunkedSegmentSealedImpl::EnsureStructElementOffsetsForField(
     const FieldMeta& field_meta,
     int64_t row_count,
     RuntimeResourceState& runtime) {
-    auto struct_name = GetStructNameForArrayField(field_meta);
-    if (!struct_name.has_value()) {
+    auto group = GetElementOffsetsGroup(field_meta);
+    if (!group.has_value()) {
         return;
     }
 
-    auto it = runtime.struct_to_element_offsets.find(*struct_name);
-    if (it == runtime.struct_to_element_offsets.end()) {
+    auto it = runtime.element_offsets_by_group.find(*group);
+    if (it == runtime.element_offsets_by_group.end()) {
         auto struct_element_offsets = StructElementOffsetsSealed::BuildAllZeros(
             row_count, !field_meta.is_nullable());
-        it = runtime.struct_to_element_offsets
-                 .emplace(*struct_name, std::move(struct_element_offsets))
+        it = runtime.element_offsets_by_group
+                 .emplace(*group, std::move(struct_element_offsets))
                  .first;
     }
 
-    runtime.struct_element_offsets_map[field_meta.get_id()] = it->second;
+    runtime.element_offsets_by_field[field_meta.get_id()] = it->second;
 }
 
 void
@@ -9146,9 +9145,8 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
         if (auto name = field_meta.is_element_nullable()
                             ? GetStructNameForArrayField(field_meta)
                             : std::nullopt) {
-            auto it =
-                committer.runtime()->struct_to_element_offsets.find(*name);
-            if (it != committer.runtime()->struct_to_element_offsets.end()) {
+            auto it = committer.runtime()->element_offsets_by_group.find(*name);
+            if (it != committer.runtime()->element_offsets_by_group.end()) {
                 AssertInfo(it->second != nullptr,
                            "struct element offsets for struct {} must be "
                            "built before filling sub-field {}",
@@ -9160,7 +9158,7 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
                     *schema_snapshot, segment_load_info, *name, id_);
                 auto zeros = StructElementOffsetsSealed::BuildAllZeros(
                     size, !field_meta.is_nullable());
-                committer.runtime()->struct_to_element_offsets[*name] = zeros;
+                committer.runtime()->element_offsets_by_group[*name] = zeros;
                 struct_offsets = zeros;
             }
         }

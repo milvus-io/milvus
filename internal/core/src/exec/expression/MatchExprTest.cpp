@@ -65,6 +65,7 @@
 #include "pb/segcore.pb.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/Plan.h"
+#include "query/PlanProto.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -382,6 +383,57 @@ class MatchExprTest : public ::testing::Test {
     static constexpr int array_len_ = 5;
     int64_t saved_batch_size_{0};
 };
+
+TEST(MatchTargetPlanTest, BindByParentIdAndReadLegacyNameOnly) {
+    proto::schema::CollectionSchema schema_proto;
+    auto* pk = schema_proto.add_fields();
+    pk->set_fieldid(100);
+    pk->set_name("pk");
+    pk->set_data_type(proto::schema::Int64);
+    pk->set_is_primary_key(true);
+    auto* scores = schema_proto.add_fields();
+    scores->set_fieldid(101);
+    scores->set_name("scores");
+    scores->set_data_type(proto::schema::Array);
+    scores->set_element_type(proto::schema::Int64);
+    auto* items = schema_proto.add_struct_array_fields();
+    items->set_fieldid(102);
+    items->set_name("items");
+    auto* price = items->add_fields();
+    price->CopyFrom(*scores);
+    price->set_fieldid(103);
+    price->set_name("items[price]");
+
+    auto schema = Schema::ParseFrom(schema_proto);
+    EXPECT_EQ(schema->GetMatchTargetField(FieldId(101)).get_id(), FieldId(101));
+    EXPECT_EQ(schema->GetMatchTargetField(FieldId(102)).get_id(), FieldId(103));
+    Schema copy(*schema);
+    Schema assigned;
+    assigned = copy;
+    EXPECT_EQ(assigned.GetMatchTargetField(FieldId(102)).get_id(),
+              FieldId(103));
+
+    ProtoParser parser(schema);
+    proto::plan::Expr expr;
+    auto* match = expr.mutable_match_expr();
+    match->mutable_predicate()->mutable_always_true_expr();
+    match->set_struct_name("items");
+    EXPECT_NO_THROW(parser.ParseExprs(expr));  // old writer
+    match->set_target_field_id(102);
+    EXPECT_NO_THROW(parser.ParseExprs(expr));  // dual-written StructArray
+    match->set_target_field_id(104);
+    EXPECT_THROW(parser.ParseExprs(expr), SegcoreError);  // stale ID, live name
+    match->set_target_field_id(103);
+    EXPECT_THROW(parser.ParseExprs(expr),
+                 SegcoreError);  // child is not a target
+    match->clear_struct_name();
+    match->set_target_field_id(102);
+    EXPECT_NO_THROW(parser.ParseExprs(expr));  // parent ID alone is sufficient
+    match->set_target_field_id(101);
+    EXPECT_NO_THROW(parser.ParseExprs(expr));  // ordinary ARRAY
+    match->clear_target_field_id();
+    EXPECT_THROW(parser.ParseExprs(expr), SegcoreError);
+}
 
 TEST_F(MatchExprTest, MatchAny) {
     auto filter_expr = CreateFilterExpr("MatchAny", 0);

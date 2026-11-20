@@ -919,6 +919,10 @@ func (e *explainer) expr(expr *planpb.Expr) *PredicateNode {
 			StructName: m.GetStructName(),
 			Child:      e.child(m.GetPredicate()),
 		}
+		if m.TargetFieldId != nil && m.GetStructName() == "" {
+			target := e.field(m.GetTargetFieldId())
+			n.Field = &target
+		}
 		switch m.GetMatchType() {
 		case planpb.MatchType_MatchLeast, planpb.MatchType_MatchMost, planpb.MatchType_MatchExact:
 			count := m.GetCount()
