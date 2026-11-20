@@ -2776,6 +2776,28 @@ func GetStorageCost(status *commonpb.Status) (int64, int64, float64, bool) {
 	return scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, true
 }
 
+// searchRequestNq returns the number of query rows of a search request as it
+// arrives, before any task has looked at it. The nq field is optional -- older
+// clients and the RESTful API leave it at 0 -- so a request that does not
+// declare it is counted by what it carries: the rows of its placeholder group,
+// or its primary keys when it searches by primary key. Reading the field alone
+// lets such a request through the rate limiter uncharged.
+//
+// A malformed placeholder group counts as 0 here; the search task rejects it.
+func searchRequestNq(req *milvuspb.SearchRequest) int64 {
+	if nq := req.GetNq(); nq != 0 {
+		return nq
+	}
+	if ids := req.GetIds(); ids != nil {
+		return int64(typeutil.GetSizeOfIDs(ids))
+	}
+	rows, err := funcutil.CountPlaceholderGroupValues(req.GetPlaceholderGroup())
+	if err != nil {
+		return 0
+	}
+	return rows
+}
+
 // GetRequestInfo returns collection name and rateType of request and return tokens needed.
 func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]int64, internalpb.RateType, int, error) {
 	switch r := req.(type) {
@@ -2793,7 +2815,7 @@ func GetRequestInfo(ctx context.Context, req proto.Message) (int64, map[int64][]
 		return dbID, collToPartIDs, internalpb.RateType_DMLBulkLoad, proto.Size(r), err
 	case *milvuspb.SearchRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, req.(reqPartNames))
-		return dbID, collToPartIDs, internalpb.RateType_DQLSearch, int(r.GetNq()), err
+		return dbID, collToPartIDs, internalpb.RateType_DQLSearch, int(searchRequestNq(r)), err
 	case *milvuspb.QueryRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, req.(reqPartNames))
 		return dbID, collToPartIDs, internalpb.RateType_DQLQuery, 1, err // think of the query request's nq as 1
