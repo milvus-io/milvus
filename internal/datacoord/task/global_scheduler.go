@@ -35,6 +35,8 @@ const NullNodeID = -1
 
 type GlobalScheduler interface {
 	Enqueue(task Task)
+	// RemoveTask drains local callbacks without issuing a worker RPC.
+	RemoveTask(taskID int64)
 	AbortAndRemoveTask(taskID int64)
 	// Finalize releases scheduler ownership and runs cleanup after in-flight
 	// callbacks finish. Cleanup must leave the task terminal before removing its
@@ -61,6 +63,8 @@ type globalTaskScheduler struct {
 
 	mu           *lock.KeyLock[int64]
 	pendingTasks PriorityQueue
+	// Registration outlives Pop, fencing callbacks during the queue-to-pool handoff.
+	tasks        *typeutil.ConcurrentMap[int64, Task]
 	runningTasks *typeutil.ConcurrentMap[int64, Task]
 	execPool     *conc.Pool[struct{}]
 	checkPool    *conc.Pool[struct{}]
@@ -116,22 +120,28 @@ func (s *globalTaskScheduler) taskInBackoff(task Task) bool {
 	return ok && time.Now().Before(bo.notBefore)
 }
 
-func (s *globalTaskScheduler) Enqueue(task Task) {
-	s.mu.RLock(task.GetTaskID())
-	defer s.mu.RUnlock(task.GetTaskID())
+// Each enqueue gets a distinct identity, even if a caller reuses its Task object.
+type scheduledTask struct{ Task }
 
-	if s.pendingTasks.Get(task.GetTaskID()) != nil {
+func (s *globalTaskScheduler) Enqueue(task Task) {
+	// Repeated inspection must not wait behind an already registered task's RPC.
+	if s.tasks.Contain(task.GetTaskID()) {
 		return
 	}
-	if s.runningTasks.Contain(task.GetTaskID()) {
+	s.mu.Lock(task.GetTaskID())
+	defer s.mu.Unlock(task.GetTaskID())
+	if s.tasks.Contain(task.GetTaskID()) {
 		return
 	}
+	task = &scheduledTask{Task: task}
 	switch task.GetTaskState() {
 	case taskcommon.Init:
 		task.SetTaskTime(taskcommon.TimeQueue, time.Now())
+		s.tasks.Insert(task.GetTaskID(), task)
 		s.pendingTasks.Push(task)
 	case taskcommon.InProgress, taskcommon.Retry:
 		task.SetTaskTime(taskcommon.TimeStart, time.Now())
+		s.tasks.Insert(task.GetTaskID(), task)
 		s.runningTasks.Insert(task.GetTaskID(), task)
 	}
 	mlog.Info(s.ctx, "task enqueued", WrapTaskLog(task)...)
@@ -143,26 +153,40 @@ func (s *globalTaskScheduler) GetPendingTaskCount(taskType taskcommon.Type) int 
 	})
 }
 
+func (s *globalTaskScheduler) registered(task Task) bool {
+	current, ok := s.tasks.Get(task.GetTaskID())
+	return ok && current == task
+}
+
+// External removal holds the per-task write lock. Scheduler callbacks may remove
+// their own registration while holding the read lock.
+func (s *globalTaskScheduler) removeTask(taskID int64) {
+	s.tasks.Remove(taskID)
+	s.pendingTasks.Remove(taskID)
+	s.runningTasks.Remove(taskID)
+	s.backoffs.Remove(taskID)
+}
+
+func (s *globalTaskScheduler) RemoveTask(taskID int64) {
+	s.mu.Lock(taskID)
+	defer s.mu.Unlock(taskID)
+	s.removeTask(taskID)
+}
+
 func (s *globalTaskScheduler) AbortAndRemoveTask(taskID int64) {
 	s.mu.Lock(taskID)
 	defer s.mu.Unlock(taskID)
-	if task, ok := s.runningTasks.GetAndRemove(taskID); ok {
+	if task, ok := s.tasks.Get(taskID); ok {
 		task.DropTaskOnWorker(s.cluster)
 	}
-	if task := s.pendingTasks.Get(taskID); task != nil {
-		task.DropTaskOnWorker(s.cluster)
-		s.pendingTasks.Remove(taskID)
-	}
-	s.backoffs.Remove(taskID)
+	s.removeTask(taskID)
 }
 
 func (s *globalTaskScheduler) Finalize(taskID int64, cleanup func()) {
 	s.mu.Lock(taskID)
 	defer s.mu.Unlock(taskID)
 
-	s.pendingTasks.Remove(taskID)
-	s.runningTasks.Remove(taskID)
-	s.backoffs.Remove(taskID)
+	s.removeTask(taskID)
 	cleanup()
 }
 
@@ -295,36 +319,37 @@ func (s *globalTaskScheduler) schedule() {
 		if task == nil {
 			break
 		}
-		// Pop removes the task from the queue before it acquires this lock.
-		// Finalize may have completed in that window, so check the state before
-		// GetTaskSlot reads metadata that cleanup may already have removed.
-		taskID := task.GetTaskID()
-		s.mu.RLock(taskID)
+		s.mu.RLock(task.GetTaskID())
+		if !s.registered(task) {
+			s.mu.RUnlock(task.GetTaskID())
+			continue
+		}
+		// Finalize removes registration before metadata cleanup. Also discard
+		// tasks that became terminal without an explicit scheduler removal.
 		switch task.GetTaskState() {
 		case taskcommon.None, taskcommon.Finished, taskcommon.Failed:
-			s.backoffs.Remove(taskID)
-			s.mu.RUnlock(taskID)
+			s.removeTask(task.GetTaskID())
+			s.mu.RUnlock(task.GetTaskID())
 			continue
 		}
-		// A task in failure backoff gives way: it re-enters the queue after
-		// this round and is dispatched once its delay elapses, so one
-		// persistently failing task cannot occupy the scheduler.
 		if s.taskInBackoff(task) {
 			delayed = append(delayed, task)
-			s.mu.RUnlock(taskID)
+			s.mu.RUnlock(task.GetTaskID())
 			continue
 		}
-		taskSlot := task.GetTaskSlot()
-		nodeID := s.pickNode(slotHeap, taskSlot)
+		nodeID := s.pickNode(slotHeap, task.GetTaskSlot())
 		if nodeID == NullNodeID {
 			s.pendingTasks.Push(task)
-			s.mu.RUnlock(taskID)
+			s.mu.RUnlock(task.GetTaskID())
 			break
 		}
-		s.mu.RUnlock(taskID)
+		s.mu.RUnlock(task.GetTaskID())
 		future := s.execPool.Submit(func() (struct{}, error) {
 			s.mu.RLock(task.GetTaskID())
 			defer s.mu.RUnlock(task.GetTaskID())
+			if !s.registered(task) {
+				return struct{}{}, nil
+			}
 			mlog.Info(s.ctx, "processing task...", WrapTaskLog(task)...)
 			if task.GetTaskState() == taskcommon.Init {
 				task.CreateTaskOnWorker(nodeID, s.cluster)
@@ -350,25 +375,26 @@ func (s *globalTaskScheduler) schedule() {
 					// never runs. Drop the backoff entry here; otherwise it would
 					// leak until datacoord restarts and grow without bound under
 					// the very failure storms this backoff exists to relieve.
-					s.backoffs.Remove(task.GetTaskID())
+					s.removeTask(task.GetTaskID())
 				}
+			} else {
+				s.removeTask(task.GetTaskID())
 			}
 			return struct{}{}, nil
 		})
 		futures = append(futures, future)
 	}
 	for _, task := range delayed {
-		// Finalize can run while this task waits in delayed. Re-check under
-		// the same lock before putting it back, just like the no-slot path.
-		taskID := task.GetTaskID()
-		s.mu.RLock(taskID)
-		switch task.GetTaskState() {
-		case taskcommon.None, taskcommon.Finished, taskcommon.Failed:
-			s.backoffs.Remove(taskID)
-		default:
-			s.pendingTasks.Push(task)
+		s.mu.RLock(task.GetTaskID())
+		if s.registered(task) {
+			switch task.GetTaskState() {
+			case taskcommon.None, taskcommon.Finished, taskcommon.Failed:
+				s.removeTask(task.GetTaskID())
+			default:
+				s.pendingTasks.Push(task)
+			}
 		}
-		s.mu.RUnlock(taskID)
+		s.mu.RUnlock(task.GetTaskID())
 	}
 	_ = conc.AwaitAll(futures...)
 }
@@ -385,17 +411,13 @@ func (s *globalTaskScheduler) check() {
 		future := s.checkPool.Submit(func() (struct{}, error) {
 			s.mu.RLock(task.GetTaskID())
 			defer s.mu.RUnlock(task.GetTaskID())
-			// A captured task may have been finalized while this callback was
-			// waiting for a worker or the task lock. Its late query must not
-			// overwrite terminal metadata or put it back in the pending queue.
-			if current, ok := s.runningTasks.Get(task.GetTaskID()); !ok || current != task {
+			if !s.registered(task) {
 				return struct{}{}, nil
 			}
 			task.QueryTaskOnWorker(s.cluster)
 			switch task.GetTaskState() {
 			case taskcommon.None:
-				s.runningTasks.Remove(task.GetTaskID())
-				s.backoffs.Remove(task.GetTaskID())
+				s.removeTask(task.GetTaskID())
 			case taskcommon.Init, taskcommon.Retry:
 				s.recordTaskFailure(task)
 				s.runningTasks.Remove(task.GetTaskID())
@@ -403,8 +425,7 @@ func (s *globalTaskScheduler) check() {
 			case taskcommon.Finished, taskcommon.Failed:
 				task.SetTaskTime(taskcommon.TimeEnd, time.Now())
 				task.DropTaskOnWorker(s.cluster)
-				s.runningTasks.Remove(task.GetTaskID())
-				s.backoffs.Remove(task.GetTaskID())
+				s.removeTask(task.GetTaskID())
 			}
 			return struct{}{}, nil
 		})
@@ -509,6 +530,7 @@ func NewGlobalTaskScheduler(ctx context.Context, cluster session.Cluster) Global
 		wg:           sync.WaitGroup{},
 		mu:           lock.NewKeyLock[int64](),
 		pendingTasks: NewPriorityQueuePolicy(),
+		tasks:        typeutil.NewConcurrentMap[int64, Task](),
 		runningTasks: typeutil.NewConcurrentMap[int64, Task](),
 		execPool:     execPool,
 		checkPool:    checkPool,

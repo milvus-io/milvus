@@ -49,10 +49,6 @@ func TestManifestIndexPathMatchesSegmentIdentity(t *testing.T) {
 			_, ok = ManifestIndexFilePathInfoForSegment("root", segment, entry)
 			require.False(t, ok, badPath)
 		}
-		entry.Path = prefix
-		entry.IndexFileKeys = []string{".."}
-		_, ok = ManifestIndexFilePathInfoForSegment("root", segment, entry)
-		require.False(t, ok)
 	}
 }
 

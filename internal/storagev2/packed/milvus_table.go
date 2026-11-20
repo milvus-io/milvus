@@ -103,6 +103,56 @@ func resolveMilvusTableSnapshotMetadataPath(externalSource, externalSpec string)
 	return "", merr.WrapErrParameterInvalidMsg("milvus-table requires external_source to be a snapshot metadata JSON path without query or fragment components")
 }
 
+type milvusTableSnapshotRootRebaser struct {
+	oldRoot string
+	newRoot string
+}
+
+func newMilvusTableSnapshotRootRebaser(metadataBytes []byte, metadataPath string) (*milvusTableSnapshotRootRebaser, error) {
+	metadata, err := snapshotio.ParseSnapshotMetadata(metadataBytes)
+	if err != nil {
+		return nil, merr.Wrap(err, "parse milvus snapshot metadata")
+	}
+	if metadata.GetLayout() != datapb.SnapshotLayout_SnapshotLayoutSelfContained {
+		return nil, nil
+	}
+	key, err := snapshotio.NormalizeObjectPath(metadataPath)
+	if err != nil {
+		return nil, err
+	}
+	newRoot, _, _, found := snapshotio.SnapshotBundleAnchor(key)
+	if !found {
+		return nil, merr.WrapErrDataIntegrityMsg("self-contained snapshot metadata requires a bundle anchor")
+	}
+	oldKey, err := snapshotio.NormalizeObjectPath(metadata.GetSnapshotInfo().GetS3Location())
+	if err != nil {
+		return nil, err
+	}
+	oldRoot, _, _, found := snapshotio.SnapshotBundleAnchor(oldKey)
+	if !found {
+		// Like Restore, do not infer relocation without an export-time anchor.
+		oldRoot = newRoot
+	}
+	return &milvusTableSnapshotRootRebaser{oldRoot: oldRoot, newRoot: newRoot}, nil
+}
+
+func (r *milvusTableSnapshotRootRebaser) rebasePath(src string) (string, error) {
+	if r == nil || src == "" {
+		return src, nil
+	}
+	key, err := snapshotio.NormalizeObjectPath(src)
+	if err != nil {
+		return "", err
+	}
+	if r.oldRoot != "" && key != r.oldRoot && !strings.HasPrefix(key, r.oldRoot+"/") {
+		return "", merr.WrapErrDataIntegrityMsg("snapshot path is outside its bundle")
+	}
+	// V5 stores complete keys. Rebase before external filesystem resolution so
+	// a moved bundle uses its current root and bucket for Avro, native manifest
+	// entry points and L0 deltalogs. Native manifest contents remain unchanged.
+	return snapshotio.RebaseObjectPath(key, r.oldRoot, r.newRoot), nil
+}
+
 // buildMilvusTableFileInfosFromSnapshotMetadata converts snapshot metadata into
 // one FileInfo per source StorageV3 segment manifest. L0 deltalogs are attached
 // to every source segment because they are snapshot-level delete overlays.
@@ -153,7 +203,7 @@ func buildMilvusTableFileInfosFromSnapshotMetadata(
 		}
 		manifestPath, err := resolveManifestPath(manifest.GetManifest())
 		if err != nil {
-			return nil, merr.WrapErrServiceInternalErr(err, "resolve source segment manifest %s", manifest.GetManifest())
+			return nil, merr.Wrapf(err, "resolve source segment manifest %s", manifest.GetManifest())
 		}
 		sourceSegment, ok := sourceSegments[manifest.GetSegmentId()]
 		if !ok {

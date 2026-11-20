@@ -121,7 +121,7 @@ func CommitManifestUpdates(baseManifestPath string,
 	if updates.isEmpty() {
 		return baseManifestPath, nil
 	}
-	baseManifest, err := ParseManifestPath(baseManifestPath)
+	_, err := ParseManifestPath(baseManifestPath)
 	if err != nil {
 		return "", merr.WrapErrDataIntegrity(err, "parse base manifest path %q", baseManifestPath)
 	}
@@ -133,10 +133,44 @@ func CommitManifestUpdates(baseManifestPath string,
 	if err != nil {
 		return "", err
 	}
+	return commitManifestUpdates(baseManifestPath, storageConfig, updates, dropIndexIDs)
+}
+
+// ReplaceCopiedManifestIndexes replaces index metadata on a newly copied,
+// exclusively owned manifest. inheritedIndexIDs must describe the complete index
+// section of the exact pinned revision copied to (basePath, baseVersion), not
+// just the indexes selected for Restore. An empty list means known empty.
+//
+// Restore copies that revision byte-for-byte and has no concurrent index writer
+// on its unpublished target. It can therefore reuse source inventory without
+// reading the target again to resolve drops. Never use this for live segments:
+// CommitManifestUpdates retains absent-index and ExpectedBuildID checks there.
+// The native transaction still reads its base and preserves all other sections.
+func ReplaceCopiedManifestIndexes(basePath string, baseVersion int64,
+	storageConfig *indexpb.StorageConfig, inheritedIndexIDs []int64, indexes []ManifestIndexInfo,
+) (string, error) {
+	seen := make(map[int64]struct{}, len(inheritedIndexIDs))
+	drops := make([]int64, 0, len(inheritedIndexIDs))
+	for _, id := range inheritedIndexIDs {
+		if _, exists := seen[id]; !exists {
+			seen[id] = struct{}{}
+			drops = append(drops, id)
+		}
+	}
+	return commitManifestUpdates(MarshalManifestPath(basePath, baseVersion), storageConfig, &ManifestUpdates{Indexes: indexes}, drops)
+}
+
+func commitManifestUpdates(baseManifestPath string,
+	storageConfig *indexpb.StorageConfig, updates *ManifestUpdates, dropIndexIDs []int64,
+) (string, error) {
 	if updates.NewFiles == nil && len(updates.ColumnGroups) == 0 && len(updates.DeltaLogs) == 0 &&
 		len(updates.Stats) == 0 && len(updates.Indexes) == 0 && len(dropIndexIDs) == 0 &&
 		len(updates.DropColumns) == 0 {
 		return baseManifestPath, nil
+	}
+	baseManifest, err := ParseManifestPath(baseManifestPath)
+	if err != nil {
+		return "", merr.WrapErrDataIntegrity(err, "parse base manifest path %q", baseManifestPath)
 	}
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
