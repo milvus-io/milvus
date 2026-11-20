@@ -18,72 +18,159 @@ package walsummary
 
 import (
 	"context"
+	"slices"
 	"sync/atomic"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
-// orphanSweepBudget limits physical deletion work per scheduler execution.
 const orphanSweepBudget = 1000
 
-// GCOnce requests retention and garbage collection. Manifest publication and
-// physical deletion are asynchronous. Cross-owner exclusion remains the design
-// TODO; readMu protects consumers of this manager only.
-func (m *Manager) GCOnce(ctx context.Context) error {
-	m.mu.Lock()
-	terminal := m.terminalErr
-	m.mu.Unlock()
-	if terminal != nil {
-		return terminal
+// RunGC schedules both policies independently of RecoveryStorage persistence.
+// A nonpositive interval disables that policy. Configuration is fixed at WAL open.
+func (m *Manager) RunGC(ctx context.Context) {
+	var regular, orphan <-chan time.Time
+	if m.cfg.GCInterval > 0 {
+		ticker := time.NewTicker(m.cfg.GCInterval)
+		defer ticker.Stop()
+		regular = ticker.C
 	}
-	m.mu.Lock()
-	released := m.computeRetentionLocked()
-	if len(released) > 0 {
-		for _, ref := range released {
-			for _, chunk := range m.manifest.Chunks {
-				if chunk.GetGeneration() != ref.Generation {
-					continue
-				}
-				for _, index := range chunk.GetVchannels() {
-					if index.GetTransform() == nil {
-						continue
-					}
-					end := index.GetTransform().GetEndTimeTick()
-					if m.manifest.TransformFastForwardTimeTick == nil {
-						m.manifest.TransformFastForwardTimeTick = make(map[string]uint64)
-					}
-					vc := index.GetVchannel()
-					m.manifest.TransformFastForwardTimeTick[vc] = max(m.manifest.TransformFastForwardTimeTick[vc], end)
-					m.notifyTransformLocked(vc)
-				}
+	if m.cfg.OrphanGCInterval > 0 {
+		ticker := time.NewTicker(m.cfg.OrphanGCInterval)
+		defer ticker.Stop()
+		orphan = ticker.C
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-regular:
+			if err := m.GCOnce(ctx); err != nil {
+				mlog.Warn(ctx, "failed to collect WALSummary prefix", mlog.Err(err))
 			}
-			m.manifest.Chunks = removeChunkEntry(m.manifest.Chunks, ref.Generation)
-			m.chunkIndex.remove(ref.Generation)
+		case <-orphan:
+			m.OrphanGCOnce()
 		}
-		m.manifestVersion++
-		m.notifyReadersLocked()
 	}
-	m.mu.Unlock()
-	m.scheduleManifest()
+}
+
+// GCOnce retires one continuous prefix and schedules exactly that deletion list.
+// It never discovers unrelated files; orphan collection has its own schedule.
+func (m *Manager) GCOnce(ctx context.Context) error {
+	now := time.Now()
 	m.mu.Lock()
-	if m.cfg.Runtime.Scheduler == nil || (m.gcTask != nil && !m.gcTask.Done()) {
+	if m.terminalErr != nil {
+		err := m.terminalErr
+		m.mu.Unlock()
+		return err
+	}
+	ready := m.retentionTriggeredLocked(now) && (m.gcTask == nil || m.gcTask.Done())
+	m.mu.Unlock()
+	if !ready {
+		return nil
+	}
+	var frontiers map[string]uint64
+	if m.cfg.FetchDataViewRetention != nil {
+		var err error
+		frontiers, err = m.cfg.FetchDataViewRetention(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	m.mu.Lock()
+	if m.terminalErr != nil {
+		err := m.terminalErr
+		m.mu.Unlock()
+		return err
+	}
+	if m.gcTask != nil && !m.gcTask.Done() {
 		m.mu.Unlock()
 		return nil
 	}
-	task := &summaryGCTask{manager: m}
+	// Only lifecycle registration can create an entry or release a Drop pin.
+	for channel, frontier := range frontiers {
+		if current, exists := m.dataViewRetention[channel]; exists && current != DroppedVChannelTimeTick {
+			m.dataViewRetention[channel] = frontier
+		}
+	}
+	released := m.computeRetentionLocked(now)
+	if len(released) == 0 {
+		m.mu.Unlock()
+		return nil
+	}
+	for _, chunk := range m.manifest.Chunks[:len(released)] {
+		for _, index := range chunk.GetVchannels() {
+			if index.GetTransform() == nil {
+				continue
+			}
+			if m.manifest.TransformFastForwardTimeTick == nil {
+				m.manifest.TransformFastForwardTimeTick = make(map[string]uint64)
+			}
+			vc := index.GetVchannel()
+			m.manifest.TransformFastForwardTimeTick[vc] = max(m.manifest.TransformFastForwardTimeTick[vc], index.GetTransform().GetEndTimeTick())
+			m.notifyTransformLocked(vc)
+		}
+	}
+	m.manifest.Chunks = slices.Delete(m.manifest.Chunks, 0, len(released))
+	m.chunkIndex.removePrefix(len(released))
+	m.manifestVersion++
+	m.notifyReadersLocked()
+	task := &summaryGCTask{manager: m, chunks: released}
 	m.gcTask = task
 	m.mu.Unlock()
-	m.cfg.Runtime.Scheduler.Submit(task, nodescheduler.WithPriority(moduleapi.PriorityData))
+	m.scheduleManifest()
+	if m.cfg.Runtime.Scheduler != nil {
+		m.cfg.Runtime.Scheduler.Submit(task, nodescheduler.WithPriority(moduleapi.PriorityData))
+	}
 	return nil
+}
+
+func (m *Manager) OrphanGCOnce() {
+	m.mu.Lock()
+	if m.terminalErr != nil || m.cfg.Runtime.Scheduler == nil || (m.orphanGCTask != nil && !m.orphanGCTask.Done()) {
+		m.mu.Unlock()
+		return
+	}
+	task := &summaryOrphanGCTask{manager: m, cutoff: time.Now().Add(-m.cfg.MaxRetentionDuration)}
+	m.orphanGCTask = task
+	m.mu.Unlock()
+	m.cfg.Runtime.Scheduler.Submit(task, nodescheduler.WithPriority(moduleapi.PriorityData))
+}
+
+// gcSnapshot waits for durable retirement and drains older local read snapshots.
+// New readers cannot acquire retired references. Uploads beyond the captured
+// coverage are protected independently, so slow DELETEs need not hold these locks.
+func (m *Manager) gcSnapshot() (*streamingpb.PChannelSummaryManifest, error) {
+	if !m.readMu.TryLock() {
+		return nil, nodescheduler.ErrDelay
+	}
+	defer m.readMu.Unlock()
+	if !m.publishMu.TryLock() {
+		return nil, nodescheduler.ErrDelay
+	}
+	defer m.publishMu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.terminalErr != nil {
+		return nil, m.terminalErr
+	}
+	if !m.manifestPublished || m.manifestVersion != m.publishedVersion {
+		return nil, nodescheduler.ErrDelay
+	}
+	return proto.Clone(m.manifest).(*streamingpb.PChannelSummaryManifest), nil
 }
 
 type summaryGCTask struct {
 	manager *Manager
+	chunks  []*streamingpb.PChannelSummaryChunkRef
 	done    atomic.Bool
 }
 
@@ -92,142 +179,113 @@ func (t *summaryGCTask) Execute(ctx context.Context) error {
 	if t.Done() {
 		return nil
 	}
-	m := t.manager
-	// Do not occupy a shared scheduler worker waiting for a reader or publisher.
-	if !m.readMu.TryLock() {
-		return nodescheduler.ErrDelay
-	}
-	if !m.publishMu.TryLock() {
-		m.readMu.Unlock()
-		return nodescheduler.ErrDelay
-	}
-	m.mu.Lock()
-	if m.terminalErr != nil {
-		err := m.terminalErr
-		t.done.Store(true)
-		m.mu.Unlock()
-		m.publishMu.Unlock()
-		m.readMu.Unlock()
+	if _, err := t.manager.gcSnapshot(); err != nil {
+		t.done.Store(!errors.Is(err, nodescheduler.ErrDelay))
 		return err
 	}
-	if !m.manifestPublished || m.manifestVersion != m.publishedVersion {
-		m.mu.Unlock()
-		m.publishMu.Unlock()
-		m.readMu.Unlock()
-		return nodescheduler.ErrDelay
+	// TODO(#55573): Retention and a unique RecoveryStorage owner must also cover
+	// successor recovery and DELETEs already in flight from the previous owner.
+	// Local locks and checkpoint term fencing alone do not provide that guarantee.
+	count := min(len(t.chunks), orphanSweepBudget)
+	for range count {
+		ref := t.chunks[0]
+		if err := t.manager.cfg.Store.DeleteChunk(ctx, ref.Generation, ref.Term); err != nil {
+			return errors.Mark(err, nodescheduler.ErrDelay)
+		}
+		t.chunks[0] = nil
+		t.chunks = t.chunks[1:]
 	}
-	refs := make(map[ChunkRef]struct{}, len(m.manifest.Chunks))
-	for _, chunk := range m.manifest.Chunks {
-		refs[ChunkRef{Generation: chunk.GetGeneration(), Term: chunk.GetTerm()}] = struct{}{}
-	}
-	version := m.manifestVersion
-	var coverage *streamingpb.SummaryCoverage
-	if m.manifest.Coverage != nil {
-		coverage = proto.Clone(m.manifest.Coverage).(*streamingpb.SummaryCoverage)
-	}
-	m.mu.Unlock()
-	m.publishMu.Unlock()
-	m.readMu.Unlock()
-	// Reference retirement is published and all older local readers have left.
-	// New readers cannot capture the retired objects. New chunks have generations
-	// beyond this frozen coverage and the sweep excludes them, even if they are
-	// published during deletion. References from older terms are only inherited
-	// at Restore, never added by this live manager. Keep the frozen refs/coverage
-	// throughout I/O; cross-owner deletion fencing remains a separate TODO.
-	_, finished, err := m.cfg.Store.sweepGarbage(ctx, m.cfg.Term, coverage, refs, orphanSweepBudget)
-	if err != nil {
-		return errors.Mark(err, nodescheduler.ErrDelay)
-	}
-	if !finished {
-		return nodescheduler.ErrDelay
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.manifestVersion != version {
+	if len(t.chunks) > 0 {
 		return nodescheduler.ErrDelay
 	}
 	t.done.Store(true)
 	return nil
 }
 
-// computeRetention returns the chunk refs, oldest first, that may be released
-// to bring the retained bytes back under the budget.
-//
-// Idempotency records may expire at the byte or chunk-count budget. Transform
-// records must remain until their materialization or cleanup frontier is durable,
-// so the oldest chunk with an unconsumed transform stops retention release.
+type summaryOrphanGCTask struct {
+	manager *Manager
+	cutoff  time.Time
+	done    atomic.Bool
+}
+
+func (t *summaryOrphanGCTask) Done() bool { return t.done.Load() }
+func (t *summaryOrphanGCTask) Execute(ctx context.Context) error {
+	if t.Done() {
+		return nil
+	}
+	m := t.manager
+	snapshot, err := m.gcSnapshot()
+	if err != nil {
+		t.done.Store(!errors.Is(err, nodescheduler.ErrDelay))
+		return err
+	}
+	refs := make(map[ChunkRef]struct{}, len(snapshot.Chunks))
+	for _, chunk := range snapshot.Chunks {
+		refs[ChunkRef{Generation: chunk.Generation, Term: chunk.Term}] = struct{}{}
+	}
+	_, finished, err := m.cfg.Store.sweepGarbage(ctx, m.cfg.Term, snapshot.Coverage, refs, t.cutoff, orphanSweepBudget)
+	if err != nil {
+		return errors.Mark(err, nodescheduler.ErrDelay)
+	}
+	if !finished {
+		return nodescheduler.ErrDelay
+	}
+	if err := m.cfg.Store.DeleteManifestsBelowTerm(ctx, m.cfg.Term, t.cutoff); err != nil {
+		return errors.Mark(err, nodescheduler.ErrDelay)
+	}
+	t.done.Store(true)
+	return nil
+}
+
+func (m *Manager) retainedBytesLocked() uint64 {
+	var retained uint64
+	for _, chunk := range m.manifest.GetChunks() {
+		retained += chunk.GetObjectSize()
+	}
+	return retained
+}
+
+func (m *Manager) retentionTriggeredLocked(now time.Time) bool {
+	chunks := m.manifest.GetChunks()
+	return len(chunks) > 0 && m.retainedBytesLocked() > m.cfg.MaxRetentionBytes &&
+		tsoutil.PhysicalTime(chunks[0].GetStartTimeTick()).Before(now.Add(-m.cfg.MaxRetentionDuration))
+}
+
 func (m *Manager) computeRetention() []*streamingpb.PChannelSummaryChunkRef {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.computeRetentionLocked()
+	return m.computeRetentionLocked(time.Now())
 }
 
-func (m *Manager) computeRetentionLocked() []*streamingpb.PChannelSummaryChunkRef {
-	if m.cfg.RetentionMaxBytes == 0 && m.cfg.MaxRetainedChunks == 0 {
+func (m *Manager) computeRetentionLocked(now time.Time) []*streamingpb.PChannelSummaryChunkRef {
+	if !m.retentionTriggeredLocked(now) {
 		return nil
 	}
-	chunks := m.manifest.GetChunks()
-	var retained uint64
-	for _, chunk := range chunks {
-		retained += chunk.GetObjectSize()
+	// Use exactly the durable selection shared with idempotency recovery. Do not
+	// credit pending/sealed records against history needed after a crash.
+	protected := m.planDurableIdempotencyRecoveryLocked(idempotencyCutoff(now, m.cfg.IdempotencyRetention.TTL), uint64(max(0, m.cfg.IdempotencyRetention.MaxSize)))
+	limit := len(m.manifest.Chunks)
+	if len(protected) > 0 {
+		first := protected[0].chunk.GetGeneration()
+		for i, chunk := range m.manifest.Chunks {
+			if chunk.Generation == first {
+				limit = i
+				break
+			}
+		}
 	}
-	count := len(chunks)
-	if !m.overRetentionLocked(retained, count) {
-		return nil
-	}
-	released := make([]*streamingpb.PChannelSummaryChunkRef, 0)
-	for _, chunk := range chunks {
-		if !m.chunkReleasedLocked(chunk) {
+	retained := m.retainedBytesLocked()
+	cutoff := now.Add(-m.cfg.MaxRetentionDuration)
+	var released []*streamingpb.PChannelSummaryChunkRef
+	for _, chunk := range m.manifest.Chunks[:limit] {
+		if retained <= m.cfg.MaxRetentionBytes || retained-chunk.ObjectSize < m.cfg.MaxRetentionBytes ||
+			!tsoutil.PhysicalTime(chunk.EndTimetick).Before(cutoff) || !m.chunkReleasedLocked(chunk) {
 			break
 		}
-		released = append(released, &streamingpb.PChannelSummaryChunkRef{
-			Generation: chunk.GetGeneration(),
-			Term:       chunk.GetTerm(),
-		})
-		retained -= chunk.GetObjectSize()
-		count--
-		if !m.overRetentionLocked(retained, count) {
-			break
-		}
+		released = append(released, &streamingpb.PChannelSummaryChunkRef{Generation: chunk.Generation, Term: chunk.Term})
+		retained -= chunk.ObjectSize
 	}
 	return released
-}
-
-// overRetentionLocked reports whether the retained set is over either bound.
-//
-// The count bound is not redundant with the byte bound: a chunk costs bytes in
-// storage but it costs a whole object READ at recovery and a whole manifest
-// entry on every publish, and those costs scale with the number of chunks, not
-// with their size. A pchannel taking a slow trickle of keyed writes seals a
-// small chunk per persist cycle, so the byte budget can stay orders of
-// magnitude away from its bound while the chunk count climbs without limit --
-// which shows up as a manifest PUT that grows with uptime and a WAL open that
-// gets slower every day. Either bound alone leaves one of the two unbounded.
-//
-// A zero bound disables that half; both zero disables release entirely.
-func (m *Manager) overRetentionLocked(retained uint64, count int) bool {
-	if m.cfg.RetentionMaxBytes > 0 && retained > m.cfg.RetentionMaxBytes {
-		return true
-	}
-	if m.cfg.MaxRetainedChunks > 0 && count > m.cfg.MaxRetainedChunks {
-		return true
-	}
-	return false
-}
-
-// removeChunkEntry drops one chunk from the manifest by generation.
-func removeChunkEntry(chunks []*streamingpb.PChannelSummaryChunkIndexEntry, generation uint64) []*streamingpb.PChannelSummaryChunkIndexEntry {
-	out := chunks[:0]
-	for _, chunk := range chunks {
-		if chunk.GetGeneration() == generation {
-			continue
-		}
-		out = append(out, chunk)
-	}
-	// Up to cap, not len: out[len(out):] is empty and clearing it does nothing,
-	// leaving the released entries reachable from the shared backing array.
-	clear(out[len(out):cap(out)])
-	return out
 }
 
 func (m *Manager) chunkReleasedLocked(chunk *streamingpb.PChannelSummaryChunkIndexEntry) bool {
@@ -235,10 +293,7 @@ func (m *Manager) chunkReleasedLocked(chunk *streamingpb.PChannelSummaryChunkInd
 		if index.GetTransform() == nil {
 			continue
 		}
-		floor := m.gcFrontiers[index.GetVchannel()]
-		if pinned, ok := m.queryRetention[index.GetVchannel()]; ok {
-			floor = min(floor, pinned)
-		}
+		floor := m.dataViewRetention[index.GetVchannel()]
 		if floor == 0 {
 			// No GC position yet: nothing of this vchannel may be released.
 			return false
@@ -253,7 +308,7 @@ func (m *Manager) chunkReleasedLocked(chunk *streamingpb.PChannelSummaryChunkInd
 }
 
 // CanCleanupVChannel reports whether recovery no longer needs the VChannel's
-// durable materialization frontier to retire any retained Delete history.
+// retained Delete history.
 // The WAL cleanup fence independently prevents replay from recreating it.
 func (m *Manager) CanCleanupVChannel(vchannel string, through uint64) bool {
 	m.mu.Lock()
@@ -271,14 +326,15 @@ func (m *Manager) CanCleanupVChannel(vchannel string, through uint64) bool {
 	return true
 }
 
-// SetQueryRetention protects Delete history needed to reconstruct retained
-// segments. Install it before recovery starts background GC. Advancing it is
-// safe only after the associated segment metadata is durably retired.
-func (m *Manager) SetQueryRetention(vchannel string, startAfter uint64) {
+// SetDataViewRetention initializes protection at recovery or collection creation,
+// or releases it with DroppedVChannelTimeTick once durable Drop is cleanup-ready.
+// The released entry stays until VChannelMeta deletion has been persisted.
+// Segment lifecycle events must not reset a frontier already refreshed from Coord.
+func (m *Manager) SetDataViewRetention(vchannel string, startAfter uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.queryRetention == nil {
-		m.queryRetention = make(map[string]uint64)
+	if m.dataViewRetention == nil {
+		m.dataViewRetention = make(map[string]uint64)
 	}
-	m.queryRetention[vchannel] = startAfter
+	m.dataViewRetention[vchannel] = startAfter
 }

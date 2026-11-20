@@ -1975,3 +1975,7 @@ func (coord *MixCoordMock) ListRunningRequests(ctx context.Context, in *milvuspb
 func (coord *MixCoordMock) CancelRequests(ctx context.Context, in *milvuspb.CancelRequestsRequest, opts ...grpc.CallOption) (*milvuspb.CancelRequestsResponse, error) {
 	return &milvuspb.CancelRequestsResponse{Status: merr.Success()}, nil
 }
+
+func (*MixCoordMock) GetDataViewRetention(context.Context, *datapb.GetDataViewRetentionRequest, ...grpc.CallOption) (*datapb.GetDataViewRetentionResponse, error) {
+	return nil, merr.Wrap(merr.ErrServiceUnimplemented, "GetDataViewRetention is not configured by this test")
+}

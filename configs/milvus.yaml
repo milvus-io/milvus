@@ -1874,6 +1874,10 @@ streaming:
       # If the binary size of l0 segment is greater than this size, it will be flushed.
       maxSize: 32m
   summary:
+    gcIntervalDuration: 10m # Regular prefix GC interval; nonpositive disables it. Applied at WAL open.
+    orphanGCIntervalDuration: 24h # Orphan chunk and obsolete manifest scan interval; nonpositive disables it. Applied at WAL open.
+    maxRetentionBytes: 4GB # Regular GC requires more retained bytes and preserves at least this many bytes after whole-chunk deletion.
+    maxRetentionDuration: 24h # Minimum history age for regular GC and minimum file modification age for orphan GC. Dependencies still take precedence.
     cacheBytesPerPChannel: 64MB # Encoded WALSummary chunk cache budget per PChannel. Zero disables residency. Indexes, in-flight reads and decoded delivery batches are accounted separately. Applied when the WAL opens.
   walRecovery:
     # The interval of persist recovery info, 10s by default. 

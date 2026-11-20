@@ -63,14 +63,7 @@ func (m *Manager) ReadIdempotencyRecovery(ctx context.Context, config idempotenc
 	if config.MaxSize <= 0 {
 		return nil, nil
 	}
-	from := uint64(0)
-	if config.TTL > 0 {
-		cutoff := now.Add(-config.TTL)
-		if cutoff.UnixMilli() >= 0 {
-			// Expire every logical tick in the expired physical millisecond.
-			from = tsoutil.ComposeTSByTime(cutoff.Truncate(time.Millisecond).Add(time.Millisecond)) - 1
-		}
-	}
+	from := idempotencyCutoff(now, config.TTL)
 	m.readMu.RLock()
 	defer m.readMu.RUnlock()
 	hot, chunks := m.planIdempotencyRecovery(from, uint64(config.MaxSize))
@@ -245,6 +238,23 @@ func (m *Manager) planIdempotencyRecovery(from, remaining uint64) ([][]idempoten
 		}
 	}
 	slices.Reverse(hot)
+	return hot, m.planDurableIdempotencyRecoveryLocked(from, remaining)
+}
+
+// idempotencyCutoff preserves recovery's physical-millisecond TTL boundary.
+func idempotencyCutoff(now time.Time, ttl time.Duration) uint64 {
+	if ttl > 0 {
+		cutoff := now.Add(-ttl)
+		if cutoff.UnixMilli() >= 0 {
+			return tsoutil.ComposeTSByTime(cutoff.Truncate(time.Millisecond).Add(time.Millisecond)) - 1
+		}
+	}
+	return 0
+}
+
+// planDurableIdempotencyRecoveryLocked is shared by recovery and GC protection.
+// Manager.mu must be held; the whole capacity-boundary chunk remains selected.
+func (m *Manager) planDurableIdempotencyRecoveryLocked(from, remaining uint64) []idempotencyChunk {
 	var chunks []idempotencyChunk
 	for i := len(m.chunkIndex.chunks) - 1; i >= 0 && remaining > 0; i-- {
 		chunk := m.chunkIndex.chunks[i]
@@ -265,7 +275,7 @@ func (m *Manager) planIdempotencyRecovery(from, remaining uint64) ([][]idempoten
 		}
 	}
 	slices.Reverse(chunks)
-	return hot, chunks
+	return chunks
 }
 
 // Both sections use repeated record field #1. Include each protobuf envelope,

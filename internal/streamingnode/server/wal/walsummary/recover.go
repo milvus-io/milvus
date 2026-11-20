@@ -166,15 +166,15 @@ func (m *Manager) Manifest() *streamingpb.PChannelSummaryManifest {
 	return proto.Clone(m.manifest).(*streamingpb.PChannelSummaryManifest)
 }
 
-// RestoreTransformGCTimeTicks seeds retention from durable VChannel metadata.
-// Missing metadata does not prove cleanup: unknown channels remain pinned.
+// RestoreTransformGCTimeTicks restores materialization backlog accounting.
+// VChannel recovery initializes DataView retention separately from its origin.
 func (m *Manager) RestoreTransformGCTimeTicks(vchannels map[string]*streamingpb.VChannelMeta) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for vchannel, meta := range vchannels {
 		frontier := meta.GetTransformMaterializedTimeTick()
 		// Dropped/tombstoned metadata can precede L0 completion. Only its
-		// persisted M releases records; final catalog cleanup reports infinity.
+		// persisted M counts as completed work; final cleanup reports infinity.
 		if frontier > m.gcFrontiers[vchannel] {
 			m.gcFrontiers[vchannel] = frontier
 			m.materializedFrontiers[vchannel] = max(m.materializedFrontiers[vchannel], frontier)

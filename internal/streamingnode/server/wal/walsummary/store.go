@@ -37,6 +37,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
@@ -428,18 +429,29 @@ type ChunkRef struct {
 // belowTerm. Recovery adopts the highest term, even when empty, so once a manifest
 // at or above belowTerm holds the whole retained set, no recovery can reach an
 // older one.
-func (s *Store) DeleteManifestsBelowTerm(ctx context.Context, belowTerm int64) error {
-	terms, err := s.ListManifestTerms(ctx, belowTerm-1)
-	if err != nil {
-		return err
-	}
-	for _, term := range terms {
-		key := buildManifestKey(s.chunkManager, s.pchannel, term)
-		if err := s.chunkManager.Remove(ctx, key); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return merr.Wrapf(err, "failed to delete superseded summary manifest %s", key)
+func (s *Store) DeleteManifestsBelowTerm(ctx context.Context, belowTerm int64, cutoff time.Time) error {
+	prefix := buildManifestPrefix(s.chunkManager, s.pchannel)
+	var deleteErr error
+	err := s.chunkManager.WalkWithPrefix(ctx, prefix, false, func(info *storage.ChunkObjectInfo) bool {
+		term, err := strconv.ParseInt(strings.TrimPrefix(info.FilePath, prefix), 10, 64)
+		if err != nil || term < 0 || term >= belowTerm || !orphanOldEnough(info.ModifyTime, cutoff) {
+			return true
 		}
+		if err := s.chunkManager.Remove(ctx, info.FilePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			deleteErr = merr.Wrapf(err, "failed to delete superseded summary manifest %s", info.FilePath)
+			return false
+		}
+		return true
+	})
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return merr.Wrap(err, "failed to list superseded summary manifests")
 	}
-	return nil
+	return deleteErr
+}
+
+// Missing modification times cannot prove the object's retention has elapsed.
+func orphanOldEnough(modified, cutoff time.Time) bool {
+	return !modified.IsZero() && modified.Before(cutoff)
 }
 
 // parseChunkKey splits a chunk object's name (the key without the prefix) into
@@ -1093,13 +1105,13 @@ func transformRecordTimetickRange(records []*streamingpb.VChannelSummaryTransfor
 
 // sweepGarbage rediscovers unreferenced objects after a committed manifest.
 // It never touches later terms or the current term's recoverable upload tail.
-func (s *Store) sweepGarbage(ctx context.Context, term int64, coverage *streamingpb.SummaryCoverage, referenced map[ChunkRef]struct{}, budget int) (int, bool, error) {
+func (s *Store) sweepGarbage(ctx context.Context, term int64, coverage *streamingpb.SummaryCoverage, referenced map[ChunkRef]struct{}, cutoff time.Time, budget int) (int, bool, error) {
 	prefix := buildChunkPrefix(s.chunkManager, s.pchannel)
 	deleted, finished := 0, true
 	var deleteErr error
 	err := s.chunkManager.WalkWithPrefix(ctx, prefix, false, func(info *storage.ChunkObjectInfo) bool {
 		generation, keyTerm, ok := parseChunkKey(strings.TrimPrefix(info.FilePath, prefix))
-		if !ok || keyTerm > term || (keyTerm == term && (coverage == nil || generation > coverage.Generation)) {
+		if !ok || !orphanOldEnough(info.ModifyTime, cutoff) || keyTerm > term || (keyTerm == term && (coverage == nil || generation > coverage.Generation)) {
 			return true
 		}
 		if _, keep := referenced[ChunkRef{Generation: generation, Term: keyTerm}]; keep {

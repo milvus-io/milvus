@@ -23,6 +23,7 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
+	DataCoord_GetDataViewRetention_FullMethodName                 = "/milvus.proto.data.DataCoord/GetDataViewRetention"
 	DataCoord_GetStreamingNodeQueryViewResources_FullMethodName   = "/milvus.proto.data.DataCoord/GetStreamingNodeQueryViewResources"
 	DataCoord_Flush_FullMethodName                                = "/milvus.proto.data.DataCoord/Flush"
 	DataCoord_FlushAll_FullMethodName                             = "/milvus.proto.data.DataCoord/FlushAll"
@@ -96,6 +97,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type DataCoordClient interface {
+	GetDataViewRetention(ctx context.Context, in *GetDataViewRetentionRequest, opts ...grpc.CallOption) (*GetDataViewRetentionResponse, error)
 	GetStreamingNodeQueryViewResources(ctx context.Context, in *GetStreamingNodeQueryViewResourcesRequest, opts ...grpc.CallOption) (*GetStreamingNodeQueryViewResourcesResponse, error)
 	Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*FlushResponse, error)
 	// FlushAll flushes all data in the cluster.
@@ -186,6 +188,15 @@ type dataCoordClient struct {
 
 func NewDataCoordClient(cc grpc.ClientConnInterface) DataCoordClient {
 	return &dataCoordClient{cc}
+}
+
+func (c *dataCoordClient) GetDataViewRetention(ctx context.Context, in *GetDataViewRetentionRequest, opts ...grpc.CallOption) (*GetDataViewRetentionResponse, error) {
+	out := new(GetDataViewRetentionResponse)
+	err := c.cc.Invoke(ctx, DataCoord_GetDataViewRetention_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *dataCoordClient) GetStreamingNodeQueryViewResources(ctx context.Context, in *GetStreamingNodeQueryViewResourcesRequest, opts ...grpc.CallOption) (*GetStreamingNodeQueryViewResourcesResponse, error) {
@@ -797,6 +808,7 @@ func (c *dataCoordClient) HandleCommitVchannel(ctx context.Context, in *HandleCo
 // All implementations should embed UnimplementedDataCoordServer
 // for forward compatibility
 type DataCoordServer interface {
+	GetDataViewRetention(context.Context, *GetDataViewRetentionRequest) (*GetDataViewRetentionResponse, error)
 	GetStreamingNodeQueryViewResources(context.Context, *GetStreamingNodeQueryViewResourcesRequest) (*GetStreamingNodeQueryViewResourcesResponse, error)
 	Flush(context.Context, *FlushRequest) (*FlushResponse, error)
 	// FlushAll flushes all data in the cluster.
@@ -885,6 +897,9 @@ type DataCoordServer interface {
 type UnimplementedDataCoordServer struct {
 }
 
+func (UnimplementedDataCoordServer) GetDataViewRetention(context.Context, *GetDataViewRetentionRequest) (*GetDataViewRetentionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetDataViewRetention not implemented")
+}
 func (UnimplementedDataCoordServer) GetStreamingNodeQueryViewResources(context.Context, *GetStreamingNodeQueryViewResourcesRequest) (*GetStreamingNodeQueryViewResourcesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetStreamingNodeQueryViewResources not implemented")
 }
@@ -1096,6 +1111,24 @@ type UnsafeDataCoordServer interface {
 
 func RegisterDataCoordServer(s grpc.ServiceRegistrar, srv DataCoordServer) {
 	s.RegisterService(&DataCoord_ServiceDesc, srv)
+}
+
+func _DataCoord_GetDataViewRetention_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetDataViewRetentionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).GetDataViewRetention(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_GetDataViewRetention_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).GetDataViewRetention(ctx, req.(*GetDataViewRetentionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _DataCoord_GetStreamingNodeQueryViewResources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -2311,6 +2344,10 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "milvus.proto.data.DataCoord",
 	HandlerType: (*DataCoordServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetDataViewRetention",
+			Handler:    _DataCoord_GetDataViewRetention_Handler,
+		},
 		{
 			MethodName: "GetStreamingNodeQueryViewResources",
 			Handler:    _DataCoord_GetStreamingNodeQueryViewResources_Handler,

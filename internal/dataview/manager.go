@@ -108,6 +108,8 @@ type Manager interface {
 	Get(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) (DataViewRef, error)
 	// ReferencedSegments snapshots the IDs in retained DataViews for one GC sweep.
 	ReferencedSegments() map[int64]struct{}
+	// DataViewRetention returns per-shard F from each collection's oldest retained view.
+	DataViewRetention(pchannel string) map[string]uint64
 	GarbageCollect(ctx context.Context, collectionID int64, retainLatest int) error
 }
 

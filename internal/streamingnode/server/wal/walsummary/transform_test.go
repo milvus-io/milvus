@@ -57,7 +57,7 @@ func TestManagerRestoreTransform(t *testing.T) {
 	assert.Len(t, recovered.Manifest().GetChunks(), 2)
 }
 
-func TestManagerGCReleaseAndMaterializationFloorTransform(t *testing.T) {
+func TestManagerGCReleaseAndDataViewFloorTransform(t *testing.T) {
 	manager, _ := newTransformTestManagerWithStore(t)
 	ctx := context.Background()
 
@@ -68,14 +68,14 @@ func TestManagerGCReleaseAndMaterializationFloorTransform(t *testing.T) {
 	require.Len(t, manager.Manifest().GetChunks(), 3)
 
 	// Without a GC position nothing is eligible, even under budget pressure.
-	manager.cfg.RetentionMaxBytes = 1
+	manager.cfg.MaxRetentionBytes = 0
 	require.NoError(t, gcSummary(ctx, manager))
 	assert.Len(t, manager.Manifest().GetChunks(), 3)
 
-	// Advance the GC position through 200 (a completed materialization):
+	// Advance the GC position through 200 (Coord DataView retention):
 	// chunks 0 (end 100) and 1 (end 200) are fully consumed and released;
 	// chunk 2 (end 300) still holds records past the position and stays.
-	manager.AdvanceGCTimeTick("v1", 200)
+	manager.SetDataViewRetention("v1", 200)
 	require.NoError(t, gcSummary(ctx, manager))
 	chunks := manager.Manifest().GetChunks()
 	require.Len(t, chunks, 1)
@@ -85,12 +85,12 @@ func TestManagerGCReleaseAndMaterializationFloorTransform(t *testing.T) {
 	assert.Error(t, err)
 
 	// Advance past everything: all chunks are released.
-	manager.AdvanceGCTimeTick("v1", 400)
+	manager.SetDataViewRetention("v1", 400)
 	require.NoError(t, gcSummary(ctx, manager))
 	assert.Empty(t, manager.Manifest().GetChunks())
 }
 
-func TestAdvanceGCTimeTickDroppedAllowsGCReleaseTransform(t *testing.T) {
+func TestDataViewRetentionAllowsGCReleaseTransform(t *testing.T) {
 	manager, _ := newTransformTestManagerWithStore(t)
 	ctx := context.Background()
 
@@ -99,13 +99,13 @@ func TestAdvanceGCTimeTickDroppedAllowsGCReleaseTransform(t *testing.T) {
 	require.Len(t, manager.Manifest().GetChunks(), 1)
 
 	// Without any GC position the chunk is not releasable.
-	manager.cfg.RetentionMaxBytes = 1
+	manager.cfg.MaxRetentionBytes = 0
 	require.NoError(t, gcSummary(ctx, manager))
 	require.Len(t, manager.Manifest().GetChunks(), 1)
 
-	// The GC boundary of a dropped vchannel makes its chunks releasable
-	// regardless of materialization. The notification touches nothing else.
-	manager.AdvanceGCTimeTick("v1", DroppedVChannelTimeTick)
+	// A DataView frontier beyond the retained history makes it releasable
+	// regardless of materialization.
+	manager.SetDataViewRetention("v1", 100)
 	require.NoError(t, gcSummary(ctx, manager))
 	assert.Empty(t, manager.Manifest().GetChunks())
 	_, _, err := manager.cfg.Store.ReadChunk(ctx, 0, 1)
@@ -159,7 +159,7 @@ func TestMixedSummaryConsumersPersistRecoverAndGC(t *testing.T) {
 	require.NoError(t, persistSummary(ctx, manager))
 	require.NoError(t, persistSummary(ctx, manager), "empty retry must not add another chunk")
 	require.Len(t, manager.Manifest().GetChunks(), 1)
-	recovered := newTestManager(t, NewStore(store.chunkManager, store.PChannel(), 3), 1)
+	recovered := newTestManager(t, NewStore(store.chunkManager, store.PChannel(), 3), 0)
 	require.NoError(t, recovered.Restore(ctx))
 	entries, err := recovered.ReadTransformEntries(ctx, "mixed", 0, 100)
 	require.NoError(t, err)
@@ -175,9 +175,7 @@ func TestMixedSummaryConsumersPersistRecoverAndGC(t *testing.T) {
 	require.Equal(t, []int64{2}, keys.Inserts[0].GetIds().GetIntId().GetData())
 	require.NoError(t, recovered.GCOnce(ctx))
 	require.Len(t, recovered.Manifest().GetChunks(), 1, "unknown transform frontier pins its chunk")
-	recovered.RestoreTransformGCTimeTicks(map[string]*streamingpb.VChannelMeta{
-		"mixed": {TransformMaterializedTimeTick: 100},
-	})
+	recovered.SetDataViewRetention("mixed", 100)
 	require.NoError(t, recovered.GCOnce(ctx))
 	require.Empty(t, recovered.Manifest().GetChunks(), "later inserts and insert-only vchannels do not pin consumed transforms")
 }
@@ -196,12 +194,10 @@ func TestMixedSummaryDDLPreservesRequestHistory(t *testing.T) {
 	keys, err := manager.ReadIdempotencyEntries(ctx, "v1", 0, 1000)
 	require.NoError(t, err)
 	require.Len(t, keys.Inserts, 1)
-	manager.cfg.RetentionMaxBytes = 1
+	manager.cfg.MaxRetentionBytes = 0
 	require.NoError(t, gcSummary(ctx, manager))
 	require.Len(t, manager.Manifest().GetChunks(), 1, "DDL observation is not durable transform materialization")
-	manager.RestoreTransformGCTimeTicks(map[string]*streamingpb.VChannelMeta{
-		"v1": {State: streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED, TransformMaterializedTimeTick: 100},
-	})
+	manager.SetDataViewRetention("v1", 100)
 	require.NoError(t, gcSummary(ctx, manager))
 	require.Empty(t, manager.Manifest().GetChunks())
 }
@@ -264,7 +260,7 @@ func TestTransformReadBoundsAndMissingObject(t *testing.T) {
 	records, err := manager.ReadTransformEntries(ctx, "v1", 0, 99)
 	require.NoError(t, err)
 	require.Empty(t, records)
-	manager.AdvanceGCTimeTick("v1", 100)
+	manager.SetDataViewRetention("v1", 100)
 	require.True(t, manager.chunkReleasedLocked(manager.manifest.Chunks[0]))
 	require.NoError(t, store.DeleteChunk(ctx, 0, store.Term()))
 	_, err = manager.ReadTransformEntries(ctx, "v1", 0, 100)
@@ -376,16 +372,19 @@ func TestDroppedVChannelRetirementSurvivesRestart(t *testing.T) {
 	manager.RestoreTransformGCTimeTicks(meta)
 	require.NoError(t, gcSummary(ctx, manager))
 	require.False(t, manager.CanCleanupVChannel("dropped", 100), "retained chunk still needs the tombstone")
-	recovered := newTestManager(t, NewStore(store.chunkManager, store.PChannel(), 3), 1)
+	recovered := newTestManager(t, NewStore(store.chunkManager, store.PChannel(), 3), 0)
 	require.NoError(t, recovered.Restore(ctx))
 	recovered.RestoreTransformGCTimeTicks(meta)
+	require.NoError(t, recovered.GCOnce(ctx))
+	require.Len(t, recovered.Manifest().GetChunks(), 1, "restart must reacquire Coord retention")
+	recovered.SetDataViewRetention("dropped", 100)
 	require.NoError(t, recovered.GCOnce(ctx))
 	require.Empty(t, recovered.Manifest().GetChunks())
 	require.False(t, recovered.CanCleanupVChannel("dropped", 100), "in-memory retirement is not enough")
 	require.NoError(t, (&manifestWriteTask{manager: recovered}).Execute(ctx))
 	require.True(t, recovered.CanCleanupVChannel("dropped", 100))
 	// Crash after manifest publication and catalog deletion but before object GC.
-	again := newTestManager(t, NewStore(store.chunkManager, store.PChannel(), 4), 1)
+	again := newTestManager(t, NewStore(store.chunkManager, store.PChannel(), 4), 0)
 	require.NoError(t, again.Restore(ctx))
 	again.RestoreTransformGCTimeTicks(map[string]*streamingpb.VChannelMeta{})
 	require.NoError(t, (&manifestWriteTask{manager: again}).Execute(ctx))

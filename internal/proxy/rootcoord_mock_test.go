@@ -1974,3 +1974,7 @@ func (*MixCoordMock) FetchFileResources(context.Context, *rootcoordpb.FetchFileR
 func (*MixCoordMock) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest, opts ...grpc.CallOption) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
 	panic("patch GetQueryViewSegmentLoadInfo with mockey")
 }
+
+func (*MixCoordMock) GetDataViewRetention(context.Context, *datapb.GetDataViewRetentionRequest, ...grpc.CallOption) (*datapb.GetDataViewRetentionResponse, error) {
+	return nil, merr.Wrap(merr.ErrServiceUnimplemented, "GetDataViewRetention is not configured by this test")
+}

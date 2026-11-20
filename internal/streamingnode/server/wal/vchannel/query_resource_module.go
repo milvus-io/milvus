@@ -173,28 +173,17 @@ func deleteReplayStartAfter(snapshot walview.VisibleSegmentSnapshot) uint64 {
 	return minCreateTimeTick - 1
 }
 
-// refreshQueryRetentionLocked protects both local recovery and QueryView
-// replay. Until distributed View retention is recovered, retain the complete
-// Transform suffix from collection creation even after all local Segments go.
-func (m *VChannelRecoveryModule) refreshQueryRetentionLocked() {
+// initializeDataViewRetentionLocked restores the origin pin before background GC.
+// Missing legacy metadata stays at zero until Coord supplies a safe frontier.
+func (m *VChannelRecoveryModule) initializeDataViewRetentionLocked() {
 	if m.summaryManager == nil {
 		return
 	}
-	// A fresh module exists before it observes CreateCollection. Pin the
-	// unknown prefix until that message establishes the collection origin.
-	var floor uint64
+	var origin uint64
 	if m.vchannelView != nil {
-		floor = m.vchannelView.AssignmentMeta().GetCreateCollectionTimeTick()
+		origin = m.vchannelView.AssignmentMeta().GetCreateCollectionTimeTick()
 	}
-	for _, segment := range m.segments {
-		created := segment.CreateTimeTick()
-		if created == 0 {
-			floor = 0
-			break
-		}
-		floor = min(floor, created-1)
-	}
-	m.summaryManager.SetQueryRetention(m.vchannel, floor)
+	m.summaryManager.SetDataViewRetention(m.vchannel, origin)
 }
 
 func (m *VChannelRecoveryModule) publishSegmentSealedLocked(id int64) {

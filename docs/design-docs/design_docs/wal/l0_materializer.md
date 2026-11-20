@@ -157,9 +157,11 @@ behind the global checkpoint in this runtime. There is no new persisted request
 position, physical cursor, or intermediate branch-format compatibility path.
 
 Both full and base-only VChannel snapshot callbacks continue to report their
-captured durable materialized position to Summary for GC. In-memory completion
-alone cannot authorize deletion. Tombstones remain until Summary has durably
-retired the relevant history.
+captured durable materialized position to Summary for backlog accounting.
+The active consumer uses retained WAL handles rather than Summary reads, so
+this position does not gate Summary GC. Summary uses Coord DataView retention.
+WAL checkpoint safety still requires durable metadata ordering. Tombstones
+remain until Summary has durably retired the relevant history.
 
 ## 6. Checkpoint And Flush Completion
 

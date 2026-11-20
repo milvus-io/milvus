@@ -47,7 +47,7 @@ func newTestSummaryManager(t *testing.T, scheduler *recordingVChannelScheduler) 
 		PChannel:          "p1",
 		Term:              1,
 		Store:             store,
-		RetentionMaxBytes: 1 << 30,
+		MaxRetentionBytes: 1 << 30,
 	})
 }
 

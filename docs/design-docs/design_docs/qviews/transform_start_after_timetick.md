@@ -265,18 +265,26 @@ complete readable TransformLog lower bound <= required F
 
 WAL/WALSummary must retain the suffix needed by every View still eligible for
 serving, in-flight preparation, and future reload. Merely materializing Delete
-records into L0 does not authorize dropping that suffix. Aggregate View
-retention with SN local Segment retention; one owner must not overwrite the
-other's requirement in `SetQueryRetention`.
+records into L0 does not authorize dropping that suffix. The active L0 consumer
+retains WAL handles until materialization finishes, independently of Summary;
+its durable M is not an additional Summary GC gate.
 
-A conservative initial implementation can pin history from B for the live
-VChannel, installed before GC during creation/recovery. This trades storage
-space for avoiding an incomplete distributed View-retention protocol. Advancing
-storage GC later requires the minimum across the latest reloadable View and
-all still-protected older Views. Collection drop releases the protection only
-after its tombstone is durable, all local Segments have been cleaned, and no
-QueryView references remain. Release the pin before waiting for Summary
-retirement, then remove the VChannel metadata after retirement completes.
+RecoveryStorage initializes `dataViewRetention[vchannel]` from the collection
+creation TimeTick. Every GC round pulls `GetDataViewRetention` from Coord: each
+Collection contributes its oldest retained DataVersion's per-shard F, returned
+as a VChannel map filtered by the requested PChannel. F is nondecreasing across
+versions, so the oldest retained version covers the latest reloadable and
+protected older Views. Temporary tombstones remain included until catalog
+deletion completes. Failed RPCs postpone retirement; omitted channels retain
+their local pins, and unknown channels default to zero. Segment lifecycle events
+do not reset refreshed pins.
+
+Summary stays a continuous PChannel log. A chunk can retire only if every
+Transform section ends at or before its own channel's F; scanning stops at the
+first blocked chunk. This is continuous-prefix GC, not VChannel-level deletion.
+A low F for a channel absent from the chunk has no effect. Collection Drop pin
+retirement still needs a separate lifetime completion proof; omission in the
+response is not such proof.
 No pin can recreate history already deleted; existing collections require a
 readable-history check.
 
