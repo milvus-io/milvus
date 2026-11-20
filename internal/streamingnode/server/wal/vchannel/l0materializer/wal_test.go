@@ -94,7 +94,7 @@ func TestWALMaterializerExplicitMessagesSplitQueuedDeletes(t *testing.T) {
 			require.Len(t, (*batches)[2].Entries, 1)
 			require.Equal(t, uint64(130), (*batches)[2].Entries[0].GetTimeTick())
 			require.Len(t, *tasks, 3, "the small post-boundary tail must not be forced")
-			require.Equal(t, deleteBytes(walDelete(150)), m.pendingBytes)
+			require.Equal(t, mutationBytes(walDelete(150)), m.pendingBytes)
 			m.RequestPersistThrough(150)
 			require.NoError(t, (*tasks)[3].Execute(context.Background()))
 			require.Zero(t, m.pendingBytes)

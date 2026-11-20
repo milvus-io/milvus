@@ -21,10 +21,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -208,5 +210,27 @@ func TestTransformLogMessageClassification(t *testing.T) {
 				assert.Len(t, entry.GetDelete().GetBlocks(), 1)
 			}
 		})
+	}
+}
+
+func TestUpdateRetainsTransformPayload(t *testing.T) {
+	body := &messagespb.UpdateMessageBody{
+		PartitionId: -1,
+		PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{42}}}},
+		Assignments: []*messagespb.UpdateAssignment{{FieldId: 102, Literal: &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_ScalarValue{ScalarValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 90}}}}}},
+	}
+	update := message.NewUpdateMessageBuilderV2().WithVChannel("v1").WithHeader(&messagespb.UpdateMessageHeader{CollectionId: 1}).WithBody(body).MustBuildMutable().WithTimeTick(90).WithLastConfirmed(walimplstest.NewTestMessageID(89)).IntoImmutableMessage(walimplstest.NewTestMessageID(90))
+	entry := BuildTransformLogEntry(update, TransformEntryOption{})
+	if assert.Len(t, entry.GetMutations().GetBlocks(), 1) {
+		assert.True(t, proto.Equal(body, entry.GetMutations().Blocks[0].GetUpdate()))
+	}
+	txn := newTestTxnMessage(t, 200, newTestInsertMessage(t, 75), update, newTestDeleteMessage(t, 95, 5, 42), update)
+	entry = BuildTransformLogEntry(txn, TransformEntryOption{})
+	if assert.Len(t, entry.GetMutations().GetBlocks(), 3) {
+		for i, b := range entry.GetMutations().Blocks {
+			assert.Equal(t, uint32(i+1), b.SourceOrdinal)
+		}
+		assert.True(t, proto.Equal(body, entry.GetMutations().Blocks[0].GetUpdate()))
+		assert.Equal(t, int64(5), entry.GetMutations().Blocks[1].GetDelete().GetPartitionId())
 	}
 }

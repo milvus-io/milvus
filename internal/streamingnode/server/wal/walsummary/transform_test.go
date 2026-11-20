@@ -12,8 +12,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
@@ -391,4 +393,25 @@ func TestDroppedVChannelRetirementSurvivesRestart(t *testing.T) {
 	require.NoError(t, (&manifestWriteTask{manager: again}).Execute(ctx))
 	require.Empty(t, again.Manifest().GetChunks())
 	require.True(t, again.CanCleanupVChannel("dropped", 100))
+}
+
+func TestUpdateSummaryRestorePreservesTypedPayload(t *testing.T) {
+	ctx := context.Background()
+	manager, store := newTransformTestManagerWithStore(t)
+	body := &messagespb.UpdateMessageBody{PartitionId: -1, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{42, 73}}}}, Assignments: []*messagespb.UpdateAssignment{{FieldId: 105, Literal: &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_NullValue{}}}}}
+	update := message.NewUpdateMessageBuilderV2().WithVChannel("v1").WithHeader(&messagespb.UpdateMessageHeader{CollectionId: 1, SchemaVersion: proto.Int32(7)}).WithBody(body).MustBuildMutable().WithTimeTick(101).WithLastConfirmed(rmq.NewRmqID(100)).IntoImmutableMessage(rmq.NewRmqID(101))
+	manager.ObserveMessage(ctx, update)
+	require.NoError(t, persistSummary(ctx, manager))
+	restored := newTestManager(t, store, 1<<30)
+	require.NoError(t, restored.Restore(ctx))
+	entries, err := restored.ReadTransformEntries(ctx, "v1", 0, 101)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	blocks := entries[0].GetMutations().GetBlocks()
+	require.Len(t, blocks, 1)
+	require.True(t, proto.Equal(body, blocks[0].GetUpdate()))
+	require.Equal(t, int32(7), blocks[0].GetSchemaVersion())
+	keys, size := transformEntrySize(entries[0])
+	require.Equal(t, uint64(2), keys)
+	require.Equal(t, uint64(proto.Size(entries[0])), size)
 }

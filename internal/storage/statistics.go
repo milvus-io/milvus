@@ -281,7 +281,7 @@ func (c *StatisticsCollector) Digest(
 		for _, l := range delta.GetBinlogs() {
 			c.deltaBinlogSize += l.GetMemorySize()
 			c.deltaBinlogCount++
-			c.deleteNumRows += l.GetEntriesNum()
+			c.deleteNumRows += l.DeleteKeyCount()
 			if f := l.GetTimestampFrom(); f > 0 && (c.deltaTimestampFrom == 0 || f < c.deltaTimestampFrom) {
 				c.deltaTimestampFrom = f
 			}
@@ -566,7 +566,7 @@ func BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, deltalogs []*datap
 	for _, fb := range deltalogs {
 		for _, l := range fb.GetBinlogs() {
 			s.DeltaBinlogSize += l.GetMemorySize()
-			s.DeleteNumRows += l.GetEntriesNum()
+			s.DeleteNumRows += l.DeleteKeyCount()
 			s.DeltaBinlogCount++
 			if from := l.GetTimestampFrom(); from > 0 && from < deltaFrom {
 				deltaFrom = from

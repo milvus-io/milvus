@@ -298,6 +298,23 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
 }
 
 CStatus
+AddPackedWriterMetadata(CPackedWriter handle,
+                        const char* key,
+                        const char* value) {
+    try {
+        auto writer = static_cast<
+            std::shared_ptr<milvus_storage::PackedRecordBatchWriter>*>(handle);
+        auto status = (*writer)->AddUserMetadata(key, value);
+        if (!status.ok()) {
+            auto error = milvus_storage::ToSegcoreError(status);
+            return milvus::FailureCStatus(&error);
+        }
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
 CloseWriter(CPackedWriter c_packed_writer) {
     SCOPE_CGO_CALL_METRIC();
 

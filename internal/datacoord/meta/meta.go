@@ -1142,7 +1142,7 @@ func addDeltalogsToSegment(modPack *UpdateSegmentPack, segmentID int64, segment 
 	for _, fb := range deltalogs {
 		for _, l := range fb.GetBinlogs() {
 			segment.Stats.DeltaBinlogSize += l.GetMemorySize()
-			segment.Stats.DeleteNumRows += l.GetEntriesNum()
+			segment.Stats.DeleteNumRows += l.DeleteKeyCount()
 			segment.Stats.DeltaBinlogCount++
 			if from := l.GetTimestampFrom(); from > 0 && (segment.Stats.DeltaTimestampFrom == 0 || from < segment.Stats.DeltaTimestampFrom) {
 				segment.Stats.DeltaTimestampFrom = from

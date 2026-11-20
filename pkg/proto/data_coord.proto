@@ -691,6 +691,7 @@ message Binlog {
   // valid element counts of the ArrayOfVector (VectorArray) fields in this
   // column group (zero included); see Statistics.valid_element_counts.
   map<int64, int64> field_valid_element_counts = 9;
+  DeltaMutationCounts mutation_counts = 10;
 }
 
 message GetRecoveryInfoResponse {
@@ -2434,4 +2435,11 @@ message SnapshotSummary {
   // Same Milvus timestamp and semantics as DescribeSnapshot.create_ts.
   int64 create_ts = 2;
   string description = 3;
+}
+
+// Typed delta entries count physical fragments. Key counts distinguish
+// mutations with shared assignments from deletes in segment statistics.
+message DeltaMutationCounts {
+  int64 delete_keys = 1;
+  int64 update_keys = 2;
 }
