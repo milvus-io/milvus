@@ -26,6 +26,10 @@ func (h *SNQueryViewHandler) acquireUpView(ctx context.Context, shardID qviews.S
 	default:
 	}
 	h.mu.Lock()
+	if h.queriesStopped {
+		h.mu.Unlock()
+		return nil, viewerror.NewOnShutdownError("query view handler is shutting down")
+	}
 	shard := h.shards[shardID]
 	h.mu.Unlock()
 	if shard == nil {
@@ -34,12 +38,37 @@ func (h *SNQueryViewHandler) acquireUpView(ctx context.Context, shardID qviews.S
 	return shard.acquireUpView(ctx, version, withTopology)
 }
 
+// StopQueryAcquisition wakes recovery waiters without releasing resources used
+// by in-flight queries. WAL shutdown must call this before waiting for queries
+// to finish; CloseForHandoff performs resource cleanup after that wait.
+func (h *SNQueryViewHandler) StopQueryAcquisition() {
+	h.mu.Lock()
+	if h.queriesStopped {
+		h.mu.Unlock()
+		return
+	}
+	h.queriesStopped = true
+	shards := make([]*snShardView, 0, len(h.shards))
+	for _, shard := range h.shards {
+		shards = append(shards, shard)
+	}
+	h.mu.Unlock()
+	// Never nest shard locks under h.mu: onEmpty takes h.mu under a shard lock.
+	for _, shard := range shards {
+		shard.stopQueryAcquisition()
+	}
+}
+
 func (s *snShardView) acquireUpView(ctx context.Context, version qviews.QueryViewVersion, withTopology bool) (*QueryViewLease, error) {
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		s.mu.Lock()
+		if s.queriesStopped {
+			s.mu.Unlock()
+			return nil, viewerror.NewOnShutdownError("query view %s is shutting down", s.shardID.String())
+		}
 		entry, exists := s.views[version]
 		if !exists {
 			s.mu.Unlock()
