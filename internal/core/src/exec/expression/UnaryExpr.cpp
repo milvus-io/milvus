@@ -2341,11 +2341,13 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
         // changing active_count_. Only sealed text results are safe to cache
         // across requests; a null cache segment bypasses both reads and writes.
         const auto* cache_segment =
-            segment_->type() == SegmentType::Sealed ? segment_ : nullptr;
+            IsResultCacheEnabled() && segment_->type() == SegmentType::Sealed
+                ? segment_
+                : nullptr;
         auto cached = exec::ExprCacheHelper::GetOrCompute(
             cache_segment,
             snapshot_,
-            [this]() { return this->ToString(); },
+            [this]() { return CacheSignature(); },
             active_count_,
             [&]() -> exec::ExprCacheHelper::ComputeResult {
                 AssertInfo(text_reader_ != nullptr,
@@ -2391,12 +2393,12 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
         cached_index_chunk_valid_res_ = cached.valid;
     }
 
-    // When execute_all_at_once_ and result is not shared with cache, move to avoid copy
-    if (execute_all_at_once_ && cached_match_res_.use_count() == 1) {
+    // GetOrCompute returns a private pair. A hit's two aliasing pointers share
+    // its lease owner, so use_count() is not a test for shared bitmap data.
+    if (execute_all_at_once_) {
         MoveCursor();
-        return std::make_shared<ColumnVector>(
-            std::move(*cached_match_res_),
-            std::move(*cached_index_chunk_valid_res_));
+        return ExprCacheHelper::MoveToColumn(cached_match_res_,
+                                             cached_index_chunk_valid_res_);
     }
 
     TargetBitmap result;

@@ -39,17 +39,17 @@ namespace exec {
 
 namespace {
 
-std::string
+ExprCacheSignature
 BuildExprCacheKey(const plan::FilterBitsNode& filter,
                   QueryContext* query_context) {
-    auto key = filter.ToString();
+    // Keep the excluded-row whole-filter bitmap distinct from predicate
+    // bitmaps in the indexed (base) and raw (domains 1/2) leaf caches.
+    auto key = filter.filter()->CacheSignature().Derive(3);
     if (query_context != nullptr) {
         auto schema = query_context->get_read_schema();
         if (schema->get_ttl_field_id().has_value()) {
-            key += fmt::format(
-                "|entity_ttl_field:{}|entity_ttl_physical_time_us:{}",
-                schema->get_ttl_field_id()->get(),
-                query_context->get_entity_ttl_physical_time_us());
+            key = key.Derive(schema->get_ttl_field_id()->get())
+                      .Derive(query_context->get_entity_ttl_physical_time_us());
         }
     }
     return key;
@@ -117,7 +117,7 @@ PhyFilterBitsNode::PhyFilterBitsNode(
         });
         if (!cache_setup_completed) {
             enable_expr_cache_ = false;
-            expr_cache_key_.clear();
+            expr_cache_key_.reset();
         }
     }
 }
@@ -175,11 +175,11 @@ PhyFilterBitsNode::GetOutput() {
 
     // Cache read: Stage 2 of two-stage search reuses the bitset cached by Stage 1.
     // Cache lives in the process-level ExprResCacheManager keyed by
-    // (segment_id, FilterBitsNode signature + dynamic filter context), so
+    // (segment_id, snapshot generation, signature + dynamic filter context), so
     // cross-query reuse is automatic only when the effective predicate matches.
     auto* cache_segment = query_context_->get_segment();
     const bool can_use_cache =
-        enable_expr_cache_ && !expr_cache_key_.empty() &&
+        enable_expr_cache_ && expr_cache_key_.has_value() &&
         ExprCacheHelper::HasCacheIdentity(
             cache_segment, query_context_->get_read_snapshot().get()) &&
         cache_segment->type() == SegmentType::Sealed &&
@@ -190,20 +190,20 @@ PhyFilterBitsNode::GetOutput() {
             auto key = ExprCacheHelper::MakeKey(
                 cache_segment,
                 query_context_->get_read_snapshot().get(),
-                expr_cache_key_);
+                *expr_cache_key_);
             ExprResCacheManager::Value cached;
             cached.active_count = need_process_rows_;
             if (!ExprResCacheManager::Instance().Get(key, cached) ||
-                cached.result == nullptr ||
+                cached.result == nullptr || cached.valid_result == nullptr ||
                 cached.result->size() != need_process_rows_) {
                 return;
             }
 
             std::vector<VectorPtr> col_res;
-            col_res.push_back(std::make_shared<ColumnVector>(
-                cached.result->clone(),
-                cached.valid_result ? cached.valid_result->clone()
-                                    : TargetBitmap(need_process_rows_, true)));
+            // Get returns a private pair. Keep its lease with the returned
+            // column while moving the bitmaps instead of cloning them again.
+            col_res.push_back(ExprCacheHelper::MoveToColumn(
+                cached.result, cached.valid_result));
             cached_output = std::make_shared<RowVector>(std::move(col_res));
             num_processed_rows_ = need_process_rows_;
         });
@@ -273,7 +273,7 @@ PhyFilterBitsNode::GetOutput() {
                 auto key = ExprCacheHelper::MakeKey(
                     cache_segment,
                     query_context_->get_read_snapshot().get(),
-                    expr_cache_key_);
+                    *expr_cache_key_);
                 ExprResCacheManager::Value v;
                 v.result = std::make_shared<TargetBitmap>(view);
                 v.valid_result = std::make_shared<TargetBitmap>(valid_view);
@@ -342,7 +342,7 @@ PhyFilterBitsNode::GetOutput() {
             auto key = ExprCacheHelper::MakeKey(
                 cache_segment,
                 query_context_->get_read_snapshot().get(),
-                expr_cache_key_);
+                *expr_cache_key_);
             ExprResCacheManager::Value v;
             v.result = std::make_shared<TargetBitmap>(bitset.clone());
             v.valid_result =

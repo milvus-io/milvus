@@ -139,11 +139,11 @@ TEST_F(EntryPoolClockTest, LongKeysSurviveRehashAndEviction) {
     const auto capacity = pool_.GetCurrentBytes();
     const auto* hand = EntryPoolTestPeer::Hand(pool_);
     const auto* key = hand->key;
-    const auto* signature_data = key->signature.data();
+    const auto signature_hash = key->signature;
     EntryPoolTestPeer::Rehash(pool_);
     EXPECT_EQ(EntryPoolTestPeer::Hand(pool_), hand);
     EXPECT_EQ(hand->key, key);
-    EXPECT_EQ(hand->key->signature.data(), signature_data);
+    EXPECT_EQ(hand->key->signature, signature_hash);
     EntryPoolTestPeer::AssertValid(pool_);
 
     pool_.Configure(capacity, false, 0);

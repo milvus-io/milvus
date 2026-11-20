@@ -18,6 +18,9 @@
 
 #include <fmt/core.h>
 #include <memory>
+#include <mutex>
+#include <algorithm>
+#include "common/ExprCacheSignature.h"
 #include <string>
 #include <vector>
 
@@ -234,7 +237,28 @@ class ITypeExpr {
         : type_(type), inputs_{std::move(inputs)} {
     }
 
+    ITypeExpr(const ITypeExpr& other)
+        : type_(other.type_),
+          inputs_(other.inputs_),
+          result_cache_enabled_(other.result_cache_enabled_) {
+    }
+
     virtual ~ITypeExpr() = default;
+
+    // Plans are shared by segment executions. Build the identity once per
+    // logical expression, including when segments evaluate it concurrently.
+    ExprCacheSignature
+    CacheSignature() const {
+        std::call_once(signature_once_, [this] {
+            signature_ = ExprCacheSignature(BuildCacheSignature());
+        });
+        return signature_;
+    }
+
+    virtual std::string
+    BuildCacheSignature() const {
+        return ToString();
+    }
 
     const std::vector<std::shared_ptr<const ITypeExpr>>&
     inputs() const {
@@ -249,6 +273,18 @@ class ITypeExpr {
     virtual std::string
     ToString() const = 0;
 
+    // Local cache policy, set before the immutable expression is published.
+    // Unlike semantic cacheability, it does not propagate to parent/siblings.
+    void
+    SetResultCacheEnabled(bool enabled) {
+        result_cache_enabled_ = enabled;
+    }
+
+    bool
+    IsResultCacheEnabled() const {
+        return result_cache_enabled_;
+    }
+
     const std::vector<std::shared_ptr<const ITypeExpr>>&
     inputs() {
         return inputs_;
@@ -260,6 +296,9 @@ class ITypeExpr {
  protected:
     DataType type_;
     std::vector<std::shared_ptr<const ITypeExpr>> inputs_;
+    bool result_cache_enabled_{true};
+    mutable std::once_flag signature_once_;
+    mutable ExprCacheSignature signature_;
 };
 
 using TypedExprPtr = std::shared_ptr<const ITypeExpr>;
@@ -572,6 +611,27 @@ class TermFilterExpr : public ITypeFilterExpr {
            << ", Is In Field: " << (is_in_field_ ? "true" : "false") << "]";
 
         return ss.str();
+    }
+
+    std::string
+    BuildCacheSignature() const override {
+        // Serialize each typed value separately, then sort/dedupe only the
+        // signature input. Evaluation retains its original value ordering.
+        std::vector<std::string> values;
+        values.reserve(vals_.size());
+        for (const auto& value : vals_) {
+            values.push_back(value.SerializeAsString());
+        }
+        std::sort(values.begin(), values.end());
+        values.erase(std::unique(values.begin(), values.end()), values.end());
+        auto result =
+            fmt::format("Term:{}:{}:", column_.ToString(), is_in_field_);
+        for (const auto& value : values) {
+            result += std::to_string(value.size());
+            result += ':';
+            result += value;
+        }
+        return result;
     }
 
     void

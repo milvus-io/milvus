@@ -89,7 +89,7 @@ class ObservedRawExpr : public Base {
     std::shared_ptr<RawCalls> calls_;
 };
 
-enum class Backend { MemorySealed, DiskSealed, MemoryGrowing };
+enum class Backend { MemorySealed, DiskSealed };
 
 struct PredicateCase {
     std::string name;
@@ -112,7 +112,6 @@ class RawExprCacheExtendedTest : public ::testing::TestWithParam<Backend> {
         config.mode = GetParam() == Backend::DiskSealed ? CacheMode::Disk
                                                         : CacheMode::Memory;
         config.mem_max_bytes = 4U << 20;
-        config.mem_enable_growing = GetParam() == Backend::MemoryGrowing;
         config.disk_base_path = cache_dir_.string();
         config.disk_max_bytes = 4U << 20;
         config.disk_max_file_size = 1U << 20;
@@ -174,19 +173,7 @@ class RawExprCacheExtendedTest : public ::testing::TestWithParam<Backend> {
                 }
             }
         }
-        if (GetParam() == Backend::MemoryGrowing) {
-            auto growing =
-                segcore::CreateGrowingSegment(schema_, empty_index_meta);
-            auto offset = growing->PreInsert(kRows);
-            growing->Insert(offset,
-                            kRows,
-                            dataset.row_ids_.data(),
-                            dataset.timestamps_.data(),
-                            std::make_shared<InsertRecordProto>(*dataset.raw_));
-            segment_ = std::move(growing);
-        } else {
-            segment_ = CreateSealedWithFieldDataLoaded(schema_, dataset);
-        }
+        segment_ = CreateSealedWithFieldDataLoaded(schema_, dataset);
         auto config_map = std::unordered_map<std::string, std::string>{
             {QueryConfig::kExprEvalBatchSize, std::to_string(kBatch)}};
         query_ = std::make_unique<QueryContext>(
@@ -619,27 +606,6 @@ TEST_P(RawExprCacheExtendedTest, SignaturesAndNotPreserveIndependentResults) {
     }
 }
 
-TEST_P(RawExprCacheExtendedTest, GrowingSnapshotChangeRecomputes) {
-    if (GetParam() != Backend::MemoryGrowing) {
-        GTEST_SKIP()
-            << "Growing snapshots are only cached by the memory backend";
-    }
-    for (const auto& c : Cases()) {
-        SCOPED_TRACE(c.name);
-        ExprResCacheManager::Instance().Clear();
-        for (int pass = 0; pass < 3; ++pass) {
-            const int64_t rows = pass == 0 ? kRows - 3 : kRows;
-            auto calls = std::make_shared<RawCalls>();
-            auto adapter = std::make_shared<RawExprCacheAdapter>(
-                MakeInput(c.logical, calls, rows), nullptr, true);
-            EvalCtx context(exec_.get());
-            Check(ReadAll(adapter, context, rows), c, 0, rows);
-            EXPECT_EQ(calls->eval, pass == 2 ? 0 : 3);
-        }
-        EXPECT_EQ(ExprResCacheManager::Instance().GetEntryCount(), 1u);
-    }
-}
-
 TEST_P(RawExprCacheExtendedTest, ElementLevelExpressionsRemainUndecorated) {
     auto json = expr::ColumnInfo(json_, DataType::JSON, {"items"}, true);
     json.element_level_ = true;
@@ -695,16 +661,13 @@ TEST_P(RawExprCacheExtendedTest,
 INSTANTIATE_TEST_SUITE_P(Backends,
                          RawExprCacheExtendedTest,
                          ::testing::Values(Backend::MemorySealed,
-                                           Backend::DiskSealed,
-                                           Backend::MemoryGrowing),
+                                           Backend::DiskSealed),
                          [](const ::testing::TestParamInfo<Backend>& info) {
                              switch (info.param) {
                                  case Backend::MemorySealed:
                                      return "MemorySealed";
                                  case Backend::DiskSealed:
                                      return "DiskSealed";
-                                 case Backend::MemoryGrowing:
-                                     return "MemoryGrowing";
                              }
                              return "Unknown";
                          });

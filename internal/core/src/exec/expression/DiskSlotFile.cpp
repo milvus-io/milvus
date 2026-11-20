@@ -58,6 +58,7 @@ DiskSlotFile::DiskSlotFile(int64_t segment_id,
             ::close(fd_);
             fd_ = -1;
         }
+        ::unlink(path_.c_str());
     });
 
     // Allocate file space
@@ -88,7 +89,7 @@ DiskSlotFile::DiskSlotFile(int64_t segment_id,
 }
 
 DiskSlotFile::~DiskSlotFile() {
-    Close();
+    Remove();
 }
 
 void
@@ -110,17 +111,20 @@ DiskSlotFile::WriteFileHeader() {
 }
 
 bool
-DiskSlotFile::Get(const std::string& signature,
+DiskSlotFile::Get(ExprCacheSignature signature,
                   int64_t active_count,
                   TargetBitmap& out_result,
                   TargetBitmap& out_valid,
-                  const std::function<bool()>& before_materialize) {
+                  const std::function<bool()>& before_materialize,
+                  const std::span<const int32_t>* offsets) {
     std::shared_lock lock(mutex_);
 
     if (fd_ < 0) {
         return false;
     }
 
+    // Exact canonical identity is checked by the map before selecting a slot.
+    // The on-disk hash below is an additional header check, not identity proof.
     auto it = slot_index_.find(signature);
     if (it == slot_index_.end()) {
         return false;
@@ -155,7 +159,8 @@ DiskSlotFile::Get(const std::string& signature,
                   strerror(errno));
         return false;
     }
-    if (slot_hdr.sig_hash != meta.sig_hash) {
+    if (slot_hdr.sig_low != meta.sig_hash.low ||
+        slot_hdr.sig_high != meta.sig_hash.high) {
         LOG_ERROR("DiskSlotFile::Get: sig_hash mismatch on disk for slot_id={}",
                   meta.slot_id);
         return false;
@@ -165,6 +170,38 @@ DiskSlotFile::Get(const std::string& signature,
             "DiskSlotFile::Get: active_count mismatch on disk for slot_id={}",
             meta.slot_id);
         return false;
+    }
+
+    if (offsets != nullptr) {
+        for (auto position : *offsets) {
+            if (position < 0 || position >= row_count_) {
+                return false;
+            }
+        }
+        // Read each touched word once even for unsorted or repeated offsets.
+        std::unordered_map<uint32_t, std::pair<uint64_t, uint64_t>> words;
+        TargetBitmap selected(offsets->size(), false);
+        TargetBitmap selected_valid(offsets->size(), false);
+        for (size_t i = 0; i < offsets->size(); ++i) {
+            const auto position = (*offsets)[i];
+            const uint32_t word_id = position / 64;
+            auto [word, inserted] = words.try_emplace(word_id);
+            if (inserted) {
+                const auto word_offset = offset + kSlotHeaderSize + word_id * 8;
+                if (::pread(fd_, &word->second.first, 8, word_offset) != 8 ||
+                    ::pread(fd_,
+                            &word->second.second,
+                            8,
+                            word_offset + bitset_bytes_) != 8) {
+                    return false;
+                }
+            }
+            selected[i] = (word->second.first >> (position % 64)) & 1;
+            selected_valid[i] = (word->second.second >> (position % 64)) & 1;
+        }
+        out_result = std::move(selected);
+        out_valid = std::move(selected_valid);
+        return true;
     }
 
     out_result = TargetBitmap(row_count_);
@@ -195,92 +232,83 @@ DiskSlotFile::Get(const std::string& signature,
     return true;
 }
 
+bool
+DiskSlotFile::Contains(ExprCacheSignature signature,
+                       int64_t active_count) const {
+    std::shared_lock lock(mutex_);
+    const auto it = slot_index_.find(signature);
+    return fd_ >= 0 && it != slot_index_.end() &&
+           it->second->active_count == active_count;
+}
+
 void
-DiskSlotFile::Put(const std::string& signature,
+DiskSlotFile::Put(ExprCacheSignature signature,
                   int64_t active_count,
                   const TargetBitmap& result,
-                  const TargetBitmap& valid) {
-    uint64_t sig_hash = XXH64(signature.data(), signature.size(), 0);
-
+                  const TargetBitmap& valid,
+                  const std::function<void()>& before_write) {
+    if (active_count != row_count_ || result.size() != row_count_ ||
+        valid.size() != row_count_) {
+        return;
+    }
+    std::lock_guard writer_lock(writer_mutex_);
     std::unique_lock lock(mutex_);
-
     if (fd_ < 0) {
         return;
     }
-    if (result.size() != static_cast<size_t>(row_count_) ||
-        valid.size() != static_cast<size_t>(row_count_)) {
-        LOG_WARN(
-            "DiskSlotFile::Put: row_count mismatch, segment_id={} expected={} "
-            "result_size={} valid_size={}",
-            segment_id_,
-            row_count_,
-            result.size(),
-            valid.size());
-        return;
-    }
-
     auto existing = slot_index_.find(signature);
-    if (existing != slot_index_.end()) {
-        free_slots_.push_back(existing->second->slot_id);
-        slot_index_.erase(existing);
-        clock_dirty_ = true;
-    }
-
-    // Allocate a slot (may evict)
-    uint32_t slot_id = AllocateSlot();
-
-    // Build slot buffer: [SlotHeader][raw bitset data]
-    std::vector<char> buf(slot_size_, 0);
-
-    SlotHeader slot_hdr;
-    slot_hdr.sig_hash = sig_hash;
-    slot_hdr.active_count = active_count;
-    slot_hdr.flags = 0;
-    std::memcpy(buf.data(), &slot_hdr, sizeof(SlotHeader));
-
-    // Copy result bitset
-    size_t result_copy =
-        std::min(static_cast<size_t>(bitset_bytes_), result.size_in_bytes());
-    std::memcpy(buf.data() + kSlotHeaderSize,
-                reinterpret_cast<const char*>(result.data()),
-                result_copy);
-
-    // Copy valid bitset
-    size_t valid_copy =
-        std::min(static_cast<size_t>(bitset_bytes_), valid.size_in_bytes());
-    std::memcpy(buf.data() + kSlotHeaderSize + bitset_bytes_,
-                reinterpret_cast<const char*>(valid.data()),
-                valid_copy);
-
-    // Write to disk
-    off_t offset = static_cast<off_t>(kFileHeaderSize) +
-                   static_cast<off_t>(slot_id) * static_cast<off_t>(slot_size_);
-
-    ssize_t written = ::pwrite(fd_, buf.data(), slot_size_, offset);
-    if (written != static_cast<ssize_t>(slot_size_)) {
-        LOG_ERROR("DiskSlotFile::Put: pwrite failed slot_id={}: {}",
-                  slot_id,
-                  strerror(errno));
-        // Put slot back to free list since write failed
-        free_slots_.push_back(slot_id);
+    // A replacement must preserve the old slot until publication. With no
+    // spare slot, keep the existing deterministic snapshot result.
+    if (existing != slot_index_.end() && free_slots_.empty() &&
+        next_unused_slot_ >= num_slots_) {
         return;
     }
-
-    // Insert metadata
+    free_slots_.reserve(free_slots_.size() + 2);
     auto meta = std::make_unique<SlotMeta>();
+    const auto slot_id = AllocateSlot();
+    if (slot_id >= num_slots_) {
+        return;
+    }
+    auto recycle = folly::makeGuard([&] {
+        if (!lock.owns_lock()) {
+            lock.lock();
+        }
+        free_slots_.push_back(slot_id);
+    });
     meta->slot_id = slot_id;
-    meta->signature = signature;
-    meta->sig_hash = sig_hash;
+    meta->sig_hash = signature;
     meta->active_count = active_count;
     meta->usage_count.store(1, std::memory_order_relaxed);
-
-    slot_index_[signature] = std::move(meta);
+    // Readers can continue using every published slot while this writer
+    // prepares and writes an unpublished slot.
+    lock.unlock();
+    std::vector<char> buffer(slot_size_, 0);
+    const SlotHeader header{signature.low, signature.high, active_count, 0};
+    std::memcpy(buffer.data(), &header, sizeof(header));
+    std::memcpy(buffer.data() + kSlotHeaderSize, result.data(), bitset_bytes_);
+    std::memcpy(buffer.data() + kSlotHeaderSize + bitset_bytes_,
+                valid.data(),
+                bitset_bytes_);
+    if (before_write) {
+        before_write();
+    }
+    const off_t offset =
+        kFileHeaderSize + static_cast<off_t>(slot_id) * slot_size_;
+    if (::pwrite(fd_, buffer.data(), buffer.size(), offset) !=
+        static_cast<ssize_t>(buffer.size())) {
+        return;
+    }
+    lock.lock();
+    existing = slot_index_.find(signature);
+    if (existing != slot_index_.end()) {
+        free_slots_.push_back(existing->second->slot_id);
+        existing->second = std::move(meta);
+    } else {
+        slot_index_.emplace(signature, std::move(meta));
+    }
+    used_count_.store(slot_index_.size(), std::memory_order_relaxed);
     clock_dirty_ = true;
-
-    LOG_DEBUG("DiskSlotFile::Put signature={} slot_id={} active_count={}",
-              signature,
-              slot_id,
-              active_count);
+    recycle.dismiss();
 }
 
 uint32_t
@@ -307,9 +335,7 @@ DiskSlotFile::AllocateSlot() {
         return slot_id;
     }
 
-    // Should not happen if EvictOne works correctly, but fallback to slot 0
-    LOG_ERROR("DiskSlotFile::AllocateSlot: failed to free a slot, reusing 0");
-    return 0;
+    return num_slots_;  // No writable unpublished slot.
 }
 
 void
@@ -335,7 +361,7 @@ DiskSlotFile::EvictOne() {
         if (clock_hand_ >= clock_keys_.size()) {
             clock_hand_ = 0;
         }
-        std::string key = clock_keys_[clock_hand_];
+        auto key = clock_keys_[clock_hand_];
         auto it = slot_index_.find(key);
         if (it == slot_index_.end()) {
             // Entry was removed but clock_keys_ stale
@@ -360,6 +386,7 @@ DiskSlotFile::EvictOne() {
             clock_keys_[clock_hand_] = clock_keys_.back();
             clock_keys_.pop_back();
             slot_index_.erase(it);
+            used_count_.store(slot_index_.size(), std::memory_order_relaxed);
 
             // Return slot to free list
             free_slots_.push_back(freed_slot);
@@ -373,13 +400,14 @@ DiskSlotFile::EvictOne() {
         if (clock_hand_ >= clock_keys_.size()) {
             clock_hand_ = 0;
         }
-        std::string key = clock_keys_[clock_hand_];
+        auto key = clock_keys_[clock_hand_];
         auto it = slot_index_.find(key);
         if (it != slot_index_.end()) {
             uint32_t freed_slot = it->second->slot_id;
             clock_keys_[clock_hand_] = clock_keys_.back();
             clock_keys_.pop_back();
             slot_index_.erase(it);
+            used_count_.store(slot_index_.size(), std::memory_order_relaxed);
             free_slots_.push_back(freed_slot);
         }
     }
@@ -406,12 +434,14 @@ DiskSlotFile::Remove() noexcept {
 
 void
 DiskSlotFile::Close() {
+    std::lock_guard writer_lock(writer_mutex_);
     std::unique_lock lock(mutex_);
     if (fd_ >= 0) {
         ::close(fd_);
         fd_ = -1;
     }
     slot_index_.clear();
+    used_count_.store(0, std::memory_order_relaxed);
     free_slots_.clear();
     next_unused_slot_ = 0;
     clock_keys_.clear();
@@ -421,15 +451,12 @@ DiskSlotFile::Close() {
 
 uint32_t
 DiskSlotFile::GetUsedCount() const {
-    std::shared_lock lock(mutex_);
-    return static_cast<uint32_t>(slot_index_.size());
+    return used_count_.load(std::memory_order_relaxed);
 }
 
 uint64_t
 DiskSlotFile::GetUsedBytes() const {
-    std::shared_lock lock(mutex_);
-    return kFileHeaderSize +
-           static_cast<uint64_t>(slot_index_.size()) * slot_size_;
+    return kFileHeaderSize + static_cast<uint64_t>(GetUsedCount()) * slot_size_;
 }
 
 }  // namespace exec

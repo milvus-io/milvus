@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "common/Types.h"
+#include "common/ExprCacheSignature.h"
 #include "exec/expression/ExprCacheGeneration.h"
 #include "exec/expression/CacheCompressor.h"
 
@@ -83,13 +84,12 @@ class EntryPool {
  public:
     struct Key {
         ExprCacheSegmentKey segment_id;
-        uint64_t sig_hash{0};
-        std::string signature;
+        ExprCacheSignature signature;
 
         bool
         operator==(const Key& other) const {
             return segment_id == other.segment_id &&
-                   sig_hash == other.sig_hash && signature == other.signature;
+                   signature == other.signature;
         }
     };
 
@@ -97,8 +97,7 @@ class EntryPool {
         size_t
         operator()(const Key& k) const noexcept {
             return ExprCacheSegmentKeyHasher{}(k.segment_id) * 1315423911u ^
-                   std::hash<uint64_t>()(k.sig_hash) ^
-                   std::hash<std::string>()(k.signature);
+                   ExprCacheSignatureHasher {}(k.signature);
         }
     };
 
@@ -177,7 +176,7 @@ class EntryPool {
     // destruction. No iterator, Entry reference, or pool lock escapes Lookup.
     Handle
     Lookup(ExprCacheSegmentKey segment_id,
-           const std::string& signature,
+           ExprCacheSignature signature,
            int64_t active_count);
 
     // Insert a compressed entry. Compression is done internally.
@@ -186,7 +185,7 @@ class EntryPool {
     // admission before calling this method.
     void
     Put(ExprCacheSegmentKey segment_id,
-        const std::string& signature,
+        ExprCacheSignature signature,
         int64_t active_count,
         const TargetBitmap& result,
         const TargetBitmap& valid,

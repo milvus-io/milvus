@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "test_utils/ExprCacheTestUtils.h"
 #include "exec/expression/RawExprCacheAdapter.h"
 
 #include <gtest/gtest.h>
@@ -411,6 +412,7 @@ TEST_F(RawExprCacheAdapterTest, MemoryGaugeTracksCaptureAndHitLifetime) {
     EXPECT_DOUBLE_EQ(gauge.Value(),
                      baseline + manager.GetMemoryBytes() + pair_bytes);
     manager.Clear();
+    EXPECT_EQ(manager.GetMemoryBytes(), 0u);
     EXPECT_DOUBLE_EQ(gauge.Value(), baseline + pair_bytes);
     hit_adapter.reset();
     EXPECT_EQ(manager.GetMaterializationBytes(), 0u);
@@ -778,6 +780,95 @@ TEST_F(RawExprCacheAdapterTest, CacheHitReturnsLogicalValueDespiteWorkMask) {
     EXPECT_EQ(hit_input->eval_count, 0);
 }
 
+TEST_F(RawExprCacheAdapterTest, CompiledTermPermutationsReuseOneLeafEntry) {
+    QueryContext query(
+        "normalized-in", segment_.get(), kActiveCount, MAX_TIMESTAMP);
+    query.set_read_snapshot(segment_->CaptureReadSnapshot());
+    ExecContext exec(&query);
+    EvalCtx context(&exec);
+    proto::plan::GenericValue one, ten;
+    one.set_int64_val(1);
+    ten.set_int64_val(10);
+    std::vector<TargetBitmap> results, validity;
+    for (const auto& values :
+         {std::vector{one, ten, one}, std::vector{ten, one}}) {
+        auto logical = std::make_shared<expr::TermFilterExpr>(
+            expr::ColumnInfo(field_id_, DataType::INT64), values);
+        auto compiled = CompileExpressions({logical}, &exec, {}, false);
+        auto adapter =
+            std::dynamic_pointer_cast<RawExprCacheAdapter>(compiled[0]);
+        ASSERT_NE(adapter, nullptr);
+        results.emplace_back();
+        validity.emplace_back();
+        EvalSequential(adapter, context, &results.back(), &validity.back());
+        EXPECT_EQ(ExprResCacheManager::Instance().GetEntryCount(), 1);
+    }
+    EXPECT_TRUE(results[0] == results[1]);
+    EXPECT_TRUE(validity[0] == validity[1]);
+}
+
+TEST_F(RawExprCacheAdapterTest, WholeHitKeepsLeaseWithMovedOutput) {
+    auto& manager = ExprResCacheManager::Instance();
+    QueryContext query(
+        "whole-hit", segment_.get(), kActiveCount, MAX_TIMESTAMP);
+    query.set_read_snapshot(segment_->CaptureReadSnapshot());
+    ExecContext exec(&query);
+    EvalCtx context(&exec);
+    auto [miss_input, miss] = MakeAdapter("raw:whole-move");
+    EvalSequential(miss, context);
+    auto [input, hit] = MakeAdapter("raw:whole-move");
+    hit->SetExecuteAllAtOnce();
+    VectorPtr output;
+    hit->Eval(context, output);
+    ASSERT_NE(output, nullptr);
+    EXPECT_EQ(output->size(), kActiveCount);
+    EXPECT_EQ(input->eval_count, 0);
+    EXPECT_EQ(input->cursor_pos(), kActiveCount);
+    const auto bytes = 2 * ((kActiveCount + 63) / 64) * 8;
+    EXPECT_EQ(manager.GetMaterializationBytes(), bytes);
+    hit.reset();
+    manager.Clear();
+    EXPECT_EQ(manager.GetMaterializationBytes(), bytes);
+    output.reset();
+    EXPECT_EQ(manager.GetMaterializationBytes(), 0);
+}
+
+TEST_F(RawExprCacheAdapterTest, OffsetPrefetchNeverMaterializesWholePair) {
+    auto& manager = ExprResCacheManager::Instance();
+    CacheConfig config;
+    config.mode = CacheMode::Memory;
+    config.admission_threshold = 1;
+    config.mem_min_eval_duration_us = 0;
+    config.materialization_max_bytes = 16;
+    ASSERT_TRUE(manager.SetConfig(config));
+    auto [input, hit] = MakeAdapter("raw:sparse-prefetch");
+    ExprResCacheManager::Value value;
+    value.active_count = kActiveCount;
+    value.result = std::make_shared<TargetBitmap>(kActiveCount, true);
+    value.valid_result = std::make_shared<TargetBitmap>(kActiveCount, true);
+    manager.Put(RawCacheKey(*input), value);
+    auto pool = std::make_shared<folly::CPUThreadPoolExecutor>(1);
+    hit->PrefetchAsync(pool);
+    hit->WaitPrefetch();
+    EXPECT_EQ(input->prefetch_count, 0);
+    EXPECT_EQ(manager.GetMaterializationBytes(), 0);
+    QueryContext query(
+        "sparse-hit", segment_.get(), kActiveCount, MAX_TIMESTAMP);
+    query.set_read_snapshot(segment_->CaptureReadSnapshot());
+    ExecContext exec(&query);
+    OffsetVector offsets{2499, 0, 64, 64};
+    EvalCtx context(&exec, &offsets);
+    VectorPtr output;
+    hit->Eval(context, output);
+    ASSERT_NE(output, nullptr);
+    EXPECT_EQ(output->size(), 4);
+    EXPECT_EQ(input->eval_count, 0);
+    EXPECT_EQ(manager.GetMaterializationBytes(), 16);
+    hit.reset();
+    output.reset();
+    EXPECT_EQ(manager.GetMaterializationBytes(), 0);
+}
+
 TEST_F(RawExprCacheAdapterTest, CacheHitSkipsWrappedRawPrefetch) {
     QueryContext query_context(
         "raw_cache_test", segment_.get(), kActiveCount, MAX_TIMESTAMP);
@@ -1045,152 +1136,6 @@ TEST_F(RawExprCacheAdapterTest, MemoryModeRejectsGrowingByDefault) {
     EXPECT_FALSE(ExprResCacheManager::Instance().Get(key, cached));
 }
 
-TEST_F(RawExprCacheAdapterTest, MemoryModeCachesGrowingWhenEnabled) {
-    auto& manager = ExprResCacheManager::Instance();
-    CacheConfig config;
-    config.mode = CacheMode::Memory;
-    config.mem_max_bytes = 1U << 20;
-    config.compression_enabled = false;
-    config.mem_enable_growing = true;
-    config.admission_threshold = 1;
-    config.mem_min_eval_duration_us = 0;
-    ASSERT_TRUE(manager.SetConfig(config));
-    manager.Clear();
-
-    auto data = segcore::DataGen(schema_, kActiveCount, 85);
-    auto growing = segcore::CreateGrowingSegment(schema_, empty_index_meta);
-    growing->PreInsert(kActiveCount);
-    growing->Insert(0,
-                    kActiveCount,
-                    data.row_ids_.data(),
-                    data.timestamps_.data(),
-                    std::make_shared<InsertRecordProto>(*data.raw_));
-
-    QueryContext query_context(
-        "raw_cache_growing", growing.get(), kActiveCount, MAX_TIMESTAMP);
-    query_context.set_read_snapshot(
-        query_context.get_segment()->CaptureReadSnapshot());
-    ExecContext exec_context(&query_context);
-    EvalCtx eval_context(&exec_context);
-
-    auto undecorated = std::make_shared<CountingRawExpr>(
-        growing.get(), field_id_, "raw:memory-growing-decoration-enabled");
-    std::vector<ExprPtr> exprs{undecorated};
-    DecorateRawExprCache(exprs, nullptr, true);
-    ASSERT_EQ(exprs.size(), 1u);
-    EXPECT_NE(std::dynamic_pointer_cast<RawExprCacheAdapter>(exprs[0]),
-              nullptr);
-
-    auto miss_input = std::make_shared<CountingRawExpr>(
-        growing.get(), field_id_, "raw:memory-growing-enabled");
-    auto miss_adapter =
-        std::make_shared<RawExprCacheAdapter>(miss_input, nullptr, true);
-    EXPECT_EQ(EvalSequential(miss_adapter, eval_context),
-              (std::vector<int64_t>{1024, 1024, 452}));
-    EXPECT_EQ(miss_input->eval_count, 3);
-
-    auto hit_input = std::make_shared<CountingRawExpr>(
-        growing.get(), field_id_, "raw:memory-growing-enabled");
-    auto hit_adapter =
-        std::make_shared<RawExprCacheAdapter>(hit_input, nullptr, true);
-    EXPECT_EQ(EvalSequential(hit_adapter, eval_context),
-              (std::vector<int64_t>{1024, 1024, 452}));
-    EXPECT_EQ(hit_input->eval_count, 0);
-}
-
-TEST_F(RawExprCacheAdapterTest, GrowingAdmissionSkipsCaptureForNewSnapshots) {
-    auto& manager = ExprResCacheManager::Instance();
-    CacheConfig config;
-    config.mode = CacheMode::Memory;
-    config.mem_max_bytes = 1U << 20;
-    config.mem_enable_growing = true;
-    config.admission_threshold = 2;
-    config.mem_min_eval_duration_us = 0;
-    ASSERT_TRUE(manager.SetConfig(config));
-
-    auto growing = segcore::CreateGrowingSegment(schema_, empty_index_meta);
-    auto append_rows = [&](int64_t rows) {
-        auto data =
-            segcore::DataGen(schema_, rows, 86, growing->get_row_count());
-        const auto offset = growing->PreInsert(rows);
-        growing->Insert(offset,
-                        rows,
-                        data.row_ids_.data(),
-                        data.timestamps_.data(),
-                        std::make_shared<InsertRecordProto>(*data.raw_));
-    };
-    const std::string signature = "raw:growing-snapshot-admission";
-    auto evaluate = [&](bool expect_capture, bool expect_hit) {
-        const auto active_count = growing->get_row_count();
-        QueryContext query_context("raw_cache_growing_admission",
-                                   growing.get(),
-                                   active_count,
-                                   MAX_TIMESTAMP);
-        query_context.set_read_snapshot(
-            query_context.get_segment()->CaptureReadSnapshot());
-        ExecContext exec_context(&query_context);
-        EvalCtx eval_context(&exec_context);
-        auto input = std::make_shared<CountingRawExpr>(
-            growing.get(), field_id_, signature, active_count);
-        auto adapter =
-            std::make_shared<RawExprCacheAdapter>(input, nullptr, true);
-
-        int64_t processed = 0;
-        while (processed < active_count) {
-            VectorPtr result;
-            adapter->Eval(eval_context, result);
-            auto column = std::dynamic_pointer_cast<ColumnVector>(result);
-            ASSERT_NE(column, nullptr);
-            ASSERT_GT(column->size(), 0);
-            TargetBitmapView data(column->GetRawData(), column->size());
-            TargetBitmapView valid(column->GetValidRawData(), column->size());
-            for (size_t i = 0; i < column->size(); ++i) {
-                EXPECT_EQ(valid[i], CountingRawExpr::IsValid(processed + i));
-                EXPECT_EQ(data[i],
-                          CountingRawExpr::IsValid(processed + i) &&
-                              CountingRawExpr::Matches(processed + i));
-            }
-            if (processed == 0) {
-                // The first batch leaves any full-segment capture in flight.
-                // A one-off snapshot must never reserve its bitmap pair.
-                const size_t full_bitmap_bytes =
-                    2 * ((active_count + 63) / 64) * sizeof(uint64_t);
-                EXPECT_EQ(manager.GetMaterializationBytes(),
-                          expect_capture || expect_hit ? full_bitmap_bytes : 0);
-            }
-            processed += column->size();
-        }
-        EXPECT_EQ(processed, active_count);
-        EXPECT_EQ(
-            input->eval_count,
-            expect_hit ? 0 : (active_count + kBatchSize - 1) / kBatchSize);
-    };
-
-    append_rows(kActiveCount);
-    evaluate(false, false);
-    EXPECT_EQ(manager.GetEntryCount(), 0);
-    append_rows(64);
-    evaluate(false, false);
-    EXPECT_EQ(manager.GetEntryCount(), 0);
-
-    evaluate(true, false);
-    EXPECT_EQ(manager.GetEntryCount(), 1);
-    evaluate(false, true);
-
-    append_rows(64);
-    evaluate(false, false);
-    evaluate(true, false);
-    evaluate(false, true);
-    EXPECT_EQ(manager.GetEntryCount(), 1);
-    EXPECT_EQ(manager.GetMaterializationBytes(), 0);
-
-    const auto key = RawCacheKey(CountingRawExpr(
-        growing.get(), field_id_, signature, growing->get_row_count()));
-    ExprResCacheManager::Value cached;
-    cached.active_count = kActiveCount + 64;
-    EXPECT_FALSE(manager.Get(key, cached));
-}
-
 TEST_F(RawExprCacheAdapterTest, DiskModeCachesSealedButRejectsGrowing) {
     auto cache_dir = std::filesystem::temp_directory_path() /
                      ("raw_expr_cache_adapter_" + std::to_string(::getpid()) +
@@ -1255,8 +1200,7 @@ TEST_F(RawExprCacheAdapterTest, DiskModeCachesSealedButRejectsGrowing) {
     std::filesystem::remove_all(cache_dir);
 }
 
-TEST_F(RawExprCacheAdapterTest,
-       CompileGateKeepsDisabledTreeUnchangedAndInstallsReadOnlyAdapter) {
+TEST_F(RawExprCacheAdapterTest, CompileGateDecoratesOnlyWhenCacheEnabled) {
     proto::plan::GenericValue value;
     value.set_int64_val(42);
     auto logical = std::make_shared<expr::UnaryRangeFilterExpr>(
@@ -1291,7 +1235,6 @@ TEST_F(RawExprCacheAdapterTest,
 
     QueryContext two_stage_query(
         "raw_cache_two_stage", segment_.get(), kActiveCount, MAX_TIMESTAMP);
-    two_stage_query.set_enable_sub_expr_cache_write(false);
     two_stage_query.set_read_snapshot(
         two_stage_query.get_segment()->CaptureReadSnapshot());
     ExecContext two_stage_context(&two_stage_query);
@@ -1354,7 +1297,7 @@ TEST_F(RawExprCacheAdapterTest,
         }
         // Other execution paths use plain ToString(). An entry without raw
         // null semantics must not alias either mode's lookup or insertion.
-        ExprResCacheManager::Key unscoped{
+        milvus::test::ExprCacheKey unscoped{
             segment_->get_segment_id(),
             input->ToString(),
             segment_->CaptureReadSnapshot()->GetExprCacheGeneration()};
@@ -1670,7 +1613,7 @@ TEST(ExprResCacheAdmissionTicketTest,
     ASSERT_TRUE(manager.SetConfig(config));
     manager.Clear();
 
-    ExprResCacheManager::Key key{7001, "ticket:threshold"};
+    milvus::test::ExprCacheKey key{7001, "ticket:threshold"};
     EXPECT_FALSE(manager.ObserveMiss(key, 128, SegmentType::Sealed).admitted);
     auto ticket = manager.ObserveMiss(key, 128, SegmentType::Sealed);
     ASSERT_TRUE(ticket.admitted);
@@ -1708,11 +1651,11 @@ TEST(ExprResCacheAdmissionTicketTest, RejectsMismatchedAndStaleTickets) {
     value.active_count = 64;
     value.eval_duration_us = 1;
 
-    ExprResCacheManager::Key original{7002, "ticket:original"};
+    milvus::test::ExprCacheKey original{7002, "ticket:original"};
     auto mismatch_ticket =
         manager.ObserveMiss(original, 64, SegmentType::Sealed);
     ASSERT_TRUE(mismatch_ticket.admitted);
-    ExprResCacheManager::Key different{7002, "ticket:different"};
+    milvus::test::ExprCacheKey different{7002, "ticket:different"};
     manager.PutAdmitted(different, value, mismatch_ticket);
     ExprResCacheManager::Value cached;
     cached.active_count = 64;
@@ -1746,7 +1689,7 @@ TEST(ExprResCacheAdmissionTicketTest, RejectsMismatchedAndStaleTickets) {
     ExprResCacheManager::SetEnabled(false);
 }
 
-TEST(ExprResCacheAdmissionTicketTest, GrowingEligibilityIsBoundToTicketEpoch) {
+TEST(ExprResCacheAdmissionTicketTest, GrowingIsAlwaysIneligible) {
     auto& manager = ExprResCacheManager::Instance();
     const auto cache_dir =
         std::filesystem::temp_directory_path() /
@@ -1759,8 +1702,8 @@ TEST(ExprResCacheAdmissionTicketTest, GrowingEligibilityIsBoundToTicketEpoch) {
     });
     ExprResCacheManager::SetEnabled(true);
 
-    ExprResCacheManager::Key growing_key{7004, "ticket:growing-refresh"};
-    ExprResCacheManager::Key sealed_key{7005, "ticket:sealed-refresh"};
+    milvus::test::ExprCacheKey growing_key{7004, "ticket:growing-refresh"};
+    milvus::test::ExprCacheKey sealed_key{7005, "ticket:sealed-refresh"};
     ExprResCacheManager::Value value;
     value.result = std::make_shared<TargetBitmap>(64, true);
     value.valid_result = std::make_shared<TargetBitmap>(64, true);
@@ -1768,12 +1711,11 @@ TEST(ExprResCacheAdmissionTicketTest, GrowingEligibilityIsBoundToTicketEpoch) {
     value.eval_duration_us = 1;
 
     for (auto next_mode : {CacheMode::Memory, CacheMode::Disk}) {
-        SCOPED_TRACE(next_mode == CacheMode::Memory ? "disable growing"
+        SCOPED_TRACE(next_mode == CacheMode::Memory ? "memory"
                                                     : "switch to disk");
         CacheConfig config;
         config.mode = CacheMode::Memory;
         config.mem_max_bytes = 1U << 20;
-        config.mem_enable_growing = true;
         config.admission_threshold = 1;
         config.mem_min_eval_duration_us = 0;
         config.disk_base_path = cache_dir.string();
@@ -1782,15 +1724,13 @@ TEST(ExprResCacheAdmissionTicketTest, GrowingEligibilityIsBoundToTicketEpoch) {
         config.disk_min_eval_duration_us = 0;
         ASSERT_TRUE(manager.SetConfig(config));
 
-        ASSERT_TRUE(manager.CanCacheSegment(SegmentType::Growing));
+        ASSERT_FALSE(manager.CanCacheSegment(SegmentType::Growing));
         const auto old_ticket =
             manager.ObserveMiss(growing_key, 64, SegmentType::Growing);
-        ASSERT_TRUE(old_ticket.admitted);
+        ASSERT_FALSE(old_ticket.admitted);
 
-        // Refresh after an eligible precheck. Disk must reject growing even
-        // when the memory-mode growing opt-in remains enabled.
+        // Both backends reject growing before and after a refresh.
         config.mode = next_mode;
-        config.mem_enable_growing = next_mode == CacheMode::Disk;
         ASSERT_TRUE(manager.SetConfig(config));
         const auto new_ticket =
             manager.ObserveMiss(growing_key, 64, SegmentType::Growing);
@@ -1799,7 +1739,7 @@ TEST(ExprResCacheAdmissionTicketTest, GrowingEligibilityIsBoundToTicketEpoch) {
         EXPECT_EQ(manager.GetEntryCount(), 0);
         EXPECT_EQ(manager.GetCurrentBytes(), 0);
 
-        // A ticket issued before the same refresh must also reject the write.
+        // A rejected ticket cannot authorize a write after a refresh.
         manager.PutAdmitted(growing_key, value, old_ticket);
         EXPECT_EQ(manager.GetEntryCount(), 0);
         EXPECT_EQ(manager.GetCurrentBytes(), 0);
@@ -1832,7 +1772,7 @@ TEST(ExprResCacheAdmissionTicketTest,
     ASSERT_TRUE(manager.SetConfig(config));
     manager.Clear();
 
-    ExprResCacheManager::Key key{7003, "ticket:latency"};
+    milvus::test::ExprCacheKey key{7003, "ticket:latency"};
     auto ticket = manager.ObserveMiss(key, 64, SegmentType::Sealed);
     ASSERT_TRUE(ticket.admitted);
 
