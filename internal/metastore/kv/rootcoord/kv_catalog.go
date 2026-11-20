@@ -306,7 +306,9 @@ func (kc *Catalog) loadCollection(ctx context.Context, dbID int64, collectionID 
 			}
 			return nil, err
 		}
-		kc.fixDefaultDBIDConsistency(ctx, info, ts)
+		if err := kc.fixDefaultDBIDConsistency(ctx, info, ts); err != nil {
+			return nil, err
+		}
 		return info, nil
 	}
 	info, err := kc.loadCollectionFromDb(ctx, dbID, collectionID, ts)
@@ -502,7 +504,9 @@ func (kc *Catalog) decodeCollection(ctx context.Context, value []byte, ts typeut
 	if err := proto.Unmarshal(value, collMeta); err != nil {
 		return nil, false, merr.WrapErrDataIntegrity(err, "unmarshal collection metadata")
 	}
-	kc.fixDefaultDBIDConsistency(ctx, collMeta, ts)
+	if err := kc.fixDefaultDBIDConsistency(ctx, collMeta, ts); err != nil {
+		return nil, false, err
+	}
 	return model.UnmarshalCollectionModel(collMeta), childMetadataStoredSeparately(collMeta), nil
 }
 
@@ -967,15 +971,18 @@ func (kc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.
 // all collections in default database should be marked with dbID 1.
 // this method also update dbid in meta store when dbid is 0
 // see also: https://github.com/milvus-io/milvus/issues/33608
-func (kc *Catalog) fixDefaultDBIDConsistency(ctx context.Context, collMeta *pb.CollectionInfo, ts typeutil.Timestamp) {
+func (kc *Catalog) fixDefaultDBIDConsistency(ctx context.Context, collMeta *pb.CollectionInfo, ts typeutil.Timestamp) error {
 	if collMeta.DbId == util.NonDBID {
 		coll := model.UnmarshalCollectionModel(collMeta)
 		cloned := coll.Clone()
 		cloned.DBID = util.DefaultDBID
-		kc.AlterCollectionDB(ctx, coll, cloned, ts)
+		if err := kc.AlterCollectionDB(ctx, coll, cloned, ts); err != nil {
+			return err
+		}
 
 		collMeta.DbId = util.DefaultDBID
 	}
+	return nil
 }
 
 func (kc *Catalog) listAliasesBefore210(ctx context.Context, ts typeutil.Timestamp) ([]*model.Alias, error) {

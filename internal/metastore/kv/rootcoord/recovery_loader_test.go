@@ -55,14 +55,18 @@ func newRecoveryMetaKV(
 	t *testing.T,
 	records map[string][]byte,
 	recorder *recoveryWalkRecorder,
+	getPathRequired ...bool,
 ) *mocks.MetaKv {
 	t.Helper()
 	const rootPath = "test-root"
 
 	metaKV := mocks.NewMetaKv(t)
-	metaKV.On("GetPath", mock.Anything).Return(func(key string) string {
+	getPathCall := metaKV.On("GetPath", mock.Anything).Return(func(key string) string {
 		return rootPath + "/" + key
 	})
+	if len(getPathRequired) > 0 && !getPathRequired[0] {
+		getPathCall.Maybe()
+	}
 	metaKV.On(
 		"WalkWithPrefix",
 		mock.Anything,
@@ -148,6 +152,38 @@ func TestCatalogListCollectionsForRecoverySkipsChildScansForEmbeddedMetadata(t *
 	assert.Zero(t, recorder.calls[FieldMetaPrefix+"/"])
 	assert.Zero(t, recorder.calls[StructArrayFieldMetaPrefix+"/"])
 	assert.Zero(t, recorder.calls[FunctionMetaPrefix+"/"])
+}
+
+func TestCatalogListCollectionsForRecoveryReturnsLegacyMigrationError(t *testing.T) {
+	collection := &pb.CollectionInfo{
+		ID:                         100,
+		DbId:                       util.NonDBID,
+		PartitionIDs:               []int64{10},
+		PartitionNames:             []string{"p100"},
+		PartitionCreatedTimestamps: []uint64{1},
+		Schema: &schemapb.CollectionSchema{
+			Name:   "c100",
+			Fields: []*schemapb.FieldSchema{{FieldID: 11, Name: "f100"}},
+		},
+		State: pb.CollectionState_CollectionCreated,
+	}
+	records := map[string][]byte{
+		CollectionMetaPrefix + "/100": marshalRecoveryProto(t, collection),
+	}
+	recorder := &recoveryWalkRecorder{calls: make(map[string]int)}
+	metaKV := newRecoveryMetaKV(t, records, recorder, false)
+	injected := merr.WrapErrIoFailedReason("injected migration failure")
+	metaKV.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		Return(injected).Once()
+	catalog := NewCatalog(metaKV).(*Catalog)
+
+	got, err := catalog.ListCollectionsForRecovery(
+		context.Background(),
+		[]int64{util.NonDBID, util.DefaultDBID},
+		0,
+	)
+	require.ErrorIs(t, err, injected)
+	assert.Nil(t, got)
 }
 
 func TestCatalogListCollectionsForRecoveryRequiresPrefixWalker(t *testing.T) {
