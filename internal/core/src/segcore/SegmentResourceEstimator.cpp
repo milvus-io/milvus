@@ -21,6 +21,7 @@
 #include <charconv>
 #include <cstdint>
 #include <limits>
+#include <map>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -28,9 +29,11 @@
 #include <utility>
 
 #include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "index/LoadResource.h"
+#include "index/Meta.h"
 #include "knowhere/index/index_factory.h"
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
@@ -224,6 +227,39 @@ FieldsById(const proto::schema::CollectionSchema& schema) {
     return fields;
 }
 
+// Estimates from supplied metadata without opening index files.
+LoadResourceRequest
+EstimateIndexResourcesFromLoadInfo(const proto::cgo::LoadIndexInfo& info) {
+    const auto field_type = static_cast<DataType>(info.field().data_type());
+    const auto element_type =
+        static_cast<DataType>(info.field().element_type());
+    const auto field = FieldMeta::ParseFrom(info.field());
+    const auto dim =
+        IsVectorDataType(field_type) && !IsSparseFloatVectorDataType(field_type)
+            ? field.get_dim()
+            : 1;
+    std::map<std::string, std::string> params;
+    for (const auto& [key, value] : info.index_params()) {
+        params.emplace(key, value);
+    }
+    if (info.current_scalar_index_version() > 0) {
+        params[index::SCALAR_INDEX_ENGINE_VERSION] =
+            std::to_string(info.current_scalar_index_version());
+    }
+    if (params.find(index::INDEX_TYPE) == params.end()) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Can't find index type in index_params");
+    }
+    return index::IndexLoadResource(field_type,
+                                    element_type,
+                                    info.index_engine_version(),
+                                    info.index_file_size(),
+                                    params,
+                                    info.enable_mmap(),
+                                    info.num_rows(),
+                                    dim);
+}
+
 SegmentEstimate
 EstimateSegment(const proto::cgo::SegmentLoadResources& input,
                 const proto::cgo::BatchLoadResourceRequest& request,
@@ -244,21 +280,15 @@ EstimateSegment(const proto::cgo::SegmentLoadResources& input,
             fields.find(info.field().fieldid()) == fields.end()) {
             continue;
         }
-        const auto estimate = index::IndexLoadResource(info);
-        const auto& resource = estimate.resource;
-        AssertInfo(estimate.shared_memory_bytes <= resource.max_memory_cost,
-                   "shared index scratch exceeds index loading estimate");
+        const auto resource = EstimateIndexResourcesFromLoadInfo(info);
         usage.set_final_memory_bytes(
             Add(usage.final_memory_bytes(), resource.final_memory_cost));
         usage.set_final_disk_bytes(
             Add(usage.final_disk_bytes(), resource.final_disk_cost));
         usage.set_max_memory_bytes(
-            Add(usage.max_memory_bytes(),
-                resource.max_memory_cost - estimate.shared_memory_bytes));
+            Add(usage.max_memory_bytes(), resource.max_memory_cost));
         usage.set_max_disk_bytes(
             Add(usage.max_disk_bytes(), resource.max_disk_cost));
-        result.read_scratch.Include(estimate.shared_memory_bytes,
-                                    estimate.max_shared_task_bytes);
         const auto field_id = info.field().fieldid();
         indexed_fields.insert(field_id);
         const std::string* index_type = nullptr;
