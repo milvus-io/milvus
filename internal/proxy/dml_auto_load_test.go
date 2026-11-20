@@ -43,6 +43,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // dmlAutoLoadWAL records writes in place of the streaming WAL.
@@ -88,7 +90,11 @@ func newDMLAutoLoadEnv(t *testing.T, phase string, autoID bool) *dmlAutoLoadEnv 
 	t.Helper()
 	metacache.MockWriteSchemaForTest(t)
 	node, client := newDQLRetryProxy(t, phase)
-	client.server.retrieved = &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}}}}
+	ids := []int64{1, 2, 3}
+	client.server.retrieveResult.Ids = &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}}
+	client.server.retrieveResult.FieldsData = []*schemapb.FieldData{
+		testutils.GenerateScalarFieldDataWithValue(schemapb.DataType_Int64, "id", 100, ids),
+	}
 
 	cache := node.metaCache.(*MockCache)
 	schema, err := cache.GetCollectionSchema(node.ctx, "db", "collection")
@@ -115,6 +121,7 @@ func newDMLAutoLoadEnv(t *testing.T, phase string, autoID bool) *dmlAutoLoadEnv 
 
 	queryPre := mockey.Mock((*queryTask).PreExecute).To(func(qt *queryTask, _ context.Context) error {
 		dql.SetQueryReadSchemaForTest(qt, schema)
+		qt.Limit = typeutil.Unlimited
 		qt.CollectionID = 100
 		return nil
 	}).Build()
