@@ -176,6 +176,20 @@ TEST_F(SourceContextMixedData, GeneratedTakeAndChunkDoNotUseSourceCredentials) {
     auto chunk = reader->get_chunk_reader(1);
     ASSERT_TRUE(chunk.ok()) << chunk.status();
     EXPECT_TRUE((*chunk)->get_chunk(0).ok());
+    auto async_chunk = std::move(reader->get_chunk_reader_async(1)).get();
+    ASSERT_TRUE(async_chunk.ok()) << async_chunk.status();
+    EXPECT_TRUE((*async_chunk)->get_chunk(0).ok());
+    auto async_rows = std::move(reader->take_async({0, 1}, 1)).get();
+    ASSERT_TRUE(async_rows.ok()) << async_rows.status();
+    EXPECT_EQ((*async_rows)->num_rows(), 2);
+    auto stream = reader->get_record_batch_reader();
+    ASSERT_TRUE(stream.ok()) << stream.status();
+    std::shared_ptr<arrow::RecordBatch> batch;
+    ASSERT_TRUE((*stream)->ReadNext(&batch).ok());
+    ASSERT_NE(batch, nullptr);
+    EXPECT_EQ(batch->num_rows(), 2);
+    reader->set_keyretriever({});
+    EXPECT_TRUE(reader->take({0}, 1).ok());
     EXPECT_EQ(provider->calls.load(), 0);
     // The same internal-looking path has no authority in the strict source API.
     auto strict = milvus::storage::CreateSourceReader(
@@ -189,6 +203,74 @@ TEST_F(SourceContextMixedData, GeneratedTakeAndChunkDoNotUseSourceCredentials) {
     EXPECT_EQ(milvus::storage::SourceAwareStorageError(denied.status())
                   .get_error_code(),
               static_cast<milvus::ErrorCode>(117));
+}
+
+TEST_F(SourceContextMixedData, MixedRoutingSnapshotsCallerMetadata) {
+    const auto output = base + "/_data/output.parquet";
+    WriteColumns(output, {"110"});
+    auto groups = std::make_shared<milvus_storage::api::ColumnGroups>(
+        milvus_storage::api::ColumnGroups{Group({"text"}, source),
+                                          Group({"110"}, output)});
+    std::vector<size_t> selected{1};
+    auto projection = std::make_shared<std::vector<std::string>>(
+        std::vector<std::string>{"110"});
+    auto reader = milvus::storage::CreateSourceReader(
+        groups, nullptr, projection, properties, context, selected);
+    // Neither the inputs nor a returned manifest view may change the retained
+    // file ownership, projection or internal filesystem configuration.
+    selected[0] = 0;
+    (*groups)[1]->files[0].path = base + "/missing.parquet";
+    (*projection)[0] = "text";
+    auto exposed = reader->get_column_groups();
+    (*exposed)[1]->files[0].path = source;
+    reader->set_keyretriever({});
+    auto rows = reader->take({0, 1}, 1);
+    ASSERT_TRUE(rows.ok()) << rows.status();
+    EXPECT_EQ((*rows)->column(0)->GetScalar(1).ValueOrDie()->ToString(), "9");
+    EXPECT_EQ(provider->calls.load(), 0);
+    auto denied =
+        reader->get_chunk_reader(0,
+                                 std::make_shared<std::vector<std::string>>(
+                                     std::vector<std::string>{"text"}));
+    ASSERT_FALSE(denied.ok());
+    EXPECT_EQ(milvus::storage::SourceAwareStorageError(denied.status())
+                  .get_error_code(),
+              static_cast<milvus::ErrorCode>(117));
+    EXPECT_EQ(provider->calls.load(), 1);
+}
+
+TEST_F(SourceContextMixedData, InternalReadsRetainCancellationGuards) {
+    const auto output = base + "/_data/output.parquet";
+    WriteColumns(output, {"110"});
+    auto groups = std::make_shared<milvus_storage::api::ColumnGroups>(
+        milvus_storage::api::ColumnGroups{Group({"110"}, output)});
+    auto reader = milvus::storage::CreateSourceReader(
+        groups, nullptr, nullptr, properties, context, {0});
+    auto stream = reader->get_record_batch_reader();
+    ASSERT_TRUE(stream.ok()) << stream.status();
+    auto pending = reader->take_async({0}, 1);
+    context->Cancel();
+    auto cancelled = std::move(pending).get();
+    EXPECT_FALSE(cancelled.ok());
+    std::shared_ptr<arrow::RecordBatch> batch;
+    EXPECT_FALSE((*stream)->ReadNext(&batch).ok());
+    EXPECT_EQ(provider->calls.load(), 0);
+}
+
+TEST_F(SourceContextMixedData, RejectsInvalidInternalSelections) {
+    auto groups = std::make_shared<milvus_storage::api::ColumnGroups>(
+        milvus_storage::api::ColumnGroups{Group({"text"}, source)});
+    for (const auto& selection :
+         {std::vector<size_t>{1}, std::vector<size_t>{0, 0}}) {
+        auto opened = milvus_storage::api::Reader::create_with_context(
+            groups, nullptr, nullptr, properties, context, selection);
+        EXPECT_FALSE(opened.ok());
+    }
+    (*groups)[0] = nullptr;
+    auto opened = milvus_storage::api::Reader::create_with_context(
+        groups, nullptr, nullptr, properties, context, std::vector<size_t>{0});
+    EXPECT_FALSE(opened.ok());
+    EXPECT_EQ(provider->calls.load(), 0);
 }
 
 TEST_F(SourceContextMixedData, IndexProjectionReadsSharedGeneratedFile) {
