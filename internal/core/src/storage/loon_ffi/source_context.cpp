@@ -20,7 +20,9 @@
 #include "milvus-storage/ffi_source_read_context_c.h"
 #include "common/EasyAssert.h"
 #include <atomic>
+#include <algorithm>
 #include <cstring>
+#include "milvus-storage/common/layout.h"
 #include "milvus-storage/filesystem/ffi/filesystem_internal.h"
 #include <nlohmann/json.hpp>
 
@@ -160,13 +162,22 @@ CreateSourceReader(
     const std::shared_ptr<arrow::Schema>& schema,
     const std::shared_ptr<std::vector<std::string>>& columns,
     const std::shared_ptr<const milvus_storage::api::Properties>& properties,
-    const milvus_storage::SourceReadContextPtr& context) {
+    const milvus_storage::SourceReadContextPtr& context,
+    const std::vector<size_t>& internal_column_group_indices) {
     if (!context) {
         return milvus_storage::api::Reader::create(
             groups, schema, columns, properties);
     }
-    auto reader = milvus_storage::api::Reader::create_with_context(
-        groups, schema, columns, properties, context);
+    auto reader = internal_column_group_indices.empty()
+                      ? milvus_storage::api::Reader::create_with_context(
+                            groups, schema, columns, properties, context)
+                      : milvus_storage::api::Reader::create_with_context(
+                            groups,
+                            schema,
+                            columns,
+                            properties,
+                            context,
+                            internal_column_group_indices);
     if (!reader.ok()) {
         auto error = SourceAwareStorageError(reader.status());
         ThrowInfo(error.get_error_code(),
@@ -174,6 +185,89 @@ CreateSourceReader(
                   error.what());
     }
     return std::move(reader).ValueOrDie();
+}
+
+std::vector<size_t>
+SelectInternalColumnGroups(
+    const milvus_storage::api::ColumnGroups& groups,
+    const std::string& manifest_path,
+    const std::unordered_set<std::string>& generated_columns) {
+    if (generated_columns.empty())
+        return {};
+    const auto manifest = nlohmann::json::parse(manifest_path, nullptr, false);
+    if (!manifest.is_object() || !manifest.contains("base_path") ||
+        !manifest["base_path"].is_string()) {
+        ThrowInfo(static_cast<ErrorCode>(117),
+                  "generated data has no trusted segment manifest");
+    }
+    const auto base = manifest["base_path"].get<std::string>();
+    // Internal keys are complete bucket-relative keys or absolute local paths.
+    // Do not normalize them: a changed spelling must not acquire authority.
+    const auto clean_key = [](const std::string& key) {
+        if (key.empty() || key.back() == '/' ||
+            key.find_first_of(":\\?#%") != std::string::npos ||
+            key.find("//") != std::string::npos)
+            return false;
+        size_t start = key.front() == '/' ? 1 : 0;
+        while (start < key.size()) {
+            const auto end = key.find('/', start);
+            const auto part = key.substr(start, end - start);
+            if (part == "." || part == ".." ||
+                std::any_of(part.begin(), part.end(), [](unsigned char ch) {
+                    return ch < 32 || ch == 127;
+                }))
+                return false;
+            if (end == std::string::npos)
+                break;
+            start = end + 1;
+        }
+        return true;
+    };
+    if (!clean_key(base)) {
+        ThrowInfo(static_cast<ErrorCode>(117),
+                  "generated data has an invalid segment base");
+    }
+    const auto prefix = base + "/" + milvus_storage::kDataPath;
+    std::vector<size_t> selected;
+    std::unordered_set<std::string> internal_files, source_files;
+    for (size_t i = 0; i < groups.size(); ++i) {
+        const auto& group = groups[i];
+        if (!group)
+            continue;
+        const bool generated =
+            !group->columns.empty() &&
+            std::all_of(group->columns.begin(),
+                        group->columns.end(),
+                        [&](const auto& column) {
+                            return generated_columns.count(column) != 0;
+                        });
+        for (const auto& file : group->files) {
+            if (!generated) {
+                source_files.insert(file.path);
+                continue;
+            }
+            // Packed writers put generated files directly in this segment's
+            // data directory. Siblings, source URIs and unresolved paths fail
+            // closed before either credential provider is consulted.
+            if (file.path.compare(0, prefix.size(), prefix) != 0 ||
+                file.path.size() == prefix.size() ||
+                file.path.find('/', prefix.size()) != std::string::npos ||
+                !clean_key(file.path)) {
+                ThrowInfo(static_cast<ErrorCode>(117),
+                          "generated data is outside its owning segment");
+            }
+            internal_files.insert(file.path);
+        }
+        if (generated)
+            selected.push_back(i);
+    }
+    for (const auto& path : internal_files) {
+        if (source_files.count(path)) {
+            ThrowInfo(static_cast<ErrorCode>(117),
+                      "source and generated data share an ambiguous file");
+        }
+    }
+    return selected;
 }
 }  // namespace milvus::storage
 

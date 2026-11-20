@@ -2434,11 +2434,32 @@ VisitFieldDataFromManifestPaged(
 
     auto needed_cols_ptr =
         std::make_shared<std::vector<std::string>>(needed_columns);
+    std::vector<size_t> internal_groups;
+    if (source_context && !is_external &&
+        field_meta.field_schema.is_function_output()) {
+        // Index tasks carry the requested FieldSchema, not the full collection
+        // schema. Narrow a private view to that trusted generated projection;
+        // other outputs may share its packed file but grant no extra columns.
+        auto projected_groups =
+            std::make_shared<milvus_storage::api::ColumnGroups>(
+                milvus_storage::api::copy_column_groups(*column_groups));
+        for (auto& group : *projected_groups) {
+            if (group && std::find(group->columns.begin(),
+                                   group->columns.end(),
+                                   column_name) != group->columns.end()) {
+                group->columns = {column_name};
+            }
+        }
+        internal_groups = milvus::storage::SelectInternalColumnGroups(
+            *projected_groups, manifest_path, {column_name});
+        column_groups = std::move(projected_groups);
+    }
     auto reader = milvus::storage::CreateSourceReader(column_groups,
                                                       reader_schema,
                                                       needed_cols_ptr,
                                                       loon_ffi_properties,
-                                                      source_context);
+                                                      source_context,
+                                                      internal_groups);
 
     if (!(reader != nullptr)) {
         ThrowInfo(ErrorCode::FileReadFailed, "Failed to create reader");

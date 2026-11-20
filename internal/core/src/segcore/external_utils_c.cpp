@@ -175,27 +175,6 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                                           collection_schema.proto_size)) {
             return MakeCStatusError("failed to parse collection schema");
         }
-        auto source_context = milvus::storage::OpenSourceReadContext(
-            source_schema.external_source(), source_schema.external_spec());
-        auto reader = milvus::storage::CreateSourceReader(
-            cgs, nullptr, nullptr, properties, source_context);
-
-        // 5. Take sample rows [0, 1, ..., actual-1]
-        std::vector<int64_t> indices(actual);
-        std::iota(indices.begin(), indices.end(), 0);
-
-        auto result = reader->take(indices, 1);
-        if (!result.ok()) {
-            auto error =
-                milvus::storage::SourceAwareStorageError(result.status());
-            return milvus::FailureCStatus(&error);
-        }
-        auto table = result.ValueOrDie();
-        auto num_rows = table->num_rows();
-        if (num_rows == 0) {
-            return MakeCStatusError("sample returned 0 rows");
-        }
-
         struct SampleField {
             milvus::FieldMeta field_meta;
             std::string column_name;
@@ -203,12 +182,7 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
         std::vector<SampleField> external_fields;
         if (collection_schema.proto_blob != nullptr &&
             collection_schema.proto_size > 0) {
-            milvus::proto::schema::CollectionSchema schema;
-            auto ok = schema.ParseFromArray(collection_schema.proto_blob,
-                                            collection_schema.proto_size);
-            if (!ok) {
-                return MakeCStatusError("failed to parse collection schema");
-            }
+            const auto& schema = source_schema;
             bool is_milvus_table =
                 milvus::IsMilvusTableExternalSpec(schema.external_spec());
             external_fields.reserve(schema.fields_size());
@@ -217,7 +191,8 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                 bool is_milvus_table_data_field =
                     is_milvus_table &&
                     field_schema.fieldid() >= START_USER_FIELDID &&
-                    field_schema.name() != milvus::VIRTUAL_PK_FIELD_NAME;
+                    field_schema.name() != milvus::VIRTUAL_PK_FIELD_NAME &&
+                    !field_schema.is_function_output();
                 if (is_milvus_table_data_field &&
                     field_schema.is_primary_key()) {
                     uses_external_primary_key = true;
@@ -245,6 +220,35 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                                        std::nullopt),
                      std::to_string(TimestampFieldID.get())});
             }
+        }
+
+        // Generated function outputs are accounted for separately by DataNode.
+        // Project source fields before opening any files in the mixed manifest.
+        std::shared_ptr<std::vector<std::string>> sample_columns;
+        if (!external_fields.empty()) {
+            sample_columns = std::make_shared<std::vector<std::string>>();
+            for (const auto& field : external_fields)
+                sample_columns->push_back(field.column_name);
+        }
+        auto source_context = milvus::storage::OpenSourceReadContext(
+            source_schema.external_source(), source_schema.external_spec());
+        auto reader = milvus::storage::CreateSourceReader(
+            cgs, nullptr, sample_columns, properties, source_context);
+
+        // 5. Take sample rows [0, 1, ..., actual-1]
+        std::vector<int64_t> indices(actual);
+        std::iota(indices.begin(), indices.end(), 0);
+
+        auto result = reader->take(indices, 1);
+        if (!result.ok()) {
+            auto error =
+                milvus::storage::SourceAwareStorageError(result.status());
+            return milvus::FailureCStatus(&error);
+        }
+        auto table = result.ValueOrDie();
+        auto num_rows = table->num_rows();
+        if (num_rows == 0) {
+            return MakeCStatusError("sample returned 0 rows");
         }
 
         // 6. Calculate per-column Arrow buffer size (recursive for nested types)

@@ -17,6 +17,8 @@
 #pragma once
 #include <memory>
 #include <string>
+#include <unordered_set>
+#include <vector>
 #include "milvus-storage/reader.h"
 #include "milvus-storage/source_read_context.h"
 
@@ -38,11 +40,21 @@ RetainOrOpenSourceReadContext(uintptr_t handle,
                               const std::string& source,
                               const std::string& spec);
 
+// Select generated column groups only from trusted coordinator schema and the
+// owning segment manifest. Manifest properties and path spelling alone never
+// grant internal storage authority. Files must already be resolved by Loon.
+std::vector<size_t>
+SelectInternalColumnGroups(
+    const milvus_storage::api::ColumnGroups& groups,
+    const std::string& manifest_path,
+    const std::unordered_set<std::string>& generated_columns);
+
 std::unique_ptr<milvus_storage::api::Reader>
 CreateSourceReader(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& groups,
     const std::shared_ptr<arrow::Schema>& schema,
     const std::shared_ptr<std::vector<std::string>>& columns,
     const std::shared_ptr<const milvus_storage::api::Properties>& properties,
-    const milvus_storage::SourceReadContextPtr& context);
+    const milvus_storage::SourceReadContextPtr& context,
+    const std::vector<size_t>& internal_column_group_indices = {});
 }  // namespace milvus::storage

@@ -2702,15 +2702,38 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     }
 
     auto needed_columns = schema_snapshot->GetExternalColumnNames();
+    auto source_context = milvus::storage::OpenSourceReadContext(
+        schema_snapshot->get_external_source(),
+        schema_snapshot->get_external_spec());
+    std::vector<size_t> internal_groups;
+    if (source_context) {
+        std::unordered_set<std::string> generated_columns;
+        for (const auto& field_id : schema_snapshot->get_field_ids()) {
+            if (schema_snapshot->is_function_output(field_id) &&
+                !schema_snapshot->IsExternalDataField(field_id)) {
+                generated_columns.insert(
+                    schema_snapshot->GetPhysicalColumnName(field_id));
+            }
+        }
+        // A source alias must never impersonate a generated physical column.
+        for (const auto& field_id : schema_snapshot->get_field_ids()) {
+            if (schema_snapshot->IsExternalDataField(field_id)) {
+                generated_columns.erase(
+                    schema_snapshot->GetPhysicalColumnName(field_id));
+            }
+        }
+        internal_groups = milvus::storage::SelectInternalColumnGroups(
+            *column_groups,
+            segment_load_info.GetManifestPath(),
+            generated_columns);
+    }
     auto reader = std::shared_ptr<milvus_storage::api::Reader>(
-        milvus::storage::CreateSourceReader(
-            column_groups,
-            /*arrow_schema=*/nullptr,
-            needed_columns,
-            properties,
-            milvus::storage::OpenSourceReadContext(
-                schema_snapshot->get_external_source(),
-                schema_snapshot->get_external_spec()))
+        milvus::storage::CreateSourceReader(column_groups,
+                                            /*arrow_schema=*/nullptr,
+                                            needed_columns,
+                                            properties,
+                                            source_context,
+                                            internal_groups)
             .release());
     // QueryNode registers the collection's cipher context before loading.
     // Resolve encrypted Parquet keys through that context when opening files.

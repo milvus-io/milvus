@@ -38,6 +38,12 @@ Explore is a separate layout: local temporary manifests live under
   `BuildPChannelInfoPath` in `internal/metastore/kv/streamingcoord`.
 - Readers consume the complete key recorded in metadata or the manifest.
   They must not prepend another root.
+- A source-authorized external collection may also contain function outputs
+  written by Milvus. Only trusted generated-field metadata plus files directly
+  in the owning segment manifest's `_data/` directory can select internal
+  credentials. The selection is request-local; manifest properties, relative
+  paths alone and failed source authorization cannot grant this access. Source
+  groups continue to use their scoped source context and separate caches.
 - Some API fields describe relative file names rather than complete keys.
   TEXT stats results contain complete keys; JSON stats results contain names
   relative to their field's stats directory. Resolve those names once at the
