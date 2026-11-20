@@ -54,7 +54,8 @@ type FetchRequest struct {
 
 // Credential is transient; its JSON/debug representations are redacted.
 // The storage adapter copies it into native-owned memory for one callback.
-// Providers must recheck the bound owner's current READ on every issuance.
+// Providers must reauthorize the binding under their configured source-access
+// policy on every issuance. The engine does not prescribe a user or service identity.
 type Credential struct {
 	Status       CredentialStatus
 	AccountName  string
@@ -79,7 +80,7 @@ type Session interface {
 }
 
 // Factory opens a fresh session from trusted coordinator state. It must not
-// trust a reference from request Properties or reuse another owner's session.
+// trust a reference from request Properties or reuse another binding's session.
 // The context lasts for the reader operation, not the original Proxy RPC.
 type Factory func(context.Context, Binding) (Session, error)
 

@@ -34,7 +34,7 @@ import (
 
 const BindingKey = "credential_binding"
 
-// Binding is durable identity metadata, not a bearer capability. Reference must
+// Binding is durable authorization metadata, not a bearer capability. Reference must
 // identify a server-owned authorization record or contain non-secret identity
 // metadata understood by Provider. It must never contain a user token or SAS.
 // The provider reauthorizes this binding whenever it issues storage credentials.
@@ -42,7 +42,7 @@ type Binding struct {
 	Version   int    `json:"version"`
 	Provider  string `json:"provider"`
 	Reference string `json:"reference"`
-	// Generation identifies this authorization attempt, not a Catalog table
+	// Generation identifies this authorization attempt, not a source-table
 	// incarnation. Same-name table deletion/recreation is not detected.
 	Generation string `json:"generation"`
 	Source     string `json:"source"`
@@ -61,8 +61,10 @@ type Operation struct {
 	Previous     *Binding // trusted stored binding for an omitted refresh; never authority for the new caller
 }
 
-// Reference is returned only after the hook verifies the initiating user and
-// source-table read permission. It contains no personal or storage credentials.
+// Reference is returned after the hook authorizes the effective source operation
+// under the deployment's policy. It can identify a user, service principal, or
+// server-owned policy record; the engine does not interpret it as a user identity.
+// It contains no personal or storage credentials.
 type Reference struct {
 	Provider string
 	Value    string
@@ -100,7 +102,7 @@ func RejectClientBinding(spec string) error {
 
 // PrepareRefresh resolves an omitted source against trusted collection state.
 // Explicit replacement of an already bound source also requires the initiating
-// user's authorizer: replacing the JSON must not disable source authorization.
+// request's authorizer: replacing the JSON must not disable source authorization.
 // With no authorizer and no binding, omitted fields stay omitted so DataCoord
 // retains the legacy behavior of resolving its current schema at admission.
 func PrepareRefresh(ctx context.Context, stored Operation, source, spec string) (string, string, error) {

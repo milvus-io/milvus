@@ -10,10 +10,15 @@
 
 ## Summary
 
-Authorize external collection registration and explicit refresh as their
-initiating user, and retain a non-secret authorization binding for subsequent
-source reads. A deployment-provided credential provider checks that owner's
-current source permissions whenever it issues storage credentials.
+Retain a non-secret, opaque authorization binding from external collection
+registration or explicit refresh through subsequent source reads. A deployment
+supplies the admission policy and a credential provider that reauthorizes the
+binding whenever it issues storage credentials.
+
+The binding can represent a user, a service principal, or a server-owned policy
+record. The engine does not prescribe creator ownership, an identity provider,
+a Catalog protocol, or a user-token header. User-delegated access is one possible
+integration of these extension points.
 
 This proposal integrates the storage library's `SourceReadContext` and retained
 credential provider with Milvus's asynchronous work. SAS renewal alone does not
@@ -27,16 +32,21 @@ external specification exposes a bearer credential and cannot support work that
 outlives that token. A shared service credential, on the other hand, does not
 check the registering user's table access.
 
-The engine needs durable identity metadata that the source authority can
+The engine needs durable authorization metadata that the source authority can
 re-authorize, plus a reader-specific callback that obtains short-lived storage
 credentials. Native and format caches must preserve that reader's scope.
 
 ## Scope
 
-Registration and explicit refresh check their current initiating user. A refresh
-that omits the source still requires new authorization. Background reads use the
-resulting binding owner. This proposal adds no source permission check for the
-current search caller and no second source permission database inside Milvus.
+When enabled, registration and explicit refresh invoke the deployment's request
+authorizer after resolving the effective source. An omitted-source refresh still
+requires fresh authorization. Background readers reopen the resulting binding
+through its provider. User-bound, service-bound and external policy-handle
+implementations can use the same interface.
+
+This proposal does not add a permission database or change Milvus login/RBAC.
+It does not check the current search caller's source ACL. Stock deployments that
+install no provider retain their existing unbound collection behavior.
 
 The first credential type is Azure SAS for Lance and Iceberg. Other cloud
 providers, detecting a dropped and recreated same-name source table, and importing
@@ -45,11 +55,12 @@ bindings through replication/restore are follow-up work.
 ## Public interfaces
 
 `sourceauth.Install` installs a provider registry and request hook in each
-process. The request hook authenticates transient source credentials, strips them
-from transport metadata, and attaches `sourceauth.Authorizer` to the request
-context. Authorization runs after Proxy resolves the effective source.
+process. The request hook applies the deployment's admission policy, strips any transient
+source credentials from transport metadata, and attaches `sourceauth.Authorizer`
+to the request context. Authorization runs after Proxy resolves the effective source.
 
-The authorizer returns a provider name and non-secret reference. It must not
+The authorizer returns a provider name and an opaque, non-secret reference.
+The generic binding schema has no username, email, tenant or owner field. It must not
 return a user JWT, SAS, or reference that functions as a bearer capability.
 `sourceauth.Registry` opens independent sessions from trusted bindings. A session
 exposes its allowed roots, account, credential callback and close operation.
@@ -102,10 +113,25 @@ Independent contexts do not share credential, filesystem or dataset cache
 authority. The storage implementation must cover metadata, data and delete files,
 directory listing, retries and retained streams for each supported format.
 
+### Source files and generated internal files
+
+A segment manifest may combine external source columns with function outputs
+stored by Milvus. Source-field sampling projects only source columns. During
+indexing and loading, the engine selects generated column groups only when
+trusted schema metadata identifies function outputs and their paths belong
+directly to the owning segment's `_data/` directory. A dropped output sharing a
+packed file does not discard the original group index.
+
+The mixed-reader overload accepts those validated original indices. It snapshots
+groups, projections, properties and selection; keeps source/internal caches and
+filesystem properties separate; and retains cancellation/deadline guards. The
+five-argument API remains source-only. Selection never follows a source denial.
+
 ### Renewal and failures
 
-The provider rechecks the binding owner's current source permissions before
-issuing credentials. Native readers renew SAS through that provider. A revoked
+The provider reauthorizes the binding according to its policy before issuing
+credentials. A user-delegated provider can recheck that user's current source
+permissions; a service-bound provider can check the service's grant. Native readers renew SAS through that provider. A revoked
 grant prevents subsequent issuance; a previously signed SAS can remain usable
 until its signed expiry. This does not renew the user's login token.
 
@@ -115,15 +141,18 @@ source failures request retry. Diagnostics omit credentials and provider details
 
 ## Compatibility, deprecation and migration
 
-This integration draft pins the public candidate from
-[milvus-storage #830](https://github.com/milvus-io/milvus-storage/pull/830)
-(`62105c5dfbe48edd25db30f2ff5b1e7894ce44a3`). Replace it with the reviewed,
+This integration draft pins the public candidate
+[`77ac0fb0ed6ba675dc0bd3d51408e47523166667`](https://github.com/jja725/milvus-storage/commit/77ac0fb0ed6ba675dc0bd3d51408e47523166667).
+It combines [milvus-storage #830](https://github.com/milvus-io/milvus-storage/pull/830)
+at `ad30a9e87d2bfe0d1500efd06338f2172a5a539e` with the four-file
+[mixed-reader follow-up](https://github.com/beinan/milvus-storage/pull/1).
+Restore the upstream repository URL and replace this pin with its reviewed,
 merged main commit before merging. Complete Linux engine builds and failure-path
-verification remain required before enabling the implementation. Merely merging
-this engine patch cannot enable user-bound reads.
+verification remain required before enabling the implementation. A deployment
+must also install its authorization hook and provider to use bound reads.
 
 Unbound collections retain legacy behavior. Deployments must review or re-register
-them if they require source-user authorization everywhere. All processes must
+them if they require source authorization everywhere. All processes must
 install consistent providers. A bound collection on an unconfigured worker fails
 closed.
 
@@ -138,13 +167,15 @@ that supports the source-context contract.
 
 ## Test plan and current verification
 
-The sourceauth, external-spec and error packages pass race-enabled Go tests on
-master with its required Go toolchain. These cover injection rejection, refresh
+The sourceauth, external-spec and error packages pass race-enabled Go tests with
+Go 1.26.10 on macOS/arm64. These cover injection rejection, refresh
 by another caller, binding removal/substitution, concurrent refresh, missing
 providers, session isolation and error propagation.
 
 Included native tests call actual exploration, file-info, filesystem and packed
-reader entry points with failing providers. They exercise five typed outcomes,
+reader entry points with failing providers. Real-Parquet mixed-reader tests cover
+source-only sampling, generated sync/async reads and streams, cache reset,
+metadata mutation, cancellation, invalid selections and shared-file indexing. They exercise five typed outcomes,
 scope rejection, owner release, Azure routing and Arrow C stream/CStatus behavior.
 They have not yet run against a complete Linux engine build.
 
@@ -156,11 +187,12 @@ Inspect persisted schemas/tasks and logs for accidental credential retention.
 
 ## Rejected alternatives
 
-- A global service credential cannot represent the initiating user's source ACL.
+- An implicit ambient credential cannot express the binding selected by the
+  deployment. An explicitly authorized service-bound provider remains supported.
 - Persisting a user token ties background work to token expiry and exposes bearer
   credentials in metadata, jobs and backups.
 - Checking only the current search caller leaves asynchronous registration,
-  indexing and refresh reads without an initiating-user authorization binding.
+  indexing and refresh reads without a retained source authorization binding.
 
 ## References
 

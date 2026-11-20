@@ -113,7 +113,7 @@ class SourceContextMixedData : public ::testing::Test {
     void
     WriteManifest(const milvus_storage::api::ColumnGroups& groups) {
         auto fs =
-            milvus_storage::FilesystemCache::getInstance().get(*properties);
+            milvus_storage::FilesystemCache::getInstance().get(properties);
         ASSERT_TRUE(fs.ok()) << fs.status();
         ASSERT_TRUE(milvus_storage::api::Manifest::WriteTo(
                         *fs,

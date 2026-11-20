@@ -350,7 +350,7 @@ func ValidateSourceAndSpec(externalSource, externalSpec string, policies ...*spe
 }
 
 // Source contexts currently issue Azure SAS for Lance and Iceberg. The account
-// is non-secret routing information and is checked against the Catalog by the
+// is non-secret routing information and is checked by the deployment's
 // authorizer. Every credential and endpoint comes from that trusted context.
 func validateSourceContextSpec(source string, spec *ExternalSpec) error {
 	u, err := url.Parse(source)

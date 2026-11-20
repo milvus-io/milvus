@@ -14,9 +14,10 @@
 # Update milvus-storage_VERSION for the first occurrence
 milvus_add_pkg_config("milvus-storage")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-# Draft dependency: milvus-io/milvus-storage#830. Replace with its merged main SHA before merge.
-set( milvus-storage_VERSION 62105c5dfbe48edd25db30f2ff5b1e7894ce44a3)
-set( GIT_REPOSITORY  "https://github.com/milvus-io/milvus-storage.git")
+# Draft dependency: milvus-io/milvus-storage#830 + beinan/milvus-storage#1.
+# Restore the upstream repository and use its reviewed merged SHA before merge.
+set( milvus-storage_VERSION 77ac0fb0ed6ba675dc0bd3d51408e47523166667)
+set( GIT_REPOSITORY  "https://github.com/jja725/milvus-storage.git")
 message(STATUS "milvus-storage repo: ${GIT_REPOSITORY}")
 message(STATUS "milvus-storage version: ${milvus-storage_VERSION}")
 
