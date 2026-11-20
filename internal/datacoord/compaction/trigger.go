@@ -398,12 +398,16 @@ func (t *compactionTrigger) TriggerCompaction(ctx context.Context, signal *Compa
 	case signalCh <- signal:
 	}
 
+	return t.awaitSignalResult(ctx, id, signal, stoppedErr)
+}
+
+func (t *compactionTrigger) awaitSignalResult(ctx context.Context, id UniqueID, signal *CompactionSignal, stoppedErr error) (UniqueID, error) {
 	select {
-	case err = <-signal.resultCh:
+	case err := <-signal.resultCh:
 		return id, err
 	case <-t.workDone:
 		select {
-		case err = <-signal.resultCh:
+		case err := <-signal.resultCh:
 			return id, err
 		default:
 			return -1, stoppedErr

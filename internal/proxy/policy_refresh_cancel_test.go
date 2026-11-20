@@ -91,6 +91,7 @@ func TestRefreshPolicyInfoCacheCancellationAndControls(t *testing.T) {
 
 	assertInitialCacheIntact := func() {
 		t.Helper()
+		require.ElementsMatch(t, []string{initialPolicy}, cache.GetPrivilegeInfo(context.Background()))
 		require.ElementsMatch(t, []string{"reader"}, cache.GetUserRole("alice"))
 		require.Empty(t, cache.GetUserRole("bob"))
 		visible, supported := cache.CanSeeCollection("alice", "tenant_a", "orders")
@@ -292,6 +293,7 @@ func TestRefreshPolicyInfoCacheCancellationAndControls(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, merr.Error(st))
 
+		require.ElementsMatch(t, []string{updatedPolicy}, cache.GetPrivilegeInfo(context.Background()))
 		require.Empty(t, cache.GetUserRole("alice"))
 		require.ElementsMatch(t, []string{"auditor"}, cache.GetUserRole("bob"))
 		visible, supported := cache.CanSeeCollection("alice", "tenant_a", "orders")
