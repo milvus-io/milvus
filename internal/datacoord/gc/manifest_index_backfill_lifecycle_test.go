@@ -46,7 +46,7 @@ func TestManifestIndexBackfillGCRechecksLegacyObservation(t *testing.T) {
 	record, _ := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
 	gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
 	t.Cleanup(gc.Close)
-	item := segmentIndexGCItem{segIdx: record, files: gc.GetAllIndexFilesOfIndex(record)}
+	item := segmentIndexGCItem{observed: observed, segIdx: record, files: gc.GetAllIndexFilesOfIndex(record)}
 	for file := range item.files {
 		require.NoError(t, m.ChunkManager.Write(ctx, file, []byte("artifact")))
 		t.Cleanup(func() { _ = m.ChunkManager.Remove(ctx, file) })
@@ -54,7 +54,7 @@ func TestManifestIndexBackfillGCRechecksLegacyObservation(t *testing.T) {
 	// Backfill passed its live-definition check before DDL retired the index.
 	require.NoError(t, index.NewMigrationBackfillInspector(ctx, m).BackfillIndexesForTest(ctx, meta.RestartSegID, meta.RestartBuildID))
 	require.NoError(t, m.IndexCatalog.(*index.IndexMeta).MarkIndexAsDeleted(ctx, meta.RestartCollID, []int64{meta.RestartIndexID}))
-	gc.recycleRecordOnlySegmentIndex(ctx, observed, item)
+	gc.recycleRecordOnlySegmentIndexes(ctx, nil, []segmentIndexGCItem{item})
 	_, exists := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
 	require.True(t, exists, "stale GC must preserve the driver of manifest retraction")
 	for file := range item.files {

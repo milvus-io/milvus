@@ -59,6 +59,105 @@ func TestMinioObjectStoragePutObjectOptions(t *testing.T) {
 	assert.False(t, opts.SendContentMd5)
 }
 
+func TestMinioObjectStorageRemoveObjects(t *testing.T) {
+	t.Run("returns one result per input and preserves typed failures", func(t *testing.T) {
+		var submitted []string
+		mockRemove := mockey.Mock((*minio.Client).RemoveObjectsWithResult).To(
+			func(_ *minio.Client, _ context.Context, bucketName string, objects <-chan minio.ObjectInfo, _ minio.RemoveObjectsOptions) <-chan minio.RemoveObjectResult {
+				assert.Equal(t, "bucket", bucketName)
+				results := make(chan minio.RemoveObjectResult, 3)
+				for object := range objects {
+					submitted = append(submitted, object.Key)
+					result := minio.RemoveObjectResult{ObjectName: object.Key}
+					if object.Key == "slow" {
+						result.Err = minio.ErrorResponse{Code: "SlowDown", Message: "throttled"}
+					}
+					results <- result
+				}
+				close(results)
+				return results
+			},
+		).Build()
+		defer mockRemove.UnPatch()
+
+		objectStorage := &MinioObjectStorage{Client: &minio.Client{}}
+		results := objectStorage.RemoveObjects(context.Background(), "bucket", []string{"ok", "slow", "missing", "ok"})
+
+		require.Len(t, results, 4)
+		assert.Equal(t, []string{"ok", "slow", "missing"}, submitted)
+		assert.NoError(t, results[0].Err)
+		assert.ErrorIs(t, results[1].Err, merr.ErrIoTooManyRequests)
+		assert.NoError(t, results[2].Err)
+		assert.NoError(t, results[3].Err)
+	})
+
+	t.Run("batch-level error fails the whole batch closed", func(t *testing.T) {
+		mockRemove := mockey.Mock((*minio.Client).RemoveObjectsWithResult).To(
+			func(_ *minio.Client, _ context.Context, _ string, objects <-chan minio.ObjectInfo, _ minio.RemoveObjectsOptions) <-chan minio.RemoveObjectResult {
+				for range objects {
+				}
+				results := make(chan minio.RemoveObjectResult, 1)
+				results <- minio.RemoveObjectResult{Err: minio.ErrorResponse{Code: "AccessDenied", Message: "denied"}}
+				close(results)
+				return results
+			},
+		).Build()
+		defer mockRemove.UnPatch()
+
+		objectStorage := &MinioObjectStorage{Client: &minio.Client{}}
+		results := objectStorage.RemoveObjects(context.Background(), "bucket", []string{"a", "b"})
+
+		require.Len(t, results, 2)
+		assert.ErrorIs(t, results[0].Err, merr.ErrIoPermissionDenied)
+		assert.ErrorIs(t, results[1].Err, merr.ErrIoPermissionDenied)
+	})
+
+	t.Run("missing SDK result is not reported as success", func(t *testing.T) {
+		mockRemove := mockey.Mock((*minio.Client).RemoveObjectsWithResult).To(
+			func(_ *minio.Client, _ context.Context, _ string, objects <-chan minio.ObjectInfo, _ minio.RemoveObjectsOptions) <-chan minio.RemoveObjectResult {
+				for range objects {
+				}
+				results := make(chan minio.RemoveObjectResult, 1)
+				results <- minio.RemoveObjectResult{ObjectName: "a"}
+				close(results)
+				return results
+			},
+		).Build()
+		defer mockRemove.UnPatch()
+
+		objectStorage := &MinioObjectStorage{Client: &minio.Client{}}
+		results := objectStorage.RemoveObjects(context.Background(), "bucket", []string{"a", "b"})
+
+		require.Len(t, results, 2)
+		assert.NoError(t, results[0].Err)
+		assert.ErrorIs(t, results[1].Err, merr.ErrIoFailed)
+	})
+
+	t.Run("duplicate SDK result cannot overwrite an earlier failure", func(t *testing.T) {
+		mockRemove := mockey.Mock((*minio.Client).RemoveObjectsWithResult).To(
+			func(_ *minio.Client, _ context.Context, _ string, objects <-chan minio.ObjectInfo, _ minio.RemoveObjectsOptions) <-chan minio.RemoveObjectResult {
+				for range objects {
+				}
+				results := make(chan minio.RemoveObjectResult, 2)
+				results <- minio.RemoveObjectResult{
+					ObjectName: "a",
+					Err:        minio.ErrorResponse{Code: "SlowDown", Message: "throttled"},
+				}
+				results <- minio.RemoveObjectResult{ObjectName: "a"}
+				close(results)
+				return results
+			},
+		).Build()
+		defer mockRemove.UnPatch()
+
+		objectStorage := &MinioObjectStorage{Client: &minio.Client{}}
+		results := objectStorage.RemoveObjects(context.Background(), "bucket", []string{"a"})
+
+		require.Len(t, results, 1)
+		assert.ErrorIs(t, results[0].Err, merr.ErrIoTooManyRequests)
+	})
+}
+
 func TestMinioObjectStorageCopyObjectCrossBucket(t *testing.T) {
 	params := paramtable.Get()
 	key := params.MinioCfg.MultipartCopyThreshold.Key
@@ -826,4 +925,69 @@ func TestIsDeleteSucceededWithOK(t *testing.T) {
 	assert.True(t, errors.Is(mapObjectStorageError("k", notFound), merr.ErrIoKeyNotFound))
 
 	assert.False(t, isDeleteSucceededWithOK(errors.New("dial tcp: connection refused")))
+}
+
+func TestMinioObjectStorageBulkDeleteWireResults(t *testing.T) {
+	var mu sync.Mutex
+	var batchSizes []int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !r.URL.Query().Has("delete") {
+			http.Error(w, "unexpected request", http.StatusBadRequest)
+			return
+		}
+		var request struct {
+			Objects []struct{ Key string } `xml:"Object"`
+		}
+		if err := xml.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		batchSizes = append(batchSizes, len(request.Objects))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = io.WriteString(w, `<DeleteResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
+		for _, object := range request.Objects {
+			if object.Key == "key-500" {
+				_, _ = fmt.Fprintf(w, "<Error><Key>%s</Key><Code>AccessDenied</Code><Message>denied</Message></Error>", object.Key)
+			} else {
+				_, _ = fmt.Fprintf(w, "<Deleted><Key>%s</Key></Deleted>", object.Key)
+			}
+		}
+		_, _ = io.WriteString(w, "</DeleteResult>")
+	}))
+	defer server.Close()
+	client, err := minio.New(strings.TrimPrefix(server.URL, "http://"), &minio.Options{
+		Creds: credentials.NewStaticV4("access", "secret", ""), Region: "us-east-1",
+	})
+	require.NoError(t, err)
+	keys := make([]string, 1001)
+	for i := range keys {
+		keys[i] = fmt.Sprintf("key-%d", i)
+	}
+	objectStorage := &MinioObjectStorage{Client: client}
+	results := objectStorage.RemoveObjects(t.Context(), "bucket", keys)
+	require.Len(t, results, len(keys))
+	for i, result := range results {
+		assert.Equal(t, keys[i], result.Path)
+		if i == 500 {
+			assert.ErrorIs(t, result.Err, merr.ErrIoPermissionDenied)
+		} else {
+			assert.NoError(t, result.Err)
+		}
+	}
+	mu.Lock()
+	assert.Equal(t, []int{1000, 1}, batchSizes)
+	mu.Unlock()
+}
+
+func TestMinioObjectStorageBulkDeleteEarlyRejection(t *testing.T) {
+	client, err := minio.New("127.0.0.1:1", &minio.Options{Region: "us-east-1"})
+	require.NoError(t, err)
+	objectStorage := &MinioObjectStorage{Client: client}
+	results := objectStorage.RemoveObjects(t.Context(), "invalid/bucket", []string{"a", "b"})
+	require.Len(t, results, 2)
+	for _, result := range results {
+		require.Error(t, result.Err)
+	}
 }

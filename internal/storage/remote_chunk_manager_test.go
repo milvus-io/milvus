@@ -24,8 +24,10 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"strconv"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
@@ -40,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // TODO: NewRemoteChunkManager is deprecated. Rewrite this unittest.
@@ -85,6 +88,210 @@ func TestRemoteChunkManagerImplementsCrossBucketCopier(t *testing.T) {
 
 type objectStorageTarget struct {
 	ObjectStorage
+}
+
+type bulkObjectStorageTarget struct {
+	ObjectStorage
+	results []RemoveResult
+	calls   int
+}
+
+type individualObjectStorageTarget struct {
+	ObjectStorage
+	remove func(context.Context, string, string) error
+}
+
+type prefixBatchObjectStorageTarget struct {
+	ObjectStorage
+	objects       map[string][]string
+	walkErrors    map[string]error
+	removeErrors  map[string]error
+	omitResults   map[string]struct{}
+	removeBatches [][]string
+}
+
+func (s *individualObjectStorageTarget) RemoveObject(ctx context.Context, bucketName, objectName string) error {
+	return s.remove(ctx, bucketName, objectName)
+}
+
+func (s *bulkObjectStorageTarget) RemoveObjects(_ context.Context, _ string, objectNames []string) []RemoveResult {
+	s.calls++
+	results := make([]RemoveResult, len(objectNames))
+	copy(results, s.results)
+	return results
+}
+
+func (s *prefixBatchObjectStorageTarget) WalkWithObjects(
+	_ context.Context,
+	_ string,
+	prefix string,
+	_ bool,
+	walkFunc ChunkObjectWalkFunc,
+) error {
+	for _, object := range s.objects[prefix] {
+		if !walkFunc(&ChunkObjectInfo{FilePath: object}) {
+			break
+		}
+	}
+	return s.walkErrors[prefix]
+}
+
+func (s *prefixBatchObjectStorageTarget) RemoveObjects(
+	_ context.Context,
+	_ string,
+	objectNames []string,
+) []RemoveResult {
+	s.removeBatches = append(s.removeBatches, append([]string(nil), objectNames...))
+	results := make([]RemoveResult, 0, len(objectNames))
+	for _, objectName := range objectNames {
+		if _, omitted := s.omitResults[objectName]; omitted {
+			continue
+		}
+		results = append(results, RemoveResult{Path: objectName, Err: s.removeErrors[objectName]})
+	}
+	return results
+}
+
+func TestRemoteChunkManagerMultiRemoveWithResult(t *testing.T) {
+	removeErr := merr.WrapErrIoTooManyRequests("b", errors.New("throttled"))
+	client := &bulkObjectStorageTarget{results: []RemoveResult{
+		{Path: "a"},
+		{Path: "b", Err: removeErr},
+		{Path: "c", Err: merr.WrapErrIoKeyNotFound("c")},
+	}}
+	mcm := &RemoteChunkManager{client: client, bucketName: "bucket"}
+
+	results := mcm.MultiRemoveWithResult(context.Background(), []string{"a", "b", "c"})
+	require.Len(t, results, 3)
+	assert.NoError(t, results[0].Err)
+	assert.ErrorIs(t, results[1].Err, merr.ErrIoTooManyRequests)
+	assert.NoError(t, results[2].Err)
+	assert.Equal(t, 1, client.calls)
+}
+
+func TestRemoteChunkManagerMultiRemoveWithResultFallbackIsBounded(t *testing.T) {
+	params := paramtable.Get()
+	oldConcurrency := params.DataCoordCfg.GCRemoveConcurrent.GetValue()
+	require.NoError(t, params.Save(params.DataCoordCfg.GCRemoveConcurrent.Key, "2"))
+	t.Cleanup(func() {
+		require.NoError(t, params.Save(params.DataCoordCfg.GCRemoveConcurrent.Key, oldConcurrency))
+	})
+
+	started := make(chan string, 4)
+	release := make(chan struct{})
+	client := &individualObjectStorageTarget{remove: func(_ context.Context, bucketName, objectName string) error {
+		assert.Equal(t, "bucket", bucketName)
+		started <- objectName
+		<-release
+		if objectName == "b" {
+			return merr.WrapErrIoTooManyRequests(objectName, errors.New("throttled"))
+		}
+		return nil
+	}}
+	mcm := &RemoteChunkManager{client: client, bucketName: "bucket"}
+
+	done := make(chan []RemoveResult, 1)
+	go func() {
+		done <- mcm.MultiRemoveWithResult(context.Background(), []string{"a", "b", "c", "d"})
+	}()
+
+	assert.NotEmpty(t, <-started)
+	assert.NotEmpty(t, <-started)
+	select {
+	case objectName := <-started:
+		t.Fatalf("fallback exceeded configured concurrency: third object %s started before release", strconv.Quote(objectName))
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+
+	results := <-done
+	require.Len(t, results, 4)
+	assert.Equal(t, []string{"a", "b", "c", "d"}, []string{results[0].Path, results[1].Path, results[2].Path, results[3].Path})
+	assert.NoError(t, results[0].Err)
+	assert.ErrorIs(t, results[1].Err, merr.ErrIoTooManyRequests)
+	assert.NoError(t, results[2].Err)
+	assert.NoError(t, results[3].Err)
+}
+
+func TestRemoteChunkManagerMultiRemoveWithPrefix(t *testing.T) {
+	params := paramtable.Get()
+	oldBatchSize := params.DataCoordCfg.GCIndexFileBatchSize.GetValue()
+	oldConcurrency := params.DataCoordCfg.GCRemoveConcurrent.GetValue()
+	require.NoError(t, params.Save(params.DataCoordCfg.GCIndexFileBatchSize.Key, "3"))
+	require.NoError(t, params.Save(params.DataCoordCfg.GCRemoveConcurrent.Key, "2"))
+	t.Cleanup(func() {
+		require.NoError(t, params.Save(params.DataCoordCfg.GCIndexFileBatchSize.Key, oldBatchSize))
+		require.NoError(t, params.Save(params.DataCoordCfg.GCRemoveConcurrent.Key, oldConcurrency))
+	})
+
+	t.Run("coalesces exact keys across prefixes", func(t *testing.T) {
+		client := &prefixBatchObjectStorageTarget{objects: map[string][]string{
+			"prefix-a": {"a/1"},
+			"prefix-b": {"b/1", "b/2"},
+			"prefix-c": {"c/1"},
+		}}
+		mcm := &RemoteChunkManager{client: client, bucketName: "bucket"}
+
+		results := mcm.MultiRemoveWithPrefix(context.Background(), []string{"prefix-a", "prefix-b", "prefix-c"})
+
+		require.Len(t, results, 3)
+		assert.Equal(t, RemovePrefixResult{Prefix: "prefix-a", Listed: 1, Removed: 1}, results[0])
+		assert.Equal(t, RemovePrefixResult{Prefix: "prefix-b", Listed: 2, Removed: 2}, results[1])
+		assert.Equal(t, RemovePrefixResult{Prefix: "prefix-c", Listed: 1, Removed: 1}, results[2])
+		require.Len(t, client.removeBatches, 2)
+		assert.Len(t, client.removeBatches[0], 3)
+		assert.Len(t, client.removeBatches[1], 1)
+	})
+
+	t.Run("fails only prefixes with incomplete work", func(t *testing.T) {
+		listErr := merr.WrapErrIoTooManyRequests("prefix-b", errors.New("list throttled"))
+		deleteErr := merr.WrapErrIoPermissionDenied("c/1", errors.New("delete denied"))
+		client := &prefixBatchObjectStorageTarget{
+			objects: map[string][]string{
+				"prefix-a": {"a/1"},
+				"prefix-b": {"b/1"},
+				"prefix-c": {"c/1"},
+			},
+			walkErrors:   map[string]error{"prefix-b": listErr},
+			removeErrors: map[string]error{"c/1": deleteErr},
+		}
+		mcm := &RemoteChunkManager{client: client, bucketName: "bucket"}
+
+		results := mcm.MultiRemoveWithPrefix(context.Background(), []string{"prefix-a", "prefix-b", "prefix-c"})
+
+		require.Len(t, results, 3)
+		assert.NoError(t, results[0].Err)
+		assert.ErrorIs(t, results[1].Err, merr.ErrIoTooManyRequests)
+		assert.ErrorIs(t, results[2].Err, merr.ErrIoPermissionDenied)
+		assert.Equal(t, 1, results[0].Removed)
+		assert.Equal(t, 1, results[1].Removed, "partial deletion remains observable while list failure keeps metadata")
+		assert.Zero(t, results[2].Removed)
+	})
+
+	t.Run("missing delete result fails the owning prefix closed", func(t *testing.T) {
+		client := &prefixBatchObjectStorageTarget{
+			objects:     map[string][]string{"prefix-a": {"a/1"}, "prefix-b": {"b/1"}},
+			omitResults: map[string]struct{}{"b/1": {}},
+		}
+		mcm := &RemoteChunkManager{client: client, bucketName: "bucket"}
+
+		results := mcm.MultiRemoveWithPrefix(context.Background(), []string{"prefix-a", "prefix-b"})
+
+		require.Len(t, results, 2)
+		assert.NoError(t, results[0].Err)
+		assert.ErrorIs(t, results[1].Err, merr.ErrIoFailed)
+	})
+
+	t.Run("empty prefix is rejected", func(t *testing.T) {
+		client := &prefixBatchObjectStorageTarget{}
+		mcm := &RemoteChunkManager{client: client, bucketName: "bucket"}
+
+		results := mcm.MultiRemoveWithPrefix(context.Background(), []string{""})
+
+		require.Len(t, results, 1)
+		assert.ErrorIs(t, results[0].Err, merr.ErrIoFailed)
+		assert.Empty(t, client.removeBatches)
+	})
 }
 
 func TestRemoteChunkManagerCopyCrossBucket(t *testing.T) {

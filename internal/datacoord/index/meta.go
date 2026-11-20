@@ -20,6 +20,7 @@ package index
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -1320,6 +1321,77 @@ func (m *IndexMeta) GetAllSegIndexes() map[int64]*model.SegmentIndex {
 	return segIndexes
 }
 
+func (m *IndexMeta) RangeSegmentIndexes(f func(*model.SegmentIndex) bool) {
+	m.SegmentBuildInfo.buildID2SegmentIndex.Range(func(_ UniqueID, item *model.SegmentIndex) bool { return f(item) })
+}
+
+func sameSegmentIndexGCVersion(candidate, current *model.SegmentIndex) bool {
+	if candidate == nil || current == nil {
+		return false
+	}
+	return candidate.BuildID == current.BuildID &&
+		candidate.CollectionID == current.CollectionID &&
+		candidate.PartitionID == current.PartitionID &&
+		candidate.SegmentID == current.SegmentID &&
+		candidate.IndexID == current.IndexID &&
+		candidate.IndexVersion == current.IndexVersion &&
+		candidate.IndexStorePathVersion == current.IndexStorePathVersion &&
+		candidate.IndexState == current.IndexState &&
+		slices.Equal(candidate.IndexFileKeys, current.IndexFileKeys)
+}
+
+// RemoveSegmentIndexes persists an exact batch removal before publishing any
+// resident deletion. Candidates changed since file GC are skipped. If a
+// catalog transaction fails, all resident entries remain for an idempotent
+// retry. The input is capped at the metastore transaction limit so this method
+// never spans multiple persistence transactions.
+func (m *IndexMeta) RemoveSegmentIndexes(ctx context.Context, candidates []*model.SegmentIndex) (int, error) {
+	maxBatchSize := Params.MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	if maxBatchSize <= 0 {
+		maxBatchSize = 64
+	}
+	if len(candidates) > maxBatchSize {
+		return 0, merr.WrapErrServiceInternalMsg(
+			"segment index metadata batch size %d exceeds metastore transaction limit %d",
+			len(candidates), maxBatchSize)
+	}
+
+	candidateByBuildID := make(map[UniqueID]*model.SegmentIndex, len(candidates))
+	buildIDs := make([]UniqueID, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate == nil {
+			continue
+		}
+		if _, exists := candidateByBuildID[candidate.BuildID]; !exists {
+			buildIDs = append(buildIDs, candidate.BuildID)
+		}
+		candidateByBuildID[candidate.BuildID] = candidate
+	}
+	lock.LockManyOrdered(m.KeyLock, buildIDs)
+	defer m.KeyLock.UnlockMany(buildIDs)
+
+	currentIndexes := make([]*model.SegmentIndex, 0, len(buildIDs))
+	for _, buildID := range buildIDs {
+		current, exists := m.SegmentBuildInfo.Get(buildID)
+		if !exists || !sameSegmentIndexGCVersion(candidateByBuildID[buildID], current) {
+			continue
+		}
+		currentIndexes = append(currentIndexes, current)
+	}
+	if len(currentIndexes) == 0 {
+		return 0, nil
+	}
+
+	if err := m.Catalog.DropSegmentIndexes(ctx, currentIndexes); err != nil {
+		return 0, err
+	}
+	for _, segIdx := range currentIndexes {
+		m.removeSegmentIndexRecordInMemory(segIdx)
+	}
+	m.taskCounts.publishStoredSizes()
+	return len(currentIndexes), nil
+}
+
 func (m *IndexMeta) RemoveSegmentIndex(ctx context.Context, buildID UniqueID) error {
 	m.KeyLock.Lock(buildID)
 	defer m.KeyLock.Unlock(buildID)
@@ -1554,6 +1626,87 @@ func (m *IndexMeta) RemoveIndex(ctx context.Context, collID, indexID UniqueID) e
 	}
 	mlog.Info(ctx, "IndexCoord meta table remove index success", mlog.Int64("collectionID", collID), mlog.Int64("indexID", indexID))
 	return nil
+}
+
+// removeIndexLocked drops a field index whose catalog record is gone and
+// reports whether it was the last index of its collection. The caller holds
+// fieldIndexLock.
+func (m *IndexMeta) removeIndexLocked(collID, indexID UniqueID) bool {
+	m.taskCounts.replaceIndex(m.Indexes[collID][indexID], nil)
+	delete(m.Indexes[collID], indexID)
+	if len(m.Indexes[collID]) > 0 {
+		return false
+	}
+	delete(m.Indexes, collID)
+	return true
+}
+
+func deleteCollectionIndexTaskMetrics(collID UniqueID) {
+	metrics.IndexTaskNum.Delete(prometheus.Labels{"collection_id": strconv.FormatInt(collID, 10), "index_task_status": metrics.UnissuedIndexTaskLabel})
+	metrics.IndexTaskNum.Delete(prometheus.Labels{"collection_id": strconv.FormatInt(collID, 10), "index_task_status": metrics.InProgressIndexTaskLabel})
+	metrics.IndexTaskNum.Delete(prometheus.Labels{"collection_id": strconv.FormatInt(collID, 10), "index_task_status": metrics.FinishedIndexTaskLabel})
+	metrics.IndexTaskNum.Delete(prometheus.Labels{"collection_id": strconv.FormatInt(collID, 10), "index_task_status": metrics.FailedIndexTaskLabel})
+}
+
+// RemoveIndexes persists a bounded exact-key batch before publishing resident
+// field-index removals. Like RemoveIndex, it only removes terminal tombstones;
+// collection DDL is serialized by broadcast callbacks and never revives one.
+// Catalog I/O stays outside fieldIndexLock.
+func (m *IndexMeta) RemoveIndexes(ctx context.Context, candidates []*model.Index) (int, error) {
+	maxBatchSize := Params.MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	if maxBatchSize <= 0 {
+		maxBatchSize = 64
+	}
+	if len(candidates) > maxBatchSize {
+		return 0, merr.WrapErrServiceInternalMsg(
+			"field index metadata batch size %d exceeds metastore transaction limit %d",
+			len(candidates), maxBatchSize)
+	}
+
+	currentIndexes := make([]*model.Index, 0, len(candidates))
+	seen := make(map[[2]UniqueID]struct{}, len(candidates))
+	m.fieldIndexLock.RLock()
+	for _, candidate := range candidates {
+		if candidate == nil {
+			continue
+		}
+		key := [2]UniqueID{candidate.CollectionID, candidate.IndexID}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		current, exists := m.Indexes[candidate.CollectionID][candidate.IndexID]
+		if !exists || current != candidate || !current.IsDeleted {
+			continue
+		}
+		currentIndexes = append(currentIndexes, current)
+	}
+	m.fieldIndexLock.RUnlock()
+	if len(currentIndexes) == 0 {
+		return 0, nil
+	}
+
+	if err := m.Catalog.DropIndexes(ctx, currentIndexes); err != nil {
+		return 0, err
+	}
+
+	removedCollections := make([]UniqueID, 0)
+	m.fieldIndexLock.Lock()
+	for _, index := range currentIndexes {
+		if m.Indexes[index.CollectionID][index.IndexID] != index {
+			continue
+		}
+		if m.removeIndexLocked(index.CollectionID, index.IndexID) {
+			removedCollections = append(removedCollections, index.CollectionID)
+		}
+	}
+	m.fieldIndexLock.Unlock()
+	m.taskCounts.publishStoredSizes()
+
+	for _, collID := range removedCollections {
+		deleteCollectionIndexTaskMetrics(collID)
+	}
+	return len(currentIndexes), nil
 }
 
 func (m *IndexMeta) CheckCleanSegmentIndex(buildID UniqueID) (bool, *model.SegmentIndex) {
