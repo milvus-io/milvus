@@ -70,6 +70,29 @@ mod tests {
     use super::create_analyzer;
 
     #[test]
+    fn test_removepunct_standalone_adapter() {
+        let params = r#"{"tokenizer":"icu","filter":[{"type":"removepunct","mode":"standalone"}]}"#;
+        let mut legacy = create_analyzer(params).unwrap();
+        let mut current = crate::analyzer::create_analyzer(params, "").unwrap();
+        let input = "don't buy 3.5kg from u.s.a, see modash.io or a@b.com";
+        for _ in 0..2 {
+            let mut old_stream = legacy.token_stream(input);
+            let mut new_stream = current.token_stream(input);
+            while new_stream.advance() {
+                assert!(old_stream.advance());
+                let old = old_stream.token();
+                let new = new_stream.token();
+                assert_eq!(old.text, new.text);
+                assert_eq!(old.offset_from, new.offset_from);
+                assert_eq!(old.offset_to, new.offset_to);
+                assert_eq!(old.position, new.position);
+                assert_eq!(old.position_length, new.position_length);
+            }
+            assert!(!old_stream.advance());
+        }
+    }
+
+    #[test]
     fn test_standard_analyzer() {
         let params = r#"{
             "type": "standard",
