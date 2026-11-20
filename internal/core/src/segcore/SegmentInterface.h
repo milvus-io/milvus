@@ -1048,6 +1048,15 @@ class SegmentInternalInterface : public SegmentInterface {
                     BitsetTypeView& bitset) const = 0;
 
  protected:
+    void
+    ApplyUpdatesWithSchema(const Schema& fields,
+                           DataType pk_type,
+                           const IdArray& ids,
+                           Timestamp timestamp,
+                           uint32_t ordinal,
+                           const std::vector<UpdateAssignment>& assignments,
+                           OpContext* op_ctx);
+
     std::shared_ptr<UpdatesRecord> updates_record_;
 
     // mutex protecting rw options on schema_

@@ -4853,8 +4853,14 @@ ChunkedSegmentSealedImpl::ApplyUpdates(
     // timestamp. Resolve and publish against one physical state.
     std::lock_guard guard(reopen_mutex_);
     AssertInfo(!read_state_fork_, "cannot apply an update through a read fork");
-    SegmentInternalInterface::ApplyUpdates(
-        keys, timestamp, ordinal, assignments, op_ctx);
+    auto layout = CaptureFieldLayout();
+    ApplyUpdatesWithSchema(*layout->MakeUpdateSchema(),
+                           layout->get_primary_field_type(),
+                           keys,
+                           timestamp,
+                           ordinal,
+                           assignments,
+                           op_ctx);
 }
 
 std::vector<int64_t>

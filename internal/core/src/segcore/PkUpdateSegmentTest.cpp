@@ -250,6 +250,61 @@ TEST(PkUpdateSegment, GrowingInsertDeleteAndReplay) {
     EXPECT_EQ(std::get<int64_t>(*store.Lookup(age, 4, 14)), 222);
 }
 
+TEST(PkUpdateSegment, ProjectedPKReturnsResourceStatus) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto age = schema->AddDebugField("age", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto layout =
+        std::make_shared<SealedFieldLayout>(schema, LoadScope({age.get()}));
+    ChunkedSegmentSealedImpl segment(
+        layout, nullptr, SegcoreConfig::default_config(), 87192);
+    auto keys = Keys({42}).SerializeAsString();
+    auto value = Long(age, 9).literal.SerializeAsString();
+    CProto literal{value.data(), static_cast<int64_t>(value.size())};
+    int64_t field = age.get();
+    auto status =
+        ApplySegmentUpdates(&segment,
+                            20,
+                            0,
+                            {keys.data(), static_cast<int64_t>(keys.size())},
+                            &field,
+                            &literal,
+                            1,
+                            nullptr);
+    EXPECT_EQ(status.error_code, FieldNotLoaded);
+    if (status.error_code != Success)
+        free(const_cast<char*>(status.error_msg));
+    EXPECT_EQ(segment.GetUpdatesRecord().Stats(age).entries, 0);
+}
+
+TEST(PkUpdateSegment, RejectsTTLAndSiblingAtomically) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto age = schema->AddDebugField("age", DataType::INT64);
+    auto ttl = schema->AddDebugField("expiry", DataType::TIMESTAMPTZ);
+    schema->set_primary_field_id(pk);
+    schema->set_ttl_field_id(ttl);
+    UpdateAssignment expiry{ttl, {}};
+    expiry.literal.mutable_scalar_value()->set_timestamptz_data(123);
+    auto data = MakeRows(schema, pk, {1, 2});
+    auto sealed = CreateSealedSegment(schema, nullptr, 87193);
+    LoadGeneratedDataIntoSegment(data, sealed.get());
+    auto growing = CreateGrowingSegment(schema, nullptr);
+    growing->PreInsert(2);
+    growing->Insert(
+        0, 2, data.row_ids_.data(), data.timestamps_.data(), data.SharedRaw());
+    auto check = [&](SegmentInternalInterface& segment) {
+        EXPECT_THROW(
+            segment.ApplyUpdates(Keys({42}), 10, 0, {Long(age, 9), expiry}),
+            SegcoreError);
+        EXPECT_EQ(segment.GetUpdatesRecord().Stats(age).entries, 0);
+        EXPECT_EQ(segment.GetUpdatesRecord().Stats(ttl).entries, 0);
+    };
+    check(*growing);
+    check(*sealed);
+}
+
 TEST(PkUpdateSegment, SealedCApplyReplayAndReadFork) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);

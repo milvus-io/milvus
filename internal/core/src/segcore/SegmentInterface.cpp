@@ -124,16 +124,33 @@ SegmentInternalInterface::ApplyUpdates(
     uint32_t ordinal,
     const std::vector<UpdateAssignment>& assignments,
     OpContext* op_ctx) {
+    auto schema = get_schema_snapshot();
+    const auto pk = schema->get_primary_field_id();
+    ApplyUpdatesWithSchema(*schema,
+                           pk ? (*schema)[*pk].get_data_type() : DataType::NONE,
+                           ids,
+                           timestamp,
+                           ordinal,
+                           assignments,
+                           op_ctx);
+}
+
+void
+SegmentInternalInterface::ApplyUpdatesWithSchema(
+    const Schema& fields,
+    DataType pk_type,
+    const IdArray& ids,
+    Timestamp timestamp,
+    uint32_t ordinal,
+    const std::vector<UpdateAssignment>& assignments,
+    OpContext* op_ctx) {
     auto check_cancel = [&] {
         CheckCancellation(op_ctx, get_segment_id(), "ApplyUpdates");
     };
     check_cancel();
-    auto schema = get_schema_snapshot();
-    const auto pk = schema->get_primary_field_id();
-    if (!pk) {
+    if (pk_type == DataType::NONE) {
         ThrowInfo(FieldNotLoaded, "PK field unavailable for update");
     }
-    const auto pk_type = (*schema)[*pk].get_data_type();
     if (!((pk_type == DataType::INT64 && ids.has_int_id()) ||
           (pk_type == DataType::VARCHAR && ids.has_str_id())) ||
         GetSizeOfIdArray(ids) == 0) {
@@ -152,7 +169,7 @@ SegmentInternalInterface::ApplyUpdates(
         std::erase_if(rows, [&](int64_t row) { return deleted[row]; });
     }
     updates_record_->Apply(
-        *schema, count, rows, timestamp, ordinal, assignments, check_cancel);
+        fields, count, rows, timestamp, ordinal, assignments, check_cancel);
 }
 
 std::shared_ptr<milvus::exec::SimpleGeometryCache>

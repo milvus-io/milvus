@@ -237,6 +237,17 @@ class SealedFieldLayout {
     CollectionWarmupPolicy(bool vector, bool index) const {
         return schema_->CollectionWarmupPolicy(vector, index);
     }
+    // Apply needs the collection's restricted TTL field, independently of the
+    // query TTL policy selected by each View's read schema.
+    SchemaPtr
+    MakeUpdateSchema() const {
+        auto fields = MakePhysicalSchema();
+        if (auto ttl = schema_->get_ttl_field_id(); ttl && has_field(*ttl)) {
+            fields->set_ttl_field_id(*ttl);
+        }
+        return fields;
+    }
+
     // Legacy native callers without an explicit query plan need a projection.
     SchemaPtr
     MakePhysicalSchema() const {
