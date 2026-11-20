@@ -1,0 +1,34 @@
+{
+  "stage": "FunctionChainStageL0Rerank",
+  "ops": [
+    {
+      "op": "map",
+      "expr": {
+        "name": "xgboost",
+        "args": [
+          {
+            "column": {
+              "name": "price"
+            }
+          },
+          {
+            "column": {
+              "name": "popularity"
+            }
+          }
+        ],
+        "params": {
+          "model_resource": {
+            "stringValue": "model"
+          },
+          "output": {
+            "stringValue": "raw"
+          }
+        }
+      },
+      "outputs": [
+        "$score"
+      ]
+    }
+  ]
+}

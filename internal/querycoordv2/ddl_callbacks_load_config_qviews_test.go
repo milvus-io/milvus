@@ -242,16 +242,16 @@ func newLoadConfigQViewsServer(t *testing.T, configure ...func(*loadmgr.LoadConf
 	m.HandleNodeUp(context.Background(), 1)
 
 	broker := meta.NewMockBroker(t)
-	usage := newCollectionUsageManager(runtime.loadConfigStore, broker, nil)
-	t.Cleanup(usage.close)
-	return &Server{
-		meta:            m,
-		metaView:        store,
-		idAllocator:     allocateID,
-		broker:          broker,
-		qviewsRuntime:   runtime,
-		collectionUsage: usage,
-	}, catalog, broker
+	s := &Server{
+		meta:          m,
+		metaView:      store,
+		idAllocator:   allocateID,
+		broker:        broker,
+		qviewsRuntime: runtime,
+	}
+	s.collectionUsage = newCollectionUsageManager(s)
+	t.Cleanup(s.collectionUsage.close)
+	return s, catalog, broker
 }
 
 func registerCaptureBroadcast(t *testing.T, capture func(message.BroadcastMutableMessage)) {

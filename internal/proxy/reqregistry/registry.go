@@ -102,7 +102,11 @@ type Filter struct {
 	DBName         string
 	CollectionName string
 	User           string
-	MinElapsed     time.Duration
+	// MinElapsedMs keeps a request only if it has been running for at least
+	// this many milliseconds. It is compared in milliseconds, the unit of the
+	// API field: converting it to a time.Duration would overflow for values
+	// above about 292 years and silently drop the filter.
+	MinElapsedMs int64
 }
 
 func (f Filter) matches(info *Info, now time.Time) bool {
@@ -115,7 +119,7 @@ func (f Filter) matches(info *Info, now time.Time) bool {
 	if f.User != "" && info.User != f.User {
 		return false
 	}
-	if f.MinElapsed > 0 && now.Sub(info.StartTime) < f.MinElapsed {
+	if f.MinElapsedMs > 0 && now.Sub(info.StartTime).Milliseconds() < f.MinElapsedMs {
 		return false
 	}
 	return true
@@ -421,13 +425,20 @@ func (r *Registry) List(filter Filter, now time.Time) []Info {
 // registry does not hold, including ids issued by another proxy, strings
 // that are not ids at all and requests that finished before this call (see
 // Entry.Finish). The id in canceled and repeated is the one the
-// caller gave.
+// caller gave. An id given more than once is handled once: without that, its
+// request would come back both in canceled and, for every repetition, in
+// repeated.
 //
 // A non-empty owner restricts the cancel to requests issued by that user: the
 // id of another user's request is reported as not held, so a caller limited
 // to their own requests learns nothing about anyone else's.
 func (r *Registry) Cancel(requestIDs []string, owner, operator, reason string, now time.Time) (canceled, repeated []Info, notFound []string) {
+	seen := make(map[string]struct{}, len(requestIDs))
 	for _, id := range requestIDs {
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
 		e := r.Get(id)
 		if e == nil || (owner != "" && e.User() != owner) {
 			notFound = append(notFound, id)

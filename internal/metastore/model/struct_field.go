@@ -63,6 +63,16 @@ func CheckStructArrayFieldsEqual(structArrayFieldsA, structArrayFieldsB []*Struc
 }
 
 func MarshalStructArrayFieldModel(structArrayField *StructArrayField) *schemapb.StructArrayFieldSchema {
+	return marshalStructArrayFieldModel(structArrayField, CloneFields)
+}
+
+func MarshalStructArrayFieldModels(fieldSchemas []*StructArrayField) []*schemapb.StructArrayFieldSchema {
+	return marshalStructArrayFieldModels(fieldSchemas, CloneFields)
+}
+
+// marshalStructArrayFieldModel builds the StructArrayFieldSchema shell
+// and takes its sub-fields from subFields(structArrayField.Fields).
+func marshalStructArrayFieldModel(structArrayField *StructArrayField, subFields func([]*Field) []*Field) *schemapb.StructArrayFieldSchema {
 	if structArrayField == nil {
 		return nil
 	}
@@ -71,20 +81,20 @@ func MarshalStructArrayFieldModel(structArrayField *StructArrayField) *schemapb.
 		FieldID:     structArrayField.FieldID,
 		Name:        structArrayField.Name,
 		Description: structArrayField.Description,
-		Fields:      MarshalFieldModels(structArrayField.Fields),
+		Fields:      subFields(structArrayField.Fields),
 		TypeParams:  structArrayField.TypeParams,
 		Nullable:    structArrayField.Nullable,
 	}
 }
 
-func MarshalStructArrayFieldModels(fieldSchemas []*StructArrayField) []*schemapb.StructArrayFieldSchema {
+func marshalStructArrayFieldModels(fieldSchemas []*StructArrayField, subFields func([]*Field) []*Field) []*schemapb.StructArrayFieldSchema {
 	if fieldSchemas == nil {
 		return nil
 	}
 
 	structArrayFields := make([]*schemapb.StructArrayFieldSchema, len(fieldSchemas))
 	for idx, structArrayField := range fieldSchemas {
-		structArrayFields[idx] = MarshalStructArrayFieldModel(structArrayField)
+		structArrayFields[idx] = marshalStructArrayFieldModel(structArrayField, subFields)
 	}
 	return structArrayFields
 }
@@ -98,7 +108,7 @@ func UnmarshalStructArrayFieldModel(fieldSchema *schemapb.StructArrayFieldSchema
 		FieldID:     fieldSchema.FieldID,
 		Name:        fieldSchema.Name,
 		Description: fieldSchema.Description,
-		Fields:      UnmarshalFieldModels(fieldSchema.Fields),
+		Fields:      CloneFields(fieldSchema.Fields),
 		TypeParams:  fieldSchema.TypeParams,
 		Nullable:    fieldSchema.Nullable,
 	}

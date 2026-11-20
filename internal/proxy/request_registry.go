@@ -159,7 +159,7 @@ func searchRequestInfo(request *milvuspb.SearchRequest) reqregistry.Info {
 		Type:           reqregistry.TypeSearch,
 		DBName:         request.GetDbName(),
 		CollectionName: request.GetCollectionName(),
-		NQ:             request.GetNq(),
+		NQ:             searchRequestNq(request),
 		TopK:           kvInt64(request.GetSearchParams(), common.TopKKey, LimitKey),
 		Expr:           request.GetDsl(),
 	}
@@ -169,7 +169,7 @@ func hybridSearchRequestInfo(request *milvuspb.HybridSearchRequest) reqregistry.
 	var nq, topk int64
 	expr := ""
 	for _, sub := range request.GetRequests() {
-		nq += sub.GetNq()
+		nq += searchRequestNq(sub)
 		if k := kvInt64(sub.GetSearchParams(), common.TopKKey, LimitKey); k > topk {
 			topk = k
 		}
@@ -354,7 +354,7 @@ func (node *Proxy) ListLocalRunningRequests(ctx context.Context, request *milvus
 		DBName:         request.GetDbName(),
 		CollectionName: request.GetCollectionName(),
 		User:           request.GetUser(),
-		MinElapsed:     time.Duration(request.GetMinElapsedMs()) * time.Millisecond,
+		MinElapsedMs:   request.GetMinElapsedMs(),
 	})
 	return &milvuspb.ListRunningRequestsResponse{
 		Status:   merr.Success(),

@@ -18,6 +18,7 @@ package reqregistry
 
 import (
 	"context"
+	"math"
 	"strings"
 	"sync"
 	"testing"
@@ -114,6 +115,30 @@ func TestCancel(t *testing.T) {
 	assert.ErrorIs(t, CancelCause(ctx), merr.ErrRequestCanceled)
 }
 
+// An id given more than once in one call is answered once, in the result it
+// belongs to, instead of once per repetition.
+func TestCancelHandlesARepeatedIDOnce(t *testing.T) {
+	r := New()
+	_, e := r.Register(context.Background(), Info{Type: TypeSearch})
+	defer r.Unregister(e)
+	id, missing := e.RequestID(), e.RequestID()+"0"
+	now := time.Now()
+
+	canceled, repeated, notFound := r.Cancel([]string{id, missing, id, id, missing}, "", "root", "", now)
+	require.Len(t, canceled, 1)
+	assert.Equal(t, id, canceled[0].RequestID)
+	assert.Equal(t, StateQueued, canceled[0].State)
+	assert.Empty(t, repeated)
+	assert.Equal(t, []string{missing}, notFound)
+
+	// a later call still reports the request as already canceled, once
+	canceled, repeated, notFound = r.Cancel([]string{id, id}, "", "root", "", now)
+	assert.Empty(t, canceled)
+	assert.Empty(t, notFound)
+	require.Len(t, repeated, 1)
+	assert.Equal(t, StateCanceling, repeated[0].State)
+}
+
 func TestCancelCauseIgnoresClientCancellation(t *testing.T) {
 	r := New()
 	parent, parentCancel := context.WithCancel(context.Background())
@@ -151,11 +176,20 @@ func TestListFilters(t *testing.T) {
 	assert.Empty(t, ids(r.List(Filter{DBName: "db2", User: "bob"}, now)))
 
 	// elapsed is measured against the time passed to List
-	assert.Empty(t, ids(r.List(Filter{MinElapsed: time.Hour}, now)))
-	assert.ElementsMatch(t, []string{id1, id2, id3}, ids(r.List(Filter{MinElapsed: time.Hour}, now.Add(2*time.Hour))))
+	assert.Empty(t, ids(r.List(Filter{MinElapsedMs: time.Hour.Milliseconds()}, now)))
+	assert.ElementsMatch(t, []string{id1, id2, id3}, ids(r.List(Filter{MinElapsedMs: time.Hour.Milliseconds()}, now.Add(2*time.Hour))))
 	for _, info := range r.List(Filter{}, now.Add(time.Second)) {
 		assert.GreaterOrEqual(t, info.ElapsedMS, int64(1000))
 	}
+
+	// A threshold too large to be held in a time.Duration still filters. As
+	// nanoseconds the first two wrap to a negative value and the third to
+	// less than a millisecond, either of which would let every request through.
+	for _, ms := range []int64{math.MaxInt64, math.MaxInt64/int64(time.Millisecond) + 1, 18446744073710} {
+		assert.Empty(t, ids(r.List(Filter{MinElapsedMs: ms}, now.Add(2*time.Hour))), "minElapsedMs %d", ms)
+	}
+	// a negative threshold is no constraint, as before
+	assert.Len(t, r.List(Filter{MinElapsedMs: -1}, now), 3)
 }
 
 func TestExprPrefixIsBounded(t *testing.T) {

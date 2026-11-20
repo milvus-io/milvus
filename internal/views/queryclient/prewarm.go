@@ -42,7 +42,7 @@ func (c *viewQueryClientImpl) Prewarm(ctx context.Context, collectionID int64, l
 // Neither plans nor executions are retried, even when ordinary queries could
 // recover by selecting a newer View or another worker.
 func (c *legacyClient) prewarm(ctx context.Context, collectionID int64, loadVersion uint64) (err error) {
-	defer func() { err = toMilvusError(err) }()
+	defer func() { err = ToMilvusError(err) }()
 	if loadVersion == 0 {
 		return merr.WrapErrServiceNotReadyMsg("prewarm requires the admitted load configuration version")
 	}
