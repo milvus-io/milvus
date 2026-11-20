@@ -815,7 +815,7 @@ func TestCompactionTriggerReturnsSignalIDWhenEnqueuedBeforeStop(t *testing.T) {
 		close(stopDone)
 	}()
 
-	// Wait until Stop() has cancelled lifecycleCtx before releasing the in-flight EnqueueCompaction.
+	// Wait until Stop() has canceled lifecycleCtx before releasing the in-flight EnqueueCompaction.
 	require.Eventually(t, func() bool {
 		return tr.isStopped()
 	}, 2*time.Second, time.Millisecond)
