@@ -19,11 +19,11 @@ package bulkimport
 import (
 	"context"
 	"encoding/base64"
-	"errors"
 	"net"
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
