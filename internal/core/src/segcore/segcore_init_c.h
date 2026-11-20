@@ -23,6 +23,12 @@ extern "C" {
 void
 SegcoreInit(const char*);
 
+// Startup-only optional native policy. An empty path is a normal deployment;
+// failed initial loading leaves it unavailable. Conflicting reinitialization
+// never replaces an existing policy. Does not enable a search strategy.
+bool
+SegcoreInitAnnFusingPolicy(const char* library_path, const char* config_path);
+
 void
 SegcoreSetChunkRows(const int64_t);
 
