@@ -3182,4 +3182,33 @@ func Test_createCollectionTask_prepareSchema_structSubFieldOriginMarker(t *testi
 		require.False(t, schemautil.IsAddedStructSubField(subFields[0]))
 		require.True(t, schemautil.IsAddedStructSubField(subFields[1]), "the marker must survive the restore")
 	})
+
+	t.Run("restore rejects non-element-nullable added sub-field", func(t *testing.T) {
+		task := buildTask(true)
+		task.body.CollectionSchema.StructArrayFields[0].Fields[1].ElementNullable = false
+		err := task.prepareSchema(context.TODO())
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "added sub-field \"s[added]\" of struct field \"s\" must set element_nullable=true")
+	})
+
+	t.Run("restore rejects struct with all sub-fields marked added", func(t *testing.T) {
+		task := buildTask(true)
+		task.body.CollectionSchema.StructArrayFields[0].Fields[0].ElementNullable = true
+		schemautil.MarkAddedStructSubField(task.body.CollectionSchema.StructArrayFields[0].Fields[0])
+		err := task.prepareSchema(context.TODO())
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "struct field \"s\" must keep at least one original sub-field without "+common.StructSubFieldAddedKey)
+	})
+
+	t.Run("restore rejects malformed origin marker value", func(t *testing.T) {
+		task := buildTask(true)
+		for _, kv := range task.body.CollectionSchema.StructArrayFields[0].Fields[1].TypeParams {
+			if kv.Key == common.StructSubFieldAddedKey {
+				kv.Value = "false"
+			}
+		}
+		err := task.prepareSchema(context.TODO())
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "type param "+common.StructSubFieldAddedKey+" of field \"s[added]\" must be \"true\", got \"false\"")
+	})
 }

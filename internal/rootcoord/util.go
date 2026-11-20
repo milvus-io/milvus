@@ -531,6 +531,51 @@ func rejectStructSubFieldOriginMarkers(schemas []*schemapb.StructArrayFieldSchem
 	return nil
 }
 
+// validateRestoredStructSubFieldOriginMarkers checks the internal origin marker
+// on restored struct sub-fields (including RestoreExternalSnapshot, which reads
+// schema metadata from a caller-selected URI). Every marked sub-field must be
+// element-nullable with value "true", and every non-empty struct must retain at
+// least one unmarked (original) sub-field so CheckStructKeepsOriginalSubField
+// and old-segment sibling lookup remain valid.
+func validateRestoredStructSubFieldOriginMarkers(schemas []*schemapb.StructArrayFieldSchema) error {
+	for _, structField := range schemas {
+		fields := structField.GetFields()
+		if len(fields) == 0 {
+			continue
+		}
+		hasOriginal := false
+		for _, field := range fields {
+			marked := false
+			for _, kv := range field.GetTypeParams() {
+				if kv.GetKey() != common.StructSubFieldAddedKey {
+					continue
+				}
+				if kv.GetValue() != "true" {
+					return merr.WrapErrParameterInvalidMsg(
+						"type param %s of field %q must be \"true\", got %q",
+						common.StructSubFieldAddedKey, field.GetName(), kv.GetValue())
+				}
+				marked = true
+			}
+			if !marked {
+				hasOriginal = true
+				continue
+			}
+			if !field.GetElementNullable() {
+				return merr.WrapErrParameterInvalidMsg(
+					"added sub-field %q of struct field %q must set element_nullable=true",
+					field.GetName(), structField.GetName())
+			}
+		}
+		if !hasOriginal {
+			return merr.WrapErrParameterInvalidMsg(
+				"struct field %q must keep at least one original sub-field without %s",
+				structField.GetName(), common.StructSubFieldAddedKey)
+		}
+	}
+	return nil
+}
+
 func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) error {
 	for _, schema := range schemas {
 		if len(schema.GetFields()) == 0 {
