@@ -328,15 +328,19 @@ func TestCompactionTriggerStopCancelsIndexFilterAndIDAllocation(t *testing.T) {
 		m, im, _ := buildTestMetaWithCandidateGroups(t, 10, datapb.SegmentLevel_L1)
 		var filterLookupCalls atomic.Int32
 		enteredFilterLookup := make(chan struct{})
+		filterLookupErr := make(chan error, 1)
 		var enteredOnce sync.Once
 
 		handler := newFuncHandler(t, func(ctx context.Context, _ UniqueID) (*meta.CollectionInfo, error) {
 			// In handleSignal, IndexBasedCompaction runs FilterInIndexedSegments before getCollection.
-			filterLookupCalls.Add(1)
+			callNum := filterLookupCalls.Add(1)
 			enteredOnce.Do(func() {
 				close(enteredFilterLookup)
 			})
 			<-ctx.Done()
+			if callNum == 1 {
+				filterLookupErr <- ctx.Err()
+			}
 			return nil, ctx.Err()
 		})
 
@@ -359,7 +363,16 @@ func TestCompactionTriggerStopCancelsIndexFilterAndIDAllocation(t *testing.T) {
 			t.Fatal("timed out waiting for FilterInIndexedSegments GetCollection call")
 		}
 
+		stopStart := time.Now()
 		tr.Stop()
+		require.Less(t, time.Since(stopStart), 800*time.Millisecond)
+
+		select {
+		case err := <-filterLookupErr:
+			require.ErrorIs(t, err, context.Canceled)
+		case <-time.After(1 * time.Second):
+			t.Fatal("FilterInIndexedSegments did not observe Stop() context cancellation")
+		}
 
 		select {
 		case err := <-done:
@@ -383,6 +396,7 @@ func TestCompactionTriggerStopCancelsIndexFilterAndIDAllocation(t *testing.T) {
 
 		var allocCalls atomic.Int32
 		enteredPlanAlloc := make(chan struct{})
+		planAllocErr := make(chan error, 1)
 		var enteredOnce sync.Once
 		mc := rootmocks.NewMixCoord(t)
 		mc.EXPECT().AllocID(mock.Anything, mock.Anything).RunAndReturn(func(rpcCtx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
@@ -399,6 +413,7 @@ func TestCompactionTriggerStopCancelsIndexFilterAndIDAllocation(t *testing.T) {
 				close(enteredPlanAlloc)
 			})
 			<-rpcCtx.Done()
+			planAllocErr <- rpcCtx.Err()
 			return nil, rpcCtx.Err()
 		})
 
@@ -421,7 +436,16 @@ func TestCompactionTriggerStopCancelsIndexFilterAndIDAllocation(t *testing.T) {
 			t.Fatal("timed out waiting for plan ID allocation RPC")
 		}
 
+		stopStart := time.Now()
 		tr.Stop()
+		require.Less(t, time.Since(stopStart), 800*time.Millisecond)
+
+		select {
+		case err := <-planAllocErr:
+			require.ErrorIs(t, err, context.Canceled)
+		case <-time.After(1 * time.Second):
+			t.Fatal("plan ID allocation did not observe Stop() context cancellation")
+		}
 
 		select {
 		case err := <-done:
@@ -838,6 +862,58 @@ func TestCompactionTriggerReturnsSignalIDWhenEnqueuedBeforeStop(t *testing.T) {
 
 	// Only the first task should be enqueued; remaining groups stop planning cleanly.
 	require.Len(t, inspector.snapshot(), 1)
+}
+
+func TestCompactionTriggerLateEnqueueAfterWorkDoneReturnsServiceUnavailable(t *testing.T) {
+	m, im, colls := buildTestMetaWithCandidateGroups(t, 1, datapb.SegmentLevel_L1)
+	handler := newFuncHandler(t, func(_ context.Context, collID UniqueID) (*meta.CollectionInfo, error) {
+		return colls[collID], nil
+	})
+
+	enteredAlloc := make(chan struct{})
+	releaseAlloc := make(chan struct{})
+	mc := rootmocks.NewMixCoord(t)
+	mc.EXPECT().AllocID(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
+		close(enteredAlloc)
+		<-releaseAlloc
+		return &rootcoordpb.AllocIDResponse{
+			Status: merr.Success(),
+			ID:     1000,
+			Count:  1,
+		}, nil
+	})
+
+	tr := NewCompactionTrigger(m, im, &recordingInspector{}, allocator.NewRootCoordAllocator(mc), handler, index.NewTestVersionManager())
+	tr.testingOnly = true
+	tr.Start()
+
+	type triggerRes struct {
+		id  UniqueID
+		err error
+	}
+	resCh := make(chan triggerRes, 1)
+	go func() {
+		id, err := tr.TriggerCompaction(context.Background(), NewCompactionSignal().WithIsForce(true).WithWaitResult(true))
+		resCh <- triggerRes{id: id, err: err}
+	}()
+
+	select {
+	case <-enteredAlloc:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for AllocID")
+	}
+
+	// Stop() exits work(), runs drainSignals(), and closes workDone before AllocID returns.
+	tr.Stop()
+	close(releaseAlloc)
+
+	select {
+	case res := <-resCh:
+		require.Equal(t, UniqueID(-1), res.id)
+		require.ErrorIs(t, res.err, merr.ErrServiceUnavailable)
+	case <-time.After(1 * time.Second):
+		t.Fatal("TriggerCompaction hung after workDone was closed")
+	}
 }
 
 func TestCompactionTriggerCancelledQueuedManualSignalNotPlanned(t *testing.T) {

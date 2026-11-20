@@ -127,6 +127,8 @@ type compactionTrigger struct {
 	globalTrigger *time.Ticker
 	closeCh       lifetime.SafeChan
 	closeWaiter   sync.WaitGroup
+	workDoneOnce  sync.Once
+	workDone      chan struct{}
 
 	ctxOnce sync.Once
 	ctx     context.Context
@@ -157,6 +159,7 @@ func NewCompactionTrigger(
 		indexEngineVersionManager: indexVersionManager,
 		handler:                   handler,
 		closeCh:                   lifetime.NewSafeChan(),
+		workDone:                  make(chan struct{}),
 	}
 	_ = t.lifecycleCtx()
 	return t
@@ -245,10 +248,19 @@ func (t *compactionTrigger) schedule() {
 }
 
 // work method listens the signal channels and generate plans from them.
+func (t *compactionTrigger) closeWorkDone() {
+	t.workDoneOnce.Do(func() {
+		if t.workDone != nil {
+			close(t.workDone)
+		}
+	})
+}
+
 func (t *compactionTrigger) work() {
 	defer logutil.LogPanic()
 	ctx := t.lifecycleCtx()
 	stoppedErr := merr.WrapErrServiceUnavailable("compaction trigger is stopped")
+	defer t.closeWorkDone()
 	defer t.drainSignals(stoppedErr)
 
 	for {
@@ -288,6 +300,7 @@ func (t *compactionTrigger) Stop() {
 	}
 	t.cancel()
 	t.closeWaiter.Wait()
+	t.closeWorkDone()
 }
 
 func (t *compactionTrigger) getCollection(ctx context.Context, collectionID UniqueID) (*meta.CollectionInfo, error) {
@@ -388,6 +401,13 @@ func (t *compactionTrigger) TriggerCompaction(ctx context.Context, signal *Compa
 	select {
 	case err = <-signal.resultCh:
 		return id, err
+	case <-t.workDone:
+		select {
+		case err = <-signal.resultCh:
+			return id, err
+		default:
+			return -1, stoppedErr
+		}
 	case <-ctx.Done():
 		return -1, ctx.Err()
 	}
