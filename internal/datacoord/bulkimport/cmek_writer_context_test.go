@@ -19,11 +19,12 @@ package bulkimport
 import (
 	"context"
 	"encoding/base64"
-	"errors"
+	"fmt"
 	"net"
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
@@ -301,7 +302,7 @@ func TestImportRetriesTransientSourceError(t *testing.T) {
 					job.Options = backupContextOptions()
 					cipher := &backupContextCipher{
 						writerContextCipher: writerContextCipher{key: []byte("ordinary")},
-						sourceErr:           errors.Join(errors.New("KMS failed to decrypt"), tc.err),
+						sourceErr:           fmt.Errorf("%w: %w", errors.New("KMS failed to decrypt"), tc.err),
 					}
 					patch := mockey.Mock(hookutil.GetCipher).Return(cipher).Build()
 					t.Cleanup(func() { patch.UnPatch() })

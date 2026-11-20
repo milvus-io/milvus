@@ -403,10 +403,30 @@ func retryableImportSourceError(err error) bool {
 	if !errors.Is(err, errImportSourceKey) {
 		return false
 	}
-	var timeout interface{ Timeout() bool }
-	var temporary interface{ Temporary() bool }
-	return merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) ||
-		(errors.As(err, &timeout) && timeout.Timeout()) || (errors.As(err, &temporary) && temporary.Temporary())
+	return retryableKMSCause(err)
+}
+
+func retryableKMSCause(err error) bool {
+	for ; err != nil; err = errors.Unwrap(err) {
+		if joined, ok := err.(interface{ Unwrap() []error }); ok {
+			for _, cause := range joined.Unwrap() {
+				if retryableKMSCause(cause) {
+					return true
+				}
+			}
+			return false
+		}
+		if merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) {
+			return true
+		}
+		if timeout, ok := err.(interface{ Timeout() bool }); ok && timeout.Timeout() {
+			return true
+		}
+		if temporary, ok := err.(interface{ Temporary() bool }); ok && temporary.Temporary() {
+			return true
+		}
+	}
+	return false
 }
 
 // New workers report a deterministic backup cipher rejection as an import
