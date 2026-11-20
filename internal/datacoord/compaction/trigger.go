@@ -388,8 +388,6 @@ func (t *compactionTrigger) TriggerCompaction(ctx context.Context, signal *Compa
 	select {
 	case err = <-signal.resultCh:
 		return id, err
-	case <-lifecycleCtx.Done():
-		return -1, stoppedErr
 	case <-ctx.Done():
 		return -1, ctx.Err()
 	}
@@ -444,9 +442,18 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 		return nil
 	}
 
+	enqueued := false
+	finishOnCtxErr := func(err error) error {
+		if enqueued {
+			log.Warn(ctx, "compaction tasks already enqueued before cancellation; preserving signal ID", mlog.Err(err))
+			return nil
+		}
+		return err
+	}
+
 	for _, group := range groups {
 		if err := ctx.Err(); err != nil {
-			return err
+			return finishOnCtxErr(err)
 		}
 		log := mlog.With(
 			mlog.Int64("group.partitionID", group.PartitionID),
@@ -460,14 +467,14 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
 			group.Segments = index.FilterInIndexedSegments(ctx, t.handler, t.indexMeta, signal.IsForce, group.Segments...)
 			if err := ctx.Err(); err != nil {
-				return err
+				return finishOnCtxErr(err)
 			}
 		}
 
 		coll, err := t.getCollection(ctx, group.CollectionID)
 		if err != nil {
 			if ctx.Err() != nil {
-				return ctx.Err()
+				return finishOnCtxErr(ctx.Err())
 			}
 			log.Warn(ctx, "get collection info failed, skip handling compaction", mlog.Err(err))
 			if signal.CollectionID != 0 {
@@ -499,7 +506,7 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 		plans := t.generatePlans(group.Segments, signal, ct, expectedSize)
 		for _, bucket := range plans {
 			if err := ctx.Err(); err != nil {
-				return err
+				return finishOnCtxErr(err)
 			}
 			if inspectorFull() {
 				return nil
@@ -516,10 +523,13 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 			planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(ctx, t.allocator, float64(totalSize), float64(expectedSize))
 			if err != nil {
 				log.Warn(ctx, "fail to allocate id", mlog.Err(err))
+				if ctx.Err() != nil {
+					return finishOnCtxErr(err)
+				}
 				return err
 			}
 			if err := ctx.Err(); err != nil {
-				return err
+				return finishOnCtxErr(err)
 			}
 			start := time.Now()
 			pts, _ := tsoutil.ParseTS(ct.StartTime)
@@ -548,6 +558,7 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 					mlog.Err(err))
 				continue
 			}
+			enqueued = true
 
 			log.Info(ctx, "time cost of generating compaction",
 				mlog.Int64("planID", task.GetPlanID()),
