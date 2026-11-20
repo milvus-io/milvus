@@ -72,7 +72,9 @@ func (m *layoutManager) prepare(p *planningContext, dirty []qviews.ShardID) []qv
 				p.targets[replica] = nodes
 			}
 		}
-		if changed {
+		if changed && p.boundedBatch {
+			p.changedLayouts = append(p.changedLayouts, id)
+		} else if changed {
 			c.RangeShards(func(s *balancercache.ShardEntry) bool { dirty = append(dirty, s.ID()); return true })
 			if c.DataView() != nil {
 				for _, replicas := range groups {
@@ -106,6 +108,9 @@ func (m *layoutManager) prepare(p *planningContext, dirty []qviews.ShardID) []qv
 	// A newly Up survivor can unblock a suspended sibling's drain immediately.
 	initial := len(dirty)
 	for _, id := range dirty[:initial] {
+		if len(p.targets[id.ReplicaID]) == 0 {
+			continue // Only an active sibling can unblock a suspended replica.
+		}
 		if c := p.collectionForShard(id); c != nil && c.LoadConfig() != nil {
 			for _, r := range c.LoadConfig().Replicas {
 				if nodes, known := p.targets[r.ReplicaID]; known && len(nodes) == 0 {

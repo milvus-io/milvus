@@ -57,6 +57,7 @@ func testShardStats(
 	placements ...testSegmentPlacement,
 ) *coordview.ShardStats {
 	stats := &coordview.ShardStats{
+		MaybeUped:         upVersion != nil,
 		UpVersion:         upVersion,
 		UpLoadInfoVersion: loadInfoVersion,
 		Segments:          make(map[int64]*coordview.SegmentStats),

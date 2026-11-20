@@ -25,6 +25,7 @@ type queryViewConfig struct {
 	LogicalSizeBytesPerUnit                 ParamItem `refreshable:"false"`
 	LogicalSizeSegmentBaseCost              ParamItem `refreshable:"true"`
 	BalancerReconcileInterval               ParamItem `refreshable:"true"`
+	BalancerShardBatchSize                  ParamItem `refreshable:"true"`
 	BalancerOptimizationEnabled             ParamItem `refreshable:"true"`
 	BalancerMinScoreGain                    ParamItem `refreshable:"true"`
 	BalancerMaxCandidateEvaluationsPerShard ParamItem `refreshable:"true"`
@@ -110,6 +111,15 @@ func (p *queryViewConfig) init(base *BaseTable) {
 		Doc:          "Positive duration with a unit between periodic reconciles. Decrease for faster convergence and more coordinator work; increase to reduce scan frequency. Events reconcile independently.",
 	}
 	p.BalancerReconcileInterval.Init(base.mgr)
+
+	p.BalancerShardBatchSize = ParamItem{
+		Key:          "queryView.balancer.shardBatchSize",
+		Version:      "3.0.0",
+		DefaultValue: "100",
+		Export:       true,
+		Doc:          "Maximum number of queued shards selected for one serial placement and apply pass.",
+	}
+	p.BalancerShardBatchSize.Init(base.mgr)
 
 	p.BalancerOptimizationEnabled = ParamItem{
 		Key:          "queryView.balancer.optimization.enabled",

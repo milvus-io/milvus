@@ -65,15 +65,10 @@ func TestBalancerWaitsForRecoveryWithoutLosingWork(t *testing.T) {
 	b.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{added}})
 	require.Never(t, func() bool { return calls.Load() != 0 }, 20*time.Millisecond, time.Millisecond)
 	require.Equal(t, before, registry.Get(existing).Stats().PreparingVersion)
-	b.queue.mu.Lock()
-	full := b.queue.scan
-	_, existingPending := b.queue.dirtyShards[existing]
-	_, addedPending := b.queue.dirtyShards[added]
-	b.queue.mu.Unlock()
-	require.True(t, full)
-	require.True(t, existingPending)
-	require.True(t, addedPending)
-
+	b.discovery.mu.Lock()
+	pending := len(b.discovery.pending)
+	b.discovery.mu.Unlock()
+	require.GreaterOrEqual(t, pending, 3, "local requests and the initial scan remain pending")
 	// Suppress all subsequent wakeups, including MarkReady's full request.
 	// The readiness barrier itself must resume the already-running reconcile.
 	c.SetNotifier(nil)
@@ -115,7 +110,7 @@ func TestBalancerStopCancelsRecoveryWait(t *testing.T) {
 	}
 	require.False(t, c.Ready())
 	require.Nil(t, registry.Get(shard), "shutdown must not run planning or apply")
-	require.True(t, b.queue.takePending().scan, "canceled wait does not consume work")
+	require.True(t, takeScanRequest(b), "canceled wait does not consume work")
 	c.MarkReady()
 	b.Start(t.Context())
 	require.Eventually(t, func() bool {

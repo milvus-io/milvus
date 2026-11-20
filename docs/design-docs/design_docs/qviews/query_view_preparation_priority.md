@@ -9,7 +9,7 @@ Status: the first implementation of priority ordering for pending tasks was conn
 The first version explicitly changes only the order of tasks that have not started; it does not preempt running tasks. Implemented behavior:
 
 - `QueryViewControl.preparation_priority` is `sint32` field 2, with a range of [-20, 20]. The default is 0, and larger values have higher priority. It is immutable after creation. The builder copies Control, and Coord lease control strengthens only the lease field. For retransmissions of the same identity, SN retains the preparation priority first received, including when an older message omits the field. Coord/SN recovery uses the persisted value.
-- Coord computes the score when creating a new View through normal planning, published-schema recovery planning, or manual migration. Statistics changes do not rebuild or reorder existing Views. An operation retains immutable feedback snapshots for replicas in the current configuration and aggregates rates from the last 6 windows by RG; numerator and denominator use the same snapshots.
+- Coord computes the score when creating a new View through normal planning, published-schema recovery planning, or manual migration. Existing Views keep their score. Before planning, the balancer also uses this rule to rank queued shard IDs. A repeated submission updates their queue priority. An operation retains immutable feedback snapshots for replicas in the current configuration and aggregates rates from the last 6 windows by RG; numerator and denominator use the same snapshots.
 - `nodeScheduler.WithPriority(int32)` and `PriorityTaskHandle.SetPriority(int32)` use the same executor. Dispatch normally follows priority, with FIFO among equal scores; after every 8 priority dispatches, the oldest runnable task gets an opportunity. SetPriority preserves queue age, does not advance retry deadlines, and does not cancel or restart Execute. A new effective value for a running task applies only to subsequent retries.
 - QN retains the task handle for each SegmentResource and takes the maximum priority among bindings whose dependencies are resolved, which are not ready or failed, and which are not waiting for retry or catch-up. If all scores are negative, the result remains negative. Dependency addition, release, and failure reorder pending tasks. Within a resource, reusable reads are published first, then eligible bindings are selected by priority. Equal scores preserve cursor order; after every 8 priority selections, the round-robin starting point gets an opportunity. Each reconcile performs at most one physical preparation before re-enqueuing, retaining the existing retry timer and cleanup behavior.
 - SN shared builds take the maximum priority of unfinished dependencies; removing a dependency can lower the score. Priority does not change the build snapshot selected for the oldest View. Each per-View ready task uses its fixed value. WAL scoped handles forward SetPriority without changing task tracking or shutdown semantics.
@@ -23,11 +23,11 @@ The current policy selects a scenario based on user demand, then adds a scenario
 | Scenario, evaluated in order | Base score | Traffic-score cap | Range including configuration |
 | --- | --- | --- | --- |
 | Recent access, no live UpView | +10 | 8 | [10,20] |
-| LoadConfig.AutoLoad, no live UpView | +10 | 0 | [10,12] |
+| Initial AutoLoad (shard has no evidence of ever reaching Up) | +10 | 0 | [10,12] |
 | Recent access, live UpView exists | 0 | 2 | [0,4] |
 | No recent access, live UpView exists (cold handoff) | -10 | 0 | [-10,-8] |
-| Not AutoLoad, known long-term inactivity, no live UpView (cold recovery) | -5 | 0 | [-5,-3] |
-| No access history, no live UpView, not AutoLoad (initial/manual load) | 0 | 0 | [0,2] |
+| Known long-term inactivity after initial AutoLoad or on a manual load, no live UpView (cold recovery) | -5 | 0 | [-5,-3] |
+| No access history, no live UpView, after initial AutoLoad or on a manual load | 0 | 0 | [0,2] |
 
 - Configuration offset: HIGH, including the proto default, adds +2; LOW and unknown enum values add 0. The enum's underlying numeric value is not used.
 - Recent access: LastAccessTime is nonzero and no more than 2 minutes before this planning operation's time. Future timestamps count as recent. LastAccessTime selects the scenario and does not add a separate activity score.
@@ -136,7 +136,7 @@ Existing QN placement is planned by `(CollectionID, ResourceGroup)`. Replica tar
 
 ```text
 recent = LastAccessTime != 0 && now - LastAccessTime <= 2min
-(base, limit) = SelectScenario(recent, healthyUp, LoadConfig.AutoLoad, knownHistory)
+(base, limit) = SelectScenario(recent, healthyUp, LoadConfig.AutoLoad && !maybeUped, knownHistory)
 share = clamp(replica.Last6Windows / same_RG_total, 0, 1)
 traffic = round(limit * log1p(100 * share) / log1p(100))
 P(view) = clamp(base + traffic + ConfigOffset, -20, 20)
@@ -158,7 +158,9 @@ AutoLoad enters through QueryCoord `EnsureCollectionReady`. When a load configur
 
 `AlterLoadConfigMessageHeader.auto_load` is persisted and replayed with the broadcast, then projected into versioned `CollectionLoadConfig.auto_load` / `loadmgr.LoadConfig.AutoLoad`. Balancer reads it directly from the existing immutable LoadConfig snapshot, without maintaining AutoLoadDemand, waiter counts, extra locks, or injected interfaces. Coord restores the flag directly from LoadConfig after restart rather than waiting for query retries to reconstruct demand.
 
-Scoring evaluates scenarios in order. Recent access without a healthy UpView receives a +10 base and up to +8 traffic points. Otherwise, `AutoLoad && !healthyUp` receives a +10 base without requiring an empty access history. When a healthy UpView exists, AutoLoad adds no points; the normal recent-access or cold-handoff rules apply. AutoLoad cold recovery therefore also receives +10. This represents persisted loading policy, not an inference that requests are currently waiting. HIGH retains its +2 offset.
+Scoring evaluates scenarios in order. Recent access without a healthy UpView receives a +10 base and up to +8 traffic points. Otherwise, initial AutoLoad receives a +10 base until the shard first reaches Up. Coord sets the in-memory `maybeUped` flag on that transition, including recovery fast-forward. A first preparation failure before Up remains eligible for the initial boost while Coord is running. A serving QN failure, a schema change, or temporary suspension of a desired replica preserves the history. Removing the replica or fully releasing the collection ends its load cycle.
+
+On Coord restart, any surviving Up, Down, or Unrecoverable record implies `maybeUped`. An Unrecoverable record can also come from a failed first preparation, so this inference can suppress the boost in that case. If only Preparing records survive, or earlier records have all been deleted, the shard is eligible for the initial boost again. Once `maybeUped` is true, the ordinary access and health rules apply. HIGH retains its +2 offset.
 
 The flag has the same lifetime as the current load configuration. Readiness completion, cancellation of an individual query, and request timeouts do not clear it. Partition creation/partial release, replica adjustments, and derived Schema/Index versions retain it. A new configuration from an explicit manual LoadCollection/LoadPartitions writes false. Load's refresh mode only refreshes data and does not change the origin. A full Release removes the configuration and flag; the next load determines the origin again. If only the origin changes, update the scheduling metadata in the current persisted record under the existing collection update lock, retaining LoadInfoVersion. After persistence succeeds, publish a new read-only configuration object instead of mutating a published object. Configuration snapshots and listener notifications still advance, so subsequently created Views use the new origin. Only resource-requirement changes produce a new LoadInfoVersion.
 

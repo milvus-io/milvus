@@ -496,8 +496,9 @@ is included and excess suspended replicas are excluded without scanning all
 collection segments during reconcile.
 
 Per-view publication, LoadConfig, DataView, and node eligibility changes refresh
-selected targets synchronously. Node changes revisit affected RG collections;
-this shifts aggregation to publication but does not make topology updates O(1).
+selected targets synchronously. Node changes refresh contributions for shards
+indexed on the changed node. Discovery separately walks the old and new RG
+collection indexes in bounded slices, including collections without placements.
 Failed Preparing removes that target or falls back to Up. It does not release
 resources. The Resources index retains confirmed individual ready segments in
 Preparing/Unrecoverable until teardown, in addition to whole Up/Ready resources.

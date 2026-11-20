@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/viewfeedback"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -18,13 +19,13 @@ const (
 
 // Access recency selects urgency; traffic and configuration only refine it.
 // Unknown access history is an initial/manual load, not evidence of cold data.
-func preparationPriority(config commonpb.LoadPriority, feedback *viewfeedback.Snapshot, groupRate float64, hasUp, autoLoad bool, now time.Time) int32 {
+func preparationPriority(config commonpb.LoadPriority, feedback *viewfeedback.Snapshot, groupRate float64, hasUp, initialAutoLoad bool, now time.Time) int32 {
 	recent := feedback != nil && feedback.LastAccessUnixNanos != 0 && now.Sub(time.Unix(0, feedback.LastAccessUnixNanos)) <= recentPreparationAccess
 	var base, trafficLimit int32
 	switch {
 	case recent && !hasUp:
 		base, trafficLimit = 10, 8
-	case autoLoad && !hasUp:
+	case initialAutoLoad && !hasUp:
 		base = 10
 	case recent:
 		trafficLimit = 2
@@ -69,7 +70,17 @@ func (p *planningContext) preparationPriority(id qviews.ShardID) int32 {
 	}
 	sample, rates := p.preparationFeedback.GetReplicaFeedback(id.ReplicaID, replica.ResourceGroup)
 
-	return preparationPriority(replica.Priority, sample, rates.Last6Windows, healthyUp(p, id), cfg.AutoLoad, p.priorityNow)
+	initialAutoLoad := cfg.AutoLoad && !p.GetCollection(cfg.CollectionID).MaybeUped(id)
+	return preparationPriority(replica.Priority, sample, rates.Last6Windows, healthyUp(p, id), initialAutoLoad, p.priorityNow)
+}
+
+// Queue admission needs no placement prediction or full node snapshot.
+func (b *DefaultBalancer) scoringContext() *planningContext {
+	p := &planningContext{Reader: b.cache, priorityNow: time.Now(), collections: make(map[int64]*balancercache.CollectionEntry)}
+	if policy, ok := b.policy.(*DefaultBalancePolicy); ok {
+		p.feedback = policy.feedback
+	}
+	return p
 }
 
 func (b *DefaultBalancer) preparationPriorities() *planningContext {

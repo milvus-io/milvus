@@ -193,5 +193,5 @@ func TestNodeLossInvalidatesUnplacedCollections(t *testing.T) {
 	var scope api.TriggerScope
 	c.SetNotifier(func(s api.TriggerScope) { scope = s })
 	c.PublishNode(1, nil)
-	require.Contains(t, scope.DirtyCollections, int64(1))
+	require.Contains(t, scope.DirtyResourceGroups, "rg1")
 }

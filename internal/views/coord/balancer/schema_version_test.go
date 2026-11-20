@@ -3,7 +3,6 @@ package balancer
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
@@ -111,9 +110,7 @@ func TestReconcileUsesDataViewSchemaAndPreemptsObsoletePreparing(t *testing.T) {
 	next.SchemaVersion = 3
 	next.DataVersion.CompactVersion = 2
 	c.PublishDataView(1, next)
-	b.queue.mu.Lock()
-	b.queue.retryAt = time.Time{}
-	b.queue.mu.Unlock()
+	b.Trigger() // Periodic discovery re-reads previously unavailable metadata.
 	require.NoError(t, b.Reconcile(t.Context()))
 	require.Equal(t, latest, reg.Get(id).Stats().PreparingSchemaVersion)
 

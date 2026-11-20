@@ -40,9 +40,10 @@ type ShardViewRegistry struct {
 
 	// Reverse indexes cover resident shards. The collection index changes with
 	// shard lifecycle, while the node index tracks current Stats placements.
-	collectionShards map[int64]map[qviews.ShardID]struct{}
-	publishedSchemas map[int64]int32
-	nodeShards       map[int64]map[qviews.ShardID]struct{}
+	collectionShards  map[int64]map[qviews.ShardID]struct{}
+	publishedSchemas  map[int64]int32
+	publishingSchemas map[int64]chan struct{}
+	nodeShards        map[int64]map[qviews.ShardID]struct{}
 
 	statsObservers        []func(qviews.ShardID, *ShardStats)
 	publicationListeners  map[uint64]ShardPublicationListener
@@ -533,13 +534,22 @@ func (r *ShardViewRegistry) publishShardLocked(shardID qviews.ShardID, stats *Sh
 // durably committed to RootCoord. Manager calls run without the registry lock.
 func (r *ShardViewRegistry) PublishCollectionSchema(collectionID int64, version int32) {
 	r.mu.Lock()
-	if old, ok := r.publishedSchemas[collectionID]; ok && old > version {
+	if old, ok := r.publishedSchemas[collectionID]; ok && old >= version {
+		pending := r.publishingSchemas[collectionID]
 		r.mu.Unlock()
+		if old == version && pending != nil {
+			<-pending
+		}
 		return
 	}
 	if r.publishedSchemas == nil {
 		r.publishedSchemas = make(map[int64]int32)
 	}
+	if r.publishingSchemas == nil {
+		r.publishingSchemas = make(map[int64]chan struct{})
+	}
+	done := make(chan struct{})
+	r.publishingSchemas[collectionID] = done
 	r.publishedSchemas[collectionID] = version
 	managers := make([]*ShardViewManager, 0, len(r.collectionShards[collectionID]))
 	for id := range r.collectionShards[collectionID] {
@@ -549,4 +559,10 @@ func (r *ShardViewRegistry) PublishCollectionSchema(collectionID int64, version 
 	for _, manager := range managers {
 		manager.PublishSchema(version)
 	}
+	r.mu.Lock()
+	if r.publishingSchemas[collectionID] == done {
+		delete(r.publishingSchemas, collectionID)
+	}
+	close(done)
+	r.mu.Unlock()
 }

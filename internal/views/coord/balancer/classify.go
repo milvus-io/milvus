@@ -161,10 +161,10 @@ func healthyUp(snap balanceInput, id qviews.ShardID) bool {
 	entry := snap.ShardEntry(id)
 	if entry != nil {
 		for _, node := range entry.UpNodes() {
-			n := snap.NodesMap()[node]
+			n := snap.GetNode(node)
 			// Stopping forbids new placement, but an existing Up view can
 			// still serve until its replacement is ready or a node fails.
-			if n == nil || !n.Alive {
+			if n == nil || !n.Info().Alive {
 				return false
 			}
 		}

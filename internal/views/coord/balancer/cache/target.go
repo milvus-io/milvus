@@ -173,17 +173,21 @@ func (c *Cache) refreshTargets(entry *CollectionEntry, fallback map[int64]int64)
 	rows := make(map[int64]int64)
 	entry.shards.each(func(old *ShardEntry) bool {
 		clear(rows)
-		target := c.selectTarget(entry, old.id, old.stats, fallback, rows)
-		if target == old.target && maps.Equal(rows, old.targetRows) {
-			return true
-		}
-		next := *old
-		next.target = target
-		next.targetRows = maps.Clone(rows)
-		c.replaceTargetRows(entry, old.id, old.targetRows, next.targetRows)
-		entry.shards = entry.shards.set(shardKey(old.id), &next)
+		c.refreshShardTarget(entry, old, fallback, rows)
 		return true
 	})
+}
+
+func (c *Cache) refreshShardTarget(entry *CollectionEntry, old *ShardEntry, fallback, rows map[int64]int64) bool {
+	target := c.selectTarget(entry, old.id, old.stats, fallback, rows)
+	if target == old.target && maps.Equal(rows, old.targetRows) {
+		return false
+	}
+	next := *old
+	next.target, next.targetRows = target, maps.Clone(rows)
+	c.replaceTargetRows(entry, old.id, old.targetRows, next.targetRows)
+	entry.shards = entry.shards.set(shardKey(old.id), &next)
+	return true
 }
 
 func (c *Cache) replaceTarget(entry *CollectionEntry, id qviews.ShardID, old, next *ShardEntry, fallback map[int64]int64) {

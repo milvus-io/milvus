@@ -1,7 +1,6 @@
 package balancer
 
 import (
-	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -33,22 +32,29 @@ func TestBalanceConfigSourcePublicationAndValidation(t *testing.T) {
 	stop := b.watchBalanceConfig(t.Context(), p)
 	defer stop()
 	require.Equal(t, DefaultBalanceConfig(), c.GetBalanceConfig())
-	require.True(t, b.queue.takePending().empty(), "identical defaults do not request a full pass")
+	require.True(t, !takeScanRequest(b), "identical defaults do not request a full pass")
+	batchSize := p.QueryViewCfg.BalancerShardBatchSize.Key
+	require.NoError(t, p.Save(batchSize, "8"))
+	require.EqualValues(t, 8, c.GetBalanceConfig().ShardBatchSize)
+	require.NoError(t, p.Save(batchSize, "0"))
+	require.EqualValues(t, 8, c.GetBalanceConfig().ShardBatchSize)
+	require.NoError(t, p.Reset(batchSize))
+	require.True(t, !takeScanRequest(b), "changing the bound needs no full scan")
 	pinned := newPlanningContext(c)
 	key := p.QueryViewCfg.BalancerMoveCostPerUnit.Key
 	require.NoError(t, p.Save(key, "3"))
 	require.Equal(t, 3.0, c.GetBalanceConfig().MoveCostPerUnit)
 	require.Equal(t, 0.02, pinned.GetBalanceConfig().MoveCostPerUnit, "an existing batch retains its config")
-	require.True(t, b.queue.takePending().scan)
+	require.True(t, takeScanRequest(b))
 	previous := c.GetBalanceConfig()
 	require.NoError(t, p.Save(key, "3"))
 	require.Same(t, previous, c.GetBalanceConfig())
-	require.True(t, b.queue.takePending().empty())
+	require.True(t, !takeScanRequest(b))
 
 	for _, value := range []string{"-1", "NaN", "+Inf", "invalid"} {
 		require.NoError(t, p.Save(key, value))
 		require.Same(t, previous, c.GetBalanceConfig())
-		require.True(t, b.queue.takePending().empty())
+		require.True(t, !takeScanRequest(b))
 	}
 	require.NoError(t, p.Save(key, "3"))
 	for _, key := range []string{p.QueryViewCfg.BalancerResourceGroupAbsoluteTolerance.Key, p.QueryViewCfg.BalancerTargetLogicalSizePerNode.Key} {
@@ -65,11 +71,11 @@ func TestBalanceConfigSourcePublicationAndValidation(t *testing.T) {
 	}
 	require.NoError(t, p.Save(intervalKey, "10ms"))
 	require.Equal(t, 10*time.Millisecond, c.GetBalanceConfig().ReconcileInterval)
-	require.True(t, b.queue.takePending().empty(), "interval-only refresh must not request full optimization")
+	require.True(t, !takeScanRequest(b), "interval-only refresh must not request full optimization")
 
 	require.NoError(t, p.Save(p.QueryViewCfg.BalancerOptimizationEnabled.Key, "false"))
 	require.False(t, c.GetBalanceConfig().OptimizationEnabled)
-	require.True(t, b.queue.takePending().scan)
+	require.True(t, takeScanRequest(b))
 	previous = c.GetBalanceConfig()
 	require.NoError(t, p.Save(p.QueryViewCfg.BalancerOptimizationEnabled.Key, "invalid"))
 	require.Same(t, previous, c.GetBalanceConfig())
@@ -88,15 +94,15 @@ func TestBalanceConfigIndependentOfQueryCoord(t *testing.T) {
 	stop := b.watchBalanceConfig(t.Context(), p)
 	defer stop()
 	require.Equal(t, DefaultBalanceConfig(), c.GetBalanceConfig())
-	require.True(t, b.queue.takePending().empty())
+	require.True(t, !takeScanRequest(b))
 
 	require.NoError(t, p.Save(p.QueryViewCfg.BalancerOptimizationEnabled.Key, "false"))
 	require.False(t, c.GetBalanceConfig().OptimizationEnabled)
-	require.True(t, b.queue.takePending().scan)
+	require.True(t, takeScanRequest(b))
 	previous := c.GetBalanceConfig()
 	require.NoError(t, p.Save(p.QueryCoordCfg.AutoBalance.Key, "true"))
 	require.Same(t, previous, c.GetBalanceConfig())
-	require.True(t, b.queue.takePending().empty())
+	require.True(t, !takeScanRequest(b))
 	require.True(t, p.QueryCoordCfg.AutoBalance.GetAsBool())
 
 	for raw, want := range map[string]time.Duration{
@@ -106,7 +112,7 @@ func TestBalanceConfigIndependentOfQueryCoord(t *testing.T) {
 	} {
 		require.NoError(t, p.Save(p.QueryViewCfg.BalancerReconcileInterval.Key, raw))
 		require.Equal(t, want, c.GetBalanceConfig().ReconcileInterval)
-		require.True(t, b.queue.takePending().empty())
+		require.True(t, !takeScanRequest(b))
 	}
 	require.NoError(t, p.Reset(p.QueryViewCfg.BalancerReconcileInterval.Key))
 	require.Equal(t, time.Minute, c.GetBalanceConfig().ReconcileInterval)
@@ -170,10 +176,12 @@ func TestBalanceLoopRefreshesLongTimerAndUnwatchesOnStop(t *testing.T) {
 	c.MarkReady()
 	b := NewDefaultBalancer(c, nil, nil, nil)
 	var calls atomic.Int64
-	patch := mockey.Mock((*DefaultBalancer).Reconcile).To(func(controller *DefaultBalancer, _ context.Context) error {
-		controller.queue.takePending()
+	patch := mockey.Mock((*DefaultBalancer).dispatch).To(func(controller *DefaultBalancer) int {
+		if job := controller.discovery.next(); job != nil {
+			controller.discovery.finish(job)
+		}
 		calls.Add(1)
-		return nil
+		return -1
 	}).Build()
 	defer patch.UnPatch()
 	b.Start(t.Context())
@@ -202,9 +210,18 @@ func TestDataViewCostConfigDoesNotTriggerBalance(t *testing.T) {
 	} {
 		require.NoError(t, p.Save(key, value))
 		require.Same(t, previous, c.GetBalanceConfig())
-		require.True(t, b.queue.takePending().empty(), "only a future DataView publication changes scheduling size")
+		require.True(t, !takeScanRequest(b), "only a future DataView publication changes scheduling size")
 	}
 	require.NoError(t, p.Save("queryView.balancer.scoring.targetLogicalSizePerNode", "200000"))
 	require.Equal(t, int64(200000), c.GetBalanceConfig().TargetLogicalSizePerNode)
-	require.True(t, b.queue.takePending().scan)
+	require.True(t, takeScanRequest(b))
+}
+
+func takeScanRequest(b *DefaultBalancer) bool {
+	job := b.discovery.next()
+	if job == nil {
+		return false
+	}
+	b.discovery.finish(job)
+	return job.scopes[0].NodeChanged
 }

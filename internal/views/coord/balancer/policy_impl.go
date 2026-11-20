@@ -29,13 +29,13 @@ func NewDefaultBalancePolicy(options ...PolicyOption) *DefaultBalancePolicy {
 }
 
 type balanceCandidate struct {
-	shardID qviews.ShardID
-	size    int64
+	shardID  qviews.ShardID
+	size     int64
+	optional bool
 }
 
-// Plan classifies dirty shards, orders mandatory work before optional
-// optimization, and allocates each accepted shard against a shared
-// steady-state row tracker.
+// Plan classifies dirty shards and allocates eligible placements against one
+// projected row tracker. Controller batches arrive in scheduling order.
 func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.ShardID) *BalancePlan {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -47,20 +47,26 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 	}
 	snap := newPlanningContext(reader)
 	snap.feedback = p.feedback
+	selected := len(dirty)
 	dirty = p.layouts.prepare(snap, dirty)
+	plan.RescanCollections = snap.changedLayouts
 	if p.fanouts == nil {
 		p.fanouts = make(map[qviews.ShardID]int)
 		p.search = make(map[qviews.ShardID]*searchCursor)
 	}
 	snap.fanouts, snap.search = p.fanouts, p.search
 
-	var mandatory, optional []balanceCandidate
+	var candidates []balanceCandidate
 	seen := make(map[qviews.ShardID]struct{}, len(dirty))
-	for _, shardID := range dirty {
+	for i, shardID := range dirty {
 		if _, ok := seen[shardID]; ok {
 			continue
 		}
 		seen[shardID] = struct{}{}
+		if snap.boundedBatch && i >= selected {
+			plan.Continues = append(plan.Continues, shardID)
+			continue
+		}
 
 		// Layout publication can refresh cached inputs. A concurrently loaded
 		// collection may not have been included in this pass's metadata read.
@@ -86,24 +92,21 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 				}
 				plan.ReleaseControls[shardID] = &viewpb.QueryViewControl{PreemptServingLease: true}
 			}
-		case actionMust:
-			mandatory = append(mandatory, balanceCandidate{
-				shardID: shardID,
-				size:    shardTotalLoad(snap, shardID),
-			})
-		case actionMayOptimize:
-			if !snap.GetBalanceConfig().OptimizationEnabled {
+		case actionMust, actionMayOptimize:
+			optional := action == actionMayOptimize
+			if optional && !snap.GetBalanceConfig().OptimizationEnabled {
 				continue
 			}
-			optional = append(optional, balanceCandidate{
-				shardID: shardID,
-				size:    shardTotalLoad(snap, shardID),
-			})
+			candidate := balanceCandidate{shardID: shardID, optional: optional}
+			if !snap.boundedBatch {
+				candidate.size = shardTotalLoad(snap, shardID)
+			}
+			candidates = append(candidates, candidate)
 		}
 	}
-
-	sortCandidates(mandatory)
-	sortCandidates(optional)
+	if !snap.boundedBatch {
+		sortCandidates(candidates)
+	}
 
 	projectedRows := initialProjectedRows(snap.NodesMap())
 	for _, shardID := range plan.Releases {
@@ -113,24 +116,10 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 		delete(p.search, shardID)
 	}
 
-	for _, candidate := range mandatory {
+	for _, candidate := range candidates {
 		oldRows := currentShardRows(snap, candidate.shardID)
 		subtractRows(projectedRows, oldRows)
-		result := allocate(snap, candidate.shardID, projectedRows, false)
-		if result == nil {
-			addRows(projectedRows, oldRows)
-			plan.Retries = append(plan.Retries, candidate.shardID)
-			continue
-		}
-		snap.acceptRows(candidate.shardID, result.rowsByNode)
-		plan.Prepares[candidate.shardID] = result.materialize(snap, candidate.shardID)
-		addRows(projectedRows, result.rowsByNode)
-	}
-
-	for _, candidate := range optional {
-		oldRows := currentShardRows(snap, candidate.shardID)
-		subtractRows(projectedRows, oldRows)
-		result := allocate(snap, candidate.shardID, projectedRows, true)
+		result := allocate(snap, candidate.shardID, projectedRows, candidate.optional)
 		if result == nil {
 			addRows(projectedRows, oldRows)
 			plan.Retries = append(plan.Retries, candidate.shardID)
@@ -139,7 +128,7 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 		if result.more {
 			plan.Continues = append(plan.Continues, candidate.shardID)
 		}
-		if assignmentsEqual(currentSegmentNodes(snap, candidate.shardID), result.assignments) {
+		if candidate.optional && assignmentsEqual(currentSegmentNodes(snap, candidate.shardID), result.assignments) {
 			addRows(projectedRows, oldRows)
 			continue
 		}
@@ -205,6 +194,9 @@ func assignmentsEqual(current, candidate map[int64]int64) bool {
 
 func sortCandidates(candidates []balanceCandidate) {
 	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].optional != candidates[j].optional {
+			return !candidates[i].optional
+		}
 		if candidates[i].size != candidates[j].size {
 			return candidates[i].size > candidates[j].size
 		}

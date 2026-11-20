@@ -17,6 +17,8 @@ type SchemaUpView struct {
 }
 
 type ShardStats struct {
+	// MaybeUped records whether this manager has seen or recovered evidence of Up.
+	MaybeUped  bool
 	UpBySchema map[int32]SchemaUpView
 
 	// Per-view placements are independent of merged physical resource progress.

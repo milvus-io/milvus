@@ -3,9 +3,7 @@ package balancer
 import (
 	"fmt"
 	"testing"
-	"time"
 
-	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
@@ -19,7 +17,7 @@ func scanTestCache(sizes ...int) *balancercache.Cache {
 	for i, size := range sizes {
 		id := int64(i + 1)
 		c.PublishLoadConfig(id, cfgFor(id, id*10, nil, nil), 1)
-		data := &CollectionDataView{CollectionID: id}
+		data := &CollectionDataView{CollectionID: id, DataVersion: qviews.DataVersion{StreamingVersion: 1}}
 		for channel := 0; channel < size; channel++ {
 			data.Shards = append(data.Shards, &ShardDataView{VChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv%d", id, channel)})
 		}
@@ -29,120 +27,127 @@ func scanTestCache(sizes ...int) *balancercache.Cache {
 	return c
 }
 
-func TestScanBatchesYieldToLocalEventsAndManagement(t *testing.T) {
-	c := scanTestCache(60, 60, 60)
+func TestDiscoveryLargeCollectionAndLocalScope(t *testing.T) {
+	c := scanTestCache(10000, 1)
 	t.Cleanup(c.Close)
-	b := NewDefaultBalancer(c, &coordview.ShardViewRegistry{}, nil, nil)
-	var batches [][]qviews.ShardID
-	patch := mockey.Mock((*DefaultBalancePolicy).Plan).To(func(_ *DefaultBalancePolicy, _ balancercache.Reader, dirty []qviews.ShardID) *BalancePlan {
-		batches = append(batches, append([]qviews.ShardID(nil), dirty...))
-		if len(batches) == 1 {
-			b.Trigger(TriggerScope{DirtyCollections: []int64{3}})
-		}
-		return nil
-	}).Build()
-	defer patch.UnPatch()
+	b := NewDefaultBalancer(c, nil, nil, nil)
 	b.Trigger()
-	require.NoError(t, b.Reconcile(t.Context()))
-	require.Len(t, batches[0], 120, "finish the collection that crosses 100")
-	require.True(t, b.scanning)
-	// The synchronous management entry can acquire the same execution lock
-	// while a scan round is still in progress.
-	_, err := b.Placement(t.Context(), 1)
-	require.NoError(t, err)
-	require.NoError(t, b.Reconcile(t.Context()))
-	require.Len(t, batches[1], 60)
-	for _, id := range batches[1] {
-		require.Equal(t, int64(30), id.ReplicaID, "new local work precedes scan continuation")
+	require.Equal(t, discoveryShardLimit, b.dispatch())
+	b.Trigger(TriggerScope{DirtyCollections: []int64{2}})
+	require.Equal(t, 1, b.dispatch())
+	require.Contains(t, b.ready.items, cacheShard(2, 20))
+	require.Len(t, b.ready.items, discoveryShardLimit+1)
+	for b.dispatch() >= 0 {
 	}
-	require.True(t, b.scanning)
-	require.NoError(t, b.Reconcile(t.Context()))
-	require.Len(t, batches[2], 60, "the EOF tail is still planned")
-	require.False(t, b.scanning)
-	require.NoError(t, b.Reconcile(t.Context()))
-	require.Len(t, batches, 3, "EOF must not cause an unrequested new round")
+	require.Len(t, b.ready.items, 10001)
 }
 
-func TestScanKeepsLargeCollectionAndResidualShards(t *testing.T) {
-	c := scanTestCache(150, 1)
+func TestDiscoveryEmptyCollectionsYieldAndPruneLayout(t *testing.T) {
+	c := scanTestCache(make([]int, scanSlotBudget+1)...)
 	t.Cleanup(c.Close)
-	residual := cacheShard(1, 99)
-	c.PublishShard(residual, &coordview.ShardStats{})
-	b := NewDefaultBalancer(c, &coordview.ShardViewRegistry{}, nil, nil)
-	var batches [][]qviews.ShardID
-	patch := mockey.Mock((*DefaultBalancePolicy).Plan).To(func(_ *DefaultBalancePolicy, _ balancercache.Reader, dirty []qviews.ShardID) *BalancePlan {
-		batches = append(batches, append([]qviews.ShardID(nil), dirty...))
-		return nil
-	}).Build()
-	defer patch.UnPatch()
-	b.Trigger()
-	require.NoError(t, b.Reconcile(t.Context()))
-	require.Len(t, batches[0], 151)
-	require.Contains(t, batches[0], residual)
-	b.Trigger() // Another scan request must not reset the current cursor.
-	require.NoError(t, b.Reconcile(t.Context()))
-	require.Equal(t, []qviews.ShardID{cacheShard(2, 20)}, batches[1])
-	require.NoError(t, b.Reconcile(t.Context()))
-	require.Len(t, batches[2], 151, "coalesced request starts after the old round")
-}
-
-func TestScanEmptyCollectionsYieldAndLayoutRemovalIsScoped(t *testing.T) {
-	sizes := make([]int, scanSlotBudget+1)
-	c := scanTestCache(sizes...)
-	t.Cleanup(c.Close)
-	b := NewDefaultBalancer(c, &coordview.ShardViewRegistry{}, nil, nil)
+	b := NewDefaultBalancer(c, nil, nil, nil)
 	policy := b.policy.(*DefaultBalancePolicy)
 	policy.layouts.domains = map[int64]map[string]*replicaLayout{1: {}, 2: {}}
 	b.Trigger()
-	require.NoError(t, b.Reconcile(t.Context()))
-	require.True(t, b.scanning, "empty collections still count toward the scan budget")
+	require.Zero(t, b.dispatch())
 	c.PublishLoadConfig(1, nil, 2)
 	c.PublishDataView(1, nil)
-	require.NoError(t, b.Reconcile(t.Context()))
+	require.Zero(t, b.dispatch())
 	require.NotContains(t, policy.layouts.domains, int64(1))
 	require.Contains(t, policy.layouts.domains, int64(2))
-	require.True(t, b.scanning, "local removal does not advance the scanner")
-	require.NoError(t, b.Reconcile(t.Context()))
-	require.False(t, b.scanning)
-}
-
-func TestRetryDeadlineDoesNotBlockFreshScopes(t *testing.T) {
-	q := newTriggerQueue()
-	failed, fresh := cacheShard(1, 10), cacheShard(2, 20)
-	q.addRetry(TriggerScope{DirtyShards: []qviews.ShardID{failed}})
-	require.False(t, q.takePending().hasScopes(), "failed work waits for its deadline")
-	q.add(TriggerScope{DirtyShards: []qviews.ShardID{fresh}})
-	require.Equal(t, setOf(fresh), q.takePending().dirtyShards)
-	q.mu.Lock()
-	q.retryAt = time.Time{}
-	q.mu.Unlock()
-	q.add(TriggerScope{DirtyShards: []qviews.ShardID{fresh}})
-	require.Equal(t, setOf(fresh), q.takePending().dirtyShards, "fresh work also precedes due retries")
-	require.Equal(t, setOf(failed), q.takePending().dirtyShards)
-	q.resetRetryDelay()
-	require.Equal(t, 100*time.Millisecond, q.retryDelay)
-}
-
-func TestBalancerLoopServicesAPIEventDuringRetryBackoff(t *testing.T) {
-	c := scanTestCache()
-	t.Cleanup(c.Close)
-	b := NewDefaultBalancer(c, &coordview.ShardViewRegistry{}, nil, nil)
-	failed, fresh := cacheShard(1, 10), cacheShard(2, 20)
-	b.queue.retryDelay = time.Hour
-	b.queue.addRetry(TriggerScope{DirtyShards: []qviews.ShardID{failed}})
-	planned := make(chan []qviews.ShardID, 4)
-	patch := mockey.Mock((*DefaultBalancePolicy).Plan).To(func(_ *DefaultBalancePolicy, _ balancercache.Reader, dirty []qviews.ShardID) *BalancePlan {
-		planned <- append([]qviews.ShardID(nil), dirty...)
-		return nil
-	}).Build()
-	t.Cleanup(func() { patch.UnPatch() })
-	b.Start(t.Context())
-	t.Cleanup(b.Stop)
-	b.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{fresh}})
-	select {
-	case ids := <-planned:
-		require.Equal(t, []qviews.ShardID{fresh}, ids)
-	case <-time.After(5 * time.Second):
-		t.Fatal("a retry deadline prevented a fresh API event from reaching the algorithm")
+	for b.dispatch() >= 0 {
 	}
+}
+
+func TestFaultDiscoveryAdmitsColdCollectionBeforeRangeCompletes(t *testing.T) {
+	for _, manyCollections := range []bool{false, true} {
+		t.Run(fmt.Sprintf("many_collections_%t", manyCollections), func(t *testing.T) {
+			sizes := []int{10000}
+			if manyCollections {
+				sizes = make([]int, 10000)
+				for i := range sizes {
+					sizes[i] = 1
+				}
+			}
+			c := scanTestCache(sizes...)
+			t.Cleanup(c.Close)
+			cfg := DefaultBalanceConfig()
+			cfg.ShardBatchSize = 8
+			c.UpdateBalanceConfig(cfg)
+			var batches [][]qviews.ShardID
+			b := NewDefaultBalancer(c, &coordview.ShardViewRegistry{}, completionTestPolicy(func(_ balancercache.Reader, batch []qviews.ShardID) *BalancePlan {
+				batches = append(batches, batch)
+				return nil
+			}), nil)
+			// Drive the producer and worker separately to inject the request at
+			// the same point regardless of CPU speed or goroutine scheduling.
+			b.running.Store(true)
+			b.Trigger(TriggerScope{DirtyResourceGroups: []string{"rg1"}})
+			require.Equal(t, discoveryShardLimit, b.dispatch())
+			require.NoError(t, b.Reconcile(t.Context()))
+			cold := cacheShard(10001, 100010)
+			auto := cfgFor(10001, 100010, nil, nil)
+			auto.AutoLoad = true
+			c.PublishLoadConfig(10001, auto, 1)
+			c.PublishDataView(10001, cacheData(10001, cold.VChannel, 1))
+			require.Equal(t, 1, b.dispatch())
+			require.NoError(t, b.Reconcile(t.Context()))
+			require.Equal(t, cold, batches[1][0])
+			require.Less(t, len(b.ready.items), 100)
+			// Unfinished discovery must release its cursor on stop; the next
+			// run can replay the range without losing a successor publication.
+			b.discovery.suspend()
+		})
+	}
+}
+
+func TestReleaseCompletionSpansDiscoverySlicesAndWorkerBatches(t *testing.T) {
+	c := balancercache.New(nil)
+	t.Cleanup(c.Close)
+	count := 2*discoveryShardLimit + 1
+	for i := 0; i < count; i++ {
+		c.PublishShard(qviews.ShardID{ReplicaID: 10, VChannel: fmt.Sprintf("p_1v%d", i)}, &coordview.ShardStats{})
+	}
+	c.MarkReady()
+	cfg := DefaultBalanceConfig()
+	cfg.ShardBatchSize = 7
+	c.UpdateBalanceConfig(cfg)
+	seen := make(map[qviews.ShardID]bool)
+	policy := completionTestPolicy(func(_ balancercache.Reader, dirty []qviews.ShardID) *BalancePlan {
+		require.LessOrEqual(t, len(dirty), 7)
+		for _, id := range dirty {
+			require.False(t, seen[id])
+			seen[id] = true
+		}
+		return nil
+	})
+	b := NewDefaultBalancer(c, &coordview.ShardViewRegistry{}, policy, nil)
+	f := b.TriggerWithCompletion(TriggerScope{DirtyCollections: []int64{1}})
+	for range count {
+		require.NoError(t, b.Reconcile(t.Context()))
+		if f.Ready() {
+			break
+		}
+	}
+	require.True(t, f.Ready())
+	require.NoError(t, f.Get())
+	require.Len(t, seen, count)
+}
+
+func TestActiveCollectionRediscoversSupersedingPublication(t *testing.T) {
+	c := scanTestCache(discoveryShardLimit + 1)
+	t.Cleanup(c.Close)
+	b := NewDefaultBalancer(c, nil, nil, nil)
+	b.Trigger(TriggerScope{DirtyCollections: []int64{1}})
+	require.Equal(t, discoveryShardLimit, b.dispatch())
+	first := cacheShard(1, 10)
+	require.EqualValues(t, 2, b.ready.items[first].priority)
+	cfg := c.GetCollection(1).LoadConfig().Clone()
+	cfg.AutoLoad = true
+	c.PublishLoadConfig(1, cfg, 2)
+	b.Trigger(TriggerScope{DirtyCollections: []int64{1}})
+	for b.dispatch() >= 0 {
+	}
+	require.EqualValues(t, 12, b.ready.items[first].priority)
+	require.Len(t, b.ready.items, discoveryShardLimit+1)
 }

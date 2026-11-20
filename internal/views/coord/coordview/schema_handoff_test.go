@@ -53,3 +53,18 @@ func TestSchemaHandoffRecoveryAndRelease(t *testing.T) {
 	require.Empty(t, mgr.Stats().UpBySchema, "release drains every serving generation")
 	require.Nil(t, mgr.upView)
 }
+
+func TestRegistryRepeatedSchemaPublication(t *testing.T) {
+	r := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	id := qviews.ShardID{ReplicaID: 10, VChannel: "p_1v0"}
+	manager := r.Ensure(id)
+	count := 0
+	r.RegisterStatsObserver(func(qviews.ShardID, *ShardStats) { count++ })
+	r.PublishCollectionSchema(1, 2)
+	r.PublishCollectionSchema(1, 2)
+	r.PublishCollectionSchema(1, 1)
+	require.Equal(t, 1, count)
+	require.Error(t, manager.AddPreparing(t.Context(), testBuilderForShard(1, id).SetSchemaVersion(1)))
+	r.PublishCollectionSchema(1, 3)
+	require.EqualValues(t, 3, *r.Ensure(qviews.ShardID{ReplicaID: 20, VChannel: "p_1v1"}).publishedSchema)
+}

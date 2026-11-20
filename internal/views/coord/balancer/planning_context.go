@@ -13,6 +13,7 @@ import (
 // balanceInput is the object-local input consumed by allocation helpers.
 // It exposes no mutable manager state or globally materialized snapshot.
 type balanceInput interface {
+	GetNode(int64) *balancercache.NodeEntry
 	ConfigForShard(qviews.ShardID) *loadmgr.LoadConfig
 	DataViewForShard(qviews.ShardID) *ShardDataView
 	DataVersionForCollection(int64) (qviews.DataVersion, bool)
@@ -29,6 +30,8 @@ type balanceInput interface {
 }
 
 type planningContext struct {
+	changedLayouts      []int64
+	boundedBatch        bool // Controller routes layout-discovered siblings through the same priority queue.
 	feedback            ViewFeedbackReader
 	preparationFeedback *viewfeedback.PlanningSnapshot
 	priorityNow         time.Time
@@ -99,9 +102,14 @@ func (p *planningContext) GetResourceGroup(name string) *balancercache.ResourceG
 	p.groupEntries[name] = group
 	return group
 }
-func (p *planningContext) GetNode(id int64) *balancercache.NodeEntry { return p.nodeEntries[id] }
-func (p *planningContext) GetBalanceConfig() *BalanceConfig          { return p.config }
-func (p *planningContext) NodesMap() map[int64]*BalanceNode          { return p.nodes }
+func (p *planningContext) GetNode(id int64) *balancercache.NodeEntry {
+	if p.nodeEntries == nil {
+		return p.Reader.GetNode(id) // Queue admission reads only the shard's serving nodes.
+	}
+	return p.nodeEntries[id]
+}
+func (p *planningContext) GetBalanceConfig() *BalanceConfig { return p.config }
+func (p *planningContext) NodesMap() map[int64]*BalanceNode { return p.nodes }
 func (p *planningContext) collectionForShard(id qviews.ShardID) *balancercache.CollectionEntry {
 	collectionID, ok := parseShardCollection(id)
 	if !ok {
@@ -184,46 +192,6 @@ func (p *planningContext) CurrentSize(id qviews.ShardID) map[int64]int64 {
 		}
 	}
 	return rows
-}
-
-// resolveCacheScope expands local events only. Background scans enumerate
-// collections incrementally through cache.Scanner.
-func resolveCacheScope(reader balancercache.Reader, pending triggerBatch) []qviews.ShardID {
-	targets := make(map[qviews.ShardID]struct{})
-	for id := range pending.dirtyColls {
-		addCollectionShards(targets, reader.GetCollection(id))
-	}
-	for id := range pending.dirtyShards {
-		targets[id] = struct{}{}
-	}
-	for id := range pending.dirtyNodes {
-		if node := reader.GetNode(id); node != nil {
-			node.RangeShards(func(id qviews.ShardID) bool { targets[id] = struct{}{}; return true })
-		}
-	}
-	return shardKeys(targets)
-}
-
-func addCollectionShards(targets map[qviews.ShardID]struct{}, collection *balancercache.CollectionEntry) {
-	if collection == nil {
-		return
-	}
-	collection.RangeShards(func(shard *balancercache.ShardEntry) bool { targets[shard.ID()] = struct{}{}; return true })
-	if collection.LoadConfig() != nil && collection.DataView() != nil {
-		for _, replica := range collection.LoadConfig().Replicas {
-			for _, shard := range collection.DataView().Shards {
-				targets[qviews.ShardID{ReplicaID: replica.ReplicaID, VChannel: shard.VChannel}] = struct{}{}
-			}
-		}
-	}
-}
-
-func shardKeys(targets map[qviews.ShardID]struct{}) []qviews.ShardID {
-	shards := make([]qviews.ShardID, 0, len(targets))
-	for id := range targets {
-		shards = append(shards, id)
-	}
-	return shards
 }
 
 // Refresh after publishing layout selectors, before accepting any candidate.

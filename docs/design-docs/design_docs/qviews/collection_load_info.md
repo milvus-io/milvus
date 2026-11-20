@@ -26,7 +26,7 @@ Each record contains:
 - exact field-to-index references: each LoadFieldConfig contains field_id and
   repeated index_ids, including all selected JSON path indexes for a field;
 - a persisted `auto_load` source flag, used by preparation priority only when the
-  target shard has no healthy Up View;
+  target shard is still in its initial load;
 - replica IDs, resource groups and priorities; target node placement belongs
   to Balancer and actual lifecycle state belongs to ShardViewRegistry.
 
@@ -261,9 +261,9 @@ it. An explicit manual LoadCollection/LoadPartitions publishes false; refresh-on
 loads retain the existing intent. Full Release removes it with the load records.
 
 Recent traffic without a healthy Up View still selects the recovery baseline
-and traffic bonus first. Otherwise AutoLoad without a healthy Up View selects
-+10, even with cold access history. AutoLoad with a healthy Up View follows
-ordinary active/cold handoff scoring. Existing QueryView priorities stay immutable.
+and traffic bonus first. Otherwise AutoLoad selects +10 only until the shard has first reached Up.
+After Coord restart, surviving Up, Down, or Unrecoverable records count as
+evidence of a previous Up. Subsequent recovery uses ordinary access and health scoring. Existing QueryView priorities stay immutable.
 
 A source-only change retains LoadInfoVersion and all View references. Under the
 existing collection update lock, persist the replacement before publishing it to

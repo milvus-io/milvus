@@ -41,6 +41,7 @@ func TestQueryViewConfiguration(t *testing.T) {
 		"logicalSize.source":                                    "rowCount",
 		"logicalSize.bytesPerUnit":                              "64KB",
 		"logicalSize.segmentBaseCost":                           "16",
+		"balancer.shardBatchSize":                               "100",
 		"balancer.reconcileInterval":                            "1m",
 		"balancer.optimization.enabled":                         "true",
 		"balancer.optimization.minScoreGain":                    "1",

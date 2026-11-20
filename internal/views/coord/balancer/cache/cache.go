@@ -9,7 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 // Reader returns immutable objects. Separate calls need not observe one instant.
@@ -26,13 +26,15 @@ type Reader interface {
 
 // CollectionEntry shares independently published desired and actual children.
 type CollectionEntry struct {
-	id                 int64
-	config             *loadmgr.LoadConfig
-	configVersion      uint64
-	data               *api.CollectionDataView
-	shards             immutableIndex[*ShardEntry]
-	placements         immutableIndex[*PlacementNode]
-	suspended          immutableIndex[bool]
+	id            int64
+	config        *loadmgr.LoadConfig
+	configVersion uint64
+	data          *api.CollectionDataView
+	shards        immutableIndex[*ShardEntry]
+	placements    immutableIndex[*PlacementNode]
+	suspended     immutableIndex[bool]
+	// Preserve Up history while a desired replica temporarily has no shard manager.
+	releasedUpShards   immutableIndex[bool]
 	targetLoads        immutableIndex[targetLoad]
 	loadedPartitions   map[int64]struct{}
 	loadsAllPartitions bool
@@ -47,6 +49,13 @@ func (c *CollectionEntry) DataView() *api.CollectionDataView { return c.data }
 func (c *CollectionEntry) GetShard(id qviews.ShardID) *ShardEntry {
 	shard, _ := c.shards.getShard(id)
 	return shard
+}
+func (c *CollectionEntry) MaybeUped(id qviews.ShardID) bool {
+	if shard := c.GetShard(id); shard != nil && shard.stats.MaybeUped {
+		return true
+	}
+	_, ok := c.releasedUpShards.getShard(id)
+	return ok
 }
 func (c *CollectionEntry) RangeShards(fn func(*ShardEntry) bool) { c.shards.each(fn) }
 
@@ -220,6 +229,7 @@ func (c *Cache) UpdateBalanceConfig(config *api.BalanceConfig) bool {
 		if c.config.CompareAndSwap(previous, &copy) {
 			policy := copy
 			policy.ReconcileInterval = previous.ReconcileInterval
+			policy.ShardBatchSize = previous.ShardBatchSize
 			if policy != *previous {
 				c.changed(api.TriggerScope{NodeChanged: true})
 			}
@@ -373,6 +383,16 @@ func (c *Cache) PublishLoadConfig(id int64, cfg *loadmgr.LoadConfig, version uin
 		}
 	}
 	c.mu.Unlock()
+	if cfg == nil {
+		next.releasedUpShards = immutableIndex[bool]{}
+	} else if next.releasedUpShards.len() > 0 {
+		for _, replica := range next.config.Replicas {
+			if !hasReplica(cfg, replica.ReplicaID) {
+				prefix := idKey(replica.ReplicaID)
+				next.releasedUpShards.tree, _ = next.releasedUpShards.tree.DeletePrefix(prefix[:])
+			}
+		}
+	}
 	next.config, next.configVersion = cfg, version
 	next.refreshLoadRows()
 	c.replaceDemand(&previous, &next)
@@ -441,13 +461,10 @@ func (s *collectionSlot) pruneRow(next *CollectionEntry, id int64) {
 
 // PublishShard is called in source order, including seed and final removal.
 func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
-	collectionID, ok := parseShardCollection(id)
-	if !ok {
-		collectionID, ok = c.CollectionForReplica(id.ReplicaID)
-	}
+	collectionID, ok := c.collectionIDForShard(id)
 	if !ok {
 		return
-	} // Invalid legacy identity cannot be associated with a collection.
+	}
 	slot := c.lockCollection(collectionID)
 	defer c.finishCollection(collectionID, slot)
 	next := *slot.value.Load()
@@ -481,6 +498,9 @@ func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
 	c.replaceTarget(&next, id, old, replacement, slot.rows)
 	if stats == nil {
 		if old != nil {
+			if old.stats.MaybeUped && next.config != nil && hasReplica(next.config, id.ReplicaID) {
+				next.releasedUpShards = next.releasedUpShards.set(shardKey(id), true)
+			}
 			slot.replicaUses[id.ReplicaID]--
 			if slot.replicaUses[id.ReplicaID] == 0 {
 				delete(slot.replicaUses, id.ReplicaID)
@@ -535,6 +555,13 @@ func shardRows(stats *coordview.ShardStats, fallback map[int64]int64) ShardSizeS
 	rows := make(ShardSizeStats)
 	if stats == nil {
 		return rows
+	}
+	// A Preparing on an empty node can still select or invalidate a non-empty Up fallback.
+	for _, node := range stats.UpNodes {
+		rows[node] = NodeSizeStats{}
+	}
+	for _, node := range stats.PreparingNodes {
+		rows[node] = NodeSizeStats{}
 	}
 	for _, segment := range stats.Segments {
 		count := segment.LogicalSize
@@ -610,25 +637,24 @@ func (c *Cache) PublishNode(id int64, info *api.NodeInfo) {
 	c.mu.Unlock()
 	slot.value.Store(&next)
 	c.finishNode(id, slot)
-	scope := api.TriggerScope{DirtyNodes: []int64{id}}
-	{
-		seen := make(map[int64]struct{})
-		for _, name := range []string{old.ResourceGroup, next.info.ResourceGroup} {
-			if rg := c.GetResourceGroup(name); rg != nil {
-				rg.RangeCollections(func(id int64) bool { seen[id] = struct{}{}; return true })
-			}
+	// Only placements on this node can have changed their target contribution.
+	// Resource-group membership also affects unplaced collections; the discovery
+	// producer traverses those immutable indexes independently of this publisher.
+	for shard := range next.RangeShards {
+		collectionID, ok := c.collectionIDForShard(shard)
+		if !ok {
+			continue
 		}
-		for id := range seen {
-			scope.DirtyCollections = append(scope.DirtyCollections, id)
-		}
-	}
-	// Release the node writer lock before taking any collection writer lock.
-	for _, collectionID := range scope.DirtyCollections {
 		s := c.lockCollection(collectionID)
 		entry := *s.value.Load()
-		c.refreshTargets(&entry, s.rows)
-		s.value.Store(&entry)
+		if current := entry.GetShard(shard); current != nil && c.refreshShardTarget(&entry, current, s.rows, make(map[int64]int64)) {
+			s.value.Store(&entry)
+		}
 		c.finishCollection(collectionID, s)
+	}
+	scope := api.TriggerScope{DirtyNodes: []int64{id}, DirtyResourceGroups: []string{old.ResourceGroup}}
+	if next.info.ResourceGroup != old.ResourceGroup {
+		scope.DirtyResourceGroups = append(scope.DirtyResourceGroups, next.info.ResourceGroup)
 	}
 	c.changed(scope)
 }
@@ -693,10 +719,10 @@ func hasReplica(config *loadmgr.LoadConfig, id int64) bool {
 	return false
 }
 
-func parseShardCollection(shardID qviews.ShardID) (int64, bool) {
-	channel, err := metautil.ParseChannel(shardID.VChannel, metautil.NewDynChannelMapper())
+func (c *Cache) collectionIDForShard(shardID qviews.ShardID) (int64, bool) {
+	_, id, _, err := funcutil.ParseVChannel(shardID.VChannel)
 	if err != nil {
-		return 0, false
+		return c.CollectionForReplica(shardID.ReplicaID)
 	}
-	return channel.CollectionID(), true
+	return id, true
 }

@@ -119,6 +119,7 @@ func TestBalancer_ReconcilePreservesTriggerArrivingDuringCacheRead(t *testing.T)
 	t.Cleanup(registry.RegisterPublicationListener(cache.PublishShard))
 	cache.MarkReady()
 	controller := NewDefaultBalancer(cache, registry, nil, nil)
+	controller.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{shard}})
 	var original func(*balancercache.Cache, int64) *balancercache.CollectionEntry
 	once := true
 	patch := mockey.Mock((*balancercache.Cache).GetCollection).Origin(&original).To(func(c *balancercache.Cache, id int64) *balancercache.CollectionEntry {
@@ -130,7 +131,6 @@ func TestBalancer_ReconcilePreservesTriggerArrivingDuringCacheRead(t *testing.T)
 		return entry
 	}).Build()
 	defer patch.UnPatch()
-	controller.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{shard}})
 	require.NoError(t, controller.Reconcile(t.Context()))
 	require.NotNil(t, registry.Get(shard).Stats().PreparingVersion)
 	require.NoError(t, controller.Reconcile(t.Context()))
@@ -226,7 +226,8 @@ func TestBalancerLoopInitialAndPeriodicFullReconcile(t *testing.T) {
 	}, 5*time.Second, time.Millisecond)
 }
 
-func TestBalancerLoopRetriesUnavailableAllocation(t *testing.T) {
+func TestBalancerPeriodicScanRecoversUnavailableAllocation(t *testing.T) {
+	setBalanceParam(t, paramtable.Get(), paramtable.Get().QueryViewCfg.BalancerReconcileInterval.Key, "50ms")
 	reg := emptyRegistry(t)
 	c := newTestCache(cfgFor(1, 10, nil, nil))
 	shard := cacheShard(1, 10)
@@ -255,7 +256,7 @@ func TestBalancerLoopRetriesUnavailableAllocation(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("initial allocation did not retry missing DataView")
 	}
-	// Disable publication notifications so recovery must consume the queued retry.
+	// Disable publication notifications so recovery must use the periodic scan.
 	c.SetNotifier(nil)
 	c.PublishDataView(1, cacheData(1, shard.VChannel, 100))
 	require.Eventually(t, func() bool {
@@ -308,8 +309,8 @@ func TestBalancerLoopRetriesDetachedManager(t *testing.T) {
 	t.Cleanup(func() { preparePatch.UnPatch() })
 
 	balancer := NewDefaultBalancer(cache, registry, nil, nil)
-	// Only the initial scan and apply's own retry can drive this test:
-	// neither cache notifications nor the periodic timer may rescue it.
+	// A stale manager is retried from fresh inputs on the next discovery round.
+	setBalanceParam(t, paramtable.Get(), paramtable.Get().QueryViewCfg.BalancerReconcileInterval.Key, "50ms")
 	cache.SetNotifier(nil)
 	balancer.Start(t.Context())
 	t.Cleanup(balancer.Stop)
@@ -372,7 +373,7 @@ func TestBalancerApplyDoesNotHoldOtherShardEventsDuringReferenceWait(t *testing.
 	done := make(chan error, 1)
 	var workers sync.WaitGroup
 	workers.Go(func() {
-		done <- controller.apply(t.Context(), &BalancePlan{Prepares: map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder{blockedShard: builder}})
+		done <- controller.apply(t.Context(), &BalancePlan{Prepares: map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder{blockedShard: builder}}, []qviews.ShardID{blockedShard})
 	})
 	defer func() {
 		release()
@@ -408,10 +409,13 @@ func pendingCompletion(t *testing.T, b *DefaultBalancer, count int) *syncutil.Fu
 	t.Helper()
 	var result *syncutil.Future[error]
 	require.Eventually(t, func() bool {
-		b.queue.mu.Lock()
-		defer b.queue.mu.Unlock()
-		result = b.queue.completion
-		return result != nil && len(b.queue.dirtyColls) == count
+		b.discovery.mu.Lock()
+		defer b.discovery.mu.Unlock()
+		if b.discovery.release == nil {
+			return false
+		}
+		result = b.discovery.release.completion.future
+		return len(b.discovery.release.scopes) == count
 	}, 5*time.Second, time.Millisecond)
 	return result
 }
@@ -455,6 +459,8 @@ func TestTriggerWithCompletionCoalescesConcurrentReleases(t *testing.T) {
 			t.Cleanup(unblock)
 			<-entered
 
+			// This case isolates explicit release notifications from ordinary stats publications.
+			c.SetNotifier(nil)
 			const waiters = 64
 			results := make(chan *syncutil.Future[error], waiters)
 			var expected []qviews.ShardID

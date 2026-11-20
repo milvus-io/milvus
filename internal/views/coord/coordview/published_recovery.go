@@ -74,6 +74,9 @@ func (m *ShardViewManager) validatePreparationLocked(view *viewpb.QueryViewOfSha
 	if err := m.validatePreparingLocked(version); err != nil {
 		return err
 	}
+	if m.publishedSchema != nil && meta.GetSchemaVersion() < *m.publishedSchema {
+		return merr.WrapErrServiceUnavailableMsg("shard %s schema %d precedes published schema %d; replan", m.shardID.String(), meta.GetSchemaVersion(), *m.publishedSchema)
+	}
 	if source == nil {
 		return nil
 	}

@@ -26,7 +26,8 @@ shards. State ownership is separate from planning:
    actual QueryView state.
 2. `BalancerCache` receives synchronous publication hooks and maintains
    immutable read objects, actual-load aggregates, and reverse indexes.
-3. Balancer resolves dirty scopes from the cache and requests one batch plan.
+3. Scope and scan producers score shard IDs and update a deduplicated priority queue.
+   The serial worker requests a placement plan for the next bounded batch.
 4. BalancePolicy reads immutable objects and maintains private predicted loads.
 5. The executor applies the completed plan through ShardViewManager.
 
@@ -74,9 +75,9 @@ LoadConfigStore    DataViewManager    Node/RG owners    ShardViewRegistry
 - **Copy-on-write with structural sharing**: Node and Collection are the main
   access units; large Collection children and node contribution indexes share
   unchanged structure. Neither reads nor small writes copy global segment data.
-- **Preserved batch planning**: Must before MayOptimize, then larger shards
-  first with deterministic tie-breaking. All candidates share one private
-  projected-load tracker. Apply starts only after planning the batch.
+- **Priority batches**: The worker selects shard IDs in signed priority order.
+  Each batch shares one projected-load tracker. Apply starts after planning
+  the selected shards.
 - **Separated state ownership**: The cache is a derived view, not a new owner
   of load lifecycle or QueryView state. No predicted plan is written into it.
 
@@ -84,8 +85,8 @@ LoadConfigStore    DataViewManager    Node/RG owners    ShardViewRegistry
 
 ### 2.1 Balancer
 
-The controller owns a work queue and one reconcile goroutine. It resolves
-scope, delegates batch decisions, and applies the completed plan.
+A discovery producer expands scopes and submits scored shard IDs. A single
+worker consumes priority batches, delegates placement decisions, and applies each plan.
 
 ```go
 type Balancer interface {
@@ -140,32 +141,32 @@ not an atomic configuration transaction.
 
 Config publication copies the input and skips unchanged values. Policy changes
 request a full pass. Interval-only changes wake the controller and reset its
-timer without requesting extra optimization, including during retry backoff.
+timer without requesting extra optimization.
 An active reconcile is allowed to finish; configuration changes do not preempt
 planning or cancel previously submitted Preparing views. Recovery readiness
 still gates planning, while config updates can be published during that wait.
 
 Synchronous Reconcile callers may supply a valid cache configuration directly.
 Once Start runs, ParamTable owns the runtime configuration. Layout estimation
-budgets and retry backoff remain internal constants in this change.
+budgets remain internal constants.
 
 #### Main Loop
 
 The target control flow is schematic:
 
 ```text
-wait for queued work, periodic tick, retry, or cancellation
-cache.WaitForReady(ctx)  // cancellation preserves pending work
-pending := queue.TakePending()
-dirty := resolveScope(cache, pending)
-plan := policy.Plan(cache, dirty)
-failedOrInvalidated := apply(plan)
-requeue affected failures with bounded backoff
+producer: wait for cache readiness
+          discover one slice from a notification or periodic scan
+          score and upsert shard IDs, then yield to other scopes
+
+worker:   take the highest-priority shard batch
+          read current inputs, classify shards and calculate placements
+          apply releases and prepares, then take the next batch
 ```
 
-The queue detaches work before scope resolution. A concurrent publication must
-remain scheduled for a later pass. The loop may start during recovery, but waits
-for all sources to finish initial cache seeding before consuming pending work.
+A new publication can requeue a shard that is already being planned. Failed
+metadata reads and apply operations are reconsidered on input changes and
+periodic scans. Release completion observes any preceding in-flight batch.
 A periodic cache scan cannot repair an update that the upstream never published.
 
 #### Scope Resolution
@@ -575,10 +576,10 @@ Phase 1: Classify each dirty shard
     │    actionNone        → skip
     │
     ▼
-Phase 2: Order candidates + build complete placements with a shared
+Phase 2: Process queued candidates and build complete placements with a shared
          steady-state row tracker
     │
-    │  Mandatory first, then optional.
+    │  Follow the selected batch order.
     │  Rebuild each shard from an empty partial candidate.
     │  After each accepted candidate, update projectedRows so later shards see it.
     │
@@ -616,9 +617,10 @@ its active target requires Must convergence. For other dirty shards:
 
 ### 3.2 Phase 2: Normalized Ordered Allocation
 
-Candidates are processed in priority order — mandatory (Must) first, optional
-(MayOptimize) last. Within each group, larger shards by total `RowNum` are
-processed first, then by ShardID. Within a shard, segments are processed by
+Controller batches retain the shard queue order. Mandatory and optional
+classification controls whether a replacement is required. Direct unbounded
+policy calls order mandatory work first and use shard load to break ties.
+Within a shard, segments are processed by
 `RowNum` descending and SegmentID ascending. The explicit secondary ordering
 makes planning deterministic.
 
@@ -863,7 +865,7 @@ base[n] = pinnedNode[n].TotalRows
 old[n,s] = pinnedNode[n].Contribution(s).TotalRows
 projected[n] = base[n] + acceptedDelta[n]
 
-for each candidate s in the existing policy order:
+for each eligible shard s in dequeue order:
     candidateBase[n] = projected[n] - old[n,s]
     candidate = allocate(s, candidateBase)
     if accepted:
@@ -901,7 +903,7 @@ reference provider.
 
 1. The node owner publishes QN3 as ineligible, then enqueues its placed shards.
 2. QueryView failure transitions independently publish actual contributions.
-3. Balancer detaches work, obtains cache references, and classifies candidates.
+3. Balancer takes up to `queryView.balancer.shardBatchSize` shards in descending preparation priority, reads current cache state, and classifies candidates.
 4. Lost placements are redistributed with surviving-copy stickiness preserved.
    Accepted candidates update only the private projected-load delta.
 5. Apply creates Preparing views; their source hooks publish actual state.
@@ -913,8 +915,7 @@ reference provider.
 2. The store hook publishes the Collection desired field and indexes before
    enqueueing C1 and returning.
 3. Scope resolution combines configured replicas and published DataView shards.
-4. Policy uses cached shard totals for ordering and allocates complete placements
-   with one shared projected-load tracker.
+4. Policy computes eligible placements in dequeue order with one shared projected-load tracker.
 5. Apply calls AddPreparing; the exact DataViewRef is acquired before existing
    views can be preempted. Missing versions cause replanning.
 

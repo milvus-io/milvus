@@ -28,6 +28,8 @@ type BalancePolicy interface {
 // A shard listed in neither Prepares nor Releases is implicitly a no-op for
 // this batch.
 type BalancePlan struct {
+	// RescanCollections identifies changed layouts for incremental discovery.
+	RescanCollections []int64
 	// Continues contains unfinished bounded searches, not allocation failures.
 	Continues []qviews.ShardID
 	// Retries could not be allocated because desired inputs or eligible nodes were unavailable.
