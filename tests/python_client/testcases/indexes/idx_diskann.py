@@ -40,24 +40,37 @@ class DISKANN:
         {"description": "Boolean Type Test", "params": {"search_cache_budget_gb_ratio": True}, "expected": success},
         {"description": "None Type Test", "params": {"search_cache_budget_gb_ratio": None}, "expected": success},
         # pq_code_budget_gb_ratio
-        # Type: Float Range: (0.0, 0.25]
+        # Type: Positive float (validated by Knowhere; 0.25 is not an upper limit)
         # Default value: 0.125
         {"description": "Minimum Boundary Test", "params": {"pq_code_budget_gb_ratio": 0.0001}, "expected": success},
-        {"description": "Maximum Boundary Test", "params": {"pq_code_budget_gb_ratio": 0.25}, "expected": success},
+        {"description": "Valid Positive Value Test", "params": {"pq_code_budget_gb_ratio": 0.25}, "expected": success},
         {"description": "Default value Test", "params": {"pq_code_budget_gb_ratio": 0.125}, "expected": success},
+        {
+            "description": "Zero Ratio Test",
+            "params": {"pq_code_budget_gb_ratio": 0},
+            "expected": {"err_code": 1100, "err_msg": "PQ navigation requires positive"},
+        },
         {
             "description": "Out of Range Test - Negative",
             "params": {"pq_code_budget_gb_ratio": -0.1},
-            "expected": success,
+            "expected": {"err_code": 1100, "err_msg": "param 'pq_code_budget_gb_ratio'"},
         },
         {
-            "description": "Out of Range Test - Too Large",
+            "description": "Positive Ratio Above 0.25 Test",
             "params": {"pq_code_budget_gb_ratio": 0.26},
             "expected": success,
         },
         {"description": "String Type Test", "params": {"pq_code_budget_gb_ratio": "0.1"}, "expected": success},
-        {"description": "Boolean Type Test", "params": {"pq_code_budget_gb_ratio": True}, "expected": success},
-        {"description": "None Type Test", "params": {"pq_code_budget_gb_ratio": None}, "expected": success},
+        {
+            "description": "Boolean Type Test",
+            "params": {"pq_code_budget_gb_ratio": True},
+            "expected": {"err_code": 1100, "err_msg": "invalid float value"},
+        },
+        {
+            "description": "None Type Test",
+            "params": {"pq_code_budget_gb_ratio": None},
+            "expected": {"err_code": 1100, "err_msg": "invalid float value"},
+        },
         # max_degree
         # Type: Integer Range: [1, 512]
         # Default value: 56
