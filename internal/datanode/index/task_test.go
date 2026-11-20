@@ -405,6 +405,7 @@ func (suite *IndexBuildTaskSuite) TestMaxConnectionsReachesCreateIndex() {
 			TalonMode:                   2,
 			TalonSmallReadThreshold:     65536,
 			TalonCoordinator:            "talon:7000",
+			TalonNamespace:              "request-namespace",
 			TalonBlockSize:              8388608,
 			TalonMaxIdlePerAddr:         32,
 			TalonEnableForExternalTable: true,
@@ -439,6 +440,7 @@ func (suite *IndexBuildTaskSuite) TestMaxConnectionsReachesCreateIndex() {
 				suite.Equal("request-secret-key", captured.GetStorageConfig().GetSecretAccessKey())
 				suite.Equal(uint32(65536), captured.GetStorageConfig().GetTalonSmallReadThreshold())
 				suite.Equal("talon:7000", captured.GetStorageConfig().GetTalonCoordinator())
+				suite.Equal("request-namespace", captured.GetStorageConfig().GetTalonNamespace())
 				suite.Equal(uint32(8388608), captured.GetStorageConfig().GetTalonBlockSize())
 				suite.Equal(uint32(32), captured.GetStorageConfig().GetTalonMaxIdlePerAddr())
 				suite.True(captured.GetStorageConfig().GetTalonEnableForExternalTable())
@@ -586,6 +588,7 @@ func (suite *AnalyzeTaskSuite) TestMaxConnectionsReachesAnalyze() {
 			TalonMode:                   2,
 			TalonSmallReadThreshold:     65536,
 			TalonCoordinator:            "talon:7000",
+			TalonNamespace:              "request-namespace",
 			TalonBlockSize:              8388608,
 			TalonMaxIdlePerAddr:         32,
 			TalonEnableForExternalTable: true,
@@ -622,6 +625,7 @@ func (suite *AnalyzeTaskSuite) TestMaxConnectionsReachesAnalyze() {
 				suite.Equal("request-secret-key", captured.GetSecretAccessKey())
 				suite.Equal(uint32(65536), captured.GetTalonSmallReadThreshold())
 				suite.Equal("talon:7000", captured.GetTalonCoordinator())
+				suite.Equal("request-namespace", captured.GetTalonNamespace())
 				suite.Equal(uint32(8388608), captured.GetTalonBlockSize())
 				suite.Equal(uint32(32), captured.GetTalonMaxIdlePerAddr())
 				suite.True(captured.GetTalonEnableForExternalTable())
