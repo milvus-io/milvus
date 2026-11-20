@@ -128,7 +128,9 @@ func TestTranslateOutputFields(t *testing.T) {
 	_, _, _, _, _, err = translateOutputFields([]string{"*", sparseFloatVectorFieldName}, schema, false)
 	assert.Error(t, err)
 	_, _, _, _, _, err = translateOutputFields([]string{sparseFloatVectorFieldName}, schema, false)
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.ErrorContains(t, err, "not allowed to retrieve raw data of field "+sparseFloatVectorFieldName)
+	assert.ErrorContains(t, err, "output of a BM25 function")
 	_, _, _, _, _, err = translateOutputFields([]string{sparseFloatVectorFieldName}, schema, true)
 	assert.Error(t, err)
 
