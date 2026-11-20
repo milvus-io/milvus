@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/dql"
+	"github.com/milvus-io/milvus/internal/proxy/reqregistry"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -456,12 +457,13 @@ func TestAutoLoadBypassesSaturatedTaskQueues(t *testing.T) {
 type dqlRetryServer struct {
 	viewpb.UnimplementedQueryPlanServiceServer
 	viewpb.UnimplementedViewQueryServiceServer
-	loaded    atomic.Bool
-	injected  atomic.Bool
-	plans     atomic.Int32
-	searches  atomic.Int32
-	queries   atomic.Int32
-	failPhase string
+	loaded        atomic.Bool
+	injected      atomic.Bool
+	plans         atomic.Int32
+	searches      atomic.Int32
+	queries       atomic.Int32
+	failPhase     string
+	beforeViewRPC func(context.Context, string) error
 	// retrieved is what QueryOnView returns.
 	retrieved *schemapb.IDs
 }
@@ -498,18 +500,28 @@ func (s *dqlRetryServer) GetQueryPlan(_ context.Context, req *viewpb.GetQueryPla
 	return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
 }
 
-func (s *dqlRetryServer) SearchOnView(context.Context, *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+func (s *dqlRetryServer) SearchOnView(ctx context.Context, _ *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
 	s.searches.Add(1)
 	if err := s.failure("search"); err != nil {
 		return nil, err
 	}
+	if s.beforeViewRPC != nil {
+		if err := s.beforeViewRPC(ctx, "search"); err != nil {
+			return nil, err
+		}
+	}
 	return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: merr.Success()}}, nil
 }
 
-func (s *dqlRetryServer) QueryOnView(context.Context, *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
+func (s *dqlRetryServer) QueryOnView(ctx context.Context, _ *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
 	s.queries.Add(1)
 	if err := s.failure("query"); err != nil {
 		return nil, err
+	}
+	if s.beforeViewRPC != nil {
+		if err := s.beforeViewRPC(ctx, "query"); err != nil {
+			return nil, err
+		}
 	}
 	return &viewpb.QueryOnViewResponse{LegacyResults: &internalpb.RetrieveResults{Status: merr.Success(), Ids: s.retrieved}}, nil
 }
@@ -633,11 +645,7 @@ func (c *dqlRetryClient) expectAutoLoad(t *testing.T) {
 // shard retries, gRPC error transport, EnsureCollectionReady RPC and full DQL retries.
 // Parsing/reducing results and coordinator storage are replaced by test doubles.
 func TestDQLAutoLoadRetryThroughTaskAndGRPC(t *testing.T) {
-	// This test's gRPC client only implements the unary QueryView RPCs.
-	params := paramtable.Get()
-	key, old := params.ProxyCfg.EnableReduceStream.Key, params.ProxyCfg.EnableReduceStream.GetValue()
-	t.Cleanup(func() { require.NoError(t, params.Save(key, old)) })
-	require.NoError(t, params.Save(key, "false"))
+	useUnaryDQLRetryRPC(t)
 
 	for _, test := range []struct{ method, phase string }{
 		{"Search", "plan"},
@@ -651,106 +659,216 @@ func TestDQLAutoLoadRetryThroughTaskAndGRPC(t *testing.T) {
 		{"Search", "wait"},
 	} {
 		t.Run(test.method+"/"+test.phase, func(t *testing.T) {
-			node, client := newDQLRetryProxy(t, test.phase)
-			if test.phase == "wait" {
-				client.server.loaded.Store(false)
-			}
-			client.expectAutoLoad(t)
-
-			if test.method == "Requery" {
-				// Internal requery tasks use the scheduler's subtask path; their
-				// parent search is still occupying a DQL worker.
-				subtask := mockey.Mock((*queryTask).IsSubTask).Return(true).Build()
-				t.Cleanup(func() { subtask.UnPatch() })
-			}
-			var searchTasks, queryTasks atomic.Int32
-			searchPre := mockey.Mock((*searchTask).PreExecute).To(func(st *searchTask, _ context.Context) error {
-				searchTasks.Add(1)
-				st.CollectionID = 100
-				st.Nq = 1
-				return nil
-			}).Build()
-			t.Cleanup(func() { searchPre.UnPatch() })
-			queryPre := mockey.Mock((*queryTask).PreExecute).To(func(qt *queryTask, _ context.Context) error {
-				queryTasks.Add(1)
-				schema, err := node.metaCache.GetCollectionSchema(node.ctx, "db", "collection")
-				if err != nil {
-					return err
-				}
-				dql.SetQueryReadSchemaForTest(qt, schema)
-				qt.CollectionID = 100
-				return nil
-			}).Build()
-			t.Cleanup(func() { queryPre.UnPatch() })
-			var queryResult *milvuspb.QueryResults
-			queryResultMock := mockey.Mock((*queryTask).Result).To(func(*queryTask) *milvuspb.QueryResults { return queryResult }).Build()
-			t.Cleanup(func() { queryResultMock.UnPatch() })
-			queryPost := mockey.Mock((*queryTask).PostExecute).To(func(qt *queryTask, _ context.Context) error {
-				queryResult = &milvuspb.QueryResults{Status: merr.Success()}
-				if test.method == "SearchByPK" {
-					queryResult.FieldsData = autoLoadTestRow()
-				}
-				return nil
-			}).Build()
-			t.Cleanup(func() { queryPost.UnPatch() })
-			var searchResult *milvuspb.SearchResults
-			searchResultMock := mockey.Mock((*searchTask).Result).To(func(*searchTask) *milvuspb.SearchResults { return searchResult }).Build()
-			t.Cleanup(func() { searchResultMock.UnPatch() })
-			searchPost := mockey.Mock((*searchTask).PostExecute).To(func(st *searchTask, ctx context.Context) error {
-				if test.method == "Requery" {
-					// The requery pipeline now lives in dql. Exercise its TaskNode
-					// query-execution boundary without reaching private operator fields.
-					qt := NewQueryTask(ctx, node, &milvuspb.QueryRequest{DbName: "db", CollectionName: "collection"}, nil,
-						&internalpb.RetrieveRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Retrieve}, QueryLabel: metrics.ReQueryLabel}, node.GetMetaCache(), false)
-					_, _, err := node.ExecuteQuery(ctx, qt, trace.SpanFromContext(ctx))
-					if err != nil {
-						return err
-					}
-				}
-				searchResult = &milvuspb.SearchResults{Status: merr.Success(), Results: &schemapb.SearchResultData{NumQueries: 1}}
-				return nil
-			}).Build()
-			t.Cleanup(func() { searchPost.UnPatch() })
-			require.NoError(t, node.sched.Start())
-
-			var status *commonpb.Status
-			switch test.method {
-			case "HybridSearch":
-				resp, err := node.HybridSearch(node.ctx, &milvuspb.HybridSearchRequest{DbName: "db", CollectionName: "collection"})
-				require.NoError(t, err)
-				status = resp.GetStatus()
-			case "Query":
-				resp, err := node.Query(node.ctx, &milvuspb.QueryRequest{DbName: "db", CollectionName: "collection"})
-				require.NoError(t, err)
-				status = resp.GetStatus()
-			default:
-				req := &milvuspb.SearchRequest{DbName: "db", CollectionName: "collection", Nq: 1}
-				if test.method == "SearchByPK" {
-					req.SearchInput = &milvuspb.SearchRequest_Ids{Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}}
-				}
-				resp, err := node.Search(node.ctx, req)
-				require.NoError(t, err)
-				status = resp.GetStatus()
-			}
-			require.NoError(t, merr.Error(status))
-			require.True(t, client.server.injected.Load())
-			require.EqualValues(t, 2, client.checks.Load())
-			if test.phase == "wait" {
-				require.EqualValues(t, 2, client.loads.Load())
-				require.EqualValues(t, 1, searchTasks.Load())
-			} else {
-				require.EqualValues(t, 1, client.loads.Load())
-				if test.method == "SearchByPK" && test.phase == "search" {
-					// qv recreates the PK lookup from the original IDs on each search attempt.
-					require.EqualValues(t, 2, queryTasks.Load())
-					require.EqualValues(t, 2, searchTasks.Load())
-				} else if test.method == "Query" || test.method == "SearchByPK" {
-					require.EqualValues(t, 2, queryTasks.Load())
-				} else {
-					require.EqualValues(t, 2, searchTasks.Load())
-				}
-			}
+			checkDQLRetryThroughTaskAndGRPC(t, test.method, test.phase, "")
 		})
+	}
+}
+
+func useUnaryDQLRetryRPC(t *testing.T) {
+	t.Helper()
+	// This test's gRPC client only implements the unary QueryView RPCs.
+	params := paramtable.Get()
+	key, old := params.ProxyCfg.EnableReduceStream.Key, params.ProxyCfg.EnableReduceStream.GetValue()
+	t.Cleanup(func() { require.NoError(t, params.Save(key, old)) })
+	require.NoError(t, params.Save(key, "false"))
+}
+
+func TestDQLCancellationDuringInternalStage(t *testing.T) {
+	useUnaryDQLRetryRPC(t)
+	for _, tc := range []struct{ name, method, failPhase, cancelPhase string }{
+		{"requery", "Requery", "", "query"},
+		{"search_by_id", "SearchByPK", "", "query"},
+		{"retry", "Search", "search", "search"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkDQLRetryThroughTaskAndGRPC(t, tc.method, tc.failPhase, tc.cancelPhase)
+		})
+	}
+}
+
+func checkDQLRetryThroughTaskAndGRPC(t *testing.T, method, failPhase, cancelPhase string) {
+	t.Helper()
+	node, client := newDQLRetryProxy(t, failPhase)
+	if cancelPhase != "" {
+		node.requests = newTestRequests()
+	}
+	started := make(chan struct{}, 1)
+	exited := make(chan error, 1)
+	if cancelPhase != "" {
+		var entered atomic.Bool
+		client.server.beforeViewRPC = func(ctx context.Context, phase string) error {
+			if phase != cancelPhase || !entered.CompareAndSwap(false, true) {
+				return nil
+			}
+			started <- struct{}{}
+			<-ctx.Done()
+			exited <- ctx.Err()
+			return ctx.Err()
+		}
+	}
+	if failPhase == "wait" {
+		client.server.loaded.Store(false)
+	}
+	client.expectAutoLoad(t)
+
+	if method == "Requery" {
+		// Internal requery tasks use the scheduler's subtask path; their
+		// parent search is still occupying a DQL worker.
+		subtask := mockey.Mock((*queryTask).IsSubTask).Return(true).Build()
+		t.Cleanup(func() { subtask.UnPatch() })
+	}
+	var searchTasks, queryTasks atomic.Int32
+	searchPre := mockey.Mock((*searchTask).PreExecute).To(func(st *searchTask, _ context.Context) error {
+		searchTasks.Add(1)
+		st.CollectionID = 100
+		st.Nq = 1
+		return nil
+	}).Build()
+	t.Cleanup(func() { searchPre.UnPatch() })
+	queryPre := mockey.Mock((*queryTask).PreExecute).To(func(qt *queryTask, _ context.Context) error {
+		queryTasks.Add(1)
+		schema, err := node.metaCache.GetCollectionSchema(node.ctx, "db", "collection")
+		if err != nil {
+			return err
+		}
+		dql.SetQueryReadSchemaForTest(qt, schema)
+		qt.CollectionID = 100
+		return nil
+	}).Build()
+	t.Cleanup(func() { queryPre.UnPatch() })
+	var queryResult *milvuspb.QueryResults
+	queryResultMock := mockey.Mock((*queryTask).Result).To(func(*queryTask) *milvuspb.QueryResults { return queryResult }).Build()
+	t.Cleanup(func() { queryResultMock.UnPatch() })
+	queryPost := mockey.Mock((*queryTask).PostExecute).To(func(qt *queryTask, _ context.Context) error {
+		queryResult = &milvuspb.QueryResults{Status: merr.Success()}
+		if method == "SearchByPK" {
+			queryResult.FieldsData = autoLoadTestRow()
+		}
+		return nil
+	}).Build()
+	t.Cleanup(func() { queryPost.UnPatch() })
+	var searchResult *milvuspb.SearchResults
+	searchResultMock := mockey.Mock((*searchTask).Result).To(func(*searchTask) *milvuspb.SearchResults { return searchResult }).Build()
+	t.Cleanup(func() { searchResultMock.UnPatch() })
+	searchPost := mockey.Mock((*searchTask).PostExecute).To(func(st *searchTask, ctx context.Context) error {
+		if method == "Requery" {
+			// The requery pipeline now lives in dql. Exercise its TaskNode
+			// query-execution boundary without reaching private operator fields.
+			qt := NewQueryTask(ctx, node, &milvuspb.QueryRequest{DbName: "db", CollectionName: "collection"}, nil,
+				&internalpb.RetrieveRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Retrieve}, QueryLabel: metrics.ReQueryLabel}, node.GetMetaCache(), false)
+			_, _, err := node.ExecuteQuery(ctx, qt, trace.SpanFromContext(ctx))
+			if err != nil {
+				return err
+			}
+		}
+		searchResult = &milvuspb.SearchResults{Status: merr.Success(), Results: &schemapb.SearchResultData{NumQueries: 1}}
+		return nil
+	}).Build()
+	t.Cleanup(func() { searchPost.UnPatch() })
+	require.NoError(t, node.sched.Start())
+
+	type rpcResult struct {
+		status *commonpb.Status
+		err    error
+	}
+	invoke := func(ctx context.Context) rpcResult {
+		switch method {
+		case "HybridSearch":
+			resp, err := node.HybridSearch(ctx, &milvuspb.HybridSearchRequest{DbName: "db", CollectionName: "collection"})
+			return rpcResult{resp.GetStatus(), err}
+		case "Query":
+			resp, err := node.Query(ctx, &milvuspb.QueryRequest{DbName: "db", CollectionName: "collection"})
+			return rpcResult{resp.GetStatus(), err}
+		default:
+			req := &milvuspb.SearchRequest{DbName: "db", CollectionName: "collection", Nq: 1}
+			if method == "SearchByPK" {
+				req.SearchInput = &milvuspb.SearchRequest_Ids{Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}}
+			}
+			resp, err := node.Search(ctx, req)
+			return rpcResult{resp.GetStatus(), err}
+		}
+	}
+	if cancelPhase != "" {
+		ctx, stop := context.WithCancel(node.ctx)
+		done := make(chan rpcResult, 1)
+		rpcExited := make(chan struct{})
+		go func() {
+			defer close(rpcExited)
+			done <- invoke(ctx)
+		}()
+		defer func() {
+			stop()
+			// Keep the fixture mocks installed until the RPC leaves.
+			select {
+			case <-rpcExited:
+			case <-time.After(5 * time.Second):
+				t.Error("search RPC did not exit during cleanup")
+			}
+		}()
+		awaitAutoLoadSchedulerResult(t, started)
+		listed := node.listRunningRequests(reqregistry.Filter{})
+		require.Len(t, listed, 1)
+		require.Equal(t, reqregistry.TypeSearch, listed[0].Type)
+		require.Equal(t, failPhase != "", client.server.injected.Load())
+		// Check the phase before Cancel so a cancelled first attempt cannot
+		// satisfy the retry regression and a late child cannot satisfy requery.
+		switch method {
+		case "Requery":
+			require.EqualValues(t, 1, client.server.searches.Load())
+			require.EqualValues(t, 1, client.server.queries.Load())
+		case "SearchByPK":
+			require.Zero(t, client.server.searches.Load())
+			require.EqualValues(t, 1, client.server.queries.Load())
+		default:
+			require.EqualValues(t, 2, client.server.searches.Load())
+		}
+		canceled, missing := node.cancelRequests(ctx, []string{listed[0].RequestID}, "", "root", "T12 operator cancel")
+		require.Len(t, canceled, 1)
+		require.Equal(t, listed[0].RequestID, canceled[0].RequestID)
+		require.Empty(t, missing)
+		require.ErrorIs(t, awaitAutoLoadSchedulerResult(t, exited), context.Canceled)
+		result := awaitAutoLoadSchedulerResult(t, done)
+		require.NoError(t, result.err)
+		require.Equal(t, merr.RequestCanceledCode, result.status.GetCode())
+		require.Contains(t, result.status.GetReason(), "T12 operator cancel")
+		require.Empty(t, node.listRunningRequests(reqregistry.Filter{}))
+		switch method {
+		case "Requery":
+			require.EqualValues(t, 1, client.server.searches.Load())
+			require.EqualValues(t, 1, client.server.queries.Load())
+			require.EqualValues(t, 1, searchTasks.Load())
+		case "SearchByPK":
+			require.EqualValues(t, 1, client.server.queries.Load())
+			require.Zero(t, client.server.searches.Load())
+			require.Zero(t, searchTasks.Load())
+		default:
+			require.EqualValues(t, 2, client.server.searches.Load())
+			require.EqualValues(t, 2, searchTasks.Load())
+			require.EqualValues(t, 2, client.checks.Load())
+			require.Zero(t, client.server.queries.Load())
+		}
+		return
+	}
+	result := invoke(node.ctx)
+	require.NoError(t, result.err)
+	status := result.status
+	require.NoError(t, merr.Error(status))
+	require.True(t, client.server.injected.Load())
+	require.EqualValues(t, 2, client.checks.Load())
+	if failPhase == "wait" {
+		require.EqualValues(t, 2, client.loads.Load())
+		require.EqualValues(t, 1, searchTasks.Load())
+	} else {
+		require.EqualValues(t, 1, client.loads.Load())
+		if method == "SearchByPK" && failPhase == "search" {
+			// qv recreates the PK lookup from the original IDs on each search attempt.
+			require.EqualValues(t, 2, queryTasks.Load())
+			require.EqualValues(t, 2, searchTasks.Load())
+		} else if method == "Query" || method == "SearchByPK" {
+			require.EqualValues(t, 2, queryTasks.Load())
+		} else {
+			require.EqualValues(t, 2, searchTasks.Load())
+		}
 	}
 }
 
