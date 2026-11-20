@@ -19,7 +19,7 @@
 package sourcecontext
 
 /*
-#cgo CXXFLAGS: -std=c++20
+#cgo pkg-config: milvus_core
 #include <stdlib.h>
 #include <stdint.h>
 #include "milvus-storage/ffi_source_read_context_c.h"
