@@ -202,9 +202,9 @@ func (s *propagationImportSuite) SetupSuite() {
 	s.WithMilvusConfig("dataCoord.import.enableImportV3", strconv.FormatBool(s.protocol == 3))
 	s.WithMilvusConfig("dataCoord.compaction.bumpSchemaVersion.enabled", "true")
 	s.WithMilvusConfig("dataCoord.import.enableIDRangeMsg", "true")
-	// Leave time to replace DN between independently dispatched stages. The
-	// test checks task metadata, so an unexpected early dispatch fails it.
-	s.WithMilvusConfig("dataCoord.import.checkIntervalHigh", "20")
+	// Stop each stage's DN before inspecting its outputs, so those checks do
+	// not require slowing down every transition in the import state machine.
+	s.WithMilvusConfig("dataCoord.import.checkIntervalHigh", "2")
 	s.WithMilvusConfig("dataCoord.import.scheduleInterval", "0.1")
 	s.WithMilvusConfig("dataCoord.taskCheckInterval", "1")
 	s.setupRawData(2) // backup input is a real packed-binlog collection
@@ -383,6 +383,18 @@ func (s *propagationImportSuite) TestBackup() {
 			}
 			return true
 		}, 2*time.Minute, 100*time.Millisecond, "job=%d stage=%s", jobID, stage)
+		if i+1 < len(stages) {
+			// Remove the warmed worker immediately after observing completion.
+			// Registration and object checks below may take longer than a checker
+			// tick; run them without a DN that could accept the next stage. Keep
+			// nodeID for those checks and start the next cold DN on the next loop.
+			for _, node := range s.Cluster.GetAllDataNodes() {
+				s.Require().NoError(node.Stop())
+			}
+			for _, task := range s.stageTasks(ctx, jobID, stages[i+1]) {
+				s.Require().LessOrEqual(task.nodeID, int64(0), "stage %s was dispatched before cold-node replacement", stages[i+1])
+			}
+		}
 		for id, task := range completed {
 			// Completed task cleanup may clear NodeID. Registration still
 			// identifies the only eligible process for this isolated stage.

@@ -36,6 +36,20 @@ type CreateCCollectionRequest struct {
 
 // CreateCCollection creates a CCollection from a CreateCCollectionRequest.
 func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
+	collection, err := createCCollection(req)
+	if err != nil {
+		return nil, err
+	}
+	release, err := acquireCollectionCipherContext(req.Schema.GetProperties(), req.CollectionID)
+	if err != nil {
+		collection.Release()
+		return nil, err
+	}
+	collection.releaseCipherContext = release
+	return collection, nil
+}
+
+func createCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
 	if req.ShareSchema {
 		return createSharedSchemaCollection(req)
 	}
@@ -96,11 +110,12 @@ type CCollection struct {
 	schemaMu     sync.RWMutex
 	// schemaVersion uses the same ordering token as the native Collection.
 	// WAL callers pass a timetick, not the logical Schema.Version.
-	schemaVersion uint64
-	schema        *schemapb.CollectionSchema
-	indexMetaMu   sync.RWMutex
-	indexMeta     *segcorepb.CollectionIndexMeta
-	releaseSchema func()
+	schemaVersion        uint64
+	schema               *schemapb.CollectionSchema
+	indexMetaMu          sync.RWMutex
+	indexMeta            *segcorepb.CollectionIndexMeta
+	releaseSchema        func()
+	releaseCipherContext func()
 }
 
 // ID returns the collection ID.
@@ -179,6 +194,10 @@ func (c *CCollection) Release() {
 	if c.releaseSchema != nil {
 		c.releaseSchema()
 		c.releaseSchema = nil
+	}
+	if c.releaseCipherContext != nil {
+		c.releaseCipherContext()
+		c.releaseCipherContext = nil
 	}
 }
 
