@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -308,6 +309,13 @@ func (node *DataNode) FlushChannels(ctx context.Context, req *datapb.FlushChanne
 	return merr.Success(), nil
 }
 
+func importCipherFailureStatus(err error) *commonpb.Status {
+	if !errors.Is(err, merr.ErrImportFailed) {
+		err = merr.WrapErrImportFailed(err.Error())
+	}
+	return merr.Status(err)
+}
+
 func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(zap.Int64("taskID", req.GetTaskID()),
 		zap.Int64("jobID", req.GetJobID()),
@@ -323,6 +331,12 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 		return merr.Status(err), nil
 	}
 
+	artifact, _ := importutilv2.GetEZK(req.GetOptions())
+	cipher, err := hookutil.PrepareImportCipherContexts(artifact, req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID())
+	if err != nil {
+		return importCipherFailureStatus(err), nil
+	}
+
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
 		log.Error("create chunk manager failed", zap.String("bucket", req.GetStorageConfig().GetBucketName()),
@@ -335,7 +349,7 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 	if importutilv2.IsL0Import(req.GetOptions()) {
 		task = importv2.NewL0PreImportTask(req, node.importTaskMgr, cm)
 	} else {
-		task = importv2.NewPreImportTask(req, node.importTaskMgr, cm)
+		task = importv2.NewPreImportTask(req, node.importTaskMgr, cm, cipher.Source)
 	}
 	node.importTaskMgr.Add(task)
 
@@ -362,6 +376,11 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 		return merr.Status(err), nil
 	}
 
+	artifact, _ := importutilv2.GetEZK(req.GetOptions())
+	cipher, err := hookutil.PrepareImportCipherContexts(artifact, req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID())
+	if err != nil {
+		return importCipherFailureStatus(err), nil
+	}
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
 		log.Error("create chunk manager failed", zap.String("bucket", req.GetStorageConfig().GetBucketName()),
@@ -371,9 +390,9 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 	}
 	var task importv2.Task
 	if importutilv2.IsL0Import(req.GetOptions()) {
-		task = importv2.NewL0ImportTask(req, node.importTaskMgr, node.syncMgr, cm)
+		task = importv2.NewL0ImportTask(req, node.importTaskMgr, node.syncMgr, cm, cipher)
 	} else {
-		task = importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, cm)
+		task = importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, cm, cipher)
 	}
 	node.importTaskMgr.Add(task)
 
@@ -549,16 +568,10 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
-			return merr.Status(err), nil
-		}
 		return node.PreImport(ctx, req)
 	case taskcommon.Import:
 		req := &datapb.ImportRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
-			return merr.Status(err), nil
-		}
-		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.ImportV2(ctx, req)

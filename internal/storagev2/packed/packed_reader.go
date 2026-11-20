@@ -66,44 +66,14 @@ func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64,
 		pluginContextPtr = &pluginContext
 	}
 
+	var config *C.CStorageConfig
 	if storageConfig != nil {
-		cStorageConfig := C.CStorageConfig{
-			address:                C.CString(storageConfig.GetAddress()),
-			bucket_name:            C.CString(storageConfig.GetBucketName()),
-			access_key_id:          C.CString(storageConfig.GetAccessKeyID()),
-			access_key_value:       C.CString(storageConfig.GetSecretAccessKey()),
-			root_path:              C.CString(storageConfig.GetRootPath()),
-			storage_type:           C.CString(storageConfig.GetStorageType()),
-			cloud_provider:         C.CString(storageConfig.GetCloudProvider()),
-			iam_endpoint:           C.CString(storageConfig.GetIAMEndpoint()),
-			log_level:              C.CString("warn"),
-			useSSL:                 C.bool(storageConfig.GetUseSSL()),
-			sslCACert:              C.CString(storageConfig.GetSslCACert()),
-			useIAM:                 C.bool(storageConfig.GetUseIAM()),
-			region:                 C.CString(storageConfig.GetRegion()),
-			useVirtualHost:         C.bool(storageConfig.GetUseVirtualHost()),
-			requestTimeoutMs:       C.int64_t(storageConfig.GetRequestTimeoutMs()),
-			gcp_credential_json:    C.CString(storageConfig.GetGcpCredentialJSON()),
-			use_custom_part_upload: true,
-			max_connections:        C.uint32_t(storageConfig.GetMaxConnections()),
-			tls_min_version:        C.CString(tlsMinVersionForStorage(storageConfig.GetSslTlsMinVersion())),
-			use_crc32c_checksum:    C.bool(storageConfig.GetUseCrc32CChecksum()),
-		}
-		defer C.free(unsafe.Pointer(cStorageConfig.address))
-		defer C.free(unsafe.Pointer(cStorageConfig.bucket_name))
-		defer C.free(unsafe.Pointer(cStorageConfig.access_key_id))
-		defer C.free(unsafe.Pointer(cStorageConfig.access_key_value))
-		defer C.free(unsafe.Pointer(cStorageConfig.root_path))
-		defer C.free(unsafe.Pointer(cStorageConfig.storage_type))
-		defer C.free(unsafe.Pointer(cStorageConfig.cloud_provider))
-		defer C.free(unsafe.Pointer(cStorageConfig.iam_endpoint))
-		defer C.free(unsafe.Pointer(cStorageConfig.log_level))
-		defer C.free(unsafe.Pointer(cStorageConfig.sslCACert))
-		defer C.free(unsafe.Pointer(cStorageConfig.region))
-		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
-		defer C.free(unsafe.Pointer(cStorageConfig.tls_min_version))
-
-		status = C.NewPackedReaderWithStorageConfig(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cStorageConfig, &cPackedReader, pluginContextPtr)
+		cConfig := GetCStorageConfig(storageConfig)
+		defer DeleteCStorageConfig(cConfig)
+		config = &cConfig
+	}
+	if config != nil {
+		status = C.NewPackedReaderWithStorageConfig(cFilePathsArray, cNumPaths, cSchema, cBufferSize, *config, &cPackedReader, pluginContextPtr)
 	} else {
 		status = C.NewPackedReader(cFilePathsArray, cNumPaths, cSchema, cBufferSize, &cPackedReader, pluginContextPtr)
 	}

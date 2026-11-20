@@ -16,6 +16,7 @@ package packed
 
 import (
 	"io"
+	"path/filepath"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -26,7 +27,11 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 )
 
 func TestPackedReadAndWrite(t *testing.T) {
@@ -183,4 +188,33 @@ func (suite *PackedTestSuite) TestCloseIsIdempotent() {
 	suite.NoError(err)
 	err = pw.Close()
 	suite.NoError(err)
+}
+
+func (suite *PackedTestSuite) TestImportWriterRequiresImportCipher() {
+	root := suite.T().TempDir()
+	path := filepath.Join(root, "encrypted.parquet")
+	groups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}}}
+	target := &indexcgopb.StoragePluginContext{EncryptionZoneId: 17, CollectionId: 23, EncryptionKey: "dGFyZ2V0"}
+	writer, err := NewPackedWriter([]string{path}, suite.schema, 1<<20, 0, groups, nil, target)
+	suite.Require().ErrorIs(err, merr.ErrSegcoreUnsupported)
+	suite.False(retry.IsRecoverable(err))
+	suite.Nil(writer)
+	suite.NoFileExists(path)
+}
+
+func (suite *PackedTestSuite) TestPlaintextImportWithStorageConfig() {
+	root := suite.T().TempDir()
+	paths := []string{filepath.Join(root, "plaintext.parquet")}
+	config := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
+	groups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}}}
+	writer, err := NewPackedWriter(paths, suite.schema, 1<<20, 0, groups, config, nil)
+	suite.Require().NoError(err)
+	suite.Require().NoError(writer.WriteRecordBatch(suite.rec))
+	suite.Require().NoError(writer.Close())
+	reader, err := NewPackedReader(paths, suite.schema, 1<<20, config, nil)
+	suite.Require().NoError(err)
+	defer reader.Close()
+	record, err := reader.ReadNext()
+	suite.Require().NoError(err)
+	suite.True(array.RecordEqual(suite.rec, record))
 }

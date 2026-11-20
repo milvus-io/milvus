@@ -18,6 +18,37 @@
 
 namespace milvus::storage {
 
+milvus_storage::ArrowFileSystemPtr
+GetPackedFileSystem(const CStorageConfig* config) {
+    if (config == nullptr) {
+        return milvus_storage::ArrowFileSystemSingleton::GetInstance()
+            .GetArrowFileSystem();
+    }
+    return StorageV2FSCache::Instance().Get({
+        config->address,
+        config->bucket_name,
+        config->access_key_id,
+        config->access_key_value,
+        config->root_path,
+        config->storage_type,
+        config->cloud_provider,
+        config->iam_endpoint,
+        config->log_level,
+        config->region,
+        config->useSSL,
+        config->sslCACert,
+        config->useIAM,
+        config->useVirtualHost,
+        config->requestTimeoutMs,
+        false,
+        config->gcp_credential_json,
+        config->use_custom_part_upload,
+        config->max_connections,
+        config->tls_min_version != nullptr ? config->tls_min_version : "",
+        config->use_crc32c_checksum,
+    });
+}
+
 StorageV2FSCache&
 StorageV2FSCache::Instance() {
     static StorageV2FSCache instance;

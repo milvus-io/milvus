@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -53,11 +54,13 @@ type SyncPack struct {
 	isFlush       bool
 	isDrop        bool
 	// metadata
-	collectionID int64
-	partitionID  int64
-	segmentID    int64
-	channelName  string
-	level        datapb.SegmentLevel
+	collectionID    int64
+	partitionID     int64
+	segmentID       int64
+	channelName     string
+	level           datapb.SegmentLevel
+	importTarget    *indexcgopb.StoragePluginContext
+	importTargetSet bool
 	// error handler function
 	errHandler func(err error)
 }
@@ -91,6 +94,13 @@ func (p *SyncPack) WithCheckpoint(cp *msgpb.MsgPosition) *SyncPack {
 
 func (p *SyncPack) WithCollectionID(collID int64) *SyncPack {
 	p.collectionID = collID
+	return p
+}
+
+// WithImportTarget pins the target keyset supplied by DataCoord for this write.
+func (p *SyncPack) WithImportTarget(target *indexcgopb.StoragePluginContext) *SyncPack {
+	p.importTarget = target
+	p.importTargetSet = true
 	return p
 }
 

@@ -22,7 +22,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -51,12 +50,6 @@ func PreAllocateBinlogIDs(allocator allocator.Allocator, segmentInfos []*Segment
 	return &datapb.IDRange{Begin: begin, End: end}, err
 }
 
-// Return None nil slice
-func GetReadPluginContext(options importutilv2.Options) []*commonpb.KeyValuePair {
-	importEzk, _ := importutilv2.GetEZK(options)
-	return hookutil.GetReadStoragePluginContext(importEzk)
-}
-
 func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, msg proto.Message) {
 	pluginContext := hookutil.GetStoragePluginContext(properties, collectionID)
 	if pluginContext == nil {
@@ -74,12 +67,6 @@ func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, 
 		job := msg
 		job.PluginContext = append(job.PluginContext, pluginContext...)
 	case *workerpb.CreateStatsRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
-	case *datapb.ImportRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
-	case *datapb.PreImportRequest:
 		job := msg
 		job.PluginContext = append(job.PluginContext, pluginContext...)
 	default:

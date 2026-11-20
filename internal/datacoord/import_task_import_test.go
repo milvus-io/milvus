@@ -109,6 +109,8 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 		cluster := session.NewMockCluster(t)
 		task.CreateTaskOnWorker(1, cluster)
 		assert.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+		assert.Equal(t, job.GetState(), im.GetJob(context.TODO(), job.GetJobID()).GetState())
+		assert.Empty(t, im.GetJob(context.TODO(), job.GetJobID()).GetReason())
 	})
 
 	t.Run("CreateImport rpc failed", func(t *testing.T) {

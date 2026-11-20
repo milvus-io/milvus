@@ -36,176 +36,130 @@
 #include "common/type_c.h"
 #include "monitor/scope_metric.h"
 
-CStatus
-NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
-                                 const int64_t buffer_size,
-                                 char** paths,
-                                 int64_t num_paths,
-                                 int64_t part_upload_size,
-                                 CColumnGroups column_groups,
-                                 CStorageConfig c_storage_config,
-                                 CPackedWriter* c_packed_writer,
-                                 CPluginContext* c_plugin_context) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto truePaths = std::vector<std::string>(paths, paths + num_paths);
-
-        auto storage_config = milvus_storage::StorageConfig();
-        storage_config.part_size = part_upload_size;
-
-        auto trueFs = milvus::storage::StorageV2FSCache::Instance().Get({
-            std::string(c_storage_config.address),
-            std::string(c_storage_config.bucket_name),
-            std::string(c_storage_config.access_key_id),
-            std::string(c_storage_config.access_key_value),
-            std::string(c_storage_config.root_path),
-            std::string(c_storage_config.storage_type),
-            std::string(c_storage_config.cloud_provider),
-            std::string(c_storage_config.iam_endpoint),
-            std::string(c_storage_config.log_level),
-            std::string(c_storage_config.region),
-            c_storage_config.useSSL,
-            std::string(c_storage_config.sslCACert),
-            c_storage_config.useIAM,
-            c_storage_config.useVirtualHost,
-            c_storage_config.requestTimeoutMs,
-            false,
-            std::string(c_storage_config.gcp_credential_json),
-            c_storage_config.use_custom_part_upload,
-            c_storage_config.max_connections,
-            c_storage_config.tls_min_version != nullptr
-                ? std::string(c_storage_config.tls_min_version)
-                : "",
-            c_storage_config.use_crc32c_checksum,
-        });
-        if (!trueFs) {
-            return milvus::FailureCStatus(
-                milvus::ErrorCode::FileReadFailed,
-                "[StorageV2] Failed to get filesystem");
-        }
-
-        auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
-
-        auto columnGroups =
-            *static_cast<std::vector<std::vector<int>>*>(column_groups);
-
-        parquet::WriterProperties::Builder builder;
-        auto plugin_ptr =
-            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-        if (plugin_ptr != nullptr && c_plugin_context != nullptr) {
-            plugin_ptr->Update(c_plugin_context->ez_id,
-                               c_plugin_context->collection_id,
-                               std::string(c_plugin_context->key));
-            auto got = plugin_ptr->GetEncryptor(
-                c_plugin_context->ez_id, c_plugin_context->collection_id);
-            parquet::FileEncryptionProperties::Builder file_encryption_builder(
-                got.first->GetKey());
-            auto metadata = milvus::storage::EncodeKeyMetadata(
-                c_plugin_context->ez_id,
-                c_plugin_context->collection_id,
-                got.second);
-
-            builder.encryption(
-                file_encryption_builder.footer_key_metadata(metadata)
-                    ->algorithm(parquet::ParquetCipher::AES_GCM_V1)
-                    ->build());
-        }
-
-        auto writer_properties = builder.build();
-        auto result =
-            milvus_storage::PackedRecordBatchWriter::Make(trueFs,
-                                                          truePaths,
-                                                          trueSchema,
-                                                          storage_config,
-                                                          columnGroups,
-                                                          buffer_size,
-                                                          writer_properties);
-        AssertInfo(result.ok(),
-                   "[StorageV2] Failed to create packed writer: " +
-                       result.status().ToString());
-        auto writer = result.ValueOrDie();
-        *c_packed_writer =
-            new std::shared_ptr<milvus_storage::PackedRecordBatchWriter>(
-                std::move(writer));
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
+namespace {
+std::shared_ptr<parquet::WriterProperties>
+GetPackedWriterProperties(const CPluginContext* context) {
+    parquet::WriterProperties::Builder builder;
+    if (context == nullptr) {
+        return builder.build();
     }
+    auto cipher =
+        milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+    if (!cipher) {
+        ThrowInfo(milvus::ErrorCode::Unsupported, "missing cipher plugin");
+    }
+    AssertInfo(context->key && *context->key, "missing writer keyset");
+    std::pair<std::shared_ptr<milvus::storage::plugin::IEncryptor>, std::string>
+        keys;
+    try {
+        keys = cipher->GetEncryptorForKeyset(
+            context->ez_id, context->collection_id, context->key);
+    } catch (const std::runtime_error&) {
+        ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                  "cipher plugin rejected the writer keyset");
+    }
+    AssertInfo(keys.first != nullptr, "cipher plugin returned no encryptor");
+    auto footer_key = keys.first->GetKey();
+    auto length = footer_key.size();
+    AssertInfo(!keys.second.empty() &&
+                   keys.second.find('\0') == std::string::npos &&
+                   (length == 16 || length == 24 || length == 32),
+               "cipher plugin returned unusable encryption parameters");
+    parquet::FileEncryptionProperties::Builder encryption(footer_key);
+    auto metadata = milvus::storage::EncodeKeyMetadata(
+        context->ez_id, context->collection_id, keys.second);
+    builder.encryption(encryption.footer_key_metadata(metadata)
+                           ->algorithm(parquet::ParquetCipher::AES_GCM_V1)
+                           ->build());
+    return builder.build();
 }
 
 CStatus
-NewPackedWriter(struct ArrowSchema* schema,
-                const int64_t buffer_size,
-                char** paths,
-                int64_t num_paths,
-                int64_t part_upload_size,
-                CColumnGroups column_groups,
-                CPackedWriter* c_packed_writer,
-                CPluginContext* c_plugin_context) {
-    SCOPE_CGO_CALL_METRIC();
-
+OpenPackedWriter(ArrowSchema* schema,
+                 int64_t buffer_size,
+                 char** paths,
+                 int64_t num_paths,
+                 int64_t part_upload_size,
+                 CColumnGroups groups,
+                 const CStorageConfig* config,
+                 CPackedWriter* writer,
+                 const CPluginContext* context) {
     try {
-        auto truePaths = std::vector<std::string>(paths, paths + num_paths);
-
-        auto conf = milvus_storage::StorageConfig();
-        conf.part_size = part_upload_size;
-
-        auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                          .GetArrowFileSystem();
-        if (!trueFs) {
+        auto fs = milvus::storage::GetPackedFileSystem(config);
+        if (!fs) {
             return milvus::FailureCStatus(
-                milvus::ErrorCode::FileWriteFailed,
+                config != nullptr ? milvus::ErrorCode::FileReadFailed
+                                  : milvus::ErrorCode::FileWriteFailed,
                 "[StorageV2] Failed to get filesystem");
         }
-
-        auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
-
-        auto columnGroups =
-            *static_cast<std::vector<std::vector<int>>*>(column_groups);
-
-        parquet::WriterProperties::Builder builder;
-        auto plugin_ptr =
-            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-        if (plugin_ptr != nullptr && c_plugin_context != nullptr) {
-            plugin_ptr->Update(c_plugin_context->ez_id,
-                               c_plugin_context->collection_id,
-                               std::string(c_plugin_context->key));
-
-            auto got = plugin_ptr->GetEncryptor(
-                c_plugin_context->ez_id, c_plugin_context->collection_id);
-            parquet::FileEncryptionProperties::Builder file_encryption_builder(
-                got.first->GetKey());
-            auto metadata = milvus::storage::EncodeKeyMetadata(
-                c_plugin_context->ez_id,
-                c_plugin_context->collection_id,
-                got.second);
-            builder.encryption(
-                file_encryption_builder.footer_key_metadata(metadata)
-                    ->algorithm(parquet::ParquetCipher::AES_GCM_V1)
-                    ->build());
-        }
-
-        auto writer_properties = builder.build();
+        auto file_paths = std::vector<std::string>(paths, paths + num_paths);
+        auto arrow_schema = arrow::ImportSchema(schema).ValueOrDie();
+        auto& column_groups =
+            *static_cast<std::vector<std::vector<int>>*>(groups);
+        milvus_storage::StorageConfig storage_config;
+        storage_config.part_size = part_upload_size;
+        auto properties = GetPackedWriterProperties(context);
         auto result =
-            milvus_storage::PackedRecordBatchWriter::Make(trueFs,
-                                                          truePaths,
-                                                          trueSchema,
-                                                          conf,
-                                                          columnGroups,
+            milvus_storage::PackedRecordBatchWriter::Make(fs,
+                                                          file_paths,
+                                                          arrow_schema,
+                                                          storage_config,
+                                                          column_groups,
                                                           buffer_size,
-                                                          writer_properties);
+                                                          properties);
         AssertInfo(result.ok(),
                    "[StorageV2] Failed to create packed writer: " +
                        result.status().ToString());
-        auto writer = result.ValueOrDie();
-        *c_packed_writer =
-            new std::shared_ptr<milvus_storage::PackedRecordBatchWriter>(
-                std::move(writer));
+        *writer = new std::shared_ptr<milvus_storage::PackedRecordBatchWriter>(
+            result.ValueOrDie());
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
+    } catch (const std::exception& e) {
         return milvus::FailureCStatus(&e);
     }
+}
+}  // namespace
+
+CStatus
+NewPackedWriterWithStorageConfig(ArrowSchema* schema,
+                                 int64_t buffer_size,
+                                 char** paths,
+                                 int64_t num_paths,
+                                 int64_t part_upload_size,
+                                 CColumnGroups groups,
+                                 CStorageConfig config,
+                                 CPackedWriter* writer,
+                                 CPluginContext* context) {
+    SCOPE_CGO_CALL_METRIC();
+    return OpenPackedWriter(schema,
+                            buffer_size,
+                            paths,
+                            num_paths,
+                            part_upload_size,
+                            groups,
+                            &config,
+                            writer,
+                            context);
+}
+
+CStatus
+NewPackedWriter(ArrowSchema* schema,
+                int64_t buffer_size,
+                char** paths,
+                int64_t num_paths,
+                int64_t part_upload_size,
+                CColumnGroups groups,
+                CPackedWriter* writer,
+                CPluginContext* context) {
+    SCOPE_CGO_CALL_METRIC();
+    return OpenPackedWriter(schema,
+                            buffer_size,
+                            paths,
+                            num_paths,
+                            part_upload_size,
+                            groups,
+                            nullptr,
+                            writer,
+                            context);
 }
 
 CStatus
@@ -313,31 +267,7 @@ GetFileSizeWithStorageConfig(const char* path,
     SCOPE_CGO_CALL_METRIC();
 
     try {
-        auto trueFs = milvus::storage::StorageV2FSCache::Instance().Get({
-            std::string(c_storage_config.address),
-            std::string(c_storage_config.bucket_name),
-            std::string(c_storage_config.access_key_id),
-            std::string(c_storage_config.access_key_value),
-            std::string(c_storage_config.root_path),
-            std::string(c_storage_config.storage_type),
-            std::string(c_storage_config.cloud_provider),
-            std::string(c_storage_config.iam_endpoint),
-            std::string(c_storage_config.log_level),
-            std::string(c_storage_config.region),
-            c_storage_config.useSSL,
-            std::string(c_storage_config.sslCACert),
-            c_storage_config.useIAM,
-            c_storage_config.useVirtualHost,
-            c_storage_config.requestTimeoutMs,
-            false,
-            std::string(c_storage_config.gcp_credential_json),
-            c_storage_config.use_custom_part_upload,
-            c_storage_config.max_connections,
-            c_storage_config.tls_min_version != nullptr
-                ? std::string(c_storage_config.tls_min_version)
-                : "",
-            c_storage_config.use_crc32c_checksum,
-        });
+        auto trueFs = milvus::storage::GetPackedFileSystem(&c_storage_config);
 
         if (!trueFs) {
             return milvus::FailureCStatus(

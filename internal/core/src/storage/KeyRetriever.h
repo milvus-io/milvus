@@ -24,6 +24,9 @@ class KeyRetriever : public parquet::DecryptionKeyRetriever {
 parquet::ReaderProperties
 GetReaderProperties();
 
+void
+RegisterReaderKeys(const CPluginContext* context);
+
 parquet::ArrowReaderProperties
 GetArrowReaderProperties();
 

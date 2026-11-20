@@ -30,11 +30,13 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 )
 
 func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedWriter, error) {
@@ -56,6 +58,7 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 	cMultiPartUploadSize := C.int64_t(multiPartUploadSize)
 
 	cColumnGroups := C.NewCColumnGroups()
+	defer C.FreeCColumnGroups(cColumnGroups)
 	for _, group := range columnGroups {
 		cGroup := C.malloc(C.size_t(len(group.Columns)) * C.size_t(unsafe.Sizeof(C.int(0))))
 		if cGroup == nil {
@@ -84,47 +87,21 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 		pluginContextPtr = &pluginContext
 	}
 
+	var config *C.CStorageConfig
 	if storageConfig != nil {
-		cStorageConfig := C.CStorageConfig{
-			address:                C.CString(storageConfig.GetAddress()),
-			bucket_name:            C.CString(storageConfig.GetBucketName()),
-			access_key_id:          C.CString(storageConfig.GetAccessKeyID()),
-			access_key_value:       C.CString(storageConfig.GetSecretAccessKey()),
-			root_path:              C.CString(storageConfig.GetRootPath()),
-			storage_type:           C.CString(storageConfig.GetStorageType()),
-			cloud_provider:         C.CString(storageConfig.GetCloudProvider()),
-			iam_endpoint:           C.CString(storageConfig.GetIAMEndpoint()),
-			log_level:              C.CString("warn"),
-			useSSL:                 C.bool(storageConfig.GetUseSSL()),
-			sslCACert:              C.CString(storageConfig.GetSslCACert()),
-			useIAM:                 C.bool(storageConfig.GetUseIAM()),
-			region:                 C.CString(storageConfig.GetRegion()),
-			useVirtualHost:         C.bool(storageConfig.GetUseVirtualHost()),
-			requestTimeoutMs:       C.int64_t(storageConfig.GetRequestTimeoutMs()),
-			gcp_credential_json:    C.CString(storageConfig.GetGcpCredentialJSON()),
-			use_custom_part_upload: true,
-			max_connections:        C.uint32_t(storageConfig.GetMaxConnections()),
-			tls_min_version:        C.CString(tlsMinVersionForStorage(storageConfig.GetSslTlsMinVersion())),
-			use_crc32c_checksum:    C.bool(storageConfig.GetUseCrc32CChecksum()),
-		}
-		defer C.free(unsafe.Pointer(cStorageConfig.address))
-		defer C.free(unsafe.Pointer(cStorageConfig.bucket_name))
-		defer C.free(unsafe.Pointer(cStorageConfig.access_key_id))
-		defer C.free(unsafe.Pointer(cStorageConfig.access_key_value))
-		defer C.free(unsafe.Pointer(cStorageConfig.root_path))
-		defer C.free(unsafe.Pointer(cStorageConfig.storage_type))
-		defer C.free(unsafe.Pointer(cStorageConfig.cloud_provider))
-		defer C.free(unsafe.Pointer(cStorageConfig.iam_endpoint))
-		defer C.free(unsafe.Pointer(cStorageConfig.log_level))
-		defer C.free(unsafe.Pointer(cStorageConfig.sslCACert))
-		defer C.free(unsafe.Pointer(cStorageConfig.region))
-		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
-		defer C.free(unsafe.Pointer(cStorageConfig.tls_min_version))
-		status = C.NewPackedWriterWithStorageConfig(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnGroups, cStorageConfig, &cPackedWriter, pluginContextPtr)
+		cConfig := GetCStorageConfig(storageConfig)
+		defer DeleteCStorageConfig(cConfig)
+		config = &cConfig
+	}
+	if config != nil {
+		status = C.NewPackedWriterWithStorageConfig(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnGroups, *config, &cPackedWriter, pluginContextPtr)
 	} else {
 		status = C.NewPackedWriter(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnGroups, &cPackedWriter, pluginContextPtr)
 	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
+		if errors.Is(err, merr.ErrSegcoreUnsupported) || merr.GetErrorType(err) == merr.InputError {
+			return nil, retry.Unrecoverable(err)
+		}
 		return nil, err
 	}
 	return &PackedWriter{cPackedWriter: cPackedWriter}, nil

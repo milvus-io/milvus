@@ -30,12 +30,15 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -272,13 +275,68 @@ func AllocImportSegment(ctx context.Context,
 	return segment, nil
 }
 
-func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportRequest {
+var errImportPluginContext = errors.New("failed to prepare import encryption context")
+
+func handleImportRequestError(task ImportTask, im ImportMeta, cause error) {
+	log.Warn("failed to dispatch import request", WrapTaskLog(task, zap.Error(cause))...)
+	if errors.Is(cause, errImportPluginContext) || errors.Is(cause, merr.ErrImportFailed) {
+		err := im.UpdateJob(context.TODO(), task.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(cause.Error()))
+		if err != nil {
+			log.Warn("failed to update import job", zap.Int64("jobID", task.GetJobID()), zap.Error(err))
+		}
+	}
+}
+
+func isTemporaryImportContextError(err error) bool {
+	for ; err != nil; err = errors.Unwrap(err) {
+		if joined, ok := err.(interface{ Unwrap() []error }); ok {
+			for _, cause := range joined.Unwrap() {
+				if isTemporaryImportContextError(cause) {
+					return true
+				}
+			}
+			return false
+		}
+		if merr.IsRetryableErr(err) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return true
+		}
+		switch status.Code(err) {
+		case codes.Unavailable, codes.DeadlineExceeded, codes.Canceled:
+			return true
+		}
+		if timeout, ok := err.(interface{ Timeout() bool }); ok && timeout.Timeout() {
+			return true
+		}
+		if temporary, ok := err.(interface{ Temporary() bool }); ok && temporary.Temporary() {
+			return true
+		}
+	}
+	return false
+}
+
+func getImportPluginContext(job ImportJob, collectionID int64) ([]*commonpb.KeyValuePair, error) {
+	artifact, _ := importutilv2.GetEZK(job.GetOptions())
+	pluginContext, err := hookutil.GetImportStoragePluginContext(artifact, job.GetSchema().GetProperties(), collectionID)
+	if err != nil {
+		if isTemporaryImportContextError(err) {
+			return nil, err
+		}
+		return nil, merr.Mark(merr.Wrap(err, errImportPluginContext.Error()), errImportPluginContext)
+	}
+	return pluginContext, nil
+}
+
+func AssemblePreImportRequest(task ImportTask, job ImportJob) (*datapb.PreImportRequest, error) {
+	pluginContext, err := getImportPluginContext(job, task.GetCollectionID())
+	if err != nil {
+		return nil, err
+	}
 	importFiles := lo.Map(task.(*preImportTask).GetFileStats(),
 		func(fileStats *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 			return fileStats.GetImportFile()
 		})
 
-	req := &datapb.PreImportRequest{
+	return &datapb.PreImportRequest{
 		JobID:         task.GetJobID(),
 		TaskID:        task.GetTaskID(),
 		CollectionID:  task.GetCollectionID(),
@@ -289,10 +347,8 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 		Options:       job.GetOptions(),
 		TaskSlot:      task.GetTaskSlot(),
 		StorageConfig: createStorageConfig(),
-		PluginContext: GetReadPluginContext(job.GetOptions()),
-	}
-	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
-	return req
+		PluginContext: pluginContext,
+	}, nil
 }
 
 func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc allocator.Allocator) (*datapb.ImportRequest, error) {
@@ -349,7 +405,11 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		return fileStat.GetImportFile()
 	})
 
-	req := &datapb.ImportRequest{
+	pluginContext, err := getImportPluginContext(job, task.GetCollectionID())
+	if err != nil {
+		return nil, err
+	}
+	return &datapb.ImportRequest{
 		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
 		JobID:           task.GetJobID(),
 		TaskID:          task.GetTaskID(),
@@ -365,10 +425,8 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		StorageConfig:   createStorageConfig(),
 		TaskSlot:        task.GetTaskSlot(),
 		StorageVersion:  storage.StorageV2,
-		PluginContext:   GetReadPluginContext(job.GetOptions()),
-	}
-	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
-	return req, nil
+		PluginContext:   pluginContext,
+	}, nil
 }
 
 func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats, segmentMaxSize int) [][]*datapb.ImportFileStats {

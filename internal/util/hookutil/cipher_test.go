@@ -24,6 +24,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -531,39 +532,118 @@ func (s *CipherSuite) TestBackupEZKFromDBProperties() {
 	s.Contains(err.Error(), "no ezID found")
 }
 
+type importResolverCipher struct {
+	testCipher
+	resolve func(string) (int64, []byte, error)
+}
+
+func (c importResolverCipher) ResolveImportEZ(artifact string) (int64, []byte, error) {
+	return c.resolve(artifact)
+}
+
+func (importResolverCipher) GetUnsafeKey(int64, int64) []byte { return nil }
+
 func (s *CipherSuite) TestImportEZ() {
-	storeCipher(nil)
-	result, err := ImportEZ("")
+	result, err := ResolveImportEZ("")
 	s.NoError(err)
 	s.Nil(result)
 
-	result, err = ImportEZ("some-base64-string")
-	s.NoError(err)
+	artifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":123}`))
+	result, err = ResolveImportEZ(artifact)
+	s.ErrorIs(err, errCipherPluginMissing)
+	s.Nil(result)
+
+	InitTestCipher() // Represents an older plugin without ResolveImportEZ.
+	result, err = ResolveImportEZ(artifact)
+	s.ErrorContains(err, "ResolveImportEZ")
+	s.Nil(result)
+
+	denied := errors.New("source KMS denied Decrypt")
+	rotated := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":123,"version":2}`))
+	var resolveErr error
+	var calls []string
+	storeCipher(importResolverCipher{resolve: func(backup string) (int64, []byte, error) {
+		calls = append(calls, backup)
+		if backup == rotated {
+			return 123, []byte("new"), nil
+		}
+		return 123, []byte{0xfb, 0xff}, resolveErr
+	}})
+	result, err = ResolveImportEZ(artifact)
+	s.Require().NoError(err)
+	s.Require().Len(result, 1)
+	s.Equal(CipherConfigUnsafeEZK, result[0].GetKey())
+	s.Equal("123:+/8=", result[0].GetValue())
+
+	result, err = ResolveImportEZ(rotated)
+	s.Require().NoError(err)
+	s.Require().Len(result, 1)
+	s.Equal("123:bmV3", result[0].GetValue())
+
+	resolveErr = denied
+	result, err = ResolveImportEZ(artifact)
+	s.ErrorIs(err, denied)
+	s.Nil(result)
+	s.Equal([]string{artifact, rotated, artifact}, calls)
+}
+
+func (s *CipherSuite) TestImportTargetEZKRequired() {
+	target := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "123"}}
+	result, err := GetImportStoragePluginContext("", target, 7)
+	s.ErrorIs(err, errCipherPluginMissing)
+	s.Nil(result)
+
+	storeCipher(importResolverCipher{resolve: func(string) (int64, []byte, error) {
+		return 123, []byte("source"), nil
+	}})
+	artifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":123}`))
+	result, err = GetImportStoragePluginContext(artifact, target, 7)
+	s.ErrorContains(err, "target EZK")
+	s.Nil(result)
+
+	target[0].Value = "9223372036854775808"
+	result, err = GetImportStoragePluginContext(artifact, target, 7)
+	s.ErrorContains(err, "invalid target")
 	s.Nil(result)
 
 	InitTestCipher()
-	result, err = ImportEZ("invalid-base64")
-	s.Error(err)
+	target[0].Value = "123"
+	target = append(target, &commonpb.KeyValuePair{Key: common.EncryptionEzIDKey, Value: "456"})
+	result, err = GetImportStoragePluginContext("", target, 7)
+	s.ErrorContains(err, "duplicate")
 	s.Nil(result)
-	s.Contains(err.Error(), "failed to decode EZK")
+}
 
-	result, err = ImportEZ(base64.StdEncoding.EncodeToString([]byte("not-json")))
+func (s *CipherSuite) TestImportEZRejectsInvalidResolverResult() {
+	InitOnceCipher()
+	artifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":123}`))
+	for _, tc := range []struct {
+		id  int64
+		key []byte
+	}{
+		{123, nil},
+		{0, []byte("key")},
+		{456, []byte("another EZ's keyset")},
+	} {
+		storeCipher(importResolverCipher{resolve: func(string) (int64, []byte, error) {
+			return tc.id, tc.key, nil
+		}})
+		result, err := ResolveImportEZ(artifact)
+		s.Error(err)
+		s.Nil(result)
+	}
+}
+
+func (s *CipherSuite) TestGetEzIDByImportEzk() {
+	for _, payload := range []string{`{}`, `null`, `{"ez_id":0}`, `{"ez_id":-1}`, `{"ez_id":"invalid"}`, `not-json`} {
+		_, err := GetEzIDByImportEzk(base64.StdEncoding.EncodeToString([]byte(payload)))
+		s.Error(err, "payload %q", payload)
+	}
+	_, err := GetEzIDByImportEzk("invalid-base64")
 	s.Error(err)
-	s.Nil(result)
-	s.Contains(err.Error(), "failed to unmarshal EZK")
-
-	ezkJSON := `{"ez_id":123}`
-	ezkBase64 := base64.StdEncoding.EncodeToString([]byte(ezkJSON))
-	result, err = ImportEZ(ezkBase64)
+	id, err := GetEzIDByImportEzk(base64.StdEncoding.EncodeToString([]byte(`{"ez_id":123}`)))
 	s.NoError(err)
-	s.NotNil(result)
-	s.Equal(1, len(result))
-	s.Equal(CipherConfigUnsafeEZK, result[0].Key)
-	// Verify encoded format: "123:base64Key"
-	s.Contains(result[0].Value, ":")
-	parts := strings.Split(result[0].Value, ":")
-	s.Equal("123", parts[0])
-	s.Equal(base64.StdEncoding.EncodeToString([]byte("unsafe key")), parts[1])
+	s.Equal(int64(123), id)
 }
 
 func (s *CipherSuite) TestIsEncryptionEnabled() {

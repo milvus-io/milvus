@@ -89,9 +89,9 @@ func genBinlogPaths(fieldIDs []int64) map[int64][]string {
 	return binlogPaths
 }
 
-func createBinlogBuf(t *testing.T, field *schemapb.FieldSchema, data storage.FieldData) []byte {
+func createBinlogBuf(t *testing.T, field *schemapb.FieldSchema, data storage.FieldData, opts ...storage.BinlogWriterOptions) []byte {
 	dataType := field.GetDataType()
-	w := storage.NewInsertBinlogWriter(dataType, 1, 1, 1, field.GetFieldID(), field.GetNullable())
+	w := storage.NewInsertBinlogWriter(dataType, 1, 1, 1, field.GetFieldID(), field.GetNullable(), opts...)
 	assert.NotNil(t, w)
 	defer w.Close()
 
@@ -388,7 +388,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 	cm, originalInsertData := suite.createMockChunk(schema, insertBinlogs, true)
 	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(128, nil)
 
-	reader, err := NewReader(context.Background(), cm, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
+	reader, err := NewReader(context.Background(), cm, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, nil)
 	suite.NoError(err)
 	insertData, err := reader.Read()
 	suite.NoError(err)
@@ -588,18 +588,18 @@ func (suite *ReaderSuite) TestVerify() {
 
 	checkFunc := func() {
 		cm, _ := suite.createMockChunk(schema, insertBinlogs, false)
-		reader, err := NewReader(context.Background(), cm, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
+		reader, err := NewReader(context.Background(), cm, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, nil)
 		suite.Error(err)
 		suite.Nil(reader)
 	}
 
 	// no insert binlogs to import
-	reader, err := NewReader(context.Background(), nil, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{}, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
+	reader, err := NewReader(context.Background(), nil, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{}, suite.tsStart, suite.tsEnd, 64*1024*1024, nil)
 	suite.Error(err)
 	suite.Nil(reader)
 
 	// too many input paths
-	reader, err = NewReader(context.Background(), nil, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix, "dummy"}, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
+	reader, err = NewReader(context.Background(), nil, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix, "dummy"}, suite.tsStart, suite.tsEnd, 64*1024*1024, nil)
 	suite.Error(err)
 	suite.Nil(reader)
 
@@ -752,7 +752,7 @@ func (suite *ReaderSuite) TestZeroDeltaRead() {
 
 	checkFunc := func(targetSchema *schemapb.CollectionSchema, expectReadBinlogs map[int64][]string) {
 		cm := mockChunkFunc(sourceSchema, expectReadBinlogs)
-		reader, err := NewReader(context.Background(), cm, targetSchema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
+		reader, err := NewReader(context.Background(), cm, targetSchema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, nil)
 		suite.NoError(err)
 		suite.NotNil(reader)
 
@@ -861,7 +861,7 @@ func TestDeltaLogListing_RetryOnTransientError(t *testing.T) {
 		retryAttempts:  5,
 	}
 
-	err := r.init([]string{insertPrefix, deltaPrefix}, 0, math.MaxUint64, nil, "")
+	err := r.init([]string{insertPrefix, deltaPrefix}, 0, math.MaxUint64)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, deltaCallCount, "delta log WalkWithPrefix should have retried on transient error")
 }
@@ -898,7 +898,7 @@ func TestDeltaLogListing_NonRetryableErrorFailsFast(t *testing.T) {
 		retryAttempts:  5,
 	}
 
-	err := r.init([]string{insertPrefix, deltaPrefix}, 0, math.MaxUint64, nil, "")
+	err := r.init([]string{insertPrefix, deltaPrefix}, 0, math.MaxUint64)
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, merr.ErrIoPermissionDenied))
 	assert.Equal(t, 1, deltaCallCount, "non-retryable error should not retry")

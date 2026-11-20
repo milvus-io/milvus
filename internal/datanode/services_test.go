@@ -18,21 +18,29 @@ package datanode
 
 import (
 	"context"
+	"encoding/base64"
 	"math/rand"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
+	"github.com/milvus-io/milvus/internal/datanode/importv2"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -749,4 +757,90 @@ func (s *DataNodeServicesSuite) TestDropTask() {
 		// an internal protocol violation, not user input.
 		s.Equal(merr.Code(merr.ErrServiceInternal), status.GetCode())
 	})
+}
+
+type workerImportCipher struct {
+	hook.Cipher
+	registered []string
+	err        error
+}
+
+func (c *workerImportCipher) Init(cfg map[string]string) error {
+	if c.err != nil {
+		return c.err
+	}
+	c.registered = append(c.registered, cfg[hookutil.CipherConfigReadOnly]+":"+cfg[hookutil.CipherConfigUnsafeEZK])
+	return nil
+}
+
+func TestDataNodeImportCipherContext(t *testing.T) {
+	const taskID = 9
+	ctx := context.Background()
+	schema := &schemapb.CollectionSchema{Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "7"}}}
+	options := []*commonpb.KeyValuePair{
+		{Key: importutilv2.BackupFlag, Value: "true"},
+		{Key: importutilv2.EZK, Value: base64.StdEncoding.EncodeToString([]byte(`{"ez_id":7}`))},
+	}
+	wire := []*commonpb.KeyValuePair{
+		{Key: hookutil.CipherConfigUnsafeEZK, Value: "7:b2xk"},
+		{Key: "other.plugin", Value: "context"},
+		{Key: hookutil.CipherConfigUnsafeEZK, Value: "7:bmV3"},
+	}
+	config := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+	for _, taskType := range []string{taskcommon.PreImport, taskcommon.Import} {
+		for _, transport := range []string{"direct RPC", "CreateTask"} {
+			t.Run(taskType+"/"+transport, func(t *testing.T) {
+				cipher := &workerImportCipher{}
+				t.Cleanup(hookutil.SetTestCipher(cipher))
+				node := &DataNode{
+					ctx: ctx, lifetime: lifetime.NewLifetime(commonpb.StateCode_Healthy),
+					importTaskMgr: importv2.NewTaskManager(), storageFactory: NewChunkMgrFactory(),
+				}
+				submit := func(entries []*commonpb.KeyValuePair) (*commonpb.Status, error) {
+					var payload proto.Message
+					if taskType == taskcommon.PreImport {
+						req := &datapb.PreImportRequest{
+							TaskID: taskID, Schema: schema, Options: options,
+							StorageConfig: config, PluginContext: entries,
+						}
+						if transport == "direct RPC" {
+							return node.PreImport(ctx, req)
+						}
+						payload = req
+					} else {
+						req := &datapb.ImportRequest{
+							TaskID: taskID, Schema: schema, Options: options,
+							StorageVersion: storage.StorageV2, StorageConfig: config, PluginContext: entries,
+						}
+						if transport == "direct RPC" {
+							return node.ImportV2(ctx, req)
+						}
+						payload = req
+					}
+					data, err := proto.Marshal(payload)
+					require.NoError(t, err)
+					return node.CreateTask(ctx, &workerpb.CreateTaskRequest{
+						Properties: map[string]string{taskcommon.TypeKey: taskType}, Payload: data,
+					})
+				}
+				status, err := submit(wire[:2])
+				require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrImportFailed)
+				require.Nil(t, node.importTaskMgr.Get(taskID))
+				require.Empty(t, cipher.registered)
+
+				cipher.err = errors.New("incompatible historical read keys")
+				status, err = submit(wire)
+				require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrImportFailed)
+				require.Contains(t, status.GetReason(), "incompatible historical read keys")
+				require.Nil(t, node.importTaskMgr.Get(taskID))
+				require.Empty(t, cipher.registered)
+
+				cipher.err = nil
+				status, err = submit(wire)
+				require.NoError(t, merr.CheckRPCCall(status, err))
+				require.NotNil(t, node.importTaskMgr.Get(taskID))
+				require.Equal(t, []string{"true:b2xk", ":bmV3"}, cipher.registered)
+			})
+		}
+	}
 }

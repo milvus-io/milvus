@@ -27,112 +27,62 @@
 #include "common/type_c.h"
 #include "monitor/scope_metric.h"
 
+namespace {
 CStatus
-NewPackedReaderWithStorageConfig(char** paths,
-                                 int64_t num_paths,
-                                 struct ArrowSchema* schema,
-                                 const int64_t buffer_size,
-                                 CStorageConfig c_storage_config,
-                                 CPackedReader* c_packed_reader,
-                                 CPluginContext* c_plugin_context) {
-    SCOPE_CGO_CALL_METRIC();
-
+OpenPackedReader(char** paths,
+                 int64_t num_paths,
+                 ArrowSchema* schema,
+                 int64_t buffer_size,
+                 const CStorageConfig* config,
+                 CPackedReader* reader,
+                 const CPluginContext* context) {
     try {
-        auto truePaths = std::vector<std::string>(paths, paths + num_paths);
-
-        auto trueFs = milvus::storage::StorageV2FSCache::Instance().Get({
-            std::string(c_storage_config.address),
-            std::string(c_storage_config.bucket_name),
-            std::string(c_storage_config.access_key_id),
-            std::string(c_storage_config.access_key_value),
-            std::string(c_storage_config.root_path),
-            std::string(c_storage_config.storage_type),
-            std::string(c_storage_config.cloud_provider),
-            std::string(c_storage_config.iam_endpoint),
-            std::string(c_storage_config.log_level),
-            std::string(c_storage_config.region),
-            c_storage_config.useSSL,
-            std::string(c_storage_config.sslCACert),
-            c_storage_config.useIAM,
-            c_storage_config.useVirtualHost,
-            c_storage_config.requestTimeoutMs,
-            false,
-            std::string(c_storage_config.gcp_credential_json),
-            c_storage_config.use_custom_part_upload,
-            c_storage_config.max_connections,
-            c_storage_config.tls_min_version != nullptr
-                ? std::string(c_storage_config.tls_min_version)
-                : "",
-            c_storage_config.use_crc32c_checksum,
-        });
-        if (!trueFs) {
+        auto fs = milvus::storage::GetPackedFileSystem(config);
+        if (!fs) {
             return milvus::FailureCStatus(
                 milvus::ErrorCode::FileReadFailed,
                 "[StorageV2] Failed to get filesystem");
         }
-        auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
-        auto plugin_ptr =
-            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-        if (plugin_ptr != nullptr && c_plugin_context != nullptr) {
-            plugin_ptr->Update(c_plugin_context->ez_id,
-                               c_plugin_context->collection_id,
-                               std::string(c_plugin_context->key));
-        }
-
-        auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
-            trueFs,
-            truePaths,
-            trueSchema,
+        auto file_paths = std::vector<std::string>(paths, paths + num_paths);
+        auto arrow_schema = arrow::ImportSchema(schema).ValueOrDie();
+        milvus::storage::RegisterReaderKeys(context);
+        *reader = new milvus_storage::PackedRecordBatchReader(
+            fs,
+            file_paths,
+            arrow_schema,
             buffer_size,
             milvus::storage::GetReaderProperties(),
             milvus::storage::GetArrowReaderProperties());
-        *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
+    } catch (const std::exception& e) {
         return milvus::FailureCStatus(&e);
     }
+}
+}  // namespace
+
+CStatus
+NewPackedReaderWithStorageConfig(char** paths,
+                                 int64_t num_paths,
+                                 ArrowSchema* schema,
+                                 int64_t buffer_size,
+                                 CStorageConfig config,
+                                 CPackedReader* reader,
+                                 CPluginContext* context) {
+    SCOPE_CGO_CALL_METRIC();
+    return OpenPackedReader(
+        paths, num_paths, schema, buffer_size, &config, reader, context);
 }
 
 CStatus
 NewPackedReader(char** paths,
                 int64_t num_paths,
-                struct ArrowSchema* schema,
-                const int64_t buffer_size,
-                CPackedReader* c_packed_reader,
-                CPluginContext* c_plugin_context) {
+                ArrowSchema* schema,
+                int64_t buffer_size,
+                CPackedReader* reader,
+                CPluginContext* context) {
     SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto truePaths = std::vector<std::string>(paths, paths + num_paths);
-        auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                          .GetArrowFileSystem();
-        if (!trueFs) {
-            return milvus::FailureCStatus(
-                milvus::ErrorCode::FileReadFailed,
-                "[StorageV2] Failed to get filesystem");
-        }
-        auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
-
-        auto plugin_ptr =
-            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-        if (plugin_ptr != nullptr && c_plugin_context != nullptr) {
-            plugin_ptr->Update(c_plugin_context->ez_id,
-                               c_plugin_context->collection_id,
-                               std::string(c_plugin_context->key));
-        }
-
-        auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
-            trueFs,
-            truePaths,
-            trueSchema,
-            buffer_size,
-            milvus::storage::GetReaderProperties(),
-            milvus::storage::GetArrowReaderProperties());
-        *c_packed_reader = reader.release();
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
+    return OpenPackedReader(
+        paths, num_paths, schema, buffer_size, nullptr, reader, context);
 }
 
 CStatus
