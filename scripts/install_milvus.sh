@@ -24,6 +24,10 @@ mkdir -p "$LIBRARY_PATH"
 cp -a "$PWD"/internal/core/output/lib/*.dylib* "$LIBRARY_PATH" 2>/dev/null || true
 cp -a "$PWD"/internal/core/output/lib/*.so* "$LIBRARY_PATH" || true
 cp -a "$PWD"/internal/core/output/lib64/*.so* "$LIBRARY_PATH" 2>/dev/null || true
+# The plan parser libraries exist for the C++ unit tests, which link them from
+# internal/core/output/lib. Nothing at runtime loads them, so keep them out of
+# the runtime directory, including copies left there by an older installer.
+rm -f "$LIBRARY_PATH"/libmilvus-planparser*
 cp -r "$PWD/internal/core/output/lib/ossl-modules" "$LIBRARY_PATH" 2>/dev/null || true
 
 for LIB_PATH in $(ldd ./bin/milvus | grep -E '(asan|atomic)' | awk '{print $3}'); do
