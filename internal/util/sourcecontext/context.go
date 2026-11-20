@@ -46,7 +46,7 @@ type Context struct {
 }
 
 func Open(ctx context.Context, source, spec string) (*Context, error) {
-	native, err := openNative(ctx, source, spec)
+	native, err := openNative(ctx, source, spec, 0)
 	if err != nil || native == 0 {
 		return nil, err
 	}
@@ -92,7 +92,7 @@ type callbackState struct {
 	session sourceauth.Session
 }
 
-func openNative(ctx context.Context, source, spec string, onClose ...context.CancelFunc) (C.LoonSourceReadContextHandle, error) {
+func openNative(ctx context.Context, source, spec string, authorityDeadline int64, onClose ...context.CancelFunc) (C.LoonSourceReadContextHandle, error) {
 	session, err := sourceauth.Open(ctx, source, spec)
 	if err != nil || session == nil {
 		return 0, err
@@ -132,14 +132,12 @@ func openNative(ctx context.Context, source, spec string, onClose ...context.Can
 			C.free(unsafe.Pointer(root))
 		}
 	}()
-	var deadline int64
-	if end, ok := ctx.Deadline(); ok {
-		deadline = end.UnixMilli()
-	}
+	// Execution cancellation is propagated by Context. Only an explicit native
+	// authority deadline may constrain signed SAS lifetime.
 	options := C.LoonSourceReadContextOptions{
 		abi_version: 1, struct_size: C.sizeof_LoonSourceReadContextOptions,
 		account_name: account, allowed_root_uris: (**C.char)(array), allowed_root_count: C.size_t(len(roots)),
-		operation_deadline_unix_ms: C.int64_t(deadline), request_timeout_ms: 15000,
+		operation_deadline_unix_ms: C.int64_t(authorityDeadline), request_timeout_ms: 15000,
 	}
 	var native C.LoonSourceReadContextHandle
 	result := C.MilvusSourceContextCreate(C.uintptr_t(owner), &options, &native)
@@ -167,14 +165,15 @@ func MilvusOpenSourceReadContext(source, spec *C.char, deadline C.int64_t, outpu
 		}
 	}()
 	ctx := context.Background()
-	// Native retained readers normally pass zero. Bounded native jobs can pass
-	// their own deadline; they must never use the initiating user's RPC deadline.
+	// Native retained readers normally pass zero. A nonzero value explicitly
+	// bounds both reader lifetime and signed authority. Ordinary execution
+	// timeouts use Context.Cancel, never this credential authority bound.
 	if deadline != 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithDeadline(ctx, time.UnixMilli(int64(deadline)))
 		// The session owns the derived context, so cancel when the callback
 		// owner is destroyed, not as soon as this constructor returns.
-		native, err := openNative(ctx, C.GoString(source), C.GoString(spec), cancel)
+		native, err := openNative(ctx, C.GoString(source), C.GoString(spec), int64(deadline), cancel)
 		if err != nil || native == 0 {
 			cancel()
 			return C.int(sourceauth.StatusFromError(err))
@@ -184,7 +183,7 @@ func MilvusOpenSourceReadContext(source, spec *C.char, deadline C.int64_t, outpu
 		*output = C.uintptr_t(native)
 		return C.int(sourceauth.CredentialOK)
 	}
-	native, err := openNative(ctx, C.GoString(source), C.GoString(spec))
+	native, err := openNative(ctx, C.GoString(source), C.GoString(spec), 0)
 	if err != nil {
 		return C.int(sourceauth.StatusFromError(err))
 	}

@@ -49,7 +49,7 @@ type FetchRequest struct {
 	ScopeRootURI      string
 	Operation         ReadOperation
 	RequestDeadline   time.Time
-	OperationDeadline time.Time // zero for retained readers without a fixed deadline
+	OperationDeadline time.Time // optional signed-authority deadline; not an RPC timeout
 }
 
 // Credential is transient; its JSON/debug representations are redacted.

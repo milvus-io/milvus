@@ -24,12 +24,18 @@ package sourcecontext
 #include <stdint.h>
 #include "milvus-storage/ffi_source_read_context_c.h"
 int MilvusTestSourceFetch(uintptr_t handle, const char* uri);
+int MilvusTestSourceCheckState(uintptr_t handle);
 */
 import "C"
 import (
-	"github.com/milvus-io/milvus/pkg/v3/sourceauth"
 	"unsafe"
+
+	"github.com/milvus-io/milvus/pkg/v3/sourceauth"
 )
+
+func nativeTestCheckState(handle uintptr) sourceauth.CredentialStatus {
+	return sourceauth.CredentialStatus(C.MilvusTestSourceCheckState(C.uintptr_t(handle)))
+}
 
 func nativeTestFetch(handle uintptr, uri string) sourceauth.CredentialStatus {
 	value := C.CString(uri)

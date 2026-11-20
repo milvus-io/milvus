@@ -18,6 +18,13 @@
 
 #include "milvus-storage/source_read_context.h"
 extern "C" int
+MilvusTestSourceCheckState(uintptr_t handle) {
+    auto context = milvus_storage::GetSourceReadContext(handle);
+    return context ? context->CheckState()
+                   : LOON_SOURCE_CREDENTIAL_INVALID_RESPONSE;
+}
+
+extern "C" int
 MilvusTestSourceFetch(uintptr_t handle, const char* uri) {
     auto context = milvus_storage::GetSourceReadContext(handle);
     if (!context)

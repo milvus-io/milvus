@@ -65,9 +65,40 @@ func nativeBinding(t *testing.T, session *nativeSession) string {
 	return spec
 }
 func validNativeCredential() sourceauth.Credential {
-	expiry := time.Now().UTC().Add(time.Minute).Truncate(time.Second)
+	return nativeCredentialUntil(time.Now().UTC().Add(time.Minute).Truncate(time.Second))
+}
+
+func nativeCredentialUntil(expiry time.Time) sourceauth.Credential {
 	sas := url.Values{"sv": {"2023-11-03"}, "spr": {"https"}, "sp": {"rl"}, "sr": {"d"}, "sdd": {"1"}, "se": {expiry.Format(time.RFC3339)}, "sig": {"test-only"}}
 	return sourceauth.Credential{Status: sourceauth.CredentialOK, AccountName: "milvustest", ScopeRootURI: testRoot, SASToken: sas.Encode(), ExpiresAt: expiry}
+}
+
+func TestNativeExecutionDeadlineDoesNotCapSignedLease(t *testing.T) {
+	expiry := time.Now().UTC().Add(12 * time.Hour).Truncate(time.Second)
+	session := &nativeSession{fetch: func(context.Context, sourceauth.FetchRequest) sourceauth.Credential {
+		return nativeCredentialUntil(expiry)
+	}}
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Hour))
+	defer cancel()
+	native, err := Open(ctx, testRoot, nativeBinding(t, session))
+	require.NoError(t, err)
+	defer native.Close()
+	require.Equal(t, sourceauth.CredentialOK, nativeTestFetch(native.Handle(), testRoot+"/data.bin"))
+	cancel()
+	// Verify cancellation in native state, independently of a later Go callback.
+	require.Eventually(t, func() bool {
+		return nativeTestCheckState(native.Handle()) == sourceauth.CredentialCancelled
+	}, 5*time.Second, time.Millisecond)
+}
+
+func TestNativeExplicitAuthorityDeadlineStillBoundsSignedLease(t *testing.T) {
+	session := &nativeSession{fetch: func(context.Context, sourceauth.FetchRequest) sourceauth.Credential {
+		return nativeCredentialUntil(time.Now().UTC().Add(12 * time.Hour).Truncate(time.Second))
+	}}
+	native, err := openNative(context.Background(), testRoot, nativeBinding(t, session), time.Now().Add(time.Hour).UnixMilli())
+	require.NoError(t, err)
+	defer nativeTestRelease(uintptr(native))
+	require.Equal(t, sourceauth.CredentialInvalidResponse, nativeTestFetch(uintptr(native), testRoot+"/data.bin"))
 }
 
 func TestNativeRetainsGoProviderAndSeparatesOwners(t *testing.T) {
@@ -79,14 +110,14 @@ func TestNativeRetainsGoProviderAndSeparatesOwners(t *testing.T) {
 	bob := &nativeSession{fetch: func(context.Context, sourceauth.FetchRequest) sourceauth.Credential {
 		return sourceauth.Credential{Status: sourceauth.CredentialDenied}
 	}}
-	first, err := openNative(context.Background(), testRoot, nativeBinding(t, alice))
+	first, err := openNative(context.Background(), testRoot, nativeBinding(t, alice), 0)
 	require.NoError(t, err)
 	retained, ok := nativeTestRetain(uintptr(first))
 	require.True(t, ok)
 	nativeTestRelease(uintptr(first))
 	require.Zero(t, alice.closed.Load())
 	require.Equal(t, sourceauth.CredentialOK, nativeTestFetch(retained, testRoot+"/data.bin"))
-	second, err := openNative(context.Background(), testRoot, nativeBinding(t, bob))
+	second, err := openNative(context.Background(), testRoot, nativeBinding(t, bob), 0)
 	require.NoError(t, err)
 	require.Equal(t, sourceauth.CredentialDenied, nativeTestFetch(uintptr(second), testRoot+"/data.bin"))
 	require.Equal(t, sourceauth.CredentialOK, nativeTestFetch(retained, testRoot+"/data.bin"))
