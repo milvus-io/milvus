@@ -161,16 +161,6 @@ github.com/mattn/go-isatty v0.0.14/go.mod h1:7GGIvUiUoEMVVmxf/4nioHXj79iQHKdU27k
 github.com/mattn/goveralls v0.0.2/go.mod h1:8d1ZMHsd7fW6IRPKQh46F2WRpyib5/X4FOpevwGNQEw=
 github.com/mediocregopher/radix/v3 v3.4.2/go.mod h1:8FL3F6UQRXHXIBSPUs5h0RybMF8i4n7wVopoX3x7Bv8=
 github.com/microcosm-cc/bluemonday v1.0.2/go.mod h1:iVP4YcDBq+n/5fb23BhYFvIMq/leAFZyRl6bYmGDlGc=
-github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260914122923-ae7fea6ab2f4 h1:e0vksvfmOldel/kiYu6p0wFgbWWGw/3K8VsuLVxEjAQ=
-github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260914122923-ae7fea6ab2f4/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
-github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261014040338-d453f0648677 h1:XrNH1S4Ifk/5RJ1dEM8TAPRpXPiH9xUFB9d5bbXxaSc=
-github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261014040338-d453f0648677/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
-github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261023100401-e88ab0dc3a82 h1:WXxmBCKzs5VcyeOTmGNcTK67+mhL8ekNx6z+KcPO0uU=
-github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261023100401-e88ab0dc3a82/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
-github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261030035152-31746ccb4f27 h1:vIhyvJ9EzRqkkHJBIIu+ziYw1xED/hD+6ItS+jUctqc=
-github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261030035152-31746ccb4f27/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
-github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261030070734-84b82513689e h1:TZcivlkEhdZj0GF9LIn5dF7BB1lHR+r6GEk0SCHIc4k=
-github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261030070734-84b82513689e/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
 github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261105020509-3c2afcbf9ce6 h1:cce6z1kO4+Nn2GhbAKBDIt7+eqzmBtcOG+qnHfx62ig=
 github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261105020509-3c2afcbf9ce6/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
 github.com/mitchellh/go-homedir v1.1.0/go.mod h1:SfyaCUpYCn1Vlf4IUYiD9fPX4A5wJrkLzIz1N1q0pr0=
@@ -327,8 +317,6 @@ golang.org/x/sync v0.0.0-20190423024810-112230192c58/go.mod h1:RxMgew5VJxzue5/jJ
 golang.org/x/sync v0.0.0-20190911185100-cd5d95a43a6e/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
 golang.org/x/sync v0.0.0-20201020160332-67f06af15bc9/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
 golang.org/x/sync v0.0.0-20210220032951-036812b2e83c/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
-golang.org/x/sync v0.22.0 h1:SZjpbeLmrCk4xhRSZFNZW5gFUeCeFgjekvI/+gfScek=
-golang.org/x/sync v0.22.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
 golang.org/x/sys v0.0.0-20180807162357-acbc56fc7007/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
 golang.org/x/sys v0.0.0-20180830151530-49385e6e1522/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
 golang.org/x/sys v0.0.0-20180909124046-d0be0721c37e/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
