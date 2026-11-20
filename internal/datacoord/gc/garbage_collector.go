@@ -1575,7 +1575,7 @@ func (gc *GarbageCollector) removeDroppedSegmentIndexMeta(ctx context.Context, s
 		return nil
 	}
 	for _, segIdx := range segIndexes {
-		if err := gc.Option.IndexMeta.RemoveSegmentIndex(ctx, segIdx.BuildID); err != nil {
+		if err := gc.removeIndexRecordLocked(ctx, segIdx); err != nil {
 			return err
 		}
 	}
@@ -1881,8 +1881,9 @@ type manifestIndexIdentity struct {
 }
 
 type segmentIndexGCItem struct {
-	segIdx *model.SegmentIndex
-	files  map[string]struct{}
+	summary *model.SegmentIndexSummary
+	nodeID  int64
+	files   map[string]struct{}
 }
 
 // recycleUnusedSegIndexes removes segment indexes whose index definition or
@@ -1899,7 +1900,11 @@ func (gc *GarbageCollector) RecycleUnusedSegIndexes(ctx context.Context, signal 
 
 	io := packed.NewManifestIOContext(1)
 	defer io.Close()
-	groups := make(map[int64][]*model.SegmentIndex)
+	if gc.Option.IndexMeta.UsesSegmentSummaries() {
+		gc.recycleSummaryIndexes(ctx, io, signal)
+		return
+	}
+	groups := make(map[int64][]*model.SegmentIndexSummary)
 	segmentOrder := make([]int64, 0)
 	for _, candidate := range gc.Option.IndexMeta.GetAllSegIndexes() {
 		if candidate == nil {
@@ -1908,7 +1913,7 @@ func (gc *GarbageCollector) RecycleUnusedSegIndexes(ctx context.Context, signal 
 		if _, ok := groups[candidate.SegmentID]; !ok {
 			segmentOrder = append(segmentOrder, candidate.SegmentID)
 		}
-		groups[candidate.SegmentID] = append(groups[candidate.SegmentID], candidate)
+		groups[candidate.SegmentID] = append(groups[candidate.SegmentID], model.SummarizeSegmentIndex(candidate))
 	}
 	for _, segmentID := range segmentOrder {
 		if ctx.Err() != nil {
@@ -1919,10 +1924,10 @@ func (gc *GarbageCollector) RecycleUnusedSegIndexes(ctx context.Context, signal 
 }
 
 func (gc *GarbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Context, io *packed.ManifestIOContext, segmentID int64,
-	candidates []*model.SegmentIndex, signal <-chan gcCmd,
+	candidates []*model.SegmentIndexSummary, signal <-chan gcCmd,
 ) {
 	segment := gc.Meta.GetSegment(ctx, segmentID)
-	items := make([]segmentIndexGCItem, 0, len(candidates))
+	summaries := make([]*model.SegmentIndexSummary, 0, len(candidates))
 	for _, candidate := range candidates {
 		if ctx.Err() != nil {
 			return
@@ -1930,7 +1935,7 @@ func (gc *GarbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 		// GetAllSegIndexes returns a point-in-time snapshot. Refresh by buildID
 		// before making deletion decisions so GC does not act on stale task state
 		// or stale index file keys.
-		segIdx, ok := gc.getLatestSegmentIndexForGC(candidate)
+		segIdx, ok := gc.getLatestSegmentIndexSummaryForGC(candidate)
 		if !ok {
 			continue
 		}
@@ -1965,9 +1970,9 @@ func (gc *GarbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 				mlog.Int64("buildID", segIdx.BuildID))
 			continue
 		}
-		items = append(items, segmentIndexGCItem{segIdx: segIdx, files: gc.getRetainedIndexFilesOfIndex(segIdx)})
+		summaries = append(summaries, segIdx)
 	}
-	if len(items) == 0 {
+	if len(summaries) == 0 {
 		return
 	}
 
@@ -1997,21 +2002,30 @@ func (gc *GarbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 		}
 	}
 
-	manifestItems := make([]segmentIndexGCItem, 0, len(items))
-	legacyItems := make([]segmentIndexGCItem, 0, len(items))
-	for _, item := range items {
-		key := manifestIndexIdentity{indexID: item.segIdx.IndexID, buildID: item.segIdx.BuildID}
+	manifestItems := make([]segmentIndexGCItem, 0, len(summaries))
+	legacyItems := make([]segmentIndexGCItem, 0, len(summaries))
+	for _, summary := range summaries {
+		item := segmentIndexGCItem{summary: summary, files: make(map[string]struct{})}
+		record, hasRecord := gc.Option.IndexMeta.GetIndexJob(summary.BuildID)
+		if hasRecord {
+			item.files = gc.getRetainedIndexFilesOfIndex(record)
+			item.nodeID = record.NodeID
+		}
+		key := manifestIndexIdentity{indexID: item.summary.IndexID, buildID: item.summary.BuildID}
 		entry, matched := manifestEntries[key]
 		if !matched {
+			if !hasRecord && summary.HasArtifact {
+				continue
+			}
 			legacyItems = append(legacyItems, item)
 			continue
 		}
 		info, ok := meta.ManifestIndexFilePathInfoForSegment(gc.Option.Cli.RootPath(), segment.SegmentInfo, entry)
 		if !ok {
 			mlog.Warn(ctx, "invalid segment manifest index metadata, wait to retry",
-				mlog.Int64("segmentID", item.segIdx.SegmentID),
-				mlog.Int64("indexID", item.segIdx.IndexID),
-				mlog.Int64("buildID", item.segIdx.BuildID))
+				mlog.Int64("segmentID", item.summary.SegmentID),
+				mlog.Int64("indexID", item.summary.IndexID),
+				mlog.Int64("buildID", item.summary.BuildID))
 			continue
 		}
 		for _, file := range info.GetIndexFilePaths() {
@@ -2032,14 +2046,14 @@ func (gc *GarbageCollector) recycleRecordOnlySegmentIndex(ctx context.Context, o
 	// Recheck that observation under the manifest lock before deleting bytes
 	// or the record that drives manifest retraction on the next GC cycle.
 	locks := gc.Meta.GetSegmentManifestLocks()
-	locks.Lock(item.segIdx.SegmentID)
-	defer locks.Unlock(item.segIdx.SegmentID)
-	current := gc.Meta.GetSegment(ctx, item.segIdx.SegmentID)
+	locks.Lock(item.summary.SegmentID)
+	defer locks.Unlock(item.summary.SegmentID)
+	current := gc.Meta.GetSegment(ctx, item.summary.SegmentID)
 	if current != nil && (meta.IsSegmentHealthy(current) || meta.IsSegmentIndexRollbackRetained(current)) &&
 		(observed == nil || current.GetManifestPath() != observed.GetManifestPath() ||
 			current.GetManifestHasIndex() != observed.GetManifestHasIndex()) {
 		mlog.RatedInfo(ctx, rate.Limit(10), "segment manifest changed during index GC; retry selection",
-			mlog.FieldSegmentID(item.segIdx.SegmentID), mlog.FieldBuildID(item.segIdx.BuildID))
+			mlog.FieldSegmentID(item.summary.SegmentID), mlog.FieldBuildID(item.summary.BuildID))
 		return
 	}
 	log := segmentIndexGCLog(item)
@@ -2048,7 +2062,7 @@ func (gc *GarbageCollector) recycleRecordOnlySegmentIndex(ctx context.Context, o
 		log.Warn(ctx, "fail to remove index files for index", mlog.Err(err))
 		return
 	}
-	if err := gc.Option.IndexMeta.RemoveSegmentIndex(ctx, item.segIdx.BuildID); err != nil {
+	if err := gc.removeIndexRecordLocked(ctx, item.summary); err != nil {
 		log.Warn(ctx, "delete index meta from etcd failed, wait to retry", mlog.Err(err))
 		return
 	}
@@ -2062,8 +2076,8 @@ func (gc *GarbageCollector) recycleManifestSegmentIndexes(ctx context.Context, i
 	var manifestUpdates []*meta.SegmentInfo
 	defer func() { gc.Meta.NotifyQueryViewSegmentUpdates(ctx, manifestUpdates) }()
 	locks := gc.Meta.GetSegmentManifestLocks()
-	locks.Lock(items[0].segIdx.SegmentID)
-	defer locks.Unlock(items[0].segIdx.SegmentID)
+	locks.Lock(items[0].summary.SegmentID)
+	defer locks.Unlock(items[0].summary.SegmentID)
 	// Serialize file retirement with migration copies and publication.
 	// One segment pointer PUT shares the atomic transaction with every
 	// defensive SegmentIndex DELETE. Keep each chunk within the configured
@@ -2094,7 +2108,7 @@ func (gc *GarbageCollector) recycleManifestSegmentIndexes(ctx context.Context, i
 		manifestUpdates = append(manifestUpdates, updates...)
 		if err != nil {
 			mlog.Warn(ctx, "failed to retract segment indexes from manifest, wait to retry",
-				mlog.Int64("segmentID", ready[0].segIdx.SegmentID),
+				mlog.Int64("segmentID", ready[0].summary.SegmentID),
 				mlog.Int("indexCount", len(ready)), mlog.Err(err))
 			continue
 		}
@@ -2108,7 +2122,7 @@ func (gc *GarbageCollector) recycleManifestSegmentIndexes(ctx context.Context, i
 		// further manifest revision; remove any surviving records via the legacy
 		// idempotent path so they do not strand the already-deleted files.
 		for _, item := range ready {
-			if err := gc.Option.IndexMeta.RemoveSegmentIndex(ctx, item.segIdx.BuildID); err != nil {
+			if err := gc.removeIndexRecordLocked(ctx, item.summary); err != nil {
 				segmentIndexGCLog(item).Warn(ctx, "delete index meta from etcd failed, wait to retry", mlog.Err(err))
 			}
 		}
@@ -2116,12 +2130,12 @@ func (gc *GarbageCollector) recycleManifestSegmentIndexes(ctx context.Context, i
 }
 
 func segmentIndexGCLog(item segmentIndexGCItem) *mlog.Logger {
-	return mlog.With(mlog.Int64("collectionID", item.segIdx.CollectionID),
-		mlog.Int64("partitionID", item.segIdx.PartitionID),
-		mlog.Int64("segmentID", item.segIdx.SegmentID),
-		mlog.Int64("indexID", item.segIdx.IndexID),
-		mlog.Int64("buildID", item.segIdx.BuildID),
-		mlog.Int64("nodeID", item.segIdx.NodeID),
+	return mlog.With(mlog.Int64("collectionID", item.summary.CollectionID),
+		mlog.Int64("partitionID", item.summary.PartitionID),
+		mlog.Int64("segmentID", item.summary.SegmentID),
+		mlog.Int64("indexID", item.summary.IndexID),
+		mlog.Int64("buildID", item.summary.BuildID),
+		mlog.Int64("nodeID", item.nodeID),
 		mlog.Int("indexFiles", len(item.files)))
 }
 
@@ -2145,8 +2159,8 @@ func (gc *GarbageCollector) commitManifestIndexRetractions(ctx context.Context, 
 	var manifestUpdates []*meta.SegmentInfo
 	defer func() { gc.Meta.NotifyQueryViewSegmentUpdates(ctx, manifestUpdates) }()
 	locks := gc.Meta.GetSegmentManifestLocks()
-	locks.Lock(items[0].segIdx.SegmentID)
-	defer locks.Unlock(items[0].segIdx.SegmentID)
+	locks.Lock(items[0].summary.SegmentID)
+	defer locks.Unlock(items[0].summary.SegmentID)
 	retracted, manifestUpdates, err := gc.commitManifestIndexRetractionsLocked(ctx, items)
 	return retracted, err
 }
@@ -2157,11 +2171,11 @@ func (gc *GarbageCollector) commitManifestIndexRetractionsLocked(ctx context.Con
 	drops := make([]packed.DropIndexEntry, 0, len(items))
 	mutations := make([]meta.SegmentIndexMutation, 0, len(items))
 	for _, item := range items {
-		drops = append(drops, packed.DropIndexEntry{IndexID: item.segIdx.IndexID, ExpectedBuildID: item.segIdx.BuildID})
-		mutations = append(mutations, meta.SegmentIndexMutation{Type: meta.SegmentIndexRemove, BuildID: item.segIdx.BuildID})
+		drops = append(drops, packed.DropIndexEntry{IndexID: item.summary.IndexID, ExpectedBuildID: item.summary.BuildID})
+		mutations = append(mutations, meta.SegmentIndexMutation{Type: meta.SegmentIndexRemove, BuildID: item.summary.BuildID})
 	}
 	manifestUpdates, err := gc.Meta.CommitSegmentManifestLocked(ctx, meta.SegmentManifestCommit{
-		SegmentID:     items[0].segIdx.SegmentID,
+		SegmentID:     items[0].summary.SegmentID,
 		StorageConfig: meta.CreateStorageConfig(),
 		Mutation: meta.ManifestMutation{
 			Type: meta.ManifestMutationCommitUpdates,
@@ -2184,17 +2198,16 @@ func (gc *GarbageCollector) commitManifestIndexRetractionsLocked(ctx context.Con
 	return true, manifestUpdates, nil
 }
 
-// getLatestSegmentIndexForGC takes a SegmentIndex candidate from GC scanning and
-// returns the latest SegmentIndex meta for the same buildID. The bool return
+// getLatestSegmentIndexSummaryForGC refreshes task state and inventory by buildID. The bool return
 // value is false when the candidate is nil or the buildID no longer exists.
-func (gc *GarbageCollector) getLatestSegmentIndexForGC(candidate *model.SegmentIndex) (*model.SegmentIndex, bool) {
+func (gc *GarbageCollector) getLatestSegmentIndexSummaryForGC(candidate *model.SegmentIndexSummary) (*model.SegmentIndexSummary, bool) {
 	if candidate == nil {
 		return nil, false
 	}
 	if gc.Option.IndexMeta == nil || gc.Option.IndexMeta.SegmentBuildInfo == nil {
-		return candidate, true
+		return nil, false
 	}
-	return gc.Option.IndexMeta.GetIndexJob(candidate.BuildID)
+	return gc.Option.IndexMeta.GetSegmentIndexSummary(candidate.SegmentID, candidate.BuildID)
 }
 
 // recycleUnusedIndexFilesV0 deletes orphan files under the legacy v0 index_files prefix.
@@ -2414,6 +2427,16 @@ func (gc *GarbageCollector) newIndexFileReclaimChecker(ctx context.Context) func
 		}
 		canRecycle, segIdx := gc.Option.IndexMeta.CheckCleanSegmentIndex(buildID)
 		if !canRecycle {
+			return d
+		}
+		if segIdx == nil && gc.Option.IndexMeta.UsesSegmentSummaries() {
+			// Completion publishes the segment before removing its active task.
+			// Refresh after that miss; the earlier snapshot can predate publication.
+			segment = gc.Meta.GetSegment(ctx, segmentID)
+			if segment != nil && (segment.GetState() == commonpb.SegmentState_Importing || segment.GetIsImporting()) {
+				return d
+			}
+			d.recorded, d.reclaimAll = gc.referencedSummaryBuild(ctx, segment, buildID)
 			return d
 		}
 		if segIdx == nil {
