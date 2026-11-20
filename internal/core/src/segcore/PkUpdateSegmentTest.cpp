@@ -94,6 +94,63 @@ TEST(PkUpdateRecord, ReplayIdentityAtomicityAndHistory) {
     EXPECT_EQ(*std::get<UpdateString>(*store.Lookup(name, 10, 300)), "new");
 }
 
+TEST(PkUpdateRecord, GCRebuildsHistoriesAndProtectsReplayBoundary) {
+    Schema schema;
+    const auto score = schema.AddDebugField("score", DataType::INT64, true);
+    const auto expanded = schema.AddDebugField("expanded", DataType::INT64);
+    UpdatesRecord store;
+    auto apply =
+        [&](int row, Timestamp ts, uint32_t ordinal, UpdateAssignment a) {
+            store.Apply(schema, 8, {row}, ts, ordinal, {a});
+        };
+    UpdateAssignment null{score, {}};
+    null.literal.set_null_value(google::protobuf::NULL_VALUE);
+    apply(0, 10, 0, Long(score, 10));
+    apply(1, 15, 0, Long(score, 15));
+    apply(0, 20, 0, Long(score, 20));
+    apply(0, 20, 2, null);
+    apply(2, 35, 0, Long(score, 35));
+    apply(0, 40, 0, Long(score, 40));
+
+    store.GC(20);
+    // Includes the old winner for row 1 and only future versions for row 2.
+    auto stats = store.Stats(score);
+    EXPECT_EQ(stats.entries, 4);
+    EXPECT_EQ(stats.distinct_offsets, 3);
+    EXPECT_EQ(stats.membership_size, 8);
+    EXPECT_FALSE(store.Lookup(score, 2, 20));
+    EXPECT_FALSE(store.Lookup(score, 3, 40));
+    EXPECT_EQ(std::get<int64_t>(*store.Lookup(score, 1, 20)), 15);
+    EXPECT_EQ(std::get<int64_t>(*store.Lookup(score, 0, 40)), 40);
+    std::map<int64_t, UpdateValue> visible;
+    store.VisitUpdates(score, 20, [&](int64_t row, const UpdateValue& value) {
+        visible[row] = value;
+    });
+    EXPECT_EQ(visible.size(), 2);
+    EXPECT_TRUE(std::holds_alternative<std::monostate>(visible.at(0)));
+    EXPECT_EQ(std::get<int64_t>(visible.at(1)), 15);
+
+    // An out-of-order suffix rebuild must carry the completed prefix with it.
+    apply(0, 30, 0, Long(score, 30));
+    apply(0, 10, 0, Long(score, 10));
+    apply(0, 20, 0, Long(score, 20));
+    apply(0, 20, 2, null);
+    EXPECT_THROW(apply(0, 20, 2, Long(score, 99)), SegcoreError);
+    EXPECT_EQ(store.Stats(score).entries, 5);
+    EXPECT_EQ(std::get<int64_t>(*store.Lookup(score, 0, 39)), 30);
+    // A newly introduced field on the same physical segment can backfill.
+    apply(0, 5, 0, Long(expanded, 5));
+    apply(0, 15, 0, Long(expanded, 15));
+    store.GC(20);
+    store.GC(8);
+    EXPECT_EQ(store.Stats(expanded).entries, 2);
+    EXPECT_EQ(store.Stats(score).entries, 5);
+    store.GC(40);
+    EXPECT_EQ(store.Stats(expanded).entries, 1);
+    EXPECT_EQ(store.Stats(score).entries, 3);
+    EXPECT_EQ(std::get<int64_t>(*store.Lookup(expanded, 0, 40)), 15);
+}
+
 TEST(PkUpdateRecord, OutOfOrderFragmentsMatchIndependentReplay) {
     Schema schema;
     auto field = schema.AddDebugField("value", DataType::INT64);
@@ -259,6 +316,15 @@ TEST(PkUpdateRecord, TypedLiteralsAndWholeArrayOwnership) {
     auto retained = std::get<UpdateArray>(read(assignments.size() - 1));
     last.literal.mutable_array_value()->mutable_string_data()->clear_data();
     store.Apply(*schema, 2, {1}, 10, 1, {last});
+    const int64_t row = 1;
+    auto old_text = store.Gather(assignments[6].field, 10, &row, 1);
+    auto text = assignments[6];
+    text.literal.mutable_scalar_value()->set_string_data("replacement");
+    store.Apply(*schema, 2, {1}, 10, 2, {text});
+    store.GC(10);
+    EXPECT_EQ(store.Stats(last.field).entries, 1);
+    EXPECT_EQ(store.Stats(text.field).entries, 1);
+    EXPECT_EQ(*std::get<UpdateString>(old_text.at(0).value), "owned");
     EXPECT_EQ(retained->string_data().data(0), "element");
     EXPECT_EQ(std::get<UpdateArray>(read(assignments.size() - 1))
                   ->string_data()
@@ -677,6 +743,13 @@ TEST(PkUpdateSegment, SealedCApplyReplayAndReadFork) {
     EXPECT_EQ(segment->GetUpdatesRecord().Stats(age).entries, 2);
     segment->ApplyUpdates(keys, 36, 0, {Long(age, 1)});
     EXPECT_EQ(segment->GetUpdatesRecord().Stats(age).entries, 5);
+    auto invalid = GCUpdates(nullptr, 36);
+    EXPECT_EQ(invalid.error_code, UnexpectedError);
+    free(const_cast<char*>(invalid.error_msg));
+    EXPECT_EQ(GCUpdates(segment.get(), 36).error_code, Success);
+    EXPECT_EQ(fork->GetUpdatesRecord().Stats(age).entries, 3);
+    EXPECT_EQ(std::get<int64_t>(*fork->GetUpdatesRecord().Lookup(age, 0, 36)),
+              1);
 }
 
 }  // namespace

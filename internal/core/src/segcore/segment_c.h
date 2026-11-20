@@ -96,6 +96,10 @@ typedef void* CLoadCancellationSource;
 CLoadCancellationSource
 NewLoadCancellationSource();
 
+// The caller pins the segment and supplies a protected read boundary.
+CStatus
+GCUpdates(CSegmentInterface segment, uint64_t safe_ts);
+
 // Apply one routed mutation body to a pinned segment. The ID blob is schema.IDs;
 // each field ID has one serialized schema.UpdateLiteral. Input buffers are borrowed.
 CStatus

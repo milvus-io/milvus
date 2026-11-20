@@ -156,6 +156,9 @@ class SegmentInterface {
     virtual ~SegmentInterface() = default;
 
     virtual void
+    GCUpdates(Timestamp safe_ts) = 0;
+
+    virtual void
     FillPrimaryKeys(const query::Plan* plan,
                     SearchResult& results,
                     milvus::OpContext* op_ctx = nullptr) const = 0;
@@ -429,6 +432,9 @@ struct UpdateAssignment;
 class SegmentInternalInterface : public SegmentInterface {
  public:
     SegmentInternalInterface();
+
+    void
+    GCUpdates(Timestamp safe_ts) override;
 
     const UpdatesRecord&
     GetUpdatesRecord() const {

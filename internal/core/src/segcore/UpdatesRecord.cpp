@@ -68,6 +68,41 @@ struct TypedLog {
     std::vector<Delta> entries;
     Directory positions;
     std::vector<bool> membership;
+    std::optional<Timestamp> collected_through;
+
+    TypedLog
+    Compact(Timestamp safe_ts) const {
+        // Mark only superseded positions. Equal-timestamp siblings are
+        // ordered by source ordinal, so the last prefix entry wins.
+        std::vector<bool> remove(entries.size());
+        size_t retained = entries.size();
+        for (const auto& [row, history] : positions) {
+            auto end = std::upper_bound(history.begin(),
+                                        history.end(),
+                                        safe_ts,
+                                        [&](Timestamp ts, size_t pos) {
+                                            return ts < entries[pos].key.first;
+                                        });
+            if (end == history.begin())
+                continue;
+            for (auto it = history.begin(); it != std::prev(end); ++it) {
+                remove[*it] = true;
+                --retained;
+            }
+        }
+        TypedLog result;
+        result.collected_through = safe_ts;
+        result.entries.reserve(retained);
+        result.membership = membership;  // Every history retains a winner.
+        for (size_t i = 0; i < entries.size(); ++i) {
+            if (!remove[i]) {
+                result.positions[entries[i].offset].push_back(
+                    result.entries.size());
+                result.entries.push_back(entries[i]);
+            }
+        }
+        return result;
+    }
 
     Commit
     Prepare(const std::vector<int64_t>& rows,
@@ -94,6 +129,10 @@ struct TypedLog {
                     continue;
                 }
             }
+            // All mutations through this field's cutoff were applied before
+            // collection. Missing prefix identities must not be resurrected.
+            if (collected_through && key.first <= *collected_through)
+                continue;
             additions->push_back({key, row, value, is_null});
         }
         if (additions->empty()) {
@@ -103,6 +142,7 @@ struct TypedLog {
             // A recut history fragment may contribute a previously unseen cell
             // older than the live suffix. Only this field needs a replacement.
             auto rebuilt = std::make_shared<TypedLog>();
+            rebuilt->collected_through = collected_through;
             auto middle =
                 std::upper_bound(entries.begin(),
                                  entries.end(),
@@ -303,11 +343,32 @@ struct UpdatesRecord::Impl {
         overlay_batches{0}, dictionary_probes{0};
     std::map<int64_t, Log> fields;
     size_t row_count = 0;
+    std::optional<Timestamp> collected_through;
 };
 
 UpdatesRecord::UpdatesRecord() : impl_(std::make_unique<Impl>()) {
 }
 UpdatesRecord::~UpdatesRecord() = default;
+
+void
+UpdatesRecord::GC(Timestamp safe_ts) {
+    decltype(impl_->fields) replacement;
+    std::unique_lock lock(impl_->mutex);
+    if (impl_->collected_through && safe_ts <= *impl_->collected_through)
+        return;
+    for (const auto& [field, log] : impl_->fields) {
+        replacement.emplace(field,
+                            std::visit(
+                                [safe_ts](const auto& typed) -> Log {
+                                    return typed.Compact(safe_ts);
+                                },
+                                log));
+    }
+    // Publish all rebuilt dictionaries and vectors together. Readers holding
+    // the shared lock have finished; returned values own their payloads.
+    impl_->fields.swap(replacement);
+    impl_->collected_through = safe_ts;
+}
 
 void
 UpdatesRecord::Grow(size_t rows) {

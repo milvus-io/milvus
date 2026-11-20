@@ -80,6 +80,10 @@ type basicSegmentMethodSet interface {
 	// Load invokes segment managed loading.
 	Load(ctx context.Context) error
 
+	// GCUpdates retains the visible update at safeTS and all later versions.
+	// Callers must protect earlier reads and finish replay through safeTS first.
+	GCUpdates(ctx context.Context, safeTS uint64) error
+
 	// Release releases the segment.
 	Release()
 }

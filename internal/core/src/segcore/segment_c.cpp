@@ -1668,6 +1668,18 @@ PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset) {
 }
 
 CStatus
+GCUpdates(CSegmentInterface segment, uint64_t safe_ts) {
+    SCOPE_CGO_CALL_METRIC();
+    try {
+        AssertInfo(segment != nullptr, "GC requires a physical segment");
+        static_cast<milvus::segcore::SegmentInterface*>(segment)->GCUpdates(
+            safe_ts);
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
 ApplySegmentUpdates(CSegmentInterface segment,
                     uint64_t timestamp,
                     uint32_t ordinal,

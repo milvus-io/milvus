@@ -46,6 +46,10 @@ class UpdatesRecord {
     ~UpdatesRecord();
     void
     Grow(size_t rows);
+    // The caller protects reads and has completely applied the affected
+    // fields through safe_ts. Never advances the read admission floor itself.
+    void
+    GC(Timestamp safe_ts);
     void
     Apply(const Schema& schema,
           size_t row_count,

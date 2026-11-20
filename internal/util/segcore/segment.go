@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"google.golang.org/protobuf/proto"
@@ -116,8 +117,11 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 
 // cSegmentImpl is a wrapper for cSegmentImplInterface.
 type cSegmentImpl struct {
-	id  int64
-	ptr C.CSegmentInterface
+	// Coordinates GC with Release. Other operations retain their existing
+	// requirement that the caller holds the physical segment alive.
+	gcMu sync.Mutex
+	id   int64
+	ptr  C.CSegmentInterface
 }
 
 // PinSealedReadState retains the current immutable columns and indexes. The
@@ -434,9 +438,31 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	return err
 }
 
+// GCUpdates completes synchronously once it enters native code.
+func (s *cSegmentImpl) GCUpdates(ctx context.Context, safeTS uint64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.gcMu.Lock()
+	defer s.gcMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.ptr == nil {
+		return merr.WrapErrSegmentNotLoaded(s.id)
+	}
+	status := C.GCUpdates(s.ptr, C.uint64_t(safeTS))
+	return ConsumeCStatusIntoError(&status)
+}
+
 // Release releases the segment.
 func (s *cSegmentImpl) Release() {
-	C.DeleteSegment(s.ptr)
+	s.gcMu.Lock()
+	defer s.gcMu.Unlock()
+	if s.ptr != nil {
+		C.DeleteSegment(s.ptr)
+		s.ptr = nil
+	}
 }
 
 // SetCommitTimestamp sets the commit timestamp for the segment.

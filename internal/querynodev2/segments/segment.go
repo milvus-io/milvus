@@ -1396,8 +1396,6 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 		mlog.Int64("insertCount", s.InsertCount()),
 	)
 
-	// wait all read ops finished
-	ptr := s.ptr
 	if options.Scope == ReleaseScopeData {
 		s.ReleaseSegmentData()
 		log.Info(ctx, "release segment data done and the field indexes info has been set lazy load=true")
@@ -1411,7 +1409,7 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 	}
 
 	GetDynamicPool().Submit(func() (any, error) {
-		C.DeleteSegment(ptr)
+		s.csegment.Release()
 		return nil, nil
 	}).Await()
 

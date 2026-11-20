@@ -2,6 +2,7 @@ package segcore_test
 
 import (
 	"context"
+	"errors"
 	"path"
 	"path/filepath"
 	"testing"
@@ -21,9 +22,48 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestSegmentGCUpdatesRelease(t *testing.T) {
+	initBoostScoreTestEnv(t)
+	schema := mock_segcore.GenTestCollectionSchema("gc_updates", schemapb.DataType_Int64, true)
+	collection, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{
+		CollectionID: 100, Schema: schema, IndexMeta: mock_segcore.GenTestIndexMeta(100, schema),
+	})
+	require.NoError(t, err)
+	defer collection.Release()
+	ctx := context.Background()
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	for _, kind := range []segcore.SegmentType{segcore.SegmentTypeGrowing, segcore.SegmentTypeSealed} {
+		segment, err := segcore.CreateCSegment(&segcore.CreateCSegmentRequest{
+			Collection: collection, SegmentID: 101, SegmentType: kind,
+		})
+		require.NoError(t, err)
+		require.ErrorIs(t, segment.GCUpdates(canceled, 99), context.Canceled)
+		for _, cutoff := range []uint64{20, 20, 8} {
+			require.NoError(t, segment.GCUpdates(ctx, cutoff))
+		}
+		start := make(chan struct{})
+		results := make(chan error, 16)
+		for i := 0; i < cap(results); i++ {
+			go func() {
+				<-start
+				results <- segment.GCUpdates(ctx, 40)
+			}()
+		}
+		close(start)
+		segment.Release()
+		for i := 0; i < cap(results); i++ {
+			err := <-results
+			require.True(t, err == nil || errors.Is(err, merr.ErrSegmentNotLoaded), "%v", err)
+		}
+		require.ErrorIs(t, segment.GCUpdates(ctx, 50), merr.ErrSegmentNotLoaded)
+	}
+}
 
 func TestGrowingSegment(t *testing.T) {
 	paramtable.Init()

@@ -111,6 +111,11 @@ SegmentInternalInterface::SegmentInternalInterface()
     : updates_record_(std::make_shared<UpdatesRecord>()) {
 }
 
+void
+SegmentInternalInterface::GCUpdates(Timestamp safe_ts) {
+    updates_record_->GC(safe_ts);
+}
+
 std::vector<int64_t>
 SegmentInternalInterface::ResolveUpdateOffsets(const std::vector<PkType>&,
                                                Timestamp) const {
