@@ -98,17 +98,9 @@ func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
 		}
 		job.(*Job).State = state
 		if state == internalpb.ImportJobState_Completed || state == internalpb.ImportJobState_Failed {
-			// Credentials are needed through both phases and retries, but not
-			// after a terminal transition. This clears the retained job record;
-			// historical WAL entries remain subject to normal WAL retention.
-			options := make([]*commonpb.KeyValuePair, 0, len(job.GetOptions()))
-			for _, option := range job.GetOptions() {
-				if option.GetKey() != importutilv2.ExternalSpec && option.GetKey() != importutilv2.SnapshotSourceURI &&
-					!importutilv2.IsSourceStorageOption(option.GetKey()) {
-					options = append(options, option)
-				}
-			}
-			job.(*Job).Options = options
+			// Remove secret credentials while keeping structural storage.* keys so
+			// terminal external-storage jobs retain their external-source identity.
+			job.(*Job).Options = importutilv2.RemoveSourceStorageCredentials(job.GetOptions())
 			// releases requested disk resource
 			job.(*Job).RequestedDiskSize = 0
 			// set cleanup ts

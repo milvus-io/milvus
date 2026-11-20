@@ -1929,7 +1929,7 @@ func TestValidateImportFilePathsExternalSource(t *testing.T) {
 			defer params.CommonCfg.StorageType.SwapTempValue(previous)
 			// Source object keys must not be resolved against the target's
 			// filesystem or root; no destination chunk manager is needed.
-			for _, key := range []string{"external_folder/data.parquet", "files/insert_log/data.parquet"} {
+			for _, key := range []string{"external_folder/data.parquet", "files/insert_log/data.parquet", "v1:2026/data.parquet"} {
 				require.NoError(t, ValidateImportFilePaths(nil, []*msgpb.ImportFile{{Paths: []string{key}}}, options))
 			}
 			for _, key := range []string{"", " ", "/data.parquet", "s3://external-bucket/data.parquet"} {
