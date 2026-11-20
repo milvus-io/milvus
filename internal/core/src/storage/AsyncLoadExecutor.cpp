@@ -40,7 +40,7 @@
 namespace milvus::storage {
 namespace {
 
-const folly::RequestToken kLoadSequenceToken("milvus.load_seq");
+const folly::RequestToken kLoadSequenceToken("milvus.sequence_id");
 
 struct LoadTaskGroup;
 
@@ -560,10 +560,10 @@ GetAsyncLoadThreadPoolSize() {
 folly::Executor::KeepAlive<>
 ResolveAsyncLoadExecutor(folly::Executor::KeepAlive<> executor,
                          const AsyncLoadPriority load_priority,
-                         uint64_t load_seq) {
+                         uint64_t sequence_id) {
     if (const auto* bound = dynamic_cast<const LoadExecutor*>(executor.get())) {
-        if (load_seq == 0) {
-            load_seq = bound->Sequence();
+        if (sequence_id == 0) {
+            sequence_id = bound->Sequence();
         }
         executor = bound->BaseExecutor();
     }
@@ -576,25 +576,19 @@ ResolveAsyncLoadExecutor(folly::Executor::KeepAlive<> executor,
         dynamic_cast<PriorityThreadPoolExecutor*>(executor.get()) == nullptr) {
         priority = folly::Executor::HI_PRI;
     }
-    return LoadExecutor::Create(std::move(executor), priority, load_seq);
+    return LoadExecutor::Create(std::move(executor), priority, sequence_id);
 }
 
 folly::Executor::KeepAlive<>
 ResolveAsyncLoadExecutor(folly::Executor::KeepAlive<> executor,
                          milvus::proto::common::LoadPriority priority,
-                         uint64_t load_seq) {
+                         uint64_t sequence_id) {
     return ResolveAsyncLoadExecutor(
         std::move(executor),
         priority == milvus::proto::common::LoadPriority::LOW
             ? AsyncLoadPriority::Low
             : AsyncLoadPriority::High,
-        load_seq);
-}
-
-uint64_t
-NextLoadSequence() noexcept {
-    static std::atomic<uint64_t> next{1};
-    return next.fetch_add(1, std::memory_order_relaxed);
+        sequence_id);
 }
 
 uint64_t

@@ -102,9 +102,9 @@ LoadAdmissionController::AcquireAsync(
     const LoadAdmissionRequest request,
     const LoadAdmissionPriority priority,
     const folly::CancellationToken& cancellation_token,
-    uint64_t load_seq) {
-    if (load_seq == 0) {
-        load_seq = std::numeric_limits<uint64_t>::max();
+    uint64_t sequence_id) {
+    if (sequence_id == 0) {
+        sequence_id = std::numeric_limits<uint64_t>::max();
     }
     auto [promise, future] =
         folly::coro::makePromiseContract<LoadAdmissionLease>();
@@ -114,7 +114,7 @@ LoadAdmissionController::AcquireAsync(
         std::lock_guard lock(mu_);
         cancelled = cancellation_token.isCancellationRequested();
         if (!cancelled &&
-            CanAdmitImmediatelyLocked(priority, request, load_seq)) {
+            CanAdmitImmediatelyLocked(priority, request, sequence_id)) {
             ReserveLocked(request);
             admitted = true;
         }
@@ -133,7 +133,7 @@ LoadAdmissionController::AcquireAsync(
     auto pending = std::make_shared<PendingAdmission>();
     pending->promise = std::move(promise);
     pending->request = request;
-    PendingQueue prepared{{load_seq, pending}};
+    PendingQueue prepared{{sequence_id, pending}};
 
     const auto merged_cancellation_token = folly::cancellation_token_merge(
         cancellation_token, pending->promise.getCancellationToken());
@@ -153,7 +153,7 @@ LoadAdmissionController::AcquireAsync(
         if (pending->state != PendingAdmission::State::Cancelled) {
             // Capacity, queue order and cancellation may have changed while
             // the waiter and callback were being prepared outside the lock.
-            if (CanAdmitImmediatelyLocked(priority, request, load_seq)) {
+            if (CanAdmitImmediatelyLocked(priority, request, sequence_id)) {
                 MarkAdmittedLocked(*pending);
                 admitted = true;
             } else {
@@ -444,15 +444,16 @@ bool
 LoadAdmissionController::CanAdmitImmediatelyLocked(
     const LoadAdmissionPriority priority,
     const LoadAdmissionRequest request,
-    const uint64_t load_seq) const {
+    const uint64_t sequence_id) const {
     if (!CanAcquireCapacityLocked(request)) {
         return false;
     }
     if (priority == LoadAdmissionPriority::High) {
-        return high_pending_.empty() || high_pending_.begin()->first > load_seq;
+        return high_pending_.empty() ||
+               high_pending_.begin()->first > sequence_id;
     }
     return high_pending_.empty() &&
-           (low_pending_.empty() || low_pending_.begin()->first > load_seq);
+           (low_pending_.empty() || low_pending_.begin()->first > sequence_id);
 }
 
 void

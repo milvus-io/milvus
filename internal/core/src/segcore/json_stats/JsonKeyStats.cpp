@@ -1679,7 +1679,7 @@ JsonKeyStats::LoadMetaFile(const std::string& remote_path, OpContext* ctx) {
         };
         folly::coro::blockingWait(folly::coro::co_withExecutor(
             storage::ResolveAsyncLoadExecutor(
-                {}, priority, ctx ? ctx->load_seq : 0),
+                {}, priority, ctx ? ctx->sequence_id : 0),
             read()));
     } else {
         content.resize(rcm_->Size(remote_path));
@@ -1956,7 +1956,7 @@ JsonKeyStats::LoadShreddingMeta(
         };
         metadata = folly::coro::blockingWait(folly::coro::co_withExecutor(
             storage::ResolveAsyncLoadExecutor(
-                {}, priority, ctx ? ctx->load_seq : 0),
+                {}, priority, ctx ? ctx->sequence_id : 0),
             inspect()));
     } else {
         auto& pool = ThreadPools::GetExecutor(milvus::ThreadPoolPriority::HIGH);
@@ -2029,7 +2029,7 @@ JsonKeyStats::LoadShreddingMeta(
         if (*file_manager_context_.use_async_load) {
             folly::coro::blockingWait(folly::coro::co_withExecutor(
                 storage::ResolveAsyncLoadExecutor(
-                    {}, priority, ctx ? ctx->load_seq : 0),
+                    {}, priority, ctx ? ctx->sequence_id : 0),
                 read_layout()));
         } else {
             folly::coro::blockingWait(read_layout());

@@ -24,7 +24,7 @@
 
 [可编辑图源（HTML）](diagrams/async-load-sequence.html)
 
-AsyncSegmentLoad 和 AsyncReopenSegment 在提交加载任务之前分配进程内递增的 load_seq，写入 OpContext。一次加载及其字段读取、索引加载、JSON stats 和后续协程任务继承同一序号。序号不是 segment ID，也不写入持久化元数据。
+AsyncSegmentLoad 和异步 Reopen 在提交加载任务之前从 milvus-common 的 OpContext 分配进程内递增的 `sequence_id`。一次加载及其字段读取、索引加载、JSON stats 和后续协程任务继承同一序号。序号不是 segment ID，也不写入持久化元数据。下文的 `load_seq` 指测试时使用的旧字段名。
 
 ASYNC_LOAD 保留 Folly CPUThreadPoolExecutor，将任务按 (priority, load_seq) 分组。每组拥有并发 FIFO，就绪组通过堆排序：HIGH 优先于 LOW，同优先级下较小 load_seq 优先，同组保持入队顺序。未指定序号的任务排在同优先级有序号任务后面。组已就绪时，生产者可以绕过全局调度锁入队；消费者在锁内选组、预留任务，在锁外从组内 FIFO 取任务。
 

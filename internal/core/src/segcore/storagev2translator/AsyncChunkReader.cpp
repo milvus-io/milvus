@@ -157,7 +157,7 @@ OpenChunkReadersAsync(const milvus::OpContext* ctx,
         auto executor =
             storage::ResolveAsyncLoadExecutor(std::move(options.executor),
                                               options.load_priority,
-                                              ctx ? ctx->load_seq : 0);
+                                              ctx ? ctx->sequence_id : 0);
         const auto context_cancellation_token =
             ctx ? ctx->cancellation_token : folly::CancellationToken{};
         return detail::ClassifyAsyncLoadExceptions(OpenChunkReadersOnExecutor(

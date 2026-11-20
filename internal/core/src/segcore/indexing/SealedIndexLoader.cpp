@@ -86,7 +86,7 @@ MakeRemoteSource(const index::IndexFamily& requested_family,
             : proto::common::LoadPriority::HIGH;
     return folly::coro::blockingWait(folly::coro::co_withExecutor(
         storage::ResolveAsyncLoadExecutor(
-            {}, priority, options.op_ctx ? options.op_ctx->load_seq : 0),
+            {}, priority, options.op_ctx ? options.op_ctx->sequence_id : 0),
         storage::V1RemoteSource::OpenAsync(
             context,
             remote_paths,
@@ -224,7 +224,7 @@ SealedIndexLoader::SealedIndexLoader(
             resolved_family =
                 folly::coro::blockingWait(folly::coro::co_withExecutor(
                     storage::ResolveAsyncLoadExecutor(
-                        {}, priority, metadata_ctx.ctx.load_seq),
+                        {}, priority, metadata_ctx.ctx.sequence_id),
                     index::ResolveLoadFamilyAsync(
                         adapted.family, *source, config_)));
         } else {
@@ -266,7 +266,7 @@ SealedIndexLoader::SealedIndexLoader(
                     storage::ResolveAsyncLoadExecutor(
                         storage::LocalFileIOPool::GetInstance().GetExecutor(),
                         priority,
-                        metadata_ctx.ctx.load_seq),
+                        metadata_ctx.ctx.sequence_id),
                     index::LegacyScalarIndexLoadResourceAsync(
                         index_load_info_.field_type,
                         index_load_info_.index_size,
@@ -309,7 +309,7 @@ SealedIndexLoader::SealedIndexLoader(
                 storage::ResolveAsyncLoadExecutor(
                     storage::LocalFileIOPool::GetInstance().GetExecutor(),
                     priority,
-                    metadata_ctx.ctx.load_seq),
+                    metadata_ctx.ctx.sequence_id),
                 index::LegacyVectorFileLoadResourceAsync(
                     load_resource_request_,
                     Family() == index::families::kVectorDisk,

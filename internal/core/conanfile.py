@@ -41,7 +41,7 @@ class MilvusConan(ConanFile):
         "unordered_dense/4.4.0#6a855c992618cc4c63019109a2e47298",
         "geos/3.12.0#a923af6dc4c18f87a7dfa960118f3166",
         "icu/74.2#cd1937b9561b8950a2ae6311284c5813",
-        "milvus-common/1.0.0-60f998e@milvus/dev#c1fd9fa7f972e6a23faf48c332f43825",
+        "milvus-common/1.0.0-9c892db@milvus/dev#213c63dad9562dcd63cfcf318644645e",
         "libavrocpp/1.12.1.1@milvus/dev#b4854183542196740ec9a004fdfff7ec",
     )
 

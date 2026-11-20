@@ -28,6 +28,7 @@
 #endif
 
 #include "common/EasyAssert.h"
+#include "common/OpContext.h"
 #include "folly/ScopeGuard.h"
 #include "folly/coro/Baton.h"
 #include "folly/coro/BlockingWait.h"
@@ -169,17 +170,20 @@ TEST(AsyncLoadExecutorTest, OrdersPriorityThenSequenceWithStableTies) {
                 record(id);
             });
         };
-    submit(proto::common::LoadPriority::LOW, 1, 5);
-    auto bound =
-        ResolveAsyncLoadExecutor({}, proto::common::LoadPriority::LOW, 20);
+    const OpContext low;
+    const OpContext older;
+    const OpContext newer;
+    submit(proto::common::LoadPriority::LOW, low.sequence_id, 5);
+    auto bound = ResolveAsyncLoadExecutor(
+        {}, proto::common::LoadPriority::LOW, newer.sequence_id);
     auto rebound = ResolveAsyncLoadExecutor(std::move(bound),
                                             proto::common::LoadPriority::HIGH);
-    EXPECT_EQ(GetAsyncLoadSequence(rebound.get()), 20);
+    EXPECT_EQ(GetAsyncLoadSequence(rebound.get()), newer.sequence_id);
     rebound->add([&] { record(2); });
     submit(proto::common::LoadPriority::HIGH, 0, 4);
-    submit(proto::common::LoadPriority::HIGH, 10, 1);
+    submit(proto::common::LoadPriority::HIGH, older.sequence_id, 1);
     submit(proto::common::LoadPriority::LOW, 0, 6);
-    submit(proto::common::LoadPriority::HIGH, 20, 3);
+    submit(proto::common::LoadPriority::HIGH, newer.sequence_id, 3);
     release.set_value();
     unblock.dismiss();
     finished.get_future().get();
@@ -440,14 +444,6 @@ TEST(AsyncLoadExecutorTest, RecreatedBindingsKeepEqualSequenceFifo) {
     for (int i = 0; i < count; ++i) {
         EXPECT_EQ(seen[i], i);
     }
-}
-
-TEST(AsyncLoadExecutorTest, SequencesIncreaseAcrossCallers) {
-    const auto first = NextLoadSequence();
-    const auto second = std::async(std::launch::async, NextLoadSequence).get();
-    EXPECT_NE(first, 0);
-    EXPECT_LT(first, second);
-    EXPECT_LT(second, NextLoadSequence());
 }
 
 }  // namespace

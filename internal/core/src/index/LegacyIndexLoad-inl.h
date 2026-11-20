@@ -69,7 +69,7 @@ RunLegacyLoad(LegacyIndexSource& source,
         token,
         folly::coro::co_withExecutor(
             storage::ResolveAsyncLoadExecutor(
-                {}, priority, context ? context->load_seq : 0),
+                {}, priority, context ? context->sequence_id : 0),
             run()));
 }
 

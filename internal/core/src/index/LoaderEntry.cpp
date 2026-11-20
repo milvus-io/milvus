@@ -100,9 +100,10 @@ OpenIndexSource(const IndexLoadRequest& request) {
             std::get_if<LegacyIndexStorageConfig>(&files.storage_config)) {
         // The source retains only token/priority, never this temporary context.
         // Include inherited cancellation even during its synchronous constructor.
-        milvus::OpContext open_context(token);
-        open_context.load_seq =
-            request.options.op_ctx ? request.options.op_ctx->load_seq : 0;
+        const auto* parent = request.options.op_ctx;
+        milvus::OpContext open_context(
+            token,
+            parent ? std::make_optional(parent->sequence_id) : std::nullopt);
         open_context.runtime_load_priority =
             priority == proto::common::LoadPriority::HIGH ? 0 : 1;
         auto open_options = request.options;
@@ -227,12 +228,12 @@ LoaderEntry::Load(IndexLoadRequest request) const {
     auto* context = request.options.op_ctx;
     auto cache = std::move(request.cache);
     auto prepare = CreateIndexLoader(*this, std::move(request));
-    auto loader = use_async
-                      ? folly::coro::blockingWait(folly::coro::co_withExecutor(
-                            storage::ResolveAsyncLoadExecutor(
-                                {}, priority, context ? context->load_seq : 0),
-                            std::move(prepare)))
-                      : folly::coro::blockingWait(std::move(prepare));
+    auto loader =
+        use_async ? folly::coro::blockingWait(folly::coro::co_withExecutor(
+                        storage::ResolveAsyncLoadExecutor(
+                            {}, priority, context ? context->sequence_id : 0),
+                        std::move(prepare)))
+                  : folly::coro::blockingWait(std::move(prepare));
     // Synchronous warmup must not block the executor that loads its cells.
     return loader->Load(context, cache);
 }

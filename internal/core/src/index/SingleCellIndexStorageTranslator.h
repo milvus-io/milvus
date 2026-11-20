@@ -101,7 +101,7 @@ class SingleCellIndexStorageTranslator final
                     context.ctx.runtime_load_priority.value_or(0) != 0
                         ? proto::common::LoadPriority::LOW
                         : proto::common::LoadPriority::HIGH,
-                    context.ctx.load_seq),
+                    context.ctx.sequence_id),
                 std::move(task));
         } else {
             storage = co_await std::move(task);
