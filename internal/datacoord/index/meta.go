@@ -101,6 +101,9 @@ type IndexMeta struct {
 	KeyLock *lock.KeyLock[UniqueID]
 	// segmentID -> indexID -> segmentIndex
 	SegmentIndexes *typeutil.ConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]
+	// Build IDs still in SegmentBuildInfo after losing the current index slot.
+	// Entries for a segment are protected by the same lock as its index slots.
+	supersededBuilds typeutil.ConcurrentMap[UniqueID, map[UniqueID]struct{}]
 	// Serialize updates to each segment's index map across per-BuildID keyLocks.
 	// Removing its last index must not unlink the map while another index is
 	// added to that segment. Different segments can update independently.
@@ -248,19 +251,7 @@ func (m *IndexMeta) reloadFromKV(collectionIDs []int64) error {
 				if segIdx.IndexMemSize == 0 {
 					segIdx.IndexMemSize = segIdx.IndexSerializedSize * paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsUint64()
 				}
-				indexes, ok := m.SegmentIndexes.Get(segIdx.SegmentID)
-				if ok {
-					// Restored superseded builds remain GC records. Select the
-					// newest build independently of catalog key iteration order.
-					current, exists := indexes.Get(segIdx.IndexID)
-					if !exists || segIdx.BuildID > current.BuildID {
-						indexes.Insert(segIdx.IndexID, segIdx)
-					}
-				} else {
-					indexes = typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
-					indexes.Insert(segIdx.IndexID, segIdx)
-					m.SegmentIndexes.Insert(segIdx.SegmentID, indexes)
-				}
+				m.setSegmentIndexSlot(segIdx, true)
 				old, _ := m.SegmentBuildInfo.Get(segIdx.BuildID)
 				m.taskCounts.replaceTask(old, segIdx)
 				m.SegmentBuildInfo.AddForRecovery(segIdx)
@@ -309,19 +300,49 @@ func (m *IndexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
 	defer locks.Unlock(segIdx.SegmentID)
 	old, _ := m.SegmentBuildInfo.Get(segIdx.BuildID)
 	m.taskCounts.replaceTask(old, segIdx)
-	indexes, ok := m.SegmentIndexes.Get(segIdx.SegmentID)
-	if ok {
-		current, exists := indexes.Get(segIdx.IndexID)
-		if !segIdx.ManifestPublished || !exists || current.BuildID <= segIdx.BuildID {
-			indexes.Insert(segIdx.IndexID, segIdx)
-		}
-	} else {
-		indexes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
-		indexes.Insert(segIdx.IndexID, segIdx)
-		m.SegmentIndexes.Insert(segIdx.SegmentID, indexes)
-	}
+	m.setSegmentIndexSlot(segIdx, segIdx.ManifestPublished)
 	m.SegmentBuildInfo.Add(segIdx)
 	m.NotifyManifestIndexMigration(segIdx)
+}
+
+// setSegmentIndexSlot updates the current slot and retains displaced build IDs.
+// The caller holds the segment's index map lock or is loading the catalog.
+func (m *IndexMeta) setSegmentIndexSlot(segIdx *model.SegmentIndex, keepNewest bool) {
+	indexes, ok := m.SegmentIndexes.Get(segIdx.SegmentID)
+	if !ok {
+		indexes = typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	}
+	if current, exists := indexes.Get(segIdx.IndexID); exists && current.BuildID != segIdx.BuildID {
+		// Recovered and manifest-only records preserve a newer build's slot.
+		if keepNewest && current.BuildID > segIdx.BuildID {
+			m.rememberSupersededBuild(segIdx)
+			return
+		}
+		m.rememberSupersededBuild(current)
+	}
+	m.forgetSupersededBuild(segIdx)
+	indexes.Insert(segIdx.IndexID, segIdx)
+	if !ok {
+		m.SegmentIndexes.Insert(segIdx.SegmentID, indexes)
+	}
+}
+
+func (m *IndexMeta) rememberSupersededBuild(segIdx *model.SegmentIndex) {
+	builds, ok := m.supersededBuilds.Get(segIdx.SegmentID)
+	if !ok {
+		builds = make(map[UniqueID]struct{})
+		m.supersededBuilds.Insert(segIdx.SegmentID, builds)
+	}
+	builds[segIdx.BuildID] = struct{}{}
+}
+
+func (m *IndexMeta) forgetSupersededBuild(segIdx *model.SegmentIndex) {
+	if builds, ok := m.supersededBuilds.Get(segIdx.SegmentID); ok {
+		delete(builds, segIdx.BuildID)
+		if len(builds) == 0 {
+			m.supersededBuilds.Remove(segIdx.SegmentID)
+		}
+	}
 }
 
 // writeSegmentIndexToManifest selects manifest publication for new StorageV3
@@ -1067,6 +1088,10 @@ func (m *IndexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map
 // deleted builds, including builds whose index definition has been deleted.
 // It performs no I/O and exposes no file metadata.
 func (m *IndexMeta) GetAllSegmentIndexSummaries(segID UniqueID) []*model.SegmentIndexSummary {
+	locks := m.getSegmentIndexMapLocks()
+	locks.Lock(segID)
+	defer locks.Unlock(segID)
+
 	var summaries []*model.SegmentIndexSummary
 	recordBuildIDs := make(map[int64]struct{})
 	if m.SegmentIndexes != nil {
@@ -1074,6 +1099,14 @@ func (m *IndexMeta) GetAllSegmentIndexSummaries(segID UniqueID) []*model.Segment
 			for _, record := range records.Values() {
 				summaries = append(summaries, model.SummarizeSegmentIndex(record))
 				recordBuildIDs[record.BuildID] = struct{}{}
+			}
+		}
+	}
+	if builds, ok := m.supersededBuilds.Get(segID); ok {
+		for buildID := range builds {
+			if record, exists := m.SegmentBuildInfo.Get(buildID); exists {
+				summaries = append(summaries, model.SummarizeSegmentIndex(record))
+				recordBuildIDs[buildID] = struct{}{}
 			}
 		}
 	}
@@ -1373,6 +1406,7 @@ func (m *IndexMeta) removeSegmentIndexRecordInMemory(segIdx *model.SegmentIndex)
 		}
 	}
 
+	m.forgetSupersededBuild(segIdx)
 	m.taskCounts.replaceTask(segIdx, nil)
 	m.SegmentBuildInfo.Remove(segIdx.BuildID)
 }

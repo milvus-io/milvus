@@ -802,6 +802,15 @@ func TestCommitSegmentManifestAddsColumnWithoutRetractingSummaries(t *testing.T)
 }
 
 func TestSummaryModeLateCompletionRetiresOnlyObsoleteBuild(t *testing.T) {
+	testSummaryModeLateCompletion(t, false)
+}
+
+func TestSummaryModeColumnReplacementRetiresSupersededBuilds(t *testing.T) {
+	testSummaryModeLateCompletion(t, true)
+}
+
+func testSummaryModeLateCompletion(t *testing.T, replaceColumn bool) {
+	t.Helper()
 	ctx := t.Context()
 	mt, dm, err := NewMemoryMetaWithIndex(t)
 	require.NoError(t, err)
@@ -817,9 +826,20 @@ func TestSummaryModeLateCompletionRetiresOnlyObsoleteBuild(t *testing.T) {
 	}})
 	basePath := filepath.Join(root, "insert_log", "1", "2", "3")
 	pathVersion := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+	columnGroup := func(file string) packed.ColumnGroupEntry {
+		return packed.ColumnGroupEntry{
+			Columns: []string{"100"},
+			Format:  "parquet",
+			Files:   []packed.ColumnGroupFileEntry{{Path: filepath.Join(basePath, "_data", file), EndIndex: 10}},
+		}
+	}
+	manifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{
+		ColumnGroups: []packed.ColumnGroupEntry{columnGroup("original.parquet")},
+	})
+	require.NoError(t, err)
 	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 3, CollectionID: 1, PartitionID: 2, StorageVersion: storage.StorageV3, State: commonpb.SegmentState_Flushed,
-		ManifestPath: packed.MarshalManifestPath(basePath, packed.ManifestEarliest), NumOfRows: 10,
+		ManifestPath: manifest, NumOfRows: 10,
 	})))
 	newTask := func(buildID int64) *indexBuildTask {
 		require.NoError(t, dm.IndexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
@@ -842,11 +862,37 @@ func TestSummaryModeLateCompletionRetiresOnlyObsoleteBuild(t *testing.T) {
 	require.NoError(t, complete(newer, []string{"new.bin"}, 64))
 	before := mt.GetSegment(ctx, 3)
 	require.EqualValues(t, 21, before.GetIndexSummaries()[0].GetBuildId())
+	if replaceColumn {
+		require.True(t, dm.IndexMeta.HasBuildInfo(lateArtifact.BuildID))
+		require.True(t, dm.IndexMeta.HasBuildInfo(lateEmpty.BuildID))
+		recovered, err := NewIndexMeta(ctx, mt.Catalog, []int64{1})
+		require.NoError(t, err)
+		var recoveredIDs []int64
+		for _, summary := range recovered.GetAllSegmentIndexSummaries(3) {
+			recoveredIDs = append(recoveredIDs, summary.BuildID)
+		}
+		require.ElementsMatch(t, []int64{lateArtifact.BuildID, lateEmpty.BuildID}, recoveredIDs)
+		require.NoError(t, mt.CommitSegmentManifest(ctx, meta.SegmentManifestCommit{
+			SegmentID: 3, StorageConfig: cfg, InspectedManifest: before.GetManifestPath(),
+			Mutation: meta.ManifestMutation{Type: meta.ManifestMutationCommitUpdates, Updates: &packed.ManifestUpdates{
+				DropColumns:  []string{"100"},
+				ColumnGroups: []packed.ColumnGroupEntry{columnGroup("replacement.parquet")},
+			}},
+		}))
+		before = mt.GetSegment(ctx, 3)
+		require.Empty(t, before.GetIndexSummaries())
+		require.False(t, before.GetManifestHasIndex())
+	}
 	dm.IndexMeta.taskCounts.mu.Lock()
 	sizeBefore := dm.IndexMeta.taskCounts.activeSizes[1]
 	dm.IndexMeta.taskCounts.mu.Unlock()
-	require.EqualValues(t, 64, sizeBefore)
+	if replaceColumn {
+		require.Zero(t, sizeBefore)
+	} else {
+		require.EqualValues(t, 64, sizeBefore)
+	}
 	require.NoError(t, complete(lateArtifact, []string{"old.bin"}, 32))
+	require.Equal(t, before.GetManifestPath(), mt.GetSegment(ctx, 3).GetManifestPath(), "a late artifact must not advance the manifest")
 	require.NoError(t, complete(lateEmpty, nil, 0))
 	for _, task := range []*indexBuildTask{lateArtifact, lateEmpty} {
 		require.Equal(t, commonpb.IndexState_Finished, task.IndexState)
@@ -857,8 +903,12 @@ func TestSummaryModeLateCompletionRetiresOnlyObsoleteBuild(t *testing.T) {
 	require.Equal(t, before.GetIndexSummaries(), after.GetIndexSummaries())
 	entries, err := packed.GetManifestIndexInfos(after.GetManifestPath(), cfg)
 	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	require.Equal(t, []string{"new.bin"}, entries[0].IndexFileKeys)
+	if replaceColumn {
+		require.Empty(t, entries)
+	} else {
+		require.Len(t, entries, 1)
+		require.Equal(t, []string{"new.bin"}, entries[0].IndexFileKeys)
+	}
 	rows, err := mt.Catalog.ListSegmentIndexes(ctx, 1)
 	require.NoError(t, err)
 	require.Empty(t, rows)
@@ -866,6 +916,19 @@ func TestSummaryModeLateCompletionRetiresOnlyObsoleteBuild(t *testing.T) {
 	sizeAfter := dm.IndexMeta.taskCounts.activeSizes[1]
 	dm.IndexMeta.taskCounts.mu.Unlock()
 	require.Equal(t, sizeBefore, sizeAfter)
+	if replaceColumn {
+		require.Zero(t, dm.IndexMeta.supersededBuilds.Len())
+		fresh := newTask(22)
+		require.NoError(t, complete(fresh, []string{"replacement.bin"}, 16))
+		segment := mt.GetSegment(ctx, 3)
+		require.Len(t, segment.GetIndexSummaries(), 1)
+		require.Equal(t, fresh.BuildID, segment.GetIndexSummaries()[0].GetBuildId())
+		entries, err := packed.GetManifestIndexInfos(segment.GetManifestPath(), cfg)
+		require.NoError(t, err)
+		require.Len(t, entries, 1)
+		require.Equal(t, fresh.BuildID, entries[0].BuildID)
+		require.Equal(t, []string{"replacement.bin"}, entries[0].IndexFileKeys)
+	}
 }
 
 // A backfill replace holds fieldIndexLock's read side across its publication
