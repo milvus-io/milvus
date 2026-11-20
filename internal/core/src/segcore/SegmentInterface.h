@@ -422,8 +422,31 @@ class SegmentInterface {
 
 // internal API for DSL calculation
 // only for implementation
+class UpdatesRecord;
+struct UpdateAssignment;
+
 class SegmentInternalInterface : public SegmentInterface {
  public:
+    SegmentInternalInterface();
+
+    const UpdatesRecord&
+    GetUpdatesRecord() const {
+        return *updates_record_;
+    }
+
+    // The caller routes this mutation to a physical segment in its collection,
+    // partition and VChannel, after publishing all preceding inserts/deletes.
+    virtual void
+    ApplyUpdates(const IdArray& keys,
+                 Timestamp timestamp,
+                 uint32_t source_ordinal,
+                 const std::vector<UpdateAssignment>& assignments,
+                 OpContext* op_ctx = nullptr);
+
+    virtual std::vector<int64_t>
+    ResolveUpdateOffsets(const std::vector<PkType>& keys,
+                         Timestamp timestamp) const;
+
     // Process-unique id for THIS segment OBJECT, distinct from
     // get_segment_id() which identifies the logical segment.
     //
@@ -1025,6 +1048,8 @@ class SegmentInternalInterface : public SegmentInterface {
                     BitsetTypeView& bitset) const = 0;
 
  protected:
+    std::shared_ptr<UpdatesRecord> updates_record_;
+
     // mutex protecting rw options on schema_
     mutable std::shared_mutex sch_mutex_;
 

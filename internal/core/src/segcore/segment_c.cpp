@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/segment_c.h"
+#include "segcore/UpdatesRecord.h"
 
 #include <arrow/api.h>
 #include <arrow/c/abi.h>
@@ -1651,6 +1652,50 @@ PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset) {
     try {
         auto segment = static_cast<milvus::segcore::SegmentGrowing*>(c_segment);
         *offset = segment->PreInsert(size);
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
+ApplySegmentUpdates(CSegmentInterface segment,
+                    uint64_t timestamp,
+                    uint32_t ordinal,
+                    CProto ids_blob,
+                    const int64_t* field_ids,
+                    const CProto* literals,
+                    int64_t count,
+                    CLoadCancellationSource cancellation) {
+    SCOPE_CGO_CALL_METRIC();
+    try {
+        auto* native = dynamic_cast<milvus::segcore::SegmentInternalInterface*>(
+            static_cast<milvus::segcore::SegmentInterface*>(segment));
+        if (!native || count <= 0 || !field_ids || !literals) {
+            ThrowInfo(milvus::DataFormatBroken,
+                      "Invalid segment update arguments");
+        }
+        auto parse = [](CProto input, auto& message) {
+            if (!input.proto_blob || input.proto_size <= 0 ||
+                input.proto_size > std::numeric_limits<int>::max() ||
+                !message.ParseFromArray(input.proto_blob,
+                                        static_cast<int>(input.proto_size))) {
+                ThrowInfo(milvus::DataFormatBroken,
+                          "Invalid segment update protobuf");
+            }
+        };
+        milvus::proto::schema::IDs ids;
+        parse(ids_blob, ids);
+        std::vector<milvus::segcore::UpdateAssignment> assignments;
+        for (int64_t i = 0; i < count; ++i) {
+            auto& a =
+                assignments.emplace_back(milvus::segcore::UpdateAssignment{
+                    milvus::FieldId(field_ids[i]), {}});
+            parse(literals[i], a.literal);
+        }
+        auto* source = static_cast<folly::CancellationSource*>(cancellation);
+        milvus::OpContext ctx(source ? source->getToken()
+                                     : folly::CancellationToken{});
+        native->ApplyUpdates(ids, timestamp, ordinal, assignments, &ctx);
         return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS

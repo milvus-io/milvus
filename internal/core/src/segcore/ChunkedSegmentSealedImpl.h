@@ -150,6 +150,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::unique_ptr<ChunkedSegmentSealedImpl>
     PinReadState() const;
 
+    void
+    ApplyUpdates(const IdArray& keys,
+                 Timestamp timestamp,
+                 uint32_t ordinal,
+                 const std::vector<UpdateAssignment>& assignments,
+                 OpContext* op_ctx = nullptr) override;
+
     // Retain the resources of a live fork instead of the original load scope.
     void
     AdoptReadState(const ChunkedSegmentSealedImpl& read);
@@ -543,13 +550,18 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                const std::vector<PkType>& pks,
                milvus::OpContext* op_ctx) const;
 
+    std::vector<int64_t>
+    ResolveUpdateOffsets(const std::vector<PkType>& keys,
+                         Timestamp timestamp) const override;
+
     void
     search_batch_pks(
         const std::vector<PkType>& pks,
         const std::function<Timestamp(const size_t idx)>& get_timestamp,
         bool include_same_ts,
         const std::function<void(const SegOffset offset, const Timestamp ts)>&
-            callback) const;
+            callback,
+        bool require_ready = false) const;
 
  public:
     // Non-virtual helper called via dynamic_cast from SegmentInterface.

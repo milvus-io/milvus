@@ -96,6 +96,18 @@ typedef void* CLoadCancellationSource;
 CLoadCancellationSource
 NewLoadCancellationSource();
 
+// Apply one routed mutation body to a pinned segment. The ID blob is schema.IDs;
+// each field ID has one serialized schema.UpdateLiteral. Input buffers are borrowed.
+CStatus
+ApplySegmentUpdates(CSegmentInterface segment,
+                    uint64_t timestamp,
+                    uint32_t ordinal,
+                    CProto ids,
+                    const int64_t* field_ids,
+                    const CProto* literals,
+                    int64_t field_count,
+                    CLoadCancellationSource cancellation);
+
 /**
  * @brief Request cancellation through the source
  * @param source: The cancellation source handle

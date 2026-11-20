@@ -87,6 +87,7 @@
 #include "segcore/DeletedRecord.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/UpdatesRecord.h"
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/KeyRetriever.h"
@@ -937,6 +938,7 @@ SegmentGrowingImpl::PublishGrowingIndexesThroughRawReady() {
         // AckResponder inserts the new end before erasing the existing begin.
         // Allocation failure therefore leaves the query-visible boundary
         // unchanged, while the already-fed prefix remains retryable here.
+        updates_record_->Grow(growing_index_feed_cursor_);
         insert_record_.ack_responder_.AddSegment(visible_end,
                                                  growing_index_feed_cursor_);
     }
@@ -2875,6 +2877,18 @@ SegmentGrowingImpl::GetFieldDataType(milvus::FieldId field_id) const {
     auto schema = get_schema_snapshot();
     auto& field_meta = schema->operator[](field_id);
     return field_meta.get_data_type();
+}
+
+std::vector<int64_t>
+SegmentGrowingImpl::ResolveUpdateOffsets(const std::vector<PkType>& keys,
+                                         Timestamp timestamp) const {
+    std::vector<int64_t> rows;
+    for (const auto& pk : keys) {
+        for (auto offset : insert_record_.search_pk(pk, timestamp, false)) {
+            rows.push_back(offset.get());
+        }
+    }
+    return rows;
 }
 
 // Reports a row's matches in input order; DeletedRecord relies on it.

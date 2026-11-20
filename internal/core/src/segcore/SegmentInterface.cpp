@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "SegmentInterface.h"
+#include "segcore/UpdatesRecord.h"
 
 #include <folly/CancellationToken.h>
 #include <folly/ExceptionWrapper.h>
@@ -105,6 +106,54 @@ FillEmptyRetrieveFields(const Schema& schema,
 }
 
 }  // namespace
+
+SegmentInternalInterface::SegmentInternalInterface()
+    : updates_record_(std::make_shared<UpdatesRecord>()) {
+}
+
+std::vector<int64_t>
+SegmentInternalInterface::ResolveUpdateOffsets(const std::vector<PkType>&,
+                                               Timestamp) const {
+    ThrowInfo(Unsupported, "Segment does not support PK update resolution");
+}
+
+void
+SegmentInternalInterface::ApplyUpdates(
+    const IdArray& ids,
+    Timestamp timestamp,
+    uint32_t ordinal,
+    const std::vector<UpdateAssignment>& assignments,
+    OpContext* op_ctx) {
+    auto check_cancel = [&] {
+        CheckCancellation(op_ctx, get_segment_id(), "ApplyUpdates");
+    };
+    check_cancel();
+    auto schema = get_schema_snapshot();
+    const auto pk = schema->get_primary_field_id();
+    if (!pk) {
+        ThrowInfo(FieldNotLoaded, "PK field unavailable for update");
+    }
+    const auto pk_type = (*schema)[*pk].get_data_type();
+    if (!((pk_type == DataType::INT64 && ids.has_int_id()) ||
+          (pk_type == DataType::VARCHAR && ids.has_str_id())) ||
+        GetSizeOfIdArray(ids) == 0) {
+        ThrowInfo(DataFormatBroken, "Invalid primary keys for update");
+    }
+    std::vector<PkType> keys(GetSizeOfIdArray(ids));
+    ParsePksFromIDs(keys, pk_type, ids);
+    const int64_t count = get_row_count();
+    auto rows = ResolveUpdateOffsets(keys, timestamp);
+    // Growing PK insertion precedes publication of its contiguous ACK prefix.
+    std::erase_if(rows, [count](int64_t row) { return row >= count; });
+    if (!rows.empty() && get_deleted_count()) {
+        BitsetType deleted(count, false);
+        BitsetTypeView view(deleted);
+        mask_with_delete(view, count, timestamp);
+        std::erase_if(rows, [&](int64_t row) { return deleted[row]; });
+    }
+    updates_record_->Apply(
+        *schema, count, rows, timestamp, ordinal, assignments, check_cancel);
+}
 
 std::shared_ptr<milvus::exec::SimpleGeometryCache>
 SegmentInternalInterface::GetGeometryCache(FieldId field_id) const {

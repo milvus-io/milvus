@@ -265,6 +265,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
                       const Schema& schema,
                       int64_t covered_row_end);
 
+    std::vector<int64_t>
+    ResolveUpdateOffsets(const std::vector<PkType>& keys,
+                         Timestamp timestamp) const override;
+
     void
     search_batch_pks(
         const std::vector<PkType>& pks,

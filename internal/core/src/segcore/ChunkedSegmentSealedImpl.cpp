@@ -4842,6 +4842,34 @@ ChunkedSegmentSealedImpl::search_pks(BitsetType& bitset,
     }
 }
 
+void
+ChunkedSegmentSealedImpl::ApplyUpdates(
+    const IdArray& keys,
+    Timestamp timestamp,
+    uint32_t ordinal,
+    const std::vector<UpdateAssignment>& assignments,
+    OpContext* op_ctx) {
+    // Reopen can replace the PK resources, physical schema and effective birth
+    // timestamp. Resolve and publish against one physical state.
+    std::lock_guard guard(reopen_mutex_);
+    AssertInfo(!read_state_fork_, "cannot apply an update through a read fork");
+    SegmentInternalInterface::ApplyUpdates(
+        keys, timestamp, ordinal, assignments, op_ctx);
+}
+
+std::vector<int64_t>
+ChunkedSegmentSealedImpl::ResolveUpdateOffsets(const std::vector<PkType>& keys,
+                                               Timestamp timestamp) const {
+    std::vector<int64_t> rows;
+    search_batch_pks(
+        keys,
+        [timestamp](size_t) { return timestamp; },
+        false,
+        [&](SegOffset offset, Timestamp) { rows.push_back(offset.get()); },
+        true);
+    return rows;
+}
+
 // Reports a row's matches in ascending timestamp order, which is their
 // input order for the timestamp-sorted batches DeletedRecord pushes;
 // DeletedRecord relies on it.
@@ -4851,7 +4879,8 @@ ChunkedSegmentSealedImpl::search_batch_pks(
     const std::function<Timestamp(const size_t idx)>& get_timestamp,
     bool include_same_ts,
     const std::function<void(const SegOffset offset, const Timestamp ts)>&
-        callback) const {
+        callback,
+    bool require_ready) const {
     // Helper to read a single timestamp by segment offset.
     // For import/CDC segments with commit_ts_ set: every row carries commit_ts_,
     // so short-circuit without touching the raw timestamp column.
@@ -4892,6 +4921,10 @@ ChunkedSegmentSealedImpl::search_batch_pks(
         if (offset < ts_chunk_base || offset >= ts_chunk_limit) {
             if (!ts_column) {
                 ts_column = get_column(runtime, TimestampFieldID);
+                if (!ts_column && require_ready) {
+                    ThrowInfo(FieldNotLoaded,
+                              "timestamp data is not ready for updates");
+                }
                 AssertInfo(ts_column != nullptr, "timestamp data is not ready");
             }
             auto [cid, off_in_chunk] = ts_column->GetChunkIDByOffset(offset);
@@ -4933,6 +4966,9 @@ ChunkedSegmentSealedImpl::search_batch_pks(
         auto pk_index = PinPkIndex(runtime, nullptr);
         auto* pk_cell = pk_index.get();
         if (pk_cell == nullptr || !pk_cell->has_pk2offset()) {
+            if (require_ready) {
+                ThrowInfo(FieldNotLoaded, "PK index is not ready for updates");
+            }
             return;
         }
         auto timestamp_hit =
@@ -4955,6 +4991,10 @@ ChunkedSegmentSealedImpl::search_batch_pks(
     auto pk_field_id = primary_key_field_id_;
     AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
     auto pk_column = get_column(snapshot->runtime, pk_field_id);
+    if (!pk_column && require_ready) {
+        ThrowInfo(FieldNotLoaded,
+                  "primary key column is not ready for updates");
+    }
     AssertInfo(pk_column != nullptr, "primary key column not loaded");
 
     auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
@@ -5448,6 +5488,7 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       segcore_config_(source.segcore_config_),
       is_sorted_by_pk_(source.is_sorted_by_pk_),
       reader_mutex_(source.reader_mutex_) {
+    updates_record_ = source.updates_record_;
 }
 
 std::unique_ptr<ChunkedSegmentSealedImpl>
