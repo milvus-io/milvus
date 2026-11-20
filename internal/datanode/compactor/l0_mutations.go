@@ -17,6 +17,7 @@
 package compactor
 
 import (
+	"cmp"
 	"context"
 	"slices"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -43,9 +45,14 @@ func (t *LevelZeroCompactionTask) dispatchMutations(ctx context.Context, pk *sch
 		results[i] = &datapb.CompactionSegment{SegmentID: target.GetSegmentID(), Channel: t.plan.GetChannel()}
 	}
 	source := compactionMutationSource(t.cm, t.BinlogIO)
-	// Retain one decoded source file and its target projection at a time.
-	// Its original WAL identity orders it against other files on replay.
-	dispatch := func(rows []scopedMutation, size int64) error {
+	// Coalesce complete files across the round without keeping the whole
+	// prefix resident. Their WAL identities order independently flushed groups.
+	var rows []scopedMutation
+	var size int64
+	flush := func() error {
+		if len(rows) == 0 {
+			return nil
+		}
 		orderMutations(rows)
 		batchSize := getMaxBatchSize(float64(max(size, 1)), float64(memoryLimit))
 		for begin := 0; begin < len(targets); begin += batchSize {
@@ -55,30 +62,52 @@ func (t *LevelZeroCompactionTask) dispatchMutations(ctx context.Context, pk *sch
 				return err
 			}
 			for i, target := range batch {
-				group, err := targetMutations(rows, target.GetPartitionID(), bfs[target.GetSegmentID()])
+				groups, err := targetMutations(rows, target.GetPartitionID(), bfs[target.GetSegmentID()])
 				if err != nil {
 					return err
 				}
-				if group == nil {
-					continue
+				for _, group := range groups {
+					file, err := t.writeTargetMutations(ctx, target, group, plugin)
+					if err != nil {
+						return err
+					}
+					out := results[begin+i]
+					if len(out.Deltalogs) == 0 {
+						out.Deltalogs = []*datapb.FieldBinlog{{}}
+					}
+					out.Deltalogs[0].Binlogs = append(out.Deltalogs[0].Binlogs, file)
 				}
-				file, err := t.writeTargetMutations(ctx, target, group, plugin)
-				if err != nil {
-					return err
-				}
-				out := results[begin+i]
-				if len(out.Deltalogs) == 0 {
-					out.Deltalogs = []*datapb.FieldBinlog{{}}
-				}
-				out.Deltalogs[0].Binlogs = append(out.Deltalogs[0].Binlogs, file)
 			}
+		}
+		rows = nil
+		size = 0
+		return nil
+	}
+	window := memoryLimit
+	if maxFile := int64(t.compactionParams.BinLogMaxSize); maxFile > 0 {
+		window = min(window, maxFile)
+	}
+	reserve := func(path string, needed int64) error {
+		if needed > memoryLimit {
+			return merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "L0 file %q needs %d bytes, budget %d", path, needed, memoryLimit)
+		}
+		if needed > window-size {
+			return flush()
 		}
 		return nil
 	}
+	collect := func(fileRows []scopedMutation, fileSize int64) error {
+		rows = append(rows, fileRows...)
+		size += fileSize
+		return nil
+	}
 	for _, input := range inputs {
-		if err := readSegmentMutations(ctx, source, t.compactionParams.StorageConfig, t.plan, input, pk, memoryLimit, dispatch); err != nil {
+		if err := readSegmentMutations(ctx, source, t.compactionParams.StorageConfig, t.plan, input, pk, reserve, collect); err != nil {
 			return nil, err
 		}
+	}
+	if err := flush(); err != nil {
+		return nil, err
 	}
 	for _, result := range results {
 		result.Stats = buildCompactionOutputStats(nil, result.Deltalogs, 0)
@@ -86,15 +115,14 @@ func (t *LevelZeroCompactionTask) dispatchMutations(ctx context.Context, pk *sch
 	return results, nil
 }
 
-func targetMutations(rows []scopedMutation, partition int64, bf *pkoracle.BloomFilterSet) (*storage.MutationDelta, error) {
-	// Each decoded file has one physical layout and scope.
-	layout := rows[0].layout
-	if layout.PartitionID != common.AllPartitionsID && layout.PartitionID != partition {
-		return nil, nil
-	}
-	layout.PartitionID = partition
-	delta := &storage.MutationDelta{Layout: layout}
+func targetMutations(rows []scopedMutation, partition int64, bf *pkoracle.BloomFilterSet) ([]*storage.MutationDelta, error) {
+	var groups []*storage.MutationDelta
+	byVersion := make(map[int32]*storage.MutationDelta)
+	fields := make(map[int32]map[int64]struct{})
 	for _, r := range rows {
+		if r.layout.PartitionID != common.AllPartitionsID && r.layout.PartitionID != partition {
+			continue
+		}
 		projected := r.Row
 		if bf != nil {
 			keys := make([]storage.PrimaryKey, typeutil.GetSizeOfIDs(r.PrimaryKeys))
@@ -116,17 +144,42 @@ func targetMutations(rows []scopedMutation, partition int64, bf *pkoracle.BloomF
 		if typeutil.GetSizeOfIDs(projected.PrimaryKeys) == 0 {
 			continue
 		}
-		delta.Rows = append(delta.Rows, projected)
+		group := byVersion[r.layout.SchemaVersion]
+		if group == nil {
+			layout := r.layout
+			layout.PartitionID = partition
+			layout.Fields = nil
+			group = &storage.MutationDelta{Layout: layout}
+			byVersion[layout.SchemaVersion] = group
+			groups = append(groups, group)
+			fields[layout.SchemaVersion] = make(map[int64]struct{})
+		}
+		assigned := fields[r.layout.SchemaVersion]
+		for _, a := range projected.Assignments {
+			id := a.GetFieldId()
+			if _, seen := assigned[id]; seen {
+				continue
+			}
+			for _, f := range r.layout.Fields {
+				if f.ID == id {
+					assigned[id] = struct{}{}
+					group.Layout.Fields = append(group.Layout.Fields, f)
+					break
+				}
+			}
+		}
+		group.Rows = append(group.Rows, projected)
 	}
-	if len(delta.Rows) == 0 {
-		return nil, nil
+	for _, group := range groups {
+		slices.SortFunc(group.Layout.Fields, func(a, b deltacodec.Field) int { return cmp.Compare(a.ID, b.ID) })
 	}
-	return delta, nil
+	return groups, nil
 }
 
 func (t *LevelZeroCompactionTask) writeTargetMutations(ctx context.Context, target *datapb.CompactionSegmentBinlogs, g *storage.MutationDelta, plugin *indexcgopb.StoragePluginContext) (*datapb.Binlog, error) {
-	// Keep delete-only targets readable by older QueryNodes during upgrade.
-	if !slices.ContainsFunc(g.Rows, func(r deltacodec.Row) bool { return r.Operation == deltacodec.Update }) {
+	// The legacy decoder implies ordinal zero. Only down-convert when it
+	// can reconstruct every delivered mutation's original identity.
+	if !slices.ContainsFunc(g.Rows, func(r deltacodec.Row) bool { return r.Operation != deltacodec.Delete || r.SourceOrdinal != 0 }) {
 		var keys []storage.PrimaryKey
 		var ticks []uint64
 		for _, r := range g.Rows {

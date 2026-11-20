@@ -19,7 +19,6 @@ package compactor
 import (
 	"cmp"
 	"context"
-	"math"
 	"slices"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -62,7 +61,7 @@ func compactionMutationSource(cm storage.ChunkManager, io binlogio.BinlogIO) mut
 	return mutationSource{cm: cm}
 }
 
-func readSegmentMutations(ctx context.Context, source mutationSource, cfg *indexpb.StorageConfig, plan *datapb.CompactionPlan, seg *datapb.CompactionSegmentBinlogs, pk *schemapb.FieldSchema, fileLimit int64, consume func([]scopedMutation, int64) error) error {
+func readSegmentMutations(ctx context.Context, source mutationSource, cfg *indexpb.StorageConfig, plan *datapb.CompactionPlan, seg *datapb.CompactionSegmentBinlogs, pk *schemapb.FieldSchema, reserve func(string, int64) error, consume func([]scopedMutation, int64) error) error {
 	files := seg.GetDeltalogs()
 	version := seg.GetStorageVersion()
 	if path := seg.GetManifest(); path != "" {
@@ -90,8 +89,10 @@ func readSegmentMutations(ctx context.Context, source mutationSource, cfg *index
 	for _, group := range files {
 		for _, file := range group.GetBinlogs() {
 			size := file.GetMemorySize()
-			if size > fileLimit {
-				return merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "L0 file %q needs %d bytes, budget %d", file.GetLogPath(), size, fileLimit)
+			if reserve != nil && size > 0 {
+				if err := reserve(file.GetLogPath(), size); err != nil {
+					return err
+				}
 			}
 			var rows []scopedMutation
 			var decodedSize int64
@@ -107,6 +108,19 @@ func readSegmentMutations(ctx context.Context, source mutationSource, cfg *index
 						return merr.WrapErrDataIntegrityMsg("delta field %d does not match compaction schema", f.ID)
 					}
 				}
+				if reserve != nil {
+					// Manifest-only and historical files may have no declared
+					// size. Reserve the decoded batch before retaining its rows.
+					for _, row := range batch {
+						decodedSize += int64(128 + proto.Size(row.PrimaryKeys) + 16*typeutil.GetSizeOfIDs(row.PrimaryKeys))
+						for _, a := range row.Assignments {
+							decodedSize += int64(16 + proto.Size(a))
+						}
+					}
+					if err := reserve(file.GetLogPath(), max(size, decodedSize)); err != nil {
+						return err
+					}
+				}
 				for _, row := range batch {
 					if seg.GetLevel() == datapb.SegmentLevel_L0 {
 						row.TimeTick = tsoutil.EffectiveTimestamp(row.TimeTick, seg.GetCommitTimestamp())
@@ -114,17 +128,7 @@ func readSegmentMutations(ctx context.Context, source mutationSource, cfg *index
 							return merr.WrapErrDataIntegrityMsg("mutation exceeds frozen frontier %d", through)
 						}
 					}
-					if fileLimit != math.MaxInt64 {
-						// Manifest-only and historical files may have no memory-size
-						// metadata. Also bound the decoded rows retained for routing.
-						decodedSize += int64(128 + proto.Size(row.PrimaryKeys) + 16*typeutil.GetSizeOfIDs(row.PrimaryKeys))
-						for _, assignment := range row.Assignments {
-							decodedSize += int64(16 + proto.Size(assignment))
-						}
-						if decodedSize > fileLimit {
-							return merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "decoded L0 file %q exceeds %d bytes", file.GetLogPath(), fileLimit)
-						}
-					}
+
 					rows = append(rows, scopedMutation{row, l})
 				}
 				return nil
@@ -182,7 +186,7 @@ type segmentMutations struct {
 
 func loadRewriteMutations(ctx context.Context, source mutationSource, cfg *indexpb.StorageConfig, plan *datapb.CompactionPlan, seg *datapb.CompactionSegmentBinlogs, pk *schemapb.FieldSchema) (*segmentMutations, error) {
 	var rows []scopedMutation
-	err := readSegmentMutations(ctx, source, cfg, plan, seg, pk, math.MaxInt64, func(batch []scopedMutation, _ int64) error {
+	err := readSegmentMutations(ctx, source, cfg, plan, seg, pk, nil, func(batch []scopedMutation, _ int64) error {
 		rows = append(rows, batch...)
 		return nil
 	})

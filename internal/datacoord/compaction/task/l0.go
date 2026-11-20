@@ -509,7 +509,8 @@ func (t *L0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 	segments = append(segments, flushedSegments...)
 	var logIDRange *datapb.IDRange
 	if taskProto.GetMaterializedThrough() != 0 {
-		// The worker writes at most one object per (source file, target).
+		// Bounded coalescing never splits a source file, so there is at
+		// most one output per (source file, target) before coalescing.
 		// V3 manifests can own several files with no legacy binlog array.
 		var sources int64
 		for _, s := range plan.SegmentBinlogs {
