@@ -82,3 +82,51 @@ func TestBackendOpenOwnership(t *testing.T) {
 		})
 	}
 }
+
+func TestBackendOpenWaitCancellation(t *testing.T) {
+	for _, write := range []bool{false, true} {
+		t.Run(map[bool]string{false: "reader", true: "writer"}[write], func(t *testing.T) {
+			mockey.PatchConvey("canceling a waiter does not depend on another open finishing", t, func() {
+				p, w, _ := installBackends(t)
+				entered, release := make(chan struct{}), make(chan struct{})
+				var opens atomic.Int32
+				auto := New(p, func(context.Context, message.WALName, types.AccessMode) (walimpls.WALImpls, error) {
+					opens.Add(1)
+					close(entered)
+					<-release
+					return w, nil
+				})
+				ownerDone := make(chan error, 1)
+				go func() {
+					_, err := auto.backend(context.Background(), w.name, true)
+					ownerDone <- err
+				}()
+				<-entered
+				defer func() {
+					close(release)
+					require.NoError(t, <-ownerDone)
+					auto.Close()
+				}()
+
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				started, done := make(chan struct{}), make(chan error, 1)
+				go func() {
+					close(started)
+					_, err := auto.backend(ctx, w.name, write)
+					done <- err
+				}()
+				<-started
+				cancel()
+				select {
+				case err := <-done:
+					require.ErrorIs(t, err, context.Canceled)
+				case <-time.After(time.Second):
+					t.Fatal("canceled waiter is blocked behind another backend open")
+				}
+				require.EqualValues(t, 1, opens.Load())
+				require.Equal(t, p.name, auto.WALName())
+			})
+		})
+	}
+}

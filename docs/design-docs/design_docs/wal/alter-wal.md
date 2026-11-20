@@ -29,8 +29,25 @@ is triggered asynchronously; it is not a prerequisite for admitting new writes.
 The existing PChannel exclusive append lock supplies business-write exclusion.
 The TimeTick layer supplies synchronization with periodic Sync and publishes the
 old acknowledged batch. The wrapper owns physical handles, append routing,
-scanner handoff and truncation routing. RecoveryStorage owns startup traversal
-of physical WALs; autowalimpls is constructed only after bounded recovery succeeds.
+scanner handoff and truncation routing. Auto is constructed from the checkpoint
+backend before recovery and owns all physical handles throughout its lifetime.
+RecoveryStorage owns startup traversal and explicitly selects each recovery writer
+through auto before writing that leg's RecoveryBarrier.
+
+Auto has one current RW handle for current reads and writes, and a collection
+of historical reader handles. A historical reader may be RO or a retired RW
+handle. Selecting a new writer moves the old current handle into that collection
+without closing or reopening it; switching back reuses a retained RW handle.
+There is one historical handle per backend, and current is excluded from that
+map. RO handles are never used for append: when a backend previously opened for
+historical reads becomes the writer, acquire an RW handle, replace the cached RO
+handle and close it. Physical RO handles do not own shared opener resources or
+scanner connections; existing scanners continue independently and close their own
+resources on handoff or subscription shutdown. A failed RW open leaves the RO
+handle in place. A prepared target is owned by the map until selected as current.
+Other historical handles remain cached for reuse until auto closes, which closes
+them and current exactly once. There is no idle eviction or reference counting.
+A reader-only auto has an RO current handle and does not admit writes.
 
 ## Durable link and target position
 
@@ -122,8 +139,8 @@ message. `autowalimpls` owns backoff, retry metrics, failure logs and
 writer-switch logs, and receives raw physical implementations with no observation
 wrapper. A physical backend's lost acknowledgement is retried on that same
 backend. Only fencing or cancellation of the WAL-owned context ends the retry
-loop; an individual backend attempt timeout is retriable. Recovery probes and
-`finishRecovery` retain their existing startup and handle-transfer contracts.
+loop; an individual backend attempt timeout is retriable. Recovery probes use
+the same auto append path; completing recovery does not reopen or transfer writers.
 
 The old AlterWAL keeps its old native MessageID and LastConfirmed. Subsequent
 messages have target-native IDs and target-native LastConfirmed. No Ack heap or
@@ -184,8 +201,9 @@ particular, StartAfter(old AlterWAL) must inspect the excluded boundary for rout
 before excluding it from delivery. Reader creation does not acquire a new writer
 on a historical backend. Physical Open is serialized separately from the mutex
 used to select the current writer: slow historical Open does not block ordinary
-Append or WALName. Concurrent opens must not create duplicate writers that fence
-each other. A handle returned after Close is closed instead of installed.
+Append or WALName. Waiting for open admission is cancellable. Concurrent opens
+must not create duplicate RW handles that fence each other. A handle returned
+after Close is closed instead of installed.
 
 `All` starts at the earliest retained record of the physical backend selected
 when the read is opened. For autowalimpls this is the current backend. It follows
@@ -207,17 +225,20 @@ invalidates an uncompleted recovery prefix merely because writes switched.
 
 ## Startup recovery
 
-The data checkpoint selects the first physical WAL. RecoveryStorage recovers
-through physical WAL implementations directly, before constructing autowalimpls.
-There is no tail-query API and no separate chain-discovery scan.
+The data checkpoint selects the first physical writer, which is immediately
+owned by autowalimpls. RecoveryStorage uses this same auto during recovery and
+live operation. There is no tail-query API or separate chain-discovery scan.
 
 1. Acquire/fence the checkpoint backend's writer and append a RecoveryBarrier.
 2. Replay with the ordinary scanner's decoding, chunk assembly, ordering and
    transaction semantics. At a cross-backend AlterWAL, pause physical input
    before reading anything beyond that marker. Observe and dispatch the old
    prefix through the boundary, including transaction abortion and async flush.
-3. RecoveryStorage opens/fences the linked target writer, appends a new local
-   RecoveryBarrier, and continues after the durable target anchor S. Reallocate
+3. RecoveryStorage calls the builder's SwitchWAL, which selects the linked target
+   through `auto.SwitchWriterForRecovery`. Auto opens/fences or reuses the writer
+   without writing an anchor or another AlterWAL. The builder then appends a new
+   local RecoveryBarrier through auto and rebuilds the recovery reader after S,
+   with the new exact barrier as its startup pause point. Reallocate
    the barrier timestamp after acquiring that writer, and use target-local
    LastConfirmed. Each leg's expected barrier is identified by its exact native
    ID, WAL name and timestamp. The old leg stops at AlterWAL and does not consume
@@ -228,17 +249,20 @@ There is no tail-query API and no separate chain-discovery scan.
    boundary all old transactions and incomplete chunks have ended, so a physical
    leg can release its scanner; the RecoveryStorage component state and ACK
    handles remain continuous. A same-backend AlterWAL creates no new leg.
-5. After the bounded replay and snapshot succeed, construct autowalimpls by
-   transferring the already-open writers, using the final physical writer as
-   current. Initialize WAB, MVCC and append interceptors from the final barrier.
-   The final scanner stays paused, retaining its transaction buffer. Bind its
-   live WAB and autowalimpls fallback source, then release startup input and write
-   admission. No second data replay or writer reopening occurs at this handoff.
+5. After bounded replay and the snapshot succeed, auto already has the final
+   writer selected. Initialize WAB, MVCC and append interceptors from the final
+   barrier. The final scanner stays paused, retaining its transaction buffer.
+   Bind its live WAB, then release startup input and write admission. The same
+   auto stays in place; no handle transfer, data replay or writer reopening occurs.
 
-Historical handles have one owner throughout startup and are transferred on
-success; failures close newly opened handles as well as the original writer.
-The safe data checkpoint may still belong to an older WAL. Neither finishing
-recovery nor constructing autowalimpls rewrites it to the target's earliest ID.
+`SwitchWriterForRecovery` is a startup-only operation, called before business
+append admission. Reading historical AlterWAL messages never changes the shared
+writer; RecoveryStorage explicitly selects it after ordered observation. Runtime
+switching still occurs only through Append(AlterWAL). Auto owns the initial and
+subsequent physical handles, reuses writers on round trips, and closes them on
+failure or shutdown. The builder keeps no separate writer cache or ownership flag.
+The safe data checkpoint may still belong to an older WAL; recovery never rewrites
+it to the target's earliest ID.
 RO opening does not run this recovery protocol; it constructs a reader-capable
 autowalimpls directly and follows historical read options and durable links.
 

@@ -14,7 +14,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// OpenBackend opens a physical handle. Historical readers must use AccessModeRO.
+// OpenBackend opens a physical handle. Opening for historical reads uses
+// AccessModeRO; an already-owned RW handle may serve those reads directly.
+// Physical RO handles do not own opener resources or scanners, so replacing
+// and closing an RO handle must leave their lifetimes independent.
 type OpenBackend func(context.Context, message.WALName, types.AccessMode) (walimpls.WALImpls, error)
 
 // WAL preserves one logical lifetime while switching the current physical log.
@@ -22,45 +25,37 @@ type OpenBackend func(context.Context, message.WALName, types.AccessMode) (walim
 // and readers; it is not a replacement for the logical PChannel append lock.
 type WAL struct {
 	mu             sync.Mutex
-	openMu         sync.Mutex // serializes physical opens without blocking current-writer lookup
+	openGate       chan struct{} // serializes physical opens with cancellable waiting
 	channel        types.PChannelInfo
 	open           OpenBackend
-	current        walimpls.WALImpls
-	writers        map[message.WALName]walimpls.WALImpls
-	readers        map[message.WALName]walimpls.WALImpls
+	current        walimpls.WALImpls                     // the only handle used for current reads and writes
+	readers        map[message.WALName]walimpls.WALImpls // one historical handle per backend; excludes current
 	lastSwitchTick uint64
 	lastSwitchID   message.MessageID
 	closed         bool
 }
 
-// New takes ownership of the final writer and any physical writers acquired
-// during recovery. It performs no recovery, I/O or writer reopening.
-func New(initial walimpls.WALImpls, open OpenBackend, recovered ...walimpls.WALImpls) *WAL {
-	w := &WAL{
+// New takes ownership of the initial physical handle. It performs no recovery,
+// I/O or writer reopening.
+func New(initial walimpls.WALImpls, open OpenBackend) *WAL {
+	return &WAL{
 		channel: initial.Channel(), open: open, current: initial,
-		writers: make(map[message.WALName]walimpls.WALImpls), readers: make(map[message.WALName]walimpls.WALImpls),
+		openGate: make(chan struct{}, 1),
+		readers:  make(map[message.WALName]walimpls.WALImpls),
 	}
-	if initial.Channel().AccessMode == types.AccessModeRW {
-		w.writers[initial.WALName()] = initial
-	} else {
-		w.readers[initial.WALName()] = initial
-	}
-	for _, backend := range recovered {
-		w.writers[backend.WALName()] = backend
-	}
-	return w
 }
 
 func (w *WAL) Channel() types.PChannelInfo { return w.channel }
 func (w *WAL) WALName() message.WALName    { w.mu.Lock(); defer w.mu.Unlock(); return w.current.WALName() }
 
-// cachedBackend requires mu. A writer can also serve historical reads.
+// cachedBackend requires mu. Retired RW handles can serve reads and be reused
+// for a later switch; an RO handle cannot be used for writes.
 func (w *WAL) cachedBackend(name message.WALName, write bool) walimpls.WALImpls {
-	if b := w.writers[name]; b != nil {
+	if b := w.current; b.WALName() == name && (!write || b.Channel().AccessMode == types.AccessModeRW) {
 		return b
 	}
-	if !write {
-		return w.readers[name]
+	if b := w.readers[name]; b != nil && (!write || b.Channel().AccessMode == types.AccessModeRW) {
+		return b
 	}
 	return nil
 }
@@ -76,9 +71,13 @@ func (w *WAL) backend(ctx context.Context, name message.WALName, write bool) (wa
 		return b, nil
 	}
 	// Concurrent RW opens can fence each other, so do not open duplicate
-	// writers and discard a loser. Cached appends never acquire openMu.
-	w.openMu.Lock()
-	defer w.openMu.Unlock()
+	// writers and discard a loser. Cached appends never acquire openGate.
+	select {
+	case w.openGate <- struct{}{}:
+		defer func() { <-w.openGate }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	w.mu.Lock()
 	b, closed = w.cachedBackend(name, write), w.closed
 	w.mu.Unlock()
@@ -105,13 +104,42 @@ func (w *WAL) backend(ctx context.Context, name message.WALName, write bool) (wa
 		b.Close()
 		return nil, merr.WrapErrServiceUnavailableMsg("auto WAL closed during backend open")
 	}
-	if write {
-		w.writers[name] = b
-	} else {
-		w.readers[name] = b
-	}
+	// A prepared RW handle becomes current only after the durable boundary.
+	previous := w.readers[name]
+	w.readers[name] = b
 	w.mu.Unlock()
+	if previous != nil {
+		// Only an RO handle can be replaced. Physical RO Close leaves shared
+		// opener resources and independently owned scanners intact.
+		previous.Close()
+	}
 	return b, nil
+}
+
+// selectWriter requires mu and a handle acquired through backend. Only the
+// append path or startup recovery selects a writer; historical readers do not.
+func (w *WAL) selectWriter(next walimpls.WALImpls) {
+	if w.current == next {
+		return
+	}
+	w.readers[w.current.WALName()] = w.current
+	delete(w.readers, next.WALName())
+	w.current = next
+}
+
+// SwitchWriterForRecovery selects the writer reached by replaying a durable
+// AlterWAL. Call only during startup, before admitting appends. It acquires the
+// target writer (and its fence) before the caller allocates a new RecoveryBarrier.
+// It writes no anchor or AlterWAL; existing scanners keep their own read position.
+func (w *WAL) SwitchWriterForRecovery(ctx context.Context, name message.WALName) error {
+	target, err := w.backend(ctx, name, true)
+	if err != nil {
+		return err
+	}
+	w.mu.Lock()
+	w.selectWriter(target)
+	w.mu.Unlock()
+	return nil
 }
 
 func (w *WAL) Append(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
@@ -165,7 +193,8 @@ func (w *WAL) Append(ctx context.Context, msg message.MutableMessage) (message.M
 		return nil, err
 	}
 	w.mu.Lock()
-	w.current, w.lastSwitchTick, w.lastSwitchID = next, msg.TimeTick(), id
+	w.selectWriter(next)
+	w.lastSwitchTick, w.lastSwitchID = msg.TimeTick(), id
 	w.mu.Unlock()
 	mlog.Info(ctx, "WAL writer switched", mlog.FieldPChannel(w.channel.Name), mlog.Stringer("oldWAL", current.WALName()), mlog.Stringer("targetWAL", target), mlog.Uint64("timetick", msg.TimeTick()))
 	return id, nil
@@ -191,12 +220,14 @@ func (w *WAL) Close() {
 		return
 	}
 	w.closed = true
-	w.mu.Unlock()
-	// No handle can be installed after closed is set.
-	for _, b := range w.readers {
-		b.Close()
+	handles := []walimpls.WALImpls{w.current}
+	for _, reader := range w.readers {
+		handles = append(handles, reader)
 	}
-	for _, b := range w.writers {
-		b.Close()
+	w.mu.Unlock()
+	// Snapshot ownership under mu: a switch can move handles between roles,
+	// but no new handle can be installed after closed is set.
+	for _, handle := range handles {
+		handle.Close()
 	}
 }

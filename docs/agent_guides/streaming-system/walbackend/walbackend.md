@@ -37,9 +37,21 @@ AlterWAL and eliminate legacy-switch historical subscription requirements before
 enabling hot switching. No persisted backend-membership compatibility list or
 catalog lookup is added to this read path; see the AlterWAL design.
 
+Auto keeps one current writer and one historical reader handle per backend. Retiring
+an RW handle changes its role to historical reader without reopening it or changing
+its access mode. A later switch back can reuse it. If a backend already has an RO
+reader when it becomes current, its new RW handle replaces the RO handle, which
+is then closed. Physical RO handles do not own shared opener resources or scanner
+connections, so existing scanners continue until their own close or handoff.
+Other historical handles are retained until auto closes; there is no idle eviction.
+The current handle is not duplicated in the historical map, and every owned
+handle closes once.
+
 Physical Open runs outside the current-writer mutex and serializes acquisition
-to avoid duplicate writers fencing one another. Latest is rejected before reader
-creation; there is no Latest-specific switch state or retry loop.
+to avoid duplicate writers fencing one another. Waiting for acquisition is
+cancellable, so closing a reader does not wait for another caller's slow Open.
+Latest is rejected before reader creation; there is no Latest-specific switch
+state or retry loop.
 
 ## Append retry and writer lifetime
 
@@ -68,11 +80,14 @@ The adaptor records one trace span around each call into `autowalimpls.Append`
 No error is injected after a successful auto append: interceptors must finish
 their in-memory transitions once persistence succeeds. Backend lost-acknowledgement
 retry tests inject errors in the mocked physical implementation, after recording
-the message. No observation wrapper or callback is passed into auto, and
-`finishRecovery` transfers raw writers unchanged.
-The adaptor directly calls the recovered auto WAL. Retry helpers are private to
+the message. No observation wrapper or callback is passed into auto.
+Auto owns the checkpoint writer from the start of recovery. RecoveryStorage
+selects each linked writer through `SwitchWriterForRecovery`, then writes its new
+RecoveryBarrier through auto; ordinary historical readers never change the writer.
+The builder does not maintain a second handle cache or transfer writers on completion.
+The adaptor directly calls the same auto WAL. Retry helpers are private to
 `autowalimpls.Append`; there is no separate retry wrapper. Test backends use the
-same auto construction path after recovery.
+same auto construction path before recovery.
 
 Validation rejected before backend append is a separate case: no record was written,
 so the relevant producer/transaction protocol handles that rejection directly.

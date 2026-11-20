@@ -114,7 +114,11 @@ func TestRecoveryScannerPreservesPartialTransaction(t *testing.T) {
 			buffer := wab.NewWriteAheadBuffer(l.Channel().Name, mlog.With(), capacity, time.Hour, barrier)
 			t.Cleanup(buffer.Close)
 			liveReady := make(chan struct{})
-			ro := adaptImplsToROWAL(l, func() {})
+			auto := autowalimpls.New(l, func(context.Context, message.WALName, types.AccessMode) (walimpls.WALImpls, error) {
+				t.Fatal("recovery handoff must not reopen a writer")
+				return nil, nil
+			})
+			ro := adaptImplsToROWAL(auto, func() {})
 			t.Cleanup(ro.Close)
 			builder := newRecoveryStreamBuilder(ro, nil, liveReady)
 			stream := builder.Build(recovery.BuildRecoveryStreamParam{
@@ -133,15 +137,9 @@ func TestRecoveryScannerPreservesPartialTransaction(t *testing.T) {
 			require.Len(t, bodies, 1)
 			require.True(t, body.MessageID().EQ(bodies[0].MessageID()))
 
-			// Recovery completes against physical WAL, then the paused scanner
-			// receives the live wrapper and WAB without losing its partial txn.
-			builder.openBackend = func(context.Context, message.WALName, types.AccessMode) (walimpls.WALImpls, error) {
-				t.Fatal("handoff must not reopen a writer")
-				return nil, nil
-			}
-			live := builder.finishRecovery()
-			require.IsType(t, &autowalimpls.WAL{}, live)
-			ro.roWALImpls = live
+			// The same auto survives recovery; only WAB is bound before resuming
+			// the paused scanner, preserving its partial transaction.
+			require.Same(t, auto, builder.RWWALImpls())
 			builder.writeAheadBuffer = buffer
 
 			// The writer can confirm more data while recovery is paused. Even a tiny

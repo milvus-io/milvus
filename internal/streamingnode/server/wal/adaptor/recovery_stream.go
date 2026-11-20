@@ -11,7 +11,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/autowalimpls"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -24,24 +23,16 @@ var (
 func newRecoveryStreamBuilder(roWALImpls *roWALAdaptorImpl, buffer wab.ROWriteAheadBuffer, liveReady <-chan struct{}) *recoveryStreamBuilderImpl {
 	return &recoveryStreamBuilderImpl{
 		roWALAdaptorImpl: roWALImpls,
-		basicWAL:         roWALImpls.roWALImpls.(walimpls.WALImpls),
 		writeAheadBuffer: buffer,
 		liveReady:        liveReady,
-		initialWAL:       roWALImpls.roWALImpls.(walimpls.WALImpls),
-		writers:          map[message.WALName]walimpls.WALImpls{roWALImpls.WALName(): roWALImpls.roWALImpls.(walimpls.WALImpls)},
 	}
 }
 
 // recoveryStreamBuilerImpl is the implementation of RecoveryStreamBuilder.
 type recoveryStreamBuilderImpl struct {
 	*roWALAdaptorImpl
-	basicWAL         walimpls.WALImpls
 	writeAheadBuffer wab.ROWriteAheadBuffer
 	liveReady        <-chan struct{}
-	initialWAL       walimpls.WALImpls
-	openBackend      autowalimpls.OpenBackend
-	writers          map[message.WALName]walimpls.WALImpls
-	transferred      bool
 }
 
 // Build builds a recovery stream.
@@ -52,7 +43,7 @@ func (b *recoveryStreamBuilderImpl) Build(param recovery.BuildRecoveryStreamPara
 	}
 	scanner := newScannerAdaptor(
 		"recovery",
-		b.basicWAL,
+		b.roWALImpls,
 		wal.ReadOption{
 			DeliverPolicy:          policy,
 			IgnorePauseConsumption: true,
@@ -64,7 +55,7 @@ func (b *recoveryStreamBuilderImpl) Build(param recovery.BuildRecoveryStreamPara
 			writeAheadBuffer:  b.writeAheadBuffer,
 			startupBarrier: &scannerStartupBarrier{
 				message: param.RecoveryBarrier, resume: b.liveReady, stopAtWALSwitch: param.StopAtWALSwitch,
-				liveSource: func() (walimpls.ROWALImpls, wab.ROWriteAheadBuffer) { return b.basicWAL, b.writeAheadBuffer },
+				liveSource: func() (walimpls.ROWALImpls, wab.ROWriteAheadBuffer) { return b.roWALImpls, b.writeAheadBuffer },
 			},
 		},
 	)
@@ -79,54 +70,16 @@ func (b *recoveryStreamBuilderImpl) Build(param recovery.BuildRecoveryStreamPara
 }
 
 func (b *recoveryStreamBuilderImpl) RWWALImpls() walimpls.WALImpls {
-	return b.basicWAL
+	return b.roWALImpls.(walimpls.WALImpls)
 }
 
 // SwitchWAL is called only by RecoveryStorage after observing an AlterWAL.
 func (b *recoveryStreamBuilderImpl) SwitchWAL(ctx context.Context, start message.MessageID) (message.ImmutableMessage, error) {
-	target := b.writers[start.WALName()]
-	if target == nil {
-		if b.openBackend == nil {
-			return nil, merr.WrapErrServiceInternalMsg("missing recovery WAL opener")
-		}
-		var err error
-		target, err = b.openBackend(ctx, start.WALName(), b.initialWAL.Channel().AccessMode)
-		if err != nil {
-			return nil, err
-		}
-		b.writers[start.WALName()] = target
-	}
-	barrier, err := sendFirstTimeTick(ctx, target, start)
-	if err != nil {
+	w := b.roWALImpls.(*autowalimpls.WAL)
+	if err := w.SwitchWriterForRecovery(ctx, start.WALName()); err != nil {
 		return nil, err
 	}
-	b.basicWAL = target
-	return barrier, nil
-}
-
-// finishRecovery transfers owned writers only after the data replay succeeds.
-func (b *recoveryStreamBuilderImpl) finishRecovery() walimpls.WALImpls {
-	if b.openBackend != nil {
-		writers := make([]walimpls.WALImpls, 0, len(b.writers))
-		for _, writer := range b.writers {
-			writers = append(writers, writer)
-		}
-		b.basicWAL = autowalimpls.New(b.basicWAL, b.openBackend, writers...)
-	}
-	b.transferred = true
-	return b.basicWAL
-}
-
-func (b *recoveryStreamBuilderImpl) closeUntransferredWriters() {
-	if b.transferred {
-		return
-	}
-	// The opener's resource guard owns the original physical handle.
-	for _, writer := range b.writers {
-		if writer != b.initialWAL {
-			writer.Close()
-		}
-	}
+	return sendFirstTimeTick(ctx, w, start)
 }
 
 // recoveryStreamImpl is the implementation of RecoveryStream.
