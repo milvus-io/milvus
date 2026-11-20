@@ -2,6 +2,8 @@
 
 Each test method has one level shared by all its parameterized instances.
 PR CI runs L0/L1; the daily regression runs L2.
+Native Vortex decoding checks for FN-15/FN-24/FN-25 are maintained in
+Agentic #327, test_snapshot_import_followup.py::TestSnapshotPhysicalDecoding.
 """
 
 import base64
@@ -961,8 +963,8 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
     ):
         """
         target: SI-FN-07, hash stored/default-filled partition keys into the correct physical partitions
-        method: snapshot real/missing/NULL key; Import; query/reload; inspect target snapshot physical rows
-        expected: original 0..3 or default 7; all 128 PKs/payloads intact; each physical row in its expected hash slot
+        method: import stored/missing keys and inspect routing; reject a nullable source key before job admission
+        expected: compatible keys route by value/default 7; nullable mismatch preserves the target sentinel after reload
         """
         client, source, target, control, snapshot, output_snapshots, store, bucket, export_prefix = (
             snapshot_key_resources
@@ -1008,6 +1010,37 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
         expected = {r["id"]: {**deepcopy(r), "route_key": r["id"] % 4 if source_kind == "values" else 7} for r in rows}
         assert self.insert(client, source, deepcopy(rows))[0]["insert_count"] == len(rows)
         self.flush(client, source)
+        if source_kind == "null":
+            self.load_collection(client, source)
+            self._assert_key_values(client, source, {row["id"]: row for row in rows})
+            metadata_uri = self._default_snapshot_uri(client, source, snapshot, export_prefix, layout, db_name)
+            sentinel = {
+                "id": 10000,
+                "source_uid": "target_sentinel",
+                "score": 777,
+                "flag": True,
+                "tag": "sentinel",
+                "vec": [0.5] * DIM,
+                "route_key": 7,
+            }
+            assert self.insert(client, target, [deepcopy(sentinel)])[0]["insert_count"] == 1
+            self.flush(client, target)
+            self.load_collection(client, target)
+            definitions = self._definitions(client, target)
+            expected_target = {sentinel["id"]: sentinel}
+            self._assert_rows(client, target, expected_target)
+            self._assert_key_values(client, target, expected_target)
+            self._assert_snapshot_import_admission_rejected(
+                url, target, metadata_uri, db_name, r"nullable mismatch for field route_key .*source true, target false"
+            )
+            self._assert_rows(client, target, expected_target)
+            self._assert_key_values(client, target, expected_target)
+            self.release_collection(client, target)
+            self.load_collection(client, target)
+            self._assert_rows(client, target, expected_target)
+            self._assert_key_values(client, target, expected_target)
+            assert self._definitions(client, target) == definitions
+            return
         self.create_snapshot(client, snapshot, source, db_name=db_name, compaction_protection_seconds=3600)
         metadata_uri = self.describe_snapshot(client, snapshot, source, db_name=db_name)[0].s3_location
         source_ids = {"id": source_fields["id"]["field_id"], "vector": source_fields["vec"]["field_id"]}
