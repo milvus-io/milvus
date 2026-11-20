@@ -57,6 +57,11 @@ class SourceContextMixedData : public ::testing::Test {
         properties = std::make_shared<milvus_storage::api::Properties>();
         milvus_storage::api::SetValue(*properties, "fs.storage_type", "local");
         milvus_storage::api::SetValue(*properties, "fs.root_path", "/");
+        // Source readers require explicit Azure routing even with a retained
+        // context. Keep the default local filesystem for generated data.
+        (*properties)["extfs.catalog.cloud_provider"] = std::string("azure");
+        (*properties)["extfs.catalog.access_key_id"] =
+            std::string("account123");
         provider = std::make_shared<DeniedMixedSourceProvider>();
         milvus_storage::SourceReadContextOptions options;
         options.account_name = "account123";
@@ -289,7 +294,7 @@ TEST_F(SourceContextMixedData, IndexProjectionReadsSharedGeneratedFile) {
                                                    meta,
                                                    milvus::DataType::INT64,
                                                    0,
-                                                   std::nullopt,
+                                                   milvus::DataType::NONE,
                                                    0,
                                                    0,
                                                    std::nullopt,
