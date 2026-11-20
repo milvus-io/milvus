@@ -10706,3 +10706,22 @@ func TestPrintFieldDetailElementNullable(t *testing.T) {
 	assert.NotContains(t, plain, HTTPReturnFieldElementNullable)
 	assert.NotContains(t, plain, HTTPReturnFieldTypeSchema)
 }
+
+func TestTopLevelNullableArrayREST(t *testing.T) {
+	field := &schemapb.FieldSchema{Name: "values", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
+	params := paramtable.Get()
+	key := params.HTTPCfg.CompatibilityMode.Key
+	defer params.Reset(key)
+	for _, compatibilityMode := range []bool{true, false} {
+		require.NoError(t, params.Save(key, strconv.FormatBool(compatibilityMode)))
+		values, _, err := checkAndSetData([]byte(`{"data":[{"values":[null,"42",null]}]}`), schema, false)
+		require.NoError(t, err)
+		row := values[0]["values"].(*schemapb.ScalarField)
+		require.Equal(t, []bool{false, true, false}, row.GetValidData())
+		require.Equal(t, []int64{42}, row.GetLongData().GetData())
+		rendered, err := scalarFieldToRESTAny(row, false)
+		require.NoError(t, err)
+		require.Equal(t, []any{nil, "42", nil}, rendered)
+	}
+}

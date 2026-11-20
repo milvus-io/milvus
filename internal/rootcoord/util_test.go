@@ -938,7 +938,7 @@ func TestCheckStructArrayFieldSchemaNestedNullable(t *testing.T) {
 	field.Nullable = false
 	require.ErrorContains(t, check(true, field), "root nullable=true must match field nullable=false")
 
-	require.ErrorContains(t, checkFieldSchema([]*schemapb.FieldSchema{{Name: "top", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true}}), "element_nullable is only supported")
+	require.NoError(t, checkFieldSchema([]*schemapb.FieldSchema{{Name: "top", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true}}))
 	require.ErrorContains(t, checkFieldSchema([]*schemapb.FieldSchema{{Name: "top", DataType: schemapb.DataType_ArrayOfVector}}), "ArrayOfVector is only supported")
 	require.NoError(t, checkStructArrayFieldSchema([]*schemapb.StructArrayFieldSchema{{
 		Name: "items", Fields: []*schemapb.FieldSchema{{

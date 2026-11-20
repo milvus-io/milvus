@@ -333,6 +333,9 @@ func validatePathReplaceArrayOperand(fd *schemapb.FieldData, schema *schemapb.Fi
 	if len(arrayData.GetData()) != rowCount {
 		return merr.WrapErrParameterInvalidMsg("PATH_REPLACE field %q has %d operand rows, expected %d", fd.GetFieldName(), len(arrayData.GetData()), rowCount)
 	}
+	if schema.GetElementNullable() {
+		return validateNullableStructOperandRows(fd, schema, rowCount)
+	}
 	for rowIndex, row := range arrayData.GetData() {
 		rowLen, err := scalarArrayRowElementCount(row, schema.GetElementType())
 		if err != nil {
@@ -850,7 +853,7 @@ func validateExistingArrayPathRows(field *schemapb.FieldData, dataIndices, rowIn
 		if row == nil {
 			return merr.WrapErrServiceInternalMsg("retrieved field %q contains a nil Array row", field.GetFieldName())
 		}
-		rowLen, err := scalarArrayRowElementCount(row, plan.arrayParent.GetElementType())
+		rowLen, err := structChildRowLen(field, plan.arrayParent, int(dataIndex))
 		if err != nil {
 			return merr.WrapErrServiceInternalErr(err, "retrieved field %q row payload is malformed", field.GetFieldName())
 		}
@@ -1024,7 +1027,7 @@ func applyStructPathReplace(dst, operand *schemapb.FieldData, plan *fieldPartial
 					return merr.WrapErrServiceInternalMsg("PATH_REPLACE child %q has out-of-range row mappings: destination %d, operand %d", structChildRawName(childSchema), dstIndex, operandIndex)
 				}
 				if childSchema.GetElementNullable() {
-					replaced, err := replaceNullableStructScalarElement(dstRows[dstIndex], operandRows[operandIndex], childSchema, plan.index)
+					replaced, err := replaceNullableArrayElement(dstRows[dstIndex], operandRows[operandIndex], childSchema, plan.index)
 					if err != nil {
 						return merr.Wrapf(err, "PATH_REPLACE child %q", structChildRawName(childSchema))
 					}
@@ -1127,7 +1130,7 @@ func replaceNullableStructPayload[T any](base []T, baseValidity []bool, update [
 	return result, validity, nil
 }
 
-func replaceNullableStructScalarElement(base, update *schemapb.ScalarField, schema *schemapb.FieldSchema, index int) (*schemapb.ScalarField, error) {
+func replaceNullableArrayElement(base, update *schemapb.ScalarField, schema *schemapb.FieldSchema, index int) (*schemapb.ScalarField, error) {
 	if base == nil || base.GetData() == nil {
 		return nil, merr.WrapErrServiceInternalMsg("retrieved struct child has nil Array row")
 	}
