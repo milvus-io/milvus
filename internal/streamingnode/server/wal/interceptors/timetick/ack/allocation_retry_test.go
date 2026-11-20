@@ -7,6 +7,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -113,6 +114,8 @@ func TestBackgroundTimestampSyncReturnsAllocationFailure(t *testing.T) {
 	defer allocate.UnPatch()
 	sync := mockey.Mock((*retryTestTSOAllocator).SyncIfExpired).To(func(_ *retryTestTSOAllocator, _ time.Duration) {}).Build()
 	defer sync.UnPatch()
+	waitRefresh := mockey.Mock((*retryTestTSOAllocator).WaitRefresh).To(func(_ *retryTestTSOAllocator, _ context.Context) error { return nil }).Build()
+	defer waitRefresh.UnPatch()
 
 	// The inspector retries on its next sync, without holding a WAL's ack lock
 	// until the process-wide inspector context is canceled.
@@ -124,4 +127,66 @@ func TestBackgroundTimestampSyncReturnsAllocationFailure(t *testing.T) {
 	require.Equal(t, 1, attempts)
 	require.Zero(t, manager.lastAllocatedTimeTick)
 	require.Zero(t, manager.notAckHeap.Len())
+}
+
+func TestBackgroundTimestampSyncWaitsForRefreshOutsideAckLock(t *testing.T) {
+	for _, refreshErr := range []error{nil, merr.WrapErrServiceUnavailable("coordinator recovering")} {
+		t.Run(map[bool]string{true: "refreshed", false: "refresh failed"}[refreshErr == nil], func(t *testing.T) {
+			manager := newAllocationRetryManager(t)
+			next := uint64(100)
+			allocate := mockey.Mock((*retryTestTSOAllocator).Allocate).To(func(_ *retryTestTSOAllocator, _ context.Context) (uint64, error) {
+				next++
+				return next, nil
+			}).Build()
+			defer allocate.UnPatch()
+			syncCalls := 0
+			sync := mockey.Mock((*retryTestTSOAllocator).SyncIfExpired).To(func(_ *retryTestTSOAllocator, _ time.Duration) { syncCalls++ }).Build()
+			defer sync.UnPatch()
+			waiting := make(chan struct{})
+			release := make(chan struct{})
+			waitRefresh := mockey.Mock((*retryTestTSOAllocator).WaitRefresh).To(func(_ *retryTestTSOAllocator, _ context.Context) error {
+				assert.Equal(t, 1, syncCalls, "the refresh must be triggered before waiting for it")
+				close(waiting)
+				<-release
+				return refreshErr
+			}).Build()
+			defer waitRefresh.UnPatch()
+
+			done := make(chan error, 1)
+			go func() {
+				_, err := manager.SyncAndGetAcknowledged(context.Background())
+				done <- err
+			}()
+			select {
+			case <-waiting:
+			case <-time.After(5 * time.Second):
+				require.Fail(t, "the time tick sync doesn't wait for the refresh")
+			}
+
+			// An append must not wait for the refresh behind the ack lock.
+			appended := make(chan *Acker, 1)
+			go func() {
+				acker, err := manager.Allocate(context.Background())
+				assert.NoError(t, err)
+				appended <- acker
+			}()
+			var acker *Acker
+			select {
+			case acker = <-appended:
+			case <-time.After(5 * time.Second):
+				// Let both goroutines finish while the allocator is still patched.
+				close(release)
+				<-done
+				<-appended
+				require.Fail(t, "append blocked by the time tick sync")
+			}
+			require.EqualValues(t, 101, acker.Timestamp())
+
+			// The time tick is allocated only after the refresh is finished, even if it failed.
+			close(release)
+			require.NoError(t, <-done)
+			require.EqualValues(t, 102, manager.lastAllocatedTimeTick)
+			acker.Ack(OptSync())
+		})
+	}
 }

@@ -35,6 +35,20 @@ preceding append mutation to preserve, and its context belongs to the process-wi
 inspector rather than the individual WAL. Making that path retry forever while holding
 the AckManager mutex could prevent a WAL from shutting down during a TSO outage.
 
+The shared allocator never holds its mutex during an RPC, and runs at most one attempt
+at a time, bounded by the per-RPC timeout. When the cache age exceeds the threshold,
+`SyncIfExpired()` starts a background refresh instead of discarding the cache: appends
+keep allocating from the cached range, the new range is published atomically, and a
+failed refresh keeps the range. Background TimeTick sync then calls `WaitRefresh()`
+outside the AckManager mutex before allocating, so a TimeTick still reflects a TSO read
+made during that sync; an idle TimeTick must not lag a guarantee timestamp by an extra
+sync interval. On refresh failure it continues with the cached range.
+
+`Sync()` (WAL startup) discards the cache and abandons the RPC in flight, whose late
+response is dropped, so the next allocation always uses a range requested after `Sync()`.
+`BarrierUntil()` can only be satisfied by an RPC started after it was called, because an
+RPC in flight may have been served before the barrier was allocated.
+
 ### Confirm and Sync
 
 Every TimeTick transitions: **Allocated** → **Confirmed** → **Synced**.
