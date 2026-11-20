@@ -135,6 +135,14 @@ func (s *ElementNullableSuite) TestArrayTextMatchLifecycle() {
 			ids  []int64
 		}{
 			{"pk > 0", []int64{1, 2, 3, 4, 5, 6}},
+			{`MATCH_ANY(tags, TRUE)`, []int64{1, 2, 4, 6}},
+			{`NOT MATCH_ANY(reviews, FALSE)`, []int64{1, 2, 3, 4, 6}},
+			{`MATCH_ALL(tags, FALSE)`, []int64{3}},
+			{`MATCH_ALL(reviews, TRUE)`, []int64{1, 2, 3, 4, 6}},
+			{`MATCH_LEAST(reviews, TRUE, threshold=2)`, []int64{1, 2, 6}},
+			{`MATCH_MOST(tags, 1 == 2, threshold=0)`, []int64{1, 2, 3, 4, 6}},
+			{`MATCH_EXACT(reviews, FALSE && $[body] == "new", threshold=0)`, []int64{1, 2, 3, 4, 6}},
+			{`MATCH_ANY(tags, FALSE || $ == "new")`, []int64{1}},
 			{`MATCH_ANY(tags, TEXT_MATCH($, "york"))`, []int64{1, 2, 4, 6}},
 			{`MATCH_ANY(tags, PHRASE_MATCH($, "new york", 99))`, []int64{2, 4}},
 			{`MATCH_ALL(tags, TEXT_MATCH($, "york"))`, []int64{2, 3, 6}},
@@ -167,6 +175,8 @@ func (s *ElementNullableSuite) TestArrayTextMatchLifecycle() {
 			{`ELEMENT_FILTER(reviews, NOT TEXT_MATCH($[body], "york"))`, []hit{{1, 1}, {2, 0}}},
 			{`ELEMENT_FILTER(reviews, true || $[lang] == "en")`, []hit{{1, 0}, {1, 1}, {2, 0}, {2, 1}, {4, 0}, {6, 0}, {6, 1}}},
 			{`ELEMENT_FILTER(reviews, false && $[lang] == "en")`, nil},
+			{`ELEMENT_FILTER(reviews, TRUE)`, []hit{{1, 0}, {1, 1}, {2, 0}, {2, 1}, {4, 0}, {6, 0}, {6, 1}}},
+			{`ELEMENT_FILTER(reviews, FALSE)`, nil},
 			{`ELEMENT_FILTER(reviews, 1 == 1)`, []hit{{1, 0}, {1, 1}, {2, 0}, {2, 1}, {4, 0}, {6, 0}, {6, 1}}},
 			{`pk in [3, 5] && ELEMENT_FILTER(reviews, 1 == 1)`, nil}, // Empty and NULL parents.
 			{`pk < 0 && ELEMENT_FILTER(reviews, 1 == 1)`, nil},

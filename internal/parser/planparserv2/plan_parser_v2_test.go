@@ -4010,6 +4010,7 @@ func TestExpr_Match(t *testing.T) {
 	// Valid MATCH_ALL expressions
 	validExprs := []string{
 		// MATCH_ALL: all elements must match
+		`MATCH_ALL(struct_array, true)`,
 		`MATCH_ALL(struct_array, $[sub_int] > 1)`,
 		`MATCH_ALL(struct_array, $[sub_int] == 100)`,
 		`MATCH_ALL(struct_array, $[sub_str] == "aaa")`,
@@ -4017,6 +4018,7 @@ func TestExpr_Match(t *testing.T) {
 		`MATCH_ALL(struct_array, $[sub_str] != "" || $[sub_int] >= 0)`,
 
 		// MATCH_ANY: at least one element must match
+		`MATCH_ANY(struct_array, ($[sub_int] == 2) && (true || $[sub_int] == 1))`,
 		`MATCH_ANY(struct_array, $[sub_int] > 1)`,
 		`MATCH_ANY(struct_array, $[sub_int] == 100)`,
 		`MATCH_ANY(struct_array, $[sub_str] == "aaa")`,
@@ -4123,8 +4125,6 @@ func TestExpr_Match(t *testing.T) {
 		`MATCH_MOST(struct_array, Int64Field > 0, threshold=1)`,
 		`MATCH_EXACT(struct_array, Int64Field > 0, threshold=1)`,
 		`MATCH_ALL(struct_array, $[sub_int] > Int64Field)`,
-		`MATCH_ALL(struct_array, true)`,
-		`MATCH_ANY(struct_array, ($[sub_int] == 2) && (true || $[sub_int] == 1))`,
 		`MATCH_ANY(struct_array, $[sub_int] == $[sub_int])`,
 
 		// Raw element columns and function calls are not supported by C++ MATCH execution
@@ -6279,7 +6279,7 @@ func TestArrayTextMatchOperand(t *testing.T) {
 	require.ErrorContains(t, err, "does not enable match")
 }
 
-func TestElementFilterConstantOnFlattenedStruct(t *testing.T) {
+func TestElementConstantsOnFlattenedStruct(t *testing.T) {
 	schema := newTestSchema(false)
 	schema.Fields = append(schema.Fields, schema.StructArrayFields[0].Fields...)
 	schema.StructArrayFields = nil
@@ -6288,6 +6288,65 @@ func TestElementFilterConstantOnFlattenedStruct(t *testing.T) {
 	expr, err := ParseExpr(helper, "ELEMENT_FILTER(struct_array, 1 == 1)", nil)
 	require.NoError(t, err)
 	require.Equal(t, "struct_array", expr.GetElementFilterExpr().GetStructName())
+	expr, err = ParseExpr(helper, "MATCH_ANY(struct_array, TRUE)", nil)
+	require.NoError(t, err)
+	require.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
+	require.True(t, rewriter.IsAlwaysTrueExpr(expr.GetMatchExpr().GetPredicate()))
+}
+
+func TestElementBooleanPredicates(t *testing.T) {
+	helper := newTestSchemaHelper(t)
+	cfg := &paramtable.Get().CommonCfg
+	saved := cfg.EnabledOptimizeExpr.SwapTempValue("true")
+	defer cfg.EnabledOptimizeExpr.SwapTempValue(saved)
+	for _, optimize := range []string{"true", "false"} {
+		cfg.EnabledOptimizeExpr.SwapTempValue(optimize)
+		for _, target := range []struct{ name, field string }{
+			{"struct_array", "$[sub_str]"}, {"StringArrayField", "$"},
+		} {
+			comparison := target.field + ` == "new"`
+			for _, op := range []string{"ELEMENT_FILTER", "MATCH_ANY", "MATCH_ALL", "MATCH_LEAST", "MATCH_MOST", "MATCH_EXACT"} {
+				if op == "ELEMENT_FILTER" && target.name != "struct_array" {
+					continue
+				}
+				threshold := ""
+				switch op {
+				case "MATCH_LEAST", "MATCH_MOST", "MATCH_EXACT":
+					threshold = ", threshold=1"
+				}
+				for _, child := range []string{"TRUE", "FALSE", "1 == 2", "FALSE && " + comparison, "FALSE || " + comparison,
+					comparison + " && " + target.field + ` == "york"`} {
+					dsl := fmt.Sprintf("%s(%s, %s%s)", op, target.name, child, threshold)
+					expr, err := ParseExpr(helper, dsl, nil)
+					require.NoError(t, err, dsl)
+					bitmap := expr.GetMatchExpr().GetPredicate()
+					if op == "ELEMENT_FILTER" {
+						bitmap = expr.GetElementFilterExpr().GetElementExpr()
+					}
+					require.NotNil(t, bitmap, dsl)
+					switch child {
+					case "TRUE":
+						require.True(t, rewriter.IsAlwaysTrueExpr(bitmap), dsl)
+					case "FALSE", "1 == 2":
+						require.True(t, rewriter.IsAlwaysFalseExpr(bitmap), dsl)
+					case "FALSE && " + comparison:
+						if optimize == "true" {
+							require.True(t, rewriter.IsAlwaysFalseExpr(bitmap), dsl)
+						}
+					}
+				}
+			}
+		}
+	}
+	for _, dsl := range []string{
+		"MATCH_ANY(missing, TRUE)", "MATCH_ANY(Int64Field, FALSE)", "ELEMENT_FILTER(StringArrayField, TRUE)",
+		"MATCH_ANY(struct_array, 42)", "ELEMENT_FILTER(struct_array, 42)",
+		"MATCH_ANY(struct_array, FALSE && Int64Field > 0)", "ELEMENT_FILTER(struct_array, TRUE || Int64Field > 0)",
+		"MATCH_ANY(struct_array, TRUE || $[sub_int] > {missing})",
+	} {
+		_, err := ParseExpr(helper, dsl, nil)
+		require.Error(t, err, dsl)
+	}
 }
 
 func TestElementPredicateRewrite(t *testing.T) {

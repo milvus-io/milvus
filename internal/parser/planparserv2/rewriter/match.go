@@ -36,7 +36,7 @@ func (v *visitor) mergeElementComparisons(op planpb.BinaryExpr_BinaryOp, parts [
 		}
 	}
 	if len(comparisons) < 2 {
-		return buildBalancedBinary(op, parts)
+		return foldBinary(op, parts)
 	}
 	before := len(comparisons)
 	if op == planpb.BinaryExpr_LogicalOr {
@@ -48,7 +48,7 @@ func (v *visitor) mergeElementComparisons(op planpb.BinaryExpr_BinaryOp, parts [
 		comparisons = combineAndRangePredicates(comparisons, func(*planpb.ColumnInfo) bool { return foldZeroHits })
 	}
 	if len(comparisons) == before {
-		return buildBalancedBinary(op, parts)
+		return foldBinary(op, parts)
 	}
 	return foldBinary(op, append(others, comparisons...))
 }
