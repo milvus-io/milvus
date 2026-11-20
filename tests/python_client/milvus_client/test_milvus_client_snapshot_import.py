@@ -3372,6 +3372,19 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
         distances = [hit["distance"] for hit in hits]
         assert all(np.isfinite(distance) for distance in distances)
         assert distances == sorted(distances, reverse=metric in ("BM25", "MHJACCARD"))
+        if family == "embedding_float":
+            assert set(outputs) == set(expected)
+            query = np.asarray(data[0], dtype=np.float64)
+            exact_distances = {
+                pk: float(np.sum((np.asarray(vector, dtype=np.float64) - query) ** 2)) for pk, vector in outputs.items()
+            }
+            cutoff = sorted(exact_distances.values())[4]
+            tolerance = 1e-6 + 1e-5 * abs(cutoff)
+            required = {pk for pk, distance in exact_distances.items() if distance < cutoff - tolerance}
+            allowed = {pk for pk, distance in exact_distances.items() if distance <= cutoff + tolerance}
+            assert required <= set(ids) <= allowed, (ids, required, allowed)
+            for hit in hits:
+                assert hit["distance"] == pytest.approx(exact_distances[hit["id"]], rel=1e-5, abs=1e-6)
         for hit in hits:
             assert set(hit["entity"]) == {"id", "marker"}
             assert hit["entity"]["id"] == hit["id"]
