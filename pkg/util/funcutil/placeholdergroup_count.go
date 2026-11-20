@@ -75,8 +75,13 @@ func countPlaceholderValues(placeholder []byte) (int64, error) {
 		if num == placeholderValueValuesField {
 			count++
 		} else if !utf8.Valid(value) {
-			// tag is a proto3 string, which proto.Unmarshal refuses when it
-			// is not valid UTF-8.
+			// tag is a proto3 string, and proto.Unmarshal refuses one that is
+			// not valid UTF-8. This check only keeps the two in agreement; it
+			// does not turn away a search that used to run. The Proxy has
+			// always unmarshalled the group of every search
+			// (ConvertPlaceholderGroup), so such a request was already
+			// refused there, and the search task falls back to
+			// proto.Unmarshal whenever this function reports an error.
 			return 0, errMalformedPlaceholderGroup()
 		}
 	}

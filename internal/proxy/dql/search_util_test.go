@@ -133,6 +133,15 @@ func TestSearchTaskCheckNqMismatch(t *testing.T) {
 		}
 	}
 
+	// A group the row counter refuses is judged by proto.Unmarshal, with its
+	// error: the counter alone never turns a request away.
+	invalidTag := []byte{0x0a, 0x03, 0x0a, 0x01, 0xff}
+	_, err = resolveNq(1, invalidTag, "failed to unmarshal placeholder group")
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorIs(t, err, proto.Error)
+	_, _, convertErr := ConvertPlaceholderGroup(invalidTag, &schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector})
+	require.Error(t, convertErr, "the pre-existing decode refuses the same bytes")
+
 	// Nothing to compare a declared nq with: left to the query nodes, as before.
 	nq, err := resolveNq(4, nil, "unused")
 	require.NoError(t, err)
