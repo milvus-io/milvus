@@ -17,7 +17,12 @@
 #include "index/growing/KnowhereGrowingVectorIndex.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <future>
+#include <folly/executors/CPUThreadPoolExecutor.h>
+#include <folly/executors/FunctionScheduler.h>
+#include <folly/executors/thread_factory/NamedThreadFactory.h>
 #include <limits>
 #include <memory>
 #include <span>
@@ -34,9 +39,69 @@
 #include "knowhere/dataset.h"
 #include "knowhere/expected.h"
 #include "log/Log.h"
+#include "monitor/Monitor.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::index {
+std::function<void(GrowingBuildPhase)> growing_build_test_hook;
+
 namespace {
+using Clock = std::chrono::steady_clock;
+double
+ElapsedMs(Clock::time_point start) {
+    return std::chrono::duration<double, std::milli>(Clock::now() - start)
+        .count();
+}
+
+void
+BuildHook(GrowingBuildPhase phase) {
+    if (growing_build_test_hook) {
+        growing_build_test_hook(phase);
+    }
+}
+
+// The growing-build queue remains independent of the storage load executors.
+// Drain accepted tasks before destroying the executor, after stopping metrics.
+struct GrowingBuildExecutor {
+    explicit GrowingBuildExecutor(float ratio)
+        : executor(
+              std::pair<size_t, size_t>{
+                  static_cast<size_t>(ComputeThreadPoolMaxThreads(ratio)), 1},
+              std::make_shared<folly::NamedThreadFactory>(
+                  "growing_index_build")) {
+        executor.setThreadDeathTimeout(std::chrono::seconds(2));
+        monitor::internal_core_growing_index_pool_capacity.Set(
+            executor.numThreads());
+        sampler.addFunction(
+            [this] {
+                const auto stats = executor.getPoolStats();
+                monitor::internal_core_growing_index_pool_active_threads.Set(
+                    stats.activeThreadCount);
+                monitor::internal_core_growing_index_pool_idle_threads.Set(
+                    stats.idleThreadCount);
+                monitor::internal_core_growing_index_pool_queue_depth.Set(
+                    stats.pendingTaskCount);
+            },
+            std::chrono::seconds(2),
+            "growing_index_build_metrics",
+            std::chrono::seconds(2));
+        sampler.start();
+    }
+
+    ~GrowingBuildExecutor() {
+        sampler.shutdown();
+        executor.join();
+    }
+
+    folly::CPUThreadPoolExecutor executor;
+    folly::FunctionScheduler sampler;
+};
+
+folly::CPUThreadPoolExecutor&
+GrowingBuildPool(float ratio) {
+    static GrowingBuildExecutor pool(ratio);
+    return pool.executor;
+}
 
 template <typename T>
 constexpr bool kSparseVector = std::is_same_v<T, sparse_u32_f32>;
@@ -107,7 +172,8 @@ WithSourceRows(
     }
 
     std::vector<GrowingVectorStorageType<T>> copied(expected);
-    source->CopyRows(physical_begin, physical_rows, copied.data());
+    auto generation =
+        source->CopyRows(physical_begin, physical_rows, copied.data());
     consume(std::span<const GrowingVectorStorageType<T>>(copied.data(),
                                                          copied.size()));
 }
@@ -127,7 +193,8 @@ KnowhereGrowingVectorIndex<T>::KnowhereGrowingVectorIndex(
     std::shared_ptr<const GrowingVectorSource<GrowingVectorStorageType<T>>>
         source,
     bool retain_source_as_data_view,
-    std::function<int64_t()> build_thread_num)
+    std::function<int64_t()> build_thread_num,
+    GrowingBuildOptions async_build)
     : value_type_(value_type),
       index_type_(std::move(index_type)),
       metric_type_(std::move(metric_type)),
@@ -138,6 +205,7 @@ KnowhereGrowingVectorIndex<T>::KnowhereGrowingVectorIndex(
       search_defaults_(std::move(search_defaults)),
       retain_source_as_data_view_(retain_source_as_data_view),
       build_thread_num_(std::move(build_thread_num)),
+      async_build_(async_build),
       source_(std::move(source)) {
     constexpr auto physical_type = PhysicalVectorDataType<T>();
     AssertInfo(value_type_ == physical_type,
@@ -306,7 +374,7 @@ KnowhereGrowingVectorIndex<T>::AddBatch(
     int64_t dim,
     const uint8_t* validity_bitmap,
     int64_t logical_count) {
-    AssertInfo(built_ && engine_.has_value(),
+    AssertInfo(engine_.has_value(),
                "cannot append an unbuilt growing vector engine");
     AssertInfo(physical_count >= 0,
                "growing vector append physical count {} is negative",
@@ -376,10 +444,8 @@ KnowhereGrowingVectorIndex<T>::AddFromSource(int64_t physical_begin,
 }
 
 template <typename T>
-bool
-KnowhereGrowingVectorIndex<T>::TryBuildAccepted() {
-    AssertInfo(!built_ && accepted_physical_count_ >= build_threshold_,
-               "invalid growing vector cold-build state");
+int64_t
+KnowhereGrowingVectorIndex<T>::BuildLogicalPrefix() const {
     // Public row prefix that covers the first build_threshold_ stored vectors.
     // A nullable field compacts null rows away, so the two counts differ.
     int64_t build_logical_count = build_threshold_;
@@ -397,6 +463,15 @@ KnowhereGrowingVectorIndex<T>::TryBuildAccepted() {
                "accepted row end {}",
                build_logical_count,
                accepted_row_end_);
+    return build_logical_count;
+}
+
+template <typename T>
+bool
+KnowhereGrowingVectorIndex<T>::TryBuildAccepted() {
+    AssertInfo(!built_ && accepted_physical_count_ >= build_threshold_,
+               "invalid growing vector cold-build state");
+    const auto build_logical_count = BuildLogicalPrefix();
     try {
         BuildFromSource(build_threshold_, build_logical_count);
     } catch (const std::exception& error) {
@@ -442,6 +517,176 @@ KnowhereGrowingVectorIndex<T>::TryBuildAccepted() {
 }
 
 template <typename T>
+KnowhereGrowingVectorIndex<T>::~KnowhereGrowingVectorIndex() {
+    if (task_) {
+        task_->cancelled.store(true);
+        // Join a running worker, but never wait for a queued task. Once it
+        // obtains lifetime it sees cancelled before dereferencing this.
+        std::lock_guard join(task_->lifetime);
+    }
+}
+
+template <typename T>
+void
+KnowhereGrowingVectorIndex<T>::DisableAsyncBuild(const char* reason,
+                                                 bool deadline) {
+    // Reclamation and metrics run after publication. An exception there
+    // must never discard an engine that already has readers.
+    if (built_) {
+        LOG_WARN("async growing index post-publication work failed: {}",
+                 reason);
+        return;
+    }
+    async_disabled_ = true;
+    engine_.reset();
+    auto& counter = deadline
+                        ? monitor::internal_core_growing_index_deadline_failures
+                        : monitor::internal_core_growing_index_build_failures;
+    counter.Increment();
+    LOG_WARN("async growing index disabled, retaining raw fallback: {}",
+             reason);
+}
+
+template <typename T>
+void
+KnowhereGrowingVectorIndex<T>::StartAsyncBuild() {
+    if (task_) {
+        return;
+    }
+    try {
+        task_ = std::make_shared<GrowingBuildTask>();
+        auto build = std::make_shared<std::packaged_task<void()>>([this,
+                                                                   lifetime =
+                                                                       task_] {
+            std::lock_guard running(lifetime->lifetime);
+            if (lifetime->cancelled.load()) {
+                return;
+            }
+            monitor::internal_core_growing_index_inflight_builds.Increment();
+            try {
+                BuildAndCatchUp();
+            } catch (const std::exception& e) {
+                std::lock_guard lock(writer_mutex_);
+                DisableAsyncBuild(e.what());
+            } catch (...) {
+                std::lock_guard lock(writer_mutex_);
+                DisableAsyncBuild("unknown build failure");
+            }
+            monitor::internal_core_growing_index_inflight_builds.Decrement();
+        });
+        completion_ = build->get_future().share();
+        GrowingBuildPool(async_build_.pool_ratio)
+            .add([build = std::move(build)] { (*build)(); });
+        // A rejected submission may throw or leave a broken promise.
+        // A successful worker must take writer_mutex_ before doing any work.
+        if (completion_.wait_for(std::chrono::seconds(0)) ==
+            std::future_status::ready) {
+            completion_.get();
+        }
+    } catch (const std::exception& error) {
+        DisableAsyncBuild(error.what());
+    }
+}
+
+template <typename T>
+void
+KnowhereGrowingVectorIndex<T>::BuildAndCatchUp() {
+    int64_t logical;
+    {
+        std::lock_guard lock(writer_mutex_);
+        logical = BuildLogicalPrefix();
+    }
+    BuildHook(GrowingBuildPhase::kBeforeBuild);
+    if (task_->cancelled.load()) {
+        return;
+    }
+    const auto build_start = Clock::now();
+    BuildFromSource(build_threshold_, logical);
+    monitor::internal_core_growing_index_build_latency.Observe(
+        ElapsedMs(build_start));
+    BuildHook(GrowingBuildPhase::kAfterBuild);
+
+    const auto catchup_start = Clock::now();
+    const int64_t slice =
+        kSparseVector<T>
+            ? 4096
+            : std::max<int64_t>(
+                  1, (8LL << 20) / sizeof(T) / std::max<int64_t>(dim_, 1));
+    int64_t physical = build_threshold_;
+    int64_t drained = 0;
+    double elapsed = 0;
+    const auto fits_budget = [&](int64_t gap) {
+        return gap == 0 ||
+               (gap <= slice && drained > 0 &&
+                gap * elapsed / drained <= async_build_.finalize_budget_ms);
+    };
+    const auto drain = [&](int64_t end) {
+        const auto begin = Clock::now();
+        const auto next = validity_.ValidCountBelow(end);
+        AddFromSource(physical, next - physical, logical, end - logical);
+        drained += end - logical;
+        elapsed += ElapsedMs(begin);
+        physical = next;
+        logical = end;
+    };
+
+    while (!task_->cancelled.load()) {
+        int64_t target;
+        {
+            std::lock_guard lock(writer_mutex_);
+            target = accepted_row_end_;
+        }
+        if (logical < target) {
+            if (ElapsedMs(catchup_start) >= async_build_.catchup_deadline_ms &&
+                !fits_budget(target - logical)) {
+                std::lock_guard lock(writer_mutex_);
+                DisableAsyncBuild("catch-up deadline exceeded", true);
+                return;
+            }
+            // Bound by logical rows as well as vector bytes. In particular,
+            // sparse-validity or entirely null tails cannot create a giant
+            // bitmap allocation or unbounded work in the publication lock.
+            drain(logical + std::min(target - logical, slice));
+            BuildHook(GrowingBuildPhase::kAfterCatchupRound);
+        }
+        BuildHook(GrowingBuildPhase::kBeforeFinalize);
+        std::unique_lock lock(writer_mutex_);
+        const auto gap = accepted_row_end_ - logical;
+        // No newly accepted vector does not mean no work: advancing a
+        // nullable IdMap still materializes and consumes a logical bitmap.
+        // Drain a null-only tail in the next unlocked slice.
+        if (gap != 0 &&
+            (accepted_physical_count_ == physical || !fits_budget(gap))) {
+            continue;
+        }
+        if (gap != 0) {
+            drain(accepted_row_end_);
+        }
+        // Publish exactly the accepted prefix while serialized with Append.
+        // Setting built_ last leaves failed first publication on raw fallback.
+        auto reader = std::make_shared<VectorIndex>(
+            *engine_, logical, physical, search_defaults_);
+        const bool release_raw =
+            async_build_.on_raw_owned && !retain_source_as_data_view_ &&
+            engine_->native_index.HasRawData(engine_->Metric());
+        PublishSnapshot(std::move(reader), logical);
+        built_ = true;
+        if (!retain_source_as_data_view_) {
+            source_.reset();
+        }
+        lock.unlock();
+        if (release_raw) {
+            async_build_.on_raw_owned(logical);
+        }
+        monitor::internal_core_growing_index_catchup_rows.Observe(
+            physical - build_threshold_);
+        monitor::internal_core_growing_index_catchup_latency.Observe(
+            ElapsedMs(catchup_start));
+        return;
+    }
+}
+
+template <typename T>
 void
 KnowhereGrowingVectorIndex<T>::PublishAccepted() {
     AssertInfo(built_ && engine_.has_value(),
@@ -468,8 +713,19 @@ KnowhereGrowingVectorIndex<T>::CommitIfNeeded() {
 template <typename T>
 void
 KnowhereGrowingVectorIndex<T>::Flush() {
-    std::lock_guard<std::mutex> lock(writer_mutex_);
+    std::unique_lock lock(writer_mutex_);
     RethrowIfPoisoned();
+    if (async_build_.enabled && !built_) {
+        if (!async_disabled_ && accepted_physical_count_ >= build_threshold_) {
+            StartAsyncBuild();
+            if (completion_.valid()) {
+                auto done = completion_;
+                lock.unlock();
+                done.wait();
+            }
+        }
+        return;
+    }
     if (publication_pending_) {
         PublishAccepted();
         return;
@@ -573,6 +829,13 @@ KnowhereGrowingVectorIndex<T>::Append(
         // so a failed cold build can be retried from all historical rows.
         accepted_row_end_ = row_end;
         accepted_physical_count_ = next_physical;
+        if (async_build_.enabled) {
+            if (!async_disabled_ &&
+                accepted_physical_count_ >= build_threshold_) {
+                StartAsyncBuild();
+            }
+            return;
+        }
         if (accepted_physical_count_ < build_threshold_ ||
             !TryBuildAccepted()) {
             return;

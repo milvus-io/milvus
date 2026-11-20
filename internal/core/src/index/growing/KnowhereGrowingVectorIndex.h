@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <atomic>
+#include <future>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -29,6 +31,7 @@
 #include "common/Types.h"
 #include "index/contracts/growing/IGrowingIndex.h"
 #include "index/growing/GrowingVectorSource.h"
+#include "index/growing/GrowingBuildOptions.h"
 #include "index/vector/KnowhereEngine.h"
 #include "knowhere/config.h"
 
@@ -59,9 +62,10 @@ class KnowhereGrowingVectorIndex final
         // thread-num config takes effect on the next build of an existing
         // growing segment (#53030). Empty keeps whatever `build_params`
         // already carries.
-        std::function<int64_t()> build_thread_num = {});
+        std::function<int64_t()> build_thread_num = {},
+        GrowingBuildOptions async_build = {});
 
-    ~KnowhereGrowingVectorIndex() override = default;
+    ~KnowhereGrowingVectorIndex() override;
 
     void
     CommitIfNeeded() override;
@@ -87,6 +91,18 @@ class KnowhereGrowingVectorIndex final
 
     bool
     TryBuildAccepted();
+
+    int64_t
+    BuildLogicalPrefix() const;
+
+    void
+    StartAsyncBuild();
+
+    void
+    BuildAndCatchUp();
+
+    void
+    DisableAsyncBuild(const char* reason, bool deadline = false);
 
     void
     BuildFromSource(int64_t physical_count, int64_t logical_count);
@@ -133,6 +149,17 @@ class KnowhereGrowingVectorIndex final
     const bool retain_source_as_data_view_;
     const std::function<int64_t()> build_thread_num_;
 
+    const GrowingBuildOptions async_build_;
+    // Queued tasks own only the control block until admitted under lifetime.
+    // A running worker exclusively owns the unpublished engine. Appenders
+    // advance the accepted prefix under writer_mutex_ without touching it.
+    struct GrowingBuildTask {
+        std::mutex lifetime;
+        std::atomic<bool> cancelled{false};
+    };
+    std::shared_ptr<GrowingBuildTask> task_;
+    std::shared_future<void> completion_;
+    bool async_disabled_{false};
     mutable std::mutex writer_mutex_;
     std::shared_ptr<const GrowingVectorSource<StorageType>> source_;
     std::optional<KnowhereEngine> engine_;
