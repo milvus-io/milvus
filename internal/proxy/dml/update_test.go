@@ -158,10 +158,10 @@ func TestPKUpdateMessageSizeAndRouting(t *testing.T) {
 	ids := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}}}}
 	assignments := []*messagespb.UpdateAssignment{{FieldId: 101, Literal: updateNull()}, {FieldId: 102, Literal: updateScalar(&schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: strings.Repeat("x", 32)}})}}
 	channels := []string{"p0_10v0", "p1_10v1"}
-	one, err := buildUpdateMessages(10, 7, -1, channels[:1], sliceUpdatePKs(ids, 0, 1), assignments, 4096, nil)
+	one, err := buildUpdateMessages(10, 7, -1, channels[:1], sliceUpdatePKs(ids, 0, 1), assignments, 4096, 1<<20, nil)
 	require.NoError(t, err)
 	limit := proto.Size(one[0].IntoMessageProto())
-	msgs, err := buildUpdateMessages(10, 7, -1, channels, ids, assignments, limit, nil)
+	msgs, err := buildUpdateMessages(10, 7, -1, channels, ids, assignments, limit, 1<<20, nil)
 	require.NoError(t, err)
 	require.Greater(t, len(msgs), 2)
 	seen := map[int64]bool{}
@@ -181,16 +181,17 @@ func TestPKUpdateMessageSizeAndRouting(t *testing.T) {
 		}
 	}
 	require.Len(t, seen, 10)
-	msgs, err = buildUpdateMessages(10, 7, -1, channels, ids, assignments, limit-1, nil)
+	msgs, err = buildUpdateMessages(10, 7, -1, channels, ids, assignments, limit-1, 1<<20, nil)
 	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	require.Nil(t, msgs, "an indivisible operation must fail before any append")
 	stringsIDs := &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"a", strings.Repeat("b", 4096)}}}}
-	msgs, err = buildUpdateMessages(10, 7, -1, channels, stringsIDs, assignments, 256, nil)
+	msgs, err = buildUpdateMessages(10, 7, -1, channels, stringsIDs, assignments, 256, 1<<20, nil)
 	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	require.Nil(t, msgs, "a late oversized PK must discard the entire prepared request")
 }
 
 func TestPKUpdatePrimaryKeyValidation(t *testing.T) {
+	paramtable.Init()
 	schema := updateTestSchema(&schemapb.FieldSchema{FieldID: 101, Name: "age", DataType: schemapb.DataType_Int64})
 	require.Error(t, validateUpdatePKs(nil, schema))
 	require.Error(t, validateUpdatePKs(&schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"x"}}}}, schema))

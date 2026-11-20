@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	walutil "github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -39,6 +40,14 @@ import (
 func UpdateRecords(ctx context.Context, cache Cache, request *milvuspb.UpdateRecordsRequest) (*milvuspb.MutationResult, error) {
 	if request == nil {
 		return nil, merr.WrapErrParameterInvalidMsg("missing update request")
+	}
+	params := paramtable.Get()
+	requestBudget := params.ProxyGrpcServerCfg.ServerMaxRecvSize.GetAsInt()
+	if requestBudget <= 0 {
+		return nil, merr.WrapErrServiceInternalMsg("invalid PK-update request byte budget")
+	}
+	if proto.Size(request) > requestBudget {
+		return nil, merr.Wrapf(merr.ErrParameterTooLarge, "update request exceeds proxy.grpc.serverMaxRecvSize (%d bytes)", requestBudget)
 	}
 	info, err := cache.GetCollectionInfo(ctx, request.GetDbName(), request.GetCollectionName(), 0)
 	if err != nil {
@@ -74,7 +83,14 @@ func UpdateRecords(ctx context.Context, cache Cache, request *milvuspb.UpdateRec
 	if hookutil.IsClusterEncryptionEnabled() {
 		cipher = hookutil.GetEzByCollProperties(schema.GetProperties(), info.CollID).AsMessageConfig()
 	}
-	msgs, err := buildUpdateMessages(info.CollID, schema.Version, partitionID, info.VChannels, request.GetPrimaryKeys(), assignments, paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt(), cipher)
+	// Keep fragments safe even while SN chunking is disabled. Reuse the WAL's
+	// backend limit and envelope headroom instead of assuming Pulsar.
+	messageBudget := requestBudget
+	if backendLimit := params.WALMaxMessageSize(walutil.MustSelectWALName().String()); backendLimit > 0 {
+		_, reserve := params.PulsarCfg.GetMessageSizeLimitsFor(backendLimit)
+		messageBudget = min(messageBudget, backendLimit-reserve)
+	}
+	msgs, err := buildUpdateMessages(info.CollID, schema.Version, partitionID, info.VChannels, request.GetPrimaryKeys(), assignments, messageBudget, requestBudget, cipher)
 	if err != nil {
 		return nil, err
 	}
@@ -89,8 +105,8 @@ func UpdateRecords(ctx context.Context, cache Cache, request *milvuspb.UpdateRec
 	return &milvuspb.MutationResult{Status: merr.Success(), Acknowledged: true, Timestamp: resp.MaxTimeTick(), UpdateCnt: int64(typeutil.GetSizeOfIDs(request.GetPrimaryKeys()))}, nil
 }
 
-func buildUpdateMessages(collectionID int64, schemaVersion int32, partitionID int64, channels []string, ids *schemapb.IDs, assignments []*messagespb.UpdateAssignment, limit int, cipher *message.CipherConfig) ([]message.MutableMessage, error) {
-	if limit <= 0 {
+func buildUpdateMessages(collectionID int64, schemaVersion int32, partitionID int64, channels []string, ids *schemapb.IDs, assignments []*messagespb.UpdateAssignment, limit, requestBudget int, cipher *message.CipherConfig) ([]message.MutableMessage, error) {
+	if limit <= 0 || requestBudget <= 0 {
 		return nil, merr.WrapErrServiceInternalMsg("invalid update message size limit")
 	}
 	hashes, err := typeutil.HashPK2Channels(ids, channels)
@@ -105,6 +121,7 @@ func buildUpdateMessages(collectionID int64, schemaVersion int32, partitionID in
 		typeutil.AppendIDs(groups[hash], ids, i)
 	}
 	var result []message.MutableMessage
+	remaining := requestBudget
 	for channelIndex, keys := range groups {
 		if keys == nil {
 			continue
@@ -117,7 +134,7 @@ func buildUpdateMessages(collectionID int64, schemaVersion int32, partitionID in
 		for start, count := 0, typeutil.GetSizeOfIDs(keys); start < count; {
 			// Binary-search the largest complete encoded envelope that fits. This
 			// counts the shared assignments, header, VChannel and cipher metadata.
-			// WAL-added metadata/backend framing remain the WAL chunker's concern.
+			// The caller has already reserved headroom for later WAL metadata.
 			lo, hi := start+1, count
 			var selected message.MutableMessage
 			end := start
@@ -136,6 +153,13 @@ func buildUpdateMessages(collectionID int64, schemaVersion int32, partitionID in
 			if selected == nil {
 				return nil, merr.WrapErrParameterTooLarge("one PK with shared assignments exceeds the update message size limit")
 			}
+			// Assignments are encoded in every fragment. Bound the retained total,
+			// not only the incoming request, before starting any WAL append.
+			size := proto.Size(selected.IntoMessageProto())
+			if size > remaining {
+				return nil, merr.Wrapf(merr.ErrParameterTooLarge, "prepared update messages exceed proxy.grpc.serverMaxRecvSize (%d bytes)", requestBudget)
+			}
+			remaining -= size
 			result = append(result, selected)
 			start = end
 		}

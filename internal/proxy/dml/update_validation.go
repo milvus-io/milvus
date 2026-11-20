@@ -30,10 +30,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/parameterutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func validateUpdatePKs(ids *schemapb.IDs, schema *schemapb.CollectionSchema) error {
+	// Count the original request, including duplicate PKs, before routing or
+	// any future deduplication. Byte limits remain independently enforced.
+	count := typeutil.GetSizeOfIDs(ids)
+	limit := paramtable.Get().ProxyCfg.PKUpdateMaxPKCount.GetAsInt()
+	if count > limit {
+		return merr.Wrapf(merr.ErrParameterTooLarge, "update primary key count %d exceeds limit %d", count, limit)
+	}
 	pk, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
 		return err
