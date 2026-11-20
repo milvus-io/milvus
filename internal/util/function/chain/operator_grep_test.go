@@ -49,10 +49,17 @@ func grepTestRepr(t *testing.T) *OperatorRepr {
 
 type (
 	grepTestRunner  func(context.Context, *array.Int64, int64) (*native.ScanResult, error)
-	grepTestSegment struct{ run grepTestRunner }
+	grepTestSegment struct {
+		run     grepTestRunner
+		inspect func(arrow.Record)
+	}
 )
 
-func (s grepTestSegment) ScanGrep(ctx context.Context, offsets *array.Int64, req native.ScanRequest) (*native.ScanResult, error) {
+func (s grepTestSegment) ScanGrep(ctx context.Context, input arrow.Record, req native.ScanRequest) (*native.ScanResult, error) {
+	if s.inspect != nil {
+		s.inspect(input)
+	}
+	offsets := input.Column(input.Schema().FieldIndices(types.SegOffsetFieldName)[0]).(*array.Int64)
 	return s.run(ctx, offsets, req.Limit)
 }
 
@@ -83,7 +90,7 @@ func grepTestDetails(t *testing.T, pool memory.Allocator, json string) arrow.Arr
 	return arr
 }
 
-const grepHit = `[{"content":"超时 timeout","starts":[7],"ends":[14]}]`
+const grepHit = `[{"type":"match","content":"超时 timeout","starts":[7],"ends":[14]}]`
 
 func grepTestFrame(t *testing.T, pool memory.Allocator, values string) *DataFrame {
 	t.Helper()
@@ -93,6 +100,35 @@ func grepTestFrame(t *testing.T, pool memory.Allocator, values string) *DataFram
 	b.SetChunkSizes([]int64{int64(column.Len())})
 	require.NoError(t, b.addColumn(types.SegOffsetFieldName, column))
 	return b.Build()
+}
+
+func TestGrepRecordBatchSharesCompanionColumns(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer pool.AssertSize(t, 0)
+	builder := NewDataFrameBuilder().SetChunkSizes([]int64{2})
+	defer builder.Release()
+	lists := selectionTestColumn(t, pool, arrow.ListOf(arrow.PrimitiveTypes.Int32), `[[1,3],[0]]`)
+	require.NoError(t, builder.addColumn(types.QueryElementIndicesFieldName, lists))
+	require.NoError(t, builder.addColumn(types.SegOffsetFieldName, selectionTestColumn(t, pool, arrow.PrimitiveTypes.Int64, `[7,9]`)))
+	input := builder.Build()
+	defer input.Release()
+	runner := grepTestSegment{
+		inspect: func(record arrow.Record) {
+			require.Same(t, lists.Chunk(0), record.Column(0))
+			require.Same(t, input.Column(types.SegOffsetFieldName).Chunk(0), record.Column(1))
+		},
+		run: func(context.Context, *array.Int64, int64) (*native.ScanResult, error) {
+			return &native.ScanResult{Positions: []int{1}, Details: grepTestDetails(t, pool, "["+grepHit+"]")}, nil
+		},
+	}
+	binding := types.FunctionBuildContext{QueryScan: &types.QueryScanBuildContext{FieldID: 101, QueryLimit: 1, Segment: runner}}
+	op, err := NewGrepOpFromReprWithContext(grepTestRepr(t), binding)
+	require.NoError(t, err)
+	output, err := ExecuteOperator(types.NewFuncContext(pool), input, op)
+	require.NoError(t, err)
+	defer output.Release()
+	selected := output.Column(types.QueryElementIndicesFieldName).Chunk(0).(*array.List)
+	require.Equal(t, []int32{0}, selected.ListValues().(*array.Int32).Int32Values())
 }
 
 func TestGrepSelectionDetailsAndLimitSnapshot(t *testing.T) {
@@ -154,7 +190,7 @@ func TestGrepPreparationAndCapability(t *testing.T) {
 	result, err := ExecuteOperator(binding.execution(context.Background(), pool), input, op)
 	require.Nil(t, result)
 	require.ErrorIs(t, err, syntaxErr)
-	repr.Params["arguments"].Value = &schemapb.FunctionParamValue_StringValue{StringValue: `-C 2 -e x`}
+	repr.Params["arguments"].Value = &schemapb.FunctionParamValue_StringValue{StringValue: `-U -e x`}
 	_, err = NewGrepOpFromReprWithContext(repr, binding.Build)
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
@@ -231,7 +267,7 @@ func TestGrepSuccessfulRunnerResultSurvivesCancellation(t *testing.T) {
 	require.ErrorIs(t, ctx.Err(), context.Canceled)
 	require.Equal(t, int64(1), result.NumRows())
 	require.Equal(t, []int64{1}, result.Column(types.SegOffsetFieldName).Chunk(0).(*array.Int64).Int64Values())
-	expected, _, err := grepJSONColumn(pool, strings.NewReader(`[[{"content":"超时 timeout","starts":[7],"ends":[14]}]]`))
+	expected, _, err := grepJSONColumn(pool, strings.NewReader(`[[{"type":"match","content":"超时 timeout","starts":[7],"ends":[14]}]]`))
 	require.NoError(t, err)
 	defer expected.Release()
 	require.True(t, array.Equal(expected, result.Column("matches").Chunk(0)))
@@ -283,7 +319,8 @@ type nativeTextTestSegment struct {
 	reads   atomic.Int64
 }
 
-func (s *nativeTextTestSegment) ScanGrep(ctx context.Context, offsets *array.Int64, req native.ScanRequest) (*native.ScanResult, error) {
+func (s *nativeTextTestSegment) ScanGrep(ctx context.Context, input arrow.Record, req native.ScanRequest) (*native.ScanResult, error) {
+	offsets := input.Column(input.Schema().FieldIndices(types.SegOffsetFieldName)[0]).(*array.Int64)
 	s.entered <- req
 	if req.FieldID != 101 || req.Spec.PatternCount() != 1 || req.Spec.Pattern(0) != "timeout" || req.Spec.CaseMode() != grep.CaseInsensitive {
 		return nil, merr.WrapErrServiceInternalMsg("wrong grep preparation or shared pattern mutation")
@@ -308,7 +345,7 @@ func (s *nativeTextTestSegment) ScanGrep(ctx context.Context, offsets *array.Int
 		} // predetermined NULL / non-match
 		text := s.label + " timeout"
 		selected = append(selected, i)
-		payload, err := json.Marshal([]grepJSONLine{{Content: text, Starts: []int64{int64(len(s.label) + 1)}, Ends: []int64{int64(len(text))}}})
+		payload, err := json.Marshal([]grepJSONLine{{Type: "match", Content: text, Starts: []int64{int64(len(s.label) + 1)}, Ends: []int64{int64(len(text))}}})
 		if err != nil {
 			return nil, err
 		}
@@ -447,6 +484,10 @@ func TestGrepExecutionConfigurationSnapshot(t *testing.T) {
 		require.Equal(t, int64(128), paramtable.Get().FunctionCfg.GrepBatchSize.GetAsInt64())
 	}
 	require.NoError(t, paramtable.Get().Save(item.Key, "7"))
+	scanItem := &paramtable.Get().FunctionCfg.GrepMaxScanRows
+	oldScan := scanItem.GetValue()
+	defer paramtable.Get().Save(scanItem.Key, oldScan)
+	require.NoError(t, paramtable.Get().Save(scanItem.Key, "19"))
 	resultItem := &paramtable.Get().QuotaConfig.MaxOutputSize
 	previousResult := resultItem.GetValue()
 	defer paramtable.Get().Save(resultItem.Key, previousResult)
@@ -471,6 +512,7 @@ func TestGrepExecutionConfigurationSnapshot(t *testing.T) {
 	require.NoError(t, paramtable.Get().Save(regexItem.Key, "16384"))
 	require.NoError(t, paramtable.Get().Save(cacheItem.Key, "32768"))
 	require.NoError(t, paramtable.Get().Save(item.Key, "11"))
+	require.NoError(t, paramtable.Get().Save(scanItem.Key, "23"))
 	require.NoError(t, paramtable.Get().Save(resultItem.Key, "131072"))
 	input := grepTestFrame(t, pool, "[7]")
 	defer input.Release()
@@ -479,6 +521,7 @@ func TestGrepExecutionConfigurationSnapshot(t *testing.T) {
 	defer result.Release()
 	req := <-entered
 	require.Equal(t, int64(7), req.ExecutionLimits.BatchSize)
+	require.Equal(t, int64(19), req.ExecutionLimits.MaxScanRows)
 	require.Equal(t, uint64(65536), req.ExecutionLimits.MaxResultBytes)
 	require.Equal(t, native.CompileLimits{MaxRegexBytes: 4096, MaxDFACacheBytes: 8192}, req.CompileLimits)
 	require.Equal(t, int64(1), req.Limit)
@@ -505,7 +548,7 @@ func TestGrepArgumentSizeConfiguration(t *testing.T) {
 func TestGrepJSONSelection(t *testing.T) {
 	pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer pool.AssertSize(t, 0)
-	nativeRows := grepTestDetails(t, pool, `[[{"content":"skip","starts":[0],"ends":[4]}],[{"content":"foo bar foo","starts":[0,8],"ends":[3,11]},{"content":"hello foo","starts":[6],"ends":[9]}],[]]`)
+	nativeRows := grepTestDetails(t, pool, `[[{"type":"match","content":"skip","starts":[0],"ends":[4]}],[{"type":"match","content":"foo bar foo","starts":[0,8],"ends":[3,11]},{"type":"match","content":"hello foo","starts":[6],"ends":[9]}],[]]`)
 	sliced := array.NewSlice(nativeRows, 1, 3)
 	column := arrow.NewChunked(sliced.DataType(), []arrow.Array{sliced})
 	sliced.Release()
@@ -515,7 +558,7 @@ func TestGrepJSONSelection(t *testing.T) {
 	column.Release()
 	require.NoError(t, err)
 	defer selected.Release()
-	expected, _, err := grepJSONColumn(pool, strings.NewReader(`[[],[{"content":"foo bar foo","starts":[0,8],"ends":[3,11]},{"content":"hello foo","starts":[6],"ends":[9]}],[{"content":"foo bar foo","starts":[0,8],"ends":[3,11]},{"content":"hello foo","starts":[6],"ends":[9]}]]`))
+	expected, _, err := grepJSONColumn(pool, strings.NewReader(`[[],[{"type":"match","content":"foo bar foo","starts":[0,8],"ends":[3,11]},{"type":"match","content":"hello foo","starts":[6],"ends":[9]}],[{"type":"match","content":"foo bar foo","starts":[0,8],"ends":[3,11]},{"type":"match","content":"hello foo","starts":[6],"ends":[9]}]]`))
 	require.NoError(t, err)
 	defer expected.Release()
 	require.True(t, array.Equal(expected, selected.Chunk(0)))

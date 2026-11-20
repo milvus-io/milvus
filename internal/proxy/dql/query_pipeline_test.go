@@ -698,3 +698,19 @@ func TestQueryComputedColumnsSurviveStructReconstruction(t *testing.T) {
 	require.Equal(t, "pk", result.FieldsData[0].FieldName)
 	require.Equal(t, input.ComputedResults, result.FieldsData[1:])
 }
+
+func TestQueryPipelineGrepElementPage(t *testing.T) {
+	pipeline, err := NewQueryPipeline(testSchema(), 3, 1, reduce.IReduceNoOrder, nil, nil, nil, nil, []int64{100})
+	require.NoError(t, err)
+	a, b := computedQueryInput([]int64{1}), computedQueryInput([]int64{2})
+	a.ElementLevel, b.ElementLevel = true, true
+	a.ElementIndices = []*internalpb.ElementIndices{{Indices: []int32{1, 3, 5}}}
+	b.ElementIndices = []*internalpb.ElementIndices{{Indices: []int32{0, 2}}}
+	result, err := pipeline.Execute(context.Background(), []*internalpb.RetrieveResults{a, b})
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 2}, result.FieldsData[0].GetScalars().GetLongData().Data)
+	require.Equal(t, []int64{1, 2}, result.FieldsData[1].GetScalars().GetLongData().Data)
+	require.Len(t, result.ElementIndices, 2)
+	require.Equal(t, []int64{3, 5}, result.ElementIndices[0].GetIndices().Data)
+	require.Equal(t, []int64{0}, result.ElementIndices[1].GetIndices().Data)
+}
