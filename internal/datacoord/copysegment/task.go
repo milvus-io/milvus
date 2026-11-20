@@ -1356,12 +1356,17 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 
 	// Sync vector/scalar indexes
 	var summaries []*datapb.SegmentIndexSummary
-	summaryMode := indexMeta.UsesSegmentSummaries()
-	if err := syncVectorScalarIndexesWithSummary(ctx, result, task, mt, indexMeta, copyMeta, publishedBuilds, &summaries); err != nil {
-		return err
-	}
+	writeToManifest, known := task.GetIndexWriteToManifest()
+	summaryMode := segment.GetStorageVersion() == storage.StorageV3 &&
+		indexMeta.PublishesSegmentSummaries(result.GetSegmentId()) &&
+		(known && writeToManifest || len(publishedBuilds) > 0)
 	if summaryMode {
+		if err := syncVectorScalarIndexesWithSummary(ctx, result, task, mt, indexMeta, copyMeta, publishedBuilds, &summaries); err != nil {
+			return err
+		}
 		operators = append(operators, meta.UpdateIndexSummaries(result.GetSegmentId(), summaries))
+	} else if err := syncVectorScalarIndexes(ctx, result, task, mt, indexMeta, copyMeta, publishedBuilds); err != nil {
+		return err
 	}
 
 	// Sync text indexes
@@ -1383,7 +1388,7 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 	}
 	if summaryMode {
 		if published := mt.GetSegment(ctx, result.GetSegmentId()); published != nil {
-			indexMeta.AccountCopiedIndexes(published.SegmentInfo)
+			indexMeta.AccountIndexSummaries(published.SegmentInfo, summaries)
 		}
 	}
 	// An inspector may have skipped these records while import protection
@@ -1697,11 +1702,7 @@ func syncVectorScalarIndexesWithSummary(ctx context.Context, result *datapb.Copy
 		return nil
 	}
 	var seenIndexIDs map[int64]struct{}
-	summaryMode := indexMeta.UsesSegmentSummaries()
-	if summaryMode {
-		if summaries == nil {
-			return merr.WrapErrServiceInternalMsg("copy summary publication is missing its target")
-		}
+	if summaries != nil {
 		seenIndexIDs = make(map[int64]struct{}, len(result.GetIndexInfos()))
 	}
 
@@ -1786,10 +1787,7 @@ func syncVectorScalarIndexesWithSummary(ctx context.Context, result *datapb.Copy
 			IndexStorePathVersion:     indexInfo.GetIndexStorePathVersion(),
 		}
 
-		if summaryMode {
-			if hasArtifact && !manifestResident {
-				return merr.Wrap(merr.ErrServiceUnimplemented, "copied index is incompatible with segment summary mode")
-			}
+		if summaries != nil && (manifestResident || !hasArtifact) {
 			if _, exists := seenIndexIDs[targetIndexID]; exists {
 				return merr.WrapErrServiceInternalMsg("copied indexes contain a duplicate index ID")
 			}

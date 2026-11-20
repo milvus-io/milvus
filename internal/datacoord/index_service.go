@@ -1290,16 +1290,11 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 		segIdxes := segmentsIndexes[segID]
 		var summarySegment *datapb.SegmentInfo
 		if s.indexMeta.UsesSegmentSummaries() {
-			segment := s.meta.GetSegment(ctx, segID)
-			if segment == nil {
-				return &indexpb.GetIndexInfoResponse{Status: merr.Status(merr.WrapErrSegmentNotFound(segID))}, nil
+			if segment := s.meta.GetSegment(ctx, segID); segment != nil && segment.GetCollectionID() == req.GetCollectionID() {
+				summarySegment = segment.SegmentInfo
 			}
-			if segment.GetCollectionID() != req.GetCollectionID() {
-				return &indexpb.GetIndexInfoResponse{Status: merr.Status(merr.WrapErrSegmentNotFound(segID))}, nil
-			}
-			summarySegment = segment.SegmentInfo
 			var err error
-			segIdxes, err = s.meta.ReadCompletedIndexes(ctx, summarySegment)
+			segIdxes, err = s.meta.ResolveCompletedIndexes(ctx, summarySegment, segIdxes)
 			if err != nil {
 				return &indexpb.GetIndexInfoResponse{Status: merr.Status(err)}, nil
 			}

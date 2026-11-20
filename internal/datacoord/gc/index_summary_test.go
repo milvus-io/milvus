@@ -47,6 +47,7 @@ import (
 )
 
 func TestLegacyManifestIndexRecoveryProtectsArtifacts(t *testing.T) {
+	meta.WithSegmentIndexManifestWrites(t, false)
 	ctx := t.Context()
 	root := t.TempDir()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
@@ -61,7 +62,7 @@ func TestLegacyManifestIndexRecoveryProtectsArtifacts(t *testing.T) {
 		return mt, dm.IndexMeta
 	}
 	oldMeta, oldIndex := boot()
-	require.False(t, oldIndex.UsesSegmentSummaries())
+	require.False(t, oldIndex.PublishesSegmentSummaries(3))
 	for _, segmentID := range []int64{3, 8} {
 		base := path.Join(root, "insert_log", metautil.JoinIDPath(1, 2, segmentID))
 		require.NoError(t, oldMeta.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
@@ -135,13 +136,37 @@ func TestLegacyManifestIndexRecoveryProtectsArtifacts(t *testing.T) {
 	gc.RecycleUnusedIndexFilesV0(ctx)
 	require.FileExists(t, live)
 	require.NoFileExists(t, orphan)
+
+	meta.WithSegmentIndexManifestWrites(t, true)
+	migrating, migratedIndex := boot()
+	require.True(t, migrating.ManifestIndexesPending(3))
+	migrating.RecoverPendingManifestIndexes(ctx, func(int64) error { return nil })
+	published := migrating.GetSegment(ctx, 3)
+	require.Equal(t, meta.CurrentIndexSummaryVersion, published.GetIndexSummaryVersion())
+	require.Equal(t, int64(5), published.GetIndexSummaries()[0].GetBuildId())
+	require.False(t, migratedIndex.HasBuildInfo(5), "manifest-only entries persist as summaries")
+
+	meta.WithSegmentIndexManifestWrites(t, false)
+	beforeRestart := reads.Load()
+	restarted, restartedIndex := boot()
+	require.False(t, restarted.HasPendingManifestIndexes())
+	require.Equal(t, beforeRestart, reads.Load())
+	require.False(t, restartedIndex.HasBuildInfo(5))
+	restartedGC := NewGarbageCollector(restarted, meta.NewMockHandler(), GcOption{IndexMeta: restartedIndex, Cli: cm})
+	restartedGC.RecycleUnusedIndexFilesV0(ctx)
+	require.FileExists(t, live)
+	runtimeRead := mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{entry}, nil).Build()
+	defer runtimeRead.UnPatch()
+	records, err := restarted.ReadCompletedIndexes(ctx, restarted.GetSegment(ctx, 3).SegmentInfo)
+	require.NoError(t, err)
+	require.Equal(t, version, records[4].IndexStorePathVersion)
 }
 
 func TestSummaryGCKeepsPublishedArtifactAcrossRestart(t *testing.T) {
 	ctx := t.Context()
 	params := paramtable.Get()
-	key := params.DataCoordCfg.SegmentIndexSummariesEnabled.Key
-	previous := params.DataCoordCfg.SegmentIndexSummariesEnabled.GetValue()
+	key := params.DataCoordCfg.WriteSegmentIndexToManifest.Key
+	previous := params.DataCoordCfg.WriteSegmentIndexToManifest.GetValue()
 	params.Save(key, "true")
 	t.Cleanup(func() { params.Save(key, previous) })
 

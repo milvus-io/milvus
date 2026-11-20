@@ -571,6 +571,7 @@ func (m *Meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 				slices.ContainsFunc(commit.CatalogMutation.SegmentIndexes, func(mut SegmentIndexMutation) bool {
 					return mut.BuildID == staged.Summary.BuildID && (mut.Type == SegmentIndexUpsert || mut.Type == SegmentIndexBackfill)
 				}))
+			MarkIndexSummaryCoverage(segment.SegmentInfo, updated.SegmentInfo)
 		}
 		var action metastore.UpdateAction
 		if isNewSegment {

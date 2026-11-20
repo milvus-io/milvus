@@ -54,8 +54,8 @@ func TestSummaryModeRecoveryDoesNotCreateBuildRecords(t *testing.T) {
 
 func TestSummaryModeRestartDoesNotReadCompletedManifests(t *testing.T) {
 	params := paramtable.Get()
-	key := params.DataCoordCfg.SegmentIndexSummariesEnabled.Key
-	previous := params.DataCoordCfg.SegmentIndexSummariesEnabled.GetValue()
+	key := params.DataCoordCfg.WriteSegmentIndexToManifest.Key
+	previous := params.DataCoordCfg.WriteSegmentIndexToManifest.GetValue()
 	params.Save(key, "true")
 	t.Cleanup(func() { params.Save(key, previous) })
 	meta.WithSegmentIndexManifestWrites(t, true)

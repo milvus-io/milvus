@@ -42,10 +42,11 @@ import (
 )
 
 func TestEmptyCompletionKeepsLegacyPublication(t *testing.T) {
+	meta.WithSegmentIndexManifestWrites(t, false)
 	ctx := context.Background()
 	mt, dm, err := NewMemoryMetaWithIndex(t)
 	require.NoError(t, err)
-	require.False(t, dm.IndexMeta.UsesSegmentSummaries())
+	require.False(t, dm.IndexMeta.PublishesSegmentSummaries(3))
 	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 3, CollectionID: 1, PartitionID: 2,
 		State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3,
@@ -180,8 +181,8 @@ func TestFinishTaskSummaryModeFallback(t *testing.T) {
 
 func TestSummaryModeRestartPreservesInventory(t *testing.T) {
 	params := paramtable.Get()
-	key := params.DataCoordCfg.SegmentIndexSummariesEnabled.Key
-	previous := params.DataCoordCfg.SegmentIndexSummariesEnabled.GetValue()
+	key := params.DataCoordCfg.WriteSegmentIndexToManifest.Key
+	previous := params.DataCoordCfg.WriteSegmentIndexToManifest.GetValue()
 	params.Save(key, "true")
 	t.Cleanup(func() { params.Save(key, previous) })
 	meta.WithSegmentIndexManifestWrites(t, true)
@@ -268,8 +269,8 @@ func TestSummaryColumnReplacementRetractsCompletedAndActiveBuilds(t *testing.T) 
 	// The definition has already been removed; the summary still owns the field identity.
 	require.NoError(t, dm.IndexMeta.AddSegmentIndex(t.Context(), &model.SegmentIndex{CollectionID: 1, PartitionID: 2, SegmentID: 3, IndexID: 10, BuildID: 21, IndexState: commonpb.IndexState_InProgress}))
 	params := paramtable.Get()
-	key := params.DataCoordCfg.SegmentIndexSummariesEnabled.Key
-	previous := params.DataCoordCfg.SegmentIndexSummariesEnabled.GetValue()
+	key := params.DataCoordCfg.WriteSegmentIndexToManifest.Key
+	previous := params.DataCoordCfg.WriteSegmentIndexToManifest.GetValue()
 	params.Save(key, "true")
 	t.Cleanup(func() { params.Save(key, previous) })
 	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).Return(packed.ManifestUpdateResult{
@@ -297,17 +298,15 @@ func TestSegmentIndexSummariesPreserveTaskStateAndCompletedBuilds(t *testing.T) 
 		t.Run(name, func(t *testing.T) {
 			mt, dm, err := NewMemoryMetaWithIndex(t)
 			require.NoError(t, err)
+			segment := &datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2}
 			if summaryMode {
-				require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
-			}
-			mt.MetaStore.PutSegment(&datapb.SegmentInfo{
-				ID: 3, CollectionID: 1, PartitionID: 2,
-				IndexSummaries: []*datapb.SegmentIndexSummary{
+				segment.IndexSummaries = []*datapb.SegmentIndexSummary{
 					{IndexId: 10, BuildId: 19, HasArtifact: true},
 					{IndexId: 11, BuildId: 21, HasArtifact: true},
 					{IndexId: 12, BuildId: 22},
-				},
-			})
+				}
+			}
+			mt.MetaStore.PutSegment(segment)
 			for _, record := range []*model.SegmentIndex{
 				{
 					SegmentID: 3, CollectionID: 1, PartitionID: 2, IndexID: 10, BuildID: 20,
@@ -359,7 +358,8 @@ func TestSummaryOnlyRetirementStagesInventoryAndAccountsAfterCommit(t *testing.T
 		IndexSummaries: []*datapb.SegmentIndexSummary{{IndexId: 10, FieldId: 100, BuildId: 19, HasArtifact: true,
 			SerializedSize: 500, MemSize: 800, IndexVersion: 2, VectorEngineVersion: 3, ScalarEngineVersion: 4, IndexType: "HNSW"}},
 	})
-	require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
+	segment := mt.GetSegment(t.Context(), 3)
+	dm.IndexMeta.AccountIndexSummaries(segment.SegmentInfo, segment.GetIndexSummaries())
 	require.EqualValues(t, 1, dm.IndexMeta.taskCounts.snapshot()[indexTaskStateSlot(commonpb.IndexState_Finished)])
 	require.EqualValues(t, 500, dm.IndexMeta.taskCounts.activeSizes[1])
 	staged, err := dm.IndexMeta.StageSegmentIndexMutation(meta.SegmentIndexMutation{

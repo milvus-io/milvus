@@ -1711,7 +1711,8 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 				s.Equal(commonpb.IndexState_Finished, persisted[0].IndexState)
 			}
 
-			_, restartedDM := index.BootMetaForRestart(s.T(), catalog, collectionID)
+			restarted, restartedDM := index.BootMetaForRestart(s.T(), catalog, collectionID)
+			restarted.RecoverPendingManifestIndexes(s.T().Context(), func(int64) error { return nil })
 			recovered := restartedDM.IndexMeta.GetSegmentIndexes(collectionID, segmentID)
 			s.Require().Len(recovered, 1)
 			s.EqualValues(buildID, recovered[indexID].BuildID)

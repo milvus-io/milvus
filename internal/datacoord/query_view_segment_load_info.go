@@ -68,7 +68,7 @@ func (s *Server) getQueryViewSegmentLoadInfo(ctx context.Context, collectionID, 
 	}
 	if s.indexMeta.UsesSegmentSummaries() {
 		var err error
-		segmentIndexes, err = s.meta.ReadCompletedIndexes(ctx, segment.SegmentInfo)
+		segmentIndexes, err = s.meta.ResolveCompletedIndexes(ctx, segment.SegmentInfo, segmentIndexes)
 		if err != nil {
 			return nil, err
 		}

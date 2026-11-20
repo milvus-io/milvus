@@ -21,8 +21,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -187,6 +190,12 @@ func (m *Meta) installRecoveredManifestIndexes(ctx context.Context, result manif
 	}
 
 	segmentID := observed.GetID()
+	var account func()
+	defer func() {
+		if account != nil {
+			account()
+		}
+	}()
 	locks := m.GetSegmentManifestLocks()
 	locks.Lock(segmentID)
 	defer locks.Unlock(segmentID)
@@ -197,6 +206,16 @@ func (m *Meta) installRecoveredManifestIndexes(ctx context.Context, result manif
 	if !packed.SameManifestPath(current.GetManifestPath(), observed.GetManifestPath()) ||
 		removed && IsSegmentHealthy(current) {
 		return StaleSegmentManifestError(segmentID, observed.GetManifestPath(), current.GetManifestPath())
+	}
+	if source, ok := m.IndexCatalog.(interface {
+		PublishesSegmentSummaries(int64) bool
+		AccountIndexSummaries(*datapb.SegmentInfo, []*datapb.SegmentIndexSummary)
+	}); ok && source.PublishesSegmentSummaries(segmentID) && !removed {
+		published, added, err := m.persistRecoveredIndexSummaries(ctx, current, result.entries, indexes)
+		if err == nil && len(added) != 0 {
+			account = func() { source.AccountIndexSummaries(published, added) }
+		}
+		return err
 	}
 	if len(indexes) == 0 && !removed {
 		return m.UpdateSegmentsInfo(ctx, ClearEmptyManifestIndexMarker(segmentID, observed.GetManifestPath()))
@@ -210,4 +229,70 @@ func (m *Meta) installRecoveredManifestIndexes(ctx context.Context, result manif
 		m.IndexCatalog.UnlockBuildIDs(ids)
 	}
 	return nil
+}
+
+// persistRecoveredIndexSummaries publishes one complete inventory for the
+// pinned manifest. The caller holds the segment manifest lock.
+func (m *Meta) persistRecoveredIndexSummaries(ctx context.Context, observed *SegmentInfo, entries []packed.ManifestIndexInfo, records []*model.SegmentIndex) (*datapb.SegmentInfo, []*datapb.SegmentIndexSummary, error) {
+	buildIDs := make([]int64, 0, len(records))
+	seenBuilds := make(map[int64]struct{}, len(records))
+	seenIndexes := make(map[int64]int64, len(records))
+	for _, record := range records {
+		_, buildExists := seenBuilds[record.BuildID]
+		_, indexExists := seenIndexes[record.IndexID]
+		if record.BuildID <= 0 || record.IndexID <= 0 || buildExists || indexExists {
+			return nil, nil, merr.Wrapf(merr.ErrDataIntegrity, "invalid index inventory for segment %d", observed.GetID())
+		}
+		seenBuilds[record.BuildID] = struct{}{}
+		seenIndexes[record.IndexID] = record.BuildID
+		buildIDs = append(buildIDs, record.BuildID)
+	}
+	m.IndexCatalog.LockBuildIDs(buildIDs)
+	defer m.IndexCatalog.UnlockBuildIDs(buildIDs)
+	defer m.LockSegments(observed.GetID())()
+	current := m.GetSegment(ctx, observed.GetID())
+	if !needsManifestIndexRecovery(current) {
+		return nil, nil, nil
+	}
+	if !packed.SameManifestPath(current.GetManifestPath(), observed.GetManifestPath()) {
+		return nil, nil, StaleSegmentManifestError(observed.GetID(), observed.GetManifestPath(), current.GetManifestPath())
+	}
+
+	updated := current.Clone()
+	existing := make(map[int64]*datapb.SegmentIndexSummary, len(updated.GetIndexSummaries()))
+	for _, summary := range updated.GetIndexSummaries() {
+		existing[summary.GetIndexId()] = summary
+		if summary.GetHasArtifact() && seenIndexes[summary.GetIndexId()] != summary.GetBuildId() {
+			return nil, nil, merr.Wrapf(merr.ErrDataIntegrity, "manifest missing summary build %d on segment %d", summary.GetBuildId(), observed.GetID())
+		}
+	}
+	var added []*datapb.SegmentIndexSummary
+	for i, record := range records {
+		if summary := existing[record.IndexID]; summary != nil {
+			if !summary.GetHasArtifact() || summary.GetBuildId() != record.BuildID ||
+				summary.GetFieldId() != entries[i].FieldID || summary.GetIndexVersion() != record.IndexVersion {
+				return nil, nil, merr.Wrapf(merr.ErrDataIntegrity, "manifest disagrees with index summary for segment %d index %d", observed.GetID(), record.IndexID)
+			}
+			continue
+		}
+		if task, ok := m.IndexCatalog.GetIndexJob(record.BuildID); ok {
+			// A surviving catalog row still owns this build (including any
+			// pending work). Readers and GC continue to use it.
+			if task.SegmentID != record.SegmentID || task.IndexID != record.IndexID {
+				return nil, nil, merr.Wrapf(merr.ErrDataIntegrity, "manifest build %d has conflicting catalog ownership", record.BuildID)
+			}
+			continue
+		}
+		summary := model.MarshalSegmentIndexSummary(model.SummarizeSegmentIndex(record), entries[i].FieldID)
+		updated.IndexSummaries = append(updated.IndexSummaries, summary)
+		added = append(added, summary)
+	}
+	sortIndexSummaries(updated.IndexSummaries)
+	updated.IndexSummaryVersion = CurrentIndexSummaryVersion
+	updated.ManifestHasIndex = len(entries) > 0
+	if err := m.Catalog.Update(ctx, metastore.UpdateSegment(updated.SegmentInfo)); err != nil {
+		return nil, nil, merr.Wrapf(err, "persist recovered index summaries for segment %d", observed.GetID())
+	}
+	m.Segments.SetSegment(updated.GetID(), updated)
+	return updated.SegmentInfo, added, nil
 }

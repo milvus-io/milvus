@@ -39,7 +39,6 @@ func TestManifestIndexMigrationAsyncProgress(t *testing.T) {
 			ctx := context.Background()
 			meta.WithSegmentIndexManifestWrites(t, false)
 			WithManifestIndexRollback(t, false)
-			WithManifestIndexBackfillEnabled(t, true)
 			meta.NewFakeManifestStore(t)
 			catalog := metastorekv.NewCatalog(meta.NewMetaMemoryKV(), "", "")
 			m := BootMigrationMeta(t, catalog, meta.RestartCollID)

@@ -2195,7 +2195,6 @@ func TestManifestIndexBackfillParams(t *testing.T) {
 	params := ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))
 
-	assert.False(t, params.DataCoordCfg.ManifestIndexBackfillEnabled.GetAsBool())
 	assert.Equal(t, 60*time.Second, params.DataCoordCfg.ManifestIndexBackfillInterval.GetAsDuration(time.Second))
 	assert.Equal(t, 1000, params.DataCoordCfg.ManifestIndexBackfillBatchSize.GetAsInt())
 	assert.Equal(t, 16, params.DataCoordCfg.ManifestIndexBackfillConcurrency.GetAsInt())

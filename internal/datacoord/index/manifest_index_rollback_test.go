@@ -86,7 +86,6 @@ func TestManifestIndexRollbackRoundTrip(t *testing.T) {
 func TestManifestIndexRollbackIndependentSwitch(t *testing.T) {
 	WithManifestIndexRollback(t, false)
 	meta.WithSegmentIndexManifestWrites(t, true)
-	WithManifestIndexBackfillEnabled(t, true)
 	assert.True(t, WriteSegmentIndexToManifest())
 	assert.True(t, manifestIndexBackfillActive())
 	WithManifestIndexRollback(t, true)

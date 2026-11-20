@@ -36,10 +36,11 @@ func TestGarbageCollector_RefreshManifestAfterTaskCompletion(t *testing.T) {
 	for _, previouslyMarked := range []bool{false, true} {
 		t.Run(fmt.Sprintf("previously_marked_%v", previouslyMarked), func(t *testing.T) {
 			ctx := context.Background()
-			meta.WithSegmentIndexManifestWrites(t, true)
+			meta.WithSegmentIndexManifestWrites(t, false)
 			store := meta.NewFakeManifestStore(t)
 			catalog := datacoord.NewCatalog(meta.NewMetaMemoryKV(), "", "")
 			m, mDomains := snapshot.BootMetaForRestartWithSnapshot(t, catalog, meta.RestartCollID)
+			meta.WithSegmentIndexManifestWrites(t, true)
 			index.SeedRestartTask(t, m, mDomains.IndexMeta)
 			if previouslyMarked {
 				// The old marked revision contains another index, but not this build.

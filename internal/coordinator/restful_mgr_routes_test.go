@@ -86,14 +86,14 @@ func TestHandleAlterConfig(t *testing.T) {
 
 	coord := &mixCoordImpl{}
 
-	t.Run("reject summary mode writes and resets", func(t *testing.T) {
+	t.Run("reject manifest publication writes and resets", func(t *testing.T) {
 		source, ok := mgr.GetEtcdSource()
 		require.True(t, ok)
-		key := paramtable.Get().DataCoordCfg.SegmentIndexSummariesEnabled.Key
+		key := paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.Key
 		formatted := pkgconfig.FormatKey(key)
 		before, beforeErr := source.GetConfigurationByKey(formatted)
 		enabled := "true"
-		for _, spelling := range []string{key, "DATACOORD_INDEX_SEGMENTINDEXSUMMARIESENABLED", "datacoordindexsegmentindexsummariesenabled"} {
+		for _, spelling := range []string{key, "DATACOORD_INDEX_WRITESEGMENTINDEXTOMANIFEST", "datacoordindexwritesegmentindextomanifest"} {
 			for _, value := range []*string{nil, &enabled} {
 				body, err := json.Marshal(map[string]any{
 					"configs": []map[string]any{{"key": spelling, "value": value}},

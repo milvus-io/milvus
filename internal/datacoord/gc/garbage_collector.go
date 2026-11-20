@@ -2228,7 +2228,9 @@ func (gc *GarbageCollector) RecycleUnusedIndexFilesV0(ctx context.Context) {
 	if gc.Meta.HasPendingManifestIndexes() {
 		return
 	}
-	summaryBuilds := sync.OnceValue(func() map[int64]struct{} { return gc.artifactSummaryBuildIDs(ctx) })
+	var summaryBuilds map[int64]struct{}
+	var summaryVersion uint64
+	summariesLoaded := false
 	start := time.Now()
 	log := mlog.With(mlog.String("gcName", "recycleUnusedIndexFilesV0"), mlog.Time("startAt", start))
 	log.Info(ctx, "start recycleUnusedIndexFilesV0...")
@@ -2263,7 +2265,16 @@ func (gc *GarbageCollector) RecycleUnusedIndexFilesV0(ctx context.Context) {
 			return true
 		}
 		if segIdx == nil {
-			_, retained := summaryBuilds()[buildID]
+			// A backfill can retire a catalog record midway through this
+			// scan. Its summary is installed before the generation advances
+			// and before the task lookup can miss.
+			version := gc.Option.IndexMeta.SummaryRetirementVersion()
+			if !summariesLoaded || version != summaryVersion {
+				summaryBuilds = gc.artifactSummaryBuildIDs(ctx)
+				summaryVersion = version
+				summariesLoaded = true
+			}
+			_, retained := summaryBuilds[buildID]
 			if ctx.Err() != nil {
 				return false
 			}

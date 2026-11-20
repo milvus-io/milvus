@@ -64,14 +64,6 @@ func IndexManifestPublished(t *testing.T, im *IndexMeta, buildID int64) bool {
 	return record.ManifestPublished
 }
 
-func WithManifestIndexBackfillEnabled(t *testing.T, enabled bool) {
-	t.Helper()
-	key := Params.DataCoordCfg.ManifestIndexBackfillEnabled.Key
-	previous := Params.DataCoordCfg.ManifestIndexBackfillEnabled.GetValue()
-	Params.Save(key, fmt.Sprintf("%t", enabled))
-	t.Cleanup(func() { Params.Save(key, previous) })
-}
-
 func SeedBackfillIndexDefinition(t *testing.T, m *meta.Meta) {
 	t.Helper()
 	if m.IndexCatalog.(*IndexMeta).IsIndexExist(meta.RestartCollID, meta.RestartIndexID) {

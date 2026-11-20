@@ -75,8 +75,9 @@ vector/scalar index builds select `IndexStorePathVersion=2` and write to
 `<manifest base>/_index/<build>/<version>/<file>`. This includes new indexes on
 legacy local segments: they follow that existing manifest base. Disabling the
 switch preserves the existing version-0/1 layout selection for new tasks.
-New or updated index entries must stay inside that `_index` directory; parent
-traversal and external namespaces are errors. Existing entries are not migrated.
+New or updated index entries must stay inside that `_index` directory. Parent
+traversal and external namespaces are errors. Recovered legacy manifest entries
+retain their original layout.
 Builds retain their creation-time publication mode across switch changes and
 restarts: version 2 finishes in the manifest, while version 0/1 finishes in etcd.
 Readers and cleanup use each artifact's persisted version.
@@ -96,19 +97,20 @@ Generation-zero backend/legacy entries retain `seg_<segment_id>.cache`.
 The cache manager removes `.cache` files on rebuild and does not restore them
 across restarts. These files are not manifests or DataCoord GC objects.
 
-## New-cluster index summary mode
+## Segment index summaries
 
-`dataCoord.index.segmentIndexSummariesEnabled` selects an immutable mode at
-initial startup of an empty cluster. Completed vector/scalar index inventory
-lives in `SegmentInfo.index_summaries`; file lists remain in segment manifests
-and are read on demand. Active and pending-cleanup tasks retain catalog rows.
-Manifest publication updates the pointer and summary and retires the task in
-one catalog transaction. An artifact-free completion retains a summary without
-creating a manifest index entry. GC must consult the current manifest after an
-active-task lookup misses; absence from the task table does not prove orphanhood.
-Historical migration, rollback, incompatible snapshot restore and direct manifest
-version adoption are unsupported in this mode. See the
-[index summary design](../../design-docs/design_docs/20261110-segment-index-summary.md).
+`dataCoord.index.writeSegmentIndexToManifest` enables summary publication and
+forward migration for eligible StorageV3 indexes. Readers use the index
+inventory already persisted in the catalog, even when publication is disabled.
+`SegmentInfo.index_summary_version=1` certifies the index inventory for the
+current manifest. `manifest_has_index` indicates file entries and can be false
+when the inventory contains a completed index without an artifact.
+Startup does not read index manifests. Background recovery fills missing
+inventory for historical manifests. Backfill publishes copied artifacts, the
+manifest pointer, the summary and catalog record retirement in one transaction.
+Active and pending-cleanup tasks retain catalog rows. A manifest read error or
+an uncertain artifact owner blocks GC for that artifact. GC protects legacy paths, importing segments and snapshot-pinned builds
+across migration. See the [index summary design](../../design-docs/design_docs/20261110-segment-index-summary.md).
 
 ## Local upgrade compatibility
 

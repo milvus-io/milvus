@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -86,18 +87,9 @@ func NewManifestIndexBackfillInspector(ctx context.Context, mt *meta.Meta, im *I
 	}
 }
 
-// Start launches no goroutine unless both operator choices are active. The
-// backfill switch opts into the background migration; manifest publication
-// selects its destination. Both are restart-scoped configuration.
+// Start runs forward migration under the manifest publication switch.
 func (i *ManifestIndexBackfillInspector) Start() {
-	if !manifestIndexBackfillEnabled() {
-		mlog.Info(i.ctx, "manifest index backfill is disabled, not starting",
-			mlog.String("switch", Params.DataCoordCfg.ManifestIndexBackfillEnabled.Key))
-		return
-	}
-	if !WriteSegmentIndexToManifest() {
-		mlog.Info(i.ctx, "manifest index backfill requires manifest publication, not starting",
-			mlog.String("switch", Params.DataCoordCfg.WriteSegmentIndexToManifest.Key))
+	if !manifestIndexBackfillActive() {
 		return
 	}
 	if i.mt == nil || i.indexMeta == nil {
@@ -220,7 +212,7 @@ func (i *ManifestIndexBackfillInspector) scan(ctx context.Context) ([]segmentMan
 		if ctx.Err() != nil {
 			return false
 		}
-		if !segmentIndexNeedsManifestBackfill(record) ||
+		if !i.canBackfillRecord(record) ||
 			!i.indexMeta.IsIndexExist(record.CollectionID, record.IndexID) {
 			return true
 		}
@@ -282,11 +274,24 @@ func (i *ManifestIndexBackfillInspector) scan(ctx context.Context) ([]segmentMan
 	return work, pending
 }
 
-func segmentIndexNeedsManifestBackfill(segIdx *model.SegmentIndex) bool {
-	return segIdx != nil && !segIdx.IsDeleted &&
-		segIdx.IndexState == commonpb.IndexState_Finished &&
-		len(segIdx.IndexFileKeys) > 0 &&
-		!segIdx.ManifestPublished
+func catalogBackfillCandidate(record *model.SegmentIndex) bool {
+	return record != nil && !record.IsDeleted && !record.ManifestPublished && record.IndexState == commonpb.IndexState_Finished
+}
+
+func (i *ManifestIndexBackfillInspector) canBackfillRecord(record *model.SegmentIndex) bool {
+	if !catalogBackfillCandidate(record) {
+		return false
+	}
+	if current, ok := i.indexMeta.completedIndexSummaryForIndex(record.SegmentID, record.IndexID); ok {
+		if current.BuildID > record.BuildID || current.HasArtifact && len(record.IndexFileKeys) == 0 {
+			return false
+		}
+	}
+	if len(record.IndexFileKeys) == 0 {
+		return i.indexMeta.PublishesSegmentSummaries(record.SegmentID)
+	}
+	_, local := i.mt.ChunkManager.(*storage.LocalChunkManager)
+	return !local || metautil.IsSegmentRooted(record.IndexStorePathVersion)
 }
 
 func countManifestIndexBackfillRecords(work []segmentManifestIndexBackfill) int {
@@ -341,16 +346,29 @@ func (i *ManifestIndexBackfillInspector) backfillSegment(ctx context.Context, it
 		batch := item.records[offset:min(offset+limit, len(item.records))]
 		buildIDs := make([]int64, 0, len(batch))
 		for _, candidate := range batch {
+			record, ok := i.indexMeta.GetIndexJob(candidate.BuildID)
+			if ok && len(record.IndexFileKeys) == 0 {
+				if err := i.mt.MigrateIndexWithoutArtifact(ctx, record); err != nil {
+					i.recordFailure(ctx, candidate, err)
+				} else {
+					succeeded++
+					metrics.DataCoordManifestIndexBackfillRecords.WithLabelValues(manifestIndexBackfillSucceeded).Inc()
+				}
+				continue
+			}
 			buildIDs = append(buildIDs, candidate.BuildID)
 		}
+		if len(buildIDs) == 0 {
+			continue
+		}
 		if err := i.backfillIndexes(ctx, item.segment.GetID(), buildIDs...); err != nil {
-			for _, candidate := range batch {
-				i.recordFailure(ctx, candidate, err)
+			for _, buildID := range buildIDs {
+				i.recordFailure(ctx, manifestIndexBackfillCandidate{SegmentID: item.segment.GetID(), BuildID: buildID}, err)
 			}
 			continue
 		}
-		succeeded += len(batch)
-		metrics.DataCoordManifestIndexBackfillRecords.WithLabelValues(manifestIndexBackfillSucceeded).Add(float64(len(batch)))
+		succeeded += len(buildIDs)
+		metrics.DataCoordManifestIndexBackfillRecords.WithLabelValues(manifestIndexBackfillSucceeded).Add(float64(len(buildIDs)))
 	}
 	return succeeded
 }
@@ -370,7 +388,7 @@ func (i *ManifestIndexBackfillInspector) backfillIndexes(ctx context.Context, se
 	mutations := make([]meta.SegmentIndexMutation, 0, len(buildIDs))
 	for _, buildID := range buildIDs {
 		segIdx, ok := i.indexMeta.GetIndexJob(buildID)
-		if !ok || !segmentIndexNeedsManifestBackfill(segIdx) ||
+		if !ok || len(segIdx.IndexFileKeys) == 0 || !i.canBackfillRecord(segIdx) ||
 			!i.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
 			return meta.ErrSegmentIndexBackfillSkipped
 		}
@@ -430,12 +448,8 @@ func (i *ManifestIndexBackfillInspector) reportPending(ctx context.Context, pend
 	i.lastPending = pending
 }
 
-func manifestIndexBackfillEnabled() bool {
-	return Params.DataCoordCfg.ManifestIndexBackfillEnabled.GetAsBool()
-}
-
 func manifestIndexBackfillActive() bool {
-	return manifestIndexBackfillEnabled() && WriteSegmentIndexToManifest()
+	return WriteSegmentIndexToManifest()
 }
 
 func manifestIndexBackfillInterval() time.Duration {

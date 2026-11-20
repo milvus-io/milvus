@@ -180,7 +180,6 @@ func TestManifestIndexBackfillFailureDuringManifestIO(t *testing.T) {
 	for _, scenario := range []string{"write fails", "pointer advances", "segment drops"} {
 		t.Run(scenario, func(t *testing.T) {
 			meta.WithSegmentIndexManifestWrites(t, false)
-			WithManifestIndexBackfillEnabled(t, true)
 			store := meta.NewFakeManifestStore(t)
 			ctx := context.TODO()
 			catalog := metastorekv.NewCatalog(meta.NewMetaMemoryKV(), "", "")
@@ -243,7 +242,6 @@ func TestManifestIndexBackfillFailureDuringManifestIO(t *testing.T) {
 
 func TestManifestIndexBackfillConcurrencyAndShutdown(t *testing.T) {
 	meta.WithSegmentIndexManifestWrites(t, false)
-	WithManifestIndexBackfillEnabled(t, true)
 	meta.NewFakeManifestStore(t)
 	ctx := context.TODO()
 	catalog := metastorekv.NewCatalog(meta.NewMetaMemoryKV(), "", "")
@@ -311,7 +309,6 @@ func TestManifestIndexBackfillIdleAndWake(t *testing.T) {
 	for _, writer := range []string{"copy install", "finish task", "version update"} {
 		t.Run(writer, func(t *testing.T) {
 			meta.WithSegmentIndexManifestWrites(t, false)
-			WithManifestIndexBackfillEnabled(t, true)
 			meta.NewFakeManifestStore(t)
 			ctx := context.Background()
 			m := BootMigrationMeta(t, metastorekv.NewCatalog(meta.NewMetaMemoryKV(), "", ""), meta.RestartCollID)
@@ -368,7 +365,6 @@ func TestManifestIndexBackfillIdleAndWake(t *testing.T) {
 
 func TestManifestIndexBackfillDoesNotLoseWakeAtIdleBoundary(t *testing.T) {
 	meta.WithSegmentIndexManifestWrites(t, false)
-	WithManifestIndexBackfillEnabled(t, true)
 	meta.NewFakeManifestStore(t)
 	ctx := context.Background()
 	m := BootMigrationMeta(t, metastorekv.NewCatalog(meta.NewMetaMemoryKV(), "", ""), meta.RestartCollID)

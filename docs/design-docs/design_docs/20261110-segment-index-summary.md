@@ -1,43 +1,61 @@
-# Segment index summaries for new clusters
+# Segment index summaries
 
 Related issue: #53047.
 
 ## Goal and scope
 
-Keep completed index inventory in SegmentInfo and artifact details in the
-segment manifest. Do not reconstruct completed SegmentIndex objects at startup.
-Collection index definitions and active or pending-cleanup build tasks remain
-coordinator metadata. The default mode retains existing behavior.
+Store completed StorageV3 vector and scalar index inventory in
+`SegmentInfo.index_summaries`. The paired segment manifest retains file lists.
+Collection index definitions, active tasks, pending cleanup and legacy index
+records that still own artifacts remain in the catalog.
 
-Completed inventory has one publication mode: legacy mode retains completed
-SegmentIndex records and does not write summaries; summary mode writes summaries
-and retires completed records. Manifest artifact entries remain in both modes.
+`dataCoord.index.writeSegmentIndexToManifest` controls publication and forward
+migration. It defaults to true and takes effect on restart. It requires Loon FFI.
+Disabling it chooses etcd for newly scheduled builds. Previously published
+summaries remain readable in either setting. In-flight builds and copy tasks
+keep their persisted publication and file layout choices. StorageV1/V2
+continue to use catalog records.
 
-The new mode is selected only when an empty cluster first starts and is persisted
-in the metadata namespace. Subsequent starts must select the same mode. Existing
-clusters cannot enable it, and summary-mode clusters cannot disable it. Manifest
-publication and `common.storage.useLoonFFI=true` are required. Summary mode
-pins the storage, publication, backfill and rollback settings at startup.
-Historical migration, rollback and conversion of incompatible snapshots are
-outside this version. Legacy direct manifest-version adoption (BatchUpdateManifest
-and pre-baked backfill results) is rejected before publication because it cannot
-update index inventory or fence active builds. Structured backfill remains
-supported by the commit framework.
+Upgrade all coordinators that can acquire leadership before enabling
+migration on a deployment with older binaries. Use the switch set to false
+during a mixed-binary rollout. An older binary cannot reconstruct an
+artifact-free summary or maintain summary coverage while publishing a new
+manifest revision. The legacy manifest-to-etcd rollback inspector applies to
+deployments without persisted summaries. Disabling the publication switch
+does not reverse migrated metadata.
 
-The publication layer rejects summary mode before storing the durable choice.
-The consumer layer enables startup once summary-aware readers and garbage
-collection are present. Enable at the first startup with both index migration
-switches disabled:
+## Recovery and migration
 
-```yaml
-dataCoord:
-  index:
-    segmentIndexSummariesEnabled: true
-    writeSegmentIndexToManifest: true
-```
+`manifest_has_index` describes file entries. `index_summary_version=1` means
+the catalog carries enough inventory for the segment's current manifest,
+including the case where the inventory is empty. Each artifact is represented
+by a summary or by its authoritative catalog record. Related task and legacy
+catalog records can coexist with this version. The absence of eligible legacy
+records indicates that the segment's catalog backfill has converged.
 
-The durable selection is `datacoord-meta/index-metadata-mode`. A restart with a
-different selection fails before recovery or background work starts.
+DataCoord initializes using only the catalog. A marked legacy manifest with
+version zero has pending inventory. After DataCoord is healthy, the existing
+bounded recovery worker reads that revision, validates the file entries, and
+persists the complete inventory and version in the segment row. It checks that
+the pointer is unchanged under the segment manifest and writer locks. Historical
+artifacts that already live in a manifest keep their file layout. When forward
+publication is disabled, the worker recovers unconverted legacy manifest
+records into memory and leaves their durable format unchanged.
+
+The existing backfill inspector owns Finished catalog records. For a segment
+with older artifact paths it copies eligible files through the existing
+server-side copy mechanism, publishes a new manifest revision, writes the
+summary, and retires the corresponding records in one catalog transaction.
+A Finished record without files writes the summary and retires its catalog
+record in a metadata-only transaction. Existing transaction and I/O budgets
+apply. Local historical file layouts that need relocation remain catalog-backed
+until their indexes are rebuilt or their segments are replaced. Old-layout
+tasks completing during migration retain the existing completion path, and
+the inspector will see newly eligible records.
+
+After a failed read or catalog transaction, pending segments remain protected
+and are retried. The worker can complete other segments concurrently. Restart
+uses the persisted progress without loading migrated manifests into memory.
 
 ## Metadata and publication
 
@@ -64,7 +82,7 @@ Consumers that need files resolve task records or the owning manifest explicitly
 a task record takes precedence when the same BuildID also has a persisted summary.
 
 Readiness, build deduplication, progress and compaction decisions use summaries
-plus active tasks. Load responses resolve artifact details from the exact manifest
+plus active and legacy catalog records. Load responses resolve artifact details from the exact manifest
 revision paired with the segment snapshot. Manifest read failures propagate;
 absence of a cached record never proves absence of a live artifact.
 
@@ -86,8 +104,9 @@ estimate retain the serialized-size fallback.
 L0 delete segments keep their existing format. When a snapshot captures no
 index definitions, physical manifest entries left by dropped indexes are
 discarded during copy.
-An incompatible snapshot returns an explicit unsupported error; no format
-conversion or legacy artifact publication is attempted.
+Legacy snapshot and in-flight copy results keep their existing compatibility
+paths. Targets with verified manifest placement publish summaries; legacy
+targets publish catalog records.
 
 The mode and physical index inventory are local cluster state. CDC continues to
 replicate logical index DDL; each cluster constructs its own segments, build IDs
@@ -104,16 +123,14 @@ and artifacts. No new replicated side effect or WAL message is introduced.
    snapshot extraction and GC. Read artifact details from the pinned manifest on
    demand, without rebuilding a resident completed-index cache. Validate consumers
    against the first layer's publications, including read failures and cleanup races.
-3. Remove manifest index reads from DataCoord startup. Register legacy segments
-   with marked manifests from catalog metadata alone. After DataCoord is healthy,
-   read their current revisions with the shared I/O budget and install the legacy
-   index records one segment at a time. During recovery, affected DataViews keep
-   their published frontiers, index RPCs report a retryable pending status, and
-   index scheduling and manifest publication wait for the segment's inventory.
-   Reads or catalog writes that fail leave that segment pending. GC retains
-   pending segments and their index files. The build-rooted orphan scan waits
-   while any inventory is pending because its prefix carries only a build ID.
-   Summary builds retain the equivalent historical file aliases during scans.
+3. Combine the publication controls, remove manifest index reads from startup,
+   and migrate each eligible segment using the existing recovery worker and
+   backfill inspector. During recovery, affected DataViews keep their published
+   frontiers. Index RPCs report a retryable pending status, and index scheduling
+   and manifest publication wait for the segment inventory. The build-rooted
+   orphan scan waits while any inventory is pending because its prefix carries
+   only a build ID. Once recovery completes, GC protects historical file aliases
+   while a migrated build remains referenced.
 
 Use the matching Milvus development container for generation, formatting, builds
 and tests. Check catalog failure leaves both pointer and summaries unchanged;

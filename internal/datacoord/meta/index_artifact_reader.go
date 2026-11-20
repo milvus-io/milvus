@@ -29,10 +29,14 @@ import (
 // ReadCompletedIndexes resolves only the immutable revision paired with segment.
 // Its returned file lists belong to this call and are never installed in meta.
 func (m *Meta) ReadCompletedIndexes(ctx context.Context, segment *datapb.SegmentInfo) (map[int64]*model.SegmentIndex, error) {
-	records := make(map[int64]*model.SegmentIndex, len(segment.GetIndexSummaries()))
+	return m.readCompletedIndexes(ctx, segment, segment.GetIndexSummaries())
+}
+
+func (m *Meta) readCompletedIndexes(ctx context.Context, segment *datapb.SegmentInfo, summaries []*datapb.SegmentIndexSummary) (map[int64]*model.SegmentIndex, error) {
+	records := make(map[int64]*model.SegmentIndex, len(summaries))
 	needManifest := false
-	fields := make(map[int64]int64, len(segment.GetIndexSummaries()))
-	for _, summary := range segment.GetIndexSummaries() {
+	fields := make(map[int64]int64, len(summaries))
+	for _, summary := range summaries {
 		if summary.GetBuildId() <= 0 || summary.GetIndexId() <= 0 {
 			return nil, merr.Wrapf(merr.ErrDataIntegrity, "invalid index summary for segment %d", segment.GetID())
 		}
@@ -74,6 +78,44 @@ func (m *Meta) ReadCompletedIndexes(ctx context.Context, segment *datapb.Segment
 		if record.ArtifactPresent && !resolved[id] {
 			return nil, merr.Wrapf(merr.ErrDataIntegrity, "manifest missing summary build %d for segment %d", record.BuildID, segment.GetID())
 		}
+	}
+	return records, nil
+}
+
+// ResolveCompletedIndexes combines manifest summaries with the selected
+// catalog-backed records for a segment. A catalog row owns a duplicate build.
+func (m *Meta) ResolveCompletedIndexes(ctx context.Context, segment *datapb.SegmentInfo, selected map[int64]*model.SegmentIndex) (map[int64]*model.SegmentIndex, error) {
+	var summaries []*datapb.SegmentIndexSummary
+	for _, summary := range segment.GetIndexSummaries() {
+		task, exists := selected[summary.GetIndexId()]
+		if !exists || task.BuildID < summary.GetBuildId() || task.BuildID == summary.GetBuildId() && task.ManifestPublished {
+			summaries = append(summaries, summary)
+		}
+	}
+	var records map[int64]*model.SegmentIndex
+	if len(summaries) != 0 {
+		var err error
+		records, err = m.readCompletedIndexes(ctx, segment, summaries)
+		if err != nil {
+			return nil, err
+		}
+	}
+	for indexID, task := range selected {
+		if summary, exists := records[indexID]; exists && (task.BuildID < summary.BuildID || task.BuildID == summary.BuildID && task.ManifestPublished) {
+			continue
+		}
+		// A snapshot may pin the segment before backfill and select its indexes
+		// after the catalog task was retired. Require a matching segment snapshot
+		// before resolving a projected summary into file paths.
+		if task.ManifestPublished && len(task.IndexFileKeys) == 0 {
+			return nil, merr.WrapErrServiceNotReadyMsg("segment %d index inventory changed while reading build %d", segment.GetID(), task.BuildID)
+		}
+		if records != nil {
+			records[indexID] = task
+		}
+	}
+	if records == nil {
+		return selected, nil
 	}
 	return records, nil
 }

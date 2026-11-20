@@ -260,7 +260,7 @@ func ValidateManifestIndexPublishable(segmentID int64, manifestIndex packed.Mani
 func needsManifestIndexRecovery(segment *SegmentInfo) bool {
 	return segment != nil && (IsSegmentHealthy(segment) || segment.GetState() == commonpb.SegmentState_Dropped) &&
 		segment.GetStorageVersion() >= storage.StorageV3 && segment.GetManifestHasIndex() &&
-		segment.GetLevel() != datapb.SegmentLevel_L0
+		segment.GetLevel() != datapb.SegmentLevel_L0 && segment.GetIndexSummaryVersion() != CurrentIndexSummaryVersion
 }
 
 // ReloadSegmentIndexesFromManifests synchronously verifies and installs index

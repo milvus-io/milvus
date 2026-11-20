@@ -740,7 +740,7 @@ func uncompressIndexFiles(h *ServerHandler, segment *datapb.SegmentInfo) ([]*ind
 	segIdxes := h.s.indexMeta.GetSegmentIndexesUnsafe(segment.GetCollectionID(), segment.GetID())
 	if h.s.indexMeta.UsesSegmentSummaries() {
 		var err error
-		segIdxes, err = h.s.meta.ReadCompletedIndexes(h.s.ctx, segment)
+		segIdxes, err = h.s.meta.ResolveCompletedIndexes(h.s.ctx, segment, segIdxes)
 		if err != nil {
 			return nil, err
 		}

@@ -29,7 +29,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -198,7 +197,7 @@ func mockReloadManifestEntry(t *testing.T, buildID int64) {
 // manifest and the consumers that decide "is this segment indexed" - which
 // have no manifest fallback of their own - work off that rebuilt state.
 func TestReloadSegmentIndexesFromManifests(t *testing.T) {
-	meta.WithSegmentIndexManifestWrites(t, true)
+	meta.WithSegmentIndexManifestWrites(t, false)
 	m, mDomains := setupManifestReloadMeta(t)
 	mockReloadManifestEntry(t, 5100)
 
@@ -265,11 +264,8 @@ func TestReloadSegmentIndexesFromManifests_EtcdRecordWins(t *testing.T) {
 	assert.EqualValues(t, 42, recovered.CreatedUTCTime)
 }
 
-// An unreadable manifest must FAIL startup, not degrade to "that segment looks
-// unindexed". A silently incomplete indexMeta is what lets GC delete live index
-// files: recycleUnusedIndexFilesV0 reads an absent SegmentIndex as proof the
-// buildID is garbage and removes its whole prefix with no time tolerance.
-func TestReloadSegmentIndexesFromManifests_UnreadableManifestFailsStartup(t *testing.T) {
+// The synchronous verification helper must propagate an unreadable manifest.
+func TestReloadSegmentIndexesFromManifests_UnreadableManifest(t *testing.T) {
 	meta.WithSegmentIndexManifestWrites(t, true)
 	m, mDomains := setupManifestReloadMeta(t)
 	infos := mockey.Mock(packed.GetManifestIndexInfosAsync).
@@ -281,31 +277,29 @@ func TestReloadSegmentIndexesFromManifests_UnreadableManifestFailsStartup(t *tes
 	assert.Empty(t, mDomains.IndexMeta.GetSegmentIndexes(100, 5001))
 }
 
-// The same failure must abort newMeta rather than yielding a usable meta with
-// a hole in it, matching the etcd path: a ListSegmentIndexes error aborts
-// newIndexMeta and therefore newMeta.
-func TestUnreadableManifestAbortsMetaBoot(t *testing.T) {
-	meta.WithSegmentIndexManifestWrites(t, true)
+// Unreadable legacy manifests remain pending after a catalog-only boot.
+func TestUnreadableManifestLeavesInventoryPendingAtBoot(t *testing.T) {
+	meta.WithSegmentIndexManifestWrites(t, false)
 	store := meta.NewFakeManifestStore(t)
 	catalog := datacoord.NewCatalog(meta.NewMetaMemoryKV(), "", "")
-	m, mDomains := BootMetaForRestart(t, catalog, meta.RestartCollID)
-	SeedRestartFixture(t, m, mDomains.IndexMeta)
-
+	m, domains := BootMetaForRestart(t, catalog, meta.RestartCollID)
+	// Publish with the legacy manifest-only writer, without summary publication.
+	meta.WithSegmentIndexManifestWrites(t, true)
+	SeedRestartFixture(t, m, domains.IndexMeta)
+	segment := m.GetSegment(t.Context(), meta.RestartSegID)
+	require.True(t, segment.GetManifestHasIndex())
+	require.Zero(t, segment.GetIndexSummaryVersion())
 	store.FailReadsFrom()
-
-	b := broker.NewMockBroker(t)
-	cm := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart"))
-	_, err := meta.NewMeta(context.TODO(), catalog, cm, meta.NewMetaStoreWithCollections(catalog, meta.RestartCollID), b, LoadIndexTestMetas(catalog, &IndexTestMetas{}))
-	require.Error(t, err, "startup must fail rather than come up with an incomplete indexMeta")
+	before := store.ReadCount
+	restarted, recovered := BootMetaForRestart(t, catalog, meta.RestartCollID)
+	require.Equal(t, before, store.ReadCount)
+	require.True(t, restarted.ManifestIndexesPending(meta.RestartSegID))
+	require.False(t, recovered.IndexMeta.HasBuildInfo(meta.RestartBuildID))
+	require.ErrorIs(t, restarted.CheckSegmentManifestIndexes(meta.RestartSegID), merr.ErrServiceNotReady)
 }
 
-// End to end for the switch: a finished artifact is published to the manifest
-// and its task row is retired from etcd, and a full DataCoord
-// restart against the same catalog still comes up seeing the segment as
-// indexed. This is the claim the switch has to make good on, and the reason
-// the manifest-driven reload exists - the consumers asserted below have no
-// manifest fallback of their own.
-func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
+// A finished artifact and its summary survive a catalog-only restart.
+func TestSegmentIndexSurvivesRestartFromSummary(t *testing.T) {
 	meta.WithSegmentIndexManifestWrites(t, true)
 	store := meta.NewFakeManifestStore(t)
 	ctx := context.TODO()
@@ -318,17 +312,20 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 	assert.EqualValues(t, meta.RestartBuildID, manifestEntries[0].BuildID)
 	assert.Empty(t, manifestEntries[0].Properties)
 
-	// Nothing about this index reached etcd.
+	// The completed task row is retired. The segment row carries the summary.
 	persisted, err := catalog.ListSegmentIndexes(ctx, meta.RestartCollID)
 	require.NoError(t, err)
 	require.Empty(t, persisted, "the switch must have kept the record out of etcd")
 
 	// Restart: same catalog, brand new meta, memory rebuilt from scratch.
 	metrics.DataCoordStoredIndexFilesSize.Reset()
-	_, restartedDomains := BootMetaForRestart(t, catalog, meta.RestartCollID)
+	restarted, restartedDomains := BootMetaForRestart(t, catalog, meta.RestartCollID)
+	require.False(t, restarted.HasPendingManifestIndexes())
+	require.False(t, restartedDomains.IndexMeta.HasBuildInfo(meta.RestartBuildID))
 
-	recovered := restartedDomains.IndexMeta.GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID)
-	require.Len(t, recovered, 1, "the index must come back from the manifest alone")
+	recovered, err := restarted.ReadCompletedIndexes(ctx, restarted.GetSegment(ctx, meta.RestartSegID).SegmentInfo)
+	require.NoError(t, err)
+	require.Len(t, recovered, 1)
 	segIdx := recovered[meta.RestartIndexID]
 	require.NotNil(t, segIdx)
 	assert.Equal(t, commonpb.IndexState_Finished, segIdx.IndexState)
@@ -337,8 +334,9 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 	assert.EqualValues(t, 4096, segIdx.IndexSerializedSize)
 	assert.EqualValues(t, 1000, segIdx.NumRows)
 	assert.Equal(t, "HNSW", segIdx.IndexType)
-	// The recovered record counts toward the stored index size.
-	assertIndexTaskCounts(t, restartedDomains.IndexMeta)
+	var expectedCounts indexTaskStateCounts
+	expectedCounts[commonpb.IndexState_Finished] = 1
+	assert.Equal(t, expectedCounts, restartedDomains.IndexMeta.indexTaskCountsSnapshot())
 	assert.Equal(t, map[int64]int64{meta.RestartCollID: 4096}, storedIndexSizeSeries(t))
 
 	// The consumers that gate load, compaction and rebuild decisions.
@@ -346,17 +344,12 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 		restartedDomains.IndexMeta.GetIndexedSegments(meta.RestartCollID, []int64{meta.RestartSegID}, []int64{meta.RestartFieldID}))
 	state := restartedDomains.IndexMeta.GetSegmentIndexState(meta.RestartCollID, meta.RestartSegID, meta.RestartIndexID)
 	assert.Equal(t, commonpb.IndexState_Finished, state.GetState())
-	_, ok := restartedDomains.IndexMeta.GetIndexJob(meta.RestartBuildID)
-	assert.True(t, ok, "the index inspector must not reissue a build for it")
-
-	// Turning publication off affects new tasks only. The durable marker
-	// still makes the already manifest-resident record recoverable.
+	// The persisted inventory still supplies the completed record after disabling publication.
 	meta.WithSegmentIndexManifestWrites(t, false)
-	_, restartedOffDomains := BootMetaForRestart(t, catalog, meta.RestartCollID)
-	recoveredOff, ok := restartedOffDomains.IndexMeta.GetIndexJob(meta.RestartBuildID)
-	require.True(t, ok, "turning the switch off must not hide a manifest-resident index")
-	assert.Equal(t, commonpb.IndexState_Finished, recoveredOff.IndexState)
-	assert.Equal(t, []string{"0", "1"}, recoveredOff.IndexFileKeys)
+	restartedOff, _ := BootMetaForRestart(t, catalog, meta.RestartCollID)
+	recoveredOff, err := restartedOff.ReadCompletedIndexes(ctx, restartedOff.GetSegment(ctx, meta.RestartSegID).SegmentInfo)
+	require.NoError(t, err)
+	require.Equal(t, segIdx, recoveredOff[meta.RestartIndexID])
 }
 
 // The control: with manifest writes off (the default), the same flow persists
@@ -406,7 +399,7 @@ func TestCommitSegmentManifestTakesKeyLockBeforeSegmentLock(t *testing.T) {
 
 	catalog := datacoord.NewCatalog(meta.NewMetaMemoryKV(), "", "")
 	m, mDomains := BootMetaForRestart(t, catalog, meta.RestartCollID)
-	SeedRestartFixture(t, m, mDomains.IndexMeta)
+	SeedRestartTask(t, m, mDomains.IndexMeta)
 
 	segIdx, ok := mDomains.IndexMeta.GetIndexJob(meta.RestartBuildID)
 	require.True(t, ok)
@@ -489,7 +482,7 @@ func TestCommitSegmentManifestTakesKeyLockBeforeSegmentLock(t *testing.T) {
 // This is the crash window the files-first drop ordering creates: bytes
 // deleted (or their deletion failed), record not yet retracted, restart.
 func TestReloadRecoversDroppedIndexEntriesSoGCCanRetract(t *testing.T) {
-	meta.WithSegmentIndexManifestWrites(t, true)
+	meta.WithSegmentIndexManifestWrites(t, false)
 	m, mDomains := setupManifestReloadMeta(t)
 	mockReloadManifestEntry(t, 5100)
 
@@ -774,9 +767,13 @@ func TestIndexPublicationModeSurvivesSwitchAndRestart(t *testing.T) {
 					require.Equal(t, version, persisted[0].IndexStorePathVersion)
 					store.FailReadsFrom()
 				}
-				_, recoveredDomains := BootMetaForRestart(t, catalog, meta.RestartCollID)
-				finished, ok := recoveredDomains.IndexMeta.GetIndexJob(meta.RestartBuildID)
-				require.True(t, ok)
+				recovered, recoveredDomains := BootMetaForRestart(t, catalog, meta.RestartCollID)
+				recovered.RecoverPendingManifestIndexes(ctx, func(int64) error { return nil })
+				inventory, err := recovered.ResolveCompletedIndexes(ctx, recovered.GetSegment(ctx, meta.RestartSegID).SegmentInfo,
+					recoveredDomains.IndexMeta.GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID))
+				require.NoError(t, err)
+				finished := inventory[meta.RestartIndexID]
+				require.NotNil(t, finished)
 				require.Equal(t, commonpb.IndexState_Finished, finished.IndexState)
 				require.Equal(t, version, finished.IndexStorePathVersion)
 				require.Equal(t, []string{"0", "1"}, finished.IndexFileKeys)

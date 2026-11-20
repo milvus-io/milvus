@@ -2490,20 +2490,21 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 }
 
 func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdateManifestRequest) (*commonpb.Status, error) {
-	if Params.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() {
-		return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "direct manifest version adoption is unsupported in segment index summary mode; use structured backfill")), nil
-	}
-
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-
 	mlog.Info(context.TODO(), "receive BatchUpdateManifest request", mlog.Int("itemCount", len(req.GetItems())))
 
 	coll, err := s.meta.GetCollectionOrNotFound(req.GetCollectionId())
 	if err != nil {
 		mlog.Warn(ctx, "BatchUpdateManifest failed to get collection", mlog.Err(err))
 		return merr.Status(err), nil
+	}
+	for _, item := range req.GetItems() {
+		if segment, ok := s.meta.MetaStore.GetSegment(item.GetSegmentId()); ok &&
+			(meta.HasIndexSummaryInventory(segment) || segment.GetManifestHasIndex()) {
+			return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "direct manifest version adoption cannot preserve index inventory; use structured backfill")), nil
+		}
 	}
 	dbName := coll.DatabaseName
 	collectionName := coll.Schema.GetName()

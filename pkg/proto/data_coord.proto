@@ -500,6 +500,9 @@ message SegmentInfo {
   // Persisted with the base; compaction inherits its actual input coverage.
   uint64 transform_start_after_timetick = 42;
   repeated SegmentIndexSummary index_summaries = 43;
+  // Version of the completed-index inventory paired with manifest_path.
+  // Zero means an older manifest may still need inventory recovery.
+  uint32 index_summary_version = 44;
 }
 
 // Completed index inventory. File ownership remains in the pinned manifest.
