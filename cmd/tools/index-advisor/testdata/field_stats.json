@@ -1,0 +1,21 @@
+{
+  "format_version": 1,
+  "source": "test fixture: written by hand for the generated products data",
+  "collected_at": "2026-10-15T00:00:00Z",
+  "scope": "default.products, all 5000 rows",
+  "collections": [
+    {
+      "db": "default",
+      "name": "products",
+      "row_count": 5000,
+      "fields": {
+        "city": {"distinct_count": 5, "null_fraction": 0},
+        "in_stock": {"distinct_count": 2},
+        "sku": {"distinct_count": 4878},
+        "tags": {"distinct_count": 5},
+        "meta[\"brand\"]": {"distinct_count": 3},
+        "color": {"distinct_count": 2}
+      }
+    }
+  ]
+}
