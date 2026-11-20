@@ -1311,11 +1311,9 @@ internaltls:
 
 common:
   cloud:
-    # Talon uses <clusterId>-<instanceType>-<classType>-<case-mode>.
-    # The suffix is all for enabledStages=all and meta for manifest, load_open, or both.
-    clusterId: "" # Cloud cluster ID. Leave empty to use Talon's default namespace.
-    instanceType: "" # Cloud instance type used in the Talon namespace.
-    classType: "" # Cloud class type used in the Talon namespace.
+    clusterId:  # Cloud cluster ID. Leave empty to use Talon's default namespace. Otherwise Talon uses <clusterId>-<instanceType>-<classType>-<case-mode>, with all for enabledStages=all and meta for manifest, load_open, or both.
+    instanceType:  # Cloud instance type used in the Talon namespace.
+    classType:  # Cloud class type used in the Talon namespace.
   defaultPartitionName: _default # Name of the default partition when a collection is created
   defaultIndexName: _default_idx # Name of the index when it is created with name unspecified
   indexSliceSize: 16 # Index slice size in MB

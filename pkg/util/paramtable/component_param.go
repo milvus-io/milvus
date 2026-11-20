@@ -567,7 +567,7 @@ To share a Pulsar instance among multiple Milvus instances, consider changing th
 		Key:          "common.cloud.clusterId",
 		Version:      "3.0.1",
 		DefaultValue: "",
-		Doc:          "Cloud cluster ID. Leave empty to use Talon's default namespace.",
+		Doc:          "Cloud cluster ID. Leave empty to use Talon's default namespace. Otherwise Talon uses <clusterId>-<instanceType>-<classType>-<case-mode>, with all for enabledStages=all and meta for manifest, load_open, or both.",
 		Export:       true,
 	}
 	p.CloudClusterID.Init(base.mgr)
