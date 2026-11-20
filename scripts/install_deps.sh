@@ -56,7 +56,7 @@ print_error() {
 
 # Minimum version requirements
 MIN_CMAKE_VERSION="3.26"
-MIN_GO_VERSION="1.21"
+MIN_GO_VERSION=$(awk '$1 == "go" {print $2; exit}' "$(dirname "${BASH_SOURCE[0]}")/../go.mod")
 CONAN_VERSION="2.25.1"
 RUST_VERSION="1.94.1"
 
@@ -470,17 +470,32 @@ main() {
     print_info "Milvus Development Dependencies Installer"
     print_info "=========================================="
 
+    if [ -z "$MIN_GO_VERSION" ]; then
+        print_error "Could not read the required Go version from go.mod."
+        exit 1
+    fi
+
     # Check for Go first
     if ! command_exists go; then
-        print_error "Go not found. Please install Go >= ${MIN_GO_VERSION} first."
+        print_error "Go not found. Please install Go >= ${MIN_GO_VERSION} (see go.mod) first."
         print_info "Download from: https://go.dev/dl/"
         exit 1
     fi
 
     # Check Go version
-    local go_version=$(go version | grep -oE 'go[0-9]+\.[0-9]+' | sed 's/go//')
+    local go_version
+    if ! go_version=$(go version); then
+        print_error "Could not determine Go version. Please install Go >= ${MIN_GO_VERSION} (see go.mod)."
+        exit 1
+    fi
+    if [[ "$go_version" =~ go([0-9]+\.[0-9]+(\.[0-9]+)?) ]]; then
+        go_version="${BASH_REMATCH[1]}"
+    else
+        print_error "Could not parse Go version: ${go_version}"
+        exit 1
+    fi
     if ! version_ge "$go_version" "$MIN_GO_VERSION"; then
-        print_error "Go version ${go_version} is too old. Please install Go >= ${MIN_GO_VERSION}"
+        print_error "Go version ${go_version} is too old. Please install Go >= ${MIN_GO_VERSION} (see go.mod)"
         exit 1
     fi
     print_info "Go version: ${go_version}"
