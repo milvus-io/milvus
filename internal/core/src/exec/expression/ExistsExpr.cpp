@@ -99,6 +99,8 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
         cached_index_chunk_id_ = 0;
 
         // Use ExprResCache for the full-segment bitset.
+        const ExprCacheFlightOptions flight_options{
+            op_ctx_ ? &op_ctx_->cancellation_token : nullptr};
         auto cached = ExprCacheHelper::GetOrCompute(
             segment_,
             snapshot_,
@@ -114,7 +116,10 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                 return {std::move(res), std::move(valid)};
             },
             /*enable_cache_write=*/true,
-            feature_recorder_);
+            feature_recorder_,
+            !expr_->column_.element_level_ && !selected_element_level_result_
+                ? &flight_options
+                : nullptr);
         cached_index_chunk_res_ = cached.result;
     }
     auto res = MoveOrSliceBitmap(
@@ -218,6 +223,8 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
         segment_->type() == SegmentType::Sealed) {
         cached_index_chunk_id_ = 0;
 
+        const ExprCacheFlightOptions flight_options{
+            op_ctx_ ? &op_ctx_->cancellation_token : nullptr};
         auto cached = ExprCacheHelper::GetOrCompute(
             segment_,
             snapshot_,
@@ -269,7 +276,8 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                 return {std::move(res), std::move(valid)};
             },
             /*enable_cache_write=*/true,
-            feature_recorder_);
+            feature_recorder_,
+            !expr_->column_.element_level_ ? &flight_options : nullptr);
         cached_index_chunk_res_ = cached.result;
     }
 

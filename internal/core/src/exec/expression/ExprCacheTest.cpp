@@ -4798,6 +4798,131 @@ class ExprCacheGenerationTest
     std::string path_;
 };
 
+TEST(ExprCacheGenerationStateTest, FirstBackendUseRacesWithRetirement) {
+    using milvus::exec::ExprCacheGeneration;
+    // Both possible orders must agree on whether cleanup is required. In
+    // particular, retirement must never skip a concurrently registered writer.
+    for (int i = 0; i < 128; ++i) {
+        ExprCacheGeneration generation;
+        std::promise<void> start;
+        auto started = start.get_future().share();
+        auto writer = std::async(std::launch::async, [&] {
+            started.wait();
+            return generation.TryUseBackend();
+        });
+        auto retire = std::async(std::launch::async, [&] {
+            started.wait();
+            return generation.Retire();
+        });
+        start.set_value();
+        const bool used = writer.get();
+        EXPECT_EQ(retire.get(), used);
+        EXPECT_TRUE(generation.IsRetired());
+        EXPECT_FALSE(generation.TryUseBackend());
+        EXPECT_EQ(generation.Retire(), used);
+    }
+}
+
+TEST_P(ExprCacheGenerationTest, UnusedAndRejectedPutsNeedNoBackendCleanup) {
+    using namespace milvus::exec;
+    auto generation = std::make_shared<ExprCacheGeneration>();
+    ExprResCacheManager::Key key{73010, "x > 0", generation};
+    config_.admission_threshold = 3;
+    ASSERT_TRUE(manager_.SetConfig(config_));
+    EXPECT_FALSE(Hit(key));
+    EXPECT_FALSE(manager_.ObserveMiss(key, 64, SegmentType::Sealed).admitted);
+    manager_.Put(key, value_);  // Second observation still fails admission.
+    EXPECT_EQ(manager_.GetEntryCount(), 0);
+    EXPECT_FALSE(generation->Retire());
+    { auto retired = manager_.RetireGeneration(key.segment_id, generation); }
+    manager_.Put(key, value_);
+    EXPECT_EQ(manager_.GetEntryCount(), 0);
+    EXPECT_FALSE(generation->Retire());
+}
+
+TEST_P(ExprCacheGenerationTest, DisabledCacheStillDetachesUsedGeneration) {
+    using namespace milvus::exec;
+    auto generation = std::make_shared<ExprCacheGeneration>();
+    ExprResCacheManager::Key key{73011, "x > 0", generation};
+    manager_.Put(key, value_);
+    ASSERT_TRUE(Hit(key));
+    ExprResCacheManager::SetEnabled(false);
+    EXPECT_TRUE(generation->Retire());
+    { auto retired = manager_.RetireGeneration(key.segment_id, generation); }
+    EXPECT_EQ(manager_.GetEntryCount(), 0);
+    if (GetParam() == CacheMode::Disk) {
+        EXPECT_FALSE(std::filesystem::exists(
+            path_ + "/seg_73011_" + std::to_string(generation->id) + ".cache"));
+    }
+    ExprResCacheManager::SetEnabled(true);
+    manager_.Put(key, value_);
+    EXPECT_FALSE(Hit(key));
+    EXPECT_EQ(manager_.GetEntryCount(), 0);
+}
+
+TEST_P(ExprCacheGenerationTest,
+       UnusedPublicationAndDestructionDoNotWaitForUnrelatedDiskIO) {
+    if (GetParam() != milvus::exec::CacheMode::Disk) {
+        GTEST_SKIP() << "Disk lookups retain the manager lock during I/O";
+    }
+    using namespace milvus;
+    using namespace milvus::segcore;
+    auto schema = std::make_shared<Schema>();
+    schema->set_primary_field_id(schema->AddDebugField("pk", DataType::INT64));
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 73012);
+    auto destroyed_segment =
+        CreateSealedSegment(schema, empty_index_meta, 73013);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto generation = sealed->CaptureReadSnapshot()->GetExprCacheGeneration();
+    auto destroyed_generation =
+        destroyed_segment->CaptureReadSnapshot()->GetExprCacheGeneration();
+    ExprResCacheManager::Key unused{73012, "x > 0", generation};
+    EXPECT_FALSE(Hit(unused));
+    // Even an admitted miss has not created per-generation backend resources.
+    EXPECT_TRUE(manager_.ObserveMiss(unused, 64, SegmentType::Sealed).admitted);
+    ExprResCacheManager::Key unrelated{
+        73014, "x > 0", std::make_shared<exec::ExprCacheGeneration>()};
+    manager_.Put(unrelated, value_);
+
+    std::promise<void> reading, resume;
+    auto reading_started = reading.get_future();
+    auto resume_read = resume.get_future().share();
+    std::future<bool> reader;
+    std::future<void> publisher, destructor;
+    auto release = folly::makeGuard([&] { resume.set_value(); });
+    reader = std::async(std::launch::async, [&] {
+        ExprResCacheManager::Value result;
+        result.active_count = 64;
+        return exec::ExprCacheTestPeer::Get(manager_, unrelated, result, [&] {
+                   reading.set_value();
+                   resume_read.wait();
+               }) == ExprResCacheManager::LookupResult::Hit;
+    });
+    ASSERT_EQ(reading_started.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    publisher = std::async(std::launch::async,
+                           [&] { sealed->TestPublishSystemFieldState(); });
+    destructor = std::async(
+        std::launch::async,
+        [owned = std::move(destroyed_segment)]() mutable { owned.reset(); });
+    EXPECT_EQ(publisher.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    EXPECT_EQ(destructor.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    EXPECT_TRUE(generation->IsRetired());
+    EXPECT_TRUE(destroyed_generation->IsRetired());
+    resume.set_value();
+    release.dismiss();
+    EXPECT_TRUE(reader.get());
+    publisher.get();
+    destructor.get();
+    EXPECT_EQ(manager_.GetEntryCount(), 1);
+    EXPECT_TRUE(Hit(unrelated));
+    manager_.Put(unused, value_);
+    EXPECT_EQ(manager_.GetEntryCount(), 1);
+}
+
 TEST_P(ExprCacheGenerationTest,
        RetirementRejectsLateWritesAndPreservesNewGeneration) {
     auto g1 = std::make_shared<milvus::exec::ExprCacheGeneration>();
@@ -5180,6 +5305,139 @@ TEST_P(ExprCacheGenerationTest, NullBackfillRecomputesRawAndWholeFilter) {
         EXPECT_EQ(evaluate(), 0);
         EXPECT_GT(manager_.GetEntryCount(), 0);
         EXPECT_EQ(evaluate(), 0);
+    }
+}
+
+TEST_P(ExprCacheGenerationTest,
+       SamePopcountDifferentRowsRecomputesRawAndWholeFilter) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+    for (bool whole_filter : {false, true}) {
+        manager_.Clear();
+        auto schema = std::make_shared<Schema>();
+        auto pk = schema->AddDebugField("pk", DataType::INT64);
+        auto field = schema->AddDebugField("value", DataType::INT64, true);
+        schema->set_primary_field_id(pk);
+        auto old_data = DataGen(schema, 65);
+        auto new_data = DataGen(schema, 65);
+        for (auto* data : {old_data.raw_, new_data.raw_}) {
+            for (auto& column : *data->mutable_fields_data()) {
+                if (column.field_id() == field.get()) {
+                    auto* scalars = column.mutable_scalars();
+                    auto* values = scalars->mutable_long_data()->mutable_data();
+                    // Same match count, different positions, including the tail word.
+                    for (int i = 0; i < 65; ++i) {
+                        const bool match = data == old_data.raw_
+                                               ? (i == 0 || i == 32 || i == 64)
+                                               : (i == 1 || i == 33 || i == 63);
+                        values->Set(i, match ? 42 : 0);
+                    }
+                    scalars->clear_valid_data();
+                    for (int i = 0; i < 65; ++i) {
+                        scalars->add_valid_data(true);
+                    }
+                }
+            }
+        }
+        // Columns load lazily. Keep both datasets alive at distinct paths so
+        // creating the replacement cannot overwrite the old segment's data.
+        auto create_segment = [&](const GeneratedData& data,
+                                  int64_t segment_id,
+                                  const std::string& name) {
+            auto segment =
+                CreateSealedSegment(schema, empty_index_meta, segment_id);
+            auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                          .GetRemoteChunkManager();
+            auto load_info = PrepareInsertBinlog(kCollectionID,
+                                                 kPartitionID,
+                                                 segment_id,
+                                                 data,
+                                                 cm,
+                                                 "",
+                                                 {},
+                                                 path_ + "/" + name + "/");
+            segment->LoadFieldData(load_info);
+            return segment;
+        };
+        auto segment = create_segment(old_data, 73020, "old");
+        auto replacement = create_segment(new_data, 73021, "new");
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        auto* source =
+            dynamic_cast<ChunkedSegmentSealedImpl*>(replacement.get());
+        ASSERT_NE(sealed, nullptr);
+        ASSERT_NE(source, nullptr);
+        proto::plan::GenericValue value;
+        value.set_int64_val(10);
+        auto predicate = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field, DataType::INT64),
+            proto::plan::OpType::GreaterThan,
+            value);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           predicate);
+        auto evaluate_on = [&](ChunkedSegmentSealedImpl* target) {
+            auto lease = target->AcquireReadLease(folly::CancellationToken());
+            auto context = std::make_shared<exec::QueryContext>(
+                "cache-same-count", target, 65, MAX_TIMESTAMP);
+            context->set_read_snapshot(target->CaptureReadSnapshot());
+            context->set_enable_expr_cache(whole_filter);
+            context->set_enable_sub_expr_cache_write(!whole_filter);
+            auto fragment = plan::PlanFragment(plan);
+            auto result =
+                query::ExecPlanNodeVisitor::ExecuteTask(fragment, context);
+            auto column =
+                std::dynamic_pointer_cast<ColumnVector>(result->childrens()[0]);
+            auto view = TargetBitmapView(column->GetRawData(), column->size());
+            EXPECT_EQ(view.size(), 65);
+            std::vector<bool> filtered;
+            for (size_t i = 0; i < view.size(); ++i) {
+                filtered.push_back(view[i]);
+            }
+            return filtered;
+        };
+        std::vector<bool> old_expected(65, true), new_expected(65, true);
+        for (int i : {0, 32, 64}) old_expected[i] = false;
+        for (int i : {1, 33, 63}) new_expected[i] = false;
+        // FilterBitsNode returns exclusion bits. Count-only checks would
+        // accept stale results here, since both generations match three rows.
+        ExprResCacheManager::SetEnabled(false);
+        ASSERT_EQ(evaluate_on(sealed), old_expected);
+        ASSERT_EQ(evaluate_on(source), new_expected);
+        ExprResCacheManager::SetEnabled(true);
+        auto evaluate = [&] { return evaluate_on(sealed); };
+        EXPECT_EQ(evaluate(), old_expected);
+        EXPECT_GT(manager_.GetEntryCount(), 0);
+        EXPECT_EQ(evaluate(), old_expected);
+        auto current = sealed->TestGetPublishedStateSnapshot();
+        const auto old_generation = current->expr_cache_generation;
+        auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+        ChunkedSegmentSealedImpl::StateDelta initial;
+        initial.fields = current->fields;
+        initial.load_info = current->load_info;
+        initial.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
+        initial.commit_ts = current->commit_ts;
+        auto staged = sealed->TestBuildNextPublishedState(current, initial);
+        ChunkedSegmentSealedImpl::StateDelta delta;
+        delta.fields = current->fields;
+        delta.load_info = current->load_info;
+        delta.commit_ts = current->commit_ts;
+        sealed->TestStageLoadFieldDataThenPublish(
+            field,
+            source->TestGetPublishedStateSnapshot()->runtime->fields.at(field),
+            65,
+            DataType::INT64,
+            schema,
+            runtime,
+            staged.get(),
+            current,
+            delta,
+            /*is_proxy_column=*/true,
+            [&] { EXPECT_EQ(evaluate(), old_expected); });
+        EXPECT_NE(sealed->CaptureReadSnapshot()->GetExprCacheGeneration(),
+                  old_generation);
+        EXPECT_EQ(manager_.GetEntryCount(), 0);
+        EXPECT_EQ(evaluate(), new_expected);
+        EXPECT_GT(manager_.GetEntryCount(), 0);
+        EXPECT_EQ(evaluate(), new_expected);
     }
 }
 

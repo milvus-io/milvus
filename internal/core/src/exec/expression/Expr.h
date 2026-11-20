@@ -3361,6 +3361,14 @@ class SegmentExpr : public Expr {
                                           : std::string();
             cached_is_nested_index_ = selected_element_level_result_;
 
+            // Only a complete row-domain result may join a flight. A nested
+            // reader is eligible when func performs the element-to-row fold
+            // itself; equal element and row counts do not establish this.
+            const bool flight_eligible =
+                !cached_is_nested_index_ || func_returns_row_level;
+            const ExprCacheFlightOptions flight_options{
+                op_ctx_ ? &op_ctx_->cancellation_token : nullptr};
+
             auto cached = ExprCacheHelper::GetOrCompute(
                 segment_,
                 snapshot_,
@@ -3451,7 +3459,8 @@ class SegmentExpr : public Expr {
                     return {std::move(res), std::move(valid_res)};
                 },
                 /*enable_cache_write=*/true,
-                feature_recorder_);
+                feature_recorder_,
+                flight_eligible ? &flight_options : nullptr);
             cached_index_chunk_res_ = cached.result;
             cached_index_chunk_valid_res_ = cached.valid;
             cached_index_chunk_id_ = 0;

@@ -836,6 +836,12 @@ queryNode:
     disk:
       maxBytes: 10737418240 # max total disk usage for expression cache in disk mode (default 10GB)
       maxFileSizeBytes: 268435456 # max file size per sealed segment in disk mode (default 256MB)
+    singleFlight:
+      enabled: false # Coalesce concurrent sealed full-row expression cache misses; requires exprCache.enabled
+      maxWaitMs: 1000 # Maximum synchronous single-flight wait in milliseconds (1-60000); timeout falls back to computation
+      maxFlights: 1024 # Maximum live single-flight records, including detached records held by readers
+      maxWaiters: 64 # Maximum concurrent single-flight followers per process; tune below the available query worker capacity
+      maxWaitersPerKey: 8 # Maximum concurrent single-flight followers per expression snapshot
   dataSync:
     flowGraph:
       maxQueueLength: 16 # The maximum size of task queue cache in flow graph in query node.
