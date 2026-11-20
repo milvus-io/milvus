@@ -620,3 +620,44 @@ func TestAppendPrepareInfo_parse(t *testing.T) {
 		assert.Equal(t, indexParams["adapt_for_cpu"], "true")
 	})
 }
+
+func TestNewBigDataExtraParamsFromMapSearchCachePrecedence(t *testing.T) {
+	t.Run("search cache from build ratio survives missing prepare ratio", func(t *testing.T) {
+		params, err := NewBigDataExtraParamsFromMap(map[string]string{
+			BuildRatioKey: `{"pq_code_budget_gb": 0.125, "num_threads": 1, "search_cache_budget_gb": 0.5}`,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 0.5, params.SearchCacheBudgetGBRatio)
+	})
+
+	t.Run("search cache from build ratio wins over prepare ratio", func(t *testing.T) {
+		params, err := NewBigDataExtraParamsFromMap(map[string]string{
+			BuildRatioKey:   `{"pq_code_budget_gb": 0.125, "num_threads": 1, "search_cache_budget_gb": 0.5}`,
+			PrepareRatioKey: `{"search_cache_budget_gb": 0.225, "num_threads": 8}`,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 0.5, params.SearchCacheBudgetGBRatio)
+	})
+
+	t.Run("search cache from prepare ratio used as fallback", func(t *testing.T) {
+		params, err := NewBigDataExtraParamsFromMap(map[string]string{
+			BuildRatioKey:   `{"pq_code_budget_gb": 0.125, "num_threads": 1}`,
+			PrepareRatioKey: `{"search_cache_budget_gb": 0.225, "num_threads": 8}`,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 0.225, params.SearchCacheBudgetGBRatio)
+	})
+
+	t.Run("default used when no ratio carries a search cache", func(t *testing.T) {
+		params, err := NewBigDataExtraParamsFromMap(map[string]string{
+			BuildRatioKey:   `{"pq_code_budget_gb": 0.125, "num_threads": 1}`,
+			PrepareRatioKey: `{"num_threads": 8}`,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, DefaultSearchCacheBudgetGBRatio, params.SearchCacheBudgetGBRatio)
+
+		params, err = NewBigDataExtraParamsFromMap(map[string]string{})
+		assert.NoError(t, err)
+		assert.Equal(t, DefaultSearchCacheBudgetGBRatio, params.SearchCacheBudgetGBRatio)
+	})
+}
