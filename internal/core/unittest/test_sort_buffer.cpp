@@ -24,7 +24,11 @@
 
 #include "common/Types.h"
 #include "common/Vector.h"
+#include "exec/operator/query-agg/RowContainer.h"
+
+#define private public
 #include "exec/SortBuffer.h"
+#undef private
 
 using namespace milvus;
 using namespace milvus::exec;
@@ -1485,4 +1489,34 @@ TEST_F(SortBufferTest, TopKHugeLimit) {
             full,
             limit);
     }
+}
+
+TEST_F(SortBufferTest, TopKRechecksTriggeringRowAfterShrink) {
+    std::vector<DataType> column_types = {DataType::INT64};
+    std::vector<SortKeyInfo> sort_keys = {SortKeyInfo(0)};
+    SortBuffer buffer(column_types, sort_keys, 1);
+
+    auto col = CreateInt64Column({10, 20, 19});
+    buffer.AddRows({col}, 3);
+
+    // The third row triggers a shrink from [10, 20] to [10]. It is worse
+    // than the newly computed threshold (10), so it must not be copied back
+    // into the candidate buffer.
+    EXPECT_EQ(buffer.sorted_rows_.size(), 1);
+}
+
+TEST_F(SortBufferTest, TopKFinalizationReleasesDiscardedCandidates) {
+    std::vector<DataType> column_types = {DataType::VARCHAR};
+    std::vector<SortKeyInfo> sort_keys = {SortKeyInfo(0)};
+    constexpr int64_t kLimit = 2;
+    SortBuffer buffer(column_types, sort_keys, kLimit);
+
+    auto col = CreateStringColumn({"delta", "charlie", "bravo", "alpha"});
+    buffer.AddRows({col}, 4);
+    ASSERT_EQ(buffer.sorted_rows_.size(), 2 * kLimit);
+
+    buffer.NoMoreInput();
+
+    EXPECT_EQ(buffer.sorted_rows_.size(), kLimit);
+    EXPECT_EQ(buffer.free_rows_.size(), kLimit);
 }

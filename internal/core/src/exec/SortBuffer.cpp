@@ -201,6 +201,11 @@ SortBuffer::OfferRow(const std::vector<ColumnVectorPtr>& columns,
     // Only a row that is kept needs room, so shrink just before storing it
     if (static_cast<int64_t>(sorted_rows_.size()) >= candidate_capacity_) {
         ShrinkCandidates();
+        // Shrinking tightens the threshold. Recheck the triggering input row
+        // before copying variable-width values into a reusable candidate row.
+        if (CompareInput(columns, row_index, threshold_row_) >= 0) {
+            return;
+        }
     }
 
     // Reuse a row released by the last shrink before allocating a new one
@@ -255,6 +260,11 @@ SortBuffer::NoMoreInput() {
         for (char* row : all_rows) {
             sorted_rows_.push_back(row);
         }
+    } else if (static_cast<int64_t>(sorted_rows_.size()) > limit_) {
+        // Release discarded variable-width values before the final sort,
+        // including the exact-capacity case where no later row triggers a
+        // periodic shrink.
+        ShrinkCandidates();
     }
     const auto num_sorted = sorted_rows_.size();
 
@@ -288,30 +298,11 @@ SortBuffer::Sort() {
         return Compare(lhs, rhs) < 0;
     };
 
-    // TopK optimization using partial_sort vs full sort:
-    //
-    // - partial_sort: O(n log k) - only guarantees first k elements are sorted
-    // - full sort:    O(n log n) - sorts entire array
-    //
-    // When limit (k) is small, partial_sort is significantly faster.
-    // When k approaches n, full sort is faster due to better cache locality
-    // (introsort vs heap-based algorithm).
-    //
-    // Threshold: use partial_sort when k < n/2. This is a practical balance -
-    // partial_sort wins clearly when k << n, and the overhead is acceptable
-    // when k is moderately large.
-    if (limit_ > 0 && limit_ < static_cast<int64_t>(sorted_rows_.size()) / 2) {
-        int64_t k = std::min(limit_, static_cast<int64_t>(sorted_rows_.size()));
-        std::partial_sort(sorted_rows_.begin(),
-                          sorted_rows_.begin() + k,
-                          sorted_rows_.end(),
-                          comparator);
-        LOG_DEBUG("SortBuffer: used partial_sort for top-{}", k);
-    } else {
-        std::sort(sorted_rows_.begin(), sorted_rows_.end(), comparator);
-        LOG_DEBUG("SortBuffer: used full sort for {} rows",
-                  sorted_rows_.size());
-    }
+    // With a limit, bounded TopK retains at most 2 * limit candidates, so a
+    // full sort is appropriate for the final ordering. Without a limit, all
+    // rows must be fully sorted.
+    std::sort(sorted_rows_.begin(), sorted_rows_.end(), comparator);
+    LOG_DEBUG("SortBuffer: used full sort for {} rows", sorted_rows_.size());
 }
 
 // TODO(performance): The switch-case on data_type runs on every comparison
