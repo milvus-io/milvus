@@ -17,13 +17,14 @@
 package coordinator
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sort"
 	"strings"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -109,7 +110,26 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 		writeJSONError(w, fmt.Sprintf("invalid output %q, expected one of: summary, per_resource_group", output), http.StatusBadRequest)
 		return
 	}
-	ctx := req.Context()
+	snapshot, err := s.evaluateReplicaLoadConfigCompliance(req.Context())
+	if err != nil {
+		writeJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	response := snapshot.response
+	if output != "per_resource_group" {
+		response.ResourceGroups = nil
+	}
+	writeJSONResponse(w, http.StatusOK, response)
+}
+
+type loadConfigCompliance struct {
+	response       LoadConfigComplianceResponse
+	resourceGroups map[string]bool
+}
+
+// evaluateReplicaLoadConfigCompliance is shared by HTTP and the scrape-time collector.
+// Its result is a new snapshot: errors and deleted RGs never retain an earlier verdict.
+func (s *mixCoordImpl) evaluateReplicaLoadConfigCompliance(ctx context.Context) (*loadConfigCompliance, error) {
 	reasons := make(map[string]string)
 	record := func(rg, reason string) {
 		if reasons[rg] == "" {
@@ -120,13 +140,11 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 	// even when no primary RG is configured. Reuse this snapshot for WAL checks.
 	b, err := balance.GetWithContext(ctx)
 	if err != nil {
-		writeJSONError(w, fmt.Sprintf("failed to get streaming balancer: %s", err), http.StatusInternalServerError)
-		return
+		return nil, fmt.Errorf("failed to get streaming balancer: %w", err)
 	}
 	nodes, err := b.GetAllStreamingNodes(ctx)
 	if err != nil {
-		writeJSONError(w, fmt.Sprintf("failed to get streaming nodes: %s", err), http.StatusInternalServerError)
-		return
+		return nil, fmt.Errorf("failed to get streaming nodes: %w", err)
 	}
 	streamingNodeRGs := make(map[int64]string, len(nodes))
 	for id, node := range nodes {
@@ -137,12 +155,10 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 	if primaryRG != "" {
 		assignment, err := b.GetLatestChannelAssignment()
 		if err != nil {
-			writeJSONError(w, fmt.Sprintf("failed to get WAL assignment: %s", err), http.StatusInternalServerError)
-			return
+			return nil, fmt.Errorf("failed to get WAL assignment: %w", err)
 		}
 		if assignment.PChannelView == nil {
-			writeJSONError(w, "WAL channel view is not initialized", http.StatusInternalServerError)
-			return
+			return nil, fmt.Errorf("WAL channel view is not initialized")
 		}
 		record(primaryRG, "")
 		ids := make([]types.ChannelID, 0, len(assignment.PChannelView.Channels))
@@ -194,8 +210,7 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 	}
 	showResp, err := s.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{Base: commonpbutil.NewMsgBase()})
 	if err := merr.CheckRPCCall(showResp, err); err != nil {
-		writeJSONError(w, fmt.Sprintf("failed to get collections: %s", err), http.StatusInternalServerError)
-		return
+		return nil, fmt.Errorf("failed to get collections: %w", err)
 	}
 	collectionIDs := append([]int64(nil), showResp.GetCollectionIDs()...)
 	sort.Slice(collectionIDs, func(i, j int) bool { return collectionIDs[i] < collectionIDs[j] })
@@ -261,16 +276,33 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 			if response.Reason == "" {
 				response.Reason = reason
 			}
-			mlog.Info(ctx, "load config compliance violation", mlog.String("resourceGroup", rg), mlog.String("reason", reason))
 		}
 		if rg != "" {
 			states = append(states, ResourceGroupComplianceState{ResourceGroup: rg, State: state, Reason: reason})
 		}
 	}
-	if output == "per_resource_group" {
-		response.ResourceGroups = &states
+	response.ResourceGroups = &states
+	metricStates := make(map[string]bool, len(states))
+	for _, state := range states {
+		metricStates[state.ResourceGroup] = state.State == LoadConfigComplianceStateReady
 	}
-	writeJSONResponse(w, http.StatusOK, response)
+	if len(collectionIDs) == 0 {
+		// Empty instances still have usable capacity. Include current RGs and
+		// configured targets, retaining any WAL or configuration violation.
+		targets := append(s.queryCoordServer.GetResourceGroupNames(ctx), configuredRGs...)
+		targets = append(targets, common.DefaultResourceGroupName)
+		for _, rg := range targets {
+			if rg != "" {
+				if _, exists := metricStates[rg]; !exists {
+					metricStates[rg] = reasons[""] == ""
+				}
+			}
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return &loadConfigCompliance{response: response, resourceGroups: metricStates}, nil
 }
 
 // validateRGDistribution validates that replicas are distributed according to cluster config.

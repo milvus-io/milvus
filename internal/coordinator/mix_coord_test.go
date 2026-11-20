@@ -27,6 +27,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -42,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -915,4 +917,54 @@ func TestMixCoord_SharedMetaStoreIsInjected(t *testing.T) {
 	s.metaStore.RemoveSegment(42)
 	_, ok = view.GetSegment(42)
 	assert.False(t, ok, "a removal on the write side must be visible on the read side")
+}
+
+func TestComplianceCollectorFollowsCoordinatorLifecycle(t *testing.T) {
+	paramtable.Init()
+	metrics.SetQueryCoordComplianceEvaluator(nil)
+	t.Cleanup(func() { metrics.SetQueryCoordComplianceEvaluator(nil) })
+	registry := prometheus.NewPedanticRegistry()
+	metrics.RegisterQueryCoord(registry)
+	read := func() map[string]float64 {
+		families, err := registry.Gather()
+		require.NoError(t, err)
+		result := make(map[string]float64)
+		for _, family := range families {
+			if family.GetName() == "milvus_querycoord_resource_group_compliance" {
+				for _, metric := range family.Metric {
+					result[metric.Label[0].GetValue()] = metric.Gauge.GetValue()
+				}
+			}
+		}
+		return result
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	coord := &mixCoordImpl{ctx: ctx, cancel: cancel, queryCoordServer: &querycoordv2.Server{},
+		rootcoordServer: &rootcoord.Core{}, session: &sessionutil.Session{}}
+	defer mockey.Mock(RegisterMgrRoute).To(func(*mixCoordImpl) {}).Build().UnPatch()
+	defer mockey.Mock((*mixCoordImpl).startPosixCleanupTask).To(func(*mixCoordImpl) {}).Build().UnPatch()
+	defer mockey.Mock((*mixCoordImpl).stopPosixCleanupTask).To(func(*mixCoordImpl) {}).Build().UnPatch()
+	calls := 0
+	defer mockey.Mock((*mixCoordImpl).evaluateReplicaLoadConfigCompliance).To(func(s *mixCoordImpl, ctx context.Context) (*loadConfigCompliance, error) {
+		require.Same(t, coord, s)
+		_, bounded := ctx.Deadline()
+		require.True(t, bounded, "scrape evaluation must have a deadline")
+		calls++
+		return &loadConfigCompliance{resourceGroups: map[string]bool{"A": true}}, nil
+	}).Build().UnPatch()
+	defer mockey.Mock((*querycoordv2.Server).Stop).To(func(*querycoordv2.Server) error {
+		require.Empty(t, read(), "collector must be stopped before its dependencies")
+		return nil
+	}).Build().UnPatch()
+	defer mockey.Mock((*rootcoord.Core).Stop).Return(nil).Build().UnPatch()
+
+	require.Empty(t, read(), "standby must not evaluate")
+	require.Zero(t, calls)
+	coord.startAndUpdateHealthy()
+	require.Equal(t, map[string]float64{"A": 1}, read())
+	require.Equal(t, 1, calls)
+	require.NoError(t, coord.Stop())
+	require.Empty(t, read())
+	require.Equal(t, 1, calls)
 }

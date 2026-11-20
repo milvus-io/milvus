@@ -200,6 +200,7 @@ func RegisterQueryCoord(registry *prometheus.Registry) {
 	QueryCoordLoadDemandMemoryBytes.WithLabelValues(common.DefaultResourceGroupName).Add(0)
 	QueryCoordLoadDemandDiskBytes.WithLabelValues(common.DefaultResourceGroupName).Add(0)
 
+	registry.MustRegister(queryCoordCompliance)
 	registry.MustRegister(QueryCoordNumCollections)
 	registry.MustRegister(QueryCoordNumPartitions)
 	registry.MustRegister(QueryCoordLoadCount)
