@@ -191,13 +191,16 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
-	if err := rejectStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
-		return err
-	}
-	// A restored collection (preserveFieldID) keeps its stored schema, whose
-	// sub-fields may carry enable_match or enable_analyzer from an earlier
-	// version, so only a new schema is checked for them.
+	// A restored collection (preserveFieldID) keeps its stored schema: on 3.0,
+	// RestoreSnapshot calls RootCoord CreateCollection directly (bypassing
+	// proxy) with preserve_field_ids=true, so added struct sub-fields must keep
+	// their origin marker for copied old segments and the sub-field drop rule,
+	// and stored sub-fields may carry enable_match or enable_analyzer from an
+	// earlier version. Client CreateCollection requests are rejected in proxy.
 	if !t.preserveFieldID {
+		if err := rejectStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
+			return err
+		}
 		if err := schemautil.RejectStructSubFieldsTextMatch(schema.GetStructArrayFields()); err != nil {
 			return err
 		}
