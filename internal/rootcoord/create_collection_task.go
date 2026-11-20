@@ -197,7 +197,11 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	// their origin marker for copied old segments and the sub-field drop rule,
 	// and stored sub-fields may carry enable_match or enable_analyzer from an
 	// earlier version. Client CreateCollection requests are rejected in proxy.
-	if !t.preserveFieldID {
+	if t.preserveFieldID {
+		if err := validateRestoredStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
+			return err
+		}
+	} else {
 		if err := rejectStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
 			return err
 		}
