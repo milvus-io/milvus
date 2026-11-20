@@ -34,6 +34,7 @@ import (
 	task2 "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -122,9 +123,9 @@ func (s *ImportInspectorSuite) TestProcessPreImport() {
 
 	// pending -> inProgress
 	cluster := session.NewMockCluster(s.T())
-	cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	s.inspector.Scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Run(func(task task2.Task) {
-		task.CreateTaskOnWorker(1, cluster)
+		task.CreateTaskOnWorker(1, cluster, taskcommon.Resource{CPU: 1, Memory: 64 << 20})
 	})
 	s.inspector.Inspect()
 	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
@@ -192,9 +193,9 @@ func (s *ImportInspectorSuite) TestProcessImport() {
 	s.alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 	s.alloc.EXPECT().AllocTimestamp(mock.Anything).Return(300, nil)
 	cluster := session.NewMockCluster(s.T())
-	cluster.EXPECT().CreateImport(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	cluster.EXPECT().CreateImport(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	s.inspector.Scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Run(func(task task2.Task) {
-		task.CreateTaskOnWorker(nodeID, cluster)
+		task.CreateTaskOnWorker(nodeID, cluster, taskcommon.Resource{CPU: 1, Memory: 64 << 20})
 	})
 	s.inspector.Inspect()
 	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())

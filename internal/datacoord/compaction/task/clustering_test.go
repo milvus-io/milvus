@@ -123,8 +123,8 @@ func (s *ClusteringCompactionTaskSuite) TestClusteringCompactionSegmentMetaChang
 	task := s.generateBasicTask(false)
 
 	cluster := session.NewMockCluster(s.T())
-	cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	task.CreateTaskOnWorker(1, cluster)
+	cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 
 	seg11 := s.meta.GetSegment(context.TODO(), 101)
 	s.Equal(datapb.SegmentLevel_L1, seg11.Level)
@@ -456,14 +456,14 @@ func (s *ClusteringCompactionTaskSuite) TestProcessRetryLogic() {
 	task.maxRetryTimes = 3
 	// process pipelining fail
 	cluster := session.NewMockCluster(s.T())
-	task.CreateTaskOnWorker(1, cluster)
+	task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 	s.Equal(int32(1), task.GetTaskProto().RetryTimes)
-	task.CreateTaskOnWorker(1, cluster)
+	task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 	s.Equal(int32(2), task.GetTaskProto().RetryTimes)
-	task.CreateTaskOnWorker(1, cluster)
+	task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 	s.Equal(int32(3), task.GetTaskProto().RetryTimes)
 	s.Equal(datapb.CompactionTaskState_pipelining, task.GetTaskProto().GetState())
-	task.CreateTaskOnWorker(1, cluster)
+	task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 	s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
 }
 
@@ -472,7 +472,7 @@ func (s *ClusteringCompactionTaskSuite) TestCreateTaskOnWorker() {
 		task := s.generateBasicTask(false)
 		task.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_pipelining))
 		cluster := session.NewMockCluster(s.T())
-		task.CreateTaskOnWorker(1, cluster)
+		task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
 	})
 
@@ -496,8 +496,8 @@ func (s *ClusteringCompactionTaskSuite) TestCreateTaskOnWorker() {
 		})
 		task.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_pipelining))
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		task.CreateTaskOnWorker(1, cluster)
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
 	})
 
@@ -521,7 +521,7 @@ func (s *ClusteringCompactionTaskSuite) TestCreateTaskOnWorker() {
 		})
 		task.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_pipelining))
 		cluster := session.NewMockCluster(s.T())
-		task.CreateTaskOnWorker(1, cluster)
+		task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 		s.Equal(datapb.CompactionTaskState_analyzing, task.GetTaskProto().GetState())
 	})
 }

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -88,6 +89,36 @@ func (p *PreImportTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromImportState(p.GetState())
 }
 
+// GetTaskResource prices a pre-import by one base read buffer per file,
+// mirroring what the worker allocates (taskresource.PreImport). A
+// snapshot-source task takes the snapshot reservation its slot is sized on. Not cached,
+// for the same reason as Task.GetTaskResource.
+func (p *PreImportTask) GetTaskResource() taskcommon.Resource {
+	base := Params.DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
+	if job := p.ImportMeta.GetJob(context.TODO(), p.GetJobID()); job != nil {
+		if rowBytes, deleteBytes, ok := snapshotImportBufferBytes(p, job, base); ok {
+			return taskresource.PreImport(rowBytes + deleteBytes)
+		}
+	}
+	return taskresource.PreImport(taskresource.ImportBufferedBytes(p.GetFileStats(), base))
+}
+
+// NodeMemoryShare implements task.NodeMemoryBounded. Only a snapshot-source
+// pre-import reserves its readers from the worker's import allocator
+// (reserveSnapshotRead). A pre-import syncs nothing, so the allocator's share
+// is its whole bound. A plain pre-import reads without the allocator and is not
+// bounded.
+func (p *PreImportTask) NodeMemoryShare() float64 {
+	job := p.ImportMeta.GetJob(context.TODO(), p.GetJobID())
+	if job == nil {
+		return 0
+	}
+	if _, _, ok := snapshotImportBufferBytes(p, job, 0); !ok {
+		return 0
+	}
+	return taskresource.ImportNodeMemoryShare()
+}
+
 func (p *PreImportTask) GetTaskSlot() int64 {
 	return int64(CalculateTaskSlot(p, p.ImportMeta))
 }
@@ -124,7 +155,7 @@ func (p *PreImportTask) setFileStats(fileStats []*datapb.ImportFileStats) {
 	p.Task.Load().FileStats = fileStats
 }
 
-func (p *PreImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
+func (p *PreImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 	mlog.Info(context.TODO(), "processing pending preimport task...", WrapTaskLog(p)...)
 	job := p.ImportMeta.GetJob(context.TODO(), p.GetJobID())
 	req, err := AssemblePreImportRequest(p, job)
@@ -136,8 +167,7 @@ func (p *PreImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster
 		}
 		return
 	}
-
-	err = cluster.CreatePreImport(nodeID, req, p.GetTaskSlot())
+	err = cluster.CreatePreImport(nodeID, req, p.GetTaskSlot(), resource)
 	if err != nil {
 		mlog.Warn(context.TODO(), "preimport failed", WrapTaskLog(p, mlog.Err(err))...)
 		p.retryTimes++

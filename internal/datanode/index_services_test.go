@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -45,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -97,6 +99,7 @@ func TestCreateAnalyzeTaskPropagatesPluginContext(t *testing.T) {
 	defer cancel()
 
 	node := NewDataNode(ctx)
+	node.importScheduler = importv2.NewScheduler(importv2.NewTaskManager())
 	defer node.cancel()
 
 	requestContext := []*commonpb.KeyValuePair{{Key: "cipher-context", Value: "opaque"}}
@@ -132,11 +135,11 @@ func TestCreateAnalyzeTaskPropagatesPluginContext(t *testing.T) {
 		Dim:           8,
 		PluginContext: requestContext,
 		StorageConfig: &indexpb.StorageConfig{RootPath: t.TempDir(), StorageType: "local"},
-	})
+	}, taskcommon.Resource{})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(status))
 
-	task := node.taskScheduler.TaskQueue.PopUnissuedTask()
+	task := node.taskScheduler.TaskQueue.PopUnissuedTask(true)
 	require.NotNil(t, task)
 	require.NoError(t, task.Execute(ctx))
 	require.Equal(t, expected, captured)
@@ -148,6 +151,7 @@ func TestCreateAnalyzeTaskPluginContextErrorDoesNotRegisterTask(t *testing.T) {
 	defer cancel()
 
 	node := NewDataNode(ctx)
+	node.importScheduler = importv2.NewScheduler(importv2.NewTaskManager())
 	defer node.cancel()
 	parseMock := mockey.Mock(hookutil.GetCPluginContext).Return(nil, assert.AnError).Build()
 	defer parseMock.UnPatch()
@@ -157,7 +161,7 @@ func TestCreateAnalyzeTaskPluginContextErrorDoesNotRegisterTask(t *testing.T) {
 		ClusterID:    "cluster",
 		TaskID:       taskID,
 		CollectionID: 1,
-	})
+	}, taskcommon.Resource{})
 	require.NoError(t, err)
 	taskErr := merr.Error(status)
 	require.Error(t, taskErr)
@@ -170,6 +174,7 @@ func TestCreateStatsTaskPropagatesPluginContext(t *testing.T) {
 	defer cancel()
 
 	node := NewDataNode(ctx)
+	node.importScheduler = importv2.NewScheduler(importv2.NewTaskManager())
 	defer node.cancel()
 
 	requestContext := []*commonpb.KeyValuePair{{Key: "cipher-context", Value: "opaque"}}
@@ -220,11 +225,11 @@ func TestCreateStatsTaskPropagatesPluginContext(t *testing.T) {
 			FieldID: fieldID,
 			Binlogs: []*datapb.Binlog{{LogID: 1}},
 		}},
-	})
+	}, taskcommon.Resource{})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(status))
 
-	task := node.taskScheduler.TaskQueue.PopUnissuedTask()
+	task := node.taskScheduler.TaskQueue.PopUnissuedTask(true)
 	require.NotNil(t, task)
 	require.NoError(t, task.Execute(ctx))
 	require.NotNil(t, captured)
@@ -237,6 +242,7 @@ func TestCreateStatsTaskPluginContextErrorDoesNotRegisterTask(t *testing.T) {
 	defer cancel()
 
 	node := NewDataNode(ctx)
+	node.importScheduler = importv2.NewScheduler(importv2.NewTaskManager())
 	defer node.cancel()
 	parseMock := mockey.Mock(hookutil.GetCPluginContext).Return(nil, assert.AnError).Build()
 	defer parseMock.UnPatch()
@@ -246,7 +252,7 @@ func TestCreateStatsTaskPluginContextErrorDoesNotRegisterTask(t *testing.T) {
 		ClusterID:    "cluster",
 		TaskID:       taskID,
 		CollectionID: 1,
-	})
+	}, taskcommon.Resource{})
 	require.NoError(t, err)
 	taskErr := merr.Error(status)
 	require.Error(t, taskErr)
@@ -258,6 +264,7 @@ func TestCreateIndexTaskInitializesIndexStorePathVersion(t *testing.T) {
 		ctx := context.Background()
 		paramtable.Init()
 		node := NewDataNode(ctx)
+		node.importScheduler = importv2.NewScheduler(importv2.NewTaskManager())
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		req := &workerpb.CreateJobRequest{

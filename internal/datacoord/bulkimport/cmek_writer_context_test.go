@@ -125,7 +125,7 @@ func TestPreImportWriterContext(t *testing.T) {
 					cluster := session.NewMockCluster(t)
 
 					if tc.wantError != "" {
-						task.CreateTaskOnWorker(42, cluster)
+						task.CreateTaskOnWorker(42, cluster, task.GetTaskResource())
 						failed := im.GetJob(context.Background(), job.GetJobID())
 						require.Equal(t, internalpb.ImportJobState_Failed, failed.GetState())
 						require.Contains(t, failed.GetReason(), tc.wantError)
@@ -135,7 +135,7 @@ func TestPreImportWriterContext(t *testing.T) {
 						return
 					}
 
-					create := func(nodeID int64, req *datapb.PreImportRequest, _ int64) error {
+					create := func(nodeID int64, req *datapb.PreImportRequest, _ int64, _ taskcommon.Resource) error {
 						require.Equal(t, int64(42), nodeID)
 						require.Equal(t, task.GetTaskID(), req.GetTaskID())
 						require.Equal(t, job.GetFiles(), req.GetImportFiles())
@@ -145,11 +145,11 @@ func TestPreImportWriterContext(t *testing.T) {
 						return nil
 					}
 					if version == internalpb.ImportVersion_ImportVersionV3 {
-						cluster.EXPECT().CreatePreImportV3(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(create).Once()
+						cluster.EXPECT().CreatePreImportV3(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(create).Once()
 					} else {
-						cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(create).Once()
+						cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(create).Once()
 					}
-					task.CreateTaskOnWorker(42, cluster)
+					task.CreateTaskOnWorker(42, cluster, task.GetTaskResource())
 					require.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
 					require.Equal(t, int64(42), task.GetNodeID())
 					require.Equal(t, internalpb.ImportJobState_PreImporting, im.GetJob(context.Background(), job.GetJobID()).GetState())

@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	_ "github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -77,6 +78,8 @@ type statsTask struct {
 
 	pluginContext *indexcgopb.StoragePluginContext
 
+	resource taskcommon.Resource
+
 	logIDOffset  int64
 	currentTime  time.Time
 	manifestPath string // current manifest version, updated after each AddStatsToManifest
@@ -95,6 +98,7 @@ func NewStatsTask(ctx context.Context,
 	manager *TaskManager,
 	cm storage.ChunkManager,
 	pluginContext *indexcgopb.StoragePluginContext,
+	resource taskcommon.Resource,
 ) *statsTask {
 	return &statsTask{
 		ident:         fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
@@ -108,6 +112,7 @@ func NewStatsTask(ctx context.Context,
 		tr:            timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
 		currentTime:   tsoutil.PhysicalTime(req.GetCurrentTs()),
 		logIDOffset:   0,
+		resource:      resource,
 	}
 }
 
@@ -141,6 +146,10 @@ func (st *statsTask) GetState() indexpb.JobState {
 
 func (st *statsTask) GetSlot() int64 {
 	return st.req.GetTaskSlot()
+}
+
+func (st *statsTask) GetResource() taskcommon.Resource {
+	return st.resource
 }
 
 func (st *statsTask) IsVectorIndex() bool {
