@@ -51,5 +51,11 @@ set_source_files_properties(
     huawei/HuaweiCloudSTSClient.cpp
     PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
 
+# Folly's x86 package enables SSE4.2 in its headers. UnboundedQueue instantiates
+# F14's CRC32 intrinsics, so this translation unit must enable the same ISA.
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
+    set_property(SOURCE AsyncLoadExecutor.cpp APPEND PROPERTY COMPILE_OPTIONS -msse4.2)
+endif()
+
 add_library(milvus_storage OBJECT ${SOURCE_FILES})
 target_link_libraries(milvus_storage PUBLIC milvus_conan_deps)
