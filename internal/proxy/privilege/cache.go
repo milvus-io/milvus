@@ -261,6 +261,10 @@ func (m *privilegeCache) RefreshPolicyInfoWithVisibility(ctx context.Context, op
 		}
 		resp, err := m.mixCoord.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				mlog.Warn(ctx, "fail to refresh policy cache due to context error", mlog.Err(err), mlog.NamedError("ctxErr", ctxErr))
+				return merr.Wrap(ctxErr, err.Error())
+			}
 			mlog.Error(ctx, "fail to init meta cache", mlog.Err(err))
 			return err
 		}

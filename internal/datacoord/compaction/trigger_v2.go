@@ -371,10 +371,21 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, req *milvu
 		}
 		return 0, err
 	}
+	enqueued := false
 	if len(events) > 0 {
 		for triggerType, views := range events {
-			m.notify(ctx, triggerType, views, false)
+			if m.notify(ctx, triggerType, views, false) {
+				enqueued = true
+			}
 		}
+	}
+	if enqueued {
+		if lifecycleCtx.Err() != nil || ctx.Err() != nil {
+			mlog.Warn(ctx, "manual compaction tasks already enqueued before cancellation; returning triggerID",
+				mlog.Int64("triggerID", triggerID),
+				mlog.FieldCollectionID(collectionID))
+		}
+		return triggerID, nil
 	}
 	if lifecycleCtx.Err() != nil {
 		return 0, merr.WrapErrServiceUnavailable("compaction trigger manager is stopped")
@@ -443,7 +454,7 @@ func (m *CompactionTriggerManager) triggerViewForCompaction(ctx context.Context,
 
 // notify submits the views of one trigger type. When capped, it stops once the
 // inspector is full and leaves the rest to later runs.
-func (m *CompactionTriggerManager) notify(ctx context.Context, eventType policy.CompactionTriggerType, views []view.CompactionView, capped bool) {
+func (m *CompactionTriggerManager) notify(ctx context.Context, eventType policy.CompactionTriggerType, views []view.CompactionView, capped bool) (enqueued bool) {
 	log := mlog.With()
 	log.Debug(ctx, "Start to trigger compactions", mlog.String("eventType", eventType.String()))
 	for _, cv := range views {
@@ -469,22 +480,33 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType policy.
 
 				switch eventType {
 				case policy.TriggerTypeLevelZeroViewChange, policy.TriggerTypeLevelZeroViewIDLE, policy.TriggerTypeLevelZeroViewManual:
-					m.SubmitL0ViewToScheduler(ctx, outView)
+					if m.SubmitL0ViewToScheduler(ctx, outView) {
+						enqueued = true
+					}
 				case policy.TriggerTypeClustering:
-					m.SubmitClusteringViewToScheduler(ctx, outView)
+					if m.SubmitClusteringViewToScheduler(ctx, outView) {
+						enqueued = true
+					}
 				case policy.TriggerTypeSingle, policy.TriggerTypeSort, policy.TriggerTypeStorageVersionUpgrade:
-					m.SubmitSingleViewToScheduler(ctx, outView, eventType)
+					if m.SubmitSingleViewToScheduler(ctx, outView, eventType) {
+						enqueued = true
+					}
 				case policy.TriggerTypeForceMerge:
-					m.SubmitForceMergeViewToScheduler(ctx, outView)
+					if m.SubmitForceMergeViewToScheduler(ctx, outView) {
+						enqueued = true
+					}
 				case policy.TriggerTypeBumpSchemaVersion:
-					m.SubmitBumpSchemaVersionViewToScheduler(ctx, outView)
+					if m.SubmitBumpSchemaVersionViewToScheduler(ctx, outView) {
+						enqueued = true
+					}
 				}
 			}
 		}
 	}
+	return enqueued
 }
 
-func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, cv view.CompactionView) {
+func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, cv view.CompactionView) (enqueued bool) {
 	log := mlog.With(mlog.String("view", cv.String()))
 	taskID, err := m.allocator.AllocID(ctx)
 	if err != nil {
@@ -541,15 +563,17 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 			mlog.Err(err))
 		return
 	}
+	enqueued = true
 	log.Info(ctx, "Finish to submit a LevelZeroCompaction plan",
 		mlog.Int64("triggerID", task.GetTriggerID()),
 		mlog.Int64("planID", task.GetPlanID()),
 		mlog.String("type", task.GetType().String()),
 		mlog.Int64s("L0 segments", levelZeroSegs),
 	)
+	return enqueued
 }
 
-func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.Context, cv view.CompactionView) {
+func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.Context, cv view.CompactionView) (enqueued bool) {
 	log := mlog.With(mlog.String("view", cv.String()))
 	collection, err := m.handler.GetCollection(ctx, cv.GetGroupLabel().CollectionID)
 	if err != nil {
@@ -612,15 +636,17 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 			mlog.Err(err))
 		return
 	}
+	enqueued = true
 	log.Info(ctx, "Finish to submit a clustering compaction task",
 		mlog.Int64("triggerID", task.GetTriggerID()),
 		mlog.Int64("planID", task.GetPlanID()),
 		mlog.Int64("MaxSegmentRows", task.MaxSegmentRows),
 		mlog.Int64("PreferSegmentRows", task.PreferSegmentRows),
 	)
+	return enqueued
 }
 
-func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Context, cv view.CompactionView, triggerType policy.CompactionTriggerType) {
+func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Context, cv view.CompactionView, triggerType policy.CompactionTriggerType) (enqueued bool) {
 	log := mlog.With(mlog.String("trigger type", triggerType.String()), mlog.String("view", cv.String()))
 
 	collection, err := m.handler.GetCollection(ctx, cv.GetGroupLabel().CollectionID)
@@ -681,12 +707,14 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 			mlog.Err(err))
 		return
 	}
+	enqueued = true
 	log.Info(ctx, "Finish to submit a single compaction task",
 		mlog.Int64("triggerID", task.GetTriggerID()),
 		mlog.Int64("planID", task.GetPlanID()),
 		mlog.String("type", task.GetType().String()),
 		mlog.Int64("targetSize", task.GetMaxSize()),
 	)
+	return enqueued
 }
 
 func allocCompactionPlanIDs(ctx context.Context, alloc allocator.Allocator, totalSize float64, preferredSize float64) (int64, *datapb.IDRange, error) {
@@ -788,7 +816,7 @@ func estimateResultSegmentCount(totalSize float64, targetSize float64) int64 {
 	return max(int64(math.Ceil(totalSize/targetSize)), 1)
 }
 
-func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.Context, cv view.CompactionView) {
+func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.Context, cv view.CompactionView) (enqueued bool) {
 	log := mlog.With(mlog.String("view", cv.String()))
 
 	collection, err := m.handler.GetCollection(ctx, cv.GetGroupLabel().CollectionID)
@@ -844,6 +872,7 @@ func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.C
 		log.Warn(ctx, "Failed to enqueue task", mlog.Err(err))
 		return
 	}
+	enqueued = true
 
 	log.Info(ctx, "Finish to submit force merge task",
 		mlog.Int64("planID", task.GetPlanID()),
@@ -851,9 +880,10 @@ func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.C
 		mlog.Int64("collectionID", task.GetCollectionID()),
 		mlog.Int64("targetSize", task.GetMaxSize()),
 	)
+	return enqueued
 }
 
-func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx context.Context, cv view.CompactionView) {
+func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx context.Context, cv view.CompactionView) (enqueued bool) {
 	log := mlog.With(mlog.String("view", cv.String()))
 	bumpView, ok := cv.(*policy.BumpSchemaVersionView)
 	if !ok {
@@ -920,9 +950,11 @@ func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx co
 			mlog.Err(err))
 		return
 	}
+	enqueued = true
 	log.Info(ctx, "Finish to submit a schema bump compaction task",
 		mlog.Int64("triggerID", task.GetTriggerID()),
 		mlog.Int64("planID", task.GetPlanID()),
 		mlog.String("type", task.GetType().String()),
 	)
+	return enqueued
 }

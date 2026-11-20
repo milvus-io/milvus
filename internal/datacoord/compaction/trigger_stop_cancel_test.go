@@ -48,9 +48,10 @@ import (
 )
 
 type recordingInspector struct {
-	mu    sync.Mutex
-	tasks []*datapb.CompactionTask
-	full  bool
+	mu        sync.Mutex
+	tasks     []*datapb.CompactionTask
+	full      bool
+	onEnqueue func(*datapb.CompactionTask) error
 }
 
 func (r *recordingInspector) Start()                                            {}
@@ -66,8 +67,12 @@ func (r *recordingInspector) GetCompactionInfo(context.Context, int64) *policy.C
 
 func (r *recordingInspector) EnqueueCompaction(task *datapb.CompactionTask) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.tasks = append(r.tasks, task)
+	cb := r.onEnqueue
+	r.mu.Unlock()
+	if cb != nil {
+		return cb(task)
+	}
 	return nil
 }
 
@@ -654,6 +659,110 @@ func TestCompactionTriggerManagerStopDuringInFlightManualTriggerAfterViewGenerat
 	require.Empty(t, inspector.snapshot())
 }
 
+func TestManualTriggerReturnsTriggerIDWhenEnqueuedBeforeStop(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.EnableAutoCompaction.Key, "true")
+	defer pt.Reset(pt.DataCoordCfg.EnableAutoCompaction.Key)
+	pt.Save(pt.DataCoordCfg.EnableCompaction.Key, "true")
+	defer pt.Reset(pt.DataCoordCfg.EnableCompaction.Key)
+
+	const collID = int64(2002)
+	const channel = "by-dev-rootcoord-dml_1_2002v0"
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
+	metaStore := metacache.NewMetaStore(catalog)
+
+	collInfo := &meta.CollectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			},
+		},
+	}
+	metaStore.PutCollection(collInfo)
+	l0Seg := &meta.SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            7001,
+			CollectionID:  collID,
+			PartitionID:   10,
+			InsertChannel: channel,
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L0,
+			NumOfRows:     10,
+			DmlPosition:   &msgpb.MsgPosition{Timestamp: 50},
+			Deltalogs:     []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{EntriesNum: 10, MemorySize: 1024}}}},
+		},
+	}
+	growingSeg := &meta.SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            7002,
+			CollectionID:  collID,
+			PartitionID:   10,
+			InsertChannel: channel,
+			State:         commonpb.SegmentState_Growing,
+			StartPosition: &msgpb.MsgPosition{Timestamp: 100},
+		},
+	}
+	m := &meta.Meta{
+		Segments: meta.NewSegmentsInfoWithSegments(map[int64]*meta.SegmentInfo{
+			7001: l0Seg,
+			7002: growingSeg,
+		}),
+		MetaStore: metaStore,
+	}
+
+	handler := newFuncHandler(t, func(ctx context.Context, _ UniqueID) (*meta.CollectionInfo, error) {
+		return collInfo, nil
+	})
+
+	_, alloc := newIncrementingRootCoordAllocator(t)
+	enqueuedCh := make(chan struct{})
+	releaseEnqueue := make(chan struct{})
+	inspector := &recordingInspector{
+		onEnqueue: func(_ *datapb.CompactionTask) error {
+			close(enqueuedCh)
+			<-releaseEnqueue
+			return nil
+		},
+	}
+	mgr := NewCompactionTriggerManager(alloc, handler, inspector, m, nil, nil, nil, nil, index.NewTestVersionManager())
+
+	type manualResult struct {
+		triggerID int64
+		err       error
+	}
+	resCh := make(chan manualResult, 1)
+	go func() {
+		id, err := mgr.ManualTrigger(context.Background(), &milvuspb.ManualCompactionRequest{
+			CollectionID: collID,
+			L0Compaction: true,
+		})
+		resCh <- manualResult{triggerID: id, err: err}
+	}()
+
+	select {
+	case <-enqueuedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for EnqueueCompaction")
+	}
+
+	mgr.Stop()
+	close(releaseEnqueue)
+
+	select {
+	case res := <-resCh:
+		require.NoError(t, res.err)
+		require.NotZero(t, res.triggerID)
+	case <-time.After(1 * time.Second):
+		t.Fatal("ManualTrigger did not return after Stop()")
+	}
+
+	require.Len(t, inspector.snapshot(), 1)
+}
+
 func TestCompactionTriggerCancelledQueuedManualSignalNotPlanned(t *testing.T) {
 	pt := paramtable.Get()
 	pt.Save(pt.DataCoordCfg.IndexBasedCompaction.Key, "false")
@@ -667,7 +776,8 @@ func TestCompactionTriggerCancelledQueuedManualSignalNotPlanned(t *testing.T) {
 	var coll1002Lookups atomic.Int32
 
 	handler := newFuncHandler(t, func(ctx context.Context, collID UniqueID) (*meta.CollectionInfo, error) {
-		if collID == 1001 {
+		switch collID {
+		case 1001:
 			enteredOnce.Do(func() {
 				close(enteredSignalA)
 			})
@@ -676,7 +786,7 @@ func TestCompactionTriggerCancelledQueuedManualSignalNotPlanned(t *testing.T) {
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			}
-		} else if collID == 1002 {
+		case 1002:
 			coll1002Lookups.Add(1)
 		}
 		return colls[collID], nil
@@ -743,8 +853,8 @@ func TestCompactionTriggerCancelledQueuedManualSignalNotPlanned(t *testing.T) {
 	}, 2*time.Second, time.Millisecond)
 	tr.Stop()
 
-	require.Zero(t, coll1002Lookups.Load(), "cancelled queued manual signal must not be planned")
+	require.Zero(t, coll1002Lookups.Load(), "canceled queued manual signal must not be planned")
 	for _, task := range inspector.snapshot() {
-		require.NotEqual(t, int64(1002), task.GetCollectionID(), "cancelled queued manual signal must not enqueue tasks")
+		require.NotEqual(t, int64(1002), task.GetCollectionID(), "canceled queued manual signal must not enqueue tasks")
 	}
 }
