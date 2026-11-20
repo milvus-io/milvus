@@ -2248,6 +2248,117 @@ TEST(GrowingIndexAsyncBuildTest, SyncFallbackBehavesLikeLegacy) {
     EXPECT_EQ(sr->seg_offsets_.size(), num_queries * top_k);
 }
 
+TEST(GrowingIndexAsyncBuildTest, SubmitRejectionKeepsRawDataSearchable) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    ScopedAsyncGrowingBuild async_build(config, true);
+    ApplyAsyncBuildConfig(config);
+
+    using SubmitPhase = milvus::ThreadPool::SubmitPhase;
+    using State = VectorFieldIndexing::GrowingIndexState;
+    int submissions = 0;
+    const milvus::ThreadPool::SubmitHook submit_hook = [&](SubmitPhase phase) {
+        if (phase == SubmitPhase::kBeforeEnqueue) {
+            ++submissions;
+            throw std::runtime_error("injected executor rejection");
+        }
+    };
+    milvus::ThreadPool::SetSubmitHookForTest(&submit_hook);
+    auto clear_hook = folly::makeGuard(
+        [] { milvus::ThreadPool::SetSubmitHookForTest(nullptr); });
+
+    auto fixture =
+        MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                              knowhere::metric::L2,
+                              /*nullable=*/false);
+    auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+    auto* impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(impl, nullptr);
+    const auto& indexing =
+        impl->get_indexing_record().get_vec_field_indexing(fixture.vec);
+    const auto submit_failures_before =
+        milvus::monitor::internal_core_growing_index_submit_failures.Value();
+
+    constexpr int64_t initial_rows = 25000;
+    auto initial =
+        InsertAsyncBatch(segment.get(), fixture.schema, initial_rows, 17);
+    EXPECT_EQ(impl->get_row_count(), initial_rows);
+    EXPECT_EQ(indexing.get_growing_index_state(), State::kDisabled);
+
+    auto next = InsertAsyncBatch(segment.get(), fixture.schema, 2000, 50017);
+    EXPECT_EQ(impl->get_row_count(), initial_rows + 2000);
+    EXPECT_EQ(submissions, 1);
+    EXPECT_EQ(indexing.get_growing_index_state(), State::kDisabled);
+    EXPECT_FALSE(impl->get_indexing_record().SyncDataWithIndex(fixture.vec));
+    EXPECT_GT(impl->get_insert_record().get_data_base(fixture.vec)->num_chunk(),
+              0);
+    EXPECT_DOUBLE_EQ(
+        milvus::monitor::internal_core_growing_index_submit_failures.Value(),
+        submit_failures_before + 1);
+
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        fixture.schema, fixture.plan_str.data(), fixture.plan_str.size());
+    auto expect_exact_hit = [&](const GeneratedData& batch, int64_t offset) {
+        auto vectors = batch.get_col<float>(fixture.vec);
+        auto probe = MakeSingleDensePlaceholder(plan.get(), vectors.data());
+        auto result = segment->Search(plan.get(), probe.get(), 1000000);
+        ASSERT_FALSE(result->seg_offsets_.empty());
+        EXPECT_EQ(result->seg_offsets_[0], offset);
+        EXPECT_NEAR(result->distances_[0], 0.0f, 1e-5);
+    };
+    expect_exact_hit(initial, 0);
+    expect_exact_hit(next, initial_rows);
+}
+
+TEST(GrowingIndexAsyncBuildTest, SubmitErrorAfterWorkerStartsKeepsBuild) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    ScopedAsyncGrowingBuild async_build(config, true);
+    ApplyAsyncBuildConfig(config);
+
+    using SubmitPhase = milvus::ThreadPool::SubmitPhase;
+    using Phase = VectorFieldIndexing::GrowingBuildPhase;
+    std::atomic<bool> worker_started{false};
+    ScopedBuildHook build_hook([&](Phase phase) {
+        if (phase == Phase::kBeforeBuild) {
+            worker_started.store(true);
+        }
+    });
+    int submit_errors = 0;
+    const milvus::ThreadPool::SubmitHook submit_hook = [&](SubmitPhase phase) {
+        if (phase == SubmitPhase::kAfterEnqueue) {
+            ASSERT_TRUE(WaitFlag(worker_started, 10000));
+            ++submit_errors;
+            throw std::runtime_error("injected error after enqueue");
+        }
+    };
+    milvus::ThreadPool::SetSubmitHookForTest(&submit_hook);
+    auto clear_hook = folly::makeGuard(
+        [] { milvus::ThreadPool::SetSubmitHookForTest(nullptr); });
+
+    auto fixture =
+        MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                              knowhere::metric::L2,
+                              /*nullable=*/false);
+    auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+    auto* impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(impl, nullptr);
+    const auto submit_failures_before =
+        milvus::monitor::internal_core_growing_index_submit_failures.Value();
+
+    constexpr int64_t initial_rows = 25000;
+    InsertAsyncBatch(segment.get(), fixture.schema, initial_rows, 23);
+    EXPECT_EQ(impl->get_row_count(), initial_rows);
+    EXPECT_EQ(submit_errors, 1);
+    ASSERT_TRUE(WaitSynced(impl, fixture.vec, 10000));
+    EXPECT_EQ(IndexedRowCount(impl, fixture.vec), initial_rows);
+    EXPECT_DOUBLE_EQ(
+        milvus::monitor::internal_core_growing_index_submit_failures.Value(),
+        submit_failures_before);
+}
+
 TEST(GrowingIndexAsyncBuildTest, BuildFailureDisablesIndexPermanently) {
     auto& config = SegcoreConfig::default_config();
     ScopedSegcoreConfigRestore config_restore(config);

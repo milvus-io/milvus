@@ -165,15 +165,11 @@ GrowingIndexBuildPool() {
     static milvus::ThreadPool pool(
         SegcoreConfig::default_config().get_growing_index_build_pool_ratio(),
         "growing_index_build");
-    // Queue depth is the saturation signal for this layer: a task waiting here
-    // is not yet even blocked on the knowhere build pool. Task counters and
-    // duration histograms are deliberately left unwired -- first-build and
-    // catch-up latency already have dedicated histograms.
     [[maybe_unused]] static const bool metrics_wired = [] {
         pool.SetMetrics(
-            &milvus::monitor::internal_core_growing_index_pool_capacity,
-            &milvus::monitor::internal_core_growing_index_pool_active_threads,
-            &milvus::monitor::internal_core_growing_index_pool_idle_threads,
+            /*capacity=*/nullptr,
+            /*active=*/nullptr,
+            /*idle=*/nullptr,
             &milvus::monitor::internal_core_growing_index_pool_queue_depth,
             /*submitted=*/nullptr,
             /*completed=*/nullptr,
@@ -353,7 +349,7 @@ VectorFieldIndexing::~VectorFieldIndexing() {
     // Invariant at this point: phase is kRunning, never kAbandoned. The only
     // two call sites that can win the TryAbandon() CAS are this destructor
     // (which returns immediately above, never reaching here) and the
-    // Submit-catch block in AppendBuild (which resets build_ctrl_ to nullptr
+    // submission failure handler (which resets build_ctrl_ to nullptr
     // on a win, so the destructor takes the early `build_ctrl_ == nullptr`
     // return instead of getting here). TryAbandon() above already lost, so
     // the running task owns the state machine and phase can only be
@@ -880,86 +876,60 @@ void
 VectorFieldIndexing::StartBuildLocked(const VectorBase* field_raw_data,
                                       int64_t upto,
                                       int64_t new_data_dim) {
-    // state_ must be published before Submit: the task may start running on
-    // another thread immediately and drive state_ all the way to kSynced, and
-    // a later store of kBuilding here would be a back edge.
-    state_.store(GrowingIndexState::kBuilding);
-    AdvanceWatermarkLocked(upto);
-    build_ctrl_ = std::make_shared<BuildTaskCtrl>();
-    try {
-        build_task_ = GrowingIndexBuildPool().Submit(
-            [this, ctrl = build_ctrl_, field_raw_data, new_data_dim] {
-                // Fulfils ctrl->finished on every exit path, so the destructor
-                // can join even when Submit threw before assigning
-                // build_task_. Must outlive everything below.
-                BuildTaskCtrl::FinishGuard done{ctrl.get()};
-                // CAS on the control block BEFORE touching `this`: if the
-                // destructor abandoned us while queued, `this` is gone and we
-                // must return reading nothing but ctrl.
-                if (!ctrl->TryStart()) {
-                    return;
-                }
-                BuildAsync(field_raw_data, new_data_dim);
-            });
-    } catch (std::exception& error) {
-        // Submit enqueues the task before its own throwable work, so the task
-        // may already be running here -- the abandon CAS decides who owns the
-        // state machine.
-        if (build_ctrl_->TryAbandon()) {
-            // We won: the body will never run (if the task was enqueued at
-            // all it will lose TryStart and exit touching only ctrl), so
-            // nothing else can observe state_ and nothing needs joining.
-            // Degrade exactly like a build failure: brute-force stays correct.
-            LOG_WARN(
-                "failed to submit async growing index build, disabling interim "
-                "index for this field: {}",
-                error.what());
-            build_ctrl_ = nullptr;
+    auto handle_submit_error = [&](const char* reason) {
+        // The executor can throw after enqueue. The worker owns the index
+        // once TryStart wins. Otherwise abandon the queued callable before
+        // releasing the control block owned by this field.
+        const bool abandoned =
+            build_ctrl_ == nullptr || build_ctrl_->TryAbandon();
+        if (abandoned) {
+            build_ctrl_.reset();
             state_.store(GrowingIndexState::kDisabled);
-            milvus::monitor::internal_core_growing_index_build_failures
-                .Increment();
-            return;
         }
-        // We lost: the task is running and owns state_ from here on. Storing
-        // kDisabled now would be a back edge that the task overwrites with
-        // kSynced. Leave state_ == kBuilding and let the running build drive
-        // it to kSynced/kDisabled itself -- the throw came from the pool's own
-        // bookkeeping after the task was handed off, so the build is still
-        // valid. The only casualty is the pool future we never received, which
-        // is why the destructor joins on build_ctrl_->finished.
-        LOG_WARN(
-            "async growing index build submit reported an error after the task "
-            "started, letting the running build drive the state machine: {}",
-            error.what());
+        // The raw write already succeeded. Keep submission failure local to
+        // the optional index even if recording the failure also throws.
+        try {
+            if (abandoned) {
+                milvus::monitor::internal_core_growing_index_submit_failures
+                    .Increment();
+                LOG_WARN(
+                    "failed to submit async growing index build, "
+                    "disabling interim index for this field: {}",
+                    reason);
+            } else {
+                LOG_WARN(
+                    "async growing index submission reported an error "
+                    "after the task started: {}",
+                    reason);
+            }
+        } catch (...) {
+        }
+    };
+
+    try {
+        build_ctrl_ = std::make_shared<BuildTaskCtrl>();
+        AdvanceWatermarkLocked(upto);
+        // A worker can start as soon as the task is enqueued.
+        state_.store(GrowingIndexState::kBuilding);
+        build_task_ = GrowingIndexBuildPool().SubmitOrThrow(
+            [this, ctrl = build_ctrl_, field_raw_data, new_data_dim] {
+                BuildTaskCtrl::FinishGuard done{ctrl.get()};
+                // An abandoned task may run after the field was destroyed.
+                if (ctrl->TryStart()) {
+                    BuildAsync(field_raw_data, new_data_dim);
+                }
+            });
+    } catch (const std::exception& error) {
+        handle_submit_error(error.what());
+    } catch (...) {
+        handle_submit_error("unknown exception");
     }
 }
 
 void
 VectorFieldIndexing::BuildAsync(const VectorBase* field_raw_data,
                                 int64_t new_data_dim) {
-    // RAII so the inflight gauge is decremented on every exit path,
-    // including handle_failure itself throwing (recreate_index's
-    // make_unique hitting bad_alloc, or LOG_WARN throwing) -- a plain
-    // Increment/Decrement pair around the try block below would leak the
-    // gauge in that case, since the throw propagates straight out of the
-    // catch clause it originated in.
-    struct InflightBuildGuard {
-        InflightBuildGuard() {
-            milvus::monitor::internal_core_growing_index_inflight_builds
-                .Increment();
-        }
-        ~InflightBuildGuard() {
-            milvus::monitor::internal_core_growing_index_inflight_builds
-                .Decrement();
-        }
-        InflightBuildGuard(const InflightBuildGuard&) = delete;
-        InflightBuildGuard&
-        operator=(const InflightBuildGuard&) = delete;
-    } inflight_guard;
-
     enum class FailureKind { kBuild, kDeadline };
-    // Shared by the catch clauses below (a non-std exception must not leak the
-    // inflight gauge nor strand the field in kBuilding forever).
     auto handle_failure = [&](const char* reason, FailureKind kind) {
         if (sync_with_index_.load()) {
             // The index is already published: CatchUp flips sync_with_index_
@@ -1064,7 +1034,6 @@ VectorFieldIndexing::BuildAsync(const VectorBase* field_raw_data,
 void
 VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
     auto catchup_start = std::chrono::steady_clock::now();
-    int64_t catchup_from = static_cast<int64_t>(index_cur_.load());
     int64_t consumed_rows = 0;
     double consumed_ms = 0.0;
 
@@ -1241,7 +1210,6 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
         // every row whose AppendingIndex call has returned.
         sync_with_index_.store(true);
         state_.store(GrowingIndexState::kSynced);
-        const auto caught_up_rows = final_target - catchup_from;
         const bool release_raw = has_raw_data();
         lock.unlock();
         double lock_hold_ms = ElapsedMs(lock_hold_start);
@@ -1262,8 +1230,6 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
         }
         milvus::monitor::internal_core_growing_index_catchup_latency.Observe(
             ElapsedMs(catchup_start));
-        milvus::monitor::internal_core_growing_index_catchup_rows.Observe(
-            static_cast<double>(caught_up_rows));
         return;
     }
 }

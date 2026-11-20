@@ -280,8 +280,9 @@ class VectorFieldIndexing : public FieldIndexing {
     using FieldIndexing::FieldIndexing;
 
     // Write-side lifecycle of the growing interim index (spec §4.1). Only
-    // kNotBuilt -> kBuilding -> (kSynced | kDisabled) transitions exist; there
-    // are no back edges, so a (segment, field) builds at most once. This state
+    // A field enters kBuilding once its task is prepared and then reaches
+    // kSynced or kDisabled. A preparation failure can disable it directly.
+    // A field builds at most once. This state
     // is invisible to the read path, which keeps consuming built_ /
     // sync_with_index_ with their pre-change meaning.
     enum class GrowingIndexState : uint8_t {
@@ -542,13 +543,9 @@ class VectorFieldIndexing : public FieldIndexing {
         enum class Phase : uint8_t { kQueued, kRunning, kAbandoned };
         std::atomic<Phase> phase{Phase::kQueued};
         std::atomic<bool> cancelled{false};
-        // Completion signal owned by the control block, NOT by the future that
-        // Submit returns: ThreadPool::Submit enqueues the task first and only
-        // then does throwable work (mutex lock, std::thread construction, map
-        // insert), so a task can be running while `build_task_` was never
-        // assigned. The destructor therefore joins on `finished`, which exists
-        // and is reachable from the moment the control block is constructed --
-        // before Submit is ever called.
+        // Submission can report an error after enqueue, before the caller
+        // receives the pool's future. Join through this control block, which
+        // is available before submission and signaled by every running task.
         std::promise<void> finished_promise;
         std::shared_future<void> finished;
 
