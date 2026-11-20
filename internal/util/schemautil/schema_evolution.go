@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -405,7 +406,10 @@ func validateDroppedEvolutionField(field *schemapb.FieldSchema, newSchema *schem
 	if function := evolutionFunctionReferencing(newSchema, field.GetFieldID()); function != "" {
 		return merr.WrapErrParameterInvalidMsg("cannot drop field %q while function %q still references it", name, function)
 	}
-	if typeutil.IsVectorType(field.GetDataType()) && !evolutionHasVectorField(newSchema) {
+	// Dropping the last vector field turns the collection into one without a
+	// vector field, which is allowed only while such collections may be created.
+	if typeutil.IsVectorType(field.GetDataType()) && !evolutionHasVectorField(newSchema) &&
+		!paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 		return merr.WrapErrParameterInvalidMsg("cannot drop the last vector field %q", name)
 	}
 	return nil

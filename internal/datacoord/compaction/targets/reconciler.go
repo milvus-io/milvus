@@ -151,7 +151,7 @@ func (reconciler *CompactionTargetReconciler) filterMixCompactionSelectable(
 		}
 	}
 	if paramtable.Get().DataCoordCfg.IndexBasedCompaction.GetAsBool() {
-		return index.FilterInIndexedSegments(ctx, reconciler.handler, reconciler.IndexMeta, true, selectable...)
+		return index.FilterInCompactionInputReadySegments(ctx, reconciler.handler, reconciler.IndexMeta, true, selectable...)
 	}
 	return selectable
 }

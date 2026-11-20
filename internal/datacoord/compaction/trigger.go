@@ -355,7 +355,7 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 		}
 
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
-			group.Segments = index.FilterInIndexedSegments(context.Background(), t.handler, t.indexMeta, signal.IsForce, group.Segments...)
+			group.Segments = index.FilterInCompactionInputReadySegments(context.Background(), t.handler, t.indexMeta, signal.IsForce, group.Segments...)
 		}
 
 		coll, err := t.getCollection(group.CollectionID)
@@ -387,20 +387,18 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 		}
 
 		expectedSize := policy.GetExpectedSegmentSize(t.indexMeta, coll.ID, coll.Schema)
-		plans := t.generatePlans(group.Segments, signal, ct, expectedSize)
+		maxRows := policy.GetSegmentMaxRows()
+		plans := t.generatePlans(group.Segments, signal, ct, expectedSize, maxRows)
 		for _, bucket := range plans {
 			if inspectorFull() {
 				return nil
 			}
 			inputSegmentIDs := lo.Map(bucket.segments, func(s *meta.SegmentInfo, _ int) int64 { return s.GetID() })
 
-			inputs := typeutil.NewSet[int64](inputSegmentIDs...)
-			totalSize := lo.SumBy(group.Segments, func(s *meta.SegmentInfo) int64 {
-				if inputs.Contain(s.GetID()) {
-					return s.GetSegmentSize()
-				}
-				return 0
-			})
+			// The bucket holds the copies the planner sized, so under a row
+			// cap the total counts every row at its minimum size and the
+			// writer gets enough segment IDs to cut its outputs on rows.
+			totalSize := lo.SumBy(bucket.segments, func(s *meta.SegmentInfo) int64 { return s.GetSegmentSize() })
 			planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(t.allocator, float64(totalSize), float64(expectedSize))
 			if err != nil {
 				log.Warn(context.TODO(), "fail to allocate id", mlog.Err(err))
@@ -423,6 +421,7 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 				TotalRows:              bucket.totalRows,
 				Schema:                 coll.Schema,
 				MaxSize:                bucket.maxSize,
+				MaxSegmentRows:         policy.PlanMaxSegmentRows(bucket.maxSize, expectedSize, maxRows),
 				PreAllocatedSegmentIDs: preAllocatedSegmentIDs,
 			}
 			err = t.inspector.EnqueueCompaction(task)
@@ -453,7 +452,17 @@ type compactionBucket struct {
 	maxSize   int64
 }
 
-func (t *compactionTrigger) generatePlans(segments []*meta.SegmentInfo, signal *CompactionSignal, compactTime *view.CompactTime, expectedSize int64) []*compactionBucket {
+// generatePlans packs the candidate segments of one partition and channel into
+// compaction buckets against expectedSize bytes. maxRows is the row cap of the
+// collection (0 for none): every segment is then charged at least
+// expectedSize / maxRows bytes per row, so a segment holding maxRows rows is
+// full however few bytes it stores, and the packing below stays byte based.
+func (t *compactionTrigger) generatePlans(segments []*meta.SegmentInfo, signal *CompactionSignal, compactTime *view.CompactTime, expectedSize int64, maxRows int64) []*compactionBucket {
+	if minRowSize := policy.MinRowSize(expectedSize, maxRows); minRowSize > 0 {
+		segments = lo.Map(segments, func(s *meta.SegmentInfo, _ int) *meta.SegmentInfo {
+			return s.ShadowClone(meta.WithMinRowSize(minRowSize))
+		})
+	}
 	if Params.DataCoordCfg.TwoTierCompaction.GetAsBool() {
 		return t.generatePlansTwoTier(segments, signal, compactTime, expectedSize)
 	}

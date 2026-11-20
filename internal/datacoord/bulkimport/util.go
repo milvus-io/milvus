@@ -206,6 +206,29 @@ func GetSegmentMaxSize(job ImportJob, indexMeta *index.IndexMeta) int {
 	return int(policy.GetExpectedSegmentSize(indexMeta, job.GetCollectionID(), job.GetSchema()))
 }
 
+// CapSegmentMaxSizeByRows lowers the byte target of an import job by the row
+// cap (see policy.GetSegmentMaxRows) so that a segment of that size holds
+// about the row cap: min(segmentMaxSize, maxRows x row size), where the row
+// size is measured from the job's own data, totalBytes / totalRows. Rows wider
+// than segmentMaxSize / maxRows keep the byte target.
+//
+// An import job sizes its segments once from this static target, so a per-job
+// measurement cannot make it disagree with itself. Row sizes that differ
+// between partitions make the row count per segment approximate; compaction
+// counts the rows of every segment afterwards, and a segment holding the cap
+// is full to it whatever its byte size.
+func CapSegmentMaxSizeByRows(job ImportJob, segmentMaxSize int64, totalBytes int64, totalRows int64) int64 {
+	if importutilv2.IsL0Import(job.GetOptions()) {
+		return segmentMaxSize
+	}
+	maxRows := policy.GetSegmentMaxRows()
+	if maxRows <= 0 || totalBytes <= 0 || totalRows <= 0 {
+		return segmentMaxSize
+	}
+	rowSize := float64(totalBytes) / float64(totalRows)
+	return max(min(segmentMaxSize, int64(float64(maxRows)*rowSize)), 1)
+}
+
 func importStorageVersion(isL0Import bool) int64 {
 	if isL0Import {
 		return storage.StorageV2
