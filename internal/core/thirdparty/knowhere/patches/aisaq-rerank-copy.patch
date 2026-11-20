@@ -1,0 +1,21 @@
+diff --git a/thirdparty/DiskANN/src/pq_flash_aisaq_index.cpp b/thirdparty/DiskANN/src/pq_flash_aisaq_index.cpp
+index db72b7cf..12bb5aff 100644
+--- a/thirdparty/DiskANN/src/pq_flash_aisaq_index.cpp
++++ b/thirdparty/DiskANN/src/pq_flash_aisaq_index.cpp
+@@ -1573,8 +1573,14 @@ void PQFlashAisaqIndex<T>::aisaq_cached_beam_search(
+                 node_fp_coords = offset_to_node_coords(node_disk_buf);
+                 nnbrs = *nhood_buf;
+                 node_nbrs = (nhood_buf + 1);
+-                if ((uint64_t)node_fp_coords & 0x1fllu) {
+-                    /* Copy only if not aligned to 32 */
++                /* Copy when unaligned to 32, and whenever the distance below reads past the
++                   stored coordinates: it runs over aligned_dim, and on disk the coordinates
++                   are followed by the neighbour count and ids, not zeros. data_buf's tail
++                   past data_dim stays zero (memset in setup_thread_data). Under IP, data_dim
++                   is dim + 1, so this is every IP index whose dim + 1 is not a multiple of 8;
++                   for 2-byte T the ids read as values of order 0.1 and corrupt the rerank. */
++                if (((uint64_t)node_fp_coords & 0x1fllu) ||
++                    this->data_dim != this->aligned_dim) {
+                     memcpy(data_buf, node_fp_coords,
+                            this->disk_bytes_per_point);
+                     node_fp_coords = data_buf;
