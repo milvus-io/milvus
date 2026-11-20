@@ -196,7 +196,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	)...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 
-	readers := importutilv2.NewTaskReaderFactory(t.ctx, sourceCM, req.GetStorageConfig(), req.GetOptions(), t.importCipher.Source)
+	readers := importutilv2.NewReaderFactory(t.ctx, sourceCM, req.GetStorageConfig(), req.GetOptions(), t.importCipher.Source)
 
 	fn := func(ctx context.Context, file *internalpb.ImportFile, rowBuffer, deleteBudget int64, shared *binlog.SnapshotL0Deletes) error {
 		reader, err := readers.NewReader(ctx, t.GetSchema(), file, int(rowBuffer), deleteBudget, shared)

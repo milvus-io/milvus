@@ -177,7 +177,7 @@ func TestExternalStoragePreImportAndReshard(t *testing.T) {
 				StorageConfig: config,
 				Plan:          plan,
 			}
-			reshard := NewReshardTask(reshardReq, cm, nil, NewMetrics(1))
+			reshard := NewReshardTask(reshardReq, cm, nil, nil, NewMetrics(1))
 			_, err = reshard.Execute(context.Background())
 			require.NoError(t, err)
 			require.Equal(t, []int64{42, 43}, gotPKs)
@@ -193,7 +193,7 @@ func TestExternalStoragePreImportAndReshard(t *testing.T) {
 				JobId: 1, TaskId: 2, RunId: 4, Slot: 1,
 				StorageConfig: config,
 				Plan:          cleanedPlan,
-			}, mocks.NewChunkManager(t), nil, NewMetrics(1))
+			}, mocks.NewChunkManager(t), nil, nil, NewMetrics(1))
 			_, err = cleanedReshard.Execute(context.Background())
 			require.ErrorIs(t, err, merr.ErrParameterInvalid)
 		})
@@ -334,7 +334,7 @@ func TestExternalStorageWorkerSharesClientAcrossFiles(t *testing.T) {
 		JobId: 1, TaskId: 2, RunId: 3, Slot: 1,
 		StorageConfig: config,
 		Plan:          plan,
-	}, cm, nil, NewMetrics(1))
+	}, cm, nil, nil, NewMetrics(1))
 	_, err = reshard.Execute(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, []int64{10, 11, 20, 21, 22}, gotPKs)

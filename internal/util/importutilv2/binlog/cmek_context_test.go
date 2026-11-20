@@ -69,7 +69,7 @@ func TestBackupPlaintextDoesNotBorrowTargetKey(t *testing.T) {
 	// destination schema. Neither a source EZK nor a source context is given.
 	reader, err := NewReader(context.Background(), nil, target,
 		&indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()},
-		storage.StorageV2, []string{"backup/segment"}, 0, math.MaxUint64, 1024, "", nil)
+		storage.StorageV2, []string{"backup/segment"}, 0, math.MaxUint64, 1024, SourceEncryption{})
 	require.NoError(t, err)
 	defer reader.Close()
 	require.Zero(t, cipher.lookups, "a plaintext source must not resolve the destination's key")
@@ -91,7 +91,7 @@ func TestL0ReaderPreservesEncryptedLegacyError(t *testing.T) {
 	data, err := writer.GetBuffer()
 	require.NoError(t, err)
 	require.NoError(t, cm.Write(ctx, path, data))
-	register := mockey.Mock(hookutil.RegisterImportReadKeys).Return(merr.ErrServiceUnavailable).Build()
+	register := mockey.Mock(storage.WithReaderDecryptionContext).Return(storage.BinlogReaderOption(func(*storage.BinlogReader) error { return merr.ErrServiceUnavailable })).Build()
 	defer register.UnPatch()
 	packedOpen := mockey.Mock(packed.NewPackedReaderWithExtfs).Return(nil, merr.ErrDataIntegrity).Build()
 	defer packedOpen.UnPatch()
@@ -100,12 +100,12 @@ func TestL0ReaderPreservesEncryptedLegacyError(t *testing.T) {
 		source *indexcgopb.StoragePluginContext
 		want   error
 	}{
-		{"plaintext task", nil, merr.ErrDataIntegrity},
-		{"other zone", &indexcgopb.StoragePluginContext{EncryptionZoneId: 9, EncryptionKey: "c291cmNl"}, merr.ErrDataIntegrity},
-		{"registration failed", &indexcgopb.StoragePluginContext{EncryptionZoneId: 17, EncryptionKey: "c291cmNl"}, merr.ErrServiceUnavailable},
+		{"plaintext task", nil, merr.ErrServiceUnavailable},
+		{"other zone", &indexcgopb.StoragePluginContext{EncryptionZoneId: 9, EncryptionKey: "c291cmNl"}, merr.ErrServiceUnavailable},
+		{"decryptor unavailable", &indexcgopb.StoragePluginContext{EncryptionZoneId: 17, EncryptionKey: "c291cmNl"}, merr.ErrServiceUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			opt := storage.WithImportReadContext(tc.source)
+			opt := storage.WithPluginContext(tc.source)
 			r, err := NewL0Reader(ctx, cm, cfg, &schemapb.FieldSchema{IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
 				&internalpb.ImportFile{Paths: []string{root + "/delta"}}, 1024, 0, math.MaxUint64, opt)
 			require.NoError(t, err)
@@ -118,5 +118,5 @@ func TestL0ReaderPreservesEncryptedLegacyError(t *testing.T) {
 			require.Zero(t, packedOpen.Times())
 		})
 	}
-	require.EqualValues(t, 2, register.Times())
+	require.EqualValues(t, 6, register.Times())
 }

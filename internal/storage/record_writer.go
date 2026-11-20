@@ -181,20 +181,7 @@ func NewPackedRecordWriter(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 ) (*packedRecordWriter, error) {
-	return newPackedRecordWriter(bucketName, paths, schema, false, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false)
-}
-
-func NewImportPackedRecordWriter(
-	bucketName string,
-	paths []string,
-	schema *schemapb.CollectionSchema,
-	bufferSize int64,
-	multiPartUploadSize int64,
-	columnGroups []storagecommon.ColumnGroup,
-	storageConfig *indexpb.StorageConfig,
-	storagePluginContext *indexcgopb.StoragePluginContext,
-) (*packedRecordWriter, error) {
-	return newPackedRecordWriter(bucketName, paths, schema, false, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, true)
+	return newPackedRecordWriter(bucketName, paths, schema, false, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext)
 }
 
 // NewPackedRecordWriterWithFieldIDNames is the packed-record writer used by
@@ -212,7 +199,7 @@ func NewPackedRecordWriterWithFieldIDNames(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 ) (*packedRecordWriter, error) {
-	return newPackedRecordWriter(bucketName, paths, schema, true, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false)
+	return newPackedRecordWriter(bucketName, paths, schema, true, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext)
 }
 
 func newPackedRecordWriter(
@@ -225,7 +212,6 @@ func newPackedRecordWriter(
 	columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
-	importTarget bool,
 ) (*packedRecordWriter, error) {
 	// Validate PK field exists before proceeding
 	_, err := typeutil.GetPrimaryFieldSchema(schema)
@@ -238,15 +224,8 @@ func newPackedRecordWriter(
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not convert collection schema %s to arrow schema: %s", schema.Name, err.Error()))
 	}
-	open := packed.NewPackedWriter
-	if importTarget {
-		open = packed.NewImportPackedWriter
-	}
-	writer, err := open(paths, arrowSchema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext)
+	writer, err := packed.NewPackedWriter(paths, arrowSchema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext)
 	if err != nil {
-		if importTarget {
-			return nil, merr.Wrap(err, "open packed import writer")
-		}
 		return nil, merr.WrapErrStorage(err, "can not new packed record writer")
 	}
 	columnGroupUncompressed := make(map[typeutil.UniqueID]uint64)
@@ -390,20 +369,6 @@ func NewPackedRecordBatchWriter(
 	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, true, false, writerFormat, schemaBasedFormats)
 }
 
-func NewImportPackedRecordBatchWriter(
-	basePath string,
-	schema *schemapb.CollectionSchema,
-	bufferSize int64,
-	multiPartUploadSize int64,
-	columnGroups []storagecommon.ColumnGroup,
-	storageConfig *indexpb.StorageConfig,
-	storagePluginContext *indexcgopb.StoragePluginContext,
-	writerFormat string,
-	schemaBasedFormats []string,
-) (*packedRecordBatchWriter, error) {
-	return openPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, batchWriterOptions{validatePK: true, importTarget: true}, writerFormat, schemaBasedFormats)
-}
-
 func NewPartialPackedRecordBatchWriter(
 	basePath string,
 	schema *schemapb.CollectionSchema,
@@ -449,12 +414,6 @@ func validatePackedRecordBatchWriterSchema(schema *schemapb.CollectionSchema) er
 	return nil
 }
 
-type batchWriterOptions struct {
-	validatePK       bool
-	textRefsAsBinary bool
-	importTarget     bool
-}
-
 func newPackedRecordBatchWriter(
 	basePath string,
 	schema *schemapb.CollectionSchema,
@@ -468,29 +427,13 @@ func newPackedRecordBatchWriter(
 	writerFormat string,
 	schemaBasedFormats []string,
 ) (*packedRecordBatchWriter, error) {
-	return openPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups,
-		storageConfig, storagePluginContext, batchWriterOptions{validatePK: validatePK, textRefsAsBinary: textRefsAsBinary}, writerFormat, schemaBasedFormats)
-}
-
-func openPackedRecordBatchWriter(
-	basePath string,
-	schema *schemapb.CollectionSchema,
-	bufferSize int64,
-	multiPartUploadSize int64,
-	columnGroups []storagecommon.ColumnGroup,
-	storageConfig *indexpb.StorageConfig,
-	storagePluginContext *indexcgopb.StoragePluginContext,
-	opts batchWriterOptions,
-	writerFormat string,
-	schemaBasedFormats []string,
-) (*packedRecordBatchWriter, error) {
-	if opts.validatePK {
+	if validatePK {
 		_, err := typeutil.GetPrimaryFieldSchema(schema)
 		if err != nil {
 			return nil, err
 		}
 	}
-	if !opts.textRefsAsBinary {
+	if !textRefsAsBinary {
 		if err := validatePackedRecordBatchWriterSchema(schema); err != nil {
 			return nil, err
 		}
@@ -501,7 +444,7 @@ func openPackedRecordBatchWriter(
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not convert collection schema %s to arrow schema: %s", schema.Name, err.Error()))
 	}
-	if opts.textRefsAsBinary {
+	if textRefsAsBinary {
 		arrowSchema = overrideTextFieldsToBinary(schema, arrowSchema)
 	}
 
@@ -516,15 +459,8 @@ func openPackedRecordBatchWriter(
 	if len(schemaBasedFormats) > 0 {
 		extraProperties[packed.PropertyWriterSchemaBasedFormats] = strings.Join(schemaBasedFormats, ",")
 	}
-	open := packed.NewFFIPackedWriter
-	if opts.importTarget {
-		open = packed.NewImportFFIPackedWriter
-	}
-	writer, err := open(basePath, arrowSchema, columnGroups, storageConfig, storagePluginContext, extraProperties)
+	writer, err := packed.NewFFIPackedWriter(basePath, arrowSchema, columnGroups, storageConfig, storagePluginContext, extraProperties)
 	if err != nil {
-		if opts.importTarget {
-			return nil, merr.Wrap(err, "open packed import writer")
-		}
 		return nil, merr.WrapErrStorage(err, "can not new packed record writer")
 	}
 	columnGroupUncompressed := make(map[typeutil.UniqueID]uint64)

@@ -15,7 +15,6 @@
 #include <memory>
 #include <string>
 #include <string_view>
-#include <utility>
 
 namespace milvus::storage {
 namespace plugin {
@@ -51,23 +50,19 @@ class ICipherPlugin : public IPlugin {
     GetDecryptor(int64_t ez_id,
                  int64_t coll_id,
                  const std::string& safeKey) const = 0;
-};
-
-// Optional capability implemented alongside ICipherPlugin. The key is the
-// Base64-encoded keyset from the task's StoragePluginContext.
-class IImportCipherPlugin {
- public:
-    virtual ~IImportCipherPlugin() = default;
 
     virtual void
-    RegisterReadKeyset(int64_t ez_id,
-                       int64_t coll_id,
-                       const std::string& key) = 0;
+    RegisterReadKeyset(int64_t ez_id, int64_t coll_id, const std::string& key) {
+        Update(ez_id, coll_id, key);
+    }
 
     virtual std::pair<std::shared_ptr<IEncryptor>, std::string>
     GetEncryptorForKeyset(int64_t ez_id,
                           int64_t coll_id,
-                          const std::string& key) const = 0;
+                          const std::string& key) {
+        Update(ez_id, coll_id, key);
+        return GetEncryptor(ez_id, coll_id);
+    }
 };
 
 class IEncryptor {

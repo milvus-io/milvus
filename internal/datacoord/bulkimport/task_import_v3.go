@@ -146,6 +146,13 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		t.Fail(fmt.Sprintf("import v3 task cannot start: job %d is in state %s", p.GetJobId(), job.GetState()))
 		return
 	}
+	readContext, err := resolveImportReadContext(job.GetOptions())
+	if err != nil {
+		if !retryableImportSourceError(err) {
+			failImportDispatch(t, t.importMeta, err)
+		}
+		return
+	}
 	plan, slot, err := importPlan(job, p, getImportV3Config())
 	if err != nil {
 		t.Fail(err.Error())
@@ -180,7 +187,7 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId(), SegmentId: p.GetSegmentId(),
 		LogRange: p.GetLogRange(), Slot: slot,
 		StorageConfig: meta.CreateStorageConfig(),
-		PluginContext: getImportV3ReadPluginContext(job.GetOptions()),
+		PluginContext: readContext,
 		Plan:          plan,
 	}
 	if err := meta.WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {

@@ -378,9 +378,8 @@ func newPackedChunksRecordReader(
 	storagePluginContext *indexcgopb.StoragePluginContext,
 ) RecordReader {
 	parallel := options.parallelChunkRead
-	readerOpts := options.packedReaderOptions()
 	if parallel.Concurrency <= 1 {
-		return newIterativePackedRecordReader(paths, schema, options.bufferSize, options.storageConfig, storagePluginContext, options.externalReader, readerOpts...)
+		return newIterativePackedRecordReader(paths, schema, options.bufferSize, options.storageConfig, storagePluginContext, options.externalReader)
 	}
 	bufferSize := parallel.BufferSize
 	if bufferSize <= 0 {
@@ -388,10 +387,9 @@ func newPackedChunksRecordReader(
 		// one round would then keep a whole chunk file resident per worker.
 		bufferSize = packed.DefaultReadBufferSize
 	}
-	readerOpts = append(readerOpts, packed.WithEagerPrebuffer())
 	return newParallelChunkRecordReader(ctx, len(paths), parallel.Concurrency, func(chunk int) (RecordReader, error) {
 		reader, err := newPackedRecordReader(paths[chunk], schema, bufferSize, options.storageConfig,
-			storagePluginContext, options.externalReader, readerOpts...)
+			storagePluginContext, options.externalReader, packed.WithEagerPrebuffer())
 		if err != nil {
 			return nil, err
 		}
@@ -406,7 +404,6 @@ func newIterativePackedRecordReader(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	externalReader packed.ExternalReaderContext,
-	opts ...packed.ReaderOption,
 ) *IterativeRecordReader {
 	chunk := 0
 	return &IterativeRecordReader{
@@ -416,7 +413,7 @@ func newIterativePackedRecordReader(
 			}
 			currentPaths := paths[chunk]
 			chunk++
-			return newPackedRecordReader(currentPaths, schema, bufferSize, storageConfig, storagePluginContext, externalReader, opts...)
+			return newPackedRecordReader(currentPaths, schema, bufferSize, storageConfig, storagePluginContext, externalReader)
 		},
 	}
 }
@@ -433,7 +430,6 @@ type ManifestReader struct {
 	field2Col            map[FieldID]int
 	storageConfig        *indexpb.StorageConfig
 	storagePluginContext *indexcgopb.StoragePluginContext
-	importReadKeyset     bool
 	externalSpecContext  packed.ExternalSpecContext
 	textColumnConfigs    []packed.TextColumnConfig
 
@@ -610,7 +606,6 @@ func newManifestReader(
 		storagePluginContext: storagePluginContext,
 		externalSpecContext:  extfs,
 		textColumnConfigs:    textColumnConfigs,
-		importReadKeyset:     rwOptions.importReadKeyset,
 
 		neededColumns:  neededColumns,
 		resolveTextLob: rwOptions.resolveTextLob,
@@ -658,11 +653,7 @@ func (mr *ManifestReader) init() error {
 		mr.reader = reader
 		return nil
 	}
-	open := packed.NewFFIPackedReader
-	if mr.importReadKeyset {
-		open = packed.NewImportFFIPackedReader
-	}
-	reader, err := open(mr.manifest, mr.arrowSchema, mr.neededColumns,
+	reader, err := packed.NewFFIPackedReader(mr.manifest, mr.arrowSchema, mr.neededColumns,
 		mr.bufferSize,
 		mr.storageConfig,
 		mr.storagePluginContext,

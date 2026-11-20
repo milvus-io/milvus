@@ -42,13 +42,6 @@ extern "C" {
 CStatus
 GetEncParams(CPluginContext* c_plugin_context, char** out_key, char** out_meta);
 
-// Same output format and ownership as GetEncParams, using the supplied target
-// keyset's primary for this writer.
-CStatus
-GetImportEncParams(const CPluginContext* target,
-                   char** out_key,
-                   char** out_meta);
-
 #ifdef __cplusplus
 }
 #endif

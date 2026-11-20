@@ -797,19 +797,11 @@ const importBinlogTestZone int64 = (1 << 53) + 1 // adjacent IDs must survive JS
 
 func newImportBinlogTestCipher(t *testing.T) (*importBinlogCipher, BinlogWriterOptions, *indexcgopb.StoragePluginContext) {
 	t.Helper()
-	cipher := &importBinlogCipher{}
+	cipher := &importBinlogCipher{registered: "dispatched source"}
 	plugin := mockey.Mock(hookutil.GetCipher).Return(cipher).Build()
 	t.Cleanup(func() { plugin.UnPatch() })
 	source := &indexcgopb.StoragePluginContext{EncryptionZoneId: importBinlogTestZone, EncryptionKey: base64.StdEncoding.EncodeToString([]byte("dispatched source"))}
 	return cipher, WithWriterEncryptionContext(importBinlogTestZone, []byte("file EDEK"), cipher), source
-}
-
-func (c *importBinlogCipher) RegisterImportReadKeys(ezID int64, keyset []byte) error {
-	if ezID != importBinlogTestZone || string(keyset) != "dispatched source" {
-		return merr.ErrServiceInternal
-	}
-	c.registered = string(keyset)
-	return nil
 }
 
 func (c *importBinlogCipher) GetDecryptor(ezID, collectionID int64, edek []byte) (hook.Decryptor, error) {
@@ -857,13 +849,11 @@ func TestImportReadContextReopensEncryptedBinlogs(t *testing.T) {
 	}
 	reader, err := NewBinlogRecordReader(context.Background(), []*datapb.FieldBinlog{{
 		FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "first"}, {LogPath: "second"}},
-	}}, schema, WithVersion(StorageV1), WithCollectionID(53), WithImportReadContext(source),
+	}}, schema, WithVersion(StorageV1), WithCollectionID(53), WithPluginContext(source),
 		WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) { return [][]byte{data}, nil }))
 	require.NoError(t, err)
 	defer reader.Close()
 	for range 2 {
-		// The worker may evict this EZ between opening two files in the same execution.
-		cipher.registered = ""
 		rec, err := reader.Next()
 		require.NoError(t, err)
 		require.EqualValues(t, 42, rec.Column(100).(*array.Int64).Value(0))
@@ -871,7 +861,7 @@ func TestImportReadContextReopensEncryptedBinlogs(t *testing.T) {
 	require.Equal(t, 2, cipher.opens)
 }
 
-func TestImportReadContextRejectsUndispatchedBinlogZone(t *testing.T) {
+func TestBinlogReaderUsesRegisteredKeysAndFileMetadata(t *testing.T) {
 	cipher, encryption, source := newImportBinlogTestCipher(t)
 	cipher.registered = "another task's cached key"
 	for _, tc := range []struct {
@@ -882,19 +872,20 @@ func TestImportReadContextRejectsUndispatchedBinlogZone(t *testing.T) {
 	}{
 		{name: "plaintext task and file", valid: true},
 		{name: "encrypted task and plaintext file", source: source, valid: true},
-		{name: "plaintext task and encrypted file", opts: []BinlogWriterOptions{encryption}},
-		{name: "different adjacent source zone", source: &indexcgopb.StoragePluginContext{
+		{name: "previously registered file zone", valid: true, opts: []BinlogWriterOptions{encryption}},
+		{name: "different adjacent source zone", valid: true, source: &indexcgopb.StoragePluginContext{
 			EncryptionZoneId: importBinlogTestZone - 1, EncryptionKey: source.EncryptionKey,
 		}, opts: []BinlogWriterOptions{encryption}},
 		{name: "missing file zone", source: source, opts: []BinlogWriterOptions{encryption, func(b *baseBinlogWriter) { delete(b.Extras, ezIDKey) }}},
 		{name: "missing file EDEK", source: source, opts: []BinlogWriterOptions{encryption, func(b *baseBinlogWriter) { delete(b.Extras, edekKey) }}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			before := cipher.opens
 			data := writeImportTestBinlog(t, tc.opts...)
 			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64}}}
 			r, err := NewBinlogRecordReader(context.Background(), []*datapb.FieldBinlog{{
 				FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "binlog"}},
-			}}, schema, WithVersion(StorageV1), WithImportReadContext(tc.source),
+			}}, schema, WithVersion(StorageV1), WithPluginContext(tc.source),
 				WithDownloader(func(context.Context, []string) ([][]byte, error) { return [][]byte{data}, nil }))
 			require.NoError(t, err)
 			defer r.Close()
@@ -907,7 +898,11 @@ func TestImportReadContextRejectsUndispatchedBinlogZone(t *testing.T) {
 				require.True(t, IsImportBinlogDecryptionError(err))
 			}
 			require.Equal(t, "another task's cached key", cipher.registered)
-			require.Zero(t, cipher.opens)
+			if tc.valid && len(tc.opts) != 0 {
+				require.Greater(t, cipher.opens, before)
+			} else {
+				require.Equal(t, before, cipher.opens)
+			}
 		})
 	}
 }
@@ -927,7 +922,7 @@ func TestImportReadContextDecryptsLegacyDelete(t *testing.T) {
 	require.NoError(t, err)
 
 	reader, err := NewDeltalogReader(context.Background(), schemapb.DataType_Int64, []string{"delta"},
-		WithVersion(StorageV1), WithImportReadContext(source),
+		WithVersion(StorageV1), WithPluginContext(source),
 		WithDownloader(func(context.Context, []string) ([][]byte, error) { return [][]byte{data}, nil }))
 	require.NoError(t, err)
 	defer reader.Close()
@@ -944,7 +939,7 @@ func TestImportReadContextRoutesPlaintextManifestAndDelta(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
 	}}
-	manifest := mockey.Mock(packed.NewImportFFIPackedReader).To(func(_ string, _ *arrow.Schema, _ []string, _ int64, _ *indexpb.StorageConfig,
+	manifest := mockey.Mock(packed.NewFFIPackedReader).To(func(_ string, _ *arrow.Schema, _ []string, _ int64, _ *indexpb.StorageConfig,
 		got *indexcgopb.StoragePluginContext, _ packed.ExternalReaderContext,
 	) (*packed.FFIPackedReader, error) {
 		require.Nil(t, got)
@@ -952,7 +947,7 @@ func TestImportReadContextRoutesPlaintextManifestAndDelta(t *testing.T) {
 	}).Build()
 	defer manifest.UnPatch()
 	_, err := NewManifestRecordReader(ctx, "manifest", schema, WithVersion(StorageV3), WithStorageConfig(cfg),
-		WithPresentFields(map[FieldID]struct{}{100: {}}), WithImportReadContext(nil))
+		WithPresentFields(map[FieldID]struct{}{100: {}}), WithPluginContext(nil))
 	require.ErrorIs(t, err, merr.ErrIoPermissionDenied)
 	require.EqualValues(t, 1, manifest.Times())
 
@@ -960,12 +955,12 @@ func TestImportReadContextRoutesPlaintextManifestAndDelta(t *testing.T) {
 		got *indexcgopb.StoragePluginContext, _ packed.ExternalReaderContext, opts ...packed.ReaderOption,
 	) (*packed.PackedReader, error) {
 		require.Nil(t, got)
-		require.NotEmpty(t, opts)
+		require.Empty(t, opts)
 		return nil, merr.ErrIoPermissionDenied
 	}).Build()
 	defer delta.UnPatch()
 	reader, err := NewDeltalogReader(ctx, schemapb.DataType_Int64, []string{"delta"}, WithVersion(StorageV2),
-		WithStorageConfig(cfg), WithImportReadContext(nil))
+		WithStorageConfig(cfg), WithPluginContext(nil))
 	require.NoError(t, err)
 	defer reader.Close()
 	_, err = reader.Next()

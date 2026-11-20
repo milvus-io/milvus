@@ -44,7 +44,7 @@ import (
 
 type BulkPackWriterV2 struct {
 	*BulkPackWriter
-	importTarget        *indexcgopb.StoragePluginContext
+
 	bufferSize          int64
 	multiPartUploadSize int64
 
@@ -173,11 +173,11 @@ func (bw *BulkPackWriterV2) getBucketName() string {
 	return paramtable.Get().MinioCfg.BucketName.GetValue()
 }
 
-func (bw *BulkPackWriterV2) getPluginContext(collectionID int64) (*indexcgopb.StoragePluginContext, error) {
-	if bw.importTarget != nil {
-		return bw.importTarget, nil
+func (bw *BulkPackWriterV2) getPluginContext(pack *SyncPack) (*indexcgopb.StoragePluginContext, error) {
+	if pack.pluginContext != nil {
+		return pack.pluginContext, nil
 	}
-	return hookutil.GetCollectionPluginContext(bw.schema.GetProperties(), collectionID)
+	return hookutil.GetCollectionPluginContext(bw.schema.GetProperties(), pack.collectionID)
 }
 
 func (bw *BulkPackWriterV2) getTsRange(rec storage.Record) (tsFrom, tsTo uint64) {
@@ -209,7 +209,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	defer rec.Release()
 
 	tsFrom, tsTo := bw.getTsRange(rec)
-	pluginContextPtr, err := bw.getPluginContext(pack.collectionID)
+	pluginContextPtr, err := bw.getPluginContext(pack)
 	if err != nil {
 		return nil, "", err
 	}
@@ -233,7 +233,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 				mlog.FieldCollectionID(pack.collectionID),
 				mlog.FieldSegmentID(pack.segmentID),
 				mlog.Err(err))
-			if bw.importTarget != nil && (errors.Is(err, merr.ErrSegcoreUnsupported) || errors.Is(err, merr.ErrServiceUnimplemented)) {
+			if pack.pluginContext != nil && (errors.Is(err, merr.ErrSegcoreUnsupported) || errors.Is(err, merr.ErrServiceUnimplemented)) {
 				return retry.Unrecoverable(err)
 			}
 			return err
@@ -296,11 +296,7 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 		return result
 	}
 
-	open := storage.NewPackedRecordWriter
-	if bw.importTarget != nil {
-		open = storage.NewImportPackedRecordWriter
-	}
-	w, err := open(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
+	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
 	if err != nil {
 		return nil, "", err
 	}

@@ -78,7 +78,7 @@ func TestBackupSourcePluginContext(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			storeCipher(tc.cipher)
-			ctx, err := GetReadStoragePluginContext("artifact")
+			ctx, err := ResolveImportEZ("artifact")
 			require.ErrorIs(t, err, tc.err)
 			require.Nil(t, ctx)
 		})
@@ -96,7 +96,7 @@ func TestBackupSourcePluginContext(t *testing.T) {
 			{"after rotation", "17:Af8="},
 			{"before rotation", "17:/wA="},
 		} {
-			ctx, err := GetReadStoragePluginContext(backup.artifact)
+			ctx, err := ResolveImportEZ(backup.artifact)
 			require.NoError(t, err)
 			require.Len(t, ctx, 1)
 			require.Equal(t, CipherConfigUnsafeEZK, ctx[0].GetKey())

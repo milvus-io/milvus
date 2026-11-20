@@ -79,8 +79,7 @@ class RecordingCipherPlugin : public plugin::ICipherPlugin {
     std::shared_ptr<plugin::IEncryptor> encryptor;
 };
 
-class ImportCipherPlugin : public RecordingCipherPlugin,
-                           public plugin::IImportCipherPlugin {
+class ImportCipherPlugin : public RecordingCipherPlugin {
  public:
     using EncryptorResult =
         std::pair<std::shared_ptr<plugin::IEncryptor>, std::string>;
@@ -91,7 +90,7 @@ class ImportCipherPlugin : public RecordingCipherPlugin,
     MOCK_METHOD(EncryptorResult,
                 GetEncryptorForKeyset,
                 (int64_t, int64_t, const std::string&),
-                (const, override));
+                (override));
 };
 
 void
@@ -238,34 +237,6 @@ TEST(CipherPluginContextTest, WriterPreservesBinaryKeysAcrossStringBoundary) {
     }
 }
 
-TEST(CipherPluginContextTest, ImportKeysetsRequireImportCapablePlugin) {
-    auto& loader = PluginLoader::GetInstance();
-    auto previous = loader.getCipherPlugin();
-    auto restore = folly::makeGuard([&] {
-        loader.unregisterPluginForTest("CipherPlugin");
-        if (previous) {
-            loader.registerPluginForTest(previous);
-        }
-    });
-    auto ordinary = std::make_shared<RecordingCipherPlugin>();
-    loader.registerPluginForTest(ordinary);
-    CPluginContext context{17, 23, "a2V5"};
-    auto status = RegisterPackedImportReadKeyset(&context, nullptr);
-    ASSERT_EQ(status.error_code, ErrorCode::Unsupported);
-    EXPECT_THAT(status.error_msg, testing::HasSubstr("import keysets"));
-    free(const_cast<char*>(status.error_msg));
-
-    char* key = nullptr;
-    char* metadata = nullptr;
-    status = GetImportEncParams(&context, &key, &metadata);
-    ASSERT_EQ(status.error_code, ErrorCode::Unsupported);
-    EXPECT_THAT(status.error_msg, testing::HasSubstr("import keysets"));
-    free(const_cast<char*>(status.error_msg));
-    EXPECT_EQ(key, nullptr);
-    EXPECT_EQ(metadata, nullptr);
-    EXPECT_EQ(ordinary->update_count, 0);
-}
-
 TEST(CipherPluginContextTest, ImportWriterRejectsUnusableEncryptionParameters) {
     auto& loader = PluginLoader::GetInstance();
     auto previous = loader.getCipherPlugin();
@@ -295,7 +266,7 @@ TEST(CipherPluginContextTest, ImportWriterRejectsUnusableEncryptionParameters) {
         }
         char* key = nullptr;
         char* metadata = nullptr;
-        auto status = GetImportEncParams(&context, &key, &metadata);
+        auto status = GetEncParams(&context, &key, &metadata);
         ASSERT_EQ(status.error_code, ErrorCode::Unsupported);
         free(const_cast<char*>(status.error_msg));
         EXPECT_EQ(key, nullptr);
@@ -309,7 +280,7 @@ TEST(CipherPluginContextTest, ImportWriterRejectsUnusableEncryptionParameters) {
     EXPECT_CALL(*encryptor, GetKey()).WillOnce(testing::Return(binary_dek));
     char* key = nullptr;
     char* metadata = nullptr;
-    auto status = GetImportEncParams(&context, &key, &metadata);
+    auto status = GetEncParams(&context, &key, &metadata);
     ASSERT_EQ(status.error_code, Success) << status.error_msg;
     auto cleanup = folly::makeGuard([&] {
         free(key);

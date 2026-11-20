@@ -143,8 +143,6 @@ func TestSnapshotCMEKTargetOnlyNullableTextBothPhases(t *testing.T) {
 		Source: &indexcgopb.StoragePluginContext{EncryptionZoneId: 10, EncryptionKey: "c291cmNl"},
 		Target: &indexcgopb.StoragePluginContext{EncryptionZoneId: 10, EncryptionKey: "dGFyZ2V0"},
 	}
-	contextPatch := mockey.Mock(hookutil.GetCPluginContextByEzID).Return(nil, merr.ErrServiceUnavailable).Build()
-	defer contextPatch.UnPatch()
 	memoryPatch := mockey.Mock(GetMemoryAllocator).Return(NewMemoryAllocator(4 << 30)).Build()
 	defer memoryPatch.UnPatch()
 	fieldIDsPatch := mockey.Mock(packed.GetManifestFieldIDs).
@@ -221,7 +219,6 @@ func TestSnapshotCMEKTargetOnlyNullableTextBothPhases(t *testing.T) {
 	require.EqualValues(t, 1, manager.Get(1).(*PreImportTask).GetFileStats()[0].GetTotalRows())
 	require.Equal(t, 1, imported)
 	require.Equal(t, 2, openCount)
-	require.Zero(t, contextPatch.Times())
 	require.True(t, typeutil.HasTextField(schema), "projection must not remove the target field")
 }
 

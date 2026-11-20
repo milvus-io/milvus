@@ -52,9 +52,9 @@ type BackupInterface interface {
 	Backup(ezID int64) (string, error)
 }
 
-// ImportEZResolver decrypts this backup with its source credentials on each call.
+// ImportResolverInterface decrypts this backup with its source credentials on each call.
 // The result is the original EZ ID and raw keyset for this artifact.
-type ImportEZResolver interface {
+type ImportResolverInterface interface {
 	ResolveImportEZ(artifact string) (int64, []byte, error)
 }
 
@@ -376,21 +376,6 @@ func GetCPluginContext(context []*commonpb.KeyValuePair, collectionID int64) (*i
 	}
 
 	return nil, nil
-}
-
-func GetCPluginContextByEzID(ezID int64) (*indexcgopb.StoragePluginContext, error) {
-	if !IsClusterEncryptionEnabled() {
-		return nil, nil
-	}
-	key := GetCipher().GetUnsafeKey(ezID, 0)
-	if len(key) == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("cannot get ez key for ezID=%d", ezID)
-	}
-	return &indexcgopb.StoragePluginContext{
-		EncryptionZoneId: ezID,
-		EncryptionKey:    base64.StdEncoding.EncodeToString(key),
-		CollectionId:     0,
-	}, nil
 }
 
 func BackupEZKFromDBProperties(dbProperties []*commonpb.KeyValuePair) (string, error) {

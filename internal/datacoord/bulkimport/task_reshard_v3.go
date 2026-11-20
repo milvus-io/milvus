@@ -190,6 +190,13 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) 
 		t.Fail(fmt.Sprintf("reshard task cannot start: job %d is in state %s", p.GetJobId(), job.GetState()))
 		return
 	}
+	readContext, err := resolveImportReadContext(job.GetOptions())
+	if err != nil {
+		if !retryableImportSourceError(err) {
+			failImportDispatch(t, t.importMeta, err)
+		}
+		return
+	}
 	cfg := getImportV3Config()
 	plan, err := reshardPlan(job, p, cfg)
 	if err != nil {
@@ -199,7 +206,7 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) 
 	req := &datapb.ReshardTaskRequest{
 		JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId(),
 		Slot: reshardSlot(job, cfg), StorageConfig: meta.CreateStorageConfig(),
-		PluginContext: getImportV3ReadPluginContext(job.GetOptions()),
+		PluginContext: readContext,
 		Plan:          plan,
 	}
 	if err := meta.WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {

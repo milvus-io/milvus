@@ -27,19 +27,15 @@
 #include "storage/KeyRetriever.h"
 #include "storage/loon_ffi/ffi_writer_c.h"
 
-namespace {
 CStatus
-GetWriterEncParams(const CPluginContext* context,
-                   bool for_import,
-                   char** out_key,
-                   char** out_meta) {
+GetEncParams(CPluginContext* context, char** out_key, char** out_meta) {
     try {
         AssertInfo(out_key != nullptr && out_meta != nullptr,
                    "encryption parameter outputs must not be null");
         *out_key = nullptr;
         *out_meta = nullptr;
         auto [raw_key, metadata] =
-            milvus::storage::GetPackedWriterKeys(context, for_import);
+            milvus::storage::GetPackedWriterKeys(context);
         // Both cgo and Loon properties use NUL-terminated strings. Encode the
         // binary DEK before crossing either boundary. The Parquet writer
         // decodes it when constructing its encryption configuration.
@@ -56,17 +52,4 @@ GetWriterEncParams(const CPluginContext* context,
         return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS
-}
-}  // namespace
-
-CStatus
-GetEncParams(CPluginContext* context, char** out_key, char** out_meta) {
-    return GetWriterEncParams(context, false, out_key, out_meta);
-}
-
-CStatus
-GetImportEncParams(const CPluginContext* target,
-                   char** out_key,
-                   char** out_meta) {
-    return GetWriterEncParams(target, true, out_key, out_meta);
 }

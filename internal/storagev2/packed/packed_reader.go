@@ -51,16 +51,7 @@ import (
 type ReaderOption func(*readerOptions)
 
 type readerOptions struct {
-	eagerPrebuffer   bool
-	importReadKeyset bool
-}
-
-// WithImportReadKeyset registers the supplied source keyset for decrypting
-// packed files without changing the ordinary write keyset.
-func WithImportReadKeyset() ReaderOption {
-	return func(o *readerOptions) {
-		o.importReadKeyset = true
-	}
+	eagerPrebuffer bool
 }
 
 // WithEagerPrebuffer makes every read round fetch all of its byte ranges at
@@ -149,20 +140,65 @@ func NewPackedReaderWithExtfs(
 	var cPackedReader C.CPackedReader
 	var status C.CStatus
 
-	pluginContextPtr, releasePluginContext := newCPluginContext(storagePluginContext)
-	defer releasePluginContext()
-	var cConfig *C.CStorageConfig
-	if cProperties == nil && storageConfig != nil {
-		config, release := newCStorageConfig(storageConfig)
-		defer release()
-		cConfig = &config
+	var pluginContextPtr *C.CPluginContext
+	if storagePluginContext != nil {
+		ckey := C.CString(storagePluginContext.EncryptionKey)
+		defer C.free(unsafe.Pointer(ckey))
+		var pluginContext C.CPluginContext
+		pluginContext.ez_id = C.int64_t(storagePluginContext.EncryptionZoneId)
+		pluginContext.collection_id = C.int64_t(storagePluginContext.CollectionId)
+		pluginContext.key = ckey
+		pluginContextPtr = &pluginContext
 	}
-	if options.importReadKeyset {
-		status = C.NewImportPackedReader(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerPrebuffer, cConfig, cProperties, cFilesystemPath, &cPackedReader, pluginContextPtr)
-	} else if cProperties != nil {
+
+	if cProperties != nil {
 		status = C.NewPackedReaderWithProperties(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerPrebuffer, cProperties, cFilesystemPath, &cPackedReader, pluginContextPtr)
-	} else if cConfig != nil {
-		status = C.NewPackedReaderWithStorageConfig(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerPrebuffer, *cConfig, &cPackedReader, pluginContextPtr)
+	} else if storageConfig != nil {
+		cStorageConfig := C.CStorageConfig{
+			address:                         C.CString(storageConfig.GetAddress()),
+			bucket_name:                     C.CString(storageConfig.GetBucketName()),
+			access_key_id:                   C.CString(storageConfig.GetAccessKeyID()),
+			access_key_value:                C.CString(storageConfig.GetSecretAccessKey()),
+			root_path:                       C.CString(storageConfig.GetRootPath()),
+			storage_type:                    C.CString(storageConfig.GetStorageType()),
+			cloud_provider:                  C.CString(storageConfig.GetCloudProvider()),
+			iam_endpoint:                    C.CString(storageConfig.GetIAMEndpoint()),
+			log_level:                       C.CString("warn"),
+			useSSL:                          C.bool(storageConfig.GetUseSSL()),
+			sslCACert:                       C.CString(storageConfig.GetSslCACert()),
+			useIAM:                          C.bool(storageConfig.GetUseIAM()),
+			region:                          C.CString(storageConfig.GetRegion()),
+			useVirtualHost:                  C.bool(storageConfig.GetUseVirtualHost()),
+			requestTimeoutMs:                C.int64_t(storageConfig.GetRequestTimeoutMs()),
+			gcp_credential_json:             C.CString(storageConfig.GetGcpCredentialJSON()),
+			use_custom_part_upload:          true,
+			max_connections:                 C.uint32_t(storageConfig.GetMaxConnections()),
+			tls_min_version:                 C.CString(tlsMinVersionForStorage(storageConfig.GetSslTlsMinVersion())),
+			use_crc32c_checksum:             C.bool(storageConfig.GetUseCrc32CChecksum()),
+			talon_mode:                      C.uint32_t(storageConfig.GetTalonMode()),
+			talon_enabled_stages:            C.uint32_t(storageConfig.GetTalonEnabledStages()),
+			talon_small_read_threshold:      C.uint32_t(storageConfig.GetTalonSmallReadThreshold()),
+			talon_coordinator:               C.CString(storageConfig.GetTalonCoordinator()),
+			talon_block_size:                C.uint32_t(storageConfig.GetTalonBlockSize()),
+			talon_max_idle_per_addr:         C.uint32_t(storageConfig.GetTalonMaxIdlePerAddr()),
+			talon_enable_for_external_table: C.bool(storageConfig.GetTalonEnableForExternalTable()),
+		}
+		defer C.free(unsafe.Pointer(cStorageConfig.address))
+		defer C.free(unsafe.Pointer(cStorageConfig.bucket_name))
+		defer C.free(unsafe.Pointer(cStorageConfig.access_key_id))
+		defer C.free(unsafe.Pointer(cStorageConfig.access_key_value))
+		defer C.free(unsafe.Pointer(cStorageConfig.root_path))
+		defer C.free(unsafe.Pointer(cStorageConfig.storage_type))
+		defer C.free(unsafe.Pointer(cStorageConfig.cloud_provider))
+		defer C.free(unsafe.Pointer(cStorageConfig.iam_endpoint))
+		defer C.free(unsafe.Pointer(cStorageConfig.log_level))
+		defer C.free(unsafe.Pointer(cStorageConfig.sslCACert))
+		defer C.free(unsafe.Pointer(cStorageConfig.region))
+		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
+		defer C.free(unsafe.Pointer(cStorageConfig.tls_min_version))
+		defer C.free(unsafe.Pointer(cStorageConfig.talon_coordinator))
+
+		status = C.NewPackedReaderWithStorageConfig(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerPrebuffer, cStorageConfig, &cPackedReader, pluginContextPtr)
 	} else {
 		status = C.NewPackedReader(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerPrebuffer, &cPackedReader, pluginContextPtr)
 	}
@@ -231,15 +267,6 @@ func (pr *PackedReader) Close() error {
 // NewPackedReader does. A failed read keeps the storage error code the C++
 // side attached (transient storage errors stay retriable).
 func GetPackedFileFieldIDs(filePaths []string, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) ([][]int64, error) {
-	return getPackedFileFieldIDs(filePaths, storageConfig, storagePluginContext, false)
-}
-
-// GetImportPackedFileFieldIDs decrypts each footer using the import read cache.
-func GetImportPackedFileFieldIDs(filePaths []string, storageConfig *indexpb.StorageConfig, source *indexcgopb.StoragePluginContext) ([][]int64, error) {
-	return getPackedFileFieldIDs(filePaths, storageConfig, source, true)
-}
-
-func getPackedFileFieldIDs(filePaths []string, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, forImport bool) ([][]int64, error) {
 	if len(filePaths) == 0 {
 		return nil, nil
 	}
@@ -260,13 +287,8 @@ func getPackedFileFieldIDs(filePaths []string, storageConfig *indexpb.StorageCon
 
 	var cFieldIDs *C.int64_t
 	var cFieldCounts *C.int64_t
-	paths := (**C.char)(unsafe.Pointer(&cFilePaths[0]))
-	var status C.CStatus
-	if forImport {
-		status = C.GetImportPackedFileFieldIDs(paths, C.int64_t(len(filePaths)), cStorageConfigPtr, cPluginContext, &cFieldIDs, &cFieldCounts)
-	} else {
-		status = C.GetPackedFileFieldIDs(paths, C.int64_t(len(filePaths)), cStorageConfigPtr, cPluginContext, &cFieldIDs, &cFieldCounts)
-	}
+	status := C.GetPackedFileFieldIDs((**C.char)(unsafe.Pointer(&cFilePaths[0])), C.int64_t(len(filePaths)),
+		cStorageConfigPtr, cPluginContext, &cFieldIDs, &cFieldCounts)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
 	}

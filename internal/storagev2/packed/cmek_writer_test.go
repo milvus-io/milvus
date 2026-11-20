@@ -68,16 +68,16 @@ func TestPackedImportRequiresCipherCapability(t *testing.T) {
 	schema := arrow.NewSchema([]arrow.Field{{Name: "pk", Type: arrow.PrimitiveTypes.Int64, Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{"100"})}}, nil)
 	groups := []storagecommon.ColumnGroup{{GroupID: 0, Columns: []int{0}, Fields: []int64{100}}}
 	for _, storage := range []*indexpb.StorageConfig{nil, cfg} {
-		writer, err := NewImportPackedWriter(paths, schema, 1<<20, 0, groups, storage, keyset)
+		writer, err := NewPackedWriter(paths, schema, 1<<20, 0, groups, storage, keyset)
 		require.ErrorIs(t, err, merr.ErrSegcoreUnsupported)
 		require.Nil(t, writer)
-		reader, err := NewPackedReaderWithExtfs(paths, schema, 1<<20, storage, keyset, ExternalReaderContext{}, WithImportReadKeyset())
+		reader, err := NewPackedReaderWithExtfs(paths, schema, 1<<20, storage, keyset, ExternalReaderContext{})
 		require.ErrorIs(t, err, merr.ErrSegcoreUnsupported)
 		require.Nil(t, reader)
-		_, err = GetImportPackedFileFieldIDs(paths, storage, keyset)
+		_, err = GetPackedFileFieldIDs(paths, storage, keyset)
 		require.ErrorIs(t, err, merr.ErrSegcoreUnsupported)
 	}
-	writer, err := NewImportFFIPackedWriter(root, schema, groups, cfg, keyset)
+	writer, err := NewFFIPackedWriter(root, schema, groups, cfg, keyset)
 	require.ErrorIs(t, err, merr.ErrSegcoreUnsupported)
 	require.Nil(t, writer)
 	_, err = os.Stat(paths[0])

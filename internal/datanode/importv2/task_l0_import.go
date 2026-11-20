@@ -181,7 +181,7 @@ func (t *L0ImportTask) Execute() []*conc.Future[any] {
 
 		var reader binlog.L0Reader
 		reader, err = binlog.NewL0Reader(t.ctx, t.cm, t.req.GetStorageConfig(), pkField, file, bufferSize, tsStart, tsEnd,
-			storage.WithImportReadContext(t.importCipher.Source))
+			storage.WithPluginContext(t.importCipher.Source))
 		if err != nil {
 			return err
 		}

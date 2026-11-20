@@ -32,7 +32,6 @@ import (
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -52,7 +51,6 @@ type reader struct {
 	storageConfig    *indexpb.StorageConfig
 	schema           *schemapb.CollectionSchema
 	storageVersion   int64
-	importEz         string
 	sourceEncryption SourceEncryption
 
 	fileSize         *atomic.Int64
@@ -84,41 +82,16 @@ type reader struct {
 type SourceEncryption struct {
 	Encrypted     bool
 	PluginContext *indexcgopb.StoragePluginContext
-	// Dispatched contexts are read-only. Legacy direct callers may still
-	// provide a context from the ordinary local key manager.
-	Dispatched bool
 }
 
 func (s SourceEncryption) readerOption() storage.RwOption {
-	if s.Dispatched {
-		return storage.WithImportReadContext(s.PluginContext)
-	}
 	return storage.WithPluginContext(s.PluginContext)
 }
 
-func NewReader(ctx context.Context,
-	cm storage.ChunkManager,
-	schema *schemapb.CollectionSchema,
-	storageConfig *indexpb.StorageConfig,
-	storageVersion int64,
-	paths []string,
-	tsStart,
-	tsEnd uint64,
-	bufferSize int,
-	importEz string,
-	pluginContext *indexcgopb.StoragePluginContext,
-) (*reader, error) {
-	r := newReader(ctx, cm, schema, storageConfig, storageVersion, bufferSize, importEz)
-	r.sourceEncryption.PluginContext = pluginContext
-	return r.open(paths, tsStart, tsEnd)
-}
-
-// NewBackupReader opens a legacy prefix backup using the task's resolved
-// source. It never looks up an ordinary key by encryption zone.
-func NewBackupReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema,
+func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema,
 	cfg *indexpb.StorageConfig, version int64, paths []string, start, end uint64, bufferSize int, encryption SourceEncryption,
 ) (*reader, error) {
-	r := newReader(ctx, cm, schema, cfg, version, bufferSize, "")
+	r := newReader(ctx, cm, schema, cfg, version, bufferSize)
 	r.sourceEncryption = encryption
 	return r.open(paths, start, end)
 }
@@ -151,7 +124,7 @@ func NewStorageV3ManifestReader(ctx context.Context,
 	snapshotDeleteBudget int64,
 	validate func(string) error,
 ) (*reader, error) {
-	r := newReader(ctx, cm, schema, storageConfig, storage.StorageV3, bufferSize, "")
+	r := newReader(ctx, cm, schema, storageConfig, storage.StorageV3, bufferSize)
 	r.sourceEncryption = encryption
 	r.validatePath = validate
 	return initStorageV3ManifestReader(r, manifestPath, tsStart, tsEnd, source, snapshotDeleteBudget, nil)
@@ -168,7 +141,7 @@ func NewStorageV3ManifestReaderWithSharedL0(ctx context.Context, cm storage.Chun
 	if shared == nil {
 		return nil, merr.WrapErrServiceInternalMsg("shared L0 reader requires prepared bitmaps")
 	}
-	r := newReader(ctx, cm, schema, storageConfig, storage.StorageV3, bufferSize, "")
+	r := newReader(ctx, cm, schema, storageConfig, storage.StorageV3, bufferSize)
 	r.sourceEncryption = encryption
 	r.validatePath = validate
 	return initStorageV3ManifestReader(r, manifestPath, tsStart, tsEnd, source, snapshotDeleteBudget, shared)
@@ -246,7 +219,6 @@ func newReader(ctx context.Context,
 	storageConfig *indexpb.StorageConfig,
 	storageVersion int64,
 	bufferSize int,
-	importEz string,
 ) *reader {
 	systemFieldsAbsent := true
 	for _, field := range schema.Fields {
@@ -266,7 +238,6 @@ func newReader(ctx context.Context,
 		fileSize:       atomic.NewInt64(0),
 		bufferSize:     bufferSize,
 		storageConfig:  storageConfig,
-		importEz:       importEz,
 		retryAttempts:  paramtable.Get().CommonCfg.StorageReadRetryAttempts.GetAsUint(),
 	}
 	return r
@@ -319,18 +290,6 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 		storage.WithStorageConfig(r.storageConfig),
 	}
 
-	// Older direct callers without a dispatched source use their ordinary
-	// local key manager. An import task never takes this branch.
-	if r.sourceEncryption.PluginContext == nil && len(r.importEz) > 0 {
-		ezID, err := hookutil.GetEzIDByImportEzk(r.importEz)
-		if err != nil {
-			return err
-		}
-		r.sourceEncryption.PluginContext, err = hookutil.GetCPluginContextByEzID(ezID)
-		if err != nil {
-			return err
-		}
-	}
 	rwOptions = append(rwOptions, r.sourceEncryption.readerOption())
 
 	rr, err := storage.NewBinlogRecordReader(r.ctx, binlogs, r.schema, rwOptions...)
@@ -992,7 +951,7 @@ func NewStorageV2SnapshotReader(ctx context.Context, cm storage.ChunkManager, sc
 	if deleteBudget <= 0 {
 		return nil, merr.Wrapf(merr.ErrServiceResourceInsufficient, "snapshot delete-map budget must be positive")
 	}
-	r := newReader(ctx, cm, schema, cfg, storage.StorageV2, bufferSize, "")
+	r := newReader(ctx, cm, schema, cfg, storage.StorageV2, bufferSize)
 	r.sourceEncryption, r.validatePath, r.snapshotSource = encryption, validate, source
 	var input *snapshotV2Input
 	var err error

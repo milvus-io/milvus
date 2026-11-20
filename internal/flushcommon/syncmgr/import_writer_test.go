@@ -36,10 +36,11 @@ func (s *SyncTaskSuite) TestImportWriterUsesTaskKeyset() {
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true).Maybe()
 	task := s.getSuiteSyncTask(new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()}))
 	target := &indexcgopb.StoragePluginContext{EncryptionZoneId: 17, CollectionId: s.collectionID, EncryptionKey: "bmV3"}
-	task.WithImportTarget(target).WithWriteRetryOptions(retry.Attempts(3))
+	task.pack.WithPluginContext(target)
+	task.WithWriteRetryOptions(retry.Attempts(3))
 	var got *indexcgopb.StoragePluginContext
 	var attempts int
-	open := mockey.Mock(packed.NewImportPackedWriter).To(func(_ []string, _ *arrow.Schema, _, _ int64,
+	open := mockey.Mock(packed.NewPackedWriter).To(func(_ []string, _ *arrow.Schema, _, _ int64,
 		_ []storagecommon.ColumnGroup, _ *indexpb.StorageConfig, key *indexcgopb.StoragePluginContext,
 	) (*packed.PackedWriter, error) {
 		attempts++

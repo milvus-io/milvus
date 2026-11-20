@@ -41,7 +41,6 @@ namespace {
 using milvus::storage::plugin::ICipherPlugin;
 using milvus::storage::plugin::IDecryptor;
 using milvus::storage::plugin::IEncryptor;
-using milvus::storage::plugin::IImportCipherPlugin;
 using milvus::storage::plugin::IPlugin;
 
 constexpr std::string_view kFixtureMasterKey = "milvus-cmek-fixture-master-v1";
@@ -275,8 +274,7 @@ class FixtureDecryptor final : public IDecryptor {
     std::string key_;
 };
 
-class FixtureCipherPlugin final : public ICipherPlugin,
-                                  public IImportCipherPlugin {
+class FixtureCipherPlugin final : public ICipherPlugin {
  public:
     std::string
     getPluginName() const override {
@@ -325,7 +323,7 @@ class FixtureCipherPlugin final : public ICipherPlugin,
     std::pair<std::shared_ptr<IEncryptor>, std::string>
     GetEncryptorForKeyset(int64_t ez_id,
                           int64_t coll_id,
-                          const std::string& key) const override {
+                          const std::string& key) override {
         auto result = makeEncryptor(checkedEZKey(ez_id, key), ez_id, coll_id);
         std::lock_guard<std::mutex> lock(context_mutex_);
         record(ez_id, coll_id, "write_keyset");
@@ -401,9 +399,9 @@ class FixtureCipherPlugin final : public ICipherPlugin,
         }
         const char* node = std::getenv("MILVUS_NODE_ID_FOR_TESTING");
         auto node_id = node == nullptr ? 0 : std::stoll(node);
-        std::ofstream log(std::string(dir) + "/cpp-" +
-                              std::to_string(getpid()) + ".jsonl",
-                          std::ios::app);
+        std::ofstream log(
+            std::string(dir) + "/cpp-" + std::to_string(getpid()) + ".jsonl",
+            std::ios::app);
         log << "{\"pid\":" << getpid() << ",\"node_id\":" << node_id
             << ",\"ez_id\":" << ez_id << ",\"collection_id\":" << coll_id
             << ",\"operation\":\"" << operation << "\"}\n";

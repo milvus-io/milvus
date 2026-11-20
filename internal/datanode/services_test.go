@@ -32,6 +32,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/compaction"
@@ -590,26 +591,29 @@ func (s *DataNodeServicesSuite) TestDropCompactionPlan() {
 	})
 }
 
+type importContextReceiver struct {
+	hook.Cipher
+	calls []map[string]string
+}
+
+func (c *importContextReceiver) Init(config map[string]string) error {
+	c.calls = append(c.calls, config)
+	return nil
+}
+
 func TestOrdinaryFileImportUsesCollectionKey(t *testing.T) {
 	properties := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}}
 	entries := []*commonpb.KeyValuePair{{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:bGl2ZQ=="}}
-	var registered []*commonpb.KeyValuePair
-	register := mockey.Mock(hookutil.RegisterEZsFromPluginContext).To(func(context []*commonpb.KeyValuePair) error {
-		registered = context
-		return nil
-	}).Build()
-	defer register.UnPatch()
-
-	keys, err := prepareV2ImportCipher(nil, properties, entries, 23)
-	require.NoError(t, err)
-	require.Equal(t, entries, registered)
-	require.Nil(t, keys.Target)
-
-	registered = nil
-	keys, err = prepareV2ImportCipher([]*commonpb.KeyValuePair{{Key: "backup", Value: "true"}}, properties, entries, 23)
-	require.NoError(t, err)
-	require.Nil(t, registered)
-	require.Equal(t, "bGl2ZQ==", keys.Target.GetEncryptionKey())
+	cipher := &importContextReceiver{}
+	patch := mockey.Mock(hookutil.GetCipher).Return(cipher).Build()
+	defer patch.UnPatch()
+	for _, options := range [][]*commonpb.KeyValuePair{nil, {{Key: "backup", Value: "true"}}} {
+		keys, err := prepareImportCipher(options, properties, entries, 23)
+		require.NoError(t, err)
+		require.Nil(t, keys.Source)
+		require.Equal(t, "bGl2ZQ==", keys.Target.GetEncryptionKey())
+		require.Equal(t, map[string]string{hookutil.CipherConfigCreateEZ: "17", hookutil.CipherConfigUnsafeEZK: "bGl2ZQ=="}, cipher.calls[len(cipher.calls)-1])
+	}
 }
 
 func (s *DataNodeServicesSuite) TestImportRejectsIncompleteCipherContext() {

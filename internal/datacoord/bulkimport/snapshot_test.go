@@ -689,7 +689,7 @@ func TestSnapshotImportL0URIRead(t *testing.T) {
 	for phase := 0; phase < 2; phase++ {
 		file := &internalpb.ImportFile{}
 		require.NoError(t, proto.Unmarshal(encoded, file))
-		readers := importutilv2.NewReaderFactory(ctx, cm, cfg, SnapshotImportTestOptions())
+		readers := importutilv2.NewReaderFactory(ctx, cm, cfg, SnapshotImportTestOptions(), nil)
 		shared, err := readers.PrepareSnapshotDeletes(ctx, schema, []*internalpb.ImportFile{file}, l0Source, 1024, 1024)
 		require.NoError(t, err)
 		reader, err := readers.NewReader(ctx, schema, file, 1024, 1024, shared)
