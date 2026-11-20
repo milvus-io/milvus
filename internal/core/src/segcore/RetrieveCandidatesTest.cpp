@@ -146,6 +146,18 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Combine(::testing::Bool(),
                        ::testing::Values(DataType::INT64, DataType::VARCHAR)));
 
+TEST_P(RetrieveCandidatesTest, SnapshotBeforeFirstInsertIsExhausted) {
+    auto empty = segment->Retrieve(
+        nullptr, plan.get(), 9, DEFAULT_MAX_OUTPUT_SIZE, false);
+    EXPECT_EQ(empty->offset_size(), 0);
+    EXPECT_FALSE(empty->has_more_result());
+
+    auto limited = segment->Retrieve(
+        nullptr, plan.get(), 10, DEFAULT_MAX_OUTPUT_SIZE, false);
+    EXPECT_EQ(limited->offset_size(), 2);
+    EXPECT_TRUE(limited->has_more_result());
+}
+
 TEST_P(RetrieveCandidatesTest, UnlimitedLightweightResultAndModeReset) {
     const auto fields = plan->field_ids_;
     ASSERT_EQ(plan->mode_, query::RetrieveMode::Normal);
@@ -296,8 +308,15 @@ TEST_P(RetrieveCandidatesTest, BudgetsAndCancellation) {
     auto offsets_only =
         segment->Retrieve(nullptr, plan.get(), 100, kRows * 8, false);
     EXPECT_EQ(offsets_only->offset_size(), kRows);
-    // No visible rows: the offsets fit, but serialized metadata exceeds budget.
-    ExpectCode([&] { segment->Retrieve(nullptr, plan.get(), 1, 1, false); },
+    // The filter matches no rows, but the serialized scan count exceeds one byte.
+    auto filter = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(pk, std::get<1>(GetParam()), {}),
+        std::vector<proto::plan::GenericValue>{});
+    plan->plan_node_->plannodes_ = test::CreateRetrievePlanByExpr(filter);
+    auto filtered = segment->Retrieve(nullptr, plan.get(), 100, 4096, false);
+    ASSERT_EQ(filtered->offset_size(), 0);
+    ASSERT_GT(filtered->all_retrieve_count(), 0);
+    ExpectCode([&] { segment->Retrieve(nullptr, plan.get(), 100, 1, false); },
                InvalidParameter);
     ExpectCode([&] { segment->Retrieve(nullptr, plan.get(), 100, 0, false); },
                UnexpectedError);

@@ -27,7 +27,7 @@ import (
 )
 
 func TestComplexDeleteQueryViewBatch(t *testing.T) {
-	for _, scenario := range []string{"int64", "varchar", "empty", "query_error", "incomplete", "rate_limit", "enqueue_error", "write_error"} {
+	for _, scenario := range []string{"int64", "varchar", "empty", "query_error", "incomplete", "missing_size", "rate_limit", "enqueue_error", "write_error"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			pkType := schemapb.DataType_Int64
@@ -56,13 +56,18 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 			if scenario == "empty" {
 				response.Results = nil
 			}
+			if scenario != "missing_size" {
+				response.CollectionSizeBytes = proto.Int64(12000)
+			}
 			if scenario == "incomplete" {
 				response.Results[1].HasMoreResult = true
 			}
 			client := queryclient.NewLegacyViewQueryClient(queryclient.ViewQueryClientConfig{}, nil, nil, nil)
 			var captured *internalpb.RetrieveRequest
+			queryCalls := 0
 			query := mockey.Mock(mockey.GetMethod(client.Legacy(), "Query")).To(func(_ context.Context, req *queryclient.LegacyQueryRequest) (*queryclient.LegacyQueryResult, error) {
 				captured = proto.Clone(req.Req).(*internalpb.RetrieveRequest)
+				queryCalls++
 				if scenario == "query_error" {
 					return nil, merr.ErrServiceUnavailable
 				}
@@ -121,11 +126,12 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 				// No legacy LB: falling back to GetShardLeaders would fail this test.
 			}
 			runner.SetViewQueryClient(client)
+			runner.MeasurePayload()
 			err = runner.Run(ctx)
 			switch scenario {
 			case "query_error", "enqueue_error", "write_error":
 				require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-			case "incomplete":
+			case "incomplete", "missing_size":
 				require.ErrorIs(t, err, merr.ErrServiceInternal)
 			case "rate_limit":
 				require.ErrorIs(t, err, merr.ErrServiceRateLimit)
@@ -150,20 +156,27 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 			require.NoError(t, proto.Unmarshal(captured.GetSerializedExprPlan(), parsed))
 			require.EqualValues(t, typeutil.Unlimited, parsed.GetQuery().GetLimit())
 			require.True(t, proto.Equal(plan.GetQuery().GetPredicates(), parsed.GetQuery().GetPredicates()))
-			if scenario == "int64" || scenario == "varchar" {
+			require.Equal(t, 1, queryCalls)
+			wrote := scenario == "int64" || scenario == "varchar"
+			if wrote {
+				require.Equal(t, 1, produce.Times())
 				require.True(t, proto.Equal(ids(values...), produced), "overlapping worker results must produce each PK once")
 				require.EqualValues(t, 3, runner.Result().GetDeleteCnt())
 				require.EqualValues(t, 200, runner.Result().GetTimestamp())
 				require.EqualValues(t, 12, runner.AllQueryCnt())
 				require.EqualValues(t, 40, runner.ScannedRemoteBytes())
 				require.EqualValues(t, 60, runner.ScannedTotalBytes())
+				require.Equal(t, primaryKeyBytes(ids(values...)), runner.DeletedPKBytes())
 			} else {
 				require.Zero(t, runner.Result().GetDeleteCnt())
 			}
-			if scenario == "query_error" || scenario == "incomplete" || scenario == "empty" {
+			if err == nil {
+				require.EqualValues(t, 12000, runner.CollectionSizeBytes())
+			}
+			if scenario == "query_error" || scenario == "incomplete" || scenario == "missing_size" || scenario == "empty" {
 				require.Zero(t, limitCalls)
 			}
-			if scenario != "int64" && scenario != "varchar" && scenario != "enqueue_error" && scenario != "write_error" {
+			if !wrote && scenario != "enqueue_error" && scenario != "write_error" {
 				require.Nil(t, produced, "failed, incomplete or empty reads must not enqueue a delete")
 			}
 		})

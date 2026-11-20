@@ -342,7 +342,7 @@ func TestQueryPlanMergesOptimizerAndPartitionSummary(t *testing.T) {
 		t.Run(strconv.FormatUint(uint64(flags), 10), func(t *testing.T) {
 			mockey.PatchConvey("partition diagnostics augment existing optimizer facts", t, func() {
 				view := &viewpb.QueryViewOfShard{
-					Meta: &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "p_1v0", ReplicaId: 1, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1}, QueryVersion: 1}},
+					Meta: &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "p_1v0", ReplicaId: 1, CollectionSizeBytes: proto.Int64(1600), Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1}, QueryVersion: 1}},
 					QueryNode: []*viewpb.QueryViewOfQueryNode{
 						{NodeId: 11, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{100}}}},
 						{NodeId: 12, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 20, SegmentIds: []int64{200}}}},
@@ -365,6 +365,7 @@ func TestQueryPlanMergesOptimizerAndPartitionSummary(t *testing.T) {
 					response, err := w.GetQueryPlan(t.Context(), req)
 					require.NoError(t, err)
 					require.Equal(t, flags|1<<viewpb.GlobalOptimizerExecutionSummary_PrunedByPartitionFiltering, response.GetExecutionSummary().GetGlobalOptimizer().GetFlags())
+					require.EqualValues(t, 1600, *response.CollectionSizeBytes)
 					require.Len(t, response.Plan.WorkNodes, 1)
 					require.EqualValues(t, 11, response.Plan.WorkNodes[0].GetQueryNode().GetNodeId())
 					require.True(t, proto.Equal(req.GetQueryPlanMvcc(), response.Plan.Mvcc))

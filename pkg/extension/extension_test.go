@@ -46,6 +46,7 @@ var _ hook.Hook = stubHook{}
 func TestNothingIsInstalledByDefault(t *testing.T) {
 	ResetForTest()
 	assert.Nil(t, InstalledHook(), "a stock binary has no compiled-in hook")
+	assert.Nil(t, RequestUsageReporter())
 	assert.Nil(t, InstalledCoordinatorEngine(), "a stock binary has no coordinator engine")
 	assert.Nil(t, InstalledQueryHook(), "a stock binary has no compiled-in query hook")
 	assert.Nil(t, InstalledCipher(), "a stock binary has no compiled-in cipher")

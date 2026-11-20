@@ -130,7 +130,7 @@ func TestPublishedRecoveryRechecksAfterReferenceAcquisition(t *testing.T) {
 	old.Meta.State = viewpb.QueryViewState_QueryViewStateUp
 	manager := newTestManager(t, newMockCatalog(), newMockSyncer(), old)
 	manager.PublishSchema(0)
-	manager.loadInfoRefs = &stubLoadInfoRefs{}
+	manager.sources.LoadInfo = &stubLoadInfoRefs{}
 	done := make(chan error, 1)
 	go func() {
 		done <- manager.AddPublishedRecovery(t.Context(), testBuilder(1, 1, 1).SetLoadInfoVersion(99), testVersion(1, 1, 1))

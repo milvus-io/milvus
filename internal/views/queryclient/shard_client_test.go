@@ -472,7 +472,7 @@ func TestShardStreamCloseFailureStopsRetryWithPrimaryError(t *testing.T) {
 	defer cancel()
 	stream := &shardReduceStream[*internalpb.RetrieveResults]{
 		stream: child, ctx: ctx, cancel: cancel,
-		restart: func(error) (reduce.ReduceStream[*internalpb.RetrieveResults], context.CancelFunc, *ShardPlan, error) {
+		restart: func(error) (reduce.ReduceStream[*internalpb.RetrieveResults], context.CancelFunc, *shardResult, error) {
 			t.Fatal("retry must not proceed after cleanup fails")
 			return nil, nil, nil, nil
 		},

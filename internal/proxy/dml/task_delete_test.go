@@ -280,8 +280,10 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 		s.mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"part1": 100, "part2": 101}, nil)
 
 		dr.metaCache = s.mockCache
+		dr.MeasurePayload()
 		s.NoError(dr.Init(context.Background()))
 
+		s.True(dr.IsFilterDelete())
 		s.Require().Equal(1, len(dr.partitionIDs))
 		s.True(typeutil.NewSet[int64](100, 101).Contain(dr.partitionIDs[0]))
 		s.Equal([]vChan{"vchan1"}, dr.vChannels)
@@ -769,8 +771,10 @@ func TestDeleteRunner_Run(t *testing.T) {
 			plan: plan,
 		}
 		streaming.ExpectErrorOnce(errors.New("mock error"))
+		dr.MeasurePayload()
 		assert.Error(t, dr.Run(context.Background()))
 		assert.Equal(t, int64(0), dr.result.DeleteCnt)
+		assert.Zero(t, dr.DeletedPKBytes())
 	})
 
 	t.Run("complex delete query rpc failed", func(t *testing.T) {

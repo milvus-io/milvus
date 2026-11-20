@@ -69,9 +69,11 @@ func (c *mockCatalog) SaveQueryViews(ctx context.Context, views []*viewpb.QueryV
 // Stats, Deref, ...) is supplied by mockey patches per test, so no mock
 // logic lives here.
 type stubDataViewRef struct {
+	size    *int64
 	version qviews.DataVersion
 }
 
+func (r stubDataViewRef) CollectionSizeBytes() *int64            { return r.size }
 func (r stubDataViewRef) DataView() *viewpb.DataViewOfCollection { return nil }
 
 func (r stubDataViewRef) Version() *viewpb.DataVersion {
@@ -293,7 +295,7 @@ func newTestManager(t *testing.T, catalog *mockCatalog, s *mockSyncer, recovered
 	t.Helper()
 	scheduler := newTestDirtyViewFlushScheduler(t, catalog, s, 128)
 	manager := &testShardViewManager{
-		ShardViewManager: newShardViewManager(context.Background(), testShardID, scheduler, recovered, stubDataViewRefProvider{}),
+		ShardViewManager: newShardViewManager(context.Background(), testShardID, scheduler, recovered, ShardViewSources{DataViews: stubDataViewRefProvider{}}),
 		t:                t,
 		scheduler:        scheduler,
 	}
@@ -308,7 +310,7 @@ func newTestManagerWithReferences(t *testing.T, catalog *mockCatalog, s *mockSyn
 	t.Helper()
 	scheduler := newTestDirtyViewFlushScheduler(t, catalog, s, 128)
 	manager := &testShardViewManager{
-		ShardViewManager: newShardViewManager(context.Background(), testShardID, scheduler, nil, refs),
+		ShardViewManager: newShardViewManager(context.Background(), testShardID, scheduler, nil, ShardViewSources{DataViews: refs}),
 		t:                t,
 		scheduler:        scheduler,
 	}
@@ -365,6 +367,56 @@ func TestShardViewManagerPinsBeforePersist(t *testing.T) {
 
 	require.NoError(t, mgr.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
 	require.Equal(t, []string{"pin", "persist"}, events)
+	require.Nil(t, catalog.saved[0].GetMeta().CollectionSizeBytes)
+}
+
+func TestCollectionSizeSampleFollowsQueryView(t *testing.T) {
+	ctx := t.Context()
+	// Both DataVersions are already published when either shard prepares.
+	sizes := map[int64]*int64{1: proto.Int64(1200), 2: proto.Int64(0)}
+	patch := mockey.Mock((*stubDataViewRefProvider).Get).To(func(_ *stubDataViewRefProvider, _ context.Context, id int64, v *viewpb.DataVersion) (qviews.DataViewRef, error) {
+		require.EqualValues(t, testCollectionID, id)
+		return stubDataViewRef{version: qviews.FromProtoDataVersion(v), size: sizes[v.GetStreamingVersion()]}, nil
+	}).Build()
+	defer patch.UnPatch()
+	sources := ShardViewSources{DataViews: stubDataViewRefProvider{}}
+	catalog := newMockCatalog()
+	registry, err := RecoverShardViewRegistryWithDataViews(ctx, catalog, newMockSyncer(), sources)
+	require.NoError(t, err)
+	defer registry.Close()
+
+	for _, ch := range []string{testVChannel, "second"} {
+		shard := qviews.ShardID{VChannel: ch, ReplicaID: testReplicaID}
+		// This query placement contains one partition. Both shards must copy the
+		// same whole-collection measurement from their exact pinned version.
+		v := testBuilder(1, 0, 1).Build()
+		v.Meta.Vchannel = ch
+		require.NoError(t, registry.Ensure(shard).AddPreparing(ctx, qviews.NewQueryViewAtCoordBuilderFromView(v)))
+	}
+	require.NoError(t, registry.flushScheduler.Flush(ctx))
+	require.Len(t, catalog.saved, 2)
+	for _, view := range catalog.saved {
+		require.Equal(t, sizes[1], view.Meta.CollectionSizeBytes)
+	}
+	recoveredCatalog := &mockCatalog{listed: catalog.saved}
+	restored, err := RecoverShardViewRegistryWithDataViews(ctx, recoveredCatalog, newMockSyncer(), sources)
+	require.NoError(t, err)
+	defer restored.Close()
+	recovered := restored.Get(testShardID)
+	recovered.mu.Lock()
+	storedSize := recovered.latestViewLocked().View().Meta.CollectionSizeBytes
+	recovered.mu.Unlock()
+	require.Equal(t, sizes[1], storedSize)
+
+	require.NoError(t, recovered.AddPreparing(ctx, testBuilder(2, 0, 1)))
+	require.NoError(t, restored.flushScheduler.Flush(ctx))
+	for _, view := range recoveredCatalog.saved {
+		if view.Meta.GetVersion().GetDataVersion().GetStreamingVersion() == 2 {
+			require.Equal(t, sizes[2], view.Meta.CollectionSizeBytes)
+			return
+		}
+	}
+	t.Fatal("new view was not persisted")
 }
 
 func TestShardViewManagerPinFailureDoesNotPreemptCurrentView(t *testing.T) {
@@ -436,7 +488,7 @@ func TestShardViewManagerUnpinsOnlyAfterDroppedPersist(t *testing.T) {
 	recoveryCatalog := newMockCatalog()
 	recoverySyncer := newMockSyncer()
 	recoveryScheduler := newTestDirtyViewFlushScheduler(t, recoveryCatalog, recoverySyncer, 128)
-	recoveredManager, err := RecoverShardViewManager(context.Background(), testShardID, recoveryScheduler, stubDataViewRefProvider{}, []*viewpb.QueryViewOfShard{recovered})
+	recoveredManager, err := RecoverShardViewManager(context.Background(), testShardID, recoveryScheduler, ShardViewSources{DataViews: stubDataViewRefProvider{}}, []*viewpb.QueryViewOfShard{recovered})
 	require.NoError(t, err)
 	recoveredTestManager := &testShardViewManager{
 		ShardViewManager: recoveredManager,

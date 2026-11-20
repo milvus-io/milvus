@@ -236,6 +236,7 @@ func (p *fakeRuntimeDataViewProvider) Get(context.Context, int64, *viewpb.DataVe
 // real DataView manager in coordview/dataview_integration_test.go.
 type runtimeDataViewRef struct{ view *viewpb.DataViewOfCollection }
 
+func (r *runtimeDataViewRef) CollectionSizeBytes() *int64            { return r.view.CollectionSizeBytes }
 func (r *runtimeDataViewRef) DataView() *viewpb.DataViewOfCollection { return r.view }
 func (r *runtimeDataViewRef) Version() *viewpb.DataVersion           { return r.view.DataVersion }
 func (r *runtimeDataViewRef) Stats(int64) (qviews.SegmentStats, bool) {

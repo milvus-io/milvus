@@ -377,7 +377,7 @@ func streamViewError(code viewpb.ViewCode, format string, args ...interface{}) e
 
 func TestQueryTaskExecuteUsesQueryViewLegacyClient(t *testing.T) {
 	legacy := &fakeLegacyQueryClient{
-		queryResult: &queryclient.LegacyQueryResult{Results: []*internalpb.RetrieveResults{{
+		queryResult: &queryclient.LegacyQueryResult{CollectionSizeBytes: proto.Int64(0), Results: []*internalpb.RetrieveResults{{
 			Base:   commonpbutil.NewMsgBase(commonpbutil.WithSourceID(101)),
 			Status: merr.Success(),
 		}}},
@@ -394,11 +394,12 @@ func TestQueryTaskExecuteUsesQueryViewLegacyClient(t *testing.T) {
 		return true
 	})
 	require.ElementsMatch(t, []int64{101}, sourceIDs)
+	require.Equal(t, proto.Int64(0), task.CollectionSizeBytes)
 }
 
 func TestSearchTaskExecuteUsesQueryViewLegacyClient(t *testing.T) {
 	legacy := &fakeLegacyQueryClient{
-		searchResult: &queryclient.LegacySearchResult{Results: []*internalpb.SearchResults{{
+		searchResult: &queryclient.LegacySearchResult{CollectionSizeBytes: proto.Int64(320), Results: []*internalpb.SearchResults{{
 			Base:   commonpbutil.NewMsgBase(commonpbutil.WithSourceID(202)),
 			Status: merr.Success(),
 		}}},
@@ -416,6 +417,7 @@ func TestSearchTaskExecuteUsesQueryViewLegacyClient(t *testing.T) {
 		return true
 	})
 	require.ElementsMatch(t, []int64{202}, sourceIDs)
+	require.Equal(t, proto.Int64(320), task.CollectionSizeBytes())
 	require.Zero(t, task.queryChannelsNode.Len())
 }
 
@@ -503,13 +505,14 @@ func TestSearchTaskRetriesUnavailableStream(t *testing.T) {
 			legacy := &fakeLegacyQueryClient{maxRetries: 2}
 			legacy.search = func(attempt int) (*queryclient.LegacySearchResult, error) {
 				if attempt == 1 {
-					return &queryclient.LegacySearchResult{Stream: failed}, nil
+					return &queryclient.LegacySearchResult{Stream: failed, CollectionSizeBytes: proto.Int64(1000)}, nil
 				}
-				return &queryclient.LegacySearchResult{Stream: replacement}, nil
+				return &queryclient.LegacySearchResult{Stream: replacement, CollectionSizeBytes: proto.Int64(0)}, nil
 			}
 			task := newQueryViewSearchTask(t, legacy, 2)
 			require.NoError(t, task.Execute(t.Context()))
 			require.Equal(t, 2, legacy.searchCalled)
+			require.Equal(t, proto.Int64(0), task.CollectionSizeBytes())
 			require.Len(t, legacy.lastSearchRequest.RetryErrors, 1)
 			require.Equal(t, codes.Unavailable, status.Code(legacy.lastSearchRequest.RetryErrors[0]))
 			require.Equal(t, 1, failed.closeCalls)
@@ -1292,13 +1295,14 @@ func TestQueryTaskRetriesUnavailableStream(t *testing.T) {
 			legacy := &fakeLegacyQueryClient{maxRetries: 2}
 			legacy.query = func(attempt int) (*queryclient.LegacyQueryResult, error) {
 				if attempt == 1 {
-					return &queryclient.LegacyQueryResult{Stream: failed}, nil
+					return &queryclient.LegacyQueryResult{Stream: failed, CollectionSizeBytes: proto.Int64(1000)}, nil
 				}
-				return &queryclient.LegacyQueryResult{Stream: replacement}, nil
+				return &queryclient.LegacyQueryResult{Stream: replacement, CollectionSizeBytes: proto.Int64(0)}, nil
 			}
 			task := newQueryViewQueryTask(t, legacy, 2)
 			require.NoError(t, task.Execute(t.Context()))
 			require.Equal(t, 2, legacy.queryCalled)
+			require.Equal(t, proto.Int64(0), task.CollectionSizeBytes)
 			require.Len(t, legacy.lastQueryRequest.RetryErrors, 1)
 			require.Equal(t, codes.Unavailable, status.Code(legacy.lastQueryRequest.RetryErrors[0]))
 			require.Equal(t, 1, failed.closeCalls)

@@ -40,7 +40,7 @@ func TestLegacyClientPlainSearchUsesBatchWhenStreamingDisabled(t *testing.T) {
 		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
 			shardA.VChannel: legacySearchPlan(shardA, queryNode),
 			shardB.VChannel: legacySearchPlan(shardB, queryNode),
-		}},
+		}, sizes: map[string]*int64{shardB.VChannel: proto.Int64(200)}},
 		&legacyServiceClient{
 			searchResults: map[string]*internalpb.SearchResults{
 				shardA.VChannel: {Status: merr.Success(), Base: &commonpb.MsgBase{SourceID: 101}},
@@ -72,6 +72,39 @@ func TestLegacyClientPlainSearchUsesBatchWhenStreamingDisabled(t *testing.T) {
 		result.Results[1].GetBase().GetSourceID(),
 	})
 	require.Len(t, result.Plans, 2)
+	require.Equal(t, proto.Int64(200), result.CollectionSizeBytes)
+}
+
+func TestLegacyQueryCollectionSize(t *testing.T) {
+	setupTestReplicaRouting(t)
+	source := &legacyPlanClient{plans: make(map[string]*viewpb.QueryPlan), sizes: make(map[string]*int64)}
+	add := func(channel string, streaming, compact int64, size *int64) {
+		plan := legacyQueryPlanWithoutWorkNodes(qviews.ShardID{ReplicaID: 1, VChannel: channel})
+		plan.Version.DataVersion = &viewpb.DataVersion{StreamingVersion: streaming, CompactVersion: compact}
+		source.plans[channel], source.sizes[channel] = plan, size
+	}
+	add("old", 1, 0, proto.Int64(1000))
+	add("compacted", 1, 1, proto.Int64(320))
+	add("a", 1, 1, proto.Int64(0))
+	add("missing", 2, 0, nil)
+	add("invalid", 3, 0, proto.Int64(-1))
+
+	for _, tc := range []struct {
+		channels []string
+		want     *int64
+	}{
+		{[]string{"old", "compacted", "missing", "invalid"}, proto.Int64(320)},
+		{[]string{"compacted", "old", "a"}, proto.Int64(0)},
+		{[]string{"a", "old", "compacted"}, proto.Int64(0)},
+		{[]string{"missing", "invalid"}, nil},
+	} {
+		client := NewLegacyViewQueryClient(ViewQueryClientConfig{}, source, &legacyServiceClient{}, &legacyResolver{vchannels: tc.channels})
+		result, err := client.Legacy().Query(t.Context(), &LegacyQueryRequest{Req: &internalpb.RetrieveRequest{CollectionID: 100}})
+		client.Close()
+		require.NoError(t, err)
+		require.Equal(t, tc.want, result.CollectionSizeBytes, "channels %v", tc.channels)
+		require.Len(t, result.Plans, len(tc.channels))
+	}
 }
 
 func TestOpenVchannelStreamsCancelsLateRegistration(t *testing.T) {
@@ -79,7 +112,7 @@ func TestOpenVchannelStreamsCancelsLateRegistration(t *testing.T) {
 	failed := make(chan struct{})
 	registered := make(chan struct{})
 	_, _, _, err := openVchannelStreams(t.Context(), 2,
-		func(setupCtx context.Context, register func(context.CancelFunc), i int) (int, *ShardPlan, error) {
+		func(setupCtx context.Context, register func(context.CancelFunc), i int) (int, *shardResult, error) {
 			if i == 0 {
 				close(failed)
 				return 0, nil, primaryErr
@@ -104,9 +137,9 @@ func TestOpenVchannelStreamsKeepsWorkerContextAfterSetup(t *testing.T) {
 	workerCtx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	_, _, _, err := openVchannelStreams(t.Context(), 1,
-		func(_ context.Context, register func(context.CancelFunc), _ int) (int, *ShardPlan, error) {
+		func(_ context.Context, register func(context.CancelFunc), _ int) (int, *shardResult, error) {
 			register(cancel)
-			return 1, &ShardPlan{}, nil
+			return 1, &shardResult{}, nil
 		}, func(int) {})
 	require.NoError(t, err)
 	require.NoError(t, workerCtx.Err())
@@ -891,7 +924,7 @@ func TestLegacyClientSearchReturnsStatusError(t *testing.T) {
 		ViewQueryClientConfig{MaxRetries: 1},
 		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
 			shardID.VChannel: legacySearchPlan(shardID, queryNode),
-		}},
+		}, sizes: map[string]*int64{shardID.VChannel: proto.Int64(200)}},
 		&legacyServiceClient{
 			searchResults: map[string]*internalpb.SearchResults{
 				shardID.VChannel: {Status: merr.Status(merr.WrapErrServiceInternalMsg("search failed"))},
@@ -902,7 +935,7 @@ func TestLegacyClientSearchReturnsStatusError(t *testing.T) {
 		},
 	)
 
-	_, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{
+	result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{
 		Req: &internalpb.SearchRequest{
 			CollectionID:     collectionID,
 			ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
@@ -912,6 +945,7 @@ func TestLegacyClientSearchReturnsStatusError(t *testing.T) {
 		},
 	})
 	require.Error(t, err)
+	require.Nil(t, result)
 }
 
 type legacyResolver struct {
@@ -925,6 +959,7 @@ func (r *legacyResolver) ResolveVChannels(context.Context, int64) ([]string, err
 type legacyPlanClient struct {
 	QueryPlanClient
 	plans        map[string]*viewpb.QueryPlan
+	sizes        map[string]*int64
 	getQueryPlan func(context.Context, qviews.ShardID, *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error)
 }
 
@@ -932,7 +967,7 @@ func (c *legacyPlanClient) GetQueryPlan(ctx context.Context, shardID qviews.Shar
 	if c.getQueryPlan != nil {
 		return c.getQueryPlan(ctx, shardID, request)
 	}
-	return &viewpb.GetQueryPlanResponse{Plan: c.plans[shardID.VChannel]}, nil
+	return &viewpb.GetQueryPlanResponse{Plan: c.plans[shardID.VChannel], CollectionSizeBytes: c.sizes[shardID.VChannel]}, nil
 }
 
 func (c *legacyPlanClient) GetMVCCTimestamp(context.Context, qviews.ShardID, *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {
@@ -1062,6 +1097,7 @@ func TestLegacyRequeryUsesRetainedViewWithoutReplanning(t *testing.T) {
 		result, err := client.Query(t.Context(), request)
 		require.NoError(t, err)
 		require.Len(t, result.Plans, 1)
+		require.Nil(t, result.CollectionSizeBytes, "the parent search already measured the request")
 		require.Equal(t, 1, calls)
 		failure = viewerror.NewViewInvalidated("original view retired")
 		_, err = client.Query(t.Context(), request)

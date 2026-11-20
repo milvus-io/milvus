@@ -159,6 +159,8 @@ type SegmentStats struct {
 type DataViewRef interface {
 	// DataView returns the referenced proto DataView snapshot.
 	DataView() *viewpb.DataViewOfCollection
+	// CollectionSizeBytes returns the optional whole-collection sample for this version.
+	CollectionSizeBytes() *int64
 	// Version returns the DataVersion of the referenced DataView.
 	Version() *viewpb.DataVersion
 	// Stats returns the published SegmentStats of one segment. ok is false

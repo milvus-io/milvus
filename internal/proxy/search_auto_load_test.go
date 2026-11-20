@@ -33,6 +33,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -43,6 +44,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -56,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestEnsureCollectionReadyUsesOneRPC(t *testing.T) {
@@ -188,9 +192,9 @@ func TestSearchStopsBeforeExecutionWhenAutoLoadFails(t *testing.T) {
 			return merr.ErrIndexNotFound
 		}).Build()
 	searchMock := mockey.Mock((*Proxy).search).To(
-		func(_ *Proxy, _ context.Context, _ *milvuspb.SearchRequest, _, _ bool, _ bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
+		func(_ *Proxy, _ context.Context, _ *milvuspb.SearchRequest, _ searchOptions) (*milvuspb.SearchResults, searchAttempt, error) {
 			searchCalls++
-			return &milvuspb.SearchResults{Status: merr.Success()}, false, false, false, nil
+			return &milvuspb.SearchResults{Status: merr.Success()}, searchAttempt{}, nil
 		}).Build()
 	defer readinessMock.UnPatch()
 	defer searchMock.UnPatch()
@@ -219,9 +223,9 @@ func TestHybridSearchStopsBeforeExecutionWhenAutoLoadFails(t *testing.T) {
 			return merr.ErrIndexNotFound
 		}).Build()
 	hybridSearchMock := mockey.Mock((*Proxy).hybridSearch).To(
-		func(_ *Proxy, _ context.Context, _ *milvuspb.HybridSearchRequest, _ bool, _ bool) (*milvuspb.SearchResults, bool, bool, error) {
+		func(_ *Proxy, _ context.Context, _ *milvuspb.HybridSearchRequest, _ searchOptions) (*milvuspb.SearchResults, searchAttempt, error) {
 			hybridSearchCalls++
-			return &milvuspb.SearchResults{Status: merr.Success()}, false, false, nil
+			return &milvuspb.SearchResults{Status: merr.Success()}, searchAttempt{}, nil
 		}).Build()
 	defer readinessMock.UnPatch()
 	defer hybridSearchMock.UnPatch()
@@ -456,14 +460,13 @@ func TestAutoLoadBypassesSaturatedTaskQueues(t *testing.T) {
 type dqlRetryServer struct {
 	viewpb.UnimplementedQueryPlanServiceServer
 	viewpb.UnimplementedViewQueryServiceServer
-	loaded    atomic.Bool
-	injected  atomic.Bool
-	plans     atomic.Int32
-	searches  atomic.Int32
-	queries   atomic.Int32
-	failPhase string
-	// retrieved is what QueryOnView returns.
-	retrieved *schemapb.IDs
+	loaded         atomic.Bool
+	injected       atomic.Bool
+	plans          atomic.Int32
+	searches       atomic.Int32
+	queries        atomic.Int32
+	failPhase      string
+	retrieveResult *internalpb.RetrieveResults
 }
 
 func (s *dqlRetryServer) failure(phase string) error {
@@ -495,7 +498,7 @@ func (s *dqlRetryServer) GetQueryPlan(_ context.Context, req *viewpb.GetQueryPla
 	} else {
 		plan.Request = &viewpb.QueryPlan_LegacyRetrieveRequest{LegacyRetrieveRequest: req.GetLegacyRetrieveRequest()}
 	}
-	return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
+	return &viewpb.GetQueryPlanResponse{Plan: plan, CollectionSizeBytes: proto.Int64(12000)}, nil
 }
 
 func (s *dqlRetryServer) SearchOnView(context.Context, *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
@@ -511,7 +514,35 @@ func (s *dqlRetryServer) QueryOnView(context.Context, *viewpb.QueryOnViewRequest
 	if err := s.failure("query"); err != nil {
 		return nil, err
 	}
-	return &viewpb.QueryOnViewResponse{LegacyResults: &internalpb.RetrieveResults{Status: merr.Success(), Ids: s.retrieved}}, nil
+	return &viewpb.QueryOnViewResponse{LegacyResults: s.retrieveResult}, nil
+}
+
+func (s *dqlRetryServer) SearchOnViewStream(stream viewpb.ViewQueryService_SearchOnViewStreamServer) error {
+	initial, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	resp, err := s.SearchOnView(stream.Context(), initial.GetRequest())
+	if err != nil {
+		return err
+	}
+	return stream.Send(&viewpb.SearchOnViewStreamResponse{
+		Payload: &viewpb.SearchOnViewStreamResponse_Chunk{Chunk: resp.GetLegacyResults()},
+	})
+}
+
+func (s *dqlRetryServer) QueryOnViewStream(stream viewpb.ViewQueryService_QueryOnViewStreamServer) error {
+	initial, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	resp, err := s.QueryOnView(stream.Context(), initial.GetRequest())
+	if err != nil {
+		return err
+	}
+	return stream.Send(&viewpb.QueryOnViewStreamResponse{
+		Payload: &viewpb.QueryOnViewStreamResponse_Chunk{Chunk: resp.GetLegacyResults()},
+	})
 }
 
 type dqlRetryPlanClient struct {
@@ -531,7 +562,6 @@ func (c *dqlRetryPlanClient) GetQueryPlan(ctx context.Context, _ qviews.ShardID,
 }
 
 type dqlRetryServiceClient struct {
-	queryclient.ViewQueryServiceClient
 	client viewpb.ViewQueryServiceClient
 }
 
@@ -543,6 +573,19 @@ func (c *dqlRetryServiceClient) SearchOnView(ctx context.Context, _ qviews.WorkN
 func (c *dqlRetryServiceClient) QueryOnView(ctx context.Context, _ qviews.WorkNode, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
 	resp, err := c.client.QueryOnView(ctx, req)
 	return resp, viewerror.ConvertViewError("QueryOnView", err)
+}
+
+func (c *dqlRetryServiceClient) StatisticsOnView(ctx context.Context, _ qviews.WorkNode, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error) {
+	resp, err := c.client.StatisticsOnView(ctx, req)
+	return resp, viewerror.ConvertViewError("StatisticsOnView", err)
+}
+
+func (c *dqlRetryServiceClient) SearchOnViewStream(ctx context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (reduce.ReduceStream[*internalpb.SearchResults], error) {
+	return reduce.NewSearchGRPCReduceStream(ctx, c.client, req)
+}
+
+func (c *dqlRetryServiceClient) QueryOnViewStream(ctx context.Context, _ qviews.WorkNode, req *viewpb.QueryOnViewRequest) (reduce.ReduceStream[*internalpb.RetrieveResults], error) {
+	return reduce.NewQueryGRPCReduceStream(ctx, c.client, req)
 }
 
 type dqlRetryClient struct {
@@ -559,7 +602,7 @@ func (c *dqlRetryClient) ResolveVChannels(context.Context, int64) ([]string, err
 
 func newDQLRetryClient(t *testing.T, phase string, loadInfo queryclient.LoadInfoClient) *dqlRetryClient {
 	t.Helper()
-	server := &dqlRetryServer{failPhase: phase}
+	server := &dqlRetryServer{failPhase: phase, retrieveResult: &internalpb.RetrieveResults{Status: merr.Success()}}
 	server.loaded.Store(true)
 	listener := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
@@ -678,6 +721,7 @@ func TestDQLAutoLoadRetryThroughTaskAndGRPC(t *testing.T) {
 					return err
 				}
 				dql.SetQueryReadSchemaForTest(qt, schema)
+				qt.Limit = typeutil.Unlimited
 				qt.CollectionID = 100
 				return nil
 			}).Build()
@@ -916,19 +960,21 @@ func TestDQLAutoLoadRetryPreservesSearchFallbackAndRecall(t *testing.T) {
 			}).Build()
 			defer ready.UnPatch()
 			calls := 0
-			search := mockey.Mock((*Proxy).search).To(func(_ *Proxy, _ context.Context, _ *milvuspb.SearchRequest, optimized, recall bool, _ bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
+			search := mockey.Mock((*Proxy).search).To(func(_ *Proxy, _ context.Context, _ *milvuspb.SearchRequest, opts searchOptions) (*milvuspb.SearchResults, searchAttempt, error) {
 				calls++
 				if calls == 1 {
-					require.True(t, optimized)
-					return &milvuspb.SearchResults{Status: merr.Success()}, mode == "fallback", mode == "fallback", mode == "recall", nil
+					require.True(t, opts.optimized)
+					return &milvuspb.SearchResults{Status: merr.Success()}, searchAttempt{
+						resultSizeInsufficient: mode == "fallback", topKReduced: mode == "fallback", evaluateRecall: mode == "recall",
+					}, nil
 				}
 				if calls == 2 {
-					require.False(t, optimized)
-					require.Equal(t, mode == "recall", recall)
+					require.False(t, opts.optimized)
+					require.Equal(t, mode == "recall", opts.recallEvaluation)
 					err := merr.Wrap(merr.ErrQueryViewNotReady, "released during extra search")
-					return &milvuspb.SearchResults{Status: merr.Status(err)}, false, false, false, err
+					return &milvuspb.SearchResults{Status: merr.Status(err)}, searchAttempt{}, err
 				}
-				return &milvuspb.SearchResults{Status: merr.Success()}, false, false, false, nil
+				return &milvuspb.SearchResults{Status: merr.Success()}, searchAttempt{}, nil
 			}).Build()
 			defer search.UnPatch()
 			resp, err := node.Search(context.Background(), &milvuspb.SearchRequest{DbName: "db", CollectionName: "collection"})
@@ -945,19 +991,30 @@ func TestDQLAutoLoadRetryPreservesInconsistentRequery(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, Params.Reset(Params.ProxyCfg.EnableAutoLoad.Key)) })
 	node := &Proxy{metaCache: &MetaCache{}}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	reports := 0
+	enableUsageReport(t, func(info map[string]any) int {
+		reports++
+		require.Equal(t, hookutil.OpTypeHybridSearch, info[hookutil.OpTypeKey])
+		require.EqualValues(t, 200, info[hookutil.CollectionStorageBytesKey])
+		require.EqualValues(t, 6, info[hookutil.ReadCountKey])
+		return 1200
+	})
 	calls := 0
-	search := mockey.Mock((*Proxy).hybridSearch).To(func(*Proxy, context.Context, *milvuspb.HybridSearchRequest, bool, bool) (*milvuspb.SearchResults, bool, bool, error) {
+	search := mockey.Mock((*Proxy).hybridSearch).To(func(*Proxy, context.Context, *milvuspb.HybridSearchRequest, searchOptions) (*milvuspb.SearchResults, searchAttempt, error) {
 		calls++
+		size := int64(100 * calls)
+		attempt := searchAttempt{collectionBytes: &size, readCount: 6}
 		if calls == 1 {
-			return &milvuspb.SearchResults{Status: merr.Status(merr.ErrInconsistentRequery)}, false, false, nil
+			return &milvuspb.SearchResults{Status: merr.Status(merr.ErrInconsistentRequery)}, attempt, nil
 		}
-		return &milvuspb.SearchResults{Status: merr.Success()}, false, false, nil
+		return &milvuspb.SearchResults{Status: merr.Success()}, attempt, nil
 	}).Build()
 	defer search.UnPatch()
 	resp, err := node.HybridSearch(context.Background(), &milvuspb.HybridSearchRequest{DbName: "db", CollectionName: "collection"})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(resp.GetStatus()))
 	require.Equal(t, 2, calls)
+	require.Equal(t, 1, reports)
 }
 
 func TestDQLQueryRetryCountsRequestOnce(t *testing.T) {
@@ -971,9 +1028,19 @@ func TestDQLQueryRetryCountsRequestOnce(t *testing.T) {
 	before := testutil.ToFloat64(counter)
 	ready := mockey.Mock((*Proxy).ensureCollectionReady).Return(nil).Build()
 	defer ready.UnPatch()
+	reports := 0
+	enableUsageReport(t, func(info map[string]any) int {
+		reports++
+		require.Equal(t, hookutil.OpTypeQuery, info[hookutil.OpTypeKey])
+		require.EqualValues(t, 300, info[hookutil.CollectionStorageBytesKey])
+		require.EqualValues(t, 1, info[hookutil.ReadCountKey])
+		return 300
+	})
 	calls := 0
-	query := mockey.Mock((*Proxy).query).To(func(*Proxy, context.Context, *queryTask, trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+	query := mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 		calls++
+		size := int64(100 * calls)
+		qt.CollectionSizeBytes = &size
 		if calls <= 2 {
 			err := merr.Wrap(merr.ErrQueryViewNotReady, "retry query")
 			return &milvuspb.QueryResults{Status: merr.Status(err)}, segcore.StorageCost{}, err
@@ -985,6 +1052,7 @@ func TestDQLQueryRetryCountsRequestOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(resp.GetStatus()))
 	require.Equal(t, 3, calls)
+	require.Equal(t, 1, reports)
 	require.Equal(t, before+1, testutil.ToFloat64(counter))
 	rate, err := rateCol.Rate(internalpb.RateType_DQLQuery.String(), ratelimitutil.DefaultWindow)
 	require.NoError(t, err)

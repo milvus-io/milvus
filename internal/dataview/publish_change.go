@@ -109,6 +109,10 @@ func (m *dataViewManager) PublishChange(ctx context.Context, event ChangeGroupDa
 		return view, commit, abort, nil
 	}
 	next.DataVersion = nextDataVersion(base, dataViewAdvanceCompact)
+	if err := m.sizeProjector().sample(ctx, next, event.SupersededSegmentIDs); err != nil {
+		unlock()
+		return nil, nil, nil, err
+	}
 
 	// The published snapshot is incremental: next carries the base version's
 	// segments minus the superseded ones plus the new members, so its stats

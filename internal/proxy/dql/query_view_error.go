@@ -12,6 +12,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// EnsureQueryViewReady waits for the bound collection and its expected shards.
+func EnsureQueryViewReady(ctx context.Context, node taskmodel.TaskNode, collectionID int64, vchannels []string) error {
+	status, err := node.MixCoord().EnsureCollectionReady(ctx, &querypb.EnsureCollectionReadyRequest{
+		CollectionID: collectionID, ExpectedVchannels: vchannels,
+	})
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
+	}
+	return merr.CheckRPCCall(status, err)
+}
+
 // QueryViewLoadError preserves the public load-state errors for all query consumers.
 // A missing view can mean release or temporary handoff/recovery. Consult the
 // current configuration only on failure; never turn a loaded collection's

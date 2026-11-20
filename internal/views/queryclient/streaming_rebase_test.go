@@ -110,14 +110,14 @@ func TestStreamingReceiveFailureRetryBoundary(t *testing.T) {
 					}
 					plan := legacySearchPlan(shard, qviews.NewQueryNode(workerID))
 					plan.Mvcc = &viewpb.QueryPlanMVCC{GrowingTimetick: uint64(attempt * 100), TransformingTimetick: uint64(attempt*100 - 10)}
-					plan.Version = &viewpb.QueryViewVersion{QueryVersion: int64(attempt)}
+					plan.Version = &viewpb.QueryViewVersion{QueryVersion: int64(attempt), DataVersion: &viewpb.DataVersion{StreamingVersion: int64(attempt)}}
 					plan.WorkNodes[0].SegmentSelection = &viewpb.SegmentSelection{SegmentIds: []int64{workerID}, Mode: viewpb.SegmentSelection_Include}
 					if query {
 						plan.Request = &viewpb.QueryPlan_LegacyRetrieveRequest{LegacyRetrieveRequest: request.GetLegacyRetrieveRequest()}
 					} else {
 						plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: request.GetLegacySearchRequest()}
 					}
-					return &viewpb.GetQueryPlanResponse{Plan: plan, ExecutionSummary: &viewpb.ExecutionSummary{
+					return &viewpb.GetQueryPlanResponse{Plan: plan, CollectionSizeBytes: proto.Int64(int64(1000 / attempt)), ExecutionSummary: &viewpb.ExecutionSummary{
 						GlobalOptimizer: &viewpb.GlobalOptimizerExecutionSummary{Flags: uint32(attempt)},
 					}}, nil
 				}}
@@ -176,6 +176,7 @@ func TestStreamingReceiveFailureRetryBoundary(t *testing.T) {
 				for attempt := 0; attempt < attempts; attempt++ {
 					var ids []int64
 					var plans []ShardPlan
+					var size *int64
 					var recvErr error
 					var totalCount int64
 					if query {
@@ -196,7 +197,7 @@ func TestStreamingReceiveFailureRetryBoundary(t *testing.T) {
 							totalCount += chunk.GetAllRetrieveCount()
 						}
 						require.NoError(t, result.Stream.Close())
-						plans = result.GetPlans()
+						plans, size = result.GetPlansAndCollectionSize()
 					} else {
 						request := newTestSearchRequest(6)
 						request.IsIterator = false
@@ -217,9 +218,12 @@ func TestStreamingReceiveFailureRetryBoundary(t *testing.T) {
 							totalCount += chunk.GetResultData().GetAllSearchCount()
 						}
 						require.NoError(t, result.Stream.Close())
-						plans = result.GetPlans()
+						plans, size = result.GetPlansAndCollectionSize()
 					}
 					require.Len(t, plans, 2)
+					if recvErr == io.EOF {
+						require.Equal(t, proto.Int64(500), size, "report the winning version after shard or whole-request retry")
+					}
 					if !afterChunk {
 						require.ErrorIs(t, recvErr, io.EOF)
 						want := []int64{200, 101, 202, 103, 204, 105}
@@ -375,7 +379,7 @@ func TestShardReduceStreamMetadataCommitsAttempt(t *testing.T) {
 	}}
 	stream := &shardReduceStream[*internalpb.RetrieveResults]{
 		ctx: ctx, cancel: cancel, stream: child,
-		restart: func(error) (reduce.ReduceStream[*internalpb.RetrieveResults], context.CancelFunc, *ShardPlan, error) {
+		restart: func(error) (reduce.ReduceStream[*internalpb.RetrieveResults], context.CancelFunc, *shardResult, error) {
 			t.Fatal("metadata-only output also forbids local retry")
 			return nil, nil, nil, nil
 		},
@@ -411,7 +415,7 @@ func TestShardReduceStreamCloseDuringReceiveOrReplan(t *testing.T) {
 			stream := &shardReduceStream[*internalpb.RetrieveResults]{ctx: ctx, cancel: cancel, stream: child}
 			if replanning {
 				stream.stream = &fakeQueryStream{recv: []fakeQueryStreamRecv{{err: status.Error(codes.Unavailable, "retry")}}}
-				stream.restart = func(error) (reduce.ReduceStream[*internalpb.RetrieveResults], context.CancelFunc, *ShardPlan, error) {
+				stream.restart = func(error) (reduce.ReduceStream[*internalpb.RetrieveResults], context.CancelFunc, *shardResult, error) {
 					close(entered)
 					<-ctx.Done()
 					return nil, nil, nil, ctx.Err()
@@ -488,7 +492,7 @@ func TestStreamingProxyRetryPrefersUntriedReplica(t *testing.T) {
 				client.replicas = router
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
-				var plan *ShardPlan
+				var plan *shardResult
 				if query {
 					stream, got, err := client.QueryStream(ctx, &ShardQueryRequest{VChannel: "p_1v0", Req: &internalpb.RetrieveRequest{Limit: 1}, retryErrors: []error{failure}}, 128)
 					require.NoError(t, err)
@@ -797,7 +801,7 @@ func TestStreamingPreservesPlanSelectionsAndSummary(t *testing.T) {
 				},
 			}
 			client := newShardViewQueryClient(1, source, service)
-			var retained *ShardPlan
+			var retained *shardResult
 			if kind == "Query" {
 				stream, plan, err := client.QueryStream(t.Context(), &ShardQueryRequest{VChannel: "p_1v0", Req: &internalpb.RetrieveRequest{Limit: 1}}, 128)
 				require.NoError(t, err)
@@ -874,7 +878,7 @@ func TestStreamingShardFailsOverDiscoveredReplicas(t *testing.T) {
 			client.replicas = router
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			var retained *ShardPlan
+			var retained *shardResult
 			if query {
 				stream, plan, err := client.QueryStream(ctx, &ShardQueryRequest{VChannel: "p_1v0", Req: &internalpb.RetrieveRequest{Limit: 1}}, 128)
 				require.NoError(t, err)

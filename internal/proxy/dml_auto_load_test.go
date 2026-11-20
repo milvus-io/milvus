@@ -37,11 +37,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // dmlAutoLoadWAL records writes in place of the streaming WAL.
@@ -87,7 +90,11 @@ func newDMLAutoLoadEnv(t *testing.T, phase string, autoID bool) *dmlAutoLoadEnv 
 	t.Helper()
 	metacache.MockWriteSchemaForTest(t)
 	node, client := newDQLRetryProxy(t, phase)
-	client.server.retrieved = &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}}}}
+	ids := []int64{1, 2, 3}
+	client.server.retrieveResult.Ids = &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}}
+	client.server.retrieveResult.FieldsData = []*schemapb.FieldData{
+		testutils.GenerateScalarFieldDataWithValue(schemapb.DataType_Int64, "id", 100, ids),
+	}
 
 	cache := node.metaCache.(*MockCache)
 	schema, err := cache.GetCollectionSchema(node.ctx, "db", "collection")
@@ -114,6 +121,7 @@ func newDMLAutoLoadEnv(t *testing.T, phase string, autoID bool) *dmlAutoLoadEnv 
 
 	queryPre := mockey.Mock((*queryTask).PreExecute).To(func(qt *queryTask, _ context.Context) error {
 		dql.SetQueryReadSchemaForTest(qt, schema)
+		qt.Limit = typeutil.Unlimited
 		qt.CollectionID = 100
 		return nil
 	}).Build()
@@ -282,6 +290,34 @@ func TestExpressionDeleteWritesTheRowsItRead(t *testing.T) {
 	require.NoError(t, merr.Error(resp.GetStatus()))
 	require.EqualValues(t, 3, resp.GetDeleteCnt())
 	require.Equal(t, []int64{1, 2, 3}, env.wal.deleted)
+}
+
+func TestFilteredDeleteReportsUsageAfterReadRetry(t *testing.T) {
+	env := newDMLAutoLoadEnv(t, "query", false)
+	env.client.expectAutoLoad(t)
+	var reads, writes []int64
+	enableUsageReport(t, func(info map[string]any) int {
+		switch info[hookutil.OpTypeKey] {
+		case hookutil.OpTypeQuery:
+			require.EqualValues(t, 1, info[hookutil.ReadCountKey])
+			reads = append(reads, info[hookutil.CollectionStorageBytesKey].(int64))
+		case hookutil.OpTypeDelete:
+			writes = append(writes, info[hookutil.WriteBytesKey].(int64))
+		default:
+			t.Fatalf("unexpected usage report %v", info)
+		}
+		return 0
+	})
+
+	resp := env.delete(t, "id > 0")
+
+	require.NoError(t, merr.Error(resp.GetStatus()))
+	require.True(t, env.client.server.injected.Load())
+	require.EqualValues(t, 1, env.client.loads.Load())
+	require.Equal(t, []int64{1, 2, 3}, env.wal.deleted)
+	require.Equal(t, 1, env.wal.calls)
+	require.Equal(t, []int64{12000}, reads)
+	require.Equal(t, []int64{24}, writes)
 }
 
 // An invalid expression fails before the read, so it must not load the tenant.

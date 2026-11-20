@@ -68,18 +68,18 @@ func (s *workerReduceStream[T]) Recv() (T, error) {
 // shardReduceStream can replace a failed vchannel attempt only before returning
 // its first Chunk. After that boundary, the parent must discard its own state too.
 type shardReduceStream[T any] struct {
-	recvMu       sync.Mutex                                                                  // Serializes receive, replacement and final cleanup.
-	stream       reduce.ReduceStream[T]                                                      // Owns the current per-vchannel reducer.
-	ctx          context.Context                                                             // Bounds both receiving and replanning.
-	cancel       context.CancelFunc                                                          // Cancels worker RPCs and a pending replan before Close waits.
-	plan         *ShardPlan                                                                  // Winning plan; callers read it only after Close.
-	workerCancel context.CancelFunc                                                          // Cancels the workers for the current attempt before a retry.
-	restart      func(error) (reduce.ReduceStream[T], context.CancelFunc, *ShardPlan, error) // Reopens with the same shard retry state.
-	emitted      bool                                                                        // Any returned Chunk, including metadata-only, forbids local retry.
-	terminal     error                                                                       // Preserves EOF or a terminal failure across later Recv calls.
-	closed       bool                                                                        // Rejects receives after Close completes.
-	closeOnce    sync.Once                                                                   // Runs cancellation and cleanup once.
-	closeErr     error                                                                       // Retains cleanup failure for repeated Close calls.
+	recvMu       sync.Mutex                                                                    // Serializes receive, replacement and final cleanup.
+	stream       reduce.ReduceStream[T]                                                        // Owns the current per-vchannel reducer.
+	ctx          context.Context                                                               // Bounds both receiving and replanning.
+	cancel       context.CancelFunc                                                            // Cancels worker RPCs and a pending replan before Close waits.
+	plan         *shardResult                                                                  // Winning plan; callers read it only after Close.
+	workerCancel context.CancelFunc                                                            // Cancels the workers for the current attempt before a retry.
+	restart      func(error) (reduce.ReduceStream[T], context.CancelFunc, *shardResult, error) // Reopens with the same shard retry state.
+	emitted      bool                                                                          // Any returned Chunk, including metadata-only, forbids local retry.
+	terminal     error                                                                         // Preserves EOF or a terminal failure across later Recv calls.
+	closed       bool                                                                          // Rejects receives after Close completes.
+	closeOnce    sync.Once                                                                     // Runs cancellation and cleanup once.
+	closeErr     error                                                                         // Retains cleanup failure for repeated Close calls.
 }
 
 func (s *shardReduceStream[T]) Recv() (T, error) {
@@ -183,10 +183,15 @@ type ShardQueryRequest struct {
 	registerCancel func(context.CancelFunc) // Registers worker cancellation during initial setup only.
 }
 
+// shardResult carries the retained plan and the measurement from the same successful attempt.
+type shardResult struct {
+	ShardPlan
+	collectionSizeBytes *int64
+}
+
 // Search executes Phase 1 + Phase 2 for a single shard's search.
 // Replica resolution is handled internally. Results are fed into the provided reducer.
-// Returns the ShardPlan for potential requery.
-func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchRequest) (*ShardPlan, error) {
+func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchRequest) (*shardResult, error) {
 	var stage twoStageSearch
 	return s.executeShard(ctx, req.VChannel, &shardExecParams{
 		collectionID:     req.Req.CollectionID,
@@ -233,7 +238,7 @@ func (s *shardViewQueryClient) SearchStreams(
 	ctx context.Context,
 	req *ShardSearchRequest,
 	chunkBytes int,
-) ([]searchreducestream.ReduceStream, *ShardPlan, error) {
+) ([]searchreducestream.ReduceStream, *shardResult, error) {
 	if req == nil || req.Req == nil {
 		return nil, nil, merr.WrapErrServiceInternalMsg("SearchStreams requires a Search request")
 	}
@@ -255,7 +260,7 @@ func (s *shardViewQueryClient) SearchStreams(
 		}
 	}
 	retry := &shardRetryState{}
-	open := func(planCtx context.Context, registerCancel func(context.CancelFunc)) ([]searchreducestream.ReduceStream, []context.CancelFunc, *ShardPlan, error) {
+	open := func(planCtx context.Context, registerCancel func(context.CancelFunc)) ([]searchreducestream.ReduceStream, []context.CancelFunc, *shardResult, error) {
 		children := make([][]searchreducestream.ReduceStream, len(requests))
 		var mu sync.Mutex
 		var plannedRequests []*internalpb.SearchRequest
@@ -421,7 +426,7 @@ func (s *shardViewQueryClient) SearchStreams(
 	}
 	streams[0] = &shardReduceStream[*internalpb.SearchResults]{
 		stream: streams[0], ctx: ctx, cancel: cancel, workerCancel: workerCancels[0], plan: plan,
-		restart: func(err error) (reduce.ReduceStream[*internalpb.SearchResults], context.CancelFunc, *ShardPlan, error) {
+		restart: func(err error) (reduce.ReduceStream[*internalpb.SearchResults], context.CancelFunc, *shardResult, error) {
 			retry.recordFailure(err)
 			next, cancels, nextPlan, err := open(ctx, nil)
 			if err != nil {
@@ -435,8 +440,7 @@ func (s *shardViewQueryClient) SearchStreams(
 
 // Query executes Phase 1 + Phase 2 for a single shard's query (retrieve).
 // Replica resolution is handled internally. Results are fed into the provided reducer.
-// Returns the ShardPlan for potential requery.
-func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest) (*ShardPlan, error) {
+func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest) (*shardResult, error) {
 	return s.executeShard(ctx, req.VChannel, &shardExecParams{
 		collectionID:     req.Req.CollectionID,
 		consistencyLevel: req.Req.ConsistencyLevel,
@@ -478,7 +482,7 @@ func (s *shardViewQueryClient) QueryStream(
 	ctx context.Context,
 	req *ShardQueryRequest,
 	chunkBytes int,
-) (queryreducestream.ReduceStream, *ShardPlan, error) {
+) (queryreducestream.ReduceStream, *shardResult, error) {
 	if req == nil || req.Req == nil {
 		return nil, nil, merr.WrapErrServiceInternalMsg("QueryStream requires a Query request")
 	}
@@ -493,7 +497,7 @@ func (s *shardViewQueryClient) QueryStream(
 	req = &request
 	ctx, cancel := context.WithCancel(ctx)
 	retry := &shardRetryState{}
-	open := func(planCtx context.Context, registerCancel func(context.CancelFunc)) (queryreducestream.ReduceStream, context.CancelFunc, *ShardPlan, error) {
+	open := func(planCtx context.Context, registerCancel func(context.CancelFunc)) (queryreducestream.ReduceStream, context.CancelFunc, *shardResult, error) {
 		var children []queryreducestream.ReduceStream
 		var mu sync.Mutex
 		// The attempt's workers share this context, which the shard stream owns on success.
@@ -578,7 +582,7 @@ func (s *shardViewQueryClient) QueryStream(
 	}
 	return &shardReduceStream[*internalpb.RetrieveResults]{
 		stream: stream, ctx: ctx, cancel: cancel, workerCancel: workerCancel, plan: plan,
-		restart: func(err error) (reduce.ReduceStream[*internalpb.RetrieveResults], context.CancelFunc, *ShardPlan, error) {
+		restart: func(err error) (reduce.ReduceStream[*internalpb.RetrieveResults], context.CancelFunc, *shardResult, error) {
 			retry.recordFailure(err)
 			return open(ctx, nil)
 		},
@@ -654,7 +658,7 @@ func (s *shardViewQueryClient) executeShard(
 	ctx context.Context,
 	vchannel string,
 	params *shardExecParams,
-) (*ShardPlan, error) {
+) (*shardResult, error) {
 	retry := params.retryState
 	if retry == nil {
 		retry = &shardRetryState{}
@@ -790,13 +794,16 @@ func (s *shardViewQueryClient) executeShard(
 		}
 
 		retry.attempt++
-		return &ShardPlan{
-			ShardID:          shardID,
-			Version:          plan.Version,
-			Mvcc:             plan.GetMvcc(),
-			WorkNodes:        workNodes,
-			Selections:       plan.GetWorkNodes(),
-			ExecutionSummary: response.GetExecutionSummary(),
+		return &shardResult{
+			ShardPlan: ShardPlan{
+				ShardID:          shardID,
+				Version:          plan.Version,
+				Mvcc:             plan.GetMvcc(),
+				WorkNodes:        workNodes,
+				Selections:       plan.GetWorkNodes(),
+				ExecutionSummary: response.GetExecutionSummary(),
+			},
+			collectionSizeBytes: response.CollectionSizeBytes,
 		}, nil
 	}
 }

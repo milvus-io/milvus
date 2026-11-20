@@ -56,21 +56,26 @@ type LegacySearchResult struct {
 	Stream  searchreducestream.ReduceStream
 	// SubStreams contains one final stream per Hybrid sub-search, in request order.
 	SubStreams  []searchreducestream.ReduceStream
-	Plans       []ShardPlan  // Initial plans; streaming consumers use GetPlans after Close.
-	streamPlans []*ShardPlan // Plans replaced by pre-output shard retries.
+	Plans       []ShardPlan    // Initial plans; streaming consumers use GetPlans after Close.
+	streamPlans []*shardResult // Plans replaced by pre-output shard retries.
+	// CollectionSizeBytes is the batch measurement. Streams use GetPlansAndCollectionSize after Close.
+	CollectionSizeBytes *int64
 }
 
 // GetPlans returns the successful plans. Streaming callers must close all result
 // streams first, joining receives and any shard replanning before reading them.
 func (r *LegacySearchResult) GetPlans() []ShardPlan {
-	if r.streamPlans == nil {
-		return r.Plans
-	}
-	plans := make([]ShardPlan, len(r.streamPlans))
-	for i, plan := range r.streamPlans {
-		plans[i] = *plan
-	}
+	plans, _ := r.GetPlansAndCollectionSize()
 	return plans
+}
+
+// GetPlansAndCollectionSize returns the winning shard plans and their whole-collection
+// measurement. For streaming results, call it only after closing all streams.
+func (r *LegacySearchResult) GetPlansAndCollectionSize() ([]ShardPlan, *int64) {
+	if r.streamPlans == nil {
+		return r.Plans, r.CollectionSizeBytes
+	}
+	return collectShardResults(r.streamPlans)
 }
 
 type LegacyQueryRequest struct {
@@ -97,19 +102,24 @@ type LegacyQueryResult struct {
 	Results     []*internalpb.RetrieveResults
 	Stream      queryreducestream.ReduceStream
 	Plans       []ShardPlan
-	streamPlans []*ShardPlan // Plans replaced by pre-output shard retries; read after Close.
+	streamPlans []*shardResult // Plans replaced by pre-output shard retries; read after Close.
+	// CollectionSizeBytes is the batch measurement. Streams use GetPlansAndCollectionSize after Close.
+	CollectionSizeBytes *int64
 }
 
 // GetPlans returns the successful plans after the result stream has been closed.
 func (r *LegacyQueryResult) GetPlans() []ShardPlan {
-	if r.streamPlans == nil {
-		return r.Plans
-	}
-	plans := make([]ShardPlan, len(r.streamPlans))
-	for i, plan := range r.streamPlans {
-		plans[i] = *plan
-	}
+	plans, _ := r.GetPlansAndCollectionSize()
 	return plans
+}
+
+// GetPlansAndCollectionSize returns the winning shard plans and their whole-collection
+// measurement. For streaming results, call it only after closing all streams.
+func (r *LegacyQueryResult) GetPlansAndCollectionSize() ([]ShardPlan, *int64) {
+	if r.streamPlans == nil {
+		return r.Plans, r.CollectionSizeBytes
+	}
+	return collectShardResults(r.streamPlans)
 }
 
 type legacyOnlyClient struct {
@@ -172,27 +182,17 @@ func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (re
 	}
 
 	collector := newLegacySearchCollector()
-	shardPlans := make([]ShardPlan, len(vchannels))
-	g, gCtx := errgroup.WithContext(ctx)
-	for i := range vchannels {
-		i := i
-		g.Go(func() error {
-			plan, err := c.shardClient.Search(gCtx, &ShardSearchRequest{
-				TotalChannelNum: int32(len(vchannels)),
-				VChannel:        vchannels[i],
-				Req:             req.Req,
-				MVCC:            req.MVCC,
-				BarrierMVCC:     req.BarrierMVCC,
-				Reducer:         collector,
-			})
-			if err != nil {
-				return err
-			}
-			shardPlans[i] = *plan
-			return nil
+	shardPlans, size, err := executeShards(ctx, vchannels, func(ctx context.Context, vchannel string) (*shardResult, error) {
+		return c.shardClient.Search(ctx, &ShardSearchRequest{
+			TotalChannelNum: int32(len(vchannels)),
+			VChannel:        vchannel,
+			Req:             req.Req,
+			MVCC:            req.MVCC,
+			BarrierMVCC:     req.BarrierMVCC,
+			Reducer:         collector,
 		})
-	}
-	if err := g.Wait(); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
 	results, err := collector.Reduce(ctx, req.Req, shardPlans)
@@ -200,17 +200,18 @@ func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (re
 		return nil, err
 	}
 	return &LegacySearchResult{
-		Results: results,
-		Plans:   shardPlans,
+		Results:             results,
+		Plans:               shardPlans,
+		CollectionSizeBytes: size,
 	}, nil
 }
 
 // openVchannelStreams coordinates cancellation only until all shard streams open.
 // The registered worker contexts outlive setup and are owned by their shard streams.
-func openVchannelStreams[T any](ctx context.Context, count int, open func(context.Context, func(context.CancelFunc), int) (T, *ShardPlan, error), closeStream func(T)) ([]T, []ShardPlan, []*ShardPlan, error) {
+func openVchannelStreams[T any](ctx context.Context, count int, open func(context.Context, func(context.CancelFunc), int) (T, *shardResult, error), closeStream func(T)) ([]T, []ShardPlan, []*shardResult, error) {
 	streams := make([]T, count)
 	plans := make([]ShardPlan, count)
-	streamPlans := make([]*ShardPlan, count)
+	streamPlans := make([]*shardResult, count)
 	// setupCtx cancels shard setup on failure; worker contexts must outlive it on success.
 	group, setupCtx := errgroup.WithContext(ctx)
 	var mu sync.Mutex                // Serializes failure with worker cancellation registration.
@@ -241,7 +242,7 @@ func openVchannelStreams[T any](ctx context.Context, count int, open func(contex
 				mu.Unlock()
 				return err
 			}
-			streams[i], plans[i], streamPlans[i] = stream, *plan, plan
+			streams[i], plans[i], streamPlans[i] = stream, plan.ShardPlan, plan
 			return nil
 		})
 	}
@@ -268,7 +269,7 @@ func (c *legacyClient) searchStream(ctx context.Context, req *LegacySearchReques
 		}
 	}
 	vchannelStreams, shardPlans, streamPlans, err := openVchannelStreams(ctx, len(vchannels),
-		func(setupCtx context.Context, register func(context.CancelFunc), i int) ([]searchreducestream.ReduceStream, *ShardPlan, error) {
+		func(setupCtx context.Context, register func(context.CancelFunc), i int) ([]searchreducestream.ReduceStream, *shardResult, error) {
 			return c.shardClient.SearchStreams(ctx, &ShardSearchRequest{
 				TotalChannelNum: int32(len(vchannels)),
 				VChannel:        vchannels[i],
@@ -332,27 +333,17 @@ func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (resu
 	}
 
 	collector := newLegacyQueryCollector()
-	shardPlans := make([]ShardPlan, len(vchannels))
-	g, gCtx := errgroup.WithContext(ctx)
-	for i := range vchannels {
-		i := i
-		g.Go(func() error {
-			plan, err := c.shardClient.Query(gCtx, &ShardQueryRequest{
-				VChannel:    vchannels[i],
-				Req:         req.Req,
-				Schema:      req.Schema,
-				MVCC:        req.MVCC,
-				BarrierMVCC: req.BarrierMVCC,
-				Reducer:     collector,
-			})
-			if err != nil {
-				return err
-			}
-			shardPlans[i] = *plan
-			return nil
+	shardPlans, size, err := executeShards(ctx, vchannels, func(ctx context.Context, vchannel string) (*shardResult, error) {
+		return c.shardClient.Query(ctx, &ShardQueryRequest{
+			VChannel:    vchannel,
+			Req:         req.Req,
+			Schema:      req.Schema,
+			MVCC:        req.MVCC,
+			BarrierMVCC: req.BarrierMVCC,
+			Reducer:     collector,
 		})
-	}
-	if err := g.Wait(); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
 	results, err := collector.Reduce(ctx, req, shardPlans)
@@ -360,9 +351,51 @@ func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (resu
 		return nil, err
 	}
 	return &LegacyQueryResult{
-		Results: results,
-		Plans:   shardPlans,
+		Results:             results,
+		Plans:               shardPlans,
+		CollectionSizeBytes: size,
 	}, nil
+}
+
+// executeShards retains each successful plan for requery and selects one
+// whole-collection measurement for the request. Shards may serve different
+// DataVersions during handoff. Prefer the newest measured version, resolving
+// ties by vchannel so the result is independent of completion order.
+func executeShards(ctx context.Context, vchannels []string, execute func(context.Context, string) (*shardResult, error)) ([]ShardPlan, *int64, error) {
+	results := make([]*shardResult, len(vchannels))
+	group, ctx := errgroup.WithContext(ctx)
+	for i, vchannel := range vchannels {
+		group.Go(func() error {
+			result, err := execute(ctx, vchannel)
+			results[i] = result
+			return err
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return nil, nil, err
+	}
+
+	plans, size := collectShardResults(results)
+	return plans, size, nil
+}
+
+// collectShardResults selects one size across winning shard attempts, including empty shards.
+func collectShardResults(results []*shardResult) ([]ShardPlan, *int64) {
+	plans := make([]ShardPlan, len(results))
+	var size *int64
+	var latest qviews.DataVersion
+	var channel string
+	for i, result := range results {
+		plans[i] = result.ShardPlan
+		if result.collectionSizeBytes == nil || *result.collectionSizeBytes < 0 {
+			continue
+		}
+		version := qviews.FromProtoDataVersion(result.Version.GetDataVersion())
+		if size == nil || version.GT(latest) || (version.EQ(latest) && result.ShardID.VChannel < channel) {
+			size, latest, channel = result.collectionSizeBytes, version, result.ShardID.VChannel
+		}
+	}
+	return plans, size
 }
 
 func (c *legacyClient) queryStream(ctx context.Context, req *LegacyQueryRequest, chunkBytes int) (*LegacyQueryResult, error) {
@@ -372,7 +405,7 @@ func (c *legacyClient) queryStream(ctx context.Context, req *LegacyQueryRequest,
 	}
 
 	vchannelStreams, shardPlans, streamPlans, err := openVchannelStreams(ctx, len(vchannels),
-		func(setupCtx context.Context, register func(context.CancelFunc), i int) (queryreducestream.ReduceStream, *ShardPlan, error) {
+		func(setupCtx context.Context, register func(context.CancelFunc), i int) (queryreducestream.ReduceStream, *shardResult, error) {
 			return c.shardClient.QueryStream(ctx, &ShardQueryRequest{
 				VChannel:       vchannels[i],
 				Req:            req.Req,

@@ -24,6 +24,12 @@ type LoadInfoRefProvider interface {
 	AcquireLoadInfo(context.Context, int64, uint64) (func(), error)
 }
 
+// ShardViewSources supplies the references held by each prepared view.
+type ShardViewSources struct {
+	DataViews DataViewRefProvider // Holds the exact version against GC for the lifetime of the QueryView.
+	LoadInfo  LoadInfoRefProvider
+}
+
 // ShardViewManager manages multiple QueryViews for a single shard (vchannel)
 // within a single replica on the Coord side.
 //
@@ -64,15 +70,7 @@ type ShardViewManager struct {
 	pendingSyncs    []syncEntry
 	pendingRemovals []*CoordQueryViewStateMachine
 
-	// dataViewRefs acquires DataViewRefs for resident QueryViews so the
-	// published per-segment LogicalSize footprint stays visible while a view is
-	// alive (lifetime(QueryView) < lifetime(DataView)).
-	//
-	// Non-nil for the DataView-backed registry. The original standalone registry
-	// leaves this nil and does not participate in DataView GC/reference ownership.
-	// A non-nil provider returning a nil ref means the version was collected.
-	dataViewRefs DataViewRefProvider
-	loadInfoRefs LoadInfoRefProvider
+	sources ShardViewSources
 }
 
 // syncEntry pairs a state machine with its per-node views for deferred event submission.
@@ -94,24 +92,20 @@ func newShardViewManager(
 	shardID qviews.ShardID,
 	eventSubmitter dirtyViewEventSubmitter,
 	recoveredViews []*viewpb.QueryViewOfShard,
-	dataViewRefs DataViewRefProvider,
-	loadInfoRefs ...LoadInfoRefProvider,
+	sources ShardViewSources,
 ) *ShardViewManager {
 	m := &ShardViewManager{
 		ctx:            ctx,
 		shardID:        shardID,
 		eventSubmitter: eventSubmitter,
 		views:          make(map[qviews.QueryViewVersion]*CoordQueryViewStateMachine, len(recoveredViews)),
-		dataViewRefs:   dataViewRefs,
+		sources:        sources,
 	}
 
 	// Recover state machines from persisted views. Unlike
 	// RecoverShardViewManager, this simple path does not re-acquire DataView
 	// refs (used by Ensure with no recovered views, and by tests).
 	recovered := make([]*CoordQueryViewStateMachine, 0, len(recoveredViews))
-	if len(loadInfoRefs) > 0 {
-		m.loadInfoRefs = loadInfoRefs[0]
-	}
 	for _, view := range recoveredViews {
 		sm := RecoverCoordQueryViewStateMachineWithRef(view, nil)
 		recovered = append(recovered, sm)
@@ -140,21 +134,17 @@ func RecoverShardViewManager(
 	ctx context.Context,
 	shardID qviews.ShardID,
 	eventSubmitter dirtyViewEventSubmitter,
-	dataViewRefs DataViewRefProvider,
+	sources ShardViewSources,
 	recoveredViews []*viewpb.QueryViewOfShard,
-	loadInfoRefs ...LoadInfoRefProvider,
 ) (*ShardViewManager, error) {
 	m := &ShardViewManager{
 		ctx:            ctx,
 		shardID:        shardID,
 		eventSubmitter: eventSubmitter,
 		views:          make(map[qviews.QueryViewVersion]*CoordQueryViewStateMachine, len(recoveredViews)),
-		dataViewRefs:   dataViewRefs,
+		sources:        sources,
 	}
 
-	if len(loadInfoRefs) > 0 {
-		m.loadInfoRefs = loadInfoRefs[0]
-	}
 	allMissing := len(recoveredViews) > 0
 	recovered := make([]*CoordQueryViewStateMachine, 0, len(recoveredViews))
 	for _, view := range recoveredViews {
@@ -164,15 +154,15 @@ func RecoverShardViewManager(
 		// outlives the QueryView) and bind it at construction. nil ref = the
 		// version no longer exists (already GC'd) -> prepare terminal
 		// recovery; error = provider failure -> abort recovery.
-		ref, err := m.dataViewRefs.Get(ctx, view.GetMeta().GetCollectionId(), version.DataVersion.IntoProto())
+		ref, err := m.sources.DataViews.Get(ctx, view.GetMeta().GetCollectionId(), version.DataVersion.IntoProto())
 		if err != nil {
 			m.abortRecovery()
 			return nil, err
 		}
 
 		sm := RecoverCoordQueryViewStateMachineWithRef(view, ref)
-		if m.loadInfoRefs != nil {
-			sm.releaseLoadInfo, err = m.loadInfoRefs.AcquireLoadInfo(ctx, view.GetMeta().GetCollectionId(), view.GetMeta().GetLoadInfoVersion())
+		if m.sources.LoadInfo != nil {
+			sm.releaseLoadInfo, err = m.sources.LoadInfo.AcquireLoadInfo(ctx, view.GetMeta().GetCollectionId(), view.GetMeta().GetLoadInfoVersion())
 			if err != nil {
 				sm.ReleaseRef()
 				m.abortRecovery()
@@ -459,32 +449,19 @@ func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.Que
 		return err
 	}
 
-	// Get pins the exact version against GC, but may wait for collection I/O.
-	// Keep both construction and acquisition outside the manager lock so node
-	// callbacks, Stats and RequestRelease can continue while it waits.
-	var ref qviews.DataViewRef
-	if m.dataViewRefs != nil {
-		ref, err = m.dataViewRefs.Get(ctx, view.GetMeta().GetCollectionId(), newDV.IntoProto())
-		if err == nil && ref == nil {
-			err = merr.WrapErrServiceUnavailableMsg("DataView %s of collection %d is no longer available; replan the QueryView", newDV.String(), view.GetMeta().GetCollectionId())
-		}
-	}
+	// Acquiring references may block. Keep node callbacks, Stats and
+	// RequestRelease available throughout preparation.
+	ref, err := m.sources.prepareDataView(ctx, view.GetMeta())
 	var releaseLoadInfo func()
-	if err == nil && m.loadInfoRefs != nil {
-		releaseLoadInfo, err = m.loadInfoRefs.AcquireLoadInfo(ctx, view.GetMeta().GetCollectionId(), view.GetMeta().GetLoadInfoVersion())
-		if err != nil && ref != nil {
-			ref.Deref()
-			ref = nil
-		}
+	if err == nil && m.sources.LoadInfo != nil {
+		releaseLoadInfo, err = m.sources.LoadInfo.AcquireLoadInfo(ctx, view.GetMeta().GetCollectionId(), view.GetMeta().GetLoadInfoVersion())
 	}
 	m.mu.Lock()
-	if err != nil {
-		m.releaseEmptyAfterFailedPrepareLocked()
-		return err
+	// The manager may have been retired, or a newer view accepted, while its
+	// references were being acquired. Assign QueryVersion after revalidation.
+	if err == nil {
+		err = m.validateManualPreparationLocked(view, source, preparation)
 	}
-	// The manager may have been retired, or a newer view accepted, during Get.
-	// QueryVersion must also be assigned from the state observed after Get.
-	err = m.validateManualPreparationLocked(view, source, preparation)
 	if err == nil {
 		err = ctx.Err()
 	}
@@ -556,6 +533,28 @@ func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.Que
 	m.submitDirtyEvent(event)
 	m.mu.Unlock()
 	return nil
+}
+
+// prepareDataView pins the exact DataView against GC and records the size on the
+// new QueryView. Recovery uses the persisted size and only reacquires the pin.
+func (s ShardViewSources) prepareDataView(ctx context.Context, meta *viewpb.QueryViewMeta) (qviews.DataViewRef, error) {
+	if s.DataViews == nil {
+		return nil, nil
+	}
+	collectionID := meta.GetCollectionId()
+	version := meta.GetVersion().GetDataVersion()
+	ref, err := s.DataViews.Get(ctx, collectionID, version)
+	if err != nil {
+		if ref != nil {
+			ref.Deref()
+		}
+		return nil, err
+	}
+	if ref == nil {
+		return nil, merr.WrapErrServiceUnavailableMsg("DataView %s of collection %d is no longer available; replan the QueryView", qviews.FromProtoDataVersion(version), collectionID)
+	}
+	meta.CollectionSizeBytes = ref.CollectionSizeBytes()
+	return ref, nil
 }
 
 // RequestRelease initiates teardown of all views in this shard.

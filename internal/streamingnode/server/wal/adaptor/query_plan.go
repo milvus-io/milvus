@@ -154,7 +154,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		ShardId: viewShardID.IntoProto(),
 		Mvcc:    mvcc,
 	}
-	response = &viewpb.GetQueryPlanResponse{Plan: plan}
+	response = &viewpb.GetQueryPlanResponse{Plan: plan, CollectionSizeBytes: lease.Meta.CollectionSizeBytes}
 	var partitionFiltered bool
 	switch request := req.GetRequest().(type) {
 	case *viewpb.GetQueryPlanRequest_StatisticsRequest:

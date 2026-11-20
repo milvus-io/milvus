@@ -96,7 +96,9 @@ type QueryTask struct {
 	lb               shardclient.LBPolicy
 	viewQueryClient  queryclient.Client
 	queryViewPlans   []queryclient.ShardPlan
-	channelsMvcc     map[string]Timestamp
+	// CollectionSizeBytes is the optional measurement from this query's planning phase.
+	CollectionSizeBytes *int64
+	channelsMvcc        map[string]Timestamp
 	// Output snapshots for internal partial-update reads, independent of the
 	// channelsMvcc input overrides. Only successful shard responses are recorded.
 	actualChannelsMvcc *typeutil.ConcurrentMap[string, uint64]
@@ -1202,6 +1204,7 @@ func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 		if result == nil {
 			return merr.WrapErrServiceInternalMsg("QueryView Query returned a nil result")
 		}
+		plans, size := result.Plans, result.CollectionSizeBytes
 		if result.Stream == nil {
 			for _, retrieveResult := range result.Results {
 				t.resultBuf.Insert(retrieveResult)
@@ -1228,15 +1231,17 @@ func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 			if closeErr != nil {
 				return closeErr
 			}
-			for _, plan := range result.GetPlans() {
+			plans, size = result.GetPlansAndCollectionSize()
+			for _, plan := range plans {
 				reducedResult.FeatureBits |= queryclient.ExecutionSummaryFeatureBits(plan.ExecutionSummary)
 			}
 			t.resultBuf.Insert(reducedResult)
 		}
 
+		t.CollectionSizeBytes = size
 		// Both frontiers belong to the final successful Strong WAL snapshot,
 		// including successful empty shards.
-		for _, plan := range result.GetPlans() {
+		for _, plan := range plans {
 			if t.actualChannelsMvcc != nil {
 				t.RecordChannelMvcc(plan.ShardID.VChannel, max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick()))
 			}

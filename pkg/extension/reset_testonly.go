@@ -22,6 +22,7 @@ package extension
 // start from a stock binary.
 func ResetForTest() {
 	installedHook.Store(nil)
+	requestUsageReporter.Store(nil)
 	installedEngine.Store(nil)
 	installedQueryHook.Store(nil)
 	installedCipher.Store(nil)

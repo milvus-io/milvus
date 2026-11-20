@@ -144,6 +144,8 @@ type SearchTask struct {
 	queryInfos        []*planpb.QueryInfo
 	relatedDataSize   int64
 
+	collectionSizeBytes *int64 // Captured by the search that selected the shard plans.
+
 	// Rerank configuration metadata (nil means no rerank)
 	rerankMeta rerankMeta
 	rankParams *rankParams
@@ -1615,6 +1617,7 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 			for _, searchResult := range result.Results {
 				t.resultBuf.Insert(searchResult)
 			}
+			t.collectionSizeBytes = result.CollectionSizeBytes
 			t.queryViewPlans = append([]queryclient.ShardPlan{}, result.Plans...)
 			return nil
 		}
@@ -1669,7 +1672,7 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 			return closeErr
 		}
 		// Plans can change during pre-output shard retries. Read them only after Close.
-		plans := result.GetPlans()
+		plans, size := result.GetPlansAndCollectionSize()
 		for _, plan := range plans {
 			featureBits |= queryclient.ExecutionSummaryFeatureBits(plan.ExecutionSummary)
 			if _, received := queryChannelsTs[plan.ShardID.VChannel]; !received {
@@ -1686,10 +1689,15 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 		t.isTopkReduce = isTopkReduce
 		t.isRecallEvaluation = isRecallEvaluation
 		t.storageCost = storageCost
+		t.collectionSizeBytes = size
 		t.queryViewPlans = append([]queryclient.ShardPlan{}, plans...)
 		return nil
 	}
 	return QueryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), lastErr)
+}
+
+func (t *SearchTask) CollectionSizeBytes() *int64 {
+	return t.collectionSizeBytes
 }
 
 // find the last bound based on reduced results and metric type

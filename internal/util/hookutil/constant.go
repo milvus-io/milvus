@@ -18,6 +18,13 @@
 
 package hookutil
 
+// Measurements supplied to hook.Extension.Report when request usage is enabled.
+const (
+	WriteBytesKey             = "write_bytes"
+	ReadCountKey              = "read_count"
+	CollectionStorageBytesKey = "collection_storage_bytes"
+)
+
 var (
 	// WARN: Please DO NOT modify all constants.
 

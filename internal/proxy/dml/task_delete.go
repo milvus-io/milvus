@@ -310,8 +310,11 @@ type DeleteRunner struct {
 	// task queue
 	queue *scheduler.DmTaskQueue
 
-	allQueryCnt atomic.Int64
-	sessionTS   atomic.Uint64
+	allQueryCnt         atomic.Int64
+	sessionTS           atomic.Uint64
+	measurePayload      bool
+	deletedPKBytes      int64
+	collectionSizeBytes int64
 
 	scannedRemoteBytes atomic.Int64
 	scannedTotalBytes  atomic.Int64
@@ -347,6 +350,15 @@ func (dr *DeleteRunner) Result() *milvuspb.MutationResult {
 func (dr *DeleteRunner) AllQueryCnt() int64 {
 	return dr.allQueryCnt.Load()
 }
+
+// MeasurePayload enables request-level measurements before Init parses the filter.
+func (dr *DeleteRunner) MeasurePayload() { dr.measurePayload = true }
+
+func (dr *DeleteRunner) IsFilterDelete() bool { return !dr.userPlanIsSimple }
+
+func (dr *DeleteRunner) CollectionSizeBytes() int64 { return dr.collectionSizeBytes }
+
+func (dr *DeleteRunner) DeletedPKBytes() int64 { return dr.deletedPKBytes }
 
 // ScannedRemoteBytes returns the scanned remote bytes across shards.
 func (dr *DeleteRunner) ScannedRemoteBytes() int64 {
@@ -439,7 +451,7 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
 	}
 	dr.plan = userPlan
-	if featureusage.Enabled() {
+	if featureusage.Enabled() || dr.measurePayload {
 		dr.userPlanIsSimple = isSimpleDeletePlan(userPlan)
 	}
 
@@ -700,6 +712,9 @@ func (dr *DeleteRunner) complexDelete(ctx context.Context) error {
 	if dr.viewQueryClient != nil {
 		return dr.complexDeleteByQueryView(ctx)
 	}
+	if dr.measurePayload && dr.IsFilterDelete() {
+		return merr.WrapErrServiceInternalMsg("filtered delete requires a QueryView collection size for collection %d", dr.collectionID)
+	}
 	rc := timerecord.NewTimeRecorder("QueryStreamDelete")
 
 	serializedPlan, err := dr.prepareQuery(ctx)
@@ -826,6 +841,13 @@ func (dr *DeleteRunner) complexDeleteByQueryView(ctx context.Context) error {
 		return err
 	}
 
+	if dr.measurePayload && dr.IsFilterDelete() {
+		if result.CollectionSizeBytes == nil {
+			return merr.WrapErrServiceInternalMsg("query plan missing collection size for collection %d", dr.collectionID)
+		}
+		dr.collectionSizeBytes = *result.CollectionSizeBytes
+	}
+
 	primaryKeys := &schemapb.IDs{}
 	seen := typeutil.NewSet[any]()
 	for _, batch := range result.Results {
@@ -874,6 +896,9 @@ func (dr *DeleteRunner) simpleDelete(ctx context.Context, pk *schemapb.IDs, numR
 	if err == nil {
 		dr.result.DeleteCnt = task.count
 		dr.result.Timestamp = task.sessionTS
+		if dr.measurePayload {
+			dr.deletedPKBytes = primaryKeyBytes(pk)
+		}
 	}
 	return err
 }

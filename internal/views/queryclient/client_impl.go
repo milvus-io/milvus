@@ -254,7 +254,7 @@ func (c *viewQueryClientImpl) searchAllShards(
 	for i := range vchannels {
 		i := i
 		g.Go(func() error {
-			plan, err := c.shardClient.Search(gCtx, &ShardSearchRequest{
+			result, err := c.shardClient.Search(gCtx, &ShardSearchRequest{
 				TotalChannelNum: int32(len(vchannels)),
 				VChannel:        vchannels[i],
 				Req:             req,
@@ -265,7 +265,7 @@ func (c *viewQueryClientImpl) searchAllShards(
 			if err != nil {
 				return err
 			}
-			shardPlans[i] = *plan
+			shardPlans[i] = result.ShardPlan
 			return nil
 		})
 	}
@@ -289,7 +289,7 @@ func (c *viewQueryClientImpl) queryAllShards(
 	for i := range vchannels {
 		i := i
 		g.Go(func() error {
-			plan, err := c.shardClient.Query(gCtx, &ShardQueryRequest{
+			result, err := c.shardClient.Query(gCtx, &ShardQueryRequest{
 				VChannel:    vchannels[i],
 				Req:         req,
 				MVCC:        mvcc,
@@ -299,7 +299,7 @@ func (c *viewQueryClientImpl) queryAllShards(
 			if err != nil {
 				return err
 			}
-			shardPlans[i] = *plan
+			shardPlans[i] = result.ShardPlan
 			return nil
 		})
 	}

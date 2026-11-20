@@ -1055,6 +1055,27 @@ func (m *IndexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map
 	return m.GetSegmentIndexesUnsafe(collectionID, segID)
 }
 
+// FinishedIndexBytes sums current builds for the selected segments. A retired
+// build may retain file keys for GC after it stops serving the collection.
+func (m *IndexMeta) FinishedIndexBytes(collectionID int64, segmentIDs []int64) int64 {
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
+	definitions := m.Indexes[collectionID]
+	var size int64
+	for _, id := range segmentIDs {
+		if indexes, ok := m.SegmentIndexes.Get(id); ok {
+			indexes.Range(func(indexID int64, build *model.SegmentIndex) bool {
+				def := definitions[indexID]
+				if def != nil && !def.IsDeleted && !build.IsDeleted && build.IndexState == commonpb.IndexState_Finished {
+					size += int64(build.IndexSerializedSize)
+				}
+				return true
+			})
+		}
+	}
+	return size
+}
+
 // GetAllSegmentIndexes returns a deep-clone of every SegmentIndex recorded
 // for segID, including deleted tasks and records whose parent field index has
 // been deleted. GC needs their file keys until cleanup completes.
