@@ -25,6 +25,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -180,7 +181,6 @@ func runComponent[T component](ctx context.Context,
 
 		// Run() executes after sign is closed, allowing components to start concurrently
 		if err := role.Run(); err != nil {
-			healthz.UnRegister(role.GetName())
 			if stopErr := role.Stop(); stopErr != nil {
 				mlog.Warn(ctx, "failed to stop component after Run failure", mlog.String("role", role.GetName()), mlog.Err(stopErr))
 			}
@@ -210,8 +210,9 @@ type MilvusRoles struct {
 
 	ServerType string
 
-	closed chan struct{}
-	once   sync.Once
+	closed                  chan struct{}
+	once                    sync.Once
+	startupCanceledBySignal atomic.Bool
 }
 
 // NewMilvusRoles creates a new MilvusRoles with private fields initialized.
@@ -299,6 +300,7 @@ func (mr *MilvusRoles) waitForAllComponentsReady(cancel context.CancelFunc, comp
 		}
 	}
 	componentMap := make(map[string]component, len(componentFutureMap))
+	mr.startupCanceledBySignal.Store(false)
 	readyCount := 0
 	var firstErr error
 	for readyCount < len(componentFutureMap) {
@@ -307,6 +309,7 @@ func (mr *MilvusRoles) waitForAllComponentsReady(cancel context.CancelFunc, comp
 			cancel()
 			if firstErr == nil {
 				firstErr = context.Canceled
+				mr.startupCanceledBySignal.Store(true)
 				mlog.Warn(context.TODO(), "components are not ready before closing, wait for the start of components to be canceled...")
 			}
 		} else {
@@ -337,10 +340,6 @@ func (mr *MilvusRoles) waitForAllComponentsReady(cancel context.CancelFunc, comp
 }
 
 func (mr *MilvusRoles) stopComponents(componentMap map[string]component) {
-	for role := range componentMap {
-		healthz.UnRegister(role)
-	}
-
 	mixCoord := componentMap[typeutil.MixCoordRole]
 	streamingNode := componentMap[typeutil.StreamingNodeRole]
 	queryNode := componentMap[typeutil.QueryNodeRole]
@@ -682,14 +681,12 @@ func (mr *MilvusRoles) Run() error {
 
 	componentMap, err := mr.waitForAllComponentsReady(cancel, componentFutureMap)
 	if err != nil {
-		select {
-		case <-mr.closed:
+		if mr.startupCanceledBySignal.Load() {
 			mlog.Info(context.TODO(), "Milvus startup canceled due to shutdown signal", mlog.Err(err))
 			return nil
-		default:
-			mlog.Error(context.TODO(), "Failed to wait for all components ready", mlog.Err(err))
-			return err
 		}
+		mlog.Error(context.TODO(), "Failed to wait for all components ready", mlog.Err(err))
+		return err
 	}
 	mlog.Info(context.TODO(), "All components are ready", mlog.Strings("roles", lo.Keys(componentMap)))
 

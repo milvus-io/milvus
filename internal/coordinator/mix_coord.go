@@ -65,12 +65,13 @@ type mixCoordImpl struct {
 	datacoordServer  *datacoord.Server
 	streamingCoord   *streamingcoord.Server
 
-	ctx     context.Context
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	etcdCli *clientv3.Client
-	tikvCli *txnkv.Client
-	address string
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	standbyWG sync.WaitGroup
+	etcdCli   *clientv3.Client
+	tikvCli   *txnkv.Client
+	address   string
 
 	// stopTiKVGC stops the GC of a TiKV meta store, which runs on the active
 	// replica only; see startTiKVGCWorker.
@@ -151,7 +152,9 @@ func (s *mixCoordImpl) Register() error {
 		metrics.NumNodes.WithLabelValues(paramtable.GetStringNodeID(), typeutil.MixCoordRole).Inc()
 		mlog.Info(s.ctx, "MixCoord Register Finished")
 	}
+	s.standbyWG.Add(1)
 	go func() {
+		defer s.standbyWG.Done()
 		if err := s.session.ProcessActiveStandBy(s.activateFunc); err != nil {
 			if s.ctx.Err() == context.Canceled {
 				mlog.Info(s.ctx, "standby process canceled due to server shutdown")
@@ -504,6 +507,11 @@ func (s *mixCoordImpl) Stop() error {
 	if s.stopTiKVGC != nil {
 		s.stopTiKVGC()
 	}
+
+	// Cancel before stopping coordinators so any in-flight standby activation
+	// exits and finishes before GracefulStop tears down streamingCoord.
+	s.cancel()
+	s.standbyWG.Wait()
 
 	s.GracefulStop()
 	mlog.Info(s.ctx, "graceful stop done")

@@ -48,7 +48,7 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 		defer removePidFile(lock)
 		return roles.Run()
 	}()
-	if runErr != nil {
+	if runErr != nil && !roles.Embedded {
 		os.Exit(1)
 	}
 }

@@ -115,7 +115,7 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 		ctx:         ctx1,
 		cancel:      cancel,
 		querynode:   qn.NewQueryNode(ctx, factory),
-		grpcErrChan: make(chan error),
+		grpcErrChan: make(chan error, 1),
 		mixCoord:    syncutil.NewFuture[types.MixCoordClient](),
 	}
 	return s, nil
@@ -164,6 +164,7 @@ func (s *Server) init() error {
 	s.SetEtcdClient(etcdCli)
 	s.querynode.SetAddress(s.listener.Address())
 	mlog.Debug(s.ctx, "QueryNode connect to etcd successfully")
+	s.initGrpcServer()
 	s.grpcWG.Add(1)
 	go s.startGrpcLoop()
 	// wait for grpc server loop start
@@ -227,9 +228,7 @@ func (s *Server) start() error {
 	return nil
 }
 
-// startGrpcLoop starts the grpc loop of QueryNode component.
-func (s *Server) startGrpcLoop() {
-	defer s.grpcWG.Done()
+func (s *Server) initGrpcServer() {
 	Params := &paramtable.Get().QueryNodeGrpcServerCfg
 	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
@@ -277,7 +276,11 @@ func (s *Server) startGrpcLoop() {
 	s.grpcServer = grpc.NewServer(grpcOpts...)
 	querypb.RegisterQueryNodeServer(s.grpcServer, s)
 	s.registerQueryViewServers()
+}
 
+// startGrpcLoop starts the grpc loop of QueryNode component.
+func (s *Server) startGrpcLoop() {
+	defer s.grpcWG.Done()
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
 

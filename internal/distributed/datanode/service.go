@@ -70,7 +70,7 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 		ctx:         ctx1,
 		cancel:      cancel,
 		factory:     factory,
-		grpcErrChan: make(chan error),
+		grpcErrChan: make(chan error, 1),
 	}
 
 	s.serverID.Store(paramtable.GetNodeID())
@@ -96,6 +96,7 @@ func (s *Server) Prepare() error {
 }
 
 func (s *Server) startGrpc() error {
+	s.initGrpcServer()
 	s.grpcWG.Add(1)
 	go s.startGrpcLoop()
 	// wait for grpc server loop start
@@ -107,9 +108,7 @@ func (s *Server) startGrpc() error {
 	}
 }
 
-// startGrpcLoop starts the grep loop of datanode component.
-func (s *Server) startGrpcLoop() {
-	defer s.grpcWG.Done()
+func (s *Server) initGrpcServer() {
 	Params := &paramtable.Get().DataNodeGrpcServerCfg
 	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
@@ -153,7 +152,11 @@ func (s *Server) startGrpcLoop() {
 	s.grpcServer = grpc.NewServer(grpcOpts...)
 	datapb.RegisterDataNodeServer(s.grpcServer, s)
 	workerpb.RegisterIndexNodeServer(s.grpcServer, s)
+}
 
+// startGrpcLoop starts the grep loop of datanode component.
+func (s *Server) startGrpcLoop() {
+	defer s.grpcWG.Done()
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
 

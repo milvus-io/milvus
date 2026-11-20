@@ -154,3 +154,30 @@ func TestRunComponentStopsOnRunFailure(t *testing.T) {
 	require.ErrorIs(t, err, runErr)
 	assert.EqualValues(t, 1, comp.stopCount.Load())
 }
+
+func TestWaitForAllComponentsReadyErrorThenSignalPreservesError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mr := &MilvusRoles{closed: make(chan struct{})}
+	syntheticErr := errors.New("synthetic component initialization failure")
+	enteredSibling := make(chan struct{})
+
+	futures := map[string]*conc.Future[component]{
+		typeutil.DataNodeRole: conc.Go(func() (component, error) {
+			return nil, syntheticErr
+		}),
+		typeutil.QueryNodeRole: conc.Go(func() (component, error) {
+			close(enteredSibling)
+			<-ctx.Done()
+			close(mr.closed)
+			return nil, ctx.Err()
+		}),
+	}
+
+	<-enteredSibling
+	componentMap, err := mr.waitForAllComponentsReady(cancel, futures)
+	require.Nil(t, componentMap)
+	require.ErrorIs(t, err, syntheticErr)
+	assert.False(t, mr.startupCanceledBySignal.Load())
+}
