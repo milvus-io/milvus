@@ -4436,8 +4436,8 @@ func CreateSparseFloatRowFromMap(input map[string]interface{}) ([]byte, error) {
 		default:
 			return 0, merr.WrapErrParameterInvalidMsg("invalid index type in JSON: %s", reflect.TypeOf(key))
 		}
-		if idx >= math.MaxUint32 {
-			return 0, merr.WrapErrParameterInvalidMsg("index too large in JSON: %v", idx)
+		if idx < 0 || idx >= math.MaxUint32 {
+			return 0, merr.WrapErrParameterInvalidMsg("invalid index in JSON: %v must be in [0, 2^32-1)", idx)
 		}
 		return uint32(idx), nil
 	}
