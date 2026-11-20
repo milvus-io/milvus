@@ -884,6 +884,7 @@ message CompactionPlan {
   // The requesting DataCoord can commit schema-bump manifest deltas. Absent
   // or false preserves the legacy worker-produced complete manifest response.
   bool enable_manifest_delta = 32;
+  uint64 materialized_through = 33;
 }
 
 // ManifestColumnGroupFile is one loon/parquet file belonging to a column
@@ -983,6 +984,8 @@ message CompactionPlanResult {
   // classifies the original error (merr.Status), so DataCoord can persist the
   // code/reason and decide retryability instead of seeing a bare `failed`.
   common.Status fail_status = 6;
+  // Echoed only by a worker that executed the certified L0 scope protocol.
+  uint64 materialized_through = 7;
 }
 
 message CompactionStateResponse {
@@ -1873,6 +1876,11 @@ message CompactionTask{
   // Preserve the task outcome after state advances to cleaned. Older cleaned
   // tasks leave this as unknown and are treated as successfully completed.
   CompactionTaskState terminal_state = 31;
+  // Persisted VChannel frontier captured before selecting the registered L0 inputs.
+  // Zero identifies legacy tasks without a scheduling-time certificate.
+  uint64 materialized_through = 32;
+  // Presence distinguishes the initial worker assignment from a frozen empty set.
+  L0DispatchTargets l0_targets = 33;
 }
 
 message PartitionStatsInfo {
@@ -2442,4 +2450,10 @@ message SnapshotSummary {
 message DeltaMutationCounts {
   int64 delete_keys = 1;
   int64 update_keys = 2;
+}
+
+message L0DispatchTargets {
+  repeated int64 segment_ids = 1;
+  // Every target result and cursor is durable. Recovery only retires inputs.
+  bool published = 2;
 }

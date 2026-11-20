@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/samber/lo"
-
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -228,22 +226,21 @@ func (e *executor) executeTask(task Compactor) {
 	e.completeTask(task.GetPlanID(), result)
 
 	// Emit metrics
-	getDataCount := func(binlogs []*datapb.FieldBinlog) int64 {
-		count := int64(0)
-		for _, binlog := range binlogs {
-			for _, fbinlog := range binlog.GetBinlogs() {
-				count += fbinlog.GetEntriesNum()
+	var entityCount, deleteCount, updateCount int64
+	for _, seg := range result.GetSegments() {
+		if task.GetCompactionType() != datapb.CompactionType_Level0DeleteCompaction && task.GetCompactionType() != datapb.CompactionType_RestoreLevel0DeleteCompaction {
+			entityCount += seg.GetNumOfRows()
+		}
+		for _, group := range seg.GetDeltalogs() {
+			for _, file := range group.GetBinlogs() {
+				deleteCount += file.DeleteKeyCount()
+				updateCount += file.GetMutationCounts().GetUpdateKeys()
 			}
 		}
-		return count
 	}
-
-	var entityCount int64
-	var deleteCount int64
-	lo.ForEach(result.Segments, func(seg *datapb.CompactionSegment, _ int) {
-		entityCount += seg.GetNumOfRows()
-		deleteCount += getDataCount(seg.GetDeltalogs())
-	})
+	if updateCount > 0 {
+		metrics.DataNodeWriteDataCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.CompactionDataSourceLabel, metrics.UpdateLabel, fmt.Sprint(task.GetCollection())).Add(float64(updateCount))
+	}
 	metrics.DataNodeWriteDataCount.WithLabelValues(
 		paramtable.GetStringNodeID(),
 		metrics.CompactionDataSourceLabel,

@@ -125,6 +125,10 @@ type ClusterBuffer struct {
 // WriteRecord copies a row into the bucket's batch, independently of the input
 // Record's lifetime. The writer receives Records sized by bytes, not input rows.
 func (b *ClusterBuffer) WriteRecord(r storage.Record, row int) error {
+	return b.appendRow(r, row, b.writer.schema)
+}
+
+func (b *ClusterBuffer) appendRow(r storage.Record, row int, copySchema *schemapb.CollectionSchema) error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 	if b.appendErr != nil {
@@ -135,9 +139,9 @@ func (b *ClusterBuffer) WriteRecord(r storage.Record, row int) error {
 	}
 	if b.builder == nil {
 		if b.writer.storageVersion == storage.StorageV3 {
-			b.builder = storage.NewRecordBuilderWithFieldID(b.writer.schema)
+			b.builder = storage.NewRecordBuilderWithFieldID(copySchema)
 		} else {
-			b.builder = storage.NewRecordBuilder(b.writer.schema)
+			b.builder = storage.NewRecordBuilder(copySchema)
 		}
 	}
 	if err := b.builder.Append(r, row, row+1); err != nil {
@@ -654,15 +658,11 @@ func (t *clusteringCompactionTask) mappingSegment(
 	processStart := time.Now()
 	var remained int64 = 0
 
-	options := []storage.RwOption{
-		storage.WithDownloader(t.binlogIO.Download),
-		storage.WithStorageConfig(t.compactionParams.StorageConfig),
-	}
-	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, t.primaryKeyField.DataType, segment, options...)
+	mutations, err := loadRewriteMutations(ctx, compactionMutationSource(nil, t.binlogIO), t.compactionParams.StorageConfig, t.plan, segment, t.primaryKeyField)
 	if err != nil {
 		return err
 	}
-	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime, segment.GetCommitTimestamp())
+	entityFilter := compaction.NewEntityFilter(mutations.deletes, t.plan.GetCollectionTtl(), t.currentTime, segment.GetCommitTimestamp())
 
 	mappingStats := &clusteringpb.ClusteringCentroidIdMappingStats{}
 	if t.isVectorClusteringKey {
@@ -700,7 +700,8 @@ func (t *clusteringCompactionTask) mappingSegment(
 		mlog.Warn(ctx, "new record materializer wrong", mlog.Err(err))
 		return err
 	}
-	rr = newMaterializedRecordReader(rr, materializer)
+	rr = mutations.wrapReader(newMaterializedRecordReader(rr, materializer))
+	copySchema := resolvedCopySchema(t.plan.Schema)
 	rr = wrapReaderWithTimestampOverwrite(rr, segment.GetCommitTimestamp())
 	defer rr.Close()
 
@@ -778,7 +779,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 				}
 				clusterBuffer = t.keyToBufferFunc(key)
 			}
-			if err := clusterBuffer.WriteRecord(r, row); err != nil {
+			if err := clusterBuffer.appendRow(r, row, copySchema); err != nil {
 				return err
 			}
 			t.writtenRowNum.Inc()

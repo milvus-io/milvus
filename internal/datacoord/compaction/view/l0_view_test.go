@@ -255,7 +255,7 @@ func (s *LevelZeroSegmentsViewSuite) TestResolveLatestDeletePos() {
 		paramtable.Get().Save("dataCoord.compaction.levelzero.forceSelectAllSegments", "false")
 		defer paramtable.Get().Reset("dataCoord.compaction.levelzero.forceSelectAllSegments")
 
-		got := resolveLatestDeletePos(dmlPos)
+		got := ResolveLatestDeletePos(dmlPos)
 		s.Equal(dmlPos, got)
 	})
 
@@ -263,7 +263,7 @@ func (s *LevelZeroSegmentsViewSuite) TestResolveLatestDeletePos() {
 		paramtable.Get().Save("dataCoord.compaction.levelzero.forceSelectAllSegments", "true")
 		defer paramtable.Get().Reset("dataCoord.compaction.levelzero.forceSelectAllSegments")
 
-		got := resolveLatestDeletePos(dmlPos)
+		got := ResolveLatestDeletePos(dmlPos)
 		s.Equal(uint64(math.MaxUint64), got.GetTimestamp())
 		s.Equal("ch-1", got.GetChannelName())
 	})
@@ -272,7 +272,7 @@ func (s *LevelZeroSegmentsViewSuite) TestResolveLatestDeletePos() {
 		paramtable.Get().Save("dataCoord.compaction.levelzero.forceSelectAllSegments", "true")
 		defer paramtable.Get().Reset("dataCoord.compaction.levelzero.forceSelectAllSegments")
 
-		got := resolveLatestDeletePos(nil)
+		got := ResolveLatestDeletePos(nil)
 		s.Equal(uint64(math.MaxUint64), got.GetTimestamp())
 		s.Equal("", got.GetChannelName())
 	})
@@ -323,4 +323,20 @@ func (s *LevelZeroSegmentsViewSuite) TestResolveLatestDeletePos() {
 		s.Require().True(ok)
 		s.Equal(uint64(math.MaxUint64), levelZeroView.LatestDeletePos.GetTimestamp())
 	})
+}
+
+func (s *LevelZeroSegmentsViewSuite) TestCertifiedRoundCannotSplit() {
+	v := s.v
+	v.MaterializedThrough = 99999
+	for _, seg := range v.L0Segments {
+		seg.DeltalogCount = 1000
+		seg.DeltaSize = 1 << 30
+	}
+	for _, trigger := range []func() (CompactionView, string){v.Trigger, v.ForceTrigger} {
+		result, _ := trigger()
+		s.Require().Same(v, result)
+	}
+	rounds, _ := v.ForceTriggerAll()
+	s.Require().Len(rounds, 1)
+	s.Same(v, rounds[0])
 }

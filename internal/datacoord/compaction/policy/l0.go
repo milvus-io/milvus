@@ -8,11 +8,15 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -82,7 +86,10 @@ func (policy *L0CompactionPolicy) Trigger(ctx context.Context) (events map[Compa
 		if len(segments) == 0 {
 			continue
 		}
-		labelViews := policy.GroupL0ViewsByPartChan(collID, view.GetViewsByInfo(segments...), newTriggerID)
+		labelViews, err := policy.scheduleViews(ctx, collID, segments, newTriggerID)
+		if err != nil {
+			return nil, err
+		}
 		if idleCollsSet.Contain(collID) {
 			idleL0Views = append(idleL0Views, labelViews...)
 		} else {
@@ -129,8 +136,84 @@ func (policy *L0CompactionPolicy) TriggerOneCollection(ctx context.Context, coll
 		log.Warn(ctx, "fail to allocate triggerID for l0 compaction", mlog.Err(err))
 		return nil, 0, err
 	}
-	views := policy.GroupL0ViewsByPartChan(collectionID, view.GetViewsByInfo(allL0Segments...), newTriggerID)
-	return views, newTriggerID, nil
+	views, err := policy.scheduleViews(ctx, collectionID, allL0Segments, newTriggerID)
+	return views, newTriggerID, err
+}
+
+// The initial compactable snapshot discovers channels only. A read of M
+// orders the subsequent snapshot of all live inputs, including reservations.
+func (policy *L0CompactionPolicy) scheduleViews(ctx context.Context, collection int64, candidates []*meta.SegmentInfo, trigger int64) ([]view.CompactionView, error) {
+	if policy.Meta.StreamingNodeCatalog == nil {
+		return policy.GroupL0ViewsByPartChan(collection, view.GetViewsByInfo(candidates...), trigger), nil
+	}
+	channels := make(map[string]struct{})
+	for _, s := range candidates {
+		channels[s.GetInsertChannel()] = struct{}{}
+	}
+	var result []view.CompactionView
+	for channel := range channels {
+		base, err := policy.Meta.StreamingNodeCatalog.GetVChannelBase(ctx, funcutil.ToPhysicalChannel(channel), channel)
+		if err != nil {
+			return nil, err
+		}
+		m0 := base.GetTransformMaterializedTimeTick()
+		if m0 == 0 || base.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
+			continue
+		}
+		inputs := policy.Meta.SelectSegments(ctx, meta.WithCollection(collection), meta.WithChannel(channel), meta.SegmentFilterFunc(func(s *meta.SegmentInfo) bool {
+			return s.GetLevel() == datapb.SegmentLevel_L0 && meta.IsSegmentHealthy(s)
+		}))
+		for _, group := range certifiedL0Groups(collection, channel, trigger, m0, inputs) {
+			growing := policy.Meta.GetEarliestStartPositionOfGrowingSegments(collection, group.Label.PartitionID, channel)
+			if group.LatestDeletePos.GetTimestamp() <= growing.GetTimestamp() {
+				group.LatestDeletePos = view.ResolveLatestDeletePos(group.LatestDeletePos)
+				result = append(result, group)
+			}
+		}
+	}
+	return result, nil
+}
+
+func certifiedL0Groups(collection int64, channel string, trigger int64, m0 uint64, inputs []*meta.SegmentInfo) []*view.LevelZeroCompactionView {
+	groups := make(map[int64]*view.LevelZeroCompactionView)
+	blocked := make(map[int64]bool)
+	joint := false
+	for _, s := range inputs {
+		part := s.GetPartitionID()
+		start, end := meta.L0MutationTimeRange(s.SegmentInfo)
+		if start > m0 && end >= start && !s.GetIsImporting() {
+			continue
+		}
+		if end > m0 || start == 0 || end < start || s.IsCompacting || s.GetIsImporting() || !meta.IsFlushed(s) {
+			blocked[part] = true
+			continue
+		}
+		joint = joint || part == common.AllPartitionsID
+		g := groups[part]
+		if g == nil {
+			g = &view.LevelZeroCompactionView{MaterializedThrough: m0, TriggerID: trigger, Label: &view.CompactionGroupLabel{CollectionID: collection, PartitionID: part, Channel: channel}, LatestDeletePos: &msgpb.MsgPosition{ChannelName: channel}}
+			groups[part] = g
+		}
+		g.LatestDeletePos.Timestamp = max(g.LatestDeletePos.Timestamp, end)
+		g.Append(view.GetViewsByInfo(s)...)
+	}
+	if blocked[common.AllPartitionsID] || (joint && len(blocked) > 0) {
+		return nil
+	}
+	if joint {
+		g := groups[common.AllPartitionsID]
+		for part, sub := range groups {
+			if part != common.AllPartitionsID {
+				g.Append(sub.L0Segments...)
+				g.LatestDeletePos.Timestamp = max(g.LatestDeletePos.Timestamp, sub.LatestDeletePos.Timestamp)
+			}
+		}
+		return []*view.LevelZeroCompactionView{g}
+	}
+	for part := range blocked {
+		delete(groups, part)
+	}
+	return lo.Values(groups)
 }
 
 func (policy *L0CompactionPolicy) GroupL0ViewsByPartChan(collectionID UniqueID, levelZeroSegments []*view.SegmentView, triggerID UniqueID) []view.CompactionView {

@@ -27,7 +27,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/dataview"
+	"github.com/milvus-io/milvus/internal/metastore"
 	kvstreamingnode "github.com/milvus-io/milvus/internal/metastore/kv/streamingnode"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -191,4 +193,168 @@ func TestL0CompactionCursorCommitsWithV3Manifest(t *testing.T) {
 		require.Len(t, published.GetDeltalogs(), 1)
 		require.Equal(t, commonpb.SegmentState_Dropped, metadata.GetSegment(ctx, 10).GetState())
 	}
+}
+
+// Model an oversized catalog publication interrupted after a cursor-only
+// target became durable but before the second target's deltalog was written.
+type interruptedL0Catalog struct {
+	metastore.DataCoordCatalog
+	failure error
+}
+
+func (c interruptedL0Catalog) AlterSegments(ctx context.Context, segments []*datapb.SegmentInfo, _ ...metastore.BinlogsIncrement) error {
+	for _, s := range segments {
+		if s.GetID() == 3 {
+			if err := c.DataCoordCatalog.AlterSegments(ctx, []*datapb.SegmentInfo{s}); err != nil {
+				return err
+			}
+			return c.failure
+		}
+	}
+	return merr.WrapErrServiceInternalMsg("missing first target in test catalog publication")
+}
+
+func TestCertifiedL0PublicationRecovery(t *testing.T) {
+	ctx := t.Context()
+	m, domain, err := newMemoryMetaWithCompactionTask(t)
+	require.NoError(t, err)
+	m.StreamingNodeCatalog = kvstreamingnode.NewCataLog(nil)
+	const channel = "p1_100v0"
+	for _, s := range []*datapb.SegmentInfo{
+		{ID: 1, Level: datapb.SegmentLevel_L0, PartitionID: 1},
+		{ID: 2, Level: datapb.SegmentLevel_L0, PartitionID: common.AllPartitionsID},
+		{ID: 3, Level: datapb.SegmentLevel_L1, PartitionID: 1, TransformStartAfterTimetick: 50},
+		{ID: 4, Level: datapb.SegmentLevel_L1, PartitionID: 2},
+	} {
+		s.CollectionID = 100
+		s.InsertChannel = channel
+		s.State = commonpb.SegmentState_Flushed
+		require.NoError(t, m.AddSegment(ctx, meta.NewSegmentInfo(s)))
+	}
+	plan := &datapb.CompactionTask{
+		PlanID: 77, TriggerID: 76, CollectionID: 100, PartitionID: common.AllPartitionsID, Channel: channel, Type: datapb.CompactionType_Level0DeleteCompaction,
+		Pos: &msgpb.MsgPosition{Timestamp: 200}, MaterializedThrough: 200, InputSegments: []int64{1, 2}, L0Targets: &datapb.L0DispatchTargets{SegmentIds: []int64{3, 4}},
+	}
+	task := NewL0CompactionTask(plan, nil, m, domain.compactionTaskMeta)
+	require.NoError(t, task.SaveTaskMeta())
+	outputs := []*datapb.CompactionSegment{{SegmentID: 3}, {SegmentID: 4, Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: 88, EntriesNum: 1, MutationCounts: &datapb.DeltaMutationCounts{UpdateKeys: 2}}}}}}}
+	require.ErrorIs(t, task.SaveSegmentMeta(outputs[:1]), merr.ErrDataIntegrity)
+	// A late manifest registration invalidates the frozen round. Keep every
+	// input live until the policy can select a complete group again.
+	require.NoError(t, m.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 9, CollectionID: 100, PartitionID: 3, InsertChannel: channel, Level: datapb.SegmentLevel_L0,
+		State: commonpb.SegmentState_Flushed, StartPosition: &msgpb.MsgPosition{Timestamp: 140},
+		DmlPosition: &msgpb.MsgPosition{Timestamp: 140},
+	})))
+	require.ErrorIs(t, task.SaveSegmentMeta(outputs), merr.ErrCompactionPlanConflict)
+	require.False(t, task.GetTaskProto().GetL0Targets().GetPublished())
+	require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateStatusOperator(9, commonpb.SegmentState_Dropped)))
+	require.EqualValues(t, 50, m.GetSegment(ctx, 3).GetTransformStartAfterTimetick())
+	catalog := m.Catalog
+	partial := merr.WrapErrServiceUnavailableMsg("interrupted target publication")
+	m.Catalog = interruptedL0Catalog{catalog, partial}
+	require.ErrorIs(t, task.SaveSegmentMeta(outputs), partial)
+	m.Catalog = catalog
+	restart := func() {
+		domain = &compactionTaskTestMetas{}
+		m = meta.BootMetaWithLoader(t, catalog, 100, withCompactionTaskTestMetas(domain))
+		m.StreamingNodeCatalog = kvstreamingnode.NewCataLog(nil)
+		saved, err := catalog.ListCompactionTask(ctx)
+		require.NoError(t, err)
+		require.Len(t, saved, 1)
+		task = NewL0CompactionTask(saved[0], nil, m, domain.compactionTaskMeta)
+	}
+	restart()
+	require.EqualValues(t, 200, m.GetSegment(ctx, 3).GetTransformStartAfterTimetick())
+	require.Empty(t, m.GetSegment(ctx, 4).GetDeltalogs())
+	require.False(t, task.GetTaskProto().GetL0Targets().GetPublished())
+	for _, id := range plan.InputSegments {
+		require.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(ctx, id).GetState())
+	}
+	failure := merr.WrapErrServiceUnavailableMsg("injected marker failure")
+	marker := mockey.Mock(mockey.GetMethod(m.Catalog, "SaveCompactionTask")).Return(failure).Build()
+	defer marker.UnPatch()
+	require.ErrorIs(t, task.SaveSegmentMeta(outputs), failure)
+	require.EqualValues(t, 200, m.GetSegment(ctx, 3).GetTransformStartAfterTimetick())
+	require.EqualValues(t, 0, m.GetSegment(ctx, 4).GetTransformStartAfterTimetick())
+	require.Len(t, m.GetSegment(ctx, 4).GetDeltalogs()[0].GetBinlogs(), 1)
+	require.False(t, task.GetTaskProto().GetL0Targets().GetPublished())
+	for _, id := range plan.InputSegments {
+		require.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(ctx, id).GetState())
+	}
+	marker.UnPatch()
+	// A target appearing after the worker attempt is outside the frozen plan.
+	require.NoError(t, m.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 5, CollectionID: 100, PartitionID: 2, InsertChannel: channel, State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1})))
+	frozen, _, err := task.SelectFlushedSegment()
+	require.NoError(t, err)
+	require.Len(t, frozen, 2)
+	require.NoError(t, task.SaveSegmentMeta(outputs))
+	require.Len(t, m.GetSegment(ctx, 4).GetDeltalogs()[0].GetBinlogs(), 1)
+	require.True(t, task.GetTaskProto().GetL0Targets().GetPublished())
+	// Model an interruption between catalog chunks of input retirement.
+	require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateStatusOperator(1, commonpb.SegmentState_Dropped), meta.UpdateCompactedOperator(1)))
+	restart()
+	require.True(t, task.Process())
+	for _, id := range plan.InputSegments {
+		require.Equal(t, commonpb.SegmentState_Dropped, m.GetSegment(ctx, id).GetState())
+	}
+}
+
+func TestCertifiedL0RejectsOldWorkerResult(t *testing.T) {
+	ctx := t.Context()
+	m, domain, err := newMemoryMetaWithCompactionTask(t)
+	require.NoError(t, err)
+	m.StreamingNodeCatalog = kvstreamingnode.NewCataLog(nil)
+	plan := &datapb.CompactionTask{PlanID: 77, TriggerID: 76, NodeID: 71, CollectionID: 100, PartitionID: 1, Channel: "p1_100v0", Type: datapb.CompactionType_Level0DeleteCompaction, MaterializedThrough: 200, InputSegments: []int64{1}, L0Targets: &datapb.L0DispatchTargets{SegmentIds: []int64{2}}}
+	task := NewL0CompactionTask(plan, nil, m, domain.compactionTaskMeta)
+	for _, s := range []*datapb.SegmentInfo{{ID: 1, Level: datapb.SegmentLevel_L0}, {ID: 2, Level: datapb.SegmentLevel_L1, TransformStartAfterTimetick: 50}} {
+		s.CollectionID = 100
+		s.PartitionID = 1
+		s.InsertChannel = plan.Channel
+		s.State = commonpb.SegmentState_Flushed
+		require.NoError(t, m.AddSegment(ctx, meta.NewSegmentInfo(s)))
+	}
+	cluster := session.NewMockCluster(t)
+	for _, tc := range []struct {
+		through uint64
+		missing bool
+	}{{}, {through: 199}, {through: 200, missing: true}, {through: 200}} {
+		through := tc.through
+		retry := through != 200 || tc.missing
+		require.NoError(t, task.UpdateAndSaveTaskMeta(SetNodeID(71), SetState(datapb.CompactionTaskState_executing)))
+		res := &datapb.CompactionPlanResult{PlanID: plan.PlanID, Channel: plan.Channel, Type: plan.Type, State: datapb.CompactionTaskState_completed, MaterializedThrough: through, Segments: []*datapb.CompactionSegment{{SegmentID: 2}}}
+		if tc.missing {
+			res.Segments = nil
+		}
+		cluster.EXPECT().QueryCompaction(int64(71), &datapb.CompactionStateRequest{PlanID: 77}).Return(res, nil).Once()
+		if retry {
+			cluster.EXPECT().DropCompaction(int64(71), int64(77)).Return(nil).Once()
+		}
+		task.QueryTaskOnWorker(cluster)
+		if retry {
+			require.EqualValues(t, 50, m.GetSegment(ctx, 2).GetTransformStartAfterTimetick())
+			require.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(ctx, 1).GetState())
+			require.False(t, task.GetTaskProto().GetL0Targets().GetPublished())
+		} else {
+			require.EqualValues(t, 200, m.GetSegment(ctx, 2).GetTransformStartAfterTimetick())
+			require.True(t, task.Process())
+			require.Equal(t, commonpb.SegmentState_Dropped, m.GetSegment(ctx, 1).GetState())
+		}
+	}
+}
+
+func TestCertifiedL0NoTargets(t *testing.T) {
+	ctx := t.Context()
+	m, domains, err := newMemoryMetaWithCompactionTask(t)
+	require.NoError(t, err)
+	plan := &datapb.CompactionTask{PlanID: 8, TriggerID: 6, CollectionID: 1, PartitionID: 1, Channel: "p1_1v0", Type: datapb.CompactionType_Level0DeleteCompaction, Pos: &msgpb.MsgPosition{Timestamp: 100}, MaterializedThrough: 200, InputSegments: []int64{7}}
+	require.NoError(t, m.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 7, CollectionID: 1, PartitionID: 1, InsertChannel: plan.Channel, Level: datapb.SegmentLevel_L0, State: commonpb.SegmentState_Flushed})))
+	task := NewL0CompactionTask(plan, nil, m, domains.compactionTaskMeta)
+	task.CreateTaskOnWorker(1, nil)
+	require.NotNil(t, task.GetTaskProto().GetL0Targets())
+	require.Empty(t, task.GetTaskProto().GetL0Targets().GetSegmentIds())
+	require.True(t, task.GetTaskProto().GetL0Targets().GetPublished())
+	require.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(ctx, 7).GetState())
+	require.True(t, task.Process())
+	require.Equal(t, commonpb.SegmentState_Dropped, m.GetSegment(ctx, 7).GetState())
 }

@@ -255,9 +255,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	initWriterCost := time.Since(phaseStart)
 
 	phaseStart = time.Now()
-	deletePKs, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField.DataType, t.plan.SegmentBinlogs[0],
-		storage.WithDownloader(t.binlogIO.Download),
-		storage.WithStorageConfig(t.compactionParams.StorageConfig))
+	mutations, err := loadRewriteMutations(ctx, compactionMutationSource(t.cm, t.binlogIO), t.compactionParams.StorageConfig, t.plan, t.plan.GetSegmentBinlogs()[0], pkField)
 	if err != nil {
 		log.Warn(ctx, "load deletePKs failed", mlog.Err(err))
 		srw.Close()
@@ -266,7 +264,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	loadDeltaCost := time.Since(phaseStart)
 	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
 
-	entityFilter := compaction.NewEntityFilter(deletePKs, t.plan.GetCollectionTtl(), t.currentTime, t.plan.GetSegmentBinlogs()[0].GetCommitTimestamp())
+	entityFilter := compaction.NewEntityFilter(mutations.deletes, t.plan.GetCollectionTtl(), t.currentTime, t.plan.GetSegmentBinlogs()[0].GetCommitTimestamp())
 	var predicate func(r storage.Record, ri, i int) bool
 	switch pkField.DataType {
 	case schemapb.DataType_Int64:
@@ -337,13 +335,13 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		srw.Close()
 		return nil, err
 	}
-	rr = newMaterializedRecordReader(rr, materializer)
+	rr = mutations.wrapReader(newMaterializedRecordReader(rr, materializer))
 	initReaderCost := time.Since(phaseStart)
 
 	rr = wrapReaderWithTimestampOverwrite(rr, t.plan.GetSegmentBinlogs()[0].GetCommitTimestamp())
 	defer rr.Close()
 	rrs := []storage.RecordReader{rr}
-	numValidRows, sortTimings, err := storage.Sort(t.compactionParams.BinLogMaxSize, writerSchema, rrs, srw, predicate, t.sortByFieldIDs)
+	numValidRows, sortTimings, err := storage.Sort(t.compactionParams.BinLogMaxSize, resolvedCopySchema(writerSchema), rrs, srw, predicate, t.sortByFieldIDs)
 	if err != nil {
 		log.Warn(ctx, "sort failed", mlog.Err(err))
 		srw.Close()
@@ -416,7 +414,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		mlog.Int("deleted rows", entityFilter.GetDeletedCount()),
 		mlog.Int("expired rows", entityFilter.GetExpiredCount()),
 		mlog.Int("deltaLogCount", len(t.plan.SegmentBinlogs[0].GetDeltalogs())),
-		mlog.Int("deletePKCount", len(deletePKs)),
+		mlog.Int("deletePKCount", len(mutations.deletes)),
 		mlog.Bool("useManifest", t.manifest != ""),
 		mlog.Duration("initWriterCost", initWriterCost),
 		mlog.Duration("loadDeltaCost", loadDeltaCost),

@@ -198,7 +198,7 @@ func Encode(l Layout, rows []Row) (arrow.Record, error) {
 				return nil, merr.WrapErrDataIntegrityMsg("repeated delta field %d", a.GetFieldId())
 			}
 			parent.Append(true)
-			if err := appendLiteral(parent.FieldBuilder(0), l.Fields[i], a.GetLiteral()); err != nil {
+			if err := AppendLiteral(parent.FieldBuilder(0), l.Fields[i], a.GetLiteral()); err != nil {
 				return nil, err
 			}
 		}
@@ -212,7 +212,8 @@ func Encode(l Layout, rows []Row) (arrow.Record, error) {
 	return b.NewRecord(), nil
 }
 
-func appendLiteral(b array.Builder, f Field, literal *schemapb.UpdateLiteral) error {
+// AppendLiteral appends a decoded literal to its typed Arrow value builder.
+func AppendLiteral(b array.Builder, f Field, literal *schemapb.UpdateLiteral) error {
 	if _, ok := literal.GetValue().(*schemapb.UpdateLiteral_NullValue); ok {
 		b.AppendNull()
 		return nil
