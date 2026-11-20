@@ -270,18 +270,19 @@ GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
                                const SegcoreConfig& segcore_config,
                                int64_t segment_id,
                                const VectorBase* field_raw_data) const {
-    if (IsStringDataType(field_meta.get_data_type()) &&
-        field_meta.enable_match()) {
+    if (field_meta.enable_match()) {
         const auto unique_id = UniqueFieldId(segment_id, field_meta.get_id());
         const auto analyzer_params = field_meta.get_analyzer_params();
-        return Appender(field_meta.get_id(),
-                        index::ReaderCaps{.text_match = true},
-                        std::make_unique<index::TantivyGrowingTextIndex>(
-                            unique_id.c_str(),
-                            "milvus_tokenizer",
-                            analyzer_params.c_str(),
-                            field_meta.get_data_type(),
-                            kGrowingTextCommitIntervalMs));
+        return Appender(
+            field_meta.get_id(),
+            index::ReaderCaps{.text_match = true},
+            std::make_unique<index::TantivyGrowingTextIndex>(
+                unique_id.c_str(),
+                "milvus_tokenizer",
+                analyzer_params.c_str(),
+                field_meta.is_varchar_array() ? DataType::VARCHAR
+                                              : field_meta.get_data_type(),
+                kGrowingTextCommitIntervalMs));
     }
 
     if (field_meta.get_data_type() == DataType::GEOMETRY &&

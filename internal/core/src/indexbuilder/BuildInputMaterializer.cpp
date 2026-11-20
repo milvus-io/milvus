@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include "indexbuilder/BuildInputMaterializer.h"
+#include "common/ArrayTextValues.h"
 
 #include <cstdint>
 #include <limits>
@@ -575,7 +576,7 @@ class NestedStringMaterializer final
  public:
     struct Batch {
         FieldDataPtr owner;
-        std::vector<std::string_view> values;
+        ArrayTextValues documents;
     };
 
     NestedStringMaterializer(DataType element_type,
@@ -594,15 +595,21 @@ class NestedStringMaterializer final
         const auto validity = BatchValidity(input);
         auto batch = std::make_unique<Batch>();
         batch->owner = input;
+        const bool native =
+            dynamic_cast<const FieldData<ArrayValue>*>(input.get()) != nullptr;
         for (size_t row = 0; row < input->Length(); ++row) {
-            if (validity && !validity[row])
+            if (validity && !validity[row]) {
                 continue;
-            const auto& array =
-                *static_cast<const Array*>(input->RawValue(row));
-            ValidateArrayRow(array, element_type_, row, false);
-            for (int i = 0; i < array.length(); ++i) {
-                batch->values.push_back(
-                    array.get_data_unchecked<std::string_view>(i));
+            }
+            if (native) {
+                const auto& value =
+                    *static_cast<const ArrayValue*>(input->RawValue(row));
+                batch->documents.Append(value.View());
+            } else {
+                const auto& array =
+                    *static_cast<const Array*>(input->RawValue(row));
+                ValidateArrayRow(array, element_type_, row, false);
+                batch->documents.Append(array);
             }
         }
         this->AddRows(input->Length());
@@ -615,7 +622,9 @@ class NestedStringMaterializer final
         std::vector<index::ScalarBuildBatch<std::string_view>> views;
         views.reserve(batches_.size());
         for (const auto& batch : batches_) {
-            views.push_back({batch->values, {}});
+            views.push_back(
+                {batch->documents.values,
+                 ValidityView::FromExpanded(batch->documents.Validity())});
         }
         return BuildBatches(views);
     }
@@ -684,6 +693,18 @@ MakeScalarBuildInputMaterializer(DataType source_type,
                        element_type != DataType::TIMESTAMPTZ,
                    "unsupported ARRAY element type {}",
                    element_type);
+        if (family == index::families::kText) {
+            AssertInfo(
+                element_type == DataType::VARCHAR && value_type == element_type,
+                "array text index requires VarChar elements");
+            // The builder receives scalar documents in array offset order.
+            auto document_params = params;
+            document_params["nested"] = false;
+            document_params["is_nested"] = false;
+            document_params["field_type"] = static_cast<int>(value_type);
+            return std::make_unique<NestedStringMaterializer>(
+                element_type, expected_rows, family, document_params);
+        }
         if (!nested) {
             AssertInfo(
                 index::ScalarValueTypesMatch(value_type, element_type),

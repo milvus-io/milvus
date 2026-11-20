@@ -491,7 +491,7 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 	}
 	// RootCoord skips this check when preserve_field_ids is set, as for a
 	// snapshot restore, which does not go through proxy.
-	if err := schemautil.RejectStructSubFieldsTextMatch(t.schema.GetStructArrayFields()); err != nil {
+	if err := schemautil.ValidateStructSubFieldsTextMatch(t.schema.GetStructArrayFields()); err != nil {
 		return err
 	}
 	if err := validateNativeListArrayGrowingSourceFlush(t.schema, typeutil.GetAllFieldSchemas(t.schema)...); err != nil {
@@ -778,6 +778,9 @@ func validateAddStructSubFieldProperties(structFieldSchema *schemapb.StructArray
 		}
 		if subField.GetExternalField() != "" {
 			return merr.WrapErrParameterInvalidMsg("add struct field operation does not support external field mapping, field name = %s", subField.GetName())
+		}
+		if err := schemautil.ValidateStructSubFieldTextMatch(subField); err != nil {
+			return err
 		}
 	}
 	return nil

@@ -165,14 +165,16 @@ class IGrowingIndex {
 };
 
 // Non-owning input views. Append must consume/copy borrowed storage before it
-// returns. Null validity means all rows valid. These batches represent flat
-// rows; nested column ingestion needs an explicit offsets/validity view and
-// must not silently interpret element count as row_count.
+// returns. A null validity pointer means all values are valid. row_count always
+// measures segment coverage, including rows that project to zero values.
 template <typename T>
 struct ScalarBatch {
     size_t row_count;
     const T* values;
     const bool* valid;
+    // Number of contiguous values represented by this segment row range.
+    // A projected struct string column can contribute zero or more per row.
+    size_t value_count = row_count;
 };
 
 using TextBatch = ScalarBatch<std::string_view>;

@@ -370,6 +370,36 @@ TEST(GrowingIndexContractTest, AppendOwnsInputAndFlushPublishesCompletePrefix) {
     EXPECT_EQ(owner.PinSnapshot().CoveredRowEnd(), 4);
 }
 
+TEST(GrowingIndexContractTest,
+     TextDocumentCountAndCoveredRowsAdvanceIndependently) {
+    TantivyGrowingTextIndex owner(
+        "struct-text", "milvus_tokenizer", "{}", DataType::VARCHAR, 1000000);
+    owner.Append(0, {2, nullptr, nullptr, 0});
+    owner.Flush();
+    auto empty = owner.PinSnapshot();
+    ASSERT_TRUE(static_cast<bool>(empty));
+    EXPECT_EQ(empty.CoveredRowEnd(), 2);
+    EXPECT_EQ(empty.Reader().Count(), 0);
+    const std::array<std::string_view, 4> values{"red", "", "red blue", "blue"};
+    const std::array<bool, 4> valid{true, false, true, true};
+    const TextBatch batch{1, values.data(), valid.data(), values.size()};
+    owner.Append(2, batch);
+    owner.Append(2, batch);
+    owner.Append(3, {1, nullptr, nullptr, 0});
+    owner.Flush();
+    auto latest = owner.PinSnapshot();
+    ASSERT_TRUE(static_cast<bool>(latest));
+    EXPECT_EQ(latest.CoveredRowEnd(), 4);
+    EXPECT_EQ(latest.Reader().Count(), 4);
+    const auto& reader = dynamic_cast<const TextIndexReader&>(latest.Reader());
+    const auto hits = reader.PhraseMatchQuery("red blue", 0);
+    ASSERT_EQ(hits.size(), 4);
+    EXPECT_EQ(hits.count(), 1);
+    EXPECT_TRUE(hits[2]);
+    EXPECT_TRUE(reader.IsNull()[1]);
+    EXPECT_EQ(empty.Reader().Count(), 0);
+}
+
 TEST(GrowingIndexContractTest, EmptyStringAndNullRowsStayDistinct) {
     TantivyGrowingTextIndex owner("contract-growing-empty-text",
                                   "milvus_tokenizer",

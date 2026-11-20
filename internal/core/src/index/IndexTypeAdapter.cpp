@@ -366,7 +366,15 @@ AdaptIndexType(const IndexTypeAdapterRequest& request) {
         // ARRAY indexes expose predicates over their element type; field_type
         // retains the parent ARRAY identity and coordinate semantics.
         result.value_type = request.element_type;
-        if (request.is_nested) {
+        const bool text = request.is_text_match ||
+                          GetValueFromConfigOrFallback<bool>(
+                              request.params, "is_text_match", false);
+        if (text) {
+            AssertInfo(request.element_type == DataType::VARCHAR,
+                       "array text index requires VarChar elements");
+            result.family =
+                ScalarFamily(request.index_type, result.value_type, true);
+        } else if (request.is_nested) {
             result.family =
                 request.index_type == HYBRID_INDEX_TYPE   ? families::kHybrid
                 : request.index_type == BITMAP_INDEX_TYPE ? families::kBitmap

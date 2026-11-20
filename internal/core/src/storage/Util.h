@@ -372,7 +372,8 @@ VisitFieldDataFromStorageV2(
     DataType element_type,
     int64_t dim,
     milvus_storage::ArrowFileSystemPtr fs,
-    const FieldDataVisitor& visitor);
+    const FieldDataVisitor& visitor,
+    const std::optional<proto::schema::TypeSchema>& array_type = std::nullopt);
 
 namespace detail {
 
@@ -388,7 +389,8 @@ VisitFieldDataFromStorageV2Paged(
     const FieldDataVisitor& visitor,
     size_t max_rows,
     size_t offset,
-    size_t window_bytes = DEFAULT_FIELD_MAX_MEMORY_LIMIT);
+    size_t window_bytes = DEFAULT_FIELD_MAX_MEMORY_LIMIT,
+    const std::optional<proto::schema::TypeSchema>& array_type = std::nullopt);
 
 }  // namespace detail
 
@@ -454,7 +456,8 @@ VisitFieldDataFromManifest(
     std::optional<DataType> element_type,
     std::optional<StorageColumnMapping> storage_column_mapping,
     const FieldDataVisitor& visitor,
-    int64_t max_inflight_bytes = kStreamingInflightBytes);
+    int64_t max_inflight_bytes = kStreamingInflightBytes,
+    const std::optional<proto::schema::TypeSchema>& array_type = std::nullopt);
 
 // Visits a Milvus-written TEXT column of a manifest as logical UTF-8 values.
 // Such a column stores LOB-encoded cells: a value below the inline threshold

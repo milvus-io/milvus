@@ -1529,12 +1529,12 @@ template <typename T>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
     if (IsTextIndexOpType(expr_->op_type_)) {
-        if (has_offset_input_) {
+        if (has_offset_input_ && !expr_->column_.element_level_) {
             ThrowInfo(
                 OpTypeInvalid,
                 fmt::format("match query does not support iterative filter"));
         }
-        return ExecTextMatch();
+        return ExecTextMatch(context.get_offset_input());
     } else if (CanUseNgramIndex()) {
         auto res = ExecNgramMatch(context);
         // If nullopt is returned, it means the query cannot be
@@ -2078,7 +2078,9 @@ void
 PhyUnaryRangeFilterExpr::DetermineExecPath() {
     if (IsTextIndexOpType(expr_->op_type_)) {
         auto req = MakeIndexRequirement(RequiredReader::TextMatch);
-        req.value_type = field_type_;
+        req.value_type = expr_->column_.element_level_
+                             ? expr_->column_.element_type_
+                             : field_type_;
         SelectAndCreateIndexReader(req);
         return;
     }
@@ -2276,7 +2278,7 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
 }
 
 VectorPtr
-PhyUnaryRangeFilterExpr::ExecTextMatch() {
+PhyUnaryRangeFilterExpr::ExecTextMatch(const OffsetVector* offsets) {
     if (!arg_inited_) {
         value_arg_.SetValue<std::string>(expr_->val_);
         arg_inited_ = true;
@@ -2330,18 +2332,34 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
         max_edit_distance = static_cast<uint32_t>(distance);
     }
 
-    auto real_batch_size = GetNextBatchSize();
-    if (real_batch_size == 0) {
+    const bool elements = expr_->column_.element_level_;
+    const auto batch = GetNextRealBatchSize(offsets, elements);
+    if (!batch.has_value()) {
         return nullptr;
     }
+    const auto real_batch_size = *batch;
+    if (auto empty =
+            AdvanceEmptyElementBatch(offsets, elements, real_batch_size)) {
+        return empty;
+    }
+    const auto mapping =
+        elements ? GetStructElementOffsets(field_id_) : nullptr;
+    AssertInfo(!elements || mapping,
+               "missing array element offsets for text field {}",
+               field_id_.get());
+    const auto position = [&](int64_t row) -> int64_t {
+        return mapping ? mapping->ElementIDRangeOfRow(row).first : row;
+    };
 
     // Cache lookup + full-bitset compute via helper
     if (cached_match_res_ == nullptr) {
-        // Growing text-index visibility can change after commit/reload without
-        // changing active_count_. Only sealed text results are safe to cache
-        // across requests; a null cache segment bypasses both reads and writes.
+        // Shared cache slots contain segment-row bitmaps. The element bitmap
+        // lives on this expression so every batch uses the same pinned result.
+        // A growing text reader may also publish at a fixed active row count.
+        const auto visible_count = position(active_count_);
         const auto* cache_segment =
-            segment_->type() == SegmentType::Sealed ? segment_ : nullptr;
+            !elements && segment_->type() == SegmentType::Sealed ? segment_
+                                                                 : nullptr;
         auto cached = exec::ExprCacheHelper::GetOrCompute(
             cache_segment,
             snapshot_,
@@ -2365,21 +2383,29 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
                               "unsupported operator type for match query: {}",
                               op_type);
                 }
-                const auto covered = selected_covered_row_end_;
-                AssertInfo(res.size() >= static_cast<size_t>(covered),
-                           "text index covers {} rows, snapshot requires {}",
-                           res.size(),
-                           covered);
+                if (elements && segment_->type() == SegmentType::Sealed) {
+                    AssertInfo(
+                        res.size() == mapping->GetTotalElementCount(),
+                        "text index has {} documents for {} array elements",
+                        res.size(),
+                        mapping->GetTotalElementCount());
+                }
+                const auto covered = position(selected_covered_row_end_);
+                AssertInfo(
+                    res.size() >= static_cast<size_t>(covered),
+                    "text index covers {} documents, snapshot requires {}",
+                    res.size(),
+                    covered);
                 res.resize(covered);
                 auto valid_res = null_reader_->IsNotNull();
                 AssertInfo(
                     valid_res.size() >= static_cast<size_t>(covered),
-                    "text null index covers {} rows, snapshot requires {}",
+                    "text null index covers {} documents, snapshot requires {}",
                     valid_res.size(),
                     covered);
                 valid_res.resize(covered);
-                if (covered < active_count_) {
-                    TargetBitmap tail(active_count_ - covered);
+                if (covered < visible_count) {
+                    TargetBitmap tail(visible_count - covered);
                     res.append(tail);
                     valid_res.append(tail);
                 }
@@ -2389,6 +2415,11 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
             feature_recorder_);
         cached_match_res_ = cached.result;
         cached_index_chunk_valid_res_ = cached.valid;
+    }
+
+    if (offsets != nullptr) {
+        return GatherCachedResultByOffsets(
+            *cached_match_res_, *cached_index_chunk_valid_res_, *offsets);
     }
 
     // When execute_all_at_once_ and result is not shared with cache, move to avoid copy
@@ -2401,11 +2432,9 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
 
     TargetBitmap result;
     TargetBitmap valid_result;
-    result.append(
-        *cached_match_res_, current_data_global_pos_, real_batch_size);
-    valid_result.append(*cached_index_chunk_valid_res_,
-                        current_data_global_pos_,
-                        real_batch_size);
+    const auto start = position(current_data_global_pos_);
+    result.append(*cached_match_res_, start, real_batch_size);
+    valid_result.append(*cached_index_chunk_valid_res_, start, real_batch_size);
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           std::move(valid_result));

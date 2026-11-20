@@ -50,6 +50,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "common/Array.h"
 #include "common/StructElementOffsets.h"
+#include "common/ArrayTextValues.h"
 #include "common/ArrowDataWrapper.h"
 #include "common/Channel.h"
 #include "common/ColumnarArrayChunkBuilder.h"
@@ -1251,16 +1252,6 @@ SegmentGrowingImpl::FeedGrowingIndexRange(const FieldMeta& field_meta,
         return;
     }
 
-    AssertInfo(IsStringDataType(data_type) || data_type == DataType::GEOMETRY,
-               "field {} type {} has no connected growing feed",
-               field_id.get(),
-               data_type);
-    const auto* values = dynamic_cast<const ConcurrentVector<std::string>*>(
-        insert_record_.get_data_base(field_id));
-    AssertInfo(values != nullptr,
-               "growing field {} must use string storage",
-               field_id.get());
-
     const auto configured_batch_rows = segcore_config_.get_chunk_rows();
     AssertInfo(configured_batch_rows > 0,
                "growing index feed batch size must be positive");
@@ -1276,6 +1267,49 @@ SegmentGrowingImpl::FeedGrowingIndexRange(const FieldMeta& field_meta,
             growing_indexes_.Append(field_id, offset, batch);
         }
     };
+
+    if (field_meta.is_varchar_array()) {
+        const auto feed = [&](const auto* column) {
+            for (auto offset = row_begin; offset < row_end;
+                 offset += batch_rows) {
+                const auto rows =
+                    std::min<int64_t>(batch_rows, row_end - offset);
+                ArrayTextValues documents;
+                FixedVector<bool> present;
+                if (field_meta.is_nullable()) {
+                    present.resize(rows);
+                    insert_record_.get_valid_data(field_id)
+                        ->bulk_is_valid_range(offset, rows, present.data());
+                }
+                for (int64_t i = 0; i < rows; ++i) {
+                    if (present.empty() || present[i]) {
+                        documents.Append(column->view_element(offset + i));
+                    }
+                }
+                append(offset,
+                       index::TextBatch{static_cast<size_t>(rows),
+                                        documents.values.data(),
+                                        documents.Validity(),
+                                        documents.values.size()});
+            }
+        };
+        if (field_meta.is_native_list_array()) {
+            feed(insert_record_.get_data<ArrayValue>(field_id));
+        } else {
+            feed(insert_record_.get_data<Array>(field_id));
+        }
+        return;
+    }
+
+    AssertInfo(IsStringDataType(data_type) || data_type == DataType::GEOMETRY,
+               "field {} type {} has no connected growing feed",
+               field_id.get(),
+               data_type);
+    const auto* values = dynamic_cast<const ConcurrentVector<std::string>*>(
+        insert_record_.get_data_base(field_id));
+    AssertInfo(values != nullptr,
+               "growing field {} must use string storage",
+               field_id.get());
 
     for (auto offset = row_begin; offset < row_end; offset += batch_rows) {
         const auto count = std::min<int64_t>(batch_rows, row_end - offset);
@@ -3931,7 +3965,7 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
                 continue;
             }
 
-            if (appender->caps.text_match) {
+            if (appender->caps.text_match && !field_meta.is_varchar_array()) {
                 const bool has_default = field_meta.default_value().has_value();
                 AssertInfo(has_default || field_meta.is_nullable(),
                            "new non-nullable text field {} has no default",

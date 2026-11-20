@@ -32,6 +32,7 @@
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
 #include "index/Families.h"
 #include "index/Meta.h"
 #include "index/ParamUtils.h"
@@ -307,17 +308,19 @@ struct VectorSideInputPlan {
 };
 
 storage::VisitOutcome
-VisitBuildField(const BuildSource& build_source,
-                const std::vector<std::string>* v1_files_override,
-                bool empty_v1_is_missing,
-                FieldId field_id,
-                DataType field_type,
-                DataType element_type,
-                int64_t dim,
-                const storage::FieldDataMeta& field_meta,
-                const storage::FileManagerContext& context,
-                const storage::FieldDataVisitor& visitor,
-                int64_t manifest_inflight_bytes) {
+VisitBuildField(
+    const BuildSource& build_source,
+    const std::vector<std::string>* v1_files_override,
+    bool empty_v1_is_missing,
+    FieldId field_id,
+    DataType field_type,
+    DataType element_type,
+    int64_t dim,
+    const storage::FieldDataMeta& field_meta,
+    const storage::FileManagerContext& context,
+    const storage::FieldDataVisitor& visitor,
+    int64_t manifest_inflight_bytes,
+    const std::optional<proto::schema::TypeSchema>& array_type = std::nullopt) {
     return std::visit(
         [&](const auto& source) -> storage::VisitOutcome {
             using Source = std::decay_t<decltype(source)>;
@@ -343,8 +346,12 @@ VisitBuildField(const BuildSource& build_source,
                     std::vector<std::string> batch_files(
                         files.begin() + static_cast<ptrdiff_t>(begin),
                         files.begin() + static_cast<ptrdiff_t>(begin + count));
-                    auto futures = storage::GetObjectData(
-                        context.chunkManagerPtr.get(), batch_files);
+                    auto futures =
+                        storage::GetObjectData(context.chunkManagerPtr.get(),
+                                               batch_files,
+                                               ThreadPoolPriority::HIGH,
+                                               true,
+                                               array_type);
                     std::exception_ptr first_failure;
                     bool stopped = false;
                     for (auto& future : futures) {
@@ -381,7 +388,8 @@ VisitBuildField(const BuildSource& build_source,
                                                             element_type,
                                                             dim,
                                                             context.fs,
-                                                            visitor);
+                                                            visitor,
+                                                            array_type);
             } else if constexpr (std::is_same_v<Source, ManifestBuildSource>) {
                 std::optional<storage::StorageColumnMapping> mapping;
                 const auto mapping_it =
@@ -411,7 +419,8 @@ VisitBuildField(const BuildSource& build_source,
                     element_type,
                     std::move(mapping),
                     visitor,
-                    manifest_inflight_bytes);
+                    manifest_inflight_bytes,
+                    array_type);
             }
         },
         build_source);
@@ -808,6 +817,20 @@ BuildSession::Materialize() {
             }
         };
 
+        // Native-list ARRAY<VarChar> stores null elements in Arrow's value
+        // validity bitmap. Text builds need the typed list decoder so those
+        // positions reach the text materializer along with the strings.
+        std::optional<proto::schema::TypeSchema> text_array_type;
+        if (req_.family == index::families::kText &&
+            field_spec_.field_type == DataType::ARRAY &&
+            field_spec_.element_type == DataType::VARCHAR &&
+            field_spec_.element_nullable) {
+            text_array_type =
+                FieldMeta::ParseFrom(
+                    file_manager_context_.fieldDataMeta.field_schema)
+                    .get_array_type_schema();
+        }
+
         // Visits the primary field, hands each batch to consume, and returns
         // the number of rows decoded. A batch that would take the count past
         // row_limit is rejected before consume sees it.
@@ -841,7 +864,8 @@ BuildSession::Materialize() {
                     consume(std::move(batch));
                     return storage::VisitControl::Continue;
                 },
-                manifest_inflight_bytes);
+                manifest_inflight_bytes,
+                text_array_type);
             AssertInfo(outcome != storage::VisitOutcome::Stopped,
                        "always-continue {} visitor stopped early",
                        label);

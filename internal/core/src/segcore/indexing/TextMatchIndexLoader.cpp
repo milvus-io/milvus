@@ -93,11 +93,22 @@ TextMatchIndexLoader::TextMatchIndexLoader(
             std::nullopt,
             milvus::segcore::MetricAttributionFromShard(load_info_.shard)) {
     milvus::index::IndexFamily family = milvus::index::families::kText;
-    const auto value_type = static_cast<DataType>(
-        file_manager_context_.fieldDataMeta.field_schema.data_type());
+    const auto& schema = file_manager_context_.fieldDataMeta.field_schema;
+    const bool elements =
+        schema.data_type() == proto::schema::DataType::Array &&
+        schema.element_type() == proto::schema::DataType::VarChar;
+    const auto value_type = elements
+                                ? DataType::VARCHAR
+                                : static_cast<DataType>(schema.data_type());
     AssertInfo(IsStringDataType(value_type),
                "text index requires a string field type");
-    config_[INDEX_NUM_ROWS_KEY] = load_info_.num_rows;
+    // The segment row count cannot validate the cardinality of an element index.
+    // Its reader obtains the document count from the persisted Tantivy index.
+    if (elements) {
+        config_.erase(INDEX_NUM_ROWS_KEY);
+    } else {
+        config_[INDEX_NUM_ROWS_KEY] = load_info_.num_rows;
+    }
     config_["field_type"] = static_cast<int32_t>(value_type);
     config_["value_type"] = static_cast<int32_t>(value_type);
     config_["nested"] = false;

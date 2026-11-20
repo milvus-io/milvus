@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -122,10 +123,9 @@ func createTextIndex(ctx context.Context,
 		}
 	}
 
-	for _, field := range plan.GetSchema().GetFields() {
+	for _, field := range typeutil.GetAllFieldSchemas(plan.GetSchema()) {
 		field := field
-		h := typeutil.CreateFieldSchemaHelper(field)
-		if !h.EnableMatch() {
+		if !schemautil.BuildTextStats(field) {
 			continue
 		}
 		log.Info(ctx, "field enable match, ready to create text index", mlog.Int64("field id", field.GetFieldID()))

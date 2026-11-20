@@ -160,8 +160,31 @@ ParseTokenizerParams(const TypeParams& params) {
     return iter->second;
 }
 
+namespace {
+bool
+ArrayTextFlag(const TypeParams& params, const char* key) {
+    auto it = params.find(key);
+    if (it == params.end()) {
+        return false;
+    }
+    const auto& value = it->second;
+    return value == "true" || value == "TRUE" || value == "True" ||
+           value == "1" || value == "t" || value == "T";
+}
+}  // namespace
+
+bool
+FieldMeta::is_varchar_array() const {
+    return data_->type_ == DataType::ARRAY &&
+           data_->element_type_ == DataType::VARCHAR;
+}
+
 bool
 FieldMeta::enable_match() const {
+    if (is_varchar_array()) {
+        return enable_analyzer() &&
+               ArrayTextFlag(data_->array_type_params_, "enable_match");
+    }
     if (!IsStringDataType(data_->type_)) {
         return false;
     }
@@ -173,6 +196,9 @@ FieldMeta::enable_match() const {
 
 bool
 FieldMeta::enable_analyzer() const {
+    if (is_varchar_array()) {
+        return ArrayTextFlag(data_->array_type_params_, "enable_analyzer");
+    }
     if (!IsStringDataType(data_->type_)) {
         return false;
     }
@@ -189,8 +215,9 @@ FieldMeta::get_analyzer_params() const {
             Unsupported,
             fmt::format("unsupported text index when not enable analyzer"));
     }
-    auto params = data_->string_info_->params;
-    return ParseTokenizerParams(params);
+    return ParseTokenizerParams(is_varchar_array()
+                                    ? data_->array_type_params_
+                                    : data_->string_info_->params);
 }
 
 milvus::proto::schema::FieldSchema
