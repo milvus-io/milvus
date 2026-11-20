@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "index/scalar/text/TextIndexReader.h"
+#include "index/Utils.h"
 
 #include <algorithm>
 #include <limits>
@@ -317,6 +318,26 @@ TextIndexReader::Count() const {
 DataType
 TextIndexReader::ValueType() const {
     return index_->Metadata().value_type;
+}
+
+std::unique_ptr<ITextMatchReader>
+TextIndexReader::CreateBatchReader(
+    const std::vector<std::shared_ptr<const std::string>>& values) const {
+    const auto& storage = GetStorage();
+    auto writer = storage->engine_->create_text_batch_writer();
+    for (size_t i = 0; i < values.size(); ++i) {
+        writer->add_data(values[i].get(), 1, i);
+    }
+    writer->commit();
+    auto reader = writer->create_snapshot_reader(SetBitsetSealed);
+    return std::make_unique<TextIndexReader>(
+        nullptr,
+        std::move(reader),
+        std::make_shared<const std::vector<size_t>>(),
+        values.size(),
+        DataType::VARCHAR,
+        false,
+        0);
 }
 
 TargetBitmap

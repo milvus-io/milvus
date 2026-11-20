@@ -12,10 +12,12 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <fstream>
 #include <thread>
 #include "query/ExecPlanNodeVisitor.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "segcore/segment_c.h"
+#include "segcore/UpdatesRecord.h"
 #include "segcore/test_utils/TextMatchTestUtils.h"
 
 using namespace milvus;
@@ -1017,4 +1019,76 @@ TEST(SegmentTextMatchTest, ConcurrentReadWriteWithNull) {
 
     writer.join();
     reader.join();
+}
+
+TEST(SegmentTextMatchTest, UpdatedRowsUseNativeAnalyzerAndSnapshot) {
+    auto directory =
+        storage::LocalDirectory::CreateOwned(TestRemotePath,
+                                             "text-update-dictionary-XXXXXX",
+                                             "text update dictionary");
+    auto dictionary = std::filesystem::path(directory->Path()) / "stop.txt";
+    {
+        std::ofstream output(dictionary);
+        output << "discarded\n";
+        ASSERT_TRUE(output.good());
+    }
+    Config analyzer = {
+        {"tokenizer", "jieba"},
+        {"filter",
+         {{{"type", "stop"},
+           {"stop_words_file",
+            {{"type", "local"}, {"path", dictionary.string()}}}}}}};
+    auto schema = GenTestSchema({{"enable_match", "true"},
+                                 {"enable_analyzer", "true"},
+                                 {"analyzer_params", analyzer.dump()}},
+                                true);
+    auto make = [&](const std::vector<std::optional<std::string>>& rows) {
+        auto data = DataGen(schema, rows.size());
+        auto* field = data.raw_->mutable_fields_data()->Mutable(1);
+        for (size_t i = 0; i < rows.size(); ++i) {
+            field->mutable_scalars()->mutable_string_data()->set_data(
+                i, rows[i].value_or(""));
+            field->mutable_scalars()->set_valid_data(i, rows[i].has_value());
+        }
+        auto seg = CreateSealedWithFieldDataLoaded(schema, data);
+        seg->CreateTextIndex(FieldId(101));
+        return seg;
+    };
+    auto changed = make({"青铜时代", "swimming football", std::nullopt});
+    auto initial = make({"青铜时代", "swimming football", std::nullopt});
+    auto mirror =
+        make({"swimming fast football discarded", std::nullopt, "青铜时代"});
+    ASSERT_TRUE(std::filesystem::remove(dictionary));
+    for (int i = 0; i < 3; ++i) {
+        IdArray ids;
+        ids.mutable_int_id()->add_data(i);
+        UpdateAssignment a{FieldId(101), {}};
+        if (i == 1)
+            a.literal.set_null_value(google::protobuf::NULL_VALUE);
+        else
+            a.literal.mutable_scalar_value()->set_string_data(
+                i == 0 ? "swimming fast football discarded" : "青铜时代");
+        changed->ApplyUpdates(ids, 50, i, {a});
+    }
+    for (auto ts : {50, 49, 60}) {
+        auto* expected = ts < 50 ? initial.get() : mirror.get();
+        for (const auto& [op, query, option] :
+             std::vector<std::tuple<OpType, std::string, int>>{
+                 {OpType::TextMatch, "discarded", 1},
+                 {OpType::TextMatch, "青铜", 1},
+                 {OpType::TextMatch, "swimming football", 2},
+                 {OpType::PhraseMatch, "swimming football", 0},
+                 {OpType::PhraseMatch, "swimming football", 1},
+                 {OpType::TextMatchFuzzy, "footbal", 1}}) {
+            for (bool negate : {false, true}) {
+                auto expr = negate ? GetNotMatchExpr(schema, query, op, option)
+                                   : GetMatchExpr(schema, query, op, option);
+                auto actual = ExecuteQueryExpr(expr, changed.get(), 3, ts);
+                auto gold = ExecuteQueryExpr(expr, expected, 3, ts);
+                for (size_t row = 0; row < 3; ++row)
+                    EXPECT_EQ(actual[row], gold[row])
+                        << ts << "/" << op << "/" << negate << "/" << row;
+            }
+        }
+    }
 }

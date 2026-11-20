@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "common/Array.h"
+#include "exec/expression/UpdatedFieldBatch.h"
 #include "common/StructElementOffsets.h"
 #include "common/FeatureBits.h"
 #include "common/FieldDataInterface.h"
@@ -539,6 +540,11 @@ class Expr : public std::enable_shared_from_this<Expr> {
         }
     }
 
+    // The compiler binds the same query timestamp to every leaf before prefetch.
+    virtual void
+    SetQueryTimestamp(Timestamp timestamp) {
+    }
+
     // Bind the request-scoped sealed read snapshot to this expression.
     // Called right after construction by the expression compiler; the pointer
     // is borrowed from the owning QueryContext and stays valid for the whole
@@ -607,6 +613,117 @@ class SegmentExpr : public Expr {
     }
 
     virtual ~SegmentExpr();
+
+    void
+    SetQueryTimestamp(Timestamp timestamp) override {
+        const auto& records = segment_->GetUpdatesRecord();
+        if (records.Stats(field_id_).entries) {
+            skip_view_ = {};
+            update_reader_.emplace(segcore::UpdateReadBinding{
+                records, field_id_, timestamp, field_type_, is_nullable_});
+        }
+    }
+
+    bool
+    HasUpdates() const {
+        return update_reader_.has_value();
+    }
+
+    bool
+    IsCacheable() const override {
+        return !HasUpdates() && Expr::IsCacheable();
+    }
+
+    // Keep native index selection and wrap its results with TS-vector correction.
+    // Arithmetic has no value-oriented predicate to issue to the scalar
+    // index. An index-only field still has its native batch value reader.
+    void
+    SelectUpdatedValuePath() {
+        if (!has_field_data_at_init_)
+            updated_base_lookup_.emplace(
+                segment_, op_ctx_, field_id_, field_type_, active_count_);
+        exec_path_ = ExprExecPath::RawData;
+    }
+
+    template <typename T, typename FUNC, typename... Args>
+    int64_t
+    EvaluateUpdatedValueBatch(FUNC& eval,
+                              OffsetVector* input,
+                              TargetBitmapView res,
+                              TargetBitmapView valid,
+                              const TargetBitmapView* mask,
+                              const Args&... args) {
+        if constexpr (std::is_integral_v<T> || std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, std::string_view>) {
+            if (updated_base_lookup_ && updated_base_lookup_->HasReader()) {
+                using Source =
+                    std::conditional_t<std::is_same_v<T, std::string>,
+                                       std::string_view,
+                                       T>;
+                const auto count = input ? input->size() : GetNextBatchSize();
+                const auto start = current_data_global_pos_;
+                FixedVector<T> data(count);
+                FixedVector<bool> validity(count, true);
+                std::vector<std::string> strings;
+                if constexpr (std::is_same_v<T, std::string_view>)
+                    strings.resize(count);
+                std::vector<int64_t> rows;
+                std::vector<size_t> positions;
+                for (size_t i = 0; i < count; ++i) {
+                    if (mask && !mask->empty() && !(*mask)[i])
+                        continue;
+                    rows.push_back(input ? (*input)[i] : start + i);
+                    positions.push_back(i);
+                }
+                const auto* base = updated_base_lookup_->Reader<Source>();
+                AssertInfo(base && updated_base_lookup_->Covers(rows.data(),
+                                                                rows.size()),
+                           "index-only expression has no covered value reader");
+                if (!rows.empty())
+                    base->Gather(
+                        rows.data(),
+                        rows.size(),
+                        [&](int64_t j, const Source* value, bool live) {
+                            const auto i = positions[j];
+                            validity[i] = live;
+                            if (live) {
+                                if constexpr (std::is_same_v<
+                                                  T,
+                                                  std::string_view>) {
+                                    strings[i] = *value;
+                                    data[i] = strings[i];
+                                } else
+                                    data[i] = *value;
+                            }
+                        });
+                auto patches = update_reader_->Patches(
+                    start, count, input ? input->data() : nullptr, mask);
+                for (const auto& [i, value] : patches) {
+                    validity[i] =
+                        !std::holds_alternative<std::monostate>(value);
+                    if (validity[i])
+                        data[i] = UpdateScalar<T>(value);
+                }
+                eval.template operator()<FilterType::random>(
+                    data.data(),
+                    ValidityView::FromExpanded(validity.data()),
+                    nullptr,
+                    count,
+                    res,
+                    valid,
+                    args...);
+                if (!input)
+                    AdvanceDataCursor(count);
+                return count;
+            }
+        }
+        return -1;
+    }
+
+    virtual void
+    DetermineUpdateExecPath() {
+        DetermineExecPath();
+    }
 
     void
     InitSegmentExpr() {
@@ -1216,7 +1333,8 @@ class SegmentExpr : public Expr {
     // Call at the top of ByStats / ByIndex methods to skip computation.
     bool
     TryCacheGet() {
-        if (!ExprResCacheManager::IsEnabled() || !HasExprCacheIdentity()) {
+        if (!IsCacheable() || !ExprResCacheManager::IsEnabled() ||
+            !HasExprCacheIdentity()) {
             return false;
         }
         bool cache_hit = false;
@@ -1245,7 +1363,8 @@ class SegmentExpr : public Expr {
     // Call after full bitset computation completes.
     void
     CachePut(int64_t eval_duration_us) {
-        if (!ExprResCacheManager::IsEnabled() || !HasExprCacheIdentity()) {
+        if (!IsCacheable() || !ExprResCacheManager::IsEnabled() ||
+            !HasExprCacheIdentity()) {
             return;
         }
         if (!cached_index_chunk_res_ || !cached_index_chunk_valid_res_) {
@@ -1279,13 +1398,31 @@ class SegmentExpr : public Expr {
     // The IsNotNull() virtual rebuilds a segment-sized bitmap on every
     // call (allocation + fill + AND); per-batch callers must reuse one
     // copy. The all-valid flag short-circuits per-row bitmap reads.
+    TargetBitmap
+    ReadIndexValidity() {
+        auto valid = (!HasUpdates() || is_nullable_)
+                         ? null_reader_->IsNotNull()
+                         : TargetBitmap(selected_reader_->Count(), true);
+        if (HasUpdates() && is_nullable_ && field_type_ == DataType::ARRAY) {
+            update_reader_->records.VisitUpdates(
+                field_id_,
+                update_reader_->timestamp,
+                [&](int64_t row, const segcore::UpdateValue& value) {
+                    if (static_cast<size_t>(row) < valid.size())
+                        valid[row] =
+                            !std::holds_alternative<std::monostate>(value);
+                });
+        }
+        return valid;
+    }
+
     const TargetBitmap&
     GetCachedIndexValidBitmap() {
         AssertInfo(null_reader_ != nullptr,
                    "selected index does not expose null predicates");
         if (!cached_index_valid_res_) {
             cached_index_valid_res_ =
-                std::make_shared<TargetBitmap>(null_reader_->IsNotNull());
+                std::make_shared<TargetBitmap>(ReadIndexValidity());
             cached_index_all_valid_ = cached_index_valid_res_->all();
         }
         return *cached_index_valid_res_;
@@ -1582,6 +1719,11 @@ class SegmentExpr : public Expr {
                    candidate_mask == nullptr ? 0 : candidate_mask->size(),
                    batch_size);
 
+        auto patches = HasUpdates()
+                           ? update_reader_->Patches(
+                                 0, batch_size, input->data(), candidate_mask)
+                           : std::vector<segcore::UpdatesRecord::Patch>{};
+        size_t next_patch = 0;
         // A scalar index is one logical index chunk for the whole segment,
         // while SkipIndex statistics remain partitioned by the original data
         // chunks. Once raw field data is dropped, this path cannot recover an
@@ -1603,6 +1745,27 @@ class SegmentExpr : public Expr {
                 continue;
             }
             auto offset = (*input)[i];
+            if constexpr (CanOverlay<T> &&
+                          (std::is_integral_v<T> ||
+                           std::is_same_v<T, std::string> ||
+                           std::is_same_v<T, std::string_view>)) {
+                if (next_patch < patches.size() &&
+                    patches[next_patch].position == i) {
+                    const auto& value = patches[next_patch++].value;
+                    const bool live =
+                        !std::holds_alternative<std::monostate>(value);
+                    const T data = live ? UpdateScalar<T>(value) : T{};
+                    evaluate_batch.template operator()<FilterType::random>(
+                        &data,
+                        ValidityView::FromExpanded(&live),
+                        nullptr,
+                        1,
+                        res + i,
+                        valid_res + i,
+                        values...);
+                    continue;
+                }
+            }
             auto raw = value_reader->Lookup(offset);
             if (!raw.has_value()) {
                 res[i] = valid_res[i] = false;
@@ -1674,6 +1837,16 @@ class SegmentExpr : public Expr {
                                  TargetBitmapView valid_res,
                                  const TargetBitmapView& candidate_mask,
                                  const ValTypes&... values) {
+        if (updated_base_lookup_) {
+            auto count = EvaluateUpdatedValueBatch<T>(evaluate_batch,
+                                                      input,
+                                                      res,
+                                                      valid_res,
+                                                      &candidate_mask,
+                                                      values...);
+            if (count >= 0)
+                return count;
+        }
         if constexpr (!std::is_same_v<T, VectorArrayView> &&
                       !std::is_same_v<T, ArrayValueView>) {
             if (UseIndexCursor() && num_data_chunk_ == 0) {
@@ -1744,6 +1917,44 @@ class SegmentExpr : public Expr {
             }
         }
 
+        auto patches =
+            HasUpdates() ? update_reader_->Patches(
+                               0, input->size(), input->data(), candidate_mask)
+                         : std::vector<segcore::UpdatesRecord::Patch>{};
+        size_t next_patch = 0;
+        auto evaluate_item = [&]<FilterType F>(const T* data,
+                                               ValidityView validity,
+                                               const int32_t* offsets,
+                                               int size,
+                                               TargetBitmapView result,
+                                               TargetBitmapView valid,
+                                               const ValTypes&... args) {
+            if constexpr (CanOverlay<T>) {
+                if (next_patch < patches.size() &&
+                    patches[next_patch].position == processed_size) {
+                    auto patch = patches[next_patch++];
+                    patch.position = 0;
+                    const T placeholder{};
+                    UpdatedFieldBatch<T> overlay(
+                        &placeholder,
+                        {},
+                        1,
+                        {patch},
+                        segment_->get_field_meta(field_id_));
+                    evaluate_batch.template operator()<F>(overlay.Data(),
+                                                          overlay.Validity(),
+                                                          nullptr,
+                                                          1,
+                                                          result,
+                                                          valid,
+                                                          args...);
+                    return;
+                }
+            }
+            evaluate_batch.template operator()<F>(
+                data, validity, offsets, size, result, valid, args...);
+        };
+
         // Read arbitrary offsets from non-owning view columns. Input order is
         // preserved, while adjacent candidates in the same chunk share one
         // pin and one batch-view construction.
@@ -1786,7 +1997,7 @@ class SegmentExpr : public Expr {
                     // Drive the callback once per row so callbacks with a
                     // batch-local cursor remain aligned.
                     for (size_t i = 0; i < batch_offsets.size(); ++i) {
-                        evaluate_batch.template operator()<FilterType::random>(
+                        evaluate_item.template operator()<FilterType::random>(
                             nullptr,
                             ValidityView{},
                             nullptr,
@@ -1813,7 +2024,7 @@ class SegmentExpr : public Expr {
                             ? ValidityView{}
                             : ValidityView::FromExpanded(valid_data.data() + i);
                     if (!skip) {
-                        evaluate_batch.template operator()<FilterType::random>(
+                        evaluate_item.template operator()<FilterType::random>(
                             data_vec.data() + i,
                             validity,
                             nullptr,
@@ -1825,7 +2036,7 @@ class SegmentExpr : public Expr {
                         apply_skipped_validity(validity, processed_size);
                         // Keep cursor-tracking callbacks aligned when the
                         // current chunk is pruned by SkipIndex.
-                        evaluate_batch.template operator()<FilterType::random>(
+                        evaluate_item.template operator()<FilterType::random>(
                             nullptr,
                             ValidityView{},
                             nullptr,
@@ -1858,7 +2069,7 @@ class SegmentExpr : public Expr {
                     std::make_pair(chunk_offset, int64_t{1}));
                 const auto& [data_vec, valid_data] = pw.get();
                 if (!skip_func || !skip_func(skip_view_, chunk_id)) {
-                    evaluate_batch.template operator()<FilterType::random>(
+                    evaluate_item.template operator()<FilterType::random>(
                         data_vec.data(),
                         valid_data,
                         nullptr,
@@ -1872,7 +2083,7 @@ class SegmentExpr : public Expr {
                     // bitmap_input by batch position via their processed_cursor) stay
                     // aligned — mirrors the sequential data-scan skip branch.
                     apply_skipped_validity(valid_data, processed_size);
-                    evaluate_batch.template operator()<FilterType::random>(
+                    evaluate_item.template operator()<FilterType::random>(
                         nullptr,
                         ValidityView{},
                         nullptr,
@@ -1926,7 +2137,7 @@ class SegmentExpr : public Expr {
                     chunk_base != nullptr ? chunk_base + chunk_offset : nullptr;
                 const auto validity = chunk_validity.Subview(chunk_offset);
                 if (!cached_skip) {
-                    evaluate_batch.template operator()<FilterType::random>(
+                    evaluate_item.template operator()<FilterType::random>(
                         data,
                         validity,
                         nullptr,
@@ -1940,7 +2151,7 @@ class SegmentExpr : public Expr {
                     // bitmap_input by batch position via their processed_cursor) stay
                     // aligned — mirrors the sequential data-scan skip branch.
                     apply_skipped_validity(validity, processed_size);
-                    evaluate_batch.template operator()<FilterType::random>(
+                    evaluate_item.template operator()<FilterType::random>(
                         nullptr,
                         ValidityView{},
                         nullptr,
@@ -1979,7 +2190,7 @@ class SegmentExpr : public Expr {
                 const T* data = chunk_base + chunk_offset;
                 const auto validity = chunk_validity.Subview(chunk_offset);
                 if (!cached_skip) {
-                    evaluate_batch.template operator()<FilterType::random>(
+                    evaluate_item.template operator()<FilterType::random>(
                         data,
                         validity,
                         nullptr,
@@ -1993,7 +2204,7 @@ class SegmentExpr : public Expr {
                     // bitmap_input by batch position via their processed_cursor) stay
                     // aligned — mirrors the sequential data-scan skip branch.
                     apply_skipped_validity(validity, processed_size);
-                    evaluate_batch.template operator()<FilterType::random>(
+                    evaluate_item.template operator()<FilterType::random>(
                         nullptr,
                         ValidityView{},
                         nullptr,
@@ -2066,7 +2277,7 @@ class SegmentExpr : public Expr {
             }
             return input->size();
         }
-        EnsureDataTakeResources(skip_func);
+        EnsureDataTakeResources(HasUpdates() ? SkipChunkFn{} : skip_func);
         if (data_take_column_ == nullptr) {
             return -1;
         }
@@ -2088,6 +2299,31 @@ class SegmentExpr : public Expr {
                    "take returned {} rows for input {}",
                    take->Size(),
                    input_view.size);
+        if constexpr (CanOverlay<T>) {
+            if (HasUpdates()) {
+                auto patches = update_reader_->Patches(
+                    0, input->size(), input->data(), candidate_mask);
+                if (!patches.empty()) {
+                    auto owned = take->GetOwn();
+                    UpdatedFieldBatch<T> overlay(
+                        owned.values.template data_as<T>(),
+                        owned.validity,
+                        owned.size,
+                        patches,
+                        segment_->get_field_meta(field_id_),
+                        candidate_mask);
+                    func.template operator()<FilterType::random>(
+                        overlay.Data(),
+                        overlay.Validity(),
+                        nullptr,
+                        owned.size,
+                        res,
+                        valid_res,
+                        values...);
+                    return owned.size;
+                }
+            }
+        }
         const auto take_is_owned = take->IsOwned();
 
         if (take_is_owned && data_take_filter_ == nullptr &&
@@ -2523,6 +2759,15 @@ class SegmentExpr : public Expr {
                          TargetBitmapView res,
                          TargetBitmapView valid_res,
                          const ValTypes&... values) {
+        if (updated_base_lookup_ ||
+            (HasUpdates() && !update_candidates_.empty()))
+            return ProcessDataByOffsetsWithMask<T>(func,
+                                                   skip_func,
+                                                   input,
+                                                   res,
+                                                   valid_res,
+                                                   update_candidates_,
+                                                   values...);
         // index reverse lookup (only for ScalarIndex path)
         if constexpr (!std::is_same_v<T, VectorArrayView> &&
                       !std::is_same_v<T, ArrayValueView>) {
@@ -2915,7 +3160,31 @@ class SegmentExpr : public Expr {
             }
 
             auto process_chunk = [&](const T* data, ValidityView valid_data) {
-                auto skipped = skip_func && skip_func(skip_view_, i);
+                std::optional<UpdatedFieldBatch<T>> overlay;
+                std::vector<segcore::UpdatesRecord::Patch> patches;
+                if constexpr (CanOverlay<T>) {
+                    if (HasUpdates()) {
+                        patches = update_reader_->Patches(
+                            current_data_global_pos_ + processed_size,
+                            size,
+                            nullptr,
+                            candidate_mask,
+                            processed_size);
+                        if (!patches.empty()) {
+                            overlay.emplace(data,
+                                            valid_data,
+                                            size,
+                                            patches,
+                                            segment_->get_field_meta(field_id_),
+                                            candidate_mask,
+                                            processed_size);
+                            data = overlay->Data();
+                            valid_data = overlay->Validity();
+                        }
+                    }
+                }
+                auto skipped =
+                    !HasUpdates() && skip_func && skip_func(skip_view_, i);
                 if (!skipped) {
                     if constexpr (NeedSegmentOffsets) {
                         // For GIS functions: construct segment offsets array
@@ -3048,7 +3317,8 @@ class SegmentExpr : public Expr {
         if (real_batch_size == 0) {
             return 0;
         }
-        auto* cursor = EnsureDataScanCursor<T>(skip_func);
+        auto* cursor =
+            EnsureDataScanCursor<T>(HasUpdates() ? SkipChunkFn{} : skip_func);
         if (cursor == nullptr) {
             return -1;
         }
@@ -3135,6 +3405,32 @@ class SegmentExpr : public Expr {
                            "data scan batch [{}, {}) has no values",
                            batch.row_id_start,
                            batch.row_id_start + batch.size);
+                if constexpr (CanOverlay<T>) {
+                    if (HasUpdates()) {
+                        auto patches = update_reader_->Patches(
+                            batch.row_id_start,
+                            batch.size,
+                            nullptr,
+                            candidate_mask,
+                            batch.row_id_start - window_start);
+                        if (!patches.empty()) {
+                            UpdatedFieldBatch<T> overlay(
+                                batch.values.data_as<T>(),
+                                batch.validity,
+                                batch.size,
+                                patches,
+                                segment_->get_field_meta(field_id_),
+                                candidate_mask,
+                                batch.row_id_start - window_start);
+                            evaluate_batch(overlay.Data(),
+                                           overlay.Validity(),
+                                           batch.row_id_start,
+                                           batch.size);
+                            offset += batch.size;
+                            continue;
+                        }
+                    }
+                }
                 evaluate_batch(batch.values.data_as<T>(),
                                batch.validity,
                                batch.row_id_start,
@@ -3158,7 +3454,12 @@ class SegmentExpr : public Expr {
                       TargetBitmapView valid_res,
                       const ValTypes&... values) {
         return ProcessDataChunksImpl<T, NeedSegmentOffsets>(
-            func, skip_func, res, valid_res, nullptr, values...);
+            func,
+            skip_func,
+            res,
+            valid_res,
+            HasUpdates() ? &update_candidates_ : nullptr,
+            values...);
     }
 
     template <typename T,
@@ -3193,6 +3494,14 @@ class SegmentExpr : public Expr {
                           TargetBitmapView valid_res,
                           const TargetBitmapView* candidate_mask,
                           const ValTypes&... values) {
+        if constexpr (!NeedSegmentOffsets) {
+            if (updated_base_lookup_) {
+                auto count = EvaluateUpdatedValueBatch<T>(
+                    func, nullptr, res, valid_res, candidate_mask, values...);
+                if (count >= 0)
+                    return count;
+            }
+        }
         const auto processed_size =
             ProcessDataChunksByScan<T, NeedSegmentOffsets>(
                 func, skip_func, res, valid_res, candidate_mask, values...);
@@ -3249,7 +3558,30 @@ class SegmentExpr : public Expr {
                                     std::make_pair(chunk_offset, batch_size));
                 auto data_vec = std::move(pw.get().first);
 
-                func(data_vec.data(), batch_size, res + processed_size);
+                const T* values = data_vec.data();
+                std::vector<segcore::UpdatesRecord::Patch> patches;
+                std::optional<UpdatedFieldBatch<T>> overlay;
+                if constexpr (std::is_same_v<T, std::string_view>) {
+                    if (HasUpdates()) {
+                        patches = update_reader_->Patches(
+                            segment_offset + processed_size,
+                            batch_size,
+                            nullptr,
+                            &res,
+                            processed_size);
+                        if (!patches.empty()) {
+                            overlay.emplace(values,
+                                            ValidityView{},
+                                            batch_size,
+                                            patches,
+                                            segment_->get_field_meta(field_id_),
+                                            &res,
+                                            processed_size);
+                            values = overlay->Data();
+                        }
+                    }
+                }
+                func(values, batch_size, res + processed_size);
 
                 chunk_offset += batch_size;
                 processed_size += batch_size;
@@ -3270,7 +3602,7 @@ class SegmentExpr : public Expr {
     VectorPtr
     ProcessIndexChunks(FUNC func, const ValTypes&... values) {
         return ProcessIndexChunksImpl<T>(
-            func, false, IndexValidityMode::Default, nullptr, values...);
+            func, false, IndexValidityMode::Default, nullptr, {}, values...);
     }
 
     // Execute an index query once for the whole segment and gather only the
@@ -3282,7 +3614,7 @@ class SegmentExpr : public Expr {
                                          const OffsetVector& offsets,
                                          const ValTypes&... values) {
         return ProcessIndexChunksImpl<T>(
-            func, false, IndexValidityMode::Default, &offsets, values...);
+            func, false, IndexValidityMode::Default, &offsets, {}, values...);
     }
 
     // ProcessIndexChunks with func_returns_row_level flag
@@ -3290,11 +3622,13 @@ class SegmentExpr : public Expr {
     //   (used when func already handles element-to-row conversion internally)
     template <typename T, typename FUNC, typename... ValTypes>
     VectorPtr
-    ProcessIndexChunksWithRowLevel(FUNC func,
-                                   IndexValidityMode validity_mode,
-                                   const ValTypes&... values) {
+    ProcessIndexChunksWithRowLevel(
+        FUNC func,
+        IndexValidityMode validity_mode,
+        const std::function<bool(const Array&)>& eval_array,
+        const ValTypes&... values) {
         return ProcessIndexChunksImpl<T>(
-            func, true, validity_mode, nullptr, values...);
+            func, true, validity_mode, nullptr, eval_array, values...);
     }
 
     TargetBitmap
@@ -3348,6 +3682,7 @@ class SegmentExpr : public Expr {
                            bool func_returns_row_level,
                            IndexValidityMode validity_mode,
                            const OffsetVector* offsets,
+                           const std::function<bool(const Array&)>& eval_array,
                            const ValTypes&... values) {
         AssertInfo(num_index_chunk_ == 1,
                    "scalar index should have exactly 1 chunk, got {}",
@@ -3362,13 +3697,12 @@ class SegmentExpr : public Expr {
             cached_is_nested_index_ = selected_element_level_result_;
 
             auto cached = ExprCacheHelper::GetOrCompute(
-                segment_,
+                HasUpdates() ? nullptr : segment_,
                 snapshot_,
                 [this]() { return this->ToString(); },
                 active_count_,
                 [&]() -> ExprCacheHelper::ComputeResult {
                     TargetBitmap res = func(predicate, values...);
-
                     TargetBitmap valid_res;
                     const bool multi_path_json =
                         json_reader_ != nullptr &&
@@ -3447,6 +3781,22 @@ class SegmentExpr : public Expr {
                             null_reader_ != nullptr,
                             "selected predicate reader has no null reader");
                         valid_res = null_reader_->IsNotNull();
+                    }
+                    if (HasUpdates() && field_type_ == DataType::ARRAY) {
+                        update_reader_->records.VisitUpdates(
+                            field_id_,
+                            update_reader_->timestamp,
+                            [&](int64_t row,
+                                const segcore::UpdateValue& value) {
+                                if (row >= active_count_)
+                                    return;
+                                const auto* array =
+                                    std::get_if<segcore::UpdateArray>(&value);
+                                valid_res[row] = array != nullptr;
+                                res[row] = array &&
+                                           eval_array(Array(
+                                               **array, is_element_nullable_));
+                            });
                     }
                     return {std::move(res), std::move(valid_res)};
                 },
@@ -3608,6 +3958,8 @@ class SegmentExpr : public Expr {
                 apply_field_valid_data();
             }
         }
+        if (!use_index)
+            PatchValidity(valid_result, 0, input.data());
         return valid_result;
     }
 
@@ -3651,6 +4003,23 @@ class SegmentExpr : public Expr {
     template <typename T>
     TargetBitmap
     ProcessDataChunksForValid() {
+        const auto start = current_data_global_pos_;
+        auto valid = ProcessBaseDataChunksForValid();
+        PatchValidity(valid, start, nullptr);
+        return valid;
+    }
+
+    void
+    PatchValidity(TargetBitmap& valid, int64_t start, const int32_t* offsets) {
+        if (HasUpdates() && is_nullable_) {
+            for (const auto& [pos, value] : update_reader_->Patches(
+                     start, valid.size(), offsets, &update_candidates_))
+                valid[pos] = !std::holds_alternative<std::monostate>(value);
+        }
+    }
+
+    TargetBitmap
+    ProcessBaseDataChunksForValid() {
         const auto batch_size = GetNextBatchSize();
         TargetBitmap valid_result(batch_size);
         valid_result.set();
@@ -3714,7 +4083,7 @@ class SegmentExpr : public Expr {
             AssertInfo(null_reader_ != nullptr,
                        "selected index does not expose null predicates");
             cached_index_chunk_valid_res_ =
-                std::make_shared<TargetBitmap>(null_reader_->IsNotNull());
+                std::make_shared<TargetBitmap>(ReadIndexValidity());
             cached_index_chunk_id_ = 0;
         }
 
@@ -3879,7 +4248,8 @@ class SegmentExpr : public Expr {
     const index::IScalarValueReader<index_value_t<T>>*
     ValueReader() const {
         return dynamic_cast<const index::IScalarValueReader<index_value_t<T>>*>(
-            selected_reader_);
+            uncorrected_index_reader_ ? uncorrected_index_reader_
+                                      : selected_reader_);
     }
 
     void
@@ -4239,7 +4609,32 @@ class SegmentExpr : public Expr {
             // so cleanup's second call would wait forever after prefetch fails.
             try {
                 auto self = const_cast<SegmentExpr*>(this);
-                self->DetermineExecPath();
+                if (self->HasUpdates()) {
+                    self->DetermineUpdateExecPath();
+                    if (self->exec_path_ == ExprExecPath::ScalarIndex &&
+                        !self->text_reader_ &&
+                        self->field_type_ != DataType::ARRAY) {
+                        self->uncorrected_index_reader_ =
+                            self->selected_reader_;
+                        self->corrected_index_reader_ =
+                            self->update_reader_->CorrectOriginalIndex(
+                                self->selected_reader_);
+                        self->selected_reader_ =
+                            self->corrected_index_reader_.get();
+                        self->null_reader_ =
+                            dynamic_cast<const index::INullReader*>(
+                                self->selected_reader_);
+                        self->pattern_reader_ =
+                            dynamic_cast<const index::IPatternMatchReader*>(
+                                self->selected_reader_);
+                        if (self->ngram_reader_)
+                            self->ngram_reader_ =
+                                dynamic_cast<const index::INgramReader*>(
+                                    self->selected_reader_);
+                    }
+                } else {
+                    self->DetermineExecPath();
+                }
                 self->FallbackToJsonStatsIfEligible();
                 self->RecordExecPath();
             } catch (...) {
@@ -4610,6 +5005,11 @@ class SegmentExpr : public Expr {
                selected_element_level_result_;
     }
 
+    std::optional<ValueLookupSource> updated_base_lookup_;
+    TargetBitmapView update_candidates_;
+    std::optional<segcore::UpdateReadBinding> update_reader_;
+    const index::IIndexReaderBase* uncorrected_index_reader_ = nullptr;
+    std::unique_ptr<index::IIndexReaderBase> corrected_index_reader_;
     const segcore::SegmentInternalInterface* segment_;
     // Request-scoped sealed read snapshot, borrowed from the owning
     // QueryContext. Null for growing segments and non-pinned paths.
@@ -4780,6 +5180,12 @@ class SegmentExpr : public Expr {
                    candidate_mask.size(),
                    batch_size);
 
+        auto patches =
+            HasUpdates()
+                ? update_reader_->Patches(
+                      start_offset, batch_size, nullptr, &candidate_mask)
+                : std::vector<segcore::UpdatesRecord::Patch>{};
+        size_t next_patch = 0;
         // A scalar index is one logical index chunk for the whole segment
         // while SkipIndex statistics stay partitioned by the original data
         // chunks, so this path applies no chunk-level skip: see the same note
@@ -4797,6 +5203,27 @@ class SegmentExpr : public Expr {
                 continue;
             }
             const auto offset = start_offset + i;
+            if constexpr (CanOverlay<T> &&
+                          (std::is_integral_v<T> ||
+                           std::is_same_v<T, std::string> ||
+                           std::is_same_v<T, std::string_view>)) {
+                if (next_patch < patches.size() &&
+                    patches[next_patch].position == i) {
+                    const auto& value = patches[next_patch++].value;
+                    const bool live =
+                        !std::holds_alternative<std::monostate>(value);
+                    const T data = live ? UpdateScalar<T>(value) : T{};
+                    evaluate_batch.template operator()<FilterType::random>(
+                        &data,
+                        ValidityView::FromExpanded(&live),
+                        nullptr,
+                        1,
+                        res + i,
+                        valid_res + i,
+                        values...);
+                    continue;
+                }
+            }
             auto raw = value_reader->Lookup(offset);
             if (!raw.has_value()) {
                 res[i] = valid_res[i] = false;

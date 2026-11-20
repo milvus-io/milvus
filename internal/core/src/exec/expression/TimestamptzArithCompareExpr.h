@@ -52,6 +52,11 @@ class PhyTimestamptzArithCompareExpr : public SegmentExpr {
     void
     DetermineExecPath() override;
 
+    void
+    DetermineUpdateExecPath() override {
+        SelectUpdatedValuePath();
+    }
+
     bool
     SupportsRawExprCache() const override {
         return !expr_->column_.element_level_;

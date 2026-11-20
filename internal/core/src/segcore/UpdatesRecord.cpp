@@ -12,6 +12,7 @@
 #include "segcore/UpdatesRecord.h"
 
 #include <algorithm>
+#include <atomic>
 #include <limits>
 #include <map>
 #include <mutex>
@@ -156,12 +157,22 @@ struct TypedLog {
         };
     }
 
+    bool
+    Contains(int64_t row) const {
+        return row >= 0 && static_cast<size_t>(row) < membership.size() &&
+               membership[row];
+    }
+
     std::optional<UpdateValue>
     Lookup(int64_t row, Timestamp ts) const {
-        if (row < 0 || static_cast<size_t>(row) >= membership.size() ||
-            !membership[row]) {
+        if (!Contains(row)) {
             return std::nullopt;
         }
+        return LookupKnownRow(row, ts);
+    }
+
+    std::optional<UpdateValue>
+    LookupKnownRow(int64_t row, Timestamp ts) const {
         const auto& history = positions.at(row);
         size_t selected = history.back();
         if (entries[selected].key.first > ts) {
@@ -288,6 +299,8 @@ Decode(const FieldMeta& meta, const proto::schema::UpdateLiteral& literal) {
 
 struct UpdatesRecord::Impl {
     std::shared_mutex mutex;
+    std::atomic<size_t> reverse_scans{0}, reverse_selected{0},
+        overlay_batches{0}, dictionary_probes{0};
     std::map<int64_t, Log> fields;
     size_t row_count = 0;
 };
@@ -391,6 +404,111 @@ UpdatesRecord::Lookup(FieldId field,
     return std::visit(
         [&](const auto& log) { return log.Lookup(offset, timestamp); },
         it->second);
+}
+
+UpdatesRecord::ReadDiagnostics
+UpdatesRecord::Diagnostics() const {
+    return {impl_->reverse_scans.load(std::memory_order_relaxed),
+            impl_->reverse_selected.load(std::memory_order_relaxed),
+            impl_->overlay_batches.load(std::memory_order_relaxed),
+            impl_->dictionary_probes.load(std::memory_order_relaxed)};
+}
+
+UpdatesRecord::ReadStats
+UpdatesRecord::VisitUpdates(
+    FieldId field,
+    Timestamp timestamp,
+    const std::function<void(int64_t, const UpdateValue&)>& visit) const {
+    ReadStats stats;
+    std::shared_lock lock(impl_->mutex);
+    auto it = impl_->fields.find(field.get());
+    if (it == impl_->fields.end())
+        return stats;
+    std::visit(
+        [&](const auto& log) {
+            auto end = std::upper_bound(log.entries.begin(),
+                                        log.entries.end(),
+                                        timestamp,
+                                        [](Timestamp t, const auto& delta) {
+                                            return t < delta.key.first;
+                                        });
+            if (end == log.entries.begin())
+                return;
+            stats.used_visited = log.positions.size() != log.entries.size();
+            std::vector<bool> visited(stats.used_visited ? log.membership.size()
+                                                         : 0);
+            while (end != log.entries.begin()) {
+                const auto& delta = *--end;
+                ++stats.scanned_entries;
+                if (stats.used_visited) {
+                    if (visited[delta.offset])
+                        continue;
+                    visited[delta.offset] = true;
+                }
+                visit(delta.offset,
+                      delta.is_null ? UpdateValue{} : UpdateValue(delta.value));
+                if (++stats.selected_offsets == log.positions.size())
+                    break;
+            }
+        },
+        it->second);
+    impl_->reverse_scans.fetch_add(1, std::memory_order_relaxed);
+    impl_->reverse_selected.fetch_add(stats.selected_offsets,
+                                      std::memory_order_relaxed);
+    return stats;
+}
+
+std::vector<UpdatesRecord::Patch>
+UpdatesRecord::ReadRangeUpdates(FieldId field,
+                                Timestamp timestamp,
+                                int64_t start,
+                                size_t count,
+                                const int32_t* offsets,
+                                const TargetBitmapView& candidates,
+                                size_t mask_start,
+                                ReadStats* stats) const {
+    AssertInfo(candidates.empty() || (mask_start <= candidates.size() &&
+                                      count <= candidates.size() - mask_start),
+               "update candidate mask does not cover batch");
+    AssertInfo(
+        offsets || (start >= 0 &&
+                    count <= static_cast<size_t>(
+                                 std::numeric_limits<int64_t>::max() - start)),
+        "invalid update batch range");
+    std::vector<Patch> patches;
+    ReadStats local;
+    std::shared_lock lock(impl_->mutex);
+    auto it = impl_->fields.find(field.get());
+    if (it != impl_->fields.end()) {
+        std::visit(
+            [&](const auto& log) {
+                if (log.entries.empty() ||
+                    log.entries.front().key.first > timestamp)
+                    return;
+                for (size_t i = 0; i < count; ++i) {
+                    if (!candidates.empty() && !candidates[mask_start + i])
+                        continue;
+                    const int64_t row =
+                        offsets ? offsets[i] : start + static_cast<int64_t>(i);
+                    if (!log.Contains(row))
+                        continue;
+                    ++local.dictionary_probes;
+                    if (auto value = log.LookupKnownRow(row, timestamp)) {
+                        patches.push_back({i, std::move(*value)});
+                    }
+                }
+            },
+            it->second);
+    }
+    local.selected_offsets = patches.size();
+    if (local.dictionary_probes)
+        impl_->dictionary_probes.fetch_add(local.dictionary_probes,
+                                           std::memory_order_relaxed);
+    if (!patches.empty())
+        impl_->overlay_batches.fetch_add(1, std::memory_order_relaxed);
+    if (stats)
+        *stats = local;
+    return patches;
 }
 
 UpdatesRecord::FieldStats

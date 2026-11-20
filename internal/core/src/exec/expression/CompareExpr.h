@@ -216,12 +216,27 @@ class PhyCompareFilterExpr : public Expr {
     Eval(EvalCtx& context, VectorPtr& result) override;
 
     void
+    SetQueryTimestamp(Timestamp timestamp) override;
+
+    bool
+    IsCacheable() const override {
+        return !left_column_expr_ && Expr::IsCacheable();
+    }
+
+    void
     SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) override {
         snapshot_ = snapshot;
     }
 
     void
     MoveCursor() override {
+        if (left_column_expr_) {
+            left_column_expr_->MoveCursor();
+            right_column_expr_->MoveCursor();
+            if (!has_offset_input_)
+                current_data_global_pos_ += GetNextBatchSize();
+            return;
+        }
         // Scan cursors receive the absolute segment position on every call.
         // A short-circuited compare window therefore advances only execution
         // state; the next evaluated call seeks both cursors forward.
@@ -952,6 +967,8 @@ class PhyCompareFilterExpr : public Expr {
     // alive for the expression lifetime.
     std::shared_ptr<ChunkedColumnInterface> left_data_column_{nullptr};
     std::shared_ptr<ChunkedColumnInterface> right_data_column_{nullptr};
+    std::unique_ptr<Expr> left_column_expr_;
+    std::unique_ptr<Expr> right_column_expr_;
     std::unique_ptr<ChunkedColumnInterface::ScanCursor> left_data_scan_cursor_;
     std::unique_ptr<ChunkedColumnInterface::ScanCursor> right_data_scan_cursor_;
 

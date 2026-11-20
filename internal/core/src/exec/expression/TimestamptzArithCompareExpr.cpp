@@ -178,6 +178,9 @@ PhyTimestamptzArithCompareExpr::DetermineExecPath() {
 
 void
 PhyTimestamptzArithCompareExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    update_candidates_ = context.get_bitmap_input();
+    auto reset_mask = folly::makeGuard([&] { update_candidates_ = {}; });
+
     WaitPrefetch();
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));

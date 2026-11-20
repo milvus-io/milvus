@@ -122,6 +122,12 @@ TEST(PkUpdateRecord, OutOfOrderFragmentsMatchIndependentReplay) {
     }
     EXPECT_EQ(store.Stats(field).entries, mutations.size() * 3);
     for (Timestamp ts = 99; ts <= 111; ++ts) {
+        std::map<int64_t, int64_t> reverse;
+        store.VisitUpdates(
+            field, ts, [&](int64_t row, const UpdateValue& value) {
+                EXPECT_TRUE(
+                    reverse.emplace(row, std::get<int64_t>(value)).second);
+            });
         for (int64_t row = 0; row < 16; ++row) {
             std::optional<int64_t> expected;
             for (const auto& m : mutations) {
@@ -133,10 +139,50 @@ TEST(PkUpdateRecord, OutOfOrderFragmentsMatchIndependentReplay) {
             }
             auto actual = store.Lookup(field, row, ts);
             ASSERT_EQ(actual.has_value(), expected.has_value());
-            if (expected)
+            EXPECT_EQ(reverse.count(row), expected.has_value());
+            if (expected) {
+                EXPECT_EQ(reverse.at(row), *expected);
                 EXPECT_EQ(std::get<int64_t>(*actual), *expected);
+            }
         }
     }
+}
+
+TEST(PkUpdateRecord, VisiblePrefixAndMaskedRange) {
+    Schema schema;
+    auto field = schema.AddDebugField("score", DataType::INT64, true);
+    UpdatesRecord record;
+    record.Apply(schema, 32, {10}, 100, 0, {Long(field, 4)});
+    record.Apply(schema, 32, {20}, 200, 0, {Long(field, 5)});
+    auto select = [&](Timestamp ts, auto expected) {
+        std::map<int64_t, UpdateValue> actual;
+        auto stats = record.VisitUpdates(
+            field, ts, [&](int64_t row, const UpdateValue& value) {
+                EXPECT_TRUE(actual.emplace(row, value).second);
+            });
+        EXPECT_EQ(actual, expected);
+        return stats;
+    };
+    using Values = std::map<int64_t, UpdateValue>;
+    auto stats = select(140, Values{{10, int64_t(4)}});
+    EXPECT_FALSE(stats.used_visited);
+    EXPECT_EQ(stats.scanned_entries, 1);
+    UpdateAssignment null{field, {}};
+    null.literal.set_null_value(google::protobuf::NULL_VALUE);
+    record.Apply(schema, 32, {10}, 100, 1, {null});
+    stats = select(200, Values{{10, {}}, {20, int64_t(5)}});
+    EXPECT_TRUE(stats.used_visited);
+    EXPECT_EQ(stats.scanned_entries, 2);
+    int32_t rows[] = {2, 10, 20, 10, 10, 5};
+    TargetBitmap mask(6, true);
+    mask[1] = false;
+    auto patches =
+        record.ReadRangeUpdates(field, 140, 0, 6, rows, mask.view(), 0, &stats);
+    ASSERT_EQ(patches.size(), 2);
+    EXPECT_EQ(patches[0].position, 3);
+    EXPECT_EQ(patches[1].position, 4);
+    EXPECT_TRUE(std::holds_alternative<std::monostate>(patches[0].value));
+    EXPECT_EQ(stats.dictionary_probes, 3);
 }
 
 TEST(PkUpdateRecord, TypedLiteralsAndWholeArrayOwnership) {

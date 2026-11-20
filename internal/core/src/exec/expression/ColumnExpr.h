@@ -81,6 +81,24 @@ class PhyColumnExpr : public Expr {
     Eval(EvalCtx& context, VectorPtr& result) override;
 
     void
+    SetQueryTimestamp(Timestamp timestamp) override {
+        const auto field = expr_->GetColumn().field_id_;
+        const auto& records = segment_->GetUpdatesRecord();
+        if (records.Stats(field).entries)
+            updates_.emplace(segcore::UpdateReadBinding{
+                records,
+                field,
+                timestamp,
+                expr_->type(),
+                segment_->get_field_meta(field).is_nullable()});
+    }
+
+    bool
+    IsCacheable() const override {
+        return !updates_ && Expr::IsCacheable();
+    }
+
+    void
     SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) override {
         snapshot_ = snapshot;
     }
@@ -186,6 +204,7 @@ class PhyColumnExpr : public Expr {
     int64_t batch_size_;
     std::shared_ptr<const milvus::expr::ColumnExpr> expr_;
     ValueLookupSource value_lookup_;
+    std::optional<segcore::UpdateReadBinding> updates_;
 };
 
 }  //namespace exec

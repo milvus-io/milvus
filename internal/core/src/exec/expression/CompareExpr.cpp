@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "CompareExpr.h"
+#include "exec/expression/ColumnExpr.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -461,6 +462,31 @@ PhyCompareFilterExpr::ExecCompareWithValueLookup(OpType, EvalCtx& context) {
 }
 
 void
+PhyCompareFilterExpr::SetQueryTimestamp(Timestamp timestamp) {
+    const auto& records = segment_->GetUpdatesRecord();
+    if (!records.Stats(left_field_).entries &&
+        !records.Stats(right_field_).entries)
+        return;
+    auto bind = [&](FieldId field, DataType type) {
+        auto logical =
+            std::make_shared<expr::ColumnExpr>(expr::ColumnInfo(field, type));
+        auto column = std::make_unique<PhyColumnExpr>(
+            std::vector<std::shared_ptr<Expr>>{},
+            logical,
+            "PhyColumnExpr",
+            op_ctx_,
+            segment_,
+            active_count_,
+            batch_size_);
+        column->SetSnapshot(snapshot_);
+        column->SetQueryTimestamp(timestamp);
+        return column;
+    };
+    left_column_expr_ = bind(left_field_, expr_->left_data_type_);
+    right_column_expr_ = bind(right_field_, expr_->right_data_type_);
+}
+
+void
 PhyCompareFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     tracer::AutoSpan span(
         "PhyCompareFilterExpr::Eval", tracer::GetRootSpan(), true);
@@ -476,7 +502,8 @@ PhyCompareFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     // keep using the Column path when both operands still come from data.
     // For segments where both fields have no index, this also lets SIMD run
     // without a deep call stack in between.
-    if (!is_left_indexed_ && !is_right_indexed_ && CanUseBothDataCompare()) {
+    if (left_column_expr_ ||
+        (!is_left_indexed_ && !is_right_indexed_ && CanUseBothDataCompare())) {
         result = ExecCompareExprDispatcherForBothDataSegment(context);
         current_data_global_pos_ += sequential_batch_size;
         return;
@@ -729,6 +756,42 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
         }
         processed_cursor += size;
     };
+    if (left_column_expr_) {
+        // ColumnExpr owns each side's native Scan/Take or value reader and
+        // applies sparse versions before comparison, including NULL -> value.
+        VectorPtr lhs, rhs;
+        left_column_expr_->Eval(context, lhs);
+        right_column_expr_->Eval(context, rhs);
+        auto left = std::static_pointer_cast<ColumnVector>(lhs);
+        auto right = std::static_pointer_cast<ColumnVector>(rhs);
+        AssertInfo(left && right && left->size() == real_batch_size &&
+                       right->size() == real_batch_size,
+                   "compare operands do not cover the execution window");
+        TargetBitmapView lv(left->GetValidRawData(), real_batch_size);
+        TargetBitmapView rv(right->GetValidRawData(), real_batch_size);
+        if constexpr (IsCompareStringViewType<T> &&
+                      IsCompareStringViewType<U>) {
+            const auto* l = left->RawAsValues<std::string>();
+            const auto* r = right->RawAsValues<std::string>();
+            for (size_t i = 0; i < real_batch_size; ++i) {
+                const std::string_view a(l[i]), b(r[i]);
+                execute_sub_batch(&a, &b, nullptr, 1, res + i);
+            }
+        } else {
+            execute_sub_batch(left->RawAsValues<T>(),
+                              right->RawAsValues<U>(),
+                              nullptr,
+                              real_batch_size,
+                              res);
+        }
+        for (size_t i = 0; i < real_batch_size; ++i) {
+            if (!lv[i] || !rv[i]) {
+                valid_res[i] = false;
+                res[i] = false;
+            }
+        }
+        return res_vec;
+    }
     int64_t processed_size;
     if (has_offset_input_) {
         processed_size = ProcessBothDataByOffsets<T, U>(
