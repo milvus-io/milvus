@@ -59,6 +59,9 @@ func WriteMutationDelta(ctx context.Context, path string, d MutationDelta, cfg *
 	if len(d.Rows) == 0 {
 		return 0, merr.WrapErrServiceInternalMsg("empty delta file")
 	}
+	if err := d.Layout.ValidateIdentity(); err != nil {
+		return 0, err
+	}
 	used := make(map[int64]bool)
 	for _, r := range d.Rows {
 		for _, a := range r.Assignments {
@@ -177,16 +180,19 @@ func ReadMutationDelta(ctx context.Context, cm ChunkManager, binlog *datapb.Binl
 		return merr.WrapErrDataIntegrityMsg("unsupported delta format %q", format)
 	}
 	l := deltacodec.Layout{VChannel: metadata["vchannel"], PKType: pkType}
-	if l.VChannel == "" || metadata["pk_type"] != pkType.String() {
-		return merr.WrapErrDataIntegrityMsg("invalid delta channel or primary-key type")
+	if metadata["pk_type"] != pkType.String() {
+		return merr.WrapErrDataIntegrityMsg("invalid delta primary-key type")
 	}
 	l.CollectionID, err = strconv.ParseInt(metadata["collection_id"], 10, 64)
-	if err != nil || l.CollectionID <= 0 {
+	if err != nil {
 		return merr.WrapErrDataIntegrityMsg("invalid delta collection ID")
 	}
 	l.PartitionID, err = strconv.ParseInt(metadata["partition_scope"], 10, 64)
-	if err != nil || l.PartitionID < -1 {
+	if err != nil {
 		return merr.WrapErrDataIntegrityMsg("invalid delta partition scope")
+	}
+	if err := l.ValidateIdentity(); err != nil {
+		return err
 	}
 	schemaVersion, err := strconv.ParseInt(metadata["schema_version"], 10, 32)
 	if err != nil {

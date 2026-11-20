@@ -29,6 +29,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -62,6 +63,20 @@ type Layout struct {
 	SchemaVersion int32
 	PKType        schemapb.DataType
 	Fields        []Field
+}
+
+// ValidateIdentity checks the scope that a typed file persists in its footer.
+func (l Layout) ValidateIdentity() error {
+	if l.CollectionID <= 0 {
+		return merr.WrapErrDataIntegrityMsg("invalid delta collection ID %d", l.CollectionID)
+	}
+	if l.VChannel == "" {
+		return merr.WrapErrDataIntegrityMsg("empty delta channel")
+	}
+	if l.PartitionID < common.AllPartitionsID {
+		return merr.WrapErrDataIntegrityMsg("invalid delta partition scope %d", l.PartitionID)
+	}
+	return nil
 }
 
 func physical(t schemapb.DataType) (arrow.DataType, protoreflect.Name, error) {

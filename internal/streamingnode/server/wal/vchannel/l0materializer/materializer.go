@@ -429,7 +429,11 @@ func typedMaterializeGroups(req MaterializeRequest, collectionID int64) ([]mater
 				g = nil
 			}
 			if g == nil {
-				g = &materializeGroup{partitionID: scope, pkType: pk.GetDataType(), fromTimeTick: tt, delta: &storage.MutationDelta{Layout: deltacodec.Layout{CollectionID: collectionID, VChannel: req.VChannel, PartitionID: scope, SchemaVersion: schema.GetVersion(), PKType: pk.GetDataType()}}}
+				layout := deltacodec.Layout{CollectionID: collectionID, VChannel: req.VChannel, PartitionID: scope, SchemaVersion: schema.GetVersion(), PKType: pk.GetDataType()}
+				if err := layout.ValidateIdentity(); err != nil {
+					return nil, err
+				}
+				g = &materializeGroup{partitionID: scope, pkType: pk.GetDataType(), fromTimeTick: tt, delta: &storage.MutationDelta{Layout: layout}}
 				current[scope] = g
 			}
 			g.toTimeTick = tt

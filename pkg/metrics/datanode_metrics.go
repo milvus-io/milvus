@@ -64,7 +64,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataNodeRole,
 			Name:      "write_data_count",
-			Help:      "byte size of datanode write to object storage, including flushed size",
+			Help:      "number of logical rows written to object storage by operation",
 		}, []string{
 			nodeIDLabelName,
 			dataSourceLabelName,

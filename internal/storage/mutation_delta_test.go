@@ -92,6 +92,35 @@ func TestMutationDeltaNativeProjection(t *testing.T) {
 	require.ErrorContains(t, ReadMutationDelta(ctx, cm, binlog, StorageV2, data.Layout.PKType, nil, cfg, nil, nil), "signature")
 }
 
+func TestMutationDeltaInvalidIdentityCreatesNoObject(t *testing.T) {
+	paramtable.Init()
+	dir := t.TempDir()
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+	keys := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}
+	for _, tc := range []struct {
+		name              string
+		collection, scope int64
+		channel           string
+	}{
+		{"empty-channel", 1, 10, ""},
+		{"zero-collection", 0, 10, "p_1v0"},
+		{"negative-collection", -1, 10, "p_1v0"},
+		{"invalid-scope", 1, -2, "p_1v0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(dir, tc.name)
+			data := MutationDelta{
+				Layout: deltacodec.Layout{CollectionID: tc.collection, VChannel: tc.channel, PartitionID: tc.scope, PKType: schemapb.DataType_Int64},
+				Rows:   []deltacodec.Row{{TimeTick: 100, PrimaryKeys: keys, Operation: deltacodec.Delete}},
+			}
+			size, err := WriteMutationDelta(context.Background(), path, data, cfg, nil)
+			require.Error(t, err)
+			require.Zero(t, size)
+			require.NoFileExists(t, path)
+		})
+	}
+}
+
 func TestMutationDeltaLegacyFormats(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
