@@ -32,6 +32,7 @@ var streamingErrorToGRPCStatus = map[streamingpb.StreamingCode]codes.Code{
 	streamingpb.StreamingCode_STREAMING_CODE_WALNAME_MISMATCH:          codes.FailedPrecondition,
 	streamingpb.StreamingCode_STREAMING_CODE_SCHEMA_VERSION_MISMATCH:   codes.FailedPrecondition,
 	streamingpb.StreamingCode_STREAMING_CODE_RATE_LIMIT_REJECTED:       codes.ResourceExhausted,
+	streamingpb.StreamingCode_STREAMING_CODE_SHARD_FENCED:              codes.FailedPrecondition,
 }
 
 // NewGRPCStatusFromStreamingError converts StreamingError to grpc status.

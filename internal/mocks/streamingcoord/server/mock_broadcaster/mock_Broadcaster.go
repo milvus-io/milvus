@@ -6,7 +6,9 @@ import (
 	context "context"
 
 	broadcaster "github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+
 	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -251,6 +253,114 @@ func (_c *MockBroadcaster_LegacyAck_Call) Return(_a0 error) *MockBroadcaster_Leg
 }
 
 func (_c *MockBroadcaster_LegacyAck_Call) RunAndReturn(run func(context.Context, uint64, string) error) *MockBroadcaster_LegacyAck_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ReportVChannelAppended provides a mock function with given fields: ctx, broadcastID, vchannel, timeTick
+func (_m *MockBroadcaster) ReportVChannelAppended(ctx context.Context, broadcastID uint64, vchannel string, timeTick uint64) error {
+	ret := _m.Called(ctx, broadcastID, vchannel, timeTick)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReportVChannelAppended")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, uint64, string, uint64) error); ok {
+		r0 = rf(ctx, broadcastID, vchannel, timeTick)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBroadcaster_ReportVChannelAppended_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReportVChannelAppended'
+type MockBroadcaster_ReportVChannelAppended_Call struct {
+	*mock.Call
+}
+
+// ReportVChannelAppended is a helper method to define mock.On call
+//   - ctx context.Context
+//   - broadcastID uint64
+//   - vchannel string
+//   - timeTick uint64
+func (_e *MockBroadcaster_Expecter) ReportVChannelAppended(ctx interface{}, broadcastID interface{}, vchannel interface{}, timeTick interface{}) *MockBroadcaster_ReportVChannelAppended_Call {
+	return &MockBroadcaster_ReportVChannelAppended_Call{Call: _e.mock.On("ReportVChannelAppended", ctx, broadcastID, vchannel, timeTick)}
+}
+
+func (_c *MockBroadcaster_ReportVChannelAppended_Call) Run(run func(ctx context.Context, broadcastID uint64, vchannel string, timeTick uint64)) *MockBroadcaster_ReportVChannelAppended_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(uint64), args[2].(string), args[3].(uint64))
+	})
+	return _c
+}
+
+func (_c *MockBroadcaster_ReportVChannelAppended_Call) Return(_a0 error) *MockBroadcaster_ReportVChannelAppended_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBroadcaster_ReportVChannelAppended_Call) RunAndReturn(run func(context.Context, uint64, string, uint64) error) *MockBroadcaster_ReportVChannelAppended_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// WaitVChannelsAcked provides a mock function with given fields: ctx, typ, broadcastID, vchannels
+func (_m *MockBroadcaster) WaitVChannelsAcked(ctx context.Context, typ message.MessageType, broadcastID uint64, vchannels []string) (uint64, error) {
+	ret := _m.Called(ctx, typ, broadcastID, vchannels)
+
+	if len(ret) == 0 {
+		panic("no return value specified for WaitVChannelsAcked")
+	}
+
+	var r0 uint64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, message.MessageType, uint64, []string) (uint64, error)); ok {
+		return rf(ctx, typ, broadcastID, vchannels)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, message.MessageType, uint64, []string) uint64); ok {
+		r0 = rf(ctx, typ, broadcastID, vchannels)
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, message.MessageType, uint64, []string) error); ok {
+		r1 = rf(ctx, typ, broadcastID, vchannels)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBroadcaster_WaitVChannelsAcked_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WaitVChannelsAcked'
+type MockBroadcaster_WaitVChannelsAcked_Call struct {
+	*mock.Call
+}
+
+// WaitVChannelsAcked is a helper method to define mock.On call
+//   - ctx context.Context
+//   - typ message.MessageType
+//   - broadcastID uint64
+//   - vchannels []string
+func (_e *MockBroadcaster_Expecter) WaitVChannelsAcked(ctx interface{}, typ interface{}, broadcastID interface{}, vchannels interface{}) *MockBroadcaster_WaitVChannelsAcked_Call {
+	return &MockBroadcaster_WaitVChannelsAcked_Call{Call: _e.mock.On("WaitVChannelsAcked", ctx, typ, broadcastID, vchannels)}
+}
+
+func (_c *MockBroadcaster_WaitVChannelsAcked_Call) Run(run func(ctx context.Context, typ message.MessageType, broadcastID uint64, vchannels []string)) *MockBroadcaster_WaitVChannelsAcked_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(message.MessageType), args[2].(uint64), args[3].([]string))
+	})
+	return _c
+}
+
+func (_c *MockBroadcaster_WaitVChannelsAcked_Call) Return(_a0 uint64, _a1 error) *MockBroadcaster_WaitVChannelsAcked_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBroadcaster_WaitVChannelsAcked_Call) RunAndReturn(run func(context.Context, message.MessageType, uint64, []string) (uint64, error)) *MockBroadcaster_WaitVChannelsAcked_Call {
 	_c.Call.Return(run)
 	return _c
 }

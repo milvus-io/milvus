@@ -129,6 +129,40 @@ func (s *L0CompactionPolicySuite) TestTriggerIdle() {
 	mlog.Info(context.TODO(), "cView", mlog.String("string", cView.String()))
 }
 
+// The L0 segments of a vchannel whose L0 compaction is suspended (a target of
+// a shard split that is not adopted) are left alone by both entrances of the
+// policy, and compacted again once the suspension ends.
+func (s *L0CompactionPolicySuite) TestL0CompactionSuspendedOnAVChannel() {
+	suspended := true
+	s.l0Policy.Meta.L0CompactionSuspended = func(vchannel string) bool {
+		return suspended && vchannel == s.testLabel.Channel
+	}
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
+
+	events, err := s.l0Policy.Trigger(context.Background())
+	s.Require().NoError(err)
+	s.Empty(events)
+	views, _, err := s.l0Policy.TriggerOneCollection(context.Background(), s.testLabel.CollectionID)
+	s.Require().NoError(err)
+	s.Empty(views)
+
+	// Another vchannel is not affected.
+	s.l0Policy.Meta.L0CompactionSuspended = func(vchannel string) bool { return vchannel == "another" }
+	events, err = s.l0Policy.Trigger(context.Background())
+	s.Require().NoError(err)
+	s.Len(events[policy.TriggerTypeLevelZeroViewIDLE], 1)
+
+	// Adopted: the accumulated L0 segments are compacted.
+	suspended = false
+	s.l0Policy.Meta.L0CompactionSuspended = func(vchannel string) bool {
+		return suspended && vchannel == s.testLabel.Channel
+	}
+	views, _, err = s.l0Policy.TriggerOneCollection(context.Background(), s.testLabel.CollectionID)
+	s.Require().NoError(err)
+	s.Require().Len(views, 1)
+	s.Len(views[0].GetSegmentsView(), 3)
+}
+
 func (s *L0CompactionPolicySuite) TestActiveCollectionWithoutL0() {
 	store := metacache.NewMetaStore(nil)
 	m := &meta.Meta{Segments: meta.NewSegmentsInfo(store), MetaStore: store}

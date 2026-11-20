@@ -52,6 +52,85 @@ func (m *shardManagerImpl) checkIfCollectionExists(collectionID int64) error {
 	return nil
 }
 
+// CollectionVChannel returns the vchannel the collection is registered with.
+func (m *shardManagerImpl) CollectionVChannel(collectionID int64) (string, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	info, ok := m.collections[collectionID]
+	if !ok {
+		return "", false
+	}
+	return info.VChannel, true
+}
+
+// SplitFenceChecker is implemented by a shard manager that can tell whether a
+// vchannel is the source of a shard split. It is kept out of ShardManager so
+// that the interface and its mock stay as they are; use IsSplitFenced.
+type SplitFenceChecker interface {
+	IsSplitFenced(vchannel string) bool
+}
+
+// IsSplitFenced reports whether the vchannel is the source of a shard split on
+// the pchannel of m. A shard manager that cannot tell answers false.
+func IsSplitFenced(m ShardManager, vchannel string) bool {
+	checker, ok := m.(SplitFenceChecker)
+	return ok && checker.IsSplitFenced(vchannel)
+}
+
+// IsSplitFenced reports whether a collection is registered with the vchannel
+// on this pchannel and the vchannel is the source of a shard split.
+func (m *shardManagerImpl) IsSplitFenced(vchannel string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, info := range m.collections {
+		if info.VChannel == vchannel {
+			return info.SplitFenced()
+		}
+	}
+	return false
+}
+
+// FenceForSplit makes the vchannel the source of a shard split.
+func (m *shardManagerImpl) FenceForSplit(collectionID int64, vchannel string, splitTaskID int64, timetick uint64) ([]int64, bool, error) {
+	logger := m.Logger().With(mlog.FieldCollectionID(collectionID), mlog.FieldVChannel(vchannel),
+		mlog.Int64("splitTaskID", splitTaskID), mlog.Uint64("timetick", timetick))
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	info, ok := m.collections[collectionID]
+	if !ok || info.VChannel != vchannel {
+		logger.Warn(m.ctx, "collection is not registered with the vchannel when fencing it for a shard split")
+		return nil, false, ErrCollectionNotFound
+	}
+	if info.SplitFenced() {
+		if info.SplitTaskID != splitTaskID {
+			logger.Warn(m.ctx, "vchannel is already fenced by another shard split", mlog.Int64("fencedBy", info.SplitTaskID))
+			return nil, false, ErrShardFenced
+		}
+		// A copy of the same split that is appended again. Nothing was written
+		// since the first fence, so there is nothing to seal.
+		logger.Info(m.ctx, "vchannel is already fenced by this shard split")
+		return nil, true, nil
+	}
+	segmentIDs, err := m.flushAndFenceSegmentAllocUntil(collectionID, timetick)
+	if err != nil {
+		return nil, false, err
+	}
+	info.SplitTaskID = splitTaskID
+	// An insert may be waiting for a segment whose create message is refused
+	// from now on. Wake it; its next attempt is refused as fenced.
+	for partitionID := range info.PartitionIDs {
+		if pm, ok := m.partitionManagers[PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}]; ok {
+			pm.CancelPendingAlloc()
+		}
+	}
+	logger.Info(m.ctx, "vchannel fenced by a shard split, it accepts no more DML", mlog.Int64s("segmentIDs", segmentIDs))
+	return segmentIDs, false, nil
+}
+
 // CreateCollection creates a new partition manager when create collection message is written into wal.
 // After CreateCollection is called, the ddl and dml on the collection can be applied.
 func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectionMessageV1) {
@@ -208,6 +287,11 @@ func (m *shardManagerImpl) checkIfCollectionSchemaVersionMatch(header *message.I
 	if !ok {
 		m.Logger().Warn(context.TODO(), "collection not found", mlog.Int64("collectionID", collectionID))
 		return -1, ErrCollectionNotFound
+	}
+	// An insert is refused before anything else is checked if the vchannel is
+	// the source of a shard split: its rows belong to the new shards.
+	if collectionInfo.SplitFenced() {
+		return -1, ErrShardFenced
 	}
 	// Missing schemaVersion means the proxy did not set it (old proxy or old SDK).
 	// Skip the schema presence and version checks for backward compatibility during

@@ -83,6 +83,9 @@ func (c *DDLCallback) registerCollectionCallbacks() {
 	registry.RegisterAlterCollectionV2AckCallback(c.alterCollectionV2AckCallback)
 	registry.RegisterDropCollectionV1AckCallback(c.dropCollectionV1AckCallback)
 
+	registry.RegisterSplitShardV2AckCallback(c.splitShardV2AckCallback)
+	registry.RegisterAppendFirstAppliedResolver(message.MessageTypeSplitShard, c.splitShardAppliedResolver)
+
 	registry.RegisterTruncateCollectionV2AckCallback(c.truncateCollectionV2AckCallback)
 	registry.RegisterTruncateCollectionV2AckOnceCallback(c.truncateCollectionV2AckOnceCallback)
 }

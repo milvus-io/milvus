@@ -21,16 +21,31 @@ type invalidationTestWAL struct{ streaming.WALAccesser }
 
 func TestInsertAppendReturnsMixedOutcomeWithoutReplay(t *testing.T) {
 	cache := newTestCache()
+	vchannels := []string{"p_10v0", "p_10v1", "p_10v2"}
+	// The write path reads the collection's routing and channel list on every
+	// attempt; a collection with no modulus has never been split.
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: 10, VChannels: vchannels}, nil)
 	task := &InsertTask{
 		baseTask: baseTask{MetaCache: cache}, ctx: t.Context(), collectionID: 10,
-		vChannels: []string{"p_10v0", "p_10v1", "p_10v2"},
 		insertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{Base: &commonpb.MsgBase{}}},
 		result:    &milvuspb.MutationResult{},
 	}
 	wal := &invalidationTestWAL{}
 	patch := mockey.Mock(streaming.WAL).Return(wal).Build()
 	defer patch.UnPatch()
-	patch = mockey.Mock(repackInsertDataForStreamingService).Return([]message.MutableMessage{}, nil).Build()
+	// One message per shard, so the append's per-shard outcomes settle against
+	// the messages that carried them.
+	msgs := make([]message.MutableMessage, 0, len(vchannels))
+	for _, vchannel := range vchannels {
+		msg, err := message.NewInsertMessageBuilderV1().
+			WithVChannel(vchannel).
+			WithHeader(&message.InsertMessageHeader{CollectionId: 10}).
+			WithBody(&msgpb.InsertRequest{CollectionID: 10}).
+			BuildMutable()
+		require.NoError(t, err)
+		msgs = append(msgs, msg)
+	}
+	patch = mockey.Mock(repackInsertDataForStreamingService).Return(msgs, make([][]int, len(msgs)), nil).Build()
 	defer patch.UnPatch()
 	appends, invalidations := 0, 0
 	patch = mockey.Mock((*invalidationTestWAL).AppendMessagesWithOptions).To(func(_ *invalidationTestWAL, _ context.Context, _ []message.MutableMessage, _ ...streaming.AppendOption) streaming.AppendResponses {

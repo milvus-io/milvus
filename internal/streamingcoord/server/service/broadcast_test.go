@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	streamtypes "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -228,4 +229,59 @@ func TestBroadcastService_ForwardImportToDataCoord_Error(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, resp)
 	assert.Contains(t, err.Error(), "test error")
+}
+
+func TestBroadcastService_WaitVChannelsAcked(t *testing.T) {
+	broadcast.ResetBroadcaster()
+	mb := mock_broadcaster.NewMockBroadcaster(t)
+	mb.EXPECT().Close().Return().Maybe()
+	broadcast.Register(mb)
+	service := NewBroadcastService()
+
+	mb.EXPECT().WaitVChannelsAcked(mock.Anything, message.MessageTypeSplitShard, uint64(7), []string{"v1"}).Return(uint64(99), nil).Once()
+	resp, err := service.WaitVChannelsAcked(context.Background(), &streamingpb.WaitVChannelsAckedRequest{
+		BroadcastId: 7,
+		Vchannels:   []string{"v1"},
+		MessageType: messagespb.MessageType_SplitShard,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(99), resp.GetTimeTick())
+
+	// The wait is bounded by the context of the caller only, and its failure is returned.
+	mb.EXPECT().WaitVChannelsAcked(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uint64(0), context.Canceled).Once()
+	_, err = service.WaitVChannelsAcked(context.Background(), &streamingpb.WaitVChannelsAckedRequest{BroadcastId: 7, Vchannels: []string{"v1"}})
+	assert.ErrorIs(t, err, context.Canceled)
+
+	// The broadcaster is not ready before the context of the caller ends.
+	broadcast.ResetBroadcaster()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = service.WaitVChannelsAcked(ctx, &streamingpb.WaitVChannelsAckedRequest{BroadcastId: 7})
+	assert.Error(t, err)
+}
+
+func TestBroadcastService_ReportVChannelAppended(t *testing.T) {
+	broadcast.ResetBroadcaster()
+	mb := mock_broadcaster.NewMockBroadcaster(t)
+	mb.EXPECT().Close().Return().Maybe()
+	broadcast.Register(mb)
+	service := NewBroadcastService()
+
+	mb.EXPECT().ReportVChannelAppended(mock.Anything, uint64(7), "v1", uint64(99)).Return(nil).Once()
+	_, err := service.ReportVChannelAppended(context.Background(), &streamingpb.ReportVChannelAppendedRequest{
+		BroadcastId: 7,
+		Vchannel:    "v1",
+		TimeTick:    99,
+	})
+	assert.NoError(t, err)
+
+	mb.EXPECT().ReportVChannelAppended(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(context.Canceled).Once()
+	_, err = service.ReportVChannelAppended(context.Background(), &streamingpb.ReportVChannelAppendedRequest{BroadcastId: 7, Vchannel: "v1", TimeTick: 99})
+	assert.ErrorIs(t, err, context.Canceled)
+
+	broadcast.ResetBroadcaster()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = service.ReportVChannelAppended(ctx, &streamingpb.ReportVChannelAppendedRequest{BroadcastId: 7})
+	assert.Error(t, err)
 }
