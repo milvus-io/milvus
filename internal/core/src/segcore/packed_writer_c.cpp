@@ -37,60 +37,34 @@
 #include "monitor/scope_metric.h"
 
 namespace {
-enum class WriterMode { Ordinary, BackupImport, FileImport };
-
 std::shared_ptr<parquet::WriterProperties>
-GetPackedWriterProperties(const CPluginContext* context, WriterMode mode) {
+GetPackedWriterProperties(const CPluginContext* context) {
     parquet::WriterProperties::Builder builder;
     if (context == nullptr) {
-        if (mode == WriterMode::FileImport) {
-            ThrowInfo(milvus::ErrorCode::InvalidParameter,
-                      "missing dispatched import target keyset");
-        }
         return builder.build();
     }
-    auto& loader = milvus::storage::PluginLoader::GetInstance();
-    auto cipher = loader.getCipherPlugin();
+    auto cipher =
+        milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+    if (!cipher) {
+        ThrowInfo(milvus::ErrorCode::Unsupported, "missing cipher plugin");
+    }
+    AssertInfo(context->key && *context->key, "missing writer keyset");
     std::pair<std::shared_ptr<milvus::storage::plugin::IEncryptor>, std::string>
         keys;
-    std::string footer_key;
-    if (mode != WriterMode::Ordinary) {
-        auto import_cipher = loader.getImportCipherPlugin(
-            *context, cipher, mode == WriterMode::FileImport);
-        try {
-            if (import_cipher) {
-                keys = import_cipher->GetEncryptorForKeyset(
-                    context->ez_id, context->collection_id, context->key);
-            } else {
-                cipher->Update(
-                    context->ez_id, context->collection_id, context->key);
-                keys = cipher->GetEncryptor(context->ez_id,
-                                            context->collection_id);
-            }
-            if (keys.first) {
-                footer_key = keys.first->GetKey();
-            }
-        } catch (const std::runtime_error&) {
-            ThrowInfo(milvus::ErrorCode::InvalidParameter,
-                      "cipher plugin rejected the import target keyset");
-        }
-        // Parquet AES accepts 128-, 192- and 256-bit file keys.
-        auto length = footer_key.size();
-        if (keys.second.empty() ||
-            (length != 16 && length != 24 && length != 32)) {
-            ThrowInfo(milvus::ErrorCode::InvalidParameter,
-                      "cipher plugin returned an invalid import target DEK");
-        }
-    } else {
-        if (cipher == nullptr) {
-            return builder.build();
-        }
-        cipher->Update(context->ez_id, context->collection_id, context->key);
-        keys = cipher->GetEncryptor(context->ez_id, context->collection_id);
-        AssertInfo(keys.first != nullptr,
-                   "cipher plugin returned no encryptor");
-        footer_key = keys.first->GetKey();
+    try {
+        keys = cipher->GetEncryptorForKeyset(
+            context->ez_id, context->collection_id, context->key);
+    } catch (const std::runtime_error&) {
+        ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                  "cipher plugin rejected the writer keyset");
     }
+    AssertInfo(keys.first != nullptr, "cipher plugin returned no encryptor");
+    auto footer_key = keys.first->GetKey();
+    auto length = footer_key.size();
+    AssertInfo(!keys.second.empty() &&
+                   keys.second.find('\0') == std::string::npos &&
+                   (length == 16 || length == 24 || length == 32),
+               "cipher plugin returned unusable encryption parameters");
     parquet::FileEncryptionProperties::Builder encryption(footer_key);
     auto metadata = milvus::storage::EncodeKeyMetadata(
         context->ez_id, context->collection_id, keys.second);
@@ -109,8 +83,7 @@ OpenPackedWriter(ArrowSchema* schema,
                  CColumnGroups groups,
                  const CStorageConfig* config,
                  CPackedWriter* writer,
-                 const CPluginContext* context,
-                 WriterMode mode) {
+                 const CPluginContext* context) {
     try {
         auto fs = milvus::storage::GetPackedFileSystem(config);
         if (!fs) {
@@ -125,7 +98,7 @@ OpenPackedWriter(ArrowSchema* schema,
             *static_cast<std::vector<std::vector<int>>*>(groups);
         milvus_storage::StorageConfig storage_config;
         storage_config.part_size = part_upload_size;
-        auto properties = GetPackedWriterProperties(context, mode);
+        auto properties = GetPackedWriterProperties(context);
         auto result =
             milvus_storage::PackedRecordBatchWriter::Make(fs,
                                                           file_paths,
@@ -165,8 +138,7 @@ NewPackedWriterWithStorageConfig(ArrowSchema* schema,
                             groups,
                             &config,
                             writer,
-                            context,
-                            WriterMode::Ordinary);
+                            context);
 }
 
 CStatus
@@ -187,33 +159,7 @@ NewPackedWriter(ArrowSchema* schema,
                             groups,
                             nullptr,
                             writer,
-                            context,
-                            WriterMode::Ordinary);
-}
-
-CStatus
-NewImportPackedWriter(ArrowSchema* schema,
-                      int64_t buffer_size,
-                      char** paths,
-                      int64_t num_paths,
-                      int64_t part_upload_size,
-                      CColumnGroups groups,
-                      const CStorageConfig* config,
-                      CPackedWriter* writer,
-                      const CPluginContext* target,
-                      bool allow_legacy_cipher) {
-    SCOPE_CGO_CALL_METRIC();
-    return OpenPackedWriter(schema,
-                            buffer_size,
-                            paths,
-                            num_paths,
-                            part_upload_size,
-                            groups,
-                            config,
-                            writer,
-                            target,
-                            allow_legacy_cipher ? WriterMode::FileImport
-                                                : WriterMode::BackupImport);
+                            context);
 }
 
 CStatus

@@ -21,11 +21,12 @@ package datanode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -34,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -348,7 +348,7 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 
 	var task importv2.Task
 	if importutilv2.IsL0Import(req.GetOptions()) {
-		task = importv2.NewL0PreImportTask(req, node.importTaskMgr, cm, cipher.Source)
+		task = importv2.NewL0PreImportTask(req, node.importTaskMgr, cm)
 	} else {
 		task = importv2.NewPreImportTask(req, node.importTaskMgr, cm, cipher.Source)
 	}
@@ -382,13 +382,6 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 	if err != nil {
 		return importCipherFailureStatus(err), nil
 	}
-	// Legacy Storage V1 writers obtain their encryptor from the ordinary local zone.
-	if target := cipher.Target; req.GetStorageVersion() == storage.StorageV1 && target != nil {
-		if err := hookutil.CreateLocalEZ(target.GetEncryptionZoneId(), target.GetEncryptionKey()); err != nil {
-			return merr.Status(err), nil
-		}
-	}
-
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
 		log.Error("create chunk manager failed", zap.String("bucket", req.GetStorageConfig().GetBucketName()),

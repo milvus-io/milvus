@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"path"
@@ -28,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -288,16 +288,30 @@ func handleImportRequestError(task ImportTask, im ImportMeta, cause error) {
 }
 
 func isTemporaryImportContextError(err error) bool {
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return true
+	for ; err != nil; err = errors.Unwrap(err) {
+		if joined, ok := err.(interface{ Unwrap() []error }); ok {
+			for _, cause := range joined.Unwrap() {
+				if isTemporaryImportContextError(cause) {
+					return true
+				}
+			}
+			return false
+		}
+		if merr.IsRetryableErr(err) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return true
+		}
+		switch status.Code(err) {
+		case codes.Unavailable, codes.DeadlineExceeded, codes.Canceled:
+			return true
+		}
+		if timeout, ok := err.(interface{ Timeout() bool }); ok && timeout.Timeout() {
+			return true
+		}
+		if temporary, ok := err.(interface{ Temporary() bool }); ok && temporary.Temporary() {
+			return true
+		}
 	}
-	switch status.Code(err) {
-	case codes.Unavailable, codes.DeadlineExceeded, codes.Canceled:
-		return true
-	}
-	var timeout interface{ Timeout() bool }
-	var temporary interface{ Temporary() bool }
-	return (errors.As(err, &timeout) && timeout.Timeout()) || (errors.As(err, &temporary) && temporary.Temporary())
+	return false
 }
 
 func getImportPluginContext(job ImportJob, collectionID int64) ([]*commonpb.KeyValuePair, error) {
@@ -307,7 +321,7 @@ func getImportPluginContext(job ImportJob, collectionID int64) ([]*commonpb.KeyV
 		if isTemporaryImportContextError(err) {
 			return nil, err
 		}
-		return nil, fmt.Errorf("%w: %w", errImportPluginContext, err)
+		return nil, merr.Mark(merr.Wrap(err, errImportPluginContext.Error()), errImportPluginContext)
 	}
 	return pluginContext, nil
 }

@@ -19,12 +19,12 @@ package datanode
 import (
 	"context"
 	"encoding/base64"
-	"errors"
 	"math/rand"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -765,11 +765,11 @@ type workerImportCipher struct {
 	err        error
 }
 
-func (c *workerImportCipher) RegisterImportReadKeys(_ int64, keyset []byte) error {
+func (c *workerImportCipher) Init(cfg map[string]string) error {
 	if c.err != nil {
 		return c.err
 	}
-	c.registered = append(c.registered, string(keyset))
+	c.registered = append(c.registered, cfg[hookutil.CipherConfigReadOnly]+":"+cfg[hookutil.CipherConfigUnsafeEZK])
 	return nil
 }
 
@@ -839,7 +839,7 @@ func TestDataNodeImportCipherContext(t *testing.T) {
 				status, err = submit(wire)
 				require.NoError(t, merr.CheckRPCCall(status, err))
 				require.NotNil(t, node.importTaskMgr.Get(taskID))
-				require.Equal(t, []string{"old"}, cipher.registered)
+				require.Equal(t, []string{"true:b2xk", ":bmV3"}, cipher.registered)
 			})
 		}
 	}

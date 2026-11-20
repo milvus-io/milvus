@@ -18,9 +18,9 @@ package hookutil
 
 import (
 	"encoding/base64"
-	"errors"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -30,9 +30,8 @@ import (
 
 type importReadCipher struct {
 	testCipher
-	ezID   int64
-	keyset []byte
-	err    error
+	calls []map[string]string
+	err   error
 }
 
 func TestMalformedEZContextDoesNotEchoInput(t *testing.T) {
@@ -43,13 +42,9 @@ func TestMalformedEZContextDoesNotEchoInput(t *testing.T) {
 	}
 }
 
-func (c *importReadCipher) RegisterImportReadKeys(ezID int64, keyset []byte) error {
-	c.ezID, c.keyset = ezID, keyset
+func (c *importReadCipher) Init(cfg map[string]string) error {
+	c.calls = append(c.calls, cfg)
 	return c.err
-}
-
-func (c *importReadCipher) Init(map[string]string) error {
-	panic("import source must not enter the ordinary key cache")
 }
 
 func (c *importReadCipher) GetUnsafeKey(int64, int64) []byte {
@@ -82,21 +77,22 @@ func TestPrepareImportCipherContexts(t *testing.T) {
 			t.Cleanup(SetTestCipher(c))
 			contexts, err := PrepareImportCipherContexts(tc.artifact, tc.props, tc.wire, collectionID)
 			require.NoError(t, err)
+			var want []map[string]string
 			if tc.wantSource {
-				require.EqualValues(t, 7, c.ezID)
-				require.Equal(t, []byte("old"), c.keyset)
+				want = append(want, map[string]string{CipherConfigCreateEZ: "7", CipherConfigUnsafeEZK: "b2xk", "cipher.ez.readOnly": "true"})
 				require.Equal(t, "b2xk", contexts.Source.GetEncryptionKey())
 			} else {
-				require.Nil(t, c.keyset)
 				require.Nil(t, contexts.Source)
 			}
 			if tc.wantTarget {
+				want = append(want, map[string]string{CipherConfigCreateEZ: "7", CipherConfigUnsafeEZK: "bmV3"})
 				require.EqualValues(t, 7, contexts.Target.GetEncryptionZoneId())
 				require.EqualValues(t, collectionID, contexts.Target.GetCollectionId())
 				require.Equal(t, "bmV3", contexts.Target.GetEncryptionKey())
 			} else {
 				require.Nil(t, contexts.Target)
 			}
+			require.Equal(t, want, c.calls)
 		})
 	}
 }
@@ -140,14 +136,9 @@ func TestPrepareImportCipherContextsRejectsInvalidRequest(t *testing.T) {
 			_, err := PrepareImportCipherContexts(tc.artifact, tc.props, tc.entries, collectionID)
 			require.Error(t, err)
 			require.NotContains(t, err.Error(), "secret")
-			require.Nil(t, c.keyset)
+			require.Empty(t, c.calls)
 		})
 	}
-	t.Run("missing read extension", func(t *testing.T) {
-		t.Cleanup(SetTestCipher(testCipher{}))
-		_, err := PrepareImportCipherContexts(artifact, nil, wire("7:b2xk"), collectionID)
-		require.ErrorContains(t, err, "RegisterImportReadKeys")
-	})
 	t.Run("disabled cipher", func(t *testing.T) {
 		t.Cleanup(SetTestCipher(nil))
 		_, err := PrepareImportCipherContexts(artifact, nil, wire("7:b2xk"), collectionID)

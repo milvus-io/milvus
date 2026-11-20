@@ -49,7 +49,6 @@ func newPackedRecordReader(
 	bufferSize int64,
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
-	importReader bool,
 ) (*packedRecordReader, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
@@ -60,11 +59,7 @@ func newPackedRecordReader(
 	for i, field := range allFields {
 		field2Col[field.FieldID] = i
 	}
-	open := packed.NewPackedReader
-	if importReader {
-		open = packed.NewImportPackedReader
-	}
-	reader, err := open(paths, arrowSchema, bufferSize, storageConfig, storagePluginContext)
+	reader, err := packed.NewPackedReader(paths, arrowSchema, bufferSize, storageConfig, storagePluginContext)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +136,6 @@ func newIterativePackedRecordReader(
 	bufferSize int64,
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
-	importReader bool,
 ) *IterativeRecordReader {
 	chunk := 0
 	return &IterativeRecordReader{
@@ -151,7 +145,7 @@ func newIterativePackedRecordReader(
 			}
 			currentPaths := paths[chunk]
 			chunk++
-			return newPackedRecordReader(currentPaths, schema, bufferSize, storageConfig, storagePluginContext, importReader)
+			return newPackedRecordReader(currentPaths, schema, bufferSize, storageConfig, storagePluginContext)
 		},
 	}
 }

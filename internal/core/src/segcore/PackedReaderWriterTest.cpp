@@ -139,7 +139,7 @@ class OrdinaryCipher : public plugin::ICipherPlugin {
                 (const, override));
 };
 
-class ImportCipher : public OrdinaryCipher, public plugin::IImportCipherPlugin {
+class ImportCipher : public OrdinaryCipher {
  public:
     MOCK_METHOD(void,
                 RegisterReadKeyset,
@@ -148,7 +148,7 @@ class ImportCipher : public OrdinaryCipher, public plugin::IImportCipherPlugin {
     MOCK_METHOD(EncryptorResult,
                 GetEncryptorForKeyset,
                 (int64_t, int64_t, const std::string&),
-                (const, override));
+                (override));
 };
 
 class ParquetFileKey : public plugin::IEncryptor, public plugin::IDecryptor {
@@ -209,8 +209,8 @@ class CPackedImportTest : public ::testing::Test {
         ArrowSchema c_schema;
         ASSERT_TRUE(arrow::ExportSchema(*schema, &c_schema).ok());
         CPackedReader reader = nullptr;
-        ASSERT_TRUE(CheckStatus(NewImportPackedReader(
-            &path, 1, &c_schema, buffer_size, nullptr, &reader, source)));
+        ASSERT_TRUE(CheckStatus(NewPackedReader(
+            &path, 1, &c_schema, buffer_size, &reader, source)));
         ASSERT_NO_FATAL_FAILURE(ReadAndClose(reader, expected));
     }
 
@@ -245,50 +245,38 @@ class CPackedImportTest : public ::testing::Test {
 };
 
 TEST_F(CPackedImportTest, EncryptedReaderRequiresImportCipher) {
-    auto legacy = std::make_shared<StrictMock<OrdinaryCipher>>();
-    milvus::storage::PluginLoader::GetInstance().registerPluginForTest(legacy);
     ArrowSchema c_schema;
     ASSERT_TRUE(arrow::ExportSchema(*schema, &c_schema).ok());
     std::string file_path = TestLocalPath + "missing-import-input";
     char* path = file_path.data();
     CPluginContext source{17, 23, "c291cmNl"};
     CPackedReader reader = nullptr;
-    auto status = NewImportPackedReader(
-        &path, 1, &c_schema, 1024, nullptr, &reader, &source);
+    auto status = NewPackedReader(&path, 1, &c_schema, 1024, &reader, &source);
     ArrowSchemaRelease(&c_schema);
     EXPECT_EQ(status.error_code, milvus::ErrorCode::Unsupported);
     ASSERT_NE(status.error_msg, nullptr);
-    EXPECT_NE(std::string(status.error_msg).find("import cipher"),
+    EXPECT_NE(std::string(status.error_msg).find("cipher plugin"),
               std::string::npos);
     free(const_cast<char*>(status.error_msg));
     EXPECT_EQ(reader, nullptr);
 }
 
-TEST_F(CPackedImportTest, FooterKeyRetrieverValidatesDispatchedSourceZone) {
+TEST_F(CPackedImportTest, DecryptsUsingFileMetadataAfterRegistration) {
     auto cipher = std::make_shared<StrictMock<ImportCipher>>();
     milvus::storage::PluginLoader::GetInstance().registerPluginForTest(cipher);
-    std::string keyset = "c291cmNl";
-    CPluginContext source{17, 0, keyset.data()};
-    auto properties = milvus::storage::GetImportReaderProperties(&source);
-    auto retriever = properties.file_decryption_properties()->key_retriever();
-    keyset[0] = 'X';  // The C caller can release its copy after open.
-    auto metadata = milvus::storage::EncodeKeyMetadata(18, 23, "wrapped");
-    EXPECT_THAT([&] { retriever->GetKey(metadata); },
-                ::testing::ThrowsMessage<std::exception>(
-                    ::testing::HasSubstr("does not match import source zone")));
-
-    auto file_key = std::make_shared<StrictMock<ParquetFileKey>>();
-    ::testing::InSequence seq;
-    EXPECT_CALL(*cipher, RegisterReadKeyset(17, 23, "c291cmNl"));
-    EXPECT_CALL(*cipher, GetDecryptor(17, 23, "wrapped"))
-        .WillOnce(Return(file_key));
-    EXPECT_CALL(*file_key, GetKey()).WillOnce(Return("file-key"));
-    EXPECT_EQ(retriever->GetKey(
-                  milvus::storage::EncodeKeyMetadata(17, 23, "wrapped")),
+    CPluginContext source{17, 0, "c291cmNl"};
+    EXPECT_CALL(*cipher, RegisterReadKeyset(17, 0, source.key));
+    milvus::storage::RegisterReaderKeys(&source);
+    auto key = std::make_shared<StrictMock<ParquetFileKey>>();
+    EXPECT_CALL(*cipher, GetDecryptor(18, 23, "wrapped")).WillOnce(Return(key));
+    EXPECT_CALL(*key, GetKey()).WillOnce(Return("file-key"));
+    auto properties = milvus::storage::GetReaderProperties();
+    EXPECT_EQ(properties.file_decryption_properties()->key_retriever()->GetKey(
+                  milvus::storage::EncodeKeyMetadata(18, 23, "wrapped")),
               "file-key");
 }
 
-TEST_F(CPackedImportTest, RejectedTargetKeysetReturnsInvalidParameter) {
+TEST_F(CPackedImportTest, RejectsInvalidTargetKeysWithoutEchoingThem) {
     auto cipher = std::make_shared<StrictMock<ImportCipher>>();
     milvus::storage::PluginLoader::GetInstance().registerPluginForTest(cipher);
     CPluginContext target{17, 23, "dGFyZ2V0"};
@@ -303,26 +291,17 @@ TEST_F(CPackedImportTest, RejectedTargetKeysetReturnsInvalidParameter) {
         .WillOnce(Return(EncryptorResult{file_key, "wrapped"}));
     std::string file = TestLocalPath + "rejected-target.parquet";
     char* path = file.data();
-    for (const auto& [reason, allow_legacy] :
-         {std::pair{"plugin error", true},
-          std::pair{"no encryptor", false},
-          std::pair{"no wrapped DEK", true},
-          std::pair{"invalid AES key", false}}) {
+    for (const auto* reason : {"plugin error",
+                               "no encryptor",
+                               "no wrapped DEK",
+                               "invalid AES key"}) {
         SCOPED_TRACE(reason);
         ArrowSchema c_schema;
         ASSERT_TRUE(arrow::ExportSchema(*schema, &c_schema).ok());
         CPackedWriter writer = nullptr;
-        auto status = NewImportPackedWriter(&c_schema,
-                                            buffer_size,
-                                            &path,
-                                            1,
-                                            0,
-                                            groups,
-                                            nullptr,
-                                            &writer,
-                                            &target,
-                                            allow_legacy);
-        EXPECT_EQ(status.error_code, milvus::ErrorCode::InvalidParameter);
+        auto status = NewPackedWriter(
+            &c_schema, buffer_size, &path, 1, 0, groups, &writer, &target);
+        EXPECT_NE(status.error_code, 0);
         ASSERT_NE(status.error_msg, nullptr);
         EXPECT_THAT(status.error_msg,
                     ::testing::Not(::testing::HasSubstr(target.key)));
@@ -349,8 +328,7 @@ TEST_F(CPackedImportTest, ReadsSourceFooterAndWritesWithTargetKeyset) {
     char* source_path = source_file.data();
     char* target_path = target_file.data();
 
-    EXPECT_CALL(*cipher, Update(17, 23, "c291cmNl"));
-    EXPECT_CALL(*cipher, GetEncryptor(17, 23))
+    EXPECT_CALL(*cipher, GetEncryptorForKeyset(17, 23, "c291cmNl"))
         .WillOnce(Return(EncryptorResult{source_key, source_edek}));
     ArrowSchema c_schema;
     ASSERT_TRUE(arrow::ExportSchema(*schema, &c_schema).ok());
@@ -363,40 +341,18 @@ TEST_F(CPackedImportTest, ReadsSourceFooterAndWritesWithTargetKeyset) {
         .WillOnce(Return(EncryptorResult{target_key, target_edek}));
     ASSERT_TRUE(arrow::ExportSchema(*schema, &c_schema).ok());
     CPackedWriter writer = nullptr;
-    ASSERT_TRUE(CheckStatus(NewImportPackedWriter(&c_schema,
-                                                  buffer_size,
-                                                  &target_path,
-                                                  1,
-                                                  0,
-                                                  groups,
-                                                  nullptr,
-                                                  &writer,
-                                                  &target,
-                                                  false)));
+    ASSERT_TRUE(CheckStatus(NewPackedWriter(
+        &c_schema, buffer_size, &target_path, 1, 0, groups, &writer, &target)));
 
-    // The source wire context carries only the EZ and keyset. The footer
-    // supplies the collection ID for both registration and decryption.
     CPluginContext import_source{17, 0, "c291cmNl"};
-    EXPECT_CALL(*cipher, RegisterReadKeyset(17, 23, "c291cmNl"))
+    EXPECT_CALL(*cipher, RegisterReadKeyset(17, 0, "c291cmNl"))
         .Times(AtLeast(1));
     EXPECT_CALL(*cipher, GetDecryptor(17, 23, source_edek))
         .Times(AtLeast(1))
         .WillRepeatedly(Return(source_key));
     ASSERT_NO_FATAL_FAILURE(ReadImport(source_path, &import_source, 11));
 
-    // A plaintext import has no source keyset, even on a worker that has just
-    // decrypted this same backup for another task.
-    ASSERT_TRUE(arrow::ExportSchema(*schema, &c_schema).ok());
-    CPackedReader plaintext = nullptr;
-    EXPECT_FALSE(CheckStatus(NewImportPackedReader(&source_path,
-                                                   1,
-                                                   &c_schema,
-                                                   buffer_size,
-                                                   nullptr,
-                                                   &plaintext,
-                                                   nullptr)));
-    ArrowSchemaRelease(&c_schema);
-    EXPECT_EQ(plaintext, nullptr);
+    ASSERT_NO_FATAL_FAILURE(ReadImport(source_path, nullptr, 11));
 
     ASSERT_NO_FATAL_FAILURE(WriteAndClose(writer, 22));
     EXPECT_CALL(*cipher, RegisterReadKeyset(17, 45, "dGFyZ2V0"))
@@ -412,19 +368,11 @@ TEST_F(CPackedImportTest, FileImportUsesEncryptedLegacyTarget) {
     char* path = file.data();
     CPluginContext target{17, 45, "dGFyZ2V0"};
     CPackedWriter writer = nullptr;
-    auto open = [&](const CPluginContext* context, bool allow_legacy) {
+    auto open = [&](CPluginContext* context) {
         ArrowSchema c_schema;
         EXPECT_TRUE(arrow::ExportSchema(*schema, &c_schema).ok());
-        return NewImportPackedWriter(&c_schema,
-                                     buffer_size,
-                                     &path,
-                                     1,
-                                     0,
-                                     groups,
-                                     nullptr,
-                                     &writer,
-                                     context,
-                                     allow_legacy);
+        return NewPackedWriter(
+            &c_schema, buffer_size, &path, 1, 0, groups, &writer, context);
     };
     auto expect_rejected = [&](CStatus status, milvus::ErrorCode code) {
         EXPECT_EQ(status.error_code, code);
@@ -435,15 +383,14 @@ TEST_F(CPackedImportTest, FileImportUsesEncryptedLegacyTarget) {
             writer = nullptr;
         }
     };
-    expect_rejected(open(&target, true), milvus::ErrorCode::Unsupported);
+    expect_rejected(open(&target), milvus::ErrorCode::Unsupported);
 
     auto cipher = std::make_shared<StrictMock<OrdinaryCipher>>();
     milvus::storage::PluginLoader::GetInstance().registerPluginForTest(cipher);
-    expect_rejected(open(&target, false), milvus::ErrorCode::Unsupported);
-    expect_rejected(open(nullptr, true), milvus::ErrorCode::InvalidParameter);
     CPluginContext missing_key{17, 45, ""};
-    expect_rejected(open(&missing_key, true),
-                    milvus::ErrorCode::InvalidParameter);
+    auto missing = open(&missing_key);
+    EXPECT_FALSE(CheckStatus(missing));
+    EXPECT_EQ(writer, nullptr);
 
     auto key = std::make_shared<StrictMock<ParquetFileKey>>();
     EXPECT_CALL(*key, GetKey()).WillRepeatedly(Return(std::string(32, 'k')));
@@ -453,7 +400,7 @@ TEST_F(CPackedImportTest, FileImportUsesEncryptedLegacyTarget) {
         EXPECT_CALL(*cipher, GetEncryptor(17, 45))
             .WillOnce(Return(EncryptorResult{key, "wrapped-target"}));
     }
-    ASSERT_TRUE(CheckStatus(open(&target, true)));
+    ASSERT_TRUE(CheckStatus(open(&target)));
     ASSERT_NO_FATAL_FAILURE(WriteAndClose(writer, 31));
 
     EXPECT_CALL(*cipher, GetDecryptor(17, 45, "wrapped-target"))

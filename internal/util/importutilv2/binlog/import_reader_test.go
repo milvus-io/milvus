@@ -20,13 +20,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"math"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -44,19 +44,12 @@ import (
 
 type importReaderCipher struct {
 	hook.Cipher
-	keyset []byte
-}
-
-func (c *importReaderCipher) RegisterImportReadKeys(zone int64, keyset []byte) error {
-	if zone != 7 {
-		return errors.New("unexpected source zone")
-	}
-	c.keyset = keyset
-	return nil
+	lastZone int64
 }
 
 func (c *importReaderCipher) GetDecryptor(zone, collection int64, edek []byte) (hook.Decryptor, error) {
-	if zone != 7 || collection != 1 || string(edek) != "file-DEK" || !bytes.Equal(c.keyset, []byte("historical")) {
+	c.lastZone = zone
+	if (zone != 7 && zone != 1<<53+1) || collection != 1 || string(edek) != "file-DEK" {
 		return nil, errors.New("incorrect source decryption context")
 	}
 	return importTestCrypt{}, nil
@@ -106,7 +99,7 @@ func TestL0ReaderUsesDispatchedSourceForEncryptedDeltalog(t *testing.T) {
 	cm := storage.NewLocalChunkManager()
 	path := t.TempDir()
 	writeImportTestDeltalog(t, cm, path, 7)
-	r, err := NewL0Reader(ctx, cm, nil, &internalpb.ImportFile{Paths: []string{path}}, 1024, 0, math.MaxUint64, testImportSource())
+	r, err := NewL0Reader(ctx, cm, nil, &internalpb.ImportFile{Paths: []string{path}}, 1024, 0, math.MaxUint64)
 	require.NoError(t, err)
 	deleted, err := r.Read()
 	require.NoError(t, err)
@@ -131,11 +124,9 @@ func TestImportBinlogValidatesStoredZoneWithoutRounding(t *testing.T) {
 
 	cipher := &importReaderCipher{}
 	t.Cleanup(hookutil.SetTestCipher(cipher))
-	source := testImportSource()
-	source.EncryptionZoneId = fileZone - 1
-	_, err = storage.NewBinlogReader(data, storage.WithImportDecryptionContext(source))
-	require.ErrorContains(t, err, "does not match import source zone")
-	require.Empty(t, cipher.keyset)
+	_, err = storage.NewBinlogReader(data, storage.DecryptBinlogFromHeader)
+	require.NoError(t, err)
+	require.Equal(t, fileZone, cipher.lastZone)
 }
 
 func TestBackupReaderUsesDispatchedSourceForInsertAndDelta(t *testing.T) {
@@ -199,7 +190,7 @@ func TestPackedBackupReaderForwardsDispatchedSource(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Cleanup(hookutil.SetTestCipher(&importReaderCipher{}))
 			openErr := errors.New("packed reader open error")
-			open := mockey.Mock(packed.NewImportPackedReader).To(func(paths []string, _ *arrow.Schema, _ int64, _ *indexpb.StorageConfig, source *indexcgopb.StoragePluginContext) (*packed.PackedReader, error) {
+			open := mockey.Mock(packed.NewPackedReader).To(func(paths []string, _ *arrow.Schema, _ int64, _ *indexpb.StorageConfig, source *indexcgopb.StoragePluginContext) (*packed.PackedReader, error) {
 				require.Equal(t, []string{dir + "/0/1"}, paths)
 				require.Equal(t, tc.source, source)
 				return nil, openErr

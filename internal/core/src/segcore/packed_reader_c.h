@@ -50,15 +50,6 @@ NewPackedReader(char** paths,
                 CPackedReader* c_packed_reader,
                 CPluginContext* c_plugin_context);
 
-CStatus
-NewImportPackedReader(char** paths,
-                      int64_t num_paths,
-                      struct ArrowSchema* schema,
-                      int64_t buffer_size,
-                      const CStorageConfig* storage_config,
-                      CPackedReader* reader,
-                      const CPluginContext* source);
-
 /**
  * @brief Read the next record batch from the packed reader.
  *        By default, the maximum return batch is 1024 rows.

@@ -30,6 +30,7 @@ import (
 
 const (
 	// Used in Plugins
+	CipherConfigReadOnly       = "cipher.ez.readOnly"
 	CipherConfigCreateEZ       = "cipher.ez.create"
 	CipherConfigRemoveEZ       = "cipher.ez.remove"
 	CipherConfigMilvusRoleName = "cipher.milvusRoleName"
@@ -158,7 +159,7 @@ func GetPluginContext(ezID int64, collectionID int64) ([]*commonpb.KeyValuePair,
 	return []*commonpb.KeyValuePair{encodeEZContext(ezID, key)}, nil
 }
 
-func ImportEZ(artifact string) ([]*commonpb.KeyValuePair, error) {
+func ResolveImportEZ(artifact string) ([]*commonpb.KeyValuePair, error) {
 	if artifact == "" {
 		return nil, nil
 	}
@@ -166,7 +167,7 @@ func ImportEZ(artifact string) ([]*commonpb.KeyValuePair, error) {
 	if cipher == nil {
 		return nil, errCipherPluginMissing
 	}
-	resolver, ok := cipher.(ImportEZResolver)
+	resolver, ok := cipher.(ImportResolverInterface)
 	if !ok {
 		return nil, merr.WrapErrServiceInternalMsg("cipher plugin does not support ResolveImportEZ")
 	}

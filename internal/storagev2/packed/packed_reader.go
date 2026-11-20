@@ -37,15 +37,6 @@ import (
 )
 
 func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedReader, error) {
-	return newPackedReader(filePaths, schema, bufferSize, storageConfig, storagePluginContext, false)
-}
-
-// NewImportPackedReader registers the backup keyset before opening the Parquet footer.
-func NewImportPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64, storageConfig *indexpb.StorageConfig, source *indexcgopb.StoragePluginContext) (*PackedReader, error) {
-	return newPackedReader(filePaths, schema, bufferSize, storageConfig, source, true)
-}
-
-func newPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, forImport bool) (*PackedReader, error) {
 	cFilePaths := make([]*C.char, len(filePaths))
 	for i, path := range filePaths {
 		cFilePaths[i] = C.CString(path)
@@ -81,12 +72,9 @@ func newPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64,
 		defer DeleteCStorageConfig(cConfig)
 		config = &cConfig
 	}
-	switch {
-	case forImport:
-		status = C.NewImportPackedReader(cFilePathsArray, cNumPaths, cSchema, cBufferSize, config, &cPackedReader, pluginContextPtr)
-	case config != nil:
+	if config != nil {
 		status = C.NewPackedReaderWithStorageConfig(cFilePathsArray, cNumPaths, cSchema, cBufferSize, *config, &cPackedReader, pluginContextPtr)
-	default:
+	} else {
 		status = C.NewPackedReader(cFilePathsArray, cNumPaths, cSchema, cBufferSize, &cPackedReader, pluginContextPtr)
 	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {

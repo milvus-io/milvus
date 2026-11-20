@@ -35,8 +35,7 @@ OpenPackedReader(char** paths,
                  int64_t buffer_size,
                  const CStorageConfig* config,
                  CPackedReader* reader,
-                 const CPluginContext* context,
-                 bool for_import) {
+                 const CPluginContext* context) {
     try {
         auto fs = milvus::storage::GetPackedFileSystem(config);
         if (!fs) {
@@ -46,22 +45,13 @@ OpenPackedReader(char** paths,
         }
         auto file_paths = std::vector<std::string>(paths, paths + num_paths);
         auto arrow_schema = arrow::ImportSchema(schema).ValueOrDie();
-        auto& loader = milvus::storage::PluginLoader::GetInstance();
-        if (!for_import && context != nullptr) {
-            if (auto cipher = loader.getCipherPlugin()) {
-                cipher->Update(
-                    context->ez_id, context->collection_id, context->key);
-            }
-        }
-        auto properties =
-            for_import ? milvus::storage::GetImportReaderProperties(context)
-                       : milvus::storage::GetReaderProperties();
+        milvus::storage::RegisterReaderKeys(context);
         *reader = new milvus_storage::PackedRecordBatchReader(
             fs,
             file_paths,
             arrow_schema,
             buffer_size,
-            properties,
+            milvus::storage::GetReaderProperties(),
             milvus::storage::GetArrowReaderProperties());
         return milvus::SuccessCStatus();
     } catch (const std::exception& e) {
@@ -80,7 +70,7 @@ NewPackedReaderWithStorageConfig(char** paths,
                                  CPluginContext* context) {
     SCOPE_CGO_CALL_METRIC();
     return OpenPackedReader(
-        paths, num_paths, schema, buffer_size, &config, reader, context, false);
+        paths, num_paths, schema, buffer_size, &config, reader, context);
 }
 
 CStatus
@@ -92,20 +82,7 @@ NewPackedReader(char** paths,
                 CPluginContext* context) {
     SCOPE_CGO_CALL_METRIC();
     return OpenPackedReader(
-        paths, num_paths, schema, buffer_size, nullptr, reader, context, false);
-}
-
-CStatus
-NewImportPackedReader(char** paths,
-                      int64_t num_paths,
-                      ArrowSchema* schema,
-                      int64_t buffer_size,
-                      const CStorageConfig* config,
-                      CPackedReader* reader,
-                      const CPluginContext* source) {
-    SCOPE_CGO_CALL_METRIC();
-    return OpenPackedReader(
-        paths, num_paths, schema, buffer_size, config, reader, source, true);
+        paths, num_paths, schema, buffer_size, nullptr, reader, context);
 }
 
 CStatus

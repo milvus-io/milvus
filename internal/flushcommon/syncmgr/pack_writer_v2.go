@@ -152,11 +152,11 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	if pluginContextPtr != nil && bw.manifestPath != "" {
 		return nil, "", merr.WrapErrParameterInvalidMsg("import target keysets require a Storage V2 packed writer")
 	}
-	if pack.writerMode != packed.OrdinaryWrite && pluginContextPtr == nil &&
+	if pack.importTargetSet && pluginContextPtr == nil &&
 		hookutil.GetEzByCollProperties(bw.schema.GetProperties(), pack.collectionID) != nil {
 		return nil, "", retry.Unrecoverable(merr.WrapErrImportFailed("missing dispatched import target keyset"))
 	}
-	if pack.writerMode == packed.OrdinaryWrite && hookutil.IsClusterEncryptionEnabled() {
+	if !pack.importTargetSet && hookutil.IsClusterEncryptionEnabled() {
 		ez := hookutil.GetEzByCollProperties(bw.schema.GetProperties(), pack.collectionID)
 		if ez != nil {
 			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
@@ -265,7 +265,7 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 			path := metautil.BuildInsertLogPath(bw.getRootPath(), pack.collectionID, pack.partitionID, pack.segmentID, columnGroup.GroupID, id)
 			paths = append(paths, path)
 		}
-		w, err := storage.NewPackedRecordWriterWithMode(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr, pack.writerMode)
+		w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
 		if err != nil {
 			return nil, "", err
 		}

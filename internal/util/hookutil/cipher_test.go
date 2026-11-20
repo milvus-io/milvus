@@ -19,12 +19,12 @@ package hookutil
 import (
 	"context"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -544,17 +544,17 @@ func (c importResolverCipher) ResolveImportEZ(artifact string) (int64, []byte, e
 func (importResolverCipher) GetUnsafeKey(int64, int64) []byte { return nil }
 
 func (s *CipherSuite) TestImportEZ() {
-	result, err := ImportEZ("")
+	result, err := ResolveImportEZ("")
 	s.NoError(err)
 	s.Nil(result)
 
 	artifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":123}`))
-	result, err = ImportEZ(artifact)
+	result, err = ResolveImportEZ(artifact)
 	s.ErrorIs(err, errCipherPluginMissing)
 	s.Nil(result)
 
 	InitTestCipher() // Represents an older plugin without ResolveImportEZ.
-	result, err = ImportEZ(artifact)
+	result, err = ResolveImportEZ(artifact)
 	s.ErrorContains(err, "ResolveImportEZ")
 	s.Nil(result)
 
@@ -569,19 +569,19 @@ func (s *CipherSuite) TestImportEZ() {
 		}
 		return 123, []byte{0xfb, 0xff}, resolveErr
 	}})
-	result, err = ImportEZ(artifact)
+	result, err = ResolveImportEZ(artifact)
 	s.Require().NoError(err)
 	s.Require().Len(result, 1)
 	s.Equal(CipherConfigUnsafeEZK, result[0].GetKey())
 	s.Equal("123:+/8=", result[0].GetValue())
 
-	result, err = ImportEZ(rotated)
+	result, err = ResolveImportEZ(rotated)
 	s.Require().NoError(err)
 	s.Require().Len(result, 1)
 	s.Equal("123:bmV3", result[0].GetValue())
 
 	resolveErr = denied
-	result, err = ImportEZ(artifact)
+	result, err = ResolveImportEZ(artifact)
 	s.ErrorIs(err, denied)
 	s.Nil(result)
 	s.Equal([]string{artifact, rotated, artifact}, calls)
@@ -628,7 +628,7 @@ func (s *CipherSuite) TestImportEZRejectsInvalidResolverResult() {
 		storeCipher(importResolverCipher{resolve: func(string) (int64, []byte, error) {
 			return tc.id, tc.key, nil
 		}})
-		result, err := ImportEZ(artifact)
+		result, err := ResolveImportEZ(artifact)
 		s.Error(err)
 		s.Nil(result)
 	}

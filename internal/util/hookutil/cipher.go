@@ -51,10 +51,10 @@ type BackupInterface interface {
 	Backup(ezID int64) (string, error)
 }
 
-// ImportEZResolver unwraps the supplied backup using the source KMS on each
+// ImportResolverInterface unwraps the supplied backup using the source KMS on each
 // call. It returns the original EZ ID and raw keyset without publishing either
 // to the ordinary EZ cache.
-type ImportEZResolver interface {
+type ImportResolverInterface interface {
 	ResolveImportEZ(artifact string) (int64, []byte, error)
 }
 
@@ -325,7 +325,7 @@ func GetStoragePluginContext(collProps []*commonpb.KeyValuePair, collectionID in
 
 // GetImportStoragePluginContext builds the ordered source and target entries for one dispatch.
 func GetImportStoragePluginContext(artifact string, collProps []*commonpb.KeyValuePair, collectionID int64) ([]*commonpb.KeyValuePair, error) {
-	source, err := ImportEZ(artifact)
+	source, err := ResolveImportEZ(artifact)
 	if err != nil {
 		return nil, err
 	}

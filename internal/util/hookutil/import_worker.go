@@ -18,6 +18,7 @@ package hookutil
 
 import (
 	"encoding/base64"
+	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
@@ -71,8 +72,16 @@ func PrepareImportCipherContexts(artifact string, properties, pluginContext []*c
 	if (result.Source != nil || result.Target != nil) && !IsClusterEncryptionEnabled() {
 		return ImportCipherContexts{}, errCipherPluginMissing
 	}
-	if err := RegisterImportReadKeys(result.Source); err != nil {
-		return ImportCipherContexts{}, err
+	if source := result.Source; source != nil {
+		err = GetCipher().Init(map[string]string{CipherConfigCreateEZ: strconv.FormatInt(source.GetEncryptionZoneId(), 10), CipherConfigUnsafeEZK: source.GetEncryptionKey(), CipherConfigReadOnly: "true"})
+		if err != nil {
+			return ImportCipherContexts{}, err
+		}
+	}
+	if target := result.Target; target != nil {
+		if err := CreateLocalEZ(target.GetEncryptionZoneId(), target.GetEncryptionKey()); err != nil {
+			return ImportCipherContexts{}, err
+		}
 	}
 	return result, nil
 }
@@ -89,27 +98,4 @@ func importCipherEntry(entry *commonpb.KeyValuePair, role string, expectedID, co
 		return nil, merr.WrapErrImportFailedMsg("invalid %s import keyset for zone %d", role, expectedID)
 	}
 	return &indexcgopb.StoragePluginContext{EncryptionZoneId: id, CollectionId: collectionID, EncryptionKey: key}, nil
-}
-
-// RegisterImportReadKeys restores a request's historical keys to the Go read cache.
-// It can run again when opening a file after an idle cache entry was evicted.
-func RegisterImportReadKeys(source *indexcgopb.StoragePluginContext) error {
-	if source == nil {
-		return nil
-	}
-	cipher := GetCipher()
-	if cipher == nil {
-		return errCipherPluginMissing
-	}
-	registrar, ok := cipher.(interface {
-		RegisterImportReadKeys(ezID int64, keyset []byte) error
-	})
-	if !ok {
-		return merr.WrapErrImportFailed("cipher plugin does not support RegisterImportReadKeys")
-	}
-	raw, err := base64.StdEncoding.DecodeString(source.GetEncryptionKey())
-	if err != nil || len(raw) == 0 {
-		return merr.WrapErrImportFailed("invalid source import keyset")
-	}
-	return registrar.RegisterImportReadKeys(source.GetEncryptionZoneId(), raw)
 }

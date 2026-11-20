@@ -130,7 +130,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 			return r.multiReadWithRetry(ctx, paths)
 		}),
 		storage.WithStorageConfig(r.storageConfig),
-		storage.WithImportSource(r.source),
+		storage.WithPluginContext(r.source),
 	}
 
 	rr, err := storage.NewBinlogRecordReader(r.ctx, binlogs, r.schema, rwOptions...)
@@ -181,7 +181,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]typeutil.Timestamp, error) {
 	deleteData := make(map[any]typeutil.Timestamp)
 	for _, path := range deltaLogs {
-		reader, err := newBinlogReader(r.ctx, r.cm, path, storage.WithImportDecryptionContext(r.source))
+		reader, err := newBinlogReader(r.ctx, r.cm, path, storage.DecryptBinlogFromHeader)
 		if err != nil {
 			return nil, err
 		}

@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -116,7 +115,11 @@ func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
 			return nil
 		}
 
-		decryptor, err := hookutil.GetCipher().GetDecryptor(ezID, collectionID, []byte(edek))
+		cipher := hookutil.GetCipher()
+		if cipher == nil {
+			return merr.Wrap(merr.ErrServiceUnavailable, "encrypted binlog requires the cipher plugin")
+		}
+		decryptor, err := cipher.GetDecryptor(ezID, collectionID, []byte(edek))
 		if err != nil {
 			log.Error("failed to get decryptor", zap.Int64("ezID", ezID), zap.Int64("collectionID", collectionID), zap.Error(err))
 			return err
@@ -148,26 +151,17 @@ func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
 	}
 }
 
-// WithImportDecryptionContext opens an encrypted event with its file metadata and
-// the read keyset that DataCoord dispatched for this backup.
-func WithImportDecryptionContext(source *indexcgopb.StoragePluginContext) BinlogReaderOption {
-	return func(reader *BinlogReader) error {
-		if _, encrypted := reader.GetEdek(); !encrypted {
-			return nil
-		}
-		if source == nil {
-			return merr.WrapErrImportFailed("encrypted binlog requires a source import cipher context")
-		}
-		if _, hasZone := reader.Extras[ezIDKey]; hasZone {
-			if id, ok := reader.GetEzID(); !ok || id != source.GetEncryptionZoneId() {
-				return merr.WrapErrImportFailedMsg("binlog encryption zone does not match import source zone %d", source.GetEncryptionZoneId())
-			}
-		}
-		if err := hookutil.RegisterImportReadKeys(source); err != nil {
-			return err
-		}
-		return WithReaderDecryptionContext(source.GetEncryptionZoneId(), reader.CollectionID)(reader)
+func DecryptBinlogFromHeader(reader *BinlogReader) error {
+	edek, encrypted := reader.GetEdek()
+	_, hasZone := reader.Extras[ezIDKey]
+	if !encrypted && !hasZone {
+		return nil
 	}
+	zone, ok := reader.GetEzID()
+	if !ok || zone <= 0 || edek == "" {
+		return merr.WrapErrDataIntegrityMsg("invalid binlog encryption metadata")
+	}
+	return WithReaderDecryptionContext(zone, reader.CollectionID)(reader)
 }
 
 // NewBinlogReader creates binlogReader to read binlog file.

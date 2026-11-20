@@ -68,7 +68,7 @@ type rwOptions struct {
 	storageConfig       *indexpb.StorageConfig
 	neededFields        typeutil.Set[int64]
 	pluginContext       *indexcgopb.StoragePluginContext
-	importReader        bool
+	pluginContextSet    bool
 }
 
 func (o *rwOptions) validate() error {
@@ -168,15 +168,7 @@ func WithNeededFields(neededFields typeutil.Set[int64]) RwOption {
 func WithPluginContext(pluginContext *indexcgopb.StoragePluginContext) RwOption {
 	return func(options *rwOptions) {
 		options.pluginContext = pluginContext
-	}
-}
-
-// WithImportSource selects the dispatched backup context. A nil source means
-// plaintext, including when the destination collection is encrypted.
-func WithImportSource(source *indexcgopb.StoragePluginContext) RwOption {
-	return func(options *rwOptions) {
-		options.importReader = true
-		options.pluginContext = source
+		options.pluginContextSet = true
 	}
 }
 
@@ -262,24 +254,20 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 
 	binlogReaderOpts := []BinlogReaderOption{}
 	var pluginContext *indexcgopb.StoragePluginContext
-	if rwOptions.importReader {
+	if rwOptions.pluginContextSet {
 		pluginContext = rwOptions.pluginContext
-		binlogReaderOpts = append(binlogReaderOpts, WithImportDecryptionContext(pluginContext))
+		binlogReaderOpts = append(binlogReaderOpts, DecryptBinlogFromHeader)
 	} else if hookutil.IsClusterEncryptionEnabled() {
-		if rwOptions.pluginContext != nil {
-			pluginContext = rwOptions.pluginContext
-		} else {
-			ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID)
-			if ez != nil {
-				binlogReaderOpts = append(binlogReaderOpts, WithReaderDecryptionContext(ez.EzID, ez.CollectionID))
+		ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID)
+		if ez != nil {
+			binlogReaderOpts = append(binlogReaderOpts, WithReaderDecryptionContext(ez.EzID, ez.CollectionID))
 
-				unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-				if len(unsafe) > 0 {
-					pluginContext = &indexcgopb.StoragePluginContext{
-						EncryptionZoneId: ez.EzID,
-						CollectionId:     ez.CollectionID,
-						EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
-					}
+			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+			if len(unsafe) > 0 {
+				pluginContext = &indexcgopb.StoragePluginContext{
+					EncryptionZoneId: ez.EzID,
+					CollectionId:     ez.CollectionID,
+					EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
 				}
 			}
 		}
@@ -315,7 +303,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 			}
 		}
 		// FIXME: add needed fields support
-		rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.importReader)
+		rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
 	}

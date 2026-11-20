@@ -195,7 +195,7 @@ func (suite *PackedTestSuite) TestImportWriterRequiresImportCipher() {
 	path := filepath.Join(root, "encrypted.parquet")
 	groups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}}}
 	target := &indexcgopb.StoragePluginContext{EncryptionZoneId: 17, CollectionId: 23, EncryptionKey: "dGFyZ2V0"}
-	writer, err := NewPackedWriterWithMode([]string{path}, suite.schema, 1<<20, 0, groups, nil, target, BackupImportWrite)
+	writer, err := NewPackedWriter([]string{path}, suite.schema, 1<<20, 0, groups, nil, target)
 	suite.Require().ErrorIs(err, merr.ErrSegcoreUnsupported)
 	suite.False(retry.IsRecoverable(err))
 	suite.Nil(writer)
@@ -207,11 +207,11 @@ func (suite *PackedTestSuite) TestPlaintextImportWithStorageConfig() {
 	paths := []string{filepath.Join(root, "plaintext.parquet")}
 	config := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
 	groups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}}}
-	writer, err := NewPackedWriterWithMode(paths, suite.schema, 1<<20, 0, groups, config, nil, BackupImportWrite)
+	writer, err := NewPackedWriter(paths, suite.schema, 1<<20, 0, groups, config, nil)
 	suite.Require().NoError(err)
 	suite.Require().NoError(writer.WriteRecordBatch(suite.rec))
 	suite.Require().NoError(writer.Close())
-	reader, err := NewImportPackedReader(paths, suite.schema, 1<<20, config, nil)
+	reader, err := NewPackedReader(paths, suite.schema, 1<<20, config, nil)
 	suite.Require().NoError(err)
 	defer reader.Close()
 	record, err := reader.ReadNext()

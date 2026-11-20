@@ -24,36 +24,6 @@ GetFileKey(plugin::ICipherPlugin& cipher, const CPluginContext& file) {
     return decryptor->GetKey();
 }
 
-class ImportKeyRetriever final : public parquet::DecryptionKeyRetriever {
- public:
-    explicit ImportKeyRetriever(const CPluginContext& source)
-        : cipher_(PluginLoader::GetInstance().getCipherPlugin()),
-          import_cipher_(PluginLoader::getImportCipherPlugin(source, cipher_)),
-          source_ez_id_(source.ez_id),
-          source_keyset_(source.key) {
-    }
-
-    std::string
-    GetKey(const std::string& key_metadata) override {
-        auto file = DecodeKeyMetadata(key_metadata);
-        if (!file || file->ez_id != source_ez_id_) {
-            ThrowInfo(
-                FileReadFailed,
-                "packed file key metadata does not match import source zone {}",
-                source_ez_id_);
-        }
-        import_cipher_->RegisterReadKeyset(
-            source_ez_id_, file->collection_id, source_keyset_);
-        return GetFileKey(*cipher_, *file);
-    }
-
- private:
-    std::shared_ptr<plugin::ICipherPlugin> cipher_;
-    std::shared_ptr<plugin::IImportCipherPlugin> import_cipher_;
-    int64_t source_ez_id_;
-    std::string source_keyset_;
-};
-
 parquet::ReaderProperties
 WithKeyRetriever(
     std::shared_ptr<parquet::DecryptionKeyRetriever> key_retriever) {
@@ -73,7 +43,7 @@ KeyRetriever::GetKey(const std::string& key_metadata) {
     auto plugin = PluginLoader::GetInstance().getCipherPlugin();
     AssertInfo(plugin != nullptr, "cipher plugin not found");
     auto context = DecodeKeyMetadata(key_metadata);
-    AssertInfo(context != nullptr, "invalid key metadata: {}", key_metadata);
+    AssertInfo(context != nullptr, "invalid encryption metadata");
     return GetFileKey(*plugin, *context);
 }
 
@@ -82,11 +52,18 @@ GetReaderProperties() {
     return WithKeyRetriever(std::make_shared<KeyRetriever>());
 }
 
-parquet::ReaderProperties
-GetImportReaderProperties(const CPluginContext* source) {
-    return source
-               ? WithKeyRetriever(std::make_shared<ImportKeyRetriever>(*source))
-               : parquet::default_reader_properties();
+void
+RegisterReaderKeys(const CPluginContext* context) {
+    if (!context) {
+        return;
+    }
+    auto cipher = PluginLoader::GetInstance().getCipherPlugin();
+    if (!cipher) {
+        ThrowInfo(Unsupported, "missing cipher plugin");
+    }
+    AssertInfo(context->key && *context->key, "missing reader keyset");
+    cipher->RegisterReadKeyset(
+        context->ez_id, context->collection_id, context->key);
 }
 
 parquet::ArrowReaderProperties

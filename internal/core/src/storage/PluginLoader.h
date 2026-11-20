@@ -121,22 +121,6 @@ class PluginLoader {
             milvus::storage::plugin::ICipherPlugin>(p);
     }
 
-    static std::shared_ptr<plugin::IImportCipherPlugin>
-    getImportCipherPlugin(const CPluginContext& context,
-                          const std::shared_ptr<plugin::ICipherPlugin>& cipher,
-                          bool allow_legacy = false) {
-        if (context.key == nullptr || context.key[0] == '\0') {
-            ThrowInfo(InvalidParameter, "missing import cipher keyset");
-        }
-        auto plugin =
-            std::dynamic_pointer_cast<plugin::IImportCipherPlugin>(cipher);
-        if (plugin == nullptr && (!allow_legacy || cipher == nullptr)) {
-            ThrowInfo(Unsupported,
-                      "storage plugin does not support import cipher keysets");
-        }
-        return plugin;
-    }
-
     std::shared_ptr<CPluginContext>
     registerCipherPluginContext(int64_t ez_id,
                                 int64_t collection_id,

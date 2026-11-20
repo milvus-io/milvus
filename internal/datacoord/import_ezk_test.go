@@ -19,11 +19,11 @@ package datacoord
 import (
 	"context"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"strconv"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
@@ -149,10 +149,12 @@ func TestImportDispatchStopsOnEZKError(t *testing.T) {
 			im, err := NewImportMeta(ctx, catalog, alloc, nil)
 			require.NoError(t, err)
 			task := im.GetTask(ctx, 2)
-			sourceErr = fmt.Errorf("source transport: %w", context.DeadlineExceeded)
-			task.CreateTaskOnWorker(10, cluster)
-			require.Equal(t, state, im.GetJob(ctx, 1).GetState())
-			catalog.AssertNotCalled(t, "SaveImportJob", mock.Anything, mock.Anything)
+			for _, transient := range []error{context.DeadlineExceeded, merr.ErrServiceUnavailable} {
+				sourceErr = fmt.Errorf("%w: %w", errors.New("decrypt failed"), transient)
+				task.CreateTaskOnWorker(10, cluster)
+				require.Equal(t, state, im.GetJob(ctx, 1).GetState())
+				catalog.AssertNotCalled(t, "SaveImportJob", mock.Anything, mock.Anything)
+			}
 
 			sourceErr = nil
 			task.CreateTaskOnWorker(11, cluster)
@@ -169,7 +171,7 @@ func TestImportDispatchStopsOnEZKError(t *testing.T) {
 			// The scheduler can revisit a pending task before the import checker fails it.
 			sourceErr = nil
 			task.CreateTaskOnWorker(13, cluster)
-			require.Equal(t, 4, resolves)
+			require.Equal(t, 5, resolves)
 		})
 	}
 }

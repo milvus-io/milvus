@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
-	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -97,7 +96,7 @@ func NewSyncTask(ctx context.Context,
 		WithDataSource(metrics.BulkinsertDataSourceLabel).
 		WithBatchRows(int64(insertData.GetRowNum()))
 	if storageVersion == storage.StorageV2 {
-		syncPack.WithImportTarget(target, importutilv2.IsFileImport(req.GetOptions()))
+		syncPack.WithImportTarget(target)
 	}
 	if bm25Stats != nil {
 		syncPack.WithBM25Stats(bm25Stats)

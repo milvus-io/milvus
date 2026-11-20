@@ -169,14 +169,7 @@ func (pw *packedRecordWriter) Close() error {
 	return nil
 }
 
-func NewPackedRecordWriter(bucketName string, paths []string, schema *schemapb.CollectionSchema,
-	bufferSize, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup,
-	storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext,
-) (*packedRecordWriter, error) {
-	return NewPackedRecordWriterWithMode(bucketName, paths, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, packed.OrdinaryWrite)
-}
-
-func NewPackedRecordWriterWithMode(
+func NewPackedRecordWriter(
 	bucketName string,
 	paths []string,
 	schema *schemapb.CollectionSchema,
@@ -185,7 +178,6 @@ func NewPackedRecordWriterWithMode(
 	columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
-	mode packed.WriterMode,
 ) (*packedRecordWriter, error) {
 	// Validate PK field exists before proceeding
 	_, err := typeutil.GetPrimaryFieldSchema(schema)
@@ -211,11 +203,8 @@ func NewPackedRecordWriterWithMode(
 		}
 		return path.Join(bucketName, p)
 	})
-	writer, err := packed.NewPackedWriterWithMode(truePaths, arrowSchema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, mode)
+	writer, err := packed.NewPackedWriter(truePaths, arrowSchema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext)
 	if err != nil {
-		if mode != packed.OrdinaryWrite {
-			return nil, merr.Wrap(err, "cannot create import packed record writer")
-		}
 		return nil, merr.WrapErrStorage(err, "can not new packed record writer")
 	}
 	columnGroupUncompressed := make(map[typeutil.UniqueID]uint64)

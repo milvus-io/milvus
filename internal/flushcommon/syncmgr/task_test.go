@@ -214,18 +214,16 @@ func (s *SyncTaskSuite) TestImportTargetRequiresNativeCipher() {
 	schema := typeutil.Clone(s.schema)
 	schema.Properties = []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}}
 	for _, tc := range []struct {
-		name        string
-		target      *indexcgopb.StoragePluginContext
-		allowLegacy bool
-		want        error
-		reason      string
+		name   string
+		target *indexcgopb.StoragePluginContext
+		want   error
+		reason string
 	}{
-		{"backup", target, false, merr.ErrSegcoreUnsupported, "import cipher"},
-		{"ordinary file", target, true, merr.ErrSegcoreUnsupported, "import cipher"},
-		{"missing target", nil, true, merr.ErrImportFailed, "missing dispatched import target keyset"},
+		{"dispatched target", target, merr.ErrSegcoreUnsupported, "missing cipher plugin"},
+		{"missing target", nil, merr.ErrImportFailed, "missing dispatched import target keyset"},
 	} {
 		s.Run(tc.name, func() {
-			pack := new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).WithImportTarget(tc.target, tc.allowLegacy)
+			pack := new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).WithImportTarget(tc.target)
 			task := s.getSuiteSyncTask(pack).WithSchema(schema).WithWriteRetryOptions(retry.Attempts(1))
 			err := task.Run(context.Background())
 			s.ErrorContains(err, tc.reason)

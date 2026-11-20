@@ -116,7 +116,7 @@ func (s *L0ImportSuite) TestL0PreImport() {
 		Schema:       s.schema,
 		ImportFiles:  []*internalpb.ImportFile{{Paths: []string{"dummy-prefix"}}},
 	}
-	task := NewL0PreImportTask(req, s.manager, s.cm, nil)
+	task := NewL0PreImportTask(req, s.manager, s.cm)
 	s.manager.Add(task)
 	fu := task.Execute()
 	err := conc.AwaitAll(fu...)
