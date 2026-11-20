@@ -372,7 +372,7 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, l0MemSize int64, 
 
 	ratio := paramtable.Get().DataNodeCfg.L0BatchMemoryRatio.GetAsFloat()
 	memLimit := float64(hardware.GetFreeMemoryCount()) * ratio
-	if float64(l0MemSize) > memLimit {
+	if t.plan.GetMaterializedThrough() == 0 && float64(l0MemSize) > memLimit {
 		return nil, merr.Wrap(merr.ErrServiceMemoryLimitExceeded, fmt.Sprintf("L0 compaction failed, not enough memory, request memory size: %v, memory limit: %v", l0MemSize, memLimit))
 	}
 
@@ -383,7 +383,7 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, l0MemSize int64, 
 	}
 
 	if t.plan.GetMaterializedThrough() != 0 {
-		return t.dispatchMutations(ctx, pkField, targetSegments, l0Segments, getMaxBatchSize(float64(max(1, l0MemSize)), memLimit))
+		return t.dispatchMutations(ctx, pkField, targetSegments, l0Segments, int64(memLimit))
 	}
 	for _, source := range l0Segments {
 		for _, group := range source.GetDeltalogs() {

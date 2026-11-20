@@ -30,14 +30,17 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore"
+	kvcatalog "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	kvstreamingnode "github.com/milvus-io/milvus/internal/metastore/kv/streamingnode"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestL0CompactionTransformCursorPrefix(t *testing.T) {
@@ -357,4 +360,96 @@ func TestCertifiedL0NoTargets(t *testing.T) {
 	require.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(ctx, 7).GetState())
 	require.True(t, task.Process())
 	require.Equal(t, commonpb.SegmentState_Dropped, m.GetSegment(ctx, 7).GetState())
+}
+
+// Cap the actual catalog backend and interrupt a later chunk. All successful
+// transactions land in the same backing KV that the restarted coordinator reads.
+type interruptedL0KV struct {
+	kv.MetaKv
+	calls  int
+	failAt int
+}
+
+func (k *interruptedL0KV) MaxTxnOps() int { return 1 }
+
+func (k *interruptedL0KV) MultiSave(ctx context.Context, values map[string]string) error {
+	k.calls++
+	if k.calls == k.failAt {
+		return merr.WrapErrServiceUnavailableMsg("interrupted L0 metadata chunk")
+	}
+	return k.MetaKv.MultiSave(ctx, values)
+}
+
+func TestCertifiedL0OversizedCatalogPublication(t *testing.T) {
+	const collection, sources, targets = 100, 2, 32
+	const m0 = 200
+	ctx := t.Context()
+	m, domain, err := newMemoryMetaWithCompactionTask(t)
+	require.NoError(t, err)
+	channel := "p1_100v0"
+	taskProto := &datapb.CompactionTask{PlanID: 99, TriggerID: 98, Channel: channel, CollectionID: collection, PartitionID: common.AllPartitionsID, MaterializedThrough: m0, L0Targets: &datapb.L0DispatchTargets{}}
+	var outputs []*datapb.CompactionSegment
+	for i := int64(1); i <= sources+targets; i++ {
+		seg := &datapb.SegmentInfo{ID: i, CollectionID: collection, PartitionID: 1, InsertChannel: channel, State: commonpb.SegmentState_Flushed}
+		if i <= sources {
+			seg.Level = datapb.SegmentLevel_L0
+			taskProto.InputSegments = append(taskProto.InputSegments, i)
+		} else {
+			seg.Level = datapb.SegmentLevel_L1
+			seg.StorageVersion = storage.StorageV2
+			seg.Stats = &datapb.Statistics{InsertBinlogCount: 1}
+			seg.TransformStartAfterTimetick = 50
+			taskProto.L0Targets.SegmentIds = append(taskProto.L0Targets.SegmentIds, i)
+			outputs = append(outputs, &datapb.CompactionSegment{SegmentID: i, Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{
+				{LogID: i * 10, EntriesNum: 1, MutationCounts: &datapb.DeltaMutationCounts{UpdateKeys: 1}},
+				{LogID: i*10 + 1, EntriesNum: 1, MutationCounts: &datapb.DeltaMutationCounts{UpdateKeys: 1}},
+			}}}})
+		}
+		require.NoError(t, m.AddSegment(ctx, meta.NewSegmentInfo(seg)))
+	}
+	catalog := m.Catalog.(*kvcatalog.Catalog)
+	kv := &interruptedL0KV{MetaKv: catalog.MetaKv, failAt: targets + 2}
+	catalog.MetaKv = kv
+	maxOps := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum
+	require.NoError(t, paramtable.Get().Save(maxOps.Key, "1"))
+	t.Cleanup(func() { paramtable.Get().Reset(maxOps.Key) })
+	task := NewL0CompactionTask(taskProto, nil, m, domain.compactionTaskMeta)
+	require.NoError(t, task.SaveTaskMeta())
+	kv.calls = 0
+	require.ErrorIs(t, task.SaveSegmentMeta(outputs), merr.ErrServiceUnavailable)
+	require.Equal(t, kv.failAt, kv.calls)
+	domain = &compactionTaskTestMetas{}
+	m = meta.BootMetaWithLoader(t, catalog, collection, withCompactionTaskTestMetas(domain))
+	saved, err := catalog.ListCompactionTask(ctx)
+	require.NoError(t, err)
+	require.Len(t, saved, 1)
+	require.False(t, saved[0].GetL0Targets().GetPublished())
+	task = NewL0CompactionTask(saved[0], nil, m, domain.compactionTaskMeta)
+	for _, id := range taskProto.GetInputSegments() {
+		require.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(ctx, id).GetState())
+	}
+	visible := 0
+	for _, id := range taskProto.GetL0Targets().GetSegmentIds() {
+		seg := m.GetSegment(ctx, id)
+		if seg.GetTransformStartAfterTimetick() == m0 {
+			visible++
+			require.Len(t, seg.GetDeltalogs(), 1, "cursor precedes delta for target %d", id)
+			require.Len(t, seg.GetDeltalogs()[0].GetBinlogs(), 2)
+		}
+	}
+	require.Positive(t, visible)
+	require.Less(t, visible, targets)
+	require.NoError(t, task.SaveSegmentMeta(outputs))
+	require.True(t, task.Process())
+	for _, id := range taskProto.GetL0Targets().GetSegmentIds() {
+		seg := m.GetSegment(ctx, id)
+		require.EqualValues(t, m0, seg.GetTransformStartAfterTimetick())
+		require.Len(t, seg.GetDeltalogs()[0].GetBinlogs(), 2)
+		require.EqualValues(t, 2, seg.GetStats().GetDeltaBinlogCount())
+		require.EqualValues(t, 0, seg.GetStats().GetDeleteNumRows())
+		require.EqualValues(t, 1, seg.GetStats().GetInsertBinlogCount())
+	}
+	for _, id := range taskProto.GetInputSegments() {
+		require.Equal(t, commonpb.SegmentState_Dropped, m.GetSegment(ctx, id).GetState())
+	}
 }

@@ -19,6 +19,7 @@ package compactor
 import (
 	"cmp"
 	"context"
+	"math"
 	"slices"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -61,13 +62,13 @@ func compactionMutationSource(cm storage.ChunkManager, io binlogio.BinlogIO) mut
 	return mutationSource{cm: cm}
 }
 
-func readSegmentMutations(ctx context.Context, source mutationSource, cfg *indexpb.StorageConfig, plan *datapb.CompactionPlan, seg *datapb.CompactionSegmentBinlogs, pk *schemapb.FieldSchema) ([]scopedMutation, error) {
+func readSegmentMutations(ctx context.Context, source mutationSource, cfg *indexpb.StorageConfig, plan *datapb.CompactionPlan, seg *datapb.CompactionSegmentBinlogs, pk *schemapb.FieldSchema, fileLimit int64, consume func([]scopedMutation, int64) error) error {
 	files := seg.GetDeltalogs()
 	version := seg.GetStorageVersion()
 	if path := seg.GetManifest(); path != "" {
 		paths, err := packed.GetDeltaLogPathsFromManifest(path, cfg)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		files = nil
 		for _, path := range paths {
@@ -76,19 +77,24 @@ func readSegmentMutations(ctx context.Context, source mutationSource, cfg *index
 		version = storage.StorageV3
 	}
 	if len(files) == 0 {
-		return nil, nil
+		return nil
 	}
 	plugin, err := hookutil.GetCPluginContext(plan.GetPluginContext(), seg.GetCollectionID())
 	if err != nil {
-		return nil, err
+		return err
 	}
 	fields := make(map[int64]*schemapb.FieldSchema)
 	for _, field := range plan.GetSchema().GetFields() {
 		fields[field.GetFieldID()] = field
 	}
-	var rows []scopedMutation
 	for _, group := range files {
 		for _, file := range group.GetBinlogs() {
+			size := file.GetMemorySize()
+			if size > fileLimit {
+				return merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "L0 file %q needs %d bytes, budget %d", file.GetLogPath(), size, fileLimit)
+			}
+			var rows []scopedMutation
+			var decodedSize int64
 			visit := func(l deltacodec.Layout, batch []deltacodec.Row) error {
 				if l.CollectionID == 0 {
 					l.CollectionID, l.VChannel, l.PartitionID, l.SchemaVersion = seg.GetCollectionID(), plan.GetChannel(), seg.GetPartitionID(), plan.GetSchema().GetVersion()
@@ -108,39 +114,53 @@ func readSegmentMutations(ctx context.Context, source mutationSource, cfg *index
 							return merr.WrapErrDataIntegrityMsg("mutation exceeds frozen frontier %d", through)
 						}
 					}
+					if fileLimit != math.MaxInt64 {
+						// Manifest-only and historical files may have no memory-size
+						// metadata. Also bound the decoded rows retained for routing.
+						decodedSize += int64(128 + proto.Size(row.PrimaryKeys) + 16*typeutil.GetSizeOfIDs(row.PrimaryKeys))
+						for _, assignment := range row.Assignments {
+							decodedSize += int64(16 + proto.Size(assignment))
+						}
+						if decodedSize > fileLimit {
+							return merr.Wrapf(merr.ErrServiceMemoryLimitExceeded, "decoded L0 file %q exceeds %d bytes", file.GetLogPath(), fileLimit)
+						}
+					}
 					rows = append(rows, scopedMutation{row, l})
 				}
 				return nil
 			}
 			if seg.GetManifest() != "" {
 				if err := storage.ReadPackedMutationDelta(ctx, file, pk.GetDataType(), nil, cfg, plugin, visit); err != nil {
-					return nil, merr.Wrapf(err, "read deltalog %q for segment %d", file.GetLogPath(), seg.GetSegmentID())
+					return merr.Wrapf(err, "read deltalog %q for segment %d", file.GetLogPath(), seg.GetSegmentID())
 				}
-				continue
-			}
-			if file.GetMutationCounts() == nil && source.download != nil {
+			} else if file.GetMutationCounts() == nil && source.download != nil {
 				objects, err := source.download(ctx, []string{file.GetLogPath()})
 				if err != nil {
-					return nil, merr.Wrapf(err, "download deltalog %q for segment %d", file.GetLogPath(), seg.GetSegmentID())
+					return merr.Wrapf(err, "download deltalog %q for segment %d", file.GetLogPath(), seg.GetSegmentID())
 				}
 				if len(objects) != 1 {
-					return nil, merr.WrapErrDataIntegrityMsg("expected one downloaded delta object, got %d", len(objects))
+					return merr.WrapErrDataIntegrityMsg("expected one downloaded delta object, got %d", len(objects))
 				}
 				if err := storage.ReadDownloadedMutationDelta(ctx, objects[0], file, version, pk.GetDataType(), cfg, plugin, visit); err != nil {
-					return nil, merr.Wrapf(err, "read deltalog %q for segment %d", file.GetLogPath(), seg.GetSegmentID())
+					return merr.Wrapf(err, "read deltalog %q for segment %d", file.GetLogPath(), seg.GetSegmentID())
 				}
-				continue
+			} else {
+				if source.cm == nil {
+					return merr.WrapErrServiceInternalMsg("missing chunk manager for packed compaction delta")
+				}
+				err := storage.ReadMutationDelta(ctx, source.cm, file, version, pk.GetDataType(), nil, cfg, plugin, visit)
+				if err != nil {
+					return merr.Wrapf(err, "read deltalog %q for segment %d", file.GetLogPath(), seg.GetSegmentID())
+				}
 			}
-			if source.cm == nil {
-				return nil, merr.WrapErrServiceInternalMsg("missing chunk manager for packed compaction delta")
-			}
-			err := storage.ReadMutationDelta(ctx, source.cm, file, version, pk.GetDataType(), nil, cfg, plugin, visit)
-			if err != nil {
-				return nil, merr.Wrapf(err, "read deltalog %q for segment %d", file.GetLogPath(), seg.GetSegmentID())
+			if len(rows) > 0 {
+				if err := consume(rows, max(size, decodedSize)); err != nil {
+					return err
+				}
 			}
 		}
 	}
-	return rows, nil
+	return nil
 }
 
 func orderMutations(rows []scopedMutation) {
@@ -161,7 +181,11 @@ type segmentMutations struct {
 }
 
 func loadRewriteMutations(ctx context.Context, source mutationSource, cfg *indexpb.StorageConfig, plan *datapb.CompactionPlan, seg *datapb.CompactionSegmentBinlogs, pk *schemapb.FieldSchema) (*segmentMutations, error) {
-	rows, err := readSegmentMutations(ctx, source, cfg, plan, seg, pk)
+	var rows []scopedMutation
+	err := readSegmentMutations(ctx, source, cfg, plan, seg, pk, math.MaxInt64, func(batch []scopedMutation, _ int64) error {
+		rows = append(rows, batch...)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}

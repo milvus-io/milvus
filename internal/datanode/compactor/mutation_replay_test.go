@@ -24,9 +24,14 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/compaction"
+	coordtask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	binlogio "github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -37,6 +42,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -149,6 +156,11 @@ func (s *MixCompactionTaskStorageV3Suite) TestCertifiedL0Dispatch() {
 	t := s.T()
 	ctx := t.Context()
 	cfg := s.task.compactionParams.StorageConfig
+	ratio := paramtable.Get().DataNodeCfg.L0BatchMemoryRatio
+	require.NoError(t, paramtable.Get().Save(ratio.Key, "1"))
+	t.Cleanup(func() { paramtable.Get().Reset(ratio.Key) })
+	free := mockey.Mock(hardware.GetFreeMemoryCount).Return(uint64(1 << 20)).Build()
+	defer free.UnPatch()
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, IsPrimaryKey: true, Name: "pk", DataType: schemapb.DataType_Int64}, {FieldID: 105, Name: "age", DataType: schemapb.DataType_Int64}}}
 	plan := &datapb.CompactionPlan{PlanID: 22, Schema: schema, Type: datapb.CompactionType_Level0DeleteCompaction, MaterializedThrough: 200, Channel: "p1_100v0", PreAllocatedLogIDs: &datapb.IDRange{Begin: 1000, End: 1100}}
 	task := NewLevelZeroCompactionTask(ctx, binlogio.NewBinlogIO(s.task.cm), s.task.cm, plan, s.task.compactionParams)
@@ -169,7 +181,7 @@ func (s *MixCompactionTaskStorageV3Suite) TestCertifiedL0Dispatch() {
 		}
 		size, err := storage.WriteMutationDelta(ctx, path, d, cfg, nil)
 		require.NoError(t, err)
-		seg.Deltalogs = []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: path, LogSize: size, EntriesNum: 1, MutationCounts: counts}}}}
+		seg.Deltalogs = []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: path, LogSize: size, MemorySize: 768 << 10, EntriesNum: 1, MutationCounts: counts}}}}
 		inputs = append(inputs, seg)
 	}
 	for i, part := range []int64{1, 2, 3, 3, 4} {
@@ -207,9 +219,10 @@ func (s *MixCompactionTaskStorageV3Suite) TestCertifiedL0Dispatch() {
 			require.Empty(t, result.Deltalogs)
 			continue
 		}
-		file := result.Deltalogs[0].Binlogs[0]
+		files := result.Deltalogs[0].Binlogs
 		if i == 4 {
-			require.Nil(t, file.GetMutationCounts())
+			require.Len(t, files, 1)
+			require.Nil(t, files[0].GetMutationCounts())
 			legacy, err := compaction.ComposeDeleteFromDeltalogs(ctx, schemapb.DataType_Int64, &datapb.CompactionSegmentBinlogs{Deltalogs: result.Deltalogs}, storage.WithDownloader(s.task.cm.MultiRead), storage.WithStorageConfig(cfg))
 			require.NoError(t, err)
 			require.Equal(t, map[any]uint64{int64(77): 180}, legacy)
@@ -223,18 +236,67 @@ func (s *MixCompactionTaskStorageV3Suite) TestCertifiedL0Dispatch() {
 		if i == 5 {
 			keys = []int64{42, 43}
 		}
-		require.EqualValues(t, len(want)*len(keys), file.GetMutationCounts().GetUpdateKeys())
 		var observed []uint64
-		err := storage.ReadMutationDelta(ctx, s.task.cm, file, storage.StorageV2, schemapb.DataType_Int64, nil, cfg, nil, func(l deltacodec.Layout, rows []deltacodec.Row) error {
-			require.Equal(t, targets[i].PartitionID, l.PartitionID)
-			for _, row := range rows {
-				observed = append(observed, row.TimeTick)
-				require.EqualValues(t, 3, row.SourceOrdinal)
-				require.Equal(t, keys, row.PrimaryKeys.GetIntId().Data)
-			}
-			return nil
-		})
-		require.NoError(t, err)
-		require.Equal(t, want, observed)
+		var updateKeys int64
+		for _, file := range files {
+			updateKeys += file.GetMutationCounts().GetUpdateKeys()
+			err := storage.ReadMutationDelta(ctx, s.task.cm, file, storage.StorageV2, schemapb.DataType_Int64, nil, cfg, nil, func(l deltacodec.Layout, rows []deltacodec.Row) error {
+				require.Equal(t, targets[i].PartitionID, l.PartitionID)
+				for _, row := range rows {
+					observed = append(observed, row.TimeTick)
+					require.EqualValues(t, 3, row.SourceOrdinal)
+					require.Equal(t, keys, row.PrimaryKeys.GetIntId().Data)
+				}
+				return nil
+			})
+			require.NoError(t, err)
+		}
+		require.EqualValues(t, len(want)*len(keys), updateKeys)
+		require.ElementsMatch(t, want, observed)
+	}
+
+	// A genuinely oversized final file fails the whole attempt, even though
+	// earlier files could be routed and written within the budget.
+	failedPlan := proto.Clone(plan).(*datapb.CompactionPlan)
+	failedPlan.PreAllocatedLogIDs = &datapb.IDRange{Begin: 2000, End: 2100}
+	failedPlan.SegmentBinlogs[len(inputs)-1].Deltalogs[0].Binlogs[0].MemorySize = 2 << 20
+	failedWorker := NewLevelZeroCompactionTask(ctx, binlogio.NewBinlogIO(s.task.cm), s.task.cm, failedPlan, s.task.compactionParams)
+	incomplete, err := failedWorker.Compact()
+	require.ErrorIs(t, err, merr.ErrServiceMemoryLimitExceeded)
+	require.Nil(t, incomplete)
+
+	// Publish this exact multi-file worker result and retire both private
+	// and shared sources only after every target has reached the frontier.
+	metadata, err := meta.NewMemoryMeta(t)
+	require.NoError(t, err)
+	tasks, err := coordtask.NewCompactionTaskMeta(ctx, metadata.Catalog)
+	require.NoError(t, err)
+	frozen := &datapb.CompactionTask{PlanID: plan.PlanID, NodeID: 9, TriggerID: 8, Type: plan.Type, Channel: plan.Channel, CollectionID: 100, PartitionID: common.AllPartitionsID, MaterializedThrough: plan.MaterializedThrough, L0Targets: &datapb.L0DispatchTargets{}}
+	for _, seg := range plan.SegmentBinlogs {
+		info := &datapb.SegmentInfo{ID: seg.SegmentID, CollectionID: seg.CollectionID, PartitionID: seg.PartitionID, InsertChannel: plan.Channel, State: commonpb.SegmentState_Flushed, Level: seg.Level}
+		if seg.Level == datapb.SegmentLevel_L0 {
+			frozen.InputSegments = append(frozen.InputSegments, seg.SegmentID)
+		} else {
+			frozen.L0Targets.SegmentIds = append(frozen.L0Targets.SegmentIds, seg.SegmentID)
+			info.TransformStartAfterTimetick = 50
+		}
+		require.NoError(t, metadata.AddSegment(ctx, meta.NewSegmentInfo(info)))
+	}
+	publication := coordtask.NewL0CompactionTask(frozen, nil, metadata, tasks)
+	worker := session.NewMockCluster(t)
+	worker.EXPECT().QueryCompaction(frozen.NodeID, &datapb.CompactionStateRequest{PlanID: plan.PlanID}).Return(result, nil).Once()
+	publication.QueryTaskOnWorker(worker)
+	require.True(t, publication.GetTaskProto().GetL0Targets().GetPublished())
+	for _, out := range results {
+		seg := metadata.GetSegment(ctx, out.SegmentID)
+		require.EqualValues(t, 200, seg.GetTransformStartAfterTimetick())
+		require.Equal(t, out.GetDeltalogs(), seg.GetDeltalogs())
+	}
+	for _, id := range frozen.InputSegments {
+		require.Equal(t, commonpb.SegmentState_Flushed, metadata.GetSegment(ctx, id).GetState())
+	}
+	require.True(t, publication.Process())
+	for _, id := range frozen.InputSegments {
+		require.Equal(t, commonpb.SegmentState_Dropped, metadata.GetSegment(ctx, id).GetState())
 	}
 }

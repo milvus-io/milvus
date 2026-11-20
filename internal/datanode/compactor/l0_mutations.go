@@ -17,7 +17,6 @@
 package compactor
 
 import (
-	"cmp"
 	"context"
 	"slices"
 
@@ -34,55 +33,68 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func (t *LevelZeroCompactionTask) dispatchMutations(ctx context.Context, pk *schemapb.FieldSchema, targets, inputs []*datapb.CompactionSegmentBinlogs, batchSize int) ([]*datapb.CompactionSegment, error) {
-	var rows []scopedMutation
-	for _, input := range inputs {
-		part, err := readSegmentMutations(ctx, compactionMutationSource(t.cm, t.BinlogIO), t.compactionParams.StorageConfig, t.plan, input, pk)
-		if err != nil {
-			return nil, err
-		}
-		rows = append(rows, part...)
-	}
-	orderMutations(rows)
+func (t *LevelZeroCompactionTask) dispatchMutations(ctx context.Context, pk *schemapb.FieldSchema, targets, inputs []*datapb.CompactionSegmentBinlogs, memoryLimit int64) ([]*datapb.CompactionSegment, error) {
 	plugin, err := hookutil.GetCPluginContext(t.plan.GetPluginContext(), targets[0].GetCollectionID())
 	if err != nil {
 		return nil, err
 	}
-	var result []*datapb.CompactionSegment
-	for batch := range slices.Chunk(targets, max(batchSize, 1)) {
-		bfs, err := t.loadBF(ctx, batch)
-		if err != nil {
-			return nil, err
-		}
-		for _, target := range batch {
-			groups, err := targetMutations(rows, target.GetPartitionID(), bfs[target.GetSegmentID()])
+	results := make([]*datapb.CompactionSegment, len(targets))
+	for i, target := range targets {
+		results[i] = &datapb.CompactionSegment{SegmentID: target.GetSegmentID(), Channel: t.plan.GetChannel()}
+	}
+	source := compactionMutationSource(t.cm, t.BinlogIO)
+	// Retain one decoded source file and its target projection at a time.
+	// Its original WAL identity orders it against other files on replay.
+	dispatch := func(rows []scopedMutation, size int64) error {
+		orderMutations(rows)
+		batchSize := getMaxBatchSize(float64(max(size, 1)), float64(memoryLimit))
+		for begin := 0; begin < len(targets); begin += batchSize {
+			batch := targets[begin:min(begin+batchSize, len(targets))]
+			bfs, err := t.loadBF(ctx, batch)
 			if err != nil {
-				return nil, err
+				return err
 			}
-			out := &datapb.CompactionSegment{SegmentID: target.GetSegmentID(), Channel: t.plan.GetChannel()}
-			for _, group := range groups {
+			for i, target := range batch {
+				group, err := targetMutations(rows, target.GetPartitionID(), bfs[target.GetSegmentID()])
+				if err != nil {
+					return err
+				}
+				if group == nil {
+					continue
+				}
 				file, err := t.writeTargetMutations(ctx, target, group, plugin)
 				if err != nil {
-					return nil, err
+					return err
 				}
+				out := results[begin+i]
 				if len(out.Deltalogs) == 0 {
 					out.Deltalogs = []*datapb.FieldBinlog{{}}
 				}
 				out.Deltalogs[0].Binlogs = append(out.Deltalogs[0].Binlogs, file)
 			}
-			out.Stats = buildCompactionOutputStats(nil, out.Deltalogs, 0)
-			result = append(result, out)
+		}
+		return nil
+	}
+	for _, input := range inputs {
+		if err := readSegmentMutations(ctx, source, t.compactionParams.StorageConfig, t.plan, input, pk, memoryLimit, dispatch); err != nil {
+			return nil, err
 		}
 	}
-	return result, nil
+	for _, result := range results {
+		result.Stats = buildCompactionOutputStats(nil, result.Deltalogs, 0)
+	}
+	return results, nil
 }
 
-func targetMutations(rows []scopedMutation, partition int64, bf *pkoracle.BloomFilterSet) (map[int32]*storage.MutationDelta, error) {
-	groups := map[int32]*storage.MutationDelta{}
+func targetMutations(rows []scopedMutation, partition int64, bf *pkoracle.BloomFilterSet) (*storage.MutationDelta, error) {
+	// Each decoded file has one physical layout and scope.
+	layout := rows[0].layout
+	if layout.PartitionID != common.AllPartitionsID && layout.PartitionID != partition {
+		return nil, nil
+	}
+	layout.PartitionID = partition
+	delta := &storage.MutationDelta{Layout: layout}
 	for _, r := range rows {
-		if r.layout.PartitionID != common.AllPartitionsID && r.layout.PartitionID != partition {
-			continue
-		}
 		projected := r.Row
 		if bf != nil {
 			keys := make([]storage.PrimaryKey, typeutil.GetSizeOfIDs(r.PrimaryKeys))
@@ -104,29 +116,12 @@ func targetMutations(rows []scopedMutation, partition int64, bf *pkoracle.BloomF
 		if typeutil.GetSizeOfIDs(projected.PrimaryKeys) == 0 {
 			continue
 		}
-		g := groups[r.layout.SchemaVersion]
-		if g == nil {
-			l := r.layout
-			l.PartitionID = partition
-			l.Fields = nil
-			g = &storage.MutationDelta{Layout: l}
-			groups[l.SchemaVersion] = g
-		}
-		for _, assignment := range r.Assignments {
-			id := assignment.GetFieldId()
-			found := slices.ContainsFunc(g.Layout.Fields, func(existing deltacodec.Field) bool { return existing.ID == id })
-			if !found {
-				for _, f := range r.layout.Fields {
-					if f.ID == id {
-						g.Layout.Fields = append(g.Layout.Fields, f)
-						break
-					}
-				}
-			}
-		}
-		g.Rows = append(g.Rows, projected)
+		delta.Rows = append(delta.Rows, projected)
 	}
-	return groups, nil
+	if len(delta.Rows) == 0 {
+		return nil, nil
+	}
+	return delta, nil
 }
 
 func (t *LevelZeroCompactionTask) writeTargetMutations(ctx context.Context, target *datapb.CompactionSegmentBinlogs, g *storage.MutationDelta, plugin *indexcgopb.StoragePluginContext) (*datapb.Binlog, error) {
@@ -155,7 +150,6 @@ func (t *LevelZeroCompactionTask) writeTargetMutations(ctx context.Context, targ
 		return nil, err
 	}
 	cfg := t.compactionParams.StorageConfig
-	slices.SortFunc(g.Layout.Fields, func(a, b deltacodec.Field) int { return cmp.Compare(a.ID, b.ID) })
 	bytes, err := storage.WriteMutationDelta(ctx, path, *g, cfg, plugin)
 	if err != nil {
 		return nil, err

@@ -509,14 +509,21 @@ func (t *L0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 	segments = append(segments, flushedSegments...)
 	var logIDRange *datapb.IDRange
 	if taskProto.GetMaterializedThrough() != 0 {
-		// At most one schema version per source object and one output
-		// object per (version, target). Segment/insert stats alone cannot
-		// bound this fan-out on a channel-wide dispatch.
+		// The worker writes at most one object per (source file, target).
+		// V3 manifests can own several files with no legacy binlog array.
 		var sources int64
 		for _, s := range plan.SegmentBinlogs {
 			var files int64
-			for _, g := range s.GetDeltalogs() {
-				files += int64(len(g.GetBinlogs()))
+			if s.GetManifest() != "" {
+				paths, err := packed.GetDeltaLogPathsFromManifest(s.GetManifest(), compaction.CreateStorageConfig())
+				if err != nil {
+					return nil, merr.Wrapf(err, "count L0 manifest files for segment %d", s.GetSegmentID())
+				}
+				files = int64(len(paths))
+			} else {
+				for _, g := range s.GetDeltalogs() {
+					files += int64(len(g.GetBinlogs()))
+				}
 			}
 			sources += max(1, files)
 		}
@@ -659,12 +666,8 @@ func (t *L0CompactionTask) SaveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 			// object-storage I/O.
 			current := t.meta.GetSegment(ctx, seg.GetSegmentID())
 			if current != nil && current.GetStorageVersion() == storage.StorageV3 && current.GetManifestPath() != "" {
-				// A target retired by a concurrent compaction while the L0 plan
-				// was executing is gone for publication purposes: GetSegment
-				// returns dropped segments, and CommitSegmentManifest would only
-				// reject one with ErrSegmentNotFound. Skip it so the
-				// input-segment retirement below still runs and the task reaches
-				// meta_saved instead of re-polling a permanent error forever.
+				// Legacy plans skip retired targets. A certified plan's target
+				// check below the manifest locks will fail the publication.
 				if !meta.IsSegmentHealthy(current) {
 					mlog.Warn(ctx, "L0 target segment no longer healthy; skipping deltalog publication",
 						mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
@@ -719,21 +722,11 @@ func (t *L0CompactionTask) retireInputOperators() []meta.UpdateOperator {
 	return ops
 }
 
-// commitL0V3DeltalogsBatch publishes every V3 target's deltalogs together with
-// extraOperators — the L0 input-segment retirement — in ONE catalog transaction.
-// CommitSegmentManifests acquires all targets' manifest locks as a single atomic
-// operation, runs the loon transactions in parallel outside the segment writer
-// locks (from the same
-// dataCoord.manifestCommitConcurrency executor), and lands every pointer
-// advance plus extraOperators in one catalog transaction (a single UpdateSegmentsInfo).
-// Folding the input drops in makes the whole L0 result atomic — the targets gain their
-// merged deltalogs and the inputs turn Dropped/Compacted together, or nothing does —
-// while also collapsing the former per-segment CommitSegmentManifest fan-out that issued
-// one catalog.Update each.
-// A target dropped during the plan is skipped by the primitive itself as a benign
-// terminal outcome, so no ErrSegmentNotFound reaches here; only a real failure (stale
-// manifest, manifest I/O error) is returned, failing the save so the scheduler retries.
-// extraOperators still commit even when every target was skipped (commits empty).
+// commitL0V3DeltalogsBatch prepares manifest revisions outside segment writer
+// locks and publishes their pointers together with the caller's operators.
+// Certified plans check every frozen target and publish its cursor here, then
+// persist the task marker before retiring inputs separately. Legacy plans
+// may skip a retired target and include input retirement in this batch.
 func (t *L0CompactionTask) commitL0V3DeltalogsBatch(ctx context.Context, deltalogsBySegment map[int64][]*datapb.FieldBinlog, extraOperators ...meta.UpdateOperator) error {
 	commits := make([]meta.SegmentManifestCommit, 0, len(deltalogsBySegment))
 	for segmentID, deltalogs := range deltalogsBySegment {

@@ -561,25 +561,7 @@ func BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, deltalogs []*datap
 			s.StatsBinlogSize += l.GetMemorySize()
 		}
 	}
-	var deltaFrom uint64 = math.MaxUint64
-	var deltaTo uint64
-	for _, fb := range deltalogs {
-		for _, l := range fb.GetBinlogs() {
-			s.DeltaBinlogSize += l.GetMemorySize()
-			s.DeleteNumRows += l.DeleteKeyCount()
-			s.DeltaBinlogCount++
-			if from := l.GetTimestampFrom(); from > 0 && from < deltaFrom {
-				deltaFrom = from
-			}
-			if to := l.GetTimestampTo(); to > deltaTo {
-				deltaTo = to
-			}
-		}
-	}
-	if deltaFrom != math.MaxUint64 {
-		s.DeltaTimestampFrom = deltaFrom
-	}
-	s.DeltaTimestampTo = deltaTo
+	AccumulateDeltaStatistics(s, deltalogs)
 	if len(binlogs) > 0 {
 		s.LoadResource = BuildLoadResourceStatistics(binlogs)
 	}
@@ -748,4 +730,20 @@ func buildValidElementCounts(binlogs []*datapb.FieldBinlog) map[int64]int64 {
 		return nil
 	}
 	return counts
+}
+
+// AccumulateDeltaStatistics adds physical file size/count and logical deletes
+// for the supplied deltalogs, preserving previously observed timestamp bounds.
+func AccumulateDeltaStatistics(s *datapb.Statistics, deltalogs []*datapb.FieldBinlog) {
+	for _, fb := range deltalogs {
+		for _, file := range fb.GetBinlogs() {
+			s.DeltaBinlogSize += file.GetMemorySize()
+			s.DeleteNumRows += file.DeleteKeyCount()
+			s.DeltaBinlogCount++
+			if ts := file.GetTimestampFrom(); ts > 0 && (s.DeltaTimestampFrom == 0 || ts < s.DeltaTimestampFrom) {
+				s.DeltaTimestampFrom = ts
+			}
+			s.DeltaTimestampTo = max(s.DeltaTimestampTo, file.GetTimestampTo())
+		}
+	}
 }
