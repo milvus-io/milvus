@@ -529,7 +529,10 @@ KnowhereGrowingVectorIndex<T>::~KnowhereGrowingVectorIndex() {
 template <typename T>
 void
 KnowhereGrowingVectorIndex<T>::DisableAsyncBuild(const char* reason,
-                                                 bool deadline) {
+                                                 AsyncBuildFailure kind) {
+    if (async_disabled_) {
+        return;
+    }
     // Reclamation and metrics run after publication. An exception there
     // must never discard an engine that already has readers.
     if (built_) {
@@ -539,12 +542,19 @@ KnowhereGrowingVectorIndex<T>::DisableAsyncBuild(const char* reason,
     }
     async_disabled_ = true;
     engine_.reset();
-    auto& counter = deadline
-                        ? monitor::internal_core_growing_index_deadline_failures
-                        : monitor::internal_core_growing_index_build_failures;
-    counter.Increment();
-    LOG_WARN("async growing index disabled, retaining raw fallback: {}",
-             reason);
+    // Diagnostics are best effort once raw fallback has been selected.
+    try {
+        auto* counter = &monitor::internal_core_growing_index_build_failures;
+        if (kind == AsyncBuildFailure::kDeadline) {
+            counter = &monitor::internal_core_growing_index_deadline_failures;
+        } else if (kind == AsyncBuildFailure::kSubmit) {
+            counter = &monitor::internal_core_growing_index_submit_failures;
+        }
+        counter->Increment();
+        LOG_WARN("async growing index disabled, retaining raw fallback: {}",
+                 reason);
+    } catch (...) {
+    }
 }
 
 template <typename T>
@@ -553,6 +563,16 @@ KnowhereGrowingVectorIndex<T>::StartAsyncBuild() {
     if (task_) {
         return;
     }
+    auto handle_submit_failure = [&](const char* reason) {
+        // Append and Flush hold writer_mutex_ here. Even if the executor
+        // queued the task, it must check cancellation under that mutex before
+        // using the engine. Keep task_ so destruction can join that worker.
+        if (task_) {
+            task_->cancelled.store(true);
+        }
+        completion_ = {};
+        DisableAsyncBuild(reason, AsyncBuildFailure::kSubmit);
+    };
     try {
         task_ = std::make_shared<GrowingBuildTask>();
         auto build = std::make_shared<std::packaged_task<void()>>([this,
@@ -575,8 +595,10 @@ KnowhereGrowingVectorIndex<T>::StartAsyncBuild() {
             monitor::internal_core_growing_index_inflight_builds.Decrement();
         });
         completion_ = build->get_future().share();
+        BuildHook(GrowingBuildPhase::kBeforeSubmit);
         GrowingBuildPool(async_build_.pool_ratio)
             .add([build = std::move(build)] { (*build)(); });
+        BuildHook(GrowingBuildPhase::kAfterSubmit);
         // A rejected submission may throw or leave a broken promise.
         // A successful worker must take writer_mutex_ before doing any work.
         if (completion_.wait_for(std::chrono::seconds(0)) ==
@@ -584,16 +606,22 @@ KnowhereGrowingVectorIndex<T>::StartAsyncBuild() {
             completion_.get();
         }
     } catch (const std::exception& error) {
-        DisableAsyncBuild(error.what());
+        handle_submit_failure(error.what());
+    } catch (...) {
+        handle_submit_failure("unknown submission failure");
     }
 }
 
 template <typename T>
 void
 KnowhereGrowingVectorIndex<T>::BuildAndCatchUp() {
+    BuildHook(GrowingBuildPhase::kBeforeBuildAdmission);
     int64_t logical;
     {
         std::lock_guard lock(writer_mutex_);
+        if (task_->cancelled.load()) {
+            return;
+        }
         logical = BuildLogicalPrefix();
     }
     BuildHook(GrowingBuildPhase::kBeforeBuild);
@@ -640,7 +668,8 @@ KnowhereGrowingVectorIndex<T>::BuildAndCatchUp() {
             if (ElapsedMs(catchup_start) >= async_build_.catchup_deadline_ms &&
                 !fits_budget(target - logical)) {
                 std::lock_guard lock(writer_mutex_);
-                DisableAsyncBuild("catch-up deadline exceeded", true);
+                DisableAsyncBuild("catch-up deadline exceeded",
+                                  AsyncBuildFailure::kDeadline);
                 return;
             }
             // Bound by logical rows as well as vector bytes. In particular,

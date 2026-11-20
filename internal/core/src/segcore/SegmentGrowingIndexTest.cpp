@@ -2249,6 +2249,75 @@ TEST(GrowingIndexAsyncBuildTest, SyncFallbackBehavesLikeLegacy) {
     EXPECT_EQ(sr->seg_offsets_.size(), num_queries * top_k);
 }
 
+TEST(GrowingIndexAsyncBuildTest, SubmitFailureKeepsRawDataSearchable) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    ScopedAsyncGrowingBuild async_build(config, true);
+    ApplyAsyncBuildConfig(config);
+
+    const auto fixture =
+        MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                              knowhere::metric::L2,
+                              /*nullable=*/false);
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        fixture.schema, fixture.plan_str.data(), fixture.plan_str.size());
+
+    for (const auto failure :
+         {GrowingBuildPhase::kBeforeSubmit, GrowingBuildPhase::kAfterSubmit}) {
+        SCOPED_TRACE(static_cast<int>(failure));
+        std::atomic<bool> worker_ready{false};
+        std::atomic<int> builds{0};
+        int submissions = 0;
+        ScopedBuildHook hook([&](GrowingBuildPhase phase) {
+            if (phase == GrowingBuildPhase::kBeforeBuildAdmission) {
+                worker_ready.store(true);
+            } else if (phase == GrowingBuildPhase::kBeforeBuild) {
+                ++builds;
+            } else if (phase == failure) {
+                if (failure == GrowingBuildPhase::kAfterSubmit) {
+                    // The worker has obtained lifetime and passed its first
+                    // cancellation check. It still needs the writer lock.
+                    EXPECT_TRUE(WaitFlag(worker_ready, 10000));
+                }
+                ++submissions;
+                throw std::runtime_error("injected executor submit failure");
+            }
+        });
+        auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+        auto* impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+        ASSERT_NE(impl, nullptr);
+        auto& submit_failures =
+            milvus::monitor::internal_core_growing_index_submit_failures;
+        const auto failures_before = submit_failures.Value();
+
+        constexpr int64_t initial_rows = 25000;
+        auto initial =
+            InsertAsyncBatch(segment.get(), fixture.schema, initial_rows, 17);
+        auto next =
+            InsertAsyncBatch(segment.get(), fixture.schema, 2000, 50017);
+        EXPECT_EQ(impl->get_row_count(), initial_rows + 2000);
+        EXPECT_EQ(submissions, 1);
+        EXPECT_DOUBLE_EQ(submit_failures.Value(), failures_before + 1);
+        EXPECT_FALSE(impl->PinGrowingIndex(nullptr, fixture.vec));
+        EXPECT_TRUE(impl->HasRawData(fixture.vec.get()));
+
+        auto expect_exact_hit = [&](const GeneratedData& batch,
+                                    int64_t offset) {
+            auto vectors = batch.get_col<float>(fixture.vec);
+            auto probe = MakeSingleDensePlaceholder(plan.get(), vectors.data());
+            auto result = segment->Search(plan.get(), probe.get(), 1000000);
+            ASSERT_FALSE(result->seg_offsets_.empty());
+            EXPECT_EQ(result->seg_offsets_[0], offset);
+            EXPECT_NEAR(result->distances_[0], 0.0f, 1e-5);
+        };
+        expect_exact_hit(initial, 0);
+        expect_exact_hit(next, initial_rows);
+        segment.reset();
+        EXPECT_EQ(builds.load(), 0);
+    }
+}
+
 TEST(GrowingIndexAsyncBuildTest, BuildFailureDisablesIndexPermanently) {
     const auto failures_before =
         milvus::monitor::internal_core_growing_index_build_failures.Value();

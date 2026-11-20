@@ -323,6 +323,8 @@ std::map<std::string, std::string> growingIndexCatchupRowsLabels{
     {"type", "catchup_rows"}};
 std::map<std::string, std::string> growingIndexInflightLabels{
     {"type", "first_build"}};
+std::map<std::string, std::string> growingIndexSubmitFailureLabels{
+    {"type", "submit"}};
 std::map<std::string, std::string> growingIndexFailureLabels{{"type", "build"}};
 std::map<std::string, std::string> growingIndexDeadlineFailureLabels{
     {"type", "deadline"}};
@@ -363,7 +365,10 @@ DEFINE_PROMETHEUS_GAUGE(internal_core_growing_index_inflight_builds,
                         growingIndexInflightLabels)
 DEFINE_PROMETHEUS_COUNTER_FAMILY(
     internal_core_growing_index_failures,
-    "[cpp]growing interim index build failures (index disabled)")
+    "[cpp]growing interim index failures (index disabled)")
+DEFINE_PROMETHEUS_COUNTER(internal_core_growing_index_submit_failures,
+                          internal_core_growing_index_failures,
+                          growingIndexSubmitFailureLabels)
 DEFINE_PROMETHEUS_COUNTER(internal_core_growing_index_build_failures,
                           internal_core_growing_index_failures,
                           growingIndexFailureLabels)

@@ -101,8 +101,11 @@ class KnowhereGrowingVectorIndex final
     void
     BuildAndCatchUp();
 
+    enum class AsyncBuildFailure { kBuild, kDeadline, kSubmit };
+
     void
-    DisableAsyncBuild(const char* reason, bool deadline = false);
+    DisableAsyncBuild(const char* reason,
+                      AsyncBuildFailure kind = AsyncBuildFailure::kBuild);
 
     void
     BuildFromSource(int64_t physical_count, int64_t logical_count);

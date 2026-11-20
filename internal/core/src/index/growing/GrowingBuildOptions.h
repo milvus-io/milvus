@@ -33,7 +33,10 @@ enum class GrowingBuildPhase {
     kBeforeBuild,
     kAfterBuild,
     kAfterCatchupRound,
-    kBeforeFinalize
+    kBeforeFinalize,
+    kBeforeSubmit,
+    kAfterSubmit,
+    kBeforeBuildAdmission,
 };
 // Install before constructing test segments and clear only after their workers join.
 extern std::function<void(GrowingBuildPhase)> growing_build_test_hook;
