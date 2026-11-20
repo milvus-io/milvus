@@ -133,12 +133,14 @@ func installBackends(t *testing.T) (*physicalLog, *physicalLog, OpenBackend) {
 		}()
 		return s, nil
 	}).Build()
-	return p, w, func(_ context.Context, name message.WALName, _ types.AccessMode) (walimpls.WALImpls, error) {
-		if name == p.name {
-			return p, nil
-		}
-		if name == w.name {
-			return w, nil
+	return p, w, func(_ context.Context, name message.WALName, mode types.AccessMode) (walimpls.WALImpls, error) {
+		for _, b := range []*physicalLog{p, w} {
+			if name == b.name {
+				if mode == types.AccessModeRO {
+					return &readOnlyLog{b}, nil
+				}
+				return b, nil
+			}
 		}
 		return nil, merr.WrapErrServiceUnavailableMsg("backend unavailable")
 	}
@@ -234,8 +236,10 @@ func TestLinkedWALCrashAfterBoundary(t *testing.T) {
 		require.Equal(t, p.name, auto.WALName())
 		floor, err := message.WALSwitchStart(a)
 		require.NoError(t, err)
-		// RecoveryStorage supplies the final writer and transfers all acquired handles.
-		recovered := New(w, open, p, w)
+		// Recovery starts from the checkpoint backend and explicitly selects
+		// the target recorded in the durable marker without appending it again.
+		recovered := New(p, open)
+		require.NoError(t, recovered.SwitchWriterForRecovery(ctx, floor.WALName()))
 		require.Equal(t, w.name, recovered.WALName())
 		require.Len(t, w.messages, 1, "empty target has only its durable anchor")
 		_, err = recovered.Append(ctx, ordinary(30, floor))
@@ -349,6 +353,8 @@ func TestLinkedWALRejectsUnavailableAndInvalidLinks(t *testing.T) {
 
 type readOnlyLog struct{ *physicalLog }
 
+func (*readOnlyLog) Close() {}
+
 func (b *readOnlyLog) Channel() types.PChannelInfo {
 	info := b.physicalLog.Channel()
 	info.AccessMode = types.AccessModeRO
@@ -391,15 +397,22 @@ func TestLinkedWALReadOnlyHistory(t *testing.T) {
 	})
 }
 
-func TestRecoveredWritersTransferOwnership(t *testing.T) {
+func TestRecoveryWritersHaveOneOwner(t *testing.T) {
 	mockey.PatchConvey("recovery handles are reused and closed exactly once", t, func() {
 		p, w, _ := installBackends(t)
 		closed := map[message.WALName]int{}
 		mockey.Mock((*physicalLog).Close).To(func(b *physicalLog) { closed[b.name]++ }).Build()
-		auto := New(w, func(context.Context, message.WALName, types.AccessMode) (walimpls.WALImpls, error) {
-			t.Fatal("transferred backend must not be reopened")
-			return nil, nil
-		}, p, w)
+		opens := 0
+		auto := New(p, func(_ context.Context, name message.WALName, mode types.AccessMode) (walimpls.WALImpls, error) {
+			require.Equal(t, w.name, name)
+			require.Equal(t, types.AccessModeRW, mode)
+			opens++
+			return w, nil
+		})
+		require.NoError(t, auto.SwitchWriterForRecovery(context.Background(), w.name))
+		require.NoError(t, auto.SwitchWriterForRecovery(context.Background(), p.name))
+		require.NoError(t, auto.SwitchWriterForRecovery(context.Background(), w.name))
+		require.Equal(t, 1, opens)
 		require.Equal(t, w.name, auto.WALName())
 		require.NoError(t, auto.Truncate(context.Background(), pulsar.NewPulsarID(pulsarclient.NewMessageID(1, 0, 0, 0))))
 		auto.Close()

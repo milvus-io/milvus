@@ -126,7 +126,7 @@ func (o *openerAdaptorImpl) Open(ctx context.Context, opt *wal.OpenOption) (wal.
 	return wal, nil
 }
 
-// backendOpener keeps physical writer acquisition explicit during recovery.
+// backendOpener supplies physical handles to auto during recovery and live use.
 func (o *openerAdaptorImpl) backendOpener(channel types.PChannelInfo) autowalimpls.OpenBackend {
 	return func(ctx context.Context, name message.WALName, mode types.AccessMode) (walimpls.WALImpls, error) {
 		opener, err := o.getOrCreateOpenerImpl(ctx, name)
@@ -198,6 +198,7 @@ func (o *openerAdaptorImpl) getOrCreateOpenerImpl(ctx context.Context, walName m
 
 // openRWWAL opens a read write wal instance for the channel.
 func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, opt *wal.OpenOption) (wal.WAL, error) {
+	l = autowalimpls.New(l, o.backendOpener(opt.Channel))
 	id := o.idAllocator.Allocate()
 	roWAL := adaptImplsToROWAL(l, func() {
 		o.walInstances.Remove(id)
@@ -227,8 +228,6 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 	}
 	liveReady := make(chan struct{})
 	builder := newRecoveryStreamBuilder(roWAL, nil, liveReady)
-	builder.openBackend = o.backendOpener(opt.Channel)
-	defer builder.closeUntransferredWriters()
 	rs, snapshot, err := recovery.RecoverRecoveryStorage(
 		ctx,
 		builder,
@@ -243,9 +242,7 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 			}
 		}),
 		recovery.WithRecoveryComplete(func(snapshot *recovery.RecoverySnapshot) {
-			liveWAL := builder.finishRecovery()
-			roWAL.roWALImpls = liveWAL
-			param = newInterceptorParams(ctx, liveWAL, snapshot.RecoveryBarrier)
+			param = newInterceptorParams(ctx, l, snapshot.RecoveryBarrier)
 			resources.param = param
 			param.WriteAheadBuffer.SetPressureController(roWAL.MuxRateLimitObserverRegistryImpl)
 			builder.writeAheadBuffer = param.WriteAheadBuffer

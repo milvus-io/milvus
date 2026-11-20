@@ -35,7 +35,7 @@ func (*recoveryPhysicalWAL) Channel() types.PChannelInfo {
 func (*recoveryPhysicalWAL) Close() { panic("mockey") }
 
 func TestRecoveryBuilderWriterOwnership(t *testing.T) {
-	for _, scenario := range []string{"success", "open_error", "barrier_error", "no_opener"} {
+	for _, scenario := range []string{"success", "open_error", "barrier_error"} {
 		t.Run(scenario, func(t *testing.T) {
 			mockey.PatchConvey(scenario, t, func() {
 				resource.InitForTest(t)
@@ -43,26 +43,26 @@ func TestRecoveryBuilderWriterOwnership(t *testing.T) {
 				target := &recoveryPhysicalWAL{name: message.WALNameWoodpecker}
 				closed := map[message.WALName]int{}
 				mockey.Mock((*recoveryPhysicalWAL).Close).To(func(w *recoveryPhysicalWAL) { closed[w.name]++ }).Build()
-				ro := adaptImplsToROWAL(old, func() {})
-				defer ro.Close()
-				builder := newRecoveryStreamBuilder(ro, nil, make(chan struct{}))
 				opens, probes := 0, 0
-				if scenario != "no_opener" {
-					builder.openBackend = func(_ context.Context, name message.WALName, mode types.AccessMode) (walimpls.WALImpls, error) {
-						opens++
-						require.Equal(t, target.name, name)
-						require.Equal(t, types.AccessModeRW, mode)
-						if scenario == "open_error" {
-							return nil, context.DeadlineExceeded
-						}
-						return target, nil
+				auto := autowalimpls.New(old, func(_ context.Context, name message.WALName, mode types.AccessMode) (walimpls.WALImpls, error) {
+					opens++
+					require.Equal(t, target.name, name)
+					require.Equal(t, types.AccessModeRW, mode)
+					if scenario == "open_error" {
+						return nil, context.DeadlineExceeded
 					}
-				}
+					return target, nil
+				})
+				ro := adaptImplsToROWAL(auto, func() {})
+				resources := &walOpenResources{roWAL: ro}
+				defer resources.Close()
+				builder := newRecoveryStreamBuilder(ro, nil, make(chan struct{}))
 				start := wp.NewWpID(&wplog.LogMessageId{SegmentId: 1, EntryId: 0})
 				barrier := recoveryTestMessage(t, message.MessageTypeRecoveryBarrier, 100).WithLastConfirmed(start).IntoImmutableMessage(wp.NewWpID(&wplog.LogMessageId{SegmentId: 1, EntryId: 1}))
 				mockey.Mock(sendFirstTimeTick).To(func(_ context.Context, w walimpls.WALImpls, last message.MessageID) (message.ImmutableMessage, error) {
 					require.Equal(t, 1, opens, "writer acquired before allocating barrier")
-					require.Same(t, target, w)
+					require.Same(t, auto, w)
+					require.Equal(t, target.name, w.WALName())
 					require.True(t, start.EQ(last))
 					probes++
 					if scenario == "barrier_error" {
@@ -74,35 +74,36 @@ func TestRecoveryBuilderWriterOwnership(t *testing.T) {
 				if scenario != "success" {
 					require.Error(t, err)
 					require.Nil(t, result)
-					require.Same(t, old, builder.RWWALImpls())
-					builder.closeUntransferredWriters()
+					require.Same(t, auto, builder.RWWALImpls())
+					resources.Close()
 					if scenario == "barrier_error" {
 						require.Equal(t, 1, closed[target.name])
+					} else {
+						require.Zero(t, probes)
+						require.Zero(t, closed[target.name])
 					}
-					require.Zero(t, closed[old.name], "original handle remains owned by opener")
+					require.Equal(t, 1, closed[old.name], "the opener closes all owned handles through auto")
 					return
 				}
 				require.NoError(t, err)
 				require.Same(t, barrier, result)
-				require.Same(t, target, builder.RWWALImpls())
+				require.Same(t, auto, builder.RWWALImpls())
 				_, err = builder.SwitchWAL(context.Background(), start)
 				require.NoError(t, err)
 				require.Equal(t, 1, opens, "revisits reuse the owned writer")
 				require.Equal(t, 2, probes, "every leg gets a fresh barrier")
-				live := builder.finishRecovery()
-				require.IsType(t, &autowalimpls.WAL{}, live)
-				require.Equal(t, target.name, live.WALName())
-				ro.roWALImpls = live
-				builder.closeUntransferredWriters()
+				require.Equal(t, target.name, auto.WALName())
+				resources.Release()
+				resources.Close()
 				require.Empty(t, closed)
-				live.Close()
+				ro.Close()
 				require.Equal(t, map[message.WALName]int{old.name: 1, target.name: 1}, closed)
 			})
 		})
 	}
 }
 
-func TestRecoveryScannerStopsAtPhysicalSwitch(t *testing.T) {
+func TestRecoveryScannerStopsAtSwitchWithAuto(t *testing.T) {
 	resource.InitForTest(t)
 	l := newRecoveryTestWAL(t)
 	first := appendRecoveryTestMessage(t, l, message.MessageTypeTimeTick, 10)
@@ -117,7 +118,12 @@ func TestRecoveryScannerStopsAtPhysicalSwitch(t *testing.T) {
 		}
 	}
 	probe := appendRecoveryTestMessage(t, l, message.MessageTypeRecoveryBarrier, 100)
-	ro := adaptImplsToROWAL(l, func() {})
+	auto := autowalimpls.New(l, func(ctx context.Context, _ message.WALName, mode types.AccessMode) (walimpls.WALImpls, error) {
+		require.Equal(t, types.AccessModeRO, mode, "reader traversal must not acquire the next writer")
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	ro := adaptImplsToROWAL(auto, func() {})
 	defer ro.Close()
 	stream := newRecoveryStreamBuilder(ro, nil, make(chan struct{})).Build(recovery.BuildRecoveryStreamParam{
 		StartCheckpoint: first.MessageID(), RecoveryBarrier: probe, StopAtWALSwitch: true,

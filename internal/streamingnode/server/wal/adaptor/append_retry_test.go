@@ -105,7 +105,7 @@ func TestAppendObservationEnclosesAutoRetries(t *testing.T) {
 	}
 }
 
-func TestRecoveryLiveWritesKeepAdaptorObservation(t *testing.T) {
+func TestAutoLiveWritesKeepAdaptorObservation(t *testing.T) {
 	resource.InitForTest(t)
 	exporter := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter), sdktrace.WithSampler(sdktrace.AlwaysSample()))
@@ -121,19 +121,15 @@ func TestRecoveryLiveWritesKeepAdaptorObservation(t *testing.T) {
 	targetID := wp.NewWpID(&wplog.LogMessageId{SegmentId: 1, EntryId: 0})
 	old, target := appendID(oldID), appendID(targetID)
 	opens := 0
-	builder := &recoveryStreamBuilderImpl{
-		basicWAL: old, writers: map[message.WALName]walimpls.WALImpls{old.WALName(): old},
-		openBackend: func(_ context.Context, name message.WALName, mode types.AccessMode) (walimpls.WALImpls, error) {
-			require.Equal(t, message.WALNameWoodpecker, name)
-			require.Equal(t, types.AccessModeRW, mode)
-			opens++
-			if opens == 1 {
-				return nil, context.DeadlineExceeded
-			}
-			return target, nil
-		},
-	}
-	live := builder.finishRecovery()
+	live := autowalimpls.New(old, func(_ context.Context, name message.WALName, mode types.AccessMode) (walimpls.WALImpls, error) {
+		require.Equal(t, message.WALNameWoodpecker, name)
+		require.Equal(t, types.AccessModeRW, mode)
+		opens++
+		if opens == 1 {
+			return nil, context.DeadlineExceeded
+		}
+		return target, nil
+	})
 	w := &walAdaptorImpl{rwWALImpls: live}
 	marker := newFenceTestAlterWALMessage().WithLastConfirmed(oldID)
 	_, err := w.appendOne(context.Background(), marker)
