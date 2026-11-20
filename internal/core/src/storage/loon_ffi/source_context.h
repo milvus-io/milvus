@@ -31,6 +31,13 @@ SourceContextResource(const std::string& source, const std::string& spec);
 milvus_storage::SourceReadContextPtr
 OpenSourceReadContext(const std::string& source, const std::string& spec);
 
+// Resolve an explicit handle exactly once, retaining the validated context.
+// A released explicit handle must never select the legacy reader path.
+milvus_storage::SourceReadContextPtr
+RetainOrOpenSourceReadContext(uintptr_t handle,
+                              const std::string& source,
+                              const std::string& spec);
+
 std::unique_ptr<milvus_storage::api::Reader>
 CreateSourceReader(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& groups,

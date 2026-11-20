@@ -17,6 +17,8 @@
 #include <arrow/c/bridge.h>
 #include <atomic>
 #include <cstdlib>
+#include <future>
+#include <thread>
 #include <nlohmann/json.hpp>
 #include "gtest/gtest.h"
 #include "common/common_type_c.h"
@@ -143,6 +145,86 @@ TEST(SourceContextRouting, NativeFilesystemChecksScopeAfterPropertyInjection) {
     }
     // Neither configuration nor a rejected path fetches credentials.
     EXPECT_EQ(provider->calls.load(), 0);
+}
+
+LoonSourceReadContextHandle
+MakeRetainedContext(std::atomic<int>& destroyed) {
+    const char* roots[] = {kRoot};
+    const LoonSourceReadContextOptions options{
+        1,
+        sizeof(LoonSourceReadContextOptions),
+        "account123",
+        roots,
+        1,
+        0,
+        3000};
+    const LoonSourceCredentialCallbacks callbacks{
+        1,
+        sizeof(LoonSourceCredentialCallbacks),
+        &destroyed,
+        [](void*,
+           const LoonSourceCredentialRequest*,
+           LoonSourceCredentialResult* result) {
+            result->status = LOON_SOURCE_CREDENTIAL_DENIED;
+        },
+        [](void*, LoonSourceCredentialResult*) {},
+        [](void* data) { ++*static_cast<std::atomic<int>*>(data); }};
+    LoonSourceReadContextHandle handle = 0;
+    auto result =
+        loon_source_read_context_create(&options, &callbacks, &handle);
+    EXPECT_EQ(result.err_code, 0);
+    loon_ffi_free_result(&result);
+    return handle;
+}
+
+TEST(SourceContextRouting, ExplicitHandleRetainsOneValidatedContext) {
+    std::atomic<int> destroyed{0};
+    auto handle = MakeRetainedContext(destroyed);
+    ASSERT_NE(handle, 0);
+    auto context =
+        milvus::storage::RetainOrOpenSourceReadContext(handle, "", "");
+    ASSERT_NE(context, nullptr);
+    loon_source_read_context_release(handle);
+    EXPECT_EQ(destroyed.load(), 0);
+    EXPECT_EQ(context->Fetch(kRoot, LOON_SOURCE_READ).status,
+              LOON_SOURCE_CREDENTIAL_DENIED);
+    try {
+        milvus::storage::RetainOrOpenSourceReadContext(handle, "", "");
+        FAIL() << "released explicit handle fell back to legacy credentials";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(static_cast<int>(error.get_error_code()), 117);
+    }
+    context.reset();
+    EXPECT_EQ(destroyed.load(), 1);
+}
+
+TEST(SourceContextRouting, ConcurrentHandleReleaseNeverSelectsLegacy) {
+    for (int i = 0; i < 100; ++i) {
+        std::atomic<int> destroyed{0};
+        auto handle = MakeRetainedContext(destroyed);
+        ASSERT_NE(handle, 0);
+        std::promise<void> start;
+        auto ready = start.get_future();
+        std::thread release([handle, ready = std::move(ready)]() mutable {
+            ready.wait();
+            loon_source_read_context_release(handle);
+        });
+        start.set_value();
+        milvus_storage::SourceReadContextPtr retained;
+        try {
+            retained =
+                milvus::storage::RetainOrOpenSourceReadContext(handle, "", "");
+            EXPECT_NE(retained, nullptr);
+        } catch (const milvus::SegcoreError& error) {
+            EXPECT_EQ(static_cast<int>(error.get_error_code()), 117);
+        }
+        release.join();
+        if (retained) {
+            EXPECT_EQ(destroyed.load(), 0);
+            retained.reset();
+        }
+        EXPECT_EQ(destroyed.load(), 1);
+    }
 }
 
 class FailingBatchReader : public arrow::RecordBatchReader {

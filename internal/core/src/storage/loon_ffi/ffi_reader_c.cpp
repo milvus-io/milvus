@@ -146,23 +146,17 @@ NewPackedFFIReaderWithManifest(const LoonManifest* loon_manifest,
             return milvus::FailureCStatus(&error);
         }
 
-        if (source_context &&
-            !milvus_storage::GetSourceReadContext(source_context)) {
-            ThrowInfo(static_cast<milvus::ErrorCode>(117),
-                      "invalid source context handle");
-        }
-        auto reader = GetLoonReader(
-            column_groups,
-            schema,
-            needed_columns,
-            needed_columns_size,
-            properties,
-            c_plugin_context,
-            source_context
-                ? milvus_storage::GetSourceReadContext(source_context)
-                : milvus::storage::OpenSourceReadContext(
-                      external_source ? external_source : "",
-                      external_spec ? external_spec : ""));
+        auto reader =
+            GetLoonReader(column_groups,
+                          schema,
+                          needed_columns,
+                          needed_columns_size,
+                          properties,
+                          c_plugin_context,
+                          milvus::storage::RetainOrOpenSourceReadContext(
+                              source_context,
+                              external_source ? external_source : "",
+                              external_spec ? external_spec : ""));
 
         auto state = std::make_unique<PackedReaderState>();
         state->reader = std::move(reader);
@@ -206,23 +200,17 @@ NewPackedFFIReaderWithColumnGroups(const LoonColumnGroups* column_groups,
             return milvus::FailureCStatus(&error);
         }
 
-        if (source_context &&
-            !milvus_storage::GetSourceReadContext(source_context)) {
-            ThrowInfo(static_cast<milvus::ErrorCode>(117),
-                      "invalid source context handle");
-        }
-        auto reader = GetLoonReader(
-            imported_column_groups,
-            schema,
-            needed_columns,
-            needed_columns_size,
-            properties,
-            c_plugin_context,
-            source_context
-                ? milvus_storage::GetSourceReadContext(source_context)
-                : milvus::storage::OpenSourceReadContext(
-                      external_source ? external_source : "",
-                      external_spec ? external_spec : ""));
+        auto reader =
+            GetLoonReader(imported_column_groups,
+                          schema,
+                          needed_columns,
+                          needed_columns_size,
+                          properties,
+                          c_plugin_context,
+                          milvus::storage::RetainOrOpenSourceReadContext(
+                              source_context,
+                              external_source ? external_source : "",
+                              external_spec ? external_spec : ""));
 
         auto state = std::make_unique<PackedReaderState>();
         state->reader = std::move(reader);

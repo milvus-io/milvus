@@ -5,7 +5,7 @@
 - **Status:** Draft
 - **Component:** Proxy, Coordinator, DataNode, QueryNode, Storage
 - **Related Issues:** [#55755](https://github.com/milvus-io/milvus/issues/55755)
-- **Related work:** [Azure SAS renewal](https://github.com/milvus-io/milvus-storage/pull/817)
+- **Related work:** [Retained source context](https://github.com/milvus-io/milvus-storage/pull/830), [Azure SAS renewal](https://github.com/milvus-io/milvus-storage/pull/817)
 - **Released:** Not released
 
 ## Summary
@@ -88,7 +88,9 @@ Go callbacks use `cgo.Handle`, not retained Go pointers. Callback results use
 transient C-owned buffers copied by the native ABI before release. Reader-owned
 sessions outlive the original Proxy request; job-owned contexts honor job
 cancellation. Each credential fetch has a finite deadline. The session closes
-after retained native owners and callbacks drain.
+after retained native owners and callbacks drain. Packed-reader FFI entry points
+resolve an explicit handle once and retain the same validated shared context;
+release overlapping that lookup must either retain authorization or fail closed.
 
 The source context validates original URIs against parsed account, endpoint,
 container and root boundaries. Routing properties do not authorize access.
@@ -113,10 +115,12 @@ source failures request retry. Diagnostics omit credentials and provider details
 
 ## Compatibility, deprecation and migration
 
-This is an integration draft. The storage source-context API is not in the
-currently pinned upstream dependency. A reviewed native dependency pin, complete
-Linux build and failure-path verification are required before merging or enabling
-the implementation. Merely merging this engine patch cannot enable user-bound reads.
+This integration draft pins the public candidate from
+[milvus-storage #830](https://github.com/milvus-io/milvus-storage/pull/830)
+(`62105c5dfbe48edd25db30f2ff5b1e7894ce44a3`). Replace it with the reviewed,
+merged main commit before merging. Complete Linux engine builds and failure-path
+verification remain required before enabling the implementation. Merely merging
+this engine patch cannot enable user-bound reads.
 
 Unbound collections retain legacy behavior. Deployments must review or re-register
 them if they require source-user authorization everywhere. All processes must

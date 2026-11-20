@@ -136,6 +136,19 @@ OpenSourceReadContext(const std::string& source, const std::string& spec) {
     return context;
 }
 
+milvus_storage::SourceReadContextPtr
+RetainOrOpenSourceReadContext(uintptr_t handle,
+                              const std::string& source,
+                              const std::string& spec) {
+    if (!handle)
+        return OpenSourceReadContext(source, spec);
+    auto context = milvus_storage::GetSourceReadContext(handle);
+    if (!context) {
+        ThrowInfo(static_cast<ErrorCode>(117), "invalid source context handle");
+    }
+    return context;
+}
+
 std::unique_ptr<milvus_storage::api::Reader>
 CreateSourceReader(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& groups,
