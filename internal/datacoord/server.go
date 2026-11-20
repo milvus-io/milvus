@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -541,13 +540,58 @@ func (s *Server) startDataCoord() {
 	s.importInspector.Reload()
 	s.startServerLoop()
 	s.afterStart()
+	started := make(chan struct{})
+	s.serverLoopWg.Go(func() {
+		select {
+		case <-started:
+		case <-s.serverLoopCtx.Done():
+			return
+		}
+		if s.manifestIndexBackfillInspector != nil {
+			s.manifestIndexBackfillInspector.Start()
+		}
+		if s.manifestIndexRollbackInspector != nil {
+			s.manifestIndexRollbackInspector.Start()
+		}
+		s.meta.RecoverPendingManifestIndexes(s.serverLoopCtx, s.resumeDataViewAfterIndexRecovery)
+	})
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
+	close(started)
 	// The first prewarm round reads the recovered metadata through a healthy
 	// DataCoord; starting it earlier could skip that round as not ready.
 	if s.talonPrewarmInspector != nil {
 		s.talonPrewarmInspector.Start()
 	}
 	sessionutil.SaveServerInfo(typeutil.MixCoordRole, s.session.GetServerID())
+}
+
+func (s *Server) resumeDataViewAfterIndexRecovery(collectionID int64) error {
+	ctx := s.serverLoopCtx
+	live, err := s.dataViewCollectionRecoveryValidator(ctx, collectionID)
+	if err != nil || !live {
+		return err
+	}
+	ref, err := s.dataViewManager.Latest(ctx, collectionID)
+	if err != nil {
+		return err
+	}
+	if ref != nil {
+		ref.Deref()
+		_, err := s.dataViewManager.RecomputeNow(ctx, collectionID, s.meta.LoadableProjection)
+		return err
+	}
+	collection := s.meta.GetCollection(collectionID)
+	if collection == nil {
+		return nil
+	}
+	segments, err := s.meta.LoadableProjection(ctx, collectionID, nil)
+	if err != nil {
+		return err
+	}
+	_, err = s.dataViewManager.OnBootstrapCollection(ctx, dataview.BootstrapCollectionDataViewEvent{
+		CollectionID: collectionID, VChannels: collection.VChannelNames, Segments: segments,
+	})
+	return err
 }
 
 func (s *Server) GetServerID() int64 {
@@ -868,36 +912,6 @@ func loadDomainMetas(catalog metastore.DataCoordCatalog, chunkManager storage.Ch
 	}
 }
 
-// Summary publication retires task rows that the legacy readers and GC need.
-// Enable startup only in the same revision that installs the summary consumers.
-const segmentIndexSummaryReadersReady = true
-
-func (s *Server) initIndexMetadataMode() error {
-	mode := &Params.DataCoordCfg.SegmentIndexSummariesEnabled
-	summaryMode, err := strconv.ParseBool(mode.GetValue())
-	if err != nil {
-		return merr.WrapErrServiceInternalMsg("%s requires a boolean value", mode.Key)
-	}
-	if summaryMode && !Params.CommonCfg.UseLoonFFI.GetAsBool() {
-		return merr.Wrap(merr.ErrServiceUnimplemented, "segment index summaries require common.storage.useLoonFFI=true")
-	}
-	if summaryMode && (!index.WriteSegmentIndexToManifest() || Params.DataCoordCfg.ManifestIndexBackfillEnabled.GetAsBool()) {
-		return merr.Wrap(merr.ErrServiceUnimplemented, "segment index summaries require manifest publication with backfill and rollback disabled")
-	}
-	if summaryMode && !segmentIndexSummaryReadersReady {
-		return merr.Wrap(merr.ErrServiceUnimplemented, "segment index summaries require summary-aware readers and garbage collection")
-	}
-	if modeCatalog, ok := s.catalog.(interface {
-		EnsureIndexMetadataMode(context.Context, bool, bool) error
-	}); ok {
-		return modeCatalog.EnsureIndexMetadataMode(s.ctx, summaryMode, len(s.metaStore.GetCollectionIDs()) != 0)
-	}
-	if summaryMode {
-		return merr.Wrap(merr.ErrServiceUnimplemented, "catalog cannot persist index metadata mode")
-	}
-	return nil
-}
-
 func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	// MixCoord injects the shared catalog and MetaStore. A standalone
 	// DataCoord (e.g. in tests) builds its own over the local KV.
@@ -909,9 +923,6 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	}
 	if s.meta != nil {
 		return nil
-	}
-	if err := s.initIndexMetadataMode(); err != nil {
-		return err
 	}
 	// DataView persistence lives on the concrete KV catalog, not on the
 	// DataCoordCatalog interface.
@@ -1224,12 +1235,6 @@ func (s *Server) collectMetaMetrics(ctx context.Context) {
 func (s *Server) startTaskScheduler() {
 	s.statsInspector.Start()
 	s.indexInspector.Start()
-	if s.manifestIndexBackfillInspector != nil {
-		s.manifestIndexBackfillInspector.Start()
-	}
-	if s.manifestIndexRollbackInspector != nil {
-		s.manifestIndexRollbackInspector.Start()
-	}
 	s.analyzeInspector.Start()
 	s.segmentChangeInspector.Start()
 	// Note: externalCollectionInspector.Start() is called in startServerLoop as a goroutine

@@ -4653,7 +4653,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes_NonManifestKeepsLegacyOrder(t 
 // when a caller has an incomplete record view.
 func TestGarbageCollector_DroppedSegmentIndexFilesComeFromManifestAfterReload(t *testing.T) {
 	meta.MockManifestIndexSubmissions(t)
-	meta.WithSegmentIndexManifestWrites(t, true)
+	meta.WithSegmentIndexManifestWrites(t, false)
 
 	const segmentID = int64(3101)
 	basePath := "/tmp/test-gc-dropped-reload/insert_log/100/10/3101"

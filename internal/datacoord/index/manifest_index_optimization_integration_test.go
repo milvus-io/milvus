@@ -36,6 +36,7 @@ import (
 )
 
 func TestEmptyManifestMarkerNormalizedAcrossRestarts(t *testing.T) {
+	meta.WithSegmentIndexManifestWrites(t, true)
 	meta.MockManifestIndexSubmissions(t)
 	ctx := context.Background()
 	catalog := catalogkv.NewCatalog(meta.NewMetaMemoryKV(), "", "")
@@ -50,13 +51,17 @@ func TestEmptyManifestMarkerNormalizedAcrossRestarts(t *testing.T) {
 		return nil, nil
 	}).Build()
 	defer reader.UnPatch()
-	failure := mockey.Mock((*catalogkv.Catalog).AlterSegments).Return(merr.ErrServiceUnavailable).Build()
+	failure := mockey.Mock((*catalogkv.Catalog).Update).Return(merr.ErrServiceUnavailable).Build()
 	t.Cleanup(func() { failure.UnPatch() })
 	require.ErrorIs(t, m.ReloadSegmentIndexesFromManifests(ctx), merr.ErrServiceUnavailable)
 	failure.UnPatch()
 	require.True(t, m.GetSegment(ctx, 8001).GetManifestHasIndex())
 	reads = 0
 	first, _ := BootMetaForRestart(t, catalog, 300)
+	require.True(t, first.ManifestIndexesPending(8001))
+	require.Zero(t, reads)
+	first.RecoverPendingManifestIndexes(ctx, func(int64) error { return nil })
+	require.Equal(t, meta.CurrentIndexSummaryVersion, first.GetSegment(ctx, 8001).GetIndexSummaryVersion())
 	require.False(t, first.GetSegment(ctx, 8001).GetManifestHasIndex())
 	require.Equal(t, 1, reads)
 	second, _ := BootMetaForRestart(t, catalog, 300)

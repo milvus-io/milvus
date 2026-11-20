@@ -1064,9 +1064,9 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 			return
 		}
 
-		modeKey := paramtable.Get().DataCoordCfg.SegmentIndexSummariesEnabled.Key
+		modeKey := paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.Key
 		if normalizedKey == pkgconfig.FormatKey(modeKey) {
-			writeJSONError(writer, fmt.Sprintf("%s cannot be modified through this endpoint; select the mode at cluster initialization", modeKey), http.StatusBadRequest)
+			writeJSONError(writer, fmt.Sprintf("%s cannot be modified through this endpoint; change the configuration and restart DataCoord", modeKey), http.StatusBadRequest)
 			return
 		}
 

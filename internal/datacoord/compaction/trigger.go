@@ -911,6 +911,9 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *meta.SegmentInfo, 
 }
 
 func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *meta.SegmentInfo) bool {
+	if t.meta.ManifestIndexesPending(segment.GetID()) {
+		return false
+	}
 	if Params.DataCoordCfg.AutoUpgradeSegmentIndex.GetAsBool() {
 		// index version of segment lower than resolved version and IndexFileKeys should have value, trigger compaction
 		indexIDToSegIdxes := t.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)

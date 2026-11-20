@@ -126,6 +126,7 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 			require.Len(t, rows, 1)
 			kv.FailAtomicUpdate = false
 			m = boot()
+			m.RecoverPendingManifestIndexes(ctx, func(int64) error { return nil })
 			for range 2 {
 				n, err = m.RollbackSegmentIndexes(ctx, NewGCManifestReadIO(t), meta.RestartSegID, meta.RestartBuildID, meta.RestartBuildID+1, meta.RestartBuildID+2)
 				require.NoError(t, err)

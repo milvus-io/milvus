@@ -28,14 +28,21 @@ func (m *IndexMeta) segmentIndexRecords(segmentID int64) (*typeutil.ConcurrentMa
 	if !m.UsesSegmentSummaries() {
 		return active, found
 	}
+	segment, exists := m.summarySource.GetSegment(segmentID)
+	if !exists || len(segment.GetIndexSummaries()) == 0 {
+		return active, found
+	}
 	records := typeutil.NewConcurrentMap[int64, *model.SegmentIndex]()
-	if segment, ok := m.summarySource.GetSegment(segmentID); ok {
-		for _, summary := range segment.GetIndexSummaries() {
-			records.Insert(summary.GetIndexId(), meta.SegmentIndexFromSummary(segment, summary))
-		}
+	for _, summary := range segment.GetIndexSummaries() {
+		records.Insert(summary.GetIndexId(), meta.SegmentIndexFromSummary(segment, summary))
 	}
 	if found {
-		active.Range(func(id int64, record *model.SegmentIndex) bool { records.Insert(id, record); return true })
+		active.Range(func(id int64, record *model.SegmentIndex) bool {
+			if current, exists := records.Get(id); !exists || current.BuildID <= record.BuildID {
+				records.Insert(id, record)
+			}
+			return true
+		})
 	}
 	return records, records.Len() != 0
 }

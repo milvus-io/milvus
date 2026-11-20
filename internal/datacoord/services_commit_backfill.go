@@ -650,10 +650,10 @@ func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, 
 		return classifySegmentResult{unit: &unit}
 	}
 
-	if Params.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() {
+	if meta.HasIndexSummaryInventory(segInfo.SegmentInfo) || segInfo.GetManifestHasIndex() {
 		return classifySegmentResult{status: &datapb.CommitBackfillResultSegmentStatus{
 			SegmentId: segID, Ok: false, Kind: "v3",
-			Reason: "direct manifest version adoption is unsupported in segment index summary mode; use structured backfill",
+			Reason: "direct manifest version adoption cannot preserve index inventory; use structured backfill",
 		}}
 	}
 	// Legacy mode: adopt a pre-baked version. Enforce that the base the

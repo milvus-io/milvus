@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -77,9 +78,11 @@ func validateIndexStorePathVersionForFinish(buildID int64, requested, actual ind
 }
 
 type IndexMeta struct {
-	summarySource metacache.MetaView
-	ctx           context.Context
-	Catalog       metastore.DataCoordCatalog
+	summarySource            metacache.MetaView
+	publishSummaries         bool
+	summaryRetirementVersion atomic.Uint64
+	ctx                      context.Context
+	Catalog                  metastore.DataCoordCatalog
 
 	// fieldIndexLock protects collection index definitions and serializes the
 	// resident publication of segment index records observed together by
@@ -297,34 +300,21 @@ func (m *IndexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
 	defer locks.Unlock(segIdx.SegmentID)
 	old, _ := m.SegmentBuildInfo.Get(segIdx.BuildID)
 	m.taskCounts.replaceTask(old, segIdx)
-	if m.UsesSegmentSummaries() && segIdx.ManifestPublished && segIdx.IndexState == commonpb.IndexState_Finished {
-		if indexes, ok := m.SegmentIndexes.Get(segIdx.SegmentID); ok {
-			if current, exists := indexes.Get(segIdx.IndexID); exists && current.BuildID == segIdx.BuildID {
-				indexes.Remove(segIdx.IndexID)
-				if indexes.Len() == 0 {
-					m.SegmentIndexes.Remove(segIdx.SegmentID)
-				}
-			}
-		}
-		m.forgetSupersededBuild(segIdx)
-		m.SegmentBuildInfo.Remove(segIdx.BuildID)
-		return
-	}
-	m.setSegmentIndexSlot(segIdx, false)
+	m.setSegmentIndexSlot(segIdx, segIdx.ManifestPublished)
 	m.SegmentBuildInfo.Add(segIdx)
 	m.NotifyManifestIndexMigration(segIdx)
 }
 
 // setSegmentIndexSlot updates the current slot and retains displaced build IDs.
 // The caller holds the segment's index map lock or is loading the catalog.
-func (m *IndexMeta) setSegmentIndexSlot(segIdx *model.SegmentIndex, recovering bool) {
+func (m *IndexMeta) setSegmentIndexSlot(segIdx *model.SegmentIndex, keepNewest bool) {
 	indexes, ok := m.SegmentIndexes.Get(segIdx.SegmentID)
 	if !ok {
 		indexes = typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 	}
 	if current, exists := indexes.Get(segIdx.IndexID); exists && current.BuildID != segIdx.BuildID {
-		// Recovery selects the newest build in any catalog key order.
-		if recovering && current.BuildID > segIdx.BuildID {
+		// Recovered and manifest-only records preserve a newer build's slot.
+		if keepNewest && current.BuildID > segIdx.BuildID {
 			m.rememberSupersededBuild(segIdx)
 			return
 		}
@@ -360,7 +350,7 @@ func (m *IndexMeta) forgetSupersededBuild(segIdx *model.SegmentIndex) {
 // remains the durable task record while a build is active or failed. Only a successful
 // publication retires its Finished etcd row.
 func WriteSegmentIndexToManifest() bool {
-	return !meta.ManifestIndexRollbackEnabled() && paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool()
+	return meta.ManifestIndexPublicationEnabled()
 }
 
 func (m *IndexMeta) alterSegmentIndexes(segIdxes []*model.SegmentIndex) error {
@@ -416,7 +406,7 @@ func (m *IndexMeta) NotifyManifestIndexMigration(record *model.SegmentIndex) {
 		}
 		return
 	}
-	if !segmentIndexNeedsManifestBackfill(record) {
+	if !catalogBackfillCandidate(record) || len(record.IndexFileKeys) == 0 && !m.PublishesSegmentSummaries(record.SegmentID) {
 		return
 	}
 	select {
@@ -1457,7 +1447,7 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 	}
 
 	staged := &meta.StagedSegmentIndexMutation{
-		PublishSummary: m.UsesSegmentSummaries(),
+		PublishSummary: mut.Type == meta.SegmentIndexRemove && m.UsesSegmentSummaries(),
 		Install:        func() func() { return func() {} },
 	}
 
@@ -1521,23 +1511,38 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 		return staged, nil
 	}
 
+	staged.PublishSummary = m.PublishesSegmentSummaries(previous.SegmentID)
+	var replacedSummary *model.SegmentIndexSummary
+	if staged.PublishSummary {
+		if segment, exists := m.summarySource.GetSegment(previous.SegmentID); exists {
+			for _, summary := range segment.GetIndexSummaries() {
+				if summary.GetIndexId() != previous.IndexID {
+					continue
+				}
+				if summary.GetBuildId() > previous.BuildID {
+					if mut.Type == meta.SegmentIndexBackfill {
+						return staged, meta.ErrSegmentIndexBackfillSkipped
+					}
+					action := metastore.DropSegmentIndex(previous)
+					staged.Action = &action
+					staged.Summary = model.SummarizeSegmentIndex(previous)
+					staged.Obsolete = true
+					staged.Install = func() func() {
+						m.removeSegmentIndexRecordInMemory(previous)
+						return m.taskCounts.publishStoredSizes
+					}
+					return staged, nil
+				}
+				replacedSummary = model.SegmentIndexSummaryFromProto(segment, summary)
+				break
+			}
+		}
+	}
 	if mut.Type == meta.SegmentIndexBackfill {
-		// The catalog row is the migration marker in the exclusive-placement
-		// design. Once it is absent, this build is already manifest-resident and
-		// republishing it would create a new revision on every inspector tick.
-		if previous.ManifestPublished || previous.IsDeleted ||
-			previous.IndexState != commonpb.IndexState_Finished || len(previous.IndexFileKeys) == 0 {
+		if previous.ManifestPublished || previous.IsDeleted || previous.IndexState != commonpb.IndexState_Finished ||
+			!m.IsIndexExist(previous.CollectionID, previous.IndexID) {
 			return staged, meta.ErrSegmentIndexBackfillSkipped
 		}
-		if !m.IsIndexExist(previous.CollectionID, previous.IndexID) {
-			// A dropped definition is owned by index GC. It cannot supply the
-			// identity fields a valid manifest entry requires, and publishing it
-			// here would race GC's delete-then-retract protocol.
-			return staged, meta.ErrSegmentIndexBackfillSkipped
-		}
-		// A rebuild may replace the (segment, index) slot with a new BuildID
-		// after the scan. Publishing the old record would then overwrite the
-		// newer artifact under the manifest's index_id replacement key.
 		indexes, ok := m.SegmentIndexes.Get(previous.SegmentID)
 		if !ok {
 			return staged, meta.ErrSegmentIndexBackfillSkipped
@@ -1555,34 +1560,21 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 		staged.Record = destination
 		staged.Summary = model.SummarizeSegmentIndex(destination)
 		staged.Install = func() func() {
-			m.updateSegmentIndexManifestPublished(destination, true)
-			return func() {}
+			if staged.PublishSummary {
+				// GC observes the new epoch before it can miss this build's
+				// retired task. The summary is already visible in SegmentInfo.
+				if len(previous.IndexFileKeys) != 0 {
+					m.summaryRetirementVersion.Add(1)
+				}
+				m.installPublishedSummary(previous, replacedSummary, staged.Summary)
+			} else {
+				m.updateSegmentIndexManifestPublished(destination, true)
+			}
+			return m.taskCounts.publishStoredSizes
 		}
 		return staged, nil
 	}
 
-	var replacedSummary *model.SegmentIndexSummary
-	if m.UsesSegmentSummaries() {
-		if segment, exists := m.summarySource.GetSegment(previous.SegmentID); exists {
-			for _, summary := range segment.GetIndexSummaries() {
-				if summary.GetIndexId() != previous.IndexID || summary.GetBuildId() == previous.BuildID {
-					continue
-				}
-				if summary.GetBuildId() > previous.BuildID {
-					action := metastore.DropSegmentIndex(previous)
-					staged.Action = &action
-					staged.Summary = model.SummarizeSegmentIndex(previous)
-					staged.Obsolete = true
-					staged.Install = func() func() {
-						m.removeSegmentIndexRecordInMemory(previous)
-						return m.taskCounts.publishStoredSizes
-					}
-					return staged, nil
-				}
-				replacedSummary = model.SegmentIndexSummaryFromProto(segment, summary)
-			}
-		}
-	}
 	finished, err := m.buildFinishedSegmentIndex(previous, mut.FinishedTask)
 	if err != nil {
 		return staged, err
@@ -1595,11 +1587,12 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 	staged.Record = finished
 	staged.Summary = model.SummarizeSegmentIndex(finished)
 	staged.Install = func() func() {
-		finished.ManifestPublished = true
-		if replacedSummary != nil {
-			m.taskCounts.adjustSummary(replacedSummary, -1)
+		if staged.PublishSummary {
+			m.installPublishedSummary(previous, replacedSummary, staged.Summary)
+		} else {
+			finished.ManifestPublished = true
+			m.updateSegmentIndex(finished)
 		}
-		m.updateSegmentIndex(finished)
 		// recordFinishedTask is observability only, and the stored-size gauge
 		// can wait for a Prometheus scrape, so the whole step is deferred out
 		// of the segment writer lock.
@@ -1609,6 +1602,14 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 		}
 	}
 	return staged, nil
+}
+
+func (m *IndexMeta) installPublishedSummary(task *model.SegmentIndex, previous, summary *model.SegmentIndexSummary) {
+	if previous != nil {
+		m.taskCounts.adjustSummary(previous, -1)
+	}
+	m.taskCounts.adjustSummary(summary, 1)
+	m.removeSegmentIndexRecordInMemory(task)
 }
 
 func (m *IndexMeta) GetDeletedIndexes() []*model.Index {

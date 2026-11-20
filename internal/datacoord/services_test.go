@@ -5125,7 +5125,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// V3 delta happy path: ops (add) generate a ManifestMutationCommitUpdates
 	// commit carrying the column-group descriptor, with no source-version pin.
 	testDeltaAdd := func(t *testing.T, summaries bool) {
-		setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentIndexSummariesEnabled, strconv.FormatBool(summaries))
+		setSegmentChangeTestParam(t, &Params.DataCoordCfg.WriteSegmentIndexToManifest, strconv.FormatBool(summaries))
 		ctx := context.Background()
 		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)

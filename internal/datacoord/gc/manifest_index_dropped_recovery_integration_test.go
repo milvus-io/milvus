@@ -44,9 +44,10 @@ func TestManifestDroppedRecoveryAfterFilesDeleted(t *testing.T) {
 	local := storage.NewLocalChunkManager(objectstorage.RootPath(m.ChunkManager.RootPath()))
 	gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(mDomains, GcOption{Cli: local}))
 	defer gc.Option.RemoveObjectPool.Release()
-	job, ok := mDomains.IndexMeta.GetIndexJob(meta.RestartBuildID)
-	require.True(t, ok)
-	files := gc.GetAllIndexFilesOfIndex(job)
+	inventory, err := m.ReadCompletedIndexes(ctx, segment.SegmentInfo)
+	require.NoError(t, err)
+	require.NotNil(t, inventory[meta.RestartIndexID])
+	files := gc.GetAllIndexFilesOfIndex(inventory[meta.RestartIndexID])
 	for file := range files {
 		require.NoError(t, m.ChunkManager.Write(ctx, file, []byte("index")))
 	}
@@ -68,6 +69,7 @@ func TestManifestDroppedRecoveryAfterFilesDeleted(t *testing.T) {
 	retained := restarted.GetSegment(ctx, meta.RestartSegID)
 	require.NotNil(t, retained)
 	require.True(t, retained.GetManifestHasIndex())
+	require.False(t, restarted.HasPendingManifestIndexes())
 	require.Empty(t, restartedDomains.IndexMeta.GetAllSegIndexes())
 	retryGC := NewGarbageCollector(restarted, meta.NewMockHandler(), GcTestDomainOption(restartedDomains, GcOption{Cli: local}))
 	defer retryGC.Option.RemoveObjectPool.Release()

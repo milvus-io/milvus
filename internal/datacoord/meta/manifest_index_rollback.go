@@ -35,6 +35,11 @@ func ManifestIndexRollbackEnabled() bool {
 	return Params.DataCoordCfg.ManifestIndexRollbackEnabled.GetAsBool()
 }
 
+func ManifestIndexPublicationEnabled() bool {
+	return Params.CommonCfg.UseLoonFFI.GetAsBool() &&
+		Params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool() && !ManifestIndexRollbackEnabled()
+}
+
 func IsSegmentIndexRollbackRetained(segment *SegmentInfo) bool {
 	return segment != nil && segment.GetStorageVersion() == storage.StorageV3 &&
 		segment.GetLevel() != datapb.SegmentLevel_L0 &&

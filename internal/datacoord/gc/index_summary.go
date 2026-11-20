@@ -25,28 +25,66 @@ import (
 )
 
 func (gc *GarbageCollector) recycleSummaryIndexes(ctx context.Context, io *packed.ManifestIOContext, signal <-chan gcCmd) {
+	records := gc.Option.IndexMeta.GetAllSegIndexes()
+	tasksBySegment := make(map[int64][]*model.SegmentIndexSummary)
+	for _, record := range records {
+		if record != nil {
+			tasksBySegment[record.SegmentID] = append(tasksBySegment[record.SegmentID], model.SummarizeSegmentIndex(record))
+		}
+	}
 	for _, segment := range gc.Meta.SelectSegments(ctx) {
 		if ctx.Err() != nil {
 			return
 		}
-		gc.recycleUnusedSegIndexesForSegment(ctx, io, segment.GetID(), gc.Option.IndexMeta.GetAllSegmentIndexSummaries(segment.GetID()), signal)
+		candidates := tasksBySegment[segment.GetID()]
+		for _, summary := range segment.GetIndexSummaries() {
+			if _, exists := records[summary.GetBuildId()]; !exists {
+				candidates = append(candidates, model.SegmentIndexSummaryFromProto(segment.SegmentInfo, summary))
+			}
+		}
+		gc.recycleUnusedSegIndexesForSegment(ctx, io, segment.GetID(), candidates, signal)
+		delete(tasksBySegment, segment.GetID())
 	}
-	// Tasks may outlive their segment row. Completed artifacts never enter this map.
-	for _, task := range gc.Option.IndexMeta.GetAllSegIndexes() {
+	// Task rows may outlive their segment row.
+	for segmentID, candidates := range tasksBySegment {
 		if ctx.Err() != nil {
 			return
 		}
-		if gc.Meta.GetSegment(ctx, task.SegmentID) == nil {
-			gc.recycleUnusedSegIndexesForSegment(ctx, io, task.SegmentID, []*model.SegmentIndexSummary{model.SummarizeSegmentIndex(task)}, signal)
+		if gc.Meta.GetSegment(ctx, segmentID) == nil {
+			gc.recycleUnusedSegIndexesForSegment(ctx, io, segmentID, candidates, signal)
 		}
 	}
 }
 
 func (gc *GarbageCollector) removeIndexRecordLocked(ctx context.Context, record *model.SegmentIndexSummary) error {
-	if gc.Option.IndexMeta.UsesSegmentSummaries() {
-		return gc.Meta.RetireIndexSummaryLocked(ctx, record.SegmentID, record.BuildID)
+	segment := gc.Meta.GetSegment(ctx, record.SegmentID)
+	if segment != nil {
+		for _, summary := range segment.GetIndexSummaries() {
+			if summary.GetBuildId() == record.BuildID {
+				return gc.Meta.RetireIndexSummaryLocked(ctx, record.SegmentID, record.BuildID)
+			}
+		}
 	}
 	return gc.Option.IndexMeta.RemoveSegmentIndex(ctx, record.BuildID)
+}
+
+func (gc *GarbageCollector) artifactSummaryBuildIDs(ctx context.Context) map[int64]struct{} {
+	if !gc.Option.IndexMeta.UsesSegmentSummaries() {
+		return nil
+	}
+	buildIDs := make(map[int64]struct{})
+	gc.Meta.Segments.RangeReused(func(segment *meta.SegmentInfo) bool {
+		if ctx.Err() != nil {
+			return false
+		}
+		for _, summary := range segment.GetIndexSummaries() {
+			if summary.GetHasArtifact() {
+				buildIDs[summary.GetBuildId()] = struct{}{}
+			}
+		}
+		return true
+	})
+	return buildIDs
 }
 
 // referencedSummaryBuild fails closed on every manifest read/validation error.
@@ -73,9 +111,11 @@ func (gc *GarbageCollector) referencedSummaryBuild(ctx context.Context, segment 
 		if !ok {
 			return nil, false
 		}
-		if files == nil {
-			files = make(map[string]struct{}, len(info.GetIndexFilePaths()))
-		}
+		files = gc.getRetainedIndexFilesOfIndex(&model.SegmentIndex{
+			SegmentID: segment.GetID(), CollectionID: segment.GetCollectionID(), PartitionID: segment.GetPartitionID(),
+			BuildID: buildID, IndexVersion: entry.IndexVersion, IndexStorePathVersion: entry.IndexStorePathVersion,
+			IndexFileKeys: entry.IndexFileKeys,
+		})
 		for _, file := range info.GetIndexFilePaths() {
 			files[file] = struct{}{}
 		}

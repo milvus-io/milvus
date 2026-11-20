@@ -1580,6 +1580,21 @@ func TestUpdateSegmentsInfoUpdatesSegmentFormatMetricWithBinlogsBeforeStateChang
 }
 
 func TestUpdateManifestVersion(t *testing.T) {
+	t.Run("index inventory published before broadcast applies", func(t *testing.T) {
+		m, err := NewMemoryMeta(t)
+		require.NoError(t, err)
+		manifestPath := packed.MarshalManifestPath("/data/segments/1", 5)
+		require.NoError(t, m.AddSegment(t.Context(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID:                  1,
+			State:               commonpb.SegmentState_Flushed,
+			ManifestPath:        manifestPath,
+			IndexSummaryVersion: CurrentIndexSummaryVersion,
+		})))
+
+		require.NoError(t, m.UpdateSegmentsInfo(t.Context(), UpdateManifestVersion(1, 10)))
+		require.Equal(t, manifestPath, m.GetSegment(t.Context(), 1).GetManifestPath())
+	})
+
 	t.Run("segment not found", func(t *testing.T) {
 		meta, err := NewMemoryMeta(t)
 		assert.NoError(t, err)

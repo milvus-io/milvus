@@ -76,8 +76,7 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
 	} {
 		t.Run(layout.String(), func(t *testing.T) {
-			meta.WithSegmentIndexManifestWrites(t, false)
-			index.WithManifestIndexBackfillEnabled(t, true)
+			meta.WithSegmentIndexManifestWrites(t, true)
 			ctx := context.TODO()
 			root := t.TempDir()
 			for item, value := range map[*paramtable.ParamItem]string{
@@ -160,12 +159,18 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 			assert.Equal(t, published, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath())
 			meta.WithSegmentIndexManifestWrites(t, false)
 			restarted := boot()
+			require.False(t, restarted.HasPendingManifestIndexes())
+			segment := restarted.GetSegment(ctx, meta.RestartSegID)
+			require.Equal(t, meta.CurrentIndexSummaryVersion, segment.GetIndexSummaryVersion())
+			inventory, err := restarted.ReadCompletedIndexes(ctx, segment.SegmentInfo)
+			require.NoError(t, err)
 			for _, record := range []*model.SegmentIndex{first, second} {
-				recovered, ok := restarted.IndexCatalog.(*index.IndexMeta).GetIndexJob(record.BuildID)
-				require.True(t, ok)
+				recovered := inventory[record.IndexID]
+				require.NotNil(t, recovered)
+				require.Equal(t, record.BuildID, recovered.BuildID)
 				assert.Equal(t, record.IndexFileKeys, recovered.IndexFileKeys)
 				assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, recovered.IndexStorePathVersion)
-				assert.True(t, index.IndexManifestPublished(t, restarted.IndexCatalog.(*index.IndexMeta), record.BuildID))
+				assert.False(t, restarted.IndexCatalog.HasBuildInfo(record.BuildID))
 			}
 			_, pending := index.NewMigrationBackfillInspector(ctx, restarted).ScanForTest(ctx)
 			assert.Zero(t, pending)

@@ -75,8 +75,8 @@ func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
 
 func testCommitSegmentManifestIndexPublication(t *testing.T, summaries bool) {
 	params := paramtable.Get()
-	key := params.DataCoordCfg.SegmentIndexSummariesEnabled.Key
-	previousMode := params.DataCoordCfg.SegmentIndexSummariesEnabled.GetValue()
+	key := params.DataCoordCfg.WriteSegmentIndexToManifest.Key
+	previousMode := params.DataCoordCfg.WriteSegmentIndexToManifest.GetValue()
 	require.NoError(t, params.Save(key, strconv.FormatBool(summaries)))
 	t.Cleanup(func() { require.NoError(t, params.Save(key, previousMode)) })
 
@@ -95,7 +95,7 @@ func testCommitSegmentManifestIndexPublication(t *testing.T, summaries bool) {
 
 	mt, dm, err := NewMemoryMetaWithIndex(t)
 	require.NoError(t, err)
-	require.Equal(t, summaries, dm.IndexMeta.UsesSegmentSummaries())
+	require.Equal(t, summaries, dm.IndexMeta.PublishesSegmentSummaries(segmentID))
 
 	require.NoError(t, mt.AddSegment(context.Background(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             segmentID,
@@ -616,11 +616,10 @@ func TestCommitSegmentManifestRetiresIndexEtcdRowWhenGated(t *testing.T) {
 	assert.Equal(t, 2, actionCount, "the segment record plus the retiring index delete")
 	assert.Equal(t, 1, indexDeletes, "any pre-switch etcd row must be retired in the same transaction")
 	assert.Equal(t, newManifest, mt.GetSegment(context.Background(), segmentID).GetManifestPath())
-	// The in-memory task still completes: the switch is durability-only.
-	published, ok := dm.IndexMeta.GetIndexJob(buildID)
-	require.True(t, ok)
-	assert.Equal(t, commonpb.IndexState_Finished, published.IndexState)
-	assert.Equal(t, []string{"0"}, published.IndexFileKeys)
+	require.False(t, dm.IndexMeta.HasBuildInfo(buildID))
+	summaries := mt.GetSegment(context.Background(), segmentID).GetIndexSummaries()
+	require.Len(t, summaries, 1)
+	require.Equal(t, buildID, summaries[0].GetBuildId())
 }
 
 // Regression test for a stall between the manifest commit and every index DDL.
@@ -639,7 +638,7 @@ func TestCommitSegmentManifestDoesNotWaitForIndexDDL(t *testing.T) {
 
 	catalog := datacoord.NewCatalog(meta.NewMetaMemoryKV(), "", "")
 	m, mDomains := BootMetaForRestart(t, catalog, meta.RestartCollID)
-	SeedRestartFixture(t, m, mDomains.IndexMeta)
+	SeedRestartTask(t, m, mDomains.IndexMeta)
 
 	segIdx, ok := mDomains.IndexMeta.GetIndexJob(meta.RestartBuildID)
 	require.True(t, ok)
@@ -744,7 +743,7 @@ func TestCommitSegmentManifestPublishesIndexSizeOutsideSegmentLock(t *testing.T)
 
 func TestCommitSegmentManifestAddsColumnWithoutRetractingSummaries(t *testing.T) {
 	ctx := t.Context()
-	SetRollbackTestParam(t, &Params.DataCoordCfg.SegmentIndexSummariesEnabled, "true")
+	SetRollbackTestParam(t, &Params.DataCoordCfg.WriteSegmentIndexToManifest, "true")
 	mt, _, err := NewMemoryMetaWithIndex(t)
 	require.NoError(t, err)
 

@@ -35,6 +35,9 @@ import (
 // back to its ancestors. Neither this function nor its predicates reenter the
 // DataView manager. SegmentMeta is snapshotted before index reads.
 func (m *Meta) LoadableProjection(ctx context.Context, collectionID int64, previous *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
+	if err := m.CheckCollectionManifestIndexes(collectionID); err != nil {
+		return nil, err
+	}
 	admitted := typeutil.NewUniqueSet()
 	for _, shard := range previous.GetShards() {
 		for _, partition := range shard.GetPartitions() {

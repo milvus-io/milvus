@@ -122,6 +122,7 @@ type Meta struct {
 	manifestCopyLimit      int
 	manifestReadOnce       sync.Once
 	manifestReadSlots      *semaphore.Weighted
+	manifestIndexRecovery  manifestIndexRecovery
 	DataViewManager        DataViewManager
 	StreamingNodeCatalog   metastore.StreamingNodeCataLog
 
@@ -251,25 +252,19 @@ func NewMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		mt.CompactionProtection = protection
 	}
 
-	// Recovery follows the durable storage location, not the current write
-	// mode. A segment marked manifest_has_index may contain records published
-	// while the switch was previously on, so it must still be loaded after the
-	// switch is turned off. Unmarked clusters perform no manifest reads.
-	if paramtable.Get().DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() {
-		source, ok := mt.IndexCatalog.(interface {
-			UseSegmentSummaries(metacache.MetaView) error
-		})
-		if !ok {
-			return nil, merr.Wrap(merr.ErrServiceUnimplemented, "index catalog does not support segment summaries")
+	if reader, ok := mt.IndexCatalog.(interface {
+		ConfigureSegmentSummaries(metacache.MetaView, bool)
+	}); ok {
+		if ManifestIndexRollbackEnabled() {
+			for _, segment := range mt.SelectSegments(ctx) {
+				if len(segment.GetIndexSummaries()) != 0 {
+					return nil, merr.Wrap(merr.ErrServiceUnimplemented, "manifest index rollback requires catalog or manifest-only index inventory")
+				}
+			}
 		}
-		if err := source.UseSegmentSummaries(mt.MetaStore); err != nil {
-			return nil, err
-		}
-	} else if err := mt.ReloadSegmentIndexesFromManifests(ctx); err != nil {
-		// Object-store reads have already retried per segment. Re-entering
-		// initMeta's metastore retry would reread every successful manifest.
-		return nil, retry.Unrecoverable(err)
+		reader.ConfigureSegmentSummaries(mt.MetaStore, ManifestIndexPublicationEnabled())
 	}
+	mt.prepareManifestIndexRecovery(ctx)
 
 	// Segment change groups load AFTER segments are in memory: the recovery
 	// index build exempts L0 superseded parents, which requires segment levels
@@ -593,9 +588,6 @@ func (m *Meta) GetAllCollectionNumRows() map[int64]int64 {
 
 // AddSegment records segment info, persisting info into kv store
 func (m *Meta) AddSegment(ctx context.Context, segment *SegmentInfo) error {
-	if paramtable.Get().DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() && segment.GetLevel() != datapb.SegmentLevel_L0 && segment.GetStorageVersion() != storage.StorageV3 {
-		return merr.Wrap(merr.ErrServiceUnimplemented, "segment index summaries require StorageV3 segments")
-	}
 	mlog.Info(ctx, "meta update: adding segment - Start", mlog.Int64("segmentID", segment.GetID()))
 	defer m.LockSegments(segment.GetID())()
 	if info := m.Segments.GetSegment(segment.GetID()); info != nil {
@@ -1722,6 +1714,9 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint,
 
 func UpdateManifest(segmentID int64, manifestPath string) UpdateOperator {
 	return func(modPack *UpdateSegmentPack) bool {
+		if err := modPack.Meta.CheckSegmentManifestIndexes(segmentID); err != nil {
+			return modPack.Fail(err)
+		}
 		segment := modPack.Get(segmentID)
 		if segment == nil {
 			mlog.Warn(modPack.Meta.Ctx, "meta update: update manifest failed - segment not found",
@@ -1787,6 +1782,9 @@ func ClearEmptyManifestIndexMarker(segmentID int64, expectedManifest string) Upd
 
 func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperator {
 	return func(modPack *UpdateSegmentPack) bool {
+		if err := modPack.Meta.CheckSegmentManifestIndexes(segmentID); err != nil {
+			return modPack.Fail(err)
+		}
 		// Inspect the pending value without registering a write for a stale/no-op
 		// manifest. Other operators in this batch may already have changed it.
 		segment := modPack.Segments[segmentID]
@@ -1821,6 +1819,12 @@ func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperato
 					mlog.Int64("currentVer", currentVer),
 					mlog.Int64("incomingVer", manifestVersion))
 			}
+			return false
+		}
+		if HasIndexSummaryInventory(segment.SegmentInfo) || segment.GetManifestHasIndex() {
+			// A manifest publication can win after the broadcast's precheck.
+			// Acknowledge the stale update without replacing its inventory.
+			mlog.Warn(modPack.Meta.Ctx, "manifest version adoption skipped after index publication", mlog.Int64("segmentID", segmentID))
 			return false
 		}
 		modPack.Get(segmentID).ManifestPath = packed.MarshalManifestPath(basePath, manifestVersion)

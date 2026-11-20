@@ -90,6 +90,9 @@ func (m *Meta) ReconcileSegmentChangeDataViews(ctx context.Context, manager data
 		collections[g.CollectionID] = struct{}{}
 	}
 	for collectionID := range collections {
+		if m.CollectionManifestIndexesPending(collectionID) {
+			continue
+		}
 		ref, err := manager.Latest(ctx, collectionID)
 		if err != nil {
 			return err

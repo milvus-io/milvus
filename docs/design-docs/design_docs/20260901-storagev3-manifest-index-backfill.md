@@ -7,6 +7,10 @@
 - **Depends on:** [StorageV3 Manifest Index Publication](20260811-storagev3-manifest-index-publication.md),
   [DataCoord Segment-Scoped Manifest Commit Framework](20260817-datacoord-segment-manifest-commit.md)
 
+The [segment index summary design](20261110-segment-index-summary.md) updates
+the activation and destination inventory described here. The inspector and
+artifact copy protocol are reused for progressive summary migration.
+
 ## Summary
 
 `dataCoord.index.writeSegmentIndexToManifest` changes where a completed

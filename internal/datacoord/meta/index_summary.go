@@ -27,6 +27,19 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+const CurrentIndexSummaryVersion uint32 = 1
+
+func HasIndexSummaryInventory(segment *datapb.SegmentInfo) bool {
+	return segment.GetIndexSummaryVersion() != 0 || len(segment.GetIndexSummaries()) != 0
+}
+
+// MarkIndexSummaryCoverage carries a verified inventory into the next revision.
+func MarkIndexSummaryCoverage(previous, updated *datapb.SegmentInfo) {
+	if previous.GetIndexSummaryVersion() == CurrentIndexSummaryVersion || !previous.GetManifestHasIndex() {
+		updated.IndexSummaryVersion = CurrentIndexSummaryVersion
+	}
+}
+
 // ApplyIndexSummary updates a cloned segment before its catalog publication.
 // A stale removal must not erase the replacement build's inventory entry.
 func ApplyIndexSummary(segment *datapb.SegmentInfo, record *model.SegmentIndexSummary, fieldID int64, present bool) {
@@ -37,11 +50,13 @@ func ApplyIndexSummary(segment *datapb.SegmentInfo, record *model.SegmentIndexSu
 		return
 	}
 	segment.IndexSummaries = append(segment.IndexSummaries, model.MarshalSegmentIndexSummary(record, fieldID))
-	slices.SortFunc(segment.IndexSummaries, compareIndexSummary)
+	sortIndexSummaries(segment.IndexSummaries)
 }
 
-func compareIndexSummary(a, b *datapb.SegmentIndexSummary) int {
-	return cmp.Compare(a.GetIndexId(), b.GetIndexId())
+func sortIndexSummaries(summaries []*datapb.SegmentIndexSummary) {
+	slices.SortFunc(summaries, func(a, b *datapb.SegmentIndexSummary) int {
+		return cmp.Compare(a.GetIndexId(), b.GetIndexId())
+	})
 }
 
 func manifestSummaryFieldID(commit SegmentManifestCommit, buildID int64) int64 {
@@ -65,7 +80,8 @@ func UpdateIndexSummaries(segmentID int64, summaries []*datapb.SegmentIndexSumma
 		for i, summary := range summaries {
 			segment.IndexSummaries[i] = proto.Clone(summary).(*datapb.SegmentIndexSummary)
 		}
-		slices.SortFunc(segment.IndexSummaries, compareIndexSummary)
+		sortIndexSummaries(segment.IndexSummaries)
+		segment.IndexSummaryVersion = CurrentIndexSummaryVersion
 		return true
 	}
 }
