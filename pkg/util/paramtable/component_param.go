@@ -574,6 +574,7 @@ To share a Pulsar instance among multiple Milvus instances, consider changing th
 		Key:          "common.cloud.clusterId",
 		Version:      "3.0.1",
 		DefaultValue: "",
+		Forbidden:    true,
 		Doc:          "Cloud cluster ID. Leave empty to use Talon's default namespace. Otherwise Talon uses <clusterId>-<type>-<case-mode>, with all for enabledStages=all and meta for manifest, load_open, or both.",
 		Export:       true,
 	}
@@ -582,6 +583,7 @@ To share a Pulsar instance among multiple Milvus instances, consider changing th
 		Key:          "common.cloud.instanceType",
 		Version:      "3.0.1",
 		DefaultValue: "",
+		Forbidden:    true,
 		Doc:          "Cloud instance type. VectorLake selects the VectorLake namespace type regardless of classType.",
 		Export:       true,
 	}
@@ -590,6 +592,7 @@ To share a Pulsar instance among multiple Milvus instances, consider changing th
 		Key:          "common.cloud.classType",
 		Version:      "3.0.1",
 		DefaultValue: "",
+		Forbidden:    true,
 		Doc:          "Cloud class type. For non-VectorLake instances, Talon uses Tiered when classType is Tiered and others otherwise.",
 		Export:       true,
 	}
@@ -1700,6 +1703,7 @@ Rows whose child elements are all null are always promoted to row-level null for
 		Key:          "common.storage.talon.enabledStages",
 		Version:      "3.0.1",
 		DefaultValue: "all",
+		Forbidden:    true,
 		Doc:          "Comma-separated Talon read stages: all preserves unrestricted routing; load_open enables QueryNode milvus-storage reader-open metadata, including footers; manifest enables QueryNode segment-manifest reads during load. Combine load_open,manifest to enable both. Other reads use origin storage when stages are restricted. Cannot combine all with other stages. Requires a restart.",
 		Formatter: func(value string) string {
 			mask, ok := common.ParseTalonEnabledStages(value)
