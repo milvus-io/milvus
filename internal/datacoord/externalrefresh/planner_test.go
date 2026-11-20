@@ -116,7 +116,7 @@ func TestSummarizeExternalRefreshOwnership(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			files := externalRefreshPlannerFiles(test.files...)
-			_, summary, err := planExternalRefreshOwnership("", "", files, test.fragments, test.filesPerTask)
+			_, summary, err := planExternalRefreshOwnership("", "", files, test.fragments, test.filesPerTask, 0)
 			require.NoError(t, err)
 			require.Equal(t, test.expected, summary)
 		})
@@ -228,6 +228,7 @@ func TestPlanExternalRefreshOwnership(t *testing.T) {
 				externalRefreshPlannerFiles(test.files...),
 				test.fragments,
 				test.filesPerTask,
+				0,
 			)
 			require.NoError(t, err)
 			require.Equal(t, test.expected, tasks)
@@ -252,7 +253,7 @@ func TestPlanExternalRefreshOwnershipRejectsInvalidInput(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, _, err := planExternalRefreshOwnership("", "", test.files, test.fragments, test.filesPerTask)
+			_, _, err := planExternalRefreshOwnership("", "", test.files, test.fragments, test.filesPerTask, 0)
 			require.ErrorContains(t, err, test.errContains)
 		})
 	}
@@ -311,7 +312,7 @@ func TestPlanExternalRefreshOwnershipMultipleDataSplits(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			tasks, summary, err := planExternalRefreshOwnership(externalspec.FormatPaimonTable, externalspec.FormatPaimonTable, files, test.fragments, 1)
+			tasks, summary, err := planExternalRefreshOwnership(externalspec.FormatPaimonTable, externalspec.FormatPaimonTable, files, test.fragments, 1, 0)
 			require.NoError(t, err)
 			require.Equal(t, test.expected, tasks)
 			// Several descriptors still refer to only one physical table path.
@@ -319,7 +320,7 @@ func TestPlanExternalRefreshOwnershipMultipleDataSplits(t *testing.T) {
 		})
 	}
 	t.Run("duplicate_descriptor", func(t *testing.T) {
-		_, _, err := planExternalRefreshOwnership(externalspec.FormatPaimonTable, externalspec.FormatPaimonTable, []packed.FileInfo{files[0], files[0]}, nil, 1)
+		_, _, err := planExternalRefreshOwnership(externalspec.FormatPaimonTable, externalspec.FormatPaimonTable, []packed.FileInfo{files[0], files[0]}, nil, 1, 0)
 		require.ErrorContains(t, err, "duplicate file path")
 	})
 	t.Run("mixed_direct_file_and_data_split", func(t *testing.T) {
@@ -329,7 +330,7 @@ func TestPlanExternalRefreshOwnershipMultipleDataSplits(t *testing.T) {
 		}
 		mixed := append(append([]packed.FileInfo(nil), files...), direct)
 		tasks, _, err := planExternalRefreshOwnership(externalspec.FormatPaimonTable, externalspec.FormatPaimonTable, mixed,
-			packed.SegmentFragments{10: {fragment(files[1]), fragment(direct)}}, 1)
+			packed.SegmentFragments{10: {fragment(files[1]), fragment(direct)}}, 1, 0)
 		require.NoError(t, err)
 		require.Equal(t, []externalRefreshOwnershipTaskPlan{
 			{FileIndexBegin: 0, FileIndexEnd: 1},
@@ -339,10 +340,10 @@ func TestPlanExternalRefreshOwnershipMultipleDataSplits(t *testing.T) {
 	t.Run("malformed_descriptor", func(t *testing.T) {
 		invalid := files[0]
 		invalid.Properties = map[string]string{"metadata": "not-json"}
-		_, _, err := planExternalRefreshOwnership(externalspec.FormatPaimonTable, externalspec.FormatPaimonTable, []packed.FileInfo{invalid}, nil, 1)
+		_, _, err := planExternalRefreshOwnership(externalspec.FormatPaimonTable, externalspec.FormatPaimonTable, []packed.FileInfo{invalid}, nil, 1, 0)
 		require.ErrorContains(t, err, "invalid Paimon metadata descriptor")
 		_, _, err = planExternalRefreshOwnership(externalspec.FormatPaimonTable, externalspec.FormatPaimonTable, files,
-			packed.SegmentFragments{10: {fragment(invalid)}}, 1)
+			packed.SegmentFragments{10: {fragment(invalid)}}, 1, 0)
 		require.ErrorContains(t, err, "invalid Paimon metadata descriptor")
 	})
 }
@@ -378,13 +379,13 @@ func TestPlanExternalRefreshOwnershipFileBasedFormats(t *testing.T) {
 				{FilePath: "b.parquet", StartRow: 10, EndRow: 20, Properties: oldProperties},
 				{FilePath: "c.parquet", StartRow: 0, EndRow: 10, Properties: oldProperties},
 			}}
-			tasks, _, err := planExternalRefreshOwnership(format, format, files, fragments, 1)
+			tasks, _, err := planExternalRefreshOwnership(format, format, files, fragments, 1, 0)
 			require.NoError(t, err)
 			require.Equal(t, []externalRefreshOwnershipTaskPlan{
 				{FileIndexBegin: 0, FileIndexEnd: 1},
 				{FileIndexBegin: 1, FileIndexEnd: 3, OwnedSegmentIDs: []int64{10}},
 			}, tasks)
-			_, _, err = planExternalRefreshOwnership(format, format, append(files, files[0]), nil, 1)
+			_, _, err = planExternalRefreshOwnership(format, format, append(files, files[0]), nil, 1, 0)
 			require.ErrorContains(t, err, "duplicate file path")
 		})
 	}
@@ -410,7 +411,7 @@ func TestPlanExternalRefreshOwnershipCrossFormatToPaimon(t *testing.T) {
 					}
 					files := []packed.FileInfo{externalRefreshPlannerDataSplit(1, "other-split"), file}
 					tasks, _, err := planExternalRefreshOwnership(externalspec.FormatPaimonTable, baselineFormat,
-						files, packed.SegmentFragments{10: {old}}, 1)
+						files, packed.SegmentFragments{10: {old}}, 1, 0)
 					require.NoError(t, err)
 					expected := []externalRefreshOwnershipTaskPlan{
 						{FileIndexBegin: 0, FileIndexEnd: 1},
@@ -434,7 +435,7 @@ func TestPlanExternalRefreshOwnershipEmptyPaimonSnapshot(t *testing.T) {
 	for _, filesPerTask := range []int64{1, 2, 1000} {
 		for _, segments := range []packed.SegmentFragments{nil, baseline} {
 			tasks, summary, err := planExternalRefreshOwnership(externalspec.FormatPaimonTable,
-				externalspec.FormatPaimonTable, nil, segments, filesPerTask)
+				externalspec.FormatPaimonTable, nil, segments, filesPerTask, 0)
 			require.NoError(t, err)
 			require.Len(t, tasks, 1)
 			require.Zero(t, tasks[0].FileIndexBegin)
@@ -446,4 +447,27 @@ func TestPlanExternalRefreshOwnershipEmptyPaimonSnapshot(t *testing.T) {
 			require.Equal(t, 1, summary.FinalTaskCount)
 		}
 	}
+}
+
+func TestPlanExternalRefreshOwnershipWithRows(t *testing.T) {
+	files := externalRefreshPlannerFiles("f0", "f1", "f2", "f3", "f4", "f5")
+	for i := range files {
+		files[i].NumRows = 1000000
+	}
+	fragments := packed.SegmentFragments{
+		10: externalRefreshPlannerFragments("f1", "f2"),
+		20: externalRefreshPlannerFragments("f3", "f4"),
+		30: externalRefreshPlannerFragments("removed"),
+	}
+	plans, summary, err := planExternalRefreshOwnership("parquet", "parquet", files, fragments, 10000, 2000000)
+	require.NoError(t, err)
+	require.Equal(t, 3, summary.BaseTaskCount)
+	require.Equal(t, 1, summary.FinalTaskCount)
+	require.Equal(t, []externalRefreshOwnershipTaskPlan{{FileIndexBegin: 0, FileIndexEnd: 6, OwnedSegmentIDs: []int64{10, 20, 30}}}, plans)
+	// Row weighting must not reinterpret an unresolved Explore sentinel as 0.
+	files[0].NumRows = -1
+	_, _, err = planExternalRefreshOwnership("parquet", "parquet", files, nil, 10000, 2000000)
+	require.ErrorContains(t, err, "unresolved")
+	_, _, err = planExternalRefreshOwnership("parquet", "parquet", files, nil, 10000, 0)
+	require.NoError(t, err)
 }
