@@ -22,8 +22,7 @@ extern void
 MilvusSourceFetch(uintptr_t,
                   const LoonSourceCredentialRequest*,
                   LoonSourceCredentialResult*);
-extern void
-MilvusSourceDestroy(uintptr_t);
+extern void MilvusSourceDestroy(uintptr_t);
 
 static void
 fetch(void* userdata,

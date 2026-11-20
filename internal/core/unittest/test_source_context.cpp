@@ -114,8 +114,9 @@ TEST(SourceContextRouting, InvalidConfigurationCannotFallBackToLegacy) {
         EXPECT_EQ(result.status().ToString().find("PRIVATE"),
                   std::string::npos);
         milvus_storage::api::Properties properties;
-        EXPECT_THROW(InjectExternalSpecProperties(properties, 42, source, kSpec),
-                     milvus::SegcoreError);
+        EXPECT_THROW(
+            InjectExternalSpecProperties(properties, 42, source, kSpec),
+            milvus::SegcoreError);
         LoonProperties c_properties{};
         auto c_result = loon_properties_inject_external_spec(
             &c_properties, 42, source, kSpec, 3000, 0);

@@ -95,9 +95,7 @@ SourceContextResource(const std::string& source, const std::string& spec) {
             return invalid();
         const auto end = source.find('/', slash + 1);
         const auto binding = AzureSourceStorageBinding::Create(
-            account,
-            suffix,
-            source.substr(slash + 1, end - slash - 1));
+            account, suffix, source.substr(slash + 1, end - slash - 1));
         if (binding)
             resource = binding->ResolveUri(source);
     }
