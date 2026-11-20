@@ -156,7 +156,9 @@ master 已有 Growing 的有限范围 Transform 回放及其后的实时 WAL 投
 - Growing 加载/恢复：还原 insert/base 状态，将 `drainDeleteReplay()` 和 `applyTransformLogEntry()` 扩展到 PK-update TransformLog entries，回放至 BaseTransformTimeTick，再无缺口接入现有 QueryRuntime 实时事件。在当前实时 WAL-message dispatch 中增加 UPDATE，不新增第二条实时订阅。
 - Sealed 加载：先加载 base，再通过阶段 2 的 reader 读取该 segment 已有的持久化 deltalogs，包括 legacy delete 和 typed update 文件。按 mutation 生效顺序归并，分别调用 native Delete/Update apply；即使后续没有实时更新，也必须恢复 update store。保留所需值后释放解码的 Arrow batches。
 - 将已加载的 base/deltalog 元数据版本与 `transform_start_after_timetick` 绑定，从该 cursor 注册，再接入 TransformLog 历史 catchup 和实时 entries；精确 PK 匹配前按 scope/BF 筛选。不能用文件内最大的 timestamp 推导回放 cursor。加载/注册期间保留所需历史，按约定的源标识和顺序处理重叠回放。
-- native apply 成功后才推进 QueryMVCC/readiness。失败时使用现有重试或失效处理，segment 进度不能越过失败位置。
+- 区分 ACK-prefix 的快照发布与 consumer 的数据可见性。native apply 成功后才推进 runtime 已应用的 Growing/Transform 边界和 readiness；后续 barrier 不能越过失败位置。
+- 保持准备阶段恰好回调一次 `OnReady` 或 `OnUnrecoverable`。准备完成后的 live apply 失败使用独立、异步的 runtime-failure 回调：拒绝该 runtime 的新读取、唤醒等待者，允许新一代重建，同时等待旧 handles 释放。Ready View 失败时向 Coord 报告 Unrecoverable；Up View 失败时保留持久化的 Up 恢复记录，沿用查询触发替换的路径。迟到回调必须核对 runtime 身份。
+- 按加载范围固定每个物理 update store 跟踪的字段集合：field ID、逻辑类型、ARRAY element type 和 nullability。集合兼容时保留现有 base/cursor 共享；集合不同时，新建物理实例与 Transform registration，通过共享 buffer 从自身 base cursor 重放，完成后才能 ready。持久化与实时 assignments 使用同一固定集合投影；扩大字段范围不能复用窄实例已追平的边界。
 - pin physical store，将成功查询 attempt 的 Q_TS 传递到 filter、streaming/requery 和延迟 output；复用现有 worker/retained-plan 链路。对更新字段绕过过期的 SN segment pruning。
 - 先登记 active read requirements 和未来查询允许进入的最小 timestamp，再计算 R_G/R_T。协调登记与 GC 边界发布，为每个 physical store 选择安全边界并调用新增的 `CSegment.GCUpdates()`。仅有 latest applied progress 或资源引用计数不能确定安全边界；还需保留延迟 load/reconnect 所需的 Transform 历史。这些读取与恢复保护通过测试前，保持 GC 关闭。
 - JSONL 注入仅用于显式开启的本地测试。生产路径直接对挂载的 store 执行 apply，不为每次 mutation 重建 Begin/Apply/Commit POC session。
@@ -169,6 +171,7 @@ master 已有 Growing 的有限范围 Transform 回放及其后的实时 WAL 投
 - 在没有实时增量的情况下，仅从持久化 update 文件恢复 segment；再测试 legacy delete/update 混合、NULL、历史 Q_TS、持久化与回放记录重叠，以及 load 注册期间到达的 update。与独立 mutation replay 对比结果。
 - 测试 streaming 开关、历史 requery、部分输出后的重试和延迟 protobuf/Arrow fill。丢弃失败 attempt 的 metadata/results，保留成功 attempt 的 snapshot。
 - 注入 apply 失败，验证查询不会把该 segment 当作已追平；检查全局 pruning 不会丢失更新后命中的行。
+- 覆盖 Ready→Up 前后发生 live failure、等待者唤醒、旧 handles 仍被持有时新一代重建，以及失败代际的迟到回调。先加载窄字段范围，对未加载字段写入尚未持久化的更新，再扩大范围，验证重放补齐更新且旧 read 仍然有效。
 - 保持旧 snapshot，同时执行 updates 和 GC；测试延迟准入和注册竞态。关闭新写入后重启/回放，验证已有更新仍然可见。
 
 ## 6. 本地 benchmark 和 e2e 验收
