@@ -2423,6 +2423,41 @@ func TestDescribeCollectionTask_FillsNameFromResultWhenQueriedByID(t *testing.T)
 	assert.Equal(t, dbID, task.result.GetDbId())
 }
 
+func TestDescribeCollectionTask_ReturnsShardRouting(t *testing.T) {
+	ctx := context.Background()
+	mix := NewMixCoordMock()
+	shardInfos := []*schemapb.CollectionShardInfo{
+		{VchannelName: "p1_1v1", Routing: &schemapb.CollectionShardInfo_HashRouting{HashRouting: &schemapb.HashRouting{Buckets: []uint64{0}}}},
+		{VchannelName: "p2_1v2", Routing: &schemapb.CollectionShardInfo_HashRouting{HashRouting: &schemapb.HashRouting{Buckets: []uint64{1}}}},
+	}
+	mix.SetDescribeCollectionFunc(func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Status:              merr.Success(),
+			CollectionName:      "c",
+			CollectionID:        1,
+			Schema:              &schemapb.CollectionSchema{Name: "c"},
+			VirtualChannelNames: []string{"p1_1v1", "p2_1v2"},
+			ShardInfos:          shardInfos,
+			RoutingModulus:      2,
+			ShardBy:             "hash(pk)",
+		}, nil
+	})
+	task := &DescribeCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
+			Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
+			CollectionID: 1,
+		},
+		ctx:      ctx,
+		mixCoord: mix,
+	}
+	assert.NoError(t, task.PreExecute(ctx))
+	assert.NoError(t, task.Execute(ctx))
+	assert.Equal(t, shardInfos, task.result.GetShardInfos())
+	assert.Equal(t, uint64(2), task.result.GetRoutingModulus())
+	assert.Equal(t, "hash(pk)", task.result.GetShardBy())
+}
+
 // Security regression: DescribeCollection must redact credentials embedded in
 // ExternalSpec.extfs (access_key_id / access_key_value / ssl_ca_cert) before
 // returning to the client. Any caller with Describe privilege would otherwise

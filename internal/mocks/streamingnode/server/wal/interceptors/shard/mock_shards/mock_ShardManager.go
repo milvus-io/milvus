@@ -631,6 +631,62 @@ func (_c *MockShardManager_Close_Call) RunAndReturn(run func()) *MockShardManage
 	return _c
 }
 
+// CollectionVChannel provides a mock function with given fields: collectionID
+func (_m *MockShardManager) CollectionVChannel(collectionID int64) (string, bool) {
+	ret := _m.Called(collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CollectionVChannel")
+	}
+
+	var r0 string
+	var r1 bool
+	if rf, ok := ret.Get(0).(func(int64) (string, bool)); ok {
+		return rf(collectionID)
+	}
+	if rf, ok := ret.Get(0).(func(int64) string); ok {
+		r0 = rf(collectionID)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(int64) bool); ok {
+		r1 = rf(collectionID)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+
+	return r0, r1
+}
+
+// MockShardManager_CollectionVChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CollectionVChannel'
+type MockShardManager_CollectionVChannel_Call struct {
+	*mock.Call
+}
+
+// CollectionVChannel is a helper method to define mock.On call
+//   - collectionID int64
+func (_e *MockShardManager_Expecter) CollectionVChannel(collectionID interface{}) *MockShardManager_CollectionVChannel_Call {
+	return &MockShardManager_CollectionVChannel_Call{Call: _e.mock.On("CollectionVChannel", collectionID)}
+}
+
+func (_c *MockShardManager_CollectionVChannel_Call) Run(run func(collectionID int64)) *MockShardManager_CollectionVChannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockShardManager_CollectionVChannel_Call) Return(_a0 string, _a1 bool) *MockShardManager_CollectionVChannel_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockShardManager_CollectionVChannel_Call) RunAndReturn(run func(int64) (string, bool)) *MockShardManager_CollectionVChannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateCollection provides a mock function with given fields: msg
 func (_m *MockShardManager) CreateCollection(msg message.ImmutableCreateCollectionMessageV1) {
 	_m.Called(msg)
@@ -793,6 +849,74 @@ func (_c *MockShardManager_DropPartition_Call) Return() *MockShardManager_DropPa
 
 func (_c *MockShardManager_DropPartition_Call) RunAndReturn(run func(message.ImmutableDropPartitionMessageV1)) *MockShardManager_DropPartition_Call {
 	_c.Run(run)
+	return _c
+}
+
+// FenceForSplit provides a mock function with given fields: collectionID, vchannel, splitTaskID, timetick
+func (_m *MockShardManager) FenceForSplit(collectionID int64, vchannel string, splitTaskID int64, timetick uint64) ([]int64, bool, error) {
+	ret := _m.Called(collectionID, vchannel, splitTaskID, timetick)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FenceForSplit")
+	}
+
+	var r0 []int64
+	var r1 bool
+	var r2 error
+	if rf, ok := ret.Get(0).(func(int64, string, int64, uint64) ([]int64, bool, error)); ok {
+		return rf(collectionID, vchannel, splitTaskID, timetick)
+	}
+	if rf, ok := ret.Get(0).(func(int64, string, int64, uint64) []int64); ok {
+		r0 = rf(collectionID, vchannel, splitTaskID, timetick)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]int64)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(int64, string, int64, uint64) bool); ok {
+		r1 = rf(collectionID, vchannel, splitTaskID, timetick)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+
+	if rf, ok := ret.Get(2).(func(int64, string, int64, uint64) error); ok {
+		r2 = rf(collectionID, vchannel, splitTaskID, timetick)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// MockShardManager_FenceForSplit_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FenceForSplit'
+type MockShardManager_FenceForSplit_Call struct {
+	*mock.Call
+}
+
+// FenceForSplit is a helper method to define mock.On call
+//   - collectionID int64
+//   - vchannel string
+//   - splitTaskID int64
+//   - timetick uint64
+func (_e *MockShardManager_Expecter) FenceForSplit(collectionID interface{}, vchannel interface{}, splitTaskID interface{}, timetick interface{}) *MockShardManager_FenceForSplit_Call {
+	return &MockShardManager_FenceForSplit_Call{Call: _e.mock.On("FenceForSplit", collectionID, vchannel, splitTaskID, timetick)}
+}
+
+func (_c *MockShardManager_FenceForSplit_Call) Run(run func(collectionID int64, vchannel string, splitTaskID int64, timetick uint64)) *MockShardManager_FenceForSplit_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(string), args[2].(int64), args[3].(uint64))
+	})
+	return _c
+}
+
+func (_c *MockShardManager_FenceForSplit_Call) Return(segmentIDs []int64, alreadyFenced bool, err error) *MockShardManager_FenceForSplit_Call {
+	_c.Call.Return(segmentIDs, alreadyFenced, err)
+	return _c
+}
+
+func (_c *MockShardManager_FenceForSplit_Call) RunAndReturn(run func(int64, string, int64, uint64) ([]int64, bool, error)) *MockShardManager_FenceForSplit_Call {
+	_c.Call.Return(run)
 	return _c
 }
 

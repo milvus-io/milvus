@@ -93,6 +93,9 @@ var (
 	// ErrCollectionConditionalUpsertExecution means the request may have partially committed.
 	ErrCollectionConditionalUpsertExecution = newMilvusError("conditional upsert execution failed", 112, false)
 
+	// ErrCollectionMutationIncomplete prevents whole-request replay when some rows may already be durable.
+	ErrCollectionMutationIncomplete = newMilvusError("mutation incomplete", 113, false)
+
 	// Partition related
 	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false) // SystemError by default; the proxy GetPartitionInfo name chokepoint stamps InputError for user-supplied partition names, while id-based lookups stay system.
 	ErrPartitionNotLoaded      = newMilvusError("partition not loaded", 201, false)

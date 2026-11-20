@@ -108,8 +108,10 @@ var StreamingNodeStateService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	StreamingCoordBroadcastService_Broadcast_FullMethodName = "/milvus.proto.streaming.StreamingCoordBroadcastService/Broadcast"
-	StreamingCoordBroadcastService_Ack_FullMethodName       = "/milvus.proto.streaming.StreamingCoordBroadcastService/Ack"
+	StreamingCoordBroadcastService_Broadcast_FullMethodName              = "/milvus.proto.streaming.StreamingCoordBroadcastService/Broadcast"
+	StreamingCoordBroadcastService_Ack_FullMethodName                    = "/milvus.proto.streaming.StreamingCoordBroadcastService/Ack"
+	StreamingCoordBroadcastService_WaitVChannelsAcked_FullMethodName     = "/milvus.proto.streaming.StreamingCoordBroadcastService/WaitVChannelsAcked"
+	StreamingCoordBroadcastService_ReportVChannelAppended_FullMethodName = "/milvus.proto.streaming.StreamingCoordBroadcastService/ReportVChannelAppended"
 )
 
 // StreamingCoordBroadcastServiceClient is the client API for StreamingCoordBroadcastService service.
@@ -121,6 +123,22 @@ type StreamingCoordBroadcastServiceClient interface {
 	Broadcast(ctx context.Context, in *BroadcastRequest, opts ...grpc.CallOption) (*BroadcastResponse, error)
 	// Ack acknowledge broadcast message is consumed.
 	Ack(ctx context.Context, in *BroadcastAckRequest, opts ...grpc.CallOption) (*BroadcastAckResponse, error)
+	// WaitVChannelsAcked blocks until every named vchannel of a broadcast is
+	// acknowledged on this cluster, or until the context ends.
+	//
+	// A secondary cluster uses it to order the copies of a replicated
+	// broadcast that names append-first vchannels: a copy on another vchannel
+	// is appended to the local WAL only after the append-first copies are
+	// acknowledged here. The broadcast task need not exist when the call
+	// arrives; the wait covers its creation.
+	WaitVChannelsAcked(ctx context.Context, in *WaitVChannelsAckedRequest, opts ...grpc.CallOption) (*WaitVChannelsAckedResponse, error)
+	// ReportVChannelAppended records that a copy of a replicated broadcast was
+	// appended to the WAL of this cluster, and at which time tick. A
+	// secondary cluster reports its append-first copies, so that
+	// WaitVChannelsAcked can answer with that time tick before the copy is
+	// acknowledged by its consumer. The record is kept in memory only; a
+	// coordinator that lost it answers from the acknowledgement.
+	ReportVChannelAppended(ctx context.Context, in *ReportVChannelAppendedRequest, opts ...grpc.CallOption) (*ReportVChannelAppendedResponse, error)
 }
 
 type streamingCoordBroadcastServiceClient struct {
@@ -149,6 +167,24 @@ func (c *streamingCoordBroadcastServiceClient) Ack(ctx context.Context, in *Broa
 	return out, nil
 }
 
+func (c *streamingCoordBroadcastServiceClient) WaitVChannelsAcked(ctx context.Context, in *WaitVChannelsAckedRequest, opts ...grpc.CallOption) (*WaitVChannelsAckedResponse, error) {
+	out := new(WaitVChannelsAckedResponse)
+	err := c.cc.Invoke(ctx, StreamingCoordBroadcastService_WaitVChannelsAcked_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *streamingCoordBroadcastServiceClient) ReportVChannelAppended(ctx context.Context, in *ReportVChannelAppendedRequest, opts ...grpc.CallOption) (*ReportVChannelAppendedResponse, error) {
+	out := new(ReportVChannelAppendedResponse)
+	err := c.cc.Invoke(ctx, StreamingCoordBroadcastService_ReportVChannelAppended_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // StreamingCoordBroadcastServiceServer is the server API for StreamingCoordBroadcastService service.
 // All implementations should embed UnimplementedStreamingCoordBroadcastServiceServer
 // for forward compatibility
@@ -158,6 +194,22 @@ type StreamingCoordBroadcastServiceServer interface {
 	Broadcast(context.Context, *BroadcastRequest) (*BroadcastResponse, error)
 	// Ack acknowledge broadcast message is consumed.
 	Ack(context.Context, *BroadcastAckRequest) (*BroadcastAckResponse, error)
+	// WaitVChannelsAcked blocks until every named vchannel of a broadcast is
+	// acknowledged on this cluster, or until the context ends.
+	//
+	// A secondary cluster uses it to order the copies of a replicated
+	// broadcast that names append-first vchannels: a copy on another vchannel
+	// is appended to the local WAL only after the append-first copies are
+	// acknowledged here. The broadcast task need not exist when the call
+	// arrives; the wait covers its creation.
+	WaitVChannelsAcked(context.Context, *WaitVChannelsAckedRequest) (*WaitVChannelsAckedResponse, error)
+	// ReportVChannelAppended records that a copy of a replicated broadcast was
+	// appended to the WAL of this cluster, and at which time tick. A
+	// secondary cluster reports its append-first copies, so that
+	// WaitVChannelsAcked can answer with that time tick before the copy is
+	// acknowledged by its consumer. The record is kept in memory only; a
+	// coordinator that lost it answers from the acknowledgement.
+	ReportVChannelAppended(context.Context, *ReportVChannelAppendedRequest) (*ReportVChannelAppendedResponse, error)
 }
 
 // UnimplementedStreamingCoordBroadcastServiceServer should be embedded to have forward compatible implementations.
@@ -169,6 +221,12 @@ func (UnimplementedStreamingCoordBroadcastServiceServer) Broadcast(context.Conte
 }
 func (UnimplementedStreamingCoordBroadcastServiceServer) Ack(context.Context, *BroadcastAckRequest) (*BroadcastAckResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Ack not implemented")
+}
+func (UnimplementedStreamingCoordBroadcastServiceServer) WaitVChannelsAcked(context.Context, *WaitVChannelsAckedRequest) (*WaitVChannelsAckedResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method WaitVChannelsAcked not implemented")
+}
+func (UnimplementedStreamingCoordBroadcastServiceServer) ReportVChannelAppended(context.Context, *ReportVChannelAppendedRequest) (*ReportVChannelAppendedResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReportVChannelAppended not implemented")
 }
 
 // UnsafeStreamingCoordBroadcastServiceServer may be embedded to opt out of forward compatibility for this service.
@@ -218,6 +276,42 @@ func _StreamingCoordBroadcastService_Ack_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _StreamingCoordBroadcastService_WaitVChannelsAcked_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WaitVChannelsAckedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamingCoordBroadcastServiceServer).WaitVChannelsAcked(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamingCoordBroadcastService_WaitVChannelsAcked_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamingCoordBroadcastServiceServer).WaitVChannelsAcked(ctx, req.(*WaitVChannelsAckedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StreamingCoordBroadcastService_ReportVChannelAppended_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportVChannelAppendedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamingCoordBroadcastServiceServer).ReportVChannelAppended(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamingCoordBroadcastService_ReportVChannelAppended_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamingCoordBroadcastServiceServer).ReportVChannelAppended(ctx, req.(*ReportVChannelAppendedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // StreamingCoordBroadcastService_ServiceDesc is the grpc.ServiceDesc for StreamingCoordBroadcastService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -232,6 +326,14 @@ var StreamingCoordBroadcastService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Ack",
 			Handler:    _StreamingCoordBroadcastService_Ack_Handler,
+		},
+		{
+			MethodName: "WaitVChannelsAcked",
+			Handler:    _StreamingCoordBroadcastService_WaitVChannelsAcked_Handler,
+		},
+		{
+			MethodName: "ReportVChannelAppended",
+			Handler:    _StreamingCoordBroadcastService_ReportVChannelAppended_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

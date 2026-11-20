@@ -82,3 +82,13 @@ func TestPartialUpdateCASErrorsGRPCMapping(t *testing.T) {
 		})
 	}
 }
+
+func TestShardFencedErrorGRPCRoundTrip(t *testing.T) {
+	st := NewGRPCStatusFromStreamingError(NewShardFenced("v1"))
+	require.Equal(t, codes.FailedPrecondition, st.Code())
+	// The code survives the process boundary, so a remote caller can still
+	// tell a fence refusal from every other failed precondition.
+	se := AsStreamingError(ConvertStreamingError("test", st.Err()))
+	require.True(t, se.IsShardFenced())
+	require.False(t, se.IsUnrecoverable())
+}

@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -100,4 +101,154 @@ func TestRedoInterceptorWaitUntilGrowingSegmentReadyReturnsUnrecoverableForDropp
 			require.True(t, status.AsStreamingError(err).IsUnrecoverable())
 		})
 	}
+}
+
+func TestRedoInterceptorReturnsShardFencedForASplitSource(t *testing.T) {
+	paramtable.Init()
+	resource.InitForTest(t)
+
+	shardManager := shards.RecoverShardManager(&shards.ShardManagerRecoverParam{
+		ChannelInfo: types.PChannelInfo{Name: "test-channel", Term: 1},
+		WAL:         syncutil.NewFuture[wal.WAL](),
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+			WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+				VChannels: map[string]moduleapi.VChannelWritePathRecoveryState{
+					"test-vchannel": {
+						VChannel:     "test-vchannel",
+						CollectionID: 1,
+						PartitionIDs: []int64{2},
+						SplitTaskID:  7,
+					},
+				},
+				GrowingSegments: map[int64]moduleapi.SegmentWritePathRecoveryState{},
+			},
+			Checkpoint: &recovery.WALCheckpoint{TimeTick: 100},
+		},
+		TxnManager: &testTxnManager{},
+	})
+	defer shardManager.Close()
+
+	interceptor := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
+		ShardManager: shardManager,
+	})
+	msg := message.NewInsertMessageBuilderV1().
+		WithVChannel("test-vchannel").
+		WithHeader(&messagespb.InsertMessageHeader{
+			CollectionId: 1,
+			Partitions:   []*messagespb.PartitionSegmentAssignment{{PartitionId: 2, Rows: 1, BinarySize: 100}},
+		}).
+		WithBody(&msgpb.InsertRequest{}).
+		MustBuildMutable()
+
+	appended := false
+	_, err := interceptor.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		appended = true
+		return nil, nil
+	})
+	// The insert is refused before it waits for a segment that is never
+	// created, and before it is appended. The refusal is not terminal: the
+	// caller retries the rows on the new shards.
+	require.Error(t, err)
+	require.False(t, appended)
+	streamingErr := status.AsStreamingError(err)
+	require.True(t, streamingErr.IsShardFenced())
+	require.False(t, streamingErr.IsUnrecoverable())
+}
+
+// Only a body that expired before Commit may request rerouting. A missing
+// Commit outcome can also be a committed session removed by ordinary cleanup.
+func TestRedoInterceptorPreservesUnknownCommitOutcomeOnSplitSource(t *testing.T) {
+	paramtable.Init()
+	resource.InitForTest(t)
+
+	newManager := func(name string, splitTaskID int64) shards.ShardManager {
+		m := shards.RecoverShardManager(&shards.ShardManagerRecoverParam{
+			ChannelInfo: types.PChannelInfo{Name: name, Term: 1},
+			WAL:         syncutil.NewFuture[wal.WAL](),
+			InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+				WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{
+					VChannels: map[string]moduleapi.VChannelWritePathRecoveryState{
+						"test-vchannel": {VChannel: "test-vchannel", CollectionID: 1, PartitionIDs: []int64{2}, SplitTaskID: splitTaskID},
+					},
+					GrowingSegments: map[int64]moduleapi.SegmentWritePathRecoveryState{},
+				},
+				Checkpoint: &recovery.WALCheckpoint{TimeTick: 100},
+			},
+			TxnManager: &testTxnManager{},
+		})
+		t.Cleanup(m.Close)
+		return m
+	}
+	fenced := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{ShardManager: newManager("fenced-channel", 7)})
+	unfenced := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{ShardManager: newManager("unfenced-channel", 0)})
+
+	txnCtx := message.TxnContext{TxnID: 11, Keepalive: message.TxnKeepaliveInfinite}
+	deleteBody := message.NewDeleteMessageBuilderV1().WithVChannel("test-vchannel").
+		WithHeader(&messagespb.DeleteMessageHeader{CollectionId: 1, Rows: 1}).
+		WithBody(&msgpb.DeleteRequest{}).MustBuildMutable().WithTxnContext(txnCtx)
+	commit := message.NewCommitTxnMessageBuilderV2().WithVChannel("test-vchannel").
+		WithHeader(&message.CommitTxnMessageHeader{}).WithBody(&message.CommitTxnMessageBody{}).
+		MustBuildMutable().WithTxnContext(txnCtx)
+	rollback := message.NewRollbackTxnMessageBuilderV2().WithVChannel("test-vchannel").
+		WithHeader(&message.RollbackTxnMessageHeader{}).WithBody(&message.RollbackTxnMessageBody{}).
+		MustBuildMutable().WithTxnContext(txnCtx)
+	autoCommit := message.NewDeleteMessageBuilderV1().WithVChannel("test-vchannel").
+		WithHeader(&messagespb.DeleteMessageHeader{CollectionId: 1, Rows: 1}).
+		WithBody(&msgpb.DeleteRequest{}).MustBuildMutable()
+
+	gone := func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		return nil, status.NewTransactionExpired("txn 11 not found in manager")
+	}
+	other := func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		return nil, status.NewInvalidArgument("something else")
+	}
+
+	for _, msg := range []message.MutableMessage{deleteBody, commit} {
+		_, err := fenced.DoAppend(context.Background(), msg, gone)
+		streamingErr := status.AsStreamingError(err)
+		if msg.MessageType() == message.MessageTypeCommitTxn {
+			require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE, streamingErr.Code)
+			require.Contains(t, streamingErr.Cause, "outcome is unknown")
+			require.True(t, streamingErr.IsUnrecoverable())
+			require.False(t, streamingErr.IsTxnExpired())
+		} else {
+			require.True(t, streamingErr.IsShardFenced())
+			require.False(t, streamingErr.IsUnrecoverable())
+		}
+		require.False(t, streamingErr.IsPartialUpdateRetryableCAS())
+		invalid := status.NewInvalidTransactionState("commit", message.TxnStateInFlight, message.TxnStateCommitted)
+		_, err = fenced.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			return nil, invalid
+		})
+		require.Same(t, invalid, err, "an invalid session state never proves zero committed writes")
+
+		// The vchannel is not fenced: the transaction error stays.
+		_, err = unfenced.DoAppend(context.Background(), msg, gone)
+		require.True(t, status.AsStreamingError(err).IsTxnExpired())
+		// Another error stays.
+		_, err = fenced.DoAppend(context.Background(), msg, other)
+		require.True(t, status.AsStreamingError(err).IsInvalidArgument())
+		// A real non-streaming append failure is not evidence that a
+		// transaction expired. Keep the original error at this boundary.
+		_, err = fenced.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			return nil, context.DeadlineExceeded
+		})
+		require.Equal(t, context.DeadlineExceeded, err)
+		require.False(t, status.AsStreamingError(err).IsShardFenced())
+		require.False(t, status.AsStreamingError(err).IsTxnUnavilable())
+	}
+	// A rollback has nothing to place elsewhere, and a message outside a
+	// transaction keeps its error.
+	begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("test-vchannel").
+		WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).
+		MustBuildMutable().WithTxnContext(txnCtx)
+	for _, msg := range []message.MutableMessage{begin, rollback, autoCommit} {
+		_, err := fenced.DoAppend(context.Background(), msg, gone)
+		require.True(t, status.AsStreamingError(err).IsTxnExpired())
+	}
+	// Success passes through.
+	_, err := fenced.DoAppend(context.Background(), commit, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		return nil, nil
+	})
+	require.NoError(t, err)
 }

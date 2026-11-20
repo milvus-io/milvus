@@ -1299,6 +1299,20 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	resp.CollectionID = collInfo.CollectionID
 	resp.VirtualChannelNames = collInfo.VirtualChannelNames
 	resp.PhysicalChannelNames = collInfo.PhysicalChannelNames
+	// The routing of a collection that was split: the residues every shard
+	// owns, parallel to virtual_channel_names. A collection that was never split
+	// reports nothing here, as before; it routes by hash % shards_num.
+	if collInfo.RoutingModulus != 0 {
+		resp.RoutingModulus = collInfo.RoutingModulus
+		resp.ShardBy = collInfo.ShardBy
+		resp.ShardInfos = collInfo.Routing().ShardInfos()
+		for _, info := range resp.ShardInfos {
+			if shard, ok := collInfo.ShardInfos[info.GetVchannelName()]; ok {
+				info.LastTruncateTimeTick = shard.LastTruncateTimeTick
+			}
+		}
+		resp.ShardInfos = append(resp.ShardInfos, splitSourceShardInfos(collInfo)...)
+	}
 	shardsNum := collInfo.ShardsNum
 	if shardsNum == 0 {
 		shardsNum = int32(len(collInfo.VirtualChannelNames))

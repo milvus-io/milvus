@@ -157,7 +157,7 @@ func TestUpsertPreExecuteNullableVectorValidity(t *testing.T) {
 						queryResult := &milvuspb.QueryResults{Status: merr.Success(), FieldsData: []*schemapb.FieldData{
 							partialUpdateCASPKFieldData(existing), nullableUpsertVector(dataType, existingValues, existingValid), arrayField(existingValues),
 						}}
-						setPartialUpdateCASTestChannels(task, partialUpdateCASTestVChannels)
+						setPartialUpdateCASTestChannels(t, task, partialUpdateCASTestVChannels)
 						oldWAL := streaming.WAL()
 						streaming.SetWALForTest(newPartialUpdateCASTestWAL(t, 9))
 						t.Cleanup(func() { streaming.SetWALForTest(oldWAL) })
@@ -166,7 +166,10 @@ func TestUpsertPreExecuteNullableVectorValidity(t *testing.T) {
 							t.Cleanup(func() { m.UnPatch() })
 						}
 						patch((*metacache.MetaCache).GetCollectionID, int64(1001), nil)
-						patch((*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: task.schema}, nil)
+						// setPartialUpdateCASTestChannels already mocks the routing
+						// lookup, and mockey refuses a second mock of the same
+						// method, so re-aim that one instead of installing another.
+						setNeverSplitRoutingInfo(&collectionInfo{Schema: task.schema, VChannels: partialUpdateCASTestVChannels})
 						patch((*metacache.MetaCache).GetPartitionID, int64(1002), nil)
 						allocation := mockey.Mock(common.AllocAutoID).To(func(_ func(uint32) (int64, int64, error), rowNum uint32, _ uint64) (int64, int64, error) {
 							return 1000, 1000 + int64(rowNum), nil
@@ -174,7 +177,11 @@ func TestUpsertPreExecuteNullableVectorValidity(t *testing.T) {
 						t.Cleanup(func() { allocation.UnPatch() })
 						patch(retrieveByPKs, queryResult, segcore.StorageCost{}, nil)
 						bind := mockey.Mock((*UpsertTask).preparePartialUpdateCASGroups).To(func(task *UpsertTask, ctx context.Context) error {
-							groups, err := task.buildPartialUpdateCASGroups()
+							route, err := task.writeRoute(ctx)
+							if err != nil {
+								return err
+							}
+							groups, err := task.buildPartialUpdateCASGroups(route)
 							if err != nil {
 								return err
 							}
