@@ -267,7 +267,10 @@ IndexingRecord::AppendingIndex(int64_t reserved_offset,
 
     int64_t valid_count = reserved_offset + size;
     if (field_meta.is_nullable() && vec_base->is_mapping_storage()) {
-        valid_count = vec_base->get_valid_count();
+        // Load can materialize the full column before dispatching its
+        // batches. Gate the first build on the prefix this batch covers.
+        valid_count = vec_base->get_offset_mapping().ValidCountBelow(
+            reserved_offset + size);
     }
 
     if ((type == DataType::VECTOR_FLOAT || type == DataType::VECTOR_FLOAT16 ||
@@ -1214,8 +1217,8 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
                 lock_wait_ms,
                 ElapsedMs(catchup_start));
             lock.unlock();
-            if (ElapsedMs(catchup_start) >= async_catchup_deadline_ms_ &&
-                !fits_budget(logical_gap)) {
+            // Even a budget-sized null-only gap requires another round.
+            if (ElapsedMs(catchup_start) >= async_catchup_deadline_ms_) {
                 throw_deadline(logical_gap, logical_tail);
             }
             continue;

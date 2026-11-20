@@ -101,6 +101,8 @@ namespace milvus::segcore {
 
 namespace {
 
+thread_local std::function<void()> before_raw_chunk_check_hook;
+
 // Call only after selecting raw storage: index APIs must keep logical IDs even
 // if an interim index takes over between NULL filtering and vector retrieval.
 std::vector<int64_t>
@@ -509,6 +511,28 @@ SegmentGrowingImpl::mask_with_delete(BitsetTypeView& bitset,
                                      int64_t ins_barrier,
                                      Timestamp timestamp) const {
     deleted_record_.Query(bitset, ins_barrier, timestamp);
+}
+
+void
+SegmentGrowingImpl::SetBeforeRawChunkCheckHookForTest(
+    std::function<void()> hook) {
+    before_raw_chunk_check_hook = std::move(hook);
+}
+
+bool
+SegmentGrowingImpl::HasRawData(int64_t field_id) const {
+    const FieldId field(field_id);
+    if (!indexing_record_.is_in(field) || indexing_record_.HasRawData(field)) {
+        return true;
+    }
+
+    if (before_raw_chunk_check_hook) {
+        before_raw_chunk_check_hook();
+    }
+    // The worker publishes the index before reclaiming the raw generation.
+    // An empty column can mean the handoff raced the first index check.
+    return insert_record_.get_data_base(field)->num_chunk() > 0 ||
+           indexing_record_.HasRawData(field);
 }
 
 void

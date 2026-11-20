@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <folly/FBVector.h>
+#include <folly/ScopeGuard.h>
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <array>
@@ -32,6 +33,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/FieldData.h"
 #include "common/IndexMeta.h"
 #include "common/QueryResult.h"
 #include "common/Schema.h"
@@ -1778,6 +1780,52 @@ InsertAsyncBatch(SegmentGrowing* segment,
     return dataset;
 }
 
+// The first payload read materializes raw chunks. The second hands the
+// batch to the index after the preceding batch has already been dispatched.
+class NullableFloatLoadBatch : public milvus::FieldData<milvus::FloatVector> {
+    using Base = milvus::FieldData<milvus::FloatVector>;
+
+ public:
+    NullableFloatLoadBatch(int64_t rows,
+                           int seed,
+                           std::function<void()> before_index_read = {})
+        : Base(kAsyncDim, DataType::VECTOR_FLOAT, /*nullable=*/true, rows),
+          before_index_read_(std::move(before_index_read)) {
+        std::vector<float> values(rows * kAsyncDim);
+        for (size_t i = 0; i < values.size(); ++i) {
+            values[i] =
+                static_cast<float>((i * 313 + (i / 11) * 17 + seed) % 1021) /
+                1021.0f;
+        }
+        std::vector<uint8_t> validity((rows + 7) / 8, 0xff);
+        FillFieldData(values.data(), validity.data(), rows, 0);
+    }
+
+    void*
+    Data() override {
+        if (++reads_ == 2 && before_index_read_) {
+            before_index_read_();
+        }
+        return Base::Data();
+    }
+
+ private:
+    int reads_ = 0;
+    std::function<void()> before_index_read_;
+};
+
+void
+MakeDenseBatchAllNull(GeneratedData& batch, FieldId vector_field) {
+    for (auto& field : *batch.raw_->mutable_fields_data()) {
+        if (field.field_id() == vector_field.get()) {
+            auto* validity = MutableFieldDataRowValidData(&field);
+            std::fill(validity->begin(), validity->end(), false);
+            field.mutable_vectors()->mutable_float_vector()->clear_data();
+            return;
+        }
+    }
+}
+
 std::unique_ptr<milvus::query::PlaceholderGroup>
 MakeAsyncPlaceholders(DataType data_type,
                       const milvus::query::Plan* plan,
@@ -2622,15 +2670,7 @@ TEST(GrowingIndexAsyncBuildTest, NullOnlyTailUsesUnlockedLogicalSlices) {
     constexpr int64_t tail = (8 << 20) / (kAsyncDim * sizeof(float)) + 1;
     InsertAsyncBatch(
         segment.get(), fixture.schema, tail, 19, [&](GeneratedData& batch) {
-            for (auto& field : *batch.raw_->mutable_fields_data()) {
-                if (field.field_id() == fixture.vec.get()) {
-                    auto* validity = MutableFieldDataRowValidData(&field);
-                    std::fill(validity->begin(), validity->end(), false);
-                    field.mutable_vectors()
-                        ->mutable_float_vector()
-                        ->clear_data();
-                }
-            }
+            MakeDenseBatchAllNull(batch, fixture.vec);
         });
     release.store(true);
     ASSERT_TRUE(WaitSynced(impl, fixture.vec, 60000));
@@ -2642,6 +2682,108 @@ TEST(GrowingIndexAsyncBuildTest, NullOnlyTailUsesUnlockedLogicalSlices) {
     auto* index = dynamic_cast<milvus::index::VectorIndex*>(pin.get());
     ASSERT_NE(index, nullptr);
     EXPECT_EQ(index->GetLogicalCount(), initial + tail);
+}
+
+TEST(GrowingIndexAsyncBuildTest, NullOnlyFinalizeDeferralHonorsDeadline) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    ScopedAsyncGrowingBuild async_build(config, true);
+    constexpr int64_t deadline_ms = 1000;
+    ScopedAsyncGrowingCatchupPolicy policy(
+        config, /*finalize_budget_ms=*/20, deadline_ms);
+    ApplyAsyncBuildConfig(config);
+
+    using Phase = VectorFieldIndexing::GrowingBuildPhase;
+    using State = VectorFieldIndexing::GrowingIndexState;
+    std::atomic<int> finalize_attempts{0};
+    std::atomic<bool> release_finalize{false};
+    ScopedBuildHook hook([&](Phase phase) {
+        if (phase == Phase::kBeforeFinalize &&
+            finalize_attempts.fetch_add(1) == 0) {
+            while (!release_finalize.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        }
+    });
+
+    auto fixture =
+        MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                              knowhere::metric::L2,
+                              /*nullable=*/true);
+    auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+    ScopedFlagOnExit release_on_exit(release_finalize);
+    auto* impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(impl, nullptr);
+
+    // Leave a payload gap so catch-up establishes a rate before finalize.
+    InsertAsyncBatch(segment.get(), fixture.schema, 50000, 17);
+    ASSERT_TRUE(WaitAtLeast(finalize_attempts, 1, 10000));
+    InsertAsyncBatch(
+        segment.get(), fixture.schema, 1, 19, [&](GeneratedData& batch) {
+            MakeDenseBatchAllNull(batch, fixture.vec);
+        });
+    // The catch-up clock started before the first finalize attempt. The
+    // deferral must honor it even though this one null row fits the budget.
+    std::this_thread::sleep_for(std::chrono::milliseconds(deadline_ms));
+    release_finalize.store(true);
+
+    EXPECT_TRUE(WaitState(impl, fixture.vec, State::kDisabled, 2000));
+    EXPECT_EQ(finalize_attempts.load(), 1);
+    EXPECT_FALSE(impl->get_indexing_record().SyncDataWithIndex(fixture.vec));
+    EXPECT_GT(impl->get_insert_record().get_data_base(fixture.vec)->num_chunk(),
+              0);
+}
+
+TEST(GrowingIndexAsyncBuildTest, NullableLoadWaitsForBuildablePrefix) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    ScopedAsyncGrowingBuild async_build(config, true);
+    ApplyAsyncBuildConfig(config);
+
+    auto fixture =
+        MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                              knowhere::metric::L2,
+                              /*nullable=*/true);
+    auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+    auto* impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(impl, nullptr);
+    using State = VectorFieldIndexing::GrowingIndexState;
+    const auto& indexing =
+        impl->get_indexing_record().get_vec_field_indexing(fixture.vec);
+    bool second_batch_reached_index = false;
+    constexpr int64_t first_rows = 16000;
+    constexpr int64_t second_rows = 10000;
+    constexpr int64_t total_rows = first_rows + second_rows;
+    static_assert(first_rows < kAsyncBuildThreshold &&
+                  total_rows > kAsyncBuildThreshold);
+    auto first = std::make_shared<NullableFloatLoadBatch>(first_rows, 0);
+    auto second =
+        std::make_shared<NullableFloatLoadBatch>(second_rows, first_rows, [&] {
+            second_batch_reached_index = true;
+            auto state = indexing.get_growing_index_state();
+            EXPECT_EQ(state, State::kNotBuilt);
+            if (state == State::kBuilding) {
+                // Hold the second batch back so a prematurely scheduled
+                // worker reaches finalize against the first batch's watermark.
+                WaitState(impl, fixture.vec, State::kDisabled, 2000);
+            }
+        });
+
+    impl->load_field_data_common(fixture.vec,
+                                 segment->PreInsert(total_rows),
+                                 {first, second},
+                                 fixture.pk,
+                                 total_rows);
+
+    EXPECT_TRUE(second_batch_reached_index);
+    ASSERT_TRUE(WaitSynced(impl, fixture.vec, 5000));
+    EXPECT_EQ(IndexedRowCount(impl, fixture.vec), total_rows);
+    auto pin = indexing.get_segment_indexing();
+    auto* index = dynamic_cast<const milvus::index::VectorIndex*>(pin.get());
+    ASSERT_NE(index, nullptr);
+    EXPECT_EQ(index->GetLogicalCount(), total_rows);
 }
 
 TEST(GrowingIndexAsyncBuildTest, NullableVectorBuildsAsynchronously) {
@@ -2982,6 +3124,61 @@ TEST(GrowingIndexAsyncBuildTest, InsertRacingFinalizeIsAbsorbed) {
     // Would read out of bounds if the racing batch had been skipped.
     InsertAsyncBatch(segment.get(), fixture.schema, per_batch, 7);
     EXPECT_EQ(IndexedRowCount(segment_impl, fixture.vec), 3 * per_batch);
+}
+
+TEST(GrowingIndexAsyncBuildTest, RetrieveAcrossBackgroundRawReclamation) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    ScopedAsyncGrowingBuild async_build(config, true);
+    ApplyAsyncBuildConfig(config);
+
+    using Phase = VectorFieldIndexing::GrowingBuildPhase;
+    std::atomic<bool> finalize_reached{false};
+    std::atomic<bool> release_finalize{false};
+    ScopedBuildHook hook([&](Phase phase) {
+        if (phase == Phase::kBeforeFinalize) {
+            finalize_reached.store(true);
+            while (!release_finalize.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        }
+    });
+    auto fixture =
+        MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                              knowhere::metric::L2,
+                              /*nullable=*/false);
+    auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+    ScopedFlagOnExit release_on_exit(release_finalize);
+    auto* impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(impl, nullptr);
+    auto batch = InsertAsyncBatch(segment.get(), fixture.schema, 25000, 101);
+    ASSERT_TRUE(WaitFlag(finalize_reached, 10000));
+
+    auto* column = impl->get_insert_record().get_data_base(fixture.vec);
+    ASSERT_GT(column->num_chunk(), 0);
+    bool reclaimed = false;
+    SegmentGrowingImpl::SetBeforeRawChunkCheckHookForTest([&] {
+        release_finalize.store(true);
+        for (int elapsed = 0; elapsed < 5000 && column->num_chunk() != 0;
+             elapsed += 5) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        reclaimed = column->num_chunk() == 0;
+    });
+    auto clear_hook = folly::makeGuard(
+        [] { SegmentGrowingImpl::SetBeforeRawChunkCheckHookForTest({}); });
+
+    const int64_t offset = 0;
+    std::unique_ptr<DataArray> result;
+    ASSERT_NO_THROW(result =
+                        impl->bulk_subscript(nullptr, fixture.vec, &offset, 1));
+    ASSERT_TRUE(reclaimed);
+    ASSERT_TRUE(impl->CanReadRawVectorFromIndex(fixture.vec));
+    const auto& actual = result->vectors().float_vector().data();
+    const auto expected = batch.get_col<float>(fixture.vec);
+    ASSERT_EQ(actual.size(), kAsyncDim);
+    EXPECT_TRUE(std::equal(actual.begin(), actual.end(), expected.begin()));
 }
 
 // Spec §4.6: destroying the segment while a build is in flight must not leak,
