@@ -3,6 +3,8 @@ mod resource_info;
 mod runtime_option;
 mod util;
 
+#[cfg(test)]
+pub(crate) use self::resource_info::FileResourcePathBuilder;
 pub use self::resource_info::{FileResourcePathHelper, ResourceInfo};
 pub use self::runtime_option::{
     get_global_file_resource_helper, get_lindera_download_url, get_options, set_options,

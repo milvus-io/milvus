@@ -6,7 +6,7 @@ use tantivy::tokenizer::{TextAnalyzer, TextAnalyzerBuilder};
 
 use super::{
     CharGroupTokenizer, GrpcTokenizer, IcuTokenizer, JiebaTokenizer, LangIdentTokenizer,
-    LinderaTokenizer, ThaiTokenizer,
+    LinderaTokenizer, ModelTokenizer, ThaiTokenizer,
 };
 
 use crate::error::{Result, TantivyBindingError};
@@ -80,6 +80,16 @@ pub fn grpc_builder(
     Ok(TextAnalyzer::builder(tokenizer).dynamic())
 }
 
+pub fn model_builder(
+    params: Option<&json::Map<String, json::Value>>,
+    helper: &mut FileResourcePathHelper,
+) -> Result<TextAnalyzerBuilder> {
+    let params = params.ok_or_else(|| {
+        TantivyBindingError::InvalidArgument("model tokenizer must be customized".to_string())
+    })?;
+    Ok(TextAnalyzer::builder(ModelTokenizer::from_json(params, helper)?).dynamic())
+}
+
 pub fn char_group_builder(
     params: Option<&json::Map<String, json::Value>>,
 ) -> Result<TextAnalyzerBuilder> {
@@ -132,6 +142,7 @@ pub fn get_builder_with_tokenizer(
         "thai" => Ok(thai_builder()),
         "language_identifier" => lang_ident_builder(params_map, helper, fc),
         "grpc" => grpc_builder(params_map),
+        "model" => model_builder(params_map, helper),
         other => {
             warn!("unsupported tokenizer: {}", other);
             Err(TantivyBindingError::InvalidArgument(format!(

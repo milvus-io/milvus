@@ -5,7 +5,10 @@ mod icu_tokneizer;
 mod jieba_tokenizer;
 mod lang_ident_tokenizer;
 mod lindera_tokenizer;
+mod model_tokenizer;
+mod model_weights;
 mod ngram_tokenizer_with_chars;
+mod output_decoder;
 mod thai_tokenizer;
 mod tokenizer;
 
@@ -16,6 +19,7 @@ pub use self::icu_tokneizer::IcuTokenizer;
 pub use self::jieba_tokenizer::JiebaTokenizer;
 pub use self::lang_ident_tokenizer::LangIdentTokenizer;
 pub use self::lindera_tokenizer::LinderaTokenizer;
+pub use self::model_tokenizer::ModelTokenizer;
 pub use self::ngram_tokenizer_with_chars::NgramTokenizerWithChars;
 pub use self::thai_tokenizer::ThaiTokenizer;
 
