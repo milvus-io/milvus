@@ -1692,7 +1692,8 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
                 Note: here the result check is through comparing the score, the ids could not be compared
                 because the high probability of the same score, then the id is not fixed in the range of
                 the same score
-        expected: hybrid search successfully with limit(topK), and the result should be the same
+        expected: an offset inside the sub-request params is rejected, the offset outside paginates
+                  the hybrid search results
         """
         client = self._client()
         nq = 1
@@ -1706,15 +1707,12 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
                 "limit": ct.default_limit,
             })
             req_list.append(req)
-        hybrid_res_inside = self.hybrid_search(client, self.collection_name, reqs=req_list,
-                                               ranker=rerank,
-                                               limit=ct.default_limit,
-                                               output_fields=[self.primary_key_field_name,
-                                                              self.string_field_name],
-                                               check_task=CheckTasks.check_search_results,
-                                               check_items={"nq": nq,
-                                                              "enable_milvus_client_api": True,
-                                                              "metric": "IP"})[0]
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"offset [{offset}] in a hybrid search sub-request is not supported"}
+        self.hybrid_search(client, self.collection_name, reqs=req_list,
+                           ranker=rerank,
+                           limit=ct.default_limit,
+                           check_task=CheckTasks.err_res, check_items=error)
         req_list = []
         for field_name in [self.float_vector_field_name1, self.float_vector_field_name2]:
             req = AnnSearchRequest(**{
@@ -1744,11 +1742,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
                                                                "enable_milvus_client_api": True,
                                                                "metric": "IP"})[0]
         for i in range(nq):
-            assert hybrid_res_inside[i].ids[offset:] == \
-                   hybrid_res_outside[i].ids[:-offset] == \
-                   hybrid_res_no_offset[i].ids[offset:]
-            # TODO: verify the offset working, uncomment the assertion below after #45939 fixed
-            # assert hybrid_res_inside[i].ids != hybrid_res_no_offset[i]
+            assert hybrid_res_outside[i].ids[:-offset] == hybrid_res_no_offset[i].ids[offset:]
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("ranker", [WeightedRanker(*[0.5, 0.5]), RRFRanker()])

@@ -536,8 +536,22 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	}
 
 	var offset int64
-	// ignore offset if isAdvanced
-	if !isAdvanced {
+	if isAdvanced {
+		// Hybrid search paginates after reranking, with the offset in rank params.
+		// A sub-request offset is not applied, so reject one that would be silently
+		// dropped. Clients do send one: PyMilvus copies the top-level offset into
+		// every sub-request, the Go SDK and REST v2 send 0 by default.
+		offsetStr, err := funcutil.GetAttrByKeyFromRepeatedKV(OffsetKey, searchParamsPair)
+		if err == nil {
+			subOffset, err := strconv.ParseInt(offsetStr, 0, 64)
+			if err != nil {
+				return nil, merr.WrapErrParameterInvalidMsg("%s [%s] is invalid", OffsetKey, offsetStr)
+			}
+			if subOffset != 0 && subOffset != rankParams.GetOffset() {
+				return nil, merr.WrapErrParameterInvalidMsg("%s [%d] in a hybrid search sub-request is not supported, set the offset of the hybrid search instead", OffsetKey, subOffset)
+			}
+		}
+	} else {
 		offsetStr, err := funcutil.GetAttrByKeyFromRepeatedKV(OffsetKey, searchParamsPair)
 		if err == nil {
 			offset, err = strconv.ParseInt(offsetStr, 0, 64)
