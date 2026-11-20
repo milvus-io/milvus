@@ -47,29 +47,21 @@ impl IcuTokenizer {
     }
 
     fn tokenize(&self, text: &str) -> Vec<Token> {
-        // Borrow the segmenter for segmentation
-        let borrowed_segmenter = self.segmenter.as_borrowed();
-        let breakpoints: Vec<usize> = borrowed_segmenter.segment_str(text).collect();
-
-        let mut tokens = Vec::with_capacity(breakpoints.len());
-        let mut offset = 0;
-        let mut position = 0;
-        for breakpoint in breakpoints {
-            if breakpoint == offset {
-                continue;
+        let segmenter = self.segmenter.as_borrowed();
+        let mut tokens = Vec::new();
+        let mut offset_from = 0;
+        for offset_to in segmenter.segment_str(text).skip(1) {
+            let segment = &text[offset_from..offset_to];
+            if segment.chars().any(char::is_alphanumeric) {
+                tokens.push(Token {
+                    text: segment.to_string(),
+                    offset_from,
+                    offset_to,
+                    position: tokens.len(),
+                    position_length: 1,
+                });
             }
-            let token_str = &text[offset..breakpoint];
-            let token = Token {
-                text: token_str.to_string(),
-                offset_from: offset,
-                offset_to: breakpoint,
-                position,
-                position_length: token_str.chars().count(),
-            };
-
-            tokens.push(token);
-            offset = breakpoint;
-            position += token_str.chars().count();
+            offset_from = offset_to;
         }
 
         tokens
@@ -90,6 +82,41 @@ mod tests {
     use tantivy::tokenizer::{TokenStream, Tokenizer};
 
     #[test]
+    fn test_icu_word_positions_and_offsets() {
+        let mut tokenizer = super::IcuTokenizer::new();
+        for (input, expected) in [
+            (
+                "home  workout",
+                [("home", 0, 1, 0..4), ("workout", 1, 1, 6..13)].as_slice(),
+            ),
+            (
+                "! café,\u{3000}3.5?",
+                [("café", 0, 1, 2..7), ("3.5", 1, 1, 11..14)].as_slice(),
+            ),
+            (" \t!?", [].as_slice()),
+            ("", [].as_slice()),
+        ] {
+            let mut stream = tokenizer.token_stream(input);
+            let mut tokens = Vec::new();
+            while stream.advance() {
+                tokens.push(stream.token().clone());
+            }
+            let actual: Vec<_> = tokens
+                .iter()
+                .map(|token| {
+                    (
+                        token.text.as_str(),
+                        token.position,
+                        token.position_length,
+                        token.offset_from..token.offset_to,
+                    )
+                })
+                .collect();
+            assert_eq!(actual, expected, "{input:?}");
+        }
+    }
+
+    #[test]
     fn test_icu_tokenizer() {
         let mut tokenizer = super::IcuTokenizer::new();
         let text =
@@ -102,7 +129,27 @@ mod tests {
             results.push(token.text.clone());
         }
 
-        println!("test tokens: {:?}", results);
-        assert_eq!(results.len(), 24);
+        assert_eq!(
+            results,
+            [
+                "tokenizer",
+                "for",
+                "global",
+                "doc",
+                "中文",
+                "分词",
+                "测试",
+                "東京",
+                "スカイツリー",
+                "の",
+                "最寄り駅",
+                "はと",
+                "う",
+                "きょう",
+                "スカイツリー",
+                "駅",
+                "です",
+            ]
+        );
     }
 }

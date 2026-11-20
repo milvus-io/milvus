@@ -5,10 +5,9 @@ use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 /// Thai tokenizer using ICU4X WordSegmenter with LSTM model.
 /// Uses try_new_lstm which provides Thai word segmentation via LSTM while
 /// not segmenting CJK text (no dictionary model loaded), keeping it Thai-focused.
-/// Unlike the generic IcuTokenizer, this also filters out whitespace and punctuation,
-/// returning only meaningful word tokens — matching ES Thai tokenizer behavior.
+/// Filters out whitespace and punctuation, matching ES Thai tokenizer behavior.
 /// Positions are character-based (Unicode scalar values) from the start of the input,
-/// including skipped segments, consistent with IcuTokenizer and Jieba.
+/// including skipped segments.
 pub struct ThaiTokenizer {
     segmenter: WordSegmenter,
 }
