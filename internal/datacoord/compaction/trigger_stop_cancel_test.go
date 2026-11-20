@@ -869,51 +869,61 @@ func TestCompactionTriggerLateEnqueueAfterWorkDoneReturnsServiceUnavailable(t *t
 	handler := newFuncHandler(t, func(_ context.Context, collID UniqueID) (*meta.CollectionInfo, error) {
 		return colls[collID], nil
 	})
+	_, alloc := newIncrementingRootCoordAllocator(t)
 
-	enteredAlloc := make(chan struct{})
-	releaseAlloc := make(chan struct{})
-	mc := rootmocks.NewMixCoord(t)
-	mc.EXPECT().AllocID(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
-		close(enteredAlloc)
-		<-releaseAlloc
-		return &rootcoordpb.AllocIDResponse{
-			Status: merr.Success(),
-			ID:     1000,
-			Count:  1,
-		}, nil
-	})
-
-	tr := NewCompactionTrigger(m, im, &recordingInspector{}, allocator.NewRootCoordAllocator(mc), handler, index.NewTestVersionManager())
+	tr := NewCompactionTrigger(m, im, &recordingInspector{}, alloc, handler, index.NewTestVersionManager())
 	tr.testingOnly = true
 	tr.Start()
-
-	type triggerRes struct {
-		id  UniqueID
-		err error
-	}
-	resCh := make(chan triggerRes, 1)
-	go func() {
-		id, err := tr.TriggerCompaction(context.Background(), NewCompactionSignal().WithIsForce(true).WithWaitResult(true))
-		resCh <- triggerRes{id: id, err: err}
-	}()
-
-	select {
-	case <-enteredAlloc:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for AllocID")
-	}
-
-	// Stop() exits work(), runs drainSignals(), and closes workDone before AllocID returns.
+	// Ensure work() has exited, run drainSignals(), and closed workDone before running result wait checks.
 	tr.Stop()
-	close(releaseAlloc)
 
-	select {
-	case res := <-resCh:
-		require.Equal(t, UniqueID(-1), res.id)
-		require.ErrorIs(t, res.err, merr.ErrServiceUnavailable)
-	case <-time.After(1 * time.Second):
-		t.Fatal("TriggerCompaction hung after workDone was closed")
-	}
+	stoppedErr := merr.WrapErrServiceUnavailable("compaction trigger is stopped")
+
+	t.Run("unconsumed_signal_with_empty_resultCh_returns_ServiceUnavailable", func(t *testing.T) {
+		sig := NewCompactionSignal().WithID(1000).WithIsForce(true).WithWaitResult(true)
+		tr.manualSignals <- sig
+
+		type waitRes struct {
+			id  UniqueID
+			err error
+		}
+		resCh := make(chan waitRes, 1)
+		go func() {
+			id, err := tr.awaitSignalResult(context.Background(), 1000, sig, stoppedErr)
+			resCh <- waitRes{id: id, err: err}
+		}()
+
+		select {
+		case res := <-resCh:
+			require.Equal(t, UniqueID(-1), res.id)
+			require.ErrorIs(t, res.err, merr.ErrServiceUnavailable)
+		case <-time.After(1 * time.Second):
+			t.Fatal("awaitSignalResult hung after workDone was closed")
+		}
+	})
+
+	t.Run("completed_signal_with_buffered_result_preserves_signalID", func(t *testing.T) {
+		sig := NewCompactionSignal().WithID(1001).WithIsForce(true).WithWaitResult(true)
+		sig.Notify(nil)
+
+		type waitRes struct {
+			id  UniqueID
+			err error
+		}
+		resCh := make(chan waitRes, 1)
+		go func() {
+			id, err := tr.awaitSignalResult(context.Background(), 1001, sig, stoppedErr)
+			resCh <- waitRes{id: id, err: err}
+		}()
+
+		select {
+		case res := <-resCh:
+			require.Equal(t, UniqueID(1001), res.id)
+			require.NoError(t, res.err)
+		case <-time.After(1 * time.Second):
+			t.Fatal("awaitSignalResult did not return buffered result after workDone closed")
+		}
+	})
 }
 
 func TestCompactionTriggerCancelledQueuedManualSignalNotPlanned(t *testing.T) {
