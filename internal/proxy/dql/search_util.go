@@ -694,37 +694,44 @@ func getOutputFieldIDs(schema *schemaInfo, outputFields []string) (outputFieldID
 }
 
 func getNqFromSubSearch(req *milvuspb.SubSearchRequest) (int64, error) {
-	if req.GetNq() == 0 {
-		// keep compatible with older client version.
-		x := &commonpb.PlaceholderGroup{}
-		err := proto.Unmarshal(req.GetPlaceholderGroup(), x)
-		if err != nil {
-			return 0, merr.WrapErrParameterInvalidErr(err, "failed to unmarshal placeholder group for sub search")
-		}
-		total := int64(0)
-		for _, h := range x.GetPlaceholders() {
-			total += int64(len(h.Values))
-		}
-		return total, nil
-	}
-	return req.GetNq(), nil
+	return resolveNq(req.GetNq(), req.GetPlaceholderGroup(), "failed to unmarshal placeholder group for sub search")
 }
 
 func getNq(req *milvuspb.SearchRequest) (int64, error) {
-	if req.GetNq() == 0 {
-		// keep compatible with older client version.
-		x := &commonpb.PlaceholderGroup{}
-		err := proto.Unmarshal(req.GetPlaceholderGroup(), x)
-		if err != nil {
-			return 0, merr.WrapErrParameterInvalidErr(err, "failed to unmarshal placeholder group")
-		}
-		total := int64(0)
-		for _, h := range x.GetPlaceholders() {
-			total += int64(len(h.Values))
-		}
-		return total, nil
+	return resolveNq(req.GetNq(), req.GetPlaceholderGroup(), "failed to unmarshal placeholder group")
+}
+
+// resolveNq returns the number of query rows of a search. The placeholder
+// group is what the query nodes execute, so its row count is the answer; the
+// nq a client declares is optional (older clients and the RESTful API leave it
+// at 0) and has to agree with that count when both are present. A request
+// whose nq disagreed used to be forwarded and fail on a query node while
+// reducing results.
+//
+// A declared nq with no placeholder group at all is passed through unchanged:
+// that request carries nothing to search with and the query nodes refuse it.
+func resolveNq(declared int64, placeholderGroup []byte, malformedMsg string) (int64, error) {
+	if declared != 0 && len(placeholderGroup) == 0 {
+		return declared, nil
 	}
-	return req.GetNq(), nil
+	rows, err := funcutil.CountPlaceholderGroupValues(placeholderGroup)
+	if err != nil {
+		// Let the decoder name what is wrong with the bytes. Should it accept
+		// them after all, its count stands.
+		group := &commonpb.PlaceholderGroup{}
+		if err := proto.Unmarshal(placeholderGroup, group); err != nil {
+			return 0, merr.WrapErrParameterInvalidErr(err, "%s", malformedMsg)
+		}
+		rows = 0
+		for _, placeholder := range group.GetPlaceholders() {
+			rows += int64(len(placeholder.GetValues()))
+		}
+	}
+	if declared != 0 && declared != rows {
+		return 0, merr.WrapErrParameterInvalidMsg(
+			"nq %d does not match the %d query rows in the placeholder group", declared, rows)
+	}
+	return rows, nil
 }
 
 func GetPartitionIDs(ctx context.Context, metaCache Cache, dbName string, collectionName string, partitionNames []string) (partitionIDs []UniqueID, err error) {
