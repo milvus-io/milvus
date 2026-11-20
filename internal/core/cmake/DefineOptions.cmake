@@ -50,6 +50,9 @@ define_option(USE_TSAN "Build C/C++ code with ThreadSanitizer" OFF)
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")
 
+define_option_string(WITH_SVS "Build Knowhere with SVS (AUTO enables it on Linux x86-64)"
+        "AUTO" "AUTO" "ON" "OFF")
+
 set(MILVUS_DEPENDENCY_SOURCE_DEFAULT "BUNDLED")
 
 define_option_string(MILVUS_DEPENDENCY_SOURCE
