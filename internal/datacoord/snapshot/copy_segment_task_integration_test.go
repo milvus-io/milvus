@@ -32,13 +32,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	sharedsnapshot "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
 func TestAssembleCopySegmentRequest_SourceSegmentNotFound(t *testing.T) {
 	// Arrange: snapshot data has segment 1, but task maps from segment 999 which doesn't exist
-	snapshotData := &snapshotstorage.SnapshotData{
+	snapshotData := &sharedsnapshot.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{
 			Id:           1,
 			CollectionId: 100,
@@ -89,7 +90,7 @@ func TestAssembleCopySegmentRequest_SourceSegmentNotFound(t *testing.T) {
 }
 
 func TestAssembleCopySegmentRequest_ExternalSnapshotRootRemap(t *testing.T) {
-	snapshotData := &snapshotstorage.SnapshotData{
+	snapshotData := &sharedsnapshot.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{
 			Id:           1,
 			CollectionId: 100,
@@ -103,13 +104,13 @@ func TestAssembleCopySegmentRequest_ExternalSnapshotRootRemap(t *testing.T) {
 
 	sm := &SnapshotMeta{}
 	sourceCM := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
-	mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{
+	mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&sharedsnapshot.ResolvedForeignStorage{
 		ForeignBucket: "bucket",
 		ForeignCM:     sourceCM,
 	}, nil).Build()
 	defer mockResolve.UnPatch()
 	mockReadExternal := mockey.Mock((*SnapshotMeta).ReadExternalSnapshotDataWithChunkManager).To(
-		func(_ *SnapshotMeta, _ context.Context, gotCM storage.ChunkManager, snapshotS3Location string, includeSegments bool) (*snapshotstorage.SnapshotData, error) {
+		func(_ *SnapshotMeta, _ context.Context, gotCM sharedsnapshot.ChunkManager, snapshotS3Location string, includeSegments bool) (*sharedsnapshot.SnapshotData, error) {
 			assert.Same(t, sourceCM, gotCM)
 			assert.Equal(t, "s3://bucket/source-root/snapshots/100/metadata/1.json", snapshotS3Location)
 			assert.True(t, includeSegments)
@@ -159,7 +160,7 @@ func TestAssembleCopySegmentRequest_ExternalSnapshotRootRemap(t *testing.T) {
 }
 
 func TestAssembleCopySegmentRequest_ExternalReferencedSnapshotRootRemap(t *testing.T) {
-	snapshotData := &snapshotstorage.SnapshotData{
+	snapshotData := &sharedsnapshot.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{
 			Id:           1,
 			CollectionId: 100,
@@ -173,7 +174,7 @@ func TestAssembleCopySegmentRequest_ExternalReferencedSnapshotRootRemap(t *testi
 
 	sm := &SnapshotMeta{}
 	sourceCM := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
-	mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{
+	mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&sharedsnapshot.ResolvedForeignStorage{
 		ForeignBucket: "bucket",
 		ForeignCM:     sourceCM,
 	}, nil).Build()

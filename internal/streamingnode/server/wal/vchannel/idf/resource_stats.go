@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -66,7 +67,7 @@ func readBM25Stats(ctx context.Context, cm storage.ChunkManager, path string) (*
 	err := retry.Do(ctx, func() error {
 		var err error
 		reader, err = cm.Reader(ctx, path)
-		return storage.ToMilvusIoError(path, err)
+		return objectstorage.ToMilvusIoError(path, err)
 	}, retry.Attempts(paramtable.Get().CommonCfg.StorageReadRetryAttempts.GetAsUint()), retry.RetryErr(merr.IsRetryableErr))
 	if err != nil {
 		return nil, err
@@ -84,10 +85,10 @@ func readBM25Stats(ctx context.Context, cm storage.ChunkManager, path string) (*
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			return nil, merr.WrapErrSerializationFailed(err, "decode BM25 stats %s", path)
 		}
-		return nil, storage.ToMilvusIoError(path, err)
+		return nil, objectstorage.ToMilvusIoError(path, err)
 	}
 	if closeErr != nil {
-		return nil, storage.ToMilvusIoError(path, closeErr)
+		return nil, objectstorage.ToMilvusIoError(path, closeErr)
 	}
 	return stats, nil
 }

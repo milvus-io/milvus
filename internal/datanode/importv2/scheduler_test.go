@@ -54,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	sharedsnapshot "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -420,9 +421,9 @@ func TestSnapshotL0BothImportPhases(t *testing.T) {
 			if external {
 				targetCM = storage.NewLocalChunkManager()
 				targetCfg = &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir(), BucketName: "target"}
-				resolve := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).To(func(context.Context, *objectstorage.Config, string, string) (*snapshotstorage.ResolvedForeignStorage, error) {
+				resolve := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).To(func(context.Context, *objectstorage.Config, string, string) (*sharedsnapshot.ResolvedForeignStorage, error) {
 					resolutions.Add(1)
-					return &snapshotstorage.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: storageCfg}, nil
+					return &sharedsnapshot.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: storageCfg}, nil
 				}).Build()
 				defer resolve.UnPatch()
 			}

@@ -20,7 +20,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	snapshotstorage "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 )
 
 type restoreSnapshotSource struct{ SnapshotSource }

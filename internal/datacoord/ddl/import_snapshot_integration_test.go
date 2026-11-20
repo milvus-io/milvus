@@ -38,6 +38,7 @@ import (
 	streamingutil "github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	sharedsnapshot "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -53,14 +54,14 @@ func TestPrepareSnapshotImportMetadataOnly(t *testing.T) {
 	defer instance.UnPatch()
 	physical := mockey.Mock(packed.GetDeltaLogPathsFromManifest).Return(nil, merr.ErrIoKeyNotFound).Build()
 	defer physical.UnPatch()
-	validation := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).Return(merr.ErrIoKeyNotFound).Build()
+	validation := mockey.Mock(sharedsnapshot.ValidateExternalSnapshotDataFiles).Return(merr.ErrIoKeyNotFound).Build()
 	defer validation.UnPatch()
 	for _, layout := range []datapb.SnapshotLayout{datapb.SnapshotLayout_SnapshotLayoutReferenced, datapb.SnapshotLayout_SnapshotLayoutSelfContained} {
 		for _, count := range []int{400, 1024} {
 			t.Run(fmt.Sprintf("%s/%d", layout, count), func(t *testing.T) {
 				snapshot := bulkimport.SnapshotImportTestData(layout)
 				metadata := &datapb.SnapshotMetadata{
-					FormatVersion: int32(snapshotstorage.SnapshotFormatVersion),
+					FormatVersion: int32(sharedsnapshot.SnapshotFormatVersion),
 					SnapshotInfo:  snapshot.SnapshotInfo, Collection: snapshot.Collection, Layout: layout,
 				}
 				metadata.SnapshotInfo.S3Location = uri
