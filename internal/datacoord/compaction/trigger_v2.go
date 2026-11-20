@@ -554,7 +554,7 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 	if ctx.Err() != nil {
 		return
 	}
-	err = m.inspector.EnqueueCompaction(task)
+	err = enqueueCompaction(ctx, m.inspector, task)
 	if err != nil {
 		log.Warn(ctx, "Failed to execute compaction task",
 			mlog.Int64("triggerID", task.GetTriggerID()),
@@ -629,7 +629,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 	if ctx.Err() != nil {
 		return
 	}
-	err = m.inspector.EnqueueCompaction(task)
+	err = enqueueCompaction(ctx, m.inspector, task)
 	if err != nil {
 		log.Warn(ctx, "Failed to execute compaction task",
 			mlog.Int64("planID", task.GetPlanID()),
@@ -698,7 +698,7 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 	if ctx.Err() != nil {
 		return
 	}
-	err = m.inspector.EnqueueCompaction(task)
+	err = enqueueCompaction(ctx, m.inspector, task)
 	if err != nil {
 		log.Warn(ctx, "Failed to execute compaction task",
 			mlog.Int64("triggerID", task.GetTriggerID()),
@@ -867,7 +867,7 @@ func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.C
 	if ctx.Err() != nil {
 		return
 	}
-	err = m.inspector.EnqueueCompaction(task)
+	err = enqueueCompaction(ctx, m.inspector, task)
 	if err != nil {
 		log.Warn(ctx, "Failed to enqueue task", mlog.Err(err))
 		return
@@ -941,7 +941,7 @@ func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx co
 	if ctx.Err() != nil {
 		return
 	}
-	err = m.inspector.EnqueueCompaction(task)
+	err = enqueueCompaction(ctx, m.inspector, task)
 	if err != nil {
 		log.Warn(ctx, "Failed to execute compaction task",
 			mlog.Int64("triggerID", task.GetTriggerID()),

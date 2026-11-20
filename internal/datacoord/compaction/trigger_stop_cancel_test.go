@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
+	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metacache"
@@ -936,19 +937,21 @@ func TestCompactionTriggerCancelledQueuedManualSignalNotPlanned(t *testing.T) {
 	enteredSignalA := make(chan struct{})
 	releaseSignalA := make(chan struct{})
 	var enteredOnce sync.Once
+	var releaseOnce sync.Once
+	releaseA := func() {
+		releaseOnce.Do(func() {
+			close(releaseSignalA)
+		})
+	}
 	var coll1002Lookups atomic.Int32
 
-	handler := newFuncHandler(t, func(ctx context.Context, collID UniqueID) (*meta.CollectionInfo, error) {
+	handler := newFuncHandler(t, func(_ context.Context, collID UniqueID) (*meta.CollectionInfo, error) {
 		switch collID {
 		case 1001:
 			enteredOnce.Do(func() {
 				close(enteredSignalA)
 			})
-			select {
-			case <-releaseSignalA:
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
+			<-releaseSignalA
 		case 1002:
 			coll1002Lookups.Add(1)
 		}
@@ -962,6 +965,7 @@ func TestCompactionTriggerCancelledQueuedManualSignalNotPlanned(t *testing.T) {
 	tr.testingOnly = true
 	tr.Start()
 	defer tr.Stop()
+	defer releaseA()
 
 	caller1Done := make(chan error, 1)
 	go func() {
@@ -1002,7 +1006,7 @@ func TestCompactionTriggerCancelledQueuedManualSignalNotPlanned(t *testing.T) {
 		t.Fatal("queued TriggerCompaction caller did not return after ctx cancel")
 	}
 
-	close(releaseSignalA)
+	releaseA()
 
 	select {
 	case err := <-caller1Done:
@@ -1020,4 +1024,160 @@ func TestCompactionTriggerCancelledQueuedManualSignalNotPlanned(t *testing.T) {
 	for _, task := range inspector.snapshot() {
 		require.NotEqual(t, int64(1002), task.GetCollectionID(), "canceled queued manual signal must not enqueue tasks")
 	}
+}
+
+func TestInspectorEnqueueCompactionWithContextAndRollback(t *testing.T) {
+	newTestTask := func(planID, triggerID, collID, segID int64) *datapb.CompactionTask {
+		return &datapb.CompactionTask{
+			PlanID:        planID,
+			TriggerID:     triggerID,
+			CollectionID:  collID,
+			PartitionID:   1,
+			Channel:       "ch-0",
+			Type:          datapb.CompactionType_MixCompaction,
+			State:         datapb.CompactionTaskState_pipelining,
+			InputSegments: []int64{segID},
+		}
+	}
+
+	t.Run("cancels_AllocTimestamp_and_releases_segments", func(t *testing.T) {
+		m, _, _ := buildTestMetaWithCandidateGroups(t, 1, datapb.SegmentLevel_L1)
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		taskMeta := ctask.NewCompactionTaskMetaOverCatalog(catalog)
+
+		enteredAllocTS := make(chan struct{})
+		allocTSObservedErr := make(chan error, 1)
+		mc := rootmocks.NewMixCoord(t)
+		mc.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).RunAndReturn(func(rpcCtx context.Context, _ *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
+			close(enteredAllocTS)
+			<-rpcCtx.Done()
+			allocTSObservedErr <- rpcCtx.Err()
+			return nil, rpcCtx.Err()
+		})
+
+		insp := NewCompactionInspector(m, taskMeta, nil, nil, nil, nil, nil, allocator.NewRootCoordAllocator(mc), nil, nil, nil, index.NewTestVersionManager())
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- insp.EnqueueCompactionWithContext(ctx, newTestTask(3001, 2001, 1001, 5001))
+		}()
+
+		select {
+		case <-enteredAllocTS:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for AllocTimestamp")
+		}
+
+		cancel()
+
+		select {
+		case err := <-allocTSObservedErr:
+			require.ErrorIs(t, err, context.Canceled)
+		case <-time.After(1 * time.Second):
+			t.Fatal("AllocTimestamp did not observe context cancellation")
+		}
+
+		select {
+		case err := <-errCh:
+			require.ErrorIs(t, err, context.Canceled)
+		case <-time.After(1 * time.Second):
+			t.Fatal("EnqueueCompactionWithContext did not return after cancel")
+		}
+
+		require.False(t, m.GetSegment(context.Background(), 5001).IsCompacting)
+		require.Nil(t, insp.getCompactionTask(3001))
+	})
+
+	t.Run("cancels_SaveCompactionTask_and_releases_segments", func(t *testing.T) {
+		m, _, _ := buildTestMetaWithCandidateGroups(t, 1, datapb.SegmentLevel_L1)
+		enteredSave := make(chan struct{})
+		saveObservedErr := make(chan error, 1)
+
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).RunAndReturn(func(saveCtx context.Context, _ *datapb.CompactionTask) error {
+			close(enteredSave)
+			<-saveCtx.Done()
+			saveObservedErr <- saveCtx.Err()
+			return saveCtx.Err()
+		})
+		taskMeta := ctask.NewCompactionTaskMetaOverCatalog(catalog)
+
+		mc := rootmocks.NewMixCoord(t)
+		mc.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocTimestampResponse{
+			Status:    merr.Success(),
+			Timestamp: 1000,
+			Count:     1,
+		}, nil)
+
+		insp := NewCompactionInspector(m, taskMeta, nil, nil, nil, nil, nil, allocator.NewRootCoordAllocator(mc), nil, nil, nil, index.NewTestVersionManager())
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- insp.EnqueueCompactionWithContext(ctx, newTestTask(3002, 2002, 1001, 5001))
+		}()
+
+		select {
+		case <-enteredSave:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for SaveCompactionTask")
+		}
+
+		cancel()
+
+		select {
+		case err := <-saveObservedErr:
+			require.ErrorIs(t, err, context.Canceled)
+		case <-time.After(1 * time.Second):
+			t.Fatal("SaveCompactionTask did not observe context cancellation")
+		}
+
+		select {
+		case err := <-errCh:
+			require.ErrorIs(t, err, context.Canceled)
+		case <-time.After(1 * time.Second):
+			t.Fatal("EnqueueCompactionWithContext did not return after cancel")
+		}
+
+		require.False(t, m.GetSegment(context.Background(), 5001).IsCompacting)
+		require.Nil(t, insp.getCompactionTask(3002))
+		require.Empty(t, taskMeta.GetCompactionTasks()[2002])
+	})
+
+	t.Run("drops_persisted_task_meta_when_queue_is_full", func(t *testing.T) {
+		m, _, _ := buildTestMetaWithCandidateGroups(t, 2, datapb.SegmentLevel_L1)
+		var droppedPlanIDs []int64
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+		catalog.EXPECT().DropCompactionTask(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, task *datapb.CompactionTask) error {
+			droppedPlanIDs = append(droppedPlanIDs, task.GetPlanID())
+			return nil
+		}).Once()
+		taskMeta := ctask.NewCompactionTaskMetaOverCatalog(catalog)
+
+		mc := rootmocks.NewMixCoord(t)
+		mc.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocTimestampResponse{
+			Status:    merr.Success(),
+			Timestamp: 1000,
+			Count:     1,
+		}, nil)
+
+		insp := NewCompactionInspector(m, taskMeta, nil, nil, nil, nil, nil, allocator.NewRootCoordAllocator(mc), nil, nil, nil, index.NewTestVersionManager())
+		insp.queueTasks = NewCompactionQueue(1, getPrioritizer())
+
+		require.NoError(t, insp.EnqueueCompactionWithContext(context.Background(), newTestTask(4001, 2101, 1001, 5001)))
+		err := insp.EnqueueCompactionWithContext(context.Background(), newTestTask(4002, 2102, 1002, 5002))
+		require.ErrorIs(t, err, errFull)
+
+		require.Equal(t, []int64{4002}, droppedPlanIDs)
+		require.Empty(t, taskMeta.GetCompactionTasks()[2102])
+		require.Len(t, taskMeta.GetCompactionTasks()[2101], 1)
+		require.False(t, m.GetSegment(context.Background(), 5002).IsCompacting)
+		require.True(t, m.GetSegment(context.Background(), 5001).IsCompacting)
+	})
 }
