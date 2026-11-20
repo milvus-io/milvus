@@ -1355,8 +1355,13 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 	}
 
 	// Sync vector/scalar indexes
-	if err := syncVectorScalarIndexes(ctx, result, task, mt, indexMeta, copyMeta, publishedBuilds); err != nil {
+	var summaries []*datapb.SegmentIndexSummary
+	summaryMode := indexMeta.UsesSegmentSummaries()
+	if err := syncVectorScalarIndexesWithSummary(ctx, result, task, mt, indexMeta, copyMeta, publishedBuilds, &summaries); err != nil {
 		return err
+	}
+	if summaryMode {
+		operators = append(operators, meta.UpdateIndexSummaries(result.GetSegmentId(), summaries))
 	}
 
 	// Sync text indexes
@@ -1375,6 +1380,11 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 	manifestUpdates, err = mt.UpdateSegmentsInfoWithoutNotify(ctx, operators...)
 	if err != nil {
 		return failCopySegmentSync(ctx, task, copyMeta, err)
+	}
+	if summaryMode {
+		if published := mt.GetSegment(ctx, result.GetSegmentId()); published != nil {
+			indexMeta.AccountCopiedIndexes(published.SegmentInfo)
+		}
 	}
 	// An inspector may have skipped these records while import protection
 	// was set. Wake it again after the durable target becomes eligible.
@@ -1676,8 +1686,23 @@ func cloneOptionalBool(value *bool) *bool {
 func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 	task CopySegmentTask, mt *meta.Meta, indexMeta *index.IndexMeta, copyMeta CopySegmentMeta, publishedBuilds map[int64]int64,
 ) error {
+	return syncVectorScalarIndexesWithSummary(ctx, result, task, mt, indexMeta, copyMeta, publishedBuilds, nil)
+}
+
+func syncVectorScalarIndexesWithSummary(ctx context.Context, result *datapb.CopySegmentResult,
+	task CopySegmentTask, mt *meta.Meta, indexMeta *index.IndexMeta, copyMeta CopySegmentMeta, publishedBuilds map[int64]int64,
+	summaries *[]*datapb.SegmentIndexSummary,
+) error {
 	if len(result.GetIndexInfos()) == 0 {
 		return nil
+	}
+	var seenIndexIDs map[int64]struct{}
+	summaryMode := indexMeta.UsesSegmentSummaries()
+	if summaryMode {
+		if summaries == nil {
+			return merr.WrapErrServiceInternalMsg("copy summary publication is missing its target")
+		}
+		seenIndexIDs = make(map[int64]struct{}, len(result.GetIndexInfos()))
 	}
 
 	// Build indexName -> target indexID mapping from target collection's index definitions.
@@ -1740,6 +1765,29 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 		hasArtifact := len(indexInfo.GetIndexFilePaths()) > 0
 		manifestResident := storageV3 && published && hasArtifact
 
+		if summaryMode {
+			if hasArtifact && !manifestResident {
+				return merr.Wrap(merr.ErrServiceUnimplemented, "copied index is incompatible with segment summary mode")
+			}
+			if _, exists := seenIndexIDs[targetIndexID]; exists {
+				return merr.WrapErrServiceInternalMsg("copied indexes contain a duplicate index ID")
+			}
+			seenIndexIDs[targetIndexID] = struct{}{}
+			*summaries = append(*summaries, &datapb.SegmentIndexSummary{
+				IndexId:             targetIndexID,
+				FieldId:             indexInfo.GetFieldId(),
+				BuildId:             indexInfo.GetBuildId(),
+				HasArtifact:         hasArtifact,
+				IndexVersion:        indexInfo.GetVersion(),
+				SerializedSize:      uint64(indexInfo.GetIndexSize()),
+				MemSize:             metautil.CopiedIndexMemSize(indexInfo),
+				VectorEngineVersion: indexInfo.GetCurrentIndexVersion(),
+				ScalarEngineVersion: indexInfo.GetCurrentScalarIndexVersion(),
+				IndexType:           indexInfo.GetIndexType(),
+			})
+			continue
+		}
+
 		now := time.Now().Unix()
 		segIndex := &model.SegmentIndex{
 			SegmentID:                 result.GetSegmentId(),
@@ -1751,7 +1799,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 			IndexState:                commonpb.IndexState_Finished,
 			IndexFileKeys:             indexInfo.GetIndexFilePaths(),
 			IndexSerializedSize:       uint64(indexInfo.GetIndexSize()),
-			IndexMemSize:              uint64(indexInfo.GetIndexSize()),
+			IndexMemSize:              metautil.CopiedIndexMemSize(indexInfo),
 			IndexVersion:              indexInfo.GetVersion(),
 			CurrentIndexVersion:       indexInfo.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: indexInfo.GetCurrentScalarIndexVersion(),
