@@ -147,6 +147,11 @@ func GetFileInfo(
 	}
 	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
+		// Source authorization results already carry their worker RPC code.
+		// Legacy Loon failures still need the existing storage classification.
+		if merr.IsMilvusError(err) {
+			return nil, merr.Wrap(err, "loon_exttable_get_file_info failed")
+		}
 		return nil, merr.WrapErrStorage(err, "loon_exttable_get_file_info failed")
 	}
 
@@ -464,6 +469,9 @@ func ExploreFilesReturnManifestPath(
 	}
 	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
+		if merr.IsMilvusError(err) {
+			return nil, "", merr.Wrap(err, "loon_exttable_explore failed")
+		}
 		return nil, "", merr.WrapErrStorage(err, "loon_exttable_explore failed")
 	}
 	if outColumnGroupsPath == nil {

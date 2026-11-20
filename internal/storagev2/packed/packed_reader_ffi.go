@@ -27,6 +27,7 @@ import "C"
 
 import (
 	"context"
+	"errors"
 	"io"
 	"unsafe"
 
@@ -238,6 +239,11 @@ func openFFIPackedReader(
 	status = C.GetFFIReaderStream(cPackedReader, C.int64_t(8196), (*C.struct_ArrowArrayStream)(unsafe.Pointer(&cStream)))
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		C.CloseFFIReader(cPackedReader)
+		// Keep source authorization outcomes across worker RPCs without
+		// changing the legacy storage code for other reader failures.
+		if merr.IsPermanentSourceAuthErr(err) || errors.Is(err, merr.ErrSourceAuthTransient) {
+			return nil, merr.Wrap(err, "failed to get reader stream")
+		}
 		return nil, merr.WrapErrStorage(err, "failed to get reader stream")
 	}
 

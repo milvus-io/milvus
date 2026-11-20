@@ -21,6 +21,7 @@ package packed
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -121,6 +122,8 @@ func TestSourceAuthorizationNativeConsumersPreserveOutcome(t *testing.T) {
 				require.ErrorIs(t, err, sourceauth.StatusError(status))
 				// The worker RPC projection must keep permanent outcomes out of
 				// retries even after the native wrappers have handled the error.
+				require.Equal(t, merr.Code(sourceauth.StatusError(status)), merr.Code(err))
+				require.Equal(t, status == sourceauth.CredentialTransient, merr.Status(err).GetRetriable())
 				roundTrip := merr.Error(merr.Status(err))
 				require.Equal(t, status, sourceauth.StatusFromError(roundTrip))
 				require.Equal(t, status != sourceauth.CredentialTransient, merr.IsPermanentSourceAuthErr(roundTrip))
@@ -146,6 +149,38 @@ func TestSourceAuthorizationNativeConsumersRejectOtherAuthority(t *testing.T) {
 			require.ErrorIs(t, err, merr.ErrSourceAuthDenied)
 			require.Zero(t, session.fetches.Load(), "must reject before requesting credentials")
 			require.EqualValues(t, 1, session.closes.Load())
+		})
+	}
+}
+
+// Ordinary FFI failures retain the storage code while source authorization
+// failures above keep their dedicated codes across the same consumer boundary.
+func TestSourceAuthorizationNativeConsumersLegacyStorageFailures(t *testing.T) {
+	paramtable.Init()
+	for _, consumer := range []string{"explore", "file-info", "packed-reader"} {
+		t.Run(consumer, func(t *testing.T) {
+			root := t.TempDir()
+			missing := filepath.Join(root, "missing.parquet")
+			config := &indexpb.StorageConfig{StorageType: "local", RootPath: root, BucketName: root}
+			var err error
+			switch consumer {
+			case "explore":
+				_, _, err = ExploreFilesReturnManifestPath([]string{"id"}, "parquet", root, filepath.Join(root, "missing"), config, ExternalSpecContext{})
+			case "file-info":
+				_, err = GetFileInfo("parquet", missing, config, ExternalSpecContext{})
+			case "packed-reader":
+				schema := arrow.NewSchema([]arrow.Field{{Name: "id", Type: arrow.PrimitiveTypes.Int64}}, nil)
+				var reader *FFIPackedReader
+				reader, err = NewFFIPackedReaderWithFragments([]string{"id"}, "parquet",
+					[]Fragment{{FilePath: missing, StartRow: 0, EndRow: 1, RowCount: 1}},
+					schema, []string{"id"}, 1024, config, nil, ExternalSpecContext{})
+				if reader != nil {
+					require.NoError(t, reader.Close())
+				}
+			}
+			require.Error(t, err)
+			require.Equal(t, merr.Code(merr.ErrStorage), merr.Status(err).GetCode())
+			require.False(t, merr.IsPermanentSourceAuthErr(err))
 		})
 	}
 }
