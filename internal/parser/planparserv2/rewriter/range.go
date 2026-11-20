@@ -205,6 +205,25 @@ func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr
 	}
 	for _, g := range groups {
 		if len(g.lowers)+len(g.uppers) == 1 {
+			if len(g.lowers) == 1 {
+				b := g.lowers[0]
+				if isIntegerUnaryRangeContradiction(g.col, g.effDt, b.value, b.inclusive, true) {
+					used[b.exprIndex] = true
+					out = append(out, newAlwaysFalseExpr())
+				} else if isIntegerUnaryRangeTautology(g.col, g.effDt, b.value, b.inclusive, true) {
+					used[b.exprIndex] = true
+					out = append(out, newAlwaysTrueExpr())
+				}
+			} else if len(g.uppers) == 1 {
+				b := g.uppers[0]
+				if isIntegerUnaryRangeContradiction(g.col, g.effDt, b.value, b.inclusive, false) {
+					used[b.exprIndex] = true
+					out = append(out, newAlwaysFalseExpr())
+				} else if isIntegerUnaryRangeTautology(g.col, g.effDt, b.value, b.inclusive, false) {
+					used[b.exprIndex] = true
+					out = append(out, newAlwaysTrueExpr())
+				}
+			}
 			continue
 		}
 		// Use the effective type stored in the group
@@ -252,6 +271,8 @@ func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr
 			if isEmpty {
 				// Empty interval → constant false
 				out = append(out, newAlwaysFalseExpr())
+			} else if isIntegerRangeFullDomain(g.col, g.effDt, bestLower.value, bestLower.inclusive, bestUpper.value, bestUpper.inclusive) {
+				out = append(out, newAlwaysTrueExpr())
 			} else {
 				out = append(out, newBinaryRangeExpr(g.col, bestLower.inclusive, bestUpper.inclusive, bestLower.value, bestUpper.value))
 			}
@@ -259,20 +280,32 @@ func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr
 			for _, b := range g.lowers {
 				used[b.exprIndex] = true
 			}
-			op := planpb.OpType_GreaterThan
-			if bestLower.inclusive {
-				op = planpb.OpType_GreaterEqual
+			if isIntegerUnaryRangeTautology(g.col, g.effDt, bestLower.value, bestLower.inclusive, true) {
+				out = append(out, newAlwaysTrueExpr())
+			} else if isIntegerUnaryRangeContradiction(g.col, g.effDt, bestLower.value, bestLower.inclusive, true) {
+				out = append(out, newAlwaysFalseExpr())
+			} else {
+				op := planpb.OpType_GreaterThan
+				if bestLower.inclusive {
+					op = planpb.OpType_GreaterEqual
+				}
+				out = append(out, newUnaryRangeExpr(g.col, op, bestLower.value))
 			}
-			out = append(out, newUnaryRangeExpr(g.col, op, bestLower.value))
 		} else if bestUpper != nil {
 			for _, b := range g.uppers {
 				used[b.exprIndex] = true
 			}
-			op := planpb.OpType_LessThan
-			if bestUpper.inclusive {
-				op = planpb.OpType_LessEqual
+			if isIntegerUnaryRangeTautology(g.col, g.effDt, bestUpper.value, bestUpper.inclusive, false) {
+				out = append(out, newAlwaysTrueExpr())
+			} else if isIntegerUnaryRangeContradiction(g.col, g.effDt, bestUpper.value, bestUpper.inclusive, false) {
+				out = append(out, newAlwaysFalseExpr())
+			} else {
+				op := planpb.OpType_LessThan
+				if bestUpper.inclusive {
+					op = planpb.OpType_LessEqual
+				}
+				out = append(out, newUnaryRangeExpr(g.col, op, bestUpper.value))
 			}
-			out = append(out, newUnaryRangeExpr(g.col, op, bestUpper.value))
 		}
 	}
 	for i := range parts {
@@ -661,7 +694,12 @@ func (v *visitor) combineAndBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 			continue
 		}
 		if len(g.intervals) == 1 {
-			// Single interval, keep as is
+			// Single interval: fold if integer full-domain, otherwise keep as is.
+			iv := g.intervals[0]
+			if iv.isBinaryRange && isIntegerRangeFullDomain(g.col, g.effDt, iv.lower, iv.lowerInc, iv.upper, iv.upperInc) {
+				used[iv.exprIndex] = true
+				out = append(out, newAlwaysTrueExpr())
+			}
 			continue
 		}
 
@@ -730,19 +768,35 @@ func (v *visitor) combineAndBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 
 		// Emit the merged interval
 		if finalLower != nil && finalUpper != nil {
-			out = append(out, newBinaryRangeExpr(g.col, finalLowerInc, finalUpperInc, finalLower, finalUpper))
+			if isIntegerRangeFullDomain(g.col, g.effDt, finalLower, finalLowerInc, finalUpper, finalUpperInc) {
+				out = append(out, newAlwaysTrueExpr())
+			} else {
+				out = append(out, newBinaryRangeExpr(g.col, finalLowerInc, finalUpperInc, finalLower, finalUpper))
+			}
 		} else if finalLower != nil {
-			op := planpb.OpType_GreaterThan
-			if finalLowerInc {
-				op = planpb.OpType_GreaterEqual
+			if isIntegerUnaryRangeTautology(g.col, g.effDt, finalLower, finalLowerInc, true) {
+				out = append(out, newAlwaysTrueExpr())
+			} else if isIntegerUnaryRangeContradiction(g.col, g.effDt, finalLower, finalLowerInc, true) {
+				out = append(out, newAlwaysFalseExpr())
+			} else {
+				op := planpb.OpType_GreaterThan
+				if finalLowerInc {
+					op = planpb.OpType_GreaterEqual
+				}
+				out = append(out, newUnaryRangeExpr(g.col, op, finalLower))
 			}
-			out = append(out, newUnaryRangeExpr(g.col, op, finalLower))
 		} else if finalUpper != nil {
-			op := planpb.OpType_LessThan
-			if finalUpperInc {
-				op = planpb.OpType_LessEqual
+			if isIntegerUnaryRangeTautology(g.col, g.effDt, finalUpper, finalUpperInc, false) {
+				out = append(out, newAlwaysTrueExpr())
+			} else if isIntegerUnaryRangeContradiction(g.col, g.effDt, finalUpper, finalUpperInc, false) {
+				out = append(out, newAlwaysFalseExpr())
+			} else {
+				op := planpb.OpType_LessThan
+				if finalUpperInc {
+					op = planpb.OpType_LessEqual
+				}
+				out = append(out, newUnaryRangeExpr(g.col, op, finalUpper))
 			}
-			out = append(out, newUnaryRangeExpr(g.col, op, finalUpper))
 		}
 	}
 
@@ -875,7 +929,12 @@ func (v *visitor) combineOrBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 			continue
 		}
 		if len(g.intervals) == 1 {
-			// Single interval, keep as is
+			// Single interval: fold if integer full-domain, otherwise keep as is.
+			iv := g.intervals[0]
+			if iv.isBinaryRange && isIntegerRangeFullDomain(g.col, g.effDt, iv.lower, iv.lowerInc, iv.upper, iv.upperInc) {
+				used[iv.exprIndex] = true
+				out = append(out, newAlwaysTrueExpr())
+			}
 			continue
 		}
 
@@ -960,4 +1019,90 @@ func (v *visitor) combineOrBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 	}
 
 	return out
+}
+
+func integerDomainBounds(dt schemapb.DataType) (int64, int64, bool) {
+	switch dt {
+	case schemapb.DataType_Int8:
+		return math.MinInt8, math.MaxInt8, true
+	case schemapb.DataType_Int16:
+		return math.MinInt16, math.MaxInt16, true
+	case schemapb.DataType_Int32:
+		return math.MinInt32, math.MaxInt32, true
+	case schemapb.DataType_Int64:
+		return math.MinInt64, math.MaxInt64, true
+	default:
+		return 0, 0, false
+	}
+}
+
+func getInt64Value(v *planpb.GenericValue) (int64, bool) {
+	if v == nil {
+		return 0, false
+	}
+	if i, ok := v.GetVal().(*planpb.GenericValue_Int64Val); ok {
+		return i.Int64Val, true
+	}
+	return 0, false
+}
+
+func isIntegerRangeFullDomain(col *planpb.ColumnInfo, dt schemapb.DataType,
+	lower *planpb.GenericValue, lowerInc bool,
+	upper *planpb.GenericValue, upperInc bool,
+) bool {
+	if !canFoldPredicateToBoolConstant(col) {
+		return false
+	}
+	minVal, maxVal, ok := integerDomainBounds(dt)
+	if !ok {
+		return false
+	}
+	lowInt, okLow := getInt64Value(lower)
+	upInt, okUp := getInt64Value(upper)
+	if !okLow || !okUp {
+		return false
+	}
+	lowerCovers := lowInt < minVal || (lowInt == minVal && lowerInc)
+	upperCovers := upInt > maxVal || (upInt == maxVal && upperInc)
+	return lowerCovers && upperCovers
+}
+
+func isIntegerUnaryRangeTautology(col *planpb.ColumnInfo, dt schemapb.DataType,
+	val *planpb.GenericValue, inc bool, isLower bool,
+) bool {
+	if !canFoldPredicateToBoolConstant(col) {
+		return false
+	}
+	minVal, maxVal, ok := integerDomainBounds(dt)
+	if !ok {
+		return false
+	}
+	v, okVal := getInt64Value(val)
+	if !okVal {
+		return false
+	}
+	if isLower {
+		return v < minVal || (v == minVal && inc)
+	}
+	return v > maxVal || (v == maxVal && inc)
+}
+
+func isIntegerUnaryRangeContradiction(col *planpb.ColumnInfo, dt schemapb.DataType,
+	val *planpb.GenericValue, inc bool, isLower bool,
+) bool {
+	if !canFoldPredicateToBoolConstant(col) {
+		return false
+	}
+	minVal, maxVal, ok := integerDomainBounds(dt)
+	if !ok {
+		return false
+	}
+	v, okVal := getInt64Value(val)
+	if !okVal {
+		return false
+	}
+	if isLower {
+		return v > maxVal || (v == maxVal && !inc)
+	}
+	return v < minVal || (v == minVal && !inc)
 }
