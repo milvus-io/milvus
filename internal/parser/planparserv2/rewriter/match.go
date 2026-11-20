@@ -7,7 +7,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
 
-// Only a quantifier's complete predicate may treat UNKNOWN as a miss.
+// Only a complete element predicate may treat UNKNOWN as a miss.
 // A NOT within the element expression still needs all three truth values.
 func (v *visitor) rewriteMatchPredicate(e *planpb.Expr, foldZeroHits bool) *planpb.Expr {
 	if u := e.GetUnaryExpr(); u != nil && u.GetOp() == planpb.UnaryExpr_Not {
@@ -20,35 +20,40 @@ func (v *visitor) rewriteMatchPredicate(e *planpb.Expr, foldZeroHits bool) *plan
 	}
 
 	parts := flattenLogicalExpr(b)
-	var comparisons, others []*planpb.Expr
 	for i, p := range parts {
-		p = v.rewriteMatchPredicate(p, false)
-		parts[i] = p
-		if isMatchScalarComparison(p.GetUnaryRangeExpr()) {
+		parts[i] = v.rewriteMatchPredicate(p, false)
+	}
+	return v.mergeElementComparisons(b.GetOp(), parts, foldZeroHits)
+}
+
+func (v *visitor) mergeElementComparisons(op planpb.BinaryExpr_BinaryOp, parts []*planpb.Expr, foldZeroHits bool) *planpb.Expr {
+	var comparisons, others []*planpb.Expr
+	for _, p := range parts {
+		if isElementScalarComparison(p.GetUnaryRangeExpr()) {
 			comparisons = append(comparisons, p)
 		} else {
 			others = append(others, p)
 		}
 	}
 	if len(comparisons) < 2 {
-		return buildBalancedBinary(b.GetOp(), parts)
+		return buildBalancedBinary(op, parts)
 	}
 	before := len(comparisons)
-	if b.GetOp() == planpb.BinaryExpr_LogicalOr {
+	if op == planpb.BinaryExpr_LogicalOr {
 		comparisons = v.combineOrEqualsToIn(comparisons)
 	} else {
-		if foldZeroHits && conflictingMatchEqualities(comparisons) {
+		if foldZeroHits && conflictingElementEqualities(comparisons) {
 			return newAlwaysFalseExpr()
 		}
 		comparisons = combineAndRangePredicates(comparisons, func(*planpb.ColumnInfo) bool { return foldZeroHits })
 	}
 	if len(comparisons) == before {
-		return buildBalancedBinary(b.GetOp(), parts)
+		return buildBalancedBinary(op, parts)
 	}
-	return foldBinary(b.GetOp(), append(others, comparisons...))
+	return foldBinary(op, append(others, comparisons...))
 }
 
-func conflictingMatchEqualities(parts []*planpb.Expr) bool {
+func conflictingElementEqualities(parts []*planpb.Expr) bool {
 	first := make(map[int64]*planpb.GenericValue)
 	for _, p := range parts {
 		u := p.GetUnaryRangeExpr()
@@ -64,7 +69,7 @@ func conflictingMatchEqualities(parts []*planpb.Expr) bool {
 	return false
 }
 
-func isMatchScalarComparison(u *planpb.UnaryRangeExpr) bool {
+func isElementScalarComparison(u *planpb.UnaryRangeExpr) bool {
 	col := u.GetColumnInfo()
 	if !col.GetIsElementLevel() || len(col.GetNestedPath()) != 0 || col.GetDataType() == schemapb.DataType_JSON {
 		return false
@@ -77,7 +82,10 @@ func isMatchScalarComparison(u *planpb.UnaryRangeExpr) bool {
 	// Element plans may carry ARRAY storage type plus the scalar element type.
 	// Group literals only if conversion to that scalar type preserves their value.
 	dt := effectiveDataType(col)
-	val := u.GetValue()
+	return (dt != schemapb.DataType_Bool || u.GetOp() == planpb.OpType_Equal) && elementLiteralIsExact(dt, u.GetValue())
+}
+
+func elementLiteralIsExact(dt schemapb.DataType, val *planpb.GenericValue) bool {
 	switch x := val.GetVal().(type) {
 	case *planpb.GenericValue_Int64Val:
 		switch dt {
@@ -96,7 +104,7 @@ func isMatchScalarComparison(u *planpb.UnaryRangeExpr) bool {
 	case *planpb.GenericValue_StringVal:
 		return dt == schemapb.DataType_VarChar
 	case *planpb.GenericValue_BoolVal:
-		return dt == schemapb.DataType_Bool && u.GetOp() == planpb.OpType_Equal
+		return dt == schemapb.DataType_Bool
 	}
 	return false
 }

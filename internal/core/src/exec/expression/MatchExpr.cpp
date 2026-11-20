@@ -461,6 +461,7 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                              .first -
                          elem_start;
         }
+        eval_ctx.set_input_batch_size(elem_count);
         if (has_candidates) {
             // Keep index/dense execution sequential and expose candidates in
             // the same element coordinates as this batch's result.

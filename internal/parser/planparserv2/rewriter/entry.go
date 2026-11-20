@@ -54,8 +54,17 @@ func (v *visitor) visitExpr(expr *planpb.Expr) interface{} {
 		}
 		return expr
 	case *planpb.Expr_ElementFilterExpr:
-		real.ElementFilterExpr.ElementExpr = v.visitExpr(real.ElementFilterExpr.GetElementExpr()).(*planpb.Expr)
-		real.ElementFilterExpr.Predicate = v.visitExpr(real.ElementFilterExpr.GetPredicate()).(*planpb.Expr)
+		ef := real.ElementFilterExpr
+		ef.Predicate = v.visitExpr(ef.GetPredicate()).(*planpb.Expr)
+		ef.ElementExpr = v.visitExpr(ef.GetElementExpr()).(*planpb.Expr)
+		// Keep the usual element_filter rewrites (including IN and text rules).
+		// Only at the root may a contradiction on a nullable element become
+		// FALSE: the filter selects definite TRUE hits, just like MATCH.
+		b := ef.ElementExpr.GetBinaryExpr()
+		if v.optimizeEnabled && b != nil && b.GetOp() == planpb.BinaryExpr_LogicalAnd &&
+			paramtable.Get().CommonCfg.EnableMatchConstantPredicate.GetAsBool() {
+			ef.ElementExpr = v.mergeElementComparisons(b.GetOp(), flattenLogicalExpr(b), true)
+		}
 		return expr
 	// no optimization for other types
 	default:

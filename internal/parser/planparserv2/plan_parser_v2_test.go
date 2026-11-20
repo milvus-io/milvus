@@ -6273,7 +6273,7 @@ func TestArrayTextMatchOperand(t *testing.T) {
 	require.ErrorContains(t, err, "does not enable match")
 }
 
-func TestMatchPredicateRewrite(t *testing.T) {
+func TestElementPredicateRewrite(t *testing.T) {
 	schema := newTestSchema(false)
 	sub := schema.StructArrayFields[0].Fields[0]
 	sub.ElementNullable = true
@@ -6281,6 +6281,9 @@ func TestMatchPredicateRewrite(t *testing.T) {
 		ElementType: schemapb.DataType_VarChar, Nullable: true, ElementNullable: true}
 	schema.Fields = append(schema.Fields, tags, &schemapb.FieldSchema{
 		FieldID: 953, Name: "weights", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float,
+	})
+	schema.StructArrayFields[0].Fields = append(schema.StructArrayFields[0].Fields, &schemapb.FieldSchema{
+		FieldID: 954, Name: "struct_array[weight]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float,
 	})
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	require.NoError(t, err)
@@ -6346,9 +6349,31 @@ func TestMatchPredicateRewrite(t *testing.T) {
 	separate := parse(`MATCH_ANY(tags, $ == "new") && MATCH_ANY(tags, $ == "york")`).GetBinaryExpr()
 	require.NotNil(t, separate.GetLeft().GetMatchExpr())
 	require.NotNil(t, separate.GetRight().GetMatchExpr())
+	elementFilter := func(predicate string) *planpb.ElementFilterExpr {
+		t.Helper()
+		return parse("Int64Field > 0 && ELEMENT_FILTER(struct_array, " + predicate + ")").GetElementFilterExpr()
+	}
+	conflict := `$[sub_str] == "a" && $[sub_str] == "b"`
+	ef := elementFilter(conflict)
+	require.Equal(t, "struct_array", ef.GetStructName())
+	require.NotNil(t, ef.GetPredicate().GetUnaryRangeExpr())
+	require.True(t, rewriter.IsAlwaysFalseExpr(ef.GetElementExpr()))
+	require.True(t, rewriter.IsAlwaysFalseExpr(elementFilter(`$[sub_str] > "z" && $[sub_str] < "a"`).GetElementExpr()))
+	require.NotNil(t, elementFilter("NOT ("+conflict+")").GetElementExpr().GetUnaryExpr().GetChild().GetBinaryExpr())
+	require.NotNil(t, elementFilter(`$[weight] == 16777216.0 && $[weight] == 16777217.0`).GetElementExpr().GetBinaryExpr())
+	require.NotNil(t, elementFilter(`$[weight] >= 16777217.0 && $[weight] <= 16777216.0`).GetElementExpr().GetBinaryExpr())
+	term, err := ParseExpr(helper, `ELEMENT_FILTER(struct_array, $[sub_str] == {x} || $[sub_str] == {y})`, map[string]*schemapb.TemplateValue{
+		"x": {Val: &schemapb.TemplateValue_StringVal{StringVal: "a"}},
+		"y": {Val: &schemapb.TemplateValue_StringVal{StringVal: "b"}},
+	})
+	require.NoError(t, err)
+	require.Len(t, term.GetElementFilterExpr().GetElementExpr().GetTermExpr().GetValues(), 2)
 	cfg.EnableMatchConstantPredicate.SwapTempValue("false")
 	require.NotNil(t, parse(`MATCH_ANY(tags, $ == "new" && $ == "york")`).GetMatchExpr().GetPredicate().GetBinaryExpr())
 	require.NotNil(t, parse(`MATCH_ANY(tags, $ == "new" || $ == "york")`).GetMatchExpr().GetPredicate().GetTermExpr())
+	require.NotNil(t, elementFilter(conflict).GetElementExpr().GetBinaryExpr())
+	require.NotNil(t, elementFilter(`$[sub_str] >= "a" && $[sub_str] < "z"`).GetElementExpr().GetBinaryRangeExpr())
 	cfg.EnabledOptimizeExpr.SwapTempValue("false")
 	require.NotNil(t, parse(`MATCH_ANY(tags, $ == "new" || $ == "york")`).GetMatchExpr().GetPredicate().GetBinaryExpr())
+	require.NotNil(t, elementFilter(conflict).GetElementExpr().GetBinaryExpr())
 }

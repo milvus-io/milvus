@@ -2017,7 +2017,7 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Version:      "3.1.0",
 		DefaultValue: "auto",
 		Export:       true,
-		Doc:          "Fold a complete MATCH element predicate with zero possible hits to FALSE. auto enables this after all registered components reach 3.1.0. Older query nodes size constant bitmaps by row count.",
+		Doc:          "Fold a complete MATCH or ELEMENT_FILTER predicate with zero possible element hits to FALSE. auto enables this after all registered components reach 3.1.0. Older query nodes size constant bitmaps by row count.",
 		VersionGateSwitcher: &VersionGateSwitcher{
 			EnableAutoSwitchValue: "auto",
 			PreSwitchValue:        "false",

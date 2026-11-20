@@ -36,6 +36,7 @@ func (s *ElementNullableSuite) TestArrayTextMatchLifecycle() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	restore := s.Cluster.MustModifyMilvusConfig(map[string]string{
+		"common.enableMatchConstantPredicate":               "true",
 		"dataCoord.compaction.enableAutoCompaction":         "false",
 		"indexCoord.segment.minSegmentNumRowsToEnableIndex": "1",
 	})
@@ -148,6 +149,11 @@ func (s *ElementNullableSuite) TestArrayTextMatchLifecycle() {
 			{`pk >= 2 && ELEMENT_FILTER(reviews, TEXT_MATCH($[body], "new york", minimum_should_match=2) && $[lang] == "en")`, []hit{{4, 0}}},
 			{`MATCH_ANY(tags, PHRASE_MATCH($, "new york")) && ELEMENT_FILTER(reviews, PHRASE_MATCH($[body], "new york"))`, []hit{{4, 0}}},
 			{`ELEMENT_FILTER(reviews, NOT TEXT_MATCH($[body], "york"))`, []hit{{1, 1}, {2, 0}}},
+			{`ELEMENT_FILTER(reviews, true || $[lang] == "en")`, []hit{{1, 0}, {1, 1}, {2, 0}, {2, 1}, {4, 0}, {6, 0}, {6, 1}}},
+			{`ELEMENT_FILTER(reviews, false && $[lang] == "en")`, nil},
+			{`pk >= 4 && ELEMENT_FILTER(reviews, true || $[lang] == "en")`, []hit{{4, 0}, {6, 0}, {6, 1}}},
+			{`ELEMENT_FILTER(reviews, $[body] == "new" && $[body] == "york")`, nil},
+			{`ELEMENT_FILTER(reviews, NOT ($[body] == "new" && $[body] == "york"))`, []hit{{1, 0}, {1, 1}, {2, 0}, {2, 1}, {4, 0}, {6, 1}}},
 		} {
 			var want []hit
 			for _, h := range tc.hits {
