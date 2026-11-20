@@ -55,6 +55,8 @@ type ElementNullableSuite struct {
 
 func (s *ElementNullableSuite) SetupSuite() {
 	s.WithMilvusConfig("mq.type", "woodpecker")
+	// Force sequential evaluation across rows with different (including zero) element counts.
+	s.WithMilvusConfig("queryNode.segcore.exprEvalBatchSize", "1")
 	s.MiniClusterSuite.SetupSuite()
 }
 

@@ -1412,31 +1412,30 @@ func elementFilterPredicateScope(structName string) elementPredicateScope {
 	}
 }
 
-func validateElementPredicateColumn(columnInfo *planpb.ColumnInfo, scope elementPredicateScope) (bool, error) {
+func validateElementPredicateColumn(columnInfo *planpb.ColumnInfo, scope elementPredicateScope) error {
 	if columnInfo == nil {
-		return false, merr.WrapErrParameterInvalidMsg("%s column info is missing", scope.name)
+		return merr.WrapErrParameterInvalidMsg("%s column info is missing", scope.name)
 	}
 	if !columnInfo.GetIsElementLevel() {
-		return false, merr.WrapErrParameterInvalidMsg("%s", scope.rowLevel)
+		return merr.WrapErrParameterInvalidMsg("%s", scope.rowLevel)
 	}
-	return true, nil
+	return nil
 }
 
 // validateElementLevelPredicate checks that the predicate of MATCH_* or
 // element_filter only uses expressions segcore evaluates per element of the
-// current struct. It reports whether every leaf references an element-level
-// field; constant leaves such as true make it false without an error.
-func validateElementLevelPredicate(expr *planpb.Expr, scope elementPredicateScope) (bool, error) {
+// target. Constants are valid in that domain and need no field reference.
+func validateElementLevelPredicate(expr *planpb.Expr, scope elementPredicateScope) error {
 	if expr == nil {
-		return false, merr.WrapErrParameterInvalidMsg("%s is missing", scope.name)
+		return merr.WrapErrParameterInvalidMsg("%s is missing", scope.name)
 	}
 
 	switch realExpr := expr.GetExpr().(type) {
 	case *planpb.Expr_ColumnExpr:
 		if !realExpr.ColumnExpr.GetInfo().GetIsElementLevel() {
-			return false, merr.WrapErrParameterInvalidMsg("%s", scope.rowLevel)
+			return merr.WrapErrParameterInvalidMsg("%s", scope.rowLevel)
 		}
-		return false, merr.WrapErrParameterInvalidMsg("%s", scope.rawColumn)
+		return merr.WrapErrParameterInvalidMsg("%s", scope.rawColumn)
 	case *planpb.Expr_TermExpr:
 		return validateElementPredicateColumn(realExpr.TermExpr.GetColumnInfo(), scope)
 	case *planpb.Expr_UnaryRangeExpr:
@@ -1446,7 +1445,7 @@ func validateElementLevelPredicate(expr *planpb.Expr, scope elementPredicateScop
 	case *planpb.Expr_BinaryArithOpEvalRangeExpr:
 		return validateElementPredicateColumn(realExpr.BinaryArithOpEvalRangeExpr.GetColumnInfo(), scope)
 	case *planpb.Expr_CompareExpr:
-		return false, merr.WrapErrParameterInvalidMsg("column-to-column comparison is not supported inside %s", scope.name)
+		return merr.WrapErrParameterInvalidMsg("column-to-column comparison is not supported inside %s", scope.name)
 	case *planpb.Expr_JsonContainsExpr:
 		return validateElementPredicateColumn(realExpr.JsonContainsExpr.GetColumnInfo(), scope)
 	case *planpb.Expr_NullExpr:
@@ -1460,37 +1459,27 @@ func validateElementLevelPredicate(expr *planpb.Expr, scope elementPredicateScop
 	case *planpb.Expr_UnaryExpr:
 		return validateElementLevelPredicate(realExpr.UnaryExpr.GetChild(), scope)
 	case *planpb.Expr_BinaryExpr:
-		leftElementLevel, err := validateElementLevelPredicate(realExpr.BinaryExpr.GetLeft(), scope)
-		if err != nil {
-			return false, err
+		if err := validateElementLevelPredicate(realExpr.BinaryExpr.GetLeft(), scope); err != nil {
+			return err
 		}
-		rightElementLevel, err := validateElementLevelPredicate(realExpr.BinaryExpr.GetRight(), scope)
-		if err != nil {
-			return false, err
-		}
-		return leftElementLevel && rightElementLevel, nil
+		return validateElementLevelPredicate(realExpr.BinaryExpr.GetRight(), scope)
 	case *planpb.Expr_BinaryArithExpr:
-		leftElementLevel, err := validateElementLevelPredicate(realExpr.BinaryArithExpr.GetLeft(), scope)
-		if err != nil {
-			return false, err
+		if err := validateElementLevelPredicate(realExpr.BinaryArithExpr.GetLeft(), scope); err != nil {
+			return err
 		}
-		rightElementLevel, err := validateElementLevelPredicate(realExpr.BinaryArithExpr.GetRight(), scope)
-		if err != nil {
-			return false, err
-		}
-		return leftElementLevel && rightElementLevel, nil
+		return validateElementLevelPredicate(realExpr.BinaryArithExpr.GetRight(), scope)
 	case *planpb.Expr_CallExpr:
-		return false, merr.WrapErrParameterInvalidMsg("function calls are not supported inside %s", scope.name)
+		return merr.WrapErrParameterInvalidMsg("function calls are not supported inside %s", scope.name)
 	case *planpb.Expr_ValueExpr, *planpb.Expr_AlwaysTrueExpr:
-		return false, nil
+		return nil
 	case *planpb.Expr_ElementFilterExpr:
-		return false, merr.WrapErrParameterInvalidMsg("element_filter is not supported inside %s", scope.name)
+		return merr.WrapErrParameterInvalidMsg("element_filter is not supported inside %s", scope.name)
 	case *planpb.Expr_MatchExpr:
-		return false, merr.WrapErrParameterInvalidMsg("MATCH_* is not supported inside %s", scope.name)
+		return merr.WrapErrParameterInvalidMsg("MATCH_* is not supported inside %s", scope.name)
 	case *planpb.Expr_RandomSampleExpr:
-		return false, merr.WrapErrParameterInvalidMsg("random sample is not supported inside %s", scope.name)
+		return merr.WrapErrParameterInvalidMsg("random sample is not supported inside %s", scope.name)
 	default:
-		return false, merr.WrapErrParameterInvalidMsg("unsupported %s expression", scope.name)
+		return merr.WrapErrParameterInvalidMsg("unsupported %s expression", scope.name)
 	}
 }
 
@@ -2088,6 +2077,13 @@ func normalizeLogicalOperand(expr *planpb.Expr) *planpb.Expr {
 	return alwaysFalseExpr()
 }
 
+// A bare boolean and a constant comparison both yield a predicate bitmap in
+// the element domain, including when expression optimization is disabled.
+func elementPredicateBitmap(e *ExprWithType) (*planpb.Expr, bool) {
+	predicate := normalizeLogicalOperand(e.expr)
+	return predicate, predicate != e.expr || canBeExecuted(e)
+}
+
 func newLogicalBinaryExpr(leftExpr, rightExpr *ExprWithType, op planpb.BinaryExpr_BinaryOp) *ExprWithType {
 	return &ExprWithType{
 		expr: &planpb.Expr{
@@ -2259,7 +2255,9 @@ func (v *ParserVisitor) foldOr2(left, right interface{}) interface{} {
 			otherExpr = getExpr(left)
 		}
 		if boolLiteral.GetBoolVal() {
-			if otherExpr.expr.GetIsTemplate() {
+			// Keep the discarded operand until its template and element scope
+			// have been validated. The rewriter can then fold the constant.
+			if otherExpr.expr.GetIsTemplate() || v.currentStructArrayField != "" {
 				return newLogicalBinaryExpr(getExpr(left), getExpr(right), planpb.BinaryExpr_LogicalOr)
 			}
 			// true or expr → always true
@@ -2345,7 +2343,9 @@ func (v *ParserVisitor) foldAnd2(left, right interface{}) interface{} {
 			otherExpr = getExpr(left)
 		}
 		if !boolLiteral.GetBoolVal() {
-			if otherExpr.expr.GetIsTemplate() {
+			// Keep the discarded operand until its template and element scope
+			// have been validated. The rewriter can then fold the constant.
+			if otherExpr.expr.GetIsTemplate() || v.currentStructArrayField != "" {
 				return newLogicalBinaryExpr(getExpr(left), getExpr(right), planpb.BinaryExpr_LogicalAnd)
 			}
 			// false and expr → always false
@@ -3674,6 +3674,9 @@ func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) int
 
 	// Get struct array field name (first parameter)
 	arrayFieldName := ctx.FieldName().GetText()
+	if !v.schema.HasStructArrayField(arrayFieldName) {
+		return merr.WrapErrParameterInvalidMsg("element_filter requires a StructArray target, got %s", arrayFieldName)
+	}
 
 	// Set current context for element expression parsing
 	v.currentStructArrayField = arrayFieldName
@@ -3715,13 +3718,13 @@ func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) int
 			"element_filter predicate %s is a bare Bool sub-field; write it as a comparison, e.g. %s == true",
 			ctx.Expr().GetText(), ctx.Expr().GetText())
 	}
-	if column := exprWithType.expr.GetColumnExpr(); (column == nil || column.GetInfo().GetIsElementLevel()) &&
-		!canBeExecuted(exprWithType) {
+	predicate, executable := elementPredicateBitmap(exprWithType)
+	if column := predicate.GetColumnExpr(); (column == nil || column.GetInfo().GetIsElementLevel()) && !executable {
 		return merr.WrapErrParameterInvalidMsg(
 			"element_filter predicate must be a boolean expression, got %s of type %s",
 			ctx.Expr().GetText(), exprWithType.dataType.String())
 	}
-	if _, err := validateElementLevelPredicate(exprWithType.expr, elementFilterPredicateScope(arrayFieldName)); err != nil {
+	if err := validateElementLevelPredicate(predicate, elementFilterPredicateScope(arrayFieldName)); err != nil {
 		return err
 	}
 
@@ -3730,7 +3733,7 @@ func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) int
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_ElementFilterExpr{
 				ElementFilterExpr: &planpb.ElementFilterExpr{
-					ElementExpr: exprWithType.expr,
+					ElementExpr: predicate,
 					StructName:  arrayFieldName,
 				},
 			},
@@ -3774,6 +3777,9 @@ func (v *ParserVisitor) parseMatchExpr(collectionName string, exprCtx parser.IEx
 		match.TargetFieldId = proto.Int64(field.GetFieldID())
 		v.currentScalarArray = field
 	} else {
+		if structField == nil && !v.schema.HasStructArrayField(collectionName) {
+			return merr.WrapErrParameterInvalidMsg("%s requires a scalar ARRAY or StructArray target, got %s", funcName, collectionName)
+		}
 		match.StructName = collectionName
 		// A flattened legacy schema only exposes the children, so it has no parent ID to send.
 		if structField.GetFieldID() != 0 {
@@ -3796,12 +3802,12 @@ func (v *ParserVisitor) parseMatchExpr(collectionName string, exprCtx parser.IEx
 	if predicateExpr == nil {
 		return merr.WrapErrParameterInvalidMsg("invalid predicate expression in %s: %s", funcName, exprCtx.GetText())
 	}
-	isElementLevel, err := validateElementLevelPredicate(predicateExpr.expr, matchPredicateScope)
-	if err != nil {
+	bitmap, executable := elementPredicateBitmap(predicateExpr)
+	if err := validateElementLevelPredicate(bitmap, matchPredicateScope); err != nil {
 		return merr.WrapErrParameterInvalidMsg("invalid predicate expression in %s: %s", funcName, err)
 	}
-	if !isElementLevel {
-		return merr.WrapErrParameterInvalidMsg("predicate expression in %s must use element-level fields", funcName)
+	if !executable {
+		return merr.WrapErrParameterInvalidMsg("predicate expression in %s must be a boolean expression, got %s", funcName, predicateExpr.dataType)
 	}
 
 	// No membership filter may appear inside a MATCH_* element predicate.
@@ -3818,7 +3824,7 @@ func (v *ParserVisitor) parseMatchExpr(collectionName string, exprCtx parser.IEx
 			"membership_match filters are not supported inside %s element predicates", funcName)
 	}
 
-	match.Predicate = predicateExpr.expr
+	match.Predicate = bitmap
 	return &ExprWithType{
 		expr: &planpb.Expr{
 			Expr:       &planpb.Expr_MatchExpr{MatchExpr: match},
