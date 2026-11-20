@@ -132,7 +132,7 @@ func TestSessionProcessActiveStandBy_RecoversCommittedMixCoordTxn(t *testing.T) 
 	}
 	defer s.updateStandby(false)
 	activated := false
-	err := s.ProcessActiveStandBy(func() error {
+	err := s.ProcessActiveStandBy(ctx, func() error {
 		activated = true
 		return nil
 	})
@@ -179,7 +179,7 @@ func TestSessionProcessActiveStandBy_PreservesForeignLegacySession(t *testing.T)
 			}
 			defer s.updateStandby(false)
 			activated := false
-			err = s.ProcessActiveStandBy(func() error { activated = true; return nil })
+			err = s.ProcessActiveStandBy(ctx, func() error { activated = true; return nil })
 			require.ErrorIs(t, err, context.DeadlineExceeded)
 			require.False(t, activated)
 			require.Zero(t, kv.txnCalls, "a foreign legacy owner must block activation")

@@ -70,7 +70,7 @@ func TestMixCoordLegacySessionsBlockTakeover(t *testing.T) {
 	}
 
 	old := newMixCoord(ctx, 1)
-	require.NoError(t, old.ProcessActiveStandBy(nil))
+	require.NoError(t, old.ProcessActiveStandBy(ctx, nil))
 	// The old supervisor records the active key before the old lease expires.
 	observed, err := cli.Get(ctx, activeKey)
 	require.NoError(t, err)
@@ -80,7 +80,7 @@ func TestMixCoordLegacySessionsBlockTakeover(t *testing.T) {
 	require.NoError(t, err)
 
 	active := newMixCoord(ctx, 2)
-	require.NoError(t, active.ProcessActiveStandBy(nil))
+	require.NoError(t, active.ProcessActiveStandBy(ctx, nil))
 	for _, role := range []string{typeutil.MixCoordRole, typeutil.RootCoordRole, typeutil.DataCoordRole, typeutil.QueryCoordRole} {
 		resp, err := cli.Get(ctx, path.Join(prefix, role))
 		require.NoError(t, err)
@@ -102,7 +102,7 @@ func TestMixCoordLegacySessionsBlockTakeover(t *testing.T) {
 	blockedCtx, cancelBlocked := context.WithTimeout(ctx, 250*time.Millisecond)
 	defer cancelBlocked()
 	blocked := newMixCoord(blockedCtx, 3)
-	require.ErrorIs(t, blocked.ProcessActiveStandBy(nil), context.DeadlineExceeded)
+	require.ErrorIs(t, blocked.ProcessActiveStandBy(blockedCtx, nil), context.DeadlineExceeded)
 	alive, err := cli.TimeToLive(ctx, *active.LeaseID)
 	require.NoError(t, err)
 	require.Positive(t, alive.TTL)
@@ -110,5 +110,5 @@ func TestMixCoordLegacySessionsBlockTakeover(t *testing.T) {
 	_, err = cli.Revoke(ctx, *active.LeaseID)
 	require.NoError(t, err)
 	successor := newMixCoord(ctx, 4)
-	require.NoError(t, successor.ProcessActiveStandBy(nil))
+	require.NoError(t, successor.ProcessActiveStandBy(ctx, nil))
 }

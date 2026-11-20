@@ -553,6 +553,7 @@ func (mr *MilvusRoles) Run() error {
 		paramtable.Init()
 		paramtable.SetRole(mr.ServerType)
 	}
+	defer kvfactory.CloseEtcdClient()
 	metrics.SetCollectionLevelMetricsMode(paramtable.Get().CommonCfg.CollectionLevelMetricsMode.GetValue())
 	mlog.Info(context.TODO(), "configured collection and VChannel metrics",
 		mlog.String("mode", metrics.CollectionLevelMetricsMode()))
@@ -747,9 +748,6 @@ func (mr *MilvusRoles) Run() error {
 	<-mr.closed
 
 	mr.stopComponents(componentMap)
-
-	// close reused etcd client
-	kvfactory.CloseEtcdClient()
 
 	mlog.Info(context.TODO(), "Milvus components graceful stop done")
 	return nil

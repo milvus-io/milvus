@@ -1157,7 +1157,9 @@ func (s *Session) updateStandby(b bool) {
 //	Start watching the active key. Whenever active key disappears, STANDBY node will go backup to 2.
 //
 // activateFunc is the function to re-active the service.
-func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
+// ctx cancels the standby election and watch loop while keeping s.ctx (and the
+// session lease) alive until the caller stops the session.
+func (s *Session) ProcessActiveStandBy(ctx context.Context, activateFunc func() error) error {
 	s.activeKey = path.Join(s.metaRoot, DefaultServiceRoot, s.ServerName)
 	// try to register to the active_key.
 	// return
@@ -1172,7 +1174,7 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 
 	registerActiveFn := func() (bool, int64, error) {
 		for _, role := range oldRoles {
-			sessions, _, err := s.GetSessions(s.ctx, role)
+			sessions, _, err := s.GetSessions(ctx, role)
 			if err != nil {
 				if etcd.IsRetriableEtcdErr(err) {
 					// Do not skip the legacy session check just because etcd is
@@ -1215,7 +1217,7 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 			}
 		}
 
-		txnResp, err := s.etcdCli.Txn(s.ctx).If(compareOps...).Then(ops...).Else(clientv3.OpGet(s.activeKey)).Commit()
+		txnResp, err := s.etcdCli.Txn(ctx).If(compareOps...).Then(ops...).Else(clientv3.OpGet(s.activeKey)).Commit()
 		if err != nil {
 			mlog.Error(context.TODO(), "register active key to etcd failed", mlog.Err(err))
 			return false, -1, err
@@ -1260,8 +1262,9 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 				// If old session exists, wait and retry
 				select {
 				case <-time.After(100 * time.Millisecond):
-				case <-s.ctx.Done():
-					return s.ctx.Err()
+				case <-ctx.Done():
+					s.updateStandby(false)
+					return ctx.Err()
 				}
 				continue
 			}
@@ -1273,23 +1276,25 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 				mlog.Warn(s.ctx, "register active key hit a transient etcd error, retry", mlog.Err(err))
 				select {
 				case <-time.After(transientEtcdErrRetryInterval):
-				case <-s.ctx.Done():
-					return s.ctx.Err()
+				case <-ctx.Done():
+					s.updateStandby(false)
+					return ctx.Err()
 				}
 				continue
 			}
 			// Some error such as ErrLeaseNotFound, is not retryable.
 			// Just return error to stop the standby process and wait for retry.
+			s.updateStandby(false)
 			return err
 		}
 		if registered {
 			break
 		}
 		mlog.Info(s.ctx, fmt.Sprintf("%s start to watch ACTIVE key %s", s.ServerName, s.activeKey))
-		ctx, cancel := context.WithCancel(s.ctx)
-		watchChan := s.etcdCli.Watch(ctx, s.activeKey, clientv3.WithPrevKV(), clientv3.WithRev(revision))
+		watchCtx, cancel := context.WithCancel(ctx)
+		watchChan := s.etcdCli.Watch(watchCtx, s.activeKey, clientv3.WithPrevKV(), clientv3.WithRev(revision))
 		select {
-		case <-ctx.Done():
+		case <-watchCtx.Done():
 			cancel()
 		case wresp, ok := <-watchChan:
 			if !ok {

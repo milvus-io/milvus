@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -65,13 +66,15 @@ type mixCoordImpl struct {
 	datacoordServer  *datacoord.Server
 	streamingCoord   *streamingcoord.Server
 
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	standbyWG sync.WaitGroup
-	etcdCli   *clientv3.Client
-	tikvCli   *txnkv.Client
-	address   string
+	ctx           context.Context
+	cancel        context.CancelFunc
+	standbyCtx    context.Context
+	standbyCancel context.CancelFunc
+	wg            sync.WaitGroup
+	standbyWG     sync.WaitGroup
+	etcdCli       *clientv3.Client
+	tikvCli       *txnkv.Client
+	address       string
 
 	// stopTiKVGC stops the GC of a TiKV meta store, which runs on the active
 	// replica only; see startTiKVGCWorker.
@@ -126,7 +129,8 @@ type mixCoordImpl struct {
 }
 
 func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoordImpl, error) {
-	ctx, cancel := context.WithCancel(c) //nolint:gosec // cancel is stored below and called in Stop
+	ctx, cancel := context.WithCancel(c)                 //nolint:gosec // cancel is stored below and called in Stop
+	standbyCtx, standbyCancel := context.WithCancel(ctx) //nolint:gosec // standbyCancel is stored below and called in GracefulStop
 	rootCoordServer, _ := rootcoord.NewCore(ctx, factory)
 	queryCoordServer, _ := querycoordv2.NewQueryCoord(c)
 
@@ -135,6 +139,8 @@ func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoord
 	return &mixCoordImpl{
 		ctx:              ctx,
 		cancel:           cancel,
+		standbyCtx:       standbyCtx,
+		standbyCancel:    standbyCancel,
 		rootcoordServer:  rootCoordServer,
 		queryCoordServer: queryCoordServer,
 		factory:          factory,
@@ -155,8 +161,8 @@ func (s *mixCoordImpl) Register() error {
 	s.standbyWG.Add(1)
 	go func() {
 		defer s.standbyWG.Done()
-		if err := s.session.ProcessActiveStandBy(s.activateFunc); err != nil {
-			if s.ctx.Err() == context.Canceled {
+		if err := s.session.ProcessActiveStandBy(s.standbyCtx, s.activateFunc); err != nil {
+			if errors.Is(err, context.Canceled) && s.standbyCtx.Err() != nil {
 				mlog.Info(s.ctx, "standby process canceled due to server shutdown")
 				return
 			}
@@ -508,11 +514,6 @@ func (s *mixCoordImpl) Stop() error {
 		s.stopTiKVGC()
 	}
 
-	// Cancel before stopping coordinators so any in-flight standby activation
-	// exits and finishes before GracefulStop tears down streamingCoord.
-	s.cancel()
-	s.standbyWG.Wait()
-
 	s.GracefulStop()
 	mlog.Info(s.ctx, "graceful stop done")
 
@@ -612,6 +613,10 @@ func (s *mixCoordImpl) GetStateCode() commonpb.StateCode {
 }
 
 func (s *mixCoordImpl) GracefulStop() {
+	if s.standbyCancel != nil {
+		s.standbyCancel()
+	}
+	s.standbyWG.Wait()
 	if s.streamingCoord != nil {
 		s.streamingCoord.Stop()
 		s.streamingCoord = nil

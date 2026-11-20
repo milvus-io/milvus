@@ -484,17 +484,17 @@ func (_c *MockSession_MarshalJSON_Call) RunAndReturn(run func() ([]byte, error))
 	return _c
 }
 
-// ProcessActiveStandBy provides a mock function with given fields: activateFunc
-func (_m *MockSession) ProcessActiveStandBy(activateFunc func() error) error {
-	ret := _m.Called(activateFunc)
+// ProcessActiveStandBy provides a mock function with given fields: ctx, activateFunc
+func (_m *MockSession) ProcessActiveStandBy(ctx context.Context, activateFunc func() error) error {
+	ret := _m.Called(ctx, activateFunc)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ProcessActiveStandBy")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(func() error) error); ok {
-		r0 = rf(activateFunc)
+	if rf, ok := ret.Get(0).(func(context.Context, func() error) error); ok {
+		r0 = rf(ctx, activateFunc)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -508,14 +508,15 @@ type MockSession_ProcessActiveStandBy_Call struct {
 }
 
 // ProcessActiveStandBy is a helper method to define mock.On call
+//   - ctx context.Context
 //   - activateFunc func() error
-func (_e *MockSession_Expecter) ProcessActiveStandBy(activateFunc interface{}) *MockSession_ProcessActiveStandBy_Call {
-	return &MockSession_ProcessActiveStandBy_Call{Call: _e.mock.On("ProcessActiveStandBy", activateFunc)}
+func (_e *MockSession_Expecter) ProcessActiveStandBy(ctx interface{}, activateFunc interface{}) *MockSession_ProcessActiveStandBy_Call {
+	return &MockSession_ProcessActiveStandBy_Call{Call: _e.mock.On("ProcessActiveStandBy", ctx, activateFunc)}
 }
 
-func (_c *MockSession_ProcessActiveStandBy_Call) Run(run func(activateFunc func() error)) *MockSession_ProcessActiveStandBy_Call {
+func (_c *MockSession_ProcessActiveStandBy_Call) Run(run func(ctx context.Context, activateFunc func() error)) *MockSession_ProcessActiveStandBy_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(func() error))
+		run(args[0].(context.Context), args[1].(func() error))
 	})
 	return _c
 }
@@ -525,7 +526,7 @@ func (_c *MockSession_ProcessActiveStandBy_Call) Return(_a0 error) *MockSession_
 	return _c
 }
 
-func (_c *MockSession_ProcessActiveStandBy_Call) RunAndReturn(run func(func() error) error) *MockSession_ProcessActiveStandBy_Call {
+func (_c *MockSession_ProcessActiveStandBy_Call) RunAndReturn(run func(context.Context, func() error) error) *MockSession_ProcessActiveStandBy_Call {
 	_c.Call.Return(run)
 	return _c
 }
