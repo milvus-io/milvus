@@ -47,6 +47,7 @@ CStatus
 FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                           int64_t num_segments,
                           CRetrievePlan c_plan,
+                          uint64_t timestamp,
                           const int32_t* seg_indices,
                           const int64_t* seg_offsets,
                           int64_t total_rows,

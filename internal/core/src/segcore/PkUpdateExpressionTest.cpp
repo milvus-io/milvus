@@ -485,6 +485,40 @@ TEST(PkUpdateTypedEvaluation, GrowingAndSealedScanTakeAndCandidateMask) {
         for (auto field : fields) {
             auto type = (*schema)[field].get_data_type();
             SCOPED_TRACE(fmt::format("sealed={} field={}", sealed, type));
+            // Read the same logical rows through production output fill, including
+            // a formerly NULL cell, a visible SET NULL and a duplicate.
+            query::RetrievePlan projection(schema);
+            projection.field_ids_ = {field};
+            int64_t offsets[] = {1, 2, 0, 1};
+            auto result =
+                segment->Retrieve(nullptr, &projection, offsets, 4, {}, 20);
+            const auto& data = result->fields_data(0);
+            const auto& valid = GetFieldDataRowValidData(data);
+            ASSERT_EQ(valid.size(), 4);
+            EXPECT_TRUE(valid[0] && !valid[1] && valid[2] && valid[3]);
+            const auto& value = data.scalars();
+            for (int i : {0, 3}) {
+                switch (type) {
+                    case DataType::BOOL:
+                        EXPECT_TRUE(value.bool_data().data(i));
+                        break;
+                    case DataType::INT64:
+                        EXPECT_EQ(value.long_data().data(i), 77);
+                        break;
+                    case DataType::TIMESTAMPTZ:
+                        EXPECT_EQ(value.timestamptz_data().data(i), 77);
+                        break;
+                    case DataType::VARCHAR:
+                        EXPECT_EQ(value.string_data().data(i), "needle");
+                        break;
+                    case DataType::ARRAY:
+                        EXPECT_EQ(
+                            value.array_data().data(i).long_data().data(0), 77);
+                        break;
+                    default:
+                        EXPECT_EQ(value.int_data().data(i), 77);
+                }
+            }
             proto::plan::Expr expr;
             proto::plan::ColumnInfo* col;
             if (type == DataType::ARRAY) {

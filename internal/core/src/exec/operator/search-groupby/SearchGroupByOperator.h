@@ -626,7 +626,8 @@ class MultiFieldDataGetter {
         const std::optional<DataType>& json_type = std::nullopt,
         bool strict_cast = false,
         const segcore::SegmentReadSnapshot* snapshot = nullptr,
-        bool use_json_stats = true);
+        bool use_json_stats = true,
+        std::optional<Timestamp> timestamp = std::nullopt);
 
     void
     GetInto(int64_t idx, CompositeGroupKey& out) const;
@@ -649,7 +650,8 @@ SearchGroupBy(milvus::OpContext* op_ctx,
               std::vector<int32_t>* element_indices = nullptr,
               SearchResult* search_result = nullptr,
               const segcore::SegmentReadSnapshot* snapshot = nullptr,
-              bool use_json_stats = true);
+              bool use_json_stats = true,
+              std::optional<Timestamp> timestamp = std::nullopt);
 
 bool
 TryStrictGroupFilteredSearch(

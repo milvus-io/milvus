@@ -231,7 +231,8 @@ class SegmentInterface {
              const int64_t* offsets,
              int64_t size,
              const folly::CancellationToken& cancel_token =
-                 folly::CancellationToken()) const = 0;
+                 folly::CancellationToken(),
+             std::optional<Timestamp> query_timestamp = std::nullopt) const = 0;
 
     virtual size_t
     GetMemoryUsageInBytes() const = 0;
@@ -679,11 +680,13 @@ class SegmentInternalInterface : public SegmentInterface {
              int64_t entity_ttl_physical_time_us = 0) const override;
 
     std::unique_ptr<proto::segcore::RetrieveResults>
-    Retrieve(tracer::TraceContext* trace_ctx,
-             const query::RetrievePlan* Plan,
-             const int64_t* offsets,
-             int64_t size,
-             const folly::CancellationToken& cancel_token) const override;
+    Retrieve(
+        tracer::TraceContext* trace_ctx,
+        const query::RetrievePlan* Plan,
+        const int64_t* offsets,
+        int64_t size,
+        const folly::CancellationToken& cancel_token,
+        std::optional<Timestamp> query_timestamp = std::nullopt) const override;
 
     // Materialize only PK and timestamp for rows surviving Grep, independently
     // of the output projection. IDs, offsets and timestamp preserve row order.
@@ -900,7 +903,8 @@ class SegmentInternalInterface : public SegmentInterface {
         const query::RetrievePlan* plan,
         const std::unique_ptr<proto::segcore::RetrieveResults>& results,
         RetrieveResult& retrieveResult,
-        milvus::OpContext* op_ctx) const;
+        milvus::OpContext* op_ctx,
+        std::optional<Timestamp> query_timestamp = std::nullopt) const;
 
     void
     FillTargetEntry(
@@ -911,7 +915,9 @@ class SegmentInternalInterface : public SegmentInterface {
         int64_t size,
         bool ignore_non_pk,
         bool fill_ids,
-        milvus::OpContext* op_ctx = nullptr) const;
+        milvus::OpContext* op_ctx = nullptr,
+        std::optional<Timestamp> query_timestamp = std::nullopt,
+        std::shared_ptr<const SegmentReadSnapshot> snapshot = nullptr) const;
 
     // return whether field mmap or not
     virtual bool
@@ -1091,7 +1097,8 @@ BulkSubscriptWithSnapshot(
     const milvus::FieldMeta& field_meta,
     const int64_t* seg_offsets,
     int64_t count,
-    const std::vector<std::string>* dynamic_field_names = nullptr);
+    const std::vector<std::string>* dynamic_field_names = nullptr,
+    std::optional<Timestamp> query_timestamp = std::nullopt);
 
 }  // namespace milvus::segcore
 

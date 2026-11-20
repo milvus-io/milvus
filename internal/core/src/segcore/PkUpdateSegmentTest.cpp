@@ -10,6 +10,14 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "gtest/gtest.h"
+#include <arrow/api.h>
+#include <arrow/c/bridge.h>
+#include "query/PlanProto.h"
+#include "common/Utils.h"
+#include "exec/operator/search-groupby/SearchGroupByOperator.h"
+#include "segcore/retrieve_result_export_c.h"
+#include "segcore/search_result_export_c.h"
+#include "pb/cgo_msg.pb.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/UpdatesRecord.h"
 #include "segcore/segment_c.h"
@@ -183,6 +191,19 @@ TEST(PkUpdateRecord, VisiblePrefixAndMaskedRange) {
     EXPECT_EQ(patches[1].position, 4);
     EXPECT_TRUE(std::holds_alternative<std::monostate>(patches[0].value));
     EXPECT_EQ(stats.dictionary_probes, 3);
+
+    const int64_t untouched[] = {2, -1, 1, 2};
+    auto before = record.Diagnostics().dictionary_probes;
+    EXPECT_TRUE(record.Gather(field, 140, untouched, 4).empty());
+    EXPECT_EQ(record.Diagnostics().dictionary_probes, before);
+
+    const int64_t ordered[] = {20, 10, -1, 10, 2};
+    auto gathered = record.Gather(field, 140, ordered, 5);
+    ASSERT_EQ(gathered.size(), 2);
+    EXPECT_EQ(gathered[0].position, 1);
+    EXPECT_EQ(gathered[1].position, 3);
+    EXPECT_TRUE(std::holds_alternative<std::monostate>(gathered[1].value));
+    EXPECT_EQ(record.Diagnostics().dictionary_probes - before, 3);
 }
 
 TEST(PkUpdateRecord, TypedLiteralsAndWholeArrayOwnership) {
@@ -257,6 +278,258 @@ MakeRows(const SchemaPtr& schema, FieldId pk, std::vector<Timestamp> times) {
         }
     }
     return data;
+}
+
+TEST(PkUpdateSegment, HistoricalRetrieveOutput) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto age = schema->AddDebugField("age", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto segment = CreateGrowingSegment(schema, nullptr);
+    auto data = MakeRows(schema, pk, {1, 2});
+    segment->PreInsert(2);
+    segment->Insert(
+        0, 2, data.row_ids_.data(), data.timestamps_.data(), data.SharedRaw());
+    segment->ApplyUpdates(Keys({42}), 20, 0, {Long(age, 371)});
+    segment->ApplyUpdates(Keys({42}), 30, 0, {Long(age, 589)});
+    proto::plan::PlanNode node;
+    node.add_output_field_ids(age.get());
+    node.mutable_query()->set_limit(2);
+    auto plan = query::ProtoParser(schema).CreateRetrievePlan(node);
+    for (auto [ts, value] : {std::pair{20, 371}, {29, 371}, {30, 589}}) {
+        auto result =
+            segment->Retrieve(nullptr, plan.get(), ts, 1 << 20, false);
+        ASSERT_EQ(result->fields_data_size(), 1);
+        const auto& values = result->fields_data(0).scalars().long_data();
+        ASSERT_GT(values.data_size(), 0);
+        for (auto actual : values.data()) EXPECT_EQ(actual, value);
+    }
+}
+
+TEST(PkUpdateSegment, DeferredOutputAndGroupKeysUsePinnedVersions) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto name = schema->AddDebugField("name", DataType::VARCHAR, true);
+    auto values = schema->AddDebugArrayField("values", DataType::INT64, true);
+    schema->set_primary_field_id(pk);
+    auto data = MakeRows(schema, pk, {1, 2, 20});
+    for (auto& f : *data.raw_->mutable_fields_data()) {
+        if (f.field_id() == pk.get()) {
+            f.mutable_scalars()->mutable_long_data()->set_data(2, 43);
+            continue;
+        }
+        f.clear_valid_data();
+        for (bool valid : {true, true, true}) f.add_valid_data(valid);
+        if (f.field_id() == name.get()) {
+            auto* d = f.mutable_scalars()->mutable_string_data();
+            d->clear_data();
+            for (const auto* text : {"a", "b", "c"}) d->add_data(text);
+        } else {
+            auto* d = f.mutable_scalars()->mutable_array_data();
+            d->clear_data();
+            for (auto n : {1, 2, 3})
+                d->add_data()->mutable_long_data()->add_data(n);
+        }
+    }
+    auto sealed = CreateSealedSegment(schema, nullptr, 87433);
+    LoadGeneratedDataIntoSegment(data, sealed.get());
+    auto fork =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(sealed.get())->PinReadState();
+    UpdateAssignment text{name, {}}, array{values, {}}, null{name, {}};
+    text.literal.mutable_scalar_value()->set_string_data("visible");
+    array.literal.mutable_array_value()->mutable_long_data()->add_data(123);
+    null.literal.set_null_value(google::protobuf::NULL_VALUE);
+    sealed->ApplyUpdates(Keys({42}), 20, 0, {text, array});
+    sealed->ApplyUpdates(Keys({42}), 30, 0, {null});
+
+    query::Plan plan(schema);
+    plan.target_entries_ = {name, values};
+    auto search_fields = [&](Timestamp ts) {
+        SearchResult output;
+        output.read_snapshot_ = fork->CaptureReadSnapshot();
+        output.query_timestamp_ = ts;
+        output.seg_offsets_ = {2, 0, -1, 0};
+        output.distances_.resize(4);
+        fork->TestFillTargetEntry(&plan, output);
+        return std::move(output.output_fields_data_);
+    };
+    auto old = search_fields(19);
+    auto current = search_fields(20);
+    auto latest = search_fields(30);
+    EXPECT_EQ(old.at(name)->scalars().string_data().data(1), "a");
+    EXPECT_EQ(current.at(name)->scalars().string_data().data(0), "c");
+    EXPECT_EQ(current.at(name)->scalars().string_data().data(3), "visible");
+    EXPECT_EQ(
+        current.at(values)->scalars().array_data().data(3).long_data().data(0),
+        123);
+    EXPECT_FALSE(GetFieldDataRowValidData(*current.at(name))[2]);
+    EXPECT_FALSE(GetFieldDataRowValidData(*latest.at(name))[1]);
+    EXPECT_TRUE(GetFieldDataRowValidData(*latest.at(name))[0]);
+    for (auto ts : {19, 20, 30}) {
+        auto snapshot = fork->CaptureReadSnapshot();
+        exec::MultiFieldDataGetter getter(nullptr,
+                                          *fork,
+                                          {name, pk},
+                                          {},
+                                          {},
+                                          false,
+                                          snapshot.get(),
+                                          true,
+                                          ts);
+        CompositeGroupKey key;
+        getter.GetInto(0, key);
+        if (ts == 30)
+            EXPECT_FALSE(key[0].has_value());
+        else
+            EXPECT_EQ(std::get<std::string>(key[0].value()),
+                      ts == 19 ? "a" : "visible");
+        EXPECT_EQ(std::get<int64_t>(key[1].value()), 42);
+    }
+    query::RetrievePlan retrieve(schema);
+    retrieve.field_ids_ = {name};
+    CSegmentInterface segments[] = {fork.get()};
+    int32_t indices[] = {0, 0, 0};
+    int64_t offsets[] = {1, 2, 1};
+    for (auto ts : {19, 20, 30}) {
+        SearchResult hit;
+        hit.segment_ = fork.get();
+        hit.read_lease_ = fork->AcquireReadLease({});
+        hit.read_snapshot_ = fork->CaptureReadSnapshot();
+        hit.query_timestamp_ = ts;
+        CSearchResult hits[] = {&hit};
+        CProto serialized{};
+        auto proto_status = FillOutputFieldsOrdered(
+            hits, 1, &plan, indices, offsets, 3, &serialized, nullptr);
+        ASSERT_EQ(proto_status.error_code, Success) << proto_status.error_msg;
+        proto::schema::SearchResultData decoded;
+        auto parsed = decoded.ParseFromArray(serialized.proto_blob,
+                                             serialized.proto_size);
+        free(const_cast<void*>(serialized.proto_blob));
+        ASSERT_TRUE(parsed);
+        ASSERT_EQ(decoded.fields_data_size(), 2);
+        const auto& names = decoded.fields_data(0);
+        ASSERT_EQ(names.field_id(), name.get());
+        EXPECT_EQ(GetFieldDataRowValidData(names)[0], ts != 30);
+        EXPECT_EQ(names.scalars().string_data().data(1), "c");
+        if (ts != 30)
+            EXPECT_EQ(names.scalars().string_data().data(2),
+                      ts == 19 ? "b" : "visible");
+
+        proto::cgo::FunctionChainInputPlan projection;
+        auto* col_projection = projection.add_inputs();
+        col_projection->set_source_field_id(name.get());
+        col_projection->set_target_data_type(proto::schema::VarChar);
+        col_projection->set_logical_name("name");
+        const auto input = projection.SerializeAsString();
+        ArrowSchema logical_schema{};
+        ArrowArray logical_data{};
+        auto logical_status =
+            FillFieldsOrderedAsArrowRecordBatchWithInputPlan(hits,
+                                                             1,
+                                                             &plan,
+                                                             input.data(),
+                                                             input.size(),
+                                                             indices,
+                                                             offsets,
+                                                             3,
+                                                             &logical_schema,
+                                                             &logical_data,
+                                                             nullptr);
+        ASSERT_EQ(logical_status.error_code, Success)
+            << logical_status.error_msg;
+        auto logical_batch =
+            arrow::ImportRecordBatch(&logical_data, &logical_schema);
+        ASSERT_TRUE(logical_batch.ok()) << logical_batch.status();
+        auto strings = (*logical_batch)->column(0);
+        EXPECT_EQ(strings->IsNull(0), ts == 30);
+        EXPECT_EQ((*strings->GetScalar(1))->ToString(), "c");
+        if (ts != 30)
+            EXPECT_EQ((*strings->GetScalar(2))->ToString(),
+                      ts == 19 ? "b" : "visible");
+        hit.read_lease_.reset();
+        ArrowSchema as{};
+        ArrowArray aa{};
+        auto status = FillRetrieveFieldsOrdered(segments,
+                                                1,
+                                                &retrieve,
+                                                ts,
+                                                indices,
+                                                offsets,
+                                                3,
+                                                1 << 20,
+                                                &as,
+                                                &aa,
+                                                nullptr);
+        ASSERT_EQ(status.error_code, Success) << status.error_msg;
+        auto batch = arrow::ImportRecordBatch(&aa, &as);
+        ASSERT_TRUE(batch.ok()) << batch.status();
+        auto col = (*batch)->column(0);
+        ASSERT_EQ(col->length(), 3);
+        for (int pos : {0, 2}) {
+            EXPECT_EQ(col->IsNull(pos), ts == 30);
+            if (ts != 30)
+                EXPECT_EQ((*col->GetScalar(pos))->ToString(),
+                          ts == 19 ? "b" : "visible");
+        }
+        EXPECT_EQ((*col->GetScalar(1))->ToString(), "c");
+    }
+}
+
+TEST(PkUpdateSegment, OrderByAndAggregationReadAtQueryTimestamp) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto score = schema->AddDebugField("score", DataType::INT64);
+    auto label = schema->AddDebugField("label", DataType::VARCHAR);
+    schema->set_primary_field_id(pk);
+    auto data = DataGen(schema, 3);
+    std::fill(data.timestamps_.begin(), data.timestamps_.end(), 1);
+    for (auto& field : *data.raw_->mutable_fields_data()) {
+        for (int i = 0; i < 3; ++i) {
+            if (field.field_id() == label.get())
+                field.mutable_scalars()->mutable_string_data()->set_data(
+                    i, std::to_string(i));
+            else
+                field.mutable_scalars()->mutable_long_data()->set_data(i, i);
+        }
+    }
+    auto segment = CreateSealedSegment(schema);
+    LoadGeneratedDataIntoSegment(data, segment.get());
+    UpdateAssignment text{label, {}};
+    text.literal.mutable_scalar_value()->set_string_data("winner");
+    segment->ApplyUpdates(Keys({2}), 20, 0, {Long(score, -8), text});
+    proto::plan::PlanNode order_node, sum_node;
+    for (auto field : {pk, score, label})
+        order_node.add_output_field_ids(field.get());
+    auto* order = order_node.mutable_query()->add_order_by_fields();
+    order->set_field_id(score.get());
+    order->set_ascending(true);
+    order_node.mutable_query()->set_limit(1);
+    auto* sum = sum_node.mutable_query()->add_aggregates();
+    sum->set_op(proto::plan::sum);
+    sum->set_field_id(score.get());
+    auto order_plan = query::ProtoParser(schema).CreateRetrievePlan(order_node);
+    auto sum_plan = query::ProtoParser(schema).CreateRetrievePlan(sum_node);
+    for (auto ts : {19, 20}) {
+        auto result =
+            segment->Retrieve(nullptr, order_plan.get(), ts, 1 << 20, false);
+        ASSERT_EQ(result->ids().int_id().data_size(), 1);
+        EXPECT_EQ(result->ids().int_id().data(0), ts == 19 ? 0 : 2);
+        bool found_label = false;
+        for (const auto& field : result->fields_data()) {
+            if (field.field_id() == label.get()) {
+                found_label = true;
+                EXPECT_EQ(field.scalars().string_data().data(0),
+                          ts == 19 ? "0" : "winner");
+            }
+        }
+        EXPECT_TRUE(found_label);
+        auto sums =
+            segment->Retrieve(nullptr, sum_plan.get(), ts, 1 << 20, false);
+        ASSERT_EQ(sums->fields_data_size(), 1);
+        const auto& totals = sums->fields_data(0).scalars().long_data();
+        ASSERT_EQ(totals.data_size(), 1);
+        EXPECT_EQ(totals.data(0), ts == 19 ? 3 : -7);
+    }
 }
 
 TEST(PkUpdateSegment, GrowingInsertDeleteAndReplay) {

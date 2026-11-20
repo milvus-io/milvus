@@ -34,6 +34,7 @@
 #include "rescores/BoostScoreRunner.h"
 #include "rescores/Scorer.h"
 #include "segcore/Types.h"
+#include "segcore/UpdatesRecord.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/index_test_utils.h"
 #include "test_utils/GenExprProto.h"
@@ -62,7 +63,8 @@ class StaticScorer : public Scorer {
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
                 const TargetBitmapView& bitmap,
-                std::vector<std::optional<float>>& boost_scores) override {
+                std::vector<std::optional<float>>& boost_scores,
+                exec::QueryContext* query_context) override {
         for (auto i = 0; i < offsets.size(); ++i) {
             if (bitmap[i] && scores_[i].has_value()) {
                 boost_scores[i] = scores_[i];
@@ -76,7 +78,8 @@ class StaticScorer : public Scorer {
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
                 const TargetBitmap& bitmap,
-                std::vector<std::optional<float>>& boost_scores) override {
+                std::vector<std::optional<float>>& boost_scores,
+                exec::QueryContext* query_context) override {
         for (auto i = 0; i < offsets.size(); ++i) {
             auto offset = offsets[i];
             if (offset >= 0 && static_cast<size_t>(offset) < bitmap.size() &&
@@ -91,7 +94,8 @@ class StaticScorer : public Scorer {
                 const segcore::SegmentInternalInterface* segment,
                 const proto::plan::FunctionMode& mode,
                 const FixedVector<int32_t>& offsets,
-                std::vector<std::optional<float>>& boost_scores) override {
+                std::vector<std::optional<float>>& boost_scores,
+                exec::QueryContext* query_context) override {
         for (auto i = 0; i < offsets.size(); ++i) {
             if (scores_[i].has_value()) {
                 boost_scores[i] = scores_[i];
@@ -257,6 +261,59 @@ TEST(BoostScoreRunnerTest, ComputeFunctionScoresRejectsMismatchedOutputSize) {
 
 // Test: TargetBitmap batch_score with out-of-bounds offsets (should NOT crash).
 // Unlike WeightScorer, RandomScorer had no bounds check on bitmap[offset].
+TEST(RandomScorerTest, HistoricalSeedMatchesNativeValueAndNullMirrors) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto field = schema->AddDebugField("seed", DataType::INT64, true);
+    schema->set_primary_field_id(pk);
+    auto data = segcore::DataGen(schema, 4);
+    std::fill(data.timestamps_.begin(), data.timestamps_.end(), 1);
+    for (auto& f : *data.raw_->mutable_fields_data()) {
+        auto* values = f.mutable_scalars()->mutable_long_data();
+        for (int i = 0; i < 4; ++i)
+            values->set_data(i,
+                             f.field_id() == pk.get()
+                                 ? i
+                                 : std::array<int, 4>{11, 11, 37, 0}[i]);
+        if (f.field_id() == field.get()) {
+            f.clear_valid_data();
+            for (bool valid : {true, true, true, false})
+                f.add_valid_data(valid);
+        }
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema, data);
+    IdArray ids;
+    ids.mutable_int_id()->add_data(0);
+    segcore::UpdateAssignment a{field, {}};
+    a.literal.mutable_scalar_value()->set_long_data(37);
+    segment->ApplyUpdates(ids, 20, 0, {a});
+    a.literal.set_null_value(google::protobuf::NULL_VALUE);
+    segment->ApplyUpdates(ids, 30, 0, {a});
+    expr::TypedExprPtr filter;
+    ProtoParams params;
+    auto* key = params.Add();
+    key->set_key("field_id");
+    key->set_value(std::to_string(field.get()));
+    auto* seed = params.Add();
+    seed->set_key("seed");
+    seed->set_value("7");
+    auto scorer = std::make_shared<RandomScorer>(filter, 1.0F, params);
+    for (auto ts : {19, 20, 30}) {
+        exec::QueryContext q("seed-query", segment.get(), 4, ts);
+        q.set_read_schema(schema);
+        q.set_read_snapshot(segment->CaptureReadSnapshot());
+        exec::ExecContext ctx(&q);
+        OpContext op;
+        FixedVector<int32_t> offsets{0, 1, 2, 3};
+        std::vector<std::optional<float>> scores(4);
+        ComputeScorerScores(&ctx, &op, segment.get(), scorer, offsets, scores);
+        ASSERT_TRUE(scores[0]);
+        EXPECT_NE(scores[1], scores[2]);
+        EXPECT_NE(scores[2], scores[3]);
+        EXPECT_EQ(scores[0], scores[ts == 19 ? 1 : ts == 20 ? 2 : 3]);
+    }
+}
+
 TEST(RandomScorerTest, BatchScoreTargetBitmapOutOfBoundsOffsets) {
     // The segment is only consulted for get_segment_id() on the
     // no-seed-field path of random_score.

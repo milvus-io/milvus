@@ -93,6 +93,12 @@ class UpdatesRecord {
                      size_t mask_start = 0,
                      ReadStats* stats = nullptr) const;
 
+    std::vector<Patch>
+    Gather(FieldId field,
+           Timestamp timestamp,
+           const int64_t* offsets,
+           size_t count) const;
+
     struct FieldStats {
         size_t entries = 0;
         size_t distinct_offsets = 0;
@@ -102,6 +108,16 @@ class UpdatesRecord {
     Stats(FieldId field) const;
 
  private:
+    template <typename Offset>
+    std::vector<Patch>
+    ReadBatch(FieldId field,
+              Timestamp timestamp,
+              int64_t start,
+              size_t count,
+              const Offset* offsets,
+              const TargetBitmapView& candidates,
+              size_t mask_start,
+              ReadStats* stats) const;
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

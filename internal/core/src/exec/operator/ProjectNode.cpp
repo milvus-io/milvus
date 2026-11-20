@@ -31,6 +31,7 @@
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
+#include "segcore/UpdatesRecord.h"
 
 namespace milvus {
 namespace exec {
@@ -192,25 +193,45 @@ PhyProjectNode::GetOutput() {
             continue;
         }
 
-        if (!segment_->is_field_exist(field_id)) {
-            auto field_data =
-                InitScalarFieldDataWithLength(column_type, selected_count);
-            auto valid_map = TargetBitmap(selected_count, false);
-            auto col = std::make_shared<ColumnVector>(
-                std::move(field_data), std::move(valid_map), selected_count);
-            column_vectors.emplace_back(std::move(col));
-            continue;
+        TargetBitmap valid_map(selected_count, false);
+        auto field_data =
+            segment_->is_field_exist(field_id)
+                ? bulk_script_field_data(op_context_,
+                                         field_id,
+                                         column_type,
+                                         selected_offsets.data(),
+                                         selected_count,
+                                         segment_,
+                                         valid_map,
+                                         true)
+                : InitScalarFieldDataWithLength(column_type, selected_count);
+        // Sort keys and aggregate inputs are materialized directly into this
+        // private typed column, independently of the expression evaluator.
+        for (const auto& [position, value] :
+             segment_->GetUpdatesRecord().Gather(
+                 field_id,
+                 query_context_->get_query_timestamp(),
+                 selected_offsets.data(),
+                 selected_count)) {
+            valid_map[position] =
+                !std::holds_alternative<std::monostate>(value);
+            std::visit(
+                [&](const auto& item) {
+                    using T = std::decay_t<decltype(item)>;
+                    if constexpr (std::is_same_v<T, segcore::UpdateString>) {
+                        static_cast<std::string*>(
+                            field_data->Data())[position] = *item;
+                    } else if constexpr (std::is_same_v<T,
+                                                        segcore::UpdateArray>) {
+                        ThrowInfo(UnexpectedError,
+                                  "unexpected ARRAY in typed sort or aggregate "
+                                  "column");
+                    } else if constexpr (!std::is_same_v<T, std::monostate>) {
+                        static_cast<T*>(field_data->Data())[position] = item;
+                    }
+                },
+                value);
         }
-
-        TargetBitmap valid_map(selected_count);
-        auto field_data = bulk_script_field_data(op_context_,
-                                                 field_id,
-                                                 column_type,
-                                                 selected_offsets.data(),
-                                                 selected_count,
-                                                 segment_,
-                                                 valid_map,
-                                                 true);
         auto null_count = selected_count - valid_map.count();
         auto column_vector = std::make_shared<ColumnVector>(
             std::move(field_data), std::move(valid_map), null_count);

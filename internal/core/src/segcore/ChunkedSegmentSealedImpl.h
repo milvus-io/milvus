@@ -575,7 +575,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool ignore_non_pk,
         bool fill_ids,
         std::shared_ptr<const PublishedSegmentState> snapshot = nullptr,
-        milvus::OpContext* op_ctx = nullptr) const;
+        milvus::OpContext* op_ctx = nullptr,
+        std::optional<Timestamp> query_timestamp = std::nullopt) const;
 
     // Result-fill reads through a request-pinned snapshot instead of
     // re-capturing the published state per field at this layer. The whole

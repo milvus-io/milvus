@@ -467,6 +467,28 @@ UpdatesRecord::ReadRangeUpdates(FieldId field,
                                 const TargetBitmapView& candidates,
                                 size_t mask_start,
                                 ReadStats* stats) const {
+    return ReadBatch(
+        field, timestamp, start, count, offsets, candidates, mask_start, stats);
+}
+
+std::vector<UpdatesRecord::Patch>
+UpdatesRecord::Gather(FieldId field,
+                      Timestamp timestamp,
+                      const int64_t* offsets,
+                      size_t count) const {
+    return ReadBatch(field, timestamp, 0, count, offsets, {}, 0, nullptr);
+}
+
+template <typename Offset>
+std::vector<UpdatesRecord::Patch>
+UpdatesRecord::ReadBatch(FieldId field,
+                         Timestamp timestamp,
+                         int64_t start,
+                         size_t count,
+                         const Offset* offsets,
+                         const TargetBitmapView& candidates,
+                         size_t mask_start,
+                         ReadStats* stats) const {
     AssertInfo(candidates.empty() || (mask_start <= candidates.size() &&
                                       count <= candidates.size() - mask_start),
                "update candidate mask does not cover batch");

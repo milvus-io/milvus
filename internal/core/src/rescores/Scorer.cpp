@@ -22,6 +22,7 @@
 #include <optional>
 
 #include "Scorer.h"
+#include "exec/QueryContext.h"
 #include "Utils.h"
 #include "bitset/bitset.h"
 #include "common/Types.h"
@@ -73,7 +74,8 @@ WeightScorer::batch_score(milvus::OpContext* op_ctx,
                           const proto::plan::FunctionMode& mode,
                           const FixedVector<int32_t>& offsets,
                           const TargetBitmapView& bitmap,
-                          std::vector<std::optional<float>>& boost_scores) {
+                          std::vector<std::optional<float>>& boost_scores,
+                          exec::QueryContext* query_context) {
     Assert(bitmap.size() == offsets.size());
     for (auto i = 0; i < offsets.size(); i++) {
         if (bitmap[i] > 0) {
@@ -88,7 +90,8 @@ WeightScorer::batch_score(milvus::OpContext* op_ctx,
                           const proto::plan::FunctionMode& mode,
                           const FixedVector<int32_t>& offsets,
                           const TargetBitmap& bitmap,
-                          std::vector<std::optional<float>>& boost_scores) {
+                          std::vector<std::optional<float>>& boost_scores,
+                          exec::QueryContext* query_context) {
     auto bitmap_size = bitmap.size();
     size_t out_of_bounds = 0;
     for (auto i = 0; i < offsets.size(); i++) {
@@ -128,7 +131,8 @@ WeightScorer::batch_score(milvus::OpContext* op_ctx,
                           const segcore::SegmentInternalInterface* segment,
                           const proto::plan::FunctionMode& mode,
                           const FixedVector<int32_t>& offsets,
-                          std::vector<std::optional<float>>& boost_scores) {
+                          std::vector<std::optional<float>>& boost_scores,
+                          exec::QueryContext* query_context) {
     for (auto i = 0; i < offsets.size(); i++) {
         set_score(boost_scores[i], mode);
     }
@@ -151,7 +155,8 @@ RandomScorer::batch_score(milvus::OpContext* op_ctx,
                           const proto::plan::FunctionMode& mode,
                           const FixedVector<int32_t>& offsets,
                           const TargetBitmapView& bitmap,
-                          std::vector<std::optional<float>>& boost_scores) {
+                          std::vector<std::optional<float>>& boost_scores,
+                          exec::QueryContext* query_context) {
     Assert(bitmap.size() == offsets.size());
     FixedVector<int64_t> target_offsets;
     FixedVector<int> idx;
@@ -170,7 +175,13 @@ RandomScorer::batch_score(milvus::OpContext* op_ctx,
         return;
     }
 
-    random_score(op_ctx, segment, mode, target_offsets, &idx, boost_scores);
+    random_score(op_ctx,
+                 segment,
+                 mode,
+                 target_offsets,
+                 &idx,
+                 boost_scores,
+                 query_context);
 }
 
 void
@@ -179,7 +190,8 @@ RandomScorer::batch_score(milvus::OpContext* op_ctx,
                           const proto::plan::FunctionMode& mode,
                           const FixedVector<int32_t>& offsets,
                           const TargetBitmap& bitmap,
-                          std::vector<std::optional<float>>& boost_scores) {
+                          std::vector<std::optional<float>>& boost_scores,
+                          exec::QueryContext* query_context) {
     FixedVector<int64_t> target_offsets;
     FixedVector<int> idx;
     target_offsets.reserve(offsets.size());
@@ -224,7 +236,13 @@ RandomScorer::batch_score(milvus::OpContext* op_ctx,
         return;
     }
 
-    random_score(op_ctx, segment, mode, target_offsets, &idx, boost_scores);
+    random_score(op_ctx,
+                 segment,
+                 mode,
+                 target_offsets,
+                 &idx,
+                 boost_scores,
+                 query_context);
 }
 
 void
@@ -232,7 +250,8 @@ RandomScorer::batch_score(milvus::OpContext* op_ctx,
                           const segcore::SegmentInternalInterface* segment,
                           const proto::plan::FunctionMode& mode,
                           const FixedVector<int32_t>& offsets,
-                          std::vector<std::optional<float>>& boost_scores) {
+                          std::vector<std::optional<float>>& boost_scores,
+                          exec::QueryContext* query_context) {
     FixedVector<int64_t> target_offsets;
     target_offsets.reserve(offsets.size());
 
@@ -240,7 +259,13 @@ RandomScorer::batch_score(milvus::OpContext* op_ctx,
         target_offsets.push_back(static_cast<int64_t>(offset));
     }
 
-    random_score(op_ctx, segment, mode, target_offsets, nullptr, boost_scores);
+    random_score(op_ctx,
+                 segment,
+                 mode,
+                 target_offsets,
+                 nullptr,
+                 boost_scores,
+                 query_context);
 }
 
 void
@@ -249,10 +274,23 @@ RandomScorer::random_score(milvus::OpContext* op_ctx,
                            const proto::plan::FunctionMode& mode,
                            const FixedVector<int64_t>& target_offsets,
                            const FixedVector<int>* idx,
-                           std::vector<std::optional<float>>& boost_scores) {
+                           std::vector<std::optional<float>>& boost_scores,
+                           exec::QueryContext* query_context) {
     if (field_.get() != -1) {
-        auto array = segment->bulk_subscript(
-            op_ctx, field_, target_offsets.data(), target_offsets.size());
+        auto schema = query_context ? query_context->get_read_schema()
+                                    : segment->get_schema_snapshot();
+        auto array = segcore::BulkSubscriptWithSnapshot(
+            segment,
+            query_context ? query_context->get_read_snapshot() : nullptr,
+            op_ctx,
+            field_,
+            (*schema)[field_],
+            target_offsets.data(),
+            target_offsets.size(),
+            nullptr,
+            query_context
+                ? std::optional<Timestamp>(query_context->get_query_timestamp())
+                : std::nullopt);
         AssertInfo(array->has_scalars(), "seed field must be scalar");
         AssertInfo(array->scalars().has_long_data(),
                    "now only support int64 field as seed");

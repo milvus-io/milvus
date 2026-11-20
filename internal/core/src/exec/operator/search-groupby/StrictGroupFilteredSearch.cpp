@@ -28,6 +28,7 @@
 #include "monitor/Monitor.h"
 #include "query/Utils.h"
 #include "segcore/Utils.h"
+#include "segcore/UpdatesRecord.h"
 
 namespace milvus::exec {
 template <typename T>
@@ -749,6 +750,9 @@ TryStrictGroupFilteredSearch(
         }
     });
     if (!query::CanUseStrictGroupControls(info, iterators.size()) ||
+        segment.GetUpdatesRecord()
+            .Stats(info.group_by_field_ids_.front())
+            .entries ||
         (info.strict_group_strategy_ == StrictGroupStrategy::Original &&
          info.strict_group_phase1_candidate_weight_ == 0)) {
         return false;
