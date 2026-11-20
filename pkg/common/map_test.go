@@ -18,6 +18,16 @@ func TestMapEqual(t *testing.T) {
 		m4 := map[int64]int64{1: 11, 2: 22}
 		assert.False(t, MapEqual(m1, m4))
 
+		m5 := map[int64]int64{1: 11, 2: 22, 4: 33}
+		assert.False(t, MapEqual(m1, m5))
+
+		// Same length, disjoint key sets and every value is the zero value, so the
+		// value comparison alone sees 0 == 0 and cannot reject these maps: only the
+		// key-existence check can make MapEqual return false here.
+		m6 := map[int64]int64{1: 0}
+		m7 := map[int64]int64{2: 0}
+		assert.False(t, MapEqual(m6, m7))
+
 		assert.False(t, MapEqual(m1, nil))
 		assert.True(t, MapEqual(map[int64]int64(nil), map[int64]int64(nil)))
 	})
