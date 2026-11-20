@@ -830,10 +830,10 @@ func TestCachedRootVerifier_RejectsOverlongPasswordBeforeLookup(t *testing.T) {
 	})
 
 	err := verifier.Verify(context.Background(), "root",
-		strings.Repeat("x", crypto.BcryptMaxPasswordBytes+1))
+		strings.Repeat("x", 257))
 	assert.True(t, isMismatch(err))
 	assert.Zero(t, lookups.Load(),
-		"a password bcrypt cannot represent must not drive a credential lookup")
+		"a password no supported hash can represent must not drive a credential lookup")
 }
 
 // bcrypt is ~60ms of CPU, and the web console makes a dozen gated calls per
@@ -1089,15 +1089,17 @@ func TestSaturationRendersAsServiceUnavailable(t *testing.T) {
 }
 
 // The verifier must not assume bcrypt: common.security.passwordHashAlgorithm
-// can make root's stored hash PBKDF2, and the oversized-candidate rejection
-// must still happen before any lookup.
+// can make root's stored hash PBKDF2, and its longer password bound has to
+// reach the comparison instead of being cut off pre-lookup at the bcrypt one.
 func TestCachedRootVerifier_PBKDF2Hash(t *testing.T) {
 	const key = "common.security.passwordHashAlgorithm"
 	assert.NoError(t, paramtable.Get().Save(key, crypto.PasswordHashPBKDF2SHA512))
 	defer paramtable.Get().Reset(key)
-	hash, err := crypto.PasswordEncrypt(testPassword)
-	assert.NoError(t, err)
-	assert.True(t, strings.HasPrefix(hash, "$pbkdf2-sha512$"))
+
+	passphrase := strings.Repeat("x", 100)
+	hash, err := crypto.PasswordEncrypt(passphrase)
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(hash, "$pbkdf2-sha512$"))
 
 	var lookups atomic.Int32
 	verifier := NewCachedRootVerifier(func(context.Context) (string, error) {
@@ -1105,10 +1107,11 @@ func TestCachedRootVerifier_PBKDF2Hash(t *testing.T) {
 		return hash, nil
 	})
 
-	assert.True(t, isMismatch(verifier.Verify(context.Background(), "root",
-		strings.Repeat("x", crypto.BcryptMaxPasswordBytes+1))))
-	assert.Zero(t, lookups.Load())
+	assert.NoError(t, verifier.Verify(context.Background(), "root", passphrase))
+	assert.Equal(t, int32(1), lookups.Load())
+	assert.True(t, isMismatch(verifier.Verify(context.Background(), "root", passphrase+"x")))
 
-	assert.NoError(t, verifier.Verify(context.Background(), "root", testPassword))
-	assert.True(t, isMismatch(verifier.Verify(context.Background(), "root", "wrong-password")))
+	// Past the PBKDF2 bound it is still rejected before any lookup.
+	assert.True(t, isMismatch(verifier.Verify(context.Background(), "root", strings.Repeat("x", 257))))
+	assert.Equal(t, int32(1), lookups.Load())
 }

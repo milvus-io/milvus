@@ -153,17 +153,41 @@ func TestPasswordEncryptPBKDF2SHA512(t *testing.T) {
 	assert.NotEqual(t, hash, other, "each hash must get its own salt")
 }
 
-func TestPasswordEncryptPBKDF2SHA512KeepsPasswordLimit(t *testing.T) {
-	usePasswordHashAlgorithm(t, PasswordHashPBKDF2SHA512)
-	longest := strings.Repeat("x", BcryptMaxPasswordBytes)
+// A password longer than bcrypt's limit is a pbkdf2-sha512 password, and only a
+// pbkdf2-sha512 one: the bound follows the algorithm in use instead of staying
+// at the length bcrypt can represent.
+func TestPasswordEncryptPasswordLength(t *testing.T) {
+	const bound = 256
 
-	hash, err := PasswordEncrypt(longest)
-	require.NoError(t, err)
-	require.NoError(t, VerifyStoredPassword(context.Background(), hash, longest))
-	require.ErrorIs(t, VerifyStoredPassword(context.Background(), hash, longest+"x"), merr.ErrPrivilegeNotAuthenticated)
+	t.Run(PasswordHashPBKDF2SHA512, func(t *testing.T) {
+		usePasswordHashAlgorithm(t, PasswordHashPBKDF2SHA512)
 
-	_, err = PasswordEncrypt(longest + "x")
-	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		passphrase := strings.Repeat("y", 100)
+		hash, err := PasswordEncrypt(passphrase)
+		require.NoError(t, err)
+		require.NoError(t, VerifyStoredPassword(context.Background(), hash, passphrase))
+		require.ErrorIs(t, VerifyStoredPassword(context.Background(), hash, passphrase[:99]), merr.ErrPrivilegeNotAuthenticated)
+
+		// The whole bound is usable, and one byte past it is not.
+		longest := strings.Repeat("x", bound)
+		hash, err = PasswordEncrypt(longest)
+		require.NoError(t, err)
+		require.NoError(t, VerifyStoredPassword(context.Background(), hash, longest))
+		require.ErrorIs(t, VerifyStoredPassword(context.Background(), hash, longest+"x"), merr.ErrPrivilegeNotAuthenticated)
+
+		_, err = PasswordEncrypt(longest + "x")
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run(PasswordHashBcrypt, func(t *testing.T) {
+		usePasswordHashAlgorithm(t, PasswordHashBcrypt)
+		longest := strings.Repeat("x", BcryptMaxPasswordBytes)
+
+		_, err := PasswordEncrypt(longest)
+		require.NoError(t, err)
+		_, err = PasswordEncrypt(longest + "x")
+		require.ErrorIs(t, err, bcrypt.ErrPasswordTooLong)
+	})
 }
 
 func TestPasswordEncryptRejectsUnknownAlgorithm(t *testing.T) {
@@ -198,11 +222,24 @@ func mustDecodeHex(t *testing.T, s string) []byte {
 	return b
 }
 
-// The bcrypt limit is a property of bcrypt hashes and must not reach this format.
-func TestVerifyStoredPasswordPBKDF2SHA512HasNoBcryptCap(t *testing.T) {
-	long := strings.Repeat("x", BcryptMaxPasswordBytes+1)
-	stored := encodePBKDF2SHA512(t, long, []byte("0123456789abcdef"), pbkdf2SHA512MinIterations)
-	require.NoError(t, VerifyStoredPassword(context.Background(), stored, long))
+// The bcrypt limit is a property of bcrypt hashes and must not reach this
+// format. The bound that does apply is the PBKDF2 one, and it applies before
+// the derivation runs.
+func TestVerifyStoredPasswordPBKDF2SHA512PasswordBound(t *testing.T) {
+	const bound = 256
+	longest := strings.Repeat("x", bound)
+	stored := encodePBKDF2SHA512(t, longest, []byte("0123456789abcdef"), pbkdf2SHA512MinIterations)
+	require.NoError(t, VerifyStoredPassword(context.Background(), stored, longest))
+	require.ErrorIs(t, VerifyStoredPassword(context.Background(), stored, longest+"x"), merr.ErrPrivilegeNotAuthenticated)
+
+	// A malformed hash is a store problem, but an over-bound candidate is still
+	// a mismatch: the length is rejected before the hash is parsed, so no
+	// derivation can run for a candidate that could never match.
+	malformed := pbkdf2SHA512Prefix + "i=210000$not-base64$not-base64"
+	require.ErrorIs(t, VerifyStoredPassword(context.Background(), malformed, longest), merr.ErrServiceInternal)
+	overBound := VerifyStoredPassword(context.Background(), malformed, longest+"x")
+	require.ErrorIs(t, overBound, merr.ErrPrivilegeNotAuthenticated)
+	require.NotErrorIs(t, overBound, merr.ErrServiceInternal)
 }
 
 func TestVerifyStoredPasswordMalformedPBKDF2SHA512(t *testing.T) {

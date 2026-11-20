@@ -3069,6 +3069,12 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 	}
 	p.MaxUserDescriptionLength.Init(base.mgr)
 
+	// maxPasswordLengthCeiling bounds proxy.maxPasswordLength whatever the hash
+	// algorithm: bcrypt hashes at most 72 bytes and pbkdf2-sha512
+	// crypto.PBKDF2MaxPasswordBytes. Spelled out rather than imported because
+	// the crypto package is the one that depends on paramtable.
+	const maxPasswordLengthCeiling = 256
+
 	p.MaxPasswordLength = ParamItem{
 		Key:          "proxy.maxPasswordLength",
 		DefaultValue: "72", // bcrypt max length
@@ -3076,7 +3082,7 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		Sensitivity:  NonSensitive,
 		Formatter: func(v string) string {
 			n := getAsInt(v)
-			if n <= 0 || n > 72 {
+			if n <= 0 || n > maxPasswordLengthCeiling {
 				return "72"
 			}
 			return v
