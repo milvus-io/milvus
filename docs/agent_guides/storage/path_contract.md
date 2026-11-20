@@ -179,6 +179,12 @@ behavior.
 
 ## GC coverage and limits
 
+- Pending streaming flush sources remain protected through query handoff and
+  retained DataViews. An explicit owning WAL Drop may retire the source and its
+  private outputs instead: DataCoord persists their retirement and terminal
+  group together before SN persists its child tombstone. A durability receipt
+  or a Drop in another partition does not authorize this retirement.
+
 - V1/V2: delete recorded files and periodically scan standard layouts for
   orphans, including independent `bm25_stats` files.
 - Dropped V3 segments: remove the manifest base directory, including data and

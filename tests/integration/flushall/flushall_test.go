@@ -141,6 +141,7 @@ func (s *FlushAllSuite) TestFlushAll() {
 
 	// show and validate segments
 	for collectionName, dbName := range collectionNames {
+		s.WaitForPublishedSegments(ctx, dbName, collectionName)
 		var resp *milvuspb.GetPersistentSegmentInfoResponse
 		// Sort compaction can replace a segment between listing its ID and
 		// fetching its details. Refresh the whole observation in that case.

@@ -149,7 +149,7 @@ func TestImportCommitCallbackAfterCollectionDrop(t *testing.T) {
 				name = "recovered/" + state.String()
 			}
 			t.Run(name, func(t *testing.T) {
-				server, catalog, result := newImportCommitCallbackTest(t)
+				server, catalog, result := newLegacyImportCommitCallbackTest(t)
 				ctx := t.Context()
 				require.NoError(t, server.importMeta.UpdateJob(ctx, 1, bulkimport.UpdateJobState(state)))
 				_, err := server.dataViewManager.OnDropCollection(ctx, 100)
@@ -193,7 +193,7 @@ func TestImportCommitCallbackAfterCollectionDrop(t *testing.T) {
 }
 
 func TestImportCommitCallbackPublishesBeforeCompleted(t *testing.T) {
-	server, catalog, result := newImportCommitCallbackTest(t)
+	server, catalog, result := newLegacyImportCommitCallbackTest(t)
 	ctx := t.Context()
 	// Another import is still being prepared. It must not be visible or block
 	// this commit while the collection's broadcast lock excludes its commit.
@@ -205,6 +205,7 @@ func TestImportCommitCallbackPublishesBeforeCompleted(t *testing.T) {
 		Binlogs: []*datapb.FieldBinlog{{FieldID: 100}},
 	}))
 	failure := mockey.Mock((*datacoordkv.Catalog).SaveDataView).Return(context.DeadlineExceeded).Build()
+	defer failure.UnPatch()
 	require.ErrorIs(t, server.ddl.CommitImportV2AckCallback(ctx, result), context.DeadlineExceeded)
 	failure.UnPatch()
 	require.Equal(t, internalpb.ImportJobState_Committing, server.importMeta.GetJob(ctx, 1).GetState())

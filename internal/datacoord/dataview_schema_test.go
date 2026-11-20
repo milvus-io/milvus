@@ -10,6 +10,9 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/dataview"
 	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestPrepareDataViewSchema(t *testing.T) {
@@ -29,4 +32,36 @@ func TestPrepareDataViewSchema(t *testing.T) {
 	require.NoError(t, err)
 	defer ref.Deref()
 	require.EqualValues(t, 3, ref.DataView().GetSchemaVersion())
+}
+
+func TestMaterializedSchemaRejectsIncompleteStreamingProjection(t *testing.T) {
+	s, req := newStreamingFlushTest(t)
+	s.UpdateStateCode(commonpb.StateCode_Healthy)
+	status, err := s.SaveBinlogPaths(t.Context(), req)
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	published := s.meta.GetCollection(1).Schema
+	target := &schemapb.CollectionSchema{Version: 1, Functions: []*schemapb.FunctionSchema{{OutputFieldIds: []int64{102}}}}
+	require.ErrorIs(t, s.PrepareDataViewSchema(t.Context(), 1, published, target), merr.ErrServiceNotReady,
+		"an empty sealed projection must not hide durable pre-ALTER growing rows")
+	ref, err := s.dataViewManager.Latest(t.Context(), 1)
+	require.NoError(t, err)
+	require.Zero(t, ref.DataView().GetSchemaVersion())
+	ref.Deref()
+	// A logical NULL/default change needs no historical computation.
+	require.NoError(t, s.PrepareDataViewSchema(t.Context(), 1, published, &schemapb.CollectionSchema{Version: 1}))
+	require.Equal(t, model.SegmentChangeStateStaged, s.meta.GetSegmentChangeGroup(t.Context(), 1, 1).State)
+	// An explicit owning Drop removes the obligation without publishing rows
+	// into the new schema or requiring the missing indexes to finish.
+	drop := &datapb.SaveBinlogPathsRequest{
+		Base: req.Base, SegmentID: req.SegmentID, CollectionID: req.CollectionID,
+		PartitionID: req.PartitionID, Channel: req.Channel, Flushed: true, Dropped: true,
+	}
+	drop.Base.Properties[dataview.FlushGroupRetire] = "1"
+	status, err = s.SaveBinlogPaths(t.Context(), drop)
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	require.False(t, s.meta.HasPendingStreamingSchema(1, 2))
+	target.Version = 2
+	require.NoError(t, s.PrepareDataViewSchema(t.Context(), 1, published, target), "durable retirement removes the historical materialization obligation")
 }

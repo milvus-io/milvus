@@ -142,6 +142,9 @@ func (s *MiniClusterSuite) CreateCollection(ctx context.Context, cfg *CreateColl
 	s.NoError(err)
 	s.True(merr.Ok(createIndexStatus))
 	s.WaitForIndexBuiltWithDB(ctx, cfg.DBName, cfg.CollectionName, FloatVecField)
+	if cfg.SegmentNum > 0 && cfg.RowNumPerSegment > 0 {
+		s.WaitForPublishedSegments(ctx, cfg.DBName, cfg.CollectionName)
+	}
 }
 
 func (s *MiniClusterSuite) DropAllCollections() {

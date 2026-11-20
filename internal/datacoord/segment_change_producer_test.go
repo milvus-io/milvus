@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/partitionstats"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore"
+	kvcatalog "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -159,6 +160,68 @@ func TestSegmentChangeImportSubgroupsWaitForFence(t *testing.T) {
 	for _, g := range groups {
 		require.Equal(t, model.SegmentChangeStateCommitted, recovered.GetSegmentChangeGroup(t.Context(), 10, g.GroupID).State)
 		require.Equal(t, uint64(9000), recovered.GetSegment(t.Context(), g.NewSegmentIDs[0]).GetCommitTimestamp())
+	}
+}
+
+func TestSegmentChangeImportPublishesCommitTransformCursor(t *testing.T) {
+	for _, source := range []model.SegmentChangeSource{model.SegmentChangeSourceImportJob, model.SegmentChangeSourceCDCReplicated} {
+		t.Run(source.String(), func(t *testing.T) {
+			setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
+			m, _, _ := seedMixProducerWithTransformStarts(t, map[string]uint64{"ch-1": 100})
+			require.NoError(t, m.AddSegment(t.Context(), meta.NewSegmentInfo(&datapb.SegmentInfo{
+				ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1", State: commonpb.SegmentState_Flushed,
+				IsImporting: true, IsSorted: true, NumOfRows: 10, Binlogs: []*datapb.FieldBinlog{{FieldID: 2}},
+			})))
+			s := &Server{meta: m, allocator: meta.NewMockAllocator(t)}
+			job := &bulkimport.Job{ImportJob: &datapb.ImportJob{JobID: 8000, CollectionID: 10, Vchannels: []string{"ch-1"}}}
+			groups, handled, err := s.stageImportGroups(t.Context(), job, "ch-1", []int64{1001}, 0, source)
+			require.True(t, handled)
+			require.NoError(t, err)
+			inspector := newSegmentChangeInspector(t.Context(), m, s.allocator)
+			defer inspector.Stop()
+			inspector.checkAllGroups(t.Context())
+			require.Equal(t, model.SegmentChangeStateReady, m.GetSegmentChangeGroup(t.Context(), 10, groups[0].GroupID).State)
+			require.Zero(t, m.GetSegment(t.Context(), 1001).GetTransformStartAfterTimetick())
+			g := m.GetSegmentChangeGroup(t.Context(), 10, groups[0].GroupID)
+			g.CommitTS = 200
+			require.NoError(t, m.UpdateSegmentChangeGroup(t.Context(), g))
+			before, err := m.DataViewManager.Latest(t.Context(), 10)
+			require.NoError(t, err)
+			defer before.Deref()
+			failure := mockey.Mock((*kvcatalog.Catalog).Update).Return(context.DeadlineExceeded).Build()
+			t.Cleanup(func() { failure.UnPatch() })
+			failedCtx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+			err = m.PublishGroup(failedCtx, g, s.allocator)
+			cancel()
+			failure.UnPatch()
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.Zero(t, m.GetSegment(t.Context(), 1001).GetCommitTimestamp())
+			require.Zero(t, m.GetSegment(t.Context(), 1001).GetTransformStartAfterTimetick())
+			require.True(t, m.GetSegment(t.Context(), 1001).GetIsInvisible())
+			afterFailure, err := m.DataViewManager.Latest(t.Context(), 10)
+			require.NoError(t, err)
+			require.True(t, proto.Equal(before.DataView(), afterFailure.DataView()), "failed catalog write must not expose the projected import cursor")
+			afterFailure.Deref()
+			handled, err = s.stageImportChangeFromSource(t.Context(), job, "ch-1", nil, 200, source)
+			require.True(t, handled)
+			require.NoError(t, err)
+			require.EqualValues(t, 200, m.GetSegment(t.Context(), 1001).GetTransformStartAfterTimetick())
+			ref, err := m.DataViewManager.Latest(t.Context(), 10)
+			require.NoError(t, err)
+			defer ref.Deref()
+			found := false
+			for _, shard := range ref.DataView().GetShards() {
+				for _, partition := range shard.GetPartitions() {
+					for i, id := range partition.GetSegmentIds() {
+						if id == 1001 {
+							require.EqualValues(t, 200, partition.GetSegmentTransformStartAfterTimeticks()[i])
+							found = true
+						}
+					}
+				}
+			}
+			require.True(t, found)
+		})
 	}
 }
 

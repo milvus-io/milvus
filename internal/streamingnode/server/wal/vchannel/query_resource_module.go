@@ -74,10 +74,10 @@ func (m *VChannelRecoveryModule) queryWALViewLocked(meta *viewpb.QueryViewMeta) 
 	if err != nil {
 		return walview.VChannelWALView{}, false
 	}
-	if !m.ensureFinalCommitsLocked() {
+	version := qviews.FromProtoDataVersion(meta.GetVersion().GetDataVersion())
+	if !m.ensureQueryPublicationsLocked(meta.GetVersion().GetDataVersion()) {
 		return walview.VChannelWALView{}, false
 	}
-	version := qviews.FromProtoDataVersion(meta.GetVersion().GetDataVersion())
 	snapshot := m.visibleSnapshot(m.queryObservedTimeTick, version)
 	start := max(deleteReplayStartAfter(snapshot), meta.GetTransformStartAfterTimetick())
 	if len(snapshot.Segments) == 0 {
@@ -96,7 +96,7 @@ func (m *VChannelRecoveryModule) queryWALViewLocked(meta *viewpb.QueryViewMeta) 
 			return true
 		},
 		WithResourceEventLock: func(fn func()) { m.mu.Lock(); defer m.mu.Unlock(); fn() },
-		PrepareQueryView:      m.prepareQueryViewLocked,
+		PrepareQueryView:      func() bool { return m.prepareQueryViewAtVersionLocked(meta.GetVersion().GetDataVersion()) },
 		BaseGrowingTimeTick:   m.queryObservedTimeTick, BaseTransformTimeTick: m.queryObservedTimeTick,
 		LoadInfoVersion: meta.GetLoadInfoVersion(), Schema: schema.GetSchema(), WriteSchema: state.Schema,
 		SegmentSnapshot: snapshot, TransformLogStream: m.queryTransformLogStream,
@@ -122,6 +122,26 @@ func (m *VChannelRecoveryModule) prepareQueryViewLocked() bool {
 	}
 	// The commit installs its version before calling NotifyDataUpdated. Publish
 	// here too so the ready barrier cannot overtake that owner notification.
+	for id := range m.segments {
+		m.publishSegmentSealedLocked(id)
+	}
+	return true
+}
+
+func (m *VChannelRecoveryModule) ensureQueryPublicationsLocked(version *viewpb.DataVersion) bool {
+	ready := true
+	for _, view := range m.segments {
+		if !view.EnsureQueryPublication(version) {
+			ready = false
+		}
+	}
+	return ready
+}
+
+func (m *VChannelRecoveryModule) prepareQueryViewAtVersionLocked(version *viewpb.DataVersion) bool {
+	if !m.ensureQueryPublicationsLocked(version) {
+		return false
+	}
 	for id := range m.segments {
 		m.publishSegmentSealedLocked(id)
 	}

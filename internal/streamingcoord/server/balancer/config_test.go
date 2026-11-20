@@ -33,6 +33,9 @@ func setupBalancerConfigSource(t *testing.T) {
 	t.Cleanup(base.Manager().Close)
 	params := &paramtable.ComponentParam{}
 	params.Init(base)
+	// Session/version-protection fixtures must share the isolated config root.
+	// Writing sessions under by-dev can stop concurrently running components.
+	require.NoError(t, base.Save(params.EtcdCfg.RootPath.Key, prefix))
 	get := mockey.Mock(paramtable.Get).Return(params).Build()
 	t.Cleanup(func() { get.UnPatch() })
 	getBase := mockey.Mock(paramtable.GetBaseTable).Return(base).Build()

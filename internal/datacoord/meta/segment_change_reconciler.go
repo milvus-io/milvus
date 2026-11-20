@@ -112,6 +112,9 @@ func (m *Meta) ReconcileSegmentChangeDataViews(ctx context.Context, manager data
 }
 
 func (m *Meta) reconcileAliveSegmentChangeGroup(ctx context.Context, g *model.SegmentChangeGroup, alloc allocator.Allocator) error {
+	if g.Source == model.SegmentChangeSourceStreamingFlush {
+		return m.reconcileStreamingFlushGroup(ctx, g)
+	}
 	visible, incomplete, allEmpty := false, false, true
 	commitTS := g.CommitTS
 	var registrationOps []UpdateOperator
@@ -229,7 +232,7 @@ func (m *Meta) reconcileAliveSegmentChangeGroup(ctx context.Context, g *model.Se
 		return m.commitSegmentChangeGroupInternal(ctx, g, commitTS, nil, true)
 	}
 	if incomplete {
-		if groupHasCommittedImportFence(g) {
+		if groupHasCommittedImportFence(g) || g.Source == model.SegmentChangeSourceStreamingFlush {
 			return merr.WrapErrDataIntegrityMsg("WAL-committed import group %d has missing outputs during recovery", g.GroupID)
 		}
 		failed := g.Clone()
@@ -264,6 +267,9 @@ func (m *Meta) ReclaimSegmentChangeGroup(ctx context.Context, g *model.SegmentCh
 		current := m.segmentChangeGroups[g.GroupID]
 		if current == nil || (current.State != model.SegmentChangeStateFailed && current.State != model.SegmentChangeStateAborted) {
 			return pack.Fail(merr.WrapErrDataIntegrityMsg("segment change group %d is not reclaimable", g.GroupID))
+		}
+		if current.Source == model.SegmentChangeSourceStreamingFlush && !current.StreamingDataRetired {
+			return pack.Fail(merr.WrapErrDataIntegrityMsg("refusing to reclaim accepted streaming flush %d without DDL retirement", current.GroupID))
 		}
 		if groupHasCommittedImportFence(current) {
 			return pack.Fail(merr.WrapErrDataIntegrityMsg("refusing to reclaim WAL-committed import group %d", current.GroupID))
@@ -355,4 +361,36 @@ func (m *Meta) validateSegmentChangeGroupDeletionLocked(g *model.SegmentChangeGr
 		}
 	}
 	return nil
+}
+
+// The original source binding, terminal group and DataView are commit-marked
+// together. Before that marker the source still serves growing queries. Hide
+// any output records written by an interrupted chunk, then resume READY through
+// PublishGroup after the DataView manager has recovered; never invent a handoff
+// version behind that manager's version allocator.
+func (m *Meta) reconcileStreamingFlushGroup(ctx context.Context, g *model.SegmentChangeGroup) error {
+	source := m.GetSegment(ctx, g.StreamingSegmentID)
+	if source == nil || source.GetSealedAtDataVersion() != nil || source.GetState() == commonpb.SegmentState_Dropped {
+		return merr.WrapErrDataIntegrityMsg("streaming flush %d has an invalid unpublished source", g.GroupID)
+	}
+	if !IsFlushState(source.GetState()) {
+		if g.State != model.SegmentChangeStateStaged || !segmentIDSetEqual(g.NewSegmentIDs, []int64{g.StreamingSegmentID}) {
+			return merr.WrapErrDataIntegrityMsg("streaming flush %d has outputs before durable registration", g.GroupID)
+		}
+		return nil // SN retains the Flush handle and replays registration.
+	}
+	var operators []UpdateOperator
+	for _, id := range g.NewSegmentIDs {
+		member := m.GetSegment(ctx, id)
+		if member == nil || (member.GetState() == commonpb.SegmentState_Dropped && !isEmptySegmentChangeOutput(member)) {
+			return merr.WrapErrDataIntegrityMsg("streaming flush %d has a missing output %d", g.GroupID, id)
+		}
+		if !member.GetIsInvisible() && !isEmptySegmentChangeOutput(member) {
+			operators = append(operators, SetSegmentIsInvisible(id, true))
+		}
+	}
+	if len(operators) == 0 {
+		return nil
+	}
+	return m.updateSegmentChanges(ctx, nil, nil, true, operators...)
 }

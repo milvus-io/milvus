@@ -402,7 +402,7 @@ func GetSegmentsChanPart(m *Meta, collectionID int64, filters ...SegmentFilter) 
 
 // GetNumRowsOfCollection returns total rows count of segments belongs to provided collection
 func (m *Meta) GetNumRowsOfCollection(ctx context.Context, collectionID UniqueID) int64 {
-	return m.countPublishedRows(collectionID, nil)
+	return m.countDurableRows(collectionID, nil)
 }
 
 func getBinlogFileCount(s *datapb.SegmentInfo) int {
@@ -2401,14 +2401,15 @@ func (m *Meta) GetSegmentsIDOfPartitionWithDropped(ctx context.Context, collecti
 
 // GetNumRowsOfPartition returns row count of segments belongs to provided collection & partition
 func (m *Meta) GetNumRowsOfPartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID) int64 {
-	return m.countPublishedRows(collectionID, &partitionID)
+	return m.countDurableRows(collectionID, &partitionID)
 }
 
-// countPublishedRows observes group exclusions and segment states atomically.
-func (m *Meta) countPublishedRows(collectionID UniqueID, partitionID *UniqueID) int64 {
+// countDurableRows observes group exclusions and segment states atomically.
+// Pending streaming sources remain counted until their replacements publish.
+func (m *Meta) countDurableRows(collectionID UniqueID, partitionID *UniqueID) int64 {
 	m.groupMu.RLock()
 	defer m.groupMu.RUnlock()
-	unpublished := m.segmentChangeExclusionsLocked(collectionID, false)
+	unpublished := m.durableSegmentExclusionsLocked(collectionID)
 	var ret int64
 	segments := m.Segments.GetSegmentsBySelector(WithCollection(collectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
 		return IsSegmentHealthy(si) && !unpublished.Contain(si.GetID()) && (partitionID == nil || si.GetPartitionID() == *partitionID)
@@ -3394,7 +3395,7 @@ func (m *Meta) CompleteBumpSchemaVersionCompactionMutation(
 	if newSchemaVersion < oldSegment.GetSchemaVersion() {
 		return nil, merr.WrapErrIllegalCompactionPlan("schema bump compaction schema version is older than input segment")
 	}
-	if oldSegment.GetIsInvisible() {
+	if oldSegment.GetIsInvisible() && !m.CanPrepareStreamingSchema(segmentID) {
 		return nil, merr.WrapErrIllegalCompactionPlan("schema bump compaction input segment should not be invisible")
 	}
 	if resultSegment.GetNumOfRows() == 0 && resultSegment.GetSegmentID() != segmentID {
@@ -3594,6 +3595,12 @@ func (m *Meta) completeBumpSchemaVersionReplacementMutation(
 		newSegment.State = commonpb.SegmentState_Dropped
 		newSegment.DroppedAt = uint64(time.Now().UnixNano())
 	}
+	if handled, err := m.completeGroupSortLocked(t, newSegment); handled {
+		if err != nil {
+			return nil, err
+		}
+		return []*SegmentInfo{newSegment}, nil
+	}
 	if Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool() {
 		if err := m.stageCompactionOutputsLocked(m.Ctx, t, []*SegmentInfo{newSegment}); err != nil {
 			return nil, err
@@ -3665,6 +3672,10 @@ func (m *Meta) DropSegmentsOfPartition(ctx context.Context, partitionIDs []int64
 		}
 	}
 
+	if handled, err := m.dropStreamingFlushGroupsLocked(ctx, modSegments); handled {
+		return err
+	}
+
 	err := m.Catalog.SaveDroppedSegmentsInBatch(m.Ctx, segments)
 	if err != nil {
 		return err
@@ -3700,6 +3711,15 @@ func (m *Meta) TruncateChannelByTime(ctx context.Context, vChannel string, flush
 				ids = append(ids, segment.GetID())
 			}
 		}
+		// A private rewrite can have a newer physical timestamp than its raw
+		// source. Truncate retires the source's entire pending realization.
+		m.groupMu.RLock()
+		for _, g := range m.segmentChangeGroups {
+			if g.Source == model.SegmentChangeSourceStreamingFlush && !g.IsTerminal() && Contains(ids, g.StreamingSegmentID) {
+				ids = append(ids, g.NewSegmentIDs...)
+			}
+		}
+		m.groupMu.RUnlock()
 		return ids
 	})
 	segmentsToDrop := make([]*SegmentInfo, 0)
@@ -3714,6 +3734,10 @@ func (m *Meta) TruncateChannelByTime(ctx context.Context, vChannel string, flush
 
 	if len(segmentsToDrop) == 0 {
 		return nil
+	}
+
+	if handled, err := m.dropStreamingFlushGroupsLocked(ctx, segmentsToDrop); handled {
+		return err
 	}
 
 	segmentsProto := lo.Map(segmentsToDrop, func(seg *SegmentInfo, _ int) *datapb.SegmentInfo {

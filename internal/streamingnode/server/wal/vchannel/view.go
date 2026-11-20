@@ -357,6 +357,19 @@ func (info *VChannelView) restoreSegmentSchema(partitionID int64, timetick uint6
 	if !info.hasPartitionMetaLocked(partitionID) {
 		return nil
 	}
+	return info.segmentEncodingSchemaLocked(timetick, schemaVersion)
+}
+
+// A durable flush source may outlive its collection/partition write lifetime
+// while retained QueryViews and recovery snapshots still reference it. Restoring
+// its exact encoding schema must not apply admission checks for new writes.
+func (info *VChannelView) restoreFlushedSegmentSchema(timetick uint64, schemaVersion int32) *schemapb.CollectionSchema {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	return info.segmentEncodingSchemaLocked(timetick, schemaVersion)
+}
+
+func (info *VChannelView) segmentEncodingSchemaLocked(timetick uint64, schemaVersion int32) *schemapb.CollectionSchema {
 	history := info.meta.GetCollectionInfo().GetSchemas()
 	for i := len(history) - 1; i >= 0; i-- {
 		entry := history[i]

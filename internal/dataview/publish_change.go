@@ -39,6 +39,10 @@ type ChangeGroupDataViewEvent struct {
 	// snapshot in the same version the members enter, so the snapshot never
 	// lists a Dropped parent next to its replacement.
 	SupersededSegmentIDs []int64
+	// StreamingFlush publishes the first sealed representation of growing
+	// data, using the streaming version axis even when sort changed its IDs.
+	StreamingFlush         bool
+	GrowingTransformStarts map[string]uint64
 }
 
 // PublishChange builds the post-batch-publish DataView snapshot while holding
@@ -91,7 +95,7 @@ func (m *dataViewManager) PublishChange(ctx context.Context, event ChangeGroupDa
 		unlock()
 		return nil, nil, nil, err
 	}
-	if err := m.advanceTransformFrontiers(ctx, next, nil); err != nil {
+	if err := m.advanceTransformFrontiers(ctx, next, event.GrowingTransformStarts); err != nil {
 		unlock()
 		return nil, nil, nil, err
 	}
@@ -109,6 +113,9 @@ func (m *dataViewManager) PublishChange(ctx context.Context, event ChangeGroupDa
 		return view, commit, abort, nil
 	}
 	next.DataVersion = nextDataVersion(base, dataViewAdvanceCompact)
+	if event.StreamingFlush {
+		next.DataVersion = nextDataVersion(base, dataViewAdvanceStreaming)
+	}
 
 	// The published snapshot is incremental: next carries the base version's
 	// segments minus the superseded ones plus the new members, so its stats

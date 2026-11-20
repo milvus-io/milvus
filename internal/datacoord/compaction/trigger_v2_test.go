@@ -26,6 +26,8 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -451,6 +453,67 @@ func (s *CompactionTriggerManagerSuite) TestRequiredGroupSortBypassesTaskBudget(
 			s.triggerManager.handleTicker(context.Background(), SingleTicker)
 		})
 	}
+}
+
+func (s *CompactionTriggerManagerSuite) TestRequiredStreamingSchemaBypassesDisabledCleanup() {
+	pt := paramtable.Get()
+	key := Params.DataCoordCfg.BumpSchemaVersionCompactionEnabled.Key
+	previous := Params.DataCoordCfg.BumpSchemaVersionCompactionEnabled.GetValue()
+	s.Require().NoError(pt.Save(key, "false"))
+	s.T().Cleanup(func() { pt.Save(key, previous) })
+	m, err := meta.NewMemoryMeta(s.T())
+	s.Require().NoError(err)
+	collection := &meta.CollectionInfo{ID: 1, Schema: &schemapb.CollectionSchema{Version: 1}}
+	m.AddCollection(collection)
+	for _, id := range []int64{900, 901} {
+		segment := policy.GenTestSegmentInfo(s.testLabel, id, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed)
+		segment.NumOfRows, segment.StorageVersion, segment.IsSorted = 10, storage.StorageV3, true
+		segment.ManifestPath = packed.MarshalManifestPath("/tmp/required-schema/insert_log/1/10", 1)
+		segment.IsInvisible = id == 900
+		s.Require().NoError(m.AddSegment(s.T().Context(), segment))
+	}
+	group := meta.NewTestGroup()
+	group.CollectionID, group.NewSegmentIDs, group.SupersededSegmentIDs = 1, []int64{900}, nil
+	group.Source, group.StreamingSegmentID = model.SegmentChangeSourceStreamingFlush, 900
+	group.GroupID, group.SourceJobID, group.VChannel = 900, 900, s.testLabel.Channel
+	s.Require().NoError(m.AddSegmentChangeGroup(s.T().Context(), group))
+	s.handler.(*meta.NMockHandler).EXPECT().GetCollection(mock.Anything, int64(1)).Return(collection, nil)
+	s.triggerManager = NewCompactionTriggerManager(meta.NewMockAllocator(s.T()), s.handler, s.inspector, m, nil, nil, nil, nil, s.versionManager)
+	s.setIndexMeta(&index.IndexMeta{Indexes: make(map[UniqueID]map[UniqueID]*model.Index)})
+	// No isFull expectation: mandatory preparation cannot depend on the
+	// ordinary budget. The visible stale segment must remain opt-in cleanup.
+	s.inspector.EXPECT().EnqueueCompaction(mock.MatchedBy(func(task *datapb.CompactionTask) bool {
+		return task.GetType() == datapb.CompactionType_BumpSchemaVersionCompaction &&
+			len(task.GetInputSegments()) == 1 && task.GetInputSegments()[0] == 900 && task.GetSchema().GetVersion() == 1
+	})).Return(nil).Once()
+	s.triggerManager.handleTicker(s.T().Context(), BumpSchemaVersionTicker)
+}
+
+func (s *CompactionTriggerManagerSuite) TestRequiredSchemaTargetBypassesDisabledCleanup() {
+	pt := paramtable.Get()
+	key := Params.DataCoordCfg.BumpSchemaVersionCompactionEnabled.Key
+	previous := Params.DataCoordCfg.BumpSchemaVersionCompactionEnabled.GetValue()
+	s.Require().NoError(pt.Save(key, "false"))
+	s.T().Cleanup(func() { pt.Save(key, previous) })
+	m, err := meta.NewMemoryMeta(s.T())
+	s.Require().NoError(err)
+	collection := &meta.CollectionInfo{ID: 1, Schema: &schemapb.CollectionSchema{Version: 1}}
+	m.AddCollection(collection)
+	m.PreparationSchema = func(context.Context, int64, *schemapb.CollectionSchema) (*schemapb.CollectionSchema, error) {
+		return &schemapb.CollectionSchema{Version: 2}, nil
+	}
+	segment := policy.GenTestSegmentInfo(s.testLabel, 901, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed)
+	segment.NumOfRows, segment.StorageVersion, segment.IsSorted = 10, storage.StorageV3, true
+	segment.ManifestPath = packed.MarshalManifestPath("/tmp/required-schema/insert_log/1/10", 1)
+	s.Require().NoError(m.AddSegment(s.T().Context(), segment))
+	s.handler.(*meta.NMockHandler).EXPECT().GetCollection(mock.Anything, int64(1)).Return(collection, nil)
+	s.triggerManager = NewCompactionTriggerManager(meta.NewMockAllocator(s.T()), s.handler, s.inspector, m, nil, nil, nil, nil, s.versionManager)
+	s.setIndexMeta(&index.IndexMeta{Indexes: make(map[UniqueID]map[UniqueID]*model.Index)})
+	s.inspector.EXPECT().EnqueueCompaction(mock.MatchedBy(func(task *datapb.CompactionTask) bool {
+		return task.GetType() == datapb.CompactionType_BumpSchemaVersionCompaction &&
+			len(task.GetInputSegments()) == 1 && task.GetInputSegments()[0] == 901 && task.GetSchema().GetVersion() == 2
+	})).Return(nil).Once()
+	s.triggerManager.handleTicker(s.T().Context(), BumpSchemaVersionTicker)
 }
 
 // Manual compaction is not capped: it never checks whether the inspector is full.

@@ -109,6 +109,7 @@ func (s *Suite) createIndexedCollection(ctx context.Context, prefix string, fiel
 		s.Require().Equal(commonpb.ErrorCode_Success, index.GetErrorCode(), "%s: %s", field, index.GetReason())
 		s.WaitForIndexBuilt(ctx, name, field)
 	}
+	s.WaitForPublishedSegments(ctx, "", name)
 	load, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{CollectionName: name})
 	s.Require().NoError(err)
 	s.Require().Equal(commonpb.ErrorCode_Success, load.GetErrorCode(), load.GetReason())

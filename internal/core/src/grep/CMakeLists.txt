@@ -19,6 +19,9 @@ target_compile_features(milvus_grep PUBLIC cxx_std_17)
 set_target_properties(milvus_grep PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(milvus_grep PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(milvus_grep PUBLIC tantivy_binding milvus_conan_deps)
+if(BUILD_UNIT_TEST)
+    target_compile_definitions(milvus_grep PRIVATE MILVUS_GREP_TEST_HOOKS)
+endif()
 # The imported binding provides the installed generated header. Explicitly
 # order object compilation after installation, including clean parallel builds.
 if(TARGET install_tantivy_target)

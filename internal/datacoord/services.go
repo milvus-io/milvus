@@ -613,6 +613,22 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		mlog.Warn(context.TODO(), "fail to CompressSaveBinlogPaths", mlog.String("channel", channelName), mlog.Err(err))
 		return merr.Status(err), nil
 	}
+	if req.GetFlushed() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
+		if req.GetDropped() && req.GetBase().GetProperties()[dataview.FlushGroupRetire] == "1" {
+			if g := s.meta.GetSegmentChangeGroup(ctx, 0, req.GetSegmentID()); g != nil && g.Source == model.SegmentChangeSourceStreamingFlush {
+				if g.CollectionID != req.GetCollectionID() || g.PartitionID != req.GetPartitionID() || g.VChannel != req.GetChannel() {
+					return merr.Status(merr.WrapErrDataIntegrityMsg("streaming flush %d drop changed its producer identity", req.GetSegmentID())), nil
+				}
+				if err := s.meta.RetireStreamingFlush(ctx, req.GetSegmentID()); err != nil {
+					return merr.Status(err), nil
+				}
+			}
+		}
+		s.progressStreamingFlushPublication(ctx, req.GetSegmentID())
+		if result, handled := s.streamingFlushResult(ctx, req); handled {
+			return result, nil
+		}
+	}
 
 	operators := []meta.UpdateOperator{}
 	var flushedVersion *viewpb.DataVersion
@@ -694,29 +710,17 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		meta.UpdateSegmentStats(req.GetSegmentID(), req.GetStats()),
 	)
 
-	// Update segment info in memory and meta. Stale updates (segment already
-	// flushed / outdated time tick) are swallowed inside UpdateSegmentsInfo as
-	// benign no-ops, so any error here is a real failure.
-	//
-	// For a flushed non-L0 segment the DataView snapshot commits atomically
-	// with SegmentMeta in one catalog txn (flush atomicity): the snapshot is
-	// prepared under the DataView Collection lock, composed into the same
-	// Update, and loaded into the manager memory only after the txn commits.
-	// Lock order is DataView Collection lock -> segment writer lock (inside
-	// UpdateSegmentsInfoAndDataView); the queue worker's Recompute takes only
-	// the DataView lock (loadableProjection reads without a segment lock), so
-	// no deadlock. On failure the lock is aborted and the StreamingNode retries
-	// the whole SaveBinlogPaths until the DataView version is durably
-	// published (the syncmgr meta writer retries indefinitely).
-	//
-	// The flush always synchronously advances streaming_version, even when
-	// sort compaction marks the segment invisible in the same txn: the
-	// segment's data is complete and loadable, invisible only means its
-	// sorted output will replace it later (SortCompaction behaves exactly
-	// like a regular compaction: output segment replaces the input). The
-	// current invisible-while-published window is an acknowledged
-	// contradiction that StreamingNode-side sorting of flushed segments will
-	// eliminate in the future.
+	// Capable writers register nonempty flushes as private groups. Their ACK
+	// proves durability; the immutable query handoff version arrives later.
+	// Legacy writers keep the synchronous first-publication protocol below.
+	if req.GetFlushed() && !req.GetDropped() && req.GetSegLevel() != datapb.SegmentLevel_L0 &&
+		s.streamingFlushAdmitted(ctx, req.GetSegmentID()) && req.GetBase().GetProperties()[dataview.FlushGroupProtocol] == "1" {
+		result, err := s.stageStreamingFlush(ctx, req, operators)
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		return result, nil
+	}
 	if s.dataViewManager != nil && req.GetFlushed() && !req.GetDropped() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
 		seg := s.meta.GetSegment(ctx, req.GetSegmentID())
 		// Skip zero-row segments: the same txn marks them Dropped via

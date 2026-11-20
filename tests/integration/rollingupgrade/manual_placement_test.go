@@ -91,6 +91,7 @@ func (s *ManualPlacementSuite) TestMoveSegments() {
 	})
 	s.Require().NoError(merr.CheckRPCCall(status, err))
 	s.WaitForIndexBuilt(ctx, name, integration.FloatVecField)
+	s.WaitForPublishedSegments(ctx, "", name)
 	status, err = c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{CollectionName: name})
 	s.Require().NoError(merr.CheckRPCCall(status, err))
 	s.WaitForLoad(ctx, name)

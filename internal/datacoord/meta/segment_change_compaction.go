@@ -63,7 +63,7 @@ func (m *Meta) compactionChangeGroupLocked(task *datapb.CompactionTask) (*model.
 	}
 	g := m.segmentChangeGroups[task.GetPlanID()]
 	if g == nil {
-		if task.GetType() == datapb.CompactionType_SortCompaction {
+		if task.GetType() == datapb.CompactionType_SortCompaction || task.GetType() == datapb.CompactionType_BumpSchemaVersionCompaction {
 			for _, candidate := range m.segmentChangeGroups {
 				if job, ok := candidate.SortJobs[task.GetPlanID()]; ok {
 					if candidate.CollectionID != task.GetCollectionID() || !segmentIDSetEqual(task.GetInputSegments(), []int64{job.InputSegmentID}) {
@@ -229,7 +229,11 @@ func (m *Meta) completeGroupSortLocked(task *datapb.CompactionTask, output *Segm
 	if current == nil {
 		return false, nil
 	}
-	if !m.canSortGroupMemberLocked(id) || task.GetCollectionID() != current.CollectionID || output.GetCollectionID() != current.CollectionID ||
+	canPrepare := m.canSortGroupMemberLocked(id)
+	if task.GetType() == datapb.CompactionType_BumpSchemaVersionCompaction {
+		canPrepare = m.canPrepareStreamingSchemaLocked(id)
+	}
+	if !canPrepare || task.GetCollectionID() != current.CollectionID || output.GetCollectionID() != current.CollectionID ||
 		m.Segments.GetSegment(output.GetID()) != nil || m.stagedSegmentToGroup[output.GetID()] != 0 || m.supersededSegmentToGroup[output.GetID()] != 0 {
 		return true, merr.WrapErrDataIntegrityMsg("sort plan %d cannot replace group member %d", task.GetPlanID(), id)
 	}
@@ -247,12 +251,24 @@ func (m *Meta) completeGroupSortLocked(task *datapb.CompactionTask, output *Segm
 	}
 	next.SortJobs[task.GetPlanID()] = model.SegmentChangeSortJob{InputSegmentID: id, OutputSegmentID: output.GetID()}
 	output.IsInvisible = true
-	err := m.updateSegmentsInfoAndChangeGroupsMaterializedLocked(m.Ctx, nil, []metastore.UpdateAction{metastore.SaveSegmentChangeGroup(next)}, next,
+	var retirement []UpdateOperator
+	if current.Source == model.SegmentChangeSourceStreamingFlush && id == current.StreamingSegmentID {
+		// This is still the SN's growing query/recovery source. Retire it
+		// only in the first sealed publication, never at sort materialization.
+		next.SupersededSegmentIDs = append(next.SupersededSegmentIDs, id)
+	} else {
+		retirement = append(retirement, UpdateStatusOperator(id, commonpb.SegmentState_Dropped), UpdateCompactedOperator(id))
+	}
+	operators := []UpdateOperator{
 		func(pack *UpdateSegmentPack) bool {
 			pack.Segments[output.GetID()] = output.Clone()
 			pack.Increments[output.GetID()] = metastore.BinlogsIncrement{Segment: output.SegmentInfo}
 			return true
-		}, UpdateStatusOperator(id, commonpb.SegmentState_Dropped), UpdateCompactedOperator(id))
+		},
+	}
+	operators = append(operators, retirement...)
+	err := m.updateSegmentsInfoAndChangeGroupsMaterializedLocked(m.Ctx, nil, []metastore.UpdateAction{metastore.SaveSegmentChangeGroup(next)}, next,
+		operators...)
 	return true, err
 }
 
@@ -272,4 +288,56 @@ func ClusteringPublicationGroup(task *datapb.CompactionTask) *model.SegmentChang
 			VChannel: task.GetChannel(), Version: task.GetPlanID(), SegmentIDs: append([]int64(nil), task.GetResultSegments()...), CommitTime: time.Now().Unix(),
 		},
 	}
+}
+
+// Schema preparation is permitted only on current private streaming outputs.
+// Superseded sources must keep their original physical data for old views.
+func (m *Meta) canPrepareStreamingSchemaLocked(id int64) bool {
+	g := m.segmentChangeGroups[m.stagedSegmentToGroup[id]]
+	seg := m.Segments.GetSegment(id)
+	return g != nil && g.Source == model.SegmentChangeSourceStreamingFlush && g.State == model.SegmentChangeStateStaged &&
+		seg != nil && IsFlushState(seg.GetState()) && seg.GetIsInvisible() && !seg.GetIsImporting()
+}
+
+func (m *Meta) CanPrepareStreamingSchema(id int64) bool {
+	m.groupMu.RLock()
+	defer m.groupMu.RUnlock()
+	return m.canPrepareStreamingSchemaLocked(id)
+}
+
+// Materialized ALTER must account for durable pre-ALTER growing data even
+// while it is absent from the sealed projection. Direct NULL/default schema
+// changes can keep their existing logical publication boundary.
+func (m *Meta) HasPendingStreamingSchema(collectionID int64, schemaVersion int32) bool {
+	m.groupMu.RLock()
+	defer m.groupMu.RUnlock()
+	for _, g := range m.segmentChangeGroups {
+		if g.CollectionID != collectionID || g.Source != model.SegmentChangeSourceStreamingFlush || g.IsTerminal() {
+			continue
+		}
+		source := m.Segments.GetSegment(g.StreamingSegmentID)
+		if source == nil || source.GetSchemaVersion() < schemaVersion {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Meta) ReserveStreamingSchema(task *datapb.CompactionTask) bool {
+	if task.GetType() != datapb.CompactionType_BumpSchemaVersionCompaction || len(task.GetInputSegments()) != 1 {
+		return false
+	}
+	id := task.GetInputSegments()[0]
+	defer m.LockSegments(id)()
+	m.groupMu.RLock()
+	defer m.groupMu.RUnlock()
+	if !m.canPrepareStreamingSchemaLocked(id) {
+		return false
+	}
+	seg := m.Segments.GetSegment(id)
+	if seg.IsCompacting || seg.GetCollectionID() != task.GetCollectionID() {
+		return false
+	}
+	m.Segments.SetIsCompacting(id, true)
+	return true
 }

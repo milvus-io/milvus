@@ -6,6 +6,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/views/coord/resource"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -18,7 +19,12 @@ func (s *Server) PrepareDataViewSchema(ctx context.Context, id int64, published,
 	}
 	var project dataview.Projector
 	if resource.SchemaRequiresMaterialization(published, target) {
-		project = s.meta.LoadableProjection
+		project = func(ctx context.Context, collectionID int64, previous *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
+			if s.meta.HasPendingStreamingSchema(collectionID, target.GetVersion()) {
+				return nil, merr.WrapErrServiceNotReadyMsg("collection %d has pre-ALTER streaming data awaiting publication", collectionID)
+			}
+			return s.meta.LoadableProjection(ctx, collectionID, previous)
+		}
 	}
 	_, err := s.dataViewManager.AdvanceSchema(ctx, id, target.GetVersion(), project)
 	return err

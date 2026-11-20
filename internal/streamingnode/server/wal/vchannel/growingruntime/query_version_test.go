@@ -7,7 +7,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
 func TestRetainedSegmentIsOnlyQueriedBeforeItsSealedDataVersion(t *testing.T) {
@@ -104,4 +106,37 @@ func TestSealedCutoverPreservesAlreadyAcquiredHandles(t *testing.T) {
 	held[0].Release()
 	held[0].Release()
 	require.Equal(t, int32(1), released.Load())
+}
+
+func TestRecoveredPendingFlushRemainsReadOnlyAndQueryable(t *testing.T) {
+	ctx := t.Context()
+	runtime := newRuntime()
+	defer runtime.Close()
+	segment, err := newGrowingSegmentFromVisible(ctx, nil, walview.VisibleSegment{
+		SegmentID: 10, PartitionID: 100,
+		Assignment: &streamingpb.SegmentAssignmentMeta{
+			CheckpointTimeTick: 100, FlushDataDurable: true,
+			State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, segment.isFlushed())
+	require.Error(t, segment.applyInsert(ctx, walview.SegmentInsertMessage{TimeTick: 101}), "a durable flush can serve reads but cannot accept new inserts")
+	segment.segment = fakeCSegment{id: 10}
+	require.True(t, runtime.addSegment(segment))
+	runtime.markGrowingTimeTick(101)
+	runtime.markTransformTimeTick(101)
+	runtime.Advance(qviews.DataVersion{StreamingVersion: 2})
+	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, qviews.DataVersion{StreamingVersion: 2}, []int64{100})
+	require.NoError(t, err)
+	require.Len(t, handles, 1, "Flush durability alone cannot remove the growing source")
+	handles[0].Release()
+	runtime.markSegmentSealed(10, qviews.DataVersion{StreamingVersion: 3})
+	handles, err = runtime.AcquireGrowingSegmentHandles(ctx, qviews.DataVersion{StreamingVersion: 2}, []int64{100})
+	require.NoError(t, err)
+	require.Len(t, handles, 1, "old versions keep the source after the handoff")
+	handles[0].Release()
+	handles, err = runtime.AcquireGrowingSegmentHandles(ctx, qviews.DataVersion{StreamingVersion: 3}, []int64{100})
+	require.NoError(t, err)
+	require.Empty(t, handles, "the first sealed version cannot query both frontiers")
 }
