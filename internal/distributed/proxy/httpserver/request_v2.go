@@ -451,6 +451,7 @@ type ExportSnapshotReq struct {
 func (req *ExportSnapshotReq) GetDbName() string { return req.DbName }
 
 type QueryReqV2 struct {
+	ResponseFormat string   `json:"responseFormat,omitempty"`
 	DbName         string   `json:"dbName"`
 	CollectionName string   `json:"collectionName" binding:"required"`
 	PartitionNames []string `json:"partitionNames"`
@@ -472,6 +473,7 @@ func (req *QueryReqV2) GetDbName() string         { return req.DbName }
 func (req *QueryReqV2) GetCollectionName() string { return req.CollectionName }
 
 type CollectionIDReq struct {
+	ResponseFormat   string      `json:"responseFormat,omitempty"`
 	DbName           string      `json:"dbName"`
 	CollectionName   string      `json:"collectionName" binding:"required"`
 	PartitionName    string      `json:"partitionName"`
@@ -616,6 +618,7 @@ func parseFieldPartialUpdateOpV2(op string) (schemapb.FieldPartialUpdateOp_OpTyp
 }
 
 type SearchReqV2 struct {
+	ResponseFormat    string                     `json:"responseFormat,omitempty"`
 	DbName            string                     `json:"dbName"`
 	CollectionName    string                     `json:"collectionName" binding:"required"`
 	Data              []interface{}              `json:"data"`
@@ -695,6 +698,7 @@ type SubSearchReq struct {
 }
 
 type HybridSearchReq struct {
+	ResponseFormat    string                `json:"responseFormat,omitempty"`
 	DbName            string                `json:"dbName"`
 	CollectionName    string                `json:"collectionName" binding:"required"`
 	PartitionNames    []string              `json:"partitionNames"`
