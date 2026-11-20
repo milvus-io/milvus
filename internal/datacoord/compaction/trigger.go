@@ -915,7 +915,7 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *meta.SegmentInfo)
 		// index version of segment lower than resolved version and IndexFileKeys should have value, trigger compaction
 		indexIDToSegIdxes := t.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 		for _, idx := range indexIDToSegIdxes {
-			if len(idx.IndexFileKeys) == 0 {
+			if idx.NumIndexFiles() == 0 {
 				continue
 			}
 
@@ -939,7 +939,7 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *meta.SegmentInfo)
 					mlog.FieldIndexID(idx.IndexID),
 					mlog.String("indexType", indexType),
 					mlog.Bool("isVectorIndex", isVectorIndex),
-					mlog.Strings("indexFileKeys", idx.IndexFileKeys),
+					mlog.Int("indexFileCount", idx.NumIndexFiles()),
 					mlog.Int32("segmentIndexVersion", segmentIndexVersion),
 					mlog.Int32("resolvedEngineVersion", resolvedEngineVersion))
 				return true
@@ -952,7 +952,7 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *meta.SegmentInfo)
 		resolvedVecTarget := t.indexEngineVersionManager.ResolveVecIndexVersion()
 		indexIDToSegIdxes := t.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 		for _, idx := range indexIDToSegIdxes {
-			if len(idx.IndexFileKeys) == 0 {
+			if idx.NumIndexFiles() == 0 {
 				continue
 			}
 
@@ -970,7 +970,7 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *meta.SegmentInfo)
 					mlog.FieldSegmentID(segment.ID),
 					mlog.FieldIndexID(idx.IndexID),
 					mlog.String("indexType", indexType),
-					mlog.Strings("indexFileKeys", idx.IndexFileKeys),
+					mlog.Int("indexFileCount", idx.NumIndexFiles()),
 					mlog.Int32("currentIndexVersion", idx.CurrentIndexVersion),
 					mlog.Int32("resolvedTargetVersion", resolvedVecTarget))
 				return true
@@ -983,7 +983,7 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *meta.SegmentInfo)
 		resolvedScalarTarget := t.indexEngineVersionManager.ResolveScalarIndexVersion()
 		indexIDToSegIdxes := t.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 		for _, idx := range indexIDToSegIdxes {
-			if len(idx.IndexFileKeys) == 0 {
+			if idx.NumIndexFiles() == 0 {
 				continue
 			}
 

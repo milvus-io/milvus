@@ -53,7 +53,7 @@ func TestGarbageCollector_RefreshManifestAfterTaskCompletion(t *testing.T) {
 				require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifestHasIndex(meta.RestartSegID)))
 			}
 			im := mDomains.IndexMeta
-			gc := NewGarbageCollector(m, meta.NewMockHandler(), GcOption{Cli: m.ChunkManager, IndexMeta: im, SnapshotMeta: mDomains.SnapshotMeta})
+			gc := NewGarbageCollector(m, meta.NewMockHandler(), GcOption{Cli: localIndexGCStorage(m), IndexMeta: im, SnapshotMeta: mDomains.SnapshotMeta})
 			defer gc.Option.RemoveObjectPool.Release()
 			var original func(*index.IndexMeta, int64) (*model.SegmentIndex, bool)
 			injected := false
@@ -65,7 +65,7 @@ func TestGarbageCollector_RefreshManifestAfterTaskCompletion(t *testing.T) {
 					index.PublishRestartTask(t, m, mDomains.IndexMeta)
 					job, ok := original(im, id)
 					require.True(t, ok)
-					files = gc.GetAllIndexFilesOfIndex(job)
+					files = recordedIndexFiles(t, gc, job)
 					for file := range files {
 						require.NoError(t, m.ChunkManager.Write(ctx, file, []byte("index")))
 					}

@@ -469,6 +469,9 @@ func transactionIndexInfos(txn C.LoonTransactionHandle, manifestPath string) ([]
 type ManifestUpdateResult struct {
 	ManifestPath string
 	HasIndexes   *bool
+	// ReplacedIndexes contains entries displaced by a new build of the same
+	// index. Their files cease to be discoverable through the published segment.
+	ReplacedIndexes []ManifestIndexInfo
 }
 
 // SubmitManifestUpdates waits only for admission, then chains native open and
@@ -508,13 +511,14 @@ func SubmitManifestUpdates(ctx context.Context, io *ManifestIOContext, baseManif
 			finish(ManifestUpdateResult{}, result.err)
 			return
 		}
-		changed, hasIndexes, err := applyAsyncManifestUpdates(result.transaction, baseManifestPath, updates)
+		changed, update, err := applyAsyncManifestUpdates(result.transaction, baseManifestPath, updates)
 		if err != nil {
 			finish(ManifestUpdateResult{}, err)
 			return
 		}
 		if !changed {
-			finish(ManifestUpdateResult{baseManifestPath, hasIndexes}, nil)
+			update.ManifestPath = baseManifestPath
+			finish(update, nil)
 			return
 		}
 		// Keep the original admission slot and transaction until commit completes.
@@ -525,8 +529,8 @@ func SubmitManifestUpdates(ctx context.Context, io *ManifestIOContext, baseManif
 				finish(ManifestUpdateResult{}, err)
 				return
 			}
-			manifestPath := CommittedManifestPath(baseManifest.BasePath, committed, size, config.GetStorageType())
-			finish(ManifestUpdateResult{manifestPath, hasIndexes}, nil)
+			update.ManifestPath = CommittedManifestPath(baseManifest.BasePath, committed, size, config.GetStorageType())
+			finish(update, nil)
 		})
 		if err != nil {
 			finish(ManifestUpdateResult{}, err)
@@ -541,30 +545,38 @@ func SubmitManifestUpdates(ctx context.Context, io *ManifestIOContext, baseManif
 // OVERWRITE applies mutations to this transaction's exact read revision, even
 // when conflict retries allocate a newer version. Reuse that in-memory snapshot
 // both for drop validation and for the final index-presence projection.
-func applyAsyncManifestUpdates(txn C.LoonTransactionHandle, manifestPath string, updates *ManifestUpdates) (bool, *bool, error) {
+func applyAsyncManifestUpdates(txn C.LoonTransactionHandle, manifestPath string, updates *ManifestUpdates) (bool, ManifestUpdateResult, error) {
 	var columns []string
 	if updates.NewFiles != nil {
 		columns = updates.NewFiles.invalidatedIndexColumns()
 	}
 	var indexes []ManifestIndexInfo
-	if len(updates.DropIndexes) > 0 || (len(columns) > 0 && len(updates.Indexes) == 0) {
+	if len(updates.DropIndexes) > 0 || len(updates.Indexes) > 0 || len(columns) > 0 {
 		var err error
 		indexes, err = transactionIndexInfos(txn, manifestPath)
 		if err != nil {
-			return false, nil, err
+			return false, ManifestUpdateResult{}, err
 		}
 	}
 	drops, err := resolveManifestIndexDrops(manifestPath, indexes, updates.DropIndexes)
 	if err != nil {
-		return false, nil, err
+		return false, ManifestUpdateResult{}, err
 	}
-	hasIndexes := manifestIndexesAfterUpdates(indexes, updates, drops, columns)
+	result := ManifestUpdateResult{HasIndexes: manifestIndexesAfterUpdates(indexes, updates, drops, columns)}
+	for _, added := range updates.Indexes {
+		for _, old := range indexes {
+			if old.IndexID == added.IndexID && old.BuildID != added.BuildID &&
+				(added.IndexID != 0 || (old.ColumnName == added.ColumnName && old.IndexType == added.IndexType)) {
+				result.ReplacedIndexes = append(result.ReplacedIndexes, old)
+			}
+		}
+	}
 	if updates.NewFiles == nil && len(updates.ColumnGroups) == 0 && len(updates.DeltaLogs) == 0 &&
 		len(updates.Stats) == 0 && len(updates.Indexes) == 0 && len(drops) == 0 &&
 		len(updates.DropColumns) == 0 {
-		return false, hasIndexes, nil
+		return false, result, nil
 	}
-	return true, hasIndexes, applyManifestUpdates(txn, updates, drops)
+	return true, result, applyManifestUpdates(txn, updates, drops)
 }
 
 func manifestIndexesAfterUpdates(indexes []ManifestIndexInfo, updates *ManifestUpdates, drops []int64, appendedColumns []string) *bool {

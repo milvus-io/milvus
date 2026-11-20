@@ -2315,6 +2315,19 @@ func (s *CopySegmentTaskSuite) TestCopiedManifestKeepsVerifiedIndexIDDuringInsta
 	s.Require().True(ok)
 	s.EqualValues(300, record.IndexID, "the artifact belongs to the retired definition, never its replacement")
 	s.NotContains(im.GetSegmentIndexes(100, 2001), int64(301))
+	s.Empty(record.IndexFileKeys)
+	read := mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(_ context.Context, _ *packed.ManifestIOContext, manifest string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+		s.Equal(m.GetSegment(ctx, 2001).GetManifestPath(), manifest)
+		return []packed.ManifestIndexInfo{copiedManifestReviewEntry()}, nil
+	}).Build()
+	defer read.UnPatch()
+	_, err = m.ResolveIndexFileKeys(ctx, nil, record)
+	s.ErrorIs(err, merr.ErrServiceNotReady)
+	s.Zero(read.Times(), "the verified worker result cannot select a revision before segment publication")
+	s.Require().NoError(m.UpdateSegmentsInfo(ctx, meta.UpdateManifest(2001, result.GetManifestPath())))
+	keys, err := m.ResolveIndexFileKeys(ctx, nil, record)
+	s.Require().NoError(err)
+	s.Equal([]string{"index.bin"}, keys)
 }
 
 func (s *CopySegmentTaskSuite) TestCopyManifestVerificationParallelAndFailClosed() {
@@ -2452,7 +2465,8 @@ func TestCopiedSegmentIndexType(t *testing.T) {
 			}
 			result := &datapb.CopySegmentResult{
 				SegmentId: 100, ImportedRows: 4096,
-				IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{5001: info},
+				ManifestPath: segment.GetManifestPath(),
+				IndexInfos:   map[int64]*datapb.VectorScalarIndexInfo{5001: info},
 			}
 			effectiveType := indexType
 			if effectiveType == "" {

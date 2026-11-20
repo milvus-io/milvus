@@ -2301,6 +2301,7 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		StorageVersion:  storage.StorageV3,
 		ManifestPath:    packed.MarshalManifestPath("/data/segments/2001", 3),
 		CommitTimestamp: 700,
+		Stats:           &datapb.Statistics{InsertBinlogSize: 8192, InsertBinlogCount: 2, DeltaBinlogSize: 5},
 	})
 	// A growing V3 segment only has an allocation placeholder and must be dropped.
 	growingSeg := meta.NewSegmentInfo(&datapb.SegmentInfo{
@@ -2378,7 +2379,12 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	defer mockSelectSegments.UnPatch()
 
 	mockCompactionTo := mockey.Mock((*meta.Meta).GetCompactionTo).To(func(m *meta.Meta, segmentID int64) ([]*meta.SegmentInfo, bool) {
-		return nil, false
+		if segmentID == manifestSeg.GetID() {
+			return []*meta.SegmentInfo{meta.NewSegmentInfo(&datapb.SegmentInfo{
+				ID: 9001, CollectionID: 200, Deltalogs: []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []*datapb.Binlog{{LogID: 102, MemorySize: 11, EntriesNum: 2}}}},
+			})}, true
+		}
+		return nil, true
 	}).Build()
 	defer mockCompactionTo.UnPatch()
 
@@ -2395,6 +2401,10 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	assert.Equal(t, int64(2001), snapshotData.Segments[0].GetSegmentId())
 	assert.NotEmpty(t, snapshotData.Segments[0].GetManifestPath())
 	assert.EqualValues(t, 700, snapshotData.Segments[0].GetCommitTimestamp())
+	assert.EqualValues(t, 8192, snapshotData.Segments[0].GetStats().GetInsertBinlogSize())
+	assert.EqualValues(t, 16, snapshotData.Segments[0].GetStats().GetDeltaBinlogSize())
+	assert.EqualValues(t, 2, snapshotData.Segments[0].GetStats().GetDeleteNumRows())
+	assert.EqualValues(t, 5, manifestSeg.GetStats().GetDeltaBinlogSize())
 	staged.UnPatch()
 
 	candidates = []*meta.SegmentInfo{meta.NewSegmentInfo(&datapb.SegmentInfo{
@@ -2412,6 +2422,79 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	assert.Nil(t, snapshotData)
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 	assert.Contains(t, err.Error(), "invalid manifest path for segment 2004")
+}
+
+func TestIndexFilesUseCapturedSegmentManifest(t *testing.T) {
+	for _, consumer := range []string{"query view", "snapshot", "get index infos"} {
+		for _, revision := range []string{"retained", "removed"} {
+			t.Run(consumer+"/"+revision, func(t *testing.T) {
+				ctx := t.Context()
+				m, _, store, _ := index.RollbackFixture(t)
+				s := &Server{meta: m, domainMetas: domainMetas{indexMeta: m.IndexCatalog.(*index.IndexMeta)}}
+				s.UpdateStateCode(commonpb.StateCode_Healthy)
+				segment := m.GetSegment(ctx, meta.RestartSegID).Clone()
+				segment.InsertChannel = "ch"
+				segment.TransformStartAfterTimetick = 1
+				m.Segments.SetSegment(segment.GetID(), segment)
+				seedCollections(s, &meta.CollectionInfo{ID: segment.GetCollectionID(), Schema: meta.NewTestSchema()})
+				before := segment.GetManifestPath()
+				after, err := meta.AdvanceManifest(before, 1)
+				require.NoError(t, err)
+				store.Revisions[after] = store.BackfillEntriesAt(before)
+				// Publish after this consumer has captured its segment.
+				advance := mockey.Mock((*meta.Meta).SegmentIndexFilePaths).When(func(_ *meta.Meta, _ context.Context, _ *model.SegmentIndex, desc *datapb.SegmentInfo) bool {
+					require.NotNil(t, desc)
+					if desc.GetManifestPath() == before {
+						require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifest(segment.GetID(), after)))
+						if revision == "removed" {
+							delete(store.Revisions, before)
+						}
+					}
+					return false
+				}).Build()
+				defer advance.UnPatch()
+				var reads []string
+				read := mockey.Mock((*meta.Meta).ReadManifestIndexesWithIO).When(func(_ *meta.Meta, _ context.Context, _ *packed.ManifestIOContext, path string, _ *indexpb.StorageConfig) bool {
+					reads = append(reads, path)
+					return false
+				}).Build()
+				defer read.UnPatch()
+
+				want := before
+				wantReads := []string{before}
+				if revision == "removed" {
+					want = after
+					wantReads = append(wantReads, after)
+				}
+				switch consumer {
+				case "query view":
+					views, _, err := s.GetQueryViewSegmentLoadInfos(ctx, segment.GetCollectionID(), []int64{segment.GetID()})
+					require.NoError(t, err)
+					require.Len(t, views, 1)
+					require.NoError(t, merr.Error(views[0].GetStatus()))
+					info := views[0].GetLoadInfo()
+					require.Equal(t, want, info.GetManifestPath())
+					require.Len(t, info.GetIndexInfos(), 1)
+					require.Len(t, info.GetIndexInfos()[0].GetIndexFilePaths(), 2)
+				case "snapshot":
+					snap, err := (&ServerHandler{s: s}).GenSnapshot(ctx, segment.GetCollectionID(), []*msgpb.MsgPosition{{ChannelName: "ch", Timestamp: 1000}})
+					require.NoError(t, err)
+					require.Len(t, snap.Segments, 1)
+					require.Equal(t, want, snap.Segments[0].GetManifestPath())
+					require.Len(t, snap.Segments[0].GetIndexFiles(), 1)
+					require.Len(t, snap.Segments[0].GetIndexFiles()[0].GetIndexFilePaths(), 2)
+				case "get index infos":
+					reply, err := s.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{CollectionID: segment.GetCollectionID(), SegmentIDs: []int64{segment.GetID()}})
+					require.NoError(t, err)
+					require.NoError(t, merr.Error(reply.GetStatus()))
+					infos := reply.GetSegmentInfo()[segment.GetID()].GetIndexInfos()
+					require.Len(t, infos, 1)
+					require.Len(t, infos[0].GetIndexFilePaths(), 2)
+				}
+				require.Equal(t, wantReads, reads)
+			})
+		}
+	}
 }
 
 func TestGenSnapshotDependencyErrors(t *testing.T) {
@@ -2589,7 +2672,7 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	mockTypeParams := mockey.Mock((*index.IndexMeta).GetTypeParams).Return(nil).Build()
 	defer mockTypeParams.UnPatch()
 
-	indexFiles, err := uncompressIndexFiles(handler, &datapb.SegmentInfo{CollectionID: 1, ID: 2})
+	indexFiles, err := uncompressIndexFiles(t.Context(), handler, &datapb.SegmentInfo{CollectionID: 1, ID: 2})
 	require.NoError(t, err)
 
 	require.Len(t, indexFiles, 1)
@@ -2600,14 +2683,15 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, indexFiles[0].GetIndexStorePathVersion())
 	assert.Equal(t, []string{"files/index_v1/1/20/2/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
 
-	// There is no segment store in this handler. The selected snapshot segment
-	// must be sufficient, including when its base differs from the current root.
+	// A relocated segment keeps the base from its current segment record.
 	version = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
 	segment := &datapb.SegmentInfo{
-		CollectionID: 1, ID: 2,
+		CollectionID: 1, PartitionID: 20, ID: 2,
 		ManifestPath: packed.MarshalManifestPath("/data/legacy/insert_log/1/20/2", 1),
 	}
-	indexFiles, err = uncompressIndexFiles(handler, segment)
+	currentSegment := mockey.Mock((*meta.Meta).GetSegment).Return(meta.NewSegmentInfo(segment)).Build()
+	defer currentSegment.UnPatch()
+	indexFiles, err = uncompressIndexFiles(t.Context(), handler, segment)
 	require.NoError(t, err)
 	require.Len(t, indexFiles, 1)
 	assert.Equal(t, "HNSW_SQ", indexFiles[0].GetIndexType())
@@ -2618,14 +2702,14 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	assert.Equal(t, []string{"/data/legacy/insert_log/1/20/2/_index/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
 
 	indexType = ""
-	indexFiles, err = uncompressIndexFiles(handler, segment)
+	indexFiles, err = uncompressIndexFiles(t.Context(), handler, segment)
 	require.NoError(t, err)
 	require.Len(t, indexFiles, 1)
 	assert.Empty(t, indexFiles[0].GetIndexType())
 	assert.Equal(t, "HNSW", meta.GetIndexType(indexFiles[0].GetIndexParams()))
 
 	segment.ManifestPath = ""
-	indexFiles, err = uncompressIndexFiles(handler, segment)
+	indexFiles, err = uncompressIndexFiles(t.Context(), handler, segment)
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 	assert.Empty(t, indexFiles)
 }

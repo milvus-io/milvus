@@ -63,6 +63,7 @@ func copyPublicationFixture(t *testing.T) (*meta.Meta, *copyCompletionFailCatalo
 		ID: meta.RestartSegID, CollectionID: meta.RestartCollID, PartitionID: index.RestartPartID,
 		State: commonpb.SegmentState_Importing, IsImporting: true,
 		NumOfRows: 1000, StorageVersion: storage.StorageV3,
+		Stats:        &datapb.Statistics{InsertBinlogSize: 8192, InsertBinlogCount: 2},
 		ManifestPath: packed.MarshalManifestPath("/tmp/test-restart/insert_log/300/30/8001", 0),
 	})
 	require.NoError(t, m.AddSegment(ctx, segment))
@@ -129,7 +130,11 @@ func TestCopyResultReplayAfterRollbackAndRestart(t *testing.T) {
 	rows, err := catalog.ListSegmentIndexes(ctx, meta.RestartCollID)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	require.Equal(t, record, rows[0])
+	require.Equal(t, 1, record.NumIndexFiles())
+	require.Equal(t, rows[0], record)
+	restored := restarted.GetSegment(ctx, meta.RestartSegID)
+	require.Empty(t, restored.GetBinlogs())
+	require.EqualValues(t, 8192, restored.GetStats().GetInsertBinlogSize())
 	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskCompleted, recoveredCopies.GetTask(ctx, task.GetTaskId()).GetState())
 }
 

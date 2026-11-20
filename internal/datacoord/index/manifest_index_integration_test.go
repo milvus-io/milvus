@@ -174,6 +174,65 @@ func TestBuildManifestIndexInfoRespectsSegmentIndexTypeOverride(t *testing.T) {
 	require.Empty(t, info.ColumnName)
 }
 
+func requireIndexFiles(t *testing.T, m *meta.Meta, record *model.SegmentIndex, expected ...string) {
+	t.Helper()
+	if record.ManifestPublished {
+		require.Empty(t, record.IndexFileKeys)
+	} else {
+		require.Equal(t, expected, record.IndexFileKeys)
+	}
+	require.Equal(t, len(expected), record.NumIndexFiles())
+	keys, err := m.ResolveIndexFileKeys(t.Context(), nil, record)
+	require.NoError(t, err)
+	require.Equal(t, expected, keys)
+}
+
+func TestIndexFileLookupRejectsWrongBuild(t *testing.T) {
+	ctx := t.Context()
+	m, _, store, _ := RollbackFixture(t)
+	job, ok := m.IndexCatalog.GetIndexJob(meta.RestartBuildID)
+	require.True(t, ok)
+	revision := m.GetSegment(ctx, job.SegmentID).GetManifestPath()
+	entries := store.BackfillEntriesAt(revision)
+	require.Len(t, entries, 1)
+	for _, change := range []func(*packed.ManifestIndexInfo){
+		func(entry *packed.ManifestIndexInfo) { entry.BuildID++ },
+		func(entry *packed.ManifestIndexInfo) { entry.IndexID++ },
+		func(entry *packed.ManifestIndexInfo) { entry.IndexVersion++ },
+		func(entry *packed.ManifestIndexInfo) { entry.IndexFileKeys = []string{"one"} },
+		func(entry *packed.ManifestIndexInfo) { entry.IndexFileKeys = []string{"../foreign", "one"} },
+	} {
+		invalid := entries[0]
+		change(&invalid)
+		store.Revisions[revision] = []packed.ManifestIndexInfo{invalid}
+		keys, err := m.ResolveIndexFileKeys(ctx, nil, job)
+		require.ErrorIs(t, err, merr.ErrDataIntegrity)
+		require.Empty(t, keys)
+	}
+	store.Revisions[revision] = entries
+	requireIndexFiles(t, m, job, "0", "1")
+}
+
+func TestIndexFileLookupRetriesReclaimedLiveRevision(t *testing.T) {
+	ctx := t.Context()
+	m, _, store, _ := RollbackFixture(t)
+	job, ok := m.IndexCatalog.GetIndexJob(meta.RestartBuildID)
+	require.True(t, ok)
+	before := m.GetSegment(ctx, job.SegmentID).GetManifestPath()
+	after, err := meta.AdvanceManifest(before, 1)
+	require.NoError(t, err)
+	store.Revisions[after] = store.BackfillEntriesAt(before)
+	missing := mockey.Mock((*meta.Meta).ReadManifestIndexesWithIO).When(func(_ *meta.Meta, _ context.Context, _ *packed.ManifestIOContext, revision string, _ *indexpb.StorageConfig) bool {
+		return revision == before
+	}).To(func(_ *meta.Meta, _ context.Context, _ *packed.ManifestIOContext, _ string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+		require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifest(job.SegmentID, after)))
+		return nil, merr.ErrIoKeyNotFound
+	}).Build()
+	t.Cleanup(func() { missing.UnPatch() })
+	requireIndexFiles(t, m, job, "0", "1")
+	require.Equal(t, 1, missing.MockTimes())
+}
+
 func mockReloadManifestEntry(t *testing.T, buildID int64) {
 	t.Helper()
 	infos := mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{{
@@ -212,7 +271,7 @@ func TestReloadSegmentIndexesFromManifests(t *testing.T) {
 	require.NotNil(t, recovered)
 	assert.Equal(t, commonpb.IndexState_Finished, recovered.IndexState)
 	assert.EqualValues(t, 5100, recovered.BuildID)
-	assert.Equal(t, []string{"f0"}, recovered.IndexFileKeys)
+	requireIndexFiles(t, m, recovered, "f0")
 	assert.EqualValues(t, 2000, recovered.IndexSerializedSize)
 	assert.EqualValues(t, 3000, recovered.IndexMemSize)
 	assert.Equal(t, "HNSW", recovered.IndexType)
@@ -260,7 +319,7 @@ func TestReloadSegmentIndexesFromManifests_EtcdRecordWins(t *testing.T) {
 
 	recovered := mDomains.IndexMeta.GetSegmentIndexes(100, 5001)[500]
 	require.NotNil(t, recovered)
-	assert.Equal(t, []string{"from-etcd"}, recovered.IndexFileKeys)
+	requireIndexFiles(t, m, recovered, "from-etcd")
 	assert.EqualValues(t, 77, recovered.NodeID, "task history must survive the manifest projection")
 	assert.EqualValues(t, 42, recovered.CreatedUTCTime)
 }
@@ -333,7 +392,7 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 	require.NotNil(t, segIdx)
 	assert.Equal(t, commonpb.IndexState_Finished, segIdx.IndexState)
 	assert.EqualValues(t, meta.RestartBuildID, segIdx.BuildID)
-	assert.Equal(t, []string{"0", "1"}, segIdx.IndexFileKeys)
+	requireIndexFiles(t, restartedDomains.IndexMeta.fileStore, segIdx, "0", "1")
 	assert.EqualValues(t, 4096, segIdx.IndexSerializedSize)
 	assert.EqualValues(t, 1000, segIdx.NumRows)
 	assert.Equal(t, "HNSW", segIdx.IndexType)
@@ -356,12 +415,66 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 	recoveredOff, ok := restartedOffDomains.IndexMeta.GetIndexJob(meta.RestartBuildID)
 	require.True(t, ok, "turning the switch off must not hide a manifest-resident index")
 	assert.Equal(t, commonpb.IndexState_Finished, recoveredOff.IndexState)
-	assert.Equal(t, []string{"0", "1"}, recoveredOff.IndexFileKeys)
+	requireIndexFiles(t, m, recoveredOff, "0", "1")
 }
 
-// The control: with manifest writes off (the default), the same flow persists
-// the record to etcd, so the test above is discriminating rather than
-// trivially green.
+func TestCatalogIndexFileKeysStayInMemory(t *testing.T) {
+	const v1, v2, v3, missing int64 = 11, 12, 13, 14
+	const buildOffset int64 = 100
+	ctx := t.Context()
+	catalog := datacoord.NewCatalog(meta.NewMetaMemoryKV(), "", "")
+	m, domains := BootMetaForRestart(t, catalog, meta.RestartCollID)
+	for id, version := range map[int64]int64{v1: storage.StorageV1, v2: storage.StorageV2, v3: storage.StorageV3} {
+		segment := &datapb.SegmentInfo{
+			ID: id, CollectionID: meta.RestartCollID, PartitionID: RestartPartID,
+			State: commonpb.SegmentState_Flushed, StorageVersion: version,
+		}
+		if version == storage.StorageV3 {
+			segment.ManifestPath = packed.MarshalManifestPath(storage.SegmentManifestBasePath(m.ChunkManager.RootPath(), meta.RestartCollID, RestartPartID, id), 1)
+		}
+		require.NoError(t, m.AddSegment(ctx, meta.NewSegmentInfo(segment)))
+	}
+
+	// Looking up names from a catalog build needs no storage access.
+	resolver := &meta.Meta{}
+	checkFiles := func(im *IndexMeta, id int64, want []string) {
+		t.Helper()
+		record, ok := im.GetIndexJob(buildOffset + id)
+		require.True(t, ok)
+		require.Equal(t, len(want), record.NumIndexFiles())
+		require.False(t, record.ManifestPublished)
+		require.Equal(t, want, record.IndexFileKeys, "segment %d", id)
+		keys, err := resolver.ResolveIndexFileKeys(ctx, nil, record)
+		require.NoError(t, err)
+		require.Equal(t, want, keys)
+	}
+
+	initialKeys, finishedKeys := []string{"initial"}, []string{"part-0", "part-1"}
+	ids := []int64{v1, v2, v3, missing}
+	for _, id := range ids {
+		record := &model.SegmentIndex{
+			CollectionID: meta.RestartCollID, PartitionID: RestartPartID, SegmentID: id,
+			IndexID: meta.RestartIndexID, BuildID: buildOffset + id, IndexVersion: 1,
+			IndexState: commonpb.IndexState_Finished, IndexFileKeys: initialKeys,
+			IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		}
+		require.NoError(t, domains.IndexMeta.AddSegmentIndex(ctx, record))
+		checkFiles(domains.IndexMeta, id, initialKeys)
+		require.NoError(t, domains.IndexMeta.FinishTask(&workerpb.IndexTaskInfo{
+			BuildID: record.BuildID, State: commonpb.IndexState_Finished,
+			IndexFileKeys: finishedKeys, IndexStorePathVersion: record.IndexStorePathVersion,
+		}))
+		checkFiles(domains.IndexMeta, id, finishedKeys)
+	}
+
+	_, restarted := BootMetaForRestart(t, catalog, meta.RestartCollID)
+	for _, id := range ids {
+		checkFiles(restarted.IndexMeta, id, finishedKeys)
+	}
+	require.NoError(t, restarted.IndexMeta.DeleteTask(buildOffset+v3, storage.StorageV3))
+	checkFiles(restarted.IndexMeta, v3, finishedKeys)
+}
+
 func TestSegmentIndexPersistedToEtcdWhenManifestWritesOff(t *testing.T) {
 	meta.WithSegmentIndexManifestWrites(t, false)
 	store := meta.NewFakeManifestStore(t)
@@ -386,6 +499,7 @@ func TestSegmentIndexPersistedToEtcdWhenManifestWritesOff(t *testing.T) {
 	recovered, ok := restartedDomains.IndexMeta.GetIndexJob(meta.RestartBuildID)
 	require.True(t, ok)
 	assert.Equal(t, commonpb.IndexState_Finished, recovered.IndexState)
+	require.Equal(t, []string{"0", "1"}, recovered.IndexFileKeys)
 }
 
 // Regression test for an ABBA deadlock between the manifest commit and every
@@ -629,7 +743,7 @@ func TestPublishIndexToManifestDeclinesDroppedIndexDefinition(t *testing.T) {
 	finished, ok := mDomains.IndexMeta.GetIndexJob(meta.RestartBuildID)
 	require.True(t, ok)
 	assert.Equal(t, commonpb.IndexState_Finished, finished.IndexState)
-	assert.Equal(t, []string{"0", "1"}, finished.IndexFileKeys)
+	requireIndexFiles(t, m, finished, "0", "1")
 }
 
 // The writer-side backstop behind the gate above: an entry the fail-closed
@@ -779,7 +893,7 @@ func TestIndexPublicationModeSurvivesSwitchAndRestart(t *testing.T) {
 				require.True(t, ok)
 				require.Equal(t, commonpb.IndexState_Finished, finished.IndexState)
 				require.Equal(t, version, finished.IndexStorePathVersion)
-				require.Equal(t, []string{"0", "1"}, finished.IndexFileKeys)
+				requireIndexFiles(t, recoveredDomains.IndexMeta.fileStore, finished, "0", "1")
 			})
 		}
 	}

@@ -76,8 +76,12 @@ func segmentColumnGroupFormatsAllEqual(segment *meta.SegmentInfo, targetFormat s
 		return true
 	}
 
+	formats := segment.GetStats().GetFormats()
+	if len(formats) > 0 && (len(formats) != 1 || formats[0] != targetFormat) {
+		return false
+	}
 	binlogs := segment.GetBinlogs()
-	if len(binlogs) == 0 {
+	if len(binlogs) == 0 && len(formats) == 0 {
 		mlog.Warn(context.TODO(), "unexpected empty binlogs for V3 segment during storage format compaction",
 			mlog.Int64("segmentID", segment.GetID()),
 			mlog.Int64("collectionID", segment.GetCollectionID()),

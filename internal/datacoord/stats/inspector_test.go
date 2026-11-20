@@ -1024,6 +1024,16 @@ func (s *statsInspectorSuite) TestEstimateStatsTaskSize() {
 		}
 	}
 
+	s.Run("manifest summary preserves projected task sizes", func() {
+		segment := newSegment(collectionID)
+		coll := s.mt.GetCollection(collectionID)
+		textSize := s.inspector.estimateStatsTaskSize(coll, segment, indexpb.StatsSubJob_TextIndexJob)
+		jsonSize := s.inspector.estimateStatsTaskSize(coll, segment, indexpb.StatsSubJob_JsonKeyIndexJob)
+		segment.Stats = segment.EnsureStats()
+		segment.Binlogs = nil
+		s.Equal(textSize, s.inspector.estimateStatsTaskSize(coll, segment, indexpb.StatsSubJob_TextIndexJob))
+		s.Equal(jsonSize, s.inspector.estimateStatsTaskSize(coll, segment, indexpb.StatsSubJob_JsonKeyIndexJob))
+	})
 	s.Run("sort job reads the whole segment", func() {
 		segment := newSegment(collectionID)
 		s.Equal(segment.GetSegmentSize(), s.inspector.estimateStatsTaskSize(s.mt.GetCollection(segment.GetCollectionID()), segment, indexpb.StatsSubJob_Sort))

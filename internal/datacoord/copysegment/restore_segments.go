@@ -74,6 +74,7 @@ func RestoredSegmentInfo(source *datapb.SegmentDescription, collectionID, partit
 		Level:     source.GetSegmentLevel(), LastExpireTime: math.MaxUint64,
 		StartPosition: startPos, DmlPosition: dmlPos,
 		StorageVersion: source.GetStorageVersion(), IsSorted: source.GetIsSorted(),
+		Stats:           source.GetStats(),
 		CommitTimestamp: source.GetCommitTimestamp(), TransformStartAfterTimetick: start,
 	})
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	metastorekv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 )
 
 func captureUnlockedManifestNotifications(t *testing.T, m *meta.Meta) *[]string {
@@ -84,7 +85,7 @@ func TestManifestIndexMigrationNotifiesOnlyCommittedRevision(t *testing.T) {
 					record, ok := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
 					require.True(t, ok)
 					gc := &GarbageCollector{Meta: m, Option: GcOption{IndexMeta: m.IndexCatalog.(*index.IndexMeta)}}
-					_, err := gc.commitManifestIndexRetractions(ctx, []segmentIndexGCItem{{segIdx: record}})
+					_, err := gc.commitManifestIndexRetractions(ctx, []*model.SegmentIndex{record})
 					return err
 				}
 				return index.NewMigrationBackfillInspector(ctx, m).BackfillIndexesForTest(ctx, meta.RestartSegID, meta.RestartBuildID)
@@ -108,9 +109,9 @@ func TestManifestIndexGCNotifiesAfterBatchUnlock(t *testing.T) {
 	paths := captureUnlockedManifestNotifications(t, m)
 	record, ok := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
 	require.True(t, ok)
-	gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
+	gc := NewGarbageCollector(m, nil, GcOption{Cli: localIndexGCStorage(m), IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
 	t.Cleanup(gc.Close)
-	gc.recycleManifestSegmentIndexes(context.Background(), []segmentIndexGCItem{{segIdx: record}})
+	gc.recycleManifestSegmentIndexes(context.Background(), []*model.SegmentIndex{record})
 	require.Equal(t, []string{m.GetSegment(context.Background(), meta.RestartSegID).GetManifestPath()}, *paths)
 	_, ok = m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
 	require.False(t, ok)

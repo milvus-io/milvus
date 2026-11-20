@@ -109,16 +109,16 @@ type columnGroup struct {
 // field they hold.
 func segmentColumnGroups(segment *SegmentInfo) map[int64]*columnGroup {
 	groups := make(map[int64]*columnGroup)
-	for _, fieldBinlog := range segment.GetBinlogs() {
-		fields := fieldBinlog.GetChildFields()
+	summary := segment.GetStats().GetLoadResource()
+	if len(summary.GetColumnGroups()) == 0 {
+		summary = storage.BuildLoadResourceStatistics(segment.GetBinlogs())
+	}
+	for _, column := range summary.GetColumnGroups() {
+		fields := column.GetFieldIds()
 		if len(fields) == 0 {
-			fields = []int64{fieldBinlog.GetFieldID()}
+			fields = []int64{column.GetGroupId()}
 		}
-		var size int64
-		for _, binlog := range fieldBinlog.GetBinlogs() {
-			size += binlog.GetMemorySize()
-		}
-		group := &columnGroup{fields: fields, size: size}
+		group := &columnGroup{fields: fields, size: column.GetMemorySize()}
 		for _, fieldID := range fields {
 			groups[fieldID] = group
 		}
@@ -126,15 +126,13 @@ func segmentColumnGroups(segment *SegmentInfo) map[int64]*columnGroup {
 	return groups
 }
 
-// estimateFieldsReadSize estimates how much data a task reads for fieldIDs of a
-// segment.
-//
-// It works off segment.GetBinlogs(), which for manifest-backed StorageV3
-// segments only exists in memory: the catalog does not persist their
-// FieldBinlog arrays (see isV3Segment), so after a DataCoord restart such
-// segments carry no binlogs and every field errors out here, letting the
-// callers keep their conservative whole-segment fallback until the segment is
-// rewritten.
+// HasColumnGroupSizes reports whether the segment has a source for projected
+// read estimates. Older segments can supply the groups through their binlogs.
+func (s *SegmentInfo) HasColumnGroupSizes() bool {
+	return len(s.GetStats().GetLoadResource().GetColumnGroups()) > 0 || len(s.GetBinlogs()) > 0
+}
+
+// EstimateFieldsReadSize estimates how much data a task reads for fieldIDs of a segment.
 //
 // Both the index build and the json/text stats tasks request a single column at
 // a time. Per-field attribution is safe only for a StorageV3 segment with a

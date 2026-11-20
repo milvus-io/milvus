@@ -152,7 +152,7 @@ func TestManifestIndexRollbackLeavesUninstalledCopyIndex(t *testing.T) {
 	m, catalog, store, _ := RollbackFixture(t)
 	ctx := context.Background()
 	first, _ := m.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID)
-	late := model.CloneSegmentIndex(first)
+	late := materializedTestIndex(t, m, first)
 	late.BuildID++
 	late.IndexID++
 	definition := model.CloneIndex(m.IndexCatalog.(*IndexMeta).GetIndexesForCollection(meta.RestartCollID, "")[0])
@@ -206,6 +206,7 @@ func TestManifestIndexRollbackRevalidatesSelectedRecord(t *testing.T) {
 			before := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
 			commits := store.CommitCount
 			record, _ := m.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID)
+			record = materializedTestIndex(t, m, record)
 			// Change the selected record after selection but before staging
 			// takes its BuildID lock. No manifest revision should be published.
 			patch := mockey.Mock((*meta.Meta).ReadManifestIndexesWithIO).When(func(_ *meta.Meta, _ context.Context, _ *packed.ManifestIOContext, _ string, _ *indexpb.StorageConfig) bool {

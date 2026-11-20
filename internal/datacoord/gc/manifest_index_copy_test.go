@@ -18,6 +18,7 @@ package gc
 
 import (
 	"context"
+	"path"
 	"testing"
 	"time"
 
@@ -25,30 +26,71 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// The migration fixtures wrap local storage to emulate server-side Copy.
+// GC uses the underlying filesystem's path and deletion semantics.
+func localIndexGCStorage(m *meta.Meta) *storage.LocalChunkManager {
+	return storage.NewLocalChunkManager(objectstorage.RootPath(m.ChunkManager.RootPath()))
+}
+
+func indexRecordWithFiles(t *testing.T, m *meta.Meta, record *model.SegmentIndex) *model.SegmentIndex {
+	t.Helper()
+	keys, err := m.ResolveIndexFileKeys(t.Context(), nil, record)
+	require.NoError(t, err)
+	copy := *record
+	copy.IndexFileKeys = keys
+	copy.IndexFileCount = 0
+	return &copy
+}
+
+func recordedIndexFiles(t *testing.T, gc *GarbageCollector, record *model.SegmentIndex) map[string]struct{} {
+	t.Helper()
+	return gc.GetAllIndexFilesOfIndex(indexRecordWithFiles(t, gc.Meta, record))
+}
+
 func TestManifestIndexMigrationRetainsLayoutAliases(t *testing.T) {
-	m, _, _, _ := index.RollbackFixture(t)
+	m, _, store, _ := index.RollbackFixture(t)
 	ctx := context.Background()
 	segment := m.GetSegment(ctx, meta.RestartSegID)
 	record, _ := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
 	gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
 	defer gc.Close()
 	canReclaim := gc.newIndexFileReclaimChecker(ctx)
+	record = model.CloneSegmentIndex(record)
+	keys, err := m.ResolveIndexFileKeys(ctx, nil, record)
+	require.NoError(t, err)
+	require.NotEmpty(t, keys)
+	record.IndexFileKeys = keys
 	var files []string
 	for _, version := range []indexpb.IndexStorePathVersion{0, 1, 2} {
 		candidate := model.CloneSegmentIndex(record)
 		candidate.IndexStorePathVersion = version
 		files = append(files, meta.MigrationIndexPaths(m.ChunkManager.RootPath(), segment.GetManifestPath(), candidate)...)
 	}
+	beforeReads := store.ReadCount
 	for _, file := range files {
 		require.False(t, canReclaim(file, meta.RestartCollID, meta.RestartSegID, meta.RestartBuildID), file)
 	}
-	_, err := m.RollbackSegmentIndexes(ctx, NewGCManifestReadIO(t), meta.RestartSegID, meta.RestartBuildID)
+	require.Equal(t, beforeReads, store.ReadCount)
+	otherVersion := model.CloneSegmentIndex(record)
+	otherVersion.IndexVersion = record.IndexVersion * 10
+	for _, layout := range []indexpb.IndexStorePathVersion{0, 1, 2} {
+		otherVersion.IndexStorePathVersion = layout
+		for _, file := range meta.MigrationIndexPaths(m.ChunkManager.RootPath(), segment.GetManifestPath(), otherVersion) {
+			require.True(t, canReclaim(file, meta.RestartCollID, meta.RestartSegID, meta.RestartBuildID), file)
+		}
+	}
+	_, err = m.RollbackSegmentIndexes(ctx, NewGCManifestReadIO(t), meta.RestartSegID, meta.RestartBuildID)
 	require.NoError(t, err)
 	// Also exercise the decision cached before the placement change.
 	for _, check := range []func(string, int64, int64, int64) bool{canReclaim, gc.newIndexFileReclaimChecker(ctx)} {
@@ -56,11 +98,132 @@ func TestManifestIndexMigrationRetainsLayoutAliases(t *testing.T) {
 			require.False(t, check(file, meta.RestartCollID, meta.RestartSegID, meta.RestartBuildID), file)
 		}
 	}
-	require.True(t, gc.newIndexFileReclaimChecker(ctx)(files[0]+"-unrecorded", meta.RestartCollID, meta.RestartSegID, meta.RestartBuildID))
+	require.False(t, gc.newIndexFileReclaimChecker(ctx)(files[0]+"-unrecorded", meta.RestartCollID, meta.RestartSegID, meta.RestartBuildID))
 	require.NoError(t, m.IndexCatalog.(*index.IndexMeta).RemoveSegmentIndex(ctx, meta.RestartBuildID))
 	for _, file := range files {
 		require.True(t, gc.newIndexFileReclaimChecker(ctx)(file, meta.RestartCollID, meta.RestartSegID, meta.RestartBuildID), file)
 	}
+}
+
+func TestV3IndexDirectoryRetirement(t *testing.T) {
+	for _, wholeSegment := range []bool{false, true} {
+		name := "index"
+		if wholeSegment {
+			name = "segment"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			m, dm, _, _ := setupV3SegIndexGC(t)
+			root := t.TempDir()
+			chunks := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+			m.ChunkManager = chunks
+			dm.SnapshotMeta = nil
+			gc := NewGarbageCollector(m, nil, GcTestDomainOption(dm, GcOption{Cli: chunks}))
+			t.Cleanup(gc.Close)
+
+			// An upgraded local segment can retain a noncanonical base under the root.
+			base := path.Join(root, "legacy/insert_log/100/10/4001")
+			segment := m.GetSegment(ctx, 4001)
+			manifest := packed.MarshalManifestPath(base, 3)
+			segment.ManifestPath = manifest
+			if wholeSegment {
+				require.NoError(t, m.SetState(ctx, segment.ID, commonpb.SegmentState_Dropped))
+			}
+			store := meta.NewFakeManifestStore(t)
+			entry := v3GCManifestIndex(400, 4100)
+			entry.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+			entry.Path = "4100/1"
+			store.Revisions[manifest] = []packed.ManifestIndexInfo{entry}
+			// GC only needs the per-segment ownership read, even when no catalog
+			// or per-build manifest lookup can provide names.
+			keys := mockey.Mock((*meta.Meta).ResolveIndexFileKeys).Return(nil, merr.ErrIoTooManyRequests).Build()
+			defer keys.UnPatch()
+			removed := []string{
+				path.Join(root, "index_files/4100/1/10/4001/unlisted"),
+				path.Join(root, "index_v1/100/10/4001/4100/1/unlisted"),
+				path.Join(base, "_index/4100/1/unlisted"),
+			}
+			kept := []string{
+				path.Join(root, "index_files/4100/10/10/4001/keep"),
+				path.Join(root, "index_v1/100/10/4001/4100/10/keep"),
+				path.Join(root, "insert_log/100/10/4001/_index/4100/1/keep"),
+			}
+			otherSegmentFiles := []string{path.Join(base, "_index/4100/10/keep"), path.Join(base, "_index/4101/1/keep"), path.Join(base, "data")}
+			if wholeSegment {
+				removed = append(removed, otherSegmentFiles...)
+			} else {
+				kept = append(kept, otherSegmentFiles...)
+			}
+			for _, group := range [][]string{removed, kept} {
+				for _, file := range group {
+					require.NoError(t, chunks.Write(ctx, file, []byte("artifact")))
+				}
+			}
+
+			if wholeSegment {
+				gc.RecycleDroppedSegment(ctx, NewGCManifestReadIO(t), segment.ID)
+				require.Nil(t, m.GetSegment(ctx, segment.ID))
+				require.Zero(t, store.CommitCount)
+			} else {
+				gc.RecycleUnusedSegIndexes(ctx, nil)
+				require.False(t, m.GetSegment(ctx, segment.ID).GetManifestHasIndex())
+				require.Equal(t, 1, store.CommitCount)
+			}
+			require.Equal(t, 1, store.ReadCount)
+			require.Zero(t, keys.MockTimes())
+			_, exists := dm.IndexMeta.GetIndexJob(entry.BuildID)
+			require.False(t, exists)
+			for _, file := range removed {
+				require.NoFileExists(t, file)
+			}
+			for _, file := range kept {
+				require.FileExists(t, file)
+			}
+		})
+	}
+}
+
+func TestManifestIndexRetirementAfterSegmentRemoval(t *testing.T) {
+	ctx := t.Context()
+	m, _, store, _ := index.RollbackFixture(t)
+	record, ok := m.IndexCatalog.GetIndexJob(meta.RestartBuildID)
+	require.True(t, ok)
+	require.Empty(t, record.IndexFileKeys)
+	chunks := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	gc := NewGarbageCollector(m, nil, GcOption{Cli: chunks, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
+	t.Cleanup(gc.Close)
+
+	var removed, kept []string
+	for _, layout := range []indexpb.IndexStorePathVersion{
+		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+	} {
+		artifact := *record
+		artifact.IndexStorePathVersion = layout
+		artifact.IndexFileKeys = []string{"orphan"}
+		for _, version := range []int64{record.IndexVersion, record.IndexVersion * 10} {
+			artifact.IndexVersion = version
+			file := meta.MigrationIndexPaths(chunks.RootPath(), "", &artifact)[0]
+			require.NoError(t, chunks.Write(ctx, file, []byte("artifact")))
+			if version == record.IndexVersion {
+				removed = append(removed, file)
+			} else {
+				kept = append(kept, file)
+			}
+		}
+	}
+	require.NoError(t, m.DropSegment(ctx, record.SegmentID))
+	reads := store.ReadCount
+	gc.RecycleUnusedSegIndexes(ctx, nil)
+	_, present := m.IndexCatalog.GetIndexJob(record.BuildID)
+	require.False(t, present)
+	for _, file := range removed {
+		require.NoFileExists(t, file)
+	}
+	for _, file := range kept {
+		require.FileExists(t, file)
+	}
+	require.Equal(t, reads, store.ReadCount)
 }
 
 func TestManifestIndexMigrationWaitsForGCRetirement(t *testing.T) {
@@ -70,7 +233,7 @@ func TestManifestIndexMigrationWaitsForGCRetirement(t *testing.T) {
 	gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
 	defer gc.Close()
 	entered, release := make(chan struct{}), make(chan struct{})
-	patch := mockey.Mock((*GarbageCollector).RemoveObjectFiles).To(func(*GarbageCollector, context.Context, map[string]struct{}) error {
+	patch := mockey.Mock((*GarbageCollector).removeSegmentIndexFiles).To(func(*GarbageCollector, context.Context, *meta.SegmentInfo, *model.SegmentIndex) error {
 		close(entered)
 		<-release
 		return nil
@@ -79,7 +242,7 @@ func TestManifestIndexMigrationWaitsForGCRetirement(t *testing.T) {
 	retired := make(chan struct{})
 	go func() {
 		defer close(retired)
-		gc.recycleManifestSegmentIndexes(ctx, []segmentIndexGCItem{{segIdx: record, files: gc.getRetainedIndexFilesOfIndex(record)}})
+		gc.recycleManifestSegmentIndexes(ctx, []*model.SegmentIndex{record})
 	}()
 	<-entered
 	restored := make(chan int, 1)

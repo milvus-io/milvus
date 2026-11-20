@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -41,6 +42,9 @@ func (s *Server) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID 
 		}
 		seen[segmentID] = struct{}{}
 		info, err := s.getQueryViewSegmentLoadInfo(ctx, collectionID, segmentID, indexInfos, segmentIndexes[segmentID])
+		if errors.Is(err, meta.ErrSegmentManifestStale) && ctx.Err() == nil {
+			info, err = s.getQueryViewSegmentLoadInfo(ctx, collectionID, segmentID, indexInfos, s.indexMeta.GetSegmentIndexes(collectionID, segmentID))
+		}
 		results = append(results, &querypb.QueryViewSegmentLoadInfoResult{SegmentID: segmentID, Status: merr.Status(err), LoadInfo: info})
 	}
 	return results, indexInfos, nil
@@ -64,11 +68,11 @@ func (s *Server) getQueryViewSegmentLoadInfo(ctx context.Context, collectionID, 
 	if err := binlog.DecompressBinLogs(cloned.SegmentInfo); err != nil {
 		return nil, merr.Wrapf(err, "expand query view binlogs for segment %d", segmentID)
 	}
-	return s.packQueryViewSegmentLoadInfo(cloned.SegmentInfo, indexInfos, segmentIndexes)
+	return s.packQueryViewSegmentLoadInfo(ctx, cloned.SegmentInfo, indexInfos, segmentIndexes)
 }
 
-func (s *Server) packQueryViewSegmentLoadInfo(segment *datapb.SegmentInfo, indexInfos []*indexpb.IndexInfo, segmentIndexes map[int64]*model.SegmentIndex) (*querypb.SegmentLoadInfo, error) {
-	fieldIndexes, err := s.packQueryViewFieldIndexInfos(segment, segmentIndexes, indexInfos)
+func (s *Server) packQueryViewSegmentLoadInfo(ctx context.Context, segment *datapb.SegmentInfo, indexInfos []*indexpb.IndexInfo, segmentIndexes map[int64]*model.SegmentIndex) (*querypb.SegmentLoadInfo, error) {
+	fieldIndexes, err := s.packQueryViewFieldIndexInfos(ctx, segment, segmentIndexes, indexInfos)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +109,7 @@ func (s *Server) packQueryViewSegmentLoadInfo(segment *datapb.SegmentInfo, index
 	return loadInfo, nil
 }
 
-func (s *Server) packQueryViewFieldIndexInfos(segment *datapb.SegmentInfo, segmentIndexes map[int64]*model.SegmentIndex, collectionIndexes []*indexpb.IndexInfo) ([]*querypb.FieldIndexInfo, error) {
+func (s *Server) packQueryViewFieldIndexInfos(ctx context.Context, segment *datapb.SegmentInfo, segmentIndexes map[int64]*model.SegmentIndex, collectionIndexes []*indexpb.IndexInfo) ([]*querypb.FieldIndexInfo, error) {
 	if len(segmentIndexes) == 0 {
 		return nil, nil
 	}
@@ -144,7 +148,7 @@ func (s *Server) packQueryViewFieldIndexInfos(segment *datapb.SegmentInfo, segme
 			Key:   common.LoadPriorityKey,
 			Value: commonpb.LoadPriority_HIGH.String(),
 		})
-		filePaths, err := meta.SegmentIndexFilePaths(s.meta.ChunkManager.RootPath(), segmentIndex, segment)
+		filePaths, err := s.meta.SegmentIndexFilePaths(ctx, segmentIndex, segment)
 		if err != nil {
 			return nil, merr.Wrap(err, "resolve query view index files")
 		}

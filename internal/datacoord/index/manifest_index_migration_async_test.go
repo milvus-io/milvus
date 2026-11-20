@@ -180,8 +180,12 @@ func TestManifestIndexRollbackNoopUsesSourceMarker(t *testing.T) {
 		t.Run(map[bool]string{false: "empty", true: "unselected entry"}[unselected], func(t *testing.T) {
 			m, catalog, store, _ := RollbackFixture(t)
 			ctx := context.Background()
-			before := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
-			entry := store.Revisions[before][0]
+			published := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
+			before, err := meta.AdvanceManifest(published, 1)
+			require.NoError(t, err)
+			require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifest(meta.RestartSegID, before)))
+			entry := store.Revisions[published][0]
+			m.IndexCatalog.RetainReplacedIndexFiles(meta.RestartSegID, entry)
 			store.Revisions[before] = nil
 			if unselected {
 				entry.BuildID++
@@ -192,7 +196,7 @@ func TestManifestIndexRollbackNoopUsesSourceMarker(t *testing.T) {
 			n, err := m.RollbackSegmentIndexes(ctx, newMigrationManifestReadIO(t), meta.RestartSegID, meta.RestartBuildID)
 			require.NoError(t, err)
 			assert.Equal(t, 1, n)
-			assert.Equal(t, reads+1, store.ReadCount, "reuse the locked source read for the Noop marker")
+			assert.Equal(t, reads+1, store.ReadCount, "the current marker and retained keys suffice for rollback")
 			assert.Equal(t, commits, store.CommitCount, "no manifest write when the selected build is absent")
 			assert.Equal(t, before, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath())
 			assert.Equal(t, unselected, m.GetSegment(ctx, meta.RestartSegID).GetManifestHasIndex())
@@ -202,4 +206,26 @@ func TestManifestIndexRollbackNoopUsesSourceMarker(t *testing.T) {
 			assert.Equal(t, meta.RestartBuildID, rows[0].BuildID)
 		})
 	}
+}
+
+func TestManifestIndexRollbackDoesNotReadOldRevision(t *testing.T) {
+	ctx := t.Context()
+	m, catalog, store, _ := RollbackFixture(t)
+	published := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
+	after, err := meta.AdvanceManifest(published, 1)
+	require.NoError(t, err)
+	store.Revisions[after] = nil
+	require.NotEmpty(t, store.BackfillEntriesAt(published))
+	require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifest(meta.RestartSegID, after)))
+	reads, commits := store.ReadCount, store.CommitCount
+	count, err := m.RollbackSegmentIndexes(ctx, newMigrationManifestReadIO(t), meta.RestartSegID, meta.RestartBuildID)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.Equal(t, reads+1, store.ReadCount)
+	require.Zero(t, count)
+	require.Equal(t, commits, store.CommitCount)
+	require.Equal(t, after, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath())
+	require.True(t, IndexManifestPublished(t, m.IndexCatalog.(*IndexMeta), meta.RestartBuildID))
+	rows, err := catalog.ListSegmentIndexes(ctx, meta.RestartCollID)
+	require.NoError(t, err)
+	require.Empty(t, rows)
 }

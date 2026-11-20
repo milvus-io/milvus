@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -281,6 +282,52 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveUnhealthySegment() {
 			s.ErrorIs(merr.Error(resp), test.expectedError)
 		})
 	}
+}
+
+func (s *ServerSuite) TestFinalV3FlushMatchesCatalogReload() {
+	t := s.T()
+	ctx := context.Background()
+	m, err := meta.NewMemoryMeta(t)
+	require.NoError(t, err)
+	s.testServer.meta = m
+	t.Cleanup(m.CloseManifestCommitExecutor)
+	const collID, segID = 100, 17
+	require.NoError(t, m.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: segID, CollectionID: collID, PartitionID: 1, InsertChannel: "ch1", StartPosition: &msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 2},
+		State: commonpb.SegmentState_Growing, Level: datapb.SegmentLevel_L1, StorageVersion: storage.StorageV3,
+	})))
+	insert := []*datapb.FieldBinlog{{FieldID: 101, ChildFields: []int64{101}, Format: "parquet", Binlogs: []*datapb.Binlog{
+		{LogID: 3, EntriesNum: 5, MemorySize: 80},
+	}}}
+	logs := []*datapb.FieldBinlog{{FieldID: 101, Binlogs: []*datapb.Binlog{{LogID: 4, EntriesNum: 1, MemorySize: 8}}}}
+	stats := storage.BuildStatsFromFieldBinlogs(insert, logs, logs, logs)
+	req := &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{}, GrowingTransformStartAfterTimetick: 9, SegmentID: segID, CollectionID: collID, Channel: "ch1",
+		SegLevel: datapb.SegmentLevel_L1, WithFullBinlogs: true, StorageVersion: storage.StorageV3,
+		ManifestPath:      packed.MarshalManifestPath("root/insert_log/100/1/17", 2),
+		Field2BinlogPaths: insert, Field2StatslogPaths: logs, Field2Bm25LogPaths: logs, Deltalogs: logs, Stats: stats,
+		CheckPoints: []*datapb.CheckPoint{{SegmentID: segID, NumOfRows: 5, Position: &msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 9}}},
+	}
+	status, err := s.testServer.SaveBinlogPaths(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	require.NotEmpty(t, m.GetSegment(ctx, segID).GetBinlogs())
+	req.Flushed = true
+	status, err = s.testServer.SaveBinlogPaths(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	check := func(segment *meta.SegmentInfo) {
+		require.NotNil(t, segment)
+		require.Nil(t, segment.Binlogs)
+		require.Nil(t, segment.Deltalogs)
+		require.Nil(t, segment.Statslogs)
+		require.Nil(t, segment.Bm25Statslogs)
+		require.EqualValues(t, 5, segment.GetNumOfRows())
+		require.Equal(t, req.ManifestPath, segment.GetManifestPath())
+		require.True(t, proto.Equal(stats, segment.GetStats()))
+		require.Positive(t, segment.GetSegmentSize())
+	}
+	check(m.GetSegment(ctx, segID))
+	require.NoError(t, meta.LoadAndNormalize(ctx, m, []int64{collID}))
+	check(m.GetSegment(ctx, segID))
 }
 
 func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {

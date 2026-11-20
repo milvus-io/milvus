@@ -33,6 +33,11 @@ import (
 )
 
 func TestManifestDroppedRecoveryAfterFilesDeleted(t *testing.T) {
+	t.Run("manifest only", func(t *testing.T) { checkDroppedRecoveryAfterFilesDeleted(t, false) })
+	t.Run("persisted deletion marker", func(t *testing.T) { checkDroppedRecoveryAfterFilesDeleted(t, true) })
+}
+
+func checkDroppedRecoveryAfterFilesDeleted(t *testing.T, marked bool) {
 	ctx := context.Background()
 	meta.WithSegmentIndexManifestWrites(t, true)
 	store := meta.NewFakeManifestStore(t)
@@ -46,7 +51,7 @@ func TestManifestDroppedRecoveryAfterFilesDeleted(t *testing.T) {
 	defer gc.Option.RemoveObjectPool.Release()
 	job, ok := mDomains.IndexMeta.GetIndexJob(meta.RestartBuildID)
 	require.True(t, ok)
-	files := gc.GetAllIndexFilesOfIndex(job)
+	files := recordedIndexFiles(t, gc, job)
 	for file := range files {
 		require.NoError(t, m.ChunkManager.Write(ctx, file, []byte("index")))
 	}
@@ -54,7 +59,12 @@ func TestManifestDroppedRecoveryAfterFilesDeleted(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, m.ChunkManager.Write(ctx, manifestFile, []byte("manifest")))
 	// Crash after file removal but before either index/segment catalog removal.
-	require.NoError(t, gc.RemoveDroppedSegmentFiles(ctx, segment.Clone(), files))
+	records, indexes, blocked := gc.GetDroppedSegmentIndexes(ctx, NewGCManifestReadIO(t), segment.GetID())
+	require.Equal(t, GcNotBlocked, blocked)
+	if marked {
+		require.NoError(t, gc.markSegmentIndexesDeleted(ctx, records, storage.StorageV3))
+	}
+	require.NoError(t, gc.RemoveDroppedSegmentFiles(ctx, segment.Clone(), indexes))
 	for file := range files {
 		exists, err := local.Exist(ctx, file)
 		require.NoError(t, err)
@@ -68,10 +78,19 @@ func TestManifestDroppedRecoveryAfterFilesDeleted(t *testing.T) {
 	retained := restarted.GetSegment(ctx, meta.RestartSegID)
 	require.NotNil(t, retained)
 	require.True(t, retained.GetManifestHasIndex())
-	require.Empty(t, restartedDomains.IndexMeta.GetAllSegIndexes())
+	if marked {
+		marker, ok := restartedDomains.IndexMeta.GetIndexJob(job.BuildID)
+		require.True(t, ok)
+		require.True(t, marker.IsDeleted)
+		require.Zero(t, marker.NumIndexFiles())
+		require.Equal(t, job.IndexVersion, marker.IndexVersion)
+	} else {
+		require.Empty(t, restartedDomains.IndexMeta.GetAllSegIndexes())
+	}
 	retryGC := NewGarbageCollector(restarted, meta.NewMockHandler(), GcTestDomainOption(restartedDomains, GcOption{Cli: local}))
 	defer retryGC.Option.RemoveObjectPool.Release()
 	retryGC.RecycleDroppedSegment(ctx, NewGCManifestReadIO(t), meta.RestartSegID)
+	require.Empty(t, restartedDomains.IndexMeta.GetAllSegIndexes())
 	require.Nil(t, restarted.GetSegment(ctx, meta.RestartSegID), "pending GC must remove the remaining catalog row")
 	again, _ := snapshot.BootMetaForRestartWithSnapshot(t, catalog, meta.RestartCollID)
 	require.Nil(t, again.GetSegment(ctx, meta.RestartSegID))

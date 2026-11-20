@@ -519,6 +519,7 @@ func applyExternalCollectionSegmentUpdateWithGroupAtFence(ctx context.Context, m
 				return true
 			}
 
+			meta.CompactManifestStats(incoming)
 			segInfo := meta.NewSegmentInfo(incoming)
 			if staging {
 				segInfo.IsInvisible = true
@@ -744,6 +745,7 @@ func applyExternalRefreshPatch(oldSeg *meta.SegmentInfo, incoming *datapb.Segmen
 	if incoming.GetStorageVersion() != 0 {
 		cloned.StorageVersion = incoming.GetStorageVersion()
 	}
+	meta.CompactManifestStats(cloned.SegmentInfo)
 	return cloned
 }
 

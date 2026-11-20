@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
@@ -35,6 +36,7 @@ type PartitionStatsPublication interface {
 // SegmentIndexCatalog is what the manifest commit path and the segment
 // readiness predicate need from the index meta. indexMeta implements it.
 type SegmentIndexCatalog interface {
+	SetIndexFileResolver(*Meta)
 	GetSegmentIndexState(collID, segmentID, indexID int64) *indexpb.SegmentIndexState
 	// GetIndexParams returns the index params of the index.
 	GetIndexParams(collID, indexID UniqueID) []*commonpb.KeyValuePair
@@ -48,6 +50,7 @@ type SegmentIndexCatalog interface {
 	// HasBuildInfo reports whether a SegmentIndex record for the build ID is in memory.
 	HasBuildInfo(buildID int64) bool
 	GetIndexJob(buildID UniqueID) (*model.SegmentIndex, bool)
+	RetainReplacedIndexFiles(segmentID int64, entry packed.ManifestIndexInfo)
 	NotifyManifestIndexMigration(record *model.SegmentIndex)
 	// LockBuildIDs takes the write lock of each build ID, in ascending order
 	// after removing duplicates, so overlapping callers cannot deadlock.

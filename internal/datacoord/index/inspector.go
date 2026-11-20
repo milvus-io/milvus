@@ -450,22 +450,13 @@ func (i *IndexInspector) isExternalCollection(collectionID int64) bool {
 // whole group and therefore keeps the binlog size. An unresolved collection
 // also keeps that previous conservative behavior.
 //
-// V3 segments do not persist their FieldBinlog arrays (the catalog skips the
-// per-FieldBinlog KVs, see isV3Segment), so the per-column attribution only
-// applies to segments flushed or refreshed during the current DataCoord
-// process lifetime; a segment recovered after a restart carries no binlogs and
-// keeps the whole-segment size until it is rewritten.
+// Flushed V3 segments retain their column-group measurements in Statistics.
 func (i *IndexInspector) estimateIndexFieldSize(ctx context.Context, coll *meta.CollectionInfo, segment *meta.SegmentInfo, fieldID int64) int64 {
 	binlogSize := segment.GetFieldBinlogSize(fieldID)
 	if !meta.SupportsFieldProjection(segment) {
 		return binlogSize
 	}
-	if len(segment.GetBinlogs()) == 0 {
-		// a manifest-backed segment recovered from the catalog: there is
-		// nothing to attribute, keep the whole-segment size
-		mlog.Debug(ctx, "no binlogs recorded for manifest-backed segment, fallback to segment size for index task slot",
-			mlog.FieldSegmentID(segment.GetID()),
-			mlog.Int64("binlogSize", binlogSize))
+	if !segment.HasColumnGroupSizes() {
 		return binlogSize
 	}
 	if coll == nil {

@@ -80,9 +80,19 @@ traversal and external namespaces are errors. Existing entries are not migrated.
 Builds retain their creation-time publication mode across switch changes and
 restarts: version 2 finishes in the manifest, while version 0/1 finishes in etcd.
 Readers and cleanup use each artifact's persisted version.
+DataCoord keeps file names in memory for every catalog-backed build. It can
+release them when the build is published to the segment manifest. Rollback
+restores the names to memory when it restores the catalog row.
 Resolving v2 index files requires the owning segment's manifest base; load and
 snapshot consumers report missing or invalid metadata instead of guessing the
-canonical base. Snapshot generation uses its selected segment metadata.
+canonical base. `SegmentInfo.ManifestPath` is the sole source of the published
+revision for ordinary manifest-backed index file reads. QueryView and snapshot
+creation read index files from the captured segment revision. If that lookup
+fails and the segment has since published a different revision, the caller
+recaptures the segment and its indexes together.
+Once a snapshot is created, restore uses the revision recorded in that snapshot.
+When a new build replaces the same index, DataCoord keeps the displaced build's
+exact keys with its retained task record for a possible rollback.
 See [design and compatibility](../../design-docs/design_docs/20261019-segment-rooted-index-artifacts.md).
 
 ## Expression cache files
@@ -181,14 +191,26 @@ behavior.
 
 - V1/V2: delete recorded files and periodically scan standard layouts for
   orphans, including independent `bm25_stats` files.
-- Dropped V3 segments: remove the manifest base directory, including data and
-  stats, subject to retention and snapshot protection.
+- Dropped V3 segments: after retention and snapshot checks, remove the
+  `index_files` and `index_v1` directories for each known build ID and index
+  version, then the manifest base directory with its data, stats and `_index`.
+  A marked segment's manifest also identifies builds missing from task metadata.
+  The segment and its deletion markers survive a failed storage cleanup.
+- Dropping a single V3 index removes that build/version directory in all
+  three layouts before retracting its matching manifest entry. Both operations
+  locate directories without a per-build file-name lookup. If the segment
+  record is already gone, a manifest-backed build can still be cleaned in the
+  two external layouts. A catalog-only v0/v1 record without a segment row
+  retains legacy file-key cleanup because its storage version is unknown.
 - V3 orphan scan: enumerate `insert_log` and reclaim files without segment
   metadata after the protection period. Files belonging to registered V3
   segments are skipped, even if an individual file is absent from the manifest.
 - A dedicated build-aware scan handles canonical `insert_log/.../_index`
   orphans, including those in live V3 segments; snapshot and import protections
-  still apply.
+  still apply. For a finished V3 build with files, its entire current build/version
+  directory is protected in each supported migration layout. Orphan scans can
+  classify a directory from the cached build record without opening a manifest.
+  Extra files in that directory become eligible when the version retires.
 - Malformed `_index` paths are skipped by the orphan scan because their build
   ownership cannot be established. Dropped-segment directory cleanup still
   covers them; malformed objects without a segment row can remain orphaned.
@@ -232,7 +254,7 @@ layout. Build IDs and file keys are unchanged.
 Copies use object-storage server-side Copy operations, concurrently with a shared
 bounded budget; no download/upload or local migration fallback is permitted.
 Copy failure/cancellation leaves visible metadata at the source. Source files
-and all three layout aliases of a retained V3 build's recorded keys/version stay
+and all three directory layout aliases of a retained V3 build/version stay
 protected from orphan scans until build retirement, subject to snapshot guards.
 This also protects partial destinations across failed attempts and restarts.
 See the [migration design](../../design-docs/design_docs/20260901-storagev3-manifest-index-backfill.md).
