@@ -537,6 +537,63 @@ func TestCluster_QueryReshard(t *testing.T) {
 	})
 }
 
+func TestCluster_QueryRefreshExternalCollectionTask(t *testing.T) {
+	finished, err := proto.Marshal(&datapb.RefreshExternalCollectionTaskResponse{
+		State: taskcommon.Finished, KeptSegments: []int64{23},
+		UpdatedSegments: []*datapb.SegmentInfo{{ID: 42}},
+	})
+	require.NoError(t, err)
+	stale, err := proto.Marshal(&datapb.RefreshExternalCollectionTaskResponse{State: taskcommon.InProgress})
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name    string
+		state   string
+		reason  string
+		payload []byte
+		wantErr bool
+	}{
+		{"worker gone", taskcommon.Retry.String(), "worker is not exist", nil, false},
+		{"retry with stale payload", taskcommon.Retry.String(), "worker is not exist", stale, false},
+		{"failure without payload", taskcommon.Failed.String(), "invalid manifest", nil, false},
+		{"failure overrides stale result", taskcommon.Failed.String(), "invalid manifest", finished, false},
+		{"in progress with stale result", taskcommon.InProgress.String(), "", finished, false},
+		{"finished", taskcommon.Finished.String(), "", finished, false},
+		{"finished without result", taskcommon.Finished.String(), "", nil, true},
+		{"finished with invalid result", taskcommon.Finished.String(), "", []byte{0xff}, true},
+		{"finished with stale result", taskcommon.Finished.String(), "", stale, true},
+		{"unknown state", "unknown", "", finished, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			nm := NewMockNodeManager(t)
+			client := mocks.NewMockDataNodeClient(t)
+			nm.EXPECT().GetClient(int64(1)).Return(client, nil)
+			client.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+				Status:     merr.Success(),
+				Properties: map[string]string{taskcommon.StateKey: tc.state, taskcommon.ReasonKey: tc.reason},
+				Payload:    tc.payload,
+			}, nil)
+			result, err := NewCluster(nm).QueryRefreshExternalCollectionTask(1, 1001)
+			if tc.wantErr {
+				require.Error(t, err)
+				require.Nil(t, result)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.state, result.GetState().String())
+			require.Equal(t, tc.reason, result.GetFailReason())
+			if result.GetState() == taskcommon.Finished {
+				require.Equal(t, []int64{23}, result.GetKeptSegments())
+				require.Len(t, result.GetUpdatedSegments(), 1)
+				require.EqualValues(t, 42, result.GetUpdatedSegments()[0].GetID())
+			} else {
+				require.Empty(t, result.GetKeptSegments())
+				require.Empty(t, result.GetUpdatedSegments())
+			}
+		})
+	}
+}
+
 func TestCluster_QueryImportV3(t *testing.T) {
 	t.Run("retry verdict overrides stale in-progress payload", func(t *testing.T) {
 		mockNodeManager := NewMockNodeManager(t)
