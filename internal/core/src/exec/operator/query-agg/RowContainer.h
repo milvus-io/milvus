@@ -449,18 +449,7 @@ class RowContainer {
     void
     clear() {
         for (auto row : rows_) {
-            for (auto i = 0; i < variable_offsets_.size(); i++) {
-                auto& off = variable_offsets_[i];
-                auto& row_col = columnAt(variable_idxes_[i]);
-                bool isStrNull =
-                    isNullAt(row, row_col.nullByte(), row_col.nullMask());
-                auto str = *reinterpret_cast<std::string**>(row + off);
-                if (!isStrNull && str) {
-                    delete str;
-                    str = nullptr;
-                    *reinterpret_cast<std::string**>(row + off) = nullptr;
-                }
-            }
+            releaseVariableWidthFields(row);
             delete[] row;
         }
         rows_.clear();
@@ -472,16 +461,9 @@ class RowContainer {
     /// row stays owned by the container.
     void
     resetRow(char* row) {
-        for (auto i = 0; i < variable_offsets_.size(); i++) {
-            auto& off = variable_offsets_[i];
-            auto& row_col = columnAt(variable_idxes_[i]);
-            bool isStrNull =
-                isNullAt(row, row_col.nullByte(), row_col.nullMask());
-            auto str = *reinterpret_cast<std::string**>(row + off);
-            if (!isStrNull && str) {
-                delete str;
-            }
-        }
+        AssertInfo(accumulators_.empty(),
+                   "resetRow cannot reset rows with aggregate state");
+        releaseVariableWidthFields(row);
         initializeRow(row);
     }
 
@@ -489,6 +471,21 @@ class RowContainer {
     initializeRow(char* row);
 
  private:
+    void
+    releaseVariableWidthFields(char* row) {
+        for (auto i = 0; i < variable_offsets_.size(); i++) {
+            auto& off = variable_offsets_[i];
+            auto& row_col = columnAt(variable_idxes_[i]);
+            bool isStrNull =
+                isNullAt(row, row_col.nullByte(), row_col.nullMask());
+            auto& str = *reinterpret_cast<std::string**>(row + off);
+            if (!isStrNull && str) {
+                delete str;
+                str = nullptr;
+            }
+        }
+    }
+
     const std::vector<DataType> keyTypes_;
     std::vector<int> variable_offsets_{};
     std::vector<int> variable_idxes_{};

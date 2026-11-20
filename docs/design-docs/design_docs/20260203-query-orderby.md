@@ -24,7 +24,7 @@ Detailed design is documented in Sections 2-13 below, including API/proto contra
 - Unit tests for parse/validate/remap/order operators in proxy.
 - Integration tests for end-to-end ORDER BY correctness across multi-segment and multi-querynode paths.
 - Edge-case tests for schema evolution, null ordering, tie-order behavior, and limit/offset boundaries.
-- Stress tests for memory behavior on high-cardinality ORDER BY queries, including known limitation coverage for missing segcore `max_sort_rows` guard.
+- Stress tests for bounded TopK memory behavior on high-cardinality ORDER BY queries, including large-limit coverage for the missing segcore `max_sort_rows` guard.
 
 ## 1. Overview
 
@@ -47,8 +47,8 @@ QueryNode (segment-level)
   │  FillOrderByResult: set field_id, fetch deferred fields, populate system fields
   │  MergeSegcoreRetrieveResults: merge results from multiple segments
   ▼
-Proxy Pipeline (query_pipeline.go)
-  │  ReduceByPK → OrderOperator → SliceOperator → RemapOperator
+Proxy Pipeline (dql/query_pipeline.go)
+  │  ReduceByPK → OrderOperator → SliceOperator → FieldIDRemapOperator
   │  Populate FieldName from schema, filter to user's output_fields
   ▼
 Client SDK
@@ -75,7 +75,7 @@ Format: `"field_name:direction"` where direction is `asc` (default) or `desc`. M
 
 ## 3. Proxy: Request Parsing & Validation
 
-**File**: `internal/proxy/task_query.go`
+**File**: `internal/proxy/dql/task_query.go`
 
 ### 3.1 Parsing order_by Strings
 
@@ -89,8 +89,8 @@ Format: `"field_name:direction"` where direction is `asc` (default) or `desc`. M
 ### 3.2 Validation Rules
 
 1. **Type check**: Only sortable types are allowed (see table above). Vectors, arrays, JSON (without path) are rejected.
-2. **GROUP BY compatibility**: When GROUP BY is present, ORDER BY can only reference columns in the GROUP BY clause or aggregate function results (e.g., `sum(price)`).
-3. **limit required**: ORDER BY always requires an explicit limit, regardless of whether a predicate is present. Unlike plain queries (which can stream results without limit, protected by `MaxOutputSize` at the proxy reduce stage), ORDER BY must load all matching rows into the segcore SortBuffer for in-memory sorting — a stage where `MaxOutputSize` provides no protection. Requests with ORDER BY but no limit are rejected with `"ORDER BY requires explicit limit"`.
+2. **GROUP BY compatibility**: When GROUP BY is present, ORDER BY can only reference columns in the GROUP BY clause. Ordering by aggregate function results (for example, `sum(price)`) is not yet supported and is rejected during validation.
+3. **limit required**: ORDER BY always requires an explicit limit, regardless of whether a predicate is present. The finite limit lets segcore use a bounded TopK buffer; without it, SortBuffer would have to materialize all matching rows in memory, where proxy-side `MaxOutputSize` provides no protection. Requests with ORDER BY but no limit are rejected with `"ORDER BY requires explicit limit"`.
 
 ### 3.3 Plan Assembly
 
@@ -120,10 +120,12 @@ FilterBitsNode → MvccNode → ProjectNode[pk, B, C, SegOffset] → OrderByNode
 
 ### 4.2 Two-Project Mode: Why It Matters
 
-VARCHAR values require heap allocation per row during RowContainer storage. Consider a segment with 10,000 matching rows and `limit=10`:
+VARCHAR values require heap allocation during RowContainer storage. Consider a segment with 10,000 matching rows and `limit=10`:
 
-- **Single-project**: Heap-allocates 10,000 strings, sorts, discards 9,990. Wasteful.
-- **Two-project**: Only projects fixed-width columns into the sort buffer. After TopK selects 10 winners, bulk-fetches the 10 VARCHAR values via segment offsets. 1000x fewer allocations.
+- **Without deferred fetch**: The bounded TopK buffer would copy the VARCHAR output for candidate rows that may later be discarded (up to 20 resident candidates with the current `2 * limit` capacity).
+- **Two-project**: Only projects sort keys and fixed-width columns into the sort buffer. After TopK selects 10 winners, it bulk-fetches exactly the 10 VARCHAR output values via segment offsets.
+
+Bounded TopK caps the **peak live candidate set** at `2 * limit`; it does not cap cumulative allocations over the entire scan. Before the first shrink, every row is copied, and an improving input stream can continue to admit rows after later shrinks. Two-project mode avoids copying deferred variable-width output fields for all of those transient candidates.
 
 ### 4.3 Mode Decision Logic
 
@@ -150,9 +152,9 @@ If a field appears in both ORDER BY and output_fields, it occupies only the ORDE
 
 The OrderByNode wraps a SortBuffer:
 
-- **Storage**: All projected columns stored in RowContainer. Fixed-width values are inline; VARCHAR values are heap-allocated pointers.
+- **Storage**: Projected columns for retained candidates are stored in RowContainer. Fixed-width values are inline; VARCHAR values are heap-allocated pointers.
 - **Sorting**: Sorts row pointers (8 bytes each), not row data. Uses sort_keys_ to compare — non-sort columns are completely ignored during comparison.
-- **TopK optimization**: When `limit < n * threshold`, uses `std::partial_sort` O(n log k) instead of `std::sort` O(n log n). Current threshold is 1/2 (`SortBuffer.cpp:144`). **TODO: benchmark needed** — `partial_sort` is heap-based with poor cache locality; the crossover point where it beats introsort may be much lower than n/2 (likely around n/4 or n/8 depending on row width and comparison cost). A micro-benchmark varying k/n ratio with realistic row sizes should determine the optimal threshold.
+- **Bounded TopK**: For a finite segment limit `k` (the request's `offset + limit`), the buffer retains at most `2 * k` live candidates and uses `std::nth_element` to shrink back to `k`. No rejection threshold exists while the initial buffer is filling. The first shrink establishes it, and each later shrink replaces it with the worst row among the newly selected top `k`. Rows that cannot beat the latest threshold are compared in place and not stored. Finalization performs one last shrink before sorting so discarded variable-width values are released promptly. All matching rows are considered; peak candidate memory is O(`k * projected_row_size`), while cumulative copies or allocations can still grow with the number of admitted candidates.
 - **Output**: Extracts columns from sorted row pointers via copy into new ColumnVectors.
 
 ## 5. Segcore: Result Assembly (FillOrderByResult)
@@ -211,12 +213,12 @@ MergeSegcoreRetrieveResults merges results from multiple segments on the same Qu
 
 ## 8. Proxy Pipeline
 
-**File**: `internal/proxy/query_pipeline.go`
+**File**: `internal/proxy/dql/query_pipeline.go`
 
 The proxy-side pipeline processes the merged results from all QueryNodes:
 
 ```
-input → ReduceByPK → OrderOperator → SliceOperator → RemapOperator → output
+input → ReduceByPK → OrderOperator → SliceOperator → FieldIDRemapOperator → output
 ```
 
 ### 8.1 ReduceByPK
@@ -243,25 +245,25 @@ Tie-order notes:
 
 Applies user-specified offset and limit to the sorted result. For pagination: page 2 with limit=10 uses offset=10, limit=10.
 
-### 8.4 RemapOperator
+### 8.4 FieldIDRemapOperator
 
 **File**: `internal/util/queryutil/remap_op.go`
 
-Reorders FieldsData from segcore's positional layout to the user's requested output field order.
+Selects and reorders FieldsData to the user's requested output field order by matching field IDs at runtime.
 
-BuildRemapIndices reconstructs the segcore positional layout (mirroring PlanProto.cpp logic), then computes an index mapping for each user output field:
+For example:
 
 ```
-Segcore layout: [pk(pos=0), price(pos=1), rating(pos=2), name(pos=3), category(pos=4)]
-User wants:     [name, category, price]
-Remap indices:  [3, 4, 1]
+Actual result field IDs: [pk=100, price=101, rating=102, name=103, category=104]
+Desired field IDs:       [103, 104, 101]
+Output fields:           [name, category, price]
 ```
 
-Fields that are only in ORDER BY (not in user's output_fields) and the implicit PK are stripped by this step.
+This path does not reconstruct the C++ positional layout. Fields that are only in ORDER BY (not in the user's output_fields) and the implicit PK are stripped by this step.
 
 ## 9. Proxy: Response Assembly
 
-**File**: `internal/proxy/task_query.go`
+**File**: `internal/proxy/dql/task_query.go`
 
 After the pipeline completes, two final steps prepare the response:
 
@@ -291,29 +293,22 @@ FilterBitsNode → MvccNode → ProjectNode → AggregationNode → OrderByNode
 [groupKey_0, groupKey_1, ..., aggResult_0, aggResult_1, ...]
 ```
 
-To avoid ambiguity between `alias`, aggregate expression text, and physical fields, the pipeline uses a unified identifier contract:
+The aggregation layout identifies group keys by physical `field_id` and aggregate results by their planned expression identity. The current ORDER BY contract uses only the group-key portion of that layout:
 
 - **GROUP BY key columns**: identified by **`field_id`** (schema-stable physical ID).
-- **Aggregate result columns**: identified by **`expression_id`** (unique per aggregate expression in the plan).
-- **Alias**: user-facing label only; resolved to `expression_id` during parsing/validation, never used as the cross-layer canonical key.
+- **Aggregate result columns**: present in the aggregation output, but not currently valid ORDER BY targets.
 
-`OrderByNode` resolves sorting keys using this canonical identity (`field_id` / `expression_id`), not raw function names such as `"sum"` which are not unique.
+`OrderByNode` resolves supported sorting keys from their group-key field IDs.
 
 ### 10.2 ORDER BY Field Resolution
 
 ORDER BY in GROUP BY context can only reference:
 - **GROUP BY columns**: resolved to `field_id`
-- **Aggregate function results**: resolved to `expression_id`
 
 Resolution rules:
 1. If token matches a GROUP BY column, bind to its `field_id`.
-2. Else if token matches an aggregate alias, bind alias -> `expression_id`.
-3. Else if token matches a normalized aggregate expression (e.g., `sum(price)`, `count(*)`), bind to `expression_id`.
-4. Otherwise reject as invalid ORDER BY field.
-
-Validation constraints:
-- Aggregate aliases must be unique within one query.
-- Bare function names (for example `ORDER BY sum`) are rejected in GROUP BY mode because they are ambiguous across multiple aggregate expressions.
+2. If the token is an aggregate expression (for example, `sum(price)` or `count(*)`), reject it as not yet supported.
+3. Otherwise reject it as an invalid ORDER BY field.
 
 This validation is enforced by `validateOrderByFieldsWithGroupBy` at the proxy level before plan creation.
 
@@ -330,27 +325,27 @@ Key differences from plain ORDER BY pipeline:
 | Aspect | Plain ORDER BY | GROUP BY + ORDER BY |
 |--------|---------------|---------------------|
 | Reduce | ReduceByPK (dedup by primary key) | ReduceByGroups (hash-merge groups, accumulate aggregates) |
-| Order | Positional comparison (field at index i+1) | Canonical ID-based comparison (`field_id` / `expression_id`, with alias resolved before sort) |
-| Remap | RemapOperator reorders from segcore positional layout | Not needed — ReduceByGroups output is already in user-visible column order |
+| Order | Positional comparison (field at index i+1) | Positional comparison using positions derived from group-key field IDs |
+| Remap | FieldIDRemapOperator selects and reorders by field ID | `newAggRemapOperator` converts the raw aggregation layout to user-visible output order |
 | PK | Always at position 0 | Not projected |
 
 **ReduceByGroups** (`GroupAggReducer`): Merges grouped results from multiple QueryNodes using a hash map keyed on grouping columns. For matching groups, aggregate accumulators are combined (e.g., sums are added, counts are added). Special case: `avg` is internally expanded to `sum + count`, merged separately, and divided at the final assembly step.
 
-**OrderOperator** in GROUP BY context: Sorts merged groups using canonical keys (`field_id` / `expression_id`), not positional indices; aliases are already translated to canonical IDs before this stage.
+**OrderOperator** in GROUP BY context: `ComputeGroupByOrderPositions` maps the validated group-key field IDs to positions in the raw reducer layout. The operator sorts by those positions before slicing.
 
-### 10.4 Why No RemapOperator
+### 10.4 Different Remap Contracts
 
-Plain ORDER BY uses RemapOperator because segcore produces a positional layout `[pk, orderby, output, SegOffset]` that must be reordered to match the user's requested field order. GROUP BY output goes through `GroupAggReducer` which assembles `FieldData` arrays directly in user-visible column order via `AggregationFieldMap`. No positional-to-named remapping is needed.
+Plain ORDER BY uses `FieldIDRemapOperator`, which selects and reorders the actual result fields by field ID without rebuilding the segcore layout. GROUP BY + ORDER BY keeps the raw reducer layout `[group_cols..., aggregate_cols...]` through sorting and slicing, then `newAggRemapOperator` uses `AggregationFieldMap` to produce the requested output order and to compute derived `avg` values from `sum + count`.
 
 ## 11. Key Implementation Files
 
 | Layer | File | Purpose |
 |-------|------|---------|
 | Proto | `pkg/proto/plan.proto` | OrderByField, QueryPlanNode definition |
-| Proxy | `internal/proxy/task_query.go` | Parse, validate, plan creation, FieldName population |
-| Proxy | `internal/proxy/query_pipeline.go` | Pipeline construction (reduce → order → slice → remap) |
+| Proxy | `internal/proxy/dql/task_query.go` | Parse, validate, plan creation, FieldName population |
+| Proxy | `internal/proxy/dql/query_pipeline.go` | Pipeline construction (reduce → order → slice → remap) |
 | Proxy | `internal/util/queryutil/order_op.go` | OrderOperator: global merge-sort with partial sort optimization |
-| Proxy | `internal/util/queryutil/remap_op.go` | RemapOperator: positional → user field order mapping |
+| Proxy | `internal/util/queryutil/remap_op.go` | FieldIDRemapOperator for plain ORDER BY; positional RemapOperator primitive used by grouped paths |
 | Proxy | `internal/util/reduce/orderby/types.go` | OrderByField type definition, sortable type check |
 | C++ | `internal/core/src/query/PlanProto.cpp` | BuildOrderByProjectNode, BuildOrderByNode |
 | C++ | `internal/core/src/query/PlanNode.h` | RetrievePlanNode: deferred_field_ids_, pipeline_field_ids_ |
@@ -366,14 +361,15 @@ Plain ORDER BY uses RemapOperator because segcore produces a positional layout `
 | Condition | Behavior |
 |-----------|----------|
 | `limit=0` (explicit) | Rejected by `validateMaxQueryResultWindow`: `"limit [0] is invalid, should be greater than 0"` |
-| No limit + ORDER BY (with or without predicate) | Rejected at PreExecute: `"ORDER BY requires explicit limit"`. Unlike plain queries which can stream results protected by `MaxOutputSize`, ORDER BY loads all matching rows into the segcore SortBuffer for in-memory sorting — `MaxOutputSize` only applies at the proxy reduce stage and cannot prevent OOM during segment-level sorting. |
+| No limit + ORDER BY (with or without predicate) | Rejected at PreExecute: `"ORDER BY requires explicit limit"`. A finite limit is required to activate bounded TopK storage; without one, SortBuffer would materialize all matching rows. `MaxOutputSize` only applies at the proxy reduce stage and cannot protect segment-level sorting. |
 
 ### 12.2 Empty Result Sets
 
-Both OrderOperator and RemapOperator handle empty results gracefully:
+The ORDER BY and remap operators handle empty results gracefully:
 
 - **OrderOperator** (`order_op.go`): If result is nil, FieldsData is empty, or rowCount <= 1, the operator passes through the input unchanged — no sort logic executes.
-- **RemapOperator** (`remap_op.go`): Triple nil-guard on result, FieldsData, and outputIndices. Additionally, index bounds are checked per-field to prevent out-of-range panics.
+- **FieldIDRemapOperator** (`remap_op.go`): Passes through nil or empty results and selects available fields from the runtime field-ID map.
+- **Grouped aggregate remap** (`dql/query_pipeline.go`): Passes through nil or empty results; non-empty results are remapped through `AggregationFieldMap` after slicing.
 - **MergeSegcoreRetrieveResults** (`result.go`): Segments with zero rows are filtered out before merge. If all segments are empty, an empty result is returned without error.
 
 ### 12.3 ORDER BY Fields Missing Due to Schema Evolution
@@ -403,37 +399,36 @@ No additional alignment is needed on the Go side — the C++ layer guarantees th
 
 **Consistency contract**: Both C++ (`SortBuffer::CompareNulls`) and Go (`OrderOperator.compareFieldValuesAt`) implement identical null-handling semantics — configurable per-field via `nulls_first`. The default follows SQL/PostgreSQL convention: ASC → NULLS LAST, DESC → NULLS FIRST (set by `ParseOrderByFields` in `types.go:141`). This ensures that segment-level sort order (C++) is compatible with the proxy-level global merge-sort (Go).
 
-### 12.4 Known Limitation: Missing Segcore Sort-Row Guard
+### 12.4 Known Limitation: Large-Limit Memory Risk
 
-**WARNING (current behavior)**: There is currently no enforced segcore-side `max_sort_rows` guard in the ORDER BY path. SortBuffer may still attempt to materialize and sort a very large match set in memory before proxy-side controls can take effect.
+**WARNING (current behavior)**: There is currently no enforced segcore-side `max_sort_rows` guard in the ORDER BY path. With a finite segment limit `k`, SortBuffer bounds resident candidates to at most `2 * k`, but a very large requested limit can still consume substantial memory before proxy-side controls take effect.
 
 Implications:
-- `limit` is required and reduces output size, but does not cap the number of rows that must be considered during segment-local sorting.
-- Proxy-side `MaxOutputSize` cannot protect memory consumed inside segcore `SortBuffer`.
-- Queries with broad predicates (or no predicate) can trigger high memory usage or OOM risk at query execution time.
+- All matching rows must still be compared, so broad predicates increase CPU work even though candidate storage is bounded.
+- Memory scales with the segment limit (`offset + limit`) and projected row width, not the total number of matches.
+- Proxy-side `MaxOutputSize` cannot protect memory consumed inside segcore `SortBuffer`; a sufficiently large limit can still cause high memory usage or OOM.
 
 Current mitigation:
-- Use selective predicates and conservative limits.
-- Avoid running unconstrained ORDER BY on high-cardinality collections during peak load.
+- Use conservative limits and offsets to bound candidate memory.
+- Use selective predicates to reduce comparison work on high-cardinality collections.
 
 ## 13. Follow-up Items
 
-### 13.1 Cross-Language Positional Layout: Design Trade-off and Testing
+### 13.1 Result Layout Contracts and Testing
 
-The positional layout contract (Section 4.4) is implemented independently in two languages:
-- **C++**: `PlanProto.cpp` (`BuildOrderByProjectNode`) determines the column order `[pk, orderby_fields, (remaining if single-project), SegOffset]`.
-- **Go**: `BuildRemapIndices` in `remap_op.go` reconstructs the same layout to compute remap indices.
+Plain ORDER BY and GROUP BY + ORDER BY use different result-layout contracts:
 
-**Risk**: If either side changes without updating the other, fields with the same data type silently map to wrong data — no error is raised, just incorrect values returned under correct field names. For example, two VARCHAR columns (name, category) could swap values without any type error or exception.
+- **Plain ORDER BY**: `BuildOrderByProjectNode` determines the C++ pipeline layout and `FillOrderByResult` stamps every output column with its field ID from `pipeline_field_ids_`. The proxy's `FieldIDRemapOperator` then selects and reorders fields by field ID at runtime, so user-visible remapping does not reconstruct the C++ positional layout.
+- **GROUP BY + ORDER BY**: Aggregation produces the fixed layout `[group_cols..., aggregate_cols...]`. Go's `ComputeGroupByOrderPositions` maps ORDER BY fields to that layout, so this path retains a positional contract between aggregation output and the QueryNode/Proxy reducers.
 
-**This is a deliberate design trade-off for simplicity.** The alternative — passing explicit field_id metadata per column through the pipeline — would add complexity to the segcore exec pipeline (RowContainer, SortBuffer, ColumnVector all operate on positional indices, not named columns). The positional contract keeps the C++ pipeline simple and allocation-free for metadata. The cost is that the Go remap logic must mirror the C++ layout logic exactly.
+**Risk**: A GROUP BY aggregation layout change that is not reflected in `ComputeGroupByOrderPositions` can make ORDER BY read the wrong column. Plain ORDER BY is protected from this class of mismatch by field-ID-based remapping.
 
-**Mitigation**: End-to-end conformance tests should cover multiple field type combinations (fixed-width only, mixed fixed/variable-width, ORDER BY field overlapping output_fields, ORDER BY field not in output_fields) and verify final output by **value** — not just field names and types. These tests serve as the contract enforcement between the two languages.
+**Mitigation**: End-to-end conformance tests should cover multiple field type combinations (fixed-width only, mixed fixed/variable-width, ORDER BY field overlapping output_fields, ORDER BY field not in output_fields) and verify final output by **value** — not just field names and types. GROUP BY + ORDER BY tests should cover each supported group key and verify that every aggregate value remains attached to the correct group after ordering, slicing, and remapping. Ordering by aggregate results is future work and must not be listed as current test coverage until the API accepts it.
 
 ### 13.2 Other Non-Blocking Follow-ups
 
 - **Deterministic tie-order option**: Evaluate appending PK as an implicit final sort key for ORDER BY, and align behavior across segcore local sort and proxy global merge-sort.
 - **GROUP BY + ORDER BY detailed design**: Full specification of aggregation pipeline interaction (Section 10 is overview only).
-- **partial_sort threshold benchmark**: Determine optimal crossover point for TopK optimization (Section 4.5).
-- **Implement segcore `max_sort_rows` guard (fix for known limitation in Section 12.4)**: SortBuffer should enforce a configurable upper bound on sortable rows per segment and reject requests that exceed it, with a clear user-facing error.
+- **Aggregate-result ordering**: Extend validation, position resolution, and cross-layer tests before supporting aggregate expressions as ORDER BY targets.
+- **Implement segcore `max_sort_rows` guard (fix for known limitation in Section 12.4)**: SortBuffer should enforce a configurable upper bound on the segment TopK limit (or estimated candidate bytes) and reject requests that exceed it, with a clear user-facing error.
 - **Deferred fetch optimization**: Explore lazy evaluation for two-project mode to avoid bulk-fetching all deferred fields when only a subset is needed.
