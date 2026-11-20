@@ -102,10 +102,8 @@ OpenFromSource(const ReaderBackend& backend,
         options.mmap_dir_path = std::filesystem::temp_directory_path().string();
     }
     options.params = backend.LoadParams(metadata);
-    if (family != families::kJsonFlat) {
-        options.params = AnnotateJsonProjectionCompleteness(
-            std::move(options.params), source);
-    }
+    options.params =
+        AnnotateJsonProjectionCompleteness(std::move(options.params), source);
     const auto expected_caps = loader_entry.derive_caps(options.params);
     auto reader = loader_entry
                       .Load({OpenedIndexSource{LegacyIndexSource{
@@ -152,12 +150,8 @@ OpenV3(const ReaderBackend& backend,
         options.mmap_dir_path = std::filesystem::temp_directory_path().string();
     }
     options.params = backend.LoadParams(metadata);
-    if (backend.Family() != families::kJsonFlat) {
-        options.params =
-            AnnotateJsonProjectionCompleteness(std::move(options.params),
-                                               source->Directory(),
-                                               source->IndexMeta());
-    }
+    options.params = AnnotateJsonProjectionCompleteness(
+        std::move(options.params), source->Directory(), source->IndexMeta());
     const auto family = ResolvePackedLoadFamily(
         backend.Family(), source->IndexMeta(), options.params);
     const auto loader_entry = LoaderRegistry::Instance().Lookup(family);

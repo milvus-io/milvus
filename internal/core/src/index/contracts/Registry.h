@@ -38,7 +38,7 @@
 namespace milvus::index {
 
 // "inverted" / "bitmap" / "sort" / "marisa" / "text" / "ngram" /
-// "json_flat" / "rtree" / "fmindex" / vector families...
+// "rtree" / "fmindex" / vector families...
 //
 // A canonical registry key. Load planning derives it from runtime parameters
 // and, for the scalar hybrid family, the persisted selector.

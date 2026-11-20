@@ -332,14 +332,13 @@ func (s *Suite) TestExecFeatures() {
 		})
 	})
 
-	s.Run("json_flat", func() {
-		// JSON statistics take precedence over a JSON index on the same
-		// field. Disable them to exercise the flat index. By design, its
-		// scalar predicates also match array elements at the same JSON path.
+	s.Run("retired_json_flat", func() {
+		// The JSON flat definition is retained without a physical index. Disable
+		// JSON statistics to verify that the filter runs on raw data.
 		noStats := map[string]*schemapb.TemplateValue{
 			common.ExprUseJSONStatsKey: {Val: &schemapb.TemplateValue_BoolVal{BoolVal: false}},
 		}
-		s.eventuallyExactly(ctx, scalar("json_flat"), func() map[string]int64 {
+		s.eventuallyExactly(ctx, map[string]int64{"filter_exec_path=brute_force": 1}, func() map[string]int64 {
 			return s.queryExecWith(ctx, name, execFlat+`["a"] == 7`, noStats)
 		})
 	})

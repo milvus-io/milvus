@@ -173,7 +173,6 @@ class SourceBuildTest : public ::testing::Test {
                                  family == index::families::kInverted ||
                                  family == index::families::kNgram ||
                                  family == index::families::kRTree ||
-                                 family == index::families::kJsonFlat ||
                                  family == index::families::kHybrid;
         return loader
             .Load({index::IndexFiles{

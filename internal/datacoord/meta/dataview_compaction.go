@@ -72,7 +72,7 @@ func (m *Meta) LoadableProjection(ctx context.Context, collectionID int64, previ
 
 	var indexes []*model.Index
 	if m.IndexCatalog != nil {
-		indexes = m.IndexCatalog.GetIndexesForCollection(collectionID, "")
+		indexes = m.IndexCatalog.GetPhysicalIndexesForCollection(collectionID)
 	}
 	collection := m.GetCollection(collectionID)
 	requireSorted := EnableSortCompaction() && (collection == nil || !collection.IsExternal())

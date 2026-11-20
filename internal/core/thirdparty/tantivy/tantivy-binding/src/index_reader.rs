@@ -3,7 +3,6 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use libc::c_char;
-use tantivy::fastfield::FastValue;
 use tantivy::query::{BooleanQuery, Query, RangeQuery, RegexQuery, TermQuery, TermSetQuery};
 use tantivy::schema::{Field, IndexRecordOption};
 use tantivy::tokenizer::{NgramTokenizer, TokenStream, Tokenizer};
@@ -17,17 +16,11 @@ use crate::milvus_id_collector::MilvusIdCollector;
 use crate::util::{c_ptr_to_str, make_bounds};
 use crate::vec_collector::VecCollector;
 
-use crate::data_type::JsonExistValueType;
 use crate::error::{Result, TantivyBindingError};
-use crate::json_exists_query::JsonExistsQuery;
 
 // Threshold for batch-in query. Less than this threshold, we use term_query one by one and use
 // TermSetQuery when larger than this threshold. This value is based on some experiments.
 const BATCH_THRESHOLD: usize = 10000;
-
-// Threshold for JSON batch-in query. JSON term construction is more expensive (path encoding),
-// so TermSetQuery becomes beneficial at a lower threshold than for non-JSON fields.
-const JSON_BATCH_THRESHOLD: usize = 10;
 
 // V5 persisted separate -0/+0 terms; V7 normalizes newly constructed zero
 // terms. Keep the raw V5 encoding available for querying existing indexes.
@@ -524,278 +517,6 @@ impl IndexReaderWrapper {
         Ok(())
     }
 
-    // JSON related query methods
-    // These methods support querying JSON fields with different data types
-
-    pub fn json_term_query_i64(
-        &self,
-        json_path: &str,
-        term: i64,
-        bitset: *mut c_void,
-    ) -> Result<()> {
-        let mut json_term = Term::from_field_json_path(self.field, json_path, false);
-        json_term.append_type_and_fast_value(term);
-        let q = TermQuery::new(json_term, IndexRecordOption::Basic);
-        self.search(&q, bitset)
-    }
-
-    pub fn json_term_query_u64(
-        &self,
-        json_path: &str,
-        term: u64,
-        bitset: *mut c_void,
-    ) -> Result<()> {
-        let mut json_term = Term::from_field_json_path(self.field, json_path, false);
-        json_term.append_type_and_fast_value(term);
-        let q = TermQuery::new(json_term, IndexRecordOption::Basic);
-        self.search(&q, bitset)
-    }
-
-    pub fn json_term_query_f64(
-        &self,
-        json_path: &str,
-        term: f64,
-        bitset: *mut c_void,
-    ) -> Result<()> {
-        let mut json_term = Term::from_field_json_path(self.field, json_path, false);
-        json_term.append_type_and_fast_value(term);
-        let q = TermQuery::new(json_term, IndexRecordOption::Basic);
-        self.search(&q, bitset)
-    }
-
-    pub fn json_term_query_bool(
-        &self,
-        json_path: &str,
-        term: bool,
-        bitset: *mut c_void,
-    ) -> Result<()> {
-        let mut json_term = Term::from_field_json_path(self.field, json_path, false);
-        json_term.append_type_and_fast_value(term);
-        let q = TermQuery::new(json_term, IndexRecordOption::Basic);
-        self.search(&q, bitset)
-    }
-
-    pub fn json_term_query_keyword(
-        &self,
-        json_path: &str,
-        term: &str,
-        bitset: *mut c_void,
-    ) -> Result<()> {
-        let mut json_term = Term::from_field_json_path(self.field, json_path, false);
-        json_term.append_type_and_str(term);
-        let q = TermQuery::new(json_term, IndexRecordOption::Basic);
-        self.search(&q, bitset)
-    }
-
-    // Batch JSON terms queries - execute all terms in a single search when possible
-    pub fn json_terms_query_i64(
-        &self,
-        json_path: &str,
-        terms: &[i64],
-        bitset: *mut c_void,
-    ) -> Result<()> {
-        if terms.len() < JSON_BATCH_THRESHOLD {
-            return terms
-                .iter()
-                .try_for_each(|&term| self.json_term_query_i64(json_path, term, bitset));
-        }
-        let term_vec: Vec<_> = terms
-            .iter()
-            .map(|&t| {
-                let mut json_term = Term::from_field_json_path(self.field, json_path, false);
-                json_term.append_type_and_fast_value(t);
-                json_term
-            })
-            .collect();
-        let q = TermSetQuery::new(term_vec);
-        self.search(&q, bitset)
-    }
-
-    pub fn json_terms_query_u64(
-        &self,
-        json_path: &str,
-        terms: &[u64],
-        bitset: *mut c_void,
-    ) -> Result<()> {
-        if terms.len() < JSON_BATCH_THRESHOLD {
-            return terms
-                .iter()
-                .try_for_each(|&term| self.json_term_query_u64(json_path, term, bitset));
-        }
-        let term_vec: Vec<_> = terms
-            .iter()
-            .map(|&t| {
-                let mut json_term = Term::from_field_json_path(self.field, json_path, false);
-                json_term.append_type_and_fast_value(t);
-                json_term
-            })
-            .collect();
-        let q = TermSetQuery::new(term_vec);
-        self.search(&q, bitset)
-    }
-
-    pub fn json_terms_query_f64(
-        &self,
-        json_path: &str,
-        terms: &[f64],
-        bitset: *mut c_void,
-    ) -> Result<()> {
-        if terms.len() < JSON_BATCH_THRESHOLD {
-            return terms
-                .iter()
-                .try_for_each(|&term| self.json_term_query_f64(json_path, term, bitset));
-        }
-        let term_vec: Vec<_> = terms
-            .iter()
-            .map(|&t| {
-                let mut json_term = Term::from_field_json_path(self.field, json_path, false);
-                json_term.append_type_and_fast_value(t);
-                json_term
-            })
-            .collect();
-        let q = TermSetQuery::new(term_vec);
-        self.search(&q, bitset)
-    }
-
-    pub fn json_terms_query_bool(
-        &self,
-        json_path: &str,
-        terms: &[bool],
-        bitset: *mut c_void,
-    ) -> Result<()> {
-        // bool has at most 2 distinct values, always use per-term
-        terms
-            .iter()
-            .try_for_each(|&term| self.json_term_query_bool(json_path, term, bitset))
-    }
-
-    pub fn json_terms_query_keyword(
-        &self,
-        json_path: &str,
-        terms: &[*const c_char],
-        bitset: *mut c_void,
-    ) -> Result<()> {
-        let terms = terms
-            .iter()
-            .map(|&term| c_ptr_to_str(term))
-            .collect::<Result<Vec<_>>>()?;
-        self.json_terms_query_keyword_strs(json_path, &terms, bitset)
-    }
-
-    pub fn json_terms_query_keyword_strs(
-        &self,
-        json_path: &str,
-        terms: &[&str],
-        bitset: *mut c_void,
-    ) -> Result<()> {
-        if terms.len() < JSON_BATCH_THRESHOLD {
-            return terms
-                .iter()
-                .try_for_each(|term| self.json_term_query_keyword(json_path, term, bitset));
-        }
-        let term_vec = terms.iter().map(|term| {
-            let mut json_term = Term::from_field_json_path(self.field, json_path, false);
-            json_term.append_type_and_str(term);
-            json_term
-        });
-        self.search(&TermSetQuery::new(term_vec), bitset)
-    }
-
-    pub fn json_exist_query(
-        &self,
-        json_path: &str,
-        json_subpaths: bool,
-        value_type: JsonExistValueType,
-        bitset: *mut c_void,
-    ) -> Result<()> {
-        let full_json_path = if json_path == "" {
-            self.field_name.clone()
-        } else {
-            format!("{}.{}", self.field_name, json_path)
-        };
-        let q = JsonExistsQuery::new(full_json_path, json_subpaths, value_type);
-        self.search(&q, bitset)
-    }
-
-    pub fn json_range_query<T: FastValue>(
-        &self,
-        json_path: &str,
-        lower_bound: T,
-        higher_bound: T,
-        lb_unbounded: bool,
-        up_unbounded: bool,
-        lb_inclusive: bool,
-        ub_inclusive: bool,
-        bitset: *mut c_void,
-    ) -> Result<()> {
-        let lb = if lb_unbounded {
-            Bound::Unbounded
-        } else {
-            let mut term = Term::from_field_json_path(self.field, json_path, false);
-            term.append_type_and_fast_value::<T>(lower_bound);
-            make_bounds(term, lb_inclusive)
-        };
-        let ub = if up_unbounded {
-            Bound::Unbounded
-        } else {
-            let mut term = Term::from_field_json_path(self.field, json_path, false);
-            term.append_type_and_fast_value::<T>(higher_bound);
-            make_bounds(term, ub_inclusive)
-        };
-        let q = RangeQuery::new(lb, ub);
-        self.search(&q, bitset)
-    }
-
-    pub fn json_range_query_keyword(
-        &self,
-        json_path: &str,
-        lower_bound: &str,
-        higher_bound: &str,
-        lb_unbounded: bool,
-        up_unbounded: bool,
-        lb_inclusive: bool,
-        ub_inclusive: bool,
-        bitset: *mut c_void,
-    ) -> Result<()> {
-        let lb = if lb_unbounded {
-            Bound::Unbounded
-        } else {
-            let mut term = Term::from_field_json_path(self.field, json_path, false);
-            term.append_type_and_str(lower_bound);
-            make_bounds(term, lb_inclusive)
-        };
-        let ub = if up_unbounded {
-            Bound::Unbounded
-        } else {
-            let mut term = Term::from_field_json_path(self.field, json_path, false);
-            term.append_type_and_str(higher_bound);
-            make_bounds(term, ub_inclusive)
-        };
-        let q = RangeQuery::new(lb, ub);
-        self.search(&q, bitset)
-    }
-
-    pub fn json_regex_query(
-        &self,
-        json_path: &str,
-        pattern: &str,
-        bitset: *mut c_void,
-    ) -> Result<()> {
-        let q = RegexQuery::from_pattern_with_json_path(pattern, self.field, json_path)?;
-        self.search(&q, bitset)
-    }
-
-    pub fn json_prefix_query(
-        &self,
-        json_path: &str,
-        prefix: &str,
-        bitset: *mut c_void,
-    ) -> Result<()> {
-        let escaped = regex::escape(prefix);
-        let pattern = format!("{}(.|\n)*", escaped);
-        self.json_regex_query(json_path, &pattern, bitset)
-    }
-
     // **Note**: literal length must be larger or equal to min_gram. The C++
     // side (`NgramInvertedIndex::CanHandleLiteral`) is the gate; a violation
     // here means that gate was bypassed. It is reported as an error rather
@@ -1131,11 +852,9 @@ mod test {
         for (version, data_type) in [
             (TantivyIndexVersion::V5, TantivyDataType::I64),
             (TantivyIndexVersion::V7, TantivyDataType::I64),
-            (TantivyIndexVersion::V7, TantivyDataType::JSON),
         ] {
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().to_str().unwrap();
-            let is_json = matches!(data_type, TantivyDataType::JSON);
             let mut writer = IndexWriterWrapper::new(
                 "value",
                 data_type,
@@ -1148,22 +867,13 @@ mod test {
             )
             .unwrap();
             for row in 0..3 {
-                if is_json {
-                    writer
-                        .add_json(
-                            &format!(r#"{{"nested":{{"value":{row}}},"text":"sample"}}"#),
-                            Some(row),
-                        )
-                        .unwrap();
-                } else {
-                    writer.add(row, Some(row)).unwrap();
-                }
+                writer.add(row, Some(row)).unwrap();
             }
             writer.finish().unwrap();
             let (expected, terms_path) = {
                 let index = Index::open_in_dir(path).unwrap();
                 // Independently measure all completed component payloads before
-                // introducing corruption, including dynamic JSON fast fields.
+                // introducing corruption.
                 let expected = index
                     .directory()
                     .list_managed_files()

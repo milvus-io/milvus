@@ -42,7 +42,6 @@ _json_path_index_params = [
     ("INVERTED", "BOOL"),
     ("INVERTED", "DOUBLE"),
     ("INVERTED", "VARCHAR"),
-    ("INVERTED", "JSON"),
     ("STL_SORT", "DOUBLE"),
     ("STL_SORT", "VARCHAR"),
     ("BITMAP", "BOOL"),

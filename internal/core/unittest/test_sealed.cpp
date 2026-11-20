@@ -712,8 +712,7 @@ TEST(SealedLazyIndexSlot, EligibilityRequiresDisabledWarmup) {
                              "VARCHAR",
                              "ARRAY_BOOL",
                              "ARRAY_DOUBLE",
-                             "ARRAY_VARCHAR",
-                             "JSON"}) {
+                             "ARRAY_VARCHAR"}) {
         info.index_params[JSON_CAST_TYPE] = cast;
         EXPECT_TRUE(CanLazyCreateSealedIndexSlot(info)) << cast;
     }
@@ -731,6 +730,31 @@ TEST(SealedLazyIndexSlot, EligibilityRequiresDisabledWarmup) {
     EXPECT_TRUE(CanLazyCreateSealedIndexSlot(info));
 }
 
+TEST(SealedLazyIndexSlot, JsonCastJsonHasNoPhysicalIndex) {
+    for (const auto* index_type :
+         {index::INVERTED_INDEX_TYPE, index::NGRAM_INDEX_TYPE}) {
+        LoadIndexInfo info{};
+        info.field_id = START_USER_FIELDID + 1;
+        info.field_type = DataType::JSON;
+        info.index_params = {
+            {index::INDEX_TYPE, index_type},
+            {JSON_PATH, ""},
+            {JSON_CAST_TYPE, "JSON"},
+            {LOAD_PRIORITY, "HIGH"},
+            {index::MIN_GRAM, "2"},
+            {index::MAX_GRAM, "3"},
+        };
+        try {
+            PrepareLazySealedIndexSlot(info);
+            FAIL() << "JSON cast JSON must not create a physical index slot";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::Unsupported);
+        }
+        EXPECT_EQ(info.index, nullptr);
+        EXPECT_FALSE(info.lazy_index_factory);
+    }
+}
+
 TEST(SealedLazyIndexSlot,
      JsonRegistrationUsesRuntimeKindWithoutOpeningArtifact) {
     LazyIndexSlotConfigGuard enabled(true);
@@ -745,12 +769,11 @@ TEST(SealedLazyIndexSlot,
         IndexKind kind;
         std::string runtime_cast;
     };
-    const std::array<Case, 9> cases{{
+    const std::array<Case, 8> cases{{
         {index::NGRAM_INDEX_TYPE, "VARCHAR", IndexKind::Ngram, "VARCHAR"},
         {index::NGRAM_INDEX_TYPE, "ARRAY_VARCHAR", IndexKind::Ngram, "VARCHAR"},
         {index::NGRAM_INDEX_TYPE, "BOOL", IndexKind::Scalar, "BOOL"},
         {index::NGRAM_INDEX_TYPE, "DOUBLE", IndexKind::Scalar, "DOUBLE"},
-        {index::NGRAM_INDEX_TYPE, "JSON", IndexKind::Scalar, "JSON"},
         {index::INVERTED_INDEX_TYPE, "DOUBLE", IndexKind::Scalar, "DOUBLE"},
         {index::BITMAP_INDEX_TYPE, "BOOL", IndexKind::Scalar, "BOOL"},
         {index::ASCENDING_SORT, "DOUBLE", IndexKind::Scalar, "DOUBLE"},

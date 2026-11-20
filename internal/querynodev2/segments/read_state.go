@@ -70,6 +70,7 @@ func (s *sealedReadState) RowNum() int64 {
 // The caller pins reuse and collection until this operation completes, including
 // waiting for native execution to finish after cancellation.
 func (s *LocalSegment) PrepareReadState(ctx context.Context, reuse ReadState, info *querypb.SegmentLoadInfo, collection *Collection) (ReadState, error) {
+	info = withoutJSONFlatIndexes(info, collection.Schema())
 	if err := s.PinIfNotReleased(); err != nil {
 		return nil, err
 	}

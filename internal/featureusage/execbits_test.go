@@ -43,10 +43,11 @@ func TestExecBitsMatchSegcore(t *testing.T) {
 	end := strings.Index(body[start:], "};")
 	require.Greater(t, end, 0)
 	enum := body[start : start+end]
+	open := strings.IndexByte(enum, '{')
+	require.GreaterOrEqual(t, open, 0)
+	enum = enum[open+1:]
 
-	re := regexp.MustCompile(`(?m)^\s*([A-Za-z]+)\s*=\s*(\d+),`)
-	matches := re.FindAllStringSubmatch(enum, -1)
-	require.Len(t, matches, len(execBitFeatures), "segcore and Go disagree on the number of bits")
+	re := regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\d+),$`)
 
 	// segcore's names are the Go feature names without the prefix; compare
 	// case-insensitively, ignoring the underscores the report names carry.
@@ -62,10 +63,8 @@ func TestExecBitsMatchSegcore(t *testing.T) {
 		FeatureScalarIndexStlSort:       "ScalarIndexStlSort",
 		FeatureScalarIndexTrie:          "ScalarIndexTrie",
 		FeatureScalarIndexInverted:      "ScalarIndexInverted",
-		execBitRetired:                  "RetiredScalarIndexHybrid",
 		FeatureScalarIndexRtree:         "ScalarIndexRtree",
 		FeatureScalarIndexNgram:         "ScalarIndexNgram",
-		FeatureScalarIndexJSONFlat:      "ScalarIndexJsonFlat",
 		FeatureFilterIndexDeclined:      "FilterIndexDeclined",
 		FeatureExprCacheHit:             "ExprCacheHit",
 		FeatureInterimIndexSearch:       "InterimIndexSearch",
@@ -75,12 +74,37 @@ func TestExecBitsMatchSegcore(t *testing.T) {
 		FeatureTwoStageSearch:           "TwoStageSearch",
 		FeatureSegmentPrune:             "SegmentPrune",
 	}
-	require.Len(t, goNames, len(execBitFeatures))
-	for _, m := range matches {
+	retiredNames := map[int]string{10: "RetiredScalarIndexHybrid", 13: "RetiredScalarIndexJsonFlat"}
+	require.Len(t, goNames, len(execBitFeatures)-len(retiredNames))
+	// Retired positions remain reserved in Go even if C++ no longer names them.
+	for pos := range retiredNames {
+		require.Equal(t, execBitRetired, execBitFeatures[pos], "retired bit %d was reused in Go", pos)
+	}
+	seen := make(map[int]bool, len(execBitFeatures))
+	for _, declaration := range strings.Split(enum, "\n") {
+		declaration = strings.TrimSpace(strings.SplitN(declaration, "//", 2)[0])
+		if declaration == "" {
+			continue
+		}
+		m := re.FindStringSubmatch(declaration)
+		require.Len(t, m, 3, "unrecognized FeatureBit declaration %q", declaration)
 		pos, err := strconv.Atoi(m[2])
 		require.NoError(t, err)
 		require.Less(t, pos, len(execBitFeatures), m[1])
-		assert.Equal(t, norm(goNames[execBitFeatures[pos]]), norm(m[1]), "bit %d", pos)
+		require.False(t, seen[pos], "duplicate C++ bit %d", pos)
+		seen[pos] = true
+		if execBitFeatures[pos] == execBitRetired {
+			assert.Equal(t, norm(retiredNames[pos]), norm(m[1]), "retired bit %d", pos)
+		} else {
+			assert.Equal(t, norm(goNames[execBitFeatures[pos]]), norm(m[1]), "bit %d", pos)
+		}
+	}
+	// Every active bit must exist at the same position in both definitions;
+	// omitted retired entries do not reduce that coverage requirement.
+	for pos, feature := range execBitFeatures {
+		if feature != execBitRetired {
+			assert.True(t, seen[pos], "segcore is missing active bit %d (%s)", pos, goNames[feature])
+		}
 	}
 }
 
@@ -93,7 +117,7 @@ func TestSetExecBits(t *testing.T) {
 	_, ok = ExecBit(FeatureGroupByField)
 	assert.False(t, ok)
 
-	set.SetExecBits(scalar | inverted | 1<<63)
+	set.SetExecBits(scalar | inverted | 1<<13 | 1<<63)
 	assert.Equal(t, []Feature{FeatureFilterPathScalarIndex, FeatureScalarIndexInverted}, set.Features())
 
 	var nilSet *FeatureSet

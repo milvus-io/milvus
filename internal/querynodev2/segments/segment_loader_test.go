@@ -3709,6 +3709,87 @@ func TestReopenSegmentsResourceAndMissingSegment(t *testing.T) {
 	}
 }
 
+func TestPrepareSegmentLoadInfoExcludesJSONFlat(t *testing.T) {
+	input := &querypb.SegmentLoadInfo{IndexInfos: []*querypb.FieldIndexInfo{
+		{IndexID: 1, FieldID: 101, IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "JSON"}}, IndexSize: 1 << 40},
+		{IndexID: 2, FieldID: 101, IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "VARCHAR"}}},
+		{IndexID: 3, IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}}},
+		{IndexID: 4, FieldID: 102, IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "JSON"}}},
+	}}
+	prepared, err := PrepareSegmentLoadInfo(input, &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101, DataType: schemapb.DataType_JSON}, {FieldID: 102, DataType: schemapb.DataType_Int64}}})
+	require.NoError(t, err)
+	require.Len(t, prepared.GetIndexInfos(), 3)
+	assert.EqualValues(t, 2, prepared.GetIndexInfos()[0].GetIndexID())
+	assert.EqualValues(t, 4, prepared.GetIndexInfos()[2].GetIndexID())
+	assert.Len(t, input.GetIndexInfos(), 4)
+}
+
+func TestLoadingResourceJSONFlatReservation(t *testing.T) {
+	for _, gpuLimit := range []bool{false, true} {
+		t.Run(strconv.FormatBool(gpuLimit), func(t *testing.T) {
+			paramtable.Init()
+			params := paramtable.Get()
+			key, previous := params.QueryNodeCfg.TieredEvictionEnabled.Key, params.QueryNodeCfg.TieredEvictionEnabled.GetValue()
+			require.NoError(t, params.Save(key, "true"))
+			t.Cleanup(func() { require.NoError(t, params.Save(key, previous)) })
+			loader := &segmentLoader{
+				duf:                       &diskUsageFetcher{usage: atomic.NewInt64(0), err: atomic.NewError(nil)},
+				committedResourceNotifier: syncutil.NewVersionedNotifier(),
+			}
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101, DataType: schemapb.DataType_JSON}}}
+			input := &querypb.SegmentLoadInfo{SegmentID: 1, IndexInfos: []*querypb.FieldIndexInfo{
+				{IndexID: 10, FieldID: 101, IndexSize: 1 << 40, IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "JSON"}}},
+				{IndexID: 11, FieldID: 101, IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "DOUBLE"}}},
+			}}
+			resource := LoadResource{MemorySize: 10, DiskSize: 2}
+			reserved, released := 0, 0
+			for _, patch := range []*mockey.Mocker{
+				mockey.Mock(hardware.GetUsedMemoryCount).Return(uint64(100)).Build(),
+				mockey.Mock(hardware.GetMemoryCount).Return(uint64(1000)).Build(),
+				mockey.Mock(hardware.GetAllGPUMemoryInfo).Return([]hardware.GPUMemoryInfo{{TotalMemory: 100, FreeMemory: 100}}, nil).Build(),
+				mockey.Mock((*segmentLoader).estimateSegmentLoadingResourceUsageWithSchema).To(
+					func(_ *segmentLoader, _ context.Context, _ *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) (*ResourceUsage, uint64, error) {
+						require.Len(t, infos, 1)
+						require.Len(t, infos[0].GetIndexInfos(), 1)
+						require.EqualValues(t, 11, infos[0].GetIndexInfos()[0].GetIndexID())
+						usage := &ResourceUsage{MemorySize: resource.MemorySize, DiskSize: resource.DiskSize}
+						if gpuLimit {
+							usage.FieldGpuMemorySize = []uint64{1000}
+						}
+						return usage, usage.MemorySize, nil
+					}).Build(),
+				mockey.Mock(tryReserveLoadingResource).To(func(got LoadResource) bool {
+					reserved++
+					require.Equal(t, resource, got)
+					return true
+				}).Build(),
+				mockey.Mock(releaseLoadingResource).To(func(got LoadResource) {
+					released++
+					require.Equal(t, resource, got)
+					require.True(t, loader.mut.TryLock(), "native release must run outside the accounting lock")
+					loader.mut.Unlock()
+				}).Build(),
+			} {
+				t.Cleanup(func() { patch.UnPatch() })
+			}
+			result, err := loader.requestResourceWithSchema(context.Background(), schema, input)
+			require.Len(t, input.GetIndexInfos(), 2, "shared metadata must retain the historical flat record")
+			require.Equal(t, 1, reserved)
+			if gpuLimit {
+				require.ErrorIs(t, err, merr.ErrSegmentRequestResourceFailed)
+				require.Zero(t, result.Resource)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, resource, result.Resource)
+				require.Zero(t, released)
+				loader.freeRequestResource(result)
+			}
+			require.Equal(t, 1, released)
+			require.Zero(t, loader.committedResource)
+		})
+	}
+}
+
 // No manager, background disk fetcher, or object store is needed for admission.
 func newResourceTestLoader(t *testing.T, tiered bool, usage *ResourceUsage) *segmentLoader {
 	t.Helper()

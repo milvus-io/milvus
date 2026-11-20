@@ -8,7 +8,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
-from pymilvus import DataType
+from pymilvus import Collection, DataType, MilvusException, utility
 
 prefix = "client_index"
 epsilon = ct.epsilon
@@ -34,6 +34,121 @@ default_bool_field_name = ct.default_bool_field_name
 default_string_field_name = ct.default_string_field_name
 default_int32_array_field_name = ct.default_int32_array_field_name
 default_string_array_field_name = ct.default_string_array_field_name
+
+
+class TestMilvusClientJsonFlatIndexDeprecated(TestMilvusClientV2Base):
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("index_type", ["INVERTED", "AUTOINDEX"])
+    @pytest.mark.parametrize("target", ["root", "subtree", "dynamic"])
+    def test_json_flat_index_logical_definition(self, index_type, target):
+        """Deprecated definitions keep SDK waiters and filtering usable."""
+        client = self._client()
+        uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
+        self.connection_wrap.connect(uri=uri, token=cf.param_info.param_token)
+        collection_name = cf.gen_unique_str("json_flat_deprecated")
+        schema = client.create_schema(enable_dynamic_field=target == "dynamic")
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=2)
+        schema.add_field("j", DataType.JSON, nullable=True)
+        schema.add_field("typed_json", DataType.JSON)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        field_name = "dyn" if target == "dynamic" else "j"
+        json_path = field_name if target == "root" else f'{field_name}["payload"]'
+        index_name = "deprecated_json"
+        params = {"json_cast_type": "json", "json_path": json_path}
+        indexes = client.prepare_index_params()
+        indexes.add_index(field_name, index_type=index_type, index_name=index_name, params=params)
+
+        # Both the MilvusClient and ORM create/wait paths use the server's
+        # Finished projection, including a definition created before any rows.
+        self.create_index(client, collection_name, indexes)
+        orm_collection = Collection(collection_name)
+        orm_collection.create_index(
+            field_name, {"index_type": index_type, **params}, index_name=index_name, timeout=30
+        )
+
+        def assert_finished(expected_rows):
+            info = client.describe_index(collection_name, index_name)
+            assert info["index_name"] == index_name, info
+            assert info["json_path"] == json_path, info
+            assert info["json_cast_type"].upper() == "JSON", info
+            assert info["state"] == "Finished", info
+            assert info["total_rows"] == expected_rows, info
+            assert info["indexed_rows"] == expected_rows, info
+            assert info["pending_index_rows"] == 0, info
+            assert utility.wait_for_index_building_complete(collection_name, index_name, timeout=30)
+            progress = utility.index_building_progress(collection_name, index_name)
+            assert progress["total_rows"] == progress["indexed_rows"] == expected_rows, progress
+            assert progress["pending_index_rows"] == 0, progress
+
+        assert_finished(0)
+        payloads = [
+            {"payload": {"v": 1}}, {"payload": {"v": 2}}, {"payload": {"v": None}},
+            {"payload": {}}, None, {"payload": {"v": "x"}},
+        ]
+        rows = []
+        for i in range(2048):
+            payload = payloads[i % len(payloads)]
+            row = {"id": i, "vector": [float(i), 1.0], "j": payload, "typed_json": {"v": i}}
+            if target == "dynamic" and payload is not None:
+                row["dyn"] = payload
+            rows.append(row)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.drop_index(client, collection_name, index_name)
+        self.create_index(client, collection_name, indexes)
+        orm_params = {"index_type": index_type, "params": {"json_cast_type": "json", "json_path": "typed_json"}}
+        for _ in range(2):
+            orm_collection.create_index("typed_json", orm_params, index_name="deprecated_orm", timeout=30)
+        assert utility.wait_for_index_building_complete(collection_name, "deprecated_orm", timeout=30)
+        orm_collection.drop_index(index_name="deprecated_orm", timeout=30)
+        assert "deprecated_orm" not in client.list_indexes(collection_name)
+        physical_indexes = client.prepare_index_params()
+        physical_indexes.add_index("vector", index_type="FLAT", metric_type="L2")
+        physical_indexes.add_index("typed_json", index_type="INVERTED", index_name="typed_path",
+                                   params={"json_cast_type": "DOUBLE", "json_path": 'typed_json["v"]'})
+        self.create_index(client, collection_name, physical_indexes)
+        assert self.wait_for_index_ready(client, collection_name, "typed_path")
+        typed_info = client.describe_index(collection_name, "typed_path")
+        assert typed_info["state"] == "Finished", typed_info
+        assert typed_info["indexed_rows"] == len(rows), typed_info
+        assert_finished(len(rows))
+        self.create_index(client, collection_name, indexes)
+        assert client.list_indexes(collection_name).count(index_name) == 1
+
+        invalid = client.prepare_index_params()
+        invalid.add_index(field_name, index_type=index_type, index_name="bad name", params=params)
+        with pytest.raises(MilvusException):
+            client.create_index(collection_name, invalid, timeout=30)
+        assert client.describe_index(collection_name, "missing_index") in (None, {})
+        if target != "dynamic":
+            missing_field = client.prepare_index_params()
+            missing_field.add_index("missing_field", index_type=index_type,
+                                    params={"json_cast_type": "JSON"})
+            with pytest.raises(MilvusException):
+                client.create_index(collection_name, missing_field, timeout=30)
+
+        self.load_collection(client, collection_name)
+        leaf = f'{field_name}["payload"]["v"]'
+        cases = [
+            (f"{leaf} == 1", 0),
+            (f"{leaf} != 1", 1),
+            (f"not ({leaf} == 1)", 1),
+            (f"{leaf} not in [1]", 1),
+            ("j is null", 4),
+        ]
+        for expression, sample in cases:
+            result = client.query(collection_name, filter=expression, output_fields=["id"], limit=len(rows))
+            assert sorted(row["id"] for row in result) == [i for i in range(len(rows)) if i % 6 == sample]
+        result = client.query(collection_name, filter='typed_json["v"] == 7', output_fields=["id"])
+        assert [row["id"] for row in result] == [7]
+
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, index_name)
+        assert index_name not in client.list_indexes(collection_name)
+        assert client.describe_index(collection_name, index_name) in (None, {})
+        with pytest.raises(MilvusException):
+            utility.index_building_progress(collection_name, index_name)
 
 
 class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
@@ -748,7 +863,6 @@ _json_path_index_params_invalid = [
     ("INVERTED", "BOOL"),
     ("INVERTED", "DOUBLE"),
     ("INVERTED", "VARCHAR"),
-    ("INVERTED", "JSON"),
     ("STL_SORT", "DOUBLE"),
     ("STL_SORT", "VARCHAR"),
     ("BITMAP", "BOOL"),
@@ -1171,7 +1285,6 @@ _json_path_index_params_valid = [
     ("INVERTED", "BOOL"),
     ("INVERTED", "DOUBLE"),
     ("INVERTED", "VARCHAR"),
-    ("INVERTED", "JSON"),
     ("STL_SORT", "DOUBLE"),
     ("STL_SORT", "VARCHAR"),
     ("BITMAP", "BOOL"),
