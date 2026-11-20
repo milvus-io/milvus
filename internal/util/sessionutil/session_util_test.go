@@ -1347,11 +1347,12 @@ func TestProcessActiveStandByKeepsSessionLeaseAlive(t *testing.T) {
 	}
 
 	// Session context and lease must remain active until session.Stop().
-	require.NoError(t, sessionCtx.Err())
+	require.NoError(t, s2.ctx.Err())
 	assert.True(t, s2.Registered())
-	ttlResp, ttlErr := etcdCli.TimeToLive(context.Background(), leaseID)
-	require.NoError(t, ttlErr)
-	assert.Greater(t, ttlResp.TTL, int64(0))
+	require.Never(t, func() bool {
+		ttlResp, ttlErr := etcdCli.TimeToLive(context.Background(), leaseID)
+		return ttlErr != nil || ttlResp.TTL <= 0
+	}, 200*time.Millisecond, 20*time.Millisecond)
 }
 
 func TestRevokeLeasesBeforeExit(t *testing.T) {

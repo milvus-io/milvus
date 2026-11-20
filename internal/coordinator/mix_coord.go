@@ -177,14 +177,14 @@ func (s *mixCoordImpl) Register() error {
 			mlog.Error(s.ctx, "failed to activate standby server", mlog.Err(err))
 			panic(err)
 		}
+		s.activationWG.Add(1)
+		defer s.activationWG.Done()
 		finishStandby()
 
 		if s.standbyCtx.Err() != nil || s.ctx.Err() != nil {
 			mlog.Info(s.ctx, "standby activation skipped due to server shutdown")
 			return
 		}
-		s.activationWG.Add(1)
-		defer s.activationWG.Done()
 		if err := s.activateFunc(); err != nil {
 			if s.standbyCtx.Err() != nil || s.ctx.Err() != nil {
 				mlog.Info(s.ctx, "standby activation canceled due to server shutdown")
@@ -544,12 +544,9 @@ func (s *mixCoordImpl) Stop() error {
 	s.GracefulStop()
 	mlog.Info(s.ctx, "graceful stop done")
 
-	// When Stop() is called after s.ctx is canceled (grpcmixcoord.Server.Stop),
-	// any in-flight initInternal has already aborted; wait before reading
-	// datacoordServer / fileResourceObserver below.
-	if s.ctx.Err() != nil {
-		s.activationWG.Wait()
-	}
+	// Wait for any in-flight activation (already canceled via standbyCtx in
+	// GracefulStop) before reading datacoordServer / fileResourceObserver below.
+	s.activationWG.Wait()
 
 	if err := s.queryCoordServer.Stop(); err != nil {
 		mlog.Error(s.ctx, "Failed to stop queryCoord", mlog.Err(err))

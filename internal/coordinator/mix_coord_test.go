@@ -200,16 +200,17 @@ func TestMixcoord_StopWhileStandby(t *testing.T) {
 	}
 	entered := make(chan struct{})
 	result := make(chan standbyResult, 1)
-	var origin func(*sessionutil.Session, context.Context, func() error) error
-	mocker := mockey.Mock((*sessionutil.Session).ProcessActiveStandBy).To(
+	var mocker *mockey.Mocker
+	mocker = mockey.Mock((*sessionutil.Session).ProcessActiveStandBy).To(
 		func(s *sessionutil.Session, standbyCtx context.Context, activateFunc func() error) error {
+			mocker.UnPatch()
 			close(entered)
-			err := origin(s, standbyCtx, activateFunc)
+			err := s.ProcessActiveStandBy(standbyCtx, activateFunc)
 			// The Register goroutine decides between "shutdown" and panic on
 			// s.standbyCtx right after this returns.
 			result <- standbyResult{err: err, ctxErr: core.standbyCtx.Err()}
 			return err
-		}).Origin(&origin).Build()
+		}).Build()
 	defer mocker.UnPatch()
 
 	assert.NoError(t, core.Register())
