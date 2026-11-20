@@ -13,26 +13,9 @@
 
 FetchContent_Declare(
     simdjson
-    URL https://github.com/simdjson/simdjson/archive/refs/tags/v5.0.2.tar.gz
-    URL_HASH SHA256=09de4289a26d3a0453569901a3837450b5b98a5c317d635eeee8e2a82b1ebe6b
+    URL https://github.com/simdjson/simdjson/archive/refs/tags/v5.2.0.tar.gz
+    URL_HASH SHA256=499176afd4b32fbe6f65551ef573b880407280072e1c19e22df0b45da58cdf64
 )
 FetchContent_MakeAvailable(simdjson)
-
-# v5.0.2 leaves these header functions with external linkage when
-# SIMDJSON_CONSTEXPR_STRING is empty. Keep their definitions ODR-safe.
-set(_key_selector "${simdjson_SOURCE_DIR}/include/simdjson/generic/ondemand/key_selector.h")
-file(READ "${_key_selector}" _key_selector_original)
-set(_key_selector_fixed "${_key_selector_original}")
-foreach(_helper append_uint append_byte)
-    set(_declaration "SIMDJSON_CONSTEXPR_STRING void ${_helper}(")
-    string(FIND "${_key_selector_fixed}" "inline ${_declaration}" _inline_position)
-    if(_inline_position EQUAL -1)
-        string(REPLACE "${_declaration}" "inline ${_declaration}"
-            _key_selector_fixed "${_key_selector_fixed}")
-    endif()
-endforeach()
-if(NOT _key_selector_fixed STREQUAL _key_selector_original)
-    file(WRITE "${_key_selector}" "${_key_selector_fixed}")
-endif()
 
 set( SIMDJSON_INCLUDE_DIR ${simdjson_SOURCE_DIR}/include CACHE INTERNAL "Path to simdjson include directory" )
