@@ -1453,7 +1453,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 	cm, originalInsertData := suite.createMockChunk(schema, insertBinlogs, true)
 	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(128, nil)
 
-	reader, err := NewReader(context.Background(), cm, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, "", nil)
+	reader, err := NewReader(context.Background(), cm, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, SourceEncryption{})
 	suite.NoError(err)
 	insertData, err := reader.Read()
 	suite.NoError(err)
@@ -1665,18 +1665,18 @@ func (suite *ReaderSuite) TestVerify() {
 
 	checkFunc := func() {
 		cm, _ := suite.createMockChunk(schema, insertBinlogs, false)
-		reader, err := NewReader(context.Background(), cm, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, "", nil)
+		reader, err := NewReader(context.Background(), cm, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, SourceEncryption{})
 		suite.Error(err)
 		suite.Nil(reader)
 	}
 
 	// no insert binlogs to import
-	reader, err := NewReader(context.Background(), nil, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{}, suite.tsStart, suite.tsEnd, 64*1024*1024, "", nil)
+	reader, err := NewReader(context.Background(), nil, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{}, suite.tsStart, suite.tsEnd, 64*1024*1024, SourceEncryption{})
 	suite.Error(err)
 	suite.Nil(reader)
 
 	// too many input paths
-	reader, err = NewReader(context.Background(), nil, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix, "dummy"}, suite.tsStart, suite.tsEnd, 64*1024*1024, "", nil)
+	reader, err = NewReader(context.Background(), nil, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix, "dummy"}, suite.tsStart, suite.tsEnd, 64*1024*1024, SourceEncryption{})
 	suite.Error(err)
 	suite.Nil(reader)
 
@@ -1829,7 +1829,7 @@ func (suite *ReaderSuite) TestZeroDeltaRead() {
 
 	checkFunc := func(targetSchema *schemapb.CollectionSchema, expectReadBinlogs map[int64][]string) {
 		cm := mockChunkFunc(sourceSchema, expectReadBinlogs)
-		reader, err := NewReader(context.Background(), cm, targetSchema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, "", nil)
+		reader, err := NewReader(context.Background(), cm, targetSchema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, SourceEncryption{})
 		suite.NoError(err)
 		suite.NotNil(reader)
 
@@ -2147,7 +2147,7 @@ func TestStorageV3Reader_DeserializeFailureClosesReader(t *testing.T) {
 	defer owner.Close()
 	target := typeutil.Clone(source)
 	typeutil.GetField(target, 101).DataType = schemapb.DataType_Int64
-	r := newReader(context.Background(), nil, target, nil, storage.StorageV3, 1024, "")
+	r := newReader(context.Background(), nil, target, nil, storage.StorageV3, 1024)
 	r.dr = storage.NewDeserializeReader(owner, func(record storage.Record, values []*storage.Value) error {
 		return storage.ValueDeserializerWithSchema(record, values, target, true)
 	})
@@ -2297,8 +2297,6 @@ func TestStorageV3Reader_CMEKWithoutTextUsesPackedReaderContext(t *testing.T) {
 	// source/target key lookup belongs to a per-segment reader anymore.
 	parsePatch := mockey.Mock(hookutil.GetEzIDByImportEzk).Return(int64(0), merr.ErrServiceInternal).Build()
 	defer parsePatch.UnPatch()
-	contextPatch := mockey.Mock(hookutil.GetCPluginContextByEzID).Return(nil, merr.ErrServiceInternal).Build()
-	defer contextPatch.UnPatch()
 	encryptionPatch := mockey.Mock(hookutil.IsClusterEncryptionEnabled).Return(true).Build()
 	defer encryptionPatch.UnPatch()
 	fieldIDsPatch := mockey.Mock(packed.GetManifestFieldIDs).
@@ -2364,7 +2362,6 @@ func TestStorageV3Reader_CMEKWithoutTextUsesPackedReaderContext(t *testing.T) {
 		})
 	}
 	require.Zero(t, parsePatch.Times())
-	require.Zero(t, contextPatch.Times())
 }
 
 func TestStorageV3Reader_CMEKWithTextIsUnsupported(t *testing.T) {
@@ -2801,7 +2798,7 @@ func TestStorageV3Reader_ReadFailurePaths(t *testing.T) {
 			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 			}}
-			r := newReader(context.Background(), nil, schema, nil, storage.StorageV3, 1, "")
+			r := newReader(context.Background(), nil, schema, nil, storage.StorageV3, 1)
 			r.snapshotSource = &internalpb.SnapshotImportSource{Version: 1, SourceCommitTimestamp: 200}
 			owner := &timestampValueReader{}
 			r.dr = owner
@@ -2892,7 +2889,7 @@ func TestStorageV3Reader_DeleteFilterRequiresPrimaryKey(t *testing.T) {
 func TestBinlogReader_InitDependencyErrors(t *testing.T) {
 	paramtable.Init()
 	type chunkManager struct{ storage.ChunkManager }
-	for _, name := range []string{"list_insert", "ez_id", "plugin_context", "open_reader", "walk_delta", "read_delta", "delete_filter", "no_delta"} {
+	for _, name := range []string{"list_insert", "open_reader", "walk_delta", "read_delta", "delete_filter", "no_delta"} {
 		t.Run(name, func(t *testing.T) {
 			cause := errors.New("injected dependency failure")
 			r := &reader{
@@ -2910,20 +2907,6 @@ func TestBinlogReader_InitDependencyErrors(t *testing.T) {
 			listPatch := mockey.Mock(listInsertLogs).Return(map[int64][]string{0: {"row_id"}, 1: {"timestamp"}, 100: {"pk"}}, listErr).Build()
 			defer listPatch.UnPatch()
 
-			if name == "ez_id" || name == "plugin_context" || name == "no_delta" {
-				r.importEz = "source-key"
-				var ezErr, pluginErr error
-				if name == "ez_id" {
-					ezErr = cause
-				}
-				if name == "plugin_context" {
-					pluginErr = cause
-				}
-				ezPatch := mockey.Mock(hookutil.GetEzIDByImportEzk).Return(int64(10), ezErr).Build()
-				defer ezPatch.UnPatch()
-				pluginPatch := mockey.Mock(hookutil.GetCPluginContextByEzID).Return(&indexcgopb.StoragePluginContext{}, pluginErr).Build()
-				defer pluginPatch.UnPatch()
-			}
 			if name == "open_reader" {
 				openPatch := mockey.Mock(storage.NewBinlogRecordReader).Return(nil, cause).Build()
 				defer openPatch.UnPatch()
@@ -3191,7 +3174,7 @@ func TestSnapshotV2PreparationValidation(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			segment := valid()
 			budget := int64(1 << 20)
-			r := newReader(context.Background(), nil, schema, nil, storage.StorageV2, 1024, "")
+			r := newReader(context.Background(), nil, schema, nil, storage.StorageV2, 1024)
 			switch mode {
 			case "empty":
 				segment.Binlogs = nil
@@ -3238,7 +3221,7 @@ func TestSnapshotV2PreparationValidation(t *testing.T) {
 			}
 		})
 	}
-	r := newReader(context.Background(), nil, schema, nil, storage.StorageV2, 1024, "")
+	r := newReader(context.Background(), nil, schema, nil, storage.StorageV2, 1024)
 	input, err := r.prepareStorageV2Snapshot(valid(), 1<<20)
 	require.NoError(t, err)
 	_, err = r.prepareStorageV2Snapshot(valid(), input.bytes)
@@ -3447,7 +3430,7 @@ func TestSnapshotV2ReaderFailureBoundaries(t *testing.T) {
 					&schemapb.FieldSchema{FieldID: 102, Name: "default", DataType: schemapb.DataType_Int64, DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}}},
 					&schemapb.FieldSchema{FieldID: 103, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true})
 				before := proto.Clone(schema)
-				r := newReader(context.Background(), nil, schema, cfg, storage.StorageV2, 1024, "")
+				r := newReader(context.Background(), nil, schema, cfg, storage.StorageV2, 1024)
 				input, err := r.prepareStorageV2Snapshot(segment, budget)
 				require.NoError(t, err)
 				require.Len(t, input.schema.Fields, 3)

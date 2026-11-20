@@ -69,11 +69,6 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 	)
 }
 
-// NewImportFFIPackedReader opens a manifest using the task's source read keyset.
-func NewImportFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns []string, bufferSize int64, storageConfig *indexpb.StorageConfig, source *indexcgopb.StoragePluginContext, ext ExternalReaderContext) (*FFIPackedReader, error) {
-	return newFFIPackedManifestReader(manifestPath, schema, neededColumns, bufferSize, storageConfig, source, ext, true)
-}
-
 // NewFFIPackedReaderWithExtfs opens a StorageV3 manifest after injecting
 // external filesystem properties for source manifests referenced by
 // milvus-table external collections.
@@ -86,17 +81,13 @@ func NewFFIPackedReaderWithExtfs(
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	extfs ExternalSpecContext,
 ) (*FFIPackedReader, error) {
-	return newFFIPackedManifestReader(manifestPath, schema, neededColumns, bufferSize, storageConfig, storagePluginContext, extfs, false)
-}
-
-func newFFIPackedManifestReader(manifestPath string, schema *arrow.Schema, neededColumns []string, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, extfs ExternalSpecContext, forImport bool) (*FFIPackedReader, error) {
 	cLoonManifest, err := GetManifestHandleWithExtfs(manifestPath, storageConfig, extfs)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to get manifest")
 	}
 	defer C.loon_manifest_destroy(cLoonManifest)
 
-	return openFFIPackedReader(schema, neededColumns, bufferSize, storageConfig, storagePluginContext, extfs, forImport,
+	return openFFIPackedReader(schema, neededColumns, bufferSize, storageConfig, storagePluginContext, extfs,
 		func(cSchema *C.struct_ArrowSchema,
 			cNeededColumnArray **C.char,
 			cNumColumns C.int64_t,
@@ -147,7 +138,7 @@ func NewFFIPackedReaderWithFragments(
 	}
 	defer C.loon_column_groups_destroy(cColumnGroups)
 
-	return openFFIPackedReader(schema, neededColumns, bufferSize, storageConfig, storagePluginContext, extfs, false,
+	return openFFIPackedReader(schema, neededColumns, bufferSize, storageConfig, storagePluginContext, extfs,
 		func(cSchema *C.struct_ArrowSchema,
 			cNeededColumnArray **C.char,
 			cNumColumns C.int64_t,
@@ -192,7 +183,6 @@ func openFFIPackedReader(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	extfs ExternalSpecContext,
-	forImport bool,
 	open ffiReaderOpenFunc,
 ) (*FFIPackedReader, error) {
 	var cas cdata.CArrowSchema
@@ -217,30 +207,19 @@ func openFFIPackedReader(
 	cExternalSource, cExternalSpec, cleanupExternalContext := newCExternalContext(extfs.Source, extfs.Spec)
 	defer cleanupExternalContext()
 
-	ordinaryContext := pluginContextPtr
-	if forImport {
-		ordinaryContext = nil
-	}
 	status := open(
 		cSchema,
 		cNeededColumnArray,
 		cNumColumns,
 		&cPackedReader,
 		cStorageConfig,
-		ordinaryContext,
+		pluginContextPtr,
 		C.int64_t(extfs.CollectionID),
 		cExternalSource,
 		cExternalSpec,
 	)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
-	}
-	if forImport {
-		status = C.RegisterPackedImportReadKeyset(pluginContextPtr, cPackedReader)
-		if err := ConsumeCStatusIntoError(&status); err != nil {
-			C.CloseFFIReader(cPackedReader)
-			return nil, err
-		}
 	}
 
 	// Get the ArrowArrayStream

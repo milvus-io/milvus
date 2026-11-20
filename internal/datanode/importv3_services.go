@@ -51,11 +51,11 @@ func (node *DataNode) submitReshardTask(ctx context.Context, req *datapb.Reshard
 	if err != nil {
 		return merr.Status(storage.ToMilvusIoError(req.GetStorageConfig().GetBucketName(), err)), nil
 	}
-	pluginContext, err := hookutil.GetCollectionPluginContext(req.GetPlan().GetCollectionSchema().GetProperties(), req.GetPlan().GetCollectionId())
+	cipher, err := prepareImportCipher(req.GetPlan().GetOptions(), req.GetPlan().GetCollectionSchema().GetProperties(), req.GetPluginContext(), req.GetPlan().GetCollectionId())
 	if err != nil {
 		return merr.Status(err), nil
 	}
-	return node.submitImportV3WorkerTask(ctx, importv3.NewReshardTask(req, cm, pluginContext, node.importV3Metrics))
+	return node.submitImportV3WorkerTask(ctx, importv3.NewReshardTask(req, cm, cipher.Source, cipher.Target, node.importV3Metrics))
 }
 
 // submitImportTaskV3 validates the request and queues one ImportTaskV3 run.
@@ -66,7 +66,7 @@ func (node *DataNode) submitImportTaskV3(ctx context.Context, req *datapb.Import
 	if req == nil || req.GetRunId() <= 0 || req.GetStorageConfig() == nil || req.GetSlot() <= 0 || req.GetPlan() == nil {
 		return merr.Status(merr.WrapErrImportSysFailedMsg("invalid or incomplete ImportTaskV3 request")), nil
 	}
-	pluginContext, err := hookutil.GetCollectionPluginContext(req.GetPlan().GetCollectionSchema().GetProperties(), req.GetPlan().GetCollectionId())
+	cipher, err := hookutil.PrepareImportCipherForZone(req.GetPlan().GetSourceEzId(), req.GetPlan().GetCollectionSchema().GetProperties(), req.GetPluginContext(), req.GetPlan().GetCollectionId())
 	if err != nil {
 		return merr.Status(err), nil
 	}
@@ -76,7 +76,7 @@ func (node *DataNode) submitImportTaskV3(ctx context.Context, req *datapb.Import
 	if err != nil {
 		return merr.Status(storage.ToMilvusIoError(req.GetStorageConfig().GetBucketName(), err)), nil
 	}
-	return node.submitImportV3WorkerTask(ctx, importv3.NewImportTask(req, cm, pluginContext))
+	return node.submitImportV3WorkerTask(ctx, importv3.NewImportTask(req, cm, cipher.Target))
 }
 
 func (node *DataNode) queryImportV3WorkerTask(

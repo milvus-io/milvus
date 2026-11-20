@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 
@@ -573,39 +572,14 @@ func (s *CipherSuite) TestBackupEZKFromDBProperties() {
 	s.Contains(err.Error(), "no ezID found")
 }
 
-func (s *CipherSuite) TestImportEZ() {
-	storeCipher(nil)
-	result, err := ImportEZ("")
+func (s *CipherSuite) TestBackupZoneFromArtifact() {
+	for _, invalid := range []string{"invalid-base64", base64.StdEncoding.EncodeToString([]byte("not-json"))} {
+		_, err := GetEzIDByImportEzk(invalid)
+		s.Error(err)
+	}
+	zone, err := GetEzIDByImportEzk(base64.StdEncoding.EncodeToString([]byte(`{"ez_id":123}`)))
 	s.NoError(err)
-	s.Nil(result)
-
-	result, err = ImportEZ("some-base64-string")
-	s.NoError(err)
-	s.Nil(result)
-
-	InitTestCipher()
-	result, err = ImportEZ("invalid-base64")
-	s.Error(err)
-	s.Nil(result)
-	s.Contains(err.Error(), "failed to decode EZK")
-
-	result, err = ImportEZ(base64.StdEncoding.EncodeToString([]byte("not-json")))
-	s.Error(err)
-	s.Nil(result)
-	s.Contains(err.Error(), "failed to unmarshal EZK")
-
-	ezkJSON := `{"ez_id":123}`
-	ezkBase64 := base64.StdEncoding.EncodeToString([]byte(ezkJSON))
-	result, err = ImportEZ(ezkBase64)
-	s.NoError(err)
-	s.NotNil(result)
-	s.Equal(1, len(result))
-	s.Equal(CipherConfigUnsafeEZK, result[0].Key)
-	// Verify encoded format: "123:base64Key"
-	s.Contains(result[0].Value, ":")
-	parts := strings.Split(result[0].Value, ":")
-	s.Equal("123", parts[0])
-	s.Equal(base64.StdEncoding.EncodeToString([]byte("unsafe key")), parts[1])
+	s.EqualValues(123, zone)
 }
 
 func (s *CipherSuite) TestIsEncryptionEnabled() {

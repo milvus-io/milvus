@@ -53,7 +53,7 @@ func TestFixtureBackupImportsReceivedSourceKey(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(17), zone)
 	require.Equal(t, payload.Key, key)
-	require.NoError(t, receiver.RegisterImportReadKeys(zone, key))
+	require.NoError(t, receiver.Init(map[string]string{createEZKey: "17", unsafeEZK: base64.StdEncoding.EncodeToString(key), "cipher.ez.readOnly": "true"}))
 	_, edek, err := sender.GetEncryptor(17, 42)
 	require.NoError(t, err)
 	_, err = receiver.GetDecryptor(17, 42, edek)

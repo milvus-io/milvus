@@ -188,11 +188,7 @@ main() {
         require(source_writer_rejected,
                 "import source context authorized a target writer");
         auto imported = newPlugin();
-        auto* import_cipher =
-            dynamic_cast<milvus::storage::plugin::IImportCipherPlugin*>(
-                imported.get());
-        require(import_cipher != nullptr, "fixture lacks import keysets");
-        import_cipher->RegisterReadKeyset(17, 23, expected_ezk);
+        imported->RegisterReadKeyset(17, 23, expected_ezk);
         require(hexEncode(imported->GetDecryptor(17, 23, edek)->GetKey()) ==
                     expected_dek,
                 "import read keyset did not open the historical EDEK");
@@ -204,7 +200,7 @@ main() {
         }
         require(read_only, "import read keyset enabled ordinary writes");
         auto [pinned_writer, pinned_edek] =
-            import_cipher->GetEncryptorForKeyset(17, 23, expected_ezk);
+            imported->GetEncryptorForKeyset(17, 23, expected_ezk);
         require(pinned_writer->GetKey() ==
                     second->GetDecryptor(17, 23, pinned_edek)->GetKey(),
                 "target keyset failed to open the import writer's EDEK");

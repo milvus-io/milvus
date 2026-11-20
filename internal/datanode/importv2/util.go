@@ -94,7 +94,7 @@ func NewSyncTask(ctx context.Context,
 	}
 
 	syncPack := &syncmgr.SyncPack{}
-	syncPack.WithInsertData([]*storage.InsertData{insertData}).
+	syncPack.WithPluginContext(importTarget).WithInsertData([]*storage.InsertData{insertData}).
 		WithDeleteData(deleteData).
 		WithCollectionID(collectionID).
 		WithPartitionID(partitionID).
@@ -113,7 +113,6 @@ func NewSyncTask(ctx context.Context,
 		WithSchema(metaCache.GetSchema(0)). // TODO specify import schema if needed
 		WithSyncPack(syncPack).
 		WithStorageConfig(storageConfig).
-		WithImportTarget(importTarget).
 		WithWriteRetryOptions(newWriteRetryOptions()...)
 	return task, nil
 }

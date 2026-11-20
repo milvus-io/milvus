@@ -227,8 +227,6 @@ func TestSnapshotReaderFactoryConcurrentResolution(t *testing.T) {
 			plugin := &indexcgopb.StoragePluginContext{EncryptionZoneId: 10}
 			parse := mockey.Mock(hookutil.GetEzIDByImportEzk).Return(int64(10), nil).Build()
 			defer parse.UnPatch()
-			key := mockey.Mock(hookutil.GetCPluginContextByEzID).Return(plugin, nil).Build()
-			defer key.UnPatch()
 			file := &internalpb.ImportFile{SnapshotSource: &internalpb.SnapshotImportSource{
 				Version: 2, ManifestPath: packed.MarshalManifestPath("root/data/1", 7),
 			}}
@@ -285,7 +283,7 @@ func TestSnapshotReaderFactoryConcurrentResolution(t *testing.T) {
 				return true
 			}).Return(shared, nil).Build()
 			defer load.UnPatch()
-			factory := NewReaderFactory(taskCtx, targetCM, target, options)
+			factory := NewReaderFactory(taskCtx, targetCM, target, options, plugin)
 			var workers sync.WaitGroup
 			for i := 0; i < 8; i++ {
 				workers.Add(1)
@@ -316,8 +314,7 @@ func TestSnapshotReaderFactoryConcurrentResolution(t *testing.T) {
 			workers.Wait()
 			require.EqualValues(t, 1, resolutions.Load())
 			require.EqualValues(t, 8, opens.Load())
-			require.EqualValues(t, 1, parse.Times())
-			require.EqualValues(t, 1, key.Times())
+			require.Zero(t, parse.Times())
 			require.True(t, proto.Equal(original, file), "validation/adaptation must not mutate persisted descriptors")
 			require.Equal(t, "target", target.BucketName)
 			require.NotEmpty(t, options[2].Value, "external_spec must remain available for descriptor validation")
@@ -327,74 +324,28 @@ func TestSnapshotReaderFactoryConcurrentResolution(t *testing.T) {
 
 func TestSnapshotReaderFactoryEncryption(t *testing.T) {
 	paramtable.Init()
-	for _, mode := range []string{"plaintext", "encrypted", "disabled_plugin", "parse_error", "key_error", "ordinary_backup"} {
-		t.Run(mode, func(t *testing.T) {
-			ctx := context.Background()
-			options := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}}
-			if mode != "plaintext" {
-				options = append(options, &commonpb.KeyValuePair{Key: "ezk", Value: "source-key"})
-			}
-			file := &internalpb.ImportFile{Paths: []string{packed.MarshalManifestPath("root/segment", 1)}}
-			var parseErr, keyErr error
-			if mode == "parse_error" {
-				parseErr = merr.ErrParameterInvalid
-			}
-			if mode == "key_error" {
-				keyErr = merr.ErrIoPermissionDenied
-			}
-			plugin := &indexcgopb.StoragePluginContext{EncryptionZoneId: 10}
-			if mode == "disabled_plugin" || mode == "plaintext" {
-				plugin = nil
-			}
-			parse := mockey.Mock(hookutil.GetEzIDByImportEzk).Return(int64(10), parseErr).Build()
-			defer parse.UnPatch()
-			key := mockey.Mock(hookutil.GetCPluginContextByEzID).Return(plugin, keyErr).Build()
-			defer key.UnPatch()
-			open := mockey.Mock(binlog.NewStorageV3ManifestReader).Return(nil, io.EOF).Build()
-			defer open.UnPatch()
-			legacy := mockey.Mock(binlog.NewReader).When(func(_ context.Context, _ storage.ChunkManager,
-				_ *schemapb.CollectionSchema, _ *indexpb.StorageConfig, _ int64, _ []string, _, _ uint64, _ int, ezk string,
-				_ *indexcgopb.StoragePluginContext,
-			) bool {
-				require.Equal(t, "source-key", ezk, "ordinary backup retains its reader's key resolution")
-				return true
-			}).Return(nil, io.EOF).Build()
-			defer legacy.UnPatch()
-			if mode == "ordinary_backup" {
-				options = Options{options[0], options[2]}
-			}
-			factory := NewReaderFactory(ctx, nil, nil, options)
-			for i := 0; i < 2; i++ {
-				_, err := factory.NewReader(ctx, nil, file, 1024, 0, nil)
-				switch mode {
-				case "parse_error":
-					require.ErrorIs(t, err, parseErr)
-				case "key_error":
-					require.ErrorIs(t, err, keyErr)
-				default:
-					require.ErrorIs(t, err, io.EOF)
-				}
-			}
-			if mode == "plaintext" || mode == "encrypted" || mode == "disabled_plugin" {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name     string
+		artifact string
+		source   *indexcgopb.StoragePluginContext
+	}{
+		{"plaintext", "", nil},
+		{"encrypted", "backup", &indexcgopb.StoragePluginContext{EncryptionZoneId: 10}},
+		{"missing source", "backup", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			options := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}, {Key: EZK, Value: tc.artifact}}
+			factory := NewReaderFactory(ctx, nil, nil, options, tc.source)
+			for attempt := 0; attempt < 2; attempt++ {
 				resolved, err := factory.storage()
-				require.NoError(t, err)
-				require.Equal(t, mode != "plaintext", resolved.encryption.Encrypted)
-				require.Equal(t, plugin, resolved.encryption.PluginContext)
-			}
-			switch mode {
-			case "plaintext", "ordinary_backup":
-				require.Zero(t, parse.Times())
-				require.Zero(t, key.Times())
-			case "parse_error":
-				require.EqualValues(t, 1, parse.Times())
-				require.Zero(t, key.Times())
-				require.Zero(t, open.Times())
-			default:
-				require.EqualValues(t, 1, parse.Times())
-				require.EqualValues(t, 1, key.Times())
-				if mode == "key_error" {
-					require.Zero(t, open.Times())
+				if tc.artifact != "" && tc.source == nil {
+					require.ErrorIs(t, err, merr.ErrServiceInternal)
+					continue
 				}
+				require.NoError(t, err)
+				require.Equal(t, tc.source != nil, resolved.encryption.Encrypted)
+				require.Same(t, tc.source, resolved.encryption.PluginContext)
 			}
 		})
 	}
@@ -414,9 +365,7 @@ func TestTaskReaderOpensPackedBackupWithDispatchedSource(t *testing.T) {
 		Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}},
 	}
 	var source *indexcgopb.StoragePluginContext
-	ordinary := mockey.Mock(hookutil.GetCPluginContextByEzID).Return(nil, merr.ErrServiceUnavailable).Build()
-	defer ordinary.UnPatch()
-	footer := mockey.Mock(packed.GetImportPackedFileFieldIDs).To(func(paths []string, _ *indexpb.StorageConfig, got *indexcgopb.StoragePluginContext) ([][]int64, error) {
+	footer := mockey.Mock(packed.GetPackedFileFieldIDs).To(func(paths []string, _ *indexpb.StorageConfig, got *indexcgopb.StoragePluginContext) ([][]int64, error) {
 		require.Equal(t, []string{path}, paths)
 		require.Equal(t, source, got)
 		return [][]int64{{0, 1, 100}}, nil
@@ -427,7 +376,7 @@ func TestTaskReaderOpensPackedBackupWithDispatchedSource(t *testing.T) {
 	) (*packed.PackedReader, error) {
 		require.Equal(t, []string{path}, paths)
 		require.Equal(t, source, got)
-		require.NotEmpty(t, opts, "use the read-only native registration at data file open")
+
 		return nil, merr.ErrIoPermissionDenied
 	}).Build()
 	defer open.UnPatch()
@@ -437,7 +386,7 @@ func TestTaskReaderOpensPackedBackupWithDispatchedSource(t *testing.T) {
 			options = append(options, &commonpb.KeyValuePair{Key: EZK, Value: "opaque on worker"})
 			source = &indexcgopb.StoragePluginContext{EncryptionZoneId: 17, EncryptionKey: "c291cmNl"}
 		}
-		factory := NewTaskReaderFactory(ctx, cm, cfg, options, source)
+		factory := NewReaderFactory(ctx, cm, cfg, options, source)
 		r, err := factory.NewReader(ctx, schema, file, 1024, 0, nil)
 		require.NoError(t, err)
 		_, err = r.Read()
@@ -446,12 +395,11 @@ func TestTaskReaderOpensPackedBackupWithDispatchedSource(t *testing.T) {
 	}
 	require.EqualValues(t, 2, footer.Times())
 	require.EqualValues(t, 2, open.Times())
-	require.Zero(t, ordinary.Times())
 }
 
 func TestTaskReaderRejectsMissingDispatchedSource(t *testing.T) {
 	options := Options{{Key: BackupFlag, Value: "true"}, {Key: EZK, Value: "backup artifact"}}
-	factory := NewTaskReaderFactory(context.Background(), nil, nil, options, nil)
+	factory := NewReaderFactory(context.Background(), nil, nil, options, nil)
 	_, err := factory.NewReader(context.Background(), nil, &internalpb.ImportFile{Paths: []string{"backup/segment"}}, 1024, 0, nil)
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
 }
@@ -465,7 +413,7 @@ func TestTaskReaderOpensOrdinaryCSV(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
 	}}
-	f := NewTaskReaderFactory(ctx, cm, nil, nil, nil)
+	f := NewReaderFactory(ctx, cm, nil, nil, nil)
 	f.storage = func() (readerStorage, error) {
 		t.Fatal("ordinary CSV opened backup storage")
 		return readerStorage{}, nil
@@ -481,7 +429,7 @@ func TestTaskReaderOpensOrdinaryCSV(t *testing.T) {
 func TestSnapshotReaderFactoryPathValidationError(t *testing.T) {
 	ctx := context.Background()
 	options := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}}
-	factory := NewReaderFactory(ctx, nil, nil, options)
+	factory := NewReaderFactory(ctx, nil, nil, options, nil)
 	validate := mockey.Mock(SnapshotPathValidator).Return(nil, merr.ErrParameterInvalid).Build()
 	defer validate.UnPatch()
 	file := &internalpb.ImportFile{Paths: []string{packed.MarshalManifestPath("root/segment", 1)}}
@@ -505,7 +453,7 @@ func TestSnapshotReaderFactoryFailureAndRetry(t *testing.T) {
 		return nil, merr.ErrIoPermissionDenied
 	}).Build()
 	defer resolve.UnPatch()
-	newFactory := func(taskCtx context.Context) *ReaderFactory { return NewReaderFactory(taskCtx, nil, nil, options) }
+	newFactory := func(taskCtx context.Context) *ReaderFactory { return NewReaderFactory(taskCtx, nil, nil, options, nil) }
 	factory := newFactory(ctx)
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
@@ -575,7 +523,7 @@ func TestSnapshotReaderFactoryInstanceStorage(t *testing.T) {
 	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
 	options := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}}
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}}
-	factory := NewReaderFactory(ctx, cm, cfg, options)
+	factory := NewReaderFactory(ctx, cm, cfg, options, nil)
 	file := &internalpb.ImportFile{SnapshotSource: &internalpb.SnapshotImportSource{
 		Version: 5, ManifestPath: packed.MarshalManifestPath("root/data/1", 7), SourceChannel: "source", SourcePartitionId: 10,
 	}}
@@ -604,7 +552,7 @@ func TestSnapshotReaderFactoryInstanceStorage(t *testing.T) {
 	_, err = factory.NewReader(ctx, schema, file, 1024, 1024, shared)
 	require.ErrorIs(t, err, io.EOF)
 	// Ordinary imports keep the existing entry point and its validation errors.
-	_, err = NewReaderFactory(ctx, cm, cfg, nil).NewReader(ctx, schema, &internalpb.ImportFile{Paths: []string{"unsupported.txt"}}, 1024, 0, nil)
+	_, err = NewReaderFactory(ctx, cm, cfg, nil, nil).NewReader(ctx, schema, &internalpb.ImportFile{Paths: []string{"unsupported.txt"}}, 1024, 0, nil)
 	require.ErrorIs(t, err, merr.ErrImportFailed)
 }
 
@@ -661,7 +609,7 @@ func TestSnapshotReaderFactoryReaderIsolation(t *testing.T) {
 	deltas := mockey.Mock(packed.GetDeltaLogPathsFromManifest).Return([]string(nil), nil).Build()
 	defer deltas.UnPatch()
 	file := &internalpb.ImportFile{SnapshotSource: &internalpb.SnapshotImportSource{Version: 2, ManifestPath: packed.MarshalManifestPath("root/data/1", 7)}}
-	factory := NewReaderFactory(ctx, nil, nil, options)
+	factory := NewReaderFactory(ctx, nil, nil, options, nil)
 	firstCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	first, err := factory.NewReader(firstCtx, schema, file, 1024, 1024, nil)
@@ -698,7 +646,7 @@ func TestSnapshotSharedL0StorageAndReader(t *testing.T) {
 	resolve := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).Return(&snapshotstorage.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: foreign}, nil).Build()
 	defer resolve.UnPatch()
 	input := &internalpb.SnapshotImportL0Source{SourceChannel: "source", SourcePartitionId: 10}
-	factory := NewReaderFactory(ctx, cm, target, options)
+	factory := NewReaderFactory(ctx, cm, target, options, nil)
 	file := &internalpb.ImportFile{SnapshotSource: &internalpb.SnapshotImportSource{
 		Version: 6, ManifestPath: packed.MarshalManifestPath("root/data/1", 7), SourceChannel: "source", SourcePartitionId: 10,
 	}}
@@ -758,9 +706,9 @@ func TestSnapshotSharedL0StorageAndReader(t *testing.T) {
 	_, err = factory.PrepareSnapshotDeletes(ctx, schema, []*internalpb.ImportFile{file}, input, 1024, 1024)
 	require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
 	resolve.Return(nil, merr.ErrIoPermissionDenied)
-	_, err = NewReaderFactory(ctx, cm, target, options).PrepareSnapshotDeletes(ctx, schema, []*internalpb.ImportFile{file}, input, 1024, 1024)
+	_, err = NewReaderFactory(ctx, cm, target, options, nil).PrepareSnapshotDeletes(ctx, schema, []*internalpb.ImportFile{file}, input, 1024, 1024)
 	require.ErrorIs(t, err, merr.ErrIoPermissionDenied)
-	_, err = NewReaderFactory(ctx, cm, target, append(options, &commonpb.KeyValuePair{Key: "start_ts", Value: "bad"})).PrepareSnapshotDeletes(ctx, schema, []*internalpb.ImportFile{file}, input, 1024, 1024)
+	_, err = NewReaderFactory(ctx, cm, target, append(options, &commonpb.KeyValuePair{Key: "start_ts", Value: "bad"}), nil).PrepareSnapshotDeletes(ctx, schema, []*internalpb.ImportFile{file}, input, 1024, 1024)
 	require.Error(t, err)
 	require.Equal(t, "target", target.BucketName)
 }
@@ -1122,7 +1070,7 @@ func TestSnapshotImportRejectsInlineL0(t *testing.T) {
 				}
 				// No source client or schema is available. Rejection must precede
 				// source resolution, manifest IO and row/delete decoding.
-				r, err := NewReaderFactory(context.Background(), nil, nil, options).NewReader(context.Background(), nil, recovered, 1024, 1024, nil)
+				r, err := NewReaderFactory(context.Background(), nil, nil, options, nil).NewReader(context.Background(), nil, recovered, 1024, 1024, nil)
 				require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
 				require.Nil(t, r)
 			})
@@ -1642,7 +1590,7 @@ func TestSnapshotV2ReaderFactoryDispatch(t *testing.T) {
 				return true
 			}).Return(nil, merr.ErrIoKeyNotFound).Build()
 			defer v3.UnPatch()
-			_, err := NewReaderFactory(ctx, cm, cfg, opts).NewReader(ctx, nil, &internalpb.ImportFile{SnapshotSource: source}, 1024, 1024, shared)
+			_, err := NewReaderFactory(ctx, cm, cfg, opts, nil).NewReader(ctx, nil, &internalpb.ImportFile{SnapshotSource: source}, 1024, 1024, shared)
 			if mode == "avro_failure" {
 				require.ErrorIs(t, err, readErr)
 				require.Zero(t, v2.Times())
@@ -1705,7 +1653,7 @@ func TestSnapshotV2FactoryPreparesMixedDeletes(t *testing.T) {
 		return want, nil
 	}).Build()
 	defer build.UnPatch()
-	got, err := NewReaderFactory(ctx, cm, cfg, opts).PrepareSnapshotDeletes(ctx, nil, files, l0, 1024, 2048)
+	got, err := NewReaderFactory(ctx, cm, cfg, opts, nil).PrepareSnapshotDeletes(ctx, nil, files, l0, 1024, 2048)
 	require.NoError(t, err)
 	require.Same(t, want, got)
 	require.Equal(t, 1, avro.Times())

@@ -21,16 +21,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"net"
-	"net/http"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/api/googleapi"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
@@ -241,7 +236,11 @@ func requireImportKeysets(t *testing.T, want, got []*commonpb.KeyValuePair) {
 
 func testBackupSourceOnEachDispatch(t *testing.T, newTask importContextFixture, rpc string) {
 	t.Helper()
-	job := preImportWriterContextJob(internalpb.ImportVersion_ImportVersionV2)
+	version := internalpb.ImportVersion_ImportVersionV2
+	if rpc == "CreatePreImportV3" {
+		version = internalpb.ImportVersion_ImportVersionV3
+	}
+	job := preImportWriterContextJob(version)
 	job.Options = backupContextOptions()
 	cipher := &backupContextCipher{writerContextCipher: writerContextCipher{key: []byte("ordinary")}}
 	patch := mockey.Mock(hookutil.GetCipher).Return(cipher).Build()
@@ -269,18 +268,9 @@ func testBackupSourceOnEachDispatch(t *testing.T, newTask importContextFixture, 
 	cluster.AssertNotCalled(t, rpc, int64(42), mock.Anything, mock.Anything)
 }
 
-// The plugin's AWS SDK v1 exposes the HTTP status through StatusCode().
-type kmsResponseError struct {
-	error
-	status int
-	code   string
-}
+type temporarySourceError struct{ error }
 
-func (e kmsResponseError) Code() string { return e.code }
-
-func (e kmsResponseError) StatusCode() int { return e.status }
-
-func (e kmsResponseError) OrigErr() error { return e.error }
+func (temporarySourceError) Temporary() bool { return true }
 
 var backupDispatchStages = []struct {
 	rpc     string
@@ -300,19 +290,9 @@ func TestImportRetriesTransientSourceError(t *testing.T) {
 				retry bool
 			}{
 				{"typed unavailable", merr.ErrServiceUnavailable, true},
-				{"Azure throttling", &azcore.ResponseError{StatusCode: http.StatusTooManyRequests, ErrorCode: "Throttled"}, true},
-				{"Azure unavailable", &azcore.ResponseError{StatusCode: http.StatusServiceUnavailable}, true},
-				{"Azure permission denied", &azcore.ResponseError{StatusCode: http.StatusForbidden, ErrorCode: "ForbiddenByRbac"}, false},
-				{"Google unavailable", &googleapi.Error{Code: http.StatusServiceUnavailable}, true},
-				{"Google permission denied", &googleapi.Error{Code: http.StatusForbidden, Message: "source access revoked"}, false},
-				{"AWS throttling", kmsResponseError{error: errors.New("decrypt limited"), status: http.StatusBadRequest, code: "ThrottlingException"}, true},
-				{"AWS invalid ciphertext", kmsResponseError{error: errors.New("decrypt failed"), status: http.StatusBadRequest, code: "InvalidCiphertextException"}, false},
-				{"AWS gateway timeout", kmsResponseError{error: errors.New("KMS request timed out"), status: http.StatusGatewayTimeout}, true},
-				{"AWS permission denied", kmsResponseError{error: errors.New("source access revoked"), status: http.StatusForbidden}, false},
-				{"AWS transport timeout", kmsResponseError{error: context.DeadlineExceeded, status: 0}, true},
-				{"HTTP denial takes precedence", errors.Join(&azcore.ResponseError{StatusCode: http.StatusForbidden}, context.DeadlineExceeded), false},
-				{"gRPC unavailable", status.Error(codes.Unavailable, "KMS unavailable"), true},
-				{"gRPC permission denied", status.Error(codes.PermissionDenied, "Decrypt permission revoked"), false},
+				{"temporary plugin error", temporarySourceError{errors.New("retry decrypt")}, true},
+				{"deadline", context.DeadlineExceeded, true},
+				{"revoked", errors.New("source permission revoked"), false},
 				{"network timeout", &net.DNSError{Err: "timeout", IsTimeout: true}, true},
 				{"untyped error text", errors.New("denied even though the message mentions HTTP 503"), false},
 			} {
@@ -349,6 +329,43 @@ func TestImportRetriesTransientSourceError(t *testing.T) {
 	}
 }
 
+func TestPreImportV3ResolvesSourceOnEachDispatch(t *testing.T) {
+	testBackupSourceOnEachDispatch(t, newPreImportWriterContextTask, "CreatePreImportV3")
+}
+
+func TestV3RejectsRevokedBackupBeforeDispatch(t *testing.T) {
+	for _, stage := range []string{"reshard", "import"} {
+		t.Run(stage, func(t *testing.T) {
+			job := preImportWriterContextJob(internalpb.ImportVersion_ImportVersionV3)
+			job.Options = backupContextOptions()
+			job.State = internalpb.ImportJobState_Resharding
+			if stage == "import" {
+				job.State = internalpb.ImportJobState_Importing
+			}
+			im := newWriterContextImportMeta(t, job)
+			var task ImportTask
+			if stage == "reshard" {
+				task = newReshardTask(&datapb.ReshardTask{JobId: job.JobID, TaskId: 4, RunId: 1}, im, nil, nil)
+			} else {
+				task = NewImportTaskV3(&datapb.ImportTaskV3{JobId: job.JobID, TaskId: 4, RunId: 1, LogRange: &datapb.IDRange{Begin: 1, End: 5}}, im, nil, nil)
+			}
+			cipher := &backupContextCipher{sourceErr: temporarySourceError{errors.New("temporary decrypt error")}}
+			patch := mockey.Mock(hookutil.GetCipher).Return(cipher).Build()
+			defer patch.UnPatch()
+			cluster := session.NewMockCluster(t)
+			task.CreateTaskOnWorker(1, cluster)
+			require.Equal(t, job.State, im.GetJob(context.Background(), job.JobID).GetState())
+			cipher.sourceErr = errors.New("source identity denied Decrypt")
+			task.CreateTaskOnWorker(2, cluster)
+			got := im.GetJob(context.Background(), job.JobID)
+			require.Equal(t, internalpb.ImportJobState_Failed, got.GetState())
+			require.Contains(t, got.GetReason(), cipher.sourceErr.Error())
+			require.Len(t, cipher.artifacts, 2)
+			require.Empty(t, cipher.targets)
+		})
+	}
+}
+
 func TestImportWorkerCipherRejections(t *testing.T) {
 	backup := []*commonpb.KeyValuePair{{Key: importutilv2.BackupFlag, Value: "true"}}
 	malformed := merr.WrapErrImportSysFailedMsg("import task has an invalid keyset for EZ 17")
@@ -360,7 +377,7 @@ func TestImportWorkerCipherRejections(t *testing.T) {
 				err      error
 				terminal bool
 			}{
-				{"missing registrar", backupContextOptions(), merr.WrapErrImportSysFailedMsg("cipher plugin does not support RegisterImportReadKeys"), true},
+				{"conflicting read keyset", backupContextOptions(), merr.WrapErrImportSysFailedMsg("conflicting read keyset"), true},
 				{"malformed context", backup, malformed, true},
 				{"L0 with malformed context", []*commonpb.KeyValuePair{{Key: importutilv2.L0Import, Value: "true"}}, malformed, true},
 				{"source artifact only", []*commonpb.KeyValuePair{{Key: importutilv2.EZK, Value: backupArtifact}}, malformed, true},

@@ -30,19 +30,13 @@ import (
 
 type importReadCipher struct {
 	testCipher
-	reads [][]byte
-	zone  int64
+	calls []map[string]string
 	err   error
 }
 
-func (c *importReadCipher) RegisterImportReadKeys(ezID int64, keyset []byte) error {
-	c.zone = ezID
-	c.reads = append(c.reads, keyset)
+func (c *importReadCipher) Init(config map[string]string) error {
+	c.calls = append(c.calls, config)
 	return c.err
-}
-
-func (*importReadCipher) Init(map[string]string) error {
-	panic("import read registration must not update ordinary EZs")
 }
 
 func TestPrepareImportCipher(t *testing.T) {
@@ -71,42 +65,43 @@ func TestPrepareImportCipher(t *testing.T) {
 			storeCipher(cipher)
 			ctx, err := PrepareImportCipher(tc.artifact, tc.properties, tc.entries, 23)
 			require.NoError(t, err)
+			var calls []map[string]string
 			if tc.artifact != "" {
-				require.Equal(t, [][]byte{sourceKey}, cipher.reads)
-				require.Equal(t, int64(17), cipher.zone)
+				calls = append(calls, map[string]string{CipherConfigCreateEZ: "17", CipherConfigUnsafeEZK: base64.StdEncoding.EncodeToString(sourceKey), "cipher.ez.readOnly": "true"})
 				require.Equal(t, base64.StdEncoding.EncodeToString(sourceKey), ctx.Source.GetEncryptionKey())
 				require.Zero(t, ctx.Source.GetCollectionId())
 			} else {
-				require.Empty(t, cipher.reads)
 				require.Nil(t, ctx.Source)
 			}
 			if tc.properties != nil {
+				calls = append(calls, map[string]string{CipherConfigCreateEZ: "17", CipherConfigUnsafeEZK: base64.StdEncoding.EncodeToString(targetKey)})
 				require.Equal(t, base64.StdEncoding.EncodeToString(targetKey), ctx.Target.GetEncryptionKey())
 				require.Equal(t, int64(23), ctx.Target.GetCollectionId())
 			} else {
 				require.Nil(t, ctx.Target)
 			}
+			require.Equal(t, calls, cipher.calls)
 		})
 	}
 	t.Run("validate all wire entries before registration", func(t *testing.T) {
 		cipher := &importReadCipher{}
 		storeCipher(cipher)
 		for _, entries := range [][]*commonpb.KeyValuePair{
-			{source}, {source, target, target}, {source, {Key: CipherConfigUnsafeEZK, Value: encodeEZContext(18, targetKey)}},
+			{source},
+			{source, target, target},
+			{source, {Key: CipherConfigUnsafeEZK, Value: encodeEZContext(18, targetKey)}},
 			{{Key: CipherConfigUnsafeEZK, Value: encodeEZContext(12, sourceKey)}, target},
-			{source, {Key: CipherConfigUnsafeEZK, Value: "17:not-base64"}}, {source, {Key: CipherConfigUnsafeEZK, Value: "17:"}},
+			{source, {Key: CipherConfigUnsafeEZK, Value: "17:not-base64"}},
+			{source, {Key: CipherConfigUnsafeEZK, Value: "17:"}},
 		} {
 			_, err := PrepareImportCipher(artifact, properties, entries, 23)
 			require.ErrorIs(t, err, merr.ErrImportSysFailed)
 		}
-		require.Empty(t, cipher.reads)
+		require.Empty(t, cipher.calls)
 	})
 	t.Run("source requires read-only registration", func(t *testing.T) {
-		storeCipher(testCipher{})
-		_, err := PrepareImportCipher(artifact, nil, []*commonpb.KeyValuePair{source}, 23)
-		require.ErrorIs(t, err, merr.ErrImportSysFailed)
 		storeCipher(nil)
-		_, err = PrepareImportCipher(artifact, nil, []*commonpb.KeyValuePair{source}, 23)
+		_, err := PrepareImportCipher(artifact, nil, []*commonpb.KeyValuePair{source}, 23)
 		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 		storeCipher(&importReadCipher{err: merr.ErrServiceInternal})
 		_, err = PrepareImportCipher(artifact, nil, []*commonpb.KeyValuePair{source}, 23)

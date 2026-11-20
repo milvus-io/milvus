@@ -406,12 +406,8 @@ func (node *DataNode) FlushChannels(ctx context.Context, req *datapb.FlushChanne
 	return merr.Success(), nil
 }
 
-func prepareV2ImportCipher(options, properties, entries []*commonpb.KeyValuePair, collectionID int64) (hookutil.ImportCipherContext, error) {
+func prepareImportCipher(options, properties, entries []*commonpb.KeyValuePair, collectionID int64) (hookutil.ImportCipherContext, error) {
 	artifact, _ := importutilv2.GetEZK(options)
-	if artifact == "" && !importutilv2.IsBackup(options) && !importutilv2.IsL0Import(options) {
-		// Ordinary file imports only receive the destination's current key.
-		return hookutil.ImportCipherContext{}, hookutil.RegisterEZsFromPluginContext(entries)
-	}
 	return hookutil.PrepareImportCipher(artifact, properties, entries, collectionID)
 }
 
@@ -422,8 +418,12 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 		return merr.Status(err), nil
 	}
 
-	cipher, err := prepareV2ImportCipher(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID())
+	cipher, err := prepareImportCipher(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID())
 	if err != nil {
+		return merr.Status(err), nil
+	}
+
+	if _, err := prepareImportCipher(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID()); err != nil {
 		return merr.Status(err), nil
 	}
 
@@ -477,7 +477,7 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 		return merr.Status(err), nil
 	}
 
-	cipher, err := prepareV2ImportCipher(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID())
+	cipher, err := prepareImportCipher(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID())
 	if err != nil {
 		return merr.Status(err), nil
 	}
@@ -873,9 +873,6 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return invalidTaskPayload("PreImportV3", err), nil
 		}
-		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
-			return merr.Status(err), nil
-		}
 		return node.PreImportV3(ctx, req)
 	case taskcommon.Import:
 		req := &datapb.ImportRequest{}
@@ -888,17 +885,11 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return invalidTaskPayload("Reshard", err), nil
 		}
-		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
-			return merr.Status(err), nil
-		}
 		return node.submitReshardTask(ctx, req)
 	case taskcommon.ImportV3:
 		req := &datapb.ImportTaskV3Request{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return invalidTaskPayload("ImportV3", err), nil
-		}
-		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
-			return merr.Status(err), nil
 		}
 		return node.submitImportTaskV3(ctx, req)
 	case taskcommon.Compaction:

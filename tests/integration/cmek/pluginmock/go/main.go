@@ -112,6 +112,14 @@ func (c *fixtureCipher) Init(params map[string]string) error {
 		}
 		key = string(deriveEZKey(ezID))
 	}
+	if params["cipher.ez.readOnly"] == "true" {
+		if c.readKeys == nil {
+			c.readKeys = make(map[int64][]byte)
+		}
+		c.readKeys[ezID] = []byte(key)
+		c.record(ezID, 0, "register", "available", nil)
+		return nil
+	}
 	c.register(ezID, []byte(key))
 	return nil
 }
@@ -129,20 +137,6 @@ func (c *fixtureCipher) ResolveImportEZ(backup string) (int64, []byte, error) {
 		return 0, nil, fmt.Errorf("fixture cipher: invalid source EZ key")
 	}
 	return source.EZID, source.Key, nil
-}
-
-func (c *fixtureCipher) RegisterImportReadKeys(ezID int64, key []byte) error {
-	if ezID <= 0 || !hmac.Equal(key, deriveEZKey(ezID)) {
-		return fmt.Errorf("fixture cipher: invalid source EZ key")
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.readKeys == nil {
-		c.readKeys = make(map[int64][]byte)
-	}
-	c.readKeys[ezID] = append([]byte(nil), key...)
-	c.record(ezID, 0, "register", "available", nil)
-	return nil
 }
 
 // register is called only after the received key or root-key identifier has

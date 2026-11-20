@@ -168,7 +168,7 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 		func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 			return fileStat.GetImportFile()
 		})
-	readers := importutilv2.NewTaskReaderFactory(t.ctx, sourceCM, t.req.GetStorageConfig(), t.options, t.importCipher.Source)
+	readers := importutilv2.NewReaderFactory(t.ctx, sourceCM, t.req.GetStorageConfig(), t.options, t.importCipher.Source)
 
 	fn := func(ctx context.Context, i int, file *internalpb.ImportFile, rowBuffer int, deleteBudget int64, shared *binlog.SnapshotL0Deletes) error {
 		reader, err := readers.NewReader(ctx, t.GetSchema(), file, rowBuffer, deleteBudget, shared)

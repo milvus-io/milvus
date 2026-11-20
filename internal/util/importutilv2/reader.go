@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/csv"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/json"
@@ -57,11 +56,10 @@ type Reader interface {
 // are shared; each NewReader call owns its stream, decoder and request context.
 // Options and storage configuration must remain immutable during execution.
 type ReaderFactory struct {
-	cm         storage.ChunkManager
-	cfg        *indexpb.StorageConfig
-	options    Options
-	dispatched bool
-	storage    func() (readerStorage, error)
+	cm      storage.ChunkManager
+	cfg     *indexpb.StorageConfig
+	options Options
+	storage func() (readerStorage, error)
 }
 
 type readerStorage struct {
@@ -70,21 +68,10 @@ type readerStorage struct {
 	encryption binlog.SourceEncryption
 }
 
-func NewReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb.StorageConfig, options Options) *ReaderFactory {
-	return newReaderFactory(ctx, cm, cfg, options, binlog.SourceEncryption{})
-}
-
-// NewTaskReaderFactory uses the validated source from this dispatch for every
-// file in both phases, including an explicit nil for a plaintext backup.
-func NewTaskReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb.StorageConfig, options Options, source *indexcgopb.StoragePluginContext) *ReaderFactory {
-	return newReaderFactory(ctx, cm, cfg, options, binlog.SourceEncryption{
-		Encrypted: source != nil, PluginContext: source, Dispatched: true,
-	})
-}
-
-func newReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb.StorageConfig, options Options, encryption binlog.SourceEncryption) *ReaderFactory {
+func NewReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb.StorageConfig, options Options, source *indexcgopb.StoragePluginContext) *ReaderFactory {
+	encryption := binlog.SourceEncryption{Encrypted: source != nil, PluginContext: source}
 	return &ReaderFactory{
-		cm: cm, cfg: cfg, options: options, dispatched: encryption.Dispatched,
+		cm: cm, cfg: cfg, options: options,
 		storage: sync.OnceValues(func() (readerStorage, error) {
 			// Use the task context, never the first file's context. Cache a
 			// resolution error for this attempt too; a retry creates a new factory.
@@ -92,7 +79,7 @@ func newReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb
 				return readerStorage{}, err
 			}
 			artifact, _ := GetEZK(options)
-			if encryption.Dispatched && artifact != "" && encryption.PluginContext == nil {
+			if artifact != "" && encryption.PluginContext == nil {
 				return readerStorage{}, merr.WrapErrServiceInternalMsg("encrypted backup is missing its dispatched source keyset")
 			}
 			if !IsSnapshotSource(options) {
@@ -103,22 +90,7 @@ func newReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb
 			if err != nil {
 				return readerStorage{}, err
 			}
-			resolved := readerStorage{cm: sourceCM, cfg: sourceCfg, encryption: encryption}
-			if encryption.Dispatched {
-				return resolved, nil
-			}
-			if artifact != "" {
-				resolved.encryption.Encrypted = true
-				ezID, err := hookutil.GetEzIDByImportEzk(artifact)
-				if err != nil {
-					return readerStorage{}, err
-				}
-				resolved.encryption.PluginContext, err = hookutil.GetCPluginContextByEzID(ezID)
-				if err != nil {
-					return readerStorage{}, err
-				}
-			}
-			return resolved, nil
+			return readerStorage{cm: sourceCM, cfg: sourceCfg, encryption: encryption}, nil
 		}),
 	}
 }
@@ -141,7 +113,7 @@ func (f *ReaderFactory) NewReader(ctx context.Context, schema *schemapb.Collecti
 		}
 	}
 	resolved := readerStorage{cm: f.cm, cfg: f.cfg}
-	if (f.dispatched && IsBackup(f.options)) || IsSnapshotSource(f.options) {
+	if IsBackup(f.options) || IsSnapshotSource(f.options) {
 		// Validate the descriptor before accessing storage or the key retriever.
 		// Same-bucket and no-L0 snapshots use this path too. Ordinary import
 		// retains its existing storage and encryption initialization.
@@ -206,7 +178,7 @@ func NewReader(ctx context.Context,
 	storageConfig *indexpb.StorageConfig,
 	snapshotDeleteBudget int64,
 ) (Reader, error) {
-	return NewReaderFactory(ctx, cm, storageConfig, options).NewReader(ctx, schema, importFile, bufferSize, snapshotDeleteBudget, nil)
+	return NewReaderFactory(ctx, cm, storageConfig, options, nil).NewReader(ctx, schema, importFile, bufferSize, snapshotDeleteBudget, nil)
 }
 
 func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema,
@@ -275,11 +247,7 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		if err != nil {
 			return nil, err
 		}
-		if encryption.Dispatched {
-			return binlog.NewBackupReader(ctx, cm, schema, storageConfig, storageVersion, paths, tsStart, tsEnd, bufferSize, encryption)
-		}
-		importEz, _ := GetEZK(options)
-		return binlog.NewReader(ctx, cm, schema, storageConfig, storageVersion, paths, tsStart, tsEnd, bufferSize, importEz, nil)
+		return binlog.NewReader(ctx, cm, schema, storageConfig, storageVersion, paths, tsStart, tsEnd, bufferSize, encryption)
 	}
 
 	fileType, err := GetFileType(importFile)

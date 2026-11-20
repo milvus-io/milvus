@@ -233,7 +233,7 @@ func BuildSnapshotDeleteMasksWithV2(ctx context.Context, cm storage.ChunkManager
 		if err := budget.reserve(256); err != nil {
 			return nil, err
 		}
-		r := newReader(ctx, cm, schema, cfg, storage.StorageV3, 0, "")
+		r := newReader(ctx, cm, schema, cfg, storage.StorageV3, 0)
 		r.sourceEncryption, r.validatePath = encryption, validate
 		var options []storage.RwOption
 		var input *snapshotV2Input

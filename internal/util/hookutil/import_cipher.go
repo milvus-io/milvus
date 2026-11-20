@@ -18,53 +18,61 @@ package hookutil
 
 import (
 	"encoding/base64"
+	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// ImportCipherContext holds immutable snapshots for one V2 task attempt.
+// ImportCipherContext holds immutable snapshots for one task attempt.
 // The source may share its zone ID with the target after key rotation.
 type ImportCipherContext struct {
 	Source *indexcgopb.StoragePluginContext
 	Target *indexcgopb.StoragePluginContext
 }
 
-type importReadKeyRegistrar interface {
-	RegisterImportReadKeys(ezID int64, keyset []byte) error
-}
-
-// RegisterImportReadKeys makes a backup's keys available to Go decryptors.
-func RegisterImportReadKeys(source *indexcgopb.StoragePluginContext) error {
-	if source == nil {
+func registerTaskKey(context *indexcgopb.StoragePluginContext, readOnly bool) error {
+	if context == nil {
 		return nil
 	}
 	cipher := GetCipher()
 	if cipher == nil {
-		return merr.Wrap(merr.ErrServiceUnavailable, "cipher plugin is unavailable for encrypted backup")
+		return merr.Wrap(merr.ErrServiceUnavailable, "cipher plugin is unavailable for encrypted import")
 	}
-	registrar, ok := cipher.(importReadKeyRegistrar)
-	if !ok {
-		return merr.WrapErrImportSysFailed("cipher plugin does not support RegisterImportReadKeys")
+	config := map[string]string{
+		CipherConfigCreateEZ:  strconv.FormatInt(context.GetEncryptionZoneId(), 10),
+		CipherConfigUnsafeEZK: context.GetEncryptionKey(),
 	}
-	key, err := base64.StdEncoding.DecodeString(source.GetEncryptionKey())
-	if err != nil || len(key) == 0 {
-		return merr.WrapErrImportSysFailedMsg("invalid source keyset for backup EZ %d", source.GetEncryptionZoneId())
+	if readOnly {
+		config[CipherConfigReadOnly] = "true"
 	}
-	err = registrar.RegisterImportReadKeys(source.GetEncryptionZoneId(), key)
+	err := cipher.Init(config)
 	if err != nil && !merr.IsRetryableErr(err) && !merr.IsCanceledOrTimeout(err) {
-		// Local registration can reject conflicting keysets. Give the worker
-		// reply the import failure code while preserving the plugin's reason.
 		err = merr.Combine(err, merr.ErrImportSysFailed)
 	}
-	return merr.Wrap(err, "register backup read keys")
+	return merr.Wrap(err, "register import encryption context")
 }
 
 // PrepareImportCipher validates the entire ordered wire context before making
 // any keys visible. Source files carry their own collection ID in the EDEK
 // metadata. The destination collection ID belongs only to the writer.
 func PrepareImportCipher(artifact string, properties, entries []*commonpb.KeyValuePair, collectionID int64) (ImportCipherContext, error) {
+	var sourceEZ int64
+	if artifact != "" {
+		var err error
+		sourceEZ, err = GetEzIDByImportEzk(artifact)
+		if err != nil {
+			return ImportCipherContext{}, merr.Combine(err, merr.ErrImportSysFailed)
+		}
+		if sourceEZ <= 0 {
+			return ImportCipherContext{}, merr.WrapErrImportSysFailedMsg("invalid backup encryption zone")
+		}
+	}
+	return PrepareImportCipherForZone(sourceEZ, properties, entries, collectionID)
+}
+
+func PrepareImportCipherForZone(sourceEZ int64, properties, entries []*commonpb.KeyValuePair, collectionID int64) (ImportCipherContext, error) {
 	var cipherEntries []*commonpb.KeyValuePair
 	for _, entry := range entries {
 		if entry.GetKey() == CipherConfigUnsafeEZK {
@@ -89,12 +97,9 @@ func PrepareImportCipher(artifact string, properties, entries []*commonpb.KeyVal
 	}
 
 	var result ImportCipherContext
-	if artifact != "" {
-		ezID, err := GetEzIDByImportEzk(artifact)
-		if err != nil {
-			return ImportCipherContext{}, merr.Combine(err, merr.ErrImportSysFailed)
-		}
-		result.Source, err = take(ezID, 0)
+	if sourceEZ != 0 {
+		var err error
+		result.Source, err = take(sourceEZ, 0)
 		if err != nil {
 			return ImportCipherContext{}, err
 		}
@@ -109,7 +114,10 @@ func PrepareImportCipher(artifact string, properties, entries []*commonpb.KeyVal
 	if len(cipherEntries) != 0 {
 		return ImportCipherContext{}, merr.WrapErrImportSysFailedMsg("import task has unexpected cipher.ezk entries")
 	}
-	if err := RegisterImportReadKeys(result.Source); err != nil {
+	if err := registerTaskKey(result.Source, true); err != nil {
+		return ImportCipherContext{}, err
+	}
+	if err := registerTaskKey(result.Target, false); err != nil {
 		return ImportCipherContext{}, err
 	}
 	return result, nil

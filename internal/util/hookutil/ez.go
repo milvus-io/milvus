@@ -30,9 +30,9 @@ import (
 
 const (
 	// Used in Plugins
+	CipherConfigReadOnly       = "cipher.ez.readOnly"
 	CipherConfigCreateEZ       = "cipher.ez.create"
 	CipherConfigRemoveEZ       = "cipher.ez.remove"
-	CipherConfigImportEZ       = "cipher.ez.import"
 	CipherConfigMilvusRoleName = "cipher.milvusRoleName"
 	CipherConfigKeyKmsKeyArn   = "cipher.kmsKeyArn"
 	CipherConfigUnsafeEZK      = "cipher.ezk"
@@ -151,8 +151,8 @@ func GetPluginContext(ezID int64, collectionID int64) ([]*commonpb.KeyValuePair,
 	return ezPluginContext(ezID, key), nil
 }
 
-// GetReadStoragePluginContext resolves the backup's own keyset for this dispatch.
-func GetReadStoragePluginContext(artifact string) ([]*commonpb.KeyValuePair, error) {
+// ResolveImportEZ resolves the backup's own keyset for this dispatch.
+func ResolveImportEZ(artifact string) ([]*commonpb.KeyValuePair, error) {
 	if artifact == "" {
 		return nil, nil
 	}
@@ -160,7 +160,7 @@ func GetReadStoragePluginContext(artifact string) ([]*commonpb.KeyValuePair, err
 	if cipher == nil {
 		return nil, merr.Wrap(merr.ErrServiceUnavailable, "cipher plugin is unavailable for encrypted backup")
 	}
-	resolver, ok := cipher.(ImportEZResolver)
+	resolver, ok := cipher.(ImportResolverInterface)
 	if !ok {
 		return nil, merr.Wrap(merr.ErrServiceUnimplemented, "cipher plugin does not support ResolveImportEZ")
 	}
@@ -179,27 +179,6 @@ func ezPluginContext(ezID int64, key []byte) []*commonpb.KeyValuePair {
 		Key:   CipherConfigUnsafeEZK,
 		Value: encodeEZContext(ezID, key),
 	}}
-}
-
-// ImportEZ is the legacy key registration used by the Import V3 pipeline.
-func ImportEZ(importEzk string) ([]*commonpb.KeyValuePair, error) {
-	cipher := GetCipher()
-	if cipher == nil || importEzk == "" {
-		return nil, nil
-	}
-
-	config := map[string]string{
-		CipherConfigImportEZ: importEzk,
-	}
-	if err := cipher.Init(config); err != nil {
-		return nil, merr.Wrap(err, "failed to import EZK")
-	}
-
-	ezID, err := GetEzIDByImportEzk(importEzk)
-	if err != nil {
-		return nil, err
-	}
-	return GetPluginContext(ezID, 0)
 }
 
 func GetEzIDByImportEzk(importEzk string) (int64, error) {

@@ -18,25 +18,17 @@ package bulkimport
 
 import (
 	"context"
-	stderrors "errors"
 	"fmt"
 	"math"
-	"net"
-	"net/http"
 	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"google.golang.org/api/googleapi"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -46,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -412,68 +403,10 @@ func retryableImportSourceError(err error) bool {
 	if !errors.Is(err, errImportSourceKey) {
 		return false
 	}
-	// ResolveImportEZ can join the original SDK error to its own decryption
-	// error. An authoritative KMS response takes precedence over transport hints.
-	if code, awsCode := sourceKMSHTTPStatus(err); code != 0 {
-		switch code {
-		case http.StatusBadRequest:
-			// AWS KMS reports throttling as HTTP 400 alongside permanent request errors.
-			return awsCode == "ThrottlingException"
-		case http.StatusRequestTimeout, http.StatusTooManyRequests, http.StatusInternalServerError,
-			http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-			return true
-		default:
-			return false
-		}
-	}
-	if rpc, ok := status.FromError(err); ok {
-		switch rpc.Code() {
-		case codes.Canceled, codes.DeadlineExceeded, codes.Unavailable, codes.ResourceExhausted:
-			return true
-		default:
-			return false
-		}
-	}
-	// This branch's cockroachdb/errors v1.9.1 cannot traverse errors.Join.
-	// Locate the classified cause before asking merr for its retry flag.
-	var milvusErr interface {
-		error
-		merr.ErrorClassifier
-	}
-	if stderrors.As(err, &milvusErr) {
-		return merr.IsRetryableErr(milvusErr)
-	}
-	// The AWS v1 SDK puts a network failure in OrigErr without implementing Unwrap.
-	var awsCause interface{ OrigErr() error }
-	if stderrors.As(err, &awsCause) && awsCause.OrigErr() != nil {
-		err = awsCause.OrigErr()
-	}
-	for _, cause := range []error{context.Canceled, context.DeadlineExceeded, syscall.ECONNRESET, syscall.ECONNREFUSED, syscall.EPIPE} {
-		if stderrors.Is(err, cause) {
-			return true
-		}
-	}
-	var network net.Error
-	return stderrors.As(err, &network) && network.Timeout()
-}
-
-func sourceKMSHTTPStatus(err error) (int, string) {
-	var azure *azcore.ResponseError
-	var google *googleapi.Error
-	var aws interface {
-		StatusCode() int
-		Code() string
-	}
-	switch {
-	case stderrors.As(err, &azure):
-		return azure.StatusCode, ""
-	case stderrors.As(err, &google):
-		return google.Code, ""
-	case stderrors.As(err, &aws):
-		return aws.StatusCode(), aws.Code()
-	default:
-		return 0, ""
-	}
+	var timeout interface{ Timeout() bool }
+	var temporary interface{ Temporary() bool }
+	return merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) ||
+		(errors.As(err, &timeout) && timeout.Timeout()) || (errors.As(err, &temporary) && temporary.Temporary())
 }
 
 // New workers report a deterministic backup cipher rejection as an import
@@ -494,30 +427,14 @@ func failImportDispatch(task ImportTask, im ImportMeta, cause error) {
 	}
 }
 
-// The separate Import V3 scheduler still uses its legacy backup key registration.
-func getImportV3ReadPluginContext(options importutilv2.Options) []*commonpb.KeyValuePair {
-	artifact, _ := importutilv2.GetEZK(options)
-	readContext, err := hookutil.ImportEZ(artifact)
-	if err != nil {
-		mlog.Error(context.TODO(), "failed to import ezk", mlog.Err(err))
-		return []*commonpb.KeyValuePair{}
-	}
-	return readContext
-}
-
 func assemblePreImportRequest(task ImportTask, job ImportJob, importFiles []*internalpb.ImportFile) (*datapb.PreImportRequest, error) {
 	l0Source, err := importutilv2.SnapshotTaskL0Source(importFiles, job.GetSnapshotL0Sources())
 	if err != nil {
 		return nil, err
 	}
-	var readContext []*commonpb.KeyValuePair
-	if task.GetType() == PreImportTaskV3Type {
-		readContext = getImportV3ReadPluginContext(job.GetOptions())
-	} else {
-		readContext, err = resolveImportReadContext(job.GetOptions())
-		if err != nil {
-			return nil, err
-		}
+	readContext, err := resolveImportReadContext(job.GetOptions())
+	if err != nil {
+		return nil, err
 	}
 	req := &datapb.PreImportRequest{
 		JobID:            task.GetJobID(),

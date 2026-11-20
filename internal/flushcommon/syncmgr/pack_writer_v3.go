@@ -283,7 +283,7 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 	defer rec.Release()
 
 	tsFrom, tsTo := bw.getTsRange(rec)
-	pluginContextPtr, err := bw.getPluginContext(ctx, pack.collectionID)
+	pluginContextPtr, err := bw.getPluginContext(ctx, pack)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -297,7 +297,7 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 	textColumnConfigs := buildTextColumnConfigs(bw.schema, partitionBasePath)
 	var w packedBatchWriter
 	if len(textColumnConfigs) > 0 {
-		if bw.importTarget != nil {
+		if pack.pluginContext != nil {
 			return nil, nil, merr.Wrap(merr.ErrServiceUnimplemented, "encrypted import target does not support TEXT LOB writes")
 		}
 		mlog.Info(ctx, "using TEXT-aware writer for import",
@@ -308,11 +308,7 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 		w, err = storage.NewPackedTextBatchWriter("", basePath, bw.schema,
 			bw.bufferSize, bw.multiPartUploadSize, bw.columnGroups, bw.storageConfig, textColumnConfigs, nil, writerFormat, schemaBasedFormats)
 	} else {
-		open := storage.NewPackedRecordBatchWriter
-		if bw.importTarget != nil {
-			open = storage.NewImportPackedRecordBatchWriter
-		}
-		w, err = open(basePath, bw.schema,
+		w, err = storage.NewPackedRecordBatchWriter(basePath, bw.schema,
 			bw.bufferSize, bw.multiPartUploadSize, bw.columnGroups, bw.storageConfig, pluginContextPtr, writerFormat, schemaBasedFormats)
 	}
 	if err != nil {
