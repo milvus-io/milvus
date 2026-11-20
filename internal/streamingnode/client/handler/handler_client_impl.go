@@ -244,6 +244,9 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 		return nil, ErrClientClosed
 	}
 	defer hc.lifetime.Done()
+	if _, latest := opts.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_Latest); latest {
+		return nil, status.NewInvalidArgument("latest delivery policy is deprecated; use All, StartFrom or StartAfter")
+	}
 
 	logger := mlog.With(mlog.FieldPChannel(opts.PChannel), mlog.FieldVChannel(opts.VChannel), mlog.String("handler", "consumer"))
 	// Use a local variable to track DeliverPolicy, so modifications in the closure don't affect the original opts

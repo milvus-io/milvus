@@ -41,7 +41,6 @@ cd "$source_root"
 failpoint_version=$(go list -m -f '{{.Version}}' github.com/pingcap/failpoint)
 GOBIN="$output/bin" go install "github.com/pingcap/failpoint/failpoint-ctl@$failpoint_version"
 "$output/bin/failpoint-ctl" enable \
-    internal/streamingnode/server/wal/adaptor \
     internal/streamingnode/server/wal/interceptors/idempotency
 make build-go INSTALL_PATH="$output/bin" GIT_COMMIT="$(git -C "$repo_root" rev-parse --short HEAD)"
 test -s "$output/bin/milvus"

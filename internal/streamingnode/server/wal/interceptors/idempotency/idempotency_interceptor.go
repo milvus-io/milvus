@@ -174,7 +174,7 @@ func (impl *idempotencyInterceptor) appendIdempotentMessage(ctx context.Context,
 			return nil, err
 		}
 		failpoint.Inject("beforeIdempotencyAppend", func(value failpoint.Value) {
-			walpoint.Hit(ctx, value, walpoint.BeforeIdempotencyAppend, msg, nil, insertResult)
+			walpoint.Hit(ctx, value, msg, nil, insertResult)
 		})
 		msgID, err := append(ctx, msg)
 		if err != nil {
@@ -193,7 +193,7 @@ func (impl *idempotencyInterceptor) appendIdempotentMessage(ctx context.Context,
 			return nil, err
 		}
 		failpoint.Inject("afterIdempotencyAppend", func(value failpoint.Value) {
-			walpoint.Hit(ctx, value, walpoint.AfterIdempotencyAppend, msg, msgID, insertResult)
+			walpoint.Hit(ctx, value, msg, msgID, insertResult)
 		})
 		window.Complete(begin.Pending, commitResultFromAppendContext(ctx, msgID, insertResult), msg)
 		return msgID, nil
@@ -242,7 +242,7 @@ func (impl *idempotencyInterceptor) appendIdempotentTxnCommitMessage(ctx context
 			return nil, err
 		}
 		failpoint.Inject("beforeIdempotencyAppend", func(value failpoint.Value) {
-			walpoint.Hit(ctx, value, walpoint.BeforeIdempotencyAppend, msg, nil, insertResult)
+			walpoint.Hit(ctx, value, msg, nil, insertResult)
 		})
 		msgID, err := append(ctx, msg)
 		if err != nil {
@@ -250,7 +250,7 @@ func (impl *idempotencyInterceptor) appendIdempotentTxnCommitMessage(ctx context
 			return nil, err
 		}
 		failpoint.Inject("afterIdempotencyAppend", func(value failpoint.Value) {
-			walpoint.Hit(ctx, value, walpoint.AfterIdempotencyAppend, msg, msgID, insertResult)
+			walpoint.Hit(ctx, value, msg, msgID, insertResult)
 		})
 		window.Complete(begin.Pending, commitResultFromAppendContext(ctx, msgID, insertResult), msg)
 		return msgID, nil

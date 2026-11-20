@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -68,12 +69,13 @@ func canInjectRandomError(messageType message.MessageType) bool {
 }
 
 func (w *walImpls) Read(ctx context.Context, opts walimpls.ReadOption) (walimpls.ScannerImpls, error) {
+	if _, latest := opts.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_Latest); latest {
+		return nil, merr.WrapErrParameterInvalidMsg("latest delivery policy is deprecated; use All, StartFrom or StartAfter")
+	}
 	offset := int64(0)
 	switch t := opts.DeliverPolicy.GetPolicy().(type) {
 	case *streamingpb.DeliverPolicy_All:
 		offset = 0
-	case *streamingpb.DeliverPolicy_Latest:
-		offset = w.datas.Len()
 	case *streamingpb.DeliverPolicy_StartFrom:
 		id, err := unmarshalTestMessageID(t.StartFrom.GetId())
 		if err != nil {

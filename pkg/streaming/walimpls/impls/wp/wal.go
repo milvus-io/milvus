@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 var _ walimpls.WALImpls = (*walImpl)(nil)
@@ -51,13 +52,14 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 }
 
 func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (walimpls.ScannerImpls, error) {
-	from := wp.LatestLogMessageID()
+	if _, latest := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_Latest); latest {
+		return nil, merr.WrapErrParameterInvalidMsg("latest delivery policy is deprecated; use All, StartFrom or StartAfter")
+	}
+	from := wp.EarliestLogMessageID()
 
 	switch t := opt.DeliverPolicy.GetPolicy().(type) {
 	case *streamingpb.DeliverPolicy_All:
 		from = wp.EarliestLogMessageID()
-	case *streamingpb.DeliverPolicy_Latest:
-		from = wp.LatestLogMessageID()
 	case *streamingpb.DeliverPolicy_StartFrom:
 		id, err := unmarshalMessageID(t.StartFrom.GetId())
 		if err != nil {
@@ -90,6 +92,9 @@ func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {
 }
 
 func (w *walImpl) Close() {
+	if w.p == nil {
+		return
+	}
 	closeWriterErr := w.p.Close(context.Background())
 	if closeWriterErr != nil {
 		w.Log().Warn(context.TODO(), "close woodpecker writer err", mlog.Err(closeWriterErr))

@@ -9,7 +9,8 @@ import (
 )
 
 const (
-	DeliverPolicyTypeAll        deliverPolicyType = 1
+	DeliverPolicyTypeAll deliverPolicyType = 1
+	// Deprecated: Latest is rejected by WAL read APIs.
 	DeliverPolicyTypeLatest     deliverPolicyType = 2
 	DeliverPolicyTypeStartFrom  deliverPolicyType = 3
 	DeliverPolicyTypeStartAfter deliverPolicyType = 4
@@ -33,7 +34,9 @@ func DeliverPolicyAll() DeliverPolicy {
 	}
 }
 
-// DeliverLatest delivers the latest message.
+// DeliverPolicyLatest constructs the legacy Latest policy.
+//
+// Deprecated: WAL read APIs reject Latest. Use All, StartFrom or StartAfter.
 func DeliverPolicyLatest() DeliverPolicy {
 	return &streamingpb.DeliverPolicy{
 		Policy: &streamingpb.DeliverPolicy_Latest{},
