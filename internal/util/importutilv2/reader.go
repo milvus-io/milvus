@@ -305,7 +305,7 @@ func resolveSnapshotV2Source(ctx context.Context, cm storage.ChunkManager, sourc
 	if err := snapshotstorage.ValidateSnapshotObjectPathForBucket(cm, "snapshot Avro", ref.GetSnapshotManifestPath(), ""); err != nil {
 		return nil, err
 	}
-	if err := snapshotstorage.ValidateExternalSnapshotPaths(uri, boundary, nil); err != nil {
+	if err := snapshotstorage.ValidateSnapshotImportPaths(uri, boundary, nil); err != nil {
 		return nil, err
 	}
 	segment, err := snapshotstorage.NewSnapshotReader(cm).ReadSegmentManifest(ctx, ref.GetSnapshotManifestPath(), int(ref.GetSnapshotFormatVersion()))

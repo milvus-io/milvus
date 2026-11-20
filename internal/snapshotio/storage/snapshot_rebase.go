@@ -148,6 +148,42 @@ func RebaseSelfContainedSnapshotData(
 	return nil
 }
 
+// RebaseBareImportSelfContainedSnapshot normalizes origin-matching URIs to
+// bucket-relative keys for same-prefix self-contained bundles imported via a
+// bare metadata key, without altering shared SnapshotReader behavior used by
+// persisted restore fingerprints.
+func RebaseBareImportSelfContainedSnapshot(
+	metadataFilePath string,
+	originalLocation string,
+	snapshot *SnapshotData,
+) error {
+	if snapshot == nil || hasURITransportScheme(metadataFilePath) ||
+		snapshot.Layout != datapb.SnapshotLayout_SnapshotLayoutSelfContained {
+		return nil
+	}
+	oldRoot, oldFound := DeriveSnapshotRootPath(originalLocation)
+	newRoot, newFound := DeriveSnapshotRootPath(metadataFilePath)
+	if !oldFound || !newFound || oldRoot != newRoot {
+		return nil
+	}
+	if _, completeOriginURI, err := parseSnapshotURIIdentity(originalLocation); err != nil || !completeOriginURI {
+		return nil
+	}
+	rebaser := newSnapshotRootRebaser(oldRoot, newRoot, originalLocation)
+	for i, manifestPath := range snapshot.ManifestPaths {
+		snapshot.ManifestPaths[i] = rebaser.rebasePath(manifestPath)
+	}
+	for i, segment := range snapshot.Segments {
+		if segment == nil {
+			return merr.WrapErrDataIntegrityMsg("snapshot segment at index %d cannot be nil", i)
+		}
+		if err := rebaser.rebaseSegment(segment); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r snapshotRootRebaser) rebaseSegment(segment *datapb.SegmentDescription) error {
 	// StorageV3 insert and text/JSON files are addressed through the manifest;
 	// their PB paths are metadata placeholders rather than relocation inputs.
