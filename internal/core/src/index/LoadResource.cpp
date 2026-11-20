@@ -498,8 +498,10 @@ IndexLoadResource(const proto::cgo::LoadIndexInfo& info) {
         IsVectorDataType(field_type) && !IsSparseFloatVectorDataType(field_type)
             ? field.get_dim()
             : 1;
-    std::map<std::string, std::string> params(info.index_params().begin(),
-                                              info.index_params().end());
+    std::map<std::string, std::string> params;
+    for (const auto& [key, value] : info.index_params()) {
+        params.emplace(key, value);
+    }
     if (info.current_scalar_index_version() > 0) {
         params[SCALAR_INDEX_ENGINE_VERSION] =
             std::to_string(info.current_scalar_index_version());
