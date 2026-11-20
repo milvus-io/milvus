@@ -1,189 +1,181 @@
 # PK Inplace-update Implementation Plan
 
-This plan implements the [PK inplace-update design](20261109-pk-inplace-update-design.md) in five component PRs. The design owns semantics and data structures; this plan owns change boundaries, dependencies and evidence required for review. New client SDK and public Protobuf changes may require companion PRs in their own repositories; they belong to PR 1's work package, not an additional Milvus component.
+[中文版](20261120-pk-inplace-update-implementation-plan.zh-CN.md)
 
-## 1. PR boundaries
+Implement the [design](20261109-pk-inplace-update-design.md) in **one Milvus PR**, using separate commits for the six stages below. The planning audit used master `c31070a6cf` on 2026-11-20. Production [PR #55742](https://github.com/milvus-io/milvus/pull/55742) extends its existing protocol foundation, based on master `20746425a1`. Use the feature patch from [Draft PR #55699](https://github.com/milvus-io/milvus/pull/55699), rebased at `ccce0c06fe`, as the Segcore reference; do not copy its unrelated master commits. That unmerged draft supports a sealed-segment INT64/VARCHAR POC, not the complete feature.
 
-| PR | Component owner | Deliverable | Required dependencies |
-| --- | --- | --- | --- |
-| 1 | Proxy / WAL ingress and protocol | A validated, replayable PK-update message | None |
-| 2 | Storage / SN materialization | Typed delta codec, legacy readers and L0 production | PR 1 protocol |
-| 3 | MixCoord / DN | Complete L0 dispatch and ordered Mix execution | PR 2 codec and progress contract |
-| 4 | Segcore | Sparse versions, TempIndex, query readers and GC executor | Shared assignment/type contract from PR 1; can develop in parallel |
-| 5 | SN query runtime / QN QueryView | Real update delivery, load, recovery and safe-boundary publication | PRs 1, 2 and 4; full acceptance also needs PR 3 |
+- Use only TS-vector + Offset Dictionary + updated-offset bitset; keep initial values in native base storage.
+- Implement stages in the numbered order below. Keep new writes disabled until all stages pass acceptance.
+- Include component tests with each stage and e2e tests in the same PR. Update external proto/SDK repositories only where required by the new API.
+- Keep the design's existing schema/backfill exclusions, channel-level L0/Mix exclusion and ordinary Mix scheduling.
+- Reuse master's transaction, materialization, TransformLog and QueryView mechanisms. Keep additional TS-vector performance experiments, bitmap checkpoint caches and alternative index structures outside this implementation; snapshot correctness remains mandatory.
 
-```mermaid
-flowchart LR
-  P1["PR 1: request and WAL"] --> P2["PR 2: storage and materialization"]
-  P2 --> P3["PR 3: dispatch and Mix"]
-  P1 -.->|Shared logical contract| P4["PR 4: Segcore"]
-  P1 --> P5["PR 5: QueryView integration"]
-  P2 --> P5
-  P4 --> P5
-  P3 --> Accept["Full-path acceptance and activation"]
-  P5 --> Accept
-```
+## Stage review before proceeding
 
-- Reuse existing POC components where they satisfy the final design; do not equate a POC hook with production integration.
-- Retain existing L0/Mix channel exclusion and standard Mix backlog policy. Failed-materialization cleanup and a finer exclusion granularity are outside these PRs.
-- Schema/backfill conflict handling remains the separate compatibility workstream. Record its supported combinations before public activation; do not silently expand this plan into a backfill redesign.
-- Every PR includes its own meaningful tests. PR 5 owns combined end-to-end evidence rather than deferring all component testing to the final PR.
-- Keep PK-update writes unavailable until the required consumers are compatible and the complete path passes acceptance. Earlier PRs may expose internal contracts for downstream development.
+- Finish and review one stage before starting the next. Review Segcore subsections 4.1–4.4 separately; test 4.4 with controlled GC boundaries until Stage 5 provides runtime protection.
+- Compare the actual diff with every implementation bullet in that stage. Record missing items and scope changes; fix unintended deviations and agree necessary scope changes before proceeding.
+- Check each added data structure, configuration, cache, background task and state transition. Reuse existing code where possible and remove additions that are not needed for the listed behavior.
+- Run the stage's tests and inspect results. Include applicable failure/retry, historical snapshot and boundary cases; compilation or success-path tests alone do not close those checks.
+- Record a short review summary with completed plan items, changed files, test commands/results and remaining issues. Resolve blocking findings, then commit the stage separately in the same PR before moving on.
 
-## 2. PR 1: Proxy and WAL protocol
+## 1. Proxy, request and WAL
 
-**Outcome:** one client call becomes valid, typed PK-update messages with existing VChannel transaction semantics.
+Code entry points: Proxy request handlers, message types/builders, SN append validation, CDC replication, paramtable and milvus.yaml.
 
-**Included**
+Master already supplies VChannel routing and transactions, but has no PK-update request/message. Continue the existing protocol foundation in [PR #55742](https://github.com/milvus-io/milvus/pull/55742) and its companion proto PR #700; keep subsequent Milvus stages in that same feature PR. Its read-dependent DML auto-load/retry path is not a prerequisite for literal PK-update writes.
 
-- Add public/internal request definitions, UPDATE message registration and generated bindings; provide companion proto/SDK changes as needed.
-- Carry collection/schema identity, scope, `schemapb.IDs` and one shared assignment set. Preserve explicit NULL and every agreed Phase 1 logical type.
-- Validate permissions, PKs, scope, field identity, restricted fields, values and supported types before append.
-- Route by VChannel; split PKs using complete encoded message size; reject an indivisible assignment set that cannot fit with one PK.
-- Reuse VChannel transactions and effective commit timestamps. Do not claim cross-VChannel atomicity.
-- Add SN append schema-version validation and required ingress/message classification. Extend CDC transport/replication handling for the new message without discarding assignments.
+### Code changes
 
-**Boundary and handoff**
+- Add the PK-update RPC/request and WAL message. Include collection/schema identity, partition scope, `schemapb.IDs`, and assignments containing `field_id` plus a typed literal or explicit NULL. Generate bindings and add the SDK call.
+- Disable automatic SDK retries for this RPC, including transport failures and schema mismatch. A lost response can follow a committed update; a replay with a fresh timestamp must not overwrite a later writer. Before release, replace temporary proto fork pins with the merged upstream version and verify SDK compilation from a downstream module.
+- Register `proxy.pkUpdate.enabled=false` and `proxy.pkUpdate.maxPkCount` in paramtable and milvus.yaml; default the count cap to 10,000 submitted PKs. Invalid or nonpositive count configuration falls back to 10,000; the count and byte limits remain independent.
+- Check the enable flag at public request admission. Turning it off rejects new requests while accepted updates continue through replay, materialization, CDC and reads.
+- Validate permission, PK type, scope, assignment type/nullability and restricted fields. Reject empty or over-limit PK lists before deduplication, routing or WAL append; count the entire submitted list.
+- Accept one assignment per field in a request; reject duplicate field IDs at admission. Literal updates must not fetch existing rows or require a loaded collection before WAL append. Preserve ordered writes from separate valid requests/transaction bodies.
+- Enforce request byte limits separately. Bound both the incoming protobuf and the sum of prepared WAL envelopes by `proxy.grpc.serverMaxRecvSize`; repeated assignment payloads count once per fragment. Route admitted PKs to VChannels and split by complete encoded WAL message size, including assignments, using the selected WAL backend's limit minus the existing envelope reserve. RocksMQ uses the request budget because it has no per-record cap. Reject before any append if one PK plus the shared assignment set cannot fit or the prepared total exceeds the request budget.
+- Put each VChannel's fragments in the existing transaction mechanism. Consumers use CommitTxn TimeTick and preserve body order; retain the existing cross-VChannel atomicity boundary.
+- Add UPDATE to SN schema-version checks, message classification and CDC forwarding. Preserve assignments and source replay identity through every conversion.
 
-- Own WAL/request encoding, not Parquet schema or query apply implementation.
-- Publish a typed logical mutation contract for PRs 2, 4 and 5: PK type/list, scope, assignments, field IDs and effective ordering.
-- PR 5 owns TransformLog payload construction and query-MVCC classification; PR 2 owns materializer consumption. Shared registrations are coordinated through PR 1.
+### Tests
 
-**Review evidence**
+- Round-trip multi-PK/multi-field updates, explicit NULL, empty values and ARRAY; reject unsupported fields/types.
+- Test PK counts 0, limit-1, limit and limit+1, duplicates and multiple VChannels; rejected requests must append nothing. Test long VARCHAR PKs and large assignments independently of count.
+- Test different Kafka/Pulsar size limits, envelope headroom, incoming bytes, and prepared fanout at/over the total byte budget; every preflight rejection must append nothing.
+- Test default-off, enable/disable, duplicate field IDs, schema mismatch, transaction rollback and CDC replay. Verify admission on an unloaded collection without an implicit pre-read. Disabling admission must leave accepted data readable.
+- Test a committed update followed by a lost response and a later writer; the SDK must return the RPC error without issuing a second update.
 
-- Round-trip multi-PK assignments, SET NULL, empty values and supported ARRAY values; reject unsupported fields/types and invalid nullability.
-- Test full-message size boundaries and verify failure does not leave a partially accepted indivisible operation.
-- Trace split-request transaction commit/rollback and schema mismatch through the actual append path.
-- Verify CDC carries the complete new payload and preserves transaction ordering; document any replication mode that remains unsupported.
+## 2. Delta file codec and SN materialization
 
-## 3. PR 2: Storage codec and SN materialization
+Code entry points: storage delta readers/writers and FFI, `vchannel/module.go`, `l0materializer.WALMaterializer.ObserveMessage()`, `walMaterializeTask.Execute()`, `SyncMaterializer` and durable-M publication.
 
-**Outcome:** PK-delete and PK-update are persisted through one versioned typed format, usable by DN and QN.
+Master constructs `WALMaterializer` in `VChannelRecoveryModule`; its active path retains Delete/Flush handles. Extend this running path, including its earlier-L1-publication gate, rather than wiring only the retained Summary consumer.
 
-**Included**
+### Code changes
 
-- Implement the common typed Parquet reader/writer through the existing FFI: common mutation columns plus nullable assignment Structs.
-- Bind columns to stable field IDs; retain logical types and file collection/channel/scope/schema metadata.
-- Preserve no-op, SET NULL and SET value, omit fields unused by the entire file, and keep multiple PKs sharing assignments.
-- Support projected field reads together with common columns and PK-delete handling. Normalize legacy L0, V1/V2 and packed V3 delete files through adapters.
-- Connect UPDATE to the SN pending/materialization path and new writer; retain existing task serialization and retry behavior.
-- Preserve effective-TimeTick groups, success-dependent materialization progress and asynchronous durable M publication. Emit trustworthy timestamp, byte/file and operation-count metadata for PR 3.
+- Add the common typed Parquet writer: mutation timestamp, original transaction body ordinal, operation, PK list and per-field nullable assignment Structs. Store field IDs, logical types and collection/channel/scope/schema metadata.
+- Persist `source_ordinal` as UInt32: standalone zero, otherwise the original transaction body position including skipped inserts. Reject ordinal overflow. Sort/deduplicate across files using VChannel, effective timestamp, ordinal and PK as appropriate; preserve the ordinal across scope splits and fragment re-cuts. Legacy equal-timestamp deletes may use ordinal zero.
+- Encode absent assignment, SET NULL and SET value separately. Omit fields unused by the file; keep one shared assignment set for multiple PKs.
+- Add projected reads of requested fields plus common columns. Adapt legacy L0, V1/V2 and packed V3 delete files to the same reader output.
+- Extend `ClassifyTransformLogMessage()` and `BuildTransformLogEntry()` with UPDATE and mixed transaction bodies; an update must not become a payload-free barrier. Update `ObserveMessage()`, task extraction and the writer together to retain assignments and write the new format. Include updates in buffered-byte and operation counts, without counting them as deletes.
+- Keep complete effective-TimeTick groups together. Register all required scope outputs before advancing materialization progress and notifying asynchronous durable-M persistence.
+- Retain only the values needed after decoding; release input Arrow batches. Bound reader windows/concurrency and update the storage dependency if the required FFI is missing.
+- Preserve legacy DELETE-only output during rolling upgrades. Do not downgrade already typed DELETE projections with nonzero source ordinals: keep the typed writer to retain their identity. Outputs containing UPDATE also use the typed writer independently of the current admission switch; accepted updates remain consumable when new writes are disabled.
 
-**Boundary and handoff**
+### Tests
 
-- Own the codec and producer. PR 3 owns M-gated scheduling and target publication; PR 5 owns QN load lifecycle and population of UpdatesRecord.
-- Reader projection must expose ownership clearly so consumers can release whole batches after retaining required values. It is not a lazy query loader.
-- A storage-library companion change, if required by the pinned dependency, stays within this work package. Do not add a custom DenseUnion decoder to implement the chosen format.
+- Use the native FFI to round-trip mixed delete/update files, sparse fields, NULL and shared assignments; verify projected reads and legacy adapters.
+- Repeat the wide sparse file case; record file size, decoded Arrow memory and peak RSS separately.
+- Inject write/registration failure and retry. Unfinished work must not advance M; registered duplicates retain their original mutation ordering.
+- Trace a real UPDATE message and a mixed transaction through classification, retained handles and native file decoding; assert the assignments survive and progress cannot advance after a payload is dropped or a scope registration fails.
 
-**Review evidence**
+## 3. L0 dispatch and Mix compaction
 
-- Native FFI write/read tests cover mixed age-only/name-only updates, all three states, PK-delete and shared assignments in the same file.
-- Selected-field tests verify other fields need not be decoded; include legacy/new mixed input and missing-field no-op behavior.
-- Repeat the documented wide sparse case and record file size, Arrow allocation and peak load RSS separately. Verify the production reader API used, its row-group behavior and concurrency.
-- Inject partial output/registration failure and retry. Registered duplicates must preserve logical timestamps; M must not claim unfinished materialization. No immediate orphan cleanup is claimed.
+Code entry points: MixCoord L0 policy/task code, DN `l0_compactor` and `mix_compactor`.
 
-## 4. PR 3: MixCoord scheduling and DN execution
+Master groups L0 inputs by partition/channel. `L0CompactionTask.transformCursorUpdates()` already limits completed cursors by durable M and unselected-input holes; this does not implement fixed-M0 input selection. Reuse its publication safety while changing task selection and payload execution.
 
-**Outcome:** storage consumers receive a complete safe prefix and materialize updates in logical order.
+### Code changes
 
-**Included**
+- Read persisted M once per scheduling round as M0. Select every registered input needed for that round's coverage through M0; exclude later inputs.
+- Keep M0 and the selected scope/input set in the task across retries. Thresholds may trigger a round, but must not truncate its claimed coverage; an input owned by another task cannot be treated as already applied.
+- If no eligible ALL_PARTITIONS input exists, create partition-scoped tasks, each with that partition's eligible L0 inputs and targets; retain channel-level execution exclusion.
+- If any eligible ALL_PARTITIONS input exists, create one collection/VChannel task containing all eligible partition-specific and ALL_PARTITIONS inputs. Include targets in partitions with no private L0. For a target in partition P, deliver P's inputs plus ALL_PARTITIONS inputs in mutation order.
+- Persist every applicable target's deltalogs and replay cursor, including zero-output targets, before completing the task or retiring shared inputs. Restore unfinished targets after retry/restart. An ALL_PARTITIONS input cannot retire after only one partition finishes. When catalog publication spans transactions, write each nonempty target's delta keys before its cursor; persist the all-target completion marker before input retirement.
+- Process bounded input groups inside the same frozen DN task and collect all target outputs. Apply memory admission to the resident group, not the full prefix; retain original mutation identities across output files and certify M0 only after every group completes.
+- Switch DN dispatch and Mix to the common delta reader. Merge records across files by effective mutation order, then apply PK-delete/update to eligible rows before writing compacted base data. Reuse this mutation application in ordinary sort/clustering rewrites; an excluded schema/backfill rewrite must explicitly reject unsupported update input before publication rather than discard it.
+- Keep the minimum input cursor on Mix output. Include update files/bytes in backlog calculations while retaining existing admission and channel exclusion.
 
-- Read persisted M and fix M0 per scheduling round; exclude unregistered inputs and inputs beyond M0.
-- Collect the complete eligible input set for the claimed coverage. Thresholds may trigger a round but must not truncate its coverage silently.
-- If eligible ALL_PARTITIONS input exists, create a task covering all relevant scopes and targets in that collection/VChannel. Otherwise retain partition tasks.
-- Keep channel-level L0/Mix exclusion. Persist target results and cursor coverage, including zero-output targets, before task completion and input retirement.
-- Make task retry/recovery preserve ownership, completed target results and remaining delivery obligations.
-- Extend DN dispatch and Mix readers to the common codec. Per input, merge all deltalog records by effective mutation order and apply PK-delete/update before merging surviving rows.
-- Retain normal Mix admission and minimum-input output cursor. Include update files/bytes in backlog signals without inflating delete counts.
+Example: with M0=200, inputs P1@100, P2@130 and ALL_PARTITIONS@160 belong to one task; P1@220 waits. P1 targets receive 100+160, P2 targets receive 130+160, and P3 targets receive 160 even without a P3 file. Retire shared inputs only after every applicable target's output/cursor is durable. A target with no BF hit still completes cursor coverage without writing an empty file.
 
-**Boundary and handoff**
+### Tests
 
-- Reuse PR 2's codec; do not duplicate an assignments parser inside DN.
-- Own persistent coverage and output-cursor correctness. PR 5 owns actual query catchup/apply progress.
-- Do not add equal-cursor admission, a global empty-range alignment sweep, shared ALL_PARTITIONS-file retirement across independent tasks, or target-batch unlocking.
+- Interleave partition-specific and ALL_PARTITIONS updates, including a target with no BF hit and a partition with no private L0.
+- Verify files beyond durable M are excluded. Retry after partial publication and restart before retirement without losing any target's updates.
+- Mix overlapping files, duplicate SETs and delete/update sequences; reload output and replay its suffix, then compare final values with independent replay.
 
-**Review evidence**
+## 4. Segcore
 
-- Interleave P1, P2 and ALL_PARTITIONS mutations; include a partition with no private L0 and targets with no BF hit.
-- Verify inputs beyond durable M remain undispatched even if their objects and metadata already exist.
-- Retry after partial target publication and restart before retirement; prove no target loses an applicable update and no input retires prematurely.
-- Mix several files containing overlapping timestamps and duplicate literal SETs. Assert timestamp order across files, delete/update interaction, repeated PK behavior and final base values.
-- Reload compactTo output and replay its suffix. Include legally different input initialization cursors; compare results before and after compaction.
+Code entry points: `UpdatesRecord`, `SealedUpdatesRecord`, `UpdatesRecordReaders`, Growing/Sealed segment apply, expression evaluators and output fill.
 
-## 5. PR 4: Segcore versions and query execution
+Master supplies native column Scan/Take, scalar indexes and Delete MVCC, but not this field-update store. Integrate the TS-vector draft with the complete write/load path below; its independent performance tuning is not a prerequisite for the feature stages.
 
-**Outcome:** Growing and sealed query execution read the correct updated values without discarding existing index performance.
+### 4.1 Storage and apply
 
-**Included**
+- Keep one UpdatesRecord per physical segment. Per field, store `vector<Delta<T>>` entries `{timestamp, offset, value}`, NULL flags, `offset -> vector<entry_position>`, membership bitset B and distinct updated-offset count.
+- Index B by row offset, not timestamp; bit 1 means a retained delta exists and still requires Q_TS selection. Keep TS order in the vector and each dictionary history. Under the same lock/generation, B may include future-only updates, but cannot omit visible ones; derive U_Q during the query instead of storing timestamped copies of B.
+- Extend the draft's INT64/VARCHAR storage to INT8/16/32/64, BOOL, TIMESTAMPTZ and ordinary scalar ARRAY. ARRAY updates replace the whole value.
+- In `Apply()`, resolve all matching physical rows using scope, strict `row_ts < mutation_ts` and delete visibility. Same-timestamp newborn rows are not update targets. Prepare allocations, then append every field's entries and dictionary positions and set B before publishing completion.
+- Preserve transaction body order and deduplicate replay by source identity. Replace the draft's strict per-cell timestamp rejection where valid transaction bodies share a commit timestamp.
+- Add live apply to attached Growing and Sealed stores. Grow row-count/bitset capacity with Growing inserts; retain native base readers for unchanged cells.
+- Keep fixed-width values inline and variable-length payloads owned/shared. Store no copied base versions and no history for unchanged offsets.
 
-- Implement sparse field/offset histories and shared version ownership; unchanged rows remain in the native base. Support all agreed Phase 1 assignment types, not only the POC's INT64/VARCHAR fixtures.
-- Implement exact PK apply with scope, row-time and liveness checks; update all eligible physical rows and preserve multi-field publication.
-- Implement the all-data versioned B-tree TempIndex with shared history references, SoA postings, latest-version fast paths and correct NULL handling.
-- Expose timestamp-bound TempIndexReader and ValueReader using existing query reader interfaces where possible.
-- Integrate supported TempIndex expressions, original-index bitmap correction and native raw-batch overlays. Preserve candidate masks, batch/all-at-once capability rules and SQL result/validity semantics.
-- Connect output fill and other consumers of mutable scalar values to the same timestamp-bound lookup contract.
-- Prevent unsafe local index/statistics shortcuts and expression-cache reuse. TempIndex disabled still uses native indexes where available.
-- Consume safe GC boundaries from Go; unlink both access paths and release shared histories safely. No Go callback from Segcore.
+### 4.2 Expression evaluation
 
-**Boundary and handoff**
+- For indexed predicates, retain the native index bitmap I. In `VisitUpdates()`, use `upper_bound(Q_TS)`, scan backward and evaluate only the first visible entry per offset; update result and validity together.
+- Skip visited allocation when each retained offset appears once. Otherwise mark first-seen offsets even for NULL/non-matches, and stop at the prefix start or after selecting all distinct retained offsets.
+- Correct only offsets with a visible delta: `(I - U_Q) union H_Q`. Exact Q_TS visibility is a correctness requirement: B must never be substituted for U_Q when clearing base hits, and future-only updates leave the base result unchanged. Derive U_Q during the visible-prefix traversal, or directly overwrite only selected offsets; no separate persistent U_Q bitmap is required.
+- Do not add bitmap checkpoint caches in this version. If introduced separately, reconstruct U_Q from a protected checkpoint at or before Q_TS plus the complete retained gap; a latest bitmap containing future updates is not a valid substitute.
+- For raw expressions, retain native Scan/Take. Use `ReadRangeUpdates()` to select updated candidates in the current batch, copy a private batch only when patches exist, and overlay values/validity before evaluation.
+- Fix ColumnExpr and CompareExpr to use the same sparse overlay; unchanged rows must not call the update dictionary. Honor candidate masks before MVCC lookup.
+- Return all-valid for non-nullable fields. Bypass stale index min/max, empty-result and all-null shortcuts, and disable unsafe expression caching on updated fields.
 
-- Own in-memory representation, query evaluation and the native apply/read/GC interfaces.
-- PR 5 owns WAL/TransformLog delivery, physical-segment lifecycle, Go snapshot protection and delivery of safe GC bounds.
-- Runtime configuration must distinguish TempIndex selection from correctness: disabling the index cannot disable sparse updates or force an indexed predicate into raw scan.
+### 4.3 Lookup and output fill
 
-**Review evidence**
+- In `Gather()`/`Lookup()`, use B to bypass unchanged offsets. For updated offsets, check the dictionary's last entry, otherwise binary-search referenced timestamps at Q_TS.
+- Use base when no visible delta exists; return NULL for visible SET NULL. Preserve requested order, duplicate offsets and search padding; use native bulk lookup when no requested offset needs an update.
+- Pass the same Q_TS and protected physical store from filtering to output fill, deferred protobuf/Arrow output, sorting, grouping, aggregation and other updated-field readers.
+- Reuse existing bulk reader/output interfaces and keep returned string/array storage alive until the consumer finishes. Further wrapper-allocation and conversion optimizations are a separate performance task.
 
-- Cover a value changed away and back, repeated updates, SET NULL transitions, multi-field changes and old/current protected snapshots.
-- Assert unchanged offsets have no allocated update history; variable-length assignments share payload without retaining irrelevant input batches.
-- Verify all three actual expression paths, corrected-offset counts and candidate-mask behavior. Low-selectivity TempIndex equality must not enumerate all non-NULL postings.
-- Verify filter and output lookup at the same timestamp, including historical values and logical combinations with NULL.
-- Supply controlled safe GC bounds and prove both readers retain the spanning/current versions while expired references are reclaimed safely.
+### 4.4 GC
 
-## 6. PR 5: QueryView delivery, load and recovery
+- Add `CSegment.GCUpdates(ctx, safeTS) error` in the Go segcore wrapper, `CStatus GCUpdates(CSegmentInterface segment, uint64_t safe_ts)` in the C ABI, and `SegmentInterface::GCUpdates(Timestamp safe_ts)` forwarding to `UpdatesRecord::GC(safe_ts)`; names are proposed. Pin the physical segment during the call and propagate failures through the existing status conversion. C++ never calls Go.
+- Go selects safeTS from R_G/R_T according to the read paths protected for that physical store. Per offset, retain its last entry at or before safeTS and all newer entries; never erase an entire old timestamp prefix blindly.
+- Reclaim vector entries and dictionary references together. If positions change, rebuild both in one publication and keep old storage alive for pinned readers. Keep B and counts consistent under the same lock/generation.
+- Test with controlled boundaries first. Enable runtime reclamation only after Stage 5 prevents admission of reads requiring reclaimed versions.
+- Test the Go/C/C++ call chain, repeated or older cutoff as a no-op, segment release racing GC, and an old reader retaining references while GC publishes replacement storage.
 
-**Outcome:** production SN/QN paths drive Segcore from durable and live data, replacing local-file POC injection.
+### Tests
 
-**Included**
+- Cover change-away-and-back, repeated versions, multi-field updates, NULL transitions, old Q_TS, every supported type and repeated physical PKs.
+- Compare reverse selection against independent replay, including uneven history depth and future-only updates. With first updates r10@100 and r20@200, verify B contains both but U_140 contains only r10.
+- Apply two ordered transaction bodies that assign different values to the same cell at one commit timestamp; verify the later body wins, replay adds no duplicate mutation, and file/load ordering does not change the result.
+- Check sparse allocation, failed-apply atomicity, append/GC reference safety and Growing insert/update interleaving.
+- Verify indexed correction, raw overlay, ColumnExpr/CompareExpr, candidate-mask skipping and ordered output lookup at the same Q_TS. Count selected deltas and dictionary probes.
+- Resolve or isolate the draft's reproduced executor teardown crash before reporting the full test process as passing; its current evidence is core-test and segment-assertion success only.
 
-- Extend WALSummary/TransformLog payload construction, classification and retention for PK-update. Keep transaction commit timestamps and complete entry boundaries.
-- Add GrowingRuntime live apply and bounded recovery replay, then join QueryRuntime live events without a gap or reordered duplicate.
-- Add QN sealed TransformLog apply with scope and local BF filtering; retain the existing physical registration, catchup and live-dispatch model.
-- Load projected typed persisted deltalogs through PR 2, apply only actual assignments through PR 4 and release temporary Arrow allocations. Keep deletes in the common load path.
-- Include PK-update in QueryMVCC/readiness progression and failed-apply handling. Publish progress after actual application, not RPC enqueue.
-- Protect updated values from stale SN global segment pruning.
-- Own snapshot/lease protection and safe R_G/R_T computation/delivery. Establish that newly admitted or delayed reads cannot require already reclaimed history before enabling GC.
-- Connect production configuration, memory accounting and useful progress/path diagnostics; coordinate full-path correctness and regression runs.
+## 5. QueryView delivery, load and recovery
 
-**Boundary and handoff**
+Code entry points: WALSummary/TransformLog, GrowingRuntime live/replay handlers, QN physical-segment loader, segment apply and QueryMVCC progress.
 
-- Reuse existing QueryView/TransformLog infra. No standalone L0 preload or replacement Delegator forwarding path.
-- Consume PR 4's reader/apply/GC APIs; do not reimplement value-version selection in Go.
-- GC coverage includes registration/admission races and protected readers, not just a minimum over requests currently executing. If this safety contract is unproven, retain history and report GC as incomplete.
+Master already has Growing bounded Transform replay followed by live WAL delivery, Sealed deltalog loading/Transform delivery, and QueryView streaming/requery. Their mutation handlers currently apply Delete, not field assignments. QueryView leases protect resources and Summary retention protects replay history; neither is an existing Segcore update-version GC service.
 
-**Review evidence**
+### Code changes
 
-- Send real API updates and read them from Growing and sealed segments under the existing consistency/readiness contract.
-- Test an unloaded collection, initial load, partial persisted data, restart, catchup/live handoff, release/reload and compaction replacement.
-- Fail an apply operation and verify queries cannot read that registration as caught up; retry or invalidation must follow the existing runtime contract.
-- Hold a protected older snapshot while applying updates and advancing GC; also exercise delayed/new snapshot admission against the chosen lower bound.
-- Verify pruning cannot drop a segment whose updated scalar value matches the query.
+- Add UPDATE payload construction/classification to WALSummary and TransformLog; retain PKs, assignments, commit timestamps and complete transaction entries.
+- Growing load/recovery: restore insert/base state, extend `drainDeleteReplay()` and `applyTransformLogEntry()` to replay PK-update TransformLog entries through BaseTransformTimeTick, then join existing QueryRuntime live events without gaps. Extend the current live WAL-message dispatch with UPDATE; do not add a second live subscription.
+- Sealed load: load the base and read the segment's existing persisted deltalogs through the Stage 2 reader, including legacy deletes and typed update files. Merge by effective mutation order and dispatch Delete/Update to native apply; restore the update store even when no live updates follow. Release decoded Arrow batches after retaining the required values.
+- Bind the loaded base/deltalog metadata version to `transform_start_after_timetick`; register from that cursor, then apply TransformLog history catchup and live entries using scope/BF filtering before exact PK matching. Never infer the replay cursor from the maximum timestamp found in a file. Retain the required history during load/registration and handle overlap by the agreed source identity/order.
+- Advance QueryMVCC/readiness only after native apply succeeds. On failure, use the existing retry/invalidation path and leave the segment behind the failed frontier.
+- Pin the physical store and pass the successful query attempt's Q_TS through filtering, streaming/requery and deferred output. Reuse the existing worker/retained-plan path. Bypass stale SN segment pruning for updated fields.
+- Register active read requirements and the minimum timestamp allowed for future admissions before deriving R_G/R_T. Coordinate registration with GC-boundary publication, select the safe cutoff for each physical store and call the new `CSegment.GCUpdates()` wrapper. Latest applied progress or resource reference counts alone are not safe cutoffs; also retain Transform history required by delayed loads/reconnects. Keep GC disabled until these read and recovery protections are tested.
+- Keep JSONL injection opt-in for local tests. Production calls apply on the attached store rather than rebuilding a Begin/Apply/Commit POC session for each mutation.
+- Report apply progress, update/version counts, delta memory and aggregated read-path counters; avoid per-cell logs/atomic statistics in hot loops.
 
-## 7. Integration acceptance and performance
+### Tests
 
-- PR 5 coordinates acceptance after PRs 3 and 5 are both available; each component owner resolves failures in its own boundary.
-- Use the same deterministic base dataset and ordered updates to compute an independent final-value mirror. Compare PK sets and projected values before accepting latency numbers.
-- Compare R1-ON, R1-OFF and R2. R1-OFF preserves old-index plus updates; R2 stores final values in base. Keep expression cache disabled for controlled comparisons.
-- Keep the case set small: equality, IN, range, prefix, NULL and representative unsupported/logical combinations. Measure output lookup separately with a common equality case.
-- Use separate equally sized instances with matched single-segment layouts. Record update coverage/history depth, actual execution paths, query latency and resident memory; measure build/apply cost outside static query timing.
-- Include legacy file compatibility, mixed PK-delete/update, materialization retry, durable-M lag, cross-scope dispatch, Mix/reload and query recovery in correctness acceptance.
-- Keep runtime mutation ordering and sparse memory assertions in the test evidence. Correct final values alone do not prove a fast or MVCC-correct path.
-- Before enabling writes, verify compatible readers throughout the deployed path, CDC behavior where enabled, and declared schema/backfill compatibility limits. An API-only success is not feature completion.
+- Send real API updates to Growing, Sealed and unloaded collections; verify query/search visibility and output fields after the required apply frontier.
+- Exercise initial load, partial persistence, restart, recovery/live handoff, release/reload and compaction replacement.
+- Load a segment using persisted update files with no live tail; then test mixed legacy deletes/updates, NULL, historical Q_TS, overlapping persisted/replayed records and an update arriving during load registration. Compare with independent mutation replay.
+- Test streaming on/off, historical requery, retries after partial output and deferred protobuf/Arrow fill. Discard failed-attempt metadata/results and retain the successful attempt's snapshot.
+- Inject apply failure; verify queries cannot treat that segment as caught up. Check updated matches survive global pruning.
+- Hold an old snapshot while applying updates and running GC; test delayed admission and registration races. Disable new writes, restart/replay and verify existing updates remain visible.
 
-## 8. Shared contracts to settle before parallel implementation
+## 6. Local benchmark and e2e acceptance
 
-- PR 1 with PRs 2/4/5: exact supported-type mapping, explicit NULL, scope and effective transaction ordering. Resolve same-timestamp operation order through the existing transaction contract.
-- PR 2 with PRs 3/5: common reader output, field projection, metadata/stats meaning and buffer ownership.
-- PR 3 with PR 5: persistent replay cursor binds to the published base/deltalogs; query apply progress remains separate.
-- PR 4 with PR 5: native update/read/GC interfaces, physical-segment lifetime, query timestamp binding and snapshot-admission proof for safe reclamation.
-
-These are integration contracts within the accepted design. They do not require new transport, publication or query frameworks.
+- Generate base data, ordered dispersed updates and an independent final-value mirror. Compare returned offsets/PKs and projected values before timing.
+- Run pure-memory `Segment::Retrieve` with one request thread, empty output fields and limit 1000. Match runtime raw/index residency, including STL_SORT-only loading where applicable.
+- Use one ClickBench expression shape: `BinaryRange(ClientIP) AND Term(URL IN ...)`, with 100 deterministic bound/value parameter sets. Start with 1% and 5% single updates plus one separately labelled repeated-update case.
+- Compare TS-vector/dictionary with the mirror under identical native index settings; measure raw and indexed configurations separately. Warm up, then run at least 1000 queries per configuration with expression cache disabled; exclude setup/apply/plan preparation and confirm execution counters advance.
+- Measure output lookup separately with equality and empty versus selected INT64/VARCHAR output fields. Record latency, scanned/selected deltas, dictionary probes, bitmap/overlay work and RSS; measure load/apply separately.
+- Run service e2e on equal resources and matched single-segment layouts. Include legacy files, CDC, materialization retry, durable-M lag, cross-scope dispatch, compaction/reload, apply failures and GC protection.
+- Enable public writes only after these checks pass and supported schema/backfill combinations are documented. Keep the existing test instances and collections.
