@@ -35,6 +35,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -683,8 +684,10 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 		assert.Equal(t, partitionID, info.GetPartitionID())
 		assert.Equal(t, collectionID, info.GetCollectionID())
 		assert.Equal(t, "vchan", info.GetInsertChannel())
-		assert.Equal(t, startPos, info.GetStartPosition())
-		assert.Equal(t, dmlPos, info.GetDeltaPosition())
+		// The store may hold an interned copy of a position, so compare
+		// contents rather than message state.
+		assert.True(t, proto.Equal(startPos, info.GetStartPosition()))
+		assert.True(t, proto.Equal(dmlPos, info.GetDeltaPosition()))
 		assert.Equal(t, datapb.SegmentLevel_L1, info.GetLevel())
 		assert.Equal(t, int64(2), info.GetStorageVersion())
 		assert.True(t, info.GetIsSorted())

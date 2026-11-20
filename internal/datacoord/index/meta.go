@@ -29,7 +29,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -75,6 +74,15 @@ func validateIndexStorePathVersionForFinish(buildID int64, requested, actual ind
 	return nil
 }
 
+// IndexMeta keeps the collection index definitions in memory.
+//
+// Published definitions are immutable. Every getter that returns a
+// *model.Index or a param list hands out the stored object itself, so its
+// fields, its TypeParams/IndexParams/UserIndexParams lists and their
+// elements are shared and read-only: a caller that needs to change one
+// must copy it first. Writers never modify a published definition either;
+// they build a new one and replace the map entry under fieldIndexLock
+// (copy-on-write), so a definition obtained earlier stays unchanged.
 type IndexMeta struct {
 	ctx     context.Context
 	Catalog metastore.DataCoordCatalog
@@ -283,7 +291,16 @@ func (m *IndexMeta) reloadFromKV(collectionIDs []int64) error {
 	return nil
 }
 
+// updateCollectionIndex installs index, which replaces any stored definition
+// with the same IDs. The caller must own index and must not have published
+// it yet. Its param lists are replaced by canonical lists, shared with every
+// index that has equal params (common.CanonicalKeyValuePairs) and read-only.
+// Their capacity equals their length, so a reader that appends to one always
+// gets a new backing array.
 func (m *IndexMeta) updateCollectionIndex(index *model.Index) {
+	index.TypeParams = common.CanonicalKeyValuePairs(index.TypeParams)
+	index.IndexParams = common.CanonicalKeyValuePairs(index.IndexParams)
+	index.UserIndexParams = common.CanonicalKeyValuePairs(index.UserIndexParams)
 	m.taskCounts.replaceIndex(m.Indexes[index.CollectionID][index.IndexID], index)
 	if _, ok := m.Indexes[index.CollectionID]; !ok {
 		m.Indexes[index.CollectionID] = make(map[UniqueID]*model.Index)
@@ -549,8 +566,8 @@ func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool 
 				indexparamcheck.IsScalarIndexType(param1.Value) {
 				for _, param2 := range req.GetIndexParams() {
 					if param1.Key == param2.Key && param1.Value != param2.Value {
-						req.IndexParams = make([]*commonpb.KeyValuePair, len(fieldIndex.IndexParams))
-						copy(req.IndexParams, fieldIndex.IndexParams)
+						// stored elements are shared and read-only; never alias them
+						req.IndexParams = common.CloneKeyValuePairs(fieldIndex.IndexParams)
 						break
 					}
 				}
@@ -643,6 +660,9 @@ func (m *IndexMeta) HasSameReq(req *indexpb.CreateIndexRequest) (bool, UniqueID)
 	return false, 0
 }
 
+// CreateIndex persists index and installs it. It takes ownership of index:
+// the caller must not use index afterwards, since its TypeParams, IndexParams
+// and UserIndexParams are replaced by shared, read-only lists.
 func (m *IndexMeta) CreateIndex(ctx context.Context, index *model.Index) error {
 	mlog.Info(ctx, "meta update: CreateIndex", mlog.Int64("collectionID", index.CollectionID),
 		mlog.Int64("fieldID", index.FieldID), mlog.Int64("indexID", index.IndexID), mlog.String("indexName", index.IndexName))
@@ -663,6 +683,9 @@ func (m *IndexMeta) CreateIndex(ctx context.Context, index *model.Index) error {
 	return nil
 }
 
+// AlterIndex persists indexes and installs them. Like CreateIndex, it takes
+// ownership of each index and replaces its param lists by shared, read-only
+// lists, so the caller must not use the indexes afterwards.
 func (m *IndexMeta) AlterIndex(ctx context.Context, indexes ...*model.Index) error {
 	err := m.Catalog.AlterIndexes(ctx, indexes)
 	if err != nil {
@@ -850,7 +873,8 @@ func (m *IndexMeta) GetIndexedSegments(collectionID int64, segmentIDs, fieldIDs 
 	return ret
 }
 
-// GetIndexesForCollection gets all indexes info with the specified collection.
+// GetIndexesForCollection returns the live indexes of the collection, all of
+// them when indexName is empty.
 func (m *IndexMeta) GetIndexesForCollection(collID UniqueID, indexName string) []*model.Index {
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
@@ -861,7 +885,7 @@ func (m *IndexMeta) GetIndexesForCollection(collID UniqueID, indexName string) [
 			continue
 		}
 		if indexName == "" || indexName == index.IndexName {
-			indexInfos = append(indexInfos, model.CloneIndex(index))
+			indexInfos = append(indexInfos, index)
 		}
 	}
 	return indexInfos
@@ -875,13 +899,13 @@ func (m *IndexMeta) GetIndexesByID(collectionID int64, ids []int64) []*model.Ind
 	result := make([]*model.Index, 0, len(ids))
 	for _, id := range ids {
 		if index := m.Indexes[collectionID][id]; index != nil {
-			result = append(result, model.CloneIndex(index))
+			result = append(result, index)
 		}
 	}
 	return result
 }
 
-// ListAllIndexes returns a clone of every index that is not deleted, across all
+// ListAllIndexes returns every index that is not deleted, across all
 // collections. Used by the feature usage report.
 func (m *IndexMeta) ListAllIndexes() []*model.Index {
 	m.fieldIndexLock.RLock()
@@ -893,12 +917,14 @@ func (m *IndexMeta) ListAllIndexes() []*model.Index {
 			if index.IsDeleted {
 				continue
 			}
-			out = append(out, model.CloneIndex(index))
+			out = append(out, index)
 		}
 	}
 	return out
 }
 
+// GetFieldIndexes returns the live indexes of the field, all of them when
+// indexName is empty.
 func (m *IndexMeta) GetFieldIndexes(collID, fieldID UniqueID, indexName string) []*model.Index {
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
@@ -909,7 +935,7 @@ func (m *IndexMeta) GetFieldIndexes(collID, fieldID UniqueID, indexName string) 
 			continue
 		}
 		if indexName == "" || indexName == index.IndexName {
-			indexInfos = append(indexInfos, model.CloneIndex(index))
+			indexInfos = append(indexInfos, index)
 		}
 	}
 	return indexInfos
@@ -945,9 +971,11 @@ func (m *IndexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 		if !ok || index.IsDeleted {
 			continue
 		}
-		clonedIndex := model.CloneIndex(index)
-		clonedIndex.IsDeleted = true
-		indexes = append(indexes, clonedIndex)
+		// Copy-on-write: the stored definition is shared with readers. A
+		// shallow copy suffices; its param lists stay shared, read-only.
+		deleted := *index
+		deleted.IsDeleted = true
+		indexes = append(indexes, &deleted)
 	}
 	m.fieldIndexLock.RUnlock()
 	if len(indexes) == 0 {
@@ -1039,7 +1067,7 @@ func (m *IndexMeta) GetQueryViewIndexSnapshot(collectionID UniqueID, segmentIDs 
 	indexes := make([]*model.Index, 0, len(m.Indexes[collectionID]))
 	for _, index := range m.Indexes[collectionID] {
 		if !index.IsDeleted {
-			indexes = append(indexes, model.CloneIndex(index))
+			indexes = append(indexes, index)
 		}
 	}
 	segmentIndexes := make(map[int64]map[UniqueID]*model.SegmentIndex, len(segmentIDs))
@@ -1123,6 +1151,7 @@ func (m *IndexMeta) GetIndexNameByID(collID, indexID UniqueID) string {
 	return ""
 }
 
+// GetIndexParams returns the stored IndexParams of the index.
 func (m *IndexMeta) GetIndexParams(collID, indexID UniqueID) []*commonpb.KeyValuePair {
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
@@ -1135,15 +1164,10 @@ func (m *IndexMeta) GetIndexParams(collID, indexID UniqueID) []*commonpb.KeyValu
 	if !ok {
 		return nil
 	}
-	indexParams := make([]*commonpb.KeyValuePair, 0, len(index.IndexParams))
-
-	for _, param := range index.IndexParams {
-		indexParams = append(indexParams, proto.Clone(param).(*commonpb.KeyValuePair))
-	}
-
-	return indexParams
+	return index.IndexParams
 }
 
+// GetTypeParams returns the stored TypeParams of the index.
 func (m *IndexMeta) GetTypeParams(collID, indexID UniqueID) []*commonpb.KeyValuePair {
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
@@ -1156,13 +1180,7 @@ func (m *IndexMeta) GetTypeParams(collID, indexID UniqueID) []*commonpb.KeyValue
 	if !ok {
 		return nil
 	}
-	typeParams := make([]*commonpb.KeyValuePair, 0, len(index.TypeParams))
-
-	for _, param := range index.TypeParams {
-		typeParams = append(typeParams, proto.Clone(param).(*commonpb.KeyValuePair))
-	}
-
-	return typeParams
+	return index.TypeParams
 }
 
 func (m *IndexMeta) GetIndexJob(buildID UniqueID) (*model.SegmentIndex, bool) {
@@ -1513,6 +1531,7 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 	return staged, nil
 }
 
+// GetDeletedIndexes returns the logically deleted indexes.
 func (m *IndexMeta) GetDeletedIndexes() []*model.Index {
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
@@ -1631,24 +1650,30 @@ func (m *IndexMeta) GetUnindexedSegments(collectionID int64, segmentIDs []int64)
 	return lo.Without(segmentIDs, indexed...)
 }
 
+// AllDenseWithDiskIndex reports whether every dense vector field (struct
+// vector sub-fields included, sparse excluded) has at least one live index
+// and all of its live indexes are disk indexes.
 func (m *IndexMeta) AllDenseWithDiskIndex(collectionID int64, schema *schemapb.CollectionSchema) bool {
-	indexInfos := m.GetIndexesForCollection(collectionID, "")
-
-	// dense vector fields only, struct vector sub-fields included
-	vectorFields := lo.Filter(typeutil.GetVectorFieldSchemas(schema), func(field *schemapb.FieldSchema, _ int) bool {
-		return !typeutil.IsSparseFloatVectorType(field.GetDataType())
-	})
-	fieldIndexTypes := lo.SliceToMap(indexInfos, func(t *model.Index) (int64, indexparamcheck.IndexType) {
-		return t.FieldID, meta.GetIndexType(t.IndexParams)
-	})
-	vectorFieldsWithDiskIndex := lo.Filter(vectorFields, func(field *schemapb.FieldSchema, _ int) bool {
-		if indexType, ok := fieldIndexTypes[field.FieldID]; ok {
-			return vecindexmgr.GetVecIndexMgrInstance().IsDiskVecIndex(indexType)
+	// allDisk[fieldID] is set for every field with a live index, and true
+	// while all of that field's live indexes are disk indexes.
+	mgr := vecindexmgr.GetVecIndexMgrInstance()
+	allDisk := make(map[int64]bool)
+	for _, idx := range m.GetIndexesForCollection(collectionID, "") {
+		disk := mgr.IsDiskVecIndex(meta.GetIndexType(idx.IndexParams))
+		if prev, ok := allDisk[idx.FieldID]; ok {
+			disk = disk && prev
 		}
-		return false
-	})
-
-	return len(vectorFields) == len(vectorFieldsWithDiskIndex)
+		allDisk[idx.FieldID] = disk
+	}
+	for _, field := range typeutil.GetVectorFieldSchemas(schema) {
+		if typeutil.IsSparseFloatVectorType(field.GetDataType()) {
+			continue
+		}
+		if !allDisk[field.GetFieldID()] {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *IndexMeta) HasIndex(collectionID int64) bool {

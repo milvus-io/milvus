@@ -500,6 +500,56 @@ func TestServer_CreateIndex(t *testing.T) {
 	})
 }
 
+func TestSortParamsByKey(t *testing.T) {
+	kv := func(k, v string) *commonpb.KeyValuePair { return &commonpb.KeyValuePair{Key: k, Value: v} }
+	tests := []struct {
+		name string
+		from []*commonpb.KeyValuePair
+		edit func(from []*commonpb.KeyValuePair) []*commonpb.KeyValuePair
+		want []*commonpb.KeyValuePair
+	}{
+		{
+			name: "update",
+			from: []*commonpb.KeyValuePair{kv("M", "16"), kv("index_type", "HNSW"), kv("efConstruction", "200")},
+			edit: func(from []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+				return UpdateParams(nil, from, []*commonpb.KeyValuePair{kv(common.MmapEnabledKey, "true")})
+			},
+			want: []*commonpb.KeyValuePair{kv("M", "16"), kv("efConstruction", "200"), kv("index_type", "HNSW"), kv(common.MmapEnabledKey, "true")},
+		},
+		{
+			name: "delete",
+			from: []*commonpb.KeyValuePair{kv(common.MmapEnabledKey, "true"), kv("index_type", "HNSW"), kv("M", "16")},
+			edit: func(from []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+				return index.DeleteParams(from, []string{common.MmapEnabledKey})
+			},
+			want: []*commonpb.KeyValuePair{kv("M", "16"), kv("index_type", "HNSW")},
+		},
+		{
+			name: "delete all",
+			from: []*commonpb.KeyValuePair{kv(common.MmapEnabledKey, "true")},
+			edit: func(from []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+				return index.DeleteParams(from, []string{common.MmapEnabledKey})
+			},
+			want: []*commonpb.KeyValuePair{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Map iteration makes the rebuilt order random; repeat so an
+			// unsorted result would show up.
+			for i := 0; i < 20; i++ {
+				got := tt.edit(tt.from)
+				sortParamsByKey(got)
+				require.Len(t, got, len(tt.want))
+				for j := range got {
+					assert.Equal(t, tt.want[j].GetKey(), got[j].GetKey())
+					assert.Equal(t, tt.want[j].GetValue(), got[j].GetValue())
+				}
+			}
+		})
+	}
+}
+
 func TestServer_AlterIndex(t *testing.T) {
 	initStreamingSystem(t)
 	var (

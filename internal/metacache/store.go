@@ -142,7 +142,10 @@ type MetaView interface {
 type MetaStore interface {
 	MetaView
 
-	// Segments — write (in-memory only)
+	// Segments — write (in-memory only). Each top-level SegmentInfo handed
+	// to PutSegment, LoadSegments or ApplySegments must not be visible to
+	// readers yet: the store may rewrite its fields in place. Its nested
+	// messages may be shared and are never written.
 	PutSegment(segment *datapb.SegmentInfo)
 	RemoveSegment(segmentID int64)
 	LoadSegments(segments []*datapb.SegmentInfo)
@@ -211,6 +214,10 @@ type metaStore struct {
 
 	// Channel checkpoints
 	checkpoints map[string]*msgpb.MsgPosition
+
+	// prunable caches the prunable null-count fields per collection (see
+	// prunableNullCountFields).
+	prunable typeutil.ConcurrentMap[int64, *prunableEntry]
 }
 
 // NewMetaStore creates an empty, ready-to-use MetaStore that owns the
@@ -223,6 +230,9 @@ func NewMetaStore(catalog metastore.DataCoordCatalog) MetaStore {
 		checkpoints: make(map[string]*msgpb.MsgPosition),
 	}
 	s.segments.Store(newSegmentTable())
+	s.OnCollectionRemoved(func(collectionID int64) {
+		s.prunable.Remove(collectionID)
+	})
 	s.SetCollectionSource(NewCollections())
 	return s
 }
@@ -269,8 +279,12 @@ func (s *metaStore) ViewCollection(collectionID int64, read func()) {
 // --- Segment write methods (in-memory) ---
 
 // PutSegment inserts or replaces a segment and emits the matching
-// DataCoordNumSegments change.
+// DataCoordNumSegments change. Like ApplySegments and LoadSegments, it
+// normalizes segment in place (see normalizeSegment), so segment must not be
+// visible to readers yet; its nested messages may be shared and are never
+// written.
 func (s *metaStore) PutSegment(segment *datapb.SegmentInfo) {
+	s.normalizeSegment(segment)
 	s.segments.Load().apply([]*datapb.SegmentInfo{segment}, nil, nil, true)
 }
 
@@ -280,10 +294,16 @@ func (s *metaStore) RemoveSegment(segmentID int64) {
 }
 
 func (s *metaStore) ApplySegments(puts []*datapb.SegmentInfo, removes []int64, hook func()) {
+	for _, segment := range puts {
+		s.normalizeSegment(segment)
+	}
 	s.segments.Load().apply(puts, removes, hook, true)
 }
 
 func (s *metaStore) LoadSegments(segments []*datapb.SegmentInfo) {
+	for _, segment := range segments {
+		s.normalizeSegment(segment)
+	}
 	s.segments.Load().apply(segments, nil, nil, false)
 }
 
@@ -620,8 +640,10 @@ func (s *metaStore) GcConfirm(ctx context.Context, collectionID, partitionID typ
 
 // SegmentNormalizer validates and rewrites a segment loaded from the catalog
 // before it enters the store. It returns the segment to install, which may be
-// the input itself. It runs concurrently across collections, so it must be
-// safe for concurrent use.
+// the input itself. The store then rewrites the returned segment and its
+// nested messages in place, so they must not be shared with anything else.
+// It runs concurrently across collections, so it must be safe for concurrent
+// use.
 type SegmentNormalizer func(segment *datapb.SegmentInfo) (*datapb.SegmentInfo, error)
 
 // LoadFromCatalog loads segments and channel checkpoints. A non-nil normalize
@@ -659,6 +681,22 @@ func (s *metaStore) LoadFromCatalog(ctx context.Context, collectionIDs []int64, 
 					}
 				}
 			}
+			// Normalize here, in parallel and in place: the catalog
+			// decodes fresh protos for this load, and normalize must not
+			// return shared ones, so no one else sees these segments or
+			// their nested messages yet. The collection is looked up once,
+			// and its prunable fields on its first segment with null
+			// counts.
+			coll, _ := s.GetCollection(collID)
+			vchannels := vchannelsOf(coll)
+			var prunable map[int64]struct{}
+			prunableLoaded := false
+			for _, segment := range segments {
+				if !prunableLoaded && len(segment.GetStats().GetNullCounts()) > 0 {
+					prunable, prunableLoaded = s.prunableFieldsOf(collID, coll), true
+				}
+				normalizeWith(segment, vchannels, prunable, false)
+			}
 			collectionSegments[i] = segments
 			return nil, nil
 		}))
@@ -666,8 +704,9 @@ func (s *metaStore) LoadFromCatalog(ctx context.Context, collectionIDs []int64, 
 	if err := conc.AwaitAll(futures...); err != nil {
 		return err
 	}
+	// Install without LoadSegments: the segments are normalized already.
 	for _, segments := range collectionSegments {
-		s.LoadSegments(segments)
+		s.segments.Load().apply(segments, nil, nil, false)
 	}
 
 	s.emitSegmentMetrics()
