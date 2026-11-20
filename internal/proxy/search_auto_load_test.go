@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -56,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestEnsureCollectionReadyUsesOneRPC(t *testing.T) {
@@ -456,14 +458,13 @@ func TestAutoLoadBypassesSaturatedTaskQueues(t *testing.T) {
 type dqlRetryServer struct {
 	viewpb.UnimplementedQueryPlanServiceServer
 	viewpb.UnimplementedViewQueryServiceServer
-	loaded    atomic.Bool
-	injected  atomic.Bool
-	plans     atomic.Int32
-	searches  atomic.Int32
-	queries   atomic.Int32
-	failPhase string
-	// retrieved is what QueryOnView returns.
-	retrieved *schemapb.IDs
+	loaded         atomic.Bool
+	injected       atomic.Bool
+	plans          atomic.Int32
+	searches       atomic.Int32
+	queries        atomic.Int32
+	failPhase      string
+	retrieveResult *internalpb.RetrieveResults
 }
 
 func (s *dqlRetryServer) failure(phase string) error {
@@ -511,7 +512,35 @@ func (s *dqlRetryServer) QueryOnView(context.Context, *viewpb.QueryOnViewRequest
 	if err := s.failure("query"); err != nil {
 		return nil, err
 	}
-	return &viewpb.QueryOnViewResponse{LegacyResults: &internalpb.RetrieveResults{Status: merr.Success(), Ids: s.retrieved}}, nil
+	return &viewpb.QueryOnViewResponse{LegacyResults: s.retrieveResult}, nil
+}
+
+func (s *dqlRetryServer) SearchOnViewStream(stream viewpb.ViewQueryService_SearchOnViewStreamServer) error {
+	initial, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	resp, err := s.SearchOnView(stream.Context(), initial.GetRequest())
+	if err != nil {
+		return err
+	}
+	return stream.Send(&viewpb.SearchOnViewStreamResponse{
+		Payload: &viewpb.SearchOnViewStreamResponse_Chunk{Chunk: resp.GetLegacyResults()},
+	})
+}
+
+func (s *dqlRetryServer) QueryOnViewStream(stream viewpb.ViewQueryService_QueryOnViewStreamServer) error {
+	initial, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	resp, err := s.QueryOnView(stream.Context(), initial.GetRequest())
+	if err != nil {
+		return err
+	}
+	return stream.Send(&viewpb.QueryOnViewStreamResponse{
+		Payload: &viewpb.QueryOnViewStreamResponse_Chunk{Chunk: resp.GetLegacyResults()},
+	})
 }
 
 type dqlRetryPlanClient struct {
@@ -531,7 +560,6 @@ func (c *dqlRetryPlanClient) GetQueryPlan(ctx context.Context, _ qviews.ShardID,
 }
 
 type dqlRetryServiceClient struct {
-	queryclient.ViewQueryServiceClient
 	client viewpb.ViewQueryServiceClient
 }
 
@@ -543,6 +571,19 @@ func (c *dqlRetryServiceClient) SearchOnView(ctx context.Context, _ qviews.WorkN
 func (c *dqlRetryServiceClient) QueryOnView(ctx context.Context, _ qviews.WorkNode, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
 	resp, err := c.client.QueryOnView(ctx, req)
 	return resp, viewerror.ConvertViewError("QueryOnView", err)
+}
+
+func (c *dqlRetryServiceClient) StatisticsOnView(ctx context.Context, _ qviews.WorkNode, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error) {
+	resp, err := c.client.StatisticsOnView(ctx, req)
+	return resp, viewerror.ConvertViewError("StatisticsOnView", err)
+}
+
+func (c *dqlRetryServiceClient) SearchOnViewStream(ctx context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (reduce.ReduceStream[*internalpb.SearchResults], error) {
+	return reduce.NewSearchGRPCReduceStream(ctx, c.client, req)
+}
+
+func (c *dqlRetryServiceClient) QueryOnViewStream(ctx context.Context, _ qviews.WorkNode, req *viewpb.QueryOnViewRequest) (reduce.ReduceStream[*internalpb.RetrieveResults], error) {
+	return reduce.NewQueryGRPCReduceStream(ctx, c.client, req)
 }
 
 type dqlRetryClient struct {
@@ -559,7 +600,7 @@ func (c *dqlRetryClient) ResolveVChannels(context.Context, int64) ([]string, err
 
 func newDQLRetryClient(t *testing.T, phase string, loadInfo queryclient.LoadInfoClient) *dqlRetryClient {
 	t.Helper()
-	server := &dqlRetryServer{failPhase: phase}
+	server := &dqlRetryServer{failPhase: phase, retrieveResult: &internalpb.RetrieveResults{Status: merr.Success()}}
 	server.loaded.Store(true)
 	listener := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
@@ -678,6 +719,7 @@ func TestDQLAutoLoadRetryThroughTaskAndGRPC(t *testing.T) {
 					return err
 				}
 				dql.SetQueryReadSchemaForTest(qt, schema)
+				qt.Limit = typeutil.Unlimited
 				qt.CollectionID = 100
 				return nil
 			}).Build()
