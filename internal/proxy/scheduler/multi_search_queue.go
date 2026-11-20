@@ -53,11 +53,17 @@ func (queue *MSearchTaskQueue) Enqueue(t taskmodel.Task) error {
 	if queue.ctx.Err() != nil {
 		return merr.WrapErrServiceUnavailableMsg("MultiSearch scheduler is stopping")
 	}
-	err := queue.enqueueWithContext(t)
+	element, err := queue.enqueue(t)
 	if IsAdmissionQueueFull(err) {
 		return queue.fullError()
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	t.SetOnContextDone(func() {
+		queue.removeUnissuedTask(element)
+	})
+	return nil
 }
 
 func (sched *TaskScheduler) multiSearchLoop() {

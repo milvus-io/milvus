@@ -2936,6 +2936,8 @@ type proxyConfig struct {
 
 	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
+	EnableReduceStream     ParamItem `refreshable:"true"`
+	ReduceStreamChunkBytes ParamItem `refreshable:"true"`
 
 	HybridSearchRequeryPolicy     ParamItem `refreshable:"true"`
 	SearchPlaceholderLogRateLimit ParamItem `refreshable:"true"`
@@ -3716,6 +3718,32 @@ Disabled if the value is less or equal to 0.`,
 		},
 	}
 	p.SearchPlaceholderLogMaxBytes.Init(base.mgr)
+
+	p.EnableReduceStream = ParamItem{
+		Key:          "proxy.queryView.enableReduceStream",
+		Version:      "3.1.0",
+		DefaultValue: "true",
+		Doc:          "Refreshable. Route supported new requests through Streaming Reduce.",
+		Export:       true,
+	}
+	p.EnableReduceStream.Init(base.mgr)
+
+	const defaultReduceStreamChunkBytes = "262144"
+	p.ReduceStreamChunkBytes = ParamItem{
+		Key:          "proxy.queryView.reduceStreamChunkBytes",
+		Version:      "3.1.0",
+		DefaultValue: defaultReduceStreamChunkBytes,
+		Doc:          "Refreshable. Reducible-payload byte threshold captured once per request. Invalid or non-positive values use the default of 262144 bytes.",
+		Export:       true,
+		Formatter: func(value string) string {
+			size, err := strconv.Atoi(value)
+			if err != nil || size <= 0 {
+				return defaultReduceStreamChunkBytes
+			}
+			return value
+		},
+	}
+	p.ReduceStreamChunkBytes.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

@@ -32,11 +32,11 @@ func requireBusinessError(t *testing.T, err error) {
 	require.False(t, errors.As(err, &se))
 	_, isRPC := status.FromError(err)
 	require.False(t, isRPC)
-	require.Equal(t, merr.Status(err), merr.Status(toMilvusError(err)), "conversion must be idempotent")
+	require.Equal(t, merr.Status(err), merr.Status(ToMilvusError(err)), "conversion must be idempotent")
 }
 
 func TestToMilvusErrorPreservesBusinessStatus(t *testing.T) {
-	require.NoError(t, toMilvusError(nil))
+	require.NoError(t, ToMilvusError(nil))
 	for _, source := range []error{
 		merr.SegcoreError(int32(merr.CodeInvalidParameter), "invalid ef"),
 		merr.Wrap(merr.WrapErrFieldNotFound(100), "query field"),
@@ -50,7 +50,7 @@ func TestToMilvusErrorPreservesBusinessStatus(t *testing.T) {
 			streamingstatus.ConvertStreamingError("GetQueryPlan", viewerror.NewGRPCStatusFromError(source).Err()),
 			merr.Wrap(viewerror.ConvertViewError("SearchOnView", viewerror.NewGRPCStatusFromError(source).Err()), "phase 2"),
 		} {
-			got := toMilvusError(wire)
+			got := ToMilvusError(wire)
 			requireBusinessError(t, got)
 			require.Equal(t, merr.Status(source), merr.Status(got))
 		}
@@ -69,7 +69,7 @@ func TestToMilvusErrorProtocolMapping(t *testing.T) {
 		{viewerror.NewUnknownError("unexpected"), merr.ErrServiceInternal},
 	} {
 		for _, source := range []error{tc.source, viewerror.ConvertViewError("QueryOnView", viewerror.NewGRPCStatusFromViewError(tc.source).Err())} {
-			got := toMilvusError(merr.Wrap(source, "dispatch"))
+			got := ToMilvusError(merr.Wrap(source, "dispatch"))
 			requireBusinessError(t, got)
 			require.True(t, errors.Is(got, tc.want))
 			require.Equal(t, merr.SystemError, merr.GetErrorType(got))
@@ -96,7 +96,7 @@ func TestToMilvusErrorProtocolMapping(t *testing.T) {
 		}
 		se := streamingstatus.New(code, "channel detail")
 		for _, source := range []error{se, streamingstatus.ConvertStreamingError("Query", streamingstatus.NewGRPCStatusFromStreamingError(se).Err())} {
-			got := toMilvusError(source)
+			got := ToMilvusError(source)
 			requireBusinessError(t, got)
 			require.True(t, errors.Is(got, want))
 			require.Equal(t, merr.SystemError, merr.GetErrorType(got))
@@ -122,7 +122,7 @@ func TestToMilvusErrorCancellationAndTransport(t *testing.T) {
 			viewerror.ConvertViewError("QueryOnView", businessWire.Err()),
 			streamingstatus.ConvertStreamingError("GetQueryPlan", businessWire.Err()),
 		} {
-			got := toMilvusError(source)
+			got := ToMilvusError(source)
 			requireBusinessError(t, got)
 			require.True(t, errors.Is(got, tc.cause))
 			require.Equal(t, tc.code, merr.Code(got))
@@ -137,7 +137,7 @@ func TestToMilvusErrorCancellationAndTransport(t *testing.T) {
 		{io.EOF, merr.ErrServiceUnavailable},
 		{errors.New("untyped failure"), merr.ErrServiceInternal},
 	} {
-		got := toMilvusError(tc.source)
+		got := ToMilvusError(tc.source)
 		requireBusinessError(t, got)
 		require.True(t, errors.Is(got, tc.want))
 	}
@@ -198,7 +198,7 @@ func TestToMilvusErrorFormatsRPCContext(t *testing.T) {
 		detailed := viewerror.AttachRPCContext(wire, info)
 		// Both local error chains and serialized RPC details retain the context.
 		for _, input := range []error{detailed, status.FromProto(status.Convert(detailed).Proto()).Err()} {
-			got := toMilvusError(input)
+			got := ToMilvusError(input)
 			requireBusinessError(t, got)
 			require.Equal(t, tc.prefix+source.Error(), got.Error())
 			require.Equal(t, merr.Code(source), merr.Code(got))
@@ -213,8 +213,8 @@ func TestToMilvusErrorFormatsRPCContext(t *testing.T) {
 		merr.WrapErrParameterInvalidMsg("bad expression"),
 		streamingstatus.NewGRPCStatusFromStreamingError(streamingstatus.NewOnShutdownError("closing")).Err(),
 	} {
-		got := toMilvusError(viewerror.AttachRPCContext(source, &viewpb.RPCRequestContext{Method: viewpb.ViewQueryService_SearchOnView_FullMethodName, Target: &viewpb.RPCRequestContext_QueryNode{QueryNode: &viewpb.QueryNodeRequestContext{NodeId: 11}}}))
-		plain := toMilvusError(source)
+		got := ToMilvusError(viewerror.AttachRPCContext(source, &viewpb.RPCRequestContext{Method: viewpb.ViewQueryService_SearchOnView_FullMethodName, Target: &viewpb.RPCRequestContext_QueryNode{QueryNode: &viewpb.QueryNodeRequestContext{NodeId: 11}}}))
+		plain := ToMilvusError(source)
 		requireBusinessError(t, got)
 		require.Equal(t, merr.Code(plain), merr.Code(got))
 		require.Equal(t, merr.IsRetryableErr(plain), merr.IsRetryableErr(got))
@@ -237,7 +237,7 @@ func TestToMilvusErrorPreservesStreamingContext(t *testing.T) {
 		streamingstatus.NewRateLimitRejected("busy"),
 	} {
 		t.Run(source.Code.String(), func(t *testing.T) {
-			plain := toMilvusError(source)
+			plain := ToMilvusError(source)
 			for _, input := range []error{
 				source,
 				merr.Wrap(source, "local provider"),
@@ -246,7 +246,7 @@ func TestToMilvusErrorPreservesStreamingContext(t *testing.T) {
 				attached := viewerror.AttachRPCContext(input, info)
 				require.True(t, errors.Is(attached, input))
 				for _, result := range []error{attached, status.FromProto(status.Convert(attached).Proto()).Err()} {
-					got := toMilvusError(result)
+					got := ToMilvusError(result)
 					requireBusinessError(t, got)
 					require.Equal(t, merr.Code(plain), merr.Code(got))
 					require.Equal(t, merr.IsRetryableErr(plain), merr.IsRetryableErr(got))

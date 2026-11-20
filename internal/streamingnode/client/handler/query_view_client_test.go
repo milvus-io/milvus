@@ -78,6 +78,70 @@ func TestHandlerClientViewQueryRoutesByStreamingWorkNode(t *testing.T) {
 	require.Same(t, searchResp, resp)
 }
 
+func TestHandlerClientSearchOnViewStreamRoutesByStreamingWorkNode(t *testing.T) {
+	searchReq := &viewpb.SearchOnViewRequest{}
+	clientStream := &fakeSearchOnViewClientStream{}
+	viewQueryService := &fakeViewQueryServiceClient{
+		searchOnViewStream: func(ctx context.Context) (viewpb.ViewQueryService_SearchOnViewStreamClient, error) {
+			serverID, ok := contextutil.GetPickServerID(ctx)
+			require.True(t, ok)
+			require.Equal(t, int64(101), serverID)
+			pchannel, err := decodeOutgoingQueryViewPChannel(ctx)
+			require.NoError(t, err)
+			require.Equal(t, types.PChannelInfo{
+				Name:       "p0",
+				Term:       1,
+				AccessMode: types.AccessModeRW,
+			}, pchannel)
+			clientStream.ctx = ctx
+			return clientStream, nil
+		},
+	}
+	client := newTestHandlerClient(nil, viewQueryService, nil)
+
+	stream, err := client.QueryViewClient().SearchOnViewStream(context.Background(), types.PChannelInfo{Name: "p0"}, searchReq)
+
+	require.NoError(t, err)
+	require.Same(t, searchReq, clientStream.sent.GetRequest())
+	chunk, err := stream.Recv()
+	require.Nil(t, chunk)
+	require.ErrorIs(t, err, io.EOF)
+	require.NoError(t, stream.Close())
+	require.Equal(t, 1, clientStream.closeCalls)
+}
+
+func TestHandlerClientQueryOnViewStreamRoutesByStreamingWorkNode(t *testing.T) {
+	queryReq := &viewpb.QueryOnViewRequest{}
+	clientStream := &fakeQueryOnViewClientStream{}
+	viewQueryService := &fakeViewQueryServiceClient{
+		queryOnViewStream: func(ctx context.Context) (viewpb.ViewQueryService_QueryOnViewStreamClient, error) {
+			serverID, ok := contextutil.GetPickServerID(ctx)
+			require.True(t, ok)
+			require.Equal(t, int64(101), serverID)
+			pchannel, err := decodeOutgoingQueryViewPChannel(ctx)
+			require.NoError(t, err)
+			require.Equal(t, types.PChannelInfo{
+				Name:       "p0",
+				Term:       1,
+				AccessMode: types.AccessModeRW,
+			}, pchannel)
+			clientStream.ctx = ctx
+			return clientStream, nil
+		},
+	}
+	client := newTestHandlerClient(nil, viewQueryService, nil)
+
+	stream, err := client.QueryViewClient().QueryOnViewStream(context.Background(), types.PChannelInfo{Name: "p0"}, queryReq)
+
+	require.NoError(t, err)
+	require.Same(t, queryReq, clientStream.sent.GetRequest())
+	chunk, err := stream.Recv()
+	require.Nil(t, chunk)
+	require.ErrorIs(t, err, io.EOF)
+	require.NoError(t, stream.Close())
+	require.Equal(t, 1, clientStream.closeCalls)
+}
+
 func TestHandlerClientPreservesViewQueryRPCError(t *testing.T) {
 	viewErr := viewerror.NewViewNotFound("missing view")
 	viewQueryService := &fakeViewQueryServiceClient{
@@ -177,15 +241,105 @@ func (c *fakeQueryPlanServiceClient) GetMVCCTimestamp(ctx context.Context, req *
 type fakeViewQueryServiceClient struct {
 	viewpb.ViewQueryServiceClient // Retain the unused Requery RPC contract.
 	searchOnView                  func(context.Context, *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
+	searchOnViewStream            func(context.Context) (viewpb.ViewQueryService_SearchOnViewStreamClient, error)
 	queryOnView                   func(context.Context, *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
+	queryOnViewStream             func(context.Context) (viewpb.ViewQueryService_QueryOnViewStreamClient, error)
 }
 
 func (c *fakeViewQueryServiceClient) SearchOnView(ctx context.Context, req *viewpb.SearchOnViewRequest, _ ...grpc.CallOption) (*viewpb.SearchOnViewResponse, error) {
 	return c.searchOnView(ctx, req)
 }
 
+func (c *fakeViewQueryServiceClient) SearchOnViewStream(ctx context.Context, _ ...grpc.CallOption) (viewpb.ViewQueryService_SearchOnViewStreamClient, error) {
+	return c.searchOnViewStream(ctx)
+}
+
 func (c *fakeViewQueryServiceClient) QueryOnView(ctx context.Context, req *viewpb.QueryOnViewRequest, _ ...grpc.CallOption) (*viewpb.QueryOnViewResponse, error) {
 	return c.queryOnView(ctx, req)
+}
+
+func (c *fakeViewQueryServiceClient) QueryOnViewStream(ctx context.Context, _ ...grpc.CallOption) (viewpb.ViewQueryService_QueryOnViewStreamClient, error) {
+	return c.queryOnViewStream(ctx)
+}
+
+type fakeSearchOnViewClientStream struct {
+	ctx        context.Context
+	sent       *viewpb.SearchOnViewStreamRequest
+	closeCalls int
+}
+
+func (s *fakeSearchOnViewClientStream) Send(request *viewpb.SearchOnViewStreamRequest) error {
+	s.sent = request
+	return nil
+}
+
+func (*fakeSearchOnViewClientStream) Recv() (*viewpb.SearchOnViewStreamResponse, error) {
+	return nil, io.EOF
+}
+
+func (*fakeSearchOnViewClientStream) Header() (metadata.MD, error) {
+	return nil, nil
+}
+
+func (*fakeSearchOnViewClientStream) Trailer() metadata.MD {
+	return nil
+}
+
+func (s *fakeSearchOnViewClientStream) CloseSend() error {
+	s.closeCalls++
+	return nil
+}
+
+func (s *fakeSearchOnViewClientStream) Context() context.Context {
+	return s.ctx
+}
+
+func (*fakeSearchOnViewClientStream) SendMsg(interface{}) error {
+	return nil
+}
+
+func (*fakeSearchOnViewClientStream) RecvMsg(interface{}) error {
+	return io.EOF
+}
+
+type fakeQueryOnViewClientStream struct {
+	ctx        context.Context
+	sent       *viewpb.QueryOnViewStreamRequest
+	closeCalls int
+}
+
+func (s *fakeQueryOnViewClientStream) Send(request *viewpb.QueryOnViewStreamRequest) error {
+	s.sent = request
+	return nil
+}
+
+func (*fakeQueryOnViewClientStream) Recv() (*viewpb.QueryOnViewStreamResponse, error) {
+	return nil, io.EOF
+}
+
+func (*fakeQueryOnViewClientStream) Header() (metadata.MD, error) {
+	return nil, nil
+}
+
+func (*fakeQueryOnViewClientStream) Trailer() metadata.MD {
+	return nil
+}
+
+func (s *fakeQueryOnViewClientStream) CloseSend() error {
+	s.closeCalls++
+	return nil
+}
+
+func (s *fakeQueryOnViewClientStream) Context() context.Context {
+	return s.ctx
+}
+
+func (*fakeQueryOnViewClientStream) SendMsg(interface{}) error {
+	return nil
+}
+
+func (*fakeQueryOnViewClientStream) RecvMsg(interface{}) error {
+	return io.EOF
 }
 
 type fakeViewSyncServiceClient struct {

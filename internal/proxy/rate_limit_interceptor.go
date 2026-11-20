@@ -193,7 +193,7 @@ func GetMultiSearchQuotaInfo(ctx context.Context, metaCache Cache, request *milv
 		return GetRequestInfo(ctx, metaCache, request)
 	}
 	dbID, parts, err := resolveQuotaPartitions(ctx, metaCache, request, paramtable.Get().ProxyCfg.PartitionNameRegexp.GetAsBool())
-	return dbID, parts, internalpb.RateType_DQLSearch, int(request.GetNq()), err
+	return dbID, parts, internalpb.RateType_DQLSearch, int(searchRequestNq(request)), err
 }
 
 func resolveQuotaPartitions(ctx context.Context, metaCache Cache, r reqPartNames, matchPartitionPatterns bool) (int64, map[int64][]int64, error) {

@@ -23,9 +23,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -180,9 +182,16 @@ func TestTaskScheduler_NestedDQLAdmissionAndClear(t *testing.T) {
 	require.False(t, queue.IsFull(), "a full nested queue must allow ordinary Search")
 	require.NoError(t, queue.Enqueue(search))
 	require.True(t, queue.IsFull())
-	require.ErrorIs(t, queue.Enqueue(newDefaultMockDqlTask()), merr.ErrServiceTooManyRequests)
+	query := newMockDqlTask(t.Context())
+	query.name = taskmodel.QueryTaskName
+	require.ErrorIs(t, queue.Enqueue(query), merr.ErrServiceTooManyRequests)
 	require.ErrorIs(t, queue.Enqueue(highlight), merr.ErrServiceTooManyRequests)
+	require.Same(t, requery, queue.getTaskByReqID(requery.ID()))
+	require.Same(t, search, queue.getTaskByReqID(search.ID()))
 	require.EqualValues(t, 2, dqlMetrics(sched).PendingCount)
+	queue.updateMetrics()
+	pending := metrics.ProxyQueueTaskNum.WithLabelValues(paramtable.GetStringNodeID(), "dql", metrics.UnissuedIndexTaskLabel)
+	require.EqualValues(t, 2, testutil.ToFloat64(pending))
 
 	cleared := sched.ClearDQLQueue("query", "test")
 	require.EqualValues(t, 1, cleared.QueuedCleared)
@@ -206,6 +215,7 @@ func TestTaskScheduler_NestedDQLAdmissionAndClear(t *testing.T) {
 	require.ErrorIs(t, search.WaitToFinish(), context.Canceled)
 	require.ErrorIs(t, highlight.WaitToFinish(), context.Canceled)
 	require.Zero(t, dqlMetrics(sched).PendingCount)
+	require.Zero(t, testutil.ToFloat64(pending))
 	require.False(t, queue.IsFull())
 }
 
@@ -241,6 +251,8 @@ func TestTaskScheduler_QueryLoopContextDoneBeforeExecution(t *testing.T) {
 					case <-time.After(5 * time.Second):
 						t.Fatal("first task did not occupy the worker")
 					}
+
+					require.Same(t, blockingTask, sched.DqQueue.getTaskByReqID(blockingTask.ID()))
 
 					ctx, cancel := context.WithCancel(context.Background())
 					if outcome == "deadline exceeded" {

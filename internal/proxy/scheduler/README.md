@@ -7,7 +7,7 @@ task model (`taskmodel`) plus `pkg/v3`.
 
 ## Overview
 
-The proxy exposes five task queues:
+The proxy exposes four task queues:
 
 - **DdQueue** (definition) — DDL tasks such as create/drop collection, alias,
   index, database, resource-group operations.
@@ -15,14 +15,13 @@ The proxy exposes five task queues:
 - **DqQueue** (query) — search and query tasks, with a separate queue for
   requery and lexical highlight tasks. Each queue has its own dispatch loop
   and worker pool so a Search waiting on a subtask can finish even when the
-  main pool is full.
+  main pool is full. Each queue admits up to `proxy.maxTaskNum` pending
+  tasks. External Search and Query requests use the main queue.
 - **DcQueue** (control) — data-control operations such as flush.
-- **MSearchQueue** — MultiSearch batches, with 64 waiting slots and eight workers
-  independent of DQL. Workers pop only when free, so a saturated worker pool
-  leaves all waiting batches inside the admission bound.
 
-Each task is enqueued by the proxy's RPC handlers and, when picked up by its
-loop, runs `PreExecute -> Execute -> PostExecute` under bounded concurrency.
+RPC handlers and Search tasks enqueue work. Each task runs
+`PreExecute -> Execute -> PostExecute` under bounded concurrency.
+
 DML uses execution slots: a read-dependent upsert releases its slot while waiting
 for readiness or read-retry backoff, and reacquires it for every read and before
 continuing the mutation. Suspended tasks retain their stack and appear in the
@@ -36,12 +35,12 @@ acquisition, without waiting for ordinary DML to finish.
 
 ## Responsibilities
 
-1. **Queues** (`DdTaskQueue`, `DmTaskQueue`, `DqTaskQueue`, `MSearchTaskQueue`) —
-   `DcQueue` uses `DdTaskQueue`. Each maintains an unissued list and an active map, plus the enqueue/dequeue
+1. **Queues** (`DdTaskQueue`, `DmTaskQueue`, `DqTaskQueue`, `DcTaskQueue`) —
+   each maintains an unissued list and an active map, plus the enqueue/dequeue
    and task-lookup primitives.
 2. **`TaskScheduler`** — owns the queues and their loops (`definitionLoop`,
    `controlLoop`, `manipulationLoop`, and one `queryLoop` for each DQL queue),
-   plus the MSearch workers, and exposes `Start`/`Close`.
+   and exposes `Start`/`Close`.
 3. **TSO + ID allocation** — `Enqueue` allocates a timestamp (or an ID from the
    meta cache for tasks that skip timestamp allocation) before a task is
    unissued.
@@ -57,9 +56,9 @@ acquisition, without waiting for ordinary DML to finish.
 │                                                               │
 │   DdQueue ──► definitionLoop ──► processTask(Pre/Exec/Post)   │
 │   DmQueue ──► manipulationLoop ──► processTask                 │
-│   DqQueue ──► queryLoop ──► processTask                        │
+│   DqQueue (main)     ──► queryLoop ──► main pool               │
+│   DqQueue (subtasks) ──► queryLoop ──► subtask pool            │
 │   DcQueue ──► controlLoop ──► processTask                      │
-│   MSearchQueue ──► multiSearchLoop workers ──► processTask     │
 │                                                               │
 │   queues hold: unissued list · active map · TSO allocator      │
 └───────────────────────────────────────────────────────────────┘
@@ -78,16 +77,7 @@ func (s *TaskScheduler) ClearDQLQueue(taskType string, reason string) ClearTaskQ
 ```
 
 The `TaskScheduler` exposes its queues as fields (`DdQueue`, `DmQueue`,
-`DqQueue`, `DcQueue`, `MSearchQueue`) so the proxy's RPC handlers can call
-`Enqueue` directly.
-
-DQL and MSearch share `BaseTaskQueue.enqueueWithContext`: `TaskCondition`
-removes a still-queued task when its waiter returns on cancellation or expiry.
-MultiSearch derives its execution context from both the caller and
-`TaskScheduler.Context()`. `Close` cancels that context and waits for the MSearch
-workers, including searches still unwinding after a timeout response. Batch
-result finalization belongs to the concrete task; the scheduler continues to
-use the standard success-only `PreExecute -> Execute -> PostExecute` sequence.
+`DqQueue`, `DcQueue`) so the proxy's RPC handlers can call `Enqueue` directly.
 
 ## Dependency rule
 
@@ -104,3 +94,16 @@ edge stays acyclic.
 - **proxy root** (`internal/proxy/`): constructs the scheduler in `Proxy.Init`
   and enqueues concrete tasks from `impl.go` / `snapshot_impl.go`; consumes
   `GetMetrics` from `metrics_info.go`.
+
+## MultiSearch queue
+
+MultiSearch adds a fifth queue, `MSearchQueue`, for batch orchestration. Its
+64 waiting slots and eight workers are independent of DQL. Workers pop only
+when free, so a saturated worker pool leaves all waiting batches inside the
+admission bound. A canceled waiter removes its task while it is still queued.
+
+MultiSearch derives its execution context from both the caller and
+`TaskScheduler.Context()`. `Close` cancels that context and waits for the MSearch
+workers, including searches still unwinding after a timeout response. Batch
+result finalization belongs to the concrete task and the scheduler runs the
+standard success-only `PreExecute -> Execute -> PostExecute` sequence.

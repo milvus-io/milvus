@@ -214,7 +214,8 @@ func TestMultiSearchLimitsActiveItems(t *testing.T) {
 		{name: "configured below default", configured: "2", wantActive: 2},
 		{name: "configured below explicit request", configured: "3", maxConcurrency: ^uint32(0), wantActive: 3},
 		{name: "limited by batch size", configured: "32", maxConcurrency: ^uint32(0), wantActive: itemCount},
-		{name: "nonpositive maximum still makes progress", configured: "0", maxConcurrency: 8, wantActive: 1},
+		{name: "zero maximum still makes progress", configured: "0", maxConcurrency: 8, wantActive: 1},
+		{name: "negative maximum still makes progress", configured: "-1", maxConcurrency: 8, wantActive: 1},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.configured != "" {

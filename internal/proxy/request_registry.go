@@ -166,7 +166,7 @@ func searchRequestInfo(request *milvuspb.SearchRequest) reqregistry.Info {
 		Type:           reqregistry.TypeSearch,
 		DBName:         request.GetDbName(),
 		CollectionName: request.GetCollectionName(),
-		NQ:             request.GetNq(),
+		NQ:             searchRequestNq(request),
 		TopK:           kvInt64(request.GetSearchParams(), common.TopKKey, LimitKey),
 		Expr:           request.GetDsl(),
 	}
@@ -176,7 +176,7 @@ func hybridSearchRequestInfo(request *milvuspb.HybridSearchRequest) reqregistry.
 	var nq, topk int64
 	expr := ""
 	for _, sub := range request.GetRequests() {
-		nq += sub.GetNq()
+		nq += searchRequestNq(sub)
 		if k := kvInt64(sub.GetSearchParams(), common.TopKKey, LimitKey); k > topk {
 			topk = k
 		}

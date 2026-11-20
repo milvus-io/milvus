@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestSearchTaskCheckNqMalformedPlaceholder(t *testing.T) {
@@ -99,6 +100,142 @@ func TestSearchTaskCheckNqCompatibility(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, int64(2), nq)
 			assert.Equal(t, nq, task.request.GetNq())
+		})
+	}
+}
+
+// A declared nq that disagrees with the placeholder group is refused by the
+// Proxy; it used to be forwarded and fail on a query node.
+func TestSearchTaskCheckNqMismatch(t *testing.T) {
+	placeholder, err := proto.Marshal(&commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{
+			{Tag: "$0", Type: commonpb.PlaceholderType_FloatVector, Values: [][]byte{{0, 0, 0, 0}, {0, 0, 0, 0}}},
+		},
+	})
+	require.NoError(t, err)
+	for _, advanced := range []bool{false, true} {
+		for _, nq := range []int64{1, 3} {
+			request := &milvuspb.SearchRequest{
+				Nq:          nq,
+				SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: placeholder},
+			}
+			if advanced {
+				request = ConvertHybridSearchToSearch(&milvuspb.HybridSearchRequest{
+					Requests: []*milvuspb.SearchRequest{request},
+				})
+			}
+			task := &SearchTask{
+				SearchRequest: &internalpb.SearchRequest{IsAdvanced: advanced},
+				request:       request,
+			}
+			_, err := task.checkNq(context.Background())
+			require.ErrorIs(t, err, merr.ErrParameterInvalid, "advanced=%v nq=%d", advanced, nq)
+			assert.Contains(t, err.Error(), "does not match the 2 query rows")
+		}
+	}
+
+	// A group the row counter refuses is judged by proto.Unmarshal, with its
+	// error: the counter alone never turns a request away.
+	invalidTag := []byte{0x0a, 0x03, 0x0a, 0x01, 0xff}
+	_, err = resolveNq(1, invalidTag, "failed to unmarshal placeholder group")
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorIs(t, err, proto.Error)
+	_, _, convertErr := ConvertPlaceholderGroup(invalidTag, &schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector})
+	require.Error(t, convertErr, "the pre-existing decode refuses the same bytes")
+
+	// Nothing to compare a declared nq with: left to the query nodes, as before.
+	nq, err := resolveNq(4, nil, "unused")
+	require.NoError(t, err)
+	assert.Equal(t, int64(4), nq)
+}
+
+func TestNormalizeMultiSearchNQ(t *testing.T) {
+	limit := &paramtable.Get().QuotaConfig.NQLimit
+	previous := limit.SwapTempValue("2")
+	t.Cleanup(func() { limit.SwapTempValue(previous) })
+
+	placeholderInput := func(values ...[]byte) *milvuspb.SearchRequest_PlaceholderGroup {
+		group, err := proto.Marshal(&commonpb.PlaceholderGroup{
+			Placeholders: []*commonpb.PlaceholderValue{
+				{Tag: "$0", Type: commonpb.PlaceholderType_FloatVector, Values: values},
+			},
+		})
+		require.NoError(t, err)
+		return &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: group}
+	}
+	idInput := func(ids ...int64) *milvuspb.SearchRequest_Ids {
+		return &milvuspb.SearchRequest_Ids{Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}},
+		}}
+	}
+
+	row := []byte{0, 0, 0, 0}
+	twoRows := placeholderInput(row, row)
+	malformed := &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: []byte{0xff}}
+	for _, tc := range []struct {
+		name      string
+		request   *milvuspb.SearchRequest
+		wantNq    int64
+		wantError string
+		wantCause error
+	}{
+		{name: "infer nq", request: &milvuspb.SearchRequest{SearchInput: twoRows}, wantNq: 2},
+		{name: "matching nq", request: &milvuspb.SearchRequest{Nq: 2, SearchInput: twoRows}, wantNq: 2},
+		{
+			name: "mismatched nq", request: &milvuspb.SearchRequest{Nq: 1, SearchInput: twoRows},
+			wantError: "nq 1 does not match the 2 query rows in the placeholder group",
+		},
+		{name: "negative nq", request: &milvuspb.SearchRequest{Nq: -1, SearchInput: twoRows}, wantError: "nq must be nonnegative"},
+		{name: "hybrid", request: &milvuspb.SearchRequest{
+			SearchInput: twoRows, SubReqs: []*milvuspb.SubSearchRequest{{PlaceholderGroup: twoRows.PlaceholderGroup}},
+		}, wantError: "MultiSearch supports only ordinary Search requests"},
+		{name: "empty input", request: &milvuspb.SearchRequest{}, wantError: "should be in range [1, 2], but got 0"},
+		{name: "empty group with declared nq", request: &milvuspb.SearchRequest{
+			Nq: 1, SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{},
+		}, wantError: "should be in range [1, 2], but got 0"},
+		{
+			name: "placeholder without rows", request: &milvuspb.SearchRequest{Nq: 1, SearchInput: placeholderInput()},
+			wantError: "should be in range [1, 2], but got 0",
+		},
+		{
+			name: "malformed group", request: &milvuspb.SearchRequest{SearchInput: malformed},
+			wantError: "failed to unmarshal placeholder group", wantCause: proto.Error,
+		},
+		{
+			name: "malformed group with declared nq", request: &milvuspb.SearchRequest{Nq: 1, SearchInput: malformed},
+			wantError: "failed to unmarshal placeholder group", wantCause: proto.Error,
+		},
+		{
+			name: "too many rows", request: &milvuspb.SearchRequest{SearchInput: placeholderInput(row, row, row)},
+			wantError: "should be in range [1, 2], but got 3",
+		},
+		{name: "charge by integer ID count", request: &milvuspb.SearchRequest{Nq: 1, SearchInput: idInput(10, 20)}, wantNq: 2},
+		{name: "charge by string ID count", request: &milvuspb.SearchRequest{SearchInput: &milvuspb.SearchRequest_Ids{
+			Ids: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"a", "b"}}}},
+		}}, wantNq: 2},
+		{
+			name: "empty IDs", request: &milvuspb.SearchRequest{Nq: 1, SearchInput: idInput()},
+			wantError: "search by primary key requires at least one ID",
+		},
+		{
+			name: "too many IDs", request: &milvuspb.SearchRequest{Nq: 1, SearchInput: idInput(10, 20, 30)},
+			wantError: "should be in range [1, 2], but got 3",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			declared := tc.request.GetNq()
+			err := NormalizeMultiSearchNQ(tc.request)
+			if tc.wantError == "" {
+				require.NoError(t, err)
+				require.Equal(t, tc.wantNq, tc.request.GetNq())
+				return
+			}
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, tc.wantError)
+			if tc.wantCause != nil {
+				require.ErrorIs(t, err, tc.wantCause)
+			}
+			require.Equal(t, declared, tc.request.GetNq())
 		})
 	}
 }
@@ -298,6 +435,15 @@ func TestSearchInfoDetermineSearchTypeWithPluralGroupByFieldIDs(t *testing.T) {
 	}
 
 	assert.Equal(t, internalpb.SearchType_DEFAULT, info.DetermineSearchType(false))
+}
+
+func TestSearchInfoDetermineSearchTypeWithOrderBy(t *testing.T) {
+	info := &SearchInfo{
+		planInfo:      &planpb.QueryInfo{},
+		orderByFields: []OrderByField{{FieldName: "price"}},
+	}
+
+	assert.Equal(t, internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER, info.DetermineSearchType(false))
 }
 
 func TestParseGroupByInfoLegacyFieldPrecedence(t *testing.T) {

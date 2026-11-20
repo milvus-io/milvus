@@ -90,6 +90,13 @@ func (s *SearchPipelineSuite) TestHybridSearchPipeFunctionChainOwnsFinalCount() 
 				segcore.StorageCost{},
 			)
 			s.Require().NoError(err)
+			op, err := newHybridSearchReduceOperator(task, nil)
+			s.Require().NoError(err)
+			reduced, err := op.run(context.Background(), s.span, []*internalpb.SearchResults{f1, f2})
+			s.Require().NoError(err)
+			streamed, _, err := pipeline.RunFromReduced(context.Background(), s.span, reduced[0].([]*milvuspb.SearchResults), reduced[1].([]searchScoreInfo), segcore.StorageCost{})
+			s.Require().NoError(err)
+			s.Equal(results.GetResults(), streamed.GetResults())
 
 			result := results.GetResults()
 			s.Equal([]int64{2}, result.GetTopks())

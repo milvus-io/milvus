@@ -370,15 +370,14 @@ func (queue *DqTaskQueue) Enqueue(t taskmodel.Task) error {
 	if t.IsSubTask() {
 		lane = queue.subTasks
 	}
-	return lane.enqueueWithContext(t)
-}
-
-func (queue *BaseTaskQueue) enqueueWithContext(t taskmodel.Task) error {
-	element, err := queue.enqueue(t)
+	element, err := lane.enqueue(t)
 	if err != nil {
 		return err
 	}
-	t.SetOnContextDone(func() { queue.removeUnissuedTask(element) })
+
+	t.SetOnContextDone(func() {
+		lane.removeUnissuedTask(element)
+	})
 	return nil
 }
 
@@ -751,6 +750,13 @@ func (sched *TaskScheduler) Start() error {
 	sched.wg.Add(1)
 	go sched.definitionLoop()
 
+	// Fixed workers pop only when free: all waiting batches remain in the
+	// bounded queue, including while canceled execution is still unwinding.
+	sched.wg.Add(sched.MSearchQueue.workers)
+	for range sched.MSearchQueue.workers {
+		go sched.multiSearchLoop()
+	}
+
 	sched.wg.Add(1)
 	go sched.controlLoop()
 
@@ -762,13 +768,6 @@ func (sched *TaskScheduler) Start() error {
 	sched.wg.Add(2)
 	go sched.queryLoop(sched.DqQueue.BaseTaskQueue)
 	go sched.queryLoop(sched.DqQueue.subTasks)
-
-	// Fixed workers pop only when free: all waiting batches remain in the
-	// bounded queue, including while canceled execution is still unwinding.
-	sched.wg.Add(sched.MSearchQueue.workers)
-	for range sched.MSearchQueue.workers {
-		go sched.multiSearchLoop()
-	}
 
 	return nil
 }

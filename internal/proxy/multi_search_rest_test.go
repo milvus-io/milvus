@@ -401,20 +401,32 @@ func TestMultiSearchRESTDefaultBudgetAndOverrides(t *testing.T) {
 }
 
 func TestMultiSearchRESTTransportDeadlineEndsCall(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		canceled := make(chan error, 1)
-		p := newMultiSearchHTTPProxy(t, nil, func(ctx context.Context, _ *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-			<-ctx.Done()
-			canceled <- ctx.Err()
-			return successfulSearchResult(), nil
+	for _, tc := range []struct {
+		name         string
+		timeoutField string
+	}{
+		{name: "header before body", timeoutField: `"timeoutMs":5000,`},
+		{name: "header only"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				canceled := make(chan error, 1)
+				p := newMultiSearchHTTPProxy(t, nil, func(ctx context.Context, _ *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+					<-ctx.Done()
+					canceled <- ctx.Err()
+					return successfulSearchResult(), nil
+				})
+				payload := `{` + tc.timeoutField + `"requests":[` + readySearch + `]}`
+				start := time.Now()
+				status, body := recordMultiSearch(t, newMultiSearchRESTHandler(p), strings.NewReader(payload), "1")
+				require.Equal(t, time.Second, time.Since(start))
+				require.Equal(t, http.StatusRequestTimeout, status)
+				require.Equal(t, merr.TimeoutCode, body.Code)
+				require.Empty(t, body.Data)
+				require.ErrorIs(t, <-canceled, context.DeadlineExceeded)
+			})
 		})
-		payload := `{"timeoutMs":5000,"requests":[` + readySearch + `]}`
-		status, body := recordMultiSearch(t, newMultiSearchRESTHandler(p), strings.NewReader(payload), "1")
-		require.Equal(t, http.StatusRequestTimeout, status)
-		require.Equal(t, merr.TimeoutCode, body.Code)
-		require.Empty(t, body.Data)
-		require.ErrorIs(t, <-canceled, context.DeadlineExceeded)
-	})
+	}
 }
 
 func TestMultiSearchRESTBudgetStartsBeforeAuthentication(t *testing.T) {
@@ -1009,8 +1021,11 @@ func TestRESTSearchKeepsOrdinaryPartitionQuotaLookup(t *testing.T) {
 			return body.Code
 		}
 		require.Equal(t, merr.Code(merr.ErrHTTPRateLimit), search("e.*"))
+		require.Empty(t, limiter.snapshot())
 		require.Zero(t, search("east"))
-		require.Empty(t, limiter.calls)
+		require.Equal(t, []multiSearchQuotaCall{
+			{dbID: 10, partitions: map[int64][]int64{11: {12}}, rateType: internalpb.RateType_DQLSearch, nq: 2},
+		}, limiter.snapshot())
 		require.Equal(t, []int64{0}, searched)
 	})
 }
