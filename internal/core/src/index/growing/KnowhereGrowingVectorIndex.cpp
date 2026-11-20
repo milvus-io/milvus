@@ -686,6 +686,11 @@ KnowhereGrowingVectorIndex<T>::BuildAndCatchUp() {
         // Drain a null-only tail in the next unlocked slice.
         if (gap != 0 &&
             (accepted_physical_count_ == physical || !fits_budget(gap))) {
+            if (ElapsedMs(catchup_start) >= async_build_.catchup_deadline_ms) {
+                DisableAsyncBuild("catch-up deadline exceeded",
+                                  AsyncBuildFailure::kDeadline);
+                return;
+            }
             continue;
         }
         if (gap != 0) {

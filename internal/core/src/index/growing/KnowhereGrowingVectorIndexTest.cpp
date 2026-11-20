@@ -21,6 +21,7 @@
 #define NOT_COMPILE_FOR_SWIG
 #endif
 
+#include <folly/ScopeGuard.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -33,10 +34,12 @@
 #include <mutex>
 #include <span>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "index/growing/KnowhereGrowingVectorIndex.h"
 #include "knowhere/index/index_factory.h"
+#include "monitor/Monitor.h"
 #include "segcore/indexing/GrowingIndexSet.h"
 
 namespace milvus::index::test {
@@ -361,6 +364,45 @@ class AsyncGrowingVectorIndexTest : public KnowhereGrowingVectorIndexTest {
         return {.enabled = true};
     }
 };
+
+class DeadlineGrowingVectorIndexTest : public AsyncGrowingVectorIndexTest {
+ protected:
+    static constexpr int64_t kDeadlineMs = 1000;
+
+    GrowingBuildOptions
+    BuildOptions() const override {
+        return {.enabled = true,
+                .finalize_budget_ms = 10000,
+                .catchup_deadline_ms = kDeadlineMs};
+    }
+};
+
+TEST_F(DeadlineGrowingVectorIndexTest, NullOnlyFinalizeDeferralHonorsDeadline) {
+    int finalize_attempts = 0;
+    growing_build_test_hook = [&](GrowingBuildPhase phase) {
+        if (phase == GrowingBuildPhase::kBeforeFinalize &&
+            ++finalize_attempts == 1) {
+            // FirstBatch already drained a row after the build prefix, so a
+            // single null fits the finalization budget but still must defer.
+            const bool valid = false;
+            owner_->Append(4, VectorBatch<float>{1, nullptr, 2, &valid});
+            std::this_thread::sleep_for(std::chrono::milliseconds(kDeadlineMs));
+        }
+    };
+    auto guard = folly::makeGuard([&] {
+        indexes_.reset();
+        growing_build_test_hook = {};
+    });
+    auto& deadline_failures =
+        monitor::internal_core_growing_index_deadline_failures;
+    const auto failures_before = deadline_failures.Value();
+
+    FirstBatch();
+    owner_->Flush();
+    EXPECT_EQ(finalize_attempts, 1);
+    EXPECT_FALSE(Pin());
+    EXPECT_DOUBLE_EQ(deadline_failures.Value(), failures_before + 1);
+}
 
 TEST_F(AsyncGrowingVectorIndexTest,
        FlushWaitsForNullOnlyTailBeforePublication) {
