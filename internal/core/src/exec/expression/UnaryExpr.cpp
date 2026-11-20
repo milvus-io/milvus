@@ -2379,17 +2379,21 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
                            res.size(),
                            covered);
                 res.resize(covered);
-                auto valid_res = null_reader_->IsNotNull();
-                AssertInfo(
-                    valid_res.size() >= static_cast<size_t>(covered),
-                    "text null index covers {} rows, snapshot requires {}",
-                    valid_res.size(),
-                    covered);
-                valid_res.resize(covered);
-                if (covered < active_count_) {
-                    TargetBitmap tail(active_count_ - covered);
-                    res.append(tail);
-                    valid_res.append(tail);
+                res.resize(active_count_, false);
+                TargetBitmap valid_res;
+                if (HasUpdates() && !is_nullable_) {
+                    // Posting coverage only controls the match bits. Every
+                    // active row in this field is known to be non-NULL.
+                    valid_res = TargetBitmap(active_count_, true);
+                } else {
+                    valid_res = null_reader_->IsNotNull();
+                    AssertInfo(
+                        valid_res.size() >= static_cast<size_t>(covered),
+                        "text null index covers {} rows, snapshot requires {}",
+                        valid_res.size(),
+                        covered);
+                    valid_res.resize(covered);
+                    valid_res.resize(active_count_, false);
                 }
                 if (HasUpdates()) {
                     std::vector<std::pair<int64_t, segcore::UpdateString>>

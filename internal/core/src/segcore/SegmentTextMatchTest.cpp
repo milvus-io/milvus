@@ -15,6 +15,7 @@
 #include <fstream>
 #include <thread>
 #include "query/ExecPlanNodeVisitor.h"
+#include "exec/expression/Expr.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "segcore/segment_c.h"
 #include "segcore/UpdatesRecord.h"
@@ -214,6 +215,79 @@ TEST(SegmentTextMatchTest, GrowingIndexAheadOfActiveCount) {
         ASSERT_TRUE(result[2]);   // "football, swimming"
         ASSERT_TRUE(result[3]);   // "football, rugby"
         ASSERT_TRUE(result[4]);   // "football, cricket"
+    }
+}
+
+TEST(SegmentTextMatchTest, UpdatedNonNullableGrowingTextWithUncoveredTail) {
+    // Hold a real committed reader generation across the next insert so that
+    // query-time autocommit cannot make the uncovered-tail case timing-dependent.
+    class GrowingWithPinnedText final : public SegmentGrowingImpl {
+     public:
+        using SegmentGrowingImpl::SegmentGrowingImpl;
+        milvus::index::GrowingIndexSnapshotPin prefix;
+        milvus::index::GrowingIndexSnapshotPin
+        PinGrowingIndex(milvus::OpContext* ctx, FieldId field) const override {
+            return prefix && field == FieldId(101)
+                       ? prefix
+                       : SegmentGrowingImpl::PinGrowingIndex(ctx, field);
+        }
+    };
+
+    auto schema = GenTestSchema();
+    GrowingWithPinnedText segment(
+        schema, empty_index_meta, SegcoreConfig::default_config(), 72001);
+    auto prefix_data = DataGen(schema, 2);
+    auto* strings = prefix_data.raw_->mutable_fields_data(1)
+                        ->mutable_scalars()
+                        ->mutable_string_data();
+    strings->set_data(0, "swimming");
+    strings->set_data(1, "football");
+    auto info = PrepareInsertBinlog(
+        1,
+        2,
+        3,
+        prefix_data,
+        storage::CreateChunkManager(get_default_local_storage_config()));
+    const auto status = LoadFieldData(&segment, &info);
+    ASSERT_EQ(status.error_code, Success);
+    segment.prefix = segment.PinGrowingIndex(nullptr, FieldId(101));
+    ASSERT_TRUE(segment.prefix);
+    ASSERT_EQ(segment.prefix.CoveredRowEnd(), 2);
+    auto tail = DataGen(schema, 1, 0, 2);
+    tail.raw_->mutable_fields_data(1)
+        ->mutable_scalars()
+        ->mutable_string_data()
+        ->set_data(0, "football");
+    const auto offset = segment.PreInsert(1);
+    segment.Insert(
+        offset, 1, tail.row_ids_.data(), tail.timestamps_.data(), tail.owner);
+    ASSERT_EQ(segment.get_active_count(20), 3);
+
+    IdArray ids;
+    ids.mutable_int_id()->add_data(0);
+    UpdateAssignment a{FieldId(101), {}};
+    a.literal.mutable_scalar_value()->set_string_data("football");
+    segment.ApplyUpdates(ids, 20, 0, {a});
+
+    auto logical =
+        GetMatchExpr(schema, "football", OpType::TextMatch)->filter();
+    for (auto ts : {19, 20}) {
+        exec::QueryContext query_ctx(DEAFULT_QUERY_ID, &segment, 3, ts);
+        exec::ExecContext exec_ctx(&query_ctx);
+        exec::ExprSet expressions({logical}, &exec_ctx);
+        exec::EvalCtx ctx(&exec_ctx);
+        std::vector<VectorPtr> output;
+        expressions.Eval(0, 1, true, ctx, output);
+        auto column = std::static_pointer_cast<ColumnVector>(output.at(0));
+        ASSERT_EQ(column->size(), 3);
+        TargetBitmapView hits(column->GetRawData(), 3);
+        TargetBitmapView valid(column->GetValidRawData(), 3);
+        EXPECT_EQ(hits[0], ts >= 20);
+        EXPECT_TRUE(hits[1]);
+        EXPECT_FALSE(hits[2]);  // The pinned generation has no posting for it.
+        EXPECT_TRUE(valid[0]);
+        EXPECT_TRUE(valid[1]);
+        EXPECT_TRUE(valid[2]);  // Its schema still guarantees a non-NULL row.
     }
 }
 

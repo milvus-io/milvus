@@ -1699,6 +1699,41 @@ class SegmentExpr : public Expr {
             evaluate_batch, input, res, valid_res, &candidate_mask, values...);
     }
 
+    // Patches and outputs share batch-position coordinates, regardless of
+    // how the caller maps those positions to physical rows.
+    template <typename T, typename BatchEvaluator, typename... ValTypes>
+    static bool
+    EvaluateIndexLookupPatch(
+        BatchEvaluator& evaluate_batch,
+        const std::vector<segcore::UpdatesRecord::Patch>& patches,
+        size_t& next_patch,
+        size_t position,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        const ValTypes&... values) {
+        if constexpr (CanOverlay<T> && (std::is_integral_v<T> ||
+                                        std::is_same_v<T, std::string> ||
+                                        std::is_same_v<T, std::string_view>)) {
+            if (next_patch < patches.size() &&
+                patches[next_patch].position == position) {
+                const auto& value = patches[next_patch++].value;
+                const bool live =
+                    !std::holds_alternative<std::monostate>(value);
+                const T data = live ? UpdateScalar<T>(value) : T{};
+                evaluate_batch.template operator()<FilterType::random>(
+                    &data,
+                    ValidityView::FromExpanded(&live),
+                    nullptr,
+                    1,
+                    res + position,
+                    valid_res + position,
+                    values...);
+                return true;
+            }
+        }
+        return false;
+    }
+
     template <typename T, typename BatchEvaluator, typename... ValTypes>
     int64_t
     ProcessIndexLookupByOffsetsImpl(BatchEvaluator evaluate_batch,
@@ -1745,26 +1780,14 @@ class SegmentExpr : public Expr {
                 continue;
             }
             auto offset = (*input)[i];
-            if constexpr (CanOverlay<T> &&
-                          (std::is_integral_v<T> ||
-                           std::is_same_v<T, std::string> ||
-                           std::is_same_v<T, std::string_view>)) {
-                if (next_patch < patches.size() &&
-                    patches[next_patch].position == i) {
-                    const auto& value = patches[next_patch++].value;
-                    const bool live =
-                        !std::holds_alternative<std::monostate>(value);
-                    const T data = live ? UpdateScalar<T>(value) : T{};
-                    evaluate_batch.template operator()<FilterType::random>(
-                        &data,
-                        ValidityView::FromExpanded(&live),
-                        nullptr,
-                        1,
-                        res + i,
-                        valid_res + i,
-                        values...);
-                    continue;
-                }
+            if (EvaluateIndexLookupPatch<T>(evaluate_batch,
+                                            patches,
+                                            next_patch,
+                                            i,
+                                            res,
+                                            valid_res,
+                                            values...)) {
+                continue;
             }
             auto raw = value_reader->Lookup(offset);
             if (!raw.has_value()) {
@@ -5203,26 +5226,14 @@ class SegmentExpr : public Expr {
                 continue;
             }
             const auto offset = start_offset + i;
-            if constexpr (CanOverlay<T> &&
-                          (std::is_integral_v<T> ||
-                           std::is_same_v<T, std::string> ||
-                           std::is_same_v<T, std::string_view>)) {
-                if (next_patch < patches.size() &&
-                    patches[next_patch].position == i) {
-                    const auto& value = patches[next_patch++].value;
-                    const bool live =
-                        !std::holds_alternative<std::monostate>(value);
-                    const T data = live ? UpdateScalar<T>(value) : T{};
-                    evaluate_batch.template operator()<FilterType::random>(
-                        &data,
-                        ValidityView::FromExpanded(&live),
-                        nullptr,
-                        1,
-                        res + i,
-                        valid_res + i,
-                        values...);
-                    continue;
-                }
+            if (EvaluateIndexLookupPatch<T>(evaluate_batch,
+                                            patches,
+                                            next_patch,
+                                            i,
+                                            res,
+                                            valid_res,
+                                            values...)) {
+                continue;
             }
             auto raw = value_reader->Lookup(offset);
             if (!raw.has_value()) {

@@ -1416,6 +1416,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecArrayLength(OffsetVector* input) {
 
 bool
 PhyBinaryArithOpEvalRangeExpr::UseArrayChunkLengths() const {
+    // Chunk lengths and null bits describe base values. The ordinary
+    // ArrayView Scan/Take evaluates visible replacements and their validity.
+    if (HasUpdates()) {
+        return false;
+    }
     if (use_array_chunk_lengths_.has_value()) {
         return *use_array_chunk_lengths_;
     }

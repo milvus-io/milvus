@@ -18,6 +18,7 @@
 #include "segcore/UpdatesRecord.h"
 #include "common/Common.h"
 #include "exec/expression/ExprCache.h"
+#include "exec/expression/ExprBatchTestUtils.h"
 #include "query/PlanProto.h"
 #include "test_utils/GenExprProto.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
@@ -571,6 +572,88 @@ TEST(PkUpdateTypedEvaluation, GrowingAndSealedScanTakeAndCandidateMask) {
                         EXPECT_EQ(valid[i], row != 2);
                     }
                 }
+            }
+        }
+    }
+}
+
+TEST(PkUpdateTypedEvaluation, SealedArrayLengthUsesSnapshotValuesAndValidity) {
+    milvus::test::ExprBatchSizeGuard batch_size(2);
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto array =
+        schema->AddDebugField("items", DataType::ARRAY, DataType::INT64, true);
+    auto data = DataGen(schema, 4);
+    std::fill(data.timestamps_.begin(), data.timestamps_.end(), 1);
+    for (auto& field : *data.raw_->mutable_fields_data()) {
+        if (field.field_id() == pk.get()) {
+            for (int i = 0; i < 4; ++i)
+                field.mutable_scalars()->mutable_long_data()->set_data(i, i);
+        } else {
+            field.clear_valid_data();
+            for (int i = 0; i < 4; ++i) {
+                field.add_valid_data(i != 1);
+                auto* row = field.mutable_scalars()
+                                ->mutable_array_data()
+                                ->mutable_data(i)
+                                ->mutable_long_data();
+                row->clear_data();
+                row->add_data(7);
+                if (i == 2)
+                    row->add_data(8);
+            }
+        }
+    }
+    auto segment = CreateSealedSegment(schema);
+    LoadGeneratedDataIntoSegment(data, segment.get());
+    UpdateAssignment replace{array, {}};
+    auto* pair = replace.literal.mutable_array_value()->mutable_long_data();
+    pair->add_data(7);
+    pair->add_data(8);
+    IdArray keys;
+    keys.mutable_int_id()->add_data(0);
+    keys.mutable_int_id()->add_data(1);
+    segment->ApplyUpdates(keys, 20, 0, {replace});
+    keys.mutable_int_id()->clear_data();
+    keys.mutable_int_id()->add_data(2);
+    replace.literal.set_null_value(google::protobuf::NULL_VALUE);
+    segment->ApplyUpdates(keys, 20, 1, {replace});
+
+    proto::plan::GenericValue target, unused;
+    target.set_int64_val(2);
+    unused.set_int64_val(0);
+    auto logical = std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+        expr::ColumnInfo(array, DataType::ARRAY, DataType::INT64, {}, true),
+        proto::plan::Equal,
+        proto::plan::ArrayLength,
+        target,
+        unused);
+    for (auto ts : {19, 20, 19}) {
+        for (bool take : {false, true}) {
+            SCOPED_TRACE(fmt::format("timestamp={} take={}", ts, take));
+            FixedVector<int32_t> rows{2, 0, 1, 0, 3};
+            exec::QueryContext query_ctx(
+                DEAFULT_QUERY_ID, segment.get(), 4, ts);
+            exec::ExecContext exec_ctx(&query_ctx);
+            exec::ExprSet expressions({logical}, &exec_ctx);
+            exec::EvalCtx ctx(&exec_ctx, take ? &rows : nullptr);
+            for (size_t start = 0; start < (take ? rows.size() : 4);) {
+                std::vector<VectorPtr> output;
+                expressions.Eval(0, 1, true, ctx, output);
+                auto column =
+                    std::static_pointer_cast<ColumnVector>(output.at(0));
+                ASSERT_EQ(column->size(), take ? rows.size() : 2);
+                TargetBitmapView hits(column->GetRawData(), column->size());
+                TargetBitmapView valid(column->GetValidRawData(),
+                                       column->size());
+                for (size_t i = 0; i < column->size(); ++i) {
+                    int row = take ? rows[i] : start + i;
+                    EXPECT_EQ(hits[i],
+                              ts < 20 ? row == 2 : row == 0 || row == 1);
+                    EXPECT_EQ(valid[i], ts < 20 ? row != 1 : row != 2);
+                }
+                start += column->size();
             }
         }
     }
