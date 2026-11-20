@@ -345,6 +345,15 @@ func TestSearchInfoDetermineSearchTypeWithPluralGroupByFieldIDs(t *testing.T) {
 	assert.Equal(t, internalpb.SearchType_DEFAULT, info.DetermineSearchType(false))
 }
 
+func TestSearchInfoDetermineSearchTypeWithOrderBy(t *testing.T) {
+	info := &SearchInfo{
+		planInfo:      &planpb.QueryInfo{},
+		orderByFields: []OrderByField{{FieldName: "price"}},
+	}
+
+	assert.Equal(t, internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER, info.DetermineSearchType(false))
+}
+
 func TestParseGroupByInfoLegacyFieldPrecedence(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 101, Name: "brand", DataType: schemapb.DataType_VarChar},
