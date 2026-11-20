@@ -2242,6 +2242,17 @@ ChunkedSegmentSealedImpl::ClearState(PublishedSegmentState& state) {
 }
 
 bool
+ChunkedSegmentSealedImpl::HasFieldInLoadedManifest(FieldId field_id) const {
+    auto snapshot = CapturePublishedState();
+    if (!snapshot->load_info || !snapshot->load_info->HasManifestPath()) {
+        return true;
+    }
+    return snapshot->fields->has_field(field_id) &&
+           snapshot->load_info->HasManifestColumn(
+               snapshot->fields->get_storage_column_name(field_id));
+}
+
+bool
 ChunkedSegmentSealedImpl::HasRawDataFromState(
     const PublishedSegmentState& state, FieldId field_id) const {
     const auto& field_meta = state.fields->operator[](field_id);
@@ -8701,6 +8712,7 @@ ChunkedSegmentSealedImpl::ReopenSchemaLocked(milvus::OpContext* op_ctx,
 
     SegmentLoadInfo current_mutable(*current->load_info);
     SegmentLoadInfo new_local(*current->load_info);
+    sch = new_local.BindManifestFields(sch);
     new_local.ReplaceSchemaForReopen(sch);
 
     auto diff = current_mutable.ComputeDiff(new_local, sch);
@@ -8786,6 +8798,7 @@ ChunkedSegmentSealedImpl::Reopen(
         new_local.RestrictToLoadFields(*target_schema);
     }
     new_local.InheritCachedColumnGroupsFrom(*current->load_info);
+    target_schema = new_local.BindManifestFields(target_schema);
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::Reopen()");
     current_mutable.ResolveLegacyBinlogChildFields(current_schema, nullptr);
     new_local.ResolveLegacyBinlogChildFields(target_schema, &current_mutable);
@@ -10274,11 +10287,12 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
         mutable_copy.SetTextIndexCreated(fid);
     }
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::Load()");
-    mutable_copy.ResolveLegacyBinlogChildFields(snapshot->fields, nullptr);
-    auto diff = mutable_copy.GetLoadDiff(snapshot->fields);
+    auto fields = mutable_copy.BindManifestFields(snapshot->fields);
+    mutable_copy.ResolveLegacyBinlogChildFields(fields, nullptr);
+    auto diff = mutable_copy.GetLoadDiff(fields);
     LOG_DEBUG("Load segment {} with diff {}", id_, diff.ToString());
 
-    ApplyLoadDiff(op_ctx, mutable_copy, diff);
+    ApplyLoadDiff(op_ctx, mutable_copy, diff, fields);
 
     LOG_DEBUG("Successfully loaded segment {} with {} rows", id_, num_rows);
 }
@@ -10993,7 +11007,7 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
         }
         has_vector_output =
             has_vector_output || IsVectorDataType(field_meta.get_data_type());
-        auto column_name = schema_snapshot->GetPhysicalColumnName(field_id);
+        auto column_name = snapshot->fields->get_storage_column_name(field_id);
         take_field_ids.push_back(field_id);
         take_column_names.push_back(std::move(column_name));
     }
@@ -11286,7 +11300,7 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(
         }
         has_vector_output =
             has_vector_output || IsVectorDataType(field_meta.get_data_type());
-        auto column_name = schema_snapshot->GetPhysicalColumnName(field_id);
+        auto column_name = snapshot->fields->get_storage_column_name(field_id);
         take_field_ids.push_back(field_id);
         take_field_metas.push_back(&field_meta);
         take_column_names.push_back(std::move(column_name));

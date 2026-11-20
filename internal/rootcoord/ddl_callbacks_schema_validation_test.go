@@ -30,12 +30,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -214,4 +216,143 @@ func TestDDLCallbacksPropertyOnlyAlterSkipsSchemaEvolutionValidation(t *testing.
 		Properties:     []*commonpb.KeyValuePair{{Key: "property_only", Value: "updated"}},
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
+}
+
+// Exercise both authoritative DDL entry points before cache invalidation or WAL publication.
+func TestMappedFieldAdditionAdmission(t *testing.T) {
+	paramtable.Init()
+	for _, tc := range []struct {
+		name               string
+		source             string
+		spec               string
+		mapping            string
+		wantMissingMapping bool
+	}{
+		{name: "milvus table", source: "s3://bucket/snapshot", spec: `{"format":"milvus-table"}`, mapping: "extra"},
+		{name: "milvus table without mapping", source: "s3://bucket/snapshot", spec: `{"format":"milvus-table"}`, wantMissingMapping: true},
+		{name: "parquet", source: "s3://bucket/data", spec: `{"format":"parquet"}`, mapping: "extra"},
+		{name: "internal"},
+	} {
+		for _, alterSchema := range []bool{false, true} {
+			entry := "AddCollectionField"
+			if alterSchema {
+				entry = "AlterCollectionSchema"
+			}
+			t.Run(tc.name+"/"+entry, func(t *testing.T) {
+				coll := &model.Collection{
+					CollectionID: 1, Name: "projected", SchemaVersion: 1,
+					ExternalSource: tc.source, ExternalSpec: tc.spec,
+					Fields: []*model.Field{
+						{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "id"},
+						{FieldID: 102, Name: "title", DataType: schemapb.DataType_Int64, ExternalField: "title"},
+					},
+				}
+				if tc.source == "" {
+					for _, field := range coll.Fields {
+						field.ExternalField = ""
+					}
+				}
+				before := proto.Clone(coll.ToCollectionSchemaPB())
+				meta := &MetaTable{}
+				read := mockey.Mock((*MetaTable).GetCollectionByName).Return(coll, nil).Build()
+				defer read.UnPatch()
+				type admissionBroadcast struct{ broadcaster.BroadcastAPI }
+				broadcast := &admissionBroadcast{}
+				closeBroadcast := mockey.Mock((*admissionBroadcast).Close).Return().Build()
+				defer closeBroadcast.UnPatch()
+				lock := mockey.Mock((*Core).startBroadcastWithCollectionLock).Return(broadcast, nil).Build()
+				defer lock.UnPatch()
+				boundary := merr.WrapErrServiceUnavailableMsg("reached cache invalidation boundary")
+				cacheCalls := 0
+				cache := mockey.Mock((*Core).getCacheExpireForCollection).To(func(*Core, context.Context, string, string) (*message.CacheExpirations, error) {
+					cacheCalls++
+					return nil, boundary
+				}).Build()
+				defer cache.UnPatch()
+				core := &Core{meta: meta}
+				field := &schemapb.FieldSchema{Name: "extra", DataType: schemapb.DataType_Int64, Nullable: true, ExternalField: tc.mapping}
+				var err error
+				if alterSchema {
+					err = core.broadcastAlterCollectionSchema(context.Background(), buildAlterSchemaAddFieldSchemaReq("db", coll.Name, field, false))
+				} else {
+					encoded, marshalErr := proto.Marshal(field)
+					require.NoError(t, marshalErr)
+					err = core.broadcastAlterCollectionForAddField(context.Background(), &milvuspb.AddCollectionFieldRequest{DbName: "db", CollectionName: coll.Name, Schema: encoded})
+				}
+				if tc.wantMissingMapping {
+					require.ErrorIs(t, err, merr.ErrParameterInvalid)
+					require.ErrorContains(t, err, "requires external_field mapping")
+					require.Zero(t, cacheCalls, "unmapped fields must fail before publication")
+				} else {
+					require.ErrorIs(t, err, boundary)
+					require.Equal(t, 1, cacheCalls)
+				}
+				require.True(t, proto.Equal(before, coll.ToCollectionSchemaPB()), "DDL admission must not mutate committed schema")
+			})
+		}
+	}
+}
+
+func TestMilvusTableRejectsStructDDL(t *testing.T) {
+	paramtable.Init()
+	for _, tc := range []struct {
+		name          string
+		wholeStruct   bool
+		externalField string
+	}{
+		{name: "whole struct", wholeStruct: true},
+		{name: "implicit subfield"},
+		{name: "explicit subfield", externalField: "items[added]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			coll := rootStructSubFieldTestCollection(true)
+			coll.ExternalSource = "s3://bucket/snapshot"
+			coll.ExternalSpec = `{"format":"milvus-table"}`
+			for _, field := range coll.Fields {
+				field.ExternalField = field.Name
+			}
+			before := proto.Clone(coll.ToCollectionSchemaPB())
+			meta := &MetaTable{}
+			read := mockey.Mock((*MetaTable).GetCollectionByName).Return(coll, nil).Build()
+			defer read.UnPatch()
+			type admissionBroadcast struct{ broadcaster.BroadcastAPI }
+			broadcast := &admissionBroadcast{}
+			closeBroadcast := mockey.Mock((*admissionBroadcast).Close).Return().Build()
+			defer closeBroadcast.UnPatch()
+			lock := mockey.Mock((*Core).startBroadcastWithCollectionLock).Return(broadcast, nil).Build()
+			defer lock.UnPatch()
+			aliasLock := mockey.Mock((*Core).startBroadcastWithAliasOrCollectionLock).Return(broadcast, nil).Build()
+			defer aliasLock.UnPatch()
+			boundary := merr.WrapErrServiceUnavailableMsg("reached cache invalidation boundary")
+			cacheCalls := 0
+			cache := mockey.Mock((*Core).getCacheExpireForCollection).To(func(*Core, context.Context, string, string) (*message.CacheExpirations, error) {
+				cacheCalls++
+				return nil, boundary
+			}).Build()
+			defer cache.UnPatch()
+			core := &Core{meta: meta}
+			var err error
+			if tc.wholeStruct {
+				err = core.broadcastAlterCollectionForAddStructField(context.Background(), &milvuspb.AddCollectionStructFieldRequest{
+					DbName: "db", CollectionName: coll.Name,
+					StructArrayFieldSchema: &schemapb.StructArrayFieldSchema{
+						Name: "added", Nullable: true,
+						Fields: []*schemapb.FieldSchema{{
+							Name: "value", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+							TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+						}},
+					},
+				})
+			} else {
+				field := &schemapb.FieldSchema{
+					Name: "items[added]", DataType: schemapb.DataType_Array,
+					ElementType: schemapb.DataType_Int64, ElementNullable: true, ExternalField: tc.externalField,
+				}
+				err = core.broadcastAlterCollectionSchema(context.Background(), buildAlterSchemaAddFieldSchemaReq("db", coll.Name, field, false))
+			}
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.Zero(t, cacheCalls, "unsupported Struct DDL must fail before publication")
+			require.True(t, proto.Equal(before, coll.ToCollectionSchemaPB()))
+		})
+	}
 }

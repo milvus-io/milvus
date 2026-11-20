@@ -852,6 +852,11 @@ class SegmentLoadInfo {
     [[nodiscard]] std::shared_ptr<milvus_storage::api::ColumnGroups>
     GetColumnGroups() const;
 
+    // Bind the logical layout to this immutable manifest revision before diffing
+    // or publishing its reader. Legacy manifests keep identity mapping.
+    SealedFieldLayoutPtr
+    BindManifestFields(const SealedFieldLayoutPtr& fields) const;
+
     // Checks the already cached manifest column groups. It intentionally does
     // not parse the manifest on demand because query paths call this method.
     [[nodiscard]] bool
