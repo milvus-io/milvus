@@ -55,6 +55,8 @@ set_source_files_properties(
 # F14's CRC32 intrinsics, so this translation unit must enable the same ISA.
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
     set_property(SOURCE AsyncLoadExecutor.cpp APPEND PROPERTY COMPILE_OPTIONS -msse4.2)
+    # The target-wide PCH uses the default ISA and cannot be reused with SSE4.2.
+    set_source_files_properties(AsyncLoadExecutor.cpp PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 endif()
 
 add_library(milvus_storage OBJECT ${SOURCE_FILES})
