@@ -11,6 +11,8 @@
 
 #include "segcore/UpdatesRecord.h"
 
+#include "segcore/PkUpdateReadObserver.h"
+
 #include <algorithm>
 #include <atomic>
 #include <limits>
@@ -337,6 +339,8 @@ Decode(const FieldMeta& meta, const proto::schema::UpdateLiteral& literal) {
 
 }  // namespace
 
+thread_local PkUpdateReadObserver pk_update_read_observer = nullptr;
+
 struct UpdatesRecord::Impl {
     std::shared_mutex mutex;
     std::atomic<size_t> reverse_scans{0}, reverse_selected{0},
@@ -481,6 +485,7 @@ UpdatesRecord::VisitUpdates(
     Timestamp timestamp,
     const std::function<void(int64_t, const UpdateValue&)>& visit) const {
     ReadStats stats;
+    size_t visited_bitmap_bits = 0;
     std::shared_lock lock(impl_->mutex);
     auto it = impl_->fields.find(field.get());
     if (it == impl_->fields.end())
@@ -496,8 +501,9 @@ UpdatesRecord::VisitUpdates(
             if (end == log.entries.begin())
                 return;
             stats.used_visited = log.positions.size() != log.entries.size();
-            std::vector<bool> visited(stats.used_visited ? log.membership.size()
-                                                         : 0);
+            visited_bitmap_bits =
+                stats.used_visited ? log.membership.size() : 0;
+            std::vector<bool> visited(visited_bitmap_bits);
             while (end != log.entries.begin()) {
                 const auto& delta = *--end;
                 ++stats.scanned_entries;
@@ -516,6 +522,8 @@ UpdatesRecord::VisitUpdates(
     impl_->reverse_scans.fetch_add(1, std::memory_order_relaxed);
     impl_->reverse_selected.fetch_add(stats.selected_offsets,
                                       std::memory_order_relaxed);
+    ObservePkUpdateRead(
+        field, {PkUpdateReadPath::Reverse, 0, stats, visited_bitmap_bits});
     return stats;
 }
 
@@ -528,8 +536,22 @@ UpdatesRecord::ReadRangeUpdates(FieldId field,
                                 const TargetBitmapView& candidates,
                                 size_t mask_start,
                                 ReadStats* stats) const {
-    return ReadBatch(
-        field, timestamp, start, count, offsets, candidates, mask_start, stats);
+    const auto observer = pk_update_read_observer;
+    ReadStats measured;
+    auto patches = ReadBatch(field,
+                             timestamp,
+                             start,
+                             count,
+                             offsets,
+                             candidates,
+                             mask_start,
+                             observer ? &measured : stats);
+    if (observer) {
+        if (stats)
+            *stats = measured;
+        observer(field, {PkUpdateReadPath::Overlay, count, measured});
+    }
+    return patches;
 }
 
 std::vector<UpdatesRecord::Patch>

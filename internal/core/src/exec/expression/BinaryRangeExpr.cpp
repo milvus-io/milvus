@@ -42,6 +42,7 @@
 #include "opentelemetry/trace/span.h"
 #include "query/Utils.h"
 #include "segcore/SegmentInterface.h"
+#include "segcore/PkUpdateReadObserver.h"
 #include "segcore/SegmentSealed.h"
 #include "storage/MmapManager.h"
 #include "storage/Types.h"
@@ -438,10 +439,12 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
     }
 
     auto execute_sub_batch =
-        [lower_inclusive, upper_inclusive](
+        [lower_inclusive, upper_inclusive, field = expr_->column_.field_id_](
             const index::IScalarPredicateReader<ReaderType>* reader,
             HighPrecisionType val1,
             HighPrecisionType val2) {
+            segcore::ObservePkUpdateRead(
+                field, {segcore::PkUpdateReadPath::IndexedPredicate});
             BinaryRangeIndexFunc<T> func;
             return func(reader, val1, val2, lower_inclusive, upper_inclusive);
         };
@@ -517,10 +520,11 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
+    const auto field = expr_->column_.field_id_;
     size_t processed_cursor = 0;
     auto execute_sub_batch =
-        [ lower_inclusive, upper_inclusive, &processed_cursor, &
-          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+        [lower_inclusive, upper_inclusive, &processed_cursor, &bitmap_input,
+         field]<FilterType filter_type = FilterType::sequential>(
             const T* data,
             ValidityView valid_data,
             const int32_t* offsets,
@@ -535,6 +539,9 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
             processed_cursor += size;
             return;
         }
+        segcore::ObservePkUpdateRead(field,
+                                     {segcore::PkUpdateReadPath::RawPredicate,
+                                      static_cast<size_t>(size)});
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFunc<T, true, true, filter_type> func;
             func(val1,
