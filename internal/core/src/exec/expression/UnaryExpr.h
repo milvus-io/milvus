@@ -1192,9 +1192,6 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     std::optional<VectorPtr>
     ExecFMPatternCandidates(EvalCtx& context);
 
-    static std::pair<std::string, std::string>
-    SplitAtFirstSlashDigit(std::string input);
-
     void
     PrefetchRawData() override;
 

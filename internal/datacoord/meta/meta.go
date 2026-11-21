@@ -263,6 +263,15 @@ func NewMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	}
 
 	mt.IndexCatalog, mt.CompactionProtection = loadedDomains()
+	if mt.IndexCatalog != nil {
+		mt.IndexCatalog.SetCollectionSchemaGetter(func(collectionID UniqueID) *schemapb.CollectionSchema {
+			collection := mt.GetCollection(collectionID)
+			if collection == nil {
+				return nil
+			}
+			return collection.Schema
+		})
+	}
 
 	// Segment change groups load AFTER segments are in memory: the recovery
 	// index build exempts L0 superseded parents, which requires segment levels
@@ -377,28 +386,36 @@ func (m *Meta) ReloadCollectionsFromRootcoord(ctx context.Context, broker broker
 			return err
 		}
 		for _, collectionID := range collectionsResp.GetCollectionIds() {
-			descResp, err := broker.DescribeCollectionInternal(ctx, collectionID)
-			if err != nil {
+			if err := m.ReloadCollectionFromRootcoord(ctx, broker, collectionID); err != nil {
 				return err
 			}
-			partitionIDs, err := broker.ShowPartitionsInternal(ctx, collectionID)
-			if err != nil {
-				return err
-			}
-			collection := &CollectionInfo{
-				ID:             collectionID,
-				Schema:         descResp.GetSchema(),
-				Partitions:     partitionIDs,
-				StartPositions: descResp.GetStartPositions(),
-				Properties:     funcutil.KeyValuePair2Map(descResp.GetProperties()),
-				CreatedAt:      descResp.GetCreatedTimestamp(),
-				DatabaseName:   descResp.GetDbName(),
-				DatabaseID:     descResp.GetDbId(),
-				VChannelNames:  descResp.GetVirtualChannelNames(),
-			}
-			m.AddCollection(collection)
 		}
 	}
+	return nil
+}
+
+// ReloadCollectionFromRootcoord shares the complete collection cache entry
+// between startup recovery and an on-demand retry for one active collection.
+func (m *Meta) ReloadCollectionFromRootcoord(ctx context.Context, broker broker.Broker, collectionID int64) error {
+	descResp, err := broker.DescribeCollectionInternal(ctx, collectionID)
+	if err != nil {
+		return err
+	}
+	partitionIDs, err := broker.ShowPartitionsInternal(ctx, collectionID)
+	if err != nil {
+		return err
+	}
+	m.AddCollection(&CollectionInfo{
+		ID:             collectionID,
+		Schema:         descResp.GetSchema(),
+		Partitions:     partitionIDs,
+		StartPositions: descResp.GetStartPositions(),
+		Properties:     funcutil.KeyValuePair2Map(descResp.GetProperties()),
+		CreatedAt:      descResp.GetCreatedTimestamp(),
+		DatabaseName:   descResp.GetDbName(),
+		DatabaseID:     descResp.GetDbId(),
+		VChannelNames:  descResp.GetVirtualChannelNames(),
+	})
 	return nil
 }
 

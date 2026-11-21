@@ -40,7 +40,6 @@
 #include "exec/expression/JsonContainsExpr.h"
 #include "exec/expression/ExprBatchTestUtils.h"
 #include "index/IndexFactory.h"
-#include "index/JsonFlatIndex.h"
 #include "index/JsonScalarIndexWrapper.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "exec/expression/TermExpr.h"
@@ -947,6 +946,99 @@ TEST(JsonStatsAsyncLoadTest, UsesFullColumnGroupProjectionWithWarmup) {
                                   /*expect_multi_field_group=*/true);
 }
 
+TEST(JsonStatsUnaryRangeTest, PreservesObjectKeysAndArrayOffsets) {
+    struct InspectableUnaryExpr : exec::PhyUnaryRangeFilterExpr {
+        using exec::PhyUnaryRangeFilterExpr::PhyUnaryRangeFilterExpr;
+
+        exec::ExprExecPath
+        GetExecPath() const {
+            return exec_path_;
+        }
+    };
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    auto segment = segcore::CreateSealedSegment(schema);
+    const std::vector<std::string> rows = {
+        R"({"1b":1,"2024-01-01":1,"outer":{"1b":1},"a/b":1,"a~b":1,"1/b":1,"outer/":{"~1b":1},"0":1,"arr":[1,2],"objects":[{"1b":1}]})",
+        R"({"1b":2,"2024-01-01":2,"outer":{"1b":2},"a/b":2,"a~b":2,"1/b":2,"outer/":{"~1b":2},"0":2,"arr":[2,1],"objects":[{"1b":2}]})",
+        R"({})",
+    };
+    auto stats = BuildAndLoadJsonKeyStats(rows,
+                                          json_fid,
+                                          TestLocalPath,
+                                          1190,
+                                          2190,
+                                          3190,
+                                          json_fid.get(),
+                                          5190,
+                                          1);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetJsonStatsForTesting(json_fid,
+                                   MakeTestJsonStatsSlot(std::move(stats)));
+    auto field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    field->FillFieldData(MakeNullableJsonArray(rows, {0xff}));
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    segment->LoadFieldData(
+        PrepareSingleFieldInsertBinlog(0, 0, 0, json_fid.get(), {field}, cm));
+
+    const std::vector<std::pair<std::vector<std::string>, bool>> paths = {
+        {{"1b"}, true},
+        {{"2024-01-01"}, true},
+        {{"outer", "1b"}, true},
+        {{"a/b"}, true},
+        {{"a~b"}, true},
+        {{"1/b"}, true},
+        {{"outer/", "~1b"}, true},
+        {{"0"}, false},
+        {{"arr", "0"}, false},
+        {{"objects", "0", "1b"}, false},
+        {{"2missing"}, true},
+    };
+    proto::plan::GenericValue one;
+    one.set_int64_val(1);
+    for (const auto& [path, uses_stats] : paths) {
+        SCOPED_TRACE(milvus::Json::pointer(path));
+        for (auto op : {proto::plan::OpType::Equal,
+                        proto::plan::OpType::NotEqual,
+                        proto::plan::OpType::GreaterThan,
+                        proto::plan::OpType::LessEqual}) {
+            SCOPED_TRACE(static_cast<int>(op));
+            auto expression = std::make_shared<expr::UnaryRangeFilterExpr>(
+                expr::ColumnInfo(json_fid, DataType::JSON, path),
+                op,
+                one,
+                std::vector<proto::plan::GenericValue>{});
+            InspectableUnaryExpr phy({},
+                                     expression,
+                                     "pointer-probe",
+                                     nullptr,
+                                     segment.get(),
+                                     rows.size(),
+                                     rows.size(),
+                                     0);
+            phy.EnsureExecPathDetermined();
+            EXPECT_EQ(phy.GetExecPath(),
+                      uses_stats ? exec::ExprExecPath::JsonStats
+                                 : exec::ExprExecPath::RawData);
+            auto plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, expression);
+            auto result = query::ExecuteQueryExpr(
+                plan, segment.get(), rows.size(), MAX_TIMESTAMP);
+            ASSERT_EQ(result.size(), rows.size());
+            const bool missing = path[0] == "2missing";
+            const bool matches_one = op == proto::plan::OpType::Equal ||
+                                     op == proto::plan::OpType::LessEqual;
+            EXPECT_EQ(result[0], !missing && matches_one);
+            EXPECT_EQ(result[1], !missing && !matches_one);
+            EXPECT_FALSE(result[2]);
+        }
+    }
+}
+
 TEST(JsonStatsUnaryRangeTest, NotEqualKeepsJsonPathUnknownsAndMasksFieldNull) {
     auto schema = std::make_shared<Schema>();
     auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
@@ -1673,41 +1765,6 @@ LoadJsonDoublePathIndex(
     segment.LoadIndex(load_index_info);
 }
 
-// Build a flat (cast type JSON) index over `json_field` and load it into
-// `segment`; it covers every path of the field.
-void
-LoadJsonFlatIndex(segcore::SegmentSealed& segment,
-                  FieldId json_fid,
-                  const std::shared_ptr<FieldData<milvus::Json>>& json_field) {
-    auto file_manager_ctx = storage::FileManagerContext();
-    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
-        milvus::proto::schema::JSON);
-    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
-    file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
-    auto cast_type = JsonCastType::FromString("JSON");
-    auto index = index::IndexFactory::GetInstance().CreateJsonIndex(
-        index::CreateIndexInfo{
-            .index_type = index::INVERTED_INDEX_TYPE,
-            .json_cast_type = cast_type,
-            .json_path = "",
-        },
-        file_manager_ctx);
-    auto json_index = std::unique_ptr<index::JsonFlatIndex>(
-        static_cast<index::JsonFlatIndex*>(index.release()));
-    json_index->BuildWithFieldData({json_field});
-    json_index->finish();
-    json_index->create_reader(milvus::index::SetBitsetSealed);
-
-    segcore::LoadIndexInfo load_index_info;
-    load_index_info.field_id = json_fid.get();
-    load_index_info.field_type = DataType::JSON;
-    load_index_info.index_params = {{JSON_PATH, ""},
-                                    {JSON_CAST_TYPE, cast_type.ToString()}};
-    load_index_info.cache_index =
-        CreateTestCacheIndex(NextExecPathCacheKey(), std::move(json_index));
-    segment.LoadIndex(load_index_info);
-}
-
 // A sealed segment over `rows` with raw JSON loaded and, when `with_stats`,
 // JSON shredding stats attached.
 struct ExecPathFixture {
@@ -1903,71 +1960,6 @@ TEST(JsonStatsExecPathTest, PathIndexWinsOverJsonStats) {
     UnaryExecPathProbe string_phy(
         {}, string_expr, "string-probe", nullptr, segment.get(), N, N, 0);
     EXPECT_EQ(string_phy.Path(), exec::ExprExecPath::JsonStats);
-}
-
-// Every usable JSON index outranks the shredded scan, the flat one included:
-// JSON stats are the fallback for the paths no index serves.
-TEST(JsonStatsExecPathTest, FlatIndexWinsOverJsonStats) {
-    auto schema = std::make_shared<Schema>();
-    auto json_fid = schema->AddDebugField("json", DataType::JSON);
-    auto segment = segcore::CreateSealedSegment(schema);
-
-    const int N = 500;
-    std::vector<std::string> json_raw_data;
-    json_raw_data.reserve(N);
-    for (int i = 0; i < N; ++i) {
-        json_raw_data.emplace_back(fmt::format(R"({{"a": {}}})", i % 5));
-    }
-    auto stats = BuildAndLoadJsonKeyStats(json_raw_data,
-                                          json_fid,
-                                          TestLocalPath,
-                                          /*collection_id=*/1302,
-                                          /*partition_id=*/2302,
-                                          /*segment_id=*/3302,
-                                          json_fid.get(),
-                                          /*build_id=*/5302,
-                                          /*version_id=*/1);
-    auto* sealed =
-        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
-    ASSERT_NE(sealed, nullptr);
-    sealed->SetJsonStatsForTesting(json_fid,
-                                   MakeTestJsonStatsSlot(std::move(stats)));
-
-    std::vector<milvus::Json> jsons;
-    jsons.reserve(N);
-    for (const auto& s : json_raw_data) {
-        jsons.emplace_back(simdjson::padded_string(s));
-    }
-    auto json_field =
-        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
-    json_field->add_json_data(jsons);
-    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
-                  .GetRemoteChunkManager();
-    auto load_info = PrepareSingleFieldInsertBinlog(
-        0, 0, 0, json_fid.get(), {json_field}, cm);
-    segment->LoadFieldData(load_info);
-    LoadJsonFlatIndex(*segment, json_fid, json_field);
-
-    proto::plan::GenericValue three;
-    three.set_int64_val(3);
-    auto unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
-        expr::ColumnInfo(
-            json_fid, DataType::JSON, std::vector<std::string>{"a"}),
-        proto::plan::OpType::Equal,
-        three,
-        std::vector<proto::plan::GenericValue>{});
-    UnaryExecPathProbe phy(
-        {}, unary_expr, "unary-probe", nullptr, segment.get(), N, N, 0);
-    EXPECT_EQ(phy.Path(), exec::ExprExecPath::ScalarIndex);
-
-    auto plan =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
-    auto result =
-        query::ExecuteQueryExpr(plan, segment.get(), N, MAX_TIMESTAMP);
-    ASSERT_EQ(result.size(), N);
-    for (int i = 0; i < N; ++i) {
-        EXPECT_EQ(bool(result[i]), i % 5 == 3) << i;
-    }
 }
 
 // A typed ARRAY_* JSON path index (INVERTED on this branch) records missing,

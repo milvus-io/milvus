@@ -459,6 +459,7 @@ func NewSegment(ctx context.Context,
 	version int64,
 	loadInfo *querypb.SegmentLoadInfo,
 ) (Segment, error) {
+	loadInfo = withoutJSONFlatIndexes(loadInfo, collection.Schema())
 	/*
 		CStatus
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type, CSegmentInterface* newSegment);
@@ -1212,6 +1213,7 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 // Segcore has already switched views; rows pending deletion can remain visible
 // until a later replay succeeds (permanent source errors require repair).
 func (s *LocalSegment) reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo, replayDeletes func() error) error {
+	newLoadInfo = withoutJSONFlatIndexes(newLoadInfo, s.collection.Schema())
 	if !s.ptrLock.PinIfNotReleased() {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released during reopen")
 	}
