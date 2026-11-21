@@ -161,6 +161,12 @@ master 已有 Growing 的有限范围 Transform 回放及其后的实时 WAL 投
 - 按加载范围固定每个物理 update store 跟踪的字段集合：field ID、逻辑类型、ARRAY element type 和 nullability。集合兼容时保留现有 base/cursor 共享；集合不同时，新建物理实例与 Transform registration，通过共享 buffer 从自身 base cursor 重放，完成后才能 ready。持久化与实时 assignments 使用同一固定集合投影；扩大字段范围不能复用窄实例已追平的边界。
 - pin physical store，将成功查询 attempt 的 Q_TS 传递到 filter、streaming/requery 和延迟 output；复用现有 worker/retained-plan 链路。对更新字段绕过过期的 SN segment pruning。
 - 先登记 active read requirements 和未来查询允许进入的最小 timestamp，再计算 R_G/R_T。协调登记与 GC 边界发布，为每个 physical store 选择安全边界并调用新增的 `CSegment.GCUpdates()`。仅有 latest applied progress 或资源引用计数不能确定安全边界；还需保留延迟 load/reconnect 所需的 Transform 历史。这些读取与恢复保护通过测试前，保持 GC 关闭。
+- 阶段 5.2a：为已发布的 shard DataView 及其 QueryViews 增加不可变的 `(G_min, T_min)` 准入下界。先冻结候选 segment IDs/manifests，再从现有 WAL owner 取得同一个完整前缀的 `(G,T)`，与候选版本一同持久化后发布。不能折成一个最小值，也不能拼接两次采样。
+- grouped change、普通 recompute、schema projection、bootstrap 和 Flush 共用发布检查。Growing→Sealed 会切换执行时间轴，同样需要认证。恢复未变化的已认证 View 时保留原下界；空 shard 也保留保护元数据。候选变化或来源证明不可得时，重试发布。
+- 保持现有最高合格 View 的选择规则。固定 `(G,T)` 分量分别校验；iterator 的 `B` 必须满足两个下界，不能修改 `B`。不可服务的历史读取返回现有 View 生命周期错误，不能为绕过下界而回退旧 View。已签发的精确版本请求才可沿原生命周期继续使用旧 View。pruning 和空结果快速返回前也要校验。
+- 阶段 5.2b：View ready 前将其下界绑定到实际 physical stores，保护 planning/execution 两次 RPC 间隙；执行中的 G 或 T 持有至 native 求值与 output conversion 完成。在 owner 锁内预留单调 GC 边界，受所有 retained/pending View 下界、执行中读取和 store 完整已应用前缀共同限制。迟到的更旧绑定必须重建或失败，不能挂到已预留的回收边界以下。
+- 成功 acquisition 证明更高安全边界后，持有 physical pin，在 owner 锁外调用一次 native GC。失败保留准入限制并稍后重试；不能由空 reader 集合推出安全边界。测试旧 View 退出后确实减少版本数，并覆盖取消与延迟绑定。
+- 对来源时钟不明的恢复历史，先审计再允许替换基线通过认证。既有墙钟 TTL 压实不能证明普遍的历史行保留，本次字段版本改动不宣称修复该问题。同时将 standalone UPDATE 纳入 append-time pending tracking，保证 Strong 读取等待已成功但 ACK 前缀尚未发布的写入。
 - JSONL 注入仅用于显式开启的本地测试。生产路径直接对挂载的 store 执行 apply，不为每次 mutation 重建 Begin/Apply/Commit POC session。
 - 记录 apply 进度、更新/版本数量、delta 内存及汇总后的读取路径计数；避免在热循环中逐 cell 打日志或更新共享 atomic 统计。
 
