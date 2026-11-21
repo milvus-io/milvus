@@ -638,6 +638,7 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 	// snapshots may replace it, so they require the same manifest revision to share.
 	coverage := collection.Collection().UpdateCoverage()
 	registrar := b.view.buffer.Registrar()
+	m.mu.Lock()
 	for _, candidate := range r.bases {
 		if candidate.retention.Reserved > b.floor() || candidate.registrar != registrar || candidate.catchupErr != nil || !slices.Equal(candidate.coverage, coverage) {
 			continue
