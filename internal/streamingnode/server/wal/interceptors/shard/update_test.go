@@ -32,7 +32,7 @@ import (
 )
 
 func TestPKUpdateAppendValidation(t *testing.T) {
-	for _, name := range []string{"missing_version", "wrong_collection", "schema_mismatch", "missing_collection", "invalid_partition", "missing_partition", "malformed_body", "canceled", "rollout_fence"} {
+	for _, name := range []string{"missing_version", "wrong_collection", "schema_mismatch", "missing_collection", "invalid_partition", "missing_partition", "malformed_body", "canceled", "valid"} {
 		t.Run(name, func(t *testing.T) {
 			manager := mock_shards.NewMockShardManager(t)
 			impl := &shardInterceptor{shardManager: manager}
@@ -70,17 +70,20 @@ func TestPKUpdateAppendValidation(t *testing.T) {
 				ctx, cancel = context.WithCancel(ctx)
 				cancel()
 			}
+			appended := false
 			id, err := impl.DoAppend(ctx, msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
-				t.Fatal("invalid or disabled UPDATE reached WAL append")
+				appended = true
 				return nil, nil
 			})
+			require.Equal(t, name == "valid", appended)
+			if name == "valid" {
+				require.NoError(t, err)
+				return
+			}
 			require.Nil(t, id)
 			require.Error(t, err)
 			if name == "schema_mismatch" {
 				require.True(t, status.AsStreamingError(err).IsSchemaVersionMismatch())
-			}
-			if name == "rollout_fence" {
-				require.ErrorContains(t, err, "consumers are not enabled")
 			}
 			if name == "canceled" {
 				require.ErrorIs(t, err, context.Canceled)

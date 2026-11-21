@@ -42,5 +42,4 @@ func TestPKUpdateMessage(t *testing.T) {
 	require.False(t, m.MessageType().IsSystem())
 	require.False(t, m.MessageType().IsSelfControlled())
 	require.False(t, m.MessageType().IsExclusiveRequired())
-	require.False(t, message.PKUpdateEnabled, "consumer integration is a separate activation gate")
 }

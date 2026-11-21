@@ -75,9 +75,9 @@ WALSummary and the active WAL materializer. Each block uses the commit TimeTick
 and its original transaction body index, including gaps left by inserts.
 Materialization pins the historical collection schema while observing these
 messages. All partition outputs must register before the cursor advances.
-Delete-only traffic retains the legacy output during the PK-update rollout fence.
+Delete-only traffic retains the legacy output format.
 
-The temporary WAL L0 materializer retains Delete/Txn and explicit Flush handles.
+The temporary WAL L0 materializer retains Delete, Update, relevant committed Txn and explicit Flush handles.
 Size, buffer age, explicit Flush and recovery-tail requests trigger output.
 Materialization through T waits for final DataCoord publication of every L1
 created before T, across all partitions of the VChannel. Growing registration or

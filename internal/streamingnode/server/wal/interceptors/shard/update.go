@@ -67,8 +67,5 @@ func (impl *shardInterceptor) handleUpdateMessage(ctx context.Context, msg messa
 			return nil, status.NewUnrecoverableError("cannot validate update partition: %s", err)
 		}
 	}
-	if !message.PKUpdateEnabled {
-		return nil, status.NewUnrecoverableError("PK-update consumers are not enabled")
-	}
 	return appendOp(ctx, msg)
 }
