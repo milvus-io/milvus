@@ -79,7 +79,7 @@ func TestManifestIndexMigrationWaitsForGCRetirement(t *testing.T) {
 	retired := make(chan struct{})
 	go func() {
 		defer close(retired)
-		gc.recycleManifestSegmentIndexes(ctx, []segmentIndexGCItem{{segIdx: record, files: gc.getRetainedIndexFilesOfIndex(record)}})
+		gc.recycleManifestSegmentIndexes(ctx, []segmentIndexGCItem{{summary: model.SummarizeSegmentIndex(record), files: gc.getRetainedIndexFilesOfIndex(record)}})
 	}()
 	<-entered
 	restored := make(chan int, 1)

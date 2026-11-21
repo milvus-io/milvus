@@ -870,7 +870,7 @@ func loadDomainMetas(catalog metastore.DataCoordCatalog, chunkManager storage.Ch
 
 // Summary publication retires task rows that the legacy readers and GC need.
 // Enable startup only in the same revision that installs the summary consumers.
-const segmentIndexSummaryReadersReady = false
+const segmentIndexSummaryReadersReady = true
 
 func (s *Server) initIndexMetadataMode() error {
 	mode := &Params.DataCoordCfg.SegmentIndexSummariesEnabled

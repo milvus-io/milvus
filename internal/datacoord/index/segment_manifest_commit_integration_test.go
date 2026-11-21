@@ -204,6 +204,9 @@ func testCommitSegmentManifestIndexPublication(t *testing.T, summaries bool) {
 		require.True(t, summary.GetHasArtifact())
 		require.False(t, dm.IndexMeta.HasBuildInfo(buildID))
 		require.Zero(t, dm.IndexMeta.SegmentIndexes.Len())
+		published, exists := dm.IndexMeta.GetSegmentIndexSummary(segmentID, buildID)
+		require.True(t, exists)
+		require.True(t, published.HasArtifact)
 	} else {
 		require.Empty(t, persistedSegments[0].GetIndexSummaries())
 		require.Empty(t, mt.GetSegment(ctx, segmentID).GetIndexSummaries())

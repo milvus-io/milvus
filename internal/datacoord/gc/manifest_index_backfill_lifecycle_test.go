@@ -46,7 +46,7 @@ func TestManifestIndexBackfillGCRechecksLegacyObservation(t *testing.T) {
 	record, _ := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
 	gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
 	t.Cleanup(gc.Close)
-	item := segmentIndexGCItem{segIdx: record, files: gc.GetAllIndexFilesOfIndex(record)}
+	item := segmentIndexGCItem{summary: model.SummarizeSegmentIndex(record), files: gc.GetAllIndexFilesOfIndex(record)}
 	for file := range item.files {
 		require.NoError(t, m.ChunkManager.Write(ctx, file, []byte("artifact")))
 		t.Cleanup(func() { _ = m.ChunkManager.Remove(ctx, file) })
