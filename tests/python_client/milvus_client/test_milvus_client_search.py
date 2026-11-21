@@ -19,6 +19,7 @@ from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import * # noqa
 from common.constants import * # noqa
 from pymilvus import DataType, Function, FunctionType, AnnSearchRequest
+from pymilvus.grpc_gen import common_pb2, milvus_pb2
 
 fake = Faker()
 
@@ -95,6 +96,53 @@ def get_nullable_vector_search_params(vector_data_type):
 
 class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
     """ Test case of search interface """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("hybrid", [False, True])
+    def test_milvus_client_search_malformed_placeholder_without_nq(self, user, password, db_name, hybrid):
+        """Search and HybridSearch preserve parse errors while inferring NQ."""
+        client = self._client(user=user, password=password, db_name=db_name)
+        name = cf.gen_collection_name_by_testcase_name()
+        try:
+            self.create_collection(client, name, dimension=4)
+            # Keep the SDK's authenticated connection while sending malformed bytes.
+            stub = client._get_connection()._stub
+            search = milvus_pb2.SearchRequest(
+                db_name=db_name,
+                collection_name=name,
+                nq=0,
+                placeholder_group=b"\xff",
+                search_params=[
+                    common_pb2.KeyValuePair(key="anns_field", value="vector"),
+                    common_pb2.KeyValuePair(key="topk", value="1"),
+                    common_pb2.KeyValuePair(key="metric_type", value="COSINE"),
+                ],
+            )
+            if hybrid:
+                response = stub.HybridSearch(
+                    milvus_pb2.HybridSearchRequest(
+                        db_name=db_name,
+                        collection_name=name,
+                        requests=[search],
+                        rank_params=[common_pb2.KeyValuePair(key="limit", value="1")],
+                    ),
+                    timeout=30,
+                )
+            else:
+                response = stub.Search(search, timeout=30)
+            status = response.status
+            assert status.code == 1100, status
+            assert status.extra_info.get("is_input_error") == "true", status
+            assert not status.retriable, status
+            context = "placeholder group for sub search:" if hybrid else "placeholder group:"
+            for text in (context, "proto:"):
+                assert text in status.reason, status
+        finally:
+            try:
+                if client.has_collection(name):
+                    self.drop_collection(client, name)
+            finally:
+                self.close(client)
 
     @pytest.fixture(scope="function", params=[False, True])
     def auto_id(self, request):
