@@ -54,6 +54,13 @@ type createCollectionTask struct {
 	header          *message.CreateCollectionMessageHeader
 	body            *message.CreateCollectionRequest
 	preserveFieldID bool
+	// allowStructSubFieldOriginMarker accepts the internal origin marker on
+	// struct sub-fields. Only restore from a snapshot sets it: that restore
+	// copies segments as they are, so the sub-fields added after their struct
+	// still lack columns in old segments and must keep the marker. Every
+	// CreateCollection request, with or without preserve_field_ids, is rejected
+	// when it carries the marker.
+	allowStructSubFieldOriginMarker bool
 
 	// heldFileResourceIds tracks file resources whose refCnt was incremented
 	// during validation, to be released if the task fails before Broadcast.
@@ -186,8 +193,14 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
-	if err := rejectStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
-		return err
+	if t.allowStructSubFieldOriginMarker {
+		if err := validateRestoredStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
+			return err
+		}
+	} else {
+		if err := rejectStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
+			return err
+		}
 	}
 	// A restored collection (preserveFieldID) keeps its stored schema, whose
 	// sub-fields may carry enable_match or enable_analyzer from an earlier
