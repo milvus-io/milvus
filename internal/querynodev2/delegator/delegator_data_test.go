@@ -332,13 +332,15 @@ func (s *DelegatorDataSuite) TestProcessInsert() {
 						FieldId: 100,
 					},
 					{
-						Type:      schemapb.DataType_FloatVector,
+						// Field 101 is a 128-dim binary vector in the suite
+						// schema: 16 bytes per row.
+						Type:      schemapb.DataType_BinaryVector,
 						FieldName: "vector",
 						Field: &schemapb.FieldData_Vectors{
 							Vectors: &schemapb.VectorField{
 								Dim: 128,
-								Data: &schemapb.VectorField_FloatVector{
-									FloatVector: &schemapb.FloatArray{Data: make([]float32, 128*2)},
+								Data: &schemapb.VectorField_BinaryVector{
+									BinaryVector: make([]byte, 128/8*2),
 								},
 							},
 						},
