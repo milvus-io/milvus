@@ -38,11 +38,101 @@ def read_owner(f, binary, role, term, meta, tick):
         returncode=proc.returncode,
         meta=meta,
         role=role,
+        term=term,
+        endpoint=endpoint,
         stdout=proc.stdout[-5000:],
         stderr=proc.stderr[-1500:],
     )
     f.record("specific worker View read", result)
     return result
+
+
+def check_row(response, score, owner=None):
+    assert response["returncode"] == 0, response
+    result = json.loads(response["stdout"])["legacyResults"]
+    assert not result.get("status", {}).get("code"), result
+    assert result["ids"]["intId"]["data"] == ["1"], result
+    values = {x["fieldId"]: x["scalars"]["longData"]["data"] for x in result["fieldsData"]}
+    assert values == {"100": ["1"], "101": [str(score)]}, values
+    node = int(result["base"]["sourceID"])
+    assert owner is None or node == owner, (node, owner)
+    return node
+
+
+def new_score(f, name, score):
+    ack = f.update([1], [literal("score", score)], collection=name)
+    f.accepted(ack, 1)
+    return int(ack["timestamp"])
+
+
+def read_sealed(f, binary, binding, tick, score):
+    node = binding["node"]
+    before = f.retrieve_calls("querynode").get(node, 0)
+    result = read_owner(f, binary, "querynode", binding["term"], binding["meta"], tick)
+    check_row(result, score, node)
+    after = f.retrieve_calls("querynode").get(node, 0)
+    assert after > before, (node, before, after)
+    f.record(
+        "sealed sibling execution",
+        dict(
+            pid=binding["pid"],
+            node=node,
+            segment=binding["segment"],
+            channel=binding["meta"]["vchannel"],
+            term=binding["term"],
+            version=binding["meta"]["version"],
+            tick=tick,
+            score=score,
+            retrieves_before=before,
+            retrieves_after=after,
+        ),
+    )
+
+
+def version(meta):
+    v = meta["version"]
+    return tuple(int(v.get("dataVersion", {}).get(key, 0)) for key in ("streamingVersion", "compactVersion")) + (
+        int(v.get("queryVersion", 0)),
+    )
+
+
+def sealed_binding(f, name, pid, channel=None):
+    cid = str(f.client.describe_collection(name, timeout=10)["collection_id"])
+    deadline = time.monotonic() + 65
+    while True:
+        snap = capture(f.site, name + f"-sealed-sibling-{time.time_ns()}", timeout=25)
+        sealed = {
+            sid for sid, seg in segments(snap, cid).items() if seg.get("state") == "Flushed" and seg.get("isSorted")
+        }
+        inventory = {
+            str(segment.segmentID): set(segment.nodeIds)
+            for segment in f.client._get_connection().get_query_segment_info(name, timeout=5)
+            if segment.is_sorted
+        }
+        views = [
+            r["data"]
+            for r in snap
+            if r.get("data", {}).get("meta", {}).get("collectionId") == cid
+            and r["data"]["meta"]["state"] == "QueryViewStateUp"
+            and (channel is None or r["data"]["meta"]["vchannel"] == channel)
+        ]
+        for view in sorted(views, key=lambda v: version(v["meta"]), reverse=True):
+            meta = view["meta"]
+            for worker in view.get("queryNode", []):
+                node = int(worker["nodeId"])
+                assigned = {sid for part in worker.get("partitions", []) for sid in part.get("segmentIds", [])}
+                for sid in sealed.intersection(assigned):
+                    if node in inventory.get(sid, set()):
+                        pch = meta["vchannel"].rsplit("_", 1)[0]
+                        term = next(
+                            x["data"]["channel"]["term"]
+                            for x in snap
+                            if x.get("key") == "streamingcoord-meta/pchannel/" + pch
+                        )
+                        return dict(node=node, pid=pid, segment=int(sid), meta=meta, term=term)
+        if time.monotonic() >= deadline:
+            raise TimeoutError("healthy sealed sibling assignment: " + name)
+        time.sleep(0.35)
 
 
 def run(f, binary, role):
@@ -74,84 +164,58 @@ def run(f, binary, role):
         if "admission is disabled" not in f.update([1], [literal("id", 0)])["status"].get("reason", ""):
             break
         time.sleep(0.5)
-    if role == "querynode":
-        f.client.flush(f.candidate, timeout=60)
-    deadline = time.monotonic() + 90
-    while True:
-        snap = capture(f.site, f.candidate + f"-native-base-{time.time_ns()}", timeout=25)
-        segs = segments(snap, cid)
-        ids = [
-            sid
-            for sid, s in segs.items()
-            if (
-                s.get("state") == "Growing"
-                if role == "streamingnode"
-                else s.get("state") == "Flushed" and s.get("isSorted")
-            )
-        ]
-        if role == "querynode" and len(ids) == 1:
-            inventory = f.client._get_connection().get_query_segment_info(f.candidate, timeout=10)
-            serving = any(
-                ids[0] in partition.get("segmentIds", [])
-                for item in snap
-                if item.get("data", {}).get("meta", {}).get("state") == "QueryViewStateUp"
-                for worker in item["data"].get("queryNode", [])
-                for partition in worker.get("partitions", [])
-            )
-            if not serving or not any(str(item.segmentID) == ids[0] and item.is_sorted for item in inventory):
-                ids = []
-            else:
-                before = sum(f.retrieve_calls("querynode").values())
-                assert rows(f.candidate) == base
-                if sum(f.retrieve_calls("querynode").values()) <= before:
-                    ids = []
-        if len(ids) == 1:
-            sid = int(ids[0])
-            break
-        if time.monotonic() >= deadline:
-            raise TimeoutError(str(segs))
-        time.sleep(1)
-    channel = segs[str(sid)]["insertChannel"]
-    pchannel = channel.rsplit("_", 1)[0]
-    (pinfo,) = (x["data"] for x in snap if x.get("key") == "streamingcoord-meta/pchannel/" + pchannel)
-    metas = [
-        x["data"]["meta"]
-        for x in snap
-        if "/qv/" in x.get("key", "")
-        and x["data"]["meta"]["vchannel"] == channel
-        and x["data"]["meta"]["state"] == "QueryViewStateUp"
-        and (
-            sn
-            or any(
-                str(sid) in partition.get("segmentIds", [])
-                for worker in x["data"].get("queryNode", [])
-                for partition in worker.get("partitions", [])
-            )
+    if sn:
+        deadline = time.monotonic() + 90
+        while True:
+            snap = capture(f.site, f.candidate + f"-native-base-{time.time_ns()}", timeout=25)
+            growing = [seg for seg in segments(snap, cid).values() if seg.get("state") == "Growing"]
+            if len(growing) == 1:
+                sid = int(growing[0]["ID"])
+                channel = growing[0]["insertChannel"]
+                break
+            if time.monotonic() >= deadline:
+                raise TimeoutError("growing candidate segment")
+            time.sleep(0.5)
+        pchannel = channel.rsplit("_", 1)[0]
+        term = next(
+            x["data"]["channel"]["term"] for x in snap if x.get("key") == "streamingcoord-meta/pchannel/" + pchannel
         )
-    ]
-
-    def version(meta):
-        v = meta["version"]
-        return tuple(int(v.get("dataVersion", {}).get(k, 0)) for k in ("streamingVersion", "compactVersion")) + (
-            int(v.get("queryVersion", 0)),
+        meta = max(
+            (
+                x["data"]["meta"]
+                for x in snap
+                if x.get("data", {}).get("meta", {}).get("vchannel") == channel
+                and x["data"]["meta"]["state"] == "QueryViewStateUp"
+            ),
+            key=version,
         )
-
-    initial_meta = meta = max(metas, key=version)
+    else:
+        for name in (f.candidate, f.mirror):
+            f.client.flush(name, timeout=60)
+        candidate = sealed_binding(f, f.candidate, owner)
+        sid, meta, term = candidate["segment"], candidate["meta"], candidate["term"]
+        channel = meta["vchannel"]
+    initial_meta = meta
 
     def worker_read(tick):
-        return read_owner(f, binary, role, pinfo["channel"]["term"], meta, tick)
+        return read_owner(f, binary, role, term, meta, tick)
 
     first = f.update([1], [literal("score", 1)])
     f.accepted(first, 1)
     baseline = worker_read(int(first["timestamp"]))
-    assert (
-        baseline["returncode"] == 0 and '"legacyResults"' in baseline["stdout"] and '"code":' not in baseline["stdout"]
-    )
+    node = check_row(baseline, 1, None if sn else candidate["node"])
+    sibling_score = 1
+    if not sn:
+        sibling = sealed_binding(f, f.mirror, owner)
+        assert sibling["node"] == node and sibling["segment"] != sid
+        sibling_tick = new_score(f, f.mirror, sibling_score)
+        read_sealed(f, binary, sibling, sibling_tick, sibling_score)
     gate = root / "apply"
     cfg.write_text(json.dumps(dict(PID=owner, Channel="", Tick=1, Segment=sid, Directory=str(gate))))
     gate.mkdir()
     f.record(
-        "physical owner before write", dict(pid=owner, role=role, segment=sid, channel=segs[str(sid)]["insertChannel"])
+        "physical owner before write",
+        dict(pid=owner, role=role, node=node, segment=sid, channel=channel, term=term, version=meta["version"]),
     )
     with ThreadPoolExecutor(3) as pool:
         submitted = pool.submit(f.update, [1], [literal("score", 91)])
@@ -179,6 +243,8 @@ def run(f, binary, role):
                 )
             direct = pool.submit(worker_read, physical["tick"])
             waiting = pool.submit(rows, f.candidate)
+            if not sn:
+                read_sealed(f, binary, sibling, sibling_tick, sibling_score)
             assert rows(f.mirror) == base
             time.sleep(0.35)
             if waiting.done():
@@ -222,6 +288,10 @@ def run(f, binary, role):
     assert old_cb["tick"] == physical["tick"]
     try:
         assert rows(f.mirror) == base
+        if not sn:
+            sibling_score = 72
+            sibling_tick = new_score(f, f.mirror, sibling_score)
+            read_sealed(f, binary, sibling, sibling_tick, sibling_score)
         f.client.create_partition(f.candidate, "recovery", timeout=20)
         # A flushed handoff also supplies a complete physical source to the Sealed replacement.
         if not sn:
@@ -260,9 +330,7 @@ def run(f, binary, role):
                 meta = max(candidates, key=version)
                 ok = worker_read(int(latest["timestamp"]))
                 if ok["returncode"] == 0:
-                    fields = json.loads(ok["stdout"])["legacyResults"]["fieldsData"]
-                    values = {x["fieldId"]: x["scalars"]["longData"]["data"] for x in fields}
-                    assert values == {"100": ["1"], "101": ["91"]}, values
+                    check_row(ok, 91, node)
                     break
             if time.monotonic() >= until:
                 raise TimeoutError("addressable replacement owner")
@@ -274,9 +342,16 @@ def run(f, binary, role):
         if time.monotonic() >= end:
             raise TimeoutError("old callback delivery")
         time.sleep(0.05)
-    assert rows(f.candidate) == target and rows(f.mirror) == base
-    assert worker_read(int(latest["timestamp"]))["returncode"] == 0
-    f.record("healthy replacement and sibling after delayed callback", dict(owner=owner, target=target, sibling=base))
+    if not sn:
+        sibling_score = 73
+        sibling_tick = new_score(f, f.mirror, sibling_score)
+        read_sealed(f, binary, sibling, sibling_tick, sibling_score)
+    sibling_rows = [dict(id=1, score=sibling_score, tag="base")]
+    assert rows(f.candidate) == target and rows(f.mirror) == sibling_rows
+    check_row(worker_read(int(latest["timestamp"])), 91, node)
+    f.record(
+        "healthy replacement and sibling after delayed callback", dict(owner=owner, target=target, sibling=sibling_rows)
+    )
     replace(f, role, binary, point)
     deadline = time.monotonic() + 90
     while True:
@@ -290,7 +365,7 @@ def run(f, binary, role):
             assert got == target
             f.record("new worker recovered committed update", got)
             break
-    assert rows(f.mirror) == base
+    assert rows(f.mirror) == sibling_rows
 
 
 if __name__ == "__main__":

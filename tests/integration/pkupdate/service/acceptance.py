@@ -81,9 +81,9 @@ class Fixture:
         with urllib.request.urlopen(req, timeout=5) as resp:
             self.record(key + " " + str(enabled), json.load(resp))
 
-    def update(self, ids, assignments, *, partition=None):
+    def update(self, ids, assignments, *, partition=None, collection=None):
         request = {
-            "collectionName": self.candidate,
+            "collectionName": collection or self.candidate,
             "primaryKeys": {"intId": {"data": ids}},
             "assignments": assignments,
         }

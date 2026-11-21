@@ -18,9 +18,11 @@ from acceptance import create_indexes
 from cluster_site import ROLES
 from history import check_history, serving_generation
 from metadata import capture
+from owner_faults import check_row
 from pymilvus import MilvusClient
 from pymilvus.grpc_gen import common_pb2, milvus_pb2_grpc
 from recovery import replace
+from replay_gap import same_stream_evidence
 
 
 def segment(sid, channel, partition, level):
@@ -85,6 +87,43 @@ def histories():
 
 
 class Checks(unittest.TestCase):
+    def test_worker_witness_rejects_stale_value_or_different_owner(self):
+        result = {
+            "base": {"sourceID": "3"},
+            "status": {},
+            "ids": {"intId": {"data": ["1"]}},
+            "fieldsData": [
+                {"fieldId": "100", "scalars": {"longData": {"data": ["1"]}}},
+                {"fieldId": "101", "scalars": {"longData": {"data": ["73"]}}},
+            ],
+        }
+        response = {"returncode": 0, "stdout": json.dumps({"legacyResults": result})}
+        self.assertEqual(check_row(response, 73, 3), 3)
+        with self.assertRaises(AssertionError):
+            check_row(response, 72, 3)
+        with self.assertRaises(AssertionError):
+            check_row(response, 73, 4)
+
+    def test_shared_stream_witness_rejects_reconnect_and_subscription_replacement(self):
+        entry = "querynode transform log buffer received entry [pchannel=channel] [vchannel=channel_sibling] [subscriptionID=8] [timeTick={}]"
+        terminal = "QNSegmentUnrecoverable channel_failed"
+        first, last = entry.format(10), entry.format(20)
+        with tempfile.TemporaryDirectory() as temp:
+            log = Path(temp) / "worker.log"
+
+            def verify(lines):
+                log.write_text("\n".join(lines) + "\n")
+                return same_stream_evidence(log, "channel", "channel_sibling", 10, 20, terminal)
+
+            self.assertEqual(verify([first, terminal, last])["subscription_id"], "8")
+            for lines in (
+                [first, terminal, "resumable transform log stream acquired underlying stream [pchannel=channel]", last],
+                [first, terminal, last.replace("subscriptionID=8", "subscriptionID=9")],
+                [first, last, terminal],
+            ):
+                with self.subTest(lines=lines), self.assertRaises(AssertionError):
+                    verify(lines)
+
     def test_event_sequences(self):
         src, out = histories()
 
