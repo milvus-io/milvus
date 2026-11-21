@@ -35,13 +35,16 @@ import (
 func TestReadCompletedIndexesUsesSelectedManifest(t *testing.T) {
 	root := t.TempDir()
 	base := path.Join(root, "insert_log/1/2/3")
-	segment := &datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2,
+	segment := &datapb.SegmentInfo{
+		ID: 3, CollectionID: 1, PartitionID: 2,
 		ManifestPath: packed.MarshalManifestPath(base, 7), ManifestHasIndex: true,
 		IndexSummaries: []*datapb.SegmentIndexSummary{{IndexId: 4, FieldId: 100, BuildId: 5, HasArtifact: true, IndexVersion: 1}},
 	}
 	mt := &Meta{ChunkManager: storage.NewLocalChunkManager(objectstorage.RootPath(root))}
-	entry := packed.ManifestIndexInfo{IndexID: 4, FieldID: 100, BuildID: 5, IndexVersion: 1, IndexName: "idx", IndexType: "HNSW",
-		Path: path.Join(base, "_index/5/1"), IndexFileKeys: []string{"index"}, IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED}
+	entry := packed.ManifestIndexInfo{
+		IndexID: 4, FieldID: 100, BuildID: 5, IndexVersion: 1, IndexName: "idx", IndexType: "HNSW",
+		Path: path.Join(base, "_index/5/1"), IndexFileKeys: []string{"index"}, IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+	}
 	read := mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(_ context.Context, _ *packed.ManifestIOContext, manifest string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
 		require.Equal(t, segment.GetManifestPath(), manifest)
 		return []packed.ManifestIndexInfo{entry}, nil

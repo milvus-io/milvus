@@ -356,8 +356,10 @@ func TestSummaryOnlyRetirementStagesInventoryAndAccountsAfterCommit(t *testing.T
 	require.NoError(t, dm.IndexMeta.CreateIndex(t.Context(), &model.Index{CollectionID: 1, IndexID: 10, FieldID: 100}))
 	mt.MetaStore.PutSegment(&datapb.SegmentInfo{
 		ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Dropped,
-		IndexSummaries: []*datapb.SegmentIndexSummary{{IndexId: 10, FieldId: 100, BuildId: 19, HasArtifact: true,
-			SerializedSize: 500, MemSize: 800, IndexVersion: 2, VectorEngineVersion: 3, ScalarEngineVersion: 4, IndexType: "HNSW"}},
+		IndexSummaries: []*datapb.SegmentIndexSummary{{
+			IndexId: 10, FieldId: 100, BuildId: 19, HasArtifact: true,
+			SerializedSize: 500, MemSize: 800, IndexVersion: 2, VectorEngineVersion: 3, ScalarEngineVersion: 4, IndexType: "HNSW",
+		}},
 	})
 	require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
 	require.EqualValues(t, 1, dm.IndexMeta.taskCounts.snapshot()[indexTaskStateSlot(commonpb.IndexState_Finished)])

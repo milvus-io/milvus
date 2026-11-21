@@ -78,8 +78,10 @@ func TestSummaryGCKeepsPublishedArtifactAcrossRestart(t *testing.T) {
 		ManifestPath: packed.MarshalManifestPath(base, packed.ManifestEarliest), NumOfRows: 10,
 	})))
 	version := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
-	task := &model.SegmentIndex{CollectionID: 1, PartitionID: 2, SegmentID: 3, IndexID: 4, BuildID: 5, IndexVersion: 1, NumRows: 10,
-		IndexState: commonpb.IndexState_InProgress, IndexStorePathVersion: version, IndexType: "FLAT"}
+	task := &model.SegmentIndex{
+		CollectionID: 1, PartitionID: 2, SegmentID: 3, IndexID: 4, BuildID: 5, IndexVersion: 1, NumRows: 10,
+		IndexState: commonpb.IndexState_InProgress, IndexStorePathVersion: version, IndexType: "FLAT",
+	}
 	require.NoError(t, im.AddSegmentIndex(ctx, task))
 	const tolerance = time.Minute
 	live := path.Join(base, "_index/5/1/index.bin")
@@ -130,8 +132,10 @@ func TestSummaryGCProtectsManifestWithoutResidentBuild(t *testing.T) {
 	})))
 	require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
 	gc := NewGarbageCollector(mt, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{Cli: cm}))
-	entry := packed.ManifestIndexInfo{IndexID: 4, BuildID: 5, IndexVersion: 1, IndexName: "idx", IndexType: "HNSW",
-		Path: path.Join(base, "_index/5/1"), IndexFileKeys: []string{"index"}, IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED}
+	entry := packed.ManifestIndexInfo{
+		IndexID: 4, BuildID: 5, IndexVersion: 1, IndexName: "idx", IndexType: "HNSW",
+		Path: path.Join(base, "_index/5/1"), IndexFileKeys: []string{"index"}, IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+	}
 	read := mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{entry}, nil).Build()
 	defer read.UnPatch()
 	reclaim := gc.newIndexFileReclaimChecker(ctx)
@@ -154,8 +158,10 @@ func TestSummaryGCRefreshesSegmentAfterTaskRetirement(t *testing.T) {
 	root := t.TempDir()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
 	base := path.Join(root, "insert_log/1/2/3")
-	old := &datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2, StorageVersion: storage.StorageV3, State: commonpb.SegmentState_Flushed,
-		ManifestPath: packed.MarshalManifestPath(base, 1)}
+	old := &datapb.SegmentInfo{
+		ID: 3, CollectionID: 1, PartitionID: 2, StorageVersion: storage.StorageV3, State: commonpb.SegmentState_Flushed,
+		ManifestPath: packed.MarshalManifestPath(base, 1),
+	}
 	require.NoError(t, mt.AddSegment(t.Context(), meta.NewSegmentInfo(old)))
 	require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
 	published := proto.Clone(old).(*datapb.SegmentInfo)
@@ -167,8 +173,10 @@ func TestSummaryGCRefreshesSegmentAfterTaskRetirement(t *testing.T) {
 		return true, nil
 	}).Build()
 	defer lookup.UnPatch()
-	entry := packed.ManifestIndexInfo{IndexID: 4, BuildID: 5, IndexVersion: 1, IndexName: "idx", IndexType: "HNSW",
-		Path: path.Join(base, "_index/5/1"), IndexFileKeys: []string{"index"}, IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED}
+	entry := packed.ManifestIndexInfo{
+		IndexID: 4, BuildID: 5, IndexVersion: 1, IndexName: "idx", IndexType: "HNSW",
+		Path: path.Join(base, "_index/5/1"), IndexFileKeys: []string{"index"}, IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+	}
 	read := mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(_ context.Context, _ *packed.ManifestIOContext, manifest string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
 		require.Equal(t, published.GetManifestPath(), manifest)
 		return []packed.ManifestIndexInfo{entry}, nil
@@ -195,9 +203,11 @@ func TestSummaryGCLoadsFileDetailsExplicitly(t *testing.T) {
 			gc := NewGarbageCollector(mt, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
 				Cli: storage.NewLocalChunkManager(objectstorage.RootPath(root)),
 			}))
-			entry := packed.ManifestIndexInfo{IndexID: 4, BuildID: 5, IndexVersion: 1, IndexName: "idx", IndexType: "HNSW",
+			entry := packed.ManifestIndexInfo{
+				IndexID: 4, BuildID: 5, IndexVersion: 1, IndexName: "idx", IndexType: "HNSW",
 				Path: path.Join(base, "_index/5/1"), IndexFileKeys: []string{"index"},
-				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED}
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+			}
 			reads := 0
 			read := mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(_ context.Context, _ *packed.ManifestIOContext, manifest string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
 				reads++
