@@ -21,6 +21,7 @@ import (
 	"math"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
@@ -142,6 +143,64 @@ func (s *RootCoordAllocatorSuite) TestAllocN() {
 		s.ms.EXPECT().AllocID(mock.Anything, mock.Anything).Return(nil, errors.New("mock")).Once()
 		_, _, err := s.allocator.AllocN(10)
 		s.Error(err)
+	})
+
+	s.Run("cancel_in_flight_with_context", func() {
+		ms := mocks.NewMixCoord(s.T())
+		alloc := NewRootCoordAllocator(ms)
+
+		entered := make(chan struct{})
+		observedErr := make(chan error, 1)
+		ms.EXPECT().AllocID(mock.Anything, mock.Anything).RunAndReturn(func(rpcCtx context.Context, _ *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
+			close(entered)
+			<-rpcCtx.Done()
+			err := rpcCtx.Err()
+			observedErr <- err
+			return nil, err
+		}).Once()
+
+		callerCtx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		done := make(chan error, 1)
+		go func() {
+			_, _, err := AllocNWithContext(callerCtx, alloc, 5)
+			done <- err
+		}()
+
+		select {
+		case <-entered:
+		case <-time.After(2 * time.Second):
+			s.FailNow("timed out waiting for AllocID entry barrier")
+		}
+
+		cancel()
+
+		select {
+		case err := <-observedErr:
+			s.ErrorIs(err, context.Canceled)
+		case <-time.After(2 * time.Second):
+			s.FailNow("inner AllocID context did not observe cancellation")
+		}
+
+		select {
+		case err := <-done:
+			s.ErrorIs(err, context.Canceled)
+		case <-time.After(2 * time.Second):
+			s.FailNow("AllocNWithContext did not return after cancellation")
+		}
+	})
+
+	s.Run("already_canceled_with_context", func() {
+		ms := mocks.NewMixCoord(s.T())
+		alloc := NewRootCoordAllocator(ms)
+
+		canceledCtx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		_, _, err := AllocNWithContext(canceledCtx, alloc, 5)
+		s.ErrorIs(err, context.Canceled)
+		ms.AssertNotCalled(s.T(), "AllocID", mock.Anything, mock.Anything)
 	})
 }
 

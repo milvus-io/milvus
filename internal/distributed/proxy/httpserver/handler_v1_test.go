@@ -277,11 +277,11 @@ func TestRESTV1AliasRBAC(t *testing.T) {
 
 	privCache := privilege.GetPrivilegeCache()
 	require.NotNil(t, privCache)
-	require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
+	require.NoError(t, privCache.RefreshPolicyInfo(context.Background(), typeutil.CacheOp{
 		OpType: typeutil.CacheGrantPrivilege,
 		OpKey:  funcutil.PolicyForPrivilege(role, commonpb.ObjectType_Collection.String(), realCol, commonpb.ObjectPrivilege_PrivilegeQuery.String(), util.DefaultDBName),
 	}))
-	require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
+	require.NoError(t, privCache.RefreshPolicyInfo(context.Background(), typeutil.CacheOp{
 		OpType: typeutil.CacheAddUserToRole,
 		OpKey:  funcutil.EncodeUserRoleCache(username, role),
 	}))
@@ -334,11 +334,11 @@ func TestRESTV1AliasRBAC_GrantOnAliasStringDenied(t *testing.T) {
 
 	privCache := privilege.GetPrivilegeCache()
 	require.NotNil(t, privCache)
-	require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
+	require.NoError(t, privCache.RefreshPolicyInfo(context.Background(), typeutil.CacheOp{
 		OpType: typeutil.CacheGrantPrivilege,
 		OpKey:  funcutil.PolicyForPrivilege(role, commonpb.ObjectType_Collection.String(), alias, commonpb.ObjectPrivilege_PrivilegeQuery.String(), util.DefaultDBName),
 	}))
-	require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
+	require.NoError(t, privCache.RefreshPolicyInfo(context.Background(), typeutil.CacheOp{
 		OpType: typeutil.CacheAddUserToRole,
 		OpKey:  funcutil.EncodeUserRoleCache(username, role),
 	}))

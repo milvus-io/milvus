@@ -67,6 +67,9 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 
 	satisfiedTargets := make([]*datapb.CompactionTarget, 0)
 	for _, target := range targets {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		record := target.Clone()
 		matches := reconciler.meta.SelectSegments(ctx, target.MatchFilters()...)
 		// Satisfaction uses semantic matches before temporary execution
@@ -80,13 +83,20 @@ func (reconciler *CompactionTargetReconciler) Reconcile(ctx context.Context) (ma
 		if remaining <= 0 {
 			continue
 		}
+		views := reconciler.compactionViews(ctx, record, target.CompactionType(), matches, remaining)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		events[policy.TriggerTypeSingle] = append(
 			events[policy.TriggerTypeSingle],
-			reconciler.compactionViews(ctx, record, target.CompactionType(), matches, remaining)...,
+			views...,
 		)
 	}
 
 	for _, record := range satisfiedTargets {
+		if err := ctx.Err(); err != nil {
+			return events, err
+		}
 		if err := targetMeta.UpdateCompactionTargetState(ctx, record.GetTargetID(), datapb.TargetState_TARGET_STATE_INACTIVE); err != nil {
 			return events, err
 		}

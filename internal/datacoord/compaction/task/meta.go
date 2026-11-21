@@ -195,6 +195,12 @@ func (csm *CompactionTaskMeta) DropCompactionTask(ctx context.Context, task *dat
 	return nil
 }
 
+func (csm *CompactionTaskMeta) RemoveTaskStats(planID UniqueID) {
+	csm.Lock()
+	defer csm.Unlock()
+	csm.taskStats.Remove(planID)
+}
+
 func (csm *CompactionTaskMeta) TaskStatsJSON() string {
 	tasks := csm.taskStats.Values()
 	ret, err := json.Marshal(tasks)

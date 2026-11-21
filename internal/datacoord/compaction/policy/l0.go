@@ -51,6 +51,9 @@ func (policy *L0CompactionPolicy) OnCollectionUpdate(collectionID int64) {
 }
 
 func (policy *L0CompactionPolicy) Trigger(ctx context.Context) (events map[CompactionTriggerType][]view.CompactionView, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	latestCollSegs := policy.Meta.GetCompactableSegmentGroupByCollection()
 
 	// 1. Get active collections
@@ -69,6 +72,9 @@ func (policy *L0CompactionPolicy) Trigger(ctx context.Context) (events map[Compa
 	}
 	events = make(map[CompactionTriggerType][]view.CompactionView)
 	for collID, segments := range latestCollSegs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		collection := policy.Meta.GetCollection(collID)
 		if collection == nil {
 			continue

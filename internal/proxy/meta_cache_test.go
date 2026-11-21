@@ -1700,29 +1700,29 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 		_, err := initMetaCache(context.Background(), client)
 		assert.NoError(t, err)
 
-		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheGrantPrivilege, OpKey: "policyX"})
+		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(context.Background(), typeutil.CacheOp{OpType: typeutil.CacheGrantPrivilege, OpKey: "policyX"})
 		assert.NoError(t, err)
 		policyInfos := privilege.GetPrivilegeCache().GetPrivilegeInfo(context.Background())
 		assert.Equal(t, 4, len(policyInfos))
 
-		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRevokePrivilege, OpKey: "policyX"})
+		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(context.Background(), typeutil.CacheOp{OpType: typeutil.CacheRevokePrivilege, OpKey: "policyX"})
 		assert.NoError(t, err)
 		policyInfos = privilege.GetPrivilegeCache().GetPrivilegeInfo(context.Background())
 		assert.Equal(t, 3, len(policyInfos))
 
-		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheAddUserToRole, OpKey: funcutil.EncodeUserRoleCache("foo", "role3")})
+		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(context.Background(), typeutil.CacheOp{OpType: typeutil.CacheAddUserToRole, OpKey: funcutil.EncodeUserRoleCache("foo", "role3")})
 		assert.NoError(t, err)
 		roles := privilege.GetPrivilegeCache().GetUserRole("foo")
 		assert.Equal(t, 3, len(roles))
 
-		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRemoveUserFromRole, OpKey: funcutil.EncodeUserRoleCache("foo", "role3")})
+		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(context.Background(), typeutil.CacheOp{OpType: typeutil.CacheRemoveUserFromRole, OpKey: funcutil.EncodeUserRoleCache("foo", "role3")})
 		assert.NoError(t, err)
 		roles = privilege.GetPrivilegeCache().GetUserRole("foo")
 		assert.Equal(t, 2, len(roles))
 
-		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheGrantPrivilege, OpKey: ""})
+		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(context.Background(), typeutil.CacheOp{OpType: typeutil.CacheGrantPrivilege, OpKey: ""})
 		assert.Error(t, err)
-		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: 100, OpKey: "policyX"})
+		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(context.Background(), typeutil.CacheOp{OpType: 100, OpKey: "policyX"})
 		assert.Error(t, err)
 	})
 
@@ -1741,7 +1741,7 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 		_, err := initMetaCache(context.Background(), client)
 		assert.NoError(t, err)
 
-		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheDeleteUser, OpKey: "foo"})
+		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(context.Background(), typeutil.CacheOp{OpType: typeutil.CacheDeleteUser, OpKey: "foo"})
 		assert.NoError(t, err)
 
 		roles := privilege.GetPrivilegeCache().GetUserRole("foo")
@@ -1750,7 +1750,7 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 		roles = privilege.GetPrivilegeCache().GetUserRole("foo2")
 		assert.Len(t, roles, 2)
 
-		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheDropRole, OpKey: "role2"})
+		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(context.Background(), typeutil.CacheOp{OpType: typeutil.CacheDropRole, OpKey: "role2"})
 		assert.NoError(t, err)
 		roles = privilege.GetPrivilegeCache().GetUserRole("foo2")
 		assert.Len(t, roles, 1)
@@ -1763,7 +1763,7 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 				UserRoles:   []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2"), funcutil.EncodeUserRoleCache("foo2", "role3")},
 			}, nil
 		}
-		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRefresh})
+		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(context.Background(), typeutil.CacheOp{OpType: typeutil.CacheRefresh})
 		assert.NoError(t, err)
 		roles = privilege.GetPrivilegeCache().GetUserRole("foo")
 		assert.Len(t, roles, 2)

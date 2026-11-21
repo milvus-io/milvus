@@ -532,42 +532,73 @@ func (c *Inspector) getCompactionTask(planID int64) ctask.CompactionTask {
 	return t
 }
 
+type contextCompactionEnqueuer interface {
+	EnqueueCompactionWithContext(ctx context.Context, task *datapb.CompactionTask) error
+}
+
+func enqueueCompaction(ctx context.Context, inspector CompactionInspector, task *datapb.CompactionTask) error {
+	if enqueuer, ok := inspector.(contextCompactionEnqueuer); ok {
+		return enqueuer.EnqueueCompactionWithContext(ctx, task)
+	}
+	return inspector.EnqueueCompaction(task)
+}
+
 func (c *Inspector) EnqueueCompaction(task *datapb.CompactionTask) error {
+	return c.EnqueueCompactionWithContext(context.Background(), task)
+}
+
+func (c *Inspector) EnqueueCompactionWithContext(ctx context.Context, task *datapb.CompactionTask) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	log := mlog.With(mlog.Int64("planID", task.GetPlanID()), mlog.Int64("triggerID", task.GetTriggerID()), mlog.FieldCollectionID(task.GetCollectionID()), mlog.String("type", task.GetType().String()))
 	t, err := c.admitCompactionTask(task)
 	if err != nil {
 		// Conflict is normal
 		if errors.Is(err, merr.ErrCompactionPlanConflict) {
-			log.RatedInfo(context.TODO(), rate.Limit(60), "Failed to create compaction task, compaction plan conflict", mlog.Err(err))
+			log.RatedInfo(ctx, rate.Limit(60), "Failed to create compaction task, compaction plan conflict", mlog.Err(err))
 		} else {
-			log.Warn(context.TODO(), "Failed to create compaction task, unable to create compaction task", mlog.Err(err))
+			log.Warn(ctx, "Failed to create compaction task, unable to create compaction task", mlog.Err(err))
 		}
 		return err
 	}
 
-	taskCreateTS, err := c.allocator.AllocTimestamp(context.TODO())
+	taskCreateTS, err := c.allocator.AllocTimestamp(ctx)
 	if err != nil {
-		c.meta.SetSegmentsCompacting(context.TODO(), t.GetTaskProto().GetInputSegments(), false)
-		log.Warn(context.TODO(), "Failed to enqueue compaction task, unable to allocate task create timestamp", mlog.Err(err))
+		c.meta.SetSegmentsCompacting(context.Background(), t.GetTaskProto().GetInputSegments(), false)
+		log.Warn(ctx, "Failed to enqueue compaction task, unable to allocate task create timestamp", mlog.Err(err))
 		return err
 	}
 	startTime := tsoutil.PhysicalTime(taskCreateTS).Unix()
 	t.SetTask(t.ShadowClone(ctask.SetStartTime(startTime), ctask.SetCreateTs(taskCreateTS)))
-	err = t.SaveTaskMeta()
+	if err := ctx.Err(); err != nil {
+		c.meta.SetSegmentsCompacting(context.Background(), t.GetTaskProto().GetInputSegments(), false)
+		return err
+	}
+	err = c.compactionTaskMeta.SaveCompactionTask(ctx, t.GetTaskProto())
 	if err != nil {
-		c.meta.SetSegmentsCompacting(context.TODO(), t.GetTaskProto().GetInputSegments(), false)
-		log.Warn(context.TODO(), "Failed to enqueue compaction task, unable to save task meta", mlog.Err(err))
+		if ctx.Err() != nil {
+			if dropErr := c.compactionTaskMeta.DropCompactionTask(context.Background(), t.GetTaskProto()); dropErr != nil {
+				log.Warn(ctx, "failed to drop compaction task meta after canceled save", mlog.Err(dropErr))
+			}
+		}
+		c.meta.SetSegmentsCompacting(context.Background(), t.GetTaskProto().GetInputSegments(), false)
+		log.Warn(ctx, "Failed to enqueue compaction task, unable to save task meta", mlog.Err(err))
 		return err
 	}
 	if err = c.submitTask(t); err != nil {
-		log.Warn(context.TODO(), "submit compaction task failed", mlog.Err(err))
+		log.Warn(ctx, "submit compaction task failed", mlog.Err(err))
+		if dropErr := c.compactionTaskMeta.DropCompactionTask(context.Background(), t.GetTaskProto()); dropErr != nil {
+			log.Warn(ctx, "failed to drop compaction task meta after submit failure", mlog.Err(dropErr))
+		}
+		c.compactionTaskMeta.RemoveTaskStats(t.GetTaskProto().GetPlanID())
 		c.meta.SetSegmentsCompacting(context.Background(), t.GetTaskProto().GetInputSegments(), false)
 		return err
 	}
 	// After the queue accepted it: a full queue makes the trigger plan the
 	// same compaction again on its next tick.
 	recordCompactionType(task.GetType())
-	log.Info(context.TODO(), "Compaction plan submitted")
+	log.Info(ctx, "Compaction plan submitted")
 	return nil
 }
 

@@ -44,6 +44,9 @@ func FilterInIndexedSegments(ctx context.Context, handler meta.Handler, indexMet
 
 	ret := make([]*meta.SegmentInfo, 0)
 	for collection, segmentList := range collectionSegments {
+		if ctx.Err() != nil {
+			return nil
+		}
 		// No segments will be filtered if there are no indices in the collection.
 		if skipNoIndexCollection && !indexMeta.HasIndex(collection) {
 			ret = append(ret, segmentList...)
@@ -55,6 +58,9 @@ func FilterInIndexedSegments(ctx context.Context, handler meta.Handler, indexMet
 		coll, err := handler.GetCollection(timeoutCtx, collection)
 		cancel()
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			mlog.Warn(ctx, "failed to get collection schema", mlog.Err(err))
 			continue
 		}
