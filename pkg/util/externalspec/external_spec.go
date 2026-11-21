@@ -599,6 +599,25 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	// empty — the endpoint would resolve to the URI host (= bucket) at
 	// runtime and fail opaquely.
 	if u != nil && !hasEndpointURL {
+		if cp == CloudProviderGCP && isGCSEndpointSource(u) {
+			if strings.Contains(u.Host, ":") {
+				port, err := strconv.ParseUint(u.Port(), 10, 16)
+				if err != nil || port == 0 {
+					return merr.WrapErrParameterInvalidMsg("GCS endpoint port must be between 1 and 65535")
+				}
+			}
+			// Injection normally extracts the bucket from the raw URI.
+			// An explicit matching bucket lets storage use its decoded path.
+			path := u.EscapedPath()
+			if bucket := extfs[ExtfsKeyBucketName]; bucket != "" && strings.HasPrefix(u.Path, "/"+bucket+"/") {
+				path = u.Path
+			}
+			bucket, _, hasSeparator := strings.Cut(strings.TrimPrefix(path, "/"), "/")
+			if bucket == "" || !hasSeparator {
+				return merr.WrapErrParameterInvalidMsg("GCS endpoint-form source requires /<bucket>/[<path>]; add a trailing slash for a bucket root")
+			}
+			return nil
+		}
 		// Cloud-family URI.host → Milvus-form, URI is authoritative.
 		// Covers global/accelerate/dualstack/FIPS/VPC/sovereign endpoint
 		// variants that DeriveEndpoint does not produce verbatim.
@@ -761,7 +780,7 @@ func validateGCPBearerEndpoint(source *url.URL, sourceScheme string, extfs map[s
 			return merr.WrapErrParameterInvalidMsg("extfs.endpoint_url is not a valid URL")
 		}
 		scheme, host = strings.ToLower(endpoint.Scheme), endpoint.Hostname()
-	} else if source != nil && IsCloudEndpointHost(source.Host) {
+	} else if source != nil && (IsCloudEndpointHost(source.Host) || isGCSEndpointSource(source)) {
 		host = source.Hostname()
 	}
 	if scheme != "https" {
@@ -774,6 +793,13 @@ func validateGCPBearerEndpoint(source *url.URL, sourceScheme string, extfs map[s
 			host)
 	}
 	return nil
+}
+
+// Only native GCS source schemes use the Google API endpoint's hostname
+// independently of its port. The full authority remains the filesystem address.
+func isGCSEndpointSource(source *url.URL) bool {
+	return (source.Scheme == SchemeGS || source.Scheme == SchemeGCS) &&
+		strings.HasSuffix(strings.ToLower(source.Hostname()), ".googleapis.com")
 }
 
 // IsCloudEndpointHost returns true when host matches a known cloud provider
