@@ -115,7 +115,11 @@ complete normalized initial URL identity, including raw query. Existing URL
 normalization and redirect handling remain in effect.
 
 GCP target and Broker credentials require HTTPS and a storage host under
-`*.googleapis.com`. Their requested token lifetime is in [900, 3600] seconds.
+`*.googleapis.com`. Endpoint-form GCS URIs preserve an explicit port, for
+example `gs://storage.googleapis.com:443/events/file`. At the root of the
+bucket the separator is required (`gs://storage.googleapis.com:443/events/`).
+Bucket-form sources such as `gs://events` also refer to the root.
+Their requested token lifetime is in [900, 3600] seconds.
 Ordinary GCP node IAM retains its existing endpoint behavior, including
 operator-trusted custom GCS endpoints. Azure's storage producer continues to
 restrict credential-bearing external filesystems to Azure Storage authorities

@@ -4927,6 +4927,49 @@ TEST(InjectExtfsAllowlist, GcpTargetServiceAccountWithOptionalIam) {
     }
 }
 
+TEST(InjectExtfsAllowlist, GcsEndpointUrisResolveWithExplicitPort) {
+    const std::string broker =
+        "https://broker.example.com/v1/credentials/assume-role";
+    ASSERT_TRUE(InitCredentialBrokerPolicy(
+                    nlohmann::json::array(
+                        {broker, broker + "?api-version=1&scope=a%2Fb+x"})
+                        .dump())
+                    .ok());
+    for (const auto& extfs :
+         std::vector<nlohmann::json>{{{"cloud_provider", "gcp"},
+                                      {"use_iam", "true"},
+                                      {"credential_endpoint", broker}},
+                                     {{"cloud_provider", "gcp"},
+                                      {"access_key_id", "ak"},
+                                      {"access_key_value", "sk"}}}) {
+        const auto spec =
+            nlohmann::json{{"format", "parquet"}, {"extfs", extfs}}.dump();
+        for (const auto* authority : {"storage.googleapis.com",
+                                      "storage.googleapis.com:443",
+                                      "STORAGE.GOOGLEAPIS.COM:443",
+                                      "storage.googleapis.com:8443"}) {
+            for (const auto* scheme : {"gs", "gcs"}) {
+                for (const auto* key : {"dir/file.parquet", ""}) {
+                    const auto source = std::string(scheme) + "://" +
+                                        authority + "/events/" + key;
+                    SCOPED_TRACE(source);
+                    milvus_storage::api::Properties props;
+                    InjectExternalSpecProperties(props, 42, source, spec);
+                    auto config =
+                        milvus_storage::FilesystemCache::resolve_config(
+                            std::make_shared<
+                                const milvus_storage::api::Properties>(props),
+                            source);
+                    ASSERT_TRUE(config.ok()) << config.status();
+                    EXPECT_EQ(config->address,
+                              std::string("https://") + authority);
+                    EXPECT_EQ(config->bucket_name, "events");
+                }
+            }
+        }
+    }
+}
+
 TEST(InjectExtfsAllowlist, GcpPlainIamKeepsTrustedEndpointPolicy) {
     // Injection must preserve plain IAM's existing endpoint policy. Actual
     // Bearer delivery still depends on the operator-trusted registry entry.

@@ -120,6 +120,47 @@ func TestGCPNodeIAMAdmissionCompatibility(t *testing.T) {
 	}
 }
 
+func TestGCSEndpointSourcePaths(t *testing.T) {
+	allowed, err := specutil.NewBrokerPolicy([]string{matrixBrokerEndpoint})
+	require.NoError(t, err)
+	_, broker := brokerModeSpec(CloudProviderGCP, "true")
+	for _, extfs := range []map[string]string{
+		broker,
+		{ExtfsKeyCloudProvider: CloudProviderGCP, ExtfsKeyAccessKeyID: "ak", ExtfsKeyAccessKeyValue: "sk"},
+	} {
+		spec := marshalBrokerSpec(t, FormatParquet, extfs)
+		for _, source := range []string{
+			"gs://storage.googleapis.com/events/",
+			"gs://storage.googleapis.com:443/events/",
+			"gcs://STORAGE.GOOGLEAPIS.COM:443/events/dir/file.parquet",
+			"gs://storage.googleapis.com:8443/events/file.parquet",
+			"gs://events", "gs://events/dir", "gcs://events.prod", "gcs://events.prod/",
+		} {
+			require.NoError(t, ValidateSourceAndSpec(source, spec, allowed), source)
+		}
+		for _, source := range []string{
+			"gs://storage.googleapis.com/events", "gcs://storage.googleapis.com:443/events",
+			"gs://storage.googleapis.com", "gs://storage.googleapis.com/",
+			"gs://storage.googleapis.com//dir", "gs://storage.googleapis.com/events%2Ffile",
+			"gs://storage.googleapis.com/events?query=/private", "gs://storage.googleapis.com/events#fragment/",
+		} {
+			err := ValidateSourceAndSpec(source, spec, allowed)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid, source)
+			require.ErrorContains(t, err, "trailing slash", source)
+			require.NotContains(t, err.Error(), "private")
+		}
+		for _, port := range []string{":", ":0", ":65536"} {
+			require.ErrorContains(t, ValidateSourceAndSpec("gs://storage.googleapis.com"+port+"/events/", spec, allowed), "port")
+		}
+		extfs[ExtfsKeyBucketName] = "events"
+		withBucket := marshalBrokerSpec(t, FormatParquet, extfs)
+		for _, source := range []string{"gs://storage.googleapis.com/events%2F", "gcs://storage.googleapis.com/events%2Ffile"} {
+			require.NoError(t, ValidateSourceAndSpec(source, withBucket, allowed), source)
+		}
+		require.ErrorContains(t, ValidateSourceAndSpec("gs://storage.googleapis.com/events", withBucket, allowed), "trailing slash")
+	}
+}
+
 func TestGCPBrokerRejectsInactiveFieldsAtAdmission(t *testing.T) {
 	const broker = "https://broker.example/token"
 	allowed, err := specutil.NewBrokerPolicy([]string{broker})

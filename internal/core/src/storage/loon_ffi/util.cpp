@@ -18,6 +18,7 @@
 #include <charconv>
 #include <arpa/inet.h>
 #include "arrow/util/uri.h"
+#include "arrow/util/string.h"
 #include <nlohmann/json.hpp>
 #include <stdint.h>
 #include <algorithm>
@@ -1110,6 +1111,17 @@ InjectExternalSpecProperties(
         bool uri_host_is_cloud_endpoint =
             IsCloudEndpointHost(host) ||
             (spec_cp == "azure" && IsAzureStorageAuthority(host));
+        if (spec_cp == "gcp" && host.find(':') != std::string::npos &&
+            (arrow::internal::AsciiEqualsCaseInsensitive(scheme, "gs") ||
+             arrow::internal::AsciiEqualsCaseInsensitive(scheme, "gcs"))) {
+            arrow::util::Uri endpoint;
+            // Classify the DNS hostname only. Keep Layer 1's complete
+            // authority so storage can match the original URI, including :443.
+            uri_host_is_cloud_endpoint =
+                endpoint.Parse("https://" + host).ok() && endpoint.port() > 0 &&
+                arrow::internal::AsciiToLower(endpoint.host())
+                    .ends_with(".googleapis.com");
+        }
         if (!uri_host_is_cloud_endpoint && !derived.empty() &&
             StripURIScheme(derived) != host) {
             milvus_storage::api::SetValue(
