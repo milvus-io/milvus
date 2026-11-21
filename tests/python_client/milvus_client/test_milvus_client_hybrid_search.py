@@ -2320,7 +2320,6 @@ class TestHybridSearchIndependent(TestMilvusClientV2Base):
                                         "pk_name": ct.default_int64_field_name,
                                         "enable_milvus_client_api": True})
 
-    @pytest.mark.skip(reason="skip for #45939")
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("rerank", [RRFRanker(), WeightedRanker(0.1, 0.9, 1)])
     def test_hybrid_search_offset_both_inside_outside_params(self, rerank):

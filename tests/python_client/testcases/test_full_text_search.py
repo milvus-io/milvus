@@ -3391,7 +3391,6 @@ class TestSearchWithFullTextSearchNegative(TestcaseBase):
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
     @pytest.mark.parametrize("invalid_search_data", ["empty_text"])
     @pytest.mark.parametrize("tokenizer", ["standard"])
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/37022")
     def test_search_for_full_text_search_with_empty_string_search_data(
         self,
         tokenizer,

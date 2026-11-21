@@ -1380,7 +1380,6 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
                                 "index_name": index_name})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #40636")
     def test_milvus_client_json_path_index_on_non_json_field(self, supported_json_cast_type,
                                                              supported_varchar_scalar_index):
         """
