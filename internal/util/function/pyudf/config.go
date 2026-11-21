@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/fips"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -223,6 +224,15 @@ func CheckEnabled() error {
 	}
 	if !config.Enabled {
 		return merr.WrapErrParameterInvalidMsg("py_udf: %s", disabledReason)
+	}
+	return checkFIPSStrict()
+}
+
+// checkFIPSStrict rejects PyUDF in MILVUS_FIPS_STRICT builds, whose images leave
+// out Python and its bundled crypto libraries.
+func checkFIPSStrict() error {
+	if fips.StrictMode() {
+		return merr.WrapErrParameterInvalidMsg("py_udf: not available in MILVUS_FIPS_STRICT builds; set function.pyUDF.enabled to false")
 	}
 	return nil
 }

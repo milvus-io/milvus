@@ -120,6 +120,24 @@ GOEXPERIMENT_FLAG :=
 ifeq ($(MILVUS_FIPS_ENABLED),ON)
 	GOEXPERIMENT_FLAG := GOEXPERIMENT=boringcrypto
 endif
+
+# FIPS strict: default OFF. Set MILVUS_FIPS_STRICT=ON (with MILVUS_FIPS_ENABLED=ON)
+# to also restrict Go TLS to FIPS settings, use the CMVP-validated OpenSSL FIPS
+# provider, not load OpenSSL's default provider, refuse to start without FIPS, and
+# compile rustls/ring out of tantivy-binding. Strict images also leave out PyUDF and its
+# Python stack: use OS_NAME=ubuntu22.04-fips with build/build_image.sh.
+ifeq ($(MILVUS_FIPS_STRICT),ON)
+ifneq ($(MILVUS_FIPS_ENABLED),ON)
+$(error MILVUS_FIPS_STRICT=ON requires MILVUS_FIPS_ENABLED=ON)
+endif
+ifeq ($(TANTIVY_ANALYZER_REMOTE_TLS),ON)
+$(error MILVUS_FIPS_STRICT=ON requires TANTIVY_ANALYZER_REMOTE_TLS=OFF)
+endif
+	tantivy_analyzer_remote_tls = OFF
+	MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),fipsstrict
+else
+	PYUDF_RUNTIME_WHEEL_TARGET = build-pyudf-runtime-wheel
+endif
 # golangci-lint
 GOLANGCI_LINT_VERSION := 2.11.3
 GOLANGCI_LINT_OUTPUT := $(shell $(INSTALL_PATH)/golangci-lint --version 2>/dev/null)
@@ -180,7 +198,7 @@ ifeq (${ENABLE_AZURE}, false)
 	AZURE_OPTION := -Z
 endif
 
-milvus: build-cpp print-build-info build-go build-pyudf-runtime-wheel
+milvus: build-cpp print-build-info build-go $(PYUDF_RUNTIME_WHEEL_TARGET)
 
 build-go:
 	@echo "Building Milvus ..."
@@ -601,9 +619,10 @@ codecov-cpp: build-cpp-with-coverage
 # An explicit environment or command-line value can override this default.
 install: export MILVUS_AUDIT_AWS_RUNTIME ?= ON
 
-install: milvus build-pyudf-runtime-wheel
+install: milvus $(PYUDF_RUNTIME_WHEEL_TARGET)
+	@if [ "$(MILVUS_FIPS_STRICT)" = "ON" ]; then bash $(PWD)/scripts/build_fips_provider.sh $(PWD); fi
 	@echo "Installing binary to './bin'"
-	@(env GOPATH=$(GOPATH) LIBRARY_PATH=$(LIBRARY_PATH) bash $(PWD)/scripts/install_milvus.sh)
+	@(env GOPATH=$(GOPATH) LIBRARY_PATH=$(LIBRARY_PATH) MILVUS_FIPS_STRICT=$(MILVUS_FIPS_STRICT) bash $(PWD)/scripts/install_milvus.sh)
 	@echo "Installation successful."
 
 clean:
