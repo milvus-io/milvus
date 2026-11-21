@@ -15,6 +15,9 @@ import (
 // while waiting; a replacement transfers the obligation to its live successor.
 func (m *dataViewManager) AdvanceSchema(ctx context.Context, collectionID int64, target int32, project Projector) (*viewpb.DataVersion, error) {
 	for {
+		if err := context.Cause(ctx); err != nil {
+			return nil, err
+		}
 		state, unlock := m.lockStateForMutation(collectionID)
 		if state == nil {
 			return nil, merr.WrapErrCollectionNotFound(collectionID)
@@ -38,7 +41,7 @@ func (m *dataViewManager) advanceSchemaLocked(ctx context.Context, state *collec
 		return nil, nil, merr.WrapErrServiceNotReadyMsg("collection %d DataView is not initialized", state.id)
 	}
 	if base.GetSchemaVersion() >= target {
-		return dataVersionFromView(base), nil, nil
+		return m.publishedSchemaLocked(state, target)
 	}
 	var segments []LoadableSegment
 	if project != nil {
@@ -78,5 +81,14 @@ func (m *dataViewManager) advanceSchemaLocked(ctx context.Context, state *collec
 	if err := m.persistLockedWithStats(ctx, state, next, stats); err != nil {
 		return nil, nil, err
 	}
-	return dataVersionFromView(next), nil, nil
+	return m.publishedSchemaLocked(state, target)
+}
+
+// A physical schema commit can precede query publication. This applies to replay
+// and to unloaded collections, which have no subsequent serving-View wait.
+func (m *dataViewManager) publishedSchemaLocked(state *collectionState, target int32) (*viewpb.DataVersion, <-chan struct{}, error) {
+	if view := m.Published(state.id); view != nil && view.SchemaVersion >= target {
+		return view.DataVersion.IntoProto(), nil, nil
+	}
+	return nil, state.changed.Listen(syncutil.VersionedListenAtLatest).WaitChan(), nil
 }

@@ -75,6 +75,10 @@ func (m *dataViewManager) certifyReadAdmission(ctx context.Context, collectionID
 		state.mu.Unlock()
 		return nil
 	}
+	if m.frontierProjector != nil && !transformFrontiersReady(frozen.view) {
+		state.mu.Unlock()
+		return merr.WrapErrServiceNotReadyMsg("Transform frontier for collection %d is not ready for read certification", collectionID)
+	}
 	physical := frozen.view
 	candidate := canonicalDataViewClone(physical)
 	ref := acquireRefLocked(state, frozen)

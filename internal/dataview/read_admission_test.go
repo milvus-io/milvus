@@ -66,13 +66,34 @@ func TestReadAdmissionFlushReplacementAndStaleSchemaCapture(t *testing.T) {
 
 	// The WAL call must run without a mutation lock. Replace its frozen
 	// candidate with a schema projection and ensure the old reply cannot win.
+	sampling, finishSample := make(chan struct{}), make(chan struct{})
 	m.readAdmissionSample = func(context.Context, string) (*viewpb.QueryPlanMVCC, error) {
-		seg := segmentWithRows(20, "v0", 1, 9)
-		seg.SchemaVersion = 1
-		_, err := m.AdvanceSchema(ctx, 1, 1, projectSegments(seg))
-		return pair, err
+		close(sampling)
+		<-finishSample
+		return pair, nil
 	}
-	require.NoError(t, m.certifyReadAdmission(ctx, 1))
+	sampleResult := make(chan error, 1)
+	go func() { sampleResult <- m.certifyReadAdmission(ctx, 1) }()
+	<-sampling
+	projecting := make(chan struct{})
+	schemaResult := make(chan error, 1)
+	go func() {
+		_, err := m.AdvanceSchema(ctx, 1, 1, func(context.Context, int64, *viewpb.DataViewOfCollection) ([]LoadableSegment, error) {
+			seg := segmentWithRows(20, "v0", 1, 9)
+			seg.SchemaVersion = 1
+			close(projecting)
+			return []LoadableSegment{seg}, nil
+		})
+		schemaResult <- err
+	}()
+	<-projecting
+	// Latest serializes with the schema commit under the same collection lock.
+	candidate, err := m.Latest(ctx, 1)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, candidate.DataView().GetSchemaVersion())
+	candidate.Deref()
+	close(finishSample)
+	require.NoError(t, <-sampleResult)
 	require.Len(t, publications, 2)
 	m.readAdmissionSample = func(context.Context, string) (*viewpb.QueryPlanMVCC, error) {
 		return &viewpb.QueryPlanMVCC{GrowingTimetick: 130, TransformingTimetick: 135}, nil
@@ -81,6 +102,7 @@ func TestReadAdmissionFlushReplacementAndStaleSchemaCapture(t *testing.T) {
 	require.Len(t, publications, 2)
 	m.readAdmissionSample = func(context.Context, string) (*viewpb.QueryPlanMVCC, error) { return pair, nil }
 	require.NoError(t, m.certifyReadAdmission(ctx, 1))
+	require.NoError(t, <-schemaResult)
 	require.Len(t, publications, 3)
 	require.EqualValues(t, 1, publications[2].SchemaVersion)
 	require.Equal(t, int64(9), publications[2].TotalRows)
@@ -202,4 +224,29 @@ func TestReadAdmissionFullRecomputeQueuePublishesQuietCollection(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("a full queue stranded bootstrap certification on a quiet collection")
 	}
+}
+
+func TestReadAdmissionNeedsReplayReadyPhysicalCandidate(t *testing.T) {
+	var bounds map[string]uint64
+	samples := 0
+	m := newManager(t.Context(), &fakeDataViewCatalog{}, nil,
+		WithFrontierProjector(func(context.Context, int64) (map[string]uint64, error) { return bounds, nil }),
+		WithReadAdmissionSampler(func(context.Context, string) (*viewpb.QueryPlanMVCC, error) {
+			samples++
+			return &viewpb.QueryPlanMVCC{GrowingTimetick: 120, TransformingTimetick: 140}, nil
+		}))
+	_, err := m.OnBootstrapCollection(t.Context(), BootstrapCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"v1"}})
+	require.NoError(t, err)
+	require.ErrorIs(t, m.certifyReadAdmission(t.Context(), 1), merr.ErrServiceNotReady)
+	require.Zero(t, samples)
+	require.Nil(t, m.Published(1))
+	bounds = map[string]uint64{"v1": 50}
+	// A legacy read of the physical version reconstructs its W/A from the
+	// recovery projector, then schedules certification of the repaired identity.
+	ref, err := m.Latest(t.Context(), 1)
+	require.NoError(t, err)
+	ref.Deref()
+	require.NoError(t, m.certifyReadAdmission(t.Context(), 1))
+	require.Equal(t, 1, samples)
+	require.EqualValues(t, 140, m.Published(1).Shard("v1").ReadAdmissionFloor.GetTransformingTimetick())
 }

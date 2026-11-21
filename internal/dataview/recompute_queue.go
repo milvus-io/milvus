@@ -121,14 +121,14 @@ func (q *dataViewRecomputeQueue) run(ctx context.Context) {
 			}
 			q.mu.Unlock()
 			projector := q.manager.getProjector()
-			var err error
+			var projectErr error
 			if projector != nil {
-				_, err = q.manager.recomputeNow(ctx, collectionID, projector)
+				_, projectErr = q.manager.recomputeNow(ctx, collectionID, projector)
 			}
-			if err == nil {
-				err = q.manager.certifyReadAdmission(ctx, collectionID)
-			}
-			if err != nil {
+			// A failed later projection leaves the last durable candidate intact.
+			// Certify that exact candidate while keeping the projection retry.
+			certErr := q.manager.certifyReadAdmission(ctx, collectionID)
+			if err := errors.Join(projectErr, certErr); err != nil {
 				mlog.Warn(ctx, "DataView Recompute failed, re-enqueue",
 					mlog.Int64("collectionID", collectionID),
 					mlog.Err(err))
