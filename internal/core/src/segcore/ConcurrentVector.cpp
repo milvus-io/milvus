@@ -151,6 +151,12 @@ VectorBase::set_data_raw(ssize_t element_offset,
         }
         case DataType::JSON: {
             auto& json_data = FIELD_DATA(data, json);
+            // The rows below are moved out of data_raw, so a short payload
+            // would write past its end.
+            AssertInfo(json_data.size() == element_count,
+                       "json payload size {} must match element count {}",
+                       json_data.size(),
+                       element_count);
             std::vector<Json> data_raw{};
             data_raw.reserve(json_data.size());
             for (auto& json_bytes : json_data) {
