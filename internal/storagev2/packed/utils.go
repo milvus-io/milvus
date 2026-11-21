@@ -319,21 +319,29 @@ func buildCurrentSegmentFragmentsForSegment(
 	seg *datapb.SegmentInfo,
 	storageConfig *indexpb.StorageConfig,
 	columns []string,
-) ([]Fragment, error) {
+	expectedBindings map[string]string,
+) ([]Fragment, []string, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
+	var missing []string
 	if seg.GetManifestPath() != "" && storageConfig != nil {
-		fragments, err := ReadFragmentsFromManifest(seg.GetManifestPath(), storageConfig, columns)
+		var fragments []Fragment
+		var err error
+		if expectedBindings == nil {
+			fragments, err = ReadFragmentsFromManifest(seg.GetManifestPath(), storageConfig, columns)
+		} else {
+			fragments, missing, err = readMilvusTableRefreshFragments(seg.GetManifestPath(), storageConfig, columns, expectedBindings)
+		}
 		if err != nil {
-			return nil, merr.Wrapf(err, "failed to read manifest for segment %d at %s", seg.GetID(), seg.GetManifestPath())
+			return nil, nil, merr.Wrapf(err, "failed to read manifest for segment %d at %s", seg.GetID(), seg.GetManifestPath())
 		}
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if len(fragments) > 0 {
-			return fragments, nil
+			return fragments, missing, nil
 		}
 		mlog.Warn(ctx, "manifest returned 0 fragments, using virtual fragment",
 			mlog.FieldSegmentID(seg.GetID()),
@@ -348,7 +356,7 @@ func buildCurrentSegmentFragmentsForSegment(
 			EndRow:     seg.GetNumOfRows(),
 			RowCount:   seg.GetNumOfRows(),
 		},
-	}, nil
+	}, missing, nil
 }
 
 func buildCurrentSegmentFragments(
@@ -356,16 +364,24 @@ func buildCurrentSegmentFragments(
 	segments []*datapb.SegmentInfo,
 	storageConfig *indexpb.StorageConfig,
 	columns []string,
-) (SegmentFragments, error) {
+	expectedBindings map[string]string,
+) (SegmentFragments, map[int64][]string, error) {
 	result := make(SegmentFragments)
+	var missingBySegment map[int64][]string
 	for _, seg := range segments {
-		fragments, err := buildCurrentSegmentFragmentsForSegment(ctx, seg, storageConfig, columns)
+		fragments, missing, err := buildCurrentSegmentFragmentsForSegment(ctx, seg, storageConfig, columns, expectedBindings)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		result[seg.GetID()] = fragments
+		if len(missing) > 0 {
+			if missingBySegment == nil {
+				missingBySegment = make(map[int64][]string)
+			}
+			missingBySegment[seg.GetID()] = missing
+		}
 	}
-	return result, nil
+	return result, missingBySegment, nil
 }
 
 // BuildCurrentSegmentFragments builds segment to fragments mapping from current segments.
@@ -378,7 +394,20 @@ func BuildCurrentSegmentFragments(
 	storageConfig *indexpb.StorageConfig,
 	columns []string,
 ) (SegmentFragments, error) {
-	return buildCurrentSegmentFragments(context.TODO(), segments, storageConfig, columns)
+	fragments, _, err := buildCurrentSegmentFragments(context.TODO(), segments, storageConfig, columns, nil)
+	return fragments, err
+}
+
+// BuildCurrentMilvusTableSegmentFragments reads each target manifest once to
+// identify its fragments, validate source IDs, and find missing target bindings.
+func BuildCurrentMilvusTableSegmentFragments(
+	ctx context.Context,
+	segments []*datapb.SegmentInfo,
+	storageConfig *indexpb.StorageConfig,
+	columns []string,
+	expectedBindings map[string]string,
+) (SegmentFragments, map[int64][]string, error) {
+	return buildCurrentSegmentFragments(ctx, segments, storageConfig, columns, expectedBindings)
 }
 
 // BuildCurrentSegmentFragmentsConcurrently reads current segment manifests with
@@ -393,7 +422,8 @@ func BuildCurrentSegmentFragmentsConcurrently(
 	concurrency int,
 ) (SegmentFragments, error) {
 	if len(segments) == 0 || concurrency <= 1 {
-		return buildCurrentSegmentFragments(ctx, segments, storageConfig, columns)
+		fragments, _, err := buildCurrentSegmentFragments(ctx, segments, storageConfig, columns, nil)
+		return fragments, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -408,7 +438,7 @@ func BuildCurrentSegmentFragmentsConcurrently(
 	for i, seg := range segments {
 		i, seg := i, seg
 		futures[i] = pool.Submit(func() (struct{}, error) {
-			fragments, err := buildCurrentSegmentFragmentsForSegment(ctx, seg, storageConfig, columns)
+			fragments, _, err := buildCurrentSegmentFragmentsForSegment(ctx, seg, storageConfig, columns, nil)
 			if err != nil {
 				return struct{}{}, err
 			}
