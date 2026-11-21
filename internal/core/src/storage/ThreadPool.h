@@ -99,6 +99,33 @@ class ThreadPool {
     template <typename F, typename... Args>
     auto
     Submit(F&& f, Args&&... args) -> std::future<decltype(f(args...))> {
+        return SubmitImpl<false>(std::forward<F>(f),
+                                 std::forward<Args>(args)...);
+    }
+
+    // Propagate executor submission errors to callers that track admission.
+    // An error can occur after enqueue, so the callable may already be running.
+    template <typename F, typename... Args>
+    auto
+    SubmitOrThrow(F&& f, Args&&... args) -> std::future<decltype(f(args...))> {
+        return SubmitImpl<true>(std::forward<F>(f),
+                                std::forward<Args>(args)...);
+    }
+
+    enum class SubmitPhase { kBeforeEnqueue, kAfterEnqueue };
+
+    // The caller keeps the hook alive until it is cleared on this thread.
+    using SubmitHook = std::function<void(SubmitPhase)>;
+
+    static void
+    SetSubmitHookForTest(const SubmitHook* hook) {
+        submit_hook_for_test_ = hook;
+    }
+
+ private:
+    template <bool PropagateError, typename F, typename... Args>
+    auto
+    SubmitImpl(F&& f, Args&&... args) -> std::future<decltype(f(args...))> {
         using ReturnType = decltype(f(args...));
         auto bound = std::bind(std::forward<F>(f), std::forward<Args>(args)...);
         using BoundTask = decltype(bound);
@@ -163,18 +190,34 @@ class ThreadPool {
         } catch (...) {
             LOG_WARN("Worker spawn hook failed for thread pool {}", name_);
         }
-        try {
+        auto enqueue = [&] {
+            const auto* hook = submit_hook_for_test_;
+            if (hook) {
+                (*hook)(SubmitPhase::kBeforeEnqueue);
+            }
             executor_->add(std::move(wrap_func));
-        } catch (const std::exception& e) {
-            LOG_WARN(
-                "Failed to submit task to thread pool {}: {}", name_, e.what());
-        } catch (...) {
-            LOG_WARN("Failed to submit task to thread pool {}", name_);
+            if (hook) {
+                (*hook)(SubmitPhase::kAfterEnqueue);
+            }
+        };
+        if constexpr (PropagateError) {
+            enqueue();
+        } else {
+            try {
+                enqueue();
+            } catch (const std::exception& e) {
+                LOG_WARN("Failed to submit task to thread pool {}: {}",
+                         name_,
+                         e.what());
+            } catch (...) {
+                LOG_WARN("Failed to submit task to thread pool {}", name_);
+            }
         }
 
         return future;
     }
 
+ public:
     // folly::ThreadPoolExecutor::numActiveThreads() reports the number of
     // currently alive worker threads (including idle ones), which matches the
     // previous hand-rolled pool's current_threads_size_ semantics rather than a
@@ -204,6 +247,8 @@ class ThreadPool {
  private:
     friend struct ThreadPoolsTestAccess;
     friend class ThreadPoolTest_WorkerSpawnFailureDoesNotFailQueuedTask_Test;
+
+    inline static thread_local const SubmitHook* submit_hook_for_test_{nullptr};
 
     void
     MetricsSamplerLoop();

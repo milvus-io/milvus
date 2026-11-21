@@ -476,13 +476,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
         cache_manager.RemoveSegmentCaches(segment_instance_uid(),
                                           get_segment_id());
 
-        // Original mmap cleanup logic
-        if (mmap_descriptor_ != nullptr) {
-            auto mcm =
-                storage::MmapManager::GetInstance().GetMmapChunkManager();
-            mcm->UnRegister(mmap_descriptor_);
-        }
-
         // Refund any tracked resources before destruction
         // No lock needed - destructor implies exclusive access
         if (tracked_resource_.AnyGTZero()) {
@@ -599,24 +592,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     bool
-    HasRawData(int64_t field_id) const override {
-        //growing index hold raw data when
-        // 1. growing index enabled and it holds raw data
-        // 2. growing index disabled then raw data held by chunk
-        // 3. growing index enabled and it not holds raw data, then raw data held by chunk
-        if (indexing_record_.is_in(FieldId(field_id))) {
-            if (indexing_record_.HasRawData(FieldId(field_id))) {
-                // 1. growing index enabled and it holds raw data
-                return true;
-            } else {
-                // 3. growing index enabled and it not holds raw data, then raw data held by chunk
-                return insert_record_.get_data_base(FieldId(field_id))
-                           ->num_chunk() > 0;
-            }
-        }
-        // 2. growing index disabled then raw data held by chunk
-        return true;
-    }
+    HasRawData(int64_t field_id) const override;
+
+    // Test-only synchronization point on the calling thread, after the
+    // interim index was found unavailable and before inspecting raw chunks.
+    static void
+    SetBeforeRawChunkCheckHookForTest(std::function<void()> hook);
 
     bool
     CanReadRawVectorFromIndex(FieldId field_id) const {
@@ -918,6 +899,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     InitializeStructElementOffsets();
 
  private:
+    // Keep this first so it is destroyed last. Its custom deleter unregisters
+    // the segment's mmap blocks only after indexing_record_ has joined any
+    // async build and insert_record_ has released all chunk objects.
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
     SegcoreConfig segcore_config_;
     SchemaPtr schema_;
