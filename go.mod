@@ -325,4 +325,4 @@ replace (
 
 replace go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc => go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.60.0 // v0.61.0 removed the UnaryServerInterceptor used by etcd v3.5.x and woodpecker
 
-replace github.com/milvus-io/milvus-proto/go-api/v3 => github.com/MrPresent-Han/milvus-proto/go-api/v3 v3.0.0-20261119170944-f1c87a6bdceb
+replace github.com/milvus-io/milvus-proto/go-api/v3 => github.com/MrPresent-Han/milvus-proto/go-api/v3 v3.0.0-20261121000801-074f3ca490fd
