@@ -2277,6 +2277,7 @@ func (suite *ServiceSuite) TestGetDataDistribution_DeltaReportsFailedLeaderSegme
 	mockDelegator.EXPECT().Serviceable().Return(true).Maybe()
 	mockDelegator.EXPECT().Collection().Return(suite.collectionID).Maybe()
 	mockDelegator.EXPECT().Version().Return(int64(1)).Maybe()
+	mockDelegator.EXPECT().ReplicaID().Return(int64(1)).Maybe()
 	mockDelegator.EXPECT().GetSegmentInfo(false).Return(
 		[]delegator.SnapshotItem{
 			{
@@ -2332,6 +2333,7 @@ func (suite *ServiceSuite) TestGetDataDistribution_DeltaReportsFailedLeaderSegme
 	mockDelegator.EXPECT().Serviceable().Return(true).Maybe()
 	mockDelegator.EXPECT().Collection().Return(suite.collectionID).Maybe()
 	mockDelegator.EXPECT().Version().Return(int64(1)).Maybe()
+	mockDelegator.EXPECT().ReplicaID().Return(int64(1)).Maybe()
 	mockDelegator.EXPECT().GetSegmentInfo(false).Return(nil, nil).Maybe()
 	mockDelegator.EXPECT().GetChannelQueryView().Return(delegator.NewChannelQueryView(nil, nil, nil, 1)).Maybe()
 	mockDelegator.EXPECT().GetPartitionStatsVersions(mock.Anything).Return(nil).Maybe()
@@ -2469,6 +2471,7 @@ func (suite *ServiceSuite) TestSyncDistribution_PartialSetFailureReportsLeaderVi
 	mockDelegator.EXPECT().Serviceable().Return(true).Maybe()
 	mockDelegator.EXPECT().Collection().Return(suite.collectionID).Maybe()
 	mockDelegator.EXPECT().Version().Return(int64(1)).Maybe()
+	mockDelegator.EXPECT().ReplicaID().Return(int64(1)).Maybe()
 	mockDelegator.EXPECT().GetSegmentInfo(false).Return(
 		[]delegator.SnapshotItem{
 			{
@@ -2549,6 +2552,7 @@ func (suite *ServiceSuite) TestSyncDistribution_RemoveFailureAfterLeaderViewUpda
 	mockDelegator.EXPECT().Serviceable().Return(true).Maybe()
 	mockDelegator.EXPECT().Collection().Return(suite.collectionID).Maybe()
 	mockDelegator.EXPECT().Version().Return(int64(1)).Maybe()
+	mockDelegator.EXPECT().ReplicaID().Return(int64(1)).Maybe()
 	mockDelegator.EXPECT().GetSegmentInfo(false).Return(nil, nil).Maybe()
 	mockDelegator.EXPECT().GetChannelQueryView().Return(delegator.NewChannelQueryView(nil, nil, nil, 1)).Maybe()
 	mockDelegator.EXPECT().GetPartitionStatsVersions(mock.Anything).RunAndReturn(func(context.Context) map[int64]int64 {
@@ -2604,6 +2608,7 @@ func (suite *ServiceSuite) TestSyncDistribution_ErrorReportsLeaderViewDelta() {
 	mockDelegator.EXPECT().Serviceable().Return(true).Maybe()
 	mockDelegator.EXPECT().Collection().Return(suite.collectionID).Maybe()
 	mockDelegator.EXPECT().Version().Return(int64(1)).Maybe()
+	mockDelegator.EXPECT().ReplicaID().Return(int64(1)).Maybe()
 	mockDelegator.EXPECT().GetSegmentInfo(false).Return(nil, nil).Maybe()
 	mockDelegator.EXPECT().GetChannelQueryView().Return(delegator.NewChannelQueryView(nil, nil, nil, 1)).Maybe()
 	mockDelegator.EXPECT().GetPartitionStatsVersions(mock.Anything).Return(nil).Maybe()
@@ -3205,8 +3210,9 @@ func TestQueryNodeService(t *testing.T) {
 	suite.Run(t, new(ServiceSuite))
 }
 
-// Reusing a channel after replica reassignment must acknowledge the new watch
-// generation without replacing its query view or recreating the delegator.
+// A Watch from the delegator's own replica must acknowledge the new generation
+// without replacing its query view or recreating the delegator. One from
+// another replica is rejected.
 func (suite *ServiceSuite) TestWatchDmChannelsUpdatesExistingVersion() {
 	ctx := context.Background()
 	suite.TestWatchDmChannelsInt64()
@@ -3263,21 +3269,24 @@ func (suite *ServiceSuite) TestWatchDmChannelsUpdatesExistingVersion() {
 	suite.Require().Len(reported.GetChannels(), 1)
 	suite.Equal(int64(200), reported.GetChannels()[0].GetVersion())
 
-	// A different replica adopts the same subscription without replacing live state.
+	// A delegator routes to its replica's workers, so a Watch from another
+	// replica, at any generation, leaves it in place.
+	ownReplica := req.GetReplicaID()
 	req.ReplicaID = 9876
-	req.Version = 300
-	status, err = suite.node.WatchDmChannels(ctx, req)
-	suite.Require().NoError(err)
-	suite.Require().True(merr.Ok(status))
-	adopted, ok := suite.node.delegators.Get(suite.vchannel)
-	suite.Require().True(ok)
-	suite.Same(sd, adopted)
-	suite.Equal(int64(300), adopted.Version())
-	suite.Same(initialQueryView, adopted.GetChannelQueryView())
+	for _, version := range []int64{100, 200, 300} {
+		req.Version = version
+		status, err = suite.node.WatchDmChannels(ctx, req)
+		suite.Require().NoError(err)
+		suite.ErrorIs(merr.Error(status), merr.ErrChannelReduplicate)
+		current, ok := suite.node.delegators.Get(suite.vchannel)
+		suite.Require().True(ok)
+		suite.Same(sd, current)
+		suite.Equal(int64(200), current.Version())
+	}
+	req.ReplicaID = ownReplica
 
 	// A different partition set also only advances the
 	// generation. The query view is left for the next target sync to replace.
-	adoptedQueryView := adopted.GetChannelQueryView()
 	req.PartitionIDs = append(slices.Clone(suite.partitionIDs), 333)
 	req.Version = 400
 	status, err = suite.node.WatchDmChannels(ctx, req)
@@ -3285,8 +3294,8 @@ func (suite *ServiceSuite) TestWatchDmChannelsUpdatesExistingVersion() {
 	suite.Require().True(merr.Ok(status))
 	reused, ok := suite.node.delegators.Get(suite.vchannel)
 	suite.Require().True(ok)
-	suite.Same(adopted, reused)
-	suite.Same(adoptedQueryView, reused.GetChannelQueryView())
+	suite.Same(sd, reused)
+	suite.Same(initialQueryView, reused.GetChannelQueryView())
 	suite.Equal(int64(400), reused.Version())
 	// Dropping the original partition and adding another is reused as well.
 	req.PartitionIDs = []int64{333}
@@ -3296,11 +3305,24 @@ func (suite *ServiceSuite) TestWatchDmChannelsUpdatesExistingVersion() {
 	suite.Require().True(merr.Ok(status))
 	reused, ok = suite.node.delegators.Get(suite.vchannel)
 	suite.Require().True(ok)
-	suite.Same(adopted, reused)
+	suite.Same(sd, reused)
 	suite.Equal(int64(500), reused.Version())
 	reported = suite.getDataDistributionWithDeltaSupport(ctx, 0)
 	suite.Require().Len(reported.GetChannels(), 1)
 	suite.Equal(int64(500), reported.GetChannels()[0].GetVersion())
+}
+
+// QueryNode reports the replica each delegator was created for, which tells
+// QueryCoord a delegator another replica left on the node from the replica's own.
+func (suite *ServiceSuite) TestGetDataDistributionReportsDelegatorReplica() {
+	ctx := context.Background()
+	watch := suite.newInt64WatchDmChannelsRequest()
+	watch.ReplicaID = 7
+	status, err := suite.node.WatchDmChannels(ctx, watch)
+	suite.Require().NoError(merr.CheckRPCCall(status, err))
+	reported := suite.getDataDistributionWithDeltaSupport(ctx, 0)
+	suite.Require().Len(reported.GetChannels(), 1)
+	suite.Equal(int64(7), reported.GetChannels()[0].GetReplicaID())
 }
 
 func (suite *ServiceSuite) TestWatchDmChannelsReplicaReuseIsMonotonic() {
@@ -3330,7 +3352,6 @@ func (suite *ServiceSuite) TestWatchDmChannelsReplicaReuseIsMonotonic() {
 	suite.Require().NoError(err)
 	suite.node.manager.Segment.Put(ctx, segments.SegmentTypeGrowing, growing)
 
-	req.ReplicaID++
 	expectedVersion := int64(200)
 	for _, version := range []int64{100, 200, 0, 300, 200, 100} {
 		suite.Run(fmt.Sprintf("version_%d", version), func() {
@@ -3652,4 +3673,33 @@ func (suite *ServiceSuite) TestChannelOperationWaitCancellation() {
 		suite.Equal(int64(0), current.Version())
 		suite.True(current.Serviceable())
 	}
+}
+
+// An unsubscribe planned against an older delegator keeps one watched since.
+func (suite *ServiceSuite) TestUnsubDmChannels_KeepsNewerDelegator() {
+	ctx := context.Background()
+	watch := suite.newInt64WatchDmChannelsRequest()
+	watch.Version = 200
+	status, err := suite.node.WatchDmChannels(ctx, watch)
+	suite.Require().NoError(merr.CheckRPCCall(status, err))
+	unsub := func(version int64) error {
+		status, err := suite.node.UnsubDmChannel(ctx, &querypb.UnsubDmChannelRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_UnsubDmChannel,
+				MsgID:    rand.Int63(),
+				TargetID: suite.node.session.ServerID,
+			},
+			NodeID:       suite.node.session.ServerID,
+			CollectionID: suite.collectionID,
+			ChannelName:  suite.vchannel,
+			Version:      version,
+		})
+		return merr.CheckRPCCall(status, err)
+	}
+	suite.ErrorIs(unsub(100), merr.ErrChannelReduplicate)
+	_, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.True(ok, "the newer delegator is kept")
+	suite.NoError(unsub(200))
+	_, ok = suite.node.delegators.Get(suite.vchannel)
+	suite.False(ok)
 }
