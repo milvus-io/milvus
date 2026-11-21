@@ -91,7 +91,7 @@ func TestCompactionRejectsUnavailableWriterContext(t *testing.T) {
 					require.Equal(t, datapb.CompactionTaskState_failed, saved.GetState())
 					return nil
 				}).Once()
-			task.CreateTaskOnWorker(42, cluster)
+			task.CreateTaskOnWorker(42, cluster, task.GetTaskResource())
 			require.Equal(t, datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
 		})
 	}

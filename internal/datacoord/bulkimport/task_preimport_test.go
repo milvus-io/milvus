@@ -93,8 +93,8 @@ func TestPreImportTask_CreateTaskOnWorker(t *testing.T) {
 		assert.NoError(t, err)
 
 		cluster := session.NewMockCluster(t)
-		cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("test"))
-		task.CreateTaskOnWorker(1, cluster)
+		cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("test"))
+		task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 		assert.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
 	})
 
@@ -135,12 +135,12 @@ func TestPreImportTask_CreateTaskOnWorker(t *testing.T) {
 		assert.NoError(t, err)
 
 		cluster := session.NewMockCluster(t)
-		cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		catalog = mocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(errors.New("mock err"))
 		task.ImportMeta.(*Meta).Catalog = catalog
-		task.CreateTaskOnWorker(1, cluster)
+		task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 		assert.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
 	})
 
@@ -180,10 +180,18 @@ func TestPreImportTask_CreateTaskOnWorker(t *testing.T) {
 		err = im.AddTask(context.TODO(), task)
 		assert.NoError(t, err)
 
+		charged := taskcommon.Resource{CPU: 3, Memory: 123 << 20}
+		var placed taskcommon.Resource
 		cluster := session.NewMockCluster(t)
-		cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		task.CreateTaskOnWorker(1, cluster)
+		cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(_ int64, _ *datapb.PreImportRequest, _ int64, resource taskcommon.Resource) error {
+				placed = resource
+				return nil
+			})
+		task.CreateTaskOnWorker(1, cluster, charged)
 		assert.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
+		// The dispatch ships exactly what the scheduler placed the task on.
+		assert.Equal(t, charged, placed)
 	})
 }
 

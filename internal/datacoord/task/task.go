@@ -17,6 +17,7 @@
 package task
 
 import (
+	"context"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -29,13 +30,36 @@ type Task interface {
 	GetTaskType() taskcommon.Type
 	GetTaskState() taskcommon.State
 	GetTaskSlot() int64
+	// GetTaskResource is the coordinator-side cpu/memory estimate the scheduler
+	// places on and the request ships. Never zero; subject to memory admission. A
+	// family whose inputs are still resolving answers with an upper bound on
+	// itself, and one whose inputs are gone for good answers with the configured
+	// floor. CoordinatorTask can retire local work before placement.
+	//
+	GetTaskResource() taskcommon.Resource
 	SetTaskTime(timeType taskcommon.TimeType, time time.Time)
 	GetTaskTime(timeType taskcommon.TimeType) time.Time
 	GetTaskVersion() int64
 
-	CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
+	CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource)
 	QueryTaskOnWorker(cluster session.Cluster)
 	DropTaskOnWorker(cluster session.Cluster)
+}
+
+// CoordinatorResult determines how the scheduler handles a local completion attempt.
+type CoordinatorResult int
+
+const (
+	LocalCompleted CoordinatorResult = iota
+	LocalNeedsWorker
+	LocalRetry
+)
+
+// CoordinatorTask identifies local completion using cached metadata only.
+// Completion may persist metadata and runs asynchronously with a timeout.
+type CoordinatorTask interface {
+	CanCompleteOnCoordinator() bool
+	CompleteOnCoordinator(context.Context) CoordinatorResult
 }
 
 func WrapTaskLog(task Task, fields ...mlog.Field) []mlog.Field {
