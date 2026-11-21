@@ -577,6 +577,11 @@ func (c *Inspector) EnqueueCompactionWithContext(ctx context.Context, task *data
 	}
 	err = c.compactionTaskMeta.SaveCompactionTask(ctx, t.GetTaskProto())
 	if err != nil {
+		if ctx.Err() != nil {
+			if dropErr := c.compactionTaskMeta.DropCompactionTask(context.Background(), t.GetTaskProto()); dropErr != nil {
+				log.Warn(ctx, "failed to drop compaction task meta after canceled save", mlog.Err(dropErr))
+			}
+		}
 		c.meta.SetSegmentsCompacting(context.Background(), t.GetTaskProto().GetInputSegments(), false)
 		log.Warn(ctx, "Failed to enqueue compaction task, unable to save task meta", mlog.Err(err))
 		return err
@@ -586,6 +591,7 @@ func (c *Inspector) EnqueueCompactionWithContext(ctx context.Context, task *data
 		if dropErr := c.compactionTaskMeta.DropCompactionTask(context.Background(), t.GetTaskProto()); dropErr != nil {
 			log.Warn(ctx, "failed to drop compaction task meta after submit failure", mlog.Err(dropErr))
 		}
+		c.compactionTaskMeta.RemoveTaskStats(t.GetTaskProto().GetPlanID())
 		c.meta.SetSegmentsCompacting(context.Background(), t.GetTaskProto().GetInputSegments(), false)
 		return err
 	}

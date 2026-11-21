@@ -343,8 +343,13 @@ func TestCompactionTriggerStopCancelsIndexFilterAndIDAllocation(t *testing.T) {
 		m, im, _ := buildTestMetaWithCandidateGroups(t, 10, datapb.SegmentLevel_L1)
 		var filterLookupCalls atomic.Int32
 		enteredFilterLookup := make(chan struct{})
+		releaseFilterLookup := make(chan struct{})
 		filterLookupErr := make(chan error, 1)
 		var enteredOnce sync.Once
+		var releaseOnce sync.Once
+		t.Cleanup(func() {
+			releaseOnce.Do(func() { close(releaseFilterLookup) })
+		})
 
 		handler := newFuncHandler(t, func(ctx context.Context, _ UniqueID) (*meta.CollectionInfo, error) {
 			// In handleSignal, IndexBasedCompaction runs FilterInIndexedSegments before getCollection.
@@ -352,11 +357,15 @@ func TestCompactionTriggerStopCancelsIndexFilterAndIDAllocation(t *testing.T) {
 			enteredOnce.Do(func() {
 				close(enteredFilterLookup)
 			})
-			<-ctx.Done()
-			if callNum == 1 {
-				filterLookupErr <- ctx.Err()
+			select {
+			case <-ctx.Done():
+				if callNum == 1 {
+					filterLookupErr <- ctx.Err()
+				}
+				return nil, ctx.Err()
+			case <-releaseFilterLookup:
+				return nil, context.DeadlineExceeded
 			}
-			return nil, ctx.Err()
 		})
 
 		_, alloc := newIncrementingRootCoordAllocator(t)
@@ -379,8 +388,17 @@ func TestCompactionTriggerStopCancelsIndexFilterAndIDAllocation(t *testing.T) {
 		}
 
 		stopStart := time.Now()
-		tr.Stop()
-		require.Less(t, time.Since(stopStart), 800*time.Millisecond)
+		stopDone := make(chan struct{})
+		go func() {
+			tr.Stop()
+			close(stopDone)
+		}()
+		select {
+		case <-stopDone:
+			require.Less(t, time.Since(stopStart), 800*time.Millisecond)
+		case <-time.After(2 * time.Second):
+			t.Fatal("compactionTrigger.Stop() hung during FilterInIndexedSegments")
+		}
 
 		select {
 		case err := <-filterLookupErr:
@@ -1109,14 +1127,27 @@ func TestInspectorEnqueueCompactionWithContextAndRollback(t *testing.T) {
 		m, _, _ := buildTestMetaWithCandidateGroups(t, 1, datapb.SegmentLevel_L1)
 		enteredSave := make(chan struct{})
 		saveObservedErr := make(chan error, 1)
+		persisted := make(map[int64]*datapb.CompactionTask)
+		var persistedMu sync.Mutex
 
 		catalog := catalogmocks.NewDataCoordCatalog(t)
-		catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).RunAndReturn(func(saveCtx context.Context, _ *datapb.CompactionTask) error {
+		catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).RunAndReturn(func(saveCtx context.Context, task *datapb.CompactionTask) error {
 			close(enteredSave)
 			<-saveCtx.Done()
+			// Simulate an ambiguous write where etcd committed before the cancel response returned.
+			persistedMu.Lock()
+			persisted[task.GetPlanID()] = task
+			persistedMu.Unlock()
 			saveObservedErr <- saveCtx.Err()
 			return saveCtx.Err()
 		})
+		catalog.EXPECT().DropCompactionTask(mock.Anything, mock.Anything).RunAndReturn(func(dropCtx context.Context, task *datapb.CompactionTask) error {
+			require.NoError(t, dropCtx.Err())
+			persistedMu.Lock()
+			delete(persisted, task.GetPlanID())
+			persistedMu.Unlock()
+			return nil
+		}).Once()
 		taskMeta := ctask.NewCompactionTaskMetaOverCatalog(catalog)
 
 		mc := rootmocks.NewMixCoord(t)
@@ -1158,6 +1189,9 @@ func TestInspectorEnqueueCompactionWithContextAndRollback(t *testing.T) {
 			t.Fatal("EnqueueCompactionWithContext did not return after cancel")
 		}
 
+		persistedMu.Lock()
+		require.Empty(t, persisted, "ambiguous canceled save must be cleaned up from catalog")
+		persistedMu.Unlock()
 		require.False(t, m.GetSegment(context.Background(), 5001).IsCompacting)
 		require.Nil(t, insp.getCompactionTask(3002))
 		require.Empty(t, taskMeta.GetCompactionTasks()[2002])
@@ -1191,6 +1225,9 @@ func TestInspectorEnqueueCompactionWithContextAndRollback(t *testing.T) {
 		require.Equal(t, []int64{4002}, droppedPlanIDs)
 		require.Empty(t, taskMeta.GetCompactionTasks()[2102])
 		require.Len(t, taskMeta.GetCompactionTasks()[2101], 1)
+		statsJSON := taskMeta.TaskStatsJSON()
+		require.Contains(t, statsJSON, `"plan_id":"4001"`)
+		require.NotContains(t, statsJSON, `"plan_id":"4002"`)
 		require.False(t, m.GetSegment(context.Background(), 5002).IsCompacting)
 		require.True(t, m.GetSegment(context.Background(), 5001).IsCompacting)
 	})
@@ -1208,21 +1245,29 @@ func TestCompactionTriggerStopDuringOnlyBucketEnqueueReturnsServiceUnavailable(t
 	_, alloc := newIncrementingRootCoordAllocator(t)
 
 	enteredEnqueue := make(chan struct{})
+	releaseEnqueue := make(chan struct{})
 	var enteredOnce sync.Once
+	var releaseOnce sync.Once
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(releaseEnqueue) })
+	})
 	inspector := &recordingInspector{
 		onEnqueueCtx: func(ctx context.Context, _ *datapb.CompactionTask) error {
 			enteredOnce.Do(func() {
 				close(enteredEnqueue)
 			})
-			<-ctx.Done()
-			return ctx.Err()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-releaseEnqueue:
+				return context.DeadlineExceeded
+			}
 		},
 	}
 
 	tr := NewCompactionTrigger(m, im, inspector, alloc, handler, index.NewTestVersionManager())
 	tr.testingOnly = true
 	tr.Start()
-	defer tr.Stop()
 
 	type triggerRes struct {
 		id  UniqueID
@@ -1241,8 +1286,17 @@ func TestCompactionTriggerStopDuringOnlyBucketEnqueueReturnsServiceUnavailable(t
 	}
 
 	stopStart := time.Now()
-	tr.Stop()
-	require.Less(t, time.Since(stopStart), 800*time.Millisecond)
+	stopDone := make(chan struct{})
+	go func() {
+		tr.Stop()
+		close(stopDone)
+	}()
+	select {
+	case <-stopDone:
+		require.Less(t, time.Since(stopStart), 800*time.Millisecond)
+	case <-time.After(2 * time.Second):
+		t.Fatal("compactionTrigger.Stop() hung during EnqueueCompactionWithContext")
+	}
 
 	select {
 	case res := <-resCh:
