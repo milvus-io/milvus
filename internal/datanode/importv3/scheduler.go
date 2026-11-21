@@ -25,6 +25,7 @@ import (
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -57,6 +58,9 @@ type Task interface {
 	Kind() string
 	// Slot is the task's slot cost on this node.
 	Slot() int64
+	// Resource is the cpu/memory DataCoord estimated for the task; it is
+	// booked from Submit until the run's closure exits.
+	Resource() taskcommon.Resource
 	// Execute runs the task to completion (or error) on the pool's
 	// goroutine. A canceled ctx is the only cancellation mechanism.
 	Execute(ctx context.Context) (any, error)
@@ -72,13 +76,14 @@ type taskEntryKey struct{ taskID, runID int64 }
 // reason, result) is guarded by the entry's own mu; the lifecycle flags
 // (started, retired, finished) and the key are guarded by the scheduler's mu.
 type taskEntry struct {
-	mu     sync.RWMutex
-	worker Task
-	state  datapb.ImportTaskStateV2
-	reason string
-	result any
-	cancel context.CancelFunc
-	ctx    context.Context
+	resource taskcommon.Resource // immutable accepted price
+	mu       sync.RWMutex
+	worker   Task
+	state    datapb.ImportTaskStateV2
+	reason   string
+	result   any
+	cancel   context.CancelFunc
+	ctx      context.Context
 	// key is the entry's immutable key in the scheduler registry: its
 	// (taskID, runID). It is assigned in addUnsafe when the entry is inserted.
 	key taskEntryKey
@@ -98,27 +103,13 @@ type taskEntry struct {
 	enqueued time.Time
 }
 
-// Scheduler owns the whole process-local import V3 slot story in one type: the
-// admission policy (which pending task starts next within the node's total slot
-// budget) and the task registry plus execution pool that runs the admitted
-// tasks. Merging the two lets one admission pass take a single lock over the
-// registry, instead of a snapshot of pending candidates followed by a per-run
-// start that could race with a concurrent Submit/Drop.
+// Scheduler owns import V3 memory admission and its fenced run registry.
+// DataCoord accounts for other executors when placing work on this node.
 //
-// Its view of the node is deliberately narrow: only import V3 tasks flow
-// through it, and only their own slots count against the node's total slot
-// capacity. Index-build and compaction usage is not consulted here; DataCoord's
-// global water-filling already accounts for every executor through QuerySlot.
-//
-// Backpressure works in both directions:
-//   - admission: a task starts only when capacity - usage covers its slot;
-//   - reporting: queued slots count as used in QuerySlot, so DataCoord stops
-//     water-filling new tasks onto this node instead of over-assigning.
-//
-// The backlog is unbounded by design: DataCoord's own slot accounting bounds
-// how many tasks ever reach this node, so it cannot grow without limit.
-// A pending task answers Pending to Query (see Query), never "not found", so
-// DataCoord waits for its slot instead of retrying the task elsewhere.
+// Pending tasks book their immutable resource price for QuerySlot but do not
+// reserve execution memory. Reservations survive Drop and replacement until
+// the admitted closure exits. The slot reports remain for old coordinators.
+// A pending task answers Pending, never not-found, so DataCoord can wait for it.
 //
 // Admission is edge-triggered with a periodic resync, the same shape as a
 // controller: a Submit, a Drop or a task completion wakes the loop (wake), and
@@ -132,9 +123,8 @@ type taskEntry struct {
 // scheduler's run check prevents late Query or completion callbacks from
 // mutating a newer run on the same DataNode.
 type Scheduler struct {
-	// capacity reports the node's total slot budget. Reading it through a
-	// function keeps the scheduler decoupled from the slot policy.
-	capacity func() int64
+	// capacity reports node resources without coupling admission to node configuration.
+	capacity func() taskcommon.Resource
 	metrics  *Metrics
 
 	ctx    context.Context
@@ -151,14 +141,13 @@ type Scheduler struct {
 	closeOnce sync.Once
 }
 
-func NewScheduler(parent context.Context, capacity func() int64, metrics *Metrics) *Scheduler {
+func NewScheduler(parent context.Context, capacity func() taskcommon.Resource, metrics *Metrics) *Scheduler {
 	if parent == nil {
 		parent = context.Background()
 	}
 	ctx, cancel := context.WithCancel(parent) //nolint:gosec // G118: cancel is stored on the scheduler and called by Close.
 	// Sized exactly like the import V2 execution pool: the admission policy
-	// bounds how many tasks ever run, so this pool only tracks their futures
-	// and never blocks admit in practice.
+	// bounds admitted memory; the blocking pool limits execution concurrency.
 	poolSize := hardware.GetCPUNum() * paramtable.Get().DataNodeCfg.ImportConcurrencyPerCPUCore.GetAsInt()
 	return &Scheduler{
 		capacity:  capacity,
@@ -173,11 +162,11 @@ func NewScheduler(parent context.Context, capacity func() int64, metrics *Metric
 }
 
 // Submit validates a task and queues it for admission. It does not execute the
-// task: admit runs it once the node has free slots. Submit is idempotent for
-// the current run and a no-op for a stale run, the same run fencing the old Add
-// enforced.
+// task: admit runs it once execution memory is available.
+// Submit is idempotent for the current run and a no-op for a stale run.
+// A completed Retry attempt with the same run ID can be submitted again.
 func (s *Scheduler) Submit(worker Task) error {
-	if s == nil || worker == nil || worker.TaskID() == 0 || worker.RunID() == 0 || worker.Slot() <= 0 {
+	if s == nil || worker == nil || worker.TaskID() == 0 || worker.RunID() == 0 || worker.Resource().Memory <= 0 {
 		return merr.WrapErrImportSysFailedMsg("invalid import V3 task create request")
 	}
 	taskID, runID := worker.TaskID(), worker.RunID()
@@ -213,9 +202,11 @@ func (s *Scheduler) Submit(worker Task) error {
 				s.retireUnsafe(existing)
 			}
 		}
+		resource := worker.Resource()
 		ctx, cancel := context.WithCancel(s.ctx) //nolint:gosec // G118: cancel is stored in the task entry and called on task termination or scheduler Close.
 		s.addUnsafe(&taskEntry{
 			worker:   worker,
+			resource: resource,
 			state:    datapb.ImportTaskStateV2_Pending,
 			cancel:   cancel,
 			ctx:      ctx,
@@ -302,7 +293,7 @@ func (s *Scheduler) Drop(taskID, runID int64) bool {
 		rec.cancel()
 	}
 	if wasQueued {
-		mlog.Info(context.TODO(), "slot scheduler discards queued task",
+		mlog.Info(rec.ctx, "slot scheduler discards queued task",
 			mlog.FieldTaskID(taskID), mlog.Int64("runID", rec.worker.RunID()), mlog.String("kind", rec.worker.Kind()))
 		// Refresh the queue gauge promptly; no slot is freed.
 		s.wake()
@@ -338,16 +329,33 @@ func (s *Scheduler) QueuedSlots() int64 {
 	return slots
 }
 
+// Resource returns the cpu/memory booked by every run DataCoord has placed
+// here and that has not exited yet: queued and started alike, the same scope
+// Slots()+QueuedSlots() covers for the scalar slot. A dropped or superseded
+// run keeps counting until its closure exits, like its slot.
+func (s *Scheduler) Resource() taskcommon.Resource {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var used taskcommon.Resource
+	for _, key := range s.tasks.Keys() {
+		rec, _ := s.tasks.Get(key)
+		if !rec.finished {
+			used = used.Add(rec.resource)
+		}
+	}
+	return used
+}
+
 // Start runs the admission loop until Close. It is a singleton loop like the
 // other datanode schedulers, so a plain ticker is used instead of a pool.
 func (s *Scheduler) Start() {
-	mlog.Info(context.TODO(), "start slot scheduler")
+	mlog.Info(s.ctx, "start slot scheduler")
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-s.closeChan:
-			mlog.Info(context.TODO(), "slot scheduler exited")
+			mlog.Info(s.ctx, "slot scheduler exited")
 			return
 		case <-s.wakeChan:
 			s.admit()
@@ -398,14 +406,9 @@ func (s *Scheduler) wake() {
 	}
 }
 
-// admit starts every pending task that fits the node's free slots, in Submit
-// order. A task that does not fit is skipped and retried on the next cycle;
-// smaller tasks behind it may still start (no head-of-line blocking).
-//
-// A task whose own slot exceeds the node's total capacity can never satisfy
-// usage+slot <= capacity while anything else runs, so once the node has no
-// import V3 task running it is admitted on its own instead of being queued
-// forever: DataCoord assigned it here, so the node owes it a run.
+// admit starts pending tasks that fit execution memory, in Submit order.
+// A task that does not fit is skipped so smaller tasks behind it can still run.
+// An idle scheduler admits one oversized task to guarantee progress.
 //
 // The pass is level-triggered: it reads the current used slots and the current
 // pending set and recomputes every decision, so a missed or duplicated wakeup
@@ -417,11 +420,12 @@ func (s *Scheduler) admit() {
 	s.mu.Unlock()
 	for _, rec := range batch {
 		// Submit runs outside the scheduler lock: the exec pool may block when
-		// every worker is busy, and that backpressure must never stall the
-		// admission loop or the RPC callers that woke it.
+		// every worker is busy, and that backpressure must not hold the
+		// registry lock needed by Submit, Query and Drop.
 		s.exec.Submit(s.runClosure(rec))
 		s.metrics.ObserveQueueLatency(rec.worker.Kind(), time.Since(rec.enqueued))
-		mlog.Info(context.TODO(), "slot scheduler started task",
+		mlog.Info(rec.ctx, "slot scheduler started task",
+			mlog.Int64("taskMemory", rec.resource.Memory),
 			mlog.FieldTaskID(rec.worker.TaskID()), mlog.Int64("runID", rec.worker.RunID()),
 			mlog.String("kind", rec.worker.Kind()), mlog.Int64("slot", rec.worker.Slot()),
 			mlog.Duration("queueWait", time.Since(rec.enqueued)))
@@ -430,16 +434,21 @@ func (s *Scheduler) admit() {
 	s.metrics.SetTaskStates(states)
 }
 
-// selectUnsafe is one admission pass. The caller holds s.mu, so the used-slot
-// read, the admission decision and the started marking all happen atomically:
-// there is no snapshot-then-start race with a concurrent Submit or Drop.
+// selectUnsafe holds s.mu across resource accounting and started marking;
+// the registry is the only execution ledger.
 //
 // It walks the not-yet-started entries in Submit order, skipping one when it
 // cannot fit alongside what already runs, and marks the admitted ones started.
 // In the same pass it computes the queued backlog (the entries it left alone)
 // and the per-kind state distribution of started, non-retired entries.
-func (s *Scheduler) selectUnsafe(capacity int64) (batch []*taskEntry, queued int, queuedSlots int64, states map[string]map[datapb.ImportTaskStateV2]int) {
-	used := s.slotsUnsafe()
+func (s *Scheduler) selectUnsafe(capacity taskcommon.Resource) (batch []*taskEntry, queued int, queuedSlots int64, states map[string]map[datapb.ImportTaskStateV2]int) {
+	used := int64(0)
+	for _, key := range s.tasks.Keys() {
+		rec, _ := s.tasks.Get(key)
+		if rec.started && !rec.finished {
+			used += rec.resource.Memory
+		}
+	}
 	states = make(map[string]map[datapb.ImportTaskStateV2]int)
 	for _, key := range s.tasks.Keys() {
 		rec, ok := s.tasks.Get(key)
@@ -448,9 +457,8 @@ func (s *Scheduler) selectUnsafe(capacity int64) (batch []*taskEntry, queued int
 		}
 		if !rec.started {
 			slot := rec.worker.Slot()
-			if used > 0 && used+slot > capacity {
-				// Does not fit alongside what already runs: keep it queued and
-				// try again on the next cycle.
+			fits := used == 0 || rec.resource.Memory <= capacity.Memory-used
+			if !fits {
 				queued++
 				queuedSlots += slot
 				continue
@@ -458,7 +466,7 @@ func (s *Scheduler) selectUnsafe(capacity int64) (batch []*taskEntry, queued int
 			rec.started = true
 			s.wg.Add(1)
 			batch = append(batch, rec)
-			used += slot
+			used += rec.resource.Memory
 		}
 		rec.mu.RLock()
 		kind := rec.worker.Kind()

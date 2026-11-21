@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache"
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -141,7 +142,7 @@ func TestRestoreL0DerivesEmptyTargetSet(t *testing.T) {
 		InputSegments: []int64{1}, Schema: &schemapb.CollectionSchema{Name: "restored"},
 	}, nil, m, tasks)
 	task.LookupRestoreJob = func(_ context.Context, id int64) *datapb.CopySegmentJob { require.EqualValues(t, 100, id); return job }
-	task.CreateTaskOnWorker(19, nil) // Empty targets complete without a worker RPC.
+	task.CreateTaskOnWorker(19, nil, taskcommon.Resource{CPU: 1, Memory: 64 << 20}) // Empty targets complete without a worker RPC.
 	require.Equal(t, datapb.CompactionTaskState_meta_saved, task.GetTaskProto().GetState())
 	require.True(t, task.Process())
 	require.Equal(t, datapb.CompactionTaskState_completed, task.GetTaskProto().GetTerminalState())
