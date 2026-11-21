@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,9 +35,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metacache/metacachetest"
+	metastoreMocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	coordMocks "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
@@ -1285,4 +1288,411 @@ func TestCheckReplicasServiceable(t *testing.T) {
 		errs := s.CheckReplicasServiceable(context.Background(), collectionID)
 		assert.Empty(t, errs)
 	})
+}
+
+type fakeSessionWatcher struct {
+	ch chan *sessionutil.SessionEvent
+}
+
+func (f *fakeSessionWatcher) EventChannel() <-chan *sessionutil.SessionEvent {
+	return f.ch
+}
+
+func (f *fakeSessionWatcher) Stop() {}
+
+func TestWatchNodesEvictStaleSameAddress(t *testing.T) {
+	t.Run("SessionAddEvent evicts older same-address node before adding newer node", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		server := &Server{
+			ctx:     ctx,
+			cancel:  cancel,
+			nodeMgr: session.NewNodeManager(),
+		}
+		server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   10,
+			Address:  "10.0.0.1:21123",
+			Hostname: "pod-0",
+		}))
+		server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   11,
+			Address:  "10.0.0.2:21123",
+			Hostname: "pod-1",
+		}))
+
+		var mu sync.Mutex
+		var events []string
+		up20 := make(chan struct{}, 1)
+		down11 := make(chan struct{}, 1)
+		mockDown := mockey.Mock((*Server).handleNodeDown).To(func(_ *Server, node int64) {
+			mu.Lock()
+			events = append(events, fmt.Sprintf("down:%d", node))
+			mu.Unlock()
+			if node == 11 {
+				select {
+				case down11 <- struct{}{}:
+				default:
+				}
+			}
+		}).Build()
+		defer mockDown.UnPatch()
+		mockUp := mockey.Mock((*Server).handleNodeUp).To(func(_ *Server, node int64) {
+			mu.Lock()
+			events = append(events, fmt.Sprintf("up:%d", node))
+			mu.Unlock()
+			if node == 20 {
+				select {
+				case up20 <- struct{}{}:
+				default:
+				}
+			}
+		}).Build()
+		defer mockUp.UnPatch()
+
+		watcher := &fakeSessionWatcher{ch: make(chan *sessionutil.SessionEvent, 4)}
+		mockSession := sessionutil.NewMockSession(t)
+		mockSession.EXPECT().WatchServices(typeutil.QueryNodeRole, int64(2), mock.Anything).Return(watcher)
+		server.session = mockSession
+
+		server.wg.Add(1)
+		go server.watchNodes(1)
+
+		watcher.ch <- &sessionutil.SessionEvent{
+			EventType: sessionutil.SessionAddEvent,
+			Session:   createTestSession(20, "10.0.0.1:21123", false),
+		}
+		<-up20
+
+		assert.Nil(t, server.nodeMgr.Get(10), "stale same-address node should be evicted immediately")
+		assert.NotNil(t, server.nodeMgr.Get(20), "new node should be added")
+		assert.NotNil(t, server.nodeMgr.Get(11), "different-address node should remain untouched")
+
+		mu.Lock()
+		assert.Equal(t, []string{"down:10", "up:20"}, events)
+		mu.Unlock()
+
+		// Delayed SessionDelEvent for already-evicted node 10 must be a no-op.
+		watcher.ch <- &sessionutil.SessionEvent{
+			EventType: sessionutil.SessionDelEvent,
+			Session:   createTestSession(10, "10.0.0.1:21123", false),
+		}
+		// Send a follow-up event for node 11 to synchronize the watcher loop.
+		watcher.ch <- &sessionutil.SessionEvent{
+			EventType: sessionutil.SessionDelEvent,
+			Session:   createTestSession(11, "10.0.0.2:21123", false),
+		}
+		<-down11
+
+		cancel()
+		server.wg.Wait()
+
+		mu.Lock()
+		assert.Equal(t, []string{"down:10", "up:20", "down:11"}, events, "delayed SessionDelEvent for evicted node 10 should not call handleNodeDown")
+		mu.Unlock()
+		assert.NotNil(t, server.nodeMgr.Get(20))
+		assert.Nil(t, server.nodeMgr.Get(11))
+	})
+
+	t.Run("out-of-order SessionAddEvent with older ServerID does not evict newer node", func(t *testing.T) {
+		server := createSimpleTestServer()
+		server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   20,
+			Address:  "10.0.0.1:21123",
+			Hostname: "pod-0",
+		}))
+
+		var downCalled, upCalled []int64
+		mockDown := mockey.Mock((*Server).handleNodeDown).To(func(_ *Server, node int64) {
+			downCalled = append(downCalled, node)
+		}).Build()
+		defer mockDown.UnPatch()
+		mockUp := mockey.Mock((*Server).handleNodeUp).To(func(_ *Server, node int64) {
+			upCalled = append(upCalled, node)
+		}).Build()
+		defer mockUp.UnPatch()
+
+		server.handleSessionEvent(&sessionutil.SessionEvent{
+			EventType: sessionutil.SessionAddEvent,
+			Session:   createTestSession(10, "10.0.0.1:21123", false),
+		})
+
+		assert.NotNil(t, server.nodeMgr.Get(20), "newer node must not be evicted")
+		assert.Nil(t, server.nodeMgr.Get(10), "stale out-of-order node must not be added")
+		assert.Empty(t, downCalled)
+		assert.Empty(t, upCalled)
+	})
+
+	t.Run("duplicate SessionAddEvent with same ServerID does not self-evict", func(t *testing.T) {
+		server := createSimpleTestServer()
+		server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   20,
+			Address:  "10.0.0.1:21123",
+			Hostname: "pod-0",
+		}))
+
+		var downCalled, upCalled []int64
+		mockDown := mockey.Mock((*Server).handleNodeDown).To(func(_ *Server, node int64) {
+			downCalled = append(downCalled, node)
+		}).Build()
+		defer mockDown.UnPatch()
+		mockUp := mockey.Mock((*Server).handleNodeUp).To(func(_ *Server, node int64) {
+			upCalled = append(upCalled, node)
+		}).Build()
+		defer mockUp.UnPatch()
+
+		server.handleSessionEvent(&sessionutil.SessionEvent{
+			EventType: sessionutil.SessionAddEvent,
+			Session:   createTestSession(20, "10.0.0.1:21123", false),
+		})
+
+		assert.NotNil(t, server.nodeMgr.Get(20))
+		assert.Empty(t, downCalled)
+		assert.Equal(t, []int64{20}, upCalled)
+	})
+
+	t.Run("empty address nodes are never evicted", func(t *testing.T) {
+		server := createSimpleTestServer()
+		server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   10,
+			Address:  "",
+			Hostname: "standalone",
+		}))
+
+		var downCalled []int64
+		mockDown := mockey.Mock((*Server).handleNodeDown).To(func(_ *Server, node int64) {
+			downCalled = append(downCalled, node)
+		}).Build()
+		defer mockDown.UnPatch()
+		mockUp := mockey.Mock((*Server).handleNodeUp).Return().Build()
+		defer mockUp.UnPatch()
+
+		server.handleSessionEvent(&sessionutil.SessionEvent{
+			EventType: sessionutil.SessionAddEvent,
+			Session:   createTestSession(20, "", false),
+		})
+
+		assert.NotNil(t, server.nodeMgr.Get(10))
+		assert.NotNil(t, server.nodeMgr.Get(20))
+		assert.Empty(t, downCalled)
+	})
+
+	t.Run("delayed SessionUpdateEvent and SessionDelEvent for already-evicted node are no-ops", func(t *testing.T) {
+		server := createSimpleTestServer()
+		server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   20,
+			Address:  "10.0.0.1:21123",
+			Hostname: "pod-0",
+		}))
+
+		var downCalled, stoppingCalled []int64
+		mockDown := mockey.Mock((*Server).handleNodeDown).To(func(_ *Server, node int64) {
+			downCalled = append(downCalled, node)
+		}).Build()
+		defer mockDown.UnPatch()
+		mockStopping := mockey.Mock((*Server).handleNodeStopping).To(func(_ *Server, node int64) {
+			stoppingCalled = append(stoppingCalled, node)
+		}).Build()
+		defer mockStopping.UnPatch()
+
+		server.handleSessionEvent(&sessionutil.SessionEvent{
+			EventType: sessionutil.SessionUpdateEvent,
+			Session:   createTestSession(10, "10.0.0.1:21123", true),
+		})
+		server.handleSessionEvent(&sessionutil.SessionEvent{
+			EventType: sessionutil.SessionDelEvent,
+			Session:   createTestSession(10, "10.0.0.1:21123", false),
+		})
+
+		assert.Empty(t, stoppingCalled)
+		assert.Empty(t, downCalled)
+		assert.NotNil(t, server.nodeMgr.Get(20))
+		assert.False(t, server.nodeMgr.Get(20).IsStoppingState())
+	})
+
+	t.Run("embedded QueryNode in StreamingNode sharing same address is evicted", func(t *testing.T) {
+		server := createSimpleTestServer()
+		embeddedLabels := map[string]string{
+			sessionutil.LabelStreamingNodeEmbeddedQueryNode: "1",
+		}
+		server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   10,
+			Address:  "10.0.0.5:22222",
+			Hostname: "sn-0",
+			Labels:   embeddedLabels,
+		}))
+
+		var events []string
+		mockDown := mockey.Mock((*Server).handleNodeDown).To(func(_ *Server, node int64) {
+			events = append(events, fmt.Sprintf("down:%d", node))
+		}).Build()
+		defer mockDown.UnPatch()
+		mockUp := mockey.Mock((*Server).handleNodeUp).To(func(_ *Server, node int64) {
+			events = append(events, fmt.Sprintf("up:%d", node))
+		}).Build()
+		defer mockUp.UnPatch()
+
+		newSess := createTestSession(20, "10.0.0.5:22222", false)
+		newSess.ServerLabels = embeddedLabels
+		server.handleSessionEvent(&sessionutil.SessionEvent{
+			EventType: sessionutil.SessionAddEvent,
+			Session:   newSess,
+		})
+
+		assert.Nil(t, server.nodeMgr.Get(10))
+		assert.NotNil(t, server.nodeMgr.Get(20))
+		assert.True(t, server.nodeMgr.Get(20).IsEmbeddedQueryNodeInStreamingNode())
+		assert.Equal(t, []string{"down:10", "up:20"}, events)
+	})
+}
+
+func TestRewatchNodesDedupSameAddress(t *testing.T) {
+	t.Run("removes existing older same-address node and adds only highest ServerID", func(t *testing.T) {
+		for iter := 0; iter < 10; iter++ {
+			server := createSimpleTestServer()
+			server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+				NodeID:   10,
+				Address:  "10.0.0.1:21123",
+				Hostname: "pod-0",
+			}))
+			server.meta = &meta.Meta{
+				ResourceManager: meta.NewResourceManager(nil, nil),
+			}
+
+			var events []string
+			mockDown := mockey.Mock((*Server).handleNodeDown).To(func(_ *Server, node int64) {
+				events = append(events, fmt.Sprintf("down:%d", node))
+			}).Build()
+			mockUp := mockey.Mock((*Server).handleNodeUp).To(func(_ *Server, node int64) {
+				events = append(events, fmt.Sprintf("up:%d", node))
+			}).Build()
+			mockCheckRG := mockey.Mock((*meta.ResourceManager).CheckNodesInResourceGroup).Return().Build()
+
+			sessions := map[string]*sessionutil.Session{
+				"querynode-10": createTestSession(10, "10.0.0.1:21123", false),
+				"querynode-20": createTestSession(20, "10.0.0.1:21123", false),
+				"querynode-30": createTestSession(30, "10.0.0.1:21123", false),
+				"querynode-40": createTestSession(40, "10.0.0.2:21123", false),
+			}
+
+			err := server.rewatchNodes(sessions)
+			mockDown.UnPatch()
+			mockUp.UnPatch()
+			mockCheckRG.UnPatch()
+
+			assert.NoError(t, err)
+			assert.Nil(t, server.nodeMgr.Get(10))
+			assert.Nil(t, server.nodeMgr.Get(20))
+			assert.NotNil(t, server.nodeMgr.Get(30))
+			assert.NotNil(t, server.nodeMgr.Get(40))
+			assert.GreaterOrEqual(t, len(events), 3)
+			assert.Equal(t, "down:10", events[0], "stale node 10 must be evicted before adding online nodes")
+			assert.ElementsMatch(t, []string{"up:30", "up:40"}, events[1:])
+		}
+	})
+
+	t.Run("cold start with two same-address sessions adds only highest ServerID", func(t *testing.T) {
+		server := createSimpleTestServer()
+		server.meta = &meta.Meta{
+			ResourceManager: meta.NewResourceManager(nil, nil),
+		}
+
+		var downCalled, upCalled []int64
+		mockDown := mockey.Mock((*Server).handleNodeDown).To(func(_ *Server, node int64) {
+			downCalled = append(downCalled, node)
+		}).Build()
+		defer mockDown.UnPatch()
+		mockUp := mockey.Mock((*Server).handleNodeUp).To(func(_ *Server, node int64) {
+			upCalled = append(upCalled, node)
+		}).Build()
+		defer mockUp.UnPatch()
+		mockCheckRG := mockey.Mock((*meta.ResourceManager).CheckNodesInResourceGroup).Return().Build()
+		defer mockCheckRG.UnPatch()
+
+		sessions := map[string]*sessionutil.Session{
+			"querynode-10": createTestSession(10, "10.0.0.1:21123", false),
+			"querynode-20": createTestSession(20, "10.0.0.1:21123", false),
+		}
+
+		err := server.rewatchNodes(sessions)
+		assert.NoError(t, err)
+		assert.Nil(t, server.nodeMgr.Get(10))
+		assert.NotNil(t, server.nodeMgr.Get(20))
+		assert.Empty(t, downCalled)
+		assert.Equal(t, []int64{20}, upCalled)
+	})
+
+	t.Run("empty addresses are not deduplicated", func(t *testing.T) {
+		server := createSimpleTestServer()
+		server.meta = &meta.Meta{
+			ResourceManager: meta.NewResourceManager(nil, nil),
+		}
+
+		mockUp := mockey.Mock((*Server).handleNodeUp).Return().Build()
+		defer mockUp.UnPatch()
+		mockCheckRG := mockey.Mock((*meta.ResourceManager).CheckNodesInResourceGroup).Return().Build()
+		defer mockCheckRG.UnPatch()
+
+		sessions := map[string]*sessionutil.Session{
+			"querynode-10": createTestSession(10, "", false),
+			"querynode-20": createTestSession(20, "", false),
+		}
+
+		err := server.rewatchNodes(sessions)
+		assert.NoError(t, err)
+		assert.NotNil(t, server.nodeMgr.Get(10))
+		assert.NotNil(t, server.nodeMgr.Get(20))
+	})
+}
+
+func TestSessionAddEventReplacesNodeInResourceGroup(t *testing.T) {
+	ctx := context.Background()
+	catalog := metastoreMocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	nodeMgr := session.NewNodeManager()
+	rm := meta.NewResourceManager(catalog, nodeMgr)
+	_, err := rm.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 1},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 1},
+	})
+	assert.NoError(t, err)
+
+	server := &Server{
+		ctx:                 ctx,
+		nodeMgr:             nodeMgr,
+		meta:                &meta.Meta{ResourceManager: rm},
+		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
+		qviewsRuntime:       &qviewsRuntime{},
+	}
+
+	// Register initial node 10 into rg1.
+	server.handleSessionEvent(&sessionutil.SessionEvent{
+		EventType: sessionutil.SessionAddEvent,
+		Session:   createTestSession(10, "10.0.0.1:21123", false),
+	})
+	assert.Equal(t, "rg1", rm.GetResourceGroupByNodeID(10))
+
+	// Restarted node 20 comes up at the exact same address before node 10's lease expires.
+	server.handleSessionEvent(&sessionutil.SessionEvent{
+		EventType: sessionutil.SessionAddEvent,
+		Session:   createTestSession(20, "10.0.0.1:21123", false),
+	})
+	assert.Nil(t, nodeMgr.Get(10))
+	assert.NotNil(t, nodeMgr.Get(20))
+	assert.Empty(t, rm.GetResourceGroupByNodeID(10), "stale node 10 should be unassigned from rg1 immediately")
+	assert.Equal(t, "rg1", rm.GetResourceGroupByNodeID(20), "restarted node 20 should take node 10's slot in rg1 immediately")
+
+	// Delayed SessionDelEvent for node 10 must not trigger HandleNodeDown again.
+	downCalls := 0
+	mockRMDown := mockey.Mock((*meta.ResourceManager).HandleNodeDown).To(func(_ *meta.ResourceManager, _ context.Context, _ int64) {
+		downCalls++
+	}).Build()
+	defer mockRMDown.UnPatch()
+
+	server.handleSessionEvent(&sessionutil.SessionEvent{
+		EventType: sessionutil.SessionDelEvent,
+		Session:   createTestSession(10, "10.0.0.1:21123", false),
+	})
+	assert.Equal(t, 0, downCalls)
+	assert.Equal(t, "rg1", rm.GetResourceGroupByNodeID(20))
 }
