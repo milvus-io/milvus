@@ -22,6 +22,31 @@
 
 namespace milvus::segcore {
 
+namespace {
+
+// Writes element_count rows into a column of ConcurrentVector<Type>. The rows
+// are moved out of `rows`, which the caller built from the payload and does
+// not use again, so each row is copied once and not twice.
+template <typename Type>
+void
+MoveRowsIntoColumn(VectorBase* column,
+                   ssize_t element_offset,
+                   std::vector<Type>& rows,
+                   ssize_t element_count) {
+    // Moving modifies the source row, so a short payload would be written
+    // past its end, not only read.
+    AssertInfo(rows.size() >= static_cast<size_t>(element_count),
+               "payload holds {} rows, cannot write {}",
+               rows.size(),
+               element_count);
+    auto* typed_column = dynamic_cast<ConcurrentVector<Type>*>(column);
+    AssertInfo(typed_column != nullptr,
+               "the column does not store the row type of the payload");
+    typed_column->move_data_raw(element_offset, rows.data(), element_count);
+}
+
+}  // namespace
+
 void
 VectorBase::set_data_raw(ssize_t element_offset,
                          ssize_t element_count,
@@ -147,27 +172,19 @@ VectorBase::set_data_raw(ssize_t element_offset,
             auto& field_data = FIELD_DATA(data, string);
             std::vector<std::string> data_raw(field_data.begin(),
                                               field_data.end());
-            return set_data_raw(element_offset, data_raw.data(), element_count);
+            return MoveRowsIntoColumn(
+                this, element_offset, data_raw, element_count);
         }
         case DataType::JSON: {
             auto& json_data = FIELD_DATA(data, json);
-            // The rows below are moved out of data_raw, so a short payload
-            // would write past its end.
-            AssertInfo(json_data.size() == element_count,
-                       "json payload size {} must match element count {}",
-                       json_data.size(),
-                       element_count);
             std::vector<Json> data_raw{};
             data_raw.reserve(json_data.size());
             for (auto& json_bytes : json_data) {
                 data_raw.emplace_back(simdjson::padded_string(json_bytes));
             }
 
-            auto* json_vector = dynamic_cast<ConcurrentVector<Json>*>(this);
-            AssertInfo(json_vector != nullptr,
-                       "JSON field must use ConcurrentVector<Json>");
-            return json_vector->move_data_raw(
-                element_offset, data_raw.data(), element_count);
+            return MoveRowsIntoColumn(
+                this, element_offset, data_raw, element_count);
         }
         case DataType::GEOMETRY: {
             // get the geometry array of a column from proto message
@@ -183,7 +200,8 @@ VectorBase::set_data_raw(ssize_t element_offset,
                 data_raw.emplace_back(
                     std::string(geometry_bytes.data(), geometry_bytes.size()));
             }
-            return set_data_raw(element_offset, data_raw.data(), element_count);
+            return MoveRowsIntoColumn(
+                this, element_offset, data_raw, element_count);
         }
         case DataType::ARRAY: {
             auto& array_data = FIELD_DATA(data, array);
