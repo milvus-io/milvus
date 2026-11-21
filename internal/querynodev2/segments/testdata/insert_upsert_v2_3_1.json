@@ -1,0 +1,26 @@
+[
+  {
+    "name": "insert_v2",
+    "payload": "CkUKBQoDCgFlIh4IaBIGc3BhcnNlKGUiEAgIMgwKCAcAAAAAAIA/EAgiEggFEgV2YWx1ZShmGgUaAwoBCjoDCgEEKgMI6Qc=",
+    "properties": {
+      "_h": "CAESCAgKEAEiAghk",
+      "_lcs": "",
+      "_t": "2",
+      "_tt": "a",
+      "_v": "2",
+      "_vc": "by-dev-rootcoord-dml_0_1v0"
+    }
+  },
+  {
+    "name": "upsert_v2",
+    "payload": "CkUKBQoDCgFlIh4IaBIGc3BhcnNlKGUiEAgIMgwKCAcAAAAAAIA/EAgiEggFEgV2YWx1ZShmGgUaAwoBFDoDCgEEKgMI6gcSBAoAIgA=",
+    "properties": {
+      "_h": "CAESCAgKEAEiAghkIAE=",
+      "_lcs": "",
+      "_t": "52",
+      "_tt": "k",
+      "_v": "2",
+      "_vc": "by-dev-rootcoord-dml_0_1v0"
+    }
+  }
+]

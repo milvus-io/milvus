@@ -1722,6 +1722,9 @@ func PrepareInsert(collSchema *schemapb.CollectionSchema, pkField *schemapb.Fiel
 		}
 
 		for _, msg := range msgs {
+			if err := msg.MaterializePrimaryKey(collSchema); err != nil {
+				return nil, err
+			}
 			data, err := storage.InsertMsgToInsertData(msg, collSchema)
 			if err != nil {
 				mlog.Warn(context.TODO(), "failed to transfer insert msg to insert data", mlog.Err(err))

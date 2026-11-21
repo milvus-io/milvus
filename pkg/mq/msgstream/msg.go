@@ -143,6 +143,40 @@ func convertToByteArray(input interface{}) ([]byte, error) {
 type InsertMsg struct {
 	BaseMsg
 	*msgpb.InsertRequest
+	// StandalonePrimaryKeys is carried by the Insert V2/Upsert reader until the consumer binds its schema.
+	StandalonePrimaryKeys *schemapb.IDs
+}
+
+// MaterializePrimaryKey binds standalone WAL keys to the consumer schema. Legacy
+// Insert messages already contain their PK column and require no adaptation.
+func (it *InsertMsg) MaterializePrimaryKey(schema *schemapb.CollectionSchema) error {
+	if it.StandalonePrimaryKeys == nil {
+		return nil
+	}
+	for _, field := range schema.GetFields() {
+		if !field.GetIsPrimaryKey() {
+			continue
+		}
+		column := &schemapb.FieldData{FieldId: field.GetFieldID(), FieldName: field.GetName(), Type: field.GetDataType()}
+		switch keys := it.StandalonePrimaryKeys.GetIdField().(type) {
+		case *schemapb.IDs_IntId:
+			if field.GetDataType() != schemapb.DataType_Int64 {
+				return merr.WrapErrServiceInternalMsg("WAL primary key type differs from schema")
+			}
+			column.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: keys.IntId}}}
+		case *schemapb.IDs_StrId:
+			if field.GetDataType() != schemapb.DataType_VarChar {
+				return merr.WrapErrServiceInternalMsg("WAL primary key type differs from schema")
+			}
+			column.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: keys.StrId}}}
+		default:
+			return merr.WrapErrServiceInternalMsg("WAL primary key encoding is missing")
+		}
+		it.FieldsData = append(it.FieldsData, column)
+		it.StandalonePrimaryKeys = nil
+		return nil
+	}
+	return merr.WrapErrServiceInternalMsg("WAL insert schema has no primary key")
 }
 
 // interface implementation validation

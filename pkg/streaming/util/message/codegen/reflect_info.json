@@ -67,6 +67,26 @@
         },
         {
             "MessageSpecializedType": {
+                "HeaderType": "messagespb.InsertMessageHeaderV2",
+                "BodyType": "messagespb.InsertMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeInsert",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.UpsertMessageHeader",
+                "BodyType": "messagespb.UpsertMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeUpsert",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
                 "HeaderType": "messagespb.DeleteMessageHeader",
                 "BodyType": "msgpb.DeleteRequest"
             },
@@ -593,6 +613,26 @@
             },
             "MessageTypeWithVersion": {
                 "MessageType": "MessageTypeDropRLSMetadata",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.RecoveryBarrierMessageHeader",
+                "BodyType": "messagespb.RecoveryBarrierMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeRecoveryBarrier",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.MVCCBarrierMessageHeader",
+                "BodyType": "messagespb.MVCCBarrierMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeMVCCBarrier",
                 "Version": 2
             }
         }

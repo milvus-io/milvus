@@ -65,6 +65,9 @@ func (i *appendInterceptor) recoverTransactions(param *interceptors.InterceptorB
 }
 
 func (i *appendInterceptor) recoverTxnBody(ctx context.Context, txnID message.TxnID, body message.ImmutableMessage) error {
+	if body.Version() == message.VersionV2 && (body.MessageType() == message.MessageTypeInsert || body.MessageType() == message.MessageTypeUpsert) {
+		return i.recoverRowWriteBody(ctx, txnID, body)
+	}
 	if message.HasPartialUpdateCAS(body) {
 		pks, scope, encoded, err := extractPKsFromCASInsertWithContext(ctx, body, i.pkDescriptorGetter)
 		if err != nil {

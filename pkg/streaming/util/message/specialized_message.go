@@ -98,7 +98,7 @@ func asSpecializedImmutableMessage[H proto.Message, B proto.Message](msg Immutab
 
 	var header H
 	msgType := MustGetMessageTypeWithVersion[H, B]()
-	if underlying.MessageType() != msgType.MessageType {
+	if underlying.MessageType() != msgType.MessageType || !specializedVersionMatches(underlying.Version(), msgType.Version) {
 		// The message type do not match the specialized header.
 		return nil, merr.WrapErrParameterInvalidMsg("message type do not match specialized header")
 	}
@@ -161,7 +161,7 @@ func (m *specializedMutableMessageImpl[H, B]) Header() H {
 
 // Body returns the message body.
 func (m *specializedMutableMessageImpl[H, B]) Body() (B, error) {
-	return unmarshalProtoB[B](m.Payload())
+	return readSpecializedBody[B](m)
 }
 
 // MustBody returns the message body.
@@ -232,7 +232,7 @@ func (m *specializedImmutableMessageImpl[H, B]) Header() H {
 
 // Body returns the message body.
 func (m *specializedImmutableMessageImpl[H, B]) Body() (B, error) {
-	return unmarshalProtoB[B](m.Payload())
+	return readSpecializedBody[B](m)
 }
 
 // Must Body returns the message body.
@@ -242,6 +242,23 @@ func (m *specializedImmutableMessageImpl[H, B]) MustBody() B {
 		panic(fmt.Sprintf("failed to unmarshal specialized body, %s, %s", m.MessageID().String(), err.Error()))
 	}
 	return b
+}
+
+// readSpecializedBody lets the receiving MsgPack adaptor retry new-format KMS
+// failures without publishing a partial pack. Other formats keep their existing
+// Payload behavior.
+func readSpecializedBody[B proto.Message](msg BasicMessage) (B, error) {
+	var body B
+	switch any(body).(type) {
+	case *messagespb.InsertMessageBody, *messagespb.UpsertMessageBody:
+		payload, err := TryDecryptPayload(msg)
+		if err != nil {
+			return body, err
+		}
+		return unmarshalProtoB[B](payload)
+	default:
+		return unmarshalProtoB[B](msg.Payload())
+	}
 }
 
 func unmarshalProtoB[B proto.Message](data []byte) (B, error) {
@@ -256,5 +273,13 @@ func unmarshalProtoB[B proto.Message](data []byte) (B, error) {
 	if err != nil {
 		return nilBody, err
 	}
+	if err := normalizeInsertOrUpsertBody(body); err != nil {
+		return nilBody, err
+	}
 	return body, nil
+}
+
+// Legacy pre-streaming messages use the V1 body contract.
+func specializedVersionMatches(actual, expected Version) bool {
+	return actual == expected || actual == VersionOld && expected == VersionV1
 }

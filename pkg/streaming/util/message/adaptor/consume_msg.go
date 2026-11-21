@@ -58,6 +58,25 @@ func newConsumeMsgPackFromSingleMessage(msg message.ImmutableMessage) (*msgstrea
 		}
 		return pack, nil
 	}
+	if isRowWrite(msg) {
+		var collection int64
+		switch msg.MessageType() {
+		case message.MessageTypeInsert:
+			typed, err := message.AsImmutableInsertMessageV2(msg)
+			if err != nil {
+				return nil, err
+			}
+			collection = typed.Header().GetCollectionId()
+		case message.MessageTypeUpsert:
+			typed, err := message.AsImmutableUpsertMessageV2(msg)
+			if err != nil {
+				return nil, err
+			}
+			collection = typed.Header().GetCollectionId()
+		}
+		position := rowWritePosition(msg)
+		return &msgstream.ConsumeMsgPack{BeginTs: msg.TimeTick(), EndTs: msg.TimeTick(), StartPositions: []*msgpb.MsgPosition{position}, EndPositions: []*msgpb.MsgPosition{position}, Msgs: []msgstream.ConsumeMsg{&lazyRowWriteMessage{lazyDMLMessage: lazyDMLMessage{msg: msg, position: position, collectionID: collection}}}}, nil
+	}
 	if msg.Version() == message.VersionV1 &&
 		(msg.MessageType() == message.MessageTypeInsert || msg.MessageType() == message.MessageTypeDelete) {
 		var collectionID int64
@@ -160,4 +179,39 @@ func (m *lazyDMLMessage) TryUnmarshal() (msgstream.TsMsg, error) {
 	m.decoded.SetPosition(m.position)
 	m.decoded.SetTraceCtx(m.traceCtx)
 	return m.decoded, nil
+}
+
+// lazyRowWriteMessage preserves one logical message until the dispatcher selects
+// its business VChannel. No PK/vector decryption is attempted for other targets.
+type lazyRowWriteMessage struct {
+	lazyDMLMessage
+	messages []msgstream.TsMsg
+}
+
+func (m *lazyRowWriteMessage) GetType() commonpb.MsgType { return commonpb.MsgType_Insert }
+func (m *lazyRowWriteMessage) TryUnmarshalMessages() ([]msgstream.TsMsg, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.messages == nil {
+		messages, err := readRowWrite(m.msg)
+		if err != nil {
+			return nil, err
+		}
+		m.messages = messages
+	}
+	for _, msg := range m.messages {
+		msg.SetPosition(m.position)
+		msg.SetTraceCtx(m.traceCtx)
+	}
+	return m.messages, nil
+}
+
+// Compound records are consumed through TryUnmarshalMessages; treating one as a
+// scalar message would lose partitions or delete effects.
+func (m *lazyRowWriteMessage) Unmarshal(msgstream.UnmarshalDispatcher) (msgstream.TsMsg, error) {
+	panic("compound WAL message requires expansion")
+}
+
+func (m *lazyRowWriteMessage) TryUnmarshal() (msgstream.TsMsg, error) {
+	panic("compound WAL message requires expansion")
 }

@@ -113,6 +113,7 @@ type catchupScanner struct {
 	deliverPolicy                  options.DeliverPolicy
 	exclusiveStartTimeTick         uint64 // scanner should filter out the message that less than or equal to this time tick.
 	oldVersionLastConfirmedTracker *oldVersionLastConfirmedTracker
+	chunkAssembler                 message.ChunkAssembler
 }
 
 func (s *catchupScanner) Do(ctx context.Context) (switchableScanner, error) {
@@ -127,6 +128,9 @@ func (s *catchupScanner) Do(ctx context.Context) (switchableScanner, error) {
 		}
 		switchedScanner, err := s.consumeWithScanner(ctx, scanner)
 		if err != nil {
+			if errors.Is(err, message.ErrCorruptedChunk) {
+				return nil, err
+			}
 			s.logger.Warn(ctx, "scanner consuming was interrpurted with error, start a backoff", mlog.Err(err))
 			continue
 		}
@@ -143,6 +147,19 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 		case msg, ok := <-scanner.Chan():
 			if !ok {
 				return nil, scanner.Error()
+			}
+
+			// Durable WAL records may be physical payload slices. Assemble before
+			// legacy conversion, ordering, filtering, or transaction assembly.
+			assembled, handled, err := s.chunkAssembler.Push(msg)
+			if err != nil {
+				return nil, err
+			}
+			if handled {
+				if assembled == nil {
+					continue
+				}
+				msg = assembled
 			}
 
 			if msg.Version() == message.VersionOld {
@@ -169,6 +186,10 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 				if err != nil {
 					panic("unrechable: unexpected error found: " + err.Error())
 				}
+				if msg.MessageType() == message.MessageTypeTimeTick {
+					// Raw v0 records have no type property until conversion.
+					s.chunkAssembler.AdvanceTimeTick(msg.TimeTick())
+				}
 			}
 
 			if msg.TimeTick() <= s.exclusiveStartTimeTick {
@@ -179,9 +200,8 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 			if err := s.HandleMessage(ctx, msg); err != nil {
 				return nil, err
 			}
-			if msg.MessageType() != message.MessageTypeTimeTick || s.writeAheadBuffer == nil {
-				// Only timetick message is keep the same order with the write ahead buffer.
-				// So we can only use the timetick message to catchup the write ahead buffer.
+			if (msg.MessageType() != message.MessageTypeTimeTick && msg.MessageType() != message.MessageTypeMVCCBarrier) || s.writeAheadBuffer == nil {
+				// TimeTick and MVCCBarrier are confirmation boundaries shared with WAB.
 				continue
 			}
 			// Here's a timetick message from the scanner, make tailing read if we catch up the writeahead buffer.

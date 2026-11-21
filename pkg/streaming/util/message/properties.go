@@ -1,6 +1,8 @@
 package message
 
 const (
+	messageChunkIndex = "_ci" // physical payload chunk index (zero-based).
+	messageChunkTotal = "_ct" // number of physical payload chunks.
 	// preserved properties
 	messageVersion                          = "_v"   // message version for compatibility, see `Version` for more information.
 	messageWALTerm                          = "_wt"  // wal term of a message, always increase by MessageID order, should never rollback.
