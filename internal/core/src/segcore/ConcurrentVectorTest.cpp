@@ -83,6 +83,41 @@ TEST(ConcurrentVector, TestSingle) {
     }
 }
 
+TEST(ConcurrentVector, JsonInsertAcrossChunks) {
+    milvus::FieldMeta field_meta(milvus::FieldName("json"),
+                                 milvus::FieldId(101),
+                                 milvus::DataType::JSON,
+                                 false,
+                                 std::nullopt);
+    std::vector<std::string> rows;
+    for (int i = 0; i < 10; ++i) {
+        std::string row = "{\"id\":";
+        row.append(std::to_string(i));
+        row.append(",\"name\":\"");
+        row.append(i * 10, 'x');
+        row.append("\"}");
+        rows.push_back(std::move(row));
+    }
+    milvus::DataArray first;
+    milvus::DataArray second;
+    for (int i = 0; i < 10; ++i) {
+        auto& batch = i < 3 ? first : second;
+        batch.mutable_scalars()->mutable_json_data()->add_data(rows[i]);
+    }
+
+    ConcurrentVector<milvus::Json> c_vec(4);
+    // The DataArray overload is declared on VectorBase and hidden by the
+    // set_data_raw overloads of ConcurrentVectorImpl.
+    VectorBase& base = c_vec;
+    base.set_data_raw(0, 3, &first, field_meta);
+    base.set_data_raw(3, 7, &second, field_meta);
+
+    ASSERT_EQ(c_vec.num_chunk(), 3);
+    for (int i = 0; i < 10; ++i) {
+        ASSERT_EQ(c_vec.view_element(i), rows[i]);
+    }
+}
+
 TEST(ConcurrentVector, TestMultithreads) {
     auto dim = 8;
     constexpr int threads = 16;
