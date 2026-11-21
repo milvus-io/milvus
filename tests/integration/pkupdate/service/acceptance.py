@@ -9,6 +9,7 @@ import time
 import urllib.request
 from pathlib import Path
 
+from cluster_site import ROLES
 from pymilvus import DataType, MilvusClient
 
 
@@ -25,6 +26,8 @@ class Fixture:
     def __init__(self, site):
         self.site = site
         self.config = json.loads((site / "site.json").read_text())
+        if set(self.config["metrics"]) != set(ROLES):
+            raise ValueError("invalid retained site role inventory")
         self.endpoint = "127.0.0.1:" + str(self.config["conf"]["proxy.port"])
         self.client = MilvusClient(uri="http://" + self.endpoint, timeout=30)
         tag = str(time.time_ns())
@@ -57,7 +60,9 @@ class Fixture:
         if partition:
             request["partitionName"] = partition
         command = [str(Path(self.config["binary"]).with_name("update-rpc")), self.endpoint]
-        result = subprocess.run(command, input=json.dumps(request), capture_output=True, text=True, check=True)
+        result = subprocess.run(
+            command, input=json.dumps(request), capture_output=True, text=True, check=True, timeout=40
+        )
         data = json.loads(result.stdout)
         self.record("update", [request, data])
         return data
@@ -94,7 +99,7 @@ class Fixture:
         for name in (self.candidate, self.mirror):
             self.create(name)
         rows = [dict(id=i, score=i, tag="base", vec=[float(i), 0.0]) for i in range(1, 9)]
-        c.insert(self.candidate, rows)
+        c.insert(self.candidate, rows, timeout=30)
         base = [{k: v for k, v in row.items() if k != "vec"} for row in rows]
         self.record("growing base", self.query(self.candidate, "id >= 0"))
         assert self.query(self.candidate, "id >= 0") == base
@@ -144,7 +149,7 @@ class Fixture:
             row.update(score=10, tag="new")
         for fields in ([literal("score", 1), literal("score", 2)], [literal("id", 3)], [literal("vec", 1)]):
             assert self.update([1], fields)["status"]["reason"]
-        c.insert(self.mirror, [{**row, "vec": [float(row["id"]), 0.0]} for row in expected])
+        c.insert(self.mirror, [{**row, "vec": [float(row["id"]), 0.0]} for row in expected], timeout=30)
         c.flush(self.mirror, timeout=120)
         for expr, oracle in (
             ("id >= 0", expected),

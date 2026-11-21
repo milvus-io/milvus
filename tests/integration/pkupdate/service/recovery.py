@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import re
 import signal
 import subprocess
 import time
@@ -13,29 +14,50 @@ from acceptance import Fixture, literal
 
 # Use a distinct module name from Python's standard library site.
 from cluster_site import launch
+from history import check_history, serving_generation
 from metadata import capture
 from pymilvus.exceptions import MilvusException
+from pymilvus.grpc_gen import milvus_pb2
+
+
+def owns_listener(pid, port):
+    r = subprocess.run(
+        ["lsof", "-nP", "-a", "-p", str(pid), f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    return r.returncode == 0 and r.stdout.strip() == str(pid)
 
 
 def replace(f, role):
     rows = [json.loads(x) for x in (f.site / "processes.jsonl").read_text().splitlines()]
     proc = next(x for x in reversed(rows) if x["role"] == role)
-    cmd = subprocess.check_output(["ps", "-p", str(proc["pid"]), "-o", "command="], text=True).strip()
     alias = f.config["namespace"] + "-" + role
-    assert cmd == f'{f.config["binary"]} run {role} -alias {alias}', cmd
-    os.kill(proc["pid"], signal.SIGKILL)
-    f.record("worker killed", [role, proc["pid"], alias])
-    for _ in range(100):
-        if subprocess.run(["ps", "-p", str(proc["pid"])], stdout=subprocess.DEVNULL).returncode:
-            break
-        time.sleep(0.1)
-    launch(f.site, role)
+    expected = f'{f.config["binary"]} run {role} -alias {alias}'
+    if role not in ("querynode", "streamingnode") or not f.config["namespace"].startswith("pk-update-"):
+        raise ValueError("replacement requires an owned PK-update worker")
+    pid = proc["pid"]
+    actual = subprocess.check_output(["ps", "-p", str(pid), "-o", "command="], text=True, timeout=5).strip()
+    if expected != actual or not owns_listener(pid, f.config["metrics"][role]):
+        raise RuntimeError(f"worker ownership mismatch for {role} PID {pid}")
+    os.kill(pid, signal.SIGKILL)
+    try:
+        f.record("worker killed", [role, pid, alias])
+    finally:
+        for _ in range(100):
+            if subprocess.run(["ps", "-p", str(pid)], stdout=subprocess.DEVNULL, timeout=5).returncode:
+                break
+            time.sleep(0.1)
+        child = launch(f.site, role)
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
+        if child.poll() is not None:
+            raise RuntimeError(f"{role} replacement exited {child.returncode}")
         try:
             with urllib.request.urlopen(f'http://127.0.0.1:{f.config["metrics"][role]}/healthz', timeout=2) as resp:
-                if resp.read() == b"OK":
-                    return
+                if resp.read() == b"OK" and owns_listener(child.pid, f.config["metrics"][role]):
+                    return child.pid
         except OSError:
             pass
         time.sleep(0.5)
@@ -46,17 +68,26 @@ def run(f, pair):
     c = f.client
     f.create(f.candidate, shards=2)
     for i, partition in enumerate(("left", "right")):
-        c.create_partition(f.candidate, partition)
+        c.create_partition(f.candidate, partition, timeout=30)
         c.load_partitions(f.candidate, [partition], timeout=90)
         c.insert(
             f.candidate,
             [{"id": i * 100 + n, "score": n, "tag": partition, "vec": [float(n), 0.0]} for n in range(1, 17)],
             partition_name=partition,
+            timeout=30,
         )
     c.flush(f.candidate, timeout=120)
-    c.delete(f.candidate, ids=[16, 116])
+    conn = c._get_connection()
+    partition_info = conn._stub.ShowPartitions(
+        milvus_pb2.ShowPartitionsRequest(collection_name=f.candidate), timeout=30
+    )
+    assert partition_info.status.code == 0
+    partitions = dict(zip(partition_info.partition_names, map(str, partition_info.partitionIDs), strict=True))
+    deleted = conn.delete(collection_name=f.candidate, expression="id in [16,116]", partition_name=None, timeout=30)
+    assert deleted.delete_count == 2 and deleted.timestamp > 0
+    f.record("delete ACK", deleted.timestamp)
     c.flush(f.candidate, timeout=120)
-    cid = str(c.describe_collection(f.candidate)["collection_id"])
+    cid = str(c.describe_collection(f.candidate, timeout=30)["collection_id"])
     tag = f.candidate
 
     def snap(label):
@@ -74,6 +105,7 @@ def run(f, pair):
     assert any(int(row["Operation"]) == 1 for x in selected(before) for row in x["rows"])
     resp = f.update([1, 2, 101, 102], [literal("score", 40)], partition="left")
     f.accepted(resp, 4)
+    private_ack = int(resp["timestamp"])
 
     def read_scope(left, right):
         for offset, part, scores in ((0, "left", left), (100, "right", right)):
@@ -154,15 +186,67 @@ def run(f, pair):
     targets = [x["data"] for x in dispatched if x.get("data", {}).get("ID") in target_cursors]
     assert len(targets) == len(target_cursors) == 4
     assert all(int(s["transformStartAfterTimetick"]) == target_cursors[s["ID"]] for s in targets)
-    merged = [r for x in selected(dispatched) if x["referrer"].startswith("datacoord-meta/s/") for r in x["rows"]]
-    updated = {
-        pk: sorted(a["field_id"] for a in r["Assignments"])
-        for r in merged
-        if r["Operation"] == 2
-        for pk in r["PrimaryKeys"]["IdField"]["IntId"]["data"]
+    scoped_ticks = check_history(
+        persist, dispatched, cid, partitions["left"], partitions["right"], deleted.timestamp, private_ack, ack
+    )
+    durable = {
+        x["data"]["vchannel"]: int(x["data"]["transformMaterializedTimeTick"])
+        for x in persist
+        if cid in x.get("data", {}).get("vchannel", "")
     }
-    assert updated == {1: [101], 2: [101, 102], 102: [101, 102]}, updated
-    assert all(r["SourceOrdinal"] == 0 for r in merged)
+    frozen = {t["channel"]: int(t["materializedThrough"]) for t in tasks}
+    assert durable == frozen and all(durable[ch] >= tick for ch, tick in scoped_ticks.items())
+    f.record(
+        "registered scoped history",
+        {"sharedTicks": scoped_ticks, "publicAck": ack, "durableM": durable, "frozenM0": frozen},
+    )
+
+    def read_replacement(stage, records):
+        pid = replace(f, "querynode")
+        expected = {s["ID"]: s for s in records}
+        deadline = time.monotonic() + 150
+        while time.monotonic() < deadline:
+            with urllib.request.urlopen(
+                f'http://127.0.0.1:{f.config["metrics"]["querynode"]}/metrics', timeout=5
+            ) as response:
+                gauges = re.findall(
+                    r'^milvus_querynode_read_task_ready_len\{node_id="(\d+)"\}', response.read().decode(), re.M
+                )
+            if len(gauges) == 1:
+                owner = int(gauges[0])
+                before = snap(f"{stage}-before-{time.time_ns()}")
+                floors = serving_generation(before, cid, owner, expected)
+                if floors:
+                    break
+            time.sleep(1)
+        else:
+            raise TimeoutError(f"waiting for {stage} manifest versions and cursors on PID {pid}")
+        calls = f.retrieve_calls("querynode").get(owner, 0)
+        verify([40, 99], [1, 99])
+        results = f.query(f.candidate, 'score == 99 && tag == "shared"')
+        assert [r["id"] for r in results] == [2, 102]
+        count = f.retrieve_calls("querynode").get(owner, 0)
+        assert count > calls and owns_listener(pid, f.config["metrics"]["querynode"])
+        after = snap(stage + "-after")
+        assert serving_generation(after, cid, owner, expected) == floors
+        # Each certified base is newer than the predecessor. Its exact history
+        # was checked directly in the target delta before ordinary compaction.
+        assert min(floors.values()) > private_ack
+        f.record(
+            "bound replacement read",
+            {
+                "stage": stage,
+                "pid": pid,
+                "qn": owner,
+                "nativeReads": [calls, count],
+                "admissionFloors": floors,
+                "predecessor": private_ack,
+                "current": results,
+                "bases": {sid: [s["manifestPath"], s["transformStartAfterTimetick"]] for sid, s in expected.items()},
+            },
+        )
+
+    read_replacement("dispatched-generation", targets)
     compact = c.compact(f.candidate, timeout=60)
     f.record("base compaction", compact)
     for _ in range(60):
@@ -184,11 +268,10 @@ def run(f, pair):
     assert {s for seg in successors for s in seg["compactionFrom"]} == target_cursors.keys()
     assert all(
         s["manifestPath"]
-        and all(int(s["transformStartAfterTimetick"]) >= target_cursors[p] for p in s["compactionFrom"])
+        and all(int(s["transformStartAfterTimetick"]) == target_cursors[p] for p in s["compactionFrom"])
         for s in successors
     )
-    replace(f, "querynode")
-    verify([40, 99], [1, 99])
+    read_replacement("compacted-generation", successors)
     survivors = f.query(f.candidate, 'score == 99 && tag == "shared"')
     assert [r["id"] for r in survivors] == [2, 102], survivors
     f.record("reloaded scoped predicate", survivors)

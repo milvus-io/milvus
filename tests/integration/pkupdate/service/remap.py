@@ -43,9 +43,11 @@ def check(f, path):
         assert result["data"]["state"] == "Failed" and "typed" in str(result["data"]).lower()
         indexes = f.client.prepare_index_params()
         indexes.add_index("vec", index_type="FLAT", metric_type="L2")
-        f.client.create_index(f.candidate, indexes)
+        f.client.create_index(f.candidate, indexes, timeout=90)
         f.client.load_collection(f.candidate, timeout=90)
-        rows = f.client.query(f.candidate, filter="id >= 0", output_fields=["id"], consistency_level="Strong")
+        rows = f.client.query(
+            f.candidate, filter="id >= 0", output_fields=["id"], consistency_level="Strong", timeout=30
+        )
         assert rows == []
     finally:
         f.put_config("dataCoord.import.enableL0Import", False)

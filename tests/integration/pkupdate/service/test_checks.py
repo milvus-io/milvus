@@ -1,0 +1,216 @@
+"""Offline regressions for the acceptance checker; no Milvus service is contacted."""
+
+import copy
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
+
+from cluster_site import ROLES
+from history import check_history, serving_generation
+from metadata import capture
+from recovery import replace
+
+
+def segment(sid, channel, partition, level):
+    return {
+        "key": f"datacoord-meta/s/9/{partition}/{sid}",
+        "data": {
+            "ID": sid,
+            "insertChannel": channel,
+            "collectionID": "9",
+            "partitionID": partition,
+            "state": "Flushed",
+            "level": level,
+        },
+    }
+
+
+def row(tick, keys, **values):
+    fields = [
+        {"field_id": int(field), "literal": {"Value": {"ScalarValue": {"Data": {kind: value}}}}}
+        for field, (kind, value) in values.items()
+    ]
+    return {
+        "TimeTick": tick,
+        "SourceOrdinal": 0,
+        "Operation": 2 if fields else 1,
+        "PrimaryKeys": {"IdField": {"IntId": {"data": keys}}},
+        "Assignments": fields,
+    }
+
+
+def histories():
+    score = {"101": ("LongData", 40)}
+    shared = {"101": ("LongData", 99), "102": ("StringData", "shared")}
+    src = []
+    out = []
+
+    def file(sid, ch, p, rows, source=True, legacy=False):
+        ref = f"datacoord-meta/deltalog/9/{p}/{sid}/0" if source else f"datacoord-meta/s/9/{p}/{sid}"
+        layout = {
+            "CollectionID": 0 if legacy else 9,
+            "VChannel": "" if legacy else ch,
+            "PartitionID": 0 if legacy else int(p),
+            "Fields": None if legacy else [],
+        }
+        return {"file": sid, "referrer": ref, "layout": layout, "rows": rows}
+
+    for sid, ch, p, rows, leg in [
+        ("1", "v0", "-1", [row(10, [16, 116])], True),
+        ("2", "v0", "4", [row(20, [1, 2, 101, 102], **score)], False),
+        ("3", "v0", "-1", [row(30, [2, 102], **shared)], False),
+        ("4", "v1", "-1", [row(31, [999], **shared)], False),
+    ]:
+        src.extend([segment(sid, ch, p, "L0"), file(sid, ch, p, rows, legacy=leg)])
+    for sid, ch, p, rows in [
+        ("a", "v0", "4", [row(10, [16]), row(20, [1, 2], **score), row(30, [2], **shared)]),
+        ("b", "v0", "5", [row(10, [116]), row(30, [102], **shared)]),
+        ("c", "v1", "4", []),
+        ("d", "v1", "5", []),
+    ]:
+        out.extend([segment(sid, ch, p, "L1"), file(sid, ch, p, rows, False)])
+    return src, out
+
+
+class Checks(unittest.TestCase):
+    def test_event_sequences(self):
+        src, out = histories()
+
+        def check(s, d):
+            return check_history(s, d, "9", "4", "5", 10, 20, 31)
+
+        check(src, out)
+        for where in ("source", "target"):
+            for fault in ("drop", "duplicate", "tick", "ordinal", "assignment"):
+                with self.subTest(where=where, fault=fault):
+                    s, d = copy.deepcopy((src, out))
+                    rows = s[3]["rows"] if where == "source" else d[1]["rows"]
+                    event = rows[0] if where == "source" else rows[1]
+                    if fault == "drop":
+                        event["PrimaryKeys"]["IdField"]["IntId"]["data"].remove(2)
+                    if fault == "duplicate":
+                        rows.append(copy.deepcopy(event))
+                    if fault == "tick":
+                        event["TimeTick"] += 1
+                    if fault == "ordinal":
+                        event["SourceOrdinal"] = 1
+                    if fault == "assignment":
+                        event["Assignments"][0]["literal"]["Value"]["ScalarValue"]["Data"]["LongData"] = 99
+                    with self.assertRaises(AssertionError):
+                        check(s, d)
+
+    def test_generation(self):
+        data = []
+        expected = {}
+        for ch in ("v0", "v1"):
+            p = {"segmentIds": [ch], "segmentManifestVersions": ["2"]}
+            gen = {"streamingVersion": ch, "compactVersion": "4"}
+            expected[ch] = {"insertChannel": ch, "manifestPath": '{"ver":2}', "transformStartAfterTimetick": "40"}
+            data.append(
+                {
+                    "key": "coord/dv/9/" + ch,
+                    "data": {
+                        "collectionId": "9",
+                        "dataVersion": gen,
+                        "shards": [
+                            {"vchannel": ch, "partitions": [{**p, "segmentTransformStartAfterTimeticks": ["40"]}]}
+                        ],
+                    },
+                }
+            )
+            data.append(
+                {
+                    "key": "streamingnode-meta/wal/p/qv/9/" + ch,
+                    "data": {
+                        "meta": {
+                            "collectionId": "9",
+                            "state": "QueryViewStateUp",
+                            "vchannel": ch,
+                            "version": {"dataVersion": gen},
+                            "readAdmissionFloor": {"transformingTimetick": "40"},
+                        },
+                        "queryNode": [{"nodeId": "8", "partitions": [p]}],
+                    },
+                }
+            )
+        self.assertEqual(serving_generation(data, "9", 8, expected), {"v0": 40, "v1": 40})
+        stale = copy.deepcopy(data[1])
+        stale["data"]["queryNode"][0]["partitions"][0]["segmentManifestVersions"] = ["1"]
+        self.assertIsNone(serving_generation(data + [stale], "9", 8, expected))
+        self.assertIsNone(serving_generation(data, "9", 7, expected))
+        expected["v0"]["transformStartAfterTimetick"] = "41"
+        self.assertIsNone(serving_generation(data, "9", 8, expected))
+
+    def test_wrong_pid(self):
+        with tempfile.TemporaryDirectory() as d:
+            site = Path(d)
+            (site / "processes.jsonl").write_text(json.dumps({"role": "querynode", "pid": os.getpid()}) + "\n")
+            f = SimpleNamespace(site=site, config={"binary": "/does/not/exist", "namespace": "pk-update-dummy"})
+            with mock.patch("recovery.os.kill") as signal:
+                with self.assertRaisesRegex(RuntimeError, "ownership mismatch"):
+                    replace(f, "querynode")
+                signal.assert_not_called()
+
+    def test_evidence_failure_still_restarts(self):
+        with tempfile.TemporaryDirectory() as d:
+            site = Path(d)
+            (site / "processes.jsonl").write_text(json.dumps({"role": "querynode", "pid": 123}) + "\n")
+            f = SimpleNamespace(
+                site=site,
+                config={"binary": "/test/milvus", "namespace": "pk-update-dummy", "metrics": {"querynode": 222}},
+                record=mock.Mock(side_effect=OSError("write failed")),
+            )
+            with (
+                mock.patch(
+                    "recovery.subprocess.check_output",
+                    return_value="/test/milvus run querynode -alias pk-update-dummy-querynode",
+                ),
+                mock.patch("recovery.owns_listener", return_value=True),
+                mock.patch("recovery.os.kill") as kill,
+                mock.patch("recovery.subprocess.run", return_value=SimpleNamespace(returncode=1)),
+                mock.patch("recovery.launch") as launch,
+            ):
+                with self.assertRaisesRegex(OSError, "write failed"):
+                    replace(f, "querynode")
+                kill.assert_called_once()
+                launch.assert_called_once_with(site, "querynode")
+
+    def test_optimized_cannot_start(self):
+        with tempfile.TemporaryDirectory() as d:
+            site = Path(d) / "new-site"
+            r = subprocess.run(
+                [sys.executable, "-O", Path(__file__).with_name("cluster_site.py"), site, "fake", "fake"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("requires Python assertion checks", r.stderr)
+            self.assertFalse(site.exists())
+
+    def test_inspector_deadline_preserves_log(self):
+        with tempfile.TemporaryDirectory() as d:
+            site = Path(d)
+            (site / "site.json").write_text(
+                json.dumps(
+                    {"binary": str(site / "milvus"), "conf": {}, "configs": d, "metrics": dict.fromkeys(ROLES, 1)}
+                )
+            )
+            helper = site / "inspect"
+            helper.write_text(
+                f"#!{sys.executable}\nimport time\nprint('inspector started',flush=True)\ntime.sleep(20)\n"
+            )
+            helper.chmod(0o700)
+            with self.assertRaises(subprocess.TimeoutExpired):
+                capture(site, "hung", timeout=1)
+            self.assertIn("inspector started", (site / "hung.log").read_text())
+
+
+if __name__ == "__main__":
+    unittest.main()

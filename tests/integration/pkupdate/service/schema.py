@@ -26,7 +26,7 @@ def run(f):
     idx.add_index("vec", index_type="FLAT", metric_type="L2")
     idx.add_index("sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
     c.create_collection(name, schema=s, index_params=idx, num_shards=1, timeout=90)
-    c.insert(name, [{"id": 1, "vec": [1.0, 0.0], "flag": False, "arr": [0], "text": "hello", "extra": 1}])
+    c.insert(name, [{"id": 1, "vec": [1.0, 0.0], "flag": False, "arr": [0], "text": "hello", "extra": 1}], timeout=30)
 
     def update(flag, arr):
         resp = f.update(
@@ -44,7 +44,7 @@ def run(f):
     for field in ("sparse", "text", "extra", "$meta", "vec", "id"):
         response = f.update([1], [literal(field, 1)])
         assert int(response["status"]["code"]) == 1100, response
-    rows = c.query(name, filter="id == 1", output_fields=["id", "flag", "arr"], consistency_level="Strong")
+    rows = c.query(name, filter="id == 1", output_fields=["id", "flag", "arr"], consistency_level="Strong", timeout=30)
     f.record("current schema row", rows)
     assert rows[0]["flag"] is False and list(rows[0]["arr"]) == [5]
     rows = c.query(

@@ -8,6 +8,9 @@ import subprocess
 import time
 from pathlib import Path
 
+if not __debug__:
+    raise RuntimeError("PK update acceptance requires Python assertion checks; unset PYTHONOPTIMIZE and omit -O")
+
 ROLES = ("mixcoord", "datanode", "querynode", "streamingnode", "proxy")
 PORTS = ("rootcoord.port", "datanode.port", "querynode.port", "streamingnode.port", "proxy.port", "proxy.internalPort")
 
@@ -89,6 +92,8 @@ def launch(site, role):
         stream.write(
             json.dumps({"role": role, "pid": process.pid, "log": str(log), "timestamp_ns": time.time_ns()}) + "\n"
         )
+
+    return process
 
 
 if __name__ == "__main__":

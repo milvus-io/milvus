@@ -15,7 +15,7 @@ def run(site):
     f = Fixture(site)
     f.run()
     sealed(f, f.candidate, f.mirror)
-    cid = f.client.describe_collection(f.candidate)["collection_id"]
+    cid = f.client.describe_collection(f.candidate, timeout=30)["collection_id"]
     files = capture(site, f.candidate + "-source")
     path = next(
         x["file"] for x in files if x.get("layout", {}).get("CollectionID") == cid and "/delta_log/" in x["file"]
