@@ -77,6 +77,12 @@ class VectorDiskAnnIndex : public VectorIndex {
     Build(const Config& config = {}) override;
 
     void
+    Prepare(const Config& config) override;
+
+    bool
+    TryReserveBuild(const Config& config) override;
+
+    void
     Query(const DatasetPtr dataset,
           const SearchInfo& search_info,
           const BitsetView& bitset,
@@ -135,8 +141,10 @@ class VectorDiskAnnIndex : public VectorIndex {
     update_load_json(const Config& config);
 
  private:
+    std::unique_ptr<PreparedVectorInput> build_input_;
     knowhere::Index<knowhere::IndexNode> index_;
     std::shared_ptr<storage::DiskFileManagerImpl> file_manager_;
+    storage::FileManagerContext build_context_;
     uint32_t search_beamwidth_ = 8;
     // used for embedding list only
     DataType elem_type_;

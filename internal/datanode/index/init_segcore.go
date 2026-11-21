@@ -97,6 +97,10 @@ func InitSegcore(nodeID int64) error {
 	// (sort compaction, import, stats). Mirror of the QueryNode wiring in #49208.
 	C.SetArrowIOThreadPoolCapacity(C.int(initcore.ResolveArrowIOThreadPoolCapacity()))
 
+	if err := initcore.InitS3CrtQueueSizes(paramtable.Get()); err != nil {
+		return err
+	}
+
 	// Apply Arrow parquet reader range-coalescing config (hole/range size limits).
 	if err := initcore.InitArrowReaderConfig(paramtable.Get()); err != nil {
 		return err

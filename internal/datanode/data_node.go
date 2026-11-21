@@ -230,6 +230,10 @@ func (node *DataNode) Init() error {
 		node.importV3Metrics = importv3.NewMetrics(serverID)
 		node.importV3Scheduler = importv3.NewScheduler(node.ctx, node.importV3Capacity, node.importV3Metrics)
 		importv3.CleanImportV3Prefixes()
+		node.taskScheduler.SetExternalSlotUsage(func() int64 {
+			return node.compactionExecutor.Slots() + node.importScheduler.Slots() +
+				node.importV3Scheduler.Slots() + node.importV3Scheduler.QueuedSlots()
+		})
 
 		err := index.InitSegcore(serverID)
 		if err != nil {

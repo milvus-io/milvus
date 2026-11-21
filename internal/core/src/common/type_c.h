@@ -94,6 +94,7 @@ typedef struct CStorageConfig {
     uint32_t max_connections;
     const char* tls_min_version;
     bool use_crc32c_checksum;
+    uint32_t crt_queue_sizes;
 } CStorageConfig;
 
 typedef struct CDiskWriteRateLimiterConfig {

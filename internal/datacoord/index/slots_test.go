@@ -68,10 +68,9 @@ func TestCalculateIndexTaskSlot(t *testing.T) {
 		})
 	}
 
-	// Existing vector indexes must keep using the same heavy curve after the
-	// helper started accepting the complete parameter set.
+	// Vector slots cover retained input, build workspace and output memory.
 	hnswParams := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}
-	assert.Equal(t, int64(16), calculateIndexTaskSlot(200*mib, 1, hnswParams))
+	assert.Equal(t, int64(2), calculateIndexTaskSlot(200*mib, 1, hnswParams))
 }
 
 func TestEstimateFMIndexBuildPeakBytes(t *testing.T) {

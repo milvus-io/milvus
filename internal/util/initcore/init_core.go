@@ -147,6 +147,12 @@ func callWithTimeout(fn func(), timeoutHandler func(), timeout time.Duration) {
 	}
 }
 
+// InitS3CrtQueueSizes publishes node-local tuning for per-job storage configurations.
+func InitS3CrtQueueSizes(params *paramtable.ComponentParam) error {
+	status := C.InitS3CrtQueueSizes(C.uint32_t(params.MinioCfg.CRTQueueSizes.GetAsUint32()))
+	return HandleCStatus(&status, "InitS3CrtQueueSizes failed")
+}
+
 func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
 	if err := InitCredentialBrokerPolicy(params); err != nil {
 		return err
@@ -228,6 +234,7 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 		max_connections:        C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
 		tls_min_version:        cTLSMinVersion,
 		use_crc32c_checksum:    C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
+		crt_queue_sizes:        C.uint32_t(params.MinioCfg.CRTQueueSizes.GetAsUint32()),
 	}
 
 	status := C.InitArrowFileSystem(storageConfig)
@@ -286,6 +293,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 		max_connections:     C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
 		tls_min_version:     cTLSMinVersion,
 		use_crc32c_checksum: C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
+		crt_queue_sizes:     C.uint32_t(params.MinioCfg.CRTQueueSizes.GetAsUint32()),
 	}
 
 	status := C.InitRemoteChunkManagerSingleton(storageConfig)

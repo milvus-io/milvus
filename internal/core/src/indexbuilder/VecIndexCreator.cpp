@@ -83,6 +83,17 @@ VecIndexCreator::Build() {
     index_->Build(config_);
 }
 
+void
+VecIndexCreator::LoadData() {
+    dynamic_cast<index::VectorIndex&>(*index_).Prepare(config_);
+    input_prepared_ = true;
+}
+
+bool
+VecIndexCreator::TryReserveBuild() {
+    return dynamic_cast<index::VectorIndex&>(*index_).TryReserveBuild(config_);
+}
+
 milvus::BinarySet
 VecIndexCreator::Serialize() {
     return index_->Serialize(config_);
