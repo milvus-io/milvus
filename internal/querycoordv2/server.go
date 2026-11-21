@@ -79,6 +79,7 @@ type Server struct {
 	session             sessionutil.SessionInterface
 	sessionWatcher      sessionutil.SessionWatcher
 	sessionWatcherMu    sync.Mutex
+	watchNodesMu        sync.Mutex
 	kv                  kv.MetaKv
 	idAllocator         func() (int64, error)
 	metricsCacheManager *metricsinfo.MetricsCacheManager
@@ -678,47 +679,124 @@ func (s *Server) watchNodes(revision int64) {
 				return
 			}
 
-			nodeID := event.Session.ServerID
-			addr := event.Session.Address
-			log := mlog.With(
-				mlog.FieldNodeID(nodeID),
-				mlog.String("nodeAddr", addr),
-			)
-
-			switch event.EventType {
-			case sessionutil.SessionAddEvent:
-				s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-					NodeID:   nodeID,
-					Address:  addr,
-					Hostname: event.Session.HostName,
-					Version:  event.Session.Version,
-					Labels:   event.Session.GetServerLabel(),
-				}))
-				s.handleNodeUp(nodeID)
-				if s.fileResourceObserver != nil && !s.fileResourceObserver.IsEmpty() {
-					s.fileResourceObserver.Notify()
-				}
-
-			case sessionutil.SessionUpdateEvent:
-				log.Info(s.ctx, "stopping the node")
-				s.nodeMgr.Stopping(nodeID)
-				s.handleNodeStopping(nodeID)
-
-			case sessionutil.SessionDelEvent:
-				log.Info(s.ctx, "a node down, remove it")
-				s.nodeMgr.Remove(nodeID)
-				s.handleNodeDown(nodeID)
-			}
+			s.handleSessionEvent(event)
 		}
 	}
+}
+
+func (s *Server) handleSessionEvent(event *sessionutil.SessionEvent) {
+	s.watchNodesMu.Lock()
+	defer s.watchNodesMu.Unlock()
+
+	nodeID := event.Session.ServerID
+	addr := event.Session.Address
+	log := mlog.With(
+		mlog.FieldNodeID(nodeID),
+		mlog.String("nodeAddr", addr),
+	)
+
+	switch event.EventType {
+	case sessionutil.SessionAddEvent:
+		if addr != "" {
+			var staleNodes []*session.NodeInfo
+			for _, existing := range s.nodeMgr.GetAll() {
+				if existing.Addr() != addr {
+					continue
+				}
+				if existing.ID() > nodeID {
+					log.Warn(s.ctx, "ignore stale node add event sharing same address with newer node",
+						mlog.Int64("existingNodeID", existing.ID()),
+					)
+					return
+				}
+				if existing.ID() < nodeID {
+					staleNodes = append(staleNodes, existing)
+				}
+			}
+			for _, old := range staleNodes {
+				mlog.Warn(s.ctx, "evict stale node sharing same address with new node",
+					mlog.Int64("oldNodeID", old.ID()),
+					mlog.Int64("newNodeID", nodeID),
+					mlog.String("nodeAddr", addr),
+				)
+				s.nodeMgr.Remove(old.ID())
+				s.handleNodeDown(old.ID())
+			}
+		}
+		s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   nodeID,
+			Address:  addr,
+			Hostname: event.Session.HostName,
+			Version:  event.Session.Version,
+			Labels:   event.Session.GetServerLabel(),
+		}))
+		s.handleNodeUp(nodeID)
+		if s.fileResourceObserver != nil && !s.fileResourceObserver.IsEmpty() {
+			s.fileResourceObserver.Notify()
+		}
+
+	case sessionutil.SessionUpdateEvent:
+		if s.nodeMgr.Get(nodeID) == nil {
+			log.Info(s.ctx, "node already removed, skip SessionUpdateEvent")
+			return
+		}
+		log.Info(s.ctx, "stopping the node")
+		s.nodeMgr.Stopping(nodeID)
+		s.handleNodeStopping(nodeID)
+
+	case sessionutil.SessionDelEvent:
+		if s.nodeMgr.Get(nodeID) == nil {
+			log.Info(s.ctx, "node already removed, skip duplicate SessionDelEvent")
+			return
+		}
+		log.Info(s.ctx, "a node down, remove it")
+		s.nodeMgr.Remove(nodeID)
+		s.handleNodeDown(nodeID)
+	}
+}
+
+// dedupSessionsByAddress indexes sessions by ServerID while discarding stale sessions
+// that share the same non-empty Address as a session with a higher ServerID.
+func (s *Server) dedupSessionsByAddress(sessions map[string]*sessionutil.Session) map[int64]*sessionutil.Session {
+	sessionMap := make(map[int64]*sessionutil.Session, len(sessions))
+	latestByAddr := make(map[string]*sessionutil.Session, len(sessions))
+	for _, sess := range sessions {
+		if sess.Address == "" {
+			sessionMap[sess.ServerID] = sess
+			continue
+		}
+		if existing, ok := latestByAddr[sess.Address]; ok {
+			if sess.ServerID > existing.ServerID {
+				mlog.Warn(s.ctx, "rewatch discarding stale session sharing same address with newer session",
+					mlog.Int64("oldNodeID", existing.ServerID),
+					mlog.Int64("newNodeID", sess.ServerID),
+					mlog.String("nodeAddr", sess.Address),
+				)
+				delete(sessionMap, existing.ServerID)
+				latestByAddr[sess.Address] = sess
+				sessionMap[sess.ServerID] = sess
+			} else if sess.ServerID < existing.ServerID {
+				mlog.Warn(s.ctx, "rewatch discarding stale session sharing same address with newer session",
+					mlog.Int64("oldNodeID", sess.ServerID),
+					mlog.Int64("newNodeID", existing.ServerID),
+					mlog.String("nodeAddr", sess.Address),
+				)
+			}
+			continue
+		}
+		latestByAddr[sess.Address] = sess
+		sessionMap[sess.ServerID] = sess
+	}
+	return sessionMap
 }
 
 // rewatchNodes is used to re-watch nodes when querycoord restart or reconnect to etcd
 // Note: may apply same node multiple times, so rewatchNodes must be idempotent
 func (s *Server) rewatchNodes(sessions map[string]*sessionutil.Session) error {
-	sessionMap := lo.MapKeys(sessions, func(s *sessionutil.Session, _ string) int64 {
-		return s.ServerID
-	})
+	s.watchNodesMu.Lock()
+	defer s.watchNodesMu.Unlock()
+
+	sessionMap := s.dedupSessionsByAddress(sessions)
 
 	// first remove all offline nodes
 	for _, node := range s.nodeMgr.GetAll() {
