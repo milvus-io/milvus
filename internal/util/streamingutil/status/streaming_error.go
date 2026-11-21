@@ -168,6 +168,13 @@ func NewTransactionExpired(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED, format, args...)
 }
 
+// NewTransactionNotFound reports missing transaction state, which does not prove
+// expiration or authorize replay. Use the existing unrecoverable wire code so
+// older producers also stop rather than retry an unrecognized error forever.
+func NewTransactionNotFound(id message.TxnID) *StreamingError {
+	return NewUnrecoverableError("transaction %d not found; its outcome is unavailable", id)
+}
+
 // NewInvalidTransactionState creates a new StreamingError with code STREAMING_CODE_INVALID_TRANSACTION_STATE.
 func NewInvalidTransactionState(operation string, expectState message.TxnState, currentState message.TxnState) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE, "invalid transaction state for operation %s, expect %s, current %s", operation, expectState, currentState)

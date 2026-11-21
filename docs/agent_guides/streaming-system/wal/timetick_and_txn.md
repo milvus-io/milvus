@@ -49,7 +49,7 @@ See [Transaction Messages](../message/message-semantic-txn.md) for message types
 2. **Append**: Each message in the transaction increments the in-flight counter and refreshes the session TTL.
 3. **Commit**: Close body admission and wait for in-flight appends. Check a nonzero Commit `body_cnt` against successful appends; zero skips validation for legacy transactions. A mismatch rolls back the session and releases references, causing a whole-transaction retry. After successful Commit append, mark the transaction as committed. The transaction's messages become visible to consumers as a single atomic group at the assigned TimeTick.
 4. **Rollback**: Mark the transaction as rolled back. All messages in the transaction are discarded.
-5. **Expire**: Expiration TimeTick = `lastTimetick + keepalive`. Each successful body append refreshes `lastTimetick` (lease renewal). Once current TimeTick ≥ expiration, the transaction is unrecoverably failed (`STREAMING_CODE_TRANSACTION_EXPIRED`).
+5. **Expire**: Expiration TimeTick = `lastTimetick + keepalive`. Each successful body append refreshes `lastTimetick` (lease renewal). An InFlight transaction whose current TimeTick ≥ expiration rejects further appends with `STREAMING_CODE_TRANSACTION_EXPIRED`. An admitted or committed transaction does not become a retryable expiration when its lease elapses.
 6. **Force-fail**: The [Lock](lock.md) interceptor aborts all active transactions in the affected scope after an exclusive operation is successfully appended. Failed, deduplicated and explicitly ignored operations do not abort.
 
 A Commit of either origin interrupted by WAL cancellation/fencing stays unresolved until
@@ -93,6 +93,35 @@ message identity. Zero deliberately skips validation for compatibility. These
 preconditions do not remove the local transaction's mutex or in-flight wait: primary
 body appends can be concurrent even though replicated appends are serialized.
 
+### Successful Commit result retention
+
+Native Commit retries consult a bounded tombstone cache before allocating another
+TimeTick or looking up the active session. A hit returns the original MessageID,
+TimeTick, LCMID and transaction context without appending or advancing MVCC. Commits
+of the same TxnID are serialized through result publication. Only successful appends
+publish results; session cleanup and scoped abort do not remove committed results.
+
+`streaming.txn.tombstoneMaxCount` (default 1024 per WAL) and
+`streaming.txn.tombstoneMaxLifetime` (default 1m of WAL TimeTick) bound retention.
+Either limit at zero disables retention. Duplicate requests do not renew the age.
+Tombstones retain neither transaction bodies nor active-session references and do
+not pin LCMID. Startup recovery reconstructs native Commit results from complete
+transactions in its replay range, preserving their original age. Records before
+the checkpoint are not restored: this is best-effort retention, not a durable
+exactly-once window. CDC keeps its source-checkpoint deduplication.
+
+Transport failures only retry the same message; the producer never infers a
+transaction outcome from a connection error. The server returns TransactionExpired
+only for a definite pre-commit expiration or rejection, allowing the existing
+whole-transaction retry, including CAS retry restrictions. A missing session
+returns TransactionNotFound using the existing UNRECOVERABLE wire code, so old
+producers also stop rather than replay. This applies to missing body/rollback
+sessions as well; Begin admission is unchanged. An admitted or committed session
+returns InvalidTransactionState even after its lease elapses. Missing history does
+not authorize replay with a new TxnID. Upgrade StreamingNodes before producers:
+old servers still conflate missing sessions with expiration, and the corrected
+server semantics are required for the guarantee during rolling upgrades.
+
 ## LastConfirmedMessageID
 
 A property attached to every ImmutableMessage. **Guarantee**: reading from this MessageID ensures all subsequent messages have TimeTick strictly greater than this message's TimeTick (including assembled transaction messages).
@@ -103,6 +132,15 @@ A property attached to every ImmutableMessage. **Guarantee**: reading from this 
 2. **Txn resolved** (if transactional): the transaction is committed, rolled back, or expired — no more body messages can appear under this transaction.
 
 When both hold, no future message can have a MessageID smaller than this entry, so it is safe to advance.
+
+Recovery rebuilds this same heap from every unfinished transaction's Begin and
+body messages, referencing the actual recovered `TxnSession`. The recovery barrier
+is their conservative EndTimestamp because it fences all old-writer appends. The
+initial LCMID remains the minimum of the barrier MessageID and unfinished Begin
+LCMIDs; subsequent ordinary ACKs remain constrained by the reconstructed heap.
+Commit, rollback, expiration and scoped abort release the recovered entries through
+the normal session lifecycle. Historical entries are not republished into the
+write-ahead buffer as new acknowledgements.
 
 ## Key Packages
 

@@ -3,6 +3,9 @@ package timetick
 import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 )
 
 var _ interceptors.InterceptorBuilder = (*interceptorBuilder)(nil)
@@ -23,8 +26,15 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 	// initialize operation can be async to avoid block the build operation.
 	resource.Resource().TimeTickInspector().RegisterSyncOperator(operator)
 
+	tombstones := utility.NewTxnTombstones()
+	if param.InitialRecoverSnapshot != nil && param.InitialRecoverSnapshot.TxnTombstones != nil {
+		tombstones = param.InitialRecoverSnapshot.TxnTombstones
+	}
+	tombstones.Advance(param.LastTimeTickMessage.TimeTick())
 	return &timeTickAppendInterceptor{
-		operator:   operator,
-		txnManager: param.TxnManager,
+		operator:    operator,
+		txnManager:  param.TxnManager,
+		commitLocks: lock.NewKeyLock[message.TxnID](),
+		tombstones:  tombstones,
 	}
 }
