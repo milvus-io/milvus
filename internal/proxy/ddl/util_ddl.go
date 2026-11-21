@@ -466,8 +466,8 @@ func validateElementNullable(field *schemapb.FieldSchema, inStruct bool) error {
 	if field.GetDataType() != schemapb.DataType_Array && field.GetDataType() != schemapb.DataType_ArrayOfVector {
 		return merr.WrapErrParameterInvalidMsg("element_nullable is only valid for Array and ArrayOfVector fields, field name = %s", field.GetName())
 	}
-	if !inStruct {
-		return merr.WrapErrParameterInvalidMsg("element_nullable is only supported for Array and ArrayOfVector sub-fields of a struct array field, field name = %s", field.GetName())
+	if !inStruct && field.GetDataType() == schemapb.DataType_ArrayOfVector {
+		return merr.WrapErrParameterInvalidMsg("ArrayOfVector is only supported in a struct array field, field name = %s", field.GetName())
 	}
 	return nil
 }

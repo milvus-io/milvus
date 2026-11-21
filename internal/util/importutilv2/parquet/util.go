@@ -272,12 +272,13 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 	}
 
 	// this loop is for "are there any fields not provided in the parquet file?"
+	topLevel := lo.KeyBy(schema.GetFields(), func(f *schemapb.FieldSchema) int64 { return f.GetFieldID() })
 	for _, field := range nameToField {
 		// auto-id field, function output field already checked
 		// dynamic field, nullable field, default value field, not provided or provided both ok
 		// element-nullable struct sub-field, filled with null elements
 		if typeutil.IsAutoPKField(field) || field.GetIsDynamic() || field.GetIsFunctionOutput() ||
-			field.GetNullable() || field.GetDefaultValue() != nil || field.GetElementNullable() {
+			field.GetNullable() || field.GetDefaultValue() != nil || (field.GetElementNullable() && topLevel[field.GetFieldID()] == nil) {
 			continue
 		}
 		// the other field must be provided
@@ -334,6 +335,11 @@ func isArrowDataTypeConvertible(src arrow.DataType, dst arrow.DataType, field *s
 	dstType := dst.ID()
 	// arrow.UINT8 is the byte-backed Arrow representation for fp16/bf16 vectors, not INT8_VECTOR.
 	if isFP16BF16VectorField(field) && dstType == arrow.UINT8 && isArrowFloatingType(srcType) {
+		return true
+	}
+	// A list whose child type is null can represent a batch containing only
+	// null elements, including on a required list column.
+	if !allowFixedSizeList && srcType == arrow.NULL && field.GetDataType() == schemapb.DataType_Array && field.GetElementNullable() {
 		return true
 	}
 	switch srcType {
