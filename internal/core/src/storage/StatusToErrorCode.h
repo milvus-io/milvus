@@ -47,25 +47,9 @@ namespace milvus::storage {
 // managers and forms an include cycle with FileManager.h) so every storage
 // site that turns an arrow::Status into an error can route through the single
 // mapper.
-// Preserve the published Loon source outcome codes across CStatus. They are
-// outside milvus-common's 2000-2099 enum namespace; Go maps 117-121 explicitly.
-// All other native statuses retain the producer's existing classification.
-inline milvus::SegcoreError
-SourceAwareStorageError(const arrow::Status& status) {
-    if (auto detail =
-            milvus_storage::ExtendStatusDetail::UnwrapStatus(status)) {
-        auto code = static_cast<int>(detail->code());
-        if (code >= 117 && code <= 121) {
-            return {static_cast<ErrorCode>(code),
-                    "external source authorization failed"};
-        }
-    }
-    return milvus_storage::ToSegcoreError(status);
-}
-
 inline ErrorCode
 ArrowStatusToErrorCode(const arrow::Status& status) {
-    return SourceAwareStorageError(status).get_error_code();
+    return milvus_storage::ToSegcoreError(status).get_error_code();
 }
 
 // Same mapping for an arrow::Result: call sites check `.ok()` on both types,

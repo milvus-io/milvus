@@ -9,7 +9,6 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "storage/loon_ffi/source_context.h"
 #include <glog/logging.h>
 #include <string.h>
 #include <cstdint>
@@ -201,10 +200,6 @@ configure_manifest_file_manager_context(
     milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
         .ApplyIndexBuildReadWindow(*loon_properties);
     file_manager_context.set_loon_ffi_properties(loon_properties);
-    file_manager_context.source_read_context =
-        milvus::storage::OpenSourceReadContext(
-            build_index_info.external_source(),
-            build_index_info.external_spec());
 
     auto is_milvus_table =
         milvus::IsMilvusTableExternalSpec(build_index_info.external_spec());

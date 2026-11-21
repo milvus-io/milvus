@@ -22,19 +22,28 @@ package packed
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
 
+CStatus NewPackedFFIReaderWithColumnGroups(
+    const LoonColumnGroups* column_groups,
+    struct ArrowSchema* schema,
+    char** needed_columns,
+    int64_t needed_columns_size,
+    CFFIPackedReader* c_loon_reader,
+    CStorageConfig c_storage_config,
+    CPluginContext* c_plugin_context,
+    int64_t collection_id,
+    const char* external_source,
+    const char* external_spec);
 */
 import "C"
 
 import (
 	"context"
-	"errors"
 	"io"
 	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
 
-	"github.com/milvus-io/milvus/internal/util/sourcecontext"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -89,7 +98,6 @@ func NewFFIPackedReaderWithExtfs(
 			collectionID C.int64_t,
 			cExternalSource *C.char,
 			cExternalSpec *C.char,
-			sourceHandle C.uintptr_t,
 		) C.CStatus {
 			return C.NewPackedFFIReaderWithManifest(
 				cLoonManifest,
@@ -102,7 +110,6 @@ func NewFFIPackedReaderWithExtfs(
 				collectionID,
 				cExternalSource,
 				cExternalSpec,
-				sourceHandle,
 			)
 		})
 }
@@ -142,7 +149,6 @@ func NewFFIPackedReaderWithFragments(
 			collectionID C.int64_t,
 			cExternalSource *C.char,
 			cExternalSpec *C.char,
-			sourceHandle C.uintptr_t,
 		) C.CStatus {
 			return C.NewPackedFFIReaderWithColumnGroups(
 				cColumnGroups,
@@ -155,7 +161,6 @@ func NewFFIPackedReaderWithFragments(
 				collectionID,
 				cExternalSource,
 				cExternalSpec,
-				sourceHandle,
 			)
 		})
 }
@@ -170,7 +175,6 @@ type ffiReaderOpenFunc func(
 	collectionID C.int64_t,
 	cExternalSource *C.char,
 	cExternalSpec *C.char,
-	sourceHandle C.uintptr_t,
 ) C.CStatus
 
 func openFFIPackedReader(
@@ -207,17 +211,6 @@ func openFFIPackedReader(
 	}
 	defer cleanupExternalContext()
 
-	sourceContext, err := sourcecontext.Open(extfs.operationContext(), extfs.Source, extfs.Spec)
-	if err != nil {
-		return nil, err
-	}
-	transferred := false
-	defer func() {
-		if !transferred {
-			sourceContext.Close()
-		}
-	}()
-
 	status := open(
 		cSchema,
 		cNeededColumnArray,
@@ -228,7 +221,6 @@ func openFFIPackedReader(
 		C.int64_t(extfs.CollectionID),
 		cExternalSource,
 		cExternalSpec,
-		C.uintptr_t(sourceContext.Handle()),
 	)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
@@ -239,11 +231,6 @@ func openFFIPackedReader(
 	status = C.GetFFIReaderStream(cPackedReader, C.int64_t(8196), (*C.struct_ArrowArrayStream)(unsafe.Pointer(&cStream)))
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		C.CloseFFIReader(cPackedReader)
-		// Keep source authorization outcomes across worker RPCs without
-		// changing the legacy storage code for other reader failures.
-		if merr.IsPermanentSourceAuthErr(err) || errors.Is(err, merr.ErrSourceAuthTransient) {
-			return nil, merr.Wrap(err, "failed to get reader stream")
-		}
 		return nil, merr.WrapErrStorage(err, "failed to get reader stream")
 	}
 
@@ -254,9 +241,7 @@ func openFFIPackedReader(
 		return nil, merr.WrapErrStorage(err, "failed to import record reader")
 	}
 
-	transferred = true
 	return &FFIPackedReader{
-		sourceContext: sourceContext,
 		cPackedReader: cPackedReader,
 		recordReader:  recordReader,
 		schema:        schema,
@@ -403,10 +388,6 @@ func (r *FFIPackedReader) ReadNext() (rec arrow.Record, err error) {
 		if err == io.EOF {
 			return nil, io.EOF
 		}
-		status := C.GetFFIReaderLastError(r.cPackedReader)
-		if nativeErr := ConsumeCStatusIntoError(&status); nativeErr != nil {
-			return nil, nativeErr
-		}
 		return nil, merr.WrapErrStorage(err, "failed to read next record")
 	}
 
@@ -415,7 +396,6 @@ func (r *FFIPackedReader) ReadNext() (rec arrow.Record, err error) {
 
 // Close closes the FFI reader
 func (r *FFIPackedReader) Close() error {
-	defer r.sourceContext.Close()
 	if r.cPackedReader == nil {
 		return nil
 	}
@@ -424,9 +404,6 @@ func (r *FFIPackedReader) Close() error {
 	// stream reader handles it
 
 	if r.recordReader != nil {
-		if releaser, ok := r.recordReader.(interface{ Release() }); ok {
-			releaser.Release()
-		}
 		r.recordReader = nil
 	}
 

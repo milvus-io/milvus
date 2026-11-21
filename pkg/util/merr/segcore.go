@@ -294,20 +294,6 @@ func classForCode(c SegcoreCode) (segcoreClass, bool) {
 	if int32(c) == 2046 {
 		return segcoreClass{sentinel: ErrCollectionSchemaVersionNotReady, retriable: true}, true
 	}
-	// Source-context outcomes come from milvus-storage's Loon ABI, outside the
-	// generated milvus-common enum. Keep their dedicated wire codes and policy.
-	switch int32(c) {
-	case 117:
-		return segcoreClass{sentinel: ErrSourceAuthDenied, permanent: true}, true
-	case 118:
-		return segcoreClass{sentinel: ErrSourceAuthExpired, permanent: true}, true
-	case 119:
-		return segcoreClass{sentinel: ErrSourceAuthTransient, retriable: true}, true
-	case 120:
-		return segcoreClass{sentinel: ErrSourceAuthCancelled, permanent: true}, true
-	case 121:
-		return segcoreClass{sentinel: ErrSourceAuthInvalidResponse, permanent: true}, true
-	}
 	return segcoreClass{}, false
 }
 

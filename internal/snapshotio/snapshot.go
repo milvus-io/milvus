@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/sourceauth"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -171,11 +170,6 @@ func ParseSnapshotMetadata(data []byte) (*datapb.SnapshotMetadata, error) {
 	}
 	if err := ValidateFormatVersion(int(metadata.GetFormatVersion())); err != nil {
 		return nil, merr.Wrap(err, "invalid snapshot metadata")
-	}
-	// Snapshot JSON is foreign input, even if it names an existing owner. An
-	// external collection binding is trusted only after caller authorization.
-	if err := sourceauth.RejectClientBinding(metadata.GetCollection().GetSchema().GetExternalSpec()); err != nil {
-		return nil, merr.Wrap(err, "snapshot cannot supply source authorization")
 	}
 	return metadata, nil
 }

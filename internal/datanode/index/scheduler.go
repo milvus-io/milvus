@@ -355,7 +355,7 @@ func getStateFromError(err error) indexpb.JobState {
 		return indexpb.JobState_JobStateFailed
 	} else if errors.Is(err, merr.ErrSegcorePretendFinished) {
 		return indexpb.JobState_JobStateFinished
-	} else if merr.IsPermanentSegcoreErr(err) || merr.IsPermanentSourceAuthErr(err) {
+	} else if merr.IsPermanentSegcoreErr(err) {
 		// A segcore code the table marks permanent (corrupted data, a missing
 		// object, a misconfigured bucket): every construction site of that code is
 		// deterministic, so the task reproduces it on every worker.

@@ -10,7 +10,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/sourceauth"
 )
 
 // UnaryServerHookInterceptor installs the request hook on every unary RPC.
@@ -37,13 +36,6 @@ func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 // streams that consult it by hand, are not counted in ProxyFunctionCall at all.
 // ProxyHookFunc records the hook's verdict.
 func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, handler grpc.UnaryHandler) (interface{}, error) {
-	// Source request credentials must not reach ordinary hooks, coordinator
-	// metadata or request logging. This capability preserves existing Milvus auth.
-	prepared, prepareErr := sourceauth.PrepareRequest(ctx, req, fullMethod)
-	if prepareErr != nil {
-		return nil, hookError(prepareErr)
-	}
-	ctx = prepared
 	hoo := hookutil.GetHook()
 	var (
 		newCtx   context.Context
@@ -68,9 +60,6 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 		return nil, hookError(err)
 	}
 	setRequestResourceGroup(ctx, newCtx)
-	if sourceauth.HasAuthorizer(ctx) && !sourceauth.HasAuthorizer(newCtx) {
-		return nil, status.Error(codes.PermissionDenied, "request hook discarded source authorization context")
-	}
 	realResp, realErr = handler(newCtx, req)
 	if err = hoo.After(newCtx, realResp, realErr, fullMethod); err != nil {
 		mlog.Warn(ctx, "hook after error", mlog.String("user", userName), mlog.String("full method", fullMethod),

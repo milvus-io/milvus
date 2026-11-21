@@ -14,7 +14,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "storage/loon_ffi/source_context.h"
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
@@ -2334,8 +2333,7 @@ VisitFieldDataFromManifestPaged(
     const FieldDataVisitor& visitor,
     int64_t max_inflight_bytes,
     size_t max_rows,
-    size_t offset,
-    milvus_storage::SourceReadContextPtr source_context) {
+    size_t offset) {
     AssertInfo(max_inflight_bytes > 0,
                "max_inflight_bytes must be positive, got {}",
                max_inflight_bytes);
@@ -2434,32 +2432,8 @@ VisitFieldDataFromManifestPaged(
 
     auto needed_cols_ptr =
         std::make_shared<std::vector<std::string>>(needed_columns);
-    std::vector<size_t> internal_groups;
-    if (source_context && !is_external &&
-        field_meta.field_schema.is_function_output()) {
-        // Index tasks carry the requested FieldSchema, not the full collection
-        // schema. Narrow a private view to that trusted generated projection;
-        // other outputs may share its packed file but grant no extra columns.
-        auto projected_groups =
-            std::make_shared<milvus_storage::api::ColumnGroups>(
-                milvus_storage::api::copy_column_groups(*column_groups));
-        for (auto& group : *projected_groups) {
-            if (group && std::find(group->columns.begin(),
-                                   group->columns.end(),
-                                   column_name) != group->columns.end()) {
-                group->columns = {column_name};
-            }
-        }
-        internal_groups = milvus::storage::SelectInternalColumnGroups(
-            *projected_groups, manifest_path, {column_name});
-        column_groups = std::move(projected_groups);
-    }
-    auto reader = milvus::storage::CreateSourceReader(column_groups,
-                                                      reader_schema,
-                                                      needed_cols_ptr,
-                                                      loon_ffi_properties,
-                                                      source_context,
-                                                      internal_groups);
+    auto reader = milvus_storage::api::Reader::create(
+        column_groups, reader_schema, needed_cols_ptr, loon_ffi_properties);
 
     if (!(reader != nullptr)) {
         ThrowInfo(ErrorCode::FileReadFailed, "Failed to create reader");
@@ -2606,8 +2580,7 @@ VisitFieldDataFromManifestPaged(
     if (max_rows == 0) {  // read all with record batches
         auto reader_result = reader->get_record_batch_reader("");
         if (!reader_result.ok()) {
-            auto error = milvus::storage::SourceAwareStorageError(
-                reader_result.status());
+            auto error = milvus_storage::ToSegcoreError(reader_result.status());
             ThrowInfo(error.get_error_code(),
                       "Failed to get record batch reader: {}",
                       error.what());
@@ -2622,7 +2595,7 @@ VisitFieldDataFromManifestPaged(
             if (!status.ok()) {
                 // pending_drain_guard waits for the outstanding decode tasks
                 // while this throw unwinds.
-                auto error = milvus::storage::SourceAwareStorageError(status);
+                auto error = milvus_storage::ToSegcoreError(status);
                 ThrowInfo(error.get_error_code(),
                           "Failed to read record batch: {}",
                           error.what());
@@ -2707,8 +2680,7 @@ VisitFieldDataFromManifestPaged(
     } else {  // read specific rows with chunk_reader
         auto reader_result = reader->get_chunk_reader(column_group_index);
         if (!reader_result.ok()) {
-            auto error = milvus::storage::SourceAwareStorageError(
-                reader_result.status());
+            auto error = milvus_storage::ToSegcoreError(reader_result.status());
             ThrowInfo(error.get_error_code(),
                       "Failed to get chunk reader: {}",
                       error.what());
@@ -2716,8 +2688,8 @@ VisitFieldDataFromManifestPaged(
         auto chunk_reader = std::move(reader_result).ValueOrDie();
         auto chunk_rows_result = chunk_reader->get_chunk_rows();
         if (!chunk_rows_result.ok()) {
-            auto error = milvus::storage::SourceAwareStorageError(
-                chunk_rows_result.status());
+            auto error =
+                milvus_storage::ToSegcoreError(chunk_rows_result.status());
             ThrowInfo(error.get_error_code(),
                       "Failed to get chunk rows: {}",
                       error.what());
@@ -2754,8 +2726,8 @@ VisitFieldDataFromManifestPaged(
         auto chunk_indices_result =
             chunk_reader->get_chunk_indices(row_indices);
         if (!chunk_indices_result.ok()) {
-            auto error = milvus::storage::SourceAwareStorageError(
-                chunk_indices_result.status());
+            auto error =
+                milvus_storage::ToSegcoreError(chunk_indices_result.status());
             ThrowInfo(error.get_error_code(),
                       "Failed to get chunk indices at offset {}: {}",
                       offset,
@@ -2774,8 +2746,7 @@ VisitFieldDataFromManifestPaged(
         auto chunks_result =
             chunk_reader->get_chunks(chunk_indices, parallel_degree);
         if (!chunks_result.ok()) {
-            auto error = milvus::storage::SourceAwareStorageError(
-                chunks_result.status());
+            auto error = milvus_storage::ToSegcoreError(chunks_result.status());
             ThrowInfo(error.get_error_code(),
                       "Failed to read chunks: {}",
                       error.what());
@@ -2900,8 +2871,7 @@ VisitFieldDataFromManifest(
     std::optional<DataType> element_type,
     std::optional<StorageColumnMapping> storage_column_mapping,
     const FieldDataVisitor& visitor,
-    int64_t max_inflight_bytes,
-    milvus_storage::SourceReadContextPtr source_context) {
+    int64_t max_inflight_bytes) {
     return VisitFieldDataFromManifestPaged(manifest_path,
                                            loon_ffi_properties,
                                            field_meta,
@@ -2912,8 +2882,7 @@ VisitFieldDataFromManifest(
                                            visitor,
                                            max_inflight_bytes,
                                            /*max_rows=*/0,
-                                           /*offset=*/0,
-                                           std::move(source_context));
+                                           /*offset=*/0);
 }
 
 void
@@ -2929,8 +2898,7 @@ IterateFieldDataFromManifest(
     const std::function<void(FieldDataPtr)>& consumer,
     int64_t max_inflight_bytes,
     size_t max_rows,
-    size_t offset,
-    milvus_storage::SourceReadContextPtr source_context) {
+    size_t offset) {
     const auto outcome = VisitFieldDataFromManifestPaged(
         manifest_path,
         loon_ffi_properties,
@@ -2945,8 +2913,7 @@ IterateFieldDataFromManifest(
         },
         max_inflight_bytes,
         max_rows,
-        offset,
-        std::move(source_context));
+        offset);
     switch (outcome) {
         case VisitOutcome::Exhausted:
         case VisitOutcome::FieldMissing:
@@ -2968,8 +2935,7 @@ GetFieldDatasFromManifest(
     std::optional<DataType> element_type,
     size_t max_rows,
     size_t offset,
-    std::optional<StorageColumnMapping> storage_column_mapping,
-    milvus_storage::SourceReadContextPtr source_context) {
+    std::optional<StorageColumnMapping> storage_column_mapping) {
     std::vector<FieldDataPtr> field_datas;
     IterateFieldDataFromManifest(
         manifest_path,
@@ -2988,8 +2954,7 @@ GetFieldDatasFromManifest(
         // grow by half a gigabyte per concurrent build.
         kAccumulatingInflightBytes,
         max_rows,
-        offset,
-        std::move(source_context));
+        offset);
     return field_datas;
 }
 

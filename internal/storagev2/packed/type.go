@@ -28,7 +28,6 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/arrio"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
-	"github.com/milvus-io/milvus/internal/util/sourcecontext"
 )
 
 type PackedWriter struct {
@@ -58,7 +57,6 @@ type PackedReader struct {
 }
 
 type FFIPackedReader struct {
-	sourceContext *sourcecontext.Context
 	cPackedReader C.CFFIPackedReader
 	recordReader  arrio.Reader
 	schema        *arrow.Schema

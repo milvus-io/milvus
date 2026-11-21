@@ -6766,15 +6766,12 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 
 		mockAllocator := allocator.NewMockAllocator(t)
 		mockAllocator.EXPECT().AllocID(mock.Anything).Return(int64(0), errors.New("alloc failed"))
-		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{}, nil)
 
 		// Create a mock refresh manager (non-nil)
 		mockRefreshMgr := &externalrefresh.Manager{}
 
 		server := &Server{
 			allocator:                        mockAllocator,
-			broker:                           mockBroker,
 			externalCollectionRefreshManager: mockRefreshMgr,
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)

@@ -494,9 +494,8 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                                               batch.rg_count,
                                               reader_memory_limit);
                         if (!tables_result.ok()) {
-                            auto error =
-                                milvus::storage::SourceAwareStorageError(
-                                    tables_result.status());
+                            auto error = milvus_storage::ToSegcoreError(
+                                tables_result.status());
                             ThrowInfo(error.get_error_code(),
                                       "[StorageV2] Failed to read batch: {}",
                                       error.what());

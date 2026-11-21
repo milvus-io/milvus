@@ -11,8 +11,6 @@
 
 #include <numeric>
 #include "index/scalar/sort/SortedMembership.h"
-#include "storage/StatusToErrorCode.h"
-#include "storage/loon_ffi/source_context.h"
 #include "ChunkedSegmentSealedImpl.h"
 #include "exec/expression/ExprCache.h"
 #include "segcore/default_fs.h"
@@ -223,8 +221,8 @@ OpenChunkReaderSync(
     auto chunk_reader_result =
         reader.get_chunk_reader(column_group_index, needed_columns);
     if (!chunk_reader_result.ok()) {
-        auto error = milvus::storage::SourceAwareStorageError(
-            chunk_reader_result.status());
+        const auto error =
+            milvus_storage::ToSegcoreError(chunk_reader_result.status());
         ThrowInfo(error.get_error_code(),
                   "get chunk reader failed, segment {}, column group index "
                   "{}, status: {}",
@@ -2701,59 +2699,12 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         properties = std::move(external_properties);
     }
 
-    auto needed_columns = schema_snapshot->GetExternalColumnNames();
-    auto source_context = milvus::storage::OpenSourceReadContext(
-        schema_snapshot->get_external_source(),
-        schema_snapshot->get_external_spec());
-    std::vector<size_t> internal_groups;
-    if (source_context) {
-        // A dropped output may share a file with a live output. Keep original
-        // group indices, but classify only the trusted schema projection that
-        // this reader can materialize; never mutate the cached manifest view.
-        column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
-            milvus_storage::api::copy_column_groups(*column_groups));
-        std::unordered_set<std::string> projected_columns(
-            needed_columns->begin(), needed_columns->end());
-        for (auto& group : *column_groups) {
-            if (!group)
-                continue;
-            auto& columns = group->columns;
-            columns.erase(
-                std::remove_if(columns.begin(),
-                               columns.end(),
-                               [&](const auto& column) {
-                                   return !projected_columns.count(column);
-                               }),
-                columns.end());
-        }
-        std::unordered_set<std::string> generated_columns;
-        for (const auto& field_id : schema_snapshot->get_field_ids()) {
-            if (schema_snapshot->is_function_output(field_id) &&
-                !schema_snapshot->IsExternalDataField(field_id)) {
-                generated_columns.insert(
-                    schema_snapshot->GetPhysicalColumnName(field_id));
-            }
-        }
-        // A source alias must never impersonate a generated physical column.
-        for (const auto& field_id : schema_snapshot->get_field_ids()) {
-            if (schema_snapshot->IsExternalDataField(field_id)) {
-                generated_columns.erase(
-                    schema_snapshot->GetPhysicalColumnName(field_id));
-            }
-        }
-        internal_groups = milvus::storage::SelectInternalColumnGroups(
-            *column_groups,
-            segment_load_info.GetManifestPath(),
-            generated_columns);
-    }
-    auto reader = std::shared_ptr<milvus_storage::api::Reader>(
-        milvus::storage::CreateSourceReader(column_groups,
+    const auto needed_columns = schema_snapshot->GetExternalColumnNames();
+    const auto reader = std::shared_ptr<milvus_storage::api::Reader>(
+        milvus_storage::api::Reader::create(column_groups,
                                             /*arrow_schema=*/nullptr,
                                             needed_columns,
-                                            properties,
-                                            source_context,
-                                            internal_groups)
-            .release());
+                                            properties));
     // QueryNode registers the collection's cipher context before loading.
     // Resolve encrypted Parquet keys through that context when opening files.
     if (storage::PluginLoader::GetInstance().getCipherPlugin()) {

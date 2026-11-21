@@ -18,10 +18,7 @@ package packed
 #cgo pkg-config: milvus_core milvus-storage
 
 #include <stdlib.h>
-#include <string.h>
-#include "storage/loon_ffi/source_context_c.h"
 #include "milvus-storage/ffi_filesystem_c.h"
-#include "milvus-storage/ffi_source_read_context_c.h"
 */
 import "C"
 
@@ -31,9 +28,7 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/internal/util/sourcecontext"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/sourceauth"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -150,34 +145,11 @@ func readFileWithExternalSpec(
 	var fsHandle C.FileSystemHandle
 	cFilesystemPath := C.CString(filesystemPath)
 	defer C.free(unsafe.Pointer(cFilesystemPath))
-	sourceContext, err := sourcecontext.Open(extfs.operationContext(), extfs.Source, extfs.Spec)
-	if err != nil {
-		return nil, err
-	}
-	defer sourceContext.Close()
-	var result C.LoonFFIResult
-	if sourceContext != nil {
-		result = C.loon_filesystem_get_with_context(cProperties, cFilesystemPath, C.uint32_t(len(filesystemPath)), C.LoonSourceReadContextHandle(sourceContext.Handle()), &fsHandle)
-	} else {
-		result = C.loon_filesystem_get(cProperties, cFilesystemPath, C.uint32_t(len(filesystemPath)), &fsHandle)
-	}
+	result := C.loon_filesystem_get(cProperties, cFilesystemPath, C.uint32_t(len(filesystemPath)), &fsHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, merr.Wrap(err, "failed to get filesystem")
 	}
 	defer C.loon_filesystem_destroy(fsHandle)
-	if sourceContext != nil {
-		var resolved *C.char
-		code := C.MilvusSourceFilesystemPath(C.uintptr_t(fsHandle), cFilesystemPath, &resolved)
-		if code != 0 {
-			if err, ok := sourceauth.ErrorFromNativeCode(int(code)); ok {
-				return nil, err
-			}
-			return nil, sourceauth.StatusError(sourceauth.CredentialInvalidResponse)
-		}
-		defer C.free(unsafe.Pointer(resolved))
-		cPath = resolved
-		pathLen = C.uint32_t(C.strlen(resolved))
-	}
 
 	var outData *C.uint8_t
 	var outSize C.uint64_t
@@ -204,11 +176,6 @@ func normalizeExternalPathForFilesystemForm(
 	extfs ExternalSpecContext,
 	pathForm externalPathForm,
 ) (string, string, error) {
-	if binding, err := sourceauth.Read(extfs.Source, extfs.Spec); err != nil {
-		return "", "", err
-	} else if binding != nil {
-		return path, path, nil
-	}
 	if extfs.Source == "" || path == "" || properties == nil {
 		return path, path, nil
 	}

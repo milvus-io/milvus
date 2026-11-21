@@ -29,12 +29,10 @@ import (
 	"github.com/iskorotkov/avro/v2/ocf"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -96,24 +94,6 @@ func TestParseSnapshotMetadata(t *testing.T) {
 	assert.NoError(t, ValidateFormatVersion(0))
 	assert.NoError(t, ValidateFormatVersion(SnapshotFormatVersion))
 	assert.NoError(t, ValidateFormatVersion(SnapshotFormatVersion+1))
-}
-
-func TestSnapshotMetadataCannotSupplySourceBinding(t *testing.T) {
-	for _, spec := range []string{
-		`{"credential_binding":null}`,
-		`{"credential_\u0062inding":{}}`,
-		`{"credential_binding":{},"credential_binding":null}`,
-	} {
-		data, err := protojson.Marshal(&datapb.SnapshotMetadata{
-			FormatVersion: SnapshotFormatVersion,
-			Collection: &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{
-				ExternalSource: "azure://core.windows.net/container/table", ExternalSpec: spec,
-			}},
-		})
-		require.NoError(t, err)
-		_, err = ParseSnapshotMetadata(data)
-		require.ErrorIs(t, err, merr.ErrParameterInvalid)
-	}
 }
 
 func TestSegmentManifestRoundTrip(t *testing.T) {

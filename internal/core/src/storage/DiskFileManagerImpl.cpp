@@ -146,7 +146,6 @@ DiskFileManagerImpl::DiskFileManagerImpl(
     fs_ = fileManagerContext.fs;
     plugin_context_ = fileManagerContext.plugin_context;
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
-    source_read_context_ = fileManagerContext.source_read_context;
     stats_base_path_ = fileManagerContext.stats_base_path;
     storage_column_mappings_ = fileManagerContext.storage_column_mappings;
 }
@@ -1066,11 +1065,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                 dim,
                 element_type,
                 GetStorageColumnMapping(GetFieldDataMeta().field_id),
-                consume_field_data,
-                kStreamingInflightBytes,
-                0,
-                0,
-                source_read_context_);
+                consume_field_data);
         }
     } else {
         for (auto& remote_files_group : all_remote_files) {
@@ -1128,8 +1123,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                       max_rows,
                                       offset,
                                       GetStorageColumnMapping(
-                                          GetFieldDataMeta().field_id),
-                                      source_read_context_);
+                                          GetFieldDataMeta().field_id));
                         if (part_field_datas.empty()) {
                             break;
                         }
@@ -1568,8 +1562,7 @@ DiskFileManagerImpl::cache_opt_field_to_disk_v3(const Config& config) {
                                       element_type,
                                       0,
                                       0,
-                                      GetStorageColumnMapping(field_id),
-                                      source_read_context_);
+                                      GetStorageColumnMapping(field_id));
 
         if (WriteOptFieldIvfData(field_type,
                                  field_id,

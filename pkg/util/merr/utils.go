@@ -74,9 +74,6 @@ func IsNonRetryableErr(err error) bool {
 		return false
 	}
 
-	if IsPermanentSourceAuthErr(err) {
-		return true
-	}
 	// Permanent errors - resource doesn't exist or access denied
 	if errors.Is(err, ErrIoKeyNotFound) ||
 		errors.Is(err, ErrIoPermissionDenied) ||
@@ -1765,11 +1762,4 @@ func WrapErrOperationNotSupported(err error, format string, args ...any) error {
 // WrapErrCollectionConditionalUpsertExecutionErr projects a possibly committed attempt.
 func WrapErrCollectionConditionalUpsertExecutionErr(err error, msg string) error {
 	return wrapInner(ErrCollectionConditionalUpsertExecution, msg, err)
-}
-
-// IsPermanentSourceAuthErr survives RPC conversion, where native Segcore detail
-// is gone but the dedicated source authorization status code remains.
-func IsPermanentSourceAuthErr(err error) bool {
-	return errors.Is(err, ErrSourceAuthDenied) || errors.Is(err, ErrSourceAuthExpired) ||
-		errors.Is(err, ErrSourceAuthCancelled) || errors.Is(err, ErrSourceAuthInvalidResponse)
 }

@@ -204,13 +204,6 @@ var (
 	ErrIoInvalidRange    = newMilvusError("invalid range", 1011, false)
 	ErrIoEntityTooLarge  = newMilvusError("entity too large", 1012, false)
 
-	// External-source provider outcomes retain distinct codes across worker RPCs.
-	ErrSourceAuthDenied          = newMilvusError("external source read denied", 1013, false)
-	ErrSourceAuthExpired         = newMilvusError("external source authorization expired", 1014, false)
-	ErrSourceAuthTransient       = newMilvusError("external source authorization temporarily unavailable", 1015, true)
-	ErrSourceAuthCancelled       = newMilvusError("external source read cancelled", 1016, false)
-	ErrSourceAuthInvalidResponse = newMilvusError("invalid external source authorization response", 1017, false)
-
 	// Parameter related
 	ErrParameterInvalid  = newMilvusError("invalid parameter", 1100, false, WithErrorType(InputError))
 	ErrParameterMissing  = newMilvusError("missing parameter", 1101, false, WithErrorType(InputError))

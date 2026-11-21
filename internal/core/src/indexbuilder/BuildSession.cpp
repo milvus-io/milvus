@@ -411,8 +411,7 @@ VisitBuildField(const BuildSource& build_source,
                     element_type,
                     std::move(mapping),
                     visitor,
-                    manifest_inflight_bytes,
-                    context.source_read_context);
+                    manifest_inflight_bytes);
             }
         },
         build_source);

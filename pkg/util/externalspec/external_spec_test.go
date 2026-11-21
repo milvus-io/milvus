@@ -17,7 +17,6 @@
 package externalspec
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -30,7 +29,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/sourceauth"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -65,98 +63,6 @@ func TestMarshalCollectionSchemaNormalizesHistoricalSpec(t *testing.T) {
 func TestValidateSourceAndSpecLegacyKeys(t *testing.T) {
 	require.NoError(t, ValidateSourceAndSpec("s3://bucket/table",
 		`{"Format":"paimon-table","SNAPSHOT_ID":"7","Scan_Mode":"data-split","EXTFS":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true"}}`))
-}
-
-func TestSourceContextAdmissionAndTrustedValidation(t *testing.T) {
-	const source = "azure://core.windows.net/container/table"
-	ctx := sourceauth.WithAuthorizer(context.Background(), func(context.Context, sourceauth.Operation) (sourceauth.Reference, error) {
-		return sourceauth.Reference{Provider: "test", Value: "verified-owner/table"}, nil
-	})
-	for _, format := range []string{FormatLanceTable, FormatIcebergTable} {
-		spec := `{"format":"` + format + `","extfs":{"cloud_provider":"azure","access_key_id":"account123"}}`
-		require.NoError(t, ValidateRequestSourceAndSpec(source, spec, true))
-		// No hook and no binding must never opt into ambient credentials.
-		require.Error(t, ValidateRequestSourceAndSpec(source, spec, false))
-		require.Error(t, ValidateSourceAndSpec(source, spec))
-		bound, err := sourceauth.Prepare(ctx, sourceauth.Operation{Source: source, Spec: spec}, true)
-		require.NoError(t, err)
-		require.NoError(t, ValidateSourceAndSpec(source, bound))
-		// A copied genuine reference is still forbidden as public input.
-		for _, hasAuthorizer := range []bool{false, true} {
-			require.ErrorIs(t, ValidateRequestSourceAndSpec(source, bound, hasAuthorizer), merr.ErrParameterInvalid)
-		}
-		require.Error(t, ValidateSourceAndSpec(source+"-other", bound))
-	}
-	// Legacy credentials still work when source authorization is unconfigured.
-	require.NoError(t, ValidateRequestSourceAndSpec("s3://bucket/prefix", minimalValidSpec(), false))
-}
-
-func TestSourceContextRejectsCredentialAndRoutingOverrides(t *testing.T) {
-	const source = "azure://core.windows.net/container/table"
-	for _, extfs := range []map[string]string{
-		{ExtfsKeyAccessKeyValue: "SECRET"},
-		{ExtfsKeyUseIAM: "true"},
-		{ExtfsKeyUseIAM: "false"},
-		{ExtfsKeyAnonymous: "true"},
-		{ExtfsKeyCredentialEndpoint: "https://broker.example"},
-		{ExtfsKeyAzureCredentialEndpoint: ""},
-		{ExtfsKeyEndpointURL: "https://other.example"},
-		{ExtfsKeyIAMEndpoint: "https://other.example"},
-		{ExtfsKeySSLCACert: "CERTIFICATE"},
-		{ExtfsKeyUseSSL: "false"},
-		{ExtfsKeyAccessKeyID: "invalid/account"},
-		{ExtfsKeyCloudProvider: "aws"},
-	} {
-		base := map[string]string{ExtfsKeyCloudProvider: "azure", ExtfsKeyAccessKeyID: "account123"}
-		for k, v := range extfs {
-			base[k] = v
-		}
-		spec, err := json.Marshal(ExternalSpec{Format: FormatLanceTable, Extfs: base})
-		require.NoError(t, err)
-		err = ValidateRequestSourceAndSpec(source, string(spec), true)
-		require.Error(t, err)
-		require.NotContains(t, err.Error(), "SECRET")
-	}
-	for _, key := range []string{`credential_binding`, `credential_\u0062inding`} {
-		require.ErrorIs(t, ValidateRequestSourceAndSpec(source, `{"`+key+`":null}`, true), merr.ErrParameterInvalid)
-	}
-}
-
-func TestSourceContextSecureAzureURIs(t *testing.T) {
-	const spec = `{"format":"lance-table","extfs":{"cloud_provider":"azure","access_key_id":"account123"}}`
-	ctx := sourceauth.WithAuthorizer(context.Background(), func(context.Context, sourceauth.Operation) (sourceauth.Reference, error) {
-		return sourceauth.Reference{Provider: "test", Value: "verified-owner/table"}, nil
-	})
-	for _, source := range []string{
-		"azure://core.windows.net/container/table",
-		"az://core.windows.net/container/table",
-		"https://account123.blob.core.windows.net/container/table",
-		"https://account123.dfs.core.windows.net/container/table",
-		"abfss://container@account123.dfs.core.windows.net/table",
-	} {
-		t.Run(source, func(t *testing.T) {
-			require.NoError(t, ValidateRequestSourceAndSpec(source, spec, true))
-			bound, err := sourceauth.Prepare(ctx, sourceauth.Operation{Source: source, Spec: spec}, true)
-			require.NoError(t, err)
-			require.NoError(t, ValidateSourceAndSpec(source, bound))
-			require.Error(t, ValidateRequestSourceAndSpec(source, spec, false))
-		})
-	}
-	for _, source := range []string{
-		"http://account123.blob.core.windows.net/container/table",
-		"abfs://container@account123.dfs.core.windows.net/table",
-		"abfss://container:SECRET@account123.dfs.core.windows.net/table",
-		"https://SECRET@account123.blob.core.windows.net/container/table",
-		"abfss://account123.dfs.core.windows.net/table",
-		"azure://core.windows.net/container/table?sig=SECRET",
-		"https://account123.blob.core.windows.net/container/table?",
-		"azure://core.windows.net/container/table#SECRET",
-		"azure://core.windows.net/container/table\\escape",
-	} {
-		err := ValidateRequestSourceAndSpec(source, spec, true)
-		require.Error(t, err)
-		require.NotContains(t, err.Error(), "SECRET")
-	}
 }
 
 func TestParseExternalSpec_Empty(t *testing.T) {

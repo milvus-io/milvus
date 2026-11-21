@@ -44,7 +44,6 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/sourceauth"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -84,11 +83,6 @@ func NewPackedReaderWithExtfs(
 	extfs ExternalReaderContext,
 	opts ...ReaderOption,
 ) (*PackedReader, error) {
-	if binding, err := sourceauth.Read(extfs.Source, extfs.Spec); err != nil {
-		return nil, err
-	} else if binding != nil {
-		return nil, merr.WrapErrOperationNotSupportedMsg("authorized external sources require the context-aware manifest reader")
-	}
 	options := &readerOptions{}
 	for _, opt := range opts {
 		opt(options)

@@ -1217,9 +1217,7 @@ func (loader *segmentLoader) bloomFilterDownloaderWithSchema(collectionID int64,
 		Spec:         schema.GetExternalSpec(),
 	}
 	return func(ctx context.Context, paths []string) ([][]byte, error) {
-		requestSpec := extfs
-		requestSpec.Context = ctx
-		return readExternalFiles(ctx, createStorageConfig(), requestSpec, paths)
+		return readExternalFiles(ctx, createStorageConfig(), extfs, paths)
 	}
 }
 
@@ -1358,7 +1356,6 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 			// Real-PK milvus-table manifests keep source deltalogs. Target-owned
 			// deltalogs are only valid for virtual-PK translation.
 			extfs := packed.ExternalSpecContext{
-				Context:      ctx,
 				CollectionID: segment.Collection(),
 				Source:       metadata.source,
 				Spec:         metadata.spec,

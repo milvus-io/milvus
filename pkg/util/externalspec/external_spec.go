@@ -27,7 +27,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/sourceauth"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -301,43 +300,17 @@ func validateEndpointURL(sourceURL *url.URL, extfs map[string]string) (bool, err
 	return true, nil
 }
 
-// ValidateRequestSourceAndSpec validates public input before authorization. A
-// configured authorizer supplies credentials, so such requests must contain only
-// source configuration, never a caller-provided binding or another auth mode.
-func ValidateRequestSourceAndSpec(externalSource, externalSpec string, hasAuthorizer bool, policies ...*specutil.BrokerPolicy) error {
-	if err := sourceauth.RejectClientBinding(externalSpec); err != nil {
-		return err
-	}
-	if !hasAuthorizer {
-		return ValidateSourceAndSpec(externalSource, externalSpec, policies...)
-	}
-	spec, err := ParseExternalSpec(externalSpec)
-	if err != nil {
-		return err
-	}
-	return validateSourceContextSpec(externalSource, spec)
-}
-
-// ValidateSourceAndSpec validates trusted coordinator input. A binding must be
-// created by the request authorizer; its digest alone is not proof of origin.
-// Without a binding, legacy credential-mode validation is unchanged.
+// ValidateSourceAndSpec validates URL + JSON shape + ValidateExtfsComplete.
 // Errors retain their typed validation code while adding field context.
 // Called from Proxy and RootCoord (defense in depth) on create-collection.
 // Omitting the server-owned policy denies every credential Broker.
 func ValidateSourceAndSpec(externalSource, externalSpec string, policies ...*specutil.BrokerPolicy) error {
+	if err := ValidateExternalSource(externalSource); err != nil {
+		return merr.Wrap(err, "external_source is invalid")
+	}
 	spec, err := ParseExternalSpec(externalSpec)
 	if err != nil {
 		return merr.Wrap(err, "external_spec is invalid")
-	}
-	binding, err := sourceauth.Read(externalSource, externalSpec)
-	if err != nil {
-		return merr.Wrap(err, "external_spec is invalid")
-	}
-	if binding != nil {
-		return validateSourceContextSpec(externalSource, spec)
-	}
-	if err := ValidateExternalSource(externalSource); err != nil {
-		return merr.Wrap(err, "external_source is invalid")
 	}
 	if err := ValidateExtfsComplete(externalSource, spec.Extfs); err != nil {
 		return merr.Wrap(err, "external_spec is invalid")
@@ -347,53 +320,6 @@ func ValidateSourceAndSpec(externalSource, externalSpec string, policies ...*spe
 		policy = policies[0]
 	}
 	return policy.Validate(spec.Extfs)
-}
-
-// Source contexts currently issue Azure SAS for Lance and Iceberg. The account
-// is non-secret routing information and is checked by the deployment's
-// authorizer. Every credential and endpoint comes from that trusted context.
-func validateSourceContextSpec(source string, spec *ExternalSpec) error {
-	u, err := url.Parse(source)
-	if err != nil || u.Host == "" || u.Opaque != "" ||
-		(u.Scheme != SchemeAzure && u.Scheme != "az" && u.Scheme != "https" && u.Scheme != "abfss") ||
-		spec.Extfs[ExtfsKeyCloudProvider] != CloudProviderAzure {
-		return merr.WrapErrParameterInvalidMsg("source authorization requires an Azure source and cloud_provider=azure")
-	}
-	if strings.ContainsAny(source, "?#\\") {
-		return merr.WrapErrParameterInvalidMsg("source authorization requires an unsigned Azure URI without a query or fragment")
-	}
-	// ABFSS uses container@account.dfs... as routing, not as credentials.
-	// Native scope parsing and the admission provider validate its exact Azure
-	// account, endpoint, container and path before any credentials are issued.
-	if u.User != nil {
-		_, password := u.User.Password()
-		if u.Scheme != "abfss" || u.User.Username() == "" || password {
-			return merr.WrapErrParameterInvalidMsg("source authorization must not embed credentials in the URI")
-		}
-	} else if u.Scheme == "abfss" {
-		return merr.WrapErrParameterInvalidMsg("ABFSS source must specify its container")
-	}
-	if spec.Format != FormatLanceTable && spec.Format != FormatIcebergTable {
-		return merr.WrapErrParameterInvalidMsg("source authorization supports Lance and Iceberg tables")
-	}
-	account := spec.Extfs[ExtfsKeyAccessKeyID]
-	if len(account) < 3 || len(account) > 24 || strings.IndexFunc(account, func(r rune) bool {
-		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
-	}) >= 0 {
-		return merr.WrapErrParameterInvalidMsg("source authorization requires a valid Azure account name in extfs.access_key_id")
-	}
-	for key, value := range spec.Extfs {
-		switch key {
-		case ExtfsKeyCloudProvider, ExtfsKeyAccessKeyID, ExtfsKeyRegion:
-		case ExtfsKeyUseSSL:
-			if value != "true" {
-				return merr.WrapErrParameterInvalidMsg("source authorization requires HTTPS")
-			}
-		default:
-			return merr.WrapErrParameterInvalidMsg("source authorization does not accept additional credentials or endpoint overrides")
-		}
-	}
-	return nil
 }
 
 // RedactExternalSource returns a log-safe external source. Normal storage URIs
@@ -733,8 +659,6 @@ func RedactExternalSpec(specStr string) string {
 	if err := json.Unmarshal([]byte(specStr), &spec); err != nil {
 		return "<invalid spec>"
 	}
-	// The reference is server-owned and is not public round-trip input.
-	delete(spec, sourceauth.BindingKey)
 	if err := normalizeInt64Field(spec, "snapshot_id"); err != nil {
 		return "<invalid spec>"
 	}

@@ -60,7 +60,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
-	"github.com/milvus-io/milvus/pkg/v3/sourceauth"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
@@ -3098,19 +3097,6 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 					active.GetJobId(), req.GetCollectionName()))),
 			JobId: active.GetJobId(),
 		}, nil
-	}
-
-	// Resolve authoritative state after acquiring the DDL lock. An omitted
-	// refresh authorized against a stale Proxy cache must not publish that old
-	// source as an explicit override, or remove an existing user's binding.
-	collection, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionId())
-	if err != nil {
-		return &datapb.RefreshExternalCollectionResponse{Status: merr.Status(err)}, nil
-	}
-	if err := sourceauth.ValidateRefreshAdmission(ctx,
-		collection.GetSchema().GetExternalSource(), collection.GetSchema().GetExternalSpec(),
-		req.GetExternalSource(), req.GetExternalSpec()); err != nil {
-		return &datapb.RefreshExternalCollectionResponse{Status: merr.Status(err)}, nil
 	}
 
 	// Pre-allocate JobID for idempotency (ensures same JobID even if retry after failure)

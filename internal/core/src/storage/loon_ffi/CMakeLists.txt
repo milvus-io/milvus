@@ -12,7 +12,6 @@
 # FFI Reader source files for interfacing with milvus-storage through FFI
 set(FFI_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/ffi_reader_c.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/source_context.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ffi_writer_c.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/milvus_table_c.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/property_singleton.cpp

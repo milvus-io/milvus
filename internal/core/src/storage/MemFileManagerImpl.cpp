@@ -57,7 +57,6 @@ MemFileManagerImpl::MemFileManagerImpl(
     rcm_ = fileManagerContext.chunkManagerPtr;
     fs_ = fileManagerContext.fs;
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
-    source_read_context_ = fileManagerContext.source_read_context;
     plugin_context_ = fileManagerContext.plugin_context;
     stats_base_path_ = fileManagerContext.stats_base_path;
     storage_column_mappings_ = fileManagerContext.storage_column_mappings;
@@ -318,8 +317,7 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
                                          element_type,
                                          max_rows,
                                          offset,
-                                         storage_column_mapping,
-                                         source_read_context_);
+                                         storage_column_mapping);
     }
 
     auto& remote_files = segment_insert_files.value();
@@ -527,8 +525,7 @@ MemFileManagerImpl::cache_opt_field_memory_v3(const Config& config) {
                                       element_type,
                                       0,
                                       0,
-                                      GetStorageColumnMapping(field_id),
-                                      source_read_context_);
+                                      GetStorageColumnMapping(field_id));
 
         res[field_id] = GetOptFieldIvfData(field_type, field_datas);
     }

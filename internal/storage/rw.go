@@ -459,7 +459,6 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, neededSch
 	for _, opt := range option {
 		opt(rwOptions)
 	}
-	rwOptions.externalReader.Context = ctx
 	if err := rwOptions.validate(); err != nil {
 		return nil, err
 	}

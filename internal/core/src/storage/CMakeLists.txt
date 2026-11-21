@@ -53,10 +53,3 @@ set_source_files_properties(
 
 add_library(milvus_storage OBJECT ${SOURCE_FILES})
 target_link_libraries(milvus_storage PUBLIC milvus_conan_deps)
-
-if (BUILD_UNIT_TEST STREQUAL "ON")
-    # Go's source-context tests call the actual native provider. Compile their
-    # C++ bridge here so it inherits Arrow and the other native dependencies.
-    target_sources(milvus_storage PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../../util/sourcecontext/native_probe.cpp)
-endif()

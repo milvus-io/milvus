@@ -14,7 +14,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "storage/StatusToErrorCode.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
 
 #include <algorithm>
@@ -160,8 +159,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
       async_read_window_bytes_(StorageV2AsyncLoadReadWindowSizeBytes()) {
     auto rows_result = chunk_reader_->get_chunk_rows();
     if (!rows_result.ok()) {
-        auto error =
-            milvus::storage::SourceAwareStorageError(rows_result.status());
+        auto error = milvus_storage::ToSegcoreError(rows_result.status());
         ThrowInfo(error.get_error_code(),
                   "get row group rows failed: {}",
                   error.what());

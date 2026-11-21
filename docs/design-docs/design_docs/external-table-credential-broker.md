@@ -102,6 +102,119 @@ The native endpoint allowlist is checked before filesystem construction or reuse
 Broker acquisition and refresh remain local; no Broker descriptor is sent to a
 Talon worker and no companion worker patch is required for this feature.
 
+## Application-managed source authorization
+
+Credential renewal and authorization policy have separate owners. Milvus keeps
+the configured Broker endpoint in the existing collection schema; the storage
+provider obtains and refreshes temporary credentials. An external application
+and Broker can decide whose source permissions to check without adding user
+ownership metadata or a Catalog-specific authorization hook to Milvus.
+
+This integration pattern requires **trusted application-managed provisioning**.
+It does not establish per-user isolation for arbitrary clients that can create
+or change external collections under a shared Milvus workload identity.
+
+### Registration and background reads
+
+1. The application authenticates the registration request and checks the chosen
+   source table using the source system's authorization API. It stores a durable
+   association between its registration, the source table/root and the principal
+   or policy to reauthorize in its own protected database. This policy may be
+   user-bound or service-bound; Milvus does not select an ownership model.
+2. The application provisions the collection with an approved Broker endpoint
+   selecting that association. The Broker authenticates its caller through the
+   deployment's trusted transport or authentication proxy, resolves the stored
+   association, and checks current source permissions before issuing credentials.
+   Request account/container and target-identity fields must agree with the
+   association; they must not let the caller select another principal or root.
+3. Background readers reuse the persisted endpoint after the registration request
+   ends or Milvus restarts. On subsequent credential issuance, the Broker repeats
+   the source permission check. Where supported, source-system service delegation
+   lets the Broker act for the stored principal using renewable workload
+   credentials; otherwise the application needs a supported renewable grant.
+   Persisting a username alone cannot replace that authorization mechanism.
+
+For example, a deployment can provision the following Azure Iceberg spec for
+`external_source = azure://core.windows.net/example-container/warehouse/orders/metadata/v1.metadata.json`.
+Resolve the actual metadata location from the authorized source catalog; the
+Broker's allowed table root must also cover the referenced manifests and data:
+
+```json
+{
+  "format": "iceberg-table",
+  "extfs": {
+    "cloud_provider": "azure",
+    "access_key_id": "examplestorage",
+    "region": "westus3",
+    "azure_client_id": "configured-client-id",
+    "azure_tenant_id": "configured-tenant-id",
+    "credential_endpoint": "https://broker.example.com/registrations/orders-reader/sas",
+    "load_frequency": "900"
+  }
+}
+```
+
+All values are illustrative configuration, not credentials. The account field
+`access_key_id` is the Azure storage account name, not an account key. Add the
+complete endpoint to `common.security.credentialBrokerAllowedEndpoints` on every
+component, using the startup configuration above. Each distinct registration URL
+needs its own exact allowlist entry and a restart to change the policy; this
+example does not add dynamic registration or wildcard endpoint support. A Lance
+table uses `format: "lance-table"` and its own table root and approved endpoint.
+Keep the Azure client/tenant fields required by the engine's existing Broker
+mode; do not combine this example with native `use_iam` or static storage keys.
+
+The Azure Broker receives an HTTP POST with storage account, container, region,
+requested duration and target client/tenant fields. It does **not** receive an
+authenticated Milvus user or a collection ID. Client/tenant IDs, the URL and an
+opaque registration identifier are configuration, not proof of identity. The
+stock request does not acquire or attach an end-user JWT. Workload authentication
+to the Broker must be supplied by the deployment, for example by an authenticated
+proxy; HTTPS alone authenticates the server, not the caller. Never put user JWTs,
+SAS tokens or bearer capabilities in the URL or persisted external specification.
+
+### Protect the association outside Milvus
+
+Only the trusted provisioner may choose or replace the source/Broker tuple.
+Enable `common.security.authorizationEnabled` and enforce this with Milvus RBAC
+and the application's admission checks, covering create, explicit refresh,
+import/restore and replication paths
+that can introduce collection metadata. A refresh with a replacement source or
+endpoint must pass the same admission checks. Do not give untrusted clients a
+broader role that bypasses these checks. The cluster endpoint allowlist controls
+which Brokers may be contacted; it is not a per-user or per-collection grant.
+
+In particular, copying another registration's endpoint into a new collection
+must be denied at admission. A shared workload reaching the same endpoint looks
+identical to the Broker, so the existing request cannot detect that substitution
+on its own. Deployments allowing direct, untrusted collection provisioning need
+an independently authenticated isolation boundary; this pattern is insufficient
+for them. A random or hidden URL does not fix that limitation.
+
+The Broker should issue read-only credentials scoped to the authorized source
+and fail issuance if the principal, table or grant is no longer valid. Reuse
+table authorization APIs when table permissions are required: a directory's
+file-read grant is not automatically equivalent to a table-read grant. Raw file
+credentials also cannot enforce row filters or column masking; a deployment must
+reject such policies unless another trusted layer enforces them.
+
+### Renewal and validation boundaries
+
+Rejecting new issuance does not revoke a previously issued SAS or undo data
+already loaded or indexed by Milvus. Search-caller authorization is a separate
+application/Milvus RBAC decision. Cache, retry and refresh behavior belongs to the
+pinned storage provider; verify it for the deployed version rather than assuming
+each query contacts the Broker. The [3.0 retained-Iceberg renewal fix](https://github.com/milvus-io/milvus-storage/pull/817)
+does not establish the behavior of main's C++ provider.
+
+Before enabling this pattern, test original-user allowed/denied registration,
+copied-endpoint rejection, source replacement, restart with the external binding
+store intact, and retained Lance/Iceberg readers across actual credential expiry.
+Exercise Broker denial, outages and source permission revocation through refresh,
+index building and query/load. Check that internal generated files still use
+internal storage credentials. Configuration validation and a raw storage-reader
+test alone do not qualify this complete application integration.
+
 ## Dependency compatibility
 
 Upgrade milvus-storage directly to 5c2ea329889e30d94b4e65209c0bc782256e7a95,

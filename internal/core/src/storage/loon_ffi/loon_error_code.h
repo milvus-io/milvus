@@ -38,11 +38,6 @@ namespace milvus::storage {
 // failures. Those are classified here, once.
 inline ErrorCode
 LoonErrCodeToErrorCode(int err_code) {
-    // Source-context outcomes use a separate ABI range. Preserve them through
-    // CStatus so Go can distinguish authorization denial from transient failure.
-    if (err_code >= 117 && err_code <= 121) {
-        return static_cast<ErrorCode>(err_code);
-    }
     switch (err_code) {
         case LOON_INVALID_ARGS:
         case LOON_INVALID_PROPERTIES:
