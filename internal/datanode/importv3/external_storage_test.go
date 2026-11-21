@@ -46,6 +46,7 @@ import (
 	importv3pb "github.com/milvus-io/milvus/pkg/v3/proto/importv3pb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -119,7 +120,7 @@ func TestExternalStoragePreImportAndReshard(t *testing.T) {
 			task := NewPreImportTask(&datapb.PreImportRequest{
 				JobID: 1, TaskID: 2, CollectionID: 3, Schema: schema,
 				ImportFiles: []*internalpb.ImportFile{file}, Options: options, StorageConfig: config,
-			}, cm)
+			}, cm, taskcommon.Resource{CPU: 1, Memory: 64 << 20})
 			result, err := task.Execute(context.Background())
 			require.NoError(t, err)
 			stats := result.([]*datapb.ImportV3FileStats)
@@ -177,7 +178,7 @@ func TestExternalStoragePreImportAndReshard(t *testing.T) {
 				StorageConfig: config,
 				Plan:          plan,
 			}
-			reshard := NewReshardTask(reshardReq, cm, nil, NewMetrics(1))
+			reshard := NewReshardTask(reshardReq, cm, nil, NewMetrics(1), taskcommon.Resource{CPU: 1, Memory: 64 << 20})
 			_, err = reshard.Execute(context.Background())
 			require.NoError(t, err)
 			require.Equal(t, []int64{42, 43}, gotPKs)
@@ -193,7 +194,7 @@ func TestExternalStoragePreImportAndReshard(t *testing.T) {
 				JobId: 1, TaskId: 2, RunId: 4, Slot: 1,
 				StorageConfig: config,
 				Plan:          cleanedPlan,
-			}, mocks.NewChunkManager(t), nil, NewMetrics(1))
+			}, mocks.NewChunkManager(t), nil, NewMetrics(1), taskcommon.Resource{CPU: 1, Memory: 64 << 20})
 			_, err = cleanedReshard.Execute(context.Background())
 			require.ErrorIs(t, err, merr.ErrParameterInvalid)
 		})
@@ -275,7 +276,7 @@ func TestExternalStorageWorkerSharesClientAcrossFiles(t *testing.T) {
 	preTask := NewPreImportTask(&datapb.PreImportRequest{
 		JobID: 1, TaskID: 2, CollectionID: 3, Schema: schema,
 		ImportFiles: files, Options: options, StorageConfig: config,
-	}, cm)
+	}, cm, taskcommon.Resource{CPU: 1, Memory: 64 << 20})
 	result, err := preTask.Execute(context.Background())
 	require.NoError(t, err)
 	stats := result.([]*datapb.ImportV3FileStats)
@@ -334,7 +335,7 @@ func TestExternalStorageWorkerSharesClientAcrossFiles(t *testing.T) {
 		JobId: 1, TaskId: 2, RunId: 3, Slot: 1,
 		StorageConfig: config,
 		Plan:          plan,
-	}, cm, nil, NewMetrics(1))
+	}, cm, nil, NewMetrics(1), taskcommon.Resource{CPU: 1, Memory: 64 << 20})
 	_, err = reshard.Execute(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, []int64{10, 11, 20, 21, 22}, gotPKs)
