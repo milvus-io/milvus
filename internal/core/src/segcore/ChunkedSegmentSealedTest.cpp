@@ -716,10 +716,10 @@ TEST(test_chunk_segment,
         dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
     auto state = sealed->TestGetPublishedStateSnapshot();
-    auto offsets = state->runtime->struct_element_offsets_map.at(vector);
+    auto offsets = state->runtime->element_offsets_by_field.at(vector);
     ASSERT_NE(offsets, nullptr);
-    EXPECT_EQ(offsets, state->runtime->struct_element_offsets_map.at(label));
-    EXPECT_EQ(offsets, state->runtime->struct_element_offsets_map.at(score));
+    EXPECT_EQ(offsets, state->runtime->element_offsets_by_field.at(label));
+    EXPECT_EQ(offsets, state->runtime->element_offsets_by_field.at(score));
     EXPECT_EQ(offsets->GetTotalElementCount(), rows * elements_per_row);
     const int64_t first_row = 0;
     // A complete unordered load batch must choose the scalar with the lower
@@ -731,7 +731,7 @@ TEST(test_chunk_segment,
     }
     // A vector-only struct pays the raw-read cost during load too.
     auto vector_only_offsets =
-        state->runtime->struct_element_offsets_map.at(unrelated);
+        state->runtime->element_offsets_by_field.at(unrelated);
     ASSERT_NE(vector_only_offsets, nullptr);
     EXPECT_EQ(vector_only_offsets->GetTotalElementCount(),
               rows * elements_per_row);

@@ -456,6 +456,8 @@ class SegmentExpr : public Expr {
                                 field_meta.is_native_list_array();
         is_nested_array_field_ = field_meta.is_nested_array();
         is_element_nullable_ = field_meta.is_element_nullable();
+        is_scalar_array_ = field_type_ == DataType::ARRAY &&
+                           !GetStructNameForArrayField(field_meta);
 
         if (schema->get_primary_field_id().has_value() &&
             schema->get_primary_field_id().value() == field_id_ &&
@@ -3340,8 +3342,18 @@ class SegmentExpr : public Expr {
     EnsureExecPathDetermined() const {
         std::call_once(determine_exec_path_once_, [this]() {
             auto self = const_cast<SegmentExpr*>(this);
-            self->DetermineExecPath();
-            self->FallbackToJsonStatsIfEligible();
+            if (is_scalar_array_ && IsElementLevelExpression()) {
+                // A scalar ARRAY index produces row ids. MATCH consumes element ids.
+                if (!has_field_data_at_init_) {
+                    ThrowInfo(ExprInvalid,
+                              "MATCH requires raw data for ARRAY field {}",
+                              field_id_.get());
+                }
+                self->exec_path_ = ExprExecPath::RawData;
+            } else {
+                self->DetermineExecPath();
+                self->FallbackToJsonStatsIfEligible();
+            }
         });
     }
 
@@ -3597,6 +3609,7 @@ class SegmentExpr : public Expr {
     bool is_native_list_array_{false};
     bool is_nested_array_field_{false};
     bool is_element_nullable_{false};
+    bool is_scalar_array_{false};
     DataType pk_type_;
     int64_t batch_size_;
 

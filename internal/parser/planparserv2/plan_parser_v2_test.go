@@ -6041,3 +6041,64 @@ func TestExpr_ElementLevelLikeAndRegex(t *testing.T) {
 	_, err = ParseExpr(helper, `MATCH_ANY(struct_array, $[en_str] =~ "a(")`, nil)
 	require.ErrorIs(t, err, merr.ErrQueryPlan)
 }
+
+func TestScalarArrayMatchBinding(t *testing.T) {
+	schema := newTestSchema(false)
+	schema.Fields = append(schema.Fields,
+		&schemapb.FieldSchema{FieldID: 950, Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true},
+		&schemapb.FieldSchema{FieldID: 951, Name: "flags", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Bool},
+	)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	for _, filter := range []string{
+		"MATCH_ANY(scores, $ IS NULL)", "MATCH_ALL(scores, $ is not null)",
+		"MATCH_LEAST(scores, 1 < $ <= 10, threshold=2)",
+		"MATCH_MOST(scores, $ % 2 == 0 && $ in [2, 4], threshold=0)",
+		"MATCH_EXACT(scores, $ > 0, threshold=2)",
+		"MATCH_ANY(flags, $ < true)", "MATCH_ANY(StringArrayField, $ like 'ab%')",
+		"MATCH_ANY(StringArrayField, $ =~ 'ab.*')",
+	} {
+		t.Run(filter, func(t *testing.T) {
+			expr, err := ParseExpr(helper, filter, nil)
+			require.NoError(t, err)
+			require.NotNil(t, expr.GetMatchExpr().TargetFieldId)
+			require.Positive(t, expr.GetMatchExpr().GetTargetFieldId())
+			require.Empty(t, expr.GetMatchExpr().GetStructName())
+		})
+	}
+	for _, filter := range []string{
+		"$ > 0", "MATCH_ANY(scores, $[sub_int] > 0)", "MATCH_ANY(struct_array, $ > 0)",
+		"MATCH_ANY(scores, Int64Field > 0)", "MATCH_ANY(Int64Field, $ == 1)",
+		"MATCH_ANY(scores, array_length($) > 0)", "MATCH_ANY(scores, array_contains($, 1))",
+		"MATCH_ANY(scores, MATCH_ALL(scores, $ > 0))", "MATCH_ANY(flags, $)",
+		"MATCH_ANY(StringArrayField, TEXT_MATCH($, 'word'))", "MATCH_ANY(StringArrayField, PHRASE_MATCH($, 'word'))",
+		"element_filter(scores, $ > 0)",
+	} {
+		t.Run(filter, func(t *testing.T) {
+			_, err := ParseExpr(helper, filter, nil)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestMatchStructParentID(t *testing.T) {
+	helper := newTestSchemaHelper(t)
+	expr, err := ParseExpr(helper, "MATCH_ANY(struct_array, $[sub_int] > 0)", nil)
+	require.NoError(t, err)
+	match := expr.GetMatchExpr()
+	require.Equal(t, "struct_array", match.GetStructName())
+	require.EqualValues(t, structArrayFieldID, match.GetTargetFieldId())
+	require.EqualValues(t, structSubIntFieldID, match.GetPredicate().GetUnaryRangeExpr().GetColumnInfo().GetFieldId())
+}
+
+func TestMatchWithFlattenedStructSchema(t *testing.T) {
+	schema := newTestSchema(false)
+	schema.Fields = append(schema.Fields, schema.StructArrayFields[0].GetFields()...)
+	schema.StructArrayFields = nil
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	expr, err := ParseExpr(helper, `MATCH_ANY(struct_array, $[sub_int] > 0)`, nil)
+	require.NoError(t, err)
+	require.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
+	require.Nil(t, expr.GetMatchExpr().TargetFieldId)
+}

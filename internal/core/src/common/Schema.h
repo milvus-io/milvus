@@ -79,6 +79,18 @@ GetStructNameForArrayField(const FieldMeta& field_meta) {
     return field_name.substr(0, left);
 }
 
+// Segment-local key for sharing row-to-element offsets. StructArray children
+// use their parent name; a scalar ARRAY uses "#<field ID>" for its own group.
+// '#' cannot start a user field name. The key is never serialized.
+inline std::optional<std::string>
+GetElementOffsetsGroup(const FieldMeta& meta) {
+    auto parent = GetStructNameForArrayField(meta);
+    if (!parent && meta.get_data_type() == DataType::ARRAY) {
+        return "#" + std::to_string(meta.get_id().get());
+    }
+    return parent;
+}
+
 class Schema {
  public:
     Schema() = default;
@@ -617,6 +629,10 @@ class Schema {
     const FieldMeta&
     GetFirstArrayFieldInStruct(const std::string& struct_name) const;
 
+    // Column supplying the per-row element ranges for a logical MATCH target.
+    const FieldMeta&
+    GetMatchTargetField(FieldId target_id) const;
+
     // Field ID of the struct array field itself. Only schemas parsed from a
     // CollectionSchema proto know it.
     std::optional<FieldId>
@@ -725,6 +741,8 @@ class Schema {
 
     // struct_name -> field ID of the struct array field (built in ParseFrom)
     std::unordered_map<std::string, FieldId> struct_field_ids_;
+    // StructArray parent ID -> representative physical child in this schema.
+    std::unordered_map<FieldId, FieldId> representative_child_by_parent_;
 
     // warmup policy settings
     // Valid values: "disable", "sync", "async" (empty string means no setting)
