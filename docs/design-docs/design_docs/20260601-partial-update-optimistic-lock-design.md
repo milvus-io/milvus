@@ -194,7 +194,7 @@ The design depends on seven invariants:
    reported by that channel's successful Strong query.
 3. **Atomic admission boundary:** local CAS validation, CommitTxn append, write
    publication, transaction transition, acknowledgement, and MVCC publication
-   retain the same exclusive PK locks. Every ordinary local Insert and Delete
+   retain the same exclusive PK locks. Every ordinary local Insert, Delete, and PK Update
    participates through shared locks on its PK keys. Replicated writes
    take no row lock: the replicate interceptor serializes and deduplicates
    them, and local CAS is rejected on a secondary. With CAS enabled (the
@@ -581,7 +581,7 @@ lock.
 
 | Logical write | PK locks |
 |---|---|
-| Ordinary nontransactional Insert/Delete with exact PKs | Shared locks on the write set |
+| Ordinary nontransactional Insert/Delete/Update with exact PKs | Shared locks on the write set |
 | Ordinary CommitTxn with reconstructed write set | Shared locks on the prefix and suffix PK union |
 | Local CAS CommitTxn with complete runtime proof | Exclusive locks on the complete PK union |
 | Replicated message (`ReplicateHeader` set) | None; the replicate interceptor serializes it |
@@ -1037,7 +1037,8 @@ the attempt; only eligible replacement updates are automatically retried.
 TxnManager preserves existing TxnID, transaction recovery, and keepalive
 behavior. During construction, partialupdate reads InitialRecoverSnapshot.TxnBuffer
 and reconstructs the PKs of every durable transaction body. Later appends extend
-this prefix. Commit admission freezes the write set when the commit arrives,
+this prefix. A PK Update contributes the exact INT64 or VARCHAR keys in its body
+to the same write set as an Insert or Delete. Commit admission freezes the write set when the commit arrives,
 rejects the commit while a body is still in flight, and otherwise locks the
 union.
 

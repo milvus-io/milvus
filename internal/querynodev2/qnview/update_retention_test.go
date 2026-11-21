@@ -176,7 +176,13 @@ type observedRetentionRegistration struct {
 	fail chan func(error)
 }
 
-func (r observedRetentionRegistration) OnFailure(callback func(error)) { r.fail <- callback }
+func (r observedRetentionRegistration) OnFailure(callback func(error)) {
+	// Only the first pending failure callback is used.
+	select {
+	case r.fail <- callback:
+	default:
+	}
+}
 
 func TestSealedLateFloorRejectsChangedAdditiveManifest(t *testing.T) {
 	for _, tc := range []struct {

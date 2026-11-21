@@ -207,7 +207,9 @@ class Fixture:
                 consistency_level="Strong",
                 timeout=30,
             )
-            assert [x["id"] for x in hits[0]] == [2, 3]
+            assert [(x["id"], x["distance"], x["entity"]["score"], x["entity"]["tag"]) for x in hits[0]] == [
+                (2, 0.0, 10, "new"), (3, 1.0, 10, "new"),
+            ], hits
             self.record("filtered search", hits)
 
     @staticmethod

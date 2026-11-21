@@ -4279,6 +4279,9 @@ func TestPartialUpdateAutoIDInsertAndRetry(t *testing.T) {
 		t.Run(fmt.Sprintf("stringPK=%t/id=%d", testCase.stringPK, testCase.allocatedID), func(t *testing.T) {
 			stringPK := testCase.stringPK
 			task := partialUpdateAutoIDInsertTestTask(t, stringPK)
+			schema := proto.Clone(task.schema.CollectionSchema).(*schemapb.CollectionSchema)
+			schema.Fields = append(schema.Fields, &schemapb.FieldSchema{FieldID: 102, Name: "other", DataType: schemapb.DataType_Int32, DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_IntData{IntData: 0}}})
+			task.schema = mustNewSchemaInfo(schema)
 			partition := mockey.Mock((*metacache.MetaCache).GetPartitionID).Return(UniqueID(100), nil).Build()
 			defer partition.UnPatch()
 			originalFields := cloneFieldDataList(task.req.FieldsData)
@@ -4318,7 +4321,12 @@ func TestPartialUpdateAutoIDInsertAndRetry(t *testing.T) {
 				for _, proof := range task.partialUpdateCASGroups {
 					proof.ReadTs = uint64(1000 + reads)
 				}
-				return &milvuspb.QueryResults{Status: merr.Success(), FieldsData: []*schemapb.FieldData{respPK, value}}, segcore.StorageCost{}, nil
+				other := proto.Clone(value).(*schemapb.FieldData)
+				other.FieldId, other.FieldName = 102, "other"
+				for i := range other.GetScalars().GetIntData().Data {
+					other.GetScalars().GetIntData().Data[i] = int32(reads * 10)
+				}
+				return &milvuspb.QueryResults{Status: merr.Success(), FieldsData: []*schemapb.FieldData{respPK, value, other}}, segcore.StorageCost{}, nil
 			}).Build()
 			defer read.UnPatch()
 			require.NoError(t, task.prepareUpsert(context.Background()))
@@ -4352,6 +4360,14 @@ func TestPartialUpdateAutoIDInsertAndRetry(t *testing.T) {
 			task.req.FieldsData[1].GetScalars().GetIntData().Data[0] = 999
 			require.NoError(t, task.preparePartialUpdateRetryAttempt(context.Background()))
 			require.Equal(t, 2, reads)
+			var other *schemapb.FieldData
+			for _, f := range task.insertFieldData {
+				if f.GetFieldId() == 102 {
+					other = f
+				}
+			}
+			require.NotNil(t, other)
+			require.EqualValues(t, 20, other.GetScalars().GetIntData().Data[0], "retry preserves another field from the fresh read")
 			require.True(t, proto.Equal(destinationIDs, task.result.IDs))
 			require.Equal(t, 2, allocations) // one PK range, one internal RowID range
 			require.Equal(t, []int32{100, 200}, task.req.FieldsData[1].GetScalars().GetIntData().GetData())

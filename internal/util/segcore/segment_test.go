@@ -43,7 +43,11 @@ type gatedGCContext struct {
 func (c *gatedGCContext) Err() error {
 	if c.checks.Add(1) == 2 {
 		close(c.entered)
-		<-c.proceed
+		select {
+		case <-c.proceed:
+		case <-time.After(5 * time.Second):
+			return context.DeadlineExceeded
+		}
 	}
 	return c.Context.Err()
 }
@@ -60,18 +64,35 @@ func TestSegmentReleaseJoinsOwnedGC(t *testing.T) {
 		op := &gatedGCContext{Context: t.Context(), entered: make(chan struct{}), proceed: make(chan struct{})}
 		collected := make(chan error, 1)
 		go func() { collected <- s.GCUpdates(op, 50) }()
-		<-op.entered
+		select {
+		case <-op.entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for op.entered")
+		}
 		started, released := make(chan struct{}), make(chan struct{})
 		go func() { close(started); s.Release(); close(released) }()
-		<-started
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for started")
+		}
 		select {
 		case <-released:
 			t.Fatal("physical release overtook GC")
 		case <-time.After(20 * time.Millisecond):
 		}
 		close(op.proceed)
-		require.NoError(t, <-collected)
-		<-released
+		select {
+		case err := <-collected:
+			require.NoError(t, err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("GC did not complete")
+		}
+		select {
+		case <-released:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for released")
+		}
 		require.ErrorIs(t, s.GCUpdates(t.Context(), 51), merr.ErrSegmentNotLoaded)
 	}
 }

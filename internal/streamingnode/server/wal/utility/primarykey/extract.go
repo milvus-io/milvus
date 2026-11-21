@@ -63,7 +63,7 @@ func KeysOfInsertField(body *msgpb.InsertRequest, fieldID int64) (Keys, error) {
 
 // KeysOfDelete returns the primary keys of a delete body.
 func KeysOfDelete(body *msgpb.DeleteRequest) (Keys, error) {
-	return keysOfIDs(body.GetPrimaryKeys())
+	return KeysOfIDs(body.GetPrimaryKeys())
 }
 
 func findField(fields []*schemapb.FieldData, fieldID int64) (*schemapb.FieldData, error) {
@@ -89,14 +89,14 @@ func keysOfFieldData(field *schemapb.FieldData, fieldID int64) (Keys, error) {
 		if values == nil {
 			return Keys{}, status.NewUnrecoverableError("int64 primary keys are nil")
 		}
-		return keysOfIDs(&schemapb.IDs{
+		return KeysOfIDs(&schemapb.IDs{
 			IdField: &schemapb.IDs_IntId{IntId: values.LongData},
 		})
 	case *schemapb.ScalarField_StringData:
 		if values == nil {
 			return Keys{}, status.NewUnrecoverableError("varchar primary keys are nil")
 		}
-		return keysOfIDs(&schemapb.IDs{
+		return KeysOfIDs(&schemapb.IDs{
 			IdField: &schemapb.IDs_StrId{StrId: values.StringData},
 		})
 	default:
@@ -104,8 +104,8 @@ func keysOfFieldData(field *schemapb.FieldData, fieldID int64) (Keys, error) {
 	}
 }
 
-// keysOfIDs converts schemapb.IDs into Keys without copying the values.
-func keysOfIDs(ids *schemapb.IDs) (Keys, error) {
+// KeysOfIDs converts schemapb.IDs into Keys without copying the values.
+func KeysOfIDs(ids *schemapb.IDs) (Keys, error) {
 	if ids == nil {
 		return Keys{}, status.NewUnrecoverableError("primary keys are nil")
 	}

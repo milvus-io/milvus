@@ -6,6 +6,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storage/deltacodec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -19,6 +20,7 @@ type sealedRuntimeMetadata struct {
 }
 
 type deltaStorageMetadata struct {
+	nullableArrays    map[int64]bool
 	properties        []*commonpb.KeyValuePair
 	primaryKeyType    schemapb.DataType
 	external          bool
@@ -31,6 +33,7 @@ type deltaStorageMetadata struct {
 func newDeltaStorageMetadata(schema *schemapb.CollectionSchema) deltaStorageMetadata {
 	resolver := typeutil.NewStorageColumnResolver(schema)
 	return deltaStorageMetadata{
+		nullableArrays:    deltacodec.ArrayElementNullability(schema),
 		properties:        schema.GetProperties(),
 		primaryKeyType:    GetPkField(schema).GetDataType(),
 		external:          typeutil.IsExternalCollection(schema),

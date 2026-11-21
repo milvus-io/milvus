@@ -61,7 +61,11 @@ if replacements:
     inputs.append(mapping)
 manifest = {"commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()}
 for path in inputs:
-    manifest[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    with path.open("rb") as binary:
+        for chunk in iter(lambda: binary.read(1024 * 1024), b""):
+            digest.update(chunk)
+    manifest[str(path)] = digest.hexdigest()
 (out / "build-inputs.json").write_text(json.dumps(manifest, indent=2))
 PY
 overlay_args=()

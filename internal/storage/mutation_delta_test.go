@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -66,7 +67,7 @@ func TestMutationDeltaNativeProjection(t *testing.T) {
 	binlog := &datapb.Binlog{LogPath: path, EntriesNum: 4, MutationCounts: &datapb.DeltaMutationCounts{UpdateKeys: 6, DeleteKeys: 2}}
 	for _, ids := range [][]int64{nil, {105}, {}} {
 		var got []deltacodec.Row
-		err = ReadMutationDelta(ctx, cm, binlog, StorageV2, data.Layout.PKType, ids, cfg, nil, func(l deltacodec.Layout, rows []deltacodec.Row) error {
+		err = ReadMutationDelta(ctx, cm, binlog, StorageV2, data.Layout.PKType, nil, ids, cfg, nil, func(l deltacodec.Layout, rows []deltacodec.Row) error {
 			require.Equal(t, data.Layout.Project(ids), l)
 			got = append(got, rows...)
 			return nil
@@ -89,7 +90,7 @@ func TestMutationDeltaNativeProjection(t *testing.T) {
 	corrupt := filepath.Join(dir, "corrupt")
 	require.NoError(t, cm.Write(ctx, corrupt, []byte("bad footer")))
 	binlog.LogPath = corrupt
-	require.ErrorContains(t, ReadMutationDelta(ctx, cm, binlog, StorageV2, data.Layout.PKType, nil, cfg, nil, nil), "signature")
+	require.ErrorContains(t, ReadMutationDelta(ctx, cm, binlog, StorageV2, data.Layout.PKType, nil, nil, cfg, nil, nil), "signature")
 }
 
 func TestMutationDeltaInvalidIdentityCreatesNoObject(t *testing.T) {
@@ -145,7 +146,7 @@ func TestMutationDeltaLegacyFormats(t *testing.T) {
 			rec.Release()
 			require.NoError(t, writer.Close())
 			var got []deltacodec.Row
-			err = ReadMutationDelta(ctx, cm, &datapb.Binlog{LogPath: path, EntriesNum: 2}, spec.read, schemapb.DataType_Int64, []int64{}, cfg, nil, func(_ deltacodec.Layout, rs []deltacodec.Row) error { got = append(got, rs...); return nil })
+			err = ReadMutationDelta(ctx, cm, &datapb.Binlog{LogPath: path, EntriesNum: 2}, spec.read, schemapb.DataType_Int64, nil, []int64{}, cfg, nil, func(_ deltacodec.Layout, rs []deltacodec.Row) error { got = append(got, rs...); return nil })
 			require.NoError(t, err)
 			require.Len(t, got, 2)
 			for i, r := range got {
@@ -259,14 +260,14 @@ func TestMutationDeltaRejectsCorruptFooterAndCancellation(t *testing.T) {
 	}
 	require.NoError(t, writer.WriteRecordBatch(rec))
 	require.NoError(t, writer.Close())
-	err = ReadMutationDelta(ctx, cm, &datapb.Binlog{LogPath: path}, StorageV2, layout.PKType, nil, cfg, nil, nil)
+	err = ReadMutationDelta(ctx, cm, &datapb.Binlog{LogPath: path}, StorageV2, layout.PKType, nil, nil, cfg, nil, nil)
 	require.ErrorContains(t, err, "does not match its Parquet schema")
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
 	size, err := WriteMutationDelta(canceled, filepath.Join(dir, "cancelled"), MutationDelta{Layout: layout, Rows: []deltacodec.Row{row}}, cfg, nil)
 	require.ErrorIs(t, err, context.Canceled)
 	require.Zero(t, size)
-	require.ErrorIs(t, ReadMutationDelta(canceled, cm, &datapb.Binlog{LogPath: path}, StorageV2, layout.PKType, nil, cfg, nil, nil), context.Canceled)
+	require.ErrorIs(t, ReadMutationDelta(canceled, cm, &datapb.Binlog{LogPath: path}, StorageV2, layout.PKType, nil, nil, cfg, nil, nil), context.Canceled)
 	// A single oversized mutation stays whole. A following large assignment
 	// starts a new Arrow batch instead of multiplying transient allocation.
 	row.Assignments[0].Literal = &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_ScalarValue{ScalarValue: &schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: strings.Repeat("x", 1024)}}}}
@@ -283,4 +284,33 @@ func TestTypedDeltaDeleteKeyAccounting(t *testing.T) {
 	collector.Digest(nil, delta, 0, 0, 1, 2)
 	require.EqualValues(t, 14, collector.Publish().GetDeleteNumRows())
 	require.EqualValues(t, 14, BuildStatsFromFieldBinlogs(nil, nil, nil, []*datapb.FieldBinlog{delta}).GetDeleteNumRows())
+}
+
+func TestMutationDeltaArraySchemaMismatch(t *testing.T) {
+	paramtable.Init()
+	ctx := t.Context()
+	dir := t.TempDir()
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+	for _, tc := range []struct {
+		name   string
+		flag   *bool
+		target bool
+		mixed  bool
+	}{
+		{"explicit_false", proto.Bool(false), true, false}, {"explicit_true", proto.Bool(true), false, false}, {"legacy_null_in_required_elements", nil, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			arr := &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{23}}}}
+			if tc.mixed {
+				arr.ValidData = []bool{true, false}
+			}
+			layout := deltacodec.Layout{CollectionID: 1, VChannel: "p_1v0", PartitionID: -1, PKType: schemapb.DataType_Int64, Fields: []deltacodec.Field{{ID: 105, Type: schemapb.DataType_Array, Element: schemapb.DataType_Int64, ElementNullable: tc.flag}}}
+			row := deltacodec.Row{Operation: deltacodec.Update, TimeTick: 10, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}, Assignments: []*messagespb.UpdateAssignment{{FieldId: 105, Literal: &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_ArrayValue{ArrayValue: arr}}}}}
+			path := filepath.Join(dir, tc.name)
+			_, err := WriteMutationDelta(ctx, path, MutationDelta{Layout: layout, Rows: []deltacodec.Row{row}}, cfg, nil)
+			require.NoError(t, err)
+			err = ReadPackedMutationDelta(ctx, &datapb.Binlog{LogPath: path}, layout.PKType, map[int64]bool{105: tc.target}, nil, cfg, nil, func(deltacodec.Layout, []deltacodec.Row) error { t.Fatal("incompatible batch delivered"); return nil })
+			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+		})
+	}
 }

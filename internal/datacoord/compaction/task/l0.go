@@ -740,8 +740,8 @@ func (t *L0CompactionTask) commitL0V3DeltalogsBatch(ctx context.Context, deltalo
 		}
 	}
 	// Delegate even when commits is empty: CommitSegmentManifests still publishes
-	// extraOperators through a plain UpdateSegmentsInfo, so the input retirement
-	// lands when every target was skipped mid-plan.
+	// extraOperators through a plain UpdateSegmentsInfo, including input retirement
+	// for legacy plans when every target was skipped mid-plan.
 	return t.meta.CommitSegmentManifests(ctx, commits, extraOperators...)
 }
 

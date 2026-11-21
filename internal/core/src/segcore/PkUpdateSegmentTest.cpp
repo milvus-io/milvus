@@ -709,16 +709,19 @@ TEST(PkUpdateSegment, GCJoinsActiveNativeVisitor) {
     auto reader = std::async(std::launch::async, [&] {
         record.VisitUpdates(age, 10, [&](int64_t, const UpdateValue& value) {
             visiting.set_value();
-            resume_signal.wait();
+            EXPECT_EQ(resume_signal.wait_for(std::chrono::seconds(5)),
+                      std::future_status::ready);
             EXPECT_EQ(std::get<int64_t>(value), 100);
         });
     });
-    visiting.get_future().wait();
+    ASSERT_EQ(visiting.get_future().wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
     auto gc = std::async(std::launch::async, [&] {
         collecting.set_value();
         return GCUpdates(segment.get(), 20);
     });
-    collecting.get_future().wait();
+    ASSERT_EQ(collecting.get_future().wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
     EXPECT_EQ(gc.wait_for(std::chrono::milliseconds(30)),
               std::future_status::timeout);
     resume.set_value();

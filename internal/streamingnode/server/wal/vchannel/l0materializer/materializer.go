@@ -170,7 +170,9 @@ func (m *SyncMaterializer) materializeGroup(
 		WithBatchRows(0).
 		WithFlush()
 
+	rows, kind := uint64(len(group.pks)), "delete"
 	if group.delta != nil {
+		rows, kind = group.logicalRows, "typed mutations"
 		pack.WithMutationDelta(group.delta, group.bytes)
 	} else {
 		pack.WithDeleteData(storage.NewDeleteData(group.pks, group.timestamps))
@@ -184,13 +186,13 @@ func (m *SyncMaterializer) materializeGroup(
 		WithSyncPack(pack).
 		WithStorageConfig(packed.CreateStorageConfig())
 
-	mlog.Info(ctx, "materialize deletes into l0 segment",
+	mlog.Info(ctx, "materialize mutations into l0 segment", mlog.String("kind", kind),
 		mlog.FieldCollectionID(collectionID),
 		mlog.FieldPartitionID(group.partitionID),
 		mlog.FieldSegmentID(segmentID),
 		mlog.String("vchannel", vchannel),
 		mlog.Uint64("targetTimeTick", req.TargetTimeTick),
-		mlog.Int64("rows", int64(len(group.pks))),
+		mlog.Uint64("rows", rows),
 		mlog.Uint64("bytes", group.bytes),
 	)
 	// Bound coordinator client retries; the WAL task scheduler owns later attempts.
@@ -383,7 +385,11 @@ func typedMaterializeGroups(req MaterializeRequest, collectionID int64) ([]mater
 				if f == nil {
 					return merr.WrapErrDataIntegrityMsg("missing delta field %d at %d", a.GetFieldId(), tt)
 				}
-				g.fields[f.GetFieldID()] = deltacodec.Field{ID: f.GetFieldID(), Type: f.GetDataType(), Element: f.GetElementType()}
+				field := deltacodec.Field{ID: f.GetFieldID(), Type: f.GetDataType(), Element: f.GetElementType()}
+				if field.Type == schemapb.DataType_Array {
+					field.ElementNullable = proto.Bool(f.GetElementNullable())
+				}
+				g.fields[field.ID] = field
 			}
 			g.rows = append(g.rows, r)
 			g.bytes += uint64(bytes)

@@ -64,7 +64,7 @@ func (loader *segmentLoader) loadMutationDeltalogs(ctx context.Context, segment 
 			return err
 		}
 		for _, path := range paths {
-			if err := storage.ReadPackedMutationDelta(ctx, &datapb.Binlog{LogPath: path}, meta.primaryKeyType, selected, cfg, plugin, visit); err != nil {
+			if err := storage.ReadPackedMutationDelta(ctx, &datapb.Binlog{LogPath: path}, meta.primaryKeyType, meta.nullableArrays, selected, cfg, plugin, visit); err != nil {
 				return merr.Wrapf(err, "read manifest delta %q", path)
 			}
 		}
@@ -83,7 +83,7 @@ func (loader *segmentLoader) loadMutationDeltalogs(ctx context.Context, segment 
 					}
 					continue
 				}
-				if err := storage.ReadMutationDelta(ctx, loader.cm, file, info.GetStorageVersion(), meta.primaryKeyType, selected, cfg, plugin, visit); err != nil {
+				if err := storage.ReadMutationDelta(ctx, loader.cm, file, info.GetStorageVersion(), meta.primaryKeyType, meta.nullableArrays, selected, cfg, plugin, visit); err != nil {
 					return merr.Wrapf(err, "read delta %q", file.GetLogPath())
 				}
 			}

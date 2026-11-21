@@ -144,7 +144,7 @@ func TestWALMaterializerMixedTxnNativeRegistrationRetry(t *testing.T) {
 	duplicates := 0
 	for _, bin := range f.registry.files {
 		require.NotNil(t, bin.GetMutationCounts())
-		err := storage.ReadMutationDelta(ctx, f.cm, bin, storage.StorageV2, schemapb.DataType_Int64, nil, cfg, nil, func(l deltacodec.Layout, rs []deltacodec.Row) error {
+		err := storage.ReadMutationDelta(ctx, f.cm, bin, storage.StorageV2, schemapb.DataType_Int64, nil, nil, cfg, nil, func(l deltacodec.Layout, rs []deltacodec.Row) error {
 			for _, r := range rs {
 				require.Equal(t, uint64(300), r.TimeTick)
 				if r.Operation == deltacodec.Delete {
@@ -182,7 +182,7 @@ func TestWALMaterializerStandaloneNativeUpdate(t *testing.T) {
 	require.Equal(t, int64(2), bin.GetMutationCounts().GetUpdateKeys())
 	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: f.dir}
 	var decoded []deltacodec.Row
-	err := storage.ReadMutationDelta(ctx, f.cm, bin, storage.StorageV2, schemapb.DataType_Int64, nil, cfg, nil, func(l deltacodec.Layout, rows []deltacodec.Row) error {
+	err := storage.ReadMutationDelta(ctx, f.cm, bin, storage.StorageV2, schemapb.DataType_Int64, nil, nil, cfg, nil, func(l deltacodec.Layout, rows []deltacodec.Row) error {
 		require.Equal(t, int64(10), l.PartitionID)
 		require.Equal(t, "p_1v0", l.VChannel)
 		decoded = append(decoded, rows...)
@@ -259,7 +259,7 @@ func TestMixedTxnDeleteOnlyScopeKeepsOrdinal(t *testing.T) {
 	scopes := map[int64]uint32{}
 	for _, file := range f.registry.files {
 		require.NotNil(t, file.MutationCounts)
-		require.NoError(t, storage.ReadMutationDelta(t.Context(), f.cm, file, storage.StorageV2, schemapb.DataType_Int64, nil, cfg, nil, func(layout deltacodec.Layout, rows []deltacodec.Row) error {
+		require.NoError(t, storage.ReadMutationDelta(t.Context(), f.cm, file, storage.StorageV2, schemapb.DataType_Int64, nil, nil, cfg, nil, func(layout deltacodec.Layout, rows []deltacodec.Row) error {
 			require.Len(t, rows, 1)
 			require.EqualValues(t, 300, rows[0].TimeTick)
 			scopes[layout.PartitionID] = rows[0].SourceOrdinal

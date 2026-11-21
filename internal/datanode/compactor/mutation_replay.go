@@ -82,6 +82,7 @@ func readSegmentMutations(ctx context.Context, source mutationSource, cfg *index
 	if err != nil {
 		return err
 	}
+	nullableArrays := deltacodec.ArrayElementNullability(plan.GetSchema())
 	fields := make(map[int64]*schemapb.FieldSchema)
 	for _, field := range plan.GetSchema().GetFields() {
 		fields[field.GetFieldID()] = field
@@ -137,7 +138,7 @@ func readSegmentMutations(ctx context.Context, source mutationSource, cfg *index
 				return nil
 			}
 			if seg.GetManifest() != "" {
-				if err := storage.ReadPackedMutationDelta(ctx, file, pk.GetDataType(), nil, cfg, plugin, visit); err != nil {
+				if err := storage.ReadPackedMutationDelta(ctx, file, pk.GetDataType(), nullableArrays, nil, cfg, plugin, visit); err != nil {
 					return merr.Wrapf(err, "read deltalog %q for segment %d", file.GetLogPath(), seg.GetSegmentID())
 				}
 			} else if file.GetMutationCounts() == nil && source.download != nil {
@@ -148,14 +149,14 @@ func readSegmentMutations(ctx context.Context, source mutationSource, cfg *index
 				if len(objects) != 1 {
 					return merr.WrapErrDataIntegrityMsg("expected one downloaded delta object, got %d", len(objects))
 				}
-				if err := storage.ReadDownloadedMutationDelta(ctx, objects[0], file, version, pk.GetDataType(), cfg, plugin, visit); err != nil {
+				if err := storage.ReadDownloadedMutationDelta(ctx, objects[0], file, version, pk.GetDataType(), nullableArrays, cfg, plugin, visit); err != nil {
 					return merr.Wrapf(err, "read deltalog %q for segment %d", file.GetLogPath(), seg.GetSegmentID())
 				}
 			} else {
 				if source.cm == nil {
 					return merr.WrapErrServiceInternalMsg("missing chunk manager for packed compaction delta")
 				}
-				err := storage.ReadMutationDelta(ctx, source.cm, file, version, pk.GetDataType(), nil, cfg, plugin, visit)
+				err := storage.ReadMutationDelta(ctx, source.cm, file, version, pk.GetDataType(), nullableArrays, nil, cfg, plugin, visit)
 				if err != nil {
 					return merr.Wrapf(err, "read deltalog %q for segment %d", file.GetLogPath(), seg.GetSegmentID())
 				}

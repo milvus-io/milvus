@@ -65,7 +65,7 @@ func run() error {
 	}
 	if len(os.Args) == 2 {
 		file := &datapb.Binlog{LogPath: os.Args[1]}
-		return storage.ReadMutationDelta(ctx, cm, file, storage.StorageV2, schemapb.DataType_Int64, nil, cfg, nil, func(l deltacodec.Layout, rows []deltacodec.Row) error {
+		return storage.ReadMutationDelta(ctx, cm, file, storage.StorageV2, schemapb.DataType_Int64, nil, nil, cfg, nil, func(l deltacodec.Layout, rows []deltacodec.Row) error {
 			return json.NewEncoder(os.Stdout).Encode(map[string]any{"file": file.LogPath, "layout": l, "rows": rows})
 		})
 	}
@@ -149,7 +149,7 @@ func run() error {
 				}
 			}
 			for _, f := range files {
-				err := storage.ReadMutationDelta(ctx, cm, f, storage.StorageV2, schemapb.DataType_Int64, nil, cfg, nil, func(l deltacodec.Layout, rows []deltacodec.Row) error {
+				err := storage.ReadMutationDelta(ctx, cm, f, storage.StorageV2, schemapb.DataType_Int64, nil, nil, cfg, nil, func(l deltacodec.Layout, rows []deltacodec.Row) error {
 					return enc.Encode(map[string]any{"file": f.LogPath, "referrer": key, "layout": l, "rows": rows})
 				})
 				if err != nil {

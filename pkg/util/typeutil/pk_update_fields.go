@@ -26,6 +26,11 @@ func SupportsPKUpdateType(field *schemapb.FieldSchema) bool {
 func PKUpdateFieldRestriction(schema *schemapb.CollectionSchema) func(*schemapb.FieldSchema) bool {
 	restrictedNames := map[string]bool{}
 	restrictedIDs := map[int64]bool{}
+	for _, parent := range schema.GetStructArrayFields() {
+		for _, child := range parent.GetFields() {
+			restrictedIDs[child.GetFieldID()] = true
+		}
+	}
 	for _, f := range schema.GetFunctions() {
 		for _, name := range append(append([]string{}, f.GetInputFieldNames()...), f.GetOutputFieldNames()...) {
 			restrictedNames[name] = true

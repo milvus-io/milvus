@@ -135,7 +135,8 @@ def run(f, pair):
                 read_scope(left, right)
                 return
             except MilvusException as error:
-                if time.monotonic() >= deadline:
+                # Only retry serving availability failures during owner replacement.
+                if error.code not in (1, 2, 401, 503, 601, 905) or time.monotonic() >= deadline:
                     raise
                 f.record("read while worker ownership converges", str(error))
                 time.sleep(2)

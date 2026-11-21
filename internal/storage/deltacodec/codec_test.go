@@ -105,6 +105,11 @@ func TestMutationAssignmentLogicalTypes(t *testing.T) {
 			field := Field{ID: 106, Type: schemapb.DataType_Array, Element: c.typ}
 			require.True(t, proto.Equal(literal, check(field, literal)), "empty list is a SET value")
 			data.Append(c.value)
+			field.ElementNullable = proto.Bool(false)
+			require.True(t, proto.Equal(literal, check(field, literal)))
+			field.ElementNullable = proto.Bool(true)
+			arr.ValidData = []bool{true}
+			require.True(t, proto.Equal(literal, check(field, literal)))
 			arr.ValidData = []bool{false, true}
 			decoded := check(field, literal)
 			require.Equal(t, []bool{false, true}, decoded.GetArrayValue().ValidData)

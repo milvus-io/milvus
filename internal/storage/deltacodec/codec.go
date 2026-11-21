@@ -51,9 +51,21 @@ type Row struct {
 }
 
 type Field struct {
-	ID      int64
-	Type    schemapb.DataType
-	Element schemapb.DataType
+	ID              int64
+	Type            schemapb.DataType
+	Element         schemapb.DataType
+	ElementNullable *bool `json:",omitempty"`
+}
+
+// ArrayElementNullability captures the destination schema for decoding older v1 files.
+func ArrayElementNullability(schema *schemapb.CollectionSchema) map[int64]bool {
+	fields := make(map[int64]bool)
+	for _, field := range schema.GetFields() {
+		if field.GetDataType() == schemapb.DataType_Array {
+			fields[field.GetFieldID()] = field.GetElementNullable()
+		}
+	}
+	return fields
 }
 
 type Layout struct {
@@ -228,6 +240,9 @@ func AppendLiteral(b array.Builder, f Field, literal *schemapb.UpdateLiteral) er
 		elems := msg.Get(desc).Message()
 		values := elems.Get(elems.Descriptor().Fields().ByName("data")).List()
 		validity := literal.GetArrayValue().GetValidData()
+		if f.ElementNullable != nil && !*f.ElementNullable && slices.Contains(validity, false) {
+			return merr.WrapErrDataIntegrityMsg("NULL element in required delta array field %d", f.ID)
+		}
 		n := values.Len()
 		compact := len(validity) > 0 && len(validity) != n
 		if compact {
@@ -392,17 +407,24 @@ func Decode(l Layout, rec arrow.Record) ([]Row, error) {
 				list := child.(*array.List)
 				elems := list.ListValues()
 				lo, hi := list.ValueOffsets(i)
+				if f.ElementNullable != nil && *f.ElementNullable && hi > lo {
+					payload.ValidData = make([]bool, hi-lo)
+				}
 				for k := lo; k < hi; k++ {
-					if elems.IsNull(int(k)) && payload.ValidData == nil {
+					isNull := elems.IsNull(int(k))
+					if isNull && payload.ValidData == nil {
+						if f.ElementNullable != nil {
+							return nil, merr.WrapErrDataIntegrityMsg("NULL element in required delta array field %d", f.ID)
+						}
 						payload.ValidData = make([]bool, hi-lo)
 						for x := range int(k - lo) {
 							payload.ValidData[x] = true
 						}
 					}
 					if payload.ValidData != nil {
-						payload.ValidData[k-lo] = !elems.IsNull(int(k))
+						payload.ValidData[k-lo] = !isNull
 					}
-					if elems.IsNull(int(k)) {
+					if isNull {
 						out.Append(out.NewElement())
 					} else {
 						out.Append(primitive(elems, int(k)))

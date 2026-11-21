@@ -29,21 +29,61 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/l0materializer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	walutil "github.com/milvus-io/milvus/internal/util/streamingutil/util"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+type materializedUpdateRows struct {
+	syncmgr.MetaWriter
+	keys int64
+}
+
+func (r *materializedUpdateRows) UpdateSync(_ context.Context, task *syncmgr.SyncTask) error {
+	_, _, delta, _ := task.Binlogs()
+	for _, file := range delta.GetBinlogs() {
+		r.keys += file.GetMutationCounts().GetUpdateKeys()
+	}
+	return nil
+}
+
+func checkPreparedUpdateMaterializes(t *testing.T, schema *schemapb.CollectionSchema, msgs []message.MutableMessage) {
+	t.Helper()
+	dir := t.TempDir()
+	pt := paramtable.Get()
+	oldType := pt.CommonCfg.StorageType.SwapTempValue("local")
+	defer pt.CommonCfg.StorageType.SwapTempValue(oldType)
+	oldPath := pt.LocalStorageCfg.Path.SwapTempValue(dir)
+	defer pt.LocalStorageCfg.Path.SwapTempValue(oldPath)
+	registry := &materializedUpdateRows{}
+	writer := l0materializer.NewSyncMaterializer(storage.NewLocalChunkManager(objectstorage.RootPath(dir)), allocator.NewLocalAllocator(1, 100), registry)
+	for i, msg := range msgs {
+		tt := uint64(200 + i)
+		sealed := msg.WithTimeTick(tt).WithLastConfirmed(walimplstest.NewTestMessageID(1)).IntoImmutableMessage(walimplstest.NewTestMessageID(int64(tt)))
+		entry := messageutil.BuildTransformLogEntry(sealed, messageutil.TransformEntryOption{})
+		require.NoError(t, writer.Materialize(t.Context(), l0materializer.MaterializeRequest{VChannel: msg.VChannel(), TargetTimeTick: tt, Schemas: map[uint64]*schemapb.CollectionSchema{tt: schema}, Entries: []*streamingpb.TransformLogEntry{entry}}))
+	}
+	require.EqualValues(t, 3, registry.keys)
+}
 
 func TestPKUpdatePrepareAndAppend(t *testing.T) {
 	paramtable.Init()
 	require.NoError(t, paramtable.Get().Save("proxy.pkUpdate.maxPkCount", "4"))
 	t.Cleanup(func() { paramtable.Get().Reset("proxy.pkUpdate.maxPkCount") })
-	for _, name := range []string{"success", "oversize", "invalid", "namespace", "schema_mismatch", "mixed_failure", "empty_keys", "below_limit", "at_limit", "over_limit", "duplicate_keys_over_limit", "kafka_oversize", "kafka_headroom", "kafka_larger_limit", "rocksmq", "prepared_oversize", "prepared_at_limit", "request_oversize"} {
+	for _, name := range []string{"struct_child", "success", "oversize", "invalid", "namespace", "schema_mismatch", "mixed_failure", "empty_keys", "below_limit", "at_limit", "over_limit", "duplicate_keys_over_limit", "kafka_oversize", "kafka_headroom", "kafka_larger_limit", "rocksmq", "prepared_oversize", "prepared_at_limit", "request_oversize"} {
 		t.Run(name, func(t *testing.T) {
 			cache := newTestCache()
 			field := &schemapb.FieldSchema{FieldID: 101, Name: "name", DataType: schemapb.DataType_VarChar, Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "4096"}}}
@@ -51,7 +91,11 @@ func TestPKUpdatePrepareAndAppend(t *testing.T) {
 				field.DataType, field.ElementType = schemapb.DataType_Array, schemapb.DataType_VarChar
 				field.TypeParams = []*commonpb.KeyValuePair{{Key: "max_length", Value: "64"}, {Key: "max_capacity", Value: "4096"}}
 			}
-			schema := mustNewSchemaInfo(updateTestSchema(field))
+			collection := updateTestSchema(field)
+			if name == "struct_child" {
+				collection.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 102, Name: "profile", Fields: []*schemapb.FieldSchema{{FieldID: 103, Name: "profile[a]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "8"}}}}}}
+			}
+			schema := mustNewSchemaInfo(collection)
 			schema.Version = 7
 			if name == "namespace" {
 				schema.EnableNamespace = true
@@ -92,6 +136,9 @@ func TestPKUpdatePrepareAndAppend(t *testing.T) {
 					require.EqualValues(t, 7, u.Header().GetSchemaVersion())
 					require.EqualValues(t, -1, u.MustBody().GetPartitionId())
 					require.Len(t, u.MustBody().GetAssignments(), 1)
+				}
+				if name == "struct_child" {
+					checkPreparedUpdateMaterializes(t, schema.CollectionSchema, msgs)
 				}
 				switch name {
 				case "schema_mismatch":
@@ -160,6 +207,15 @@ func TestPKUpdatePrepareAndAppend(t *testing.T) {
 				defer paramtable.Get().PulsarCfg.MaxMessageSize.SwapTempValue(previous)
 				req.Assignments[0].Literal = updateScalar(&schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: strings.Repeat("x", 1024)}})
 			}
+			if name == "struct_child" {
+				for _, value := range []*schemapb.UpdateLiteral{updateNull(), {Value: &schemapb.UpdateLiteral_ArrayValue{ArrayValue: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}}}}}} {
+					child := proto.Clone(req).(*milvuspb.UpdateRecordsRequest)
+					child.Assignments = []*milvuspb.UpdateAssignment{{FieldName: "profile[a]", Literal: value}}
+					_, err := UpdateRecords(t.Context(), cache, child)
+					require.ErrorIs(t, err, merr.ErrParameterInvalid)
+					require.Zero(t, appends)
+				}
+			}
 			result, err := UpdateRecords(t.Context(), cache, req)
 			switch name {
 			case "oversize", "invalid", "namespace", "empty_keys", "over_limit", "duplicate_keys_over_limit", "kafka_oversize", "kafka_headroom", "prepared_oversize", "request_oversize":
@@ -177,7 +233,7 @@ func TestPKUpdatePrepareAndAppend(t *testing.T) {
 				require.ErrorContains(t, err, "first shard shutdown")
 				require.Equal(t, 1, appends, "partially committed shards must not be replayed")
 				require.Equal(t, 1, invalidations)
-			case "success", "below_limit", "at_limit", "kafka_larger_limit", "rocksmq", "prepared_at_limit":
+			case "struct_child", "success", "below_limit", "at_limit", "kafka_larger_limit", "rocksmq", "prepared_at_limit":
 				require.NoError(t, err)
 				require.EqualValues(t, 200, result.GetTimestamp())
 				expectedCount := int64(3)

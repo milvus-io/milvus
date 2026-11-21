@@ -2,20 +2,24 @@ package segments
 
 import (
 	"fmt"
+	"math"
 	"path"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storage/deltacodec"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 )
 
 func (suite *SegmentLoaderSuite) TestMixedMutationFilesRestoreWithoutTail() {
@@ -175,4 +179,105 @@ func (suite *SegmentLoaderSuite) TestMixedMutationFilesRestoreWithoutTail() {
 	require.EqualValues(t, 123, newValue)
 	_, valid = read(narrow, 35, field)
 	require.False(t, valid)
+}
+
+func (suite *SegmentLoaderSuite) TestArrayDeltaReloadAndReplay() {
+	t := suite.T()
+	ctx := t.Context()
+	collection, partition, id := suite.collectionID+1, suite.partitionID, suite.segmentID
+	schema := proto.Clone(suite.schema).(*schemapb.CollectionSchema)
+	const plain, nullable int64 = 300, 301
+	for _, field := range []int64{plain, nullable} {
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{FieldID: field, Name: fmt.Sprintf("values%d", field), DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32, Nullable: true, ElementNullable: field == nullable})
+	}
+	require.NoError(t, suite.manager.Collection.PutOrRef(collection, schema, mock_segcore.GenTestIndexMeta(collection, schema), &querypb.LoadMetaInfo{CollectionID: collection, LoadType: querypb.LoadType_LoadCollection, PartitionIDs: []int64{partition}}))
+	defer suite.manager.Collection.Unref(collection, 1)
+	data, err := mock_segcore.GenInsertData(4, schema)
+	require.NoError(t, err)
+	keys := data.Data[GetPkField(schema).FieldID].(*storage.Int64FieldData)
+	keys.Data = []int64{10, 11, 12, 13}
+	data.Data[1].(*storage.Int64FieldData).Data = []int64{1, 2, 3, 4}
+	for _, f := range []int64{plain, nullable} {
+		base := data.Data[f].(*storage.ArrayFieldData)
+		base.Nullable = true
+		base.ElementNullable = f == nullable
+		base.ValidData = []bool{true, true, true, true}
+		for _, row := range base.Data {
+			if f == nullable {
+				for range row.GetIntData().Data {
+					row.ValidData = append(row.ValidData, true)
+				}
+			}
+		}
+	}
+	reader, err := storage.NewInsertDataRecordReader(data, schema)
+	require.NoError(t, err)
+	defer reader.Close()
+	record, err := reader.Next()
+	require.NoError(t, err)
+	writer, err := storage.NewBinlogRecordWriter(ctx, collection, partition, id, schema, allocator.NewLocalAllocator(100, math.MaxInt64), 1<<20, 4, storage.WithVersion(storage.StorageV3), storage.WithStorageConfig(createStorageConfig()), storage.WithWriterFormat("parquet"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Close())
+	logs, _, _, manifest, _ := writer.GetLogs()
+	require.NoError(t, err)
+	channel := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collection)
+	layout := deltacodec.Layout{CollectionID: collection, PartitionID: partition, VChannel: channel, PKType: schemapb.DataType_Int64}
+	var rows []deltacodec.Row
+	for _, field := range []int64{plain, nullable} {
+		// Write the original v1 field directory without an element-nullability marker.
+		layout.Fields = append(layout.Fields, deltacodec.Field{ID: field, Type: schemapb.DataType_Array, Element: schemapb.DataType_Int32})
+		for i, key := range keys.Data {
+			arr := &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{}}}
+			value := &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_ArrayValue{ArrayValue: arr}}
+			switch i {
+			case 0, 1:
+				arr.GetIntData().Data = []int32{5, 6}
+				if field == nullable {
+					arr.ValidData = []bool{true, i == 0}
+					if i == 1 {
+						arr.GetIntData().Data[1] = 0
+					}
+				}
+			case 3:
+				value = &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_NullValue{}}
+			}
+			rows = append(rows, deltacodec.Row{Operation: deltacodec.Update, TimeTick: 20, SourceOrdinal: uint32(len(rows)), PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{key}}}}, Assignments: []*messagespb.UpdateAssignment{{FieldId: field, Literal: value}}})
+		}
+	}
+	base, _, err := packed.UnmarshalManifestPath(manifest)
+	require.NoError(t, err)
+	file := metautil.BuildDeltaLogPathV3(base, 30000)
+	_, err = storage.WriteMutationDelta(ctx, file, storage.MutationDelta{Layout: layout, Rows: rows}, createStorageConfig(), nil)
+	require.NoError(t, err)
+	manifest, err = packed.AddDeltaLogsToManifest(manifest, createStorageConfig(), []packed.DeltaLogEntry{{Path: file, NumEntries: int64(len(rows))}})
+	require.NoError(t, err)
+	info := &querypb.SegmentLoadInfo{SegmentID: id, PartitionID: partition, CollectionID: collection, InsertChannel: channel, BinlogPaths: storage.SortFieldBinlogs(logs), StorageVersion: storage.StorageV3, ManifestPath: manifest, NumOfRows: 4}
+	loaded, err := suite.loader.Load(ctx, collection, SegmentTypeSealed, 0, info)
+	require.NoError(t, err)
+	local := loaded[0].(*LocalSegment)
+	defer local.Release(ctx)
+	for _, r := range rows {
+		a := r.Assignments[0]
+		// The live payload and the restored entry must agree at the same identity.
+		require.NoError(t, local.ApplyUpdates(ctx, r.TimeTick, r.SourceOrdinal, &messagespb.UpdateMessageBody{PrimaryKeys: r.PrimaryKeys, Assignments: r.Assignments}))
+		encoded, err := proto.Marshal(&planpb.PlanNode{Node: &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{Limit: 4}}, OutputFieldIds: []int64{a.FieldId}})
+		require.NoError(t, err)
+		plan, err := segcore.NewRetrievePlan(local.GetCollection().GetCCollection(), encoded, 20, 100, 0, 0, 0)
+		require.NoError(t, err)
+		res, err := local.RetrieveByOffsets(ctx, &segcore.RetrievePlanWithOffsets{RetrievePlan: plan, Offsets: []int64{r.PrimaryKeys.GetIntId().Data[0] - 10}})
+		plan.Delete()
+		require.NoError(t, err)
+		var got *schemapb.FieldData
+		for _, f := range res.FieldsData {
+			if f.FieldId == a.FieldId {
+				got = f
+			}
+		}
+		require.NotNil(t, got)
+		require.Equal(t, a.Literal.GetArrayValue() != nil, got.ValidData[0])
+		if got.ValidData[0] {
+			require.True(t, proto.Equal(a.Literal.GetArrayValue(), got.GetScalars().GetArrayData().Data[0]), "field=%d ordinal=%d got=%v", a.FieldId, r.SourceOrdinal, got)
+		}
+	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -41,6 +42,28 @@ func TestPartialUpdateRecoveryLocksDurablePrefixAndNewSuffix(t *testing.T) {
 	require.True(t, env.hasPKVersionAfter("v1", 20, readTS))
 	require.Nil(t, env.partial.state.getTxn(1))
 	requireTestRowLocksAvailable(t, env.partial.state.rowLocks, "v1", 10, 20)
+}
+
+func TestPartialUpdateRecoveryPublishesFragmentedPKUpdate(t *testing.T) {
+	txnCtx := message.TxnContext{TxnID: 1, Keepalive: message.TxnKeepaliveInfinite}
+	makeUpdate := func(key string) message.MutableMessage {
+		return ordinaryPKUpdate(&schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{key}}}})
+	}
+	builder := recoveredWriteSetBuilder(t, txnCtx, 10, makeUpdate("prefix"))
+	env := newPartialUpdateChainTestEnvWithBuilders(t, map[message.TxnID]*message.ImmutableTxnMessageBuilder{1: builder})
+	_, err := env.append(makeUpdate("suffix").WithTxnContext(txnCtx), nil)
+	require.NoError(t, err)
+	read := env.allocateReadTS(t)
+	_, err = env.append(newCommitTxnMessage("v1", 1, 0), nil)
+	require.NoError(t, err)
+	for _, key := range []string{"prefix", "suffix", "disjoint"} {
+		err := env.partial.state.pkVersions.VerifyTyped("v1", primarykey.Keys{Kind: primarykey.KindString, StringValues: []string{key}}, read, env.allocateReadTS(t))
+		if key == "disjoint" {
+			require.NoError(t, err)
+		} else {
+			requirePartialUpdateRetryable(t, err)
+		}
+	}
 }
 
 func TestPartialUpdateRecoveryReplicatedCASKeepsCommittedSourceWrites(t *testing.T) {

@@ -134,5 +134,6 @@ def serving_generation(snapshot, cid, owner, target):
             if expected != bound or loaded != {sid: t[0] for sid, t in expected.items()}:
                 return None
             coverage.update(bound)
-            floors[ch] = max(int(v) for v in meta["readAdmissionFloor"].values())
+            threshold = max(int(v) for v in meta["readAdmissionFloor"].values())
+            floors[ch] = min(floors.get(ch, threshold), threshold)
     return floors if coverage == set(target) and len(floors) == 2 else None

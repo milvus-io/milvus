@@ -284,7 +284,7 @@ func (s *MixCompactionTaskStorageV3Suite) checkCertifiedL0Dispatch(budget uint64
 		var deletes int
 		for _, file := range files {
 			updateKeys += file.GetMutationCounts().GetUpdateKeys()
-			err := storage.ReadMutationDelta(ctx, s.task.cm, file, storage.StorageV2, schemapb.DataType_Int64, nil, cfg, nil, func(l deltacodec.Layout, rows []deltacodec.Row) error {
+			err := storage.ReadMutationDelta(ctx, s.task.cm, file, storage.StorageV2, schemapb.DataType_Int64, nil, nil, cfg, nil, func(l deltacodec.Layout, rows []deltacodec.Row) error {
 				require.Equal(t, targets[i].PartitionID, l.PartitionID)
 				for _, row := range rows {
 					if row.Operation == deltacodec.Delete {
@@ -438,7 +438,7 @@ func (s *MixCompactionTaskStorageV3Suite) TestCertifiedTinyFileCatalogValue() {
 		var previous uint64
 		var previousOrdinal uint32
 		var readRows int64
-		err := storage.ReadMutationDelta(ctx, s.task.cm, file, storage.StorageV2, schemapb.DataType_Int64, nil, s.task.compactionParams.StorageConfig, nil, func(_ deltacodec.Layout, rows []deltacodec.Row) error {
+		err := storage.ReadMutationDelta(ctx, s.task.cm, file, storage.StorageV2, schemapb.DataType_Int64, nil, nil, s.task.compactionParams.StorageConfig, nil, func(_ deltacodec.Layout, rows []deltacodec.Row) error {
 			for _, row := range rows {
 				key := row.PrimaryKeys.GetIntId().GetData()[0]
 				require.GreaterOrEqual(t, row.TimeTick, firstTick)
@@ -477,4 +477,73 @@ func (s *MixCompactionTaskStorageV3Suite) TestCertifiedTinyFileCatalogValue() {
 	t.Logf("%d source files, %d dispatched objects, %d persisted field bytes", count, len(persisted.Binlogs), len(values[0]))
 	require.Less(t, len(values[0]), valueLimit)
 	require.Greater(t, len(persisted.Binlogs), 1, "the prefix exceeds the worker window")
+}
+
+func (s *MixCompactionTaskStorageV3Suite) TestArrayDeltaRewrite() {
+	t := s.T()
+	ctx := t.Context()
+	plan, cfg := s.task.plan, s.task.compactionParams.StorageConfig
+	schema := w6bCompactionSchema()
+	source := w6bWriteCompactionSource(t, cfg, schema, 10, []int64{1, 2, 3, 4}, false)
+	plan.Schema = schema
+	plan.Channel = "array-rewrite"
+	plan.TotalRows = 4
+	plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{source}
+	birth := tsoutil.ComposeTSByTime(getMilvusBirthday())
+	delta := storage.MutationDelta{Layout: deltacodec.Layout{CollectionID: source.CollectionID, PartitionID: source.PartitionID, VChannel: plan.Channel, PKType: schemapb.DataType_Int64}}
+	expected := map[int64]map[int64]*schemapb.ScalarField{}
+	for _, id := range []int64{105, 106} {
+		nullable := id == 106
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{FieldID: id, Name: fmt.Sprintf("tags%d", id), DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true, ElementNullable: nullable})
+		delta.Layout.Fields = append(delta.Layout.Fields, deltacodec.Field{ID: id, Type: schemapb.DataType_Array, Element: schemapb.DataType_Int64, ElementNullable: proto.Bool(nullable)})
+		expected[id] = map[int64]*schemapb.ScalarField{}
+		for _, pk := range []int64{1, 2, 3, 4} {
+			arr := &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{}}}
+			value := &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_ArrayValue{ArrayValue: arr}}
+			switch pk {
+			case 1, 2:
+				arr.GetLongData().Data = []int64{9, 0}
+				if nullable {
+					arr.ValidData = []bool{true, pk == 1}
+				}
+			case 4:
+				value = &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_NullValue{}}
+			}
+			expected[id][pk] = value.GetArrayValue()
+			delta.Rows = append(delta.Rows, deltacodec.Row{Operation: deltacodec.Update, TimeTick: birth + 1, SourceOrdinal: uint32(len(delta.Rows)), PrimaryKeys: mutationIDs(pk), Assignments: []*messagespb.UpdateAssignment{{FieldId: id, Literal: value}}})
+		}
+	}
+	base, _, err := packed.UnmarshalManifestPath(source.Manifest)
+	require.NoError(t, err)
+	path := metautil.BuildDeltaLogPathV3(base, 10001)
+	_, err = storage.WriteMutationDelta(ctx, path, delta, cfg, nil)
+	require.NoError(t, err)
+	source.Manifest, err = packed.AddDeltaLogsToManifest(source.Manifest, cfg, []packed.DeltaLogEntry{{Path: path, NumEntries: int64(len(delta.Rows))}})
+	require.NoError(t, err)
+	result, err := s.task.Compact()
+	require.NoError(t, err)
+	var seen int
+	for _, seg := range result.GetSegments() {
+		reader, err := storage.NewManifestRecordReader(ctx, seg.Manifest, schema, storage.WithVersion(storage.StorageV3), storage.WithStorageConfig(cfg))
+		require.NoError(t, err)
+		for {
+			record, err := reader.Next()
+			if err == io.EOF {
+				break
+			}
+			require.NoError(t, err)
+			values, err := storage.RecordToInsertData(record, schema, nil)
+			require.NoError(t, err)
+			for i := range record.Len() {
+				pk := record.Column(w6bCompactionPK).(*array.Int64).Value(i)
+				for id, want := range expected {
+					actual, _ := values.Data[id].GetRow(i).(*schemapb.ScalarField)
+					require.True(t, proto.Equal(want[pk], actual), "field=%d pk=%d want=%v got=%v", id, pk, want[pk], actual)
+				}
+				seen++
+			}
+		}
+		require.NoError(t, reader.Close())
+	}
+	require.Equal(t, 4, seen)
 }
