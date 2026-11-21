@@ -61,8 +61,8 @@ import (
 
 // Server is the grpc server of streamingnode.
 type Server struct {
-	stopOnce       sync.Once
-	grpcServerChan chan struct{}
+	stopOnce sync.Once
+	grpcWG   sync.WaitGroup
 
 	// session of current server.
 	session *sessionutil.Session
@@ -95,7 +95,6 @@ func NewServer(ctx context.Context, f dependency.Factory) (*Server, error) {
 		stopOnce:       sync.Once{},
 		factory:        f,
 		mixCoord:       syncutil.NewFuture[types.MixCoordClient](),
-		grpcServerChan: make(chan struct{}),
 		componentState: componentutil.NewComponentStateService(typeutil.StreamingNodeRole),
 		ctx:            ctx1,
 		cancel:         cancel,
@@ -141,32 +140,46 @@ func (s *Server) Stop() (err error) {
 
 // stop stops the server.
 func (s *Server) stop() {
-	s.componentState.OnStopping()
+	if s.componentState != nil {
+		s.componentState.OnStopping()
+	}
 
-	mlog.Info(context.TODO(), "streamingnode stop", mlog.String("Address", s.listener.Address()))
+	if s.listener != nil {
+		mlog.Info(context.TODO(), "streamingnode stop", mlog.String("Address", s.listener.Address()))
+	} else {
+		mlog.Info(context.TODO(), "streamingnode stop")
+	}
 
-	// Unregister current server from etcd.
-	mlog.Info(context.TODO(), "streamingnode unregister session from etcd...")
-	if err := s.session.GoingStop(); err != nil {
-		mlog.Warn(context.TODO(), "streamingnode unregister session failed", mlog.Err(err))
+	// Unregister current server from etcd only if registration succeeded.
+	if s.session != nil && s.session.Registered() {
+		mlog.Info(context.TODO(), "streamingnode unregister session from etcd...")
+		if err := s.session.GoingStop(); err != nil {
+			mlog.Warn(context.TODO(), "streamingnode unregister session failed", mlog.Err(err))
+		}
 	}
 
 	// Stop StreamingNode service.
-	mlog.Info(context.TODO(), "streamingnode stop service...")
-	s.streamingnode.Stop()
+	if s.streamingnode != nil {
+		mlog.Info(context.TODO(), "streamingnode stop service...")
+		s.streamingnode.Stop()
+	}
 
 	// Stop grpc server.
-	mlog.Info(context.TODO(), "streamingnode stop grpc server...")
-	s.grpcServer.GracefulStop()
+	if s.grpcServer != nil {
+		mlog.Info(context.TODO(), "streamingnode stop grpc server...")
+		s.grpcServer.GracefulStop()
+	}
 
 	// Stop all session
-	mlog.Info(context.TODO(), "streamingnode stop session...")
-	s.session.Stop()
+	if s.session != nil {
+		mlog.Info(context.TODO(), "streamingnode stop session...")
+		s.session.Stop()
+	}
 
 	// Stop rootCoord client.
 	mlog.Info(context.TODO(), "streamingnode stop mixCoord client...")
 
-	if s.mixCoord.Ready() {
+	if s.mixCoord != nil && s.mixCoord.Ready() {
 		if err := s.mixCoord.Get().Close(); err != nil {
 			mlog.Warn(context.TODO(), "streamingnode stop mixCoord client failed", mlog.Err(err))
 		}
@@ -181,12 +194,14 @@ func (s *Server) stop() {
 
 	// Wait for grpc server to stop.
 	mlog.Info(context.TODO(), "wait for grpc server stop...")
-	<-s.grpcServerChan
+	s.grpcWG.Wait()
 	mlog.Info(context.TODO(), "streamingnode stop done")
 
 	s.cancel()
-	if err := s.listener.Close(); err != nil {
-		mlog.Warn(context.TODO(), "streamingnode stop listener failed", mlog.Err(err))
+	if s.listener != nil {
+		if err := s.listener.Close(); err != nil {
+			mlog.Warn(context.TODO(), "streamingnode stop listener failed", mlog.Err(err))
+		}
 	}
 }
 
@@ -246,7 +261,9 @@ func (s *Server) start() (err error) {
 		return errors.Wrap(err, "StreamingNode start gRPC server fail")
 	}
 	// Register current server to etcd.
-	s.session.Register()
+	if err := s.session.Register(); err != nil {
+		return merr.Wrap(err, "StreamingNode register session failed")
+	}
 
 	s.componentState.OnInitialized(s.session.ServerID)
 	return nil
@@ -257,7 +274,9 @@ func (s *Server) initSession() error {
 	if s.session == nil {
 		return merr.WrapErrServiceUnavailable("session is nil, the etcd client connection may have failed")
 	}
-	s.session.Init(typeutil.StreamingNodeRole, s.listener.Address(), false)
+	if err := s.session.Init(typeutil.StreamingNodeRole, s.listener.Address(), false); err != nil {
+		return merr.Wrap(err, "StreamingNode init session failed")
+	}
 	// Record the session so that the supervisor process (--run-with-subprocess) removes it as soon as
 	// this process exits abnormally. Otherwise the streamingnode session lingers until its lease
 	// expires, and every WAL owned by this node stays unavailable for up to common.session.ttl.
@@ -364,10 +383,11 @@ func (s *Server) initGRPCServer() {
 // startGRPCServer starts the grpc server.
 func (s *Server) startGPRCServer(ctx context.Context) error {
 	errCh := make(chan error, 1)
+	s.grpcWG.Add(1)
 	go func() {
-		defer close(s.grpcServerChan)
+		defer s.grpcWG.Done()
 
-		if err := s.grpcServer.Serve(s.listener); err != nil {
+		if err := s.grpcServer.Serve(s.listener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 			select {
 			case errCh <- err:
 				// failure at initial startup.
@@ -378,5 +398,10 @@ func (s *Server) startGPRCServer(ctx context.Context) error {
 		}
 	}()
 	funcutil.CheckGrpcReady(ctx, errCh)
-	return <-errCh
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

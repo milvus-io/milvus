@@ -247,7 +247,9 @@ func (node *Proxy) IsDQLQueueFull() bool {
 
 // Register registers proxy at etcd
 func (node *Proxy) Register() error {
-	node.session.Register()
+	if err := node.session.Register(); err != nil {
+		return err
+	}
 	metrics.NumNodes.WithLabelValues(paramtable.GetStringNodeID(), typeutil.ProxyRole).Inc()
 	mlog.Info(node.ctx, "Proxy Register Finished")
 
@@ -262,7 +264,9 @@ func (node *Proxy) initSession() error {
 	if node.session == nil {
 		return merr.WrapErrServiceNotReadyMsg("new session failed, maybe etcd cannot be connected")
 	}
-	node.session.Init(typeutil.ProxyRole, node.address, false)
+	if err := node.session.Init(typeutil.ProxyRole, node.address, false); err != nil {
+		return err
+	}
 	sessionutil.SaveServerInfo(typeutil.ProxyRole, node.session.ServerID)
 	if node.requests != nil {
 		// Running-request ids carry the node id and this process's start, so

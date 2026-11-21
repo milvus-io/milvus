@@ -164,7 +164,9 @@ func (node *DataNode) SetMixCoordClient(mixc types.MixCoordClient) error {
 // Register register datanode to etcd
 func (node *DataNode) Register() error {
 	mlog.Debug(node.ctx, "node begin to register to etcd", mlog.String("serverName", node.session.ServerName), mlog.Int64("ServerID", node.session.ServerID))
-	node.session.Register()
+	if err := node.session.Register(); err != nil {
+		return err
+	}
 
 	metrics.NumNodes.WithLabelValues(fmt.Sprint(node.GetNodeID()), typeutil.DataNodeRole).Inc()
 	mlog.Info(node.ctx, "DataNode Register Finished")
@@ -176,7 +178,9 @@ func (node *DataNode) initSession() error {
 	if node.session == nil {
 		return merr.WrapErrServiceInternalMsg("failed to initialize session")
 	}
-	node.session.Init(typeutil.DataNodeRole, node.address, false)
+	if err := node.session.Init(typeutil.DataNodeRole, node.address, false); err != nil {
+		return err
+	}
 	sessionutil.SaveServerInfo(typeutil.DataNodeRole, node.session.ServerID)
 	return nil
 }

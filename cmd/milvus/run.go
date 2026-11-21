@@ -44,8 +44,13 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 	if err != nil {
 		panic(err)
 	}
-	defer removePidFile(lock)
-	roles.Run()
+	runErr := func() error {
+		defer removePidFile(lock)
+		return roles.Run()
+	}()
+	if runErr != nil && !roles.Embedded {
+		os.Exit(1)
+	}
 }
 
 func (c *run) printBanner(w io.Writer) {
