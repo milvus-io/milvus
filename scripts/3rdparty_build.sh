@@ -186,6 +186,11 @@ if [[ "${USE_TSAN:-OFF}" == "ON" ]]; then
     fi
     cp "${CPP_SRC_DIR}/milvus_tsan.py" "$CONAN_HOME_DIR/extensions/hooks/hook_milvus_tsan.py"
 fi
+# Conan conf read by internal/core/conanfile.py.
+CONAN_CONF_ARGS=()
+if [[ "${MILVUS_FIPS_STRICT:-OFF}" == "ON" ]]; then
+    CONAN_CONF_ARGS+=(-c user.milvus:fips_strict=True)
+fi
 cat > "$CONAN_HOME_DIR/extensions/hooks/hook_fix_shared_lib_env.py" << 'HOOK_EOF'
 import os, platform
 
@@ -289,7 +294,7 @@ def post_package(conanfile, **kwargs):
         conanfile.output.info("Fixed macOS rpaths for: %s" % ", ".join(fixed))
 HOOK_EOF
 
-    "$CONAN" install ${CPP_SRC_DIR} ${CONAN_ARGS} "${CONAN_PROFILE_ARGS[@]}" || { echo 'conan install failed'; exit 1; }
+    "$CONAN" install ${CPP_SRC_DIR} ${CONAN_ARGS} "${CONAN_PROFILE_ARGS[@]}" "${CONAN_CONF_ARGS[@]}" || { echo 'conan install failed'; exit 1; }
     ;;
   Linux*)
     if [ -f /etc/os-release ]; then
@@ -308,11 +313,11 @@ HOOK_EOF
     fi
     if [[ -n "${CONAN_HOST_PROFILE:-}" ]]; then
       # An explicit profile owns compiler/ABI selection (including Clang).
-      "${CONAN_ENV[@]}" "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.cppstd=20 -s:b compiler.cppstd=20 "${CONAN_PROFILE_ARGS[@]}" || { echo 'conan install failed'; exit 1; }
+      "${CONAN_ENV[@]}" "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.cppstd=20 -s:b compiler.cppstd=20 "${CONAN_PROFILE_ARGS[@]}" "${CONAN_CONF_ARGS[@]}" || { echo 'conan install failed'; exit 1; }
     elif [[ `gcc -v 2>&1 | sed -n 's/.*\(--with-default-libstdcxx-abi\)=\(\w*\).*/\2/p'` == "gcc4" ]]; then
-      "${CONAN_ENV[@]}" "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.cppstd=20 -s:b compiler.cppstd=20 "${CONAN_PROFILE_ARGS[@]}" || { echo 'conan install failed'; exit 1; }
+      "${CONAN_ENV[@]}" "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.cppstd=20 -s:b compiler.cppstd=20 "${CONAN_PROFILE_ARGS[@]}" "${CONAN_CONF_ARGS[@]}" || { echo 'conan install failed'; exit 1; }
     else
-      "${CONAN_ENV[@]}" "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -s compiler.cppstd=20 -s:b compiler.cppstd=20 "${CONAN_PROFILE_ARGS[@]}" || { echo 'conan install failed'; exit 1; }
+      "${CONAN_ENV[@]}" "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -s compiler.cppstd=20 -s:b compiler.cppstd=20 "${CONAN_PROFILE_ARGS[@]}" "${CONAN_CONF_ARGS[@]}" || { echo 'conan install failed'; exit 1; }
     fi
     ;;
   *)
