@@ -15,6 +15,16 @@ use tokenizer::TokenizationRequest;
 
 use crate::error::TantivyBindingError;
 
+// Enabling both would also turn on tonic's own TLS check, which rejects https
+// URIs passed through connect_with_connector.
+#[cfg(all(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
+compile_error!(
+    "analyzer-remote-tls and analyzer-remote-tls-openssl are mutually exclusive; build with --no-default-features to use analyzer-remote-tls-openssl"
+);
+
 pub mod tokenizer {
     include!("../gen/milvus.proto.tokenizer.rs");
 }
@@ -38,7 +48,10 @@ pub struct GrpcTokenStream {
 
 const ENDPOINTKEY: &str = "endpoint";
 const PARAMTERSKEY: &str = "parameters";
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 const TLSKEY: &str = "tls";
 const DEFAULTTOKENSKEY: &str = "default_tokens";
 
@@ -85,10 +98,13 @@ impl GrpcTokenizer {
                 "grpc tokenizer endpoint must start with http:// or https://".to_string(),
             ));
         }
-        #[cfg(not(feature = "analyzer-remote-tls"))]
+        #[cfg(not(any(
+            feature = "analyzer-remote-tls",
+            feature = "analyzer-remote-tls-openssl"
+        )))]
         if endpoint.starts_with("https://") {
             return Err(TantivyBindingError::InvalidArgument(
-                "grpc tokenizer https endpoints require the analyzer-remote-tls feature, which is disabled in this build".to_string(),
+                "grpc tokenizer https endpoints require the analyzer-remote-tls or analyzer-remote-tls-openssl feature, and neither is enabled in this build".to_string(),
             ));
         }
 
@@ -172,7 +188,28 @@ impl GrpcTokenizer {
             }
         }
 
+        #[cfg(feature = "analyzer-remote-tls-openssl")]
+        let openssl_connector = if endpoint.starts_with("https://") {
+            let endpoint_domain = url::Url::parse(endpoint)
+                .ok()
+                .and_then(|u| u.host_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| endpoint.to_string());
+            Some(super::grpc_openssl::connector(
+                endpoint_domain,
+                params.get(TLSKEY),
+            )?)
+        } else {
+            None
+        };
+
         let channel = match TOKIO_RT.block_on(async {
+            #[cfg(feature = "analyzer-remote-tls-openssl")]
+            if let Some(connector) = openssl_connector {
+                return tonic::transport::Endpoint::new(endpoint.to_string())?
+                    .connect_with_connector(connector)
+                    .await;
+            }
+
             #[cfg(feature = "analyzer-remote-tls")]
             {
                 let endpoint_domain = url::Url::parse(endpoint)
@@ -347,7 +384,10 @@ mod tests {
         assert!(tokenizer.is_err());
     }
 
-    #[cfg(not(feature = "analyzer-remote-tls"))]
+    #[cfg(not(any(
+        feature = "analyzer-remote-tls",
+        feature = "analyzer-remote-tls-openssl"
+    )))]
     #[test]
     fn test_grpc_tokenizer_https_requires_remote_tls() {
         let params = json!({

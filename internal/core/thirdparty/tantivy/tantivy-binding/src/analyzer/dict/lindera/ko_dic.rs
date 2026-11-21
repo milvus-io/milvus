@@ -1,14 +1,27 @@
 use super::fetch;
 use crate::error::Result;
-#[cfg(any(feature = "analyzer-remote-tls", feature = "lindera-ko-dic"))]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl",
+    feature = "lindera-ko-dic"
+))]
 use crate::error::TantivyBindingError;
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 use lindera_dictionary::dictionary_builder::ko_dic::KoDicBuilder;
 
 #[cfg(feature = "lindera-ko-dic")]
 use lindera::dictionary::{load_dictionary_from_kind, DictionaryKind};
 
-#[cfg(all(feature = "analyzer-remote-tls", not(feature = "lindera-ko-dic")))]
+#[cfg(all(
+    any(
+        feature = "analyzer-remote-tls",
+        feature = "analyzer-remote-tls-openssl"
+    ),
+    not(feature = "lindera-ko-dic")
+))]
 fn download(params: &fetch::FetchParams) -> Result<()> {
     fetch::fetch(params, KoDicBuilder::new()).map_err(|e| {
         TantivyBindingError::InternalError(format!(
@@ -20,7 +33,13 @@ fn download(params: &fetch::FetchParams) -> Result<()> {
 
 // Online download is compiled out; only a dictionary already built under
 // `build_dir` can be used.
-#[cfg(all(not(feature = "analyzer-remote-tls"), not(feature = "lindera-ko-dic")))]
+#[cfg(all(
+    not(any(
+        feature = "analyzer-remote-tls",
+        feature = "analyzer-remote-tls-openssl"
+    )),
+    not(feature = "lindera-ko-dic")
+))]
 fn download(params: &fetch::FetchParams) -> Result<()> {
     fetch::ensure_prebuilt(params, "ko-dic")
 }
@@ -42,6 +61,7 @@ pub fn load_ko_dic(
             "https://Lindera.dev/mecab-ko-dic-2.1.1-20180720.tar.gz".to_string(),
         ],
         md5_hash: "b996764e91c96bc89dc32ea208514a96".to_string(),
+        sha256_hash: "702ced21c6167e9d9aebc674ab5ee54af58d4443975f2940d37d0567c020591a".to_string(),
     };
     if download_url.len() > 0 {
         params.download_urls = download_url
@@ -63,7 +83,14 @@ pub fn load_ko_dic(
     })
 }
 
-#[cfg(all(test, any(feature = "lindera-ko-dic", feature = "analyzer-remote-tls")))]
+#[cfg(all(
+    test,
+    any(
+        feature = "lindera-ko-dic",
+        feature = "analyzer-remote-tls",
+        feature = "analyzer-remote-tls-openssl"
+    )
+))]
 mod tests {
     use super::load_ko_dic;
     use env_logger;

@@ -1,4 +1,6 @@
 mod char_group_tokenizer;
+#[cfg(feature = "analyzer-remote-tls-openssl")]
+mod grpc_openssl;
 mod grpc_tokenizer;
 mod icu_tokneizer;
 mod jieba_tokenizer;
