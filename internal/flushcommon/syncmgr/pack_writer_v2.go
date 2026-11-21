@@ -22,6 +22,7 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -43,6 +44,7 @@ import (
 
 type BulkPackWriterV2 struct {
 	*BulkPackWriter
+
 	bufferSize          int64
 	multiPartUploadSize int64
 
@@ -171,8 +173,11 @@ func (bw *BulkPackWriterV2) getBucketName() string {
 	return paramtable.Get().MinioCfg.BucketName.GetValue()
 }
 
-func (bw *BulkPackWriterV2) getPluginContext(collectionID int64) (*indexcgopb.StoragePluginContext, error) {
-	return hookutil.GetCollectionPluginContext(bw.schema.GetProperties(), collectionID)
+func (bw *BulkPackWriterV2) getPluginContext(pack *SyncPack) (*indexcgopb.StoragePluginContext, error) {
+	if pack.pluginContext != nil {
+		return pack.pluginContext, nil
+	}
+	return hookutil.GetCollectionPluginContext(bw.schema.GetProperties(), pack.collectionID)
 }
 
 func (bw *BulkPackWriterV2) getTsRange(rec storage.Record) (tsFrom, tsTo uint64) {
@@ -204,7 +209,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	defer rec.Release()
 
 	tsFrom, tsTo := bw.getTsRange(rec)
-	pluginContextPtr, err := bw.getPluginContext(pack.collectionID)
+	pluginContextPtr, err := bw.getPluginContext(pack)
 	if err != nil {
 		return nil, "", err
 	}
@@ -228,6 +233,9 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 				mlog.FieldCollectionID(pack.collectionID),
 				mlog.FieldSegmentID(pack.segmentID),
 				mlog.Err(err))
+			if pack.pluginContext != nil && (errors.Is(err, merr.ErrSegcoreUnsupported) || errors.Is(err, merr.ErrServiceUnimplemented)) {
+				return retry.Unrecoverable(err)
+			}
 			return err
 		}
 		return nil

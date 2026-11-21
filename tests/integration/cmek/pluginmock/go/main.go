@@ -51,9 +51,10 @@ const (
 var CipherPlugin = fixtureCipher{}
 
 type fixtureCipher struct {
-	mu   sync.Mutex
-	role string
-	keys map[int64][]byte
+	mu       sync.Mutex
+	role     string
+	keys     map[int64][]byte
+	readKeys map[int64][]byte
 }
 
 type fixtureBackup struct {
@@ -68,18 +69,11 @@ func (c *fixtureCipher) Init(params map[string]string) error {
 		c.role = role
 	}
 	if backup := params["cipher.ez.import"]; backup != "" {
-		data, err := base64.StdEncoding.DecodeString(backup)
+		zone, key, err := c.ResolveImportEZ(backup)
 		if err != nil {
-			return fmt.Errorf("fixture cipher: decode backup: %w", err)
+			return err
 		}
-		var source fixtureBackup
-		if err := json.Unmarshal(data, &source); err != nil {
-			return fmt.Errorf("fixture cipher: decode source EZ: %w", err)
-		}
-		if source.EZID <= 0 || !hmac.Equal(source.Key, deriveEZKey(source.EZID)) {
-			return fmt.Errorf("fixture cipher: invalid source EZ key")
-		}
-		c.register(source.EZID, source.Key)
+		c.register(zone, key)
 		return nil
 	}
 	ezText := params[createEZKey]
@@ -118,8 +112,31 @@ func (c *fixtureCipher) Init(params map[string]string) error {
 		}
 		key = string(deriveEZKey(ezID))
 	}
+	if params["cipher.ez.readOnly"] == "true" {
+		if c.readKeys == nil {
+			c.readKeys = make(map[int64][]byte)
+		}
+		c.readKeys[ezID] = []byte(key)
+		c.record(ezID, 0, "register", "available", nil)
+		return nil
+	}
 	c.register(ezID, []byte(key))
 	return nil
+}
+
+func (c *fixtureCipher) ResolveImportEZ(backup string) (int64, []byte, error) {
+	data, err := base64.StdEncoding.DecodeString(backup)
+	if err != nil {
+		return 0, nil, fmt.Errorf("fixture cipher: decode backup: %w", err)
+	}
+	var source fixtureBackup
+	if err := json.Unmarshal(data, &source); err != nil {
+		return 0, nil, fmt.Errorf("fixture cipher: decode source EZ: %w", err)
+	}
+	if source.EZID <= 0 || !hmac.Equal(source.Key, deriveEZKey(source.EZID)) {
+		return 0, nil, fmt.Errorf("fixture cipher: invalid source EZ key")
+	}
+	return source.EZID, source.Key, nil
 }
 
 // register is called only after the received key or root-key identifier has

@@ -283,7 +283,7 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 	defer rec.Release()
 
 	tsFrom, tsTo := bw.getTsRange(rec)
-	pluginContextPtr, err := bw.getPluginContext(pack.collectionID)
+	pluginContextPtr, err := bw.getPluginContext(pack)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -297,6 +297,9 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 	textColumnConfigs := buildTextColumnConfigs(bw.schema, partitionBasePath)
 	var w packedBatchWriter
 	if len(textColumnConfigs) > 0 {
+		if pack.pluginContext != nil {
+			return nil, nil, merr.Wrap(merr.ErrServiceUnimplemented, "encrypted import target does not support TEXT LOB writes")
+		}
 		mlog.Info(ctx, "using TEXT-aware writer for import",
 			mlog.Int("textFieldCount", len(textColumnConfigs)),
 			mlog.String("basePath", basePath))

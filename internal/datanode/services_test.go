@@ -32,6 +32,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/compaction"
@@ -42,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -587,6 +589,54 @@ func (s *DataNodeServicesSuite) TestDropCompactionPlan() {
 		s.NoError(err)
 		s.True(merr.Ok(status))
 	})
+}
+
+type importContextReceiver struct {
+	hook.Cipher
+	calls []map[string]string
+}
+
+func (c *importContextReceiver) Init(config map[string]string) error {
+	c.calls = append(c.calls, config)
+	return nil
+}
+
+func TestOrdinaryFileImportUsesCollectionKey(t *testing.T) {
+	properties := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}}
+	entries := []*commonpb.KeyValuePair{{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:bGl2ZQ=="}}
+	cipher := &importContextReceiver{}
+	patch := mockey.Mock(hookutil.GetCipher).Return(cipher).Build()
+	defer patch.UnPatch()
+	for _, options := range [][]*commonpb.KeyValuePair{nil, {{Key: "backup", Value: "true"}}} {
+		keys, err := prepareImportCipher(options, properties, entries, 23)
+		require.NoError(t, err)
+		require.Nil(t, keys.Source)
+		require.Equal(t, "bGl2ZQ==", keys.Target.GetEncryptionKey())
+		require.Equal(t, map[string]string{hookutil.CipherConfigCreateEZ: "17", hookutil.CipherConfigUnsafeEZK: "bGl2ZQ=="}, cipher.calls[len(cipher.calls)-1])
+	}
+}
+
+func (s *DataNodeServicesSuite) TestImportRejectsIncompleteCipherContext() {
+	properties := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}}
+	options := []*commonpb.KeyValuePair{{Key: "ezk", Value: "eyJlel9pZCI6MTd9"}}
+	entries := []*commonpb.KeyValuePair{{Key: "cipher.ezk", Value: "17:b2xk"}}
+	for kind, req := range map[string]proto.Message{
+		taskcommon.PreImport: &datapb.PreImportRequest{TaskID: 73, Options: options, Schema: &schemapb.CollectionSchema{Properties: properties}, PluginContext: entries},
+		taskcommon.Import:    &datapb.ImportRequest{TaskID: 73, Options: options, Schema: &schemapb.CollectionSchema{Properties: properties}, PluginContext: entries},
+	} {
+		s.Run(kind, func() {
+			payload, err := proto.Marshal(req)
+			s.Require().NoError(err)
+			status, err := s.node.CreateTask(s.ctx, &workerpb.CreateTaskRequest{
+				Properties: map[string]string{taskcommon.ClusterIDKey: "cluster-0", taskcommon.TypeKey: kind},
+				Payload:    payload,
+			})
+			s.Require().NoError(err)
+			s.Contains(status.GetReason(), "missing a keyset")
+			s.Equal(merr.Code(merr.ErrImportSysFailed), status.GetCode())
+			s.Nil(s.node.importTaskMgr.Get(73))
+		})
+	}
 }
 
 func (s *DataNodeServicesSuite) TestCreateTask() {

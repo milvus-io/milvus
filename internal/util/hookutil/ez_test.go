@@ -17,9 +17,14 @@
 package hookutil
 
 import (
-	"github.com/cockroachdb/errors"
+	"testing"
 
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type failingInitCipher struct {
@@ -41,4 +46,61 @@ func (s *CipherSuite) TestCreateLocalEZReturnsParameterError() {
 
 	err := CreateLocalEZ(1, "key")
 	s.ErrorIs(err, merr.ErrParameterInvalid)
+}
+
+type importResolverCipher struct {
+	testCipher
+	resolve func(string) (int64, []byte, error)
+}
+
+func (c importResolverCipher) ResolveImportEZ(artifact string) (int64, []byte, error) {
+	return c.resolve(artifact)
+}
+
+func TestBackupSourcePluginContext(t *testing.T) {
+	paramtable.Init()
+	previous := GetCipher()
+	t.Cleanup(func() { storeCipher(previous) })
+	denied := errors.New("source KMS denied Decrypt")
+	for _, tc := range []struct {
+		name   string
+		cipher hook.Cipher
+		err    error
+	}{
+		{"missing cipher", nil, merr.ErrServiceUnavailable},
+		{"cipher without resolver", testCipher{}, merr.ErrServiceUnimplemented},
+		{"empty resolved keyset", importResolverCipher{resolve: func(string) (int64, []byte, error) {
+			return 17, nil, nil
+		}}, merr.ErrServiceInternal},
+		{"provider error survives", importResolverCipher{resolve: func(string) (int64, []byte, error) {
+			return 0, nil, denied
+		}}, denied},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			storeCipher(tc.cipher)
+			ctx, err := ResolveImportEZ("artifact")
+			require.ErrorIs(t, err, tc.err)
+			require.Nil(t, ctx)
+		})
+	}
+
+	t.Run("same EZ returns the bytes of each artifact", func(t *testing.T) {
+		storeCipher(importResolverCipher{resolve: func(artifact string) (int64, []byte, error) {
+			if artifact == "before rotation" {
+				return 17, []byte{0xff, 0x00}, nil
+			}
+			return 17, []byte{0x01, 0xff}, nil
+		}})
+		for _, backup := range []struct{ artifact, wire string }{
+			{"before rotation", "17:/wA="},
+			{"after rotation", "17:Af8="},
+			{"before rotation", "17:/wA="},
+		} {
+			ctx, err := ResolveImportEZ(backup.artifact)
+			require.NoError(t, err)
+			require.Len(t, ctx, 1)
+			require.Equal(t, CipherConfigUnsafeEZK, ctx[0].GetKey())
+			require.Equal(t, backup.wire, ctx[0].GetValue())
+		}
+	})
 }

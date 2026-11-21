@@ -57,3 +57,29 @@ func TestPackedWriterRejectsMissingCipherPlugin(t *testing.T) {
 		})
 	}
 }
+
+func TestPackedImportRequiresCipherCapability(t *testing.T) {
+	paramtable.Init()
+	initcore.InitLocalArrowFileSystem("/tmp")
+	root := t.TempDir()
+	paths := []string{filepath.Join(root, "data.parquet")}
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
+	keyset := &indexcgopb.StoragePluginContext{EncryptionZoneId: 17, CollectionId: 23, EncryptionKey: "a2V5"}
+	schema := arrow.NewSchema([]arrow.Field{{Name: "pk", Type: arrow.PrimitiveTypes.Int64, Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{"100"})}}, nil)
+	groups := []storagecommon.ColumnGroup{{GroupID: 0, Columns: []int{0}, Fields: []int64{100}}}
+	for _, storage := range []*indexpb.StorageConfig{nil, cfg} {
+		writer, err := NewPackedWriter(paths, schema, 1<<20, 0, groups, storage, keyset)
+		require.ErrorIs(t, err, merr.ErrSegcoreUnsupported)
+		require.Nil(t, writer)
+		reader, err := NewPackedReaderWithExtfs(paths, schema, 1<<20, storage, keyset, ExternalReaderContext{})
+		require.ErrorIs(t, err, merr.ErrSegcoreUnsupported)
+		require.Nil(t, reader)
+		_, err = GetPackedFileFieldIDs(paths, storage, keyset)
+		require.ErrorIs(t, err, merr.ErrSegcoreUnsupported)
+	}
+	writer, err := NewFFIPackedWriter(root, schema, groups, cfg, keyset)
+	require.ErrorIs(t, err, merr.ErrSegcoreUnsupported)
+	require.Nil(t, writer)
+	_, err = os.Stat(paths[0])
+	require.True(t, os.IsNotExist(err))
+}

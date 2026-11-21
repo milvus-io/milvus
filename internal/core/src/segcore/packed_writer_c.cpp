@@ -120,21 +120,11 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
             *static_cast<std::vector<std::vector<int>>*>(column_splits);
 
         parquet::WriterProperties::Builder builder;
-        auto plugin_ptr =
-            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
         if (c_plugin_context != nullptr) {
-            AssertInfo(plugin_ptr != nullptr, "failed to get cipher plugin");
-            plugin_ptr->Update(c_plugin_context->ez_id,
-                               c_plugin_context->collection_id,
-                               std::string(c_plugin_context->key));
-            auto got = plugin_ptr->GetEncryptor(
-                c_plugin_context->ez_id, c_plugin_context->collection_id);
+            auto [key, metadata] =
+                milvus::storage::GetPackedWriterKeys(c_plugin_context);
             parquet::FileEncryptionProperties::Builder file_encryption_builder(
-                got.first->GetKey());
-            auto metadata = milvus::storage::EncodeKeyMetadata(
-                c_plugin_context->ez_id,
-                c_plugin_context->collection_id,
-                got.second);
+                key);
 
             builder.encryption(
                 file_encryption_builder.footer_key_metadata(metadata)
@@ -203,22 +193,11 @@ NewPackedWriter(struct ArrowSchema* schema,
             *static_cast<std::vector<std::vector<int>>*>(column_splits);
 
         parquet::WriterProperties::Builder builder;
-        auto plugin_ptr =
-            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
         if (c_plugin_context != nullptr) {
-            AssertInfo(plugin_ptr != nullptr, "failed to get cipher plugin");
-            plugin_ptr->Update(c_plugin_context->ez_id,
-                               c_plugin_context->collection_id,
-                               std::string(c_plugin_context->key));
-
-            auto got = plugin_ptr->GetEncryptor(
-                c_plugin_context->ez_id, c_plugin_context->collection_id);
+            auto [key, metadata] =
+                milvus::storage::GetPackedWriterKeys(c_plugin_context);
             parquet::FileEncryptionProperties::Builder file_encryption_builder(
-                got.first->GetKey());
-            auto metadata = milvus::storage::EncodeKeyMetadata(
-                c_plugin_context->ez_id,
-                c_plugin_context->collection_id,
-                got.second);
+                key);
             builder.encryption(
                 file_encryption_builder.footer_key_metadata(metadata)
                     ->algorithm(parquet::ParquetCipher::AES_GCM_V1)

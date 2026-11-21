@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -42,6 +43,7 @@ import (
 
 type PreImportTask struct {
 	*datapb.PreImportTask
+	importCipher hookutil.ImportCipherContext
 	ctx          context.Context
 	cancel       context.CancelFunc
 	partitionIDs []int64
@@ -57,6 +59,7 @@ type PreImportTask struct {
 func NewPreImportTask(req *datapb.PreImportRequest,
 	manager TaskManager,
 	cm storage.ChunkManager,
+	cipher ...hookutil.ImportCipherContext,
 ) Task {
 	fileStats := lo.Map(req.GetImportFiles(), func(file *internalpb.ImportFile, _ int) *datapb.ImportFileStats {
 		return &datapb.ImportFileStats{
@@ -77,6 +80,7 @@ func NewPreImportTask(req *datapb.PreImportRequest,
 			State:        datapb.ImportTaskStateV2_Pending,
 			FileStats:    fileStats,
 		},
+		importCipher: lo.FirstOrEmpty(cipher),
 		ctx:          ctx,
 		cancel:       cancel,
 		partitionIDs: req.GetPartitionIDs(),
@@ -125,6 +129,7 @@ func (t *PreImportTask) Clone() Task {
 	// that cancellation a no-op on the work actually in flight.
 	return &PreImportTask{
 		PreImportTask: typeutil.Clone(t.PreImportTask),
+		importCipher:  t.importCipher,
 		ctx:           t.ctx,
 		cancel:        t.cancel,
 		partitionIDs:  t.GetPartitionIDs(),
@@ -163,7 +168,7 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 		func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 			return fileStat.GetImportFile()
 		})
-	readers := importutilv2.NewReaderFactory(t.ctx, sourceCM, t.req.GetStorageConfig(), t.options)
+	readers := importutilv2.NewReaderFactory(t.ctx, sourceCM, t.req.GetStorageConfig(), t.options, t.importCipher.Source)
 
 	fn := func(ctx context.Context, i int, file *internalpb.ImportFile, rowBuffer int, deleteBudget int64, shared *binlog.SnapshotL0Deletes) error {
 		reader, err := readers.NewReader(ctx, t.GetSchema(), file, rowBuffer, deleteBudget, shared)

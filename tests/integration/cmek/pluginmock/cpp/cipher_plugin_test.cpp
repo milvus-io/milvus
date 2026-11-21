@@ -177,6 +177,23 @@ main() {
         }
         require(source_writer_rejected,
                 "import source context authorized a target writer");
+        auto imported = newPlugin();
+        imported->RegisterReadKeyset(17, 23, expected_ezk);
+        require(hexEncode(imported->GetDecryptor(17, 23, edek)->GetKey()) ==
+                    expected_dek,
+                "import read keyset did not open the historical EDEK");
+        bool read_only = false;
+        try {
+            static_cast<void>(imported->GetEncryptor(17, 23));
+        } catch (const std::exception&) {
+            read_only = true;
+        }
+        require(read_only, "import read keyset enabled ordinary writes");
+        auto [pinned_writer, pinned_edek] =
+            imported->GetEncryptorForKeyset(17, 23, expected_ezk);
+        require(pinned_writer->GetKey() ==
+                    second->GetDecryptor(17, 23, pinned_edek)->GetKey(),
+                "target keyset failed to open the import writer's EDEK");
     } catch (const std::exception& error) {
         std::cerr << error.what() << std::endl;
         return 1;

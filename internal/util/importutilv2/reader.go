@@ -25,13 +25,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/csv"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/json"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/numpy"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -68,7 +68,8 @@ type readerStorage struct {
 	encryption binlog.SourceEncryption
 }
 
-func NewReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb.StorageConfig, options Options) *ReaderFactory {
+func NewReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb.StorageConfig, options Options, source *indexcgopb.StoragePluginContext) *ReaderFactory {
+	encryption := binlog.SourceEncryption{Encrypted: source != nil, PluginContext: source}
 	return &ReaderFactory{
 		cm: cm, cfg: cfg, options: options,
 		storage: sync.OnceValues(func() (readerStorage, error) {
@@ -77,24 +78,19 @@ func NewReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb
 			if err := ctx.Err(); err != nil {
 				return readerStorage{}, err
 			}
+			artifact, _ := GetEZK(options)
+			if artifact != "" && encryption.PluginContext == nil {
+				return readerStorage{}, merr.WrapErrServiceInternalMsg("encrypted backup is missing its dispatched source keyset")
+			}
+			if !IsSnapshotSource(options) {
+				return readerStorage{cm: cm, cfg: cfg, encryption: encryption}, nil
+			}
 			uri, _ := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotSourceURI, options)
 			sourceCM, sourceCfg, err := ResolveSnapshotImportStorage(ctx, cm, cfg, uri, options)
 			if err != nil {
 				return readerStorage{}, err
 			}
-			resolved := readerStorage{cm: sourceCM, cfg: sourceCfg}
-			if ezk, _ := GetEZK(options); ezk != "" {
-				resolved.encryption.Encrypted = true
-				ezID, err := hookutil.GetEzIDByImportEzk(ezk)
-				if err != nil {
-					return readerStorage{}, err
-				}
-				resolved.encryption.PluginContext, err = hookutil.GetCPluginContextByEzID(ezID)
-				if err != nil {
-					return readerStorage{}, err
-				}
-			}
-			return resolved, nil
+			return readerStorage{cm: sourceCM, cfg: sourceCfg, encryption: encryption}, nil
 		}),
 	}
 }
@@ -117,7 +113,7 @@ func (f *ReaderFactory) NewReader(ctx context.Context, schema *schemapb.Collecti
 		}
 	}
 	resolved := readerStorage{cm: f.cm, cfg: f.cfg}
-	if IsSnapshotSource(f.options) {
+	if IsBackup(f.options) || IsSnapshotSource(f.options) {
 		// Validate the descriptor before accessing storage or the key retriever.
 		// Same-bucket and no-L0 snapshots use this path too. Ordinary import
 		// retains its existing storage and encryption initialization.
@@ -182,7 +178,7 @@ func NewReader(ctx context.Context,
 	storageConfig *indexpb.StorageConfig,
 	snapshotDeleteBudget int64,
 ) (Reader, error) {
-	return NewReaderFactory(ctx, cm, storageConfig, options).NewReader(ctx, schema, importFile, bufferSize, snapshotDeleteBudget, nil)
+	return NewReaderFactory(ctx, cm, storageConfig, options, nil).NewReader(ctx, schema, importFile, bufferSize, snapshotDeleteBudget, nil)
 }
 
 func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema,
@@ -251,8 +247,7 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		if err != nil {
 			return nil, err
 		}
-		importEz, _ := GetEZK(options)
-		return binlog.NewReader(ctx, cm, schema, storageConfig, storageVersion, paths, tsStart, tsEnd, bufferSize, importEz, nil)
+		return binlog.NewReader(ctx, cm, schema, storageConfig, storageVersion, paths, tsStart, tsEnd, bufferSize, encryption)
 	}
 
 	fileType, err := GetFileType(importFile)

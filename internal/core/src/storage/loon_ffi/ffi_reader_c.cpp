@@ -80,21 +80,10 @@ GetLoonReader(
             needed_columns, needed_columns + needed_columns_size),
         properties);
 
-    // Configure CMEK decryption if plugin context is provided
-    if (c_plugin_context != nullptr) {
-        auto plugin_ptr =
-            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-        AssertInfo(plugin_ptr != nullptr, "cipher plugin is nullptr");
-        plugin_ptr->Update(c_plugin_context->ez_id,
-                           c_plugin_context->collection_id,
-                           std::string(c_plugin_context->key));
-        auto key_retriever = std::make_shared<milvus::storage::KeyRetriever>();
-        reader->set_keyretriever(
-            [key_retriever](const std::string& metadata) -> std::string {
-                return key_retriever->GetKey(metadata);
-            });
-    }
-
+    milvus::storage::RegisterReaderKeys(c_plugin_context);
+    auto keys = std::make_shared<milvus::storage::KeyRetriever>();
+    reader->set_keyretriever(
+        [keys](const std::string& metadata) { return keys->GetKey(metadata); });
     return reader;
 }
 

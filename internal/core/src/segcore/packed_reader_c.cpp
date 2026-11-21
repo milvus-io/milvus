@@ -59,17 +59,6 @@ ConvertLoonProperties(const LoonProperties* properties) {
     return converted;
 }
 
-void
-UpdateCipherPluginIfNeeded(CPluginContext* c_plugin_context) {
-    auto plugin_ptr =
-        milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-    if (plugin_ptr != nullptr && c_plugin_context != nullptr) {
-        plugin_ptr->Update(c_plugin_context->ez_id,
-                           c_plugin_context->collection_id,
-                           std::string(c_plugin_context->key));
-    }
-}
-
 milvus_storage::ArrowFileSystemPtr
 GetFsFromStorageConfig(const CStorageConfig& c_storage_config) {
     return milvus::storage::StorageV2FSCache::Instance().Get({
@@ -139,14 +128,15 @@ NewPackedReaderWithStorageConfig(char** paths,
                 schema_result.status().ToString());
         }
         auto trueSchema = schema_result.ValueUnsafe();
-        UpdateCipherPluginIfNeeded(c_plugin_context);
+        milvus::storage::RegisterReaderKeys(c_plugin_context);
+        auto reader_properties = milvus::storage::GetReaderProperties();
 
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
             trueFs,
             truePaths,
             trueSchema,
             buffer_size,
-            milvus::storage::GetReaderProperties(),
+            reader_properties,
             milvus::storage::GetArrowReaderProperties(eager_prebuffer));
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
@@ -192,14 +182,15 @@ NewPackedReaderWithProperties(char** paths,
                 schema_result.status().ToString());
         }
         auto trueSchema = schema_result.ValueUnsafe();
-        UpdateCipherPluginIfNeeded(c_plugin_context);
+        milvus::storage::RegisterReaderKeys(c_plugin_context);
+        auto reader_properties = milvus::storage::GetReaderProperties();
 
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
             trueFs,
             truePaths,
             trueSchema,
             buffer_size,
-            milvus::storage::GetReaderProperties(),
+            reader_properties,
             milvus::storage::GetArrowReaderProperties(eager_prebuffer));
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
@@ -236,14 +227,15 @@ NewPackedReader(char** paths,
         }
         auto trueSchema = schema_result.ValueUnsafe();
 
-        UpdateCipherPluginIfNeeded(c_plugin_context);
+        milvus::storage::RegisterReaderKeys(c_plugin_context);
+        auto reader_properties = milvus::storage::GetReaderProperties();
 
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
             trueFs,
             truePaths,
             trueSchema,
             buffer_size,
-            milvus::storage::GetReaderProperties(),
+            reader_properties,
             milvus::storage::GetArrowReaderProperties(eager_prebuffer));
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
@@ -320,14 +312,15 @@ GetPackedFileFieldIDs(char** paths,
                 milvus::ErrorCode::FileReadFailed,
                 "[StorageV2] Failed to get filesystem");
         }
-        UpdateCipherPluginIfNeeded(c_plugin_context);
+        milvus::storage::RegisterReaderKeys(c_plugin_context);
+        auto reader_properties = milvus::storage::GetReaderProperties();
 
         std::vector<int64_t> ids;
         std::vector<int64_t> counts;
         counts.reserve(num_paths);
         for (int64_t i = 0; i < num_paths; ++i) {
-            auto file_ids =
-                milvus::storage::GetPackedFileColumnFieldIDs(fs, paths[i]);
+            auto file_ids = milvus::storage::GetPackedFileColumnFieldIDs(
+                fs, paths[i], reader_properties);
             ids.insert(ids.end(), file_ids.begin(), file_ids.end());
             counts.push_back(static_cast<int64_t>(file_ids.size()));
         }

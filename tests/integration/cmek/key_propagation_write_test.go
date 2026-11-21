@@ -407,7 +407,10 @@ func (s *propagationImportSuite) TestBackup() {
 			s.fixture.assertRegistration(s.T(), nodeID, sourceEZ, 0)
 		}
 		if s.targetEncrypted && stage != "preimport" {
-			s.fixture.assertRegistration(s.T(), nodeID, s.ezID, collectionID)
+			s.fixture.assertNativeCipherOperation(s.T(), nodeID, s.ezID, collectionID, "write_keyset")
+			if stage == "import" && s.protocol == 3 {
+				s.fixture.assertRegistration(s.T(), nodeID, s.ezID, collectionID)
+			}
 		}
 		if stage == "reshard" {
 			s.inspectReshardFragments(ctx, jobID, collectionID, int64(len(expected)), completed)
