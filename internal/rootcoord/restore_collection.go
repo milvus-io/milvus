@@ -49,8 +49,11 @@ func (c *Core) PrepareRestoreCollection(ctx context.Context, req *milvuspb.Creat
 	} else {
 		req.NumPartitions = 1
 	}
+	// The stored schema keeps the origin marker of sub-fields added after their
+	// struct: the restored collection reuses the source segments, which lack
+	// those sub-fields, and the sub-field drop rule depends on the marker.
 	task := &createCollectionTask{
-		Core: c, Req: req, preserveFieldID: true,
+		Core: c, Req: req, preserveFieldID: true, allowStructSubFieldOriginMarker: true,
 		header: &message.CreateCollectionMessageHeader{},
 		body:   &message.CreateCollectionRequest{DbName: req.GetDbName(), CollectionName: req.GetCollectionName(), CollectionSchema: schema},
 	}
