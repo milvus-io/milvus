@@ -464,7 +464,8 @@ class PkUpdateNativeBenchmark : public ::testing::Test {
             {"max_ms", ordered.back()},
             {"mean_ms",
              std::accumulate(ordered.begin(), ordered.end(), 0.0) / count},
-            {"samples_ms", std::move(samples)}};
+            { "samples_ms",
+              std::move(samples) }};
     }
 
     std::vector<double>

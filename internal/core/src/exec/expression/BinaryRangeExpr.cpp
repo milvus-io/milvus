@@ -440,22 +440,22 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
         return res;
     }
 
-    auto execute_sub_batch =
-        [lower_inclusive, upper_inclusive
+    auto execute_sub_batch = [lower_inclusive,
+                              upper_inclusive
 #ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
-         , field = expr_->column_.field_id_
+                              ,
+                              field = expr_->column_.field_id_
 #endif
-        ](
-            const index::IScalarPredicateReader<ReaderType>* reader,
-            HighPrecisionType val1,
-            HighPrecisionType val2) {
+    ](const index::IScalarPredicateReader<ReaderType>* reader,
+                             HighPrecisionType val1,
+                             HighPrecisionType val2) {
 #ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
-            segcore::ObservePkUpdateRead(
-                field, {segcore::PkUpdateReadPath::IndexedPredicate});
+        segcore::ObservePkUpdateRead(
+            field, {segcore::PkUpdateReadPath::IndexedPredicate});
 #endif
-            BinaryRangeIndexFunc<T> func;
-            return func(reader, val1, val2, lower_inclusive, upper_inclusive);
-        };
+        BinaryRangeIndexFunc<T> func;
+        return func(reader, val1, val2, lower_inclusive, upper_inclusive);
+    };
     if (input != nullptr) {
         if (SelectedJsonIndexIsFlat()) {
             return ProcessIndexChunksAndGatherByOffsets<T>(
@@ -530,9 +530,14 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
 
     size_t processed_cursor = 0;
     auto execute_sub_batch =
-        [lower_inclusive, upper_inclusive, &processed_cursor, &bitmap_input
+        [
+            lower_inclusive,
+            upper_inclusive,
+            &processed_cursor,
+            &bitmap_input
 #ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
-         , field = expr_->column_.field_id_
+            ,
+            field = expr_->column_.field_id_
 #endif
         ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
