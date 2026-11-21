@@ -16,21 +16,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
-func TestResumableStreamRetriesAllSubscribeErrors(t *testing.T) {
+type rejectedSubscribeAttempt struct {
+	wal.TransformLogStream
+	err error
+}
+
+func (s *rejectedSubscribeAttempt) Subscribe(context.Context, wal.TransformLogSubscriptionOption) (wal.TransformLogSubscription, error) {
+	return nil, s.err
+}
+
+func TestResumableStreamRetriesPhysicalSubscribeErrors(t *testing.T) {
 	for _, err := range []error{context.Canceled, status.AsStreamingError(context.Canceled), wal.ErrTransformLogVChannelUnavailable, status.NewUnknownError("read failed"), status.NewInvalidArgument("rejected")} {
 		t.Run(err.Error(), func(t *testing.T) {
-			first := walsummary.NewStream(walsummary.NewManager(walsummary.ManagerConfig{}))
+			first := &rejectedSubscribeAttempt{TransformLogStream: walsummary.NewStream(walsummary.NewManager(walsummary.ManagerConfig{})), err: err}
 			second := walsummary.NewStream(walsummary.NewManager(walsummary.ManagerConfig{}))
 			defer first.Close()
 			defer second.Close()
-			var original func(*walsummary.Stream, context.Context, wal.TransformLogSubscriptionOption) (wal.TransformLogSubscription, error)
-			patch := mockey.Mock((*walsummary.Stream).Subscribe).Origin(&original).To(func(s *walsummary.Stream, ctx context.Context, opt wal.TransformLogSubscriptionOption) (wal.TransformLogSubscription, error) {
-				if s == first {
-					return nil, err
-				}
-				return original(s, ctx, opt)
-			}).Build()
-			defer patch.UnPatch()
 			calls := 0
 			stream := NewResumableStream(context.Background(), "p", func(context.Context, string) (wal.TransformLogStream, error) {
 				calls++

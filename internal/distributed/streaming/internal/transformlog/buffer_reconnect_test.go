@@ -22,48 +22,51 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
+type observedAttempt struct {
+	wal.TransformLogStream
+	options chan<- wal.TransformLogSubscriptionOption
+	failed  chan struct{}
+	cause   error
+}
+
+func (s *observedAttempt) Done() <-chan struct{} {
+	if s.failed != nil {
+		return s.failed
+	}
+	return s.TransformLogStream.Done()
+}
+
+func (s *observedAttempt) Error() error {
+	select {
+	case <-s.failed:
+		return s.cause
+	default:
+		return s.TransformLogStream.Error()
+	}
+}
+
+func (s *observedAttempt) Subscribe(ctx context.Context, opt wal.TransformLogSubscriptionOption) (wal.TransformLogSubscription, error) {
+	sub, err := s.TransformLogStream.Subscribe(ctx, opt)
+	s.options <- opt
+	return sub, err
+}
+
 func TestBufferSurvivesUnderlyingStreamCancellation(t *testing.T) {
 	for _, cancelErr := range []error{context.Canceled, status.AsStreamingError(context.Canceled)} {
 		t.Run(cancelErr.Error(), func(t *testing.T) {
-			firstStream := walsummary.NewStream(walsummary.NewManager(walsummary.ManagerConfig{}))
-			defer firstStream.Close()
-			failed := make(chan struct{})
-			var originalDone func(*walsummary.Stream) <-chan struct{}
-			donePatch := mockey.Mock((*walsummary.Stream).Done).Origin(&originalDone).To(func(s *walsummary.Stream) <-chan struct{} {
-				if s == firstStream {
-					return failed
-				}
-				return originalDone(s)
-			}).Build()
-			defer donePatch.UnPatch()
-			var originalError func(*walsummary.Stream) error
-			errorPatch := mockey.Mock((*walsummary.Stream).Error).Origin(&originalError).To(func(s *walsummary.Stream) error {
-				if s == firstStream {
-					return cancelErr
-				}
-				return originalError(s)
-			}).Build()
-			defer errorPatch.UnPatch()
 			options := make(chan wal.TransformLogSubscriptionOption, 4)
-			var original func(*walsummary.Stream, context.Context, wal.TransformLogSubscriptionOption) (wal.TransformLogSubscription, error)
-			patch := mockey.Mock((*walsummary.Stream).Subscribe).Origin(&original).To(func(s *walsummary.Stream, ctx context.Context, opt wal.TransformLogSubscriptionOption) (wal.TransformLogSubscription, error) {
-				sub, err := original(s, ctx, opt)
-				options <- opt
-				return sub, err
-			}).Build()
-			defer patch.UnPatch()
+			failed := make(chan struct{})
 			var calls atomic.Int64
-			stream := resumable.NewResumableStream(context.Background(), "p", func(context.Context, string) (wal.TransformLogStream, error) {
+			stream := resumable.NewResumableStream(t.Context(), "p", func(context.Context, string) (wal.TransformLogStream, error) {
+				attempt := &observedAttempt{TransformLogStream: walsummary.NewStream(walsummary.NewManager(walsummary.ManagerConfig{})), options: options}
 				if calls.Add(1) == 1 {
-					return firstStream, nil
+					attempt.failed, attempt.cause = failed, cancelErr
 				}
-				return walsummary.NewStream(walsummary.NewManager(walsummary.ManagerConfig{})), nil
+				return attempt, nil
 			})
 			defer stream.Close()
-			manager := wal.NewTransformLogErrorAccesser(wal.ErrTransformLogVChannelUnavailable)
-			acquire := mockey.Mock(mockey.GetMethod(manager, "AcquireStream")).Return(stream, nil).Build()
-			defer acquire.UnPatch()
-			buffer := transformlogbuffer.New(manager, 1)
+			buffer := transformlogbuffer.New(sharedRPCStream{stream}, 1)
+			defer buffer.Close()
 			view := qviews.NewQueryViewAtQueryNode(&viewpb.QueryViewMeta{Vchannel: "p_100v0"}, &viewpb.QueryViewOfQueryNode{NodeId: 1}).(*qviews.QueryViewAtQueryNode)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -84,6 +87,7 @@ func TestBufferSurvivesUnderlyingStreamCancellation(t *testing.T) {
 				t.Fatal("subscription error did not trigger reconnect")
 			}
 			require.Equal(t, uint64(12), second.StartAfterTimeTick)
+			first.Handler.Handle(wal.TransformLogStreamEvent{SubscriptionError: wal.ErrTransformLogStartPointTruncated})
 			second.Handler.Handle(wal.TransformLogStreamEvent{Entry: &streamingpb.TransformLogEntry{TimeTick: 13}})
 			second.Handler.Handle(wal.TransformLogStreamEvent{SyncUp: &wal.TransformLogSyncUp{TimeTick: 20}})
 			require.NoError(t, guard.WaitTransformVisible(ctx, 20))
@@ -91,6 +95,21 @@ func TestBufferSurvivesUnderlyingStreamCancellation(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, next.WaitTransformVisible(ctx, 20))
 			next.Release()
+			// An explicitly removed logical subscription may be followed by a
+			// new subscription on the same channel and physical attempt.
+			retired, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "p_101v0", StartAfterTimeTick: 0, Handler: newRecordingHandler()})
+			require.NoError(t, err)
+			retiredAttempt := <-options
+			require.NoError(t, retired.Close())
+			activeHandler := newRecordingHandler()
+			active, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "p_101v0", StartAfterTimeTick: 0, Handler: activeHandler})
+			require.NoError(t, err)
+			activeAttempt := <-options
+			require.Zero(t, recvStreamEvent(t, activeHandler.events).SyncUp.TimeTick)
+			retiredAttempt.Handler.Handle(wal.TransformLogStreamEvent{SubscriptionError: wal.ErrTransformLogStartPointTruncated})
+			activeAttempt.Handler.Handle(wal.TransformLogStreamEvent{SyncUp: &wal.TransformLogSyncUp{TimeTick: 22}})
+			require.EqualValues(t, 22, recvStreamEvent(t, activeHandler.events).SyncUp.TimeTick)
+			require.NoError(t, active.Close())
 			require.Equal(t, int64(2), calls.Load())
 			require.NoError(t, stream.Close())
 			require.Equal(t, int64(2), calls.Load(), "explicit close must not reconnect")

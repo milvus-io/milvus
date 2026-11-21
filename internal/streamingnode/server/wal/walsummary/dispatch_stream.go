@@ -2,6 +2,7 @@ package walsummary
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -61,6 +62,7 @@ type dispatchSubscription struct {
 	replayThrough uint64 // immutable capture, distinct from the live frontier
 	replayAfter   uint64 // owned by the worker executing this subscription
 	// Protected by stream.mu. Manager.mu serializes registration with observation.
+	terminal    bool // history is truncated; terminal control is queued for delivery
 	live        bool
 	needsSyncUp bool // replay started ahead of the new owner's coverage
 	through     uint64
@@ -213,11 +215,7 @@ func (s *dispatchSubscription) Close() error {
 		}
 		clear(stream.outgoing[len(kept):])
 		stream.outgoing = kept
-		for _, delivery := range s.pending {
-			stream.pendingBytes -= delivery.size
-			stream.pendingEvents--
-		}
-		s.pending = nil
+		s.clearPendingLocked()
 		stream.signalLocked()
 		stream.mu.Unlock()
 		stream.manager.mu.Unlock()
@@ -295,7 +293,18 @@ func (s *DispatchStream) deliverLoop() {
 			sub.opt.Handler.Handle(delivery.event)
 		}
 		sub.handleMu.Unlock()
+		if delivery.event.SubscriptionError != nil {
+			_ = sub.Close()
+		}
 	}
+}
+
+func (s *dispatchSubscription) clearPendingLocked() {
+	for _, delivery := range s.pending {
+		s.stream.pendingBytes -= delivery.size
+		s.stream.pendingEvents--
+	}
+	s.pending = nil
 }
 
 func (s *DispatchStream) catchupLoop() {
@@ -326,6 +335,15 @@ func (s *DispatchStream) catchupLoop() {
 		s.mu.Unlock()
 		done, err := sub.catchupPage()
 		if sub.ctx.Err() != nil {
+			continue
+		}
+		if errors.Is(err, wal.ErrTransformLogStartPointTruncated) {
+			s.mu.Lock()
+			sub.terminal = true
+			sub.clearPendingLocked()
+			s.mu.Unlock()
+			event := wal.TransformLogStreamEvent{SubscriptionID: sub.ID(), VChannel: sub.VChannel(), SubscriptionError: err}
+			_ = s.enqueue(sub.ctx, transformDelivery{sub: sub, size: 32, event: event})
 			continue
 		}
 		if err != nil {
@@ -427,7 +445,7 @@ func (m *Manager) dispatchTransformLocked(vchannel string, entry *streamingpb.Tr
 	for sub := range m.transformSubscribers[vchannel] {
 		stream := sub.stream
 		stream.mu.Lock()
-		if sub.ctx.Err() != nil || tick <= sub.through {
+		if sub.terminal || sub.ctx.Err() != nil || tick <= sub.through {
 			stream.mu.Unlock()
 			continue
 		}

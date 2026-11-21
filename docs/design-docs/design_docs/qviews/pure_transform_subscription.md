@@ -51,12 +51,14 @@ covering both the closing send and response. Expiry terminates the stream with
 `context.DeadlineExceeded`. RPC cancellation does not cancel the parent
 resumable stream, and subscription cleanup still runs once.
 
-An underlying read, subscription or transport failure ends the physical attempt
-through the stream's Done/Error, never a business-handler event. The resumable
-client closes that attempt outside delivery callbacks and recreates subscriptions
-from each handler's last accepted Entry/SyncUp cursor. Runtime failures are not
-classified or forwarded to the shared QN buffer; persistent failures remain
-observable in retry logs and block progress without fabricating coverage.
+A physical read or transport failure ends the physical attempt through
+Done/Error. The resumable client recreates active subscriptions from each
+handler's last delivered Entry/SyncUp cursor. A truncated subscription instead
+delivers its terminal cause to the affected QN buffer and its registrations.
+A new View can acquire a fresh buffer while the failed View releases its guard.
+Each guard supplies its own buffer instance for new segment registrations. Read
+and base sharing require that same instance, so a delayed failure callback
+belongs to the original physical base throughout replacement.
 Invalid subscription options are rejected before starting an attempt. Explicit
 consumer Close terminates the resumable stream rather than reconnecting. See
 [Resume and Failure](../wal/transform_log.md#5-resume-and-failure).
@@ -67,14 +69,12 @@ consumer Close terminates the resumable stream rather than reconnecting. See
   zero requests continuous delivery.
 - Delete entries use the outer committed transaction TimeTick when applicable.
   Plain inserts do not produce Delete entries.
-- `SyncUp(T)` certifies delivery of the retained suffix through T, including
-  empty intervals after the adjusted start. It does not certify persistence,
-  L0 materialization, segment application, or delivery below Summary's lower bound.
-- The adaptor accepts Summary's `FastForwardTimeTick` and resumes at that
-  retained lower bound. A bounded interval entirely below the bound completes
-  without entries. This compatibility behavior does not establish that skipped
-  Deletes were applied; complete query recovery still requires the retention
-  guarantees below. See [the adaptor contract](../wal/transform_log.md).
+- SyncUp(T) certifies complete delivery from the exclusive cursor through T,
+  including intervals without Transform entries. Segment application and L0
+  materialization maintain their own progress.
+- A FastForwardTimeTick above the cursor of a required interval ends that
+  subscription. Covered sibling subscriptions can continue immediately.
+  See [the adaptor contract](../wal/transform_log.md).
 - The summary reader provides bounded pages and scoped change notifications.
   No independent subscriber backlog is persisted on SN.
 - The QN buffer applies entries to each registered segment and advances that
@@ -116,11 +116,10 @@ wait ends at the finite readiness frontier; later failure is delivered by an
 installed callback (including failures preceding installation), not one waiting
 goroutine per Segment.
 
-These guarantees cover retained history and the subsequent live suffix. The
-existing FastForward policy for already GC'd history is unchanged and is not a
-proof of delivery of that discarded prefix. Stream overflow is a terminal
-attempt error, never successful progress over a dropped queue item; the client
-resumes from its last accepted cursor using the same retained-history contract.
+These guarantees cover retained history and the subsequent live suffix. A
+replacement for a truncated subscription starts from a base with a covered
+cursor. Stream overflow ends the physical attempt and lets the client resume
+from its last accepted cursor under the same retained-history contract.
 
 ## Persistence and retention
 

@@ -427,13 +427,19 @@ func TestDispatchStreamRejectsTruncatedCursor(t *testing.T) {
 	sub, err := s.Subscribe(t.Context(), wal.TransformLogSubscriptionOption{VChannel: "v", Handler: h})
 	require.NoError(t, err)
 	defer sub.Close()
-	select {
-	case <-s.Done():
-	case <-time.After(time.Second):
-		t.Fatal("truncated stream did not fail")
-	}
-	require.ErrorIs(t, s.Error(), wal.ErrTransformLogStartPointTruncated)
+	require.ErrorIs(t, nextTransformEvent(t, h).SubscriptionError, wal.ErrTransformLogStartPointTruncated)
 	require.Empty(t, h.events)
+	require.NoError(t, s.Error())
+	for _, channel := range []string{"v", "sibling"} {
+		valid := newRecordingTransformHandler()
+		ok, err := s.Subscribe(t.Context(), wal.TransformLogSubscriptionOption{VChannel: channel, StartAfterTimeTick: 10, Handler: valid})
+		require.NoError(t, err)
+		if channel == "v" {
+			require.EqualValues(t, 20, nextTransformEvent(t, valid).Entry.GetTimeTick())
+		}
+		require.EqualValues(t, 20, nextTransformEvent(t, valid).SyncUp.TimeTick)
+		require.NoError(t, ok.Close())
+	}
 }
 
 // Insert-only transactions do not advance the Transform frontier or emit live

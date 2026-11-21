@@ -62,12 +62,10 @@ QueryNode integration uses continuous subscriptions to catch loaded
 sealed Segments up and then apply live Deletes. StreamingNode uses bounded subscriptions when preparing
 growing resources from a captured WAL view; subsequent resource events arrive
 through the VChannel's ordered live event path. Both consumers are specified to use the same Summary-backed read semantics.
-The current adaptor clamps an older start to Summary's lower bound and delivers
-the retained suffix. It does not emit a separate FastForward event or a truncated
-start error. A bounded interval wholly at or below the lower bound completes
-with SyncUp at its requested end and no entries. This is an explicit compatibility
-policy, not proof that skipped Deletes were applied; reliable retention remains
-[TODO](summary.md#todo-reliable-retention-for-query-recovery).
+When Summary's retained lower bound overtakes a required interval, the adaptor
+fails that subscription with the truncated-start cause. Siblings continue on
+the same stream. A fresh base can subscribe from a covered cursor.
+See [Summary retention](summary.md#todo-reliable-retention-for-query-recovery).
 
 ## 3. Entry And SyncUp Semantics
 
@@ -76,7 +74,7 @@ uses its outer TimeTick and delivers its Delete children as one ordered entry.
 Pure Inserts do not produce transform entries. Other ordered messages may
 establish progress without producing payload records.
 
-`SyncUp(T)` means every retained Delete after the adjusted start through T has
+`SyncUp(T)` means every Transform entry after the requested exclusive start through T has
 been delivered successfully. It makes no claim about history below Summary's
 lower bound. It has two responsibilities:
 
@@ -193,8 +191,8 @@ The existing `Stream` adaptor remains the local SN bootstrap reader, and handles
 explicitly bounded remote reads. Each read captures complete coverage and a
 change token together, delivers whole entries, and advances only through proven
 coverage. It sends SyncUp and completes at EndTimeTick; if that end is not yet
-readable, it waits for coverage. Reads below the retained lower bound keep the
-compatibility policy in section 2. Storage errors never become empty history.
+readable, it waits for coverage. A required prefix below the retained lower bound fails
+only that subscription as described in section 2. Storage errors never become empty history.
 
 The reader-only adaptor also retains unbounded mode for reader consumers/tests.
 That mode uses scoped notifications and a waiting goroutine; production remote
@@ -292,13 +290,13 @@ state. If the recovered server has not yet reconstructed a previously delivered
 position, it must not manufacture coverage from the resume request.
 
 Invalid options and an unavailable VChannel are explicit semantic errors.
-When Summary returns `FastForwardTimeTick`, the adaptor accepts that boundary
-and delivers the returned suffix without rereading it. Cursor advancement is
-capped by EndTimeTick for bounded subscriptions, including an entirely skipped
-interval. The same policy applies when GC overtakes a live cursor. Missing or
-corrupt retained objects still fail the read; they are never converted into empty
-history, fast-forward, or SyncUp. Correct replay of all query-required effects
-depends on the reliable-retention TODO, not on accepting an older cursor.
+When Summary returns a FastForwardTimeTick above the cursor of a nonempty
+requested interval, the adaptor emits one terminal subscription error. The
+remote server carries it in TransformSubscriptionError with the existing
+UNRECOVERABLE code. The logical client retires only that subscription and
+passes the cause to its buffer and segment registrations. The cursor stays at
+the last completely delivered entry or SyncUp. Other subscriptions and new
+requests with covered cursors can continue on the same physical stream.
 
 ### Local read recovery
 
@@ -335,18 +333,11 @@ failure remains retryable. Bytes returned successfully still undergo framing,
 checksum and index validation, so a damaged object is a permanent failure.
 No error becomes an empty history or a successful SyncUp.
 
-The resumable layer treats every underlying read, subscription or transport
-failure as the end of one physical attempt and recreates all subscriptions from
-their individual delivered cursors. It does not classify runtime failures or
-pass them to business handlers. A persistent corruption therefore remains
-observable in retry logs and blocks progress until repaired or the owner closes
-the logical stream; it never produces fabricated data or coverage. Local callers
-that use a Summary stream directly observe its Done/Error without resuming.
-Segment application failure handling is outside this transport contract.
-
-This retry policy does not alter the lower-bound compatibility rule above or
-implement reliable retention. It preserves delivery across transient failures
-within retained history; it cannot reconstruct Deletes already retired by GC.
+A physical read or transport failure ends the underlying attempt. The resumable
+layer reconnects active subscriptions from their individual delivered cursors.
+Persistent storage corruption blocks progress until repair or logical stream
+closure. Local callers of the Summary stream observe its Done/Error directly.
+A rejected history interval uses the per-subscription error path above.
 
 ### Deferred: NodeScheduler task priorities
 
@@ -396,8 +387,8 @@ and [WAL input view](streamingnode_vchannel_wal_view.md) for snapshot handoff.
 1. TransformLog has no independent WAL scanner or storage-write path; live input comes from ordered Summary observation.
 2. Every subscription reads the same WALSummary record store.
 3. Payload delivery is ordered by source WAL TimeTick with an exclusive cursor.
-4. SyncUp claims complete delivery only after the adjusted start; it does not
-   certify history skipped below the retained lower bound.
+4. SyncUp certifies complete delivery after the requested exclusive start. A
+   permanent gap ends that subscription before any higher progress.
 5. Historical/live handoff and storage transitions lose no retained records.
 6. Subscription cursors do not advance L0 materialization or authorize GC.
 7. L0 materialization does not depend on this adaptor or on external subscribers.

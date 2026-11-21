@@ -77,7 +77,16 @@ func TestQueryStreamRejectsMissingPrefix(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("missing terminal notification")
 			}
-			require.ErrorIs(t, stream.Error(), wal.ErrTransformLogStartPointTruncated)
+			require.ErrorIs(t, nextTransformEvent(t, h).SubscriptionError, wal.ErrTransformLogStartPointTruncated)
+			require.NoError(t, stream.Error())
+			for _, channel := range []string{"v1", "sibling"} {
+				manager.ObserveQueryBarrier(channel, 30)
+				valid := newRecordingTransformHandler()
+				covered, err := stream.Subscribe(t.Context(), wal.TransformLogSubscriptionOption{VChannel: channel, StartAfterTimeTick: 10, EndTimeTick: 30, Handler: valid})
+				require.NoError(t, err)
+				require.EqualValues(t, 30, nextTransformEvent(t, valid).SyncUp.TimeTick)
+				require.NoError(t, covered.Close())
+			}
 			require.Empty(t, h.events)
 		})
 	}

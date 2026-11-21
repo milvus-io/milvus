@@ -218,6 +218,9 @@ func (s *SubscribeServer) createSubscription(req *streamingpb.CreateTransformSub
 }
 
 func (s *SubscribeServer) sendSubscriptionError(subscriptionID int64, vchannel string, err error) error {
+	if errors.Is(err, wal.ErrTransformLogStartPointTruncated) {
+		err = status.NewUnrecoverableError("%s", err.Error())
+	}
 	return s.send(&streamingpb.TransformResponse{
 		Response: &streamingpb.TransformResponse_SubscriptionError{
 			SubscriptionError: &streamingpb.TransformSubscriptionError{
@@ -230,6 +233,10 @@ func (s *SubscribeServer) sendSubscriptionError(subscriptionID int64, vchannel s
 }
 
 func (s *SubscribeServer) sendSubscriptionEvent(event wal.TransformLogStreamEvent) error {
+	if event.SubscriptionError != nil {
+		s.closeSubscription(event.SubscriptionID)
+		return s.sendSubscriptionError(event.SubscriptionID, event.VChannel, event.SubscriptionError)
+	}
 	if event.Entry != nil {
 		mlog.Debug(s.stream.Context(), "streamingnode transform log forward entry",
 			mlog.FieldPChannel(s.pchannel),

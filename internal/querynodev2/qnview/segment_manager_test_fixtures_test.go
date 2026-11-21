@@ -115,7 +115,7 @@ func (b *fakeTransformLogBuffer) Bind(view *qviews.QueryViewAtQueryNode) (Transf
 		return nil, b.acquireErr
 	}
 	if b.guard == nil {
-		b.guard = &fakeTransformLogGuard{}
+		b.guard = &fakeTransformLogGuard{registrar: b}
 	}
 	return b.guard, nil
 }
@@ -133,12 +133,15 @@ func (b *fakeTransformLogBuffer) RegisterSegment(_ context.Context, segment Tran
 }
 
 type fakeTransformLogGuard struct {
+	registrar    TransformSegmentRegistrar
 	mu           sync.Mutex
 	released     bool
 	waitCalled   bool
 	waitTimetick uint64
 	waitErr      error
 }
+
+func (g *fakeTransformLogGuard) Registrar() TransformSegmentRegistrar { return g.registrar }
 
 func (g *fakeTransformLogGuard) WaitTransformVisible(_ context.Context, timetick uint64) error {
 	g.mu.Lock()
@@ -266,7 +269,7 @@ func (b *interleavingTransformLogBuffer) Acquire(_ context.Context, _ *qviews.Qu
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
-	return instantTransformGuard{}, nil
+	return instantTransformGuard{registrar: b}, nil
 }
 
 func (b *interleavingTransformLogBuffer) RegisterSegment(_ context.Context, segment TransformSegment) (TransformRegistration, error) {
@@ -276,7 +279,9 @@ func (b *interleavingTransformLogBuffer) RegisterSegment(_ context.Context, segm
 	return instantTransformRegistration{}, nil
 }
 
-type instantTransformGuard struct{}
+type instantTransformGuard struct{ registrar TransformSegmentRegistrar }
+
+func (g instantTransformGuard) Registrar() TransformSegmentRegistrar { return g.registrar }
 
 func (instantTransformGuard) WaitTransformVisible(context.Context, uint64) error {
 	return nil

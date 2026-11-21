@@ -75,7 +75,7 @@ func (c *Collection) UpdateCoverage() []UpdateField {
 	restricted := typeutil.PKUpdateFieldRestriction(schema)
 	var fields []UpdateField
 	for _, f := range schema.GetFields() {
-		if restricted(f) || !typeutil.SupportsPKUpdateType(f) || c.schemaOwner != nil && !c.loadFields.Contain(f.GetFieldID()) {
+		if restricted(f) || !typeutil.SupportsPKUpdateType(f) || c.loadFields != nil && !c.loadFields.Contain(f.GetFieldID()) {
 			continue
 		}
 		fields = append(fields, UpdateField{f.GetFieldID(), f.GetDataType(), f.GetElementType(), f.GetNullable()})

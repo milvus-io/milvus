@@ -347,14 +347,24 @@ func (s *EventStream) handleSyncUp(resp *streamingpb.TransformSubscriptionSyncUp
 	)
 }
 
-// A failed subscription ends this physical attempt. Resuming recreates all
-// subscriptions from their last delivered cursors; handlers receive no errors.
+// Only a permanent, subscription-scoped rejection retires an individual
+// subscription. Transient errors resume the physical stream from its cursors.
 func (s *EventStream) handleSubscriptionError(resp *streamingpb.TransformSubscriptionError) error {
-	if resp == nil || s.getSubscription(resp.GetSubscriptionId()) == nil {
+	if resp == nil {
+		return nil
+	}
+	sub := s.getSubscription(resp.GetSubscriptionId())
+	if sub == nil {
 		return nil
 	}
 	if resp.GetError() != nil {
-		return status.AsStreamingError((*status.StreamingError)(resp.GetError()))
+		err := (*status.StreamingError)(resp.GetError())
+		if err.Code == streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE {
+			sub.handle(wal.TransformLogStreamEvent{SubscriptionID: sub.ID(), VChannel: sub.VChannel(), SubscriptionError: err})
+			sub.finish(err)
+			return nil
+		}
+		return err
 	}
 	return status.NewUnknownError("transform subscription error")
 }

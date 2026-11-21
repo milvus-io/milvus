@@ -69,7 +69,7 @@ type segmentBinding struct {
 	manifest    int64
 	// Zero-manifest requirements validate fresh metadata before reusing a read.
 	snapshot     *SegmentLoadInfoSnapshot
-	prepared     *preparedSegmentRead
+	prepared     *preparedSegmentRead // pinned before catch-up; published after its registration succeeds
 	reported     bool
 	retryAfter   time.Time
 	retryBackoff *backoff.ExponentialBackOff
@@ -85,6 +85,7 @@ type preparedSegmentRead struct {
 }
 
 type segmentBase struct {
+	registrar      TransformSegmentRegistrar
 	coverage       []segments.UpdateField
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -429,6 +430,7 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 				result.snapshot = snapshot.LoadInfo
 			}
 			b.resetRetryLocked()
+			b.prepared = result
 			r.reads = append(r.reads, result)
 		}
 		prepared = true
@@ -455,14 +457,14 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 		}
 		if b.prepared == nil {
 			for _, read := range r.reads {
-				if readMatchesBinding(read, b) && read.base.caughtUp && read.base.catchupErr == nil {
+				if read.base.catchupErr == nil && readMatchesBinding(read, b) {
 					b.prepared = read
 					b.resetRetryLocked()
 					break
 				}
 			}
 		}
-		if b.prepared != nil && !b.reported {
+		if b.prepared != nil && b.prepared.base.caughtUp && !b.reported {
 			b.reported = true
 			cb, partition, id := b.view.req.OnReady, b.partitionID, r.id
 			if cb != nil {
@@ -475,18 +477,6 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 		i := (r.cursor + n) % len(r.bindings)
 		b := r.bindings[i]
 		if b.view.collection == nil || b.view.buffer == nil || b.view.failed || b.prepared != nil {
-			continue
-		}
-		waiting := false
-		for _, read := range r.reads {
-			if readMatchesBinding(read, b) {
-				waiting = true
-				if read.base.catchupErr != nil {
-					go m.failView(b.view, read.base.catchupErr)
-				}
-			}
-		}
-		if waiting {
 			continue
 		}
 		if time.Now().Before(b.retryAfter) {
@@ -521,6 +511,9 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 }
 
 func readMatchesBinding(read *preparedSegmentRead, b *segmentBinding) bool {
+	if read.base.registrar != b.view.buffer.Registrar() {
+		return false
+	}
 	if b.manifest == 0 && (b.snapshot == nil || !proto.Equal(read.snapshot, b.snapshot.LoadInfo)) {
 		return false
 	}
@@ -569,9 +562,10 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 	// Normal sealed same-ID additive manifests preserve the row domain. External
 	// snapshots may replace it, so they require the same manifest revision to share.
 	coverage := collection.Collection().UpdateCoverage()
+	registrar := b.view.buffer.Registrar()
 	m.mu.Lock()
 	for _, candidate := range r.bases {
-		if !slices.Equal(candidate.coverage, coverage) {
+		if candidate.registrar != registrar || candidate.catchupErr != nil || !slices.Equal(candidate.coverage, coverage) {
 			continue
 		}
 		sameManifest := info.GetManifestPath() != "" && packed.SameManifestPath(candidate.snapshot.LoadInfo.GetManifestPath(), info.GetManifestPath())
@@ -595,7 +589,7 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 		}
 		segment = &transformStartSegment{TransformSegment: segment, startAfter: info.GetTransformStartAfterTimetick()}
 		baseCtx, cancel := context.WithCancel(r.ctx) //nolint:gosec // Ownership transfers to the base; resource closure or base retirement cancels it.
-		base = &segmentBase{coverage: coverage, segment: segment, snapshot: snapshot, ctx: baseCtx, cancel: cancel}
+		base = &segmentBase{registrar: registrar, coverage: coverage, segment: segment, snapshot: snapshot, ctx: baseCtx, cancel: cancel}
 		m.mu.Lock()
 		r.bases = append(r.bases, base)
 		r.operations.Add(1)
@@ -614,7 +608,7 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 
 func (r *segmentResource) catchup(base *segmentBase) {
 	defer r.operations.Done()
-	reg, err := r.manager.buffer.RegisterSegment(base.ctx, base.segment)
+	reg, err := base.registrar.RegisterSegment(base.ctx, base.segment)
 	if err == nil {
 		err = reg.WaitCatchup(base.ctx)
 	}
@@ -963,7 +957,7 @@ func (r *segmentResource) pendingPriorityLocked() int32 {
 		}
 		waiting := false
 		for _, read := range r.reads {
-			if readMatchesBinding(read, b) {
+			if read.base.catchupErr == nil && readMatchesBinding(read, b) {
 				waiting = true
 				break
 			}

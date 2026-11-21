@@ -11,7 +11,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
 type StreamFactory = func(ctx context.Context, pchannel string) (wal.TransformLogStream, error)
@@ -245,7 +247,7 @@ func (s *resumableStream) subscribePending(ctx context.Context, underlying wal.T
 		if sub.hasRemote() {
 			continue
 		}
-		handler := &nopCloseHandler{TransformLogEventHandler: sub.handler}
+		handler := &attemptHandler{sub: sub, attempt: underlying}
 		if err := s.subscribeRemote(ctx, underlying, sub, handler); err != nil {
 			return err
 		}
@@ -263,7 +265,7 @@ func (s *resumableStream) subscriptionSnapshot() []*resumableSubscription {
 	return subs
 }
 
-func (s *resumableStream) subscribeRemote(ctx context.Context, underlying wal.TransformLogStream, sub *resumableSubscription, handler *nopCloseHandler) error {
+func (s *resumableStream) subscribeRemote(ctx context.Context, underlying wal.TransformLogStream, sub *resumableSubscription, handler *attemptHandler) error {
 	opt := sub.option()
 	opt.Handler = handler
 	mlog.Debug(s.ctx, "resumable transform log stream subscribing vchannel",
@@ -274,13 +276,18 @@ func (s *resumableStream) subscribeRemote(ctx context.Context, underlying wal.Tr
 		mlog.Int64("subscriptionID", sub.ID()),
 	)
 	remote, err := underlying.Subscribe(ctx, opt)
+	if errors.Is(err, wal.ErrTransformLogStartPointTruncated) || (err != nil && status.AsStreamingError(err).Code == streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE) {
+		handler.Handle(wal.TransformLogStreamEvent{SubscriptionError: err})
+		return nil
+	}
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
 	if s.subscriptions[sub.id] != sub {
 		s.mu.Unlock()
-		return remote.Close()
+		_ = remote.Close()
+		return nil
 	}
 	sub.remote = remote
 	s.mu.Unlock()
@@ -362,13 +369,15 @@ func (s *resumableStream) waitUntilUnavailable(ctx context.Context, underlying w
 func (s *resumableStream) removeSubscription(sub *resumableSubscription, err error) {
 	var remote wal.TransformLogSubscription
 	s.mu.Lock()
-	if s.subscriptions[sub.id] == sub {
-		delete(s.subscriptions, sub.id)
-		remote = sub.remote
-		sub.remote = nil
-		if len(s.subscriptions) == 0 && s.acquireCancel != nil {
-			s.acquireCancel()
-		}
+	if s.subscriptions[sub.id] != sub {
+		s.mu.Unlock()
+		return // The owner that removed this subscription completes its handler.
+	}
+	delete(s.subscriptions, sub.id)
+	remote = sub.remote
+	sub.remote = nil
+	if len(s.subscriptions) == 0 && s.acquireCancel != nil {
+		s.acquireCancel()
 	}
 	s.mu.Unlock()
 	if remote != nil {

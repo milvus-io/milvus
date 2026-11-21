@@ -37,7 +37,7 @@ func (m *SegmentResourceManager) AcquireSealedSegmentHandles(ctx context.Context
 	}
 	ids := segmentPartitionMap(view)
 	for id := range ids {
-		if b := v.bindings[id]; b == nil || b.prepared == nil {
+		if b := v.bindings[id]; b == nil || b.prepared == nil || !b.prepared.base.caughtUp || b.prepared.base.catchupErr != nil {
 			m.mu.Unlock()
 			return nil, viewerror.NewViewInvalidated("query view %s segment %d is not ready", key.String(), id)
 		}

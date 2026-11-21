@@ -2,6 +2,7 @@ package walsummary
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sync"
 
@@ -44,6 +45,10 @@ func (s *Stream) Subscribe(ctx context.Context, opt wal.TransformLogSubscription
 		defer stop()
 		defer cancel()
 		if err := s.read(subctx, opt); err != nil && subctx.Err() == nil {
+			if errors.Is(err, wal.ErrTransformLogStartPointTruncated) {
+				opt.Handler.Handle(wal.TransformLogStreamEvent{SubscriptionID: opt.SubscriptionID, VChannel: opt.VChannel, SubscriptionError: err})
+				return
+			}
 			// End the physical stream, allowing its owner to resume all subscriptions.
 			// Explicit subscription cancellation must not fail sibling subscriptions.
 			s.cancel(err)

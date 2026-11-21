@@ -343,8 +343,19 @@ func TestSegmentResourceFailureLeavesOtherInstancesQueryable(t *testing.T) {
 		// Existing query references still own the failed base until they release.
 		held, err := f.manager.AcquireSealedSegmentHandles(t.Context(), first.Key, first.View, 50)
 		require.NoError(t, err)
+		// The subscription fails before the segment owner's callback is delivered.
+		// Bind the replacement to a fresh buffer, keeping the old read and handle alive.
 		close(broken)
 		callback := <-observer
+		_, err = f.manager.AcquireSealedSegmentHandles(t.Context(), first.Key, first.View, 50)
+		require.ErrorIs(t, err, failure, "registration is terminal before the View callback")
+		buffer := f.manager.buffer.(*fakeTransformLogBuffer)
+		buffer.mu.Lock()
+		buffer.guard = &fakeTransformLogGuard{registrar: &fakeTransformLogBuffer{}}
+		buffer.mu.Unlock()
+		replacement := f.acquire(3, 1, 1)
+		f.await(t, 1)
+		require.EqualValues(t, 2, registered.Load())
 		callback(failure)
 		select {
 		case <-failed:
@@ -358,17 +369,16 @@ func TestSegmentResourceFailureLeavesOtherInstancesQueryable(t *testing.T) {
 		query, err := f.manager.AcquireSealedSegmentHandles(t.Context(), healthy.Key, healthy.View, 100)
 		require.NoError(t, err)
 		query[0].Release()
+		// A late notification still belongs to the original registration.
+		query, err = f.manager.AcquireSealedSegmentHandles(t.Context(), replacement.Key, replacement.View, 100)
+		require.NoError(t, err)
+		query[0].Release()
+		require.EqualValues(t, 2, registered.Load())
 		dropped := f.beginDrop(first)
 		require.Zero(t, f.releases.Load(), "failure cannot destroy a resource borrowed by an executing query")
 		held[0].Release()
 		awaitShutdown(t, dropped)
 		require.Eventually(t, func() bool { return f.releases.Load() == 1 }, 5*time.Second, time.Millisecond)
-		// Reconstruction uses a fresh registration even for the same SegmentID.
-		replacement := f.acquire(3, 1, 1)
-		f.await(t, 1)
-		query, err = f.manager.AcquireSealedSegmentHandles(t.Context(), replacement.Key, replacement.View, 100)
-		require.NoError(t, err)
-		query[0].Release()
 		f.drop(t, replacement)
 		f.drop(t, healthy)
 	})

@@ -165,8 +165,32 @@ func (h *checkpointEventHandler) Close() {
 }
 
 // Keep the business handler alive across underlying stream attempts.
-type nopCloseHandler struct {
-	wal.TransformLogEventHandler
+type attemptHandler struct {
+	sub     *resumableSubscription
+	attempt wal.TransformLogStream
 }
 
-func (h *nopCloseHandler) Close() {}
+func (h *attemptHandler) Handle(event wal.TransformLogStreamEvent) {
+	if event.SubscriptionError == nil {
+		h.sub.handler.Handle(event)
+		return
+	}
+	sub := h.sub
+	s := sub.stream
+	s.mu.Lock()
+	if s.underlying != h.attempt || s.subscriptions[sub.id] != sub {
+		s.mu.Unlock()
+		return
+	}
+	sub.setError(event.SubscriptionError)
+	delete(s.subscriptions, sub.id)
+	sub.remote = nil
+	s.mu.Unlock()
+	// The physical owner retires its own subscription. Calling remote.Close
+	// from its receive loop would wait for an acknowledgement on the same loop.
+	sub.handler.Handle(event)
+	sub.finish(event.SubscriptionError)
+	s.wakeResume()
+}
+
+func (h *attemptHandler) Close() {}

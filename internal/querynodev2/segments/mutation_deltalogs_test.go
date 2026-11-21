@@ -59,10 +59,13 @@ func (suite *SegmentLoaderSuite) TestMixedMutationFilesRestoreWithoutTail() {
 		return deltacodec.Row{TimeTick: tick, SourceOrdinal: ordinal, Operation: deltacodec.Update, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{41}}}}, Assignments: []*messagespb.UpdateAssignment{{FieldId: field, Literal: &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_ScalarValue{ScalarValue: &schemapb.ValueField{Data: &schemapb.ValueField_IntData{IntData: value}}}}}}}
 	}
 	r1, r2 := makeRow(20, 0, 334), makeRow(30, 1, 667)
+	omitted := makeRow(20, 0, 99).Assignments[0]
+	omitted.FieldId = extra
+	r1.Assignments = append(r1.Assignments, omitted)
 	null := makeRow(35, 0, 1)
 	null.Assignments[0].Literal = &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_NullValue{}}
 	file := path.Join(suite.rootPath, fmt.Sprintf("typed-%d", id))
-	_, err = storage.WriteMutationDelta(ctx, file, storage.MutationDelta{Layout: deltacodec.Layout{CollectionID: collection, VChannel: vchannel, PartitionID: partition, SchemaVersion: 1, PKType: schemapb.DataType_Int64, Fields: []deltacodec.Field{{ID: field, Type: schemapb.DataType_Int32}}}, Rows: []deltacodec.Row{r1, r2, null}}, createStorageConfig(), nil)
+	_, err = storage.WriteMutationDelta(ctx, file, storage.MutationDelta{Layout: deltacodec.Layout{CollectionID: collection, VChannel: vchannel, PartitionID: partition, SchemaVersion: 1, PKType: schemapb.DataType_Int64, Fields: []deltacodec.Field{{ID: extra, Type: schemapb.DataType_Int16}, {ID: field, Type: schemapb.DataType_Int32}}}, Rows: []deltacodec.Row{r1, r2, null}}, createStorageConfig(), nil)
 	require.NoError(t, err)
 	info := &querypb.SegmentLoadInfo{SegmentID: id, PartitionID: partition, CollectionID: collection, InsertChannel: vchannel, BinlogPaths: logs, Statslogs: stats, NumOfRows: 4, TransformStartAfterTimetick: 11, Deltalogs: append(legacy, &datapb.FieldBinlog{Binlogs: []*datapb.Binlog{{LogPath: file, EntriesNum: 3}}})}
 	loaded, err := suite.loader.Load(ctx, collection, SegmentTypeSealed, 0, info)
@@ -115,6 +118,24 @@ func (suite *SegmentLoaderSuite) TestMixedMutationFilesRestoreWithoutTail() {
 		require.NoError(t, suite.loader.LoadDeltaLogsWithoutResource(ctx, seg, info))
 		return seg.(*LocalSegment)
 	}
+	// Ordinary segment loading also accepts a strict field set on its owning collection.
+	owner, err := NewCollection(collection, schema, nil, &querypb.LoadMetaInfo{
+		CollectionID: collection, LoadType: querypb.LoadType_LoadCollection,
+		PartitionIDs: []int64{partition}, LoadFields: []int64{0, 1, pk, field},
+	})
+	require.NoError(t, err)
+	defer DeleteCollection(owner)
+	partial := newBase(owner)
+	defer partial.Release(ctx)
+	require.Contains(t, partial.updateFields, field)
+	require.NotContains(t, partial.updateFields, extra)
+	persisted, valid := read(partial, 20, field)
+	require.True(t, valid)
+	require.EqualValues(t, 334, persisted)
+	persisted, valid = read(local, 20, extra)
+	require.True(t, valid)
+	require.EqualValues(t, 99, persisted)
+
 	narrow := newBase(narrowScope)
 	defer narrow.Release(ctx)
 	nonPersisted := makeRow(41, 2, 819)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -120,10 +121,17 @@ func (b *Buffer) Bind(view *qviews.QueryViewAtQueryNode) (qnview.TransformLogGua
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	buf := b.channels[channel]
-	if buf == nil {
-		buf = newVChannelBuffer(b, funcutil.ToPhysicalChannel(channel), channel, start)
-		b.channels[channel] = buf
+	if buf != nil {
+		if err := buf.acquireLocked(start); err == nil {
+			return &guard{buffer: buf, startFrom: start}, nil
+		} else if !isUnrecoverableSubscribeError(err) {
+			return nil, err
+		}
+		// References to a failed subscription drain against their own buffer.
+		// A new View can register a different certified base immediately.
 	}
+	buf = newVChannelBuffer(b, funcutil.ToPhysicalChannel(channel), channel, start)
+	b.channels[channel] = buf
 	if err := buf.acquireLocked(start); err != nil {
 		return nil, err
 	}
@@ -142,6 +150,8 @@ func (b *Buffer) Acquire(ctx context.Context, view *qviews.QueryViewAtQueryNode)
 	return g, nil
 }
 
+// RegisterSegment targets the current generation. A View registers through its
+// pinned guard to preserve the generation selected at Bind.
 func (b *Buffer) RegisterSegment(ctx context.Context, segment qnview.TransformSegment) (qnview.TransformRegistration, error) {
 	if segment == nil || segment.VChannel() == "" {
 		return nil, wal.ErrTransformLogInvalidReadOption
@@ -152,7 +162,7 @@ func (b *Buffer) RegisterSegment(ctx context.Context, segment qnview.TransformSe
 	if buf == nil {
 		return nil, merr.WrapErrServiceInternalMsg("transform log buffer for vchannel %q is not acquired", segment.VChannel())
 	}
-	return buf.registerSegment(ctx, segment)
+	return buf.RegisterSegment(ctx, segment)
 }
 
 // scheduleDrainLocked coalesces runnable registrations. Caller holds the
@@ -242,7 +252,7 @@ func (b *Buffer) getOrCreateStreamLocked(ctx context.Context, pchannel string) (
 	state := &streamState{
 		pchannel: pchannel,
 		stream:   stream,
-		refs:     make(map[string]*vchannelBuffer),
+		refs:     make(map[*vchannelBuffer]struct{}),
 	}
 	b.streamsByPChannel[pchannel] = state
 	return state, nil
@@ -253,7 +263,7 @@ func (b *Buffer) removeLocked(vchannel string, buf *vchannelBuffer) wal.Transfor
 		delete(b.channels, vchannel)
 	}
 	if state := b.streamsByPChannel[buf.pchannel]; state != nil {
-		delete(state.refs, vchannel)
+		delete(state.refs, buf)
 		if len(state.refs) == 0 {
 			delete(b.streamsByPChannel, buf.pchannel)
 			return state.stream
@@ -265,7 +275,7 @@ func (b *Buffer) removeLocked(vchannel string, buf *vchannelBuffer) wal.Transfor
 type streamState struct {
 	pchannel string
 	stream   wal.TransformLogStream
-	refs     map[string]*vchannelBuffer
+	refs     map[*vchannelBuffer]struct{}
 }
 
 type bufEventHandler struct {
@@ -274,6 +284,10 @@ type bufEventHandler struct {
 }
 
 func (h bufEventHandler) Handle(event wal.TransformLogStreamEvent) {
+	if event.SubscriptionError != nil {
+		h.buffer.fail(event.SubscriptionError)
+		return
+	}
 	if event.Entry != nil {
 		mlog.Debug(context.TODO(), "querynode transform log buffer received entry",
 			mlog.FieldPChannel(h.buffer.pchannel),
@@ -309,13 +323,15 @@ type guard struct {
 	startFrom uint64
 }
 
+func (g *guard) Registrar() qnview.TransformSegmentRegistrar { return g.buffer }
+
 func (g *guard) Prepare(ctx context.Context) (bool, error) {
 	b := g.buffer.owner
 	b.streamMu.Lock()
 	b.mu.Lock()
 	stream, err := b.getOrCreateStreamLocked(ctx, g.buffer.pchannel)
 	if err == nil {
-		stream.refs[g.buffer.vchannel] = g.buffer
+		stream.refs[g.buffer] = struct{}{}
 	}
 	b.mu.Unlock()
 	b.streamMu.Unlock()
@@ -487,7 +503,7 @@ func (b *vchannelBuffer) completeSubscribeLocked(attempt *subscribeAttempt, err 
 }
 
 func isUnrecoverableSubscribeError(err error) bool {
-	return errors.Is(err, wal.ErrTransformLogInvalidReadOption) ||
+	return (err != nil && status.AsStreamingError(err).Code == streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE) || errors.Is(err, wal.ErrTransformLogInvalidReadOption) ||
 		errors.Is(err, wal.ErrTransformLogVChannelUnavailable) ||
 		errors.Is(err, wal.ErrTransformLogStartPointTruncated)
 }
@@ -505,7 +521,10 @@ func (b *vchannelBuffer) acquireLocked(startFrom uint64) error {
 	return nil
 }
 
-func (b *vchannelBuffer) registerSegment(ctx context.Context, segment qnview.TransformSegment) (qnview.TransformRegistration, error) {
+func (b *vchannelBuffer) RegisterSegment(ctx context.Context, segment qnview.TransformSegment) (qnview.TransformRegistration, error) {
+	if segment == nil || segment.VChannel() != b.vchannel {
+		return nil, wal.ErrTransformLogInvalidReadOption
+	}
 	b.mu.Lock()
 	if b.err != nil {
 		b.mu.Unlock()

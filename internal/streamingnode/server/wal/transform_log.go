@@ -35,8 +35,8 @@ type TransformLogStream interface {
 type TransformLogSubscriptionOption struct {
 	SubscriptionID int64
 	VChannel       string
-	// StartAfterTimeTick is exclusive. Summary-backed streams advance older
-	// cursors to their retained lower bound; skipped history is not replayed.
+	// StartAfterTimeTick is exclusive. Losing part of the requested interval
+	// terminates this subscription with ErrTransformLogStartPointTruncated.
 	StartAfterTimeTick uint64
 	EndTimeTick        uint64
 	Handler            TransformLogEventHandler
@@ -48,11 +48,11 @@ type TransformLogSubscriptionOption struct {
 // Close methods synchronously from Handle. Remote subscriptions share a receive
 // loop: a blocked handler also delays other subscriptions on that RPC.
 // Close is a completion notification, not the mechanism for aborting Handle.
-// Handle receives only Entry/SyncUp and completes delivery before returning.
+// Handle receives ordered entries, watermarks, or a terminal subscription error.
 // Events and their payloads are immutable; live dispatch may share a payload
 // across subscriptions and Summary. Consumers must copy before modifying it.
-// Failures are exposed by the underlying stream's Done/Error and handled by
-// resuming; they are never delivered as business events.
+// Transport failures remain stream-scoped. A permanent subscription failure
+// ends only that subscription and cannot certify progress.
 type TransformLogEventHandler interface {
 	Handle(event TransformLogStreamEvent)
 	Close()
@@ -68,10 +68,11 @@ type TransformLogSubscription interface {
 }
 
 type TransformLogStreamEvent struct {
-	SubscriptionID int64
-	VChannel       string
-	Entry          *streamingpb.TransformLogEntry
-	SyncUp         *TransformLogSyncUp
+	SubscriptionID    int64
+	VChannel          string
+	SubscriptionError error // permanent control event; exclusive with Entry/SyncUp
+	Entry             *streamingpb.TransformLogEntry
+	SyncUp            *TransformLogSyncUp
 }
 
 type transformLogErrorAccesser struct {

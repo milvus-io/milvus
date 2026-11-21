@@ -19,12 +19,18 @@ type TransformLogBuffer interface {
 	// Close joins the owned workers after all guards and registrations are released.
 	Close()
 	Bind(view *qviews.QueryViewAtQueryNode) (TransformLogGuard, error)
+}
+
+// TransformSegmentRegistrar is the shared buffer instance pinned by a View.
+// Guards on the same VChannel generation return the same comparable owner.
+type TransformSegmentRegistrar interface {
 	RegisterSegment(ctx context.Context, segment TransformSegment) (TransformRegistration, error)
 }
 
 // TransformLogGuard pins a local TransformLog buffer range for one QueryView
 // lifetime.
 type TransformLogGuard interface {
+	Registrar() TransformSegmentRegistrar
 	Prepare(ctx context.Context) (retryable bool, err error)
 	WaitTransformVisible(ctx context.Context, timetick uint64) error
 	Release()

@@ -44,6 +44,9 @@ func drainDeleteReplay(ctx context.Context, view walview.VChannelWALView, apply 
 				}
 				return merr.WrapErrServiceNotReadyMsg("bounded transform replay closed before its end frontier")
 			}
+			if event.SubscriptionError != nil {
+				return event.SubscriptionError
+			}
 			if event.Entry != nil {
 				if err := apply(event.Entry); err != nil {
 					return err
