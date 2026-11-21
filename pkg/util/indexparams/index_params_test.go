@@ -620,3 +620,118 @@ func TestAppendPrepareInfo_parse(t *testing.T) {
 		assert.Equal(t, indexParams["adapt_for_cpu"], "true")
 	})
 }
+
+func TestAppendPrepareLoadParamsCagra(t *testing.T) {
+	tests := []struct {
+		name     string
+		build    string
+		load     string
+		expected string
+	}{
+		{name: "native format CPU load", build: "false", load: "true", expected: "true"},
+		{name: "native format GPU load", build: "false", load: "false", expected: "false"},
+		{name: "CPU format CPU load", build: "true", load: "true", expected: "true"},
+		{name: "CPU format ignores GPU load", build: "true", load: "false", expected: "true"},
+		{name: "omitted build CPU load", load: "true", expected: "true"},
+		{name: "omitted build GPU load", load: "false", expected: "false"},
+		{name: "native format default load", build: "false", expected: "false"},
+		{name: "CPU format default load", build: "true", expected: "true"},
+		{name: "omitted build default load"},
+		{name: "numeric false", build: "0", load: "true", expected: "true"},
+		{name: "numeric true", build: "1", load: "false", expected: "1"},
+		{name: "invalid build value is preserved", build: "invalid", load: "true", expected: "invalid"},
+	}
+	for _, indexType := range []string{"GPU_CAGRA", "GPU_CUVS_CAGRA"} {
+		for _, test := range tests {
+			t.Run(indexType+"/"+test.name, func(t *testing.T) {
+				var params paramtable.ComponentParam
+				params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+				params.Save(params.AutoIndexConfig.Enable.Key, "false")
+				loadKey := params.KnowhereConfig.IndexParam.KeyPrefix + indexType + ".load.adapt_for_cpu"
+				params.Remove(loadKey)
+				if test.load != "" {
+					params.Save(loadKey, test.load)
+				}
+				indexParams := map[string]string{
+					common.IndexTypeKey: indexType,
+					"graph_degree":      "32",
+				}
+				if test.build != "" {
+					indexParams["adapt_for_cpu"] = test.build
+				}
+
+				assert.NoError(t, AppendPrepareLoadParams(&params, indexParams))
+				assert.Equal(t, test.expected, indexParams["adapt_for_cpu"])
+				assert.Equal(t, "32", indexParams["graph_degree"])
+				// Resource estimation and actual loading may prepare the same params again.
+				assert.NoError(t, AppendPrepareLoadParams(&params, indexParams))
+				assert.Equal(t, test.expected, indexParams["adapt_for_cpu"])
+			})
+		}
+	}
+
+	t.Run("other indexes retain metadata precedence", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		params.Save(params.AutoIndexConfig.Enable.Key, "false")
+		params.Save(params.KnowhereConfig.IndexParam.KeyPrefix+"GPU_IVF_FLAT.load.adapt_for_cpu", "true")
+		indexParams := map[string]string{common.IndexTypeKey: "GPU_IVF_FLAT", "adapt_for_cpu": "false"}
+		assert.NoError(t, AppendPrepareLoadParams(&params, indexParams))
+		assert.Equal(t, "false", indexParams["adapt_for_cpu"])
+	})
+
+	t.Run("auto index load configuration", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		params.Save(params.AutoIndexConfig.Enable.Key, "true")
+		params.Save(params.KnowhereConfig.IndexParam.KeyPrefix+"GPU_CAGRA.load.adapt_for_cpu", "true")
+		for _, test := range []struct {
+			name     string
+			prepare  string
+			load     string
+			expected string
+		}{
+			{name: "load overrides prepare and Knowhere", prepare: `{"adapt_for_cpu":"true"}`, load: `{"adapt_for_cpu":"false"}`, expected: "false"},
+			{name: "prepare overrides Knowhere", prepare: `{"adapt_for_cpu":"false"}`, load: `{}`, expected: "false"},
+			{name: "cloud enables CPU load", prepare: `{}`, load: `{"adapt_for_cpu":"true"}`, expected: "true"},
+			{name: "Knowhere fallback", prepare: `{}`, load: `{}`, expected: "true"},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				params.Save(params.AutoIndexConfig.PrepareParams.Key, test.prepare)
+				params.Save(params.AutoIndexConfig.LoadAdaptParams.Key, test.load)
+				for _, build := range []string{"false", "true"} {
+					indexParams := map[string]string{common.IndexTypeKey: "GPU_CAGRA", "adapt_for_cpu": build}
+					expected := test.expected
+					if build == "true" {
+						expected = "true"
+					}
+					assert.NoError(t, AppendPrepareLoadParams(&params, indexParams))
+					assert.Equal(t, expected, indexParams["adapt_for_cpu"])
+					assert.NoError(t, AppendPrepareLoadParams(&params, indexParams))
+					assert.Equal(t, expected, indexParams["adapt_for_cpu"])
+				}
+			})
+		}
+	})
+
+	t.Run("other parameters retain merge precedence", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		params.Save(params.AutoIndexConfig.Enable.Key, "true")
+		params.Save(params.AutoIndexConfig.PrepareParams.Key, `{"cloud_key":"prepare"}`)
+		params.Save(params.AutoIndexConfig.LoadAdaptParams.Key, `{"cloud_key":"load"}`)
+		prefix := params.KnowhereConfig.IndexParam.KeyPrefix + "HNSW.load."
+		params.Save(prefix+"cloud_key", "default")
+		params.Save(prefix+"explicit_key", "default")
+		params.Save(prefix+"missing_key", "default")
+		indexParams := map[string]string{
+			common.IndexTypeKey: "HNSW",
+			"cloud_key":         "index",
+			"explicit_key":      "index",
+		}
+		assert.NoError(t, AppendPrepareLoadParams(&params, indexParams))
+		assert.Equal(t, "load", indexParams["cloud_key"])
+		assert.Equal(t, "index", indexParams["explicit_key"])
+		assert.Equal(t, "default", indexParams["missing_key"])
+	})
+}
