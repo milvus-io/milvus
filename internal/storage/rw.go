@@ -250,6 +250,13 @@ func WithPluginContext(pluginContext *indexcgopb.StoragePluginContext) RwOption 
 	}
 }
 
+func (o *rwOptions) binlogReaderOptions() []BinlogReaderOption {
+	if !o.pluginContextSet {
+		return nil
+	}
+	return []BinlogReaderOption{decryptBinlogFromHeader}
+}
+
 // WithTextColumnConfigs sets TEXT column configurations for REWRITE_ALL mode during compaction.
 // when TEXT columns need to be rewritten (hole ratio >= threshold), this option enables
 // the writer to expand TEXT LOB references and write to new LOB files.
@@ -434,7 +441,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		}
 		present := rwOptions.presentFields
 		if present == nil {
-			present, err = packedBinlogPresentFields(ctx, binlogs, schema, rwOptions.storageConfig, pluginContext)
+			present, err = packedBinlogPresentFields(ctx, binlogs, schema, rwOptions, pluginContext)
 			if err != nil {
 				return nil, err
 			}
@@ -479,7 +486,7 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, neededSch
 	// been resolved, including an explicit nil for a plaintext source, so target
 	// CMEK properties are never reused to read the source. Destination encryption
 	// is applied independently by the import write path.
-	if hookutil.IsClusterEncryptionEnabled() && !rwOptions.resolveTextLob {
+	if !rwOptions.resolveTextLob && (rwOptions.pluginContextSet || hookutil.IsClusterEncryptionEnabled()) {
 		if rwOptions.pluginContextSet {
 			pluginContext = rwOptions.pluginContext
 		} else {
@@ -601,26 +608,26 @@ func filterSchemaToPresentFields(schema *schemapb.CollectionSchema, present map[
 // binlogReaderEncryption returns the decryption options of a binlog reader:
 // the V1 blob reader options and the plugin context of the packed readers.
 func binlogReaderEncryption(schema *schemapb.CollectionSchema, rwOptions *rwOptions) ([]BinlogReaderOption, *indexcgopb.StoragePluginContext) {
-	binlogReaderOpts := []BinlogReaderOption{}
-	pluginContext := rwOptions.pluginContext
-	// Import resolves the source independently of the target schema,
-	// including an explicit nil context for plaintext input.
-	if hookutil.IsClusterEncryptionEnabled() && !rwOptions.pluginContextSet {
-		ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID)
-		if ez != nil {
-			binlogReaderOpts = append(binlogReaderOpts, WithReaderDecryptionContext(ez.EzID, ez.CollectionID))
-
-			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-			if len(unsafe) > 0 {
-				pluginContext = &indexcgopb.StoragePluginContext{
-					EncryptionZoneId: ez.EzID,
-					CollectionId:     ez.CollectionID,
-					EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
-				}
-			}
-		}
+	if rwOptions.pluginContextSet {
+		return rwOptions.binlogReaderOptions(), rwOptions.pluginContext
 	}
-	return binlogReaderOpts, pluginContext
+	if !hookutil.IsClusterEncryptionEnabled() {
+		return nil, nil
+	}
+	ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID)
+	if ez == nil {
+		return nil, nil
+	}
+	blobOptions := []BinlogReaderOption{WithReaderDecryptionContext(ez.EzID, ez.CollectionID)}
+	key := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+	if len(key) == 0 {
+		return blobOptions, nil
+	}
+	return blobOptions, &indexcgopb.StoragePluginContext{
+		EncryptionZoneId: ez.EzID,
+		CollectionId:     ez.CollectionID,
+		EncryptionKey:    base64.StdEncoding.EncodeToString(key),
+	}
 }
 
 // PackedBinlogPresentFields returns the field IDs physically stored in the
@@ -632,7 +639,7 @@ func PackedBinlogPresentFields(ctx context.Context, binlogs []*datapb.FieldBinlo
 		opt(rwOptions)
 	}
 	_, pluginContext := binlogReaderEncryption(schema, rwOptions)
-	return packedBinlogPresentFields(ctx, binlogs, schema, rwOptions.storageConfig, pluginContext)
+	return packedBinlogPresentFields(ctx, binlogs, schema, rwOptions, pluginContext)
 }
 
 // packedBinlogPresentFields returns the field IDs physically stored in the
@@ -646,7 +653,7 @@ func PackedBinlogPresentFields(ctx context.Context, binlogs []*datapb.FieldBinlo
 // sub-field into null rows, so such a sub-field must be in every file of its
 // group or in none.
 func packedBinlogPresentFields(ctx context.Context, binlogs []*datapb.FieldBinlog, schema *schemapb.CollectionSchema,
-	storageConfig *indexpb.StorageConfig, pluginContext *indexcgopb.StoragePluginContext,
+	options *rwOptions, pluginContext *indexcgopb.StoragePluginContext,
 ) (map[FieldID]struct{}, error) {
 	if present, ok := binlogFieldIDSet(binlogs); ok {
 		return present, nil
@@ -670,7 +677,7 @@ func packedBinlogPresentFields(ctx context.Context, binlogs []*datapb.FieldBinlo
 		if len(paths) == 0 {
 			continue
 		}
-		perFile, err := packed.GetPackedFileFieldIDs(paths, storageConfig, pluginContext)
+		perFile, err := packed.GetPackedFileFieldIDs(paths, options.storageConfig, pluginContext)
 		if err != nil {
 			return nil, merr.Wrapf(err, "read field ids from packed binlog footers of column group %d", fb.GetFieldID())
 		}
@@ -865,7 +872,7 @@ func NewDeltalogReader(
 
 	switch rwOptions.version {
 	case StorageV1:
-		return NewLegacyDeltalogReader(ctx, pkField, rwOptions.downloader, paths)
+		return NewLegacyDeltalogReader(ctx, pkField, rwOptions.downloader, paths, rwOptions.binlogReaderOptions()...)
 	case StorageV2, StorageV3:
 		pathPos := 0
 		schema := &schemapb.CollectionSchema{
@@ -890,7 +897,8 @@ func NewDeltalogReader(
 				}
 				path := paths[pathPos]
 				pathPos++
-				return newPackedRecordReader([]string{path}, schema, rwOptions.bufferSize, rwOptions.storageConfig, nil, rwOptions.externalReader)
+				return newPackedRecordReader([]string{path}, schema, rwOptions.bufferSize, rwOptions.storageConfig,
+					rwOptions.pluginContext, rwOptions.externalReader)
 			},
 		}, nil
 	default:

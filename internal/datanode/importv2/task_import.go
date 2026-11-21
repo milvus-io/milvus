@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
@@ -45,6 +46,7 @@ import (
 
 type ImportTask struct {
 	*datapb.ImportTaskV2
+	importCipher hookutil.ImportCipherContext
 	ctx          context.Context
 	cancel       context.CancelFunc
 	segmentsInfo map[int64]*datapb.ImportSegmentInfo
@@ -61,6 +63,7 @@ func NewImportTask(req *datapb.ImportRequest,
 	manager TaskManager,
 	syncMgr syncmgr.SyncManager,
 	cm storage.ChunkManager,
+	cipher ...hookutil.ImportCipherContext,
 ) Task {
 	ctx, cancel := context.WithCancel(context.Background())
 	// During binlog import, even if the primary key's autoID is set to true,
@@ -79,6 +82,7 @@ func NewImportTask(req *datapb.ImportRequest,
 			CollectionID: req.GetCollectionID(),
 			State:        datapb.ImportTaskStateV2_Pending,
 		},
+		importCipher: lo.FirstOrEmpty(cipher),
 		ctx:          ctx,
 		cancel:       cancel,
 		segmentsInfo: make(map[int64]*datapb.ImportSegmentInfo),
@@ -155,6 +159,7 @@ func (t *ImportTask) Clone() Task {
 	// that cancellation a no-op on the work actually in flight.
 	return &ImportTask{
 		ImportTaskV2: typeutil.Clone(t.ImportTaskV2),
+		importCipher: t.importCipher,
 		ctx:          t.ctx,
 		cancel:       t.cancel,
 		segmentsInfo: infos,
@@ -191,7 +196,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	)...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 
-	readers := importutilv2.NewReaderFactory(t.ctx, sourceCM, req.GetStorageConfig(), req.GetOptions())
+	readers := importutilv2.NewReaderFactory(t.ctx, sourceCM, req.GetStorageConfig(), req.GetOptions(), t.importCipher.Source)
 
 	fn := func(ctx context.Context, file *internalpb.ImportFile, rowBuffer, deleteBudget int64, shared *binlog.SnapshotL0Deletes) error {
 		reader, err := readers.NewReader(ctx, t.GetSchema(), file, int(rowBuffer), deleteBudget, shared)
@@ -363,7 +368,7 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 			}
 			syncTask, err := NewSyncTask(t.ctx, t.allocator, t.metaCaches, t.req.GetTs(),
 				segmentID, partitionID, t.GetCollectionID(), channel, data, nil,
-				bm25Stats, t.req.GetStorageVersion(), t.req.GetUseLoonFfi(), t.req.GetStorageConfig())
+				bm25Stats, t.req.GetStorageVersion(), t.req.GetUseLoonFfi(), t.req.GetStorageConfig(), t.importCipher.Target)
 			if err != nil {
 				return nil, nil, err
 			}

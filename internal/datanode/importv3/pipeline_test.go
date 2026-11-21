@@ -467,7 +467,7 @@ func TestExecuteReshardPlanSpillsAtMemoryCheckpoint(t *testing.T) {
 	recorder := &reshardCallRecorder{}
 	mockReshardBoundaries(t, readers, recorder)
 
-	require.NoError(t, executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil, NewMetrics(1), nil))
+	require.NoError(t, executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil, nil, NewMetrics(1), nil))
 	require.Equal(t, int64(1), recorder.publishCalled.Load())
 	require.Len(t, recorder.published, 1)
 	// One drained range per source-batch checkpoint; the single end-of-input
@@ -858,7 +858,7 @@ func TestExecuteReshardPlanKeepsManifestDeterministic(t *testing.T) {
 	logicalBefore := testutil.ToFloat64(logical)
 	routeBefore := histogramSampleCount(t, route)
 
-	require.NoError(t, executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil, NewMetrics(1), nil))
+	require.NoError(t, executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil, nil, NewMetrics(1), nil))
 	require.Equal(t, int64(1), recorder.publishCalled.Load())
 	require.Len(t, recorder.published, 1)
 	manifest := recorder.published[0]
@@ -936,7 +936,7 @@ func TestExecuteReshardPlanDetachesConcurrentFragmentWrites(t *testing.T) {
 	}
 	mockReshardBoundaries(t, readers, recorder)
 
-	require.NoError(t, executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil, NewMetrics(1), nil))
+	require.NoError(t, executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil, nil, NewMetrics(1), nil))
 	require.Equal(t, int64(1), recorder.publishCalled.Load())
 	require.Len(t, recorder.published, 1)
 	fragments := recorder.published[0].GetFragments()
@@ -992,7 +992,7 @@ func TestExecuteReshardPlanPrefetchesReadDuringFlush(t *testing.T) {
 	}
 	mockReshardBoundaries(t, readers, recorder)
 
-	require.NoError(t, executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil, NewMetrics(1), nil))
+	require.NoError(t, executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil, nil, NewMetrics(1), nil))
 	require.Greater(t, exitReads.Load(), entryReads.Load(),
 		"reads must advance while the first flush is in flight (entry=%d exit=%d)", entryReads.Load(), exitReads.Load())
 	require.LessOrEqual(t, exitReads.Load()-entryReads.Load(), int64(reshardPrepareDepth+2),
@@ -1067,7 +1067,7 @@ func TestExecuteReshardPlanFlushErrorFailsRun(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil, NewMetrics(1), nil)
+		done <- executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil, nil, NewMetrics(1), nil)
 	}()
 	select {
 	case err := <-done:
@@ -1247,7 +1247,7 @@ func TestExecuteReshardPlanRunsFunctionsInPrepareStage(t *testing.T) {
 	}
 	mockReshardBoundaries(t, readers, recorder)
 
-	require.NoError(t, executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil, NewMetrics(1), nil))
+	require.NoError(t, executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil, nil, NewMetrics(1), nil))
 	require.Equal(t, int64(1), recorder.publishCalled.Load())
 	require.Len(t, recorder.published, 1)
 	// The fragment target is large enough to keep both batches resident, so the
@@ -1342,7 +1342,7 @@ func TestExecuteReshardPlanSpillsOverResidentBudgetAndReplaysThroughFlush(t *tes
 	recorder := &reshardCallRecorder{}
 	mockReshardBoundaries(t, readers, recorder)
 
-	require.NoError(t, executeReshardPlan(context.Background(), nil, fix.request(plan, 1), plan, nil, NewMetrics(1), nil))
+	require.NoError(t, executeReshardPlan(context.Background(), nil, fix.request(plan, 1), plan, nil, nil, NewMetrics(1), nil))
 	require.Equal(t, int64(1), recorder.publishCalled.Load())
 	require.Len(t, recorder.published, 1)
 	// The whole-task budget was exceeded and at least one bucket was spilled;
@@ -1405,7 +1405,7 @@ func TestExecuteReshardPlanIgnoresRetiredRLSPredicate(t *testing.T) {
 	}
 	recorder := &reshardCallRecorder{}
 	mockReshardBoundaries(t, readers, recorder)
-	err := executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil, NewMetrics(1), nil)
+	err := executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil, nil, NewMetrics(1), nil)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), recorder.publishCalled.Load())
 }

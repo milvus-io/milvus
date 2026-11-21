@@ -48,10 +48,12 @@ const (
 	NullNodeID = -1
 )
 
-// Return None nil slice
-func GetReadPluginContext(options importutilv2.Options) []*commonpb.KeyValuePair {
-	importEzk, _ := importutilv2.GetEZK(options)
-	return hookutil.GetReadStoragePluginContext(importEzk)
+func GetReadPluginContext(options importutilv2.Options) ([]*commonpb.KeyValuePair, error) {
+	importEzk, err := importutilv2.GetEZK(options)
+	if err != nil {
+		return nil, err
+	}
+	return hookutil.ResolveImportEZ(importEzk)
 }
 
 func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, msg proto.Message) error {

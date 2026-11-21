@@ -88,9 +88,7 @@ func executeImportPlan(
 	segmentID := req.GetSegmentId()
 	// Reshard uses the source context only to read original backup data and
 	// writes fragments with the target collection's context. pluginContext is
-	// the target context used below to read those fragments. The final segment
-	// writer derives its target context from the schema properties, matching
-	// the V2 import path.
+	// the target context used below to read those fragments. The final writer uses that same target snapshot.
 	writerOptions, err := buildImportV3WriterOptions(
 		req.GetStorageConfig(),
 		plan.GetCollectionId(),
@@ -105,7 +103,7 @@ func executeImportPlan(
 	// The packed/manifest writer uploads its stats blobs (PK stats, BM25) through
 	// the BlobsWriter callback, so it needs an uploader even for StorageV2/V3;
 	// without it the writer dereferences a nil callback on the first stats write.
-	writerOptions = append(writerOptions, storage.WithUploader(flushio.NewBinlogIO(cm).Upload))
+	writerOptions = append(writerOptions, storage.WithPluginContext(pluginContext), storage.WithUploader(flushio.NewBinlogIO(cm).Upload))
 	sources := make([]Source, 0, len(plan.GetFragments()))
 	for _, ref := range plan.GetFragments() {
 		source, err := SourceFromFragment(

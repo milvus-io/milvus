@@ -41,7 +41,7 @@ func TestReshardExecutorResidentIncludesInflightWrites(t *testing.T) {
 	// target and cut the first one as a detached fragment write.
 	plan := fix.plan([]*internalpb.ImportFile{fix.source(1)}, 1)
 	req := fix.request(plan, 3)
-	ex, err := newReshardPlanExecutor(nil, req, plan, nil, NewMetrics(1), nil)
+	ex, err := newReshardPlanExecutor(nil, req, plan, nil, nil, NewMetrics(1), nil)
 	require.NoError(t, err)
 	ex.ctx = context.Background()
 	// Disable the whole-task resident ceiling for this test: the point is the

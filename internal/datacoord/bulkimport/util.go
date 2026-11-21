@@ -56,6 +56,9 @@ import (
 // An immutable job/task source mismatch cannot be repaired by rescheduling.
 var errSnapshotTaskSource = errors.New("invalid snapshot task source")
 
+// Mark source resolution separately from target and inventory failures.
+var errImportSourceKey = errors.New("cannot resolve backup encryption key")
+
 func WrapTaskLog(task ImportTask, fields ...mlog.Field) []mlog.Field {
 	res := []mlog.Field{
 		mlog.FieldTaskID(task.GetTaskID()),
@@ -388,8 +391,68 @@ func AssemblePreImportV3Request(task *preImportV3Task, job ImportJob) (*datapb.P
 	return assemblePreImportRequest(task, job, importFiles)
 }
 
+func resolveImportReadContext(options importutilv2.Options) ([]*commonpb.KeyValuePair, error) {
+	ctx, err := meta.GetReadPluginContext(options)
+	if err != nil {
+		return nil, merr.Mark(err, errImportSourceKey)
+	}
+	return ctx, nil
+}
+
+func retryableImportSourceError(err error) bool {
+	if !errors.Is(err, errImportSourceKey) {
+		return false
+	}
+	return retryableKMSCause(err)
+}
+
+func retryableKMSCause(err error) bool {
+	for ; err != nil; err = errors.Unwrap(err) {
+		if joined, ok := err.(interface{ Unwrap() []error }); ok {
+			for _, cause := range joined.Unwrap() {
+				if retryableKMSCause(cause) {
+					return true
+				}
+			}
+			return false
+		}
+		if merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) {
+			return true
+		}
+		if timeout, ok := err.(interface{ Timeout() bool }); ok && timeout.Timeout() {
+			return true
+		}
+		if temporary, ok := err.(interface{ Temporary() bool }); ok && temporary.Temporary() {
+			return true
+		}
+	}
+	return false
+}
+
+// New workers report a deterministic backup cipher rejection as an import
+// system error at CreateTask. Older workers and transient RPC failures retain
+// their existing retry behavior.
+func isBackupCipherRejection(options importutilv2.Options, err error) bool {
+	if !errors.Is(err, merr.ErrImportSysFailed) || merr.IsRetryableErr(err) {
+		return false
+	}
+	artifact, _ := importutilv2.GetEZK(options)
+	return artifact != "" || importutilv2.IsBackup(options) || importutilv2.IsL0Import(options)
+}
+
+func failImportDispatch(task ImportTask, im ImportMeta, cause error) {
+	if err := im.UpdateJob(context.TODO(), task.GetJobID(),
+		UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(cause.Error())); err != nil {
+		mlog.Warn(context.TODO(), "failed to persist import dispatch failure", WrapTaskLog(task, mlog.Err(err))...)
+	}
+}
+
 func assemblePreImportRequest(task ImportTask, job ImportJob, importFiles []*internalpb.ImportFile) (*datapb.PreImportRequest, error) {
 	l0Source, err := importutilv2.SnapshotTaskL0Source(importFiles, job.GetSnapshotL0Sources())
+	if err != nil {
+		return nil, err
+	}
+	readContext, err := resolveImportReadContext(job.GetOptions())
 	if err != nil {
 		return nil, err
 	}
@@ -404,7 +467,7 @@ func assemblePreImportRequest(task ImportTask, job ImportJob, importFiles []*int
 		Options:          job.GetOptions(),
 		TaskSlot:         task.GetTaskSlot(),
 		StorageConfig:    meta.CreateStorageConfig(),
-		PluginContext:    meta.GetReadPluginContext(job.GetOptions()),
+		PluginContext:    readContext,
 		SnapshotL0Source: l0Source,
 	}
 	if err := meta.WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
@@ -420,6 +483,10 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 	l0Source, err := importutilv2.SnapshotTaskL0Source(importFiles, job.GetSnapshotL0Sources())
 	if err != nil {
 		return nil, merr.Mark(err, errSnapshotTaskSource)
+	}
+	readContext, err := resolveImportReadContext(job.GetOptions())
+	if err != nil {
+		return nil, err
 	}
 	requestSegments := make([]*datapb.ImportRequestSegment, 0)
 	for _, segmentID := range task.(*Task).GetSegmentIDs() {
@@ -485,7 +552,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 		StorageConfig:    meta.CreateStorageConfig(),
 		TaskSlot:         task.GetTaskSlot(),
 		StorageVersion:   storageVersion,
-		PluginContext:    meta.GetReadPluginContext(job.GetOptions()),
+		PluginContext:    readContext,
 		UseLoonFfi:       useLoonFFI,
 		SnapshotL0Source: l0Source,
 	}

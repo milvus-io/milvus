@@ -50,6 +50,19 @@ class ICipherPlugin : public IPlugin {
     GetDecryptor(int64_t ez_id,
                  int64_t coll_id,
                  const std::string& safeKey) const = 0;
+
+    virtual void
+    RegisterReadKeyset(int64_t ez_id, int64_t coll_id, const std::string& key) {
+        Update(ez_id, coll_id, key);
+    }
+
+    virtual std::pair<std::shared_ptr<IEncryptor>, std::string>
+    GetEncryptorForKeyset(int64_t ez_id,
+                          int64_t coll_id,
+                          const std::string& key) {
+        Update(ez_id, coll_id, key);
+        return GetEncryptor(ez_id, coll_id);
+    }
 };
 
 class IEncryptor {

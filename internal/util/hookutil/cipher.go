@@ -52,6 +52,12 @@ type BackupInterface interface {
 	Backup(ezID int64) (string, error)
 }
 
+// ImportResolverInterface decrypts this backup with its source credentials on each call.
+// The result is the original EZ ID and raw keyset for this artifact.
+type ImportResolverInterface interface {
+	ResolveImportEZ(artifact string) (int64, []byte, error)
+}
+
 // GetCipher returns singleton hook.Cipher instance.
 // If Milvus is not built with cipher plugin, it will return nil
 // If Milvus is built with cipher plugin, it will return hook.Cipher
@@ -331,16 +337,6 @@ func GetCollectionPluginContext(collProps []*commonpb.KeyValuePair, collectionID
 	}, nil
 }
 
-// Non nill return
-func GetReadStoragePluginContext(importEzk string) []*commonpb.KeyValuePair {
-	readContext, err := ImportEZ(importEzk)
-	if err != nil {
-		mlog.Error(context.TODO(), "failed to import ezk", mlog.Err(err))
-		return []*commonpb.KeyValuePair{}
-	}
-	return readContext
-}
-
 // RegisterEZsFromPluginContext registers all EZ contexts from plugin context.
 // This processes ALL CipherConfigUnsafeEZK entries (for both read and write contexts).
 func RegisterEZsFromPluginContext(context []*commonpb.KeyValuePair) error {
@@ -380,21 +376,6 @@ func GetCPluginContext(context []*commonpb.KeyValuePair, collectionID int64) (*i
 	}
 
 	return nil, nil
-}
-
-func GetCPluginContextByEzID(ezID int64) (*indexcgopb.StoragePluginContext, error) {
-	if !IsClusterEncryptionEnabled() {
-		return nil, nil
-	}
-	key := GetCipher().GetUnsafeKey(ezID, 0)
-	if len(key) == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("cannot get ez key for ezID=%d", ezID)
-	}
-	return &indexcgopb.StoragePluginContext{
-		EncryptionZoneId: ezID,
-		EncryptionKey:    base64.StdEncoding.EncodeToString(key),
-		CollectionId:     0,
-	}, nil
 }
 
 func BackupEZKFromDBProperties(dbProperties []*commonpb.KeyValuePair) (string, error) {

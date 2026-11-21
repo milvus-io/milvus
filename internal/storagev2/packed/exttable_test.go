@@ -1027,6 +1027,32 @@ func TestMakePropertiesFromStorageConfig_ExtraKVsOverrideStorageFormat(t *testin
 	assert.Equal(t, "parquet", loonPropertyString(props, PropertyWriterFormat))
 }
 
+func TestEncryptedWriterFormatOverridesVortexGroups(t *testing.T) {
+	paramtable.Init()
+	config := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+	for _, encrypted := range []bool{false, true} {
+		options := map[string]string{
+			PropertyWriterFormat:             "vortex",
+			PropertyWriterSchemaBasedFormats: "parquet,vortex",
+		}
+		if encrypted {
+			options[PropertyWriterEncEnable] = "true"
+		}
+		props, err := MakePropertiesFromStorageConfig(config, options)
+		require.NoError(t, err)
+		if encrypted {
+			assert.Equal(t, "parquet", loonPropertyString(props, PropertyWriterFormat))
+			assert.Empty(t, loonPropertyString(props, PropertyWriterSchemaBasedFormats))
+		} else {
+			assert.Equal(t, "vortex", loonPropertyString(props, PropertyWriterFormat))
+			assert.Equal(t, "parquet,vortex", loonPropertyString(props, PropertyWriterSchemaBasedFormats))
+		}
+		FreeProperties(props)
+		assert.Equal(t, "vortex", options[PropertyWriterFormat])
+		assert.Equal(t, "parquet,vortex", options[PropertyWriterSchemaBasedFormats])
+	}
+}
+
 func TestExternalFileReaders_DeclarePathForm(t *testing.T) {
 	config := &indexpb.StorageConfig{StorageType: "local"}
 	extfs := ExternalSpecContext{

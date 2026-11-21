@@ -41,6 +41,7 @@ type l0Reader struct {
 	ctx           context.Context
 	cm            storage.ChunkManager
 	storageConfig *indexpb.StorageConfig
+	options       []storage.RwOption
 	pkField       *schemapb.FieldSchema
 
 	bufferSize int
@@ -59,11 +60,13 @@ func NewL0Reader(ctx context.Context,
 	bufferSize int,
 	tsStart,
 	tsEnd uint64,
+	options ...storage.RwOption,
 ) (*l0Reader, error) {
 	r := &l0Reader{
 		ctx:           ctx,
 		cm:            cm,
 		storageConfig: storageConfig,
+		options:       options,
 		pkField:       pkField,
 		bufferSize:    bufferSize,
 	}
@@ -109,7 +112,7 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 	deleteData := storage.NewDeleteData(nil, nil)
 	readInternal := func(path string, opts []storage.RwOption) (*storage.DeleteData, error) {
 		tempData := storage.NewDeleteData(nil, nil)
-		reader, err := storage.NewDeltalogReader(r.ctx, r.pkField.DataType, []string{path}, opts...)
+		reader, err := storage.NewDeltalogReader(r.ctx, r.pkField.DataType, []string{path}, append(opts, r.options...)...)
 		if err != nil {
 			return nil, err
 		}
@@ -169,6 +172,9 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 
 		// try v1 first
 		tempData, errv1 := readInternal(path, v1opts)
+		if storage.IsImportBinlogDecryptionError(errv1) {
+			return nil, errv1
+		}
 		if errv1 != nil {
 			// try v2 if v1 failed
 			tempData, errv2 := readInternal(path, v2opts)

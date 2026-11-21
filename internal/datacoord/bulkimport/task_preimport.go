@@ -129,17 +129,22 @@ func (p *PreImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster
 	job := p.ImportMeta.GetJob(context.TODO(), p.GetJobID())
 	req, err := AssemblePreImportRequest(p, job)
 	if err != nil {
-		// Request assembly validates source inventory and required writer context.
-		if updateErr := p.ImportMeta.UpdateJob(context.TODO(), p.GetJobID(),
-			UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error())); updateErr != nil {
-			mlog.Warn(context.TODO(), "failed to mark preimport job failed after assemble error", WrapTaskLog(p, mlog.Err(updateErr))...)
+		if retryableImportSourceError(err) {
+			p.retryTimes++
+			return
 		}
+		// Report source inventory, source key, and target key errors to the job.
+		failImportDispatch(p, p.ImportMeta, err)
 		return
 	}
 
 	err = cluster.CreatePreImport(nodeID, req, p.GetTaskSlot())
 	if err != nil {
 		mlog.Warn(context.TODO(), "preimport failed", WrapTaskLog(p, mlog.Err(err))...)
+		if isBackupCipherRejection(req.GetOptions(), err) {
+			failImportDispatch(p, p.ImportMeta, err)
+			return
+		}
 		p.retryTimes++
 		return
 	}

@@ -58,17 +58,6 @@ ConvertLoonProperties(const LoonProperties* properties) {
     return converted;
 }
 
-void
-UpdateCipherPluginIfNeeded(CPluginContext* c_plugin_context) {
-    auto plugin_ptr =
-        milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-    if (plugin_ptr != nullptr && c_plugin_context != nullptr) {
-        plugin_ptr->Update(c_plugin_context->ez_id,
-                           c_plugin_context->collection_id,
-                           std::string(c_plugin_context->key));
-    }
-}
-
 milvus_storage::ArrowFileSystemPtr
 GetFsFromStorageConfig(const CStorageConfig& c_storage_config) {
     return milvus::storage::StorageV2FSCache::Instance().Get({
@@ -121,7 +110,7 @@ NewPackedReaderWithStorageConfig(char** paths,
                 "[StorageV2] Failed to get filesystem");
         }
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
-        UpdateCipherPluginIfNeeded(c_plugin_context);
+        milvus::storage::RegisterReaderKeys(c_plugin_context);
 
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
             trueFs,
@@ -166,7 +155,7 @@ NewPackedReaderWithProperties(char** paths,
         }
         auto trueFs = fs_result.ValueOrDie();
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
-        UpdateCipherPluginIfNeeded(c_plugin_context);
+        milvus::storage::RegisterReaderKeys(c_plugin_context);
 
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
             trueFs,
@@ -202,7 +191,7 @@ NewPackedReader(char** paths,
         }
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
 
-        UpdateCipherPluginIfNeeded(c_plugin_context);
+        milvus::storage::RegisterReaderKeys(c_plugin_context);
 
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
             trueFs,
@@ -289,7 +278,7 @@ GetPackedFileFieldIDs(char** paths,
                 milvus::ErrorCode::FileReadFailed,
                 "[StorageV2] Failed to get filesystem");
         }
-        UpdateCipherPluginIfNeeded(c_plugin_context);
+        milvus::storage::RegisterReaderKeys(c_plugin_context);
 
         std::vector<int64_t> ids;
         std::vector<int64_t> counts;

@@ -416,7 +416,7 @@ func newReshardSourceReader(
 		if err != nil {
 			return nil, err
 		}
-		return binlog.NewReader(ctx, cm, schema, storageConfig, storageVersion, file.GetPaths(), tsStart, tsEnd, int(bufferSize), "", pluginContext)
+		return binlog.NewReader(ctx, cm, schema, storageConfig, storageVersion, file.GetPaths(), tsStart, tsEnd, int(bufferSize), binlog.SourceEncryption{Encrypted: pluginContext != nil, PluginContext: pluginContext})
 	}
 	// V3 never carries a typed snapshot source, so no delete budget is reserved.
 	return importutilv2.NewReader(ctx, cm, schema, file, options, int(bufferSize), storageConfig, 0)

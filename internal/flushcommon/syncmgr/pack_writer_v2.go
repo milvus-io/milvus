@@ -22,6 +22,7 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -43,6 +44,7 @@ import (
 
 type BulkPackWriterV2 struct {
 	*BulkPackWriter
+
 	bufferSize          int64
 	multiPartUploadSize int64
 
@@ -171,13 +173,16 @@ func (bw *BulkPackWriterV2) getBucketName() string {
 	return paramtable.Get().MinioCfg.BucketName.GetValue()
 }
 
-func (bw *BulkPackWriterV2) getPluginContext(ctx context.Context, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
+func (bw *BulkPackWriterV2) getPluginContext(ctx context.Context, pack *SyncPack) (*indexcgopb.StoragePluginContext, error) {
+	if pack.pluginContext != nil {
+		return pack.pluginContext, nil
+	}
 	var pluginContext *indexcgopb.StoragePluginContext
 	// Key lookup is part of the critical write path. Use the same retry policy
 	// as storage writes before surfacing an error to SyncTask.HandleError.
 	err := retry.Do(ctx, func() error {
 		var err error
-		pluginContext, err = hookutil.GetCollectionPluginContext(bw.schema.GetProperties(), collectionID)
+		pluginContext, err = hookutil.GetCollectionPluginContext(bw.schema.GetProperties(), pack.collectionID)
 		return err
 	}, bw.writeRetryOpts...)
 	return pluginContext, err
@@ -212,7 +217,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	defer rec.Release()
 
 	tsFrom, tsTo := bw.getTsRange(rec)
-	pluginContextPtr, err := bw.getPluginContext(ctx, pack.collectionID)
+	pluginContextPtr, err := bw.getPluginContext(ctx, pack)
 	if err != nil {
 		return nil, "", err
 	}
@@ -236,6 +241,9 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 				mlog.FieldCollectionID(pack.collectionID),
 				mlog.FieldSegmentID(pack.segmentID),
 				mlog.Err(err))
+			if pack.pluginContext != nil && (errors.Is(err, merr.ErrSegcoreUnsupported) || errors.Is(err, merr.ErrServiceUnimplemented)) {
+				return retry.Unrecoverable(err)
+			}
 			return err
 		}
 		return nil
