@@ -255,7 +255,8 @@ func validateAddedEvolutionFields(oldFields, newFields *evolutionFieldMaps, newS
 		if _, isSubField := newFields.structSubFields[id]; isSubField {
 			parentID := newFields.structParents[id]
 			parent := newFields.structFields[parentID]
-			if field.GetIsPrimaryKey() || field.GetAutoID() || field.GetIsPartitionKey() || field.GetIsClusteringKey() || field.GetIsFunctionOutput() || field.GetIsDynamic() || field.GetExternalField() != "" {
+			mappedStructChild := typeutil.NewStorageColumnResolver(newSchema).IsMilvusTable() && field.GetExternalField() == field.GetName()
+			if field.GetIsPrimaryKey() || field.GetAutoID() || field.GetIsPartitionKey() || field.GetIsClusteringKey() || field.GetIsFunctionOutput() || field.GetIsDynamic() || (field.GetExternalField() != "" && !mappedStructChild) {
 				return merr.WrapErrParameterInvalidMsg("cannot add struct sub-field %q with a protected role", field.GetName())
 			}
 			if _, parentExisted := oldFields.structFields[parentID]; parentExisted {

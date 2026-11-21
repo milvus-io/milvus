@@ -18,6 +18,7 @@ package rootcoord
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"strconv"
 	"testing"
@@ -37,14 +38,17 @@ import (
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestCreateCollectionTaskReleaseFileResources(t *testing.T) {
@@ -1754,25 +1758,151 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 	})
 }
 
-func TestNextMilvusTableTargetOnlyFieldID(t *testing.T) {
-	source := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: common.StartOfUserFieldID, Name: "pk"},
-			{FieldID: common.StartOfUserFieldID + 3, Name: "vec"},
-		},
+func TestPrepareSchemaMilvusTableMissingDynamicMetadata(t *testing.T) {
+	source := &schemapb.CollectionSchema{Name: "source", EnableDynamicField: true}
+	read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).
+		Return(&datapb.SnapshotMetadata{Collection: &datapb.CollectionDescription{Schema: source}}, nil).Build()
+	defer read.UnPatch()
+	schema := &schemapb.CollectionSchema{
+		Name: "target", EnableDynamicField: true,
+		ExternalSource: "minio://localhost:9000/bucket/snapshot.json",
+		ExternalSpec:   `{"format":"milvus-table","extfs":{"cloud_provider":"minio","access_key_id":"test-ak","access_key_value":"test-sk"}}`,
 	}
-	target := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: 0, Name: common.VirtualPKFieldName},
-			{FieldID: common.StartOfUserFieldID, Name: "target_pk"},
-		},
-	}
-
-	next := nextMilvusTableTargetOnlyFieldID(source, target)
-	assert.Equal(t, int64(common.StartOfUserFieldID+4), next)
+	task := &createCollectionTask{body: &message.CreateCollectionRequest{CollectionSchema: schema}}
+	err := task.prepareMilvusTableSnapshotSchema(context.Background())
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+	require.ErrorContains(t, err, schema.GetName())
+	require.ErrorContains(t, err, "source")
 }
 
-func TestPrepareMilvusTableSnapshotSchemaAlignsFieldIDs(t *testing.T) {
+func TestPrepareSchemaPreservesMilvusTableDynamicDefinition(t *testing.T) {
+	for _, warmup := range []string{common.WarmupDisable, "sync"} {
+		t.Run(warmup, func(t *testing.T) {
+			source := &schemapb.CollectionSchema{
+				Name:               "source",
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 101, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+					{
+						FieldID: 105, Name: common.MetaFieldName, DataType: schemapb.DataType_JSON,
+						Description: "source dynamic field", IsDynamic: true, Nullable: true,
+						DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_BytesData{BytesData: []byte("{}")}},
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.WarmupKey, Value: warmup},
+							{Key: common.MmapEnabledKey, Value: "true"},
+						},
+					},
+				},
+			}
+			originalSource := proto.Clone(source).(*schemapb.CollectionSchema)
+			metadataReads := 0
+			mockRead := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).To(func(string, string, *indexpb.StorageConfig, packed.ExternalSpecContext) (*datapb.SnapshotMetadata, error) {
+				metadataReads++
+				return &datapb.SnapshotMetadata{Collection: &datapb.CollectionDescription{Schema: source}}, nil
+			}).Build()
+			defer mockRead.UnPatch()
+
+			schema := &schemapb.CollectionSchema{
+				Name: "target", EnableDynamicField: true,
+				ExternalSource: "minio://localhost:9000/bucket/snapshot.json",
+				ExternalSpec:   `{"format":"milvus-table","extfs":{"cloud_provider":"minio","access_key_id":"test-ak","access_key_value":"test-sk"}}`,
+				Fields:         []*schemapb.FieldSchema{{Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "pk"}},
+			}
+			expectedMeta := proto.Clone(source.Fields[1]).(*schemapb.FieldSchema)
+			expectedMeta.ExternalField = common.MetaFieldName
+			expectedMeta.FieldID = 101
+
+			for _, replay := range []bool{false, true} {
+				task := &createCollectionTask{
+					Req:             &milvuspb.CreateCollectionRequest{CollectionName: schema.GetName()},
+					body:            &message.CreateCollectionRequest{CollectionSchema: schema},
+					preserveFieldID: replay,
+				}
+				require.NoError(t, task.prepareSchema(context.Background()))
+				dynamicFields := 0
+				for _, field := range schema.GetFields() {
+					if field.GetIsDynamic() {
+						dynamicFields++
+					}
+				}
+				require.Equal(t, 1, dynamicFields)
+				require.True(t, proto.Equal(expectedMeta, typeutil.GetDynamicField(schema)), "source dynamic definition must survive schema preparation (replay=%t)", replay)
+				// Exercise the same strict identity boundary used by refresh.
+				require.NoError(t, typeutil.ValidateMilvusTableSchemaIdentity(schema, source))
+				schema = proto.Clone(schema).(*schemapb.CollectionSchema)
+			}
+			require.Equal(t, 1, metadataReads, "replay must not reopen the source snapshot")
+			require.True(t, proto.Equal(originalSource, source), "preparation must not mutate the source snapshot schema")
+		})
+	}
+}
+
+func TestPrepareSchemaMilvusTableStruct(t *testing.T) {
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_Array, schemapb.DataType_ArrayOfVector} {
+		for _, elementNullable := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/element_nullable=%t", dataType, elementNullable), func(t *testing.T) {
+				elementType := schemapb.DataType_Int64
+				params := []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}
+				if dataType == schemapb.DataType_ArrayOfVector {
+					elementType = schemapb.DataType_FloatVector
+					params = append(params, &commonpb.KeyValuePair{Key: common.DimKey, Value: "8"})
+				}
+				source := &schemapb.CollectionSchema{
+					Name:   "source",
+					Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+					StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+						FieldID: 105, Name: "items", Nullable: true,
+						Fields: []*schemapb.FieldSchema{{
+							FieldID: 106, Name: "items[value]", DataType: dataType, ElementType: elementType,
+							Nullable: true, ElementNullable: elementNullable, TypeParams: params,
+						}},
+					}},
+				}
+				// Keep the requested child, but insert a source-only child before it.
+				// ID alignment must use names rather than child positions.
+				target := proto.Clone(source).(*schemapb.CollectionSchema)
+				source.StructArrayFields[0].Fields = append([]*schemapb.FieldSchema{{
+					FieldID: 108, Name: "items[ignored]", DataType: schemapb.DataType_Array,
+					ElementType: schemapb.DataType_Int64, Nullable: true,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+				}}, source.StructArrayFields[0].Fields...)
+				if elementNullable {
+					added := source.StructArrayFields[0].Fields[1]
+					added.TypeParams = append(added.TypeParams, &commonpb.KeyValuePair{Key: common.StructSubFieldAddedKey, Value: "true"})
+				}
+				original := proto.Clone(source)
+				read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).Return(
+					&datapb.SnapshotMetadata{Collection: &datapb.CollectionDescription{Schema: source}}, nil).Build()
+				defer read.UnPatch()
+				target.Name = "target"
+				target.ExternalSource = "s3://bucket/snapshot.json"
+				target.ExternalSpec = `{"format":"milvus-table","extfs":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true"}}`
+				target.Fields[0].FieldID = 0
+				target.Fields[0].ExternalField = "pk"
+				target.StructArrayFields[0].FieldID = 0
+				child := target.StructArrayFields[0].Fields[0]
+				child.FieldID, child.ExternalField = 0, ""
+				for _, replay := range []bool{false, true} {
+					task := &createCollectionTask{
+						Req:  &milvuspb.CreateCollectionRequest{CollectionName: target.Name},
+						body: &message.CreateCollectionRequest{CollectionSchema: target}, preserveFieldID: replay,
+					}
+					require.NoError(t, task.prepareSchema(context.Background()))
+					require.Len(t, target.StructArrayFields[0].Fields, 1)
+					require.EqualValues(t, 101, target.StructArrayFields[0].FieldID)
+					require.EqualValues(t, 102, child.FieldID)
+					require.Equal(t, "items[value]", child.ExternalField)
+					require.Equal(t, elementNullable, child.ElementNullable)
+					require.NoError(t, typeutil.ValidateMilvusTableSchemaIdentity(target, source))
+				}
+				require.True(t, proto.Equal(original, source))
+			})
+		}
+	}
+}
+
+func TestPrepareMilvusTableSnapshotSchemaKeepsTargetAllocation(t *testing.T) {
 	mockReadMetadata := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).
 		Return(&datapb.SnapshotMetadata{
 			Collection: &datapb.CollectionDescription{
@@ -1813,105 +1943,125 @@ func TestPrepareMilvusTableSnapshotSchemaAlignsFieldIDs(t *testing.T) {
 	err := task.prepareMilvusTableSnapshotSchema(context.Background())
 	require.NoError(t, err)
 
-	assert.True(t, task.preserveFieldID)
-	require.Len(t, task.Req.GetProperties(), 1)
-	assert.Equal(t, util.PreserveFieldIdsKey, task.Req.GetProperties()[0].GetKey())
-	assert.Equal(t, "true", task.Req.GetProperties()[0].GetValue())
-	assert.Equal(t, int64(common.RowIDField), schema.GetFields()[0].GetFieldID())
-	assert.Equal(t, int64(106), schema.GetFields()[1].GetFieldID())
-	assert.Equal(t, int64(101), schema.GetFields()[2].GetFieldID())
-	assert.Equal(t, int64(105), schema.GetFields()[3].GetFieldID())
+	assert.False(t, task.preserveFieldID)
+	assert.Equal(t, "false", task.Req.GetProperties()[0].GetValue())
+	assert.Equal(t, int64(101), schema.GetFields()[1].GetFieldID())
+	assert.Zero(t, schema.GetFields()[2].GetFieldID())
+	assert.Zero(t, schema.GetFields()[3].GetFieldID())
+	require.NoError(t, task.assignFieldAndFunctionID(schema))
+	assert.NotEqual(t, int64(105), schema.GetFields()[3].GetFieldID())
 }
 
-func TestPrepareMilvusTableSnapshotSchemaAlignsTargetFunctionOutputs(t *testing.T) {
-	mockReadMetadata := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).
-		Return(&datapb.SnapshotMetadata{
-			Collection: &datapb.CollectionDescription{
-				Schema: &schemapb.CollectionSchema{
-					Fields: []*schemapb.FieldSchema{
-						{FieldID: 101, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-						{FieldID: 103, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
-							{Key: common.MaxLengthKey, Value: "128"},
-							{Key: common.EnableAnalyzerKey, Value: "true"},
-						}},
-						{
-							FieldID:  105,
-							Name:     "vec",
-							DataType: schemapb.DataType_FloatVector,
-							TypeParams: []*commonpb.KeyValuePair{
-								{Key: common.DimKey, Value: "16"},
+func TestPrepareMilvusTableSnapshotSchemaFunctionOutputAvoidsSourceColumns(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		sourceVectorID     int64
+		sourceTextID       int64
+		sourceStructLeafID int64
+		wantOutputID       int64
+	}{
+		{name: "first free target ID", sourceVectorID: 105, sourceTextID: 103, wantOutputID: 104},
+		{name: "skip occupied source ID", sourceVectorID: 104, sourceTextID: 103, wantOutputID: 105},
+		{name: "noncolliding output keeps normal ID", sourceVectorID: 105, sourceTextID: 106, wantOutputID: 103},
+		{name: "unmapped struct child reserves physical ID", sourceVectorID: 105, sourceTextID: 106, sourceStructLeafID: 103, wantOutputID: 104},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var sourceStructs []*schemapb.StructArrayFieldSchema
+			if tc.sourceStructLeafID != 0 {
+				sourceStructs = []*schemapb.StructArrayFieldSchema{{
+					Name: "omitted", FieldID: 107,
+					Fields: []*schemapb.FieldSchema{{
+						Name: "omitted[value]", FieldID: tc.sourceStructLeafID,
+						DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+					}},
+				}}
+			}
+			mockReadMetadata := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).
+				Return(&datapb.SnapshotMetadata{
+					Collection: &datapb.CollectionDescription{
+						Schema: &schemapb.CollectionSchema{
+							StructArrayFields: sourceStructs,
+							Fields: []*schemapb.FieldSchema{
+								{FieldID: 101, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+								{FieldID: tc.sourceTextID, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
+									{Key: common.MaxLengthKey, Value: "128"},
+									{Key: common.EnableAnalyzerKey, Value: "true"},
+								}},
+								{
+									FieldID:  tc.sourceVectorID,
+									Name:     "vec",
+									DataType: schemapb.DataType_FloatVector,
+									TypeParams: []*commonpb.KeyValuePair{
+										{Key: common.DimKey, Value: "16"},
+									},
+								},
 							},
 						},
 					},
+				}, nil).Build()
+			defer mockReadMetadata.UnPatch()
+
+			// The target function must also satisfy the non-runtime function
+			// validation that runs after allocating milvus-table logical IDs: a
+			// typed BM25 over a VarChar input, no params.
+			schema := &schemapb.CollectionSchema{
+				Name:           "target",
+				ExternalSource: "minio://localhost:9000/bucket/snapshots/100/metadata/200.json",
+				ExternalSpec:   `{"format":"milvus-table","extfs":{"access_key_id":"AK","access_key_value":"SK"}}`,
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 0, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "pk"},
+					{FieldID: 0, Name: "doc", DataType: schemapb.DataType_VarChar, ExternalField: "text", TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "128"},
+						{Key: common.EnableAnalyzerKey, Value: "true"},
+					}},
+					{
+						FieldID:       0,
+						Name:          "embedding",
+						DataType:      schemapb.DataType_FloatVector,
+						ExternalField: "vec",
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.DimKey, Value: "16"},
+						},
+					},
+					{FieldID: 101, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
 				},
-			},
-		}, nil).Build()
-	defer mockReadMetadata.UnPatch()
-
-	// The target function must also satisfy the non-runtime function
-	// validation that now runs on newly aligned milvus-table schemas: a
-	// typed BM25 over a VarChar input, no params.
-	schema := &schemapb.CollectionSchema{
-		Name:           "target",
-		ExternalSource: "minio://localhost:9000/bucket/snapshots/100/metadata/200.json",
-		ExternalSpec:   `{"format":"milvus-table","extfs":{"access_key_id":"AK","access_key_value":"SK"}}`,
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: 0, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "pk"},
-			{FieldID: 0, Name: "doc", DataType: schemapb.DataType_VarChar, ExternalField: "text", TypeParams: []*commonpb.KeyValuePair{
-				{Key: common.MaxLengthKey, Value: "128"},
-				{Key: common.EnableAnalyzerKey, Value: "true"},
-			}},
-			{
-				FieldID:       0,
-				Name:          "embedding",
-				DataType:      schemapb.DataType_FloatVector,
-				ExternalField: "vec",
-				TypeParams: []*commonpb.KeyValuePair{
-					{Key: common.DimKey, Value: "16"},
+				Functions: []*schemapb.FunctionSchema{
+					{
+						Name:             "bm25",
+						Type:             schemapb.FunctionType_BM25,
+						InputFieldNames:  []string{"doc"},
+						OutputFieldNames: []string{"sparse"},
+					},
 				},
-			},
-			{FieldID: 101, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
-		},
-		Functions: []*schemapb.FunctionSchema{
-			{
-				Name:             "bm25",
-				Type:             schemapb.FunctionType_BM25,
-				InputFieldNames:  []string{"doc"},
-				OutputFieldNames: []string{"sparse"},
-			},
-		},
-	}
-	task := &createCollectionTask{
-		Req: &milvuspb.CreateCollectionRequest{
-			CollectionName: "target",
-			Properties: []*commonpb.KeyValuePair{
-				{Key: util.PreserveFieldIdsKey, Value: "false"},
-			},
-		},
-		body: &message.CreateCollectionRequest{
-			CollectionSchema: schema,
-		},
-	}
+			}
+			task := &createCollectionTask{
+				Req: &milvuspb.CreateCollectionRequest{
+					CollectionName: "target",
+					Properties: []*commonpb.KeyValuePair{
+						{Key: util.PreserveFieldIdsKey, Value: "false"},
+					},
+				},
+				body: &message.CreateCollectionRequest{
+					CollectionSchema: schema,
+				},
+			}
 
-	err := task.prepareMilvusTableSnapshotSchema(context.Background())
-	require.NoError(t, err)
+			err := task.prepareMilvusTableSnapshotSchema(context.Background())
+			require.NoError(t, err)
 
-	assert.True(t, task.preserveFieldID)
-	assert.Equal(t, int64(101), schema.GetFields()[0].GetFieldID())
-	assert.Equal(t, int64(103), schema.GetFields()[1].GetFieldID())
-	assert.Equal(t, int64(105), schema.GetFields()[2].GetFieldID())
-	assert.Equal(t, int64(106), schema.GetFields()[3].GetFieldID())
-	require.Len(t, schema.GetFunctions(), 1)
-	assert.Equal(t, int64(StartOfUserFunctionID), schema.GetFunctions()[0].GetId())
-	assert.Equal(t, []int64{103}, schema.GetFunctions()[0].GetInputFieldIds())
-	assert.Equal(t, []int64{106}, schema.GetFunctions()[0].GetOutputFieldIds())
+			assert.False(t, task.preserveFieldID)
+			require.NoError(t, task.assignFieldAndFunctionID(schema))
+			assert.Equal(t, int64(100), schema.GetFields()[0].GetFieldID())
+			assert.Equal(t, int64(101), schema.GetFields()[1].GetFieldID())
+			assert.Equal(t, int64(102), schema.GetFields()[2].GetFieldID())
+			assert.Equal(t, tc.wantOutputID, schema.GetFields()[3].GetFieldID())
+			assert.Equal(t, []int64{101}, schema.GetFunctions()[0].GetInputFieldIds())
+			assert.Equal(t, []int64{tc.wantOutputID}, schema.GetFunctions()[0].GetOutputFieldIds())
+		})
+	}
 }
 
-// The newly aligned milvus-table schema is a NEW schema that merely reuses
-// source field IDs, so it must pass the same non-runtime function validation
-// as any direct-path create; before this call a structurally impossible
-// function persisted through the milvus-table path (preserveFieldID bypassed
-// the prepareSchema validation).
+// Milvus-table uses the normal function validation after allocating logical IDs.
 func TestPrepareMilvusTableSnapshotSchemaRejectsInvalidFunction(t *testing.T) {
 	mockReadMetadata := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).
 		Return(&datapb.SnapshotMetadata{
@@ -1963,7 +2113,9 @@ func TestPrepareMilvusTableSnapshotSchemaRejectsInvalidFunction(t *testing.T) {
 		},
 	}
 
-	err := task.prepareMilvusTableSnapshotSchema(context.Background())
+	require.NoError(t, task.prepareMilvusTableSnapshotSchema(context.Background()))
+	require.NoError(t, task.assignFieldAndFunctionID(schema))
+	err := validator.ValidateFunction(schema, "", true)
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	assert.ErrorContains(t, err, "does not match expected dim")
 }
@@ -2021,10 +2173,11 @@ func TestPrepareMilvusTableSnapshotSchemaMapsSourceFunctionOutputAsDataField(t *
 	err := task.prepareMilvusTableSnapshotSchema(context.Background())
 	require.NoError(t, err)
 
-	assert.True(t, task.preserveFieldID)
-	assert.Equal(t, int64(101), schema.GetFields()[0].GetFieldID())
-	assert.Equal(t, int64(105), schema.GetFields()[1].GetFieldID())
-	assert.Equal(t, int64(106), schema.GetFields()[2].GetFieldID())
+	assert.False(t, task.preserveFieldID)
+	require.NoError(t, task.assignFieldAndFunctionID(schema))
+	assert.Equal(t, int64(100), schema.GetFields()[0].GetFieldID())
+	assert.Equal(t, int64(101), schema.GetFields()[1].GetFieldID())
+	assert.Equal(t, int64(102), schema.GetFields()[2].GetFieldID())
 }
 
 func TestPrepareMilvusTableSnapshotSchemaSkipsReadWhenFieldIDsPreserved(t *testing.T) {
@@ -2188,16 +2341,6 @@ func TestPrepareMilvusTableSnapshotSchemaErrors(t *testing.T) {
 		assert.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
 		assert.Contains(t, err.Error(), "target schema must match source snapshot schema")
 	})
-}
-
-func TestUpsertCreateCollectionProperty(t *testing.T) {
-	properties := upsertCreateCollectionProperty(nil, "key", "value")
-	require.Len(t, properties, 1)
-	assert.Equal(t, "value", properties[0].GetValue())
-
-	properties = upsertCreateCollectionProperty(properties, "key", "updated")
-	require.Len(t, properties, 1)
-	assert.Equal(t, "updated", properties[0].GetValue())
 }
 
 func Test_createCollectionTask_Prepare(t *testing.T) {
@@ -3344,6 +3487,43 @@ func Test_createCollectionTask_prepareSchema_structSubFieldTextMatch(t *testing.
 			err := task.prepareSchema(context.TODO())
 			require.ErrorIs(t, err, merr.ErrParameterInvalid)
 			require.ErrorContains(t, err, key+" is not supported on struct sub-field s[tag]")
+		})
+	}
+}
+
+func TestPrepareSchemaOrdinaryExternalStruct(t *testing.T) {
+	for _, mapping := range []string{"", "items[other]"} {
+		t.Run(fmt.Sprintf("mapping=%s", mapping), func(t *testing.T) {
+			read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).Return(nil, merr.ErrServiceInternal).Build()
+			defer read.UnPatch()
+			schema := &schemapb.CollectionSchema{
+				Name: "external_struct", ExternalSource: "s3://bucket/data",
+				ExternalSpec: `{"format":"parquet","extfs":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true"}}`,
+				Fields: []*schemapb.FieldSchema{
+					{Name: common.VirtualPKFieldName, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+					{Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec", TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+				},
+				StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", Fields: []*schemapb.FieldSchema{{Name: "items[score]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ExternalField: mapping, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}}}}},
+			}
+			task := &createCollectionTask{Req: &milvuspb.CreateCollectionRequest{CollectionName: schema.Name}, body: &message.CreateCollectionRequest{CollectionSchema: schema}}
+			err := task.prepareSchema(context.Background())
+			require.Zero(t, read.Times(), "ordinary source must not read Milvus snapshot metadata")
+			if mapping != "" {
+				require.ErrorContains(t, err, "must retain its source name")
+				return
+			}
+			require.NoError(t, err)
+			parent := schema.GetStructArrayFields()[0]
+			child := parent.GetFields()[0]
+			require.True(t, parent.GetNullable())
+			require.True(t, child.GetNullable())
+			require.Equal(t, "items[score]", child.GetExternalField())
+			require.GreaterOrEqual(t, parent.GetFieldID(), int64(StartOfUserFieldID))
+			require.Greater(t, child.GetFieldID(), parent.GetFieldID())
+			pk, err := typeutil.GetPrimaryFieldSchema(schema)
+			require.NoError(t, err)
+			require.Equal(t, common.VirtualPKFieldName, pk.GetName())
+			require.False(t, pk.GetNullable())
 		})
 	}
 }

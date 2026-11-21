@@ -50,6 +50,13 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 		return err
 	}
 
+	schema := coll.ToCollectionSchemaPB()
+	// Ordinary external Struct projection is supported at creation time only.
+	// Keep additive DDL restricted to snapshot-backed milvus-table schemas.
+	if typeutil.IsExternalCollection(schema) && !typeutil.NewStorageColumnResolver(schema).IsMilvusTable() {
+		return merr.WrapErrParameterInvalidMsg("external collection %s does not support adding struct fields", coll.Name)
+	}
+
 	if req.GetStructArrayFieldSchema() == nil {
 		return merr.WrapErrParameterInvalidMsg("struct array field schema is nil")
 	}
@@ -75,7 +82,6 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 		return err
 	}
 
-	schema := coll.ToCollectionSchemaPB()
 	fieldIDStart := maxAssignedFieldIDFromSchema(schema) + 1
 	structArrayField.FieldID = fieldIDStart
 	for i, field := range structArrayField.GetFields() {
@@ -84,6 +90,9 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 
 	schema.Version = coll.SchemaVersion + 1
 	schema.StructArrayFields = append(schema.StructArrayFields, structArrayField)
+	if err := alignMilvusTableAddedStructFields(ctx, coll, schema); err != nil {
+		return err
+	}
 	properties := updateMaxFieldIDProperty(coll.Properties, maxAssignedFieldIDFromSchema(schema))
 	schema.Properties = properties
 	if err := validateSchemaEvolution(coll, schema); err != nil {
@@ -149,6 +158,32 @@ func normalizeAndCheckAddedStructField(structArrayField *schemapb.StructArrayFie
 		field.Nullable = true
 		if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
 			field.TypeSchema.Nullable = true
+		}
+	}
+	return nil
+}
+
+// alignMilvusTableAddedStructFields declares same-name Struct projections.
+// IDs belong to the target schema; refresh binds them to its selected snapshot.
+func alignMilvusTableAddedStructFields(ctx context.Context, coll *model.Collection, schema *schemapb.CollectionSchema) error {
+	if !typeutil.NewStorageColumnResolver(schema).IsMilvusTable() {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	oldChildren := make(map[string]struct{})
+	for _, parent := range coll.StructArrayFields {
+		for _, child := range parent.Fields {
+			oldChildren[storedRootStructSubFieldName(parent.Name, child.Name)] = struct{}{}
+		}
+	}
+	for _, parent := range schema.GetStructArrayFields() {
+		for _, child := range parent.GetFields() {
+			name := storedRootStructSubFieldName(parent.GetName(), child.GetName())
+			if _, exists := oldChildren[name]; !exists {
+				child.ExternalField = name
+			}
 		}
 	}
 	return nil

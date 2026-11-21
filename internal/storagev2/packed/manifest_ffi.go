@@ -19,9 +19,12 @@ package packed
 #include <stdint.h>
 #include <stdlib.h>
 #include "milvus-storage/ffi_c.h"
+#include "milvus-storage/ffi_internal/ffi_error_code.h"
 #include "milvus-storage/ffi_exttable_c.h"
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
+#include "common/type_c.h"
+CStatus ReadMilvusTableManifestFieldMapping(const LoonColumnGroups* groups, char** output);
 
 LoonFFIResult loon_milvus_table_append_source_manifests(
     LoonTransactionHandle transaction,
@@ -32,7 +35,8 @@ LoonFFIResult loon_milvus_table_append_source_manifests(
     size_t num_target_columns,
     const char* external_source,
     const LoonProperties* properties,
-    int has_external_primary_key);
+    int has_external_primary_key,
+    const char* field_id_mapping);
 */
 import "C"
 
@@ -55,6 +59,8 @@ import (
 )
 
 const (
+	// MilvusTableFieldIDMappingProperty binds target field IDs to physical source columns.
+	MilvusTableFieldIDMappingProperty     = "milvus_table.field_id_mapping"
 	milvusTableSourceManifestPathProperty = "milvus_table.source_manifest_path"
 	milvusTableSourceRowCountProperty     = "milvus_table.source_row_count"
 )
@@ -460,6 +466,12 @@ func createMilvusTableManifest(
 	if extfs.MilvusTablePKMode.usesExternalPrimaryKey() {
 		hasExternalPrimaryKey = C.int(1)
 	}
+	rawMapping := fragments[0].Properties[MilvusTableFieldIDMappingProperty]
+	if strings.IndexByte(rawMapping, 0) >= 0 {
+		return "", merr.WrapErrParameterInvalidMsg("milvus-table field mapping contains a NUL byte")
+	}
+	cFieldIDMapping := C.CString(rawMapping)
+	defer C.free(unsafe.Pointer(cFieldIDMapping))
 	// The call reads the source segment manifests and writes the new target
 	// manifest, blocking this goroutine's OS thread; bound it process-wide.
 	// Release before commitTransaction, which acquires its own slot: holding
@@ -475,9 +487,16 @@ func createMilvusTableManifest(
 		cExternalSource,
 		cProperties,
 		hasExternalPrimaryKey,
+		cFieldIDMapping,
 	)
 	releaseManifestFFI()
+	unsupported := result.err_code == C.LOON_NOT_SUPPORT
 	if err := HandleLoonFFIResult(result); err != nil {
+		if unsupported {
+			// Translate this import capability error at the milvus-table boundary,
+			// retaining the FFI sentinel for existing retry guards.
+			return "", merr.WrapErrOperationNotSupported(err, "import milvus-table source columns")
+		}
 		return "", err
 	}
 	if err := ctx.Err(); err != nil {
@@ -669,6 +688,10 @@ func ReadFragmentsFromManifest(
 	if err != nil {
 		return nil, err
 	}
+	return projectManifestFragments(groups, columns), nil
+}
+
+func projectManifestFragments(groups []manifestColumnGroup, columns []string) []Fragment {
 	if len(columns) > 0 {
 		columnSet := make(map[string]struct{}, len(columns))
 		for _, column := range columns {
@@ -683,7 +706,7 @@ func ReadFragmentsFromManifest(
 		}
 		groups = filtered
 	}
-	return manifestColumnGroupsToFragments(groups), nil
+	return manifestColumnGroupsToFragments(groups)
 }
 
 // ManifestHasColumns returns true when the manifest contains every requested
@@ -730,6 +753,47 @@ func ManifestMissingColumns(
 		}
 	}
 	return missing, nil
+}
+
+// readMilvusTableRefreshFragments uses the same revision for fragment identity
+// and logical binding validation, before the caller decides whether to reuse it.
+func readMilvusTableRefreshFragments(manifestPath string, config *indexpb.StorageConfig, columns []string, expected map[string]string) ([]Fragment, []string, error) {
+	manifest, err := GetManifestHandle(manifestPath, config)
+	if err != nil {
+		return nil, nil, err
+	}
+	if manifest == nil {
+		return nil, nil, merr.WrapErrDataIntegrityMsg("nil milvus-table manifest")
+	}
+	defer C.loon_manifest_destroy(manifest)
+	groups, err := decodeManifestColumnGroups(manifestPath, manifest)
+	if err != nil {
+		return nil, nil, err
+	}
+	var encoded *C.char
+	status := C.ReadMilvusTableManifestFieldMapping(&manifest.column_groups, &encoded)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, nil, err
+	}
+	defer C.free(unsafe.Pointer(encoded))
+	// The native resolver validates both explicit bindings and legacy identity.
+	var previous map[string]string
+	if err := json.Unmarshal([]byte(C.GoString(encoded)), &previous); err != nil {
+		return nil, nil, merr.Wrap(err, "decode validated manifest mapping")
+	}
+	var missing []string
+	for target, physical := range expected {
+		old, exists := previous[target]
+		if !exists {
+			missing = append(missing, target)
+			continue
+		}
+		if old != physical {
+			return nil, nil, merr.WrapErrParameterInvalidMsg("milvus-table source Field ID changed for target field %s: previous=%s, snapshot=%s", target, old, physical)
+		}
+	}
+	sort.Strings(missing)
+	return projectManifestFragments(groups, columns), missing, nil
 }
 
 // readManifestColumnGroupEntries copies selected column-group metadata into
@@ -817,7 +881,7 @@ func readManifestColumnGroupEntries(
 	return selected, nil
 }
 
-// MilvusTableRefreshResult contains the only manifest committed by a delete-only
+// MilvusTableRefreshResult contains the manifest committed by a column or delete
 // refresh and its scheduling metadata. An error always returns an empty result.
 type MilvusTableRefreshResult struct {
 	ManifestPath  string
@@ -1015,6 +1079,10 @@ func readColumnGroupsFromManifest(
 	}
 	defer C.loon_manifest_destroy(manifest)
 
+	return decodeManifestColumnGroups(manifestPath, manifest)
+}
+
+func decodeManifestColumnGroups(manifestPath string, manifest *C.LoonManifest) ([]manifestColumnGroup, error) {
 	cgroups := &manifest.column_groups
 	manifestDeltalogs, err := deltaLogsFromManifest(manifestPath, manifest)
 	if err != nil {

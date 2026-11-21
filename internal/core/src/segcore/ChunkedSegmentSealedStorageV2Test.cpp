@@ -5400,3 +5400,161 @@ TEST_P(TestChunkSegmentStorageV2, DupPkAcrossChunkBoundaryRangeOps) {
             << "UnaryRangeFilterExpr(pk " << c.name << " X)";
     }
 }
+
+TEST(LazyManifest, EmptyExternalStructViewDoesNotRegisterChildren) {
+    milvus::proto::schema::CollectionSchema source;
+    source.set_external_source("s3://bucket/path");
+    source.set_external_spec(R"({"format":"parquet"})");
+    auto* pk = source.add_fields();
+    pk->set_fieldid(100);
+    pk->set_name("pk");
+    pk->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk->set_is_primary_key(true);
+    // The primary key is virtual; the empty View selects no user fields.
+    auto* parent = source.add_struct_array_fields();
+    parent->set_name("items");
+    parent->set_fieldid(200);
+    for (int64_t id : {201, 202}) {
+        auto* child = parent->add_fields();
+        child->set_fieldid(id);
+        child->set_name(id == 201 ? "items[a]" : "items[b]");
+        child->set_external_field(child->name());
+        child->set_data_type(milvus::proto::schema::DataType::Array);
+        child->set_element_type(milvus::proto::schema::DataType::Int64);
+    }
+    auto schema = Schema::ParseFrom(source);
+
+    auto physical = std::make_shared<Schema>();
+    physical->AddField(FieldMeta(FieldName("items"),
+                                 FieldId(201),
+                                 DataType::INT64,
+                                 true,
+                                 std::nullopt,
+                                 "items"));
+    physical->set_external_source(source.external_source());
+    physical->set_external_spec(source.external_spec());
+    const auto path = UniqueManifestTestPath("empty_external_struct_view");
+    auto fs = GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, path);
+    constexpr int64_t rows = 8;
+    milvus::test::V3SegmentTestData data(
+        physical, 1, rows, 1, TestLocalPath, path, "items");
+    ASSERT_EQ(data.NumColumnGroups(), 1);
+    // Remove the payload. A correctly empty load scope must never open it,
+    // even though the manifest still contains a real target Struct parent.
+    const auto payload = data.GetColumnGroups()->at(0)->files.front().path;
+    ASSERT_TRUE(fs->DeleteFile(payload).ok());
+    auto layout =
+        std::make_shared<const SealedFieldLayout>(schema, LoadScope({}));
+    ASSERT_TRUE(layout->IsOrdinaryExternalStruct("items"));
+    ASSERT_TRUE(
+        layout->GetOrdinaryStructProjections(schema->get_field_ids()).empty());
+    constexpr int64_t segment_id = 3199;
+    ChunkedSegmentSealedImpl segment(
+        layout, nullptr, SegcoreConfig::default_config(), segment_id);
+    proto::segcore::SegmentLoadInfo info;
+    info.set_segmentid(segment_id);
+    info.set_collectionid(1);
+    info.set_partitionid(1);
+    info.set_num_of_rows(rows);
+    info.set_storageversion(STORAGE_V3);
+    info.set_manifest_path(data.ManifestPathJson());
+    segment.SetLoadInfo(info);
+    milvus::tracer::TraceContext trace_ctx;
+    ASSERT_NO_THROW(segment.Load(trace_ctx, nullptr));
+    const auto state = segment.TestGetPublishedStateSnapshot();
+    EXPECT_EQ(state->runtime->fields.count(FieldId(201)), 0);
+    EXPECT_EQ(state->runtime->fields.count(FieldId(202)), 0);
+    EXPECT_FALSE(state->fields->has_field(FieldId(201)));
+    EXPECT_FALSE(state->fields->has_field(FieldId(202)));
+}
+
+TEST(LazyManifest, MilvusTableRefreshWithoutSchemaLoadsNewBinding) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto policies =
+        cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
+    policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    policies.scalarIndexCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Sync;
+    CacheWarmupPolicyGuard warmup_guard(policies);
+    const FieldId first(100), added(101), pk(102);
+    auto source = std::make_shared<Schema>();
+    source->AddField(FieldMeta(
+        FieldName("first"), first, DataType::INT64, false, std::nullopt));
+    auto expanded = std::make_shared<Schema>(*source);
+    expanded->AddField(FieldMeta(
+        FieldName("added"), added, DataType::INT64, false, std::nullopt));
+    auto fs = GetDefaultArrowFileSystem();
+    auto old_path = UniqueManifestTestPath("deferred_old");
+    auto new_path = UniqueManifestTestPath("deferred_new");
+    StorageV2TempDirGuard old_guard(fs, old_path), new_guard(fs, new_path);
+    milvus::test::V3SegmentTestData old_data(
+        source, 1, 8, 1, TestLocalPath, old_path, "100");
+    milvus::test::V3SegmentTestData new_data(
+        expanded, 1, 8, 1, TestLocalPath, new_path, "100|101");
+    auto target = std::make_shared<Schema>(*expanded);
+    target->set_external_source("s3://bucket/snapshot");
+    target->set_external_spec(R"({"format":"milvus-table"})");
+    target->AddField(FieldMeta(
+        FieldName("__virtual_pk__"), pk, DataType::INT64, false, std::nullopt));
+    target->set_primary_field_id(pk);
+    target->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    target->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    auto segment = CreateSealedSegment(target, nullptr, 3198);
+    proto::segcore::SegmentLoadInfo info;
+    info.set_segmentid(3198);
+    info.set_collectionid(1);
+    info.set_partitionid(1);
+    info.set_num_of_rows(8);
+    info.set_storageversion(STORAGE_V3);
+    info.set_manifest_path(old_data.ManifestPathJson());
+    segment->SetLoadInfo(info);
+    milvus::tracer::TraceContext trace;
+    ASSERT_NO_THROW(segment->Load(trace, nullptr));
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    ASSERT_FALSE(sealed->HasFieldInLoadedManifest(added));
+    // A second native caller must not silently discard an index for the newly
+    // bound field while constructing its load-info cache from the old view.
+    auto indexed_segment = CreateSealedSegment(target, nullptr, 3199);
+    auto index_info = info;
+    index_info.set_segmentid(3199);
+    indexed_segment->SetLoadInfo(index_info);
+    ASSERT_NO_THROW(indexed_segment->Load(trace, nullptr));
+    auto* indexed =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(indexed_segment.get());
+    ASSERT_NE(indexed, nullptr);
+    index_info.set_manifest_path(new_data.ManifestPathJson());
+    auto* missing_index = index_info.add_index_infos();
+    missing_index->set_fieldid(added.get());
+    missing_index->set_indexid(9001);
+    missing_index->set_buildid(9002);
+    missing_index->set_index_version(1);
+    missing_index->set_enable_index(true);
+    missing_index->add_index_file_paths(new_path + "/missing-index");
+    auto* type = missing_index->add_index_params();
+    type->set_key("index_type");
+    type->set_value("INVERTED");
+    auto* priority = missing_index->add_index_params();
+    priority->set_key(milvus::LOAD_PRIORITY);
+    priority->set_value("HIGH");
+    milvus::OpContext index_ctx;
+    EXPECT_THROW(indexed->Reopen(&index_ctx, index_info), SegcoreError);
+    EXPECT_FALSE(indexed->HasFieldInLoadedManifest(added));
+    info.set_manifest_path(new_data.ManifestPathJson());
+    milvus::OpContext ctx;
+    ASSERT_NO_THROW(sealed->Reopen(&ctx, info));
+    auto state = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_TRUE(state->load_info->HasFieldInSchema(added));
+    ASSERT_TRUE(state->runtime->fields.count(added));
+    int64_t offsets[] = {0, 2, 7};
+    auto values = segment->bulk_subscript(nullptr, added, offsets, 3);
+    ASSERT_EQ(values->scalars().long_data().data_size(), 3);
+    EXPECT_EQ(values->scalars().long_data().data(1), 2);
+}

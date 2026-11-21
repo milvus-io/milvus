@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -955,7 +956,8 @@ func (node *Proxy) AddCollectionStructField(ctx context.Context, request *milvus
 		return merr.Status(err), nil
 	}
 
-	if typeutil.IsExternalCollection(dresp.GetSchema()) {
+	if typeutil.IsExternalCollection(dresp.GetSchema()) &&
+		!typeutil.NewStorageColumnResolver(dresp.GetSchema()).IsMilvusTable() {
 		return merr.Status(merr.WrapErrParameterInvalidMsg(
 			"add struct field operation is not supported for external collection %s", request.GetCollectionName())), nil
 	}
@@ -1015,12 +1017,19 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 		}, nil
 	}
 
-	// Check for external collection - alter collection schema is not supported
 	if typeutil.IsExternalCollection(dresp.GetSchema()) {
-		return &milvuspb.AlterCollectionSchemaResponse{
-			AlterStatus: merr.Status(merr.WrapErrParameterInvalidMsg(
-				"alter collection schema operation is not supported for external collection %s", request.GetCollectionName())),
-		}, nil
+		if !typeutil.NewStorageColumnResolver(dresp.GetSchema()).IsMilvusTable() {
+			// PyMilvus uses this status and reason to fall back to AddCollectionField.
+			return &milvuspb.AlterCollectionSchemaResponse{
+				AlterStatus: merr.Status(merr.WrapErrParameterInvalidMsg(
+					"alter collection schema operation is not supported for external collection %s", request.GetCollectionName())),
+			}, nil
+		}
+		plan, parseErr := schemautil.ParseAlterSchemaAddRequest(request.GetAction().GetAddRequest())
+		if parseErr != nil ||
+			(plan.Kind != schemautil.AlterSchemaAddField && plan.Kind != schemautil.AlterSchemaAddStructSubField) {
+			return &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Status(merr.WrapErrOperationNotSupportedMsg("external collections support only mapped milvus-table field additions"))}, nil
+		}
 	}
 
 	task := NewAlterCollectionSchemaTask(ctx, node, request, dresp.GetSchema(), dresp.GetProperties(), CheckVecIndexWithDataTypeExist)
