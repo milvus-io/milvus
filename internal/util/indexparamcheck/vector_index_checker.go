@@ -93,6 +93,10 @@ func (c vecIndexChecker) StaticCheck(dataType schemapb.DataType, elementType sch
 		return merr.WrapErrParameterInvalidMsg("no indexType is specified")
 	}
 
+	if err := validateEMeansParams(indexType, params[Metric], params); err != nil {
+		return merr.WrapErrParameterInvalidMsg("%s", err)
+	}
+
 	if !vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) {
 		return merr.WrapErrParameterInvalidMsg("indexType %s is not supported", indexType)
 	}
