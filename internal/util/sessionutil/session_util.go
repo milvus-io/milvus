@@ -400,8 +400,8 @@ func (s *Session) isCoordinator() bool {
 }
 
 // checkVersion checks the version of the session and returns the error if the version is not found or expired.
-func (s *Session) checkVersionForCoordinator(ctx context.Context) (*mvccpb.KeyValue, error) {
-	resp, err := s.etcdCli.Get(ctx, s.versionKey)
+func (s *Session) checkVersionForCoordinator() (*mvccpb.KeyValue, error) {
+	resp, err := s.etcdCli.Get(s.ctx, s.versionKey)
 	if err != nil {
 		return nil, err
 	}
@@ -570,7 +570,7 @@ func (s *Session) registerService() error {
 		// if enable active-standby, we don't need to check the version now,
 		// only check the version when the standby is activated.
 		if s.isCoordinator() && !s.enableActiveStandBy {
-			if ops, compareOps, err = s.getOpsForCoordinator(s.ctx, ops, compareOps, sessionJSON); err != nil {
+			if ops, compareOps, err = s.getOpsForCoordinator(ops, compareOps, sessionJSON); err != nil {
 				return err
 			}
 		}
@@ -597,8 +597,8 @@ func (s *Session) registerService() error {
 }
 
 // getOpsForCoordinator gets the ops and compare ops for coordinator.
-func (s *Session) getOpsForCoordinator(ctx context.Context, ops []clientv3.Op, compareOps []clientv3.Cmp, sessionJSON []byte) ([]clientv3.Op, []clientv3.Cmp, error) {
-	previousVersion, err := s.checkVersionForCoordinator(ctx)
+func (s *Session) getOpsForCoordinator(ops []clientv3.Op, compareOps []clientv3.Cmp, sessionJSON []byte) ([]clientv3.Op, []clientv3.Cmp, error) {
+	previousVersion, err := s.checkVersionForCoordinator()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1157,9 +1157,7 @@ func (s *Session) updateStandby(b bool) {
 //	Start watching the active key. Whenever active key disappears, STANDBY node will go backup to 2.
 //
 // activateFunc is the function to re-active the service.
-// ctx cancels the standby election and watch loop while keeping s.ctx (and the
-// session lease) alive until the caller stops the session.
-func (s *Session) ProcessActiveStandBy(ctx context.Context, activateFunc func() error) error {
+func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 	s.activeKey = path.Join(s.metaRoot, DefaultServiceRoot, s.ServerName)
 	// try to register to the active_key.
 	// return
@@ -1174,7 +1172,7 @@ func (s *Session) ProcessActiveStandBy(ctx context.Context, activateFunc func() 
 
 	registerActiveFn := func() (bool, int64, error) {
 		for _, role := range oldRoles {
-			sessions, _, err := s.GetSessions(ctx, role)
+			sessions, _, err := s.GetSessions(s.ctx, role)
 			if err != nil {
 				if etcd.IsRetriableEtcdErr(err) {
 					// Do not skip the legacy session check just because etcd is
@@ -1212,12 +1210,12 @@ func (s *Session) ProcessActiveStandBy(ctx context.Context, activateFunc func() 
 		}
 
 		if s.isCoordinator() {
-			if ops, compareOps, err = s.getOpsForCoordinator(ctx, ops, compareOps, sessionJSON); err != nil {
+			if ops, compareOps, err = s.getOpsForCoordinator(ops, compareOps, sessionJSON); err != nil {
 				return false, -1, err
 			}
 		}
 
-		txnResp, err := s.etcdCli.Txn(ctx).If(compareOps...).Then(ops...).Else(clientv3.OpGet(s.activeKey)).Commit()
+		txnResp, err := s.etcdCli.Txn(s.ctx).If(compareOps...).Then(ops...).Else(clientv3.OpGet(s.activeKey)).Commit()
 		if err != nil {
 			mlog.Error(context.TODO(), "register active key to etcd failed", mlog.Err(err))
 			return false, -1, err
@@ -1262,9 +1260,8 @@ func (s *Session) ProcessActiveStandBy(ctx context.Context, activateFunc func() 
 				// If old session exists, wait and retry
 				select {
 				case <-time.After(100 * time.Millisecond):
-				case <-ctx.Done():
-					s.updateStandby(false)
-					return ctx.Err()
+				case <-s.ctx.Done():
+					return s.ctx.Err()
 				}
 				continue
 			}
@@ -1276,30 +1273,24 @@ func (s *Session) ProcessActiveStandBy(ctx context.Context, activateFunc func() 
 				mlog.Warn(s.ctx, "register active key hit a transient etcd error, retry", mlog.Err(err))
 				select {
 				case <-time.After(transientEtcdErrRetryInterval):
-				case <-ctx.Done():
-					s.updateStandby(false)
-					return ctx.Err()
+				case <-s.ctx.Done():
+					return s.ctx.Err()
 				}
 				continue
 			}
 			// Some error such as ErrLeaseNotFound, is not retryable.
 			// Just return error to stop the standby process and wait for retry.
-			s.updateStandby(false)
 			return err
 		}
 		if registered {
 			break
 		}
 		mlog.Info(s.ctx, fmt.Sprintf("%s start to watch ACTIVE key %s", s.ServerName, s.activeKey))
-		watchCtx, cancel := context.WithCancel(ctx)
-		watchChan := s.etcdCli.Watch(watchCtx, s.activeKey, clientv3.WithPrevKV(), clientv3.WithRev(revision))
+		ctx, cancel := context.WithCancel(s.ctx)
+		watchChan := s.etcdCli.Watch(ctx, s.activeKey, clientv3.WithPrevKV(), clientv3.WithRev(revision))
 		select {
-		case <-watchCtx.Done():
+		case <-ctx.Done():
 			cancel()
-			if ctx.Err() != nil {
-				s.updateStandby(false)
-				return ctx.Err()
-			}
 		case wresp, ok := <-watchChan:
 			if !ok {
 				cancel()
@@ -1319,16 +1310,8 @@ func (s *Session) ProcessActiveStandBy(ctx context.Context, activateFunc func() 
 		}
 		cancel()
 		mlog.Info(s.ctx, fmt.Sprintf("stop watching ACTIVE key %v", s.activeKey))
-		if err := ctx.Err(); err != nil {
-			s.updateStandby(false)
-			return err
-		}
 	}
 
-	if err := ctx.Err(); err != nil {
-		s.updateStandby(false)
-		return err
-	}
 	s.updateStandby(false)
 	mlog.Info(s.ctx, fmt.Sprintf("serverName: %v quit STANDBY mode, this node will become ACTIVE, ID: %d", s.ServerName, s.ServerID))
 	if activateFunc != nil {

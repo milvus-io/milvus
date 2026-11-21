@@ -41,7 +41,7 @@ type SessionInterface interface {
 	SetDisconnected(b bool)
 	Disconnected() bool
 	SetEnableActiveStandBy(enable bool)
-	ProcessActiveStandBy(ctx context.Context, activateFunc func() error) error
+	ProcessActiveStandBy(activateFunc func() error) error
 
 	GetAddress() string
 	GetServerID() int64

@@ -560,7 +560,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 		s1.GetRegisteredRevision()
 	})
 	wg.Add(1)
-	s1.ProcessActiveStandBy(ctx1, func() error {
+	s1.ProcessActiveStandBy(func() error {
 		mlog.Debug(context.TODO(), "Session 1 become active")
 		wg.Done()
 		return nil
@@ -576,7 +576,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	s2.SetEnableActiveStandBy(true)
 	s2.Register()
 	wg.Add(1)
-	go s2.ProcessActiveStandBy(ctx2, func() error {
+	go s2.ProcessActiveStandBy(func() error {
 		mlog.Debug(context.TODO(), "Session 2 become active")
 		wg.Done()
 		return nil
@@ -622,7 +622,7 @@ func TestSessionProcessActiveStandBy_ActiveKeyHeldByOwnLease(t *testing.T) {
 	require.NoError(t, err)
 
 	activated := make(chan struct{})
-	go s.ProcessActiveStandBy(ctx, func() error {
+	go s.ProcessActiveStandBy(func() error {
 		close(activated)
 		return nil
 	})
@@ -1301,58 +1301,6 @@ func TestInitCancellationReturnsErrorWithoutPanic(t *testing.T) {
 
 	err := <-errCh
 	require.ErrorIs(t, err, context.Canceled)
-}
-
-func TestProcessActiveStandByKeepsSessionLeaseAlive(t *testing.T) {
-	paramtable.Init()
-	etcdCli, _ := kvfactory.GetEtcdAndPath()
-	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-	defer etcdkv.NewEtcdKV(etcdCli, metaRoot).RemoveWithPrefix(context.Background(), "")
-
-	sessionCtx, sessionCancel := context.WithCancel(context.Background())
-	defer sessionCancel()
-
-	s1 := NewSessionWithEtcd(sessionCtx, metaRoot, etcdCli, WithResueNodeID(false))
-	s1.SetEnableActiveStandBy(true)
-	require.NoError(t, s1.Init(typeutil.MixCoordRole, "addr-1", true))
-	require.NoError(t, s1.Register())
-	defer s1.Stop()
-	require.NoError(t, s1.ProcessActiveStandBy(sessionCtx, nil))
-
-	s2 := NewSessionWithEtcd(sessionCtx, metaRoot, etcdCli, WithResueNodeID(false))
-	s2.SetEnableActiveStandBy(true)
-	require.NoError(t, s2.Init(typeutil.MixCoordRole, "addr-2", true))
-	require.NoError(t, s2.Register())
-	defer s2.Stop()
-	require.NotNil(t, s2.LeaseID)
-	leaseID := *s2.LeaseID
-
-	standbyCtx, standbyCancel := context.WithCancel(sessionCtx)
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- s2.ProcessActiveStandBy(standbyCtx, nil)
-	}()
-
-	require.Eventually(t, func() bool {
-		return s2.isStandby.Load().(bool)
-	}, 2*time.Second, 20*time.Millisecond)
-
-	standbyCancel()
-
-	select {
-	case err := <-errCh:
-		require.ErrorIs(t, err, context.Canceled)
-	case <-time.After(2 * time.Second):
-		t.Fatal("ProcessActiveStandBy did not exit after standbyCtx cancellation")
-	}
-
-	// Session context and lease must remain active until session.Stop().
-	require.NoError(t, s2.ctx.Err())
-	assert.True(t, s2.Registered())
-	require.Never(t, func() bool {
-		ttlResp, ttlErr := etcdCli.TimeToLive(context.Background(), leaseID)
-		return ttlErr != nil || ttlResp.TTL <= 0
-	}, 200*time.Millisecond, 20*time.Millisecond)
 }
 
 func TestRevokeLeasesBeforeExit(t *testing.T) {

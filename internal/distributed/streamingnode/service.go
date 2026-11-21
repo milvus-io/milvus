@@ -387,7 +387,7 @@ func (s *Server) startGPRCServer(ctx context.Context) error {
 	go func() {
 		defer s.grpcWG.Done()
 
-		if err := s.grpcServer.Serve(s.listener); err != nil {
+		if err := s.grpcServer.Serve(s.listener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 			select {
 			case errCh <- err:
 				// failure at initial startup.

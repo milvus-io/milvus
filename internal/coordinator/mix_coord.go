@@ -65,17 +65,12 @@ type mixCoordImpl struct {
 	datacoordServer  *datacoord.Server
 	streamingCoord   *streamingcoord.Server
 
-	ctx                    context.Context
-	cancel                 context.CancelFunc
-	standbyCtx             context.Context
-	standbyCancel          context.CancelFunc
-	wg                     sync.WaitGroup
-	standbyWG              sync.WaitGroup
-	activationWG           sync.WaitGroup
-	streamingCoordStopOnce sync.Once
-	etcdCli                *clientv3.Client
-	tikvCli                *txnkv.Client
-	address                string
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
+	etcdCli *clientv3.Client
+	tikvCli *txnkv.Client
+	address string
 
 	// stopTiKVGC stops the GC of a TiKV meta store, which runs on the active
 	// replica only; see startTiKVGCWorker.
@@ -130,8 +125,7 @@ type mixCoordImpl struct {
 }
 
 func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoordImpl, error) {
-	ctx, cancel := context.WithCancel(c)                 //nolint:gosec // cancel is stored below and called in Stop
-	standbyCtx, standbyCancel := context.WithCancel(ctx) //nolint:gosec // standbyCancel is stored below and called in GracefulStop
+	ctx, cancel := context.WithCancel(c) //nolint:gosec // cancel is stored below and called in Stop
 	rootCoordServer, _ := rootcoord.NewCore(ctx, factory)
 	queryCoordServer, _ := querycoordv2.NewQueryCoord(c)
 
@@ -140,8 +134,6 @@ func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoord
 	return &mixCoordImpl{
 		ctx:              ctx,
 		cancel:           cancel,
-		standbyCtx:       standbyCtx,
-		standbyCancel:    standbyCancel,
 		rootcoordServer:  rootCoordServer,
 		queryCoordServer: queryCoordServer,
 		factory:          factory,
@@ -159,35 +151,10 @@ func (s *mixCoordImpl) Register() error {
 		metrics.NumNodes.WithLabelValues(paramtable.GetStringNodeID(), typeutil.MixCoordRole).Inc()
 		mlog.Info(s.ctx, "MixCoord Register Finished")
 	}
-	s.standbyWG.Add(1)
 	go func() {
-		standbyDone := false
-		finishStandby := func() {
-			if !standbyDone {
-				standbyDone = true
-				s.standbyWG.Done()
-			}
-		}
-		defer finishStandby()
-		if err := s.session.ProcessActiveStandBy(s.standbyCtx, nil); err != nil {
-			if s.standbyCtx.Err() != nil || s.ctx.Err() != nil {
+		if err := s.session.ProcessActiveStandBy(s.activateFunc); err != nil {
+			if s.ctx.Err() == context.Canceled {
 				mlog.Info(s.ctx, "standby process canceled due to server shutdown")
-				return
-			}
-			mlog.Error(s.ctx, "failed to activate standby server", mlog.Err(err))
-			panic(err)
-		}
-		s.activationWG.Add(1)
-		defer s.activationWG.Done()
-		finishStandby()
-
-		if s.standbyCtx.Err() != nil || s.ctx.Err() != nil {
-			mlog.Info(s.ctx, "standby activation skipped due to server shutdown")
-			return
-		}
-		if err := s.activateFunc(); err != nil {
-			if s.standbyCtx.Err() != nil || s.ctx.Err() != nil {
-				mlog.Info(s.ctx, "standby activation canceled due to server shutdown")
 				return
 			}
 			mlog.Error(s.ctx, "failed to activate standby server", mlog.Err(err))
@@ -260,11 +227,8 @@ func (s *mixCoordImpl) initInternal() error {
 	s.queryCoordServer.SetMetaView(s.metaStore)
 	s.fileResourceObserver = NewFileResourceObserver(s.ctx)
 
-	if err := s.streamingCoord.Start(s.standbyCtx); err != nil {
+	if err := s.streamingCoord.Start(s.ctx); err != nil {
 		mlog.Error(s.ctx, "streamCoord start failed", mlog.Err(err))
-		return err
-	}
-	if err := s.standbyCtx.Err(); err != nil {
 		return err
 	}
 
@@ -544,10 +508,6 @@ func (s *mixCoordImpl) Stop() error {
 	s.GracefulStop()
 	mlog.Info(s.ctx, "graceful stop done")
 
-	// Wait for any in-flight activation (already canceled via standbyCtx in
-	// GracefulStop) before reading datacoordServer / fileResourceObserver below.
-	s.activationWG.Wait()
-
 	if err := s.queryCoordServer.Stop(); err != nil {
 		mlog.Error(s.ctx, "Failed to stop queryCoord", mlog.Err(err))
 	}
@@ -644,15 +604,10 @@ func (s *mixCoordImpl) GetStateCode() commonpb.StateCode {
 }
 
 func (s *mixCoordImpl) GracefulStop() {
-	if s.standbyCancel != nil {
-		s.standbyCancel()
+	if s.streamingCoord != nil {
+		s.streamingCoord.Stop()
+		s.streamingCoord = nil
 	}
-	s.standbyWG.Wait()
-	s.streamingCoordStopOnce.Do(func() {
-		if s.streamingCoord != nil {
-			s.streamingCoord.Stop()
-		}
-	})
 }
 
 // RootCoordServer

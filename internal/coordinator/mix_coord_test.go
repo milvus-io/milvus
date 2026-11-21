@@ -191,7 +191,7 @@ func TestMixcoord_StopWhileStandby(t *testing.T) {
 	active.Init(typeutil.MixCoordRole, "localhost:1", true)
 	active.SetEnableActiveStandBy(true)
 	active.Register()
-	assert.NoError(t, active.ProcessActiveStandBy(ctx, nil))
+	assert.NoError(t, active.ProcessActiveStandBy(nil))
 	defer active.Stop()
 
 	type standbyResult struct {
@@ -200,17 +200,16 @@ func TestMixcoord_StopWhileStandby(t *testing.T) {
 	}
 	entered := make(chan struct{})
 	result := make(chan standbyResult, 1)
-	var mocker *mockey.Mocker
-	mocker = mockey.Mock((*sessionutil.Session).ProcessActiveStandBy).To(
-		func(s *sessionutil.Session, standbyCtx context.Context, activateFunc func() error) error {
-			mocker.UnPatch()
+	var origin func(*sessionutil.Session, func() error) error
+	mocker := mockey.Mock((*sessionutil.Session).ProcessActiveStandBy).To(
+		func(s *sessionutil.Session, activateFunc func() error) error {
 			close(entered)
-			err := s.ProcessActiveStandBy(standbyCtx, activateFunc)
+			err := origin(s, activateFunc)
 			// The Register goroutine decides between "shutdown" and panic on
-			// s.standbyCtx right after this returns.
-			result <- standbyResult{err: err, ctxErr: core.standbyCtx.Err()}
+			// core.ctx right after this returns.
+			result <- standbyResult{err: err, ctxErr: core.ctx.Err()}
 			return err
-		}).Build()
+		}).Origin(&origin).Build()
 	defer mocker.UnPatch()
 
 	assert.NoError(t, core.Register())
