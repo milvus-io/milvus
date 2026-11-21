@@ -175,3 +175,7 @@ func newPrimaryKeysLike(pks storage.PrimaryKeys) (storage.PrimaryKeys, bool) {
 		return nil, false
 	}
 }
+
+func (s *queryViewTransformSegment) GCUpdates(ctx context.Context, ts uint64) error {
+	return s.segment.GCUpdates(ctx, ts)
+}

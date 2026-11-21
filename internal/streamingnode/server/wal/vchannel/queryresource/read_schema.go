@@ -213,7 +213,7 @@ type ReadRuntime struct {
 	idf       idfOracle
 }
 
-func (r *ReadRuntime) AcquireGrowingSegmentHandles(ctx context.Context, version qviews.DataVersion, partitions []int64) ([]snview.GrowingSegmentHandle, error) {
+func (r *ReadRuntime) AcquireGrowingSegmentHandles(ctx context.Context, version qviews.DataVersion, growingTS uint64, partitions []int64) ([]snview.GrowingSegmentHandle, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -221,7 +221,7 @@ func (r *ReadRuntime) AcquireGrowingSegmentHandles(ctx context.Context, version 
 	if err != nil {
 		return nil, r.acquisitionError(ctx, err)
 	}
-	handles, err := r.QueryRuntime.AcquireGrowingSegmentHandles(operationCtx, version, partitions)
+	handles, err := r.QueryRuntime.AcquireGrowingSegmentHandles(operationCtx, version, growingTS, partitions)
 	if err != nil {
 		end()
 		return nil, r.acquisitionError(ctx, err)

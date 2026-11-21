@@ -43,7 +43,7 @@ func TestRetainedSegmentIsOnlyQueriedBeforeItsSealedDataVersion(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.visible, runtime.MayHaveVisibleGrowingSegments(tc.version, 100, 100, []int64{100}))
-			handles, err := runtime.AcquireGrowingSegmentHandles(context.Background(), tc.version, []int64{100})
+			handles, err := runtime.AcquireGrowingSegmentHandles(context.Background(), tc.version, 0, []int64{100})
 			require.NoError(t, err)
 			if tc.visible {
 				require.Len(t, handles, 1)
@@ -56,7 +56,7 @@ func TestRetainedSegmentIsOnlyQueriedBeforeItsSealedDataVersion(t *testing.T) {
 			}
 			// Unsealed growing data remains visible regardless of the view version.
 			require.True(t, runtime.MayHaveVisibleGrowingSegments(tc.version, 100, 100, []int64{200}))
-			handles, err = runtime.AcquireGrowingSegmentHandles(context.Background(), tc.version, []int64{200})
+			handles, err = runtime.AcquireGrowingSegmentHandles(context.Background(), tc.version, 0, []int64{200})
 			require.NoError(t, err)
 			require.Len(t, handles, 1)
 			require.Equal(t, int64(20), handles[0].ID())
@@ -80,16 +80,16 @@ func TestSealedCutoverPreservesAlreadyAcquiredHandles(t *testing.T) {
 	current := qviews.DataVersion{StreamingVersion: 2}
 	runtime.markGrowingTimeTick(50)
 	runtime.markTransformTimeTick(50)
-	held, err := runtime.AcquireGrowingSegmentHandles(context.Background(), old, nil)
+	held, err := runtime.AcquireGrowingSegmentHandles(context.Background(), old, 0, nil)
 	require.NoError(t, err)
 	require.Len(t, held, 1)
 	segment.markFlushed(50)
 	runtime.markSegmentSealed(10, current)
 	require.False(t, runtime.MayHaveVisibleGrowingSegments(current, 50, 50, nil))
-	handles, err := runtime.AcquireGrowingSegmentHandles(context.Background(), current, nil)
+	handles, err := runtime.AcquireGrowingSegmentHandles(context.Background(), current, 0, nil)
 	require.NoError(t, err)
 	require.Empty(t, handles)
-	handles, err = runtime.AcquireGrowingSegmentHandles(context.Background(), old, nil)
+	handles, err = runtime.AcquireGrowingSegmentHandles(context.Background(), old, 0, nil)
 	require.NoError(t, err)
 	require.Len(t, handles, 1)
 	handles[0].Release()

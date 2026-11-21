@@ -77,6 +77,7 @@ type TransformSegment interface {
 	VChannel() string
 	PartitionID() int64
 	TransformStartAfterTimeTick() uint64
+	GCUpdates(context.Context, uint64) error
 	ApplyTransform(ctx context.Context, entry *streamingpb.TransformLogEntry) error
 	Release(ctx context.Context) error
 }

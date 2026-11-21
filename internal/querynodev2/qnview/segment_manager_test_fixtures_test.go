@@ -308,3 +308,5 @@ func (instantTransformRegistration) WaitTransformVisible(context.Context, uint64
 func (r *fakeTransformRegistration) WaitTransformVisible(ctx context.Context, _ uint64) error {
 	return r.WaitCatchup(ctx)
 }
+
+func (*fakeTransformSegment) GCUpdates(context.Context, uint64) error { return nil }

@@ -22,6 +22,20 @@ type QueryViewResourceModule interface {
 	BindView(*viewpb.QueryViewMeta) QueryViewResource
 }
 
+// growingFloorGuard follows the same prepare/drain/release lifecycle as the
+// schema and IDF bindings. A late, incompatible floor fails View preparation.
+type growingFloorGuard struct {
+	release func()
+	err     error
+}
+
+func (g growingFloorGuard) Prepare(context.Context, LoadInfoProvider) error { return g.err }
+func (g growingFloorGuard) Release() {
+	if g.release != nil {
+		g.release()
+	}
+}
+
 // viewResources follows the QN ViewResources ownership rule: withdrawing a View
 // cancels its work, but its resource guards survive every operation borrowing them.
 type viewResources struct {
@@ -43,6 +57,10 @@ func (r *QueryRuntime) bindView(meta *viewpb.QueryViewMeta) *viewResources {
 	ctx, cancel := context.WithCancel(r.ctx)
 	v := &viewResources{ctx: ctx, cancel: cancel, drained: make(chan struct{}), closed: make(chan struct{}), runtime: r}
 	for _, module := range r.modules {
+		if growing, ok := module.(interface{ BindReadFloor(uint64) (func(), error) }); ok {
+			release, err := growing.BindReadFloor(meta.GetReadAdmissionFloor().GetGrowingTimetick())
+			v.modules = append(v.modules, growingFloorGuard{release: release, err: err})
+		}
 		if module, ok := module.(QueryViewResourceModule); ok {
 			v.modules = append(v.modules, module.BindView(meta))
 		}

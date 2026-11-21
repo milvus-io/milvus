@@ -1887,3 +1887,11 @@ func (s *LocalSegment) ApplyUpdates(ctx context.Context, ts uint64, ordinal uint
 	s.memSize.Store(-1)
 	return nil
 }
+
+func (s *LocalSegment) GCUpdates(ctx context.Context, ts uint64) error {
+	err := s.csegment.GCUpdates(ctx, ts)
+	if err == nil {
+		s.memSize.Store(-1)
+	}
+	return err
+}

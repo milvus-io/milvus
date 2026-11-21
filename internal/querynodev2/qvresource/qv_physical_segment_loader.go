@@ -242,3 +242,7 @@ func (l *queryViewPhysicalSegmentLoader) AdoptReadState(segment qnview.Transform
 func (s *qvLocalSegment) ApplyUpdates(ctx context.Context, ts uint64, ordinal uint32, body *messagespb.UpdateMessageBody) error {
 	return s.segment.(*segments.LocalSegment).ApplyUpdates(ctx, ts, ordinal, body)
 }
+
+func (s *qvLocalSegment) GCUpdates(ctx context.Context, ts uint64) error {
+	return s.segment.(*segments.LocalSegment).GCUpdates(ctx, ts)
+}

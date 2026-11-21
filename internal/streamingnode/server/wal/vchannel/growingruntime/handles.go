@@ -8,10 +8,11 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func (r *Runtime) AcquireGrowingSegmentHandles(ctx context.Context, dataVersion qviews.DataVersion, partitionIDs []int64) ([]snview.GrowingSegmentHandle, error) {
+func (r *Runtime) AcquireGrowingSegmentHandles(ctx context.Context, dataVersion qviews.DataVersion, growingTS uint64, partitionIDs []int64) ([]snview.GrowingSegmentHandle, error) {
 	if r == nil {
 		return nil, nil
 	}
@@ -25,12 +26,18 @@ func (r *Runtime) AcquireGrowingSegmentHandles(ctx context.Context, dataVersion 
 		r.mu.Unlock()
 		return nil, viewerror.NewViewInvalidated("growing runtime is closed")
 	}
+	if growingTS < r.reservedGrowing {
+		floor := r.reservedGrowing
+		r.mu.Unlock()
+		return nil, viewerror.NewViewInvalidated("growing update history starts at %d", floor)
+	}
 	for _, id := range partitionIDs {
 		if !r.partitionLoaded(id) {
 			r.mu.Unlock()
 			return nil, merr.WrapErrPartitionNotLoaded(id)
 		}
 	}
+	cutoff := r.viewFloors.Limit(min(growingTS, r.appliedGrowingTimeTick.Load(), r.appliedTransformTimeTick.Load()))
 	handles := make([]snview.GrowingSegmentHandle, 0, len(r.segments))
 	for _, segmentID := range r.segmentIDs {
 		segment := r.segments[segmentID]
@@ -48,7 +55,22 @@ func (r *Runtime) AcquireGrowingSegmentHandles(ctx context.Context, dataVersion 
 			segment.unpin()
 			continue
 		}
+		segment.retention.Reads.Add(growingTS)
+		startGC := len(r.viewFloors) > 0 && segment.retention.Reserve(cutoff)
+		// Coalescing advances exclusion even while the previous call is in flight.
+		r.reservedGrowing = max(r.reservedGrowing, segment.retention.Reserved)
+		if startGC {
+			// A separate native pin keeps this operation valid across query
+			// release, truncation, and retirement of this runtime.
+			segment.mu.Lock()
+			segment.refs++ // Already pinned above, even if a flush changed its visibility.
+			segment.mu.Unlock()
+			r.pinQueryLocked()
+			r.gcWorkers.Add(1)
+			go r.collectUpdates(context.WithoutCancel(ctx), segment, csegment, segment.retention.Reserved)
+		}
 		handles = append(handles, growingSegmentHandle{
+			readTS:      growingTS,
 			runtime:     r,
 			source:      segment,
 			collection:  r.collection,
@@ -82,6 +104,7 @@ func partitionSelected(selectedPartitions map[int64]struct{}, partitionID int64)
 }
 
 type growingSegmentHandle struct {
+	readTS      uint64
 	runtime     *Runtime
 	source      *growingSegment
 	collection  *segcore.CCollection
@@ -113,6 +136,9 @@ func (h growingSegmentHandle) Release() {
 	}
 	h.once.Do(func() {
 		if h.source != nil {
+			h.runtime.mu.Lock()
+			h.source.retention.Reads.Remove(h.readTS)
+			h.runtime.mu.Unlock()
 			h.source.unpin()
 		}
 		if h.runtime != nil {
@@ -128,4 +154,39 @@ func (r *Runtime) partitionLoaded(id int64) bool {
 	}
 	_, ok := r.loadedPartitions[id]
 	return ok
+}
+
+// BindReadFloor covers the whole generation, including shards loaded by
+// partition refresh and segments allocated after the View becomes Ready.
+func (r *Runtime) BindReadFloor(floor uint64) (func(), error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || r.applyErr != nil || floor < r.reservedGrowing {
+		return nil, viewerror.NewViewInvalidated("growing runtime cannot retain read floor %d", floor)
+	}
+	r.viewFloors.Add(floor)
+	return func() {
+		r.mu.Lock()
+		r.viewFloors.Remove(floor)
+		r.mu.Unlock()
+	}, nil
+}
+
+func (r *Runtime) collectUpdates(ctx context.Context, s *growingSegment, native segcore.CSegment, target uint64) {
+	defer r.gcWorkers.Done()
+	defer r.unpinQuery()
+	defer s.unpin()
+	for {
+		err := native.GCUpdates(ctx, target)
+		if err != nil {
+			mlog.Warn(ctx, "growing update GC failed", mlog.FieldSegmentID(s.segmentID), mlog.Err(err))
+		}
+		r.mu.Lock()
+		next, again := s.retention.Finish(target, err)
+		r.mu.Unlock()
+		if !again {
+			return
+		}
+		target = next
+	}
 }

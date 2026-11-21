@@ -12,6 +12,7 @@
 #include "gtest/gtest.h"
 #include <arrow/api.h>
 #include <arrow/c/bridge.h>
+#include <future>
 #include "query/PlanProto.h"
 #include "common/Utils.h"
 #include "exec/operator/search-groupby/SearchGroupByOperator.h"
@@ -688,6 +689,43 @@ TEST(PkUpdateSegment, RejectsTTLAndSiblingAtomically) {
     };
     check(*growing);
     check(*sealed);
+}
+
+TEST(PkUpdateSegment, GCJoinsActiveNativeVisitor) {
+    auto schema = std::make_shared<Schema>();
+    const auto pk = schema->AddDebugField("pk", DataType::INT64);
+    const auto age = schema->AddDebugField("age", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto data = MakeRows(schema, pk, {1});
+    auto segment = CreateSealedSegment(schema, nullptr, 87194);
+    LoadGeneratedDataIntoSegment(data, segment.get());
+    const auto keys = Keys({42});
+    segment->ApplyUpdates(keys, 10, 0, {Long(age, 100)});
+    segment->ApplyUpdates(keys, 20, 0, {Long(age, 200)});
+    const auto& record = segment->GetUpdatesRecord();
+
+    std::promise<void> visiting, resume, collecting;
+    auto resume_signal = resume.get_future();
+    auto reader = std::async(std::launch::async, [&] {
+        record.VisitUpdates(age, 10, [&](int64_t, const UpdateValue& value) {
+            visiting.set_value();
+            resume_signal.wait();
+            EXPECT_EQ(std::get<int64_t>(value), 100);
+        });
+    });
+    visiting.get_future().wait();
+    auto gc = std::async(std::launch::async, [&] {
+        collecting.set_value();
+        return GCUpdates(segment.get(), 20);
+    });
+    collecting.get_future().wait();
+    EXPECT_EQ(gc.wait_for(std::chrono::milliseconds(30)),
+              std::future_status::timeout);
+    resume.set_value();
+    reader.get();
+    EXPECT_EQ(gc.get().error_code, Success);
+    EXPECT_EQ(record.Stats(age).entries, 1);
+    EXPECT_EQ(std::get<int64_t>(*record.Lookup(age, 0, 20)), 200);
 }
 
 TEST(PkUpdateSegment, SealedCApplyReplayAndReadFork) {

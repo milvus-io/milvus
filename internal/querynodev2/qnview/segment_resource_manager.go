@@ -63,10 +63,15 @@ type viewResources struct {
 }
 
 type segmentBinding struct {
-	view        *viewResources
-	resource    *segmentResource
-	partitionID int64
-	manifest    int64
+	// A late binding needs fresh source identity even when another pristine read is cached.
+	verifySource bool
+	// Incompatible reservations retain their immutable source witness even if
+	// the physical instance fails and is retired during metadata acquisition.
+	originalSources []*querypb.SegmentLoadInfo
+	view            *viewResources
+	resource        *segmentResource
+	partitionID     int64
+	manifest        int64
 	// Zero-manifest requirements validate fresh metadata before reusing a read.
 	snapshot     *SegmentLoadInfoSnapshot
 	prepared     *preparedSegmentRead // pinned before catch-up; published after its registration succeeds
@@ -85,6 +90,7 @@ type preparedSegmentRead struct {
 }
 
 type segmentBase struct {
+	retention      qviews.UpdateRetention
 	registrar      TransformSegmentRegistrar
 	coverage       []segments.UpdateField
 	ctx            context.Context
@@ -119,6 +125,7 @@ type segmentResource struct {
 	dirty              bool
 	closing            bool
 	done               chan struct{}
+	preparing          bool // An out-of-lock prepare has selected a physical base.
 	cursor             int
 	// Query handles, metrics sampling and catch-up pin this incarnation until
 	// completion. Only bindings determine whether it can admit new consumers.
@@ -159,6 +166,14 @@ func (m *SegmentResourceManager) Acquire(req AcquireSegments) {
 			b := &segmentBinding{view: v, resource: r, partitionID: partition.GetPartitionId()}
 			if i < len(partition.GetSegmentManifestVersions()) {
 				b.manifest = partition.GetSegmentManifestVersions()[i]
+			}
+			for _, base := range r.bases {
+				if base.retention.Reserved != 0 {
+					b.verifySource = true
+				}
+				if base.retention.Reserved > b.floor() && (b.manifest == 0 || snapshotManifestVersion(base.snapshot) == b.manifest) {
+					b.originalSources = append(b.originalSources, base.snapshot.LoadInfo)
+				}
 			}
 			v.bindings[id] = b
 			r.bindings = append(r.bindings, b)
@@ -350,7 +365,7 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 			r.dirty = true
 			b = nil
 		}
-		if b != nil && (r.snapshot == nil || snapshotManifestVersion(*r.snapshot) < b.manifest || (b.manifest == 0 && b.snapshot == nil)) {
+		if b != nil && (r.snapshot == nil || snapshotManifestVersion(*r.snapshot) < b.manifest || ((b.manifest == 0 || b.verifySource) && b.snapshot == nil)) {
 			m.mu.Unlock()
 			ctx, cancel := mergeTaskContext(schedulerCtx, r.ctx)
 			snapshot, err := m.metadata.GetQueryViewSegmentLoadInfo(ctx, r.collectionID, r.id)
@@ -365,10 +380,9 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 			if err == nil {
 				snapshot.LoadInfo = proto.Clone(snapshot.LoadInfo).(*querypb.SegmentLoadInfo)
 				r.snapshot = &snapshot
-				if b.manifest == 0 {
-					b.snapshot = r.snapshot
-				}
+				b.snapshot = r.snapshot
 				if snapshotManifestVersion(snapshot) < b.manifest {
+					b.snapshot = nil
 					err = merr.WrapErrServiceNotReadyMsg("segment %d manifest is behind required version %d", r.id, b.manifest)
 				}
 			}
@@ -399,11 +413,12 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 			return nil
 		}
 		snapshot := *r.snapshot
-		if b.manifest == 0 {
+		if b.snapshot != nil && (b.manifest == 0 || snapshotManifestVersion(*b.snapshot) >= b.manifest) {
 			snapshot = *b.snapshot
 		}
 		collection := b.view.collection
 		b.view.operationRefs++
+		r.preparing = true
 		m.mu.Unlock()
 		r.retainBaseReads(anchors)
 		for _, read := range obsolete {
@@ -421,14 +436,14 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 		}
 		m.mu.Lock()
 		b.view.operationRefs--
+		r.preparing = false
 		if err != nil {
 			// A missing V2 artifact may have appeared since this attempt.
 			b.snapshot = nil
 			b.backoffLocked()
 		} else {
-			if b.manifest == 0 {
-				result.snapshot = snapshot.LoadInfo
-			}
+			result.snapshot = snapshot.LoadInfo
+			b.originalSources = nil
 			b.resetRetryLocked()
 			b.prepared = result
 			r.reads = append(r.reads, result)
@@ -455,10 +470,11 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 			go m.failView(b.view, b.prepared.base.catchupErr)
 			continue
 		}
-		if b.prepared == nil {
+		if b.prepared == nil && !b.conflictsWithReservedSource() {
 			for _, read := range r.reads {
 				if read.base.catchupErr == nil && readMatchesBinding(read, b) {
 					b.prepared = read
+					b.originalSources = nil
 					b.resetRetryLocked()
 					break
 				}
@@ -485,10 +501,12 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 			}
 			continue
 		}
-		// External manifests may change the row domain. Never replace a required
-		// historical external base with the current one or retry that mismatch forever.
-		if r.snapshot != nil && b.manifest != 0 && typeutil.IsExternalCollection(b.view.collection.Schema()) && snapshotManifestVersion(*r.snapshot) > b.manifest {
-			go m.failView(b.view, merr.WrapErrServiceNotReadyMsg("required external segment %d manifest %d is unavailable in current metadata", r.id, b.manifest))
+		// After native reclamation, a late binding must prove that a fresh
+		// load reconstructs the original requested source. V2 has no
+		// manifest revision, so compare its complete immutable load info.
+		externalMismatch := b.manifest != 0 && r.snapshot != nil && snapshotManifestVersion(*r.snapshot) > b.manifest && typeutil.IsExternalCollection(b.view.collection.Schema())
+		if externalMismatch || b.conflictsWithReservedSource() {
+			go m.failView(b.view, merr.WrapErrServiceNotReadyMsg("required segment %d manifest %d is unavailable in current metadata", r.id, b.manifest))
 			continue
 		}
 		if selected < 0 || b.view.req.Meta.GetControl().GetPreparationPriority() > r.bindings[selected].view.req.Meta.GetControl().GetPreparationPriority() {
@@ -510,15 +528,35 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 	return r.bindings[selected], retryAt
 }
 
+func (b *segmentBinding) conflictsWithReservedSource() bool {
+	if b.snapshot == nil || !b.verifySource {
+		return false
+	}
+	if b.manifest != 0 && snapshotManifestVersion(*b.snapshot) != b.manifest {
+		return true
+	}
+	// A different committed V3 revision is independently addressable.
+	return slices.ContainsFunc(b.originalSources, func(original *querypb.SegmentLoadInfo) bool {
+		return !proto.Equal(original, b.snapshot.LoadInfo)
+	})
+}
+
+func (b *segmentBinding) floor() uint64 {
+	return b.view.req.Meta.GetReadAdmissionFloor().GetTransformingTimetick()
+}
+
 func readMatchesBinding(read *preparedSegmentRead, b *segmentBinding) bool {
-	if read.base.registrar != b.view.buffer.Registrar() {
+	if read.base.retention.Reserved > b.floor() || read.base.registrar != b.view.buffer.Registrar() ||
+		read.schema != b.view.req.Meta.GetSchemaVersion() || read.load != b.view.req.Meta.GetLoadInfoVersion() || read.manifest < b.manifest {
 		return false
 	}
-	if b.manifest == 0 && (b.snapshot == nil || !proto.Equal(read.snapshot, b.snapshot.LoadInfo)) {
+	if (b.manifest == 0 || b.verifySource) && (b.snapshot == nil || !proto.Equal(read.snapshot, b.snapshot.LoadInfo)) {
 		return false
 	}
-	return read.schema == b.view.req.Meta.GetSchemaVersion() && read.load == b.view.req.Meta.GetLoadInfoVersion() &&
-		read.manifest >= b.manifest && (!typeutil.IsExternalCollection(b.view.collection.Schema()) || b.manifest == 0 || read.manifest == b.manifest)
+	if b.verifySource && !proto.Equal(read.base.snapshot.LoadInfo, b.snapshot.LoadInfo) {
+		return false
+	}
+	return b.manifest == 0 || read.manifest == b.manifest || (!b.verifySource && !typeutil.IsExternalCollection(b.view.collection.Schema()))
 }
 
 func (r *segmentResource) validateSnapshot(snapshot SegmentLoadInfoSnapshot) error {
@@ -565,11 +603,16 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 	registrar := b.view.buffer.Registrar()
 	m.mu.Lock()
 	for _, candidate := range r.bases {
-		if candidate.registrar != registrar || candidate.catchupErr != nil || !slices.Equal(candidate.coverage, coverage) {
+		if candidate.retention.Reserved > b.floor() || candidate.registrar != registrar || candidate.catchupErr != nil || !slices.Equal(candidate.coverage, coverage) {
 			continue
 		}
-		sameManifest := info.GetManifestPath() != "" && packed.SameManifestPath(candidate.snapshot.LoadInfo.GetManifestPath(), info.GetManifestPath())
-		if candidate.segment.TransformStartAfterTimeTick() <= info.GetTransformStartAfterTimetick() && (sameManifest || (!typeutil.IsExternalCollection(collection.Schema()) && candidate.snapshot.LoadInfo.GetNumOfRows() == info.GetNumOfRows())) {
+		// Legacy additive reads may share the row domain, but a compacted
+		// record can only be attached to the exact source it compacted.
+		if (b.verifySource || candidate.retention.Reserved > 0) && !proto.Equal(candidate.snapshot.LoadInfo, snapshot.LoadInfo) {
+			continue
+		}
+		if candidate.segment.TransformStartAfterTimeTick() <= info.GetTransformStartAfterTimetick() &&
+			compatibleRowSource(candidate.snapshot.LoadInfo, snapshot.LoadInfo, typeutil.IsExternalCollection(collection.Schema())) {
 			base = candidate
 			break
 		}
@@ -604,6 +647,23 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 		return nil, err
 	}
 	return &preparedSegmentRead{schema: b.view.req.Meta.GetSchemaVersion(), load: b.view.req.Meta.GetLoadInfoVersion(), manifest: snapshotManifestVersion(snapshot), base: base, read: read}, nil
+}
+
+// Additive revisions of a normal sealed manifest preserve its original rows.
+// A different manifest base or a legacy V2 descriptor needs an independent load.
+func compatibleRowSource(base, next *querypb.SegmentLoadInfo, external bool) bool {
+	if base.GetNumOfRows() != next.GetNumOfRows() || base.GetPartitionID() != next.GetPartitionID() || base.GetInsertChannel() != next.GetInsertChannel() {
+		return false
+	}
+	if base.GetManifestPath() == "" || next.GetManifestPath() == "" {
+		return proto.Equal(base, next)
+	}
+	if packed.SameManifestPath(base.GetManifestPath(), next.GetManifestPath()) {
+		return true
+	}
+	oldRoot, oldRev, oldErr := packed.UnmarshalManifestPath(base.GetManifestPath())
+	newRoot, newRev, newErr := packed.UnmarshalManifestPath(next.GetManifestPath())
+	return !external && oldErr == nil && newErr == nil && oldRoot == newRoot && oldRev < newRev
 }
 
 func (r *segmentResource) catchup(base *segmentBase) {

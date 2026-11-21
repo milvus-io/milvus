@@ -5,7 +5,9 @@ import (
 	"errors"
 	"path"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,6 +29,52 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// The second cancellation check in GCUpdates runs after taking the physical
+// pointer mutex and immediately before C. Hold the caller at that boundary
+// so Release starts while a real native operation owns the pointer.
+type gatedGCContext struct {
+	context.Context
+	checks  atomic.Int32
+	entered chan struct{}
+	proceed chan struct{}
+}
+
+func (c *gatedGCContext) Err() error {
+	if c.checks.Add(1) == 2 {
+		close(c.entered)
+		<-c.proceed
+	}
+	return c.Context.Err()
+}
+
+func TestSegmentReleaseJoinsOwnedGC(t *testing.T) {
+	initBoostScoreTestEnv(t)
+	schema := mock_segcore.GenTestCollectionSchema("owned_gc", schemapb.DataType_Int64, true)
+	collection, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{CollectionID: 100, Schema: schema})
+	require.NoError(t, err)
+	defer collection.Release()
+	for _, kind := range []segcore.SegmentType{segcore.SegmentTypeGrowing, segcore.SegmentTypeSealed} {
+		s, err := segcore.CreateCSegment(&segcore.CreateCSegmentRequest{Collection: collection, SegmentID: 101, SegmentType: kind})
+		require.NoError(t, err)
+		op := &gatedGCContext{Context: t.Context(), entered: make(chan struct{}), proceed: make(chan struct{})}
+		collected := make(chan error, 1)
+		go func() { collected <- s.GCUpdates(op, 50) }()
+		<-op.entered
+		started, released := make(chan struct{}), make(chan struct{})
+		go func() { close(started); s.Release(); close(released) }()
+		<-started
+		select {
+		case <-released:
+			t.Fatal("physical release overtook GC")
+		case <-time.After(20 * time.Millisecond):
+		}
+		close(op.proceed)
+		require.NoError(t, <-collected)
+		<-released
+		require.ErrorIs(t, s.GCUpdates(t.Context(), 51), merr.ErrSegmentNotLoaded)
+	}
+}
 
 func TestSegmentGCUpdatesRelease(t *testing.T) {
 	initBoostScoreTestEnv(t)

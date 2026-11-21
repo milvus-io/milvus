@@ -418,3 +418,5 @@ func TestPermanentHistoryGapCrossesRPCAndOnlyRetiresOneBuffer(t *testing.T) {
 	require.NoError(t, valid.WaitTransformVisible(ctx, 31))
 	require.EqualValues(t, 1, attempts.Load())
 }
+
+func (rpcBufferSegment) GCUpdates(context.Context, uint64) error { return nil }

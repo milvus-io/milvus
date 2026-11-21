@@ -180,10 +180,10 @@ func TestNativeHandleRetainsReadSchemaAfterLastView(t *testing.T) {
 	releases := 0
 	mockey.PatchConvey("native handle pins schema, including conversion after withdrawal", t, func() {
 		mockey.Mock((*schemaTestHandle).Release).To(func(*schemaTestHandle) { releases++ }).Build()
-		mockey.Mock((*QueryRuntime).AcquireGrowingSegmentHandles).To(func(*QueryRuntime, context.Context, qviews.DataVersion, []int64) ([]snview.GrowingSegmentHandle, error) {
+		mockey.Mock((*QueryRuntime).AcquireGrowingSegmentHandles).To(func(*QueryRuntime, context.Context, qviews.DataVersion, uint64, []int64) ([]snview.GrowingSegmentHandle, error) {
 			return []snview.GrowingSegmentHandle{&schemaTestHandle{}}, nil
 		}).Build()
-		handles, err := read.AcquireGrowingSegmentHandles(t.Context(), qviews.DataVersion{}, nil)
+		handles, err := read.AcquireGrowingSegmentHandles(t.Context(), qviews.DataVersion{}, 0, nil)
 		require.NoError(t, err)
 		ref.retire()
 		require.ErrorIs(t, ref.release(), nodescheduler.ErrDelay, "View cleanup waits for execution handles")
@@ -196,13 +196,13 @@ func TestNativeHandleRetainsReadSchemaAfterLastView(t *testing.T) {
 		require.NoError(t, ref.release())
 		require.Empty(t, pool.resources)
 		require.Zero(t, read.schema.refs)
-		_, err = read.AcquireGrowingSegmentHandles(t.Context(), qviews.DataVersion{}, nil)
+		_, err = read.AcquireGrowingSegmentHandles(t.Context(), qviews.DataVersion{}, 0, nil)
 		require.ErrorIs(t, err, context.Canceled)
 		require.Equal(t, 1, releases, "retired View rejects acquisition before touching physical resources")
 	})
 	mockey.PatchConvey("physical acquisition error is preserved", t, func() {
 		mockey.Mock((*QueryRuntime).AcquireGrowingSegmentHandles).Return(nil, context.Canceled).Build()
-		_, err := read.AcquireGrowingSegmentHandles(t.Context(), qviews.DataVersion{}, nil)
+		_, err := read.AcquireGrowingSegmentHandles(t.Context(), qviews.DataVersion{}, 0, nil)
 		require.ErrorIs(t, err, context.Canceled)
 	})
 }
@@ -241,7 +241,7 @@ func (m *phaseTwoGrowing) WaitMVCCVisible(context.Context, uint64, uint64) error
 	m.waited = true
 	return nil
 }
-func (m *phaseTwoGrowing) AcquireGrowingSegmentHandles(ctx context.Context, _ qviews.DataVersion, _ []int64) ([]snview.GrowingSegmentHandle, error) {
+func (m *phaseTwoGrowing) AcquireGrowingSegmentHandles(ctx context.Context, _ qviews.DataVersion, _ uint64, _ []int64) ([]snview.GrowingSegmentHandle, error) {
 	m.insideAcquire(ctx)
 	return nil, ctx.Err()
 }

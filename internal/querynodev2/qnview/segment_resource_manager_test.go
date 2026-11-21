@@ -442,13 +442,22 @@ func TestNewPhysicalCoverageRegistersFromFrozenCursor(t *testing.T) {
 			cursors <- segment.TransformStartAfterTimeTick()
 			return instantTransformRegistration{}, nil
 		}).Build()
-		first := f.acquire(1, 1, 1)
+		acquire := func(version int64, schema int32, load uint64) AcquireSegments {
+			req := f.request(version, schema, load)
+			req.Meta.ReadAdmissionFloor.TransformingTimetick = 60
+			f.manager.Acquire(req)
+			return req
+		}
+		first := acquire(1, 1, 1)
 		require.EqualValues(t, 1, <-f.ready)
 		require.EqualValues(t, 50, <-cursors)
-		second := f.acquire(2, 2, 2)
+		held, err := f.manager.AcquireSealedSegmentHandles(t.Context(), first.Key, first.View, 60)
+		require.NoError(t, err)
+		held[0].Release()
+		second := acquire(2, 2, 2)
 		require.EqualValues(t, 2, <-f.ready)
 		require.EqualValues(t, 50, <-cursors)
-		third := f.acquire(3, 3, 3)
+		third := acquire(3, 3, 3)
 		require.EqualValues(t, 3, <-f.ready)
 		require.EqualValues(t, 2, f.loads.Load())
 		require.Empty(t, cursors)

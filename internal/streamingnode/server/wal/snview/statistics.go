@@ -31,7 +31,7 @@ func (h *SNQueryViewHandler) Statistics(ctx context.Context, req *viewpb.Statist
 	if err != nil {
 		return 0, err
 	}
-	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, partitions)
+	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, req.GetMvcc().GetGrowingTimetick(), partitions)
 	if err != nil {
 		return 0, err
 	}

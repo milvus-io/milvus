@@ -16,12 +16,12 @@ func (r *QueryRuntime) WaitMVCCVisible(ctx context.Context, growingTimetick uint
 	return runtime.WaitMVCCVisible(ctx, growingTimetick, transformingTimetick)
 }
 
-func (r *QueryRuntime) AcquireGrowingSegmentHandles(ctx context.Context, dataVersion qviews.DataVersion, partitionIDs []int64) ([]snview.GrowingSegmentHandle, error) {
+func (r *QueryRuntime) AcquireGrowingSegmentHandles(ctx context.Context, dataVersion qviews.DataVersion, growingTS uint64, partitionIDs []int64) ([]snview.GrowingSegmentHandle, error) {
 	runtime, ok := r.growingRuntime()
 	if !ok {
 		return nil, merr.WrapErrServiceInternalMsg("growing runtime module is not available")
 	}
-	return runtime.AcquireGrowingSegmentHandles(ctx, dataVersion, partitionIDs)
+	return runtime.AcquireGrowingSegmentHandles(ctx, dataVersion, growingTS, partitionIDs)
 }
 
 func (r *QueryRuntime) MayHaveVisibleGrowingSegments(dataVersion qviews.DataVersion, growingTimetick uint64, transformingTimetick uint64, partitionIDs []int64) bool {
@@ -34,7 +34,7 @@ func (r *QueryRuntime) MayHaveVisibleGrowingSegments(dataVersion qviews.DataVers
 
 type growingRuntime interface {
 	WaitMVCCVisible(ctx context.Context, growingTimetick uint64, transformingTimetick uint64) error
-	AcquireGrowingSegmentHandles(ctx context.Context, dataVersion qviews.DataVersion, partitionIDs []int64) ([]snview.GrowingSegmentHandle, error)
+	AcquireGrowingSegmentHandles(ctx context.Context, dataVersion qviews.DataVersion, growingTS uint64, partitionIDs []int64) ([]snview.GrowingSegmentHandle, error)
 	MayHaveVisibleGrowingSegments(dataVersion qviews.DataVersion, growingTimetick uint64, transformingTimetick uint64, partitionIDs []int64) bool
 }
 

@@ -25,6 +25,7 @@ type qvSegmentManager interface {
 }
 
 type qvLoadedSegment interface {
+	GCUpdates(context.Context, uint64) error
 	ApplyUpdates(context.Context, uint64, uint32, *messagespb.UpdateMessageBody) error
 	ID() int64
 	Partition() int64

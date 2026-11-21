@@ -956,18 +956,19 @@ func TestLiveApplyFailureRetiresOnlyFailedGeneration(t *testing.T) {
 		captures.Add(1)
 		return walview.VChannelWALView{CollectionID: 1, VChannel: "v1", Schema: schema, BaseGrowingTimeTick: max(10, through.Load()), BaseTransformTimeTick: through.Load(), TransformLogStream: stream, SegmentSnapshot: walview.VisibleSegmentSnapshot{Segments: []walview.VisibleSegment{{SegmentID: 100, PartitionID: 10, Schema: schema, Data: walview.SegmentSnapshotData{InsertMessages: []message.ImmutableMessage{ins}}}}}}, true
 	}
-	acquire := func(version int64) (qviews.QueryViewKey, chan struct{}) {
+	acquire := func(version int64, floor uint64) (qviews.QueryViewKey, chan struct{}) {
 		meta, key := testManagerQueryViewMetaAndKey(version)
+		meta.ReadAdmissionFloor = &viewpb.QueryPlanMVCC{GrowingTimetick: floor}
 		ready, failed := make(chan struct{}), make(chan struct{})
 		manager.AcquireLocked(snview.AcquireResource{Key: key, Meta: meta, OnReady: func() { close(ready) }, OnRuntimeFailed: func() { close(failed) }}, capture)
 		wait(ready)
 		return key, failed
 	}
-	first, failed1 := acquire(1)
-	second, failed2 := acquire(2)
+	first, failed1 := acquire(1, 0)
+	second, failed2 := acquire(2, 0)
 	old, ok := manager.QueryRuntime(first)
 	require.True(t, ok)
-	handles, err := old.AcquireGrowingSegmentHandles(t.Context(), first.QueryViewVersion.DataVersion, nil)
+	handles, err := old.AcquireGrowingSegmentHandles(t.Context(), first.QueryViewVersion.DataVersion, 0, nil)
 	require.NoError(t, err)
 	require.Len(t, handles, 1)
 	defer handles[0].Release()
@@ -986,12 +987,12 @@ func TestLiveApplyFailureRetiresOnlyFailedGeneration(t *testing.T) {
 	require.False(t, ran.Load())
 	_, ok = manager.QueryRuntime(first)
 	require.False(t, ok)
-	third, failed3 := acquire(3)
+	third, failed3 := acquire(3, 40)
 	current, ok := manager.QueryRuntime(third)
 	require.True(t, ok)
 	require.NotSame(t, old, current)
 	require.EqualValues(t, 2, captures.Load())
-	restored, err := current.AcquireGrowingSegmentHandles(t.Context(), third.QueryViewVersion.DataVersion, nil)
+	restored, err := current.AcquireGrowingSegmentHandles(t.Context(), third.QueryViewVersion.DataVersion, 40, nil)
 	require.NoError(t, err)
 	require.Len(t, restored, 1)
 	defer restored[0].Release()
@@ -1014,13 +1015,34 @@ func TestLiveApplyFailureRetiresOnlyFailedGeneration(t *testing.T) {
 	require.Equal(t, []int32{216}, actual)
 	restored[0].Release()
 	handles[0].Release()
+	// The replacement has now excluded G < 40. A late View on this same
+	// DataVersion must fail preparation while the serving View stays usable.
+	meta, late := testManagerQueryViewMetaAndKey(3)
+	late.QueryViewVersion.QueryVersion++
+	meta.Version = late.QueryViewVersion.IntoProto()
+	meta.ReadAdmissionFloor = &viewpb.QueryPlanMVCC{GrowingTimetick: 39}
+	prepared := make(chan bool, 1)
+	manager.AcquireLocked(snview.AcquireResource{
+		Key: late, Meta: meta,
+		OnReady: func() { prepared <- true }, OnUnrecoverable: func() { prepared <- false },
+	}, capture)
+	select {
+	case ready := <-prepared:
+		require.False(t, ready)
+	case <-time.After(3 * time.Second):
+		t.Fatal("late View did not finish preparation")
+	}
+	healthy, err := current.AcquireGrowingSegmentHandles(t.Context(), third.QueryViewVersion.DataVersion, 40, nil)
+	require.NoError(t, err)
+	require.Len(t, healthy, 1)
+	healthy[0].Release()
 	manager.runtimeFailed(old)
 	select {
 	case <-failed3:
 		t.Fatal("obsolete runtime failed replacement")
 	default:
 	}
-	for _, key := range []qviews.QueryViewKey{first, second, third} {
+	for _, key := range []qviews.QueryViewKey{first, second, third, late} {
 		dropped := make(chan struct{})
 		manager.Release(snview.ReleaseResource{Key: key, OnDropped: func() { close(dropped) }})
 		wait(dropped)

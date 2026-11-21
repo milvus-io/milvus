@@ -279,3 +279,5 @@ func (s *fakeQVSegment) ApplyUpdates(_ context.Context, ts uint64, ordinal uint3
 	s.updateTicks = append(s.updateTicks, ts)
 	return s.err
 }
+
+func (*fakeQVSegment) GCUpdates(context.Context, uint64) error { return nil }

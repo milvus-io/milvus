@@ -147,7 +147,23 @@ func (suite *SegmentLoaderSuite) TestMixedMutationFilesRestoreWithoutTail() {
 	require.True(t, valid)
 	require.EqualValues(t, 819, commonValue)
 	wideScope := local.GetCollection().WithLoadScope([]int64{partition}, []int64{0, 1, pk, field, extra})
+	versions := func(s *LocalSegment) uint64 {
+		n, err := segcore.UpdateVersionCountForTest(s.csegment)
+		require.NoError(t, err)
+		return n
+	}
+	before := versions(narrow)
+	require.NoError(t, narrow.GCUpdates(ctx, 20))
+	require.Equal(t, before, versions(narrow))
+	require.NoError(t, narrow.GCUpdates(ctx, 35))
+	require.Less(t, versions(narrow), before)
+	_, valid = read(narrow, 35, field)
+	require.False(t, valid)
+	// A compatible new base reconstructs all times from the original files.
 	wide := newBase(wideScope)
+	restored, valid := read(wide, 20, field)
+	require.True(t, valid)
+	require.EqualValues(t, 334, restored)
 	defer wide.Release(ctx)
 	// Replay from the same persisted base/cursor into the wider registration.
 	require.NoError(t, wide.ApplyUpdates(ctx, 41, 2, body))

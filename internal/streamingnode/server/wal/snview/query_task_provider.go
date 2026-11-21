@@ -57,7 +57,7 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 	if err != nil {
 		return nil, err
 	}
-	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, partitions)
+	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, mvcc.GetGrowingTimetick(), partitions)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +119,7 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 	if err != nil {
 		return nil, err
 	}
-	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, partitions)
+	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, mvcc.GetGrowingTimetick(), partitions)
 	if err != nil {
 		return nil, err
 	}

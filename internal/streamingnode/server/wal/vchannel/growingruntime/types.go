@@ -50,6 +50,9 @@ type Runtime struct {
 	truncateDataVersion      qviews.DataVersion
 	hasTruncateDataVersion   bool
 	closeOnce                sync.Once
+	gcWorkers                sync.WaitGroup
+	viewFloors               qviews.ReadTimestamps
+	reservedGrowing          uint64 // Maximum exclusion of any store in this runtime generation.
 	queryRefs                int
 	appliedGrowingTimeTick   atomic.Uint64
 	appliedTransformTimeTick atomic.Uint64
@@ -177,6 +180,7 @@ func (r *Runtime) Close() {
 		if collection != nil {
 			collection.Release()
 		}
+		r.gcWorkers.Wait()
 	})
 }
 

@@ -3,6 +3,7 @@ package growingruntime
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -12,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -47,6 +49,11 @@ func TestGrowingUpdateRecoveryAndLiveFailure(t *testing.T) {
 	defer stream.Close()
 	r := newRuntime()
 	defer r.Close()
+	retireOld, err := r.BindReadFloor(20)
+	require.NoError(t, err)
+	retireNew, err := r.BindReadFloor(30)
+	require.NoError(t, err)
+	defer retireNew()
 	require.NoError(t, r.Prepare(ctx, walview.VChannelWALView{CollectionID: 1, VChannel: "ch", Schema: schema, BaseGrowingTimeTick: 20, BaseTransformTimeTick: 20, TransformLogStream: stream, SegmentSnapshot: walview.VisibleSegmentSnapshot{Segments: []walview.VisibleSegment{{SegmentID: 100, PartitionID: 10, Schema: schema, Data: walview.SegmentSnapshotData{InsertMessages: []message.ImmutableMessage{insert}}}}}}))
 	native, ok := r.Segment(100)
 	require.True(t, ok)
@@ -73,6 +80,31 @@ func TestGrowingUpdateRecoveryAndLiveFailure(t *testing.T) {
 	require.NoError(t, r.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{Message: update(30, field, 876)}))
 	require.EqualValues(t, 321, read(29))
 	require.EqualValues(t, 876, read(30))
+	acquire := func(ts uint64) func() {
+		handles, err := r.AcquireGrowingSegmentHandles(ctx, qviews.DataVersion{}, ts, nil)
+		require.NoError(t, err)
+		require.Len(t, handles, 1)
+		return handles[0].Release
+	}
+	versions := func() uint64 {
+		n, err := segcore.UpdateVersionCountForTest(native)
+		require.NoError(t, err)
+		return n
+	}
+	// The View still protects an issued plan before its worker acquires a handle.
+	acquire(30)()
+	require.EqualValues(t, 2, versions())
+	oldRead := acquire(20)
+	retireOld()
+	acquire(30)()
+	require.EqualValues(t, 2, versions())
+	require.EqualValues(t, 321, read(20))
+	oldRead()
+	acquire(30)()
+	require.Eventually(t, func() bool { return versions() == 1 }, 3*time.Second, time.Millisecond)
+	require.EqualValues(t, 876, read(30))
+	_, err = r.BindReadFloor(29)
+	require.Error(t, err)
 	require.Error(t, r.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{Message: update(40, -100, 2)}))
 	require.Error(t, r.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{Message: update(50, field, 999)}))
 	require.EqualValues(t, 30, r.AppliedTransformTimeTick())

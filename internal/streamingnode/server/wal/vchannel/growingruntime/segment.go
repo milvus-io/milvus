@@ -26,6 +26,8 @@ import (
 // growingSegment wraps the queryable segcore state and lifecycle metadata for
 // one growing segment.
 type growingSegment struct {
+	// Protected by the owning Runtime.mu.
+	retention              qviews.UpdateRetention
 	mu                     sync.Mutex
 	collection             *segcore.CCollection
 	encodingSchema         *schemapb.CollectionSchema
