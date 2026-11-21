@@ -43,8 +43,7 @@ def check(f, path):
         assert result["data"]["state"] == "Failed" and "typed" in str(result["data"]).lower()
         indexes = f.client.prepare_index_params()
         indexes.add_index("vec", index_type="FLAT", metric_type="L2")
-        f.client.create_index(f.candidate, indexes, timeout=90)
-        f.client.load_collection(f.candidate, timeout=90)
+        f.index_and_load(f.candidate, indexes)
         rows = f.client.query(
             f.candidate, filter="id >= 0", output_fields=["id"], consistency_level="Strong", timeout=30
         )

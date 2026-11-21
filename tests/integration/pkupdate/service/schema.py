@@ -25,7 +25,8 @@ def run(f):
     idx = c.prepare_index_params()
     idx.add_index("vec", index_type="FLAT", metric_type="L2")
     idx.add_index("sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
-    c.create_collection(name, schema=s, index_params=idx, num_shards=1, timeout=90)
+    c.create_collection(name, schema=s, num_shards=1, timeout=90)
+    f.index_and_load(name, idx)
     c.insert(name, [{"id": 1, "vec": [1.0, 0.0], "flag": False, "arr": [0], "text": "hello", "extra": 1}], timeout=30)
 
     def update(flag, arr):

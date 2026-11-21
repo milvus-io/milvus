@@ -11,6 +11,9 @@ from pathlib import Path
 
 from cluster_site import ROLES
 from pymilvus import DataType, MilvusClient
+from pymilvus.client.prepare import Prepare
+from pymilvus.client.utils import check_status
+from pymilvus.grpc_gen import common_pb2, milvus_pb2
 
 
 def literal(field, value):
@@ -20,6 +23,33 @@ def literal(field, value):
         kind = "stringData" if isinstance(value, str) else "longData"
         data = {"scalarValue": {kind: value}}
     return {"fieldName": field, "literal": data}
+
+
+def create_indexes(stub, name, indexes, timeout=90):
+    """Use the public wire API so the timestamp allocation shares the build deadline."""
+    deadline = time.monotonic() + timeout
+
+    def remaining():
+        seconds = deadline - time.monotonic()
+        if seconds <= 0:
+            raise TimeoutError(f"Index build deadline expired for {name}")
+        return seconds
+
+    for idx in indexes:
+        create = Prepare.create_index_request(name, idx.field_name, idx.get_index_configs(), index_name=idx.index_name)
+        check_status(stub.CreateIndex(create, timeout=remaining()))
+        snap = stub.AllocTimestamp(milvus_pb2.AllocTimestampRequest(), timeout=remaining())
+        check_status(snap.status)
+        describe = Prepare.describe_index_request(name, idx.index_name, timestamp=snap.timestamp)
+        while True:
+            response = stub.DescribeIndex(describe, timeout=remaining())
+            check_status(response.status)
+            state = next(x for x in response.index_descriptions if x.field_name == idx.field_name)
+            if state.state == common_pb2.Finished:
+                break
+            if state.state == common_pb2.Failed:
+                raise RuntimeError(f"Index build failed on {name}.{idx.field_name}: {state.index_state_fail_reason}")
+            time.sleep(min(0.5, remaining()))
 
 
 class Fixture:
@@ -76,9 +106,13 @@ class Fixture:
         indexes = self.client.prepare_index_params()
         indexes.add_index("vec", index_type="FLAT", metric_type="L2")
         indexes.add_index("score", index_type="STL_SORT")
-        self.client.create_collection(
-            name, schema=schema, index_params=indexes, num_shards=shards, consistency_level="Strong", timeout=90
-        )
+        self.client.create_collection(name, schema=schema, num_shards=shards, consistency_level="Strong", timeout=90)
+
+        self.index_and_load(name, indexes)
+
+    def index_and_load(self, name, indexes):
+        create_indexes(self.client._get_connection()._stub, name, indexes)
+        self.client.load_collection(name, timeout=90)
 
     def query(self, name, expr):
         rows = self.client.query(

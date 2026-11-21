@@ -6,14 +6,20 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+from concurrent import futures
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import grpc
+from acceptance import create_indexes
 from cluster_site import ROLES
 from history import check_history, serving_generation
 from metadata import capture
+from pymilvus import MilvusClient
+from pymilvus.grpc_gen import common_pb2, milvus_pb2_grpc
 from recovery import replace
 
 
@@ -194,6 +200,41 @@ class Checks(unittest.TestCase):
             self.assertIn("requires Python assertion checks", r.stderr)
             self.assertFalse(site.exists())
 
+    def test_index_timestamp_rpc_deadline(self):
+        budgets = []
+
+        class NoTimestampReply(milvus_pb2_grpc.MilvusServiceServicer):
+            def CreateIndex(self, request, context):
+                budgets.append(context.time_remaining())
+                return common_pb2.Status()
+
+            def AllocTimestamp(self, request, context):
+                budgets.append(context.time_remaining())
+                cancelled = threading.Event()
+                context.add_callback(cancelled.set)
+                # Bound the test even if the caller regresses to no deadline.
+                if not cancelled.wait(3):
+                    context.abort(grpc.StatusCode.INTERNAL, "client never cancelled")
+                context.abort(grpc.StatusCode.CANCELLED, "observed client cancellation")
+
+        with futures.ThreadPoolExecutor(max_workers=2) as executor:
+            server = grpc.server(executor)
+            milvus_pb2_grpc.add_MilvusServiceServicer_to_server(NoTimestampReply(), server)
+            port = server.add_insecure_port("127.0.0.1:0")
+            server.start()
+            try:
+                with grpc.insecure_channel(f"127.0.0.1:{port}") as channel:
+                    grpc.channel_ready_future(channel).result(timeout=3)
+                    indexes = MilvusClient.prepare_index_params()
+                    indexes.add_index("vec", index_type="FLAT", metric_type="L2")
+                    with self.assertRaises(grpc.RpcError) as failure:
+                        create_indexes(milvus_pb2_grpc.MilvusServiceStub(channel), "probe", indexes, timeout=0.5)
+                    self.assertEqual(failure.exception.code(), grpc.StatusCode.DEADLINE_EXCEEDED)
+                    self.assertEqual(len(budgets), 2)
+                    self.assertTrue(all(0 < value <= 0.51 for value in budgets), budgets)
+            finally:
+                server.stop(0).wait(timeout=3)
+
     def test_inspector_deadline_preserves_log(self):
         with tempfile.TemporaryDirectory() as d:
             site = Path(d)
@@ -203,12 +244,10 @@ class Checks(unittest.TestCase):
                 )
             )
             helper = site / "inspect"
-            helper.write_text(
-                f"#!{sys.executable}\nimport time\nprint('inspector started',flush=True)\ntime.sleep(20)\n"
-            )
+            helper.write_text("#!/bin/sh\necho inspector started\nexec sleep 20\n")
             helper.chmod(0o700)
             with self.assertRaises(subprocess.TimeoutExpired):
-                capture(site, "hung", timeout=1)
+                capture(site, "hung", timeout=2)
             self.assertIn("inspector started", (site / "hung.log").read_text())
 
 
