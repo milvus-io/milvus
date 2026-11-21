@@ -31,8 +31,8 @@ namespace exec {
  * @brief Physical operator for Query ORDER BY operations
  *
  * This is a BLOCKING operator that:
- * 1. Accumulates all input rows (AddInput phase)
- * 2. Sorts them by specified keys when no more input (NoMoreInput)
+ * 1. Consumes all input rows, retaining bounded TopK candidates when limited
+ * 2. Sorts the retained candidates when no more input (NoMoreInput)
  * 3. Returns sorted results in batches (GetOutput phase)
  *
  * Pipeline position:

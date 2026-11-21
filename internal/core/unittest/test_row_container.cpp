@@ -17,6 +17,7 @@
 
 #include "common/Types.h"
 #include "common/Vector.h"
+#include "exec/operator/query-agg/MinAggregateBase.h"
 #include "exec/operator/query-agg/RowContainer.h"
 
 using namespace milvus;
@@ -133,4 +134,12 @@ TEST_F(RowContainerTest, ExtractColumnVectorCopiesStringValues) {
     EXPECT_EQ(output->ValueAt<std::string>(0), "alpha");
     EXPECT_EQ(output->ValueAt<std::string>(1), "beta");
     EXPECT_EQ(output->ValueAt<std::string>(2), "gamma");
+}
+
+TEST_F(RowContainerTest, ResetRowRejectsAccumulatorState) {
+    MinStringAggregate aggregate(DataType::VARCHAR);
+    RowContainer rows({DataType::INT64}, {Accumulator(&aggregate)});
+    auto row = rows.newRow();
+
+    EXPECT_THROW(rows.resetRow(row), SegcoreError);
 }
