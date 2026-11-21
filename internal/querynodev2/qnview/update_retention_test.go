@@ -170,3 +170,114 @@ func TestSealedLateFloorRejectsChangedOriginalBase(t *testing.T) {
 		f.drop(t, current)
 	})
 }
+
+type observedRetentionRegistration struct {
+	instantTransformRegistration
+	fail chan func(error)
+}
+
+func (r observedRetentionRegistration) OnFailure(callback func(error)) { r.fail <- callback }
+
+func TestSealedLateFloorRejectsChangedAdditiveManifest(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		retireRead bool
+		retireBase bool
+	}{
+		{name: "active"},
+		{name: "retired_read", retireRead: true},
+		{name: "retired_base", retireBase: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mockey.PatchConvey("a shared physical base retains the source of additive reads", t, func() {
+				f := setupResourceTest(t, nil)
+				defer f.manager.Close()
+				registered := make(chan func(error), 1)
+				if tc.retireBase {
+					f.registerMock.Return(observedRetentionRegistration{fail: registered}, nil)
+				}
+				prepare := func(version, manifest int64) AcquireSegments {
+					f.manifest.Store(manifest)
+					req := f.request(version, 1, 1)
+					req.View.Partitions[0].SegmentManifestVersions[0] = manifest
+					req.Meta.ReadAdmissionFloor.TransformingTimetick = 60
+					f.manager.Acquire(req)
+					f.await(t, 1)
+					return req
+				}
+				first := prepare(1, 1)
+				second := prepare(2, 2)
+				require.EqualValues(t, 1, f.loads.Load(), "A/2 must fork the A/1 base")
+				require.EqualValues(t, 2, f.prepares.Load())
+				hs, err := f.manager.AcquireSealedSegmentHandles(t.Context(), second.Key, second.View, 70)
+				require.NoError(t, err)
+				owner := hs[0].(*resourceSegmentHandle).base
+				hs[0].Release()
+				healthy := second
+				if tc.retireRead {
+					f.drop(t, second)
+					healthy = first
+					require.Eventually(t, func() bool {
+						f.manager.mu.Lock()
+						defer f.manager.mu.Unlock()
+						reads := f.manager.resources[1000].reads
+						return len(reads) == 1 && reads[0].manifest == 1
+					}, time.Second, time.Millisecond)
+				}
+				f.getMock.To(func(_ *resourceTestMetadata, _ context.Context, collection, id int64) (SegmentLoadInfoSnapshot, error) {
+					snapshot := resourceSnapshot(collection, id, 2)
+					snapshot.LoadInfo.ManifestPath = packed.MarshalManifestPath("replacement", 2)
+					return snapshot, nil
+				})
+				late := f.request(3, 1, 1)
+				late.View.Partitions[0].SegmentManifestVersions[0] = 2
+				late.Meta.ReadAdmissionFloor.TransformingTimetick = 30
+				ready := make(chan bool, 1)
+				late.OnReady = func(map[int64][]int64) { ready <- true }
+				late.OnUnrecoverable = func() { ready <- false }
+				resume := make(chan struct{})
+				if tc.retireBase {
+					f.dependencyMock.To(func(_ *fakeQueryViewCollectionRuntimeManager, ctx context.Context, _ *qviews.QueryViewAtQueryNode) (CollectionRuntimeGuard, bool, error) {
+						select {
+						case <-resume:
+							return &fakeCollectionRuntimeGuard{}, false, nil
+						case <-ctx.Done():
+							return nil, false, ctx.Err()
+						}
+					})
+				}
+				f.manager.Acquire(late)
+				if tc.retireBase {
+					// An outstanding binding survives physical retirement while its
+					// dependency fetch blocks. Its frozen source must survive too.
+					select {
+					case fail := <-registered:
+						fail(merr.WrapErrServiceInternalMsg("retiring transform generation"))
+					case <-time.After(3 * time.Second):
+						t.Fatal("missing transform registration failure callback")
+					}
+					f.drop(t, first)
+					f.drop(t, second)
+					require.Eventually(t, func() bool { return f.releases.Load() == 1 }, time.Second, time.Millisecond)
+					close(resume)
+				}
+				select {
+				case got := <-ready:
+					require.False(t, got, "a late View must not serve B/2 in place of A/2")
+				case <-time.After(3 * time.Second):
+					t.Fatal("late View did not finish preparation")
+				}
+				require.EqualValues(t, 1, f.loads.Load(), "B/2 must never reach physical load")
+				_, err = f.manager.AcquireSealedSegmentHandles(t.Context(), late.Key, late.View, 40)
+				require.Error(t, err)
+				if tc.retireBase {
+					return
+				}
+				hs, err = f.manager.AcquireSealedSegmentHandles(t.Context(), healthy.Key, healthy.View, 70)
+				require.NoError(t, err)
+				require.Same(t, owner, hs[0].(*resourceSegmentHandle).base)
+				hs[0].Release()
+			})
+		})
+	}
+}

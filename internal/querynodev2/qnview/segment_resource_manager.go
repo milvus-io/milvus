@@ -90,19 +90,22 @@ type preparedSegmentRead struct {
 }
 
 type segmentBase struct {
-	retention      qviews.UpdateRetention
-	registrar      TransformSegmentRegistrar
-	coverage       []segments.UpdateField
-	ctx            context.Context
-	cancel         context.CancelFunc
-	anchor         *preparedSegmentRead
-	operationRefs  int // Query handles and metrics pins that prevent base pruning.
-	segment        TransformSegment
-	snapshot       SegmentLoadInfoSnapshot
-	registration   TransformRegistration
-	caughtUp       bool
-	catchupRunning bool
-	catchupErr     error
+	// Frozen source for each revision served by this physical update record.
+	// A present nil marks a revision served by conflicting descriptors.
+	manifestSources map[int64]*querypb.SegmentLoadInfo
+	retention       qviews.UpdateRetention
+	registrar       TransformSegmentRegistrar
+	coverage        []segments.UpdateField
+	ctx             context.Context
+	cancel          context.CancelFunc
+	anchor          *preparedSegmentRead
+	operationRefs   int // Query handles and metrics pins that prevent base pruning.
+	segment         TransformSegment
+	snapshot        SegmentLoadInfoSnapshot
+	registration    TransformRegistration
+	caughtUp        bool
+	catchupRunning  bool
+	catchupErr      error
 }
 
 // A resource remains in the registry through Closing. Bindings arriving during
@@ -171,8 +174,16 @@ func (m *SegmentResourceManager) Acquire(req AcquireSegments) {
 				if base.retention.Reserved != 0 {
 					b.verifySource = true
 				}
-				if base.retention.Reserved > b.floor() && (b.manifest == 0 || snapshotManifestVersion(base.snapshot) == b.manifest) {
+				if base.retention.Reserved <= b.floor() {
+					continue
+				}
+				// The initial base exists even if preparing its first read failed.
+				// A legacy binding carries no independent source revision.
+				if b.manifest == 0 || b.manifest == snapshotManifestVersion(base.snapshot) {
 					b.originalSources = append(b.originalSources, base.snapshot.LoadInfo)
+				}
+				if source, served := base.manifestSources[b.manifest]; served {
+					b.originalSources = append(b.originalSources, source)
 				}
 			}
 			v.bindings[id] = b
@@ -443,9 +454,7 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 			b.backoffLocked()
 		} else {
 			result.snapshot = snapshot.LoadInfo
-			b.originalSources = nil
-			b.resetRetryLocked()
-			b.prepared = result
+			b.bindReadLocked(result)
 			r.reads = append(r.reads, result)
 		}
 		prepared = true
@@ -473,9 +482,7 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 		if b.prepared == nil && !b.conflictsWithReservedSource() {
 			for _, read := range r.reads {
 				if read.base.catchupErr == nil && readMatchesBinding(read, b) {
-					b.prepared = read
-					b.originalSources = nil
-					b.resetRetryLocked()
+					b.bindReadLocked(read)
 					break
 				}
 			}
@@ -526,6 +533,28 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 	}
 	r.cursor = (selected + 1) % len(r.bindings)
 	return r.bindings[selected], retryAt
+}
+
+// Record the source on the physical base before publishing its read. The
+// additive read fork can retire while this base still owns a GC reservation.
+func (b *segmentBinding) bindReadLocked(read *preparedSegmentRead) {
+	base := read.base
+	if base.manifestSources == nil {
+		base.manifestSources = make(map[int64]*querypb.SegmentLoadInfo)
+	}
+	for _, revision := range []int64{read.manifest, b.manifest} {
+		source, served := base.manifestSources[revision]
+		if !served {
+			base.manifestSources[revision] = read.snapshot
+		} else if source != nil && source != read.snapshot && !proto.Equal(source, read.snapshot) {
+			// An older request can be served by a newer additive read. Fail
+			// closed if its revision alone cannot identify an original source.
+			base.manifestSources[revision] = nil
+		}
+	}
+	b.prepared = read
+	b.originalSources = nil
+	b.resetRetryLocked()
 }
 
 func (b *segmentBinding) conflictsWithReservedSource() bool {
