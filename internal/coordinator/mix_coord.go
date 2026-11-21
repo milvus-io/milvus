@@ -547,6 +547,7 @@ func (s *mixCoordImpl) initStreamingCoord() {
 		WithMetaKV(s.metaKVCreator()).
 		WithSession(s.session).
 		WithMixCoordClient(fMixcoord).
+		WithNodeLostCallback(s.queryCoordServer.OnStreamingNodeLost).
 		Build()
 }
 

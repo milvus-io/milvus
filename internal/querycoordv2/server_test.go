@@ -22,6 +22,8 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1286,5 +1288,212 @@ func TestCheckReplicasServiceable(t *testing.T) {
 
 		errs := s.CheckReplicasServiceable(context.Background(), collectionID)
 		assert.Empty(t, errs)
+	})
+}
+
+func TestOnStreamingNodeLost(t *testing.T) {
+	t.Run("evicts embedded querynode and cleans up heartbeat metric, delayed SessionDelEvent is no-op", func(t *testing.T) {
+		ctx := context.Background()
+		nodeID := int64(2001)
+		registry := prometheus.NewRegistry()
+		metrics.RegisterQueryCoord(registry)
+		metrics.QueryCoordLastHeartbeatTimeStamp.WithLabelValues(fmt.Sprint(nodeID)).Set(1640995200.0)
+
+		nodeMgr := session.NewNodeManager()
+		nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   nodeID,
+			Address:  "10.0.0.1:21123",
+			Hostname: "sn-1",
+			Labels: map[string]string{
+				sessionutil.LabelStreamingNodeEmbeddedQueryNode: "1",
+			},
+		}))
+
+		s := &Server{
+			ctx:                 ctx,
+			nodeMgr:             nodeMgr,
+			metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
+			qviewsRuntime:       &qviewsRuntime{},
+			meta: &meta.Meta{
+				ResourceManager: meta.NewResourceManager(nil, nil),
+			},
+		}
+
+		var downCount atomic.Int32
+		mockRMDown := mockey.Mock((*meta.ResourceManager).HandleNodeDown).To(func(_ *meta.ResourceManager, _ context.Context, id int64) {
+			assert.Equal(t, nodeID, id)
+			downCount.Add(1)
+		}).Build()
+		defer mockRMDown.UnPatch()
+
+		s.OnStreamingNodeLost(ctx, nodeID)
+
+		assert.Nil(t, s.nodeMgr.Get(nodeID))
+		assert.Equal(t, int32(1), downCount.Load())
+
+		// Heartbeat metric must be cleaned up.
+		metricFamilies, err := registry.Gather()
+		assert.NoError(t, err)
+		found := false
+		for _, mf := range metricFamilies {
+			if mf.GetName() == "milvus_querycoord_last_heartbeat_timestamp" {
+				for _, m := range mf.GetMetric() {
+					for _, label := range m.GetLabel() {
+						if label.GetName() == "node_id" && label.GetValue() == fmt.Sprint(nodeID) {
+							found = true
+						}
+					}
+				}
+			}
+		}
+		assert.False(t, found, "heartbeat metric should be cleaned up")
+
+		// Delayed etcd SessionDelEvent must be an idempotent no-op.
+		s.handleSessionEvent(&sessionutil.SessionEvent{
+			EventType: sessionutil.SessionDelEvent,
+			Session: &sessionutil.Session{
+				SessionRaw: sessionutil.SessionRaw{
+					ServerID: nodeID,
+					Address:  "10.0.0.1:21123",
+				},
+			},
+		})
+		assert.Equal(t, int32(1), downCount.Load(), "delayed SessionDelEvent must not re-run handleNodeDown")
+	})
+
+	t.Run("evicts legacy embedded querynode label", func(t *testing.T) {
+		ctx := context.Background()
+		nodeID := int64(2002)
+		nodeMgr := session.NewNodeManager()
+		nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:  nodeID,
+			Address: "10.0.0.2:21123",
+			Labels: map[string]string{
+				sessionutil.LegacyLabelStreamingNodeEmbeddedQueryNode: "1",
+			},
+		}))
+
+		s := &Server{
+			ctx:                 ctx,
+			nodeMgr:             nodeMgr,
+			metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
+			qviewsRuntime:       &qviewsRuntime{},
+			meta: &meta.Meta{
+				ResourceManager: meta.NewResourceManager(nil, nil),
+			},
+		}
+
+		var downCount atomic.Int32
+		mockRMDown := mockey.Mock((*meta.ResourceManager).HandleNodeDown).To(func(_ *meta.ResourceManager, _ context.Context, id int64) {
+			downCount.Add(1)
+		}).Build()
+		defer mockRMDown.UnPatch()
+
+		s.OnStreamingNodeLost(ctx, nodeID)
+		assert.Nil(t, s.nodeMgr.Get(nodeID))
+		assert.Equal(t, int32(1), downCount.Load())
+	})
+
+	t.Run("ignores standalone external querynode", func(t *testing.T) {
+		ctx := context.Background()
+		nodeID := int64(2003)
+		nodeMgr := session.NewNodeManager()
+		nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:  nodeID,
+			Address: "10.0.0.3:21123",
+			Labels:  map[string]string{},
+		}))
+
+		s := &Server{
+			ctx:     ctx,
+			nodeMgr: nodeMgr,
+		}
+		var downCount atomic.Int32
+		mockDown := mockey.Mock((*Server).handleNodeDown).To(func(_ *Server, _ int64) {
+			downCount.Add(1)
+		}).Build()
+		defer mockDown.UnPatch()
+
+		s.OnStreamingNodeLost(ctx, nodeID)
+		assert.NotNil(t, s.nodeMgr.Get(nodeID), "standalone querynode must not be evicted")
+		assert.Equal(t, int32(0), downCount.Load())
+	})
+
+	t.Run("guards missing node, nil nodeMgr, and stopped server", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		var downCount atomic.Int32
+		mockDown := mockey.Mock((*Server).handleNodeDown).To(func(_ *Server, _ int64) {
+			downCount.Add(1)
+		}).Build()
+		defer mockDown.UnPatch()
+
+		// Nil nodeMgr (before Init)
+		uninitServer := &Server{ctx: ctx}
+		uninitServer.OnStreamingNodeLost(ctx, 2004)
+		assert.Equal(t, int32(0), downCount.Load())
+
+		// Missing node
+		s := &Server{ctx: ctx, nodeMgr: session.NewNodeManager()}
+		s.OnStreamingNodeLost(ctx, 2004)
+		assert.Equal(t, int32(0), downCount.Load())
+
+		// Stopped server
+		s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:  2004,
+			Address: "10.0.0.4:21123",
+			Labels: map[string]string{
+				sessionutil.LabelStreamingNodeEmbeddedQueryNode: "1",
+			},
+		}))
+		cancel()
+		s.OnStreamingNodeLost(context.Background(), 2004)
+		assert.NotNil(t, s.nodeMgr.Get(2004))
+		assert.Equal(t, int32(0), downCount.Load())
+	})
+
+	t.Run("concurrent OnStreamingNodeLost and SessionDelEvent invokes handleNodeDown once", func(t *testing.T) {
+		ctx := context.Background()
+		nodeID := int64(2005)
+		nodeMgr := session.NewNodeManager()
+		nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:  nodeID,
+			Address: "10.0.0.5:21123",
+			Labels: map[string]string{
+				sessionutil.LabelStreamingNodeEmbeddedQueryNode: "1",
+			},
+		}))
+
+		s := &Server{
+			ctx:     ctx,
+			nodeMgr: nodeMgr,
+		}
+		var downCount atomic.Int32
+		mockDown := mockey.Mock((*Server).handleNodeDown).To(func(_ *Server, _ int64) {
+			downCount.Add(1)
+		}).Build()
+		defer mockDown.UnPatch()
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			s.OnStreamingNodeLost(ctx, nodeID)
+		}()
+		go func() {
+			defer wg.Done()
+			s.handleSessionEvent(&sessionutil.SessionEvent{
+				EventType: sessionutil.SessionDelEvent,
+				Session: &sessionutil.Session{
+					SessionRaw: sessionutil.SessionRaw{
+						ServerID: nodeID,
+						Address:  "10.0.0.5:21123",
+					},
+				},
+			})
+		}()
+		wg.Wait()
+
+		assert.Nil(t, s.nodeMgr.Get(nodeID))
+		assert.Equal(t, int32(1), downCount.Load())
 	})
 }

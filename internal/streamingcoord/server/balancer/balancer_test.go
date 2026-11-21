@@ -1118,3 +1118,267 @@ func TestBalancer_NoGracePeriodWhenDisabled(t *testing.T) {
 	// Grace 0 disables the wait, the helper fails at its 10s assign timeout if the balancer keeps waiting.
 	reassignFromLostNode(t, types.ErrNotAlive, "0")
 }
+
+func TestBalancer_OnNodeLostCallback_AfterGracePeriodAndCommit(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().StreamingCfg.WALBalancerNodeLostGracePeriod.SwapTempValue("200ms")
+	defer paramtable.Get().StreamingCfg.WALBalancerNodeLostGracePeriod.SwapTempValue("")
+	etcdClient, _ := kvfactory.GetEtcdAndPath()
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+
+	var mu sync.Mutex
+	var removedAt, assignedAt, notifiedAt time.Time
+	var notifiedIDs []int64
+	notifiedCh := make(chan struct{}, 4)
+
+	streamingNodeManager := mock_manager.NewMockManagerClient(t)
+	streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(make(chan struct{}), nil)
+	streamingNodeManager.EXPECT().Remove(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, assignment types.PChannelInfoAssigned) error {
+			mu.Lock()
+			if removedAt.IsZero() {
+				removedAt = time.Now()
+			}
+			mu.Unlock()
+			return types.ErrNotAlive
+		})
+	streamingNodeManager.EXPECT().Assign(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, assignment types.PChannelInfoAssigned) error {
+			assert.Equal(t, int64(1), assignment.Node.ServerID)
+			mu.Lock()
+			if assignedAt.IsZero() {
+				assignedAt = time.Now()
+			}
+			mu.Unlock()
+			return nil
+		})
+	streamingNodeManager.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{
+		1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}},
+	}, nil).Maybe()
+	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything, mock.Anything).Return(map[int64]*types.StreamingNodeStatus{
+		1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}},
+	}, nil).Maybe()
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1)).Maybe()
+	resource.InitForTest(
+		resource.OptETCD(etcdClient),
+		resource.OptStreamingCatalog(catalog),
+		resource.OptStreamingManagerClient(streamingNodeManager),
+		resource.OptSession(s),
+	)
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().SaveCChannel(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().ListPChannel(mock.Anything).RunAndReturn(func(ctx context.Context) ([]*streamingpb.PChannelMeta, error) {
+		return []*streamingpb.PChannelMeta{
+			{
+				Channel: &streamingpb.PChannelInfo{
+					Name:       "test-channel-1",
+					Term:       1,
+					AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READWRITE,
+				},
+				State: streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED,
+				Node:  &streamingpb.StreamingNodeInfo{ServerId: 3},
+			},
+			{
+				Channel: &streamingpb.PChannelInfo{
+					Name:       "test-channel-2",
+					Term:       1,
+					AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READWRITE,
+				},
+				State: streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED,
+				Node:  &streamingpb.StreamingNodeInfo{ServerId: 3},
+			},
+		}, nil
+	})
+	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil).Maybe()
+
+	ctx := context.Background()
+	b, err := balancer.RecoverBalancer(
+		ctx,
+		newStaticChannelProvider("test-channel-1", "test-channel-2"),
+		balancer.WithNodeLostCallback(func(ctx context.Context, serverID int64) {
+			mu.Lock()
+			notifiedIDs = append(notifiedIDs, serverID)
+			if notifiedAt.IsZero() {
+				notifiedAt = time.Now()
+			}
+			mu.Unlock()
+			notifiedCh <- struct{}{}
+		}),
+	)
+	require.NoError(t, err)
+	defer b.Close()
+
+	require.NoError(t, b.Trigger(ctx))
+	select {
+	case <-notifiedCh:
+	case <-time.After(10 * time.Second):
+		t.Fatal("expected node lost callback for server 3")
+	}
+
+	// Wait for the balance round to settle by issuing another Trigger and ensure deduplication.
+	require.NoError(t, b.Trigger(ctx))
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []int64{3}, notifiedIDs, "lost node should be notified once even when multiple pchannels are evicted")
+	assert.GreaterOrEqual(t, notifiedAt.Sub(removedAt), 200*time.Millisecond, "callback must fire only after grace period")
+	assert.False(t, notifiedAt.Before(assignedAt), "callback must fire after Assign succeeds")
+}
+
+func TestBalancer_OnNodeLostCallback_NotFiredOnLiveRemoveOrAssignFailure(t *testing.T) {
+	t.Run("normal remove does not notify", func(t *testing.T) {
+		paramtable.Init()
+		paramtable.Get().StreamingCfg.WALBalancerNodeLostGracePeriod.SwapTempValue("0")
+		defer paramtable.Get().StreamingCfg.WALBalancerNodeLostGracePeriod.SwapTempValue("")
+		etcdClient, _ := kvfactory.GetEtcdAndPath()
+		channel.ResetStaticPChannelStatsManager()
+		channel.RecoverPChannelStatsManager([]string{})
+
+		assigned := make(chan struct{})
+		var assignOnce sync.Once
+		var notified atomic.Int32
+
+		streamingNodeManager := mock_manager.NewMockManagerClient(t)
+		streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(make(chan struct{}), nil)
+		streamingNodeManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
+		streamingNodeManager.EXPECT().Assign(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, assignment types.PChannelInfoAssigned) error {
+				assignOnce.Do(func() { close(assigned) })
+				return nil
+			})
+		streamingNodeManager.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{
+			1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}},
+		}, nil).Maybe()
+		streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything, mock.Anything).Return(map[int64]*types.StreamingNodeStatus{
+			1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}},
+		}, nil).Maybe()
+
+		catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+		s := sessionutil.NewMockSession(t)
+		s.EXPECT().GetRegisteredRevision().Return(int64(1)).Maybe()
+		resource.InitForTest(
+			resource.OptETCD(etcdClient),
+			resource.OptStreamingCatalog(catalog),
+			resource.OptStreamingManagerClient(streamingNodeManager),
+			resource.OptSession(s),
+		)
+		catalog.EXPECT().GetCChannel(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().SaveCChannel(mock.Anything, mock.Anything).Return(nil).Maybe()
+		catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil).Maybe()
+		catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
+			{
+				Channel: &streamingpb.PChannelInfo{
+					Name:       "test-channel-1",
+					Term:       1,
+					AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READWRITE,
+				},
+				State: streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED,
+				Node:  &streamingpb.StreamingNodeInfo{ServerId: 3},
+			},
+		}, nil)
+		catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil).Maybe()
+		catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil).Maybe()
+
+		ctx := context.Background()
+		b, err := balancer.RecoverBalancer(
+			ctx,
+			newStaticChannelProvider("test-channel-1"),
+			balancer.WithNodeLostCallback(func(ctx context.Context, serverID int64) {
+				notified.Inc()
+			}),
+		)
+		require.NoError(t, err)
+		defer b.Close()
+
+		require.NoError(t, b.Trigger(ctx))
+		select {
+		case <-assigned:
+		case <-time.After(10 * time.Second):
+			t.Fatal("test-channel-1 was not assigned")
+		}
+		require.NoError(t, b.Trigger(ctx))
+		assert.Equal(t, int32(0), notified.Load(), "callback must not fire when Remove succeeds on a live node")
+	})
+
+	t.Run("transient remove or assign failure does not notify before commit", func(t *testing.T) {
+		paramtable.Init()
+		paramtable.Get().StreamingCfg.WALBalancerNodeLostGracePeriod.SwapTempValue("0")
+		defer paramtable.Get().StreamingCfg.WALBalancerNodeLostGracePeriod.SwapTempValue("")
+		etcdClient, _ := kvfactory.GetEtcdAndPath()
+		channel.ResetStaticPChannelStatsManager()
+		channel.RecoverPChannelStatsManager([]string{})
+
+		assignAttempted := make(chan struct{})
+		var attemptOnce sync.Once
+		var notified atomic.Int32
+
+		streamingNodeManager := mock_manager.NewMockManagerClient(t)
+		streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(make(chan struct{}), nil)
+		streamingNodeManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(types.ErrNotAlive)
+		streamingNodeManager.EXPECT().Assign(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, assignment types.PChannelInfoAssigned) error {
+				attemptOnce.Do(func() { close(assignAttempted) })
+				return errors.New("temporary assign error")
+			})
+		streamingNodeManager.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{
+			1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}},
+		}, nil).Maybe()
+		streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything, mock.Anything).Return(map[int64]*types.StreamingNodeStatus{
+			1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}},
+		}, nil).Maybe()
+
+		catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+		s := sessionutil.NewMockSession(t)
+		s.EXPECT().GetRegisteredRevision().Return(int64(1)).Maybe()
+		resource.InitForTest(
+			resource.OptETCD(etcdClient),
+			resource.OptStreamingCatalog(catalog),
+			resource.OptStreamingManagerClient(streamingNodeManager),
+			resource.OptSession(s),
+		)
+		catalog.EXPECT().GetCChannel(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().SaveCChannel(mock.Anything, mock.Anything).Return(nil).Maybe()
+		catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil).Maybe()
+		catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
+			{
+				Channel: &streamingpb.PChannelInfo{
+					Name:       "test-channel-1",
+					Term:       1,
+					AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READWRITE,
+				},
+				State: streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED,
+				Node:  &streamingpb.StreamingNodeInfo{ServerId: 3},
+			},
+		}, nil)
+		catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil).Maybe()
+		catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil).Maybe()
+
+		ctx := context.Background()
+		b, err := balancer.RecoverBalancer(
+			ctx,
+			newStaticChannelProvider("test-channel-1"),
+			balancer.WithNodeLostCallback(func(ctx context.Context, serverID int64) {
+				notified.Inc()
+			}),
+		)
+		require.NoError(t, err)
+		defer b.Close()
+
+		require.NoError(t, b.Trigger(ctx))
+		select {
+		case <-assignAttempted:
+		case <-time.After(10 * time.Second):
+			t.Fatal("assign was not attempted")
+		}
+		assert.Equal(t, int32(0), notified.Load(), "callback must not fire when Assign fails before commit")
+	})
+}
