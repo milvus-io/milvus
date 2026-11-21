@@ -17,6 +17,7 @@
 package tei
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -46,14 +47,14 @@ func TestEmbeddingOK(t *testing.T) {
 
 	{
 		c, _ := NewTEIClient("mock_key", url)
-		ret, err := c.Embedding([]string{"sentence"}, true, "left", "query", 0)
+		ret, err := c.Embedding(context.Background(), []string{"sentence"}, true, "left", "query", 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret, &EmbeddingResponse{{0.0, 0.1}, {1.0, 1.1}, {2.0, 2.1}})
 	}
 
 	{
 		c, _ := NewTEIClient("mock_key", url)
-		ret, err := c.Embedding([]string{"sentence"}, false, "", "", 0)
+		ret, err := c.Embedding(context.Background(), []string{"sentence"}, false, "", "", 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret, &EmbeddingResponse{{0.0, 0.1}, {1.0, 1.1}, {2.0, 2.1}})
 	}
@@ -69,7 +70,7 @@ func TestEmbeddingFailed(t *testing.T) {
 
 	{
 		c, _ := NewTEIClient("mock_key", url)
-		_, err := c.Embedding([]string{"sentence"}, true, "left", "query", 0)
+		_, err := c.Embedding(context.Background(), []string{"sentence"}, true, "left", "query", 0)
 		assert.True(t, err != nil)
 	}
 }
@@ -90,7 +91,7 @@ func TestRerankOK(t *testing.T) {
 
 	{
 		c, _ := NewTEIClient("", url)
-		ret, err := c.Rerank("query", []string{"t1", "t2", "t3"}, nil, 0)
+		ret, err := c.Rerank(context.Background(), "query", []string{"t1", "t2", "t3"}, nil, 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret, &RerankResponse{RerankResponseItem{Index: 0, Score: 0.0}, RerankResponseItem{Index: 1, Score: 0.1}, RerankResponseItem{Index: 2, Score: 0.2}})
 	}
@@ -106,7 +107,7 @@ func TestRerankFailed(t *testing.T) {
 
 	{
 		c, _ := NewTEIClient("mock_key", url)
-		_, err := c.Rerank("query", []string{"t1", "t2", "t3"}, nil, 0)
+		_, err := c.Rerank(context.Background(), "query", []string{"t1", "t2", "t3"}, nil, 0)
 		assert.True(t, err != nil)
 	}
 }

@@ -127,11 +127,14 @@ func (provider *TeiEmbeddingProvider) CallEmbedding(ctx context.Context, texts [
 	}
 
 	for i := 0; i < numRows; i += provider.maxBatch {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		end := i + provider.maxBatch
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(texts[i:end], provider.truncate, provider.truncationDirection, prompt, provider.timeoutMs)
+		resp, err := provider.client.Embedding(ctx, texts[i:end], provider.truncate, provider.truncationDirection, prompt, provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}

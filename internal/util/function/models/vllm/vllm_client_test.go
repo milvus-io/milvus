@@ -17,6 +17,7 @@
 package vllm
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -64,7 +65,7 @@ func TestEmbeddingOK(t *testing.T) {
 	{
 		c, err := NewVLLMClient("mock_key", url)
 		assert.NoError(t, err)
-		r, err := c.Embedding([]string{"sentence"}, nil, 0)
+		r, err := c.Embedding(context.Background(), []string{"sentence"}, nil, 0)
 		assert.NoError(t, err)
 		assert.Equal(t, r.Data[0].Embedding, res.Data[0].Embedding)
 	}
@@ -80,7 +81,7 @@ func TestEmbeddingFailed(t *testing.T) {
 	{
 		c, err := NewVLLMClient("mock_key", url)
 		assert.NoError(t, err)
-		_, err = c.Embedding([]string{"sentence"}, nil, 0)
+		_, err = c.Embedding(context.Background(), []string{"sentence"}, nil, 0)
 		assert.Error(t, err)
 	}
 }
@@ -131,7 +132,7 @@ func TestRerankOK(t *testing.T) {
 	{
 		c, err := NewVLLMClient("mock_key", url)
 		assert.NoError(t, err)
-		r, err := c.Rerank("query", []string{"t1", "t2", "t3"}, nil, 0)
+		r, err := c.Rerank(context.Background(), "query", []string{"t1", "t2", "t3"}, nil, 0)
 		assert.NoError(t, err)
 		assert.Equal(t, r.Results[0].Index, 0)
 		assert.Equal(t, r.Results[0].RelevanceScore, float32(0.0))
@@ -152,7 +153,7 @@ func TestRerankFailed(t *testing.T) {
 	{
 		c, err := NewVLLMClient("mock_key", url)
 		assert.NoError(t, err)
-		_, err = c.Rerank("query", []string{"t1", "t2", "t3"}, nil, 0)
+		_, err = c.Rerank(context.Background(), "query", []string{"t1", "t2", "t3"}, nil, 0)
 		assert.Error(t, err)
 	}
 }

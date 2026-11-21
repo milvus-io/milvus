@@ -17,6 +17,7 @@
 package vertexai
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -67,7 +68,7 @@ func TestEmbeddingOK(t *testing.T) {
 		c := NewVertexAIEmbedding(url, []byte{1, 2, 3}, "mock_scopes", "mock_token")
 		err := c.Check()
 		assert.True(t, err == nil)
-		_, err = c.Embedding("text-embedding-005", []string{"sentence"}, 0, "query", 0)
+		_, err = c.Embedding(context.Background(), "text-embedding-005", []string{"sentence"}, 0, "query", 0)
 		assert.True(t, err == nil)
 	}
 }
@@ -84,7 +85,7 @@ func TestEmbeddingFailed(t *testing.T) {
 		c := NewVertexAIEmbedding(url, []byte{1, 2, 3}, "mock_scopes", "mock_token")
 		err := c.Check()
 		assert.True(t, err == nil)
-		_, err = c.Embedding("text-embedding-v2", []string{"sentence"}, 0, "query", 0)
+		_, err = c.Embedding(context.Background(), "text-embedding-v2", []string{"sentence"}, 0, "query", 0)
 		assert.True(t, err != nil)
 	}
 }
