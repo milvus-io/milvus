@@ -106,8 +106,11 @@ TEST(ConcurrentVector, JsonInsertAcrossChunks) {
     }
 
     ConcurrentVector<milvus::Json> c_vec(4);
-    c_vec.set_data_raw(0, 3, &first, field_meta);
-    c_vec.set_data_raw(3, 7, &second, field_meta);
+    // The DataArray overload is declared on VectorBase and hidden by the
+    // set_data_raw overloads of ConcurrentVectorImpl.
+    VectorBase& base = c_vec;
+    base.set_data_raw(0, 3, &first, field_meta);
+    base.set_data_raw(3, 7, &second, field_meta);
 
     ASSERT_EQ(c_vec.num_chunk(), 3);
     for (int i = 0; i < 10; ++i) {
