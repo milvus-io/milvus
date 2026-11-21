@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -711,7 +712,10 @@ func (c *Checker) publishRestoredCollection(job CopySegmentJob, totalRows int64)
 	// remains unavailable if reconciliation fails; a checker retry resumes it.
 	if c.Meta.DataViewManager != nil {
 		version, err := c.Meta.DataViewManager.RecomputeNow(c.Ctx, job.GetCollectionId(), c.Meta.LoadableProjection)
-		if err != nil || version == nil {
+		// The physical commit can precede its WAL certificate. A later
+		// published version covering that commit also satisfies the restore.
+		published := c.Meta.DataViewManager.Published(job.GetCollectionId())
+		if err != nil || version == nil || published == nil || !published.DataVersion.GTE(qviews.FromProtoDataVersion(version)) {
 			if !c.checkRestoreTarget(job) {
 				return
 			}

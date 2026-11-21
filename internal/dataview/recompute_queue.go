@@ -39,22 +39,24 @@ var errRecomputeQueueFull = errors.New("DataView recompute queue full")
 // in-memory, per-Collection deduplicated queue: a single worker drains
 // collectionIDs and runs the reconciliation against the injected projection,
 // so multiple pending mutations of one Collection collapse into a single
-// snapshot write ("only the last view is updated"). The queue is best-effort -
-// a lost entry (crash, failed recompute, dropped enqueue) is converged by the
-// recovery rebuild.
+// snapshot write. Ordinary reconciliation requests are best effort. Required
+// certification is deduplicated even at capacity, and recovery schedules all
+// durable candidates still awaiting certification.
 type dataViewRecomputeQueue struct {
 	manager *dataViewManager
 
-	mu      sync.Mutex
-	ch      chan int64 // bounded; over-capacity enqueues are dropped
-	pending map[int64]struct{}
+	mu       sync.Mutex
+	ch       chan int64 // bounded; over-capacity enqueues are dropped
+	pending  map[int64]struct{}
+	overflow map[int64]struct{} // mandatory certification work waiting for a channel slot
 }
 
 func newDataViewRecomputeQueue(manager *dataViewManager) *dataViewRecomputeQueue {
 	return &dataViewRecomputeQueue{
-		manager: manager,
-		ch:      make(chan int64, 1024),
-		pending: make(map[int64]struct{}),
+		manager:  manager,
+		ch:       make(chan int64, 1024),
+		pending:  make(map[int64]struct{}),
+		overflow: make(map[int64]struct{}),
 	}
 }
 
@@ -66,24 +68,35 @@ func newDataViewRecomputeQueue(manager *dataViewManager) *dataViewRecomputeQueue
 // blocking a coordinator RPC; the recovery rebuild converges the snapshot.
 func (q *dataViewRecomputeQueue) Enqueue(collectionID int64) error {
 	q.mu.Lock()
+	defer q.mu.Unlock()
 	if _, ok := q.pending[collectionID]; ok {
-		q.mu.Unlock()
 		return nil
 	}
-	q.pending[collectionID] = struct{}{}
-	q.mu.Unlock()
 
 	select {
 	case q.ch <- collectionID:
+		q.pending[collectionID] = struct{}{}
 		return nil
 	default:
-		// Queue full: unmark and drop; the recovery rebuild converges.
-		q.mu.Lock()
-		delete(q.pending, collectionID)
-		q.mu.Unlock()
 		mlog.Warn(q.manager.workerCtx, "DataView recompute queue full, dropping enqueue",
 			mlog.Int64("collectionID", collectionID))
 		return errRecomputeQueueFull
+	}
+}
+
+// Certification is required to make a physical snapshot queryable. A full
+// best-effort queue must not strand the latest snapshot until another write.
+func (q *dataViewRecomputeQueue) requireCertification(id int64) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if _, ok := q.pending[id]; ok {
+		return
+	}
+	q.pending[id] = struct{}{}
+	select {
+	case q.ch <- id:
+	default:
+		q.overflow[id] = struct{}{}
 	}
 }
 
@@ -98,9 +111,24 @@ func (q *dataViewRecomputeQueue) run(ctx context.Context) {
 		case collectionID := <-q.ch:
 			q.mu.Lock()
 			delete(q.pending, collectionID)
+			for id := range q.overflow {
+				select {
+				case q.ch <- id:
+					delete(q.overflow, id)
+				default:
+				}
+				break
+			}
 			q.mu.Unlock()
 			projector := q.manager.getProjector()
-			if _, err := q.manager.recomputeNow(ctx, collectionID, projector); err != nil {
+			var err error
+			if projector != nil {
+				_, err = q.manager.recomputeNow(ctx, collectionID, projector)
+			}
+			if err == nil {
+				err = q.manager.certifyReadAdmission(ctx, collectionID)
+			}
+			if err != nil {
 				mlog.Warn(ctx, "DataView Recompute failed, re-enqueue",
 					mlog.Int64("collectionID", collectionID),
 					mlog.Err(err))
@@ -109,7 +137,7 @@ func (q *dataViewRecomputeQueue) run(ctx context.Context) {
 				case <-ctx.Done():
 					return
 				}
-				_ = q.Enqueue(collectionID)
+				q.requireCertification(collectionID)
 			}
 		}
 	}

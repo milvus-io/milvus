@@ -73,6 +73,8 @@ func WithPendingTransformProjector(project PendingTransformProjector) Option {
 
 type Manager interface {
 	api.DataViewPublisher
+	// Published returns the immutable projection exposed to query placement.
+	Published(collectionID int64) *api.CollectionDataView
 	OnCreateCollection(ctx context.Context, event CreateCollectionDataViewEvent) (*viewpb.DataVersion, error)
 	OnBootstrapCollection(ctx context.Context, event BootstrapCollectionDataViewEvent) (*viewpb.DataVersion, error)
 	// PrepareFlush builds the post-flush snapshot under the Collection lock
@@ -229,6 +231,7 @@ type dataViewManager struct {
 	projector                 Projector
 	frontierProjector         FrontierProjector
 	pendingTransformProjector PendingTransformProjector
+	readAdmissionSample       ReadAdmissionSampler
 	// workerCtx bounds the async Recompute worker's lifetime. NewManager uses
 	// a process-lifetime context; RecoverManager derives it from the caller's
 	// ctx so the worker stops when the coordinator does.
@@ -493,6 +496,7 @@ func (m *dataViewManager) OnCreateCollection(ctx context.Context, event CreateCo
 	view := buildEmptyDataView(event.CollectionID, event.VChannels)
 	view.SchemaVersion = event.SchemaVersion
 	for _, shard := range view.Shards {
+		shard.ReadAdmissionFloor = &viewpb.QueryPlanMVCC{}
 		shard.GrowingTransformStartAfterTimetick = event.TransformStarts[shard.Vchannel]
 		shard.CompactedTransformStartAfterTimetick = event.TransformStarts[shard.Vchannel]
 	}
@@ -573,6 +577,7 @@ func (m *dataViewManager) recomputeNow(ctx context.Context, collectionID int64, 
 		return nil, err
 	}
 	canonicalizeDataView(next)
+	invalidateChangedReadAdmission(base, next)
 	if dataViewMembershipEqual(base, next) {
 		// Recovery path: a persisted entry loaded from the catalog carries no
 		// stats (they are never serialized), so a restart leaves the latest
@@ -649,7 +654,13 @@ func (m *dataViewManager) Get(ctx context.Context, collectionID int64, version *
 	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	return m.acquireReadyRefLocked(ctx, state, state.versions[protoVersionToStruct(version)])
+	entry := state.versions[protoVersionToStruct(version)]
+	// Exact query publication and SN resource hydration both use Get. A
+	// physical transaction awaiting certification is never a serving version.
+	if m.readAdmissionSample != nil && entry != nil && !hasReadAdmission(entry.view) {
+		return nil, nil
+	}
+	return m.acquireReadyRefLocked(ctx, state, entry)
 }
 
 // ReferencedSegments protects every retained version, including versions that
@@ -710,7 +721,7 @@ func (m *dataViewManager) GarbageCollect(ctx context.Context, collectionID int64
 	})
 	collectable := make([]collectableVersion, 0, len(entries))
 	for idx, entry := range entries {
-		if idx < retainLatest || entry == state.latest || entry.refs.count > 0 {
+		if idx < retainLatest || entry == state.latest || entry == state.publishedEntry || entry.refs.count > 0 {
 			continue
 		}
 		version := entry.view.GetDataVersion()
@@ -751,7 +762,7 @@ func (m *dataViewManager) GarbageCollect(ctx context.Context, collectionID int64
 	defer state.mu.Unlock()
 	for _, candidate := range collectable {
 		entry := state.versions[candidate.key]
-		if entry == nil || entry == state.latest || entry.refs.count > 0 {
+		if entry == nil || entry == state.latest || entry == state.publishedEntry || entry.refs.count > 0 {
 			continue
 		}
 		delete(state.versions, candidate.key)
@@ -759,9 +770,9 @@ func (m *dataViewManager) GarbageCollect(ctx context.Context, collectionID int64
 	return nil
 }
 
-// collectionDataViewLocked builds the native collection projection from the
-// latest version and its matching row statistics. Caller holds state.mu.
-func (m *dataViewManager) collectionDataViewLocked(state *collectionState) *api.CollectionDataView {
+// collectionDataViewLocked builds the native collection projection from a
+// certified version and its matching row statistics. Caller holds state.mu.
+func (m *dataViewManager) collectionDataViewLocked(state *collectionState, entry *versionEntry) *api.CollectionDataView {
 	m.mu.RLock()
 	current := m.states[state.id] == state
 	m.mu.RUnlock()
@@ -769,7 +780,6 @@ func (m *dataViewManager) collectionDataViewLocked(state *collectionState) *api.
 		return nil
 	}
 
-	entry := state.latest
 	if entry == nil || entry.isTombstone {
 		return nil
 	}
@@ -787,6 +797,7 @@ func (m *dataViewManager) collectionDataViewLocked(state *collectionState) *api.
 		}
 		nativeShard := &api.ShardDataView{
 			VChannel:                             shard.GetVchannel(),
+			ReadAdmissionFloor:                   proto.Clone(shard.GetReadAdmissionFloor()).(*viewpb.QueryPlanMVCC),
 			GrowingTransformStartAfterTimetick:   shard.GetGrowingTransformStartAfterTimetick(),
 			CompactedTransformStartAfterTimetick: shard.GetCompactedTransformStartAfterTimetick(),
 			Partitions:                           make([]*api.PartitionDataView, 0, len(shard.GetPartitions())),
@@ -932,6 +943,7 @@ func (m *dataViewManager) PrepareFlush(ctx context.Context, event FlushDataViewE
 		return nil, nil, nil, err
 	}
 	canonicalizeDataView(next)
+	invalidateChangedReadAdmission(base, next)
 	if dataViewMembershipEqual(base, next) {
 		// Idempotent replay of an already-seen flush (e.g. a retried flush
 		// RPC): no new snapshot to persist, return the current one.
@@ -1510,6 +1522,12 @@ func (m *dataViewManager) RegisterDataViewListener(listener api.DataViewListener
 	return func() { m.publicationMu.Lock(); delete(m.listeners, id); m.publicationMu.Unlock() }
 }
 
+func (m *dataViewManager) Published(collectionID int64) *api.CollectionDataView {
+	m.publicationMu.Lock()
+	defer m.publicationMu.Unlock()
+	return m.published[collectionID]
+}
+
 // Caller holds state.mu. Publication never acquires another collection lock.
 func (m *dataViewManager) publishDataViewLocked(state *collectionState) {
 	state.changed.NotifyAll()
@@ -1517,11 +1535,29 @@ func (m *dataViewManager) publishDataViewLocked(state *collectionState) {
 	if entry == nil {
 		return
 	}
-	if m.frontierProjector != nil && !transformFrontiersReady(entry.view) {
-		return
+	needsFloor := m.readAdmissionSample != nil && !hasReadAdmission(entry.view)
+	if needsFloor {
+		m.queue.requireCertification(state.id)
+	}
+	if needsFloor || (m.frontierProjector != nil && !transformFrontiersReady(entry.view)) {
+		// Preserve the last certified query snapshot, including across restart.
+		entry = state.publishedEntry
+		if entry == nil {
+			for _, previous := range state.versions {
+				if previous.isTombstone || !hasReadAdmission(previous.view) || (m.frontierProjector != nil && !transformFrontiersReady(previous.view)) {
+					continue
+				}
+				if entry == nil || compareDataVersion(previous.view.GetDataVersion(), entry.view.GetDataVersion()) > 0 {
+					entry = previous
+				}
+			}
+		}
+		if entry == nil {
+			return
+		}
 	}
 	if state.publishedEntry != entry {
-		view := m.collectionDataViewLocked(state)
+		view := m.collectionDataViewLocked(state, entry)
 		if view == nil {
 			return
 		}

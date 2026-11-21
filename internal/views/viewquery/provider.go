@@ -10,6 +10,9 @@ import (
 
 // TaskProvider converts a QueryView version into ready concrete segment tasks.
 type TaskProvider interface {
+	// CheckReadAdmission validates queries whose plan skips all physical work.
+	CheckReadAdmission(context.Context, qviews.ShardID, qviews.QueryViewVersion, *viewpb.QueryPlanMVCC) error
+
 	// Statistics waits for visibility and counts the resources retained by this View.
 	Statistics(ctx context.Context, req *viewpb.StatisticsOnViewRequest) (int64, error)
 

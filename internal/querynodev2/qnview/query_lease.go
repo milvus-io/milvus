@@ -51,6 +51,9 @@ func (s *qnShardView) acquireReadyView(ctx context.Context, version qviews.Query
 	}
 	entry.queryRefs++
 	view := proto.Clone(entry.View.IntoProto()).(*viewpb.QueryViewOfShard)
+	// Use the certificate captured at the Prepare that bound these segments;
+	// subsequent lifecycle commands only control their availability.
+	view.Meta.ReadAdmissionFloor = proto.Clone(entry.sm.Meta().GetReadAdmissionFloor()).(*viewpb.QueryPlanMVCC)
 	var once sync.Once
 	return &QueryViewLease{
 		Version: version,

@@ -277,6 +277,7 @@ func (t *advancedSearchTasks) Release() {
 
 type advancedTaskProvider struct {
 	TaskProvider
+	admissionErr  error
 	mu            sync.Mutex
 	emptyFields   map[int64]struct{}
 	acquired      []int64
@@ -377,4 +378,19 @@ func (s *advancedScheduler) executedFields() []int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]int64(nil), s.executed...)
+}
+
+func (p *advancedTaskProvider) CheckReadAdmission(context.Context, qviews.ShardID, qviews.QueryViewVersion, *viewpb.QueryPlanMVCC) error {
+	return p.admissionErr
+}
+
+func TestReadAdmissionAllSkippedSearch(t *testing.T) {
+	provider := newAdvancedTaskProvider()
+	provider.admissionErr = context.DeadlineExceeded
+	server := NewServer(provider, &advancedScheduler{})
+	req := advancedSearchOnViewRequest([]*internalpb.SubSearchRequest{{Nq: 1, Topk: 1, MetricType: metric.IP, Skip: true}})
+	got, err := server.SearchOnView(t.Context(), req)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Nil(t, got)
+	require.Empty(t, provider.acquiredFields())
 }

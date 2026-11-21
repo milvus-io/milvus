@@ -25,6 +25,9 @@ func (h *QNQueryViewHandler) AcquireSearchSegmentTasks(
 		return nil, err
 	}
 	defer lease.Release()
+	if err := qviews.CheckReadAdmission(ctx, lease.Meta, mvcc); err != nil {
+		return nil, err
+	}
 	if req.GetSchemaVersion() != lease.Meta.GetSchemaVersion() {
 		return nil, viewerror.NewViewInvalidated("request schema %d does not match QueryView schema %d", req.GetSchemaVersion(), lease.Meta.GetSchemaVersion())
 	}
@@ -65,6 +68,9 @@ func (h *QNQueryViewHandler) AcquireQuerySegmentTasks(
 		return nil, err
 	}
 	defer lease.Release()
+	if err := qviews.CheckReadAdmission(ctx, lease.Meta, mvcc); err != nil {
+		return nil, err
+	}
 	if req.GetSchemaVersion() != lease.Meta.GetSchemaVersion() {
 		return nil, viewerror.NewViewInvalidated("request schema %d does not match QueryView schema %d", req.GetSchemaVersion(), lease.Meta.GetSchemaVersion())
 	}
@@ -90,4 +96,13 @@ func (h *QNQueryViewHandler) AcquireQuerySegmentTasks(
 		})
 	}
 	return NewQNQuerySegmentTasks(tasks), nil
+}
+
+func (h *QNQueryViewHandler) CheckReadAdmission(ctx context.Context, shardID qviews.ShardID, version qviews.QueryViewVersion, mvcc *viewpb.QueryPlanMVCC) error {
+	lease, err := h.AcquireReadyView(ctx, shardID, version)
+	if err != nil {
+		return err
+	}
+	defer lease.Release()
+	return qviews.CheckReadAdmission(ctx, lease.Meta, mvcc)
 }

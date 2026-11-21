@@ -71,6 +71,8 @@ func (m *dataViewManager) advanceSchemaLocked(ctx context.Context, state *collec
 			stats[id] = value
 		}
 	}
+	canonicalizeDataView(next)
+	invalidateChangedReadAdmission(base, next)
 	next.SchemaVersion = target
 	next.DataVersion = nextDataVersion(base, dataViewAdvanceCompact)
 	if err := m.persistLockedWithStats(ctx, state, next, stats); err != nil {

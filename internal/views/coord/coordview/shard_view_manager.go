@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	qvobserve "github.com/milvus-io/milvus/internal/views/qviews/observe"
@@ -506,7 +508,9 @@ func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.Que
 	builder.SetQueryVersion(qv)
 	view.Meta.Version.QueryVersion = qv
 	if source != nil {
-		view.Meta.TransformStartAfterTimetick = m.views[*source].View().GetMeta().GetTransformStartAfterTimetick()
+		sourceMeta := m.views[*source].View().GetMeta()
+		view.Meta.ReadAdmissionFloor = proto.Clone(sourceMeta.GetReadAdmissionFloor()).(*viewpb.QueryPlanMVCC)
+		view.Meta.TransformStartAfterTimetick = sourceMeta.GetTransformStartAfterTimetick()
 	}
 	sm := NewCoordQueryViewStateMachineWithRef(view, ref)
 	sm.releaseLoadInfo = releaseLoadInfo

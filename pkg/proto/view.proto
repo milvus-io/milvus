@@ -88,6 +88,8 @@ message DataViewOfShard {
     // A: minimum cursor of the exact Segment bases selected by this view.
     // Recomputed for every membership/base change, including Flush. Empty shards use W.
     uint64 compacted_transform_start_after_timetick = 4;
+    // Inclusive read minima for this immutable physical history. Absence means uncertified.
+    QueryPlanMVCC read_admission_floor = 5;
 }
 
 message DataViewOfPartition {
@@ -138,6 +140,8 @@ message QueryViewMeta {
     uint64 transform_start_after_timetick = 7;
     int32 schema_version = 8; // Required logical collection schema revision.
     QueryViewControl control = 9;
+    // Copied from the exact shard DataView before planning or execution.
+    QueryPlanMVCC read_admission_floor = 10;
 }
 
 // QueryViewOfStreamingNode is the StreamingNode-local part of a QueryView.

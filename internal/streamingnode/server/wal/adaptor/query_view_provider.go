@@ -72,3 +72,11 @@ func (w *walAdaptorImpl) queryViewTaskHandler(shardID qviews.ShardID) (*snview.S
 	}
 	return w.queryViewHandler, nil
 }
+
+func (w *walAdaptorImpl) CheckReadAdmission(ctx context.Context, shardID qviews.ShardID, version qviews.QueryViewVersion, mvcc *viewpb.QueryPlanMVCC) error {
+	h, err := w.queryViewTaskHandler(shardID)
+	if err != nil {
+		return err
+	}
+	return h.CheckReadAdmission(ctx, shardID, version, mvcc)
+}

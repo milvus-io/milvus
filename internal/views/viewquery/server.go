@@ -2,6 +2,7 @@ package viewquery
 
 import (
 	"context"
+	"slices"
 
 	"golang.org/x/sync/errgroup"
 
@@ -65,6 +66,11 @@ func (s *Server) executeAdvancedSearch(ctx context.Context, req *viewpb.SearchOn
 		return nil, err
 	}
 
+	if !slices.ContainsFunc(legacyReq.GetSubReqs(), func(sub *internalpb.SubSearchRequest) bool { return !sub.GetSkip() }) {
+		if err := s.provider.CheckReadAdmission(ctx, qviews.FromProtoShardID(req.GetShardId()), qviews.FromProtoQueryViewVersion(req.GetVersion()), req.GetMvcc()); err != nil {
+			return nil, err
+		}
+	}
 	results := make([]*internalpb.SearchResults, len(subRequests))
 	group, groupCtx := errgroup.WithContext(ctx)
 	for index := range subRequests {

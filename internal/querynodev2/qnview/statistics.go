@@ -17,6 +17,9 @@ func (h *QNQueryViewHandler) Statistics(ctx context.Context, req *viewpb.Statist
 		return 0, err
 	}
 	defer lease.Release()
+	if err := qviews.CheckReadAdmission(ctx, lease.Meta, req.GetMvcc()); err != nil {
+		return 0, err
+	}
 	key := qviews.QueryViewKey{ShardID: shardID, QueryViewVersion: version}
 	if err := h.segMgr.WaitTransformVisible(ctx, key, req.GetMvcc().GetTransformingTimetick()); err != nil {
 		return 0, err

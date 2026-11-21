@@ -186,6 +186,7 @@ func (s *MixCompactionTaskStorageV3Suite) checkCertifiedL0Dispatch(budget uint64
 		d := storage.MutationDelta{Layout: deltacodec.Layout{CollectionID: 100, PartitionID: part, VChannel: plan.Channel, PKType: schemapb.DataType_Int64, Fields: []deltacodec.Field{{ID: 105, Type: schemapb.DataType_Int64}}}, Rows: []deltacodec.Row{{TimeTick: ts, SourceOrdinal: 3, Operation: deltacodec.Update, PrimaryKeys: keys, Assignments: []*messagespb.UpdateAssignment{{FieldId: 105, Literal: mutationValue(int64(ts))}}}}}
 		counts := &datapb.DeltaMutationCounts{UpdateKeys: 2}
 		if part == 4 {
+			seg.CommitTimestamp = 150 // The imported raw DELETE at 180 is later than local commit.
 			file, err := task.writeLegacyDeletes(ctx, seg, schemapb.DataType_Int64, []storage.PrimaryKey{storage.NewInt64PrimaryKey(77)}, []uint64{ts})
 			require.NoError(t, err)
 			file.MemorySize = 768 << 10
@@ -325,6 +326,18 @@ func (s *MixCompactionTaskStorageV3Suite) checkCertifiedL0Dispatch(budget uint64
 		require.EqualValues(t, len(want)*len(keys)+additional, updateKeys)
 		require.ElementsMatch(t, want, observed)
 	}
+
+	// The persisted range can understate a legacy imported timestamp. Only
+	// the decoded effective row can authorize this file for a certified round.
+	early := proto.Clone(plan).(*datapb.CompactionPlan)
+	early.MaterializedThrough = 170
+	legacy := early.SegmentBinlogs[len(inputs)-1]
+	legacy.Deltalogs[0].Binlogs[0].TimestampTo = 160
+	early.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{legacy, targets[4]}
+	earlyTask := NewLevelZeroCompactionTask(ctx, binlogio.NewBinlogIO(s.task.cm), s.task.cm, early, s.task.compactionParams)
+	premature, err := earlyTask.Compact()
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.Nil(t, premature)
 
 	// A genuinely oversized final file fails the whole attempt, even though
 	// earlier files could be routed and written within the budget.

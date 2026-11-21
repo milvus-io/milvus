@@ -27,6 +27,7 @@ func newPublishedRecoveryBase(id qviews.ShardID, recovery *coordview.PublishedRe
 	meta := recovery.View.GetMeta()
 	shard := &ShardDataView{
 		VChannel:                             id.VChannel,
+		ReadAdmissionFloor:                   meta.GetReadAdmissionFloor(),
 		GrowingTransformStartAfterTimetick:   meta.GetTransformStartAfterTimetick(),
 		CompactedTransformStartAfterTimetick: meta.GetTransformStartAfterTimetick(),
 	}

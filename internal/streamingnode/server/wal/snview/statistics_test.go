@@ -34,7 +34,7 @@ func TestStatisticsGrowingHandlesUseSelectedDataVersion(t *testing.T) {
 		runtime := &mockQueryRuntime{handles: []GrowingSegmentHandle{handle}}
 		version := qviews.QueryViewVersion{DataVersion: qviews.DataVersion{StreamingVersion: 8}, QueryVersion: 9}
 		released := 0
-		lease := &QueryViewLease{Meta: &viewpb.QueryViewMeta{LoadInfoVersion: 12}, Release: func() { released++ }}
+		lease := &QueryViewLease{Meta: &viewpb.QueryViewMeta{ReadAdmissionFloor: &viewpb.QueryPlanMVCC{}, LoadInfoVersion: 12}, Release: func() { released++ }}
 		mockey.Mock((*SNQueryViewHandler).acquireUpView).Return(lease, nil).Build()
 		mockey.Mock((*SNQueryViewHandler).queryRuntime).Return(runtime, nil).Build()
 		mockey.Mock((*mockQueryRuntime).ResolvePartitions).To(func(_ *mockQueryRuntime, load uint64, partitions []int64) ([]int64, error) {

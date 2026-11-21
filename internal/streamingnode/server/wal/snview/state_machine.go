@@ -108,7 +108,10 @@ func (sm *snQueryViewStateMachine) UpdateView(view *viewpb.QueryViewOfShard) {
 	}
 	if view.GetMeta() != nil {
 		priority := sm.meta.GetControl().GetPreparationPriority()
+		floor := sm.meta.ReadAdmissionFloor
 		sm.meta = proto.Clone(view.GetMeta()).(*viewpb.QueryViewMeta)
+		// The first Prepare or recovered Up fixed the retained physical history.
+		sm.meta.ReadAdmissionFloor = floor
 		// Priority belongs to the identity captured at first admission/recovery.
 		// A duplicate command (including an older sender omitting Control) may
 		// strengthen lifecycle control, but cannot rescore this view.

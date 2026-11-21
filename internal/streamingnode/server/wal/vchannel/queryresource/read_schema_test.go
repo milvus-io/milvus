@@ -260,6 +260,7 @@ func TestSNPhaseTwoReadBindingClassifiesRuntimeFailureAndCallerCancellation(t *t
 					defer runtime.Close()
 					require.NoError(t, runtime.Initialize(t.Context(), walview.VChannelWALView{}))
 					meta, key := testManagerQueryViewMetaAndKey(1)
+					meta.ReadAdmissionFloor = &viewpb.QueryPlanMVCC{}
 					meta.State = viewpb.QueryViewState_QueryViewStateUp
 					read := &phaseTwoRead{ReadRuntime: &ReadRuntime{QueryRuntime: runtime, resources: runtime.bindView(meta)}}
 					resources := &phaseTwoResources{read: read}

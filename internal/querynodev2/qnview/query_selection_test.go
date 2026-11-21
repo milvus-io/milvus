@@ -104,3 +104,25 @@ func TestQNSelectionIntersectsPartitionScopeBeforePinning(t *testing.T) {
 		}
 	}
 }
+
+func TestReadAdmissionQNOriginalCertificateBeforeEmptySelection(t *testing.T) {
+	mgr := newMockSegmentManager()
+	h := NewQNQueryViewHandler(mgr)
+	meta := buildHandlerTestMeta(1)
+	meta.ReadAdmissionFloor = &viewpb.QueryPlanMVCC{GrowingTimetick: 120, TransformingTimetick: 140}
+	view := qviews.NewQueryViewAtQueryNode(meta, buildHandlerTestQNView(1))
+	h.ApplyViews([]handler.ApplyView{{View: view}})
+	key := view.QueryViewKey()
+	preparation, ok := mgr.getAcquired(key)
+	require.True(t, ok)
+	preparation.OnReady(map[int64][]int64{10: {1000, 1001}, 20: {2000}})
+	// A repeated control for the same identity cannot lower its original floor.
+	h.ApplyViews([]handler.ApplyView{{View: qviews.NewQueryViewAtQueryNode(buildHandlerTestMeta(1), buildHandlerTestQNView(1))}})
+	fixed := &viewpb.QueryPlanMVCC{GrowingTimetick: 120, TransformingTimetick: 130}
+	_, err := h.AcquireQuerySegmentTasks(t.Context(), key.ShardID, key.QueryViewVersion, fixed, &internalpb.RetrieveRequest{}, &viewpb.SegmentSelection{Mode: viewpb.SegmentSelection_None})
+	require.Error(t, err)
+	require.False(t, mgr.waitCalled)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, h.CheckReadAdmission(ctx, key.ShardID, key.QueryViewVersion, fixed), context.Canceled)
+}

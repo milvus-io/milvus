@@ -128,11 +128,19 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 	viewShardID := qviews.NewShardIDFromQVMeta(lease.Meta)
 	w.queryViewHandler.RecordShardAccess(viewShardID)
 
+	if fixed, ok := req.GetMvcc().(*viewpb.GetQueryPlanRequest_BarrierMvcc); ok {
+		if err := qviews.CheckBarrierAdmission(ctx, lease.Meta, fixed.BarrierMvcc); err != nil {
+			return nil, err
+		}
+	}
 	mvcc, err := w.resolveQueryPlanMVCC(ctx, req, shardID.VChannel)
 	if err != nil {
 		return nil, err
 	}
 
+	if err := qviews.CheckReadAdmission(ctx, lease.Meta, mvcc); err != nil {
+		return nil, err
+	}
 	var readRuntime *queryresource.ReadRuntime
 	if w.viewResourceManager != nil {
 		readRuntime, _ = w.viewResourceManager.GetQueryReadRuntime(qviews.QueryViewKey{

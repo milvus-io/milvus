@@ -92,7 +92,7 @@ func TestSNHandler_AcquireSearchSegmentTasksWaitsRuntimeAndReleasesViewRef(t *te
 	assert.Equal(t, 1, handle.releaseCount)
 }
 
-func TestSNHandler_AcquireSearchSegmentTasksSkipsIgnoreGrowingSubSearch(t *testing.T) {
+func TestSNHandler_IgnoreGrowingStillRequiresServingView(t *testing.T) {
 	h := &SNQueryViewHandler{}
 	tasks, err := h.AcquireSearchSegmentTasks(
 		context.Background(),
@@ -103,9 +103,8 @@ func TestSNHandler_AcquireSearchSegmentTasksSkipsIgnoreGrowingSubSearch(t *testi
 		nil,
 	)
 
-	require.NoError(t, err)
-	require.NotNil(t, tasks)
-	assert.Empty(t, tasks.Tasks())
+	require.Error(t, err)
+	require.Nil(t, tasks)
 }
 
 func TestSNHandler_AcquireQuerySegmentTasksWaitsRuntimeAndReleasesViewRef(t *testing.T) {

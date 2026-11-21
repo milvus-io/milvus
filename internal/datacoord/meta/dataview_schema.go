@@ -33,15 +33,14 @@ func (m *Meta) checkCompactionSchemaPublication(ctx context.Context, collectionI
 	if m.DataViewManager == nil {
 		return nil
 	}
-	ref, err := m.DataViewManager.Latest(ctx, collectionID)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if ref == nil {
+	view := m.DataViewManager.Published(collectionID)
+	if view == nil {
 		return merr.WrapErrServiceNotReadyMsg("collection %d DataView is not initialized", collectionID)
 	}
-	defer ref.Deref()
-	if ref.DataView().GetSchemaVersion() >= target.GetVersion() {
+	if view.SchemaVersion >= target.GetVersion() {
 		return nil
 	}
 	published := m.GetCollection(collectionID)

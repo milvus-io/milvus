@@ -21,18 +21,21 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 	req *internalpb.SearchRequest,
 	selection *viewpb.SegmentSelection,
 ) (viewquery.SearchSegmentTasks, error) {
-	if req.GetIgnoreGrowing() {
-		return NewSNSearchSegmentTasks(nil), nil
-	}
 	lease, err := h.acquireUpView(ctx, shardID, version, false)
 	if err != nil {
 		return nil, err
 	}
 	defer lease.Release()
+	if err := qviews.CheckReadAdmission(ctx, lease.Meta, mvcc); err != nil {
+		return nil, err
+	}
 	if req.GetSchemaVersion() != lease.Meta.GetSchemaVersion() {
 		return nil, viewerror.NewViewInvalidated("request schema %d does not match QueryView schema %d", req.GetSchemaVersion(), lease.Meta.GetSchemaVersion())
 	}
 
+	if req.GetIgnoreGrowing() {
+		return NewSNSearchSegmentTasks(nil), nil
+	}
 	if err := h.localOptimizer.OptimizeSearch(ctx, req); err != nil {
 		return nil, err
 	}
@@ -88,6 +91,9 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 		return nil, err
 	}
 	defer lease.Release()
+	if err := qviews.CheckReadAdmission(ctx, lease.Meta, mvcc); err != nil {
+		return nil, err
+	}
 	if req.GetSchemaVersion() != lease.Meta.GetSchemaVersion() {
 		return nil, viewerror.NewViewInvalidated("request schema %d does not match QueryView schema %d", req.GetSchemaVersion(), lease.Meta.GetSchemaVersion())
 	}
@@ -132,4 +138,13 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 		})
 	}
 	return NewSNQuerySegmentTasks(tasks), nil
+}
+
+func (h *SNQueryViewHandler) CheckReadAdmission(ctx context.Context, shardID qviews.ShardID, version qviews.QueryViewVersion, mvcc *viewpb.QueryPlanMVCC) error {
+	lease, err := h.acquireUpView(ctx, shardID, version, false)
+	if err != nil {
+		return err
+	}
+	defer lease.Release()
+	return qviews.CheckReadAdmission(ctx, lease.Meta, mvcc)
 }

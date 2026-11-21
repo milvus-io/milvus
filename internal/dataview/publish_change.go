@@ -96,6 +96,7 @@ func (m *dataViewManager) PublishChange(ctx context.Context, event ChangeGroupDa
 		return nil, nil, nil, err
 	}
 	canonicalizeDataView(next)
+	invalidateChangedReadAdmission(base, next)
 	if dataViewMembershipEqual(base, next) {
 		// Idempotent replay of an already-published batch: no new snapshot to
 		// persist, return the current one.

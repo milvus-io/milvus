@@ -955,6 +955,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 			recoveredMeta.LoadableProjection,
 			collectionIDs,
 			collectionVChannels,
+			dataview.WithReadAdmissionSampler(sampleViewReadAdmission),
 			dataview.WithFrontierProjector(func(ctx context.Context, collectionID int64) (map[string]uint64, error) {
 				return transformFrontierBounds(ctx, recoveredMeta, recoveredImports, collectionID)
 			}),

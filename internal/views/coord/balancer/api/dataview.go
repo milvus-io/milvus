@@ -1,6 +1,9 @@
 package api
 
-import "github.com/milvus-io/milvus/internal/views/qviews"
+import (
+	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+)
 
 // CollectionDataView is the native (non-proto) DataView of one collection.
 type CollectionDataView struct {
@@ -16,6 +19,7 @@ type CollectionDataView struct {
 
 // ShardDataView is one vchannel's DataView within a collection.
 type ShardDataView struct {
+	ReadAdmissionFloor                   *viewpb.QueryPlanMVCC
 	VChannel                             string
 	GrowingTransformStartAfterTimetick   uint64
 	CompactedTransformStartAfterTimetick uint64
