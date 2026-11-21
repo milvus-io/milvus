@@ -445,6 +445,13 @@ proxy:
   maxTaskNum: 1024 # The maximum number of tasks in the task queue of the proxy.
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
+  replicaSelectionPolicy: look_aside # Replica selection policy in multiple replicas load balancing: round_robin, look_aside, or latency_weighted. Live changes apply to new channel requests.
+  latencyWeighted:
+    decay: 10s # Time constant of the decay of the latency statistics kept per channel, request class and replica: a sample, and a failure penalty, weigh 1/e after this long.
+    minShare: 0.001 # Minimum share among eligible replicas for a channel and request class, so that a slow or failing replica keeps being probed. Hedging may cover probes when another replica is eligible.
+  hedging:
+    enabled: false # Enable hedged Search/Query attempts across replicas, independent of proxy.replicaSelectionPolicy. Sends at most one hedge per channel request across all retry rounds.
+    minDelay: 200ms # Minimum wait before dispatching a hedged attempt; actual delay is max(minDelay, recent p99 latency).
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
   resolveAliasForPrivilege: true # switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks
   maxArrayCapacity: 4096 # maximum number of elements in an array field for a single row

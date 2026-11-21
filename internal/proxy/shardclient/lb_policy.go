@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -47,6 +48,10 @@ type ChannelWorkload struct {
 	Nq              int64
 	Exec            ExecuteFunc
 	PreferredNodeID int64
+	// StatsClass separates latency observations by request kind and consistency.
+	StatsClass string
+	// Hedgeable requires Exec to call CommitAttempt before publishing results.
+	Hedgeable bool
 	// ResourceGroup, when non-empty, restricts selectNode to the leaders whose
 	// replica lives in that resource group (NodeInfo.ResourceGroup). It scopes
 	// the candidates of this one channel only -- the channel itself is still
@@ -73,6 +78,8 @@ type CollectionWorkLoad struct {
 	CollectionID   int64
 	Nq             int64
 	Exec           ExecuteFunc
+	StatsClass     string
+	Hedgeable      bool
 	// ResourceGroup is copied onto every ChannelWorkload the fan-out creates,
 	// through ForChannel. The fan-out itself stays unscoped: every shard is
 	// visited, and a shard the group cannot serve fails its channel rather
@@ -97,6 +104,8 @@ func (w CollectionWorkLoad) ForChannel(channel string, preferredNodeID int64) Ch
 		Exec:            w.Exec,
 		PreferredNodeID: preferredNodeID,
 		ResourceGroup:   w.ResourceGroup,
+		StatsClass:      w.StatsClass,
+		Hedgeable:       w.Hedgeable,
 	}
 }
 
@@ -110,14 +119,16 @@ type LBPolicy interface {
 }
 
 const (
-	RoundRobin = "round_robin"
-	LookAside  = "look_aside"
+	RoundRobin      = "round_robin"
+	LookAside       = "look_aside"
+	LatencyWeighted = "latency_weighted"
 )
 
 type LBPolicyImpl struct {
 	getBalancer    func() LBBalancer
 	clientMgr      ShardClientMgr
 	balancerMap    map[string]LBBalancer
+	hedging        *hedgeTracker
 	retryOnReplica int
 	blacklist      *ChannelBlacklist
 }
@@ -126,9 +137,10 @@ func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
 	balancerMap := make(map[string]LBBalancer)
 	balancerMap[LookAside] = NewLookAsideBalancer(clientMgr)
 	balancerMap[RoundRobin] = NewRoundRobinBalancer()
+	balancerMap[LatencyWeighted] = NewLatencyWeightedBalancer(clientMgr)
 
-	balancePolicy := params.Params.ProxyCfg.ReplicaSelectionPolicy.GetValue()
 	getBalancer := func() LBBalancer {
+		balancePolicy := params.Params.ProxyCfg.ReplicaSelectionPolicy.GetValue()
 		if _, ok := balancerMap[balancePolicy]; !ok {
 			return balancerMap[LookAside]
 		}
@@ -141,6 +153,7 @@ func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
 		getBalancer:    getBalancer,
 		clientMgr:      clientMgr,
 		balancerMap:    balancerMap,
+		hedging:        newHedgeTracker(),
 		retryOnReplica: retryOnReplica,
 		blacklist:      NewChannelBlacklist(),
 	}
@@ -150,6 +163,7 @@ func (lb *LBPolicyImpl) Start(ctx context.Context) {
 	for _, lb := range lb.balancerMap {
 		lb.Start(ctx)
 	}
+	lb.hedging.Start(ctx)
 	lb.blacklist.Start()
 }
 
@@ -351,6 +365,10 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	// stamped on here, at the load balancer's own entry, so that no call site
 	// can silently omit it. Empty with no provider installed.
 	workload = scopedChannelWorkload(ctx, workload)
+	balancer, lw := snapshotBalancer(lb.getBalancer())
+	if lw != nil {
+		return lb.executeWeightedWithRetry(ctx, workload, balancer, lw)
+	}
 	log := mlog.With(
 		mlog.Int64("collectionID", workload.CollectionID),
 		mlog.String("channelName", workload.Channel),
@@ -359,6 +377,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	var err error
 	var shardLeaders []NodeInfo
 	requestExcludedNodes := typeutil.NewUniqueSet()
+	hedgedOnce := false
 	tryExecute := func() (bool, error) {
 		// Get fresh blacklist on each retry to include newly blacklisted nodes
 		blacklist := lb.blacklist.GetBlacklistedNodes(workload.Channel)
@@ -395,7 +414,6 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		}
 		excludeNodes := typeutil.NewUniqueSet(blacklist...)
 		excludeNodes.Insert(requestExcludedNodes.Collect()...)
-		balancer := lb.getBalancer()
 		targetNode, selectedByBalancer, err := lb.selectNode(ctx, balancer, workload, &excludeNodes)
 		if err != nil {
 			log.Warn(ctx, "failed to select node for shard",
@@ -433,6 +451,19 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				return true, lastErr
 			}
 			return true, err
+		}
+		start := time.Now()
+		if workload.Hedgeable && !hedgedOnce {
+			if delay, enabled := lb.hedging.HedgeDelay(hedgeStatsKey(workload)); enabled {
+				again, hedged, err := lb.executeHedged(ctx, workload, balancer, nil, targetNode, selectedByBalancer, start, delay, &requestExcludedNodes, &excludeNodes)
+				if hedged {
+					hedgedOnce = true
+				}
+				if err != nil {
+					lastErr = err
+				}
+				return again, err
+			}
 		}
 		// cancel work load which assign to the target node
 		if selectedByBalancer {
@@ -482,6 +513,9 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			return true, lastErr
 		}
 
+		if workload.Hedgeable {
+			lb.hedging.ObserveRequest(hedgeStatsKey(workload), time.Since(start))
+		}
 		return true, nil
 	}
 
@@ -621,5 +655,6 @@ func (lb *LBPolicyImpl) Close() {
 	for _, lb := range lb.balancerMap {
 		lb.Close()
 	}
+	lb.hedging.Close()
 	lb.blacklist.Close()
 }
