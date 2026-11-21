@@ -42,7 +42,9 @@
 #include "opentelemetry/trace/span.h"
 #include "query/Utils.h"
 #include "segcore/SegmentInterface.h"
+#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
 #include "segcore/PkUpdateReadObserver.h"
+#endif
 #include "segcore/SegmentSealed.h"
 #include "storage/MmapManager.h"
 #include "storage/Types.h"
@@ -439,12 +441,18 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
     }
 
     auto execute_sub_batch =
-        [lower_inclusive, upper_inclusive, field = expr_->column_.field_id_](
+        [lower_inclusive, upper_inclusive
+#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
+         , field = expr_->column_.field_id_
+#endif
+        ](
             const index::IScalarPredicateReader<ReaderType>* reader,
             HighPrecisionType val1,
             HighPrecisionType val2) {
+#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
             segcore::ObservePkUpdateRead(
                 field, {segcore::PkUpdateReadPath::IndexedPredicate});
+#endif
             BinaryRangeIndexFunc<T> func;
             return func(reader, val1, val2, lower_inclusive, upper_inclusive);
         };
@@ -520,11 +528,13 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
-    const auto field = expr_->column_.field_id_;
     size_t processed_cursor = 0;
     auto execute_sub_batch =
-        [lower_inclusive, upper_inclusive, &processed_cursor, &bitmap_input,
-         field]<FilterType filter_type = FilterType::sequential>(
+        [lower_inclusive, upper_inclusive, &processed_cursor, &bitmap_input
+#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
+         , field = expr_->column_.field_id_
+#endif
+        ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
             ValidityView valid_data,
             const int32_t* offsets,
@@ -539,9 +549,11 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
             processed_cursor += size;
             return;
         }
+#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
         segcore::ObservePkUpdateRead(field,
                                      {segcore::PkUpdateReadPath::RawPredicate,
                                       static_cast<size_t>(size)});
+#endif
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFunc<T, true, true, filter_type> func;
             func(val1,

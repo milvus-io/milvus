@@ -425,6 +425,19 @@ if ( BUILD_UNIT_TEST STREQUAL "ON" )
     add_subdirectory(benchmark)
 endif ()
 
+if (MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK)
+    if (NOT BUILD_UNIT_TEST STREQUAL "ON")
+        message(FATAL_ERROR "MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK requires BUILD_UNIT_TEST=ON")
+    endif ()
+    # Keep the opt-in limited to the benchmark and its production observation sites.
+    set_property(SOURCE src/exec/expression/BinaryRangeExpr.cpp src/exec/expression/TermExpr.cpp
+        TARGET_DIRECTORY milvus_exec APPEND PROPERTY COMPILE_DEFINITIONS MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK)
+    set_property(SOURCE src/segcore/UpdatesRecord.cpp
+        TARGET_DIRECTORY milvus_segcore APPEND PROPERTY COMPILE_DEFINITIONS MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK)
+    set_property(SOURCE unittest/pk_update_native_benchmark.cpp
+        TARGET_DIRECTORY all_tests APPEND PROPERTY COMPILE_DEFINITIONS MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK)
+endif ()
+
 # Use the same checks in normal, verifier and coverage builds. These operate
 # on first-party targets only; no additional compiler or sanitizer build runs.
 include(CompileChecks)

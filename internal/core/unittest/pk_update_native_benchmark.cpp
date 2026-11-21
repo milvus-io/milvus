@@ -42,7 +42,10 @@
 #include "exec/expression/ExprCache.h"
 #include "query/PlanProto.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/UpdatesRecord.h"
+#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
 #include "segcore/PkUpdateReadObserver.h"
+#endif
 #include "test_utils/DataGen.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -51,15 +54,18 @@ namespace milvus::segcore {
 namespace {
 
 using Json = nlohmann::json;
-using Clock = std::chrono::steady_clock;
 using Plan = std::unique_ptr<query::RetrievePlan>;
 using Result = proto::segcore::RetrieveResults;
 
 constexpr int64_t kLimit = 1000;
+constexpr int64_t kFirstPk = 2000000;
+
+#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
+using Clock = std::chrono::steady_clock;
+
 constexpr size_t kPlans = 100;
 constexpr size_t kIterations = 1000;
 constexpr size_t kRows = 1000000;
-constexpr int64_t kFirstPk = 2000000;
 
 double
 ElapsedMs(Clock::time_point start, Clock::time_point finish = Clock::now()) {
@@ -89,12 +95,14 @@ ReadJson(const std::filesystem::path& path) {
     std::ifstream input(path);
     return Json::parse(input);
 }
+#endif
 
 struct Columns {
     std::vector<int64_t> ips;
     std::vector<std::string> urls;
 };
 
+#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
 struct FieldWork {
     uint64_t raw_batches = 0;
     uint64_t raw_rows = 0;
@@ -186,6 +194,7 @@ class MeasurePredicateWork {
         current_work = nullptr;
     }
 };
+#endif
 
 class PkUpdateNativeBenchmark : public ::testing::Test {
  protected:
@@ -438,6 +447,7 @@ class PkUpdateNativeBenchmark : public ::testing::Test {
         }
     }
 
+#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
     static Json
     Latency(std::vector<double> samples) {
         auto ordered = samples;
@@ -486,6 +496,7 @@ class PkUpdateNativeBenchmark : public ::testing::Test {
         }
         return samples;
     }
+#endif
 
     SchemaPtr schema_;
     FieldId pk_{0}, ip_{0}, url_{0};
@@ -531,6 +542,7 @@ TEST_F(PkUpdateNativeBenchmark, SnapshotProjection) {
     }
 }
 
+#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
 TEST_F(PkUpdateNativeBenchmark, DISABLED_ClickBench) {
 #ifndef NDEBUG
     FAIL() << "Timing requires a Release or RelWithDebInfo build";
@@ -776,6 +788,7 @@ TEST_F(PkUpdateNativeBenchmark, DISABLED_ClickBench) {
 #endif
     std::cout << "PK_UPDATE_NATIVE_BENCH " << report.dump() << '\n';
 }
+#endif
 
 }  // namespace
 }  // namespace milvus::segcore

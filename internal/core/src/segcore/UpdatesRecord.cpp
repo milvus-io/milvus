@@ -11,7 +11,9 @@
 
 #include "segcore/UpdatesRecord.h"
 
+#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
 #include "segcore/PkUpdateReadObserver.h"
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -339,7 +341,9 @@ Decode(const FieldMeta& meta, const proto::schema::UpdateLiteral& literal) {
 
 }  // namespace
 
+#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
 thread_local PkUpdateReadObserver pk_update_read_observer = nullptr;
+#endif
 
 struct UpdatesRecord::Impl {
     std::shared_mutex mutex;
@@ -485,7 +489,9 @@ UpdatesRecord::VisitUpdates(
     Timestamp timestamp,
     const std::function<void(int64_t, const UpdateValue&)>& visit) const {
     ReadStats stats;
+#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
     size_t visited_bitmap_bits = 0;
+#endif
     std::shared_lock lock(impl_->mutex);
     auto it = impl_->fields.find(field.get());
     if (it == impl_->fields.end())
@@ -501,9 +507,11 @@ UpdatesRecord::VisitUpdates(
             if (end == log.entries.begin())
                 return;
             stats.used_visited = log.positions.size() != log.entries.size();
-            visited_bitmap_bits =
-                stats.used_visited ? log.membership.size() : 0;
-            std::vector<bool> visited(visited_bitmap_bits);
+            std::vector<bool> visited(stats.used_visited ? log.membership.size()
+                                                         : 0);
+#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
+            visited_bitmap_bits = visited.size();
+#endif
             while (end != log.entries.begin()) {
                 const auto& delta = *--end;
                 ++stats.scanned_entries;
@@ -522,8 +530,10 @@ UpdatesRecord::VisitUpdates(
     impl_->reverse_scans.fetch_add(1, std::memory_order_relaxed);
     impl_->reverse_selected.fetch_add(stats.selected_offsets,
                                       std::memory_order_relaxed);
+#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
     ObservePkUpdateRead(
         field, {PkUpdateReadPath::Reverse, 0, stats, visited_bitmap_bits});
+#endif
     return stats;
 }
 
@@ -536,22 +546,25 @@ UpdatesRecord::ReadRangeUpdates(FieldId field,
                                 const TargetBitmapView& candidates,
                                 size_t mask_start,
                                 ReadStats* stats) const {
-    const auto observer = pk_update_read_observer;
-    ReadStats measured;
-    auto patches = ReadBatch(field,
-                             timestamp,
-                             start,
-                             count,
-                             offsets,
-                             candidates,
-                             mask_start,
-                             observer ? &measured : stats);
-    if (observer) {
+#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
+    if (const auto observer = pk_update_read_observer) {
+        ReadStats measured;
+        auto patches = ReadBatch(field,
+                                 timestamp,
+                                 start,
+                                 count,
+                                 offsets,
+                                 candidates,
+                                 mask_start,
+                                 &measured);
         if (stats)
             *stats = measured;
         observer(field, {PkUpdateReadPath::Overlay, count, measured});
+        return patches;
     }
-    return patches;
+#endif
+    return ReadBatch(
+        field, timestamp, start, count, offsets, candidates, mask_start, stats);
 }
 
 std::vector<UpdatesRecord::Patch>

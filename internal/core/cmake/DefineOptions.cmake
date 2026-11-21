@@ -63,6 +63,9 @@ define_option(MILVUS_USE_CCACHE "Use ccache when compiling (if available)" ON)
 
 define_option(MILVUS_USE_PCH "Use precompiled headers to speed up compilation" ON)
 
+define_option(MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
+        "Enable read observation for the native PK update benchmark" OFF)
+
 define_option(MILVUS_UNITY_BUILD "Use CMake unity (jumbo) build to speed up compilation" OFF)
 
 define_option(MILVUS_USE_SPLIT_DWARF

@@ -16,6 +16,8 @@
 
 #pragma once
 
+#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
+
 #include "common/Types.h"
 #include "segcore/UpdatesRecord.h"
 
@@ -48,3 +50,5 @@ ObservePkUpdateRead(FieldId field, const PkUpdateReadEvent& event) {
 }
 
 }  // namespace milvus::segcore
+
+#endif

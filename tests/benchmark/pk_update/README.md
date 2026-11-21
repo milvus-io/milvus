@@ -20,8 +20,11 @@ python tests/benchmark/pk_update/prepare_clickbench.py \
   --parquet /path/to/hits_0.parquet --output-dir "$fixtures/5pct-3x" --percent 5 --rounds 3
 ```
 
-Build `all_tests` and its matching shared core in Release or RelWithDebInfo
-using the repository's native test build. Run the matrix against those binaries.
+Configure a native test build in Release or RelWithDebInfo with
+`-DBUILD_UNIT_TEST=ON -DMILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK=ON`. Build
+`all_tests` and its matching shared core, then run the matrix against those
+binaries. The observer and the timed test are compiled only with this opt-in.
+The standard native test build still includes the snapshot correctness test.
 
 ```sh
 python tests/benchmark/pk_update/run_native.py \
@@ -44,7 +47,8 @@ observer records actual native predicate and update batch work. Raw rows are
 rows passed to native evaluators before their per-row candidate mask. Overlay
 input rows are the size of the incoming spans before membership or candidate
 filtering. Visited bitmap bits report requested logical size. Repeated
-configurations include an unobserved timing comparison for the candidate.
+configurations include a callback-off timing comparison for the candidate
+within the same benchmark build.
 
 The runner preserves per-process command, exit code, GTest XML and complete
 latency series. It verifies fixture hashes and records binary and core digests.
