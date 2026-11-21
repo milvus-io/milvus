@@ -41,11 +41,15 @@ if ( MILVUS_GPU_VERSION STREQUAL "ON" )
     set(rmm_DIR "${FETCHCONTENT_BASE_DIR}/rmm-build" CACHE PATH "Path to rmm build directory" FORCE)
 endif ()
 
-if ( WITH_SVS STREQUAL "ON" )
-    set(WITH_SVS ON CACHE BOOL "" FORCE )
+# Resolve auto for the target without replacing the user's cached selection.
+if ( WITH_SVS STREQUAL "ON" OR
+     ( WITH_SVS STREQUAL "AUTO" AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+       CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$" ) )
+    set(WITH_SVS ON)
 else ()
-    set(WITH_SVS OFF CACHE BOOL "" FORCE )
+    set(WITH_SVS OFF)
 endif()
+message(STATUS "Knowhere SVS support: ${WITH_SVS}")
 
 # Conan 2.x: CMAKE_PREFIX_PATH is set by conan_toolchain.cmake
 FetchContent_Declare(
@@ -66,20 +70,15 @@ if ( NOT knowhere_POPULATED )
                       ${knowhere_BINARY_DIR} )
 endif()
 
-# Install the SVS runtime shared library alongside libknowhere.so so that
-# the Go linker (and the final binary at runtime) can find it.
-# svs_SOURCE_DIR is set inside knowhere's subdirectory scope and does not
-# propagate here, so we derive the path from FETCHCONTENT_BASE_DIR which
-# is in the CMake cache (set by internal/core/CMakeLists.txt).
-if ( WITH_SVS STREQUAL "ON" )
-    set( _SVS_LIB_DIR "${FETCHCONTENT_BASE_DIR}/svs-src/lib" )
-    if ( EXISTS "${_SVS_LIB_DIR}" )
-        install(DIRECTORY ${_SVS_LIB_DIR}/
-                DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}
-                FILES_MATCHING PATTERN "libsvs_runtime.so*")
-    else()
-        message(WARNING "SVS enabled but ${_SVS_LIB_DIR} not found \u2014 libsvs_runtime.so will not be installed")
+# Install the runtime alongside libknowhere.so. Both fetched and preinstalled
+# SVS packages place their config under lib/cmake/svs_runtime.
+if ( WITH_SVS )
+    get_directory_property(_SVS_CONFIG_DIR DIRECTORY "${knowhere_SOURCE_DIR}" DEFINITION svs_runtime_DIR)
+    file(GLOB _SVS_RUNTIME_LIBS "${_SVS_CONFIG_DIR}/../../libsvs_runtime.so*")
+    if ( NOT _SVS_RUNTIME_LIBS )
+        message(FATAL_ERROR "SVS runtime libraries not found for package config at ${_SVS_CONFIG_DIR}")
     endif()
+    install(FILES ${_SVS_RUNTIME_LIBS} DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 endif()
 
 if ( WITH_CUVS STREQUAL "ON" )

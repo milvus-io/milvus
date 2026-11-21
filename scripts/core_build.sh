@@ -99,7 +99,7 @@ EMBEDDED_MILVUS="OFF"
 BUILD_DISK_ANN="OFF"
 USE_ASAN="OFF"
 USE_DYNAMIC_SIMD="ON"
-USE_SVS="OFF"
+USE_SVS="AUTO"
 TANTIVY_FEATURES=""
 : "${TANTIVY_ANALYZER_REMOTE_TLS:=ON}"
 INDEX_ENGINE="KNOWHERE"
@@ -178,7 +178,7 @@ parameter:
 -b: build embedded milvus(default: OFF)
 -a: build milvus with AddressSanitizer(default: false)
 -Z: build milvus without azure-sdk-for-cpp, so cannot use azure blob
--S: build milvus with SVS/Intel Scalable Vector Search(default: OFF)
+-S: build milvus with SVS (AUTO/ON/OFF, default: AUTO enables SVS on Linux x86-64)
 -f: build milvus with tantivy features(default: '')
 -h: help
 
@@ -286,7 +286,7 @@ ${CMAKE_EXTRA_ARGS} \
 -DUSE_ASAN=${USE_ASAN} \
 -DUSE_DYNAMIC_SIMD=${USE_DYNAMIC_SIMD} \
 -DCPU_ARCH=${CPU_ARCH} \
--DWITH_SVS=${USE_SVS} \
+-DWITH_SVS:STRING=${USE_SVS} \
 -DINDEX_ENGINE=${INDEX_ENGINE} \
 -DTANTIVY_FEATURES_LIST=${TANTIVY_FEATURES} \
 -DTANTIVY_ANALYZER_REMOTE_TLS=${TANTIVY_ANALYZER_REMOTE_TLS} \
