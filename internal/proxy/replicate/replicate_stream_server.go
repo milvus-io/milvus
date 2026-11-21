@@ -5,9 +5,11 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"github.com/pingcap/failpoint"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/util/pkupdatepoint"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -138,6 +140,12 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 	// Append message to wal.
 	_, err = streaming.WAL().Replicate().Append(ctx, msg)
 	if err == nil {
+		failpoint.Inject("pkReplicatedTxnBody", func(value failpoint.Value) {
+			if msg.MessageType() == message.MessageTypeUpdate && msg.TxnContext() != nil &&
+				pkupdatepoint.Hold(ctx, value, msg.VChannel(), sourceTs, 0, reqMsg.GetId().GetId()) {
+				failpoint.Return(merr.WrapErrServiceUnavailable("replication stream interrupted after WAL append"))
+			}
+		})
 		p.sendReplicateResult(sourceTs, msg)
 		return nil
 	}

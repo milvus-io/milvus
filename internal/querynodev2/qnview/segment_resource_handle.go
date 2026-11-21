@@ -2,8 +2,12 @@ package qnview
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
+	"github.com/pingcap/failpoint"
+
+	"github.com/milvus-io/milvus/internal/util/pkupdatepoint"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -88,6 +92,15 @@ func (m *SegmentResourceManager) AcquireSealedSegmentHandles(ctx context.Context
 		}
 	}
 	m.mu.Unlock()
+	failpoint.Inject("pkReadReservation", func(value failpoint.Value) {
+		for _, h := range handles {
+			pin := h.(*resourceSegmentHandle)
+			m.mu.Lock()
+			reserved := pin.base.retention.Reserved
+			m.mu.Unlock()
+			pkupdatepoint.Hold(ctx, value, pin.base.segment.VChannel(), timetick, pin.ID(), map[string]any{"base": fmt.Sprintf("%p", pin.base), "view": key.String(), "reserved": reserved})
+		}
+	})
 	return handles, nil
 }
 

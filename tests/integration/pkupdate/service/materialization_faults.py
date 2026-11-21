@@ -23,9 +23,9 @@ def arm(path, directory, owner, channel, tick):
     temp.replace(path)
 
 
-def receipt(directory):
+def receipt(directory, timeout=60):
     target = directory / "receipt.json"
-    deadline = time.monotonic() + 60
+    deadline = time.monotonic() + timeout
     while not target.exists():
         if time.monotonic() >= deadline:
             raise TimeoutError(str(target))

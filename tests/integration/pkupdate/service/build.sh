@@ -20,19 +20,31 @@ replacements = {str(source): str(overlay)}
 inputs = [source, overlay]
 if sys.argv[2] == "faults":
     import shutil
+    private_dirs = {}
     for rel in (
+        "internal/querynodev2/segments/segment.go",
+        "internal/querynodev2/transformlogbuffer/buffer.go",
+        "internal/streamingnode/server/wal/vchannel/growingruntime/live.go",
+        "internal/streamingnode/server/wal/vchannel/queryresource/runtime.go",
+        "internal/querynodev2/qnview/segment_resource_handle.go",
+        "internal/querynodev2/qnview/segment_resource_manager.go",
+        "internal/util/segcore/segment.go",
+        "internal/proxy/replicate/replicate_stream_server.go",
+        "internal/streamingnode/server/wal/walsummary/dispatch_stream.go",
         "internal/flushcommon/syncmgr/meta_writer.go",
         "internal/streamingnode/server/wal/recovery/recovery_background_task.go",
     ):
         orig = pathlib.Path(rel).resolve(strict=True)
         private = out / "rewritten" / rel
-        private.parent.mkdir(parents=True)
+        private.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(orig, private)
-        subprocess.run([out / "bin/failpoint-ctl", "enable", private.parent], check=True)
-        for generated in private.parent.glob("*.go"):
-            replacements[str(orig.parent / generated.name)] = str(generated)
-            inputs.append(generated)
+        private_dirs[private.parent] = orig.parent
         inputs.append(orig)
+    for copied_dir, original_dir in private_dirs.items():
+        subprocess.run([out / "bin/failpoint-ctl", "enable", copied_dir], check=True)
+        for generated in copied_dir.glob("*.go"):
+            replacements[str(original_dir / generated.name)] = str(generated)
+            inputs.append(generated)
     inputs.append(pathlib.Path("internal/util/pkupdatepoint/receipt.go").resolve())
 elif sys.argv[2] != "normal":
     raise ValueError("build mode must be normal or faults")
@@ -47,5 +59,6 @@ go build -p=2 -mod=readonly -pgo=off -tags dynamic -overlay="$out/overlay.json" 
 go build -mod=readonly -o "$out/bin/update-rpc" ./tests/integration/pkupdate/service/rpc
 go build -p=2 -mod=readonly -pgo=off -tags dynamic -o "$out/bin/inspect" ./tests/integration/pkupdate/service/inspect
 if [[ "$mode" == faults ]]; then
+    go build -mod=readonly -o "$out/bin/ownerread" ./tests/integration/pkupdate/service/ownerread
     go build -mod=readonly -o "$out/bin/transform" ./tests/integration/pkupdate/service/transform
 fi

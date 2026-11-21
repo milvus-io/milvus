@@ -3,7 +3,10 @@ package growingruntime
 import (
 	"context"
 
+	"github.com/pingcap/failpoint"
+
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
+	"github.com/milvus-io/milvus/internal/util/pkupdatepoint"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
@@ -58,6 +61,9 @@ func (r *Runtime) applyLiveMessage(ctx context.Context, msg message.ImmutableMes
 		r.applyErr = merr.Wrap(err, "failed to apply live message to growing runtime")
 		r.mvccCond.Broadcast()
 		r.mu.Unlock()
+		failpoint.Inject("pkGrowingFailureFrontier", func(value failpoint.Value) {
+			pkupdatepoint.Hold(ctx, value, msg.VChannel(), timeTick, 0, map[string]uint64{"growing": r.appliedGrowingTimeTick.Load(), "transform": r.appliedTransformTimeTick.Load()})
+		})
 		return err
 	}
 	if applyGrowing {

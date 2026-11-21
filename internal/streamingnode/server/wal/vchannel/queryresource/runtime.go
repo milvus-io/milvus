@@ -2,9 +2,13 @@ package queryresource
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
+	"github.com/pingcap/failpoint"
+
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
+	"github.com/milvus-io/milvus/internal/util/pkupdatepoint"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -417,6 +421,13 @@ func (r *QueryRuntime) drainReady() {
 			r.stop()
 			if r.onFailure != nil {
 				r.onFailure(r)
+				failpoint.Inject("pkOldGrowingCallback", func(value failpoint.Value) {
+					for _, event := range batch {
+						if msg := event.Message; msg != nil {
+							pkupdatepoint.Redeliver(value, msg.VChannel(), msg.TimeTick(), 0, fmt.Sprintf("%p", r), func() { r.onFailure(r) })
+						}
+					}
+				})
 			}
 			return
 		}

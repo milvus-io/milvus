@@ -97,7 +97,7 @@ class Fixture:
         self.record("update", [request, data])
         return data
 
-    def create(self, name, shards=1):
+    def create(self, name, shards=1, *, index_score=True):
         schema = self.client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field("id", DataType.INT64, is_primary=True)
         schema.add_field("score", DataType.INT64)
@@ -105,7 +105,8 @@ class Fixture:
         schema.add_field("vec", DataType.FLOAT_VECTOR, dim=2)
         indexes = self.client.prepare_index_params()
         indexes.add_index("vec", index_type="FLAT", metric_type="L2")
-        indexes.add_index("score", index_type="STL_SORT")
+        if index_score:
+            indexes.add_index("score", index_type="STL_SORT")
         self.client.create_collection(name, schema=schema, num_shards=shards, consistency_level="Strong", timeout=90)
 
         self.index_and_load(name, indexes)
