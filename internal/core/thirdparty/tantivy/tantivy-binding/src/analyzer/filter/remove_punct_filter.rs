@@ -1,11 +1,36 @@
 use super::fixed_regex::FixedRegex;
+use crate::error::{Result, TantivyBindingError};
 use once_cell::sync::Lazy;
 use regex_automata::meta::Regex;
+use serde_json as json;
 use tantivy::tokenizer::{Token, TokenFilter, TokenStream, Tokenizer};
 
 static PUNCT_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"[\p{Punct}\s]+").unwrap());
+static STANDALONE_PUNCT_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\A[\p{Punct}\s]+\z").unwrap());
 
-pub struct RemovePunctFilter;
+#[derive(Default)]
+pub struct RemovePunctFilter {
+    standalone: bool,
+}
+
+impl RemovePunctFilter {
+    pub fn from_json(params: &json::Map<String, json::Value>) -> Result<Self> {
+        let standalone = match params.get("mode") {
+            None => false,
+            Some(value) => match value.as_str() {
+                Some("contains") => false,
+                Some("standalone") => true,
+                _ => {
+                    return Err(TantivyBindingError::InvalidArgument(
+                        "removepunct mode must be 'contains' or 'standalone'".to_string(),
+                    ));
+                }
+            },
+        };
+        Ok(Self { standalone })
+    }
+}
 
 pub struct RemovePunctFilterStream<'a, T> {
     regex: &'a mut FixedRegex,
@@ -18,7 +43,11 @@ impl TokenFilter for RemovePunctFilter {
     fn transform<T: Tokenizer>(self, tokenizer: T) -> RemovePunctFilterWrapper<T> {
         RemovePunctFilterWrapper {
             inner: tokenizer,
-            regex: FixedRegex::new(&PUNCT_REGEX),
+            regex: FixedRegex::new(if self.standalone {
+                &STANDALONE_PUNCT_REGEX
+            } else {
+                &PUNCT_REGEX
+            }),
         }
     }
 }
@@ -62,6 +91,44 @@ impl<T: TokenStream> TokenStream for RemovePunctFilterStream<'_, T> {
 #[cfg(test)]
 mod tests {
     use crate::analyzer::analyzer::create_analyzer;
+    use serde_json::json;
+    use tantivy::tokenizer::{RawTokenizer, TextAnalyzer, Token};
+
+    #[test]
+    fn test_standalone_punctuation_token_boundaries() {
+        let params = json!({"mode": "standalone"});
+        let filter = super::RemovePunctFilter::from_json(params.as_object().unwrap()).unwrap();
+        let mut analyzer = TextAnalyzer::builder(RawTokenizer::default())
+            .filter(filter)
+            .build();
+        for (text, keep) in [
+            ("", true),
+            ("!，。\n\t\u{a0}\u{2003}", false),
+            (" ", false),
+            ("don't", true),
+            ("3.5kg", true),
+            ("u.s.a", true),
+            ("!abc", true),
+            ("abc!", true),
+            ("a b", true),
+            ("a\n", true),
+            ("\n!a", true),
+            ("😀", true),
+            ("$+", true),
+        ] {
+            let mut stream = analyzer.token_stream(text);
+            let mut tokens: Vec<Token> = Vec::new();
+            while stream.advance() {
+                tokens.push(stream.token().clone());
+            }
+            assert_eq!(tokens.len(), usize::from(keep), "{text:?}");
+            if keep {
+                assert_eq!(tokens[0].text, text);
+                assert_eq!(tokens[0].offset_from, 0);
+                assert_eq!(tokens[0].offset_to, text.len());
+            }
+        }
+    }
 
     #[test]
     fn test_remove_punct_filter() {

@@ -226,3 +226,125 @@ fn fixed_regex_filter_analyzer_can_move_between_threads() {
         });
     }
 }
+
+#[test]
+fn removepunct_standalone_preserves_icu_words() {
+    let input = "don't buy 3.5kg from u.s.a, see modash.io or a@b.com";
+    let config = json!({"tokenizer":"icu", "filter":[
+        {"type":"removepunct", "mode":"standalone"}, "lowercase"
+    ]});
+    // Older versions have no configurable removepunct. Exercise their existing
+    // filter so the regression reports the lost words, rather than just a
+    // configuration error. Other construction errors must still fail the test.
+    let mut analyzer = match create_analyzer(&config.to_string(), "") {
+        Ok(analyzer) => analyzer,
+        Err(error)
+            if error.to_string() == "InvalidArgument: unsupport filter type: removepunct" =>
+        {
+            create_analyzer(
+                r#"{"tokenizer":"icu","filter":["removepunct","lowercase"]}"#,
+                "",
+            )
+            .unwrap()
+        }
+        Err(error) => panic!("{error}"),
+    };
+    let expected = [
+        "don't",
+        "buy",
+        "3.5kg",
+        "from",
+        "u.s.a",
+        "see",
+        "modash.io",
+        "or",
+        "a",
+        "b.com",
+    ];
+    for _ in 0..2 {
+        assert_eq!(
+            collect(&mut analyzer, input)
+                .into_iter()
+                .map(|token| token.text)
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+    let mut cloned = analyzer.clone();
+    drop(analyzer);
+    assert_eq!(
+        collect(&mut cloned, input)
+            .into_iter()
+            .map(|token| token.text)
+            .collect::<Vec<_>>(),
+        expected
+    );
+}
+
+#[test]
+fn removepunct_modes_preserve_tokens_and_defaults() {
+    for tokenizer in ["icu", "jieba", "whitespace", "standard"] {
+        for (filter, pattern) in [
+            (json!("removepunct"), r"[\p{Punct}\s]+"),
+            (json!({"type":"removepunct"}), r"[\p{Punct}\s]+"),
+            (
+                json!({"type":"removepunct", "mode":"contains"}),
+                r"[\p{Punct}\s]+",
+            ),
+            (
+                json!({"type":"removepunct", "mode":"standalone"}),
+                r"\A[\p{Punct}\s]+\z",
+            ),
+        ] {
+            let config = json!({"tokenizer":tokenizer, "filter":["lowercase"]});
+            let mut baseline = create_analyzer(&config.to_string(), "").unwrap();
+            let config = json!({"tokenizer":tokenizer, "filter":["lowercase", filter]});
+            let serialized = serde_json::from_str::<Value>(&config.to_string()).unwrap();
+            assert!(
+                tantivy_binding::analyzer::validate_analyzer(&serialized.to_string(), "").is_ok()
+            );
+            let mut analyzer = create_analyzer(&serialized.to_string(), "").unwrap();
+            let regex = Regex::new(pattern).unwrap();
+            let inputs = corpus().into_iter().chain([
+                "Don't 3.5kg u.s.a modash.io b.com".into(),
+                "!abc abc! a\u{a0}b a\n !\n\t，。 😀 $ +".into(),
+            ]);
+            for text in inputs {
+                let expected: Vec<_> = collect(&mut baseline, &text)
+                    .into_iter()
+                    .filter(|token| !regex.is_match(&token.text))
+                    .collect();
+                // Check all fields as well as repeated calls and warm clones.
+                assert_eq!(collect(&mut analyzer, &text), expected, "{config}");
+                let mut cloned = analyzer.clone();
+                assert_eq!(collect(&mut cloned, &text), expected, "{config}");
+                assert_eq!(collect(&mut analyzer, &text), expected, "{config}");
+            }
+        }
+    }
+}
+
+#[test]
+fn removepunct_rejects_invalid_modes() {
+    for mode in [
+        json!(null),
+        json!(true),
+        json!(1),
+        json!([]),
+        json!({}),
+        json!(""),
+        json!("unknown"),
+    ] {
+        let config = json!({"tokenizer":"icu", "filter":[{"type":"removepunct", "mode":mode}]});
+        for result in [
+            create_analyzer(&config.to_string(), "").map(|_| ()),
+            tantivy_binding::analyzer::validate_analyzer(&config.to_string(), "").map(|_| ()),
+        ] {
+            let error = result.unwrap_err().to_string();
+            assert!(
+                error.starts_with("InvalidArgument:") && error.contains("removepunct mode"),
+                "{config}: {error}"
+            );
+        }
+    }
+}
