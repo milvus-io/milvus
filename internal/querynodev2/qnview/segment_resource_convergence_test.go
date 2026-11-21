@@ -156,6 +156,57 @@ func TestSegmentResourceCatchupFailureDoesNotReportReady(t *testing.T) {
 	})
 }
 
+func TestSegmentResourceRetiresFailedInitialCatchupAfterReplacement(t *testing.T) {
+	mockey.PatchConvey("only its own binding retains a terminal initial catch-up", t, func() {
+		f := setupResourceTest(t, nil)
+		f.registerMock.UnPatch()
+		oldOwner := f.manager.buffer.(*fakeTransformLogBuffer)
+		gap := make(chan struct{})
+		oldReg := &fakeTransformRegistration{waitCh: gap, waitErr: merr.WrapErrServiceNotReadyMsg("history truncated")}
+		mockey.Mock((*fakeTransformLogBuffer).RegisterSegment).To(func(owner *fakeTransformLogBuffer, _ context.Context, _ TransformSegment) (TransformRegistration, error) {
+			if owner == oldOwner {
+				return oldReg, nil
+			}
+			return instantTransformRegistration{}, nil
+		}).Build()
+		old := f.request(1, 1, 1)
+		failed := make(chan struct{})
+		old.OnUnrecoverable = func() { close(failed) }
+		f.manager.Acquire(old)
+		close(gap)
+		awaitShutdown(t, failed)
+		require.Empty(t, f.ready)
+		oldOwner.mu.Lock()
+		oldOwner.guard = &fakeTransformLogGuard{registrar: &fakeTransformLogBuffer{}}
+		oldOwner.mu.Unlock()
+		replacement := f.acquire(2, 1, 1)
+		f.await(t, 1)
+		defer f.drop(t, replacement)
+		require.EqualValues(t, 2, f.loads.Load())
+		require.Zero(t, f.releases.Load())
+
+		// A third binding still needs dependencies; a terminal base cannot
+		// satisfy speculative demand even when schema and load versions match.
+		f.dependencyMock.UnPatch()
+		entered := make(chan struct{})
+		mockey.Mock((*fakeQueryViewCollectionRuntimeManager).Acquire).To(func(_ *fakeQueryViewCollectionRuntimeManager, ctx context.Context, _ *qviews.QueryViewAtQueryNode) (CollectionRuntimeGuard, bool, error) {
+			close(entered)
+			<-ctx.Done()
+			return nil, false, ctx.Err()
+		}).Build()
+		pending := f.acquire(3, 1, 1)
+		defer f.drop(t, pending)
+		awaitShutdown(t, entered)
+		f.drop(t, old)
+		require.Eventually(t, func() bool { return f.releases.Load() == 1 }, time.Second, time.Millisecond)
+		require.True(t, oldReg.unregistered)
+		handles, err := f.manager.AcquireSealedSegmentHandles(t.Context(), replacement.Key, replacement.View, 50)
+		require.NoError(t, err)
+		require.Len(t, handles, 1)
+		handles[0].Release()
+	})
+}
+
 func TestSegmentResourcePrunesDepartedScope(t *testing.T) {
 	mockey.PatchConvey("the physical base adopts a retained read after another scope exits", t, func() {
 		f := setupResourceTest(t, nil)

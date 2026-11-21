@@ -836,7 +836,7 @@ func (r *segmentResource) pruneReadsLocked() []segments.ReadState {
 		latest[read.base] = read
 	}
 	for base, read := range latest {
-		if bound[base] {
+		if bound[base] || base.catchupErr != nil {
 			continue
 		}
 		for _, b := range r.bindings {
@@ -846,9 +846,9 @@ func (r *segmentResource) pruneReadsLocked() []segments.ReadState {
 			}
 		}
 	}
-	// A result awaiting catch-up is still the outcome of a live demand.
+	// Only an unfinished catch-up can still satisfy another pending binding.
 	for _, read := range r.reads {
-		if read.base.caughtUp {
+		if read.base.caughtUp || read.base.catchupErr != nil {
 			continue
 		}
 		for _, b := range r.bindings {
@@ -913,17 +913,13 @@ func (r *segmentResource) pruneBasesLocked() []*segmentBase {
 	for _, read := range r.reads {
 		used[read.base] = true
 	}
+	pending := slices.ContainsFunc(r.bindings, func(b *segmentBinding) bool {
+		return b.prepared == nil && !b.view.failed
+	})
 	var retired []*segmentBase
 	kept := r.bases[:0]
 	for _, base := range r.bases {
-		pending := false
-		for _, b := range r.bindings {
-			if b.prepared == nil && !b.view.failed {
-				pending = true
-				break
-			}
-		}
-		if used[base] || base.operationRefs > 0 || base.catchupRunning || pending {
+		if used[base] || base.operationRefs > 0 || base.catchupRunning || (pending && base.catchupErr == nil) {
 			kept = append(kept, base)
 		} else {
 			retired = append(retired, base)
