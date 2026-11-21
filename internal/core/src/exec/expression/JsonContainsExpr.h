@@ -476,6 +476,11 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
+    bool
+    SupportsRawExprCache() const override {
+        return !expr_->column_.element_level_;
+    }
+
     std::string
     ToString() const override {
         return fmt::format("{}", expr_->ToString());
