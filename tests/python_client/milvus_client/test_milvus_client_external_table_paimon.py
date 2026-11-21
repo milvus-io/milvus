@@ -207,7 +207,15 @@ class TestMilvusClientPaimonRefresh(_ClientBase):
     @pytest.mark.parametrize(
         "fixture,mode,index_type,metric,params,search_params",
         [
-            ("dv", "direct-file", "HNSW", "COSINE", {"M": 16, "efConstruction": 200}, {"ef": 200}),
+            (
+                "dv",
+                "direct-file",
+                "HNSW",
+                "COSINE",
+                # Returned distances are checked against exact raw vectors in PaimonOracle.assert_search.
+                {"M": 16, "efConstruction": 200, "refine_quant_type": "NONE"},
+                {"ef": 200},
+            ),
             ("mor", "data-split", "IVF_FLAT", "L2", {"nlist": 32}, {"nprobe": 32}),
         ],
     )
