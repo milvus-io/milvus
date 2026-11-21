@@ -30,6 +30,7 @@ type Server struct {
 	// service level variables.
 	assignmentService service.AssignmentService
 	broadcastService  service.BroadcastService
+	onNodeLost        balancer.NodeLostCallback
 }
 
 // Start initializes the streamingcoord server.
@@ -52,7 +53,7 @@ func (s *Server) initBasicComponent(ctx context.Context) (err error) {
 		// Create a provider that reads channel names from configuration
 		// and collection metadata recovered by RootCoord.
 		provider := util.NewConfigChannelProviderWithPChannelStatsManager(channel.StaticPChannelStatsManager)
-		balancer, err := balancer.RecoverBalancer(ctx, provider)
+		balancer, err := balancer.RecoverBalancer(ctx, provider, balancer.WithNodeLostCallback(s.onNodeLost))
 		if err != nil {
 			provider.Close()
 			s.logger.Warn(ctx, "recover balancer failed", mlog.Err(err))

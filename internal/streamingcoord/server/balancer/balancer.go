@@ -22,7 +22,22 @@ type (
 	AllocVChannelParam                   = channel.AllocVChannelParam
 	WatchChannelAssignmentsCallbackParam = channel.WatchChannelAssignmentsCallbackParam
 	WatchChannelAssignmentsCallback      = channel.WatchChannelAssignmentsCallback
+
+	// NodeLostCallback is invoked after the balancer confirms a StreamingNode is not alive,
+	// completes the configured node-lost grace period, and commits pchannel reassignment away from it.
+	NodeLostCallback func(ctx context.Context, serverID int64)
+
+	// Option configures optional behavior of RecoverBalancer.
+	Option func(*balancerImpl)
 )
+
+// WithNodeLostCallback registers a callback invoked when a StreamingNode is confirmed lost
+// and its pchannel assignments have been evicted.
+func WithNodeLostCallback(cb NodeLostCallback) Option {
+	return func(b *balancerImpl) {
+		b.onNodeLost = cb
+	}
+}
 
 // Balancer is a load balancer to balance the load of log node.
 // Given the balance result to assign or remove channels to corresponding log node.
