@@ -30,11 +30,15 @@ def owns_listener(pid, port):
     return r.returncode == 0 and r.stdout.strip() == str(pid)
 
 
-def replace(f, role):
+def replace(f, role, binary=None, points=None):
+    if binary is not None:
+        binary = Path(binary).resolve(strict=True)
+        if not binary.is_file() or not os.access(binary, os.X_OK):
+            raise ValueError("replacement must be an executable file")
     rows = [json.loads(x) for x in (f.site / "processes.jsonl").read_text().splitlines()]
     proc = next(x for x in reversed(rows) if x["role"] == role)
     alias = f.config["namespace"] + "-" + role
-    expected = f'{f.config["binary"]} run {role} -alias {alias}'
+    expected = f'{proc.get("binary", f.config["binary"])} run {role} -alias {alias}'
     if role not in ("querynode", "streamingnode") or not f.config["namespace"].startswith("pk-update-"):
         raise ValueError("replacement requires an owned PK-update worker")
     pid = proc["pid"]
@@ -49,7 +53,7 @@ def replace(f, role):
             if subprocess.run(["ps", "-p", str(pid)], stdout=subprocess.DEVNULL, timeout=5).returncode:
                 break
             time.sleep(0.1)
-        child = launch(f.site, role)
+        child = launch(f.site, role, binary=binary, points=points)
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
         if child.poll() is not None:

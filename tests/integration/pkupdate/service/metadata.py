@@ -9,7 +9,7 @@ from pathlib import Path
 from cluster_site import ROLES
 
 
-def capture(site, label, timeout=90):
+def capture(site, label, timeout=90, *, inspector=None, object_path=None):
     m = json.loads((site / "site.json").read_text())
     if set(m["metrics"]) != set(ROLES):
         raise ValueError("invalid retained site role inventory")
@@ -22,10 +22,11 @@ def capture(site, label, timeout=90):
         "NO_PROXY": "*",
         "no_proxy": "*",
     }
-    binary = Path(m["binary"]).with_name("inspect")
+    binary = inspector or Path(m["binary"]).with_name("inspect")
+    command = [binary] if object_path is None else [binary, object_path]
     # Native libraries and service logging can also write to stdout.
     with path.with_suffix(".log").open("x") as log:
-        proc = subprocess.run([binary], env=env, cwd=site, stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
+        proc = subprocess.run(command, env=env, cwd=site, stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
     with path.open("x") as out, path.with_suffix(".log").open() as log:
         for line in log:
             if line.startswith('{"') and ('"key":' in line or '"file":' in line):

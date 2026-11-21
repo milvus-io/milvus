@@ -62,7 +62,7 @@ def create(site, binary, configs):
         launch(site, role)
 
 
-def launch(site, role):
+def launch(site, role, binary=None, points=None):
     m = json.loads((site / "site.json").read_text())
     conf = {**m["conf"], "localStorage.path": str((site / role / "data").resolve())}
     env = {
@@ -75,12 +75,15 @@ def launch(site, role):
         "NO_PROXY": "*",
         "no_proxy": "*",
     }
+    binary = str(Path(binary or m["binary"]).resolve(strict=True))
+    if points:
+        env["GO_FAILPOINTS"] = points
     path = site / role
     path.mkdir(exist_ok=True)
     log = path / f"{time.time_ns()}.log"
     with log.open("xb") as sink:
         process = subprocess.Popen(
-            [m["binary"], "run", role, "-alias", m["namespace"] + "-" + role],
+            [binary, "run", role, "-alias", m["namespace"] + "-" + role],
             cwd=path,
             stdin=subprocess.DEVNULL,
             stdout=sink,
@@ -90,7 +93,10 @@ def launch(site, role):
         )
     with (site / "processes.jsonl").open("a") as stream:
         stream.write(
-            json.dumps({"role": role, "pid": process.pid, "log": str(log), "timestamp_ns": time.time_ns()}) + "\n"
+            json.dumps(
+                {"role": role, "pid": process.pid, "binary": binary, "log": str(log), "timestamp_ns": time.time_ns()}
+            )
+            + "\n"
         )
 
     return process

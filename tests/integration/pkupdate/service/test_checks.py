@@ -185,7 +185,7 @@ class Checks(unittest.TestCase):
                 with self.assertRaisesRegex(OSError, "write failed"):
                     replace(f, "querynode")
                 kill.assert_called_once()
-                launch.assert_called_once_with(site, "querynode")
+                launch.assert_called_once_with(site, "querynode", binary=None, points=None)
 
     def test_optimized_cannot_start(self):
         with tempfile.TemporaryDirectory() as d:

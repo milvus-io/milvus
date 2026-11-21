@@ -63,6 +63,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if len(os.Args) == 2 {
+		file := &datapb.Binlog{LogPath: os.Args[1]}
+		return storage.ReadMutationDelta(ctx, cm, file, storage.StorageV2, schemapb.DataType_Int64, nil, cfg, nil, func(l deltacodec.Layout, rows []deltacodec.Row) error {
+			return json.NewEncoder(os.Stdout).Encode(map[string]any{"file": file.LogPath, "layout": l, "rows": rows})
+		})
+	}
 	base := p.EtcdCfg.RootPath.GetValue() + "/meta/"
 	enc := json.NewEncoder(os.Stdout)
 	segments := map[int64]*datapb.SegmentInfo{}
