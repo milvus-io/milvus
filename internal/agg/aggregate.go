@@ -2,6 +2,7 @@ package agg
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"regexp"
 	"strings"
@@ -17,11 +18,19 @@ const (
 	kAvg   = "avg"
 	kMin   = "min"
 	kMax   = "max"
+
+	kVarPop     = "var_pop"
+	kVarSamp    = "var_samp"
+	kStddevPop  = "stddev_pop"
+	kStddevSamp = "stddev_samp"
+	kMean       = "mean"
+	kM2         = "m2"
 )
 
 var (
 	// Define the regular expression pattern once to avoid repeated concatenation.
-	aggregationTypes   = kSum + `|` + kCount + `|` + kAvg + `|` + kMin + `|` + kMax
+	aggregationTypes = kSum + `|` + kCount + `|` + kAvg + `|` + kMin + `|` + kMax + `|` +
+		kVarPop + `|` + kVarSamp + `|` + kStddevPop + `|` + kStddevSamp
 	aggregationPattern = regexp.MustCompile(`(?i)^(` + aggregationTypes + `)\s*\(\s*([\w\*]*)\s*\)$`)
 )
 
@@ -49,7 +58,7 @@ type AggregateBase interface {
 
 func isSupportedAggregateName(aggregateName string) bool {
 	switch aggregateName {
-	case kCount, kSum, kAvg, kMin, kMax:
+	case kCount, kSum, kAvg, kMin, kMax, kVarPop, kVarSamp, kStddevPop, kStddevSamp:
 		return true
 	default:
 		return false
@@ -67,9 +76,9 @@ func NewAggregate(aggregateName string, aggFieldID int64, originalName string, f
 
 	switch aggregateName {
 	case kCount:
-		return []AggregateBase{&CountAggregate{fieldID: aggFieldID, originalName: originalName, isAvg: false}}, nil
+		return []AggregateBase{&CountAggregate{fieldID: aggFieldID, originalName: originalName, partial: false}}, nil
 	case kSum:
-		return []AggregateBase{&SumAggregate{fieldID: aggFieldID, originalName: originalName, isAvg: false}}, nil
+		return []AggregateBase{&SumAggregate{fieldID: aggFieldID, originalName: originalName, partial: false}}, nil
 	case kAvg:
 		avg := NewAvgAggregate(aggFieldID, originalName)
 		return []AggregateBase{avg.sum, avg.count}, nil
@@ -77,6 +86,13 @@ func NewAggregate(aggregateName string, aggFieldID int64, originalName string, f
 		return []AggregateBase{&MinAggregate{fieldID: aggFieldID, originalName: originalName}}, nil
 	case kMax:
 		return []AggregateBase{&MaxAggregate{fieldID: aggFieldID, originalName: originalName}}, nil
+	case kVarPop, kVarSamp, kStddevPop, kStddevSamp:
+		// Row.Merge relies on this order: the variance state is mean, count, m2.
+		return []AggregateBase{
+			&varianceSlotAggregate{fieldID: aggFieldID, originalName: originalName, mean: true},
+			&CountAggregate{fieldID: aggFieldID, originalName: originalName, partial: true},
+			&varianceSlotAggregate{fieldID: aggFieldID, originalName: originalName},
+		}, nil
 	default:
 		// should never happen due to isSupportedAggregateName check
 		return nil, merr.WrapErrParameterInvalidMsg("invalid Aggregation operator %s", aggregateName)
@@ -86,13 +102,17 @@ func NewAggregate(aggregateName string, aggFieldID int64, originalName string, f
 func FromPB(pb *planpb.Aggregate) (AggregateBase, error) {
 	switch pb.Op {
 	case planpb.AggregateOp_count:
-		return &CountAggregate{fieldID: pb.GetFieldId(), isAvg: false}, nil
+		return &CountAggregate{fieldID: pb.GetFieldId(), partial: false}, nil
 	case planpb.AggregateOp_sum:
-		return &SumAggregate{fieldID: pb.GetFieldId(), isAvg: false}, nil
+		return &SumAggregate{fieldID: pb.GetFieldId(), partial: false}, nil
 	case planpb.AggregateOp_min:
 		return &MinAggregate{fieldID: pb.GetFieldId()}, nil
 	case planpb.AggregateOp_max:
 		return &MaxAggregate{fieldID: pb.GetFieldId()}, nil
+	case planpb.AggregateOp_mean:
+		return &varianceSlotAggregate{fieldID: pb.GetFieldId(), mean: true}, nil
+	case planpb.AggregateOp_m2:
+		return &varianceSlotAggregate{fieldID: pb.GetFieldId()}, nil
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("invalid Aggregation operator %d", pb.Op)
 	}
@@ -221,8 +241,76 @@ func (r *Row) Equal(other *Row, keyCount int) bool {
 	return true
 }
 
-func (r *Row) UpdateFieldValue(newRow *Row, col int, agg AggregateBase) {
-	agg.Update(r.fieldValues[col], newRow.fieldValues[col])
+// UpdateFieldValue merges column col of newRow into r with agg.
+func (r *Row) UpdateFieldValue(newRow *Row, col int, agg AggregateBase) error {
+	return agg.Update(r.fieldValues[col], newRow.fieldValues[col])
+}
+
+// Merge folds the aggregate columns of newRow into r. A variance state, the
+// mean, count and m2 columns from NewAggregate, merges as 1 group.
+func (r *Row) Merge(newRow *Row, keyCount int, aggs []AggregateBase) error {
+	for i := 0; i < len(aggs); i++ {
+		col := keyCount + i
+		if v, ok := aggs[i].(*varianceSlotAggregate); ok && v.mean {
+			if err := mergeVarianceState(r.fieldValues[col:col+3], newRow.fieldValues[col:col+3], col); err != nil {
+				return err
+			}
+			i += 2
+			continue
+		}
+		if err := r.UpdateFieldValue(newRow, col, aggs[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// mergeVarianceState merges the (mean, count, m2) state n into t with Chan's
+// formula. A side with count 0 holds no values, whatever its mean and m2 slots
+// hold. An m2 that overflows to +Inf stays +Inf instead of turning into NaN.
+func mergeVarianceState(t, n []*FieldValue, col int) error {
+	na, okA := t[1].val.(int64)
+	nb, okB := n[1].val.(int64)
+	if !okA || !okB || na < 0 || nb < 0 || na > math.MaxInt64-nb {
+		return merr.WrapErrServiceInternalMsg("invalid variance count at column %d: %v + %v", col+1, t[1].val, n[1].val)
+	}
+	if nb == 0 {
+		return nil
+	}
+	// state reads the mean and m2 of a side with values. A NULL, non-numeric,
+	// NaN or negative m2 there is a malformed state.
+	state := func(s []*FieldValue) (float64, float64, error) {
+		mean, okMean := s[0].val.(float64)
+		m2, okM2 := s[2].val.(float64)
+		if !okMean || !okM2 || !(m2 >= 0) {
+			return 0, 0, merr.WrapErrServiceInternalMsg("invalid variance state at column %d", col)
+		}
+		return mean, m2, nil
+	}
+	mb, qb, err := state(n)
+	if err != nil {
+		return err
+	}
+	if na == 0 {
+		for k := range t {
+			t[k].val, t[k].isNull = n[k].val, n[k].isNull
+		}
+		return nil
+	}
+	ma, qa, err := state(t)
+	if err != nil {
+		return err
+	}
+	nt := na + nb
+	d := mb - ma
+	// The weight na*nb/nt is at least 1/2, so d*w*d overflows only when the
+	// term itself does, unlike d*d*w.
+	m2 := qa + qb + d*(float64(na)*float64(nb)/float64(nt))*d
+	if math.IsInf(qa, 1) || math.IsInf(qb, 1) || math.IsNaN(m2) {
+		m2 = math.Inf(1)
+	}
+	t[0].val, t[1].val, t[2].val = ma+d*float64(nb)/float64(nt), nt, m2
+	return nil
 }
 
 func (r *Row) ToString() string {
@@ -268,10 +356,7 @@ func (bucket *Bucket) Accumulate(row *Row, idx int, keyCount int, aggs []Aggrega
 	if row.ColumnCount() != keyCount+len(aggs) {
 		return merr.WrapErrParameterInvalidMsg("column count:%d in the row must be sum of keyCount:%d and the number of aggs:%d", row.ColumnCount(), keyCount, len(aggs))
 	}
-	for col := keyCount; col < row.ColumnCount(); col++ {
-		targetRow.UpdateFieldValue(row, col, aggs[col-keyCount])
-	}
-	return nil
+	return targetRow.Merge(row, keyCount, aggs)
 }
 
 const NONE int = -1

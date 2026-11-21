@@ -327,7 +327,7 @@ func TestStreamingReductionSchemaCoverage(t *testing.T) {
 				"Review new fields for streaming compatibility and classify them as reduction-related or independent; update parity tests where needed")
 		})
 	}
-	require.Equal(t, map[int32]string{0: "sum", 1: "count", 2: "avg", 3: "min", 4: "max"}, planpb.AggregateOp_name)
+	require.Equal(t, map[int32]string{0: "sum", 1: "count", 2: "avg", 3: "min", 4: "max", 5: "m2", 6: "mean"}, planpb.AggregateOp_name)
 	require.Equal(t, map[int32]string{0: "DEFAULT", 1: "PURE_ANN_SEARCH_NO_FILTER", 2: "PURE_ANN_SEARCH_WITH_FILTER"}, internalpb.SearchType_name)
 	require.Equal(t, map[int32]string{
 		0: "FunctionChainStageUnspecified", 1: "FunctionChainStageIngestion", 2: "FunctionChainStagePreProcess",

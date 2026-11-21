@@ -158,8 +158,8 @@ func getAggregateResultType(op planpb.AggregateOp, inputType schemapb.DataType) 
 	case planpb.AggregateOp_count:
 		// count aggregation always returns Int64
 		return schemapb.DataType_Int64, nil
-	case planpb.AggregateOp_avg:
-		// avg aggregation always returns Double
+	case planpb.AggregateOp_avg, planpb.AggregateOp_mean, planpb.AggregateOp_m2:
+		// avg and the variance state mean and m2 always return Double
 		return schemapb.DataType_Double, nil
 	case planpb.AggregateOp_min, planpb.AggregateOp_max:
 		// min/max keep the original field type
@@ -213,7 +213,19 @@ func (reducer *GroupAggReducer) prepareLayout() (*aggregationLayout, error) {
 	}
 
 	// Add types for aggregates
-	for _, agg := range reducer.aggregates {
+	aggs := reducer.aggregates
+	isVarState := func(i int, op planpb.AggregateOp, fieldID int64) bool {
+		return i >= 0 && i < len(aggs) && aggs[i].GetOp() == op && aggs[i].GetFieldId() == fieldID
+	}
+	for idx, agg := range aggs {
+		op, fieldID := agg.GetOp(), agg.GetFieldId()
+		badMean := op == planpb.AggregateOp_mean && (!isVarState(idx+1, planpb.AggregateOp_count, fieldID) ||
+			!isVarState(idx+2, planpb.AggregateOp_m2, fieldID))
+		badM2 := op == planpb.AggregateOp_m2 && !isVarState(idx-2, planpb.AggregateOp_mean, fieldID)
+		if badMean || badM2 {
+			return nil, merr.WrapErrServiceInternalMsg("aggregate %d of field %d is not part of a mean, count, m2 variance state",
+				idx, fieldID)
+		}
 		var expectedType schemapb.DataType
 		if agg.GetOp() == planpb.AggregateOp_count {
 			// count aggregation always returns Int64
@@ -326,11 +338,13 @@ func (reducer *GroupAggReducer) mergeValues(ctx context.Context, results []*Part
 		rows[idx] = NewRow(fieldValues)
 	}
 	for row := 1; row < len(rows); row++ {
-		for col := 0; col < outputColumnCount; col++ {
-			rows[0].UpdateFieldValue(rows[row], col, aggs[col])
+		if err := rows[0].Merge(rows[row], 0, aggs); err != nil {
+			return nil, err
 		}
 	}
-	AssembleSingleRow(outputColumnCount, rows[0], reducedResult.fieldDatas)
+	if err := AssembleSingleRow(outputColumnCount, rows[0], reducedResult.fieldDatas); err != nil {
+		return nil, err
+	}
 	return reducedResult, nil
 }
 

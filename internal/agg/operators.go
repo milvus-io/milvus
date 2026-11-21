@@ -62,7 +62,7 @@ func newSingleSlotState() []*FieldValue {
 type SumAggregate struct {
 	fieldID      int64
 	originalName string
-	isAvg        bool
+	partial      bool
 }
 
 func (sum *SumAggregate) Name() string {
@@ -103,7 +103,7 @@ func (sum *SumAggregate) OriginalName() string {
 type CountAggregate struct {
 	fieldID      int64
 	originalName string
-	isAvg        bool
+	partial      bool
 }
 
 func (count *CountAggregate) Name() string {
@@ -155,8 +155,8 @@ func NewAvgAggregate(fieldID int64, originalName string) *AvgAggregate {
 	return &AvgAggregate{
 		fieldID:      fieldID,
 		originalName: originalName,
-		sum:          &SumAggregate{fieldID: fieldID, originalName: originalName, isAvg: true},
-		count:        &CountAggregate{fieldID: fieldID, originalName: originalName, isAvg: true},
+		sum:          &SumAggregate{fieldID: fieldID, originalName: originalName, partial: true},
+		count:        &CountAggregate{fieldID: fieldID, originalName: originalName, partial: true},
 	}
 }
 
@@ -199,6 +199,54 @@ func (avg *AvgAggregate) FieldID() int64 {
 
 func (avg *AvgAggregate) OriginalName() string {
 	return avg.originalName
+}
+
+// varianceSlotAggregate is the mean or the m2 column of a variance state,
+// m2 being the sum of squared deviations from the mean. Row.Merge merges the
+// mean, count and m2 columns together, so a slot has no update of its own.
+type varianceSlotAggregate struct {
+	fieldID      int64
+	originalName string
+	mean         bool
+}
+
+func (v *varianceSlotAggregate) Name() string {
+	if v.mean {
+		return kMean
+	}
+	return kM2
+}
+
+func (v *varianceSlotAggregate) Update(target *FieldValue, new *FieldValue) error {
+	return merr.WrapErrServiceInternalMsg("%s aggregate merges require the whole variance state", v.Name())
+}
+
+func (v *varianceSlotAggregate) NewState() []*FieldValue {
+	return newSingleSlotState()
+}
+
+func (v *varianceSlotAggregate) UpdateState(slots []*FieldValue, new *FieldValue) error {
+	return v.Update(nil, new)
+}
+
+func (v *varianceSlotAggregate) Terminate(slots []*FieldValue) (any, error) {
+	return nil, v.Update(nil, nil)
+}
+
+func (v *varianceSlotAggregate) ToPB() *planpb.Aggregate {
+	op := planpb.AggregateOp_m2
+	if v.mean {
+		op = planpb.AggregateOp_mean
+	}
+	return &planpb.Aggregate{Op: op, FieldId: v.FieldID()}
+}
+
+func (v *varianceSlotAggregate) FieldID() int64 {
+	return v.fieldID
+}
+
+func (v *varianceSlotAggregate) OriginalName() string {
+	return v.originalName
 }
 
 func updateOrderedState(target *FieldValue, new *FieldValue, op string) error {
