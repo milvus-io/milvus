@@ -570,6 +570,102 @@ ValidateGeometryInsertDataShape(const proto::schema::FieldData& field_data,
     }
 }
 
+// The payload of a field, in the unit its write path copies it in, and how
+// many of those units make up one row.
+struct InsertPayloadSize {
+    int64_t size;
+    int64_t per_row;
+};
+
+// The size of a field's insert payload, for the types whose write path copies
+// a fixed number of rows without looking at how many the payload holds
+// (VectorBase::set_data_raw and the TEXT branch of Insert). nullopt for the
+// types that accept more than one layout and check it where they are written:
+// GEOMETRY (ValidateGeometryInsertDataShape), native-list ARRAY and
+// VECTOR_ARRAY (ConcurrentVector.cpp).
+std::optional<InsertPayloadSize>
+GetInsertPayloadSize(const proto::schema::FieldData& field_data,
+                     const FieldMeta& field_meta) {
+    const auto& scalars = field_data.scalars();
+    const auto& vectors = field_data.vectors();
+    auto rows = [](int64_t size) { return InsertPayloadSize{size, 1}; };
+    // Dense vectors are one flat buffer, get_sizeof() bytes per row.
+    auto bytes = [&](size_t size) {
+        return InsertPayloadSize{static_cast<int64_t>(size),
+                                 static_cast<int64_t>(field_meta.get_sizeof())};
+    };
+    switch (field_meta.get_data_type()) {
+        case DataType::BOOL:
+            return rows(scalars.bool_data().data_size());
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+            return rows(scalars.int_data().data_size());
+        case DataType::INT64:
+            return rows(scalars.long_data().data_size());
+        case DataType::FLOAT:
+            return rows(scalars.float_data().data_size());
+        case DataType::DOUBLE:
+            return rows(scalars.double_data().data_size());
+        case DataType::TIMESTAMPTZ:
+            return rows(scalars.timestamptz_data().data_size());
+        case DataType::STRING:
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+            return rows(scalars.string_data().data_size());
+        case DataType::JSON:
+            return rows(scalars.json_data().data_size());
+        case DataType::ARRAY:
+            if (field_meta.is_native_list_array()) {
+                return std::nullopt;
+            }
+            return rows(scalars.array_data().data_size());
+        case DataType::VECTOR_FLOAT:
+            return bytes(vectors.float_vector().data_size() * sizeof(float));
+        case DataType::VECTOR_BINARY:
+            return bytes(vectors.binary_vector().size());
+        case DataType::VECTOR_FLOAT16:
+            return bytes(vectors.float16_vector().size());
+        case DataType::VECTOR_BFLOAT16:
+            return bytes(vectors.bfloat16_vector().size());
+        case DataType::VECTOR_INT8:
+            return bytes(vectors.int8_vector().size());
+        case DataType::VECTOR_SPARSE_U32_F32:
+            return rows(vectors.sparse_float_vector().contents_size());
+        default:
+            return std::nullopt;
+    }
+}
+
+// The write path copies a fixed number of rows out of each payload: num_rows
+// for a scalar, which keeps a slot for a null row, and the number of valid
+// rows for a nullable vector, which is stored compactly. A payload holding
+// fewer rows would be read past its end.
+void
+ValidateInsertPayloadSize(const proto::schema::FieldData& field_data,
+                          const FieldMeta& field_meta,
+                          int64_t num_rows) {
+    const auto payload = GetInsertPayloadSize(field_data, field_meta);
+    if (!payload.has_value()) {
+        return;
+    }
+    auto expected_rows = num_rows;
+    if (field_meta.is_vector() && field_meta.is_nullable()) {
+        // The length of valid_data itself is checked where it is written
+        // (ThreadSafeValidData::set_data_raw).
+        const auto& valid_data = GetFieldDataRowValidData(field_data);
+        expected_rows = std::count(valid_data.begin(), valid_data.end(), true);
+    }
+    AssertInfo(payload->size == expected_rows * payload->per_row,
+               "field {} of type {} has payload size {}, expected {} rows of "
+               "size {}",
+               field_meta.get_id().get(),
+               field_meta.get_data_type(),
+               payload->size,
+               expected_rows,
+               payload->per_row);
+}
+
 // A StorageV2 column-group load only carries fields that were written to
 // binlogs. A TEXT field added to the schema after the segment was written
 // (AddField) has no binlog column, so the schema alone must not reject the
@@ -1683,28 +1779,33 @@ SegmentGrowingImpl::Insert(
         field_id_to_offset.emplace(field_id, field_offset++);
     }
 
-    // Validate geometry row alignment before mutating any segment-owned
+    // Validate payload row alignment before mutating any segment-owned
     // storage. Geometry scalars are dense at this boundary (nullable rows keep
     // an empty physical payload slot), and valid_data is one entry per logical
     // row. Treating a truncated internal message as NULL later in the index or
     // cache path would be too late: the raw column and validity vectors copy
-    // num_rows entries first.
+    // num_rows entries first. The other types copy a fixed number of rows the
+    // same way, so this is also where their payload size is checked.
     for (const auto& [field_id, field_meta] : schema_->get_fields()) {
-        if (field_id.get() < START_USER_FIELDID ||
-            field_meta.get_data_type() != DataType::GEOMETRY) {
+        if (field_id.get() < START_USER_FIELDID) {
             continue;
         }
+        const bool is_geometry =
+            field_meta.get_data_type() == DataType::GEOMETRY;
         auto data_it = field_id_to_offset.find(field_id);
         if (data_it == field_id_to_offset.end()) {
-            AssertInfo(schema_->is_function_output(field_id),
+            AssertInfo(!is_geometry || schema_->is_function_output(field_id),
                        "geometry field {} missing from insert",
                        field_id.get());
             continue;
         }
-        ValidateGeometryInsertDataShape(
-            insert_record_proto->fields_data(data_it->second),
-            field_meta,
-            num_rows);
+        const auto& field_data =
+            insert_record_proto->fields_data(data_it->second);
+        if (is_geometry) {
+            ValidateGeometryInsertDataShape(field_data, field_meta, num_rows);
+        } else {
+            ValidateInsertPayloadSize(field_data, field_meta, num_rows);
+        }
     }
 
     if (num_rows > 0) {

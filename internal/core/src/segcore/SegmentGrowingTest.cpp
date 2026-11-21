@@ -18,6 +18,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <initializer_list>
 #include <iostream>
 #include <map>
@@ -4027,4 +4028,103 @@ TEST(Growing, InsertRejectsShortValidDataForNullableVarchar) {
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
     }
+}
+
+// The write path copies num_rows rows out of every payload without looking at
+// how many it holds, so a payload with fewer rows was read past its end.
+// SegmentGrowingImpl::Insert now checks every field before it writes any.
+namespace {
+
+// Inserts two rows into a growing segment of `schema` and expects the insert
+// to be rejected. `record` holds the pk column; `add_field` appends the
+// column under test.
+void
+ExpectTwoRowInsertRejected(
+    const SchemaPtr& schema,
+    FieldId pk,
+    const std::function<void(InsertRecordProto&)>& add_field) {
+    constexpr int64_t row_count = 2;
+    std::array<int64_t, row_count> row_ids = {10, 11};
+    std::array<Timestamp, row_count> timestamps = {100, 101};
+    std::array<int64_t, row_count> pks = {1, 2};
+
+    auto record = std::make_shared<InsertRecordProto>();
+    record->set_num_rows(row_count);
+    record->mutable_fields_data()->AddAllocated(
+        CreateDataArrayFrom(pks.data(), nullptr, row_count, (*schema)[pk])
+            .release());
+    add_field(*record);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto offset = segment->PreInsert(row_count);
+    try {
+        segment->Insert(
+            offset, row_count, row_ids.data(), timestamps.data(), record);
+        FAIL() << "expected the short payload to be rejected";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
+    }
+}
+
+}  // namespace
+
+TEST(Growing, InsertRejectsShortVarcharPayload) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto text = schema->AddDebugField("text", DataType::VARCHAR);
+    schema->set_primary_field_id(pk);
+
+    ExpectTwoRowInsertRejected(schema, pk, [&](InsertRecordProto& record) {
+        std::array<std::string, 2> texts = {"a", "b"};
+        auto data =
+            CreateDataArrayFrom(texts.data(), nullptr, 2, (*schema)[text]);
+        data->mutable_scalars()
+            ->mutable_string_data()
+            ->mutable_data()
+            ->RemoveLast();
+        record.mutable_fields_data()->AddAllocated(data.release());
+    });
+}
+
+// A null row still takes a slot in a scalar payload. Validity alone has the
+// right length here, so only the payload check can reject it.
+TEST(Growing, InsertRejectsShortPayloadForNullableInt32) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto num = schema->AddDebugField("num", DataType::INT32, true);
+    schema->set_primary_field_id(pk);
+
+    ExpectTwoRowInsertRejected(schema, pk, [&](InsertRecordProto& record) {
+        std::array<int32_t, 2> nums = {7, 0};
+        std::array<bool, 2> valid = {true, false};
+        auto data =
+            CreateDataArrayFrom(nums.data(), valid.data(), 2, (*schema)[num]);
+        data->mutable_scalars()
+            ->mutable_int_data()
+            ->mutable_data()
+            ->RemoveLast();
+        record.mutable_fields_data()->AddAllocated(data.release());
+    });
+}
+
+// A dense vector payload is one flat buffer, so it can also end in the middle
+// of a row.
+TEST(Growing, InsertRejectsShortFloatVectorPayload) {
+    constexpr int64_t dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+
+    ExpectTwoRowInsertRejected(schema, pk, [&](InsertRecordProto& record) {
+        std::array<float, 2 * dim> vectors = {};
+        auto data =
+            CreateDataArrayFrom(vectors.data(), nullptr, 2, (*schema)[vec]);
+        data->mutable_vectors()
+            ->mutable_float_vector()
+            ->mutable_data()
+            ->RemoveLast();
+        record.mutable_fields_data()->AddAllocated(data.release());
+    });
 }
