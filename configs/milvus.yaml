@@ -1350,6 +1350,7 @@ common:
   sync:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr
+  enableMatchConstantPredicate: auto # Fold a complete MATCH element predicate with zero possible hits to FALSE. auto enables this after all registered components reach 3.0.7. Older query nodes size constant bitmaps by row count.
   enableDriverPrefetch: false # Indicates whether to enable query driver prefetch in segcore.
   enabledJSONShredding: true # Indicates sealedsegment whether to enable JSON key stats
   enabledGrowingSegmentJSONShredding: false # Indicates growingsegment whether to enable JSON key stats

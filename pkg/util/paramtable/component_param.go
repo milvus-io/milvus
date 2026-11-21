@@ -211,6 +211,7 @@ func (p *ComponentParam) versionGateItems() []*ParamItem {
 	return []*ParamItem{
 		&p.FunctionCfg.EnableWriteBeforeMaterialization,
 		&p.DataCoordCfg.ImportEnableIDRangeMsg,
+		&p.CommonCfg.EnableMatchConstantPredicate,
 	}
 }
 
@@ -459,6 +460,7 @@ type commonConfig struct {
 
 	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
 
+	EnableMatchConstantPredicate      ParamItem `refreshable:"true"`
 	EnabledOptimizeExpr               ParamItem `refreshable:"true"`
 	EnableDriverPrefetch              ParamItem `refreshable:"true"`
 	EnabledJSONKeyStats               ParamItem `refreshable:"true"`
@@ -1756,6 +1758,22 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Export:       true,
 	}
 	p.EnabledOptimizeExpr.Init(base.mgr)
+
+	p.EnableMatchConstantPredicate = ParamItem{
+		Key:          "common.enableMatchConstantPredicate",
+		Version:      "3.0.7",
+		DefaultValue: "auto",
+		Export:       true,
+		Doc:          "Fold a complete MATCH element predicate with zero possible hits to FALSE. auto enables this after all registered components reach 3.0.7. Older query nodes size constant bitmaps by row count.",
+		VersionGateSwitcher: &VersionGateSwitcher{
+			EnableAutoSwitchValue: "auto",
+			PreSwitchValue:        "false",
+			GateVersion:           "3.0.7",
+			TargetValue:           "true",
+			SwitchDelay:           time.Minute,
+		},
+	}
+	p.EnableMatchConstantPredicate.Init(base.mgr)
 
 	p.EnableDriverPrefetch = ParamItem{
 		Key:          "common.enableDriverPrefetch",
