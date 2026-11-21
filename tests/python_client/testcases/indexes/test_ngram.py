@@ -276,7 +276,6 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
                 )
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="skip for issue #44164")
     def test_ngram_alter_index_mmap_and_gram_values(self):
         """
         Test the alter index with mmap and gram values
@@ -335,7 +334,7 @@ class TestNgramBuildParams(TestMilvusClientV2Base):
 
         # Alter index gram value properties is not supported
         self.release_collection(client, collection_name)
-        error = {ct.err_code: 1, ct.err_msg: "invalid mmap.enabled value: True, expected: true, false"}
+        error = {ct.err_code: 1100, ct.err_msg: "min_gram is not a configable index property"}
         self.alter_index_properties(
             client,
             collection_name,

@@ -6187,7 +6187,6 @@ class TestMilvusClientCollectionMultipleVectorInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("issue #37543")
     def test_milvus_client_collection_multiple_vectors_invalid_dim(self, get_invalid_dim):
         """
         target: test create collection with multiple vector fields where one has invalid dimension
@@ -6202,8 +6201,13 @@ class TestMilvusClientCollectionMultipleVectorInvalid(TestMilvusClientV2Base):
         # Add vector fields - one with invalid dimension, one with valid dimension
         schema.add_field("vector_field_1", DataType.FLOAT_VECTOR, dim=get_invalid_dim)
         schema.add_field("vector_field_2", DataType.FLOAT_VECTOR, dim=default_dim)
+        # Determine expected error based on invalid dimension type
+        if isinstance(get_invalid_dim, int):  # range errors: 1, -32, 32769
+            expected_msg = "invalid dimension"
+        else:  # type conversion errors: 32.1, "vii", "十六"
+            expected_msg = "the value for dim of field vector_field_1 must be an integer"
         # Try to create collection with invalid dimension
-        error = {ct.err_code: 65535, ct.err_msg: "invalid dimension"}
+        error = {ct.err_code: 1100, ct.err_msg: expected_msg}
         self.create_collection(client, collection_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
 

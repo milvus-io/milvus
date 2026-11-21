@@ -887,7 +887,6 @@ class TestMilvusClientSearchInvalidReranker(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="pymilvus issue 41533")
     @pytest.mark.parametrize("invalid_decay", [-1.0, 0, 1, 2.0])
     def test_milvus_client_search_reranker_decay_out_of_range(self, invalid_decay):
         """
@@ -935,8 +934,8 @@ class TestMilvusClientSearchInvalidReranker(TestMilvusClientV2Base):
         )
         vectors_to_search = rng.random((1, dim))
         error = {
-            ct.err_code: 65535,
-            ct.err_msg: f"Decay function param: decay must 0 < decay < 1, but got {invalid_decay}",
+            ct.err_code: 1100,
+            ct.err_msg: f"decay must be 0 < decay < 1, got {invalid_decay:.6f}",
         }
         self.search(
             client,
