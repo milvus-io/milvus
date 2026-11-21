@@ -38,9 +38,8 @@ add_subdirectory(simdjson)
 add_subdirectory(tantivy)
 add_subdirectory(libsais)
 
-if (LINUX)
+if (LINUX AND NOT USE_TSAN)
     add_subdirectory(jemalloc)
 endif()
 
 add_subdirectory(milvus-storage)
-
