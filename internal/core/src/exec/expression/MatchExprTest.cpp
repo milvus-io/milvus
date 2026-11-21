@@ -39,6 +39,8 @@
 #include <vector>
 
 #include "common/Common.h"
+#include "common/ArrayTextValues.h"
+#include "common/FieldData.h"
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
 #include "common/IndexMeta.h"
@@ -57,6 +59,7 @@
 #include "gtest/gtest.h"
 #include "index/Index.h"
 #include "index/InvertedIndexTantivy.h"
+#include "index/TextMatchIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
@@ -77,6 +80,8 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/ManifestTestUtil.h"
+#include "storage/MemFileManagerImpl.h"
+#include "storage/loon_ffi/property_singleton.h"
 #include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -4759,3 +4764,271 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<IntTypeTestParam>& info) {
         return info.param.type_name;
     });
+
+class MatchExprArrayText
+    : public ::testing::TestWithParam<std::tuple<bool, bool>> {};
+
+TEST_P(MatchExprArrayText, QuantifiesTextDocumentsOnGrowingAndSealed) {
+    const auto [plain_array, element_nullable] = GetParam();
+    const auto previous = EXEC_EVAL_EXPR_BATCH_SIZE.exchange(2);
+    auto restore =
+        folly::makeGuard([&] { EXEC_EVAL_EXPR_BATCH_SIZE.store(previous); });
+    auto schema = std::make_shared<Schema>();
+    const auto pk = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    const auto score =
+        schema->AddDebugArrayField("reviews[score]", DataType::INT32, false);
+    const FieldId body(220);
+    proto::schema::FieldSchema field;
+    field.set_fieldid(body.get());
+    field.set_name(plain_array ? "tags" : "reviews[body]");
+    field.set_data_type(proto::schema::DataType::Array);
+    field.set_element_type(proto::schema::DataType::VarChar);
+    field.set_element_nullable(element_nullable);
+    for (const char* key : {"enable_match", "enable_analyzer"}) {
+        auto* param = field.add_type_params();
+        param->set_key(key);
+        param->set_value("true");
+    }
+    schema->AddField(FieldMeta::ParseFrom(field));
+    const std::vector<std::vector<std::string>> texts = {
+        {"new", "york"}, {"new york", "new york"}, {}, {"new york", "x"}, {}};
+    const int64_t n = texts.size();
+    std::vector<int64_t> ids(n);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<proto::schema::ScalarField> bodies(n), scores(n);
+    for (int64_t i = 0; i < n; ++i) {
+        auto* strings = bodies[i].mutable_string_data();
+        auto* integers = scores[i].mutable_int_data();
+        for (size_t j = 0; j < texts[i].size(); ++j) {
+            if (element_nullable) {
+                bodies[i].add_valid_data(!(i == 3 && j == 1));
+            }
+            strings->add_data(texts[i][j]);
+            integers->add_data(i == 3 && j == 0 ? 0 : 1);
+        }
+    }
+    auto insert = std::make_unique<InsertRecordProto>();
+    insert->set_num_rows(n);
+    auto* fields = insert->mutable_fields_data();
+    fields->AddAllocated(
+        CreateDataArrayFrom(ids.data(), nullptr, n, (*schema)[pk]).release());
+    fields->AddAllocated(
+        CreateDataArrayFrom(bodies.data(), nullptr, n, (*schema)[body])
+            .release());
+    fields->AddAllocated(
+        CreateDataArrayFrom(scores.data(), nullptr, n, (*schema)[score])
+            .release());
+    GeneratedData generated;
+    generated.raw_ = insert.release();
+    generated.schema_ = schema;
+    generated.row_ids_ = ids;
+    generated.timestamps_.assign(ids.begin(), ids.end());
+    ScopedSchemaHandle handle(*schema);
+    for (bool sealed : {false, true}) {
+        SCOPED_TRACE(sealed);
+        std::unique_ptr<SegmentInternalInterface> segment;
+        if (sealed) {
+            if (element_nullable) {
+                // Element-nullable arrays are written as native lists in Storage V3.
+                auto storage_proto = schema->ToProto();
+                for (auto [id, name] :
+                     {std::pair{RowFieldID, "RowID"},
+                      std::pair{TimestampFieldID, "Timestamp"}}) {
+                    auto* system = storage_proto.add_fields();
+                    system->set_fieldid(id.get());
+                    system->set_name(name);
+                    system->set_data_type(proto::schema::DataType::Int64);
+                }
+                auto storage_schema = Schema::ParseFrom(storage_proto);
+                arrow::Int64Builder id_builder;
+                ASSERT_TRUE(id_builder.AppendValues(ids).ok());
+                auto ids_column = id_builder.Finish().ValueOrDie();
+                auto strings = std::make_shared<arrow::StringBuilder>();
+                arrow::ListBuilder list(arrow::default_memory_pool(),
+                                        strings,
+                                        GetArrowDataType((*schema)[body]));
+                arrow::BinaryBuilder score_builder;
+                for (int64_t i = 0; i < n; ++i) {
+                    ASSERT_TRUE(list.Append().ok());
+                    for (size_t j = 0; j < texts[i].size(); ++j) {
+                        ASSERT_TRUE((bodies[i].valid_data(j)
+                                         ? strings->Append(texts[i][j])
+                                         : strings->AppendNull())
+                                        .ok());
+                    }
+                    ASSERT_TRUE(
+                        score_builder.Append(scores[i].SerializeAsString())
+                            .ok());
+                }
+                auto body_column = list.Finish().ValueOrDie();
+                auto score_column = score_builder.Finish().ValueOrDie();
+                arrow::ArrayVector columns;
+                for (const auto id : storage_schema->get_field_ids()) {
+                    columns.push_back(
+                        id == body ? body_column
+                                   : (id == score ? score_column : ids_column));
+                }
+                auto batch = arrow::RecordBatch::Make(
+                    storage_schema->ConvertToLoonArrowSchema(),
+                    n,
+                    std::move(columns));
+                const auto path =
+                    TestRemotePath +
+                    (plain_array ? "/array-text" : "/struct-text");
+                auto version = test::WriteRecordBatchesToV3(
+                    storage_schema,
+                    path,
+                    {batch},
+                    test::GenerateColumnGroupPattern(storage_schema));
+                proto::segcore::SegmentLoadInfo info;
+                info.set_collectionid(1);
+                info.set_partitionid(2);
+                info.set_segmentid(3);
+                info.set_storageversion(STORAGE_V3);
+                info.set_num_of_rows(n);
+                info.set_manifest_path(nlohmann::json{
+                    {"base_path", path},
+                    {"ver", version}}.dump());
+                // Exercise the stats builder's manifest reader with the same
+                // native-list column that the sealed segment is about to load.
+                auto config = get_default_local_storage_config();
+                storage::FileManagerContext ctx(
+                    storage::FieldDataMeta{1, 2, 3, body.get(), field},
+                    storage::IndexMeta{3, body.get(), 1, 1},
+                    storage::CreateChunkManager(config),
+                    storage::InitArrowFileSystem(config));
+                ctx.set_loon_ffi_properties(
+                    storage::LoonFFIPropertiesSingleton::GetInstance()
+                        .GetProperties());
+                storage::MemFileManagerImpl files(ctx);
+                auto batches = files.CacheRawDataToMemory(
+                    {{STORAGE_VERSION_KEY, STORAGE_V3},
+                     {SEGMENT_MANIFEST_KEY, info.manifest_path()},
+                     {DATA_TYPE_KEY, DataType::ARRAY},
+                     {ELEMENT_TYPE_KEY, DataType::VARCHAR},
+                     {"is_text_match", true}});
+                ASSERT_FALSE(batches.empty());
+                ArrayTextValues docs;
+                for (const auto& part : batches) {
+                    ASSERT_NE(
+                        dynamic_cast<const FieldData<ArrayValue>*>(part.get()),
+                        nullptr);
+                    for (int64_t i = 0; i < part->get_num_rows(); ++i) {
+                        docs.Append(
+                            static_cast<const ArrayValue*>(part->RawValue(i))
+                                ->View());
+                    }
+                }
+                ASSERT_EQ(docs.values.size(), 6);
+                ASSERT_EQ(docs.valid.size(), 6);
+                EXPECT_FALSE(docs.valid[5]);
+                auto loaded =
+                    CreateSealedSegment(storage_schema, empty_index_meta, 3);
+                loaded->SetLoadInfo(info);
+                tracer::TraceContext trace;
+                loaded->Load(trace, nullptr);
+                segment = std::move(loaded);
+            } else {
+                auto loaded =
+                    CreateSealedWithFieldDataLoaded(schema, generated);
+                loaded->CreateTextIndex(body);
+                segment = std::move(loaded);
+            }
+        } else {
+            auto growing = CreateGrowingSegment(schema, empty_index_meta);
+            growing->PreInsert(n);
+            auto insert_batch = [&](int64_t begin, int64_t count) {
+                InsertRecordProto batch;
+                batch.set_num_rows(count);
+                auto* fields = batch.mutable_fields_data();
+                fields->AddAllocated(
+                    CreateDataArrayFrom(
+                        ids.data() + begin, nullptr, count, (*schema)[pk])
+                        .release());
+                fields->AddAllocated(
+                    CreateDataArrayFrom(
+                        bodies.data() + begin, nullptr, count, (*schema)[body])
+                        .release());
+                fields->AddAllocated(
+                    CreateDataArrayFrom(
+                        scores.data() + begin, nullptr, count, (*schema)[score])
+                        .release());
+                growing->Insert(begin,
+                                count,
+                                ids.data() + begin,
+                                generated.timestamps_.data() + begin,
+                                &batch);
+            };
+            // Later rows arrive first. Document IDs must still follow array offsets.
+            insert_batch(2, n - 2);
+            insert_batch(0, 2);
+            auto index = growing->GetTextIndex(nullptr, body);
+            index.get()->Commit();
+            index.get()->Reload();
+            segment = std::move(growing);
+        }
+        const auto target = plain_array ? "tags" : "reviews";
+        const auto text = plain_array ? "$" : "$[body]";
+        std::vector<std::pair<std::string, std::vector<bool>>> cases{
+            {fmt::format(R"(match_any({}, phrase_match({}, "new york", 99)))",
+                         target,
+                         text),
+             {false, true, false, true, false}},
+            {fmt::format(
+                 R"(match_all({}, text_match({}, "new")))", target, text),
+             {false, true, true, false, true}},
+            {fmt::format(
+                 R"(match_exact({}, phrase_match({}, "new york"), threshold=2))",
+                 target,
+                 text),
+             {false, true, false, false, false}},
+            {fmt::format(
+                 R"(match_least({}, text_match({}, "new york", minimum_should_match=2), threshold=1))",
+                 target,
+                 text),
+             {false, true, false, true, false}},
+            {fmt::format(
+                 R"(match_most({}, text_match({}, "york"), threshold=0))",
+                 target,
+                 text),
+             {false, false, true, false, true}},
+            {fmt::format(
+                 R"(match_any({}, not text_match({}, "new")))", target, text),
+             {true, false, false, !element_nullable, false}},
+        };
+        if (plain_array) {
+            cases.push_back(
+                {R"(match_any(tags, $ == "new" && text_match($, "york")))",
+                 {false, false, false, false, false}});
+        } else {
+            cases.push_back(
+                {R"(match_any(reviews, $[score] == 1 && phrase_match($[body], "new york")))",
+                 {false, true, false, false, false}});
+        }
+        for (const auto& [query, expected] : cases) {
+            SCOPED_TRACE(query);
+            auto bytes = handle.Parse(query);
+            auto plan =
+                CreateRetrievePlanByExpr(schema, bytes.data(), bytes.size());
+            auto node = plan->plan_node_->plannodes_->sources().front();
+            auto hits = ExecuteQueryExpr(node, segment.get(), n, MAX_TIMESTAMP);
+            ASSERT_EQ(hits.size(), n);
+            for (int64_t i = 0; i < n; ++i)
+                EXPECT_EQ(bool(hits[i]), expected[i]);
+
+            exec::OffsetVector offsets{3, 1, 3, 2, 0};
+            auto batch = test::gen_filter_res(
+                node.get(), segment.get(), n, MAX_TIMESTAMP, &offsets);
+            ASSERT_EQ(batch->size(), offsets.size());
+            TargetBitmapView selected(batch->GetRawData(), batch->size());
+            for (size_t i = 0; i < offsets.size(); ++i)
+                EXPECT_EQ(bool(selected[i]), expected[offsets[i]]);
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(StorageFormats,
+                         MatchExprArrayText,
+                         ::testing::Combine(::testing::Bool(),
+                                            ::testing::Bool()));

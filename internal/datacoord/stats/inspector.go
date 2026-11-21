@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -240,15 +241,7 @@ func (si *Inspector) triggerTextStatsTask() {
 		if !si.canSubmitStatsTask(indexpb.StatsSubJob_TextIndexJob) {
 			return
 		}
-		needTriggerFieldIDs := make([]UniqueID, 0)
-		for _, field := range collection.Schema.GetFields() {
-			// TODO @longjiquan: please replace it to fieldSchemaHelper.EnableMath
-			h := typeutil.CreateFieldSchemaHelper(field)
-			if !h.EnableMatch() {
-				continue
-			}
-			needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
-		}
+		needTriggerFieldIDs := statsTaskFieldIDs(collection.Schema, indexpb.StatsSubJob_TextIndexJob)
 		// needDoTextIndex is false for every segment once there is no field to
 		// index, so skip the collection before scanning all of its segments.
 		if len(needTriggerFieldIDs) == 0 {
@@ -526,14 +519,14 @@ func statsTaskFieldIDs(schema *schemapb.CollectionSchema, subJobType indexpb.Sta
 		}
 	case indexpb.StatsSubJob_TextIndexJob:
 		predicate = func(field *schemapb.FieldSchema) bool {
-			return typeutil.CreateFieldSchemaHelper(field).EnableMatch()
+			return schemautil.BuildTextStats(field)
 		}
 	default:
 		return nil
 	}
 
 	fieldIDs := make([]int64, 0)
-	for _, field := range schema.GetFields() {
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
 		if predicate(field) {
 			fieldIDs = append(fieldIDs, field.GetFieldID())
 		}

@@ -40,6 +40,7 @@
 #include "boost/iterator/iterator_facade.hpp"
 #include "cachinglayer/CacheSlot.h"
 #include "common/Array.h"
+#include "common/ArrayTextValues.h"
 #include "common/StructElementOffsets.h"
 #include "common/ArrowDataWrapper.h"
 #include "common/Channel.h"
@@ -1013,8 +1014,13 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 reserved_offset, array_lengths.data(), num_rows);
         }
 
-        // index text.
-        if (field_meta.enable_match()) {
+        // The array writer reads the stored column so inserts and binlog
+        // loads use the same element order and validity.
+        if (field_meta.is_varchar_array() && field_meta.enable_match()) {
+            auto pinned = GetTextIndex(nullptr, field_id);
+            AppendArrayTextRows(
+                *pinned.get(), field_meta, reserved_offset, num_rows);
+        } else if (field_meta.enable_match()) {
             // TODO: iterate texts and call `AddText` instead of `AddTexts`. This may cost much more memory.
             std::vector<std::string> texts(
                 insert_record_proto->fields_data(data_offset)
@@ -1305,8 +1311,13 @@ SegmentGrowingImpl::load_field_data_common(
         } else {
             auto pinned = GetTextIndex(nullptr, field_id);
             auto index = pinned.get();
-            index->BuildIndexFromFieldData(field_data,
-                                           field_meta.is_nullable());
+            if (field_meta.is_varchar_array()) {
+                AppendArrayTextRows(
+                    *index, field_meta, reserved_offset, num_rows);
+            } else {
+                index->BuildIndexFromFieldData(field_data,
+                                               field_meta.is_nullable());
+            }
             index->Commit();
             // Reload reader so that the index can be read immediately
             index->Reload();
@@ -2955,6 +2966,55 @@ SegmentGrowingImpl::BuildTextIndexFromTextLobRefs(
 }
 
 void
+SegmentGrowingImpl::AppendArrayTextRows(index::TextMatchIndex& index,
+                                        const FieldMeta& field,
+                                        int64_t begin,
+                                        int64_t count,
+                                        bool rebuilding) {
+    const auto id = field.get_id();
+    std::lock_guard lock(array_text_mutex_);
+    if (rebuilding) {
+        // A schema backfill may be retried with a fresh, unpublished writer.
+        array_text_progress_.erase(id);
+    }
+    if (count == 0) {
+        return;
+    }
+    auto& progress = array_text_progress_[id];
+    // PreInsert reserves row ranges that can finish out of order. A row's
+    // first element ID is known only once all preceding rows are available.
+    progress.ready_rows.AddSegment(begin, begin + count);
+    const auto end = progress.ready_rows.GetAck();
+    const auto append = [&](const auto* column) {
+        while (progress.next_row < end) {
+            const auto row = progress.next_row;
+            const auto n =
+                std::min<int64_t>(end - row, kTextLobIndexBuildBatchSize);
+            ArrayTextValues docs;
+            for (int64_t i = row; i < row + n; ++i) {
+                if (!field.is_nullable() ||
+                    insert_record_.get_valid_data(id)->is_valid(i)) {
+                    docs.Append(column->view_element(i));
+                }
+            }
+            if (!docs.values.empty()) {
+                index.AddTextsGrowing(docs.values.size(),
+                                      docs.values.data(),
+                                      docs.Validity(),
+                                      progress.next_document);
+                progress.next_document += docs.values.size();
+            }
+            progress.next_row += n;
+        }
+    };
+    if (field.is_native_list_array()) {
+        append(insert_record_.get_data<ArrayValue>(id));
+    } else {
+        append(insert_record_.get_data<Array>(id));
+    }
+}
+
+void
 SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
                                     milvus::OpContext* op_ctx) {
     // Check for cancellation before starting
@@ -2962,8 +3022,13 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
         op_ctx, id_, field_id.get(), "SegmentGrowingImpl::CreateTextIndex()");
 
     auto schema = get_schema_snapshot();
-    auto index = BuildTextIndexForMeta(schema->operator[](field_id));
+    const auto& field_meta = (*schema)[field_id];
+    auto index = BuildTextIndexForMeta(field_meta);
     std::unique_lock lock(mutex_);
+    if (field_meta.is_varchar_array()) {
+        std::lock_guard progress_lock(array_text_mutex_);
+        array_text_progress_.erase(field_id);
+    }
     text_indexes_[field_id] = std::move(index);
 }
 
@@ -2971,8 +3036,9 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
 // meta is passed in because Reopen runs before the field is in schema_.
 std::unique_ptr<index::TextMatchIndex>
 SegmentGrowingImpl::BuildTextIndexForMeta(const FieldMeta& field_meta) {
-    AssertInfo(IsStringDataType(field_meta.get_data_type()),
-               "cannot create text index on non-string type");
+    AssertInfo(IsStringDataType(field_meta.get_data_type()) ||
+                   field_meta.is_varchar_array(),
+               "text index requires a string field or VarChar array");
     std::string unique_id = GetUniqueFieldId(field_meta.get_id().get());
     // todo: make this(200) configurable.
     auto index = std::make_unique<index::TextMatchIndex>(
@@ -2992,8 +3058,7 @@ void
 SegmentGrowingImpl::CreateTextIndexes() {
     auto schema = get_schema_snapshot();
     for (const auto& [field_id, field_meta] : schema->get_fields()) {
-        if (IsStringDataType(field_meta.get_data_type()) &&
-            field_meta.enable_match()) {
+        if (field_meta.enable_match()) {
             CreateTextIndex(FieldId(field_id));
         }
     }
@@ -3163,11 +3228,13 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
                 continue;
             }
             auto field_id = field_meta.get_id();
-            if (IsStringDataType(field_meta.get_data_type()) &&
-                field_meta.enable_match() &&
+            if (field_meta.enable_match() &&
                 text_indexes_.find(field_id) == text_indexes_.end()) {
                 auto index = BuildTextIndexForMeta(field_meta);
-                if (row_count > 0) {
+                if (field_meta.is_varchar_array()) {
+                    AppendArrayTextRows(
+                        *index, field_meta, 0, row_count, /*rebuilding=*/true);
+                } else if (row_count > 0) {
                     const bool has_default =
                         field_meta.default_value().has_value();
                     std::vector<std::string> texts(

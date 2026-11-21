@@ -518,7 +518,7 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 // the internal origin marker. It is not part of checkStructArrayFieldSchema
 // because that check also runs on an existing struct merged with an added
 // sub-field, whose earlier added sub-fields carry the marker legitimately.
-// schemautil.RejectStructSubFieldTextMatch stays out of it for the same
+// schemautil.ValidateStructSubFieldTextMatch stays out of it for the same
 // reason: stored sub-fields may carry enable_match or enable_analyzer.
 func rejectStructSubFieldOriginMarkers(schemas []*schemapb.StructArrayFieldSchema) error {
 	for _, structField := range schemas {

@@ -1598,12 +1598,14 @@ FetchFieldData(ChunkManager* cm, const std::vector<std::string>& remote_files) {
 }
 
 std::vector<FieldDataPtr>
-GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
-                           int64_t field_id,
-                           DataType data_type,
-                           DataType element_type,
-                           int64_t dim,
-                           milvus_storage::ArrowFileSystemPtr fs) {
+GetFieldDatasFromStorageV2(
+    std::vector<std::vector<std::string>>& remote_files,
+    int64_t field_id,
+    DataType data_type,
+    DataType element_type,
+    int64_t dim,
+    milvus_storage::ArrowFileSystemPtr fs,
+    std::optional<proto::schema::TypeSchema> array_type) {
     AssertInfo(remote_files.size() > 0, "[StorageV2] remote files size is 0");
     std::vector<FieldDataPtr> field_data_list;
 
@@ -1773,7 +1775,8 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                                              element_type,
                                              field_schema->nullable(),
                                              dim,
-                                             num_rows);
+                                             num_rows,
+                                             array_type);
                 for (const auto& chunked_array : chunked_arrays) {
                     field_data->FillFieldData(chunked_array);
                 }
@@ -1808,7 +1811,8 @@ IterateFieldDataFromManifest(
     std::optional<DataType> element_type,
     std::optional<StorageColumnMapping> storage_column_mapping,
     const std::function<void(FieldDataPtr)>& consumer,
-    int64_t max_inflight_bytes) {
+    int64_t max_inflight_bytes,
+    std::optional<proto::schema::TypeSchema> array_type) {
     AssertInfo(max_inflight_bytes > 0,
                "max_inflight_bytes must be positive, got {}",
                max_inflight_bytes);
@@ -2076,6 +2080,7 @@ IterateFieldDataFromManifest(
                                           dim,
                                           nullable,
                                           normalize_field_meta,
+                                          array_type,
                                           num_rows]() -> FieldDataPtr {
             auto raw_column = batch->GetColumnByName(column_name);
             if (is_external) {
@@ -2089,8 +2094,12 @@ IterateFieldDataFromManifest(
             }
             auto chunked_array =
                 std::make_shared<arrow::ChunkedArray>(raw_column);
-            auto field_data = CreateFieldData(
-                data_type_v, element_type_v, nullable, dim, num_rows);
+            auto field_data = CreateFieldData(data_type_v,
+                                              element_type_v,
+                                              nullable,
+                                              dim,
+                                              num_rows,
+                                              array_type);
             field_data->FillFieldData(chunked_array);
             return field_data;
         });
@@ -2147,7 +2156,8 @@ GetFieldDatasFromManifest(
     std::optional<DataType> data_type,
     int64_t dim,
     std::optional<DataType> element_type,
-    std::optional<StorageColumnMapping> storage_column_mapping) {
+    std::optional<StorageColumnMapping> storage_column_mapping,
+    std::optional<proto::schema::TypeSchema> array_type) {
     std::vector<FieldDataPtr> field_datas;
     IterateFieldDataFromManifest(
         manifest_path,
@@ -2164,7 +2174,8 @@ GetFieldDatasFromManifest(
         // would only pin extra source arrow batches on top of the full
         // column. Keep it small; overlap still happens, the peak does not
         // grow by half a gigabyte per concurrent build.
-        kAccumulatingInflightBytes);
+        kAccumulatingInflightBytes,
+        std::move(array_type));
     return field_datas;
 }
 

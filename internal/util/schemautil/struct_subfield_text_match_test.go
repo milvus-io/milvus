@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func TestRejectStructSubFieldsTextMatch(t *testing.T) {
+func TestValidateStructSubFieldsTextMatch(t *testing.T) {
 	newStruct := func(field *schemapb.FieldSchema) []*schemapb.StructArrayFieldSchema {
 		return []*schemapb.StructArrayFieldSchema{{Name: "s", Fields: []*schemapb.FieldSchema{field}}}
 	}
@@ -41,12 +41,24 @@ func TestRejectStructSubFieldsTextMatch(t *testing.T) {
 		}
 	}
 
-	for _, key := range []string{common.EnableMatchKey, common.EnableAnalyzerKey} {
-		err := RejectStructSubFieldsTextMatch(newStruct(varcharArray(&commonpb.KeyValuePair{Key: key, Value: "true"})))
-		require.ErrorIs(t, err, merr.ErrParameterInvalid)
-		require.ErrorContains(t, err, key+" is not supported on struct sub-field s[tag]")
-	}
-	require.NoError(t, RejectStructSubFieldsTextMatch(newStruct(varcharArray(&commonpb.KeyValuePair{Key: common.EnableMatchKey, Value: "false"}))))
+	match := &commonpb.KeyValuePair{Key: common.EnableMatchKey, Value: "true"}
+	analyzer := &commonpb.KeyValuePair{Key: common.EnableAnalyzerKey, Value: "true"}
+	tags := varcharArray(match, analyzer)
+	tags.Name = "tags"
+	require.NoError(t, ValidateVarCharArrayTextMatch(tags))
+	require.True(t, BuildTextStats(tags))
+	tags.TypeParams = []*commonpb.KeyValuePair{match}
+	require.ErrorContains(t, ValidateVarCharArrayTextMatch(tags), "requires enable_analyzer")
+	require.False(t, BuildTextStats(tags)) // Old schemas may contain only enable_match.
+	enabled := varcharArray(match, analyzer)
+	require.NoError(t, ValidateStructSubFieldsTextMatch(newStruct(enabled)))
+	require.True(t, BuildTextStats(enabled))
+	MarkAddedStructSubField(enabled)
+	require.False(t, BuildTextStats(enabled))
+	require.NoError(t, ValidateStructSubFieldsTextMatch(newStruct(varcharArray(analyzer))))
+	err := ValidateStructSubFieldsTextMatch(newStruct(varcharArray(match)))
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, err, "requires enable_analyzer")
 
 	nested := &schemapb.FieldSchema{
 		Name: "s[tags]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array,
@@ -64,5 +76,5 @@ func TestRejectStructSubFieldsTextMatch(t *testing.T) {
 			}},
 		},
 	}
-	require.ErrorContains(t, RejectStructSubFieldsTextMatch(newStruct(nested)), "enable_analyzer is not supported on struct sub-field s[tags]")
+	require.ErrorContains(t, ValidateStructSubFieldsTextMatch(newStruct(nested)), "enable_analyzer is not supported on struct sub-field s[tags]")
 }

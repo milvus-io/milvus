@@ -52,6 +52,7 @@ type ParserVisitor struct {
 	// ElementFilter or MATCH_* predicates.
 	currentStructArrayField string
 	currentScalarArray      *schemapb.FieldSchema
+	inMatchPredicate        bool
 }
 
 func NewParserVisitor(schema *typeutil.SchemaHelper, args *ParserVisitorArgs) *ParserVisitor {
@@ -1043,13 +1044,28 @@ func (v *ParserVisitor) VisitRegexNotMatch(ctx *parser.RegexNotMatchContext) int
 // text_match_fuzzy / phrase_match visitors: resolve the field, require a
 // text-match-enabled string column, and parse the query literal or template.
 func (v *ParserVisitor) parseTextMatchOperand(identifier string, queryExpr parser.IExprContext, opName string, argName string) (*planpb.ColumnInfo, *planpb.GenericValue, string, bool, error) {
-	column, err := v.translateIdentifierWithText(identifier, true)
-	if err != nil {
-		return nil, nil, "", false, err
-	}
-	columnInfo := toColumnInfo(column)
-	if !typeutil.IsStringType(column.dataType) {
-		return nil, nil, "", false, merr.WrapErrQueryPlanMsg("%s operation on non-string is unsupported", opName)
+	var columnInfo *planpb.ColumnInfo
+	if identifier == "$" || isValidStructSubField(identifier) {
+		if !v.inMatchPredicate {
+			return nil, nil, "", false, merr.WrapErrParameterInvalidMsg("%s on an array element requires MATCH_*", opName)
+		}
+		info, err := v.getColumnInfoFromStructSubField(identifier)
+		if err != nil {
+			return nil, nil, "", false, err
+		}
+		if info.GetElementType() != schemapb.DataType_VarChar {
+			return nil, nil, "", false, merr.WrapErrQueryPlanMsg("%s requires a VarChar element", opName)
+		}
+		columnInfo = info
+	} else {
+		column, err := v.translateIdentifierWithText(identifier, true)
+		if err != nil {
+			return nil, nil, "", false, err
+		}
+		if !typeutil.IsStringType(column.dataType) {
+			return nil, nil, "", false, merr.WrapErrQueryPlanMsg("%s operation on non-string is unsupported", opName)
+		}
+		columnInfo = toColumnInfo(column)
 	}
 	if !v.schema.IsFieldTextMatchEnabled(columnInfo.FieldId) {
 		return nil, nil, "", false, merr.WrapErrParameterInvalidMsg("field \"%s\" does not enable match", identifier)
@@ -1066,7 +1082,7 @@ func (v *ParserVisitor) parseTextMatchOperand(identifier string, queryExpr parse
 }
 
 func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{} {
-	identifier := ctx.FieldName().GetText()
+	identifier := ctx.TextField().GetText()
 	columnInfo, value, placeholder, isTemplate, err := v.parseTextMatchOperand(
 		identifier, ctx.Expr(), "text match", "text_match query")
 	if err != nil {
@@ -1169,7 +1185,7 @@ func (v *ParserVisitor) VisitTextMatchOption(ctx *parser.TextMatchOptionContext)
 }
 
 func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interface{} {
-	identifier := ctx.FieldName().GetText()
+	identifier := ctx.TextField().GetText()
 	columnInfo, value, placeholder, isTemplate, err := v.parseTextMatchOperand(
 		identifier, ctx.Expr(0), "phrase match", "phrase_match query")
 	if err != nil {
@@ -3516,7 +3532,9 @@ func (v *ParserVisitor) parseMatchExpr(collectionName string, exprCtx parser.IEx
 		}
 	}
 	v.currentStructArrayField = collectionName
+	v.inMatchPredicate = true
 	defer func() {
+		v.inMatchPredicate = false
 		v.currentScalarArray = nil
 		v.currentStructArrayField = ""
 	}()

@@ -6102,3 +6102,42 @@ func TestMatchWithFlattenedStructSchema(t *testing.T) {
 	require.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
 	require.Nil(t, expr.GetMatchExpr().TargetFieldId)
 }
+
+func TestArrayTextMatchOperand(t *testing.T) {
+	schema := newTestSchema(false)
+	field := schema.StructArrayFields[0].Fields[0]
+	field.ElementNullable = true
+	field.TypeParams = []*commonpb.KeyValuePair{{Key: common.EnableMatchKey, Value: "true"}, {Key: common.EnableAnalyzerKey, Value: "true"}}
+	tags := &schemapb.FieldSchema{FieldID: 952, Name: "tags", DataType: schemapb.DataType_Array,
+		ElementType: schemapb.DataType_VarChar, ElementNullable: true, TypeParams: field.TypeParams}
+	schema.Fields = append(schema.Fields, tags)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		filter  string
+		fieldID int64
+	}{
+		{`MATCH_ANY(struct_array, TEXT_MATCH($[sub_str], "a b", minimum_should_match=2))`, field.GetFieldID()},
+		{`MATCH_EXACT(struct_array, PHRASE_MATCH($[sub_str], "a b", 2), threshold=1)`, field.GetFieldID()},
+		{`MATCH_LEAST(tags, TEXT_MATCH($, "a b", minimum_should_match=2), threshold=2)`, tags.GetFieldID()},
+		{`MATCH_ALL(tags, PHRASE_MATCH($, "a b", 2))`, tags.GetFieldID()},
+	} {
+		plan, err := ParseExpr(helper, tc.filter, nil)
+		require.NoError(t, err)
+		leaf := plan.GetMatchExpr().GetPredicate().GetUnaryRangeExpr()
+		require.Equal(t, tc.fieldID, leaf.GetColumnInfo().GetFieldId())
+		require.True(t, leaf.GetColumnInfo().GetIsElementLevel())
+		require.True(t, leaf.GetColumnInfo().GetNullable())
+		require.EqualValues(t, 2, leaf.GetExtraValues()[0].GetInt64Val())
+	}
+	for _, filter := range []string{
+		`TEXT_MATCH($[sub_str], "x")`, `TEXT_MATCH(StringArrayField, "x")`, `TEXT_MATCH(tags, "x")`,
+		`TEXT_MATCH($, "x")`, `MATCH_ANY(tags, TEXT_MATCH($[sub_str], "x"))`,
+		`MATCH_ANY(struct_array, PHRASE_MATCH($, "x"))`,
+		`MATCH_ANY(struct_array, PHRASE_MATCH($[sub_int], "x"))`,
+		`element_filter(struct_array, TEXT_MATCH($[sub_str], "x"))`,
+	} {
+		_, err := ParseExpr(helper, filter, nil)
+		require.Error(t, err, filter)
+	}
+}

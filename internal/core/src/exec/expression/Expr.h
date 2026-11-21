@@ -3342,7 +3342,7 @@ class SegmentExpr : public Expr {
     EnsureExecPathDetermined() const {
         std::call_once(determine_exec_path_once_, [this]() {
             auto self = const_cast<SegmentExpr*>(this);
-            if (is_scalar_array_ && IsElementLevelExpression()) {
+            if (is_scalar_array_ && RequiresRawArrayElements()) {
                 // A scalar ARRAY index produces row ids. MATCH consumes element ids.
                 if (!has_field_data_at_init_) {
                     ThrowInfo(ExprInvalid,
@@ -3518,6 +3518,13 @@ class SegmentExpr : public Expr {
     virtual bool
     IsElementLevelExpression() const {
         return false;
+    }
+
+    // Ordinary scalar indexes return parent rows. A leaf with its own
+    // element-document index can select that reader instead.
+    virtual bool
+    RequiresRawArrayElements() const {
+        return IsElementLevelExpression();
     }
 
     size_t
