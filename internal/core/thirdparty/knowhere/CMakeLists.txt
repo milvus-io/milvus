@@ -40,6 +40,14 @@ if ( WITH_GPU AND NOT WITH_CARDINAL )
     set(rmm_DIR "${FETCHCONTENT_BASE_DIR}/rmm-build" CACHE PATH "Path to rmm build directory" FORCE)
 endif ()
 
+if ( NOT DEFINED WITH_SVS OR WITH_SVS STREQUAL "AUTO" )
+    if ( CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$" )
+        set(WITH_SVS ON)
+    else ()
+        set(WITH_SVS OFF)
+    endif ()
+endif ()
+
 if ( WITH_SVS STREQUAL "ON" )
     set(WITH_SVS ON CACHE BOOL "" FORCE )
 else ()
@@ -67,18 +75,19 @@ endif()
 
 # Install the SVS runtime shared library alongside libknowhere.so so that
 # the Go linker (and the final binary at runtime) can find it.
-# svs_SOURCE_DIR is set inside knowhere's subdirectory scope and does not
-# propagate here, so we derive the path from FETCHCONTENT_BASE_DIR which
-# is in the CMake cache (set by internal/core/CMakeLists.txt).
+# Read the package resolved in Knowhere's directory scope, including
+# preinstalled runtimes (the fetched package path is not necessarily cached).
+# Its config directory is <prefix>/lib/cmake/svs_runtime.
 if ( WITH_SVS STREQUAL "ON" )
-    set( _SVS_LIB_DIR "${FETCHCONTENT_BASE_DIR}/svs-src/lib" )
-    if ( EXISTS "${_SVS_LIB_DIR}" )
-        install(DIRECTORY ${_SVS_LIB_DIR}/
-                DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}
-                FILES_MATCHING PATTERN "libsvs_runtime.so*")
-    else()
-        message(WARNING "SVS enabled but ${_SVS_LIB_DIR} not found \u2014 libsvs_runtime.so will not be installed")
-    endif()
+    get_directory_property(_SVS_RUNTIME_DIR DIRECTORY "${knowhere_SOURCE_DIR}"
+                           DEFINITION svs_runtime_DIR)
+    if ( NOT _SVS_RUNTIME_DIR )
+        message(FATAL_ERROR "SVS enabled but Knowhere did not resolve svs_runtime")
+    endif ()
+    get_filename_component(_SVS_LIB_DIR "${_SVS_RUNTIME_DIR}/../.." ABSOLUTE)
+    install(DIRECTORY "${_SVS_LIB_DIR}/"
+            DESTINATION "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
+            FILES_MATCHING PATTERN "libsvs_runtime.so*")
 endif()
 
 if ( WITH_GPU AND NOT WITH_CARDINAL )

@@ -46,6 +46,7 @@ create_library() {
 }
 
 create_library "$repo_root/internal/core/output/lib" libdemo.so libdemo.so.1 libdemo.so.1.2
+create_library "$repo_root/internal/core/output/lib" libsvs_runtime.so libsvs_runtime.so.0 libsvs_runtime.so.0.5.1
 create_library "$repo_root/internal/core/output/lib64" libother.so libother.so.2 libother.so.2.3
 create_library "$repo_root/internal/core/output/lib" libdemo.dylib libdemo.1.dylib libdemo.1.2.dylib
 printf 'module fixture\n' > "$repo_root/internal/core/output/lib/ossl-modules/fips.so"
@@ -73,6 +74,7 @@ assert_library() {
 
 assert_install() {
     assert_library libdemo.so libdemo.so.1 libdemo.so.1.2
+    assert_library libsvs_runtime.so libsvs_runtime.so.0 libsvs_runtime.so.0.5.1
     assert_library libother.so libother.so.2 libother.so.2.3
     assert_library libdemo.dylib libdemo.1.dylib libdemo.1.2.dylib
     cmp "$repo_root/bin/milvus" "$test_root/gopath/bin/milvus"
