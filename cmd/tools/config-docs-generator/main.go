@@ -160,17 +160,15 @@ This topic introduces the general sections of the system configurations in Milvu
 
 Milvus maintains a considerable number of parameters that configure the system. Each configuration has a default value, which can be used directly. You can modify these parameters flexibly so that Milvus can better serve your application. See [Configure Milvus](configure-docker.md) for more information.
 
-<div class="alert note">
-In current release, all parameters take effect only after being configured at the startup of Milvus.
-</div>
+Some configuration changes require a restart. See [Configure Milvus on the Fly](dynamic_config.md) for settings that can be updated at runtime.
 
 ## Sections
 
-For the convenience of maintenance, Milvus classifies its configurations into %s sections based on its components, dependencies, and general usage.
+For the convenience of maintenance, Milvus classifies its configurations into %d sections based on its components, dependencies, and general usage.
 
 `
 	const fileName = "system_configuration.md"
-	fileContent := head
+	fileContent := fmt.Sprintf(head, len(secs))
 	for _, sec := range secs {
 		fileContent += sec.systemConfiguratinContent()
 		sectionFileContent := sec.sectionPageContent()
@@ -217,9 +215,6 @@ func (s Section) sectionPageContent() string {
 	ret += fmt.Sprintf("# %s-related Configurations"+mdNextLine, s.Name)
 	ret += s.descriptionContent() + mdNextLine
 	for _, field := range s.Fields {
-		if len(field.Description) == 0 || field.Description[0] == "" {
-			continue
-		}
 		ret += field.sectionPageContent() + mdNextLine
 	}
 
@@ -256,6 +251,9 @@ func (f Field) sectionPageContent() string {
 }
 
 func (f Field) descriptionContent() string {
+	if len(f.Description) == 0 {
+		return ""
+	}
 	var ret string
 	lines := len(f.Description)
 	if lines > 1 {
