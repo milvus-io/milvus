@@ -815,6 +815,86 @@ func Test_CheckStructArrayConsistency(t *testing.T) {
 	})
 }
 
+// Test_CheckStructArrayConsistency_CompactVectorArray pins how a binlog import
+// counts the elements of an element-nullable vector sub-field: the payload
+// holds only the valid vectors, so the element count is the length of the
+// element validity, and the payload must hold exactly one vector per valid
+// element. A count taken from the payload length would disagree with the
+// dense scalar sibling whenever an element is null.
+func Test_CheckStructArrayConsistency_CompactVectorArray(t *testing.T) {
+	const (
+		dim      = 2
+		scalarID = int64(201)
+		vectorID = int64(202)
+	)
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 200, Name: "s",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID: scalarID, Name: typeutil.ConcatStructFieldName("s", "id"),
+					DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID: vectorID, Name: typeutil.ConcatStructFieldName("s", "emb"),
+					DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector,
+					ElementNullable: true,
+					TypeParams:      []*commonpb.KeyValuePair{{Key: common.DimKey, Value: fmt.Sprintf("%d", dim)}},
+				},
+			},
+		}},
+	}
+	compact := func(valid []bool, vectors int) *schemapb.VectorField {
+		row := &schemapb.VectorField{
+			Dim:  dim,
+			Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, vectors*dim)}},
+		}
+		typeutil.SetVectorArrayElementValidData(row, valid)
+		return row
+	}
+	build := func(vectorRows ...*schemapb.VectorField) *storage.InsertData {
+		return &storage.InsertData{Data: map[int64]storage.FieldData{
+			scalarID: &storage.ArrayFieldData{
+				ElementType: schemapb.DataType_Int64,
+				Data: []*schemapb.ScalarField{
+					{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}}},
+					{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{}}}},
+				},
+			},
+			vectorID: &storage.VectorArrayFieldData{
+				Dim: dim, ElementType: schemapb.DataType_FloatVector, ElementNullable: true,
+				Data: vectorRows,
+			},
+		}}
+	}
+
+	t.Run("null elements counted by validity", func(t *testing.T) {
+		// three elements, the middle one null: two vectors in the payload
+		data := build(compact([]bool{true, false, true}, 2), compact([]bool{}, 0))
+		require.NoError(t, CheckStructArrayConsistency(schema, data))
+	})
+
+	t.Run("all elements null", func(t *testing.T) {
+		data := build(compact([]bool{false, false, false}, 0), compact([]bool{}, 0))
+		require.NoError(t, CheckStructArrayConsistency(schema, data))
+	})
+
+	t.Run("payload does not match valid count", func(t *testing.T) {
+		data := build(compact([]bool{true, false, true}, 3), compact([]bool{}, 0))
+		err := CheckStructArrayConsistency(schema, data)
+		require.ErrorIs(t, err, merr.ErrImportSysFailed)
+		require.ErrorContains(t, err, "expected 2 valid vectors")
+	})
+
+	t.Run("element count differs from sibling", func(t *testing.T) {
+		data := build(compact([]bool{true, false}, 1), compact([]bool{}, 0))
+		err := CheckStructArrayConsistency(schema, data)
+		require.ErrorIs(t, err, merr.ErrImportFailed)
+		require.ErrorContains(t, err, "inconsistent element count at row 0")
+	})
+}
+
 func Test_AppendNullableDefaultFieldsData(t *testing.T) {
 	autoIDField := int64(100)
 	dynamicFieldID := int64(102)

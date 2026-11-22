@@ -22,51 +22,9 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-// ValidateImportSchema rejects target schemas that the requested import source
-// cannot fill. File imports (JSON, CSV, Parquet) read element-nullable and
-// nested Array struct sub-fields; binlog imports (backup restore), including
-// snapshot-source imports, copy source binlogs and cannot fill them, so they
-// are rejected before the job is accepted. NumPy imports into a collection
-// with struct fields are rejected separately because the check needs the
-// file types.
-func ValidateImportSchema(schema *schemapb.CollectionSchema, options Options) error {
-	if !IsBackup(options) && !IsSnapshotSource(options) {
-		return nil
-	}
-	kind := "binlog import (backup restore)"
-	if IsSnapshotSource(options) {
-		kind = "snapshot-source import"
-	}
-	check := func(field *schemapb.FieldSchema, name string) error {
-		if typeutil.IsNativeListArrayField(field) {
-			return merr.WrapErrParameterInvalidMsg("%s into a collection with element-nullable or nested Array field %s is not supported", kind, name)
-		}
-		return nil
-	}
-	for _, field := range schema.GetFields() {
-		if err := check(field, field.GetName()); err != nil {
-			return err
-		}
-	}
-	for _, structField := range schema.GetStructArrayFields() {
-		for _, field := range structField.GetFields() {
-			name, err := typeutil.ExtractStructFieldName(field.GetName())
-			if err != nil {
-				return err
-			}
-			if err := check(field, structField.GetName()+"."+name); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
 
 const (
 	JSONFileExt    = ".json"
