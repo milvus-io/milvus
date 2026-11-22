@@ -164,6 +164,52 @@ func TestVerify_StorageV2V3_NullableVectorOptional(t *testing.T) {
 	}
 }
 
+// TestVerify_StorageV2V3_ElementNullableVectorSubFieldOptional pins that a
+// vector sub-field added to a struct after the segment was flushed has no
+// column group and is accepted because it is element-nullable, even when the
+// struct, and so the sub-field, is not nullable. A missing vector sub-field
+// that is not element-nullable is still rejected. The column group of a
+// dropped vector sub-field is passed on: the packed reader needs the complete
+// path list and projects the read schema.
+func TestVerify_StorageV2V3_ElementNullableVectorSubFieldOptional(t *testing.T) {
+	vector := func(id int64, name string, elementNullable bool) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			FieldID: id, Name: name, DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector,
+			ElementNullable: elementNullable,
+			TypeParams:      []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+		}
+	}
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 200, Name: "s",
+			Fields: []*schemapb.FieldSchema{
+				vector(201, "s[old]", false),
+				vector(202, "s[added]", true),
+			},
+		}},
+	}
+	logs := func(ids ...int64) map[int64][]string {
+		out := make(map[int64][]string, len(ids))
+		for _, id := range ids {
+			out[id] = []string{fmt.Sprintf("insert_log/1/2/3/%d/1", id)}
+		}
+		return out
+	}
+	for _, version := range []int64{storage.StorageV2, storage.StorageV3} {
+		withDropped := logs(storagecommon.DefaultShortColumnGroupID, 201, 299)
+		gotLogs, gotSchema, err := verify(schema, version, withDropped)
+		assert.NoError(t, err, "version %d", version)
+		assert.Equal(t, withDropped, gotLogs)
+		assert.Same(t, schema, gotSchema)
+
+		_, _, err = verify(schema, version, logs(storagecommon.DefaultShortColumnGroupID, 202))
+		assert.ErrorContains(t, err, "no binlog for field:s[old]", "version %d", version)
+	}
+}
+
 func TestVerify_MissingSystemFields(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
