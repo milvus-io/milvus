@@ -110,6 +110,12 @@ class InstrumentedLobColumnReader : public LobColumnReader {
                                                  Bytes("mock-text"));
     }
 
+    folly::SemiFuture<arrow::Result<std::vector<std::string>>>
+    ReadBatchAsync(const std::vector<EncodedRef>&) override {
+        return folly::makeSemiFuture(arrow::Result<std::vector<std::string>>(
+            arrow::Status::NotImplemented("unexpected async read")));
+    }
+
     arrow::Result<std::shared_ptr<arrow::BinaryArray>>
     ReadArrowArray(const std::shared_ptr<arrow::BinaryArray>&) override {
         return arrow::Status::NotImplemented("unused");
