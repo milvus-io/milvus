@@ -9,6 +9,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -79,6 +80,58 @@ func TestScannerRetriesSwitchWithoutReplayingPrefix(t *testing.T) {
 		require.NoError(t, s.Close())
 		_, ok := <-s.Chan()
 		require.False(t, ok, "no replayed prefix, boundary or anchor may remain queued")
+	})
+}
+
+func TestScannerTransfersMessageOwnership(t *testing.T) {
+	mockey.PatchConvey("consumers can overwrite trace context immediately after receiving a switch", t, func() {
+		p, w, first, _ := prepareScannerSwitch(t)
+		auto := New(p, func(_ context.Context, name message.WALName, mode types.AccessMode) (walimpls.WALImpls, error) {
+			require.Equal(t, w.name, name)
+			require.Equal(t, types.AccessModeRO, mode)
+			return &readOnlyLog{w}, nil
+		})
+		defer auto.Close()
+		ctx := trace.ContextWithSpanContext(context.Background(), trace.NewSpanContext(trace.SpanContextConfig{
+			TraceID: trace.TraceID{1}, SpanID: trace.SpanID{1},
+		}))
+		// Repeated handoffs exercise both goroutines under the race detector.
+		for i := 0; i < 32; i++ {
+			s, err := auto.Read(ctx, walimpls.ReadOption{DeliverPolicy: options.DeliverPolicyStartFrom(first)})
+			require.NoError(t, err)
+			for _, tick := range []uint64{10, 20, 30} {
+				msg := receive(t, s)
+				message.OverwriteTraceContext(ctx, msg)
+				require.Equal(t, tick, msg.TimeTick())
+			}
+			require.NoError(t, s.Close())
+		}
+	})
+}
+
+func TestScannerRejectsNonAdvancingSwitch(t *testing.T) {
+	mockey.PatchConvey("cached switch TimeTick still enforces increasing boundaries", t, func() {
+		p, w, first, start := prepareScannerSwitch(t)
+		invalid := alter(20, p.name, start)
+		message.SetWALSwitchStart(invalid, first)
+		_, err := w.Append(context.Background(), invalid)
+		require.NoError(t, err)
+		auto := New(p, func(context.Context, message.WALName, types.AccessMode) (walimpls.WALImpls, error) {
+			return &readOnlyLog{w}, nil
+		})
+		defer auto.Close()
+		s, err := auto.Read(context.Background(), walimpls.ReadOption{DeliverPolicy: options.DeliverPolicyStartFrom(first)})
+		require.NoError(t, err)
+		defer s.Close()
+		for _, tick := range []uint64{10, 20, 30, 20} {
+			require.Equal(t, tick, receive(t, s).TimeTick())
+		}
+		select {
+		case <-s.Done():
+			require.ErrorContains(t, s.Error(), "WAL scanner switch does not advance")
+		case <-time.After(time.Second):
+			t.Fatal("scanner did not reject the non-advancing switch")
+		}
 	})
 }
 

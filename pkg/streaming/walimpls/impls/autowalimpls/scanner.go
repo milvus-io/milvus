@@ -70,6 +70,7 @@ func (s *scanner) run(w *WAL, inner walimpls.ScannerImpls, opt walimpls.ReadOpti
 				return inner.Error()
 			}
 			var start message.MessageID
+			var switchTimeTick uint64
 			if message.IsWALSwitch(msg) {
 				var err error
 				start, err = message.WALSwitchStart(msg)
@@ -78,6 +79,9 @@ func (s *scanner) run(w *WAL, inner walimpls.ScannerImpls, opt walimpls.ReadOpti
 				}
 				if start.WALName() == msg.WALName() {
 					start = nil
+				} else {
+					// Consumers may overwrite message properties after handoff.
+					switchTimeTick = msg.TimeTick()
 				}
 			}
 			skip := exclude != nil && msg.MessageID().EQ(exclude)
@@ -92,10 +96,10 @@ func (s *scanner) run(w *WAL, inner walimpls.ScannerImpls, opt walimpls.ReadOpti
 			if start == nil {
 				continue
 			}
-			if msg.TimeTick() <= boundary {
+			if switchTimeTick <= boundary {
 				return merr.WrapErrDataIntegrityMsg("WAL scanner switch does not advance")
 			}
-			boundary = msg.TimeTick()
+			boundary = switchTimeTick
 			next := s.readNext(w, opt, start)
 			if next == nil {
 				return nil // Scanner closed while establishing the next reader.
