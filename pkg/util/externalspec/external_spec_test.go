@@ -754,10 +754,14 @@ func TestExplicitBucketMatchesExternalSource(t *testing.T) {
 	for _, tc := range []struct{ provider, source, bucket string }{
 		{"aws", "s3://events.prod/dir/file", "events.prod"},
 		{"aws", "s3://s3.us-west-2.amazonaws.com/events/dir/file", "events"},
+		{"aws", "s3://S3.US-WEST-2.AMAZONAWS.COM:443/events/dir/file", "events"},
+		{"aws", "aws://s3.cn-north-1.amazonaws.com.cn:8443/events/dir/file", "events"},
 		{"aliyun", "oss://events/dir/file", "events"},
 		{"aliyun", "oss://oss-cn-hangzhou-internal.aliyuncs.com/events/dir/file", "events"},
+		{"aliyun", "oss://oss-cn-hangzhou-internal.aliyuncs.com:443/events/dir/file", "events"},
 		{"tencent", "cos://events-1250000000/dir/file", "events-1250000000"},
 		{"tencent", "cos://cos.ap-guangzhou.myqcloud.com/events-1250000000/dir/file", "events-1250000000"},
+		{"tencent", "cos://cos.ap-guangzhou.myqcloud.com:8443/events-1250000000/dir/file", "events-1250000000"},
 		{"huawei", "obs://events/dir/file", "events"},
 		{"huawei", "obs://obs.cn-north-4.myhuaweicloud.com/events/dir/file", "events"},
 		{"gcp", "gs://events.prod/dir/file", "events.prod"},
@@ -786,6 +790,28 @@ func TestExplicitBucketMatchesExternalSource(t *testing.T) {
 	}
 }
 
+func TestS3ProviderEndpointPort(t *testing.T) {
+	for _, tc := range []struct{ provider, endpoint string }{
+		{"aws", "s3://s3.us-west-2.amazonaws.com"},
+		{"aliyun", "oss://oss-cn-hangzhou-internal.aliyuncs.com"},
+		{"tencent", "cos://cos.ap-guangzhou.myqcloud.com"},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			spec := marshalBrokerSpec(t, FormatParquet, map[string]string{
+				ExtfsKeyCloudProvider: tc.provider, ExtfsKeyRegion: "us-west-2",
+				ExtfsKeyAccessKeyID: "account", ExtfsKeyAccessKeyValue: "secret",
+			})
+			for _, port := range []string{"443", "65535"} {
+				require.NoError(t, ValidateSourceAndSpec(tc.endpoint+":"+port+"/events/file", spec))
+			}
+			for _, port := range []string{"", "0", "65536", "abc"} {
+				err := ValidateSourceAndSpec(tc.endpoint+":"+port+"/events/file", spec)
+				require.ErrorIs(t, err, merr.ErrParameterInvalid, "port %q", port)
+			}
+		})
+	}
+}
+
 func TestIsCloudEndpointHost(t *testing.T) {
 	for _, host := range []string{
 		"s3.us-west-2.amazonaws.com",
@@ -805,6 +831,8 @@ func TestIsCloudEndpointHost(t *testing.T) {
 
 	for _, host := range []string{
 		"localhost:9000",
+		"s3.us-west-2.amazonaws.com:443",
+		"storage.googleapis.com:443",
 		"bucket",
 		"amazonaws.com",
 	} {

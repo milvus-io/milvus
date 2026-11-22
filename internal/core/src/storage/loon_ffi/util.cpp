@@ -567,13 +567,6 @@ StripURIScheme(const std::string& addr) {
     return (pos != std::string::npos) ? addr.substr(pos + 3) : addr;
 }
 
-// IsCloudEndpointHost returns true when `host` matches a known cloud provider
-// domain family. Used to identify Milvus-form URIs whose host is an endpoint
-// variant (global / accelerate / dual-stack / VPC / FIPS / sovereign) that
-// DeriveEndpoint does not produce verbatim. When the host belongs to a cloud
-// family, the URI is Milvus-form regardless of whether DeriveEndpoint(cp,
-// region) equals the host string. Keep list in sync with Go
-// externalspec.IsCloudEndpointHost.
 // IsAzureStorageAuthority returns true for the bare Azure Storage
 // authorities that azure://<authority>/<container>/<blob> names. An Azure
 // container name cannot contain a dot, so such a host is never a container.
@@ -587,43 +580,32 @@ IsAzureStorageAuthority(const std::string& host) {
            h == "core.usgovcloudapi.net" || h == "core.cloudapi.de";
 }
 
-static bool
-IsCloudEndpointHost(const std::string& host) {
-    std::string h = host;
-    std::transform(h.begin(), h.end(), h.begin(), [](unsigned char c) {
-        return std::tolower(c);
-    });
-    auto ends_with = [&](const std::string& suffix) {
-        return h.size() >= suffix.size() &&
-               h.compare(h.size() - suffix.size(), suffix.size(), suffix) == 0;
-    };
-    // AWS (global, regional, accelerate, dualstack, FIPS, VPC, China).
-    if (ends_with(".amazonaws.com") || ends_with(".amazonaws.com.cn")) {
-        return true;
+// Keep the endpoint domain families in sync with Go externalspec.IsCloudEndpointHost.
+static std::string_view
+CloudEndpointProvider(const std::string& host) {
+    const auto h = arrow::internal::AsciiToLower(host);
+    if (h.ends_with(".amazonaws.com") || h.ends_with(".amazonaws.com.cn")) {
+        return "aws";
     }
-    // GCP Cloud Storage.
-    if (ends_with(".googleapis.com")) {
-        return true;
+    if (h.ends_with(".googleapis.com")) {
+        return "gcp";
     }
-    // Aliyun OSS (public, internal, accelerate, VPC).
-    if (ends_with(".aliyuncs.com")) {
-        return true;
+    if (h.ends_with(".aliyuncs.com")) {
+        return "aliyun";
     }
-    // Tencent Cloud COS.
-    if (ends_with(".myqcloud.com")) {
-        return true;
+    if (h.ends_with(".myqcloud.com")) {
+        return "tencent";
     }
-    // Huawei Cloud OBS.
-    if (ends_with(".myhuaweicloud.com")) {
-        return true;
+    if (h.ends_with(".myhuaweicloud.com")) {
+        return "huawei";
     }
-    // Azure Blob Storage (public, China, US Gov, Germany).
-    if (ends_with(".core.windows.net") || ends_with(".core.chinacloudapi.cn") ||
-        ends_with(".core.usgovcloudapi.net") ||
-        ends_with(".core.cloudapi.de")) {
-        return true;
+    if (h.ends_with(".core.windows.net") ||
+        h.ends_with(".core.chinacloudapi.cn") ||
+        h.ends_with(".core.usgovcloudapi.net") ||
+        h.ends_with(".core.cloudapi.de")) {
+        return "azure";
     }
-    return false;
+    return {};
 }
 
 static arrow::Status
@@ -1056,19 +1038,27 @@ InjectExternalSpecProperties(
                        spec_cp.end(),
                        spec_cp.begin(),
                        [](unsigned char c) { return std::tolower(c); });
+        const auto colon = host.find(':');
+        const auto provider = CloudEndpointProvider(host.substr(0, colon));
         bool uri_host_is_cloud_endpoint =
-            IsCloudEndpointHost(host) ||
+            (colon == std::string::npos && !provider.empty()) ||
             (spec_cp == "azure" && IsAzureStorageAuthority(host));
-        if (spec_cp == "gcp" && host.find(':') != std::string::npos &&
-            (arrow::internal::AsciiEqualsCaseInsensitive(scheme, "gs") ||
-             arrow::internal::AsciiEqualsCaseInsensitive(scheme, "gcs"))) {
+        if (colon != std::string::npos && provider == spec_cp &&
+            (provider == "aws" || provider == "aliyun" ||
+             provider == "tencent" ||
+             (provider == "gcp" &&
+              (arrow::internal::AsciiEqualsCaseInsensitive(scheme, "gs") ||
+               arrow::internal::AsciiEqualsCaseInsensitive(scheme, "gcs"))))) {
+            // Classify the DNS hostname, but keep the complete address for
+            // matching the storage URI and connecting to its explicit port.
             arrow::util::Uri endpoint;
-            // Classify the DNS hostname only. Keep Layer 1's complete
-            // authority so storage can match the original URI, including :443.
-            uri_host_is_cloud_endpoint =
-                endpoint.Parse("https://" + host).ok() && endpoint.port() > 0 &&
-                arrow::internal::AsciiToLower(endpoint.host())
-                    .ends_with(".googleapis.com");
+            if (!endpoint.Parse("https://" + host).ok() ||
+                endpoint.port() <= 0 || endpoint.port() > 65535 ||
+                !endpoint.username().empty() || !endpoint.password().empty()) {
+                return arrow::Status::Invalid(
+                    "Cloud endpoint requires a port between 1 and 65535");
+            }
+            uri_host_is_cloud_endpoint = true;
         }
         const bool bucket_in_host = !uri_host_is_cloud_endpoint &&
                                     !derived.empty() &&

@@ -591,17 +591,20 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	// empty — the endpoint would resolve to the URI host (= bucket) at
 	// runtime and fail opaquely.
 	if u != nil && !hasEndpointURL {
+		gcsEndpoint := cp == CloudProviderGCP && isGCSEndpointSource(u)
+		cloudEndpoint := IsCloudEndpointHost(u.Host) || gcsEndpoint
+		if strings.Contains(u.Host, ":") && (gcsEndpoint || isS3ProviderEndpoint(u, cp)) {
+			port, err := strconv.ParseUint(u.Port(), 10, 16)
+			if err != nil || port == 0 {
+				return merr.WrapErrParameterInvalidMsg("object storage endpoint port must be between 1 and 65535")
+			}
+			cloudEndpoint = true
+		}
 		bucket := extfs[ExtfsKeyBucketName]
-		if bucket != "" && bucket != sourceBucketName(u, cp, extfs[ExtfsKeyRegion]) {
+		if bucket != "" && bucket != sourceBucketName(u, cp, extfs[ExtfsKeyRegion], cloudEndpoint) {
 			return merr.WrapErrParameterInvalidMsg("extfs.bucket_name must match the bucket in external_source")
 		}
-		if cp == CloudProviderGCP && isGCSEndpointSource(u) {
-			if strings.Contains(u.Host, ":") {
-				port, err := strconv.ParseUint(u.Port(), 10, 16)
-				if err != nil || port == 0 {
-					return merr.WrapErrParameterInvalidMsg("GCS endpoint port must be between 1 and 65535")
-				}
-			}
+		if gcsEndpoint {
 			// Injection normally extracts the bucket from the raw URI.
 			// An explicit matching bucket lets storage use its decoded path.
 			path := u.EscapedPath()
@@ -617,7 +620,7 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 		// Cloud-family URI.host → Milvus-form, URI is authoritative.
 		// Covers global/accelerate/dualstack/FIPS/VPC/sovereign endpoint
 		// variants that DeriveEndpoint does not produce verbatim.
-		if IsCloudEndpointHost(u.Host) {
+		if cloudEndpoint {
 			return nil
 		}
 		pathSegs := len(strings.Split(strings.Trim(u.Path, "/"), "/"))
@@ -649,9 +652,8 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 // sourceBucketName follows the address/bucket choice in native
 // InjectExternalSpecProperties. StorageUri parses the endpoint-form path
 // after percent decoding; url.URL.Path is already decoded once.
-func sourceBucketName(source *url.URL, cp, region string) string {
-	knownEndpoint := IsCloudEndpointHost(source.Host) ||
-		(cp == CloudProviderGCP && isGCSEndpointSource(source)) ||
+func sourceBucketName(source *url.URL, cp, region string, cloudEndpoint bool) string {
+	knownEndpoint := cloudEndpoint ||
 		(cp == CloudProviderAzure && azureStorageAuthorities[strings.ToLower(source.Host)])
 	derived := DeriveEndpoint(cp, region)
 	if !knownEndpoint && derived != "" && strings.TrimPrefix(derived, "https://") != source.Host {
@@ -806,11 +808,22 @@ func validateGCPBearerEndpoint(source *url.URL, sourceScheme string, extfs map[s
 	return nil
 }
 
+// Only a matching S3-family provider treats a port on its cloud endpoint
+// as part of the storage address. Custom hosts keep their URI-form rules.
+func isS3ProviderEndpoint(source *url.URL, cp string) bool {
+	switch cp {
+	case CloudProviderAWS, CloudProviderAliyun, CloudProviderTencent:
+		return cloudEndpointProvider(source.Hostname()) == cp
+	default:
+		return false
+	}
+}
+
 // Only native GCS source schemes use the Google API endpoint's hostname
 // independently of its port. The full authority remains the filesystem address.
 func isGCSEndpointSource(source *url.URL) bool {
 	return (source.Scheme == SchemeGS || source.Scheme == SchemeGCS) &&
-		strings.HasSuffix(strings.ToLower(source.Hostname()), ".googleapis.com")
+		cloudEndpointProvider(source.Hostname()) == CloudProviderGCP
 }
 
 // IsCloudEndpointHost returns true when host matches a known cloud provider
@@ -821,22 +834,28 @@ func isGCSEndpointSource(source *url.URL) bool {
 // DeriveEndpoint(cp, region) string-matches.
 // Keep list in sync with C++ IsCloudEndpointHost in loon_ffi/util.cpp.
 func IsCloudEndpointHost(host string) bool {
+	return cloudEndpointProvider(host) != ""
+}
+
+func cloudEndpointProvider(host string) string {
 	h := strings.ToLower(host)
-	suffixes := []string{
-		".amazonaws.com", ".amazonaws.com.cn",
-		".googleapis.com",
-		".aliyuncs.com",
-		".myqcloud.com",
-		".myhuaweicloud.com",
-		".core.windows.net", ".core.chinacloudapi.cn",
-		".core.usgovcloudapi.net", ".core.cloudapi.de",
+	switch {
+	case strings.HasSuffix(h, ".amazonaws.com"), strings.HasSuffix(h, ".amazonaws.com.cn"):
+		return CloudProviderAWS
+	case strings.HasSuffix(h, ".googleapis.com"):
+		return CloudProviderGCP
+	case strings.HasSuffix(h, ".aliyuncs.com"):
+		return CloudProviderAliyun
+	case strings.HasSuffix(h, ".myqcloud.com"):
+		return CloudProviderTencent
+	case strings.HasSuffix(h, ".myhuaweicloud.com"):
+		return CloudProviderHuawei
+	case strings.HasSuffix(h, ".core.windows.net"), strings.HasSuffix(h, ".core.chinacloudapi.cn"),
+		strings.HasSuffix(h, ".core.usgovcloudapi.net"), strings.HasSuffix(h, ".core.cloudapi.de"):
+		return CloudProviderAzure
+	default:
+		return ""
 	}
-	for _, s := range suffixes {
-		if strings.HasSuffix(h, s) {
-			return true
-		}
-	}
-	return false
 }
 
 // DeriveEndpoint mirrors C++ externalspec::DeriveEndpoint in

@@ -5013,6 +5013,67 @@ TEST(InjectExtfsAllowlist, GcsEndpointUrisResolveWithExplicitPort) {
     }
 }
 
+TEST(InjectExtfsAllowlist, S3CloudEndpointsResolveWithExplicitPort) {
+    struct Endpoint {
+        const char* scheme;
+        const char* provider;
+        const char* region;
+        const char* host;
+    };
+    for (const auto& endpoint :
+         {Endpoint{"s3", "aws", "us-west-2", "s3.amazonaws.com"},
+          Endpoint{"s3", "aws", "cn-north-1", "s3.cn-north-1.amazonaws.com.cn"},
+          Endpoint{"oss",
+                   "aliyun",
+                   "cn-hangzhou",
+                   "oss-cn-hangzhou-internal.aliyuncs.com"},
+          Endpoint{
+              "cos", "tencent", "ap-beijing", "cos.ap-beijing.myqcloud.com"},
+          Endpoint{
+              "s3", "tencent", "ap-beijing", "cos.ap-beijing.myqcloud.com"}}) {
+        nlohmann::json spec = {{"extfs",
+                                {{"cloud_provider", endpoint.provider},
+                                 {"region", endpoint.region},
+                                 {"use_iam", "true"}}}};
+        const auto origin =
+            std::string(endpoint.scheme) + "://" + endpoint.host + ":";
+        for (const auto* port : {"443", "8443"}) {
+            const auto source = origin + port + "/events/dir/file.parquet";
+            SCOPED_TRACE(source);
+            for (bool explicit_bucket : {false, true}) {
+                auto input = spec;
+                if (explicit_bucket) {
+                    input["extfs"]["bucket_name"] = "events";
+                }
+                milvus_storage::api::Properties props;
+                InjectExternalSpecProperties(props, 42, source, input.dump());
+                auto config = milvus_storage::FilesystemCache::resolve_config(
+                    std::make_shared<const milvus_storage::api::Properties>(
+                        props),
+                    source);
+                ASSERT_TRUE(config.ok()) << config.status();
+                EXPECT_EQ(config->bucket_name, "events");
+                EXPECT_EQ(config->address,
+                          std::string("https://") + endpoint.host + ":" + port);
+            }
+            auto mismatch = spec;
+            mismatch["extfs"]["bucket_name"] = "archive";
+            milvus_storage::api::Properties rejected;
+            EXPECT_THROW(InjectExternalSpecProperties(
+                             rejected, 42, source, mismatch.dump()),
+                         milvus::SegcoreError);
+        }
+        for (const auto* port : {"", "0", "65536"}) {
+            const auto source = origin + port + "/events/dir/file.parquet";
+            SCOPED_TRACE(source);
+            milvus_storage::api::Properties rejected;
+            EXPECT_THROW(
+                InjectExternalSpecProperties(rejected, 42, source, spec.dump()),
+                milvus::SegcoreError);
+        }
+    }
+}
+
 TEST(InjectExtfsAllowlist, GcpPlainIamKeepsTrustedEndpointPolicy) {
     // Injection must preserve plain IAM's existing endpoint policy. Actual
     // Bearer delivery still depends on the operator-trusted registry entry.
