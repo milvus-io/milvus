@@ -790,6 +790,36 @@ func TestExplicitBucketMatchesExternalSource(t *testing.T) {
 	}
 }
 
+func TestS3ProviderEndpointBucketRoot(t *testing.T) {
+	for _, tc := range []struct{ provider, scheme, host string }{
+		{"aws", "s3", "s3.us-west-2.amazonaws.com"},
+		{"aliyun", "oss", "oss-cn-hangzhou-internal.aliyuncs.com"},
+		{"tencent", "cos", "cos.ap-guangzhou.myqcloud.com"},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			extfs := map[string]string{
+				ExtfsKeyCloudProvider: tc.provider, ExtfsKeyRegion: "us-west-2",
+				ExtfsKeyAccessKeyID: "account", ExtfsKeyAccessKeyValue: "secret",
+			}
+			for _, bucket := range []string{"", "events"} {
+				if bucket != "" {
+					extfs[ExtfsKeyBucketName] = bucket
+				}
+				spec := marshalBrokerSpec(t, FormatParquet, extfs)
+				require.NoError(t, ValidateSourceAndSpec(tc.scheme+"://events", spec))
+				for _, port := range []string{"", ":443"} {
+					root := tc.scheme + "://" + tc.host + port + "/events"
+					require.ErrorContains(t, ValidateSourceAndSpec(root, spec), "trailing slash")
+					require.NoError(t, ValidateSourceAndSpec(root+"/", spec))
+					if bucket != "" {
+						require.NoError(t, ValidateSourceAndSpec(root+"%2F", spec))
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestS3ProviderEndpointPort(t *testing.T) {
 	for _, tc := range []struct{ provider, endpoint string }{
 		{"aws", "s3://s3.us-west-2.amazonaws.com"},

@@ -35,6 +35,8 @@ corrected spec that omits the field or names the same bucket.
 AWS S3, Aliyun OSS and Tencent COS endpoint-form URIs accept an explicit
 port. For example, `s3://s3.us-west-2.amazonaws.com:443/events/file`
 selects bucket `events` and keeps port `443` in the storage address.
+To select the bucket root, keep the trailing slash after the bucket name,
+as in `s3://s3.us-west-2.amazonaws.com:443/events/`.
 
 Resource fields still depend on the cloud. S3-family requests require a region.
 Azure needs a storage account name in `access_key_id` and a container from the

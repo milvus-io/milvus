@@ -591,20 +591,19 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	// empty — the endpoint would resolve to the URI host (= bucket) at
 	// runtime and fail opaquely.
 	if u != nil && !hasEndpointURL {
-		gcsEndpoint := cp == CloudProviderGCP && isGCSEndpointSource(u)
-		cloudEndpoint := IsCloudEndpointHost(u.Host) || gcsEndpoint
-		if strings.Contains(u.Host, ":") && (gcsEndpoint || isS3ProviderEndpoint(u, cp)) {
+		requiresBucketPath := (cp == CloudProviderGCP && isGCSEndpointSource(u)) || isS3ProviderEndpoint(u, cp)
+		cloudEndpoint := IsCloudEndpointHost(u.Host) || requiresBucketPath
+		if strings.Contains(u.Host, ":") && requiresBucketPath {
 			port, err := strconv.ParseUint(u.Port(), 10, 16)
 			if err != nil || port == 0 {
 				return merr.WrapErrParameterInvalidMsg("object storage endpoint port must be between 1 and 65535")
 			}
-			cloudEndpoint = true
 		}
 		bucket := extfs[ExtfsKeyBucketName]
 		if bucket != "" && bucket != sourceBucketName(u, cp, extfs[ExtfsKeyRegion], cloudEndpoint) {
 			return merr.WrapErrParameterInvalidMsg("extfs.bucket_name must match the bucket in external_source")
 		}
-		if gcsEndpoint {
+		if requiresBucketPath {
 			// Injection normally extracts the bucket from the raw URI.
 			// An explicit matching bucket lets storage use its decoded path.
 			path := u.EscapedPath()
@@ -613,7 +612,7 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 			}
 			bucket, _, hasSeparator := strings.Cut(strings.TrimPrefix(path, "/"), "/")
 			if bucket == "" || !hasSeparator {
-				return merr.WrapErrParameterInvalidMsg("GCS endpoint-form source requires /<bucket>/[<path>]; add a trailing slash for a bucket root")
+				return merr.WrapErrParameterInvalidMsg("endpoint-form source requires /<bucket>/[<path>]; add a trailing slash for a bucket root")
 			}
 			return nil
 		}
