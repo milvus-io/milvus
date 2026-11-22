@@ -1038,10 +1038,11 @@ func newPartialUpdateChainTestEnvWithShardManager(
 	partial.state.rowLocks = newRowLockManager()
 	chained := []interceptors.Interceptor{
 		lockinterceptor.NewInterceptorBuilder().Build(param),
-		streamingtimetick.NewInterceptorBuilder().Build(param),
 	}
 	if withShard {
 		chained = append(chained, shard.NewInterceptorBuilder().Build(param))
+	} else {
+		chained = append(chained, streamingtimetick.NewInterceptorBuilder().Build(param))
 	}
 	chain := interceptors.NewChainedInterceptor(append(chained, partial)...)
 	writeMetrics := metricsutil.NewWriteMetrics(channel, message.WALNameRocksmq)

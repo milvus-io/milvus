@@ -21,7 +21,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
@@ -46,7 +45,7 @@ func TestCollectionSchemaRPCWithWAL(t *testing.T) {
 	message.RegisterDefaultWALName(message.WALNameTest)
 	opener, err := registry.MustGetBuilder(message.WALNameTest,
 		redo.NewInterceptorBuilder(), lock.NewInterceptorBuilder(),
-		replicate.NewInterceptorBuilder(), timetick.NewInterceptorBuilder(), shard.NewInterceptorBuilder(),
+		replicate.NewInterceptorBuilder(), shard.NewInterceptorBuilder(),
 	).Build()
 	require.NoError(t, err)
 	defer opener.Close()
