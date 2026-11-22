@@ -555,9 +555,9 @@ class WarmupTestReader : public milvus_storage::api::Reader {
 
     folly::SemiFuture<
         arrow::Result<std::unique_ptr<milvus_storage::api::ChunkReader>>>
-    get_chunk_reader_async(
-        int64_t index,
-        const std::shared_ptr<std::vector<std::string>>&) const override {
+    get_chunk_reader_async(int64_t index,
+                           const std::shared_ptr<std::vector<std::string>>&,
+                           folly::CancellationToken) const override {
         chunk_reader_calls_->fetch_add(1, std::memory_order_relaxed);
         if (!async_open_status_.ok()) {
             return folly::makeSemiFuture(

@@ -247,9 +247,11 @@ class CountingChunkReader : public milvus_storage::api::ChunkReader {
     folly::SemiFuture<
         arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>>
     get_chunks_async(const std::vector<int64_t>& chunk_indices,
-                     size_t parallelism) override {
+                     size_t parallelism,
+                     folly::CancellationToken cancellation) override {
         async_calls_.fetch_add(1);
-        return inner_->get_chunks_async(chunk_indices, parallelism);
+        return inner_->get_chunks_async(
+            chunk_indices, parallelism, std::move(cancellation));
     }
 
     arrow::Result<std::vector<uint64_t>>
