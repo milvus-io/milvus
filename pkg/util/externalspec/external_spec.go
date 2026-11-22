@@ -431,6 +431,9 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	if err != nil {
 		return err
 	}
+	if cp == CloudProviderGCP && extfs[ExtfsKeyRoleARN] != "" {
+		return merr.WrapErrParameterInvalidMsg("unsupported extfs.role_arn for GCP. For a target identity, use extfs.gcp_target_service_account")
+	}
 	hasGCPBroker := brokerEndpoint != "" && cp == CloudProviderGCP
 	if hasGCPBroker {
 		brokerIAM := extfs[ExtfsKeyUseIAM] == "true"
@@ -443,7 +446,7 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 		// Match native injection: the endpoint selects the Broker, and use_iam
 		// selects its own identity instead of a target service account.
 		for _, key := range []string{
-			ExtfsKeyRoleARN, ExtfsKeyExternalID, ExtfsKeySessionName,
+			ExtfsKeyExternalID, ExtfsKeySessionName,
 			ExtfsKeyAccessKeyID, ExtfsKeyAccessKeyValue,
 			ExtfsKeyAzureClientID, ExtfsKeyAzureTenantID,
 		} {

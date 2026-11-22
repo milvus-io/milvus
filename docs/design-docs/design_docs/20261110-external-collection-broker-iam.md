@@ -72,8 +72,8 @@ field, because `credential_endpoint` and `use_iam` select the credential
 source.
 
 Without a Broker endpoint, existing direct node IAM and AssumeRole behavior
-is preserved. A GCP target also accepts `use_iam=true` without counting the
-two fields as separate credential modes. On Azure,
+is preserved. For GCP target impersonation, use `gcp_target_service_account`.
+It also accepts `use_iam=true`. Admission rejects `role_arn` on GCP. On Azure,
 [#55318](https://github.com/milvus-io/milvus/pull/55318) admits the node's
 workload identity as `use_iam=true` with the account name and no endpoint, so
 removing the endpoint from an Azure Broker IAM spec selects the node identity

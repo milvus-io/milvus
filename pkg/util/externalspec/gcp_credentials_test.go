@@ -40,6 +40,8 @@ func TestGCPCredentialAdmission(t *testing.T) {
 	}{
 		{"target alone", "gs://bucket/key", nil, ""},
 		{"target absorbs IAM", "gcs://bucket/key", map[string]string{ExtfsKeyUseIAM: "true"}, ""},
+		{"direct role alone", "gs://bucket/key", map[string]string{ExtfsKeyGCPTargetServiceAccount: "", ExtfsKeyRoleARN: "example-role"}, "use extfs.gcp_target_service_account"},
+		{"direct role with node IAM", "gs://bucket/key", map[string]string{ExtfsKeyGCPTargetServiceAccount: "", ExtfsKeyRoleARN: "example-role", ExtfsKeyUseIAM: "true"}, "use extfs.gcp_target_service_account"},
 		{"broker", "gs://storage.googleapis.com/bucket/key", map[string]string{ExtfsKeyCredentialEndpoint: broker}, ""},
 		{"broker IAM conflicts", "gs://bucket/key", map[string]string{ExtfsKeyCredentialEndpoint: broker, ExtfsKeyUseIAM: "true"}, "conflicts"},
 		{"broker needs target", "gs://bucket/key", map[string]string{ExtfsKeyGCPTargetServiceAccount: "", ExtfsKeyCredentialEndpoint: broker}, "gcp_target_service_account is required"},
