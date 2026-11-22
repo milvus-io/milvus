@@ -2217,7 +2217,7 @@ JsonKeyStats::LoadColumnGroup(
             /*enable_async_load=*/enable_async_load);
 
         const auto chunked_column_group =
-            std::make_shared<ChunkedColumnGroup>(std::move(translator));
+            std::make_shared<ChunkedColumnGroup>(std::move(translator), ctx);
 
         for (const auto& inner_field_id : milvus_field_ids) {
             const auto& field_meta = field_meta_map.at(inner_field_id);
@@ -2336,7 +2336,7 @@ JsonKeyStats::LoadColumnGroup(
             /*enable_async_load=*/enable_async_load);
 
         const auto chunked_column_group =
-            std::make_shared<ChunkedColumnGroup>(std::move(translator));
+            std::make_shared<ChunkedColumnGroup>(std::move(translator), ctx);
         const auto column = std::make_shared<ProxyChunkColumn>(
             chunked_column_group, inner_field_id, field_meta);
 

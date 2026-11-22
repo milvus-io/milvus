@@ -280,14 +280,15 @@ ReadCellsAsyncImpl(
     LOG_INFO(
         "[StorageV3] async load pipeline: segment {} loads {} cells in {} "
         "windows (read_window={}MB, budget_capacity={}MB, slot_capacity={}, "
-        "priority={})",
+        "priority={}, sequence_id={})",
         segment_id,
         cells.size(),
         windows.size(),
         effective_read_window_bytes >> 20,
         admission.CapacityBytes() >> 20,
         admission.CapacitySlots(),
-        priority_name);
+        priority_name,
+        storage::GetAsyncLoadSequence(work_executor.get()));
     const auto shared_consumer =
         std::make_shared<CellReadCallback>(std::move(consume_cell));
     const auto window_failure_state = std::make_shared<WindowFailureState>();
