@@ -106,7 +106,7 @@ func CreateChannelTasksFromPlans(ctx context.Context, source task.Source, timeou
 			actions = append(actions, action)
 		}
 		if p.From != -1 {
-			action := task.NewChannelAction(p.From, task.ActionTypeReduce, p.Channel.GetChannelName())
+			action := task.NewChannelReduceAction(p.From, p.Channel.GetChannelName(), p.Channel.Version)
 			actions = append(actions, action)
 		}
 		t, err := task.NewChannelTask(ctx, timeout, source, p.Channel.GetCollectionID(), p.Replica, actions...)

@@ -141,3 +141,24 @@ func TestMinReplicaLoadPercentageIsTheLaggard(t *testing.T) {
 	assert.EqualValues(t, 33, MinReplicaLoadPercentage(map[int64]int32{1: 100, 2: 33, 3: 66}))
 	assert.EqualValues(t, 0, MinReplicaLoadPercentage(map[int64]int32{1: 0, 2: 100}))
 }
+
+// A delegator that another replica left on the replica's node does not carry
+// the channel for this replica. One whose QueryNode does not report the
+// replica (0) is attributed by node.
+func TestReplicaLoadPercentageSkipsLeftoverDelegator(t *testing.T) {
+	replica := meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: 1, Nodes: []int64{10}})
+	channelTargets := map[string]*meta.DmChannel{
+		"dmc0": {VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "dmc0"}},
+	}
+	delegatorOf := func(replicaID int64) map[string][]*meta.DmChannel {
+		return map[string][]*meta.DmChannel{"dmc0": {{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "dmc0"},
+			Node:         10,
+			ReplicaID:    replicaID,
+			View:         &meta.LeaderView{ID: 10},
+		}}}
+	}
+	assert.EqualValues(t, 0, replicaLoadPercentage(replica, channelTargets, nil, nil, delegatorOf(3)))
+	assert.EqualValues(t, 100, replicaLoadPercentage(replica, channelTargets, nil, nil, delegatorOf(1)))
+	assert.EqualValues(t, 100, replicaLoadPercentage(replica, channelTargets, nil, nil, delegatorOf(0)))
+}

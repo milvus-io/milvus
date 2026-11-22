@@ -241,7 +241,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 		actions = append(actions, loadAction)
 		if !copyMode {
 			// if in copy mode, the release action will be skip
-			releaseAction := task.NewChannelAction(plan.From, task.ActionTypeReduce, plan.Channel.GetChannelName())
+			releaseAction := task.NewChannelReduceAction(plan.From, plan.Channel.GetChannelName(), plan.Channel.Version)
 			actions = append(actions, releaseAction)
 		}
 		t, err := task.NewChannelTask(s.ctx,
