@@ -95,6 +95,13 @@ class PhyNullExpr : public SegmentExpr {
     }
 
  private:
+    // Types whose IS [NOT] NULL is answered from the validity bitmap alone,
+    // without reading or prefetching the (large) value column.
+    static bool
+    ReadsValidityOnly(DataType type) {
+        return IsOrdinaryVectorDataType(type) || type == DataType::TEXT;
+    }
+
     ColumnVectorPtr
     PreCheckNullable(OffsetVector* input);
 

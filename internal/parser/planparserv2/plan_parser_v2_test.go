@@ -1389,6 +1389,38 @@ func TestExpr_TextField(t *testing.T) {
 	}
 }
 
+// issue #55519: IS NULL / IS NOT NULL only need the validity bitmap, so they
+// are allowed on TEXT while value operators stay rejected.
+func TestExpr_TextFieldNullExpr(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	cases := map[string]planpb.NullExpr_NullOp{
+		`TextField is null`:     planpb.NullExpr_IsNull,
+		`TextField IS NOT NULL`: planpb.NullExpr_IsNotNull,
+	}
+	for exprStr, op := range cases {
+		expr, err := ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		ne := expr.GetNullExpr()
+		require.NotNil(t, ne, exprStr)
+		assert.Equal(t, op, ne.GetOp(), exprStr)
+		assert.Equal(t, schemapb.DataType_Text, ne.GetColumnInfo().GetDataType(), exprStr)
+	}
+
+	// Composes with other predicates.
+	assertValidExpr(t, helper, `TextField is null or Int64Field > 1`)
+
+	for _, exprStr := range []string{
+		`TextField == "query"`,
+		`TextField like "q%"`,
+		`TextField in ["a"]`,
+	} {
+		assertInvalidExpr(t, helper, exprStr)
+	}
+}
+
 func TestExpr_IsNull(t *testing.T) {
 	schema := newTestSchema(false)
 	schema.EnableDynamicField = false
@@ -1406,6 +1438,9 @@ func TestExpr_IsNull(t *testing.T) {
 		`BFloat16VectorField is null`,
 		`SparseFloatVectorField is null`,
 		`Int8VectorField is null`,
+		// issue #55519: validity-only operator, no LOB value is read.
+		`TextField is null`,
+		`TextField IS NULL`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -1508,6 +1543,9 @@ func TestExpr_IsNotNull(t *testing.T) {
 		`BFloat16VectorField is not null`,
 		`SparseFloatVectorField is not null`,
 		`Int8VectorField is not null`,
+		// issue #55519
+		`TextField is not null`,
+		`TextField IS NOT NULL`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
