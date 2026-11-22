@@ -859,9 +859,9 @@ job. The plan guarantees:
 
 The relevant implementation is in:
 
-- `internal/datacoord/external_collection_refresh_manager.go`
-- `internal/datacoord/external_collection_refresh_planner.go`
-- `internal/datacoord/task_refresh_external_collection.go`
+- `internal/datacoord/externalrefresh/manager.go`
+- `internal/datacoord/externalrefresh/planner.go`
+- `internal/datacoord/externalrefresh/task.go`
 - `internal/datanode/external/task_update.go`
 
 #### Planning Inputs
@@ -895,6 +895,36 @@ count and approximate task size; it is not a hard final limit.
 
 For example, 10 files with a target of 6 produce two balanced base ranges of
 5 files instead of ranges of 6 and 4.
+
+#### Row Budget for Parquet Function Materialization
+
+For Parquet collections with Functions, DataCoord additionally refines these
+base ranges by `dataCoord.externalCollection.functionRowsPerTask` (default
+16,000,000 source rows; zero disables the refinement). This is a row-count
+proxy for materialization work, not an estimate of tokenizer or model latency.
+The default groups roughly sixteen default one-million-row segments, matching
+one wave of DataNode's sixteen manifest/Function workers. It is configurable
+because row width, Function type and node resources differ.
+
+Parquet Explore returns `NumRows=-1`, not a real row count. During the async
+planning attempt, DataCoord resolves counts through the same bounded (at most
+sixteen concurrent reads per attempt) metadata helper used by DataNode. If estimation fails while the planning context is still live, DataCoord
+logs the failure and falls back to at most 64 files per base range (or the
+configured file target if smaller). Counts are only a planning optimization:
+DataNode remains responsible for authoritative source validation and normal
+worker error handling. A canceled/expired planning context publishes no tasks.
+Already-running native reads must drain before cancellation returns; they are
+not forcibly interrupted. DataNode still validates/reopens
+its source ranges, so this adds metadata reads rather than moving data scanning
+or Function execution into DataCoord.
+
+Refinement keeps the original file boundaries and only inserts boundaries when
+the next file would exceed the row budget. Files are indivisible: a single file
+larger than the budget cannot be split across DataNodes by this change. Existing
+segment ownership closure below remains authoritative and can merge ranges
+beyond either target. Other source formats and collections without Functions
+retain file-count planning. Changing the setting only affects newly planned
+jobs; persisted plans are reused on recovery.
 
 #### Continuous-Range Closure
 
@@ -963,11 +993,17 @@ that single apply operation.
 ### 7.2 External Collection Refresh Manager
 
 **Files**:
-- `internal/datacoord/external_collection_refresh_manager.go`
+- `internal/datacoord/externalrefresh/manager.go`
 - `internal/datacoord/ddl_callbacks_external_collection.go`
 
 `SubmitRefreshJobWithID` accepts the job ID allocated before WAL broadcast and
 persists the job idempotently. Only one active job is allowed per collection.
+
+Submission has two phases: the WAL acknowledgement callback persists an Init
+job and returns; `ensureTasksForInitJob` runs Explore, row-count resolution,
+planning, task persistence and enqueue asynchronously. The checker retries an
+Init job if task creation fails transiently. Object-storage I/O does not run
+synchronously on the acknowledgement path.
 
 The manager explores the source on DataCoord, writes an explore manifest, and
 splits the discovered file ranges into tasks using
@@ -986,7 +1022,7 @@ segment update.
 ### 7.3 External Collection Refresh Metadata
 
 **Files**:
-- `internal/datacoord/external_collection_refresh_meta.go`
+- `internal/datacoord/externalrefresh/meta.go`
 - `pkg/proto/data_coord.proto`
 
 | Record | Purpose | Persisted Information |
@@ -1005,7 +1041,7 @@ payload persisted before the job can apply segment updates.
 
 ### 7.4 RefreshExternalCollectionTask (DataCoord side)
 
-**File**: `internal/datacoord/task_refresh_external_collection.go`
+**File**: `internal/datacoord/externalrefresh/task.go`
 
 `refreshExternalCollectionTask` adapts persisted refresh tasks to the shared
 scheduler. `CreateTaskOnWorker`, `QueryTaskOnWorker` and `DropTaskOnWorker` manage
@@ -1138,6 +1174,7 @@ func ReadFragmentsFromManifest(
 | `dataCoord.externalCollectionJobTimeout` | Refresh job timeout, in seconds | 3600 |
 | `dataCoord.externalCollectionJobRetention` | Retention of finished/failed jobs, in seconds | 86400 |
 | `dataCoord.externalCollectionFilesPerTask` | Target files per base refresh task; ownership closure may produce larger final tasks | 10000 |
+| `dataCoord.externalCollection.functionRowsPerTask` | Source rows per base Parquet Function refresh task before ownership closure; 0 disables | 16000000 |
 | `dataCoord.externalCollectionPreAllocSegments` | IDs pre-allocated per task; segments and fake binlogs consume separate IDs | 500000 |
 | `dataCoord.externalCollectionDropRatioWarn` | Segment-drop ratio above which a warning is logged | 0.9 |
 | `queryNode.externalCollection.useTakeForOutput` | Use Take for eligible external output fields | true |
