@@ -3554,6 +3554,49 @@ TEST(InjectExtfsAllowlist, EndpointURLSelectsExplicitEndpointMode) {
     }
 }
 
+TEST(InjectExtfsAllowlist, ExplicitBucketMustMatchResolvedSource) {
+    for (const auto* source : {"s3://events/key",
+                               "s3://events?query/part",
+                               "s3://events#fragment",
+                               "s3://s3.amazonaws.com/events/key",
+                               "s3://s3.amazonaws.com/%65vents/key",
+                               "s3://s3.amazonaws.com/events%2Fkey"}) {
+        SCOPED_TRACE(source);
+        nlohmann::json spec = {{"extfs",
+                                {{"cloud_provider", "aws"},
+                                 {"region", "us-west-2"},
+                                 {"bucket_name", "events"}}}};
+        milvus_storage::api::Properties props;
+        InjectExternalSpecProperties(props, 42, source, spec.dump());
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
+                  "events");
+        spec["extfs"]["bucket_name"] = "archive";
+        try {
+            InjectExternalSpecProperties(props, 42, source, spec.dump());
+            FAIL() << "expected bucket mismatch";
+        } catch (const milvus::SegcoreError& error) {
+            const std::string message = error.what();
+            EXPECT_NE(message.find("extfs.bucket_name must match the bucket in "
+                                   "external_source"),
+                      std::string::npos);
+            EXPECT_EQ(message.find(source), std::string::npos);
+        }
+    }
+}
+
+TEST(InjectExtfsAllowlist, EndpointURLRejectsExplicitBucket) {
+    for (const auto& bucket :
+         nlohmann::json::array({"events", "archive", "", nullptr})) {
+        nlohmann::json spec = {
+            {"extfs",
+             {{"endpoint_url", "http://ceph:80"}, {"bucket_name", bucket}}}};
+        milvus_storage::api::Properties props;
+        EXPECT_THROW(InjectExternalSpecProperties(
+                         props, 42, "s3://events/key", spec.dump()),
+                     milvus::SegcoreError);
+    }
+}
+
 TEST(InjectExtfsAllowlist, EndpointURLRejectsFragments) {
     const std::vector<std::string> endpoint_urls = {
         "http://host#", "http://host/#", "http://host#fragment"};
@@ -5152,17 +5195,26 @@ TEST(InjectExtfsAllowlist, AzureBrokerIamAndTargetModes) {
         auto conflicting = valid;
         conflicting["extfs"]["bucket_name"] = "other";
         EXPECT_ANY_THROW(inject(conflicting));
-        // Region-derived target mode keeps ignoring an old bucket override.
         milvus_storage::api::Properties regional;
-        if (iam) {
-            EXPECT_ANY_THROW(InjectExternalSpecProperties(
-                regional, 42, "azure://container/path", conflicting.dump()));
-        } else {
-            InjectExternalSpecProperties(
-                regional, 42, "azure://container/path", conflicting.dump());
-            EXPECT_EQ(
-                std::get<std::string>(regional.at("extfs.42.bucket_name")),
-                "container");
+        EXPECT_ANY_THROW(InjectExternalSpecProperties(
+            regional, 42, "azure://container/path", conflicting.dump()));
+        for (const auto* source :
+             {"azure://core.windows.net/%63ontainer/path",
+              "azure://core.windows.net/container%2Fpath"}) {
+            SCOPED_TRACE(source);
+            milvus_storage::api::Properties encoded;
+            if (iam) {
+                EXPECT_ANY_THROW(InjectExternalSpecProperties(
+                    encoded, 42, source, valid.dump()));
+            } else {
+                InjectExternalSpecProperties(encoded, 42, source, valid.dump());
+                auto resolved = milvus_storage::FilesystemCache::resolve_config(
+                    std::make_shared<const milvus_storage::api::Properties>(
+                        encoded),
+                    source);
+                ASSERT_TRUE(resolved.ok()) << resolved.status();
+                EXPECT_EQ(resolved->bucket_name, "container");
+            }
         }
         for (const auto* key : {"access_key_id", "region"}) {
             auto spec = valid;

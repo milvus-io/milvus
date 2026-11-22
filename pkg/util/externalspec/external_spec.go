@@ -502,17 +502,6 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 		if raw := extfs[ExtfsKeyLoadFrequency]; brokerIAM && raw != "" && !isCredentialLifetime(raw) {
 			return merr.WrapErrParameterInvalidMsg("extfs.load_frequency must be an integer in [900, 3600] for Azure credential broker IAM")
 		}
-		if bucket := extfs[ExtfsKeyBucketName]; bucket != "" && u != nil {
-			authority := azureStorageAuthorities[strings.ToLower(u.Host)]
-			container := u.Host
-			if authority {
-				container, _, _ = strings.Cut(strings.TrimPrefix(u.EscapedPath(), "/"), "/")
-			}
-			// A region-derived target-mode URI historically ignores bucket_name.
-			if (authority || brokerIAM) && bucket != container {
-				return merr.WrapErrParameterInvalidMsg("extfs.bucket_name must match the Azure source container")
-			}
-		}
 		if brokerIAM {
 			if err := validateAzureBrokerIAMSource(u, externalSource, extfs); err != nil {
 				return err
@@ -599,6 +588,10 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	// empty — the endpoint would resolve to the URI host (= bucket) at
 	// runtime and fail opaquely.
 	if u != nil && !hasEndpointURL {
+		bucket := extfs[ExtfsKeyBucketName]
+		if bucket != "" && bucket != sourceBucketName(u, cp, extfs[ExtfsKeyRegion]) {
+			return merr.WrapErrParameterInvalidMsg("extfs.bucket_name must match the bucket in external_source")
+		}
 		if cp == CloudProviderGCP && isGCSEndpointSource(u) {
 			if strings.Contains(u.Host, ":") {
 				port, err := strconv.ParseUint(u.Port(), 10, 16)
@@ -609,7 +602,7 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 			// Injection normally extracts the bucket from the raw URI.
 			// An explicit matching bucket lets storage use its decoded path.
 			path := u.EscapedPath()
-			if bucket := extfs[ExtfsKeyBucketName]; bucket != "" && strings.HasPrefix(u.Path, "/"+bucket+"/") {
+			if bucket != "" {
 				path = u.Path
 			}
 			bucket, _, hasSeparator := strings.Cut(strings.TrimPrefix(path, "/"), "/")
@@ -648,6 +641,21 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 		}
 	}
 	return nil
+}
+
+// sourceBucketName follows the address/bucket choice in native
+// InjectExternalSpecProperties. StorageUri parses the endpoint-form path
+// after percent decoding; url.URL.Path is already decoded once.
+func sourceBucketName(source *url.URL, cp, region string) string {
+	knownEndpoint := IsCloudEndpointHost(source.Host) ||
+		(cp == CloudProviderGCP && isGCSEndpointSource(source)) ||
+		(cp == CloudProviderAzure && azureStorageAuthorities[strings.ToLower(source.Host)])
+	derived := DeriveEndpoint(cp, region)
+	if !knownEndpoint && derived != "" && strings.TrimPrefix(derived, "https://") != source.Host {
+		return source.Host
+	}
+	bucket, _, _ := strings.Cut(strings.TrimPrefix(source.Path, "/"), "/")
+	return bucket
 }
 
 // errUnresolvableEndpoint names the source without a query or fragment: a

@@ -193,7 +193,15 @@ func TestAzureBrokerIAMSourceShapes(t *testing.T) {
 		{"true", "azure://container/path", conflicting, "extfs.bucket_name"},
 		{"false", "azure://core.windows.net/container/path", matching, ""},
 		{"false", "azure://core.windows.net/container/path", conflicting, "extfs.bucket_name"},
-		{"false", "azure://container/path", conflicting, ""},
+		{"false", "azure://container/path", conflicting, "extfs.bucket_name"},
+		// A matching explicit bucket restored the decoded container for
+		// these legacy target-mode sources before Broker IAM was added.
+		{"false", "azure://core.windows.net/cont%61iner/path", matching, ""},
+		{"false", "azure://core.windows.net/container%2Ffile", matching, ""},
+		{"false", "azure://core.windows.net/container%2Fdir/file", conflicting, "extfs.bucket_name"},
+		{"false", "azure://core.windows.net/cont%2561iner/file", matching, "extfs.bucket_name"},
+		{"true", "azure://core.windows.net/cont%61iner/path", matching, container},
+
 		// azure://<authority>/<container>/[<path>], with or without a region.
 		{"true", "azure://core.windows.net/container/path", withRegion, ""},
 		{"true", "azure://core.windows.net/container/", withRegion, ""},

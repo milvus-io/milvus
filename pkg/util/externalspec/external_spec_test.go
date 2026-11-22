@@ -750,6 +750,42 @@ func TestExternalSpecMarshalJSON(t *testing.T) {
 	})
 }
 
+func TestExplicitBucketMatchesExternalSource(t *testing.T) {
+	for _, tc := range []struct{ provider, source, bucket string }{
+		{"aws", "s3://events.prod/dir/file", "events.prod"},
+		{"aws", "s3://s3.us-west-2.amazonaws.com/events/dir/file", "events"},
+		{"aliyun", "oss://events/dir/file", "events"},
+		{"aliyun", "oss://oss-cn-hangzhou-internal.aliyuncs.com/events/dir/file", "events"},
+		{"tencent", "cos://events-1250000000/dir/file", "events-1250000000"},
+		{"tencent", "cos://cos.ap-guangzhou.myqcloud.com/events-1250000000/dir/file", "events-1250000000"},
+		{"huawei", "obs://events/dir/file", "events"},
+		{"huawei", "obs://obs.cn-north-4.myhuaweicloud.com/events/dir/file", "events"},
+		{"gcp", "gs://events.prod/dir/file", "events.prod"},
+		{"gcp", "gcs://STORAGE.GOOGLEAPIS.COM:443/events%2Fdir/file", "events"},
+		{"gcp", "gs://storage.googleapis.com/%65vents/file", "events"},
+		{"azure", "azure://events/dir/file", "events"},
+		{"azure", "azure://core.chinacloudapi.cn/events/dir/file", "events"},
+		{"minio", "s3://custom.example:9000/events/dir/file", "events"},
+		{"", "minio://custom.example:9000/events/dir/file", "events"},
+	} {
+		t.Run(tc.source, func(t *testing.T) {
+			extfs := map[string]string{
+				ExtfsKeyAccessKeyID: "account", ExtfsKeyAccessKeyValue: "secret",
+				ExtfsKeyRegion: "us-west-2", ExtfsKeyBucketName: tc.bucket,
+			}
+			if tc.provider != "" {
+				extfs[ExtfsKeyCloudProvider] = tc.provider
+			}
+			require.NoError(t, ValidateSourceAndSpec(tc.source, marshalBrokerSpec(t, FormatParquet, extfs)))
+			extfs[ExtfsKeyBucketName] = "other"
+			err := ValidateSourceAndSpec(tc.source, marshalBrokerSpec(t, FormatParquet, extfs))
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, "extfs.bucket_name must match the bucket in external_source")
+			require.NotContains(t, err.Error(), tc.source)
+		})
+	}
+}
+
 func TestIsCloudEndpointHost(t *testing.T) {
 	for _, host := range []string{
 		"s3.us-west-2.amazonaws.com",

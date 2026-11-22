@@ -23,6 +23,15 @@ AWS, Aliyun, Tencent, GCP and Azure.
 | GCP | Broker identity | `gcp_target_service_account` |
 | Azure | Broker identity obtains SAS | `azure_client_id` + `azure_tenant_id` obtain SAS |
 
+The source URI identifies the bucket or Azure container. New specs can omit
+`extfs.bucket_name`. If set to a non-empty value, it must match the bucket
+in the URI. For example, both `gs://events/logs/a.parquet` and
+`gs://storage.googleapis.com/events/logs/a.parquet` refer to bucket `events`
+and object `logs/a.parquet`. With `extfs.endpoint_url`, omit
+`extfs.bucket_name` even when it matches. Refresh also checks stored specs.
+If an old spec has a conflicting value, refresh with the source URI and a
+corrected spec that omits the field or names the same bucket.
+
 Resource fields still depend on the cloud. S3-family requests require a region.
 Azure needs a storage account name in `access_key_id` and a container from the
 source URI; its target mode also requires region, while IAM mode may omit it
@@ -35,10 +44,7 @@ four Azure Storage authorities in lowercase without a port and the container
 is followed by `/`, and `azure://<container>/[<path>]` with a region. Container
 names follow the Broker's naming rule and are read from the raw source, as
 native injection splits it: a percent-encoded separator or letter is not the
-container. A non-empty `extfs.bucket_name` must match this container in
-Broker IAM mode. Azure target mode also requires a match when the URI names
-a storage authority. Its region-derived form keeps taking the container from
-the URI host. The built-in Cloud Broker must be deployed for the target
+container. The built-in Cloud Broker must be deployed for the target
 account's Azure cloud to issue a SAS in a sovereign cloud.
 Admission errors name the host and container, never the source's
 query or fragment, which may carry a signed token. When the source names an

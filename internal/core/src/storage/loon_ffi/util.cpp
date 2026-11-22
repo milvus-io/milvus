@@ -703,6 +703,7 @@ InjectExternalSpecProperties(
 
     std::string scheme = external_source.substr(0, scheme_end);
     auto rest = external_source.substr(scheme_end + 3);
+    rest = rest.substr(0, rest.find_first_of("?#"));
     auto slash_pos = rest.find('/');
     // No slash after authority (e.g. "s3://mybucket"): entire rest is host,
     // path is empty. Only assert against the pathological "scheme://" case
@@ -752,7 +753,7 @@ InjectExternalSpecProperties(
     std::string spec_cloud_provider;
     std::string spec_region;
     std::string spec_endpoint_url;
-    std::string spec_bucket_name;
+    std::optional<std::string> spec_bucket_name;
     bool has_spec_endpoint_url = false;
     std::string broker_endpoint;
     bool legacy_broker = false;
@@ -791,6 +792,10 @@ InjectExternalSpecProperties(
                             spec_endpoint_url = val;
                             continue;
                         }
+                        if (key == "bucket_name") {
+                            spec_bucket_name = std::move(val);
+                            continue;
+                        }
                         if (val.empty()) {
                             continue;
                         }
@@ -814,9 +819,7 @@ InjectExternalSpecProperties(
                             properties.erase(extfs_prefix + key);
                             continue;
                         }
-                        if (key == "bucket_name") {
-                            spec_bucket_name = val;
-                        } else if (key == "cloud_provider") {
+                        if (key == "cloud_provider") {
                             spec_cloud_provider = val;
                         } else if (key == "region") {
                             spec_region = val;
@@ -903,15 +906,6 @@ InjectExternalSpecProperties(
                 return arrow::Status::OK();
             };
         if (spec_cloud_provider == "azure") {
-            if (!spec_bucket_name.empty()) {
-                const bool authority = IsAzureStorageAuthority(host);
-                if ((authority || use_iam) &&
-                    spec_bucket_name != (authority ? path_bucket : host)) {
-                    return arrow::Status::Invalid(
-                        "extfs.bucket_name must match the Azure source "
-                        "container");
-                }
-            }
             if (value("access_key_id").empty()) {
                 return arrow::Status::Invalid(
                     "Azure broker requires access_key_id");
@@ -978,6 +972,11 @@ InjectExternalSpecProperties(
     // The Go API boundary validates the full URL contract. The checks here are
     // defense in depth for corrupted metadata or callers that bypass Go.
     if (has_spec_endpoint_url) {
+        if (spec_bucket_name.has_value()) {
+            return arrow::Status::Invalid(
+                "extfs.bucket_name cannot be set with extfs.endpoint_url; "
+                "the bucket comes from external_source");
+        }
         std::string effective_endpoint = spec_endpoint_url;
         if (!effective_endpoint.empty() && effective_endpoint.back() == '/') {
             effective_endpoint.pop_back();
@@ -1071,8 +1070,33 @@ InjectExternalSpecProperties(
                 arrow::internal::AsciiToLower(endpoint.host())
                     .ends_with(".googleapis.com");
         }
-        if (!uri_host_is_cloud_endpoint && !derived.empty() &&
-            StripURIScheme(derived) != host) {
+        const bool bucket_in_host = !uri_host_is_cloud_endpoint &&
+                                    !derived.empty() &&
+                                    StripURIScheme(derived) != host;
+        if (spec_bucket_name && !spec_bucket_name->empty()) {
+            // StorageUri::Parse decodes the path before splitting out the bucket.
+            auto source_bucket =
+                bucket_in_host ? host : arrow::util::UriUnescape(path_bucket);
+            source_bucket = source_bucket.substr(0, source_bucket.find('/'));
+            if (*spec_bucket_name != source_bucket) {
+                return arrow::Status::Invalid(
+                    "extfs.bucket_name must match the bucket in "
+                    "external_source");
+            }
+            if (!bucket_in_host) {
+                if (spec_cp == "azure" && !broker_endpoint.empty() && use_iam &&
+                    path_bucket != source_bucket) {
+                    return arrow::Status::Invalid(
+                        "Azure broker IAM requires an unescaped source "
+                        "container");
+                }
+                milvus_storage::api::SetValue(
+                    properties,
+                    (extfs_prefix + "bucket_name").c_str(),
+                    source_bucket.c_str());
+            }
+        }
+        if (bucket_in_host) {
             milvus_storage::api::SetValue(
                 properties,
                 (extfs_prefix + "bucket_name").c_str(),
