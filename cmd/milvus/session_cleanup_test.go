@@ -35,6 +35,12 @@ import (
 
 func newSessionCleanupEtcd(t *testing.T) *clientv3.Client {
 	t.Helper()
+	client, _ := newSessionCleanupEtcdWithEndpoint(t)
+	return client
+}
+
+func newSessionCleanupEtcdWithEndpoint(t *testing.T) (*clientv3.Client, string) {
+	t.Helper()
 	endpoint := func() url.URL {
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(t, err)
@@ -60,7 +66,7 @@ func newSessionCleanupEtcd(t *testing.T) *clientv3.Client {
 	}
 	client := v3client.New(server.Server)
 	t.Cleanup(func() { _ = client.Close() })
-	return client
+	return client, cfg.ListenClientUrls[0].Host
 }
 
 func sessionCleanupJSON(serverID int64) string {
