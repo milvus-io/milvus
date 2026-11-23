@@ -259,11 +259,32 @@ func TestValidateAnalyzer(t *testing.T) {
 		assert.Error(t, err)
 	}
 
-	// char_filter is not supported with build-in analyzer type in the first version.
-	{
-		m := `{"type": "standard", "char_filter": []}`
-		_, err := ValidateAnalyzer(m, "")
-		assert.Error(t, err)
+	// Persisted built-in analyzers must keep ignoring unrelated options after upgrade.
+	for _, m := range []string{
+		`{"type":"standard","char_filter":[{"type":"mapping","mappings":["& => and"]}]}`,
+		`{"type":"standard","char_filter":[]}`,
+		`{"type":"standard","char_filter_offset_mode":"boundary"}`,
+		`{"type":"standard","char_filter":"invalid","char_filter_offset_mode":42}`,
+	} {
+		t.Run(m, func(t *testing.T) {
+			ids, err := ValidateAnalyzer(m, "")
+			require.NoError(t, err)
+			assert.Empty(t, ids)
+			analyzer, err := NewAnalyzer(m, "")
+			require.NoError(t, err)
+			defer analyzer.Destroy()
+
+			stream := analyzer.NewTokenStream("A&B")
+			defer stream.Destroy()
+			for i, expected := range []string{"a", "b"} {
+				require.True(t, stream.Advance())
+				token := stream.DetailedToken()
+				assert.Equal(t, expected, token.GetToken())
+				assert.Equal(t, int64(i*2), token.GetStartOffset())
+				assert.Equal(t, int64(i*2+1), token.GetEndOffset())
+			}
+			assert.False(t, stream.Advance())
+		})
 	}
 
 	// with user resource

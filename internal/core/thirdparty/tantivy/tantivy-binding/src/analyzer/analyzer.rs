@@ -127,19 +127,12 @@ impl<'a> AnalyzerBuilder<'a> {
         // build base build-in analyzer
         match self.params.get("type") {
             Some(type_) => {
-                if self.params.contains_key("char_filter")
-                    || self.params.contains_key("char_filter_offset_mode")
-                {
-                    return Err(TantivyBindingError::InvalidArgument(
-                        "char_filter options cannot be used with build-in analyzer type"
-                            .to_string(),
-                    ));
-                }
                 if !type_.is_string() {
                     return Err(TantivyBindingError::InternalError(format!(
                         "analyzer type should be string"
                     )));
                 }
+                // Ignore unrelated options to preserve persisted template semantics across upgrades.
                 return self.build_template(type_.as_str().unwrap());
             }
             _ => {}
@@ -332,14 +325,60 @@ mod tests {
     }
 
     #[test]
-    fn test_char_filter_rejects_build_in_analyzer() {
-        let params = r#"{
-            "type": "standard",
-            "char_filter": []
-        }"#;
+    fn test_builtin_analyzers_ignore_unrelated_options() {
+        use serde_json::json;
 
-        let analyzer = create_analyzer(params, "");
-        assert!(analyzer.is_err());
+        let tokens = |params: &str| {
+            assert!(super::validate_analyzer(params, "").unwrap().is_empty());
+            let mut analyzer = create_analyzer(params, "").unwrap();
+            let mut stream = analyzer.token_stream("A&B running 中文 ภาษาไทย العربية");
+            let mut result = Vec::new();
+            while stream.advance() {
+                let token = stream.token();
+                result.push((
+                    token.text.clone(),
+                    token.offset_from,
+                    token.offset_to,
+                    token.position,
+                    token.position_length,
+                ));
+            }
+            result
+        };
+
+        for type_ in ["standard", "english", "chinese", "arabic", "thai"] {
+            let baseline = json!({"type": type_, "stop_words": ["b"]});
+            let expected = tokens(&baseline.to_string());
+            assert!(!expected.is_empty());
+            for options in [
+                json!({"char_filter": [{"type": "mapping", "mappings": ["& => and"]}]}),
+                json!({"char_filter": []}),
+                json!({"char_filter_offset_mode": "boundary"}),
+                json!({"char_filter": null}),
+                json!({"char_filter": [{"type": "unsupported"}]}),
+                json!({"char_filter": "invalid", "char_filter_offset_mode": 42}),
+                json!({"tokenizer": "invalid", "filter": false, "unknown_option": true}),
+            ] {
+                let mut params = baseline.clone();
+                params
+                    .as_object_mut()
+                    .unwrap()
+                    .extend(options.as_object().unwrap().clone());
+                assert_eq!(tokens(&params.to_string()), expected, "params: {params}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_builtin_analyzers_still_validate_template_parameters() {
+        for params in [
+            r#"{"type":1,"char_filter":[]}"#,
+            r#"{"type":"unknown","char_filter":[]}"#,
+            r#"{"type":"standard","stop_words":42,"char_filter":[]}"#,
+        ] {
+            assert!(create_analyzer(params, "").is_err(), "{params}");
+            assert!(super::validate_analyzer(params, "").is_err(), "{params}");
+        }
     }
 
     #[test]
