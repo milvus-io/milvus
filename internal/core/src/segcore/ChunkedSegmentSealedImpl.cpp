@@ -455,6 +455,19 @@ ChunkedSegmentSealedImpl::PinPkIndex(
         ca, cell);
 }
 
+// A JSON flat index covers the JSON pointers at or below its nested path: the
+// root path "" covers every pointer, and any other path covers itself and the
+// pointers that continue it after a '/'. A string prefix is not enough: "/a"
+// would claim "/address", and the executor would query the relative path
+// "ddress" as "dress".
+static inline bool
+IsJsonPathPrefix(std::string_view index_path, std::string_view query_path) {
+    return index_path.empty() || query_path == index_path ||
+           (query_path.size() > index_path.size() &&
+            query_path.compare(0, index_path.size(), index_path) == 0 &&
+            query_path[index_path.size()] == '/');
+}
+
 std::vector<cachinglayer::PinWrapper<const index::IndexBase*>>
 ChunkedSegmentSealedImpl::PinJsonIndex(milvus::OpContext* op_ctx,
                                        FieldId field_id,
@@ -472,11 +485,7 @@ ChunkedSegmentSealedImpl::PinJsonIndex(milvus::OpContext* op_ctx,
         }
         switch (index.cast_type.data_type()) {
             case JsonCastType::DataType::JSON:
-                if (path_view.length() < index.nested_path.length()) {
-                    continue;
-                }
-                if (path_view.substr(0, index.nested_path.length()) ==
-                    index.nested_path) {
+                if (IsJsonPathPrefix(index.nested_path, path_view)) {
                     int current_len_diff =
                         path_view.length() - index.nested_path.length();
                     if (current_len_diff < path_len_diff) {
@@ -508,18 +517,16 @@ ChunkedSegmentSealedImpl::PinJsonIndex(milvus::OpContext* op_ctx,
                                                               pinned_index)};
 }
 
-std::string
+std::optional<std::string>
 ChunkedSegmentSealedImpl::GetJsonFlatIndexNestedPath(
     FieldId field_id, std::string_view query_path) const {
     auto runtime = CaptureRuntimeResourceState();
-    std::string best_path;
+    std::optional<std::string> best_path;
     int path_len_diff = std::numeric_limits<int>::max();
     for (const auto& index : runtime->json_indices) {
         if (index.field_id != field_id ||
             index.cast_type.data_type() != JsonCastType::DataType::JSON ||
-            query_path.length() < index.nested_path.length() ||
-            query_path.substr(0, index.nested_path.length()) !=
-                index.nested_path) {
+            !IsJsonPathPrefix(index.nested_path, query_path)) {
             continue;
         }
         int current_len_diff = query_path.length() - index.nested_path.length();
