@@ -231,7 +231,7 @@ func (t *compactionTrigger) getCollection(collectionID UniqueID) (*meta.Collecti
 }
 
 func getCompactTime(ts Timestamp, coll *meta.CollectionInfo) (*view.CompactTime, error) {
-	collectionTTL, err := common.GetCollectionTTLFromMap(coll.Properties)
+	collectionTTL, err := common.GetCollectionTTL(coll.Properties)
 	if err != nil {
 		return nil, err
 	}

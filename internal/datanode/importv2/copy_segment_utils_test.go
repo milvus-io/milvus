@@ -1378,6 +1378,7 @@ func TestBuildIndexInfoFromSource(t *testing.T) {
 				BuildID:        1002,
 				IndexFilePaths: []string{"files/index_files/1002/1/222/333/index1"},
 				SerializedSize: 5000,
+				MemSize:        12000,
 			},
 		},
 		TextIndexFiles: map[int64]*datapb.TextIndexStats{
@@ -1464,6 +1465,7 @@ func TestBuildIndexInfoFromSource(t *testing.T) {
 		assert.Equal(t, int64(1001), indexInfos[1002].IndexId)
 		assert.Equal(t, int64(1002), indexInfos[1002].BuildId)
 		assert.Equal(t, int64(5000), indexInfos[1002].IndexSize)
+		assert.Equal(t, uint64(12000), indexInfos[1002].GetMemSize())
 		assert.Equal(t, "files/index_files/1002/1/555/666/index1", indexInfos[1002].IndexFilePaths[0])
 
 		// Verify text index info
@@ -1491,6 +1493,14 @@ func TestBuildIndexInfoFromSource(t *testing.T) {
 		assert.Equal(t, 2, len(jsonKeyIndexInfos[102].Files))
 		assert.Equal(t, "files/json_stats/2/3002/1/444/555/666/102/shared_key_index/index1", jsonKeyIndexInfos[102].Files[0])
 		assert.Equal(t, "files/json_stats/2/3002/1/444/555/666/102/shredding_data/data1", jsonKeyIndexInfos[102].Files[1])
+	})
+
+	t.Run("older snapshot without memory estimate", func(t *testing.T) {
+		legacy := proto.Clone(source).(*datapb.CopySegmentSource)
+		legacy.IndexFiles[0].MemSize = 0
+		indexInfos, _, _, err := buildIndexInfoFromSource(legacy, target, mappings)
+		require.NoError(t, err)
+		require.Nil(t, indexInfos[1002].MemSize)
 	})
 }
 
@@ -3950,9 +3960,12 @@ func TestRepublishCopiedManifestIndexes_WritePlacementMatrix(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		enabled bool
+		memSize *uint64
+		wantMem int64
 	}{
 		{name: "manifest writes disabled", enabled: false},
-		{name: "manifest writes enabled", enabled: true},
+		{name: "manifest writes enabled", enabled: true, memSize: proto.Uint64(256), wantMem: 256},
+		{name: "older worker result", enabled: true, wantMem: 64},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
@@ -3993,6 +4006,8 @@ func TestRepublishCopiedManifestIndexes_WritePlacementMatrix(t *testing.T) {
 					IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
 					BuildId:               888,
 					Version:               2,
+					IndexSize:             64,
+					MemSize:               tc.memSize,
 					IndexFilePaths:        []string{filepath.Join(basePath, "_index/888/2/target.bin")},
 				},
 			}
@@ -4008,6 +4023,8 @@ func TestRepublishCopiedManifestIndexes_WritePlacementMatrix(t *testing.T) {
 				assert.Equal(t, int64(777), entries[0].IndexID)
 				assert.Equal(t, int64(888), entries[0].BuildID)
 				assert.Equal(t, "vec_idx", entries[0].IndexName)
+				assert.EqualValues(t, 64, entries[0].SerializedSize)
+				assert.Equal(t, tc.wantMem, entries[0].MemSize)
 			} else {
 				assert.Empty(t, publishedBuildIDs)
 				assert.Empty(t, entries)

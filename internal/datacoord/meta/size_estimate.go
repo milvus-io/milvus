@@ -18,6 +18,7 @@ package meta
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/fieldsize"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -77,11 +78,13 @@ func fieldSizePerRecord(schema *schemapb.CollectionSchema, fieldID int64) (field
 	if field == nil {
 		return fieldSizeEstimate{}, merr.WrapErrFieldNotFound(fieldID)
 	}
-	sizePerRecord, err := typeutil.EstimateSizePerRecord(&schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{field},
-	})
-	if err != nil {
-		return fieldSizeEstimate{}, err
+	sizePerRecord := fieldsize.FixedFieldWidth(field)
+	if sizePerRecord == 0 {
+		estimate, err := typeutil.EstimateSizePerRecord(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}})
+		if err != nil {
+			return fieldSizeEstimate{}, err
+		}
+		sizePerRecord = int64(estimate)
 	}
 	if sizePerRecord <= 0 {
 		// An unrecognized data type estimates to zero, which would understate
@@ -91,7 +94,7 @@ func fieldSizePerRecord(schema *schemapb.CollectionSchema, fieldID int64) (field
 	}
 	fixedWidth := IsFixedWidthType(field.GetDataType())
 	return fieldSizeEstimate{
-		sizePerRecord: int64(sizePerRecord),
+		sizePerRecord: sizePerRecord,
 		exact:         fixedWidth && !field.GetNullable(),
 		fixedWidth:    fixedWidth,
 	}, nil

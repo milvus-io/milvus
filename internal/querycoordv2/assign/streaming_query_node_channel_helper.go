@@ -21,7 +21,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
@@ -57,23 +56,20 @@ func assignChannelToWALLocatedFirstForNodeInfo(
 	return notFoundChannels, plans, scoreDelta
 }
 
-// filterSQNIfStreamingServiceEnabled filter out the non-sqn querynode.
-func filterSQNIfStreamingServiceEnabled(nodes []int64) []int64 {
-	if streamingutil.UseStreamingQueryNodeAsDelegator() {
-		sqns := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
-		expectedSQNs := make([]int64, 0, len(nodes))
-		unexpectedNodes := make([]int64, 0)
-		for _, node := range nodes {
-			if sqns.Contain(node) {
-				expectedSQNs = append(expectedSQNs, node)
-			} else {
-				unexpectedNodes = append(unexpectedNodes, node)
-			}
+// filterStreamingQueryNodes keeps only SQNs as channel assignment candidates.
+func filterStreamingQueryNodes(nodes []int64) []int64 {
+	sqns := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
+	expectedSQNs := make([]int64, 0, len(nodes))
+	unexpectedNodes := make([]int64, 0)
+	for _, node := range nodes {
+		if sqns.Contain(node) {
+			expectedSQNs = append(expectedSQNs, node)
+		} else {
+			unexpectedNodes = append(unexpectedNodes, node)
 		}
-		if len(unexpectedNodes) > 0 {
-			mlog.Warn(context.TODO(), "unexpected streaming querynode found when enable streaming service", mlog.Int64s("unexpectedNodes", unexpectedNodes))
-		}
-		return expectedSQNs
 	}
-	return nodes
+	if len(unexpectedNodes) > 0 {
+		mlog.Warn(context.TODO(), "unexpected streaming querynode found when enable streaming service", mlog.Int64s("unexpectedNodes", unexpectedNodes))
+	}
+	return expectedSQNs
 }

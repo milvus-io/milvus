@@ -7,19 +7,21 @@ import (
 )
 
 type SegmentIndex struct {
-	SegmentID      int64
-	CollectionID   int64
-	PartitionID    int64
-	NumRows        int64
-	IndexID        int64
-	BuildID        int64
-	NodeID         int64
-	IndexVersion   int64
-	IndexState     commonpb.IndexState
-	FailReason     string
-	IsDeleted      bool
-	CreatedUTCTime uint64
-	IndexFileKeys  []string
+	// ArtifactPresent is set on transient projections of SegmentInfo summaries.
+	ArtifactPresent bool
+	SegmentID       int64
+	CollectionID    int64
+	PartitionID     int64
+	NumRows         int64
+	IndexID         int64
+	BuildID         int64
+	NodeID          int64
+	IndexVersion    int64
+	IndexState      commonpb.IndexState
+	FailReason      string
+	IsDeleted       bool
+	CreatedUTCTime  uint64
+	IndexFileKeys   []string
 	// IndexFileCount preserves the cardinality when the cache releases the file names.
 	IndexFileCount int
 	// The byte size of serialized index data at oos. (compressed)
@@ -125,3 +127,5 @@ func CloneSegmentIndex(segIndex *SegmentIndex) *SegmentIndex {
 	cloned.IndexFileKeys = common.CloneStringList(segIndex.IndexFileKeys)
 	return &cloned
 }
+
+func (s *SegmentIndex) HasArtifact() bool { return s.ArtifactPresent || s.NumIndexFiles() > 0 }

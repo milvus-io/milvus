@@ -50,6 +50,11 @@ Without storage options, import retains its existing cluster-storage behavior.
 The source never inherits cluster credentials, IAM, bucket, or root path.
 It uses the existing S3-compatible client factory and static credentials.
 
+> Note: `storage.endpoint` is validated for host/port syntax only. Milvus does
+> not filter private, loopback, or cloud metadata addresses or perform DNS/SSRF
+> checks on caller-supplied endpoints. Operators in shared or untrusted
+> environments should restrict worker egress at the network/infrastructure layer.
+
 Example REST request body for the existing import endpoint:
 
 ```json
@@ -66,12 +71,13 @@ Example REST request body for the existing import endpoint:
 }
 ```
 
-File names are complete bucket-relative object keys. Absolute paths, empty
-keys, and URI schemes are rejected. Milvus does not prepend a source root,
-normalize dot components, or collapse repeated separators. The cluster's
-internal-layout denylist does not apply to an explicitly authenticated source
-bucket; the source credentials determine object access. There is no implicit
-fallback to cluster storage after a source failure.
+File names are complete bucket-relative object keys validated against S3 object
+name rules (nonblank UTF-8 up to 1024 bytes, without a leading `/` or `://`
+scheme; valid S3 keys containing colons are preserved). Milvus does not prepend
+a source root, normalize dot components, or collapse repeated separators. The
+cluster's internal-layout denylist does not apply to an explicitly authenticated
+source bucket; the source credentials determine object access. There is no
+implicit fallback to cluster storage after a source failure.
 
 A source client does not create buckets or perform an initialization-time
 bucket-existence probe. Object GET/HEAD permissions are sufficient when the
@@ -81,23 +87,29 @@ chunk manager, storage config, and encryption context.
 
 ## Design details: execution and recovery
 
-Proxy and DataCoord use `ValidateImportSourceRequest` for public options and
-`ValidateImportSourceOptions` for internal options. `ValidateImportFiles` and
-`ValidateImportPlan` check durable sources and delegate snapshot rules to the
-snapshot validators. Source key checks share `ValidateSourceStorageFilePaths`.
-DataCoord also validates file keys before broadcast.
-The existing Import WAL body carries the options. Its ACK callback validates
-the durable source contract before creating a job; a malformed persisted
-contract becomes a failed job instead of an indefinitely retried callback.
+Snapshot import and external source storage remain orthogonal: snapshot/backup/L0
+imports use `ValidateImportSourceRequest`, `ValidateImportSourceOptions`, and
+`ValidateImportPlan` unchanged, while ordinary external-storage imports
+parse options into a typed `SourceStorageConfig` via `GetSourceStorageConfig` and
+validate object keys via `ValidateSourceStorageFilePaths` at Proxy admission
+and in DataCoord (`ValidateImportFilePaths`) before WAL broadcast. Because only
+validated messages enter the Import WAL, the ACK callback records the job
+directly without mutating or re-validating durable source options.
 
 The job's options travel unchanged in preimport/import requests and V3 reshard
-plans. `ReaderFactory` resolves and caches a separate source chunk manager per
-V2 task attempt, with independent streams per file. A retry constructs a new
-factory. V3 row scans and reshard readers use the same source resolver through
-`NewReader`. V3 Parquet-footer and NumPy-header row counting bypass ordinary
-readers, so they explicitly resolve the source too. V3 metadata counting
-currently creates a source client for each file; sharing these clients is a
-possible performance follow-up.
+plans. Each DataNode worker task entry point (`importv2.PreImportTask`,
+`importv2.ImportTask`, `importv3.preImportTask`, and
+`importv3.reshardPlanExecutor`) resolves its source once via
+`NewSourceChunkManager(ctx, options, fallback) -> (sourceCM, err)`:
+- When no `storage.*` options are present, `sourceCM` aliases the cluster
+  `ChunkManager`.
+- When `storage.*` options are present, `NewSourceChunkManager` builds one
+  read-only external S3-compatible `ChunkManager` and shares it across all file
+  readers and V3 Parquet/NumPy metadata counters in that task attempt.
+
+`ReaderFactory`, `NewReader`, and `simpleRowCount` stay agnostic to `storage.*`
+options and simply read from the `sourceCM` passed to them, while destination
+writers continue to use the worker's cluster `ChunkManager`.
 
 No coordinator writes a new state outside the existing broadcast/ACK path.
 All segment publication and import completion behavior remains in that path.
@@ -127,12 +139,17 @@ ordinary storage diagnostics.
 
 Active job catalog entries and the Import WAL body contain source credentials
 because recovery needs them. Internal task RPCs and in-memory V3 reshard plans
-also carry them. On Completed/Failed transitions, all storage options are
-removed from the retained job record in the same catalog update. This does
-not erase historical WAL entries, metadata backups, or already-dispatched
-worker memory; their existing retention/lifecycle rules still apply. Protect
-these internal systems as credential-bearing data. Encryption at rest and
-secret references are outside this change.
+also carry them. On `Completed`/`Failed` transitions,
+`RemoveSourceStorageCredentials` removes secret (`storage.accessKeyID`,
+`storage.secretAccessKey`) and any unknown `storage.*` options from the retained
+job record in the same catalog update while preserving non-secret structural
+options (`storage.endpoint`, `storage.bucket`, etc.). Preserving structural
+options ensures a terminal external-storage job retains its external-source
+identity and cannot silently fall back to cluster storage. This
+cleanup does not erase historical WAL entries, metadata backups, or
+already-dispatched worker memory; their existing retention/lifecycle rules still
+apply. Protect these internal systems as credential-bearing data. Encryption at
+rest and secret references are outside this change.
 
 Storage errors retain the existing object-storage/reader error handling.
 Request-option redaction does not sanitize arbitrary messages returned by a

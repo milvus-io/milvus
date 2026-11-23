@@ -141,7 +141,7 @@ func attachRecoveryChildMetadata(
 	})
 	g.Go(func() error {
 		return scanRecoveryChildren(gCtx, walker, FieldMetaPrefix+"/", targets, duplicates,
-			unmarshalField, (*model.Field).Clone,
+			unmarshalField, model.CloneField,
 			func(c *model.Collection) *[]*model.Field { return &c.Fields })
 	})
 	g.Go(func() error {

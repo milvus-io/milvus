@@ -505,6 +505,21 @@ class ConcurrentVectorImpl : public VectorBase {
     set_data_raw(ssize_t element_offset,
                  const void* source,
                  ssize_t element_count) override {
+        write_data_raw<false>(
+            element_offset, static_cast<const Type*>(source), element_count);
+    }
+
+    // Same as set_data_raw, but the rows in source may be moved from.
+    void
+    move_data_raw(ssize_t element_offset, Type* source, ssize_t element_count) {
+        write_data_raw<true>(element_offset, source, element_count);
+    }
+
+    template <bool Move>
+    void
+    write_data_raw(ssize_t element_offset,
+                   std::conditional_t<Move, Type*, const Type*> source,
+                   ssize_t element_count) {
         ssize_t valid_count = 0;
         ssize_t storage_offset = 0;
         if (use_mapping_storage_) {
@@ -544,8 +559,7 @@ class ConcurrentVectorImpl : public VectorBase {
             chunks_ptr_->emplace_to_at_least(
                 upper_div(storage_offset + valid_count, size),
                 elements_per_row_ * size);
-            set_data(
-                storage_offset, static_cast<const Type*>(source), valid_count);
+            set_data<Move>(storage_offset, source, valid_count);
         }
     }
 
@@ -763,9 +777,10 @@ class ConcurrentVectorImpl : public VectorBase {
     }
 
  private:
+    template <bool Move>
     void
     set_data(ssize_t element_offset,
-             const Type* source,
+             std::conditional_t<Move, Type*, const Type*> source,
              ssize_t element_count) {
         auto chunk_id = element_offset / size_per_chunk_;
         auto chunk_offset = element_offset % size_per_chunk_;
@@ -773,13 +788,14 @@ class ConcurrentVectorImpl : public VectorBase {
         // first partition:
         if (chunk_offset + element_count <= size_per_chunk_) {
             // only first
-            fill_chunk(
+            fill_chunk<Move>(
                 chunk_id, chunk_offset, element_count, source, source_offset);
             return;
         }
 
         auto first_size = size_per_chunk_ - chunk_offset;
-        fill_chunk(chunk_id, chunk_offset, first_size, source, source_offset);
+        fill_chunk<Move>(
+            chunk_id, chunk_offset, first_size, source, source_offset);
 
         source_offset += size_per_chunk_ - chunk_offset;
         element_count -= first_size;
@@ -787,7 +803,8 @@ class ConcurrentVectorImpl : public VectorBase {
 
         // the middle
         while (element_count >= size_per_chunk_) {
-            fill_chunk(chunk_id, 0, size_per_chunk_, source, source_offset);
+            fill_chunk<Move>(
+                chunk_id, 0, size_per_chunk_, source, source_offset);
             source_offset += size_per_chunk_;
             element_count -= size_per_chunk_;
             ++chunk_id;
@@ -795,14 +812,15 @@ class ConcurrentVectorImpl : public VectorBase {
 
         // the final
         if (element_count > 0) {
-            fill_chunk(chunk_id, 0, element_count, source, source_offset);
+            fill_chunk<Move>(chunk_id, 0, element_count, source, source_offset);
         }
     }
+    template <bool Move>
     void
     fill_chunk(ssize_t chunk_id,
                ssize_t chunk_offset,
                ssize_t element_count,
-               const Type* source,
+               std::conditional_t<Move, Type*, const Type*> source,
                ssize_t source_offset) {
         if (element_count <= 0) {
             return;
@@ -822,11 +840,21 @@ class ConcurrentVectorImpl : public VectorBase {
                 return valid_data_ptr->is_valid(beg_id + offset);
             };
         }
-        chunks_ptr_->copy_to_chunk(chunk_id,
-                                   chunk_offset * elements_per_row_,
-                                   source + source_offset * elements_per_row_,
-                                   element_count * elements_per_row_,
-                                   check_data_valid);
+        if constexpr (Move) {
+            chunks_ptr_->move_to_chunk(
+                chunk_id,
+                chunk_offset * elements_per_row_,
+                source + source_offset * elements_per_row_,
+                element_count * elements_per_row_,
+                check_data_valid);
+        } else {
+            chunks_ptr_->copy_to_chunk(
+                chunk_id,
+                chunk_offset * elements_per_row_,
+                source + source_offset * elements_per_row_,
+                element_count * elements_per_row_,
+                check_data_valid);
+        }
     }
 
  protected:

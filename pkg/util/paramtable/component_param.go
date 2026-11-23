@@ -179,6 +179,14 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.QueryCoordCfg.init(bt)
 	p.QueryNodeCfg.init(bt, p.LocalStorageCfg.Path.GetValue())
 	p.DataCoordCfg.init(bt)
+	p.CommonCfg.UseLoonFFI = ParamItem{
+		Key:          "common.storage.useLoonFFI",
+		Version:      "2.6.7",
+		DefaultValue: "true",
+		Forbidden:    p.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool(),
+		Export:       true,
+	}
+	p.CommonCfg.UseLoonFFI.Init(bt.mgr)
 	p.DataNodeCfg.init(bt)
 	p.StreamingCfg.init(bt)
 	p.QueryViewCfg.init(bt)
@@ -1511,14 +1519,6 @@ Upgrade every node, and every cluster in a CDC topology, before selecting pbkdf2
 		Export:       true,
 	}
 	p.MaxWLockConditionalWaitTime.Init(base.mgr)
-
-	p.UseLoonFFI = ParamItem{
-		Key:          "common.storage.useLoonFFI",
-		Version:      "2.6.7",
-		DefaultValue: "true",
-		Export:       true,
-	}
-	p.UseLoonFFI.Init(base.mgr)
 
 	p.EnableGrowingSourceFlush = ParamItem{
 		Key:          "common.storage.enableGrowingSourceFlush",
@@ -2863,8 +2863,10 @@ type proxyConfig struct {
 	// WAL payload chunking rollout switch.
 	SplitChunkProxy ParamItem `refreshable:"true"`
 
-	ExprParseCacheEnabled    ParamItem `refreshable:"false"`
-	ExprParseCacheMaxEntries ParamItem `refreshable:"false"`
+	ExprParseCacheEnabled       ParamItem `refreshable:"false"`
+	ExprParseCacheMaxEntries    ParamItem `refreshable:"false"`
+	ExprParseCacheMaxBytes      ParamItem `refreshable:"false"`
+	ExprParseCacheMaxEntryBytes ParamItem `refreshable:"false"`
 
 	TimeTickInterval               ParamItem `refreshable:"false"`
 	HealthCheckTimeout             ParamItem `refreshable:"true"`
@@ -2935,6 +2937,8 @@ type proxyConfig struct {
 
 	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
+	EnableReduceStream     ParamItem `refreshable:"true"`
+	ReduceStreamChunkBytes ParamItem `refreshable:"true"`
 
 	HybridSearchRequeryPolicy     ParamItem `refreshable:"true"`
 	SearchPlaceholderLogRateLimit ParamItem `refreshable:"true"`
@@ -2969,6 +2973,26 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.ExprParseCacheMaxEntries.Init(base.mgr)
+
+	p.ExprParseCacheMaxBytes = ParamItem{
+		Key:          "proxy.exprParseCache.maxBytes",
+		Version:      "3.0.6",
+		DefaultValue: "67108864",
+		Formatter:    positiveProxyLimitFormatter("67108864"),
+		Doc:          "Maximum aggregate retained byte budget of cached expression parse trees and parsing errors per process. Non-positive or invalid values use 67108864 (64 MiB). Entries retain the existing maxEntries and 10-minute TTL bounds. Restart required.",
+		Export:       true,
+	}
+	p.ExprParseCacheMaxBytes.Init(base.mgr)
+
+	p.ExprParseCacheMaxEntryBytes = ParamItem{
+		Key:          "proxy.exprParseCache.maxEntryBytes",
+		Version:      "3.0.6",
+		DefaultValue: "8388608",
+		Formatter:    positiveProxyLimitFormatter("8388608"),
+		Doc:          "Maximum estimated retained byte cost for a single expression parse cache entry. Non-positive or invalid values use 8388608 (8 MiB), clamped to proxy.exprParseCache.maxBytes. Larger expressions still parse normally without being cached. Restart required.",
+		Export:       true,
+	}
+	p.ExprParseCacheMaxEntryBytes.Init(base.mgr)
 
 	p.SplitChunkProxy = ParamItem{
 		Key:          "proxy.splitChunk",
@@ -3198,7 +3222,7 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		Key:          "proxy.enableAutoLoad",
 		Version:      "3.0.0",
 		DefaultValue: "false",
-		Doc:          "whether to automatically load an unloaded collection before DQL requests",
+		Doc:          "whether to automatically load an unloaded collection before DQL requests and before writes that read existing rows",
 		Export:       true,
 	}
 	p.EnableAutoLoad.Init(base.mgr)
@@ -3706,6 +3730,32 @@ Disabled if the value is less or equal to 0.`,
 		},
 	}
 	p.SearchPlaceholderLogMaxBytes.Init(base.mgr)
+
+	p.EnableReduceStream = ParamItem{
+		Key:          "proxy.queryView.enableReduceStream",
+		Version:      "3.1.0",
+		DefaultValue: "true",
+		Doc:          "Refreshable. Route supported new requests through Streaming Reduce.",
+		Export:       true,
+	}
+	p.EnableReduceStream.Init(base.mgr)
+
+	const defaultReduceStreamChunkBytes = "262144"
+	p.ReduceStreamChunkBytes = ParamItem{
+		Key:          "proxy.queryView.reduceStreamChunkBytes",
+		Version:      "3.1.0",
+		DefaultValue: defaultReduceStreamChunkBytes,
+		Doc:          "Refreshable. Reducible-payload byte threshold captured once per request. Invalid or non-positive values use the default of 262144 bytes.",
+		Export:       true,
+		Formatter: func(value string) string {
+			size, err := strconv.Atoi(value)
+			if err != nil || size <= 0 {
+				return defaultReduceStreamChunkBytes
+			}
+			return value
+		},
+	}
+	p.ReduceStreamChunkBytes.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -6746,6 +6796,7 @@ type dataCoordConfig struct {
 	// Index related configuration
 	IndexMemSizeEstimateMultiplier      ParamItem `refreshable:"true"`
 	IndexStorePathVersion               ParamItem `refreshable:"true"`
+	SegmentIndexSummariesEnabled        ParamItem `refreshable:"false"`
 	WriteSegmentIndexToManifest         ParamItem `refreshable:"false"`
 	SegmentIndexManifestLoadConcurrency ParamItem `refreshable:"false"`
 	ManifestIndexBackfillEnabled        ParamItem `refreshable:"false"`
@@ -6879,6 +6930,20 @@ type dataCoordConfig struct {
 	ScalarIndexTaskSlotUsage             ParamItem `refreshable:"true"`
 	StatsTaskSlotUsage                   ParamItem `refreshable:"true"`
 	AnalyzeTaskSlotUsage                 ParamItem `refreshable:"true"`
+
+	// Two-dimensional task pricing (dataCoord.taskResource.*). CPU in cores,
+	// memory as a multiplier of the input size or an absolute size.
+	TaskResourceVectorIndexCPU           ParamItem `refreshable:"true"`
+	TaskResourceAnalyzeCPU               ParamItem `refreshable:"true"`
+	TaskResourceClusteringCompactionCPU  ParamItem `refreshable:"true"`
+	TaskResourceDefaultCPU               ParamItem `refreshable:"true"`
+	TaskResourceIndexMemoryFactor        ParamItem `refreshable:"true"`
+	TaskResourceStatsMemoryFactor        ParamItem `refreshable:"true"`
+	TaskResourceL0CompactionMemoryFactor ParamItem `refreshable:"true"`
+	TaskResourceAnalyzeMemoryFactor      ParamItem `refreshable:"true"`
+	TaskResourceImportMemoryFactor       ParamItem `refreshable:"true"`
+	TaskResourceMinTaskMemory            ParamItem `refreshable:"true"`
+	TaskResourceExternalRefreshMemory    ParamItem `refreshable:"true"`
 
 	EnableSortCompaction       ParamItem `refreshable:"true"`
 	TaskCheckInterval          ParamItem `refreshable:"true"`
@@ -7546,10 +7611,18 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 	}
 	p.IndexStorePathVersion.Init(base.mgr)
 
+	p.SegmentIndexSummariesEnabled = ParamItem{
+		Key: "dataCoord.index.segmentIndexSummariesEnabled", Version: "3.0.0", DefaultValue: "false", Forbidden: true,
+		Doc: "Use SegmentInfo summaries and on-demand manifest reads instead of resident completed index records. New empty clusters only; the first startup choice is durable and cannot be changed. Requires common.storage.useLoonFFI=true, manifest index publication and no index migration/rollback. Incompatible snapshot restores are rejected.", Export: true,
+	}
+	p.SegmentIndexSummariesEnabled.Init(base.mgr)
+	summaryMode := p.SegmentIndexSummariesEnabled.GetAsBool()
+
 	p.WriteSegmentIndexToManifest = ParamItem{
 		Key:          "dataCoord.index.writeSegmentIndexToManifest",
 		Version:      "3.0.0",
 		DefaultValue: "true",
+		Forbidden:    summaryMode,
 		Doc: `Whether completed StorageV3 index artifacts are published in segment manifests. On by default: successful builds with artifact files publish a new manifest revision, which advances the DataView and drives QueryView resource preparation; that commit atomically deletes the corresponding Finished etcd row. Unissued, InProgress, Failed, fake-finished, and other task states remain in etcd. Off keeps the legacy etcd-only path, which does not drive QueryView index refresh. StorageV1/V2 always use etcd.
 New StorageV3 builds also write artifacts under the segment manifest base/_index/<build>/<version> (path version 2). Upgrade all workers and QueryNodes before enabling. Old-layout tasks keep their original etcd publication mode; external index paths are never added.
 The setting applies when a build task is created. Existing builds keep their persisted mode across switches and restarts: path version 2 publishes to manifests, while versions 0/1 finish in etcd. Published records remain recoverable through the segment's manifest_has_index marker.
@@ -7575,6 +7648,7 @@ Startup continuously schedules bounded concurrent reads and retries failed reads
 		Key:          "dataCoord.index.manifestIndexBackfill.enabled",
 		Version:      "3.0.1",
 		DefaultValue: "false",
+		Forbidden:    summaryMode,
 		Doc: `Whether DataCoord migrates historical finished StorageV3 SegmentIndex catalog rows into segment manifests. This is an operator-controlled, restart-scoped migration and is inert unless dataCoord.index.writeSegmentIndexToManifest is also true.
 Artifact files are copied with object-storage server-side Copy into the segment _index directory before publication; local-storage layout migration is unsupported. Copies run concurrently under a shared storage I/O budget.
 Each eligible record is moved through the ordinary segment manifest commit: the new manifest pointer, manifest_has_index marker, and deletion of the old catalog row land in one transaction. No separate index-prune phase is required. Failed, in-flight, fake-finished, deleted, StorageV1/V2, and L0 records remain on their existing lifecycle paths.
@@ -7632,6 +7706,7 @@ Watch milvus_datacoord_manifest_index_backfill_pending_records. Zero means no el
 
 	p.ManifestIndexRollbackEnabled = ParamItem{
 		Key: "dataCoord.index.manifestIndexRollback.enabled", Version: "3.0.1", DefaultValue: "false",
+		Forbidden: summaryMode,
 		Doc: `Copy StorageV3 path-version-2 index files to index_v1 with object-storage server-side Copy, then atomically restore etcd records with path version 1 and remove their manifest entries. Source files remain retained for readers and snapshots. Local-storage layout migration is unsupported. This restart-scoped switch overrides forward backfill and creation of new manifest index tasks; already-created version-2 tasks still finish in manifests and are then eligible for rollback.
 Only in-memory manifest-resident records are migrated. Untracked manifest entries remain owned by GC. Readiness reports that the current record backlog is empty; later records wake the inspector.`,
 		Export: true,
@@ -8833,6 +8908,105 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 		},
 	}
 	p.AnalyzeTaskSlotUsage.Init(base.mgr)
+
+	p.TaskResourceVectorIndexCPU = ParamItem{
+		Key:          "dataCoord.taskResource.vectorIndexCPU",
+		Version:      "3.0.1",
+		DefaultValue: "8",
+		Doc:          "cpu cores a vector index build task is expected to use; used by DataCoord to place tasks across DataNodes",
+		Export:       false,
+	}
+	p.TaskResourceVectorIndexCPU.Init(base.mgr)
+
+	p.TaskResourceAnalyzeCPU = ParamItem{
+		Key:          "dataCoord.taskResource.analyzeCPU",
+		Version:      "3.0.1",
+		DefaultValue: "8",
+		Doc:          "cpu cores an analyze task is expected to use",
+		Export:       false,
+	}
+	p.TaskResourceAnalyzeCPU.Init(base.mgr)
+
+	p.TaskResourceClusteringCompactionCPU = ParamItem{
+		Key:          "dataCoord.taskResource.clusteringCompactionCPU",
+		Version:      "3.0.1",
+		DefaultValue: "8",
+		Doc:          "cpu cores a clustering compaction task is expected to use",
+		Export:       false,
+	}
+	p.TaskResourceClusteringCompactionCPU.Init(base.mgr)
+
+	p.TaskResourceDefaultCPU = ParamItem{
+		Key:          "dataCoord.taskResource.defaultCPU",
+		Version:      "3.0.1",
+		DefaultValue: "1",
+		Doc:          "cpu cores every other task type (scalar index, stats, mix/l0/sort compaction, import, copy segment, external refresh) is expected to use",
+		Export:       false,
+	}
+	p.TaskResourceDefaultCPU.Init(base.mgr)
+
+	p.TaskResourceIndexMemoryFactor = ParamItem{
+		Key:          "dataCoord.taskResource.indexMemoryFactor",
+		Version:      "3.0.1",
+		DefaultValue: "2",
+		Doc:          "memory of an index build task = indexed field size * this factor",
+		Export:       false,
+	}
+	p.TaskResourceIndexMemoryFactor.Init(base.mgr)
+
+	p.TaskResourceStatsMemoryFactor = ParamItem{
+		Key:          "dataCoord.taskResource.statsMemoryFactor",
+		Version:      "3.0.1",
+		DefaultValue: "2",
+		Doc:          "memory of a stats task (text match, bm25, json key index) = size of the fields it indexes * this factor; of a sort compaction = segment size * this factor",
+		Export:       false,
+	}
+	p.TaskResourceStatsMemoryFactor.Init(base.mgr)
+
+	p.TaskResourceL0CompactionMemoryFactor = ParamItem{
+		Key:          "dataCoord.taskResource.l0CompactionMemoryFactor",
+		Version:      "3.0.1",
+		DefaultValue: "2",
+		Doc:          "memory of an l0 compaction task = total delta log size of its input segments * this factor + the stats log size of the target segments the deletes are applied to",
+		Export:       false,
+	}
+	p.TaskResourceL0CompactionMemoryFactor.Init(base.mgr)
+
+	p.TaskResourceAnalyzeMemoryFactor = ParamItem{
+		Key:          "dataCoord.taskResource.analyzeMemoryFactor",
+		Version:      "3.0.1",
+		DefaultValue: "2",
+		Doc:          "memory of an analyze task = size of the clustering-key field in its input segments * this factor",
+		Export:       false,
+	}
+	p.TaskResourceAnalyzeMemoryFactor.Init(base.mgr)
+
+	p.TaskResourceImportMemoryFactor = ParamItem{
+		Key:          "dataCoord.taskResource.importMemoryFactor",
+		Version:      "3.0.1",
+		DefaultValue: "2",
+		Doc:          "memory of an import task = files * per-file read buffer * this factor; the factor covers the batch that is being serialized and uploaded while the next one is read",
+		Export:       false,
+	}
+	p.TaskResourceImportMemoryFactor.Init(base.mgr)
+
+	p.TaskResourceMinTaskMemory = ParamItem{
+		Key:          "dataCoord.taskResource.minTaskMemory",
+		Version:      "3.0.1",
+		DefaultValue: "64m",
+		Doc:          "lower bound of the memory estimate of any task, so that no task is ever placed as if it were free",
+		Export:       false,
+	}
+	p.TaskResourceMinTaskMemory.Init(base.mgr)
+
+	p.TaskResourceExternalRefreshMemory = ParamItem{
+		Key:          "dataCoord.taskResource.externalRefreshMemory",
+		Version:      "3.0.1",
+		DefaultValue: "1g",
+		Doc:          "memory of a refresh external collection task; it does not scale with an input DataCoord can size, so it is a fixed budget",
+		Export:       false,
+	}
+	p.TaskResourceExternalRefreshMemory.Init(base.mgr)
 
 	p.EnableSortCompaction = ParamItem{
 		Key:          "dataCoord.sortCompaction.enable",

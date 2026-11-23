@@ -23,12 +23,14 @@ import (
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -49,7 +51,9 @@ func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 			meta.MockManifestIndexSubmissions(t)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			kv := meta.NewMetaMemoryKV()
+			// initMeta must persist the index metadata mode with a conditional write.
+			kv := tikv.NewTiKV(globalTestTikv, "manifest-index-restart-"+uuid.NewString())
+			t.Cleanup(func() { require.NoError(t, kv.RemoveWithPrefix(context.Background(), "")) })
 			catalog := datacoord.NewCatalog(kv, "", "")
 			m, _ := index.BootMetaForRestart(t, catalog, 100)
 			cm := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart"))
@@ -102,7 +106,7 @@ func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 				return true, nil
 			})
 			err := server.initMeta(cm)
-			require.Equal(t, 1, reads[good])
+			require.Equal(t, 1, reads[good], "initMeta returned %v", err)
 			if mode == "transient" || mode == "dataview-reload" {
 				require.NoError(t, err)
 				require.NotNil(t, server.meta)

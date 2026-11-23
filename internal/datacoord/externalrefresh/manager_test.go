@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/snapshotio"
@@ -786,7 +787,7 @@ func TestCreateTasksForJob_PersistedOwnershipDrivesWorkerRequest(t *testing.T) {
 	assert.Equal(t, []int64{10}, persistedTask.GetOwnedSegmentIds())
 
 	cluster := &stubCluster{}
-	mgr.wrapTask(persistedTask).CreateTaskOnWorker(1, cluster)
+	mgr.wrapTask(persistedTask).CreateTaskOnWorker(1, cluster, taskresource.ExternalRefresh())
 	require.NotNil(t, cluster.refreshReq)
 	assert.Equal(t, "manifest-path", cluster.refreshReq.GetExploreManifestPath())
 	assert.Equal(t, int64(0), cluster.refreshReq.GetFileIndexBegin())

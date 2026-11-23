@@ -129,8 +129,8 @@ func patchIndexGCReadinessExternalIO(t *testing.T, s *Server, catalog *indexGCRe
 	t.Helper()
 	// Keep the real collector and real index metadata methods. Only storage
 	// discovery/removal is substituted so failures are deterministic.
-	discovery := mockey.Mock((*gc.GarbageCollector).GetDroppedSegmentIndexes).To(func(_ *gc.GarbageCollector, _ context.Context, _ *packed.ManifestIOContext, segmentID int64) ([]*model.SegmentIndex, gc.DroppedSegmentIndexes, gc.GcBlockReason) {
-		indexes := s.indexMeta.GetAllSegmentIndexes(segmentID)
+	discovery := mockey.Mock((*gc.GarbageCollector).GetDroppedSegmentIndexes).To(func(_ *gc.GarbageCollector, _ context.Context, _ *packed.ManifestIOContext, segmentID int64) ([]*model.SegmentIndexSummary, gc.DroppedSegmentIndexes, gc.GcBlockReason) {
+		indexes := s.indexMeta.GetAllSegmentIndexSummaries(segmentID)
 		sort.Slice(indexes, func(i, j int) bool { return indexes[i].IndexID < indexes[j].IndexID })
 		return indexes, gc.DroppedSegmentIndexes{}, gc.GcNotBlocked
 	}).Build()
@@ -152,7 +152,7 @@ func assertIndexGCReadinessInvalidated(t *testing.T, s *Server, idx *model.Index
 	require.Empty(t, s.indexMeta.GetIndexedSegments(1, []int64{1}, []int64{10}))
 	require.Empty(t, s.indexMeta.GetSegmentIndexes(1, 1))
 	require.Nil(t, s.indexMeta.GetSegmentsIndexStates(1, []int64{1})[1][10])
-	require.Len(t, s.indexMeta.GetAllSegmentIndexes(1), 1, "GC retains the durable retry record")
+	require.Len(t, s.indexMeta.GetAllSegmentIndexSummaries(1), 1, "GC retains the durable retry record")
 	require.ElementsMatch(t, []int64{3}, indexServingQueryIDs(s))
 	assertIndexServingState(t, s, idx, commonpb.IndexState_InProgress)
 	progress, err := s.GetIndexBuildProgress(context.Background(), &indexpb.GetIndexBuildProgressRequest{CollectionID: 1, IndexName: idx.IndexName})
@@ -172,7 +172,7 @@ func TestIndexGCReadinessMarkerFailurePreventsFiles(t *testing.T) {
 	require.True(t, catalog.stored[110].IsDeleted)
 	require.False(t, catalog.stored[120].IsDeleted, "failed persistence must not mutate the live task")
 	require.NotNil(t, s.meta.Segments.GetSegment(1))
-	require.Len(t, s.indexMeta.GetAllSegmentIndexes(1), 2)
+	require.Len(t, s.indexMeta.GetAllSegmentIndexSummaries(1), 2)
 }
 
 func TestIndexGCReadinessFileFailureLeavesMarkedRecord(t *testing.T) {

@@ -159,7 +159,7 @@ func (policy *StorageVersionUpgradePolicy) TriggerOneCollection(ctx context.Cont
 		return nil, nil
 	}
 
-	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
+	collectionTTL, err := common.GetCollectionTTL(collection.Properties)
 	if err != nil {
 		mlog.Warn(ctx, "failed to apply storageVersionUpgradePolicy, get collection ttl failed")
 		return nil, err

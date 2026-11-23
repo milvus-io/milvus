@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -86,6 +87,12 @@ func (t *refreshExternalCollectionTask) GetTaskType() taskcommon.Type {
 func (t *refreshExternalCollectionTask) GetTaskState() taskcommon.State {
 	// taskcommon.State is a type alias of indexpb.JobState, so this is type-safe.
 	return t.GetState()
+}
+
+// GetTaskResource prices a refresh at the fixed external-refresh budget; the
+// DataNode books it like any other task.
+func (t *refreshExternalCollectionTask) GetTaskResource() taskcommon.Resource {
+	return taskresource.ExternalRefresh()
 }
 
 func (t *refreshExternalCollectionTask) GetTaskSlot() int64 {
@@ -763,7 +770,7 @@ func getExternalRefreshSegmentSnapshots(mt *meta.Meta, segmentIDs []int64) []*me
 	return result
 }
 
-func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
+func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 	ctx := context.TODO()
 	log := mlog.With(
 		mlog.FieldJobID(t.GetJobId()),
@@ -910,7 +917,7 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 	}
 
 	// Submit task to worker via unified task system
-	err = cluster.CreateRefreshExternalCollectionTask(nodeID, req)
+	err = cluster.CreateRefreshExternalCollectionTask(nodeID, req, resource)
 	if err != nil {
 		log.Warn(ctx, "failed to create refresh task on worker", mlog.Err(err))
 		return
