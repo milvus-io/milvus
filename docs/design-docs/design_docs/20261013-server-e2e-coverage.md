@@ -52,6 +52,9 @@ counter updates, independently of `BUILD_UNIT_TEST`. It disables compiler
 launchers that might restore objects without their `.gcno` sidecars. Existing
 unit-test coverage behavior is preserved. Unsupported server coverage toolchains
 fail configuration. Build farms must isolate coverage and ordinary build caches.
+By default `make` builds in `mode=Release` (`-O3`), where inlining and code
+motion can merge or drop C++ source lines; pass `mode=RelWithDebInfo` or
+`mode=Debug` when tighter C++ line mapping is preferred over runtime speed.
 
 The packaging script preserves `.gcno` paths and the source revision, and copies
 the matching `gcov` and Go `covdata` decoders. Keep this bundle paired with the
@@ -91,11 +94,23 @@ mkdir coverage-result
 tar -xzf coverage.tar.gz -C coverage-result
 ```
 
+Pass `--raw-only` to skip in-container decoding and export only `done.json`,
+raw `go/` counters, and `cpp/**/*.gcda` without mounting metadata or decoders
+into the server container:
+
+```bash
+/tmp/milvus-coverage-build/bin/coverage-export --raw-only "$snapshot" > coverage-raw.tar.gz
+```
+
+Decode raw archives offline using the matching `coverage-covdata`,
+`coverage-gcov`, and `coverage/` metadata bundle from the same build.
+
 The exporter must run in the server's PID and filesystem namespace, for example
-through `kubectl exec` in the server container. Copy the metadata/tools bundle
-into that container or mount it read-only. `coverage-gcov` also needs the matching
-runtime libraries from the builder; include them when using a minimal image.
-The server itself does not need the source checkout or reporting tools.
+through `kubectl exec` in the server container. For full in-container decoding,
+copy the metadata/tools bundle into that container or mount it read-only.
+`coverage-gcov` also needs the matching runtime libraries from the builder;
+include them when using a minimal image. The server itself does not need the
+source checkout or reporting tools.
 
 For remote collection, save the archive inside the container before downloading
 it. A failed stream must not be mistaken for a valid archive. Verify its size and
@@ -120,11 +135,14 @@ where libgcov reports open failures only to `stderr` cannot be distinguished by
 the collector from unexecuted units; ensure adequate disk space and check
 server `stderr` if native coverage looks unexpectedly low.
 
-The exporter converts Go data into `go.out`, pairs C++ counters with `.gcno`
-files, and produces gcov JSON, including units with no hits. It archives these
-alongside raw data, `done.json`, and `build-info.txt`. It preserves the snapshot
-on disk for inspection; the caller owns cleanup. Keep the process's `cpp/`
-accumulator until the server has finished, even after deleting individual runs.
+In default mode, the exporter converts Go data into `go.out`, pairs C++
+counters with `.gcno` files, and produces gcov JSON, including units with no
+hits. It archives these alongside raw data, `done.json`, and `build-info.txt`.
+With `--raw-only`, it archives only raw Go/C++ counters and `done.json` for
+host-side decoding with the paired metadata/tools bundle. In both modes, it
+preserves the snapshot on disk for inspection; the caller owns cleanup. Keep
+the process's `cpp/` accumulator until the server has finished, even after
+deleting individual runs.
 
 Coverage is cumulative since process start, including startup and background
 work. Go counters are not cleared. GCC dumps merge an interval into existing

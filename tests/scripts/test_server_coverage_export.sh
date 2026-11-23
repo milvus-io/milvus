@@ -113,4 +113,32 @@ fi
 wait "$server_pid" || true
 test ! -s "$work/exited.out"
 grep -F 'exited before completing' "$work/stderr.log" >/dev/null
+
+mkdir -p "$work/raw-only-bin"
+cp "$source_root/scripts/export_server_coverage.sh" "$work/raw-only-bin/coverage-export"
+chmod +x "$work/raw-only-bin/coverage-export"
+new_process raw_only
+respond "$id" success & responder=$!
+"$work/raw-only-bin/coverage-export" --raw-only "$id" > "$work/raw-only.tar.gz"
+wait "$responder"
+mkdir "$work/unpacked-raw"
+tar -xzf "$work/raw-only.tar.gz" -C "$work/unpacked-raw"
+test -f "$work/unpacked-raw/done.json"
+test -f "$work/unpacked-raw/cpp/build/core.gcda"
+test ! -e "$work/unpacked-raw/go.out"
+test ! -e "$work/unpacked-raw/build-info.txt"
+test ! -e "$work/unpacked-raw/cpp/build/core.gcno"
+test ! -e "$work/unpacked-raw/cpp/build/core.gcov.json.gz"
+
+new_process raw_only_extra_arg
+if "$work/raw-only-bin/coverage-export" --raw-only "$id" "$work/metadata" > "$work/raw-extra.out" 2> "$work/stderr.log"; then
+    echo 'Accepted metadata argument with --raw-only' >&2; exit 1
+fi
+test ! -s "$work/raw-extra.out"
+test ! -e "$MILVUS_COVERAGE_DIR/requests/$id"
+
+if "$work/raw-only-bin/coverage-export" --unknown "$id" > "$work/unknown-opt.out" 2> "$work/stderr.log"; then
+    echo 'Accepted an unknown option' >&2; exit 1
+fi
+test ! -s "$work/unknown-opt.out"
 echo 'Server coverage exporter protocol tests passed'
