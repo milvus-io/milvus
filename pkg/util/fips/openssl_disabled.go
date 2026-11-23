@@ -14,10 +14,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !boringcrypto
+//go:build !milvus_fips
 
 package fips
 
+// MaybeEnableOpenSSLFIPS reports false: this is not a MILVUS_FIPS_ENABLED=ON build.
 func MaybeEnableOpenSSLFIPS() bool {
 	return false
+}
+
+// Require has nothing to check outside a MILVUS_FIPS_ENABLED=ON build.
+func Require() error {
+	return nil
+}
+
+// Status describes the FIPS state of the process for the startup banner.
+func Status() string {
+	return "off"
 }

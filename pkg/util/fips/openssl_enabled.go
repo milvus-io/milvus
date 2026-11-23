@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build boringcrypto
+//go:build milvus_fips
 
 package fips
 
@@ -46,8 +46,12 @@ static int enableOpenSSLFIPS() {
 import "C"
 
 import (
-	"log"
+	"context"
+	"crypto/fips140"
 	"sync"
+
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 var (
@@ -55,20 +59,45 @@ var (
 	opensslFIPSEnabled bool
 )
 
+// MaybeEnableOpenSSLFIPS loads OpenSSL's FIPS configuration once for the
+// process and reports whether the FIPS provider is in use.
 func MaybeEnableOpenSSLFIPS() bool {
 	fipsOnce.Do(func() {
-		rc := C.enableOpenSSLFIPS()
-		switch rc {
+		ctx := context.TODO()
+		switch C.enableOpenSSLFIPS() {
 		case 1:
-			log.Println("OpenSSL FIPS mode enabled")
+			mlog.Info(ctx, "OpenSSL FIPS mode enabled")
 			opensslFIPSEnabled = true
 		case 0:
-			log.Println("WARNING: OpenSSL FIPS config loaded but fips=yes not set in default properties")
+			mlog.Error(ctx, "OpenSSL FIPS config loaded but fips=yes not set in default properties")
 		case -2:
-			log.Println("FATAL: OpenSSL FIPS property set but FIPS provider not functional (check OPENSSL_MODULES env var and .include path in openssl-fips.cnf)")
+			mlog.Error(ctx, "OpenSSL FIPS property set but FIPS provider not functional (check OPENSSL_MODULES env var and .include path in openssl-fips.cnf)")
 		default:
-			log.Println("Failed to load OpenSSL FIPS config")
+			mlog.Error(ctx, "Failed to load OpenSSL FIPS config /milvus/configs/ssl/openssl-fips.cnf")
 		}
 	})
 	return opensslFIPSEnabled
+}
+
+// Require returns an error unless both halves of a MILVUS_FIPS_ENABLED=ON
+// build are in FIPS 140-3 mode: Go's cryptography on a validated version of
+// the Go Cryptographic Module, and OpenSSL with its FIPS provider.
+func Require() error {
+	// A frozen module reports its version; "latest" is the standard library's
+	// own copy, which is not the validated module.
+	if version := fips140.Version(); version == "latest" {
+		return merr.WrapErrServiceInternalMsg("FIPS build, but Go was not built against a validated Go Cryptographic Module; build with MILVUS_FIPS_ENABLED=ON so that GOFIPS140 is set")
+	}
+	if !fips140.Enabled() {
+		return merr.WrapErrServiceInternalMsg("FIPS build, but Go FIPS 140-3 mode is off; do not set GODEBUG=fips140=off")
+	}
+	if !MaybeEnableOpenSSLFIPS() {
+		return merr.WrapErrServiceInternalMsg("FIPS build, but the OpenSSL FIPS provider could not be enabled; see the error logged above")
+	}
+	return nil
+}
+
+// Status describes the FIPS state of the process for the startup banner.
+func Status() string {
+	return "on (Go Cryptographic Module " + fips140.Version() + ", OpenSSL FIPS provider)"
 }

@@ -115,10 +115,15 @@ ifdef WITH_CRT
 	with_crt = ${WITH_CRT}
 endif
 
-# FIPS: default OFF. Set MILVUS_FIPS_ENABLED=ON to enable BoringCrypto.
-GOEXPERIMENT_FLAG :=
+# FIPS: default OFF. MILVUS_FIPS_ENABLED=ON builds every Go binary, library and
+# plugin against a CMVP-validated version of the FIPS 140-3 Go Cryptographic
+# Module, and the milvus_fips tag makes Milvus enable OpenSSL's FIPS provider and
+# refuse to start unless both are in FIPS mode. GOFIPS140 is exported, not passed
+# per command, because plugins only load into a binary built with the same value.
+MILVUS_FIPS_GO_MODULE ?= v1.0.0
 ifeq ($(MILVUS_FIPS_ENABLED),ON)
-	GOEXPERIMENT_FLAG := GOEXPERIMENT=boringcrypto
+	export GOFIPS140 := $(MILVUS_FIPS_GO_MODULE)
+	MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),milvus_fips
 endif
 # golangci-lint
 GOLANGCI_LINT_VERSION := 2.11.3
@@ -186,7 +191,7 @@ build-go:
 	@echo "Building Milvus ..."
 	@source $(PWD)/scripts/setenv.sh && \
 		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
-		$(GOEXPERIMENT_FLAG) CGO_LDFLAGS="$(CGO_LDFLAGS)" CGO_CFLAGS="$(CGO_CFLAGS)" CGO_CXXFLAGS="$(CGO_CXXFLAGS)" GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="$(TSAN_GO_LDFLAGS) $(SONIC_PLUGIN_SYNC_LDFLAG) -r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
+		CGO_LDFLAGS="$(CGO_LDFLAGS)" CGO_CFLAGS="$(CGO_CFLAGS)" CGO_CXXFLAGS="$(CGO_CXXFLAGS)" GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="$(TSAN_GO_LDFLAGS) $(SONIC_PLUGIN_SYNC_LDFLAG) -r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
 		-tags "$(MILVUS_GO_BUILD_TAGS)" -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
 
 get-build-deps:
