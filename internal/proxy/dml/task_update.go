@@ -18,6 +18,7 @@ package dml
 
 import (
 	"context"
+	"encoding/binary"
 
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
@@ -118,88 +119,68 @@ func buildUpdateMessages(collectionID int64, schemaVersion int32, partitionID in
 	header := &messagespb.UpdateMessageHeader{CollectionId: collectionID, SchemaVersion: proto.Int32(schemaVersion)}
 	body := &messagespb.UpdateMessageBody{PartitionId: partitionID, Assignments: assignments}
 	fixedBodySize := proto.Size(body)
+	// All length-delimited fields on the PK path have one-byte tags.
+	fieldOverhead := protowire.SizeTag(1) + protowire.SizeVarint(uint64(limit))
 	for channelIndex, keys := range groups {
 		if keys == nil {
 			continue
 		}
-		channel := channels[channelIndex]
 		build := func(b *messagespb.UpdateMessageBody, c *message.CipherConfig) (message.MutableMessage, error) {
-			return message.NewUpdateMessageBuilderV2().WithVChannel(channel).WithHeader(header).
+			return message.NewUpdateMessageBuilderV2().WithVChannel(channels[channelIndex]).WithHeader(header).
 				WithBody(b).WithCipher(c).BuildMutable()
 		}
-		var emit func(start, end int) error
-		emit = func(start, end int) error {
-			body.PrimaryKeys = sliceUpdatePKs(keys, start, end)
-			msg, err := build(body, cipher)
-			if err != nil {
-				return err
-			}
-			size := proto.Size(msg.IntoMessageProto())
-			if limit > 0 && size > limit {
-				if end-start == 1 {
-					return merr.WrapErrParameterTooLarge("one PK with shared assignments exceeds the update message size limit")
-				}
-				// Only encryption can expand a batch that fit the plaintext budget.
-				mid := start + (end-start)/2
-				if err := emit(start, mid); err != nil {
-					return err
-				}
-				return emit(mid, end)
-			}
-			if size > remaining {
-				return merr.WrapErrParameterTooLarge("prepared update messages exceed the total byte budget")
-			}
-			remaining -= size
-			result = append(result, msg)
-			return nil
-		}
-
-		start, count := 0, typeutil.GetSizeOfIDs(keys)
+		pkBudget := 0
 		if limit > 0 {
 			envelope, err := build(&messagespb.UpdateMessageBody{}, nil)
 			if err != nil {
 				return nil, err
 			}
-			bodyBudget := bytesFieldCapacity(limit - proto.Size(envelope.IntoMessageProto()))
-			idsBudget := bytesFieldCapacity(bodyBudget - fixedBodySize)
-			pkBudget := bytesFieldCapacity(idsBudget) // IDs.int_id or IDs.str_id
-			if keys.GetIntId() != nil {
-				pkBudget = bytesFieldCapacity(pkBudget) // LongArray.data is packed
-			}
-			available := pkBudget
-			for i := 0; i < count; i++ {
-				keySize := updatePKWireSize(keys, i)
-				if i > start && keySize > available {
-					if err := emit(start, i); err != nil {
-						return nil, err
-					}
-					start, available = i, pkBudget
-				}
-				available -= keySize
+			// At most four wrappers: payload, primary_keys, IDs oneof, packed integers.
+			pkBudget = limit - proto.Size(envelope.IntoMessageProto()) - fixedBodySize - 4*fieldOverhead
+			if cipher != nil {
+				const cipherReserve = 1024 // Per message, for ciphertext expansion and its header.
+				pkBudget -= cipherReserve
 			}
 		}
-		if err := emit(start, count); err != nil {
-			return nil, err
+		for start, count := 0, typeutil.GetSizeOfIDs(keys); start < count; {
+			end := count
+			if limit > 0 {
+				end = updatePKBatchEnd(keys, start, pkBudget, fieldOverhead)
+			}
+			body.PrimaryKeys = sliceUpdatePKs(keys, start, end)
+			msg, err := build(body, cipher)
+			if err != nil {
+				return nil, err
+			}
+			size := proto.Size(msg.IntoMessageProto())
+			if limit > 0 && size > limit {
+				return nil, merr.Wrapf(merr.ErrParameterTooLarge, "encoded update message is %d bytes, limit is %d bytes", size, limit)
+			}
+			if size > remaining {
+				return nil, merr.WrapErrParameterTooLarge("prepared update messages exceed the total byte budget")
+			}
+			remaining -= size
+			result = append(result, msg)
+			start = end
 		}
 	}
 	return result, nil
 }
 
-// bytesFieldCapacity returns the payload bytes that fit after a one-byte
-// protobuf tag and its varint length prefix.
-func bytesFieldCapacity(budget int) int {
-	n := budget - 2
-	for n > 0 && 1+protowire.SizeBytes(n) > budget {
-		n--
-	}
-	return n
-}
-
-func updatePKWireSize(keys *schemapb.IDs, i int) int {
+// Try at least one PK so that the encoded size decides whether a single key fits.
+func updatePKBatchEnd(keys *schemapb.IDs, start, budget, fieldOverhead int) int {
 	if ints := keys.GetIntId(); ints != nil {
-		return protowire.SizeVarint(uint64(ints.Data[i]))
+		count := max(1, budget/binary.MaxVarintLen64)
+		return start + min(count, len(ints.Data)-start)
 	}
-	return protowire.SizeTag(1) + protowire.SizeBytes(len(keys.GetStrId().Data[i]))
+	strs := keys.GetStrId().GetData()
+	for i := start; i < len(strs); i++ {
+		budget -= len(strs[i]) + fieldOverhead
+		if budget < 0 {
+			return max(start+1, i)
+		}
+	}
+	return len(strs)
 }
 
 func sliceUpdatePKs(ids *schemapb.IDs, start, end int) *schemapb.IDs {
