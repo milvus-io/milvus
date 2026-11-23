@@ -258,6 +258,22 @@ func NewMetaWithoutManifestIndexes(ctx context.Context, catalog metastore.DataCo
 		mt.CompactionProtection = protection
 	}
 
+	// Recovery follows the durable storage location, not the current write
+	// mode. A segment marked manifest_has_index may contain records published
+	// while the switch was previously on, so it must still be loaded after the
+	// switch is turned off. Unmarked clusters perform no manifest reads.
+	if paramtable.Get().DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() {
+		source, ok := mt.IndexCatalog.(interface {
+			UseSegmentSummaries(metacache.MetaView) error
+		})
+		if !ok {
+			return nil, merr.Wrap(merr.ErrServiceUnimplemented, "index catalog does not support segment summaries")
+		}
+		if err := source.UseSegmentSummaries(mt.MetaStore); err != nil {
+			return nil, err
+		}
+	}
+
 	// Segment change groups load AFTER segments are in memory: the recovery
 	// index build exempts L0 superseded parents, which requires segment levels
 	// (MetaStore must be populated by LoadFromCatalog above).
@@ -580,6 +596,9 @@ func (m *Meta) GetAllCollectionNumRows() map[int64]int64 {
 
 // AddSegment records segment info, persisting info into kv store
 func (m *Meta) AddSegment(ctx context.Context, segment *SegmentInfo) error {
+	if paramtable.Get().DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() && segment.GetLevel() != datapb.SegmentLevel_L0 && segment.GetStorageVersion() != storage.StorageV3 {
+		return merr.Wrap(merr.ErrServiceUnimplemented, "segment index summaries require StorageV3 segments")
+	}
 	mlog.Info(ctx, "meta update: adding segment - Start", mlog.Int64("segmentID", segment.GetID()))
 	defer m.LockSegments(segment.GetID())()
 	if info := m.Segments.GetSegment(segment.GetID()); info != nil {

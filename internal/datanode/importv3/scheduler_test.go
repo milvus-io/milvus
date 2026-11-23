@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -27,14 +28,16 @@ type fakeTask struct {
 	taskID   int64
 	runID    int64
 	slot     int64
+	resource taskcommon.Resource
 	progress TaskProgress
 	execute  func(ctx context.Context) (any, error)
 }
 
-func (t *fakeTask) TaskID() int64 { return t.taskID }
-func (t *fakeTask) RunID() int64  { return t.runID }
-func (t *fakeTask) Kind() string  { return "import" }
-func (t *fakeTask) Slot() int64   { return t.slot }
+func (t *fakeTask) TaskID() int64                 { return t.taskID }
+func (t *fakeTask) RunID() int64                  { return t.runID }
+func (t *fakeTask) Kind() string                  { return "import" }
+func (t *fakeTask) Slot() int64                   { return t.slot }
+func (t *fakeTask) Resource() taskcommon.Resource { return t.resource }
 func (t *fakeTask) Progress() TaskProgress {
 	return t.progress
 }
@@ -44,11 +47,11 @@ func (t *fakeTask) Execute(ctx context.Context) (any, error) {
 }
 
 func newFakeTask(taskID, runID, slot int64, execute func(ctx context.Context) (any, error)) *fakeTask {
-	return &fakeTask{taskID: taskID, runID: runID, slot: slot, execute: execute}
+	return &fakeTask{taskID: taskID, runID: runID, slot: slot, resource: taskcommon.Resource{CPU: 1, Memory: slot}, execute: execute}
 }
 
 func newTestScheduler(capacity int64) *Scheduler {
-	return NewScheduler(context.Background(), func() int64 { return capacity }, NewMetrics(1))
+	return NewScheduler(context.Background(), func() taskcommon.Resource { return taskcommon.Resource{Memory: capacity} }, NewMetrics(1))
 }
 
 // submitAdmit queues a task and runs one admission pass, mirroring what the
@@ -351,7 +354,7 @@ func TestSchedulerClassifiesWithTaskPolicy(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			parent, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			s := NewScheduler(parent, func() int64 { return 100 }, NewMetrics(1))
+			s := NewScheduler(parent, func() taskcommon.Resource { return taskcommon.Resource{Memory: 100} }, NewMetrics(1))
 			taskID, runID := int64(30+i), int64(70+i)
 			started := make(chan struct{})
 			submitAdmit(t, s, newFakeTask(taskID, runID, 1, func(ctx context.Context) (any, error) {

@@ -137,9 +137,12 @@ is checked before creation; cancellation after creation does not stop Python.
 
 ### Python supervisor
 
-The supervisor stays single-threaded and does not import gRPC, PyArrow, or user
-models before `fork`. Runtime package exports are lazy so importing the
-supervisor does not initialize worker dependencies.
+The supervisor keeps a single Python thread and does not import gRPC, PyArrow,
+or user models before `fork`. Runtime package exports are lazy so importing the
+supervisor does not initialize worker dependencies. This does not require the
+whole process to have exactly one native OS thread: the product image's jemalloc
+allocator may create background threads. Its fork handling must be validated
+with worker startup, replacement, and shutdown tests in the image configuration.
 
 During fork, the supervisor blocks TERM/INT. Each child restores default signal
 handling and the previous signal mask, then imports and starts its worker.
@@ -173,7 +176,10 @@ Go process.
 Linux and macOS are the target platforms. macOS fork safety and port-reuse
 behavior require native validation; Linux test results do not establish macOS
 traffic distribution or throughput. The supervisor must remain free of
-background threads and worker-library initialization before every fork.
+additional Python threads and worker-library initialization before every fork.
+Tests check `threading.active_count() == 1`, dependency imports, and worker
+lifecycle behavior without imposing an OS thread-count limit. This does not
+establish fork safety for arbitrary threaded libraries.
 
 ## 4. Go client and connection reuse
 
@@ -755,7 +761,10 @@ The worker needs the runtime wheel and compatible user dependencies installed
 in that environment. Core CMake does not select this interpreter.
 
 The package currently pins PyArrow 23.0.1, grpcio and grpcio-health-checking
-1.74.0, and protobuf 6.31.1. The codegen extra pins grpcio-tools 1.74.0. Generated
+1.74.0, and protobuf 6.33.5. See
+[`pyproject.toml`](../../../internal/util/function/pyudf/python/pyproject.toml)
+for the authoritative runtime dependencies. The codegen extra pins
+grpcio-tools 1.74.0. Generated
 Python files ship in the runtime wheel; deployment needs no protoc or codegen
 extra. The user UDF wheel is a separate FileResource artifact loaded at Execute.
 
@@ -943,6 +952,8 @@ These are single-run local measurements, not a production capacity guarantee.
 The load generators and server ran on the same Linux host, with 48 logical CPUs
 visible to the benchmark. The environment used Python 3.12.13, grpcio 1.74.0,
 PyArrow 23.0.1, and protobuf 6.31.1.
+These versions describe the historical benchmark environment. For current
+runtime dependencies, see [Packaging and generated files](#13-packaging-and-generated-files).
 
 Both runs used the same workload and client settings:
 

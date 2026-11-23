@@ -238,9 +238,9 @@ func TestImportTaskV3CreateTaskOnWorkerCreatesSegmentBeforeRunning(t *testing.T)
 		}
 		return nil
 	}).Once()
-	cluster.EXPECT().CreateImportV3(int64(7), mock.Anything, int64(2)).Return(nil).Once()
+	cluster.EXPECT().CreateImportV3(int64(7), mock.Anything, int64(2), mock.Anything).Return(nil).Once()
 
-	task.CreateTaskOnWorker(7, cluster)
+	task.CreateTaskOnWorker(7, cluster, task.GetTaskResource())
 
 	seg := mt.GetSegment(ctx, 100)
 	require.NotNil(t, seg)
@@ -270,9 +270,9 @@ func TestImportTaskV3CreateTaskOnWorkerCreatesSegmentBeforeRunning(t *testing.T)
 		}
 		return nil
 	}).Once()
-	cluster.EXPECT().CreateImportV3(int64(8), mock.Anything, int64(2)).Return(nil).Once()
+	cluster.EXPECT().CreateImportV3(int64(8), mock.Anything, int64(2), mock.Anything).Return(nil).Once()
 
-	task.CreateTaskOnWorker(8, cluster)
+	task.CreateTaskOnWorker(8, cluster, task.GetTaskResource())
 
 	require.Equal(t, int64(7), mt.GetSegment(ctx, 100).GetNumOfRows(), "existing segment must be reused, not recreated")
 	require.Equal(t, commonpb.SegmentState_Dropped, mt.GetSegment(ctx, 101).GetState())
@@ -309,9 +309,9 @@ func TestImportTaskV3CreateTaskOnWorkerUsesPlanStorageVersion(t *testing.T) {
 
 	importMeta.EXPECT().GetJob(mock.Anything, int64(1)).Return(job).Maybe()
 	importMeta.EXPECT().UpdateTask(mock.Anything, int64(10), mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-	cluster.EXPECT().CreateImportV3(int64(7), mock.Anything, int64(2)).Return(nil).Once()
+	cluster.EXPECT().CreateImportV3(int64(7), mock.Anything, int64(2), mock.Anything).Return(nil).Once()
 
-	task.CreateTaskOnWorker(7, cluster)
+	task.CreateTaskOnWorker(7, cluster, task.GetTaskResource())
 
 	require.Equal(t, storage.StorageV3, mt.GetSegment(ctx, 100).GetStorageVersion())
 }
@@ -671,7 +671,7 @@ func TestImportTaskV3CreateTaskKeepsOldSegmentsOnDropFailure(t *testing.T) {
 	patch := mockey.Mock((*meta.Meta).UpdateSegmentsInfo).Return(context.DeadlineExceeded).Build()
 	defer patch.UnPatch()
 
-	task.CreateTaskOnWorker(7, cluster)
+	task.CreateTaskOnWorker(7, cluster, task.GetTaskResource())
 
 	require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState(), "a transient drop failure must not fail the task")
 	require.Equal(t, []int64{101}, task.task.Load().GetOldSegmentIds(),

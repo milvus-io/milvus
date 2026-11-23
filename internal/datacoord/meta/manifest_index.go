@@ -335,6 +335,9 @@ func (m *Meta) recheckAfterManifestIndexRecovery(collectionID int64) {
 // would therefore destroy live index files that the manifest still references.
 // Failing to start is recoverable; that is not.
 func (m *Meta) ReloadSegmentIndexesFromManifests(ctx context.Context) error {
+	if paramtable.Get().DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() {
+		return nil // Completed inventory was recovered with the segment summaries.
+	}
 	record := timerecord.NewTimeRecorder("indexMeta-reloadFromManifests")
 	segments := m.SelectSegments(ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return (IsSegmentHealthy(segment) || segment.GetState() == commonpb.SegmentState_Dropped) &&

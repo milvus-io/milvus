@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/google/uuid"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/dataview"
+	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -53,7 +55,9 @@ func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 			meta.MockManifestIndexSubmissions(t)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			kv := meta.NewMetaMemoryKV()
+			// initMeta must persist the index metadata mode with a conditional write.
+			kv := tikv.NewTiKV(globalTestTikv, "manifest-index-restart-"+uuid.NewString())
+			t.Cleanup(func() { require.NoError(t, kv.RemoveWithPrefix(context.Background(), "")) })
 			catalog := datacoord.NewCatalog(kv, "", "")
 			m, _ := index.BootMetaForRestart(t, catalog, 100)
 			cm := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart"))
@@ -111,7 +115,7 @@ func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 				// may not have read every manifest yet; none is read twice.
 				require.LessOrEqual(t, reads[good], 1)
 			} else {
-				require.Equal(t, 1, reads[good])
+				require.Equal(t, 1, reads[good], "initMeta returned %v", err)
 			}
 			if mode == "transient" || mode == "dataview-reload" {
 				require.NoError(t, err)
@@ -154,7 +158,8 @@ func TestInitMetaRechecksDataViewsAfterManifestScan(t *testing.T) {
 	meta.NewFakeManifestStore(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	kv := meta.NewMetaMemoryKV()
+	kv := tikv.NewTiKV(globalTestTikv, "manifest-index-recheck-"+uuid.NewString())
+	t.Cleanup(func() { require.NoError(t, kv.RemoveWithPrefix(context.Background(), "")) })
 	catalog := datacoord.NewCatalog(kv, "", "")
 	m, metas := index.BootMetaForRestart(t, catalog, meta.RestartCollID)
 	index.SeedRestartFixture(t, m, metas.IndexMeta)
@@ -231,7 +236,9 @@ func TestInitMetaCancelsAndJoinsManifestScanOnFailure(t *testing.T) {
 	defer scan.UnPatch()
 	listViews := mockey.Mock((*datacoord.Catalog).ListAllDataViews).Return(nil, retry.Unrecoverable(merr.WrapErrDataIntegrityMsg("invalid DataView catalog"))).Build()
 	defer listViews.UnPatch()
-	server := &Server{ctx: t.Context(), kv: meta.NewMetaMemoryKV(), broker: broker.NewCoordinatorBroker(nil)}
+	kv := tikv.NewTiKV(globalTestTikv, "manifest-index-cancel-"+uuid.NewString())
+	t.Cleanup(func() { require.NoError(t, kv.RemoveWithPrefix(context.Background(), "")) })
+	server := &Server{ctx: t.Context(), kv: kv, broker: broker.NewCoordinatorBroker(nil)}
 
 	err := server.initMeta(storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart")))
 

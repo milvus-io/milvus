@@ -224,6 +224,59 @@ func TestCommonConfigCollectionLevelMetricsMode(t *testing.T) {
 	assert.Equal(t, metrics.CollectionLevelMetricsModeAggregate, aggregateConfig.CollectionLevelMetricsMode.GetValue())
 }
 
+func TestProxyQueryViewStreamingConfig(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	t.Cleanup(base.mgr.Close)
+	config := proxyConfig{}
+	config.init(base)
+	assert.Equal(t, "true", config.EnableReduceStream.DefaultValue)
+	assert.True(t, config.EnableReduceStream.GetAsBool())
+	assert.Equal(t, 256*1024, config.ReduceStreamChunkBytes.GetAsInt())
+	assert.NoError(t, base.Save(config.EnableReduceStream.Key, "false"))
+	assert.NoError(t, base.Save(config.ReduceStreamChunkBytes.Key, "128"))
+	assert.False(t, config.EnableReduceStream.GetAsBool())
+	assert.Equal(t, 128, config.ReduceStreamChunkBytes.GetAsInt())
+
+	t.Setenv("PROXY_QUERYVIEW_ENABLEREDUCESTREAM", "false")
+	t.Setenv("PROXY_QUERYVIEW_REDUCESTREAMCHUNKBYTES", "256")
+	envBase := NewBaseTable(SkipRemote(true))
+	t.Cleanup(envBase.mgr.Close)
+	envConfig := proxyConfig{}
+	envConfig.init(envBase)
+	assert.False(t, envConfig.EnableReduceStream.GetAsBool())
+	assert.Equal(t, 256, envConfig.ReduceStreamChunkBytes.GetAsInt())
+}
+
+func TestProxyQueryViewStreamingConfigFileRefresh(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MILVUSCONF", dir)
+	path := filepath.Join(dir, "milvus.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("proxy:\n  queryView:\n    enableReduceStream: true\n    reduceStreamChunkBytes: 0\n"), 0o600))
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{"milvus.yaml"}), Interval(10*time.Millisecond))
+	t.Cleanup(base.mgr.Close)
+	cfg := proxyConfig{}
+	cfg.init(base)
+	for _, name := range []string{"EnableReduceStream", "ReduceStreamChunkBytes"} {
+		field, ok := reflect.TypeOf(&cfg).Elem().FieldByName(name)
+		require.True(t, ok)
+		require.Equal(t, "true", field.Tag.Get("refreshable"))
+	}
+	require.True(t, cfg.EnableReduceStream.GetAsBool())
+	require.Equal(t, 256*1024, cfg.ReduceStreamChunkBytes.GetAsInt())
+	for _, tc := range []struct {
+		enabled   bool
+		bytes     string
+		wantBytes int
+	}{{true, "64", 64}, {true, "256KB", 256 * 1024}, {true, "128", 128}, {true, "-1", 256 * 1024}, {false, "256", 256}} {
+		body := fmt.Sprintf("proxy:\n  queryView:\n    enableReduceStream: %t\n    reduceStreamChunkBytes: %s\n", tc.enabled, tc.bytes)
+		require.NoError(t, os.WriteFile(path+".tmp", []byte(body), 0o600))
+		require.NoError(t, os.Rename(path+".tmp", path))
+		require.Eventually(t, func() bool {
+			return cfg.EnableReduceStream.GetAsBool() == tc.enabled && cfg.ReduceStreamChunkBytes.GetAsInt() == tc.wantBytes
+		}, 5*time.Second, 10*time.Millisecond)
+	}
+}
+
 func TestComponentParam_DataCoordBumpSchemaVersionCompactionParams(t *testing.T) {
 	Init()
 	params := Get()
@@ -307,6 +360,8 @@ func TestExprCacheConfig(t *testing.T) {
 		fallback int
 	}{
 		{&params.ExprParseCacheMaxEntries, 1024},
+		{&params.ExprParseCacheMaxBytes, 67108864},
+		{&params.ExprParseCacheMaxEntryBytes, 8388608},
 	} {
 		t.Run(tc.item.Key, func(t *testing.T) {
 			require.Equal(t, tc.fallback, tc.item.GetAsInt())
@@ -1675,6 +1730,18 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100, Params.MaxSegmentsPerCopyTask.GetAsInt())
 		params.Save("dataCoord.import.maxSegmentsPerCopyTask", "200")
 		assert.Equal(t, 200, Params.MaxSegmentsPerCopyTask.GetAsInt())
+
+		assert.Equal(t, int64(8), Params.TaskResourceVectorIndexCPU.GetAsInt64())
+		assert.Equal(t, int64(8), Params.TaskResourceAnalyzeCPU.GetAsInt64())
+		assert.Equal(t, int64(8), Params.TaskResourceClusteringCompactionCPU.GetAsInt64())
+		assert.Equal(t, int64(1), Params.TaskResourceDefaultCPU.GetAsInt64())
+		assert.Equal(t, 2.0, Params.TaskResourceIndexMemoryFactor.GetAsFloat())
+		assert.Equal(t, 2.0, Params.TaskResourceStatsMemoryFactor.GetAsFloat())
+		assert.Equal(t, 2.0, Params.TaskResourceL0CompactionMemoryFactor.GetAsFloat())
+		assert.Equal(t, 2.0, Params.TaskResourceAnalyzeMemoryFactor.GetAsFloat())
+		assert.Equal(t, 2.0, Params.TaskResourceImportMemoryFactor.GetAsFloat())
+		assert.Equal(t, int64(64)<<20, Params.TaskResourceMinTaskMemory.GetAsSize())
+		assert.Equal(t, int64(1)<<30, Params.TaskResourceExternalRefreshMemory.GetAsSize())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {

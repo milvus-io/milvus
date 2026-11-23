@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
 type TaskManager interface {
@@ -55,8 +56,12 @@ func (m *taskManager) Add(task Task) {
 func (m *taskManager) Update(taskID int64, actions ...UpdateAction) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.tasks[taskID]; ok {
-		updatedTask := m.tasks[taskID].Clone()
+	if task, ok := m.tasks[taskID]; ok {
+		// Canceled sibling readers cannot overwrite the first failure or revive the task.
+		if task.GetState() == datapb.ImportTaskStateV2_Failed {
+			return
+		}
+		updatedTask := task.Clone()
 		for _, action := range actions {
 			action(updatedTask)
 		}

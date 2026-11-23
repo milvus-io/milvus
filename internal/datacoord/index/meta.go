@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -76,8 +77,9 @@ func validateIndexStorePathVersionForFinish(buildID int64, requested, actual ind
 }
 
 type IndexMeta struct {
-	ctx     context.Context
-	Catalog metastore.DataCoordCatalog
+	summarySource metacache.MetaView
+	ctx           context.Context
+	Catalog       metastore.DataCoordCatalog
 
 	// fieldIndexLock protects collection index definitions and serializes the
 	// resident publication of segment index records observed together by
@@ -96,6 +98,9 @@ type IndexMeta struct {
 	KeyLock *lock.KeyLock[UniqueID]
 	// segmentID -> indexID -> segmentIndex
 	SegmentIndexes *typeutil.ConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]
+	// Build IDs still in SegmentBuildInfo after losing the current index slot.
+	// Entries for a segment are protected by the same lock as its index slots.
+	supersededBuilds typeutil.ConcurrentMap[UniqueID, map[UniqueID]struct{}]
 	// Serialize updates to each segment's index map across per-BuildID keyLocks.
 	// Removing its last index must not unlink the map while another index is
 	// added to that segment. Different segments can update independently.
@@ -254,19 +259,7 @@ func (m *IndexMeta) reloadFromKV(collectionIDs []int64) error {
 				if segIdx.IndexMemSize == 0 {
 					segIdx.IndexMemSize = segIdx.IndexSerializedSize * paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsUint64()
 				}
-				indexes, ok := m.SegmentIndexes.Get(segIdx.SegmentID)
-				if ok {
-					// Restored superseded builds remain GC records. Select the
-					// newest build independently of catalog key iteration order.
-					current, exists := indexes.Get(segIdx.IndexID)
-					if !exists || segIdx.BuildID > current.BuildID {
-						indexes.Insert(segIdx.IndexID, segIdx)
-					}
-				} else {
-					indexes = typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
-					indexes.Insert(segIdx.IndexID, segIdx)
-					m.SegmentIndexes.Insert(segIdx.SegmentID, indexes)
-				}
+				m.setSegmentIndexSlot(segIdx, true)
 				old, _ := m.SegmentBuildInfo.Get(segIdx.BuildID)
 				m.taskCounts.replaceTask(old, segIdx)
 				m.SegmentBuildInfo.AddForRecovery(segIdx)
@@ -315,21 +308,22 @@ func (m *IndexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
 	defer locks.Unlock(segIdx.SegmentID)
 	old, _ := m.SegmentBuildInfo.Get(segIdx.BuildID)
 	m.taskCounts.replaceTask(old, segIdx)
-	m.putSegmentIndex(segIdx)
+	if m.UsesSegmentSummaries() && segIdx.ManifestPublished && segIdx.IndexState == commonpb.IndexState_Finished {
+		if indexes, ok := m.SegmentIndexes.Get(segIdx.SegmentID); ok {
+			if current, exists := indexes.Get(segIdx.IndexID); exists && current.BuildID == segIdx.BuildID {
+				indexes.Remove(segIdx.IndexID)
+				if indexes.Len() == 0 {
+					m.SegmentIndexes.Remove(segIdx.SegmentID)
+				}
+			}
+		}
+		m.forgetSupersededBuild(segIdx)
+		m.SegmentBuildInfo.Remove(segIdx.BuildID)
+		return
+	}
+	m.setSegmentIndexSlot(segIdx, false)
 	m.SegmentBuildInfo.Add(segIdx)
 	m.NotifyManifestIndexMigration(segIdx)
-}
-
-// putSegmentIndex makes segIdx its segment's record for its index ID.
-func (m *IndexMeta) putSegmentIndex(segIdx *model.SegmentIndex) {
-	indexes, ok := m.SegmentIndexes.Get(segIdx.SegmentID)
-	if ok {
-		indexes.Insert(segIdx.IndexID, segIdx)
-	} else {
-		indexes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
-		indexes.Insert(segIdx.IndexID, segIdx)
-		m.SegmentIndexes.Insert(segIdx.SegmentID, indexes)
-	}
 }
 
 // manifestIndexRecovery installs the SegmentIndex records startup recovers from
@@ -356,11 +350,14 @@ func (m *IndexMeta) NewManifestIndexRecovery() meta.ManifestIndexRecovery {
 // its build ID, which then stays authoritative.
 func (r *manifestIndexRecovery) Install(segIdx *model.SegmentIndex) {
 	m := r.indexMeta
+	locks := m.getSegmentIndexMapLocks()
+	locks.Lock(segIdx.SegmentID)
+	defer locks.Unlock(segIdx.SegmentID)
 	if !m.SegmentBuildInfo.insertIfAbsent(segIdx) {
 		return
 	}
 	m.taskCounts.replaceTask(nil, segIdx)
-	m.putSegmentIndex(segIdx)
+	m.setSegmentIndexSlot(segIdx, true)
 	r.latest[r.installed%taskStatsLRUCapacity] = segIdx
 	r.installed++
 }
@@ -383,6 +380,46 @@ func (r *manifestIndexRecovery) Finish() {
 	}
 }
 
+// setSegmentIndexSlot updates the current slot and retains displaced build IDs.
+// The caller holds the segment's index map lock or is loading the catalog.
+func (m *IndexMeta) setSegmentIndexSlot(segIdx *model.SegmentIndex, recovering bool) {
+	indexes, ok := m.SegmentIndexes.Get(segIdx.SegmentID)
+	if !ok {
+		indexes = typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	}
+	if current, exists := indexes.Get(segIdx.IndexID); exists && current.BuildID != segIdx.BuildID {
+		// Recovery selects the newest build in any catalog key order.
+		if recovering && current.BuildID > segIdx.BuildID {
+			m.rememberSupersededBuild(segIdx)
+			return
+		}
+		m.rememberSupersededBuild(current)
+	}
+	m.forgetSupersededBuild(segIdx)
+	indexes.Insert(segIdx.IndexID, segIdx)
+	if !ok {
+		m.SegmentIndexes.Insert(segIdx.SegmentID, indexes)
+	}
+}
+
+func (m *IndexMeta) rememberSupersededBuild(segIdx *model.SegmentIndex) {
+	builds, ok := m.supersededBuilds.Get(segIdx.SegmentID)
+	if !ok {
+		builds = make(map[UniqueID]struct{})
+		m.supersededBuilds.Insert(segIdx.SegmentID, builds)
+	}
+	builds[segIdx.BuildID] = struct{}{}
+}
+
+func (m *IndexMeta) forgetSupersededBuild(segIdx *model.SegmentIndex) {
+	if builds, ok := m.supersededBuilds.Get(segIdx.SegmentID); ok {
+		delete(builds, segIdx.BuildID)
+		if len(builds) == 0 {
+			m.supersededBuilds.Remove(segIdx.SegmentID)
+		}
+	}
+}
+
 // writeSegmentIndexToManifest selects manifest publication for new StorageV3
 // tasks. Existing index builds follow their persisted path version. SegmentIndex
 // remains the durable task record while a build is active or failed. Only a successful
@@ -392,9 +429,13 @@ func WriteSegmentIndexToManifest() bool {
 }
 
 func (m *IndexMeta) alterSegmentIndexes(segIdxes []*model.SegmentIndex) error {
-	err := m.Catalog.AlterSegmentIndexes(m.ctx, segIdxes)
+	return m.alterSegmentIndexesWithContext(m.ctx, segIdxes)
+}
+
+func (m *IndexMeta) alterSegmentIndexesWithContext(ctx context.Context, segIdxes []*model.SegmentIndex) error {
+	err := m.Catalog.AlterSegmentIndexes(ctx, segIdxes)
 	if err != nil {
-		mlog.Error(context.TODO(), "failed to alter segments index in meta store", mlog.Int("segment indexes num", len(segIdxes)),
+		mlog.Error(ctx, "failed to alter segments index in meta store", mlog.Int("segment indexes num", len(segIdxes)),
 			mlog.Err(err))
 		return err
 	}
@@ -1122,27 +1163,42 @@ func (m *IndexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map
 	return m.GetSegmentIndexesUnsafe(collectionID, segID)
 }
 
-// GetAllSegmentIndexes returns a deep-clone of every SegmentIndex recorded
-// for segID, including deleted tasks and records whose parent field index has
-// been deleted. GC needs their file keys until cleanup completes.
-//
-// It only reads the self-synchronized segmentIndexes map and does not acquire
-// fieldIndexLock or consult field-index definitions.
-func (m *IndexMeta) GetAllSegmentIndexes(segID UniqueID) []*model.SegmentIndex {
-	if m.SegmentIndexes == nil {
-		return nil
-	}
-	segIndexInfos, ok := m.SegmentIndexes.Get(segID)
-	if !ok || segIndexInfos.Len() == 0 {
-		return nil
-	}
+// GetAllSegmentIndexSummaries returns detached inventory for active, completed and
+// deleted builds, including builds whose index definition has been deleted.
+// It performs no I/O and exposes no file metadata.
+func (m *IndexMeta) GetAllSegmentIndexSummaries(segID UniqueID) []*model.SegmentIndexSummary {
+	locks := m.getSegmentIndexMapLocks()
+	locks.Lock(segID)
+	defer locks.Unlock(segID)
 
-	segIndexes := segIndexInfos.Values()
-	ret := make([]*model.SegmentIndex, 0, len(segIndexes))
-	for _, segIdx := range segIndexes {
-		ret = append(ret, model.CloneSegmentIndex(segIdx))
+	var summaries []*model.SegmentIndexSummary
+	recordBuildIDs := make(map[int64]struct{})
+	if m.SegmentIndexes != nil {
+		if records, ok := m.SegmentIndexes.Get(segID); ok {
+			for _, record := range records.Values() {
+				summaries = append(summaries, model.SummarizeSegmentIndex(record))
+				recordBuildIDs[record.BuildID] = struct{}{}
+			}
+		}
 	}
-	return ret
+	if builds, ok := m.supersededBuilds.Get(segID); ok {
+		for buildID := range builds {
+			if record, exists := m.SegmentBuildInfo.Get(buildID); exists {
+				summaries = append(summaries, model.SummarizeSegmentIndex(record))
+				recordBuildIDs[buildID] = struct{}{}
+			}
+		}
+	}
+	if m.UsesSegmentSummaries() {
+		if segment, ok := m.summarySource.GetSegment(segID); ok {
+			for _, summary := range segment.GetIndexSummaries() {
+				if _, exists := recordBuildIDs[summary.GetBuildId()]; !exists {
+					summaries = append(summaries, model.SegmentIndexSummaryFromProto(segment, summary))
+				}
+			}
+		}
+	}
+	return summaries
 }
 
 // Note: thread-unsafe, don't call it outside indexMeta
@@ -1261,15 +1317,16 @@ func (m *IndexMeta) IsIndexExist(collID, indexID UniqueID) bool {
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
 
-	fieldIndexes, ok := m.Indexes[collID]
-	if !ok {
-		return false
-	}
-	if index, ok := fieldIndexes[indexID]; !ok || index.IsDeleted {
-		return false
-	}
+	_, exists := m.GetLiveIndexFieldIDLocked(collID, indexID)
+	return exists
+}
 
-	return true
+func (m *IndexMeta) GetLiveIndexFieldIDLocked(collectionID, indexID int64) (int64, bool) {
+	index, exists := m.Indexes[collectionID][indexID]
+	if !exists || index.IsDeleted {
+		return 0, false
+	}
+	return index.FieldID, true
 }
 
 // UpdateVersion updates the version and nodeID of the index meta, whenever the task is built once, the version will be updated once.
@@ -1293,27 +1350,32 @@ func (m *IndexMeta) UpdateVersion(buildID, nodeID UniqueID) error {
 }
 
 func (m *IndexMeta) UpdateIndexState(buildID UniqueID, state commonpb.IndexState, failReason string) error {
+	return m.UpdateIndexStateWithContext(m.ctx, buildID, state, failReason)
+}
+
+// UpdateIndexStateWithContext allows local completion to bound catalog writes.
+func (m *IndexMeta) UpdateIndexStateWithContext(ctx context.Context, buildID UniqueID, state commonpb.IndexState, failReason string) error {
 	m.KeyLock.Lock(buildID)
 	defer m.KeyLock.Unlock(buildID)
 
 	segIdx, ok := m.SegmentBuildInfo.Get(buildID)
 	if !ok {
-		mlog.Warn(m.ctx, "there is no index with buildID", mlog.Int64("buildID", buildID))
+		mlog.Warn(ctx, "there is no index with buildID", mlog.FieldBuildID(buildID))
 		return merr.WrapErrServiceInternalMsg("there is no index with buildID: %d", buildID)
 	}
 
 	updateFunc := func(segIdx *model.SegmentIndex) error {
 		segIdx.IndexState = state
 		segIdx.FailReason = failReason
-		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
+		return m.alterSegmentIndexesWithContext(ctx, []*model.SegmentIndex{segIdx})
 	}
 
 	if err := m.updateSegIndexMeta(segIdx, updateFunc); err != nil {
-		mlog.Warn(m.ctx, "failed to update index meta", mlog.Int64("buildID", buildID), mlog.Err(err))
+		mlog.Warn(ctx, "failed to update index meta", mlog.FieldBuildID(buildID), mlog.Err(err))
 		return err
 	}
 
-	mlog.Info(m.ctx, "update index task state success", mlog.Int64("buildID", buildID),
+	mlog.Info(ctx, "update index task state success", mlog.FieldBuildID(buildID),
 		mlog.String("state", state.String()), mlog.String("fail reason", failReason))
 	return nil
 }
@@ -1444,6 +1506,7 @@ func (m *IndexMeta) removeSegmentIndexRecordInMemory(segIdx *model.SegmentIndex)
 		}
 	}
 
+	m.forgetSupersededBuild(segIdx)
 	m.taskCounts.replaceTask(segIdx, nil)
 	m.SegmentBuildInfo.Remove(segIdx.BuildID)
 }
@@ -1483,9 +1546,22 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 		return nil, merr.WrapErrServiceInternalMsg("unknown segment index mutation type %d, buildID=%d", mut.Type, mut.BuildID)
 	}
 
-	staged := &meta.StagedSegmentIndexMutation{Install: func() func() { return func() {} }}
+	staged := &meta.StagedSegmentIndexMutation{
+		PublishSummary: m.UsesSegmentSummaries(),
+		Install:        func() func() { return func() {} },
+	}
 
 	previous, ok := m.SegmentBuildInfo.Get(mut.BuildID)
+	if !ok && mut.Type == meta.SegmentIndexRemove {
+		if summary, exists := m.completedIndexSummary(mut.SegmentID, mut.BuildID); exists {
+			staged.Summary = summary
+			staged.Install = func() func() {
+				m.taskCounts.adjustSummary(summary, -1)
+				return m.taskCounts.publishStoredSizes
+			}
+		}
+		return staged, nil
+	}
 	if !ok {
 		if mut.Type == meta.SegmentIndexUpsert {
 			return staged, meta.ErrSegmentIndexRecordGone
@@ -1513,6 +1589,7 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 		action := metastore.SaveSegmentIndex(destination)
 		staged.Action = &action
 		staged.Record = destination
+		staged.Summary = model.SummarizeSegmentIndex(destination)
 		staged.Install = func() func() {
 			// A replacement build may own the current (segment,index) slot.
 			m.updateSegmentIndexManifestPublished(destination, false)
@@ -1526,6 +1603,7 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 		action := metastore.DropSegmentIndex(segIdx)
 		staged.Action = &action
 		staged.Record = segIdx
+		staged.Summary = model.SummarizeSegmentIndex(segIdx)
 		staged.Install = func() func() {
 			m.removeSegmentIndexRecordInMemory(segIdx)
 			return m.taskCounts.publishStoredSizes
@@ -1565,6 +1643,7 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 		action := metastore.DropSegmentIndex(previous)
 		staged.Action = &action
 		staged.Record = destination
+		staged.Summary = model.SummarizeSegmentIndex(destination)
 		staged.Install = func() func() {
 			m.updateSegmentIndexManifestPublished(destination, true)
 			return func() {}
@@ -1572,6 +1651,28 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 		return staged, nil
 	}
 
+	var replacedSummary *model.SegmentIndexSummary
+	if m.UsesSegmentSummaries() {
+		if segment, exists := m.summarySource.GetSegment(previous.SegmentID); exists {
+			for _, summary := range segment.GetIndexSummaries() {
+				if summary.GetIndexId() != previous.IndexID || summary.GetBuildId() == previous.BuildID {
+					continue
+				}
+				if summary.GetBuildId() > previous.BuildID {
+					action := metastore.DropSegmentIndex(previous)
+					staged.Action = &action
+					staged.Summary = model.SummarizeSegmentIndex(previous)
+					staged.Obsolete = true
+					staged.Install = func() func() {
+						m.removeSegmentIndexRecordInMemory(previous)
+						return m.taskCounts.publishStoredSizes
+					}
+					return staged, nil
+				}
+				replacedSummary = model.SegmentIndexSummaryFromProto(segment, summary)
+			}
+		}
+	}
 	finished, err := m.buildFinishedSegmentIndex(previous, mut.FinishedTask)
 	if err != nil {
 		return staged, err
@@ -1582,8 +1683,12 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 	action := metastore.DropSegmentIndex(finished)
 	staged.Action = &action
 	staged.Record = finished
+	staged.Summary = model.SummarizeSegmentIndex(finished)
 	staged.Install = func() func() {
 		finished.ManifestPublished = true
+		if replacedSummary != nil {
+			m.taskCounts.adjustSummary(replacedSummary, -1)
+		}
 		m.updateSegmentIndex(finished)
 		// recordFinishedTask is observability only, and the stored-size gauge
 		// can wait for a Prometheus scrape, so the whole step is deferred out
@@ -1833,6 +1938,11 @@ func (m *IndexMeta) GetSegmentIndexedFields(collectionID UniqueID, segmentID Uni
 		}
 	}
 	return isIndexed, SegmentIndexes
+}
+
+func (m *IndexMeta) HasBuildInfo(buildID int64) bool {
+	_, ok := m.SegmentBuildInfo.Get(buildID)
+	return ok
 }
 
 func (m *IndexMeta) LockBuildIDs(buildIDs []int64) { lock.LockManyOrdered(m.KeyLock, buildIDs) }

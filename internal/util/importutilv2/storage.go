@@ -21,44 +21,47 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
-// ResolveSourceStorage selects storage for reading import files only. The caller
-// must retain the original chunk manager and config for writing segment data.
-func ResolveSourceStorage(ctx context.Context, options Options, cm storage.ChunkManager,
-	config *indexpb.StorageConfig,
-) (storage.ChunkManager, *indexpb.StorageConfig, error) {
+// NewSourceChunkManager creates a task-scoped read-only ChunkManager when
+// options configure an external S3-compatible source, or returns fallback when
+// cluster storage should be used.
+//
+// Callers must keep their destination ChunkManager separate for segment and
+// manifest writes.
+func NewSourceChunkManager(
+	ctx context.Context,
+	options Options,
+	fallback storage.ChunkManager,
+) (storage.ChunkManager, error) {
 	source, err := GetSourceStorageConfig(options)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if source == nil {
-		return cm, config, nil
-	}
-	if err := ValidateImportSourceOptions(options); err != nil {
-		return nil, nil, err
+		return fallback, nil
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	factory := storage.NewChunkManagerFactory(source.GetStorageType(),
-		objectstorage.Address(source.GetAddress()),
-		objectstorage.BucketName(source.GetBucketName()),
-		objectstorage.AccessKeyID(source.GetAccessKeyID()),
-		objectstorage.SecretAccessKeyID(source.GetSecretAccessKey()),
-		objectstorage.UseSSL(source.GetUseSSL()),
-		objectstorage.CloudProvider(source.GetCloudProvider()),
-		objectstorage.Region(source.GetRegion()),
-		objectstorage.UseVirtualHost(source.GetUseVirtualHost()),
-		objectstorage.CreateBucket(false),
-		// Object reads establish access. Do not require ListBucket permission
-		// or probe/create a bucket while constructing a read-only source client.
-		func(c *objectstorage.Config) { c.SkipBucketCheck = true },
-	)
-	readerCM, err := factory.NewPersistentStorageChunkManager(ctx)
+
+	cfg := objectstorage.NewDefaultConfig()
+	cfg.CloudProvider = objectstorage.CloudProviderAWS
+	cfg.Address = source.Endpoint
+	cfg.BucketName = source.Bucket
+	cfg.AccessKeyID = source.AccessKeyID
+	cfg.SecretAccessKeyID = source.SecretAccessKey
+	cfg.UseSSL = source.UseSSL
+	cfg.UseVirtualHost = source.UseVirtualHost
+	cfg.Region = source.Region
+	cfg.CreateBucket = false
+	// Object reads establish access. Do not require ListBucket permission
+	// or probe/create a bucket while constructing a read-only source client.
+	cfg.SkipBucketCheck = true
+
+	readerCM, err := storage.NewRemoteChunkManager(ctx, cfg)
 	if err != nil {
-		return nil, nil, storage.ToMilvusIoError("external import source", err)
+		return nil, storage.ToMilvusIoError("external import source", err)
 	}
-	return readerCM, source, nil
+	return readerCM, nil
 }
