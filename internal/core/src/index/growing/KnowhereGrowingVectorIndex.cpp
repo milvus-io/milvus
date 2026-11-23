@@ -568,23 +568,22 @@ KnowhereGrowingVectorIndex<T>::StartAsyncBuild() {
     };
     try {
         task_ = std::make_shared<GrowingBuildTask>();
-        auto build = std::make_shared<std::packaged_task<void()>>([this,
-                                                                   lifetime =
-                                                                       task_] {
-            std::lock_guard running(lifetime->lifetime);
-            if (lifetime->cancelled.load()) {
-                return;
-            }
-            try {
-                BuildAndCatchUp();
-            } catch (const std::exception& e) {
-                std::lock_guard lock(writer_mutex_);
-                DisableAsyncBuild(e.what());
-            } catch (...) {
-                std::lock_guard lock(writer_mutex_);
-                DisableAsyncBuild("unknown build failure");
-            }
-        });
+        auto build = std::make_shared<std::packaged_task<void()>>(
+            [this, lifetime = task_] {
+                std::lock_guard running(lifetime->lifetime);
+                if (lifetime->cancelled.load()) {
+                    return;
+                }
+                try {
+                    BuildAndCatchUp();
+                } catch (const std::exception& e) {
+                    std::lock_guard lock(writer_mutex_);
+                    DisableAsyncBuild(e.what());
+                } catch (...) {
+                    std::lock_guard lock(writer_mutex_);
+                    DisableAsyncBuild("unknown build failure");
+                }
+            });
         completion_ = build->get_future().share();
         BuildHook(GrowingBuildPhase::kBeforeSubmit);
         GrowingBuildPool(async_build_.pool_ratio)
