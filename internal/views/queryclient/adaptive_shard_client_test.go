@@ -30,6 +30,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
@@ -860,4 +861,182 @@ func TestAtMostOneHedgeAcrossRetries(t *testing.T) {
 	require.Equal(t, int64(3), totalCalls.Load(), "only 1 hedge may be dispatched across all retry rounds")
 	require.Equal(t, 1.0, testutil.ToFloat64(sentCounter)-baseSent)
 	require.Zero(t, testutil.ToFloat64(noReplicaCounter)-baseNoReplica)
+}
+
+func overloadViewStatus() *commonpb.Status {
+	return merr.Status(merr.WrapErrTooManyRequests(200, "read task queue"))
+}
+
+func overloadTestClient(t *testing.T, latencyWeighted, hedgeEnabled bool, replicas []int64, searchFn func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)) *shardViewQueryClient {
+	t.Helper()
+	planner := &adaptiveTestPlanner{plan: func(_ context.Context, shard qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+		return adaptiveTestPlan(shard), nil
+	}}
+	service := &adaptiveTestService{search: searchFn}
+	client := adaptiveTestClient(planner, service)
+	r := make([]qviews.Replica, 0, len(replicas))
+	for _, id := range replicas {
+		r = append(r, qviews.Replica{ReplicaID: id})
+	}
+	client.replicas.channels["channel"] = &replicaRoute{
+		changed:  make(chan struct{}),
+		snapshot: qviews.ReplicaSnapshot{Valid: true, Replicas: r},
+	}
+	client.selectionConfig = func() ReplicaSelectionConfig {
+		cfg := adaptiveTestConfig()
+		cfg.LatencyWeighted = latencyWeighted
+		cfg.HedgeEnabled = hedgeEnabled
+		cfg.HedgeMinDelay = 20 * time.Millisecond
+		return cfg
+	}
+	return client
+}
+
+func TestAdaptiveOverloadGetsOneExtraAttempt(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var mu sync.Mutex
+	var nodes []int64
+	client := overloadTestClient(t, true, true, []int64{1, 2, 3}, func(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+		mu.Lock()
+		nodes = append(nodes, req.GetShardId().GetReplicaId())
+		first := len(nodes) == 1
+		mu.Unlock()
+		if first {
+			return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: overloadViewStatus()}}, nil
+		}
+		return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: merr.Success()}}, nil
+	})
+	plan, err := client.Search(ctx, &ShardSearchRequest{VChannel: "channel", Req: &internalpb.SearchRequest{CollectionID: 100}, Reducer: newLegacySearchCollector()})
+	require.NoError(t, err)
+	require.NotNil(t, plan)
+	require.Len(t, nodes, 2)
+	require.NotEqual(t, nodes[0], nodes[1])
+
+	key := replicaPolicyKey{channel: "channel", class: "search/Strong"}
+	client.selection.mu.Lock()
+	defer client.selection.mu.Unlock()
+	require.Zero(t, client.selection.keys[key].replicas[nodes[0]].failures)
+}
+
+func TestAdaptiveOverloadTwiceEndsRequest(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var mu sync.Mutex
+	var nodes []int64
+	client := overloadTestClient(t, true, true, []int64{1, 2, 3}, func(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+		mu.Lock()
+		nodes = append(nodes, req.GetShardId().GetReplicaId())
+		mu.Unlock()
+		return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: overloadViewStatus()}}, nil
+	})
+	_, err := client.Search(ctx, &ShardSearchRequest{VChannel: "channel", Req: &internalpb.SearchRequest{CollectionID: 100}, Reducer: newLegacySearchCollector()})
+	require.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+	require.Len(t, nodes, 2)
+	require.NotEqual(t, nodes[0], nodes[1])
+}
+
+func TestAdaptiveOverloadOnSingleReplicaEndsRequest(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var calls atomic.Int32
+	client := overloadTestClient(t, true, true, []int64{1}, func(_ context.Context, _ qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+		calls.Add(1)
+		return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: overloadViewStatus()}}, nil
+	})
+	_, err := client.Search(ctx, &ShardSearchRequest{VChannel: "channel", Req: &internalpb.SearchRequest{CollectionID: 100}, Reducer: newLegacySearchCollector()})
+	require.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+	require.Equal(t, int32(1), calls.Load())
+}
+
+func TestAdaptiveOverloadAfterHedgeEndsRequest(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var calls atomic.Int32
+	client := overloadTestClient(t, true, true, []int64{1, 2, 3}, func(_ context.Context, _ qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+		c := calls.Add(1)
+		if c == 1 {
+			time.Sleep(60 * time.Millisecond)
+		} else {
+			time.Sleep(80 * time.Millisecond)
+		}
+		return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: overloadViewStatus()}}, nil
+	})
+	_, err := client.Search(ctx, &ShardSearchRequest{VChannel: "channel", Req: &internalpb.SearchRequest{CollectionID: 100}, Reducer: newLegacySearchCollector()})
+	require.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+	require.Equal(t, int32(2), calls.Load())
+}
+
+func TestAdaptiveOverloadedHedgeLeavesPrimary(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var calls atomic.Int32
+	client := overloadTestClient(t, true, true, []int64{1, 2}, func(_ context.Context, _ qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+		if calls.Add(1) == 1 {
+			time.Sleep(60 * time.Millisecond)
+			return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: merr.Success()}}, nil
+		}
+		return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: overloadViewStatus()}}, nil
+	})
+	plan, err := client.Search(ctx, &ShardSearchRequest{VChannel: "channel", Req: &internalpb.SearchRequest{CollectionID: 100}, Reducer: newLegacySearchCollector()})
+	require.NoError(t, err)
+	require.NotNil(t, plan)
+	require.Equal(t, int32(2), calls.Load())
+}
+
+func TestAdaptiveFailedReplicaDoesNotUseExtraAttempt(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var calls atomic.Int32
+	client := overloadTestClient(t, true, false, []int64{1, 2, 3}, func(_ context.Context, _ qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+		switch calls.Add(1) {
+		case 1:
+			return nil, status.Error(codes.Unavailable, "node down")
+		case 2:
+			return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: overloadViewStatus()}}, nil
+		default:
+			return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: merr.Success()}}, nil
+		}
+	})
+	plan, err := client.Search(ctx, &ShardSearchRequest{VChannel: "channel", Req: &internalpb.SearchRequest{CollectionID: 100}, Reducer: newLegacySearchCollector()})
+	require.NoError(t, err)
+	require.NotNil(t, plan)
+	require.Equal(t, int32(3), calls.Load())
+}
+
+func TestAdaptiveOverloadUnderDefaultPolicy(t *testing.T) {
+	run := func(refusals int) ([]int64, error) {
+		// less than replicaRetryInterval (100ms) so overload failover must happen immediately
+		ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+		defer cancel()
+		var mu sync.Mutex
+		var nodes []int64
+		client := overloadTestClient(t, false, false, []int64{1, 2, 3}, func(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+			mu.Lock()
+			nodes = append(nodes, req.GetShardId().GetReplicaId())
+			n := len(nodes)
+			mu.Unlock()
+			if n <= refusals {
+				return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: overloadViewStatus()}}, nil
+			}
+			return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: merr.Success()}}, nil
+		})
+		_, err := client.Search(ctx, &ShardSearchRequest{VChannel: "channel", Req: &internalpb.SearchRequest{CollectionID: 100}, Reducer: newLegacySearchCollector()})
+		return nodes, err
+	}
+
+	nodes, err := run(1)
+	require.NoError(t, err)
+	require.Len(t, nodes, 2)
+	require.NotEqual(t, nodes[0], nodes[1])
+
+	nodes, err = run(3)
+	require.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+	require.Len(t, nodes, 2)
 }

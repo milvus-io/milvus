@@ -28,7 +28,7 @@ import (
 )
 
 func TestReplicaObservationFailureAttribution(t *testing.T) {
-	for _, scenario := range []string{"planning pending", "streaming pending", "query finished streaming pending", "query pending", "late error", "late success", "caller canceled", "input error"} {
+	for _, scenario := range []string{"planning pending", "streaming pending", "query finished streaming pending", "query pending", "late error", "late success", "caller canceled", "input error", "overload error"} {
 		t.Run(scenario, func(t *testing.T) {
 			policy := newReplicaPolicy()
 			key := replicaPolicyKey{channel: "channel", class: "search"}
@@ -55,6 +55,8 @@ func TestReplicaObservationFailureAttribution(t *testing.T) {
 			switch scenario {
 			case "input error":
 				observation.finish(ctx, merr.WrapErrParameterInvalidMsg("invalid request"), true, false)
+			case "overload error":
+				observation.finish(ctx, &workNodeFailure{node: qviews.NewQueryNode(1), err: merr.WrapErrTooManyRequests(200, "read task queue")}, true, false)
 			case "late success":
 				observation.finish(ctx, nil, false, true)
 				expected = 0

@@ -697,6 +697,7 @@ func (s *shardViewQueryClient) executeShard(
 			retry.recordFailure(retryErr)
 		}
 	}
+	overloadExtraUsed := false
 	for ; ; retry.attempt++ {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -729,6 +730,13 @@ func (s *shardViewQueryClient) executeShard(
 		planReq := params.buildPlanReq(targetShardID)
 		response, err := s.executeGetQueryPlan(ctx, targetShardID, planReq, params)
 		if err != nil {
+			if isOverloadErr(err) {
+				retry.tried[candidate] = true
+				if consumeExtraAttemptOnOverload(route, retry.tried, &overloadExtraUsed) {
+					continue
+				}
+				return nil, err
+			}
 			if retryableQueryError(err) {
 				retry.lastErr = err
 				continue
@@ -790,6 +798,14 @@ func (s *shardViewQueryClient) executeShard(
 			}
 		}
 		if err != nil {
+			if isOverloadErr(err) {
+				retry.tried[candidate] = true
+				params.resetShard(shardID)
+				if consumeExtraAttemptOnOverload(route, retry.tried, &overloadExtraUsed) {
+					continue
+				}
+				return nil, err
+			}
 			if retryableQueryError(err) {
 				retry.recordFailure(err)
 				params.resetShard(shardID)
@@ -973,4 +989,14 @@ func retryableQueryError(err error) bool {
 		return true
 	}
 	return status.Code(err) == codes.Unavailable
+}
+
+// consumeExtraAttemptOnOverload claims the single extra attempt allowed for an
+// overloaded shard read when an untried replica remains.
+func consumeExtraAttemptOnOverload(route *replicaRoute, tried map[qviews.Replica]bool, extraUsed *bool) bool {
+	if *extraUsed || !route.hasUntried(tried) {
+		return false
+	}
+	*extraUsed = true
+	return true
 }

@@ -25,6 +25,9 @@ const (
 	readTaskQueueOutcomeScheduled = "scheduled"
 	readTaskQueueOutcomeExpired   = "expired"
 	readTaskQueueOutcomeCleared   = "cleared"
+	// the task would wait, or has waited, in the queue for longer than it
+	// may, see maxQueueWait
+	readTaskQueueOutcomeOverloaded = "overloaded"
 )
 
 // newScheduler create a scheduler with given schedule policy.
@@ -72,6 +75,11 @@ type scheduler struct {
 	wg sync.WaitGroup
 	// lifetime controls scheduler State & make sure all requests accepted will be processed
 	lifetime lifetime.Lifetime[lifetime.State]
+
+	// head is the task that leaves the queue next: taken from the policy and
+	// waiting for a worker. Nil when no task waits. Owned by the schedule
+	// goroutine.
+	head *queuedTask
 
 	schedulerCounter
 }
@@ -167,6 +175,10 @@ func (s *scheduler) schedule() {
 
 		select {
 		case req, ok := <-s.receiveChan:
+			// The select may have blocked for long, on an idle node until
+			// this request came in: take the time again, it is the time the
+			// task is queued at.
+			now = time.Now()
 			if !ok {
 				mlog.Info(context.TODO(), "receiveChan closed, processing remaining request")
 				// drain policy maintained task
@@ -190,8 +202,9 @@ func (s *scheduler) schedule() {
 			// Task sent, drop the ownership of sent task.
 			// Update waiting task counter.
 			s.updateWaitingTaskCounter(-1, -nq)
-			// And produce new task into execChan as much as possible.
-			task = s.produceExecChan(now)
+			// And produce new task into execChan as much as possible. The
+			// select may have blocked for long: take the time again.
+			task = s.produceExecChan(time.Now())
 		}
 	}
 }
@@ -236,9 +249,20 @@ func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64, n
 			fmt.Sprintf("limit by %s", paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.Key),
 		)
 		req.err <- err
+	} else if queued := newQueuedTask(req.task, now); queued.cleanupReady(now) {
+		// Its deadline passed, though its context does not say so yet: it is
+		// out of time, not refused for the load on this node.
+		s.recordReadTaskQueueDuration(queued, now, readTaskQueueOutcomeExpired)
+		req.err <- cleanupTaskError(queued)
+	} else if queued.mustWaitTooLong(s.head, now) {
+		// The task that leaves the queue next has waited so long that this
+		// one would wait for longer than it may. Refuse it now, while the
+		// request has all its time left, rather than when it has waited for
+		// nothing.
+		s.recordReadTaskQueueDuration(queued, now, readTaskQueueOutcomeOverloaded)
+		req.err <- overloadedError(queued, s.head.queueDuration(now))
 	} else {
 		// Push the task into the policy to schedule and update the counter of the ready queue.
-		queued := newQueuedTask(req.task, now)
 		nq := queued.NQ()
 		newTaskAdded, err := s.policy.Push(queued)
 		if err == nil {
@@ -384,17 +408,68 @@ func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time
 				continue
 			}
 			lastWaitingTask.Task = survivor
+			if lastWaitingTask.cleanupReady(now) {
+				// Out of time even when its context does not say so yet, so
+				// that it does not count as refused for the load on this node.
+				s.updateWaitingTaskCounter(-1, -lastWaitingTask.countedNQ())
+				s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeExpired)
+				finishExpiredTask(lastWaitingTask)
+				lastWaitingTask = nil
+				continue
+			}
+			if lastWaitingTask.overloaded(now) {
+				// The queue holds more than the node gets done in the time
+				// the task may wait. Executing it would make the tasks behind
+				// it wait as long: fail it now, so that the Proxy can turn to
+				// another replica while the request still has time.
+				s.updateWaitingTaskCounter(-1, -lastWaitingTask.countedNQ())
+				s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeOverloaded)
+				finishUnrunTask(lastWaitingTask, overloadedError(lastWaitingTask, lastWaitingTask.queueDuration(now)))
+				lastWaitingTask = nil
+				continue
+			}
 			s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeScheduled)
 			break
 		}
 	}
+	s.head = nil
 	if lastWaitingTask.valid() {
 		// Try to sent task to execChan if there is a task ready to run.
 		execChan = s.execChan
 		nq = lastWaitingTask.countedNQ()
+		s.head = lastWaitingTask
 	}
 
 	return lastWaitingTask, nq, execChan
+}
+
+func finishExpiredTask(task *queuedTask) {
+	if g, ok := task.Task.(ExpirableGroup); ok {
+		g.FinishExpired()
+		return
+	}
+	task.Done(cleanupTaskError(task))
+}
+
+func finishUnrunTask(task *queuedTask, err error) {
+	if u, ok := task.Task.(UnrunTask); ok {
+		u.FinishUnrun(err)
+		return
+	}
+	task.Done(err)
+}
+
+// overloadedError is what a task fails with that would wait, or has waited,
+// for longer than it may. waited is how long the task that leaves the queue
+// next has waited: the refused task itself, or the one it would queue behind.
+func overloadedError(task *queuedTask, waited time.Duration) error {
+	return merr.WrapErrTooManyRequests(
+		int32(task.maxWait.Milliseconds()),
+		fmt.Sprintf("read tasks wait %s in the queue, limit by %s and %s",
+			waited,
+			paramtable.Get().QueryNodeCfg.MaxQueueWaitRatio.Key,
+			paramtable.Get().QueryNodeCfg.MaxQueueWait.Key),
+	)
 }
 
 func (s *scheduler) cleanupExpiredTasks(now time.Time) {

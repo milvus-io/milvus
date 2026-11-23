@@ -212,7 +212,10 @@ func (s *shardViewQueryClient) executeAdaptiveShard(ctx context.Context, key rep
 	deadNodes := make(map[int64]struct{})
 	var sessionChanged <-chan struct{}
 	var lastErr error
-	hedgedOnce := false
+	var overloadErr error
+	// extraUsed tracks the single extra attempt (hedge or overload failover)
+	// permitted across all retry rounds for this shard read.
+	extraUsed := false
 	for attempts := 0; ; {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -254,10 +257,11 @@ func (s *shardViewQueryClient) executeAdaptiveShard(ctx context.Context, key rep
 		primaryObservation := launch(primary)
 		pending := 1
 		var terminalErr error
+		roundRefused := false
 		hedgeSent := false
 		var hedgeTimer *time.Timer
 		var hedgeReady <-chan time.Time
-		if cfg.HedgeEnabled && !hedgedOnce {
+		if cfg.HedgeEnabled && !extraUsed {
 			hedgeTimer = time.NewTimer(s.selection.hedgeDelay(key, cfg))
 			hedgeReady = hedgeTimer.C
 		}
@@ -282,7 +286,7 @@ func (s *shardViewQueryClient) executeAdaptiveShard(ctx context.Context, key rep
 					launch(candidate)
 					pending++
 					hedgeSent = true
-					hedgedOnce = true
+					extraUsed = true
 					metrics.ProxyReplicaHedgeCount.WithLabelValues(paramtable.GetStringNodeID(), "sent").Inc()
 				} else {
 					metrics.ProxyReplicaHedgeCount.WithLabelValues(paramtable.GetStringNodeID(), "skipped_no_replica").Inc()
@@ -308,6 +312,12 @@ func (s *shardViewQueryClient) executeAdaptiveShard(ctx context.Context, key rep
 					return result.plan, nil
 				}
 				lastErr = result.err
+				if isOverloadErr(result.err) {
+					tried[result.candidate] = true
+					overloadErr = result.err
+					roundRefused = true
+					continue
+				}
 				if merr.GetErrorType(toMilvusError(result.err)) == merr.InputError {
 					// Stop retrying, but allow an already dispatched sibling to succeed.
 					terminalErr = result.err
@@ -340,6 +350,12 @@ func (s *shardViewQueryClient) executeAdaptiveShard(ctx context.Context, key rep
 		s.selection.completed(key, time.Since(started), false, hedgeSent, false)
 		if terminalErr != nil {
 			return nil, terminalErr
+		}
+		if roundRefused {
+			if consumeExtraAttemptOnOverload(route, tried, &extraUsed) {
+				continue
+			}
+			return nil, overloadErr
 		}
 	}
 }

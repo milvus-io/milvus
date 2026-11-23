@@ -109,6 +109,41 @@ single-hedge limit bounds amplification to at most one extra attempt per shard
 request, and the win-rate guard suppresses unproductive hedging after 10
 outcomes via completion-based feedback (rather than a global concurrency cap).
 
+## Overload
+
+Under load above what the replicas get done, read tasks wait in the QueryNode
+read scheduler queue (`queryNode.scheduler.unsolvedQueueSize`, 1024), turning
+excess traffic into long queue latency. Four pieces bound answered-request
+queue time and fail the excess fast:
+
+**QueryNode queue wait limit.** `queryNode.scheduler.maxQueueWaitRatio`
+(default `0`, off; refreshable) bounds how long a read task may wait in the
+queue (`min(maxQueueWait, maxQueueWaitRatio * time left until the deadline)`,
+where `queryNode.scheduler.maxQueueWait` defaults to `1s` and also applies to
+tasks without a deadline). A new task is refused immediately with
+`ErrServiceTooManyRequests` when the next task at the head of the queue (`head`)
+has waited more than half of the new task's limit. Already-expired tasks fail
+as expired rather than overloaded, and tasks waiting beyond their limit by
+dequeue time are refused then (`read_task_queue_duration{outcome="overloaded"}`).
+
+**One extra attempt, then the refusal goes to the client.** Across both the
+default router (`executeShard`) and the adaptive selector (`executeAdaptiveShard`),
+a shard read gets at most one extra attempt on another replica across hedging
+and overload failover combined. When a replica refuses as overloaded, the
+client moves immediately (without retry backoff or waiting for hedge delay) to
+an untried replica once; a second overload refusal or exhaustion of untried
+replicas ends the request immediately with `ErrServiceTooManyRequests`.
+Overload refusals do not record replica failure penalties, and non-overload
+replica failures do not consume the extra-attempt slot.
+
+**No resending inside worker RPC clients.** `grpcclient.WithFailFastOnOverload`
+stops Proxy and Delegator `ClientBase` retries on `ErrServiceTooManyRequests`
+so overload refusals propagate back immediately.
+
+**A failed shard stops the others.** `client_impl.go` and `legacy_client.go`
+fan out across shards under `errgroup.WithContext`, canceling sibling shards as
+soon as one fails.
+
 ## Configuration and observability
 
 All settings are live-refreshable (`refreshable: true`) and apply to new shard
@@ -121,6 +156,8 @@ requests:
 | `proxy.latencyWeighted.minShare` | `0.001` | Minimum selection share per eligible replica, capped by replica count. |
 | `proxy.hedging.enabled` | `false` | Enable hedged Search/Query attempts across replicas, independent of `replicaSelectionPolicy`. |
 | `proxy.hedging.minDelay` | `200ms` | Lower bound of the p99-based hedge trigger delay. |
+| `queryNode.scheduler.maxQueueWaitRatio` | `0` | Share of remaining deadline a read task may wait in the QueryNode queue (`0` disables). |
+| `queryNode.scheduler.maxQueueWait` | `1s` | Maximum queue wait for any read task (and limit when without deadline). |
 
 `milvus_proxy_replica_hedge_total` uses only proxy node ID and decision labels:
 `sent`, `won`, `skipped_low_win_rate`, and

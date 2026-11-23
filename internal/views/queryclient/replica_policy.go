@@ -232,10 +232,19 @@ func (o *replicaObservation) finish(ctx context.Context, err error, workerFailur
 	stats.end()
 	if success {
 		stats.succeed(now, now.Sub(o.start), o.config.Decay)
-	} else if !o.failed && workerFailure && !errors.Is(ctx.Err(), context.Canceled) && merr.GetErrorType(toMilvusError(err)) != merr.InputError {
+	} else if !o.failed && workerFailure && !errors.Is(ctx.Err(), context.Canceled) &&
+		merr.GetErrorType(toMilvusError(err)) != merr.InputError && !isOverloadErr(err) {
 		o.failed = true
 		stats.fail(now, replicaAttemptPenalty(ctx, o.start, now), o.config.Decay)
 	}
+}
+
+// isOverloadErr tells whether err is a replica refusing a request because its
+// read queue is too long. It says the replica has more work than it gets
+// done, not that it is failing: the request may try another replica once, and
+// the refusal does not count against this one.
+func isOverloadErr(err error) bool {
+	return errors.Is(toMilvusError(err), merr.ErrServiceTooManyRequests)
 }
 
 func replicaAttemptPenalty(ctx context.Context, start, now time.Time) time.Duration {
