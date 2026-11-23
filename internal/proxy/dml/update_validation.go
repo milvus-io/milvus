@@ -21,7 +21,6 @@ import (
 	"unicode/utf8"
 
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -171,8 +170,8 @@ func validateUpdateAssignments(schema *schemapb.CollectionSchema, assignments []
 			return nil, merr.WrapErrParameterInvalidMsg("field %s has unsupported update type %s", field.GetName(), field.GetDataType())
 		}
 		literal := proto.Clone(a.GetLiteral()).(*schemapb.UpdateLiteral)
-		if n, ok := literal.GetValue().(*schemapb.UpdateLiteral_NullValue); ok {
-			if !field.GetNullable() || n.NullValue != structpb.NullValue_NULL_VALUE {
+		if n, ok := literal.GetValue().(*schemapb.UpdateLiteral_SetNull); ok {
+			if !field.GetNullable() || !n.SetNull {
 				return nil, merr.WrapErrParameterInvalidMsg("field %s does not accept this NULL assignment", field.GetName())
 			}
 		} else {

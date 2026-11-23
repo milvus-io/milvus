@@ -23,7 +23,6 @@ import (
 
 	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -70,7 +69,7 @@ func (opt *updateRecordsOption) WithAssignment(fieldName string, literal *schema
 }
 
 func (opt *updateRecordsOption) WithNull(fieldName string) *updateRecordsOption {
-	return opt.WithAssignment(fieldName, &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_NullValue{NullValue: structpb.NullValue_NULL_VALUE}})
+	return opt.WithAssignment(fieldName, &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_SetNull{SetNull: true}})
 }
 
 func (opt *updateRecordsOption) Request() (*milvuspb.UpdateRecordsRequest, error) {

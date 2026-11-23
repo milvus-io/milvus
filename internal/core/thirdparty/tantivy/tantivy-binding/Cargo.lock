@@ -2909,7 +2909,6 @@ dependencies = [
  "memchr",
  "prost",
  "prost-build",
- "prost-types",
  "regex-syntax 0.8.6",
 ]
 

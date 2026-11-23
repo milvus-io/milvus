@@ -281,8 +281,8 @@ ValidArray(DataType element, const proto::schema::ScalarField& array) {
 // NULL uses a typed placeholder only to dispatch to the correct log.
 UpdateValue
 Decode(const FieldMeta& meta, const proto::schema::UpdateLiteral& literal) {
-    bool null = literal.has_null_value();
-    RequireUpdate(!null || (meta.is_nullable() && literal.null_value() == 0),
+    bool null = literal.has_set_null();
+    RequireUpdate(!null || (meta.is_nullable() && literal.set_null()),
                   "illegal NULL assignment");
     const auto& v = literal.scalar_value();
     switch (meta.get_data_type()) {
@@ -444,7 +444,7 @@ UpdatesRecord::Apply(const Schema& schema,
                     commits.push_back(typed->Prepare(rows,
                                                      {timestamp, ordinal},
                                                      payload,
-                                                     a.literal.has_null_value(),
+                                                     a.literal.has_set_null(),
                                                      capacity));
                 }
             },

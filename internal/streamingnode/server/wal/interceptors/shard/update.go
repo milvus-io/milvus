@@ -69,6 +69,15 @@ func (impl *shardInterceptor) handleUpdateMessage(ctx context.Context, msg messa
 			return nil, status.NewUnrecoverableError("cannot validate update partition: %s", err)
 		}
 	}
+	for _, assignment := range body.GetAssignments() {
+		literal := assignment.GetLiteral()
+		if literal.GetValue() == nil {
+			return nil, status.NewInvalidArgument("UPDATE assignment requires an explicit literal")
+		}
+		if n, ok := literal.GetValue().(*schemapb.UpdateLiteral_SetNull); ok && !n.SetNull {
+			return nil, status.NewInvalidArgument("UPDATE set_null must be true")
+		}
+	}
 	// Enforce the text-update boundary before persistence, including writes
 	// arriving through replication rather than the public Proxy RPC.
 	if len(body.GetAssignments()) > 0 {

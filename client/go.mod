@@ -51,4 +51,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/milvus-io/milvus-proto/go-api/v3 => github.com/MrPresent-Han/milvus-proto/go-api/v3 v3.0.0-20261121000801-074f3ca490fd
+replace github.com/milvus-io/milvus-proto/go-api/v3 => github.com/MrPresent-Han/milvus-proto/go-api/v3 v3.0.0-20261123063054-d5af9ff95a80

@@ -226,7 +226,13 @@ func Encode(l Layout, rows []Row) (arrow.Record, error) {
 
 // AppendLiteral appends a decoded literal to its typed Arrow value builder.
 func AppendLiteral(b array.Builder, f Field, literal *schemapb.UpdateLiteral) error {
-	if _, ok := literal.GetValue().(*schemapb.UpdateLiteral_NullValue); ok {
+	if literal.GetValue() == nil {
+		return merr.WrapErrDataIntegrityMsg("delta field %d has no literal", f.ID)
+	}
+	if n, ok := literal.GetValue().(*schemapb.UpdateLiteral_SetNull); ok {
+		if !n.SetNull {
+			return merr.WrapErrDataIntegrityMsg("delta field %d has set_null=false", f.ID)
+		}
 		b.AppendNull()
 		return nil
 	}
@@ -397,7 +403,7 @@ func Decode(l Layout, rec arrow.Record) ([]Row, error) {
 			literal := &schemapb.UpdateLiteral{}
 			switch {
 			case child.IsNull(i):
-				literal.Value = &schemapb.UpdateLiteral_NullValue{}
+				literal.Value = &schemapb.UpdateLiteral_SetNull{SetNull: true}
 			case f.Type == schemapb.DataType_Array:
 				payload := &schemapb.ScalarField{}
 				msg := payload.ProtoReflect()

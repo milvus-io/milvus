@@ -382,9 +382,12 @@ func ApplyMutationLiterals(base arrow.Array, field *schemapb.FieldSchema, values
 			}
 			continue
 		}
-		if _, null := v.GetValue().(*schemapb.UpdateLiteral_NullValue); null {
-			if !field.GetNullable() {
-				return nil, merr.WrapErrDataIntegrityMsg("null delta for required field %d", field.GetFieldID())
+		if v.GetValue() == nil {
+			return nil, merr.WrapErrDataIntegrityMsg("delta field %d has no literal", field.GetFieldID())
+		}
+		if n, null := v.GetValue().(*schemapb.UpdateLiteral_SetNull); null {
+			if !n.SetNull || !field.GetNullable() {
+				return nil, merr.WrapErrDataIntegrityMsg("illegal NULL assignment for delta field %d", field.GetFieldID())
 			}
 			b.AppendNull()
 			continue
