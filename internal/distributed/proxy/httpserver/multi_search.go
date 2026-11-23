@@ -21,6 +21,7 @@ import (
 	"context"
 	stdjson "encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -46,10 +47,15 @@ import (
 )
 
 type MultiSearchReqV2 struct {
+	DbName         string               `json:"dbName"`
 	Requests       []stdjson.RawMessage `json:"requests"`
 	MaxConcurrency uint32               `json:"maxConcurrency"`
 	TimeoutMs      *int64               `json:"timeoutMs"`
+
+	headerTimeout *time.Duration
 }
+
+func (req *MultiSearchReqV2) GetDbName() string { return req.DbName }
 
 type multiSearchProxy interface {
 	CheckMultiSearchAdmission() error
@@ -69,25 +75,40 @@ func bindMultiSearchRequest(reader io.Reader, req *MultiSearchReqV2) error {
 	return stdjson.Unmarshal(body, req)
 }
 
-func (h *HandlersV2) multiSearchRoute(next gin.HandlerFunc) gin.HandlerFunc {
+func (h *HandlersV2) multiSearchRoute() gin.HandlerFunc {
 	respond := newDQLResponseMiddleware(dqlExplicitTransportTimeout)
+	handle := wrapperTraceLog(h.multiSearch)
 	handleWithMetrics := restfulSizeMiddleware(func(c *gin.Context) {
 		metrics.GetStats(c.Request.Context()).SetNodeID(paramtable.GetNodeID()).SetInboundLabel("MultiSearch")
-		timeout, err := multiSearchTransportTimeout(c)
-		handle := next
+		timeout, err := multiSearchHeaderTimeout(c.Request.Header)
 		if err != nil {
-			handle = func(c *gin.Context) {
+			respond(c, func(c *gin.Context) {
 				HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-			}
+			}, time.Time{})
+			return
 		}
-		respond(c, handle, timeout)
+		// Only an explicit body budget makes the header a transport deadline.
+		// Read the body once before choosing the role of the header.
+		req := &MultiSearchReqV2{headerTimeout: timeout}
+		bindErr := bindMultiSearchRequest(c.Request.Body, req)
+		var transportDeadline time.Time
+		if timeout != nil && req.TimeoutMs != nil {
+			state := c.Request.Context().Value(dqlStreamKey{}).(*dqlStreamState)
+			transportDeadline = state.receivedAt.Add(*timeout)
+		}
+		respond(c, func(c *gin.Context) {
+			if bindErr != nil {
+				abortRESTPostBinding(c, bindErr)
+				return
+			}
+			handleBoundRESTPost(c, req, handle)
+		}, transportDeadline)
 	}, true)
 	return func(c *gin.Context) {
 		if p, ok := h.proxy.(multiSearchProxy); ok {
 			if err := p.CheckMultiSearchAdmission(); err != nil {
 				// Admission still takes precedence over an invalid header.
-				timeout, _ := multiSearchTransportTimeout(c)
-				respond(c, func(c *gin.Context) { rejectQueueFullBeforeDecode(c, err) }, timeout)
+				respond(c, func(c *gin.Context) { rejectQueueFullBeforeDecode(c, err) }, time.Time{})
 				return
 			}
 		}
@@ -95,15 +116,18 @@ func (h *HandlersV2) multiSearchRoute(next gin.HandlerFunc) gin.HandlerFunc {
 	}
 }
 
-func multiSearchTransportTimeout(c *gin.Context) (*time.Duration, error) {
-	header := c.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout)
-	if header == "" {
+func multiSearchHeaderTimeout(header http.Header) (*time.Duration, error) {
+	values := header.Values(mhttp.HTTPHeaderRequestTimeout)
+	if len(values) == 0 {
 		return nil, nil
 	}
-	timeout, err := parseRequestTimeout(header)
-	if err != nil {
-		return nil, err
+	const maxSeconds = math.MaxInt64 / int64(time.Second)
+	seconds, err := strconv.ParseInt(values[0], 10, 64)
+	if err != nil || seconds < 0 || seconds > maxSeconds {
+		return nil, merr.WrapErrParameterInvalidMsg("%s must be an integer between 0 and %d seconds, got %q",
+			mhttp.HTTPHeaderRequestTimeout, maxSeconds, values[0])
 	}
+	timeout := time.Duration(seconds) * time.Second
 	return &timeout, nil
 }
 
@@ -136,13 +160,20 @@ func (h *HandlersV2) multiSearch(ctx context.Context, c *gin.Context, anyReq any
 	if len(req.Requests) == 0 {
 		return fail(merr.WrapErrParameterMissingMsg("MultiSearch requires at least one search"))
 	}
+	if err := proxy.CheckMultiSearchBatchSize(len(req.Requests)); err != nil {
+		return fail(err)
+	}
 	state := ctx.Value(dqlStreamKey{}).(*dqlStreamState)
 	deadline, err := proxy.MultiSearchExecutionDeadline(state.receivedAt, req.TimeoutMs)
 	if err != nil {
 		return fail(err)
 	}
-	if req.TimeoutMs == nil && c.GetHeader(mhttp.HTTPHeaderRequestTimeout) == "" {
-		deadline = state.receivedAt.Add(paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond))
+	if req.TimeoutMs == nil {
+		timeout := paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond)
+		if req.headerTimeout != nil {
+			timeout = *req.headerTimeout
+		}
+		deadline = state.receivedAt.Add(timeout)
 	}
 	vectorEncoding, err := parseFloatVectorEncoding(c.Request.Header)
 	if err != nil {
@@ -241,11 +272,23 @@ func (h *HandlersV2) prepareMultiSearchItem(ctx context.Context, body []byte, fa
 	return req, schema.CollectionSchema, nil
 }
 
-func (h *HandlersV2) executeMultiSearchItem(ctx context.Context, req *milvuspb.SearchRequest, username, token string) (*milvuspb.SearchResults, error) {
+func (h *HandlersV2) executeMultiSearchItem(ctx context.Context, req *milvuspb.SearchRequest, username, token string) (result *milvuspb.SearchResults, err error) {
 	const searchMethod = milvuspb.MilvusService_Search_FullMethodName
 	ctx = contextutil.SetToIncomingContext(ctx, util.HeaderDBName, req.GetDbName())
+	// Each attempt owns the consistency, request, and outcome of its Search log.
+	// Start before authorization and quota so their rejections are logged too.
+	accessInfo := info.NewGrpcAccessInfo(ctx, &grpc.UnaryServerInfo{FullMethod: searchMethod}, req)
+	ctx = context.WithValue(ctx, accesslog.AccessKey{}, accessInfo)
+	defer func() {
+		logErr := err
+		if result == nil && logErr == nil {
+			// The item goroutine handles the panic after this defer.
+			logErr = merr.ErrServiceInternal
+		}
+		accessInfo.SetResult(result, logErr)
+		accesslog.Write(accessInfo)
+	}()
 	if h.checkAuth {
-		var err error
 		ctx, err = proxy.PrivilegeInterceptorWithMetaCache(h.metaCache)(ctx, req)
 		if err != nil {
 			hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(err), nil, searchMethod, hookutil.ActionAuthorize)
@@ -256,10 +299,6 @@ func (h *HandlersV2) executeMultiSearchItem(ctx context.Context, req *milvuspb.S
 		hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(err), nil, searchMethod, hookutil.ActionAuthorize)
 		return nil, err
 	}
-	// Search records its actual consistency level in the request's access info.
-	// Give it its own object so concurrent searches don't update the batch log.
-	accessInfo := info.NewGrpcAccessInfo(ctx, &grpc.UnaryServerInfo{FullMethod: searchMethod}, req)
-	ctx = context.WithValue(ctx, accesslog.AccessKey{}, accessInfo)
 	response, err := proxy.HookInterceptor(ctx, req, username, searchMethod, func(ctx context.Context, req any) (any, error) {
 		return forwardRESTProxy(ctx, req, token, searchMethod, func(ctx context.Context, req any) (any, error) {
 			return h.proxy.Search(ctx, req.(*milvuspb.SearchRequest))
@@ -269,7 +308,7 @@ func (h *HandlersV2) executeMultiSearchItem(ctx context.Context, req *milvuspb.S
 		return nil, err
 	}
 	result, ok := response.(*milvuspb.SearchResults)
-	if !ok {
+	if !ok || result == nil {
 		return nil, merr.WrapErrServiceInternalMsg("Search returned an invalid response")
 	}
 	return result, nil

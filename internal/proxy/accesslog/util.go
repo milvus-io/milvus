@@ -41,7 +41,7 @@ func UnaryAccessLogInterceptor(ctx context.Context, req any, rpcInfo *grpc.Unary
 	newCtx := context.WithValue(ctx, AccessKey{}, accessInfo)
 	resp, err := handler(newCtx, req)
 	accessInfo.SetResult(resp, err)
-	_globalL.Write(accessInfo)
+	Write(accessInfo)
 	return resp, err
 }
 
@@ -65,7 +65,7 @@ func AccessLogMiddleware(ctx *gin.Context) {
 	}
 	ctx.Next()
 	accessInfo.InitReq()
-	_globalL.Write(accessInfo)
+	Write(accessInfo)
 
 	// Plugin pulls req / status / err / path from the gin context — the
 	// middleware only needs to surface it through the stdlib context.

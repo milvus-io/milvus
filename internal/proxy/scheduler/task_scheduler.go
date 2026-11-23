@@ -23,6 +23,7 @@ import (
 	"math"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -365,6 +366,14 @@ type DqTaskQueue struct {
 	metricsMu sync.Mutex
 }
 
+type dqlAdmissionKey struct{}
+
+// WithDQLAdmissionTracking tracks main-queue saturation for a single Search attempt.
+func WithDQLAdmissionTracking(ctx context.Context) (context.Context, *atomic.Bool) {
+	rejected := new(atomic.Bool)
+	return context.WithValue(ctx, dqlAdmissionKey{}, rejected), rejected
+}
+
 func (queue *DqTaskQueue) Enqueue(t taskmodel.Task) error {
 	lane := queue.BaseTaskQueue
 	if t.IsSubTask() {
@@ -372,6 +381,11 @@ func (queue *DqTaskQueue) Enqueue(t taskmodel.Task) error {
 	}
 	element, err := lane.enqueue(t)
 	if err != nil {
+		if lane == queue.BaseTaskQueue && IsAdmissionQueueFull(err) {
+			if rejected, ok := t.TraceCtx().Value(dqlAdmissionKey{}).(*atomic.Bool); ok {
+				rejected.Store(true)
+			}
+		}
 		return err
 	}
 

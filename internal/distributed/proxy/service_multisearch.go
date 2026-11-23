@@ -49,6 +49,9 @@ func (s *Server) MultiSearch(ctx context.Context, req *milvuspb.MultiSearchReque
 	if len(requests) == 0 {
 		return fail(merr.WrapErrParameterMissingMsg("MultiSearch requires at least one search"))
 	}
+	if err := proxy.CheckMultiSearchBatchSize(len(requests)); err != nil {
+		return fail(err)
+	}
 	receivedAt, ok := ctx.Value(multiSearchReceivedAtKey{}).(time.Time)
 	if !ok {
 		receivedAt = time.Now()

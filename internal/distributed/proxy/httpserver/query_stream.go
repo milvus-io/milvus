@@ -94,7 +94,7 @@ func dqlTimeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 	respond := newDQLResponseMiddleware(dqlPreparationTimeout)
 	return func(c *gin.Context) {
 		if timeout, ok := requestTimeout(c); ok {
-			respond(c, handler, &timeout)
+			respond(c, handler, time.Now().Add(timeout))
 		}
 	}
 }
@@ -106,16 +106,16 @@ const (
 	dqlExplicitTransportTimeout
 )
 
-func newDQLResponseMiddleware(scope dqlTimeoutScope) func(*gin.Context, gin.HandlerFunc, *time.Duration) {
+func newDQLResponseMiddleware(scope dqlTimeoutScope) func(*gin.Context, gin.HandlerFunc, time.Time) {
 	bufPool := &BufferPool{}
-	return func(c *gin.Context, handler gin.HandlerFunc, timeout *time.Duration) {
+	return func(c *gin.Context, handler gin.HandlerFunc, deadline time.Time) {
 		// DQLStreamingHTTPHandler is required to abort partial responses past Gin Recovery.
 		state := c.Request.Context().Value(dqlStreamKey{}).(*dqlStreamState)
 		parentCtx := c.Request.Context()
 		ctx := parentCtx
 		cancel := func() {}
-		if timeout != nil {
-			ctx, cancel = context.WithTimeout(parentCtx, *timeout)
+		if !deadline.IsZero() {
+			ctx, cancel = context.WithDeadline(parentCtx, deadline)
 		}
 		defer cancel()
 		c.Request = c.Request.WithContext(ctx)
@@ -127,14 +127,6 @@ func newDQLResponseMiddleware(scope dqlTimeoutScope) func(*gin.Context, gin.Hand
 			writer.Close() // Detach under the recorder lock before reuse by another request.
 			bufPool.Put(buffer)
 		}()
-		child := c.Copy()
-		child.Request, child.Writer = c.Request, writer
-		finished := make(chan any, 1)
-		go func() {
-			defer func() { finished <- recover() }()
-			handler(child)
-		}()
-
 		abort := func() { c.Abort(); state.aborted = true }
 		fail := func(status int) {
 			c.Abort()
@@ -168,6 +160,17 @@ func newDQLResponseMiddleware(scope dqlTimeoutScope) func(*gin.Context, gin.Hand
 			}
 			fail(http.StatusRequestTimeout)
 		}
+		if err := contextutil.ErrOrDeadlineExceeded(ctx); err != nil {
+			stopRequest(err)
+			return
+		}
+		child := c.Copy()
+		child.Request, child.Writer = c.Request, writer
+		finished := make(chan any, 1)
+		go func() {
+			defer func() { finished <- recover() }()
+			handler(child)
+		}()
 		select {
 		case <-ctx.Done():
 			stopRequest(ctx.Err())

@@ -333,9 +333,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 			Limit: 100,
 		}
 	}, wrapperTraceLog(h.search))), true)))
-	router.POST(EntityCategory+MultiSearchAction, h.multiSearchRoute(wrapperPost(func() any {
-		return &MultiSearchReqV2{}
-	}, wrapperTraceLog(h.multiSearch))))
+	router.POST(EntityCategory+MultiSearchAction, h.multiSearchRoute())
 	// advanced_search, backward compatible uri
 	router.POST(EntityCategory+AdvancedSearchAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &HybridSearchReq{
@@ -458,89 +456,95 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 		switch dataReq := req.(type) {
 		case *CollectionDataReq:
 			bindErr = bindCollectionDataMetadata(gCtx, dataReq)
-		case *MultiSearchReqV2:
-			bindErr = bindMultiSearchRequest(gCtx.Request.Body, dataReq)
 		default:
 			bindErr = gCtx.ShouldBindBodyWith(req, binding.JSON)
 		}
-		if err := bindErr; err != nil {
-			mlog.Warn(context.TODO(), "high level restful api, read parameters from request body fail", mlog.Err(err),
-				mlog.Any("url", gCtx.Request.URL.Path))
-			if _, ok := err.(validator.ValidationErrors); ok {
-				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
-					HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
-					HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error() + ", error: " + err.Error(),
-				})
-			} else if err == io.EOF {
-				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
-					HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
-					HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", the request body should be nil, however {} is valid",
-				})
-			} else {
-				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
-					HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
-					HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
-				})
-			}
+		if bindErr != nil {
+			abortRESTPostBinding(gCtx, bindErr)
 			return
 		}
-		dbName := ""
-		collectionName := ""
-		if req != nil {
-			if getter, ok := req.(requestutil.DBNameGetter); ok {
-				dbName = getter.GetDbName()
-			}
+		handleBoundRESTPost(gCtx, req, v2)
+	}
+}
+
+func abortRESTPostBinding(gCtx *gin.Context, err error) {
+	mlog.Warn(gCtx.Request.Context(), "high level restful api, read parameters from request body fail", mlog.Err(err),
+		mlog.Any("url", gCtx.Request.URL.Path))
+	if _, ok := err.(validator.ValidationErrors); ok {
+		HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
+			HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error() + ", error: " + err.Error(),
+		})
+	} else if err == io.EOF {
+		HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
+			HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", the request body should be nil, however {} is valid",
+		})
+	} else {
+		HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
+			HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
+		})
+	}
+}
+
+func handleBoundRESTPost(gCtx *gin.Context, req any, v2 handlerFuncV2) {
+	dbName := ""
+	collectionName := ""
+	if req != nil {
+		if getter, ok := req.(requestutil.DBNameGetter); ok {
+			dbName = getter.GetDbName()
+		}
+		if dbName == "" {
+			dbName = gCtx.Request.Header.Get(HTTPHeaderDBName)
 			if dbName == "" {
-				dbName = gCtx.Request.Header.Get(HTTPHeaderDBName)
-				if dbName == "" {
-					dbName = DefaultDbName
-				}
-			}
-			if getter, ok := req.(requestutil.CollectionNameGetter); ok {
-				collectionName = getter.GetCollectionName()
+				dbName = DefaultDbName
 			}
 		}
-		ctx := gCtx.Request.Context()
-		username, _ := gCtx.Get(ContextUsername)
-		ctx = proxy.NewContextWithMetadata(ctx, username.(string), dbName)
-		mlog.Debug(ctx, "high level restful api, read parameters from request body, then start to handle.",
-			mlog.Any("url", gCtx.Request.URL.Path))
+		if getter, ok := req.(requestutil.CollectionNameGetter); ok {
+			collectionName = getter.GetCollectionName()
+		}
+	}
+	ctx := gCtx.Request.Context()
+	username, _ := gCtx.Get(ContextUsername)
+	ctx = proxy.NewContextWithMetadata(ctx, username.(string), dbName)
+	mlog.Debug(ctx, "high level restful api, read parameters from request body, then start to handle.",
+		mlog.Any("url", gCtx.Request.URL.Path))
 
-		metricDBName := dbName
-		if _, batch := req.(*MultiSearchReqV2); batch {
-			// Batch counters omit the DB even when all items share one target.
-			// dbName remains the routing fallback for each child Search.
-			metricDBName = ""
-		}
-		ctx, requestMetrics := proxy.WithRequestMetrics(ctx)
-		resp, err := v2(ctx, gCtx, req, dbName)
-		methodTag, ok := routeToMethod[gCtx.FullPath()]
-		if !ok {
-			return
-		}
-		label, cause := requestMetrics.Record(methodTag, metricDBName, collectionName, resp, err)
+	metricDBName := dbName
+	if _, batch := req.(*MultiSearchReqV2); batch {
+		// Batch counters omit the DB even when all items share one target.
+		// dbName remains the routing fallback for each child Search.
+		metricDBName = ""
+	}
+	ctx, requestMetrics := proxy.WithRequestMetrics(ctx)
+	resp, err := v2(ctx, gCtx, req, dbName)
+	methodTag, ok := routeToMethod[gCtx.FullPath()]
+	if !ok {
+		return
+	}
+	label, cause := requestMetrics.Record(methodTag, metricDBName, collectionName, resp, err)
 
-		// Mirror the metric's cause into the logs so a failed REST request can be
-		// filtered by error_type. System failures are logged at Warn (actionable);
-		// input failures at Info (expected user mistakes — keeping them at Warn
-		// would spam the logs).
-		if label == metrics.FailLabel && (cause == metrics.CauseSystem || cause == metrics.CauseUser) {
-			status, _ := requestutil.GetStatusFromResponse(resp)
-			errType := merr.SystemError
-			if cause == metrics.CauseUser {
-				errType = merr.InputError
-			}
-			logger := mlog.With(
-				mlog.String("method", methodTag),
-				mlog.String("error_type", errType.String()),
-				mlog.Int32("code", status.GetCode()),
-				mlog.String("reason", status.GetReason()),
-			)
-			if errType == merr.InputError {
-				logger.Info(ctx, "restful request returned an input error")
-			} else {
-				logger.Warn(ctx, "restful request returned a system error")
-			}
+	// Mirror the metric's cause into the logs so a failed REST request can be
+	// filtered by error_type. System failures are logged at Warn (actionable);
+	// input failures at Info (expected user mistakes — keeping them at Warn
+	// would spam the logs).
+	if label == metrics.FailLabel && (cause == metrics.CauseSystem || cause == metrics.CauseUser) {
+		status, _ := requestutil.GetStatusFromResponse(resp)
+		errType := merr.SystemError
+		if cause == metrics.CauseUser {
+			errType = merr.InputError
+		}
+		logger := mlog.With(
+			mlog.String("method", methodTag),
+			mlog.String("error_type", errType.String()),
+			mlog.Int32("code", status.GetCode()),
+			mlog.String("reason", status.GetReason()),
+		)
+		if errType == merr.InputError {
+			logger.Info(ctx, "restful request returned an input error")
+		} else {
+			logger.Warn(ctx, "restful request returned a system error")
 		}
 	}
 }

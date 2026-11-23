@@ -19,20 +19,25 @@ package proxy
 import (
 	"context"
 	"math"
+	"runtime/debug"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
-	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/reqregistry"
+	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -41,6 +46,8 @@ import (
 )
 
 const defaultMultiSearchConcurrency = 4
+
+var multiSearchSuccessStatusBytes = uint64(proto.Size(&milvuspb.MultiSearchResponse{Status: merr.Success()}))
 
 // MultiSearchOptions applies to the entire admitted batch. A zero deadline
 // leaves execution bounded only by the parent call and scheduler lifetime.
@@ -77,6 +84,15 @@ func (node *Proxy) CheckMultiSearchAdmission() error {
 	return nil
 }
 
+// CheckMultiSearchBatchSize bounds item preparation on both transports.
+func CheckMultiSearchBatchSize(count int) error {
+	limit := paramtable.Get().ProxyCfg.MultiSearchMaxBatchSize.GetAsInt64()
+	if int64(count) > limit {
+		return merr.Wrapf(merr.ErrParameterTooLarge, "MultiSearch item count %d exceeds proxy.multiSearch.maxBatchSize %d", count, limit)
+	}
+	return nil
+}
+
 // RunMultiSearch accepts a structurally validated list of Search operations.
 // A failure of an individual search is returned in its native SearchResults.
 func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOptions, items []MultiSearchPrepare, execute MultiSearchExecute) (results []*milvuspb.SearchResults, err error) {
@@ -87,6 +103,9 @@ func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOption
 	defer func() { observeMultiSearchBatch(ctx, nodeID, startedAt, len(items), results, err) }()
 	if len(items) == 0 {
 		return nil, merr.WrapErrParameterMissingMsg("MultiSearch requires at least one search")
+	}
+	if err := CheckMultiSearchBatchSize(len(items)); err != nil {
+		return nil, err
 	}
 	for i, prepare := range items {
 		if prepare == nil {
@@ -99,6 +118,10 @@ func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOption
 	s := node.sched
 	if s == nil || execute == nil {
 		return nil, merr.WrapErrServiceInternalMsg("MultiSearch scheduler or Search entry is unavailable")
+	}
+	maxResultBytes := uint64(paramtable.Get().ProxyCfg.MultiSearchMaxResultBytes.GetAsInt64())
+	if multiSearchSuccessStatusBytes > maxResultBytes {
+		return nil, multiSearchResultLimitError(maxResultBytes, multiSearchSuccessStatusBytes, false)
 	}
 	// Register once for both transports, before queueing or preparing any item.
 	// A batch has no single database, collection, NQ, topk or expression.
@@ -136,6 +159,9 @@ func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOption
 		items:          items,
 		execute:        execute,
 		maxConcurrency: options.MaxConcurrency,
+		cancel:         cancel,
+		maxResultBytes: maxResultBytes,
+		resultBytes:    multiSearchSuccessStatusBytes,
 		results:        make([]*milvuspb.SearchResults, len(items)),
 	}
 	err = s.MSearchQueue.Enqueue(batch)
@@ -153,7 +179,10 @@ func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOption
 	if unfinished == nil {
 		unfinished = err
 	}
-	batchResults := batch.finish(ctx, unfinished)
+	batchResults, limitErr := batch.finish(ctx, unfinished)
+	if limitErr != nil {
+		return nil, limitErr
+	}
 
 	if err := contextutil.ErrOrDeadlineExceeded(ctx); err != nil {
 		return nil, err
@@ -178,9 +207,13 @@ type MultiSearchTask struct {
 	concurrency    int
 	nodeID         string
 	startedAt      time.Time
+	cancel         context.CancelFunc
+	maxResultBytes uint64
 
-	mu      sync.Mutex
-	results []*milvuspb.SearchResults
+	mu             sync.Mutex
+	results        []*milvuspb.SearchResults
+	resultBytes    uint64
+	resultLimitErr error
 }
 
 var _ taskmodel.Task = (*MultiSearchTask)(nil)
@@ -212,31 +245,70 @@ func (b *MultiSearchTask) PreExecute(ctx context.Context) error {
 }
 
 func (b *MultiSearchTask) Execute(ctx context.Context) error {
-	var group errgroup.Group
-	group.SetLimit(b.concurrency)
+	var group sync.WaitGroup
+	slots := semaphore.NewWeighted(int64(b.concurrency))
 	for i, prepare := range b.items {
-		if contextutil.ErrOrDeadlineExceeded(ctx) != nil {
+		if contextutil.ErrOrDeadlineExceeded(ctx) != nil || slots.Acquire(ctx, 1) != nil {
 			break
 		}
-		group.Go(func() error {
-			if contextutil.ErrOrDeadlineExceeded(ctx) == nil {
-				itemCtx := metrics.WithIndependentRPCStats(ctx)
-				b.complete(ctx, i, b.runItem(itemCtx, i, prepare, b.execute))
+		group.Go(func() {
+			defer slots.Release(1)
+			if contextutil.ErrOrDeadlineExceeded(ctx) != nil {
+				return
 			}
-			return nil
+			itemCtx := metrics.WithIndependentRPCStats(ctx)
+			var result *milvuspb.SearchResults
+			defer func() {
+				if recover() != nil {
+					err := merr.WrapErrServiceInternalMsg("MultiSearch requests[%d] panicked", i)
+					mlog.Error(itemCtx, "MultiSearch item panicked", mlog.Int("index", i),
+						mlog.FieldTaskID(b.ID()), mlog.Err(err), mlog.ByteString("panic_stack", debug.Stack()))
+					result = &milvuspb.SearchResults{Status: merr.Status(err)}
+				}
+				b.complete(itemCtx, i, result)
+			}()
+			result = b.runItem(itemCtx, i, prepare, b.execute)
 		})
 	}
 	// Keep the scheduler worker occupied until canceled searches unwind so
 	// slow cancellation cannot create unbounded detached work.
-	_ = group.Wait()
+	group.Wait()
 	return contextutil.ErrOrDeadlineExceeded(ctx)
 }
 
 func (b *MultiSearchTask) PostExecute(context.Context) error { return nil }
 
+func multiSearchResultSize(result *milvuspb.SearchResults) uint64 {
+	const resultsField = 2 // milvuspb.MultiSearchResponse.results
+	size := uint64(proto.Size(result))
+	return uint64(protowire.SizeTag(resultsField)+protowire.SizeVarint(size)) + size
+}
+
+func multiSearchResultLimitError(limit, observed uint64, singleItem bool) error {
+	message := "MultiSearch response has at least %d bytes, exceeding proxy.multiSearch.maxResultBytes (%d bytes)"
+	if singleItem {
+		message += ". One Search result exceeds the batch limit. Reduce nq, topK, or outputFields"
+	}
+	return merr.Wrapf(merr.ErrParameterTooLarge, message, observed, limit)
+}
+
 func (b *MultiSearchTask) complete(ctx context.Context, i int, result *milvuspb.SearchResults) {
+	if result == nil || contextutil.ErrOrDeadlineExceeded(ctx) != nil {
+		return
+	}
+	size := multiSearchResultSize(result)
 	b.mu.Lock()
-	if result == nil || b.results == nil || b.results[i] != nil || contextutil.ErrOrDeadlineExceeded(ctx) != nil {
+	if b.results == nil || b.results[i] != nil || contextutil.ErrOrDeadlineExceeded(ctx) != nil {
+		b.mu.Unlock()
+		return
+	}
+	b.resultBytes += size
+	if b.resultBytes > b.maxResultBytes {
+		// Publish the limit error before canceling execution and waking the
+		// caller. Late completions cannot replace the error or retain results.
+		b.resultLimitErr = multiSearchResultLimitError(b.maxResultBytes, b.resultBytes, multiSearchSuccessStatusBytes+size > b.maxResultBytes)
+		b.results = nil
+		b.cancel()
 		b.mu.Unlock()
 		return
 	}
@@ -246,39 +318,53 @@ func (b *MultiSearchTask) complete(ctx context.Context, i int, result *milvuspb.
 	// Serialize the event with finish so the caller cannot end the batch span
 	// before an accepted completion has been recorded.
 	traceMultiSearchCompletion(b.TraceCtx(), i, label, code, duration)
+	metrics.ProxyMultiSearchSubrequestsTotal.WithLabelValues(b.nodeID, label).Inc()
 	b.mu.Unlock()
 	logMultiSearchCompletion(ctx, i, label, code, duration)
 }
 
 // finish is called once by RunMultiSearch, which owns final response accounting.
-func (b *MultiSearchTask) finish(ctx context.Context, unfinished error) []*milvuspb.SearchResults {
+func (b *MultiSearchTask) finish(ctx context.Context, unfinished error) ([]*milvuspb.SearchResults, error) {
 	b.mu.Lock()
 	// Transfer ownership to the caller. Late searches can no longer write
 	// slots or retain completed Search data while they unwind.
 	results := b.results
 	b.results = nil
+	resultBytes, limitErr := b.resultBytes, b.resultLimitErr
 	duration := time.Since(b.startedAt)
 	b.mu.Unlock()
+	if limitErr != nil {
+		return nil, limitErr
+	}
 
+	// Check the full envelope before publishing or recording synthesized slots.
+	var unfinishedResult *milvuspb.SearchResults
+	var unfinishedBytes uint64
+	for _, result := range results {
+		if result != nil {
+			continue
+		}
+		if unfinishedResult == nil {
+			unfinishedResult = &milvuspb.SearchResults{Status: merr.Status(unfinished)}
+			unfinishedBytes = multiSearchResultSize(unfinishedResult)
+		}
+		resultBytes += unfinishedBytes
+		if resultBytes > b.maxResultBytes {
+			return nil, multiSearchResultLimitError(b.maxResultBytes, resultBytes, false)
+		}
+	}
 	for i, result := range results {
-		isUnfinished := result == nil
-		if isUnfinished {
-			result = &milvuspb.SearchResults{Status: merr.Status(unfinished)}
-			results[i] = result
+		if result != nil {
+			continue
 		}
-		label, code := multiSearchResultLabel(result.GetStatus())
-		if isUnfinished {
-			traceMultiSearchCompletion(ctx, i, label, code, duration)
-			logMultiSearchCompletion(ctx, i, label, code, duration)
-		}
+		results[i] = proto.CloneOf(unfinishedResult)
+		label, code := multiSearchResultLabel(unfinishedResult.GetStatus())
+		traceMultiSearchCompletion(ctx, i, label, code, duration)
+		logMultiSearchCompletion(ctx, i, label, code, duration)
 		metrics.ProxyMultiSearchSubrequestsTotal.WithLabelValues(b.nodeID, label).Inc()
 	}
-	return results
+	return results, nil
 }
-
-type multiSearchDQLAdmissionKey struct{}
-
-type multiSearchDQLAdmission struct{ rejected bool }
 
 func (b *MultiSearchTask) runItem(ctx context.Context, index int, prepare MultiSearchPrepare, execute MultiSearchExecute) *milvuspb.SearchResults {
 	request, err := prepare(ctx)
@@ -290,17 +376,15 @@ func (b *MultiSearchTask) runItem(ctx context.Context, index int, prepare MultiS
 	}
 	var result *milvuspb.SearchResults
 	var reason string
-	admission := multiSearchDQLAdmission{}
-	ctx = context.WithValue(ctx, multiSearchDQLAdmissionKey{}, &admission)
 	// Keep the native response. retry.Handle may return an earlier error
 	// when a later attempt stops on a context error.
 	_ = retry.Handle(ctx, func() (bool, error) {
 		if !b.startAttempt(ctx, index, reason) {
 			return false, nil
 		}
-		admission.rejected = false
+		attemptCtx, rejected := scheduler.WithDQLAdmissionTracking(ctx)
 		var err error
-		result, err = execute(ctx, copySearchRequestForAttempt(request))
+		result, err = execute(attemptCtx, copySearchRequestForAttempt(request))
 		if err != nil {
 			result = &milvuspb.SearchResults{Status: multiSearchErrorStatus(err)}
 		}
@@ -318,7 +402,7 @@ func (b *MultiSearchTask) runItem(ctx context.Context, index int, prepare MultiS
 			logMultiSearchRejection(ctx, index, reason)
 			return true, merr.ErrServiceRateLimit
 		case merr.Code(merr.ErrServiceTooManyRequests):
-			if admission.rejected {
+			if rejected.Load() {
 				reason = multiSearchRetryQueueFull
 				logMultiSearchRejection(ctx, index, reason)
 				return true, merr.ErrServiceTooManyRequests

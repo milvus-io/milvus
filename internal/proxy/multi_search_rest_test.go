@@ -23,6 +23,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,6 +37,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -42,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
@@ -162,6 +166,118 @@ func recordMultiSearch(t *testing.T, handler http.Handler, payload io.Reader, re
 	var body multiSearchRESTResponse
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 	return response.Code, body
+}
+
+func TestMultiSearchRESTRejectsBatchLimits(t *testing.T) {
+	result := successfulSearchResult()
+	var prepared, executed int
+	p := newMultiSearchHTTPProxy(t, func(context.Context, string) { prepared++ }, func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		executed++
+		return result, nil
+	})
+	handler := newMultiSearchRESTHandler(p)
+	post := func(payload, setting string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, multiSearchRESTPath, strings.NewReader(payload))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, req)
+		require.Equal(t, http.StatusOK, response.Code)
+		var body map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+		require.JSONEq(t, "1102", string(body["code"]))
+		require.NotContains(t, body, "data")
+		require.Contains(t, string(body["message"]), setting)
+	}
+	// Reject the size before trying to parse the unrecognized last item.
+	post(`{"requests":[`+strings.Repeat(readySearch+",", 256)+`null]}`, "maxBatchSize")
+	require.Zero(t, prepared)
+	require.Zero(t, executed)
+
+	size := proto.Size(&milvuspb.MultiSearchResponse{Status: merr.Success(), Results: []*milvuspb.SearchResults{result}})
+	params := paramtable.Get()
+	key := params.ProxyCfg.MultiSearchMaxResultBytes.Key
+	require.NoError(t, params.Save(key, strconv.Itoa(size-1)))
+	t.Cleanup(func() { require.NoError(t, params.Reset(key)) })
+	post(`{"requests":[`+readySearch+`]}`, "maxResultBytes")
+	require.Equal(t, 1, prepared)
+	require.Equal(t, 1, executed)
+}
+
+func TestMultiSearchRESTWritesSearchAccessLogs(t *testing.T) {
+	const filename = "multisearch-access.log"
+	logDir := t.TempDir()
+	params := paramtable.Get()
+	cfg := &params.ProxyCfg.AccessLog
+	for _, setting := range []struct{ key, value string }{
+		{cfg.LocalPath.Key, logDir},
+		{cfg.Filename.Key, filename},
+		{cfg.Enable.Key, "true"},
+	} {
+		require.NoError(t, params.Save(setting.key, setting.value))
+		t.Cleanup(func() { require.NoError(t, params.Reset(setting.key)) })
+	}
+	accesslog.InitAccessLogger(params)
+
+	hookutil.InitOnceHook()
+	hookutil.SetTestHook(multiSearchMetricsHook{
+		before: func(ctx context.Context, req any) (context.Context, error) {
+			if req.(*milvuspb.SearchRequest).GetCollectionName() == "blocked" {
+				return ctx, merr.ErrPrivilegeNotPermitted
+			}
+			return ctx, nil
+		},
+	})
+	t.Cleanup(func() { hookutil.SetTestHook(hookutil.DefaultHook{}) })
+	p := newMultiSearchHTTPProxy(t, nil, func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		if req.GetDbName() == "catalog" {
+			accesslog.SetActualConsistencyLevel(ctx, commonpb.ConsistencyLevel_Bounded)
+		} else {
+			accesslog.SetActualConsistencyLevel(ctx, commonpb.ConsistencyLevel_Eventually)
+		}
+		return successfulSearchResult(), nil
+	})
+	handler := newMultiSearchRESTHandler(p, accesslog.AccessLogMiddleware, httpserver.LoggerHandlerFunc())
+	payload := `{"requests":[
+		{"search":{"dbName":"catalog","collectionName":"papers","data":[[1,0]]}},
+		{"search":{"dbName":"archive","collectionName":"reports","data":[[1,0],[0,1]]}},
+		{"search":{"dbName":"catalog","collectionName":"blocked","data":[[1,0],[0,1],[1,1]]}}
+	]}`
+	status, body := recordMultiSearch(t, handler, strings.NewReader(payload), "")
+	require.Equal(t, http.StatusOK, status)
+	require.Zero(t, body.Code)
+	require.Len(t, body.Data, 3)
+	require.Zero(t, body.Data[0].Search.Code)
+	require.Zero(t, body.Data[1].Search.Code)
+	require.Equal(t, merr.Code(merr.ErrParameterInvalid), body.Data[2].Search.Code)
+
+	data, err := os.ReadFile(filepath.Join(logDir, filename))
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	require.Len(t, lines, 4)
+	require.Contains(t, lines[3], multiSearchRESTPath+" [status: Successful]")
+	require.NotContains(t, lines[3], "[database:")
+	for _, tc := range []struct {
+		db, collection, nq, consistency, outcome string
+	}{
+		{"catalog", "papers", "1", "Bounded", "Successful"},
+		{"archive", "reports", "2", "Eventually", "Successful"},
+		{"catalog", "blocked", "3", "", "GrpcInvalidArgument"},
+	} {
+		var entry string
+		for _, line := range lines[:3] {
+			if strings.Contains(line, "[collection: "+tc.collection+"]") {
+				entry = line
+				break
+			}
+		}
+		require.Contains(t, entry, " Search [status: "+tc.outcome+"]")
+		require.Contains(t, entry, "[database: "+tc.db+"]")
+		require.Contains(t, entry, "[nq: "+tc.nq+"]")
+		require.Contains(t, entry, "[timeCost:")
+		if tc.consistency != "" {
+			require.Contains(t, entry, "[consistency_level: "+tc.consistency+"]")
+		}
+	}
 }
 
 func TestMultiSearchRESTExplicitZeroBudget(t *testing.T) {
@@ -305,10 +421,13 @@ func TestMultiSearchRESTDeliversPartialResultsAfterExpiry(t *testing.T) {
 	})
 }
 
-type slowMultiSearchReader struct{ io.Reader }
+type slowMultiSearchReader struct {
+	io.Reader
+	delay time.Duration
+}
 
 func (r slowMultiSearchReader) Read(p []byte) (int, error) {
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(r.delay)
 	return r.Reader.Read(p)
 }
 
@@ -323,12 +442,24 @@ func TestMultiSearchRESTBudgetStartsBeforeDecode(t *testing.T) {
 			return successfulSearchResult(), nil
 		})
 		handler := newMultiSearchRESTHandler(p)
-		for _, payload := range []string{
-			`{"requests":[` + readySearch + `]}`,
-			`{"timeoutMs":5,"requests":[` + readySearch + `]}`,
+		for _, tc := range []struct {
+			timeout, header string
+			readDelay       time.Duration
+			wantHTTP        int
+		}{
+			{readDelay: 10 * time.Millisecond, wantHTTP: http.StatusOK},
+			{timeout: `"timeoutMs":5,`, readDelay: 10 * time.Millisecond, wantHTTP: http.StatusOK},
+			{header: "1", readDelay: 2 * time.Second, wantHTTP: http.StatusOK},
+			{timeout: `"timeoutMs":5000,`, header: "1", readDelay: 2 * time.Second, wantHTTP: http.StatusRequestTimeout},
 		} {
-			status, body := recordMultiSearch(t, handler, slowMultiSearchReader{strings.NewReader(payload)}, "")
-			require.Equal(t, http.StatusOK, status)
+			payload := `{` + tc.timeout + `"requests":[` + readySearch + `]}`
+			status, body := recordMultiSearch(t, handler, slowMultiSearchReader{strings.NewReader(payload), tc.readDelay}, tc.header)
+			require.Equal(t, tc.wantHTTP, status)
+			if status == http.StatusRequestTimeout {
+				require.Equal(t, merr.TimeoutCode, body.Code)
+				require.Empty(t, body.Data)
+				continue
+			}
 			require.Zero(t, body.Code)
 			require.Len(t, body.Data, 1)
 			require.Equal(t, merr.TimeoutCode, body.Data[0].Search.Code)
@@ -404,27 +535,79 @@ func TestMultiSearchRESTTransportDeadlineEndsCall(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		timeoutField string
+		wantHTTP     int
 	}{
-		{name: "header before body", timeoutField: `"timeoutMs":5000,`},
-		{name: "header only"},
+		{name: "header before body", timeoutField: `"timeoutMs":5000,`, wantHTTP: http.StatusRequestTimeout},
+		{name: "header only", wantHTTP: http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				canceled := make(chan error, 1)
-				p := newMultiSearchHTTPProxy(t, nil, func(ctx context.Context, _ *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-					<-ctx.Done()
-					canceled <- ctx.Err()
+				p := newMultiSearchHTTPProxy(t, nil, func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+					if req.GetCollectionName() == "slow" {
+						<-ctx.Done()
+						canceled <- ctx.Err()
+					}
 					return successfulSearchResult(), nil
 				})
-				payload := `{` + tc.timeoutField + `"requests":[` + readySearch + `]}`
+				payload := `{` + tc.timeoutField + `"maxConcurrency":1,"requests":[` + readySearch +
+					`,{"search":{"collectionName":"slow","data":[[1,0]]}},` + readySearch + `]}`
 				start := time.Now()
 				status, body := recordMultiSearch(t, newMultiSearchRESTHandler(p), strings.NewReader(payload), "1")
 				require.Equal(t, time.Second, time.Since(start))
-				require.Equal(t, http.StatusRequestTimeout, status)
-				require.Equal(t, merr.TimeoutCode, body.Code)
-				require.Empty(t, body.Data)
+				require.Equal(t, tc.wantHTTP, status)
+				if status == http.StatusRequestTimeout {
+					require.Equal(t, merr.TimeoutCode, body.Code)
+					require.Empty(t, body.Data)
+				} else {
+					require.Zero(t, body.Code)
+					require.Len(t, body.Data, 3)
+					require.Zero(t, body.Data[0].Search.Code)
+					require.NotEmpty(t, body.Data[0].Search.Data)
+					require.Equal(t, merr.TimeoutCode, body.Data[1].Search.Code)
+					require.Equal(t, merr.TimeoutCode, body.Data[2].Search.Code)
+				}
 				require.ErrorIs(t, <-canceled, context.DeadlineExceeded)
 			})
+		})
+	}
+}
+
+func TestMultiSearchRESTHeaderTimeoutValues(t *testing.T) {
+	p := newMultiSearchHTTPProxy(t, func(context.Context, string) {
+		t.Error("prepared an item without an execution budget or with an invalid header")
+	}, nil)
+	handler := newMultiSearchRESTHandler(p)
+	for _, tc := range []struct {
+		name, header, timeout string
+		status                int
+		code                  int32
+	}{
+		{name: "zero execution budget", header: "0", status: http.StatusOK},
+		{name: "zero transport deadline", header: "0", timeout: `"timeoutMs":5000,`, status: http.StatusRequestTimeout, code: merr.TimeoutCode},
+		{name: "negative", header: "-1", status: http.StatusOK, code: merr.Code(merr.ErrParameterInvalid)},
+		{name: "invalid", header: "1.5", status: http.StatusOK, code: merr.Code(merr.ErrParameterInvalid)},
+		{name: "empty", status: http.StatusOK, code: merr.Code(merr.ErrParameterInvalid)},
+		{name: "duration overflow", header: "9223372037", status: http.StatusOK, code: merr.Code(merr.ErrParameterInvalid)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := `{` + tc.timeout + `"requests":[` + readySearch + `,` + readySearch + `]}`
+			req := httptest.NewRequest(http.MethodPost, multiSearchRESTPath, strings.NewReader(payload))
+			req.Header.Set(mhttp.HTTPHeaderRequestTimeout, tc.header)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, req)
+			require.Equal(t, tc.status, response.Code)
+			var body multiSearchRESTResponse
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+			require.Equal(t, tc.code, body.Code)
+			if tc.code != 0 {
+				require.Empty(t, body.Data)
+				return
+			}
+			require.Len(t, body.Data, 2)
+			for _, item := range body.Data {
+				require.Equal(t, merr.TimeoutCode, item.Search.Code)
+			}
 		})
 	}
 }
@@ -491,30 +674,22 @@ func (w blockedMultiSearchResponseWriter) FlushError() error {
 func TestMultiSearchRESTTransportDeadlineInterruptsFlush(t *testing.T) {
 	for _, test := range []struct {
 		name, payload string
-		capacity      int
-		status        int
 		code          int32
 	}{
-		{"valid batch", `{"requests":[{"search":{}}],"timeoutMs":0}`, 1, http.StatusOK, 0},
-		{"decode failure", "{", 1, http.StatusOK, merr.Code(merr.ErrIncorrectParameterFormat)},
-		{"invalid batch", `{"requests":[]}`, 1, http.StatusOK, merr.Code(merr.ErrParameterMissing)},
-		{"admission rejection", "{", 0, http.StatusTooManyRequests, merr.Code(merr.ErrServiceTooManyRequests)},
+		{"valid batch", `{"requests":[{"search":{}}],"timeoutMs":0}`, 0},
+		{"invalid batch", `{"requests":[],"timeoutMs":100}`, merr.Code(merr.ErrParameterMissing)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				handler := newMultiSearchRESTHandler(proxy.NewMultiSearchTestProxy(t, test.capacity, 1))
+				handler := newMultiSearchRESTHandler(proxy.NewMultiSearchTestProxy(t, 1, 1))
 				req := httptest.NewRequest(http.MethodPost, multiSearchRESTPath, strings.NewReader(test.payload))
 				req.Header.Set(mhttp.HTTPHeaderRequestTimeout, "1")
 				response := blockedMultiSearchResponseWriter{httptest.NewRecorder(), make(chan struct{})}
 				require.PanicsWithValue(t, http.ErrAbortHandler, func() {
 					handler.ServeHTTP(response, req)
 				})
-				require.Equal(t, test.status, response.Code)
+				require.Equal(t, http.StatusOK, response.Code)
 				require.Contains(t, response.Header().Get("Content-Type"), "application/json")
-				if test.status == http.StatusTooManyRequests {
-					require.Equal(t, "1", response.Header().Get("Retry-After"))
-					require.Equal(t, "Retry-After", response.Header().Get("Access-Control-Expose-Headers"))
-				}
 				var body multiSearchRESTResponse
 				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 				require.Equal(t, test.code, body.Code)

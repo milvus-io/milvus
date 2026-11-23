@@ -12,7 +12,7 @@
 
 Add `MilvusService.MultiSearch` (gRPC) and `POST /v2/vectordb/entities/multi_search` (REST V2) to execute an ordered batch of independent ordinary `Search` requests inside one call. Each item can target any database and collection, carries its own search parameters and query vectors (`nq`), and returns either its complete native Search result or its own error in the original input position.
 
-The Proxy orchestrates batches on a dedicated, bounded `MSearchQueue` (64 waiting slots, 8 fixed workers) outside the DQL worker pool, dispatches items under a server-capped per-batch concurrency window (`proxy.multiSearch.maxConcurrency`, default `16`), enforces ordinary per-item Search RBAC and quota checks, retries transient rate-limit and local DQL queue-full rejections within a shared execution budget, integrates with `ListRunningRequests` and `CancelRequests` as one stable batch entry, and exposes dedicated batch, subrequest, attempt, and retry metrics.
+The Proxy orchestrates batches on a dedicated `MSearchQueue` (64 waiting slots, 8 workers) outside the DQL worker pool. A batch accepts up to 256 items and 64 MiB of uncompressed protobuf response data by default. Up to 16 items per batch can be active at once. Each item keeps ordinary Search authorization and quota checks, with retries for transient rate limits and main DQL queue saturation within a shared execution budget. `ListRunningRequests` and `CancelRequests` use one stable batch entry.
 
 **Scope (v1):** Ordinary `Search` items only. `Query` and `HybridSearch` sub-requests, cross-item result union or reranking, same-collection execution-layer batching, a dedicated MultiSearch RBAC privilege, a Proxy-global retained response memory budget, and quota refunds on queue rejection are out of scope.
 
@@ -61,9 +61,10 @@ message MultiSearchResponse {
 | --- | --- | --- |
 | Entry point | `MilvusService.MultiSearch` | `POST /v2/vectordb/entities/multi_search` |
 | Search list | `requests[]` (`repeated SearchRequest`) | `requests[].search` (each wraps a V2 Search object) |
+| Batch database fallback | `dbname` request metadata | Top-level `dbName`, then the `DB-Name` header |
 | Requested in-flight concurrency | `max_concurrency` (`uint32`, 0 = default 4) | `maxConcurrency` (`uint32`, 0 = default 4) |
 | Optional execution budget (ms) | `timeout_ms` (`optional int64`) | `timeoutMs` (`*int64`) |
-| Transport deadline | Caller gRPC context deadline | `Request-Timeout` HTTP header (integer seconds) |
+| Transport deadline | Caller gRPC context deadline | `Request-Timeout` (integer seconds) when `timeoutMs` is also supplied |
 | Batch status | `status` (`common.Status`) | `code` / `message` |
 | Ordered item results | `results[]` (`repeated SearchResults`) | `data[].search` (native V2 Search response per item) |
 
@@ -71,6 +72,7 @@ Example REST request:
 
 ```json
 {
+  "dbName": "catalog",
   "requests": [
     {"search": {"collectionName": "papers", "data": [[1, 0], [0, 1]], "limit": 5}},
     {"search": {"dbName": "archive", "collectionName": "guidelines", "data": [[1, 0]], "limit": 3}}
@@ -99,6 +101,10 @@ Each item retains ordinary Search response rules, including multi-vector `nq` gr
 | Key | Default | Refreshable | Description |
 | --- | --- | --- | --- |
 | `proxy.multiSearch.maxConcurrency` | `16` | Yes | Maximum number of active Search items per MultiSearch batch for both gRPC and REST. Values below `1` fall back to `1`. |
+| `proxy.multiSearch.maxBatchSize` | `256` | Yes | Maximum number of Search items per batch. |
+| `proxy.multiSearch.maxResultBytes` | `67108864` (64 MiB) | Yes | Maximum uncompressed protobuf response size per batch, including status. Applies to both transports. |
+
+The item and byte limits require positive integers. Non-positive, malformed, and overflowing values use the corresponding defaults.
 
 ### Error Isolation Boundaries
 
@@ -106,9 +112,11 @@ Each item retains ordinary Search response rules, including multi-vector `nq` gr
 | --- | --- | --- |
 | **Pre-decode admission (REST)** | `MSearchQueue` is full | Rejects the batch before body decoding with HTTP `429`, `Retry-After: 1`, and `ErrServiceTooManyRequests`; zero subrequests start. |
 | **Batch validation & auth** | Invalid credentials, empty `requests`, invalid `timeoutMs`/`timeout_ms` (`< 0` or `> 9,223,372,036,854`), invalid `Request-Timeout` header, REST item without a single recognized `{"search": {...}}` object (e.g. `{}` or `{"query": {}}`), Proxy unhealthy, or `MSearchQueue` full at enqueue | Rejects the batch before any subrequest runs. Outer status is non-Success (`HTTP 401` on missing auth, `HTTP 429` on queue full, `HTTP 200` + error `code` on validation error; gRPC `Unauthenticated` / outer error `status`) and `results`/`data` is empty. |
+| **Batch size or response budget** | More than `maxBatchSize` items or a response larger than `maxResultBytes` | Returns outer non-retriable `ErrParameterTooLarge` (`1102`). gRPC returns transport OK with empty `results`. REST returns HTTP 200 without `data`. The item limit rejects before preparation or enqueue. The byte limit stops dispatch and cancels in-flight items. |
 | **Operator cancellation** | `CancelRequests` targeting the batch's `request_id` | Stops dispatch, cancels in-flight preparation/searches/retries, returns outer non-retriable `RequestCanceled` (`3002`) with cancel reason and empty `results`/`data`. |
-| **Per-item preparation & execution** | Malformed fields inside REST `{"search": {...}}` (e.g. `{"search": {}}`), empty/nil gRPC `SearchRequest`, hybrid `sub_reqs` in an item, NQ validation/mismatch error, missing collection, RBAC `PermissionDenied`, exhausted rate-limit/DQL-queue-full retries, or execution budget expiry | Recorded at that item's index as a native failed `SearchResults` (no partial result data). Sibling items continue unaffected. |
-| **Transport / delivery failure** | Client disconnect, parent gRPC deadline exceeded, REST `Request-Timeout` exceeded, or oversized aggregated response | Ends the call as a batch delivery failure (REST `HTTP 408` / aborted stream; gRPC transport error). The server never drops or truncates successful items to shrink the response. |
+| **Per-item preparation & execution** | Malformed Search fields, empty/nil gRPC `SearchRequest`, hybrid `sub_reqs`, NQ validation, missing collection, RBAC `PermissionDenied`, exhausted retries, or a panic in item preparation or execution | Returns a failed `SearchResults` at that item's index. A recovered panic returns `ErrServiceInternal` and leaves siblings eligible to finish. |
+| **Execution budget expiry** | Batch execution deadline reached while the transport is open | The Proxy returns completed results and fills unfinished slots with `10001`, subject to the same response byte limit. |
+| **Transport / delivery failure** | Client disconnect, parent gRPC deadline exceeded, or REST hard deadline exceeded | Ends delivery with a gRPC transport error, HTTP `408`, or an interrupted HTTP response after commitment. |
 
 ## Design Details
 
@@ -141,12 +149,14 @@ flowchart LR
 2. **Decoupled DQL subtask scheduling (`#55710` / `#55711`):**
    Ordinary Search tasks synchronously enqueue internal `requery` or lexical `highlight` subtasks while holding a main DQL worker. Splitting subtasks onto their own bounded queue (`proxy.maxTaskNum`), dispatch loop, and worker pool inside `DqTaskQueue` prevents the main DQL dispatcher from blocking on a full main pool ahead of the subtasks needed to free it. Because this also fixes a pre-existing deadlock path for ordinary Search and Query on `master`, `2.6`, and `3.0`, it has been extracted into standalone issue [#55710](https://github.com/milvus-io/milvus/issues/55710) and PR [#55711](https://github.com/milvus-io/milvus/pull/55711).
 
-3. **Result ownership and completion race safety:**
-   `PreExecute` validates the execution context and computes effective batch concurrency; `Execute` drives the bounded `errgroup` and records accepted outcomes via `complete()`; `PostExecute` is empty. `RunMultiSearch` is the sole caller of `finish()`, which takes ownership of `results` under mutex (`b.results = nil`), fills any unfinished slots with timeout/error status, and records subrequest terminal metrics once. Late-finishing Searches cannot overwrite frozen slots, retain result memory, or double-count metrics or trace events.
+3. **Result ownership and completion:**
+   `PreExecute` validates the execution context and computes effective concurrency. `Execute` waits for a slot with the batch context and recovers panics inside each item goroutine. It logs the item index, batch task ID, and stack, and publishes an internal error through `complete()`.
+   A result's protobuf size is computed outside the mutex. Under the mutex, `complete()` adds the repeated field tag, length prefix, and full Search result, including failed results, to the initial size of the outer success Status. Equality is allowed. The first completion above the limit records `1102`, releases the retained result references, and cancels the batch context. `RunMultiSearch` reads the stored error before interpreting that internal cancellation.
+   `finish()` takes ownership of the result slots under the same mutex. It includes the synthesized timeout statuses in the same byte budget and returns `1102` if the final response would exceed it. Late completions have no writable slots. A worker remains occupied until its in-flight items exit.
 
 ### Database Resolution, Authorization, and NQ / Quota Accounting
 
-- **DB precedence & context isolation:** Each item resolves its target DB in strict order: (1) item `db_name`/`dbName`, (2) call-level gRPC metadata `dbname` / HTTP `DB-Name` header, (3) `default`. Resolution runs before schema lookup, alias resolution, RBAC, quota scope lookup, and `Proxy.Search`. When all items specify an explicit DB, an unused call-level DB is never checked for existence or privileges. Each item derives an isolated context from the authenticated parent with its own incoming `dbname` metadata, independent `*metrics.RPCStats`, independent `accesslog` info, and independent `RequestMetrics` scope while preserving caller identity and trace context.
+- **DB precedence and context isolation:** REST resolves each target from item `search.dbName`, top-level `dbName`, the `DB-Name` header, then `default`. gRPC uses item `db_name`, `dbname` metadata, then `default`. Schema, alias, privilege, and quota lookups run against the selected DB. When every item supplies a DB, only those DBs are checked. Each item carries its own DB metadata, RPC stats, access log information, and request metrics while preserving the caller identity and trace.
 - **Per-item authorization:** Authentication runs once at batch entry. Every item then checks ordinary `Search` privileges via `PrivilegeInterceptorWithMetaCache` against its resolved DB and collection—including on schema cache hits—so items can be authorized by different roles held by the same user, and cross-DB same-name collections are checked independently. Unary gRPC `PermissionDenied` is translated into an item-level `ErrPrivilegeNotPermitted` status.
 - **NQ validation & alignment with `#55744`:**
   - `NormalizeMultiSearchNQ` (`internal/proxy/dql/search_util.go`) validates every item before Search execution or quota checks: rejects hybrid `sub_reqs` and negative `nq`; for `SearchRequest_Ids`, validates at least one ID and `validateNQLimit` and sets `request.Nq` to the PK count so rate limiting charges IDs before `transformSearchByPK` resolves them; for `PlaceholderGroup`, shares `countPlaceholderGroupNQ` (wrapping `#55744`'s zero-allocation wire walker `funcutil.CountPlaceholderGroupValues` with `proto.Unmarshal` fallback for error diagnostics) and `validateDeclaredNq` with `resolveNq`, rejecting empty placeholder groups (even when `nq` is declared) and any `nq`/row-count mismatch with the same error semantics as `#55744`.
@@ -161,7 +171,7 @@ flowchart LR
   ```
   Requests asking for higher concurrency than `proxy.multiSearch.maxConcurrency` are accepted and scheduled under the cap, returning all items in input order. One active slot covers an item's full lifecycle—preparation (including REST schema lookup), quota check, DQL queueing, Search execution, and retry backoff—until it reaches a terminal result.
 - **Proxy-wide DQL pressure bound:** With `8` MSearch workers and factory `proxy.multiSearch.maxConcurrency = 16`, all MultiSearch batches combined can hold at most **`8 × 16 = 128`** active Searches on a Proxy—`12.5%` of the default `proxy.maxTaskNum = 1024` DQL queue. Items beyond the sliding window stay as lightweight preparer closures and do not enter `DqQueue` until an active slot finishes.
-- **Per-item retry policy:** Batch-level retry triggers **only** on `ErrServiceRateLimit` (`1807`) and **local Proxy** DQL admission rejections (`ErrServiceTooManyRequests` marked by `scheduler.IsAdmissionQueueFull`). Downstream QueryNode `TooManyRequests`, `force-deny` (`ErrServiceQuotaExceeded`), RBAC denials, parameter errors, and `InputError`-marked errors terminate the item immediately.
+- **Per-item retry policy:** Batch-level retry triggers only on `ErrServiceRateLimit` (`1807`) and `ErrServiceTooManyRequests` from main Proxy DQL admission. The main queue sets the attempt marker for both the Search task and the vector lookup Query used by Search-by-PK. Subtask queue saturation, downstream QueryNode `TooManyRequests`, `force-deny`, RBAC denials, and input errors terminate the item.
   - Up to `10` total attempts (1 initial + 9 retries), exponential backoff starting at `200 ms` and capping at `3 s` (`pkg/v3/util/retry` defaults, no jitter).
   - Each attempt clones a clean request (`copySearchRequestForAttempt`, preserving `RlsPrincipal`/`SkipRls`), re-runs authorization/hook/quota checks for the item's resolved target and NQ, and shares the batch execution deadline.
   - If the next backoff does not fit in the remaining budget while `executionCtx` is still live, the item stops retrying and preserves its last refusal status; once `executionCtx` expires, unfinished items finalize as timeout (`10001`).
@@ -174,17 +184,17 @@ An explicit execution budget (`timeout_ms` / `timeoutMs`) accepts whole millisec
 execution_deadline = batch_received_at + execution_budget
 ```
 
-| Transport | Body Budget (`timeout_ms` / `timeoutMs`) | Transport Deadline (`Request-Timeout` / gRPC deadline) | Effective Execution Budget | Behavior on Expiry |
+| Transport | Body Budget (`timeout_ms` / `timeoutMs`) | Header or RPC Deadline | Effective Execution Budget | Behavior on Expiry |
 | --- | --- | --- | --- | --- |
 | **REST** | Omitted | Omitted | `proxy.http.requestTimeoutMs` (default `30,000 ms`) from batch receipt | Stops dispatch, cancels in-flight items, returns `HTTP 200` (`code: 0`) with completed items + `10001` for unfinished/unstarted items. |
 | **REST** | `0` | Omitted | `0 ms` (expires at receipt) | Immediately returns `HTTP 200` (`code: 0`) with `10001` for every item. |
 | **REST** | Explicit `T > 0` (including `> 30 s`) | Omitted | `T ms` from batch receipt (overrides default 30 s) | Returns `HTTP 200` (`code: 0`) with completed items + `10001` for remaining items when `T` elapses. |
-| **REST** | Omitted | `Request-Timeout: H` (seconds) | None (governed by transport deadline `H s`) | If `H s` expires before delivery completes, returns `HTTP 408` (`code: 10001`, empty `data`) or aborts the connection if response headers were already committed. |
-| **REST** | Explicit `T` | `Request-Timeout: H` | `T ms` execution budget; `H s` transport deadline | Whichever expires first: `T` first → `HTTP 200` partial results + `10001`; `H` first (including during response write/flush) → `HTTP 408` / transport abort. |
+| **REST** | Omitted | `Request-Timeout: H` (seconds) | `H s` from batch receipt | Returns `HTTP 200` with completed items and per-item `10001` for unfinished work. `H = 0` times out every item. |
+| **REST** | Explicit `T` | `Request-Timeout: H` | `T ms` execution budget and `H s` hard transport deadline | The execution deadline can produce a partial response. The hard deadline applies through body reading, execution, JSON encoding, write, and flush. Expiry yields HTTP `408` before commitment or ends delivery after commitment. |
 | **gRPC** | Omitted | Optional gRPC deadline | None (inherits parent gRPC deadline) | Runs until all items finish or parent deadline/cancel ends the RPC with gRPC transport error. |
 | **gRPC** | Explicit `T >= 0` | Optional gRPC deadline | `T ms` from receipt | `T` expires while parent RPC is alive → outer `Success` with completed items + per-item `10001`. Parent deadline/cancel fires first → gRPC transport error (`DeadlineExceeded` / `Canceled`). |
 
-Whenever all items reach a terminal state before the deadline, the Proxy returns immediately.
+`Request-Timeout` accepts whole seconds in `[0, 9,223,372,036]`. An invalid value returns `ErrParameterInvalid`. REST reads the body once to determine whether the header sets the execution budget or the transport deadline. When both values are supplied, a body that finishes reading after the hard deadline gets HTTP `408` before dispatch. When execution finishes within budget, the Proxy proceeds to response delivery immediately.
 
 ### List and cancel
 
@@ -199,25 +209,26 @@ Outer `Success` indicates a valid ordered response list rather than all items su
 
 | Metric Name | Type | Labels | Semantics |
 | --- | --- | --- | --- |
-| `milvus_proxy_multisearch_batches_total` | Counter | `node_id`, `result` (`all_success`, `partial_success`, `all_failed`, `batch_failed`) | Incremented once per `RunMultiSearch` call. Outer success classifies by item outcomes; outer error (including queue full or `CancelRequests`) records `batch_failed`. |
-| `milvus_proxy_multisearch_subrequests_total` | Counter | `node_id`, `result` (`success`, `failed`, `timeout`, `cancelled`) | Incremented once per item at finalization. Retries and late-finishing Searches never double-count terminal outcomes. |
+| `milvus_proxy_multisearch_batches_total` | Counter | `node_id`, `result` (`all_success`, `partial_success`, `all_failed`, `batch_failed`) | Incremented once per `RunMultiSearch` call. Outer success classifies by item outcomes. Response budget exhaustion, queue rejection at enqueue, and operator cancellation record `batch_failed`. |
+| `milvus_proxy_multisearch_subrequests_total` | Counter | `node_id`, `result` (`success`, `failed`, `timeout`, `cancelled`) | Incremented once when a completion is accepted or an unfinished slot is finalized within budget. |
 | `milvus_proxy_multisearch_attempts_total` | Counter | `node_id` | Incremented every time a Search attempt starts (initial attempt + retries). Pre-initialized at Proxy startup. |
 | `milvus_proxy_multisearch_retries_total` | Counter | `node_id`, `reason` (`rate_limit`, `queue_full`) | Incremented only when an additional retry attempt starts (not on initial attempts or terminal refusals that trigger no further retry). Pre-initialized at Proxy startup. |
 
 - **Existing entry metrics:** `milvus_proxy_req_count` (`ProxyFunctionCall`) records outer `MultiSearch` with empty `database`, `collection`, and `resource_group` labels; each child Search attempt owns an isolated `RequestMetrics` scope recording `method="Search"` with its resolved `database`, `collection`, and hook-assigned `resource_group` (including refusals and retries) without leaking into the outer batch. gRPC `milvus_proxy_grpc_latency` (`function_name="MultiSearch"`) and REST `milvus_proxy_restful_api_req_count` / `milvus_proxy_restful_api_req_latency` (`path="/v2/vectordb/entities/multi_search"`) track entry volume and latency.
-- **Traces & debug logs:** The `Proxy-MultiSearch` OTel span records `result`, `code`, `size`, `succeeded`, and `duration_ms` attributes, plus one `MultiSearch subrequest finished` span event per item (`index`, `result`, `code`, `duration_ms`) emitted immediately on accepted completion (or at finalization for unfinished items). Rate-limited debug logs record subrequest rejections, retries, and completions with item `index`.
+- **Access logs:** Each Search attempt writes its own entry on gRPC and REST when access logging is enabled. REST includes authorization, quota, and hook refusals. The Search formatter records the selected DB, collection, NQ, consistency level, status, and duration. The outer batch has its own entry.
+- **Traces and debug logs:** The `Proxy-MultiSearch` span records the batch outcome, including `1102` for an oversized response. Each accepted completion or finalized slot emits one event with the item index, result, code, and duration. Rate-limited debug logs record refusals, retries, and completions.
 
 ## Compatibility, Deprecation, and Migration Plan
 
 - **Wire & API compatibility:** Purely additive (`MilvusService.MultiSearch` gRPC RPC and `POST /v2/vectordb/entities/multi_search` REST route). No existing Search, HybridSearch, Query, or RBAC contract is changed.
 - **Rolling upgrades:** Clients calling a Proxy that predates MultiSearch receive gRPC `Unimplemented` (or HTTP 404 on REST). No mixed-version partial execution can occur.
-- **Configuration:** `proxy.multiSearch.maxConcurrency` defaults to `16` and is hot-refreshable; existing deployments require no migration.
+- **Configuration:** The three batch limits support hot refresh. New batches use the current configuration without a data migration.
 - **Replication / CDC:** MultiSearch is a read-only DQL operation that produces no WAL writes or persistent metadata mutations, so no replication changes are required.
 
 ## Known Limits
 
-- **Retained response memory:** Completed `SearchResults` remain in memory until the batch finishes and serializes. Per-Search `nq`/`topk` limits bound individual items, and gRPC `serverMaxRecvSize`/`serverMaxSendSize` bound wire messages, but v1 has no Proxy-global result memory budget and REST does not automatically inherit gRPC message size caps.
-- **No hard batch item-count cap in v1:** Active DQL pressure is bounded by `proxy.multiSearch.maxConcurrency` × `8` MSearch workers (`128` active Searches/Proxy by default) and execution budgets rather than a hard item count; very large batches with large per-item payloads can still accumulate response memory until completion or timeout.
+- **Default split points:** Split requests at 256 items or when their combined response would exceed 64 MiB. If one Search alone exceeds 64 MiB, reduce its `nq`, `topK`, or `outputFields`.
+- **Proxy memory and transport:** The byte limit applies to one batch's uncompressed protobuf response. Search allocates result data before it can be measured, REST JSON can be larger than protobuf, and concurrent and encoding batches consume additional memory. The gRPC message-size settings still apply at transport.
 - **Per-attempt quota charging:** Rate-limit tokens are charged on each Search attempt (consistent with ordinary Search); a DQL queue-full rejection does not refund tokens already consumed by the rate limiter.
 - **Asynchronous cancellation:** Returning `3002` (operator cancel) or `10001` (budget expiry) does not guarantee that every QueryNode has already finished unwinding; the MSearch worker stays occupied until in-flight child Searches exit so slow cancellation cannot create unbounded detached work.
 
@@ -227,11 +238,12 @@ Outer `Success` indicates a valid ordered response list rather than all items su
 
 - **Search parity and ordering:** Compare gRPC and REST MultiSearch against ordinary Search across single-collection, cross-collection, cross-database (including same-name collections), and multi-NQ queries; verify input-order preservation under out-of-order completion, valid empty hits, and mixed or all-item failures.
 - **Error isolation and compatibility:** Verify whole-batch rejection before execution (invalid auth, empty batch, malformed REST items, full `MSearchQueue` pre-decode 429) versus per-item isolation (bad Search fields, NQ validation/mismatch, hybrid `sub_reqs`, missing targets), as well as `Unimplemented` handling against older Proxies.
-- **Database, RBAC, and quota accounting:** Verify DB precedence and unused header-DB isolation, per-item Search RBAC (including schema cache hits and multi-role users), and per-attempt quota charging for both vector and primary-key searches.
+- **Database, RBAC, and quota accounting:** Verify REST body and header precedence, unused DB fallback isolation, per-item Search RBAC, and per-attempt quota charging for vector and primary-key searches. Check the REST Search access log fields and refusals independently of the outer log.
+- **Batch limits:** Check 256/257 items, exact response byte size and one byte over, failure and timeout slots, single-item guidance, and one Go client RPC for `1102`.
 
 ### Concurrency, Scheduling, and Lifecycle
 
-- **Queue isolation and concurrency limits:** Verify `MSearchQueue` capacity and slot reclamation, DQL queue-full recovery through per-item retry, independent DQL subtask (`requery`/`highlight`) progress under a saturated main pool, and `proxy.multiSearch.maxConcurrency` enforcement across omitted, zero, explicit, below-default, non-positive, and over-cap requests.
+- **Queue isolation and concurrency limits:** Verify `MSearchQueue` capacity and slot reclamation, vector and Search-by-PK retry after main queue saturation, separate subtask admission, and concurrency settings. Inject a panic into preparation and execution and check sibling results.
 - **Execution budgets and cancellation:** Cover all REST and gRPC timeout combinations (including REST's default budget measured from receipt, explicit zero/longer budgets, and `Request-Timeout` precedence), partial-result finalization against late-finishing items, `ListRunningRequests`/`CancelRequests` across every lifecycle state, graceful scheduler shutdown, and single-count metrics/trace reporting under `-race`.
 
 ### Performance and Resource Validation
@@ -249,9 +261,9 @@ Executing parent batches on the shared DQL worker pool lets saturated parent bat
 
 Releasing a DQL worker while a batch waits on child Searches and reacquiring one on completion complicates task lifecycle, cancellation, and retry recovery, and still requires separating child admission from parent admission to avoid mutual waiting. Rejected in favor of a simple 8-worker `MSearchQueue`.
 
-### Enforcing a hard batch item-count limit (like `HybridSearch`'s 1,024 cap)
+### Bounding execution concurrency alone
 
-`HybridSearch` fans out all `sub_reqs` simultaneously inside a single `SearchTask` with no sliding concurrency window, so it must cap `len(sub_reqs)` at `1024`. MultiSearch instead bounds in-flight items with `errgroup.SetLimit(concurrency)` across `8` fixed MSearch workers (`8 × 16 = 128` max active Searches per Proxy by default, `12.5%` of the `1024` DQL queue) and bounds total execution time via execution budgets (including REST's 30 s default). Hard-capping item count would reject large batches that already execute safely under bounded concurrency and budgets. Deferred; an optional `proxy.multiSearch.maxBatchSize` guard can be added compatibly later if operators need a hard cap on retained response memory.
+Completed child results accumulate while later items run, and each response retains them through serialization. Two batches with the same concurrency can have very different item counts and payload sizes. The item and encoded byte limits cover these additional costs.
 
 ### Wrapping gRPC items in a `oneof` message (`MultiSearchSubRequest` / `MultiSearchSubResult`)
 

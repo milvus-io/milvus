@@ -21,8 +21,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"testing/synctest"
+	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace"
@@ -76,6 +80,52 @@ func TestMultiSearchRejectsAtEnqueue(t *testing.T) {
 	var body ReturnErrMsg
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 	require.Equal(t, merr.Code(merr.ErrServiceTooManyRequests), body.Code)
+}
+
+type blockedMultiSearchJSON struct {
+	started chan<- struct{}
+	release <-chan struct{}
+}
+
+func (v blockedMultiSearchJSON) MarshalJSON() ([]byte, error) {
+	close(v.started)
+	<-v.release
+	return []byte("null"), nil
+}
+
+func TestMultiSearchTransportDeadlineInterruptsEncoding(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started, release := make(chan struct{}), make(chan struct{})
+		releaseEncoding := sync.OnceFunc(func() { close(release) })
+		defer releaseEncoding()
+		respond := newDQLResponseMiddleware(dqlExplicitTransportTimeout)
+		router := gin.New()
+		router.POST("/", func(c *gin.Context) {
+			state := c.Request.Context().Value(dqlStreamKey{}).(*dqlStreamState)
+			respond(c, func(c *gin.Context) {
+				HTTPReturnStream(c, http.StatusOK, gin.H{
+					HTTPReturnCode: int32(0),
+					HTTPReturnData: blockedMultiSearchJSON{started, release},
+				})
+			}, state.receivedAt.Add(time.Second))
+		})
+		recorder := httptest.NewRecorder()
+		start := time.Now()
+		DQLStreamingHTTPHandler(router).ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/", nil))
+		require.Equal(t, time.Second, time.Since(start))
+		select {
+		case <-started:
+		default:
+			t.Fatal("response encoding did not start")
+		}
+		require.Equal(t, http.StatusRequestTimeout, recorder.Code)
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
+		require.EqualValues(t, merr.TimeoutCode, body[HTTPReturnCode])
+		require.NotContains(t, body, HTTPReturnData)
+		releaseEncoding()
+		synctest.Wait()
+	})
 }
 
 type multiSearchRESTProxy struct {
@@ -320,12 +370,16 @@ func TestMultiSearchRoutesAndAuthorizesEachDatabase(t *testing.T) {
 			}, nil
 		},
 	})
-	post := func(headerDB, items string) multiSearchRESTResponse {
+	post := func(headerDB, bodyDB, items string) multiSearchRESTResponse {
 		t.Helper()
 		parent := metadata.NewIncomingContext(trace.ContextWithSpanContext(t.Context(), span), metadata.Pairs(
 			util.HeaderDBName, "upstream_db", "request-marker", "batch",
 		))
-		req := httptest.NewRequestWithContext(parent, http.MethodPost, versionalV2(EntityCategory, MultiSearchAction), strings.NewReader(`{"requests":[`+items+`]}`))
+		dbField := ""
+		if bodyDB != "" {
+			dbField = `"dbName":"` + bodyDB + `",`
+		}
+		req := httptest.NewRequestWithContext(parent, http.MethodPost, versionalV2(EntityCategory, MultiSearchAction), strings.NewReader(`{`+dbField+`"requests":[`+items+`]}`))
 		req.SetBasicAuth(username, "pwd")
 		if headerDB != "" {
 			req.Header.Set(HTTPHeaderDBName, headerDB)
@@ -340,7 +394,7 @@ func TestMultiSearchRoutesAndAuthorizesEachDatabase(t *testing.T) {
 		return body
 	}
 
-	body := post("catalog", `
+	body := post("catalog", "", `
 		{"search":{"dbName":"default","collectionName":"current","partitionNames":["ready"],"data":[[1,0],[0,1]]}},
 		{"search":{"collectionName":"current","partitionNames":["ready"],"data":[[1,0,0]]}},
 		{"search":{"dbName":"","collectionName":"current","partitionNames":["ready"],"data":[[1,0,0]]}},
@@ -363,24 +417,33 @@ func TestMultiSearchRoutesAndAuthorizesEachDatabase(t *testing.T) {
 		{12, map[int64][]int64{102: {202}}, 1},
 	}, charges)
 
-	body = post("unused_database", `
+	body = post("unused_header_database", "unused_body_database", `
 		{"search":{"dbName":"default","collectionName":"current","data":[[1,0]]}},
 		{"search":{"dbName":"catalog","collectionName":"current","data":[[1,0,0]]}}`)
 	require.Len(t, body.Data, 2)
 	require.Zero(t, body.Data[0].Search.Code, body.Data[0].Search.Message)
 	require.Zero(t, body.Data[1].Search.Code, body.Data[1].Search.Message)
-	body = post("", `{"search":{"collectionName":"current","data":[[1,0]]}}`)
+	body = post("", "", `{"search":{"collectionName":"current","data":[[1,0]]}}`)
 	require.Len(t, body.Data, 1)
 	require.Zero(t, body.Data[0].Search.Code, body.Data[0].Search.Message)
+	body = post("", "catalog", `{"search":{"collectionName":"current","data":[[1,0,0]]}}`)
+	require.Len(t, body.Data, 1)
+	require.Equal(t, "102", body.Data[0].Search.Data[0]["id"])
+	body = post("default", "catalog", `
+		{"search":{"collectionName":"current","data":[[1,0,0]]}},
+		{"search":{"dbName":"default","collectionName":"current","data":[[1,0]]}}`)
+	require.Len(t, body.Data, 2)
+	require.Equal(t, "102", body.Data[0].Search.Data[0]["id"])
+	require.Equal(t, "101", body.Data[1].Search.Data[0]["id"])
 	for _, expected := range []struct {
 		method, db, collection, outcome, cause string
 		count                                  float64
 	}{
-		{"Search", "default", "current", metrics.SuccessLabel, metrics.CauseNA, 3},
-		{"Search", "catalog", "current", metrics.SuccessLabel, metrics.CauseNA, 3},
+		{"Search", "default", "current", metrics.SuccessLabel, metrics.CauseNA, 4},
+		{"Search", "catalog", "current", metrics.SuccessLabel, metrics.CauseNA, 5},
 		{"Search", "archive", "papers", metrics.RejectedLabel, metrics.CauseUser, 1},
 		{"Search", "archive", "current", metrics.RejectedLabel, metrics.CauseUser, 1},
-		{"MultiSearch", "", "", metrics.SuccessLabel, metrics.CauseNA, 3},
+		{"MultiSearch", "", "", metrics.SuccessLabel, metrics.CauseNA, 5},
 	} {
 		for _, labels := range [][2]string{{metrics.TotalLabel, metrics.CauseNA}, {expected.outcome, expected.cause}} {
 			require.Equal(t, expected.count, testutil.ToFloat64(metrics.ProxyFunctionCall.WithLabelValues(

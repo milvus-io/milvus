@@ -2901,6 +2901,8 @@ type proxyConfig struct {
 	DDLConcurrency                    ParamItem `refreshable:"true"`
 	DCLConcurrency                    ParamItem `refreshable:"true"`
 	MultiSearchMaxConcurrency         ParamItem `refreshable:"true"`
+	MultiSearchMaxBatchSize           ParamItem `refreshable:"true"`
+	MultiSearchMaxResultBytes         ParamItem `refreshable:"true"`
 	ShardLeaderCacheInterval          ParamItem `refreshable:"false"`
 	ReplicaSelectionPolicy            ParamItem `refreshable:"false"`
 	CheckQueryNodeHealthInterval      ParamItem `refreshable:"false"`
@@ -3254,6 +3256,26 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		Export:       true,
 	}
 	p.MultiSearchMaxConcurrency.Init(base.mgr)
+
+	p.MultiSearchMaxBatchSize = ParamItem{
+		Key:          "proxy.multiSearch.maxBatchSize",
+		Version:      "3.0.1",
+		DefaultValue: "256",
+		Doc:          "Maximum number of Search items per MultiSearch batch. Non-positive or invalid values use 256.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("256"),
+	}
+	p.MultiSearchMaxBatchSize.Init(base.mgr)
+
+	p.MultiSearchMaxResultBytes = ParamItem{
+		Key:          "proxy.multiSearch.maxResultBytes",
+		Version:      "3.0.1",
+		DefaultValue: "67108864",
+		Doc:          "Maximum uncompressed protobuf response size in bytes per MultiSearch batch on both gRPC and REST. Non-positive or invalid values use 64 MiB.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("67108864"),
+	}
+	p.MultiSearchMaxResultBytes.Init(base.mgr)
 
 	p.GinLogging = ParamItem{
 		Key:          "proxy.ginLogging",

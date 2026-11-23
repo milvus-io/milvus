@@ -18,11 +18,15 @@ package proxy
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -31,6 +35,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -156,6 +161,218 @@ func TestMultiSearchMissingPreparerIsSystemError(t *testing.T) {
 	require.Empty(t, results)
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
 	require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+}
+
+func TestMultiSearchRecoversItemPanic(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := NewMultiSearchTestProxy(t, 1, 1)
+		items := []MultiSearchPrepare{
+			func(context.Context) (*milvuspb.SearchRequest, error) { panic("preparation panicked") },
+			multiSearchTestPrepare("panic"),
+			multiSearchTestPrepare("ready"),
+		}
+		results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{MaxConcurrency: 2}, items,
+			func(_ context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+				if request.GetCollectionName() == "panic" {
+					panic("Search panicked")
+				}
+				return &milvuspb.SearchResults{Status: merr.Success(), CollectionName: "ready"}, nil
+			})
+		require.NoError(t, err)
+		require.Len(t, results, 3)
+		for _, result := range results[:2] {
+			err := merr.Error(result.GetStatus())
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+		}
+		require.NoError(t, merr.Error(results[2].GetStatus()))
+		require.Equal(t, "ready", results[2].GetCollectionName())
+	})
+}
+
+func TestMultiSearchBatchSizeLimit(t *testing.T) {
+	p := NewMultiSearchTestProxy(t, 1, 1)
+	for _, count := range []int{256, 257} {
+		t.Run(strconv.Itoa(count), func(t *testing.T) {
+			items := make([]MultiSearchPrepare, count)
+			prepared, executed := 0, 0
+			for i := range items {
+				items[i] = func(context.Context) (*milvuspb.SearchRequest, error) {
+					prepared++
+					return &milvuspb.SearchRequest{}, nil
+				}
+			}
+			results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{MaxConcurrency: 1}, items,
+				func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+					executed++
+					return &milvuspb.SearchResults{Status: merr.Success()}, nil
+				})
+			if count == 256 {
+				require.NoError(t, err)
+				require.Len(t, results, count)
+				require.Equal(t, count, prepared)
+				require.Equal(t, count, executed)
+				return
+			}
+			require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+			require.ErrorContains(t, err, "item count 257")
+			require.ErrorContains(t, err, "maxBatchSize 256")
+			require.Empty(t, results)
+			require.Zero(t, prepared)
+			require.Zero(t, executed)
+		})
+	}
+}
+
+func setMultiSearchResultLimit(t *testing.T, limit int) {
+	t.Helper()
+	params := paramtable.Get()
+	key := params.ProxyCfg.MultiSearchMaxResultBytes.Key
+	require.NoError(t, params.Save(key, strconv.Itoa(limit)))
+	t.Cleanup(func() { require.NoError(t, params.Reset(key)) })
+}
+
+func TestMultiSearchResultByteLimit(t *testing.T) {
+	ready := &milvuspb.SearchResults{Status: merr.Success(), CollectionName: strings.Repeat("x", 128)}
+	failed := &milvuspb.SearchResults{Status: merr.Status(merr.ErrPrivilegeNotPermitted)}
+	for _, tc := range []struct {
+		name       string
+		results    []*milvuspb.SearchResults
+		under      int
+		singleItem bool
+	}{
+		{name: "exact", results: []*milvuspb.SearchResults{ready, failed}},
+		{name: "one byte over", results: []*milvuspb.SearchResults{ready, failed}, under: 1},
+		{name: "one oversized item", results: []*milvuspb.SearchResults{ready}, under: 1, singleItem: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			expected := &milvuspb.MultiSearchResponse{Status: merr.Success(), Results: tc.results}
+			encoded, err := proto.Marshal(expected)
+			require.NoError(t, err)
+			limit := len(encoded) - tc.under
+			setMultiSearchResultLimit(t, limit)
+			p := NewMultiSearchTestProxy(t, 1, 1)
+			items := make([]MultiSearchPrepare, len(tc.results))
+			for i := range items {
+				items[i] = multiSearchTestPrepare(strconv.Itoa(i))
+			}
+			results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{MaxConcurrency: 1}, items,
+				func(_ context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+					i, _ := strconv.Atoi(req.GetCollectionName())
+					return tc.results[i], nil
+				})
+			if tc.under == 0 {
+				require.NoError(t, err)
+				require.Equal(t, tc.results, results)
+				return
+			}
+			require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+			require.False(t, merr.Status(err).GetRetriable())
+			require.ErrorContains(t, err, "at least "+strconv.Itoa(len(encoded))+" bytes")
+			require.ErrorContains(t, err, "maxResultBytes ("+strconv.Itoa(limit)+" bytes)")
+			require.Empty(t, results)
+			if tc.singleItem {
+				require.ErrorContains(t, err, "Reduce nq, topK, or outputFields")
+			} else {
+				require.NotContains(t, err.Error(), "One Search result")
+			}
+		})
+	}
+}
+
+func TestMultiSearchConcurrentByteLimitCancelsInFlight(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		result := &milvuspb.SearchResults{Status: merr.Success(), CollectionName: "ready"}
+		setMultiSearchResultLimit(t, proto.Size(&milvuspb.MultiSearchResponse{
+			Status: merr.Success(), Results: []*milvuspb.SearchResults{result},
+		}))
+		p := NewMultiSearchTestProxy(t, 1, 1)
+		lateStarted, release := make(chan struct{}), make(chan struct{})
+		releaseLate := sync.OnceFunc(func() { close(release) })
+		defer releaseLate()
+		canceled := make(chan error, 1)
+		batches := metrics.ProxyMultiSearchBatchesTotal
+		nodeID := paramtable.GetStringNodeID()
+		failed := batches.WithLabelValues(nodeID, "batch_failed")
+		success := batches.WithLabelValues(nodeID, "all_success")
+		beforeFailed, beforeSuccess := testutil.ToFloat64(failed), testutil.ToFloat64(success)
+
+		items := []MultiSearchPrepare{
+			multiSearchTestPrepare("first"),
+			multiSearchTestPrepare("a"),
+			multiSearchTestPrepare("b"),
+			multiSearchTestPrepare("late"),
+			multiSearchTestPrepare("undispatched"),
+		}
+		results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{MaxConcurrency: 3, ExecutionDeadline: time.Now().Add(time.Second)}, items,
+			func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+				switch req.GetCollectionName() {
+				case "first":
+				case "a", "b":
+					<-lateStarted
+				case "late":
+					close(lateStarted)
+					<-ctx.Done()
+					canceled <- ctx.Err()
+					<-release
+				default:
+					t.Error("dispatched Search after exceeding the byte limit")
+				}
+				return result, nil
+			})
+		require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		require.Empty(t, results)
+		require.ErrorIs(t, <-canceled, context.Canceled)
+		releaseLate()
+		synctest.Wait()
+		require.Equal(t, beforeFailed+1, testutil.ToFloat64(failed))
+		require.Equal(t, beforeSuccess, testutil.ToFloat64(success))
+	})
+}
+
+func TestMultiSearchByteLimitIncludesUnfinishedResults(t *testing.T) {
+	ready := &milvuspb.SearchResults{Status: merr.Success()}
+	timeout := &milvuspb.SearchResults{Status: merr.Status(context.DeadlineExceeded)}
+	responseSize := proto.Size(&milvuspb.MultiSearchResponse{
+		Status: merr.Success(), Results: []*milvuspb.SearchResults{ready, timeout, timeout},
+	})
+	for _, tc := range []struct {
+		name  string
+		limit int
+	}{
+		{name: "exact", limit: responseSize},
+		{name: "one byte over", limit: responseSize - 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				setMultiSearchResultLimit(t, tc.limit)
+				p := NewMultiSearchTestProxy(t, 1, 1)
+				items := []MultiSearchPrepare{multiSearchTestPrepare("ready"), multiSearchTestPrepare("late"), multiSearchTestPrepare("undispatched")}
+				results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{MaxConcurrency: 1, ExecutionDeadline: time.Now().Add(time.Second)}, items,
+					func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+						switch req.GetCollectionName() {
+						case "ready":
+							return ready, nil
+						case "late":
+							<-ctx.Done()
+						default:
+							t.Error("dispatched Search after the execution deadline")
+						}
+						return &milvuspb.SearchResults{Status: merr.Success(), CollectionName: strings.Repeat("x", responseSize)}, nil
+					})
+				if tc.limit == responseSize {
+					require.NoError(t, err)
+					require.Len(t, results, 3)
+					require.Equal(t, merr.TimeoutCode, results[1].GetStatus().GetCode())
+					require.Equal(t, merr.TimeoutCode, results[2].GetStatus().GetCode())
+					require.Equal(t, responseSize, proto.Size(&milvuspb.MultiSearchResponse{Status: merr.Success(), Results: results}))
+				} else {
+					require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+					require.Empty(t, results)
+				}
+			})
+		})
+	}
 }
 
 func TestMultiSearchKeepsInputOrder(t *testing.T) {
@@ -499,10 +716,55 @@ func TestMultiSearchRetriesProxyDQLAdmissionOnly(t *testing.T) {
 		require.Len(t, results, 3)
 		require.True(t, merr.Ok(results[0].GetStatus()))
 		require.ErrorIs(t, merr.Error(results[1].GetStatus()), merr.ErrServiceTooManyRequests)
-		require.Equal(t, merr.Status(merr.WrapErrTooManyRequests(0)), results[1].GetStatus())
+		require.True(t, proto.Equal(merr.Status(merr.WrapErrTooManyRequests(0)), results[1].GetStatus()),
+			"queue-full status changed: %v", results[1].GetStatus())
 		require.ErrorIs(t, merr.Error(results[2].GetStatus()), merr.ErrServiceTooManyRequests)
 		require.Equal(t, map[string]int{"admission_recovers": 2, "admission_stays_full": 10, "querynode_rejection": 1}, attempts)
 		require.Equal(t, 18*time.Second+200*time.Millisecond, time.Since(start))
+	})
+}
+
+func TestMultiSearchRetriesSearchByPKWhenMainDQLQueueIsFull(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := NewMultiSearchTestProxy(t, 1, 1)
+		cache := NewMockCache(t)
+		cache.EXPECT().GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
+			Return(&collectionInfo{CollID: 100, Schema: mustNewSchemaInfo(searchByPKTestSchema(true))}, nil)
+		p.setMetaCache(&multiSearchTestCache{Cache: cache})
+		p.sched.DqQueue.SetMaxTaskNum(0)
+
+		// Keep the real Proxy Query enqueue and wait. The stored vector is null,
+		// so a successful lookup returns one empty Search result without fan-out.
+		defer mockey.Mock((*queryTask).PreExecute).Return(nil).Build().UnPatch()
+		defer mockey.Mock((*queryTask).Execute).Return(nil).Build().UnPatch()
+		defer mockey.Mock((*queryTask).PostExecute).Return(nil).Build().UnPatch()
+		defer mockey.Mock((*queryTask).Result).Return(searchByPKQueryResult([]int64{1}, nil, []bool{false})).Build().UnPatch()
+
+		items := []MultiSearchPrepare{func(context.Context) (*milvuspb.SearchRequest, error) {
+			return searchByPKRequest([]int64{1}), nil
+		}}
+		var attempts atomic.Int32
+		done := make(chan struct{})
+		var results []*milvuspb.SearchResults
+		var err error
+		go func() {
+			defer close(done)
+			results, err = p.RunMultiSearch(t.Context(), MultiSearchOptions{}, items,
+				func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+					attempts.Add(1)
+					return p.Search(ctx, req)
+				})
+		}()
+		synctest.Wait()
+		require.EqualValues(t, 1, attempts.Load())
+		require.Empty(t, done, "the Search-by-PK attempt should wait for an admission retry")
+		p.sched.DqQueue.SetMaxTaskNum(1)
+		<-done
+		require.NoError(t, err)
+		require.EqualValues(t, 2, attempts.Load())
+		require.Len(t, results, 1)
+		require.NoError(t, merr.Error(results[0].GetStatus()))
+		require.Equal(t, []int64{0}, results[0].GetResults().GetTopks())
 	})
 }
 

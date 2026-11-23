@@ -171,8 +171,9 @@ func TestTaskScheduler_NestedDQLAdmissionAndClear(t *testing.T) {
 		notified:    make(chan error, 1),
 	}
 	requery.name = taskmodel.QueryTaskName
+	subtaskCtx, subtaskRejected := WithDQLAdmissionTracking(t.Context())
 	highlight := &queryLoopTestTask{
-		mockDqlTask: newMockDqlTask(t.Context()),
+		mockDqlTask: newMockDqlTask(subtaskCtx),
 		subTask:     true,
 		notified:    make(chan error, 1),
 	}
@@ -182,10 +183,13 @@ func TestTaskScheduler_NestedDQLAdmissionAndClear(t *testing.T) {
 	require.False(t, queue.IsFull(), "a full nested queue must allow ordinary Search")
 	require.NoError(t, queue.Enqueue(search))
 	require.True(t, queue.IsFull())
-	query := newMockDqlTask(t.Context())
+	queryCtx, queryRejected := WithDQLAdmissionTracking(t.Context())
+	query := newMockDqlTask(queryCtx)
 	query.name = taskmodel.QueryTaskName
 	require.ErrorIs(t, queue.Enqueue(query), merr.ErrServiceTooManyRequests)
+	require.True(t, queryRejected.Load())
 	require.ErrorIs(t, queue.Enqueue(highlight), merr.ErrServiceTooManyRequests)
+	require.False(t, subtaskRejected.Load())
 	require.Same(t, requery, queue.getTaskByReqID(requery.ID()))
 	require.Same(t, search, queue.getTaskByReqID(search.ID()))
 	require.EqualValues(t, 2, dqlMetrics(sched).PendingCount)

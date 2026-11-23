@@ -20,6 +20,8 @@ import (
 	"context"
 	"crypto/rand"
 	"net"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -174,6 +176,58 @@ func TestMultiSearchGRPCRejectsInvalidBatch(t *testing.T) {
 	require.Empty(t, response.GetResults())
 	require.Zero(t, component.batchCalls.Load())
 	require.Zero(t, component.searchCalls.Load())
+}
+
+func TestMultiSearchGRPCRejectsBatchLimits(t *testing.T) {
+	params := paramtable.Get()
+	for _, key := range []string{params.CommonCfg.AuthorizationEnabled.Key, params.QuotaConfig.QuotaAndLimitsEnabled.Key} {
+		require.NoError(t, params.Save(key, "false"))
+		t.Cleanup(func() { require.NoError(t, params.Reset(key)) })
+	}
+	cache := proxy.InitEmptyMetaCacheForTest()
+	cache.SeedDBInfoForTest(util.DefaultDBName, &metacache.DatabaseInfo{DBID: 1})
+	cache.SeedCollectionForTest(util.DefaultDBName, "papers", 2)
+	runner := proxy.NewMultiSearchTestProxy(t, 1, 1)
+	result := &milvuspb.SearchResults{Status: merr.Success(), CollectionName: strings.Repeat("x", 128)}
+	component := &multiSearchTestProxy{
+		cache:   cache,
+		run:     runner.RunMultiSearch,
+		limiter: multiSearchTestLimiter{check: func(int64, map[int64][]int64, internalpb.RateType, int) error { return nil }},
+		search: func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			return result, nil
+		},
+	}
+	client := startMultiSearchTestProxy(t, component)
+	request := &milvuspb.SearchRequest{
+		CollectionName: "papers",
+		SearchInput: &milvuspb.SearchRequest_Ids{
+			Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+		},
+	}
+	requests := make([]*milvuspb.SearchRequest, 257)
+	for i := range requests {
+		requests[i] = request
+	}
+	checkLimit := func(requests []*milvuspb.SearchRequest, setting string) {
+		t.Helper()
+		response, err := client.MultiSearch(t.Context(), &milvuspb.MultiSearchRequest{Requests: requests})
+		require.NoError(t, err)
+		require.EqualValues(t, 1102, response.GetStatus().GetCode())
+		require.False(t, response.GetStatus().GetRetriable())
+		require.Equal(t, "true", response.GetStatus().GetExtraInfo()[merr.InputErrorFlagKey])
+		require.Contains(t, response.GetStatus().GetReason(), setting)
+		require.Empty(t, response.GetResults())
+	}
+	checkLimit(requests, "maxBatchSize")
+	require.Zero(t, component.batchCalls.Load())
+	require.Zero(t, component.searchCalls.Load())
+
+	size := proto.Size(&milvuspb.MultiSearchResponse{Status: merr.Success(), Results: []*milvuspb.SearchResults{result}})
+	key := params.ProxyCfg.MultiSearchMaxResultBytes.Key
+	require.NoError(t, params.Save(key, strconv.Itoa(size-1)))
+	t.Cleanup(func() { require.NoError(t, params.Reset(key)) })
+	checkLimit(requests[:1], "maxResultBytes")
+	require.EqualValues(t, 1, component.searchCalls.Load())
 }
 
 func TestMultiSearchGRPCRejectsInvalidIdentity(t *testing.T) {
