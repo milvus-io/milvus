@@ -327,7 +327,19 @@ AsyncReopenSealedSegmentWithManifest(CTraceContext trace,
         milvus::proto::segcore::SegmentLoadInfo info;
         AssertInfo(info.ParseFromArray(load_blob, load_length),
                    "unmarshal load info failed");
-        auto column_groups = ImportLoadColumnGroups(manifest);
+        auto* segment =
+            dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(
+                static_cast<milvus::segcore::SegmentInterface*>(c_segment));
+        AssertInfo(segment != nullptr,
+                   "borrowed schema reopen requires a sealed segment");
+        std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups;
+        if (manifest != nullptr) {
+            column_groups =
+                segment->GetCachedColumnGroupsForManifest(info.manifest_path());
+            if (column_groups == nullptr) {
+                column_groups = ImportLoadColumnGroups(manifest);
+            }
+        }
         auto layout =
             collection->GetSealedFieldLayout(milvus::segcore::LoadScope(
                 fields,
@@ -339,15 +351,11 @@ AsyncReopenSealedSegmentWithManifest(CTraceContext trace,
         auto future = milvus::futures::Future<bool>::async(
             milvus::futures::getLoadCPUExecutor(),
             milvus::futures::ExecutePriority::NORMAL,
-            [c_segment, info = std::move(info), layout = std::move(layout),
+            [segment,
+             info = std::move(info),
+             layout = std::move(layout),
              column_groups = std::move(column_groups)](
                 folly::CancellationToken token) -> bool* {
-                auto* segment =
-                    dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(
-                        static_cast<milvus::segcore::SegmentInterface*>(
-                            c_segment));
-                AssertInfo(segment != nullptr,
-                           "borrowed schema reopen requires a sealed segment");
                 milvus::OpContext ctx(token);
                 segment->Reopen(&ctx, info, layout, column_groups);
                 return nullptr;

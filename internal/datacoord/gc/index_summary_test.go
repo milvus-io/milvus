@@ -351,19 +351,33 @@ func TestSummaryGCDeletionGuardRespectsPendingAndCommittedSnapshot(t *testing.T)
 	_, dm, err := newMemoryMetaWithSnapshot(t)
 	require.NoError(t, err)
 	sm := dm.SnapshotMeta
-	release, ok := sm.TryGuardIndexGC(1)
+	releaseFirst, ok := sm.TryGuardIndexGC(1)
 	require.True(t, ok)
-	require.False(t, sm.SetSnapshotPending(1), "snapshot selection retries while a delete is in flight")
-	require.False(t, sm.IsCollectionCompactionBlocked(1))
-	release()
+	releaseSecond, ok := sm.TryGuardIndexGC(1)
+	require.True(t, ok)
 
-	require.True(t, sm.SetSnapshotPending(1))
+	drained := sm.SetSnapshotPending(1)
 	t.Cleanup(func() { sm.ClearSnapshotPending(1) })
+	require.NotNil(t, drained)
+	require.True(t, sm.IsCollectionCompactionBlocked(1))
 	_, ok = sm.TryGuardIndexGC(1)
 	require.False(t, ok)
-	release, ok = sm.TryGuardIndexGC(2)
+	release, ok := sm.TryGuardIndexGC(2)
 	require.True(t, ok)
 	release()
+
+	releaseFirst()
+	select {
+	case <-drained:
+		t.Fatal("one deletion is still active")
+	default:
+	}
+	releaseSecond()
+	select {
+	case <-drained:
+	default:
+		t.Fatal("all admitted deletions have finished")
+	}
 
 	sm.RegisterSnapshotProtection(&datapb.SnapshotInfo{Id: 42, CollectionId: 1}, []int64{3}, []int64{5})
 	sm.ClearSnapshotPending(1)

@@ -362,7 +362,7 @@ func TestLoadCopySnapshotPreservesLegacyFingerprintAfterRestart(t *testing.T) {
 			require.NoError(t, err)
 			job := restored.GetJob(ctx, 100)
 			require.Nil(t, job.(*Job).SnapshotCache.data)
-			got, err := loadCopySnapshot(ctx, job, source)
+			got, err := loadCopySnapshot(ctx, job, source, nil)
 			require.NoError(t, err)
 			require.True(t, proto.Equal(legacySegment, got.Segments[0]))
 
@@ -372,7 +372,7 @@ func TestLoadCopySnapshotPreservesLegacyFingerprintAfterRestart(t *testing.T) {
 			require.NoError(t, err)
 			restored, err = NewCopySegmentMeta(ctx, catalog, nil, nil, source, nil)
 			require.NoError(t, err)
-			_, err = loadCopySnapshot(ctx, restored.GetJob(ctx, 100), source)
+			_, err = loadCopySnapshot(ctx, restored.GetJob(ctx, 100), source, nil)
 			require.ErrorContains(t, err, "external snapshot changed after restore job creation")
 		})
 	}

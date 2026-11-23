@@ -1006,6 +1006,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	// Publish only fully recovered metadata. A failed later phase must not
 	// make a subsequent initMeta call return early with partial state.
 	recoveredMeta.DataViewManager = manager
+	recoveredDomainMetas.snapshotMeta.SetManifestIndexReader(recoveredMeta.ReadManifestIndexesWithIO)
 	s.meta = recoveredMeta
 	s.domainMetas = recoveredDomainMetas
 	s.importMeta = recoveredImports

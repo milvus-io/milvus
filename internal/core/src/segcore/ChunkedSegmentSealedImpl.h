@@ -334,6 +334,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info,
                 std::shared_ptr<milvus_storage::api::ColumnGroups> groups);
 
+    [[nodiscard]] std::shared_ptr<milvus_storage::api::ColumnGroups>
+    GetCachedColumnGroupsForManifest(const std::string& manifest_path) const;
+
     void
     SetCommitTimestamp(uint64_t ts) override;
 

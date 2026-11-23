@@ -1478,6 +1478,17 @@ ChunkedSegmentSealedImpl::CaptureLoadInfoSnapshot() const {
     return CapturePublishedState()->load_info;
 }
 
+std::shared_ptr<milvus_storage::api::ColumnGroups>
+ChunkedSegmentSealedImpl::GetCachedColumnGroupsForManifest(
+    const std::string& manifest_path) const {
+    auto info = CaptureLoadInfoSnapshot();
+    if (info == nullptr || !info->HasManifestPath() ||
+        !::IsSameLoonManifestPath(info->GetManifestPath(), manifest_path)) {
+        return nullptr;
+    }
+    return info->GetCachedColumnGroups();
+}
+
 std::shared_ptr<const ChunkedSegmentSealedImpl::PublishedSegmentState>
 ChunkedSegmentSealedImpl::CapturePublishedState() const {
     return std::atomic_load(&published_state_);

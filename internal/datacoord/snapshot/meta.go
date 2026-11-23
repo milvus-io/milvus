@@ -216,7 +216,7 @@ type SnapshotMeta struct {
 	SegmentProtectionMu sync.RWMutex
 
 	// In-flight index reclamation by collection, protected by SegmentProtectionMu.
-	activeIndexGC map[int64]int
+	activeIndexGC map[int64]indexGCGroup
 
 	// ===== Compaction protection (TTL-bound) =====
 	// segmentProtectionUntil: segmentID -> latest active protection expiry (Unix seconds).
@@ -278,6 +278,13 @@ type SnapshotMeta struct {
 	chunkManager storage.ChunkManager
 	reader       *snapshotstorage.SnapshotReader // Reads complete snapshot data from S3
 	writer       *snapshotstorage.SnapshotWriter // Writes complete snapshot data to S3
+
+	readManifestIndexes snapshotstorage.ManifestIndexReader
+}
+
+// SetManifestIndexReader installs the coordinator's shared reader before serving requests.
+func (sm *SnapshotMeta) SetManifestIndexReader(read snapshotstorage.ManifestIndexReader) {
+	sm.readManifestIndexes = read
 }
 
 // newSnapshotMeta creates a new snapshot metadata manager and initializes it from catalog.
@@ -980,7 +987,7 @@ func (sm *SnapshotMeta) ReadSnapshotData(ctx context.Context, collectionID int64
 	snapshotData.SnapshotInfo.S3Location = snapshotInfo.S3Location
 
 	if includeSegments && snapshotData.IndexFilesFromManifest {
-		if err := snapshotstorage.ResolveSnapshotIndexFiles(ctx, snapshotData, meta.CreateStorageConfig()); err != nil {
+		if err := snapshotstorage.ResolveSnapshotIndexFiles(ctx, snapshotData, meta.CreateStorageConfig(), sm.readManifestIndexes); err != nil {
 			return nil, err
 		}
 	}
@@ -1025,7 +1032,7 @@ func (sm *SnapshotMeta) ReadAndValidateExternalSnapshotDataWithChunkManager(
 		return nil, err
 	}
 	if includeSegments {
-		if err := snapshotstorage.ResolveSnapshotIndexFiles(ctx, snapshotData, storageConfig); err != nil {
+		if err := snapshotstorage.ResolveSnapshotIndexFiles(ctx, snapshotData, storageConfig, sm.readManifestIndexes); err != nil {
 			return nil, err
 		}
 		if err := snapshotstorage.ValidateExternalSnapshotDataFiles(
@@ -1268,8 +1275,13 @@ func (sm *SnapshotMeta) GetSnapshotByBuildID(buildID UniqueID) []UniqueID {
 	return snapshotIDs
 }
 
-// TryGuardIndexGC excludes new snapshot selections until the caller releases
-// the guard. The caller must still check the pins for the objects it deletes.
+type indexGCGroup struct {
+	active  int
+	drained chan struct{}
+}
+
+// TryGuardIndexGC admits a deletion only when no snapshot is pending for the
+// collection. The caller must still check the pins for the objects it deletes.
 func (sm *SnapshotMeta) TryGuardIndexGC(collectionID int64) (release func(), ok bool) {
 	sm.SegmentProtectionMu.Lock()
 	defer sm.SegmentProtectionMu.Unlock()
@@ -1277,35 +1289,49 @@ func (sm *SnapshotMeta) TryGuardIndexGC(collectionID int64) (release func(), ok 
 		return nil, false
 	}
 	if sm.activeIndexGC == nil {
-		sm.activeIndexGC = make(map[int64]int)
+		sm.activeIndexGC = make(map[int64]indexGCGroup)
 	}
-	sm.activeIndexGC[collectionID]++
+	group := sm.activeIndexGC[collectionID]
+	group.active++
+	sm.activeIndexGC[collectionID] = group
 	return func() {
 		sm.SegmentProtectionMu.Lock()
 		defer sm.SegmentProtectionMu.Unlock()
-		sm.activeIndexGC[collectionID]--
-		if sm.activeIndexGC[collectionID] == 0 {
+		group := sm.activeIndexGC[collectionID]
+		group.active--
+		if group.active == 0 {
 			delete(sm.activeIndexGC, collectionID)
+			if group.drained != nil {
+				close(group.drained)
+			}
+		} else {
+			sm.activeIndexGC[collectionID] = group
 		}
 	}, true
 }
 
 // SetSnapshotPending blocks compaction commit and new index reclamation until
-// snapshot creation ends. An already-running deletion makes the caller retry.
-func (sm *SnapshotMeta) SetSnapshotPending(collectionID int64) bool {
+// ClearSnapshotPending. A non-nil channel closes when active deletions finish.
+// Snapshot creation must wait for it before selecting segments and indexes.
+func (sm *SnapshotMeta) SetSnapshotPending(collectionID int64) <-chan struct{} {
 	sm.SegmentProtectionMu.Lock()
 	defer sm.SegmentProtectionMu.Unlock()
-	if sm.activeIndexGC[collectionID] != 0 {
-		return false
-	}
 	sm.SnapshotPendingCollections.Insert(collectionID)
 	mlog.Info(context.TODO(), "collection marked as snapshot pending, compaction blocked",
 		mlog.Int64("collectionID", collectionID))
-	return true
+	group, active := sm.activeIndexGC[collectionID]
+	if !active {
+		return nil
+	}
+	if group.drained == nil {
+		group.drained = make(chan struct{})
+		sm.activeIndexGC[collectionID] = group
+	}
+	return group.drained
 }
 
 // ClearSnapshotPending removes the pending snapshot mark for a collection.
-// Called after SaveSnapshot completes (success or failure) to unblock compaction.
+// Called when snapshot creation ends, including on failure or cancellation.
 func (sm *SnapshotMeta) ClearSnapshotPending(collectionID int64) {
 	sm.SegmentProtectionMu.Lock()
 	defer sm.SegmentProtectionMu.Unlock()

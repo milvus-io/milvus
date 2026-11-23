@@ -863,7 +863,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		)
 	}
 
-	snapshotData, err := loadCopySnapshot(ctx, job, t.SnapshotMeta)
+	snapshotData, err := loadCopySnapshot(ctx, job, t.SnapshotMeta, t.Meta.ReadManifestIndexesWithIO)
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to read snapshot data for copy segment task",
 			append(WrapCopySegmentTaskLog(task), mlog.Err(err))...)
@@ -1987,7 +1987,7 @@ func syncJSONKeyIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 	return nil
 }
 
-func loadCopySnapshot(ctx context.Context, job CopySegmentJob, snapshots SnapshotSource) (*snapshotstorage.SnapshotData, error) {
+func loadCopySnapshot(ctx context.Context, job CopySegmentJob, snapshots SnapshotSource, readManifestIndexes snapshotstorage.ManifestIndexReader) (*snapshotstorage.SnapshotData, error) {
 	concreteJob, ok := job.(*Job)
 	if !ok || concreteJob.SnapshotCache == nil {
 		return nil, merr.WrapErrServiceInternalMsg(
@@ -2016,7 +2016,7 @@ func loadCopySnapshot(ctx context.Context, job CopySegmentJob, snapshots Snapsho
 				true,
 			)
 			if err == nil {
-				err = snapshotstorage.ResolveSnapshotIndexFiles(ctx, loaded, resolved.ForeignStorageConfig)
+				err = snapshotstorage.ResolveSnapshotIndexFiles(ctx, loaded, resolved.ForeignStorageConfig, readManifestIndexes)
 			}
 		} else {
 			loaded, err = snapshots.ReadSnapshotData(ctx, job.GetSourceCollectionId(), job.GetSnapshotName(), true)

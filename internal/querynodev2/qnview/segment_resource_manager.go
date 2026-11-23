@@ -105,17 +105,15 @@ type segmentBase struct {
 // A resource remains in the registry through Closing. Bindings arriving during
 // closure wait for its done channel before installing a replacement owner.
 type segmentResource struct {
-	manager       *SegmentResourceManager
-	id            int64
-	collectionID  int64
-	ctx           context.Context
-	cancel        context.CancelFunc
-	bindings      []*segmentBinding
-	snapshot      *SegmentLoadInfoSnapshot
-	loadManifest  *packed.LoadManifest
-	storageConfig *indexpb.StorageConfig
-	bases         []*segmentBase
-	reads         []*preparedSegmentRead
+	manager      *SegmentResourceManager
+	id           int64
+	collectionID int64
+	ctx          context.Context
+	cancel       context.CancelFunc
+	bindings     []*segmentBinding
+	snapshot     *SegmentLoadInfoSnapshot
+	bases        []*segmentBase
+	reads        []*preparedSegmentRead
 	// scheduled covers only running or immediately queued work, never backoff.
 	taskHandle         nodescheduler.TaskHandle
 	prioritySelections int
@@ -561,18 +559,16 @@ func (r *segmentResource) validateSnapshot(snapshot SegmentLoadInfoSnapshot) err
 func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collection CollectionRuntime, snapshot SegmentLoadInfoSnapshot) (*preparedSegmentRead, error) {
 	m := r.manager
 	info := proto.Clone(snapshot.LoadInfo).(*querypb.SegmentLoadInfo)
+	var storageConfig *indexpb.StorageConfig
 	if m.openManifest != nil && info.GetStorageVersion() == storage.StorageV3 &&
 		info.GetLevel() != datapb.SegmentLevel_L0 && !typeutil.IsExternalCollection(collection.Schema()) {
-		config := packed.CreateStorageConfig()
-		if !r.loadManifest.Matches(info.GetManifestPath()) || !proto.Equal(r.storageConfig, config) {
-			manifest, err := m.openManifest(ctx, info.GetManifestPath(), config)
-			if err != nil {
-				return nil, err
-			}
-			r.loadManifest.Close()
-			r.loadManifest, r.storageConfig = manifest, config
+		storageConfig = packed.CreateStorageConfig()
+		manifest, err := m.openManifest(ctx, info.GetManifestPath(), storageConfig)
+		if err != nil {
+			return nil, err
 		}
-		ctx = packed.WithLoadManifest(ctx, r.loadManifest)
+		defer manifest.Close()
+		ctx = packed.WithLoadManifest(ctx, manifest)
 	}
 	selected := make(map[int64]*indexpb.IndexInfo, len(collection.IndexInfos()))
 	for _, index := range collection.IndexInfos() {
@@ -585,7 +581,7 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 			m.failView(b.view, err)
 			return nil, err
 		}
-		indexes, err := resolveQueryViewManifestIndexes(info, snapshot.ManifestIndexes, selected, manifest, r.storageConfig.GetRootPath())
+		indexes, err := resolveQueryViewManifestIndexes(info, snapshot.ManifestIndexes, selected, manifest, storageConfig.GetRootPath())
 		if err != nil {
 			if errors.Is(err, merr.ErrDataIntegrity) || errors.Is(err, merr.ErrServiceInternal) {
 				m.failView(b.view, err)
@@ -695,7 +691,6 @@ func (r *segmentResource) close() {
 	// running reconcile holds an operation while it admits catch-up goroutines,
 	// so no operation can be added once Wait has seen zero.
 	r.operations.Wait()
-	r.loadManifest.Close()
 	for _, base := range r.bases {
 		if base.registration != nil {
 			base.registration.Unregister()

@@ -20,6 +20,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestSummarySnapshotResolvesPinnedIndexesForRestoreAndExport(t *testing.T) {
@@ -49,6 +51,11 @@ func TestSummarySnapshotResolvesPinnedIndexesForRestoreAndExport(t *testing.T) {
 	sm.chunkManager = cm
 	sm.reader = snapshotstorage.NewSnapshotReader(cm)
 	sm.writer = snapshotstorage.NewSnapshotWriter(cm)
+	limit := &paramtable.Get().DataCoordCfg.SegmentIndexManifestLoadConcurrency
+	previousLimit := limit.SwapTempValue("1")
+	defer limit.SwapTempValue(previousLimit)
+	mt := &meta.Meta{}
+	sm.SetManifestIndexReader(mt.ReadManifestIndexesWithIO)
 
 	base := filepath.Join(cm.RootPath(), "insert_log", "1", "2", "3")
 	version := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
@@ -99,6 +106,64 @@ func TestSummarySnapshotResolvesPinnedIndexesForRestoreAndExport(t *testing.T) {
 		DropIndexes: []packed.DropIndexEntry{{IndexID: selected.IndexID, ExpectedBuildID: selected.BuildID}},
 	})
 	require.NoError(t, err)
+
+	t.Run("shared budget", func(t *testing.T) {
+		entered := make(chan struct{})
+		release := make(chan struct{})
+		otherRead := make(chan error, 1)
+		reader := mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(_ context.Context, _ *packed.ManifestIOContext, path string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+			if path != "other reader" {
+				return nil, merr.ErrServiceUnavailable
+			}
+			close(entered)
+			<-release
+			return nil, nil
+		}).Build()
+		defer reader.UnPatch()
+		go func() {
+			_, err := mt.ReadManifestIndexesWithIO(t.Context(), nil, "other reader", config)
+			otherRead <- err
+		}()
+		defer func() {
+			close(release)
+			require.NoError(t, <-otherRead)
+		}()
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the other reader did not acquire the shared permit")
+		}
+
+		hydrating := make(chan struct{})
+		sm.SetManifestIndexReader(func(ctx context.Context, io *packed.ManifestIOContext, path string, cfg *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+			close(hydrating)
+			return mt.ReadManifestIndexesWithIO(ctx, io, path, cfg)
+		})
+		defer sm.SetManifestIndexReader(mt.ReadManifestIndexesWithIO)
+		waitCtx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() {
+			_, err := sm.ReadSnapshotData(waitCtx, 1, "pinned", true)
+			done <- err
+		}()
+		select {
+		case <-hydrating:
+		case err := <-done:
+			t.Fatalf("snapshot hydration bypassed the shared reader: %v", err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("snapshot hydration did not reach the shared reader")
+		}
+		cancel()
+		select {
+		case err := <-done:
+			require.ErrorIs(t, err, context.Canceled)
+		case <-time.After(5 * time.Second):
+			t.Fatal("snapshot hydration did not cancel while waiting for the shared permit")
+		}
+		require.Equal(t, 1, reader.Times(), "snapshot hydration must wait for the same permit")
+	})
+
 	loaded, err := sm.ReadSnapshotData(ctx, 1, "pinned", true)
 	require.NoError(t, err)
 	require.NoError(t, validateSummarySnapshot(ctx, nil, loaded, nil))
@@ -130,10 +195,10 @@ func TestSummarySnapshotResolvesPinnedIndexesForRestoreAndExport(t *testing.T) {
 	// resolved entries to the caller.
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
-	require.ErrorIs(t, snapshotstorage.ResolveSnapshotIndexFiles(canceled, stored, config), context.Canceled)
+	require.ErrorIs(t, snapshotstorage.ResolveSnapshotIndexFiles(canceled, stored, config, mt.ReadManifestIndexesWithIO), context.Canceled)
 	require.Len(t, stored.Segments[0].GetIndexFiles(), 1)
 	stored.BuildIDs = append(stored.BuildIDs, 23)
-	err = snapshotstorage.ResolveSnapshotIndexFiles(ctx, stored, config)
+	err = snapshotstorage.ResolveSnapshotIndexFiles(ctx, stored, config, mt.ReadManifestIndexesWithIO)
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 	require.ErrorContains(t, err, "snapshot build 23 is missing")
 	require.Len(t, stored.Segments[0].GetIndexFiles(), 1)

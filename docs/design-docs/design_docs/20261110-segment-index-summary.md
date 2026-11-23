@@ -79,11 +79,13 @@ responses still resolve manifest-backed indexes from the manifest.
 For an ordinary StorageV3 QueryView segment in summary mode, QueryNode can
 request local index resolution. DataCoord returns the summaries, retained
 finished tasks, manifest pointer and matching replay cursor from the accepted
-snapshot without opening the manifest. QueryNode opens that revision once and
-uses it for index artifacts, column groups, delta paths and stats. The View's
-index definitions supply its load parameters. A finished task for the same
-build supplies the artifact metadata. Complete snapshots remain available for
-older consumers, external collections, StorageV2 and diagnostics.
+snapshot without opening the manifest. QueryNode opens that revision once per
+preparation and uses it for index artifacts, column groups, delta paths and stats.
+The manifest closes when preparation ends. Read states of the same revision
+share the imported column groups. The View's index definitions supply its load
+parameters. A finished task for the same build supplies the artifact metadata.
+Complete snapshots remain available for older consumers, external collections,
+StorageV2 and diagnostics.
 
 ## Cleanup and restore
 
@@ -94,15 +96,17 @@ segment manifest at a time and retracts its matching summary atomically. Dropped
 segments retire completed readiness in one catalog update before removing
 files. Their manifests and task rows supply the retry list. Orphan scans reuse
 one manifest revision at a time and check snapshot protection again at deletion.
-A pending snapshot blocks index deletions in its collection until publication
-installs its build pins.
+A pending snapshot blocks new index deletions in its collection and waits for
+already admitted deletions to finish before selecting revisions. The block lasts
+until publication installs the build pins or snapshot creation fails.
 
 Snapshot creation collects build IDs from the selected segments' summaries and
 persists them with the snapshot's exact manifest pointers. The snapshot metadata
 marks that manifest-backed file records are deferred. Summaries without files
-remain explicit completion records. Restore and export resolve deferred records
-from those versions and verify that every captured build is accounted for. The
-self-contained export writes the complete file list with rewritten paths.
+remain explicit completion records. Restore and export use DataCoord's shared
+manifest read limit to resolve deferred records from those versions and verify
+that every captured build is accounted for. The self-contained export writes
+the complete file list with rewritten paths.
 
 Copy/restore verifies compatibility before creating work or copying files.
 Compatible targets publish their manifest and summaries before becoming visible.

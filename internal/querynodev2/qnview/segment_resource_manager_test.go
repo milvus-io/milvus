@@ -417,8 +417,8 @@ func TestSegmentResourceManagerListsQueryViewCollections(t *testing.T) {
 	})
 }
 
-func TestSegmentResourceSharesOpenedManifestAcrossPreparations(t *testing.T) {
-	mockey.PatchConvey("a new revision opens once and same-revision preparations share it", t, func() {
+func TestSegmentResourceSharesManifestWithinPreparation(t *testing.T) {
+	mockey.PatchConvey("each preparation shares one opened revision", t, func() {
 		dir := t.TempDir()
 		config := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
 		first, err := packed.CreateManifestForSegment(filepath.Join(dir, "segment"), []string{"100"}, "parquet",
@@ -452,8 +452,10 @@ func TestSegmentResourceSharesOpenedManifestAcrossPreparations(t *testing.T) {
 			}, false, nil
 		})
 		var prepared []*querypb.SegmentLoadInfo
-		f.prepareMock.To(func(_ *resourceTestLoader, _ context.Context, _ TransformSegment, _ segments.ReadState, _ CollectionRuntime, snapshot SegmentLoadInfoSnapshot) (segments.ReadState, error) {
+		var prepareManifests []*packed.LoadManifest
+		f.prepareMock.To(func(_ *resourceTestLoader, ctx context.Context, _ TransformSegment, _ segments.ReadState, _ CollectionRuntime, snapshot SegmentLoadInfoSnapshot) (segments.ReadState, error) {
 			prepared = append(prepared, snapshot.LoadInfo)
+			prepareManifests = append(prepareManifests, packed.LoadManifestFromContext(ctx, snapshot.LoadInfo.GetManifestPath()))
 			return &resourceTestRead{}, nil
 		})
 		f.getMock.UnPatch()
@@ -501,15 +503,18 @@ func TestSegmentResourceSharesOpenedManifestAcrossPreparations(t *testing.T) {
 		require.Len(t, opened, 1)
 		require.Len(t, prepared, 1)
 		require.EqualValues(t, 30, prepared[0].GetIndexInfos()[0].GetBuildID())
-		require.True(t, opened[0].Native() != nil)
+		require.Same(t, opened[0], prepareManifests[0])
+		require.Nil(t, opened[0].Native())
 
 		two := f.request(2, 2, 2)
 		two.View.Partitions[0].SegmentManifestVersions = []int64{firstVersion}
 		f.manager.Acquire(two)
 		f.await(t, 2)
-		require.Len(t, opened, 1)
+		require.Len(t, opened, 2)
 		require.Len(t, prepared, 2)
 		require.EqualValues(t, 30, prepared[1].GetIndexInfos()[0].GetBuildID())
+		require.Same(t, opened[1], prepareManifests[1])
+		require.Nil(t, opened[1].Native())
 
 		f.manifest.Store(secondVersion)
 		three := f.request(3, 3, 3)
@@ -526,21 +531,61 @@ func TestSegmentResourceSharesOpenedManifestAcrossPreparations(t *testing.T) {
 		f.manager.mu.Unlock()
 		require.NotNil(t, previousRead)
 		require.Equal(t, firstVersion, previousRead.manifest)
-		require.True(t, opened[0].Native() != nil)
 
 		close(retryOpen)
 		f.await(t, 3)
-		require.Len(t, opened, 2)
+		require.Len(t, opened, 3)
 		require.Len(t, prepared, 3)
 		require.EqualValues(t, 31, prepared[2].GetIndexInfos()[0].GetBuildID())
 		require.EqualValues(t, 55, prepared[2].GetTransformStartAfterTimetick())
-		require.True(t, opened[0].Native() == nil)
-		require.Len(t, opened[1].DeltaPaths(), 1)
+		require.Same(t, opened[2], prepareManifests[2])
+		require.Nil(t, opened[2].Native())
+		require.Len(t, opened[2].DeltaPaths(), 1)
 
 		f.drop(t, three)
 		f.drop(t, two)
 		f.drop(t, one)
-		f.manager.Close()
-		require.True(t, opened[1].Native() == nil)
+	})
+}
+
+func TestSegmentResourceClosesManifestOnRejectedReservation(t *testing.T) {
+	mockey.PatchConvey("rejected reservation closes the attempt's manifest", t, func() {
+		dir := t.TempDir()
+		config := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+		basePath := filepath.Join(dir, "segment")
+		path, err := packed.CreateManifestForSegment(basePath, []string{"100"}, "parquet",
+			[]packed.Fragment{{FilePath: filepath.Join(basePath, "data.parquet"), EndRow: 10}}, config)
+		require.NoError(t, err)
+		_, version, err := packed.UnmarshalManifestPath(path)
+		require.NoError(t, err)
+
+		var opened []*packed.LoadManifest
+		manager := &SegmentResourceManager{
+			estimator: &resourceTestEstimator{},
+			openManifest: func(ctx context.Context, path string, _ *indexpb.StorageConfig) (*packed.LoadManifest, error) {
+				manifest, err := packed.OpenLoadManifest(ctx, path, config)
+				opened = append(opened, manifest)
+				return manifest, err
+			},
+		}
+		var admissionManifest *packed.LoadManifest
+		mockey.Mock((*resourceTestEstimator).Reserve).To(func(_ *resourceTestEstimator, ctx context.Context, info *querypb.SegmentLoadInfo, _ CollectionRuntime) (ResourceReservation, error) {
+			admissionManifest = packed.LoadManifestFromContext(ctx, info.GetManifestPath())
+			return nil, merr.ErrServiceUnavailable
+		}).Build()
+
+		resource := &segmentResource{manager: manager, id: 1000, collectionID: testCollectionID}
+		snapshot := resourceSnapshot(testCollectionID, resource.id, version)
+		snapshot.LoadInfo.ManifestPath = path
+		snapshot.ManifestIndexes = &querypb.QueryViewManifestIndexes{}
+		collection := &fakeCollectionRuntimeGuard{schema: &schemapb.CollectionSchema{}}
+		for attempt := 1; attempt <= 2; attempt++ {
+			read, err := resource.prepare(t.Context(), &segmentBinding{}, collection, snapshot)
+			require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+			require.Nil(t, read)
+			require.Len(t, opened, attempt)
+			require.Same(t, opened[attempt-1], admissionManifest)
+			require.Nil(t, admissionManifest.Native())
+		}
 	})
 }

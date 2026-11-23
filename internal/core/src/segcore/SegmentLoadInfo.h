@@ -852,6 +852,11 @@ class SegmentLoadInfo {
     [[nodiscard]] std::shared_ptr<milvus_storage::api::ColumnGroups>
     GetColumnGroups() const;
 
+    [[nodiscard]] std::shared_ptr<milvus_storage::api::ColumnGroups>
+    GetCachedColumnGroups() const {
+        return column_groups_;
+    }
+
     void
     SetCachedColumnGroups(
         std::shared_ptr<milvus_storage::api::ColumnGroups> groups) {

@@ -31,7 +31,7 @@ import (
 // registerRestoreSegments resumes registration from the durable Job, before
 // dispatching any copy tasks. AddSegment preserves already-registered records.
 func (c *Checker) registerRestoreSegments(job CopySegmentJob) error {
-	snapshot, err := loadCopySnapshot(c.Ctx, job, c.SnapshotSource)
+	snapshot, err := loadCopySnapshot(c.Ctx, job, c.SnapshotSource, c.Meta.ReadManifestIndexesWithIO)
 	if err != nil {
 		return err
 	}

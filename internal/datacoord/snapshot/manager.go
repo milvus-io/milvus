@@ -381,8 +381,8 @@ type Manager struct {
 	getChannelsByCollectionID func(context.Context, int64) ([]meta.RWChannel, error) // For channel mapping
 
 	// Concurrency control
-	// createSnapshotMu protects CreateSnapshot to prevent TOCTOU race on snapshot name uniqueness
-	createSnapshotMu sync.Mutex
+	// Serialize snapshot creation within each collection through pin publication.
+	createSnapshotLocks *lock.KeyLock[int64]
 
 	// Serialize all restores by target name without holding RootCoord's DDL lock.
 	restoreTargetLockOnce sync.Once
@@ -432,6 +432,7 @@ func NewSnapshotManager(
 		Broker:                    broker,
 		getChannelsByCollectionID: getChannelsFunc,
 		IndexEngineVersionManager: ievm,
+		createSnapshotLocks:       lock.NewKeyLock[int64](),
 	}
 }
 
@@ -448,14 +449,17 @@ func (sm *Manager) CreateSnapshot(
 	positions []*msgpb.MsgPosition,
 ) (int64, error) {
 	// Lock to prevent TOCTOU race on snapshot name uniqueness check
-	sm.createSnapshotMu.Lock()
-	defer sm.createSnapshotMu.Unlock()
+	sm.createSnapshotLocks.Lock(collectionID)
+	defer sm.createSnapshotLocks.Unlock(collectionID)
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 
 	mlog.Info(context.TODO(), "create snapshot request received",
 		mlog.String("description", description),
 		mlog.Int64("compactionProtectionSeconds", compactionProtectionSeconds))
 
-	// Validate snapshot name uniqueness within collection (protected by createSnapshotMu)
+	// Validate snapshot name uniqueness within the locked collection.
 	if _, err := sm.snapshotMeta.GetSnapshot(ctx, collectionID, name); err == nil {
 		return 0, merr.WrapErrParameterInvalidMsg("snapshot name %s already exists", name)
 	}
@@ -466,10 +470,17 @@ func (sm *Manager) CreateSnapshot(
 	// within the GenSnapshot → SaveSnapshot window, otherwise concurrent compaction
 	// could drop segments that the in-flight snapshot is about to reference, leaving
 	// the freshly-created snapshot immediately broken.
-	if !sm.snapshotMeta.SetSnapshotPending(collectionID) {
-		return 0, merr.WrapErrServiceNotReadyMsg("index garbage collection is active for collection %d", collectionID)
-	}
+	drained := sm.snapshotMeta.SetSnapshotPending(collectionID)
 	defer sm.snapshotMeta.ClearSnapshotPending(collectionID)
+	if drained != nil {
+		select {
+		case <-ctx.Done():
+		case <-drained:
+		}
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+	}
 
 	// Allocate snapshot ID
 	snapshotID, err := sm.Allocator.AllocID(ctx)

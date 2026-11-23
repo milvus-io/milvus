@@ -32,10 +32,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// ManifestIndexReader reads a pinned manifest using the caller's I/O admission.
+type ManifestIndexReader func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error)
+
 // ResolveSnapshotIndexFiles fills the missing file records of a snapshot read from
 // storage. The explicit records and the pinned BuildIDs together define the
 // inventory. The caller owns the snapshot and supplies the source storage config.
-func ResolveSnapshotIndexFiles(ctx context.Context, snapshot *SnapshotData, config *indexpb.StorageConfig) error {
+func ResolveSnapshotIndexFiles(ctx context.Context, snapshot *SnapshotData, config *indexpb.StorageConfig, read ManifestIndexReader) error {
 	if snapshot == nil || !snapshot.IndexFilesFromManifest {
 		return nil
 	}
@@ -98,6 +101,9 @@ func ResolveSnapshotIndexFiles(ctx context.Context, snapshot *SnapshotData, conf
 		definitions[index.GetIndexID()] = index
 	}
 	if len(sources) > 0 {
+		if read == nil {
+			return merr.WrapErrServiceInternalMsg("snapshot manifest index reader is not configured")
+		}
 		limit := max(1, min(len(sources), paramtable.Get().DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt()))
 		if connections := config.GetMaxConnections(); connections > 0 {
 			limit = min(limit, int(connections))
@@ -109,8 +115,8 @@ func ResolveSnapshotIndexFiles(ctx context.Context, snapshot *SnapshotData, conf
 		for i := range sources {
 			group.Go(func() error {
 				source := &sources[i]
-				files, err := readSnapshotManifestIndexes(readCtx, io, config, snapshot.SnapshotInfo.GetCollectionId(),
-					source.segment, source.path, pending, definitions)
+				files, err := readSnapshotManifestIndexes(readCtx, io, config, read,
+					snapshot.SnapshotInfo.GetCollectionId(), source.segment, source.path, pending, definitions)
 				source.files = files
 				return err
 			})
@@ -137,13 +143,13 @@ func ResolveSnapshotIndexFiles(ctx context.Context, snapshot *SnapshotData, conf
 	return nil
 }
 
-func readSnapshotManifestIndexes(ctx context.Context, io *packed.ManifestIOContext, config *indexpb.StorageConfig, collectionID int64,
+func readSnapshotManifestIndexes(ctx context.Context, io *packed.ManifestIOContext, config *indexpb.StorageConfig, read ManifestIndexReader, collectionID int64,
 	segment *datapb.SegmentDescription, manifestPath string, pending typeutil.UniqueSet, definitions map[int64]*indexpb.IndexInfo,
 ) ([]*indexpb.IndexFilePathInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	entries, err := packed.GetManifestIndexInfosAsync(ctx, io, manifestPath, config)
+	entries, err := read(ctx, io, manifestPath, config)
 	if err != nil {
 		return nil, merr.Wrapf(err, "read indexes for snapshot segment %d", segment.GetSegmentId())
 	}
