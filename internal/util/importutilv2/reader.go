@@ -108,7 +108,7 @@ func (f *ReaderFactory) NewReader(ctx context.Context, schema *schemapb.Collecti
 	if shared != nil && !SnapshotSourceUsesSharedL0(file.GetSnapshotSource()) {
 		return nil, merr.WrapErrServiceInternalMsg("shared L0 reader requires a task-shared snapshot descriptor and prepared bitmaps")
 	}
-	if err := ValidateSnapshotSourceOptions(f.options); err != nil {
+	if err := ValidateImportSourceOptions(f.options); err != nil {
 		return nil, err
 	}
 	if file.GetSnapshotSource() != nil || HasExternalSource(f.options) {
@@ -237,7 +237,7 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 			// DataCoord broadcasts a metadata URI, then expands and persists
 			// exact StorageV3 manifests during Pending preparation before dispatch.
 			// Do not consult storage_version: snapshot metadata is the source of
-			// truth and ValidateSnapshotSourceOptions rejects that ambiguity.
+			// truth and ValidateImportSourceOptions rejects that ambiguity.
 			if len(paths) != 1 {
 				return nil, merr.WrapErrImportFailedMsg(
 					"snapshot-source import file requires exactly one manifest path",
@@ -301,7 +301,7 @@ func resolveSnapshotV2Source(ctx context.Context, cm storage.ChunkManager, sourc
 	if err := snapshotstorage.ValidateSnapshotObjectPathForBucket(cm, "snapshot Avro", ref.GetSnapshotManifestPath(), ""); err != nil {
 		return nil, err
 	}
-	if err := snapshotstorage.ValidateExternalSnapshotPaths(uri, boundary, nil); err != nil {
+	if err := snapshotstorage.ValidateSnapshotImportPaths(uri, boundary, nil); err != nil {
 		return nil, err
 	}
 	segment, err := snapshotstorage.NewSnapshotReader(cm).ReadSegmentManifest(ctx, ref.GetSnapshotManifestPath(), int(ref.GetSnapshotFormatVersion()))

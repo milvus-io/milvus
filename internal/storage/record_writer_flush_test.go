@@ -188,7 +188,9 @@ func TestPackedTextBatchWriterKeepsOutputAcrossMidStreamFlushes(t *testing.T) {
 		textColumn, ok := record.Column(flushTestTextFieldID).(*array.String)
 		require.True(t, ok)
 		for i := 0; i < textColumn.Len(); i++ {
-			gotTexts = append(gotTexts, textColumn.Value(i))
+			// Value is zero-copy and the next reader.Next releases this
+			// record's buffers, so keep a copy past this iteration.
+			gotTexts = append(gotTexts, strings.Clone(textColumn.Value(i)))
 		}
 	}
 	sort.Strings(gotTexts)

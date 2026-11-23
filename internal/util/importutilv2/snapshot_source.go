@@ -56,7 +56,7 @@ func SnapshotPathValidator(options Options, cm storage.ChunkManager) (func(strin
 	if err != nil {
 		return nil, nil // Already-expanded jobs from before deferred validation.
 	}
-	if err := ValidateSnapshotSourceOptions(options); err != nil {
+	if err := ValidateImportSourceOptions(options); err != nil {
 		return nil, err
 	}
 	uri, _ := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotSourceURI, options)
@@ -68,7 +68,7 @@ func SnapshotPathValidator(options Options, cm storage.ChunkManager) (func(strin
 		if err := snapshotstorage.ValidateSnapshotObjectPathForBucket(cm, "snapshot reference", path, ""); err != nil {
 			return err
 		}
-		return snapshotstorage.ValidateExternalSnapshotPaths(uri, snapshot, []snapshotstorage.SnapshotFileRef{{
+		return snapshotstorage.ValidateSnapshotImportPaths(uri, snapshot, []snapshotstorage.SnapshotFileRef{{
 			Path: path, NormalizedPath: snapshotstorage.NormalizeSnapshotObjectPath(path),
 		}})
 	}, nil
@@ -103,7 +103,7 @@ func ValidateSnapshotImportFiles(files []*internalpb.ImportFile, options Options
 	if !typed && !IsSnapshotSource(options) {
 		return nil
 	}
-	if err := ValidateSnapshotSourceOptions(options); err != nil {
+	if err := ValidateImportSourceOptions(options); err != nil {
 		return err
 	}
 	if !IsSnapshotSource(options) || len(files) == 0 {
@@ -257,10 +257,10 @@ type snapshotSourceScope struct {
 	partitionID int64
 }
 
-// ValidateSnapshotImportPlan checks the complete durable representation before
+// ValidateImportPlan checks the complete durable representation before
 // publication and after ACK/recovery. Empty exact-scope entries are intentional:
 // a missing inventory is corruption, not evidence that a segment has no L0.
-func ValidateSnapshotImportPlan(files []*internalpb.ImportFile, options Options, sources []*internalpb.SnapshotImportL0Source) error {
+func ValidateImportPlan(files []*internalpb.ImportFile, options Options, sources []*internalpb.SnapshotImportL0Source) error {
 	if err := ValidateSnapshotImportFiles(files, options); err != nil {
 		return err
 	}
@@ -393,7 +393,7 @@ func ValidateSnapshotImportTask(files []*internalpb.ImportFile, options Options,
 	}
 	// A task has exactly one exact-scope inventory. Plan validation therefore
 	// also rejects any file from a different scope, without copying the lists.
-	return ValidateSnapshotImportPlan(files, options, sources)
+	return ValidateImportPlan(files, options, sources)
 }
 
 // ValidateSnapshotTaskPartitions guards the coordinator-to-worker routing

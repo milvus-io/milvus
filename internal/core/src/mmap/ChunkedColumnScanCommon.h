@@ -195,66 +195,6 @@ struct OffsetView {
     }
 };
 
-struct CellLocation {
-    int64_t cell_id = -1;
-    int64_t cell_offset = 0;
-};
-
-enum class OffsetLookupStrategy { PerOffset, BatchBinary, Bucket };
-
-struct OffsetLookupOptions {
-    OffsetLookupStrategy strategy = OffsetLookupStrategy::PerOffset;
-    // Borrow the immutable V1 index rather than rebuilding/copying it per Take.
-    int64_t bucket_order = 0;
-    const std::vector<int64_t>* bucket_cells = nullptr;
-};
-
-// The single Cell-geometry authority for one Column generation. Column
-// backends use it for segment-offset-to-Cell conversion and Take planning;
-// physical Cell details never leave the Column read implementation.
-class ColumnPlanner {
- public:
-    // Production Columns borrow their immutable generation metadata. The
-    // rvalue overload retains ownership for standalone planners and tests.
-    explicit ColumnPlanner(const std::vector<int64_t>& num_rows_until_cell,
-                           OffsetLookupOptions lookup_options = {});
-    explicit ColumnPlanner(std::vector<int64_t>&& num_rows_until_cell,
-                           OffsetLookupOptions lookup_options = {});
-    virtual ~ColumnPlanner() = default;
-
-    CellLocation
-    Locate(int64_t segment_offset) const;
-
-    // Return Cell ids and Cell-local offsets in input order, preserving
-    // duplicates. Backends choose the lookup algorithm independently of pin
-    // policy; pin-set deduplication must not change this positional mapping.
-    std::pair<std::vector<int64_t>, std::vector<int64_t>>
-    LocateBatch(OffsetView offsets) const;
-
-    int64_t
-    CellStart(int64_t cell_id) const;
-
-    int64_t
-    CellRows(int64_t cell_id) const;
-
-    int64_t
-    NumCells() const;
-
-    int64_t
-    NumRows() const;
-
-    const std::vector<int64_t>&
-    CellBoundaries() const;
-
- private:
-    void
-    ValidateBoundaries() const;
-
-    std::shared_ptr<const std::vector<int64_t>> owned_num_rows_until_cell_;
-    const std::vector<int64_t>* num_rows_until_cell_{nullptr};
-    OffsetLookupOptions lookup_options_;
-};
-
 struct ValueView {
     TargetType target_type = TargetType::None;
     const void* data = nullptr;
@@ -326,7 +266,7 @@ struct TakeItemState {
 // outlive the result; callers do not manage backend Cell lifetimes.
 // A candidate mask selects which input positions belong to the request. Size()
 // preserves input indexing, but only selected positions may be read, including
-// in GetOwn() output. The immutable mask must also outlive the result.
+// in GetOwn() output. The immutable mask view and its backing storage must also outlive the result.
 // Reader-backed results may already contain one dense owned value array. Raw
 // CurrentCell results pin only the Cell used by the current borrowed access;
 // a view remains valid until switching Cells, GetOwn(), or result destruction.
@@ -523,7 +463,7 @@ struct TakeOptions {
     TakePinPolicy pin_policy = TakePinPolicy::CurrentCell;
     // Borrow the executor's candidate selection; excluded positions require
     // neither data nor validity. This is independent of the Cell data filter.
-    const TargetBitmap* candidate_mask = nullptr;
+    const TargetBitmapView* candidate_mask = nullptr;
 };
 
 enum class ScanReadMode {

@@ -106,9 +106,9 @@ func (h *HandlersV2) dqlAdmission(handler gin.HandlerFunc) gin.HandlerFunc {
 			// series.
 			if methodTag, ok := routeToMethod[c.FullPath()]; ok {
 				nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
-				metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, metrics.TotalLabel, metrics.CauseNA, "", "").Inc()
+				metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, metrics.TotalLabel, metrics.CauseNA, "", "", "").Inc()
 				label, cause := requestutil.ParseMetricLabel(nil, err)
-				metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, label, cause, "", "").Inc()
+				metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, label, cause, "", "", "").Inc()
 			}
 			c.Header("Retry-After", "1")
 			// Retry-After is not CORS-safelisted; expose it so browser
@@ -318,7 +318,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 		return &CollectionDataReq{}
 	}, wrapperTraceLog(h.insert))), false))
 	// Upsert
-	router.POST(EntityCategory+UpsertAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+UpsertAction, restfulSizeMiddleware(upsertTimeoutMiddleware(wrapperPost(func() any {
 		return &CollectionDataReq{}
 	}, wrapperTraceLog(h.upsert))), false))
 	// Search
@@ -494,11 +494,13 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 		mlog.Debug(ctx, "high level restful api, read parameters from request body, then start to handle.",
 			mlog.Any("url", gCtx.Request.URL.Path))
 
+		ctx, requestMetrics := proxy.WithRequestMetrics(ctx)
 		resp, err := v2(ctx, gCtx, req, dbName)
 		methodTag, ok := routeToMethod[gCtx.FullPath()]
 		if !ok {
 			return
 		}
+		resourceGroup := requestMetrics.ResourceGroup()
 		metrics.ProxyFunctionCall.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
 			methodTag,
@@ -506,6 +508,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			metrics.CauseNA,
 			dbName,
 			collectionName,
+			resourceGroup,
 		).Inc()
 		label, cause := requestutil.ParseMetricLabel(resp, err)
 		// set metrics for state code
@@ -516,6 +519,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			cause,
 			dbName,
 			collectionName,
+			resourceGroup,
 		).Inc()
 
 		// Mirror the metric's cause into the logs so a failed REST request can be
@@ -1904,6 +1908,15 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 		PartialUpdate:  httpReq.PartialUpdate,
 		// PartitionName:  "_default",
 	}
+	condition, err := httpReq.WriteCondition.toProto()
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+	req.WriteCondition = condition
+	if condition != nil {
+		req.PartialUpdate = true
+	}
 	fieldOps, err := buildFieldPartialUpdateOpsV2(httpReq.FieldOps)
 	if err != nil {
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -1967,7 +1980,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 				if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
 					HTTPReturn(c, http.StatusOK, gin.H{
 						HTTPReturnCode:               merr.Code(nil),
-						HTTPReturnData:               gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data},
+						HTTPReturnData:               conditionalUpsertData(req.GetWriteCondition(), gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data}, upsertResp),
 						HTTPReturnCost:               cost,
 						HTTPReturnScannedRemoteBytes: scannedRemoteBytes,
 						HTTPReturnScannedTotalBytes:  scannedTotalBytes,
@@ -1976,7 +1989,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 				} else {
 					HTTPReturn(c, http.StatusOK, gin.H{
 						HTTPReturnCode: merr.Code(nil),
-						HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data},
+						HTTPReturnData: conditionalUpsertData(req.GetWriteCondition(), gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data}, upsertResp),
 						HTTPReturnCost: cost,
 					})
 				}
@@ -1984,7 +1997,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 				if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
 					HTTPReturn(c, http.StatusOK, gin.H{
 						HTTPReturnCode:               merr.Code(nil),
-						HTTPReturnData:               gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": formatInt64(upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)},
+						HTTPReturnData:               conditionalUpsertData(req.GetWriteCondition(), gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": formatInt64(upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)}, upsertResp),
 						HTTPReturnCost:               cost,
 						HTTPReturnScannedRemoteBytes: scannedRemoteBytes,
 						HTTPReturnScannedTotalBytes:  scannedTotalBytes,
@@ -1993,7 +2006,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 				} else {
 					HTTPReturn(c, http.StatusOK, gin.H{
 						HTTPReturnCode: merr.Code(nil),
-						HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": formatInt64(upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)},
+						HTTPReturnData: conditionalUpsertData(req.GetWriteCondition(), gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": formatInt64(upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)}, upsertResp),
 						HTTPReturnCost: cost,
 					})
 				}
@@ -2002,7 +2015,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 			if proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() && isValid {
 				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:               merr.Code(nil),
-					HTTPReturnData:               gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data},
+					HTTPReturnData:               conditionalUpsertData(req.GetWriteCondition(), gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data}, upsertResp),
 					HTTPReturnCost:               cost,
 					HTTPReturnScannedRemoteBytes: scannedRemoteBytes,
 					HTTPReturnScannedTotalBytes:  scannedTotalBytes,
@@ -2011,7 +2024,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 			} else {
 				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode: merr.Code(nil),
-					HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data},
+					HTTPReturnData: conditionalUpsertData(req.GetWriteCondition(), gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data}, upsertResp),
 					HTTPReturnCost: cost,
 				})
 			}

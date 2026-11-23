@@ -318,14 +318,19 @@ configuration used by external RestoreSnapshot, for example
 `{"extfs":{"access_key_id":"...","access_key_value":"..."}}`.
 It is accepted only with `source_type=snapshot`, must be nonempty and at most
 64 KiB, and requires a complete metadata URI identifying the source bucket.
-Without this option reads still use the instance storage, and the metadata URI
-must match its provider, bucket, effective endpoint and transport. A URI naming
+Without this option reads still use the instance storage: callers may pass
+either a complete metadata URI matching the instance provider, bucket,
+effective endpoint and transport, or a bucket-relative object key ending with
+`snapshots/{collectionID}/metadata/{snapshotID}.json` (without URI scheme,
+leading slash, empty path segments, traversal, query or fragment) so that
+multi-cluster CDC topologies with per-cluster buckets can resolve the same
+replicated `ImportMsg` against each cluster's own bucket. A URI naming
 another endpoint is rejected even if that endpoint is permitted by the snapshot
-cross-storage policy. URI validation occurs before metadata IO. This admission
-rule only applies to new snapshot Import requests: shared snapshot readers,
-bare object references inside snapshots and already-expanded persisted tasks
-keep their existing representation. Callers that used bare metadata keys must
-switch to complete URIs, such as the location returned by DescribeSnapshot.
+cross-storage policy, and bare metadata keys reject non-relocated internal
+snapshot references carrying any URI scheme. URI/key validation occurs before
+metadata IO. This admission rule only applies to new snapshot Import requests:
+shared snapshot readers, bare object references inside snapshots and
+already-expanded persisted tasks keep their existing representation.
 The coordinator-owned `_snapshot_source_uri` and
 `_snapshot_layout` options are rejected in public requests; after validation
 DataCoord persists the original URI and layout with the job.
@@ -534,8 +539,8 @@ It adds option validation for the snapshot-source contract:
   rejecting a simultaneous partition name or a partition-key target; and
 - forward the request through the normal Import broadcast path.
 
-Proxy does not read snapshot objects. DataCoord enforces complete URI and
-storage-identity validation before metadata I/O. Explicit mapping adds a
+Proxy does not read snapshot objects. DataCoord enforces metadata URI /
+bucket-relative key and storage-identity validation before metadata I/O. Explicit mapping adds a
 target-resolution branch to the existing Import API; automatic L0 folding adds
 no public toggle.
 
@@ -544,7 +549,9 @@ no public toggle.
 DataCoord extends the existing snapshot expansion without introducing another
 public source kind:
 
-1. Require a complete metadata URI and validate its storage identity. Resolve
+1. Require a complete metadata URI when `external_spec` is set, or either a
+   matching complete metadata URI or a canonical bucket-relative metadata key
+   when `external_spec` is absent. Resolve
    source storage using `external_spec` when supplied; otherwise reuse the
    instance ChunkManager. Open metadata through that source reader.
 2. Call `SnapshotReader.ReadMetadata` once. Validate the metadata with
@@ -1020,7 +1027,7 @@ The V1 binlog and V3 snapshot readers use the same field-selection function:
 
 Source and target AutoID settings need not match: both PreImport and Import use
 the existing backup behavior that preserves source PKs. Stored function outputs
-are imported without rerunning functions. Source nullable/default definitions,
+are imported without rerunning functions. Source default definitions,
 partition/clustering markers, collection properties, shard counts and indexes
 are not restored or compared for equality. Target routing and writing remain
 the standard Import path. Present NULL values and decoding failures retain
@@ -1035,11 +1042,31 @@ unchanged. StorageV2's legacy packed-binlog path is not modified by this change.
 ### 11.1 Validation and Filling in Both Phases
 
 DataCoord checks that source/target schemas exist and the collections are
-eligible, but does not compare schema identity, names or types. The DataNode
+eligible, but does not require schema identity or compare field names. For
+matching physical FieldIDs, it requires equal `nullable` settings, even when the
+target has a default. Missing fields retain the existing filling rules. It
+rejects different data types when either field
+is a vector (including ArrayOfVector). For the same fixed-dimensional vector
+type, it rejects different dimensions and ArrayOfVector element types or
+`element_nullable` settings before opening the native reader. ArrayOfVector
+uses `list<Binary>` for nullable elements and `list<FixedSizeBinary>` otherwise.
+The existing Proxy import gate still rejects targets with element-nullable arrays.
+Equal-width
+element types such as Float16Vector and BFloat16Vector are not interchangeable:
+interpreting source buffers with the target type or width can otherwise
+hide a mismatch from row-level checks. Sparse vectors have no fixed dimension.
+The DataNode
 reader checks required physical fields against each exact manifest and decodes
 present columns with the target schema. Missing required columns or decoding
 errors can therefore fail an admitted task/job; request acceptance is not a
-promise that every segment can be decoded.
+promise that every segment can be decoded. A missing or invalid target dimension
+is classified as a system error because the target schema comes from collection
+metadata; malformed source dimensions retain input-error classification.
+
+For matching VarChar fields, DataCoord requires the source `max_length` to
+be no greater than the target `max_length`. A narrower target is rejected
+at admission and Pending preparation, even when the stored values would fit.
+The reader does not add per-value length checks.
 
 Both phases retain the full target task schema while projecting only the
 reader schema. Filling occurs at the point the existing pipeline needs it:
@@ -1069,10 +1096,13 @@ For ordinary fields, whole-column absence and a stored NULL are separate paths:
 | Physical column absent | Has a default | Omit from reader; fill target default later, with the PreImport routing exception above |
 | Physical column absent | Nullable, no default | Omit from reader; Import fills NULL |
 | Physical column absent | Required, no default | Reader initialization fails |
-| Column present, row is NULL | Has a default | Shared deserializer substitutes the target default in both phases |
+| Column present, row is NULL | Nullable, has a default | Shared deserializer substitutes the target default in both phases |
 | Column present, row is NULL | Nullable, no default | Preserve NULL |
 | Column present, row is NULL | Non-nullable, no default | Reject during row conversion |
 
+Source/target nullable mismatches are rejected at admission and Pending
+preparation; a target default does not permit importing a nullable source into a
+non-nullable target. The native reader uses the target schema unchanged.
 `ValueDeserializerWithSchema` applies the present-NULL rule before timestamp
 and delete filtering. A non-NULL stored value must decode as the target type;
 it is not replaced merely because the target has a default. Missing dynamic
@@ -1266,7 +1296,8 @@ defined by the snapshot layout. Logs and user-visible errors must redact
 credentials and signed URL query strings.
 
 Without `external_spec`, source reads use the configured target Milvus storage;
-the complete metadata URI must match that storage identity before reading.
+the metadata reference must be either a complete metadata URI matching that
+storage identity or a canonical bucket-relative object key before reading.
 With it, source reads use the request-scoped foreign storage; target writes
 always use the target instance configuration. Ordinary file and legacy backup
 imports reject this option. External jobs use empty legacy paths and select
@@ -1429,7 +1460,8 @@ ignore that metadata and succeed without applying L0 deletes.
 ### 18.1 Unit Tests
 
 - Parse and validate `source_type=snapshot` option combinations.
-- Require exactly one complete metadata URI, reject bare metadata keys and
+- Require a complete metadata URI when `external_spec` is set, accept canonical
+  bucket-relative metadata keys when `external_spec` is absent, reject
   `storage_version`, and reject URI/instance identity mismatches without extfs
   before metadata IO.
 - Read both referenced and self-contained snapshot layouts.

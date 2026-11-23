@@ -43,6 +43,36 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+func TestImportTaskPreExecuteRejectsInvalidSourceOptions(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		options importutilv2.Options
+		want    error
+	}{
+		{"incomplete storage", importutilv2.Options{{Key: importutilv2.StorageBucket, Value: "source-bucket"}}, merr.ErrParameterInvalid},
+		{"invalid endpoint", importutilv2.Options{
+			{Key: importutilv2.StorageEndpoint, Value: "s3.amazonaws.com/path"},
+			{Key: importutilv2.StorageBucket, Value: "source-bucket"},
+			{Key: importutilv2.StorageAccessKeyID, Value: "ak"},
+			{Key: importutilv2.StorageSecretAccessKey, Value: "sk"},
+		}, merr.ErrParameterInvalid},
+		{"incompatible backup", importutilv2.Options{
+			{Key: importutilv2.BackupFlag, Value: "true"},
+			{Key: importutilv2.StorageEndpoint, Value: "s3.us-east-1.amazonaws.com"},
+			{Key: importutilv2.StorageBucket, Value: "source-bucket"},
+			{Key: importutilv2.StorageAccessKeyID, Value: "ak"},
+			{Key: importutilv2.StorageSecretAccessKey, Value: "sk"},
+		}, merr.ErrParameterInvalid},
+		{"reserved routing", importutilv2.Options{{Key: importutilv2.SnapshotSourceURI, Value: "s3://source/metadata.json"}}, merr.ErrImportFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// No metadata dependencies: reject invalid source options first.
+			task := &ImportTask{req: &internalpb.ImportRequest{Options: tc.options}}
+			require.ErrorIs(t, task.PreExecute(context.Background()), tc.want)
+		})
+	}
+}
+
 func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
 	paramtable.Init()
 	for _, tc := range []struct {
@@ -59,8 +89,12 @@ func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
 		loaded       bool
 		failAt       string
 		fileCount    int
+		external     bool
+		filePath     string
 	}{
 		{name: "snapshot_default", snapshot: true, backup: true, wantName: "_default", wantIDs: []int64{10}},
+		{name: "external_colon_key", external: true, filePath: "v1:2026/data.json", wantName: "_default", wantIDs: []int64{10}},
+		{name: "external_uri_rejected", external: true, filePath: "s3://source-bucket/data.json", wantErr: "relative object keys"},
 		{name: "snapshot_mapping", snapshot: true, backup: true, mapping: `{"A":"custom","B":"_default"}`, wantIDs: []int64{10, 20}},
 		{name: "snapshot_mapping_merge", snapshot: true, backup: true, mapping: `{"A":"custom","B":"custom"}`, wantIDs: []int64{20}},
 		{name: "snapshot_mapping_named", snapshot: true, backup: true, mapping: `{"A":"custom"}`, partition: "custom", wantErr: "cannot be combined"},
@@ -101,7 +135,7 @@ func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
 			if tc.failAt == "mapping" {
 				// Exercise propagation at the routing boundary independently of
 				// the earlier public-option validator, which has its own tests.
-				validation := mockey.Mock(importutilv2.ValidateSnapshotSourceRequest).Return(nil).Build()
+				validation := mockey.Mock(importutilv2.ValidateImportSourceRequest).Return(nil).Build()
 				defer validation.UnPatch()
 				mapping := mockey.Mock(importutilv2.GetPartitionMapping).Return(nil, errFor("mapping")).Build()
 				defer mapping.UnPatch()
@@ -155,6 +189,17 @@ func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
 			if tc.snapshot {
 				req.Options = append(req.Options, &commonpb.KeyValuePair{Key: "source_type", Value: "snapshot"})
 				req.Files[0].Paths = []string{"s3://source/root/snapshots/1/metadata/2.json"}
+			}
+			if tc.external {
+				req.Options = append(req.Options,
+					&commonpb.KeyValuePair{Key: importutilv2.StorageEndpoint, Value: "s3.us-east-1.amazonaws.com"},
+					&commonpb.KeyValuePair{Key: importutilv2.StorageBucket, Value: "source-bucket"},
+					&commonpb.KeyValuePair{Key: importutilv2.StorageAccessKeyID, Value: "ak"},
+					&commonpb.KeyValuePair{Key: importutilv2.StorageSecretAccessKey, Value: "sk"},
+				)
+			}
+			if tc.filePath != "" {
+				req.Files[0].Paths = []string{tc.filePath}
 			}
 			if tc.fileCount > 1 {
 				req.Files = append(req.Files, &internalpb.ImportFile{Paths: []string{"second.json"}})

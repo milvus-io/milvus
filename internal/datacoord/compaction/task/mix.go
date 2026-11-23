@@ -15,7 +15,9 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -23,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var _ CompactionTask = (*MixCompactionTask)(nil)
@@ -39,6 +42,7 @@ type MixCompactionTask struct {
 	times *taskcommon.Times
 
 	slotUsage atomic.Int64
+	resource  taskresource.Cache
 }
 
 func (t *MixCompactionTask) GetTaskID() int64 {
@@ -51,6 +55,32 @@ func (t *MixCompactionTask) GetTaskType() taskcommon.Type {
 
 func (t *MixCompactionTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCompactionState(t.GetTaskProto().GetState())
+}
+
+// GetTaskResource prices a sort compaction by the segment it sorts (it reads
+// and rewrites all of it) and a mix compaction by its writer, simultaneously
+// resident merge-sort readers, and delete maps (mixCompactionInputs).
+func (t *MixCompactionTask) GetTaskResource() taskcommon.Resource {
+	return t.resource.Get(func() (taskcommon.Resource, bool) {
+		taskProto := t.GetTaskProto()
+		if taskProto.GetType() != datapb.CompactionType_SortCompaction {
+			inputSize, readerBytes, deleteMapBytes, ok := mixCompactionInputs(t.Meta, taskProto)
+			if !ok {
+				return taskresource.Default(), false
+			}
+			return taskresource.MixCompaction(inputSize, readerBytes, deleteMapBytes), true
+		}
+		inputs := taskProto.GetInputSegments()
+		segment := t.Meta.GetHealthySegment(context.TODO(), inputs[0])
+		if segment == nil {
+			return taskresource.Default(), false
+		}
+		size := taskresource.EstimateSegmentSize(segment, taskProto.GetSchema())
+		if size <= 0 {
+			return taskresource.Default(), false
+		}
+		return taskresource.SortCompaction(size), true
+	})
 }
 
 func (t *MixCompactionTask) GetTaskSlot() int64 {
@@ -83,7 +113,7 @@ func (t *MixCompactionTask) GetTaskVersion() int64 {
 	return int64(t.GetTaskProto().GetRetryTimes())
 }
 
-func (t *MixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
+func (t *MixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 	plan, err := t.BuildCompactionRequest()
 	if err != nil {
 		mlog.Warn(context.TODO(), "mixCompactionTask failed to build compaction request", mlog.Err(err))
@@ -94,7 +124,7 @@ func (t *MixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 		return
 	}
 
-	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID())
+	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		// Compaction tasks may be refused by DataNode because of slot limit. In this case, the node id is reset
 		//  to enable a retry in compaction.checkCompaction().
@@ -122,6 +152,23 @@ func (t *MixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 
 func (t *MixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	task := t.GetTaskProto()
+	// Group registration is the durable result anchor. A worker result or
+	// task-meta response can be lost after it commits; resume without asking
+	// the worker to execute the same logical change again.
+	{
+		m := t.Meta
+		group, err := m.GetCompactionChangeGroup(task)
+		if err != nil {
+			mlog.Warn(m.CompactionContext(), "cannot resume compaction change group", mlog.Int64("planID", task.GetPlanID()), mlog.Err(err))
+			return
+		}
+		if group != nil {
+			if err := t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_meta_saved), setResultSegments(meta.CompactionGroupResultIDs(group, task))); err == nil {
+				t.processMetaSaved()
+			}
+			return
+		}
+	}
 	result, err := cluster.QueryCompaction(task.GetNodeID(), &datapb.CompactionStateRequest{
 		PlanID: task.GetPlanID(),
 	})
@@ -223,7 +270,34 @@ func NewMixCompactionTask(t *datapb.CompactionTask,
 }
 
 func (t *MixCompactionTask) processMetaSaved() bool {
-	if err := t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_completed)); err != nil {
+	{
+		m := t.Meta
+		group, err := m.GetCompactionChangeGroup(t.GetTaskProto())
+		if err != nil {
+			return false
+		}
+		if group != nil {
+			switch group.State {
+			case model.SegmentChangeStateStaged, model.SegmentChangeStateReady:
+				if _, materialized := group.SortJobs[t.GetTaskID()]; !materialized {
+					return false
+				}
+			case model.SegmentChangeStateFailed, model.SegmentChangeStateAborted:
+				if err := t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_failed), setFailReason(group.FailReason)); err != nil {
+					return false
+				}
+				return true
+			}
+		}
+	}
+	var resultOpts []compactionTaskOpt
+	{
+		m := t.Meta
+		if group, err := m.GetCompactionChangeGroup(t.GetTaskProto()); err == nil && group != nil {
+			resultOpts = append(resultOpts, setResultSegments(meta.CompactionGroupResultIDs(group, t.GetTaskProto())))
+		}
+	}
+	if err := t.UpdateAndSaveTaskMeta(append(resultOpts, SetState(datapb.CompactionTaskState_completed))...); err != nil {
 		mlog.Warn(context.TODO(), "mixCompactionTask failed to proccessMetaSaved", mlog.Err(err))
 		return false
 	}
@@ -251,13 +325,20 @@ func (t *MixCompactionTask) SaveSegmentMeta(result *datapb.CompactionPlanResult)
 	meta.NotifySegmentIndexBuild(newSegmentIDs...)
 	meta.NotifySegmentStatsBuild(newSegmentIDs...)
 
-	// The SegmentMeta mutation is committed (inputs dropped, outputs visible,
-	// manifest versions advanced); schedule an asynchronous DataView snapshot
-	// reconciliation. The recompute runs on the latest SegmentMeta, so it
-	// observes both the output publish and the input retirement in one
-	// projection.
-	if mt, ok := t.Meta.(*meta.Meta); ok {
-		mt.RecomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+	// Legacy mutations publish immediately and need an asynchronous snapshot
+	// reconciliation. Staged results leave the inputs live; the group inspector
+	// owns their later DataView publication and retirement.
+	{
+		mt := t.Meta
+		group, err := mt.GetCompactionChangeGroup(t.GetTaskProto())
+		if err != nil {
+			return err
+		}
+		if group == nil {
+			mt.RecomputeCompactionDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+		} else {
+			newSegmentIDs = meta.CompactionGroupResultIDs(group, t.GetTaskProto())
+		}
 	}
 
 	err = t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_meta_saved), setResultSegments(newSegmentIDs))
@@ -326,6 +407,22 @@ func (t *MixCompactionTask) Clean() bool {
 }
 
 func (t *MixCompactionTask) doClean() error {
+	{
+		m := t.Meta
+		group, err := m.GetCompactionChangeGroup(t.GetTaskProto())
+		if err != nil {
+			return err
+		}
+		materialized := false
+		if group != nil {
+			_, materialized = group.SortJobs[t.GetTaskID()]
+		}
+		if group != nil && !group.IsTerminal() && !materialized {
+			if err := m.AbortProducerChange(context.TODO(), group, "compaction task canceled before group publication"); err != nil {
+				return err
+			}
+		}
+	}
 	err := t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_cleaned))
 	if err != nil {
 		mlog.Warn(context.TODO(), "mixCompactionTask fail to updateAndSaveTaskMeta", mlog.Err(err))
@@ -390,6 +487,17 @@ func (t *MixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		JsonParams:                compactionParams,
 		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
 	}
+	if taskProto.GetType() == datapb.CompactionType_SortCompaction && len(taskProto.GetInputSegments()) == 1 {
+		{
+			m := t.Meta
+			if g := m.GetSegmentChangeGroupBySegmentID(m.CompactionContext(), taskProto.GetInputSegments()[0]); g != nil && g.AwaitCommitFence {
+				// Pending import rows acquire their effective timestamp at the
+				// commit fence. Their provisional file timestamps must not cause
+				// relative collection TTL to remove rows during preparation.
+				plan.CollectionTtl = 0
+			}
+		}
+	}
 
 	// Both SortCompaction and MixCompaction build text indexes inline and need the analyzer resources in ref mode.
 	if fileresource.IsRefMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) &&
@@ -451,4 +559,57 @@ func (t *MixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 
 func (t *MixCompactionTask) GetSlotUsage() int64 {
 	return t.GetTaskSlot()
+}
+
+// compactionInputSize sums the sizes of a compaction's input segments, or
+// reports ok=false when one of them is not in meta (dropped between enqueue
+// and dispatch) so the caller prices at the floor without caching.
+func compactionInputSize(compactionMeta meta.CompactionMeta, taskProto *datapb.CompactionTask) (int64, bool) {
+	var size int64
+	for _, segID := range taskProto.GetInputSegments() {
+		segment := compactionMeta.GetHealthySegment(context.TODO(), segID)
+		if segment == nil {
+			return 0, false
+		}
+		size += taskresource.EstimateSegmentSize(segment, taskProto.GetSchema())
+	}
+	return size, true
+}
+
+// mixCompactionInputs walks a mix compaction's inputs once and returns their
+// streamed size (as compactionInputSize), reader windows and delete-map memory the worker
+// holds at once. mergeSplit reads one input at a time and drops its map before
+// the next, so the largest input's map is what it holds. storage.MergeSort
+// keeps the map of every input until the merge ends, so on that path they add
+// up. The worker picks the path with compaction.CanMergeSort from the plan's sorted
+// flags, the input count and the compaction params, which DataCoord generates
+// for the plan using compaction.GenParams. Both use the shared predicate.
+// ok=false when an input is not in meta or the schema has no primary key.
+func mixCompactionInputs(compactionMeta meta.CompactionMeta, taskProto *datapb.CompactionTask) (inputSize, readerBytes, deleteMapBytes int64, ok bool) {
+	schema := taskProto.GetSchema()
+	pk, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	inputs := taskProto.GetInputSegments()
+	plan := &datapb.CompactionPlan{Schema: schema}
+	var sum, largest int64
+	for _, segID := range inputs {
+		segment := compactionMeta.GetHealthySegment(context.TODO(), segID)
+		if segment == nil {
+			return 0, 0, 0, false
+		}
+		inputSize += taskresource.EstimateSegmentSize(segment, schema)
+		readerBytes += taskresource.CompactionReaderMemory(segment, schema)
+		plan.SegmentBinlogs = append(plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
+			IsSorted: segment.GetIsSorted(), IsSortedByNamespace: segment.GetIsSortedByNamespace(),
+		})
+		bytes := taskresource.DeleteMapBytes(segment, pk.GetDataType())
+		sum += bytes
+		largest = max(largest, bytes)
+	}
+	if compaction.CanMergeSort(plan, compaction.GenParams()) {
+		return inputSize, readerBytes, sum, true
+	}
+	return inputSize, 0, largest, true
 }

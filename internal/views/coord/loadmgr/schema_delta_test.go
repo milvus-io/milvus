@@ -32,7 +32,7 @@ func TestSchemaDeltaPreservesLoadingIntent(t *testing.T) {
 		{"dynamic field hinted", []int64{100, 104}, []int64{100, 103, 104, 105, 107}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := &LoadConfig{CollectionID: 1, RequiredFields: RequiredFieldsForSchema(old)}
+			cfg := &LoadConfig{CollectionID: 1, AutoLoad: true, RequiredFields: RequiredFieldsForSchema(old)}
 			for _, id := range tc.hints {
 				cfg.LoadFields = append(cfg.LoadFields, &viewpb.LoadFieldConfig{FieldId: id})
 			}
@@ -55,6 +55,7 @@ func TestSchemaDeltaPreservesLoadingIntent(t *testing.T) {
 			var persisted viewpb.CollectionLoadConfig
 			require.NoError(t, proto.Unmarshal(wire, &persisted))
 			recovered := buildFromPersisted(&persisted)
+			require.True(t, recovered.AutoLoad, "schema revisions preserve loading source")
 			requireFieldConfigsEqual(t, next.RequiredFields, recovered.RequiredFields)
 			requireFieldConfigsEqual(t, next.LoadFields, recovered.LoadFields)
 		})

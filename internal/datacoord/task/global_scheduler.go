@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -32,6 +34,9 @@ import (
 )
 
 const NullNodeID = -1
+
+// blockedRoundLogInterval bounds logs for tasks that cannot fit a worker.
+const blockedRoundLogInterval = 30 * time.Second
 
 type GlobalScheduler interface {
 	Enqueue(task Task)
@@ -62,6 +67,8 @@ type globalTaskScheduler struct {
 	mu           *lock.KeyLock[int64]
 	pendingTasks PriorityQueue
 	runningTasks *typeutil.ConcurrentMap[int64, Task]
+	localTasks   *typeutil.ConcurrentMap[int64, Task]
+	localWG      sync.WaitGroup
 	execPool     *conc.Pool[struct{}]
 	checkPool    *conc.Pool[struct{}]
 	cluster      session.Cluster
@@ -123,7 +130,7 @@ func (s *globalTaskScheduler) Enqueue(task Task) {
 	if s.pendingTasks.Get(task.GetTaskID()) != nil {
 		return
 	}
-	if s.runningTasks.Contain(task.GetTaskID()) {
+	if s.runningTasks.Contain(task.GetTaskID()) || s.localTasks.Contain(task.GetTaskID()) {
 		return
 	}
 	switch task.GetTaskState() {
@@ -153,6 +160,7 @@ func (s *globalTaskScheduler) AbortAndRemoveTask(taskID int64) {
 		task.DropTaskOnWorker(s.cluster)
 		s.pendingTasks.Remove(taskID)
 	}
+	s.localTasks.Remove(taskID)
 	s.backoffs.Remove(taskID)
 }
 
@@ -161,6 +169,7 @@ func (s *globalTaskScheduler) Finalize(taskID int64, cleanup func()) {
 	defer s.mu.Unlock(taskID)
 
 	s.pendingTasks.Remove(taskID)
+	s.localTasks.Remove(taskID)
 	s.runningTasks.Remove(taskID)
 	s.backoffs.Remove(taskID)
 	cleanup()
@@ -213,6 +222,7 @@ func (s *globalTaskScheduler) Start() {
 func (s *globalTaskScheduler) Stop() {
 	s.cancel()
 	s.wg.Wait()
+	s.localWG.Wait()
 }
 
 type nodeSlotEntry struct {
@@ -250,7 +260,14 @@ func newNodeSlotHeap(workerSlots map[int64]*session.WorkerSlots) typeutil.Heap[*
 // The picked node's slots are updated in place; the caller reuses the same heap
 // across all tasks in a scheduling round so later picks observe the decremented
 // slots.
+//
+// The method is kept for its callers and tests; the placement itself lives in
+// pickNodeFromHeap so nodePicker can share it as its fallback tier.
 func (s *globalTaskScheduler) pickNode(slotHeap typeutil.Heap[*nodeSlotEntry], taskSlot int64) int64 {
+	return pickNodeFromHeap(slotHeap, taskSlot)
+}
+
+func pickNodeFromHeap(slotHeap typeutil.Heap[*nodeSlotEntry], taskSlot int64) int64 {
 	if slotHeap.Len() == 0 {
 		return NullNodeID
 	}
@@ -285,12 +302,13 @@ func (s *globalTaskScheduler) schedule() {
 	nodeSlots := s.cluster.QuerySlot()
 	mlog.Info(s.ctx, "scheduling pending tasks...", mlog.Int("num", pendingNum), mlog.Any("nodeSlots", nodeSlots))
 
-	// Build the node-slot max-heap once per round and reuse it across all picks,
-	// so each task is placed on the currently least-loaded node.
-	slotHeap := newNodeSlotHeap(nodeSlots)
+	// Build the picker once per round and reuse it across all picks, so each
+	// task is placed on the currently least-loaded node.
+	picker := newNodePicker(nodeSlots)
 	futures := make([]*conc.Future[struct{}], 0)
 	var delayed []Task
-	for {
+	// Bound the scan to the initial queue size; failure-backoff tasks give way.
+	for examined := 0; examined < pendingNum; examined++ {
 		task := s.pendingTasks.Pop()
 		if task == nil {
 			break
@@ -314,20 +332,53 @@ func (s *globalTaskScheduler) schedule() {
 			s.mu.RUnlock(taskID)
 			continue
 		}
+		if local, ok := task.(CoordinatorTask); ok && task.GetTaskState() == taskcommon.Init && local.CanCompleteOnCoordinator() {
+			// Keep ownership while completion runs, but do not await its metadata
+			// writes in this scheduling round or charge worker resources for it.
+			s.localTasks.Insert(taskID, task)
+			s.mu.RUnlock(taskID)
+			s.completeOnCoordinator(task, local)
+			continue
+		}
 		taskSlot := task.GetTaskSlot()
-		nodeID := s.pickNode(slotHeap, taskSlot)
+		// Price once per round and reuse: the placement decision and the log
+		// below must agree, and a family that walks meta on a cache miss would
+		// otherwise pay for the walk twice.
+		//
+		// A family that cannot resolve its inputs yet answers with an upper
+		// bound, not the floor, and is placed when capacity fits. Waiting for an
+		// exact price instead would strand any task whose inputs are gone for
+		// good. CoordinatorTask handles local completion before this point; other
+		// families still retire obsolete work in CreateTaskOnWorker.
+		resource := task.GetTaskResource()
+		// A task the worker bounds to a share of its memory is charged that
+		// bound on each node, not its estimate (NodeMemoryBounded).
+		memoryShare := nodeMemoryShare(task)
+		nodeID, chargedResource := picker.PickBounded(taskSlot, resource, memoryShare)
 		if nodeID == NullNodeID {
+			// Preserve task-ID order when capacity is insufficient. Later small
+			// tasks must not consume memory that this waiting task needs.
+			mlog.RatedInfo(s.ctx, rate.Every(blockedRoundLogInterval),
+				"task does not fit any worker now, worker dispatch paused for this round",
+				WrapTaskLog(task,
+					mlog.Int64("taskSlot", taskSlot),
+					mlog.Stringer("resource", resource),
+					mlog.Float64("nodeMemoryShare", memoryShare),
+					mlog.Int("pendingBehind", s.pendingTasks.TaskCount()),
+					mlog.Any("resourceNodes", picker.remaining()))...)
 			s.pendingTasks.Push(task)
 			s.mu.RUnlock(taskID)
+			s.completeLocalTasksBehind(taskID)
 			break
 		}
 		s.mu.RUnlock(taskID)
 		future := s.execPool.Submit(func() (struct{}, error) {
 			s.mu.RLock(task.GetTaskID())
 			defer s.mu.RUnlock(task.GetTaskID())
-			mlog.Info(s.ctx, "processing task...", WrapTaskLog(task)...)
+			mlog.Info(s.ctx, "processing task...",
+				WrapTaskLog(task, mlog.Stringer("resource", chargedResource))...)
 			if task.GetTaskState() == taskcommon.Init {
-				task.CreateTaskOnWorker(nodeID, s.cluster)
+				task.CreateTaskOnWorker(nodeID, s.cluster, chargedResource)
 				switch task.GetTaskState() {
 				case taskcommon.Init, taskcommon.Retry:
 					s.recordTaskFailure(task)
@@ -371,6 +422,55 @@ func (s *globalTaskScheduler) schedule() {
 		s.mu.RUnlock(taskID)
 	}
 	_ = conc.AwaitAll(futures...)
+}
+
+// Leave waiting worker tasks in the priority queue so cancellation, metrics and
+// the next scheduling round still see them while local completions run.
+func (s *globalTaskScheduler) completeLocalTasksBehind(headID int64) {
+	for _, id := range s.pendingTasks.TaskIDs() {
+		if id <= headID {
+			continue
+		}
+		s.mu.Lock(id)
+		task := s.pendingTasks.Get(id)
+		local, ok := task.(CoordinatorTask)
+		if !ok || task.GetTaskState() != taskcommon.Init || s.taskInBackoff(task) || !local.CanCompleteOnCoordinator() {
+			s.mu.Unlock(id)
+			continue
+		}
+		s.pendingTasks.Remove(id)
+		s.localTasks.Insert(id, task)
+		s.mu.Unlock(id)
+		s.completeOnCoordinator(task, local)
+	}
+}
+
+// completeOnCoordinator owns the task until persistence finishes. Finalize and
+// AbortAndRemoveTask serialize with this callback through the per-task lock.
+func (s *globalTaskScheduler) completeOnCoordinator(task Task, local CoordinatorTask) {
+	s.localWG.Add(1)
+	s.execPool.Submit(func() (struct{}, error) {
+		defer s.localWG.Done()
+		taskID := task.GetTaskID()
+		s.mu.Lock(taskID)
+		defer s.mu.Unlock(taskID)
+		if current, ok := s.localTasks.Get(taskID); !ok || current != task {
+			return struct{}{}, nil
+		}
+		defer s.localTasks.Remove(taskID)
+		ctx, cancel := context.WithTimeout(s.ctx, paramtable.Get().DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
+		defer cancel()
+		switch local.CompleteOnCoordinator(ctx) {
+		case LocalCompleted:
+			s.backoffs.Remove(taskID)
+		case LocalRetry:
+			s.recordTaskFailure(task)
+			s.pendingTasks.Push(task)
+		case LocalNeedsWorker:
+			s.pendingTasks.Push(task)
+		}
+		return struct{}{}, nil
+	})
 }
 
 func (s *globalTaskScheduler) check() {
@@ -510,6 +610,7 @@ func NewGlobalTaskScheduler(ctx context.Context, cluster session.Cluster) Global
 		mu:           lock.NewKeyLock[int64](),
 		pendingTasks: NewPriorityQueuePolicy(),
 		runningTasks: typeutil.NewConcurrentMap[int64, Task](),
+		localTasks:   typeutil.NewConcurrentMap[int64, Task](),
 		execPool:     execPool,
 		checkPool:    checkPool,
 		cluster:      cluster,

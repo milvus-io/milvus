@@ -63,7 +63,7 @@ func TestCompactionUnavailableResult(t *testing.T) {
 			lostResult := merr.WrapErrCompactionResultNotFound("terminal task has no payload")
 
 			t.Run("drop then reset without changing retry metadata", func(t *testing.T) {
-				mt := ctask.NewMockCompactionMeta(t)
+				mt := ctask.NewDefaultMockCompactionMeta(t)
 				catalog := mocks.NewDataCoordCatalog(t)
 				cluster := session.NewMockCluster(t)
 				task := newTask(mt, ctask.NewCompactionTaskMetaOverCatalog(catalog))
@@ -85,7 +85,7 @@ func TestCompactionUnavailableResult(t *testing.T) {
 			})
 
 			t.Run("drop failure keeps original task", func(t *testing.T) {
-				mt := ctask.NewMockCompactionMeta(t)
+				mt := ctask.NewDefaultMockCompactionMeta(t)
 				catalog := mocks.NewDataCoordCatalog(t)
 				cluster := session.NewMockCluster(t)
 				task := newTask(mt, ctask.NewCompactionTaskMetaOverCatalog(catalog))
@@ -104,7 +104,7 @@ func TestCompactionUnavailableResult(t *testing.T) {
 }
 
 func TestMixCompactionDeletedErrorAfterSaveFailure(t *testing.T) {
-	mt := ctask.NewMockCompactionMeta(t)
+	mt := ctask.NewDefaultMockCompactionMeta(t)
 	catalog := mocks.NewDataCoordCatalog(t)
 	cluster := session.NewMockCluster(t)
 	task := ctask.NewMixCompactionTask(&datapb.CompactionTask{

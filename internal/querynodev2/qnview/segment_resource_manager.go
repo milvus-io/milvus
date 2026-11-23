@@ -110,12 +110,14 @@ type segmentResource struct {
 	bases        []*segmentBase
 	reads        []*preparedSegmentRead
 	// scheduled covers only running or immediately queued work, never backoff.
-	scheduled  bool
-	retryTimer *time.Timer
-	dirty      bool
-	closing    bool
-	done       chan struct{}
-	cursor     int
+	taskHandle         nodescheduler.TaskHandle
+	prioritySelections int
+	scheduled          bool
+	retryTimer         *time.Timer
+	dirty              bool
+	closing            bool
+	done               chan struct{}
+	cursor             int
 	// Query handles, metrics sampling and catch-up pin this incarnation until
 	// completion. Only bindings determine whether it can admit new consumers.
 	operations sync.WaitGroup
@@ -247,6 +249,11 @@ func (m *SegmentResourceManager) failView(v *viewResources, err error) {
 	m.mu.Lock()
 	notify := !v.failed && !v.released
 	v.failed = true
+	if notify {
+		for _, binding := range v.bindings {
+			binding.resource.wakeLocked()
+		}
+	}
 	m.mu.Unlock()
 	if notify {
 		mlog.Warn(v.ctx, "query view resource preparation failed", mlog.FieldCollectionID(v.req.Meta.GetCollectionId()), mlog.Err(err))
@@ -258,7 +265,13 @@ func (m *SegmentResourceManager) failView(v *viewResources, err error) {
 
 func (r *segmentResource) wakeLocked() {
 	r.dirty = true
-	if r.scheduled || r.closing {
+	if r.closing {
+		return
+	}
+	if r.scheduled {
+		if handle, ok := r.taskHandle.(nodescheduler.PriorityTaskHandle); ok {
+			handle.SetPriority(r.pendingPriorityLocked())
+		}
 		return
 	}
 	r.submitLocked()
@@ -266,7 +279,7 @@ func (r *segmentResource) wakeLocked() {
 
 func (r *segmentResource) submitLocked() {
 	r.scheduled = true
-	r.manager.scheduler.Submit(schedulerTaskFunc(func(ctx context.Context) error { return r.reconcile(ctx) }))
+	r.taskHandle = r.manager.scheduler.Submit(schedulerTaskFunc(func(ctx context.Context) error { return r.reconcile(ctx) }), nodescheduler.WithPriority(r.pendingPriorityLocked()))
 }
 
 func (r *segmentResource) stopRetryLocked() {
@@ -300,6 +313,7 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 	m.mu.Lock()
 	if r.closing {
 		// Close has already started; a closing resource takes no new work.
+		r.taskHandle = nil
 		r.scheduled = false
 		m.mu.Unlock()
 		return nil
@@ -310,6 +324,7 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 	// Every return holds mu. Events arriving during I/O either get consumed
 	// by the next iteration or transfer to a successor under this same lock.
 	defer func() {
+		r.taskHandle = nil
 		r.scheduled = false
 		if r.dirty && !r.closing {
 			r.submitLocked()
@@ -324,12 +339,12 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 			r.closeLocked()
 			return nil
 		}
-		cursor := r.cursor
+		cursor, selections := r.cursor, r.prioritySelections
 		b, retryAt := r.nextBindingLocked()
 		if b != nil && prepared {
 			// Publish ready reads immediately, but yield further physical work
 			// to the queue tail so one resource cannot monopolize a worker.
-			r.cursor = cursor
+			r.cursor, r.prioritySelections = cursor, selections
 			r.dirty = true
 			b = nil
 		}
@@ -424,8 +439,8 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 }
 
 // Complete compatible reads are published before selecting another operation.
-// The rotating cursor gives every executable requirement an opportunity even
-// while another schema is waiting for materialization.
+// Choose the highest-priority eligible binding; periodically use the rotating
+// cursor to preserve progress for lower priorities. Blocked bindings do not compete.
 func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 	m := r.manager
 	var retryAt time.Time
@@ -454,6 +469,7 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 			}
 		}
 	}
+	selected := -1
 	for n := 0; n < len(r.bindings); n++ {
 		i := (r.cursor + n) % len(r.bindings)
 		b := r.bindings[i]
@@ -484,10 +500,23 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 			go m.failView(b.view, merr.WrapErrServiceNotReadyMsg("required external segment %d manifest %d is unavailable in current metadata", r.id, b.manifest))
 			continue
 		}
-		r.cursor = (i + 1) % len(r.bindings)
-		return b, retryAt
+		if selected < 0 || b.view.req.Meta.GetControl().GetPreparationPriority() > r.bindings[selected].view.req.Meta.GetControl().GetPreparationPriority() {
+			selected = i
+		}
+		if r.prioritySelections >= 8 {
+			break
+		}
 	}
-	return nil, retryAt
+	if selected < 0 {
+		return nil, retryAt
+	}
+	if r.prioritySelections >= 8 {
+		r.prioritySelections = 0
+	} else {
+		r.prioritySelections++
+	}
+	r.cursor = (selected + 1) % len(r.bindings)
+	return r.bindings[selected], retryAt
 }
 
 func readMatchesBinding(read *preparedSegmentRead, b *segmentBinding) bool {
@@ -914,4 +943,33 @@ func (r *segmentResource) releaseBases(bases []*segmentBase) {
 		}
 		_ = base.segment.Release(context.WithoutCancel(r.ctx))
 	}
+}
+
+// Pending priority excludes already satisfied, blocked and delayed bindings.
+// A resource's bookkeeping passes still run with default priority when no
+// physical preparation is currently eligible.
+func (r *segmentResource) pendingPriorityLocked() int32 {
+	var priority int32
+	found := false
+	now := time.Now()
+	for _, b := range r.bindings {
+		if b.view.collection == nil || b.view.buffer == nil || b.view.failed || b.prepared != nil || now.Before(b.retryAfter) {
+			continue
+		}
+		waiting := false
+		for _, read := range r.reads {
+			if readMatchesBinding(read, b) {
+				waiting = true
+				break
+			}
+		}
+		if waiting {
+			continue
+		}
+		value := b.view.req.Meta.GetControl().GetPreparationPriority()
+		if !found || value > priority {
+			priority, found = value, true
+		}
+	}
+	return priority
 }

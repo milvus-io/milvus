@@ -38,6 +38,8 @@ def _normalize_consistency_level(level):
 
 class Error:
     def __init__(self, error):
+        # Keep the origin without retaining the caught exception and its traceback.
+        self.exception_type = type(error)
         self.code = getattr(error, "code", -1)
         self.message = getattr(error, "message", str(error))
 

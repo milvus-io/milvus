@@ -39,8 +39,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
-	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
-	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -353,14 +351,6 @@ func (s *Server) initQueryCoord() error {
 	s.proxyWatcher.DelSessionFunc(s.proxyClientManager.DelProxyClient)
 	mlog.Info(s.ctx, "init proxy manager done")
 
-	// Init global assign policy factory
-	mlog.Info(s.ctx, "init global assign policy factory")
-	assign.InitGlobalAssignPolicyFactory(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
-
-	// Init global balancer factory
-	mlog.Info(s.ctx, "init global balancer factory")
-	balance.InitGlobalBalancerFactory(s.taskScheduler, s.nodeMgr, s.dist, s.targetMgr)
-
 	// Init checker controller
 	mlog.Info(s.ctx, "init checker controller")
 	s.checkerController = checkers.NewCheckerController(
@@ -412,11 +402,7 @@ func (s *Server) initQViewsRuntime(queryViewCatalog queryview.QueryViewCatalog) 
 	}
 	s.qviewsRuntime = runtime
 	qvresource.Init(runtime.resources)
-	s.collectionUsage = newCollectionUsageManager(
-		runtime.loadConfigStore,
-		s.broker,
-		s.autoReleaseCollection,
-	)
+	s.collectionUsage = newCollectionUsageManager(s)
 	return nil
 }
 
@@ -476,7 +462,6 @@ func (s *Server) initObserver() {
 		s.meta,
 		s.targetMgr,
 		s.targetObserver,
-		s.checkerController,
 		s.proxyClientManager,
 	)
 
@@ -821,7 +806,6 @@ func (s *Server) handleNodeUp(node int64) {
 	s.meta.HandleNodeUp(s.ctx, node)
 
 	s.metricsCacheManager.InvalidateSystemInfoMetrics()
-	s.checkerController.Check()
 }
 
 func (s *Server) handleNodeDown(node int64) {
@@ -860,9 +844,6 @@ func (s *Server) handleNodeStopping(node int64) {
 
 	// mark node as stopping in resource manager
 	s.meta.HandleNodeStopping(context.Background(), node)
-
-	// trigger checker to check stopping node
-	s.checkerController.Check()
 }
 
 func (s *Server) watchLoadConfigChanges() {

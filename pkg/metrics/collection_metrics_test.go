@@ -181,10 +181,16 @@ func TestProxyFunctionCallAggregatesButReportValueIsUnaffected(t *testing.T) {
 		ProxyReportValue.Reset()
 	})
 
-	ProxyFunctionCall.WithLabelValues("node", "Search", SuccessLabel, CauseNA, "db", "collection-a").Add(1)
-	ProxyFunctionCall.WithLabelValues("node", "Search", SuccessLabel, CauseNA, "db", "collection-b").Add(2)
+	ProxyFunctionCall.WithLabelValues("node", "Search", SuccessLabel, CauseNA, "db", "collection-a", "").Add(1)
+	ProxyFunctionCall.WithLabelValues("node", "Search", SuccessLabel, CauseNA, "db", "collection-b", "").Add(2)
 	assert.Equal(t, float64(3), testutil.ToFloat64(ProxyFunctionCall.WithLabelValues(
-		"node", "Search", SuccessLabel, CauseNA, "db", "collection-c")))
+		"node", "Search", SuccessLabel, CauseNA, "db", "collection-c", "")))
+
+	ProxyFunctionCall.WithLabelValues("node", "Search", SuccessLabel, CauseNA, "db", "collection-a", "rg-a").Add(4)
+	assert.Equal(t, float64(4), testutil.ToFloat64(ProxyFunctionCall.WithLabelValues(
+		"node", "Search", SuccessLabel, CauseNA, "db", "collection-c", "rg-a")))
+	assert.Equal(t, float64(3), testutil.ToFloat64(ProxyFunctionCall.WithLabelValues(
+		"node", "Search", SuccessLabel, CauseNA, "db", "collection-c", "")))
 
 	ProxyReportValue.WithLabelValues("node", InsertLabel, "db", "user-a").Add(1)
 	ProxyReportValue.WithLabelValues("node", InsertLabel, "db", "user-b").Add(2)

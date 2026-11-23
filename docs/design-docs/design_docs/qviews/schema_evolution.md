@@ -18,8 +18,10 @@ StreamingNode/GrowingSegment ownership is outside that resource refactor.
 5. RootCoord publishes the new read schema only after the complete serving
    handoff obligation is satisfied. AlterCollection then completes its callback
    and API. Unloaded collections have no serving handoff obligation.
-6. Dropped fields become invalid at each VChannel's WAL ALTER boundary. Keeping
-   old resources does not permit post-boundary queries on removed fields.
+6. Read-side field validity follows the selected QueryView's exact schema and
+   required-field scope. WAL ALTER switches the write schema; it does not revoke
+   fields from retained old read Views. Publish the new read schema before
+   retiring old-schema serving coverage through normal View/lease draining.
 7. Persist exact schema/load identities for recovery and keep runtime handles
    alive while views/queries use them. All durable-history and storage GC issues
    are deferred to the unified TODO in section 8.2, per the 2026-10-13 decision.
@@ -38,14 +40,15 @@ standalone Analyzer API to QueryView/replica discovery.
 | --- | --- | --- |
 | Segment encoding schema | Interpretation of a Segment's stored/logged fields and inserted rows | Segment metadata plus retained SN schema history |
 | Current write schema | Schema accepted for subsequent writes on a VChannel | Its current primary SN, after WAL admission switches schema |
-| Target read schema | Committed schema for which resources are being prepared | Broadcaster message/callback, projected into Coordinator memory |
+| Target read schema | Durable preparation intent, visible before WAL append/ACK completion | Earliest unfinished persisted schema ALTER in Broadcaster |
 | Published read schema | Schema exposed by DescribeCollection and selected for new DQL parsing | RootCoord's durable collection metadata |
 | View read schema | Exact immutable schema under which this QueryView serves | QueryView SchemaVersion, resolved from SN history |
 
-Write and target read schema normally refer to the same new schema. Public read
-schema can lag while resources prepare. Segment encoding versions can be older
-than either; loading a Segment must not reinterpret its stored rows as if they
-were encoded by the latest schema.
+The target can be visible before any VChannel switches its write schema. Once
+applied, write and target read schema refer to the same new schema; public read
+schema can still lag while resources prepare. Segment encoding versions can be
+older than either; loading a Segment must not reinterpret its stored rows as if
+they were encoded by the latest schema.
 
 SchemaVersion identifies an immutable query-relevant schema payload within a
 CollectionID. It is not a DataVersion, Manifest version, index build version or
@@ -158,43 +161,53 @@ does not prove that every write destination already accepts it.
 
 ### 4.2 DataCoord and QueryView access through Broadcaster
 
-The full target schema is already business content of the durable ALTER message.
-The existing ACK callback receives that message and per-VChannel append results
-after all required ACKs. Extend this workflow to publish one immutable,
-collection-scoped target snapshot for DataCoord and QueryView planning:
+The full target schema is business content of the durable ALTER message.
+`GetPendingSchemaTarget(collectionID)` exposes the earliest unfinished persisted
+schema ALTER as an immutable collection-scoped snapshot for DataCoord and
+QueryView planning. The index is updated after successful task persistence,
+before WAL append or ACK completion; it is not installed by the ACK callback:
 
 ```text
-CollectionID, BroadcastID, TargetSchemaVersion, TargetSchema,
-business-VChannel -> ALTER TimeTick, field/index requirement delta
+CollectionID, BroadcastID, Schema (including its Version),
+TimeTicks: business-VChannel -> persisted, known ACK TimeTick
 ```
 
-This is a shared in-process projection of Broadcaster-owned durable intent. It
-is exposed through the Coordinator's package-level resource infrastructure, not
-through a QueryCoord RPC or another collection-lock acquisition. The callback
-installs it before refreshing DataCoord/index planning and triggering QueryView
-planning. Readers obtain one immutable target, not independently sampled schema
-and version. They do not fall back to an older public schema while a target is
-active. Collection snapshots passed to compaction/index jobs remain immutable.
+Missing TimeTicks are unknown; the initial map can be empty. The accessor shares
+the immutable Schema and copies the TimeTicks map. Reading a target proves
+durable intent, not channel application, completed data preparation or permission
+to publish the read schema. Bound index requirements remain in the ALTER message
+and are applied by the ordered callback after all required ACKs.
 
-Recovery reconstructs this projection from eligible pending broadcast tasks in
-the existing callback order. A merely persisted, partially appended task is not
-yet a preparation/publication authorization. Affected planning waits until its
-target can be reconstructed; absence during startup must not mark recovered
-views obsolete. CDC/recovered tasks follow existing callback serialization too;
-do not select the numerically largest pending task without checking that order.
+The shared in-process projection is consumed through Coordinator's package-level
+`PreparationSchema` accessor, without a QueryCoord RPC or another collection-lock
+acquisition. Readers obtain one immutable schema and version. They do not fall
+back to an older public schema while a target is active. Collection snapshots
+passed to compaction/index jobs remain immutable. Target-aware work may inspect
+the pending intent early; DataView certification and read publication retain
+their separate callback fences.
+
+Recovery reconstructs the index from persisted unfinished tasks, including tasks
+that are only partially appended or ACKed. For each collection the accessor
+selects the lowest unfinished BroadcastID, preserving serialized ALTER order,
+including replicated tasks. It does not select the newest pending schema or wait
+for all ACKs to make the target visible. Recovery must install dependencies before
+planning resumes; target visibility alone cannot certify a DataView or obsolete
+retained published-schema Views.
 
 After read publication, RootCoord's durable published snapshot supplies the
-steady-state schema for Coordinator planning. Remove the pending projection only
-after that snapshot durably covers the target. Thus completed Broadcast tasks can
-still become tombstones and be GC'd normally. Broadcaster is **not** a permanent
-historical-schema database; historical worker reads remain SN-owned.
+steady-state schema for Coordinator planning. The pending projection is retired
+when callback completion is persisted, after durable read publication. Thus
+completed Broadcast tasks can still become tombstones and be GC'd normally.
+Broadcaster is **not** a permanent historical-schema database; historical worker
+reads remain SN-owned.
 
-RootCoord need not serve two Schema bodies publicly. Its existing metadata
-publication must be split from the early internal side effects currently coupled
-to `MetaTable.AlterCollection` and `BroadcastAlteredCollection`. The callback
-must preserve rename/property/index side effects and idempotency while leaving
-the public schema old until publication. Non-schema ALTER paths retain their
-existing completion contract.
+RootCoord serves one published Schema body publicly. The implemented callback
+applies bound index metadata and calls `Resources.PrepareSchema` before
+`MetaTable.AlterCollection` publishes the new metadata. It then calls
+`ShardViewRegistry.PublishCollectionSchema`; the outer callback retains other
+ALTER side effects and cache invalidation. Replay detects already published
+metadata and finishes lifecycle/cache notification without repeating preparation
+for a retired schema. Non-schema ALTER paths retain their existing contract.
 
 ### 4.3 LoadConfig and retained LoadInfo
 
@@ -237,6 +250,15 @@ a content hash alone is not an incarnation fence.
 
 ## 5. AlterCollection event flow
 
+Four milestones must remain distinct:
+
+| Milestone | What it establishes | What remains pending |
+| --- | --- | --- |
+| Target visible | Broadcast task persistence exposes durable target intent through `GetPendingSchemaTarget()` | WAL append/application and ACKs can still be incomplete; no readiness or public-read guarantee |
+| Write schema effective | Each VChannel's WAL ALTER switches write admission; consuming-side ACK additionally fences old L1 final publication | DataView certification, target QueryView readiness and public read publication |
+| Data preparation complete | `PrepareDataViewSchema` / `AdvanceSchema` publish a DataView certified for the target | Loaded collections additionally need exact-target Up coverage via `WaitAtSchema`; the public read schema remains old |
+| Read schema public | `MetaTable.AlterCollection` durably publishes the schema after certification and any required Up coverage | Notify View managers and invalidate caches; drain superseded old-schema Views and in-flight references |
+
 ```mermaid
 sequenceDiagram
     participant P as Proxy
@@ -248,25 +270,29 @@ sequenceDiagram
     participant Q as QueryNode
     P->>C: AlterCollection
     C->>B: One broadcast with stable target schema
+    B->>B: Persist task; index immutable target (target visible)
+    Note over B,V: DataCoord and planner can read pending intent before append/ACK
     B->>S: ALTER on each VChannel
-    S->>S: Fence old allocation; switch write schema; retain history
+    S->>S: Fence old allocation; switch write schema per channel; retain history
     P->>S: Fetch current write schema for DML
     S-->>B: Consuming-side ACK after old L1 final publication
     B->>C: Ordered ACK callback with schema and channel boundaries
-    C->>C: Install immutable target from Broadcaster
-    C->>D: Expose target schema and bound index requirements
+    C->>D: Apply bound index metadata from ACKed ALTER
     C->>V: Install target load intent (planning gated by DataView schema)
     C->>D: Advance DataView schema directly or await schema-bump
-    D-->>V: Publish DataView with supported target SchemaVersion
+    D-->>V: Publish certified DataView (data preparation complete)
     V->>S: Prepare target QueryView
     V->>Q: Prepare target QueryView
     Q->>S: Get exact schema and acquire retained version
     S-->>V: Resources ready; target Up protocol
     Q-->>V: Required resources Ready
-    V-->>C: Complete expected-shard target Up coverage
-    C->>C: Durably publish read schema
-    C-->>P: Invalidate read cache; complete ALTER
-    C->>V: Release superseded schema serving obligation
+    V-->>C: WaitAtSchema: complete expected-shard target Up coverage
+    C->>C: MetaTable.AlterCollection (read schema public)
+    C->>V: PublishCollectionSchema: release old serving obligation
+    C->>P: Invalidate read cache
+    C-->>B: ACK callback complete
+    B->>B: Persist completion; retire pending target
+    C-->>P: Complete ALTER
     V->>V: Drain old views / leases / resources
 ```
 
@@ -275,19 +301,24 @@ overlap. Target Up uses the existing distributed Ready/Up protocol, including
 its persistence and reports. WAL consumers must not wait for QueryView handoff.
 Their ordered Flush, schema, data and visibility events are prerequisites for it.
 
-The callback executes these idempotent stages:
+Target indexing precedes the callback. After all required ACKs, the callback
+executes these idempotent stages:
 
-1. Install the target schema from the ACKed broadcast and retain its dependencies.
-2. Expose it to DataCoord before publishing bound index metadata; apply the load
-   delta through the existing owner without recursively broadcasting.
-3. Advance DataView schema directly or await materialization of the current complete
-   data set and atomically publish it with the target schema. Then trigger QueryView
-   preparation and wait for the complete target serving obligation.
-4. Atomically persist the new public read metadata/version under the existing
-   collection serialization; prevent stale callback replay from regressing it.
-5. Invalidate read caches, notify view lifecycle publication, and finish. If
-   publication succeeded before a crash, replay finishes these side effects
-   without reverting metadata or starting another materialization operation.
+1. Check whether durable public metadata already covers this ALTER. Otherwise,
+   install its bound index metadata; the pending target is already visible.
+2. Call `Resources.PrepareSchema`, which applies target load intent through
+   `LoadConfigs.ApplySchema` without recursively broadcasting.
+3. Within `PrepareSchema`, call DataCoord's `PrepareDataViewSchema` to advance
+   DataView schema directly or await materialization of the current complete data
+   set and atomically publish it with the target schema. For loaded collections,
+   trigger QueryView planning and call `WaitAtSchema` for exact-target Up coverage.
+4. Call `MetaTable.AlterCollection` to durably publish the new public read
+   metadata/version under the existing collection serialization.
+5. Call `ShardViewRegistry.PublishCollectionSchema`, finish the outer callback's
+   ALTER side effects and invalidate read caches. Broadcaster then persists task
+   completion and retires its pending target. If publication succeeded before a
+   crash, replay finishes lifecycle/cache side effects without reverting metadata
+   or starting another materialization operation.
 
 The target obligation is all metadata VChannels crossed with the current desired
 replicas, including shards not yet in the registry. Each must have an Up view
@@ -295,7 +326,8 @@ with the exact target schema and matching load lifecycle/LoadInfo, backed by the
 capabilities in section 3. Resource shortages do not reduce the denominator or
 produce successful publication. Recheck configuration identity around observation.
 
-With no LoadConfig, publish the schema without implicitly loading the collection.
+With no LoadConfig, still certify the DataView, then publish the read schema
+without implicitly loading the collection or waiting for serving Up coverage.
 Release removes a serving obligation only when it actually commits; a release
 queued behind the same broadcast resource lock cannot unblock the callback
 holding that lock. Explicit administrative interruption needs its own existing
@@ -465,8 +497,8 @@ fabricating readiness.
 
 | Crash / race | Required result |
 | --- | --- |
-| Task persisted, some channels not appended | Continue the same broadcast; do not publish or treat it as globally ready |
-| WAL changed, callback not yet applied | Writes use each SN's admitted schema; read publication stays old; callback restores target |
+| Task persisted, some channels not appended | Reconstruct the visible pending target and continue the same broadcast; incomplete ACK TimeTicks do not prove application or readiness |
+| WAL changed, callback not yet applied | Writes use each SN's admitted schema; the target is already visible; read publication stays old until callback preparation and handoff complete |
 | Some target resources/Up views ready | Keep published-old coverage; resume missing work |
 | Target Up everywhere, before read publication | Recover target and old obligation; safely retry publication |
 | Read metadata persisted, callback not done | Keep published version; replay cache/lifecycle side effects idempotently |
@@ -522,9 +554,14 @@ node failures still use normal availability/retry behavior.
 complete membership, with Manifest and encoding requirements. A higher schema
 number or omitted unprepared Segment cannot provide this proof.
 
-**Removal correctness:** a validated field scope and fixed per-channel MVCC obey
-the WAL removal boundary. Physical retention does not extend logical validity,
-and delayed public metadata cannot resurrect a removed field past that boundary.
+**Removal correctness:** the request's bound View schema and required-field scope
+determine field validity. WAL ALTER changes write admission, not the validity of
+retained old read generations. Until read publication, matching old-schema Up
+Views can still serve the published schema, including its removed-in-target
+fields. After publication, fresh requests resolve the new schema without those
+fields; old bound requests drain with their retained Views and resource handles.
+Physical retention cannot authorize fields absent from the selected View, and
+MVCC controls data visibility rather than overriding schema identity.
 
 **Recovery correctness, with referenced history available:** pending intent
 survives in Broadcaster until callback completion; published read metadata
@@ -569,7 +606,8 @@ Required tests include:
 | --- | --- |
 | Added fields | Ordinary/default/nullable, StructArray and dynamic field on growing and sealed data; every historical row has correct values |
 | Functions | BM25/MinHash outputs, statistics and configured indexes; no Ready with absent derived data; old functions still usable by retained valid plans |
-| Removal | Ordinary/StructArray/function/dynamic removal and same-name re-add; correct pre/post-boundary behavior |
+| Removal | Ordinary/StructArray/function/dynamic removal and same-name re-add; WAL write switching does not revoke old read Views; new published schema rejects removed fields; old bound requests drain normally |
+| Target visibility | Persist task before append/ACK; expose immutable target with absent/partial TimeTicks without allowing early data certification or read publication; recover the earliest unfinished ALTER |
 | Semantic changes | TTL set/switch/remove, Function runtime settings, metadata-only changes; no unnecessary data reload |
 | Cross-shard handoff | Pause one shard/replica and between target Up and public publication; no early public schema, mixed-schema reduce or premature old-view retirement |
 | Query stages | Phase-1/Phase-2 gap, retries, requery, hybrid search, rerank, highlight and iterators; fixed schema/MVCC and complete field dependency validation |
@@ -595,9 +633,9 @@ All paths below are relative to the repository root:
 | Area | Source / change |
 | --- | --- |
 | RC ALTER callback and public publication | `internal/rootcoord/ddl_callbacks_alter_collection_properties.go`, `ddl_callbacks_alter_collection_schema.go`, `meta_table.go` |
-| Durable target source | `internal/streamingcoord/server/broadcaster/{broadcast_manager,broadcast_task,ack_callback_scheduler}.go` and `registry/` |
-| Shared Coord access | `internal/views/coord/resource/resource.go`; add target projection wiring here, outside QueryCoord RPC routing |
-| Materialization | `internal/datacoord/compaction_policy_bump_schema_version.go`, `internal/datanode/compactor/bump_schema_version_compactor.go` |
+| Durable target source | `internal/streamingcoord/server/broadcaster/{schema,broadcast_task,ack_callback_scheduler}.go`; target index updated after task persistence, ordered callback after required ACKs |
+| Shared Coord access | `internal/views/coord/resource/schema.go`; `PreparationSchema` reads pending intent, `PrepareSchema` applies load intent, certifies data and waits for exact-schema Up coverage |
+| DataView certification and materialization | `internal/datacoord/dataview_schema.go`, `internal/dataview/schema.go`, `internal/datacoord/compaction_policy_bump_schema_version.go`, `internal/datanode/compactor/bump_schema_version_compactor.go` |
 | View generation/publication | `internal/views/coord/{balancer,coordview,loadmgr,loadstatus}/`; replace single latest-Up / schema-lower-bound assumptions |
 | Proxy schemas | `internal/proxy/metacache/meta_cache.go`, `internal/proxy/{dml,dql,ddl}/`; separate selection and retain public projection |
 | Streaming client | `internal/distributed/streaming/`, `internal/streamingnode/client/handler/`; add SchemaClient using existing discovery |

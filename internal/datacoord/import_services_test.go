@@ -755,6 +755,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 		{"native_list_array", nil},
 		{"native_list_array_backup", nil},
 		{"native_list_array_snapshot", nil},
+		{"external_valid", nil},
 	} {
 		s.Run(tc.name, func() {
 			ctx := context.Background()
@@ -768,6 +769,12 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 			coll := &meta.CollectionInfo{ID: 100, VChannelNames: []string{"v1", "v2"}}
 			var allocErr, collectionErr, saveErr error
 			switch tc.name {
+			case "external_valid":
+				body.Options[importutilv2.StorageEndpoint] = "source.example.com"
+				body.Options[importutilv2.StorageBucket] = "source-bucket"
+				body.Options[importutilv2.StorageAccessKeyID] = "source-access-key"
+				body.Options[importutilv2.StorageSecretAccessKey] = "source-secret-key"
+				body.Files[0].Paths = []string{"data.json"}
 			case "invalid_timeout":
 				body.Options["timeout"] = "invalid_format"
 			case "allocator_failure":

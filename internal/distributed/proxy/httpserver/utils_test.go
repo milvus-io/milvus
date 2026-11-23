@@ -138,6 +138,20 @@ func TestCheckLimiter_ChargedRequestsRemainRateLimited(t *testing.T) {
 	defer getPartition.UnPatch()
 
 	insert := &milvuspb.InsertRequest{DbName: "target", CollectionName: "collection", PartitionName: "partition"}
+	// The handlers build search requests without nq; they are charged by the
+	// rows of their placeholder group.
+	placeholder, err := proto.Marshal(&commonpb.PlaceholderGroup{Placeholders: []*commonpb.PlaceholderValue{
+		{Tag: "$0", Type: commonpb.PlaceholderType_FloatVector, Values: [][]byte{{0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}}},
+	}})
+	require.NoError(t, err)
+	search := &milvuspb.SearchRequest{
+		DbName: "target", CollectionName: "collection",
+		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: placeholder},
+	}
+	hybridSearch := &milvuspb.HybridSearchRequest{
+		DbName: "target", CollectionName: "collection",
+		Requests: []*milvuspb.SearchRequest{search, search},
+	}
 	testCases := []struct {
 		name     string
 		request  proto.Message
@@ -146,6 +160,8 @@ func TestCheckLimiter_ChargedRequestsRemainRateLimited(t *testing.T) {
 	}{
 		{"create collection", &milvuspb.CreateCollectionRequest{DbName: "target", CollectionName: "collection"}, internalpb.RateType_DDLCollection, 1},
 		{"insert", insert, internalpb.RateType_DMLInsert, proto.Size(insert)},
+		{"search", search, internalpb.RateType_DQLSearch, 3},
+		{"hybrid search", hybridSearch, internalpb.RateType_DQLSearch, 6},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -174,7 +190,11 @@ func TestCheckLimiter_ChargedRequestsRemainRateLimited(t *testing.T) {
 					assert.Equal(t, totalBefore+1, testutil.ToFloat64(total))
 					if rejected {
 						require.ErrorIs(t, err, merr.ErrServiceQuotaExceeded)
-						assert.NotNil(t, resp)
+						// GetFailedResponse has no response type for a hybrid
+						// search; the error alone carries the rejection.
+						if _, hybrid := tc.request.(*milvuspb.HybridSearchRequest); !hybrid {
+							assert.NotNil(t, resp)
+						}
 						assert.Equal(t, successBefore, testutil.ToFloat64(success))
 						assert.Equal(t, failBefore+1, testutil.ToFloat64(fail))
 					} else {
@@ -775,24 +795,41 @@ func TestPrimaryField(t *testing.T) {
 		values[primaryKeyTemplateVar].GetArrayVal().GetStringData().GetData())
 }
 
+// minAllocBytesPerCall returns the fewest bytes allocated by a single call of
+// f across several attempts. runtime.MemStats.TotalAlloc is process-global, so
+// each measurement also counts other goroutines: the config refresher started
+// by paramtable.Init re-reads and parses milvus.yaml on every tick, allocating
+// over 1 MiB each time. Such bursts land in only some attempts, while an
+// allocation made by f itself (such as copying the request body) shows up in
+// every attempt, so the minimum isolates f's own allocation.
+func minAllocBytesPerCall(f func()) uint64 {
+	const attempts = 20
+	minAlloc := uint64(math.MaxUint64)
+	var before, after runtime.MemStats
+	for i := 0; i < attempts; i++ {
+		runtime.ReadMemStats(&before)
+		f()
+		runtime.ReadMemStats(&after)
+		minAlloc = min(minAlloc, after.TotalAlloc-before.TotalAlloc)
+	}
+	return minAlloc
+}
+
 func TestCheckAndSetDataDoesNotCopyWholeDataArray(t *testing.T) {
 	// One small row surrounded by a large amount of valid JSON whitespace
 	// isolates the cost of extracting data from row conversion allocations.
 	body := []byte(`{"data":[` + strings.Repeat(" ", 8<<20) + `{}]}`)
 	schema := &schemapb.CollectionSchema{}
-	_, _, err := checkAndSetData([]byte(`{"data":[{}]}`), schema, false)
-	require.NoError(t, err)
 
-	runtime.GC()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
 	rows, _, err := checkAndSetData(body, schema, false)
-	runtime.ReadMemStats(&after)
-	runtime.KeepAlive(body)
-
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20),
+
+	alloc := minAllocBytesPerCall(func() {
+		_, _, err := checkAndSetData(body, schema, false)
+		require.NoError(t, err)
+	})
+	require.Less(t, alloc, uint64(1<<20),
 		"extracting one row should not copy the entire data array")
 }
 
@@ -805,16 +842,15 @@ func TestSchemaForPathReplaceDoesNotCopyWholeDataArray(t *testing.T) {
 		Path:      "$.name",
 	}}
 
-	runtime.GC()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
 	got, err := schemaForPathReplaceOperands(body, schema, ops)
-	runtime.ReadMemStats(&after)
-	runtime.KeepAlive(body)
-
 	require.NoError(t, err)
 	require.True(t, proto.Equal(schema, got))
-	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20),
+
+	alloc := minAllocBytesPerCall(func() {
+		_, err := schemaForPathReplaceOperands(body, schema, ops)
+		require.NoError(t, err)
+	})
+	require.Less(t, alloc, uint64(1<<20),
 		"validating path-replace rows should not copy the entire data array")
 }
 

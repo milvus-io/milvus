@@ -37,6 +37,10 @@
 namespace milvus {
 namespace {
 
+using detail::OffsetLookupOptions;
+using detail::OffsetLookupStrategy;
+using detail::RawColumnPlanner;
+
 constexpr int32_t kElementSize = 4;
 constexpr int64_t kTestFieldId = 1;
 constexpr int64_t kVectorArrayFieldId = 2;
@@ -1652,7 +1656,9 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
             spec.dense_nullable_payload = true;
             auto fx = TypeParam::Create(spec);
             const int64_t offsets[]{4, -1, 0, 5, 4, 2};
-            TargetBitmap candidates(6, false);
+            TargetBitmap backing(6 + 13, false);
+            auto candidates = backing.view(7, 6);
+            const auto candidate_view = candidates.view();
             for (const auto i : {0, 2, 3, 4}) {
                 candidates.set(i);
             }
@@ -1661,7 +1667,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
                                          TargetType::Int32,
                                          nullptr,
                                          policy,
-                                         &candidates});
+                                         &candidate_view});
             ASSERT_NE(take, nullptr);
             EXPECT_EQ(take->Size(), 6);
             EXPECT_THROW(take->template Get<int32_t>(1), SegcoreError);
@@ -1694,6 +1700,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest, TakeEmptyCandidateMaskNeverPlansOrPins) {
         auto fx = TypeParam::Create(spec);
         const int32_t offsets[]{-1, 100};
         TargetBitmap candidates(2, false);
+        const auto candidate_view = candidates.view();
         auto filter = std::make_shared<const detail::ColumnFilter>(
             detail::ColumnFilter::MetricsSource::PreloadedStatistics,
             [](int64_t) {
@@ -1704,13 +1711,14 @@ TYPED_TEST(ChunkedColumnInterfaceTest, TakeEmptyCandidateMaskNeverPlansOrPins) {
                                    TargetType::Int32,
                                    filter,
                                    policy,
-                                   &candidates};
+                                   &candidate_view};
         auto take = fx.column->Take(nullptr, options);
         ASSERT_NE(take, nullptr);
         EXPECT_EQ(take->GetOwn().size, 2);
         EXPECT_TRUE(fx.pin_requests->empty());
         TargetBitmap wrong_size(1, true);
-        options.candidate_mask = &wrong_size;
+        const auto wrong_size_view = wrong_size.view();
+        options.candidate_mask = &wrong_size_view;
         EXPECT_THROW(fx.column->Take(nullptr, options), SegcoreError);
         EXPECT_TRUE(fx.pin_requests->empty());
     }
@@ -1729,6 +1737,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
             auto fx = TypeParam::Create(spec);
             const int32_t offsets[]{1, -1, 4, 2};
             TargetBitmap candidates(4, false);
+            const auto candidate_view = candidates.view();
             candidates.set(0);
             candidates.set(2);
             auto filter = std::make_shared<const detail::ColumnFilter>(
@@ -1742,7 +1751,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
                                          TargetType::Int32,
                                          filter,
                                          policy,
-                                         &candidates});
+                                         &candidate_view});
             ASSERT_NE(take, nullptr);
             const auto skipped = take->template Get<int32_t>(0);
             EXPECT_TRUE(skipped.data_skipped);
@@ -2141,6 +2150,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
         auto fx = TypeParam::Create(spec);
         const Offset offsets[]{12, 0, 5, 3, 12, 8, 2, masked ? -1 : 1, 5, 10};
         TargetBitmap candidates(std::size(offsets), true);
+        const auto candidate_view = candidates.view();
         candidates.set(7, !masked);
         auto filter = std::make_shared<const detail::ColumnFilter>(
             detail::ColumnFilter::MetricsSource::PreloadedStatistics,
@@ -2151,7 +2161,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
                              TargetType::Int32,
                              filter,
                              TakePinPolicy::Batch,
-                             masked ? &candidates : nullptr});
+                             masked ? &candidate_view : nullptr});
         ASSERT_NE(take, nullptr);
         ASSERT_EQ(fx.pin_requests->size(), 1u);
         EXPECT_EQ(fx.pin_requests->front(),
@@ -2352,7 +2362,7 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
 }
 
 TEST(ColumnPlannerTest, LocatesSegmentOffsets) {
-    ColumnPlanner planner(std::vector<int64_t>{0, 3, 5});
+    RawColumnPlanner planner(std::vector<int64_t>{0, 3, 5});
     EXPECT_EQ(planner.NumCells(), 2);
     EXPECT_EQ(planner.NumRows(), 5);
     EXPECT_EQ(planner.CellBoundaries(), (std::vector<int64_t>{0, 3, 5}));
@@ -2367,7 +2377,7 @@ TEST(ColumnPlannerTest, LocatesSegmentOffsets) {
     EXPECT_EQ(boundary.cell_id, 1);
     EXPECT_EQ(boundary.cell_offset, 0);
 
-    ColumnPlanner single_cell(std::vector<int64_t>{0, 5});
+    RawColumnPlanner single_cell(std::vector<int64_t>{0, 5});
     const auto single_cell_last = single_cell.Locate(4);
     EXPECT_EQ(single_cell_last.cell_id, 0);
     EXPECT_EQ(single_cell_last.cell_offset, 4);
@@ -2375,10 +2385,10 @@ TEST(ColumnPlannerTest, LocatesSegmentOffsets) {
 
 TEST(ColumnPlannerTest, BorrowsStableBoundariesAndOwnsTemporaryBoundaries) {
     const std::vector<int64_t> stable_boundaries{0, 3, 5};
-    ColumnPlanner borrowed(stable_boundaries);
+    RawColumnPlanner borrowed(stable_boundaries);
     EXPECT_EQ(borrowed.CellBoundaries().data(), stable_boundaries.data());
 
-    ColumnPlanner owned(std::vector<int64_t>{0, 2, 5});
+    RawColumnPlanner owned(std::vector<int64_t>{0, 2, 5});
     EXPECT_EQ(owned.CellBoundaries(), (std::vector<int64_t>{0, 2, 5}));
     EXPECT_EQ(owned.NumRows(), 5);
 }
@@ -2398,11 +2408,11 @@ TEST(ColumnPlannerTest, BatchStrategiesPreserveOrderForBothOffsetWidths) {
             boundaries.back() - 1, 0, 3, 2, 1, 3, 0};
         const std::vector<int32_t> offsets32(offsets64.begin(),
                                              offsets64.end());
-        const ColumnPlanner reference(boundaries);
+        const RawColumnPlanner reference(boundaries);
         for (const auto strategy : {OffsetLookupStrategy::PerOffset,
                                     OffsetLookupStrategy::BatchBinary,
                                     OffsetLookupStrategy::Bucket}) {
-            const ColumnPlanner planner(
+            const RawColumnPlanner planner(
                 boundaries,
                 OffsetLookupOptions{strategy, bucket_order, &buckets});
             for (const auto offsets :
@@ -2430,7 +2440,7 @@ TEST(ColumnPlannerTest, BatchStrategiesValidateOffsetsAndAllowEmptyRequests) {
     for (const auto strategy : {OffsetLookupStrategy::PerOffset,
                                 OffsetLookupStrategy::BatchBinary,
                                 OffsetLookupStrategy::Bucket}) {
-        const ColumnPlanner planner(
+        const RawColumnPlanner planner(
             boundaries, OffsetLookupOptions{strategy, bucket_order, &buckets});
         for (const int64_t invalid : {-1, 5}) {
             const int64_t offsets64[]{0, invalid};
@@ -2459,20 +2469,20 @@ TEST(ColumnPlannerTest, BatchStrategiesValidateOffsetsAndAllowEmptyRequests) {
 TEST(ColumnPlannerTest, RejectsInvalidBucketConfiguration) {
     const std::vector<int64_t> boundaries{0, 3, 8};
     const std::vector<int64_t> short_index{0};
+    EXPECT_THROW((RawColumnPlanner(boundaries,
+                                   {OffsetLookupStrategy::Bucket, 0, nullptr})),
+                 std::exception);
     EXPECT_THROW(
-        (ColumnPlanner(boundaries, {OffsetLookupStrategy::Bucket, 0, nullptr})),
+        (RawColumnPlanner(boundaries,
+                          {OffsetLookupStrategy::Bucket, 63, &short_index})),
         std::exception);
     EXPECT_THROW(
-        (ColumnPlanner(boundaries,
-                       {OffsetLookupStrategy::Bucket, 63, &short_index})),
+        (RawColumnPlanner(boundaries,
+                          {OffsetLookupStrategy::Bucket, 0, &short_index})),
         std::exception);
     EXPECT_THROW(
-        (ColumnPlanner(boundaries,
-                       {OffsetLookupStrategy::Bucket, 0, &short_index})),
-        std::exception);
-    EXPECT_THROW(
-        (ColumnPlanner(boundaries,
-                       {static_cast<OffsetLookupStrategy>(99), 0, nullptr})),
+        (RawColumnPlanner(boundaries,
+                          {static_cast<OffsetLookupStrategy>(99), 0, nullptr})),
         std::exception);
 }
 
@@ -2483,7 +2493,7 @@ TEST(ColumnPlannerTest, EmptyColumnsHaveNoLocationsForAnyBatchStrategy) {
         for (const auto strategy : {OffsetLookupStrategy::PerOffset,
                                     OffsetLookupStrategy::BatchBinary,
                                     OffsetLookupStrategy::Bucket}) {
-            const ColumnPlanner planner(boundaries, {strategy, 0, &buckets});
+            const RawColumnPlanner planner(boundaries, {strategy, 0, &buckets});
             const auto result = planner.LocateBatch(OffsetView{});
             EXPECT_TRUE(result.first.empty());
             EXPECT_TRUE(result.second.empty());

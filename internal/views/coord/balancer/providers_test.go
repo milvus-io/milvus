@@ -120,12 +120,69 @@ func TestRecoveredLoadIdentityAvoidsRebuildButDetectsRealChanges(t *testing.T) {
 	cache.PublishShard(id, withSegmentRows(testShardStats(ver(1, 1, 1), oldVersion, placement(1000, 1, 1, coordview.SegmentStateUp)), map[int64]int64{1000: 100}))
 	policy := NewDefaultBalancePolicy()
 	require.Empty(t, policy.Plan(cache, []qviews.ShardID{id}).Prepares, "unchanged recovery must not rebuild Up views")
-	require.Contains(t, reusableResources(newPlanningContext(cache), id, segment, []int64{1}), int64(1))
+	key := coordview.ResourceKey{SegmentID: segment.SegmentID, PartitionID: segment.PartitionID, DataVersion: dv, LoadInfoVersion: oldVersion}
+	placements := []*balancercache.PlacementNode{cache.GetCollection(1).PlacementNode(1)}
+	require.Contains(t, reusableResources(placements, key), int64(1))
 	// A newly selected index changes only LoadInfoVersion, not Schema/DataVersion.
 	indexes = append(indexes, &indexpb.IndexInfo{FieldID: 200, IndexID: 301})
 	require.NoError(t, after.Put(t.Context(), cfg))
 	plan := policy.Plan(cache, []qviews.ShardID{id})
 	require.Contains(t, plan.Prepares, id, "config change must be mandatory even with autoBalance disabled")
 	require.NotEqual(t, oldVersion, plan.Prepares[id].Build().Meta.LoadInfoVersion)
-	require.Empty(t, reusableResources(newPlanningContext(cache), id, segment, []int64{1}), "old resources must not alias the new load identity")
+	key.LoadInfoVersion = cache.GetCollection(1).ConfigVersion()
+	require.Empty(t, reusableResources(placements, key), "old resources must not alias the new load identity")
+}
+
+func TestAutoLoadSourceUpdateDoesNotRebuildViews(t *testing.T) {
+	for _, preparing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "up", true: "preparing"}[preparing], func(t *testing.T) {
+			deps := loadmgrtest.Dependencies(t)
+			store, err := loadmgr.RecoverLoadConfigStore(t.Context(), deps)
+			require.NoError(t, err)
+			cfg := cfgFor(1, 10, []int64{1}, nil)
+			cfg.AutoLoad = true
+			require.NoError(t, store.Put(t.Context(), cfg))
+			version := store.GetConfigVersion(1)
+			cache := balancercache.New(policyTestConfig())
+			stop := store.RegisterLoadConfigListener(cache.PublishLoadConfig)
+			defer stop()
+			config := *cache.GetBalanceConfig()
+			config.OptimizationEnabled = false
+			cache.UpdateBalanceConfig(&config)
+			id := cacheShard(1, 10)
+			publishTestNodes(cache, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
+			publishTestData(cache, 1, qviews.DataVersion{StreamingVersion: 1}, nil, shardDataView(id.VChannel, 1))
+			policy := NewDefaultBalancePolicy()
+			initial := policy.Plan(cache, []qviews.ShardID{id}).Prepares[id].Build()
+			require.EqualValues(t, 12, initial.Meta.Control.PreparationPriority)
+			stats := testShardStats(ver(1, 0, 1), version)
+			if preparing {
+				stats.PreparingVersion, stats.UpVersion = stats.UpVersion, nil
+			}
+			cache.PublishShard(id, stats)
+			oldContext := newPlanningContext(cache)
+			require.True(t, oldContext.ConfigForShard(id).AutoLoad)
+			cfg.AutoLoad = false
+			require.NoError(t, store.Put(t.Context(), cfg))
+			require.Equal(t, version, store.GetConfigVersion(1))
+			require.True(t, oldContext.ConfigForShard(id).AutoLoad)
+			require.False(t, newPlanningContext(cache).ConfigForShard(id).AutoLoad, "same-version metadata reaches the balancer")
+			require.Empty(t, policy.Plan(cache, []qviews.ShardID{id}).Prepares)
+			require.EqualValues(t, 12, initial.Meta.Control.PreparationPriority, "already admitted priority is immutable")
+			if preparing {
+				cache.PublishShard(id, testShardStats(ver(1, 0, 1), version))
+				require.Empty(t, policy.Plan(cache, []qviews.ShardID{id}).Prepares, "completion must not create a cold successor")
+			}
+			// Once a new View is needed, its score must use the current source,
+			// even though the resource requirements still have the same identity.
+			cache.PublishShard(id, nil)
+			next := policy.Plan(cache, []qviews.ShardID{id}).Prepares[id].Build()
+			require.Equal(t, version, next.Meta.LoadInfoVersion)
+			require.EqualValues(t, 2, next.Meta.Control.PreparationPriority, "new View uses manual source, not the old AutoLoad boost")
+			cache.PublishShard(id, testShardStats(ver(1, 0, 1), version))
+			cfg.PartitionIDs = append(cfg.PartitionIDs, 2)
+			require.NoError(t, store.Put(t.Context(), cfg))
+			require.Contains(t, policy.Plan(cache, []qviews.ShardID{id}).Prepares, id, "real requirements still rebuild")
+		})
+	}
 }

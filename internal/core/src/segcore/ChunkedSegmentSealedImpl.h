@@ -377,6 +377,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     };
 
     struct PublishedSegmentState {
+        exec::ExprCacheGenerationPtr expr_cache_generation =
+            std::make_shared<exec::ExprCacheGeneration>();
         SealedFieldLayoutPtr fields;
         std::shared_ptr<const SegmentLoadInfo> load_info;
         std::shared_ptr<const RuntimeResourceState> runtime;

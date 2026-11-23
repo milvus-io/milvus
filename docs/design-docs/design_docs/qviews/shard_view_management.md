@@ -556,3 +556,18 @@ Later Down, removal, or a newer Up cannot overwrite that result. Failed recovery
 shutdown also wakes pending observers. Waiting does not hold manager/reconcile
 locks and cancellation does not change the view lifecycle. This is an in-memory
 observation handle, not a persisted management job or a new lifecycle state.
+
+### State snapshot ownership
+
+State-machine construction takes ownership of the complete QueryView definition;
+callers and `View()` readers must treat its placement payload as immutable.
+Metadata-only persistence snapshots allocate a fresh outer protobuf and clone
+Meta (including Version and Control), while sharing the immutable QueryNode and
+StreamingNode payloads. Later state transitions and control upgrades cannot
+change an earlier queued snapshot. Unknown outer wire fields are preserved.
+
+The flush scheduler only retains and reads these snapshots. Catalog
+`marshalForPersistence` clones before removing transport-only fields. Sync view
+constructors and `IntoProto()` retain their independent deep-copy boundaries;
+mutable transport data never aliases the state machine's placement. DataView and
+LoadInfo reference acquisition/release timing is unchanged.

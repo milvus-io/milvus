@@ -132,7 +132,27 @@ func TestSnapshotDeferredPathBoundary(t *testing.T) {
 			for _, path := range []string{"s3://other/root/files/data", "other/files/data", "root/../outside", ""} {
 				require.Error(t, validate(path), path)
 			}
-			require.Error(t, ValidateSnapshotSourceRequest(options), "clients cannot forge deferred validation context")
+			require.Error(t, ValidateImportSourceRequest(options), "clients cannot forge deferred validation context")
+
+			bareOptions := Options{
+				{Key: BackupFlag, Value: "true"},
+				{Key: SourceType, Value: SourceTypeSnapshot},
+				{Key: SnapshotSourceURI, Value: "root/snapshots/1/metadata/2.json"},
+				{Key: SnapshotLayout, Value: layout},
+			}
+			bareValidate, err := SnapshotPathValidator(bareOptions, cm)
+			require.NoError(t, err)
+			require.NoError(t, bareValidate("root/files/data"))
+			for _, path := range []string{
+				"s3://source/root/files/data",
+				"s3://other/root/files/data",
+				"minio://other:9000/source/root/files/data",
+				"other/files/data",
+				"root/../outside",
+				"",
+			} {
+				require.Error(t, bareValidate(path), path)
+			}
 		})
 	}
 	validate, err := SnapshotPathValidator(nil, cm)
@@ -177,7 +197,7 @@ func TestSnapshotPreparationDescriptor(t *testing.T) {
 			case "pending_l0":
 				l0 = []*internalpb.SnapshotImportL0Source{{SourceChannel: "channel", SourcePartitionId: 1}}
 			}
-			err := ValidateSnapshotImportPlan(files, input, l0)
+			err := ValidateImportPlan(files, input, l0)
 			if mode == "valid" {
 				require.NoError(t, err)
 				require.ErrorIs(t, ValidateSnapshotImportTask(files, input, nil), merr.ErrServiceUnimplemented)
@@ -866,7 +886,7 @@ func TestImportNewReader_DependencyErrors(t *testing.T) {
 	t.Run("storage_version", func(t *testing.T) {
 		// Isolate the dispatch-time error forwarding from the earlier option
 		// validation, which currently also parses the storage version.
-		validationPatch := mockey.Mock(ValidateSnapshotSourceOptions).Return(nil).Build()
+		validationPatch := mockey.Mock(ValidateImportSourceOptions).Return(nil).Build()
 		defer validationPatch.UnPatch()
 		r, err := NewReader(context.Background(), nil, &schemapb.CollectionSchema{}, &internalpb.ImportFile{},
 			Options{{Key: BackupFlag, Value: "true"}, {Key: StorageVersion, Value: "invalid"}}, 1024, nil, 0)
@@ -1016,7 +1036,7 @@ func TestSnapshotImportRejectsInlineL0(t *testing.T) {
 				files := []*internalpb.ImportFile{recovered}
 				for _, err := range []error{
 					ValidateSnapshotImportFiles(files, options),
-					ValidateSnapshotImportPlan(files, options, nil),
+					ValidateImportPlan(files, options, nil),
 					ValidateSnapshotImportTask(files, options, nil),
 				} {
 					require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
@@ -1055,7 +1075,7 @@ func TestSnapshotSharedL0Contracts(t *testing.T) {
 				{SourceChannel: "a", SourcePartitionId: 10, LegacyL0Deltalogs: []string{"local", "duplicate"}},
 				{SourceChannel: "a", SourcePartitionId: common.AllPartitionsID, LegacyL0Deltalogs: []string{"all", "duplicate"}, ManifestL0Paths: []string{packed.MarshalManifestPath("packed", 1)}},
 			}
-			require.NoError(t, ValidateSnapshotImportPlan(files, opts, inventories))
+			require.NoError(t, ValidateImportPlan(files, opts, inventories))
 			shared, err := SnapshotTaskL0Source(files, inventories)
 			require.NoError(t, err)
 			require.Equal(t, []string{"all", "duplicate", "local"}, shared.LegacyL0Deltalogs)
@@ -1113,10 +1133,10 @@ func TestSnapshotSharedL0Contracts(t *testing.T) {
 				file.SnapshotSource.Version = 99
 			}
 			if name == "empty" {
-				require.NoError(t, ValidateSnapshotImportPlan(files, base, inventories))
+				require.NoError(t, ValidateImportPlan(files, base, inventories))
 				require.NoError(t, ValidateSnapshotImportTask(files, base, shared))
 			} else {
-				require.Error(t, ValidateSnapshotImportPlan(files, base, inventories))
+				require.Error(t, ValidateImportPlan(files, base, inventories))
 			}
 			if name == "missing" || name == "wrong_channel" || name == "wrong_partition" || name == "mixed_scope" || name == "mixed_version" || name == "decoder_conflict" {
 				_, err := SnapshotTaskL0Source(files, inventories)
@@ -1131,7 +1151,7 @@ func TestSnapshotSharedL0Contracts(t *testing.T) {
 	shared, err := SnapshotTaskL0Source(nil, nil)
 	require.NoError(t, err)
 	require.Nil(t, shared)
-	require.NoError(t, ValidateSnapshotImportPlan([]*internalpb.ImportFile{{Paths: []string{strings.Repeat("x", SnapshotSourcePlanMaxBytes+1)}}}, nil, nil), "ordinary imports do not acquire a snapshot plan limit")
+	require.NoError(t, ValidateImportPlan([]*internalpb.ImportFile{{Paths: []string{strings.Repeat("x", SnapshotSourcePlanMaxBytes+1)}}}, nil, nil), "ordinary imports do not acquire a snapshot plan limit")
 }
 
 func TestSnapshotImportPlanLimitWithoutL0(t *testing.T) {
@@ -1150,13 +1170,13 @@ func TestSnapshotImportPlanLimitWithoutL0(t *testing.T) {
 			file := makeFile(SnapshotSourcePlanMaxBytes)
 			file = makeFile(2*SnapshotSourcePlanMaxBytes - proto.Size(file))
 			require.Equal(t, SnapshotSourcePlanMaxBytes, proto.Size(file))
-			require.NoError(t, ValidateSnapshotImportPlan([]*internalpb.ImportFile{file}, options, nil))
+			require.NoError(t, ValidateImportPlan([]*internalpb.ImportFile{file}, options, nil))
 			file.Id = 1 << 60
-			require.ErrorContains(t, ValidateSnapshotImportPlan([]*internalpb.ImportFile{file}, options, nil), "snapshot source plan exceeds 256 KiB")
+			require.ErrorContains(t, ValidateImportPlan([]*internalpb.ImportFile{file}, options, nil), "snapshot source plan exceeds 256 KiB")
 			// The limit covers the whole plan, not just individual files.
 			file = makeFile(SnapshotSourcePlanMaxBytes / 2)
-			require.NoError(t, ValidateSnapshotImportPlan([]*internalpb.ImportFile{file}, options, nil))
-			require.ErrorContains(t, ValidateSnapshotImportPlan([]*internalpb.ImportFile{file, file}, options, nil), "snapshot source plan exceeds 256 KiB")
+			require.NoError(t, ValidateImportPlan([]*internalpb.ImportFile{file}, options, nil))
+			require.ErrorContains(t, ValidateImportPlan([]*internalpb.ImportFile{file, file}, options, nil), "snapshot source plan exceeds 256 KiB")
 		})
 	}
 }
@@ -1416,7 +1436,7 @@ func TestSnapshotV2CrossBucketRebase(t *testing.T) {
 	cm := &sourceCM{}
 	bucket := mockey.Mock((*sourceCM).BucketName).Return("new-bucket").Build()
 	defer bucket.UnPatch()
-	for _, mode := range []string{"moved", "same_prefix", "bucket_root", "unmatched_prefix", "credentials", "referenced"} {
+	for _, mode := range []string{"moved", "same_prefix", "same_prefix_bare_source", "bucket_root", "unmatched_prefix", "credentials", "referenced", "referenced_bare_source_endpoint_escape"} {
 		t.Run(mode, func(t *testing.T) {
 			source := &internalpb.SnapshotImportSource{Version: 10, V2Reference: &internalpb.SnapshotImportV2Reference{SegmentId: 20, SnapshotManifestPath: "new/snapshots/1/manifests/20.avro", SnapshotFormatVersion: 6, OriginalKeyPrefix: proto.String("old")}}
 			opts := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}, {Key: SnapshotSourceURI, Value: "s3://new-bucket/new/snapshots/1/metadata/2.json"}, {Key: SnapshotLayout, Value: "self-contained"}}
@@ -1424,6 +1444,11 @@ func TestSnapshotV2CrossBucketRebase(t *testing.T) {
 			wantPath := "new/files/insert"
 			if mode == "same_prefix" {
 				source.V2Reference.OriginalKeyPrefix = proto.String("new")
+				path = "s3://old-bucket/new/files/insert"
+			}
+			if mode == "same_prefix_bare_source" {
+				source.V2Reference.OriginalKeyPrefix = proto.String("new")
+				opts[2].Value = "new/snapshots/1/metadata/2.json"
 				path = "s3://old-bucket/new/files/insert"
 			}
 			if mode == "bucket_root" {
@@ -1442,6 +1467,12 @@ func TestSnapshotV2CrossBucketRebase(t *testing.T) {
 				source.V2Reference.OriginalKeyPrefix = nil
 				opts[len(opts)-1].Value = "referenced"
 			}
+			if mode == "referenced_bare_source_endpoint_escape" {
+				source.V2Reference.OriginalKeyPrefix = nil
+				opts[2].Value = "new/snapshots/1/metadata/2.json"
+				opts[len(opts)-1].Value = "referenced"
+				path = "minio://evil:9000/new-bucket/new/files/insert"
+			}
 			data, err := snapshotio.MarshalSegmentManifest(&datapb.SegmentDescription{
 				SegmentId: 20, StorageVersion: storage.StorageV2, SegmentLevel: datapb.SegmentLevel_L1,
 				Binlogs: []*datapb.FieldBinlog{{FieldID: 7, Binlogs: []*datapb.Binlog{{LogPath: path}}}},
@@ -1458,7 +1489,7 @@ func TestSnapshotV2CrossBucketRebase(t *testing.T) {
 			validate, err := SnapshotPathValidator(opts, cm)
 			require.NoError(t, err)
 			err = validate(segment.Binlogs[0].Binlogs[0].LogPath)
-			if mode == "unmatched_prefix" {
+			if mode == "unmatched_prefix" || mode == "referenced_bare_source_endpoint_escape" {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)

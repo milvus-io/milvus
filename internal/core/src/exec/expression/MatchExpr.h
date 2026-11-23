@@ -46,6 +46,10 @@ class PhyMatchFilterExpr : public Expr {
           active_count_(active_count),
           batch_size_(batch_size) {
         size_per_chunk_ = segment_->size_per_chunk();
+        // Every quantifier counts only definite TRUE elements. This is an
+        // element-level consumption property even when MATCH is below NOT;
+        // MarkNullRejecting still stops at NOT inside the element predicate.
+        inputs_[0]->MarkNullRejecting();
     }
 
     void

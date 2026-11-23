@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	ext "github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -57,7 +56,7 @@ func stockBinary(t *testing.T) {
 	t.Cleanup(ext.ResetForTest)
 }
 
-// withStreamingQueryNodes turns the streaming service on and makes the
+// withStreamingQueryNodes makes the
 // streaming node manager answer from byRG, so a test can state which resource
 // group holds which streaming query nodes without one running.
 //
@@ -71,7 +70,6 @@ func withStreamingQueryNodes(byRG map[string]typeutil.UniqueSet) func() {
 	for _, nodes := range byRG {
 		all.Insert(nodes.Collect()...)
 	}
-	enabled := mockey.Mock(streamingutil.IsStreamingServiceEnabled).Return(true).Build()
 	byGroup := mockey.Mock((*snmanager.StreamingNodeManager).GetStreamingQueryNodeIDsByResourceGroup).
 		Return(byRG).Build()
 	cluster := mockey.Mock((*snmanager.StreamingNodeManager).GetStreamingQueryNodeIDs).
@@ -79,7 +77,6 @@ func withStreamingQueryNodes(byRG map[string]typeutil.UniqueSet) func() {
 	return func() {
 		cluster.UnPatch()
 		byGroup.UnPatch()
-		enabled.UnPatch()
 	}
 }
 
@@ -121,12 +118,8 @@ func metaWithQueryClusters(t *testing.T, rgNames ...string) (context.Context, *m
 	return ctx, m
 }
 
-// A form's instance runs ONE streaming node, for DDL and the write ahead log,
-// and serves queries from resource groups of regular query nodes, several of
-// which load the same collection. Milvus's own bound - no more replicas than
-// streaming query nodes, because that is where a delegator goes - would refuse
-// the second one. Under a form the delegator goes onto the replica's regular
-// query nodes, so that bound does not apply and the regular one decides.
+// Form load admission allows independently loaded resource groups to outnumber
+// StreamingNodes. This policy does not select delegator placement.
 func TestAFormLoadsACollectionIntoMoreQueryClustersThanItHasStreamingNodes(t *testing.T) {
 	ctx, m := metaWithQueryClusters(t, "cluster_a", "cluster_b")
 	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{

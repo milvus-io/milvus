@@ -208,12 +208,12 @@ type CompactionInfo struct {
 
 // getCollectionAutoCompactionEnabled returns whether auto compaction for collection is enabled.
 // if not set, returns global auto compaction config.
-func GetCollectionAutoCompactionEnabled(properties map[string]string) (bool, error) {
+func GetCollectionAutoCompactionEnabled(properties []*commonpb.KeyValuePair) (bool, error) {
 	// when collection is on truncating, disable auto compaction.
-	if _, ok := properties[common.CollectionOnTruncatingKey]; ok {
+	if _, ok := common.GetStringValue(properties, common.CollectionOnTruncatingKey); ok {
 		return false, nil
 	}
-	v, ok := properties[common.CollectionAutoCompactionKey]
+	v, ok := common.GetStringValue(properties, common.CollectionAutoCompactionKey)
 	if ok {
 		enabled, err := strconv.ParseBool(v)
 		if err != nil {

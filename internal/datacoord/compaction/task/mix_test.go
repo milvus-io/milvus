@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
@@ -36,7 +38,7 @@ type MixCompactionTaskSuite struct {
 }
 
 func (s *MixCompactionTaskSuite) SetupTest() {
-	s.mockMeta = NewMockCompactionMeta(s.T())
+	s.mockMeta = newTestCompactionMeta(s.T())
 	s.mockCatalog = mocks.NewDataCoordCatalog(s.T())
 	s.compactionTaskMeta = NewCompactionTaskMetaOverCatalog(s.mockCatalog)
 }
@@ -78,6 +80,45 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_NormalMix() {
 	s.ElementsMatch([]int64{200, 201}, segIDs)
 }
 
+func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_DeferredBloomFilter() {
+	pt := paramtable.Get()
+	key := pt.DataNodeCfg.EnableDeferredBloomFilter.Key
+	original := pt.DataNodeCfg.EnableDeferredBloomFilter.GetValue()
+	s.T().Cleanup(func() { s.Require().NoError(pt.Save(key, original)) })
+	for _, enabled := range []bool{false, true} {
+		s.Run(strconv.FormatBool(enabled), func() {
+			s.Require().NoError(pt.Save(key, strconv.FormatBool(enabled)))
+			mt := NewMockCompactionMeta(s.T())
+			mt.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&meta.SegmentInfo{
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:      200,
+					State:   commonpb.SegmentState_Flushed,
+					Binlogs: []*datapb.FieldBinlog{meta.GetFieldBinlogIDs(101, 1)},
+				},
+			}).Once()
+			task := NewMixCompactionTask(&datapb.CompactionTask{
+				PlanID:        1,
+				Type:          datapb.CompactionType_MixCompaction,
+				InputSegments: []int64{200},
+				Schema:        &schemapb.CollectionSchema{Version: 1},
+			}, nil, mt, nil, index.NewTestVersionManager())
+			alloc := allocator.NewMockAllocator(s.T())
+			alloc.EXPECT().AllocN(mock.Anything).Return(int64(100), int64(200), nil).Once()
+			task.Allocator = alloc
+
+			plan, err := task.BuildCompactionRequest()
+			s.Require().NoError(err)
+			s.Require().NotEmpty(plan.GetJsonParams())
+			// Simulate a DataNode with the opposite local setting. Decode the
+			// actual plan using the same parser as the DataNode RPC handler.
+			s.Require().NoError(pt.Save(key, strconv.FormatBool(!enabled)))
+			params, err := compaction.ParseParamsFromJSON(plan.GetJsonParams())
+			s.Require().NoError(err)
+			s.Equal(enabled, params.EnableDeferredBloomFilter)
+		})
+	}
+}
+
 func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_MixFileResources() {
 	channel := "Ch-1"
 	binLogs := []*datapb.FieldBinlog{meta.GetFieldBinlogIDs(101, 3)}
@@ -100,7 +141,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_MixFileResources() {
 				paramtable.Get().Reset(Params.CommonCfg.DNFileResourceMode.Key)
 			})
 
-			mockMeta := NewMockCompactionMeta(s.T())
+			mockMeta := newTestCompactionMeta(s.T())
 			mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segID int64) *meta.SegmentInfo {
 				return &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 					ID:            segID,
@@ -173,7 +214,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 			PlanID:        1,
 			Type:          datapb.CompactionType_MixCompaction,
 			InputSegments: []int64{200},
-		}, nil, NewMockCompactionMeta(s.T()), nil, index.NewTestVersionManager())
+		}, nil, newTestCompactionMeta(s.T()), nil, index.NewTestVersionManager())
 
 		_, err := task.BuildCompactionRequest()
 		s.Error(err)
@@ -181,7 +222,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 	})
 
 	s.Run("mix_task_schema_older_than_input", func() {
-		mt := NewMockCompactionMeta(s.T())
+		mt := newTestCompactionMeta(s.T())
 		mt.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:            200,
 			State:         commonpb.SegmentState_Flushed,
@@ -200,7 +241,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 	})
 
 	s.Run("sort_task_schema_older_than_input", func() {
-		mt := NewMockCompactionMeta(s.T())
+		mt := newTestCompactionMeta(s.T())
 		mt.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:            200,
 			State:         commonpb.SegmentState_Flushed,
@@ -252,7 +293,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 		},
 	} {
 		s.Run(test.name, func() {
-			mt := NewMockCompactionMeta(s.T())
+			mt := newTestCompactionMeta(s.T())
 			mt.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID:            200,
 				State:         commonpb.SegmentState_Flushed,

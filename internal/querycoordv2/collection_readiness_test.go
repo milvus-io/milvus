@@ -94,6 +94,13 @@ func newReadinessTestServerWithConfig(t *testing.T, info *querypb.CollectionLoad
 	catalog.EXPECT().GetReplicas(mock.Anything).Return([]*querypb.Replica{{ID: 1000, CollectionID: 100}}, nil).Once()
 	store, err := loadmgr.RecoverLoadConfigStore(ctx, loadmgrtest.FromLegacyCatalog(t, catalog))
 	require.NoError(t, err)
+	s, syncer := newReadinessTestServerWithStore(t, store, views...)
+	return s, catalog, syncer
+}
+
+func newReadinessTestServerWithStore(t *testing.T, store *loadmgr.LoadConfigStore, views ...*viewpb.QueryViewOfShard) (*Server, *readinessSyncer) {
+	t.Helper()
+	ctx := context.Background()
 	// Seed Up views with the recovered configuration identity; an update below
 	// must still wait for a new matching Up acknowledgement.
 	for _, view := range views {
@@ -107,10 +114,11 @@ func newReadinessTestServerWithConfig(t *testing.T, info *querypb.CollectionLoad
 	s := &Server{ctx: ctx, qviewsRuntime: runtime}
 	usageBroker := meta.NewMockBroker(t)
 	usageBroker.EXPECT().GetCollectionProperties(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	s.collectionUsage = newCollectionUsageManager(store, usageBroker, nil)
+	s.broker = usageBroker
+	s.collectionUsage = newCollectionUsageManager(s)
 	t.Cleanup(s.collectionUsage.close)
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
-	return s, catalog, syncer
+	return s, syncer
 }
 
 func readinessRequest(channels ...string) *querypb.EnsureCollectionReadyRequest {
@@ -305,6 +313,9 @@ func TestEnsureCollectionReadyEndsOnReleaseCancelAndShutdown(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("waiter was not released")
 			}
+			if scenario == "cancel" {
+				s.qviewsRuntime.readyChanges.Close()
+			}
 		})
 	}
 }
@@ -473,6 +484,7 @@ func TestEnsureCollectionReadySharesLoadAcrossRPCs(t *testing.T) {
 	require.Eventually(t, func() bool { return s.qviewsRuntime.loadConfigStore.Contains(100) }, 3*time.Second, time.Millisecond)
 	assertReadinessBlocked(t, done)
 	config := s.qviewsRuntime.loadConfigStore.GetConfig(100)
+	require.True(t, config.AutoLoad, "query-triggered load persists its source through the WAL callback")
 	require.Len(t, config.LoadFields, 2)
 	require.Equal(t, []int64{1000}, config.LoadFields[1].GetIndexIds())
 	shardID := qviews.ShardID{ReplicaID: config.Replicas[0].ReplicaID, VChannel: channel}
@@ -495,6 +507,7 @@ func TestEnsureCollectionReadySharesLoadAcrossRPCs(t *testing.T) {
 			t.Fatal("ready collection did not release all callers")
 		}
 	}
+	require.True(t, s.qviewsRuntime.loadConfigStore.GetConfig(100).AutoLoad, "readiness completion does not clear the persisted source")
 	// An already-ready collection submits no additional load.
 	status, err := second.EnsureCollectionReady(ctx, request())
 	require.NoError(t, merr.CheckRPCCall(status, err))
@@ -709,4 +722,48 @@ func TestEnsureCollectionReadyLoadFailureCanBeRetried(t *testing.T) {
 	}
 	require.Equal(t, total+1, testutil.ToFloat64(metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel)))
 	require.Equal(t, fail+1, testutil.ToFloat64(metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel)))
+}
+
+func TestAutoLoadSourceUpdateKeepsPreparingReadinessWaiter(t *testing.T) {
+	const channel = "by-dev-rootcoord-dml_100v0"
+	shardID := qviews.ShardID{ReplicaID: 1000, VChannel: channel}
+	s, _, syncer := newReadinessTestServer(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	store := s.qviewsRuntime.loadConfigStore
+	cfg := store.GetConfig(100).Clone()
+	cfg.AutoLoad = true
+	require.NoError(t, store.Put(ctx, cfg))
+	version := store.GetConfigVersion(100)
+	builder := qviews.NewQueryViewAtCoordBuilder(shardID.ReplicaID, &viewpb.DataViewOfCollection{
+		CollectionId: 100, DataVersion: &viewpb.DataVersion{StreamingVersion: 1},
+		Shards: []*viewpb.DataViewOfShard{{Vchannel: channel}},
+	}, channel).SetLoadInfoVersion(version).SetPreparationPriority(12)
+	require.NoError(t, s.qviewsRuntime.shardViewRegistry.Ensure(shardID).AddPreparing(ctx, builder))
+	preparing := receiveReadinessSync(t, syncer, qviews.QueryViewStatePreparing)
+	client := newEnsureRPCClient(t, s)
+	result := make(chan error, 1)
+	go func() {
+		status, err := client.EnsureCollectionReady(ctx, readinessRequest(channel))
+		result <- merr.CheckRPCCall(status, err)
+	}()
+	assertReadinessBlocked(t, result)
+	cfg.AutoLoad = false
+	require.NoError(t, store.Put(ctx, cfg))
+	require.Equal(t, version, store.GetConfigVersion(100))
+	assertReadinessBlocked(t, result)
+	ready := preparing.View.IntoProto()
+	ready.Meta.State = viewpb.QueryViewState_QueryViewStateReady
+	preparing.OnSyncResponse(qviews.NewQueryViewAtWorkNodeFromProto(ready))
+	up := receiveReadinessSync(t, syncer, qviews.QueryViewStateUp)
+	require.EqualValues(t, 12, up.View.IntoProto().Meta.Control.PreparationPriority)
+	up.OnSyncResponse(up.View)
+	select {
+	case err := <-result:
+		require.NoError(t, err, "the originally admitted view must satisfy the waiter")
+	case <-ctx.Done():
+		t.Fatal("source-only update left the waiter waiting for a successor view")
+	}
+	status, err := client.EnsureCollectionReady(ctx, readinessRequest(channel))
+	require.NoError(t, merr.CheckRPCCall(status, err))
 }

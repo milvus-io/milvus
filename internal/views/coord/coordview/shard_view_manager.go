@@ -579,19 +579,22 @@ func (m *ShardViewManager) RequestReleaseWithControl(ctx context.Context, contro
 
 	for _, sm := range m.views {
 		key, before := m.keyForStateMachine(sm), sm.State()
+		changed := true
 		switch before {
 		case qviews.QueryViewStateUp, qviews.QueryViewStateDown:
-			sm.EnterDownWithControl(control)
+			changed = sm.EnterDownWithControl(control)
 		case qviews.QueryViewStatePreparing, qviews.QueryViewStateReady:
 			sm.EnterUnrecoverable()
 		default:
 			continue
 		}
-		qvobserve.Observe(ctx, qvobserve.CoordViewReleaseRequestedEvent{
-			ViewStateTransition: qvobserve.ViewStateTransition{
-				CollectionID: m.collectionIDForStateMachine(sm), View: key, From: before, To: sm.State(),
-			},
-		})
+		if changed {
+			qvobserve.Observe(ctx, qvobserve.CoordViewReleaseRequestedEvent{
+				ViewStateTransition: qvobserve.ViewStateTransition{
+					CollectionID: m.collectionIDForStateMachine(sm), View: key, From: before, To: sm.State(),
+				},
+			})
+		}
 		m.processStateMachine(sm)
 	}
 

@@ -1955,10 +1955,9 @@ JsonKeyStats::LoadShreddingMeta(
         metadata = folly::coro::blockingWait(folly::coro::co_withExecutor(
             storage::ResolveAsyncLoadExecutor({}, priority), inspect()));
     } else {
-        auto& pool =
-            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+        auto& pool = ThreadPools::GetExecutor(milvus::ThreadPoolPriority::HIGH);
         metadata.resize(files.size());
-        std::vector<std::future<void>> futures;
+        std::vector<folly::SemiFuture<folly::Unit>> futures;
         futures.reserve(files.size());
         auto drain = folly::makeGuard([&] {
             for (auto& future : futures) {
@@ -1983,11 +1982,11 @@ JsonKeyStats::LoadShreddingMeta(
             if (files[i].second) {
                 read();
             } else {
-                futures.push_back(pool.Submit(std::move(read)));
+                futures.push_back(folly::via(&pool, std::move(read)).semi());
             }
         }
         for (auto& future : futures) {
-            future.get();
+            std::move(future).get();
         }
     }
     storage::ThrowIfCancelled(token, "prepare JSON stats footers");

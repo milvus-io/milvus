@@ -442,9 +442,12 @@ func createMilvusTableManifest(
 	// updates append, even with OVERWRITE; opening the old version would retain
 	// its stale deletes. Version allocation still advances past existing files.
 	var handle C.LoonTransactionHandle
-	if err := HandleLoonFFIResult(C.loon_transaction_open(cBasePath, cProperties,
+	acquireManifestFFI(context.Background())
+	err = HandleLoonFFIResult(C.loon_transaction_open(cBasePath, cProperties,
 		C.int64_t(ManifestEarliest), C.int64_t(-1), C.LOON_TRANSACTION_RESOLVE_OVERWRITE,
-		getRetryLimit(), &handle)); err != nil {
+		getRetryLimit(), &handle))
+	releaseManifestFFI()
+	if err != nil {
 		return "", merr.WrapErrStorage(err, "begin milvus-table manifest")
 	}
 	defer C.loon_transaction_destroy(handle)
@@ -457,6 +460,11 @@ func createMilvusTableManifest(
 	if extfs.MilvusTablePKMode.usesExternalPrimaryKey() {
 		hasExternalPrimaryKey = C.int(1)
 	}
+	// The call reads the source segment manifests and writes the new target
+	// manifest, blocking this goroutine's OS thread; bound it process-wide.
+	// Release before commitTransaction, which acquires its own slot: holding
+	// this one through it would nest and deadlock a budget of one.
+	acquireManifestFFI(context.Background())
 	result := C.loon_milvus_table_append_source_manifests(
 		handle,
 		cPathsPtr,
@@ -468,6 +476,7 @@ func createMilvusTableManifest(
 		cProperties,
 		hasExternalPrimaryKey,
 	)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", err
 	}
@@ -598,8 +607,23 @@ func GetManifestFieldIDs(manifestPath string, storageConfig *indexpb.StorageConf
 
 func manifestFieldIDsFromColumnGroups(manifestPath string, cgroups *C.LoonColumnGroups) (map[int64]struct{}, error) {
 	fields := make(map[int64]struct{})
+	err := visitManifestColumnNames(manifestPath, cgroups, func(columnName string) error {
+		fieldID, err := strconv.ParseInt(columnName, 10, 64)
+		if err != nil {
+			return merr.WrapErrStorage(err, "invalid manifest column name %q", columnName)
+		}
+		fields[fieldID] = struct{}{}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return fields, nil
+}
+
+func visitManifestColumnNames(manifestPath string, cgroups *C.LoonColumnGroups, visit func(string) error) error {
 	if cgroups.column_group_array == nil && cgroups.num_of_column_groups > 0 {
-		return nil, merr.WrapErrServiceInternalMsg("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
+		return merr.WrapErrServiceInternalMsg("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
 	}
 
 	cgArray := unsafe.Slice(cgroups.column_group_array, int(cgroups.num_of_column_groups))
@@ -612,24 +636,21 @@ func manifestFieldIDsFromColumnGroups(manifestPath string, cgroups *C.LoonColumn
 			continue
 		}
 		if cg.columns == nil {
-			return nil, merr.WrapErrServiceInternalMsg(
+			return merr.WrapErrServiceInternalMsg(
 				"columns array is nil but num_of_columns is %d in column group %d", cg.num_of_columns, i)
 		}
 		columns := unsafe.Slice(cg.columns, int(cg.num_of_columns))
 		for j, column := range columns {
 			if column == nil {
-				return nil, merr.WrapErrServiceInternalMsg(
+				return merr.WrapErrServiceInternalMsg(
 					"nil column name in column group %d at index %d", i, j)
 			}
-			columnName := C.GoString(column)
-			fieldID, err := strconv.ParseInt(columnName, 10, 64)
-			if err != nil {
-				return nil, merr.WrapErrStorage(err, "invalid manifest column name %q", columnName)
+			if err := visit(C.GoString(column)); err != nil {
+				return err
 			}
-			fields[fieldID] = struct{}{}
 		}
 	}
-	return fields, nil
+	return nil
 }
 
 // ReadFragmentsFromManifest reads fragment info from a manifest path.

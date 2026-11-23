@@ -170,6 +170,13 @@ func (t *mixCompactionTask) buildWriterOptions(ctx context.Context) []storage.Rw
 		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
 		storage.WithWriterFormat(t.compactionParams.GetStorageFormat()),
 	}
+	// Enable deferred sizing only when multiple outputs are expected to avoid hash caching overhead for single-output compactions.
+	// An inaccurate estimate affects memory usage, not correctness.
+	if t.compactionParams.EnableDeferredBloomFilter && t.estimatedOutputSegmentCount > 1 {
+		pkStatsConfig := storage.DefaultPkStatsConfig(t.maxRows)
+		pkStatsConfig.UseDeferredBloomFilter = true
+		writerOpts = append(writerOpts, storage.WithPkStatsConfig(pkStatsConfig))
+	}
 
 	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {
 		// LOB base path at partition level, sharing the manifest root rule so
@@ -477,7 +484,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return nil, err
 	}
 
-	useMergeSort := canMergeSort(t.plan, t.compactionParams)
+	useMergeSort := compaction.CanMergeSort(t.plan, t.compactionParams)
 
 	var res []*datapb.CompactionSegment
 	var err error
@@ -575,37 +582,6 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		Type:     t.plan.GetType(),
 	}
 	return planResult, nil
-}
-
-// canMergeSort reports whether this plan is eligible for storage.MergeSort,
-// which merges without sorting and so requires every input to already be
-// ordered by the plan's merge key. A plan that is not eligible falls back to
-// mergeSplit, which does not assume ordering.
-func canMergeSort(plan *datapb.CompactionPlan, params compaction.Params) bool {
-	if !params.UseMergeSort {
-		return false
-	}
-	// The two sorted flags record which order the compactors that write sorted
-	// output used. datanode/services.go derives this plan's merge key from the
-	// same EnableNamespace setting -- [pk], or [partitionKey, pk] -- so the flag
-	// that must be set is the matching one, not either one. It also rejects the
-	// plan outright when a namespace-enabled collection has no partition key
-	// (namespace.mode=partition), which is why reading the setting is enough
-	// here rather than inspecting the merge key itself.
-	namespaceEnabled := plan.GetSchema().GetEnableNamespace()
-	for _, segment := range plan.GetSegmentBinlogs() {
-		sortedByMergeKey := segment.GetIsSorted()
-		if namespaceEnabled {
-			sortedByMergeKey = segment.GetIsSortedByNamespace()
-		}
-		if !sortedByMergeKey {
-			return false
-		}
-	}
-	// Each reader holds a live record, so memory grows with the reader count. A
-	// single segment is allowed: merge sort keeps the output flagged sorted,
-	// whereas mergeSplit emits it unsorted and needs a follow-up sort compaction.
-	return len(plan.GetSegmentBinlogs()) <= params.MaxSegmentMergeSort
 }
 
 func (t *mixCompactionTask) Complete() {

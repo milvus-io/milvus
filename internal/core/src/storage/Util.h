@@ -23,7 +23,7 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
-#include <future>
+#include <folly/futures/Future.h>
 #include <map>
 #include <memory>
 #include <functional>
@@ -227,7 +227,7 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
                           std::string object_key,
                           std::shared_ptr<CPluginContext> plugin_context);
 
-std::vector<std::future<std::unique_ptr<DataCodec>>>
+std::vector<folly::SemiFuture<std::unique_ptr<DataCodec>>>
 GetObjectData(
     ChunkManager* remote_chunk_manager,
     const std::vector<std::string>& remote_files,
@@ -238,12 +238,12 @@ GetObjectData(
 // Helper function to wait for all futures and collect exceptions
 // This ensures all background threads complete before rethrowing exception
 inline void
-WaitAllFutures(std::vector<std::future<void>>& futures) {
+WaitAllFutures(std::vector<folly::SemiFuture<folly::Unit>>& futures) {
     std::exception_ptr first_exception = nullptr;
 
     for (auto& future : futures) {
         try {
-            future.get();  // return type is void
+            std::move(future).get();
         } catch (...) {
             if (!first_exception) {
                 first_exception = std::current_exception();
@@ -260,7 +260,7 @@ WaitAllFutures(std::vector<std::future<void>>& futures) {
 // This ensures all background threads complete before rethrowing exception
 template <typename T>
 std::vector<T>
-WaitAllFutures(std::vector<std::future<T>> futures) {
+WaitAllFutures(std::vector<folly::SemiFuture<T>> futures) {
     std::vector<T> results;
     results.reserve(futures.size());
     std::exception_ptr first_exception = nullptr;
@@ -268,7 +268,7 @@ WaitAllFutures(std::vector<std::future<T>> futures) {
     // Wait for all futures to complete and collect exceptions
     for (auto& future : futures) {
         try {
-            results.emplace_back(future.get());
+            results.emplace_back(std::move(future).get());
         } catch (...) {
             if (!first_exception) {
                 first_exception = std::current_exception();
@@ -292,12 +292,12 @@ WaitAllFutures(std::vector<std::future<T>> futures) {
 // use-after-free on resources captured by background threads (see #46958).
 template <typename T, typename Processor>
 void
-ProcessFuturesInOrder(std::vector<std::future<T>>& futures,
+ProcessFuturesInOrder(std::vector<folly::SemiFuture<T>>& futures,
                       Processor&& processor) {
     std::exception_ptr first_exception = nullptr;
     for (auto& future : futures) {
         try {
-            auto result = future.get();
+            auto result = std::move(future).get();
             if (!first_exception) {
                 processor(std::move(result));
             }
@@ -325,7 +325,7 @@ DrainFutures(FutureContainer& futures) noexcept {
             continue;
         }
         try {
-            future.get();
+            std::move(future).get();
         } catch (...) {
         }
     }
@@ -333,12 +333,12 @@ DrainFutures(FutureContainer& futures) noexcept {
 
 template <typename T>
 void
-DrainFuture(std::future<T>& future) noexcept {
+DrainFuture(folly::SemiFuture<T>& future) noexcept {
     if (!future.valid()) {
         return;
     }
     try {
-        future.get();
+        std::move(future).get();
     } catch (...) {
     }
 }

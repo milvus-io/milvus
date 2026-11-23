@@ -21,7 +21,6 @@ import copy
 import numpy as np
 import pytest
 from common import common_func as cf
-from ml_dtypes import bfloat16
 from pymilvus import DataType
 
 SCALARS = [
@@ -54,8 +53,7 @@ def scalar_boundary_value(dtype, n):
 
 
 def normalized_vector(n, dim=DIM):
-    value = np.random.RandomState(n % (2**32)).normal(size=dim).astype(np.float32)
-    return (value / np.linalg.norm(value)).tolist()
+    return cf.gen_vectors(1, dim, seed=n, normalize=True)[0]
 
 
 def make_nullable_row(schema, n, clips, revision=0):
@@ -223,6 +221,36 @@ def vector_score(query, vector, metric):
     return dot if metric == "IP" else dot / float(np.linalg.norm(query) * np.linalg.norm(vector))
 
 
+def vector_score_tolerance(index, dtype=DataType.FLOAT_VECTOR, *, indexed=False, abs_tol=2e-4, rel_tol=2e-4):
+    """Keep raw controls strict; allow an ANN budget only for an established indexed path.
+
+    Struct children are VECTOR_ARRAY fields. GrowingIndexSet::StageAppender and
+    ChunkedSegmentSealedImpl::generate_interim_index exclude this type, so initial
+    growing and below-threshold sealed controls do not use interim vector indexes.
+    These budgets apply to the fixed corpora, not to arbitrary ANN workloads.
+    """
+    exact = {"abs": abs_tol, "rel": rel_tol}
+    if (
+        not indexed
+        or index["index_type"] not in ("HNSW", "DISKANN")
+        or dtype not in (DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR)
+        or (index.get("refine_quant_type") or "").upper() == "NONE"
+    ):
+        return exact
+    # The caller must establish indexed execution; collection metadata alone is
+    # insufficient for growing or small sealed populations. Default ANN refinement
+    # may be quantized. Keep the same policy on both engines;
+    # FLAT, binary/integer vectors and explicitly unquantized refinement stay strict.
+    metric = index["metric_type"]
+    if metric == "COSINE":
+        return {"abs": 5e-3, "rel": 0}
+    if metric in ("L2", "IP"):
+        # Full mutation/reload runs observed up to 1.22% relative error for BF16/IP.
+        # The absolute floor also covers self-matches with an exact L2 score of zero.
+        return {"abs": 5e-3, "rel": 2e-2 if dtype == DataType.BFLOAT16_VECTOR and metric == "IP" else 1e-2}
+    return exact
+
+
 def make_typed_vector(dtype, seed, dim=None):
     # Seeded vectors keep precision regressions and exact score oracles reproducible.
     dim = dim if dim is not None else (128 if dtype == DataType.BINARY_VECTOR else 32)
@@ -231,12 +259,7 @@ def make_typed_vector(dtype, seed, dim=None):
         return rng.bytes(dim // 8)
     if dtype == DataType.INT8_VECTOR:
         return rng.randint(-16, 17, dim).astype(np.int8)
-    values = rng.uniform(-1, 1, dim)
-    if dtype == DataType.FLOAT16_VECTOR:
-        return values.astype(np.float16)
-    if dtype == DataType.BFLOAT16_VECTOR:
-        return values.astype(bfloat16)
-    return values.astype(np.float32).tolist()
+    return cf.gen_vectors(1, dim, dtype, seed=seed, normalize=False)[0]
 
 
 def decode_vector(value, dtype):

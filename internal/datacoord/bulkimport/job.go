@@ -84,7 +84,8 @@ var UnfailableJobStates = typeutil.NewSet(
 
 // isIllegalJobTransition reports whether moving job to state must be refused.
 func isIllegalJobTransition(job ImportJob, state internalpb.ImportJobState) bool {
-	return state == internalpb.ImportJobState_Failed && UnfailableJobStates.Contain(job.GetState())
+	return state == internalpb.ImportJobState_Failed &&
+		(UnfailableJobStates.Contain(job.GetState()) || job.GetCommitBroadcastStarted())
 }
 
 func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
@@ -97,16 +98,9 @@ func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
 		}
 		job.(*Job).State = state
 		if state == internalpb.ImportJobState_Completed || state == internalpb.ImportJobState_Failed {
-			// Credentials are needed through both phases and retries, but not
-			// after a terminal transition. This clears the retained job record;
-			// historical WAL entries remain subject to normal WAL retention.
-			options := make([]*commonpb.KeyValuePair, 0, len(job.GetOptions()))
-			for _, option := range job.GetOptions() {
-				if option.GetKey() != importutilv2.ExternalSpec && option.GetKey() != importutilv2.SnapshotSourceURI {
-					options = append(options, option)
-				}
-			}
-			job.(*Job).Options = options
+			// Remove secret credentials while keeping structural storage.* keys so
+			// terminal external-storage jobs retain their external-source identity.
+			job.(*Job).Options = importutilv2.RemoveSourceStorageCredentials(job.GetOptions())
 			// releases requested disk resource
 			job.(*Job).RequestedDiskSize = 0
 			// set cleanup ts
@@ -123,6 +117,15 @@ func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
 func UpdateJobReason(reason string) UpdateJobAction {
 	return func(job ImportJob) {
 		job.(*Job).Reason = reason
+	}
+}
+
+// UpdateJobCommitBroadcastStarted records the last reversible point of a
+// staged import commit. The action runs under importMeta's job lock, so a
+// concurrent timeout either wins first or observes this durable marker.
+func UpdateJobCommitBroadcastStarted(job ImportJob) {
+	if job.GetState() == internalpb.ImportJobState_Uncommitted {
+		job.(*Job).CommitBroadcastStarted = true
 	}
 }
 
@@ -174,6 +177,7 @@ type ImportJob interface {
 	GetOptions() []*commonpb.KeyValuePair
 	GetAutoCommit() bool
 	GetCommitByCoordinator() bool
+	GetCommitBroadcastStarted() bool
 	GetTR() *timerecord.TimeRecorder
 	GetObjCleaned() bool
 	GetDataTs() uint64

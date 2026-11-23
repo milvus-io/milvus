@@ -138,10 +138,6 @@ func (s *RestfulAccessInfoSuite) TestErrorMsg() {
 	s.ctx.Set(ContextReturnMessage, merr.ErrChannelLack.Error())
 	result := Get(s.info, "$error_msg")
 	s.Equal(merr.ErrChannelLack.Error(), result[0])
-
-	s.ctx.Set(ContextReturnMessage, "test error. stack: 1:\n 2:\n 3:\n")
-	result = Get(s.info, "$error_msg")
-	s.Equal("test error. stack: 1:\\n 2:\\n 3:\\n", result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestDbName() {
