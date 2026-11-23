@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/CGoCatch.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
@@ -420,11 +421,8 @@ LoadIndexData(CIndex index) {
     try {
         static_cast<milvus::indexbuilder::IndexCreatorBase*>(index)->LoadData();
         return CStatus{Success, ""};
-    } catch (const SegcoreError& e) {
-        return CStatus{e.get_error_code(), strdup(e.what())};
-    } catch (const std::exception& e) {
-        return CStatus{UnexpectedError, strdup(e.what())};
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -433,11 +431,8 @@ TryReserveIndexBuild(CIndex index, bool* admitted) {
         *admitted = static_cast<milvus::indexbuilder::IndexCreatorBase*>(index)
                         ->TryReserveBuild();
         return CStatus{Success, ""};
-    } catch (const SegcoreError& e) {
-        return CStatus{e.get_error_code(), strdup(e.what())};
-    } catch (const std::exception& e) {
-        return CStatus{UnexpectedError, strdup(e.what())};
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -449,11 +444,8 @@ BuildIndex(CIndex index) {
                    "index build requires prepared input");
         builder->Build();
         return CStatus{Success, ""};
-    } catch (const SegcoreError& e) {
-        return CStatus{e.get_error_code(), strdup(e.what())};
-    } catch (const std::exception& e) {
-        return CStatus{UnexpectedError, strdup(e.what())};
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus

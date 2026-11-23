@@ -492,11 +492,14 @@ func TestIndexTaskQueue_SameNameOverlapReleasesEachBooking(t *testing.T) {
 			newerExec := sched.beginTask(newer)
 			assert.Equal(t, taskcommon.Resource{CPU: 2, Memory: 200}, queue.GetUsingResource())
 
+			assert.EqualValues(t, 2, queue.GetUsingSlot())
+
 			first, second := olderExec, newerExec
 			if newerFirst {
 				first, second = newerExec, olderExec
 			}
 			sched.finishTask(first, nil)
+			assert.EqualValues(t, 1, queue.GetUsingSlot())
 			assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 100}, queue.GetUsingResource())
 			sched.finishTask(second, nil)
 			assert.Equal(t, taskcommon.Resource{}, queue.GetUsingResource())
