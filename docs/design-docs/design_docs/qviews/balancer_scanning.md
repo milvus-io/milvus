@@ -66,12 +66,12 @@ paused scanner may retain an old pointer array until its round finishes.
 ## Balancer scheduling
 
 Cache publications record shard, collection, node, or resource group scopes.
-The discovery producer advances their immutable indexes in slices of at most
-100 shard IDs. It can suspend inside one collection or replica. Directory
+Local collection/shard notifications, node/RG notifications and full scans have
+independent producers. Each advances its own immutable cursors in slices of at
+most 100 shard IDs and can suspend inside a collection or replica. Directory
 scans also yield after 256 slots, including tombstones. New scopes alternate
-with unfinished cursors. Overlapping requests for one active scope schedule
-one following walk against the latest inputs. A periodic tick uses the same
-producer and the same submission path. Explicit bounded shard lists can
+with unfinished cursors within each source. Overlapping requests for one active scope schedule
+one following walk against the latest inputs. A periodic tick wakes the full-scan producer. Explicit bounded shard lists can
 submit directly when the cache is ready.
 
 Each slice uses the QueryView preparation priority to upsert the selected
@@ -86,9 +86,13 @@ computes placements against the batch's predicted loads, and submits prepares
 in dequeue order. A layout change can discover more work, which enters the
 same queue. The worker releases its execution lock between batches. New work
 can enter the queue while placement or AddPreparing is running. The next batch
-sees new priorities and synchronous updates to target load.
+reads current inputs. While node target accounting is in progress it refreshes
+the selected shards before pinning the batch and defers optional optimization.
+After a shard is dequeued, overlapping notifications can cause another policy
+evaluation. A valid Preparing or Ready for the current schema suppresses a new
+prepare; an invalid Preparing placement or obsolete schema permits replacement.
 
-Collection release uses a completion barrier. The discovery producer expands the released
+Collection release uses a completion barrier. The serial placement worker expands one slice of the released
 scope after the preceding apply, so it sees managers created during that apply.
 Callers that join the same pending notification share one future. The future
 collects errors and completes when all its selected shards have had a pass.

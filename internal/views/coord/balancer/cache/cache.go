@@ -121,17 +121,18 @@ type nodeSlot struct {
 // segment work is serialized per collection, and contribution writes per node.
 // Sources invoke publication synchronously and never call back from cache to source.
 type Cache struct {
-	mu            sync.RWMutex
-	collections   map[int64]*collectionSlot
-	scanIndex     collectionScanIndex
-	nodes         map[int64]*nodeSlot
-	replicas      map[int64]int64
-	groups        map[string]*ResourceGroupEntry
-	notify        func(api.TriggerScope)
-	config        atomic.Pointer[api.BalanceConfig]
-	readyCh       chan struct{}
-	readyOnce     sync.Once
-	subscriptions []func()
+	mu               sync.RWMutex
+	collections      map[int64]*collectionSlot
+	scanIndex        collectionScanIndex
+	nodes            map[int64]*nodeSlot
+	replicas         map[int64]int64
+	groups           map[string]*ResourceGroupEntry
+	notify           func(api.TriggerScope)
+	asyncNodeTargets bool
+	config           atomic.Pointer[api.BalanceConfig]
+	readyCh          chan struct{}
+	readyOnce        sync.Once
+	subscriptions    []func()
 }
 
 func New(config *api.BalanceConfig) *Cache {
@@ -199,7 +200,18 @@ func (c *Cache) WaitForReady(ctx context.Context) error {
 	}
 }
 
-func (c *Cache) SetNotifier(fn func(api.TriggerScope)) { c.mu.Lock(); c.notify = fn; c.mu.Unlock() }
+// SetNotifier registers an observer. Target accounting completes on publication.
+func (c *Cache) SetNotifier(fn func(api.TriggerScope)) { c.setNotifier(fn, false) }
+
+// SetScheduler installs the controller, which refreshes node targets during discovery.
+func (c *Cache) SetScheduler(fn func(api.TriggerScope)) { c.setNotifier(fn, true) }
+
+func (c *Cache) setNotifier(fn func(api.TriggerScope), asyncNodeTargets bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.notify, c.asyncNodeTargets = fn, asyncNodeTargets && fn != nil
+}
+
 func (c *Cache) changed(scope api.TriggerScope) {
 	c.mu.RLock()
 	fn := c.notify
@@ -637,26 +649,40 @@ func (c *Cache) PublishNode(id int64, info *api.NodeInfo) {
 	c.mu.Unlock()
 	slot.value.Store(&next)
 	c.finishNode(id, slot)
-	// Only placements on this node can have changed their target contribution.
-	// Resource-group membership also affects unplaced collections; the discovery
-	// producer traverses those immutable indexes independently of this publisher.
-	for shard := range next.RangeShards {
-		collectionID, ok := c.collectionIDForShard(shard)
-		if !ok {
-			continue
-		}
-		s := c.lockCollection(collectionID)
-		entry := *s.value.Load()
-		if current := entry.GetShard(shard); current != nil && c.refreshShardTarget(&entry, current, s.rows, make(map[int64]int64)) {
-			s.value.Store(&entry)
-		}
-		c.finishCollection(collectionID, s)
-	}
 	scope := api.TriggerScope{DirtyNodes: []int64{id}, DirtyResourceGroups: []string{old.ResourceGroup}}
 	if next.info.ResourceGroup != old.ResourceGroup {
 		scope.DirtyResourceGroups = append(scope.DirtyResourceGroups, next.info.ResourceGroup)
 	}
-	c.changed(scope)
+	c.mu.RLock()
+	notify, async := c.notify, c.asyncNodeTargets
+	c.mu.RUnlock()
+	if !async {
+		// Standalone readers and initial replay have no discovery producer.
+		for shard := range next.RangeShards {
+			c.RefreshShardTarget(shard)
+		}
+	}
+	if notify != nil {
+		notify(scope)
+	}
+}
+
+// RefreshShardTarget recomputes from current inputs under the collection writer lock.
+func (c *Cache) RefreshShardTarget(shard qviews.ShardID) {
+	collectionID, ok := c.collectionIDForShard(shard)
+	if !ok {
+		return
+	}
+	// Cold and already removed shards have no published target to repair.
+	if entry := c.GetCollection(collectionID); entry == nil || entry.GetShard(shard) == nil {
+		return
+	}
+	s := c.lockCollection(collectionID)
+	defer c.finishCollection(collectionID, s)
+	entry := *s.value.Load()
+	if current := entry.GetShard(shard); current != nil && c.refreshShardTarget(&entry, current, s.rows, make(map[int64]int64)) {
+		s.value.Store(&entry)
+	}
 }
 
 // A publication that waited for a retired slot retries on the replacement;

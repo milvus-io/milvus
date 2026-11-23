@@ -176,9 +176,9 @@ func TestBalanceLoopRefreshesLongTimerAndUnwatchesOnStop(t *testing.T) {
 	c.MarkReady()
 	b := NewDefaultBalancer(c, nil, nil, nil)
 	var calls atomic.Int64
-	patch := mockey.Mock((*DefaultBalancer).dispatch).To(func(controller *DefaultBalancer) int {
-		if job := controller.discovery.next(); job != nil {
-			controller.discovery.finish(job)
+	patch := mockey.Mock((*DefaultBalancer).dispatch).To(func(controller *DefaultBalancer, source discoverySource) int {
+		if job, source := controller.discovery.next(source); job != nil {
+			controller.discovery.finish(source, job)
 		}
 		calls.Add(1)
 		return -1
@@ -218,10 +218,10 @@ func TestDataViewCostConfigDoesNotTriggerBalance(t *testing.T) {
 }
 
 func takeScanRequest(b *DefaultBalancer) bool {
-	job := b.discovery.next()
+	job, source := b.discovery.next(periodicScan)
 	if job == nil {
 		return false
 	}
-	b.discovery.finish(job)
+	b.discovery.finish(source, job)
 	return job.scopes[0].NodeChanged
 }

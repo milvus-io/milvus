@@ -94,7 +94,7 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 			}
 		case actionMust, actionMayOptimize:
 			optional := action == actionMayOptimize
-			if optional && !snap.GetBalanceConfig().OptimizationEnabled {
+			if optional && (snap.deferOptimization || !snap.GetBalanceConfig().OptimizationEnabled) {
 				continue
 			}
 			candidate := balanceCandidate{shardID: shardID, optional: optional}

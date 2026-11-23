@@ -30,6 +30,7 @@ type balanceInput interface {
 }
 
 type planningContext struct {
+	deferOptimization   bool // Target loads are still converging after a topology change.
 	changedLayouts      []int64
 	boundedBatch        bool // Controller routes layout-discovered siblings through the same priority queue.
 	feedback            ViewFeedbackReader

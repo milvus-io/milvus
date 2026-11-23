@@ -283,7 +283,12 @@ func TestDefaultBalancePolicy_OptionalOptimizationAcceptedWhenWorthCost(t *testi
 
 	publishBackgroundRows(c, map[int64]int64{1: 890})
 
-	plan := NewDefaultBalancePolicy().Plan(c, []qviews.ShardID{shardID})
+	refreshing := newPlanningContext(c)
+	refreshing.deferOptimization = true
+	policy := NewDefaultBalancePolicy()
+	require.Empty(t, policy.Plan(refreshing, []qviews.ShardID{shardID}).Prepares, "partial target totals must not trigger an optional migration")
+
+	plan := policy.Plan(c, []qviews.ShardID{shardID})
 
 	require.Contains(t, plan.Prepares, shardID)
 	assert.Equal(t, int64(2), assignmentsFromBuilder(plan.Prepares[shardID])[101])

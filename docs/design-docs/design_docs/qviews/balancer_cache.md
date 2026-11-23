@@ -495,9 +495,14 @@ N eligible nodes a bucket contributes `rows * min(replicas, N)`; unplaced demand
 is included and excess suspended replicas are excluded without scanning all
 collection segments during reconcile.
 
-Per-view publication, LoadConfig, DataView, and node eligibility changes refresh
-selected targets synchronously. Node changes refresh contributions for shards
-indexed on the changed node. Discovery separately walks the old and new RG
+Per-view, LoadConfig and DataView publications refresh their selected targets
+synchronously. Node changes publish eligibility and RG membership immediately.
+During initial replay, the cache refreshes resident target contributions inline.
+Once the controller is attached, its topology producer refreshes each resident
+using current state under the collection lock before submitting that shard.
+Other producers can submit in parallel. While node walks are pending, the worker
+repairs its selected shards before pinning inputs and defers optional movement
+until a later evaluation with settled load totals. Discovery separately walks the old and new RG
 collection indexes in bounded slices, including collections without placements.
 Failed Preparing removes that target or falls back to Up. It does not release
 resources. The Resources index retains confirmed individual ready segments in

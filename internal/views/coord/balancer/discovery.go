@@ -6,6 +6,7 @@ import (
 	"iter"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -55,24 +56,44 @@ type discoverySlice struct {
 	last bool
 }
 
-// Only the producer advances the cursors. A newer publication may schedule
-// one fresh walk while an older immutable collection or RG is being visited.
+// Each source has one producer. A wide topology change and a periodic scan
+// can both be in flight while the collection producer admits a cold load.
+type discoverySource int
+
+const (
+	localChanges discoverySource = iota
+	topologyChanges
+	periodicScan
+	producerCount
+	workerRelease                 = producerCount // the placement worker advances release cursors
+	anySource     discoverySource = -1
+)
+
+type scopeQueue struct {
+	fresh, resumed list.List
+	resumeNext     bool
+	signal         chan struct{}
+}
+
 type discovery struct {
-	mu         sync.Mutex
-	fresh      list.List
-	pending    map[scopeKey]*discoveryScope
-	resumed    list.List
-	resumeNext bool
-	release    *discoveryScope
-	applying   bool
-	signal     chan struct{}
+	mu              sync.Mutex
+	queues          [producerCount + 1]scopeQueue
+	pending         map[scopeKey]*discoveryScope
+	release         *discoveryScope
+	nextSync        discoverySource
+	refreshingNodes atomic.Int64 // node walks with target accounting still in progress
 }
 
-func newDiscovery() *discovery {
-	return &discovery{pending: make(map[scopeKey]*discoveryScope), signal: make(chan struct{}, 1)}
+func newDiscovery(work chan struct{}) *discovery {
+	d := &discovery{pending: make(map[scopeKey]*discoveryScope)}
+	for i := range producerCount {
+		d.queues[i].signal = make(chan struct{}, 1)
+	}
+	d.queues[workerRelease].signal = work
+	return d
 }
 
-func (d *discovery) add(scope TriggerScope) {
+func (d *discovery) add(source discoverySource, scope TriggerScope) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	job := &discoveryScope{scopes: []TriggerScope{scope}}
@@ -83,8 +104,12 @@ func (d *discovery) add(scope TriggerScope) {
 		}
 		d.pending[key] = job
 	}
-	d.fresh.PushBack(job)
-	wakeBalancer(d.signal)
+	if len(scope.DirtyNodes) > 0 {
+		d.refreshingNodes.Add(1)
+	}
+	q := &d.queues[source]
+	q.fresh.PushBack(job)
+	wakeBalancer(q.signal)
 }
 
 // All shards in the selected batch already saw the new layout.
@@ -95,8 +120,9 @@ func (d *discovery) layout(collections []int64, selected []qviews.ShardID) {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.fresh.PushBack(&discoveryScope{scopes: []TriggerScope{{DirtyCollections: collections}}, skip: skip})
-	wakeBalancer(d.signal)
+	q := &d.queues[localChanges]
+	q.fresh.PushBack(&discoveryScope{scopes: []TriggerScope{{DirtyCollections: collections}}, skip: skip})
+	wakeBalancer(q.signal)
 }
 
 func (d *discovery) completion(scopes []TriggerScope) *syncutil.Future[error] {
@@ -109,7 +135,7 @@ func (d *discovery) completion(scopes []TriggerScope) *syncutil.Future[error] {
 	for _, scope := range scopes {
 		d.release.scopes = append(d.release.scopes, cloneScope(scope))
 	}
-	wakeBalancer(d.signal)
+	wakeBalancer(d.queues[workerRelease].signal)
 	return d.release.completion.future
 }
 
@@ -121,41 +147,44 @@ func cloneScope(s TriggerScope) TriggerScope {
 	return s
 }
 
-func (d *discovery) next() *discoveryScope {
+// When called synchronously before Start, rotate over the same source queues.
+func (d *discovery) next(source discoverySource) (*discoveryScope, discoverySource) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.release != nil && !d.applying {
+	if source != anySource {
+		return d.take(source), source
+	}
+	for range producerCount {
+		source = d.nextSync
+		d.nextSync = (source + 1) % producerCount
+		if job := d.take(source); job != nil {
+			return job, source
+		}
+	}
+	return nil, anySource
+}
+
+func (d *discovery) take(source discoverySource) *discoveryScope {
+	if source == workerRelease && d.release != nil && d.queues[source].resumed.Len() == 0 {
 		job := d.release
 		d.release = nil
 		return job
 	}
-	if d.resumed.Len() > 0 && (d.resumeNext || d.fresh.Len() == 0) {
-		d.resumeNext = false
-		return d.resumed.Remove(d.resumed.Front()).(*discoveryScope)
+	q := &d.queues[source]
+	if q.resumed.Len() > 0 && (q.resumeNext || q.fresh.Len() == 0) {
+		q.resumeNext = false
+		return q.resumed.Remove(q.resumed.Front()).(*discoveryScope)
 	}
-	if d.fresh.Len() == 0 {
+	if q.fresh.Len() == 0 {
 		return nil
 	}
-	job := d.fresh.Remove(d.fresh.Front()).(*discoveryScope)
+	job := q.fresh.Remove(q.fresh.Front()).(*discoveryScope)
 	job.active = true
-	d.resumeNext = d.resumed.Len() > 0
+	q.resumeNext = q.resumed.Len() > 0
 	return job
 }
 
-func (d *discovery) setApplying(value bool) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.applying = value
-	if !value && d.release != nil {
-		// Only the batch that already held old load intent needs to finish.
-		// A later busy worker cannot delay this scope a second time.
-		d.fresh.PushFront(d.release)
-		d.release = nil
-		wakeBalancer(d.signal)
-	}
-}
-
-func (d *discovery) finish(job *discoveryScope) {
+func (d *discovery) finish(source discoverySource, job *discoveryScope) {
 	if job.completion != nil {
 		job.completion.finish(1, nil)
 		return
@@ -163,17 +192,22 @@ func (d *discovery) finish(job *discoveryScope) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if job.repeat {
-		d.restart(job)
-	} else if key, ok := discoveryKey(job.scopes[0]); ok && job.skip == nil {
+		d.queues[source].restart(job)
+		return
+	}
+	if len(job.scopes[0].DirtyNodes) > 0 {
+		d.refreshingNodes.Add(-1)
+	}
+	if key, ok := discoveryKey(job.scopes[0]); ok && job.skip == nil {
 		delete(d.pending, key)
 	}
 }
 
 // The caller holds d.mu and has stopped any active iterator.
-func (d *discovery) restart(job *discoveryScope) {
+func (q *scopeQueue) restart(job *discoveryScope) {
 	job.remaining, job.stop = nil, nil
 	job.active, job.repeat = false, false
-	d.fresh.PushBack(job)
+	q.fresh.PushBack(job)
 }
 
 // Release suspended iterator stacks on Stop. A restart rediscovers unfinished
@@ -181,10 +215,14 @@ func (d *discovery) restart(job *discoveryScope) {
 func (d *discovery) suspend() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	for d.resumed.Len() > 0 {
-		job := d.resumed.Remove(d.resumed.Front()).(*discoveryScope)
-		job.stop()
-		d.restart(job)
+	for i := range d.queues {
+		q := &d.queues[i]
+		for q.resumed.Len() > 0 {
+			job := q.resumed.Remove(q.resumed.Front()).(*discoveryScope)
+			job.stop()
+			q.restart(job)
+			wakeBalancer(q.signal)
+		}
 	}
 }
 
@@ -271,6 +309,7 @@ func (w *scopeWalk) visitScope(scope TriggerScope) bool {
 	for _, id := range scope.DirtyNodes {
 		if node := w.balancer.cache.GetNode(id); node != nil {
 			for shard := range node.RangeShards {
+				w.balancer.cache.RefreshShardTarget(shard)
 				if !w.emit(shard) {
 					return false
 				}
@@ -322,8 +361,8 @@ func (b *DefaultBalancer) pruneLayout(collection int64) {
 }
 
 // dispatch advances one producer slice, independent of an in-flight placement.
-func (b *DefaultBalancer) dispatch() int {
-	job := b.discovery.next()
+func (b *DefaultBalancer) dispatch(source discoverySource) int {
+	job, source := b.discovery.next(source)
 	if job == nil {
 		return -1
 	}
@@ -336,13 +375,13 @@ func (b *DefaultBalancer) dispatch() int {
 	}
 	b.submitShards(slice.ids, job.completion)
 	if slice.last {
-		b.discovery.finish(job)
+		b.discovery.finish(source, job)
 	} else {
 		b.discovery.mu.Lock()
-		b.discovery.resumed.PushBack(job)
+		b.discovery.queues[source].resumed.PushBack(job)
 		b.discovery.mu.Unlock()
 	}
-	wakeBalancer(b.discovery.signal)
+	wakeBalancer(b.discovery.queues[source].signal)
 	return len(slice.ids)
 }
 

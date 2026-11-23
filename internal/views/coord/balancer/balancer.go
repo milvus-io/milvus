@@ -35,7 +35,6 @@ type DefaultBalancer struct {
 	viewRegistry  *coordview.ShardViewRegistry
 	policy        BalancePolicy
 	discovery     *discovery
-	dispatchMu    sync.Mutex
 	running       atomic.Bool
 	work          chan struct{}
 	submitMu      sync.Mutex
@@ -67,13 +66,14 @@ func NewDefaultBalancer(
 		schemaVersion: schemaVersion,
 		viewRegistry:  registry,
 		policy:        policy,
-		discovery:     newDiscovery(),
+
 		work:          make(chan struct{}, 1),
 		ready:         shardQueue{items: make(map[qviews.ShardID]*queuedShard)},
 		configChanged: make(chan struct{}, 1),
 	}
+	balancer.discovery = newDiscovery(balancer.work)
 	if cache != nil {
-		cache.SetNotifier(balancer.publishScope)
+		cache.SetScheduler(balancer.publishScope)
 	}
 	return balancer
 }
@@ -88,9 +88,8 @@ func (b *DefaultBalancer) Start(ctx context.Context) {
 	loopCtx, cancel := context.WithCancel(ctx)
 	b.cancel = cancel
 	b.running.Store(true)
-	b.wg.Add(2)
-	go b.produce(loopCtx)
-	go b.loop(loopCtx)
+	b.wg.Go(func() { b.run(loopCtx) })
+	wakeBalancer(b.work) // Resume pending release work even if the startup scan is empty.
 	b.Trigger()
 }
 
@@ -111,7 +110,7 @@ func (b *DefaultBalancer) Stop() {
 // full scan.
 func (b *DefaultBalancer) Trigger(scopes ...TriggerScope) {
 	if len(scopes) == 0 {
-		b.discovery.add(TriggerScope{NodeChanged: true})
+		b.discovery.add(periodicScan, TriggerScope{NodeChanged: true})
 		return
 	}
 	for _, s := range scopes {
@@ -127,18 +126,18 @@ func (b *DefaultBalancer) Trigger(scopes ...TriggerScope) {
 // affected scope here; the producer reads inputs after publication.
 func (b *DefaultBalancer) publishScope(s TriggerScope) {
 	if len(s.DirtyShards) > 0 {
-		b.discovery.add(TriggerScope{DirtyShards: slices.Clone(s.DirtyShards)})
+		b.discovery.add(localChanges, TriggerScope{DirtyShards: slices.Clone(s.DirtyShards)})
 	}
 	if len(s.DirtyCollections) > 0 {
-		b.discovery.add(TriggerScope{DirtyCollections: slices.Clone(s.DirtyCollections)})
+		b.discovery.add(localChanges, TriggerScope{DirtyCollections: slices.Clone(s.DirtyCollections)})
 	}
 	if len(s.DirtyNodes) > 0 {
-		b.discovery.add(TriggerScope{DirtyNodes: slices.Clone(s.DirtyNodes)})
+		b.discovery.add(topologyChanges, TriggerScope{DirtyNodes: slices.Clone(s.DirtyNodes)})
 	} else if s.NodeChanged {
-		b.discovery.add(TriggerScope{NodeChanged: true})
+		b.discovery.add(periodicScan, TriggerScope{NodeChanged: true})
 	}
 	for _, group := range s.DirtyResourceGroups {
-		b.discovery.add(TriggerScope{DirtyResourceGroups: []string{group}})
+		b.discovery.add(topologyChanges, TriggerScope{DirtyResourceGroups: []string{group}})
 	}
 }
 
@@ -180,8 +179,7 @@ func (b *DefaultBalancer) TriggerWithCompletion(scopes ...TriggerScope) *syncuti
 	return b.discovery.completion(scopes)
 }
 
-func (b *DefaultBalancer) produce(ctx context.Context) {
-	defer b.wg.Done()
+func (b *DefaultBalancer) run(ctx context.Context) {
 	if b.cache == nil {
 		return
 	}
@@ -190,6 +188,12 @@ func (b *DefaultBalancer) produce(ctx context.Context) {
 	if b.cache.WaitForReady(ctx) != nil {
 		return
 	}
+	var workers sync.WaitGroup
+	for source := range producerCount {
+		workers.Go(func() { b.produce(ctx, source) })
+	}
+	workers.Go(func() { b.loop(ctx) })
+	defer workers.Wait()
 	ticker := time.NewTicker(b.cache.GetBalanceConfig().ReconcileInterval)
 	defer ticker.Stop()
 	for {
@@ -200,16 +204,22 @@ func (b *DefaultBalancer) produce(ctx context.Context) {
 			ticker.Reset(b.cache.GetBalanceConfig().ReconcileInterval)
 		case <-ticker.C:
 			b.Trigger()
-		case <-b.discovery.signal:
-			b.dispatchMu.Lock()
-			b.dispatch()
-			b.dispatchMu.Unlock()
+		}
+	}
+}
+
+func (b *DefaultBalancer) produce(ctx context.Context, source discoverySource) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-b.discovery.queues[source].signal:
+			b.dispatch(source)
 		}
 	}
 }
 
 func (b *DefaultBalancer) loop(ctx context.Context) {
-	defer b.wg.Done()
 	for {
 		select {
 		case <-ctx.Done():
@@ -238,18 +248,17 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) (retErr error) {
 	}
 	// Synchronous callers drive the same producer without starting background loops.
 	if !b.running.Load() {
-		b.dispatchMu.Lock()
 		for remaining := discoveryShardLimit; remaining > 0; {
-			n := b.dispatch()
+			n := b.dispatch(anySource)
 			if n < 0 {
 				break
 			}
 			remaining -= max(1, n) // Empty scopes also consume the discovery budget.
 		}
-		b.dispatchMu.Unlock()
 	}
-	b.discovery.setApplying(true)
-	defer b.discovery.setApplying(false)
+	// Releases submitted during a placement pass must observe its publications.
+	// Detach the next release before taking this batch so later requests get their own completion.
+	b.dispatch(workerRelease)
 	b.submitMu.Lock()
 	dirty, waiters := b.ready.take(int(b.cache.GetBalanceConfig().ShardBatchSize))
 	more := len(b.ready.heap) > 0
@@ -265,7 +274,16 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) (retErr error) {
 	if len(dirty) == 0 {
 		return nil
 	}
+	// A different producer may admit a shard before its node walk reaches it.
+	// Repair this batch against live eligibility before pinning planning inputs.
+	updating := b.discovery.refreshingNodes.Load() > 0
+	if updating {
+		for _, id := range dirty {
+			b.cache.RefreshShardTarget(id)
+		}
+	}
 	reader := newPlanningContext(b.cache)
+	reader.deferOptimization = updating
 	reader.boundedBatch = true
 	dirty, err := b.readSchemaVersions(ctx, reader, dirty)
 	plan := b.policy.Plan(reader, dirty)

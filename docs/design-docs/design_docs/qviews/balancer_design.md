@@ -85,7 +85,7 @@ LoadConfigStore    DataViewManager    Node/RG owners    ShardViewRegistry
 
 ### 2.1 Balancer
 
-A discovery producer expands scopes and submits scored shard IDs. A single
+After cache readiness, three producers independently expand local collection/shard changes, node/RG changes and periodic scans. All submit scored shard IDs to one heap. A single
 worker consumes priority batches, delegates placement decisions, and applies each plan.
 
 ```go
@@ -155,11 +155,11 @@ budgets remain internal constants.
 The target control flow is schematic:
 
 ```text
-producer: wait for cache readiness
-          discover one slice from a notification or periodic scan
-          score and upsert shard IDs, then yield to other scopes
+producers: local changes | topology changes | full scans
+           discover and score slices independently, upsert into the same heap
 
-worker:   take the highest-priority shard batch
+worker:   advance pending release discovery after the previous apply
+          take the highest-priority shard batch
           read current inputs, classify shards and calculate placements
           apply releases and prepares, then take the next batch
 ```
