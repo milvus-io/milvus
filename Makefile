@@ -52,7 +52,7 @@ ifeq ($(USE_ASAN), ON)
 	use_asan = ${USE_ASAN}
 	CGO_LDFLAGS += -fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address
 	CGO_CFLAGS += -fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address
-	MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),use_asan
+	asan_go_tag := ,use_asan
 endif
 
 USE_TSAN ?= OFF
@@ -115,16 +115,6 @@ ifdef WITH_CRT
 	with_crt = ${WITH_CRT}
 endif
 
-# FIPS: default OFF. MILVUS_FIPS_ENABLED=ON builds every Go binary, library and
-# plugin against a CMVP-validated version of the FIPS 140-3 Go Cryptographic
-# Module, and the milvus_fips tag makes Milvus enable OpenSSL's FIPS provider and
-# refuse to start unless both are in FIPS mode. GOFIPS140 is exported, not passed
-# per command, because plugins only load into a binary built with the same value.
-MILVUS_FIPS_GO_MODULE ?= v1.0.0
-ifeq ($(MILVUS_FIPS_ENABLED),ON)
-	export GOFIPS140 := $(MILVUS_FIPS_GO_MODULE)
-	MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),milvus_fips
-endif
 # golangci-lint
 GOLANGCI_LINT_VERSION := 2.11.3
 GOLANGCI_LINT_OUTPUT := $(shell $(INSTALL_PATH)/golangci-lint --version 2>/dev/null)
@@ -163,8 +153,27 @@ ifneq ($(filter ON on TRUE True true 1,$(WITH_GPU)),)
         $(error USE_TSAN does not support GPU builds)
     endif
     ifneq ($(index_engine),cardinal)
-        MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),cuda
+        cuda_go_tag := ,cuda
     endif
+endif
+
+# All Go artifacts loaded into the same process must use the same snapshot.
+# Go 1.26.10 resolves v1.0.0 to the certified v1.0.0-c2097c7c (CMVP #5247).
+ifeq ($(MILVUS_FIPS_ENABLED),ON)
+ifneq ($(findstring ',$(MILVUS_GO_BUILD_TAGS))$(findstring ",$(MILVUS_GO_BUILD_TAGS)),)
+$(error FIPS build tags must not contain literal quote characters)
+endif
+	override GOFIPS140 := v1.0.0
+	export GOFIPS140
+	# Go accepts whitespace-separated or comma-separated tags. Normalize custom
+	# lists before adding a required tag so the Go tool sees it as its own tag.
+	empty :=
+	space := $(empty) $(empty)
+	comma := ,
+	fips_go_tags := $(subst $(comma), ,$(MILVUS_GO_BUILD_TAGS)$(asan_go_tag)$(cuda_go_tag))
+	override MILVUS_GO_BUILD_TAGS := $(subst $(space),$(comma),$(strip $(filter-out milvus_fips,$(fips_go_tags)) milvus_fips))
+else
+	MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS)$(asan_go_tag)$(cuda_go_tag)
 endif
 
 # Ensure git works inside containers where .git is owned by a different user.
@@ -186,6 +195,11 @@ ifeq (${ENABLE_AZURE}, false)
 endif
 
 milvus: build-cpp print-build-info build-go build-pyudf-runtime-wheel
+
+# Expose the server's Go module selection to external packaging builds.
+.PHONY: print-fips-go-module
+print-fips-go-module:
+	@printf '%s\n' "$$GOFIPS140"
 
 build-go:
 	@echo "Building Milvus ..."

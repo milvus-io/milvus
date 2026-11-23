@@ -24,27 +24,35 @@ start outside FIPS mode.
 
 ## Design
 
-**Build.** `MILVUS_FIPS_ENABLED=ON` exports `GOFIPS140=$(MILVUS_FIPS_GO_MODULE)`
-(default `v1.0.0`) to every Go command `make` runs, and adds the `milvus_fips`
-build tag to `MILVUS_GO_BUILD_TAGS`. `GOFIPS140` is exported rather than added
-to one command, because a Go plugin only loads into a binary built with the
-same value. Plugins built outside this Makefile must use both the same
-`GOFIPS140` and the `milvus_fips` tag.
+**Build.** `MILVUS_FIPS_ENABLED=ON` pins `GOFIPS140=v1.0.0` for all Go
+commands run by Make and adds `milvus_fips` to the server build tags, including
+custom tag lists. Go 1.26.10 resolves this selector to the certified snapshot
+`v1.0.0-c2097c7c`. External Go plugins must use the server's Go toolchain,
+module snapshot, and matching tags (including `milvus_fips`). External packaging
+builds can query the selector with
+`make -s --no-print-directory MILVUS_FIPS_ENABLED=ON print-fips-go-module`.
 
 **OpenSSL.** `pkg/util/fips` enables the OpenSSL FIPS provider under the
-`milvus_fips` tag instead of `boringcrypto`. Nothing else in it changes: the
-same configuration file, the same checks, and `MaybeEnableOpenSSLFIPS` still
-drives CRC32C for S3.
+`milvus_fips` tag. After loading the configuration, it checks the default
+`fips=yes` property and the provider backing the shared primary random generator
+and the startup thread's public and private generators. Both public and private
+random generation must succeed. Embedding hosts must configure FIPS before
+initializing the OpenSSL random generators, since OpenSSL retains generators
+across changes to default properties. `MaybeEnableOpenSSLFIPS` still drives
+CRC32C for S3.
 
-**Startup.** `fips.Require` runs first in `milvus run`. In a `milvus_fips`
+**Startup.** `milvus run` calls `fips.Require` before starting service roles. In a `milvus_fips`
 build it returns an error, and Milvus exits with status 1, when:
 
-- the binary was not built against a frozen module version
-  (`crypto/fips140.Version()` is `latest`);
+- Go build metadata is missing or its resolved `GOFIPS140` value differs
+  from `v1.0.0-c2097c7c`;
 - Go FIPS mode is off at run time (`GODEBUG=fips140=off`);
 - the OpenSSL FIPS provider could not be enabled.
 
-Outside a `milvus_fips` build it returns nil.
+With `--run-with-subprocess`, the supervisor finishes session cleanup and
+propagates an explicit nonzero exit status from the run child in both build
+modes. A FIPS startup failure therefore reaches the caller as exit status 1.
+Outside a `milvus_fips` build, `fips.Require` returns nil.
 
 **PBKDF2.** `pkg/util/crypto` uses `crypto/pbkdf2` instead of its own HMAC
 loop. The loop existed only because `crypto/pbkdf2` bypasses BoringCrypto.
@@ -63,7 +71,7 @@ Stored hashes are unchanged; the RFC known-answer tests still pass.
 - **The banner line changes** from `Milvus FIPS in Go: BoringCrypto <bool>` to
   `FIPS: on (Go Cryptographic Module v1.0.0, OpenSSL FIPS provider)`.
 
-Default builds do not change.
+Default builds continue to use Go's standard cryptography with their existing FIPS mode defaults.
 
 ## Not covered
 
