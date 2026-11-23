@@ -39,6 +39,7 @@ type Window struct {
 	entries   map[IdempotencyKey]*cachedRecord
 	inflight  map[IdempotencyKey]*PendingEntry
 	order     list.List
+	users     int // active interceptor calls holding this window
 	heapIndex int
 	bytes     int
 }

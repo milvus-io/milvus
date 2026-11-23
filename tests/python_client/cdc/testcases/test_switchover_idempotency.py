@@ -80,7 +80,8 @@ class TestCDCIdempotentInsertSwitchover(TestCDCSyncBase):
         self.log_test_start("test_idempotent_retry_after_switchover", "SWITCHOVER_IDEMPOTENT_RETRY", c_name)
         self._upstream_client = upstream_client
         self.resources_to_cleanup.append(("collection", c_name))
-        switched = False
+        restore_topology = False
+        passed = False
 
         try:
             self.cleanup_collection(upstream_client, c_name)
@@ -124,8 +125,8 @@ class TestCDCIdempotentInsertSwitchover(TestCDCSyncBase):
             assert self.wait_for_sync(check_replicated, sync_timeout, f"replicate {ROWS} rows of {c_name}")
 
             logger.info("[SWITCHOVER] Promoting the downstream cluster...")
+            restore_topology = True
             switchover_helper(target_cluster_id, source_cluster_id)
-            switched = True
 
             retried = rest_insert(downstream_uri, downstream_token, c_name, key, rows)
             assert retried == original, (
@@ -146,8 +147,9 @@ class TestCDCIdempotentInsertSwitchover(TestCDCSyncBase):
             physical = int(downstream_client.get_collection_stats(c_name)["row_count"])
             assert physical == ROWS, f"physical rows after switchover retry: {physical}, expected {ROWS}"
 
+            passed = True
         finally:
-            if switched:
+            if restore_topology:
                 logger.info("[SWITCHOVER] Restoring original topology...")
                 switchover_helper(source_cluster_id, target_cluster_id)
-            self.log_test_end("test_idempotent_retry_after_switchover", True, time.time() - start_time)
+            self.log_test_end("test_idempotent_retry_after_switchover", passed, time.time() - start_time)

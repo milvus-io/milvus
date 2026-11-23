@@ -93,7 +93,7 @@ cannot be done correctly for autoID collections at all.
   no-op; `Upsert` needs its delete leg deduped as well, which is a separate design.
 - Cross-cluster dedup of replicated writes. A replicated write is never deduplicated
   against the local window; it is only recorded there, so that a client retry after a
-  planned switchover is served on the promoted cluster (see
+  planned switchover can reuse the result while the secondary retains the key (see
   [Replication and CDC](#replication-and-cdc)). Keys that replication had not delivered
   before a force promote are not recovered.
 - Unbounded retention. Duplicate visibility is a bounded window (see
@@ -487,16 +487,16 @@ a retry must see. The recovery observer applies the same rule, so a window rebui
 Summary carries the replicated keys too, and restore already keeps the newest record per
 key.
 
-What this buys: after a **planned switchover**, the promoted cluster answers a client
-retry of a key the old primary committed with the primary keys the old primary assigned,
-instead of appending a second copy. The `AlterReplicateConfig` message is appended behind
-every earlier message of each pchannel, so the promoted cluster holds every key the source
-committed before it accepts its first client write. Routing lines up because row *i* goes
-to shard `i % n` on every attempt and a secondary names its vchannels by pchannel index.
+During a **planned switchover**, each PChannel appends `AlterReplicateConfig`
+after its preceding replicated writes have updated the window. A client retry on the
+promoted cluster returns the original primary keys if its window still holds the entry.
+Each cluster enforces its own idle TTL and byte budget. A duplicate hit on the old
+primary refreshes only that cluster's entry, so the secondary can evict the key sooner.
+Routing lines up because row *i* goes to shard `i % n` on every attempt and a secondary
+names its VChannels by PChannel index.
 
-What it does not buy: after a **force promote**, keys that replication had not yet
-delivered are absent, and a retry of one of them appends again. That is a property of
-unplanned failover, not of the window.
+After a **force promote**, replication may also have missed writes. A retry appends
+again when the promoted cluster has no entry for the key.
 
 Recording is best effort. A replicated write must land even when its key cannot be
 remembered. A replicated transaction is recorded only when the buffer holds a result for
@@ -527,7 +527,8 @@ with the untrusted result, and a window rebuilt after a restart would serve it a
 A known limitation remains. A keyless write does not invalidate older Summary records of
 the same key. If Summary still holds a record of an older write under that key, a window
 rebuilt after a restart serves that record again. This occurs only when the source sends
-a malformed or incomplete write, and the key was also evicted and reused before.
+a malformed result header, an incomplete transaction, or a legacy commit without
+`BodyCnt`, after eviction and reuse of the key on the source.
 
 ## Reader-side physical dedup
 

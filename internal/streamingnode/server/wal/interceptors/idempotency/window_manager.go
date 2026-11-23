@@ -43,6 +43,7 @@ type cachedRecord struct {
 type windowManager struct {
 	mu       sync.Mutex
 	config   WindowConfig
+	windows  map[string]*Window
 	order    list.List
 	eligible windowHeap
 	bytes    int
@@ -56,7 +57,7 @@ func newWindowManager(config WindowConfig) *windowManager {
 	if config.Now == nil {
 		config.Now = time.Now
 	}
-	return &windowManager{config: config}
+	return &windowManager{config: config, windows: make(map[string]*Window)}
 }
 
 func (m *windowManager) newWindow(vchannel string) *Window {
@@ -65,6 +66,43 @@ func (m *windowManager) newWindow(vchannel string) *Window {
 		entries:  make(map[IdempotencyKey]*cachedRecord),
 		inflight: make(map[IdempotencyKey]*PendingEntry),
 	}
+}
+
+// Callers retain the window through their last access, including any wait for
+// a concurrent owner. Eviction can then retire an idle VChannel without a
+// second window being created while an append still holds the first one.
+func (m *windowManager) acquireWindow(vc string) *Window {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	w := m.windows[vc]
+	if w == nil {
+		w = m.newWindow(vc)
+		m.windows[vc] = w
+	}
+	w.users++
+	return w
+}
+
+func (w *Window) release() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.users--
+	w.manager.removeEmptyWindowLocked(w)
+}
+
+func (m *windowManager) removeEmptyWindowLocked(w *Window) {
+	if w.users == 0 && len(w.entries) == 0 && len(w.inflight) == 0 && m.windows[w.vchannel] == w {
+		delete(m.windows, w.vchannel)
+		deleteWindowMetrics(w.vchannel)
+	}
+}
+
+func (m *windowManager) registerRecoveredWindow(vc string, w *Window) {
+	if len(w.entries) == 0 {
+		deleteWindowMetrics(vc)
+		return
+	}
+	m.windows[vc] = w
 }
 
 func (m *windowManager) expired(record *cachedRecord, now time.Time) bool {
@@ -118,6 +156,7 @@ func (m *windowManager) removeLocked(record *cachedRecord) {
 	m.updateEligibleLocked(w)
 	observeWindowEviction(w.vchannel, 1)
 	observeWindowEntries(w.vchannel, len(w.entries))
+	m.removeEmptyWindowLocked(w)
 }
 
 func (m *windowManager) evictLocked(now time.Time) int {

@@ -16,7 +16,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const interceptorName = "idempotency"
@@ -30,7 +29,6 @@ type idempotencyInterceptor struct {
 	config WindowConfig
 	cache  *windowManager
 
-	windows                *typeutil.ConcurrentMap[string, *Window]
 	txnInsertResultBuffers *idempotencyutils.TxnInsertResultBuffers
 	// replicatedMu is held by a replicated message for its whole handling here,
 	// and by an AlterReplicateConfig message. The inner replicate interceptor
@@ -41,7 +39,10 @@ type idempotencyInterceptor struct {
 	//     reconnected stream that reads the buffer of its bodies;
 	//   - a promotion, which must not let a client retry a key that is
 	//     already appended but not yet recorded.
-	replicatedMu sync.Mutex
+	// Local keyed writes and transaction messages hold a shared lock from
+	// role selection through completion. A topology change therefore cannot
+	// admit a write that bypassed the window or strand an owner's result.
+	replicatedMu sync.RWMutex
 	// txnActive reports whether a txn session is still tracked by the txn
 	// manager; a duplicate commit only synthesizes a rollback for a txn that is
 	// positively known to be still open. nil means "unknown" and skips the
@@ -91,7 +92,6 @@ func newIdempotencyInterceptorWithParam(config WindowConfig, param *interceptors
 	cache.start()
 	interceptor := &idempotencyInterceptor{
 		cache:                  cache,
-		windows:                typeutil.NewConcurrentMap[string, *Window](),
 		txnInsertResultBuffers: idempotencyutils.NewTxnInsertResultBuffers(currentTimeTick, txnActive),
 		txnActive:              txnActive,
 		replicateRole:          replicateRole,
@@ -107,7 +107,7 @@ func newIdempotencyInterceptorWithSnapshots(config WindowConfig, snapshots map[s
 	interceptor := newIdempotencyInterceptorWithParam(config, param)
 	interceptor.cache.mu.Lock()
 	for vchannel, window := range interceptor.cache.restore(snapshots) {
-		interceptor.windows.Insert(vchannel, window)
+		interceptor.cache.registerRecoveredWindow(vchannel, window)
 	}
 	interceptor.cache.mu.Unlock()
 	return interceptor
@@ -117,7 +117,7 @@ func newIdempotencyInterceptorWithRecovery(config WindowConfig, snapshot *idempo
 	interceptor := newIdempotencyInterceptorWithParam(config, param)
 	interceptor.cache.mu.Lock()
 	for vc, window := range interceptor.cache.restoreOrdered(snapshot) {
-		interceptor.windows.Insert(vc, window)
+		interceptor.cache.registerRecoveredWindow(vc, window)
 	}
 	interceptor.cache.mu.Unlock()
 	return interceptor
@@ -159,6 +159,9 @@ func (impl *idempotencyInterceptor) DoAppend(ctx context.Context, msg message.Mu
 	if msg.ReplicateHeader() != nil || msg.MessageType() == message.MessageTypeAlterReplicateConfig {
 		impl.replicatedMu.Lock()
 		defer impl.replicatedMu.Unlock()
+	} else if idempotencyKeyOf(msg) != "" || isTxnMessage(msg) {
+		impl.replicatedMu.RLock()
+		defer impl.replicatedMu.RUnlock()
 	}
 	if msg.ReplicateHeader() != nil {
 		return impl.appendReplicatedMessage(ctx, msg, append)
@@ -185,13 +188,10 @@ func (impl *idempotencyInterceptor) DoAppend(ctx context.Context, msg message.Mu
 // demotion, or after the source evicted the key and a client legally
 // re-issued it.
 //
-// The window IS written to. A planned switchover appends the AlterReplicateConfig
-// message behind every earlier message of the pchannel, so by the time this
-// cluster accepts client writes its window holds every key the source
-// committed, and a client retry of one of them answers with the primary keys
-// the source assigned instead of appending a second copy. Recording is best
-// effort: a replicated write must land even when its key cannot be remembered,
-// so no bookkeeping failure rejects the append.
+// A planned switchover orders the role change after preceding replicated
+// appends and their window updates. A retry can reuse the source's result
+// while the secondary retains the key under its own TTL and byte budget.
+// Recording is best effort even if the replicated result is malformed.
 func (impl *idempotencyInterceptor) appendReplicatedMessage(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
 	switch msg.MessageType() {
 	case message.MessageTypeBeginTxn:
@@ -213,7 +213,18 @@ func (impl *idempotencyInterceptor) appendReplicatedMessage(ctx context.Context,
 	}
 	// Resolve the result before the append: a txn commit reads the buffer its
 	// bodies filled, and the append below does not change it.
-	result, recordable := impl.replicatedInsertResult(ctx, msg)
+	var result *messagespb.IdempotentInsertResult
+	var resultErr error
+	var bodyCnt uint64
+	isCommit := msg.MessageType() == message.MessageTypeCommitTxn
+	if isCommit {
+		bodyCnt = message.MustAsMutableCommitTxnMessageV2(msg).Header().BodyCnt
+		result = impl.txnInsertResultBuffers.BuildIfComplete(msg, bodyCnt)
+	} else {
+		result, resultErr = getInsertResultFromInsertMessage(msg)
+	}
+	// Inserts with client-assigned primary keys can have a nil result.
+	recordable := resultErr == nil && (!isCommit || result != nil)
 	if !recordable {
 		// The WAL summary rebuilds the window from the WAL on reopen, and it
 		// cannot tell that this key was forgotten. Append the write without
@@ -227,57 +238,37 @@ func (impl *idempotencyInterceptor) appendReplicatedMessage(ctx context.Context,
 		// Their results must survive until a commit lands.
 		return nil, err
 	}
-	if msg.MessageType() == message.MessageTypeCommitTxn {
+	if isCommit {
 		impl.txnInsertResultBuffers.Remove(msg)
 	}
-	window := impl.window(msg.VChannel())
+	window := impl.cache.acquireWindow(msg.VChannel())
+	defer window.release()
 	if recordable {
 		window.Record(key, commitResultFromAppendContext(ctx, msgID, result), msg)
 	} else {
 		// This write landed under key, so an entry still held for key now
 		// describes an older write.
 		window.Forget(key)
+		if isCommit {
+			mlog.Warn(ctx, "replicated txn commit appended without a complete buffered insert result",
+				mlog.FieldVChannel(msg.VChannel()), mlog.Uint64("bodyCnt", bodyCnt))
+		} else {
+			mlog.Warn(ctx, "replicated insert appended with a malformed idempotency insert result",
+				mlog.FieldVChannel(msg.VChannel()), mlog.Err(resultErr))
+		}
 	}
 	return msgID, nil
-}
-
-// replicatedInsertResult returns the insert result to record for a keyed
-// replicated Insert or CommitTxn, and whether the key may be recorded at all.
-// An Insert without a result header (client-supplied primary keys) is recorded
-// with a nil result, as a native one is. A key is not recorded when its result
-// cannot be trusted; the caller then forgets the entry held for the key, so a
-// retry of the key appends again, as it did before replicated keys were
-// recorded. A partial record, or a stale one, would answer the retry with
-// primary keys of another write.
-func (impl *idempotencyInterceptor) replicatedInsertResult(ctx context.Context, msg message.MutableMessage) (*messagespb.IdempotentInsertResult, bool) {
-	if msg.MessageType() == message.MessageTypeCommitTxn {
-		// A native commit also needs its merged body results: a keyed commit
-		// without them fails as TransactionExpired. So a replicated one is
-		// recorded only with the complete set.
-		bodyCnt := message.MustAsMutableCommitTxnMessageV2(msg).Header().BodyCnt
-		result := impl.txnInsertResultBuffers.BuildIfComplete(msg, bodyCnt)
-		if result == nil {
-			mlog.Warn(ctx, "replicated txn commit has no complete buffered insert result, appended without recording its key",
-				mlog.FieldVChannel(msg.VChannel()), mlog.Uint64("bodyCnt", bodyCnt))
-			return nil, false
-		}
-		return result, true
-	}
-	result, err := getInsertResultFromInsertMessage(msg)
-	if err != nil {
-		mlog.Warn(ctx, "replicated insert carries a malformed idempotency insert result, appended without recording its key",
-			mlog.FieldVChannel(msg.VChannel()), mlog.Err(err))
-		return nil, false
-	}
-	return result, true
 }
 
 func (impl *idempotencyInterceptor) appendReplicatedTxnBody(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
 	insertResult, err := getInsertResultFromInsertMessage(msg)
 	if err != nil {
-		mlog.Warn(ctx, "replicated txn body carries a malformed idempotency insert result, appended without buffering it",
-			mlog.FieldVChannel(msg.VChannel()), mlog.Err(err))
-		return append(ctx, msg)
+		id, appendErr := append(ctx, msg)
+		if appendErr == nil {
+			mlog.Warn(ctx, "replicated txn body appended without buffering its malformed idempotency insert result",
+				mlog.FieldVChannel(msg.VChannel()), mlog.Err(err))
+		}
+		return id, appendErr
 	}
 	return impl.appendTxnBodyWithInsertResult(ctx, msg, insertResult, append)
 }
@@ -316,7 +307,8 @@ func (impl *idempotencyInterceptor) appendSingleMessage(ctx context.Context, msg
 }
 
 func (impl *idempotencyInterceptor) appendIdempotentMessage(ctx context.Context, msg message.MutableMessage, key IdempotencyKey, append interceptors.Append) (message.MessageID, error) {
-	window := impl.window(msg.VChannel())
+	window := impl.cache.acquireWindow(msg.VChannel())
+	defer window.release()
 	begin := window.Begin(key, msg)
 	switch begin.Decision {
 	case BeginDecisionOwner:
@@ -365,7 +357,8 @@ func (impl *idempotencyInterceptor) appendIdempotentMessage(ctx context.Context,
 }
 
 func (impl *idempotencyInterceptor) appendIdempotentTxnCommitMessage(ctx context.Context, msg message.MutableMessage, key IdempotencyKey, append interceptors.Append) (message.MessageID, error) {
-	window := impl.window(msg.VChannel())
+	window := impl.cache.acquireWindow(msg.VChannel())
+	defer window.release()
 	begin := window.Begin(key, msg)
 	switch begin.Decision {
 	case BeginDecisionOwner:
@@ -551,18 +544,11 @@ func (impl *idempotencyInterceptor) Close() {
 	impl.cache.shutdown()
 	// Drop the per-vchannel window metric series so they do not linger in the
 	// registry after this interceptor (one per pchannel WAL) tears down.
-	impl.windows.Range(func(vchannel string, _ *Window) bool {
-		deleteWindowMetrics(vchannel)
-		return true
-	})
-}
-
-func (impl *idempotencyInterceptor) window(vchannel string) *Window {
-	if window, found := impl.windows.Get(vchannel); found {
-		return window
+	impl.cache.mu.Lock()
+	defer impl.cache.mu.Unlock()
+	for vc := range impl.cache.windows {
+		deleteWindowMetrics(vc)
 	}
-	window, _ := impl.windows.GetOrInsert(vchannel, impl.cache.newWindow(vchannel))
-	return window
 }
 
 // idempotencyKeyOf reads the idempotency key from the message property. The

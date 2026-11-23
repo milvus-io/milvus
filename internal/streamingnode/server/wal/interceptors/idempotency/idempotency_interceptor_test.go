@@ -41,6 +41,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
+func testWindow(t *testing.T, impl *idempotencyInterceptor, vc string) *Window {
+	w := impl.cache.acquireWindow(vc)
+	t.Cleanup(w.release)
+	return w
+}
+
 func newInterceptor(config WindowConfig) *idempotencyInterceptor {
 	return newIdempotencyInterceptor(config)
 }
@@ -468,6 +474,86 @@ func TestInterceptorAlterReplicateConfigWaitsForReplicatedRecord(t *testing.T) {
 	require.Equal(t, []int64{800}, extra.GetIds().GetIntId().GetData())
 }
 
+func TestInterceptorNativeRetryDuringPromotion(t *testing.T) {
+	impl := newInterceptor(WindowConfig{})
+	defer impl.Close()
+	role := replicateutil.RoleSecondary
+	impl.replicateRole = func() replicateutil.Role { return role }
+	insert := newIdempotentInsertMessage(t, "v1", "key")
+	replicated := withTestReplicateHeader(newIdempotentInsertMessage(t, "v1", "key"))
+	firstID, err := impl.DoAppend(newAppendTestContext(replicated), replicated, func(ctx context.Context, _ message.MutableMessage) (message.MessageID, error) {
+		utility.ReplaceAppendResultTimeTick(ctx, 100)
+		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(9))
+		return newTestMessageID(10), nil
+	})
+	require.NoError(t, err)
+
+	alter := message.NewAlterReplicateConfigMessageBuilderV2().WithAllVChannel().
+		WithHeader(&message.AlterReplicateConfigMessageHeader{}).
+		WithBody(&message.AlterReplicateConfigMessageBody{}).MustBuildMutable()
+	entered, release, promoted := appendInBackground(impl, alter, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		role = replicateutil.RolePrimary
+		return newTestMessageID(11), nil
+	})
+	<-entered
+	started := make(chan struct{})
+	done := make(chan appendResult, 1)
+	go func() {
+		close(started)
+		id, err := impl.DoAppend(newAppendTestContext(insert), insert, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			return newTestMessageID(12), nil
+		})
+		done <- appendResult{id: id, err: err}
+	}()
+	<-started
+	select {
+	case <-done:
+		close(release)
+		<-promoted
+		t.Fatal("retry completed before promotion")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	require.NoError(t, <-promoted)
+	retry := <-done
+	require.NoError(t, retry.err)
+	require.True(t, firstID.EQ(retry.id))
+}
+
+func TestInterceptorDemotionWaitsForNativeOwner(t *testing.T) {
+	impl := newInterceptor(WindowConfig{})
+	defer impl.Close()
+	insert := newIdempotentInsertMessage(t, "v1", "key")
+	entered, release, ownerDone := appendInBackground(impl, insert, func(ctx context.Context, _ message.MutableMessage) (message.MessageID, error) {
+		utility.ReplaceAppendResultTimeTick(ctx, 100)
+		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(9))
+		return newTestMessageID(10), nil
+	})
+	<-entered
+	alter := message.NewAlterReplicateConfigMessageBuilderV2().WithAllVChannel().
+		WithHeader(&message.AlterReplicateConfigMessageHeader{}).
+		WithBody(&message.AlterReplicateConfigMessageBody{}).MustBuildMutable()
+	recorded := make(chan bool, 1)
+	go func() {
+		_, _ = impl.DoAppend(context.Background(), alter, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			w := impl.cache.acquireWindow("v1")
+			recorded <- w.Len() == 1 && w.InflightLen() == 0
+			w.release()
+			return newTestMessageID(11), nil
+		})
+	}()
+	select {
+	case <-recorded:
+		close(release)
+		<-ownerDone
+		t.Fatal("demotion ran before the native owner recorded its result")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	require.NoError(t, <-ownerDone)
+	require.True(t, <-recorded)
+}
+
 // A replicated begin drops the buffer of its txn after its append. A body of
 // the same txn that a reconnected stream replays in that gap must not lose its
 // buffered result to that drop.
@@ -555,7 +641,7 @@ func TestInterceptorReplicatedTxnCommitWithMissingBodiesIsNotRecorded(t *testing
 	_, err = interceptor.DoAppend(newCtx(), newKeyedCommit(message.TxnContext{TxnID: 11, Keepalive: 10}, 0), ok)
 	require.Error(t, err, "the native commit has no buffered bodies, so it fails as an owner instead of being served")
 	require.Equal(t, 2, appendCount)
-	require.Equal(t, 0, interceptor.window("v1").Len())
+	require.Equal(t, 0, testWindow(t, interceptor, "v1").Len())
 }
 
 // seedReplicatedKey records key on the window through a replicated insert, the
@@ -573,7 +659,7 @@ func seedReplicatedKey(t *testing.T, interceptor *idempotencyInterceptor, key st
 		return newTestMessageID(5), nil
 	})
 	require.NoError(t, err)
-	require.Equal(t, 1, interceptor.window("v1").Len())
+	require.Equal(t, 1, testWindow(t, interceptor, "v1").Len())
 }
 
 // A replicated write that lands under a key but cannot be recorded makes any
@@ -605,7 +691,7 @@ func TestInterceptorUnrecordableReplicatedTxnForgetsStaleEntry(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.Equal(t, BeginDecisionOwner, interceptor.window("v1").Begin("txn-key", nil).Decision)
+	require.Equal(t, BeginDecisionOwner, testWindow(t, interceptor, "v1").Begin("txn-key", nil).Decision)
 }
 
 // The same holds for a replicated insert whose result header cannot be read.
@@ -624,7 +710,7 @@ func TestInterceptorMalformedReplicatedInsertForgetsStaleEntry(t *testing.T) {
 	})
 	require.NoError(t, err, "a replicated write must land even when its key cannot be recorded")
 
-	require.Equal(t, BeginDecisionOwner, interceptor.window("v1").Begin("key-1", nil).Decision)
+	require.Equal(t, BeginDecisionOwner, testWindow(t, interceptor, "v1").Begin("key-1", nil).Decision)
 }
 
 // After a restart the replicate side recovers an open replicated transaction
@@ -697,7 +783,7 @@ func TestInterceptorRestoresReplicatedTxnBuffersFromTxnBuffer(t *testing.T) {
 			_, err = interceptor.DoAppend(newCtx(), withTestReplicateHeader(newKeyedCommit(bodyCtx, 2)), ok)
 			require.NoError(t, err)
 
-			entry := interceptor.window("v1").Begin("txn-key", nil)
+			entry := testWindow(t, interceptor, "v1").Begin("txn-key", nil)
 			require.Equal(t, BeginDecisionDuplicate, entry.Decision)
 			require.ElementsMatch(t, []int64{700, 701}, entry.Entry.InsertResult.GetIds().GetIntId().GetData())
 		})
@@ -1016,8 +1102,8 @@ func TestInterceptorOwnerCommitFailsOnLostInsertResults(t *testing.T) {
 	require.True(t, sErr.IsUnrecoverable())
 	require.Zero(t, appendCount)
 	// The key is released: a whole-txn retry (with rebuffered bodies) re-owns it.
-	require.Equal(t, 0, interceptor.window("v1").Len())
-	require.Equal(t, 0, interceptor.window("v1").InflightLen())
+	require.Equal(t, 0, testWindow(t, interceptor, "v1").Len())
+	require.Equal(t, 0, testWindow(t, interceptor, "v1").InflightLen())
 }
 
 // A retry still names the original write after a DDL removes its data. It
@@ -1200,8 +1286,8 @@ func TestInterceptorOwnerAppendFailureAllowsRetry(t *testing.T) {
 		return nil, appendErr
 	})
 	require.ErrorIs(t, err, appendErr)
-	require.Equal(t, 0, interceptor.window("v1").Len())
-	require.Equal(t, 0, interceptor.window("v1").InflightLen())
+	require.Equal(t, 0, testWindow(t, interceptor, "v1").Len())
+	require.Equal(t, 0, testWindow(t, interceptor, "v1").InflightLen())
 
 	ctx = utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
 	msgID, err := interceptor.DoAppend(ctx, newIdempotentInsertMessage(t, "v1", "key-retry"), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
@@ -1228,7 +1314,7 @@ func TestInterceptorIgnoresTxnBody(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, 1, appendCount)
-	require.Equal(t, 0, interceptor.window("v1").Len())
+	require.Equal(t, 0, testWindow(t, interceptor, "v1").Len())
 }
 
 func TestInterceptorPassesThroughTxnBodyWithoutIdempotencyKey(t *testing.T) {
@@ -1333,8 +1419,8 @@ func TestInterceptorTxnCommitAppendFailureClearsBuffer(t *testing.T) {
 	// dropped so the txn buffer does not leak, and the window slot must be
 	// released so a retry can re-own the key.
 	require.Nil(t, interceptor.txnInsertResultBuffers.Build(body))
-	require.Equal(t, 0, interceptor.window("v1").InflightLen())
-	require.Equal(t, 0, interceptor.window("v1").Len())
+	require.Equal(t, 0, testWindow(t, interceptor, "v1").InflightLen())
+	require.Equal(t, 0, testWindow(t, interceptor, "v1").Len())
 }
 
 func TestInterceptorConcurrentDuplicateTxnCommitKeepsInsertIDs(t *testing.T) {
@@ -1570,7 +1656,7 @@ func TestInterceptorKeylessPassThrough(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, 2, appendCount)
-	require.Equal(t, 0, interceptor.window("v1").Len())
+	require.Equal(t, 0, testWindow(t, interceptor, "v1").Len())
 }
 
 func TestInterceptorRejectsLongIdempotencyProperties(t *testing.T) {
