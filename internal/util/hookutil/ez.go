@@ -61,8 +61,8 @@ func decodeEZContext(encoded string) (ezID int64, key string, err error) {
 
 func ParseEzIDFromProperties(properties []*commonpb.KeyValuePair) (int64, bool) {
 	for _, property := range properties {
-		if property.Key == common.EncryptionEzIDKey {
-			ezID, err := strconv.ParseInt(property.Value, 10, 64)
+		if property.GetKey() == common.EncryptionEzIDKey {
+			ezID, err := strconv.ParseInt(property.GetValue(), 10, 64)
 			if err != nil {
 				return 0, false
 			}
@@ -72,22 +72,25 @@ func ParseEzIDFromProperties(properties []*commonpb.KeyValuePair) (int64, bool) 
 	return 0, false
 }
 
-func importTargetEZ(properties []*commonpb.KeyValuePair) (int64, bool, error) {
-	var ezID int64
+// parseTargetEzID requires at most one positive encryption zone ID on import target schemas.
+func parseTargetEzID(properties []*commonpb.KeyValuePair) (int64, bool, error) {
+	var id int64
+	var found bool
 	for _, property := range properties {
 		if property.GetKey() != common.EncryptionEzIDKey {
 			continue
 		}
-		if ezID != 0 {
+		if found {
 			return 0, false, merr.WrapErrParameterInvalidMsg("duplicate target %s", common.EncryptionEzIDKey)
 		}
-		id, err := strconv.ParseInt(property.GetValue(), 10, 64)
-		if err != nil || id <= 0 {
+		parsed, err := strconv.ParseInt(property.GetValue(), 10, 64)
+		if err != nil || parsed <= 0 {
 			return 0, false, merr.WrapErrParameterInvalidMsg("invalid target %s", common.EncryptionEzIDKey)
 		}
-		ezID = id
+		id = parsed
+		found = true
 	}
-	return ezID, ezID != 0, nil
+	return id, found, nil
 }
 
 func CreateEZ(ezID int64, kmsKeyArn string) error {
@@ -105,13 +108,21 @@ func CreateEZ(ezID int64, kmsKeyArn string) error {
 }
 
 func CreateLocalEZ(ezID int64, encryptionKey string) error {
+	return registerLocalEZ(CipherConfigCreateEZ, ezID, encryptionKey)
+}
+
+func RegisterLocalImportEZ(ezID int64, encryptionKey string) error {
+	return registerLocalEZ(CipherConfigImportEZ, ezID, encryptionKey)
+}
+
+func registerLocalEZ(configKey string, ezID int64, encryptionKey string) error {
 	cipher := GetCipher()
 	if cipher == nil {
 		return nil
 	}
 
 	config := map[string]string{
-		CipherConfigCreateEZ:  strconv.FormatInt(ezID, 10),
+		configKey:             strconv.FormatInt(ezID, 10),
 		CipherConfigUnsafeEZK: encryptionKey,
 	}
 
@@ -163,6 +174,10 @@ func ResolveImportEZ(artifact string) ([]*commonpb.KeyValuePair, error) {
 	if artifact == "" {
 		return nil, nil
 	}
+	sourceID, err := GetEzIDByImportEzk(artifact)
+	if err != nil {
+		return nil, err
+	}
 	cipher := GetCipher()
 	if cipher == nil {
 		return nil, errCipherPluginMissing
@@ -177,10 +192,6 @@ func ResolveImportEZ(artifact string) ([]*commonpb.KeyValuePair, error) {
 	}
 	if ezID <= 0 || len(key) == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("cipher plugin returned an invalid source EZK")
-	}
-	sourceID, err := GetEzIDByImportEzk(artifact)
-	if err != nil {
-		return nil, err
 	}
 	if ezID != sourceID {
 		return nil, merr.WrapErrServiceInternalMsg("cipher plugin resolved source ezID %d, expected %d", ezID, sourceID)

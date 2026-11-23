@@ -17,7 +17,9 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "storage/KeyRetriever.h"
+#include "storage/loon_ffi/ffi_writer_c.h"
 #include "storage/PluginLoader.h"
+#include "storage/storage_c.h"
 #include "milvus-storage/common/constants.h"
 #include "segcore/packed_writer_c.h"
 #include "segcore/packed_reader_c.h"
@@ -262,11 +264,15 @@ TEST_F(CPackedImportTest, EncryptedReaderRequiresImportCipher) {
 }
 
 TEST_F(CPackedImportTest, DecryptsUsingFileMetadataAfterRegistration) {
+    CPluginContext source{17, 0, "c291cmNl"};
+    auto missing = RegisterReadPluginContext(source);
+    EXPECT_EQ(missing.error_code, milvus::ErrorCode::Unsupported);
+    free(const_cast<char*>(missing.error_msg));
+
     auto cipher = std::make_shared<StrictMock<ImportCipher>>();
     milvus::storage::PluginLoader::GetInstance().registerPluginForTest(cipher);
-    CPluginContext source{17, 0, "c291cmNl"};
     EXPECT_CALL(*cipher, RegisterReadKeyset(17, 0, source.key));
-    milvus::storage::RegisterReaderKeys(&source);
+    ASSERT_TRUE(CheckStatus(RegisterReadPluginContext(source)));
     auto key = std::make_shared<StrictMock<ParquetFileKey>>();
     EXPECT_CALL(*cipher, GetDecryptor(18, 23, "wrapped")).WillOnce(Return(key));
     EXPECT_CALL(*key, GetKey()).WillOnce(Return("file-key"));
@@ -276,25 +282,35 @@ TEST_F(CPackedImportTest, DecryptsUsingFileMetadataAfterRegistration) {
               "file-key");
 }
 
-TEST_F(CPackedImportTest, RejectsInvalidTargetKeysWithoutEchoingThem) {
+TEST_F(CPackedImportTest, ReportsWriterKeysetErrors) {
+    CPluginContext target{17, 23, "dGFyZ2V0"};
+    char* enc_key = nullptr;
+    char* enc_meta = nullptr;
+    auto missing_enc = GetEncParams(&target, &enc_key, &enc_meta);
+    EXPECT_EQ(missing_enc.error_code, milvus::ErrorCode::Unsupported);
+    free(const_cast<char*>(missing_enc.error_msg));
+    EXPECT_EQ(enc_key, nullptr);
+    EXPECT_EQ(enc_meta, nullptr);
+
     auto cipher = std::make_shared<StrictMock<ImportCipher>>();
     milvus::storage::PluginLoader::GetInstance().registerPluginForTest(cipher);
-    CPluginContext target{17, 23, "dGFyZ2V0"};
     auto file_key = std::make_shared<StrictMock<ParquetFileKey>>();
     EXPECT_CALL(*file_key, GetKey())
         .WillOnce(Return(std::string(32, 'a')))
         .WillOnce(Return("short"));
     EXPECT_CALL(*cipher, GetEncryptorForKeyset(17, 23, target.key))
-        .WillOnce(::testing::Throw(std::runtime_error(target.key)))
+        .WillOnce(
+            ::testing::Throw(std::runtime_error("keyset could not be decoded")))
         .WillOnce(Return(EncryptorResult{}))
         .WillOnce(Return(EncryptorResult{file_key, ""}))
-        .WillOnce(Return(EncryptorResult{file_key, "wrapped"}));
+        .WillOnce(Return(EncryptorResult{file_key, "wrapped"}))
+        .WillOnce(Return(EncryptorResult{}));
     std::string file = TestLocalPath + "rejected-target.parquet";
     char* path = file.data();
-    for (const auto* reason : {"plugin error",
-                               "no encryptor",
-                               "no wrapped DEK",
-                               "invalid AES key"}) {
+    for (const auto* reason : {"keyset could not be decoded",
+                               "cipher plugin returned no encryptor",
+                               "unusable encryption parameters",
+                               "unusable encryption parameters"}) {
         SCOPED_TRACE(reason);
         ArrowSchema c_schema;
         ASSERT_TRUE(arrow::ExportSchema(*schema, &c_schema).ok());
@@ -303,11 +319,21 @@ TEST_F(CPackedImportTest, RejectsInvalidTargetKeysWithoutEchoingThem) {
             &c_schema, buffer_size, &path, 1, 0, groups, &writer, &target);
         EXPECT_NE(status.error_code, 0);
         ASSERT_NE(status.error_msg, nullptr);
+        EXPECT_THAT(status.error_msg, ::testing::HasSubstr(reason));
         EXPECT_THAT(status.error_msg,
                     ::testing::Not(::testing::HasSubstr(target.key)));
         free(const_cast<char*>(status.error_msg));
         EXPECT_EQ(writer, nullptr);
     }
+
+    auto bad_enc = GetEncParams(&target, &enc_key, &enc_meta);
+    EXPECT_NE(bad_enc.error_code, 0);
+    ASSERT_NE(bad_enc.error_msg, nullptr);
+    EXPECT_THAT(bad_enc.error_msg,
+                ::testing::HasSubstr("cipher plugin returned no encryptor"));
+    free(const_cast<char*>(bad_enc.error_msg));
+    EXPECT_EQ(enc_key, nullptr);
+    EXPECT_EQ(enc_meta, nullptr);
 }
 
 TEST_F(CPackedImportTest, ReadsSourceFooterAndWritesWithTargetKeyset) {
@@ -338,7 +364,15 @@ TEST_F(CPackedImportTest, ReadsSourceFooterAndWritesWithTargetKeyset) {
     ASSERT_NO_FATAL_FAILURE(WriteAndClose(backup, 11));
 
     EXPECT_CALL(*cipher, GetEncryptorForKeyset(17, 45, "dGFyZ2V0"))
-        .WillOnce(Return(EncryptorResult{target_key, target_edek}));
+        .Times(2)
+        .WillRepeatedly(Return(EncryptorResult{target_key, target_edek}));
+    char* key = nullptr;
+    char* metadata = nullptr;
+    ASSERT_TRUE(CheckStatus(GetEncParams(&target, &key, &metadata)));
+    EXPECT_EQ(std::string(key), std::string(32, 'b'));
+    EXPECT_EQ(std::string(metadata), "17_45_" + target_edek);
+    free(key);
+    free(metadata);
     ASSERT_TRUE(arrow::ExportSchema(*schema, &c_schema).ok());
     CPackedWriter writer = nullptr;
     ASSERT_TRUE(CheckStatus(NewPackedWriter(

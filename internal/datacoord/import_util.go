@@ -275,11 +275,9 @@ func AllocImportSegment(ctx context.Context,
 	return segment, nil
 }
 
-var errImportPluginContext = errors.New("failed to prepare import encryption context")
-
 func handleImportRequestError(task ImportTask, im ImportMeta, cause error) (failed bool) {
 	log.Warn("failed to dispatch import request", WrapTaskLog(task, zap.Error(cause))...)
-	if !errors.Is(cause, errImportPluginContext) && !errors.Is(cause, merr.ErrImportFailed) {
+	if !errors.Is(cause, merr.ErrImportFailed) {
 		return false
 	}
 	if err := im.UpdateJob(context.TODO(), task.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(cause.Error())); err != nil {
@@ -289,7 +287,13 @@ func handleImportRequestError(task ImportTask, im ImportMeta, cause error) (fail
 	return true
 }
 
+// isTemporaryImportContextError walks single and Go 1.20 multi-unwrap chains
+// because this branch's cockroachdb/errors does not traverse Unwrap() []error,
+// and checks each ErrorClassifier layer so an inner retriable error isn't masked.
 func isTemporaryImportContextError(err error) bool {
+	if merr.IsCanceledOrTimeout(err) {
+		return true
+	}
 	for ; err != nil; err = errors.Unwrap(err) {
 		if joined, ok := err.(interface{ Unwrap() []error }); ok {
 			for _, cause := range joined.Unwrap() {
@@ -299,12 +303,14 @@ func isTemporaryImportContextError(err error) bool {
 			}
 			return false
 		}
-		if merr.IsRetryableErr(err) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		if _, ok := err.(merr.ErrorClassifier); ok && merr.IsRetryableErr(err) {
 			return true
 		}
-		switch status.Code(err) {
-		case codes.Unavailable, codes.DeadlineExceeded, codes.Canceled:
-			return true
+		if rpc, ok := err.(interface{ GRPCStatus() *status.Status }); ok {
+			switch rpc.GRPCStatus().Code() {
+			case codes.Unavailable, codes.DeadlineExceeded, codes.Canceled:
+				return true
+			}
 		}
 		if timeout, ok := err.(interface{ Timeout() bool }); ok && timeout.Timeout() {
 			return true
@@ -323,7 +329,7 @@ func getImportPluginContext(job ImportJob, collectionID int64) ([]*commonpb.KeyV
 		if isTemporaryImportContextError(err) {
 			return nil, err
 		}
-		return nil, merr.Mark(merr.Wrap(err, errImportPluginContext.Error()), errImportPluginContext)
+		return nil, merr.Mark(merr.Wrap(err, "failed to prepare import encryption context"), merr.ErrImportFailed)
 	}
 	return pluginContext, nil
 }

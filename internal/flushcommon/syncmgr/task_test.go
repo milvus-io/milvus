@@ -38,16 +38,16 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/github.com/milvus-io/milvus-proto/go-api/v2/mock_hook"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type SyncTaskSuite struct {
@@ -198,39 +198,28 @@ func (s *SyncTaskSuite) TestRunNormalWithStorageV2() {
 	s.runTestRunNormal(storage.StorageV2)
 }
 
-func (s *SyncTaskSuite) TestImportTargetRequiresNativeCipher() {
+func (s *SyncTaskSuite) TestEncryptedWriteRejectsMissingUnsafeKey() {
 	seg := s.createSegment(storage.StorageV2)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg}).Maybe()
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Maybe()
 
-	// This worker has no native cipher. Losing the requested target on the
-	// way to the packed writer would allow the task to write plaintext.
-	target := &indexcgopb.StoragePluginContext{
-		EncryptionZoneId: 17,
-		CollectionId:     s.collectionID,
-		EncryptionKey:    "dGFyZ2V0",
+	cipher := mock_hook.NewMockCipher(s.T())
+	cipher.EXPECT().GetUnsafeKey(int64(17), s.collectionID).Return(nil).Once()
+	s.T().Cleanup(hookutil.SetTestCipher(cipher))
+
+	schema := s.schema
+	s.schema = &schemapb.CollectionSchema{
+		Name:       schema.GetName(),
+		Fields:     schema.GetFields(),
+		Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}},
 	}
-	schema := typeutil.Clone(s.schema)
-	schema.Properties = []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}}
-	for _, tc := range []struct {
-		name   string
-		target *indexcgopb.StoragePluginContext
-		want   error
-		reason string
-	}{
-		{"dispatched target", target, merr.ErrSegcoreUnsupported, "missing cipher plugin"},
-		{"missing target", nil, merr.ErrImportFailed, "missing dispatched import target keyset"},
-	} {
-		s.Run(tc.name, func() {
-			pack := new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).WithImportTarget(tc.target)
-			task := s.getSuiteSyncTask(pack).WithSchema(schema).WithWriteRetryOptions(retry.Attempts(1))
-			err := task.Run(context.Background())
-			s.ErrorContains(err, tc.reason)
-			s.ErrorIs(err, tc.want)
-			s.False(retry.IsRecoverable(err))
-		})
-	}
+	defer func() { s.schema = schema }()
+
+	pack := new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()})
+	task := s.getSuiteSyncTask(pack).WithWriteRetryOptions(retry.Attempts(1))
+	err := task.Run(context.Background())
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
 }
 
 func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {

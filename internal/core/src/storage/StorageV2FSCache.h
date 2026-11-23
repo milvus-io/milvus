@@ -19,15 +19,10 @@
 #include <future>
 #include <shared_mutex>
 
-#include "common/type_c.h"
 #include "milvus-storage/filesystem/fs.h"
 #include <tbb/concurrent_unordered_map.h>
 
 namespace milvus::storage {
-
-// Resolve the explicit storage configuration or use the process filesystem.
-milvus_storage::ArrowFileSystemPtr
-GetPackedFileSystem(const CStorageConfig* config);
 
 // cache for storage v2 filesystem using storage config as key.
 class StorageV2FSCache {

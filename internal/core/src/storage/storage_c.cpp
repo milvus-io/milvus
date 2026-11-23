@@ -238,6 +238,16 @@ PutOrRefPluginContext(CPluginContext c_plugin_context) {
 }
 
 CStatus
+RegisterReadPluginContext(CPluginContext c_plugin_context) {
+    try {
+        milvus::storage::RegisterReaderKeys(&c_plugin_context);
+        return milvus::SuccessCStatus();
+    } catch (const std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
 UnRefPluginContext(CPluginContext c_plugin_context) {
     auto cipherPluginPtr =
         milvus::storage::PluginLoader::GetInstance().getCipherPlugin();

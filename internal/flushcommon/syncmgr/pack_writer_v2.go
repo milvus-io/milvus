@@ -19,6 +19,7 @@ package syncmgr
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"math"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -148,26 +149,20 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 			tsTo = ts
 		}
 	}
-	pluginContextPtr := pack.importTarget
-	if pluginContextPtr != nil && bw.manifestPath != "" {
-		return nil, "", merr.WrapErrParameterInvalidMsg("import target keysets require a Storage V2 packed writer")
-	}
-	if pack.importTargetSet && pluginContextPtr == nil &&
-		hookutil.GetEzByCollProperties(bw.schema.GetProperties(), pack.collectionID) != nil {
-		return nil, "", retry.Unrecoverable(merr.WrapErrImportFailed("missing dispatched import target keyset"))
-	}
-	if !pack.importTargetSet && hookutil.IsClusterEncryptionEnabled() {
+	var pluginContextPtr *indexcgopb.StoragePluginContext
+	if hookutil.IsClusterEncryptionEnabled() {
 		ez := hookutil.GetEzByCollProperties(bw.schema.GetProperties(), pack.collectionID)
 		if ez != nil {
 			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-			if len(unsafe) > 0 {
-				pluginContext := indexcgopb.StoragePluginContext{
-					EncryptionZoneId: ez.EzID,
-					CollectionId:     ez.CollectionID,
-					EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
-				}
-				pluginContextPtr = &pluginContext
+			if len(unsafe) == 0 {
+				return nil, "", merr.WrapErrServiceUnavailable(fmt.Sprintf("cannot get encryption key for ezID=%d, collectionID=%d", ez.EzID, ez.CollectionID))
 			}
+			pluginContext := indexcgopb.StoragePluginContext{
+				EncryptionZoneId: ez.EzID,
+				CollectionId:     ez.CollectionID,
+				EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
+			}
+			pluginContextPtr = &pluginContext
 		}
 	}
 	var logs map[int64]*datapb.FieldBinlog

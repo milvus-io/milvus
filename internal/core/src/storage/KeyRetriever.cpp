@@ -15,27 +15,6 @@ namespace {
 std::mutex arrow_reader_properties_mutex;
 parquet::ArrowReaderProperties arrow_reader_properties =
     parquet::default_arrow_reader_properties();
-
-std::string
-GetFileKey(plugin::ICipherPlugin& cipher, const CPluginContext& file) {
-    auto decryptor =
-        cipher.GetDecryptor(file.ez_id, file.collection_id, file.key);
-    AssertInfo(decryptor != nullptr, "cipher plugin returned no decryptor");
-    return decryptor->GetKey();
-}
-
-parquet::ReaderProperties
-WithKeyRetriever(
-    std::shared_ptr<parquet::DecryptionKeyRetriever> key_retriever) {
-    parquet::ReaderProperties reader_properties =
-        parquet::default_reader_properties();
-    parquet::FileDecryptionProperties::Builder builder;
-    reader_properties.file_decryption_properties(
-        builder.key_retriever(key_retriever)
-            ->plaintext_files_allowed()
-            ->build());
-    return reader_properties;
-}
 }  // namespace
 
 std::string
@@ -44,12 +23,24 @@ KeyRetriever::GetKey(const std::string& key_metadata) {
     AssertInfo(plugin != nullptr, "cipher plugin not found");
     auto context = DecodeKeyMetadata(key_metadata);
     AssertInfo(context != nullptr, "invalid encryption metadata");
-    return GetFileKey(*plugin, *context);
+    auto decryptor = plugin->GetDecryptor(
+        context->ez_id, context->collection_id, context->key);
+    AssertInfo(decryptor != nullptr, "cipher plugin returned no decryptor");
+    return decryptor->GetKey();
 }
 
 parquet::ReaderProperties
 GetReaderProperties() {
-    return WithKeyRetriever(std::make_shared<KeyRetriever>());
+    parquet::ReaderProperties reader_properties =
+        parquet::default_reader_properties();
+    std::shared_ptr<milvus::storage::KeyRetriever> key_retriever =
+        std::make_shared<milvus::storage::KeyRetriever>();
+    parquet::FileDecryptionProperties::Builder builder;
+    reader_properties.file_decryption_properties(
+        builder.key_retriever(key_retriever)
+            ->plaintext_files_allowed()
+            ->build());
+    return reader_properties;
 }
 
 void
@@ -64,6 +55,28 @@ RegisterReaderKeys(const CPluginContext* context) {
     AssertInfo(context->key && *context->key, "missing reader keyset");
     cipher->RegisterReadKeyset(
         context->ez_id, context->collection_id, context->key);
+}
+
+std::pair<std::string, std::string>
+GetWriterEncryptionParams(const CPluginContext* context) {
+    AssertInfo(context != nullptr, "c_plugin_context is nullptr");
+    auto cipher = PluginLoader::GetInstance().getCipherPlugin();
+    if (!cipher) {
+        ThrowInfo(Unsupported, "missing cipher plugin");
+    }
+    AssertInfo(context->key && *context->key, "missing writer keyset");
+    auto keys = cipher->GetEncryptorForKeyset(
+        context->ez_id, context->collection_id, context->key);
+    AssertInfo(keys.first != nullptr, "cipher plugin returned no encryptor");
+    auto footer_key = keys.first->GetKey();
+    auto length = footer_key.size();
+    AssertInfo(!keys.second.empty() &&
+                   keys.second.find('\0') == std::string::npos &&
+                   (length == 16 || length == 24 || length == 32),
+               "cipher plugin returned unusable encryption parameters");
+    auto metadata =
+        EncodeKeyMetadata(context->ez_id, context->collection_id, keys.second);
+    return {std::move(footer_key), std::move(metadata)};
 }
 
 parquet::ArrowReaderProperties

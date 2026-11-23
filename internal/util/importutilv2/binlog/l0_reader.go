@@ -120,7 +120,7 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 			Value: bytes,
 		}}
 		// TODO: support multiple delta logs
-		reader, err := storage.CreateDeltalogReader(blobs, storage.DecryptBinlogFromHeader)
+		reader, err := storage.CreateDeltalogReader(blobs)
 		if err != nil {
 			log.Error("malformed delta file", zap.Error(err))
 			return nil, err

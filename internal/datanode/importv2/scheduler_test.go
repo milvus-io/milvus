@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -137,7 +136,7 @@ func (s *SchedulerSuite) TestScheduler_Slots() {
 		ImportFiles:  []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
 		TaskSlot:     10,
 	}
-	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm, nil)
+	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm)
 	s.manager.Add(preimportTask)
 
 	slots := s.scheduler.Slots()
@@ -174,7 +173,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Preimport() {
 		Schema:       s.schema,
 		ImportFiles:  []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
 	}
-	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm, nil)
+	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm)
 	s.manager.Add(preimportTask)
 
 	go s.scheduler.Start()
@@ -222,7 +221,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Preimport_Failed() {
 		Schema:       s.schema,
 		ImportFiles:  []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
 	}
-	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm, nil)
+	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm)
 	s.manager.Add(preimportTask)
 
 	go s.scheduler.Start()
@@ -283,7 +282,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import() {
 			},
 		},
 	}
-	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm, hookutil.ImportCipherContexts{})
+	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
 	s.manager.Add(importTask)
 
 	go s.scheduler.Start()
@@ -344,7 +343,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import_Failed() {
 			},
 		},
 	}
-	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm, hookutil.ImportCipherContexts{})
+	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
 	s.manager.Add(importTask)
 
 	go s.scheduler.Start()
@@ -383,7 +382,7 @@ func (s *SchedulerSuite) TestScheduler_ReadFileStat() {
 		Schema:       s.schema,
 		ImportFiles:  []*internalpb.ImportFile{importFile},
 	}
-	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm, nil)
+	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm)
 	s.manager.Add(preimportTask)
 	err = preimportTask.(*PreImportTask).readFileStat(s.reader, 0)
 	s.NoError(err)
@@ -435,7 +434,7 @@ func (s *SchedulerSuite) TestScheduler_ImportFile() {
 			},
 		},
 	}
-	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm, hookutil.ImportCipherContexts{})
+	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
 	s.manager.Add(importTask)
 	err = importTask.(*ImportTask).importFile(s.reader)
 	s.NoError(err)
@@ -548,7 +547,7 @@ func (s *SchedulerSuite) TestScheduler_ImportFileWithFunction() {
 			},
 		},
 	}
-	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm, hookutil.ImportCipherContexts{})
+	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
 	s.manager.Add(importTask)
 	err = importTask.(*ImportTask).importFile(s.reader)
 	s.NoError(err)

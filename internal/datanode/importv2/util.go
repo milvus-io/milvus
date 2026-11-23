@@ -41,7 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
@@ -60,10 +60,9 @@ func NewSyncTask(ctx context.Context,
 	insertData *storage.InsertData,
 	deleteData *storage.DeleteData,
 	bm25Stats map[int64]*storage.BM25Stats,
-	req *datapb.ImportRequest,
-	target *indexcgopb.StoragePluginContext,
+	storageVersion int64,
+	storageConfig *indexpb.StorageConfig,
 ) (syncmgr.Task, error) {
-	storageVersion := req.GetStorageVersion()
 	metaCache := metaCaches[vchannel]
 	if _, ok := metaCache.GetSegmentByID(segmentID); !ok {
 		segment := &datapb.SegmentInfo{
@@ -95,9 +94,6 @@ func NewSyncTask(ctx context.Context,
 		WithLevel(segmentLevel).
 		WithDataSource(metrics.BulkinsertDataSourceLabel).
 		WithBatchRows(int64(insertData.GetRowNum()))
-	if storageVersion == storage.StorageV2 {
-		syncPack.WithImportTarget(target)
-	}
 	if bm25Stats != nil {
 		syncPack.WithBM25Stats(bm25Stats)
 	}
@@ -107,7 +103,7 @@ func NewSyncTask(ctx context.Context,
 		WithMetaCache(metaCache).
 		WithSchema(metaCache.GetSchema(0)). // TODO specify import schema if needed
 		WithSyncPack(syncPack).
-		WithStorageConfig(req.GetStorageConfig()).
+		WithStorageConfig(storageConfig).
 		WithWriteRetryOptions(newWriteRetryOptions()...)
 	return task, nil
 }

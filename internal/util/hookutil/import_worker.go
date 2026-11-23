@@ -18,23 +18,15 @@ package hookutil
 
 import (
 	"encoding/base64"
-	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
-// ImportCipherContexts keeps the two roles distinct even when they have the same zone ID.
-type ImportCipherContexts struct {
-	Source *indexcgopb.StoragePluginContext
-	Target *indexcgopb.StoragePluginContext
-}
-
-// PrepareImportCipherContexts validates all entries before registering any read keys.
-// The backup and target schema determine which roles must appear, in wire order.
-func PrepareImportCipherContexts(artifact string, properties, pluginContext []*commonpb.KeyValuePair, collectionID int64) (ImportCipherContexts, error) {
-	var result ImportCipherContexts
+// ParseImportCipherContexts reads the ordered source and target snapshots without
+// consulting or updating the worker's keys. A plaintext side has no wire entry.
+func ParseImportCipherContexts(artifact string, properties, pluginContext []*commonpb.KeyValuePair, collectionID int64) (source, target *indexcgopb.StoragePluginContext, err error) {
 	next := func() *commonpb.KeyValuePair {
 		for len(pluginContext) > 0 {
 			entry := pluginContext[0]
@@ -48,44 +40,57 @@ func PrepareImportCipherContexts(artifact string, properties, pluginContext []*c
 	if artifact != "" {
 		id, err := GetEzIDByImportEzk(artifact)
 		if err != nil {
-			return ImportCipherContexts{}, err
+			return nil, nil, err
 		}
 		// The wire context contains the source zone, but no source collection ID.
-		result.Source, err = importCipherEntry(next(), "source", id, 0)
+		source, err = importCipherEntry(next(), "source", id, 0)
 		if err != nil {
-			return ImportCipherContexts{}, err
+			return nil, nil, err
 		}
 	}
-	targetID, hasTarget, err := importTargetEZ(properties)
+	targetID, hasTarget, err := parseTargetEzID(properties)
 	if err != nil {
-		return ImportCipherContexts{}, err
+		return nil, nil, err
 	}
 	if hasTarget {
-		result.Target, err = importCipherEntry(next(), "target", targetID, collectionID)
+		target, err = importCipherEntry(next(), "target", targetID, collectionID)
 		if err != nil {
-			return ImportCipherContexts{}, err
+			return nil, nil, err
 		}
 	}
 	if next() != nil {
-		return ImportCipherContexts{}, merr.WrapErrImportFailed("unexpected import cipher context")
+		return nil, nil, merr.WrapErrImportFailed("unexpected import cipher context")
 	}
-	if (result.Source != nil || result.Target != nil) && !IsClusterEncryptionEnabled() {
-		return ImportCipherContexts{}, errCipherPluginMissing
+	return source, target, nil
+}
+
+func RegisterImportCipherContexts(
+	artifact string,
+	properties, pluginContext []*commonpb.KeyValuePair,
+	collectionID int64,
+	registerNativeRead func(ezID int64, key string) error,
+) error {
+	source, target, err := ParseImportCipherContexts(artifact, properties, pluginContext, collectionID)
+	if err != nil {
+		return err
 	}
-	if source := result.Source; source != nil {
-		if err := GetCipher().Init(map[string]string{
-			CipherConfigImportEZ:  strconv.FormatInt(source.GetEncryptionZoneId(), 10),
-			CipherConfigUnsafeEZK: source.GetEncryptionKey(),
-		}); err != nil {
-			return ImportCipherContexts{}, err
+	if (source != nil || target != nil) && !IsClusterEncryptionEnabled() {
+		return errCipherPluginMissing
+	}
+	if source != nil {
+		if err := RegisterLocalImportEZ(source.GetEncryptionZoneId(), source.GetEncryptionKey()); err != nil {
+			return err
+		}
+		if registerNativeRead != nil {
+			if err := registerNativeRead(source.GetEncryptionZoneId(), source.GetEncryptionKey()); err != nil {
+				return err
+			}
 		}
 	}
-	if target := result.Target; target != nil {
-		if err := CreateLocalEZ(target.GetEncryptionZoneId(), target.GetEncryptionKey()); err != nil {
-			return ImportCipherContexts{}, err
-		}
+	if target != nil {
+		return CreateLocalEZ(target.GetEncryptionZoneId(), target.GetEncryptionKey())
 	}
-	return result, nil
+	return nil
 }
 
 func importCipherEntry(entry *commonpb.KeyValuePair, role string, expectedID, collectionID int64) (*indexcgopb.StoragePluginContext, error) {

@@ -569,6 +569,11 @@ func (s *CipherSuite) TestImportEZ() {
 		}
 		return 123, []byte{0xfb, 0xff}, resolveErr
 	}})
+	for _, invalid := range []string{"%%", base64.StdEncoding.EncodeToString([]byte(`{"ez_id":0}`))} {
+		_, err = ResolveImportEZ(invalid)
+		s.Error(err)
+	}
+	s.Empty(calls)
 	result, err = ResolveImportEZ(artifact)
 	s.Require().NoError(err)
 	s.Require().Len(result, 1)

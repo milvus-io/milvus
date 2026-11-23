@@ -51,7 +51,7 @@ func (c *importReadCipher) GetUnsafeKey(int64, int64) []byte {
 	panic("import must use key material from the request")
 }
 
-func TestPrepareImportCipherContexts(t *testing.T) {
+func TestRegisterImportCipherContexts(t *testing.T) {
 	paramtable.Init()
 	const collectionID = 35
 	artifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":7}`))
@@ -75,29 +75,41 @@ func TestPrepareImportCipherContexts(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := &importReadCipher{}
 			t.Cleanup(SetTestCipher(c))
-			contexts, err := PrepareImportCipherContexts(tc.artifact, tc.props, tc.wire, collectionID)
+			source, target, err := ParseImportCipherContexts(tc.artifact, tc.props, tc.wire, collectionID)
 			require.NoError(t, err)
 			var want []map[string]string
 			if tc.wantSource {
 				want = append(want, map[string]string{CipherConfigImportEZ: "7", CipherConfigUnsafeEZK: "b2xk"})
-				require.Equal(t, "b2xk", contexts.Source.GetEncryptionKey())
+				require.Equal(t, "b2xk", source.GetEncryptionKey())
 			} else {
-				require.Nil(t, contexts.Source)
+				require.Nil(t, source)
 			}
 			if tc.wantTarget {
 				want = append(want, map[string]string{CipherConfigCreateEZ: "7", CipherConfigUnsafeEZK: "bmV3"})
-				require.EqualValues(t, 7, contexts.Target.GetEncryptionZoneId())
-				require.EqualValues(t, collectionID, contexts.Target.GetCollectionId())
-				require.Equal(t, "bmV3", contexts.Target.GetEncryptionKey())
+				require.EqualValues(t, 7, target.GetEncryptionZoneId())
+				require.EqualValues(t, collectionID, target.GetCollectionId())
+				require.Equal(t, "bmV3", target.GetEncryptionKey())
 			} else {
-				require.Nil(t, contexts.Target)
+				require.Nil(t, target)
 			}
+			require.Empty(t, c.calls)
+			var nativeReads []string
+			err = RegisterImportCipherContexts(tc.artifact, tc.props, tc.wire, collectionID, func(ezID int64, key string) error {
+				nativeReads = append(nativeReads, string(rune('0'+ezID))+":"+key)
+				return nil
+			})
+			require.NoError(t, err)
 			require.Equal(t, want, c.calls)
+			if tc.wantSource {
+				require.Equal(t, []string{"7:b2xk"}, nativeReads)
+			} else {
+				require.Empty(t, nativeReads)
+			}
 		})
 	}
 }
 
-func TestPrepareImportCipherContextsRejectsInvalidRequest(t *testing.T) {
+func TestRegisterImportCipherContextsRejectsInvalidRequest(t *testing.T) {
 	paramtable.Init()
 	const collectionID = 35
 	artifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":7}`))
@@ -133,7 +145,7 @@ func TestPrepareImportCipherContextsRejectsInvalidRequest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := &importReadCipher{}
 			t.Cleanup(SetTestCipher(c))
-			_, err := PrepareImportCipherContexts(tc.artifact, tc.props, tc.entries, collectionID)
+			err := RegisterImportCipherContexts(tc.artifact, tc.props, tc.entries, collectionID, nil)
 			require.Error(t, err)
 			require.NotContains(t, err.Error(), "secret")
 			require.Empty(t, c.calls)
@@ -141,17 +153,27 @@ func TestPrepareImportCipherContextsRejectsInvalidRequest(t *testing.T) {
 	}
 	t.Run("disabled cipher", func(t *testing.T) {
 		t.Cleanup(SetTestCipher(nil))
-		_, err := PrepareImportCipherContexts(artifact, nil, wire("7:b2xk"), collectionID)
+		err := RegisterImportCipherContexts(artifact, nil, wire("7:b2xk"), collectionID, nil)
 		require.Error(t, err)
-		_, err = PrepareImportCipherContexts("", zone("8"), wire("8:bmV3"), collectionID)
+		err = RegisterImportCipherContexts("", zone("8"), wire("8:bmV3"), collectionID, nil)
 		require.Error(t, err)
-		_, err = PrepareImportCipherContexts("", nil, nil, collectionID)
+		err = RegisterImportCipherContexts("", nil, nil, collectionID, nil)
 		require.NoError(t, err)
 	})
 	t.Run("incompatible cached read key", func(t *testing.T) {
 		conflict := errors.New("read key conflict")
 		t.Cleanup(SetTestCipher(&importReadCipher{err: conflict}))
-		_, err := PrepareImportCipherContexts(artifact, nil, wire("7:b2xk"), collectionID)
+		err := RegisterImportCipherContexts(artifact, nil, wire("7:b2xk"), collectionID, nil)
 		require.ErrorIs(t, err, conflict)
+	})
+	t.Run("native read registration failure stops before target", func(t *testing.T) {
+		nativeErr := errors.New("missing native cipher plugin")
+		c := &importReadCipher{}
+		t.Cleanup(SetTestCipher(c))
+		err := RegisterImportCipherContexts(artifact, zone("8"), wire("7:b2xk", "8:bmV3"), collectionID, func(int64, string) error {
+			return nativeErr
+		})
+		require.ErrorIs(t, err, nativeErr)
+		require.Equal(t, []map[string]string{{CipherConfigImportEZ: "7", CipherConfigUnsafeEZK: "b2xk"}}, c.calls)
 	})
 }

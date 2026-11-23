@@ -325,23 +325,20 @@ func GetStoragePluginContext(collProps []*commonpb.KeyValuePair, collectionID in
 
 // GetImportStoragePluginContext builds the ordered source and target entries for one dispatch.
 func GetImportStoragePluginContext(artifact string, collProps []*commonpb.KeyValuePair, collectionID int64) ([]*commonpb.KeyValuePair, error) {
+	id, hasTarget, err := parseTargetEzID(collProps)
+	if err != nil {
+		return nil, err
+	}
+	if (artifact != "" || hasTarget) && !IsClusterEncryptionEnabled() {
+		return nil, errCipherPluginMissing
+	}
 	source, err := ResolveImportEZ(artifact)
-	if err != nil {
-		return nil, err
-	}
-	id, found, err := importTargetEZ(collProps)
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		return source, nil
+	if err != nil || !hasTarget {
+		return source, err
 	}
 	target, err := GetPluginContext(id, collectionID)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to get target EZK")
-	}
-	if len(target) == 0 {
-		return nil, merr.Wrap(errCipherPluginMissing, "failed to get target EZK")
 	}
 	return append(source, target...), nil
 }

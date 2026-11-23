@@ -26,8 +26,7 @@ extern "C" {
 /**
  * @brief Retrieves encryption parameters from the cipher plugin for CMEK (Customer Managed Encryption Keys).
  *
- * This function loads the cipher plugin, updates it with the provided plugin context,
- * and retrieves the encryption key and metadata required for encrypting data in storage.
+ * The cipher plugin derives the encryption key and metadata from the provided writer keyset.
  *
  * @param[in] c_plugin_context Pointer to the plugin context containing:
  *                             - ez_id: Encryption zone ID

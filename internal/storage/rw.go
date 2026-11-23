@@ -68,7 +68,6 @@ type rwOptions struct {
 	storageConfig       *indexpb.StorageConfig
 	neededFields        typeutil.Set[int64]
 	pluginContext       *indexcgopb.StoragePluginContext
-	pluginContextSet    bool
 }
 
 func (o *rwOptions) validate() error {
@@ -168,7 +167,6 @@ func WithNeededFields(neededFields typeutil.Set[int64]) RwOption {
 func WithPluginContext(pluginContext *indexcgopb.StoragePluginContext) RwOption {
 	return func(options *rwOptions) {
 		options.pluginContext = pluginContext
-		options.pluginContextSet = true
 	}
 }
 
@@ -254,20 +252,22 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 
 	binlogReaderOpts := []BinlogReaderOption{}
 	var pluginContext *indexcgopb.StoragePluginContext
-	if rwOptions.pluginContextSet {
-		pluginContext = rwOptions.pluginContext
-		binlogReaderOpts = append(binlogReaderOpts, DecryptBinlogFromHeader)
-	} else if hookutil.IsClusterEncryptionEnabled() {
-		ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID)
-		if ez != nil {
-			binlogReaderOpts = append(binlogReaderOpts, WithReaderDecryptionContext(ez.EzID, ez.CollectionID))
+	if hookutil.IsClusterEncryptionEnabled() {
+		// Reader pluginContext from import tasks
+		if rwOptions.pluginContext != nil {
+			pluginContext = rwOptions.pluginContext
+		} else {
+			ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID)
+			if ez != nil {
+				binlogReaderOpts = append(binlogReaderOpts, WithReaderDecryptionContext(ez.EzID, ez.CollectionID))
 
-			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-			if len(unsafe) > 0 {
-				pluginContext = &indexcgopb.StoragePluginContext{
-					EncryptionZoneId: ez.EzID,
-					CollectionId:     ez.CollectionID,
-					EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
+				unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+				if len(unsafe) > 0 {
+					pluginContext = &indexcgopb.StoragePluginContext{
+						EncryptionZoneId: ez.EzID,
+						CollectionId:     ez.CollectionID,
+						EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
+					}
 				}
 			}
 		}

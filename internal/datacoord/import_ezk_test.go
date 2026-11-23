@@ -156,8 +156,10 @@ func TestImportDispatchStopsOnEZKError(t *testing.T) {
 			require.NoError(t, err)
 			task := im.GetTask(ctx, 2)
 			transients := []error{
+				context.Canceled,
 				context.DeadlineExceeded,
 				merr.ErrServiceUnavailable,
+				merr.WrapErrServiceInternalErr(merr.ErrServiceUnavailable, "KMS client failed"),
 				status.Error(codes.Unavailable, "source temporarily unavailable"),
 				temporaryImportTestError{errors.New("source KMS throttled Decrypt")},
 			}
@@ -174,6 +176,9 @@ func TestImportDispatchStopsOnEZKError(t *testing.T) {
 			require.Equal(t, state, im.GetJob(ctx, 1).GetState())
 
 			sourceErr = errors.New("source KMS denied Decrypt")
+			_, err = getImportPluginContext(im.GetJob(ctx, 1), task.GetCollectionID())
+			require.True(t, errors.Is(err, merr.ErrImportFailed))
+			require.ErrorIs(t, err, sourceErr)
 			task.CreateTaskOnWorker(12, cluster)
 			require.Equal(t, state, im.GetJob(ctx, 1).GetState())
 			task.CreateTaskOnWorker(12, cluster)
@@ -184,7 +189,7 @@ func TestImportDispatchStopsOnEZKError(t *testing.T) {
 			// The scheduler can revisit a pending task before the import checker fails it.
 			sourceErr = nil
 			task.CreateTaskOnWorker(13, cluster)
-			require.Equal(t, len(transients)+3, resolves)
+			require.Equal(t, len(transients)+4, resolves)
 		})
 	}
 }

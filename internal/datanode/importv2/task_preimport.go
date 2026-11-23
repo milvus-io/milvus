@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -50,7 +49,6 @@ type PreImportTask struct {
 	schema       *schemapb.CollectionSchema
 	options      []*commonpb.KeyValuePair
 	req          *datapb.PreImportRequest
-	source       *indexcgopb.StoragePluginContext
 
 	manager TaskManager
 	cm      storage.ChunkManager
@@ -59,7 +57,6 @@ type PreImportTask struct {
 func NewPreImportTask(req *datapb.PreImportRequest,
 	manager TaskManager,
 	cm storage.ChunkManager,
-	source *indexcgopb.StoragePluginContext,
 ) Task {
 	fileStats := lo.Map(req.GetImportFiles(), func(file *internalpb.ImportFile, _ int) *datapb.ImportFileStats {
 		return &datapb.ImportFileStats{
@@ -87,7 +84,6 @@ func NewPreImportTask(req *datapb.PreImportRequest,
 		schema:       req.GetSchema(),
 		options:      req.GetOptions(),
 		req:          req,
-		source:       source,
 		manager:      manager,
 		cm:           cm,
 	}
@@ -136,7 +132,6 @@ func (t *PreImportTask) Clone() Task {
 		schema:        t.GetSchema(),
 		options:       t.options,
 		req:           t.req,
-		source:        t.source,
 		manager:       t.manager,
 		cm:            t.cm,
 	}
@@ -157,7 +152,7 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 		})
 
 	fn := func(i int, file *internalpb.ImportFile) error {
-		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, t.options, bufferSize, t.req.GetStorageConfig(), t.source)
+		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, t.options, bufferSize, t.req.GetStorageConfig())
 		if err != nil {
 			log.Warn("new reader failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())

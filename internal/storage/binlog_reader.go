@@ -115,11 +115,7 @@ func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
 			return nil
 		}
 
-		cipher := hookutil.GetCipher()
-		if cipher == nil {
-			return merr.Wrap(merr.ErrServiceUnavailable, "encrypted binlog requires the cipher plugin")
-		}
-		decryptor, err := cipher.GetDecryptor(ezID, collectionID, []byte(edek))
+		decryptor, err := hookutil.GetCipher().GetDecryptor(ezID, collectionID, []byte(edek))
 		if err != nil {
 			log.Error("failed to get decryptor", zap.Int64("ezID", ezID), zap.Int64("collectionID", collectionID), zap.Error(err))
 			return err
@@ -149,19 +145,6 @@ func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
 		base.buffer = bytes.NewBuffer(decrypted)
 		return nil
 	}
-}
-
-func DecryptBinlogFromHeader(reader *BinlogReader) error {
-	edek, encrypted := reader.GetEdek()
-	_, hasZone := reader.Extras[ezIDKey]
-	if !encrypted && !hasZone {
-		return nil
-	}
-	zone, ok := reader.GetEzID()
-	if !ok || zone <= 0 || edek == "" {
-		return merr.WrapErrDataIntegrityMsg("invalid binlog encryption metadata")
-	}
-	return WithReaderDecryptionContext(zone, reader.CollectionID)(reader)
 }
 
 // NewBinlogReader creates binlogReader to read binlog file.

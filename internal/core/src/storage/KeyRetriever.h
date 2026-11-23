@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <utility>
+
 #include "common/type_c.h"
 #include "parquet/encryption/encryption.h"
 #include "parquet/properties.h"
@@ -26,6 +28,9 @@ GetReaderProperties();
 
 void
 RegisterReaderKeys(const CPluginContext* context);
+
+std::pair<std::string, std::string>
+GetWriterEncryptionParams(const CPluginContext* context);
 
 parquet::ArrowReaderProperties
 GetArrowReaderProperties();

@@ -36,7 +36,7 @@ import (
 )
 
 // newDeltalogOneFieldReader creates a reader for the old single-field deltalog format
-func newDeltalogOneFieldReader(blobs []*Blob, opts ...BinlogReaderOption) (*DeserializeReaderImpl[*DeleteLog], error) {
+func newDeltalogOneFieldReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteLog], error) {
 	reader := newIterativeCompositeBinlogRecordReader(
 		&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -46,7 +46,7 @@ func newDeltalogOneFieldReader(blobs []*Blob, opts ...BinlogReaderOption) (*Dese
 			},
 		},
 		nil,
-		MakeBlobsReader(blobs), opts...)
+		MakeBlobsReader(blobs))
 	return NewDeserializeReader(reader, func(r Record, v []*DeleteLog) error {
 		for i := 0; i < r.Len(); i++ {
 			if v[i] == nil {
@@ -185,7 +185,6 @@ var _ RecordReader = (*simpleArrowRecordReader)(nil)
 // simpleArrowRecordReader reads simple arrow records from blobs
 type simpleArrowRecordReader struct {
 	blobs []*Blob
-	opts  []BinlogReaderOption
 
 	blobPos int
 	rr      array.RecordReader
@@ -204,7 +203,7 @@ func (crr *simpleArrowRecordReader) iterateNextBatch() error {
 		return io.EOF
 	}
 
-	reader, err := NewBinlogReader(crr.blobs[crr.blobPos].Value, crr.opts...)
+	reader, err := NewBinlogReader(crr.blobs[crr.blobPos].Value)
 	if err != nil {
 		return err
 	}
@@ -275,10 +274,9 @@ func (crr *simpleArrowRecordReader) Close() error {
 	return nil
 }
 
-func newSimpleArrowRecordReader(blobs []*Blob, opts ...BinlogReaderOption) (*simpleArrowRecordReader, error) {
+func newSimpleArrowRecordReader(blobs []*Blob) (*simpleArrowRecordReader, error) {
 	return &simpleArrowRecordReader{
 		blobs: blobs,
-		opts:  opts,
 	}, nil
 }
 
@@ -433,8 +431,8 @@ func newDeltalogMultiFieldWriter(eventWriter *MultiFieldDeltalogStreamWriter, ba
 	}, batchSize), nil
 }
 
-func newDeltalogMultiFieldReader(blobs []*Blob, opts ...BinlogReaderOption) (*DeserializeReaderImpl[*DeleteLog], error) {
-	reader, err := newSimpleArrowRecordReader(blobs, opts...)
+func newDeltalogMultiFieldReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteLog], error) {
+	reader, err := newSimpleArrowRecordReader(blobs)
 	if err != nil {
 		return nil, err
 	}
@@ -476,15 +474,15 @@ func newDeltalogMultiFieldReader(blobs []*Blob, opts ...BinlogReaderOption) (*De
 // newDeltalogDeserializeReader is the entry point for the delta log reader.
 // It includes newDeltalogOneFieldReader, which uses the existing log format with only one column in a log file,
 // and newDeltalogMultiFieldReader, which uses the new format and supports multiple fields in a log file.
-func newDeltalogDeserializeReader(blobs []*Blob, opts ...BinlogReaderOption) (*DeserializeReaderImpl[*DeleteLog], error) {
+func newDeltalogDeserializeReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteLog], error) {
 	if supportMultiFieldFormat(blobs) {
-		return newDeltalogMultiFieldReader(blobs, opts...)
+		return newDeltalogMultiFieldReader(blobs)
 	}
-	return newDeltalogOneFieldReader(blobs, opts...)
+	return newDeltalogOneFieldReader(blobs)
 }
 
 // supportMultiFieldFormat checks delta log description data to see if it is the format with
-// pk and ts column separately. The descriptor is plaintext even when the event payload is encrypted.
+// pk and ts column separately
 func supportMultiFieldFormat(blobs []*Blob) bool {
 	if len(blobs) > 0 {
 		reader, err := NewBinlogReader(blobs[0].Value)
@@ -499,8 +497,8 @@ func supportMultiFieldFormat(blobs []*Blob) bool {
 }
 
 // CreateDeltalogReader creates a deltalog reader based on the format version
-func CreateDeltalogReader(blobs []*Blob, opts ...BinlogReaderOption) (*DeserializeReaderImpl[*DeleteLog], error) {
-	return newDeltalogDeserializeReader(blobs, opts...)
+func CreateDeltalogReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteLog], error) {
+	return newDeltalogDeserializeReader(blobs)
 }
 
 // createDeltalogWriter creates a deltalog writer based on the configured format

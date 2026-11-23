@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -316,6 +317,13 @@ func importCipherFailureStatus(err error) *commonpb.Status {
 	return merr.Status(err)
 }
 
+func registerImportCipherContexts(options, properties, pluginContext []*commonpb.KeyValuePair, collectionID int64) error {
+	artifact, _ := importutilv2.GetEZK(options)
+	return hookutil.RegisterImportCipherContexts(artifact, properties, pluginContext, collectionID, func(ezID int64, key string) error {
+		return segcore.RegisterReadPluginContext(&hookutil.EZ{EzID: ezID}, key)
+	})
+}
+
 func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(zap.Int64("taskID", req.GetTaskID()),
 		zap.Int64("jobID", req.GetJobID()),
@@ -331,9 +339,7 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 		return merr.Status(err), nil
 	}
 
-	artifact, _ := importutilv2.GetEZK(req.GetOptions())
-	cipher, err := hookutil.PrepareImportCipherContexts(artifact, req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID())
-	if err != nil {
+	if err := registerImportCipherContexts(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID()); err != nil {
 		return importCipherFailureStatus(err), nil
 	}
 
@@ -349,7 +355,7 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 	if importutilv2.IsL0Import(req.GetOptions()) {
 		task = importv2.NewL0PreImportTask(req, node.importTaskMgr, cm)
 	} else {
-		task = importv2.NewPreImportTask(req, node.importTaskMgr, cm, cipher.Source)
+		task = importv2.NewPreImportTask(req, node.importTaskMgr, cm)
 	}
 	node.importTaskMgr.Add(task)
 
@@ -376,9 +382,7 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 		return merr.Status(err), nil
 	}
 
-	artifact, _ := importutilv2.GetEZK(req.GetOptions())
-	cipher, err := hookutil.PrepareImportCipherContexts(artifact, req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID())
-	if err != nil {
+	if err := registerImportCipherContexts(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID()); err != nil {
 		return importCipherFailureStatus(err), nil
 	}
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
@@ -390,9 +394,9 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 	}
 	var task importv2.Task
 	if importutilv2.IsL0Import(req.GetOptions()) {
-		task = importv2.NewL0ImportTask(req, node.importTaskMgr, node.syncMgr, cm, cipher)
+		task = importv2.NewL0ImportTask(req, node.importTaskMgr, node.syncMgr, cm)
 	} else {
-		task = importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, cm, cipher)
+		task = importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, cm)
 	}
 	node.importTaskMgr.Add(task)
 

@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -41,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -805,6 +807,16 @@ func TestDataNodeImportCipherContext(t *testing.T) {
 				}
 				cipher := &workerImportCipher{}
 				t.Cleanup(hookutil.SetTestCipher(cipher))
+				var nativeRegistered []string
+				var nativeErr error
+				nativePatch := mockey.Mock(segcore.RegisterReadPluginContext).To(func(ez *hookutil.EZ, key string) error {
+					if nativeErr != nil {
+						return nativeErr
+					}
+					nativeRegistered = append(nativeRegistered, string(rune('0'+ez.EzID))+":"+key)
+					return nil
+				}).Build()
+				defer nativePatch.UnPatch()
 				node := &DataNode{
 					ctx: ctx, lifetime: lifetime.NewLifetime(commonpb.StateCode_Healthy),
 					importTaskMgr: importv2.NewTaskManager(), storageFactory: NewChunkMgrFactory(),
@@ -840,6 +852,7 @@ func TestDataNodeImportCipherContext(t *testing.T) {
 				require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrImportFailed)
 				require.Nil(t, node.importTaskMgr.Get(taskID))
 				require.Empty(t, cipher.registered)
+				require.Empty(t, nativeRegistered)
 
 				cipher.err = errors.New("incompatible historical read keys")
 				status, err = submit(wire)
@@ -847,8 +860,19 @@ func TestDataNodeImportCipherContext(t *testing.T) {
 				require.Contains(t, status.GetReason(), "incompatible historical read keys")
 				require.Nil(t, node.importTaskMgr.Get(taskID))
 				require.Empty(t, cipher.registered)
+				require.Empty(t, nativeRegistered)
 
 				cipher.err = nil
+				nativeErr = errors.New("missing native cipher plugin")
+				status, err = submit(wire)
+				require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrImportFailed)
+				require.Contains(t, status.GetReason(), "missing native cipher plugin")
+				require.Nil(t, node.importTaskMgr.Get(taskID))
+				require.Equal(t, []string{"7:b2xk"}, cipher.registered)
+				require.Empty(t, nativeRegistered)
+
+				cipher.registered = nil
+				nativeErr = nil
 				status, err = submit(wire)
 				require.NoError(t, merr.CheckRPCCall(status, err))
 				task := node.importTaskMgr.Get(taskID)
@@ -861,6 +885,7 @@ func TestDataNodeImportCipherContext(t *testing.T) {
 					}
 				}
 				require.Equal(t, []string{"7:b2xk", ":bmV3"}, cipher.registered)
+				require.Equal(t, []string{"7:b2xk"}, nativeRegistered)
 			})
 		}
 	}

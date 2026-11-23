@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -171,7 +170,7 @@ func (s *L0ImportSuite) TestL0Import() {
 			End:   int64(s.delCnt),
 		},
 	}
-	task := NewL0ImportTask(req, s.manager, s.syncMgr, s.cm, hookutil.ImportCipherContexts{})
+	task := NewL0ImportTask(req, s.manager, s.syncMgr, s.cm)
 	s.manager.Add(task)
 	fu := task.Execute()
 	err := conc.AwaitAll(fu...)
