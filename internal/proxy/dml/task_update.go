@@ -19,6 +19,7 @@ package dml
 import (
 	"context"
 
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -114,68 +115,91 @@ func buildUpdateMessages(collectionID int64, schemaVersion int32, partitionID in
 	}
 	var result []message.MutableMessage
 	remaining := params.ProxyGrpcServerCfg.ServerMaxRecvSize.GetAsInt()
+	header := &messagespb.UpdateMessageHeader{CollectionId: collectionID, SchemaVersion: proto.Int32(schemaVersion)}
+	body := &messagespb.UpdateMessageBody{PartitionId: partitionID, Assignments: assignments}
+	fixedBodySize := proto.Size(body)
 	for channelIndex, keys := range groups {
 		if keys == nil {
 			continue
 		}
-		build := func(start, end int) (message.MutableMessage, error) {
-			return message.NewUpdateMessageBuilderV2().WithVChannel(channels[channelIndex]).WithCipher(cipher).
-				WithHeader(&messagespb.UpdateMessageHeader{CollectionId: collectionID, SchemaVersion: proto.Int32(schemaVersion)}).
-				WithBody(&messagespb.UpdateMessageBody{PartitionId: partitionID, PrimaryKeys: sliceUpdatePKs(keys, start, end), Assignments: assignments}).BuildMutable()
+		channel := channels[channelIndex]
+		build := func(b *messagespb.UpdateMessageBody, c *message.CipherConfig) (message.MutableMessage, error) {
+			return message.NewUpdateMessageBuilderV2().WithVChannel(channel).WithHeader(header).
+				WithBody(b).WithCipher(c).BuildMutable()
 		}
-		fixedSize := 0
+		var emit func(start, end int) error
+		emit = func(start, end int) error {
+			body.PrimaryKeys = sliceUpdatePKs(keys, start, end)
+			msg, err := build(body, cipher)
+			if err != nil {
+				return err
+			}
+			size := proto.Size(msg.IntoMessageProto())
+			if limit > 0 && size > limit {
+				if end-start == 1 {
+					return merr.WrapErrParameterTooLarge("one PK with shared assignments exceeds the update message size limit")
+				}
+				// Only encryption can expand a batch that fit the plaintext budget.
+				mid := start + (end-start)/2
+				if err := emit(start, mid); err != nil {
+					return err
+				}
+				return emit(mid, end)
+			}
+			if size > remaining {
+				return merr.WrapErrParameterTooLarge("prepared update messages exceed the total byte budget")
+			}
+			remaining -= size
+			result = append(result, msg)
+			return nil
+		}
+
+		start, count := 0, typeutil.GetSizeOfIDs(keys)
 		if limit > 0 {
-			base, err := build(0, 0)
+			envelope, err := build(&messagespb.UpdateMessageBody{}, nil)
 			if err != nil {
 				return nil, err
 			}
-			fixedSize = proto.Size(base.IntoMessageProto())
-		}
-		for start, count := 0, typeutil.GetSizeOfIDs(keys); start < count; {
-			end := count
-			if limit > 0 {
-				// Accumulate PK bytes as Delete does; assignments are fixed per pack.
-				// Allow one key through for an exact indivisible-message size check.
-				end = start
-				for size := fixedSize; end < count; end++ {
-					pkSize, _ := typeutil.GetId(keys, end)
-					rowSize := 16 + pkSize // PK plus protobuf framing headroom.
-					if end > start && size+rowSize > limit {
-						break
+			bodyBudget := bytesFieldCapacity(limit - proto.Size(envelope.IntoMessageProto()))
+			idsBudget := bytesFieldCapacity(bodyBudget - fixedBodySize)
+			pkBudget := bytesFieldCapacity(idsBudget) // IDs.int_id or IDs.str_id
+			if keys.GetIntId() != nil {
+				pkBudget = bytesFieldCapacity(pkBudget) // LongArray.data is packed
+			}
+			available := pkBudget
+			for i := 0; i < count; i++ {
+				keySize := updatePKWireSize(keys, i)
+				if i > start && keySize > available {
+					if err := emit(start, i); err != nil {
+						return nil, err
 					}
-					size += rowSize
+					start, available = i, pkBudget
 				}
+				available -= keySize
 			}
-			var selected message.MutableMessage
-			var size int
-			for {
-				msg, err := build(start, end)
-				if err != nil {
-					return nil, err
-				}
-				size = proto.Size(msg.IntoMessageProto())
-				if limit == 0 || size <= limit {
-					selected = msg
-					break
-				}
-				if end-start == 1 {
-					return nil, merr.WrapErrParameterTooLarge("one PK with shared assignments exceeds the update message size limit")
-				}
-				// Like Insert, shrink only if final encoding/encryption outgrows the
-				// estimate. Do not search for a maximally filled message.
-				end = start + (end-start)/2
-			}
-			// Assignments are encoded in every fragment. Bound the retained total,
-			// not only the incoming request, before starting any WAL append.
-			if size > remaining {
-				return nil, merr.WrapErrParameterTooLarge("prepared update messages exceed the total byte budget")
-			}
-			remaining -= size
-			result = append(result, selected)
-			start = end
+		}
+		if err := emit(start, count); err != nil {
+			return nil, err
 		}
 	}
 	return result, nil
+}
+
+// bytesFieldCapacity returns the payload bytes that fit after a one-byte
+// protobuf tag and its varint length prefix.
+func bytesFieldCapacity(budget int) int {
+	n := budget - 2
+	for n > 0 && 1+protowire.SizeBytes(n) > budget {
+		n--
+	}
+	return n
+}
+
+func updatePKWireSize(keys *schemapb.IDs, i int) int {
+	if ints := keys.GetIntId(); ints != nil {
+		return protowire.SizeVarint(uint64(ints.Data[i]))
+	}
+	return protowire.SizeTag(1) + protowire.SizeBytes(len(keys.GetStrId().Data[i]))
 }
 
 func sliceUpdatePKs(ids *schemapb.IDs, start, end int) *schemapb.IDs {
