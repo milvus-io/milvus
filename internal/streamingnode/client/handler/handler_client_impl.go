@@ -281,7 +281,6 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 			MessageHandler:         opts.MessageHandler,
 			IgnorePauseConsumption: opts.IgnorePauseConsumption,
 		}, handlerService)
-
 		if err != nil {
 			return nil, err
 		}
