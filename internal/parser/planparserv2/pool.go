@@ -72,13 +72,27 @@ func getParser(lexer *antlrparser.PlanLexer, listeners ...antlr.ErrorListener) *
 
 func putLexer(lexer *antlrparser.PlanLexer) {
 	lexer.SetInputStream(nil)
+	lexer.SetError(nil)
 	lexer.RemoveErrorListeners()
 	lexerPool.ReturnObject(context.TODO(), lexer)
 }
 
 func putParser(parser *antlrparser.PlanParser) {
 	parser.SetInputStream(nil)
+	parser.SetError(nil)
 	parser.RemoveErrorListeners()
+	// ANTLR v4.13.1's ParserATNSimulator.reset() is a no-op, leaving simulator.input
+	// and simulator.outerContext pointing at the last request's token stream and parse tree.
+	// Replace the lightweight simulator shell while preserving the shared ATN, DFA, and
+	// PredictionContextCache; this also resets predictionMode to LL.
+	if interp := parser.GetInterpreter(); interp != nil {
+		parser.Interpreter = antlr.NewParserATNSimulator(
+			parser,
+			interp.ATN(),
+			interp.DecisionToDFA(),
+			interp.SharedContextCache(),
+		)
+	}
 	parserPool.ReturnObject(context.TODO(), parser)
 }
 
