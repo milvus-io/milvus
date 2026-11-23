@@ -52,6 +52,8 @@ func TestClassifyAttempt(t *testing.T) {
 		{"wrapped superseded", withDeadline, now, errors.Wrap(ErrAttemptSuperseded, "search"), attemptSucceeded, 2 * time.Millisecond},
 		{"input error", withDeadline, now, merr.WrapErrParameterInvalidMsg("bad"), attemptIgnored, 0},
 		{"input error through a status", withDeadline, now, merr.Error(merr.Status(merr.WrapErrParameterInvalidMsg("bad"))), attemptIgnored, 0},
+		{"overloaded replica", withDeadline, now, merr.WrapErrTooManyRequests(200, "queue"), attemptIgnored, 0},
+		{"overloaded replica through a status", withDeadline, now, merr.Error(merr.Status(merr.WrapErrTooManyRequests(200, "queue"))), attemptIgnored, 0},
 		{"caller canceled", canceled, now, context.Canceled, attemptIgnored, 0},
 		{"caller canceled mid rpc", canceled, now, status.Error(codes.Canceled, "context canceled"), attemptIgnored, 0},
 		// a failure counts as the attempt's timeout

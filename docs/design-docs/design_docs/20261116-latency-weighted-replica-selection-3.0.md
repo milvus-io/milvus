@@ -199,6 +199,54 @@ unreachable mark from the retained consecutive heartbeat failure count.
 Healthy heartbeats or successful cost updates restore eligibility through
 the existing health transitions. Minimum share does not bypass this check.
 
+An overload refusal (`ErrServiceTooManyRequests`) is also ignored in replica
+latency/failure accounting and does not enter `lb.blacklist`: the replica has
+more work than it gets done, not that it is failing.
+
+## Overload
+
+Under load above what the replicas get done, requests wait in the QueryNode
+read scheduler queue (`queryNode.scheduler.unsolvedQueueSize`, 1024), turning
+excess traffic into long queue latency. Four changes bound the wait of
+answered requests and fail the excess fast:
+
+**QueryNode queue wait limit.** `queryNode.scheduler.maxQueueWaitRatio`
+(default `0`, off; refreshable) limits how long a read task may wait in the
+queue:
+
+```
+limit = min(maxQueueWait, maxQueueWaitRatio * time left until the deadline)
+```
+
+`queryNode.scheduler.maxQueueWait` defaults to `1s` (refreshable) and is also
+the limit for a task without a deadline; the intended ratio is `0.1`. A new
+task is refused immediately with `ErrServiceTooManyRequests` when the task that
+leaves the queue next (`head`) has already waited for more than half of the new
+task's limit. A task whose deadline has passed fails as expired rather than
+overloaded, and a task that waited longer than its limit by the time it leaves
+the queue is refused then. `milvus_querynode_read_task_queue_duration{outcome="overloaded"}`
+counts refused tasks.
+
+**One extra attempt, then the refusal goes to the client.** A `Hedgeable` read
+gets at most one extra attempt on another replica across hedging and overload
+failover combined. Either the first replica refuses it as overloaded and it
+moves to another replica at once (bypassing policy retry backoff and hedge
+delay), or the hedge delay fires and uses that slot. A second overload refusal
+ends the request immediately with `ErrServiceTooManyRequests` without trying a
+third replica or refreshing shard leaders. Non-overload replica failures (down
+node, broken connection) do not consume the extra-attempt slot. This applies
+under all replica selection policies (`round_robin`, `look_aside`,
+`latency_weighted`), respecting resource group scoping when present.
+
+**No resending inside the RPC client.** `grpcclient.WithFailFastOnOverload`
+prevents Proxy and Delegator gRPC clients from retrying `ErrServiceTooManyRequests`
+against the same node, returning the overload status immediately so the caller
+can failover or abort.
+
+**A failed shard stops the others.** `LBPolicyImpl.Execute` uses the
+`errgroup.WithContext` derived `ctx` so the first failed channel cancels
+in-flight attempts on sibling channels instead of finishing wasted work.
+
 Regression tests exercise real Search/Query task callbacks and status
 conversion, both error arrival orders, winner metadata, and no new retry after
 all attempts fail. Heartbeat lifecycle tests exercise registration, the failure
