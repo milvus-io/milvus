@@ -542,6 +542,11 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
         (*properties_map)[PROPERTY_FS_TALON_COORDINATOR] =
             std::string(c_storage_config.talon_coordinator);
     }
+    if (c_storage_config.talon_namespace != nullptr &&
+        c_storage_config.talon_namespace[0] != '\0') {
+        (*properties_map)[PROPERTY_FS_TALON_NAMESPACE] =
+            std::string(c_storage_config.talon_namespace);
+    }
 
     // Carry the configured arrow reader prebuffer limits into every
     // freshly-built properties map. Index build (index_c.cpp) and the FFI
@@ -1208,6 +1213,7 @@ InjectExternalSpecProperties(
                             PROPERTY_FS_TALON_OPEN_ONLY,
                             PROPERTY_FS_TALON_SMALL_READ_THRESHOLD,
                             PROPERTY_FS_TALON_COORDINATOR,
+                            PROPERTY_FS_TALON_NAMESPACE,
                             PROPERTY_FS_TALON_BLOCK_SIZE,
                             PROPERTY_FS_TALON_MAX_IDLE_PER_ADDR}) {
         const auto* source_key = std::string_view(key) == PROPERTY_FS_TALON_MODE
@@ -1364,7 +1370,8 @@ ToCStorageConfig(const milvus::storage::StorageConfig& config) {
                           config.talon_max_idle_per_addr,
                           config.talon_enable_for_external_table,
                           0,  // CRT queue tuning is node-local.
-                          config.talon_enabled_stages};
+                          config.talon_enabled_stages,
+                          config.talon_namespace.c_str()};
 }
 
 std::optional<LoonManifestPath>
