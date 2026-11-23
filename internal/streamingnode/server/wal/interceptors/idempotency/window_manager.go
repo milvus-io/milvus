@@ -41,23 +41,24 @@ type cachedRecord struct {
 // windowManager owns one PChannel's committed records. Pending owners remain
 // VChannel-scoped and never participate in TTL or capacity eviction.
 type windowManager struct {
-	mu       sync.Mutex
-	config   WindowConfig
-	windows  map[string]*Window
-	order    list.List
-	eligible windowHeap
-	bytes    int
-	sequence uint64
-	stop     chan struct{}
-	done     chan struct{}
-	close    sync.Once
+	mu           sync.Mutex
+	config       WindowConfig
+	windows      map[string]*Window
+	idleCounters map[string]struct{} // live VChannels with counters but no window
+	order        list.List
+	eligible     windowHeap
+	bytes        int
+	sequence     uint64
+	stop         chan struct{}
+	done         chan struct{}
+	close        sync.Once
 }
 
 func newWindowManager(config WindowConfig) *windowManager {
 	if config.Now == nil {
 		config.Now = time.Now
 	}
-	return &windowManager{config: config, windows: make(map[string]*Window)}
+	return &windowManager{config: config, windows: make(map[string]*Window), idleCounters: make(map[string]struct{})}
 }
 
 func (m *windowManager) newWindow(vchannel string) *Window {
@@ -77,6 +78,8 @@ func (m *windowManager) acquireWindow(vc string) *Window {
 	w := m.windows[vc]
 	if w == nil {
 		w = m.newWindow(vc)
+		_, w.hadRecords = m.idleCounters[vc]
+		delete(m.idleCounters, vc)
 		m.windows[vc] = w
 	}
 	w.users++
@@ -93,7 +96,25 @@ func (w *Window) release() {
 func (m *windowManager) removeEmptyWindowLocked(w *Window) {
 	if w.users == 0 && len(w.entries) == 0 && len(w.inflight) == 0 && m.windows[w.vchannel] == w {
 		delete(m.windows, w.vchannel)
-		deleteWindowMetrics(w.vchannel)
+		deleteWindowGauges(w.vchannel)
+		if w.dropped {
+			deleteWindowCounters(w.vchannel)
+		} else if w.hadRecords {
+			m.idleCounters[w.vchannel] = struct{}{}
+		}
+	}
+}
+
+// Drop preserves cached retry results until normal eviction. Once the window
+// drains there is no live collection left to report cumulative counters for.
+func (m *windowManager) dropVChannel(vc string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if w := m.windows[vc]; w != nil {
+		w.dropped = true
+	} else {
+		delete(m.idleCounters, vc)
+		deleteWindowCounters(vc)
 	}
 }
 
@@ -132,6 +153,7 @@ func (m *windowManager) touchLocked(record *cachedRecord, now time.Time) {
 }
 
 func (m *windowManager) addLocked(w *Window, record *idempotencyview.Record, at time.Time) {
+	w.hadRecords = true
 	key := IdempotencyKey(record.IdempotencyKey)
 	if old := w.entries[key]; old != nil {
 		m.removeLocked(old)

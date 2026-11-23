@@ -495,6 +495,10 @@ primary refreshes only that cluster's entry, so the secondary can evict the key 
 Routing lines up because row *i* goes to shard `i % n` on every attempt and a secondary
 names its VChannels by PChannel index.
 
+A native request releases the role lock while waiting for function resources, segment
+readiness, or another owner of the same key. If the topology changed during the wait,
+the request checks the current role and window again before it can append.
+
 After a **force promote**, replication may also have missed writes. A retry appends
 again when the promoted cluster has no entry for the key.
 
@@ -523,6 +527,11 @@ write's primary keys. Without the entry the retry appends again, as it did befor
 keys were recorded. The interceptor also removes the key from such a write before the
 append, so the WAL holds it as a keyless write. Otherwise Summary would record the key
 with the untrusted result, and a window rebuilt after a restart would serve it again.
+
+During WAL replay, Summary also checks records written by older secondaries. A
+replicated transaction can supply a duplicate result only if its nonzero commit
+body count matches the complete set of insert results. A replicated single insert
+with a malformed result retains its write position as a keyless record.
 
 A known limitation remains. A keyless write does not invalidate older Summary records of
 the same key. If Summary still holds a record of an older write under that key, a window

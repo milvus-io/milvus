@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"github.com/pingcap/failpoint"
 
 	walpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/failpoint"
@@ -20,6 +21,9 @@ import (
 
 const interceptorName = "idempotency"
 
+// Consumed inside DoAppend before the caller sees an append outcome.
+var errTopologyChanged = errors.New("topology changed while append was waiting")
+
 var (
 	_ interceptors.Interceptor            = (*idempotencyInterceptor)(nil)
 	_ interceptors.InterceptorWithMetrics = (*idempotencyInterceptor)(nil)
@@ -30,19 +34,12 @@ type idempotencyInterceptor struct {
 	cache  *windowManager
 
 	txnInsertResultBuffers *idempotencyutils.TxnInsertResultBuffers
-	// replicatedMu is held by a replicated message for its whole handling here,
-	// and by an AlterReplicateConfig message. The inner replicate interceptor
-	// accepts a replicated message, and advances the replicate checkpoint,
-	// before the append returns here, so the buffer and window updates that
-	// follow the append need this lock to stay ordered against:
-	//   - another replicated message, for example a commit replayed on a
-	//     reconnected stream that reads the buffer of its bodies;
-	//   - a promotion, which must not let a client retry a key that is
-	//     already appended but not yet recorded.
-	// Local keyed writes and transaction messages hold a shared lock from
-	// role selection through completion. A topology change therefore cannot
-	// admit a write that bypassed the window or strand an owner's result.
-	replicatedMu sync.RWMutex
+	// A replicated append holds exclusive admission from checkpoint acceptance
+	// through publication of its results. Native writes share admission across
+	// their role check, window decision and append. Redo and duplicate waits
+	// release admission before blocking and check the generation on resumption.
+	replicatedMu       sync.RWMutex
+	topologyGeneration uint64
 	// txnActive reports whether a txn session is still tracked by the txn
 	// manager; a duplicate commit only synthesizes a rollback for a txn that is
 	// positively known to be still open. nil means "unknown" and skips the
@@ -156,17 +153,65 @@ func (impl *idempotencyInterceptor) restoreReplicatedTxnBuffers(txnBuffer *utili
 }
 
 func (impl *idempotencyInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
-	if msg.ReplicateHeader() != nil || msg.MessageType() == message.MessageTypeAlterReplicateConfig {
+	if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
 		impl.replicatedMu.Lock()
 		defer impl.replicatedMu.Unlock()
-	} else if idempotencyKeyOf(msg) != "" || isTxnMessage(msg) {
-		impl.replicatedMu.RLock()
-		defer impl.replicatedMu.RUnlock()
+		// The inner interceptor switches role before the final WAL append.
+		id, err := append(ctx, msg)
+		if message.MustAsMutableAlterReplicateConfigMessageV2(msg).Header().Ignore {
+			return id, err
+		}
+		impl.topologyGeneration++
+		if err == nil {
+			// The WAL lock interceptor has aborted every session on this PChannel.
+			impl.txnInsertResultBuffers.Clear()
+		}
+		return id, err
+	}
+	replicated := msg.ReplicateHeader() != nil
+	var admission sync.Locker
+	switch {
+	case replicated:
+		admission = &impl.replicatedMu
+	case idempotencyKeyOf(msg) != "" || isTxnMessage(msg):
+		admission = impl.replicatedMu.RLocker()
+	default:
+		return impl.appendMessage(ctx, msg, append)
+	}
+	admission.Lock()
+	defer admission.Unlock()
+	for {
+		generation := impl.topologyGeneration
+		waitCtx := interceptors.WithAppendWait(ctx, func(wait func() error) (err error) {
+			admission.Unlock()
+			defer func() {
+				admission.Lock()
+				// Redo always reenters the replication gate for a replicated
+				// message. Only a native write needs a new window decision.
+				if err == nil && !replicated && generation != impl.topologyGeneration {
+					err = errTopologyChanged
+				}
+			}()
+			return wait()
+		})
+		id, err := impl.appendMessage(waitCtx, msg, append)
+		if !errors.Is(err, errTopologyChanged) {
+			return id, err
+		}
+	}
+}
+
+func (impl *idempotencyInterceptor) appendMessage(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
+	if msg.MessageType() == message.MessageTypeDropCollection {
+		id, err := append(ctx, msg)
+		if err == nil {
+			impl.cache.dropVChannel(msg.VChannel())
+		}
+		return id, err
 	}
 	if msg.ReplicateHeader() != nil {
 		return impl.appendReplicatedMessage(ctx, msg, append)
 	}
-
 	if impl.shouldLetReplicateGateHandle(msg) {
 		return append(ctx, msg)
 	}
@@ -548,6 +593,9 @@ func (impl *idempotencyInterceptor) Close() {
 	defer impl.cache.mu.Unlock()
 	for vc := range impl.cache.windows {
 		deleteWindowMetrics(vc)
+	}
+	for vc := range impl.cache.idleCounters {
+		deleteWindowCounters(vc)
 	}
 }
 

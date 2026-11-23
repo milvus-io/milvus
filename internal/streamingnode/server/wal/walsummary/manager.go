@@ -215,20 +215,14 @@ func insertSummaryOf(msg message.ImmutableMessage) (
 	*streamingpb.VChannelSummaryIdempotencyRecord,
 	*streamingpb.VChannelSummaryInsertRecord,
 ) {
-	result, hasInsert := insertResultOf(msg)
+	result, key, hasInsert := insertResultOf(msg)
 	if !hasInsert {
 		return nil, nil
 	}
-	key := idempotencyKeyOf(msg)
 	insert := &streamingpb.VChannelSummaryInsertRecord{
 		SourceMessageId:        messageIDProto(msg.MessageID()),
 		SourceTimetick:         msg.TimeTick(),
 		LastConfirmedMessageId: messageIDProto(msg.LastConfirmedMessageID()),
-	}
-	if result == nil && msg.MessageType() == message.MessageTypeTxn {
-		// Keep the write fact, but never restore a duplicate response from an
-		// incomplete transaction result.
-		key = ""
 	}
 	keys := &streamingpb.VChannelSummaryIdempotencyRecord{Key: key}
 	if result != nil {
@@ -238,54 +232,8 @@ func insertSummaryOf(msg message.ImmutableMessage) (
 	return keys, insert
 }
 
-// idempotencyKeyOf returns the client key a message was appended with, or ""
-// when the summary must not remember one for it.
-func idempotencyKeyOf(msg message.ImmutableMessage) string {
-	// A replicated message preserves the SOURCE cluster's properties, including
-	// its idempotency key, and the key is remembered like a native one: the
-	// interceptor records replicated writes without ever consulting the window
-	// for them, so a restored record cannot drive a replicated append down the
-	// duplicate path. It only serves a client retry after this cluster is
-	// promoted. When the interceptor cannot record a replicated key, it removes
-	// the key before the append, so such a write reaches the summary keyless.
-	//
-	// Gated to the message types the append path deduplicates: the key property
-	// alone must not materialize a record for a type that is never deduped.
-	//
-	// A bare CommitTxn is deliberately NOT here. Every path into an observer
-	// goes through a scanner that assembles transactions (the live flusher and
-	// the recovery stream share one txn buffer), so a commit always arrives
-	// wrapped in MessageTypeTxn and a CommitTxn case could never fire. Worse
-	// than unreachable: insertResultOf has no CommitTxn case either,
-	// so if one ever did arrive it would stage a record with nil Ids and answer
-	// a later duplicate with no primary keys.
-	switch msg.MessageType() {
-	case message.MessageTypeInsert:
-		return string(message.IdempotencyKeyOf(msg))
-	case message.MessageTypeTxn:
-		// What reaches an observer is the ASSEMBLED txn, not the CommitTxn the
-		// interceptor deduplicated: the scanner's txn buffer packs begin + bodies
-		// + commit into one message, and the assembly copies only the trace
-		// context off the commit -- the idempotency key property stays on the
-		// commit sub-message. Reading it from there is what keeps a multi-message
-		// insert (a partition-key collection, or one split by maxMessageSize)
-		// in the durable window at all.
-		txnMsg := message.AsImmutableTxnMessage(msg)
-		if txnMsg == nil {
-			return ""
-		}
-		commit := txnMsg.Commit()
-		if commit == nil || commit.MessageType() != message.MessageTypeCommitTxn {
-			return ""
-		}
-		return string(message.IdempotencyKeyOf(commit))
-	default:
-		return ""
-	}
-}
-
-// insertResultOf reports whether the message contains committed inserts and
-// returns their optional header result. A replicated write restores the result
+// insertResultOf returns the insert result, the key eligible for recovery,
+// and whether the message contains committed inserts. A replicated write restores the result
 // the source cluster stamped; missing results do not erase the write fact.
 //
 // For a transaction it is REBUILT from the insert bodies rather than read off
@@ -296,19 +244,22 @@ func idempotencyKeyOf(msg message.ImmutableMessage) string {
 // through MergeIdempotentInsertResults over the bodies in append order), which
 // is what makes a post-restart duplicate answer with the same primary keys the
 // first attempt returned.
-func insertResultOf(msg message.ImmutableMessage) (*messagespb.IdempotentInsertResult, bool) {
+func insertResultOf(msg message.ImmutableMessage) (*messagespb.IdempotentInsertResult, string, bool) {
 	switch msg.MessageType() {
 	case message.MessageTypeInsert:
 		insertMsg, err := message.AsImmutableInsertMessageV1(msg)
 		if err != nil {
-			return nil, true
+			return nil, "", true
 		}
 		result, _ := message.IdempotentInsertResultFromInsertHeader(insertMsg.Header())
-		return result, true
+		if msg.ReplicateHeader() != nil && message.ValidateIdempotentInsertResult(result) != nil {
+			return nil, "", true
+		}
+		return result, string(message.IdempotencyKeyOf(msg)), true
 	case message.MessageTypeTxn:
 		txnMsg := message.AsImmutableTxnMessage(msg)
 		if txnMsg == nil {
-			return nil, false
+			return nil, "", false
 		}
 		var results []*messagespb.IdempotentInsertResult
 		hasInsert := false
@@ -326,13 +277,23 @@ func insertResultOf(msg message.ImmutableMessage) (*messagespb.IdempotentInsertR
 			}
 			return nil
 		})
-		merged, _, err := message.MergeIdempotentInsertResults(results...)
-		if err != nil {
-			return nil, hasInsert
+		commit := txnMsg.Commit()
+		key := string(message.IdempotencyKeyOf(commit))
+		// A pre-upgrade WAL may still carry a key that the live interceptor
+		// would strip today. Never restore partial primary keys for that write.
+		if key != "" && commit.ReplicateHeader() != nil {
+			bodyCnt := message.MustAsImmutableCommitTxnMessageV2(commit).Header().BodyCnt
+			if bodyCnt == 0 || uint64(len(results)) != bodyCnt || txnMsg.Size() != len(results) {
+				return nil, "", hasInsert
+			}
 		}
-		return merged, hasInsert
+		merged, _, err := message.MergeIdempotentInsertResults(results...)
+		if err != nil || merged == nil {
+			return nil, "", hasInsert
+		}
+		return merged, key, hasInsert
 	default:
-		return nil, false
+		return nil, "", false
 	}
 }
 

@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/idempotencyview"
@@ -167,6 +168,14 @@ func TestEmptyWindowRemainsRegisteredWhileInUse(t *testing.T) {
 	node := paramtable.GetStringNodeID()
 	require.False(t, metrics.WALIdempotencyWindowEntries.DeleteLabelValues(node, vc))
 	require.False(t, metrics.WALIdempotencyWindowInflight.DeleteLabelValues(node, vc))
+	require.EqualValues(t, 1, testutil.ToFloat64(metrics.WALIdempotencyDuplicateTotal.WithLabelValues(node, vc)))
+	require.EqualValues(t, 1, testutil.ToFloat64(metrics.WALIdempotencyEvictionTotal.WithLabelValues(node, vc)))
+	next := m.acquireWindow(vc)
+	completeKey(t, next, "other", 2)
+	next.release()
+	require.EqualValues(t, 2, testutil.ToFloat64(metrics.WALIdempotencyEvictionTotal.WithLabelValues(node, vc)))
+	m.dropVChannel(vc)
+	require.NotContains(t, m.idleCounters, vc)
 	require.False(t, metrics.WALIdempotencyDuplicateTotal.DeleteLabelValues(node, vc))
 	require.False(t, metrics.WALIdempotencyEvictionTotal.DeleteLabelValues(node, vc))
 }

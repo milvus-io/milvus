@@ -1015,11 +1015,54 @@ func TestObserveMessageStagesIdempotentInserts(t *testing.T) {
 	_ = store
 }
 
+func TestSummaryValidatesLegacyReplicatedTxnBeforeRestoringKey(t *testing.T) {
+	source := message.AsImmutableTxnMessage(newTestIdempotentTxnMessage(t, "v1", 100, "key", [][]int64{{7}, {8}}))
+	rh := &message.ReplicateHeader{
+		ClusterID: "source", VChannel: "v1", TimeTick: 100,
+		MessageID: walimplstest.NewTestMessageID(2), LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
+	}
+	for _, tc := range []struct {
+		count         uint64
+		missingResult bool
+		key           string
+	}{
+		{count: 0},
+		{count: 3},
+		{count: 3, missingResult: true},
+		{count: 2, key: "key"},
+	} {
+		builder := message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(source.Begin()))
+		require.NoError(t, source.RangeOver(func(body message.ImmutableMessage) error {
+			builder.Add(body)
+			return nil
+		}))
+		if tc.missingResult {
+			builder.Add(plainSummaryInsert(103))
+		}
+		commit := message.NewCommitTxnMessageBuilderV2().WithVChannel("v1").
+			WithHeader(&message.CommitTxnMessageHeader{BodyCnt: tc.count}).WithBody(&message.CommitTxnMessageBody{}).
+			WithIdempotencyKey("key").MustBuildMutable().WithTxnContext(*source.Commit().TxnContext()).
+			WithReplicateHeader(rh).WithTimeTick(source.TimeTick()).WithLastConfirmed(source.LastConfirmedMessageID()).
+			IntoImmutableMessage(source.MessageID())
+		txn, err := builder.Build(message.MustAsImmutableCommitTxnMessageV2(commit))
+		require.NoError(t, err)
+		keys, fact := insertSummaryOf(txn)
+		require.NotNil(t, fact)
+		require.Equal(t, tc.key, keys.GetKey())
+		if tc.key == "" {
+			require.Nil(t, fact.GetIds())
+		} else {
+			require.Equal(t, []int64{7, 8}, fact.GetIds().GetIntId().GetData())
+		}
+	}
+}
+
 func TestIdempotencyKeyOfIsGatedByOriginAndType(t *testing.T) {
 	vchannel := "by-dev-rootcoord-dml_0_40451v0"
 
 	keyed := newTestIdempotentInsertMessage(t, vchannel, 100, "key-a", []int64{1}, []uint32{0})
-	assert.Equal(t, "key-a", idempotencyKeyOf(keyed))
+	keyRecord, _ := insertSummaryOf(keyed)
+	assert.Equal(t, "key-a", keyRecord.GetKey())
 
 	// A replicated insert preserves the SOURCE cluster's key and insert result.
 	// Both are remembered, so a window rebuilt after a restart can answer a
@@ -1031,34 +1074,42 @@ func TestIdempotencyKeyOfIsGatedByOriginAndType(t *testing.T) {
 		RowOffsets: []uint32{0},
 		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}},
 	})
-	replicated := message.NewInsertMessageBuilderV1().
-		WithVChannel(vchannel).
-		WithHeader(header).
-		WithBody(&msgpb.InsertRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert}}).
-		WithIdempotencyKey("key-from-source").
-		MustBuildMutable().
-		WithReplicateHeader(&message.ReplicateHeader{
-			ClusterID:              "source-cluster",
-			MessageID:              walimplstest.NewTestMessageID(100),
-			LastConfirmedMessageID: walimplstest.NewTestMessageID(99),
-			VChannel:               vchannel,
-			TimeTick:               100,
-		}).
-		WithTimeTick(101).
-		WithLastConfirmed(walimplstest.NewTestMessageID(101)).
-		IntoImmutableMessage(walimplstest.NewTestMessageID(102))
-	assert.Equal(t, "key-from-source", idempotencyKeyOf(replicated))
+	buildReplicated := func() message.ImmutableMessage {
+		return message.NewInsertMessageBuilderV1().
+			WithVChannel(vchannel).
+			WithHeader(header).
+			WithBody(&msgpb.InsertRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert}}).
+			WithIdempotencyKey("key-from-source").
+			MustBuildMutable().
+			WithReplicateHeader(&message.ReplicateHeader{
+				ClusterID:              "source-cluster",
+				MessageID:              walimplstest.NewTestMessageID(100),
+				LastConfirmedMessageID: walimplstest.NewTestMessageID(99),
+				VChannel:               vchannel,
+				TimeTick:               100,
+			}).
+			WithTimeTick(101).
+			WithLastConfirmed(walimplstest.NewTestMessageID(101)).
+			IntoImmutableMessage(walimplstest.NewTestMessageID(102))
+	}
+	replicated := buildReplicated()
+
 	keys, insert := insertSummaryOf(replicated)
 	require.NotNil(t, keys)
 	assert.Equal(t, "key-from-source", keys.GetKey())
 	require.NotNil(t, insert)
 	assert.Equal(t, replicated.TimeTick(), insert.GetSourceTimetick())
 	assert.Equal(t, []int64{7}, insert.GetIds().GetIntId().GetData())
+	header.IdempotentResult.RowOffsets = []uint32{0, 1}
+	keys, insert = insertSummaryOf(buildReplicated())
+	require.Empty(t, keys.GetKey())
+	require.Nil(t, insert.GetIds())
 
 	// The key property alone must not materialize a record for a type the
 	// append path never deduplicates.
 	deleteMsg := newTestDeleteMessage(t, vchannel, 103, 10, 1)
-	assert.Empty(t, idempotencyKeyOf(deleteMsg))
+	keyRecord, _ = insertSummaryOf(deleteMsg)
+	assert.Nil(t, keyRecord)
 }
 
 func TestStagedRecordSizeChargesTheRecordNotTheMessage(t *testing.T) {

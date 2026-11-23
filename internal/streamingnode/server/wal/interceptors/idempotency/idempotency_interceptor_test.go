@@ -300,6 +300,35 @@ func newKeyedCommit(txnCtx message.TxnContext, bodyCnt uint64) message.MutableMe
 		WithTxnContext(txnCtx)
 }
 
+func TestTopologyChangeReclaimsReplicatedTxnBuffers(t *testing.T) {
+	impl := newInterceptor(WindowConfig{})
+	defer impl.Close()
+	txn := message.TxnContext{TxnID: 8, Keepalive: 10}
+	body := newReplicatedTxnBody(t, txn, 100, 0)
+	commit := newKeyedCommit(txn, 1)
+	ok := func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		return newTestMessageID(1), nil
+	}
+	_, err := impl.DoAppend(newAppendTestContext(body), body, ok)
+	require.NoError(t, err)
+	alter := func(ignore bool) message.MutableMessage {
+		return message.NewAlterReplicateConfigMessageBuilderV2().WithAllVChannel().
+			WithHeader(&message.AlterReplicateConfigMessageHeader{Ignore: ignore}).
+			WithBody(&message.AlterReplicateConfigMessageBody{}).MustBuildMutable()
+	}
+	_, err = impl.DoAppend(t.Context(), alter(true), ok)
+	require.NoError(t, err)
+	require.NotNil(t, impl.txnInsertResultBuffers.BuildIfComplete(commit, 1))
+	_, err = impl.DoAppend(t.Context(), alter(false), func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		return nil, context.Canceled
+	})
+	require.ErrorIs(t, err, context.Canceled)
+	require.NotNil(t, impl.txnInsertResultBuffers.BuildIfComplete(commit, 1))
+	_, err = impl.DoAppend(t.Context(), alter(false), ok)
+	require.NoError(t, err)
+	require.Nil(t, impl.txnInsertResultBuffers.BuildIfComplete(commit, 1))
+}
+
 // The replicate interceptor rejects a replicated commit whose accepted bodies
 // fall short of its body count, and the source replays the whole transaction.
 // Bodies that already landed are ignored on the replay, so their buffered
@@ -518,6 +547,49 @@ func TestInterceptorNativeRetryDuringPromotion(t *testing.T) {
 	retry := <-done
 	require.NoError(t, retry.err)
 	require.True(t, firstID.EQ(retry.id))
+}
+
+func TestResumedOwnerRechecksWindowAfterTwoRoleChanges(t *testing.T) {
+	impl := newInterceptor(WindowConfig{})
+	defer impl.Close()
+	entered, resume := make(chan struct{}), make(chan struct{})
+	result := make(chan appendResult, 1)
+	msg := newIdempotentInsertMessage(t, "v1", "key")
+	go func() {
+		id, err := impl.DoAppend(newAppendTestContext(msg), msg, func(ctx context.Context, _ message.MutableMessage) (message.MessageID, error) {
+			err := interceptors.WaitOutsideAppend(ctx, func() error {
+				close(entered)
+				<-resume
+				return nil
+			})
+			return newTestMessageID(2), err
+		})
+		result <- appendResult{id: id, err: err}
+	}()
+	<-entered
+	switchRole := func(role replicateutil.Role) {
+		alter := message.NewAlterReplicateConfigMessageBuilderV2().WithAllVChannel().
+			WithHeader(&message.AlterReplicateConfigMessageHeader{}).
+			WithBody(&message.AlterReplicateConfigMessageBody{}).MustBuildMutable()
+		_, err := impl.DoAppend(t.Context(), alter, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			impl.replicateRole = func() replicateutil.Role { return role }
+			return newTestMessageID(3), nil
+		})
+		require.NoError(t, err)
+	}
+	switchRole(replicateutil.RoleSecondary)
+	replicated := withTestReplicateHeader(newIdempotentInsertMessage(t, "v1", "key"))
+	first, err := impl.DoAppend(newAppendTestContext(replicated), replicated, func(ctx context.Context, _ message.MutableMessage) (message.MessageID, error) {
+		utility.ReplaceAppendResultTimeTick(ctx, 100)
+		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(9))
+		return newTestMessageID(10), nil
+	})
+	require.NoError(t, err)
+	switchRole(replicateutil.RolePrimary)
+	close(resume)
+	got := <-result
+	require.NoError(t, got.err)
+	require.True(t, first.EQ(got.id))
 }
 
 func TestInterceptorDemotionWaitsForNativeOwner(t *testing.T) {

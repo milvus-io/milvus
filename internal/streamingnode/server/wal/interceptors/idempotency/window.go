@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/idempotencyview"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -33,15 +34,17 @@ type WindowConfig struct {
 // Window owns one VChannel's key scope and pending requests. Committed
 // records share the PChannel manager's mutex, budget and LRU lifecycle.
 type Window struct {
-	mu        *sync.Mutex
-	manager   *windowManager
-	vchannel  string
-	entries   map[IdempotencyKey]*cachedRecord
-	inflight  map[IdempotencyKey]*PendingEntry
-	order     list.List
-	users     int // active interceptor calls holding this window
-	heapIndex int
-	bytes     int
+	mu         *sync.Mutex
+	manager    *windowManager
+	vchannel   string
+	entries    map[IdempotencyKey]*cachedRecord
+	inflight   map[IdempotencyKey]*PendingEntry
+	order      list.List
+	users      int // active interceptor calls holding this window
+	hadRecords bool
+	dropped    bool
+	heapIndex  int
+	bytes      int
 }
 
 type PendingEntry struct {
@@ -211,17 +214,22 @@ func (w *Window) Fail(pending *PendingEntry, err error, msg message.MutableMessa
 }
 
 func (p *PendingEntry) Wait(ctx context.Context, msg message.MutableMessage) PendingResult {
-	select {
-	case <-p.done:
-		// The close of p.done happens-after the owner published p.result, so
-		// every waiter observes the same committed result here.
-		if p.result.Err == nil {
-			observeWindowDuplicate(vchannelOf(msg))
+	// The owner may be suspended in resource preparation. Waiting here with
+	// the role lock held would still block topology changes on its behalf.
+	var result PendingResult
+	result.Err = interceptors.WaitOutsideAppend(ctx, func() error {
+		select {
+		case <-p.done:
+			result = p.result
+			return result.Err
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-		return p.result
-	case <-ctx.Done():
-		return PendingResult{Err: ctx.Err()}
+	})
+	if result.Err == nil {
+		observeWindowDuplicate(vchannelOf(msg))
 	}
+	return result
 }
 
 func (w *Window) Len() int {

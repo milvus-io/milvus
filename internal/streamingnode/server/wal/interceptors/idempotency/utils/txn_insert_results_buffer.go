@@ -152,6 +152,13 @@ func (bs *TxnInsertResultBuffers) Remove(msg message.MutableMessage) {
 	bs.clearExpiredLocked(key.vchannel, currentTimeTick, hasCurrentTimeTick)
 }
 
+// Clear releases buffered results after a PChannel-wide transaction abort.
+func (bs *TxnInsertResultBuffers) Clear() {
+	bs.mu.Lock()
+	defer bs.mu.Unlock()
+	clear(bs.builders)
+}
+
 // RemoveVChannel drops every buffered transaction result for a reclaimed
 // vchannel. DropCollection is the last message for that vchannel, so normal
 // Add/Build/Remove-triggered sweeping will not get another chance to run.
