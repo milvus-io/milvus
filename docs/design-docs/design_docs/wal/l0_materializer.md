@@ -7,7 +7,7 @@
 ## 1. Current Integration
 
 Until QueryView is enabled, VChannelRecoveryModule owns one `WALMaterializer`.
-It observes retained WAL messages and holds mutation handles until L0 output and
+It observes retained WAL messages and holds Delete handles until L0 output and
 DataCoord registration succeed. Together with SegmentView's temporary growing
 SaveBinlogPaths publication, this protects the recoverability of the WAL
 prefix covered by the published global checkpoint.
@@ -22,7 +22,7 @@ publication bridge, and reconnect the Summary consumer.
 
 `ObserveMessage(RetainedImmutableMessage)` runs after Segment observation.
 
-- Delete, Update and committed Txn containing either retain one outer-message clone.
+- Delete and committed Txn containing Delete retain one outer-message clone.
 - Pure Insert, ordinary TimeTick, RecoveryBarrier and generic DDL retain no L0
   handle and do not force output.
 - ManualFlush, FlushAll, DropCollection, DropPartition, TruncateCollection,
@@ -31,23 +31,24 @@ publication bridge, and reconnect the Summary consumer.
 
 Each VChannel has an ordered pending buffer and at most one active serial task.
 The buffer holds immutable WAL handles, not another durable record store.
-Capacity accounting includes each Delete’s encoded primary keys plus eight bytes per key and each Update’s encoded message body. Insert children contribute zero. All mutation children use the outer commit TimeTick and retain their body ordinal.
+Mixed transactions count only their Delete payloads for capacity admission;
+all Delete children use the outer commit TimeTick and complete together.
 
 The WAL consumer passes runtime-only positions to the output writer. Each
-physical L0 group's StartPosition comes from its first mutation's TimeTick and
+physical L0 group's StartPosition comes from its first Delete's TimeTick and
 LastConfirmedMessageID; its checkpoint/DmlPosition comes from its own last
-mutation's complete position. The materialization batch boundary remains separate
-and never substitutes for a Segment's last mutation. Transaction positions come
+Delete's complete position. The materialization batch boundary remains separate
+and never substitutes for a Segment's last Delete. Transaction positions come
 from the outer Txn, never an individual child or the raw Commit message ID.
 Positions include the consumer VChannel and WAL name.
 Summary storage gains no MessageID fields. Its retained consumer still supplies
 only timestamps for future Summary-reader materialization.
 
-Within each partition, all mutation blocks at one TimeTick form an indivisible
+Within each partition, all Delete blocks at one TimeTick form an indivisible
 output unit. Row/byte limits are checked against the whole unit before admitting
 it to the current L0. If necessary, close that L0 before the unit; an oversized
 unit may exceed the soft limits but cannot be split. Different partitions still
-produce separate L0s, even when their mutations share a transaction TimeTick.
+produce separate L0s, even when their Deletes share a transaction TimeTick.
 
 Snapshot replay filters against the materialized cursor, independently of the
 VChannel metadata checkpoint. Observed positions suppress duplicate pending work.
@@ -56,9 +57,9 @@ VChannel metadata checkpoint. Observed positions suppress duplicate pending work
 
 | Trigger | Rule |
 |---|---|
-| Capacity | Pending mutation bytes reach `dataNode.segment.deleteBufBytes`. |
+| Capacity | Pending Delete bytes reach `dataNode.segment.deleteBufBytes`. |
 | Age | The oldest pending buffer exceeds `dataNode.segment.syncPeriod`. |
-| Explicit completion | A Flush/lifecycle message requires the preceding mutation prefix. |
+| Explicit completion | A Flush/lifecycle message requires the preceding Delete prefix. |
 | Recovery tail | `RequestPersistThrough` requests stalled or pressure-blocking data. |
 
 The production config sources are `DataNodeCfg.FlushDeleteBufferBytes` and
@@ -76,7 +77,7 @@ captured force request permits it. Every explicit WAL flush/lifecycle message
 is a hard batch boundary: even if queued behind an active task, select only the prefix through the first
 pending ManualFlush, FlushAll, DropCollection, DropPartition, TruncateCollection,
 AlterWAL or CreateSnapshot, retaining later messages and their byte accounting
-for the next batch. Whole L0 files must not mix mutations across these boundaries.
+for the next batch. Whole L0 files must not mix deletes across these boundaries.
 Capacity, age and RequestPersistThrough keep their existing trigger policies;
 they do not introduce additional batch boundaries.
 Empty explicit batches advance metadata without writing an empty L0. TimeTick progress alone does not write metadata or
@@ -114,7 +115,7 @@ The sequence is:
 ```
 write all L0 outputs and register them with DataCoord
   -> install dirty VChannelMeta.transform_materialized_time_tick
-  -> release covered mutation/Flush handles
+  -> release covered Delete/Flush handles
   -> publish component snapshots before the global WAL checkpoint
 ```
 
@@ -138,7 +139,7 @@ field is introduced. This retains the existing limitation for reassignment back
 to the same NodeID.
 
 On `ChannelMisrouted`, the old WALMaterializer terminates, poisons and releases
-its active and queued mutation/Flush handles, and poisons later relevant messages.
+its active and queued Delete/Flush handles, and poisons later relevant messages.
 It does not advance the materialized cursor, install completion metadata, or
 acknowledge the failed WAL prefix. Poison is local to that consumer; a new owner
 replays the original messages from the published checkpoint. L1 publication
@@ -150,8 +151,8 @@ the coordinator client's internal RPC retries are also bounded. The scheduler
 owns subsequent attempts. Only an actual successful registration or confirmed
 lifecycle retirement allows normal handle release.
 
-Restart restores the materialized cursor and rebuilds remaining mutation/Flush
-handles from the single WAL replay. Unmaterialized mutations cannot be
+Restart restores the materialized cursor and rebuilds remaining Delete/Flush
+handles from the single WAL replay. Unmaterialized Delete messages cannot be
 behind the global checkpoint in this runtime. There is no new persisted request
 position, physical cursor, or intermediate branch-format compatibility path.
 
@@ -165,7 +166,7 @@ retired the relevant history.
 RecoveryStorage persists the global checkpoint after its covered component
 snapshots. Insert registration and L0 completion are required by the retained
 message handles before publication. No additional requirement forces an L0
-cursor to equal checkpoint TimeTick across a range containing no mutations.
+cursor to equal checkpoint TimeTick across a range containing no Deletes.
 
 There is no periodic per-VChannel checkpoint reporting to DataCoord. Explicit
 Flush completion joins L1/L0 work through message handles and consuming-side

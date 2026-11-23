@@ -82,7 +82,6 @@ set(MILVUS_TEST_FILES
         test_commit_timestamp.cpp
         test_schema_reopen.cpp
         test_growing_concurrent_reopen.cpp
-        pk_update_native_benchmark.cpp
         test_segment_read_lease.cpp
         CipherPluginContextTest.cpp
         test_knowhere_status_mapping.cpp

@@ -37,7 +37,6 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/cockroachdb/errors"
-	"github.com/pingcap/failpoint"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
@@ -49,7 +48,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/internal/util/pkupdatepoint"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -846,9 +844,6 @@ func (s *LocalSegment) retrieveNative(ctx context.Context, plan *segcore.Retriev
 	}
 	defer s.ptrLock.Unpin()
 
-	failpoint.Inject("pkSealedRead", func(value failpoint.Value) {
-		pkupdatepoint.Hold(ctx, value, s.Shard().VirtualName(), plan.Timestamp, s.ID(), map[string]string{"base": fmt.Sprintf("%p", s.csegment.RawPointer()), "read": fmt.Sprintf("%p", native.RawPointer())})
-	})
 	log.Debug(ctx, "begin to retrieve")
 
 	tr := timerecord.NewTimeRecorder("cgoRetrieve")
@@ -979,9 +974,6 @@ func (s *LocalSegment) retrieveByOffsetsNative(ctx context.Context, plan *segcor
 	}
 	defer s.ptrLock.Unpin()
 
-	failpoint.Inject("pkSealedOutput", func(value failpoint.Value) {
-		pkupdatepoint.Hold(ctx, value, s.Shard().VirtualName(), plan.Timestamp, s.ID(), map[string]string{"base": fmt.Sprintf("%p", s.csegment.RawPointer()), "read": fmt.Sprintf("%p", native.RawPointer())})
-	})
 	log.Debug(ctx, "begin to retrieve by offsets")
 	tr := timerecord.NewTimeRecorder("cgoRetrieveByOffsets")
 	result, err := retrySegmentReadGate(

@@ -2,7 +2,6 @@ package qnview
 
 import (
 	"context"
-	"fmt"
 	"maps"
 	"slices"
 	"sync"
@@ -10,14 +9,12 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
-	"github.com/pingcap/failpoint"
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/internal/util/pkupdatepoint"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -610,11 +607,6 @@ func (r *segmentResource) validateSnapshot(snapshot SegmentLoadInfoSnapshot) err
 func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collection CollectionRuntime, snapshot SegmentLoadInfoSnapshot) (*preparedSegmentRead, error) {
 	m := r.manager
 	info := proto.Clone(snapshot.LoadInfo).(*querypb.SegmentLoadInfo)
-	failpoint.Inject("pkPendingReadBinding", func(value failpoint.Value) {
-		v := b.view.req.Meta.GetVersion().GetDataVersion()
-		instance := fmt.Sprintf("%d/%d", v.GetStreamingVersion(), v.GetCompactVersion())
-		pkupdatepoint.HoldInstance(ctx, value, info.GetInsertChannel(), b.floor(), r.id, instance, map[string]any{"version": instance, "manifest": info.GetManifestPath()})
-	})
 	selected := make(map[int64]struct{}, len(collection.IndexInfos()))
 	for _, index := range collection.IndexInfos() {
 		selected[index.GetIndexID()] = struct{}{}

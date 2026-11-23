@@ -71,18 +71,6 @@ Retained requery uses QueryOnView with the original plan, workers, Schema and
 MVCC. It does not select new resources through Phase 1 or use a separate requery
 RPC.
 
-A native Growing apply failure stops that runtime's ordered event batch and
-wakes visibility waiters. The manager retires every View bound to the failed
-runtime and a replacement captures a fresh snapshot. A Ready View reports the
-failure to the coordinator. An Up View becomes unavailable locally and retains
-its durable Up record for restart. Runtime-failure notification is independent
-of the acquisition's one-time readiness callback. Previously acquired handles
-drain before their physical stores are released.
-
-Sealed registrations publish an entry's progress after every applicable block
-succeeds. A failed registration invalidates its physical instance. Other
-instances on the shared shard stream continue independently.
-
 ## Error and validation boundary
 
 View lifecycle errors retain their ViewCode and retry semantics. The query RPC

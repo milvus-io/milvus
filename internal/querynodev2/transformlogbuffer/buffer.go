@@ -8,11 +8,9 @@ import (
 	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
-	"github.com/pingcap/failpoint"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/util/pkupdatepoint"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/config"
@@ -997,23 +995,12 @@ func (r *registration) apply(ctx context.Context, entry *streamingpb.TransformLo
 		return nil
 	}
 	if err := r.segment.ApplyTransform(ctx, entry); err != nil {
-		failpoint.Inject("pkSealedFailureFrontier", func(value failpoint.Value) {
-			pkupdatepoint.Hold(ctx, value, r.buffer.vchannel, entry.GetTimeTick(), r.segment.ID(), map[string]uint64{"transform": r.drainedTo.Load()})
-		})
 		// A partially applied entry cannot be retried on this physical base.
 		// Publish failure before shared delivery advances; instance MVCC waits
 		// then reject every timestamp, including previously applied history.
 		// Release cancellation only retires this registration.
 		if r.ctx.Err() == nil {
 			r.finish(err)
-			failpoint.Inject("pkOldSealedCallback", func(value failpoint.Value) {
-				r.errMu.Lock()
-				cb := r.onFailure
-				r.errMu.Unlock()
-				if cb != nil {
-					pkupdatepoint.Redeliver(value, r.buffer.vchannel, entry.GetTimeTick(), r.segment.ID(), fmt.Sprintf("%p", r), func() { cb(err) })
-				}
-			})
 		}
 		return err
 	}

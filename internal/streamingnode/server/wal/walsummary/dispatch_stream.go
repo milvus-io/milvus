@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/pingcap/failpoint"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/util/pkupdatepoint"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -381,11 +379,6 @@ func (s *dispatchSubscription) catchupPage() (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		failpoint.Inject("pkTruncatedReplay", func(value failpoint.Value) {
-			if pkupdatepoint.Hold(s.ctx, value, s.opt.VChannel, target, 0, map[string]uint64{"after": after, "through": target}) {
-				batch.FastForwardTimeTick = target
-			}
-		})
 		if batch.FastForwardTimeTick > after {
 			return false, wal.ErrTransformLogStartPointTruncated
 		}

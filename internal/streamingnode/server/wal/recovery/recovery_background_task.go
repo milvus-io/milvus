@@ -6,12 +6,10 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
-	"github.com/pingcap/failpoint"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
-	"github.com/milvus-io/milvus/internal/util/pkupdatepoint"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -240,13 +238,6 @@ func (rs *recoveryStorageImpl) buildRecoverySnapshot(snapshot *dirtyPersistSnaps
 
 func (rs *recoveryStorageImpl) saveRecoverySnapshot(ctx context.Context, snapshot *metastore.WALRecoverySnapshot) error {
 	return retryOperationWithBackoff(ctx, rs.Logger().With(mlog.String("op", "persistRecoverySnapshot")), func(ctx context.Context) error {
-		failpoint.Inject("pkVChannelPersistence", func(value failpoint.Value) {
-			for _, group := range []map[string]*streamingpb.VChannelMeta{snapshot.VChannels, snapshot.VChannelBaseMetas} {
-				for channel, meta := range group {
-					pkupdatepoint.Hold(ctx, value, channel, meta.GetTransformMaterializedTimeTick(), 0, rs.channel.Name)
-				}
-			}
-		})
 		return resource.Resource().StreamingNodeCatalog().SaveRecoverySnapshot(ctx, rs.channel.Name, snapshot)
 	})
 }

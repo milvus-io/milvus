@@ -21,7 +21,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/pingcap/failpoint"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -29,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/cgo"
-	"github.com/milvus-io/milvus/internal/util/pkupdatepoint"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -490,11 +488,6 @@ func (s *cSegmentImpl) ApplyUpdates(ctx context.Context, timestamp uint64, ordin
 	}
 	guard := NewCancellationGuard(ctx)
 	defer guard.Close()
-	failpoint.Inject("pkNativeApply", func(value failpoint.Value) {
-		if pkupdatepoint.Hold(ctx, value, "", timestamp, s.id, map[string]any{"segment_ptr": fmt.Sprintf("%p", s.ptr), "ordinal": ordinal}) {
-			C.CancelLoadCancellationSource(C.CLoadCancellationSource(guard.Source()))
-		}
-	})
 	status := C.ApplySegmentUpdates(s.ptr, C.uint64_t(timestamp), C.uint32_t(ordinal), ids, &fields[0], &literals[0], C.int64_t(len(fields)), C.CLoadCancellationSource(guard.Source()))
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return err
@@ -538,26 +531,6 @@ func (s *cSegmentImpl) GCUpdates(ctx context.Context, safeTS uint64) error {
 	if s.ptr == nil {
 		return merr.WrapErrSegmentNotLoaded(s.id)
 	}
-	failpoint.Inject("pkNativeGC", func(value failpoint.Value) {
-		physical := fmt.Sprintf("%p", s.ptr)
-		if pkupdatepoint.Armed(value, "", safeTS, s.id, physical) {
-			var before, after C.CUpdateStoreStats
-			first := C.GetUpdateStoreStats(s.ptr, &before)
-			if err := ConsumeCStatusIntoError(&first); err != nil {
-				failpoint.Return(err)
-			}
-			gcStatus := C.GCUpdates(s.ptr, C.uint64_t(safeTS))
-			if err := ConsumeCStatusIntoError(&gcStatus); err != nil {
-				failpoint.Return(err)
-			}
-			last := C.GetUpdateStoreStats(s.ptr, &after)
-			if err := ConsumeCStatusIntoError(&last); err != nil {
-				failpoint.Return(err)
-			}
-			pkupdatepoint.HoldInstance(ctx, value, "", safeTS, s.id, physical, map[string]any{"segment_ptr": physical, "before": uint64(before.versions), "after": uint64(after.versions)})
-			failpoint.Return(nil)
-		}
-	})
 	status := C.GCUpdates(s.ptr, C.uint64_t(safeTS))
 	return ConsumeCStatusIntoError(&status)
 }

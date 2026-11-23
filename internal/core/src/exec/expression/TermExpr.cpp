@@ -46,9 +46,6 @@
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "segcore/SegmentInterface.h"
-#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
-#include "segcore/PkUpdateReadObserver.h"
-#endif
 #include "segcore/SegmentSealed.h"
 #include "storage/MmapManager.h"
 #include "storage/Types.h"
@@ -976,19 +973,12 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
         arg_set_ = std::make_shared<FlatVectorElement<ReaderType>>(vals);
         arg_inited_ = true;
     }
-    auto execute_sub_batch = [
-#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
-                                 field = expr_->column_.field_id_
-#endif
-    ](const index::IScalarPredicateReader<ReaderType>* reader,
-                             const std::vector<ReaderType>& vals) {
-#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
-        segcore::ObservePkUpdateRead(
-            field, {segcore::PkUpdateReadPath::IndexedPredicate});
-#endif
-        TermIndexFunc<ReaderType> func;
-        return func(reader, vals.size(), vals.data());
-    };
+    auto execute_sub_batch =
+        [](const index::IScalarPredicateReader<ReaderType>* reader,
+           const std::vector<ReaderType>& vals) {
+            TermIndexFunc<ReaderType> func;
+            return func(reader, vals.size(), vals.data());
+        };
     auto args =
         std::dynamic_pointer_cast<FlatVectorElement<ReaderType>>(arg_set_);
     if (field_type_ == DataType::JSON && args->values_.empty()) {
@@ -1149,16 +1139,8 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
 
     int processed_cursor = 0;
     auto execute_sub_batch =
-        [
-            &processed_cursor,
-            &bitmap_input,
-            &simd_filter_fn,
-            str_set_elem
-#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
-            ,
-            field = expr_->column_.field_id_
-#endif
-        ]<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &bitmap_input, &simd_filter_fn,
+         str_set_elem ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
             ValidityView valid_data,
             const int32_t* offsets,
@@ -1170,11 +1152,6 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
             processed_cursor += size;
             return;
         }
-#ifdef MILVUS_ENABLE_PK_UPDATE_NATIVE_BENCHMARK
-        segcore::ObservePkUpdateRead(field,
-                                     {segcore::PkUpdateReadPath::RawPredicate,
-                                      static_cast<size_t>(size)});
-#endif
         bool has_bitmap_input = !bitmap_input.empty();
 
         // ── Path 1: SIMD batch (numeric, sequential, within threshold) ──

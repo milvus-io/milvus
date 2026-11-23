@@ -5,7 +5,6 @@ import (
 	"math"
 
 	"github.com/cockroachdb/errors"
-	"github.com/pingcap/failpoint"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -13,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/internal/util/pkupdatepoint"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -129,12 +127,6 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		// and V3).
 		Stats: pack.stats,
 	}
-	failpoint.Inject("pkL0Registration", func(value failpoint.Value) {
-		if pack.level == datapb.SegmentLevel_L0 && pack.pack.mutationDelta != nil &&
-			pkupdatepoint.Hold(ctx, value, pack.channelName, pack.tsTo, pack.segmentID, req.Deltalogs) {
-			failpoint.Return(merr.WrapErrServiceUnavailable("injected L0 registration failure"))
-		}
-	})
 	err := retry.Handle(ctx, func() (bool, error) {
 		err := b.broker.SaveBinlogPaths(ctx, req)
 		// This publisher has lost WAL ownership. Let the recovery task poison
