@@ -565,6 +565,12 @@ func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
 		accessMode = types.AccessModeRW
 	}
 	currentLayout := generateCurrentLayout(pchannelView, nodeStatus, accessMode)
+	// Per-RG expected streaming node number gate: suspend the automatic rebalance
+	// until every resource group that owns read-write pchannels has enough
+	// available streaming nodes. Opt-in, disabled by default.
+	if !b.perRGExpectedNodeNumReached(ctx, pchannelView) {
+		currentLayout.Config.AllowRebalance = false
+	}
 	expectedLayout, err := b.policy.Balance(currentLayout)
 	if err != nil {
 		return false, merr.Wrap(err, "fail to balance")
@@ -582,6 +588,70 @@ func (b *balancerImpl) balance(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 	return true, b.applyBalanceResultToStreamingNode(ctx, modifiedChannels)
+}
+
+// perRGExpectedNodeNumReached reports whether every resource group that owns at
+// least one read-write pchannel has at least the expected number of available
+// streaming nodes. The gate is opt-in: it returns true when
+// streaming.walBalancer.expectedStreamingNodeNumPerRG is disabled (<= 0).
+// While it returns false, the balance round suspends only the automatic
+// optimization rebalance (AllowRebalance=false); new WAL assignment, failure
+// recovery, frozen-node evacuation and manual transfer keep working.
+func (b *balancerImpl) perRGExpectedNodeNumReached(ctx context.Context, view *channel.PChannelView) bool {
+	expected := paramtable.Get().StreamingCfg.WALBalancerExpectedStreamingNodeNumPerRG.GetAsInt()
+	if expected <= 0 {
+		return true
+	}
+	availableNodes, err := b.GetAvailableStreamingNodes(ctx)
+	if err != nil {
+		b.Logger().Warn("fail to get available streaming nodes for per-rg expected node num check, skip gate this round", zap.Error(err))
+		return true
+	}
+	rwAssignments := make([]types.PChannelInfoAssigned, 0, len(view.Channels))
+	for _, meta := range view.Channels {
+		if meta.ChannelInfo().AccessMode != types.AccessModeRW {
+			continue
+		}
+		rwAssignments = append(rwAssignments, types.PChannelInfoAssigned{
+			Channel: meta.ChannelInfo(),
+			Node:    types.StreamingNodeInfo{ServerID: meta.CurrentServerID()},
+		})
+	}
+	if blockedRG := rgWithInsufficientStreamingNodes(availableNodes, rwAssignments, expected); blockedRG != "" {
+		b.Logger().Info("resource group has not enough available streaming nodes, suspend automatic rebalance",
+			zap.String("resourceGroup", blockedRG),
+			zap.Int("expectedStreamingNodeNum", expected))
+		return false
+	}
+	return true
+}
+
+// rgWithInsufficientStreamingNodes returns the first resource group that owns at
+// least one read-write pchannel but has fewer than expected available streaming
+// nodes, or "" when every owning resource group satisfies the expected number.
+// Channels assigned to a node absent from availableNodes (e.g. frozen or gone)
+// are skipped: they are handled by recovery, not by this gate.
+func rgWithInsufficientStreamingNodes(
+	availableNodes map[int64]*types.StreamingNodeInfoWithResourceGroup,
+	rwAssignments []types.PChannelInfoAssigned,
+	expected int,
+) string {
+	availableByRG := make(map[string]int, len(availableNodes))
+	for _, node := range availableNodes {
+		availableByRG[node.ResourceGroup]++
+	}
+	owningRG := make(map[string]struct{})
+	for _, rel := range rwAssignments {
+		if node, ok := availableNodes[rel.Node.ServerID]; ok {
+			owningRG[node.ResourceGroup] = struct{}{}
+		}
+	}
+	for rg := range owningRG {
+		if availableByRG[rg] < expected {
+			return rg
+		}
+	}
+	return ""
 }
 
 // fetchStreamingNodeStatus fetch the streaming node status.
