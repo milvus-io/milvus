@@ -40,6 +40,7 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 	c.printBanner(flags.Output())
 	c.injectVariablesToEnv()
 	c.printHardwareInfo(flags.Output())
+	startServerCoverage()
 	lock, err := createPidFile(flags.Output(), filename, runtimeDir)
 	if err != nil {
 		panic(err)

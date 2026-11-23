@@ -87,6 +87,26 @@ endif
 	TSAN_GO_LDFLAGS := -linkmode=external
 endif
 
+# Instrument the server used by SDK/REST E2E tests; normal builds are unchanged.
+USE_SERVER_COVERAGE ?= OFF
+export USE_SERVER_COVERAGE
+ifneq ($(USE_SERVER_COVERAGE),ON)
+ifneq ($(USE_SERVER_COVERAGE),OFF)
+$(error USE_SERVER_COVERAGE must be ON or OFF)
+endif
+endif
+SERVER_COVERAGE_GO_FLAGS :=
+ifeq ($(USE_SERVER_COVERAGE),ON)
+ifneq ($(OS),Linux)
+$(error USE_SERVER_COVERAGE currently requires Linux)
+endif
+ifeq ($(USE_TSAN),ON)
+$(error USE_SERVER_COVERAGE and USE_TSAN are mutually exclusive)
+endif
+	MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),servercoverage
+	SERVER_COVERAGE_GO_FLAGS := -cover -covermode=atomic -coverpkg=github.com/milvus-io/milvus/...,command-line-arguments
+endif
+
 use_dynamic_simd = ON
 ifdef USE_DYNAMIC_SIMD
 	use_dynamic_simd = ${USE_DYNAMIC_SIMD}
@@ -157,6 +177,9 @@ ifneq ($(filter ON on TRUE True true 1,$(WITH_GPU)),)
     ifeq ($(USE_TSAN),ON)
         $(error USE_TSAN does not support GPU builds)
     endif
+    ifeq ($(USE_SERVER_COVERAGE),ON)
+        $(error USE_SERVER_COVERAGE does not support GPU builds)
+    endif
     ifneq ($(index_engine),cardinal)
         MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),cuda
     endif
@@ -186,7 +209,7 @@ build-go:
 	@echo "Building Milvus ..."
 	@source $(PWD)/scripts/setenv.sh && \
 		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
-		$(GOEXPERIMENT_FLAG) CGO_LDFLAGS="$(CGO_LDFLAGS)" CGO_CFLAGS="$(CGO_CFLAGS)" CGO_CXXFLAGS="$(CGO_CXXFLAGS)" GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="$(TSAN_GO_LDFLAGS) $(SONIC_PLUGIN_SYNC_LDFLAG) -r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
+		$(GOEXPERIMENT_FLAG) CGO_LDFLAGS="$(CGO_LDFLAGS)" CGO_CFLAGS="$(CGO_CFLAGS)" CGO_CXXFLAGS="$(CGO_CXXFLAGS)" GO111MODULE=on $(GO) build $(SERVER_COVERAGE_GO_FLAGS) -pgo=$(PGO_PATH)/default.pgo -ldflags="$(TSAN_GO_LDFLAGS) $(SONIC_PLUGIN_SYNC_LDFLAG) -r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
 		-tags "$(MILVUS_GO_BUILD_TAGS)" -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
 
 get-build-deps:

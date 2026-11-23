@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# Run beside the server. stdout is exclusively the resulting coverage archive.
+set -euo pipefail
+
+usage() {
+    echo 'usage: coverage-export [--raw-only] SNAPSHOT_ID [METADATA_DIRECTORY]' >&2
+    exit 1
+}
+
+root=${MILVUS_COVERAGE_DIR:?MILVUS_COVERAGE_DIR is required}
+if [[ "$root" != "/" ]]; then
+    root=${root%/}
+fi
+raw_only=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --raw-only)
+            raw_only=1
+            shift
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            echo "Unknown option: $1" >&2
+            usage
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+if [[ $# -lt 1 || $# -gt 2 ]] || [[ "$raw_only" == 1 && $# -gt 1 ]]; then
+    usage
+fi
+id=$1
+metadata=${2:-$root}
+tools=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+if [[ ! "$id" =~ ^[0-9a-f]{32}$ ]]; then
+    echo 'Snapshot ID must contain 32 lowercase hexadecimal characters' >&2
+    exit 1
+fi
+if [[ "$raw_only" == 0 ]]; then
+    if [[ ! -x "$tools/coverage-covdata" || ! -x "$tools/coverage-gcov" ]]; then
+        echo 'Coverage decoder tools are missing; package them from the same build as the server' >&2
+        exit 1
+    fi
+    if [[ ! -s "$metadata/build-info.txt" || ! -d "$metadata/gcno" ]]; then
+        echo 'Build metadata is missing; package it from the same build as the server' >&2
+        exit 1
+    fi
+fi
+if [[ ! -s "$root/ready" ]]; then
+    echo 'The coverage runtime is not ready' >&2
+    exit 1
+fi
+pid=$(cat "$root/ready")
+if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! kill -0 "$pid" 2>/dev/null; then
+    echo 'The recorded coverage process is no longer running' >&2
+    exit 1
+fi
+run="$root/runs/$id"
+if [[ -e "$run" ]] || ! (set -o noclobber; : > "$root/requests/$id") 2>/dev/null; then
+    echo 'Snapshot ID has already been used' >&2
+    exit 1
+fi
+for ((attempt=0; attempt<240; attempt++)); do
+    if [[ -f "$run/error" ]]; then
+        cat "$run/error" >&2
+        exit 1
+    fi
+    [[ ! -f "$run/done.json" ]] || break
+    if ! kill -0 "$pid" 2>/dev/null; then
+        echo 'The recorded coverage process exited before completing the snapshot' >&2
+        exit 1
+    fi
+    sleep 0.5
+done
+if [[ ! -f "$run/done.json" ]]; then
+    echo 'Timed out waiting for the server coverage snapshot' >&2
+    exit 1
+fi
+count=0
+while IFS= read -r -d '' counters; do
+    if [[ "$raw_only" == 0 ]]; then
+        relative=${counters#"$run/cpp/"}
+        if [[ ! -f "$metadata/gcno/${relative%.gcda}.gcno" ]]; then
+            echo "Missing matching build metadata for $relative" >&2
+            exit 1
+        fi
+    fi
+    count=$((count + 1))
+done < <(find "$run/cpp" -type f -name '*.gcda' -print0)
+if [[ "$count" == 0 ]]; then
+    echo 'Snapshot contains no C++ coverage counters' >&2
+    exit 1
+fi
+if [[ "$raw_only" == 0 ]]; then
+    env -u LD_PRELOAD "$tools/coverage-covdata" textfmt -i="$run/go" -o="$run/go.out" >&2
+    cp -a "$metadata/gcno/." "$run/cpp/"
+    cp "$metadata/build-info.txt" "$run/build-info.txt"
+    while IFS= read -r -d '' notes; do
+        (
+            cd "$(dirname "$notes")"
+            env -u LD_PRELOAD "$tools/coverage-gcov" --json-format "$(basename "$notes")" >&2
+        )
+    done < <(find "$run/cpp" -type f -name '*.gcno' -print0)
+fi
+tar -C "$run" -czf - .
+# Keep the snapshot for retrying transfers and auditing. The caller owns cleanup.
