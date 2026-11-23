@@ -52,11 +52,25 @@ PhyConjunctFilterExpr::ResolveType(const std::vector<DataType>& inputs) {
 
 TargetBitmap
 PhyConjunctFilterExpr::BuildActiveBitmap(const ColumnVectorPtr& vec) {
-    // AND still needs TRUE or UNKNOWN rows; OR needs FALSE or UNKNOWN rows.
+    // Rows that still need the following expressions.
+    //
+    // For AND: TRUE or NULL rows still need evaluation; only definite FALSE
+    //   can stop (NULL AND FALSE = FALSE, so a NULL row can still change).
+    //   With a null-rejecting consumer, NULL is already equivalent to FALSE
+    //   downstream, so NULL rows are dropped too and only TRUE rows stay
+    //   active — restoring the pre-3VL early exit for UNKNOWN-heavy batches.
+    // For OR: FALSE or NULL rows still need evaluation; only definite TRUE
+    //   can stop. A NULL row can still become TRUE (NULL OR TRUE = TRUE),
+    //   so null-rejection does not shrink the active set for OR.
     const size_t size = vec->size();
     TargetBitmapView data(vec->GetRawData(), size);
     TargetBitmapView valid(vec->GetValidRawData(), size);
     if (is_and_) {
+        if (null_rejecting_) {
+            TargetBitmap active_rows(data);
+            active_rows.inplace_and(valid, size);  // data & valid
+            return active_rows;
+        }
         TargetBitmap active_rows(valid);
         active_rows.inplace_sub(data, size);  // valid & ~data
         active_rows.flip();                   // data | ~valid
@@ -98,18 +112,27 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     }
 
     auto has_input_offset = context.get_offset_input() != nullptr;
-    if (!has_input_offset && !like_batch_initialized_ && is_and_ &&
-        like_indices_.size() > 1) {
+    if (!like_batch_initialized_ && is_and_ && like_indices_.size() > 1) {
         like_batch_initialized_ = true;
-        // Collect LIKE expressions that can use ngram index at runtime
+        // Collect LIKE expressions that can use ngram index at runtime.
+        // The batch-ngram path evaluates whole batches, so it cannot be
+        // used with an offset input; ngram_exprs then stays empty and the
+        // else branch below erases the input_order_ slot reserved at
+        // compile time. Deciding here — once, in every mode — keeps the
+        // invariant that each input_order_ entry has a backing expression
+        // in inputs_ before anything indexes inputs_ with it. (An
+        // instance's offset mode is fixed for its lifetime, so no later
+        // call could have used the batch path anyway.)
         std::vector<std::shared_ptr<PhyUnaryRangeFilterExpr>> ngram_exprs;
-        for (size_t idx : like_indices_) {
-            auto unary_expr =
-                std::dynamic_pointer_cast<PhyUnaryRangeFilterExpr>(
-                    inputs_[idx]);
-            if (unary_expr && unary_expr->CanUseNgramIndex()) {
-                ngram_exprs.push_back(unary_expr);
-                batch_ngram_indices_.insert(idx);
+        if (!has_input_offset) {
+            for (size_t idx : like_indices_) {
+                auto unary_expr =
+                    std::dynamic_pointer_cast<PhyUnaryRangeFilterExpr>(
+                        inputs_[idx]);
+                if (unary_expr && unary_expr->CanUseNgramIndex()) {
+                    ngram_exprs.push_back(unary_expr);
+                    batch_ngram_indices_.insert(idx);
+                }
             }
         }
 

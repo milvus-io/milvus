@@ -164,6 +164,28 @@ class PhyConjunctFilterExpr : public Expr {
         inputs_ = std::move(inputs);
     }
 
+    // This conjunction feeds a null-rejecting consumer: one that treats an
+    // UNKNOWN (NULL) output row exactly like FALSE. Under AND, an UNKNOWN
+    // row can never become TRUE (UNKNOWN AND x is UNKNOWN or FALSE), so a
+    // null-rejecting AND may stop evaluating it early; the row then stays
+    // UNKNOWN instead of possibly collapsing to FALSE, which is
+    // indistinguishable downstream. The property crosses AND/OR — their
+    // combination cannot turn an operand's UNKNOWN into TRUE when the root
+    // folds UNKNOWN into FALSE — so it propagates to the inputs; any other
+    // node keeps the no-op default and stops the propagation.
+    void
+    MarkNullRejecting() override {
+        null_rejecting_ = true;
+        for (auto& input : inputs_) {
+            input->MarkNullRejecting();
+        }
+    }
+
+    bool
+    IsNullRejecting() const {
+        return null_rejecting_;
+    }
+
     bool
     IsAnd() {
         return is_and_;
@@ -175,7 +197,9 @@ class PhyConjunctFilterExpr : public Expr {
     }
 
  private:
-    // Rows that still need following expressions under ordinary 3VL.
+    // Build the bitmap of rows that still need the following expressions:
+    // its count drives the batch-level early exit and the bitmap itself
+    // becomes the row-level input of the next expression.
     TargetBitmap
     BuildActiveBitmap(const ColumnVectorPtr& vec);
 
@@ -186,6 +210,9 @@ class PhyConjunctFilterExpr : public Expr {
     SkipFollowingExprs(int start);
     // true if conjunction (and), false if disjunction (or).
     bool is_and_;
+    // true if the consumer of this expression's output treats UNKNOWN like
+    // FALSE (see MarkNullRejecting).
+    bool null_rejecting_{false};
     std::vector<size_t> input_order_;
     // Indices of LIKE expressions for potential batch ngram optimization (AND only)
     std::vector<size_t> like_indices_;
