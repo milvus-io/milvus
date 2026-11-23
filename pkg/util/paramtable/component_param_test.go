@@ -1927,6 +1927,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 2*time.Second, params.StreamingCfg.DelegatorEmptyTimeTickMaxFilterInterval.GetAsDurationByParse())
 		assert.Equal(t, 1*time.Second, params.StreamingCfg.FlushEmptyTimeTickMaxFilterInterval.GetAsDurationByParse())
 		assert.Equal(t, 0, params.StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.GetAsInt())
+		assert.Equal(t, 0, params.StreamingCfg.WALBalancerExpectedStreamingNodeNumPerRG.GetAsInt())
 
 		// wal rate limit
 		assert.Equal(t, int64(20*1024*1024), params.StreamingCfg.WALRateLimitDefaultBurst.GetAsSize())
