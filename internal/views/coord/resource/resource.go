@@ -59,14 +59,19 @@ func Resource() *Resources { return current.Load() }
 
 // Refresh publishes pending data mutations and waits for their serving views.
 func (r *Resources) Refresh(ctx context.Context, collectionID int64) error {
-	if err := r.checkActive(ctx); err != nil {
-		return err
-	}
-	version, err := r.Reconciler.RefreshDataView(ctx, collectionID)
+	version, err := r.PublishDataView(ctx, collectionID)
 	if err != nil {
 		return err
 	}
 	return r.WaitDataVersion(ctx, collectionID, qviews.FromProtoDataVersion(version))
+}
+
+// PublishDataView reconciles committed data mutations and returns the published version.
+func (r *Resources) PublishDataView(ctx context.Context, collectionID int64) (*viewpb.DataVersion, error) {
+	if err := r.checkActive(ctx); err != nil {
+		return nil, err
+	}
+	return r.Reconciler.RefreshDataView(ctx, collectionID)
 }
 
 // WaitDataVersion waits for all desired replicas/shards to serve the publication.

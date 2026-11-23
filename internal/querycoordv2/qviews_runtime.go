@@ -65,6 +65,7 @@ type qviewsRuntime struct {
 	shardViewRegistry *coordview.ShardViewRegistry
 	readyChanges      *readiness.Notifications
 	refreshVersions   sync.Map // collection ID -> qviews.DataVersion, max requested refresh fence
+	refreshDemand     sync.Map // collection ID -> *refreshLoadDemand
 	syncer            syncer.ReliableSyncer
 	viewFeedback      *viewfeedback.ReplicaFeedbackStore
 	balancer          qviewsBalancer
@@ -196,6 +197,7 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 	loadConfigStore.RegisterObserver(func(collectionID int64, released bool) {
 		if released {
 			runtime.refreshVersions.Delete(collectionID)
+			runtime.refreshDemand.Delete(collectionID)
 		}
 	})
 	return runtime, nil

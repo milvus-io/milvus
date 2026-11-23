@@ -557,7 +557,13 @@ func (s *Server) refreshCollection(ctx context.Context, collectionID int64) erro
 	if progress.Config == nil || !progress.Ready() {
 		return merr.WrapErrCollectionNotLoaded(collectionID, "collection not fully loaded")
 	}
-	return qvresource.Resource().Refresh(ctx, collectionID)
+	resources := qvresource.Resource()
+	version, err := resources.PublishDataView(ctx, collectionID)
+	if err != nil {
+		return err
+	}
+	s.recordRefreshLoadDemand(ctx, progress.Config, version)
+	return resources.WaitDataVersion(ctx, collectionID, qviews.FromProtoDataVersion(version))
 }
 
 func (s *Server) isStoppingNode(ctx context.Context, nodeID int64) error {

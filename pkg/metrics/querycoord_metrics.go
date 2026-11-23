@@ -112,7 +112,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
 			Name:      "load_demand_memory_bytes",
-			Help:      "cumulative estimated memory bytes required by load configuration changes successfully broadcast after resource precheck",
+			Help:      "cumulative estimated memory bytes required by accepted load configuration changes and refreshes",
 		}, []string{ResourceGroupLabelName})
 
 	QueryCoordLoadDemandDiskBytes = prometheus.NewCounterVec(
@@ -120,7 +120,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
 			Name:      "load_demand_disk_bytes",
-			Help:      "cumulative estimated disk bytes required by load configuration changes successfully broadcast after resource precheck",
+			Help:      "cumulative estimated disk bytes required by accepted load configuration changes and refreshes",
 		}, []string{ResourceGroupLabelName})
 
 	QueryCoordNumQueryNodes = prometheus.NewGaugeVec(
