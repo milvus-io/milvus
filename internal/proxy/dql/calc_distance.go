@@ -336,7 +336,10 @@ func (t *QueryTask) resolveCalcDistance(ctx context.Context, spec *calcDistanceS
 		return merr.WrapErrParameterInvalidMsg("%s.vector dimension does not match field %s: got %d bytes, want %d",
 			CalcDistanceKey, spec.fieldName, len(spec.refVector), expected)
 	}
-	if len(spec.refVector) == 0 {
+	// An empty canonical encoding IS the valid all-zero sparse vector (the
+	// dense types above always decode to a non-empty payload because dim > 0),
+	// so the empty-vector check applies only to the fixed-dimension types.
+	if spec.refVectorType != schemapb.DataType_SparseFloatVector && len(spec.refVector) == 0 {
 		return merr.WrapErrParameterInvalidMsg("%s.vector must not be an empty vector", CalcDistanceKey)
 	}
 	// a reference vector containing NaN/Inf would poison the whole distance

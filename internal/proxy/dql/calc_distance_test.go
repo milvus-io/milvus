@@ -266,6 +266,34 @@ func TestResolveCalcDistance_UnsupportedFieldType(t *testing.T) {
 	require.Error(t, task.resolveCalcDistance(context.Background(), spec, nil))
 }
 
+// TestResolveCalcDistance_SparseEmptyReference pins that an all-zero sparse
+// reference vector is accepted: the empty compact encoding IS the canonical
+// all-zero sparse row, so the empty-vector guard must not reject it (the guard
+// applies only to fixed-dimension dense types, whose expected lengths are all
+// positive).
+func TestResolveCalcDistance_SparseEmptyReference(t *testing.T) {
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Name: "cd",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
+		},
+	})
+	task := &QueryTask{baseTask: baseTask{}, schema: schema}
+
+	for _, input := range []string{
+		`{}`,
+		`{"indices":[],"values":[]}`,
+		`[]`,
+	} {
+		spec := &calcDistanceSpec{fieldName: "sparse", metricType: "IP", vectorInput: []byte(input)}
+		require.NoError(t, task.resolveCalcDistance(context.Background(), spec, nil))
+		assert.Equal(t, schemapb.DataType_SparseFloatVector, spec.refVectorType)
+		assert.Empty(t, spec.refVector)
+		assert.Equal(t, metric.IP, spec.metricType)
+	}
+}
+
 func TestValidateRefVectorValues(t *testing.T) {
 	require.NoError(t, validateRefVectorValues(
 		typeutil.Float32ArrayToBytes([]float32{1, 2, 3, 4}), schemapb.DataType_FloatVector))
