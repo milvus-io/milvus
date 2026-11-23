@@ -427,6 +427,9 @@ message PlanOption {
    // interim index, ...) the request used, for the feature usage report.
    // Set by the Proxy only on requests it counts.
    bool collect_feature_bits = 2;
+   // Effective request timezone resolved by Proxy (request > collection > default).
+   // Used when workers parse function-chain filters. Empty keeps legacy UTC behavior.
+   string resolved_timezone = 3;
 };
 
 message PlanNode {

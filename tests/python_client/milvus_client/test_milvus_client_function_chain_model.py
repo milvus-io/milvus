@@ -234,16 +234,16 @@ class TestMilvusClientFunctionChainModelIndependent(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
-        "override,message",
+        "override,message,code",
         [
-            ({"queries": ["forward"]}, "queries count (1) != nq count (2)"),
-            ({"queries": ["forward", "reverse", "forward"]}, "queries count (3) != nq count (2)"),
-            ({"queries": []}, "queries must not be empty"),
-            ({"queries": [1]}, "queries"),
-            ({"provider": "absent"}, "unknown rerank model provider"),
-            ({"endpoint": "invalid"}, "not a valid http/https link"),
-            ({"max_client_batch_size": 0}, "must be greater than 0"),
-            ({"truncate": "wrong"}, "is not bool type"),
+            ({"queries": ["forward"]}, "queries count (1) != nq count (2)", 1100),
+            ({"queries": ["forward", "reverse", "forward"]}, "queries count (3) != nq count (2)", 1100),
+            ({"queries": []}, "queries must not be empty", 1101),
+            ({"queries": [1]}, "queries", 1100),
+            ({"provider": "absent"}, "unknown rerank model provider", 1100),
+            ({"endpoint": "invalid"}, "not a valid http/https link", 1100),
+            ({"max_client_batch_size": 0}, "must be greater than 0", 1100),
+            ({"truncate": "wrong"}, "is not bool type", 1100),
         ],
         ids=[
             "short_queries",
@@ -256,7 +256,9 @@ class TestMilvusClientFunctionChainModelIndependent(TestMilvusClientV2Base):
             "truncate",
         ],
     )
-    def test_function_chain_rerank_model_rejects_invalid_server_params(self, chain_rerank_provider, override, message):
+    def test_function_chain_rerank_model_rejects_invalid_server_params(
+        self, chain_rerank_provider, override, message, code
+    ):
         """target: server model parameters; method: public raw expression; expected: rejection before provider and recovery."""
         endpoint, requests = chain_rerank_provider
         client = self._client()
@@ -266,9 +268,10 @@ class TestMilvusClientFunctionChainModelIndependent(TestMilvusClientV2Base):
             "$score", FunctionChainExpr("rerank_model", args=(col("document"),), params=params)
         )
         error = self._search(
-            client, name, chain, check_task=CheckTasks.err_res, check_items={"err_code": 1100, "err_msg": message}
+            client, name, chain, check_task=CheckTasks.err_res, check_items={"err_code": code, "err_msg": message}
         )
-        assert error.code == 1100 and requests == []
+        assert error.code == code
+        assert requests == []
         self._assert_result(
             self._search(client, name, self._chain(endpoint, ["forward", "reverse"])), ["forward", "reverse"]
         )

@@ -91,13 +91,19 @@ func newHybridDynamicSearchTask(t *testing.T, partitionMode bool, outputs []stri
 		ctx: context.Background(), collectionName: schema.Name,
 		SearchRequest: &internalpb.SearchRequest{Base: &commonpb.MsgBase{Timestamp: 1}, CollectionID: 1, PartitionIDs: []int64{1}, IsAdvanced: true, Nq: 2},
 		request:       ConvertHybridSearchToSearch(request), schema: mustNewSchemaInfo(schema),
-		tr: timerecord.NewTimeRecorder("hybrid-dynamic-test"),
+		resolvedTimezoneStr: "Asia/Shanghai",
+		tr:                  timerecord.NewTimeRecorder("hybrid-dynamic-test"),
 	}
 	task.translatedOutputFields, task.userOutputFields, task.userDynamicFields, _, task.userRequestedPkFieldExplicitly, err = translateOutputFields(outputs, task.schema, true)
 	require.NoError(t, err)
 	task.OutputFieldsId, err = translateToOutputFieldIDs(task.translatedOutputFields, schema)
 	require.NoError(t, err)
 	require.NoError(t, task.initAdvancedSearchRequest(task.ctx))
+	for _, sub := range task.GetSubReqs() {
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(sub.SerializedExprPlan, plan))
+		require.Equal(t, "Asia/Shanghai", plan.GetPlanOptions().GetResolvedTimezone())
+	}
 	return task
 }
 

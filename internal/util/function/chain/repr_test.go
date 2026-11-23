@@ -142,9 +142,9 @@ func (m *MockBooleanFunctionExpr) Execute(ctx *types.FuncContext, inputs []*arro
 
 func init() {
 	// Register mock_filter function for testing
-	types.RegisterFunction("mock_filter", func(_ types.FunctionBuildContext, _ types.FunctionConfig) (types.FunctionExpr, error) {
+	types.RegisterFunction("mock_filter", types.FunctionDefinition{Factory: func(_ types.FunctionBuildContext, _ types.FunctionConfig) (types.FunctionExpr, error) {
 		return &MockBooleanFunctionExpr{name: "mock_filter"}, nil
-	})
+	}})
 }
 
 func TestParseFuncChainProto_BasicOperators(t *testing.T) {
@@ -620,7 +620,7 @@ func TestFunctionFromReprWithContextPassesTypedConfigAndContext(t *testing.T) {
 	args := []*schemapb.FunctionChainExprArg{columnArg("text"), literalArg(intParam(10))}
 
 	called := false
-	err := types.RegisterFunction(funcName, func(ctx types.FunctionBuildContext, cfg types.FunctionConfig) (types.FunctionExpr, error) {
+	err := types.RegisterFunction(funcName, types.FunctionDefinition{Factory: func(ctx types.FunctionBuildContext, cfg types.FunctionConfig) (types.FunctionExpr, error) {
 		called = true
 		assert.Same(t, extraInfo, ctx.ModelExtraInfo)
 		assert.Equal(t, funcName, cfg.Name)
@@ -629,7 +629,7 @@ func TestFunctionFromReprWithContextPassesTypedConfigAndContext(t *testing.T) {
 		assert.Same(t, args[0], cfg.Args[0])
 		assert.Same(t, args[1], cfg.Args[1])
 		return &MockFunctionExpr{name: cfg.Name}, nil
-	})
+	}})
 	require.NoError(t, err)
 
 	fn, err := FunctionFromReprWithContext(&FunctionRepr{
@@ -670,7 +670,7 @@ func TestFuncChainFromReprWithContextPassesBuildContext(t *testing.T) {
 	args := []*schemapb.FunctionChainExprArg{columnArg("score")}
 
 	called := false
-	err := types.RegisterFunction(funcName, func(ctx types.FunctionBuildContext, cfg types.FunctionConfig) (types.FunctionExpr, error) {
+	err := types.RegisterFunction(funcName, types.FunctionDefinition{Factory: func(ctx types.FunctionBuildContext, cfg types.FunctionConfig) (types.FunctionExpr, error) {
 		called = true
 		assert.Same(t, extraInfo, ctx.ModelExtraInfo)
 		assert.Equal(t, funcName, cfg.Name)
@@ -678,7 +678,7 @@ func TestFuncChainFromReprWithContextPassesBuildContext(t *testing.T) {
 		require.Len(t, cfg.Args, 1)
 		assert.Same(t, args[0], cfg.Args[0])
 		return &MockFunctionExpr{name: cfg.Name}, nil
-	})
+	}})
 	require.NoError(t, err)
 
 	repr := &ChainRepr{
@@ -770,4 +770,149 @@ func arrayParam(values ...*schemapb.FunctionParamValue) *schemapb.FunctionParamV
 
 func objectParam(fields map[string]*schemapb.FunctionParamValue) *schemapb.FunctionParamValue {
 	return &schemapb.FunctionParamValue{Value: &schemapb.FunctionParamValue_ObjectValue{ObjectValue: &schemapb.FunctionParamObject{Fields: fields}}}
+}
+
+func TestOptionalPreparationKeepsArgumentValidationInConstruction(t *testing.T) {
+	repr := &FunctionRepr{
+		Name: chainexpr.NumCombineFuncName,
+		Args: []*schemapb.FunctionChainExprArg{nil},
+	}
+	require.NoError(t, PrepareFunctionFromRepr(repr, types.FunctionBuildContext{}))
+	require.Nil(t, repr.Prepared)
+	_, err := FunctionFromReprWithContext(repr, types.FunctionBuildContext{})
+	require.ErrorContains(t, err, "expr arg[0] is nil")
+}
+
+func TestFunctionPreparationDataLifecycle(t *testing.T) {
+	name := "test_prepare_data_lifecycle"
+	data := &struct{ value int }{42}
+	prepareCalls, factoryCalls := 0, 0
+	types.MustRegisterFunction(name, types.FunctionDefinition{
+		Prepare: func(types.FunctionBuildContext, types.FunctionConfig) (any, error) {
+			prepareCalls++
+			return data, nil
+		},
+		Factory: func(_ types.FunctionBuildContext, cfg types.FunctionConfig) (types.FunctionExpr, error) {
+			factoryCalls++
+			require.Same(t, data, cfg.Prepared)
+			return chainexpr.NewNumCombineExpr(chainexpr.ModeSum, nil)
+		},
+	})
+	repr := &FunctionRepr{Name: name, Args: []*schemapb.FunctionChainExprArg{nil}}
+	ctx := types.FunctionBuildContext{}
+	require.NoError(t, PrepareFunctionFromRepr(repr, ctx))
+	require.Equal(t, 1, prepareCalls)
+	require.Zero(t, factoryCalls)
+	for i := 0; i < 2; i++ {
+		_, err := FunctionFromReprWithContext(repr, ctx)
+		require.ErrorContains(t, err, "expr arg[0] is nil")
+	}
+	require.Equal(t, 2, factoryCalls)
+	require.Equal(t, 1, prepareCalls)
+}
+
+func TestFunctionPreparationErrors(t *testing.T) {
+	require.Error(t, PrepareFunctionFromRepr(nil, types.FunctionBuildContext{}))
+	require.ErrorIs(t, PrepareFunctionFromRepr(&FunctionRepr{Name: "missing_prepare_fn"}, types.FunctionBuildContext{}), merr.ErrParameterInvalid)
+	failure := merr.WrapErrServiceUnavailableMsg("prepare dependency unavailable")
+	name := "test_prepare_error_propagation"
+	types.MustRegisterFunction(name, types.FunctionDefinition{
+		Prepare: func(types.FunctionBuildContext, types.FunctionConfig) (any, error) {
+			return nil, failure
+		},
+		Factory: func(types.FunctionBuildContext, types.FunctionConfig) (types.FunctionExpr, error) {
+			t.Fatal("preparation must not construct an expression")
+			return nil, nil
+		},
+	})
+	repr := &FunctionRepr{Name: name}
+	require.ErrorIs(t, PrepareFunctionFromRepr(repr, types.FunctionBuildContext{}), failure)
+	require.Nil(t, repr.Prepared)
+}
+
+// builtinInputExpr exercises Map binding without preparation or registry metadata.
+type builtinInputExpr struct{ types.FunctionExpr }
+
+func (*builtinInputExpr) InternalInputs() []string { return []string{types.ScoreFieldName} }
+
+func TestMapBindsBuiltinInputsWithoutChangingRepr(t *testing.T) {
+	name := "test_map_builtin_binding"
+	types.MustRegisterFunction(name, types.FunctionDefinition{Factory: func(types.FunctionBuildContext, types.FunctionConfig) (types.FunctionExpr, error) {
+		fn, err := chainexpr.NewNumCombineExpr(chainexpr.ModeSum, nil)
+		return &builtinInputExpr{FunctionExpr: fn}, err
+	}})
+	for _, public := range [][]string{nil, {"value"}} {
+		inputs := make([]string, len(public), 4)
+		copy(inputs, public)
+		opRepr := OperatorRepr{Type: types.OpTypeMap, Inputs: inputs, Outputs: []string{"result"}, Function: &FunctionRepr{Name: name}}
+		repr := &ChainRepr{Operators: []OperatorRepr{opRepr}}
+		require.NoError(t, repr.RefreshInfo())
+		require.Equal(t, len(public), len(repr.Info.RequiredInputs))
+		for i := 0; i < 2; i++ {
+			op, err := NewMapOpFromRepr(&opRepr)
+			require.NoError(t, err)
+			require.Equal(t, append(append([]string(nil), public...), types.ScoreFieldName), op.Inputs())
+			require.Equal(t, len(public), len(opRepr.Inputs))
+			require.Nil(t, opRepr.Function.Prepared)
+		}
+		require.Empty(t, inputs[:cap(inputs)][len(public)])
+	}
+}
+
+func TestMapFactoryErrorCodeContract(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		want error
+	}{
+		"missing":                     {merr.Wrap(merr.WrapErrParameterMissingMsg("queries must not be empty"), "rerank_model"), merr.ErrParameterMissing},
+		"invalid":                     {merr.WrapErrParameterInvalidMsg("bad parameter"), merr.ErrParameterInvalid},
+		"too_large":                   {merr.WrapErrParameterTooLarge("filter"), merr.ErrParameterTooLarge},
+		"internal":                    {merr.WrapErrServiceInternalMsg("missing runtime binding"), merr.ErrServiceInternal},
+		"unavailable":                 {merr.WrapErrServiceUnavailableMsg("dependency unavailable"), merr.ErrServiceUnavailable},
+		"system_with_parameter_cause": {merr.WrapErrServiceUnavailableErr(merr.ErrParameterMissing, "dependency configuration unavailable"), merr.ErrServiceUnavailable},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fnName := "test_map_error_contract_" + name
+			types.MustRegisterFunction(fnName, types.FunctionDefinition{Factory: func(types.FunctionBuildContext, types.FunctionConfig) (types.FunctionExpr, error) {
+				return nil, tc.err
+			}})
+			repr := &ChainRepr{Stage: types.StageL2Rerank, Operators: []OperatorRepr{{
+				Type:     types.OpTypeMap,
+				Function: &FunctionRepr{Name: fnName},
+				Inputs:   []string{"document"}, Outputs: []string{types.ScoreFieldName},
+			}}}
+			_, err := FuncChainFromReprWithContext(repr, memory.DefaultAllocator, types.FunctionBuildContext{})
+			require.ErrorIs(t, err, tc.err, "keep the original cause")
+			require.ErrorContains(t, err, "map function")
+			actual, expected := merr.Status(err), merr.Status(tc.want)
+			require.Equal(t, expected.Code, actual.Code)
+			require.Equal(t, expected.Retriable, actual.Retriable)
+			require.Equal(t, expected.ExtraInfo[merr.InputErrorFlagKey], actual.ExtraInfo[merr.InputErrorFlagKey])
+		})
+	}
+}
+
+func TestRerankModelEmptyQueriesPreservesMissingParameterCode(t *testing.T) {
+	// This matches the Python E2E request. Provider construction is local;
+	// no model execution or outbound request should be needed to reject it.
+	fn := &FunctionRepr{
+		Name: chainexpr.RerankModelFuncName,
+		Args: []*schemapb.FunctionChainExprArg{{Arg: &schemapb.FunctionChainExprArg_Column{Column: &schemapb.FunctionChainColumnArg{Name: "document"}}}},
+		Params: map[string]*schemapb.FunctionParamValue{
+			"queries":  {Value: &schemapb.FunctionParamValue_ArrayValue{ArrayValue: &schemapb.FunctionParamArray{}}},
+			"provider": {Value: &schemapb.FunctionParamValue_StringValue{StringValue: "tei"}},
+			"endpoint": {Value: &schemapb.FunctionParamValue_StringValue{StringValue: "http://127.0.0.1:1"}},
+		},
+	}
+	_, err := FunctionFromRepr(fn)
+	require.EqualValues(t, 1101, merr.Status(err).Code)
+	repr := &ChainRepr{Stage: types.StageL2Rerank, Operators: []OperatorRepr{{
+		Type: types.OpTypeMap, Function: fn, Inputs: []string{"document"}, Outputs: []string{types.ScoreFieldName},
+	}}}
+	_, err = FuncChainFromRepr(repr, memory.DefaultAllocator)
+	status := merr.Status(err)
+	require.EqualValues(t, 1101, status.Code)
+	require.Contains(t, status.Reason, "queries must not be empty")
+	require.Equal(t, "true", status.ExtraInfo[merr.InputErrorFlagKey])
+	require.False(t, status.Retriable)
 }

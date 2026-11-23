@@ -34,6 +34,9 @@ func TestPythonParity(t *testing.T) {
 			Map("freshness", Decay(Col("published_at"), "exp", 1700000000, 86400)).
 			Map("$score", NumCombine(Col("$score"), Col("freshness")).WithParam("mode", "weighted").WithParam("weights", []float64{0.7, 0.3})).
 			Map("$score", RoundDecimal(Col("$score"), 4)).SortBy(Col("$score"), true, Col("$id")).Limit(10, 2),
+		"boost": NewFunctionChain(L0Rerank).
+			Map("boost", BoostScore(2.5).WithParam("filter", "category == 1").WithParam("random_score", map[string]any{"field": "id", "seed": int64(42)})).
+			Map("$score", NumCombine(Col("$score"), Col("boost")).WithParam("mode", "multiply").WithParam("null_policy", "skip")),
 		"grep":     NewFunctionChain(QueryScan).WithName("grep").WithOutputColumns("matches").Grep("content", "-i -e 'timeout'"),
 		"rrf":      NewFunctionChain(L2Rerank).Merge("rrf", MergeOptions{Weights: []float64{0.7, 0.3}}),
 		"weighted": NewFunctionChain(L2Rerank).Merge("weighted", MergeOptions{Weights: []float64{0.7, 0.3}}),
@@ -119,4 +122,52 @@ func TestIntegerWeightsNormalizeToDouble(t *testing.T) {
 	require.NoError(t, err)
 	require.IsType(t, &schemapb.FunctionParamValue_DoubleValue{}, p.Params["weights"].GetArrayValue().Values[0].Value)
 	require.Equal(t, 2.0, p.Params["weights"].GetArrayValue().Values[1].GetDoubleValue())
+}
+
+func TestBoostScoreParameters(t *testing.T) {
+	for _, weight := range []float64{0, -2, 2.5, math.MaxFloat32} {
+		p, err := BoostScore(weight).ProtoMessage()
+		require.NoError(t, err)
+		require.Equal(t, "boost_score", p.Name)
+		require.Empty(t, p.Args)
+		require.Len(t, p.Params, 1)
+		require.IsType(t, &schemapb.FunctionParamValue_DoubleValue{}, p.Params["weight"].Value)
+		require.Equal(t, weight, p.Params["weight"].GetDoubleValue())
+	}
+	for _, random := range []map[string]any{{}, {"seed": int64(0)}, {"field": "id"}, {"field": "id", "seed": int64(math.MinInt64)}} {
+		p, err := BoostScore(1).WithParam("filter", "id > 0").WithParam("random_score", random).ProtoMessage()
+		require.NoError(t, err)
+		require.Equal(t, "id > 0", p.Params["filter"].GetStringValue())
+		require.Len(t, p.Params["random_score"].GetObjectValue().Fields, len(random))
+	}
+	p, err := BoostScore(1).WithParam("weight", int64(3)).ProtoMessage()
+	require.NoError(t, err)
+	require.EqualValues(t, 3, p.Params["weight"].GetInt64Value())
+}
+
+func TestBoostScoreValidation(t *testing.T) {
+	for name, e := range map[string]*Expr{
+		"nan":                   BoostScore(math.NaN()),
+		"infinite":              BoostScore(math.Inf(1)),
+		"overflow":              BoostScore(math.MaxFloat64),
+		"boolean weight":        BoostScore(1).WithParam("weight", true),
+		"string weight":         BoostScore(1).WithParam("weight", "2"),
+		"filter type":           BoostScore(1).WithParam("filter", 3),
+		"random type":           BoostScore(1).WithParam("random_score", []int{1}),
+		"random nil":            BoostScore(1).WithParam("random_score", nil),
+		"seed type":             BoostScore(1).WithParam("random_score", map[string]any{"seed": 1.5}),
+		"seed overflow":         BoostScore(1).WithParam("random_score", map[string]any{"seed": uint64(math.MaxUint64)}),
+		"field type":            BoostScore(1).WithParam("random_score", map[string]any{"field": 1}),
+		"unknown random option": BoostScore(1).WithParam("random_score", map[string]any{"unknown": 1}),
+	} {
+		t.Run(name, func(t *testing.T) { _, err := e.ProtoMessage(); require.Error(t, err) })
+	}
+	e := BoostScore(1)
+	e.Args = []any{Col("$seg_offset")}
+	_, err := e.ProtoMessage()
+	require.ErrorContains(t, err, "does not accept public arguments")
+	e.Args = nil
+	delete(e.Params, "weight")
+	_, err = e.ProtoMessage()
+	require.ErrorContains(t, err, "weight")
 }

@@ -672,7 +672,7 @@ func (s *MapOpTestSuite) TestNewMapOpFromReprNoInputs() {
 		Outputs:  []string{"out"},
 	}
 	_, err := NewMapOpFromRepr(repr)
-	s.Error(err)
+	s.Require().Error(err)
 	s.Contains(err.Error(), "requires inputs")
 }
 

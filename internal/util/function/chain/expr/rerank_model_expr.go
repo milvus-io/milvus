@@ -215,5 +215,5 @@ func (m *RerankModelExpr) rerankBatch(ctx context.Context, query string, texts [
 }
 
 func init() {
-	types.MustRegisterFunction(RerankModelFuncName, NewRerankModelExprFromParams)
+	types.MustRegisterFunction(RerankModelFuncName, types.FunctionDefinition{Factory: NewRerankModelExprFromParams})
 }

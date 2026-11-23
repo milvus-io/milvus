@@ -160,3 +160,24 @@ func TestFunctionChainHybridSerializesCombinations(t *testing.T) {
 		})
 	}
 }
+
+func TestFunctionChainSearchBoost(t *testing.T) {
+	chain := fc.NewFunctionChain(fc.L0Rerank).
+		Map("boost", fc.BoostScore(2).WithParam("filter", "category == 1")).
+		Map("$score", fc.NumCombine(fc.Col("$score"), fc.Col("boost")).WithParam("mode", "multiply").WithParam("null_policy", "skip"))
+	req, err := NewSearchOption("docs", 10, nil).WithFunctionChains(chain).Request()
+	require.NoError(t, err)
+	require.Len(t, req.FunctionChains, 1)
+	wire := req.FunctionChains[0]
+	require.Equal(t, fc.L0Rerank, wire.Stage)
+	require.Len(t, wire.Ops, 2)
+	require.Empty(t, wire.Ops[0].Expr.Args)
+	require.Equal(t, "boost_score", wire.Ops[0].Expr.Name)
+	require.Equal(t, 2.0, wire.Ops[0].Expr.Params["weight"].GetDoubleValue())
+	require.Equal(t, "category == 1", wire.Ops[0].Expr.Params["filter"].GetStringValue())
+	require.Equal(t, "skip", wire.Ops[1].Expr.Params["null_policy"].GetStringValue())
+	_, err = NewSearchOption("docs", 10, nil).WithFunctionChains(
+		fc.NewFunctionChain(fc.L0Rerank).Map("boost", fc.BoostScore(1).WithParam("weight", "bad")),
+	).Request()
+	require.Error(t, err)
+}

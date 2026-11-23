@@ -1449,6 +1449,12 @@ func (t *SearchTask) tryGeneratePlan(
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, WrapPlanCreationError(planErr, "failed to create query plan")
 	}
+	// Workers compiling chain filters must use the same timezone as this predicate.
+	// This plan builder is shared by ordinary search and each hybrid sub-request.
+	if plan.PlanOptions == nil {
+		plan.PlanOptions = &planpb.PlanOption{}
+	}
+	plan.PlanOptions.ResolvedTimezone = t.resolvedTimezoneStr
 	collectExprTemplateFeatures(exprTemplateValues, t.featureSink())
 	collectExecFeatureBits(plan, t.collectFeatures)
 	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)

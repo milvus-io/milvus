@@ -44,7 +44,7 @@ func validateL1FunctionChain(repr *chain.ChainRepr) error {
 	for opIdx, op := range repr.Operators {
 		switch op.Type {
 		case chaintypes.OpTypeMap:
-			if err := validateQueryNodeMapOp(&op, chaintypes.StageL1Rerank); err != nil {
+			if err := validateQueryNodeMapOp(&op); err != nil {
 				return merr.Wrapf(err, "op[%d]", opIdx)
 			}
 		case chaintypes.OpTypeSort:

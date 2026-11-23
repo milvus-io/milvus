@@ -28,8 +28,10 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	boostnative "github.com/milvus-io/milvus/internal/util/function/boost/native"
 	"github.com/milvus-io/milvus/internal/util/function/grep/native"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // =============================================================================
@@ -160,10 +162,19 @@ type QueryScanBuildContext struct {
 	FieldID    int64
 }
 
-// FunctionBuildContext contains runtime-only context used while constructing a
-// FunctionExpr or a context-aware operator.
-// It is not serialized in public FunctionChain proto params.
+// L0BuildContext borrows one segment for constructing executable expressions.
+type L0BuildContext struct{ Segment boostnative.Segment }
+
+// FunctionBuildContext contains request-local context for static preparation and
+// execution construction. It is never serialized in public FunctionChain params.
 type FunctionBuildContext struct {
+	// Stage identifies the target execution stage during preparation and construction.
+	Stage string
+	// Timezone is the effective request timezone resolved by Proxy.
+	Timezone string
+	// Schema is available during static preparation; L0 only during execution.
+	Schema         *typeutil.SchemaHelper
+	L0             *L0BuildContext
 	ModelExtraInfo *models.ModelExtraInfo
 	QueryScan      *QueryScanBuildContext
 	Search         *SearchRuntimeInfo
@@ -171,10 +182,30 @@ type FunctionBuildContext struct {
 
 // FunctionConfig contains the public function expression configuration from FunctionChain proto.
 type FunctionConfig struct {
-	Name   string
-	Params map[string]*schemapb.FunctionParamValue
-	Args   []*schemapb.FunctionChainExprArg
+	// Prepared is function-owned, immutable request-local state. Never serialized.
+	Prepared any
+	Name     string
+	Params   map[string]*schemapb.FunctionParamValue
+	Args     []*schemapb.FunctionChainExprArg
 }
 
 // FunctionFactory is a factory function that creates a FunctionExpr from typed config.
 type FunctionFactory func(ctx FunctionBuildContext, cfg FunctionConfig) (FunctionExpr, error)
+
+// FunctionPreparer prepares reusable data, checking the parameters needed for
+// preparation. It does not replace expression construction or ValidateArgs.
+// The returned data must be immutable and must not contain segment execution state.
+type FunctionPreparer func(FunctionBuildContext, FunctionConfig) (any, error)
+
+// FunctionInternalInputs optionally declares built-in columns to bind when a Map
+// is constructed. These are runtime system columns, not public expression args.
+type FunctionInternalInputs interface {
+	InternalInputs() []string
+}
+
+// FunctionDefinition groups the capabilities registered for one function.
+// Factory is required; Prepare is optional for functions with static preparation.
+type FunctionDefinition struct {
+	Factory FunctionFactory
+	Prepare FunctionPreparer
+}

@@ -18,7 +18,10 @@ package functionchain
 
 import (
 	"fmt"
+	"math"
 	"reflect"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 func helper(name string, cols ...ColumnRef) *Expr {
@@ -34,6 +37,15 @@ func helper(name string, cols ...ColumnRef) *Expr {
 // NumCombine defaults to sum. Set mode and weights with WithParam.
 func NumCombine(cols ...ColumnRef) *Expr {
 	return helper("num_combine", cols...).WithParam("mode", "sum")
+}
+
+// BoostScore produces an L0 boost score with no public column arguments.
+// Set filter (string) and random_score (an object with optional field and int64
+// seed entries) using WithParam. An omitted filter matches all candidates.
+// Non-matching rows produce NULL; combine with $score using NumCombine and
+// WithParam("null_policy", "skip") to preserve their original scores.
+func BoostScore(weight float64) *Expr {
+	return helper("boost_score").WithParam("weight", weight)
 }
 
 // Decay defaults to offset=0 and decay=0.5. WithParam overrides these defaults.
@@ -112,6 +124,46 @@ func (e *Expr) validateHelper() error {
 			for i := 0; i < v.Len(); i++ {
 				if !numeric(v.Index(i).Interface()) {
 					return bad("weights must be numeric")
+				}
+			}
+		}
+	case "boost_score":
+		if len(e.Args) != 0 {
+			return bad("does not accept public arguments")
+		}
+		if !numeric(e.Params["weight"]) {
+			return bad("weight must be numeric")
+		}
+		weight := reflect.ValueOf(e.Params["weight"]).Convert(reflect.TypeOf(float64(0))).Float()
+		if math.IsNaN(weight) || math.IsInf(weight, 0) || math.Abs(weight) > math.MaxFloat32 {
+			return bad("weight must be a finite Float32 value")
+		}
+		if filter, exists := e.Params["filter"]; exists {
+			if _, ok := filter.(string); !ok {
+				return bad("filter must be a string")
+			}
+		}
+		if random, exists := e.Params["random_score"]; exists {
+			value, err := paramValue(random, 0)
+			if err != nil {
+				return bad("random_score: " + err.Error())
+			}
+			object := value.GetObjectValue()
+			if object == nil {
+				return bad("random_score must be an object")
+			}
+			for key, value := range object.Fields {
+				switch key {
+				case "field":
+					if _, ok := value.Value.(*schemapb.FunctionParamValue_StringValue); !ok {
+						return bad("random_score.field must be a string")
+					}
+				case "seed":
+					if _, ok := value.Value.(*schemapb.FunctionParamValue_Int64Value); !ok {
+						return bad("random_score.seed must be an int64")
+					}
+				default:
+					return bad("unknown random_score parameter: " + key)
 				}
 			}
 		}

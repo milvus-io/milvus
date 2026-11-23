@@ -286,5 +286,5 @@ func (d *DecayExpr) processChunk(ctx *types.FuncContext, inputChunk arrow.Array)
 // =============================================================================
 
 func init() {
-	types.MustRegisterFunction("decay", NewDecayExprFromParams)
+	types.MustRegisterFunction("decay", types.FunctionDefinition{Factory: NewDecayExprFromParams})
 }

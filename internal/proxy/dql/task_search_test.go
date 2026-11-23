@@ -291,69 +291,79 @@ func TestSearchTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 }
 
 func TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter(t *testing.T) {
-	mockey.PatchConvey("TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter", t, func() {
-		const (
-			dbName         = "db"
-			collectionName = "timestamptz_collection"
-			collectionID   = int64(100)
-		)
-		schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
-			Name: collectionName,
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: testInt64Field, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-				{
-					FieldID:  101,
-					Name:     testFloatVecField,
-					DataType: schemapb.DataType_FloatVector,
-					TypeParams: []*commonpb.KeyValuePair{
-						{Key: common.DimKey, Value: strconv.Itoa(testVecDim)},
+	for _, tc := range []struct{ name, requestTZ, collectionTZ, want string }{
+		{"request_overrides_collection", "Asia/Shanghai", "America/New_York", "Asia/Shanghai"},
+		{"collection_default", "", "America/New_York", "America/New_York"},
+		{"utc_default", "", "", "UTC"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mockey.PatchConvey(tc.name, t, func() {
+				const (
+					dbName         = "db"
+					collectionName = "timestamptz_collection"
+					collectionID   = int64(100)
+				)
+				schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+					Name: collectionName,
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: testInt64Field, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+						{
+							FieldID:  101,
+							Name:     testFloatVecField,
+							DataType: schemapb.DataType_FloatVector,
+							TypeParams: []*commonpb.KeyValuePair{
+								{Key: common.DimKey, Value: strconv.Itoa(testVecDim)},
+							},
+						},
+						{FieldID: 102, Name: "ts", DataType: schemapb.DataType_Timestamptz},
 					},
-				},
-				{FieldID: 102, Name: "ts", DataType: schemapb.DataType_Timestamptz},
-			},
+				})
+
+				mockTest(t, (*metacache.MetaCache).GetCollectionID, collectionID, nil)
+				mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{
+					Schema:           schema,
+					UpdateTimestamp:  100,
+					ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+					Properties:       []*commonpb.KeyValuePair{{Key: common.TimezoneKey, Value: tc.collectionTZ}},
+				}, nil)
+				mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schema, nil)
+				mockTest(t, isIgnoreGrowing, false, nil)
+				mockTest(t, (*SearchTask).checkNq, int64(1), nil)
+
+				searchParams := append([]*commonpb.KeyValuePair{}, getValidSearchParams()...)
+				searchParams = append(searchParams, &commonpb.KeyValuePair{
+					Key:   common.TimezoneKey,
+					Value: tc.requestTZ,
+				})
+				task := &SearchTask{
+					baseTask:      baseTask{MetaCache: newTestCache()},
+					Condition:     NewTaskCondition(context.Background()),
+					SearchRequest: &internalpb.SearchRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Search}},
+					ctx:           context.Background(),
+					request: &milvuspb.SearchRequest{
+						DbName:         dbName,
+						CollectionName: collectionName,
+						Nq:             1,
+						Dsl:            "ts > ISO '2025-01-01T00:00:00'",
+						SearchParams:   searchParams,
+					},
+					result: &milvuspb.SearchResults{Status: merr.Success()},
+				}
+
+				err := task.PreExecute(context.Background())
+				assert.NoError(t, err)
+				assert.Equal(t, tc.want, task.resolvedTimezoneStr)
+				plan := &planpb.PlanNode{}
+				require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
+				require.Equal(t, tc.want, plan.GetPlanOptions().GetResolvedTimezone())
+				rangeExpr := plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr()
+				require.NotNil(t, rangeExpr)
+				shanghai, err := time.LoadLocation(tc.want)
+				require.NoError(t, err)
+				assert.Equal(t, time.Date(2025, 1, 1, 0, 0, 0, 0, shanghai).UnixMicro(), rangeExpr.GetValue().GetInt64Val())
+			})
 		})
-
-		mockTest(t, (*metacache.MetaCache).GetCollectionID, collectionID, nil)
-		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{
-			Schema:           schema,
-			UpdateTimestamp:  100,
-			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
-		}, nil)
-		mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schema, nil)
-		mockTest(t, isIgnoreGrowing, false, nil)
-		mockTest(t, (*SearchTask).checkNq, int64(1), nil)
-
-		searchParams := append([]*commonpb.KeyValuePair{}, getValidSearchParams()...)
-		searchParams = append(searchParams, &commonpb.KeyValuePair{
-			Key:   common.TimezoneKey,
-			Value: "Asia/Shanghai",
-		})
-		task := &SearchTask{
-			baseTask:      baseTask{MetaCache: newTestCache()},
-			Condition:     NewTaskCondition(context.Background()),
-			SearchRequest: &internalpb.SearchRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Search}},
-			ctx:           context.Background(),
-			request: &milvuspb.SearchRequest{
-				DbName:         dbName,
-				CollectionName: collectionName,
-				Nq:             1,
-				Dsl:            "ts > ISO '2025-01-01T00:00:00'",
-				SearchParams:   searchParams,
-			},
-			result: &milvuspb.SearchResults{Status: merr.Success()},
-		}
-
-		err := task.PreExecute(context.Background())
-		assert.NoError(t, err)
-		assert.Equal(t, "Asia/Shanghai", task.resolvedTimezoneStr)
-		plan := &planpb.PlanNode{}
-		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
-		rangeExpr := plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr()
-		require.NotNil(t, rangeExpr)
-		shanghai, err := time.LoadLocation("Asia/Shanghai")
-		require.NoError(t, err)
-		assert.Equal(t, time.Date(2025, 1, 1, 0, 0, 0, 0, shanghai).UnixMicro(), rangeExpr.GetValue().GetInt64Val())
-	})
+	}
 }
 
 func TestSearchTask_PostExecute(t *testing.T) {

@@ -17,17 +17,14 @@
 package tasks
 
 import (
-	"context"
 	"fmt"
 
-	"github.com/apache/arrow/go/v17/arrow"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/chain/expr"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
-	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -83,17 +80,12 @@ func boostModeToScoreCombineMode(mode planpb.BoostMode) (string, error) {
 	}
 }
 
-type preparedBoostScore struct {
-	scorers      []*planpb.ScoreFunction
-	functionMode string
-	boostMode    string
-}
-
-func prepareBoostScore(plan *planpb.PlanNode) (*preparedBoostScore, error) {
+// prepareBoostScore is the legacy request adapter. After this conversion the
+// worker retains only a ChainRepr and uses the ordinary L0 execution path.
+func prepareBoostScore(plan *planpb.PlanNode) (*chain.ChainRepr, error) {
 	if plan == nil || len(plan.GetScorers()) == 0 {
 		return nil, nil
 	}
-
 	functionMode, err := functionModeToScoreCombineMode(plan.GetScoreOption().GetFunctionMode())
 	if err != nil {
 		return nil, err
@@ -102,127 +94,55 @@ func prepareBoostScore(plan *planpb.PlanNode) (*preparedBoostScore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &preparedBoostScore{
-		scorers:      plan.GetScorers(),
-		functionMode: functionMode,
-		boostMode:    boostMode,
-	}, nil
+	return legacyBoostChainRepr(plan.GetScorers(), functionMode, boostMode)
 }
 
-var boostScoreRunnerFactory = newSegmentBoostScoreRunner
-
-type boostScoreFunc func(context.Context, segments.Segment, *segcore.SearchRequest, *planpb.ScoreFunction, *arrow.Chunked) (*arrow.Chunked, error)
-
-func newSegmentBoostScoreRunner(scoreFunc boostScoreFunc, segment segments.Segment, searchReq *segcore.SearchRequest, scorer *planpb.ScoreFunction) expr.BoostScoreRunner {
-	return func(ctx context.Context, offsets *arrow.Chunked) (*arrow.Chunked, error) {
-		return scoreFunc(ctx, segment, searchReq, scorer, offsets)
-	}
-}
-
-func buildBoostScoreChain(
-	df *chain.DataFrame,
-	segment segments.Segment,
-	searchReq *segcore.SearchRequest,
-	scorers []*planpb.ScoreFunction,
-	scoreFunc boostScoreFunc,
-	functionMode string,
-	boostMode string,
-) (*chain.FuncChain, error) {
-	boostChain := chain.NewFuncChainWithAllocator(defaultAllocator).
-		SetName("l0-rerank").
-		SetStage(types.StageL0Rerank)
-
-	boostScoreColumns, err := appendBoostScoreColumns(boostChain, segment, searchReq, scorers, scoreFunc)
-	if err != nil {
-		return nil, err
-	}
-
-	functionScoreCol, err := appendFunctionScoreColumn(boostChain, boostScoreColumns, functionMode)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := appendFinalBoostScore(boostChain, functionScoreCol, boostMode); err != nil {
-		return nil, err
-	}
-
-	return appendL0RerankReduceContract(boostChain), nil
-}
-
-func appendBoostScoreColumns(
-	boostChain *chain.FuncChain,
-	segment segments.Segment,
-	searchReq *segcore.SearchRequest,
-	scorers []*planpb.ScoreFunction,
-	scoreFunc boostScoreFunc,
-) ([]string, error) {
-	boostScoreColumns := make([]string, 0, len(scorers))
-	for scorerIdx, scorer := range scorers {
-		outputCol := boostScoreColumn(scorerIdx)
-		boostExpr, err := expr.NewBoostScoreExpr(boostScoreRunnerFactory(scoreFunc, segment, searchReq, scorer))
-		if err != nil {
-			return nil, err
+func legacyBoostChainRepr(scorers []*planpb.ScoreFunction, functionMode, boostMode string) (*chain.ChainRepr, error) {
+	repr := &chain.ChainRepr{Name: "l0-rerank", Stage: types.StageL0Rerank}
+	columns := make([]string, 0, len(scorers))
+	for i, scorer := range scorers {
+		if scorer == nil {
+			return nil, merr.WrapErrServiceInternal("boost_score: compiled scorer is nil")
 		}
-		boostChain.Map(boostExpr, []string{types.SegOffsetFieldName}, []string{outputCol})
-		boostScoreColumns = append(boostScoreColumns, outputCol)
+		prepared := proto.Clone(scorer).(*planpb.ScoreFunction)
+		output := boostScoreColumn(i)
+		repr.Operators = append(repr.Operators, chain.OperatorRepr{
+			Type:     types.OpTypeMap,
+			Function: &chain.FunctionRepr{Name: expr.BoostScoreFuncName, Prepared: prepared},
+			Outputs:  []string{output},
+		})
+		columns = append(columns, output)
 	}
-	return boostScoreColumns, nil
-}
-
-func appendFunctionScoreColumn(boostChain *chain.FuncChain, boostScoreColumns []string, functionMode string) (string, error) {
-	if len(boostScoreColumns) == 1 {
-		return boostScoreColumns[0], nil
+	if len(columns) == 0 {
+		return nil, merr.WrapErrServiceInternal("boost_score: no compiled scorers")
 	}
-
-	functionCombineExpr, err := expr.NewNumCombineExpr(functionMode, nil, expr.WithNullPolicy(expr.NumCombineNullSkip))
-	if err != nil {
-		return "", err
-	}
-	boostChain.Map(functionCombineExpr, boostScoreColumns, []string{functionScoreColumn})
-	return functionScoreColumn, nil
-}
-
-func appendFinalBoostScore(boostChain *chain.FuncChain, functionScoreCol string, boostMode string) error {
-	finalCombineExpr, err := expr.NewNumCombineExpr(boostMode, nil, expr.WithNullPolicy(expr.NumCombineNullSkip))
-	if err != nil {
-		return err
-	}
-	boostChain.Map(finalCombineExpr,
-		[]string{types.ScoreFieldName, functionScoreCol},
-		[]string{types.ScoreFieldName})
-	return nil
-}
-
-func (t *SearchTask) applyBoostScores(segDFs []*chain.DataFrame, searchedSegments []segments.Segment, searchReq *segcore.SearchRequest) error {
-	plan, err := extractPlanWithScorers(t.req.GetReq().GetSerializedExprPlan())
-	if err != nil {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("boost_score: failed to parse search plan scorers: %v", err))
-	}
-	prepared, err := prepareBoostScore(plan)
-	if err != nil {
-		return err
-	}
-	return t.applyPreparedBoostScores(segDFs, prepared, searchedSegments, searchReq)
-}
-
-func (t *SearchTask) applyPreparedBoostScores(segDFs []*chain.DataFrame, prepared *preparedBoostScore, searchedSegments []segments.Segment, searchReq *segcore.SearchRequest) error {
-	if len(segDFs) != len(searchedSegments) {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("boost_score: DataFrame count %d does not match segment count %d", len(segDFs), len(searchedSegments)))
-	}
-	if prepared == nil {
+	appendCombine := func(inputs []string, output, mode string) error {
+		args := make([]*schemapb.FunctionChainExprArg, 0, len(inputs))
+		for _, input := range inputs {
+			args = append(args, &schemapb.FunctionChainExprArg{Arg: &schemapb.FunctionChainExprArg_Column{Column: &schemapb.FunctionChainColumnArg{Name: input}}})
+		}
+		fn := &chain.FunctionRepr{Name: expr.NumCombineFuncName, Args: args, Params: map[string]*schemapb.FunctionParamValue{
+			types.NumCombineParamMode:       {Value: &schemapb.FunctionParamValue_StringValue{StringValue: mode}},
+			types.NumCombineParamNullPolicy: {Value: &schemapb.FunctionParamValue_StringValue{StringValue: "skip"}},
+		}}
+		if _, err := chain.FunctionFromReprWithContext(fn, types.FunctionBuildContext{}); err != nil {
+			return err
+		}
+		repr.Operators = append(repr.Operators, chain.OperatorRepr{Type: types.OpTypeMap, Function: fn, Inputs: inputs, Outputs: []string{output}})
 		return nil
 	}
-
-	scoreFunc := segments.AsyncComputeScorerScoresOnChunkedOffsets
-	return executeL0RerankChains(t.ctx, segDFs, func(_ context.Context, i int, df *chain.DataFrame) (*chain.FuncChain, error) {
-		return buildBoostScoreChain(
-			df,
-			searchedSegments[i],
-			searchReq,
-			prepared.scorers,
-			scoreFunc,
-			prepared.functionMode,
-			prepared.boostMode,
-		)
-	}, "boost_score")
+	combined := columns[0]
+	if len(columns) > 1 {
+		if err := appendCombine(columns, functionScoreColumn, functionMode); err != nil {
+			return nil, err
+		}
+		combined = functionScoreColumn
+	}
+	if err := appendCombine([]string{types.ScoreFieldName, combined}, types.ScoreFieldName, boostMode); err != nil {
+		return nil, err
+	}
+	if err := repr.RefreshInfo(); err != nil {
+		return nil, err
+	}
+	return repr, nil
 }

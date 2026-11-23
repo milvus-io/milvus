@@ -1172,30 +1172,30 @@ func (s *ChainTestSuite) TestFunctionRegistry() {
 	factory := func(_ types.FunctionBuildContext, _ types.FunctionConfig) (types.FunctionExpr, error) {
 		return &MockAddColumnFunction{value: 1}, nil
 	}
-	err := registry.Register("test_func", factory)
+	err := registry.Register("test_func", types.FunctionDefinition{Factory: factory})
 	s.NoError(err)
 	s.True(registry.Has("test_func"))
 	s.False(registry.Has("nonexistent"))
 
 	// Test duplicate registration returns error
-	err = registry.Register("test_func", factory)
+	err = registry.Register("test_func", types.FunctionDefinition{Factory: factory})
 	s.Error(err)
 	s.Contains(err.Error(), "already registered")
 
 	// Test empty name returns error
-	err = registry.Register("", factory)
+	err = registry.Register("", types.FunctionDefinition{Factory: factory})
 	s.Error(err)
 	s.Contains(err.Error(), "cannot be empty")
 
 	// Test nil factory returns error
-	err = registry.Register("nil_factory", nil)
+	err = registry.Register("nil_factory", types.FunctionDefinition{Factory: nil})
 	s.Error(err)
 	s.Contains(err.Error(), "cannot be nil")
 
 	// Test Get
 	f, ok := registry.Get("test_func")
 	s.True(ok)
-	s.NotNil(f)
+	s.NotNil(f.Factory)
 
 	_, ok = registry.Get("nonexistent")
 	s.False(ok)
@@ -1214,7 +1214,7 @@ func (s *ChainTestSuite) TestFunctionRegistry() {
 
 	// Test MustRegister panics on duplicate
 	s.Panics(func() {
-		registry.MustRegister("test_func", factory)
+		registry.MustRegister("test_func", types.FunctionDefinition{Factory: factory})
 	})
 }
 
@@ -1223,9 +1223,9 @@ func (s *ChainTestSuite) TestGlobalFunctionRegistry() {
 	funcName := "test_global_func_" + s.T().Name()
 
 	// Register a test function first
-	err := types.RegisterFunction(funcName, func(_ types.FunctionBuildContext, _ types.FunctionConfig) (types.FunctionExpr, error) {
+	err := types.RegisterFunction(funcName, types.FunctionDefinition{Factory: func(_ types.FunctionBuildContext, _ types.FunctionConfig) (types.FunctionExpr, error) {
 		return &MockAddColumnFunction{value: 42}, nil
-	})
+	}})
 	s.NoError(err)
 
 	// Test global registry functions
@@ -1253,17 +1253,17 @@ func (s *ChainTestSuite) TestGlobalFunctionRegistry() {
 	s.Error(err)
 
 	// Test duplicate registration returns error
-	err = types.RegisterFunction(funcName, func(_ types.FunctionBuildContext, _ types.FunctionConfig) (types.FunctionExpr, error) {
+	err = types.RegisterFunction(funcName, types.FunctionDefinition{Factory: func(_ types.FunctionBuildContext, _ types.FunctionConfig) (types.FunctionExpr, error) {
 		return nil, nil
-	})
+	}})
 	s.Error(err)
 	s.Contains(err.Error(), "already registered")
 
 	// Test MustRegisterFunction panics on duplicate
 	s.Panics(func() {
-		types.MustRegisterFunction(funcName, func(_ types.FunctionBuildContext, _ types.FunctionConfig) (types.FunctionExpr, error) {
+		types.MustRegisterFunction(funcName, types.FunctionDefinition{Factory: func(_ types.FunctionBuildContext, _ types.FunctionConfig) (types.FunctionExpr, error) {
 			return nil, nil
-		})
+		}})
 	})
 }
 

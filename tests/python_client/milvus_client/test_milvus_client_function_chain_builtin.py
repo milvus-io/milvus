@@ -13,6 +13,7 @@ from pymilvus import (
     Function,
     FunctionChain,
     FunctionChainStage,
+    FunctionScore,
     FunctionType,
     RRFRanker,
     SearchAggregation,
@@ -1259,3 +1260,334 @@ class TestMilvusClientFunctionChainScoreConsumers(TestMilvusClientV2Base):
                     ), context
                     if normalize:
                         assert all(0 <= hit["distance"] <= 1 for hit in hits), context
+
+
+class TestMilvusClientFunctionChainBoost(TestMilvusClientV2Base):
+    """Public Boost chains use the same numerical contract as FunctionScore."""
+
+    skip_global_role_cleanup = True
+    queries = [[1.0, 0.0], [0.5, 0.0]]
+
+    def _boost_collection(self, client, storage, with_decay=False):
+        name = cf.gen_unique_str("fc_boost")
+        schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("label", DataType.VARCHAR, max_length=32)
+        if with_decay:
+            schema.add_field("age", DataType.DOUBLE, nullable=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=2)
+        index = self.prepare_index_params(client)[0]
+        index.add_index(field_name="vector", index_type="FLAT", metric_type="IP")
+        self.create_collection(
+            client, name, schema=schema, index_params=index, shards_num=1, consistency_level="Strong"
+        )
+        # Separate partitions keep flushed batches in distinct segments even if
+        # compaction runs. Mixed mode leaves the second partition unflushed.
+        rows = [{"id": i, "label": f"row_{i}", "vector": [float(i), 0.0]} for i in range(1, 7)]
+        if with_decay:
+            for row, age in zip(rows, [0.0, 2.0, None, 4.0, 6.0, 8.0]):
+                row["age"] = age
+        for batch, partition in enumerate(("first", "second")):
+            self.create_partition(client, name, partition)
+            inserted = self.insert(client, name, rows[batch * 3 : (batch + 1) * 3], partition_name=partition)[0]
+            assert inserted["insert_count"] == 3
+            if storage == "sealed" or (storage == "mixed" and batch == 0):
+                self.flush(client, name)
+        self.load_collection(client, name)
+        return name, rows
+
+    @staticmethod
+    def _boost_chain(specs, function_mode, boost_mode, stage=L0):
+        chain = FunctionChain(stage)
+        columns = []
+        for i, (weight, predicate, _) in enumerate(specs):
+            params = {"weight": weight}
+            if predicate is not None:
+                params["filter"] = predicate
+            output = f"boost_{i}"
+            # Use the generic public expression API until fn.boost_score exists.
+            chain.map(output, FunctionChainExpr("boost_score", params=params))
+            columns.append(output)
+        combined = columns[0]
+        if len(columns) > 1:
+            combined = "combined_boost"
+            chain.map(
+                combined,
+                FunctionChainExpr(
+                    "num_combine",
+                    args=tuple(col(c) for c in columns),
+                    params={"mode": function_mode, "null_policy": "skip"},
+                ),
+            )
+        chain.map(
+            "$score",
+            FunctionChainExpr(
+                "num_combine",
+                args=(col("$score"), col(combined)),
+                params={"mode": boost_mode, "null_policy": "skip"},
+            ),
+        )
+        return chain
+
+    @staticmethod
+    def _legacy_boost(specs, function_mode, boost_mode):
+        functions = []
+        for i, (weight, predicate, _) in enumerate(specs):
+            params = {"reranker": "boost", "weight": str(weight)}
+            if predicate is not None:
+                params["filter"] = predicate
+            functions.append(
+                Function(
+                    name=f"boost_{i}",
+                    function_type=FunctionType.RERANK,
+                    input_field_names=[],
+                    output_field_names=[],
+                    params=params,
+                )
+            )
+        return FunctionScore(functions=functions, params={"function_mode": function_mode, "boost_mode": boost_mode})
+
+    def _boost_search(self, client, name, **kwargs):
+        return self.search(
+            client,
+            name,
+            data=self.queries,
+            anns_field="vector",
+            search_params={"metric_type": "IP"},
+            limit=6,
+            output_fields=["label"],
+            **kwargs,
+        )[0]
+
+    def _assert_boost_oracle(self, result, specs, function_mode, boost_mode):
+        assert len(result) == len(self.queries)
+        for query, hits in zip(self.queries, result):
+            assert len(hits) == 6
+            assert {hit["id"] for hit in hits} == set(range(1, 7))
+            actual_scores = [hit["distance"] for hit in hits]
+            assert actual_scores == sorted(actual_scores, reverse=True)
+            for hit in hits:
+                pk = hit["id"]
+                base = pk * query[0]
+                # Explicit ID sets are an independent oracle for each predicate.
+                weights = [weight for weight, _, matched in specs if matched is None or pk in matched]
+                if not weights:
+                    expected = base  # all boost outputs NULL: skip preserves the original score
+                else:
+                    boost = sum(weights) if function_mode == "sum" else math.prod(weights)
+                    expected = base + boost if boost_mode == "sum" else base * boost
+                assert hit["distance"] == pytest.approx(expected, rel=2e-6, abs=1e-6)
+                assert hit["entity"] == {"label": f"row_{pk}"}
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("storage", ["growing", "sealed", "mixed"])
+    @pytest.mark.parametrize("boost_mode", ["sum", "multiply"])
+    @pytest.mark.parametrize("case", ["filtered", "zero_weight", "no_filter"])
+    def test_boost_chain_matches_legacy_and_oracle(self, storage, boost_mode, case):
+        """Validate both wire paths, filter NULLs, zero weight, ordering and segment bindings."""
+        specs = {
+            "filtered": [(3.0, "id in [1, 4]", {1, 4})],
+            "zero_weight": [(0.0, "id in [1, 4]", {1, 4})],
+            "no_filter": [(2.0, None, None)],
+        }[case]
+        client = self._client()
+        name, _ = self._boost_collection(client, storage)
+        try:
+            chain_result = self._boost_search(client, name, function_chains=self._boost_chain(specs, "sum", boost_mode))
+            legacy_result = self._boost_search(client, name, ranker=self._legacy_boost(specs, "sum", boost_mode))
+            for result in (chain_result, legacy_result):
+                self._assert_boost_oracle(result, specs, "sum", boost_mode)
+            for current, legacy in zip(chain_result, legacy_result):
+                assert {hit["id"]: hit["distance"] for hit in current} == pytest.approx(
+                    {hit["id"]: hit["distance"] for hit in legacy}, rel=2e-6, abs=1e-6
+                )
+        finally:
+            self.drop_collection(client, name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("function_mode", ["sum", "multiply"])
+    @pytest.mark.parametrize("boost_mode", ["sum", "multiply"])
+    def test_boost_chain_multiple_scorers(self, function_mode, boost_mode):
+        """Exercise both/one/no filter matches and independent score-combine modes."""
+        specs = [(2.0, "id in [1, 3, 4]", {1, 3, 4}), (3.0, "id in [3, 5]", {3, 5})]
+        client = self._client()
+        name, _ = self._boost_collection(client, "sealed")
+        try:
+            current = self._boost_search(
+                client, name, function_chains=self._boost_chain(specs, function_mode, boost_mode)
+            )
+            legacy = self._boost_search(client, name, ranker=self._legacy_boost(specs, function_mode, boost_mode))
+            for result in (current, legacy):
+                self._assert_boost_oracle(result, specs, function_mode, boost_mode)
+        finally:
+            self.drop_collection(client, name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "stage,params,err_code,message",
+        [
+            (L0, {}, 1100, 'missing required parameter "weight"'),
+            (L0, {"weight": 1.0, "filter": "id >"}, 2201, "parse scorer filter failed"),
+            (L1, {"weight": 1.0}, 1100, "only L0 rerank"),
+            (L1, {"weight": 1.0, "filter": "id >"}, 1100, "only L0 rerank"),
+        ],
+        ids=["missing_weight", "invalid_filter", "l1", "l1_before_filter_parse"],
+    )
+    def test_boost_chain_invalid_request(self, stage, params, err_code, message):
+        """Preserve filter parse codes; reject unsupported placement before parsing filters."""
+        client = self._client()
+        name, _ = self._boost_collection(client, "sealed")
+        try:
+            chain = FunctionChain(stage).map("$score", FunctionChainExpr("boost_score", params=params))
+            response = self._boost_search(
+                client,
+                name,
+                function_chains=chain,
+                check_task=CheckTasks.err_res,
+                check_items={"err_code": err_code, "err_msg": message},
+            )
+            assert response.code == err_code
+            # A rejected request must not poison subsequent valid preparation/execution.
+            specs = [(2.0, None, None)]
+            result = self._boost_search(client, name, function_chains=self._boost_chain(specs, "sum", "sum"))
+            self._assert_boost_oracle(result, specs, "sum", "sum")
+        finally:
+            self.drop_collection(client, name)
+
+    @staticmethod
+    def _boost_f32(value):
+        return struct.unpack("f", struct.pack("f", value))[0]
+
+    @staticmethod
+    def _assert_mixed_boost_scores(result, expected_by_query):
+        assert len(result) == len(expected_by_query)
+        for hits, expected in zip(result, expected_by_query):
+            assert len(hits) == len(expected)
+            assert {hit["id"] for hit in hits} == set(expected)
+            scores = [hit["distance"] for hit in hits]
+            assert scores == sorted(scores, reverse=True)
+            # Do not impose an undocumented ID tie-break on equal rounded scores.
+            for hit in hits:
+                assert hit["distance"] == pytest.approx(expected[hit["id"]], rel=2e-6, abs=1e-6)
+                assert hit["entity"] == {"label": f"row_{hit['id']}"}
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("storage", ["growing", "sealed", "mixed"])
+    @pytest.mark.parametrize("mode", ["sum", "multiply"])
+    def test_boost_chain_interleaves_builtin_expressions(self, storage, mode):
+        """Two prepared Boosts interleave with scalar decay, weighted combine and rounding."""
+        client = self._client()
+        name, _ = self._boost_collection(client, storage, with_decay=True)
+        try:
+            chain = FunctionChain(L0)
+            chain.map(
+                "early_boost",
+                FunctionChainExpr(
+                    "boost_score",
+                    params={"weight": 2.5, "filter": "id in [1, 3, 5]"},
+                ),
+            )
+            chain.map("freshness", fn.decay(col("age"), function="exp", origin=0, scale=2))
+            chain.map(
+                "work",
+                FunctionChainExpr(
+                    "num_combine",
+                    args=(col("$score"), col("freshness")),
+                    params={"mode": "weighted", "weights": [1.0, 3.0], "null_policy": "skip"},
+                ),
+            )
+            # Reading and replacing a temporary column exercises its lifetime.
+            chain.map(
+                "work",
+                FunctionChainExpr(
+                    "num_combine",
+                    args=(col("work"), col("early_boost")),
+                    params={"mode": mode, "null_policy": "skip"},
+                ),
+            )
+            chain.map(
+                "late_boost",
+                FunctionChainExpr(
+                    "boost_score",
+                    params={"weight": 1.75, "filter": "id in [3, 4, 5]"},
+                ),
+            )
+            chain.map(
+                "work",
+                FunctionChainExpr(
+                    "num_combine",
+                    args=(col("work"), col("late_boost")),
+                    params={"mode": "sum", "null_policy": "skip"},
+                ),
+            )
+            chain.map("$score", fn.round_decimal(col("work"), decimal=2))
+            # Decay factors are hand-derived for age [0, 2, NULL, 4, 6, 8].
+            factors = {1: 1.0, 2: 0.5, 3: None, 4: 0.25, 5: 0.125, 6: 0.0625}
+            expected = []
+            for query in self.queries:
+                scores = {}
+                for pk, factor in factors.items():
+                    value = self._boost_f32(pk * query[0] + (0 if factor is None else 3 * factor))
+                    if pk in {1, 3, 5}:
+                        value = self._boost_f32(value + 2.5 if mode == "sum" else value * 2.5)
+                    if pk in {3, 4, 5}:
+                        value = self._boost_f32(value + 1.75)
+                    scores[pk] = self._boost_f32(math.floor(value * 100 + 0.5) / 100)
+                expected.append(scores)
+            result = self._boost_search(client, name, function_chains=chain)
+            self._assert_mixed_boost_scores(result, expected)
+        finally:
+            self.drop_collection(client, name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("storage", ["growing", "sealed", "mixed"])
+    @pytest.mark.parametrize("policy", ["skip", "as_zero"])
+    def test_boost_chain_nulls_through_decay_and_round(self, storage, policy):
+        """Boost output feeds another expr; NULL survives decay, combine and round until recovery."""
+        client = self._client()
+        name, _ = self._boost_collection(client, storage, with_decay=True)
+        try:
+            chain = FunctionChain(L0)
+            chain.map(
+                "raw_boost",
+                FunctionChainExpr(
+                    "boost_score",
+                    params={"weight": 2.0, "filter": "id in [1, 3, 5]"},
+                ),
+            )
+            chain.map("decayed_boost", fn.decay(col("raw_boost"), function="exp", origin=0, scale=2))
+            chain.map("freshness", fn.decay(col("age"), function="exp", origin=0, scale=2))
+            chain.map(
+                "signal",
+                FunctionChainExpr(
+                    "num_combine",
+                    args=(col("decayed_boost"), col("freshness")),
+                    params={"mode": "multiply", "null_policy": "propagate"},
+                ),
+            )
+            chain.map("signal", fn.round_decimal(col("signal"), decimal=2))
+            chain.map(
+                "$score",
+                FunctionChainExpr(
+                    "num_combine",
+                    args=(col("$score"), col("signal")),
+                    params={"mode": "multiply", "null_policy": policy},
+                ),
+            )
+            # ID 3 matches Boost but has NULL age; IDs 2/4/6 miss Boost.
+            # Only ID 1 (0.5*1) and ID 5 (0.5*0.125 -> 0.06) have a signal.
+            expected = []
+            for query in self.queries:
+                scores = {}
+                for pk in range(1, 7):
+                    base = pk * query[0]
+                    if pk in {1, 5}:
+                        signal = self._boost_f32(0.5 if pk == 1 else 0.06)
+                        scores[pk] = self._boost_f32(base * signal)
+                    else:
+                        scores[pk] = base if policy == "skip" else 0.0
+                expected.append(scores)
+            result = self._boost_search(client, name, function_chains=chain)
+            self._assert_mixed_boost_scores(result, expected)
+        finally:
+            self.drop_collection(client, name)

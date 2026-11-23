@@ -29,69 +29,69 @@ import (
 // Function Registry
 // =============================================================================
 
-// FunctionRegistry is a registry for function factories.
+// FunctionRegistry stores immutable function definitions by name.
 type FunctionRegistry struct {
-	mu        sync.RWMutex
-	factories map[string]FunctionFactory
+	mu          sync.RWMutex
+	definitions map[string]FunctionDefinition
 }
 
 // NewFunctionRegistry creates a new FunctionRegistry.
 func NewFunctionRegistry() *FunctionRegistry {
 	return &FunctionRegistry{
-		factories: make(map[string]FunctionFactory),
+		definitions: make(map[string]FunctionDefinition),
 	}
 }
 
-// Register registers a function factory with the given name.
+// Register registers a function definition with the given name.
 // Returns an error if a function with the same name is already registered.
-func (r *FunctionRegistry) Register(name string, factory FunctionFactory) error {
+func (r *FunctionRegistry) Register(name string, definition FunctionDefinition) error {
 	if name == "" {
 		return merr.WrapErrParameterMissingMsg("function name cannot be empty")
 	}
-	if factory == nil {
+	if definition.Factory == nil {
 		return merr.WrapErrServiceInternalMsg("function factory cannot be nil for %q", name)
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, exists := r.factories[name]; exists {
+	if _, exists := r.definitions[name]; exists {
 		return merr.WrapErrServiceInternalMsg("function %q already registered", name)
 	}
-	r.factories[name] = factory
+	r.definitions[name] = definition
 	return nil
 }
 
-// MustRegister registers a function factory and panics on error.
+// MustRegister registers a function definition and panics on error.
 // Use this in init() functions to fail fast on registration errors.
-func (r *FunctionRegistry) MustRegister(name string, factory FunctionFactory) {
-	if err := r.Register(name, factory); err != nil {
+func (r *FunctionRegistry) MustRegister(name string, definition FunctionDefinition) {
+	if err := r.Register(name, definition); err != nil {
 		panic(fmt.Sprintf("failed to register function: %v", err))
 	}
 }
 
-// Get returns the function factory for the given name.
-func (r *FunctionRegistry) Get(name string) (FunctionFactory, bool) {
+// Get returns a copy of the function definition for the given name.
+func (r *FunctionRegistry) Get(name string) (FunctionDefinition, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	factory, ok := r.factories[name]
-	return factory, ok
+	definition, ok := r.definitions[name]
+	return definition, ok
 }
 
 // Create creates a FunctionExpr using the factory registered with the given name.
 func (r *FunctionRegistry) Create(ctx FunctionBuildContext, cfg FunctionConfig) (FunctionExpr, error) {
-	factory, ok := r.Get(cfg.Name)
+	definition, ok := r.Get(cfg.Name)
 	if !ok {
 		return nil, merr.WrapErrParameterInvalidMsg("unknown function: %s", cfg.Name)
 	}
-	return factory(ctx, cfg)
+	return definition.Factory(ctx, cfg)
 }
 
 // Has returns true if a function with the given name is registered.
 func (r *FunctionRegistry) Has(name string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	_, ok := r.factories[name]
+	_, ok := r.definitions[name]
 	return ok
 }
 
@@ -99,8 +99,8 @@ func (r *FunctionRegistry) Has(name string) bool {
 func (r *FunctionRegistry) Names() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	names := make([]string, 0, len(r.factories))
-	for name := range r.factories {
+	names := make([]string, 0, len(r.definitions))
+	for name := range r.definitions {
 		names = append(names, name)
 	}
 	return names
@@ -113,21 +113,22 @@ func (r *FunctionRegistry) Names() []string {
 // globalRegistry is the global function registry.
 var globalRegistry = NewFunctionRegistry()
 
-// RegisterFunction registers a function factory in the global registry.
+// RegisterFunction registers a function definition in the global registry.
 // Returns an error if a function with the same name is already registered.
-func RegisterFunction(name string, factory FunctionFactory) error {
-	return globalRegistry.Register(name, factory)
+func RegisterFunction(name string, definition FunctionDefinition) error {
+	return globalRegistry.Register(name, definition)
 }
 
-// MustRegisterFunction registers a function factory and panics on error.
+// MustRegisterFunction registers a function definition and panics on error.
 // Use this in init() functions to fail fast on registration errors.
-func MustRegisterFunction(name string, factory FunctionFactory) {
-	globalRegistry.MustRegister(name, factory)
+func MustRegisterFunction(name string, definition FunctionDefinition) {
+	globalRegistry.MustRegister(name, definition)
 }
 
 // GetFunctionFactory returns the function factory from the global registry.
 func GetFunctionFactory(name string) (FunctionFactory, bool) {
-	return globalRegistry.Get(name)
+	definition, ok := globalRegistry.Get(name)
+	return definition.Factory, ok
 }
 
 // CreateFunction creates a FunctionExpr using the global registry.
@@ -143,4 +144,9 @@ func HasFunction(name string) bool {
 // FunctionNames returns all registered function names from the global registry.
 func FunctionNames() []string {
 	return globalRegistry.Names()
+}
+
+// GetFunctionDefinition returns the registered function capabilities.
+func GetFunctionDefinition(name string) (FunctionDefinition, bool) {
+	return globalRegistry.Get(name)
 }

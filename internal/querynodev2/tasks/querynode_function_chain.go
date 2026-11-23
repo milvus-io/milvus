@@ -31,9 +31,8 @@ type preparedQueryNodeFunctionChains struct {
 }
 
 type preparedL0Rerank struct {
-	chain      *chain.ChainRepr
-	inputPlan  *chain.DataFrameInputPlan
-	boostScore *preparedBoostScore
+	chain     *chain.ChainRepr
+	inputPlan *chain.DataFrameInputPlan
 }
 
 type preparedL1FunctionChain struct {
@@ -58,11 +57,13 @@ func prepareQueryNodeFunctionChainsFromPlan(plan *planpb.PlanNode, schema *schem
 		if len(plan.GetQuerynodeFunctionChains()) > 0 {
 			return nil, merr.WrapErrParameterInvalidMsg("boost score and querynode rerank function chains cannot be used together")
 		}
-		boostScore, err := prepareBoostScore(plan)
+		// Legacy scorers are already compiled. The adapter supplies Prepared directly;
+		// do not send this representation through parameter-based preparation.
+		repr, err := prepareBoostScore(plan)
 		if err != nil {
 			return nil, err
 		}
-		prepared.l0 = &preparedL0Rerank{boostScore: boostScore}
+		prepared.l0 = &preparedL0Rerank{chain: repr}
 		return prepared, nil
 	}
 	if len(plan.GetQuerynodeFunctionChains()) == 0 {
@@ -74,6 +75,7 @@ func prepareQueryNodeFunctionChainsFromPlan(plan *planpb.PlanNode, schema *schem
 		return nil, merr.WrapErrServiceInternalErr(err, "querynode function chain: failed to create schema helper")
 	}
 
+	reprs := make([]*chain.ChainRepr, 0, len(plan.GetQuerynodeFunctionChains()))
 	seenStages := make(map[schemapb.FunctionChainStage]struct{}, len(plan.GetQuerynodeFunctionChains()))
 	for i, chainPB := range plan.GetQuerynodeFunctionChains() {
 		if chainPB == nil {
@@ -94,6 +96,7 @@ func prepareQueryNodeFunctionChainsFromPlan(plan *planpb.PlanNode, schema *schem
 			return nil, merr.Wrapf(err, "querynode function chain[%d]", i)
 		}
 
+		reprs = append(reprs, repr)
 		switch stage {
 		case schemapb.FunctionChainStage_FunctionChainStageL0Rerank:
 			if err := validateL0FunctionChainOps(repr); err != nil {
@@ -126,28 +129,39 @@ func prepareQueryNodeFunctionChainsFromPlan(plan *planpb.PlanNode, schema *schem
 			return nil, merr.WrapErrParameterInvalidMsg("querynode function chain[%d] stage %s is not supported", i, stage.String())
 		}
 	}
+	for _, repr := range reprs {
+		ctx := chaintypes.FunctionBuildContext{Stage: repr.Stage, Schema: schemaHelper, Timezone: plan.GetPlanOptions().GetResolvedTimezone()}
+		for i := range repr.Operators {
+			if fn := repr.Operators[i].Function; fn != nil {
+				if err := chain.PrepareFunctionFromRepr(fn, ctx); err != nil {
+					return nil, merr.Wrapf(err, "%s function chain op[%d] preparation", repr.Stage, i)
+				}
+			}
+		}
+	}
+	// Validate complete executable contracts before ANN, including requests that
+	// have no local segments. Prepared filter plans are reused; no execution or
+	// segment binding occurs during this construction.
+	for _, repr := range reprs {
+		if _, err := chain.FuncChainFromReprWithContext(repr, defaultAllocator, chaintypes.FunctionBuildContext{}); err != nil {
+			return nil, merr.Wrapf(err, "%s function chain validation", repr.Stage)
+		}
+	}
 	return prepared, nil
 }
 
-// validateQueryNodeMapOp checks request semantics without executing the function
-// or materializing input fields. Both L0 and L1 must run these checks before ANN.
-func validateQueryNodeMapOp(op *chain.OperatorRepr, stage string) error {
-	fn, err := chain.FunctionFromReprWithContext(op.Function, chaintypes.FunctionBuildContext{})
-	if err != nil {
-		return err
+// validateQueryNodeMapOp checks structure without preparing data or constructing
+// an expression. Args, input arity, output types and runnable stages are checked
+// during the separate pre-ANN chain construction after preparation.
+func validateQueryNodeMapOp(op *chain.OperatorRepr) error {
+	if op.Function == nil {
+		return merr.WrapErrParameterInvalidMsg("map operator requires function")
 	}
-	if len(op.Inputs) == 0 {
-		return merr.WrapErrParameterInvalidMsg("map operator requires inputs")
+	if !chaintypes.HasFunction(op.Function.Name) {
+		return merr.WrapErrParameterInvalidMsg("unknown function: %s", op.Function.Name)
 	}
 	if len(op.Outputs) == 0 {
 		return merr.WrapErrParameterInvalidMsg("map operator requires outputs")
-	}
-	outputTypes := fn.OutputDataTypes()
-	if outputTypes != nil && len(op.Outputs) != len(outputTypes) {
-		return merr.WrapErrParameterInvalidMsg("map output columns count %d does not match function output count %d", len(op.Outputs), len(outputTypes))
-	}
-	if !fn.IsRunnable(stage) {
-		return merr.WrapErrParameterInvalidMsg("function %q does not support stage %q", fn.Name(), stage)
 	}
 	return nil
 }
