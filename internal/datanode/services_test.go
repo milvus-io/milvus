@@ -769,7 +769,7 @@ func (c *workerImportCipher) Init(cfg map[string]string) error {
 	if c.err != nil {
 		return c.err
 	}
-	c.registered = append(c.registered, cfg[hookutil.CipherConfigReadOnly]+":"+cfg[hookutil.CipherConfigUnsafeEZK])
+	c.registered = append(c.registered, cfg[hookutil.CipherConfigImportEZ]+":"+cfg[hookutil.CipherConfigUnsafeEZK])
 	return nil
 }
 
@@ -777,19 +777,32 @@ func TestDataNodeImportCipherContext(t *testing.T) {
 	const taskID = 9
 	ctx := context.Background()
 	schema := &schemapb.CollectionSchema{Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "7"}}}
-	options := []*commonpb.KeyValuePair{
-		{Key: importutilv2.BackupFlag, Value: "true"},
-		{Key: importutilv2.EZK, Value: base64.StdEncoding.EncodeToString([]byte(`{"ez_id":7}`))},
-	}
+	artifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":7}`))
 	wire := []*commonpb.KeyValuePair{
 		{Key: hookutil.CipherConfigUnsafeEZK, Value: "7:b2xk"},
 		{Key: "other.plugin", Value: "context"},
 		{Key: hookutil.CipherConfigUnsafeEZK, Value: "7:bmV3"},
 	}
 	config := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
-	for _, taskType := range []string{taskcommon.PreImport, taskcommon.Import} {
+	for _, scenario := range []struct {
+		name     string
+		taskType string
+		l0       bool
+	}{
+		{taskcommon.PreImport, taskcommon.PreImport, false},
+		{taskcommon.Import, taskcommon.Import, false},
+		{"L0PreImport", taskcommon.PreImport, true},
+		{"L0Import", taskcommon.Import, true},
+	} {
 		for _, transport := range []string{"direct RPC", "CreateTask"} {
-			t.Run(taskType+"/"+transport, func(t *testing.T) {
+			t.Run(scenario.name+"/"+transport, func(t *testing.T) {
+				options := []*commonpb.KeyValuePair{
+					{Key: importutilv2.BackupFlag, Value: "true"},
+					{Key: importutilv2.EZK, Value: artifact},
+				}
+				if scenario.l0 {
+					options = append(options, &commonpb.KeyValuePair{Key: importutilv2.L0Import, Value: "true"})
+				}
 				cipher := &workerImportCipher{}
 				t.Cleanup(hookutil.SetTestCipher(cipher))
 				node := &DataNode{
@@ -798,7 +811,7 @@ func TestDataNodeImportCipherContext(t *testing.T) {
 				}
 				submit := func(entries []*commonpb.KeyValuePair) (*commonpb.Status, error) {
 					var payload proto.Message
-					if taskType == taskcommon.PreImport {
+					if scenario.taskType == taskcommon.PreImport {
 						req := &datapb.PreImportRequest{
 							TaskID: taskID, Schema: schema, Options: options,
 							StorageConfig: config, PluginContext: entries,
@@ -820,7 +833,7 @@ func TestDataNodeImportCipherContext(t *testing.T) {
 					data, err := proto.Marshal(payload)
 					require.NoError(t, err)
 					return node.CreateTask(ctx, &workerpb.CreateTaskRequest{
-						Properties: map[string]string{taskcommon.TypeKey: taskType}, Payload: data,
+						Properties: map[string]string{taskcommon.TypeKey: scenario.taskType}, Payload: data,
 					})
 				}
 				status, err := submit(wire[:2])
@@ -838,8 +851,16 @@ func TestDataNodeImportCipherContext(t *testing.T) {
 				cipher.err = nil
 				status, err = submit(wire)
 				require.NoError(t, merr.CheckRPCCall(status, err))
-				require.NotNil(t, node.importTaskMgr.Get(taskID))
-				require.Equal(t, []string{"true:b2xk", ":bmV3"}, cipher.registered)
+				task := node.importTaskMgr.Get(taskID)
+				require.NotNil(t, task)
+				if scenario.l0 {
+					if scenario.taskType == taskcommon.PreImport {
+						require.Equal(t, importv2.L0PreImportTaskType, task.GetType())
+					} else {
+						require.Equal(t, importv2.L0ImportTaskType, task.GetType())
+					}
+				}
+				require.Equal(t, []string{"7:b2xk", ":bmV3"}, cipher.registered)
 			})
 		}
 	}

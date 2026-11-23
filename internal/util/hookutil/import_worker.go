@@ -73,8 +73,10 @@ func PrepareImportCipherContexts(artifact string, properties, pluginContext []*c
 		return ImportCipherContexts{}, errCipherPluginMissing
 	}
 	if source := result.Source; source != nil {
-		err = GetCipher().Init(map[string]string{CipherConfigCreateEZ: strconv.FormatInt(source.GetEncryptionZoneId(), 10), CipherConfigUnsafeEZK: source.GetEncryptionKey(), CipherConfigReadOnly: "true"})
-		if err != nil {
+		if err := GetCipher().Init(map[string]string{
+			CipherConfigImportEZ:  strconv.FormatInt(source.GetEncryptionZoneId(), 10),
+			CipherConfigUnsafeEZK: source.GetEncryptionKey(),
+		}); err != nil {
 			return ImportCipherContexts{}, err
 		}
 	}

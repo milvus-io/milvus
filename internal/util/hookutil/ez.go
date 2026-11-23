@@ -30,7 +30,7 @@ import (
 
 const (
 	// Used in Plugins
-	CipherConfigReadOnly       = "cipher.ez.readOnly"
+	CipherConfigImportEZ       = "cipher.ez.import"
 	CipherConfigCreateEZ       = "cipher.ez.create"
 	CipherConfigRemoveEZ       = "cipher.ez.remove"
 	CipherConfigMilvusRoleName = "cipher.milvusRoleName"

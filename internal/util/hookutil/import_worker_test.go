@@ -79,7 +79,7 @@ func TestPrepareImportCipherContexts(t *testing.T) {
 			require.NoError(t, err)
 			var want []map[string]string
 			if tc.wantSource {
-				want = append(want, map[string]string{CipherConfigCreateEZ: "7", CipherConfigUnsafeEZK: "b2xk", "cipher.ez.readOnly": "true"})
+				want = append(want, map[string]string{CipherConfigImportEZ: "7", CipherConfigUnsafeEZK: "b2xk"})
 				require.Equal(t, "b2xk", contexts.Source.GetEncryptionKey())
 			} else {
 				require.Nil(t, contexts.Source)

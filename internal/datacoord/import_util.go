@@ -277,14 +277,16 @@ func AllocImportSegment(ctx context.Context,
 
 var errImportPluginContext = errors.New("failed to prepare import encryption context")
 
-func handleImportRequestError(task ImportTask, im ImportMeta, cause error) {
+func handleImportRequestError(task ImportTask, im ImportMeta, cause error) (failed bool) {
 	log.Warn("failed to dispatch import request", WrapTaskLog(task, zap.Error(cause))...)
-	if errors.Is(cause, errImportPluginContext) || errors.Is(cause, merr.ErrImportFailed) {
-		err := im.UpdateJob(context.TODO(), task.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(cause.Error()))
-		if err != nil {
-			log.Warn("failed to update import job", zap.Int64("jobID", task.GetJobID()), zap.Error(err))
-		}
+	if !errors.Is(cause, errImportPluginContext) && !errors.Is(cause, merr.ErrImportFailed) {
+		return false
 	}
+	if err := im.UpdateJob(context.TODO(), task.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(cause.Error())); err != nil {
+		log.Warn("failed to update import job", zap.Int64("jobID", task.GetJobID()), zap.Error(err))
+		return false
+	}
+	return true
 }
 
 func isTemporaryImportContextError(err error) bool {

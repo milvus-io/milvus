@@ -143,8 +143,9 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	}
 	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())
 	if err != nil {
-		handleImportRequestError(t, t.importMeta, err)
-		t.retryTimes++
+		if !handleImportRequestError(t, t.importMeta, err) {
+			t.retryTimes++
+		}
 		return
 	}
 	err = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
