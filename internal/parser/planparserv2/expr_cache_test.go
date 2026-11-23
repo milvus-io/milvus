@@ -27,19 +27,24 @@ import (
 )
 
 func purgeExprCache() {
-	if c := exprCache(); c.cache != nil {
-		c.cache.Purge()
-	}
+	exprCache().purge()
 }
 
 // Each case models a fresh process with its own static configuration snapshot.
 // These tests must not run in parallel because the parser cache is process-wide.
 func configureExprCache(t *testing.T, enabled, maxEntries string) {
 	t.Helper()
+	configureExprCacheWithBytes(t, enabled, maxEntries, "67108864", "8388608")
+}
+
+func configureExprCacheWithBytes(t *testing.T, enabled, maxEntries, maxBytes, maxEntryBytes string) {
+	t.Helper()
 	params := paramtable.Get()
 	for item, value := range map[*paramtable.ParamItem]string{
-		&params.ProxyCfg.ExprParseCacheEnabled:    enabled,
-		&params.ProxyCfg.ExprParseCacheMaxEntries: maxEntries,
+		&params.ProxyCfg.ExprParseCacheEnabled:       enabled,
+		&params.ProxyCfg.ExprParseCacheMaxEntries:    maxEntries,
+		&params.ProxyCfg.ExprParseCacheMaxBytes:      maxBytes,
+		&params.ProxyCfg.ExprParseCacheMaxEntryBytes: maxEntryBytes,
 	} {
 		old := item.GetValue()
 		require.NoError(t, params.Save(item.Key, value))
@@ -147,4 +152,100 @@ func TestExprCacheConcurrentFirstUse(t *testing.T) {
 	}
 	wg.Wait()
 	require.Equal(t, 1, exprCache().cache.Len())
+}
+
+func TestExprCacheByteBudgetEviction(t *testing.T) {
+	// Keep maxEntries large so eviction is driven strictly by maxBytes.
+	configureExprCacheWithBytes(t, "true", "100", "3000", "2000")
+
+	c := exprCache()
+	_, err := handleInternal("id == 1")
+	require.NoError(t, err)
+	_, err = handleInternal("id == 2")
+	require.NoError(t, err)
+	require.Equal(t, 2, c.cache.Len())
+	require.LessOrEqual(t, c.currentBytes.Load(), c.maxBytes)
+
+	// Adding more entries must evict the oldest ones to stay within maxBytes.
+	for i := 3; i <= 10; i++ {
+		_, err = handleInternal("id == " + strings.Repeat("1", i))
+		require.NoError(t, err)
+		require.LessOrEqual(t, c.currentBytes.Load(), c.maxBytes)
+		require.Greater(t, c.currentBytes.Load(), int64(0))
+	}
+	require.False(t, c.cache.Contains("id == 1"))
+	require.False(t, c.cache.Contains("id == 2"))
+
+	c.purge()
+	require.Equal(t, int64(0), c.currentBytes.Load())
+}
+
+func TestExprCacheEntryAdmissionLimit(t *testing.T) {
+	configureExprCacheWithBytes(t, "true", "100", "4096", "16384")
+	c := exprCache()
+	// maxEntryBytes must be clamped to maxBytes.
+	require.Equal(t, int64(4096), c.maxEntryBytes)
+
+	largeValid := `id in [` + strings.Repeat("1,", 500) + `1]`
+	first, err := handleInternal(largeValid)
+	require.NoError(t, err)
+	second, err := handleInternal(largeValid)
+	require.NoError(t, err)
+	require.NotSame(t, first, second, "oversized valid expression must parse normally without being cached")
+	require.False(t, c.cache.Contains(largeValid))
+	require.Equal(t, int64(0), c.currentBytes.Load())
+
+	largeErr := "id ==" + strings.Repeat(" ", 5000)
+	_, firstErr := handleInternal(largeErr)
+	_, secondErr := handleInternal(largeErr)
+	require.Error(t, firstErr)
+	require.EqualError(t, secondErr, firstErr.Error())
+	require.NotSame(t, firstErr, secondErr, "oversized error must not be cached")
+	require.False(t, c.cache.Contains(largeErr))
+	require.Equal(t, int64(0), c.currentBytes.Load())
+}
+
+func TestExprCacheAccountingOnReplaceAndError(t *testing.T) {
+	configureExprCacheWithBytes(t, "true", "16", "1048576", "65536")
+	c := exprCache()
+
+	_, err := handleInternal("id == 1")
+	require.NoError(t, err)
+	cost1 := c.currentBytes.Load()
+	require.Greater(t, cost1, int64(0))
+
+	// Directly replacing an existing key must subtract the previous cost cleanly.
+	c.add("id == 1", "replacement", 500)
+	require.Equal(t, int64(500), c.currentBytes.Load())
+
+	_, err = handleInternal("id ==")
+	require.Error(t, err)
+	require.Greater(t, c.currentBytes.Load(), int64(500))
+
+	c.purge()
+	require.Equal(t, int64(0), c.currentBytes.Load())
+}
+
+func TestExprCacheConcurrentByteBudget(t *testing.T) {
+	configureExprCacheWithBytes(t, "true", "64", "8192", "2048")
+	c := exprCache()
+
+	var wg sync.WaitGroup
+	for g := range 8 {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for i := range 25 {
+				expr := "id == " + strings.Repeat("1", (id+i)%10+1)
+				if i%5 == 0 {
+					expr = "id ==" + strings.Repeat(" ", (id+i)%5)
+				}
+				_, _ = handleInternal(expr)
+			}
+		}(g)
+	}
+	wg.Wait()
+	require.LessOrEqual(t, c.currentBytes.Load(), c.maxBytes)
+	c.purge()
+	require.Equal(t, int64(0), c.currentBytes.Load())
 }

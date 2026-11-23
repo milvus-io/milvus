@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -283,15 +282,13 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 	streamingNotifier := snmanager.NewStreamingReadyNotifier()
 	defer streamingNotifier.Release()
 
-	if streamingutil.IsStreamingServiceEnabled() {
-		if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(t.ctx, streamingNotifier); err != nil {
-			mlog.Info(t.ctx, "register streaming enabled listener failed", mlog.Err(err))
-			return
-		}
-		if streamingNotifier.IsReady() {
-			mlog.Info(t.ctx, "streaming service has been enabled, proxy timetick from rootcoord should not start")
-			return
-		}
+	if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(t.ctx, streamingNotifier); err != nil {
+		mlog.Info(t.ctx, "register streaming enabled listener failed", mlog.Err(err))
+		return
+	}
+	if streamingNotifier.IsReady() {
+		mlog.Info(t.ctx, "streaming service has been enabled, proxy timetick from rootcoord should not start")
+		return
 	}
 
 	var checker *timerecord.LongTermChecker

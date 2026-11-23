@@ -222,14 +222,7 @@ func newBaseTask(ctx context.Context, timeout time.Duration, source Source, coll
 // whose distribution/leader-promotion confirmation is slow can still be
 // starved by a deadline armed for an earlier, already-returned RPC. Fully
 // isolating "wait for dist confirmation" from "RPC in flight" needs its own
-// design, in the same bucket as the no-backoff TODO below.
-//
-// TODO: this is still a flat wall-clock budget per step, on the assumption a
-// single action always finishes within its configured timeout
-// (segmentTaskTimeout defaults to 5min). A real operation that legitimately
-// runs longer never gets a chance to finish: the checker rebuilds it with the
-// same budget on every check tick, forever. See
-// SegmentChecker.createSegmentLoadTasks / ChannelChecker's equivalent.
+// design.
 func (task *baseTask) ActivateDeadline(step int) {
 	if task.timeout <= 0 {
 		return

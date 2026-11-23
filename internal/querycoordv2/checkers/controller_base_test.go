@@ -17,15 +17,18 @@
 package checkers
 
 import (
+	"context"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
-	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
-	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -45,7 +48,6 @@ type ControllerBaseTestSuite struct {
 	dist          *meta.DistributionManager
 	targetManager *meta.TargetManager
 	scheduler     *task.MockScheduler
-	balancer      *balance.MockBalancer
 
 	controller *CheckerController
 }
@@ -77,34 +79,27 @@ func (suite *ControllerBaseTestSuite) SetupTest() {
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetManager = meta.NewTargetManager(suite.broker, suite.meta, metacache.NewMetaStore(nil))
 
-	suite.balancer = balance.NewMockBalancer(suite.T())
 	suite.scheduler = task.NewMockScheduler(suite.T())
-
-	// Initialize global factories before creating checkers
-	assign.InitGlobalAssignPolicyFactory(suite.scheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetManager)
-	balance.InitGlobalBalancerFactory(suite.scheduler, suite.nodeMgr, suite.dist, suite.targetManager)
 
 	suite.controller = NewCheckerController(suite.meta, suite.dist, suite.targetManager, suite.nodeMgr, suite.scheduler, suite.broker)
 }
 
 func (suite *ControllerBaseTestSuite) TearDownTest() {
 	suite.kv.Close()
-	assign.ResetGlobalAssignPolicyFactoryForTest()
-	balance.ResetGlobalBalancerFactoryForTest()
 }
 
 func (s *ControllerBaseTestSuite) TestActivation() {
-	active, err := s.controller.IsActive(utils.SegmentChecker)
+	active, err := s.controller.IsActive(utils.IndexChecker)
 	s.NoError(err)
 	s.True(active)
-	err = s.controller.Deactivate(utils.SegmentChecker)
+	err = s.controller.Deactivate(utils.IndexChecker)
 	s.NoError(err)
-	active, err = s.controller.IsActive(utils.SegmentChecker)
+	active, err = s.controller.IsActive(utils.IndexChecker)
 	s.NoError(err)
 	s.False(active)
-	err = s.controller.Activate(utils.SegmentChecker)
+	err = s.controller.Activate(utils.IndexChecker)
 	s.NoError(err)
-	active, err = s.controller.IsActive(utils.SegmentChecker)
+	active, err = s.controller.IsActive(utils.IndexChecker)
 	s.NoError(err)
 	s.True(active)
 
@@ -115,7 +110,45 @@ func (s *ControllerBaseTestSuite) TestActivation() {
 
 func (s *ControllerBaseTestSuite) TestListCheckers() {
 	checkers := s.controller.Checkers()
-	s.Equal(5, len(checkers))
+	ids := make([]utils.CheckerType, 0, len(checkers))
+	for _, checker := range checkers {
+		ids = append(ids, checker.ID())
+	}
+	s.ElementsMatch([]utils.CheckerType{utils.IndexChecker, utils.LeaderChecker}, ids)
+}
+
+func TestControllerRetainedCheckersRunPeriodically(t *testing.T) {
+	paramtable.Init()
+	p := paramtable.Get()
+	require.NoError(t, p.Save(p.QueryCoordCfg.IndexCheckInterval.Key, "10"))
+	require.NoError(t, p.Save(p.QueryCoordCfg.LeaderViewUpdateInterval.Key, "1"))
+	t.Cleanup(func() {
+		require.NoError(t, p.Reset(p.QueryCoordCfg.IndexCheckInterval.Key))
+		require.NoError(t, p.Reset(p.QueryCoordCfg.LeaderViewUpdateInterval.Key))
+	})
+	var indexChecks, leaderChecks atomic.Int32
+	index := mockey.Mock((*IndexChecker).Check).To(func(*IndexChecker, context.Context) []task.Task {
+		indexChecks.Add(1)
+		return nil
+	}).Build()
+	t.Cleanup(func() { index.UnPatch() })
+	leader := mockey.Mock((*LeaderChecker).Check).To(func(*LeaderChecker, context.Context) []task.Task {
+		leaderChecks.Add(1)
+		return nil
+	}).Build()
+	t.Cleanup(func() { leader.UnPatch() })
+
+	controller := NewCheckerController(nil, nil, nil, nil, nil, nil)
+	controller.Start()
+	defer controller.Stop()
+	require.Eventually(t, func() bool {
+		return indexChecks.Load() > 0 && leaderChecks.Load() > 0
+	}, 3*time.Second, 10*time.Millisecond)
+
+	// Interval refresh must keep the remaining periodic checks running.
+	require.NoError(t, p.Save(p.QueryCoordCfg.IndexCheckInterval.Key, "20"))
+	previous := indexChecks.Load()
+	require.Eventually(t, func() bool { return indexChecks.Load() >= previous+2 }, time.Second, 10*time.Millisecond)
 }
 
 func TestControllerBaseTestSuite(t *testing.T) {

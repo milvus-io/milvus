@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -118,7 +119,7 @@ func TestStatsCreateTextIndexUsesActualFileResourceMode(t *testing.T) {
 			}
 			taskManager := NewTaskManager(ctx)
 			taskManager.LoadOrStoreStatsTask(req.GetClusterID(), req.GetTaskID(), &StatsTaskInfo{})
-			task := NewStatsTask(ctx, cancel, req, taskManager, nil, nil)
+			task := NewStatsTask(ctx, cancel, req, taskManager, nil, nil, taskcommon.Resource{})
 
 			err := task.createTextIndex(ctx, req.GetStorageConfig(), 1, 2, 3, 1, 1, req.GetInsertLogs())
 			require.NoError(t, err)

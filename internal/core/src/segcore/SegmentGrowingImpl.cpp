@@ -1990,11 +1990,12 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
         //
         // has_field() gates the schema lookup: this loop intentionally lets
         // the system fields (RowID, Timestamp) through its dropped-field
-        // guard above, and they are absent from schema_->fields_, so an
+        // guard above, and they are absent from the schema's fields, so an
         // unguarded operator[] asserts on every load. load_field_data_common
-        // applies the same guard for the same reason.
-        if (schema_->has_field(field_id) &&
-            schema_->operator[](field_id).get_data_type() ==
+        // applies the same guard for the same reason. Read the snapshot taken
+        // above, as the rest of this function does, rather than schema_.
+        if (schema->has_field(field_id) &&
+            schema->operator[](field_id).get_data_type() ==
                 DataType::GEOMETRY &&
             segcore_config_.get_enable_geometry_cache()) {
             BuildGeometryCacheForLoad(field_id, field_data, reserved_offset);

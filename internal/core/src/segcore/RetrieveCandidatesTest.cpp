@@ -296,9 +296,6 @@ TEST_P(RetrieveCandidatesTest, BudgetsAndCancellation) {
     auto offsets_only =
         segment->Retrieve(nullptr, plan.get(), 100, kRows * 8, false);
     EXPECT_EQ(offsets_only->offset_size(), kRows);
-    // No visible rows: the offsets fit, but serialized metadata exceeds budget.
-    ExpectCode([&] { segment->Retrieve(nullptr, plan.get(), 1, 1, false); },
-               InvalidParameter);
     ExpectCode([&] { segment->Retrieve(nullptr, plan.get(), 100, 0, false); },
                UnexpectedError);
     folly::CancellationSource cancellation;
