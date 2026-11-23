@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -294,6 +295,8 @@ func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 		Level:          datapb.SegmentLevel_L1,
 		NumOfRows:      50,
 		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath("files/insert_log/100/10/10", 1),
+		DmlPosition:    &msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 2},
 	})
 	require.NoError(s.T(), s.testServer.meta.AddSegment(ctx, seg))
 
@@ -334,6 +337,10 @@ func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 		SegLevel:        datapb.SegmentLevel_L1,
 		WithFullBinlogs: true,
 		StorageVersion:  storage.StorageV3,
+		ManifestPath:    packed.MarshalManifestPath("files/insert_log/100/10/10", 2),
+		Stats: &datapb.Statistics{FieldLogicalSizes: &datapb.FieldLogicalSizes{Version: 1, RowCount: 100,
+			Fields: map[int64]*datapb.FieldLogicalSize{101: {}},
+		}},
 		Field2BinlogPaths: []*datapb.FieldBinlog{{
 			FieldID: 1,
 			Binlogs: []*datapb.Binlog{{LogID: 1}},
@@ -341,9 +348,20 @@ func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 		CheckPoints: []*datapb.CheckPoint{{SegmentID: 10, NumOfRows: 100, Position: &msgpb.MsgPosition{
 			ChannelName: "ch1",
 			MsgID:       []byte{1, 2, 3},
-			Timestamp:   1,
+			Timestamp:   3,
 		}}},
 	}
+	stale := proto.CloneOf(req)
+	stale.CheckPoints[0].Position.Timestamp = 1
+	staleResp, err := s.testServer.SaveBinlogPaths(ctx, stale)
+	require.NoError(s.T(), err)
+	require.ErrorIs(s.T(), merr.Error(staleResp), merr.ErrServiceUnavailable)
+	require.Equal(s.T(), commonpb.SegmentState_Growing, s.testServer.meta.GetSegment(ctx, 10).GetState())
+	before, err := manager.Latest(ctx, 100)
+	require.NoError(s.T(), err)
+	_, present := before.Stats(10)
+	require.False(s.T(), present)
+	before.Deref()
 	// The first catalog.Update attempt fails (injected) and the in-function
 	// retry converges on the second attempt, all within this single call:
 	// the caller sees success, the segment is Flushed (and, under the
@@ -385,6 +403,12 @@ func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 	require.NotNil(s.T(), ref)
 	partition = ref.DataView().GetShards()[0].GetPartitions()[0]
 	require.Equal(s.T(), []int64{10}, partition.GetSegmentIds())
+	require.NotNil(s.T(), meta.SegmentFieldLogicalSizes(flushed.SegmentInfo).GetFields()[101])
+	req.Stats.FieldLogicalSizes.Fields[101].PayloadBytes = 1
+	resp, err = s.testServer.SaveBinlogPaths(ctx, req)
+	require.NoError(s.T(), err)
+	require.ErrorIs(s.T(), merr.Error(resp), merr.ErrDataIntegrity)
+	require.Zero(s.T(), s.testServer.meta.GetSegment(ctx, 10).GetStats().GetFieldLogicalSizes().GetFields()[101].GetPayloadBytes())
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_StorageVersionImmutable() {
@@ -4419,8 +4443,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		require.NoError(t, err)
 		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 903, CollectionID: 100, State: commonpb.SegmentState_Flushed,
-			StorageVersion: storage.StorageV3,
-			ManifestPath:   packed.MarshalManifestPath("/seg/903", 1),
+			StorageVersion: storage.StorageV3, NumOfRows: 1,
+			ManifestPath: packed.MarshalManifestPath("/seg/903", 1), FieldLogicalSizesManifest: packed.MarshalManifestPath("/seg/903", 1),
+			Stats: &datapb.Statistics{FieldLogicalSizes: &datapb.FieldLogicalSizes{Version: 1, RowCount: 1, Fields: map[int64]*datapb.FieldLogicalSize{100: {PayloadBytes: 9}}}},
 		}})
 		jsonStr := `{
           "success": true,
@@ -4446,6 +4471,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.True(t, merr.Ok(resp.GetStatus()))
 		assert.Equal(t, int32(1), resp.GetCommittedSegments())
 		assert.Equal(t, 1, recomputeCalls, "a V3 commit must recompute the DataView")
+		assert.Nil(t, m.GetSegment(ctx, 903).GetStats().GetFieldLogicalSizes())
 	})
 
 	// V2 metadata updates use the same notification path. Reconciliation of an
@@ -5303,13 +5329,15 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		cfg := meta.CreateStorageConfig()
 		basePath := path.Join(localRoot, "backfill_replace_indexed", "seg810")
 		oldPath := path.Join(basePath, "_data", "100_old.parquet")
-		// Seed a manifest holding an old group for field 100 plus an index
-		// entry on that column.
+		// Seed two columns and an index on the column that Spark will replace.
 		seedManifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{
 			ColumnGroups: []packed.ColumnGroupEntry{{
 				Columns: []string{"100"},
 				Format:  "parquet",
 				Files:   []packed.ColumnGroupFileEntry{{Path: oldPath, StartIndex: 0, EndIndex: 5}},
+			}, {
+				Columns: []string{"101"}, Format: "parquet",
+				Files: []packed.ColumnGroupFileEntry{{Path: path.Join(basePath, "_data", "101.parquet"), EndIndex: 5}},
 			}},
 			Indexes: []packed.ManifestIndexInfo{{
 				ColumnName: "100", IndexName: "idx_100", IndexType: "HNSW",
@@ -5328,8 +5356,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		require.NoError(t, err)
 		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 810, CollectionID: 100, State: commonpb.SegmentState_Flushed,
-			StorageVersion: storage.StorageV3,
-			ManifestPath:   packed.MarshalManifestPath(basePath, 1),
+			StorageVersion: storage.StorageV3, NumOfRows: 5, ManifestPath: seedManifest,
+			FieldLogicalSizesManifest: packed.ManifestPathKey(seedManifest),
+			Stats:                     &datapb.Statistics{FieldLogicalSizes: &datapb.FieldLogicalSizes{Version: 1, RowCount: 5, Fields: map[int64]*datapb.FieldLogicalSize{100: {PayloadBytes: 44}, 101: {}}}},
 		}})
 		require.NoError(t, dm.IndexMeta.CreateIndex(ctx, &model.Index{
 			CollectionID: 100, FieldID: 100, IndexID: 10, IndexName: "idx_100",
@@ -5370,16 +5399,25 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		require.Empty(t, dm.IndexMeta.GetSegmentIndexes(100, 810))
 		// The manifest dropped the column's index entries and re-registered
 		// the field with the new files.
-		manifestPath := m.GetSegment(ctx, 810).GetManifestPath()
+		updated := m.GetSegment(ctx, 810)
+		fields := meta.SegmentFieldLogicalSizes(updated.SegmentInfo).GetFields()
+		require.NotContains(t, fields, int64(100))
+		require.NotNil(t, fields[101])
+		manifestPath := updated.GetManifestPath()
 		indexes, err := packed.GetManifestIndexInfos(manifestPath, cfg)
 		require.NoError(t, err)
 		require.Empty(t, indexes)
 		groups, err := packed.ReadManifestColumnGroups(manifestPath, cfg)
 		require.NoError(t, err)
-		require.Len(t, groups, 1)
-		require.Equal(t, []string{"100"}, groups[0].Columns)
-		require.Len(t, groups[0].Files, 1)
-		require.Equal(t, newPath, groups[0].Files[0].Path)
+		require.Len(t, groups, 2)
+		files := make(map[string]string)
+		for _, group := range groups {
+			require.Len(t, group.Columns, 1)
+			require.Len(t, group.Files, 1)
+			files[group.Columns[0]] = group.Files[0].Path
+		}
+		require.Equal(t, newPath, files["100"])
+		require.Contains(t, files, "101")
 	})
 
 	// Re-submitting an already-committed delta add must return success instead

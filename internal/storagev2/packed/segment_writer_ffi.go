@@ -25,6 +25,7 @@ package packed
 import "C"
 
 import (
+	"maps"
 	"strings"
 	"unsafe"
 
@@ -182,12 +183,18 @@ func (w *FFISegmentWriter) SyncBuffered() error {
 // CommitManifestUpdates (success or failure). Destroy is idempotent; a
 // nil column_groups pointer indicates the handle has already been released.
 type SegmentOutput struct {
-	cOutput     C.LoonSegmentWriteOutput
-	rowsWritten int64
+	cOutput          C.LoonSegmentWriteOutput
+	rowsWritten      int64
+	textLogicalBytes map[int64]uint64
 }
 
 // RowsWritten returns the number of rows the segment writer reported.
 func (f *SegmentOutput) RowsWritten() int64 { return f.rowsWritten }
+
+// TextLogicalBytes returns an independent snapshot of UTF-8 payload bytes by
+// FieldID for TEXT columns encoded across every output row, including NULLs.
+// An absent field has no native total. The snapshot is available after Destroy.
+func (f *SegmentOutput) TextLogicalBytes() map[int64]uint64 { return maps.Clone(f.textLogicalBytes) }
 
 // Destroy releases the C output (LOB file strings + array). Safe to call
 // multiple times — the nil column_groups pointer left behind serves as
@@ -261,10 +268,19 @@ func (w *FFISegmentWriter) Close() (WriterOutput, error) {
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, err
 	}
-	return &SegmentOutput{
-		cOutput:     cOutput,
-		rowsWritten: int64(cOutput.rows_written),
-	}, nil
+	output := &SegmentOutput{cOutput: cOutput, rowsWritten: int64(cOutput.rows_written)}
+	var count C.size_t
+	stats := C.loon_segment_writer_get_text_column_stats(w.handle, &count)
+	if count > 0 {
+		output.textLogicalBytes = make(map[int64]uint64, count)
+		for _, stat := range unsafe.Slice(stats, count) {
+			// A failed Write can advance a LOB counter before the batch is accepted.
+			if stat.total_entries == cOutput.rows_written && stat.total_bytes >= 0 {
+				output.textLogicalBytes[int64(stat.field_id)] = uint64(stat.total_bytes)
+			}
+		}
+	}
+	return output, nil
 }
 
 // buildCSegmentWriterConfig converts Go config to C config.

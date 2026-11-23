@@ -18,14 +18,97 @@ package meta
 
 import (
 	"context"
+	"slices"
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// addStatsDelta folds an increment into a segment's existing Statistics and
+// addStatsDelta applies an in-place rewrite. File aggregates are additive, but
+// the known size of a rewritten column is an absolute replacement. Unmentioned
+// IDs remain accurate because this operation preserves the segment's row set.
+func addStatsDelta(ctx context.Context, segment *SegmentInfo, result *datapb.CompactionSegment, schema *schemapb.CollectionSchema) *datapb.Statistics {
+	out := addFileStatsDelta(ctx, segment.GetID(), segment.GetStats(), result.GetStats())
+	if out == nil {
+		return nil
+	}
+	if typeutil.IsExternalCollection(schema) {
+		out.FieldLogicalSizes = nil
+		return out
+	}
+	rows := segment.GetNumOfRows()
+	if SegmentFieldLogicalSizes(segment.SegmentInfo) == nil {
+		out.FieldLogicalSizes = nil
+	}
+	ids := result.GetFieldLogicalSizeUpdateIds()
+	if len(ids) == 0 {
+		// A legacy writer did not count its output. Its manifest delta or
+		// the ChildFields of its freshly written groups can still identify
+		// exactly which entries to invalidate. Group IDs are not field IDs.
+		ids = legacyMaterializedFieldIDs(result)
+		if len(ids) == 0 {
+			out.FieldLogicalSizes = nil // opaque prebuilt materialization
+		}
+		for _, id := range ids {
+			delete(out.GetFieldLogicalSizes().GetFields(), id)
+		}
+		for _, parent := range schema.GetStructArrayFields() {
+			for _, child := range parent.GetFields() {
+				if slices.Contains(ids, child.GetFieldID()) {
+					delete(out.GetFieldLogicalSizes().GetFields(), parent.GetFieldID())
+					break
+				}
+			}
+		}
+		return out
+	}
+	report := result.GetStats().GetFieldLogicalSizes()
+	measured := result.GetNumOfRows() == rows && storage.FieldLogicalSizesCover(report, rows)
+	for _, id := range ids {
+		size := report.GetFields()[id]
+		if !measured || size == nil {
+			delete(out.GetFieldLogicalSizes().GetFields(), id)
+			continue
+		}
+		if out.FieldLogicalSizes == nil {
+			out.FieldLogicalSizes = &datapb.FieldLogicalSizes{Version: storage.FieldLogicalSizeVersion, RowCount: rows}
+		}
+		if out.FieldLogicalSizes.Fields == nil {
+			out.FieldLogicalSizes.Fields = make(map[int64]*datapb.FieldLogicalSize)
+		}
+		out.FieldLogicalSizes.Fields[id] = proto.Clone(size).(*datapb.FieldLogicalSize)
+	}
+	return out
+}
+
+func legacyMaterializedFieldIDs(result *datapb.CompactionSegment) []int64 {
+	var ids []int64
+	if groups := result.GetManifestDelta().GetColumnGroups(); len(groups) > 0 {
+		for _, group := range groups {
+			columns := group.GetColumns()
+			fields := droppedColumnFieldIDs(columns)
+			if len(fields) == 0 || len(fields) != len(columns) {
+				return nil
+			}
+			ids = append(ids, fields...)
+		}
+		return ids
+	}
+	for _, group := range result.GetInsertLogs() {
+		if len(group.GetChildFields()) == 0 {
+			return nil
+		}
+		ids = append(ids, group.GetChildFields()...)
+	}
+	return ids
+}
+
+// addFileStatsDelta folds an increment into a segment's existing Statistics and
 // returns a fresh object; neither input is mutated, and the result never
 // aliases base or delta — including when delta is nil, in which case an
 // independent copy of base is returned rather than base itself — so a
@@ -42,7 +125,7 @@ import (
 // add columns, so every field is expected to be non-negative. Each result is
 // clamped at zero anyway: nothing emits a negative increment today, and the
 // clamp keeps a future producer that does from silently corrupting Stats.
-func addStatsDelta(ctx context.Context, segmentID int64, base, delta *datapb.Statistics) *datapb.Statistics {
+func addFileStatsDelta(ctx context.Context, segmentID int64, base, delta *datapb.Statistics) *datapb.Statistics {
 	if delta == nil {
 		// Still hand back an independent copy: the caller may freely mutate
 		// the result, and that must never reach back into the segment's

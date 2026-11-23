@@ -479,6 +479,7 @@ func (t *ClusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 			IsSortedByNamespace: segInfo.GetIsSortedByNamespace(),
 			StorageVersion:      segInfo.GetStorageVersion(),
 			Manifest:            segInfo.GetManifestPath(),
+			FieldLogicalSizes:   meta.SegmentFieldLogicalSizes(segInfo.SegmentInfo),
 			CommitTimestamp:     segInfo.GetCommitTimestamp(),
 		})
 	}

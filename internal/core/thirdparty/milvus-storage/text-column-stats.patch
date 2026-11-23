@@ -1,0 +1,138 @@
+diff --git a/cpp/include/milvus-storage/ffi_c.h b/cpp/include/milvus-storage/ffi_c.h
+index 235fbd6daa2972606ce9fea5a6b90490b5c443aa..2e836646697586250570ae2f0840e5842f59e3ff 100644
+--- a/cpp/include/milvus-storage/ffi_c.h
++++ b/cpp/include/milvus-storage/ffi_c.h
+@@ -1071,6 +1071,14 @@ FFI_EXPORT LoonFFIResult loon_segment_writer_flush(LoonSegmentWriterHandle handl
+  */
+ FFI_EXPORT LoonFFIResult loon_segment_writer_close(LoonSegmentWriterHandle handle, LoonSegmentWriteOutput* out_output);
+
++/**
++ * @brief Returns the encoded TEXT column counters after a successful close.
++ * The array is borrowed until loon_segment_writer_destroy. Before close, or
++ * when no TEXT columns were encoded, the count is zero.
++ */
++FFI_EXPORT const LoonTextColumnStats* loon_segment_writer_get_text_column_stats(LoonSegmentWriterHandle handle,
++                                                                                size_t* out_count);
++
+ /**
+  * @brief Destroys a SegmentWriter handle
+  *
+diff --git a/cpp/include/milvus-storage/ffi_types.h b/cpp/include/milvus-storage/ffi_types.h
+index 2a25daa84ad066ba00e0196d708329cd62e3df55..a72d067b5c370f72870f67a7f70ab100fcd2e01e 100644
+--- a/cpp/include/milvus-storage/ffi_types.h
++++ b/cpp/include/milvus-storage/ffi_types.h
+@@ -14,6 +14,8 @@
+
+ #pragma once
+
++#include <stdint.h>
++
+ // Visibility macro for FFI exports when building Python bindings
+ #if defined(__GNUC__) || defined(__clang__)
+ #define FFI_EXPORT __attribute__((visibility("default")))
+@@ -25,3 +27,10 @@ typedef struct LoonFFIResult {
+   int err_code;
+   char* message;
+ } LoonFFIResult;
++
++// Counters from encoding the UTF-8 body of one segment output column.
++typedef struct LoonTextColumnStats {
++  int64_t field_id;
++  int64_t total_entries;  // includes nulls
++  int64_t total_bytes;    // excludes nulls and reference encoding
++} LoonTextColumnStats;
+diff --git a/cpp/include/milvus-storage/segment/segment_writer.h b/cpp/include/milvus-storage/segment/segment_writer.h
+index 8aa76059b93b2e5babf4b8a0282f24d5d0fa6865..06b27e94bfbf76b39acb92ff4fd933dd55b1466b 100644
+--- a/cpp/include/milvus-storage/segment/segment_writer.h
++++ b/cpp/include/milvus-storage/segment/segment_writer.h
+@@ -26,6 +26,7 @@
+ #include <vector>
+
+ #include "milvus-storage/column_groups.h"
++#include "milvus-storage/ffi_types.h"
+ #include "milvus-storage/properties.h"
+ #include "milvus-storage/lob_column/lob_column_manager.h"
+ #include "milvus-storage/manifest.h"
+@@ -167,6 +168,9 @@ class SegmentWriter {
+   // check if the writer is closed
+   virtual bool IsClosed() const = 0;
+
++  // Populated by a successful Close. The writer owns the snapshot.
++  virtual const std::vector<LoonTextColumnStats>& GetTextColumnStats() const = 0;
++
+   protected:
+   SegmentWriter() = default;
+ };
+diff --git a/cpp/src/ffi/segment_writer_c.cpp b/cpp/src/ffi/segment_writer_c.cpp
+index 3111a4789c019ed7a7a96435043cf67cb0bde2cd..0607b5dc7437063f67a17510de1f40b7f166acce 100644
+--- a/cpp/src/ffi/segment_writer_c.cpp
++++ b/cpp/src/ffi/segment_writer_c.cpp
+@@ -190,6 +190,20 @@ LoonFFIResult loon_segment_writer_close(LoonSegmentWriterHandle handle, LoonSegm
+   RETURN_UNREACHABLE();
+ }
+
++const LoonTextColumnStats* loon_segment_writer_get_text_column_stats(LoonSegmentWriterHandle handle,
++                                                                     size_t* out_count) {
++  if (!out_count) {
++    return nullptr;
++  }
++  *out_count = 0;
++  if (!handle) {
++    return nullptr;
++  }
++  const auto& stats = reinterpret_cast<SegmentWriter*>(handle)->GetTextColumnStats();
++  *out_count = stats.size();
++  return stats.data();
++}
++
+ void loon_segment_write_output_free(LoonSegmentWriteOutput* output) {
+   if (output) {
+     if (output->lob_files) {
+diff --git a/cpp/src/segment/segment_writer.cpp b/cpp/src/segment/segment_writer.cpp
+index 89489b6fdc2e3c05627e64f3999bc3b40805810e..1f9692982d110273068439b4aa7526e9d71ef347 100644
+--- a/cpp/src/segment/segment_writer.cpp
++++ b/cpp/src/segment/segment_writer.cpp
+@@ -178,12 +178,18 @@ class SegmentWriterImpl : public SegmentWriter {
+     ARROW_RETURN_NOT_OK(Flush());
+
+     // close all TEXT column writers and collect LOB file results
++    std::vector<LoonTextColumnStats> text_column_stats;
++    text_column_stats.reserve(lob_writers_.size());
+     for (auto& [col_idx, writer] : lob_writers_) {
+       ARROW_ASSIGN_OR_RAISE(auto lob_files, writer->Close());
+       lob_file_results_[col_idx] = std::move(lob_files);
+
+       auto text_stats = writer->GetStats();
+       stats_.lob_files_created += text_stats.lob_files_created;
++      const auto field_id = GetFieldId(original_schema_->field(col_idx));
++      if (config_.lob_columns.at(field_id).data_type == lob_column::LobDataType::kText) {
++        text_column_stats.push_back({field_id, text_stats.total_entries, text_stats.total_bytes});
++      }
+     }
+
+     // close LOB readers (rewrite mode)
+@@ -212,6 +218,7 @@ class SegmentWriterImpl : public SegmentWriter {
+       }
+     }
+
++    text_column_stats_ = std::move(text_column_stats);
+     closed_ = true;
+
+     SegmentWriteOutput output;
+@@ -252,6 +259,8 @@ class SegmentWriterImpl : public SegmentWriter {
+
+   bool IsClosed() const override { return closed_; }
+
++  const std::vector<LoonTextColumnStats>& GetTextColumnStats() const override { return text_column_stats_; }
++
+   private:
+   std::shared_ptr<arrow::fs::FileSystem> fs_;
+   std::shared_ptr<arrow::Schema> original_schema_;
+@@ -279,6 +288,7 @@ class SegmentWriterImpl : public SegmentWriter {
+
+   // statistics
+   SegmentWriterStats stats_;
++  std::vector<LoonTextColumnStats> text_column_stats_;
+ };
+
+ // factory function

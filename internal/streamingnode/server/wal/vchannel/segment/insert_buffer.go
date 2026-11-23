@@ -59,6 +59,7 @@ func (b *writeOnlyInsertBuffer) flushPack(meta *streamingpb.SegmentAssignmentMet
 		FromTimeTick: b.fromTimeTick,
 		ToTimeTick:   b.toTimeTick,
 		Schema:       schema,
+		PreviousRows: meta.GetStat().GetModifiedRows(),
 		Rows:         b.rows,
 		BinarySize:   b.binarySize,
 		Inserts:      b.Messages(),

@@ -70,6 +70,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 		}
 	}()
 
+	lineage := newTextSizeLineage(writerSchema, lobContext, binlogs)
 	segmentFilters := make([]compaction.EntityFilter, len(binlogs))
 	for i, s := range binlogs {
 		textDecodeConfigs, err := lobContext.GetSourceTextColumnConfigs(s.GetManifest())
@@ -91,6 +92,9 @@ func mergeSortMultipleSegments(ctx context.Context,
 			return nil, err
 		}
 		reader = newMaterializedRecordReader(reader, materializer)
+		if lineage != nil {
+			lineage.sources[i].present = existingFields
+		}
 		segmentReaders[i] = wrapReaderWithTimestampOverwrite(reader, s.GetCommitTimestamp())
 		delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField.DataType, s,
 			storage.WithDownloader(binlogIO.Download),
@@ -136,7 +140,11 @@ func mergeSortMultipleSegments(ctx context.Context,
 		log.Warn(ctx, "compaction only support int64 and varchar pk field")
 	}
 
-	if _, err = storage.MergeSort(compactionParams.BinLogMaxSize, writerSchema, segmentReaders, writer, predicate, sortByFields); err != nil {
+	var output storage.RecordWriter = writer
+	if lineage != nil {
+		output = &mergeTextSizeWriter{MultiSegmentWriter: writer, lineage: lineage}
+	}
+	if _, err = storage.MergeSort(compactionParams.BinLogMaxSize, writerSchema, segmentReaders, output, predicate, sortByFields); err != nil {
 		// segmentReaders[i] is built from binlogs[i], so the reader index the
 		// error names, when it names one, indexes into this list.
 		segmentIDs := make([]int64, len(binlogs))
@@ -158,6 +166,9 @@ func mergeSortMultipleSegments(ctx context.Context,
 		for i, segment := range binlogs {
 			totalDeleted := int64(segmentFilters[i].GetDeletedCount() + segmentFilters[i].GetExpiredCount())
 			lobContext.SetSegmentRowStats(segment.GetSegmentID(), segmentTotalRows[i], totalDeleted)
+			if lineage != nil {
+				lineage.sources[i].read = segmentTotalRows[i]
+			}
 		}
 	}
 
@@ -167,6 +178,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	}
 
 	res := writer.GetCompactionSegments()
+	lineage.finish(res)
 	isNamespaceSorted := plan.GetSchema().GetEnableNamespace()
 	for _, seg := range res {
 		seg.IsSorted = !isNamespaceSorted

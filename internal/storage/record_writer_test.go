@@ -17,18 +17,309 @@
 package storage
 
 import (
+	"math"
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/apache/arrow/go/v17/parquet/file"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestPackedRecordBatchWriterFieldLogicalSizes(t *testing.T) {
+	// The target writes only name and TEXT. The reader also carries an anchor
+	// and has a different column order. Both target fields share a column group.
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, DataType: schemapb.DataType_VarChar},
+		{FieldID: 101, DataType: schemapb.DataType_Text, Nullable: true},
+	}}
+	target, err := ConvertToArrowSchema(schema, true)
+	require.NoError(t, err)
+	target = overrideTextFieldsToBinary(schema, target)
+	reader := arrow.NewSchema([]arrow.Field{{Name: "anchor", Type: arrow.PrimitiveTypes.Int64}, target.Field(1), target.Field(0)}, nil)
+	input := func(ref []byte) Record {
+		b := array.NewRecordBuilder(memory.DefaultAllocator, reader)
+		defer b.Release()
+		b.Field(0).AppendEmptyValue()
+		b.Field(1).(*array.BinaryBuilder).Append(ref)
+		b.Field(2).(*array.StringBuilder).Append("猫")
+		return NewSimpleArrowRecord(b.NewRecord(), map[FieldID]int{0: 0, 101: 1, 100: 2})
+	}
+	inline, external := input([]byte{0, 'x'}), input(append([]byte{1}, make([]byte, 23)...))
+	defer inline.Release()
+	defer external.Release()
+	w := &packedRecordBatchWriter{
+		v3BatchStats: v3BatchStats{columnGroupUncompressed: make(map[int64]uint64)},
+		writer:       &packed.FFIPackedWriter{}, schema: schema, arrowSchema: target,
+		columnGroups: []storagecommon.ColumnGroup{{GroupID: 7, Columns: []int{0, 1}, Fields: []int64{100, 101}}},
+	}
+	writes := 0
+	write := mockey.Mock((*packed.FFIPackedWriter).WriteRecordBatch).To(func(_ *packed.FFIPackedWriter, rec arrow.Record) error {
+		require.True(t, target.Equal(rec.Schema()))
+		writes++
+		if writes == 2 {
+			return merr.ErrServiceUnavailable
+		}
+		return nil
+	}).Build()
+	defer write.UnPatch()
+	require.Nil(t, w.GetFieldLogicalSizes())
+	require.NoError(t, w.Write(inline))
+	first := w.GetFieldLogicalSizes()
+	require.EqualValues(t, 1, first.Version)
+	require.EqualValues(t, 1, first.RowCount)
+	require.Len(t, first.Fields, 2)
+	requireLogicalSize(t, first.Fields[100], 3, 0)
+	requireLogicalSize(t, first.Fields[101], 1, 1)
+	first.Fields[101].PayloadBytes = 999
+	delete(first.Fields, 100)
+
+	require.ErrorIs(t, w.Write(external), merr.ErrServiceUnavailable)
+	afterFailure := w.GetFieldLogicalSizes()
+	require.EqualValues(t, 1, afterFailure.RowCount)
+	requireLogicalSize(t, afterFailure.Fields[100], 3, 0)
+	requireLogicalSize(t, afterFailure.Fields[101], 1, 1)
+	require.NoError(t, w.Write(external))
+	require.NoError(t, w.Write(inline))
+	last := w.GetFieldLogicalSizes()
+	require.EqualValues(t, 3, last.RowCount)
+	requireLogicalSize(t, last.Fields[100], 9, 0)
+	require.NotContains(t, last.Fields, int64(101), "later inline rows cannot repair an unknown prefix")
+	require.Equal(t, w.GetWrittenUncompressed(), w.GetColumnGroupWrittenUncompressed(7))
+
+	manifest := &PackedManifestRecordWriter{writer: w}
+	require.Nil(t, manifest.GetFieldLogicalSizes(), "written files without a manifest cannot publish statistics")
+	manifest.manifest = "committed"
+	manifest.GetFieldLogicalSizes().Fields[100].PayloadBytes = 1
+	requireLogicalSize(t, manifest.GetFieldLogicalSizes().Fields[100], 9, 0)
+
+	w.rowNum = math.MaxInt64
+	require.ErrorIs(t, w.Write(inline), merr.ErrServiceInternal)
+	require.Equal(t, 4, writes, "row overflow must be rejected before the native write")
+}
+
+func TestPackedRecordBatchWriterFieldLogicalSizesAcrossGroups(t *testing.T) {
+	const pk, text int64 = 100, 101
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: pk, DataType: schemapb.DataType_VarChar, IsPrimaryKey: true},
+		{FieldID: text, DataType: schemapb.DataType_VarChar, Nullable: true},
+	}}
+	target, err := ConvertToArrowSchema(schema, true)
+	require.NoError(t, err)
+	b := array.NewRecordBuilder(memory.DefaultAllocator, target)
+	defer b.Release()
+	b.Field(0).(*array.StringBuilder).AppendValues([]string{"A", "猫", "B"}, nil)
+	b.Field(1).(*array.StringBuilder).AppendValues([]string{"", "", strings.Repeat("v", 4096)}, []bool{true, false, true})
+	data := b.NewRecord()
+	defer data.Release()
+	mapping := map[FieldID]int{pk: 0, text: 1}
+	for _, tc := range []struct {
+		name        string
+		compression string
+		groups      []storagecommon.ColumnGroup
+		ends        []int64
+	}{
+		{
+			name:        "one gzip group and batch",
+			compression: "gzip",
+			groups:      []storagecommon.ColumnGroup{{GroupID: 7, Columns: []int{0, 1}, Fields: []int64{pk, text}}},
+			ends:        []int64{3},
+		},
+		{
+			name:        "two compressed groups and batches",
+			compression: "zstd",
+			groups: []storagecommon.ColumnGroup{
+				{GroupID: 7, Columns: []int{0}, Fields: []int64{pk}},
+				{GroupID: 8, Columns: []int{1}, Fields: []int64{text}},
+			},
+			ends: []int64{1, 3},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+			native, err := packed.NewFFIPackedWriter(cfg.RootPath, target, tc.groups, cfg, nil, map[string]string{
+				packed.PropertyWriterFormat: "parquet",
+				"writer.compression":        tc.compression,
+			})
+			require.NoError(t, err)
+			w := &packedRecordBatchWriter{
+				v3BatchStats: v3BatchStats{columnGroupUncompressed: make(map[int64]uint64)},
+				writer:       native,
+				schema:       schema,
+				arrowSchema:  target,
+				columnGroups: tc.groups,
+			}
+			defer w.Abort()
+			var start int64
+			for _, end := range tc.ends {
+				rec := NewSimpleArrowRecord(data.NewSlice(start, end), mapping)
+				err := w.Write(rec)
+				rec.Release()
+				require.NoError(t, err)
+				start = end
+			}
+			out, err := w.Close()
+			require.NoError(t, err)
+			defer out.Destroy()
+			sizes := w.GetFieldLogicalSizes()
+			require.EqualValues(t, 3, sizes.GetRowCount())
+			require.Len(t, sizes.Fields, 2)
+			requireLogicalSize(t, sizes.Fields[pk], 5, 0)
+			requireLogicalSize(t, sizes.Fields[text], 4096, 3)
+
+			groups, err := out.(*packed.ColumnGroups).ColumnGroupEntries()
+			require.NoError(t, err)
+			require.Len(t, groups, len(tc.groups))
+			for _, group := range groups {
+				require.Len(t, group.Files, 1)
+				r, err := file.OpenParquetFile(group.Files[0].Path, false)
+				require.NoError(t, err)
+				t.Cleanup(func() { _ = r.Close() })
+				column, err := r.MetaData().RowGroup(0).ColumnChunk(0)
+				require.NoError(t, err)
+				require.Equal(t, tc.compression, strings.ToLower(column.Compression().String()))
+			}
+		})
+	}
+}
+
+func TestPackedRecordBatchWriterCopiedTextFieldLogicalSizes(t *testing.T) {
+	const inline, external int64 = 100, 101
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: inline, DataType: schemapb.DataType_Text, Nullable: true},
+		{FieldID: external, DataType: schemapb.DataType_Text, Nullable: true},
+	}}
+	target, err := ConvertToArrowSchema(schema, true)
+	require.NoError(t, err)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, overrideTextFieldsToBinary(schema, target))
+	defer builder.Release()
+	for i, first := range [][]byte{append([]byte{0}, strings.Repeat("v", 23)...), append([]byte{1}, make([]byte, 23)...)} {
+		col := builder.Field(i).(*array.BinaryBuilder)
+		col.Append(first)
+		col.Append([]byte{0})
+		col.AppendNull()
+	}
+	rec := NewSimpleArrowRecord(builder.NewRecord(), map[FieldID]int{inline: 0, external: 1})
+	defer rec.Release()
+
+	// The reference points at a LOB that does not exist anywhere in this root.
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+	groups := []storagecommon.ColumnGroup{{GroupID: 7, Columns: []int{0, 1}, Fields: []int64{inline, external}}}
+	w, err := NewPartialPackedRecordBatchWriterWithTextRefsAsBinary(cfg.RootPath, schema, 0, 0, groups, cfg, nil, "parquet", nil)
+	require.NoError(t, err)
+	defer w.Abort()
+	before, err := storagev2.GetFilesystemMetricsWithConfig(cfg)
+	require.NoError(t, err)
+	require.Contains(t, before, "origin")
+	require.NoError(t, w.Write(rec))
+	out, err := w.Close()
+	require.NoError(t, err)
+	defer out.Destroy()
+	sizes := w.GetFieldLogicalSizes()
+	require.EqualValues(t, 3, sizes.GetRowCount())
+	requireLogicalSize(t, sizes.Fields[inline], 23, 3)
+	require.NotContains(t, sizes.Fields, external)
+	after, err := storagev2.GetFilesystemMetricsWithConfig(cfg)
+	require.NoError(t, err)
+	require.Contains(t, after, "origin")
+	require.Equal(t, before["origin"].ReadCount, after["origin"].ReadCount)
+	require.Equal(t, before["origin"].ReadBytes, after["origin"].ReadBytes)
+}
+
+func TestPartialPackedBatchWriterFieldLogicalSizes(t *testing.T) {
+	ages := &schemapb.FieldSchema{FieldID: 201, Name: "age", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int16, ElementNullable: true, Nullable: true}
+	names := &schemapb.FieldSchema{FieldID: 202, Name: "name", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar, ElementNullable: true, Nullable: true}
+	scalar := &schemapb.FieldSchema{FieldID: 100, DataType: schemapb.DataType_Int64, Nullable: true}
+	target := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{scalar, {FieldID: 101, DataType: schemapb.DataType_VarChar}},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{FieldID: 200, Nullable: true, Fields: []*schemapb.FieldSchema{ages, names}}}}
+	// The partial writer receives only physical FieldSchemas (not their
+	// parents), interleaved with a top-level field in native group order.
+	projected := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{names, scalar, ages}}
+	arrowSchema, err := ConvertToArrowSchema(projected, true)
+	require.NoError(t, err)
+	w := &packedRecordBatchWriter{writer: &packed.FFIPackedWriter{}, schema: projected, arrowSchema: arrowSchema}
+	require.NoError(t, w.SetFieldLogicalSizeSchema(target))
+	b := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	defer b.Release()
+	nameList := b.Field(0).(*array.ListBuilder)
+	nameList.Append(true)
+	nameList.ValueBuilder().(*array.StringBuilder).AppendValues([]string{"猫", ""}, nil)
+	nameList.AppendNull()
+	b.Field(1).AppendEmptyValues(2)
+	ageList := b.Field(2).(*array.ListBuilder)
+	ageList.Append(true)
+	ageList.ValueBuilder().(*array.Int16Builder).AppendValues([]int16{7, 0}, []bool{true, false})
+	ageList.AppendNull()
+	rec := NewSimpleArrowRecord(b.NewRecord(), map[FieldID]int{202: 0, 100: 1, 201: 2})
+	defer rec.Release()
+	write := mockey.Mock((*packed.FFIPackedWriter).WriteRecordBatch).Return(nil).Build()
+	defer write.UnPatch()
+	require.NoError(t, w.Write(rec))
+	require.ErrorIs(t, w.SetFieldLogicalSizeSchema(target), merr.ErrServiceInternal)
+	snapshot := w.GetFieldLogicalSizes()
+	require.Len(t, snapshot.Fields, 4)
+	requireLogicalSize(t, snapshot.Fields[200], 0, 2) // one shared row mask
+	requireLogicalSize(t, snapshot.Fields[201], 2, 2) // only element validity
+	requireLogicalSize(t, snapshot.Fields[202], 3, 2)
+	requireLogicalSize(t, snapshot.Fields[100], 16, 2)
+	require.NotContains(t, snapshot.Fields, int64(101))
+}
+
+func TestPackedTextBatchWriterNativeFieldLogicalSizes(t *testing.T) {
+	const rewritten, missingTotal, copiedExternal, copiedInline, pk int64 = 100, 101, 102, 103, 104
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: rewritten, DataType: schemapb.DataType_Text, Nullable: true},
+		{FieldID: missingTotal, DataType: schemapb.DataType_Text, Nullable: true},
+		{FieldID: copiedExternal, DataType: schemapb.DataType_Text},
+		{FieldID: copiedInline, DataType: schemapb.DataType_Text, Nullable: true},
+		{FieldID: pk, DataType: schemapb.DataType_Int64},
+	}}
+	arrowSchema, err := ConvertToArrowSchema(schema, true)
+	require.NoError(t, err)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, overrideTextFieldsToBinary(schema, arrowSchema))
+	defer builder.Release()
+	for _, i := range []int{0, 1, 3} {
+		col := builder.Field(i).(*array.BinaryBuilder)
+		col.Append(append([]byte{0}, "猫"...))
+		col.AppendNull()
+	}
+	external := builder.Field(2).(*array.BinaryBuilder)
+	external.Append(append([]byte{1}, make([]byte, 23)...))
+	external.Append([]byte{0})
+	builder.Field(4).AppendEmptyValues(2)
+	rec := builder.NewRecord()
+	defer rec.Release()
+
+	w := &packedTextBatchWriter{v3BatchStats: v3BatchStats{
+		logicalLayout: newLogicalSizeLayout(schema, schema, typeutil.NewUniqueSet(rewritten, missingTotal)),
+	}}
+	require.NoError(t, w.writeBatch(rec, schema, nil, func(uint64) error { return nil }))
+	before := w.GetFieldLogicalSizes()
+	require.NotContains(t, before.Fields, rewritten, "Go must skip even inline values when native owns the payload")
+	require.NotContains(t, before.Fields, missingTotal)
+	requireLogicalSize(t, before.Fields[copiedInline], 3, 2)
+
+	w.finishTextSizes(2, map[int64]uint64{rewritten: 65537, copiedInline: 99, copiedExternal: 99, pk: 99})
+	s := w.GetFieldLogicalSizes()
+	requireLogicalSize(t, s.Fields[rewritten], 65537, 2)
+	require.NotContains(t, s.Fields, missingTotal)
+	require.NotContains(t, s.Fields, copiedExternal)
+	requireLogicalSize(t, s.Fields[copiedInline], 3, 2)
+	requireLogicalSize(t, s.Fields[pk], 16, 0)
+	w.finishTextSizes(3, nil)
+	require.Nil(t, w.GetFieldLogicalSizes(), "native row count doesn't match the accepted prefix")
+}
 
 // TestToWriterRecordProjectsOverWideRecord pins the schema-bump additive
 // regression: the reader hands the writer a record carrying the row anchor in

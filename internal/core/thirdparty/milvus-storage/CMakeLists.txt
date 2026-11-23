@@ -57,6 +57,9 @@ FetchContent_Declare(
         milvus-storage
         GIT_REPOSITORY  ${GIT_REPOSITORY}
         GIT_TAG         ${milvus-storage_VERSION}
+        # Remove when the pin exposes TEXT counters. FetchContent source-dir
+        # overrides skip PATCH_COMMAND and must supply an already patched tree.
+        PATCH_COMMAND   ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_LIST_DIR}/apply-text-column-stats.cmake
         SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/milvus-storage-src
         BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/milvus-storage-build
         SOURCE_SUBDIR   cpp

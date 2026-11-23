@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"path"
 	"strings"
 	"testing"
@@ -202,6 +203,9 @@ func (s *ClusteringCompactionTaskStorageV3Suite) TestScalarCompactionWithManifes
 	var totalRows int64
 	for _, segment := range compactionResult.GetSegments() {
 		totalRows += segment.GetNumOfRows()
+		sizes := segment.GetStats().GetFieldLogicalSizes()
+		s.EqualValues(segment.GetNumOfRows(), sizes.GetRowCount())
+		s.EqualValues(segment.GetNumOfRows()*8, sizes.GetFields()[common.RowIDField].GetPayloadBytes())
 		s.EqualValues(storage.StorageV3, segment.GetStorageVersion())
 		s.NotEmpty(segment.GetManifest())
 		s.NotEmpty(segment.GetInsertLogs())
@@ -372,7 +376,7 @@ func (s *MixCompactionTaskStorageV3Suite) TestMergeSortPreservesTextLobFiles() {
 
 	totalSourceLobFiles := 0
 	for _, segmentID := range []int64{10, 11} {
-		binlogs, _, _, _, manifest, _, _, err := s.initTextLOBStorageV3Segment(2, segmentID, alloc)
+		binlogs, _, _, _, manifest, _, stats, err := s.initTextLOBStorageV3Segment(2, segmentID, alloc)
 		s.Require().NoError(err)
 		s.Require().NotEmpty(manifest)
 
@@ -382,14 +386,15 @@ func (s *MixCompactionTaskStorageV3Suite) TestMergeSortPreservesTextLobFiles() {
 		totalSourceLobFiles += len(lobFiles)
 
 		s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
-			CollectionID:   CollectionID,
-			PartitionID:    PartitionID,
-			SegmentID:      segmentID,
-			FieldBinlogs:   storage.SortFieldBinlogs(binlogs),
-			Deltalogs:      []*datapb.FieldBinlog{},
-			StorageVersion: storage.StorageV3,
-			Manifest:       manifest,
-			IsSorted:       true,
+			CollectionID:      CollectionID,
+			PartitionID:       PartitionID,
+			SegmentID:         segmentID,
+			FieldBinlogs:      storage.SortFieldBinlogs(binlogs),
+			Deltalogs:         []*datapb.FieldBinlog{},
+			StorageVersion:    storage.StorageV3,
+			Manifest:          manifest,
+			IsSorted:          true,
+			FieldLogicalSizes: stats.GetFieldLogicalSizes(),
 		})
 	}
 
@@ -404,6 +409,7 @@ func (s *MixCompactionTaskStorageV3Suite) TestMergeSortPreservesTextLobFiles() {
 	s.EqualValues(storage.StorageV3, segment.GetStorageVersion())
 	s.NotEmpty(segment.GetManifest())
 	s.True(segment.GetIsSorted())
+	s.EqualValues(4*(256+len("segment-10-row-0-")), segment.GetStats().GetFieldLogicalSizes().GetFields()[StringField].GetPayloadBytes())
 
 	outputLobFiles, err := packed.GetManifestLobFiles(segment.GetManifest(), s.task.compactionParams.StorageConfig)
 	s.Require().NoError(err)
@@ -500,6 +506,7 @@ func (s *MixCompactionTaskStorageV3Suite) initTextLOBStorageV3Segment(rows int, 
 		WithPartitionID(PartitionID).
 		WithSegmentID(segmentID).
 		WithChannelName(channelName).
+		WithBatchRows(int64(rows)).
 		WithInsertData(genTextLOBInsertData(rows, segmentID, s.meta.GetSchema()))
 	schema := s.meta.GetSchema()
 	fields := typeutil.GetAllFieldSchemas(schema)
@@ -553,6 +560,53 @@ func genTextLOBCompactionSchema() *schemapb.CollectionSchema {
 	}
 }
 
+// The merge seeds its readers in [1000, 9] order but emits [9, 1000]. Each
+// source is complete in one distinct output. Its own body total must follow
+// its emitted row even though both external references occupy the same bytes.
+func (s *MixCompactionTaskStorageV3Suite) TestMergeSortRoutesReusedTextToActualOutputs() {
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.TextInlineThreshold.Key, "1")
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.TextInlineThreshold.Key)
+	schema := genTextLOBCompactionSchema()
+	s.meta.Schema = schema
+	plan := s.task.plan
+	plan.Schema, plan.SegmentBinlogs, plan.TotalRows, plan.MaxSize = schema, nil, 2, 1
+	s.task.sortByFieldIDs = []int64{Int64Field}
+	s.task.compactionParams = compaction.GenParams()
+	s.task.compactionParams.UseMergeSort, s.task.compactionParams.BinLogMaxSize = true, 1
+	alloc := allocator.NewLocalAllocator(7777777, math.MaxInt64)
+	expected := make(map[int64]uint64)
+	for _, id := range []int64{1000, 9} {
+		_, _, _, _, manifest, _, stats, err := s.initTextLOBStorageV3Segment(1, id, alloc)
+		s.Require().NoError(err)
+		payload := uint64(len(fmt.Sprintf("segment-%d-row-0-", id)) + 256)
+		s.Require().EqualValues(payload, stats.GetFieldLogicalSizes().GetFields()[StringField].GetPayloadBytes())
+		expected[id*100] = payload
+		// Missing group-size estimates allow REUSE despite the real rotation.
+		plan.SegmentBinlogs = append(plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
+			CollectionID: CollectionID, PartitionID: PartitionID, SegmentID: id,
+			StorageVersion: storage.StorageV3, Manifest: manifest, IsSorted: true,
+			FieldLogicalSizes: stats.GetFieldLogicalSizes(),
+		})
+	}
+	cfg := s.task.compactionParams.StorageConfig
+	lobDir := path.Join(storage.SegmentPartitionBasePath(cfg.GetRootPath(), CollectionID, PartitionID), "lobs", fmt.Sprint(StringField))
+	s.Require().NoError(os.Rename(lobDir, lobDir+".unavailable"))
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().Len(result.GetSegments(), 2)
+	for _, out := range result.GetSegments() {
+		cols, rows := readAllColumns(s.T(), cfg, out.GetManifest(), &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{typeutil.GetField(schema, Int64Field)}})
+		s.Require().Equal(1, rows)
+		pk := cols[Int64Field][0].(int64)
+		s.Require().Contains(expected, pk)
+		sizes := out.GetStats().GetFieldLogicalSizes()
+		s.EqualValues(1, sizes.GetRowCount())
+		s.EqualValues(expected[pk], sizes.GetFields()[StringField].GetPayloadBytes())
+		delete(expected, pk)
+	}
+	s.Empty(expected)
+}
+
 func genTextLOBInsertData(rows int, seed int64, schema *schemapb.CollectionSchema) []*storage.InsertData {
 	buf, _ := storage.NewInsertData(schema)
 	ts := int64(tsoutil.ComposeTSByTime(getMilvusBirthday()))
@@ -567,6 +621,180 @@ func genTextLOBInsertData(rows int, seed int64, schema *schemapb.CollectionSchem
 		})
 	}
 	return []*storage.InsertData{buf}
+}
+
+// The V3 source has four rows. A delete and a TTL expiration remove two.
+// Each surviving row is written to a separate segment under REWRITE_ALL.
+func TestCompactionRewrittenTextSizesAfterDeleteTTLAndSplit(t *testing.T) {
+	for _, kind := range []datapb.CompactionType{datapb.CompactionType_MixCompaction, datapb.CompactionType_ClusteringCompaction} {
+		t.Run(kind.String(), func(t *testing.T) {
+			setupBumpUTEnv(t)
+			const nameID, bodyID = int64(104), int64(105)
+			names := []any{"猫", "", nil, "ab"}
+			bodies := []string{"x", strings.Repeat("y", 65536), strings.Repeat("z", 90000), "expired"}
+			now := time.Now()
+			rowTime := func(i int) uint64 {
+				if i == 3 {
+					return tsoutil.ComposeTSByTime(now.Add(-2 * time.Hour))
+				}
+				return tsoutil.ComposeTSByTime(now)
+			}
+			name := &schemapb.FieldSchema{FieldID: nameID, Name: "name", DataType: schemapb.DataType_VarChar, Nullable: true,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "32"}}}
+			body := &schemapb.FieldSchema{FieldID: bodyID, Name: "body", DataType: schemapb.DataType_Text}
+			fix := buildBumpFixture(t, withRows(4), withoutSourceText(), withSourceFields(name, body), withTextLOBSource(bodyID),
+				withCollectionTTL(time.Hour), withRowTs(rowTime), withDeletedPKs(map[any]uint64{int64(3): rowTime(2) + 1}),
+				withFillValue(func(i int, _ uint64, v map[int64]any) {
+					v[bumpFxPKField], v[nameID], v[bodyID] = int64(i+1), names[i], bodies[i]
+				}))
+			input := fix.segment.GetFieldLogicalSizes()
+			require.EqualValues(t, 4, input.GetRowCount())
+			require.Equal(t, &datapb.FieldLogicalSize{PayloadBytes: 5, ValidityBits: 4}, input.GetFields()[nameID])
+			require.Equal(t, &datapb.FieldLogicalSize{PayloadBytes: 155544}, input.GetFields()[bodyID])
+
+			fix.task.plan.MaxSize, fix.task.compactionParams.BinLogMaxSize = 1, 1
+			var result *datapb.CompactionPlanResult
+			var err error
+			if kind == datapb.CompactionType_ClusteringCompaction {
+				task := newClusteringTextTask(fix)
+				task.currentTime = now
+				result, err = task.Compact()
+				require.NoError(t, err)
+				require.Len(t, task.clusterBuffers, 1, "both segments must come from the same bucket")
+				require.Equal(t, compaction.LOBStrategyRewriteAll, task.lobContext.GetStrategy(bodyID))
+			} else {
+				plan, params := fix.task.plan, fix.task.compactionParams
+				plan.Type, params.UseMergeSort, params.MaxSegmentMergeSort = kind, true, 16
+				fix.segment.IsSorted = true
+				task := NewMixCompactionTask(context.Background(), binlogio.NewBinlogIO(fix.task.chunkManager), fix.task.chunkManager, plan, params, []int64{bumpFxPKField})
+				task.currentTime = now
+				result, err = task.Compact()
+				require.NoError(t, err)
+				require.Equal(t, compaction.LOBStrategyRewriteAll, task.lobContext.GetStrategy(bodyID))
+			}
+			outputs := result.GetSegments()
+			require.Len(t, outputs, 2)
+			require.NotEqual(t, outputs[0].GetSegmentID(), outputs[1].GetSegmentID())
+			partitionBase := storage.SegmentPartitionBasePath(fix.cfg.GetRootPath(), CollectionID, PartitionID)
+			textConfigs := []packed.TextColumnConfig{{FieldID: bodyID, LobBasePath: path.Join(partitionBase, "lobs", fmt.Sprint(bodyID))}}
+			for i, out := range outputs {
+				require.EqualValues(t, 1, out.GetNumOfRows())
+				reader, err := storage.NewTextDecodedManifestRecordReader(context.Background(), out.GetManifest(), fix.targetSchema, textConfigs,
+					storage.WithVersion(storage.StorageV3), storage.WithStorageConfig(fix.cfg))
+				require.NoError(t, err)
+				rec, err := reader.Next()
+				require.NoError(t, err)
+				require.Equal(t, 1, rec.Len())
+				require.EqualValues(t, i+1, rec.Column(bumpFxPKField).(*array.Int64).Value(0))
+				require.Equal(t, names[i], rec.Column(nameID).(*array.String).Value(0))
+				require.Equal(t, bodies[i], rec.Column(bodyID).(*array.String).Value(0))
+				_, err = reader.Next()
+				require.ErrorIs(t, err, io.EOF)
+				require.NoError(t, reader.Close())
+				sizes := out.GetStats().GetFieldLogicalSizes()
+				require.EqualValues(t, 1, sizes.GetRowCount())
+				require.Equal(t, &datapb.FieldLogicalSize{PayloadBytes: uint64(len(names[i].(string))), ValidityBits: 1}, sizes.GetFields()[nameID])
+				require.Equal(t, &datapb.FieldLogicalSize{PayloadBytes: uint64(len(bodies[i]))}, sizes.GetFields()[bodyID])
+			}
+		})
+	}
+}
+
+// Run real reference-preserving compactions after making every LOB body
+// unavailable. Neither exact inheritance nor an unknown result needs to open
+// a body. A stale estimate of one output is not proof that the rows stayed
+// together, and a surviving 24-byte reference is not a 24-byte payload.
+func TestCompactionReusedTextLogicalSizes(t *testing.T) {
+	const textID = int64(105)
+	for _, tc := range []struct {
+		name        string
+		kind        datapb.CompactionType
+		mergeSort   bool
+		deleteFirst bool
+		split       bool
+		keepInline  bool
+	}{
+		{name: "mix whole", kind: datapb.CompactionType_MixCompaction},
+		{name: "mix deleted prefix", kind: datapb.CompactionType_MixCompaction, deleteFirst: true},
+		{name: "merge whole", kind: datapb.CompactionType_MixCompaction, mergeSort: true},
+		{name: "merge actual split", kind: datapb.CompactionType_MixCompaction, mergeSort: true, split: true},
+		{name: "merge remaining inline", kind: datapb.CompactionType_MixCompaction, mergeSort: true, deleteFirst: true, keepInline: true},
+		{name: "sort whole", kind: datapb.CompactionType_SortCompaction},
+		{name: "sort deleted prefix", kind: datapb.CompactionType_SortCompaction, deleteFirst: true},
+		{name: "schema whole", kind: datapb.CompactionType_BumpSchemaVersionCompaction},
+		{name: "schema deleted prefix", kind: datapb.CompactionType_BumpSchemaVersionCompaction, deleteFirst: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupBumpUTEnv(t)
+			// Both large bodies must be external irrespective of the boundary
+			// convention at exactly the default threshold (65,536 bytes).
+			paramtable.Get().Save(paramtable.Get().DataNodeCfg.TextInlineThreshold.Key, "100")
+			defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.TextInlineThreshold.Key)
+			bodies := []string{strings.Repeat("x", 90000), strings.Repeat("y", 65536)}
+			if tc.keepInline {
+				bodies[1] = "猫"
+			}
+			var deletes map[any]uint64
+			if tc.deleteFirst {
+				deletes = map[any]uint64{int64(0): bumpFxTS(0) + 1}
+			}
+			fix := buildBumpFixture(t, withRows(2), withTextLOBSource(textID), withDeletedPKs(deletes),
+				withTargetDroppedField(bumpFxTextField),
+				withSourceFields(&schemapb.FieldSchema{FieldID: textID, Name: "body", DataType: schemapb.DataType_Text, Nullable: true}),
+				withFillValue(func(i int, _ uint64, v map[int64]any) { v[textID] = bodies[i] }))
+			refs := readTextRefs(t, fix, fix.sourceManifest, textID)
+			require.Equal(t, byte(1), refs[0][0])
+			require.Equal(t, tc.keepInline, refs[1][0] == 0)
+			sourceSize := uint64(len(bodies[0]) + len(bodies[1]))
+			require.Equal(t, &datapb.FieldLogicalSize{PayloadBytes: sourceSize, ValidityBits: 2}, fix.segment.GetFieldLogicalSizes().GetFields()[textID])
+			lobDir := path.Join(storage.SegmentPartitionBasePath(fix.cfg.GetRootPath(), CollectionID, PartitionID), "lobs", fmt.Sprint(textID))
+			require.NoError(t, os.Rename(lobDir, lobDir+".unavailable"))
+
+			plan, params := fix.task.plan, fix.task.compactionParams
+			plan.Type, params.UseMergeSort, params.MaxSegmentMergeSort = tc.kind, tc.mergeSort, 16
+			fix.segment.IsSorted = tc.mergeSort
+			if tc.split {
+				// A V3 source recovered without FieldBinlogs has no size
+				// estimate; the actual batch and writer boundaries split it.
+				fix.segment.FieldBinlogs = nil
+				plan.MaxSize, params.BinLogMaxSize = 1, 1
+			}
+			var task Compactor = fix.task
+			switch tc.kind {
+			case datapb.CompactionType_MixCompaction:
+				task = NewMixCompactionTask(context.Background(), binlogio.NewBinlogIO(fix.task.chunkManager), fix.task.chunkManager, plan, params, []int64{bumpFxPKField})
+			case datapb.CompactionType_SortCompaction:
+				task = NewSortCompactionTask(context.Background(), fix.task.chunkManager, plan, params, []int64{bumpFxPKField})
+			}
+			result, err := task.Compact()
+			require.NoError(t, err)
+			wantOutputs := 1
+			if tc.split {
+				wantOutputs = 2
+			}
+			require.Len(t, result.GetSegments(), wantOutputs)
+			var rowCount int64
+			for _, out := range result.GetSegments() {
+				rowCount += out.GetNumOfRows()
+				sizes := out.GetStats().GetFieldLogicalSizes()
+				require.Equal(t, out.GetNumOfRows(), sizes.GetRowCount())
+				require.EqualValues(t, sizes.GetRowCount()*8, sizes.GetFields()[bumpFxPKField].GetPayloadBytes())
+				require.NotContains(t, sizes.GetFields(), bumpFxTextField) // dropped from target schema
+				switch {
+				case tc.keepInline:
+					require.Equal(t, &datapb.FieldLogicalSize{PayloadBytes: 3, ValidityBits: 1}, sizes.GetFields()[textID])
+				case tc.deleteFirst || tc.split:
+					require.NotContains(t, sizes.GetFields(), textID)
+				default:
+					require.Equal(t, &datapb.FieldLogicalSize{PayloadBytes: sourceSize, ValidityBits: 2}, sizes.GetFields()[textID])
+				}
+				for pk, ref := range readTextRefs(t, fix, out.GetManifest(), textID) {
+					require.Equal(t, refs[pk], ref)
+				}
+			}
+			require.EqualValues(t, len(bodies)-len(deletes), rowCount)
+		})
+	}
 }
 
 func newClusteringTextTask(fixture *bumpFixture) *clusteringCompactionTask {
