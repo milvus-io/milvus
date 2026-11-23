@@ -1056,10 +1056,10 @@ func TestQueryTaskGroupedOrderByBatchParity(t *testing.T) {
 		{FieldID: 203, Name: "value", DataType: schemapb.DataType_Int64, Nullable: true},
 	}}
 	for _, operation := range []string{"distinct", "count", "sum", "avg", "min", "max"} {
-		for _, ascending := range []bool{false, true} {
+		for _, direction := range []string{"default", "asc", "desc"} {
 			for _, chunkBytes := range []int{1, 1 << 20} {
-				for _, offset := range []int64{0, 1, 10} {
-					t.Run(fmt.Sprintf("%s/asc=%v/bytes=%d/offset=%d", operation, ascending, chunkBytes, offset), func(t *testing.T) {
+				for _, offset := range []int64{0, 1, 2, 10} {
+					t.Run(fmt.Sprintf("%s/%s/bytes=%d/offset=%d", operation, direction, chunkBytes, offset), func(t *testing.T) {
 						var operators []agg.AggregateBase
 						names := []string{"city", "region"} // Output order differs from the raw group layout.
 						if operation != "distinct" {
@@ -1071,11 +1071,11 @@ func TestQueryTaskGroupedOrderByBatchParity(t *testing.T) {
 						}
 						outputMap, err := agg.NewAggregationFieldMap(names, []string{"region", "city"}, operators)
 						require.NoError(t, err)
-						direction := "desc"
-						if ascending {
-							direction = "asc"
+						var orderSpecs []string
+						if direction != "default" {
+							orderSpecs = []string{"region:" + direction}
 						}
-						orderFields, err := translateOrderByFields([]string{"region:" + direction}, []int64{201, 202}, schema)
+						orderFields, err := translateOrderByFields(orderSpecs, []int64{201, 202}, schema)
 						require.NoError(t, err)
 						request := &internalpb.RetrieveRequest{
 							Limit: 2 + offset, GroupByFieldIds: []int64{201, 202},
@@ -1084,6 +1084,10 @@ func TestQueryTaskGroupedOrderByBatchParity(t *testing.T) {
 						var batches []*internalpb.RetrieveResults
 						var shards []queryreducestream.ReduceStream
 						var workers []*fakeLegacyQueryStream
+						ordering, err := orderby.ConvertFromPlanOrderByFields(orderFields, schema)
+						require.NoError(t, err)
+						workerPipeline, err := queryutil.BuildQueryReducePipeline(queryutil.PipelineNameQN, schema, request.Limit, 0, ordering, request.GroupByFieldIds, request.Aggregates, 1<<20, nil, nil)
+						require.NoError(t, err)
 						for shard := 0; shard < 2; shard++ {
 							var children []queryreducestream.ReduceStream
 							for child := 0; child < 2; child++ {
@@ -1101,7 +1105,11 @@ func TestQueryTaskGroupedOrderByBatchParity(t *testing.T) {
 								}
 								batch := &internalpb.RetrieveResults{Status: merr.Success(), FieldsData: fields, AllRetrieveCount: n}
 								batches = append(batches, proto.Clone(batch).(*internalpb.RetrieveResults))
-								chunks, err := queryreducestream.SplitRetrieveResult(batch, chunkBytes)
+								msg, err := workerPipeline.Run(t.Context(), nil, queryutil.OpMsg{queryutil.PipelineInput: []*internalpb.RetrieveResults{batch}})
+								require.NoError(t, err)
+								ordered := msg[queryutil.PipelineOutput].(*internalpb.RetrieveResults)
+								ordered.AllRetrieveCount = n
+								chunks, err := queryreducestream.SplitRetrieveResult(ordered, chunkBytes)
 								require.NoError(t, err)
 								worker := &fakeLegacyQueryStream{}
 								for _, chunk := range chunks {
@@ -1125,22 +1133,30 @@ func TestQueryTaskGroupedOrderByBatchParity(t *testing.T) {
 						require.True(t, legacy.lastQueryRequest.AllowStreaming)
 						output := task.resultBuf.Collect()
 						require.Len(t, output, 1)
-						require.Equal(t, 4, queryutil.GetRowCount(output[0])) // Never truncate before ordering.
+						require.EqualValues(t, min(int64(4), request.Limit), queryutil.GetRowCount(output[0]))
 						require.EqualValues(t, 10, output[0].GetAllRetrieveCount())
 						require.Equal(t, request.Limit, task.GetLimit())
 						for _, worker := range workers {
 							require.Equal(t, len(worker.recv), worker.next)
 							require.Equal(t, 1, worker.closeCalls)
 						}
-						ordering, err := orderby.ConvertFromPlanOrderByFields(orderFields, schema)
-						require.NoError(t, err)
 						pipeline, err := NewQueryPipeline(schema, 2, offset, 0, ordering, request.GroupByFieldIds, request.Aggregates, outputMap, nil)
 						require.NoError(t, err)
 						want, err := pipeline.Execute(t.Context(), batches)
 						require.NoError(t, err)
-						got, err := pipeline.Execute(t.Context(), output)
-						require.NoError(t, err)
-						require.True(t, proto.Equal(want, got), "batch=%v streaming=%v", want, got)
+						task.ctx, task.schema.PkField = t.Context(), schema.Fields[0]
+						task.queryParams = &queryParams{limit: 2, offset: offset}
+						task.aggregationFieldMap = outputMap
+						require.NoError(t, task.PostExecute(t.Context()))
+						require.Len(t, task.result.FieldsData, len(want.FieldsData))
+						if direction == "default" && offset == 2 {
+							region := task.result.FieldsData[1]
+							require.Equal(t, []bool{true, false}, region.GetValidData())
+							require.EqualValues(t, 2, region.GetScalars().GetLongData().GetData()[0])
+						}
+						for i, field := range want.FieldsData {
+							require.True(t, proto.Equal(field, task.result.FieldsData[i]), "batch=%v streaming=%v", field, task.result.FieldsData[i])
+						}
 					})
 				}
 			}
@@ -1148,7 +1164,7 @@ func TestQueryTaskGroupedOrderByBatchParity(t *testing.T) {
 	}
 }
 
-func TestQueryTaskGroupedOrderByDrainErrors(t *testing.T) {
+func TestQueryTaskGroupedOrderByStopsAtLimit(t *testing.T) {
 	for _, tail := range []error{io.EOF, io.ErrUnexpectedEOF, context.Canceled, context.DeadlineExceeded} {
 		stream := &fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{
 			{chunk: newFinalQueryChunk([]int64{3, 2}, 10)},
@@ -1162,21 +1178,10 @@ func TestQueryTaskGroupedOrderByDrainErrors(t *testing.T) {
 		legacy := &fakeLegacyQueryClient{queryResult: &queryclient.LegacyQueryResult{Stream: stream}}
 		task := newQueryViewQueryTask(t, legacy, 1)
 		task.GroupByFieldIds = []int64{100}
-		task.OrderByFields = []*planpb.OrderByField{{FieldId: 100, Ascending: true}}
-		err := task.Execute(t.Context())
-		if tail == io.EOF {
-			require.NoError(t, err)
-			require.Equal(t, []int64{3, 2, 1}, task.resultBuf.Collect()[0].GetFieldsData()[0].GetScalars().GetLongData().GetData())
-		} else {
-			if merr.IsCanceledOrTimeout(tail) {
-				require.True(t, merr.IsCanceledOrTimeout(err))
-				require.Equal(t, merr.Code(tail), merr.Code(err))
-			} else {
-				require.ErrorIs(t, err, tail)
-			}
-			require.Empty(t, task.resultBuf.Collect())
-		}
-		require.Equal(t, 3, stream.next)
+		task.OrderByFields = []*planpb.OrderByField{{FieldId: 100, Ascending: false}}
+		require.NoError(t, task.Execute(t.Context()))
+		require.Equal(t, []int64{3}, task.resultBuf.Collect()[0].GetFieldsData()[0].GetScalars().GetLongData().GetData())
+		require.Equal(t, 1, stream.next)
 		require.Equal(t, 1, stream.closeCalls)
 		require.Equal(t, 1, legacy.queryCalled)
 	}

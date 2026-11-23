@@ -75,15 +75,14 @@ one outstanding receive per child and fills empty child Buffers concurrently.
 | Query `OrderedReduceStream` | Each active child has a head or EOF; merge by PK and resolve shard-local duplicate PKs by timestamp. |
 | Plain Query ORDER BY | Each vchannel drains workers into a PK map, resolves versions, sorts and selects candidates before emitting Chunks. Final merge uses scalar ordering and rejects cross-vchannel duplicate PKs. |
 | Search `OrderedReduceStream` | Each active child has a head or EOF; merge by score per vector. Group selection preserves Batch pruning, not exhaustive group membership. |
-| Query Group By `UnOrderedReduceStream` | Consume available Buffers into a stream-owned group map; drain all children before emitting partial aggregates. Finalize at Proxy, preserving AVG sum/count and NULL state between levels. |
+| Query Group By `OrderedReduceStream` | Merge all child heads with the least full group key into one Unit. Stop at `offset + limit` complete groups or EOF. |
 | Global Query aggregation `UnOrderedReduceStream` | Merge available partials into one retained partial; drain all children before emitting one aggregate row. Preserve AVG sum/count and NULL state until Proxy finalization. |
 
 Proxy `Execute()` consumes results and stops at the request's row, element, or
 per-vector window, or EOF; unlimited Query drains input. Plain Query ORDER BY
 drains finalized vchannel candidates to validate duplicates, retaining only its
 requested window. Search skips surplus
-hits for earlier vectors to reach later vectors. Group By + ORDER BY retains all
-merged groups until EOF, then uses Proxy ordering and pagination. Search bypasses repeated Batch
+hits for earlier vectors to reach later vectors. Group By preserves the full key order through pagination. Search bypasses repeated Batch
 candidate reduction; Query passes its merged result through existing pagination
 and aggregate finalization. `Close()` cancels children, joins receives and releases
 resources; `Interrupt()` remains unimplemented. On a retryable ViewError or gRPC
@@ -137,7 +136,7 @@ improvement is claimed by this document.
 4. [Receive scheduling and implementation comparison](#4-receive-scheduling-and-implementation-comparison)
 5. [Ordered Query](#5-ordered-query)
 6. [Ordered Search](#6-ordered-search)
-7. [Unordered Query Aggregation](#7-unordered-query-aggregation)
+7. [Query Aggregation](#7-query-aggregation)
 8. [Worker-to-Proxy execution](#8-worker-to-proxy-execution)
 9. [Metadata and lifecycle](#9-metadata-and-lifecycle)
 10. [Configuration and supported paths](#10-configuration-and-supported-paths)
@@ -231,8 +230,7 @@ queryreducestream.NewShardReduceStream(request, schema, childStreams, chunkBytes
 ```
 
 `NewShardReduceStream` enables the vchannel-level duplicate policy. The final
-factory composes vchannel streams. Query chooses `UnOrderedReduceStream` when
-grouping or aggregation is requested; other eligible Query requests use `OrderedReduceStream`.
+factory composes vchannel streams. Only global Query aggregation uses `UnOrderedReduceStream`.
 Eligible Search candidate reduction uses `OrderedReduceStream`, including Search
 Group By. Hybrid is decomposed before the factory, not merged as one ANN request.
 Sources: [Search factories](../../../internal/util/searchutil/reduce_stream/search_reduce_stream.go#L369),
@@ -332,8 +330,7 @@ against arbitrary oversized inputs. gRPC message-size limits remain independent.
 ### 4. Receive Scheduling and Implementation Comparison
 
 The common lifecycle is receive, reduce into an output Buffer, then encode a
-Chunk. The concrete output-readiness rules differ; forcing Query Group By into
-the row-at-a-time loop would obscure its need to drain all inputs.
+Chunk. An ordered reducer needs a head or EOF from each child; a global aggregate needs every contribution before it can emit.
 
 ```text
                          parent calls Recv()
@@ -353,10 +350,10 @@ the row-at-a-time loop would obscure its need to drain all inputs.
                             return Chunk
 
 STEP              ORDERED QUERY       ORDERED SEARCH       QUERY GROUP BY
-receive           all active heads    all active heads     any ready input
-consume           lowest PK/version   best score/vector    all grouped rows
-accumulate        row references      hit references       group map
-ready             byte boundary*      byte/window yield*   all inputs drained
+receive           all active heads    all active heads     all active heads
+consume           lowest PK/version   best score/vector    heads with least full key
+accumulate        row references      hit references       one complete group per Unit
+ready             byte boundary*      byte/window yield*   byte boundary*, limit or EOF
 emit              RetrieveResults     SearchResults        partials as Chunks
 
 * Also respects indivisible Units and exhaustion; Query resolves the trailing PK.
@@ -610,105 +607,47 @@ member cannot be recovered when its group later wins globally. This deliberately
 matches Batch intermediate pruning; it is not exhaustive global group selection.
 
 Search aggregation uses the existing hierarchy-derived candidate window and
-group fields. It is not the Query Group By map over all matching rows, and it
-does not compute aggregates over candidates never returned by workers. Sources:
+group fields. Unlike Query Group By, it does not compute aggregates over
+matching rows that workers did not return as candidates. Sources:
 [group selection](../../../internal/util/searchutil/reduce_stream/search_reduce_stream.go#L685),
 [candidate assembly](../../../internal/proxy/dql/task_search.go#L1887),
 [Proxy aggregation](../../../internal/proxy/dql/search_pipeline.go#L668).
 
-### 7. Unordered Query Aggregation
+### 7. Query Aggregation
 
-Query Group By can combine partial aggregates without cross-child head ordering.
-It cannot finalize a group on first arrival: later Chunks may update that group.
-Both vchannel and final reducers therefore accumulate a group map and drain
-their children before exposing output Chunks. The vchannel reducer does not
-merely forward child pairs.
-
-The stream owns `GroupAggBuffer`; `GroupAggReducer` supplies layout, decoding and
-encoding. Its ordinary `Merge(ctx, partials)` is a stateless operation, not a
-hidden map retained across calls. Incremental streaming calls the explicitly
-owned Buffer's `Merge()` instead. The Buffer can remain stateful without changing
-the `PartialAggregationResult` contract. Global COUNT/SUM/AVG/MIN/MAX instead retain
-one partial and pass it with incoming partials to the shared stateless `Merge()`.
-They drain all children at both levels; only Proxy finalizes AVG from sum/count.
+Batch and ReduceStream use the same Query GROUP BY order. Without ORDER BY,
+both compare the group keys in declaration order (ascending, NULLs last).
+An explicit ORDER BY takes precedence; remaining group keys break ties.
+Workers apply this order before selecting their local top K, and Proxy applies
+it before pagination. No implicit ORDER BY is added to the request. For
+keys-only Batch queries, the worker now merges distinct groups before choosing
+the first K, rather than retaining any K; the existing group cap still applies.
 
 ```text
-construction:
-    reducer = NewGroupAggReducer(groupByFieldIDs, aggregates, -1, schema)
-    outputBuffer = reducer.NewBuffer() if groupByFieldIDs is not empty else nil
-
-Recv():
-    if outputChunks is not built:
-        reduced = PartialAggregationResult{}
-        repeat:
-            readyBuffers = getReadyBuffers()
-            if readyBuffers is empty:
-                break
-            partialResults = []
-            for readyBuffer in readyBuffers:
-                partialResults.append(reducer.DecodePartial(readyBuffer.FieldsData, 0))
-            if outputBuffer != nil:
-                outputBuffer.Merge(partialResults)
-            else:
-                reduced = reducer.Merge(context.Background(), partialResults + [reduced])
-            clear childBuffers
-        if outputBuffer != nil:
-            reduced = outputBuffer.Result()
-        result = reducer.EncodePartial(reduced)
-        attachMetadata(result)
-        outputChunks = SplitRetrieveResult(result, chunkBytes)
-        release reducer and outputBuffer
-    if outputIndex < len(outputChunks):
-        return outputChunks[outputIndex++] and release that stored reference
-    close children; return EOF
+QN 1: (A,2) (C,1) --> vchannel 1: (A,5) (B,4) (C,1)
+QN 2: (A,3) (B,4) --/                     |
+                                          +--> Proxy, LIMIT 2: (A,6) (B,4); close
+                      vchannel 2: (A,1) (D,8) --/
 ```
 
-Every accepted Buffer's grouped rows are consumed, not just one key/value pair.
-`DecodePartial(..., 0)` avoids counting retrieval metadata again through the
-aggregate Buffer; the stream separately combines metadata. The current
-implementation materializes grouped output and its Chunk list after draining,
-so the grouped path is not bounded by one outgoing Chunk in memory.
-Sources: [group Recv](../../../internal/util/queryutil/reduce_stream/query_reduce_stream.go#L553),
-[GroupAggBuffer](../../../internal/agg/aggregate_reducer.go#L338).
+Both ordered reducers wait for a head or EOF from every child. Each child emits
+one row per full group key, so all contributions to the least key are at the
+heads. The reducer merges them into one Unit; it need not read another Chunk
+to prove the group complete. AVG stays as SUM and COUNT until Proxy maps the
+output columns. Empty grouped input yields typed columns with zero rows.
 
-```text
-worker partials --> vchannel map --> EncodePartial --> final map
-                                                         |
-                                                   EncodePartial
-                                                         |
-                                            Proxy Finalize + output mapping
-```
+Both levels stop at the internal `offset + limit`; only Proxy skips the offset.
+The shared Proxy pipeline re-sorts that bounded prefix before slicing the page,
+without reading more groups from the stream.
+An unbounded merge drains to EOF. The group cap still fails the query when a
+reducer visits too many distinct groups. It does not trigger a scan of an unread
+tail after the page is complete. Workers still materialize their local result:
+their hash merge can hit the cap before the first Chunk, even for a small LIMIT.
+See the [worker order and group merge](../../../internal/util/queryutil/reduce_stream/group_by_stream.go).
 
-Empty input is an identity, not a fabricated zero or NULL group. Real zero and
-NULL values remain distinct. AVG stays mergeable as sum/count through both levels;
-division belongs to final output mapping. Finalization and column naming do not
-mutate partials retained upstream. Query's existing pipeline consumes the single
-merged result and still performs aggregate finalization and pagination. Sources:
-[partial contract](../../../internal/agg/aggregate_reducer.go#L515),
-[Query finalization](../../../internal/proxy/dql/query_pipeline.go#L280).
-
-Without group keys, empty input produces one row: COUNT is zero; SUM/AVG/MIN/MAX
-are NULL. The global partial is one indivisible Unit, even when larger than the
-Chunk threshold. Retrieval metadata is combined separately from aggregate values.
-Normal COUNT(*) is compiled into an aggregate plan; the legacy bare `IsCount`
-request is not enabled. Global results are already small in Batch, so this path
-does not imply a substantial memory or transfer saving.
-
-Group By + ORDER BY uses the same UnOrderedReduceStream at both levels. Before
-its first output Chunk, the final reducer has merged every child contribution;
-the emitted group order is unspecified. QueryTask must therefore receive until
-EOF and retain every grouped row, not stop or truncate at `offset + limit`.
-Its local collection limit is unlimited; the request's original limit remains
-unchanged. The existing Proxy pipeline finalizes aggregate columns, orders by
-group keys with the completed tie-break order, slices the page, and maps output
-fields (including AVG sum/count conversion). No requery or PK/timestamp
-deduplication is added for grouped partials. Without ORDER BY, QueryTask can still
-stop after enough fully merged groups have arrived for the requested page.
-
-Shared Query validation still requires an explicit limit for ORDER BY and only
-allows group keys as ordering columns, not aggregate expressions. Sources:
-[grouped consumption](../../../internal/proxy/dql/task_query.go#L1387),
-[final ordering](../../../internal/proxy/dql/query_pipeline.go#L160).
+Global aggregation (no grouping keys) still uses `UnOrderedReduceStream`:
+combine partials until every child reaches EOF, then emit one row. For empty
+input COUNT is zero and SUM/AVG/MIN/MAX are NULL.
 
 ### 8. Worker-to-Proxy Execution
 
@@ -928,9 +867,9 @@ whereas an invalid request is not made valid by this feature.
 | Query | Plain bounded Query, including scalar filters | Ordered streaming. |
 | Query | Valid filtered unlimited Query, including iterator requests with an omitted page limit | Ordered streaming; Proxy reads until EOF, retaining iterator drain rules. |
 | Query | Bounded element-level Query and iterator | Ordered streaming; retain complete rows and matched-element indexes. |
-| Query | Group By and grouped COUNT/SUM/AVG/MIN/MAX, without ORDER BY | Unordered grouped streaming, then Proxy finalization. |
+| Query | Group By and grouped COUNT/SUM/AVG/MIN/MAX, without ORDER BY | Merge by full group key, then finalize and paginate at Proxy. |
 | Query | Bounded plain ORDER BY | Drain/version-resolve each vchannel, sort and emit Chunks; final merge drains for cross-vchannel integrity checks. |
-| Query | Group By + ORDER BY | Unordered grouped streaming; Proxy collects all merged groups, then orders and paginates. Existing validation requires a limit and ordering by group keys. |
+| Query | Group By + ORDER BY | Merge by the requested order with remaining keys as tie-breakers; Proxy re-sorts the bounded prefix and applies the offset. |
 | Query | ORDER BY without an explicit limit | Rejected by shared Query validation in both Batch and Streaming modes. |
 | Query | Global COUNT/SUM/AVG/MIN/MAX without Group By | Unordered streaming; merge one partial across all children, then finalize at Proxy. |
 | Query | Valid QueryScan function chains | Ordered streaming; preserve separately named computed columns, row alignment, validity and empty schema. |
@@ -994,10 +933,10 @@ Its final PK-validation set grows with received vchannel candidates. This path
 does not have a Chunk-bytes-times-child-count memory bound; it trades early output
 for correct timestamp resolution and retains Batch's intermediate output quota.
 
-Group maps grow with distinct keys; their complete encoded output and Chunk list
-are additional materialization. Group By + ORDER BY also retains every merged
-group in QueryTask before sorting; its existing output-size guard still applies
-to that collection. Oversized Units can exceed `B`. Standard output
+Worker group maps still grow with distinct keys. Vchannel and final grouped
+reducers retain input Chunks and the outgoing Chunk, not a map of all groups.
+QueryTask retains the requested window and applies its existing output-size
+guard. Oversized Units can exceed `B`. Standard output
 quotas and gRPC message limits are independent of the Chunk threshold. Tests of
 retained input are not measurements of total RSS or Go heap.
 
@@ -1019,7 +958,7 @@ control or low-watermark prefetch is introduced by this feature. Sources:
 | Ordered equivalence | Batch parity for PK/score order, ties, deduplication, timestamps, NQ, offsets and partial final Chunks. |
 | Query ORDER BY | Late newer versions changing topK, equal/missing timestamps, ASC/DESC/NULL ordering, nested reduction, non-adjacent cross-vchannel duplicates beyond the page, and errors before worker drain. |
 | Byte contract | Crossing `B`, exact boundary, oversized Unit alone, timestamp replacement, nullable/nested/element fields and metadata exclusion. |
-| Grouped Query | Multiple Chunks per child, nested vchannel/final accumulation, unequal AVG counts, empty/NULL/zero values and partial-state preservation. Grouped ordering must retain groups beyond the page before ASC/DESC sorting, tie-breaking, offset and limit; verify Batch parity and failure cleanup. |
+| Grouped Query | Verify worker ordering before local truncation, equal keys across Chunks and vchannels, and AVG/NULL partials. Check ASC/DESC, tie-breaks and offset against Batch, and verify cutoff without reading the tail. |
 | Global Query aggregation | Standalone COUNT and mixed aggregate projections; nested reduction, unequal AVG counts, empty/NULL/zero values, empty shards, late errors and cancellation. Verify one output row, metadata and Batch finalization parity. |
 | QueryScan | Computed JSON/scalar columns across worker splitting, nested reduction and Proxy pagination; timestamp winners, named-column reordering, NULL/empty schema, malformed columns, Chunk bytes and output quota. Verify native Grep output and gRPC round trips. |
 | Search variants | Group pruning parity, aggregation candidate order, range/filter behavior, Hybrid sub-search windows, element identity and downstream assembly. |
@@ -1049,8 +988,8 @@ findings. Documentation-only updates do not upgrade that verification status.
 | M1A enables only iterator requests | Later approved ordinary Query/Search and eligible Hybrid paths are included; use the matrix above. |
 | Fixed Unit-count Chunks | Byte threshold with complete-Unit crossing and oversized-Unit handling. |
 | `B + y` concurrent prefetch Buffers | Refill empty inputs through one outstanding receive per child; no `y` control. |
-| Query Group By vchannel forwarding or reducer-owned hidden map | Each grouped stream owns `GroupAggBuffer` and emits mergeable partials after draining. |
-| Query ORDER BY only needs a different comparator | Plain ORDER BY first drains and version-resolves each vchannel; Group By + ORDER BY merges partials at both levels, then orders all output groups at Proxy. |
+| Query Group By vchannel forwarding or reducer-owned hidden map | Equal full keys are reduced at both vchannel and Proxy; only global aggregation requires EOF before output. |
+| Query ORDER BY only needs a different comparator | Plain ORDER BY first drains and version-resolves each vchannel; grouped ORDER BY merges complete keys incrementally. |
 | Proxy consumes in PostExecute, or retry ends at first internal Chunk | Execute owns whole-attempt consumption/retry and publishes only successful output. |
 | Interrupt returns aggregated terminal metadata | Reserved API only; current early termination uses Close. |
 | Per-request SDK streaming overrides | Removed; refreshable server YAML controls only. |

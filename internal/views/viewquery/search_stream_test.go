@@ -664,7 +664,7 @@ func TestQueryOnViewStreamAcceptsGroupByQuery(t *testing.T) {
 		client, cleanup := startSearchStreamTestServer(t, server)
 		defer cleanup()
 
-		stream, err := reduce.NewQueryGRPCReduceStream(context.Background(), client, &viewpb.QueryOnViewRequest{
+		req := &viewpb.QueryOnViewRequest{
 			LegacyReq: &internalpb.RetrieveRequest{
 				CollectionID:    10,
 				GroupByFieldIds: []int64{100},
@@ -681,7 +681,8 @@ func TestQueryOnViewStreamAcceptsGroupByQuery(t *testing.T) {
 			},
 			Mvcc:             &viewpb.QueryPlanMVCC{GrowingTimetick: 10},
 			StreamChunkBytes: 32,
-		})
+		}
+		stream, err := reduce.NewQueryGRPCReduceStream(context.Background(), client, req)
 		require.NoError(t, err)
 
 		var groups []int64
@@ -696,6 +697,12 @@ func TestQueryOnViewStreamAcceptsGroupByQuery(t *testing.T) {
 		require.Equal(t, []int64{1, 2}, groups)
 		require.NoError(t, stream.Close())
 		require.Equal(t, 1, tasks.releaseCount)
+		require.Len(t, provider.queryRequest.GetOrderByFields(), len(orderBy))
+
+		_, err = server.QueryOnView(t.Context(), req)
+		require.NoError(t, err)
+		require.Same(t, req.LegacyReq, provider.queryRequest)
+		require.Len(t, provider.queryRequest.GetOrderByFields(), len(orderBy))
 	}
 }
 

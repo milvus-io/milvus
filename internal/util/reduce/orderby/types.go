@@ -212,11 +212,11 @@ func ConvertFromPlanOrderByFields(planFields []*planpb.OrderByField, schema *sch
 	return result, nil
 }
 
-// AppendGroupByTieBreakers gives every group a distinct position in the sort
-// order. All reduction levels must use the same order before applying topK;
-// otherwise a tied group can lose partial aggregate values from one source.
-func AppendGroupByTieBreakers(orderByFields []*OrderByField, groupByFieldIDs []int64, schema *schemapb.CollectionSchema) ([]*OrderByField, error) {
-	if len(orderByFields) == 0 || len(groupByFieldIDs) == 0 {
+// GroupKeyOrder completes an explicit order with the remaining grouping keys.
+// Without ORDER BY, all keys are compared in declaration order, ascending, NULLs last.
+// All reducers must agree on this order before selecting their local top K.
+func GroupKeyOrder(orderByFields []*OrderByField, groupByFieldIDs []int64, schema *schemapb.CollectionSchema) ([]*OrderByField, error) {
+	if len(groupByFieldIDs) == 0 {
 		return orderByFields, nil
 	}
 

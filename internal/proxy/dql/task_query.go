@@ -375,12 +375,12 @@ func translateOrderByFields(orderByFieldSpecs []string, groupByFieldIDs []int64,
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg(err.Error())
 	}
-	parsed, err = orderby.AppendGroupByTieBreakers(parsed, groupByFieldIDs, schema)
-	if err != nil {
-		return nil, err
-	}
 	if len(parsed) == 0 {
 		return nil, nil
+	}
+	parsed, err = orderby.GroupKeyOrder(parsed, groupByFieldIDs, schema)
+	if err != nil {
+		return nil, err
 	}
 
 	result := make([]*planpb.OrderByField, len(parsed))
@@ -1401,10 +1401,6 @@ func (t *QueryTask) consumeQueryResultStream(stream queryreducestream.ReduceStre
 	// For bounded Query, the internal limit includes the offset. The shared
 	// pipeline, not the stream, applies the offset when it slices the page.
 	limit := t.GetLimit()
-	if len(t.GetGroupByFieldIds()) > 0 && len(t.GetOrderByFields()) > 0 {
-		// Grouped Chunks are unordered. Retain every group for final ordering and pagination.
-		limit = typeutil.Unlimited
-	}
 	// ORDER BY can separate duplicate PKs. Drain finalized vchannel candidates
 	// so cross-vchannel integrity checks also cover rows beyond the client page.
 	drainOrderBy := len(t.GetOrderByFields()) > 0 && len(t.GetGroupByFieldIds()) == 0

@@ -483,9 +483,7 @@ func TestGroupByLimitPreservesAggregateAcrossWorkers(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, result.GetFieldsData(), 3)
 			require.Equal(t, []int64{2}, result.GetFieldsData()[2].GetScalars().GetLongData().GetData())
-			if len(tc.orderBy) > 0 {
-				require.Equal(t, []int64{1}, result.GetFieldsData()[1].GetScalars().GetLongData().GetData())
-			}
+			require.Equal(t, []int64{1}, result.GetFieldsData()[1].GetScalars().GetLongData().GetData())
 		})
 	}
 

@@ -87,10 +87,13 @@ func NewQueryPipeline(
 	outputFieldIDs []int64,
 ) (*QueryPipeline, error) {
 	hasAggregation := len(groupByFieldIDs) > 0 || len(aggregates) > 0
+	orderByFields, err := orderby.GroupKeyOrder(orderByFields, groupByFieldIDs, schema)
+	if err != nil {
+		return nil, err
+	}
 	hasOrderBy := len(orderByFields) > 0
 
 	var p *queryutil.Pipeline
-	var err error
 	if hasAggregation && hasOrderBy {
 		p, err = buildGroupByOrderByPipeline(schema, limit, offset, orderByFields, groupByFieldIDs, aggregates, outputMap)
 	} else if hasAggregation {
@@ -266,7 +269,7 @@ func newComplementFieldOperator(schema *schemapb.CollectionSchema) queryutil.Ope
 
 // newReduceByGroupsOperator aggregates results and reorganizes output by
 // outputMap to match the user's output_fields order.
-// Used for GROUP BY queries without ORDER BY.
+// Used for global aggregation, where there are no group keys to sort.
 func newReduceByGroupsOperator(
 	schema *schemapb.CollectionSchema,
 	groupByFieldIDs []int64,
