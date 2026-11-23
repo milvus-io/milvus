@@ -104,10 +104,11 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                 if (index->GetCastType().data_type() ==
                     JsonCastType::DataType::JSON) {
                     // JsonFlatIndex needs special handling via executor.
-                    auto* json_flat_index = const_cast<index::JsonFlatIndex*>(
-                        dynamic_cast<const index::JsonFlatIndex*>(index));
+                    const auto* json_flat_index =
+                        dynamic_cast<const index::JsonFlatIndex*>(index);
                     auto executor =
-                        json_flat_index->create_executor<double>(pointer);
+                        json_flat_index->create_executor<double>(pointer.substr(
+                            json_flat_index->GetNestedPath().size()));
                     res = executor->Exists();
                 } else {
                     // All other JSON path indexes (Inverted, Sort, Bitmap,

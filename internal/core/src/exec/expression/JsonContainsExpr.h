@@ -496,16 +496,14 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
         return expr_->column_.element_level_;
     }
 
-    bool
-    SupportsJsonStatsExecPath() const override {
-        return true;
-    }
-
     void
     DetermineExecPath() override {
-        // JsonStats is the fallback applied by EnsureExecPathDetermined()
-        // when no index below serves this expression; see SegmentExpr::
-        // FallbackToJsonStatsIfEligible().
+        if (CanUseJsonStatsAtInit()) {
+            // Array indexes can treat missing, null and non-array values as
+            // valid empty arrays. Keep their validity through negation.
+            exec_path_ = ExprExecPath::JsonStats;
+            return;
+        }
         if (expr_->column_.data_type_ == DataType::JSON &&
             (!expr_->same_type_ ||
              std::any_of(expr_->vals_.begin(),

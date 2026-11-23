@@ -2070,10 +2070,15 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
         return;
     }
 
-    // JsonStats is not chosen here: EnsureExecPathDetermined() upgrades a
-    // RawData outcome to JsonStats when the segment has stats for the field,
-    // so a usable JSON path index selected below always wins over the
-    // shredded-column scan.
+    if (expr_->column_.data_type_ == DataType::JSON &&
+        CanUseJsonStatsAtInit() &&
+        (JsonNumericBoundRequiresPreciseInt64Comparison(expr_->val_) ||
+         (expr_->val_.has_string_val() && !IsCompareOp(expr_->op_type_)))) {
+        // Numeric projections can round large integers, and flat-index
+        // patterns can fail on special JSON keys.
+        exec_path_ = ExprExecPath::JsonStats;
+        return;
+    }
 
     // JSON array literals are only executable from raw data. Decide this
     // before the base selector pins a JSON index so a cold or failed index
