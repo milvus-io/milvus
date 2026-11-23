@@ -353,3 +353,81 @@ func TestHybridSubBoostSurvivesFusion(t *testing.T) {
 		})
 	}
 }
+
+// TestHybridSubBoostUnderL2PinsCurrentBehavior pins how a sub-request boost on an
+// L2 sub-search behaves today. It is the same as the existing top-level boost on
+// L2: this test records the current behavior and does not endorse it.
+//
+// On the QueryNode, RescoresNode multiplies the raw L2 distance (smaller is
+// better) by the boost weight and re-sorts ascending, and segment_c negates
+// the distances only after the plan has run. A weight > 1 therefore pushes a
+// matching row farther away. The proxy does not count boost as a score
+// rewrite (subSearchScoresRewritten looks at function_chains only), so reduce
+// negates the scores back into distances.
+//
+// If boost score semantics under non-positively-related metrics are changed,
+// update this test along with the top-level boost path.
+func TestHybridSubBoostUnderL2PinsCurrentBehavior(t *testing.T) {
+	paramtable.Init()
+
+	request := newSubBoostHybridRequest(t)
+	for _, kv := range request.Requests[0].SearchParams {
+		if kv.Key == common.MetricTypeKey {
+			kv.Value = metric.L2
+		}
+	}
+	request.Requests[0].FunctionScore = boostFunctionScore()
+
+	task, err := newSubBoostSearchTask(t, request)
+	require.NoError(t, err, "sub-request boost is accepted on an L2 sub-search")
+	require.Len(t, subSearchPlan(t, task, 0).GetScorers(), 1)
+	assert.Empty(t, subSearchPlan(t, task, 1).GetScorers())
+	assert.Equal(t, []bool{false, false}, task.subSearchScoresRewritten(),
+		"boost does not mark a sub-search's scores as rewritten")
+
+	// Leg 0 (L2, boosted) as the QueryNode returns it. Raw distances are
+	// row0=0.2, row1=0.3, row2=0.4, row3=0.5, row4=0.6. Row 0 matches the boost
+	// filter, so its distance becomes 0.2*100=20 and it sorts last. Then all
+	// distances are negated.
+	l2Leg := &internalpb.SubSearchResults{
+		ReqIndex: 0, MetricType: metric.L2, NumQueries: 1, TopK: 5,
+		ResultData: &schemapb.SearchResultData{
+			NumQueries: 1, TopK: 5, Topks: []int64{5},
+			Ids:    testSearchResultIDs(1, 2, 3, 4, 0),
+			Scores: []float32{-0.3, -0.4, -0.5, -0.6, -20},
+		},
+	}
+	// Leg 1 (IP, no boost) ranks the rows in the same order, so the fused
+	// order does not depend on the fusion weights.
+	ipLeg := &internalpb.SubSearchResults{
+		ReqIndex: 1, MetricType: metric.IP, NumQueries: 1, TopK: 5,
+		ResultData: &schemapb.SearchResultData{
+			NumQueries: 1, TopK: 5, Topks: []int64{5},
+			Ids:    testSearchResultIDs(1, 2, 3, 4, 0),
+			Scores: []float32{0.9, 0.8, 0.7, 0.6, 0.1},
+		},
+	}
+
+	span := trace.SpanFromContext(task.ctx)
+	reduceOp, err := newHybridSearchReduceOperator(task, nil)
+	require.NoError(t, err)
+	reduced, err := reduceOp.run(task.ctx, span, []*internalpb.SearchResults{{IsAdvanced: true, SubResults: []*internalpb.SubSearchResults{l2Leg, ipLeg}}})
+	require.NoError(t, err)
+
+	legs := reduced[0].([]*milvuspb.SearchResults)
+	l2Result := legs[0].GetResults()
+	assert.Equal(t, []int64{1, 2, 3, 4, 0}, l2Result.GetIds().GetIntId().GetData())
+	assert.InDeltaSlice(t, []float32{0.3, 0.4, 0.5, 0.6, 20}, l2Result.GetScores(), 1e-6,
+		"reduce restores the boosted L2 scores to distances")
+	scoreInfos := reduced[1].([]searchScoreInfo)
+	assert.Equal(t, metric.L2, scoreInfos[0].MetricType)
+	assert.False(t, scoreInfos[0].Rewritten)
+
+	rerankOp, err := newRerankOperator(task, nil)
+	require.NoError(t, err)
+	fused, err := rerankOp.run(task.ctx, span, reduced...)
+	require.NoError(t, err)
+	result := fused[0].(*milvuspb.SearchResults).GetResults()
+	assert.Equal(t, []int64{1, 2, 3, 4, 0}, result.GetIds().GetIntId().GetData(),
+		"the boosted row ends up last after fusion")
+}
