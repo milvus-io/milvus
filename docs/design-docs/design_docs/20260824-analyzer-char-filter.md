@@ -72,17 +72,19 @@ Duplicate sources are rejected after trimming and unescaping.
 ```
 
 Character filters run in array order before the tokenizer. Token filters run
-after the tokenizer as before. Built-in analyzer templates do not accept
-character-filter options.
+after the tokenizer as before. Built-in analyzer templates selected by `type`
+read only their own parameters and ignore unrelated options, including
+`char_filter` and `char_filter_offset_mode`, regardless of their values. This
+preserves the semantics of previously persisted built-in analyzer configurations.
 
 The configuration remains part of the existing analyzer JSON used by field
 `analyzer_params`, analyzer validation, and `RunAnalyzer`. Collection creation
 and schema changes use the existing validation path, which constructs the
-analyzer on a query node. Invalid character-filter configuration is returned as
-the existing invalid-parameter error; no new error code is introduced.
+analyzer on a query node. Invalid custom-analyzer character-filter configuration
+is returned as the existing invalid-parameter error; no new error code is introduced.
 
-Validation rejects a non-array `char_filter`, non-object entries, missing or
-unsupported `type`, missing or non-array `mappings`, non-string mapping entries,
+For custom analyzers, validation rejects a non-array `char_filter`, non-object
+entries, missing or unsupported `type`, missing or non-array `mappings`, non-string mapping entries,
 empty or duplicate sources, malformed escapes, and unsupported offset modes.
 `char_filter_offset_mode` requires `char_filter` to be present.
 
@@ -147,8 +149,11 @@ through source corrections monotonically.
 ## Compatibility, Rollout, And Limits
 
 - Existing analyzers without `char_filter` are unchanged.
-- Old binaries reject the new configuration. Operators must upgrade all nodes
-  that validate or execute analyzers before creating fields that use it.
+- Old binaries reject character-filter options on custom analyzers. Operators
+  must upgrade all nodes that validate or execute analyzers before creating
+  fields that use them. Built-in templates continue to ignore these options
+  during validation and runtime reconstruction; they must not start applying
+  previously ignored mappings to existing data.
 - There is no feature flag or data migration. Before data is analyzed, rollback
   consists of removing the new options. After derived text or BM25 data has
   been produced, changing the analyzer alone would make index-time and
@@ -188,6 +193,9 @@ Rust unit and integration tests cover mapping, expansion, contraction, deletion,
 UTF-8 input and replacement text, chained character filters, both offset modes,
 configuration validation, and lazy token streaming. Cgo analyzer tests cover the
 default source-span behavior through the Go boundary.
+Compatibility regressions cover built-in templates with nonempty mappings,
+empty lists, offset-only configurations, and malformed unrelated options. Their
+tokens, offsets, and positions must match the same template without those options.
 
 No design-review meeting conclusion has been recorded yet. The Feature DRI,
 Independent Approver, and review date remain required before design approval.
