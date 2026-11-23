@@ -20,12 +20,13 @@ import (
 func countChunkReads(t *testing.T) *atomic.Int64 {
 	t.Helper()
 	calls := &atomic.Int64{}
-	var original func(*storage.LocalChunkManager, context.Context, string) ([]byte, error)
-	patch := mockey.Mock((*storage.LocalChunkManager).Read).Origin(&original).To(func(cm *storage.LocalChunkManager, ctx context.Context, key string) ([]byte, error) {
+	// LocalChunkManager.Read delegates directly to ReadFile. Avoid Origin's
+	// shared function variable when independent chunks are read concurrently.
+	patch := mockey.Mock((*storage.LocalChunkManager).Read).To(func(_ *storage.LocalChunkManager, _ context.Context, key string) ([]byte, error) {
 		if strings.Contains(key, "/chunks/") {
 			calls.Add(1)
 		}
-		return original(cm, ctx, key)
+		return storage.ReadFile(key)
 	}).Build()
 	t.Cleanup(func() { patch.UnPatch() })
 	return calls
@@ -172,7 +173,8 @@ func TestChunkCacheRetirementDuringLoad(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, batch.Entries, 1)
 	require.True(t, leaf.retired)
-	require.Nil(t, leaf.payload, "a retiring load must not repopulate cache")
+	m.chunkIndex.cache.retain(leaf, &chunkPayload{bytes: []byte{1}})
+	require.Nil(t, leaf.payload, "a retiring load or ordered recovery promotion must not repopulate cache")
 	require.Nil(t, leaf.verified, "a retiring load must not publish validation")
 	require.Zero(t, m.chunkIndex.cache.bytes)
 	batch, err = m.ReadTransform(ctx, "a", 0, 10, ReadLimits{})

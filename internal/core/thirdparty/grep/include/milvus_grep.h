@@ -50,13 +50,18 @@ typedef struct {
 } MgGrepBytes;
 
 /**
- * Zero initialization means regex, sensitive, no boundary restriction.
+ * Zero initialization means regex, sensitive, no boundary or match-count restriction.
  * Unknown values are rejected. Unicode and LF line semantics are fixed.
  */
 typedef struct {
   uint32_t pattern_kind;
   uint32_t case_mode;
   uint32_t boundary;
+  /**
+   * 0: unlimited; 1: max_count is present (including zero).
+   */
+  uint32_t has_max_count;
+  uint64_t max_count;
 } MgGrepMatchOptions;
 
 /**
@@ -169,9 +174,21 @@ MgGrepStatus mg_grep_compile(const MgGrepSpecView *spec,
 /**
  * NULL is a no-op. Existing Sessions retain the Plan. Does not wait.
  * # Safety
- * Own this live handle; no session_create may be using it concurrently.
+ * Own this live handle; no concurrent calls or readers of borrowed condition
+ * bytes may still be using it.
  */
 void mg_grep_plan_free(MgGrepPlan *plan);
+
+/**
+ * Required: plan, out. Borrows the immutable cached Protobuf condition bytes;
+ * repeated calls return the same view without encoding or allocating again.
+ * A valid out slot is cleared to {NULL, 0} on failure. error is optional.
+ * # Safety
+ * Pointers obey the header's memory/aliasing rules; out may be uninitialized.
+ * The Plan must remain alive while reading the returned bytes. Concurrent
+ * calls may share the Plan, but not output/error storage, and must not free it.
+ */
+MgGrepStatus mg_grep_plan_condition(const MgGrepPlan *plan, MgGrepBytes *out, MgGrepError *error);
 
 /**
  * Required: plan, out_session. A valid output slot is NULL on failure.

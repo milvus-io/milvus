@@ -256,6 +256,11 @@ const (
 	FeatureSegmentPrune
 	FeatureRunAnalyzer
 
+	FeatureUpsertConditionGT
+	FeatureUpsertConditionGTE
+	FeatureUpsertMissingInsert
+	FeatureUpsertMissingSkip
+	FeatureUpsertMissingError
 	numFeatures // must be last
 )
 
@@ -457,6 +462,12 @@ var featureNames = [numFeatures]string{
 	FeatureTwoStageSearch: "two_stage_search",
 	FeatureSegmentPrune:   "segment_prune",
 	FeatureRunAnalyzer:    "run_analyzer",
+
+	FeatureUpsertConditionGT:   "upsert_write_condition=gt",
+	FeatureUpsertConditionGTE:  "upsert_write_condition=gte",
+	FeatureUpsertMissingInsert: "upsert_on_missing=insert",
+	FeatureUpsertMissingSkip:   "upsert_on_missing=skip",
+	FeatureUpsertMissingError:  "upsert_on_missing=error",
 }
 
 // Role is the node role that owns a counter. Every role's GetFeatureUsage

@@ -14,6 +14,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	qvobserve "github.com/milvus-io/milvus/internal/views/qviews/observe"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
@@ -919,6 +920,67 @@ func TestQueryNodeLost_DroppingCleanupCompletes(t *testing.T) {
 // ===========================================================================
 // RequestRelease tests
 // ===========================================================================
+
+func TestRequestReleaseObservesOnlyStateOrControlChanges(t *testing.T) {
+	var transitions []qvobserve.ViewStateTransition
+	patch := mockey.Mock(qvobserve.Observe).To(func(_ context.Context, event qvobserve.Event) {
+		if release, ok := event.(qvobserve.CoordViewReleaseRequestedEvent); ok {
+			transitions = append(transitions, release.ViewStateTransition)
+		}
+	}).Build()
+	defer patch.UnPatch()
+
+	view := buildTestView(1)
+	view.Meta.State = viewpb.QueryViewState_QueryViewStateUp
+	catalog, transport := newMockCatalog(), newMockSyncer()
+	manager := newTestManager(t, catalog, transport, view)
+	release := func(control *viewpb.QueryViewControl, wantEvents, wantWrites, wantSyncs int) {
+		t.Helper()
+		catalog.reset()
+		transport.reset()
+		require.NoError(t, manager.RequestReleaseWithControl(t.Context(), control))
+		manager.waitFlush()
+		require.Len(t, transitions, wantEvents)
+		require.Equal(t, wantWrites, catalog.numSaveCalls())
+		require.Equal(t, wantSyncs, transport.numSyncCalls())
+	}
+	release(nil, 1, 1, 1)
+	require.Equal(t, qviews.QueryViewStateUp, transitions[0].From)
+	require.Equal(t, qviews.QueryViewStateDown, transitions[0].To)
+	release(nil, 1, 0, 0)
+
+	control := &viewpb.QueryViewControl{PreemptServingLease: true}
+	release(control, 2, 1, 1)
+	require.Equal(t, qviews.QueryViewStateDown, transitions[1].From)
+	require.Equal(t, qviews.QueryViewStateDown, transitions[1].To)
+	catalog.mu.Lock()
+	persisted := proto.Clone(catalog.saved[0]).(*viewpb.QueryViewOfShard)
+	catalog.mu.Unlock()
+	require.True(t, persisted.Meta.GetControl().GetPreemptServingLease())
+	release(control, 2, 0, 0)
+	release(nil, 2, 0, 0)
+
+	// A restart must resend persisted control even though another release is a no-op.
+	recoveredCatalog, recoveredTransport := newMockCatalog(), newMockSyncer()
+	recovered := newTestManager(t, recoveredCatalog, recoveredTransport, persisted)
+	require.Equal(t, 1, recoveredTransport.numSyncCalls())
+	require.True(t, recoveredTransport.syncedViews[0].View.IntoProto().Meta.GetControl().GetPreemptServingLease())
+	require.NoError(t, recovered.RequestReleaseWithControl(t.Context(), control))
+	recovered.waitFlush()
+	require.Len(t, transitions, 2)
+	require.Zero(t, recoveredCatalog.numSaveCalls())
+	require.Equal(t, 1, recoveredTransport.numSyncCalls())
+
+	version := qviews.FromProtoQueryViewVersion(persisted.Meta.Version)
+	// An SN that still reports Up gets controlled Down again, then cleanup can finish.
+	simulateNodeResponse(t, recoveredTransport, testSN, version, qviews.QueryViewStateUp)
+	require.Equal(t, 2, recoveredTransport.numSyncCalls())
+	require.True(t, recoveredTransport.syncedViews[1].View.IntoProto().Meta.GetControl().GetPreemptServingLease())
+	simulateNodeResponse(t, recoveredTransport, testSN, version, qviews.QueryViewStateDown)
+	simulateNodeResponse(t, recoveredTransport, testQN1, version, qviews.QueryViewStateDropped)
+	simulateNodeResponse(t, recoveredTransport, testSN, version, qviews.QueryViewStateDropped)
+	require.Empty(t, recovered.views)
+}
 
 func TestRequestRelease_UpView(t *testing.T) {
 	catalog := newMockCatalog()

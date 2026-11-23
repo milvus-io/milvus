@@ -107,7 +107,7 @@ EntryPool::Payload::Decode(TargetBitmap& result, TargetBitmap& valid) const {
 }
 
 EntryPool::Handle
-EntryPool::Lookup(int64_t segment_id,
+EntryPool::Lookup(ExprCacheSegmentKey segment_id,
                   const std::string& signature,
                   int64_t active_count) {
     const uint64_t sig_hash = XXH64(signature.data(), signature.size(), 0);
@@ -127,7 +127,7 @@ EntryPool::Lookup(int64_t segment_id,
 }
 
 void
-EntryPool::Put(int64_t segment_id,
+EntryPool::Put(ExprCacheSegmentKey segment_id,
                const std::string& signature,
                int64_t active_count,
                const TargetBitmap& result,
@@ -169,7 +169,8 @@ EntryPool::Put(int64_t segment_id,
                                     : existing->first.signature.capacity();
     const size_t entry_mem = sizeof(Entry) + sizeof(Payload) +
                              2 * sizeof(void*) + payload->data.capacity() +
-                             sizeof(Key) + key_capacity;
+                             sizeof(Key) + key_capacity +
+                             sizeof(ExprCacheSegmentKey) + 4 * sizeof(void*);
     if (entry_mem > max_bytes_) {
         return;
     }
@@ -182,9 +183,24 @@ EntryPool::Put(int64_t segment_id,
     // Allocate the map node (and any rehash) before evicting. The provisional
     // node is invisible to readers under this lock and is not in Clock yet.
     const bool inserted = existing == entries_.end();
+    // Allocate the secondary index before eviction/insertion commits.
+    segment_heads_.try_emplace(segment_id, nullptr);
+    auto rollback_segment = folly::makeGuard([&] {
+        auto it = segment_heads_.find(segment_id);
+        if (it != segment_heads_.end() && it->second == nullptr) {
+            segment_heads_.erase(it);
+        }
+    });
     if (inserted) {
         existing = entries_.try_emplace(std::move(key), std::move(entry)).first;
-        existing->second->key = &existing->first;
+        auto* added = existing->second.get();
+        added->key = &existing->first;
+        auto& head = segment_heads_.at(segment_id);
+        added->segment_next = head;
+        if (head) {
+            head->segment_prev = added;
+        }
+        head = added;
     }
     auto* protected_entry = existing->second.get();
     auto rollback = folly::makeGuard([&]() {
@@ -192,6 +208,7 @@ EntryPool::Put(int64_t segment_id,
             if (protected_entry->next != nullptr) {
                 UnlinkClockEntry(clock_hand_, protected_entry);
             }
+            UnlinkSegmentEntry(protected_entry);
             entries_.erase(existing);
         }
     });
@@ -220,20 +237,67 @@ EntryPool::Put(int64_t segment_id,
     rollback.dismiss();
 }
 
-size_t
-EntryPool::EraseSegment(int64_t segment_id) {
-    std::unique_lock lock(mutex_);
-    size_t erased = 0;
-    for (auto it = entries_.begin(); it != entries_.end();) {
-        if (it->first.segment_id == segment_id) {
-            UnlinkClockEntry(clock_hand_, it->second.get());
-            it = entries_.erase(it);
-            ++erased;
-        } else {
-            ++it;
-        }
+EntryPool::RetiredEntries&
+EntryPool::RetiredEntries::operator=(RetiredEntries&& other) noexcept {
+    if (this != &other) {
+        RetiredEntries old;
+        old.head = std::move(head);
+        head = std::move(other.head);
+        count = std::exchange(other.count, 0);
     }
-    return erased;
+    return *this;
+}
+
+EntryPool::RetiredEntries::~RetiredEntries() {
+    while (head) {
+        auto next = std::move(head->retired_next);
+        head = std::move(next);
+    }
+}
+
+void
+EntryPool::UnlinkSegmentEntry(Entry* entry) noexcept {
+    auto it = segment_heads_.find(entry->key->segment_id);
+    if (entry->segment_prev) {
+        entry->segment_prev->segment_next = entry->segment_next;
+    } else {
+        it->second = entry->segment_next;
+    }
+    if (entry->segment_next) {
+        entry->segment_next->segment_prev = entry->segment_prev;
+    }
+    if (!it->second) {
+        segment_heads_.erase(it);
+    }
+    entry->segment_prev = entry->segment_next = nullptr;
+}
+
+EntryPool::RetiredEntries
+EntryPool::DetachSegment(ExprCacheSegmentKey segment) {
+    RetiredEntries retired;
+    std::unique_lock lock(mutex_);
+    auto it = segment_heads_.find(segment);
+    if (it == segment_heads_.end()) {
+        return retired;
+    }
+    auto* entry = it->second;
+    while (entry) {
+        auto* next = entry->segment_next;
+        auto node = entries_.extract(*entry->key);
+        UnlinkClockEntry(clock_hand_, entry);
+        entry->retired_next = std::move(retired.head);
+        retired.head = std::move(node.mapped());
+        ++retired.count;
+        entry = next;
+    }
+    segment_heads_.erase(it);
+    return retired;
+}
+
+size_t
+EntryPool::EraseSegment(ExprCacheSegmentKey segment_id) {
+    auto retired = DetachSegment(segment_id);
+    return retired.count;
 }
 
 void
@@ -241,6 +305,7 @@ EntryPool::Clear() {
     std::unique_lock lock(mutex_);
     clock_hand_ = nullptr;
     entries_.clear();
+    segment_heads_.clear();
 }
 
 void
@@ -332,9 +397,10 @@ EntryPool::EvictForPut(size_t bytes,
     while (candidates != nullptr) {
         auto it = entries_.find(*candidates->key);
         LOG_DEBUG("EntryPool::EvictForPut segment_id={}, sig_hash={}",
-                  it->first.segment_id,
+                  it->first.segment_id.segment_id,
                   it->first.sig_hash);
         UnlinkClockEntry(candidates, it->second.get());
+        UnlinkSegmentEntry(it->second.get());
         entries_.erase(it);
     }
     return true;

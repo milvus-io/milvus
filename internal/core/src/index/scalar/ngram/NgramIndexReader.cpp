@@ -346,6 +346,34 @@ NgramIndexReader::ValueType() const {
 }
 
 bool
+NgramIndexReader::CanHandleConditionTree(
+    const RegexLiteralCondition& condition) const {
+    return !PlanNgramRegexCondition(condition, index_->GramBounds().first)
+                .IsTrue();
+}
+
+void
+NgramIndexReader::ConditionTreeCandidates(
+    const RegexLiteralCondition& condition, TargetBitmap& candidates) const {
+    const auto& pin = GetStorage();
+    const auto& storage = *pin;
+    AssertInfo(candidates.size() == storage.count_,
+               "NGRAM candidates size {} disagrees with count {}",
+               candidates.size(),
+               storage.count_);
+    const auto plan = PlanNgramRegexCondition(condition, storage.min_gram_);
+    AssertInfo(!plan.IsTrue(),
+               "NGRAM cannot handle the requested condition tree");
+    ApplyNgramRegexPlan(
+        plan,
+        candidates,
+        [this, &storage](const std::vector<std::string>& literals,
+                         TargetBitmap& bitmap) {
+            ApplyLiterals(storage, literals, bitmap);
+        });
+}
+
+bool
 NgramIndexReader::CanHandle(std::string_view literal, PatternOp op) const {
     const auto [min_gram, max_gram] = index_->GramBounds();
     const auto owned = OwnString(literal);

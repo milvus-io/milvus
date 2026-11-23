@@ -45,9 +45,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestLoadCallbacksRecordDemandAfterBroadcast(t *testing.T) {
+	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		meta.DefaultResourceGroupName: typeutil.NewUniqueSet(10001),
+	})()
 	enableAutoscalePrecheckForTest(t)
 	setAutoscaleCapacityRatiosForTest(t, "0.9", "0.5")
 	params := paramtable.Get()
@@ -119,7 +123,7 @@ func TestLoadCallbacksRecordDemandAfterBroadcast(t *testing.T) {
 						PartitionIDs: []int64{autoscalePrecheckTestPartitionID},
 					})
 				} else {
-					err = server.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, &querypb.LoadCollectionRequest{
+					err = server.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, false, &querypb.LoadCollectionRequest{
 						CollectionID: autoscalePrecheckTestCollectionID, ReplicaNumber: 1,
 					})
 				}

@@ -219,19 +219,48 @@ func (s *queryScanGrepSegment) ScanGrep(ctx context.Context, offsets *array.Int6
 	}, waitSegmentReadGateRetry)
 }
 
+// queryScanNativeSegment borrows the exact native handle retained by retrieval.
+// The caller owns the legacy segment pin or QueryView lease through scanning,
+// identity retrieval and final materialization; this helper must not release it.
+func queryScanNativeSegment(segment Segment) (segcore.CSegment, SegmentType, error) {
+	var csegment segcore.CSegment
+	var segmentType SegmentType
+	switch s := segment.(type) {
+	case *LocalSegment:
+		if s != nil {
+			csegment, segmentType = s.csegment, s.segmentType
+		}
+	case *sealedReadState:
+		// Never use parent.csegment: it may already expose a newer read state.
+		if s != nil {
+			csegment, segmentType = s.native, SegmentTypeSealed
+		}
+	case *viewQueryGrowingSegment:
+		if s != nil {
+			csegment, segmentType = s.csegment, SegmentTypeGrowing
+		}
+	default:
+		return nil, segmentType, merr.WrapErrServiceInternalMsg("QueryScan does not support segment type %T", segment)
+	}
+	if csegment == nil {
+		return nil, segmentType, merr.WrapErrServiceInternalMsg("QueryScan segment %T has nil native handle", segment)
+	}
+	return csegment, segmentType, nil
+}
+
 func runQueryScanSegment(ctx context.Context, fieldID, queryLimit int64, repr *chain.ChainRepr,
 	input RetrieveSegmentResult, plan *segcore.RetrievePlan,
 ) (*chain.DataFrame, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	local, ok := input.Segment.(*LocalSegment)
-	if !ok || local.csegment == nil {
-		return nil, merr.WrapErrServiceInternalMsg("QueryScan requires a local segcore segment")
+	csegment, segmentType, err := queryScanNativeSegment(input.Segment)
+	if err != nil {
+		return nil, err
 	}
 	binding := types.FunctionBuildContext{QueryScan: &types.QueryScanBuildContext{
 		FieldID: fieldID, QueryLimit: queryLimit, Segment: &queryScanGrepSegment{
-			Segment: segcore.NewGrepSegment(local.csegment), segmentType: local.segmentType,
+			Segment: segcore.NewGrepSegment(csegment), segmentType: segmentType,
 		},
 	}}
 	fc, err := chain.FuncChainFromReprWithContext(repr, memory.DefaultAllocator, binding)
@@ -275,8 +304,8 @@ func runQueryScanSegment(ctx context.Context, fieldID, queryLimit int64, repr *c
 	selected := offsets.Int64Values()
 	takeLimit := paramtable.Get().QueryNodeCfg.TakeForOutputResultCountLimit.GetAsInt64()
 	takeAllowed := takeLimit == 0 || int64(len(selected)) <= takeLimit
-	nativeResult, err := retrySegmentReadGate(ctx, local.segmentType, func() (*segcore.RetrieveArrowResult, error) {
-		return segcore.RetrieveIdentitiesByOffsets(ctx, local.csegment, &segcore.RetrievePlanWithOffsets{RetrievePlan: plan, Offsets: selected}, takeAllowed)
+	nativeResult, err := retrySegmentReadGate(ctx, segmentType, func() (*segcore.RetrieveArrowResult, error) {
+		return segcore.RetrieveIdentitiesByOffsets(ctx, csegment, &segcore.RetrievePlanWithOffsets{RetrievePlan: plan, Offsets: selected}, takeAllowed)
 	}, waitSegmentReadGateRetry)
 	if err != nil {
 		return nil, err

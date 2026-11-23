@@ -83,7 +83,7 @@ func InitTraceConfig(params *paramtable.ComponentParam) {
 		otlpEndpoint:   endpoint,
 		otlpMethod:     otlpMethod,
 		otlpHeaders:    otlpHeaders,
-		oltpSecure:     (C.bool)(otlpSecure),
+		oltpSecure:     C.bool(otlpSecure),
 		nodeID:         nodeID,
 	}
 	// oltp grpc may hangs forever, add timeout logic at go side
@@ -117,7 +117,7 @@ func ResetTraceConfig(params *paramtable.ComponentParam) {
 		otlpEndpoint:   endpoint,
 		otlpMethod:     otlpMethod,
 		otlpHeaders:    otlpHeaders,
-		oltpSecure:     (C.bool)(otlpSecure),
+		oltpSecure:     C.bool(otlpSecure),
 		nodeID:         nodeID,
 	}
 
@@ -153,6 +153,8 @@ func InitS3CrtQueueSizes(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitS3CrtQueueSizes failed")
 }
 
+// InitStorageV2FileSystem preserves QueryNode's Talon mode and stage mask for
+// reader-open metadata. The native filesystem routes ordinary IO separately.
 func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
 	if err := InitCredentialBrokerPolicy(params); err != nil {
 		return err
@@ -188,6 +190,7 @@ func initLocalArrowFileSystem(path string, params *paramtable.ComponentParam) er
 		root_path:                       cRootPath,
 		storage_type:                    cStorageType,
 		talon_mode:                      C.uint32_t(params.CommonCfg.StorageTalonMode.GetAsUint32()),
+		talon_enabled_stages:            C.uint32_t(params.CommonCfg.StorageTalonEnabledStages.GetAsUint32()),
 		talon_small_read_threshold:      C.uint32_t(params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32()),
 		talon_coordinator:               cTalonCoordinator,
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
@@ -250,6 +253,7 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 		tls_min_version:                 cTLSMinVersion,
 		use_crc32c_checksum:             C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
 		talon_mode:                      C.uint32_t(params.CommonCfg.StorageTalonMode.GetAsUint32()),
+		talon_enabled_stages:            C.uint32_t(params.CommonCfg.StorageTalonEnabledStages.GetAsUint32()),
 		talon_small_read_threshold:      C.uint32_t(params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32()),
 		talon_coordinator:               cTalonCoordinator,
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
@@ -270,6 +274,7 @@ func SetArrowFSChunkManagerEnabled(params *paramtable.ComponentParam) {
 	C.SetArrowFileSystemChunkManagerEnabled(C.bool(params.CommonCfg.UseArrowFSChunkManager.GetAsBool()))
 }
 
+// InitRemoteChunkManager initializes the singleton used for ordinary QueryNode IO.
 func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	cAddress := C.CString(params.MinioCfg.Address.GetValue())
 	cBucketName := C.CString(params.MinioCfg.BucketName.GetValue())
@@ -325,6 +330,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 		tls_min_version:                 cTLSMinVersion,
 		use_crc32c_checksum:             C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
 		talon_mode:                      C.uint32_t(params.CommonCfg.StorageTalonMode.GetAsUint32()),
+		talon_enabled_stages:            C.uint32_t(params.CommonCfg.StorageTalonEnabledStages.GetAsUint32()),
 		talon_small_read_threshold:      C.uint32_t(params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32()),
 		talon_coordinator:               cTalonCoordinator,
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
@@ -460,8 +466,6 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	rejectRemoteVectorOutput := C.bool(params.QueryNodeCfg.TieredRejectRemoteVectorOutput.GetAsBool())
 	overloadedMemoryThresholdPercentage := C.float(memoryMaxRatio)
 	maxDiskUsagePercentage := C.float(diskMaxRatio)
-	diskPath := C.CString(params.LocalStorageCfg.Path.GetValue())
-	defer C.free(unsafe.Pointer(diskPath))
 
 	prefetchPoolThreads := C.uint32_t(hardware.GetCPUNum() * params.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt())
 
@@ -475,7 +479,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 		storageUsageTrackingEnabled,
 		evictionEnabled, cacheTouchWindowMs,
 		backgroundEvictionEnabled, evictionIntervalMs, cacheCellUnaccessedSurvivalTime,
-		overloadedMemoryThresholdPercentage, loadingResourceFactor, maxDiskUsagePercentage, diskPath,
+		overloadedMemoryThresholdPercentage, loadingResourceFactor, maxDiskUsagePercentage,
 		loadingTimeoutMs, warmupLoadingTimeoutMs, rejectRemoteVectorOutput, prefetchPoolThreads)
 
 	tieredEvictableMemoryCacheRatio := params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat()

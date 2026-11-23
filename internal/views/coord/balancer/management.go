@@ -190,6 +190,7 @@ func (b *DefaultBalancer) MoveSegments(ctx context.Context, cfg *loadmgr.LoadCon
 		}
 		rows[destination] += info.LogicalSize
 	}
+	priorities := b.preparationPriorities()
 	builders := make(map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder, len(moves))
 	for id, move := range moves {
 		stat := pl.Shards[id]
@@ -208,7 +209,8 @@ func (b *DefaultBalancer) MoveSegments(ctx context.Context, cfg *loadmgr.LoadCon
 			assignments[node][info.PartitionID] = append(assignments[node][info.PartitionID], segment)
 		}
 		builders[id] = qviews.NewQueryViewAtCoordBuilder(id.ReplicaID, syntheticDataView(cfg, data.DataVersion, data.Shard(id.VChannel)), id.VChannel).
-			SetAssignments(assignments).SetLoadInfoVersion(pl.ConfigVersion).SetSchemaVersion(stat.UpSchemaVersion)
+			SetAssignments(assignments).SetLoadInfoVersion(pl.ConfigVersion).SetSchemaVersion(stat.UpSchemaVersion).
+			SetPreparationPriority(priorities.preparationPriority(id))
 	}
 	for id, builder := range builders {
 		// A concurrent data/schema change is handled by normal reconciliation;

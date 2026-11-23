@@ -25,7 +25,7 @@
 #include <cstring>
 #include <deque>
 #include <functional>
-#include <future>
+#include <folly/futures/Future.h>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -51,7 +51,8 @@ using SliceTransientBytes = std::function<size_t(size_t seq)>;
 struct ActiveSliceTask {
     size_t slice_transient_bytes{0};
     std::shared_ptr<StreamSliceResult> result;
-    std::future<void> future;
+    folly::SemiFuture<folly::Unit> future =
+        folly::SemiFuture<folly::Unit>::makeEmpty();
 };
 
 // Holds the transient bytes and one slot for the lifetime of a slice task.
@@ -128,14 +129,14 @@ EncryptedStreamBudgetBytes(size_t cipher_len, size_t plain_len) {
 constexpr size_t kEntryDownloadRangeSize = 16 * 1024 * 1024;
 
 void
-DrainFutures(std::vector<std::future<void>>& futures,
+DrainFutures(std::vector<folly::SemiFuture<folly::Unit>>& futures,
              std::exception_ptr& first_error) {
     for (auto& future : futures) {
         if (!future.valid()) {
             continue;
         }
         try {
-            future.get();
+            std::move(future).get();
         } catch (...) {
             if (!first_error) {
                 first_error = std::current_exception();
@@ -167,11 +168,11 @@ ReadOrderedEntryStream(
         return;
     }
 
-    auto& pool = ThreadPools::GetThreadPool(priority);
+    auto& pool = ThreadPools::GetExecutor(priority);
     auto& budget = LoadAdmissionController::GetInstance();
     const auto budget_priority = LoadAdmissionPriorityForThreadPool(priority);
     const size_t max_active_tasks =
-        std::min(num_slices, std::max<size_t>(1, pool.GetMaxThreadNum()));
+        std::min(num_slices, std::max<size_t>(1, pool.numThreads()));
 
     size_t next_submit = 0;
     uint32_t running_crc = 0;
@@ -201,7 +202,7 @@ ReadOrderedEntryStream(
             active_tasks.pop_front();
             if (task.future.valid()) {
                 try {
-                    task.future.get();
+                    std::move(task.future).get();
                 } catch (...) {
                     rememberError(std::current_exception());
                 }
@@ -244,18 +245,22 @@ ReadOrderedEntryStream(
         }
 
         try {
-            active_tasks.push_back(ActiveSliceTask{
-                slice_transient_byte_count, result, std::future<void>()});
+            active_tasks.push_back(
+                ActiveSliceTask{slice_transient_byte_count, result});
             active_tasks.back().future =
-                pool.Submit([result, load_slice, seq, cancellation_token]() {
-                    try {
-                        ThrowIfCancelled(cancellation_token, "ReadEntryStream");
-                        result->data = load_slice(seq);
-                        ThrowIfCancelled(cancellation_token, "ReadEntryStream");
-                    } catch (...) {
-                        result->error = std::current_exception();
-                    }
-                });
+                folly::via(&pool,
+                           [result, load_slice, seq, cancellation_token]() {
+                               try {
+                                   ThrowIfCancelled(cancellation_token,
+                                                    "ReadEntryStream");
+                                   result->data = load_slice(seq);
+                                   ThrowIfCancelled(cancellation_token,
+                                                    "ReadEntryStream");
+                               } catch (...) {
+                                   result->error = std::current_exception();
+                               }
+                           })
+                    .semi();
         } catch (...) {
             if (!active_tasks.empty() && active_tasks.back().result == result &&
                 !active_tasks.back().future.valid()) {
@@ -301,7 +306,7 @@ ReadOrderedEntryStream(
         active_tasks.pop_front();
 
         try {
-            task.future.get();
+            std::move(task.future).get();
         } catch (...) {
             rememberError(std::current_exception());
         }
@@ -500,11 +505,11 @@ IndexEntryReader::ReadPlainEntry(const EntryMeta& meta) {
         return result;
     }
 
-    auto& pool = ThreadPools::GetThreadPool(priority_);
+    auto& pool = ThreadPools::GetExecutor(priority_);
     auto cancellation_token = cancellation_token_;
     uint8_t* dest = result.data.data();
 
-    std::vector<std::future<void>> futures;
+    std::vector<folly::SemiFuture<folly::Unit>> futures;
     size_t remaining = meta.plaintext_size;
     size_t offset = 0;
 
@@ -515,20 +520,24 @@ IndexEntryReader::ReadPlainEntry(const EntryMeta& meta) {
             size_t len = std::min(remaining, kEntryDownloadRangeSize);
             size_t this_offset = offset;
 
-            futures.push_back(pool.Submit(
-                [this, dest, this_offset, len, &pm, cancellation_token]() {
-                    ThrowIfCancelled(cancellation_token,
-                                     "IndexEntryReader::ReadPlainEntry");
-                    size_t n = input_->ReadAt(dest + this_offset,
-                                              pm.remote_offset + this_offset,
-                                              len);
-                    ThrowIfCancelled(cancellation_token,
-                                     "IndexEntryReader::ReadPlainEntry");
-                    if (!(n == len)) {
-                        ThrowInfo(ErrorCode::FileReadFailed,
-                                  "Failed to read entry data range");
-                    }
-                }));
+            futures.push_back(
+                folly::via(
+                    &pool,
+                    [this, dest, this_offset, len, &pm, cancellation_token]() {
+                        ThrowIfCancelled(cancellation_token,
+                                         "IndexEntryReader::ReadPlainEntry");
+                        size_t n =
+                            input_->ReadAt(dest + this_offset,
+                                           pm.remote_offset + this_offset,
+                                           len);
+                        ThrowIfCancelled(cancellation_token,
+                                         "IndexEntryReader::ReadPlainEntry");
+                        if (!(n == len)) {
+                            ThrowInfo(ErrorCode::FileReadFailed,
+                                      "Failed to read entry data range");
+                        }
+                    })
+                    .semi());
 
             remaining -= len;
             offset += len;
@@ -556,11 +565,11 @@ IndexEntryReader::ReadEncryptedEntry(const EntryMeta& meta) {
     Entry result;
     result.data.resize(meta.plaintext_size);
 
-    auto& pool = ThreadPools::GetThreadPool(priority_);
+    auto& pool = ThreadPools::GetExecutor(priority_);
     auto cancellation_token = cancellation_token_;
     uint8_t* dest = result.data.data();
 
-    std::vector<std::future<void>> futures;
+    std::vector<folly::SemiFuture<folly::Unit>> futures;
 
     std::exception_ptr first_error = nullptr;
     try {
@@ -569,37 +578,48 @@ IndexEntryReader::ReadEncryptedEntry(const EntryMeta& meta) {
             const auto this_output_offset = slice.plaintext_offset;
             const auto plain_len = slice.plaintext_bytes;
 
-            futures.push_back(pool.Submit([this,
-                                           slice,
-                                           dest,
-                                           this_output_offset,
-                                           plain_len,
-                                           cancellation_token]() {
-                ThrowIfCancelled(cancellation_token,
-                                 "IndexEntryReader::ReadEncryptedEntry");
-                std::vector<uint8_t> cipher(slice.remote_bytes);
-                size_t n = input_->ReadAt(
-                    cipher.data(), slice.remote_offset, slice.remote_bytes);
-                ThrowIfCancelled(cancellation_token,
-                                 "IndexEntryReader::ReadEncryptedEntry");
-                if (!(n == slice.remote_bytes)) {
-                    ThrowInfo(ErrorCode::FileReadFailed,
-                              "Failed to read encrypted slice");
-                }
+            futures.push_back(
+                folly::via(
+                    &pool,
+                    [this,
+                     slice,
+                     dest,
+                     this_output_offset,
+                     plain_len,
+                     cancellation_token]() {
+                        ThrowIfCancelled(
+                            cancellation_token,
+                            "IndexEntryReader::ReadEncryptedEntry");
+                        std::vector<uint8_t> cipher(slice.remote_bytes);
+                        size_t n = input_->ReadAt(cipher.data(),
+                                                  slice.remote_offset,
+                                                  slice.remote_bytes);
+                        ThrowIfCancelled(
+                            cancellation_token,
+                            "IndexEntryReader::ReadEncryptedEntry");
+                        if (!(n == slice.remote_bytes)) {
+                            ThrowInfo(ErrorCode::FileReadFailed,
+                                      "Failed to read encrypted slice");
+                        }
 
-                auto dec = cipher_plugin_->GetDecryptor(
-                    encryption_->ez_id, collection_id_, encryption_->edek);
-                auto plain = dec->Decrypt(cipher.data(), cipher.size());
+                        auto dec =
+                            cipher_plugin_->GetDecryptor(encryption_->ez_id,
+                                                         collection_id_,
+                                                         encryption_->edek);
+                        auto plain = dec->Decrypt(cipher.data(), cipher.size());
 
-                if (!(plain.size() == plain_len)) {
-                    ThrowInfo(ErrorCode::DataFormatBroken,
-                              "Decrypted size mismatch: expected {}, got {}",
-                              plain_len,
-                              plain.size());
-                }
-                milvus::fastmem::FastMemcpy(
-                    dest + this_output_offset, plain.data(), plain.size());
-            }));
+                        if (!(plain.size() == plain_len)) {
+                            ThrowInfo(
+                                ErrorCode::DataFormatBroken,
+                                "Decrypted size mismatch: expected {}, got {}",
+                                plain_len,
+                                plain.size());
+                        }
+                        milvus::fastmem::FastMemcpy(dest + this_output_offset,
+                                                    plain.data(),
+                                                    plain.size());
+                    })
+                    .semi());
         }
     } catch (...) {
         first_error = std::current_exception();
@@ -663,8 +683,8 @@ void
 IndexEntryReader::SubmitEntryDownloadTasks(
     const EntryMeta& meta,
     EntryDownloadState& state,
-    std::vector<std::future<void>>& futures) {
-    auto& pool = ThreadPools::GetThreadPool(priority_);
+    std::vector<folly::SemiFuture<folly::Unit>>& futures) {
+    auto& pool = ThreadPools::GetExecutor(priority_);
     auto cancellation_token = cancellation_token_;
     futures.reserve(futures.size() + DownloadTaskCount(meta));
 
@@ -676,48 +696,61 @@ IndexEntryReader::SubmitEntryDownloadTasks(
             const auto this_output_offset = slice.plaintext_offset;
             const auto plain_len = slice.plaintext_bytes;
 
-            futures.push_back(pool.Submit([this,
-                                           slice,
-                                           fd = state.fd,
-                                           this_output_offset,
-                                           plain_len,
-                                           i,
-                                           &state,
-                                           cancellation_token]() {
-                ThrowIfCancelled(cancellation_token,
-                                 "IndexEntryReader::ReadEntriesToFiles");
-                std::vector<uint8_t> cipher(slice.remote_bytes);
-                size_t n = input_->ReadAt(
-                    cipher.data(), slice.remote_offset, slice.remote_bytes);
-                ThrowIfCancelled(cancellation_token,
-                                 "IndexEntryReader::ReadEntriesToFiles");
-                if (!(n == slice.remote_bytes)) {
-                    ThrowInfo(ErrorCode::FileReadFailed,
-                              "Failed to read encrypted slice");
-                }
+            futures.push_back(
+                folly::via(
+                    &pool,
+                    [this,
+                     slice,
+                     fd = state.fd,
+                     this_output_offset,
+                     plain_len,
+                     i,
+                     &state,
+                     cancellation_token]() {
+                        ThrowIfCancelled(
+                            cancellation_token,
+                            "IndexEntryReader::ReadEntriesToFiles");
+                        std::vector<uint8_t> cipher(slice.remote_bytes);
+                        size_t n = input_->ReadAt(cipher.data(),
+                                                  slice.remote_offset,
+                                                  slice.remote_bytes);
+                        ThrowIfCancelled(
+                            cancellation_token,
+                            "IndexEntryReader::ReadEntriesToFiles");
+                        if (!(n == slice.remote_bytes)) {
+                            ThrowInfo(ErrorCode::FileReadFailed,
+                                      "Failed to read encrypted slice");
+                        }
 
-                auto dec = cipher_plugin_->GetDecryptor(
-                    encryption_->ez_id, collection_id_, encryption_->edek);
-                auto plain = dec->Decrypt(cipher.data(), cipher.size());
+                        auto dec =
+                            cipher_plugin_->GetDecryptor(encryption_->ez_id,
+                                                         collection_id_,
+                                                         encryption_->edek);
+                        auto plain = dec->Decrypt(cipher.data(), cipher.size());
 
-                if (!(plain.size() == plain_len)) {
-                    ThrowInfo(ErrorCode::DataFormatBroken,
-                              "Decrypted size mismatch: expected {}, got {}",
-                              plain_len,
-                              plain.size());
-                }
-                ThrowIfCancelled(cancellation_token,
-                                 "IndexEntryReader::ReadEntriesToFiles");
-                auto written = ::pwrite(
-                    fd, plain.data(), plain.size(), this_output_offset);
-                if (!(written == static_cast<ssize_t>(plain.size()))) {
-                    ThrowInfo(ErrorCode::FileWriteFailed, "Failed to pwrite");
-                }
-                state.range_crcs[i] = {
-                    Crc32cValue(reinterpret_cast<const uint8_t*>(plain.data()),
+                        if (!(plain.size() == plain_len)) {
+                            ThrowInfo(
+                                ErrorCode::DataFormatBroken,
+                                "Decrypted size mismatch: expected {}, got {}",
+                                plain_len,
+                                plain.size());
+                        }
+                        ThrowIfCancelled(
+                            cancellation_token,
+                            "IndexEntryReader::ReadEntriesToFiles");
+                        auto written = ::pwrite(
+                            fd, plain.data(), plain.size(), this_output_offset);
+                        if (!(written == static_cast<ssize_t>(plain.size()))) {
+                            ThrowInfo(ErrorCode::FileWriteFailed,
+                                      "Failed to pwrite");
+                        }
+                        state.range_crcs[i] = {
+                            Crc32cValue(
+                                reinterpret_cast<const uint8_t*>(plain.data()),
                                 plain.size()),
-                    plain.size()};
-            }));
+                            plain.size()};
+                    })
+                    .semi());
         }
     } else {
         const auto& pm = std::get<PlainEntrySource>(meta.source);
@@ -732,31 +765,39 @@ IndexEntryReader::SubmitEntryDownloadTasks(
             size_t this_src_offset = src_offset;
             size_t this_range_idx = range_idx;
 
-            futures.push_back(pool.Submit([this,
-                                           this_src_offset,
-                                           len,
-                                           fd = state.fd,
-                                           this_file_offset,
-                                           this_range_idx,
-                                           &state,
-                                           cancellation_token]() {
-                ThrowIfCancelled(cancellation_token,
-                                 "IndexEntryReader::ReadEntriesToFiles");
-                std::vector<uint8_t> buf(len);
-                size_t n = input_->ReadAt(buf.data(), this_src_offset, len);
-                ThrowIfCancelled(cancellation_token,
-                                 "IndexEntryReader::ReadEntriesToFiles");
-                if (!(n == len)) {
-                    ThrowInfo(ErrorCode::FileReadFailed,
-                              "Failed to read data for file");
-                }
-                auto written = ::pwrite(fd, buf.data(), len, this_file_offset);
-                if (!(written == static_cast<ssize_t>(len))) {
-                    ThrowInfo(ErrorCode::FileWriteFailed, "Failed to pwrite");
-                }
-                state.range_crcs[this_range_idx] = {
-                    Crc32cValue(buf.data(), len), len};
-            }));
+            futures.push_back(
+                folly::via(&pool,
+                           [this,
+                            this_src_offset,
+                            len,
+                            fd = state.fd,
+                            this_file_offset,
+                            this_range_idx,
+                            &state,
+                            cancellation_token]() {
+                               ThrowIfCancelled(
+                                   cancellation_token,
+                                   "IndexEntryReader::ReadEntriesToFiles");
+                               std::vector<uint8_t> buf(len);
+                               size_t n = input_->ReadAt(
+                                   buf.data(), this_src_offset, len);
+                               ThrowIfCancelled(
+                                   cancellation_token,
+                                   "IndexEntryReader::ReadEntriesToFiles");
+                               if (!(n == len)) {
+                                   ThrowInfo(ErrorCode::FileReadFailed,
+                                             "Failed to read data for file");
+                               }
+                               auto written = ::pwrite(
+                                   fd, buf.data(), len, this_file_offset);
+                               if (!(written == static_cast<ssize_t>(len))) {
+                                   ThrowInfo(ErrorCode::FileWriteFailed,
+                                             "Failed to pwrite");
+                               }
+                               state.range_crcs[this_range_idx] = {
+                                   Crc32cValue(buf.data(), len), len};
+                           })
+                    .semi());
 
             remaining -= len;
             file_offset += len;
@@ -861,9 +902,9 @@ void
 IndexEntryReader::SubmitEntryStreamDownloadTasks(
     const EntryMeta& meta,
     EntryStreamDownloadState& state,
-    std::vector<std::future<void>>& futures,
+    std::vector<folly::SemiFuture<folly::Unit>>& futures,
     EntryStreamFailure& failure) {
-    auto& pool = ThreadPools::GetThreadPool(priority_);
+    auto& pool = ThreadPools::GetExecutor(priority_);
     auto input = input_;
     const auto cancellation_token = folly::cancellation_token_merge(
         cancellation_token_, failure.cancellation.getToken());
@@ -892,66 +933,71 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
             ThrowIfCancelled(
                 cancellation_token,
                 "IndexEntryReader::SubmitEntryStreamDownloadTasks");
-            futures.push_back(pool.Submit([input,
-                                           cipher_plugin,
-                                           ez_id,
-                                           collection_id,
-                                           edek,
-                                           slice,
-                                           output_offset,
-                                           plain_len,
-                                           i,
-                                           &state,
-                                           &failure,
-                                           cancellation_token,
-                                           budget_guard = std::move(
-                                               budget_guard)]() mutable {
-                // Move out of packaged_task's closure: completed futures can
-                // retain that closure while submission waits for another slot.
-                auto reservation = std::move(budget_guard);
-                try {
-                    ThrowIfCancelled(
-                        cancellation_token,
-                        "IndexEntryReader::ReadEntriesStreamToFiles");
+            futures.push_back(
+                folly::via(
+                    &pool,
+                    [input,
+                     cipher_plugin,
+                     ez_id,
+                     collection_id,
+                     edek,
+                     slice,
+                     output_offset,
+                     plain_len,
+                     i,
+                     &state,
+                     &failure,
+                     cancellation_token,
+                     budget_guard = std::move(budget_guard)]() mutable {
+                        // Release the reservation before publishing task completion.
+                        auto reservation = std::move(budget_guard);
+                        try {
+                            ThrowIfCancelled(
+                                cancellation_token,
+                                "IndexEntryReader::ReadEntriesStreamToFiles");
 
-                    std::vector<uint8_t> cipher(slice.remote_bytes);
-                    size_t n = input->ReadAt(
-                        cipher.data(), slice.remote_offset, slice.remote_bytes);
-                    ThrowIfCancelled(
-                        cancellation_token,
-                        "IndexEntryReader::ReadEntriesStreamToFiles");
-                    if (!(n == slice.remote_bytes)) {
-                        ThrowInfo(ErrorCode::FileReadFailed,
-                                  "Failed to read encrypted slice");
-                    }
+                            std::vector<uint8_t> cipher(slice.remote_bytes);
+                            size_t n = input->ReadAt(cipher.data(),
+                                                     slice.remote_offset,
+                                                     slice.remote_bytes);
+                            ThrowIfCancelled(
+                                cancellation_token,
+                                "IndexEntryReader::ReadEntriesStreamToFiles");
+                            if (!(n == slice.remote_bytes)) {
+                                ThrowInfo(ErrorCode::FileReadFailed,
+                                          "Failed to read encrypted slice");
+                            }
 
-                    auto dec =
-                        cipher_plugin->GetDecryptor(ez_id, collection_id, edek);
-                    auto plain = dec->Decrypt(cipher.data(), cipher.size());
+                            auto dec = cipher_plugin->GetDecryptor(
+                                ez_id, collection_id, edek);
+                            auto plain =
+                                dec->Decrypt(cipher.data(), cipher.size());
 
-                    if (!(plain.size() == plain_len)) {
-                        ThrowInfo(
-                            ErrorCode::DataFormatBroken,
-                            "Decrypted size mismatch: expected {}, got {}",
-                            plain_len,
-                            plain.size());
-                    }
-                    ThrowIfCancelled(
-                        cancellation_token,
-                        "IndexEntryReader::ReadEntriesStreamToFiles");
-                    state.write(output_offset,
+                            if (!(plain.size() == plain_len)) {
+                                ThrowInfo(ErrorCode::DataFormatBroken,
+                                          "Decrypted size mismatch: expected "
+                                          "{}, got {}",
+                                          plain_len,
+                                          plain.size());
+                            }
+                            ThrowIfCancelled(
+                                cancellation_token,
+                                "IndexEntryReader::ReadEntriesStreamToFiles");
+                            state.write(
+                                output_offset,
                                 reinterpret_cast<const uint8_t*>(plain.data()),
                                 plain.size());
-                    state.range_crcs[i] = {
-                        Crc32cValue(
-                            reinterpret_cast<const uint8_t*>(plain.data()),
-                            plain.size()),
-                        plain.size()};
-                } catch (...) {
-                    failure.RecordAndCancel(std::current_exception());
-                    throw;
-                }
-            }));
+                            state.range_crcs[i] = {
+                                Crc32cValue(reinterpret_cast<const uint8_t*>(
+                                                plain.data()),
+                                            plain.size()),
+                                plain.size()};
+                        } catch (...) {
+                            failure.RecordAndCancel(std::current_exception());
+                            throw;
+                        }
+                    })
+                    .semi());
         }
     } else {
         auto pm = std::get<PlainEntrySource>(meta.source);
@@ -975,39 +1021,44 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
             ThrowIfCancelled(
                 cancellation_token,
                 "IndexEntryReader::SubmitEntryStreamDownloadTasks");
-            futures.push_back(pool.Submit([input,
-                                           output_offset,
-                                           src_offset,
-                                           len,
-                                           seq,
-                                           &state,
-                                           &failure,
-                                           cancellation_token,
-                                           budget_guard = std::move(
-                                               budget_guard)]() mutable {
-                auto reservation = std::move(budget_guard);
-                try {
-                    ThrowIfCancelled(
-                        cancellation_token,
-                        "IndexEntryReader::ReadEntriesStreamToFiles");
+            futures.push_back(
+                folly::via(
+                    &pool,
+                    [input,
+                     output_offset,
+                     src_offset,
+                     len,
+                     seq,
+                     &state,
+                     &failure,
+                     cancellation_token,
+                     budget_guard = std::move(budget_guard)]() mutable {
+                        auto reservation = std::move(budget_guard);
+                        try {
+                            ThrowIfCancelled(
+                                cancellation_token,
+                                "IndexEntryReader::ReadEntriesStreamToFiles");
 
-                    std::vector<uint8_t> buf(len);
-                    size_t n = input->ReadAt(buf.data(), src_offset, len);
-                    ThrowIfCancelled(
-                        cancellation_token,
-                        "IndexEntryReader::ReadEntriesStreamToFiles");
-                    if (!(n == len)) {
-                        ThrowInfo(ErrorCode::FileReadFailed,
-                                  "Failed to read entry slice");
-                    }
+                            std::vector<uint8_t> buf(len);
+                            size_t n =
+                                input->ReadAt(buf.data(), src_offset, len);
+                            ThrowIfCancelled(
+                                cancellation_token,
+                                "IndexEntryReader::ReadEntriesStreamToFiles");
+                            if (!(n == len)) {
+                                ThrowInfo(ErrorCode::FileReadFailed,
+                                          "Failed to read entry slice");
+                            }
 
-                    state.write(output_offset, buf.data(), len);
-                    state.range_crcs[seq] = {Crc32cValue(buf.data(), len), len};
-                } catch (...) {
-                    failure.RecordAndCancel(std::current_exception());
-                    throw;
-                }
-            }));
+                            state.write(output_offset, buf.data(), len);
+                            state.range_crcs[seq] = {
+                                Crc32cValue(buf.data(), len), len};
+                        } catch (...) {
+                            failure.RecordAndCancel(std::current_exception());
+                            throw;
+                        }
+                    })
+                    .semi());
         }
     }
 }
@@ -1055,7 +1106,7 @@ IndexEntryReader::ReadEntryStreamAt(
     state.range_crcs.resize(StreamDownloadTaskCount(meta));
     state.write = std::move(write);
     EntryStreamFailure failure;
-    std::vector<std::future<void>> futures;
+    std::vector<folly::SemiFuture<folly::Unit>> futures;
     std::exception_ptr first_error;
     try {
         SubmitEntryStreamDownloadTasks(meta, state, futures, failure);
@@ -1082,7 +1133,7 @@ IndexEntryReader::ReadEntryToFile(const std::string& name,
     const auto& meta = directory_.At(name);
 
     auto state = PrepareEntryDownload(name, local_path, meta);
-    std::vector<std::future<void>> futures;
+    std::vector<folly::SemiFuture<folly::Unit>> futures;
     try {
         futures.reserve(DownloadTaskCount(meta));
         SubmitEntryDownloadTasks(meta, state, futures);
@@ -1127,7 +1178,7 @@ IndexEntryReader::ReadEntriesToFiles(
         }
     };
 
-    std::vector<std::future<void>> all_futures;
+    std::vector<folly::SemiFuture<folly::Unit>> all_futures;
     try {
         size_t total_task_count = 0;
         for (const auto& [name, path] : name_path_pairs) {
@@ -1198,7 +1249,7 @@ IndexEntryReader::ReadEntriesStreamToFiles(
     std::vector<EntryStreamDownloadState> states;
     states.reserve(name_path_pairs.size());
     EntryStreamFailure failure;
-    std::vector<std::future<void>> all_futures;
+    std::vector<folly::SemiFuture<folly::Unit>> all_futures;
 
     try {
         size_t total_task_count = 0;

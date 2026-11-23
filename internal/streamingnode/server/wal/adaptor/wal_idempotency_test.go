@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 func TestWALIdempotencyAppend(t *testing.T) {
@@ -135,7 +136,7 @@ func TestRecoveryStartsWALSummary(t *testing.T) {
 	rwWAL, err := opener.Open(ctx, &wal.OpenOption{Channel: channel, DisableFlusher: true})
 	require.NoError(t, err)
 
-	_, err = rwWAL.Append(ctx, newIdempotencyWALAppendMessage("chunk-key-1"))
+	first, err := rwWAL.Append(ctx, newIdempotencyWALAppendMessage("chunk-key-1"))
 	require.NoError(t, err)
 	_, err = rwWAL.Append(ctx, newIdempotencyWALAppendMessage("chunk-key-2"))
 	require.NoError(t, err)
@@ -144,7 +145,12 @@ func TestRecoveryStartsWALSummary(t *testing.T) {
 	channel.Term++
 	recoveredWAL, err := opener.Open(ctx, &wal.OpenOption{Channel: channel, DisableFlusher: true})
 	require.NoError(t, err)
-	recoveredWAL.Close()
+	defer recoveredWAL.Close()
+	duplicate, err := recoveredWAL.Append(ctx, newIdempotencyWALAppendMessage("chunk-key-1"))
+	require.NoError(t, err)
+	require.True(t, first.MessageID.EQ(duplicate.MessageID), "recovery must restore the original result instead of appending again")
+	require.Equal(t, first.TimeTick, duplicate.TimeTick)
+	require.True(t, first.LastConfirmedMessageID.EQ(duplicate.LastConfirmedMessageID))
 	prefix := chunkManager.RootPath() + "/"
 	keys, _, err := storage.ListAllChunkWithPrefix(ctx, chunkManager, prefix, true)
 	require.NoError(t, err)
@@ -158,7 +164,7 @@ func initIdempotencyResourceForTest(t *testing.T) storage.ChunkManager {
 
 	rc := mocks.NewMockMixCoordClient(t)
 	tso := atomic.Uint64{}
-	tso.Store(1000)
+	tso.Store(tsoutil.ComposeTSByTime(time.Now()))
 	rc.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *rootcoordpb.AllocTimestampRequest, opts ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error) {
 		start := tso.Add(uint64(req.Count)) - uint64(req.Count)
 		return &rootcoordpb.AllocTimestampResponse{

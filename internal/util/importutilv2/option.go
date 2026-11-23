@@ -215,11 +215,13 @@ func IsSnapshotSource(options Options) bool {
 	return err == nil && strings.EqualFold(strings.TrimSpace(sourceType), SourceTypeSnapshot)
 }
 
-// ValidateSnapshotSourceOptions rejects combinations that would make the
-// source contract ambiguous. Snapshot metadata is the sole authority for the
-// source storage version. L0 import remains a separate contract; CMEK content
-// is validated later against the source schema and supplied EZK.
-func ValidateSnapshotSourceOptions(options Options) error {
+// ValidateImportSourceOptions rejects combinations that would make the
+// backup/snapshot/L0 source contract ambiguous. Snapshot metadata is the sole
+// authority for the source storage version. L0 import remains a separate contract;
+// CMEK content is validated later against the source schema and supplied EZK.
+// Per-request external source storage options (`storage.*`) are parsed
+// independently by GetSourceStorageConfig.
+func ValidateImportSourceOptions(options Options) error {
 	contractKeys := []string{SourceType, BackupFlag, L0Import, StorageVersion, EZK, ExternalSpec, SnapshotSourceURI, SnapshotLayout, PartitionMapping}
 	counts := make(map[string]int, len(contractKeys))
 	hasSnapshotContractOption := false
@@ -361,11 +363,13 @@ func HasExternalSource(options Options) bool {
 	return err == nil
 }
 
-// ValidateSnapshotSourceRequest additionally rejects internal routing options
-// supplied by a public caller. Persisted tasks use ValidateSnapshotSourceOptions.
-func ValidateSnapshotSourceRequest(options Options) error {
+// ValidateImportSourceRequest additionally rejects internal routing options
+// supplied by a public caller. Persisted tasks use ValidateImportSourceOptions.
+// Per-request external source storage options (`storage.*`) are validated
+// separately via GetSourceStorageConfig.
+func ValidateImportSourceRequest(options Options) error {
 	// Do not silently broaden a request written for the earlier partition
-	// selector. Already-expanded tasks still use ValidateSnapshotSourceOptions
+	// selector. Already-expanded tasks still use ValidateImportSourceOptions
 	// and keep their immutable file inventory rather than re-expanding it.
 	for _, option := range options {
 		// GetKey tolerates nil entries; the common validator rejects them below.
@@ -376,7 +380,7 @@ func ValidateSnapshotSourceRequest(options Options) error {
 			return merr.WrapErrImportFailedMsg("%s is reserved for internal use", option.GetKey())
 		}
 	}
-	return ValidateSnapshotSourceOptions(options)
+	return ValidateImportSourceOptions(options)
 }
 
 // RedactOptions returns a logging-only copy; never mutate credentials in live
@@ -388,7 +392,8 @@ func RedactOptions(options Options) Options {
 			continue
 		}
 		value := option.GetValue()
-		if strings.EqualFold(option.GetKey(), ExternalSpec) || strings.EqualFold(option.GetKey(), EZK) {
+		if strings.EqualFold(option.GetKey(), ExternalSpec) || strings.EqualFold(option.GetKey(), EZK) ||
+			IsSourceStorageOption(option.GetKey()) {
 			value = "<redacted>"
 		}
 		result = append(result, &commonpb.KeyValuePair{Key: option.GetKey(), Value: value})

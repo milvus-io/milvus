@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include "folly/coro/Task.h"
+
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
@@ -436,7 +438,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
               },
               segment_id) {
         growing_indexes_.Initialize(
-            *schema_, index_meta_, segcore_config_, id_, insert_record_);
+            *schema_,
+            index_meta_,
+            segcore_config_,
+            id_,
+            insert_record_,
+            [this](FieldId id) { return !schema_->is_function_output(id); });
         this->InitializeTextLobSpillovers();
         this->InitializeStructElementOffsets();
         this->UpdateResourceTracking();
@@ -826,6 +833,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
  private:
     void
+    InitializeFunctionOutputIndexes(
+        const Schema& schema,
+        const std::function<bool(FieldId)>& has_field_in_input);
+
+    void
     CompleteGrowingRawRange(int64_t row_begin,
                             int64_t row_end,
                             bool require_index_flush);
@@ -899,20 +911,25 @@ class SegmentGrowingImpl : public SegmentGrowing {
     /**
      * @brief Load a single column group and return field data
      *
-     * Reads a specific column group from milvus storage and converts it to
+     * Reads a column group using the selected load mode and converts it to
      * field data format that can be inserted into the growing segment.
      *
      * @param column_groups Metadata about all available column groups
      * @param properties Storage properties for accessing the data
      * @param index Index of the column group to load
+     * @param row_limit Number of rows covered by the recovery checkpoint
+     * @param enable_async_load Use coroutine windows instead of HIGH-pool reads
+     * @note Borrows the segment and arguments until the task completes.
      * @return Map of field IDs to their corresponding field data vectors
      */
-    std::unordered_map<FieldId, std::vector<FieldDataPtr>>
+    folly::coro::Task<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>
     LoadColumnGroup(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        const std::shared_ptr<const milvus_storage::api::Properties>&
+            properties,
         int64_t index,
-        int64_t row_limit);
+        int64_t row_limit,
+        bool enable_async_load);
 
     void
     InitializeStructElementOffsets();
@@ -934,6 +951,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // reads no longer exclude each other in either direction.
 
     GrowingIndexSet growing_indexes_;
+    std::once_flag function_output_indexes_once_;
     AckResponder growing_raw_ready_;
     mutable std::mutex growing_index_feed_mutex_;
     int64_t growing_index_feed_cursor_{0};

@@ -131,7 +131,7 @@ class TestChaosApply:
         if connections.has_connection("default") is False:
             raise Exception("no connections")
 
-    def teardown(self):
+    def teardown_method(self):
         for chaos_config in getattr(self, "chaos_configs", [getattr(self, "chaos_config", {})]):
             if not chaos_config:
                 continue

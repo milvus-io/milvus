@@ -37,7 +37,9 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/partitionstats"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -72,7 +74,8 @@ type ClusteringCompactionTask struct {
 
 	maxRetryTimes int32
 
-	times *taskcommon.Times
+	times    *taskcommon.Times
+	resource taskresource.Cache
 }
 
 func (t *ClusteringCompactionTask) GetTaskID() int64 {
@@ -85,6 +88,19 @@ func (t *ClusteringCompactionTask) GetTaskType() taskcommon.Type {
 
 func (t *ClusteringCompactionTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCompactionState(t.GetTaskProto().GetState())
+}
+
+// GetTaskResource: a clustering compaction buckets its input in memory up to
+// a share of the worker, so it is priced by its input with that share as the
+// cap (see taskresource.ClusteringCompaction).
+func (t *ClusteringCompactionTask) GetTaskResource() taskcommon.Resource {
+	return t.resource.Get(func() (taskcommon.Resource, bool) {
+		inputSize, ok := compactionInputSize(t.meta, t.GetTaskProto())
+		if !ok {
+			return taskresource.Default(), false
+		}
+		return taskresource.ClusteringCompaction(inputSize), true
+	})
 }
 
 func (t *ClusteringCompactionTask) GetTaskSlot() int64 {
@@ -119,7 +135,7 @@ func (t *ClusteringCompactionTask) retryOnError(err error) {
 	}
 }
 
-func (t *ClusteringCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
+func (t *ClusteringCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 	var err error
 	defer func() {
 		t.retryOnError(err)
@@ -135,7 +151,7 @@ func (t *ClusteringCompactionTask) CreateTaskOnWorker(nodeID int64, cluster sess
 			err = merr.WrapErrClusteringCompactionSubmitTaskFail("analyze", err)
 		}
 	} else {
-		err = t.doCompact(nodeID, cluster)
+		err = t.doCompact(nodeID, cluster, resource)
 		if err != nil {
 			mlog.Warn(context.TODO(), "fail to submit compaction task", mlog.Err(err))
 			err = merr.WrapErrClusteringCompactionSubmitTaskFail("compact", err)
@@ -144,6 +160,10 @@ func (t *ClusteringCompactionTask) CreateTaskOnWorker(nodeID int64, cluster sess
 }
 
 func (t *ClusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
+	if t.meta.GetProducerChangeGroup(model.SegmentChangeSourceClustering, t.GetTaskProto().GetPlanID(), t.GetTaskProto().GetChannel()) != nil {
+		t.Process()
+		return
+	}
 	// If task is in analyzing state, skip querying the DataNode — the compaction has not been
 	// submitted yet. The state transition (analyzing → pipelining) is driven by Process() /
 	// processAnalyzing(). Once the state becomes pipelining, the scheduler will move the task
@@ -416,7 +436,7 @@ func (t *ClusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		ClusteringKeyField:        taskProto.GetClusteringKeyField().GetFieldID(),
 		MaxSegmentRows:            taskProto.GetMaxSegmentRows(),
 		PreferSegmentRows:         taskProto.GetPreferSegmentRows(),
-		AnalyzeResultPath:         path.Join(t.meta.(*meta.Meta).ChunkManager.RootPath(), common.AnalyzeStatsPath, metautil.JoinIDPath(taskProto.AnalyzeTaskID, taskProto.AnalyzeVersion)),
+		AnalyzeResultPath:         path.Join(t.meta.CompactionStorageRoot(), common.AnalyzeStatsPath, metautil.JoinIDPath(taskProto.AnalyzeTaskID, taskProto.AnalyzeVersion)),
 		AnalyzeSegmentIds:         taskProto.GetInputSegments(),
 		BeginLogID:                logIDRange.Begin, // BeginLogID is deprecated, but still assign it for compatibility.
 		PreAllocatedSegmentIDs:    taskProto.GetPreAllocatedSegmentIDs(),
@@ -490,7 +510,11 @@ func (t *ClusteringCompactionTask) processStats() error {
 		existNonStats := false
 		tmpToResultSegments := make(map[int64][]int64, len(t.GetTaskProto().GetTmpSegments()))
 		for _, segmentID := range t.GetTaskProto().GetTmpSegments() {
-			to, ok := t.meta.(*meta.Meta).GetCompactionTo(segmentID)
+			if seg := t.meta.GetSegment(context.TODO(), segmentID); meta.IsEmptySegmentChangeOutput(seg) {
+				tmpToResultSegments[segmentID] = nil
+				continue
+			}
+			to, ok := t.meta.GetCompactionTo(segmentID)
 			if !ok || to == nil {
 				select {
 				case meta.GetStatsTaskChSingleton() <- segmentID:
@@ -585,6 +609,18 @@ func (t *ClusteringCompactionTask) regeneratePartitionStats(tmpToResultSegments 
 }
 
 func (t *ClusteringCompactionTask) processIndexing() error {
+	{
+		m := t.meta
+		if Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool() {
+			if _, _, err := m.StageAdmittedChange(context.TODO(), meta.ClusteringPublicationGroup(t.GetTaskProto()), true); err != nil {
+				return err
+			}
+			return t.completeTask()
+		}
+		if m.GetProducerChangeGroup(model.SegmentChangeSourceClustering, t.GetTaskProto().GetPlanID(), t.GetTaskProto().GetChannel()) != nil {
+			return t.completeTask()
+		}
+	}
 	// wait for segment indexed
 	collectionIndexes := t.indexMeta.GetIndexesForCollection(t.GetTaskProto().GetCollectionID(), "")
 	if len(collectionIndexes) == 0 {
@@ -643,6 +679,22 @@ func (t *ClusteringCompactionTask) markInputSegmentsDropped() error {
 // indexed is the final state of a clustering compaction task
 // one task should only run this once
 func (t *ClusteringCompactionTask) completeTask() error {
+	{
+		m := t.meta
+		g, handled, err := m.StageAdmittedChange(m.CompactionContext(), meta.ClusteringPublicationGroup(t.GetTaskProto()), false)
+		if err != nil {
+			return err
+		}
+		if handled {
+			if g.State == model.SegmentChangeStateFailed || g.State == model.SegmentChangeStateAborted {
+				return t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_failed), setFailReason(g.FailReason))
+			}
+			if g.State != model.SegmentChangeStateCommitted {
+				return nil
+			}
+			return t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_completed))
+		}
+	}
 	var err error
 	// first mark result segments visible
 	if err = t.markResultSegmentsVisible(); err != nil {
@@ -679,8 +731,9 @@ func (t *ClusteringCompactionTask) completeTask() error {
 	// schedule an asynchronous DataView snapshot reconciliation. The recompute
 	// runs on the latest SegmentMeta, so it observes both the visibility flip
 	// and the input retirement in one projection.
-	if mt, ok := t.meta.(*meta.Meta); ok {
-		mt.RecomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+	{
+		mt := t.meta
+		mt.RecomputeCompactionDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
 	}
 
 	return nil
@@ -716,6 +769,20 @@ func (t *ClusteringCompactionTask) resetSegmentCompacting() {
 }
 
 func (t *ClusteringCompactionTask) doClean() error {
+	{
+		m := t.meta
+		g := m.GetProducerChangeGroup(model.SegmentChangeSourceClustering, t.GetTaskProto().GetPlanID(), t.GetTaskProto().GetChannel())
+		if g != nil && g.State == model.SegmentChangeStateCommitted && t.GetTaskProto().GetState() != datapb.CompactionTaskState_completed {
+			if err := t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_completed)); err != nil {
+				return err
+			}
+		}
+		if g != nil && !g.IsTerminal() {
+			if err := m.AbortProducerChange(context.TODO(), g, "clustering task cleaned before publication"); err != nil {
+				return err
+			}
+		}
+	}
 	mlog.Info(context.TODO(), "clean task", mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
 		mlog.String("state", t.GetTaskProto().GetState().String()))
 
@@ -774,7 +841,7 @@ func (t *ClusteringCompactionTask) doClean() error {
 				// tmpSegment is always invisible
 				operators = append(operators, meta.UpdateStatusOperator(segID, commonpb.SegmentState_Dropped))
 				if !hasResultSegments {
-					toSegments, _ := t.meta.(*meta.Meta).GetCompactionTo(segID)
+					toSegments, _ := t.meta.GetCompactionTo(segID)
 					for _, toSeg := range toSegments {
 						operators = append(operators, meta.UpdateStatusOperator(toSeg.GetID(), commonpb.SegmentState_Dropped))
 					}
@@ -832,13 +899,13 @@ func (t *ClusteringCompactionTask) doAnalyze() error {
 		return err
 	}
 
-	t.analyzeScheduler.Enqueue(analyze.NewAnalyzeTask(proto.Clone(analyzeTask).(*indexpb.AnalyzeTask), t.meta.(*meta.Meta), t.analyzeMeta))
+	t.analyzeScheduler.Enqueue(analyze.NewAnalyzeTask(proto.Clone(analyzeTask).(*indexpb.AnalyzeTask), t.meta, t.analyzeMeta))
 
 	mlog.Info(context.TODO(), "submit analyze task", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()), mlog.Int64("collectionID", t.GetTaskProto().GetCollectionID()), mlog.Int64("id", t.GetTaskProto().GetAnalyzeTaskID()))
 	return t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_analyzing))
 }
 
-func (t *ClusteringCompactionTask) doCompact(nodeID int64, cluster session.Cluster) error {
+func (t *ClusteringCompactionTask) doCompact(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) error {
 	var err error
 	t.plan, err = t.BuildCompactionRequest()
 	if err != nil {
@@ -874,7 +941,7 @@ func (t *ClusteringCompactionTask) doCompact(nodeID int64, cluster session.Clust
 				mlog.Err(dropErr))
 		}
 	}
-	err = cluster.CreateCompaction(nodeID, t.GetPlan(), t.GetTaskProto().GetCollectionID())
+	err = cluster.CreateCompaction(nodeID, t.GetPlan(), t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		originNodeID := t.GetTaskProto().GetNodeID()
 		mlog.Warn(context.TODO(), "Failed to notify compaction tasks to DataNode",

@@ -56,7 +56,7 @@ pub struct MgGrepBytes {
     pub len: usize,
 }
 
-/// Zero initialization means regex, sensitive, no boundary restriction.
+/// Zero initialization means regex, sensitive, no boundary or match-count restriction.
 /// Unknown values are rejected. Unicode and LF line semantics are fixed.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -64,6 +64,9 @@ pub struct MgGrepMatchOptions {
     pub pattern_kind: u32,
     pub case_mode: u32,
     pub boundary: u32,
+    /// 0: unlimited; 1: max_count is present (including zero).
+    pub has_max_count: u32,
+    pub max_count: u64,
 }
 
 /// At least one pattern; ordered OR. Empty patterns are valid. No literal
@@ -173,7 +176,8 @@ pub unsafe extern "C" fn mg_grep_compile(
 
 /// NULL is a no-op. Existing Sessions retain the Plan. Does not wait.
 /// # Safety
-/// Own this live handle; no session_create may be using it concurrently.
+/// Own this live handle; no concurrent calls or readers of borrowed condition
+/// bytes may still be using it.
 #[no_mangle]
 pub unsafe extern "C" fn mg_grep_plan_free(plan: *mut MgGrepPlan) {
     discard_unwind(|| {
@@ -181,6 +185,37 @@ pub unsafe extern "C" fn mg_grep_plan_free(plan: *mut MgGrepPlan) {
             unsafe { drop(Box::from_raw(plan)) };
         }
     });
+}
+
+/// Required: plan, out. Borrows the immutable cached Protobuf condition bytes;
+/// repeated calls return the same view without encoding or allocating again.
+/// A valid out slot is cleared to {NULL, 0} on failure. error is optional.
+/// # Safety
+/// Pointers obey the header's memory/aliasing rules; out may be uninitialized.
+/// The Plan must remain alive while reading the returned bytes. Concurrent
+/// calls may share the Plan, but not output/error storage, and must not free it.
+#[no_mangle]
+pub unsafe extern "C" fn mg_grep_plan_condition(
+    plan: *const MgGrepPlan,
+    out: *mut MgGrepBytes,
+    error: *mut MgGrepError,
+) -> MgGrepStatus {
+    boundary(error, None, || unsafe {
+        if out.is_null() || (out as usize) % align_of::<MgGrepBytes>() != 0 {
+            return Err(invalid("invalid condition output slot"));
+        }
+        // Raw writes accept C output storage that has not been initialized.
+        out.write(MgGrepBytes {
+            data: ptr::null(),
+            len: 0,
+        });
+        let bytes = required(plan)?.plan.condition_payload();
+        out.write(MgGrepBytes {
+            data: bytes.as_ptr(),
+            len: bytes.len(),
+        });
+        Ok(())
+    })
 }
 
 /// Required: plan, out_session. A valid output slot is NULL on failure.
@@ -456,6 +491,11 @@ unsafe fn inputs<'a>(
 
 fn options(o: MgGrepMatchOptions) -> Result<MatchOptions, Error> {
     Ok(MatchOptions {
+        max_count: match o.has_max_count {
+            0 => None,
+            1 => Some(o.max_count),
+            _ => return Err(invalid("unknown max-count presence")),
+        },
         pattern_kind: match o.pattern_kind {
             0 => PatternKind::Regex,
             1 => PatternKind::Literal,
@@ -600,6 +640,106 @@ impl fmt::Write for Diagnostic<'_> {
 mod tests {
     use super::*;
 
+    fn condition_plan() -> Box<MgGrepPlan> {
+        Box::new(MgGrepPlan {
+            plan: Plan::compile(
+                &[br"a\x00b"],
+                MatchOptions::default(),
+                CompileLimits {
+                    max_regex_bytes: 1_000_000,
+                    max_dfa_cache_bytes: 1_000_000,
+                },
+            )
+            .unwrap(),
+        })
+    }
+
+    #[test]
+    fn condition_view_is_cached_and_accepts_uninitialized_outputs() {
+        let plan = condition_plan();
+        let expected = plan.plan.condition_payload().to_vec();
+        let mut output = std::mem::MaybeUninit::<MgGrepBytes>::uninit();
+        let mut error = std::mem::MaybeUninit::<MgGrepError>::uninit();
+        unsafe {
+            assert_eq!(
+                mg_grep_plan_condition(&*plan, output.as_mut_ptr(), error.as_mut_ptr()),
+                MG_GREP_OK
+            );
+            let first = output.assume_init();
+            assert_eq!(slice::from_raw_parts(first.data, first.len), expected);
+            assert!(error.assume_init().message.iter().all(|&byte| byte == 0));
+            let mut again = MgGrepBytes {
+                data: ptr::null(),
+                len: 0,
+            };
+            assert_eq!(
+                mg_grep_plan_condition(&*plan, &mut again, ptr::null_mut()),
+                MG_GREP_OK
+            );
+            assert_eq!((first.data, first.len), (again.data, again.len));
+            let owned = slice::from_raw_parts(first.data, first.len).to_vec();
+            drop(plan);
+            assert_eq!(owned, expected);
+            assert!(owned.windows(3).any(|bytes| bytes == b"a\0b"));
+        }
+    }
+
+    #[test]
+    fn condition_view_rejects_bad_arguments_and_clears_valid_output() {
+        let plan = condition_plan();
+        let mut error = MgGrepError { message: [0; 512] };
+        let mut storage = [0usize; 4];
+        unsafe {
+            let misaligned = storage.as_mut_ptr().cast::<u8>().add(1);
+            for invalid_plan in [ptr::null(), misaligned.cast::<MgGrepPlan>().cast_const()] {
+                let mut output = MgGrepBytes {
+                    data: b"stale".as_ptr(),
+                    len: 5,
+                };
+                assert_eq!(
+                    mg_grep_plan_condition(invalid_plan, &mut output, &mut error),
+                    MG_GREP_INVALID_ARGUMENT
+                );
+                assert!(output.data.is_null());
+                assert_eq!(output.len, 0);
+                assert_ne!(error.message[0], 0);
+            }
+            for invalid_out in [ptr::null_mut(), misaligned.cast::<MgGrepBytes>()] {
+                assert_eq!(
+                    mg_grep_plan_condition(&*plan, invalid_out, &mut error),
+                    MG_GREP_INVALID_ARGUMENT
+                );
+            }
+            assert_eq!(storage, [0; 4]);
+        }
+    }
+
+    #[test]
+    fn concurrent_condition_readers_share_an_immutable_plan() {
+        let plan = condition_plan();
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let plan = &*plan;
+                scope.spawn(move || {
+                    for _ in 0..100 {
+                        let mut view = std::mem::MaybeUninit::<MgGrepBytes>::uninit();
+                        unsafe {
+                            assert_eq!(
+                                mg_grep_plan_condition(plan, view.as_mut_ptr(), ptr::null_mut()),
+                                MG_GREP_OK
+                            );
+                            let view = view.assume_init();
+                            assert_eq!(
+                                slice::from_raw_parts(view.data, view.len),
+                                plan.plan.condition_payload()
+                            );
+                        }
+                    }
+                });
+            }
+        });
+    }
+
     #[cfg(target_pointer_width = "64")]
     #[test]
     fn pod_layout_matches_the_c11_assertions() {
@@ -612,16 +752,18 @@ mod tests {
         assert_eq!(
             (
                 size_of::<MgGrepMatchOptions>(),
-                offset_of!(MgGrepMatchOptions, boundary)
+                offset_of!(MgGrepMatchOptions, boundary),
+                offset_of!(MgGrepMatchOptions, has_max_count),
+                offset_of!(MgGrepMatchOptions, max_count),
             ),
-            (12, 8)
+            (24, 8, 12, 16)
         );
         assert_eq!(
             (
                 size_of::<MgGrepSpecView>(),
                 offset_of!(MgGrepSpecView, options)
             ),
-            (32, 16)
+            (40, 16)
         );
         assert_eq!(
             (

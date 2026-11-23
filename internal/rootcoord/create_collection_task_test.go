@@ -2201,6 +2201,7 @@ func TestUpsertCreateCollectionProperty(t *testing.T) {
 }
 
 func Test_createCollectionTask_Prepare(t *testing.T) {
+	useStreamingBootstrap(t)
 	initStreamingSystemAndCore(t)
 
 	paramtable.Init()
@@ -2295,6 +2296,7 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 }
 
 func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
+	useStreamingBootstrap(t)
 	initStreamingSystemAndCore(t)
 
 	paramtable.Init()
@@ -2446,6 +2448,7 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 }
 
 func Test_createCollectionTask_PartitionKey(t *testing.T) {
+	useStreamingBootstrap(t)
 	initStreamingSystemAndCore(t)
 
 	paramtable.Init()

@@ -51,7 +51,9 @@ func TestPlanningPinsNodeContributionAlongsideTotal(t *testing.T) {
 	// The collection is first read after the node baseline was acquired.
 	require.Equal(t, int64(40), p.GetShardStats(shard).Segments[1000].LogicalSize)
 	require.Equal(t, int64(100), p.CurrentSize(shard)[1])
-	require.Zero(t, withoutRows(initialProjectedRows(p.nodes), p.CurrentSize(shard))[1])
+	projected := initialProjectedRows(p.nodes)
+	subtractRows(projected, p.CurrentSize(shard))
+	require.Zero(t, projected[1])
 	// The collection has a newer contribution than the pinned node. Each
 	// objective must subtract the contribution from its own aggregate version.
 	p.targets[10] = []int64{1}

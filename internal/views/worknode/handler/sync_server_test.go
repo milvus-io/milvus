@@ -553,3 +553,7 @@ func TestViewSyncServer_EmptyApplyResult(t *testing.T) {
 	cancel()
 	<-errCh
 }
+
+func (*mockHandler) TakeViewFeedback() qviews.ViewFeedbackWindow { return qviews.ViewFeedbackWindow{} }
+
+func (*mockHandler) ViewFeedbackReady() <-chan struct{} { return nil }

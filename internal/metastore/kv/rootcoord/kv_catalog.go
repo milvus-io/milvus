@@ -230,8 +230,7 @@ func buildCreateCollectionChildKvs(coll *model.Collection) (map[string]string, e
 	// save fields info to new path.
 	for _, field := range coll.Fields {
 		k := BuildFieldKey(coll.CollectionID, field.FieldID)
-		fieldInfo := model.MarshalFieldModel(field)
-		v, err := proto.Marshal(fieldInfo)
+		v, err := proto.Marshal(field)
 		if err != nil {
 			return nil, err
 		}
@@ -267,7 +266,11 @@ func (kc *Catalog) loadCollectionFromDb(ctx context.Context, dbID int64, collect
 	collKey := BuildCollectionKey(dbID, collectionID)
 	collVal, err := kc.Txn.Load(ctx, collKey)
 	if err != nil {
-		return nil, merr.WrapErrCollectionNotFound(collectionID, err.Error())
+		// Return the storage error as is. The default-database compatibility
+		// fallback must distinguish a missing key from a tombstone or an I/O
+		// failure, and callers must still see a cancellation or a timeout as
+		// such.
+		return nil, err
 	}
 
 	// Legacy SuffixSnapshot deletion with ts!=0 overwrote the plain key with a
@@ -283,8 +286,12 @@ func (kc *Catalog) loadCollectionFromDb(ctx context.Context, dbID int64, collect
 }
 
 func (kc *Catalog) loadCollectionFromDefaultDb(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*pb.CollectionInfo, error) {
-	if info, err := kc.loadCollectionFromDb(ctx, util.DefaultDBID, collectionID, ts); err == nil {
+	info, err := kc.loadCollectionFromDb(ctx, util.DefaultDBID, collectionID, ts)
+	if err == nil {
 		return info, nil
+	}
+	if !errors.Is(err, merr.ErrIoKeyNotFound) {
+		return nil, err
 	}
 	// get collection from older version.
 	return kc.loadCollectionFromDb(ctx, util.NonDBID, collectionID, ts)
@@ -294,12 +301,19 @@ func (kc *Catalog) loadCollection(ctx context.Context, dbID int64, collectionID 
 	if isDefaultDB(dbID) {
 		info, err := kc.loadCollectionFromDefaultDb(ctx, collectionID, ts)
 		if err != nil {
+			if errors.Is(err, merr.ErrIoKeyNotFound) {
+				return nil, merr.WrapErrCollectionNotFound(collectionID)
+			}
 			return nil, err
 		}
 		kc.fixDefaultDBIDConsistency(ctx, info, ts)
 		return info, nil
 	}
-	return kc.loadCollectionFromDb(ctx, dbID, collectionID, ts)
+	info, err := kc.loadCollectionFromDb(ctx, dbID, collectionID, ts)
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
+	}
+	return info, err
 }
 
 func partitionVersionAfter210(collMeta *pb.CollectionInfo) bool {
@@ -415,7 +429,7 @@ func unmarshalField(value []byte) (*model.Field, error) {
 	if err := proto.Unmarshal(value, info); err != nil {
 		return nil, merr.WrapErrDataIntegrity(err, "unmarshal field metadata")
 	}
-	return model.UnmarshalFieldModel(info), nil
+	return info, nil
 }
 
 func unmarshalStructArrayField(value []byte) (*model.StructArrayField, error) {
@@ -423,7 +437,16 @@ func unmarshalStructArrayField(value []byte) (*model.StructArrayField, error) {
 	if err := proto.Unmarshal(value, info); err != nil {
 		return nil, merr.WrapErrDataIntegrity(err, "unmarshal struct array field metadata")
 	}
-	return model.UnmarshalStructArrayFieldModel(info), nil
+	// info was just decoded and is owned by nobody else, so the model
+	// keeps its sub-fields instead of copying them, as unmarshalField does.
+	return &model.StructArrayField{
+		FieldID:     info.GetFieldID(),
+		Name:        info.GetName(),
+		Description: info.GetDescription(),
+		Fields:      info.GetFields(),
+		TypeParams:  info.GetTypeParams(),
+		Nullable:    info.GetNullable(),
+	}, nil
 }
 
 func unmarshalFunction(value []byte) (*model.Function, error) {
@@ -673,8 +696,7 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 		for _, field := range newColl.Fields {
 			newFieldIDs[field.FieldID] = struct{}{}
 			k := BuildFieldKey(newColl.CollectionID, field.FieldID)
-			fieldInfo := model.MarshalFieldModel(field)
-			v, err := proto.Marshal(fieldInfo)
+			v, err := proto.Marshal(field)
 			if err != nil {
 				return err
 			}

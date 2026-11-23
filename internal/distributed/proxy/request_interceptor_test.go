@@ -135,7 +135,7 @@ func (suite *StatsInterceptorSuite) TestUnaryRequestStatsInterceptor() {
 		suite.Run(tc.tag, func() {
 			UnaryRequestStatsInterceptor(ctx, tc.req, tc.info, tc.handler)
 			for _, labels := range tc.expectLabels {
-				suite.MetricsEqual(metrics.ProxyFunctionCall.WithLabelValues(labels...), 1)
+				suite.MetricsEqual(metrics.ProxyFunctionCall.WithLabelValues(append(labels, "")...), 1)
 			}
 			metrics.ProxyFunctionCall.DeletePartialMatch(prometheus.Labels{})
 		})
@@ -220,8 +220,8 @@ func (suite *StatsInterceptorSuite) TestHookVerdictCountedOnce() {
 			suite.Equal(tc.handlerRuns, handlerRuns)
 			// one total and one outcome, under any labels; checked before WithLabelValues creates series
 			suite.CollectCntEqual(metrics.ProxyFunctionCall, 2)
-			suite.MetricsEqual(metrics.ProxyFunctionCall.WithLabelValues(nodeID, "GetVersion", metrics.TotalLabel, metrics.CauseNA, "", ""), 1)
-			suite.MetricsEqual(metrics.ProxyFunctionCall.WithLabelValues(nodeID, "GetVersion", tc.outcome[0], tc.outcome[1], "", ""), 1)
+			suite.MetricsEqual(metrics.ProxyFunctionCall.WithLabelValues(nodeID, "GetVersion", metrics.TotalLabel, metrics.CauseNA, "", "", ""), 1)
+			suite.MetricsEqual(metrics.ProxyFunctionCall.WithLabelValues(nodeID, "GetVersion", tc.outcome[0], tc.outcome[1], "", "", ""), 1)
 		})
 	}
 	metrics.ProxyFunctionCall.DeletePartialMatch(prometheus.Labels{})

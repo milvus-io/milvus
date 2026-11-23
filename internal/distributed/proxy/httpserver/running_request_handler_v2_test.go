@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -111,7 +112,7 @@ func TestCancelRequestsReturnsEveryIDList(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), w.Body.String())
 	assert.Equal(t, int32(0), body.Code)
 	require.Len(t, body.Data.Canceled, 1)
-	assert.Equal(t, "25-to03zu-rs", body.Data.Canceled[0]["request_id"])
+	assert.Equal(t, "25-to03zu-rs", body.Data.Canceled[0]["requestId"])
 	assert.Equal(t, []string{"25-to03zu-rt"}, body.Data.NotFound)
 	assert.Equal(t, []string{"26-to03zv-1"}, body.Data.Undetermined)
 	assert.Len(t, body.Data.NodeResults, 1)
@@ -145,7 +146,7 @@ func TestRunningRequestIDSurvivesADoubleDecodingClient(t *testing.T) {
 	var listed map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &listed), w.Body.String())
 	row := listed["data"].(map[string]any)["requests"].([]any)[0].(map[string]any)
-	readBack := row["request_id"]
+	readBack := row["requestId"]
 	require.Equal(t, id, readBack)
 
 	cancelBody, err := json.Marshal(map[string]any{"requestIds": []any{readBack}})
@@ -174,4 +175,95 @@ func TestCancelRequestsRejectsNumericIDs(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), w.Body.String())
 	assert.NotEqual(t, int32(0), body.Code, w.Body.String())
+}
+
+// The REST body uses the proto's JSON names, like every other v2 response, and
+// carries every field: a request that is not cancellable, or has not queued,
+// must say so rather than drop the key. Lists are never null, and task ids,
+// which exceed 2^53, follow Accept-Type-Allow-Int64 as primary keys do.
+func TestRunningRequestsRESTBody(t *testing.T) {
+	info := &milvuspb.RunningRequestInfo{
+		RequestId:      "25-to03zu-rs",
+		ProxyId:        25,
+		Type:           "Search",
+		DbName:         "default",
+		CollectionName: "books",
+		User:           "alice",
+		ClientAddr:     "10.0.0.1:5000",
+		Nq:             10,
+		Topk:           100,
+		StartTimeMs:    1700000000000,
+		ElapsedMs:      2500,
+		State:          "Running",
+		TaskIds:        []int64{470262051793262565},
+	}
+	oldProxy := &milvuspb.RunningRequestNodeResult{
+		NodeId:        8,
+		Status:        merr.Status(merr.WrapErrServiceUnimplemented(errors.New("unknown method ListLocalRunningRequests"))),
+		Unimplemented: true,
+	}
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().ListRunningRequests(mock.Anything, mock.Anything).Return(&milvuspb.ListRunningRequestsResponse{
+		Status:      merr.Success(),
+		Requests:    []*milvuspb.RunningRequestInfo{info},
+		NodeResults: []*milvuspb.RunningRequestNodeResult{{NodeId: 7, Status: merr.Success()}, oldProxy},
+	}, nil).Twice()
+	mp.EXPECT().CancelRequests(mock.Anything, mock.Anything).Return(&milvuspb.CancelRequestsResponse{Status: merr.Success()}, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+
+	post := func(action, body string, header map[string]string) map[string]any {
+		r := httptest.NewRequest(http.MethodPost, versionalV2(RunningRequestCategory, action), bytes.NewReader([]byte(body)))
+		for k, v := range header {
+			r.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, r)
+		require.Equal(t, http.StatusOK, w.Code)
+		dec := json.NewDecoder(bytes.NewReader(w.Body.Bytes()))
+		dec.UseNumber()
+		var out map[string]any
+		require.NoError(t, dec.Decode(&out), w.Body.String())
+		require.Equal(t, json.Number("0"), out["code"], w.Body.String())
+		return out["data"].(map[string]any)
+	}
+
+	data := post(ListAction, `{}`, map[string]string{HTTPHeaderAllowInt64: "false"})
+	rows := data["requests"].([]any)
+	require.Len(t, rows, 1)
+	assert.Equal(t, map[string]any{
+		"requestId":      "25-to03zu-rs",
+		"proxyId":        json.Number("25"),
+		"type":           "Search",
+		"dbName":         "default",
+		"collectionName": "books",
+		"user":           "alice",
+		"clientAddr":     "10.0.0.1:5000",
+		"nq":             json.Number("10"),
+		"topk":           json.Number("100"),
+		"expr":           "",
+		"startTimeMs":    json.Number("1700000000000"),
+		"queuedMs":       json.Number("0"),
+		"elapsedMs":      json.Number("2500"),
+		"state":          "Running",
+		"taskIds":        []any{"470262051793262565"},
+		"traceId":        "",
+		"cancellable":    false,
+	}, rows[0])
+
+	nodes := data["nodeResults"].([]any)
+	require.Len(t, nodes, 2)
+	assert.Equal(t, map[string]any{"nodeId": json.Number("7"), "code": json.Number("0"), "message": "", "unimplemented": false}, nodes[0])
+	failed := nodes[1].(map[string]any)
+	assert.Equal(t, json.Number("8"), failed["nodeId"])
+	assert.Equal(t, json.Number("10"), failed["code"])
+	assert.Contains(t, failed["message"], "unknown method ListLocalRunningRequests")
+	assert.Equal(t, true, failed["unimplemented"])
+
+	data = post(ListAction, `{}`, map[string]string{HTTPHeaderAllowInt64: "true"})
+	assert.Equal(t, []any{json.Number("470262051793262565")}, data["requests"].([]any)[0].(map[string]any)["taskIds"])
+
+	data = post(CancelAction, `{"requestIds": ["25-to03zu-rs"]}`, nil)
+	for _, key := range []string{"canceled", "notFound", "undetermined", "nodeResults"} {
+		assert.Equal(t, []any{}, data[key], "%s must be an empty list, not null or missing", key)
+	}
 }

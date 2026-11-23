@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 )
 
 // reshardTask executes one ReshardTask run: route the source files into buckets
@@ -26,12 +27,13 @@ type reshardTask struct {
 
 // NewReshardTask builds one ReshardTask run. The Scheduler admits it once the
 // node has free slots.
-func NewReshardTask(req *datapb.ReshardTaskRequest, cm storage.ChunkManager, pluginContext *indexcgopb.StoragePluginContext, metrics *Metrics) Task {
+func NewReshardTask(req *datapb.ReshardTaskRequest, cm storage.ChunkManager, pluginContext *indexcgopb.StoragePluginContext, metrics *Metrics, resource taskcommon.Resource) Task {
 	return &reshardTask{
 		workerTaskBase: workerTaskBase{
-			taskID: req.GetTaskId(),
-			runID:  req.GetRunId(),
-			slot:   req.GetSlot(),
+			taskID:   req.GetTaskId(),
+			runID:    req.GetRunId(),
+			slot:     req.GetSlot(),
+			resource: resource,
 		},
 		req:           req,
 		cm:            cm,

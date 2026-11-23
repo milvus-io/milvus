@@ -59,15 +59,14 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookBefore, fullMethod).Inc()
 		return nil, hookError(err)
 	}
+	setRequestResourceGroup(ctx, newCtx)
 	realResp, realErr = handler(newCtx, req)
 	if err = hoo.After(newCtx, realResp, realErr, fullMethod); err != nil {
 		mlog.Warn(ctx, "hook after error", mlog.String("user", userName), mlog.String("full method", fullMethod),
 			GetRequestFieldWithoutSensitiveInfo(req), mlog.Err(err))
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookAfter, fullMethod).Inc()
-		observeResourceGroupRequest(newCtx, fullMethod, req, nil, hookError(err))
 		return nil, hookError(err)
 	}
-	observeResourceGroupRequest(newCtx, fullMethod, req, realResp, realErr)
 	return realResp, realErr
 }
 

@@ -55,7 +55,7 @@ func TestCompactionRejectsUnavailableWriterContext(t *testing.T) {
 	} {
 		t.Run(kind.String(), func(t *testing.T) {
 			cipher.key = nil
-			mt := NewMockCompactionMeta(t)
+			mt := NewDefaultMockCompactionMeta(t)
 			catalog := mocks.NewDataCoordCatalog(t)
 			compactionTaskMeta := NewCompactionTaskMetaOverCatalog(catalog)
 			mt.EXPECT().GetHealthySegment(mock.Anything, int64(31)).Return(&meta.SegmentInfo{
@@ -89,7 +89,7 @@ func TestCompactionRejectsUnavailableWriterContext(t *testing.T) {
 					require.Equal(t, datapb.CompactionTaskState_failed, saved.GetState())
 					return nil
 				}).Once()
-			task.CreateTaskOnWorker(42, cluster)
+			task.CreateTaskOnWorker(42, cluster, task.GetTaskResource())
 			require.Equal(t, datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
 		})
 	}

@@ -17,6 +17,7 @@
 package crypto
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -30,8 +31,8 @@ func TestVerifyStoredPassword(t *testing.T) {
 	const password = "a-business-user-password"
 	hash, err := PasswordEncrypt(password)
 	require.NoError(t, err)
-	require.NoError(t, VerifyStoredPassword(hash, password))
-	mismatch := VerifyStoredPassword(hash, "wrong-password")
+	require.NoError(t, VerifyStoredPassword(context.Background(), hash, password))
+	mismatch := VerifyStoredPassword(context.Background(), hash, "wrong-password")
 	require.ErrorIs(t, mismatch, merr.ErrPrivilegeNotAuthenticated)
 	require.NotContains(t, mismatch.Error(), "root")
 
@@ -40,10 +41,10 @@ func TestVerifyStoredPassword(t *testing.T) {
 	longest := strings.Repeat("x", BcryptMaxPasswordBytes)
 	legacy, err := bcrypt.GenerateFromPassword([]byte(longest), bcrypt.MinCost)
 	require.NoError(t, err)
-	require.NoError(t, VerifyStoredPassword(string(legacy), longest))
-	require.ErrorIs(t, VerifyStoredPassword(string(legacy), longest+"x"), merr.ErrPrivilegeNotAuthenticated)
+	require.NoError(t, VerifyStoredPassword(context.Background(), string(legacy), longest))
+	require.ErrorIs(t, VerifyStoredPassword(context.Background(), string(legacy), longest+"x"), merr.ErrPrivilegeNotAuthenticated)
 
-	malformed := VerifyStoredPassword("malformed-bcrypt-hash", password)
+	malformed := VerifyStoredPassword(context.Background(), "malformed-bcrypt-hash", password)
 	require.ErrorIs(t, malformed, merr.ErrServiceInternal)
 	require.NotErrorIs(t, malformed, merr.ErrPrivilegeNotAuthenticated)
 	require.NotContains(t, malformed.Error(), "root")

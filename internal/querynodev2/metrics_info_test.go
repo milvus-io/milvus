@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
@@ -40,6 +41,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
@@ -330,6 +333,23 @@ func TestGetQuotaMetricsAggregatesCollectionGauges(t *testing.T) {
 		"db-b|all|7|all|Sealed":  40,
 		"db-c|all|8|all|Growing": 999,
 	}, numEntitiesSeries(t))
+}
+
+func TestGetMetricsNodeMemory(t *testing.T) {
+	total := mockey.Mock(hardware.GetMemoryCount).Return(uint64(68719476736)).Build()
+	defer total.UnPatch()
+	used := mockey.Mock(hardware.GetUsedMemoryCount).Return(uint64(51539607552)).Build()
+	defer used.UnPatch()
+
+	node := NewQueryNode(t.Context(), nil)
+	defer node.cancel()
+	node.registerMetricsRequest()
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	req, err := metricsinfo.ConstructRequestByMetricType("node_memory")
+	require.NoError(t, err)
+	resp, err := node.GetMetrics(t.Context(), req)
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	require.JSONEq(t, `{"memory":68719476736,"memory_usage":51539607552}`, resp.GetResponse())
 }
 
 func TestGetLocalStorageMetrics(t *testing.T) {

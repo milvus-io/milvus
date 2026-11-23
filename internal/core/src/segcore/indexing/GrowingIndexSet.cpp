@@ -245,9 +245,13 @@ GrowingIndexSet::Initialize(const Schema& schema,
                             const IndexMetaPtr& index_meta,
                             const SegcoreConfig& segcore_config,
                             int64_t segment_id,
-                            const InsertRecordGrowing& insert_record) {
+                            const InsertRecordGrowing& insert_record,
+                            const std::function<bool(FieldId)>& include_field) {
     AppenderMap staged;
     for (const auto& [field_id, field_meta] : schema.get_fields()) {
+        if (!include_field(field_id)) {
+            continue;
+        }
         auto appender = StageAppender(field_meta,
                                       index_meta,
                                       segcore_config,

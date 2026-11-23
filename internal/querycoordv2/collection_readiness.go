@@ -75,7 +75,7 @@ func (s *Server) ensureCollectionReady(ctx context.Context, req *querypb.EnsureC
 			if err != nil {
 				return nil, err
 			}
-			status, err := s.LoadCollection(loadCtx, loadReq)
+			status, err := s.loadCollection(loadCtx, loadReq, true)
 			if err := merr.CheckRPCCall(status, err); err != nil {
 				return nil, err
 			}
@@ -88,7 +88,7 @@ func (s *Server) ensureCollectionReady(ctx context.Context, req *querypb.EnsureC
 			return context.Cause(ctx)
 		}
 		if r.Err == nil {
-			// A long load gets a fresh idle TTL immediately before query execution.
+			// A long load gets a fresh TTI interval immediately before query execution.
 			s.collectionUsage.touch(collectionID)
 		}
 		return r.Err

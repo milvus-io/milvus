@@ -84,6 +84,12 @@ tikv:
     tlsCert:  # path to your cert file
     tlsKey:  # path to your key file
     tlsCACert:  # path to your CACert file
+  gc:
+    # Whether MixCoord advances the GC safe point of the TiKV cluster, so that TiKV reclaims old versions of metadata keys.
+    # Enable it only on a dedicated TiKV cluster whose garbage collection is managed by Milvus.
+    enabled: false
+    lifeTime: 600 # seconds, how long TiKV keeps an overwritten or deleted version of a metadata key. A transaction that lasts longer fails.
+    interval: 600 # seconds, how often MixCoord advances the TiKV GC safe point
 
 localStorage:
   # Local path to where vector data are stored during a search or a query to avoid repetitve access to MinIO or S3 service.
@@ -454,6 +460,8 @@ proxy:
   exprParseCache:
     enabled: true # Enable caching expression parse trees and parsing errors. These settings apply to all components using the expression parser, not only Proxy; each process maintains its own cache. Restart required; disabling the cache does not reject expressions.
     maxEntries: 1024 # Maximum number of cached expression parse trees and parsing errors per process. Non-positive or invalid values use 1024. Entries retain the existing 10-minute TTL. Restart required.
+    maxBytes: 67108864 # Maximum aggregate retained byte budget of cached expression parse trees and parsing errors per process. Non-positive or invalid values use 67108864 (64 MiB). Entries retain the existing maxEntries and 10-minute TTL bounds. Restart required.
+    maxEntryBytes: 8388608 # Maximum estimated retained byte cost for a single expression parse cache entry. Non-positive or invalid values use 8388608 (8 MiB), clamped to proxy.exprParseCache.maxBytes. Larger expressions still parse normally without being cached. Restart required.
   timeTickInterval: 200 # The interval at which proxy synchronizes the time tick, unit: ms.
   healthCheckTimeout: 3000 # ms, the interval that to do component healthy check
   msgStream:
@@ -477,7 +485,7 @@ proxy:
   roleNameValidation:
     allowedChars: $ # Additional characters allowed in role names beyond underscores, letters and numbers. Add '-' to allow hyphens in role names.
   maxTaskNum: 1024 # The maximum number of tasks in the task queue of the proxy.
-  enableAutoLoad: false # whether to automatically load an unloaded collection before DQL requests
+  enableAutoLoad: false # whether to automatically load an unloaded collection before DQL requests and before writes that read existing rows
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
@@ -524,6 +532,9 @@ proxy:
   slowQuerySpanInSeconds: 1 # threshold for slow query detection in seconds. For Search/HybridSearch requests, the time is divided by nq for more accurate per-query measurement. Triggers slow log, WebUI display, and metrics.
   queryNodePooling:
     size: 10 # the size for shardleader(querynode) client pool
+  queryView:
+    enableReduceStream: true # Refreshable. Route supported new requests through Streaming Reduce.
+    reduceStreamChunkBytes: 262144 # Refreshable. Reducible-payload byte threshold captured once per request. Invalid or non-positive values use the default of 262144 bytes.
   partialResultRequiredDataRatio: 1 # partial result required data ratio, default to 1 which means disable partial result, otherwise, it will be used as the minimum data ratio for partial result
   http:
     enabled: true # Whether to enable the http server
@@ -626,10 +637,13 @@ queryCoord:
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
   loadTimeoutSeconds: 600
   autoRelease:
-    enabled: false # whether QueryCoord releases collections after an idle TTL; effective only when proxy.enableAutoLoad is true
-    idleTTLSeconds: 600
-    checkIntervalSeconds: 30
-    releaseConcurrency: 16 # maximum concurrent automatic collection releases in one scan; changes apply to the next release batch
+    enabled: false # whether QueryCoord releases collections after the configured time to idle (TTI) or under Worker QN memory pressure; effective only when proxy.enableAutoLoad is true
+    ttiSeconds: 3600
+    checkIntervalSeconds: 10
+    releaseConcurrency: 16 # maximum concurrent automatic collection releases per scan; runtime updates take effect on the next scan
+    lruHighWatermarkPercentage: 85 # Worker QueryNode pool anonymous resident memory percentage that starts collection LRU release; takes effect on the next scan
+    lruLowWatermarkPercentage: 80 # Worker QueryNode pool anonymous resident memory percentage that stops selecting collection LRU releases; must be below the high watermark
+    lruMaxEvictionsPerScan: 64 # maximum collection LRU releases selected per scan, independent of releaseConcurrency
   distRequestTimeout: 5000 # the request timeout for querycoord fetching data distribution from querynodes, in milliseconds
   heatbeatWarningLag: 5000 # the lag value for querycoord report warning when last heatbeat is too old, in milliseconds
   enableDataDistributionDelta: true # whether querycoord requests delta data distribution reports from querynodes
@@ -978,6 +992,7 @@ dataCoord:
     # Layout 1 cannot be read by 2.6, so enabling it commits the upgrade and gives up the ability to roll back to 2.6. Existing index files keep the layout they were built with, so this switch only affects index files built from now on.
     # Layout 1 is additionally gated on no QueryNode still reporting an older release line, so setting this to 1 during a 2.6 -> 3.0 upgrade still builds layout 0 until every QueryNode is upgraded. That check reads the version each QueryNode publishes in its session, which is a per-release-line constant, so it separates 2.6.x from 3.0.x but does not differentiate binaries within the same release line.
     storePathVersion: 0
+    segmentIndexSummariesEnabled: false # Use SegmentInfo summaries and on-demand manifest reads instead of resident completed index records. New empty clusters only; the first startup choice is durable and cannot be changed. Requires common.storage.useLoonFFI=true, manifest index publication and no index migration/rollback. Incompatible snapshot restores are rejected.
     # Whether completed StorageV3 index artifacts are published in segment manifests. On by default: successful builds with artifact files publish a new manifest revision, which advances the DataView and drives QueryView resource preparation; that commit atomically deletes the corresponding Finished etcd row. Unissued, InProgress, Failed, fake-finished, and other task states remain in etcd. Off keeps the legacy etcd-only path, which does not drive QueryView index refresh. StorageV1/V2 always use etcd.
     # New StorageV3 builds also write artifacts under the segment manifest base/_index/<build>/<version> (path version 2). Upgrade all workers and QueryNodes before enabling. Old-layout tasks keep their original etcd publication mode; external index paths are never added.
     # The setting applies when a build task is created. Existing builds keep their persisted mode across switches and restarts: path version 2 publishes to manifests, while versions 0/1 finish in etcd. Published records remain recoverable through the segment's manifest_has_index marker.
@@ -1038,7 +1053,8 @@ dataCoord:
   taskRetryBackoffMaxInterval: 60 # Maximum backoff in seconds between re-dispatches of a task that keeps failing on workers.
   brokerTimeout: 5000 # 5000ms, dataCoord broker rpc timeout
   segmentChange:
-    stagingTimeout: 3600 # The maximum duration in seconds a segment change group may stay staged before the batch is aborted (STAGED -> ABORTED), bounding unconvergeable or externally-dropped batches.
+    enabled: false # Experimental opt-in for staged segment membership publication. Do not enable in production until L0 and clustering fairness is implemented: continuous Flush-to-Sort groups can starve L0 delete and clustering compaction. Existing groups finish after disabling this switch. Flush keeps its synchronous version handshake; content-only updates retain their existing protocol.
+    stagingTimeout: 3600 # The maximum duration in seconds that eligible compaction segment change groups may wait for readiness before aborting. Import, clustering, copy and external refresh use their producer lifecycle instead.
     maxMembersPerGroup: 512 # The maximum number of output segments one segment change group may carry before oversized task outputs are split into sequentially published subgroups.
   autoBalance: true # Enable auto balance
   checkAutoBalanceConfigInterval: 10 # the interval of check auto balance config
@@ -1157,6 +1173,7 @@ dataNode:
     useMergeSort: true # Whether to enable mergeSort mode when performing mixCompaction.
     maxSegmentMergeSort: 30 # The maximum number of segments to be merged in mergeSort mode.
     lobHoleRatioThreshold: 0.3 # The hole ratio threshold for TEXT column compaction. If hole_ratio >= threshold, rewrite LOB files; otherwise reuse existing LOB files.
+    enableDeferredBloomFilter: false # Enable deferred Bloom filter sizing for mix compactions estimated to produce multiple output segments. Read by DataCoord and passed to DataNode in the compaction plan. Single-output estimates use the existing path.
   text:
     inlineThreshold: 65536 # TEXT values smaller than this threshold (in bytes) are stored inline instead of in LOB files.
     maxLobFileBytes: 67108864 # Maximum size of a single LOB file for TEXT column storage (in bytes).
@@ -1321,7 +1338,7 @@ common:
     SearchCacheBudgetGBRatio: 0.1
     LoadNumThreadRatio: 8
     BeamWidthRatio: 4
-  gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
+  gracefulTime: 60000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
   gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
   parquetStatsSkipIndex:
     enabled: true # whether to force one row group per cache cell and build the sealed-segment chunk skip index from parquet footer statistics. When enabled, packing is 1:1 even without usable statistics; disabling allows target-size packing. Takes effect only at startup (not refreshable): the flag decides the segment cache cell layout, which must not change while queries are running. Storage v2 segments only; manifest-based (v3) segments do not build this index yet.
@@ -1336,7 +1353,7 @@ common:
       splitByAvgSize:
         enabled: true # enable split by average size policy in storage v2
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
-    useLoonFFI: false
+    useLoonFFI: true
     enableGrowingSourceFlush: false # enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path
     iops:
       # Initial ObjectStore request rate used by the Lance AIMD limiter for External Table reads.
@@ -1348,7 +1365,8 @@ common:
       # The default matches the milvus-storage default.
       maxRate: 5000
     talon:
-      mode: 0 # Remote milvus-storage read routing: 0 disables Talon, 1 routes all reads through Talon, and 2 routes only small reads. Requires a restart.
+      mode: 0 # Remote milvus-storage read routing within enabledStages: 0 disables Talon, 1 routes all reads through Talon, and 2 routes only small reads. Requires a restart.
+      enabledStages: all # Comma-separated Talon read stages: all preserves unrestricted routing; load_open enables QueryNode milvus-storage reader-open metadata, including footers; manifest enables QueryNode segment-manifest reads during load. Combine load_open,manifest to enable both. Other reads use origin storage when stages are restricted. Cannot combine all with other stages. Requires a restart.
       enableForExternalTable: false # Apply the configured Talon read routing to remote External Tables when mode is 1 or 2. Requires a restart.
       smallReadThreshold: 524288 # Inclusive request size threshold in bytes for Talon mode 2, before EOF clamping. Defaults to 512 KiB. Valid range: [1, 1048576]. Requires a restart.
       coordinator:  # Talon coordinator address (host:port), required when Talon mode is 1 or 2. Requires a restart.
@@ -1411,6 +1429,11 @@ common:
     # default password for root user. The maximum length is 72 characters. 
     # Large numeric passwords require double quotes to avoid yaml parsing precision issues.
     defaultRootPassword: Milvus
+    # Algorithm used to hash newly created or updated passwords: bcrypt or pbkdf2-sha512.
+    # pbkdf2-sha512 is a FIPS-approved key derivation function. On a build with MILVUS_FIPS_ENABLED=ON it runs on BoringCrypto.
+    # Existing hashes keep working after a change and are rehashed only when the password is updated, including the root hash created at first startup.
+    # Upgrade every node, and every cluster in a CDC topology, before selecting pbkdf2-sha512: older versions cannot verify these hashes, and they stop verifying after a downgrade.
+    passwordHashAlgorithm: bcrypt
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
     # Whether to expose the feature usage report at GET /management/feature_usage on the Proxy
@@ -1874,8 +1897,17 @@ streaming:
     gracefulCloseTimeout: 3s
     tail:
       lowWatermark: 4g # RecoveryStorage releases WAL append pressure after the unpublished WAL tail falls to this logical size.
-      softWatermark: 8g # RecoveryStorage requests VChannel persistence and slows WAL append after the unpublished WAL tail reaches this logical size.
+      softWatermark: 8g # RecoveryStorage slows WAL append after the unpublished WAL tail reaches this logical size. Independent of the walRecovery.flush persistence thresholds.
       highWatermark: 16g # RecoveryStorage rejects new DML append after the unpublished WAL tail reaches this logical size.
+    flush:
+      sizeThreshold: 6g # Unpublished logical WAL bytes per PChannel that trigger WALSummary sealing and VChannel buffer persistence, without changing append rate limits. Nonpositive values disable this trigger. Applied when the WAL opens.
+      messageThreshold: 6144 # Unpublished persisted WAL message count per PChannel that triggers WALSummary sealing and VChannel buffer persistence, without changing append rate limits. Includes completed but unpublished messages and counts an assembled transaction once. Nonpositive values disable this trigger. Applied when the WAL opens.
+      idleMinSize: 512MB # Unpublished logical WAL bytes per PChannel must exceed this size and remain idle for idleTimeout to trigger WALSummary sealing and VChannel buffer persistence, without changing append rate limits. Nonpositive values disable this trigger. Applied when the WAL opens.
+      idleTimeout: 10m # Idle time without a newly observed persisted non-TimeTick WAL message before triggering buffer persistence above idleMinSize. TimeTicks and volatile heartbeats do not reset it; checkpoint publication does not refresh it. Does not change append rate limits. Nonpositive values disable this trigger. Applied when the WAL opens.
+  idempotency:
+    ttlPerPChannel: 1h # Idle lifetime of committed Insert idempotency records per PChannel. Duplicate access refreshes the in-memory lifetime; recovery uses the original WAL commit time. Applied when the WAL opens.
+    maxSizePerPChannel: 256MB # PChannel-wide estimated byte budget for committed Insert idempotency records. Eviction follows last access order. Recovery preselects a newest chunk suffix using encoded Insert and Idempotency section lengths and ttl, including one whole boundary chunk. This is not a process RSS limit. Applied when the WAL opens.
+    bestEffortMinCountPerVChannel: 16 # Best-effort minimum retained-record count per VChannel. Capacity eviction prefers channels above this count; ttl and the PChannel maxSize take precedence. Recovery does not reserve this count. Zero disables the preference. Applied when the WAL opens.
   transformLog:
     catchupConcurrencyRatioPerPChannel: 0.25 # TransformLog catch-up worker count for each consumer's PChannel stream is max(1, floor(CPU count * ratio)). Updates existing worker pools dynamically.
   replication:

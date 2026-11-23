@@ -21,7 +21,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <variant>
 #include <vector>
 
 #include "cachinglayer/CacheSlot.h"
@@ -131,8 +130,6 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
 
     // fn: (bool is_valid, size_t offset) -> void
     // If offsets is nullptr, this function will iterate over all rows.
-    // Only BulkRawStringAt and BulkIsValid allow offsets to be nullptr.
-    // Other Bulk* methods can also support nullptr offsets, but not added at this moment.
     virtual void
     BulkIsValid(milvus::OpContext* ctx,
                 std::function<void(bool, size_t)> fn,
@@ -253,13 +250,17 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
     }
 
     virtual ScanResult
-    Scan(milvus::OpContext* op_ctx, const ScanOptions& options) const;
+    Scan(milvus::OpContext* op_ctx, const ScanOptions& options) const {
+        return nullptr;
+    }
 
     // Convenience positional access. Backends consume segment offsets without
     // exposing physical Cell/file locations. Results preserve input order and
     // duplicates.
     virtual TakeResultPtr
-    Take(milvus::OpContext* op_ctx, TakeOptions options) const;
+    Take(milvus::OpContext* op_ctx, TakeOptions options) const {
+        return nullptr;
+    }
 
     // Get number of rows before a specific chunk
     virtual int64_t
@@ -445,20 +446,6 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
                       int64_t element_sizeof,
                       int64_t count) = 0;
 
-    // fn: (std::string_view value, size_t offset, bool is_valid) -> void
-    // If offsets is nullptr, this function will iterate over all rows.
-    // Only BulkRawStringAt and BulkIsValid allow offsets to be nullptr.
-    // Other Bulk* methods can also support nullptr offsets, but not added at this moment.
-    virtual void
-    BulkRawStringAt(milvus::OpContext* op_ctx,
-                    std::function<void(std::string_view, size_t, bool)> fn,
-                    const int64_t* offsets = nullptr,
-                    int64_t count = 0) const {
-        ThrowInfo(ErrorCode::Unsupported,
-                  "BulkRawStringAt only supported for ChunkColumnInterface of "
-                  "variable length type");
-    }
-
     virtual void
     BulkRawBsonAt(milvus::OpContext* op_ctx,
                   std::function<void(BsonView, uint32_t, uint32_t)> fn,
@@ -515,39 +502,6 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
     }
 
  protected:
-    using TakeCellPin = std::function<PinWrapper<Chunk*>(int64_t)>;
-    using TakeCellRead = std::function<Chunk*(int64_t)>;
-    using TakeCellAccess = std::variant<TakeCellPin, TakeCellRead>;
-
-    // The Raw Take accessor owns its generation, never a bare Column pointer.
-    // Batch access borrows pointers from its retained pin set; CurrentCell
-    // returns an owning pin only on a Cell change. op_ctx outlives borrowed reads.
-    virtual TakeCellAccess
-    MakeTakeCellAccess(
-        milvus::OpContext* op_ctx,
-        const std::vector<int64_t>* batch_cell_ids = nullptr) const {
-        return {};
-    }
-
-    // Return the immutable physical planner owned by this Column generation.
-    // Scan/Take implementations may use it, but callers must not observe Cell
-    // geometry through the Column API.
-    const ColumnPlanner&
-    Planner() const;
-
-    // Keep immutable generation geometry alive for lazy backend work that may
-    // outlive the concrete Column object (for example a Raw TakeResult).
-    std::shared_ptr<const ColumnPlanner>
-    PlannerHandle() const;
-
-    virtual std::unique_ptr<ColumnPlanner>
-    BuildPlanner() const;
-
-    virtual std::optional<DataType>
-    GetDefaultScanDataType() const {
-        return std::nullopt;
-    }
-
     virtual void
     ValidateArrayViewTarget(TargetType target_type) const {
     }
@@ -625,10 +579,6 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
         }
         return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
     }
-
- private:
-    mutable std::once_flag planner_once_;
-    mutable std::shared_ptr<ColumnPlanner> planner_;
 };
 
 }  // namespace milvus

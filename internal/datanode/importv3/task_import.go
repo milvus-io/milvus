@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 )
 
 // importTask executes one ImportTaskV3 run: merge the plan's fragments into the
@@ -24,12 +25,13 @@ type importTask struct {
 
 // NewImportTask builds one ImportTaskV3 run. The Scheduler admits it once the
 // node has free slots.
-func NewImportTask(req *datapb.ImportTaskV3Request, cm storage.ChunkManager, pluginContext *indexcgopb.StoragePluginContext) Task {
+func NewImportTask(req *datapb.ImportTaskV3Request, cm storage.ChunkManager, pluginContext *indexcgopb.StoragePluginContext, resource taskcommon.Resource) Task {
 	return &importTask{
 		workerTaskBase: workerTaskBase{
-			taskID: req.GetTaskId(),
-			runID:  req.GetRunId(),
-			slot:   req.GetSlot(),
+			taskID:   req.GetTaskId(),
+			runID:    req.GetRunId(),
+			slot:     req.GetSlot(),
+			resource: resource,
 		},
 		req:           req,
 		cm:            cm,

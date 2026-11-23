@@ -3,6 +3,7 @@ package recovery
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -18,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 func TestRecoveryRestoresIdempotencyHistoryAtBarrier(t *testing.T) {
@@ -33,6 +35,7 @@ func TestRecoveryRestoresIdempotencyHistoryAtBarrier(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
+			base := tsoutil.ComposeTSByTime(time.Now().Add(-time.Minute))
 			cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 			store := walsummary.NewStore(cm, "test-pchannel", 1)
 			previous := walsummary.NewManager(walsummary.ManagerConfig{
@@ -44,15 +47,15 @@ func TestRecoveryRestoresIdempotencyHistoryAtBarrier(t *testing.T) {
 				RowOffsets: []uint32{0, 2},
 				Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{101, 103}}}},
 			}
-			durable := newRecoveryIdempotentInsert("historical-vchannel", "durable-key", 10, result)
+			durable := newRecoveryIdempotentInsert("historical-vchannel", "durable-key", base+10, result)
 			previous.ObserveMessage(ctx, durable)
-			previous.RequestFlushThrough(10)
-			require.Equal(t, uint64(10), previous.LastAcked())
+			previous.RequestFlushThrough(base + 10)
+			require.Equal(t, base+10, previous.LastAcked())
 
 			// The checkpoint is newer than this retained history, and the write
 			// path has no collection for either vchannel. Neither may filter IKs.
 			rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{
-				MessageID: walimplstest.NewTestMessageID(20), TimeTick: 20,
+				MessageID: walimplstest.NewTestMessageID(20), TimeTick: base + 20,
 			})
 			defer rs.metrics.Close()
 			defer rs.taskScheduler.Close()
@@ -66,17 +69,17 @@ func TestRecoveryRestoresIdempotencyHistoryAtBarrier(t *testing.T) {
 			if tc.missingChunk {
 				require.NoError(t, store.DeleteChunk(ctx, 0, 1))
 			}
-			replayed := newRecoveryIdempotentInsert("replayed-vchannel", "replayed-key", 30, result)
+			replayed := newRecoveryIdempotentInsert("replayed-vchannel", "replayed-key", base+30, result)
 			barrier := message.NewRecoveryBarrierMessageBuilderV2().WithVChannel("").
 				WithHeader(&message.RecoveryBarrierMessageHeader{}).
 				WithBody(&message.RecoveryBarrierMessageBody{}).MustBuildMutable().
-				WithTimeTick(40).WithLastConfirmed(walimplstest.NewTestMessageID(39)).
+				WithTimeTick(base + 40).WithLastConfirmed(walimplstest.NewTestMessageID(39)).
 				IntoImmutableMessage(walimplstest.NewTestMessageID(40))
 			stream := &blockingRecoveryStream{ch: make(chan message.ImmutableMessage, 3), closed: make(chan struct{})}
 			defer stream.Close()
 			stream.ch <- replayed
 			stream.ch <- barrier
-			stream.ch <- newRecoveryIdempotentInsert("replayed-vchannel", "after-barrier", 50, result)
+			stream.ch <- newRecoveryIdempotentInsert("replayed-vchannel", "after-barrier", base+50, result)
 			snapshot, err := rs.runBoundedRecovery(ctx, &recordingRecoveryStreamBuilder{stream: stream}, barrier)
 			if tc.missingChunk {
 				require.ErrorContains(t, err, "failed to read the idempotency summary")

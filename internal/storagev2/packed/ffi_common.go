@@ -13,6 +13,7 @@ package packed
 import "C"
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storagev2"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
@@ -138,7 +140,9 @@ func initCredentialBrokerPolicy(params *paramtable.ComponentParam) error {
 // MakePropertiesFromStorageConfig creates a Properties object from StorageConfig.
 // All configuration fields are mapped to corresponding property key-value pairs,
 // with the local filesystem root normalized separately from the key prefix.
-func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extraKVs map[string]string) (*C.LoonProperties, error) {
+// Optional stage bits select a private filesystem policy for that operation;
+// callers must not reuse manifest properties for data or index reads.
+func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extraKVs map[string]string, talonStages ...uint32) (*C.LoonProperties, error) {
 	if storageConfig == nil {
 		return nil, merr.WrapErrStorageMsg("storageConfig is required")
 	}
@@ -260,9 +264,24 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 
 	// Store the External Table mode in the same properties map; it is consumed
 	// by InjectExternalSpecProperties once the collection is known.
+	// Unscoped callers only enable Talon under the unrestricted policy.
+	var stage uint32
+	for _, requested := range talonStages {
+		stage |= requested
+	}
+	mask := storageConfig.GetTalonEnabledStages()
+	if mask == 0 {
+		mask = common.TalonStagesAll // Legacy StorageConfig without stage bits.
+	}
+	var talonMode uint32
+	if mask == common.TalonStagesAll || mask&stage != 0 {
+		talonMode = storageConfig.GetTalonMode()
+	}
+	keys = append(keys, "fs.talon.open_only")
+	values = append(values, strconv.FormatBool(talonMode != 0 && mask != common.TalonStagesAll && mask&stage&common.TalonStageLoadOpen != 0))
 	externalMode := uint32(0)
 	if storageConfig.GetTalonEnableForExternalTable() {
-		externalMode = storageConfig.GetTalonMode()
+		externalMode = talonMode
 	}
 	keys = append(keys, "milvus.talon.external_mode")
 	values = append(values, strconv.FormatUint(uint64(externalMode), 10))
@@ -270,7 +289,7 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 		key   string
 		value uint32
 	}{
-		{"fs.talon.mode", storageConfig.GetTalonMode()},
+		{"fs.talon.mode", talonMode},
 		{"fs.talon.small_read_threshold", storageConfig.GetTalonSmallReadThreshold()},
 		{"fs.talon.block_size", storageConfig.GetTalonBlockSize()},
 		{"fs.talon.max_idle_per_addr", storageConfig.GetTalonMaxIdlePerAddr()},
@@ -508,6 +527,11 @@ func openTransaction(manifest ManifestJSON, cProperties *C.LoonProperties, resol
 	cBasePath := C.CString(manifest.BasePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 	var handle C.LoonTransactionHandle
+	// The open reads the manifest revision from storage and blocks the calling
+	// goroutine's OS thread; bound it process-wide like every other blocking
+	// manifest FFI call so concurrent commits cannot explode thread count.
+	acquireManifestFFI(context.Background())
+	defer releaseManifestFFI()
 	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(manifest.ManifestVersion),
 		C.int64_t(manifest.Size), resolveID, retryLimit, &handle)
 	return handle, HandleLoonFFIResult(result)
@@ -531,6 +555,10 @@ func openManifest(manifest ManifestJSON, cProperties *C.LoonProperties) (*C.Loon
 // revision it wrote on basePath, recording the size of the manifest object.
 func commitTransaction(handle C.LoonTransactionHandle, basePath string, storageConfig *indexpb.StorageConfig) (string, error) {
 	var version, size C.int64_t
+	// The commit writes the manifest revision and blocks the calling
+	// goroutine's OS thread; bound it process-wide like openTransaction.
+	acquireManifestFFI(context.Background())
+	defer releaseManifestFFI()
 	if err := HandleLoonFFIResult(C.loon_transaction_commit(handle, &version, &size)); err != nil {
 		return "", err
 	}

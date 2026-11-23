@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -170,7 +169,7 @@ func (i *RestfulInfo) ErrorMsg() string {
 	if !ok {
 		return ""
 	}
-	return strings.ReplaceAll(message.(string), "\n", "\\n")
+	return message.(string)
 }
 
 func (i *RestfulInfo) ErrorType() string {

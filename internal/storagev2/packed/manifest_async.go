@@ -101,7 +101,13 @@ func (io *ManifestIOContext) init() {
 func (io *ManifestIOContext) runWorker() {
 	defer io.workers.Done()
 	for task := range io.tasks {
+		// The native task performs blocking manifest I/O on this goroutine's
+		// OS thread. Bound worker execution by the process-wide manifest FFI
+		// budget, not just this context's capacity: many short-lived contexts
+		// (GC, copy-segment, backfill, index reads) share one process.
+		acquireManifestFFI(context.Background())
 		C.milvusRunManifestTask(task.run, task.data)
+		releaseManifestFFI()
 		io.taskMu.Lock()
 		io.pendingTasks--
 		io.taskMu.Unlock()
@@ -441,20 +447,24 @@ func getManifestAsync(ctx context.Context, io *ManifestIOContext, manifestPath s
 		return nil, err
 	}
 	defer C.loon_transaction_destroy(txn)
+	return transactionManifest(txn)
+}
+
+func transactionIndexInfos(txn C.LoonTransactionHandle, manifestPath string) ([]ManifestIndexInfo, error) {
+	manifest, err := transactionManifest(txn)
+	if err != nil {
+		return nil, err
+	}
+	defer C.loon_manifest_destroy(manifest)
+	return manifestIndexInfos(manifest, manifestPath)
+}
+
+func transactionManifest(txn C.LoonTransactionHandle) (*C.LoonManifest, error) {
 	var manifest *C.LoonManifest
 	if err := HandleLoonFFIResult(C.loon_transaction_get_manifest(txn, &manifest)); err != nil {
 		return nil, merr.WrapErrStorage(err, "get loaded manifest")
 	}
 	return manifest, nil
-}
-
-func transactionIndexInfos(txn C.LoonTransactionHandle, manifestPath string) ([]ManifestIndexInfo, error) {
-	var manifest *C.LoonManifest
-	if err := HandleLoonFFIResult(C.loon_transaction_get_manifest(txn, &manifest)); err != nil {
-		return nil, merr.WrapErrStorage(err, "get loaded manifest")
-	}
-	defer C.loon_manifest_destroy(manifest)
-	return manifestIndexInfos(manifest, manifestPath)
 }
 
 // ManifestUpdateResult carries the committed path and the index-marker change.
@@ -541,11 +551,29 @@ func applyAsyncManifestUpdates(txn C.LoonTransactionHandle, manifestPath string,
 		columns = updates.NewFiles.invalidatedIndexColumns()
 	}
 	var indexes []ManifestIndexInfo
-	if len(updates.DropIndexes) > 0 || (len(columns) > 0 && len(updates.Indexes) == 0) {
-		var err error
-		indexes, err = transactionIndexInfos(txn, manifestPath)
+	if len(updates.DropIndexes) > 0 || ((len(columns) > 0 || len(updates.DropColumns) > 0) && len(updates.Indexes) == 0) {
+		manifest, err := transactionManifest(txn)
 		if err != nil {
 			return false, nil, err
+		}
+		defer C.loon_manifest_destroy(manifest)
+		indexes, err = manifestIndexInfos(manifest, manifestPath)
+		if err != nil {
+			return false, nil, err
+		}
+		if len(updates.DropColumns) > 0 && len(updates.Indexes) == 0 {
+			// Storage only invalidates indexes when the dropped column exists
+			// in the transaction's base revision.
+			columns = slices.Clone(columns)
+			err = visitManifestColumnNames(manifestPath, &manifest.column_groups, func(column string) error {
+				if slices.Contains(updates.DropColumns, column) {
+					columns = append(columns, column)
+				}
+				return nil
+			})
+			if err != nil {
+				return false, nil, err
+			}
 		}
 	}
 	drops, err := resolveManifestIndexDrops(manifestPath, indexes, updates.DropIndexes)
@@ -561,20 +589,20 @@ func applyAsyncManifestUpdates(txn C.LoonTransactionHandle, manifestPath string,
 	return true, hasIndexes, applyManifestUpdates(txn, updates, drops)
 }
 
-func manifestIndexesAfterUpdates(indexes []ManifestIndexInfo, updates *ManifestUpdates, drops []int64, appendedColumns []string) *bool {
+func manifestIndexesAfterUpdates(indexes []ManifestIndexInfo, updates *ManifestUpdates, drops []int64, invalidatedColumns []string) *bool {
 	// Storage applies file invalidation and drops before additions. At least one
 	// addition therefore guarantees a nonempty index section after a valid commit.
 	value := len(updates.Indexes) > 0
 	if value {
 		return &value
 	}
-	if len(updates.DropIndexes) == 0 && len(appendedColumns) == 0 {
+	if len(updates.DropIndexes) == 0 && len(invalidatedColumns) == 0 {
 		return nil
 	}
 	for _, index := range indexes {
 		// Internal data columns use decimal field IDs; ColumnName retains the
 		// schema name. Keep this projection aligned with storage invalidation.
-		if !slices.Contains(drops, index.IndexID) && !slices.Contains(appendedColumns, strconv.FormatInt(index.FieldID, 10)) {
+		if !slices.Contains(drops, index.IndexID) && !slices.Contains(invalidatedColumns, strconv.FormatInt(index.FieldID, 10)) {
 			value = true
 			break
 		}

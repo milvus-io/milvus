@@ -12,6 +12,12 @@ import (
 // It unifies the DDL-side config (CollectionLoadInfo + LoadReplicaConfig).
 // Runtime node membership is derived from ResourceGroup by the Balancer.
 type LoadConfig struct {
+	// AutoLoad is persisted scheduling metadata, independent of current waiters.
+	// Changing only this source publishes a new snapshot at the same Version;
+	// it affects future View priorities without rebuilding existing Views.
+	AutoLoad bool
+	// Version identifies immutable resource requirements, not every metadata
+	// publication. Use snapshot identity to detect an AutoLoad-only change.
 	Version                  uint64
 	DbID                     int64
 	CollectionID             int64
@@ -40,6 +46,7 @@ func (c *LoadConfig) Clone() *LoadConfig {
 		DbID:                     c.DbID,
 		CollectionID:             c.CollectionID,
 		UserSpecifiedReplicaMode: c.UserSpecifiedReplicaMode,
+		AutoLoad:                 c.AutoLoad,
 		RequiredFields:           cloneFieldConfigs(c.RequiredFields),
 	}
 	if len(c.PartitionIDs) > 0 {
@@ -80,6 +87,7 @@ func FromAlterLoadConfigMessage(msg *messagespb.AlterLoadConfigMessageHeader) *L
 		CollectionID:             msg.GetCollectionId(),
 		PartitionIDs:             append([]int64{}, msg.GetPartitionIds()...),
 		UserSpecifiedReplicaMode: msg.GetUserSpecifiedReplicaMode(),
+		AutoLoad:                 msg.GetAutoLoad(),
 		RequiredFields:           FieldsFromMessage(msg.GetRequiredFields()),
 	}
 	cfg.LoadFields = FieldsFromMessage(msg.GetLoadFields())
@@ -98,6 +106,7 @@ func buildFromPersisted(info *viewpb.CollectionLoadConfig) *LoadConfig {
 	cfg := &LoadConfig{
 		Version: info.GetVersion(), DbID: info.GetDbID(), CollectionID: info.GetCollectionID(),
 		UserSpecifiedReplicaMode: info.GetUserSpecifiedReplicaMode(),
+		AutoLoad:                 info.GetAutoLoad(),
 		RequiredFields:           cloneFieldConfigs(info.GetRequiredFields()),
 		LoadFields:               cloneFieldConfigs(info.GetPreloadFields()),
 		PartitionIDs:             append([]int64(nil), info.GetPartitionIds()...),
@@ -117,6 +126,7 @@ func (c *LoadConfig) toCollectionLoadConfigProto() *viewpb.CollectionLoadConfig 
 		CollectionID:             c.CollectionID,
 		DbID:                     c.DbID,
 		UserSpecifiedReplicaMode: c.UserSpecifiedReplicaMode,
+		AutoLoad:                 c.AutoLoad,
 		RequiredFields:           cloneFieldConfigs(c.RequiredFields),
 		PartitionIds:             append([]int64(nil), c.PartitionIDs...),
 	}

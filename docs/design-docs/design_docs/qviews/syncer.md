@@ -18,7 +18,7 @@
 │  ┌─────────────────────────────────────────────────────────────┐ │
 │  │                     ReliableSyncer                          │ │
 │  │  • Watches node changes via ViewSyncClient                 │ │
-│  │  • Lazily creates resumableSyncers per node                │ │
+│  │  • Seeds SN streams; adds targets on SyncViews                │ │
 │  │  • Drains removed nodes (service discovery)                │ │
 │  │                                                             │ │
 │  │  ┌──────────────────┐ ┌──────────────────┐                 │ │
@@ -37,7 +37,7 @@
 ```
 
 **ReliableSyncer**: Top-level component that:
-1. Lazily creates per-node `resumableSyncer` instances on first `SyncViews` call (via `getOrCreateSyncer`).
+1. Creates SN/PChannel `resumableSyncer` instances from the initial full cluster channel list, even without pending Views. `SyncViews` creates targets added after that snapshot; QN streams are also created on first `SyncViews`.
 2. Watches node changes via `ViewSyncClient` and drains `resumableSyncer` instances for removed nodes.
 3. Detects QueryNode loss via service discovery (not reconnect timeout).
 
@@ -201,7 +201,7 @@ node-change worker:
 ```
 
 Key design decisions:
-- **Lazy creation**: `resumableSyncer` instances are created on demand by `getOrCreateSyncer`, NOT by the background watcher. The watcher only handles removals.
+- **SN keepalive**: runtime initialization reads `channel.GetClusterChannels(channel.OptIncludeUnavailableInReplication()).Channels` and passes the snapshot to `NewReliableSyncer`. This includes channels without a current owner. Subsequent `SyncViews` adds new PChannels on demand. Existing SN streams keep resuming across idle periods and assignment gaps; shutdown closes them. QN streams remain lazy and the QN membership notifier handles their removal.
 - **No reconnect timeout**: `resumableSyncer` retries indefinitely with backoff until closed.
 - **Separation of concerns**: Stream reconnection (resumableSyncer) is independent of node liveness (service discovery).
 
@@ -332,3 +332,20 @@ internal/views/coord/coordview/
 │   └── pending_sync_query_views.go # Per-node pending view tracker
 └── state_machine.go                # CoordQueryView state machine
 ```
+
+## ViewFeedback
+
+See [ViewFeedback](view_feedback.md). ReliableSyncer receives
+a `ViewFeedbackHandler` at construction, after Replica configuration replay. SN
+responses carry best-effort ShardID windows and are dispatched directly to that handler,
+without matching pending View callbacks. The receiver validates the stream's
+PChannel; the feedback store validates Replica and collection membership. The store retains received windows for two minutes and expires them independently.
+It publishes immutable Replica feedback, averaging shard rates by the full
+collection shard count supplied by DataView.
+A stream reconnect does not replay consumed feedback, even if delivery failed.
+
+The Syncer has no ongoing PChannel discovery watcher. The initial topology comes
+from the local ChannelManager; later View synchronization adds targets. HandlerClient
+continues resolving SN owners for opening and reconnecting streams. Temporary
+assignment gaps do not discard pending View commands or stop SN reconnection.
+Feedback does not introduce a separate source, subscriber or recovery-ready gate.

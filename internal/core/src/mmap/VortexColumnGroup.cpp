@@ -62,7 +62,7 @@ ThrowVortexStatus(const arrow::Status& status,
 
 VortexColumnGroup::VortexColumnGroup(
     const std::vector<VortexColumnFileInfo>& files,
-    std::shared_ptr<milvus_storage::api::Properties> properties,
+    std::shared_ptr<const milvus_storage::api::Properties> properties,
     const std::vector<std::string>& field_names,
     size_t logical_field_count,
     CacheWarmupPolicy cache_warmup_policy,
@@ -143,6 +143,9 @@ VortexColumnGroup::VortexColumnGroup(
                 ErrorCode::DataFormatBroken,
                 fmt::format("failed to open vortex file {}", file.path));
         }
+
+        // The footer source handle ends with Open. The translator below opens
+        // its data handle on the same FS and disables Talon for load_open.
 
         auto cell_metas_result =
             milvus_storage::vortex::BuildVortexGroupCellMetas(

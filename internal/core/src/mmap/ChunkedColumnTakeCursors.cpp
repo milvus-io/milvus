@@ -30,7 +30,7 @@
 #include "flat_hash_map/flat_hash_map.hpp"
 
 #include "mmap/ChunkedColumnFilter.h"
-#include "mmap/ChunkedColumnInterface.h"
+#include "mmap/ChunkedColumn.h"
 
 namespace milvus {
 namespace detail {
@@ -101,13 +101,13 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
                                      RawTakeBatch,
                                      RawTakeLocations>;
 
-    RawTakeResult(std::shared_ptr<const ColumnPlanner> planner,
+    RawTakeResult(std::shared_ptr<const RawColumnPlanner> planner,
                   OffsetView offsets,
                   ColumnFilterPtr filter,
                   DataType data_type,
                   ChunkedColumnInterface::TargetType target_type,
                   bool nullable,
-                  const TargetBitmap* candidate_mask)
+                  const TargetBitmapView* candidate_mask)
         : planner_(std::move(planner)),
           data_type_(data_type),
           target_type_(target_type),
@@ -684,7 +684,7 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
     }
 
     CellAccess access_cell_;
-    std::shared_ptr<const ColumnPlanner> planner_;
+    std::shared_ptr<const RawColumnPlanner> planner_;
     DataType data_type_;
     ChunkedColumnInterface::TargetType target_type_;
     bool nullable_;
@@ -702,14 +702,13 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
     mutable std::shared_ptr<OwnedTakeStorage> owned_;
     mutable ChunkedColumnInterface::OwnedTakeData owned_data_;
     mutable void* current_data_{nullptr};
-    const TargetBitmap* candidate_mask_;
+    const TargetBitmapView* candidate_mask_;
 };
 
 }  // namespace detail
 
-ChunkedColumnInterface::TakeResultPtr
-ChunkedColumnInterface::Take(milvus::OpContext* op_ctx,
-                             TakeOptions options) const {
+RawColumnBase::TakeResultPtr
+RawColumnBase::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
     ValidateArrayViewTarget(options.target_type);
     AssertInfo(options.offsets.size >= 0,
                "take offset count must be non-negative, got {}",
@@ -733,7 +732,8 @@ ChunkedColumnInterface::Take(milvus::OpContext* op_ctx,
     if (!target_type.has_value()) {
         return nullptr;
     }
-    auto planner = PlannerHandle();
+    Planner();
+    auto planner = planner_;
     const auto make_result =
         [&]<bool HasCandidateMask, TakePinPolicy PinPolicy>() -> TakeResultPtr {
         using Result = detail::RawTakeResult<HasCandidateMask, PinPolicy>;

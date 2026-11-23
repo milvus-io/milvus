@@ -10,7 +10,7 @@ The design covers Coordinator metadata and its QN/SN consumers. It does not
 change SchemaVersion, DataVersion or Manifest identity, introduce a metadata
 watch stream, or implement general storage/schema history GC.
 
-## One immutable record per version
+## Immutable resource requirements per version
 
 Use `coord/load_info/<collectionID>/<version>` for both current
 load configuration and retained historical requirements. One owner/catalog
@@ -25,6 +25,8 @@ Each record contains:
 - explicit RequiredFields and LoadFields preload hints;
 - exact field-to-index references: each LoadFieldConfig contains field_id and
   repeated index_ids, including all selected JSON path indexes for a field;
+- a persisted `auto_load` source flag, used by preparation priority only when the
+  target shard has no healthy Up View;
 - replica IDs, resource groups and priorities; target node placement belongs
   to Balancer and actual lifecycle state belongs to ShardViewRegistry.
 
@@ -67,8 +69,13 @@ not from today's partition keys. This merge does not require removing legacy
 partition APIs before their remaining consumers are adapted.
 
 Allocate and persist a new version under the collection's serialized update
-boundary before publishing it to planners. A committed version is immutable.
-Recovery and callback retries must not reuse an identity for different contents;
+boundary before publishing it to planners. Resource requirements at a committed
+version are immutable. The `auto_load` scheduling metadata is the sole exception
+to whole-record immutability: a source-only update replaces the current catalog
+record at the same version and publishes a new immutable in-memory object.
+Previously returned objects are never mutated. Recovery reads the persisted
+source; callback replay of the same source is a no-op.
+Recovery and callback retries must not reuse an identity for different requirements;
 version allocation must remain safe across complete Release and reload, even
 though no old LoadInfo record is retained. Version zero remains a current-state
 probe, never a resource-preparation identity. Exact historical lookup never
@@ -85,8 +92,9 @@ single-index hint does not restrict the new record's multiple-index selection.
 
 The catalog lives in `internal/metastore/kv/queryview/`. Each version is a single
 key containing partitions, required fields, preload hints and replicas. Save
-writes that key once, without separate partition or replica keys and without
-legacy dual writes. Release removes only this collection's new-format prefix.
+writes resource requirements once, and may replace only the current record's
+`auto_load` metadata without changing its version. This uses no separate partition
+or replica keys and no legacy dual writes. Release removes only this collection's new-format prefix.
 The legacy CollectionLoadInfo/PartitionLoadInfo catalogs and ReplicaManager
 retain the master implementation and are not QueryView state owners.
 
@@ -181,9 +189,11 @@ On recovery, rebuild all persisted View references before enabling GC. Merely
 loading current configuration is insufficient to decide which historical
 versions are unreferenced.
 
-Release stops new View planning for the collection, drains reconciliation that
-captured the old intent, and waits for all QueryViews to complete node cleanup
-and durable removal. It then deletes **all** CollectionLoadConfig versions and
+Release stops new View planning for the collection and joins the next pending
+background reconciliation batch. Concurrent releases share that batch's
+completion, which drains any planning that captured the old intent. Each release
+then waits for its own QueryViews to complete node cleanup and durable removal.
+It deletes **all** CollectionLoadConfig versions and
 completes the Release workflow. There is no retained maximum, inactive version
 or LoadInfo tombstone after Release. DropCollection likewise does not retain a
 load version after its cleanup finishes.
@@ -236,3 +246,35 @@ retains its lease semantics for replica retirement. Balancer applies the control
 already-Down Views. DDL callbacks only withdraw intent and wait; they never
 modify View state directly. DropCollection shares the DropLoadConfig callback. Final registry removal and LoadConfig deletion remain
 the release completion fence.
+
+### AutoLoad source
+
+QueryCoord passes the loading source explicitly through its internal load helper;
+LoadCollectionRequest remains unchanged. AlterLoadConfigMessageHeader carries
+`auto_load` across durable broadcast replay into CollectionLoadConfig. Recovery,
+cloning and immutable cache publication preserve the flag. The Balancer reads
+it from its existing configuration snapshot; no separate waiter registry is needed.
+
+Completing readiness or canceling a query does not clear the source. Partition
+creation/partial release, replica adjustment and Schema/Index revisions preserve
+it. An explicit manual LoadCollection/LoadPartitions publishes false; refresh-only
+loads retain the existing intent. Full Release removes it with the load records.
+
+Recent traffic without a healthy Up View still selects the recovery baseline
+and traffic bonus first. Otherwise AutoLoad without a healthy Up View selects
++10, even with cold access history. AutoLoad with a healthy Up View follows
+ordinary active/cold handoff scoring. Existing QueryView priorities stay immutable.
+
+A source-only change retains LoadInfoVersion and all View references. Under the
+existing collection update lock, persist the replacement before publishing it to
+both the latest-config and retained-version maps. Snapshot/listener revisions
+still advance so the Balancer sees the new source for future Views. A failed
+save publishes nothing; retry after a successful save is idempotent, including
+recovery between persistence and memory publication. GC uses the unchanged
+requirements version and the existing reference counts.
+
+Readiness compares requirements versions, not config pointers: a concurrent
+source-only publication does not make a serving collection unready. Actual
+partition/field/index/replica changes still allocate a fresh version, and full
+Release/reload never reuses the old identity. Source updates neither rebuild Up
+Views nor add a successor when an already admitted Preparing View completes.

@@ -23,6 +23,7 @@
 #define MgGrepResult GrepFaultResult
 #define mg_grep_compile grep_fault_compile
 #define mg_grep_plan_free grep_fault_plan_free
+#define mg_grep_plan_condition grep_fault_plan_condition
 #define mg_grep_session_create grep_fault_session_create
 #define mg_grep_session_free grep_fault_session_free
 #define mg_grep_session_cancel grep_fault_session_cancel
@@ -52,6 +53,7 @@ struct MgGrepResult {
 namespace {
 struct Faults {
     MgGrepStatus compile = MG_GREP_OK;
+    MgGrepStatus condition = MG_GREP_OK;
     MgGrepStatus create = MG_GREP_OK;
     MgGrepStatus execute = MG_GREP_OK;
     bool partial_handle = false;
@@ -60,6 +62,9 @@ struct Faults {
     bool null_result = false;
     bool wrong_count = false;
     bool bad_span = false;
+    std::string condition_bytes = std::string("a\0b", 3);
+    bool null_condition = false;
+    bool oversized_condition = false;
     int plans = 0, plans_freed = 0;
     int sessions = 0, sessions_freed = 0;
     int results = 0, results_freed = 0;
@@ -96,6 +101,19 @@ mg_grep_plan_free(MgGrepPlan* plan) {
         ++faults.plans_freed;
         delete plan;
     }
+}
+MgGrepStatus
+mg_grep_plan_condition(const MgGrepPlan*,
+                       MgGrepBytes* out,
+                       MgGrepError* error) {
+    out->data =
+        faults.null_condition
+            ? nullptr
+            : reinterpret_cast<const uint8_t*>(faults.condition_bytes.data());
+    out->len =
+        faults.oversized_condition ? SIZE_MAX : faults.condition_bytes.size();
+    Message(error);
+    return faults.condition;
 }
 MgGrepStatus
 mg_grep_session_create(const MgGrepPlan*,
@@ -217,6 +235,37 @@ TEST_F(GrepFault, SessionCreationFailureReleasesPartialHandle) {
         Expect([&] { plan.CreateSession(); }, code, Operation::CreateSession);
         EXPECT_EQ(faults.sessions, faults.sessions_freed);
     }
+}
+
+TEST_F(GrepFault, ConditionFailuresPreserveStatusAndKeepPlanUsable) {
+    auto plan = Compile();
+    for (auto code : {1u, 7u, 9u, 4242u}) {
+        faults.condition = code;
+        Expect(
+            [&] { plan.ConditionPayload(); }, code, Operation::ReadCondition);
+    }
+    faults.condition = MG_GREP_OK;
+    auto payload = plan.ConditionPayload();
+    faults.condition_bytes.assign("changed");
+    EXPECT_EQ(payload, std::string("a\0b", 3));
+}
+
+TEST_F(GrepFault, InvalidConditionViewsAreInternalErrors) {
+    auto plan = Compile();
+    faults.null_condition = true;
+    Expect([&] { plan.ConditionPayload(); },
+           MG_GREP_INTERNAL_ERROR,
+           Operation::ReadCondition);
+    faults.null_condition = false;
+    faults.oversized_condition = true;
+    Expect([&] { plan.ConditionPayload(); },
+           MG_GREP_INTERNAL_ERROR,
+           Operation::ReadCondition);
+    faults.oversized_condition = false;
+    faults.condition_bytes.clear();
+    Expect([&] { plan.ConditionPayload(); },
+           MG_GREP_INTERNAL_ERROR,
+           Operation::ReadCondition);
 }
 
 TEST_F(GrepFault, EveryExecutionStatusReleasesPartialResults) {

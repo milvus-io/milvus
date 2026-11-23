@@ -5124,7 +5124,8 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 
 	// V3 delta happy path: ops (add) generate a ManifestMutationCommitUpdates
 	// commit carrying the column-group descriptor, with no source-version pin.
-	t.Run("v3_delta_add_happy_path", func(t *testing.T) {
+	testDeltaAdd := func(t *testing.T, summaries bool) {
+		setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentIndexSummariesEnabled, strconv.FormatBool(summaries))
 		ctx := context.Background()
 		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
@@ -5174,7 +5175,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		require.Len(t, cg.Files, 1)
 		assert.Equal(t, "/seg/601/_data/100_abc.parquet", cg.Files[0].Path)
 		assert.Equal(t, int64(5), cg.Files[0].EndIndex)
-	})
+	}
+	t.Run("v3_delta_add_legacy", func(t *testing.T) { testDeltaAdd(t, false) })
+	t.Run("v3_delta_add_summary", func(t *testing.T) { testDeltaAdd(t, true) })
 
 	// V3 delta replace: the target column is dropped and re-added in the same
 	// transaction (DropColumns + ColumnGroups), no source-version pin. The
@@ -7789,6 +7792,20 @@ func TestAbortImport_CommittingRejected(t *testing.T) {
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
 	resp, err := server.AbortImport(ctx, &datapb.AbortImportRequest{JobId: 2104})
+	assert.NoError(t, err)
+	assert.False(t, merr.Ok(resp))
+}
+
+func TestAbortImport_StartedBroadcastRejected(t *testing.T) {
+	ctx := context.Background()
+	job := &bulkimport.Job{ImportJob: &datapb.ImportJob{
+		JobID: 2105, State: internalpb.ImportJobState_Uncommitted, CommitBroadcastStarted: true,
+	}}
+	im := bulkimport.NewMockImportMeta(t)
+	im.EXPECT().GetJob(mock.Anything, int64(2105)).Return(job).Once()
+	server := &Server{importMeta: im, importJobLock: lock.NewKeyLock[int64]()}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	resp, err := server.AbortImport(ctx, &datapb.AbortImportRequest{JobId: 2105})
 	assert.NoError(t, err)
 	assert.False(t, merr.Ok(resp))
 }

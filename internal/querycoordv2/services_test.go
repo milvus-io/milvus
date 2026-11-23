@@ -45,8 +45,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
-	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
-	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -63,6 +61,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
@@ -113,7 +112,6 @@ type ServiceSuite struct {
 	cluster            *session.MockCluster
 	nodeMgr            *session.NodeManager
 	taskScheduler      *task.MockScheduler
-	balancer           balance.Balance
 
 	distMgr        *meta.DistributionManager
 	distController *dist.MockController
@@ -207,6 +205,15 @@ func (suite *ServiceSuite) SetupSuite() {
 		101, 102, 103, 104, 105,
 	}
 
+	// Keep enough SNs so resource-group capacity tests exercise the QN bound.
+	streamingNodes := typeutil.NewUniqueSet()
+	for i := 0; i <= len(suite.nodes); i++ {
+		streamingNodes.Insert(int64(10001 + i))
+	}
+	suite.T().Cleanup(withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		meta.DefaultResourceGroupName: streamingNodes,
+	}))
+
 	suite.proxyManager = proxyutil.NewMockProxyClientManager(suite.T())
 	suite.proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	suite.proxyManager.EXPECT().InvalidateShardLeaderCache(mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -269,14 +276,6 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.taskScheduler = task.NewMockScheduler(suite.T())
 	suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
-	assign.ResetGlobalAssignPolicyFactoryForTest()
-	assign.InitGlobalAssignPolicyFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
-	suite.balancer = balance.NewRowCountBasedBalancer(
-		suite.taskScheduler,
-		suite.nodeMgr,
-		suite.dist,
-		suite.targetMgr,
-	)
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 	suite.distMgr = meta.NewDistributionManager(suite.nodeMgr)
 	suite.distController = dist.NewMockController(suite.T())
@@ -286,7 +285,6 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.meta,
 		suite.targetMgr,
 		suite.targetObserver,
-		&checkers.CheckerController{},
 		suite.proxyManager,
 	)
 	suite.collectionObserver.Start()
@@ -332,6 +330,10 @@ func (suite *ServiceSuite) SetupTest() {
 		queryNodeClient:        &fakeRuntimeQueryNodeClient{},
 		resourceGroupManager:   suite.meta,
 		dataViewProvider:       newRuntimeDataViewProvider(suite.T()),
+		// Service tests assert metadata updates without running reconciliation.
+		balancerFactory: func(*cache.Cache) qviewsBalancer {
+			return &fakeRuntimeBalancer{}
+		},
 	})
 	suite.Require().NoError(err)
 	suite.server.qviewsRuntime = runtime
@@ -2057,7 +2059,6 @@ func (suite *ServiceSuite) TearDownTest() {
 	suite.server.qviewsRuntime.stop()
 	suite.targetObserver.Stop()
 	suite.collectionObserver.Stop()
-	assign.ResetGlobalAssignPolicyFactoryForTest()
 }
 
 func TestService(t *testing.T) {

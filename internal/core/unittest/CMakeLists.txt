@@ -91,6 +91,7 @@ set(MILVUS_TEST_FILES
         )
 
 set(INDEX_TEST_FILES
+        ${CMAKE_HOME_DIRECTORY}/src/grep/SegmentGrepTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/IndexLoadContextTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/segcore/json_stats/BsonInvertedIndexTranslatorTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/segcore/indexing/FieldIndexCapabilityTest.cpp
@@ -116,6 +117,7 @@ set(INDEX_TEST_FILES
         ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/VectorReaderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/bitmap/BitmapIndexArtifactTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/bitmap/BitmapIndexReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/bsi/BitSlicedIndexInt32Test.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/fmindex/FmIndexArtifactTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/fmindex/FmIndexBuilderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/fmindex/FmIndexLibraryTest.cpp
@@ -127,6 +129,7 @@ set(INDEX_TEST_FILES
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/marisa/MarisaIndexArtifactTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/marisa/MarisaIndexReaderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/ngram/NgramIndexReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/ngram/NgramGrepTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/sort/SortedIndexArtifactTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/sort/SortedIndexReaderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/sort/SortedMembershipTest.cpp

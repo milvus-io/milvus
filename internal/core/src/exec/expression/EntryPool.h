@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "common/Types.h"
+#include "exec/expression/ExprCacheGeneration.h"
 #include "exec/expression/CacheCompressor.h"
 
 namespace prometheus {
@@ -81,7 +82,7 @@ class ExprCacheMemoryBudget {
 class EntryPool {
  public:
     struct Key {
-        int64_t segment_id{0};
+        ExprCacheSegmentKey segment_id;
         uint64_t sig_hash{0};
         std::string signature;
 
@@ -95,7 +96,7 @@ class EntryPool {
     struct KeyHasher {
         size_t
         operator()(const Key& k) const noexcept {
-            return std::hash<int64_t>()(k.segment_id) * 1315423911u ^
+            return ExprCacheSegmentKeyHasher{}(k.segment_id) * 1315423911u ^
                    std::hash<uint64_t>()(k.sig_hash) ^
                    std::hash<std::string>()(k.signature);
         }
@@ -141,7 +142,24 @@ class EntryPool {
         const Key* key{nullptr};
         Entry* prev{nullptr};
         Entry* next{nullptr};
+        Entry* segment_prev{nullptr};
+        Entry* segment_next{nullptr};
+        std::unique_ptr<Entry> retired_next;
     };
+
+    // An allocation-free detached chain. Destroy outside cache/publication locks.
+    struct RetiredEntries {
+        std::unique_ptr<Entry> head;
+        size_t count{0};
+        RetiredEntries() = default;
+        RetiredEntries(RetiredEntries&&) = default;
+        RetiredEntries&
+        operator=(RetiredEntries&& other) noexcept;
+        ~RetiredEntries();
+    };
+
+    RetiredEntries
+    DetachSegment(ExprCacheSegmentKey segment);
 
     explicit EntryPool(size_t max_bytes,
                        std::shared_ptr<ExprCacheMemoryBudget> budget = {});
@@ -158,7 +176,7 @@ class EntryPool {
     // The returned handle survives erase, clear, replacement, and pool
     // destruction. No iterator, Entry reference, or pool lock escapes Lookup.
     Handle
-    Lookup(int64_t segment_id,
+    Lookup(ExprCacheSegmentKey segment_id,
            const std::string& signature,
            int64_t active_count);
 
@@ -167,7 +185,7 @@ class EntryPool {
     // Subject to latency admission here; the manager applies frequency
     // admission before calling this method.
     void
-    Put(int64_t segment_id,
+    Put(ExprCacheSegmentKey segment_id,
         const std::string& signature,
         int64_t active_count,
         const TargetBitmap& result,
@@ -176,7 +194,7 @@ class EntryPool {
 
     // Erase all entries belonging to a segment. Returns number erased.
     size_t
-    EraseSegment(int64_t segment_id);
+    EraseSegment(ExprCacheSegmentKey segment_id);
 
     // Clear all entries.
     void
@@ -209,6 +227,12 @@ class EntryPool {
     // but leave its mapping for the caller to replace. Requires unique_lock.
     bool
     EvictForPut(size_t bytes, size_t reclaimable, const Entry* protected_entry);
+
+    void
+    UnlinkSegmentEntry(Entry* entry) noexcept;
+
+    std::unordered_map<ExprCacheSegmentKey, Entry*, ExprCacheSegmentKeyHasher>
+        segment_heads_;
 
     size_t max_bytes_;
     std::shared_ptr<ExprCacheMemoryBudget> budget_;

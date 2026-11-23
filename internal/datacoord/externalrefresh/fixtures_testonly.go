@@ -27,6 +27,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
+func ApplySegmentUpdateWithGroupForTest(ctx context.Context, mt *meta.Meta, collectionID, jobID int64, baseline, kept []int64, updated []*datapb.SegmentInfo) error {
+	return applyExternalCollectionSegmentUpdateWithGroup(ctx, mt, collectionID, jobID, baseline, kept, updated)
+}
+
 // drainBuildIndexCh empties the build-acceleration channel and returns what it
 // held, so a test can assert on exactly what one call pushed.
 func drainBuildIndexCh() []int64 {

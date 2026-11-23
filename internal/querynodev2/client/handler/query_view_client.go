@@ -3,6 +3,9 @@ package handler
 import (
 	"context"
 
+	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
+	"github.com/milvus-io/milvus/internal/util/reduce"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
@@ -16,7 +19,9 @@ type QueryViewClient interface {
 	StatisticsOnView(ctx context.Context, nodeID int64, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error)
 
 	SearchOnView(ctx context.Context, nodeID int64, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
+	SearchOnViewStream(ctx context.Context, nodeID int64, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error)
 	QueryOnView(ctx context.Context, nodeID int64, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
+	QueryOnViewStream(ctx context.Context, nodeID int64, req *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error)
 }
 
 type queryViewClient struct {
@@ -37,9 +42,21 @@ func (qvc *queryViewClient) SearchOnView(ctx context.Context, nodeID int64, req 
 	})
 }
 
+func (qvc *queryViewClient) SearchOnViewStream(ctx context.Context, nodeID int64, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
+	return executeViewQueryRPC(ctx, qvc, nodeID, func(ctx context.Context, client viewpb.ViewQueryServiceClient) (searchreducestream.ReduceStream, error) {
+		return reduce.NewSearchGRPCReduceStream(ctx, client, req)
+	})
+}
+
 func (qvc *queryViewClient) QueryOnView(ctx context.Context, nodeID int64, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
 	return executeViewQueryRPC(ctx, qvc, nodeID, func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*viewpb.QueryOnViewResponse, error) {
 		return client.QueryOnView(ctx, req)
+	})
+}
+
+func (qvc *queryViewClient) QueryOnViewStream(ctx context.Context, nodeID int64, req *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error) {
+	return executeViewQueryRPC(ctx, qvc, nodeID, func(ctx context.Context, client viewpb.ViewQueryServiceClient) (queryreducestream.ReduceStream, error) {
+		return reduce.NewQueryGRPCReduceStream(ctx, client, req)
 	})
 }
 

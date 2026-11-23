@@ -35,6 +35,7 @@ func (p Params) MarshalLogObject(enc mlog.ObjectEncoder) error {
 	enc.AddString("storageFormat", p.StorageFormat)
 	enc.AddUint64("binlogMaxSize", p.BinLogMaxSize)
 	enc.AddBool("useMergeSort", p.UseMergeSort)
+	enc.AddBool("enableDeferredBloomFilter", p.EnableDeferredBloomFilter)
 	enc.AddInt("maxSegmentMergeSort", p.MaxSegmentMergeSort)
 	enc.AddFloat64("preferSegmentSizeRatio", p.PreferSegmentSizeRatio)
 	enc.AddInt("bloomFilterApplyBatchSize", p.BloomFilterApplyBatchSize)
@@ -53,6 +54,7 @@ func (p Params) MarshalLogObject(enc mlog.ObjectEncoder) error {
 }
 
 type Params struct {
+	EnableDeferredBloomFilter bool                   `json:"enable_deferred_bloom_filter,omitempty"`
 	StorageVersion            int64                  `json:"storage_version,omitempty"`
 	StorageFormat             string                 `json:"storage_format,omitempty"`
 	BinLogMaxSize             uint64                 `json:"binlog_max_size,omitempty"`
@@ -74,6 +76,7 @@ func GenParams() Params {
 		storageVersion = storage.StorageV3
 	}
 	return Params{
+		EnableDeferredBloomFilter: paramtable.Get().DataNodeCfg.EnableDeferredBloomFilter.GetAsBool(),
 		StorageVersion:            storageVersion,
 		StorageFormat:             paramtable.Get().DataNodeCfg.StorageFormat.GetValue(),
 		BinLogMaxSize:             paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
@@ -134,6 +137,7 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 			// primary storage is local, so the connection cap still applies.
 			MaxConnections:              uint32(paramtable.Get().MinioCfg.MaxConnections.GetAsInt()),
 			TalonMode:                   paramtable.Get().CommonCfg.StorageTalonMode.GetAsUint32(),
+			TalonEnabledStages:          paramtable.Get().CommonCfg.StorageTalonEnabledStages.GetAsUint32(),
 			TalonSmallReadThreshold:     paramtable.Get().CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
 			TalonCoordinator:            paramtable.Get().CommonCfg.StorageTalonCoordinator.GetValue(),
 			TalonBlockSize:              paramtable.Get().CommonCfg.StorageTalonBlockSize.GetAsUint32(),
@@ -161,6 +165,7 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 			SslTlsMinVersion:            paramtable.Get().MinioCfg.SslTLSMinVersion.GetValue(),
 			UseCrc32CChecksum:           paramtable.Get().MinioCfg.UseCRC32C.GetAsBool(),
 			TalonMode:                   paramtable.Get().CommonCfg.StorageTalonMode.GetAsUint32(),
+			TalonEnabledStages:          paramtable.Get().CommonCfg.StorageTalonEnabledStages.GetAsUint32(),
 			TalonSmallReadThreshold:     paramtable.Get().CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
 			TalonCoordinator:            paramtable.Get().CommonCfg.StorageTalonCoordinator.GetValue(),
 			TalonBlockSize:              paramtable.Get().CommonCfg.StorageTalonBlockSize.GetAsUint32(),

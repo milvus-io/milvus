@@ -75,13 +75,14 @@ func getAtVersions(store *loadmgr.LoadConfigStore, registry *coordview.ShardView
 			}
 		}
 	}
-	// Config identities survive recovery. Also compare the immutable config
-	// pointer to detect updates or release/reload with identical content while
-	// the registry snapshot was being read.
+	// Requirements identities survive recovery and are never reused after
+	// release/reload. A source-only AutoLoad update replaces the config pointer
+	// at the same version without invalidating an already serving View.
 	current, currentVersion := store.GetConfigWithVersion(collectionID)
-	if current != cfg || currentVersion != version {
+	if currentVersion != version {
 		return Progress{Config: current}
 	}
+	progress.Config = current
 	return progress
 }
 

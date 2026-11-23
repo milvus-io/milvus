@@ -129,7 +129,7 @@ type broadcastTask struct {
 
 // SetLogger sets the logger of the broadcast task.
 func (b *broadcastTask) SetLogger(logger *mlog.Logger) {
-	b.Binder.SetLogger(logger.With(mlog.FieldMessage(b.msg)))
+	b.Binder.SetLogger(logger)
 }
 
 // WithResourceKeyLockGuards sets the lock guards for the broadcast task.
@@ -661,7 +661,7 @@ func (b *broadcastTask) saveTaskIfDirty(ctx context.Context, logger *mlog.Logger
 	}
 	logger = logger.With(mlog.String("state", b.task.State.String()), mlog.Int("ackedVChannelCount", ackedCount(b.task)))
 	if err := resource.Resource().StreamingCatalog().SaveBroadcastTask(ctx, b.header().BroadcastID, b.task); err != nil {
-		logger.Warn(ctx, "save broadcast task failed", mlog.Err(err))
+		logger.Warn(ctx, "save broadcast task failed", mlog.FieldMessage(b.msg), mlog.Err(err))
 		if ctx.Err() == nil {
 			panic("critical error: the save broadcast task is failed before the context is done")
 		}
@@ -672,6 +672,6 @@ func (b *broadcastTask) saveTaskIfDirty(ctx context.Context, logger *mlog.Logger
 		b.schemaTasks.update(b)
 	}
 	b.ObserveStateChanged(b.task.State)
-	logger.Info(ctx, "save broadcast task done")
+	logger.Info(ctx, "save broadcast task done", mlog.FieldMessage(b.msg))
 	return nil
 }

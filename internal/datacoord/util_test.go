@@ -646,22 +646,18 @@ func (suite *UtilSuite) TestGetZeroTime() {
 }
 
 func (suite *UtilSuite) TestGetCollectionAutoCompactionEnabled() {
-	properties := map[string]string{
-		common.CollectionAutoCompactionKey: "true",
+	kv := func(value string) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{{Key: common.CollectionAutoCompactionKey, Value: value}}
 	}
 
-	enabled, err := policy.GetCollectionAutoCompactionEnabled(properties)
+	enabled, err := policy.GetCollectionAutoCompactionEnabled(kv("true"))
 	suite.NoError(err)
 	suite.True(enabled)
 
-	properties = map[string]string{
-		common.CollectionAutoCompactionKey: "bad_value",
-	}
-
-	_, err = policy.GetCollectionAutoCompactionEnabled(properties)
+	_, err = policy.GetCollectionAutoCompactionEnabled(kv("bad_value"))
 	suite.Error(err)
 
-	enabled, err = policy.GetCollectionAutoCompactionEnabled(map[string]string{})
+	enabled, err = policy.GetCollectionAutoCompactionEnabled(nil)
 	suite.NoError(err)
 	suite.Equal(Params.DataCoordCfg.EnableAutoCompaction.GetAsBool(), enabled)
 }

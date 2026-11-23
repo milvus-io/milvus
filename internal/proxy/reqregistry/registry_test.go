@@ -18,6 +18,7 @@ package reqregistry
 
 import (
 	"context"
+	"math"
 	"strings"
 	"sync"
 	"testing"
@@ -114,6 +115,30 @@ func TestCancel(t *testing.T) {
 	assert.ErrorIs(t, CancelCause(ctx), merr.ErrRequestCanceled)
 }
 
+// An id given more than once in one call is answered once, in the result it
+// belongs to, instead of once per repetition.
+func TestCancelHandlesARepeatedIDOnce(t *testing.T) {
+	r := New()
+	_, e := r.Register(context.Background(), Info{Type: TypeSearch})
+	defer r.Unregister(e)
+	id, missing := e.RequestID(), e.RequestID()+"0"
+	now := time.Now()
+
+	canceled, repeated, notFound := r.Cancel([]string{id, missing, id, id, missing}, "", "root", "", now)
+	require.Len(t, canceled, 1)
+	assert.Equal(t, id, canceled[0].RequestID)
+	assert.Equal(t, StateQueued, canceled[0].State)
+	assert.Empty(t, repeated)
+	assert.Equal(t, []string{missing}, notFound)
+
+	// a later call still reports the request as already canceled, once
+	canceled, repeated, notFound = r.Cancel([]string{id, id}, "", "root", "", now)
+	assert.Empty(t, canceled)
+	assert.Empty(t, notFound)
+	require.Len(t, repeated, 1)
+	assert.Equal(t, StateCanceling, repeated[0].State)
+}
+
 func TestCancelCauseIgnoresClientCancellation(t *testing.T) {
 	r := New()
 	parent, parentCancel := context.WithCancel(context.Background())
@@ -151,11 +176,20 @@ func TestListFilters(t *testing.T) {
 	assert.Empty(t, ids(r.List(Filter{DBName: "db2", User: "bob"}, now)))
 
 	// elapsed is measured against the time passed to List
-	assert.Empty(t, ids(r.List(Filter{MinElapsed: time.Hour}, now)))
-	assert.ElementsMatch(t, []string{id1, id2, id3}, ids(r.List(Filter{MinElapsed: time.Hour}, now.Add(2*time.Hour))))
+	assert.Empty(t, ids(r.List(Filter{MinElapsedMs: time.Hour.Milliseconds()}, now)))
+	assert.ElementsMatch(t, []string{id1, id2, id3}, ids(r.List(Filter{MinElapsedMs: time.Hour.Milliseconds()}, now.Add(2*time.Hour))))
 	for _, info := range r.List(Filter{}, now.Add(time.Second)) {
 		assert.GreaterOrEqual(t, info.ElapsedMS, int64(1000))
 	}
+
+	// A threshold too large to be held in a time.Duration still filters. As
+	// nanoseconds the first two wrap to a negative value and the third to
+	// less than a millisecond, either of which would let every request through.
+	for _, ms := range []int64{math.MaxInt64, math.MaxInt64/int64(time.Millisecond) + 1, 18446744073710} {
+		assert.Empty(t, ids(r.List(Filter{MinElapsedMs: ms}, now.Add(2*time.Hour))), "minElapsedMs %d", ms)
+	}
+	// a negative threshold is no constraint, as before
+	assert.Len(t, r.List(Filter{MinElapsedMs: -1}, now), 3)
 }
 
 func TestExprPrefixIsBounded(t *testing.T) {
@@ -258,4 +292,93 @@ func TestCancelHeldToOwner(t *testing.T) {
 	assert.Equal(t, []string{bob.RequestID(), "nope"}, notFound)
 	assert.ErrorIs(t, aliceCtx.Err(), context.Canceled)
 	assert.NoError(t, bobCtx.Err())
+}
+
+// A cancel that reaches a request before it finished must be the one the
+// client sees; a cancel that comes after must change nothing and say so.
+func TestFinishDecidesBetweenCancelAndResult(t *testing.T) {
+	t.Run("cancel before finish", func(t *testing.T) {
+		r := New()
+		ctx, e := r.Register(context.Background(), Info{Type: TypeQuery})
+		canceled, _, notFound := r.Cancel([]string{e.RequestID()}, "", "root", "heavy", time.Now())
+		require.Len(t, canceled, 1)
+		require.Empty(t, notFound)
+
+		e.Finish()
+		assert.ErrorIs(t, CancelCause(ctx), merr.ErrRequestCanceled, "the RPC method answers with the cancel")
+		// until it leaves, the request is still listed and a second cancel still names it
+		listed := r.List(Filter{}, time.Now())
+		require.Len(t, listed, 1)
+		assert.Equal(t, StateCanceling, listed[0].State)
+		_, repeated, notFound := r.Cancel([]string{e.RequestID()}, "", "root", "again", time.Now())
+		assert.Len(t, repeated, 1)
+		assert.Empty(t, notFound)
+	})
+
+	t.Run("cancel after finish", func(t *testing.T) {
+		r := New()
+		ctx, e := r.Register(context.Background(), Info{Type: TypeQuery})
+		e.Finish()
+
+		// The entry is still registered: the RPC method has not returned yet.
+		require.Equal(t, 1, r.Len())
+		canceled, repeated, notFound := r.Cancel([]string{e.RequestID()}, "", "root", "late", time.Now())
+		assert.Empty(t, canceled)
+		assert.Empty(t, repeated)
+		assert.Equal(t, []string{e.RequestID()}, notFound)
+		assert.NoError(t, ctx.Err(), "a late cancel leaves the ctx alone")
+		assert.Nil(t, CancelCause(ctx))
+		_, canceledAt := e.CanceledAt()
+		assert.False(t, canceledAt)
+		assert.Empty(t, r.List(Filter{}, time.Now()), "a finished request is no longer listed")
+	})
+
+	t.Run("cancel on an entry that already left", func(t *testing.T) {
+		// Registry.Cancel looks the entry up and then cancels it. A request
+		// that finishes and unregisters in between must not be reported as
+		// canceled.
+		r := New()
+		ctx, e := r.Register(context.Background(), Info{Type: TypeQuery})
+		e.Finish()
+		r.Unregister(e)
+		_, first, held := e.Cancel("root", "late", time.Now())
+		assert.False(t, first)
+		assert.False(t, held)
+		assert.Nil(t, CancelCause(ctx))
+	})
+
+	t.Run("nil entry", func(t *testing.T) {
+		var e *Entry
+		e.Finish()
+	})
+}
+
+// Whichever of Cancel and Finish runs first, the operator's answer and the
+// request's ctx agree: canceled if and only if the ctx carries the cancel.
+func TestCancelAndFinishNeverDisagree(t *testing.T) {
+	r := New()
+	for i := 0; i < 2000; i++ {
+		ctx, e := r.Register(context.Background(), Info{Type: TypeQuery})
+		id := e.RequestID()
+		var canceled []Info
+		var notFound []string
+		var clientSeesCancel bool
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			canceled, _, notFound = r.Cancel([]string{id}, "", "root", "race", time.Now())
+		}()
+		go func() {
+			defer wg.Done()
+			// what the RPC method does on its way out
+			e.Finish()
+			clientSeesCancel = CancelCause(ctx) != nil
+			r.Unregister(e)
+		}()
+		wg.Wait()
+		require.Equal(t, 1, len(canceled)+len(notFound))
+		require.Equal(t, len(canceled) == 1, clientSeesCancel,
+			"canceled=%d notFound=%d clientSeesCancel=%v", len(canceled), len(notFound), clientSeesCancel)
+	}
 }

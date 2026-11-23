@@ -155,7 +155,7 @@ func (policy *StorageVersionUpgradePolicy) TriggerOneCollection(ctx context.Cont
 		return nil, nil
 	}
 
-	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
+	collectionTTL, err := common.GetCollectionTTL(collection.Properties)
 	if err != nil {
 		mlog.Warn(ctx, "failed to apply storageVersionUpgradePolicy, get collection ttl failed")
 		return nil, err
@@ -180,8 +180,10 @@ func (policy *StorageVersionUpgradePolicy) TriggerOneCollection(ctx context.Cont
 	formatEnabled := paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.GetAsBool()
 	targetFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
 
+	excluded := policy.meta.SegmentChangeCompactionExclusions(collectionID)
 	segments := policy.meta.SelectSegments(ctx, meta.WithCollection(collectionID), meta.SegmentFilterFunc(func(segment *meta.SegmentInfo) bool {
 		return meta.IsSegmentHealthy(segment) &&
+			!excluded.Contain(segment.GetID()) &&
 			meta.IsFlushed(segment) &&
 			!segment.IsCompacting &&
 			!segment.GetIsImporting() &&

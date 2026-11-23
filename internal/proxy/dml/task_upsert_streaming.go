@@ -19,7 +19,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -45,37 +44,65 @@ func (ut *UpsertTask) Execute(ctx context.Context) error {
 }
 
 func (ut *UpsertTask) executePartialUpdateWithCASRetry(ctx context.Context, ez *message.CipherConfig) error {
-	// A request-level retry can reapply relative operations on vchannels that
-	// already committed before another vchannel rejected the CAS.
-	if !ut.canRetryPartialUpdateCASConflict() {
-		return projectPartialUpdateCASError(ut.appendUpsertAttempt(ctx, ez), false)
-	}
-
 	if ut.partialUpdateOriginalFields == nil {
-		return merr.WrapErrServiceInternalMsg("partial update: original request fields are unavailable")
+		return merr.WrapErrServiceInternalMsg("partial update original fields are unavailable")
 	}
-	attempt := 0
-	err := retry.Do(ctx, func() error {
+	if ut.partialState == nil {
+		return merr.WrapErrServiceInternalMsg("partial update row state is unavailable")
+	}
+	ut.requestSize = proto.Size(ut.req)
+	ut.mutationSize = ut.upsertMsg.InsertMsg.Size() + ut.upsertMsg.DeleteMsg.Size()
+	for attempt := 0; ; attempt++ {
 		if attempt > 0 {
-			if err := ut.preparePartialUpdateRetryAttempt(ctx); err != nil {
+			delay := partialUpdateCASRetryBackoff * (1 << min(attempt-1, 2))
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				err := merr.Wrap(ctx.Err(), "partial update canceled while waiting to retry CAS conflict")
+				if ut.req.GetWriteCondition() != nil {
+					return conditionalExecutionError(err)
+				}
+				return err
+			case <-timer.C:
+			}
+			if err := ut.retainRejectedRows(ctx); err != nil {
+				if ut.req.GetWriteCondition() != nil {
+					return conditionalExecutionError(err)
+				}
 				return err
 			}
 		}
-		attempt++
-		return ut.appendUpsertAttempt(ctx, ez)
-	},
-		retry.Attempts(partialUpdateCASMaxRetryAttempts),
-		retry.Sleep(partialUpdateCASRetryBackoff),
-		retry.MaxSleepTime(4*partialUpdateCASRetryBackoff),
-		retry.RetryErr(func(err error) bool {
-			return status.AsStreamingError(err).IsPartialUpdateRetryableCAS()
-		}),
-	)
-	return projectPartialUpdateCASError(err, true)
+		if len(ut.partialState.writeRows) == 0 {
+			return nil
+		}
+		err := ut.appendUpsertAttempt(ctx, ez)
+		if err == nil {
+			return nil
+		}
+		if !isPartialUpdateCASRetry(err) {
+			if ut.req.GetWriteCondition() != nil && ut.partialState.appendAttempted {
+				return conditionalExecutionError(err)
+			}
+			return err
+		}
+		if !ut.canRetryPartialUpdateCASConflict() || (ut.req.GetWriteCondition() != nil && attempt == partialUpdateCASMaxRetryAttempts-1) {
+			return merr.WrapErrCollectionPartialUpdateConflictErr(err, "partial update conflict; request may have partially committed; automatic replay is unsafe")
+		}
+		if attempt == partialUpdateCASMaxRetryAttempts-1 {
+			return projectPartialUpdateCASError(err, true)
+		}
+	}
+}
+
+// Only streaming admission failures are rebuild signals. A public merr projection
+// owns the final decision, even when its diagnostic cause contains a CAS error.
+func isPartialUpdateCASRetry(err error) bool {
+	return err != nil && !merr.IsMilvusError(err) && status.AsStreamingError(err).IsPartialUpdateRetryableCAS()
 }
 
 func projectPartialUpdateCASError(err error, allowConflictRetry bool) error {
-	if err == nil || !status.AsStreamingError(err).IsPartialUpdateRetryableCAS() {
+	if err == nil || !isPartialUpdateCASRetry(err) {
 		return err
 	}
 	if !allowConflictRetry {
@@ -92,6 +119,9 @@ func projectPartialUpdateCASError(err error, allowConflictRetry bool) error {
 func (ut *UpsertTask) preparePartialUpdateRetryAttempt(ctx context.Context) error {
 	if err := ut.prepareUpsert(ctx); err != nil {
 		return err
+	}
+	if ut.partialState != nil && len(ut.partialState.writeRows) == 0 {
+		return nil
 	}
 	if err := ut.insertPreExecute(ctx); err != nil {
 		return err
@@ -138,8 +168,26 @@ func (ut *UpsertTask) appendUpsertAttempt(ctx context.Context, ez *message.Ciphe
 			return err
 		}
 	}
+	if ut.req.GetWriteCondition() != nil {
+		if err := ctx.Err(); err != nil {
+			return ut.conditionalWriteState().Cancel(merr.Wrap(err, "conditional upsert canceled before WAL submission"))
+		}
+		if !ut.conditionalWriteState().TryAppend() {
+			return merr.Wrap(context.Canceled, "conditional upsert canceled before WAL submission")
+		}
+	}
+	if ut.partialState != nil {
+		// This marks an attempted call, not a successful commit, and persists
+		// across retries even if a later attempt fails before reaching WAL.
+		ut.partialState.appendAttempted = true
+	}
 	resp := streaming.WAL().AppendMessages(ctx, messages...)
-	invalidateMismatchedWriteSchema(ctx, ut.GetMetaCache(), ut.collectionID, resp)
+	defer invalidateMismatchedWriteSchema(ctx, ut.GetMetaCache(), ut.collectionID, resp)
+	if ut.partialState != nil {
+		if err := ut.recordPartialAppend(messages, resp); err != nil {
+			return err
+		}
+	}
 	appendErr := resp.UnwrapFirstError()
 	if ut.req.GetPartialUpdate() {
 		appendErr = unwrapPartialUpdateAppendError(resp)
@@ -164,7 +212,7 @@ func unwrapPartialUpdateAppendError(resp streaming.AppendResponses) error {
 		if response.Error == nil {
 			continue
 		}
-		if !status.AsStreamingError(response.Error).IsPartialUpdateRetryableCAS() {
+		if !isPartialUpdateCASRetry(response.Error) {
 			return response.Error
 		}
 		if casErr == nil {
@@ -212,6 +260,20 @@ func (ut *UpsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 		log.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
 		ut.result.Status = merr.Status(err)
 		return nil, err
+	}
+	if s := ut.partialState; s != nil {
+		if len(ut.upsertMsg.InsertMsg.HashValues) != len(s.writeRows) || typeutil.GetSizeOfIDs(ut.result.GetIDs()) != len(s.writeRows) {
+			return nil, merr.WrapErrServiceInternalMsg("partial update packed rows are not aligned")
+		}
+		// Preserve the actual packing route; result accounting must not resolve metadata after append.
+		channels := make([]string, len(s.writeRows))
+		for row, index := range ut.upsertMsg.InsertMsg.HashValues {
+			if int(index) >= len(channelNames) {
+				return nil, merr.WrapErrServiceInternalMsg("partial update packed channel index %d is out of range", index)
+			}
+			channels[row] = channelNames[index]
+		}
+		s.writeChannels = channels
 	}
 	return msgs, nil
 }
@@ -392,6 +454,9 @@ func (ut *UpsertTask) bindPartialUpdateReadTimestamps(channelReadTs *typeutil.Co
 	}
 	for channel, meta := range ut.partialUpdateCASGroups {
 		meta.ReadTs, _ = channelReadTs.Get(channel)
+		if ut.partialState != nil && meta.ReadTs > ut.partialState.timestamp {
+			ut.partialState.timestamp = meta.ReadTs
+		}
 	}
 	return nil
 }
@@ -410,8 +475,12 @@ func (ut *UpsertTask) buildPartialUpdateCASGroups() (map[string]*messagespb.Part
 		return nil, err
 	}
 
+	originalIDs = ut.selectedPartialIDs(originalIDs)
 	size := typeutil.GetSizeOfIDs(originalIDs)
 	if size == 0 {
+		if ut.partialState != nil && ut.partialState.writeRows != nil {
+			return map[string]*messagespb.PartialUpdateCAS{}, nil
+		}
 		return nil, merr.WrapErrParameterInvalidMsg("partial update primary keys are empty")
 	}
 	if ut.chMgr == nil {

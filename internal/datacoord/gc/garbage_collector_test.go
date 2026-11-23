@@ -145,7 +145,7 @@ func TestGarbageCollectorManifestReadContextPerSweep(t *testing.T) {
 					require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 					for id := int64(1); id <= 2; id++ {
 						require.NotNil(t, m.GetSegment(context.Background(), id))
-						require.Len(t, dm.IndexMeta.GetAllSegmentIndexes(id), 1, "failed reads must retain metadata")
+						require.Len(t, dm.IndexMeta.GetAllSegmentIndexSummaries(id), 1, "failed reads must retain metadata")
 					}
 				}
 			})
@@ -3115,12 +3115,12 @@ func TestGarbageCollector_recycleDroppedSegments_RecyclesSegmentIndexMeta(t *tes
 
 	assert.Empty(t, dm.IndexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID),
 		"deleted field indexes are filtered by the existing query API")
-	assert.Len(t, dm.IndexMeta.GetAllSegmentIndexes(segment.ID), 1)
+	assert.Len(t, dm.IndexMeta.GetAllSegmentIndexSummaries(segment.ID), 1)
 
 	gc.RecycleDroppedSegments(ctx, nil)
 
 	assert.Nil(t, m.GetSegment(ctx, segment.ID))
-	assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexes(segment.ID))
+	assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexSummaries(segment.ID))
 	mu.Lock()
 	assert.ElementsMatch(t, []string{binlogPath, expectedIndexFile}, removed)
 	mu.Unlock()
@@ -3182,7 +3182,7 @@ func TestGarbageCollector_recycleDroppedSegments_FileDeleteFailureKeepsMeta(t *t
 	gc.RecycleDroppedSegments(ctx, nil)
 
 	assert.NotNil(t, m.GetSegment(ctx, segment.ID))
-	assert.Len(t, dm.IndexMeta.GetAllSegmentIndexes(segment.ID), 1)
+	assert.Len(t, dm.IndexMeta.GetAllSegmentIndexSummaries(segment.ID), 1)
 }
 
 func TestGarbageCollector_recycleDroppedSegments_IndexMetaFailureKeepsSegmentMeta(t *testing.T) {
@@ -3210,7 +3210,7 @@ func TestGarbageCollector_recycleDroppedSegments_IndexMetaFailureKeepsSegmentMet
 	gc.RecycleDroppedSegments(ctx, nil)
 
 	assert.NotNil(t, m.GetSegment(ctx, segment.ID))
-	assert.Len(t, dm.IndexMeta.GetAllSegmentIndexes(segment.ID), 1)
+	assert.Len(t, dm.IndexMeta.GetAllSegmentIndexSummaries(segment.ID), 1)
 }
 
 func TestGarbageCollector_recycleDroppedSegments_IndexSnapshotReference(t *testing.T) {
@@ -3242,7 +3242,7 @@ func TestGarbageCollector_recycleDroppedSegments_IndexSnapshotReference(t *testi
 	gc.RecycleDroppedSegments(ctx, nil)
 
 	assert.NotNil(t, m.GetSegment(ctx, segment.ID))
-	assert.Len(t, dm.IndexMeta.GetAllSegmentIndexes(segment.ID), 1)
+	assert.Len(t, dm.IndexMeta.GetAllSegmentIndexSummaries(segment.ID), 1)
 	cli.AssertNotCalled(t, "Remove", mock.Anything, mock.Anything)
 }
 
@@ -3282,14 +3282,16 @@ func TestGarbageCollector_DroppedSegmentIndexHelpers(t *testing.T) {
 		strconv.FormatInt(segIdx.PartitionID, 10), strconv.FormatInt(segIdx.SegmentID, 10), "idx-file")
 	assert.Contains(t, indexFiles, expectedIndexFile)
 
-	assert.Nil(t, (&GarbageCollector{}).getAllSegmentIndexesForDroppedSegment(segment.ID))
+	assert.Nil(t, (&GarbageCollector{}).getAllSegmentIndexSummariesForDroppedSegment(segment.ID))
 	removed, err := dm.IndexMeta.RemoveSegmentIndexes(ctx, nil)
 	require.NoError(t, err)
 	assert.Zero(t, removed)
-	removed, err = dm.IndexMeta.RemoveSegmentIndexes(ctx, segIndexes)
+	plan, reason := gc.planDroppedSegmentIndexFiles(ctx, NewGCManifestReadIO(t), segment.ID)
+	require.Equal(t, GcNotBlocked, reason)
+	removed, err = dm.IndexMeta.RemoveSegmentIndexes(ctx, plan.records)
 	require.NoError(t, err)
 	assert.Equal(t, 1, removed)
-	assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexes(segment.ID))
+	assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexSummaries(segment.ID))
 }
 
 func TestGarbageCollector_getDroppedSegmentIndexFiles_BlockedReturnsNilFiles(t *testing.T) {
@@ -3782,7 +3784,7 @@ func TestGarbageCollector_recycleDroppedSegment_MissingLocalV3DataStillRemovesMe
 	gc.RecycleDroppedSegment(ctx, NewGCManifestReadIO(t), segment.ID)
 
 	assert.Nil(t, m.GetSegment(ctx, segment.ID))
-	assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexes(segment.ID))
+	assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexSummaries(segment.ID))
 	for file := range indexFiles {
 		assert.NoFileExists(t, file)
 	}
@@ -4885,7 +4887,7 @@ func TestGarbageCollector_DroppedSegmentIndexFilesComeFromManifestAfterReload(t 
 	defer infos.UnPatch()
 
 	require.NoError(t, m.ReloadSegmentIndexesFromManifests(context.TODO()))
-	recovered := dm.IndexMeta.GetAllSegmentIndexes(segmentID)
+	recovered := dm.IndexMeta.GetAllSegmentIndexSummaries(segmentID)
 	require.Len(t, recovered, 1, "retained dropped segments need their index records after restart")
 	require.EqualValues(t, 5300, recovered[0].BuildID)
 
@@ -4962,7 +4964,9 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_UnionsRecordsAndManifest(t
 	require.Len(t, segIndexes, 1)
 	assert.Contains(t, indexFiles, "/tmp/test/index_files/6200/1/10/3201/manifest-file",
 		"the manifest-only entry's files must be in the delete list even though records exist")
-	for file := range gc.GetAllIndexFilesOfIndex(segIndexes[0]) {
+	record, exists := dm.IndexMeta.GetIndexJob(segIndexes[0].BuildID)
+	require.True(t, exists)
+	for file := range gc.GetAllIndexFilesOfIndex(record) {
 		assert.Contains(t, indexFiles, file,
 			"the record-derived files must survive the union with the manifest")
 	}
@@ -5739,7 +5743,7 @@ func TestGarbageCollector_recycleDroppedSegmentsBatchFallbackWithIndexes(t *test
 
 	for segmentID := int64(1); segmentID <= 4; segmentID++ {
 		assert.Nil(t, m.GetSegment(ctx, segmentID))
-		assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexes(segmentID))
+		assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexSummaries(segmentID))
 	}
 }
 
@@ -5813,7 +5817,7 @@ func TestDroppedSegmentBatchRechecksManifestBeforeDeletion(t *testing.T) {
 	gc.recycleDroppedSegmentBatch(ctx, batch)
 	require.Len(t, cm.calls, 1)
 	require.Equal(t, updated.GetManifestPath(), m.GetSegment(ctx, 1).GetManifestPath())
-	require.Len(t, dm.IndexMeta.GetAllSegmentIndexes(1), 1)
+	require.Len(t, dm.IndexMeta.GetAllSegmentIndexSummaries(1), 1)
 	require.Nil(t, m.GetSegment(ctx, 2))
 }
 
@@ -5835,7 +5839,7 @@ func TestGarbageCollector_recycleDroppedSegmentsInBatches(t *testing.T) {
 		cm.mu.Unlock()
 		for segmentID := int64(1); segmentID <= 3; segmentID++ {
 			assert.Nil(t, m.GetSegment(ctx, segmentID))
-			assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexes(segmentID))
+			assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexSummaries(segmentID))
 		}
 	})
 
@@ -5862,9 +5866,9 @@ func TestGarbageCollector_recycleDroppedSegmentsInBatches(t *testing.T) {
 		gc.RecycleDroppedSegments(ctx, nil)
 
 		assert.Nil(t, m.GetSegment(ctx, 1))
-		assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexes(1))
+		assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexSummaries(1))
 		assert.NotNil(t, m.GetSegment(ctx, 2))
-		assert.Len(t, dm.IndexMeta.GetAllSegmentIndexes(2), 1)
+		assert.Len(t, dm.IndexMeta.GetAllSegmentIndexSummaries(2), 1)
 	})
 
 	t.Run("missing file result only retains the owning segment", func(t *testing.T) {
@@ -5889,9 +5893,9 @@ func TestGarbageCollector_recycleDroppedSegmentsInBatches(t *testing.T) {
 		gc.RecycleDroppedSegments(ctx, nil)
 
 		assert.Nil(t, m.GetSegment(ctx, 1))
-		assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexes(1))
+		assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexSummaries(1))
 		assert.NotNil(t, m.GetSegment(ctx, 2))
-		assert.Len(t, dm.IndexMeta.GetAllSegmentIndexes(2), 1)
+		assert.Len(t, dm.IndexMeta.GetAllSegmentIndexSummaries(2), 1)
 	})
 
 	t.Run("V3 prefix failure only retains the owning segment", func(t *testing.T) {
@@ -5995,7 +5999,7 @@ func TestGarbageCollector_recycleDroppedSegmentsInBatches(t *testing.T) {
 		gc.RecycleDroppedSegments(ctx, nil)
 
 		assert.NotNil(t, m.GetSegment(ctx, 1))
-		assert.Len(t, dm.IndexMeta.GetAllSegmentIndexes(1), 1)
+		assert.Len(t, dm.IndexMeta.GetAllSegmentIndexSummaries(1), 1)
 	})
 
 	t.Run("segment metadata batch failure keeps final marker", func(t *testing.T) {
@@ -6013,7 +6017,7 @@ func TestGarbageCollector_recycleDroppedSegmentsInBatches(t *testing.T) {
 		gc.RecycleDroppedSegments(ctx, nil)
 
 		assert.NotNil(t, m.GetSegment(ctx, 1))
-		assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexes(1))
+		assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexSummaries(1))
 	})
 }
 
@@ -6204,7 +6208,7 @@ func TestGarbageCollector_recycleDroppedSegmentsBatch_CancellationShortCircuit(t
 
 		gc.RecycleDroppedSegments(ctx, nil)
 
-		assert.Len(t, dm.IndexMeta.GetAllSegmentIndexes(segment.ID), 1)
+		assert.Len(t, dm.IndexMeta.GetAllSegmentIndexSummaries(segment.ID), 1)
 		assert.NotNil(t, m.GetSegment(context.Background(), segment.ID))
 	})
 }
@@ -6229,7 +6233,7 @@ func TestGarbageCollector_recycleDroppedSegmentsBatch_CtxCanceledBeforeSegmentMe
 	gc.RecycleDroppedSegments(ctx, nil)
 
 	assert.Equal(t, int32(1), indexMetaCalls.Load())
-	assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexes(segment.ID))
+	assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexSummaries(segment.ID))
 	assert.NotNil(t, m.GetSegment(context.Background(), segment.ID))
 }
 
