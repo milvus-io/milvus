@@ -54,16 +54,19 @@ type discoverySlice struct {
 	last bool
 }
 
-// Each source has one producer. A wide topology change and a periodic scan
-// can both be in flight while the collection producer admits a cold load.
+// Local changes, topology changes and the periodic scan have separate producers.
+// Discovery returns the queue that owns a scope so it resumes on the same input.
 type discoverySource int
 
 const (
 	localChanges discoverySource = iota
 	topologyChanges
 	periodicScan
-	producerCount
-	anySource discoverySource = -1
+	// The local producer serves both localChanges (collections) and localShards.
+	localShards
+	queueCount
+	producerCount                 = periodicScan + 1
+	anySource     discoverySource = -1
 )
 
 type scopeQueue struct {
@@ -74,7 +77,8 @@ type scopeQueue struct {
 
 type discovery struct {
 	mu              sync.Mutex
-	queues          [producerCount]scopeQueue
+	queues          [queueCount]scopeQueue
+	shardsNext      bool
 	pending         map[scopeKey]*discoveryScope
 	nextSync        discoverySource
 	refreshingNodes atomic.Int64 // node walks with target accounting still in progress
@@ -85,6 +89,7 @@ func newDiscovery() *discovery {
 	for i := range producerCount {
 		d.queues[i].signal = make(chan struct{}, 1)
 	}
+	d.queues[localShards].signal = d.queues[localChanges].signal
 	return d
 }
 
@@ -125,20 +130,36 @@ func (d *discovery) next(source discoverySource) (*discoveryScope, discoverySour
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if source != anySource {
-		return d.take(source), source
+		return d.take(source)
 	}
 	for range producerCount {
 		source = d.nextSync
 		d.nextSync = (source + 1) % producerCount
-		if job := d.take(source); job != nil {
-			return job, source
+		if job, queue := d.take(source); job != nil {
+			return job, queue
 		}
 	}
 	return nil, anySource
 }
 
-func (d *discovery) take(source discoverySource) *discoveryScope {
-	q := &d.queues[source]
+func (d *discovery) take(source discoverySource) (*discoveryScope, discoverySource) {
+	if source == localChanges {
+		collections, shards := &d.queues[localChanges], &d.queues[localShards]
+		if !shards.empty() && (d.shardsNext || collections.empty()) {
+			source = localShards
+			d.shardsNext = false
+		} else if !collections.empty() {
+			d.shardsNext = true
+		}
+	}
+	return d.queues[source].take(), source
+}
+
+func (q *scopeQueue) empty() bool {
+	return q.fresh.Len() == 0 && q.resumed.Len() == 0
+}
+
+func (q *scopeQueue) take() *discoveryScope {
 	if q.resumed.Len() > 0 && (q.resumeNext || q.fresh.Len() == 0) {
 		q.resumeNext = false
 		return q.resumed.Remove(q.resumed.Front()).(*discoveryScope)

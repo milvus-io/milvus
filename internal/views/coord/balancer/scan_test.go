@@ -45,6 +45,65 @@ func TestDiscoveryLargeCollectionAndLocalScope(t *testing.T) {
 	require.Len(t, b.ready.items, 10001)
 }
 
+// A node failure can publish one local notification per affected shard before
+// the producer sees a cold collection's load. Exercise the cache callbacks so
+// the ordering guarantee also covers the path that runs under publisher locks.
+func TestLocalCollectionDuringShardPublicationBacklog(t *testing.T) {
+	const backlog = 10000
+	c := scanTestCache(backlog)
+	t.Cleanup(c.Close)
+	shards := c.GetCollection(1).DataView().Shards
+	for _, shard := range shards {
+		id := qviews.ShardID{ReplicaID: 10, VChannel: shard.VChannel}
+		c.PublishShard(id, &coordview.ShardStats{PreparingVersion: ver(1, 1, 1), MaybeUped: true})
+	}
+	cold := cacheShard(2, 20)
+	c.PublishDataView(2, cacheData(2, cold.VChannel, 1))
+	b := NewDefaultBalancer(c, nil, nil, nil)
+	for _, shard := range shards {
+		id := qviews.ShardID{ReplicaID: 10, VChannel: shard.VChannel}
+		c.PublishShard(id, &coordview.ShardStats{MaybeUped: true})
+	}
+	select {
+	case <-b.discovery.queues[localChanges].signal:
+	default:
+		t.Fatal("shard publications did not wake the local producer")
+	}
+	require.Equal(t, 1, b.dispatch(localChanges))
+	cfg := cfgFor(2, 20, nil, nil)
+	cfg.AutoLoad = true
+	c.PublishLoadConfig(2, cfg, 1)
+	require.Equal(t, 1, b.dispatch(localChanges))
+	require.Equal(t, []qviews.ShardID{cold}, b.ready.take(1))
+	for b.dispatch(localChanges) >= 0 {
+	}
+	require.Len(t, b.ready.items, backlog)
+}
+
+func TestLocalDiscoveryAlternatesWideScopes(t *testing.T) {
+	const size = 2*discoveryShardLimit + 1
+	c := scanTestCache(size, size)
+	t.Cleanup(c.Close)
+	b := NewDefaultBalancer(c, nil, nil, nil)
+	ids := make([]qviews.ShardID, 0, size)
+	for _, shard := range c.GetCollection(1).DataView().Shards {
+		ids = append(ids, qviews.ShardID{ReplicaID: 10, VChannel: shard.VChannel})
+	}
+	b.Trigger(TriggerScope{DirtyCollections: []int64{2}})
+	require.Equal(t, discoveryShardLimit, b.dispatch(localChanges))
+	b.Trigger(TriggerScope{DirtyShards: ids})
+	require.Equal(t, discoveryShardLimit, b.dispatch(localChanges))
+	require.Contains(t, b.ready.items, ids[0])
+	require.Equal(t, discoveryShardLimit, b.dispatch(localChanges))
+	require.NotContains(t, b.ready.items, ids[discoveryShardLimit])
+	require.Equal(t, discoveryShardLimit, b.dispatch(localChanges))
+	require.Contains(t, b.ready.items, ids[discoveryShardLimit])
+	b.discovery.suspend()
+	for b.dispatch(anySource) >= 0 {
+	}
+	require.Len(t, b.ready.items, 2*size)
+}
+
 func TestDiscoveryEmptyCollectionsYieldAndPruneLayout(t *testing.T) {
 	c := scanTestCache(make([]int, scanSlotBudget+1)...)
 	t.Cleanup(c.Close)

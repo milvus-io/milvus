@@ -69,9 +69,13 @@ Cache publications record shard, collection, node, or resource group scopes.
 Local collection/shard notifications, node/RG notifications and full scans have
 independent producers. Each advances its own immutable cursors in slices of at
 most 100 shard IDs and can suspend inside a collection or replica. Directory
-scans also yield after 256 slots, including tombstones. New scopes alternate
-with unfinished cursors within each source. Overlapping requests for one active scope schedule
-one following walk against the latest inputs. A periodic tick wakes the full-scan producer. Explicit bounded shard lists can
+scans also yield after 256 slots, including tombstones. The local producer
+alternates slices between collection notifications and explicit shard notifications
+when both have work. A cold collection can therefore enter discovery during a
+backlog of individual shard publications. Either input can use every slice when
+the other is empty. Within each input, new scopes alternate with unfinished cursors.
+Overlapping requests for one active scope schedule one following walk against the
+latest inputs. A periodic tick wakes the full-scan producer. Explicit bounded shard lists can
 submit directly when the cache is ready.
 
 Each slice uses the QueryView preparation priority to upsert the selected

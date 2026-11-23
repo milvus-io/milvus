@@ -125,7 +125,7 @@ func (b *DefaultBalancer) Trigger(scopes ...TriggerScope) {
 // affected scope here; the producer reads inputs after publication.
 func (b *DefaultBalancer) publishScope(s TriggerScope) {
 	if len(s.DirtyShards) > 0 {
-		b.discovery.add(localChanges, TriggerScope{DirtyShards: slices.Clone(s.DirtyShards)})
+		b.discovery.add(localShards, TriggerScope{DirtyShards: slices.Clone(s.DirtyShards)})
 	}
 	if len(s.DirtyCollections) > 0 {
 		b.discovery.add(localChanges, TriggerScope{DirtyCollections: slices.Clone(s.DirtyCollections)})
@@ -191,14 +191,18 @@ func (b *DefaultBalancer) run(ctx context.Context) {
 	}
 	workers.Go(func() { b.loop(ctx) })
 	defer workers.Wait()
-	ticker := time.NewTicker(b.cache.GetBalanceConfig().ReconcileInterval)
+	interval := b.cache.GetBalanceConfig().ReconcileInterval
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-b.configChanged:
-			ticker.Reset(b.cache.GetBalanceConfig().ReconcileInterval)
+			if next := b.cache.GetBalanceConfig().ReconcileInterval; next != interval {
+				interval = next
+				ticker.Reset(interval)
+			}
 		case <-ticker.C:
 			b.Trigger()
 		}

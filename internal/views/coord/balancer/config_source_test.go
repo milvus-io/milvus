@@ -4,12 +4,15 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
 	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
+	"github.com/milvus-io/milvus/internal/views/coord/coordview"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -23,6 +26,43 @@ func setBalanceParam(t *testing.T, p *paramtable.ComponentParam, key, value stri
 	t.Helper()
 	require.NoError(t, p.Save(key, value))
 	t.Cleanup(func() { require.NoError(t, p.Reset(key)) })
+}
+
+func TestBalancerPeriodicScanDeadlineOnConfigChange(t *testing.T) {
+	params := paramtable.Get()
+	interval := params.QueryViewCfg.BalancerReconcileInterval.Key
+	setBalanceParam(t, params, interval, "1m")
+	synctest.Test(t, func(t *testing.T) {
+		cache := scanTestCache(1)
+		defer cache.Close()
+		var passes atomic.Int32
+		b := NewDefaultBalancer(cache, &coordview.ShardViewRegistry{}, balancePolicyFunc(func(balancercache.Reader, []qviews.ShardID) *BalancePlan {
+			passes.Add(1)
+			return nil
+		}), nil)
+		b.Start(t.Context())
+		defer b.Stop()
+		synctest.Wait()
+		require.EqualValues(t, 1, passes.Load(), "startup scan")
+
+		time.Sleep(59 * time.Second)
+		setBalanceParam(t, params, params.QueryViewCfg.BalancerShardBatchSize.Key, "8")
+		synctest.Wait()
+		require.EqualValues(t, 8, cache.GetBalanceConfig().ShardBatchSize)
+		require.EqualValues(t, 1, passes.Load())
+		time.Sleep(time.Second)
+		synctest.Wait()
+		require.EqualValues(t, 2, passes.Load(), "a batch-size change must preserve the original deadline")
+
+		require.NoError(t, params.Save(interval, "5s"))
+		synctest.Wait()
+		time.Sleep(4 * time.Second)
+		synctest.Wait()
+		require.EqualValues(t, 2, passes.Load())
+		time.Sleep(time.Second)
+		synctest.Wait()
+		require.EqualValues(t, 3, passes.Load(), "the new interval controls the next deadline")
+	})
 }
 
 func TestBalanceConfigSourcePublicationAndValidation(t *testing.T) {
