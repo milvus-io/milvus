@@ -851,7 +851,8 @@ func TestCreateSegmentSchemaDDLOrdering(t *testing.T) {
 						CollectionId: 1,
 						Partitions:   []*streamingpb.PartitionInfoOfVChannel{{PartitionId: 10}, {PartitionId: 11}},
 						Schemas:      []*streamingpb.CollectionSchemaOfVChannel{{Schema: old, State: streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL}},
-					}},
+					},
+				},
 			},
 		},
 	})
