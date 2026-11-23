@@ -90,6 +90,7 @@ func TestServerBroker_GetSegmentInfo(t *testing.T) {
 }
 
 func TestServerBroker_WatchChannels(t *testing.T) {
+	useStreamingBootstrap(t)
 	t.Run("failed to execute", func(t *testing.T) {
 		defer cleanTestEnv()
 

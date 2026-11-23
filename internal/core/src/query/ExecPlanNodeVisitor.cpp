@@ -308,7 +308,6 @@ ExecPlanNodeVisitor::setupRetrieveResult(
     const segcore::SegmentInternalInterface* segment,
     std::shared_ptr<milvus::exec::QueryContext> query_context) {
     if (result == nullptr) {
-        tmp_retrieve_result.has_more_result = false;
         // Return empty field_data arrays with correct schema (0 rows, N columns)
         // to ensure result structure matches the expected output type.
         auto output_type = node.plannodes_->output_type();
@@ -323,6 +322,7 @@ ExecPlanNodeVisitor::setupRetrieveResult(
                 tmp_retrieve_result.field_data_[i] = std::move(data_array);
             }
         }
+        tmp_retrieve_result.has_more_result = false;
         retrieve_result_opt_ = std::move(tmp_retrieve_result);
         return;
     }

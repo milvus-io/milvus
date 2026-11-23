@@ -1294,8 +1294,8 @@ func TestIndexMeta_QueryViewIndexSnapshotDoesNotObservePartialSegmentIndexBatch(
 	assert.Equal(t, int64(1), snapshot[segment2ID][indexID].IndexVersion)
 }
 
-func TestMeta_GetAllSegmentIndexes(t *testing.T) {
-	assert.Nil(t, (&IndexMeta{}).GetAllSegmentIndexes(meta.SegID))
+func TestMeta_GetAllSegmentIndexSummaries(t *testing.T) {
+	assert.Nil(t, (&IndexMeta{}).GetAllSegmentIndexSummaries(meta.SegID))
 
 	m := &IndexMeta{
 		SegmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
@@ -1322,12 +1322,13 @@ func TestMeta_GetAllSegmentIndexes(t *testing.T) {
 	m.SegmentIndexes.Insert(meta.SegID, segIdxes)
 
 	assert.Empty(t, m.GetSegmentIndexes(meta.CollID, meta.SegID))
-	segIndexes := m.GetAllSegmentIndexes(meta.SegID)
+	segIndexes := m.GetAllSegmentIndexSummaries(meta.SegID)
 	require.Len(t, segIndexes, 1)
 	assert.Equal(t, meta.BuildID, segIndexes[0].BuildID)
 	origin, ok := segIdxes.Get(meta.IndexID)
 	require.True(t, ok)
-	assert.False(t, origin == segIndexes[0])
+	segIndexes[0].IsDeleted = true
+	assert.False(t, origin.IsDeleted)
 }
 
 func TestMeta_GetFieldIDByIndexID(t *testing.T) {

@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 )
 
 // PartitionStatsPublication guards cache updates that accompany group publication.
@@ -36,6 +37,9 @@ type PartitionStatsPublication interface {
 // readiness predicate need from the index meta. indexMeta implements it.
 type SegmentIndexCatalog interface {
 	FinishedIndexBytes(collectionID int64, segmentIDs []int64) int64
+	UsesSegmentSummaries() bool
+	IsIndexExist(collID, indexID UniqueID) bool
+	FinishTask(result *workerpb.IndexTaskInfo) error
 	GetSegmentIndexState(collID, segmentID, indexID int64) *indexpb.SegmentIndexState
 	// GetIndexParams returns the index params of the index.
 	GetIndexParams(collID, indexID UniqueID) []*commonpb.KeyValuePair
@@ -82,12 +86,14 @@ type SegmentIndexCatalog interface {
 	RLockFieldIndexes()
 	// RUnlockFieldIndexes releases the read side taken by RLockFieldIndexes.
 	RUnlockFieldIndexes()
+	// GetLiveIndexFieldIDLocked requires RLockFieldIndexes.
+	GetLiveIndexFieldIDLocked(collectionID, indexID int64) (int64, bool)
 	// LiveIndexIDsOnColumnsLocked returns the IDs of the live indexes of the
 	// collection whose field ID, formatted as a manifest column name, is in
 	// columns. The caller must hold RLockFieldIndexes.
 	LiveIndexIDsOnColumnsLocked(collectionID int64, columns map[string]struct{}) map[int64]struct{}
-	// GetAllSegmentIndexes returns the SegmentIndex records of the segment.
-	GetAllSegmentIndexes(segID UniqueID) []*model.SegmentIndex
+	// GetAllSegmentIndexSummaries returns inventory and task state without file metadata.
+	GetAllSegmentIndexSummaries(segID UniqueID) []*model.SegmentIndexSummary
 
 	// HasIndex reports whether the collection has an index.
 	HasIndex(collectionID int64) bool

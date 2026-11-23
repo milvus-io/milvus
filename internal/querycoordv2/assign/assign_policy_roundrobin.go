@@ -24,7 +24,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -120,12 +119,8 @@ func (p *RoundRobinAssignPolicy) AssignChannel(
 		return nil
 	}
 
-	// Handle WAL-based assignment if streaming service is enabled
-	plans := make([]ChannelAssignPlan, 0)
-	scoreDelta := make(map[int64]int)
-	if streamingutil.IsStreamingServiceEnabled() {
-		channels, plans, scoreDelta = assignChannelToWALLocatedFirstForNodeInfo(channels, nodes)
-	}
+	// Prefer nodes that host the WAL.
+	channels, plans, scoreDelta := assignChannelToWALLocatedFirstForNodeInfo(channels, nodes)
 
 	// Create a copy of nodes to avoid race condition when sorting
 	nodesCopy := make([]int64, len(nodes))

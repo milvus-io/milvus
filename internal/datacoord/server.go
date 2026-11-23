@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -868,6 +869,36 @@ func loadDomainMetas(catalog metastore.DataCoordCatalog, chunkManager storage.Ch
 	}
 }
 
+// Summary publication retires task rows that the legacy readers and GC need.
+// Enable startup only in the same revision that installs the summary consumers.
+const segmentIndexSummaryReadersReady = false
+
+func (s *Server) initIndexMetadataMode() error {
+	mode := &Params.DataCoordCfg.SegmentIndexSummariesEnabled
+	summaryMode, err := strconv.ParseBool(mode.GetValue())
+	if err != nil {
+		return merr.WrapErrServiceInternalMsg("%s requires a boolean value", mode.Key)
+	}
+	if summaryMode && !Params.CommonCfg.UseLoonFFI.GetAsBool() {
+		return merr.Wrap(merr.ErrServiceUnimplemented, "segment index summaries require common.storage.useLoonFFI=true")
+	}
+	if summaryMode && (!index.WriteSegmentIndexToManifest() || Params.DataCoordCfg.ManifestIndexBackfillEnabled.GetAsBool()) {
+		return merr.Wrap(merr.ErrServiceUnimplemented, "segment index summaries require manifest publication with backfill and rollback disabled")
+	}
+	if summaryMode && !segmentIndexSummaryReadersReady {
+		return merr.Wrap(merr.ErrServiceUnimplemented, "segment index summaries require summary-aware readers and garbage collection")
+	}
+	if modeCatalog, ok := s.catalog.(interface {
+		EnsureIndexMetadataMode(context.Context, bool, bool) error
+	}); ok {
+		return modeCatalog.EnsureIndexMetadataMode(s.ctx, summaryMode, len(s.metaStore.GetCollectionIDs()) != 0)
+	}
+	if summaryMode {
+		return merr.Wrap(merr.ErrServiceUnimplemented, "catalog cannot persist index metadata mode")
+	}
+	return nil
+}
+
 func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	// MixCoord injects the shared catalog and MetaStore. A standalone
 	// DataCoord (e.g. in tests) builds its own over the local KV.
@@ -879,6 +910,9 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	}
 	if s.meta != nil {
 		return nil
+	}
+	if err := s.initIndexMetadataMode(); err != nil {
+		return err
 	}
 	// DataView persistence lives on the concrete KV catalog, not on the
 	// DataCoordCatalog interface.

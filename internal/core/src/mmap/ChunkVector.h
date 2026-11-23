@@ -90,6 +90,15 @@ class ChunkVectorBase {
                   const Type* data,
                   int64_t length,
                   const std::optional<CheckDataValid>& check_data_valid) = 0;
+    // Same as copy_to_chunk, but the rows in data may be moved from.
+    virtual void
+    move_to_chunk(int64_t chunk_id,
+                  int64_t offset,
+                  Type* data,
+                  int64_t length,
+                  const std::optional<CheckDataValid>& check_data_valid) {
+        copy_to_chunk(chunk_id, offset, data, length, check_data_valid);
+    }
     virtual void*
     get_chunk_data(int64_t index) = 0;
     virtual int64_t
@@ -301,6 +310,26 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
         const Type* data,
         int64_t length,
         const std::optional<CheckDataValid>& check_data_valid) override {
+        write_to_chunk<false>(chunk_id, offset, data, length, check_data_valid);
+    }
+
+    void
+    move_to_chunk(
+        int64_t chunk_id,
+        int64_t offset,
+        Type* data,
+        int64_t length,
+        const std::optional<CheckDataValid>& check_data_valid) override {
+        write_to_chunk<true>(chunk_id, offset, data, length, check_data_valid);
+    }
+
+    template <bool Move>
+    void
+    write_to_chunk(int64_t chunk_id,
+                   int64_t offset,
+                   std::conditional_t<Move, Type*, const Type*> data,
+                   int64_t length,
+                   const std::optional<CheckDataValid>& check_data_valid) {
         std::unique_lock<std::shared_mutex> lck(mutex_);
         const auto counter = this->counter_.load();
         AssertInfo(chunk_id < counter,
@@ -319,6 +348,8 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
             if constexpr (std::is_trivially_copyable_v<Type>) {
                 milvus::fastmem::FastMemcpy(
                     ptr + offset, data, length * sizeof(Type));
+            } else if constexpr (Move) {
+                std::move(data, data + length, ptr + offset);
             } else {
                 std::copy_n(data, length, ptr + offset);
             }

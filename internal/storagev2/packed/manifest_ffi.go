@@ -607,8 +607,23 @@ func GetManifestFieldIDs(manifestPath string, storageConfig *indexpb.StorageConf
 
 func manifestFieldIDsFromColumnGroups(manifestPath string, cgroups *C.LoonColumnGroups) (map[int64]struct{}, error) {
 	fields := make(map[int64]struct{})
+	err := visitManifestColumnNames(manifestPath, cgroups, func(columnName string) error {
+		fieldID, err := strconv.ParseInt(columnName, 10, 64)
+		if err != nil {
+			return merr.WrapErrStorage(err, "invalid manifest column name %q", columnName)
+		}
+		fields[fieldID] = struct{}{}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return fields, nil
+}
+
+func visitManifestColumnNames(manifestPath string, cgroups *C.LoonColumnGroups, visit func(string) error) error {
 	if cgroups.column_group_array == nil && cgroups.num_of_column_groups > 0 {
-		return nil, merr.WrapErrServiceInternalMsg("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
+		return merr.WrapErrServiceInternalMsg("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
 	}
 
 	cgArray := unsafe.Slice(cgroups.column_group_array, int(cgroups.num_of_column_groups))
@@ -621,24 +636,21 @@ func manifestFieldIDsFromColumnGroups(manifestPath string, cgroups *C.LoonColumn
 			continue
 		}
 		if cg.columns == nil {
-			return nil, merr.WrapErrServiceInternalMsg(
+			return merr.WrapErrServiceInternalMsg(
 				"columns array is nil but num_of_columns is %d in column group %d", cg.num_of_columns, i)
 		}
 		columns := unsafe.Slice(cg.columns, int(cg.num_of_columns))
 		for j, column := range columns {
 			if column == nil {
-				return nil, merr.WrapErrServiceInternalMsg(
+				return merr.WrapErrServiceInternalMsg(
 					"nil column name in column group %d at index %d", i, j)
 			}
-			columnName := C.GoString(column)
-			fieldID, err := strconv.ParseInt(columnName, 10, 64)
-			if err != nil {
-				return nil, merr.WrapErrStorage(err, "invalid manifest column name %q", columnName)
+			if err := visit(C.GoString(column)); err != nil {
+				return err
 			}
-			fields[fieldID] = struct{}{}
 		}
 	}
-	return fields, nil
+	return nil
 }
 
 // ReadFragmentsFromManifest reads fragment info from a manifest path.

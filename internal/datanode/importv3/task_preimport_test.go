@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -64,7 +65,7 @@ func TestPreImportV3TaskProducesImportV3FileStats(t *testing.T) {
 		ImportFiles:   []*internalpb.ImportFile{{Id: 7, Paths: []string{"data.csv"}}},
 		StorageConfig: &indexpb.StorageConfig{},
 	}
-	task := NewPreImportTask(req, cm)
+	task := NewPreImportTask(req, cm, taskcommon.Resource{})
 
 	res, err := task.Execute(context.Background())
 	require.NoError(t, err)
@@ -104,7 +105,7 @@ func TestPreImportV3TaskSizeOnlyBackup(t *testing.T) {
 		ImportFiles: []*internalpb.ImportFile{{Id: 7, Paths: []string{"insert", "delta"}}},
 		Options:     []*commonpb.KeyValuePair{{Key: importutilv2.BackupFlag, Value: "true"}},
 	}
-	task := NewPreImportTask(req, cm)
+	task := NewPreImportTask(req, cm, taskcommon.Resource{})
 
 	res, err := task.Execute(context.Background())
 	require.NoError(t, err)
@@ -202,7 +203,7 @@ func TestPreImportV3RejectsNumpyNamingNoField(t *testing.T) {
 		StorageConfig: &indexpb.StorageConfig{},
 	}
 
-	_, err := NewPreImportTask(req, cm).Execute(context.Background())
+	_, err := NewPreImportTask(req, cm, taskcommon.Resource{}).Execute(context.Background())
 	require.Error(t, err)
 	require.True(t, errors.Is(err, merr.ErrImportFailed),
 		"a file set naming no field must be a terminal input error: %v", err)
