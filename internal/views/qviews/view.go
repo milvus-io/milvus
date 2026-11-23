@@ -21,6 +21,8 @@ type QueryViewAtWorkNode interface {
 
 	State() QueryViewState
 
+	PreparationPriority() int32
+
 	Version() QueryViewVersion
 
 	QueryViewKey() QueryViewKey
@@ -36,6 +38,10 @@ func (qv *queryViewAtWorkNodeBase) ShardID() ShardID {
 
 func (qv *queryViewAtWorkNodeBase) State() QueryViewState {
 	return QueryViewState(qv.inner.Meta.State)
+}
+
+func (qv *queryViewAtWorkNodeBase) PreparationPriority() int32 {
+	return qv.inner.GetMeta().GetControl().GetPreparationPriority()
 }
 
 func (qv *queryViewAtWorkNodeBase) Version() QueryViewVersion {

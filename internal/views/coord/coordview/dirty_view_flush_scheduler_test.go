@@ -684,3 +684,135 @@ func TestPersistViewsSortsVersionAscendingBeforeChunk(t *testing.T) {
 		assert.Equal(t, expected[i], versions, "batch %d versions", i)
 	}
 }
+
+func scoredFlushEvent(replicaID, version int64, priority int32, state qviews.QueryViewState) dirtyViewEvent {
+	id := qviews.ShardID{ReplicaID: replicaID, VChannel: testVChannel}
+	event := dirtyPersistEvent(id, version)
+	meta := event.persists[0].Meta
+	meta.State = viewpb.QueryViewState(state)
+	if priority != 0 {
+		meta.Control = &viewpb.QueryViewControl{PreparationPriority: priority}
+	}
+	return event
+}
+
+func TestFlushClaimsLatePreparingAheadOfRecoveryBacklog(t *testing.T) {
+	const backlog = 10000
+	catalog := newMockCatalog()
+	workers := &capturedDirtyViewTaskScheduler{}
+	s := newDirtyViewFlushScheduler(catalog, newMockSyncer(), 8, workers)
+	t.Cleanup(s.Close)
+	for id := int64(1); id <= backlog; id++ {
+		s.Submit(scoredFlushEvent(id, 1, -3, qviews.QueryViewStatePreparing))
+	}
+	firstTask := workers.snapshot()[0]
+	cold := qviews.ShardID{ReplicaID: backlog + 1, VChannel: testVChannel}
+	manager := newShardViewManager(t.Context(), cold, s, nil, stubDataViewRefProvider{})
+	require.NoError(t, manager.AddPreparing(t.Context(), testBuilderForShard(1, cold).SetPreparationPriority(12)))
+	require.NoError(t, firstTask.Execute(t.Context()))
+	require.Len(t, catalog.saved, 8)
+	for _, view := range catalog.saved {
+		if view.Meta.ReplicaId == cold.ReplicaID {
+			require.EqualValues(t, 12, view.Meta.GetControl().GetPreparationPriority())
+			return
+		}
+	}
+	t.Fatal("late Preparing missing from the first persisted batch")
+}
+
+func TestFlushReordersMergedEffectsAndPreservesAge(t *testing.T) {
+	s := newDirtyViewFlushScheduler(newMockCatalog(), newMockSyncer(), 1, &capturedDirtyViewTaskScheduler{})
+	t.Cleanup(s.Close)
+	submit := func(id, version int64, priority int32, state qviews.QueryViewState) {
+		s.Submit(scoredFlushEvent(id, version, priority, state))
+	}
+	prepare, drop := qviews.QueryViewStatePreparing, qviews.QueryViewStateDropped
+	batch := s.Begin()
+	submit(1, 1, 12, prepare)
+	submit(2, 1, -7, prepare)
+	submit(3, 1, 0, prepare)
+	submit(4, 1, 0, prepare)
+	submit(5, 1, -5, prepare)
+	submit(6, 1, 15, drop)
+	batch.Commit()
+	// Replacing A's high-scoring view removes its boost, even with an older
+	// per-node sync pending. B's new view raises its score to C and D's tier.
+	old := scoredFlushEvent(1, 1, 12, prepare).persists[0]
+	s.Submit(dirtyViewEvent{shardID: qviews.NewShardIDFromQVMeta(old.Meta), syncs: []syncer.SyncView{
+		{View: qviews.NewQueryViewAtQueryNode(old.Meta, old.QueryNode[0])},
+	}})
+	submit(1, 1, 12, drop)
+	submit(1, 2, -3, prepare)
+	submit(2, 2, 0, qviews.QueryViewStateUp)
+	for _, id := range []int64{2, 3, 4, 6, 1, 5} {
+		claimed := s.claim()
+		require.Len(t, claimed, 1)
+		require.Contains(t, claimed, qviews.ShardID{ReplicaID: id, VChannel: testVChannel})
+	}
+}
+
+func TestFlushSyncOnlyPriorityAndDeadline(t *testing.T) {
+	s := newDirtyViewFlushScheduler(newMockCatalog(), newMockSyncer(), 1, &capturedDirtyViewTaskScheduler{})
+	t.Cleanup(s.Close)
+	push := func(id int64, score int32, state qviews.QueryViewState, deadline time.Time) qviews.ShardID {
+		event := scoredFlushEvent(id, 1, score, state)
+		view := event.persists[0]
+		event.persists = nil
+		event.syncs = []syncer.SyncView{{View: qviews.NewQueryViewAtStreamingNode(view.Meta, view.StreamingNode)}}
+		event.notBefore = deadline
+		s.Submit(event)
+		return event.shardID
+	}
+	ordinary := scoredFlushEvent(4, 1, 2, qviews.QueryViewStatePreparing)
+	s.Submit(ordinary)
+	ready := push(1, 8, qviews.QueryViewStateUp, time.Time{})
+	high := push(2, 12, qviews.QueryViewStatePreparing, time.Time{})
+	push(2, 12, qviews.QueryViewStatePreparing, time.Now().Add(time.Hour))
+	require.Contains(t, s.claim(), ready)
+	require.Contains(t, s.claim(), ordinary.shardID)
+	require.Empty(t, s.claim())
+	push(2, 12, qviews.QueryViewStateDown, time.Time{})
+	low := push(3, -2, qviews.QueryViewStatePreparing, time.Time{})
+	require.Contains(t, s.claim(), high)
+	require.Contains(t, s.claim(), low)
+}
+
+func TestFlushFairnessAcrossBatchBoundaries(t *testing.T) {
+	s := newDirtyViewFlushScheduler(newMockCatalog(), newMockSyncer(), 1, &capturedDirtyViewTaskScheduler{})
+	t.Cleanup(s.Close)
+	cleanup := scoredFlushEvent(1, 1, 20, qviews.QueryViewStateDropped)
+	recovery := scoredFlushEvent(2, 1, -10, qviews.QueryViewStatePreparing)
+	s.Submit(cleanup)
+	s.Submit(recovery)
+	for i := 1; i <= 2*(flushPriorityBurst+1); i++ {
+		// Fresh positive-score work exists at every claim, including fairness turns.
+		s.Submit(scoredFlushEvent(int64(2+i), 1, 12, qviews.QueryViewStatePreparing))
+		claimed := s.claim()
+		require.Len(t, claimed, 1)
+		switch i {
+		case flushPriorityBurst + 1:
+			require.Contains(t, claimed, cleanup.shardID)
+		case 2 * (flushPriorityBurst + 1):
+			require.Contains(t, claimed, recovery.shardID)
+		default:
+			require.NotContains(t, claimed, cleanup.shardID)
+			require.NotContains(t, claimed, recovery.shardID)
+		}
+	}
+}
+
+func TestFlushLeavesNonFittingHeadForNextBatch(t *testing.T) {
+	s := newDirtyViewFlushScheduler(newMockCatalog(), newMockSyncer(), 2, &capturedDirtyViewTaskScheduler{})
+	t.Cleanup(s.Close)
+	a := scoredFlushEvent(1, 1, 12, qviews.QueryViewStatePreparing)
+	b := scoredFlushEvent(2, 1, 8, qviews.QueryViewStatePreparing)
+	c := scoredFlushEvent(3, 1, 1, qviews.QueryViewStatePreparing)
+	for _, event := range []dirtyViewEvent{a, b, scoredFlushEvent(2, 2, 8, qviews.QueryViewStatePreparing), c} {
+		s.Submit(event)
+	}
+	for _, event := range []dirtyViewEvent{a, b, c} {
+		batch := s.claim()
+		require.Len(t, batch, 1)
+		require.Contains(t, batch, event.shardID)
+	}
+}
