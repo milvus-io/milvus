@@ -420,6 +420,9 @@ UpdatesRecord::Apply(const Schema& schema,
             "unknown or restricted update field");
         RequireUpdate(seen.insert(a.field.get()).second,
                       "duplicate field assignment");
+        RequireUpdate(schema[a.field].get_data_type() != DataType::VARCHAR ||
+                          !schema[a.field].enable_match(),
+                      "PK-update does not support enable_match VARCHAR fields");
         auto value = Decode(schema[a.field], a.literal);
         if (rows.empty())
             continue;

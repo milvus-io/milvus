@@ -2345,8 +2345,7 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
         // changing active_count_. Only sealed text results are safe to cache
         // across requests; a null cache segment bypasses both reads and writes.
         const auto* cache_segment =
-            !HasUpdates() && segment_->type() == SegmentType::Sealed ? segment_
-                                                                     : nullptr;
+            segment_->type() == SegmentType::Sealed ? segment_ : nullptr;
         auto cached = exec::ExprCacheHelper::GetOrCompute(
             cache_segment,
             snapshot_,
@@ -2357,80 +2356,36 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
                            "selected text index has no text-match reader");
                 AssertInfo(null_reader_ != nullptr,
                            "selected text index has no null reader");
-                const auto match =
-                    [&](const index::ITextMatchReader& reader) -> TargetBitmap {
-                    if (op_type == proto::plan::OpType::TextMatch) {
-                        return reader.MatchQuery(query, min_should_match);
-                    } else if (op_type == proto::plan::OpType::PhraseMatch) {
-                        return reader.PhraseMatchQuery(query, slop);
-                    } else if (op_type == proto::plan::OpType::TextMatchFuzzy) {
-                        return reader.FuzzyMatchQuery(query, max_edit_distance);
-                    } else {
-                        ThrowInfo(
-                            UnexpectedError,
-                            "unsupported operator type for match query: {}",
-                            op_type);
-                    }
-                };
-                auto res = match(*text_reader_);
+                TargetBitmap res;
+                if (op_type == proto::plan::OpType::TextMatch) {
+                    res = text_reader_->MatchQuery(query, min_should_match);
+                } else if (op_type == proto::plan::OpType::PhraseMatch) {
+                    res = text_reader_->PhraseMatchQuery(query, slop);
+                } else if (op_type == proto::plan::OpType::TextMatchFuzzy) {
+                    res =
+                        text_reader_->FuzzyMatchQuery(query, max_edit_distance);
+                } else {
+                    ThrowInfo(UnexpectedError,
+                              "unsupported operator type for match query: {}",
+                              op_type);
+                }
                 const auto covered = selected_covered_row_end_;
                 AssertInfo(res.size() >= static_cast<size_t>(covered),
                            "text index covers {} rows, snapshot requires {}",
                            res.size(),
                            covered);
                 res.resize(covered);
-                res.resize(active_count_, false);
-                TargetBitmap valid_res;
-                if (HasUpdates() && !is_nullable_) {
-                    // Posting coverage only controls the match bits. Every
-                    // active row in this field is known to be non-NULL.
-                    valid_res = TargetBitmap(active_count_, true);
-                } else {
-                    valid_res = null_reader_->IsNotNull();
-                    AssertInfo(
-                        valid_res.size() >= static_cast<size_t>(covered),
-                        "text null index covers {} rows, snapshot requires {}",
-                        valid_res.size(),
-                        covered);
-                    valid_res.resize(covered);
-                    valid_res.resize(active_count_, false);
-                }
-                if (HasUpdates()) {
-                    std::vector<std::pair<int64_t, segcore::UpdateString>>
-                        selected;
-                    update_reader_->records.VisitUpdates(
-                        field_id_,
-                        update_reader_->timestamp,
-                        [&](int64_t row, const segcore::UpdateValue& value) {
-                            if (row >= active_count_)
-                                return;
-                            const auto* text =
-                                std::get_if<segcore::UpdateString>(&value);
-                            res[row] = false;
-                            valid_res[row] = text != nullptr;
-                            if (text)
-                                selected.emplace_back(row, *text);
-                        });
-                    // Release the store read lock before tokenizing or committing.
-                    constexpr size_t batch_size = 256;
-                    for (size_t begin = 0; begin < selected.size();
-                         begin += batch_size) {
-                        segcore::CheckCancellation(
-                            op_ctx_,
-                            segment_->get_segment_id(),
-                            "text predicate update correction");
-                        const size_t count =
-                            std::min(batch_size, selected.size() - begin);
-                        std::vector<segcore::UpdateString> values;
-                        values.reserve(count);
-                        for (size_t i = 0; i < count; ++i)
-                            values.push_back(selected[begin + i].second);
-                        auto batch_reader =
-                            text_reader_->CreateBatchReader(values);
-                        auto hits = match(*batch_reader);
-                        for (size_t i = 0; i < count; ++i)
-                            res[selected[begin + i].first] = hits[i];
-                    }
+                auto valid_res = null_reader_->IsNotNull();
+                AssertInfo(
+                    valid_res.size() >= static_cast<size_t>(covered),
+                    "text null index covers {} rows, snapshot requires {}",
+                    valid_res.size(),
+                    covered);
+                valid_res.resize(covered);
+                if (covered < active_count_) {
+                    TargetBitmap tail(active_count_ - covered);
+                    res.append(tail);
+                    valid_res.append(tail);
                 }
                 return {std::move(res), std::move(valid_res)};
             },

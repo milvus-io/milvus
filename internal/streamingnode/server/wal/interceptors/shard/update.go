@@ -21,12 +21,14 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func (impl *shardInterceptor) handleUpdateMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
@@ -65,6 +67,24 @@ func (impl *shardInterceptor) handleUpdateMessage(ctx context.Context, msg messa
 		}
 		if err := impl.shardManager.CheckIfPartitionExists(shards.PartitionUniqueKey{CollectionID: h.GetCollectionId(), PartitionID: body.GetPartitionId()}); err != nil {
 			return nil, status.NewUnrecoverableError("cannot validate update partition: %s", err)
+		}
+	}
+	// Enforce the text-update boundary before persistence, including writes
+	// arriving through replication rather than the public Proxy RPC.
+	if len(body.GetAssignments()) > 0 {
+		schema := impl.shardManager.GetCollectionSchemaSnapshot(h.GetCollectionId())
+		if schema == nil {
+			return nil, status.NewUnrecoverableError("cannot validate UPDATE fields: collection schema is unavailable")
+		}
+		for _, field := range schema.GetFields() {
+			if field.GetDataType() != schemapb.DataType_VarChar || !typeutil.CreateFieldSchemaHelper(field).EnableMatch() {
+				continue
+			}
+			for _, assignment := range body.GetAssignments() {
+				if assignment.GetFieldId() == field.GetFieldID() {
+					return nil, status.NewInvalidArgument("PK-update does not support enable_match VARCHAR field %s", field.GetName())
+				}
+			}
 		}
 	}
 	return appendOp(ctx, msg)

@@ -491,13 +491,6 @@ RustResult tantivy_register_tokenizer(void *ptr,
                                       const char *analyzer_params,
                                       const char *analyzer_extra_info);
 
-/// Clone the registered analyzer, including resolved external resources.
-/// The writer and its snapshot own their copy independently.
-///
-/// # Safety
-/// `ptr` must point to an IndexReaderWrapper kept alive for this call.
-RustResult tantivy_create_text_batch_writer(const void *ptr, uintptr_t memory_budget);
-
 RustResult tantivy_create_index(const char *field_name,
                                 TantivyDataType data_type,
                                 const char *path,

@@ -188,10 +188,6 @@ class TextIndexReader final : public IIndexReaderBase,
 
     // ---- ITextMatchReader ----------------------------------------
 
-    std::unique_ptr<ITextMatchReader>
-    CreateBatchReader(const std::vector<std::shared_ptr<const std::string>>&
-                          values) const override;
-
     TargetBitmap
     MatchQuery(std::string_view query,
                uint32_t min_should_match) const override;

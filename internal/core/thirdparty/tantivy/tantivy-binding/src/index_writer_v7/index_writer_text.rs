@@ -41,28 +41,6 @@ impl IndexWriterWrapperImpl {
 
         let analyzer = create_analyzer(analyzer_params, analyzer_extra_info)?;
 
-        Self::with_text_analyzer(
-            field_name,
-            path,
-            analyzer_name,
-            analyzer,
-            num_threads,
-            overall_memory_budget_in_bytes,
-            in_ram,
-            enable_background_merge,
-        )
-    }
-
-    pub(crate) fn with_text_analyzer(
-        field_name: &str,
-        path: &str,
-        analyzer_name: &str,
-        analyzer: tantivy::tokenizer::TextAnalyzer,
-        num_threads: usize,
-        overall_memory_budget_in_bytes: usize,
-        in_ram: bool,
-        enable_background_merge: bool,
-    ) -> Result<Self> {
         let (schema, field) = build_text_schema(field_name, analyzer_name);
         let index = if in_ram {
             Index::create_in_ram(schema)
