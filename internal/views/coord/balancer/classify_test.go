@@ -166,6 +166,17 @@ func TestClassify_PreparingOnly_None(t *testing.T) {
 	assert.Equal(t, actionNone, classifyShard(newPlanningContext(c), shardID))
 }
 
+func TestClassify_HeldReadyReplacedWhenLoadRequirementsChange(t *testing.T) {
+	shard := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_1v0"}
+	cfg := cfgFor(1, 1, []int64{10}, nil)
+	c := newTestCache(cfg)
+	c.PublishLoadConfig(1, cfg, 2)
+	c.PublishShard(shard, &coordview.ShardStats{PreparingVersion: ver(1, 1, 1)})
+	assert.Equal(t, actionNone, classifyShard(newPlanningContext(c), shard))
+	c.PublishShard(shard, &coordview.ShardStats{PreparingVersion: ver(1, 1, 1), HeldReadyLoadInfoVersion: 1})
+	assert.Equal(t, actionMust, classifyShard(newPlanningContext(c), shard))
+}
+
 func TestClassify_DataVersionAdvanced_Must(t *testing.T) {
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_1v0"}
 	cfg := cfgFor(1, 1, []int64{10}, nil)

@@ -88,6 +88,11 @@ func classifyShard(snap balanceInput, shardID qviews.ShardID) actionKind {
 	// Supersede an in-flight view after DataView certifies a newer schema. This
 	// check must precede the normal "wait for Preparing" rule.
 	latestSchema := snap.SchemaVersion(desired.CollectionID)
+	// A held Ready view cannot reach Up to trigger the usual follow-up
+	// reconcile. Replace it if the collection's requirements changed meanwhile.
+	if hasPreparing && stats.HeldReadyLoadInfoVersion != 0 && stats.HeldReadyLoadInfoVersion != snap.ConfigVersion(desired.CollectionID) {
+		return actionMust
+	}
 	if hasPreparing && stats.PreparingSchemaVersion < latestSchema {
 		return actionMust
 	}

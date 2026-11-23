@@ -21,6 +21,7 @@ type DataViewRefProvider = qviews.DataViewRefProvider
 // LoadInfoRefProvider protects immutable requirements until final durable View
 // removal. Acquisition may perform synchronization and runs outside manager locks.
 type LoadInfoRefProvider interface {
+	HoldReplicaUp(collectionID, replicaID int64, version uint64) bool
 	AcquireLoadInfo(context.Context, int64, uint64) (func(), error)
 }
 
@@ -267,6 +268,10 @@ func (m *ShardViewManager) statsLocked() *ShardStats {
 		case qviews.QueryViewStatePreparing, qviews.QueryViewStateReady:
 			if stats.PreparingVersion == nil || version.GT(*stats.PreparingVersion) {
 				stats.PreparingVersion = &version
+				stats.HeldReadyLoadInfoVersion = 0
+				if sm.State() == qviews.QueryViewStateReady && sm.upHeld {
+					stats.HeldReadyLoadInfoVersion = sm.View().GetMeta().GetLoadInfoVersion()
+				}
 				stats.PreparingSchemaVersion = sm.View().GetMeta().GetSchemaVersion()
 				stats.PreparingNodes = viewNodeIDs(sm.View())
 				stats.PreparingPlacement = viewPlacement(sm)
@@ -628,6 +633,16 @@ func (m *ShardViewManager) processStateMachine(sm *CoordQueryViewStateMachine) {
 	}
 
 	// 2. ConsumeFlush sync effects → collect into pending batch.
+	// A Ready view has already passed the normal SN and QN checks. Hold its
+	// Up command until the cluster watcher releases its resource group.
+	// Keep the current Up view serving during a move that reuses a replica ID.
+	if sm.State() == qviews.QueryViewStateReady && len(flush.Sync) > 0 && m.loadInfoRefs != nil {
+		meta := sm.View().GetMeta()
+		sm.upHeld = m.loadInfoRefs.HoldReplicaUp(meta.GetCollectionId(), meta.GetReplicaId(), meta.GetLoadInfoVersion())
+		if sm.upHeld {
+			flush.Sync = nil
+		}
+	}
 	if len(flush.Sync) > 0 {
 		m.pendingSyncs = append(m.pendingSyncs, syncEntry{sm: sm, views: flush.Sync})
 	}
@@ -814,6 +829,21 @@ func (m *ShardViewManager) consumeDirtyEventLocked() dirtyViewEvent {
 	m.pendingSyncs = nil
 	m.pendingRemovals = nil
 	return event
+}
+
+// ResumeReady sends the held Up command after admission. A preemption or
+// release while the watcher was checking readiness makes this a no-op.
+func (m *ShardViewManager) ResumeReady() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sm := m.preparingView
+	if sm == nil || !sm.upHeld || m.closed {
+		return
+	}
+	sm.pending.Sync = sm.syncViewsForState(qviews.QueryViewStateUp)
+	m.processStateMachine(sm)
+	m.publishStatsLocked()
+	m.submitDirtyEvent(m.consumeDirtyEventLocked())
 }
 
 // makeOnSyncResponse creates a callback that processes node responses for a view sync.

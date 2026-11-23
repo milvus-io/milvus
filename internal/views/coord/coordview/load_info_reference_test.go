@@ -15,6 +15,8 @@ import (
 
 type stubLoadInfoRefs struct{}
 
+func (*stubLoadInfoRefs) HoldReplicaUp(int64, int64, uint64) bool { return false }
+
 func (*stubLoadInfoRefs) AcquireLoadInfo(context.Context, int64, uint64) (func(), error) {
 	panic("patch with mockey")
 }

@@ -25,6 +25,7 @@ import (
 //
 // Thread-safety: NOT thread-safe. The caller (Manager) must serialize access.
 type CoordQueryViewStateMachine struct {
+	upHeld      bool         // Ready, with the first Up command held for group admission.
 	preparation *Preparation // Exact-version completion, protected by the manager lock.
 	state       qviews.QueryViewState
 	view        *viewpb.QueryViewOfShard
@@ -260,6 +261,10 @@ func (sm *CoordQueryViewStateMachine) OnQueryNodeLost(node qviews.QueryNode) {
 	switch sm.state {
 	case qviews.QueryViewStatePreparing:
 		sm.transitionToUnrecoverable()
+	case qviews.QueryViewStateReady:
+		if sm.upHeld {
+			sm.transitionToUnrecoverable()
+		}
 	case qviews.QueryViewStateDropping:
 		sm.qnStates[node.ID] = qviews.QueryViewStateDropped
 		if sm.allNodesDropped() {

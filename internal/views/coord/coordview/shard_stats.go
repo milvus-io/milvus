@@ -37,6 +37,8 @@ type ShardStats struct {
 	// UpLoadInfoVersion is the load-config snapshot version of the current Up view.
 	// Zero when no view is currently Up.
 	UpLoadInfoVersion uint64
+	// Nonzero while the prepared View is waiting for cluster RG admission.
+	HeldReadyLoadInfoVersion uint64
 
 	// Schema revisions of the serving and in-flight views.
 	UpSchemaVersion        int32
