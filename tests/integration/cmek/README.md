@@ -36,7 +36,7 @@ Segment Storage Version, index engine version and index artifact format are sepa
 
 Key propagation tests cover two behaviors: each business path receives the key/context needed for its actual reads and writes, and an encrypted target cannot write when its writer key is unavailable.
 
-Each case uses an isolated database/EZ. Background-task scenarios replace the DataNode after preparing their inputs, so encrypted requests must register their keys in a fresh process. Fixture observations check both Go key receipt and C++ context registration there. Task IDs and segment/build metadata identify the resulting objects; object inspection and release/load query or search results verify those same outputs. Import replaces the DataNode between independently dispatched stages as well.
+Each case uses an isolated database/EZ. Background-task scenarios replace the DataNode after preparing their inputs, so encrypted requests must register their keys in a fresh process. Fixture observations check both Go key receipt and C++ context registration there. Task IDs and segment/build metadata identify the resulting objects; object inspection and release/load query or search results verify those same outputs. Import attempts replacement between independently dispatched stages. If the next stage has already started, it keeps the worker and reports the missed cold-node window instead of failing. A dispatch racing shutdown may complete on the old worker or retry on the replacement. Positive task NodeIDs select the registration checks; when cleanup has cleared every NodeID, the test requires Go/C++ registration on an eligible process and reports cold coverage as unconfirmed. This fallback does not prove fresh key delivery for that stage. Missing-key scenarios retain strict no-dispatch, no-output and cold-worker recovery checks.
 
 Failure scenarios inject an empty key at the Go plugin lookup selected by role, EZ, collection and adapter. They compare the storage object set and content hashes while blocked, including unpublished objects. Background requests must be rejected before DataNode dispatch; ordinary flush rejects the key in its StreamingNode writer. Recovery follows each path's existing task policy, as shown below.
 
@@ -55,6 +55,8 @@ The entry-point tables generate **49 cases**, including successful paths and fau
 | `TestKeyPropagationAnalyzeAndClustering` | 2 | V3 Analyze reads encrypted input; clustering uses another cold DataNode. | The Analyze-fault case recovers through clustering. The clustering-fault case reports the missing key, leaves storage unchanged and produces no output segments. |
 
 Import protocol version is independent of Segment Storage Version: both protocols use **Storage V2 backup objects and target segments** here. Import V3 additionally checks every Parquet fragment against the exact completed reshard manifest. Its backup PreImport is size-only; reshard establishes the source row count.
+
+`TestKeyPropagationImportEarlyDispatch` adds two timing regressions (V2/V3) outside the 49-case business matrix. They deliberately let the next stage complete and clear its NodeID before deciding whether to replace the worker, then retain the registration, encrypted-object and query checks on the warmed process.
 
 ### Code map
 
