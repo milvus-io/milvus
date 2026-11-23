@@ -125,7 +125,8 @@ func (sm *Manager) broadcastRestoreCollection(ctx context.Context, snapshot *sna
 		SourceCollectionId: sourceID, PinId: pinID, External: external, SnapshotS3Location: location, ExternalSpec: spec,
 	}
 	if external {
-		header.SnapshotFingerprint, err = snapshotstorage.SnapshotFingerprint(snapshot)
+		// Admission reads metadata only; Avro is loaded by the restore callback.
+		header.SnapshotFingerprint, err = snapshotstorage.SnapshotMetadataFingerprint(snapshot)
 		if err != nil {
 			return 0, err
 		}

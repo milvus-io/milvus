@@ -45,7 +45,8 @@ func testSummaryCopyPublishesInventory(t *testing.T, reportedMemSize *uint64, ex
 	t.Helper()
 	fixture := &CopySegmentTaskSuite{}
 	fixture.SetT(t)
-	task, copies, mt, im, resp := fixture.newCopiedManifestReadBackFixture()
+	task, copies, mt, resp := fixture.newCopiedManifestResultFixture()
+	im := testCopyIndexMeta(mt)
 	require.NoError(t, im.UseSegmentSummaries(mt.MetaStore))
 	result := resp.GetSegmentResults()[0]
 	result.ManifestIndexRewritten = proto.Bool(true)
@@ -95,10 +96,11 @@ func testSummaryCopyPublishesInventory(t *testing.T, reportedMemSize *uint64, ex
 func TestCopyWithoutIndexesAcceptsNilIndexMeta(t *testing.T) {
 	fixture := &CopySegmentTaskSuite{}
 	fixture.SetT(t)
-	task, copies, mt, _, resp := fixture.newCopiedManifestReadBackFixture()
+	task, copies, mt, resp := fixture.newCopiedManifestResultFixture()
 	result := resp.GetSegmentResults()[0]
 	result.ManifestIndexRewritten = proto.Bool(true)
 	result.IndexInfos = nil
+	result.ManifestIndexBuildIds = nil
 	require.NoError(t, SyncCopySegmentTask(t.Context(), task, resp, copies, mt, nil))
 	segment := mt.GetSegment(t.Context(), result.GetSegmentId())
 	require.Equal(t, commonpb.SegmentState_Flushed, segment.GetState())

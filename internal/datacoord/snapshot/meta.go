@@ -19,11 +19,15 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// Snapshot manifest GETs share a DataCoord-wide budget across named and external
+// readers. Keep this independent of DataNode copy concurrency: these operations
+// prepare metadata before tasks are dispatched, and must not fan out per job.
+var snapshotManifestReadPermits = make(chan struct{}, 16)
 
 // Snapshot Metadata Management
 //
@@ -262,7 +266,7 @@ type SnapshotMeta struct {
 	pinID2SnapshotID *typeutil.ConcurrentMap[int64, UniqueID]
 
 	// pinMapsInit guards lazy initialization of pinLocks/pinID2SnapshotID so
-	// tests that construct snapshotMeta literally (without newSnapshotMeta)
+	// tests that construct snapshotMeta literally (without NewSnapshotMeta)
 	// can still exercise Pin/Unpin without panicking on nil maps.
 	pinMapsInit sync.Once
 
@@ -276,7 +280,7 @@ type SnapshotMeta struct {
 	writer       *snapshotstorage.SnapshotWriter // Writes complete snapshot data to S3
 }
 
-// newSnapshotMeta creates a new snapshot metadata manager and initializes it from catalog.
+// NewSnapshotMeta creates a new snapshot metadata manager and initializes it from catalog.
 //
 // This is called during DataCoord startup to restore snapshot metadata state.
 //
@@ -292,7 +296,7 @@ type SnapshotMeta struct {
 //   - chunkManager: S3/storage manager for reading/writing snapshot data
 //
 // Returns:
-//   - *snapshotMeta: Initialized snapshot manager with populated cache
+//   - *SnapshotMeta: Initialized snapshot manager with populated cache
 //   - error: Error if catalog reload or S3 verification fails
 func NewSnapshotMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager) (*SnapshotMeta, error) {
 	loaderCtx, loaderCancel := context.WithCancel(context.Background())
@@ -313,7 +317,7 @@ func NewSnapshotMeta(ctx context.Context, catalog metastore.DataCoordCatalog, ch
 		loaderCtx:                    loaderCtx,
 		LoaderCancel:                 loaderCancel,
 		chunkManager:                 chunkManager,
-		reader:                       snapshotstorage.NewSnapshotReader(chunkManager),
+		reader:                       snapshotstorage.NewSnapshotReader(chunkManager, snapshotstorage.WithManifestReadPermits(snapshotManifestReadPermits)),
 		writer:                       snapshotstorage.NewSnapshotWriter(chunkManager),
 	}
 
@@ -410,7 +414,7 @@ func (sm *SnapshotMeta) reload(ctx context.Context) error {
 
 // refIndexLoaderLoop loads unloaded RefIndexes in the background.
 //
-// newSnapshotMeta imprints a coarse collection-level block for every protected
+// NewSnapshotMeta imprints a coarse collection-level block for every protected
 // snapshot before returning (fail-closed, no I/O). This loop is responsible for
 // converging from that coarse state to precise segment-level protection:
 //   - first tick: runs immediately, loads RefIndexes from S3, narrows the blocks
@@ -987,7 +991,7 @@ func (sm *SnapshotMeta) ReadExternalSnapshotDataWithChunkManager(
 	if err := snapshotstorage.ValidateSnapshotObjectPathForBucket(cm, "snapshot_s3_location", snapshotS3Location, ""); err != nil {
 		return nil, err
 	}
-	snapshotData, err := snapshotstorage.NewSnapshotReader(cm).ReadSnapshot(ctx, snapshotS3Location, includeSegments)
+	snapshotData, err := snapshotstorage.NewSnapshotReader(cm, snapshotstorage.WithManifestReadPermits(snapshotManifestReadPermits)).ReadSnapshot(ctx, snapshotS3Location, includeSegments)
 	if err != nil {
 		logger.Error(ctx, "failed to read external snapshot data from S3", mlog.Err(err))
 		return nil, err
@@ -1004,7 +1008,6 @@ func (sm *SnapshotMeta) ReadAndValidateExternalSnapshotDataWithChunkManager(
 	cm storage.ChunkManager,
 	snapshotS3Location string,
 	includeSegments bool,
-	storageConfig *indexpb.StorageConfig,
 ) (*snapshotstorage.SnapshotData, error) {
 	snapshotData, err := sm.ReadExternalSnapshotDataWithChunkManager(ctx, cm, snapshotS3Location, includeSegments)
 	if err != nil {
@@ -1013,10 +1016,8 @@ func (sm *SnapshotMeta) ReadAndValidateExternalSnapshotDataWithChunkManager(
 	if includeSegments {
 		if err := snapshotstorage.ValidateExternalSnapshotDataFiles(
 			ctx,
-			cm,
 			snapshotS3Location,
 			snapshotData,
-			storageConfig,
 		); err != nil {
 			return nil, merr.Wrap(err, "invalid external snapshot data files")
 		}
@@ -1520,7 +1521,7 @@ func cloneSnapshotInfo(s *datapb.SnapshotInfo) *datapb.SnapshotInfo {
 }
 
 // ensurePinMaps lazily initializes pinLocks/pinID2SnapshotID for tests that
-// construct snapshotMeta via struct-literal. newSnapshotMeta always pre-seeds
+// construct snapshotMeta via struct-literal. NewSnapshotMeta always pre-seeds
 // them; in that case this is a no-op.
 func (sm *SnapshotMeta) ensurePinMaps() {
 	sm.pinMapsInit.Do(func() {
