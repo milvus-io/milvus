@@ -149,7 +149,7 @@ func TestSearchTaskCheckNqMismatch(t *testing.T) {
 	assert.Equal(t, int64(4), nq)
 }
 
-func TestNormalizeMultiSearchNQ(t *testing.T) {
+func TestNormalizeExecuteDQLNQ(t *testing.T) {
 	limit := &paramtable.Get().QuotaConfig.NQLimit
 	previous := limit.SwapTempValue("2")
 	t.Cleanup(func() { limit.SwapTempValue(previous) })
@@ -188,7 +188,7 @@ func TestNormalizeMultiSearchNQ(t *testing.T) {
 		{name: "negative nq", request: &milvuspb.SearchRequest{Nq: -1, SearchInput: twoRows}, wantError: "nq must be nonnegative"},
 		{name: "hybrid", request: &milvuspb.SearchRequest{
 			SearchInput: twoRows, SubReqs: []*milvuspb.SubSearchRequest{{PlaceholderGroup: twoRows.PlaceholderGroup}},
-		}, wantError: "MultiSearch supports only ordinary Search requests"},
+		}, wantError: "ExecuteDQL supports only ordinary Search requests"},
 		{name: "empty input", request: &milvuspb.SearchRequest{}, wantError: "should be in range [1, 2], but got 0"},
 		{name: "empty group with declared nq", request: &milvuspb.SearchRequest{
 			Nq: 1, SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{},
@@ -224,7 +224,7 @@ func TestNormalizeMultiSearchNQ(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			declared := tc.request.GetNq()
-			err := NormalizeMultiSearchNQ(tc.request)
+			err := NormalizeExecuteDQLNQ(tc.request)
 			if tc.wantError == "" {
 				require.NoError(t, err)
 				require.Equal(t, tc.wantNq, tc.request.GetNq())

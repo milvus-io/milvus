@@ -27,6 +27,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -56,25 +57,25 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-type multiSearchTestProxy struct {
+type executeDQLTestProxy struct {
 	types.ProxyComponent
 	cache       proxy.Cache
 	limiter     types.Limiter
-	search      proxy.MultiSearchExecute
-	run         func(context.Context, proxy.MultiSearchOptions, []proxy.MultiSearchPrepare, proxy.MultiSearchExecute) ([]*milvuspb.SearchResults, error)
+	search      proxy.ExecuteDQLExecute
+	run         func(context.Context, proxy.ExecuteDQLOptions, []proxy.ExecuteDQLPrepare, proxy.ExecuteDQLExecute) ([]*milvuspb.DQLResult, error)
 	batchCalls  atomic.Int32
 	searchCalls atomic.Int32
 }
 
-func (p *multiSearchTestProxy) GetMetaCache() proxy.Cache {
+func (p *executeDQLTestProxy) GetMetaCache() proxy.Cache {
 	return p.cache
 }
 
-func (p *multiSearchTestProxy) GetRateLimiter() (types.Limiter, error) {
+func (p *executeDQLTestProxy) GetRateLimiter() (types.Limiter, error) {
 	return p.limiter, nil
 }
 
-func (p *multiSearchTestProxy) Search(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+func (p *executeDQLTestProxy) Search(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 	p.searchCalls.Add(1)
 	if p.search != nil {
 		return p.search(ctx, req)
@@ -82,7 +83,7 @@ func (p *multiSearchTestProxy) Search(ctx context.Context, req *milvuspb.SearchR
 	return &milvuspb.SearchResults{Status: merr.Success()}, nil
 }
 
-func (p *multiSearchTestProxy) RunMultiSearch(ctx context.Context, options proxy.MultiSearchOptions, items []proxy.MultiSearchPrepare, execute proxy.MultiSearchExecute) ([]*milvuspb.SearchResults, error) {
+func (p *executeDQLTestProxy) RunExecuteDQL(ctx context.Context, options proxy.ExecuteDQLOptions, items []proxy.ExecuteDQLPrepare, execute proxy.ExecuteDQLExecute) ([]*milvuspb.DQLResult, error) {
 	p.batchCalls.Add(1)
 	if p.run == nil {
 		return nil, merr.WrapErrServiceInternalMsg("unexpected batch admission")
@@ -90,16 +91,16 @@ func (p *multiSearchTestProxy) RunMultiSearch(ctx context.Context, options proxy
 	return p.run(ctx, options, items, execute)
 }
 
-type multiSearchTestLimiter struct {
+type executeDQLTestLimiter struct {
 	types.Limiter
 	check func(int64, map[int64][]int64, internalpb.RateType, int) error
 }
 
-func (l multiSearchTestLimiter) Check(dbID int64, collections map[int64][]int64, kind internalpb.RateType, nq int) error {
+func (l executeDQLTestLimiter) Check(dbID int64, collections map[int64][]int64, kind internalpb.RateType, nq int) error {
 	return l.check(dbID, collections, kind, nq)
 }
 
-type multiSearchTestHook struct {
+type executeDQLTestHook struct {
 	hookutil.DefaultHook
 	apiKey      string
 	username    string
@@ -108,7 +109,7 @@ type multiSearchTestHook struct {
 	before      func(any)
 }
 
-func (h *multiSearchTestHook) VerifyAPIKey(key string) (string, error) {
+func (h *executeDQLTestHook) VerifyAPIKey(key string) (string, error) {
 	h.authCalls <- time.Now()
 	if key != h.apiKey {
 		return "", merr.ErrNeedAuthenticate
@@ -116,7 +117,7 @@ func (h *multiSearchTestHook) VerifyAPIKey(key string) (string, error) {
 	return h.username, nil
 }
 
-func (h *multiSearchTestHook) Before(ctx context.Context, req any, method string) (context.Context, error) {
+func (h *executeDQLTestHook) Before(ctx context.Context, req any, method string) (context.Context, error) {
 	h.searchCalls <- method
 	if h.before != nil {
 		h.before(req)
@@ -124,7 +125,7 @@ func (h *multiSearchTestHook) Before(ctx context.Context, req any, method string
 	return ctx, nil
 }
 
-func newMultiSearchTestClient(t *testing.T, server *grpc.Server) milvuspb.MilvusServiceClient {
+func newExecuteDQLTestClient(t *testing.T, server *grpc.Server) milvuspb.MilvusServiceClient {
 	t.Helper()
 	accesslog.InitAccessLogger(paramtable.Get())
 	listener := bufconn.Listen(1024 * 1024)
@@ -140,7 +141,7 @@ func newMultiSearchTestClient(t *testing.T, server *grpc.Server) milvuspb.Milvus
 	return milvuspb.NewMilvusServiceClient(conn)
 }
 
-func startMultiSearchTestProxy(t *testing.T, component types.ProxyComponent) milvuspb.MilvusServiceClient {
+func startExecuteDQLTestProxy(t *testing.T, component types.ProxyComponent) milvuspb.MilvusServiceClient {
 	t.Helper()
 	server := &Server{
 		ctx:             t.Context(),
@@ -151,34 +152,76 @@ func startMultiSearchTestProxy(t *testing.T, component types.ProxyComponent) mil
 	server.wg.Add(1)
 	server.startExternalGrpc(started)
 	require.NoError(t, <-started)
-	return newMultiSearchTestClient(t, server.grpcExternalServer)
+	return newExecuteDQLTestClient(t, server.grpcExternalServer)
 }
 
-func TestMultiSearchGRPCRejectsInvalidBatch(t *testing.T) {
+func executeDQLSearchRequest(search *milvuspb.SearchRequest) *milvuspb.DQLRequest {
+	return &milvuspb.DQLRequest{Request: &milvuspb.DQLRequest_Search{Search: search}}
+}
+
+func executeDQLSearchRequests(searches ...*milvuspb.SearchRequest) []*milvuspb.DQLRequest {
+	requests := make([]*milvuspb.DQLRequest, len(searches))
+	for i, search := range searches {
+		requests[i] = executeDQLSearchRequest(search)
+	}
+	return requests
+}
+
+func TestExecuteDQLGRPCRejectsInvalidBatch(t *testing.T) {
 	proxy.Params.Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "false")
 	t.Cleanup(func() { proxy.Params.Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key) })
-	component := &multiSearchTestProxy{cache: proxy.InitEmptyMetaCacheForTest()}
-	client := startMultiSearchTestProxy(t, component)
+	component := &executeDQLTestProxy{cache: proxy.InitEmptyMetaCacheForTest()}
+	client := startExecuteDQLTestProxy(t, component)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	t.Cleanup(cancel)
 
-	response, err := client.MultiSearch(ctx, &milvuspb.MultiSearchRequest{})
+	response, err := client.ExecuteDQL(ctx, &milvuspb.ExecuteDQLRequest{})
 	require.NoError(t, err)
 	require.ErrorIs(t, merr.Error(response.GetStatus()), merr.ErrParameterMissing)
 	require.Empty(t, response.GetResults())
 
-	response, err = client.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
-		Requests:  []*milvuspb.SearchRequest{{CollectionName: "papers"}},
+	response, err = client.ExecuteDQL(ctx, &milvuspb.ExecuteDQLRequest{
+		Requests:  executeDQLSearchRequests(&milvuspb.SearchRequest{CollectionName: "papers"}),
 		TimeoutMs: proto.Int64(-1),
 	})
 	require.NoError(t, err)
 	require.ErrorIs(t, merr.Error(response.GetStatus()), merr.ErrParameterInvalid)
 	require.Empty(t, response.GetResults())
+	future := &milvuspb.DQLRequest{}
+	require.NoError(t, proto.Unmarshal([]byte{0x12, 0x00}, future)) // An unknown length-delimited operation in field 2.
+	valid := executeDQLSearchRequest(&milvuspb.SearchRequest{CollectionName: "papers"})
+	for _, tc := range []struct {
+		name string
+		item *milvuspb.DQLRequest
+	}{
+		{"nil", nil},
+		{"unset", &milvuspb.DQLRequest{}},
+		{"unknown", future},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &milvuspb.ExecuteDQLRequest{Requests: []*milvuspb.DQLRequest{valid, tc.item}}
+			// Exercise both a nil pointer at the server boundary and the wire
+			// form, where gRPC decodes nil repeated messages as empty messages.
+			server := &Server{proxy: component, executeDQLExecute: component.Search}
+			for _, execute := range []func(context.Context, *milvuspb.ExecuteDQLRequest) (*milvuspb.ExecuteDQLResponse, error){
+				server.ExecuteDQL,
+				func(ctx context.Context, req *milvuspb.ExecuteDQLRequest) (*milvuspb.ExecuteDQLResponse, error) {
+					return client.ExecuteDQL(ctx, req)
+				},
+			} {
+				response, err := execute(ctx, req)
+				require.NoError(t, err)
+				require.ErrorIs(t, merr.Error(response.GetStatus()), merr.ErrParameterInvalid)
+				require.Contains(t, response.GetStatus().GetReason(), "requests[1]")
+				require.Empty(t, response.GetResults())
+			}
+		})
+	}
 	require.Zero(t, component.batchCalls.Load())
 	require.Zero(t, component.searchCalls.Load())
 }
 
-func TestMultiSearchGRPCRejectsBatchLimits(t *testing.T) {
+func TestExecuteDQLGRPCRejectsBatchLimits(t *testing.T) {
 	params := paramtable.Get()
 	for _, key := range []string{params.CommonCfg.AuthorizationEnabled.Key, params.QuotaConfig.QuotaAndLimitsEnabled.Key} {
 		require.NoError(t, params.Save(key, "false"))
@@ -187,30 +230,30 @@ func TestMultiSearchGRPCRejectsBatchLimits(t *testing.T) {
 	cache := proxy.InitEmptyMetaCacheForTest()
 	cache.SeedDBInfoForTest(util.DefaultDBName, &metacache.DatabaseInfo{DBID: 1})
 	cache.SeedCollectionForTest(util.DefaultDBName, "papers", 2)
-	runner := proxy.NewMultiSearchTestProxy(t, 1, 1)
+	runner := proxy.NewExecuteDQLTestProxy(t, 1, 1)
 	result := &milvuspb.SearchResults{Status: merr.Success(), CollectionName: strings.Repeat("x", 128)}
-	component := &multiSearchTestProxy{
+	component := &executeDQLTestProxy{
 		cache:   cache,
-		run:     runner.RunMultiSearch,
-		limiter: multiSearchTestLimiter{check: func(int64, map[int64][]int64, internalpb.RateType, int) error { return nil }},
+		run:     runner.RunExecuteDQL,
+		limiter: executeDQLTestLimiter{check: func(int64, map[int64][]int64, internalpb.RateType, int) error { return nil }},
 		search: func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 			return result, nil
 		},
 	}
-	client := startMultiSearchTestProxy(t, component)
+	client := startExecuteDQLTestProxy(t, component)
 	request := &milvuspb.SearchRequest{
 		CollectionName: "papers",
 		SearchInput: &milvuspb.SearchRequest_Ids{
 			Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
 		},
 	}
-	requests := make([]*milvuspb.SearchRequest, 257)
+	requests := make([]*milvuspb.DQLRequest, 257)
 	for i := range requests {
-		requests[i] = request
+		requests[i] = executeDQLSearchRequest(request)
 	}
-	checkLimit := func(requests []*milvuspb.SearchRequest, setting string) {
+	checkLimit := func(requests []*milvuspb.DQLRequest, setting string) {
 		t.Helper()
-		response, err := client.MultiSearch(t.Context(), &milvuspb.MultiSearchRequest{Requests: requests})
+		response, err := client.ExecuteDQL(t.Context(), &milvuspb.ExecuteDQLRequest{Requests: requests})
 		require.NoError(t, err)
 		require.EqualValues(t, 1102, response.GetStatus().GetCode())
 		require.False(t, response.GetStatus().GetRetriable())
@@ -222,25 +265,27 @@ func TestMultiSearchGRPCRejectsBatchLimits(t *testing.T) {
 	require.Zero(t, component.batchCalls.Load())
 	require.Zero(t, component.searchCalls.Load())
 
-	size := proto.Size(&milvuspb.MultiSearchResponse{Status: merr.Success(), Results: []*milvuspb.SearchResults{result}})
-	key := params.ProxyCfg.MultiSearchMaxResultBytes.Key
+	size := proto.Size(&milvuspb.ExecuteDQLResponse{Status: merr.Success(), Results: []*milvuspb.DQLResult{
+		{Status: merr.Success(), Result: &milvuspb.DQLResult_Search{Search: result}},
+	}})
+	key := params.ProxyCfg.ExecuteDQLMaxResultBytes.Key
 	require.NoError(t, params.Save(key, strconv.Itoa(size-1)))
 	t.Cleanup(func() { require.NoError(t, params.Reset(key)) })
 	checkLimit(requests[:1], "maxResultBytes")
 	require.EqualValues(t, 1, component.searchCalls.Load())
 }
 
-func TestMultiSearchGRPCRejectsInvalidIdentity(t *testing.T) {
+func TestExecuteDQLGRPCRejectsInvalidIdentity(t *testing.T) {
 	proxy.Params.Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
 	t.Cleanup(func() { proxy.Params.Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key) })
-	component := &multiSearchTestProxy{cache: proxy.InitEmptyMetaCacheForTest()}
-	client := startMultiSearchTestProxy(t, component)
+	component := &executeDQLTestProxy{cache: proxy.InitEmptyMetaCacheForTest()}
+	client := startExecuteDQLTestProxy(t, component)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	t.Cleanup(cancel)
 	ctx = metadata.NewOutgoingContext(ctx, metadata.Pairs(util.HeaderAuthorize, "!"))
 
-	response, err := client.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
-		Requests: []*milvuspb.SearchRequest{{CollectionName: "papers"}},
+	response, err := client.ExecuteDQL(ctx, &milvuspb.ExecuteDQLRequest{
+		Requests: executeDQLSearchRequests(&milvuspb.SearchRequest{CollectionName: "papers"}),
 	})
 	require.Equal(t, codes.Unauthenticated, status.Code(err))
 	require.Nil(t, response)
@@ -248,7 +293,7 @@ func TestMultiSearchGRPCRejectsInvalidIdentity(t *testing.T) {
 	require.Zero(t, component.searchCalls.Load())
 }
 
-func TestMultiSearchGRPCSearchEntry(t *testing.T) {
+func TestExecuteDQLGRPCSearchEntry(t *testing.T) {
 	require.NoError(t, proxy.Params.Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true"))
 	t.Cleanup(func() { require.NoError(t, proxy.Params.Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)) })
 	regexpKey := proxy.Params.ProxyCfg.PartitionNameRegexp.Key
@@ -257,8 +302,8 @@ func TestMultiSearchGRPCSearchEntry(t *testing.T) {
 	quotaKey := proxy.Params.QuotaConfig.QuotaAndLimitsEnabled.Key
 	require.NoError(t, proxy.Params.Save(quotaKey, "true"))
 	t.Cleanup(func() { require.NoError(t, proxy.Params.Reset(quotaKey)) })
-	const username = "grpc_multisearch_reader"
-	const role = "grpc_multisearch_role"
+	const username = "grpc_execute_dql_reader"
+	const role = "grpc_execute_dql_role"
 	const collection = "papers"
 	apiKey := rand.Text()
 	cache := proxy.InitEmptyMetaCacheForTest()
@@ -282,7 +327,7 @@ func TestMultiSearchGRPCSearchEntry(t *testing.T) {
 		}
 	}
 	previousHook := hookutil.GetHook()
-	hook := &multiSearchTestHook{apiKey: apiKey, username: username, authCalls: make(chan time.Time, 8), searchCalls: make(chan string, 8)}
+	hook := &executeDQLTestHook{apiKey: apiKey, username: username, authCalls: make(chan time.Time, 8), searchCalls: make(chan string, 8)}
 	hookutil.SetTestHook(hook)
 	t.Cleanup(func() { hookutil.SetTestHook(previousHook) })
 
@@ -293,10 +338,10 @@ func TestMultiSearchGRPCSearchEntry(t *testing.T) {
 	}
 	charges := make(chan charge, 4)
 	searchAccess := make(chan any, 4)
-	batchOptions := make(chan proxy.MultiSearchOptions, 1)
-	component := &multiSearchTestProxy{
+	batchOptions := make(chan proxy.ExecuteDQLOptions, 1)
+	component := &executeDQLTestProxy{
 		cache: cache,
-		limiter: multiSearchTestLimiter{check: func(db int64, collections map[int64][]int64, kind internalpb.RateType, nq int) error {
+		limiter: executeDQLTestLimiter{check: func(db int64, collections map[int64][]int64, kind internalpb.RateType, nq int) error {
 			assert.Equal(t, internalpb.RateType_DQLSearch, kind)
 			charges <- charge{db, collections, nq}
 			return nil
@@ -312,14 +357,14 @@ func TestMultiSearchGRPCSearchEntry(t *testing.T) {
 				Results: &schemapb.SearchResultData{NumQueries: req.GetNq(), Topks: make([]int64, req.GetNq())},
 			}, nil
 		},
-		run: func(ctx context.Context, options proxy.MultiSearchOptions, items []proxy.MultiSearchPrepare, execute proxy.MultiSearchExecute) ([]*milvuspb.SearchResults, error) {
+		run: func(ctx context.Context, options proxy.ExecuteDQLOptions, items []proxy.ExecuteDQLPrepare, execute proxy.ExecuteDQLExecute) ([]*milvuspb.DQLResult, error) {
 			batchOptions <- options
-			results := make([]*milvuspb.SearchResults, len(items))
+			results := make([]*milvuspb.DQLResult, len(items))
 			for i, prepare := range items {
 				itemCtx := metrics.WithIndependentRPCStats(ctx)
 				request, err := prepare(itemCtx)
 				if err != nil {
-					results[i] = &milvuspb.SearchResults{Status: merr.Status(err)}
+					results[i] = &milvuspb.DQLResult{Status: merr.Status(err)}
 					continue
 				}
 				result, err := execute(itemCtx, request)
@@ -327,15 +372,19 @@ func TestMultiSearchGRPCSearchEntry(t *testing.T) {
 					if request.GetDbName() != "denied_db" || status.Code(err) != codes.PermissionDenied {
 						return nil, err
 					}
-					result = &milvuspb.SearchResults{Status: merr.Status(merr.ErrPrivilegeNotPermitted)}
+					results[i] = &milvuspb.DQLResult{Status: merr.Status(merr.ErrPrivilegeNotPermitted)}
+					continue
 				}
-				results[i] = result
+				results[i] = &milvuspb.DQLResult{Status: result.GetStatus()}
+				if merr.Ok(result.GetStatus()) {
+					results[i].Result = &milvuspb.DQLResult_Search{Search: result}
+				}
 			}
 			assert.Equal(t, []string{"header_db"}, metadata.ValueFromIncomingContext(ctx, util.HeaderDBName))
 			return results, nil
 		},
 	}
-	client := startMultiSearchTestProxy(t, component)
+	client := startExecuteDQLTestProxy(t, component)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	t.Cleanup(cancel)
 	ctx = metadata.NewOutgoingContext(ctx, metadata.Pairs(util.HeaderAuthorize, crypto.Base64Encode(apiKey), util.HeaderDBName, "header_db"))
@@ -345,11 +394,15 @@ func TestMultiSearchGRPCSearchEntry(t *testing.T) {
 	require.NoError(t, err)
 	vectorInput := &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: placeholder}
 	const budget = 500 * time.Millisecond
+	batchMetric := metrics.ProxyFunctionCall.WithLabelValues(
+		paramtable.GetStringNodeID(), "ExecuteDQL", metrics.SuccessLabel, metrics.CauseNA, "", "", "",
+	)
+	beforeBatchMetric := testutil.ToFloat64(batchMetric)
 	beforeCall := time.Now()
-	response, err := client.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
+	response, err := client.ExecuteDQL(ctx, &milvuspb.ExecuteDQLRequest{
 		MaxConcurrency: 2,
 		TimeoutMs:      proto.Int64(budget.Milliseconds()),
-		Requests: []*milvuspb.SearchRequest{
+		Requests: executeDQLSearchRequests([]*milvuspb.SearchRequest{
 			{CollectionName: collection, PartitionNames: []string{"part_.*"}, SearchInput: vectorInput},
 			{DbName: "explicit_db", CollectionName: collection, PartitionNames: []string{"part_.*"}, SearchInput: &milvuspb.SearchRequest_Ids{
 				Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}}}},
@@ -364,23 +417,28 @@ func TestMultiSearchGRPCSearchEntry(t *testing.T) {
 			{CollectionName: collection, Nq: 2, SearchInput: vectorInput},
 			{},
 			nil,
-		},
+		}...),
 	})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(response.GetStatus()))
 	require.Len(t, response.GetResults(), 12)
+	require.Equal(t, beforeBatchMetric+1, testutil.ToFloat64(batchMetric))
 	for i, nq := range map[int]int64{0: 2, 1: 3, 9: 2} {
 		result := response.GetResults()[i]
+		require.NotNil(t, result.GetStatus())
 		require.NoError(t, merr.Error(result.GetStatus()))
-		require.Equal(t, collection, result.GetCollectionName())
-		require.Equal(t, uint64(1234), result.GetSessionTs())
-		require.Equal(t, nq, result.GetResults().GetNumQueries())
-		require.Len(t, result.GetResults().GetTopks(), int(nq))
+		require.NotNil(t, result.GetSearch().GetStatus())
+		require.NoError(t, merr.Error(result.GetSearch().GetStatus()))
+		require.Equal(t, collection, result.GetSearch().GetCollectionName())
+		require.Equal(t, uint64(1234), result.GetSearch().GetSessionTs())
+		require.Equal(t, nq, result.GetSearch().GetResults().GetNumQueries())
+		require.Len(t, result.GetSearch().GetResults().GetTopks(), int(nq))
 	}
 	require.ErrorIs(t, merr.Error(response.GetResults()[2].GetStatus()), merr.ErrPrivilegeNotPermitted)
-	require.Nil(t, response.GetResults()[2].GetResults())
+	require.Nil(t, response.GetResults()[2].GetResult())
 	for _, i := range []int{3, 4, 5, 6, 7, 8, 10, 11} {
 		require.ErrorIs(t, merr.Error(response.GetResults()[i].GetStatus()), merr.ErrParameterInvalid, "item %d", i)
+		require.Nil(t, response.GetResults()[i].GetResult())
 	}
 	require.Len(t, charges, 3)
 	require.Equal(t, charge{11, map[int64][]int64{101: {1001}}, 2}, <-charges)
@@ -403,24 +461,24 @@ func TestMultiSearchGRPCSearchEntry(t *testing.T) {
 	require.False(t, options.ExecutionDeadline.Add(-budget).After(<-hook.authCalls))
 }
 
-func TestMultiSearchGRPCUnimplementedOnOldService(t *testing.T) {
+func TestExecuteDQLGRPCUnimplementedOnOldService(t *testing.T) {
 	server := grpc.NewServer()
 	server.RegisterService(&grpc.ServiceDesc{
 		ServiceName: "milvus.proto.milvus.MilvusService",
 		HandlerType: (*milvuspb.MilvusServiceServer)(nil),
 	}, &milvuspb.UnimplementedMilvusServiceServer{})
-	client := newMultiSearchTestClient(t, server)
+	client := newExecuteDQLTestClient(t, server)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	t.Cleanup(cancel)
 
-	response, err := client.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
-		Requests: []*milvuspb.SearchRequest{{CollectionName: "papers"}},
+	response, err := client.ExecuteDQL(ctx, &milvuspb.ExecuteDQLRequest{
+		Requests: executeDQLSearchRequests(&milvuspb.SearchRequest{CollectionName: "papers"}),
 	})
 	require.Equal(t, codes.Unimplemented, status.Code(err))
 	require.Nil(t, response)
 }
 
-func TestMultiSearchGRPCPreservesSearchHookFields(t *testing.T) {
+func TestExecuteDQLGRPCPreservesSearchHookFields(t *testing.T) {
 	key := proxy.Params.CommonCfg.AuthorizationEnabled.Key
 	require.NoError(t, proxy.Params.Save(key, "false"))
 	t.Cleanup(func() { require.NoError(t, proxy.Params.Reset(key)) })
@@ -430,7 +488,7 @@ func TestMultiSearchGRPCPreservesSearchHookFields(t *testing.T) {
 	}
 	seen := make(chan hookFields, 2)
 	previousHook := hookutil.GetHook()
-	hookutil.SetTestHook(&multiSearchTestHook{
+	hookutil.SetTestHook(&executeDQLTestHook{
 		searchCalls: make(chan string, 2),
 		before: func(req any) {
 			if search, ok := req.(*milvuspb.SearchRequest); ok {
@@ -440,39 +498,42 @@ func TestMultiSearchGRPCPreservesSearchHookFields(t *testing.T) {
 	})
 	t.Cleanup(func() { hookutil.SetTestHook(previousHook) })
 
-	runner := proxy.NewMultiSearchTestProxy(t, 1, 1)
+	runner := proxy.NewExecuteDQLTestProxy(t, 1, 1)
 	cache := proxy.InitEmptyMetaCacheForTest()
 	cache.SeedDBInfoForTest(util.DefaultDBName, &metacache.DatabaseInfo{DBID: 1})
 	cache.SeedCollectionForTest(util.DefaultDBName, "papers", 2)
-	client := startMultiSearchTestProxy(t, &multiSearchTestProxy{
+	client := startExecuteDQLTestProxy(t, &executeDQLTestProxy{
 		cache: cache,
-		limiter: multiSearchTestLimiter{check: func(int64, map[int64][]int64, internalpb.RateType, int) error {
+		limiter: executeDQLTestLimiter{check: func(int64, map[int64][]int64, internalpb.RateType, int) error {
 			return nil
 		}},
-		run: runner.RunMultiSearch,
+		run: runner.RunExecuteDQL,
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	ids := &milvuspb.SearchRequest_Ids{Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}}
-	response, err := client.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
+	response, err := client.ExecuteDQL(ctx, &milvuspb.ExecuteDQLRequest{
 		MaxConcurrency: 1,
-		Requests: []*milvuspb.SearchRequest{
+		Requests: executeDQLSearchRequests([]*milvuspb.SearchRequest{
 			{CollectionName: "papers", SearchInput: ids, RlsPrincipal: "paper-reader"},
 			{CollectionName: "papers", SearchInput: ids, RlsPrincipal: "paper-owner", SkipRls: true},
-		},
+		}...),
 	})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(response.GetStatus()))
 	require.Len(t, response.GetResults(), 2)
 	for _, result := range response.GetResults() {
+		require.NotNil(t, result.GetStatus())
 		require.NoError(t, merr.Error(result.GetStatus()))
+		require.NotNil(t, result.GetSearch().GetStatus())
+		require.NoError(t, merr.Error(result.GetSearch().GetStatus()))
 	}
 	require.Len(t, seen, 2)
 	require.Equal(t, hookFields{"paper-reader", false}, <-seen)
 	require.Equal(t, hookFields{"paper-owner", true}, <-seen)
 }
 
-func TestMultiSearchGRPCDeliversPartialResultsAfterExecutionDeadline(t *testing.T) {
+func TestExecuteDQLGRPCDeliversPartialResultsAfterExecutionDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		for _, key := range []string{
 			proxy.Params.CommonCfg.AuthorizationEnabled.Key,
@@ -481,30 +542,33 @@ func TestMultiSearchGRPCDeliversPartialResultsAfterExecutionDeadline(t *testing.
 			require.NoError(t, proxy.Params.Save(key, "false"))
 			t.Cleanup(func() { require.NoError(t, proxy.Params.Reset(key)) })
 		}
-		runner := proxy.NewMultiSearchTestProxy(t, 1, 1)
+		runner := proxy.NewExecuteDQLTestProxy(t, 1, 1)
 		cache := proxy.InitEmptyMetaCacheForTest()
 		cache.SeedDBInfoForTest(util.DefaultDBName, &metacache.DatabaseInfo{DBID: 1})
-		for i, collection := range []string{"ready", "active", "undispatched"} {
+		for i, collection := range []string{"ready", "panic", "active", "undispatched"} {
 			cache.SeedCollectionForTest(util.DefaultDBName, collection, int64(i+2))
 		}
 		started := make(chan string, 3)
 		deadlines := make(chan time.Time, 3)
 		canceled := make(chan error, 1)
 		batchDeadlines := make(chan [2]time.Time, 1)
-		client := startMultiSearchTestProxy(t, &multiSearchTestProxy{
+		client := startExecuteDQLTestProxy(t, &executeDQLTestProxy{
 			cache: cache,
-			limiter: multiSearchTestLimiter{check: func(int64, map[int64][]int64, internalpb.RateType, int) error {
+			limiter: executeDQLTestLimiter{check: func(int64, map[int64][]int64, internalpb.RateType, int) error {
 				return nil
 			}},
-			run: func(ctx context.Context, options proxy.MultiSearchOptions, items []proxy.MultiSearchPrepare, execute proxy.MultiSearchExecute) ([]*milvuspb.SearchResults, error) {
+			run: func(ctx context.Context, options proxy.ExecuteDQLOptions, items []proxy.ExecuteDQLPrepare, execute proxy.ExecuteDQLExecute) ([]*milvuspb.DQLResult, error) {
 				parentDeadline, _ := ctx.Deadline()
 				batchDeadlines <- [2]time.Time{parentDeadline, options.ExecutionDeadline}
-				return runner.RunMultiSearch(ctx, options, items, execute)
+				return runner.RunExecuteDQL(ctx, options, items, execute)
 			},
 			search: func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 				started <- req.GetCollectionName()
 				deadline, _ := ctx.Deadline()
 				deadlines <- deadline
+				if req.GetCollectionName() == "panic" {
+					panic("Search panicked")
+				}
 				if req.GetCollectionName() == "active" {
 					<-ctx.Done()
 					canceled <- ctx.Err()
@@ -520,39 +584,47 @@ func TestMultiSearchGRPCDeliversPartialResultsAfterExecutionDeadline(t *testing.
 		defer cancel()
 		input := &milvuspb.SearchRequest_Ids{Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}}
 		budget := 250 * time.Millisecond
-		response, err := client.MultiSearch(parent, &milvuspb.MultiSearchRequest{
+		response, err := client.ExecuteDQL(parent, &milvuspb.ExecuteDQLRequest{
 			MaxConcurrency: 1,
 			TimeoutMs:      proto.Int64(budget.Milliseconds()),
-			Requests: []*milvuspb.SearchRequest{
+			Requests: executeDQLSearchRequests([]*milvuspb.SearchRequest{
 				{CollectionName: "ready", SearchInput: input},
+				{CollectionName: "panic", SearchInput: input},
 				{CollectionName: "active", SearchInput: input},
 				{CollectionName: "undispatched", SearchInput: input},
-			},
+			}...),
 		})
 		require.NoError(t, err)
 		require.NoError(t, parent.Err())
 		require.NoError(t, merr.Error(response.GetStatus()))
-		require.Len(t, response.GetResults(), 3)
+		require.Len(t, response.GetResults(), 4)
 		ready := response.GetResults()[0]
+		require.NotNil(t, ready.GetStatus())
 		require.NoError(t, merr.Error(ready.GetStatus()))
-		require.Equal(t, "ready", ready.GetCollectionName())
-		require.Equal(t, uint64(42), ready.GetSessionTs())
-		require.Equal(t, []int64{0}, ready.GetResults().GetTopks())
-		for _, item := range response.GetResults()[1:] {
+		require.NotNil(t, ready.GetSearch().GetStatus())
+		require.NoError(t, merr.Error(ready.GetSearch().GetStatus()))
+		require.Equal(t, "ready", ready.GetSearch().GetCollectionName())
+		require.Equal(t, uint64(42), ready.GetSearch().GetSessionTs())
+		require.Equal(t, []int64{0}, ready.GetSearch().GetResults().GetTopks())
+		panicked := response.GetResults()[1]
+		require.ErrorIs(t, merr.Error(panicked.GetStatus()), merr.ErrServiceInternal)
+		require.Nil(t, panicked.GetResult())
+		for _, item := range response.GetResults()[2:] {
 			require.Equal(t, merr.TimeoutCode, item.GetStatus().GetCode())
-			require.Nil(t, item.GetResults())
+			require.Nil(t, item.GetResult())
 		}
 		synctest.Wait()
-		require.Len(t, started, 2)
+		require.Len(t, started, 3)
 		require.Equal(t, "ready", <-started)
+		require.Equal(t, "panic", <-started)
 		require.Equal(t, "active", <-started)
 		require.Len(t, canceled, 1)
 		require.ErrorIs(t, <-canceled, context.DeadlineExceeded)
 		require.Len(t, batchDeadlines, 1)
 		pair := <-batchDeadlines
 		require.True(t, pair[0].After(pair[1]))
-		require.Len(t, deadlines, 2)
-		for range 2 {
+		require.Len(t, deadlines, 3)
+		for range 3 {
 			require.Equal(t, pair[1], <-deadlines)
 		}
 	})

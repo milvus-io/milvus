@@ -32,36 +32,36 @@ import (
 )
 
 const (
-	multiSearchRetryRateLimit = "rate_limit"
-	multiSearchRetryQueueFull = "queue_full"
+	executeDQLRetryRateLimit = "rate_limit"
+	executeDQLRetryQueueFull = "queue_full"
 )
 
-func (b *MultiSearchTask) startAttempt(ctx context.Context, index int, retryReason string) bool {
+func (b *ExecuteDQLTask) startAttempt(ctx context.Context, index int, retryReason string) bool {
 	b.mu.Lock()
 	if b.results == nil || contextutil.ErrOrDeadlineExceeded(ctx) != nil {
 		b.mu.Unlock()
 		return false
 	}
-	metrics.ProxyMultiSearchAttemptsTotal.WithLabelValues(b.nodeID).Inc()
+	metrics.ProxyExecuteDQLAttemptsTotal.WithLabelValues(b.nodeID).Inc()
 	if retryReason != "" {
-		metrics.ProxyMultiSearchRetriesTotal.WithLabelValues(b.nodeID, retryReason).Inc()
+		metrics.ProxyExecuteDQLRetriesTotal.WithLabelValues(b.nodeID, retryReason).Inc()
 	}
 	b.mu.Unlock()
 	if retryReason != "" && mlog.LevelEnabled(mlog.DebugLevel) {
-		mlog.RatedDebug(ctx, 10, "MultiSearch subrequest retry",
+		mlog.RatedDebug(ctx, 10, "ExecuteDQL subrequest retry",
 			mlog.Int("index", index), mlog.String("reason", retryReason))
 	}
 	return true
 }
 
-func logMultiSearchRejection(ctx context.Context, index int, reason string) {
+func logExecuteDQLRejection(ctx context.Context, index int, reason string) {
 	if mlog.LevelEnabled(mlog.DebugLevel) {
-		mlog.RatedDebug(ctx, 10, "MultiSearch subrequest rejected",
+		mlog.RatedDebug(ctx, 10, "ExecuteDQL subrequest rejected",
 			mlog.Int("index", index), mlog.String("reason", reason))
 	}
 }
 
-func multiSearchResultLabel(status *commonpb.Status) (string, int32) {
+func executeDQLResultLabel(status *commonpb.Status) (string, int32) {
 	code := merr.Code(merr.Error(status))
 	switch code {
 	case 0:
@@ -75,9 +75,9 @@ func multiSearchResultLabel(status *commonpb.Status) (string, int32) {
 	}
 }
 
-func traceMultiSearchCompletion(ctx context.Context, index int, result string, code int32, duration time.Duration) {
+func traceExecuteDQLCompletion(ctx context.Context, index int, result string, code int32, duration time.Duration) {
 	if span := trace.SpanFromContext(ctx); span.IsRecording() {
-		span.AddEvent("MultiSearch subrequest finished", trace.WithAttributes(
+		span.AddEvent("ExecuteDQL subrequest finished", trace.WithAttributes(
 			attribute.Int("index", index),
 			attribute.String("result", result),
 			attribute.Int("code", int(code)),
@@ -86,15 +86,15 @@ func traceMultiSearchCompletion(ctx context.Context, index int, result string, c
 	}
 }
 
-func logMultiSearchCompletion(ctx context.Context, index int, result string, code int32, duration time.Duration) {
+func logExecuteDQLCompletion(ctx context.Context, index int, result string, code int32, duration time.Duration) {
 	if mlog.LevelEnabled(mlog.DebugLevel) {
-		mlog.RatedDebug(ctx, 10, "MultiSearch subrequest finished",
+		mlog.RatedDebug(ctx, 10, "ExecuteDQL subrequest finished",
 			mlog.Int("index", index), mlog.String("result", result), mlog.Int32("code", code),
 			mlog.Duration("duration", duration))
 	}
 }
 
-func observeMultiSearchBatch(ctx context.Context, nodeID string, startedAt time.Time, size int, results []*milvuspb.SearchResults, err error) {
+func observeExecuteDQLBatch(ctx context.Context, nodeID string, startedAt time.Time, size int, results []*milvuspb.DQLResult, err error) {
 	outcome := "batch_failed"
 	succeeded := 0
 	if err == nil {
@@ -112,7 +112,7 @@ func observeMultiSearchBatch(ctx context.Context, nodeID string, startedAt time.
 			outcome = "partial_success"
 		}
 	}
-	metrics.ProxyMultiSearchBatchesTotal.WithLabelValues(nodeID, outcome).Inc()
+	metrics.ProxyExecuteDQLBatchesTotal.WithLabelValues(nodeID, outcome).Inc()
 
 	duration := time.Since(startedAt)
 	if span := trace.SpanFromContext(ctx); span.IsRecording() {
@@ -125,7 +125,7 @@ func observeMultiSearchBatch(ctx context.Context, nodeID string, startedAt time.
 		)
 	}
 	if mlog.LevelEnabled(mlog.DebugLevel) {
-		mlog.RatedDebug(ctx, 10, "MultiSearch batch finished",
+		mlog.RatedDebug(ctx, 10, "ExecuteDQL batch finished",
 			mlog.String("result", outcome), mlog.Int32("code", merr.Code(err)),
 			mlog.Int("size", size), mlog.Int("succeeded", succeeded), mlog.Duration("duration", duration))
 	}

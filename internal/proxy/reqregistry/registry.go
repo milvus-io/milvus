@@ -18,7 +18,7 @@
 // serving, so that they can be listed and canceled.
 //
 // The unit of registration is one client RPC (Search, HybridSearch, Query or
-// MultiSearch), not one scheduler task: a single RPC can spawn several tasks
+// ExecuteDQL), not one scheduler task: a single RPC can spawn several tasks
 // (a requery, a search-by-primary-key vector fetch, a retried attempt) and
 // those tasks share the request's context, so cancellation can only ever stop
 // the whole tree. Registration therefore happens at the very top of the RPC
@@ -63,7 +63,7 @@ const (
 	TypeSearch       = "Search"
 	TypeHybridSearch = "HybridSearch"
 	TypeQuery        = "Query"
-	TypeMultiSearch  = "MultiSearch"
+	TypeExecuteDQL   = "ExecuteDQL"
 )
 
 // ExprPrefixLimit bounds the expression text kept per request.

@@ -412,9 +412,9 @@ func (node *Proxy) Start() error {
 	mlog.Debug(node.ctx, "start id allocator done", mlog.String("role", typeutil.ProxyRole))
 
 	nodeID := paramtable.GetStringNodeID()
-	metrics.ProxyMultiSearchAttemptsTotal.WithLabelValues(nodeID)
-	metrics.ProxyMultiSearchRetriesTotal.WithLabelValues(nodeID, multiSearchRetryRateLimit)
-	metrics.ProxyMultiSearchRetriesTotal.WithLabelValues(nodeID, multiSearchRetryQueueFull)
+	metrics.ProxyExecuteDQLAttemptsTotal.WithLabelValues(nodeID)
+	metrics.ProxyExecuteDQLRetriesTotal.WithLabelValues(nodeID, executeDQLRetryRateLimit)
+	metrics.ProxyExecuteDQLRetriesTotal.WithLabelValues(nodeID, executeDQLRetryQueueFull)
 
 	// Start callbacks
 	for _, cb := range node.startCallbacks {

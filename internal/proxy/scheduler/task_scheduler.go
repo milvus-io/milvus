@@ -486,10 +486,10 @@ func newDqTaskQueue(tsoAllocatorIns taskmodel.TsoAllocator) *DqTaskQueue {
 
 // TaskScheduler schedules the gRPC tasks.
 type TaskScheduler struct {
-	DdQueue      *DdTaskQueue
-	DmQueue      *DmTaskQueue
-	DqQueue      *DqTaskQueue
-	MSearchQueue *MSearchTaskQueue
+	DdQueue         *DdTaskQueue
+	DmQueue         *DmTaskQueue
+	DqQueue         *DqTaskQueue
+	ExecuteDQLQueue *ExecuteDQLQueue
 
 	// data control queue, use for such as flush operation, which control the data status
 	DcQueue *DdTaskQueue
@@ -513,12 +513,12 @@ func NewTaskScheduler(ctx context.Context,
 	s.DdQueue = newDdTaskQueue(tsoAllocatorIns)
 	s.DmQueue = newDmTaskQueue(tsoAllocatorIns)
 	s.DqQueue = newDqTaskQueue(tsoAllocatorIns)
-	s.MSearchQueue = &MSearchTaskQueue{
+	s.ExecuteDQLQueue = &ExecuteDQLQueue{
 		BaseTaskQueue: newBaseTaskQueue(tsoAllocatorIns),
 		ctx:           ctx1,
 		workers:       8,
 	}
-	s.MSearchQueue.SetMaxTaskNum(64)
+	s.ExecuteDQLQueue.SetMaxTaskNum(64)
 
 	s.DcQueue = newDdTaskQueue(tsoAllocatorIns)
 
@@ -766,9 +766,9 @@ func (sched *TaskScheduler) Start() error {
 
 	// Fixed workers pop only when free: all waiting batches remain in the
 	// bounded queue, including while canceled execution is still unwinding.
-	sched.wg.Add(sched.MSearchQueue.workers)
-	for range sched.MSearchQueue.workers {
-		go sched.multiSearchLoop()
+	sched.wg.Add(sched.ExecuteDQLQueue.workers)
+	for range sched.ExecuteDQLQueue.workers {
+		go sched.executeDQLLoop()
 	}
 
 	sched.wg.Add(1)

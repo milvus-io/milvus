@@ -48,11 +48,11 @@ func RateLimitInterceptorWithMetaCache(GetMetaCache func() Cache, limiter types.
 	return rateLimitInterceptor(GetMetaCache, limiter, false, GetRequestInfo)
 }
 
-// MultiSearchRateLimitInterceptor requires a quota scope for every Search
+// ExecuteDQLRateLimitInterceptor requires a quota scope for every Search
 // attempt when quota is enabled.
-func MultiSearchRateLimitInterceptor(getMetaCache func() Cache, limiter types.Limiter) grpc.UnaryServerInterceptor {
+func ExecuteDQLRateLimitInterceptor(getMetaCache func() Cache, limiter types.Limiter) grpc.UnaryServerInterceptor {
 	return rateLimitInterceptor(getMetaCache, limiter, true, func(ctx context.Context, cache Cache, request proto.Message) (int64, map[int64][]int64, internalpb.RateType, int, error) {
-		return GetMultiSearchQuotaInfo(ctx, cache, request.(*milvuspb.SearchRequest))
+		return GetExecuteDQLQuotaInfo(ctx, cache, request.(*milvuspb.SearchRequest))
 	})
 }
 
@@ -187,8 +187,8 @@ func getCollectionAndPartitionIDs(ctx context.Context, metaCache Cache, r reqPar
 	return resolveQuotaPartitions(ctx, metaCache, r, false)
 }
 
-// GetMultiSearchQuotaInfo resolves the scope and quota cost of a prepared Search item.
-func GetMultiSearchQuotaInfo(ctx context.Context, metaCache Cache, request *milvuspb.SearchRequest) (int64, map[int64][]int64, internalpb.RateType, int, error) {
+// GetExecuteDQLQuotaInfo resolves the scope and quota cost of a prepared Search item.
+func GetExecuteDQLQuotaInfo(ctx context.Context, metaCache Cache, request *milvuspb.SearchRequest) (int64, map[int64][]int64, internalpb.RateType, int, error) {
 	if metaCache == nil {
 		return GetRequestInfo(ctx, metaCache, request)
 	}

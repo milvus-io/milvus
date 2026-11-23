@@ -45,71 +45,71 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-const defaultMultiSearchConcurrency = 4
+const defaultExecuteDQLConcurrency = 4
 
-var multiSearchSuccessStatusBytes = uint64(proto.Size(&milvuspb.MultiSearchResponse{Status: merr.Success()}))
+var executeDQLSuccessStatusBytes = uint64(proto.Size(&milvuspb.ExecuteDQLResponse{Status: merr.Success()}))
 
-// MultiSearchOptions applies to the entire admitted batch. A zero deadline
+// ExecuteDQLOptions applies to the entire admitted batch. A zero deadline
 // leaves execution bounded only by the parent call and scheduler lifetime.
-type MultiSearchOptions struct {
+type ExecuteDQLOptions struct {
 	MaxConcurrency    uint32
 	ExecutionDeadline time.Time
 }
 
-// MultiSearchExecutionDeadline validates the optional wire budget and anchors
+// ExecuteDQLExecutionDeadline validates the optional wire budget and anchors
 // it at receipt. An explicitly supplied zero expires at receipt.
-func MultiSearchExecutionDeadline(receivedAt time.Time, timeoutMs *int64) (time.Time, error) {
+func ExecuteDQLExecutionDeadline(receivedAt time.Time, timeoutMs *int64) (time.Time, error) {
 	if timeoutMs == nil {
 		return time.Time{}, nil
 	}
 	const maxTimeoutMs = math.MaxInt64 / int64(time.Millisecond)
 	if *timeoutMs < 0 || *timeoutMs > maxTimeoutMs {
-		return time.Time{}, merr.WrapErrParameterInvalidMsg("MultiSearch execution timeout must be between 0 and %d milliseconds", maxTimeoutMs)
+		return time.Time{}, merr.WrapErrParameterInvalidMsg("ExecuteDQL execution timeout must be between 0 and %d milliseconds", maxTimeoutMs)
 	}
 	return receivedAt.Add(time.Duration(*timeoutMs) * time.Millisecond), nil
 }
 
-// MultiSearchPrepare builds one recognized Search request after batch admission.
-type MultiSearchPrepare func(context.Context) (*milvuspb.SearchRequest, error)
+// ExecuteDQLPrepare builds one recognized Search request after batch admission.
+type ExecuteDQLPrepare func(context.Context) (*milvuspb.SearchRequest, error)
 
-// MultiSearchExecute runs a prepared request through ordinary Search entry checks and execution.
-type MultiSearchExecute func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error)
+// ExecuteDQLExecute runs a prepared request through ordinary Search entry checks and execution.
+type ExecuteDQLExecute func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error)
 
-// CheckMultiSearchAdmission is a pre-decode probe. RunMultiSearch makes the
+// CheckExecuteDQLAdmission is a pre-decode probe. RunExecuteDQL makes the
 // authoritative admission decision when it enqueues the batch.
-func (node *Proxy) CheckMultiSearchAdmission() error {
+func (node *Proxy) CheckExecuteDQLAdmission() error {
 	if node.sched != nil {
-		return node.sched.MSearchQueue.CheckAdmission()
+		return node.sched.ExecuteDQLQueue.CheckAdmission()
 	}
 	return nil
 }
 
-// CheckMultiSearchBatchSize bounds item preparation on both transports.
-func CheckMultiSearchBatchSize(count int) error {
-	limit := paramtable.Get().ProxyCfg.MultiSearchMaxBatchSize.GetAsInt64()
+// CheckExecuteDQLBatchSize bounds item preparation on both transports.
+func CheckExecuteDQLBatchSize(count int) error {
+	limit := paramtable.Get().ProxyCfg.ExecuteDQLMaxBatchSize.GetAsInt64()
 	if int64(count) > limit {
-		return merr.Wrapf(merr.ErrParameterTooLarge, "MultiSearch item count %d exceeds proxy.multiSearch.maxBatchSize %d", count, limit)
+		return merr.Wrapf(merr.ErrParameterTooLarge, "ExecuteDQL item count %d exceeds proxy.executeDQL.maxBatchSize %d", count, limit)
 	}
 	return nil
 }
 
-// RunMultiSearch accepts a structurally validated list of Search operations.
-// A failure of an individual search is returned in its native SearchResults.
-func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOptions, items []MultiSearchPrepare, execute MultiSearchExecute) (results []*milvuspb.SearchResults, err error) {
+// RunExecuteDQL accepts a structurally validated list of Search operations.
+// Each DQLResult carries the outcome of one operation in input order.
+func (node *Proxy) RunExecuteDQL(ctx context.Context, options ExecuteDQLOptions, items []ExecuteDQLPrepare, execute ExecuteDQLExecute) (results []*milvuspb.DQLResult, err error) {
 	startedAt := time.Now()
 	nodeID := paramtable.GetStringNodeID()
-	ctx, span := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-MultiSearch")
+	ctx, span := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ExecuteDQL")
 	defer span.End()
-	defer func() { observeMultiSearchBatch(ctx, nodeID, startedAt, len(items), results, err) }()
+	defer func() { observeExecuteDQLBatch(ctx, nodeID, startedAt, len(items), results, err) }()
 	if len(items) == 0 {
-		return nil, merr.WrapErrParameterMissingMsg("MultiSearch requires at least one search")
+		return nil, merr.WrapErrParameterMissingMsg("ExecuteDQL requires at least one operation")
 	}
-	if err := CheckMultiSearchBatchSize(len(items)); err != nil {
+	if err := CheckExecuteDQLBatchSize(len(items)); err != nil {
 		return nil, err
 	}
 	for i, prepare := range items {
 		if prepare == nil {
-			return nil, merr.WrapErrServiceInternalMsg("MultiSearch requests[%d] has no preparer", i)
+			return nil, merr.WrapErrServiceInternalMsg("ExecuteDQL requests[%d] has no preparer", i)
 		}
 	}
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -117,15 +117,15 @@ func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOption
 	}
 	s := node.sched
 	if s == nil || execute == nil {
-		return nil, merr.WrapErrServiceInternalMsg("MultiSearch scheduler or Search entry is unavailable")
+		return nil, merr.WrapErrServiceInternalMsg("ExecuteDQL scheduler or Search entry is unavailable")
 	}
-	maxResultBytes := uint64(paramtable.Get().ProxyCfg.MultiSearchMaxResultBytes.GetAsInt64())
-	if multiSearchSuccessStatusBytes > maxResultBytes {
-		return nil, multiSearchResultLimitError(maxResultBytes, multiSearchSuccessStatusBytes, false)
+	maxResultBytes := uint64(paramtable.Get().ProxyCfg.ExecuteDQLMaxResultBytes.GetAsInt64())
+	if executeDQLSuccessStatusBytes > maxResultBytes {
+		return nil, executeDQLResultLimitError(maxResultBytes, executeDQLSuccessStatusBytes, false)
 	}
 	// Register once for both transports, before queueing or preparing any item.
 	// A batch has no single database, collection, NQ, topk or expression.
-	ctx, entry := node.registerRequest(ctx, reqregistry.Info{Type: reqregistry.TypeMultiSearch})
+	ctx, entry := node.registerRequest(ctx, reqregistry.Info{Type: reqregistry.TypeExecuteDQL})
 	defer node.unregisterRequest(entry)
 	defer func() {
 		// Linearize the response against CancelRequests before releasing the
@@ -151,7 +151,7 @@ func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOption
 		executionCtx, cancelExecution = context.WithDeadline(batchCtx, options.ExecutionDeadline)
 		defer cancelExecution()
 	}
-	batch := &MultiSearchTask{
+	batch := &ExecuteDQLTask{
 		BaseTask:       taskmodel.BaseTask{MetaCache: node.GetMetaCache()},
 		TaskCondition:  taskmodel.NewTaskCondition(executionCtx),
 		nodeID:         nodeID,
@@ -161,10 +161,10 @@ func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOption
 		maxConcurrency: options.MaxConcurrency,
 		cancel:         cancel,
 		maxResultBytes: maxResultBytes,
-		resultBytes:    multiSearchSuccessStatusBytes,
-		results:        make([]*milvuspb.SearchResults, len(items)),
+		resultBytes:    executeDQLSuccessStatusBytes,
+		results:        make([]*milvuspb.DQLResult, len(items)),
 	}
-	err = s.MSearchQueue.Enqueue(batch)
+	err = s.ExecuteDQLQueue.Enqueue(batch)
 	if err != nil && !errors.Is(err, executionCtx.Err()) {
 		return nil, err
 	}
@@ -188,21 +188,21 @@ func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOption
 		return nil, err
 	}
 	if s.Context().Err() != nil {
-		return nil, merr.WrapErrServiceUnavailableMsg("MultiSearch scheduler is stopping")
+		return nil, merr.WrapErrServiceUnavailableMsg("ExecuteDQL scheduler is stopping")
 	}
 	return batchResults, nil
 }
 
-// MultiSearchTask orchestrates a batch on TaskScheduler's independent MSearch queue.
+// ExecuteDQLTask orchestrates a batch on TaskScheduler's independent ExecuteDQL queue.
 // Item preparation stays inside the bounded fan-out because REST preparation can
 // perform schema lookups and must share the execution budget and item limit.
-type MultiSearchTask struct {
+type ExecuteDQLTask struct {
 	taskmodel.BaseTask
 	*taskmodel.TaskCondition
 	id             taskmodel.UniqueID
 	ts             taskmodel.Timestamp
-	items          []MultiSearchPrepare
-	execute        MultiSearchExecute
+	items          []ExecuteDQLPrepare
+	execute        ExecuteDQLExecute
 	maxConcurrency uint32
 	concurrency    int
 	nodeID         string
@@ -211,40 +211,40 @@ type MultiSearchTask struct {
 	maxResultBytes uint64
 
 	mu             sync.Mutex
-	results        []*milvuspb.SearchResults
+	results        []*milvuspb.DQLResult
 	resultBytes    uint64
 	resultLimitErr error
 }
 
-var _ taskmodel.Task = (*MultiSearchTask)(nil)
+var _ taskmodel.Task = (*ExecuteDQLTask)(nil)
 
-func (b *MultiSearchTask) TraceCtx() context.Context   { return b.Ctx() }
-func (b *MultiSearchTask) ID() taskmodel.UniqueID      { return b.id }
-func (b *MultiSearchTask) SetID(id taskmodel.UniqueID) { b.id = id }
-func (b *MultiSearchTask) Name() string                { return "MultiSearchTask" }
+func (b *ExecuteDQLTask) TraceCtx() context.Context   { return b.Ctx() }
+func (b *ExecuteDQLTask) ID() taskmodel.UniqueID      { return b.id }
+func (b *ExecuteDQLTask) SetID(id taskmodel.UniqueID) { b.id = id }
+func (b *ExecuteDQLTask) Name() string                { return "ExecuteDQLTask" }
 
 // The batch is a local orchestration task, without a corresponding wire MsgType.
-func (b *MultiSearchTask) Type() commonpb.MsgType       { return commonpb.MsgType_Undefined }
-func (b *MultiSearchTask) BeginTs() taskmodel.Timestamp { return b.ts }
-func (b *MultiSearchTask) EndTs() taskmodel.Timestamp   { return b.ts }
-func (b *MultiSearchTask) SetTs(ts taskmodel.Timestamp) { b.ts = ts }
-func (b *MultiSearchTask) CanSkipAllocTimestamp() bool  { return true }
-func (b *MultiSearchTask) OnEnqueue() error             { return nil }
+func (b *ExecuteDQLTask) Type() commonpb.MsgType       { return commonpb.MsgType_Undefined }
+func (b *ExecuteDQLTask) BeginTs() taskmodel.Timestamp { return b.ts }
+func (b *ExecuteDQLTask) EndTs() taskmodel.Timestamp   { return b.ts }
+func (b *ExecuteDQLTask) SetTs(ts taskmodel.Timestamp) { b.ts = ts }
+func (b *ExecuteDQLTask) CanSkipAllocTimestamp() bool  { return true }
+func (b *ExecuteDQLTask) OnEnqueue() error             { return nil }
 
-func (b *MultiSearchTask) PreExecute(ctx context.Context) error {
+func (b *ExecuteDQLTask) PreExecute(ctx context.Context) error {
 	if err := contextutil.ErrOrDeadlineExceeded(ctx); err != nil {
 		return err
 	}
 	requested := b.maxConcurrency
 	if requested == 0 {
-		requested = defaultMultiSearchConcurrency
+		requested = defaultExecuteDQLConcurrency
 	}
-	limit := max(1, paramtable.Get().ProxyCfg.MultiSearchMaxConcurrency.GetAsUint64())
+	limit := max(1, paramtable.Get().ProxyCfg.ExecuteDQLMaxConcurrency.GetAsUint64())
 	b.concurrency = int(min(uint64(requested), limit, uint64(len(b.items))))
 	return nil
 }
 
-func (b *MultiSearchTask) Execute(ctx context.Context) error {
+func (b *ExecuteDQLTask) Execute(ctx context.Context) error {
 	var group sync.WaitGroup
 	slots := semaphore.NewWeighted(int64(b.concurrency))
 	for i, prepare := range b.items {
@@ -257,13 +257,13 @@ func (b *MultiSearchTask) Execute(ctx context.Context) error {
 				return
 			}
 			itemCtx := metrics.WithIndependentRPCStats(ctx)
-			var result *milvuspb.SearchResults
+			var result *milvuspb.DQLResult
 			defer func() {
 				if recover() != nil {
-					err := merr.WrapErrServiceInternalMsg("MultiSearch requests[%d] panicked", i)
-					mlog.Error(itemCtx, "MultiSearch item panicked", mlog.Int("index", i),
+					err := merr.WrapErrServiceInternalMsg("ExecuteDQL requests[%d] panicked", i)
+					mlog.Error(itemCtx, "ExecuteDQL item panicked", mlog.Int("index", i),
 						mlog.FieldTaskID(b.ID()), mlog.Err(err), mlog.ByteString("panic_stack", debug.Stack()))
-					result = &milvuspb.SearchResults{Status: merr.Status(err)}
+					result = &milvuspb.DQLResult{Status: merr.Status(err)}
 				}
 				b.complete(itemCtx, i, result)
 			}()
@@ -276,27 +276,27 @@ func (b *MultiSearchTask) Execute(ctx context.Context) error {
 	return contextutil.ErrOrDeadlineExceeded(ctx)
 }
 
-func (b *MultiSearchTask) PostExecute(context.Context) error { return nil }
+func (b *ExecuteDQLTask) PostExecute(context.Context) error { return nil }
 
-func multiSearchResultSize(result *milvuspb.SearchResults) uint64 {
-	const resultsField = 2 // milvuspb.MultiSearchResponse.results
+func executeDQLResultSize(result *milvuspb.DQLResult) uint64 {
+	const resultsField = 2 // milvuspb.ExecuteDQLResponse.results
 	size := uint64(proto.Size(result))
 	return uint64(protowire.SizeTag(resultsField)+protowire.SizeVarint(size)) + size
 }
 
-func multiSearchResultLimitError(limit, observed uint64, singleItem bool) error {
-	message := "MultiSearch response has at least %d bytes, exceeding proxy.multiSearch.maxResultBytes (%d bytes)"
+func executeDQLResultLimitError(limit, observed uint64, singleItem bool) error {
+	message := "ExecuteDQL response has at least %d bytes, exceeding proxy.executeDQL.maxResultBytes (%d bytes)"
 	if singleItem {
 		message += ". One Search result exceeds the batch limit. Reduce nq, topK, or outputFields"
 	}
 	return merr.Wrapf(merr.ErrParameterTooLarge, message, observed, limit)
 }
 
-func (b *MultiSearchTask) complete(ctx context.Context, i int, result *milvuspb.SearchResults) {
+func (b *ExecuteDQLTask) complete(ctx context.Context, i int, result *milvuspb.DQLResult) {
 	if result == nil || contextutil.ErrOrDeadlineExceeded(ctx) != nil {
 		return
 	}
-	size := multiSearchResultSize(result)
+	size := executeDQLResultSize(result)
 	b.mu.Lock()
 	if b.results == nil || b.results[i] != nil || contextutil.ErrOrDeadlineExceeded(ctx) != nil {
 		b.mu.Unlock()
@@ -306,25 +306,25 @@ func (b *MultiSearchTask) complete(ctx context.Context, i int, result *milvuspb.
 	if b.resultBytes > b.maxResultBytes {
 		// Publish the limit error before canceling execution and waking the
 		// caller. Late completions cannot replace the error or retain results.
-		b.resultLimitErr = multiSearchResultLimitError(b.maxResultBytes, b.resultBytes, multiSearchSuccessStatusBytes+size > b.maxResultBytes)
+		b.resultLimitErr = executeDQLResultLimitError(b.maxResultBytes, b.resultBytes, executeDQLSuccessStatusBytes+size > b.maxResultBytes)
 		b.results = nil
 		b.cancel()
 		b.mu.Unlock()
 		return
 	}
 	b.results[i] = result
-	label, code := multiSearchResultLabel(result.GetStatus())
+	label, code := executeDQLResultLabel(result.GetStatus())
 	duration := time.Since(b.startedAt)
 	// Serialize the event with finish so the caller cannot end the batch span
 	// before an accepted completion has been recorded.
-	traceMultiSearchCompletion(b.TraceCtx(), i, label, code, duration)
-	metrics.ProxyMultiSearchSubrequestsTotal.WithLabelValues(b.nodeID, label).Inc()
+	traceExecuteDQLCompletion(b.TraceCtx(), i, label, code, duration)
+	metrics.ProxyExecuteDQLSubrequestsTotal.WithLabelValues(b.nodeID, label).Inc()
 	b.mu.Unlock()
-	logMultiSearchCompletion(ctx, i, label, code, duration)
+	logExecuteDQLCompletion(ctx, i, label, code, duration)
 }
 
-// finish is called once by RunMultiSearch, which owns final response accounting.
-func (b *MultiSearchTask) finish(ctx context.Context, unfinished error) ([]*milvuspb.SearchResults, error) {
+// finish is called once by RunExecuteDQL, which owns final response accounting.
+func (b *ExecuteDQLTask) finish(ctx context.Context, unfinished error) ([]*milvuspb.DQLResult, error) {
 	b.mu.Lock()
 	// Transfer ownership to the caller. Late searches can no longer write
 	// slots or retain completed Search data while they unwind.
@@ -338,19 +338,22 @@ func (b *MultiSearchTask) finish(ctx context.Context, unfinished error) ([]*milv
 	}
 
 	// Check the full envelope before publishing or recording synthesized slots.
-	var unfinishedResult *milvuspb.SearchResults
+	var unfinishedResult *milvuspb.DQLResult
 	var unfinishedBytes uint64
 	for _, result := range results {
 		if result != nil {
 			continue
 		}
 		if unfinishedResult == nil {
-			unfinishedResult = &milvuspb.SearchResults{Status: merr.Status(unfinished)}
-			unfinishedBytes = multiSearchResultSize(unfinishedResult)
+			if unfinished == nil {
+				unfinished = merr.WrapErrServiceInternalMsg("ExecuteDQL item finished without a result")
+			}
+			unfinishedResult = &milvuspb.DQLResult{Status: merr.Status(unfinished)}
+			unfinishedBytes = executeDQLResultSize(unfinishedResult)
 		}
 		resultBytes += unfinishedBytes
 		if resultBytes > b.maxResultBytes {
-			return nil, multiSearchResultLimitError(b.maxResultBytes, resultBytes, false)
+			return nil, executeDQLResultLimitError(b.maxResultBytes, resultBytes, false)
 		}
 	}
 	for i, result := range results {
@@ -358,69 +361,73 @@ func (b *MultiSearchTask) finish(ctx context.Context, unfinished error) ([]*milv
 			continue
 		}
 		results[i] = proto.CloneOf(unfinishedResult)
-		label, code := multiSearchResultLabel(unfinishedResult.GetStatus())
-		traceMultiSearchCompletion(ctx, i, label, code, duration)
-		logMultiSearchCompletion(ctx, i, label, code, duration)
-		metrics.ProxyMultiSearchSubrequestsTotal.WithLabelValues(b.nodeID, label).Inc()
+		label, code := executeDQLResultLabel(unfinishedResult.GetStatus())
+		traceExecuteDQLCompletion(ctx, i, label, code, duration)
+		logExecuteDQLCompletion(ctx, i, label, code, duration)
+		metrics.ProxyExecuteDQLSubrequestsTotal.WithLabelValues(b.nodeID, label).Inc()
 	}
 	return results, nil
 }
 
-func (b *MultiSearchTask) runItem(ctx context.Context, index int, prepare MultiSearchPrepare, execute MultiSearchExecute) *milvuspb.SearchResults {
+func (b *ExecuteDQLTask) runItem(ctx context.Context, index int, prepare ExecuteDQLPrepare, execute ExecuteDQLExecute) *milvuspb.DQLResult {
 	request, err := prepare(ctx)
 	if err != nil {
-		return &milvuspb.SearchResults{Status: multiSearchErrorStatus(err)}
+		return &milvuspb.DQLResult{Status: executeDQLErrorStatus(err)}
 	}
 	if request == nil {
-		return &milvuspb.SearchResults{Status: merr.Status(merr.WrapErrServiceInternalMsg("MultiSearch prepared no Search request"))}
+		return &milvuspb.DQLResult{Status: merr.Status(merr.WrapErrServiceInternalMsg("ExecuteDQL prepared no Search request"))}
 	}
-	var result *milvuspb.SearchResults
+	var search *milvuspb.SearchResults
+	var itemStatus *commonpb.Status
 	var reason string
-	// Keep the native response. retry.Handle may return an earlier error
-	// when a later attempt stops on a context error.
+	// Retain the last attempt's status. retry.Handle can return the previous
+	// refusal when the next attempt stops at the execution deadline.
 	_ = retry.Handle(ctx, func() (bool, error) {
 		if !b.startAttempt(ctx, index, reason) {
 			return false, nil
 		}
 		attemptCtx, rejected := scheduler.WithDQLAdmissionTracking(ctx)
 		var err error
-		result, err = execute(attemptCtx, copySearchRequestForAttempt(request))
-		if err != nil {
-			result = &milvuspb.SearchResults{Status: multiSearchErrorStatus(err)}
+		search, err = execute(attemptCtx, copySearchRequestForAttempt(request))
+		switch {
+		case err != nil:
+			itemStatus = executeDQLErrorStatus(err)
+		case search.GetStatus() == nil:
+			itemStatus = merr.Status(merr.WrapErrServiceInternalMsg("Search returned no status"))
+			return false, nil
+		default:
+			itemStatus = search.GetStatus()
 		}
-		st := result.GetStatus()
-		if st == nil {
-			result = &milvuspb.SearchResults{Status: merr.Status(merr.WrapErrServiceInternalMsg("Search returned no status"))}
+		if itemStatus.GetExtraInfo()[merr.InputErrorFlagKey] == "true" {
 			return false, nil
 		}
-		if st.GetExtraInfo()[merr.InputErrorFlagKey] == "true" {
-			return false, nil
-		}
-		switch merr.Code(merr.Error(st)) {
+		switch merr.Code(merr.Error(itemStatus)) {
 		case merr.Code(merr.ErrServiceRateLimit):
-			reason = multiSearchRetryRateLimit
-			logMultiSearchRejection(ctx, index, reason)
+			reason = executeDQLRetryRateLimit
+			logExecuteDQLRejection(ctx, index, reason)
 			return true, merr.ErrServiceRateLimit
 		case merr.Code(merr.ErrServiceTooManyRequests):
 			if rejected.Load() {
-				reason = multiSearchRetryQueueFull
-				logMultiSearchRejection(ctx, index, reason)
+				reason = executeDQLRetryQueueFull
+				logExecuteDQLRejection(ctx, index, reason)
 				return true, merr.ErrServiceTooManyRequests
 			}
 		}
 		return false, nil
 	})
-	if !merr.Ok(result.GetStatus()) && result.GetResults() != nil {
-		return &milvuspb.SearchResults{
-			Status:         result.GetStatus(),
-			CollectionName: result.GetCollectionName(),
-			SessionTs:      result.GetSessionTs(),
-		}
+	if itemStatus == nil {
+		return nil // The execution budget expired before the first attempt.
 	}
-	return result
+	if !merr.Ok(itemStatus) {
+		return &milvuspb.DQLResult{Status: itemStatus}
+	}
+	return &milvuspb.DQLResult{
+		Status: merr.Success(),
+		Result: &milvuspb.DQLResult_Search{Search: search},
+	}
 }
 
-func multiSearchErrorStatus(err error) *commonpb.Status {
+func executeDQLErrorStatus(err error) *commonpb.Status {
 	grpcStatus := status.Convert(err)
 	switch grpcStatus.Code() {
 	case codes.PermissionDenied:

@@ -27,19 +27,19 @@ import (
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
-// TestMultiSearchListAndCancel uses a WAL barrier for gRPC and a collection's
+// TestExecuteDQLListAndCancel uses a WAL barrier for gRPC and a collection's
 // rate limit for REST, so neither case depends on a search happening to be slow.
 // A unique caller (gRPC) or trace ID (REST) isolates the batch from concurrent
 // tests, including when REST authentication is disabled. DQL quotas must be enabled.
-func TestMultiSearchListAndCancel(t *testing.T) {
+func TestExecuteDQLListAndCancel(t *testing.T) {
 	for _, transport := range []string{"grpc", "rest"} {
 		t.Run(transport, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 			defer cancel()
 			root := hp.CreateDefaultMilvusClient(ctx, t)
-			name := common.GenRandomString("multisearch_cancel", 8)
-			createMultiSearchCollection(ctx, t, root, name, 1)
-			user, password := common.GenRandomString("multisearch_caller", 8), common.GenRandomString("pwd", 12)
+			name := common.GenRandomString("execute_dql_cancel", 8)
+			createExecuteDQLCollection(ctx, t, root, name, 1)
+			user, password := common.GenRandomString("execute_dql_caller", 8), common.GenRandomString("pwd", 12)
 			require.NoError(t, root.CreateUser(ctx, client.NewCreateUserOption(user, password)))
 			granted := false
 			t.Cleanup(func() {
@@ -74,10 +74,10 @@ func TestMultiSearchListAndCancel(t *testing.T) {
 			listRequest := &milvuspb.ListRunningRequestsRequest{User: user, MinElapsedMs: 100}
 			batchTraceID := ""
 			if transport == "grpc" {
-				blocked := multiSearchBlockingRequest(ready)
+				blocked := executeDQLBlockingRequest(ready)
 				go func() {
-					response, callErr := service.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
-						Requests: []*milvuspb.SearchRequest{ready, blocked, proto.CloneOf(blocked), ready}, MaxConcurrency: 2,
+					response, callErr := service.ExecuteDQL(ctx, &milvuspb.ExecuteDQLRequest{
+						Requests: executeDQLSearchRequests(ready, blocked, proto.CloneOf(blocked), ready), MaxConcurrency: 2,
 					})
 					finished <- outcome{
 						code: response.GetStatus().GetCode(), reason: response.GetStatus().GetReason(),
@@ -85,8 +85,8 @@ func TestMultiSearchListAndCancel(t *testing.T) {
 					}
 				}()
 			} else {
-				limitedName := common.GenRandomString("multisearch_cancel_limited", 8)
-				createMultiSearchCollection(ctx, t, root, limitedName, 101)
+				limitedName := common.GenRandomString("execute_dql_cancel_limited", 8)
+				createExecuteDQLCollection(ctx, t, root, limitedName, 101)
 				require.NoError(t, root.AlterCollectionProperties(ctx,
 					client.NewAlterCollectionPropertiesOption(limitedName).WithProperty("collection.searchRate.max.vps", "1")))
 				limited, requestErr := client.NewSearchOption(limitedName, 1, []entity.Vector{
@@ -106,9 +106,9 @@ func TestMultiSearchListAndCancel(t *testing.T) {
 					},
 				})
 				require.NoError(t, marshalErr)
-				endpoint, _ := multiSearchRESTConfig()
+				endpoint, _ := executeDQLRESTConfig()
 				request, requestErr := http.NewRequestWithContext(ctx, http.MethodPost,
-					endpoint+"/v2/vectordb/entities/multi_search", bytes.NewReader(payload))
+					endpoint+"/v2/vectordb/entities/execute_dql", bytes.NewReader(payload))
 				require.NoError(t, requestErr)
 				request.Header.Set("Authorization", "Bearer "+user+":"+password)
 				request.Header.Set("Content-Type", "application/json")
@@ -161,7 +161,7 @@ func TestMultiSearchListAndCancel(t *testing.T) {
 				}
 				require.Len(t, requests, 1, "a batch must not expose independent child Search requests")
 				candidate := requests[0]
-				require.Equal(t, "MultiSearch", candidate.GetType())
+				require.Equal(t, "ExecuteDQL", candidate.GetType())
 				if transport == "rest" {
 					require.Contains(t, []string{user, ""}, candidate.GetUser())
 				} else {
@@ -177,7 +177,7 @@ func TestMultiSearchListAndCancel(t *testing.T) {
 				time.Sleep(20 * time.Millisecond)
 			}
 			require.NotNil(t, batch, "the running batch must remain listed after its first Search completes")
-			const reason = "cancel the complete MultiSearch batch"
+			const reason = "cancel the complete ExecuteDQL batch"
 			canceled, err := service.CancelRequests(ctx, &milvuspb.CancelRequestsRequest{
 				RequestIds: []string{batch.GetRequestId()}, Reason: reason,
 			})
@@ -206,16 +206,26 @@ func TestMultiSearchListAndCancel(t *testing.T) {
 			again, err := service.CancelRequests(ctx, &milvuspb.CancelRequestsRequest{RequestIds: []string{batch.GetRequestId()}})
 			require.NoError(t, merr.CheckRPCCall(again, err))
 			require.Equal(t, []string{batch.GetRequestId()}, again.GetNotFound())
-			recovery, err := service.MultiSearch(ctx, &milvuspb.MultiSearchRequest{Requests: []*milvuspb.SearchRequest{ready}})
+			recovery, err := service.ExecuteDQL(ctx, &milvuspb.ExecuteDQLRequest{Requests: executeDQLSearchRequests(ready)})
 			require.NoError(t, merr.CheckRPCCall(recovery, err))
 			require.Len(t, recovery.GetResults(), 1)
 			require.NoError(t, merr.Error(recovery.Results[0].GetStatus()))
+			require.NotNil(t, recovery.Results[0].GetSearch().GetStatus())
+			require.NoError(t, merr.Error(recovery.Results[0].GetSearch().GetStatus()))
 			t.Logf("MULTISEARCH_CANCEL transport=%s code=3002 task_count=%d recovered=true", transport, len(batch.GetTaskIds()))
 		})
 	}
 }
 
-func createMultiSearchCollection(ctx context.Context, t *testing.T, mc *base.MilvusClient, name string, pk int64) {
+func executeDQLSearchRequests(searches ...*milvuspb.SearchRequest) []*milvuspb.DQLRequest {
+	requests := make([]*milvuspb.DQLRequest, len(searches))
+	for i, search := range searches {
+		requests[i] = &milvuspb.DQLRequest{Request: &milvuspb.DQLRequest_Search{Search: search}}
+	}
+	return requests
+}
+
+func createExecuteDQLCollection(ctx context.Context, t *testing.T, mc *base.MilvusClient, name string, pk int64) {
 	t.Helper()
 	schema := entity.NewSchema().WithName(name).
 		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
@@ -245,11 +255,11 @@ func createMultiSearchCollection(ctx context.Context, t *testing.T, mc *base.Mil
 	require.NoError(t, load.Await(ctx))
 }
 
-func TestMultiSearchOrderedResults(t *testing.T) {
+func TestExecuteDQLOrderedResults(t *testing.T) {
 	t.Parallel()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	db := common.GenRandomString("multisearch_db", 6)
+	db := common.GenRandomString("execute_dql_db", 6)
 	require.NoError(t, mc.CreateDatabase(ctx, client.NewCreateDatabaseOption(db)))
 	t.Cleanup(func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -257,9 +267,9 @@ func TestMultiSearchOrderedResults(t *testing.T) {
 		require.NoError(t, mc.DropDatabase(cleanupCtx, client.NewDropDatabaseOption(db)))
 	})
 	archive := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{DBName: db})
-	name := common.GenRandomString("multisearch", 6)
-	createMultiSearchCollection(ctx, t, mc, name, 1)
-	createMultiSearchCollection(ctx, t, archive, name, 101)
+	name := common.GenRandomString("execute_dql", 6)
+	createExecuteDQLCollection(ctx, t, mc, name, 1)
+	createExecuteDQLCollection(ctx, t, archive, name, 101)
 
 	vectors := []entity.Vector{entity.FloatVector{1, 0}, entity.FloatVector{0, 1}}
 	req, err := client.NewSearchOption(name, 3, vectors).
@@ -277,36 +287,39 @@ func TestMultiSearchOrderedResults(t *testing.T) {
 	missing.CollectionName += "_missing"
 
 	service := archive.GetService()
-	batch := &milvuspb.MultiSearchRequest{
-		Requests:       []*milvuspb.SearchRequest{req, missing, explicit, empty},
+	batch := &milvuspb.ExecuteDQLRequest{
+		Requests:       executeDQLSearchRequests(req, missing, explicit, empty),
 		MaxConcurrency: 2,
 	}
-	response, err := service.MultiSearch(ctx, batch)
+	response, err := service.ExecuteDQL(ctx, batch)
 	require.NoError(t, merr.CheckRPCCall(response, err))
 	require.Len(t, response.GetResults(), 4)
 
 	for _, i := range []int{0, 2, 3} {
-		ordinary, err := service.Search(ctx, batch.Requests[i])
+		ordinary, err := service.Search(ctx, batch.Requests[i].GetSearch())
 		require.NoError(t, merr.CheckRPCCall(ordinary, err))
 		item := response.Results[i]
 		require.NotNil(t, item)
+		require.NotNil(t, item.GetStatus())
 		require.NoError(t, merr.Error(item.GetStatus()))
-		require.Equal(t, ordinary.GetCollectionName(), item.GetCollectionName())
-		require.True(t, proto.Equal(ordinary.GetResults(), item.GetResults()), "item %d differs from Search", i)
-		require.EqualValues(t, 2, item.GetResults().GetNumQueries())
+		require.NotNil(t, item.GetSearch().GetStatus())
+		require.NoError(t, merr.Error(item.GetSearch().GetStatus()))
+		require.Equal(t, ordinary.GetCollectionName(), item.GetSearch().GetCollectionName())
+		require.True(t, proto.Equal(ordinary.GetResults(), item.GetSearch().GetResults()), "item %d differs from Search", i)
+		require.EqualValues(t, 2, item.GetSearch().GetResults().GetNumQueries())
 	}
-	require.Equal(t, []int64{2, 2}, response.Results[0].GetResults().GetTopks())
-	require.Equal(t, int64(101), response.Results[0].GetResults().GetIds().GetIntId().GetData()[0])
-	require.Equal(t, int64(1), response.Results[2].GetResults().GetIds().GetIntId().GetData()[0])
+	require.Equal(t, []int64{2, 2}, response.Results[0].GetSearch().GetResults().GetTopks())
+	require.Equal(t, int64(101), response.Results[0].GetSearch().GetResults().GetIds().GetIntId().GetData()[0])
+	require.Equal(t, int64(1), response.Results[2].GetSearch().GetResults().GetIds().GetIntId().GetData()[0])
 	failure := response.Results[1]
 	require.NotNil(t, failure)
 	require.ErrorIs(t, merr.Error(failure.GetStatus()), merr.ErrCollectionNotFound)
-	require.Nil(t, failure.GetResults())
-	require.Empty(t, response.Results[3].GetResults().GetIds().GetIntId().GetData())
+	require.Nil(t, failure.GetResult())
+	require.Empty(t, response.Results[3].GetSearch().GetResults().GetIds().GetIntId().GetData())
 
 	t.Run("high concurrency preserves every result", func(t *testing.T) {
 		requests := slices.Repeat(batch.Requests, 5)
-		resp, err := service.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
+		resp, err := service.ExecuteDQL(ctx, &milvuspb.ExecuteDQLRequest{
 			Requests: requests, MaxConcurrency: ^uint32(0),
 		})
 		require.NoError(t, merr.CheckRPCCall(resp, err))
@@ -314,32 +327,38 @@ func TestMultiSearchOrderedResults(t *testing.T) {
 		for i, item := range resp.Results {
 			want := response.Results[i%len(batch.Requests)]
 			require.Equal(t, want.GetStatus().GetCode(), item.GetStatus().GetCode(), "item %d", i)
-			require.True(t, proto.Equal(want.GetResults(), item.GetResults()), "item %d", i)
+			if merr.Ok(item.GetStatus()) {
+				require.NotNil(t, item.GetSearch().GetStatus(), "item %d", i)
+				require.NoError(t, merr.Error(item.GetSearch().GetStatus()), "item %d", i)
+				require.True(t, proto.Equal(want.GetSearch().GetResults(), item.GetSearch().GetResults()), "item %d", i)
+			} else {
+				require.Nil(t, item.GetResult(), "item %d", i)
+			}
 		}
 	})
 
 	t.Run("unused database metadata", func(t *testing.T) {
 		missingDB := metadata.AppendToOutgoingContext(ctx, "dbname", db+"_missing")
-		resp, err := service.MultiSearch(missingDB, &milvuspb.MultiSearchRequest{
-			Requests: []*milvuspb.SearchRequest{explicit},
+		resp, err := service.ExecuteDQL(missingDB, &milvuspb.ExecuteDQLRequest{
+			Requests: executeDQLSearchRequests(explicit),
 		})
 		require.NoError(t, merr.CheckRPCCall(resp, err))
 		require.Len(t, resp.GetResults(), 1)
 		require.NoError(t, merr.Error(resp.Results[0].GetStatus()))
 	})
 	t.Run("empty search fails per item", func(t *testing.T) {
-		resp, err := service.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
-			Requests: []*milvuspb.SearchRequest{req, {}},
+		resp, err := service.ExecuteDQL(ctx, &milvuspb.ExecuteDQLRequest{
+			Requests: executeDQLSearchRequests(req, &milvuspb.SearchRequest{}),
 		})
 		require.NoError(t, merr.CheckRPCCall(resp, err))
 		require.Len(t, resp.GetResults(), 2)
 		require.NoError(t, merr.Error(resp.Results[0].GetStatus()))
 		require.ErrorIs(t, merr.Error(resp.Results[1].GetStatus()), merr.ErrParameterInvalid)
-		require.Nil(t, resp.Results[1].GetResults())
+		require.Nil(t, resp.Results[1].GetResult())
 	})
 	t.Run("budget exhausted", func(t *testing.T) {
 		zero := int64(0)
-		resp, err := service.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
+		resp, err := service.ExecuteDQL(ctx, &milvuspb.ExecuteDQLRequest{
 			Requests:       batch.GetRequests(),
 			TimeoutMs:      &zero,
 			MaxConcurrency: 1,
@@ -349,7 +368,7 @@ func TestMultiSearchOrderedResults(t *testing.T) {
 		for _, item := range resp.GetResults() {
 			require.NotNil(t, item)
 			require.Equal(t, merr.TimeoutCode, item.GetStatus().GetCode())
-			require.Nil(t, item.GetResults())
+			require.Nil(t, item.GetResult())
 		}
 	})
 }

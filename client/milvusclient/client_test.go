@@ -47,14 +47,14 @@ func TestClient(t *testing.T) {
 	suite.Run(t, new(ClientSuite))
 }
 
-func (s *ClientSuite) TestMultiSearchDoesNotRetryParameterTooLarge() {
+func (s *ClientSuite) TestExecuteDQLDoesNotRetryParameterTooLarge() {
 	const parameterTooLarge = 1102
-	s.mock.EXPECT().MultiSearch(mock.Anything, mock.Anything).Return(&milvuspb.MultiSearchResponse{
-		Status: &commonpb.Status{Code: parameterTooLarge, Reason: "MultiSearch response exceeds maxResultBytes"},
+	s.mock.EXPECT().ExecuteDQL(mock.Anything, mock.Anything).Return(&milvuspb.ExecuteDQLResponse{
+		Status: &commonpb.Status{Code: parameterTooLarge, Reason: "ExecuteDQL response exceeds maxResultBytes"},
 	}, nil).Once()
-	response, err := s.client.GetService().MultiSearch(s.T().Context(), &milvuspb.MultiSearchRequest{})
+	response, err := s.client.GetService().ExecuteDQL(s.T().Context(), &milvuspb.ExecuteDQLRequest{})
 	s.Require().NoError(err)
 	s.EqualValues(parameterTooLarge, merr.Code(merr.CheckRPCCall(response, err)))
 	s.Empty(response.GetResults())
-	s.mock.AssertNumberOfCalls(s.T(), "MultiSearch", 1)
+	s.mock.AssertNumberOfCalls(s.T(), "ExecuteDQL", 1)
 }

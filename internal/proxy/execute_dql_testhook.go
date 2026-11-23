@@ -34,39 +34,39 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
-// NewMultiSearchTestProxy starts the real task scheduler for transport tests.
-func NewMultiSearchTestProxy(t *testing.T, queueCapacity, workers int) *Proxy {
+// NewExecuteDQLTestProxy starts the real task scheduler for transport tests.
+func NewExecuteDQLTestProxy(t *testing.T, queueCapacity, workers int) *Proxy {
 	t.Helper()
-	s, err := scheduler.NewTaskScheduler(t.Context(), &multiSearchTestTSO{}, scheduler.WithMultiSearchQueue(queueCapacity, workers))
+	s, err := scheduler.NewTaskScheduler(t.Context(), &executeDQLTestTSO{}, scheduler.WithExecuteDQLQueue(queueCapacity, workers))
 	require.NoError(t, err)
 	require.NoError(t, s.Start())
 	t.Cleanup(s.Close)
 	p := &Proxy{sched: s, requests: reqregistry.New()}
-	p.setMetaCache(&multiSearchTestCache{})
+	p.setMetaCache(&executeDQLTestCache{})
 	p.UpdateStateCode(commonpb.StateCode_Healthy)
 	return p
 }
 
 // Batch task IDs use the cache allocator; ordinary DQL tasks still use TSO.
-type multiSearchTestCache struct {
+type executeDQLTestCache struct {
 	Cache
 	id atomic.Int64
 }
 
-func (c *multiSearchTestCache) AllocID(context.Context) (int64, error) {
+func (c *executeDQLTestCache) AllocID(context.Context) (int64, error) {
 	return c.id.Add(1), nil
 }
 
-type multiSearchTestTSO struct{ logical atomic.Int64 }
+type executeDQLTestTSO struct{ logical atomic.Int64 }
 
-func (a *multiSearchTestTSO) AllocOne(context.Context) (taskmodel.Timestamp, error) {
+func (a *executeDQLTestTSO) AllocOne(context.Context) (taskmodel.Timestamp, error) {
 	return tsoutil.ComposeTSByTimeWithLogical(time.Now(), a.logical.Add(1)), nil
 }
 
-// SetMultiSearchSearchDependenciesForTest supplies metadata and shard routing
+// SetExecuteDQLSearchDependenciesForTest supplies metadata and shard routing
 // to ordinary Search on the same scheduler as the outer batch.
-func SetMultiSearchSearchDependenciesForTest(p *Proxy, cache Cache, policy shardclient.LBPolicy) *scheduler.TaskScheduler {
-	p.setMetaCache(&multiSearchTestCache{Cache: cache})
+func SetExecuteDQLSearchDependenciesForTest(p *Proxy, cache Cache, policy shardclient.LBPolicy) *scheduler.TaskScheduler {
+	p.setMetaCache(&executeDQLTestCache{Cache: cache})
 	p.lbPolicy = policy
 	return p.sched
 }

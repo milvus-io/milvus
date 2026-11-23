@@ -375,7 +375,7 @@ func TestExprCacheConfig(t *testing.T) {
 	}
 }
 
-func TestMultiSearchLimitsConfig(t *testing.T) {
+func TestExecuteDQLLimitsConfig(t *testing.T) {
 	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
 	t.Cleanup(base.mgr.Close)
 	params := proxyConfig{}
@@ -385,8 +385,8 @@ func TestMultiSearchLimitsConfig(t *testing.T) {
 		item     *ParamItem
 		fallback int64
 	}{
-		{&params.MultiSearchMaxBatchSize, 256},
-		{&params.MultiSearchMaxResultBytes, 64 * 1024 * 1024},
+		{&params.ExecuteDQLMaxBatchSize, 256},
+		{&params.ExecuteDQLMaxResultBytes, 64 * 1024 * 1024},
 	} {
 		t.Run(tc.item.Key, func(t *testing.T) {
 			require.Equal(t, tc.fallback, tc.item.GetAsInt64())

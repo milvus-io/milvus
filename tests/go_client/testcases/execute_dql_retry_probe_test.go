@@ -22,20 +22,20 @@ import (
 )
 
 // Run alone on the controlled retry deployment (quota enabled and a short
-// quota collection interval), with -multisearch-resource-probes.
-func TestMultiSearchQuotaRecovery(t *testing.T) {
-	if !*multiSearchResourceProbes {
-		t.Skip("requires -multisearch-resource-probes and an isolated quota-enabled deployment")
+// quota collection interval), with -execute-dql-resource-probes.
+func TestExecuteDQLQuotaRecovery(t *testing.T) {
+	if !*executeDQLResourceProbes {
+		t.Skip("requires -execute-dql-resource-probes and an isolated quota-enabled deployment")
 	}
 	for _, route := range []string{"grpc", "rest"} {
 		t.Run(route, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 			defer cancel()
 			mc := hp.CreateDefaultMilvusClient(ctx, t)
-			readyName := common.GenRandomString("multisearch_ready", 8)
-			limitedName := common.GenRandomString("multisearch_limited", 8)
-			createMultiSearchCollection(ctx, t, mc, readyName, 1)
-			createMultiSearchCollection(ctx, t, mc, limitedName, 101)
+			readyName := common.GenRandomString("execute_dql_ready", 8)
+			limitedName := common.GenRandomString("execute_dql_limited", 8)
+			createExecuteDQLCollection(ctx, t, mc, readyName, 1)
+			createExecuteDQLCollection(ctx, t, mc, limitedName, 101)
 			makeRequest := func(name string, nq int) *milvuspb.SearchRequest {
 				vectors := make([]entity.Vector, nq)
 				for i := range nq {
@@ -66,14 +66,20 @@ func TestMultiSearchQuotaRecovery(t *testing.T) {
 					requests = append([]*milvuspb.SearchRequest{ready}, requests...)
 				}
 				if route == "grpc" {
-					response, callErr := service.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
-						Requests: requests, MaxConcurrency: 2, TimeoutMs: budget,
+					response, callErr := service.ExecuteDQL(ctx, &milvuspb.ExecuteDQLRequest{
+						Requests: executeDQLSearchRequests(requests...), MaxConcurrency: 2, TimeoutMs: budget,
 					})
 					require.NoError(t, merr.CheckRPCCall(response, callErr))
 					require.Len(t, response.GetResults(), len(requests))
 					codes := make([]int32, len(requests))
 					for i, item := range response.Results {
 						codes[i] = merr.Code(merr.Error(item.GetStatus()))
+						if codes[i] == 0 {
+							require.NotNil(t, item.GetSearch().GetStatus())
+							require.NoError(t, merr.Error(item.GetSearch().GetStatus()))
+						} else {
+							require.Nil(t, item.GetResult())
+						}
 					}
 					return codes
 				}
@@ -98,9 +104,9 @@ func TestMultiSearchQuotaRecovery(t *testing.T) {
 				}
 				body, marshalErr := json.Marshal(payload)
 				require.NoError(t, marshalErr)
-				endpoint, token := multiSearchRESTConfig()
+				endpoint, token := executeDQLRESTConfig()
 				request, requestErr := http.NewRequestWithContext(ctx, http.MethodPost,
-					endpoint+"/v2/vectordb/entities/multi_search", bytes.NewReader(body))
+					endpoint+"/v2/vectordb/entities/execute_dql", bytes.NewReader(body))
 				require.NoError(t, requestErr)
 				request.Header.Set("Authorization", "Bearer "+token)
 				request.Header.Set("Content-Type", "application/json")
@@ -111,9 +117,9 @@ func TestMultiSearchQuotaRecovery(t *testing.T) {
 				var result struct {
 					Code int32 `json:"code"`
 					Data []struct {
-						Search struct {
-							Code int32 `json:"code"`
-						} `json:"search"`
+						Code    int32           `json:"code"`
+						Message string          `json:"message"`
+						Search  json.RawMessage `json:"search"`
 					} `json:"data"`
 				}
 				require.NoError(t, json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&result))
@@ -121,26 +127,34 @@ func TestMultiSearchQuotaRecovery(t *testing.T) {
 				require.Len(t, result.Data, len(requests))
 				codes := make([]int32, len(result.Data))
 				for i, item := range result.Data {
-					codes[i] = item.Search.Code
+					codes[i] = item.Code
+					if item.Code == 0 {
+						var search struct{ Code int32 }
+						require.NoError(t, json.Unmarshal(item.Search, &search))
+						require.Zero(t, search.Code)
+					} else {
+						require.NotEmpty(t, item.Message)
+						require.Empty(t, item.Search)
+					}
 				}
 				return codes
 			}
 			retries := func() int64 {
-				return multiSearchMetric(t, ctx, "milvus_proxy_multisearch_retries_total", `reason="rate_limit"`)
+				return executeDQLMetric(t, ctx, "milvus_proxy_execute_dql_retries_total", `reason="rate_limit"`)
 			}
 			readyCalls := func() int64 {
-				return multiSearchMetric(t, ctx, "milvus_proxy_req_count", `function_name="Search"`,
+				return executeDQLMetric(t, ctx, "milvus_proxy_req_count", `function_name="Search"`,
 					`status="total"`, `collection_name="`+readyName+`"`)
 			}
 			setRate("4")
 			awaitRefusal(merr.ErrServiceRateLimit)
-			attemptsBefore, retriesBefore, readyBefore := multiSearchAttemptCount(t, ctx), retries(), readyCalls()
+			attemptsBefore, retriesBefore, readyBefore := executeDQLAttemptCount(t, ctx), retries(), readyCalls()
 			budget := int64(5000)
 			started := time.Now()
 			require.Equal(t, []int32{0, 0}, call(true, &budget))
 			retryCount := retries() - retriesBefore
 			require.Positive(t, retryCount)
-			require.Equal(t, int64(2)+retryCount, multiSearchAttemptCount(t, ctx)-attemptsBefore)
+			require.Equal(t, int64(2)+retryCount, executeDQLAttemptCount(t, ctx)-attemptsBefore)
 			require.Equal(t, int64(1), readyCalls()-readyBefore, "the completed item must not run again")
 			t.Logf("MULTISEARCH_QUOTA route=%s scenario=recovery retries=%d elapsed_ms=%d ready_attempts=1", route, retryCount, time.Since(started).Milliseconds())
 
@@ -148,8 +162,8 @@ func TestMultiSearchQuotaRecovery(t *testing.T) {
 			// its token balance, which may refill during the retry window. After
 			// observing zero, consume four tokens at the small positive rate so
 			// the limiter stays depleted for the entire exhaustion/budget checks.
-			limitedName = common.GenRandomString("multisearch_exhausted", 8)
-			createMultiSearchCollection(ctx, t, mc, limitedName, 201)
+			limitedName = common.GenRandomString("execute_dql_exhausted", 8)
+			createExecuteDQLCollection(ctx, t, mc, limitedName, 201)
 			limited = makeRequest(limitedName, 4)
 			setRate("0")
 			awaitRefusal(merr.ErrServiceQuotaExceeded)
@@ -159,17 +173,17 @@ func TestMultiSearchQuotaRecovery(t *testing.T) {
 				return merr.CheckRPCCall(response, callErr) == nil
 			}, 15*time.Second, 20*time.Millisecond, "consume the fresh limiter's first allowance")
 			awaitRefusal(merr.ErrServiceRateLimit)
-			attemptsBefore, retriesBefore = multiSearchAttemptCount(t, ctx), retries()
+			attemptsBefore, retriesBefore = executeDQLAttemptCount(t, ctx), retries()
 			started = time.Now()
 			require.Equal(t, []int32{merr.Code(merr.ErrServiceRateLimit)}, call(false, nil))
-			require.Equal(t, int64(10), multiSearchAttemptCount(t, ctx)-attemptsBefore)
+			require.Equal(t, int64(10), executeDQLAttemptCount(t, ctx)-attemptsBefore)
 			require.Equal(t, int64(9), retries()-retriesBefore)
 			t.Logf("MULTISEARCH_QUOTA route=%s scenario=attempt_limit attempts=10 retries=9 elapsed_ms=%d", route, time.Since(started).Milliseconds())
 
-			attemptsBefore, retriesBefore = multiSearchAttemptCount(t, ctx), retries()
+			attemptsBefore, retriesBefore = executeDQLAttemptCount(t, ctx), retries()
 			budget = 450
 			require.Equal(t, []int32{merr.Code(merr.ErrServiceRateLimit)}, call(false, &budget))
-			require.Equal(t, int64(2), multiSearchAttemptCount(t, ctx)-attemptsBefore)
+			require.Equal(t, int64(2), executeDQLAttemptCount(t, ctx)-attemptsBefore)
 			require.Equal(t, int64(1), retries()-retriesBefore)
 			t.Logf("MULTISEARCH_QUOTA route=%s scenario=remaining_budget budget_ms=450 attempts=2 retries=1", route)
 
@@ -185,9 +199,9 @@ func TestMultiSearchQuotaRecovery(t *testing.T) {
 				response, callErr := service.Search(ctx, ready)
 				return errors.Is(merr.CheckRPCCall(response, callErr), merr.ErrServiceQuotaExceeded)
 			}, 15*time.Second, 50*time.Millisecond)
-			attemptsBefore, retriesBefore = multiSearchAttemptCount(t, ctx), retries()
+			attemptsBefore, retriesBefore = executeDQLAttemptCount(t, ctx), retries()
 			require.Equal(t, []int32{merr.Code(merr.ErrServiceQuotaExceeded), merr.Code(merr.ErrServiceQuotaExceeded)}, call(true, nil))
-			require.Equal(t, int64(2), multiSearchAttemptCount(t, ctx)-attemptsBefore)
+			require.Equal(t, int64(2), executeDQLAttemptCount(t, ctx)-attemptsBefore)
 			require.Equal(t, retriesBefore, retries())
 			t.Logf("MULTISEARCH_QUOTA route=%s scenario=force_deny attempts=2 retries=0", route)
 			_, configErr = hp.AlterServerConfig("quotaAndLimits.limitReading.forceDeny", previous)
@@ -200,9 +214,9 @@ func TestMultiSearchQuotaRecovery(t *testing.T) {
 	}
 }
 
-func TestMultiSearchDQLQueueRecovery(t *testing.T) {
-	if !*multiSearchResourceProbes {
-		t.Skip("requires -multisearch-resource-probes and an isolated deployment with proxy.maxTaskNum=8")
+func TestExecuteDQLDQLQueueRecovery(t *testing.T) {
+	if !*executeDQLResourceProbes {
+		t.Skip("requires -execute-dql-resource-probes and an isolated deployment with proxy.maxTaskNum=8")
 	}
 	maxTasks, err := hp.GetServerConfig("proxy.maxTaskNum")
 	require.NoError(t, err)
@@ -212,12 +226,12 @@ func TestMultiSearchDQLQueueRecovery(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
 			mc := hp.CreateDefaultMilvusClient(ctx, t)
-			name := common.GenRandomString("multisearch_dql", 8)
-			createMultiSearchCollection(ctx, t, mc, name, 1)
+			name := common.GenRandomString("execute_dql_dql", 8)
+			createExecuteDQLCollection(ctx, t, mc, name, 1)
 			request, requestErr := client.NewSearchOption(name, 1, []entity.Vector{entity.FloatVector{1, 0}}).
 				WithANNSField("vector").WithConsistencyLevel(entity.ClEventually).Request()
 			require.NoError(t, requestErr)
-			blocked := multiSearchBlockingRequest(request)
+			blocked := executeDQLBlockingRequest(request)
 			service := mc.GetService()
 			blockedCtx, release := context.WithCancel(ctx)
 			defer release()
@@ -236,9 +250,9 @@ func TestMultiSearchDQLQueueRecovery(t *testing.T) {
 				t.Fatal("DQL queue did not fill")
 			}
 			retries := func() int64 {
-				return multiSearchMetric(t, ctx, "milvus_proxy_multisearch_retries_total", `reason="queue_full"`)
+				return executeDQLMetric(t, ctx, "milvus_proxy_execute_dql_retries_total", `reason="queue_full"`)
 			}
-			before, attempts := retries(), multiSearchAttemptCount(t, ctx)
+			before, attempts := retries(), executeDQLAttemptCount(t, ctx)
 			type outcome struct {
 				outer int32
 				item  int32
@@ -248,8 +262,8 @@ func TestMultiSearchDQLQueueRecovery(t *testing.T) {
 			if route == "grpc" {
 				go func() {
 					budget := int64(5000)
-					response, callErr := service.MultiSearch(ctx, &milvuspb.MultiSearchRequest{
-						Requests: []*milvuspb.SearchRequest{request}, TimeoutMs: &budget,
+					response, callErr := service.ExecuteDQL(ctx, &milvuspb.ExecuteDQLRequest{
+						Requests: executeDQLSearchRequests(request), TimeoutMs: &budget,
 					})
 					got := outcome{outer: -1, item: -1, err: callErr}
 					if response != nil {
@@ -267,9 +281,9 @@ func TestMultiSearchDQLQueueRecovery(t *testing.T) {
 					}}}, "timeoutMs": 5000,
 				})
 				require.NoError(t, marshalErr)
-				endpoint, token := multiSearchRESTConfig()
+				endpoint, token := executeDQLRESTConfig()
 				httpRequest, requestErr := http.NewRequestWithContext(ctx, http.MethodPost,
-					endpoint+"/v2/vectordb/entities/multi_search", bytes.NewReader(body))
+					endpoint+"/v2/vectordb/entities/execute_dql", bytes.NewReader(body))
 				require.NoError(t, requestErr)
 				httpRequest.Header.Set("Authorization", "Bearer "+token)
 				httpRequest.Header.Set("Content-Type", "application/json")
@@ -281,16 +295,14 @@ func TestMultiSearchDQLQueueRecovery(t *testing.T) {
 						var decoded struct {
 							Code int32 `json:"code"`
 							Data []struct {
-								Search struct {
-									Code int32 `json:"code"`
-								} `json:"search"`
+								Code int32 `json:"code"`
 							} `json:"data"`
 						}
 						got.err = json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&decoded)
 						if response.StatusCode == http.StatusOK {
 							got.outer = decoded.Code
 							if len(decoded.Data) == 1 {
-								got.item = decoded.Data[0].Search.Code
+								got.item = decoded.Data[0].Code
 							}
 						}
 					}
@@ -317,7 +329,7 @@ func TestMultiSearchDQLQueueRecovery(t *testing.T) {
 			}
 			retryCount := retries() - before
 			require.Positive(t, retryCount)
-			require.Equal(t, retryCount+1, multiSearchAttemptCount(t, ctx)-attempts)
+			require.Equal(t, retryCount+1, executeDQLAttemptCount(t, ctx)-attempts)
 			t.Logf("MULTISEARCH_DQL_RECOVERY route=%s retries=%d recovered=true", route, retryCount)
 		})
 	}

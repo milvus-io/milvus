@@ -33,71 +33,79 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-type multiSearchReceivedAtKey struct{}
+type executeDQLReceivedAtKey struct{}
 
-type multiSearchRunner interface {
-	RunMultiSearch(context.Context, proxy.MultiSearchOptions, []proxy.MultiSearchPrepare, proxy.MultiSearchExecute) ([]*milvuspb.SearchResults, error)
+type executeDQLRunner interface {
+	RunExecuteDQL(context.Context, proxy.ExecuteDQLOptions, []proxy.ExecuteDQLPrepare, proxy.ExecuteDQLExecute) ([]*milvuspb.DQLResult, error)
 }
 
-var _ multiSearchRunner = (*proxy.Proxy)(nil)
+var _ executeDQLRunner = (*proxy.Proxy)(nil)
 
-func (s *Server) MultiSearch(ctx context.Context, req *milvuspb.MultiSearchRequest) (*milvuspb.MultiSearchResponse, error) {
-	fail := func(err error) (*milvuspb.MultiSearchResponse, error) {
-		return &milvuspb.MultiSearchResponse{Status: merr.Status(err)}, nil
+func (s *Server) ExecuteDQL(ctx context.Context, req *milvuspb.ExecuteDQLRequest) (*milvuspb.ExecuteDQLResponse, error) {
+	fail := func(err error) (*milvuspb.ExecuteDQLResponse, error) {
+		return &milvuspb.ExecuteDQLResponse{Status: merr.Status(err)}, nil
 	}
 	requests := req.GetRequests()
 	if len(requests) == 0 {
-		return fail(merr.WrapErrParameterMissingMsg("MultiSearch requires at least one search"))
+		return fail(merr.WrapErrParameterMissingMsg("ExecuteDQL requires at least one operation"))
 	}
-	if err := proxy.CheckMultiSearchBatchSize(len(requests)); err != nil {
+	if err := proxy.CheckExecuteDQLBatchSize(len(requests)); err != nil {
 		return fail(err)
 	}
-	receivedAt, ok := ctx.Value(multiSearchReceivedAtKey{}).(time.Time)
+	receivedAt, ok := ctx.Value(executeDQLReceivedAtKey{}).(time.Time)
 	if !ok {
 		receivedAt = time.Now()
 	}
-	deadline, err := proxy.MultiSearchExecutionDeadline(receivedAt, req.TimeoutMs)
+	deadline, err := proxy.ExecuteDQLExecutionDeadline(receivedAt, req.TimeoutMs)
 	if err != nil {
 		return fail(err)
 	}
-	items := make([]proxy.MultiSearchPrepare, len(requests))
-	for i, search := range requests {
+	items := make([]proxy.ExecuteDQLPrepare, len(requests))
+	for i, item := range requests {
+		operation, ok := item.GetRequest().(*milvuspb.DQLRequest_Search)
+		if !ok {
+			return fail(merr.WrapErrParameterInvalidMsg("requests[%d] must contain a Search operation", i))
+		}
+		var search *milvuspb.SearchRequest
+		if operation != nil {
+			search = operation.Search
+		}
 		items[i] = func(ctx context.Context) (*milvuspb.SearchRequest, error) {
-			return prepareMultiSearchRequest(ctx, search)
+			return prepareExecuteDQLSearch(ctx, search)
 		}
 	}
-	runner, ok := s.proxy.(multiSearchRunner)
-	if !ok || s.multiSearchExecute == nil {
-		return fail(merr.Wrap(merr.ErrServiceUnimplemented, "MultiSearch is unavailable"))
+	runner, ok := s.proxy.(executeDQLRunner)
+	if !ok || s.executeDQLExecute == nil {
+		return fail(merr.Wrap(merr.ErrServiceUnimplemented, "ExecuteDQL is unavailable"))
 	}
-	options := proxy.MultiSearchOptions{MaxConcurrency: req.GetMaxConcurrency(), ExecutionDeadline: deadline}
-	results, err := runner.RunMultiSearch(ctx, options, items, s.multiSearchExecute)
+	options := proxy.ExecuteDQLOptions{MaxConcurrency: req.GetMaxConcurrency(), ExecutionDeadline: deadline}
+	results, err := runner.RunExecuteDQL(ctx, options, items, s.executeDQLExecute)
 	if err != nil {
 		if parentErr := ctx.Err(); parentErr != nil {
 			return nil, status.FromContextError(parentErr).Err()
 		}
 		return fail(err)
 	}
-	return &milvuspb.MultiSearchResponse{
+	return &milvuspb.ExecuteDQLResponse{
 		Status:  merr.Success(),
 		Results: results,
 	}, nil
 }
 
-func prepareMultiSearchRequest(ctx context.Context, search *milvuspb.SearchRequest) (*milvuspb.SearchRequest, error) {
+func prepareExecuteDQLSearch(ctx context.Context, search *milvuspb.SearchRequest) (*milvuspb.SearchRequest, error) {
 	request := proto.CloneOf(search)
 	if request == nil {
-		// A nil repeated message is encoded as an empty Search request on the wire.
+		// A selected Search with an empty payload is validated as an item.
 		request = &milvuspb.SearchRequest{}
 	}
 	request.DbName = proxy.GetCurDBNameFromRequestOrContext(ctx, request)
-	if err := dql.NormalizeMultiSearchNQ(request); err != nil {
+	if err := dql.NormalizeExecuteDQLNQ(request); err != nil {
 		return nil, err
 	}
 	return request, nil
 }
 
-func newMultiSearchExecutor(component types.ProxyComponent, entry grpc.UnaryServerInterceptor) proxy.MultiSearchExecute {
+func newExecuteDQLExecutor(component types.ProxyComponent, entry grpc.UnaryServerInterceptor) proxy.ExecuteDQLExecute {
 	info := &grpc.UnaryServerInfo{Server: component, FullMethod: milvuspb.MilvusService_Search_FullMethodName}
 	search := func(ctx context.Context, req any) (any, error) {
 		return component.Search(ctx, req.(*milvuspb.SearchRequest))

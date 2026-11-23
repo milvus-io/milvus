@@ -95,15 +95,15 @@ edge stays acyclic.
   and enqueues concrete tasks from `impl.go` / `snapshot_impl.go`; consumes
   `GetMetrics` from `metrics_info.go`.
 
-## MultiSearch queue
+## ExecuteDQL queue
 
-MultiSearch adds a fifth queue, `MSearchQueue`, for batch orchestration. Its
+ExecuteDQL adds a fifth queue, `ExecuteDQLQueue`, for batch orchestration. Its
 64 waiting slots and eight workers are independent of DQL. Workers pop only
 when free, so a saturated worker pool leaves all waiting batches inside the
 admission bound. A canceled waiter removes its task while it is still queued.
 
-MultiSearch derives its execution context from both the caller and
-`TaskScheduler.Context()`. `Close` cancels that context and waits for the MSearch
+ExecuteDQL derives its execution context from both the caller and
+`TaskScheduler.Context()`. `Close` cancels that context and waits for the ExecuteDQL
 workers, including searches still unwinding after a timeout response. Batch
 result finalization belongs to the concrete task and the scheduler runs the
 standard success-only `PreExecute -> Execute -> PostExecute` sequence.

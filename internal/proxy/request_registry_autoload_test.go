@@ -101,12 +101,12 @@ func TestOperatorCancelWhileWaitingForAutoLoad(t *testing.T) {
 
 // A completed child must not finish the parent's registry entry. Exercise
 // public Search, including its registration and deferred response finalizer.
-func TestMultiSearchChildCompletionKeepsParentCancelable(t *testing.T) {
+func TestExecuteDQLChildCompletionKeepsParentCancelable(t *testing.T) {
 	enableAutoLoad(t)
 	oldRateCol := rateCol
 	t.Cleanup(func() { rateCol = oldRateCol })
-	p := NewMultiSearchTestProxy(t, 1, 1)
-	p.setMetaCache(&multiSearchTestCache{Cache: mockSearchCollectionMeta(t, 100, []string{"v0"})})
+	p := NewExecuteDQLTestProxy(t, 1, 1)
+	p.setMetaCache(&executeDQLTestCache{Cache: mockSearchCollectionMeta(t, 100, []string{"v0"})})
 	require.NoError(t, p.initRateCollector())
 	coord := mocks.NewMockMixCoordClient(t)
 	p.mixCoord = coord
@@ -128,8 +128,8 @@ func TestMultiSearchChildCompletionKeepsParentCancelable(t *testing.T) {
 		return &milvuspb.SearchRequest{DbName: "db", CollectionName: "collection", Nq: 1}, nil
 	}
 	go func() {
-		results, err := p.RunMultiSearch(ctx, MultiSearchOptions{MaxConcurrency: 1},
-			[]MultiSearchPrepare{prepare, prepare, prepare}, p.Search)
+		results, err := p.RunExecuteDQL(ctx, ExecuteDQLOptions{MaxConcurrency: 1},
+			[]ExecuteDQLPrepare{prepare, prepare, prepare}, p.Search)
 		if len(results) != 0 {
 			t.Error("operator cancellation returned completed child results")
 		}
@@ -140,7 +140,7 @@ func TestMultiSearchChildCompletionKeepsParentCancelable(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, listed.GetRequests(), 1, "children share the batch's registration")
 	batch := listed.Requests[0]
-	require.Equal(t, reqregistry.TypeMultiSearch, batch.GetType())
+	require.Equal(t, reqregistry.TypeExecuteDQL, batch.GetType())
 	require.True(t, batch.GetCancellable())
 	canceled, err := p.CancelLocalRequests(ctx, &milvuspb.CancelRequestsRequest{RequestIds: []string{batch.GetRequestId()}})
 	require.NoError(t, err)

@@ -29,20 +29,25 @@ def post_search(endpoint, token, operation, body, **headers):
 
 def run_batch(endpoint, token, searches, options=None, **headers):
     body = {"requests": [{"search": item} for item in searches], **(options or {})}
-    response = post_search(endpoint, token, "multi_search", body, **headers)
+    response = post_search(endpoint, token, "execute_dql", body, **headers)
     assert response.status_code == 200, response.text
     batch = response.json()
     assert batch["code"] == 0, batch
     assert len(batch["data"]) == len(searches), batch
-    return [item["search"] for item in batch["data"]]
+    for item in batch["data"]:
+        if item["code"] == 0:
+            assert item["search"]["code"] == 0, item
+        else:
+            assert item["message"] and "search" not in item, item
+    return batch["data"]
 
 
 @pytest.fixture(scope="class")
 def search_targets(endpoint, token, request):
-    db = gen_unique_str("multisearch_db")
-    shared = gen_unique_str("multisearch_shared")
-    other = gen_unique_str("multisearch_other")
-    alias = gen_unique_str("multisearch_alias")
+    db = gen_unique_str("execute_dql_db")
+    shared = gen_unique_str("execute_dql_shared")
+    other = gen_unique_str("execute_dql_other")
+    alias = gen_unique_str("execute_dql_alias")
     database = DatabaseClient(endpoint, token)
     collections = CollectionClient(endpoint, token)
     vectors = VectorClient(endpoint, token)
@@ -94,7 +99,7 @@ def search_targets(endpoint, token, request):
 
 
 @pytest.mark.tags(CaseLabel.L0)
-class TestMultiSearch:
+class TestExecuteDQL:
     @pytest.mark.parametrize("allow_int64", ["true", "false"])
     def test_ordered_native_results(self, endpoint, token, search_targets, allow_int64):
         _, shared, other, _ = search_targets
@@ -108,19 +113,20 @@ class TestMultiSearch:
         ]
         headers = {"Accept-Type-Allow-Int64": allow_int64}
         results = run_batch(endpoint, token, searches, {"maxConcurrency": 3}, **headers)
-        for query, item in zip(searches[:4], results[:4]):
+        for query, result in zip(searches[:4], results[:4]):
+            item = result["search"]
             ordinary = post_search(endpoint, token, "search", query, **headers).json()
-            assert item["code"] == ordinary["code"] == 0, (item, ordinary)
+            assert result["code"] == item["code"] == ordinary["code"] == 0, (item, ordinary)
             assert item["data"] == ordinary["data"], (item, ordinary)
             assert item.get("topks") == ordinary.get("topks"), (item, ordinary)
             assert item.keys() == ordinary.keys(), (item, ordinary)
-        assert results[0]["topks"] == [1, 1]
+        assert results[0]["search"]["topks"] == [1, 1]
         expected_id = BASE_ID if allow_int64 == "true" else str(BASE_ID)
-        assert results[0]["data"][0]["id"] == expected_id
-        assert results[0]["data"][0]["marker"] == expected_id
-        assert results[1]["topks"] == [2, 2]
-        assert results[3]["data"] == []
-        assert all(item["code"] != 0 and "data" not in item for item in results[4:])
+        assert results[0]["search"]["data"][0]["id"] == expected_id
+        assert results[0]["search"]["data"][0]["marker"] == expected_id
+        assert results[1]["search"]["topks"] == [2, 2]
+        assert results[3]["search"]["data"] == []
+        assert all(item["code"] != 0 for item in results[4:])
         assert all(item["code"] != 0 for item in run_batch(endpoint, token, searches[4:]))
 
     def test_high_concurrency_preserves_every_result(self, endpoint, token, search_targets):
@@ -130,7 +136,7 @@ class TestMultiSearch:
         results = run_batch(endpoint, token, searches, {"maxConcurrency": 2**32 - 1})
         for (_, pk), item in zip(targets, results):
             assert item["code"] == 0, item
-            assert [int(hit["id"]) for hit in item["data"]] == [pk], item
+            assert [int(hit["id"]) for hit in item["search"]["data"]] == [pk], item
 
     def test_database_precedence(self, endpoint, token, search_targets):
         db, shared, _, alias = search_targets
@@ -142,13 +148,13 @@ class TestMultiSearch:
             **headers,
         )
         assert [result["code"] for result in results] == [0, 0, 0], results
-        assert [int(result["data"][0]["id"]) for result in results] == [41, BASE_ID, 41]
+        assert [int(result["search"]["data"][0]["id"]) for result in results] == [41, BASE_ID, 41]
         results = run_batch(endpoint, token, [search_request(alias, dbName=db)], **{"DB-Name": f"{db}_missing"})
         assert results[0]["code"] == 0, results
-        assert int(results[0]["data"][0]["id"]) == 41
+        assert int(results[0]["search"]["data"][0]["id"]) == 41
         results = run_batch(endpoint, token, [search_request(alias)])
         assert results[0]["code"] == 0, results
-        assert int(results[0]["data"][0]["id"]) == BASE_ID
+        assert int(results[0]["search"]["data"][0]["id"]) == BASE_ID
 
     def test_structure_and_expired_budget(self, endpoint, token, search_targets):
         _, shared, _, _ = search_targets
@@ -159,26 +165,25 @@ class TestMultiSearch:
             {"requests": [valid_search, {}]},
             {"requests": [valid_search], "timeoutMs": -1},
         ]:
-            response = post_search(endpoint, token, "multi_search", payload)
+            response = post_search(endpoint, token, "execute_dql", payload)
             assert response.json()["code"] != 0, response.text
-            assert not response.json().get("data"), response.text
+            assert "data" not in response.json(), response.text
         results = run_batch(
             endpoint, token, [search_request(shared), search_request(shared)], {"timeoutMs": 0, "maxConcurrency": 1}
         )
         assert [item["code"] for item in results] == [TIMEOUT_CODE, TIMEOUT_CODE], results
-        assert all("data" not in item for item in results)
         assert run_batch(endpoint, token, [search_request(shared)], {"timeoutMs": 10000})[0]["code"] == 0
 
 
 @pytest.mark.tags(CaseLabel.RBAC)
-class TestMultiSearchRBAC:
+class TestExecuteDQLRBAC:
     def test_invalid_credentials_rejected(self, endpoint, search_targets):
         _, shared, _, _ = search_targets
         response = post_search(
-            endpoint, "unknown:bad", "multi_search", {"requests": [{"search": search_request(shared)}]}
+            endpoint, "unknown:bad", "execute_dql", {"requests": [{"search": search_request(shared)}]}
         )
         assert response.json()["code"] != 0, response.text
-        assert not response.json().get("data"), response.text
+        assert "data" not in response.json(), response.text
 
     def test_cached_targets_still_require_search_privilege(self, endpoint, token, search_targets, request):
         db, shared, _, _ = search_targets
@@ -210,4 +215,4 @@ class TestMultiSearchRBAC:
         assert [item["code"] for item in warm] == [0, 0]
         results = run_batch(endpoint, f"{user}:{password}", searches, {"maxConcurrency": 2})
         assert [item["code"] for item in results] == [PRIVILEGE_NOT_PERMITTED, 0], results
-        assert int(results[1]["data"][0]["id"]) == BASE_ID
+        assert int(results[1]["search"]["data"][0]["id"]) == BASE_ID

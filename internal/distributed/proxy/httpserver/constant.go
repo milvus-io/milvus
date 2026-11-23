@@ -64,7 +64,7 @@ const (
 	InsertAction         = "insert"
 	UpsertAction         = "upsert"
 	SearchAction         = "search"
-	MultiSearchAction    = "multi_search"
+	ExecuteDQLAction     = "execute_dql"
 	AdvancedSearchAction = "advanced_search"
 	CancelAction         = "cancel"
 	HybridSearchAction   = "hybrid_search"

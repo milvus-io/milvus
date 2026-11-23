@@ -749,11 +749,11 @@ func validateDeclaredNq(declared, rows int64) error {
 	return nil
 }
 
-// NormalizeMultiSearchNQ validates a plain Search and sets its quota cost
+// NormalizeExecuteDQLNQ validates a plain Search and sets its quota cost
 // from the actual input before any attempt enters the Search path.
-func NormalizeMultiSearchNQ(request *milvuspb.SearchRequest) error {
+func NormalizeExecuteDQLNQ(request *milvuspb.SearchRequest) error {
 	if len(request.GetSubReqs()) != 0 {
-		return merr.WrapErrParameterInvalidMsg("MultiSearch supports only ordinary Search requests")
+		return merr.WrapErrParameterInvalidMsg("ExecuteDQL supports only ordinary Search requests")
 	}
 	declared := request.GetNq()
 	if declared < 0 {

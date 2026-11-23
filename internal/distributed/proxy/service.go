@@ -106,7 +106,7 @@ type Server struct {
 	grpcInternalServer *grpc.Server
 	grpcExternalServer *grpc.Server
 	listenerManager    *listenerManager
-	multiSearchExecute proxy.MultiSearchExecute
+	executeDQLExecute  proxy.ExecuteDQLExecute
 
 	serverID atomic.Int64
 
@@ -348,7 +348,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 	var streamServerOption grpc.ServerOption
 	if enableCustomInterceptor {
 		interceptor, execute := newExternalUnaryInterceptor(s.proxy, getMetaCache, limiter)
-		s.multiSearchExecute = execute
+		s.executeDQLExecute = execute
 		unaryServerOption = grpc.UnaryInterceptor(interceptor)
 		// Streaming RPCs (e.g. CreateReplicateStream, DumpMessages) bypass the
 		// unary chain, so they must be authenticated and authorized through a
@@ -447,7 +447,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 	mlog.Info(context.TODO(), "Proxy external grpc server exited")
 }
 
-func newExternalUnaryInterceptor(component types.ProxyComponent, getMetaCache func() proxy.Cache, limiter types.Limiter) (grpc.UnaryServerInterceptor, proxy.MultiSearchExecute) {
+func newExternalUnaryInterceptor(component types.ProxyComponent, getMetaCache func() proxy.Cache, limiter types.Limiter) (grpc.UnaryServerInterceptor, proxy.ExecuteDQLExecute) {
 	authenticate := proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptorWithMetaCache(getMetaCache))
 	authorize := proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptorWithMetaCache(getMetaCache))
 	hook := proxy.UnaryServerHookInterceptor()
@@ -482,17 +482,17 @@ func newExternalUnaryInterceptor(component types.ProxyComponent, getMetaCache fu
 		accesslog.UnaryAccessLogInterceptor,
 		authorize,
 		hook,
-		proxy.MultiSearchRateLimitInterceptor(getMetaCache, limiter),
+		proxy.ExecuteDQLRateLimitInterceptor(getMetaCache, limiter),
 		accesslog.UnaryUpdateAccessInfoInterceptor,
 		proxy.TraceLogInterceptor,
 	)
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		if info.FullMethod == milvuspb.MilvusService_MultiSearch_FullMethodName {
-			ctx = context.WithValue(ctx, multiSearchReceivedAtKey{}, time.Now())
+		if info.FullMethod == milvuspb.MilvusService_ExecuteDQL_FullMethodName {
+			ctx = context.WithValue(ctx, executeDQLReceivedAtKey{}, time.Now())
 			return batch(ctx, req, info, handler)
 		}
 		return ordinary(ctx, req, info, handler)
-	}, newMultiSearchExecutor(component, search)
+	}, newExecuteDQLExecutor(component, search)
 }
 
 // newStreamInterceptorOption builds the security-critical stream interceptor

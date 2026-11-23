@@ -315,10 +315,10 @@ func TestTaskScheduler_QueryLoopContextDoneBeforeExecution(t *testing.T) {
 	}
 }
 
-func TestTaskScheduler_MultiSearchAndNestedDQLMakeProgress(t *testing.T) {
+func TestTaskScheduler_ExecuteDQLAndNestedDQLMakeProgress(t *testing.T) {
 	sched := newSingleWorkerDQLScheduler(t)
-	sched.MSearchQueue.workers = 1
-	sched.MSearchQueue.SetMaxTaskNum(1)
+	sched.ExecuteDQLQueue.workers = 1
+	sched.ExecuteDQLQueue.SetMaxTaskNum(1)
 	sched.DqQueue.SetMaxTaskNum(2)
 	require.NoError(t, sched.Start())
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -374,8 +374,8 @@ func TestTaskScheduler_MultiSearchAndNestedDQLMakeProgress(t *testing.T) {
 			return child.WaitToFinish()
 		},
 	}
-	batch.name = "MultiSearchTask"
-	require.NoError(t, sched.MSearchQueue.Enqueue(batch))
+	batch.name = "ExecuteDQLTask"
+	require.NoError(t, sched.ExecuteDQLQueue.Enqueue(batch))
 	require.NoError(t, batch.WaitToFinish(), "batch dispatch must not need the saturated DQL worker")
 	require.NoError(t, search.WaitToFinish())
 	require.NoError(t, waiting.WaitToFinish())
@@ -386,9 +386,9 @@ func TestTaskScheduler_MultiSearchAndNestedDQLMakeProgress(t *testing.T) {
 	require.EqualValues(t, 1, batch.postExecuteCalls.Load())
 }
 
-func TestTaskScheduler_MultiSearchWakesAllWorkers(t *testing.T) {
+func TestTaskScheduler_ExecuteDQLWakesAllWorkers(t *testing.T) {
 	const workers, capacity = 3, 4
-	sched, err := NewTaskScheduler(t.Context(), newMockTsoAllocator(), WithMultiSearchQueue(capacity, workers))
+	sched, err := NewTaskScheduler(t.Context(), newMockTsoAllocator(), WithExecuteDQLQueue(capacity, workers))
 	require.NoError(t, err)
 	t.Cleanup(sched.Close)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -413,7 +413,7 @@ func TestTaskScheduler_MultiSearchWakesAllWorkers(t *testing.T) {
 				}
 			},
 		}
-		require.NoError(t, sched.MSearchQueue.Enqueue(task))
+		require.NoError(t, sched.ExecuteDQLQueue.Enqueue(task))
 		tasks = append(tasks, task)
 	}
 	require.NoError(t, sched.Start())
@@ -426,10 +426,10 @@ func TestTaskScheduler_MultiSearchWakesAllWorkers(t *testing.T) {
 	}
 	for range capacity {
 		task := newMockDqlTask(ctx)
-		require.NoError(t, sched.MSearchQueue.Enqueue(task))
+		require.NoError(t, sched.ExecuteDQLQueue.Enqueue(task))
 		tasks = append(tasks, task)
 	}
-	require.ErrorIs(t, sched.MSearchQueue.Enqueue(newMockDqlTask(ctx)), merr.ErrServiceTooManyRequests)
+	require.ErrorIs(t, sched.ExecuteDQLQueue.Enqueue(newMockDqlTask(ctx)), merr.ErrServiceTooManyRequests)
 	releaseWorkers()
 	for _, task := range tasks {
 		require.NoError(t, task.WaitToFinish())

@@ -31,6 +31,7 @@ import (
 	"github.com/gin-gonic/gin/binding"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	mhttp "github.com/milvus-io/milvus/internal/http"
@@ -46,7 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-type MultiSearchReqV2 struct {
+type ExecuteDQLReqV2 struct {
 	DbName         string               `json:"dbName"`
 	Requests       []stdjson.RawMessage `json:"requests"`
 	MaxConcurrency uint32               `json:"maxConcurrency"`
@@ -55,16 +56,16 @@ type MultiSearchReqV2 struct {
 	headerTimeout *time.Duration
 }
 
-func (req *MultiSearchReqV2) GetDbName() string { return req.DbName }
+func (req *ExecuteDQLReqV2) GetDbName() string { return req.DbName }
 
-type multiSearchProxy interface {
-	CheckMultiSearchAdmission() error
-	RunMultiSearch(context.Context, proxy.MultiSearchOptions, []proxy.MultiSearchPrepare, proxy.MultiSearchExecute) ([]*milvuspb.SearchResults, error)
+type executeDQLProxy interface {
+	CheckExecuteDQLAdmission() error
+	RunExecuteDQL(context.Context, proxy.ExecuteDQLOptions, []proxy.ExecuteDQLPrepare, proxy.ExecuteDQLExecute) ([]*milvuspb.DQLResult, error)
 }
 
-var _ multiSearchProxy = (*proxy.Proxy)(nil)
+var _ executeDQLProxy = (*proxy.Proxy)(nil)
 
-func bindMultiSearchRequest(reader io.Reader, req *MultiSearchReqV2) error {
+func bindExecuteDQLRequest(reader io.Reader, req *ExecuteDQLReqV2) error {
 	body, err := io.ReadAll(reader)
 	if err != nil {
 		return err
@@ -75,12 +76,12 @@ func bindMultiSearchRequest(reader io.Reader, req *MultiSearchReqV2) error {
 	return stdjson.Unmarshal(body, req)
 }
 
-func (h *HandlersV2) multiSearchRoute() gin.HandlerFunc {
+func (h *HandlersV2) executeDQLRoute() gin.HandlerFunc {
 	respond := newDQLResponseMiddleware(dqlExplicitTransportTimeout)
-	handle := wrapperTraceLog(h.multiSearch)
+	handle := wrapperTraceLog(h.executeDQL)
 	handleWithMetrics := restfulSizeMiddleware(func(c *gin.Context) {
-		metrics.GetStats(c.Request.Context()).SetNodeID(paramtable.GetNodeID()).SetInboundLabel("MultiSearch")
-		timeout, err := multiSearchHeaderTimeout(c.Request.Header)
+		metrics.GetStats(c.Request.Context()).SetNodeID(paramtable.GetNodeID()).SetInboundLabel("ExecuteDQL")
+		timeout, err := executeDQLHeaderTimeout(c.Request.Header)
 		if err != nil {
 			respond(c, func(c *gin.Context) {
 				HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
@@ -89,8 +90,8 @@ func (h *HandlersV2) multiSearchRoute() gin.HandlerFunc {
 		}
 		// Only an explicit body budget makes the header a transport deadline.
 		// Read the body once before choosing the role of the header.
-		req := &MultiSearchReqV2{headerTimeout: timeout}
-		bindErr := bindMultiSearchRequest(c.Request.Body, req)
+		req := &ExecuteDQLReqV2{headerTimeout: timeout}
+		bindErr := bindExecuteDQLRequest(c.Request.Body, req)
 		var transportDeadline time.Time
 		if timeout != nil && req.TimeoutMs != nil {
 			state := c.Request.Context().Value(dqlStreamKey{}).(*dqlStreamState)
@@ -105,8 +106,8 @@ func (h *HandlersV2) multiSearchRoute() gin.HandlerFunc {
 		}, transportDeadline)
 	}, true)
 	return func(c *gin.Context) {
-		if p, ok := h.proxy.(multiSearchProxy); ok {
-			if err := p.CheckMultiSearchAdmission(); err != nil {
+		if p, ok := h.proxy.(executeDQLProxy); ok {
+			if err := p.CheckExecuteDQLAdmission(); err != nil {
 				// Admission still takes precedence over an invalid header.
 				respond(c, func(c *gin.Context) { rejectQueueFullBeforeDecode(c, err) }, time.Time{})
 				return
@@ -116,7 +117,7 @@ func (h *HandlersV2) multiSearchRoute() gin.HandlerFunc {
 	}
 }
 
-func multiSearchHeaderTimeout(header http.Header) (*time.Duration, error) {
+func executeDQLHeaderTimeout(header http.Header) (*time.Duration, error) {
 	values := header.Values(mhttp.HTTPHeaderRequestTimeout)
 	if len(values) == 0 {
 		return nil, nil
@@ -131,7 +132,7 @@ func multiSearchHeaderTimeout(header http.Header) (*time.Duration, error) {
 	return &timeout, nil
 }
 
-func (h *HandlersV2) multiSearch(ctx context.Context, c *gin.Context, anyReq any, dbName string) (any, error) {
+func (h *HandlersV2) executeDQL(ctx context.Context, c *gin.Context, anyReq any, dbName string) (any, error) {
 	fail := func(err error) (any, error) {
 		if errors.Is(err, merr.ErrServiceTooManyRequests) {
 			rejectQueueFull(c, err)
@@ -152,19 +153,19 @@ func (h *HandlersV2) multiSearch(ctx context.Context, c *gin.Context, anyReq any
 	if h.checkAuth && username == "" {
 		return fail(merr.ErrNeedAuthenticate)
 	}
-	p, ok := h.proxy.(multiSearchProxy)
+	p, ok := h.proxy.(executeDQLProxy)
 	if !ok {
-		return fail(merr.Wrap(merr.ErrServiceUnimplemented, "MultiSearch is unavailable"))
+		return fail(merr.Wrap(merr.ErrServiceUnimplemented, "ExecuteDQL is unavailable"))
 	}
-	req := anyReq.(*MultiSearchReqV2)
+	req := anyReq.(*ExecuteDQLReqV2)
 	if len(req.Requests) == 0 {
-		return fail(merr.WrapErrParameterMissingMsg("MultiSearch requires at least one search"))
+		return fail(merr.WrapErrParameterMissingMsg("ExecuteDQL requires at least one operation"))
 	}
-	if err := proxy.CheckMultiSearchBatchSize(len(req.Requests)); err != nil {
+	if err := proxy.CheckExecuteDQLBatchSize(len(req.Requests)); err != nil {
 		return fail(err)
 	}
 	state := ctx.Value(dqlStreamKey{}).(*dqlStreamState)
-	deadline, err := proxy.MultiSearchExecutionDeadline(state.receivedAt, req.TimeoutMs)
+	deadline, err := proxy.ExecuteDQLExecutionDeadline(state.receivedAt, req.TimeoutMs)
 	if err != nil {
 		return fail(err)
 	}
@@ -182,7 +183,7 @@ func (h *HandlersV2) multiSearch(ctx context.Context, c *gin.Context, anyReq any
 	allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 	token := c.GetString(ContextToken)
 
-	preparers := make([]proxy.MultiSearchPrepare, len(req.Requests))
+	preparers := make([]proxy.ExecuteDQLPrepare, len(req.Requests))
 	schemas := make([]*schemapb.CollectionSchema, len(req.Requests))
 	for i, item := range req.Requests {
 		var operation map[string]stdjson.RawMessage
@@ -194,17 +195,17 @@ func (h *HandlersV2) multiSearch(ctx context.Context, c *gin.Context, anyReq any
 			return fail(merr.WrapErrParameterInvalidMsg("requests[%d] must contain a search object", i))
 		}
 		preparers[i] = func(ctx context.Context) (*milvuspb.SearchRequest, error) {
-			request, schema, err := h.prepareMultiSearchItem(ctx, search, dbName)
+			request, schema, err := h.prepareExecuteDQLItem(ctx, search, dbName)
 			schemas[i] = schema
 			return request, err
 		}
 	}
 
-	options := proxy.MultiSearchOptions{MaxConcurrency: req.MaxConcurrency, ExecutionDeadline: deadline}
-	results, err := p.RunMultiSearch(ctx, options, preparers, func(ctx context.Context, search *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	options := proxy.ExecuteDQLOptions{MaxConcurrency: req.MaxConcurrency, ExecutionDeadline: deadline}
+	results, err := p.RunExecuteDQL(ctx, options, preparers, func(ctx context.Context, search *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 		db, collection := search.GetDbName(), search.GetCollectionName()
 		ctx, requestMetrics := proxy.WithRequestMetrics(ctx)
-		result, err := h.executeMultiSearchItem(ctx, search, username, token)
+		result, err := h.executeExecuteDQLItem(ctx, search, username, token)
 		requestMetrics.Record("Search", db, collection, result, err)
 		return result, err
 	})
@@ -216,22 +217,34 @@ func (h *HandlersV2) multiSearch(ctx context.Context, c *gin.Context, anyReq any
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		status := result.GetStatus()
-		var search gin.H
-		if merr.Ok(status) {
-			// Publishing a successful result also publishes its preparer's
-			// schema. An unfinished preparer only belongs to a failed slot.
-			search, _ = buildRESTSearchResponse(ctx, result, allowJS, schemas[i], vectorEncoding)
+		// Publishing a successful result also publishes its preparer's
+		// schema. Failed slots may still have a preparer unwinding.
+		if merr.Ok(result.GetStatus()) && result.GetSearch() != nil {
+			data[i] = renderExecuteDQLSearch(ctx, result.GetSearch(), allowJS, schemas[i], vectorEncoding)
 		} else {
-			search = gin.H{HTTPReturnCode: merr.Code(merr.Error(status)), HTTPReturnMessage: status.GetReason()}
+			data[i] = renderExecuteDQLItemFailure(result.GetStatus())
 		}
-		data[i] = gin.H{"search": search}
 	}
 	HTTPReturnStream(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: data})
 	return merr.Success(), nil
 }
 
-func (h *HandlersV2) prepareMultiSearchItem(ctx context.Context, body []byte, fallbackDB string) (*milvuspb.SearchRequest, *schemapb.CollectionSchema, error) {
+func renderExecuteDQLSearch(ctx context.Context, result *milvuspb.SearchResults, allowJS bool, schema *schemapb.CollectionSchema, encoding floatVectorEncoding) gin.H {
+	search, _ := buildRESTSearchResponse(ctx, result, allowJS, schema, encoding)
+	if search[HTTPReturnCode] != merr.Code(nil) {
+		return gin.H{HTTPReturnCode: search[HTTPReturnCode], HTTPReturnMessage: search[HTTPReturnMessage]}
+	}
+	return gin.H{HTTPReturnCode: merr.Code(nil), "search": search}
+}
+
+func renderExecuteDQLItemFailure(status *commonpb.Status) gin.H {
+	if merr.Ok(status) {
+		status = merr.Status(merr.WrapErrServiceInternalMsg("ExecuteDQL succeeded without a Search result"))
+	}
+	return gin.H{HTTPReturnCode: merr.Code(merr.Error(status)), HTTPReturnMessage: status.GetReason()}
+}
+
+func (h *HandlersV2) prepareExecuteDQLItem(ctx context.Context, body []byte, fallbackDB string) (*milvuspb.SearchRequest, *schemapb.CollectionSchema, error) {
 	httpReq := SearchReqV2{Limit: 100}
 	if err := stdjson.Unmarshal(body, &httpReq); err != nil {
 		return nil, nil, restSearchError{
@@ -266,13 +279,13 @@ func (h *HandlersV2) prepareMultiSearchItem(ctx context.Context, body []byte, fa
 	if err := prepareRESTSearch(ctx, req, &httpReq, schema.CollectionSchema, string(body)); err != nil {
 		return nil, nil, err
 	}
-	if err := dql.NormalizeMultiSearchNQ(req); err != nil {
+	if err := dql.NormalizeExecuteDQLNQ(req); err != nil {
 		return nil, nil, err
 	}
 	return req, schema.CollectionSchema, nil
 }
 
-func (h *HandlersV2) executeMultiSearchItem(ctx context.Context, req *milvuspb.SearchRequest, username, token string) (result *milvuspb.SearchResults, err error) {
+func (h *HandlersV2) executeExecuteDQLItem(ctx context.Context, req *milvuspb.SearchRequest, username, token string) (result *milvuspb.SearchResults, err error) {
 	const searchMethod = milvuspb.MilvusService_Search_FullMethodName
 	ctx = contextutil.SetToIncomingContext(ctx, util.HeaderDBName, req.GetDbName())
 	// Each attempt owns the consistency, request, and outcome of its Search log.
@@ -295,7 +308,7 @@ func (h *HandlersV2) executeMultiSearchItem(ctx context.Context, req *milvuspb.S
 			return nil, err
 		}
 	}
-	if err := h.checkMultiSearchQuota(ctx, req); err != nil {
+	if err := h.checkExecuteDQLQuota(ctx, req); err != nil {
 		hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(err), nil, searchMethod, hookutil.ActionAuthorize)
 		return nil, err
 	}
@@ -314,11 +327,11 @@ func (h *HandlersV2) executeMultiSearchItem(ctx context.Context, req *milvuspb.S
 	return result, nil
 }
 
-func (h *HandlersV2) checkMultiSearchQuota(ctx context.Context, req *milvuspb.SearchRequest) error {
+func (h *HandlersV2) checkExecuteDQLQuota(ctx context.Context, req *milvuspb.SearchRequest) error {
 	if !paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
 		return nil
 	}
-	dbID, parts, rateType, nq, err := proxy.GetMultiSearchQuotaInfo(ctx, h.metaCache(), req)
+	dbID, parts, rateType, nq, err := proxy.GetExecuteDQLQuotaInfo(ctx, h.metaCache(), req)
 	if err != nil {
 		return err
 	}

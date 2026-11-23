@@ -488,10 +488,10 @@ proxy:
   enableAutoLoad: false # whether to automatically load an unloaded collection before DQL requests and before writes that read existing rows
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
-  multiSearch:
-    maxConcurrency: 16 # Maximum number of active Search items per MultiSearch batch. Values below 1 use 1.
-    maxBatchSize: 256 # Maximum number of Search items per MultiSearch batch. Non-positive or invalid values use 256.
-    maxResultBytes: 67108864 # Maximum uncompressed protobuf response size in bytes per MultiSearch batch on both gRPC and REST. Non-positive or invalid values use 64 MiB.
+  executeDQL:
+    maxConcurrency: 16 # Maximum number of active Search items per ExecuteDQL batch. Values below 1 use 1.
+    maxBatchSize: 256 # Maximum number of Search items per ExecuteDQL batch. Non-positive or invalid values use 256.
+    maxResultBytes: 67108864 # Maximum uncompressed protobuf response size in bytes per ExecuteDQL batch on both gRPC and REST. Non-positive or invalid values use 64 MiB.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
   resolveAliasForPrivilege: true # switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks
   maxArrayCapacity: 4096 # maximum number of elements in an array field for a single row

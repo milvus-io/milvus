@@ -52,7 +52,7 @@ func (node *Proxy) registerRequest(ctx context.Context, info reqregistry.Info) (
 		return ctx, nil
 	}
 	if parent := reqregistry.FromContext(ctx); parent != nil &&
-		parent.Type() == reqregistry.TypeMultiSearch && info.Type == reqregistry.TypeSearch {
+		parent.Type() == reqregistry.TypeExecuteDQL && info.Type == reqregistry.TypeSearch {
 		// A batch's Search attempts share its identity and task linkage. Return
 		// no owned entry: finishing or unregistering a child must not end the
 		// batch, including when that child is about to be retried.

@@ -23,35 +23,35 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// MSearchTaskQueue admits batch orchestration independently of child DQL work.
-type MSearchTaskQueue struct {
+// ExecuteDQLQueue admits batch orchestration independently of child DQL work.
+type ExecuteDQLQueue struct {
 	*BaseTaskQueue
 	ctx     context.Context
 	workers int
 }
 
-// WithMultiSearchQueue sizes the independent waiting and execution capacities.
-func WithMultiSearchQueue(capacity, workers int) SchedOpt {
+// WithExecuteDQLQueue sizes the independent waiting and execution capacities.
+func WithExecuteDQLQueue(capacity, workers int) SchedOpt {
 	return func(s *TaskScheduler) {
-		s.MSearchQueue.SetMaxTaskNum(int64(capacity))
-		s.MSearchQueue.workers = workers
+		s.ExecuteDQLQueue.SetMaxTaskNum(int64(capacity))
+		s.ExecuteDQLQueue.workers = workers
 	}
 }
 
-func (queue *MSearchTaskQueue) fullError() error {
-	return merr.WrapErrTooManyRequests(int32(queue.GetMaxTaskNum()), "MultiSearch queue is full")
+func (queue *ExecuteDQLQueue) fullError() error {
+	return merr.WrapErrTooManyRequests(int32(queue.GetMaxTaskNum()), "ExecuteDQL queue is full")
 }
 
-func (queue *MSearchTaskQueue) CheckAdmission() error {
+func (queue *ExecuteDQLQueue) CheckAdmission() error {
 	if queue.IsFull() {
 		return queue.fullError()
 	}
 	return nil
 }
 
-func (queue *MSearchTaskQueue) Enqueue(t taskmodel.Task) error {
+func (queue *ExecuteDQLQueue) Enqueue(t taskmodel.Task) error {
 	if queue.ctx.Err() != nil {
-		return merr.WrapErrServiceUnavailableMsg("MultiSearch scheduler is stopping")
+		return merr.WrapErrServiceUnavailableMsg("ExecuteDQL scheduler is stopping")
 	}
 	element, err := queue.enqueue(t)
 	if IsAdmissionQueueFull(err) {
@@ -66,9 +66,9 @@ func (queue *MSearchTaskQueue) Enqueue(t taskmodel.Task) error {
 	return nil
 }
 
-func (sched *TaskScheduler) multiSearchLoop() {
+func (sched *TaskScheduler) executeDQLLoop() {
 	defer sched.wg.Done()
-	queue := sched.MSearchQueue
+	queue := sched.ExecuteDQLQueue
 	for {
 		select {
 		case <-sched.ctx.Done():

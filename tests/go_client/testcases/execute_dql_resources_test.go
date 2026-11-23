@@ -30,10 +30,10 @@ import (
 )
 
 // These regressions need an otherwise idle deployment. Select the test with
-// -run and pass -args -multisearch-resource-probes with its required configuration.
-var multiSearchResourceProbes = flag.Bool("multisearch-resource-probes", false, "run isolated MultiSearch resource regressions")
+// -run and pass -args -execute-dql-resource-probes with its required configuration.
+var executeDQLResourceProbes = flag.Bool("execute-dql-resource-probes", false, "run isolated ExecuteDQL resource regressions")
 
-func multiSearchBlockingRequest(request *milvuspb.SearchRequest) *milvuspb.SearchRequest {
+func executeDQLBlockingRequest(request *milvuspb.SearchRequest) *milvuspb.SearchRequest {
 	blocked := proto.CloneOf(request)
 	blocked.UseDefaultConsistency = false
 	blocked.ConsistencyLevel = commonpb.ConsistencyLevel_Session
@@ -44,7 +44,7 @@ func multiSearchBlockingRequest(request *milvuspb.SearchRequest) *milvuspb.Searc
 	return blocked
 }
 
-func multiSearchRESTConfig() (string, string) {
+func executeDQLRESTConfig() (string, string) {
 	endpoint := strings.TrimRight(hp.GetURI(), "/")
 	if !strings.Contains(endpoint, "://") {
 		endpoint = "http://" + endpoint
@@ -56,7 +56,7 @@ func multiSearchRESTConfig() (string, string) {
 	return endpoint, token
 }
 
-func multiSearchManagementRead(t *testing.T, ctx context.Context, path string) []byte {
+func executeDQLManagementRead(t *testing.T, ctx context.Context, path string) []byte {
 	t.Helper()
 	address := hp.GetURI()
 	if !strings.Contains(address, "://") {
@@ -84,41 +84,41 @@ func multiSearchManagementRead(t *testing.T, ctx context.Context, path string) [
 	return body
 }
 
-func multiSearchAttemptCount(t *testing.T, ctx context.Context) int64 {
-	return multiSearchMetric(t, ctx, "milvus_proxy_multisearch_attempts_total")
+func executeDQLAttemptCount(t *testing.T, ctx context.Context) int64 {
+	return executeDQLMetric(t, ctx, "milvus_proxy_execute_dql_attempts_total")
 }
 
-// Use proxy.multiSearch.maxConcurrency=2 and proxy.http.requestTimeoutMs=500.
-func TestMultiSearchConfiguredConcurrency(t *testing.T) {
-	if !*multiSearchResourceProbes {
-		t.Skip("requires -multisearch-resource-probes and an idle deployment with the documented Proxy limits")
+// Use proxy.executeDQL.maxConcurrency=2 and proxy.http.requestTimeoutMs=500.
+func TestExecuteDQLConfiguredConcurrency(t *testing.T) {
+	if !*executeDQLResourceProbes {
+		t.Skip("requires -execute-dql-resource-probes and an idle deployment with the documented Proxy limits")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	name := common.GenRandomString("multisearch_cap", 8)
-	createMultiSearchCollection(ctx, t, mc, name, 1)
+	name := common.GenRandomString("execute_dql_cap", 8)
+	createExecuteDQLCollection(ctx, t, mc, name, 1)
 	ready, err := client.NewSearchOption(name, 1, []entity.Vector{entity.FloatVector{1, 0}}).WithANNSField("vector").Request()
 	require.NoError(t, err)
-	blocked := multiSearchBlockingRequest(ready)
+	blocked := executeDQLBlockingRequest(ready)
 	for _, requested := range []uint32{0, ^uint32(0)} {
-		before := multiSearchAttemptCount(t, ctx)
+		before := executeDQLAttemptCount(t, ctx)
 		callCtx, cancelCall := context.WithTimeout(ctx, 2*time.Second)
-		_, err := mc.GetService().MultiSearch(callCtx, &milvuspb.MultiSearchRequest{
-			Requests:       []*milvuspb.SearchRequest{blocked, blocked, blocked, blocked},
+		_, err := mc.GetService().ExecuteDQL(callCtx, &milvuspb.ExecuteDQLRequest{
+			Requests:       executeDQLSearchRequests(blocked, blocked, blocked, blocked),
 			MaxConcurrency: requested,
 		})
 		cancelCall()
 		// Without timeout_ms, only the gRPC deadline can end these blocked searches.
 		require.Equal(t, codes.DeadlineExceeded, status.Code(err))
-		require.Equal(t, int64(2), multiSearchAttemptCount(t, ctx)-before, "requested concurrency %d", requested)
+		require.Equal(t, int64(2), executeDQLAttemptCount(t, ctx)-before, "requested concurrency %d", requested)
 	}
 }
 
-func multiSearchMetric(t *testing.T, ctx context.Context, name string, labels ...string) int64 {
+func executeDQLMetric(t *testing.T, ctx context.Context, name string, labels ...string) int64 {
 	t.Helper()
 	var total int64
-	scanner := bufio.NewScanner(strings.NewReader(string(multiSearchManagementRead(t, ctx, "/metrics"))))
+	scanner := bufio.NewScanner(strings.NewReader(string(executeDQLManagementRead(t, ctx, "/metrics"))))
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, name+"{") {
@@ -141,34 +141,34 @@ func multiSearchMetric(t *testing.T, ctx context.Context, name string, labels ..
 	return total
 }
 
-func TestMultiSearchClusterQueueCapacity(t *testing.T) {
-	if !*multiSearchResourceProbes {
-		t.Skip("requires -multisearch-resource-probes and an idle distributed deployment")
+func TestExecuteDQLClusterQueueCapacity(t *testing.T) {
+	if !*executeDQLResourceProbes {
+		t.Skip("requires -execute-dql-resource-probes and an idle distributed deployment")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
-	name := common.GenRandomString("multisearch_queue", 8)
-	createMultiSearchCollection(ctx, t, mc, name, 1)
+	name := common.GenRandomString("execute_dql_queue", 8)
+	createExecuteDQLCollection(ctx, t, mc, name, 1)
 	search, err := client.NewSearchOption(name, 1, []entity.Vector{entity.FloatVector{1, 0}}).
 		WithANNSField("vector").Request()
 	require.NoError(t, err)
-	blocked := multiSearchBlockingRequest(search)
+	blocked := executeDQLBlockingRequest(search)
 	const workers, waiting, submitted = 8, 64, 80
 	budget := int64(15000)
-	batch := &milvuspb.MultiSearchRequest{Requests: []*milvuspb.SearchRequest{blocked}, TimeoutMs: &budget}
+	batch := &milvuspb.ExecuteDQLRequest{Requests: executeDQLSearchRequests(blocked), TimeoutMs: &budget}
 	type outcome struct {
-		response *milvuspb.MultiSearchResponse
+		response *milvuspb.ExecuteDQLResponse
 		err      error
 	}
 	results := make(chan outcome, submitted)
 	blockedCtx, cancelBlocked := context.WithCancel(ctx)
 	defer cancelBlocked()
 	service := mc.GetService()
-	before := multiSearchAttemptCount(t, ctx)
+	before := executeDQLAttemptCount(t, ctx)
 	submit := func() {
 		go func() {
-			response, callErr := service.MultiSearch(blockedCtx, proto.CloneOf(batch))
+			response, callErr := service.ExecuteDQL(blockedCtx, proto.CloneOf(batch))
 			results <- outcome{response, callErr}
 		}()
 	}
@@ -178,7 +178,7 @@ func TestMultiSearchClusterQueueCapacity(t *testing.T) {
 	// Occupy the workers before filling the waiting queue. A simultaneous
 	// burst can otherwise reach the queue before every worker has dequeued.
 	require.Eventually(t, func() bool {
-		return multiSearchAttemptCount(t, ctx)-before == workers
+		return executeDQLAttemptCount(t, ctx)-before == workers
 	}, 3*time.Second, 20*time.Millisecond)
 	for range submitted - workers {
 		submit()
@@ -197,16 +197,16 @@ func TestMultiSearchClusterQueueCapacity(t *testing.T) {
 			t.Fatalf("only %d queue refusals after submitting %d blocked batches", refused, submitted)
 		}
 	}
-	require.Equal(t, int64(workers), multiSearchAttemptCount(t, ctx)-before,
+	require.Equal(t, int64(workers), executeDQLAttemptCount(t, ctx)-before,
 		"only the worker-owned batches may start their Search")
 	select {
 	case unexpected := <-results:
 		t.Fatalf("more than %d calls finished while the accepted batches should be blocked: %v", refused, unexpected.err)
 	default:
 	}
-	endpoint, token := multiSearchRESTConfig()
+	endpoint, token := executeDQLRESTConfig()
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		strings.TrimRight(endpoint, "/")+"/v2/vectordb/entities/multi_search", bytes.NewBufferString("{"))
+		strings.TrimRight(endpoint, "/")+"/v2/vectordb/entities/execute_dql", bytes.NewBufferString("{"))
 	require.NoError(t, err)
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Content-Type", "application/json")
@@ -227,8 +227,8 @@ func TestMultiSearchClusterQueueCapacity(t *testing.T) {
 	require.Eventually(t, func() bool {
 		recoveryCtx, recoveryCancel := context.WithTimeout(ctx, time.Second)
 		defer recoveryCancel()
-		response, callErr := service.MultiSearch(recoveryCtx, &milvuspb.MultiSearchRequest{
-			Requests: []*milvuspb.SearchRequest{search},
+		response, callErr := service.ExecuteDQL(recoveryCtx, &milvuspb.ExecuteDQLRequest{
+			Requests: executeDQLSearchRequests(search),
 		})
 		return callErr == nil && merr.Ok(response.GetStatus()) && len(response.GetResults()) == 1 &&
 			merr.Ok(response.Results[0].GetStatus())

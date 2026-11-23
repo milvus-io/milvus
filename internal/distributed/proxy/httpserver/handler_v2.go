@@ -172,7 +172,7 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/entities/insert":          "Insert",
 	"/v2/vectordb/entities/upsert":          "Upsert",
 	"/v2/vectordb/entities/search":          "Search",
-	"/v2/vectordb/entities/multi_search":    "MultiSearch",
+	"/v2/vectordb/entities/execute_dql":     "ExecuteDQL",
 	"/v2/vectordb/entities/advanced_search": "HybridSearch",
 	"/v2/vectordb/entities/hybrid_search":   "HybridSearch",
 
@@ -333,7 +333,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 			Limit: 100,
 		}
 	}, wrapperTraceLog(h.search))), true)))
-	router.POST(EntityCategory+MultiSearchAction, h.multiSearchRoute())
+	router.POST(EntityCategory+ExecuteDQLAction, h.executeDQLRoute())
 	// advanced_search, backward compatible uri
 	router.POST(EntityCategory+AdvancedSearchAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &HybridSearchReq{
@@ -512,7 +512,7 @@ func handleBoundRESTPost(gCtx *gin.Context, req any, v2 handlerFuncV2) {
 		mlog.Any("url", gCtx.Request.URL.Path))
 
 	metricDBName := dbName
-	if _, batch := req.(*MultiSearchReqV2); batch {
+	if _, batch := req.(*ExecuteDQLReqV2); batch {
 		// Batch counters omit the DB even when all items share one target.
 		// dbName remains the routing fallback for each child Search.
 		metricDBName = ""
@@ -703,7 +703,7 @@ func getTraceLogRequestFieldWithoutSensitiveInfo(req any) mlog.Field {
 		redactedReq := *request
 		redactedReq.ExprParams = redactExprParams(request.ExprParams)
 		return mlog.Any("request", &redactedReq)
-	case *MultiSearchReqV2:
+	case *ExecuteDQLReqV2:
 		return mlog.Int("search_requests", len(request.Requests))
 	case *HybridSearchReq:
 		if request == nil || !hasExprParams(request.Search) {

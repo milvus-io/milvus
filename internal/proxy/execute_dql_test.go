@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -47,15 +48,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func multiSearchTestPrepare(collection string) MultiSearchPrepare {
+func executeDQLTestPrepare(collection string) ExecuteDQLPrepare {
 	return func(context.Context) (*milvuspb.SearchRequest, error) {
 		return &milvuspb.SearchRequest{DbName: "default", CollectionName: collection}, nil
 	}
 }
 
-func TestMultiSearchOperatorCancelDuringPreparation(t *testing.T) {
+func TestExecuteDQLOperatorCancelDuringPreparation(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		p := NewMultiSearchTestProxy(t, 1, 1)
+		p := NewExecuteDQLTestProxy(t, 1, 1)
 		p.requests = newTestRequests()
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
@@ -67,8 +68,8 @@ func TestMultiSearchOperatorCancelDuringPreparation(t *testing.T) {
 			return nil, ctx.Err()
 		}
 		go func() {
-			results, err := p.RunMultiSearch(ctx, MultiSearchOptions{MaxConcurrency: 1},
-				[]MultiSearchPrepare{prepare, multiSearchTestPrepare("not started")},
+			results, err := p.RunExecuteDQL(ctx, ExecuteDQLOptions{MaxConcurrency: 1},
+				[]ExecuteDQLPrepare{prepare, executeDQLTestPrepare("not started")},
 				func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 					t.Error("started a Search after cancellation during preparation")
 					return &milvuspb.SearchResults{Status: merr.Success()}, nil
@@ -83,7 +84,7 @@ func TestMultiSearchOperatorCancelDuringPreparation(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, listed.GetRequests(), 1)
 		batch := listed.Requests[0]
-		require.Equal(t, "MultiSearch", batch.GetType())
+		require.Equal(t, "ExecuteDQL", batch.GetType())
 		require.Equal(t, reqregistry.StateRunning, batch.GetState())
 		require.True(t, batch.GetCancellable())
 		require.Len(t, batch.GetTaskIds(), 1)
@@ -106,19 +107,19 @@ func TestMultiSearchOperatorCancelDuringPreparation(t *testing.T) {
 	})
 }
 
-func TestMultiSearchCancelAndCompletionAgree(t *testing.T) {
-	p := NewMultiSearchTestProxy(t, 1, 1)
+func TestExecuteDQLCancelAndCompletionAgree(t *testing.T) {
+	p := NewExecuteDQLTestProxy(t, 1, 1)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	type outcome struct {
-		results []*milvuspb.SearchResults
+		results []*milvuspb.DQLResult
 		err     error
 	}
 	for range 50 {
 		started, release := make(chan struct{}), make(chan struct{})
 		done := make(chan outcome, 1)
 		go func() {
-			results, err := p.RunMultiSearch(ctx, MultiSearchOptions{}, []MultiSearchPrepare{multiSearchTestPrepare("last")},
+			results, err := p.RunExecuteDQL(ctx, ExecuteDQLOptions{}, []ExecuteDQLPrepare{executeDQLTestPrepare("last")},
 				func(ctx context.Context, _ *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 					close(started)
 					select {
@@ -155,23 +156,23 @@ func TestMultiSearchCancelAndCompletionAgree(t *testing.T) {
 	}
 }
 
-func TestMultiSearchMissingPreparerIsSystemError(t *testing.T) {
-	p := NewMultiSearchTestProxy(t, 1, 1)
-	results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{}, []MultiSearchPrepare{nil}, nil)
+func TestExecuteDQLMissingPreparerIsSystemError(t *testing.T) {
+	p := NewExecuteDQLTestProxy(t, 1, 1)
+	results, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{}, []ExecuteDQLPrepare{nil}, nil)
 	require.Empty(t, results)
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
 	require.Equal(t, merr.SystemError, merr.GetErrorType(err))
 }
 
-func TestMultiSearchRecoversItemPanic(t *testing.T) {
+func TestExecuteDQLRecoversItemPanic(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		p := NewMultiSearchTestProxy(t, 1, 1)
-		items := []MultiSearchPrepare{
+		p := NewExecuteDQLTestProxy(t, 1, 1)
+		items := []ExecuteDQLPrepare{
 			func(context.Context) (*milvuspb.SearchRequest, error) { panic("preparation panicked") },
-			multiSearchTestPrepare("panic"),
-			multiSearchTestPrepare("ready"),
+			executeDQLTestPrepare("panic"),
+			executeDQLTestPrepare("ready"),
 		}
-		results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{MaxConcurrency: 2}, items,
+		results, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{MaxConcurrency: 2}, items,
 			func(_ context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 				if request.GetCollectionName() == "panic" {
 					panic("Search panicked")
@@ -184,17 +185,20 @@ func TestMultiSearchRecoversItemPanic(t *testing.T) {
 			err := merr.Error(result.GetStatus())
 			require.ErrorIs(t, err, merr.ErrServiceInternal)
 			require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+			require.Nil(t, result.GetResult())
 		}
 		require.NoError(t, merr.Error(results[2].GetStatus()))
-		require.Equal(t, "ready", results[2].GetCollectionName())
+		require.NotNil(t, results[2].GetSearch().GetStatus())
+		require.NoError(t, merr.Error(results[2].GetSearch().GetStatus()))
+		require.Equal(t, "ready", results[2].GetSearch().GetCollectionName())
 	})
 }
 
-func TestMultiSearchBatchSizeLimit(t *testing.T) {
-	p := NewMultiSearchTestProxy(t, 1, 1)
+func TestExecuteDQLBatchSizeLimit(t *testing.T) {
+	p := NewExecuteDQLTestProxy(t, 1, 1)
 	for _, count := range []int{256, 257} {
 		t.Run(strconv.Itoa(count), func(t *testing.T) {
-			items := make([]MultiSearchPrepare, count)
+			items := make([]ExecuteDQLPrepare, count)
 			prepared, executed := 0, 0
 			for i := range items {
 				items[i] = func(context.Context) (*milvuspb.SearchRequest, error) {
@@ -202,7 +206,7 @@ func TestMultiSearchBatchSizeLimit(t *testing.T) {
 					return &milvuspb.SearchRequest{}, nil
 				}
 			}
-			results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{MaxConcurrency: 1}, items,
+			results, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{MaxConcurrency: 1}, items,
 				func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 					executed++
 					return &milvuspb.SearchResults{Status: merr.Success()}, nil
@@ -224,46 +228,53 @@ func TestMultiSearchBatchSizeLimit(t *testing.T) {
 	}
 }
 
-func setMultiSearchResultLimit(t *testing.T, limit int) {
+func setExecuteDQLResultLimit(t *testing.T, limit int) {
 	t.Helper()
 	params := paramtable.Get()
-	key := params.ProxyCfg.MultiSearchMaxResultBytes.Key
+	key := params.ProxyCfg.ExecuteDQLMaxResultBytes.Key
 	require.NoError(t, params.Save(key, strconv.Itoa(limit)))
 	t.Cleanup(func() { require.NoError(t, params.Reset(key)) })
 }
 
-func TestMultiSearchResultByteLimit(t *testing.T) {
-	ready := &milvuspb.SearchResults{Status: merr.Success(), CollectionName: strings.Repeat("x", 128)}
-	failed := &milvuspb.SearchResults{Status: merr.Status(merr.ErrPrivilegeNotPermitted)}
+func executeDQLTestSearchResult(search *milvuspb.SearchResults) *milvuspb.DQLResult {
+	return &milvuspb.DQLResult{Status: merr.Success(), Result: &milvuspb.DQLResult_Search{Search: search}}
+}
+
+func TestExecuteDQLResultByteLimit(t *testing.T) {
+	ready := executeDQLTestSearchResult(&milvuspb.SearchResults{Status: merr.Success(), CollectionName: strings.Repeat("x", 128)})
+	failed := &milvuspb.DQLResult{Status: merr.Status(merr.ErrPrivilegeNotPermitted)}
 	for _, tc := range []struct {
 		name       string
-		results    []*milvuspb.SearchResults
+		results    []*milvuspb.DQLResult
 		under      int
 		singleItem bool
 	}{
-		{name: "exact", results: []*milvuspb.SearchResults{ready, failed}},
-		{name: "one byte over", results: []*milvuspb.SearchResults{ready, failed}, under: 1},
-		{name: "one oversized item", results: []*milvuspb.SearchResults{ready}, under: 1, singleItem: true},
+		{name: "exact", results: []*milvuspb.DQLResult{ready, failed}},
+		{name: "one byte over", results: []*milvuspb.DQLResult{ready, failed}, under: 1},
+		{name: "one oversized item", results: []*milvuspb.DQLResult{ready}, under: 1, singleItem: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			expected := &milvuspb.MultiSearchResponse{Status: merr.Success(), Results: tc.results}
+			expected := &milvuspb.ExecuteDQLResponse{Status: merr.Success(), Results: tc.results}
 			encoded, err := proto.Marshal(expected)
 			require.NoError(t, err)
 			limit := len(encoded) - tc.under
-			setMultiSearchResultLimit(t, limit)
-			p := NewMultiSearchTestProxy(t, 1, 1)
-			items := make([]MultiSearchPrepare, len(tc.results))
+			setExecuteDQLResultLimit(t, limit)
+			p := NewExecuteDQLTestProxy(t, 1, 1)
+			items := make([]ExecuteDQLPrepare, len(tc.results))
 			for i := range items {
-				items[i] = multiSearchTestPrepare(strconv.Itoa(i))
+				items[i] = executeDQLTestPrepare(strconv.Itoa(i))
 			}
-			results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{MaxConcurrency: 1}, items,
+			results, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{MaxConcurrency: 1}, items,
 				func(_ context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 					i, _ := strconv.Atoi(req.GetCollectionName())
-					return tc.results[i], nil
+					if search := tc.results[i].GetSearch(); search != nil {
+						return search, nil
+					}
+					return &milvuspb.SearchResults{Status: tc.results[i].GetStatus(), Results: &schemapb.SearchResultData{TopK: 1}}, nil
 				})
 			if tc.under == 0 {
 				require.NoError(t, err)
-				require.Equal(t, tc.results, results)
+				require.True(t, proto.Equal(expected, &milvuspb.ExecuteDQLResponse{Status: merr.Success(), Results: results}))
 				return
 			}
 			require.ErrorIs(t, err, merr.ErrParameterTooLarge)
@@ -280,31 +291,66 @@ func TestMultiSearchResultByteLimit(t *testing.T) {
 	}
 }
 
-func TestMultiSearchConcurrentByteLimitCancelsInFlight(t *testing.T) {
+func TestExecuteDQLDefaultResultByteLimit(t *testing.T) {
+	const maxResultBytes = 64 * 1024 * 1024
+	payload := strings.Repeat("x", maxResultBytes)
+	envelope := func(value string) *milvuspb.ExecuteDQLResponse {
+		return &milvuspb.ExecuteDQLResponse{
+			Status: merr.Success(),
+			Results: []*milvuspb.DQLResult{executeDQLTestSearchResult(
+				&milvuspb.SearchResults{Status: merr.Success(), CollectionName: value},
+			)},
+		}
+	}
+	// All length prefixes have the same width near 64 MiB.
+	exactLength := 2*maxResultBytes - proto.Size(envelope(payload))
+	p := NewExecuteDQLTestProxy(t, 1, 1)
+	for _, extra := range []int{0, 1} {
+		t.Run(strconv.Itoa(extra), func(t *testing.T) {
+			expected := envelope(payload[:exactLength+extra])
+			require.Equal(t, maxResultBytes+extra, proto.Size(expected))
+			results, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{},
+				[]ExecuteDQLPrepare{executeDQLTestPrepare("large_result")},
+				func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+					return expected.GetResults()[0].GetSearch(), nil
+				})
+			if extra == 0 {
+				require.NoError(t, err)
+				require.Len(t, results, 1)
+				require.Equal(t, maxResultBytes, proto.Size(&milvuspb.ExecuteDQLResponse{Status: merr.Success(), Results: results}))
+			} else {
+				require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+				require.Empty(t, results)
+			}
+		})
+	}
+}
+
+func TestExecuteDQLConcurrentByteLimitCancelsInFlight(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		result := &milvuspb.SearchResults{Status: merr.Success(), CollectionName: "ready"}
-		setMultiSearchResultLimit(t, proto.Size(&milvuspb.MultiSearchResponse{
-			Status: merr.Success(), Results: []*milvuspb.SearchResults{result},
+		setExecuteDQLResultLimit(t, proto.Size(&milvuspb.ExecuteDQLResponse{
+			Status: merr.Success(), Results: []*milvuspb.DQLResult{executeDQLTestSearchResult(result)},
 		}))
-		p := NewMultiSearchTestProxy(t, 1, 1)
+		p := NewExecuteDQLTestProxy(t, 1, 1)
 		lateStarted, release := make(chan struct{}), make(chan struct{})
 		releaseLate := sync.OnceFunc(func() { close(release) })
 		defer releaseLate()
 		canceled := make(chan error, 1)
-		batches := metrics.ProxyMultiSearchBatchesTotal
+		batches := metrics.ProxyExecuteDQLBatchesTotal
 		nodeID := paramtable.GetStringNodeID()
 		failed := batches.WithLabelValues(nodeID, "batch_failed")
 		success := batches.WithLabelValues(nodeID, "all_success")
 		beforeFailed, beforeSuccess := testutil.ToFloat64(failed), testutil.ToFloat64(success)
 
-		items := []MultiSearchPrepare{
-			multiSearchTestPrepare("first"),
-			multiSearchTestPrepare("a"),
-			multiSearchTestPrepare("b"),
-			multiSearchTestPrepare("late"),
-			multiSearchTestPrepare("undispatched"),
+		items := []ExecuteDQLPrepare{
+			executeDQLTestPrepare("first"),
+			executeDQLTestPrepare("a"),
+			executeDQLTestPrepare("b"),
+			executeDQLTestPrepare("late"),
+			executeDQLTestPrepare("undispatched"),
 		}
-		results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{MaxConcurrency: 3, ExecutionDeadline: time.Now().Add(time.Second)}, items,
+		results, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{MaxConcurrency: 3, ExecutionDeadline: time.Now().Add(time.Second)}, items,
 			func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 				switch req.GetCollectionName() {
 				case "first":
@@ -330,11 +376,11 @@ func TestMultiSearchConcurrentByteLimitCancelsInFlight(t *testing.T) {
 	})
 }
 
-func TestMultiSearchByteLimitIncludesUnfinishedResults(t *testing.T) {
+func TestExecuteDQLByteLimitIncludesUnfinishedResults(t *testing.T) {
 	ready := &milvuspb.SearchResults{Status: merr.Success()}
-	timeout := &milvuspb.SearchResults{Status: merr.Status(context.DeadlineExceeded)}
-	responseSize := proto.Size(&milvuspb.MultiSearchResponse{
-		Status: merr.Success(), Results: []*milvuspb.SearchResults{ready, timeout, timeout},
+	timeout := &milvuspb.DQLResult{Status: merr.Status(context.DeadlineExceeded)}
+	responseSize := proto.Size(&milvuspb.ExecuteDQLResponse{
+		Status: merr.Success(), Results: []*milvuspb.DQLResult{executeDQLTestSearchResult(ready), timeout, timeout},
 	})
 	for _, tc := range []struct {
 		name  string
@@ -345,10 +391,10 @@ func TestMultiSearchByteLimitIncludesUnfinishedResults(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				setMultiSearchResultLimit(t, tc.limit)
-				p := NewMultiSearchTestProxy(t, 1, 1)
-				items := []MultiSearchPrepare{multiSearchTestPrepare("ready"), multiSearchTestPrepare("late"), multiSearchTestPrepare("undispatched")}
-				results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{MaxConcurrency: 1, ExecutionDeadline: time.Now().Add(time.Second)}, items,
+				setExecuteDQLResultLimit(t, tc.limit)
+				p := NewExecuteDQLTestProxy(t, 1, 1)
+				items := []ExecuteDQLPrepare{executeDQLTestPrepare("ready"), executeDQLTestPrepare("late"), executeDQLTestPrepare("undispatched")}
+				results, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{MaxConcurrency: 1, ExecutionDeadline: time.Now().Add(time.Second)}, items,
 					func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 						switch req.GetCollectionName() {
 						case "ready":
@@ -365,7 +411,9 @@ func TestMultiSearchByteLimitIncludesUnfinishedResults(t *testing.T) {
 					require.Len(t, results, 3)
 					require.Equal(t, merr.TimeoutCode, results[1].GetStatus().GetCode())
 					require.Equal(t, merr.TimeoutCode, results[2].GetStatus().GetCode())
-					require.Equal(t, responseSize, proto.Size(&milvuspb.MultiSearchResponse{Status: merr.Success(), Results: results}))
+					require.Nil(t, results[1].GetResult())
+					require.Nil(t, results[2].GetResult())
+					require.Equal(t, responseSize, proto.Size(&milvuspb.ExecuteDQLResponse{Status: merr.Success(), Results: results}))
 				} else {
 					require.ErrorIs(t, err, merr.ErrParameterTooLarge)
 					require.Empty(t, results)
@@ -375,20 +423,20 @@ func TestMultiSearchByteLimitIncludesUnfinishedResults(t *testing.T) {
 	}
 }
 
-func TestMultiSearchKeepsInputOrder(t *testing.T) {
-	p := NewMultiSearchTestProxy(t, 1, 1)
+func TestExecuteDQLKeepsInputOrder(t *testing.T) {
+	p := NewExecuteDQLTestProxy(t, 1, 1)
 	ctx, cancel := context.WithTimeout(metrics.WrapRestfulContext(t.Context(), 123), 5*time.Second)
 	defer cancel()
 	secondFinished := make(chan struct{})
 	seen := make(chan *metrics.RPCStats, 2)
-	prepare := []MultiSearchPrepare{
-		multiSearchTestPrepare("slow"),
-		multiSearchTestPrepare("denied"),
+	prepare := []ExecuteDQLPrepare{
+		executeDQLTestPrepare("slow"),
+		executeDQLTestPrepare("denied"),
 		func(context.Context) (*milvuspb.SearchRequest, error) {
 			return nil, merr.WrapErrParameterMissingMsg("collection")
 		},
 	}
-	results, err := p.RunMultiSearch(ctx, MultiSearchOptions{MaxConcurrency: 2}, prepare, func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	results, err := p.RunExecuteDQL(ctx, ExecuteDQLOptions{MaxConcurrency: 2}, prepare, func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 		seen <- metrics.GetStats(ctx)
 		if req.GetCollectionName() == "denied" {
 			close(secondFinished)
@@ -405,18 +453,19 @@ func TestMultiSearchKeepsInputOrder(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, results, 3)
-	require.Equal(t, "slow", results[0].GetCollectionName())
-	require.Equal(t, []int64{0}, results[0].GetResults().GetTopks())
+	require.Equal(t, "slow", results[0].GetSearch().GetCollectionName())
+	require.Equal(t, []int64{0}, results[0].GetSearch().GetResults().GetTopks())
 	require.ErrorIs(t, merr.Error(results[1].GetStatus()), merr.ErrPrivilegeNotPermitted)
-	require.Nil(t, results[1].GetResults())
+	require.Nil(t, results[1].GetResult())
 	require.ErrorIs(t, merr.Error(results[2].GetStatus()), merr.ErrParameterMissing)
+	require.Nil(t, results[2].GetResult())
 	firstStats, secondStats := <-seen, <-seen
 	require.NotSame(t, firstStats, secondStats)
 	require.NotSame(t, metrics.GetStats(ctx), firstStats)
 	require.NotSame(t, metrics.GetStats(ctx), secondStats)
 }
 
-func TestMultiSearchLimitsActiveItems(t *testing.T) {
+func TestExecuteDQLLimitsActiveItems(t *testing.T) {
 	const itemCount = 18
 	for _, tt := range []struct {
 		name           string
@@ -437,15 +486,15 @@ func TestMultiSearchLimitsActiveItems(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.configured != "" {
 				params := paramtable.Get()
-				key := params.ProxyCfg.MultiSearchMaxConcurrency.Key
+				key := params.ProxyCfg.ExecuteDQLMaxConcurrency.Key
 				require.NoError(t, params.Save(key, tt.configured))
 				t.Cleanup(func() { require.NoError(t, params.Reset(key)) })
 			}
 			synctest.Test(t, func(t *testing.T) {
-				p := NewMultiSearchTestProxy(t, 1, 1)
-				items := make([]MultiSearchPrepare, itemCount)
+				p := NewExecuteDQLTestProxy(t, 1, 1)
+				items := make([]ExecuteDQLPrepare, itemCount)
 				for i := range items {
-					items[i] = multiSearchTestPrepare("ready")
+					items[i] = executeDQLTestPrepare("ready")
 				}
 				started := make(chan struct{}, itemCount)
 				release := make(chan struct{})
@@ -453,7 +502,7 @@ func TestMultiSearchLimitsActiveItems(t *testing.T) {
 				defer releaseAll()
 				batchDone := make(chan error, 1)
 				go func() {
-					_, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{MaxConcurrency: tt.maxConcurrency}, items,
+					_, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{MaxConcurrency: tt.maxConcurrency}, items,
 						func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 							started <- struct{}{}
 							<-release
@@ -476,8 +525,8 @@ func TestMultiSearchLimitsActiveItems(t *testing.T) {
 	}
 }
 
-func TestMultiSearchBoundsBatchAdmission(t *testing.T) {
-	p := NewMultiSearchTestProxy(t, 1, 1)
+func TestExecuteDQLBoundsBatchAdmission(t *testing.T) {
+	p := NewExecuteDQLTestProxy(t, 1, 1)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	started := make(chan struct{})
@@ -494,9 +543,9 @@ func TestMultiSearchBoundsBatchAdmission(t *testing.T) {
 		return &milvuspb.SearchResults{Status: merr.Success()}, nil
 	}
 	done := make(chan error, 2)
-	options := MultiSearchOptions{MaxConcurrency: 1}
+	options := ExecuteDQLOptions{MaxConcurrency: 1}
 	go func() {
-		_, err := p.RunMultiSearch(ctx, options, []MultiSearchPrepare{multiSearchTestPrepare("first")}, execute)
+		_, err := p.RunExecuteDQL(ctx, options, []ExecuteDQLPrepare{executeDQLTestPrepare("first")}, execute)
 		done <- err
 	}()
 	select {
@@ -505,17 +554,17 @@ func TestMultiSearchBoundsBatchAdmission(t *testing.T) {
 		t.Fatal("first batch did not start")
 	}
 	go func() {
-		_, err := p.RunMultiSearch(ctx, options, []MultiSearchPrepare{multiSearchTestPrepare("second")}, execute)
+		_, err := p.RunExecuteDQL(ctx, options, []ExecuteDQLPrepare{executeDQLTestPrepare("second")}, execute)
 		done <- err
 	}()
-	require.Eventually(t, func() bool { return p.CheckMultiSearchAdmission() != nil }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return p.CheckExecuteDQLAdmission() != nil }, time.Second, time.Millisecond)
 
 	ran := make(chan struct{}, 1)
 	prepare := func(context.Context) (*milvuspb.SearchRequest, error) {
 		ran <- struct{}{}
 		return &milvuspb.SearchRequest{CollectionName: "third"}, nil
 	}
-	results, err := p.RunMultiSearch(ctx, options, []MultiSearchPrepare{prepare}, execute)
+	results, err := p.RunExecuteDQL(ctx, options, []ExecuteDQLPrepare{prepare}, execute)
 	require.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
 	require.Empty(t, results)
 	close(release)
@@ -529,26 +578,26 @@ func TestMultiSearchBoundsBatchAdmission(t *testing.T) {
 	}
 	require.Empty(t, ran)
 
-	results, err = p.RunMultiSearch(ctx, options, []MultiSearchPrepare{prepare}, execute)
+	results, err = p.RunExecuteDQL(ctx, options, []ExecuteDQLPrepare{prepare}, execute)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	require.True(t, merr.Ok(results[0].GetStatus()))
 }
 
-func TestMultiSearchKeepsRecordedResultsWhenLateSearchReturns(t *testing.T) {
+func TestExecuteDQLKeepsRecordedResultsWhenLateSearchReturns(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		p := NewMultiSearchTestProxy(t, 1, 1)
+		p := NewExecuteDQLTestProxy(t, 1, 1)
 		release := make(chan struct{})
 		releaseSearch := sync.OnceFunc(func() { close(release) })
 		defer releaseSearch()
 		canceled := make(chan error, 1)
-		items := []MultiSearchPrepare{
-			multiSearchTestPrepare("finished"),
-			multiSearchTestPrepare("late"),
-			multiSearchTestPrepare("undispatched"),
+		items := []ExecuteDQLPrepare{
+			executeDQLTestPrepare("finished"),
+			executeDQLTestPrepare("late"),
+			executeDQLTestPrepare("undispatched"),
 		}
 		deadline := time.Now().Add(time.Second)
-		results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{MaxConcurrency: 1, ExecutionDeadline: deadline}, items, func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		results, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{MaxConcurrency: 1, ExecutionDeadline: deadline}, items, func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 			gotDeadline, ok := ctx.Deadline()
 			if !ok || !gotDeadline.Equal(deadline) {
 				t.Errorf("Search deadline = %v, want %v", gotDeadline, deadline)
@@ -568,7 +617,7 @@ func TestMultiSearchKeepsRecordedResultsWhenLateSearchReturns(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Len(t, results, 3)
-		require.Equal(t, "finished", results[0].GetCollectionName())
+		require.Equal(t, "finished", results[0].GetSearch().GetCollectionName())
 		require.Equal(t, merr.TimeoutCode, results[1].GetStatus().GetCode())
 		require.Equal(t, merr.TimeoutCode, results[2].GetStatus().GetCode())
 		require.ErrorIs(t, <-canceled, context.DeadlineExceeded)
@@ -576,13 +625,13 @@ func TestMultiSearchKeepsRecordedResultsWhenLateSearchReturns(t *testing.T) {
 		releaseSearch()
 		synctest.Wait()
 		require.Equal(t, merr.TimeoutCode, results[1].GetStatus().GetCode())
-		require.Empty(t, results[1].GetCollectionName())
+		require.Nil(t, results[1].GetResult())
 	})
 }
 
-func TestMultiSearchExecutionBudgetReclaimsQueuedSlot(t *testing.T) {
+func TestExecuteDQLExecutionBudgetReclaimsQueuedSlot(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		p := NewMultiSearchTestProxy(t, 1, 1)
+		p := NewExecuteDQLTestProxy(t, 1, 1)
 		release := make(chan struct{})
 		releaseSearch := sync.OnceFunc(func() { close(release) })
 		defer releaseSearch()
@@ -596,14 +645,14 @@ func TestMultiSearchExecutionBudgetReclaimsQueuedSlot(t *testing.T) {
 		}
 		finished := make(chan error, 2)
 		run := func(name string) {
-			_, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{}, []MultiSearchPrepare{multiSearchTestPrepare(name)}, execute)
+			_, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{}, []ExecuteDQLPrepare{executeDQLTestPrepare(name)}, execute)
 			finished <- err
 		}
 		go run("running")
 		<-started
 
 		type batchResult struct {
-			items []*milvuspb.SearchResults
+			items []*milvuspb.DQLResult
 			err   error
 		}
 		expired := make(chan batchResult, 1)
@@ -612,36 +661,36 @@ func TestMultiSearchExecutionBudgetReclaimsQueuedSlot(t *testing.T) {
 				t.Error("prepared a batch after its deadline in the queue")
 				return nil, merr.ErrParameterMissing
 			}
-			items, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{ExecutionDeadline: time.Now().Add(time.Second)}, []MultiSearchPrepare{prepare}, execute)
+			items, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{ExecutionDeadline: time.Now().Add(time.Second)}, []ExecuteDQLPrepare{prepare}, execute)
 			expired <- batchResult{items, err}
 		}()
 		synctest.Wait()
-		require.ErrorIs(t, p.CheckMultiSearchAdmission(), merr.ErrServiceTooManyRequests)
+		require.ErrorIs(t, p.CheckExecuteDQLAdmission(), merr.ErrServiceTooManyRequests)
 		result := <-expired
 		require.NoError(t, result.err)
 		require.Len(t, result.items, 1)
 		require.Equal(t, merr.TimeoutCode, result.items[0].GetStatus().GetCode())
-		require.NoError(t, p.CheckMultiSearchAdmission())
+		require.NoError(t, p.CheckExecuteDQLAdmission())
 
 		go run("replacement")
 		synctest.Wait()
-		require.ErrorIs(t, p.CheckMultiSearchAdmission(), merr.ErrServiceTooManyRequests)
+		require.ErrorIs(t, p.CheckExecuteDQLAdmission(), merr.ErrServiceTooManyRequests)
 		releaseSearch()
 		require.NoError(t, <-finished)
 		require.NoError(t, <-finished)
 	})
 }
 
-func TestMultiSearchParentCancellationEndsCall(t *testing.T) {
+func TestExecuteDQLParentCancellationEndsCall(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		p := NewMultiSearchTestProxy(t, 1, 1)
+		p := NewExecuteDQLTestProxy(t, 1, 1)
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		started := make(chan struct{})
 		canceled := make(chan error, 1)
 		finished := make(chan error, 1)
 		go func() {
-			items, err := p.RunMultiSearch(ctx, MultiSearchOptions{ExecutionDeadline: time.Now().Add(time.Hour)}, []MultiSearchPrepare{multiSearchTestPrepare("running")}, func(ctx context.Context, _ *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			items, err := p.RunExecuteDQL(ctx, ExecuteDQLOptions{ExecutionDeadline: time.Now().Add(time.Hour)}, []ExecuteDQLPrepare{executeDQLTestPrepare("running")}, func(ctx context.Context, _ *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 				close(started)
 				<-ctx.Done()
 				canceled <- ctx.Err()
@@ -659,14 +708,14 @@ func TestMultiSearchParentCancellationEndsCall(t *testing.T) {
 	})
 }
 
-func TestMultiSearchRetriesRateLimitedItem(t *testing.T) {
+func TestExecuteDQLRetriesRateLimitedItem(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		p := NewMultiSearchTestProxy(t, 1, 1)
+		p := NewExecuteDQLTestProxy(t, 1, 1)
 		start := time.Now()
 		var limitedAttempts []time.Duration
 		var readyAttempts []time.Duration
-		prepare := []MultiSearchPrepare{multiSearchTestPrepare("limited"), multiSearchTestPrepare("ready")}
-		results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{MaxConcurrency: 1}, prepare, func(_ context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		prepare := []ExecuteDQLPrepare{executeDQLTestPrepare("limited"), executeDQLTestPrepare("ready")}
+		results, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{MaxConcurrency: 1}, prepare, func(_ context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 			if req.GetCollectionName() == "limited" {
 				limitedAttempts = append(limitedAttempts, time.Since(start))
 				// Search may rewrite fields as it prepares a task. Retry with the original request.
@@ -689,19 +738,19 @@ func TestMultiSearchRetriesRateLimitedItem(t *testing.T) {
 	})
 }
 
-func TestMultiSearchRetriesProxyDQLAdmissionOnly(t *testing.T) {
+func TestExecuteDQLRetriesProxyDQLAdmissionOnly(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		p := NewMultiSearchTestProxy(t, 1, 1)
+		p := NewExecuteDQLTestProxy(t, 1, 1)
 		p.sched.DqQueue.SetMaxTaskNum(0)
 
 		attempts := make(map[string]int)
-		items := []MultiSearchPrepare{
-			multiSearchTestPrepare("admission_recovers"),
-			multiSearchTestPrepare("admission_stays_full"),
-			multiSearchTestPrepare("querynode_rejection"),
+		items := []ExecuteDQLPrepare{
+			executeDQLTestPrepare("admission_recovers"),
+			executeDQLTestPrepare("admission_stays_full"),
+			executeDQLTestPrepare("querynode_rejection"),
 		}
 		start := time.Now()
-		results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{MaxConcurrency: 1}, items, func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		results, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{MaxConcurrency: 1}, items, func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 			name := req.GetCollectionName()
 			attempts[name]++
 			if name == "querynode_rejection" {
@@ -724,13 +773,13 @@ func TestMultiSearchRetriesProxyDQLAdmissionOnly(t *testing.T) {
 	})
 }
 
-func TestMultiSearchRetriesSearchByPKWhenMainDQLQueueIsFull(t *testing.T) {
+func TestExecuteDQLRetriesSearchByPKWhenMainDQLQueueIsFull(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		p := NewMultiSearchTestProxy(t, 1, 1)
+		p := NewExecuteDQLTestProxy(t, 1, 1)
 		cache := NewMockCache(t)
 		cache.EXPECT().GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
 			Return(&collectionInfo{CollID: 100, Schema: mustNewSchemaInfo(searchByPKTestSchema(true))}, nil)
-		p.setMetaCache(&multiSearchTestCache{Cache: cache})
+		p.setMetaCache(&executeDQLTestCache{Cache: cache})
 		p.sched.DqQueue.SetMaxTaskNum(0)
 
 		// Keep the real Proxy Query enqueue and wait. The stored vector is null,
@@ -740,16 +789,16 @@ func TestMultiSearchRetriesSearchByPKWhenMainDQLQueueIsFull(t *testing.T) {
 		defer mockey.Mock((*queryTask).PostExecute).Return(nil).Build().UnPatch()
 		defer mockey.Mock((*queryTask).Result).Return(searchByPKQueryResult([]int64{1}, nil, []bool{false})).Build().UnPatch()
 
-		items := []MultiSearchPrepare{func(context.Context) (*milvuspb.SearchRequest, error) {
+		items := []ExecuteDQLPrepare{func(context.Context) (*milvuspb.SearchRequest, error) {
 			return searchByPKRequest([]int64{1}), nil
 		}}
 		var attempts atomic.Int32
 		done := make(chan struct{})
-		var results []*milvuspb.SearchResults
+		var results []*milvuspb.DQLResult
 		var err error
 		go func() {
 			defer close(done)
-			results, err = p.RunMultiSearch(t.Context(), MultiSearchOptions{}, items,
+			results, err = p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{}, items,
 				func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 					attempts.Add(1)
 					return p.Search(ctx, req)
@@ -764,11 +813,11 @@ func TestMultiSearchRetriesSearchByPKWhenMainDQLQueueIsFull(t *testing.T) {
 		require.EqualValues(t, 2, attempts.Load())
 		require.Len(t, results, 1)
 		require.NoError(t, merr.Error(results[0].GetStatus()))
-		require.Equal(t, []int64{0}, results[0].GetResults().GetTopks())
+		require.Equal(t, []int64{0}, results[0].GetSearch().GetResults().GetTopks())
 	})
 }
 
-func TestMultiSearchStopsRateLimitRetriesAndKeepsLastStatus(t *testing.T) {
+func TestExecuteDQLStopsRateLimitRetriesAndKeepsLastStatus(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		budget   time.Duration
@@ -782,18 +831,18 @@ func TestMultiSearchStopsRateLimitRetriesAndKeepsLastStatus(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				p := NewMultiSearchTestProxy(t, 1, 1)
-				retries := metrics.ProxyMultiSearchRetriesTotal.WithLabelValues(paramtable.GetStringNodeID(), "rate_limit")
+				p := NewExecuteDQLTestProxy(t, 1, 1)
+				retries := metrics.ProxyExecuteDQLRetriesTotal.WithLabelValues(paramtable.GetStringNodeID(), "rate_limit")
 				beforeRetries := testutil.ToFloat64(retries)
 				start := time.Now()
-				options := MultiSearchOptions{}
+				options := ExecuteDQLOptions{}
 				if tc.budget != 0 {
 					options.ExecutionDeadline = start.Add(tc.budget)
 				}
 				var attempts []time.Duration
 				var lastStatus *commonpb.Status
-				items := []MultiSearchPrepare{multiSearchTestPrepare("limited")}
-				results, err := p.RunMultiSearch(t.Context(), options, items, func(ctx context.Context, _ *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+				items := []ExecuteDQLPrepare{executeDQLTestPrepare("limited")}
+				results, err := p.RunExecuteDQL(t.Context(), options, items, func(ctx context.Context, _ *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 					deadline, _ := ctx.Deadline()
 					if !deadline.Equal(options.ExecutionDeadline) {
 						t.Errorf("attempt deadline = %v, want %v", deadline, options.ExecutionDeadline)
@@ -814,8 +863,8 @@ func TestMultiSearchStopsRateLimitRetriesAndKeepsLastStatus(t *testing.T) {
 	}
 }
 
-func TestMultiSearchDoesNotRetryTerminalFailures(t *testing.T) {
-	p := NewMultiSearchTestProxy(t, 1, 1)
+func TestExecuteDQLDoesNotRetryTerminalFailures(t *testing.T) {
+	p := NewExecuteDQLTestProxy(t, 1, 1)
 	failures := map[string]error{
 		"force_deny":       merr.WrapErrServiceQuotaExceeded("administrator disabled reads"),
 		"permission":       status.Error(codes.PermissionDenied, "no search privilege"),
@@ -824,17 +873,17 @@ func TestMultiSearchDoesNotRetryTerminalFailures(t *testing.T) {
 		"marked_input":     merr.WrapErrAsInputError(merr.ErrServiceRateLimit),
 	}
 	attempts := make(map[string]int)
-	items := make([]MultiSearchPrepare, 0, len(failures))
+	items := make([]ExecuteDQLPrepare, 0, len(failures))
 	codes := make([]int32, 0, len(failures))
 	for name, err := range failures {
-		items = append(items, multiSearchTestPrepare(name))
+		items = append(items, executeDQLTestPrepare(name))
 		code := merr.Code(err)
 		if name == "permission" {
 			code = merr.Code(merr.ErrPrivilegeNotPermitted)
 		}
 		codes = append(codes, code)
 	}
-	results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{MaxConcurrency: 1}, items, func(_ context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	results, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{MaxConcurrency: 1}, items, func(_ context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 		attempts[req.GetCollectionName()]++
 		return nil, failures[req.GetCollectionName()]
 	})
@@ -848,20 +897,20 @@ func TestMultiSearchDoesNotRetryTerminalFailures(t *testing.T) {
 	}
 }
 
-func TestMultiSearchCancelsBackoffOnParentCancellation(t *testing.T) {
+func TestExecuteDQLCancelsBackoffOnParentCancellation(t *testing.T) {
 	for name, operator := range map[string]bool{"client": false, "operator": true} {
 		t.Run(name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				p := NewMultiSearchTestProxy(t, 1, 1)
-				retries := metrics.ProxyMultiSearchRetriesTotal.WithLabelValues(paramtable.GetStringNodeID(), "rate_limit")
+				p := NewExecuteDQLTestProxy(t, 1, 1)
+				retries := metrics.ProxyExecuteDQLRetriesTotal.WithLabelValues(paramtable.GetStringNodeID(), "rate_limit")
 				beforeRetries := testutil.ToFloat64(retries)
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
 				finished := make(chan error, 1)
 				attempts := 0
 				go func() {
-					items := []MultiSearchPrepare{multiSearchTestPrepare("limited"), multiSearchTestPrepare("undispatched")}
-					results, err := p.RunMultiSearch(ctx, MultiSearchOptions{MaxConcurrency: 1}, items, func(_ context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+					items := []ExecuteDQLPrepare{executeDQLTestPrepare("limited"), executeDQLTestPrepare("undispatched")}
+					results, err := p.RunExecuteDQL(ctx, ExecuteDQLOptions{MaxConcurrency: 1}, items, func(_ context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 						if request.GetCollectionName() != "limited" {
 							t.Error("started an item after cancellation during backoff")
 						}
@@ -906,7 +955,9 @@ func TestMultiSearchCancelsBackoffOnParentCancellation(t *testing.T) {
 	}
 }
 
-func TestMultiSearchRecordsEachTerminalOnce(t *testing.T) {
+func TestExecuteDQLRecordsEachTerminalOnce(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	metrics.RegisterProxy(registry)
 	recorder := tracetest.NewSpanRecorder()
 	provider := trace.NewTracerProvider(trace.WithSpanProcessor(recorder))
 	previous := otel.GetTracerProvider()
@@ -914,27 +965,27 @@ func TestMultiSearchRecordsEachTerminalOnce(t *testing.T) {
 	defer otel.SetTracerProvider(previous)
 
 	synctest.Test(t, func(t *testing.T) {
-		p := NewMultiSearchTestProxy(t, 1, 1)
+		p := NewExecuteDQLTestProxy(t, 1, 1)
 		unblock := make(chan struct{})
 		releaseLateResult := sync.OnceFunc(func() { close(unblock) })
 		defer releaseLateResult()
 		nodeID := paramtable.GetStringNodeID()
-		success := metrics.ProxyMultiSearchSubrequestsTotal.WithLabelValues(nodeID, "success")
-		timeout := metrics.ProxyMultiSearchSubrequestsTotal.WithLabelValues(nodeID, "timeout")
-		partial := metrics.ProxyMultiSearchBatchesTotal.WithLabelValues(nodeID, "partial_success")
-		retry := metrics.ProxyMultiSearchRetriesTotal.WithLabelValues(nodeID, "rate_limit")
-		attemptCounter := metrics.ProxyMultiSearchAttemptsTotal.WithLabelValues(nodeID)
+		success := metrics.ProxyExecuteDQLSubrequestsTotal.WithLabelValues(nodeID, "success")
+		timeout := metrics.ProxyExecuteDQLSubrequestsTotal.WithLabelValues(nodeID, "timeout")
+		partial := metrics.ProxyExecuteDQLBatchesTotal.WithLabelValues(nodeID, "partial_success")
+		retry := metrics.ProxyExecuteDQLRetriesTotal.WithLabelValues(nodeID, "rate_limit")
+		attemptCounter := metrics.ProxyExecuteDQLAttemptsTotal.WithLabelValues(nodeID)
 		beforeSuccess, beforeTimeout := testutil.ToFloat64(success), testutil.ToFloat64(timeout)
 		beforePartial, beforeRetry := testutil.ToFloat64(partial), testutil.ToFloat64(retry)
 		beforeAttempts := testutil.ToFloat64(attemptCounter)
 		attempts := 0
-		items := []MultiSearchPrepare{
-			multiSearchTestPrepare("recovers"),
-			multiSearchTestPrepare("late"),
-			multiSearchTestPrepare("undispatched"),
+		items := []ExecuteDQLPrepare{
+			executeDQLTestPrepare("recovers"),
+			executeDQLTestPrepare("late"),
+			executeDQLTestPrepare("undispatched"),
 		}
-		options := MultiSearchOptions{MaxConcurrency: 1, ExecutionDeadline: time.Now().Add(time.Second)}
-		results, err := p.RunMultiSearch(t.Context(), options, items, func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		options := ExecuteDQLOptions{MaxConcurrency: 1, ExecutionDeadline: time.Now().Add(time.Second)}
+		results, err := p.RunExecuteDQL(t.Context(), options, items, func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 			switch req.GetCollectionName() {
 			case "recovers":
 				attempts++
@@ -956,6 +1007,16 @@ func TestMultiSearchRecordsEachTerminalOnce(t *testing.T) {
 		require.Equal(t, beforePartial+1, testutil.ToFloat64(partial))
 		require.Equal(t, beforeRetry+2, testutil.ToFloat64(retry))
 		require.Equal(t, beforeAttempts+4, testutil.ToFloat64(attemptCounter))
+		for _, name := range []string{
+			"milvus_proxy_execute_dql_batches_total",
+			"milvus_proxy_execute_dql_subrequests_total",
+			"milvus_proxy_execute_dql_attempts_total",
+			"milvus_proxy_execute_dql_retries_total",
+		} {
+			count, err := testutil.GatherAndCount(registry, name)
+			require.NoError(t, err)
+			require.Positive(t, count, name)
+		}
 
 		releaseLateResult()
 		synctest.Wait()
@@ -963,7 +1024,7 @@ func TestMultiSearchRecordsEachTerminalOnce(t *testing.T) {
 		require.Equal(t, beforeTimeout+2, testutil.ToFloat64(timeout))
 		var batchSpan trace.ReadOnlySpan
 		for _, span := range recorder.Ended() {
-			if span.Name() == "Proxy-MultiSearch" {
+			if span.Name() == "Proxy-ExecuteDQL" {
 				batchSpan = span
 			}
 		}
@@ -992,14 +1053,14 @@ func TestMultiSearchRecordsEachTerminalOnce(t *testing.T) {
 	})
 }
 
-func TestMultiSearchTimeoutKeepsWorkerUntilExecutionExits(t *testing.T) {
+func TestExecuteDQLTimeoutKeepsWorkerUntilExecutionExits(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		p := NewMultiSearchTestProxy(t, 1, 1)
+		p := NewExecuteDQLTestProxy(t, 1, 1)
 		release := make(chan struct{})
 		releaseSearch := sync.OnceFunc(func() { close(release) })
 		defer releaseSearch()
-		results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{ExecutionDeadline: time.Now().Add(time.Second)},
-			[]MultiSearchPrepare{multiSearchTestPrepare("slow cancellation")},
+		results, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{ExecutionDeadline: time.Now().Add(time.Second)},
+			[]ExecuteDQLPrepare{executeDQLTestPrepare("slow cancellation")},
 			func(ctx context.Context, _ *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 				<-ctx.Done()
 				<-release
@@ -1015,13 +1076,13 @@ func TestMultiSearchTimeoutKeepsWorkerUntilExecutionExits(t *testing.T) {
 		}
 		done := make(chan error, 1)
 		go func() {
-			_, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{}, []MultiSearchPrepare{multiSearchTestPrepare("waiting")}, execute)
+			_, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{}, []ExecuteDQLPrepare{executeDQLTestPrepare("waiting")}, execute)
 			done <- err
 		}()
 		synctest.Wait()
 		require.Empty(t, started, "a timed-out batch still owns its worker until execution exits")
-		require.ErrorIs(t, p.CheckMultiSearchAdmission(), merr.ErrServiceTooManyRequests)
-		_, err = p.RunMultiSearch(t.Context(), MultiSearchOptions{}, []MultiSearchPrepare{multiSearchTestPrepare("rejected")}, execute)
+		require.ErrorIs(t, p.CheckExecuteDQLAdmission(), merr.ErrServiceTooManyRequests)
+		_, err = p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{}, []ExecuteDQLPrepare{executeDQLTestPrepare("rejected")}, execute)
 		require.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
 		releaseSearch()
 		require.NoError(t, <-done)
@@ -1030,18 +1091,18 @@ func TestMultiSearchTimeoutKeepsWorkerUntilExecutionExits(t *testing.T) {
 	})
 }
 
-func TestMultiSearchQueuedParentCancellationReclaimsCapacity(t *testing.T) {
+func TestExecuteDQLQueuedParentCancellationReclaimsCapacity(t *testing.T) {
 	for name, operator := range map[string]bool{"client": false, "operator": true} {
 		t.Run(name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				p := NewMultiSearchTestProxy(t, 1, 1)
+				p := NewExecuteDQLTestProxy(t, 1, 1)
 				release := make(chan struct{})
 				releaseSearch := sync.OnceFunc(func() { close(release) })
 				defer releaseSearch()
 				started := make(chan struct{})
 				running := make(chan error, 1)
 				go func() {
-					_, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{}, []MultiSearchPrepare{multiSearchTestPrepare("running")},
+					_, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{}, []ExecuteDQLPrepare{executeDQLTestPrepare("running")},
 						func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 							close(started)
 							<-release
@@ -1061,14 +1122,14 @@ func TestMultiSearchQueuedParentCancellationReclaimsCapacity(t *testing.T) {
 					return &milvuspb.SearchResults{Status: merr.Success()}, nil
 				}
 				go func() {
-					results, err := p.RunMultiSearch(ctx, MultiSearchOptions{}, []MultiSearchPrepare{prepare}, execute)
+					results, err := p.RunExecuteDQL(ctx, ExecuteDQLOptions{}, []ExecuteDQLPrepare{prepare}, execute)
 					if len(results) != 0 {
 						t.Error("returned results after parent cancellation")
 					}
 					queued <- err
 				}()
 				synctest.Wait()
-				require.ErrorIs(t, p.CheckMultiSearchAdmission(), merr.ErrServiceTooManyRequests)
+				require.ErrorIs(t, p.CheckExecuteDQLAdmission(), merr.ErrServiceTooManyRequests)
 				if operator {
 					listed, err := p.ListLocalRunningRequests(t.Context(), &milvuspb.ListRunningRequestsRequest{})
 					require.NoError(t, err)
@@ -1088,13 +1149,13 @@ func TestMultiSearchQueuedParentCancellationReclaimsCapacity(t *testing.T) {
 					cancel()
 					require.ErrorIs(t, <-queued, context.Canceled)
 				}
-				require.NoError(t, p.CheckMultiSearchAdmission())
+				require.NoError(t, p.CheckExecuteDQLAdmission())
 				go func() {
-					_, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{}, []MultiSearchPrepare{multiSearchTestPrepare("replacement")}, execute)
+					_, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{}, []ExecuteDQLPrepare{executeDQLTestPrepare("replacement")}, execute)
 					queued <- err
 				}()
 				synctest.Wait()
-				require.ErrorIs(t, p.CheckMultiSearchAdmission(), merr.ErrServiceTooManyRequests)
+				require.ErrorIs(t, p.CheckExecuteDQLAdmission(), merr.ErrServiceTooManyRequests)
 				releaseSearch()
 				require.NoError(t, <-running)
 				require.NoError(t, <-queued)
@@ -1103,9 +1164,9 @@ func TestMultiSearchQueuedParentCancellationReclaimsCapacity(t *testing.T) {
 	}
 }
 
-func TestMultiSearchSchedulerCloseCancelsAndWaits(t *testing.T) {
+func TestExecuteDQLSchedulerCloseCancelsAndWaits(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		p := NewMultiSearchTestProxy(t, 1, 1)
+		p := NewExecuteDQLTestProxy(t, 1, 1)
 		release := make(chan struct{})
 		releaseSearch := sync.OnceFunc(func() { close(release) })
 		defer releaseSearch()
@@ -1124,14 +1185,14 @@ func TestMultiSearchSchedulerCloseCancelsAndWaits(t *testing.T) {
 			return &milvuspb.SearchResults{Status: merr.Success()}, nil
 		}
 		run := func(name string) {
-			_, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{}, []MultiSearchPrepare{multiSearchTestPrepare(name)}, execute)
+			_, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{}, []ExecuteDQLPrepare{executeDQLTestPrepare(name)}, execute)
 			finished <- err
 		}
 		go run("running")
 		<-started
 		go run("queued")
 		synctest.Wait()
-		require.ErrorIs(t, p.CheckMultiSearchAdmission(), merr.ErrServiceTooManyRequests)
+		require.ErrorIs(t, p.CheckExecuteDQLAdmission(), merr.ErrServiceTooManyRequests)
 		closed := make(chan struct{})
 		go func() {
 			p.sched.Close()
@@ -1143,15 +1204,15 @@ func TestMultiSearchSchedulerCloseCancelsAndWaits(t *testing.T) {
 		}
 		synctest.Wait()
 		require.Empty(t, closed, "Close must wait for canceled execution to exit")
-		require.NoError(t, p.CheckMultiSearchAdmission(), "queued capacity is reclaimed during shutdown")
-		_, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{}, []MultiSearchPrepare{multiSearchTestPrepare("after shutdown")}, execute)
+		require.NoError(t, p.CheckExecuteDQLAdmission(), "queued capacity is reclaimed during shutdown")
+		_, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{}, []ExecuteDQLPrepare{executeDQLTestPrepare("after shutdown")}, execute)
 		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 		releaseSearch()
 		<-closed
 	})
 }
 
-func TestMultiSearchTaskIDAllocation(t *testing.T) {
+func TestExecuteDQLTaskIDAllocation(t *testing.T) {
 	for _, outcome := range []string{"success", "allocator unavailable", "budget expires", "scheduler closes"} {
 		t.Run(outcome, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -1180,8 +1241,8 @@ func TestMultiSearchTaskIDAllocation(t *testing.T) {
 				p.setMetaCache(cache)
 				p.UpdateStateCode(commonpb.StateCode_Healthy)
 				prepared := false
-				results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{ExecutionDeadline: time.Now().Add(time.Second)},
-					[]MultiSearchPrepare{func(context.Context) (*milvuspb.SearchRequest, error) {
+				results, err := p.RunExecuteDQL(t.Context(), ExecuteDQLOptions{ExecutionDeadline: time.Now().Add(time.Second)},
+					[]ExecuteDQLPrepare{func(context.Context) (*milvuspb.SearchRequest, error) {
 						prepared = true
 						return &milvuspb.SearchRequest{}, nil
 					}}, func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
@@ -1200,7 +1261,7 @@ func TestMultiSearchTaskIDAllocation(t *testing.T) {
 					}
 				}
 				require.Equal(t, outcome == "success", prepared)
-				require.NoError(t, p.CheckMultiSearchAdmission())
+				require.NoError(t, p.CheckExecuteDQLAdmission())
 			})
 		})
 	}

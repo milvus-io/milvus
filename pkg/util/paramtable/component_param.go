@@ -2900,9 +2900,9 @@ type proxyConfig struct {
 	EnableAutoLoad                    ParamItem `refreshable:"true"`
 	DDLConcurrency                    ParamItem `refreshable:"true"`
 	DCLConcurrency                    ParamItem `refreshable:"true"`
-	MultiSearchMaxConcurrency         ParamItem `refreshable:"true"`
-	MultiSearchMaxBatchSize           ParamItem `refreshable:"true"`
-	MultiSearchMaxResultBytes         ParamItem `refreshable:"true"`
+	ExecuteDQLMaxConcurrency          ParamItem `refreshable:"true"`
+	ExecuteDQLMaxBatchSize            ParamItem `refreshable:"true"`
+	ExecuteDQLMaxResultBytes          ParamItem `refreshable:"true"`
 	ShardLeaderCacheInterval          ParamItem `refreshable:"false"`
 	ReplicaSelectionPolicy            ParamItem `refreshable:"false"`
 	CheckQueryNodeHealthInterval      ParamItem `refreshable:"false"`
@@ -3248,34 +3248,34 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 	}
 	p.DCLConcurrency.Init(base.mgr)
 
-	p.MultiSearchMaxConcurrency = ParamItem{
-		Key:          "proxy.multiSearch.maxConcurrency",
+	p.ExecuteDQLMaxConcurrency = ParamItem{
+		Key:          "proxy.executeDQL.maxConcurrency",
 		Version:      "3.0.1",
 		DefaultValue: "16",
-		Doc:          "Maximum number of active Search items per MultiSearch batch. Values below 1 use 1.",
+		Doc:          "Maximum number of active Search items per ExecuteDQL batch. Values below 1 use 1.",
 		Export:       true,
 	}
-	p.MultiSearchMaxConcurrency.Init(base.mgr)
+	p.ExecuteDQLMaxConcurrency.Init(base.mgr)
 
-	p.MultiSearchMaxBatchSize = ParamItem{
-		Key:          "proxy.multiSearch.maxBatchSize",
+	p.ExecuteDQLMaxBatchSize = ParamItem{
+		Key:          "proxy.executeDQL.maxBatchSize",
 		Version:      "3.0.1",
 		DefaultValue: "256",
-		Doc:          "Maximum number of Search items per MultiSearch batch. Non-positive or invalid values use 256.",
+		Doc:          "Maximum number of Search items per ExecuteDQL batch. Non-positive or invalid values use 256.",
 		Export:       true,
 		Formatter:    positiveProxyLimitFormatter("256"),
 	}
-	p.MultiSearchMaxBatchSize.Init(base.mgr)
+	p.ExecuteDQLMaxBatchSize.Init(base.mgr)
 
-	p.MultiSearchMaxResultBytes = ParamItem{
-		Key:          "proxy.multiSearch.maxResultBytes",
+	p.ExecuteDQLMaxResultBytes = ParamItem{
+		Key:          "proxy.executeDQL.maxResultBytes",
 		Version:      "3.0.1",
 		DefaultValue: "67108864",
-		Doc:          "Maximum uncompressed protobuf response size in bytes per MultiSearch batch on both gRPC and REST. Non-positive or invalid values use 64 MiB.",
+		Doc:          "Maximum uncompressed protobuf response size in bytes per ExecuteDQL batch on both gRPC and REST. Non-positive or invalid values use 64 MiB.",
 		Export:       true,
 		Formatter:    positiveProxyLimitFormatter("67108864"),
 	}
-	p.MultiSearchMaxResultBytes.Init(base.mgr)
+	p.ExecuteDQLMaxResultBytes.Init(base.mgr)
 
 	p.GinLogging = ParamItem{
 		Key:          "proxy.ginLogging",

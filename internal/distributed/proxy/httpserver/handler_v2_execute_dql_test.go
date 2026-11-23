@@ -20,6 +20,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -51,21 +52,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-type multiSearchAdmissionProxy struct {
+type executeDQLAdmissionProxy struct {
 	mockProxyComponent
 	precheckErr error
 	enqueueErr  error
+	results     []*milvuspb.DQLResult
 }
 
-func (p *multiSearchAdmissionProxy) CheckMultiSearchAdmission() error { return p.precheckErr }
+func (p *executeDQLAdmissionProxy) CheckExecuteDQLAdmission() error { return p.precheckErr }
 
-func (p *multiSearchAdmissionProxy) RunMultiSearch(context.Context, proxy.MultiSearchOptions, []proxy.MultiSearchPrepare, proxy.MultiSearchExecute) ([]*milvuspb.SearchResults, error) {
-	return nil, p.enqueueErr
+func (p *executeDQLAdmissionProxy) RunExecuteDQL(context.Context, proxy.ExecuteDQLOptions, []proxy.ExecuteDQLPrepare, proxy.ExecuteDQLExecute) ([]*milvuspb.DQLResult, error) {
+	return p.results, p.enqueueErr
 }
 
-func TestMultiSearchRejectsBeforeDecode(t *testing.T) {
-	server := initHTTPServerV2(&multiSearchAdmissionProxy{precheckErr: merr.ErrServiceTooManyRequests}, false)
-	response := postJSONBody(server, versionalV2(EntityCategory, MultiSearchAction), "{")
+func TestExecuteDQLRejectsBeforeDecode(t *testing.T) {
+	server := initHTTPServerV2(&executeDQLAdmissionProxy{precheckErr: merr.ErrServiceTooManyRequests}, false)
+	response := postJSONBody(server, versionalV2(EntityCategory, ExecuteDQLAction), "{")
 	require.Equal(t, http.StatusTooManyRequests, response.Code)
 	require.Equal(t, "1", response.Header().Get("Retry-After"))
 	var body ReturnErrMsg
@@ -73,27 +75,27 @@ func TestMultiSearchRejectsBeforeDecode(t *testing.T) {
 	require.Equal(t, merr.Code(merr.ErrServiceTooManyRequests), body.Code)
 }
 
-func TestMultiSearchRejectsAtEnqueue(t *testing.T) {
-	server := initHTTPServerV2(&multiSearchAdmissionProxy{enqueueErr: merr.ErrServiceTooManyRequests}, false)
-	response := postJSONBody(server, versionalV2(EntityCategory, MultiSearchAction), `{"requests":[{"search":{}}]}`)
+func TestExecuteDQLRejectsAtEnqueue(t *testing.T) {
+	server := initHTTPServerV2(&executeDQLAdmissionProxy{enqueueErr: merr.ErrServiceTooManyRequests}, false)
+	response := postJSONBody(server, versionalV2(EntityCategory, ExecuteDQLAction), `{"requests":[{"search":{}}]}`)
 	require.Equal(t, http.StatusTooManyRequests, response.Code)
 	var body ReturnErrMsg
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 	require.Equal(t, merr.Code(merr.ErrServiceTooManyRequests), body.Code)
 }
 
-type blockedMultiSearchJSON struct {
+type blockedExecuteDQLJSON struct {
 	started chan<- struct{}
 	release <-chan struct{}
 }
 
-func (v blockedMultiSearchJSON) MarshalJSON() ([]byte, error) {
+func (v blockedExecuteDQLJSON) MarshalJSON() ([]byte, error) {
 	close(v.started)
 	<-v.release
 	return []byte("null"), nil
 }
 
-func TestMultiSearchTransportDeadlineInterruptsEncoding(t *testing.T) {
+func TestExecuteDQLTransportDeadlineInterruptsEncoding(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		started, release := make(chan struct{}), make(chan struct{})
 		releaseEncoding := sync.OnceFunc(func() { close(release) })
@@ -105,7 +107,7 @@ func TestMultiSearchTransportDeadlineInterruptsEncoding(t *testing.T) {
 			respond(c, func(c *gin.Context) {
 				HTTPReturnStream(c, http.StatusOK, gin.H{
 					HTTPReturnCode: int32(0),
-					HTTPReturnData: blockedMultiSearchJSON{started, release},
+					HTTPReturnData: blockedExecuteDQLJSON{started, release},
 				})
 			}, state.receivedAt.Add(time.Second))
 		})
@@ -128,81 +130,89 @@ func TestMultiSearchTransportDeadlineInterruptsEncoding(t *testing.T) {
 	})
 }
 
-type multiSearchRESTProxy struct {
-	multiSearchAdmissionProxy
+type executeDQLRESTProxy struct {
+	executeDQLAdmissionProxy
 	cache   proxy.Cache
 	limiter types.Limiter
 	search  func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error)
 }
 
-func (*multiSearchRESTProxy) IsDQLQueueFull() bool { return true }
+func (*executeDQLRESTProxy) IsDQLQueueFull() bool { return true }
 
-func (p *multiSearchRESTProxy) GetMetaCache() proxy.Cache { return p.cache }
+func (p *executeDQLRESTProxy) GetMetaCache() proxy.Cache { return p.cache }
 
-func (p *multiSearchRESTProxy) GetRateLimiter() (types.Limiter, error) { return p.limiter, nil }
+func (p *executeDQLRESTProxy) GetRateLimiter() (types.Limiter, error) { return p.limiter, nil }
 
-func (p *multiSearchRESTProxy) RunMultiSearch(ctx context.Context, _ proxy.MultiSearchOptions, items []proxy.MultiSearchPrepare, execute proxy.MultiSearchExecute) ([]*milvuspb.SearchResults, error) {
-	results := make([]*milvuspb.SearchResults, len(items))
+func (p *executeDQLRESTProxy) RunExecuteDQL(ctx context.Context, _ proxy.ExecuteDQLOptions, items []proxy.ExecuteDQLPrepare, execute proxy.ExecuteDQLExecute) ([]*milvuspb.DQLResult, error) {
+	results := make([]*milvuspb.DQLResult, len(items))
 	for i, prepare := range items {
 		req, err := prepare(ctx)
+		var search *milvuspb.SearchResults
 		if err == nil {
-			results[i], err = execute(ctx, req)
+			search, err = execute(ctx, req)
 		}
 		if err != nil {
 			// The Proxy converts unary permission failures to item statuses.
 			if grpcStatus := status.Convert(err); grpcStatus.Code() == codes.PermissionDenied {
 				err = merr.WrapErrPrivilegeNotPermitted("%s", grpcStatus.Message())
 			}
-			results[i] = &milvuspb.SearchResults{Status: merr.Status(err)}
+			results[i] = &milvuspb.DQLResult{Status: merr.Status(err)}
+			continue
+		}
+		results[i] = &milvuspb.DQLResult{Status: search.GetStatus()}
+		if merr.Ok(search.GetStatus()) {
+			results[i].Result = &milvuspb.DQLResult_Search{Search: search}
 		}
 	}
 	return results, nil
 }
 
-func (p *multiSearchRESTProxy) Search(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+func (p *executeDQLRESTProxy) Search(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 	return p.search(ctx, req)
 }
 
-type multiSearchRESTCache struct {
+type executeDQLRESTCache struct {
 	proxy.Cache
 	schema *metacache.SchemaInfo
 }
 
-func (m *multiSearchRESTCache) GetCollectionSchema(_ context.Context, db, collection string) (*metacache.SchemaInfo, error) {
+func (m *executeDQLRESTCache) GetCollectionSchema(_ context.Context, db, collection string) (*metacache.SchemaInfo, error) {
 	if db == DefaultDbName && (collection == "papers" || collection == "guidelines") {
 		return m.schema, nil
 	}
 	return nil, merr.WrapErrCollectionNotFound(collection)
 }
 
-func (*multiSearchRESTCache) GetDatabaseInfo(context.Context, string) (*metacache.DatabaseInfo, error) {
+func (*executeDQLRESTCache) GetDatabaseInfo(context.Context, string) (*metacache.DatabaseInfo, error) {
 	return &metacache.DatabaseInfo{DBID: 4}, nil
 }
 
-func (*multiSearchRESTCache) GetCollectionID(_ context.Context, _, collection string) (int64, error) {
+func (*executeDQLRESTCache) GetCollectionID(_ context.Context, _, collection string) (int64, error) {
 	if collection == "guidelines" {
 		return 5, nil
 	}
 	return 6, nil
 }
 
-func (*multiSearchRESTCache) GetPartitionInfo(context.Context, string, string, string) (*metacache.PartitionInfo, error) {
+func (*executeDQLRESTCache) GetPartitionInfo(context.Context, string, string, string) (*metacache.PartitionInfo, error) {
 	return &metacache.PartitionInfo{PartitionID: 7}, nil
 }
 
-type multiSearchRESTLimiter struct {
+type executeDQLRESTLimiter struct {
 	types.Limiter
 	check func(int64, map[int64][]int64, internalpb.RateType, int) error
 }
 
-func (m multiSearchRESTLimiter) Check(db int64, collections map[int64][]int64, kind internalpb.RateType, n int) error {
+func (m executeDQLRESTLimiter) Check(db int64, collections map[int64][]int64, kind internalpb.RateType, n int) error {
 	return m.check(db, collections, kind, n)
 }
 
-type multiSearchRESTResponse struct {
+type executeDQLRESTResponse struct {
 	Code int32
 	Data []struct {
-		Search struct {
+		Code    int32
+		Message string
+		Search  *struct {
 			Code    int32
 			Message string
 			Data    []map[string]any
@@ -211,7 +221,7 @@ type multiSearchRESTResponse struct {
 	}
 }
 
-func TestMultiSearchRendersOrderedSearchResults(t *testing.T) {
+func TestExecuteDQLRendersOrderedSearchResults(t *testing.T) {
 	params := paramtable.Get()
 	quota := params.QuotaConfig.QuotaAndLimitsEnabled.Key
 	require.NoError(t, params.Save(quota, "true"))
@@ -229,9 +239,9 @@ func TestMultiSearchRendersOrderedSearchResults(t *testing.T) {
 	})
 	require.NoError(t, err)
 	checked := make([]int, 0, 2)
-	mock := &multiSearchRESTProxy{
-		cache: &multiSearchRESTCache{schema: schema},
-		limiter: multiSearchRESTLimiter{check: func(db int64, collections map[int64][]int64, kind internalpb.RateType, nq int) error {
+	mock := &executeDQLRESTProxy{
+		cache: &executeDQLRESTCache{schema: schema},
+		limiter: executeDQLRESTLimiter{check: func(db int64, collections map[int64][]int64, kind internalpb.RateType, nq int) error {
 			require.Equal(t, int64(4), db)
 			require.Equal(t, internalpb.RateType_DQLSearch, kind)
 			checked = append(checked, nq)
@@ -262,29 +272,37 @@ func TestMultiSearchRendersOrderedSearchResults(t *testing.T) {
 		},
 	}
 	server := initHTTPServerV2(mock, false)
-	response := postJSONBody(server, versionalV2(EntityCategory, MultiSearchAction), `{"requests":[
+	response := postJSONBody(server, versionalV2(EntityCategory, ExecuteDQLAction), `{"requests":[
 		{"search":{}},
 		{"search":{"collectionName":"papers","filter":"id > 0","partitionNames":["test"],"data":[[1,0],[0,1]]}},
 		{"search":{"collectionName":"guidelines","ids":[7]}},
 		{"search":{"collectionName":"missing","data":[[1,0]]}}
 	]}`)
 	require.Equal(t, http.StatusOK, response.Code)
-	var body multiSearchRESTResponse
+	var body executeDQLRESTResponse
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 	require.Zero(t, body.Code)
 	require.Len(t, body.Data, 4)
-	require.Equal(t, merr.Code(merr.ErrMissingRequiredParameters), body.Data[0].Search.Code)
+	require.Equal(t, merr.Code(merr.ErrMissingRequiredParameters), body.Data[0].Code)
+	require.NotEmpty(t, body.Data[0].Message)
+	require.Nil(t, body.Data[0].Search)
+	require.Zero(t, body.Data[1].Code)
+	require.NotNil(t, body.Data[1].Search)
 	require.Zero(t, body.Data[1].Search.Code)
 	require.Equal(t, []int64{1, 1}, body.Data[1].Search.Topks)
 	require.Len(t, body.Data[1].Search.Data, 2)
 	require.Equal(t, "9007199254740993", body.Data[1].Search.Data[0]["id"])
 	require.Equal(t, "9", body.Data[1].Search.Data[1]["id"])
-	require.Equal(t, merr.Code(merr.ErrServiceRateLimit), body.Data[2].Search.Code)
-	require.Equal(t, merr.Code(merr.ErrCollectionNotFound), body.Data[3].Search.Code)
+	require.Equal(t, merr.Code(merr.ErrServiceRateLimit), body.Data[2].Code)
+	require.NotEmpty(t, body.Data[2].Message)
+	require.Nil(t, body.Data[2].Search)
+	require.Equal(t, merr.Code(merr.ErrCollectionNotFound), body.Data[3].Code)
+	require.NotEmpty(t, body.Data[3].Message)
+	require.Nil(t, body.Data[3].Search)
 	require.Equal(t, []int{2, 1}, checked)
 }
 
-func TestMultiSearchRoutesAndAuthorizesEachDatabase(t *testing.T) {
+func TestExecuteDQLRoutesAndAuthorizesEachDatabase(t *testing.T) {
 	metrics.ProxyFunctionCall.Reset()
 	t.Cleanup(metrics.ProxyFunctionCall.Reset)
 	params := paramtable.Get()
@@ -297,7 +315,7 @@ func TestMultiSearchRoutesAndAuthorizesEachDatabase(t *testing.T) {
 		t.Cleanup(func() { require.NoError(t, params.Reset(key)) })
 	}
 
-	const username = "multisearch_reader"
+	const username = "execute_dql_reader"
 	cache := proxy.InitEmptyMetaCacheForTest()
 	policy := privilege.GetPrivilegeCache()
 	for _, target := range []struct {
@@ -344,9 +362,9 @@ func TestMultiSearchRoutesAndAuthorizesEachDatabase(t *testing.T) {
 		nq          int
 	}
 	var charges []quotaCharge
-	server := newRESTV2ServerForRBACTest(t, &multiSearchRESTProxy{
+	server := newRESTV2ServerForRBACTest(t, &executeDQLRESTProxy{
 		cache: cache,
-		limiter: multiSearchRESTLimiter{check: func(db int64, collections map[int64][]int64, kind internalpb.RateType, nq int) error {
+		limiter: executeDQLRESTLimiter{check: func(db int64, collections map[int64][]int64, kind internalpb.RateType, nq int) error {
 			require.Equal(t, internalpb.RateType_DQLSearch, kind)
 			charges = append(charges, quotaCharge{db, collections, nq})
 			return nil
@@ -370,7 +388,7 @@ func TestMultiSearchRoutesAndAuthorizesEachDatabase(t *testing.T) {
 			}, nil
 		},
 	})
-	post := func(headerDB, bodyDB, items string) multiSearchRESTResponse {
+	post := func(headerDB, bodyDB, items string) executeDQLRESTResponse {
 		t.Helper()
 		parent := metadata.NewIncomingContext(trace.ContextWithSpanContext(t.Context(), span), metadata.Pairs(
 			util.HeaderDBName, "upstream_db", "request-marker", "batch",
@@ -379,7 +397,7 @@ func TestMultiSearchRoutesAndAuthorizesEachDatabase(t *testing.T) {
 		if bodyDB != "" {
 			dbField = `"dbName":"` + bodyDB + `",`
 		}
-		req := httptest.NewRequestWithContext(parent, http.MethodPost, versionalV2(EntityCategory, MultiSearchAction), strings.NewReader(`{`+dbField+`"requests":[`+items+`]}`))
+		req := httptest.NewRequestWithContext(parent, http.MethodPost, versionalV2(EntityCategory, ExecuteDQLAction), strings.NewReader(`{`+dbField+`"requests":[`+items+`]}`))
 		req.SetBasicAuth(username, "pwd")
 		if headerDB != "" {
 			req.Header.Set(HTTPHeaderDBName, headerDB)
@@ -387,7 +405,7 @@ func TestMultiSearchRoutesAndAuthorizesEachDatabase(t *testing.T) {
 		response := httptest.NewRecorder()
 		server.ServeHTTP(response, req)
 		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-		var body multiSearchRESTResponse
+		var body executeDQLRESTResponse
 		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 		require.Zero(t, body.Code, response.Body.String())
 		require.Equal(t, []string{"upstream_db"}, metadata.ValueFromIncomingContext(parent, util.HeaderDBName))
@@ -407,9 +425,9 @@ func TestMultiSearchRoutesAndAuthorizesEachDatabase(t *testing.T) {
 		require.Equal(t, id, body.Data[i].Search.Data[0]["id"])
 	}
 	for _, item := range body.Data[3:] {
-		require.Equal(t, merr.Code(merr.ErrPrivilegeNotPermitted), item.Search.Code, item.Search.Message)
-		require.Contains(t, item.Search.Message, "`archive` database")
-		require.Empty(t, item.Search.Data)
+		require.Equal(t, merr.Code(merr.ErrPrivilegeNotPermitted), item.Code, item.Message)
+		require.Contains(t, item.Message, "`archive` database")
+		require.Nil(t, item.Search)
 	}
 	require.ElementsMatch(t, []quotaCharge{
 		{11, map[int64][]int64{101: {201}}, 2},
@@ -443,7 +461,7 @@ func TestMultiSearchRoutesAndAuthorizesEachDatabase(t *testing.T) {
 		{"Search", "catalog", "current", metrics.SuccessLabel, metrics.CauseNA, 5},
 		{"Search", "archive", "papers", metrics.RejectedLabel, metrics.CauseUser, 1},
 		{"Search", "archive", "current", metrics.RejectedLabel, metrics.CauseUser, 1},
-		{"MultiSearch", "", "", metrics.SuccessLabel, metrics.CauseNA, 5},
+		{"ExecuteDQL", "", "", metrics.SuccessLabel, metrics.CauseNA, 5},
 	} {
 		for _, labels := range [][2]string{{metrics.TotalLabel, metrics.CauseNA}, {expected.outcome, expected.cause}} {
 			require.Equal(t, expected.count, testutil.ToFloat64(metrics.ProxyFunctionCall.WithLabelValues(
@@ -453,9 +471,9 @@ func TestMultiSearchRoutesAndAuthorizesEachDatabase(t *testing.T) {
 	require.Equal(t, 10, testutil.CollectAndCount(metrics.ProxyFunctionCall))
 }
 
-func TestMultiSearchStructuralFailureStopsWholeBatch(t *testing.T) {
-	mock := &multiSearchRESTProxy{}
-	path := versionalV2(EntityCategory, MultiSearchAction)
+func TestExecuteDQLStructuralFailureStopsWholeBatch(t *testing.T) {
+	mock := &executeDQLRESTProxy{}
+	path := versionalV2(EntityCategory, ExecuteDQLAction)
 	server := initHTTPServerV2(mock, false)
 	for _, request := range []string{
 		`{"requests":[]}`,
@@ -470,7 +488,7 @@ func TestMultiSearchStructuralFailureStopsWholeBatch(t *testing.T) {
 	} {
 		response := postJSONBody(server, path, request)
 		require.Equal(t, http.StatusOK, response.Code, request)
-		var body multiSearchRESTResponse
+		var body executeDQLRESTResponse
 		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 		require.NotZero(t, body.Code, request)
 		require.Empty(t, body.Data, request)
@@ -478,15 +496,36 @@ func TestMultiSearchStructuralFailureStopsWholeBatch(t *testing.T) {
 
 	// A recognized Search whose required fields are missing fails at its position.
 	response := postJSONBody(server, path, `{"requests":[{"search":{}},{"search":{"collectionName":0}}]}`)
-	var body multiSearchRESTResponse
+	var body executeDQLRESTResponse
 	require.Equal(t, http.StatusOK, response.Code)
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 	require.Zero(t, body.Code)
 	require.Len(t, body.Data, 2)
-	require.Equal(t, merr.Code(merr.ErrMissingRequiredParameters), body.Data[0].Search.Code)
-	require.Equal(t, merr.Code(merr.ErrIncorrectParameterFormat), body.Data[1].Search.Code)
+	require.Equal(t, merr.Code(merr.ErrMissingRequiredParameters), body.Data[0].Code)
+	require.NotEmpty(t, body.Data[0].Message)
+	require.Nil(t, body.Data[0].Search)
+	require.Equal(t, merr.Code(merr.ErrIncorrectParameterFormat), body.Data[1].Code)
+	require.NotEmpty(t, body.Data[1].Message)
+	require.Nil(t, body.Data[1].Search)
 
 	unauthenticated := initHTTPServerV2(mock, true)
 	response = postJSONBody(unauthenticated, path, `{"requests":[{"search":{"collectionName":"papers","data":[[1,0]]}}]}`)
 	require.Equal(t, http.StatusUnauthorized, response.Code)
+}
+
+func TestExecuteDQLRejectsMissingSearchResult(t *testing.T) {
+	proxy := &executeDQLAdmissionProxy{results: []*milvuspb.DQLResult{{Status: merr.Success()}}}
+	server := initHTTPServerV2(proxy, false)
+	response := postJSONBody(server, versionalV2(EntityCategory, ExecuteDQLAction), `{"requests":[{"search":{}}]}`)
+	require.Equal(t, http.StatusOK, response.Code)
+	var body struct {
+		Code int32
+		Data []map[string]json.RawMessage
+	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.Zero(t, body.Code)
+	require.Len(t, body.Data, 1)
+	require.JSONEq(t, strconv.Itoa(int(merr.Code(merr.ErrServiceInternal))), string(body.Data[0]["code"]))
+	require.Contains(t, string(body.Data[0]["message"]), "without a Search result")
+	require.NotContains(t, body.Data[0], "search")
 }
