@@ -4769,12 +4769,11 @@ func TestMetaCache_RemoveDatabaseEvictsAllCollectionsAcrossBatch(t *testing.T) {
 	assertMetaCacheByIDConsistent(t, cache)
 }
 
-// TestMetaCache_FillPreservesCallerDeadlineAndOrdersInvalidation verifies that
-// MetaCache does not shorten the API deadline while still ordering a cache fill
-// before a concurrent invalidation. The invalidation must wait until the caller
-// cancels the fill; there is intentionally no MetaCache-specific timeout.
+// An earlier caller deadline still governs the fill and its cancellation releases the gate.
 func TestMetaCache_FillPreservesCallerDeadlineAndOrdersInvalidation(t *testing.T) {
 	metacache.MockPublishedSchemaForTest(t)
+	paramtable.Get().Save(Params.ProxyCfg.MetaCacheFillTimeout.Key, "60")
+	defer paramtable.Get().Reset(Params.ProxyCfg.MetaCacheFillTimeout.Key)
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
 		Status: merr.Success(),
@@ -4832,6 +4831,8 @@ func TestMetaCache_FillPreservesCallerDeadlineAndOrdersInvalidation(t *testing.T
 	select {
 	case err := <-fillDone:
 		assert.ErrorIs(t, err, context.Canceled)
+		assert.NotErrorIs(t, err, merr.ErrServiceUnavailable,
+			"a fill ended by its caller must not be reported as the MetaCache bound")
 	case <-time.After(time.Second):
 		t.Fatal("the fill did not return after its caller was canceled")
 	}
