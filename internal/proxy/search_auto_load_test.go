@@ -804,7 +804,7 @@ func checkDQLRetryThroughTaskAndGRPC(t *testing.T, method, failPhase, cancelPhas
 		require.Len(t, listed, 1)
 		require.Equal(t, reqregistry.TypeSearch, listed[0].Type)
 		require.Equal(t, failPhase != "", client.server.injected.Load())
-		// Check the phase before Cancel so a cancelled first attempt cannot
+		// Check the phase before Cancel so a canceled first attempt cannot
 		// satisfy the retry regression and a late child cannot satisfy requery.
 		switch method {
 		case "Requery":
