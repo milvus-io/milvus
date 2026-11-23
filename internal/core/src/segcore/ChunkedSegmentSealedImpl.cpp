@@ -455,17 +455,47 @@ ChunkedSegmentSealedImpl::PinPkIndex(
         ca, cell);
 }
 
-// A JSON flat index covers the JSON pointers at or below its nested path: the
-// root path "" covers every pointer, and any other path covers itself and the
-// pointers that continue it after a '/'. A string prefix is not enough: "/a"
-// would claim "/address", and the executor would query the relative path
-// "ddress" as "dress".
+// The root path "" is the parent of every JSON pointer; any other path is the
+// parent of itself and of the pointers that continue it after a '/'. A string
+// prefix is not enough: "/a" would claim "/address", and a flat index on "/a"
+// would query the relative path "ddress" as "dress".
 static inline bool
 IsJsonPathPrefix(std::string_view index_path, std::string_view query_path) {
     return index_path.empty() || query_path == index_path ||
            (query_path.size() > index_path.size() &&
             query_path.compare(0, index_path.size(), index_path) == 0 &&
             query_path[index_path.size()] == '/');
+}
+
+static inline bool
+HasIntegerSegment(std::string_view relative_path) {
+    size_t pos = 0;
+    while (pos < relative_path.size()) {
+        if (relative_path[pos] == '/') {
+            ++pos;
+            continue;
+        }
+        auto end = relative_path.find('/', pos);
+        if (end == std::string_view::npos) {
+            end = relative_path.size();
+        }
+        if (milvus::IsInteger(
+                std::string(relative_path.substr(pos, end - pos)))) {
+            return true;
+        }
+        pos = end;
+    }
+    return false;
+}
+
+// Whether a JSON flat index on index_path can answer query_path. Tantivy keeps
+// no array positions, so a flat index cannot answer a path that indexes into
+// an array below it, such as "/a/0"; leaving such an index out lets an exact
+// typed index on the path serve it, or the query fall back to raw data.
+static inline bool
+JsonFlatIndexCovers(std::string_view index_path, std::string_view query_path) {
+    return IsJsonPathPrefix(index_path, query_path) &&
+           !HasIntegerSegment(query_path.substr(index_path.size()));
 }
 
 std::vector<cachinglayer::PinWrapper<const index::IndexBase*>>
@@ -485,7 +515,7 @@ ChunkedSegmentSealedImpl::PinJsonIndex(milvus::OpContext* op_ctx,
         }
         switch (index.cast_type.data_type()) {
             case JsonCastType::DataType::JSON:
-                if (IsJsonPathPrefix(index.nested_path, path_view)) {
+                if (JsonFlatIndexCovers(index.nested_path, path_view)) {
                     int current_len_diff =
                         path_view.length() - index.nested_path.length();
                     if (current_len_diff < path_len_diff) {
@@ -517,16 +547,16 @@ ChunkedSegmentSealedImpl::PinJsonIndex(milvus::OpContext* op_ctx,
                                                               pinned_index)};
 }
 
-std::optional<std::string>
+std::string
 ChunkedSegmentSealedImpl::GetJsonFlatIndexNestedPath(
     FieldId field_id, std::string_view query_path) const {
     auto runtime = CaptureRuntimeResourceState();
-    std::optional<std::string> best_path;
+    std::string best_path;
     int path_len_diff = std::numeric_limits<int>::max();
     for (const auto& index : runtime->json_indices) {
         if (index.field_id != field_id ||
             index.cast_type.data_type() != JsonCastType::DataType::JSON ||
-            !IsJsonPathPrefix(index.nested_path, query_path)) {
+            !JsonFlatIndexCovers(index.nested_path, query_path)) {
             continue;
         }
         int current_len_diff = query_path.length() - index.nested_path.length();

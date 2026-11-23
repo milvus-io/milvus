@@ -180,7 +180,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                  bool any_type,
                  bool is_array) const override;
 
-    std::optional<std::string>
+    std::string
     GetJsonFlatIndexNestedPath(FieldId field_id,
                                std::string_view query_path) const override;
 

@@ -3139,7 +3139,7 @@ class SegmentExpr : public Expr {
         auto query_path = milvus::Json::pointer(nested_path_);
         auto index_path =
             segment_->GetJsonFlatIndexNestedPath(field_id_, query_path);
-        if (!index_path.has_value()) {
+        if (index_path.empty()) {
             // No JsonFlatIndex covers this path; nothing JSON-specific to
             // reject here. The caller will decide between ScalarIndex and
             // RawData based on HasCompatibleScalarIndex() alone.
@@ -3147,18 +3147,16 @@ class SegmentExpr : public Expr {
         }
 
         // Exact match - safe to use index
-        if (*index_path == query_path) {
+        if (index_path == query_path) {
             return true;
         }
 
-        // GetJsonFlatIndexNestedPath guarantees index_path is an ancestor of
-        // query_path: query_path continues it after a '/'. A JsonFlatIndex on
-        // the whole field has index_path "", so its relative path is the
-        // whole query path.
+        // GetJsonFlatIndexNestedPath guarantees index_path is a prefix of
+        // query_path.
 
         // Get relative path (e.g., if index_path="/a" and query_path="/a/0/b",
         // relative_path="/0/b")
-        auto relative_path = query_path.substr(index_path->length());
+        auto relative_path = query_path.substr(index_path.length());
 
         // Check if any path segment is numeric (potential array index)
         size_t pos = 0;
