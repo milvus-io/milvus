@@ -1064,6 +1064,12 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 			return
 		}
 
+		modeKey := paramtable.Get().DataCoordCfg.SegmentIndexSummariesEnabled.Key
+		if normalizedKey == pkgconfig.FormatKey(modeKey) {
+			writeJSONError(writer, fmt.Sprintf("%s cannot be modified through this endpoint; select the mode at cluster initialization", modeKey), http.StatusBadRequest)
+			return
+		}
+
 		// The management-plane auth gate is not settable here. This endpoint is
 		// itself behind that gate, so allowing it would mean: while the gate is
 		// off, anyone who can reach port 9091 -- the exposure the gate exists to

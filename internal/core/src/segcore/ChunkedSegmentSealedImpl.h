@@ -179,6 +179,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     bool
     HasColumnInLoadedManifest(const std::string& column_name) const override;
 
+    bool
+    HasFieldInLoadedManifest(FieldId field_id) const override;
+
     FieldIndexCapability
     ResolveIndexCapability(milvus::OpContext* op_ctx,
                            FieldId field_id) const override;

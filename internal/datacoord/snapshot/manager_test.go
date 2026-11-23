@@ -2167,6 +2167,7 @@ func TestFinishRestoreSnapshot_BroadcastFailureRollbackBoundary(t *testing.T) {
 				false,
 				"",
 				"",
+				nil,
 				func(context.Context, int64, string) (broadcaster.BroadcastAPI, error) { return api, nil },
 				func(context.Context, string, string) error {
 					rollbackCalls++
@@ -6310,6 +6311,7 @@ func TestRestoreExternalSnapshot_PreparationFailuresReleaseLocks(t *testing.T) {
 			mFinish := mockey.Mock((*Manager).finishRestoreSnapshot).To(
 				func(_ *Manager, _ context.Context, _ *mlog.Logger, _ *snapshotstorage.SnapshotData,
 					name string, _ int64, _, _ string, _ int64, _ bool, _, _ string,
+					_ *indexpb.StorageConfig,
 					_ StartBroadcasterFunc, _ RollbackFunc, _ ValidateResourcesFunc,
 				) (int64, error) {
 					assert.Equal(t, uri, name)

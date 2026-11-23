@@ -20,6 +20,7 @@
 #include <nlohmann/json.hpp>
 #include <stdint.h>
 #include <algorithm>
+#include <charconv>
 #include <initializer_list>
 #include <map>
 #include <memory>
@@ -59,6 +60,190 @@ namespace {
 std::mutex broker_policy_mutex;
 std::optional<std::unordered_set<std::string>> broker_allowed_endpoints;
 }  // namespace
+
+std::optional<int64_t>
+TryParseCanonicalFieldID(std::string_view value) {
+    if (value.empty()) {
+        return std::nullopt;
+    }
+    int64_t field_id = -1;
+    const auto parsed =
+        std::from_chars(value.data(), value.data() + value.size(), field_id);
+    if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() ||
+        field_id < 0 || std::to_string(field_id) != value) {
+        return std::nullopt;
+    }
+    return field_id;
+}
+
+namespace {
+int64_t
+ParseCanonicalFieldID(const std::string& value) {
+    const auto field_id = TryParseCanonicalFieldID(value);
+    if (!field_id.has_value()) {
+        ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                  "Invalid field ID mapping value '{}': expected canonical "
+                  "nonnegative int64",
+                  value);
+    }
+    return *field_id;
+}
+
+json
+ParseFieldIDMappingJSON(const std::string& text) {
+    std::unordered_set<std::string> keys;
+    auto callback = [&keys](
+                        int depth, json::parse_event_t event, json& parsed) {
+        if (depth == 1 && event == json::parse_event_t::key &&
+            !keys.insert(parsed.get<std::string>()).second) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "Duplicate field ID mapping key");
+        }
+        return true;
+    };
+    try {
+        auto result = json::parse(text, callback);
+        if (!result.is_object()) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "Field ID mapping must be an object");
+        }
+        return result;
+    } catch (const nlohmann::json::exception& e) {
+        ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                  "Invalid field ID mapping JSON: {}",
+                  e.what());
+    }
+}
+}  // namespace
+
+MilvusTableFieldIdMapping
+ParseMilvusTableFieldIdMapping(const std::string& encoded) {
+    const auto parsed = ParseFieldIDMappingJSON(encoded);
+    MilvusTableFieldIdMapping mapping;
+    for (auto it = parsed.begin(); it != parsed.end(); ++it) {
+        const auto target_id = ParseCanonicalFieldID(it.key());
+        if (!it.value().is_string()) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "source field ID for target {} must be a string",
+                      it.key());
+        }
+        const auto& physical = it.value().get_ref<const std::string&>();
+        (void)ParseCanonicalFieldID(physical);
+        mapping.physical_columns.emplace(target_id, physical);
+        if (!mapping.target_fields.emplace(physical, target_id).second) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "duplicate source field ID {}",
+                      physical);
+        }
+    }
+    return mapping;
+}
+
+std::shared_ptr<const MilvusTableFieldIdMapping>
+ResolveMilvusTableFieldIdMapping(
+    const milvus_storage::api::ColumnGroups& column_groups) {
+    if (auto mapping = ReadMilvusTableFieldIdMapping(column_groups)) {
+        return mapping;
+    }
+    auto identity = std::make_shared<MilvusTableFieldIdMapping>();
+    for (const auto& group : column_groups) {
+        for (const auto& column : group->columns) {
+            const auto id = ParseCanonicalFieldID(column);
+            identity->physical_columns.emplace(id, column);
+            identity->target_fields.emplace(column, id);
+        }
+    }
+    return identity;
+}
+
+std::shared_ptr<const MilvusTableFieldIdMapping>
+ReadMilvusTableFieldIdMapping(
+    const milvus_storage::api::ColumnGroups& column_groups) {
+    std::shared_ptr<MilvusTableFieldIdMapping> mapping;
+    bool saw_unmapped_nonempty = false;
+    for (const auto& group : column_groups) {
+        if (group == nullptr) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "Null column group in field ID mapping");
+        }
+        std::optional<MilvusTableFieldIdMapping> group_mapping;
+        bool any_property = false;
+        bool any_missing = false;
+        for (const auto& file : group->files) {
+            const auto property =
+                file.properties.find(kMilvusTableFieldIdMappingProperty);
+            if (property == file.properties.end()) {
+                any_missing = true;
+                continue;
+            }
+            any_property = true;
+            auto parsed = ParseMilvusTableFieldIdMapping(property->second);
+            if (group_mapping.has_value() &&
+                group_mapping->physical_columns != parsed.physical_columns) {
+                ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                          "Column group files disagree on field ID mapping");
+            }
+            group_mapping = std::move(parsed);
+        }
+        if (any_property && any_missing) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "Column group files have incomplete field ID mapping "
+                      "properties");
+        }
+        if (!any_property) {
+            if (!group->files.empty() || !group->columns.empty()) {
+                saw_unmapped_nonempty = true;
+            }
+            continue;
+        }
+        if (group_mapping->physical_columns.empty() &&
+            !group->columns.empty()) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "Nonempty column group has an empty field ID mapping");
+        }
+        if (!mapping) {
+            mapping = std::make_shared<MilvusTableFieldIdMapping>();
+        }
+        std::unordered_set<std::string> mapped_group_columns;
+        for (const auto& [target_id, physical] :
+             group_mapping->physical_columns) {
+            if (physical.empty() ||
+                std::find(group->columns.begin(),
+                          group->columns.end(),
+                          physical) == group->columns.end()) {
+                ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                          "Mapped physical column '{}' is absent from its "
+                          "column group",
+                          physical);
+            }
+            mapped_group_columns.insert(physical);
+            auto [physical_it, inserted] =
+                mapping->physical_columns.emplace(target_id, physical);
+            if (!inserted && physical_it->second != physical) {
+                ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                          "Target field {} has conflicting physical columns",
+                          target_id);
+            }
+            auto [target_it, target_inserted] =
+                mapping->target_fields.emplace(physical, target_id);
+            if (!target_inserted && target_it->second != target_id) {
+                ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                          "Physical column '{}' maps to multiple target fields",
+                          physical);
+            }
+        }
+        if (mapped_group_columns.size() != group->columns.size()) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "Column group field ID mapping does not cover every "
+                      "physical column");
+        }
+    }
+    if (mapping != nullptr && saw_unmapped_nonempty) {
+        ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                  "Column group has no field ID mapping");
+    }
+    return mapping;
+}
 
 arrow::Result<std::string>
 NormalizeBrokerEndpoint(const std::string& raw) {

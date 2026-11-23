@@ -80,6 +80,188 @@ class StorageV2IndexRawDataTest : public ::testing::Test {
     int64_t index_version = 4001;
 };
 
+TEST_F(StorageV2IndexRawDataTest,
+       MilvusTableManifestBindingControlsIndexReads) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(
+        FieldName("first"), FieldId(101), DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("second"),
+                     FieldId(103),
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    arrow::Int64Builder first_builder;
+    arrow::Int64Builder second_builder;
+    ASSERT_TRUE(first_builder.AppendValues({11, 12}).ok());
+    ASSERT_TRUE(second_builder.AppendValues({31, 32}).ok());
+    auto first = first_builder.Finish().ValueOrDie();
+    auto second = second_builder.Finish().ValueOrDie();
+    auto batch = arrow::RecordBatch::Make(
+        schema->ConvertToLoonArrowSchema(), 2, {first, second});
+    auto source_path = path_ + "/mapping_index_source";
+    auto target_path = path_ + "/mapping_index_target";
+    std::filesystem::remove_all(source_path);
+    std::filesystem::remove_all(target_path);
+    auto version = milvus::test::WriteRecordBatchesToV3(
+        schema, source_path, {batch}, "101|103");
+    auto properties = LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    auto source = GetLoonManifest(
+        nlohmann::json({{"base_path", source_path}, {"ver", version}}).dump(),
+        properties);
+    auto groups = source->columnGroups();
+    for (auto& group : groups) {
+        group = std::make_shared<milvus_storage::api::ColumnGroup>(*group);
+        for (auto& file : group->files) {
+            file.properties["milvus_table.field_id_mapping"] =
+                R"({"101":"103","103":"101"})";
+        }
+    }
+    auto transaction = milvus_storage::api::transaction::Transaction::Open(
+                           GetDefaultArrowFileSystem(), target_path)
+                           .ValueOrDie();
+    transaction->AppendFiles(groups);
+    auto target_version = transaction->Commit().ValueOrDie();
+    auto target_manifest =
+        nlohmann::json({{"base_path", target_path}, {"ver", target_version}})
+            .dump();
+    auto meta = gen_field_meta(collection_id,
+                               partition_id,
+                               segment_id,
+                               101,
+                               DataType::INT64,
+                               DataType::NONE,
+                               false);
+    meta.field_schema.set_external_field("second");
+    std::vector<int64_t> values;
+    auto outcome = VisitFieldDataFromManifest(
+        target_manifest,
+        properties,
+        meta,
+        DataType::INT64,
+        1,
+        DataType::NONE,
+        StorageColumnMapping{"101", "101", true},
+        [&](FieldDataPtr data) {
+            auto begin = static_cast<const int64_t*>(data->Data());
+            values.insert(values.end(), begin, begin + data->get_num_rows());
+            return VisitControl::Continue;
+        },
+        kStreamingInflightBytes);
+    EXPECT_EQ(outcome, VisitOutcome::Exhausted);
+    EXPECT_EQ(values, (std::vector<int64_t>{31, 32}));
+    std::filesystem::remove_all(source_path);
+    std::filesystem::remove_all(target_path);
+}
+
+TEST_F(StorageV2IndexRawDataTest, MissingMappedFieldCannotBuildDefaultIndex) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(FieldName("existing"),
+                     FieldId(101),
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    arrow::Int64Builder builder;
+    ASSERT_TRUE(builder.AppendValues({11, 12}).ok());
+    auto batch = arrow::RecordBatch::Make(
+        schema->ConvertToLoonArrowSchema(), 2, {builder.Finish().ValueOrDie()});
+    auto source_path = path_ + "/missing_index_source";
+    auto target_path = path_ + "/missing_index_target";
+    std::filesystem::remove_all(source_path);
+    std::filesystem::remove_all(target_path);
+    auto version = milvus::test::WriteRecordBatchesToV3(
+        schema, source_path, {batch}, "101");
+    auto properties = LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    const auto legacy_manifest =
+        nlohmann::json({{"base_path", source_path}, {"ver", version}}).dump();
+    auto groups = GetLoonManifest(legacy_manifest, properties)->columnGroups();
+    for (auto& group : groups) {
+        group = std::make_shared<milvus_storage::api::ColumnGroup>(*group);
+        for (auto& file : group->files) {
+            file.properties["milvus_table.field_id_mapping"] =
+                R"({"103":"101"})";
+        }
+    }
+    auto transaction = milvus_storage::api::transaction::Transaction::Open(
+                           GetDefaultArrowFileSystem(), target_path)
+                           .ValueOrDie();
+    transaction->AppendFiles(groups);
+    const auto target_version = transaction->Commit().ValueOrDie();
+    const auto mapped_manifest =
+        nlohmann::json({{"base_path", target_path}, {"ver", target_version}})
+            .dump();
+
+    for (const auto& manifest : {legacy_manifest, mapped_manifest}) {
+        for (bool has_default : {false, true}) {
+            SCOPED_TRACE(manifest);
+            SCOPED_TRACE(has_default);
+            auto meta = gen_field_meta(collection_id,
+                                       partition_id,
+                                       segment_id,
+                                       105,
+                                       DataType::INT64,
+                                       DataType::NONE,
+                                       true);
+            meta.field_schema.set_external_field("extra");
+            if (has_default) {
+                meta.field_schema.mutable_default_value()->set_long_data(7);
+            }
+            auto index_meta =
+                gen_index_meta(segment_id, 105, index_build_id, index_version);
+            storage::FileManagerContext context(meta, index_meta, cm_, fs_);
+            context.set_loon_ffi_properties(properties);
+            context.set_storage_column_mapping(
+                105, StorageColumnMapping{"105", "105", true});
+            index::IndexTypeAdapterRequest adapter;
+            adapter.index_type = index::ASCENDING_SORT;
+            adapter.field_type = DataType::INT64;
+            adapter.params = Config::object();
+            auto adapted = index::AdaptIndexType(adapter);
+            indexbuilder::BuildRequest request;
+            request.family = std::move(adapted.family);
+            request.params = std::move(adapted.params);
+            request.value_type = adapted.value_type;
+            request.field_id = FieldId(105);
+            request.source = indexbuilder::ManifestBuildSource{manifest};
+            request.expected_rows = 2;
+            request.staging_parent = path_;
+            indexbuilder::BuildSession session(request, context);
+            try {
+                session.BuildFromSource();
+                ADD_FAILURE() << "an unrefreshed mapped field must not build a "
+                                 "NULL/default index";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(), ErrorCode::FieldNotLoaded);
+                EXPECT_NE(
+                    std::string(error.what()).find("RefreshExternalCollection"),
+                    std::string::npos);
+            }
+            // Normal internal manifests (without milvus_table.field_id_mapping)
+            // remain eligible for schema-evolution defaults, while explicitly
+            // mapped milvus-table manifests must never synthesize defaults even
+            // when the caller omits external column metadata.
+            context.fieldDataMeta.field_schema.clear_external_field();
+            context.set_storage_column_mapping(
+                105, StorageColumnMapping{"105", "105", false});
+            indexbuilder::BuildSession internal_session(request, context);
+            if (manifest == legacy_manifest) {
+                EXPECT_NO_THROW(internal_session.BuildFromSource());
+            } else {
+                try {
+                    internal_session.BuildFromSource();
+                    ADD_FAILURE() << "an unmapped field on a mapped "
+                                     "milvus-table manifest must not build a "
+                                     "NULL/default index";
+                } catch (const SegcoreError& error) {
+                    EXPECT_EQ(error.get_error_code(),
+                              ErrorCode::FieldNotLoaded);
+                }
+            }
+        }
+    }
+    std::filesystem::remove_all(source_path);
+    std::filesystem::remove_all(target_path);
+}
+
 TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
     GTEST_SKIP() << "TODO: fix ut logic after behavior change";
     auto schema = gen_all_data_types_schema();

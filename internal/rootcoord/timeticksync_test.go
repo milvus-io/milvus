@@ -32,6 +32,7 @@ import (
 )
 
 func TestTimetickSync(t *testing.T) {
+	useStreamingBootstrap(t)
 	ctx := context.Background()
 	sourceID := int64(100)
 	factory := dependency.NewDefaultFactory(true)
@@ -110,6 +111,7 @@ func TestTimetickSync(t *testing.T) {
 }
 
 func TestMultiTimetickSync(t *testing.T) {
+	useStreamingBootstrap(t)
 	params := paramtable.Get()
 	oldNum := params.RootCoordCfg.DmlChannelNum.SwapTempValue("1")
 	oldDml := params.CommonCfg.RootCoordDml.SwapTempValue(params.CommonCfg.ClusterPrefix.GetValue() + "-rootcoord-dml")
@@ -182,6 +184,7 @@ func Test_ttHistogram_get(t *testing.T) {
 }
 
 func TestTimetickSyncWithExistChannels(t *testing.T) {
+	useStreamingBootstrap(t)
 	params := paramtable.Get()
 	oldNum := params.RootCoordCfg.DmlChannelNum.SwapTempValue("1")
 	oldDml := params.CommonCfg.RootCoordDml.SwapTempValue(params.CommonCfg.ClusterPrefix.GetValue() + "-rootcoord-dml")
@@ -238,6 +241,7 @@ func TestTimetickSyncWithExistChannels(t *testing.T) {
 }
 
 func TestTimetickSyncInvalidName(t *testing.T) {
+	useStreamingBootstrap(t)
 	ctx := context.Background()
 	sourceID := int64(100)
 
