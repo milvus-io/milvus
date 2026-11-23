@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/metacache"
+	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
@@ -18,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/viewfeedback"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
@@ -248,13 +250,35 @@ func TestQueryViewReleaseRuntimeShutdown(t *testing.T) {
 	}
 }
 
+type releaseTestLoadConfigCatalog struct {
+	queryview.CollectionLoadInfoCatalog
+	saveResult error
+}
+
+func (c *releaseTestLoadConfigCatalog) Save(ctx context.Context, config *viewpb.CollectionLoadConfig) error {
+	if err := c.CollectionLoadInfoCatalog.Save(ctx, config); err != nil {
+		return err
+	}
+	return c.saveResult
+}
+
 func TestDropLoadConfigAckWaitsAfterDesiredStateRemoval(t *testing.T) {
 	s := newReleaseTestServer(t)
 	deps := loadmgrtest.Dependencies(t)
+	catalog := &releaseTestLoadConfigCatalog{CollectionLoadInfoCatalog: deps.Catalog}
+	deps.Catalog = catalog
 	store, err := loadmgr.RecoverLoadConfigStore(t.Context(), deps)
 	require.NoError(t, err)
-	require.NoError(t, store.Put(t.Context(), &loadmgr.LoadConfig{CollectionID: 100, PartitionIDs: []int64{10}, Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 1}}}))
+	config := &loadmgr.LoadConfig{CollectionID: 100, PartitionIDs: []int64{10}, Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 1}}}
+	require.NoError(t, store.Put(t.Context(), config))
 	version := store.GetConfigVersion(100)
+
+	// The metadata store can commit before the caller's deadline expires.
+	catalog.saveResult = context.DeadlineExceeded
+	config.PartitionIDs = append(config.PartitionIDs, 11)
+	require.ErrorIs(t, store.Put(t.Context(), config), context.DeadlineExceeded)
+	require.Equal(t, version, store.GetConfigVersion(100))
+
 	s.qviewsRuntime.loadConfigStore = store
 	removed := make(chan struct{}, 1)
 	s.qviewsRuntime.loadManager = loadmgr.NewCollectionLoadManager(store, func(int64) { removed <- struct{}{} }, nil)
@@ -272,7 +296,7 @@ func TestDropLoadConfigAckWaitsAfterDesiredStateRemoval(t *testing.T) {
 	require.NoError(t, err, "node cleanup still needs the historical load requirements")
 	records, err := deps.Catalog.List(ctx)
 	require.NoError(t, err)
-	require.Len(t, records, 1)
+	require.Len(t, records, 2, "the unconfirmed write left a version on disk")
 	select {
 	case err := <-done:
 		t.Fatalf("ack completed before node cleanup: %v", err)
@@ -285,6 +309,15 @@ func TestDropLoadConfigAckWaitsAfterDesiredStateRemoval(t *testing.T) {
 	require.Empty(t, records, "ACK must follow durable removal of all load versions")
 	_, err = store.GetLoadInfo(ctx, 100, version)
 	require.Error(t, err)
+
+	// Replay can run on a new coordinator after deletion but before the durable ACK.
+	restarted := newReleaseTestServer(t)
+	restartedStore, err := loadmgr.RecoverLoadConfigStore(ctx, deps)
+	require.NoError(t, err)
+	require.False(t, restartedStore.Contains(100), "an unconfirmed write must not resurrect the collection")
+	restarted.qviewsRuntime.loadConfigStore = restartedStore
+	restarted.qviewsRuntime.loadManager = loadmgr.NewCollectionLoadManager(restartedStore, nil, nil)
+	require.NoError(t, restarted.dropLoadConfigV2AckCallback(ctx, buildDropLoadConfigBroadcastResult(100)))
 }
 
 func TestQueryViewRepeatedReleaseWaitsWithoutLoadConfig(t *testing.T) {

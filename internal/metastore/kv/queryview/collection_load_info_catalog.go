@@ -83,5 +83,6 @@ func (c *collectionLoadInfoCatalog) RemoveVersions(ctx context.Context, collecti
 }
 
 func (c *collectionLoadInfoCatalog) RemoveCollection(ctx context.Context, collectionID int64) error {
-	return c.storage.RemoveWithPrefix(ctx, fmt.Sprintf("%s/%d/", VersionedLoadInfoPrefix, collectionID))
+	prefix := fmt.Sprintf("%s/%d/", VersionedLoadInfoPrefix, collectionID)
+	return c.storage.MultiSaveAndRemoveWithPrefix(ctx, nil, []string{prefix})
 }

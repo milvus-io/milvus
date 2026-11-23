@@ -3,20 +3,24 @@ package queryview
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/protobuf/proto"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	legacycatalog "github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func TestCollectionLoadInfoSingleRecord(t *testing.T) {
+func newLoadInfoTestEtcd(t *testing.T) (*clientv3.Client, kv.MetaKv) {
+	t.Helper()
 	paramtable.Init()
 	cfg := &paramtable.Get().EtcdCfg
 	client, err := etcd.GetEtcdClient(cfg.UseEmbedEtcd.GetAsBool(), cfg.EtcdUseSSL.GetAsBool(), cfg.Endpoints.GetAsStrings(),
@@ -27,6 +31,11 @@ func TestCollectionLoadInfoSingleRecord(t *testing.T) {
 		require.NoError(t, storage.RemoveWithPrefix(context.Background(), ""))
 		storage.Close()
 	})
+	return client, storage
+}
+
+func TestCollectionLoadInfoSingleRecord(t *testing.T) {
+	_, storage := newLoadInfoTestEtcd(t)
 	ctx := t.Context()
 	legacy := legacycatalog.NewCatalog(storage)
 	require.NoError(t, legacy.SaveCollection(ctx, &querypb.CollectionLoadInfo{CollectionID: 1, ReplicaNumber: 7},
@@ -72,4 +81,39 @@ func TestCollectionLoadInfoSingleRecord(t *testing.T) {
 	records, err = catalog.List(ctx)
 	require.NoError(t, err)
 	require.Empty(t, records, "legacy records must not recreate QV load intent")
+}
+
+func TestCollectionLoadInfoRemoveCollectionIsAtomic(t *testing.T) {
+	client, storage := newLoadInfoTestEtcd(t)
+	limit := &paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum
+	previous := limit.SwapTempValue("2")
+	t.Cleanup(func() { limit.SwapTempValue(previous) })
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	catalog := NewCollectionLoadInfoCatalog(storage)
+	const versions = 3
+	require.Greater(t, versions, storage.MaxTxnOps())
+	for version := uint64(1); version <= versions; version++ {
+		require.NoError(t, catalog.Save(ctx, &viewpb.CollectionLoadConfig{CollectionID: 1, Version: version}))
+	}
+	prefix := storage.GetPath(VersionedLoadInfoPrefix + "/1/")
+	before, err := client.Get(ctx, prefix, clientv3.WithPrefix())
+	require.NoError(t, err)
+	require.Len(t, before.Kvs, versions)
+
+	watch := client.Watch(ctx, prefix, clientv3.WithPrefix(), clientv3.WithRev(before.Header.Revision+1))
+	require.NoError(t, catalog.RemoveCollection(ctx, 1))
+	deletion, ok := <-watch
+	require.True(t, ok, "watch closed before observing the deletion")
+	require.NoError(t, deletion.Err())
+	require.Len(t, deletion.Events, versions, "all versions must be deleted in one revision")
+	revision := deletion.Events[0].Kv.ModRevision
+	for _, event := range deletion.Events {
+		require.Equal(t, clientv3.EventTypeDelete, event.Type)
+		require.Equal(t, revision, event.Kv.ModRevision)
+	}
+	records, err := catalog.List(ctx)
+	require.NoError(t, err)
+	require.Empty(t, records)
 }
