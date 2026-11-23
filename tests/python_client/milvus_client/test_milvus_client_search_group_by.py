@@ -2,6 +2,7 @@
 # fmt: off
 import json
 import random
+import time
 
 import numpy as np
 import pytest
@@ -10,6 +11,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from pymilvus import AnnSearchRequest, CollectionSchema, DataType, FieldSchema, RRFRanker, WeightedRanker
+from pymilvus.grpc_gen.common_pb2 import SegmentState
 from utils.util_log import test_log as log
 from utils.util_pymilvus import *  # noqa: F403
 
@@ -1321,6 +1323,19 @@ class TestSearchGroupByIndependent(TestMilvusClientV2Base):
                 f"GroupBy search should return result with distance >= normal search for {metric} metric"
             )
 
+    def _load_exact_group_rows(self, client, name, rows):
+        schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("grp", DataType.INT64)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=2)
+        self.create_collection(client, name, schema=schema, num_shards=1)
+        self.insert(client, name, rows)
+        self.flush(client, name)
+        indexes = self.prepare_index_params(client)[0]
+        indexes.add_index("vec", index_type="FLAT", metric_type="IP")
+        self.create_index(client, name, index_params=indexes)
+        self.load_collection(client, name)
+
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize(
         "sealed_ids, appended_ids, group_limit, group_size, offset, exclude_id, expected_ids",
@@ -1345,11 +1360,6 @@ class TestSearchGroupByIndependent(TestMilvusClientV2Base):
         """
         client = self._client()
         name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
-        schema.add_field("id", DataType.INT64, is_primary=True)
-        schema.add_field("grp", DataType.INT64)
-        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=2)
-        self.create_collection(client, name, schema=schema, num_shards=1)
 
         # (group, IP score against [1, 0]); all scores are distinct.
         catalog = {
@@ -1363,12 +1373,7 @@ class TestSearchGroupByIndependent(TestMilvusClientV2Base):
             8: (1, 0.75),
         }
         rows = {pk: {"id": pk, "grp": grp, "vec": [score, 0.0]} for pk, (grp, score) in catalog.items()}
-        self.insert(client, name, [rows[pk] for pk in sealed_ids])
-        self.flush(client, name)
-        indexes = self.prepare_index_params(client)[0]
-        indexes.add_index("vec", index_type="FLAT", metric_type="IP")
-        self.create_index(client, name, index_params=indexes)
-        self.load_collection(client, name)
+        self._load_exact_group_rows(client, name, [rows[pk] for pk in sealed_ids])
         if appended_ids:
             self.insert(client, name, [rows[pk] for pk in appended_ids])
 
@@ -1397,3 +1402,92 @@ class TestSearchGroupByIndependent(TestMilvusClientV2Base):
         assert hits.ids == expected_ids
         assert [hit.entity.get("grp") for hit in hits] == [catalog[pk][0] for pk in expected_ids]
         assert hits.distances == pytest.approx([catalog[pk][1] for pk in expected_ids], abs=1e-6)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_group_by_two_sealed_partitions(self):
+        """Return the best two members across two sealed segments after release and reload (#55665)."""
+        client = self._client()
+        name = cf.gen_collection_name_by_testcase_name()
+        self._load_exact_group_rows(
+            client,
+            name,
+            [
+                {"id": 1, "grp": 1, "vec": [1.0, 0.0]},
+                {"id": 2, "grp": 1, "vec": [0.80, 0.0]},
+            ],
+        )
+        self.create_partition(client, name, "later")
+        self.insert(
+            client,
+            name,
+            [
+                {"id": 3, "grp": 1, "vec": [0.95, 0.0]},
+                {"id": 4, "grp": 2, "vec": [0.99, 0.0]},
+            ],
+            partition_name="later",
+        )
+        self.flush(client, name)
+        self.release_collection(client, name)
+        self.load_collection(client, name)
+
+        deadline = time.monotonic() + 60
+        while True:
+            segments = client.list_loaded_segments(name, timeout=5)
+            partitions = {s.partition_id for s in segments if s.state == SegmentState.Sealed and s.num_rows == 2}
+            if len(partitions) == 2:
+                break
+            assert time.monotonic() < deadline, segments
+            time.sleep(0.5)
+
+        query = dict(
+            data=[[1.0, 0.0]], anns_field="vec", search_params={"metric_type": "IP"}, consistency_level="Strong"
+        )
+        plain = self.search(client, name, limit=4, **query)[0][0]
+        assert plain.ids == [1, 4, 3, 2]
+        hits = self.search(
+            client, name, limit=1, group_by_field="grp", group_size=2, strict_group_size=True, **query,
+        )[0][0]
+        assert hits.ids == [1, 3]
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_group_by_ordered_pages(self):
+        """Check all three two-group pages against the known ranking from exact IP scores."""
+        client = self._client()
+        name = cf.gen_collection_name_by_testcase_name()
+        # (group key, IP score) in primary key order, starting at ID 1.
+        members = [
+            (30, 85),
+            (10, 56),
+            (20, 64),
+            (60, 61),
+            (50, 89),
+            (40, 92),
+            (60, 98),
+            (50, 74),
+            (40, 42),
+            (30, 62),
+            (20, 96),
+            (10, 93),
+        ]
+        rows = [{"id": pk, "grp": grp, "vec": [float(score), 0.0]} for pk, (grp, score) in enumerate(members, start=1)]
+        self._load_exact_group_rows(client, name, rows)
+
+        # Each tuple holds the two IDs of a group. Groups rank by their best member.
+        expected_groups = [(7, 4), (11, 3), (12, 2), (6, 9), (5, 8), (1, 10)]
+        page_size = 2
+        for offset in range(0, len(expected_groups), page_size):
+            hits = self.search(
+                client,
+                name,
+                data=[[1.0, 0.0]],
+                anns_field="vec",
+                search_params={"metric_type": "IP"},
+                consistency_level="Strong",
+                limit=page_size,
+                offset=offset,
+                group_by_field="grp",
+                group_size=2,
+                strict_group_size=True,
+            )[0][0]
+            expected_ids = [pk for group in expected_groups[offset : offset + page_size] for pk in group]
+            assert hits.ids == expected_ids, f"group offset {offset}"
