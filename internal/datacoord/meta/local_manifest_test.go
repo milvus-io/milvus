@@ -134,8 +134,10 @@ func TestReloadLocalManifestFieldLogicalSizes(t *testing.T) {
 	resolved := packed.MarshalManifestPath(filepath.ToSlash(filepath.Join(root, base)), 17)
 	mt := NewLocalManifestTestMeta(t, catalogmocks.NewDataCoordCatalog(t), storage.NewLocalChunkManager(objectstorage.RootPath(root)))
 	for _, stamp := range []string{legacy, "", packed.MarshalManifestPath(base, 16)} {
-		raw := &datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3, NumOfRows: 2,
-			ManifestPath: legacy, FieldLogicalSizesManifest: stamp, Stats: &datapb.Statistics{FieldLogicalSizes: &datapb.FieldLogicalSizes{Version: 1, RowCount: 2, Fields: map[int64]*datapb.FieldLogicalSize{100: {}}}}}
+		raw := &datapb.SegmentInfo{
+			ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3, NumOfRows: 2,
+			ManifestPath: legacy, FieldLogicalSizesManifest: stamp, Stats: &datapb.Statistics{FieldLogicalSizes: &datapb.FieldLogicalSizes{Version: 1, RowCount: 2, Fields: map[int64]*datapb.FieldLogicalSize{100: {}}}},
+		}
 		loaded, err := mt.segmentLoadNormalizer()(raw)
 		require.NoError(t, err)
 		require.Equal(t, resolved, loaded.GetManifestPath())

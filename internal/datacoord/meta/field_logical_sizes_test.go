@@ -42,13 +42,17 @@ func TestSaveBinlogFieldLogicalSizes(t *testing.T) {
 			mt, err := NewMemoryMeta(t)
 			require.NoError(t, err)
 			const segmentID, collectionID = 101, 2
-			require.NoError(t, mt.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID, CollectionID: collectionID, PartitionID: 3,
-				State: commonpb.SegmentState_Growing, StorageVersion: storage.StorageV3, Level: datapb.SegmentLevel_L1})))
+			require.NoError(t, mt.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+				ID: segmentID, CollectionID: collectionID, PartitionID: 3,
+				State: commonpb.SegmentState_Growing, StorageVersion: storage.StorageV3, Level: datapb.SegmentLevel_L1,
+			})))
 			manifest := func(ver int64) string { return packed.MarshalManifestPath("files/insert_log/2/3/101", ver) }
 			request := func(revision, rows int64, tick uint64, sizes *datapb.FieldLogicalSizes) *datapb.SaveBinlogPathsRequest {
-				return &datapb.SaveBinlogPathsRequest{SegmentID: segmentID, WithFullBinlogs: mode.full, ManifestPath: manifest(revision),
+				return &datapb.SaveBinlogPathsRequest{
+					SegmentID: segmentID, WithFullBinlogs: mode.full, ManifestPath: manifest(revision),
 					CheckPoints: []*datapb.CheckPoint{{SegmentID: segmentID, NumOfRows: rows, Position: &msgpb.MsgPosition{Timestamp: tick}}},
-					Stats:       &datapb.Statistics{InsertBinlogSize: 90, FieldLogicalSizes: sizes}}
+					Stats:       &datapb.Statistics{InsertBinlogSize: 90, FieldLogicalSizes: sizes},
+				}
 			}
 			save := func(req *datapb.SaveBinlogPathsRequest) error {
 				op := AddBinlogsOperator(segmentID, req.GetField2BinlogPaths(), nil, nil, nil)
@@ -115,8 +119,10 @@ func TestFieldLogicalSizesDowngradeRecovery(t *testing.T) {
 	mt, err := NewMemoryMeta(t)
 	require.NoError(t, err)
 	const base = "files/insert_log/2/3/4"
-	original := &datapb.SegmentInfo{ID: 4, CollectionID: 2, PartitionID: 3, State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, NumOfRows: 10, StorageVersion: storage.StorageV3,
-		ManifestPath: packed.MarshalManifestPath(base, 1)}
+	original := &datapb.SegmentInfo{
+		ID: 4, CollectionID: 2, PartitionID: 3, State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, NumOfRows: 10, StorageVersion: storage.StorageV3,
+		ManifestPath: packed.MarshalManifestPath(base, 1),
+	}
 	stats := &datapb.Statistics{InsertBinlogSize: 100, FieldLogicalSizes: &datapb.FieldLogicalSizes{Version: 1, RowCount: 10, Fields: map[int64]*datapb.FieldLogicalSize{101: {}}}}
 	require.NoError(t, mt.installReportedStats(original, stats))
 	require.NoError(t, mt.AddSegment(ctx, NewSegmentInfo(original)))
@@ -243,8 +249,10 @@ func TestFieldLogicalSizesCompactionAdoption(t *testing.T) {
 			in.StorageVersion, in.ManifestPath = storage.StorageV3, packed.MarshalManifestPath("input", 1)
 			require.NoError(t, mt.AddSegment(ctx, in))
 			task := &datapb.CompactionTask{PlanID: 11, Type: typ, InputSegments: []int64{1}, CollectionID: in.GetCollectionID(), Channel: in.GetInsertChannel(), Schema: &schemapb.CollectionSchema{Version: 2}, PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 10, End: 11}}
-			out := &datapb.CompactionSegment{SegmentID: 10, NumOfRows: 2, StorageVersion: storage.StorageV3, Manifest: packed.MarshalManifestPath("output", 1), IsSorted: true,
-				Stats: &datapb.Statistics{FieldLogicalSizes: &datapb.FieldLogicalSizes{Version: 1, RowCount: 3, Fields: map[int64]*datapb.FieldLogicalSize{100: {PayloadBytes: 18}}}}}
+			out := &datapb.CompactionSegment{
+				SegmentID: 10, NumOfRows: 2, StorageVersion: storage.StorageV3, Manifest: packed.MarshalManifestPath("output", 1), IsSorted: true,
+				Stats: &datapb.Statistics{FieldLogicalSizes: &datapb.FieldLogicalSizes{Version: 1, RowCount: 3, Fields: map[int64]*datapb.FieldLogicalSize{100: {PayloadBytes: 18}}}},
+			}
 			apply := func() error {
 				_, err := mt.CompleteCompactionMutation(ctx, task, &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{out}})
 				return err

@@ -43,8 +43,10 @@ func TestReusedTextSizeLineage(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
 	lob := compaction.NewLOBCompactionContext()
 	lob.ComputeStrategies([]int64{id}, 0.3)
-	source := &datapb.CompactionSegmentBinlogs{FieldLogicalSizes: &datapb.FieldLogicalSizes{Version: 1, RowCount: 2,
-		Fields: map[int64]*datapb.FieldLogicalSize{id: {PayloadBytes: 70001, ValidityBits: 2}}}}
+	source := &datapb.CompactionSegmentBinlogs{FieldLogicalSizes: &datapb.FieldLogicalSizes{
+		Version: 1, RowCount: 2,
+		Fields: map[int64]*datapb.FieldLogicalSize{id: {PayloadBytes: 70001, ValidityBits: 2}},
+	}}
 	l := newTextSizeLineage(schema, lob, []*datapb.CompactionSegmentBinlogs{source, {}})
 	require.NotNil(t, l)
 	l.sources[0].read, l.sources[1].read = 2, 3

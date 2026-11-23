@@ -197,8 +197,10 @@ func TestFieldLogicalSizeScalarArrays(t *testing.T) {
 func TestFieldLogicalSizeNestedArrays(t *testing.T) {
 	leaf := &schemapb.TypeSchema{Nullable: true, Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_VarChar}}
 	inner := &schemapb.TypeSchema{Nullable: true, Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: leaf}}
-	f := &schemapb.FieldSchema{DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array, Nullable: true, ElementNullable: true,
-		TypeSchema: &schemapb.TypeSchema{Nullable: true, Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: inner}}}
+	f := &schemapb.FieldSchema{
+		DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array, Nullable: true, ElementNullable: true,
+		TypeSchema: &schemapb.TypeSchema{Nullable: true, Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: inner}},
+	}
 	outer := array.NewListBuilder(memory.DefaultAllocator, arrow.ListOf(arrow.BinaryTypes.String))
 	defer outer.Release()
 	children := outer.ValueBuilder().(*array.ListBuilder)
@@ -217,8 +219,10 @@ func TestFieldLogicalSizeNestedArrays(t *testing.T) {
 
 	// The same nested row in protobuf form, with compact inner/leaf masks.
 	row := &schemapb.ScalarField{ValidData: []bool{true, false}, Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
-		ElementType: schemapb.DataType_VarChar, Data: []*schemapb.ScalarField{{ValidData: []bool{true, false},
-			Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"猫"}}}}},
+		ElementType: schemapb.DataType_VarChar, Data: []*schemapb.ScalarField{{
+			ValidData: []bool{true, false},
+			Data:      &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"猫"}}},
+		}},
 	}}}
 	encoded, err := proto.Marshal(row)
 	require.NoError(t, err)
@@ -229,8 +233,10 @@ func TestFieldLogicalSizeNestedArrays(t *testing.T) {
 
 func TestFieldLogicalSizeVectorArrays(t *testing.T) {
 	for _, nullable := range []bool{true, false} {
-		f := &schemapb.FieldSchema{DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector,
-			Nullable: true, ElementNullable: nullable, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "3"}}}
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector,
+			Nullable: true, ElementNullable: nullable, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "3"}},
+		}
 		// The legacy fixed child is physically annotated nullable even when
 		// the schema is element-non-nullable. It must not be charged bits.
 		var child arrow.DataType = &arrow.FixedSizeBinaryType{ByteWidth: 12}

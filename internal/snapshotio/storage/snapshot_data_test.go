@@ -234,8 +234,10 @@ func TestSnapshotCommitTimestampRoundTrip(t *testing.T) {
 					SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 2},
 					Collection:   &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Name: "source"}, Partitions: map[string]int64{"default": 10}},
 					Segments: []*datapb.SegmentDescription{
-						{SegmentId: 20, PartitionId: 10, SegmentLevel: datapb.SegmentLevel_L1, CommitTimestamp: commit, NumOfRows: sizes.RowCount,
-							StorageVersion: storage.StorageV3, ManifestPath: manifest, FieldLogicalSizes: sizes},
+						{
+							SegmentId: 20, PartitionId: 10, SegmentLevel: datapb.SegmentLevel_L1, CommitTimestamp: commit, NumOfRows: sizes.RowCount,
+							StorageVersion: storage.StorageV3, ManifestPath: manifest, FieldLogicalSizes: sizes,
+						},
 						{SegmentId: 30, PartitionId: common.AllPartitionsID, SegmentLevel: datapb.SegmentLevel_L0},
 					},
 				}

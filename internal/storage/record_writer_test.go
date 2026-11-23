@@ -241,8 +241,10 @@ func TestPartialPackedBatchWriterFieldLogicalSizes(t *testing.T) {
 	ages := &schemapb.FieldSchema{FieldID: 201, Name: "age", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int16, ElementNullable: true, Nullable: true}
 	names := &schemapb.FieldSchema{FieldID: 202, Name: "name", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar, ElementNullable: true, Nullable: true}
 	scalar := &schemapb.FieldSchema{FieldID: 100, DataType: schemapb.DataType_Int64, Nullable: true}
-	target := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{scalar, {FieldID: 101, DataType: schemapb.DataType_VarChar}},
-		StructArrayFields: []*schemapb.StructArrayFieldSchema{{FieldID: 200, Nullable: true, Fields: []*schemapb.FieldSchema{ages, names}}}}
+	target := &schemapb.CollectionSchema{
+		Fields:            []*schemapb.FieldSchema{scalar, {FieldID: 101, DataType: schemapb.DataType_VarChar}},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{FieldID: 200, Nullable: true, Fields: []*schemapb.FieldSchema{ages, names}}},
+	}
 	// The partial writer receives only physical FieldSchemas (not their
 	// parents), interleaved with a top-level field in native group order.
 	projected := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{names, scalar, ages}}

@@ -639,8 +639,10 @@ func TestCompactionRewrittenTextSizesAfterDeleteTTLAndSplit(t *testing.T) {
 				}
 				return tsoutil.ComposeTSByTime(now)
 			}
-			name := &schemapb.FieldSchema{FieldID: nameID, Name: "name", DataType: schemapb.DataType_VarChar, Nullable: true,
-				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "32"}}}
+			name := &schemapb.FieldSchema{
+				FieldID: nameID, Name: "name", DataType: schemapb.DataType_VarChar, Nullable: true,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "32"}},
+			}
 			body := &schemapb.FieldSchema{FieldID: bodyID, Name: "body", DataType: schemapb.DataType_Text}
 			fix := buildBumpFixture(t, withRows(4), withoutSourceText(), withSourceFields(name, body), withTextLOBSource(bodyID),
 				withCollectionTTL(time.Hour), withRowTs(rowTime), withDeletedPKs(map[any]uint64{int64(3): rowTime(2) + 1}),

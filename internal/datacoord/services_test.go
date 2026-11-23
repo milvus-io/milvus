@@ -338,7 +338,8 @@ func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 		WithFullBinlogs: true,
 		StorageVersion:  storage.StorageV3,
 		ManifestPath:    packed.MarshalManifestPath("files/insert_log/100/10/10", 2),
-		Stats: &datapb.Statistics{FieldLogicalSizes: &datapb.FieldLogicalSizes{Version: 1, RowCount: 100,
+		Stats: &datapb.Statistics{FieldLogicalSizes: &datapb.FieldLogicalSizes{
+			Version: 1, RowCount: 100,
 			Fields: map[int64]*datapb.FieldLogicalSize{101: {}},
 		}},
 		Field2BinlogPaths: []*datapb.FieldBinlog{{

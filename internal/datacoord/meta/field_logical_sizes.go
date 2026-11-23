@@ -313,7 +313,8 @@ func UpdateSaveBinlogStats(req *datapb.SaveBinlogPathsRequest) UpdateOperator {
 		// A growing segment only appends inserts. Equal authoritative counts
 		// identify an unchanged insert prefix; an unanchored manifest advance
 		// does not, even if the old cached row count happened to stay the same.
-		if rows != current.GetNumOfRows() || !(provedRows || sameManifest || (req.GetManifestPath() == "" && len(req.GetField2BinlogPaths()) == 0)) {
+		hasManifestOrBinlogs := req.GetManifestPath() != "" || len(req.GetField2BinlogPaths()) != 0
+		if rows != current.GetNumOfRows() || (!provedRows && !sameManifest && hasManifestOrBinlogs) {
 			return true
 		}
 		known := SegmentFieldLogicalSizes(current.SegmentInfo)
