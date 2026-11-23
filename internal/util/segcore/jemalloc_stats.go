@@ -21,6 +21,8 @@ package segcore
 */
 import "C"
 
+import "unsafe"
+
 // JemallocStats represents comprehensive jemalloc memory statistics
 // All sizes are in bytes
 type JemallocStats struct {
@@ -44,7 +46,15 @@ type JemallocStats struct {
 // Returns JemallocStats with detailed memory information
 // On platforms without jemalloc support, all metrics will be 0 and Success will be false
 func GetJemallocStats() JemallocStats {
-	cStats := C.GetJemallocStats()
+	cStats := (*C.JemallocStats)(C.malloc(C.sizeof_JemallocStats))
+	if cStats == nil {
+		return JemallocStats{}
+	}
+	defer C.free(unsafe.Pointer(cStats))
+
+	if !bool(C.GetJemallocStats(cStats)) {
+		return JemallocStats{}
+	}
 
 	return JemallocStats{
 		Allocated:     uint64(cStats.allocated),

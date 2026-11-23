@@ -41,8 +41,13 @@ typedef struct {
     bool success;  // Whether stats were successfully retrieved
 } JemallocStats;
 
-JemallocStats
-GetJemallocStats();
+// Populates caller-provided stats storage and returns whether jemalloc metrics
+// were retrieved. Using an out-parameter lets cgo callers pass C-heap storage
+// instead of returning a large struct by value via memcpy into Go-managed
+// stack/heap frames (which causes ThreadSanitizer false positives when Go
+// reuses memory across OS threads).
+bool
+GetJemallocStats(JemallocStats* stats);
 
 #ifdef __cplusplus
 }

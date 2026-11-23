@@ -277,8 +277,13 @@ func gatherJemallocMetrics() map[string]*dto.MetricFamily {
 	// This involves expensive mallctl("epoch") call which can take 100-5000μs
 	result := make(map[string]*dto.MetricFamily)
 
-	cStats := C.GetJemallocStats()
-	if !bool(cStats.success) {
+	cStats := (*C.JemallocStats)(C.malloc(C.sizeof_JemallocStats))
+	if cStats == nil {
+		return result
+	}
+	defer C.free(unsafe.Pointer(cStats))
+
+	if !bool(C.GetJemallocStats(cStats)) {
 		mlog.Debug(context.TODO(), "jemalloc stats not available (may be running on macOS or jemalloc is disabled)")
 		return result
 	}
