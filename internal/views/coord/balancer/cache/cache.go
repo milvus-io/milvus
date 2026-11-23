@@ -50,6 +50,7 @@ func (c *CollectionEntry) GetShard(id qviews.ShardID) *ShardEntry {
 	shard, _ := c.shards.getShard(id)
 	return shard
 }
+
 func (c *CollectionEntry) MaybeUped(id qviews.ShardID) bool {
 	if shard := c.GetShard(id); shard != nil && shard.stats.MaybeUped {
 		return true

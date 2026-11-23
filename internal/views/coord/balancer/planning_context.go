@@ -103,6 +103,7 @@ func (p *planningContext) GetResourceGroup(name string) *balancercache.ResourceG
 	p.groupEntries[name] = group
 	return group
 }
+
 func (p *planningContext) GetNode(id int64) *balancercache.NodeEntry {
 	if p.nodeEntries == nil {
 		return p.Reader.GetNode(id) // Queue admission reads only the shard's serving nodes.
