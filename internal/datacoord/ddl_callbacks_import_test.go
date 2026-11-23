@@ -42,7 +42,6 @@ import (
 	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
@@ -56,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	sharedsnapshot "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -125,12 +125,12 @@ func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
 	defer validation.UnPatch()
 	replication := mockey.Mock((*ddl.Callbacks).ValidateImportReplication).Return(nil).Build()
 	defer replication.UnPatch()
-	read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadMetadata).Return(&datapb.SnapshotMetadata{
-		FormatVersion: int32(snapshotstorage.SnapshotFormatVersion), SnapshotInfo: snapshot.SnapshotInfo,
+	read := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadMetadata).Return(&datapb.SnapshotMetadata{
+		FormatVersion: int32(sharedsnapshot.SnapshotFormatVersion), SnapshotInfo: snapshot.SnapshotInfo,
 		Collection: snapshot.Collection, Layout: snapshot.Layout,
 	}, nil).Build()
 	defer read.UnPatch()
-	fileValidation := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).Return(nil).Build()
+	fileValidation := mockey.Mock(sharedsnapshot.ValidateExternalSnapshotDataFiles).Return(nil).Build()
 	defer fileValidation.UnPatch()
 	api := meta.NewMockBroadcastAPIImpl()
 	// The target partitions appear only once the broadcast lock is held, so
@@ -300,7 +300,7 @@ func TestBroadcastSnapshotImportNormalizesEZK(t *testing.T) {
 	defer validation.UnPatch()
 	replication := mockey.Mock((*ddl.Callbacks).ValidateImportReplication).Return(nil).Build()
 	defer replication.UnPatch()
-	fileValidation := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).Return(nil).Build()
+	fileValidation := mockey.Mock(sharedsnapshot.ValidateExternalSnapshotDataFiles).Return(nil).Build()
 	defer fileValidation.UnPatch()
 	api := meta.NewMockBroadcastAPIImpl()
 	start := mockey.Mock((*ddl.Callbacks).StartBroadcastWithCollectionID).Return(api, nil).Build()
@@ -317,8 +317,8 @@ func TestBroadcastSnapshotImportNormalizesEZK(t *testing.T) {
 			if encrypted {
 				snapshot.Collection.Schema.Properties = []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "10"}}
 			}
-			read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadMetadata).Return(&datapb.SnapshotMetadata{
-				FormatVersion: int32(snapshotstorage.SnapshotFormatVersion), SnapshotInfo: snapshot.SnapshotInfo,
+			read := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadMetadata).Return(&datapb.SnapshotMetadata{
+				FormatVersion: int32(sharedsnapshot.SnapshotFormatVersion), SnapshotInfo: snapshot.SnapshotInfo,
 				Collection: snapshot.Collection, Layout: snapshot.Layout,
 			}, nil).Build()
 			defer read.UnPatch()
