@@ -208,7 +208,7 @@ func (f *shardLeaderReadinessFixture) putReplica(t *testing.T, collectionID int6
 // putInvisibleReplica registers a replica of collectionID in rgName holding
 // nodeIDs, in the not-yet-query-visible state load-config updates spawn
 // replicas in (job_update.go passes WithQueryInvisible; visibility is flipped
-// later, all-or-nothing, by tryPromoteReadyLoadConfigReplicas).
+// later, per resource group, by tryPromoteReadyLoadConfigReplicas).
 func (f *shardLeaderReadinessFixture) putInvisibleReplica(t *testing.T, collectionID int64, rgName string, nodeIDs ...int64) {
 	f.putResourceGroup(t, rgName)
 	require.NotEmpty(t, nodeIDs)
@@ -607,7 +607,7 @@ func TestShardLeaderReadinessByRG_NilFailedLoadCache(t *testing.T) {
 // one the proxy can never route to; counting it here would report Ready for a
 // resource group that does not appear in the GetShardLeaders answer at all — exactly the
 // load-config switch window this check exists to keep honest. Once visibility
-// is flipped (the same all-or-nothing promotion tryPromoteReadyLoadConfigReplicas
+// is flipped (the per-resource-group promotion tryPromoteReadyLoadConfigReplicas
 // performs), the same leader must start counting.
 func TestShardLeaderReadinessByRG_QueryInvisibleReplicaDoesNotCount(t *testing.T) {
 	ctx := context.Background()
