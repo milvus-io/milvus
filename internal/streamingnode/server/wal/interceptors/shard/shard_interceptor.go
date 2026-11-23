@@ -5,6 +5,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
@@ -19,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const interceptorName = "shard"
@@ -389,6 +391,15 @@ func (impl *shardInterceptor) handleCreateSegment(ctx context.Context, msg messa
 		// The segment can not be created at current shard, ignored
 		return nil, status.NewUnrecoverableError(err.Error())
 	}
+
+	// The worker can start before a schema DDL. The outer VChannel lock
+	// serializes this append (including registration) with the DDL.
+	schema := impl.shardManager.GetCollectionSchemaSnapshot(h.GetCollectionId())
+	h.SchemaVersion = schema.GetVersion()
+	if typeutil.HasTextField(schema) {
+		h.StorageVersion = storage.StorageV3
+	}
+	createSegmentMsg.OverwriteHeader(h)
 
 	msgID, err := appendOp(ctx, msg)
 	if err != nil {
