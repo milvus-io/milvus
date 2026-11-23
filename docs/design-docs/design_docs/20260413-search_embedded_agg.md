@@ -328,21 +328,6 @@ Metrics are accumulated at the proxy over the rows that reached the proxy from Q
 
 Nested `sub_group` parents carrying metrics are supported. Parent metrics aggregate over all child-level retrieval pools — they are subject to bias amplification (see Approximation Contract). Users requiring exact values on the full post-filter collection should fall back to scalar `query` aggregation.
 
-#### 5.5.4 Integer SUM and AVG
-
-Search aggregation uses an `int64` accumulator for integer inputs and promotes
-to a bucket-owned `big.Int` before overflow. Intermediate sums remain exact:
-`INT64_MAX + 1 - 1` returns `INT64_MAX` regardless of encounter order. At
-finalization, SUM must fit `int64`; otherwise the request fails with
-`ErrAggregateOverflow` (2203), including requests that also compute AVG.
-AVG divides the exact sum by the non-null count before rounding to `float64`;
-its sum need not fit `int64`. NULL inputs do not affect either sum or count.
-Only finalized scalar values reach bucket ordering and response serialization.
-
-This state is local to the proxy's `NewState` / `UpdateState` / `Terminate`
-lifecycle. Scalar Query partial-result accumulation and its wire types are
-unchanged. Floating-point accumulation retains its existing behavior.
-
 ### 5.6 Bucket ordering (R7) and intra-bucket sort (R5)
 
 #### 5.6.1 R7 — `order` selects the top-K buckets
