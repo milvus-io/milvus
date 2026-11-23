@@ -35,31 +35,6 @@
 namespace milvus::segcore {
 namespace {
 
-class CandidateScanWarnings : public google::LogSink {
- public:
-    CandidateScanWarnings() {
-        google::AddLogSink(this);
-    }
-    ~CandidateScanWarnings() override {
-        google::RemoveLogSink(this);
-    }
-    void
-    send(google::LogSeverity severity,
-         const char*,
-         const char*,
-         int,
-         const struct tm*,
-         const char* message,
-         size_t length) override {
-        std::string text(message, length);
-        if (severity == google::GLOG_WARNING &&
-            text.find("Candidate scan reached row cap") != std::string::npos) {
-            messages.push_back(std::move(text));
-        }
-    }
-    std::vector<std::string> messages;
-};
-
 class RetrieveCandidatesTest
     : public ::testing::TestWithParam<std::tuple<bool, DataType>> {
  protected:
@@ -112,8 +87,8 @@ class RetrieveCandidatesTest
     }
 
     void
-    SetMode(CRetrieveMode mode, int64_t max_rows = 0) {
-        auto status = SetRetrievePlanMode(plan.get(), mode, max_rows);
+    SetMode(CRetrieveMode mode) {
+        auto status = SetRetrievePlanMode(plan.get(), mode);
         ASSERT_EQ(status.error_code, Success) << status.error_msg;
     }
 
@@ -306,42 +281,33 @@ TEST_P(RetrieveCandidatesTest, BudgetsAndCancellation) {
         nullptr, plan.get(), nullptr, 0, true, cancellation.getToken()));
 }
 
-TEST_P(RetrieveCandidatesTest, CandidateRowCap) {
+TEST_P(RetrieveCandidatesTest, SerializedMetadataBudget) {
     SetMode(RetrieveModeCandidates);
-    auto reference = segment->Retrieve(nullptr, plan.get(), 100, 4096, false);
-    SetMode(RetrieveModeCandidates, 4);
-    {
-        CandidateScanWarnings warnings;
-        // The budget fits four offsets, not the full candidate set.
-        auto capped = segment->Retrieve(nullptr, plan.get(), 100, 4 * 8, false);
-        ASSERT_EQ(capped->offset_size(), 4);
-        EXPECT_TRUE(capped->has_more_result());
-        EXPECT_FALSE(capped->has_ids());
-        EXPECT_EQ(plan->plan_node_->limit_, 2);
-        for (int i = 0; i < 4; ++i) {
-            EXPECT_EQ(capped->offset(i), reference->offset(i));
-        }
-        ASSERT_EQ(warnings.messages.size(), 1);
-        EXPECT_NE(warnings.messages[0].find("maxRows=4"), std::string::npos);
-        EXPECT_NE(warnings.messages[0].find("returnedRows=4"),
-                  std::string::npos);
-    }
-    CandidateScanWarnings no_warnings;
-    SetMode(RetrieveModeCandidates, kRows - 1);
-    // Count after MVCC, not all rows in the segment.
+    // Keep active rows, but match only a row newer than the query timestamp.
+    // A timestamp before every insert short-circuits growing retrieval and
+    // produces a zero-byte result, so it cannot exercise this budget check.
+    auto filter = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(pk, std::get<1>(GetParam()), {}),
+        std::vector<proto::plan::GenericValue>{PkValue(20)});
+    plan->plan_node_->plannodes_ = test::CreateRetrievePlanByExpr(filter);
+    auto empty = segment->Retrieve(nullptr, plan.get(), 15, 4096, false);
+    ASSERT_EQ(empty->offset_size(), 0);
+    ASSERT_GT(empty->all_retrieve_count(), 0);
+    ASSERT_GT(empty->ByteSizeLong(), 1);
+    // No offsets to allocate: only serialized metadata exceeds the budget.
+    ExpectCode([&] { segment->Retrieve(nullptr, plan.get(), 15, 1, false); },
+               InvalidParameter);
+}
+
+TEST_P(RetrieveCandidatesTest, CandidatesRemainCompleteBeyondQueryLimit) {
+    SetMode(RetrieveModeCandidates);
     auto visible = segment->Retrieve(nullptr, plan.get(), 15, 4096, false);
     EXPECT_EQ(visible->offset_size(), kRows / 2);
     EXPECT_FALSE(visible->has_more_result());
-    SetMode(RetrieveModeCandidates, kRows);
-    auto exact = segment->Retrieve(nullptr, plan.get(), 100, 4096, false);
-    EXPECT_EQ(exact->offset_size(), kRows);
-    EXPECT_FALSE(exact->has_more_result());
-    EXPECT_TRUE(no_warnings.messages.empty());
-    auto status = SetRetrievePlanMode(plan.get(), RetrieveModeCandidates, -1);
-    EXPECT_EQ(status.error_code, UnexpectedError);
-    std::free(const_cast<char*>(status.error_msg));
-    EXPECT_EQ(plan->max_candidate_rows_, kRows);
-    SetMode(RetrieveModeNormal, 1);
+    auto all = segment->Retrieve(nullptr, plan.get(), 100, 4096, false);
+    EXPECT_EQ(all->offset_size(), kRows);
+    EXPECT_FALSE(all->has_more_result());
+    SetMode(RetrieveModeNormal);
     auto normal = segment->Retrieve(nullptr, plan.get(), 100, 4096, false);
     EXPECT_EQ(normal->offset_size(), 2);
 }
@@ -369,13 +335,13 @@ TEST_P(RetrieveCandidatesTest, RejectsNonCandidatePlansBeforeExecution) {
 TEST(RetrieveCandidatesMode, CApiRejectsInvalidModeWithoutChangingPlan) {
     auto schema = std::make_shared<Schema>();
     query::RetrievePlan plan(schema);
-    auto status = SetRetrievePlanMode(&plan, RetrieveModeCandidates, 0);
+    auto status = SetRetrievePlanMode(&plan, RetrieveModeCandidates);
     ASSERT_EQ(status.error_code, Success);
-    status = SetRetrievePlanMode(&plan, static_cast<CRetrieveMode>(999), 0);
+    status = SetRetrievePlanMode(&plan, static_cast<CRetrieveMode>(999));
     ASSERT_EQ(status.error_code, UnexpectedError);
     std::free(const_cast<char*>(status.error_msg));
     EXPECT_EQ(plan.mode_, query::RetrieveMode::Candidates);
-    status = SetRetrievePlanMode(nullptr, RetrieveModeNormal, 0);
+    status = SetRetrievePlanMode(nullptr, RetrieveModeNormal);
     ASSERT_EQ(status.error_code, UnexpectedError);
     std::free(const_cast<char*>(status.error_msg));
 }

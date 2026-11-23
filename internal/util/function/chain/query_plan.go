@@ -143,9 +143,6 @@ func PrepareQueryPlanChainExecution(plan *planpb.PlanNode, schema *schemapb.Coll
 	if query == nil {
 		return nil, merr.WrapErrServiceInternalMsg("Query chains require a QueryPlanNode")
 	}
-	if query.GetPredicates().GetElementFilterExpr() != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("QueryScan supports only document-level Query")
-	}
 	if query.GetIsCount() || len(query.GetAggregates()) > 0 || len(query.GetGroupByFieldIds()) > 0 ||
 		len(query.GetOrderByFields()) > 0 || isIterator || query.GetQueryIteratorCursor() != nil {
 		return nil, merr.WrapErrParameterInvalidMsg("Query chains do not support count, aggregation, group-by, order-by or iterator")

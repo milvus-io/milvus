@@ -3119,6 +3119,70 @@ TEST(ElementFilter, GrowingNullableArrayTailChunkUsesActiveRows) {
     EXPECT_EQ(retrieve_results->element_indices(1).indices(0), 0);
 }
 
+TEST_P(ElementFilterEmptyDocHit, OrdinaryQueryPreservesEmptyElementMode) {
+    auto schema = std::make_shared<Schema>();
+    auto array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+    auto pk_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    proto::plan::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_is_count(false);
+    query->set_limit(2);
+    auto* filter = query->mutable_predicates()->mutable_element_filter_expr();
+    filter->set_struct_name("structA");
+    auto* range = filter->mutable_element_expr()->mutable_unary_range_expr();
+    auto* column = range->mutable_column_info();
+    column->set_field_id(array_fid.get());
+    column->set_data_type(proto::schema::DataType::Int32);
+    column->set_element_type(proto::schema::DataType::Int32);
+    column->set_is_element_level(true);
+    range->set_op(proto::plan::OpType::GreaterEqual);
+    range->mutable_value()->set_int64_val(0);
+    plan_node.add_output_field_ids(pk_fid.get());
+    plan_node.add_output_field_ids(array_fid.get());
+    auto plan = ProtoParser(schema).CreateRetrievePlan(plan_node);
+
+    // No candidate mode: exercise ordinary Query, including the zero-element
+    // bitmap path and a genuinely empty growing segment's null result path.
+    for (size_t rows : {size_t{0}, size_t{4}}) {
+        if (GetParam() && rows == 0) {
+            continue;  // Sealed field loading requires nonempty data.
+        }
+        SCOPED_TRACE(rows);
+        auto data = DataGen(schema, rows, 42, 0, 1, 0);
+        std::shared_ptr<SegmentInterface> segment;
+        if (GetParam()) {
+            segment = CreateSealedWithFieldDataLoaded(schema, data);
+        } else {
+            auto growing = CreateGrowingSegment(schema, empty_index_meta);
+            if (rows > 0) {
+                growing->PreInsert(rows);
+                growing->Insert(0,
+                                rows,
+                                data.row_ids_.data(),
+                                data.timestamps_.data(),
+                                data.SharedRaw());
+            }
+            segment = std::move(growing);
+        }
+        auto result = segment->Retrieve(nullptr,
+                                        plan.get(),
+                                        1L << 63,
+                                        INT64_MAX,
+                                        false,
+                                        folly::CancellationToken(),
+                                        0,
+                                        0);
+        ASSERT_NE(result, nullptr);
+        EXPECT_TRUE(result->element_level());
+        EXPECT_EQ(result->offset_size(), 0);
+        EXPECT_EQ(result->element_indices_size(), 0);
+        EXPECT_EQ(result->ids().int_id().data_size(), 0);
+    }
+}
+
 TEST_P(ElementFilterEmptyDocHit, ElementLevelSearchWithZeroElements) {
     bool with_sealed = GetParam();
 

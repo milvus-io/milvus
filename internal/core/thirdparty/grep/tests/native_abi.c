@@ -7,11 +7,11 @@
 #if UINTPTR_MAX == UINT64_MAX
 _Static_assert(sizeof(MgGrepError) == 512, "error layout");
 _Static_assert(sizeof(MgGrepBytes) == 16 && offsetof(MgGrepBytes, len) == 8, "bytes layout");
-_Static_assert(sizeof(MgGrepMatchOptions) == 24 && offsetof(MgGrepMatchOptions, boundary) == 8 && offsetof(MgGrepMatchOptions, has_max_count) == 12 && offsetof(MgGrepMatchOptions, max_count) == 16, "options layout");
-_Static_assert(sizeof(MgGrepSpecView) == 40 && offsetof(MgGrepSpecView, options) == 16, "spec layout");
+_Static_assert(sizeof(MgGrepMatchOptions) == 40 && offsetof(MgGrepMatchOptions, boundary) == 8 && offsetof(MgGrepMatchOptions, has_max_count) == 12 && offsetof(MgGrepMatchOptions, max_count) == 16 && offsetof(MgGrepMatchOptions, before_context) == 24 && offsetof(MgGrepMatchOptions, after_context) == 32, "options layout");
+_Static_assert(sizeof(MgGrepSpecView) == 56 && offsetof(MgGrepSpecView, options) == 16, "spec layout");
 _Static_assert(sizeof(MgGrepCompileLimits) == 16 && offsetof(MgGrepCompileLimits, max_regex_bytes) == 0 && offsetof(MgGrepCompileLimits, max_dfa_cache_bytes) == 8, "compile limits layout");
 _Static_assert(sizeof(MgGrepSpan) == 16 && offsetof(MgGrepSpan, end) == 8, "span layout");
-_Static_assert(sizeof(MgGrepLine) == 48 && offsetof(MgGrepLine, spans) == 16 && offsetof(MgGrepLine, span_count) == 24 && offsetof(MgGrepLine, line_number) == 32 && offsetof(MgGrepLine, line_start_offset) == 40, "line layout");
+_Static_assert(sizeof(MgGrepLine) == 56 && offsetof(MgGrepLine, spans) == 16 && offsetof(MgGrepLine, span_count) == 24 && offsetof(MgGrepLine, line_number) == 32 && offsetof(MgGrepLine, line_start_offset) == 40 && offsetof(MgGrepLine, is_match) == 48, "line layout");
 _Static_assert(sizeof(MgGrepTextResult) == 16 && offsetof(MgGrepTextResult, line_count) == 8, "text layout");
 _Static_assert(sizeof(MgGrepBatchView) == 16 && offsetof(MgGrepBatchView, text_count) == 8, "batch layout");
 #endif
@@ -59,6 +59,40 @@ int main(void) {
     assert(line->line_number == 2 && line->line_start_offset == 5);
     assert(line->span_count == 2 && line->spans[0].start == 0 && line->spans[0].end == 5);
     assert(line->spans[1].start == 7 && line->spans[1].end == 12);
+    mg_grep_result_free(result);
+
+    /* Absolute anchors enumerate spans on the selected logical line. */
+    MgGrepBytes anchor_pattern = bytes("\\Aerror");
+    MgGrepSpecView anchor_spec = {&anchor_pattern, 1, {0}};
+    assert(mg_grep_compile(&anchor_spec, &cl, &plan, &error) == MG_GREP_OK);
+    assert(mg_grep_session_create(plan, &session, &error) == MG_GREP_OK);
+    mg_grep_plan_free(plan);
+    MgGrepBytes anchor_input = bytes("prefix\nerror\nlast\n");
+    assert(mg_grep_execute_batch(session, &anchor_input, 1, el, &result, &error) == MG_GREP_OK);
+    mg_grep_session_free(session);
+    view = mg_grep_result_view(result);
+    assert(view->texts[0].line_count == 1);
+    line = view->texts[0].lines;
+    assert(line->line_number == 2 && line->line_start_offset == 7);
+    assert(line->content.len == 5 && memcmp(line->content.data, "error", 5) == 0);
+    assert(line->is_match && line->span_count == 1);
+    assert(line->spans[0].start == 0 && line->spans[0].end == 5);
+    mg_grep_result_free(result);
+
+    /* Spans may address an individual byte inside a valid UTF-8 character. */
+    MgGrepBytes byte_pattern = bytes("(?-u:\\xA9)");
+    MgGrepSpecView byte_spec = {&byte_pattern, 1, {0}};
+    assert(mg_grep_compile(&byte_spec, &cl, &plan, &error) == MG_GREP_OK);
+    assert(mg_grep_session_create(plan, &session, &error) == MG_GREP_OK);
+    mg_grep_plan_free(plan);
+    MgGrepBytes byte_input = bytes("\xC3\xA9");
+    assert(mg_grep_execute_batch(session, &byte_input, 1, el, &result, &error) == MG_GREP_OK);
+    mg_grep_session_free(session);
+    view = mg_grep_result_view(result);
+    assert(view->texts[0].line_count == 1);
+    line = view->texts[0].lines;
+    assert(line->content.len == 2 && memcmp(line->content.data, "\xC3\xA9", 2) == 0);
+    assert(line->span_count == 1 && line->spans[0].start == 1 && line->spans[0].end == 2);
     mg_grep_result_free(result);
 
     /* Presence distinguishes -m 0 from the zero-initialized unlimited default. */
@@ -121,7 +155,7 @@ int main(void) {
     assert(mg_grep_execute_batch(session, unicode_batch, 3, el, &result, &error) == MG_GREP_OK);
     view = mg_grep_result_view(result);
     line = view->texts[0].lines;
-    assert(line->span_count == 2 && line->spans[0].start == 0 && line->spans[1].start == 2);
+    assert(line->span_count == 3 && line->spans[0].start == 0 && line->spans[1].start == 1 && line->spans[2].start == 2);
     assert(view->texts[1].lines[0].content.data == NULL && view->texts[1].lines[0].content.len == 0);
     assert(view->texts[1].lines[0].span_count == 1);
     assert(view->texts[2].lines == NULL);
@@ -182,6 +216,30 @@ int main(void) {
     }
     assert(found);
     free(owned);
+
+    /* Context lines have empty spans. -m counts hits, not emitted lines. */
+    p = bytes("hit");
+    spec.options.has_max_count = 1;
+    spec.options.max_count = 1;
+    spec.options.before_context = 1;
+    spec.options.after_context = 2;
+    assert(mg_grep_compile(&spec, &cl, &plan, &error) == MG_GREP_OK);
+    assert(mg_grep_session_create(plan, &session, &error) == MG_GREP_OK);
+    mg_grep_plan_free(plan);
+    MgGrepBytes contextual[] = {bytes("before\nhit\nhit\nafter\nignored"), bytes("miss")};
+    assert(mg_grep_execute_batch(session, contextual, 2, el, &result, &error) == MG_GREP_OK);
+    view = mg_grep_result_view(result);
+    assert(view->texts[0].line_count == 4 && view->texts[1].line_count == 0);
+    assert(!view->texts[0].lines[0].is_match && view->texts[0].lines[1].is_match);
+    assert(view->texts[0].lines[2].is_match && !view->texts[0].lines[3].is_match);
+    assert(view->texts[0].lines[0].span_count == 0 && view->texts[0].lines[0].spans == NULL);
+    assert(view->texts[0].lines[1].span_count == 1 && view->texts[0].lines[1].line_start_offset == 7);
+    assert(view->texts[0].lines[2].span_count == 1 && view->texts[0].lines[3].span_count == 0);
+    mg_grep_result_free(result);
+    assert(mg_grep_execute_batch(session, contextual, 2, 1, &result, &error) == MG_GREP_RESOURCE_LIMIT && result == NULL);
+    mg_grep_session_cancel(session);
+    assert(mg_grep_execute_batch(session, contextual, 2, el, &result, &error) == MG_GREP_CANCELLED && result == NULL);
+    mg_grep_session_free(session);
 
     mg_grep_plan_free(NULL);
     mg_grep_session_cancel(NULL);
