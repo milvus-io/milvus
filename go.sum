@@ -106,8 +106,8 @@ github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c/go.mod h1:X0
 github.com/Knetic/govaluate v3.0.1-0.20171022003610-9aa49832a739+incompatible/go.mod h1:r7JcOSlj0wfOMncg0iLm8Leh48TZaKVeNIfJntJ2wa0=
 github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
-github.com/MrPresent-Han/milvus-proto/go-api/v3 v3.0.0-20261123092047-29762ddfa2da h1:BYu22/3Du4ajojr6QrjNVmGbM78K1n9f7tL2ypeBR1s=
-github.com/MrPresent-Han/milvus-proto/go-api/v3 v3.0.0-20261123092047-29762ddfa2da/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
+github.com/MrPresent-Han/milvus-proto/go-api/v3 v3.0.0-20261123095423-d077a651d492 h1:W25RcsDKUirlpXO2zEfbyegwmOLB3XkAT//WJ0CUcjI=
+github.com/MrPresent-Han/milvus-proto/go-api/v3 v3.0.0-20261123095423-d077a651d492/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
 github.com/OneOfOne/xxhash v1.2.2/go.mod h1:HSdplMjZKSmBqAxg5vPj2TmRDmfkzw+cTzAElWljhcU=
 github.com/RoaringBitmap/roaring/v2 v2.8.0 h1:y1rdtixfXvaITKzkfiKvScI0hlBJHe9sfzJp8cgeM7w=
 github.com/RoaringBitmap/roaring/v2 v2.8.0/go.mod h1:FiJcsfkGje/nZBZgCu0ZxCPOKD/hVXDS2dXi7/eUFE0=

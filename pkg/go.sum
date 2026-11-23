@@ -100,8 +100,8 @@ github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapp
 github.com/Joker/hpp v1.0.0/go.mod h1:8x5n+M1Hp5hC0g8okX3sR3vFQwynaX/UgSOM9MeBKzY=
 github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
-github.com/MrPresent-Han/milvus-proto/go-api/v3 v3.0.0-20261123092047-29762ddfa2da h1:BYu22/3Du4ajojr6QrjNVmGbM78K1n9f7tL2ypeBR1s=
-github.com/MrPresent-Han/milvus-proto/go-api/v3 v3.0.0-20261123092047-29762ddfa2da/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
+github.com/MrPresent-Han/milvus-proto/go-api/v3 v3.0.0-20261123095423-d077a651d492 h1:W25RcsDKUirlpXO2zEfbyegwmOLB3XkAT//WJ0CUcjI=
+github.com/MrPresent-Han/milvus-proto/go-api/v3 v3.0.0-20261123095423-d077a651d492/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
 github.com/RoaringBitmap/roaring/v2 v2.8.0 h1:y1rdtixfXvaITKzkfiKvScI0hlBJHe9sfzJp8cgeM7w=
 github.com/RoaringBitmap/roaring/v2 v2.8.0/go.mod h1:FiJcsfkGje/nZBZgCu0ZxCPOKD/hVXDS2dXi7/eUFE0=
 github.com/Shopify/goreferrer v0.0.0-20181106222321-ec9c9a553398/go.mod h1:a1uqRtAwp2Xwc6WNPJEufxJ7fx3npB4UV/JOLmbu5I0=

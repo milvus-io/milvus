@@ -2348,6 +2348,9 @@ func GetRequestInfo(ctx context.Context, metaCache Cache, req proto.Message) (in
 		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, metaCache, req.(reqPartName))
 		return dbID, collToPartIDs, internalpb.RateType_DMLInsert, proto.Size(r), err
 	case *milvuspb.UpsertRequest, *milvuspb.UpdateRequest:
+		// PK Update temporarily shares the Insert/Upsert byte-rate quota; it does not insert rows.
+		// TODO: Add independent Update rate limiting, including quota configuration,
+		// distribution, and write-admission protection.
 		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, metaCache, req.(reqPartName))
 		return dbID, collToPartIDs, internalpb.RateType_DMLInsert, proto.Size(r), err
 	case *milvuspb.DeleteRequest:
