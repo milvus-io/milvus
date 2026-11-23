@@ -163,6 +163,12 @@ RunWithSdk(const std::function<void(RecordingHttpClient&)>& test) {
     setenv("AWS_EC2_METADATA_SERVICE_ENDPOINT", "http://169.254.169.254", 1);
     setenv("AWS_CONFIG_FILE", "/dev/null", 1);
     setenv("AWS_SHARED_CREDENTIALS_FILE", "/dev/null", 1);
+    unsetenv("AWS_WEB_IDENTITY_TOKEN_FILE");
+    unsetenv("AWS_ROLE_ARN");
+    unsetenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI");
+    unsetenv("AWS_CONTAINER_CREDENTIALS_FULL_URI");
+    unsetenv("AWS_CONTAINER_AUTHORIZATION_TOKEN");
+    unsetenv("AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE");
     unsetenv("AWS_REGION");
     unsetenv("AWS_DEFAULT_REGION");
     auto factory = std::make_shared<RecordingHttpFactory>();
@@ -508,81 +514,76 @@ TEST_F(S3EndpointAuthGuardDeathTest, DefaultsAndEndpointOverridesPreserved) {
 }
 
 TEST_F(S3EndpointAuthGuardDeathTest,
-       ChunkManagersAcceptEnvironmentCredentialsWithoutSessionToken) {
-    ASSERT_EXIT(RunWithSdk([](RecordingHttpClient& http) {
-                    setenv("AWS_ACCESS_KEY_ID", "ENV_AK", 1);
-                    setenv("AWS_SECRET_ACCESS_KEY", "ENV_SK", 1);
-                    unsetenv("AWS_SESSION_TOKEN");
-                    unsetenv("AWS_EC2_METADATA_ENABLE");
+       ChunkManagersRejectEnvironmentCredentialsInIamMode) {
+    ASSERT_EXIT(
+        RunWithSdk([](RecordingHttpClient& http) {
+            setenv("AWS_ACCESS_KEY_ID", "ENV_AK", 1);
+            setenv("AWS_SECRET_ACCESS_KEY", "ENV_SK", 1);
+            setenv("AWS_SESSION_TOKEN", "ENV_SESSION_TOKEN", 1);
+            setenv("AWS_EC2_METADATA_DISABLED", "true", 1);
 
-                    StorageConfig config;
-                    config.address = "s3.example.test";
-                    config.bucket_name = "test-bucket";
-                    config.region = "us-east-1";
-                    config.useIAM = true;
-                    EXPECT_NO_THROW({ AwsChunkManager manager(config); });
-                    EXPECT_NO_THROW({ MinioChunkManager manager(config); });
-                    EXPECT_EQ(http.requests, 2);
-                    EXPECT_NE(http.authorization.find("Credential=ENV_AK/"),
-                              Aws::String::npos);
-                }),
-                ::testing::ExitedWithCode(0),
-                "");
+            StorageConfig config;
+            config.address = "s3.example.test";
+            config.bucket_name = "test-bucket";
+            config.region = "us-east-1";
+            config.useIAM = true;
+            EXPECT_THROW({ AwsChunkManager manager(config); }, SegcoreError);
+            EXPECT_THROW({ MinioChunkManager manager(config); }, SegcoreError);
+            EXPECT_EQ(http.requests, 0);
+        }),
+        ::testing::ExitedWithCode(0),
+        "");
 }
 
-TEST_F(S3EndpointAuthGuardDeathTest, AwsCredentialsRequireOptInForNodeRole) {
+TEST_F(S3EndpointAuthGuardDeathTest, AwsCredentialsHonorMetadataDisabled) {
     ASSERT_EXIT(
         RunWithSdk([](RecordingHttpClient& http) {
             unsetenv("AWS_ACCESS_KEY_ID");
             unsetenv("AWS_SECRET_ACCESS_KEY");
             unsetenv("AWS_SESSION_TOKEN");
-            unsetenv("AWS_WEB_IDENTITY_TOKEN_FILE");
-            unsetenv("AWS_ROLE_ARN");
-            unsetenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI");
-            unsetenv("AWS_CONTAINER_CREDENTIALS_FULL_URI");
             setenv("AWS_DEFAULT_REGION", "us-east-1", 1);
-            setenv("AWS_EC2_METADATA_DISABLED", "false", 1);
 
-            const char* const disabled_values[] = {nullptr, "", "false", "1"};
-            for (const auto* const value : disabled_values) {
+            const char* const values[] = {
+                nullptr, "", "false", "1", "true", "TrUe"};
+            for (const auto* const value : values) {
                 SCOPED_TRACE(value == nullptr ? "unset" : value);
                 if (value == nullptr) {
-                    unsetenv("AWS_EC2_METADATA_ENABLE");
+                    unsetenv("AWS_EC2_METADATA_DISABLED");
                 } else {
-                    setenv("AWS_EC2_METADATA_ENABLE", value, 1);
+                    setenv("AWS_EC2_METADATA_DISABLED", value, 1);
                 }
+                const bool disabled =
+                    value != nullptr && (std::string(value) == "true" ||
+                                         std::string(value) == "TrUe");
+                const auto previous_requests = http.metadata_requests;
                 milvus_storage::AwsCredentialsProviderChain chain;
-                EXPECT_TRUE(chain.GetAWSCredentials().IsEmpty());
-                EXPECT_EQ(http.metadata_requests, 0);
-                // These are the only allowed credential sources by default.
+                const auto credentials = chain.GetAWSCredentials();
                 const auto& providers = chain.GetProviders();
-                ASSERT_EQ(providers.size(), 2);
-                EXPECT_NE(std::dynamic_pointer_cast<
-                              Aws::Auth::EnvironmentAWSCredentialsProvider>(
-                              providers[0]),
-                          nullptr);
-                EXPECT_NE(
-                    std::dynamic_pointer_cast<
-                        Aws::Auth::STSAssumeRoleWebIdentityCredentialsProvider>(
-                        providers[1]),
-                    nullptr);
+                if (disabled) {
+                    EXPECT_TRUE(credentials.IsEmpty());
+                    EXPECT_TRUE(providers.empty());
+                    EXPECT_EQ(http.metadata_requests, previous_requests);
+                } else {
+                    EXPECT_EQ(credentials.GetAWSAccessKeyId(), "NODE_AK");
+                    EXPECT_EQ(credentials.GetSessionToken(), "NODE_TOKEN");
+                    ASSERT_EQ(providers.size(), 1);
+                    EXPECT_NE(
+                        std::dynamic_pointer_cast<
+                            Aws::Auth::InstanceProfileCredentialsProvider>(
+                            providers[0]),
+                        nullptr);
+                    EXPECT_GT(http.metadata_requests, previous_requests);
+                }
             }
 
-            setenv("AWS_EC2_METADATA_ENABLE", "TrUe", 1);
-            milvus_storage::AwsCredentialsProviderChain enabled_chain;
-            const auto node_credentials = enabled_chain.GetAWSCredentials();
-            EXPECT_EQ(node_credentials.GetAWSAccessKeyId(), "NODE_AK");
-            EXPECT_EQ(node_credentials.GetSessionToken(), "NODE_TOKEN");
-            EXPECT_GT(http.metadata_requests, 0);
-
-            const auto metadata_requests = http.metadata_requests;
+            // Ambient keys do not override the selected role in IAM mode.
+            unsetenv("AWS_EC2_METADATA_DISABLED");
             setenv("AWS_ACCESS_KEY_ID", "ENV_AK", 1);
             setenv("AWS_SECRET_ACCESS_KEY", "ENV_SK", 1);
-            milvus_storage::AwsCredentialsProviderChain environment_chain;
-            const auto credentials = environment_chain.GetAWSCredentials();
-            EXPECT_EQ(credentials.GetAWSAccessKeyId(), "ENV_AK");
-            EXPECT_TRUE(credentials.GetSessionToken().empty());
-            EXPECT_EQ(http.metadata_requests, metadata_requests);
+            milvus_storage::AwsCredentialsProviderChain ambient_keys_chain;
+            const auto credentials = ambient_keys_chain.GetAWSCredentials();
+            EXPECT_EQ(credentials.GetAWSAccessKeyId(), "NODE_AK");
+            EXPECT_EQ(credentials.GetSessionToken(), "NODE_TOKEN");
         }),
         ::testing::ExitedWithCode(0),
         "");
@@ -597,7 +598,7 @@ TEST_F(S3EndpointAuthGuardDeathTest,
             unsetenv("AWS_SESSION_TOKEN");
             unsetenv("AWS_WEB_IDENTITY_TOKEN_FILE");
             unsetenv("AWS_ROLE_ARN");
-            unsetenv("AWS_EC2_METADATA_ENABLE");
+            setenv("AWS_EC2_METADATA_DISABLED", "true", 1);
 
             StorageConfig config;
             config.address = "s3.example.test";
@@ -629,7 +630,6 @@ TEST_F(S3EndpointAuthGuardDeathTest,
                     unsetenv("AWS_ACCESS_KEY_ID");
                     unsetenv("AWS_SECRET_ACCESS_KEY");
                     unsetenv("AWS_SESSION_TOKEN");
-                    unsetenv("AWS_EC2_METADATA_ENABLE");
                     setenv("AWS_EC2_METADATA_DISABLED", "false", 1);
                     setenv("AWS_DEFAULT_REGION", "us-east-1", 1);
                     setenv("AWS_ROLE_ARN",
