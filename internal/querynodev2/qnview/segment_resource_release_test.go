@@ -53,9 +53,23 @@ func TestSegmentResourceClosingPreservesQueryMVCCWait(t *testing.T) {
 		f := setupResourceTest(t, nil)
 		caughtUp := make(chan struct{})
 		close(caughtUp)
+		f.registerMock.Return(&fakeTransformRegistration{waitCh: caughtUp}, nil)
 		unregistered := make(chan struct{})
+		mockey.Mock((*fakeTransformRegistration).Unregister).To(func(*fakeTransformRegistration) {
+			close(unregistered)
+		}).Build()
 		entered, visible := make(chan struct{}), make(chan struct{})
-		f.registerMock.Return(&closingTestRegistration{fakeTransformRegistration: fakeTransformRegistration{waitCh: caughtUp}, unregistered: unregistered, entered: entered, visible: visible}, nil)
+		mockey.Mock((*fakeTransformRegistration).WaitTransformVisible).To(func(_ *fakeTransformRegistration, ctx context.Context, _ uint64) error {
+			close(entered)
+			select {
+			case <-visible:
+				return nil
+			case <-unregistered:
+				return context.Canceled
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}).Build()
 		req := f.acquire(1, 1, 1)
 		f.await(t, 1)
 		acquired := make(chan struct{})
@@ -168,22 +182,4 @@ func TestSegmentResourceLastBindingWaitsForDetachedQuery(t *testing.T) {
 		f.drop(t, next)
 		require.EqualValues(t, 2, f.releases.Load())
 	})
-}
-
-type closingTestRegistration struct {
-	fakeTransformRegistration
-	unregistered, entered, visible chan struct{}
-}
-
-func (r *closingTestRegistration) Unregister() { close(r.unregistered) }
-func (r *closingTestRegistration) WaitTransformVisible(ctx context.Context, _ uint64) error {
-	close(r.entered)
-	select {
-	case <-r.visible:
-		return nil
-	case <-r.unregistered:
-		return context.Canceled
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }

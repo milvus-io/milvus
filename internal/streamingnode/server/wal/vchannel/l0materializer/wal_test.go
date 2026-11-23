@@ -35,10 +35,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
-func walDelete(tt uint64) message.ImmutableMessage { return walScopedDelete(tt, 10) }
-
-func walScopedDelete(tt uint64, scope int64) message.ImmutableMessage {
-	return message.NewDeleteMessageBuilderV1().WithVChannel("v1").WithHeader(&message.DeleteMessageHeader{CollectionId: 1, Rows: 1}).WithBody(&msgpb.DeleteRequest{CollectionID: 1, PartitionID: scope, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}, Timestamps: []uint64{tt}}).MustBuildMutable().WithTimeTick(tt).WithLastConfirmed(rmq.NewRmqID(int64(tt - 1))).IntoImmutableMessage(rmq.NewRmqID(int64(tt)))
+func walDelete(tt uint64) message.ImmutableMessage {
+	return message.NewDeleteMessageBuilderV1().WithVChannel("v1").WithHeader(&message.DeleteMessageHeader{CollectionId: 1, Rows: 1}).WithBody(&msgpb.DeleteRequest{CollectionID: 1, PartitionID: 10, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}, Timestamps: []uint64{tt}}).MustBuildMutable().WithTimeTick(tt).WithLastConfirmed(rmq.NewRmqID(int64(tt - 1))).IntoImmutableMessage(rmq.NewRmqID(int64(tt)))
 }
 
 func walFlush(tt uint64) message.ImmutableMessage {
@@ -96,7 +94,7 @@ func TestWALMaterializerExplicitMessagesSplitQueuedDeletes(t *testing.T) {
 			require.Len(t, (*batches)[2].Entries, 1)
 			require.Equal(t, uint64(130), (*batches)[2].Entries[0].GetTimeTick())
 			require.Len(t, *tasks, 3, "the small post-boundary tail must not be forced")
-			require.Equal(t, mutationBytes(walDelete(150)), m.pendingBytes)
+			require.Equal(t, deleteBytes(walDelete(150)), m.pendingBytes)
 			m.RequestPersistThrough(150)
 			require.NoError(t, (*tasks)[3].Execute(context.Background()))
 			require.Zero(t, m.pendingBytes)

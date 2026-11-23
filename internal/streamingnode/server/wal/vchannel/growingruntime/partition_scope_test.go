@@ -33,7 +33,7 @@ func TestLoadedPartitionScopeAppliesToSnapshotLiveAndHandles(t *testing.T) {
 				s.segment = fakeCSegment{id: s.segmentID}
 			}
 			v := qviews.DataVersion{StreamingVersion: 10}
-			handles, err := r.AcquireGrowingSegmentHandles(ctx, v, 0, nil)
+			handles, err := r.AcquireGrowingSegmentHandles(ctx, v, nil)
 			require.NoError(t, err)
 			actual := make([]int64, 0, len(handles))
 			for _, h := range handles {
@@ -47,7 +47,7 @@ func TestLoadedPartitionScopeAppliesToSnapshotLiveAndHandles(t *testing.T) {
 				r.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{Message: msg})
 				if !r.partitionLoaded(p) {
 					require.NotContains(t, r.SegmentIDs(), p)
-					hs, err := r.AcquireGrowingSegmentHandles(ctx, v, 0, []int64{p})
+					hs, err := r.AcquireGrowingSegmentHandles(ctx, v, []int64{p})
 					require.ErrorIs(t, err, merr.ErrPartitionNotLoaded)
 					require.Empty(t, hs)
 					require.True(t, r.MayHaveVisibleGrowingSegments(v, 0, 0, []int64{p}), "must not skip the error as an empty result")
@@ -71,7 +71,7 @@ func TestLoadedPartitionReceivesSealWithoutPartitionID(t *testing.T) {
 	r.segments[1].segment = fakeCSegment{id: 1}
 	version := qviews.DataVersion{StreamingVersion: 10}
 	r.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{SegmentSealed: &walview.SegmentSealedEvent{SegmentID: 1, SealedAtDataVersion: version}})
-	handles, err := r.AcquireGrowingSegmentHandles(ctx, version, 0, nil)
+	handles, err := r.AcquireGrowingSegmentHandles(ctx, version, nil)
 	require.NoError(t, err)
 	defer func() {
 		for _, h := range handles {

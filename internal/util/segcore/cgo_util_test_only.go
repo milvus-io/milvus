@@ -7,7 +7,6 @@ package segcore
 #cgo pkg-config: milvus_core
 
 #include "common/protobuf_utils_c.h"
-#include "segcore/segment_c.h"
 */
 import "C"
 
@@ -29,11 +28,4 @@ func SetProtoLayout(protoLayout *C.ProtoLayout, slice []byte) {
 
 func ReleaseProtoLayout(protoLayout *C.ProtoLayout) {
 	C.ReleaseProtoLayout((C.ProtoLayoutInterface)(unsafe.Pointer(reflect.ValueOf(protoLayout).Pointer())))
-}
-
-// UpdateVersionCountForTest samples a pinned physical record via the production C ABI.
-func UpdateVersionCountForTest(segment CSegment) (uint64, error) {
-	var stats C.CUpdateStoreStats
-	status := C.GetUpdateStoreStats(C.CSegmentInterface(segment.RawPointer()), &stats)
-	return uint64(stats.versions), ConsumeCStatusIntoError(&status)
 }

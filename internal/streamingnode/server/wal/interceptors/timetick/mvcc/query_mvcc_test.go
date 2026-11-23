@@ -134,18 +134,13 @@ func TestQueryMVCCRestoreCreatesChannelAtPublishedPrefix(t *testing.T) {
 }
 
 func TestQueryMVCCMessageProjection(t *testing.T) {
-	for _, kind := range []message.MessageType{message.MessageTypeInsert, message.MessageTypeDelete, message.MessageTypeUpdate, message.MessageTypeCommitTxn, message.MessageTypeFlush, message.MessageTypeManualFlush, message.MessageTypeCommitImport, message.MessageTypeCreateSnapshot, message.MessageTypeDropPartition, message.MessageTypeRestoreSnapshot} {
+	for _, kind := range []message.MessageType{message.MessageTypeInsert, message.MessageTypeDelete, message.MessageTypeCommitTxn, message.MessageTypeFlush, message.MessageTypeManualFlush, message.MessageTypeCommitImport, message.MessageTypeCreateSnapshot, message.MessageTypeDropPartition, message.MessageTypeRestoreSnapshot} {
 		t.Run(kind.String(), func(t *testing.T) {
 			cm := NewQueryMVCCManager(100)
 			cm.ApplyRecoveryBarrier("v", 100)
 			msg := createQueryTestMessage(t, 150, "v", kind, kind == message.MessageTypeCommitTxn, true)
 			cm.ObserveAppend(msg)
 			require.EqualValues(t, 150, cm.Minimum("v", true))
-			_, ready := cm.Snapshot("v", cm.Minimum("v", true))
-			require.False(t, ready)
-			old, ready := cm.Snapshot("v", cm.Minimum("v", false))
-			require.True(t, ready)
-			require.Equal(t, QueryVChannelMVCC{100, 100}, old)
 			publishQueryTestPrefix(t, cm, 200, msg)
 			got, ready := cm.Snapshot("v", 200)
 			require.True(t, ready)
@@ -153,7 +148,7 @@ func TestQueryMVCCMessageProjection(t *testing.T) {
 			if kind == message.MessageTypeInsert {
 				expected = QueryVChannelMVCC{150, 100}
 			}
-			if kind == message.MessageTypeDelete || kind == message.MessageTypeUpdate || kind == message.MessageTypeCommitTxn || kind == message.MessageTypeRestoreSnapshot {
+			if kind == message.MessageTypeDelete || kind == message.MessageTypeCommitTxn || kind == message.MessageTypeRestoreSnapshot {
 				expected = QueryVChannelMVCC{150, 150}
 			}
 			require.Equal(t, expected, got)
@@ -165,12 +160,10 @@ func TestQueryMVCCUncommittedAndGlobalPublication(t *testing.T) {
 	cm := NewQueryMVCCManager(100)
 	cm.ApplyRecoveryBarrier("v", 100)
 	cm.ApplyRecoveryBarrier("other", 100)
-	deleteBody := createQueryTestMessage(t, 145, "v", message.MessageTypeDelete, true, true)
-	body := createQueryTestMessage(t, 150, "v", message.MessageTypeUpdate, true, true)
-	cm.ObserveAppend(deleteBody)
+	body := createQueryTestMessage(t, 150, "v", message.MessageTypeDelete, true, true)
 	cm.ObserveAppend(body)
 	require.EqualValues(t, 100, cm.Minimum("v", true))
-	publishQueryTestPrefix(t, cm, 160, deleteBody, body)
+	publishQueryTestPrefix(t, cm, 160, body)
 	current, _ := cm.Snapshot("v", 160)
 	require.Equal(t, QueryVChannelMVCC{100, 100}, current)
 	global := createQueryTestMessage(t, 200, "", message.MessageTypeFlushAll, false, true)
@@ -321,24 +314,4 @@ func TestQueryMVCCRetainedACKsDoNotRegressPublishedBarrier(t *testing.T) {
 	got, ready = cm.Snapshot("v", 80)
 	require.True(t, ready)
 	require.Zero(t, got)
-}
-
-func TestUpdateFrontiersFollowStandaloneAndTxnCommit(t *testing.T) {
-	cm := NewQueryMVCCManager(100)
-	cm.ApplyRecoveryBarrier("v", 100)
-	standalone := createQueryTestMessage(t, 111, "v", message.MessageTypeUpdate, false, true)
-	publishQueryTestPrefix(t, cm, 111, standalone)
-	got, ready := cm.Snapshot("v", 111)
-	require.True(t, ready)
-	require.Equal(t, QueryVChannelMVCC{111, 111}, got)
-	body := createQueryTestMessage(t, 120, "v", message.MessageTypeUpdate, true, true)
-	publishQueryTestPrefix(t, cm, 120, body)
-	got, ready = cm.Snapshot("v", 120)
-	require.True(t, ready)
-	require.Equal(t, QueryVChannelMVCC{111, 111}, got)
-	commit := createQueryTestMessage(t, 130, "v", message.MessageTypeCommitTxn, true, true)
-	publishQueryTestPrefix(t, cm, 130, commit)
-	got, ready = cm.Snapshot("v", 130)
-	require.True(t, ready)
-	require.Equal(t, QueryVChannelMVCC{130, 130}, got)
 }

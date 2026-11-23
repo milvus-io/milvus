@@ -209,7 +209,3 @@ func NewDirectSegmentTaskExecutorForTest(serverID int64, searchRunner SearchTask
 		queryRunner:  queryRunner,
 	}
 }
-
-func (fakeReadableSegment) GCUpdates(context.Context, uint64) error { return nil }
-
-func (fakeTransformOnlySegment) GCUpdates(context.Context, uint64) error { return nil }

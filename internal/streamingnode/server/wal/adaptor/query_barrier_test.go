@@ -163,7 +163,7 @@ func TestQueryPlanCancellationDoesNotHoldWALShutdown(t *testing.T) {
 			defer cancelCaller()
 			owner, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			meta := &viewpb.QueryViewMeta{ReadAdmissionFloor: &viewpb.QueryPlanMVCC{}, CollectionId: 1, Vchannel: "v", ReplicaId: 1}
+			meta := &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "v", ReplicaId: 1}
 			released := make(chan struct{})
 			lease := &snview.QueryViewLease{Meta: meta, Release: func() { close(released) }}
 			mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
@@ -249,32 +249,4 @@ func TestQueryPlanBarrierReusesCompletePrefix(t *testing.T) {
 		require.True(t, viewerror.AsViewError(err).IsViewNotFound())
 		require.Zero(t, ensured.Times(), "a dropped channel must not be revived by a barrier")
 	})
-}
-
-func TestReadAdmissionOwnerSnapshotAcrossHandoff(t *testing.T) {
-	manager := mvcc.NewMVCCManager(120)
-	manager.ApplyRecoveryBarrier("v", 120)
-	imported := message.NewMutableMessageBeforeAppend(nil, map[string]string{"_t": strconv.FormatInt(int64(message.MessageTypeCommitImport), 10), "_vc": "v"}).WithTimeTick(140)
-	manager.QueryMVCC().Publish(queryMVCCMessages([]message.ImmutableMessage{imported.IntoImmutableMessage(nil)}), 150, nil)
-	mode := streamingtypes.AccessModeRW
-	channel := mockey.Mock((*roWALAdaptorImpl).Channel).To(func(*roWALAdaptorImpl) streamingtypes.PChannelInfo {
-		return streamingtypes.PChannelInfo{AccessMode: mode}
-	}).Build()
-	defer channel.UnPatch()
-	w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, param: &interceptors.InterceptorBuildParam{MVCCManager: manager}}
-	req := &viewpb.GetMVCCTimestampRequest{Vchannel: "v"}
-	r, err := w.GetMVCCTimestamp(t.Context(), req)
-	require.NoError(t, err)
-	require.EqualValues(t, 120, r.GetMvcc().GetGrowingTimetick())
-	require.EqualValues(t, 140, r.GetMvcc().GetTransformingTimetick())
-	mode = streamingtypes.AccessModeRO
-	_, err = w.GetMVCCTimestamp(t.Context(), req)
-	require.True(t, viewerror.AsViewError(err).IsNotPrimary())
-	mode = streamingtypes.AccessModeRW
-	w.param.MVCCManager = mvcc.NewMVCCManager(200)
-	w.param.MVCCManager.ApplyRecoveryBarrier("v", 200)
-	r, err = w.GetMVCCTimestamp(t.Context(), req)
-	require.NoError(t, err)
-	require.EqualValues(t, 200, r.GetMvcc().GetGrowingTimetick())
-	require.EqualValues(t, 200, r.GetMvcc().GetTransformingTimetick())
 }

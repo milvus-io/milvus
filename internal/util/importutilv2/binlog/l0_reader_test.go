@@ -22,23 +22,17 @@ import (
 	"io"
 	"math"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/storage/deltacodec"
-	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -194,27 +188,4 @@ func TestFilterDeleteWithTimeRange(t *testing.T) {
 		dl.Ts = 6
 		assert.False(t, filter(dl))
 	})
-}
-
-func TestTypedSourceHistoryIsRejectedByImportReaders(t *testing.T) {
-	paramtable.Init()
-	dir := t.TempDir()
-	ctx := t.Context()
-	cm := storage.NewLocalChunkManager(objectstorage.RootPath(dir))
-	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
-	file := filepath.Join(dir, "historical")
-	layout := deltacodec.Layout{CollectionID: 1, VChannel: "v", PartitionID: 2, SchemaVersion: 1, PKType: schemapb.DataType_Int64}
-	row := deltacodec.Row{TimeTick: 10, SourceOrdinal: 1, Operation: deltacodec.Delete, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{11}}}}}
-	_, err := storage.WriteMutationDelta(ctx, file, storage.MutationDelta{Layout: layout, Rows: []deltacodec.Row{row}}, cfg, nil)
-	require.NoError(t, err)
-	r, err := NewL0Reader(ctx, cm, cfg, &schemapb.FieldSchema{DataType: layout.PKType}, &internalpb.ImportFile{Paths: []string{dir}}, 1024, 0, math.MaxUint64)
-	require.NoError(t, err)
-	got, err := r.Read()
-	require.Nil(t, got)
-	require.ErrorIs(t, err, merr.ErrImportFailed)
-	m, err := NewDeleteMerger(cm, cfg, layout.PKType, 1, 1024)
-	require.NoError(t, err)
-	rows, err := m.Merge(ctx, []string{file}, 0, math.MaxUint64, false)
-	require.Nil(t, rows)
-	require.ErrorIs(t, err, merr.ErrImportFailed)
 }

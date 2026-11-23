@@ -593,8 +593,6 @@ func (suite *SegmentSuite) TestSegmentReleased() {
 	sealed := suite.sealed.(*LocalSegment)
 
 	suite.False(sealed.ptrLock.PinIfNotReleased())
-	suite.Require().Nil(sealed.csegment.RawPointer())
-	suite.ErrorIs(sealed.csegment.GCUpdates(context.Background(), 123), merr.ErrSegmentNotLoaded)
 	suite.EqualValues(0, sealed.RowNum())
 	suite.EqualValues(0, sealed.MemSize())
 	suite.False(sealed.HasRawData(101))

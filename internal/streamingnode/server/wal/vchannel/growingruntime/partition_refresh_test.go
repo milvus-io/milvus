@@ -180,7 +180,7 @@ func TestPreparePartitionsFailureDoesNotPublish(t *testing.T) {
 
 func TestPreparePartitionsDoesNotWaitForInsertTransform(t *testing.T) {
 	mockey.PatchConvey("an insert-only prefix does not need a future transform", t, func() {
-		mockey.Mock(drainDeleteReplay).Return(nil).Build()
+		mockey.Mock(drainDeleteReplay).Return(nil, nil).Build()
 		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 		defer cancel()
 		r := newRuntime()

@@ -70,7 +70,7 @@ func TestRuntimeCloseInvalidatesWaitingQueries(t *testing.T) {
 	require.True(t, viewerror.AsViewError(err).IsViewInvalidated())
 	wire := viewerror.NewGRPCStatusFromViewError(viewerror.AsViewError(err)).Err()
 	require.True(t, viewerror.AsViewError(viewerror.ConvertViewError("SearchOnView", wire)).IsRetryable())
-	_, err = runtime.AcquireGrowingSegmentHandles(ctx, qviews.DataVersion{}, 0, nil)
+	_, err = runtime.AcquireGrowingSegmentHandles(ctx, qviews.DataVersion{}, nil)
 	require.True(t, viewerror.AsViewError(err).IsViewInvalidated())
 }
 

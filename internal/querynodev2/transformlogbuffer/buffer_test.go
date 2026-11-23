@@ -878,5 +878,3 @@ func TestTrimReleasesPayloadsButRetainsViewRange(t *testing.T) {
 		require.Nil(t, entry)
 	}
 }
-
-func (*fakeSegment) GCUpdates(context.Context, uint64) error { return nil }

@@ -333,8 +333,7 @@ CRetrieveByOffsets(CSegmentInterface c_segment,
                    int64_t* offsets,
                    int64_t len,
                    CRetrieveResult** result) {
-    auto future =
-        AsyncRetrieveByOffsets({}, c_segment, c_plan, offsets, len, 0);
+    auto future = AsyncRetrieveByOffsets({}, c_segment, c_plan, offsets, len);
     auto futurePtr = static_cast<milvus::futures::IFuture*>(
         static_cast<void*>(static_cast<CFuture*>(future)));
 

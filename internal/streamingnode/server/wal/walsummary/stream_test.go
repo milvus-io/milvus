@@ -61,33 +61,35 @@ func TestQueryStreamWaitsForBoundedCoverage(t *testing.T) {
 	}
 }
 
-func TestQueryStreamRejectsMissingPrefix(t *testing.T) {
+func TestQueryStreamStartsAtRetainedBoundary(t *testing.T) {
 	for _, end := range []uint64{5, 10, 20} {
 		t.Run(fmt.Sprint(end), func(t *testing.T) {
 			manager := NewManager(ManagerConfig{})
 			manager.InitLastAcked(10)
 			stream := NewStream(manager)
 			defer stream.Close()
-			h := newRecordingTransformHandler()
-			sub, err := stream.Subscribe(t.Context(), wal.TransformLogSubscriptionOption{VChannel: "v1", EndTimeTick: end, Handler: h})
+			handler := newRecordingTransformHandler()
+			sub, err := stream.Subscribe(context.Background(), wal.TransformLogSubscriptionOption{VChannel: "v1", EndTimeTick: end, Handler: handler})
 			require.NoError(t, err)
 			defer sub.Close()
+			if end > 10 {
+				// Clamping the start must not manufacture coverage through a future end.
+				select {
+				case event := <-handler.events:
+					t.Fatalf("premature completion: %v", event)
+				case <-time.After(20 * time.Millisecond):
+				}
+				manager.ObserveMessage(context.Background(), newTestDeleteMessage(t, "v1", 20, 1, 20))
+				require.Equal(t, uint64(20), nextTransformEvent(t, handler).Entry.GetTimeTick())
+			}
+			event := nextTransformEvent(t, handler)
+			require.NotNil(t, event.SyncUp)
+			require.Equal(t, end, event.SyncUp.TimeTick)
 			select {
-			case <-h.done:
+			case <-handler.done:
 			case <-time.After(time.Second):
-				t.Fatal("missing terminal notification")
+				t.Fatal("bounded replay did not finish")
 			}
-			require.ErrorIs(t, nextTransformEvent(t, h).SubscriptionError, wal.ErrTransformLogStartPointTruncated)
-			require.NoError(t, stream.Error())
-			for _, channel := range []string{"v1", "sibling"} {
-				manager.ObserveQueryBarrier(channel, 30)
-				valid := newRecordingTransformHandler()
-				covered, err := stream.Subscribe(t.Context(), wal.TransformLogSubscriptionOption{VChannel: channel, StartAfterTimeTick: 10, EndTimeTick: 30, Handler: valid})
-				require.NoError(t, err)
-				require.EqualValues(t, 30, nextTransformEvent(t, valid).SyncUp.TimeTick)
-				require.NoError(t, covered.Close())
-			}
-			require.Empty(t, h.events)
 		})
 	}
 }
@@ -108,7 +110,7 @@ func TestQueryStreamResumesAfterGC(t *testing.T) {
 	stream := NewStream(restored)
 	defer stream.Close()
 	handler := newRecordingTransformHandler()
-	sub, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "v1", StartAfterTimeTick: 10, Handler: handler})
+	sub, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "v1", Handler: handler})
 	require.NoError(t, err)
 	defer sub.Close()
 	require.Equal(t, uint64(20), nextTransformEvent(t, handler).Entry.GetTimeTick())
@@ -119,7 +121,7 @@ func TestQueryStreamResumesAfterGC(t *testing.T) {
 	require.NoError(t, stream.Close())
 	require.ErrorIs(t, stream.Error(), context.Canceled)
 	require.Empty(t, handler.events)
-	_, err = stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "v1", StartAfterTimeTick: 10, Handler: handler})
+	_, err = stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "v1", Handler: handler})
 	require.ErrorIs(t, err, context.Canceled)
 }
 

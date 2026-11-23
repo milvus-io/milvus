@@ -446,26 +446,13 @@ func TestPartialUpdateInterceptorRejectsCommitWithoutTxnContext(t *testing.T) {
 	requireUnrecoverable(t, err)
 }
 
-func ordinaryPKUpdate(ids *schemapb.IDs) message.MutableMessage {
-	value := &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}}
-	return message.NewUpdateMessageBuilderV2().
-		WithVChannel("v1").
-		WithHeader(&message.UpdateMessageHeader{CollectionId: 10, SchemaVersion: proto.Int32(1)}).
-		WithBody(&message.UpdateMessageBody{
-			PartitionId: -1, PrimaryKeys: ids,
-			Assignments: []*messagespb.UpdateAssignment{{FieldId: 101, Literal: &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_ScalarValue{ScalarValue: value}}}},
-		}).MustBuildMutable()
-}
-
 func TestPartialUpdateInterceptorRejectsCASConflictBeforeAppend(t *testing.T) {
 	interceptor := newTestAppendInterceptor(types.PChannelInfo{Name: "p1", Term: 1})
 	appendCASTxnBody(t, interceptor, 1, validCASMeta(100, 1), 120, 10)
-	update := ordinaryPKUpdate(&schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10}}}}).WithTimeTick(125)
-	_, err := interceptor.DoAppend(t.Context(), update, appendOK)
-	require.NoError(t, err)
+	interceptor.state.pkVersions.UpdateAll("v1", []any{int64(10)}, 125)
 	called := false
 
-	_, err = interceptor.DoAppend(context.Background(), newCASCommitTxnMessage(t, "v1", 1, 130), func(context.Context, message.MutableMessage) (message.MessageID, error) {
+	_, err := interceptor.DoAppend(context.Background(), newCASCommitTxnMessage(t, "v1", 1, 130), func(context.Context, message.MutableMessage) (message.MessageID, error) {
 		called = true
 		return walimplstest.NewTestMessageID(1), nil
 	})
@@ -473,12 +460,6 @@ func TestPartialUpdateInterceptorRejectsCASConflictBeforeAppend(t *testing.T) {
 	requirePartialUpdateRetryable(t, err)
 	require.False(t, called)
 	require.Nil(t, interceptor.state.getTxn(1))
-	appendCASTxnBody(t, interceptor, 2, validCASMeta(100, 1), 131, 11)
-	_, err = interceptor.DoAppend(t.Context(), newCASCommitTxnMessage(t, "v1", 2, 132), appendOK)
-	require.NoError(t, err, "disjoint update")
-	appendCASTxnBody(t, interceptor, 3, validCASMeta(132, 1), 133, 10)
-	_, err = interceptor.DoAppend(t.Context(), newCASCommitTxnMessage(t, "v1", 3, 134), appendOK)
-	require.NoError(t, err, "retry with a fresh snapshot")
 }
 
 func TestPartialUpdateInterceptorCommitAppendErrorDoesNotPublish(t *testing.T) {

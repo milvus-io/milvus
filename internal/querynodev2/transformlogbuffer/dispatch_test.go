@@ -11,10 +11,8 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -221,43 +219,4 @@ func TestDispatchHonorsExclusiveSegmentCursor(t *testing.T) {
 	}
 	require.NoError(t, reg.WaitTransformVisible(ctx, 110))
 	require.Equal(t, []uint64{110}, segment.appliedTicks())
-}
-
-func TestSecondPhysicalBaseReplaysUpdateFromMetadataCursor(t *testing.T) {
-	streams := newFakeStreamManager()
-	buffer := New(streams, 1)
-	defer buffer.Close()
-	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
-	defer cancel()
-	guard, err := buffer.Acquire(ctx, newTestQueryView("v", 50))
-	require.NoError(t, err)
-	defer guard.Release()
-	stream := streams.stream("v")
-	stream.emit(wal.TransformLogStreamEvent{VChannel: "v", SyncUp: &wal.TransformLogSyncUp{TimeTick: 50}})
-	old := &fakeSegment{id: 1, vchannel: "v", startAfter: 50}
-	a, err := buffer.RegisterSegment(ctx, old)
-	require.NoError(t, err)
-	defer a.Unregister()
-	require.NoError(t, a.WaitCatchup(ctx))
-	entry := func(tick uint64) *streamingpb.TransformLogEntry {
-		body := &messagespb.UpdateMessageBody{PartitionId: -1, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}, Assignments: []*messagespb.UpdateAssignment{{FieldId: 102, Literal: &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_NullValue{}}}}}
-		return &streamingpb.TransformLogEntry{TimeTick: tick, Entry: &streamingpb.TransformLogEntry_Mutations{Mutations: &streamingpb.TransformMutationEntry{Blocks: []*streamingpb.TransformMutationBlock{{Mutation: &streamingpb.TransformMutationBlock_Update{Update: body}}}}}}
-	}
-	stream.emit(wal.TransformLogStreamEvent{VChannel: "v", Entry: entry(70)})
-	require.NoError(t, a.WaitTransformVisible(ctx, 70))
-	expanded := &fakeSegment{id: 1, vchannel: "v", startAfter: 50, applyStarted: make(chan struct{}, 1), applyBlock: make(chan struct{})}
-	b, err := buffer.RegisterSegment(ctx, expanded)
-	require.NoError(t, err)
-	defer b.Unregister()
-	select {
-	case <-expanded.applyStarted:
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	stream.emit(wal.TransformLogStreamEvent{VChannel: "v", Entry: entry(90)})
-	close(expanded.applyBlock)
-	require.NoError(t, b.WaitTransformVisible(ctx, 90))
-	require.NoError(t, a.WaitTransformVisible(ctx, 90))
-	require.Equal(t, []uint64{70, 90}, expanded.appliedTicks())
-	require.Equal(t, []uint64{70, 90}, old.appliedTicks())
 }

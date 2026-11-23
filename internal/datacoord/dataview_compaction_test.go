@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -225,36 +224,4 @@ func compactionChildren(segments []*meta.SegmentInfo) map[int64][]int64 {
 		}
 	}
 	return children
-}
-
-func TestReadAdmissionFlushPublishesWhileCompactionLacksAncestor(t *testing.T) {
-	m := compactionAdmissionMeta(t)
-	ctx := t.Context()
-	catalog := m.Catalog.(*datacatalog.Catalog)
-	event := dataview.FlushDataViewEvent{CollectionID: 1, Segments: []dataview.LoadableSegment{{SegmentID: 1, VChannel: "v1", PartitionID: 1, TransformStartAfterTimetick: 50}}}
-	physical, commit, abort, err := m.DataViewManager.PrepareFlush(ctx, event)
-	require.NoError(t, err)
-	defer abort()
-	require.NoError(t, catalog.SaveDataView(ctx, physical))
-	commit()
-	// Boot over the actual catalog with an independently unready successor.
-	// The missing parent prevents constructing any newer projection.
-	m.Segments.SetSegment(3, admissionSegment(3, 1, 2))
-	_, err = m.LoadableProjection(ctx, 1, physical)
-	require.ErrorContains(t, err, "no complete ready ancestor frontier")
-	manager, err := dataview.RecoverManager(ctx, catalog, func(context.Context, int64) (bool, error) { return true, nil },
-		m.LoadableProjection, []int64{1}, nil, dataview.WithReadAdmissionSampler(func(context.Context, string) (*viewpb.QueryPlanMVCC, error) {
-			return &viewpb.QueryPlanMVCC{GrowingTimetick: 120, TransformingTimetick: 140}, nil
-		}))
-	require.NoError(t, err)
-	hasMember := func(id int64) bool {
-		shard := manager.Published(1).Shard("v1")
-		return shard.ReadAdmissionFloor.GetTransformingTimetick() == 140 && len(shard.Partitions) == 1 &&
-			len(shard.Partitions[0].Segments) == 1 && shard.Partitions[0].Segments[0].SegmentID == id
-	}
-	require.Eventually(t, func() bool { return hasMember(1) }, 3*time.Second, 10*time.Millisecond,
-		"a failed later projection cannot block certification of the committed flush")
-	admissionFinishIndexes(m, 3, 10, 11, 12)
-	require.Eventually(t, func() bool { return hasMember(3) }, 4*time.Second, 10*time.Millisecond,
-		"the failed projection must still retry after certification succeeds")
 }

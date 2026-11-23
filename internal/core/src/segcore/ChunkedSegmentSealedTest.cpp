@@ -636,8 +636,7 @@ TEST(test_chunk_segment, EmptyViewScopeRetainsPrimaryKeyMetadata) {
         schema->set_primary_field_id(pk);
         auto layout = std::make_shared<const segcore::SealedFieldLayout>(
             schema, segcore::LoadScope({}));
-        ASSERT_TRUE(layout->get_primary_field_id().has_value());
-        EXPECT_EQ(layout->get_primary_field_id()->get(), pk.get());
+        EXPECT_EQ(layout->get_primary_field_id(), pk);
         EXPECT_EQ(layout->get_primary_field_type(), type);
         EXPECT_FALSE(layout->IsFieldInLoadScope(pk));
         EXPECT_FALSE(layout->ShouldLoadField(pk));

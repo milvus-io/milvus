@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -39,15 +38,11 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/storage/deltacodec"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/metrics"
-	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -451,51 +446,6 @@ func (s *SyncTaskSuite) TestRunL0Segment() {
 		err := task.Run(ctx)
 		s.NoError(err)
 	})
-}
-
-func (s *SyncTaskSuite) TestRunLogicalMutationCounters() {
-	keys := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2}}}}
-	update := deltacodec.Row{
-		TimeTick: 100, Operation: deltacodec.Update, PrimaryKeys: keys,
-		Assignments: []*messagespb.UpdateAssignment{{FieldId: 105, Literal: &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_NullValue{}}}},
-	}
-	firstDelete := deltacodec.Row{TimeTick: 101, Operation: deltacodec.Delete, PrimaryKeys: keys}
-	secondDelete := deltacodec.Row{TimeTick: 102, Operation: deltacodec.Delete, PrimaryKeys: keys}
-	for _, tc := range []struct {
-		name             string
-		rows             []deltacodec.Row
-		deletes, updates float64
-	}{
-		{"pure-update", []deltacodec.Row{update}, 0, 2},
-		{"mixed", []deltacodec.Row{update, firstDelete, secondDelete}, 4, 2},
-		{"legacy", nil, 10, 0},
-	} {
-		s.Run(tc.name, func() {
-			pack := new(SyncPack).WithDataSource(metrics.StreamingDataSourceLabel)
-			if tc.rows == nil {
-				pack.WithDeleteData(s.getDeleteBuffer())
-			} else {
-				pack.WithMutationDelta(&storage.MutationDelta{Layout: deltacodec.Layout{
-					CollectionID: s.collectionID, VChannel: s.channelName, PartitionID: s.partitionID,
-					PKType: schemapb.DataType_Int64, Fields: []deltacodec.Field{{ID: 105, Type: schemapb.DataType_Int64}},
-				}, Rows: tc.rows}, 100)
-			}
-			dir := s.T().TempDir()
-			task := s.getSuiteSyncTask(pack).WithChunkManager(storage.NewLocalChunkManager(objectstorage.RootPath(dir))).
-				WithStorageConfig(&indexpb.StorageConfig{StorageType: "local", RootPath: dir})
-			seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0, StorageVersion: storage.StorageV2},
-				pkoracle.NewBloomFilterSet(), nil, metacache.NewEmptySegmentStats())
-			s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
-			s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
-			count := func(op string) float64 {
-				return testutil.ToFloat64(metrics.DataNodeWriteDataCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.StreamingDataSourceLabel, op, fmt.Sprint(s.collectionID)))
-			}
-			beforeDeletes, beforeUpdates := count(metrics.DeleteLabel), count(metrics.UpdateLabel)
-			s.Require().NoError(task.Run(context.Background()))
-			s.Equal(tc.deletes, count(metrics.DeleteLabel)-beforeDeletes)
-			s.Equal(tc.updates, count(metrics.UpdateLabel)-beforeUpdates)
-		})
-	}
 }
 
 func (s *SyncTaskSuite) TestRunError() {

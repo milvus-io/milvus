@@ -43,7 +43,6 @@
 #include "query/Utils.h"
 #include "mmap/ChunkedColumn.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
-#include "segcore/UpdatesRecord.h"
 #include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/cachinglayer_test_utils.h"
@@ -1576,62 +1575,6 @@ TEST(GroupMembershipTest, RejectsMismatchedFilterSize) {
     auto membership = BuildOffsetsBitmap<int64_t>(
         nullptr, *segment, group_field, 10, {0}, &wrong_size);
     EXPECT_FALSE(membership.has_value());
-}
-
-TEST(StrictGroupEligibility, HistoricalGroupKeysChangeWinningOffsets) {
-    auto schema = std::make_shared<Schema>();
-    auto pk = schema->AddDebugField("pk", DataType::INT64);
-    auto group = schema->AddDebugField("group", DataType::INT64);
-    schema->set_primary_field_id(pk);
-    auto data = segcore::DataGen(schema, 4);
-    std::fill(data.timestamps_.begin(), data.timestamps_.end(), 1);
-    for (auto& field : *data.raw_->mutable_fields_data()) {
-        for (int i = 0; i < 4; ++i) {
-            field.mutable_scalars()->mutable_long_data()->set_data(
-                i, field.field_id() == pk.get() ? i : 1 + i / 2);
-        }
-    }
-    auto segment = CreateSealedWithFieldDataLoaded(schema, data);
-    IdArray ids;
-    ids.mutable_int_id()->add_data(0);
-    segcore::UpdateAssignment a{group, {}};
-    a.literal.mutable_scalar_value()->set_long_data(2);
-    segment->ApplyUpdates(ids, 20, 0, {a});
-    for (bool strict : {false, true}) {
-        for (auto ts : {19, 20}) {
-            SearchInfo info;
-            info.group_by_field_ids_ = {group};
-            info.strict_group_strategy_ = StrictGroupStrategy::PerGroup;
-            info.strict_group_size_ = strict;
-            info.topk_ = strict ? 1 : 2;
-            info.group_size_ = strict ? 2 : 1;
-            info.metric_type_ = "L2";
-            auto iter =
-                MakeSequenceVectorIterator({{0, 0}, {1, 1}, {2, 2}, {3, 3}});
-            std::vector<CompositeGroupKey> keys;
-            std::vector<int64_t> offsets;
-            std::vector<float> distances;
-            std::vector<size_t> prefix;
-            auto snapshot = segment->CaptureReadSnapshot();
-            SearchGroupBy(nullptr,
-                          {iter},
-                          info,
-                          keys,
-                          *segment,
-                          offsets,
-                          distances,
-                          prefix,
-                          nullptr,
-                          nullptr,
-                          snapshot.get(),
-                          true,
-                          ts);
-            ASSERT_EQ(offsets.size(), 2);
-            EXPECT_EQ(offsets[0], 0);
-            EXPECT_EQ(offsets[1], strict == (ts < 20) ? 1 : 2);
-            EXPECT_EQ(std::get<int64_t>(keys[0][0].value()), ts < 20 ? 1 : 2);
-        }
-    }
 }
 
 TEST(StrictGroupEligibilityTest, CompositeAndMultiQueryKeepOriginalPath) {

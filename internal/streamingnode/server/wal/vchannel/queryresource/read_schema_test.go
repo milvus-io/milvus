@@ -2,7 +2,6 @@ package queryresource
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -16,7 +15,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -180,10 +178,10 @@ func TestNativeHandleRetainsReadSchemaAfterLastView(t *testing.T) {
 	releases := 0
 	mockey.PatchConvey("native handle pins schema, including conversion after withdrawal", t, func() {
 		mockey.Mock((*schemaTestHandle).Release).To(func(*schemaTestHandle) { releases++ }).Build()
-		mockey.Mock((*QueryRuntime).AcquireGrowingSegmentHandles).To(func(*QueryRuntime, context.Context, qviews.DataVersion, uint64, []int64) ([]snview.GrowingSegmentHandle, error) {
+		mockey.Mock((*QueryRuntime).AcquireGrowingSegmentHandles).To(func(*QueryRuntime, context.Context, qviews.DataVersion, []int64) ([]snview.GrowingSegmentHandle, error) {
 			return []snview.GrowingSegmentHandle{&schemaTestHandle{}}, nil
 		}).Build()
-		handles, err := read.AcquireGrowingSegmentHandles(t.Context(), qviews.DataVersion{}, 0, nil)
+		handles, err := read.AcquireGrowingSegmentHandles(t.Context(), qviews.DataVersion{}, nil)
 		require.NoError(t, err)
 		ref.retire()
 		require.ErrorIs(t, ref.release(), nodescheduler.ErrDelay, "View cleanup waits for execution handles")
@@ -196,113 +194,13 @@ func TestNativeHandleRetainsReadSchemaAfterLastView(t *testing.T) {
 		require.NoError(t, ref.release())
 		require.Empty(t, pool.resources)
 		require.Zero(t, read.schema.refs)
-		_, err = read.AcquireGrowingSegmentHandles(t.Context(), qviews.DataVersion{}, 0, nil)
+		_, err = read.AcquireGrowingSegmentHandles(t.Context(), qviews.DataVersion{}, nil)
 		require.ErrorIs(t, err, context.Canceled)
 		require.Equal(t, 1, releases, "retired View rejects acquisition before touching physical resources")
 	})
 	mockey.PatchConvey("physical acquisition error is preserved", t, func() {
 		mockey.Mock((*QueryRuntime).AcquireGrowingSegmentHandles).Return(nil, context.Canceled).Build()
-		_, err := read.AcquireGrowingSegmentHandles(t.Context(), qviews.DataVersion{}, 0, nil)
+		_, err := read.AcquireGrowingSegmentHandles(t.Context(), qviews.DataVersion{}, nil)
 		require.ErrorIs(t, err, context.Canceled)
 	})
-}
-
-type phaseTwoResources struct {
-	snview.StreamingNodeResourceManager
-	acquired snview.AcquireResource
-	read     *phaseTwoRead
-}
-
-func (m *phaseTwoResources) Acquire(req snview.AcquireResource) { m.acquired = req }
-func (m *phaseTwoResources) QueryRuntime(qviews.QueryViewKey) (snview.QueryRuntime, bool) {
-	return m.read, true
-}
-
-type phaseTwoRead struct {
-	*ReadRuntime
-	afterWait func()
-}
-
-func (r *phaseTwoRead) ResolvePartitions(v uint64, partitions []int64) ([]int64, error) {
-	r.afterWait()
-	return r.ReadRuntime.ResolvePartitions(v, partitions)
-}
-
-type phaseTwoGrowing struct {
-	recordingModule
-	insideAcquire func(context.Context)
-	waited        bool
-}
-
-func (m *phaseTwoGrowing) ApplyLiveEvent(context.Context, walview.VChannelResourceEvent) error {
-	return merr.WrapErrServiceInternalMsg("injected live apply failure")
-}
-func (m *phaseTwoGrowing) WaitMVCCVisible(context.Context, uint64, uint64) error {
-	m.waited = true
-	return nil
-}
-func (m *phaseTwoGrowing) AcquireGrowingSegmentHandles(ctx context.Context, _ qviews.DataVersion, _ uint64, _ []int64) ([]snview.GrowingSegmentHandle, error) {
-	m.insideAcquire(ctx)
-	return nil, ctx.Err()
-}
-func (*phaseTwoGrowing) MayHaveVisibleGrowingSegments(qviews.DataVersion, uint64, uint64, []int64) bool {
-	return true
-}
-
-func TestSNPhaseTwoReadBindingClassifiesRuntimeFailureAndCallerCancellation(t *testing.T) {
-	paramtable.Init()
-	for _, op := range []string{"search", "retrieve"} {
-		for _, duringAcquire := range []bool{false, true} {
-			for _, cancelCaller := range []bool{false, true} {
-				t.Run(fmt.Sprintf("%s/duringAcquire=%t/cancelCaller=%t", op, duringAcquire, cancelCaller), func(t *testing.T) {
-					module := &phaseTwoGrowing{}
-					runtime := NewQueryRuntime(module)
-					defer runtime.Close()
-					require.NoError(t, runtime.Initialize(t.Context(), walview.VChannelWALView{}))
-					meta, key := testManagerQueryViewMetaAndKey(1)
-					meta.ReadAdmissionFloor = &viewpb.QueryPlanMVCC{}
-					meta.State = viewpb.QueryViewState_QueryViewStateUp
-					read := &phaseTwoRead{ReadRuntime: &ReadRuntime{QueryRuntime: runtime, resources: runtime.bindView(meta)}}
-					resources := &phaseTwoResources{read: read}
-					handler := snview.RecoverPChannelSNQueryViewHandler(t.Context(), "p1", nil, resources,
-						[]*viewpb.QueryViewOfShard{{Meta: meta, StreamingNode: &viewpb.QueryViewOfStreamingNode{}}})
-					resources.acquired.OnReady()
-					caller, cancel := context.WithCancel(t.Context())
-					defer cancel()
-					fail := func() {
-						require.True(t, module.waited)
-						require.True(t, runtime.ObserveEvent(t.Context(), walview.VChannelResourceEvent{}))
-						resources.acquired.OnRuntimeFailed()
-						if cancelCaller {
-							cancel()
-						}
-					}
-					read.afterWait = func() {
-						if !duringAcquire {
-							fail()
-						}
-					}
-					module.insideAcquire = func(ctx context.Context) {
-						require.True(t, duringAcquire)
-						fail()
-						<-ctx.Done()
-					}
-					var err error
-					if op == "search" {
-						_, err = handler.AcquireSearchSegmentTasks(caller, key.ShardID, key.QueryViewVersion, &viewpb.QueryPlanMVCC{}, &internalpb.SearchRequest{}, nil)
-					} else {
-						_, err = handler.AcquireQuerySegmentTasks(caller, key.ShardID, key.QueryViewVersion, &viewpb.QueryPlanMVCC{}, &internalpb.RetrieveRequest{}, nil)
-					}
-					require.Error(t, err)
-					if cancelCaller {
-						require.ErrorIs(t, err, context.Canceled)
-					} else {
-						require.NoError(t, caller.Err())
-						require.True(t, viewerror.AsViewError(err).IsViewInvalidated(), "%v", err)
-						require.ErrorContains(t, err, "injected live apply failure")
-					}
-				})
-			}
-		}
-	}
 }

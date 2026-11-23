@@ -18,18 +18,13 @@ import (
 	resumable "github.com/milvus-io/milvus/internal/distributed/streaming/internal/transformlog"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_walmanager"
-	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
-	"github.com/milvus-io/milvus/internal/querynodev2/transformlogbuffer"
 	remote "github.com/milvus-io/milvus/internal/streamingnode/client/handler/transformlog"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -342,81 +337,3 @@ func TestTransformRPCReusesStreamAfterLastSubscription(t *testing.T) {
 		t.Fatal("logical Close did not release the server owner")
 	}
 }
-
-type sharedRPCStream struct{ stream wal.TransformLogStream }
-
-func (m sharedRPCStream) AcquireStream(context.Context, string) (wal.TransformLogStream, error) {
-	return m.stream, nil
-}
-
-type rpcBufferSegment struct {
-	qnview.TransformSegment
-	start uint64
-}
-
-func (s rpcBufferSegment) ID() int64                           { return 1 }
-func (s rpcBufferSegment) VChannel() string                    { return "p_1v0" }
-func (s rpcBufferSegment) TransformStartAfterTimeTick() uint64 { return s.start }
-func (s rpcBufferSegment) ApplyTransform(context.Context, *streamingpb.TransformLogEntry) error {
-	return nil
-}
-
-func TestPermanentHistoryGapCrossesRPCAndOnlyRetiresOneBuffer(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
-	defer cancel()
-	client, mgr, _ := summaryRPCWithStream(t, func(m *walsummary.Manager) wal.TransformLogStream {
-		m.InitLastAcked(10)
-		return walsummary.NewDispatchStream(m)
-	})
-	var attempts atomic.Int64
-	stream := resumable.NewResumableStream(ctx, "p", func(ctx context.Context, _ string) (wal.TransformLogStream, error) {
-		return remote.CreateEventStream(ctx, rpcOptions(attempts.Add(1)), client)
-	})
-	defer stream.Close()
-	buffer := transformlogbuffer.New(sharedRPCStream{stream}, 1)
-	defer buffer.Close()
-	view := func(channel string, cursor uint64) *qviews.QueryViewAtQueryNode {
-		return qviews.NewQueryViewAtQueryNode(&viewpb.QueryViewMeta{Vchannel: channel, TransformStartAfterTimetick: cursor}, &viewpb.QueryViewOfQueryNode{NodeId: 1}).(*qviews.QueryViewAtQueryNode)
-	}
-	healthy, err := buffer.Acquire(ctx, view("p_2v0", 10))
-	require.NoError(t, err)
-	defer healthy.Release()
-	mgr.ObserveQueryBarrier("p_2v0", 21)
-	require.NoError(t, healthy.WaitTransformVisible(ctx, 21))
-	old, err := buffer.Bind(view("p_1v0", 0))
-	require.NoError(t, err)
-	defer old.Release()
-	reg, err := old.Registrar().RegisterSegment(ctx, rpcBufferSegment{start: 0})
-	require.NoError(t, err)
-	defer reg.Unregister()
-	failed := make(chan error, 1)
-	reg.OnFailure(func(err error) { failed <- err })
-	_, _ = old.Prepare(ctx)
-	err = reg.WaitCatchup(ctx)
-	require.Error(t, err)
-	require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE, status.AsStreamingError(err).Code)
-	select {
-	case err := <-failed:
-		require.ErrorContains(t, err, "truncated")
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	require.Error(t, old.WaitTransformVisible(ctx, 11))
-	newGuard, err := buffer.Acquire(ctx, view("p_1v0", 10))
-	require.NoError(t, err)
-	defer newGuard.Release()
-	_, err = old.Registrar().RegisterSegment(ctx, rpcBufferSegment{start: 10})
-	require.Error(t, err, "late registration must stay on the failed generation")
-	valid, err := newGuard.Registrar().RegisterSegment(ctx, rpcBufferSegment{start: 10})
-	require.NoError(t, err)
-	defer valid.Unregister()
-	require.NoError(t, valid.WaitCatchup(ctx))
-	old.Release()
-	mgr.ObserveQueryBarrier("p_2v0", 30)
-	mgr.ObserveQueryBarrier("p_1v0", 31)
-	require.NoError(t, healthy.WaitTransformVisible(ctx, 30))
-	require.NoError(t, valid.WaitTransformVisible(ctx, 31))
-	require.EqualValues(t, 1, attempts.Load())
-}
-
-func (rpcBufferSegment) GCUpdates(context.Context, uint64) error { return nil }

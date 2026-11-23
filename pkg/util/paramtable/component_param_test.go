@@ -22,7 +22,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strconv"
 	"testing"
 	"time"
 
@@ -2411,27 +2410,5 @@ func TestCredentialBrokerRejectsInvalidStartupQuery(t *testing.T) {
 		require.NoError(t, bt.Save("common.security.credentialBrokerAllowedEndpoints", `["`+endpoint+`"]`))
 		require.Panics(t, func() { var params ComponentParam; params.Init(bt) })
 		bt.mgr.Close()
-	}
-}
-
-func TestPKUpdateAdmissionParameters(t *testing.T) {
-	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
-	defer base.mgr.Close()
-	params := proxyConfig{}
-	params.init(base)
-	assert.False(t, params.PKUpdateEnabled.GetAsBool())
-	assert.Equal(t, 10000, params.PKUpdateMaxPKCount.GetAsInt())
-	for _, enabled := range []bool{true, false} {
-		assert.NoError(t, base.Save("proxy.pkUpdate.enabled", strconv.FormatBool(enabled)))
-		assert.Equal(t, enabled, params.PKUpdateEnabled.GetAsBool())
-	}
-	for _, tc := range []struct {
-		value string
-		want  int
-	}{
-		{"3", 3}, {"1", 1}, {"0", 10000}, {"-1", 10000}, {"invalid", 10000}, {"9223372036854775808", 10000},
-	} {
-		assert.NoError(t, base.Save("proxy.pkUpdate.maxPkCount", tc.value))
-		assert.Equal(t, tc.want, params.PKUpdateMaxPKCount.GetAsInt())
 	}
 }

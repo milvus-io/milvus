@@ -7,13 +7,11 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 func TestAdvanceSchemaPreservesPublishedFootprint(t *testing.T) {
@@ -237,43 +235,4 @@ func TestAdvanceSchemaRetriesProjectionFailure(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	_, err = m.AdvanceSchema(t.Context(), 1, 2, projectSegments(LoadableSegment{SegmentID: 10, VChannel: "v1", PartitionID: 1, SchemaVersion: 2}))
 	require.NoError(t, err)
-}
-
-func TestAdvanceSchemaDirectWaitsForPendingFlushAndDrop(t *testing.T) {
-	ctx := t.Context()
-	m := newManager(ctx, &fakeDataViewCatalog{}, nil, WithReadAdmissionSampler(func(context.Context, string) (*viewpb.QueryPlanMVCC, error) {
-		t.Fatal("DDL must never sample the owner while preparing the physical version")
-		return nil, nil
-	}))
-	_, err := m.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, SchemaVersion: 1, VChannels: []string{"v1"}})
-	require.NoError(t, err)
-	_, commit, _, err := m.PrepareFlush(ctx, FlushDataViewEvent{CollectionID: 1, Segments: []LoadableSegment{segment(10, "v1", 1)}})
-	require.NoError(t, err)
-	commit()
-	state := m.getState(1)
-	changed := state.changed.Listen(syncutil.VersionedListenAtLatest)
-	done := make(chan error, 1)
-	go func() { _, err := m.AdvanceSchema(ctx, 1, 2, nil); done <- err }()
-	select {
-	case <-changed.WaitChan():
-	case <-time.After(3 * time.Second):
-		t.Fatal("direct schema candidate did not commit")
-	}
-	ref, err := m.Latest(ctx, 1)
-	require.NoError(t, err)
-	require.EqualValues(t, 2, ref.DataView().GetSchemaVersion())
-	ref.Deref()
-	require.EqualValues(t, 1, m.Published(1).SchemaVersion)
-	// An already published older target still has its own certified version.
-	version, err := m.AdvanceSchema(ctx, 1, 1, nil)
-	require.NoError(t, err)
-	require.True(t, proto.Equal(m.Published(1).DataVersion.IntoProto(), version))
-	_, err = m.OnDropCollection(ctx, 1)
-	require.NoError(t, err)
-	select {
-	case err := <-done:
-		require.ErrorIs(t, err, merr.ErrCollectionNotFound)
-	case <-time.After(3 * time.Second):
-		t.Fatal("drop did not wake the schema certification waiter")
-	}
 }

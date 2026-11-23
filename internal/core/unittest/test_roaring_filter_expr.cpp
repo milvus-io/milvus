@@ -991,45 +991,6 @@ TEST_F(RoaringFilterExprEvalTest,
     ExpectSameColumn(AsColumnVector(result), EvalPredicate(raw.get(), logical));
 }
 
-TEST_F(RoaringFilterExprEvalTest, VisibleValuesInBothIndexOnlyLookupPaths) {
-    auto segment = BuildIndexOnlyStlSegment();
-    const auto pks = dataset_->get_col<int64_t>(pk_fid_);
-    segcore::UpdateAssignment assign{i64_fid_, {}};
-    constexpr int64_t member = 987654321;
-    assign.literal.mutable_scalar_value()->set_long_data(member);
-    IdArray ids;
-    ids.mutable_int_id()->add_data(pks[6]);  // Base NULL becomes a member.
-    segment->ApplyUpdates(ids, MAX_TIMESTAMP - 1, 0, {assign});
-    ids.mutable_int_id()->set_data(0, pks[2]);
-    assign.literal.set_null_value(google::protobuf::NULL_VALUE);
-    segment->ApplyUpdates(ids, MAX_TIMESTAMP - 1, 1, {assign});
-
-    auto logical = MakeLogical(i64_fid_, DataType::INT64, {member});
-    exec::OffsetVector rows{6, 2, 6, 0, 17};
-    for (bool take : {false, true}) {
-        const auto count = take ? rows.size() : N;
-        TargetBitmap mask(count, true);
-        if (take)
-            mask[0] =
-                false;  // Skip the first occurrence, retain its duplicate.
-        auto before = segment->GetUpdatesRecord().Diagnostics();
-        auto col = EvalPhysical(
-            segment.get(), logical, std::move(mask), take ? &rows : nullptr);
-        ASSERT_NE(col, nullptr);
-        ASSERT_EQ(col->size(), count);
-        BitsetTypeView hit(col->GetRawData(), count);
-        BitsetTypeView valid(col->GetValidRawData(), count);
-        for (size_t i = take ? 1 : 0; i < count; ++i) {
-            const auto row = take ? rows[i] : i;
-            EXPECT_EQ(hit[i], row == 6);
-            EXPECT_EQ(valid[i], row != 2 && row != 17);
-        }
-        EXPECT_EQ(segment->GetUpdatesRecord().Diagnostics().dictionary_probes -
-                      before.dictionary_probes,
-                  2);
-    }
-}
-
 TEST_F(RoaringFilterExprEvalTest, Int64SealedBitmapIndexOnlyRejected) {
     auto index_only = BuildIndexOnlyBitmapSegment();
     auto logical = MakeLogical(i64_fid_, DataType::INT64, {-7, 0, 42});

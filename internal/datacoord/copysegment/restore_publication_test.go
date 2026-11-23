@@ -26,12 +26,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
-	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metacache"
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -67,42 +65,6 @@ func TestRestorePublicationRetriesWithoutNewState(t *testing.T) {
 	patch.UnPatch()
 	checker.tryTimeoutJob(job) // Snapshot from before completion.
 	require.Equal(t, datapb.CopySegmentJobState_CopySegmentJobCompleted, recovered.GetJob(ctx, 100).GetState())
-}
-
-func TestRestorePublicationWaitsForReadAdmission(t *testing.T) {
-	ctx := t.Context()
-	task := CreateTestCopyTask(100, 2001).(*Task)
-	copies, mt := NewCopySegmentTaskTestMeta(t, task)
-	job := NewTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting).(*Job)
-	job.CollectionId, job.CreatesCollection = 100, true
-	require.NoError(t, copies.AddJob(ctx, job))
-	require.NoError(t, copies.UpdateTask(ctx, task.GetTaskId(), UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskCompleted)))
-	available := make(chan struct{})
-	manager, err := dataview.RecoverManager(ctx, mt.Catalog.(*kvdatacoord.Catalog), func(context.Context, int64) (bool, error) { return true, nil },
-		mt.LoadableProjection, []int64{100}, map[int64][]string{100: {"v0"}},
-		dataview.WithReadAdmissionSampler(func(ctx context.Context, _ string) (*viewpb.QueryPlanMVCC, error) {
-			select {
-			case <-available:
-				return &viewpb.QueryPlanMVCC{GrowingTimetick: 120, TransformingTimetick: 140}, nil
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}))
-	require.NoError(t, err)
-	mt.DataViewManager = manager
-	lookup := mockey.Mock((*restoreCollectionTarget).IsCollectionDropped).Return(false, nil).Build()
-	defer lookup.UnPatch()
-	complete := mockey.Mock((*restoreCollectionTarget).CompleteRestoreCollection).Return(nil).Build()
-	defer complete.UnPatch()
-	checker := &Checker{Ctx: ctx, CopyMeta: copies, Meta: mt, CollectionRestorer: &restoreCollectionTarget{}}
-	checker.publishRestoredCollection(job, 10)
-	require.Zero(t, complete.Times())
-	require.Equal(t, datapb.CopySegmentJobState_CopySegmentJobExecuting, copies.GetJob(ctx, 100).GetState())
-	close(available)
-	require.Eventually(t, func() bool { return manager.Published(100) != nil }, 3*time.Second, time.Millisecond)
-	checker.publishRestoredCollection(job, 10)
-	require.Equal(t, 1, complete.Times())
-	require.Equal(t, datapb.CopySegmentJobState_CopySegmentJobCompleted, copies.GetJob(ctx, 100).GetState())
 }
 
 func TestRestorePublicationWakesManifestBackfill(t *testing.T) {

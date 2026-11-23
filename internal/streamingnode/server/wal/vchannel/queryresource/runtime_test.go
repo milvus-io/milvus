@@ -160,15 +160,13 @@ type recordingModule struct {
 }
 
 func (m *recordingModule) Prepare(context.Context, walview.VChannelWALView) error { return nil }
-func (m *recordingModule) ApplyLiveEvent(_ context.Context, event walview.VChannelResourceEvent) error {
+func (m *recordingModule) ApplyLiveEvent(_ context.Context, event walview.VChannelResourceEvent) {
 	if event.SegmentSealed == nil {
-		return nil
+		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.segments = append(m.segments, event.SegmentSealed.SegmentID)
-
-	return nil
 }
 
 func (m *recordingModule) Advance(version qviews.DataVersion) {
@@ -194,10 +192,8 @@ type messageRecordingModule struct {
 }
 
 func (*messageRecordingModule) Prepare(context.Context, walview.VChannelWALView) error { return nil }
-func (m *messageRecordingModule) ApplyLiveEvent(_ context.Context, event walview.VChannelResourceEvent) error {
+func (m *messageRecordingModule) ApplyLiveEvent(_ context.Context, event walview.VChannelResourceEvent) {
 	m.timeTick = event.Message.TimeTick()
-
-	return nil
 }
 func (*messageRecordingModule) Advance(qviews.DataVersion) {}
 func (*messageRecordingModule) Close()                     {}

@@ -117,10 +117,9 @@ func (m *mockSegmentManager) releasedCount() int {
 
 func buildHandlerTestMeta(version int64) *viewpb.QueryViewMeta {
 	return &viewpb.QueryViewMeta{
-		ReadAdmissionFloor: &viewpb.QueryPlanMVCC{},
-		CollectionId:       testCollectionID,
-		ReplicaId:          testReplicaID,
-		Vchannel:           testVChannel,
+		CollectionId: testCollectionID,
+		ReplicaId:    testReplicaID,
+		Vchannel:     testVChannel,
 		Version: &viewpb.QueryViewVersion{
 			DataVersion:  &viewpb.DataVersion{StreamingVersion: version, CompactVersion: 1},
 			QueryVersion: version,

@@ -41,11 +41,11 @@ func TestReplicaDirectoryLocalLifecycle(t *testing.T) {
 	require.Empty(t, initial.GetReplicas(), "UpRecovering is not locally Up")
 	version1 := first.QueryViewKey().QueryViewVersion
 	version2 := second.QueryViewKey().QueryViewVersion
-	shard.notifyRecoveringDone(version1, shard.views[version1])
+	shard.notifyRecoveringDone(version1)
 	require.Equal(t, version1, qviews.FromProtoQueryViewVersion(watch.Pop().GetReplicas()[0].GetMaxUpViewVersion()))
 	require.Zero(t, shard.views[version1].queryRefs)
 	require.True(t, shard.views[version1].leaseExpireAt.IsZero(), "watch must not renew lease")
-	shard.notifyRecoveringDone(version2, shard.views[version2])
+	shard.notifyRecoveringDone(version2)
 	require.Equal(t, version2, qviews.FromProtoQueryViewVersion(watch.Pop().GetReplicas()[0].GetMaxUpViewVersion()), "same replica publishes a new maximum")
 	h.ApplyViews([]handler.ApplyView{{View: newSNViewWithState(1, viewpb.QueryViewState_QueryViewStateDown)}})
 	require.Nil(t, watch.Pop(), "retiring one version must preserve the replica")
@@ -84,7 +84,7 @@ func TestReplicaDirectoryRecoveryFailure(t *testing.T) {
 	watch.Subscribe(view.ShardID().VChannel)
 	require.Empty(t, watch.Pop().GetReplicas())
 	shard := h.shards[view.ShardID()]
-	shard.notifyUnrecoverable(view.QueryViewKey().QueryViewVersion, shard.views[view.QueryViewKey().QueryViewVersion])
+	shard.notifyUnrecoverable(view.QueryViewKey().QueryViewVersion)
 	snapshot := watch.Pop()
 	require.NotNil(t, snapshot, "failed recovery must unblock initial subscribers")
 	require.Empty(t, snapshot.GetReplicas())
@@ -119,11 +119,11 @@ func TestReplicaDirectoryMaximumRetirementAndRecoveryOrder(t *testing.T) {
 	watch.Subscribe(id.VChannel)
 	require.Empty(t, watch.Pop().GetReplicas())
 	// Recovery can complete in any order. An older schema/version can remain Up.
-	shard.notifyRecoveringDone(versions[1], shard.views[versions[1]])
+	shard.notifyRecoveringDone(versions[1])
 	require.Equal(t, versions[1], qviews.FromProtoQueryViewVersion(watch.Pop().Replicas[0].MaxUpViewVersion))
-	shard.notifyRecoveringDone(versions[0], shard.views[versions[0]])
+	shard.notifyRecoveringDone(versions[0])
 	require.Nil(t, watch.Pop(), "late recovery of an older version must not change maximum")
-	shard.notifyRecoveringDone(versions[2], shard.views[versions[2]])
+	shard.notifyRecoveringDone(versions[2])
 	require.Equal(t, versions[2], qviews.FromProtoQueryViewVersion(watch.Pop().Replicas[0].MaxUpViewVersion))
 	for i := len(versions) - 1; i >= 0; i-- {
 		down := newSNViewWithState(int64(i+1), viewpb.QueryViewState_QueryViewStateDown).IntoProto()
@@ -163,11 +163,11 @@ func TestReplicaDirectoryPreparingReadyAndTerminalStates(t *testing.T) {
 			require.True(t, initial.preparing)
 			require.Empty(t, initial.GetReplicas())
 			if terminal != viewpb.QueryViewState_QueryViewStateUnrecoverable {
-				shard.notifyReady(view.QueryViewKey().QueryViewVersion, shard.views[view.QueryViewKey().QueryViewVersion])
+				shard.notifyReady(view.QueryViewKey().QueryViewVersion)
 				require.Nil(t, watch.Pop(), "Ready still waits for Coordinator Up")
 			}
 			if terminal == viewpb.QueryViewState_QueryViewStateUnrecoverable {
-				shard.notifyUnrecoverable(view.QueryViewKey().QueryViewVersion, shard.views[view.QueryViewKey().QueryViewVersion])
+				shard.notifyUnrecoverable(view.QueryViewKey().QueryViewVersion)
 			} else {
 				h.ApplyViews([]handler.ApplyView{{View: newSNViewWithState(1, terminal)}})
 			}

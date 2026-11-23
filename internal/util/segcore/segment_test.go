@@ -2,12 +2,9 @@ package segcore_test
 
 import (
 	"context"
-	"errors"
 	"path"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,119 +18,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-// The second cancellation check in GCUpdates runs after taking the physical
-// pointer mutex and immediately before C. Hold the caller at that boundary
-// so Release starts while a real native operation owns the pointer.
-type gatedGCContext struct {
-	context.Context
-	checks  atomic.Int32
-	entered chan struct{}
-	proceed chan struct{}
-}
-
-func (c *gatedGCContext) Err() error {
-	if c.checks.Add(1) == 2 {
-		close(c.entered)
-		select {
-		case <-c.proceed:
-		case <-time.After(5 * time.Second):
-			return context.DeadlineExceeded
-		}
-	}
-	return c.Context.Err()
-}
-
-func TestSegmentReleaseJoinsOwnedGC(t *testing.T) {
-	initBoostScoreTestEnv(t)
-	schema := mock_segcore.GenTestCollectionSchema("owned_gc", schemapb.DataType_Int64, true)
-	collection, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{CollectionID: 100, Schema: schema})
-	require.NoError(t, err)
-	defer collection.Release()
-	for _, kind := range []segcore.SegmentType{segcore.SegmentTypeGrowing, segcore.SegmentTypeSealed} {
-		s, err := segcore.CreateCSegment(&segcore.CreateCSegmentRequest{Collection: collection, SegmentID: 101, SegmentType: kind})
-		require.NoError(t, err)
-		op := &gatedGCContext{Context: t.Context(), entered: make(chan struct{}), proceed: make(chan struct{})}
-		collected := make(chan error, 1)
-		go func() { collected <- s.GCUpdates(op, 50) }()
-		select {
-		case <-op.entered:
-		case <-time.After(5 * time.Second):
-			t.Fatal("timed out waiting for op.entered")
-		}
-		started, released := make(chan struct{}), make(chan struct{})
-		go func() { close(started); s.Release(); close(released) }()
-		select {
-		case <-started:
-		case <-time.After(5 * time.Second):
-			t.Fatal("timed out waiting for started")
-		}
-		select {
-		case <-released:
-			t.Fatal("physical release overtook GC")
-		case <-time.After(20 * time.Millisecond):
-		}
-		close(op.proceed)
-		select {
-		case err := <-collected:
-			require.NoError(t, err)
-		case <-time.After(5 * time.Second):
-			t.Fatal("GC did not complete")
-		}
-		select {
-		case <-released:
-		case <-time.After(5 * time.Second):
-			t.Fatal("timed out waiting for released")
-		}
-		require.ErrorIs(t, s.GCUpdates(t.Context(), 51), merr.ErrSegmentNotLoaded)
-	}
-}
-
-func TestSegmentGCUpdatesRelease(t *testing.T) {
-	initBoostScoreTestEnv(t)
-	schema := mock_segcore.GenTestCollectionSchema("gc_updates", schemapb.DataType_Int64, true)
-	collection, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{
-		CollectionID: 100, Schema: schema, IndexMeta: mock_segcore.GenTestIndexMeta(100, schema),
-	})
-	require.NoError(t, err)
-	defer collection.Release()
-	ctx := context.Background()
-	canceled, cancel := context.WithCancel(ctx)
-	cancel()
-	for _, kind := range []segcore.SegmentType{segcore.SegmentTypeGrowing, segcore.SegmentTypeSealed} {
-		segment, err := segcore.CreateCSegment(&segcore.CreateCSegmentRequest{
-			Collection: collection, SegmentID: 101, SegmentType: kind,
-		})
-		require.NoError(t, err)
-		require.ErrorIs(t, segment.GCUpdates(canceled, 99), context.Canceled)
-		for _, cutoff := range []uint64{20, 20, 8} {
-			require.NoError(t, segment.GCUpdates(ctx, cutoff))
-		}
-		start := make(chan struct{})
-		results := make(chan error, 16)
-		for i := 0; i < cap(results); i++ {
-			go func() {
-				<-start
-				results <- segment.GCUpdates(ctx, 40)
-			}()
-		}
-		close(start)
-		segment.Release()
-		for i := 0; i < cap(results); i++ {
-			err := <-results
-			require.True(t, err == nil || errors.Is(err, merr.ErrSegmentNotLoaded), "%v", err)
-		}
-		require.ErrorIs(t, segment.GCUpdates(ctx, 50), merr.ErrSegmentNotLoaded)
-	}
-}
 
 func TestGrowingSegment(t *testing.T) {
 	paramtable.Init()
@@ -192,19 +82,6 @@ func TestGrowingSegment(t *testing.T) {
 	assert.Equal(t, int64(100), segment.RowNum())
 	assertEqualCount(t, collection, segment, 100)
 
-	var scoreField int64
-	for _, field := range schema.GetFields() {
-		if field.GetDataType() == schemapb.DataType_Int32 {
-			scoreField = field.GetFieldID()
-			break
-		}
-	}
-	require.NotZero(t, scoreField)
-	update := &messagespb.UpdateMessageBody{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10}}}}, Assignments: []*messagespb.UpdateAssignment{{FieldId: scoreField, Literal: &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_ScalarValue{ScalarValue: &schemapb.ValueField{Data: &schemapb.ValueField_IntData{IntData: 42}}}}}}}
-	require.NoError(t, segment.ApplyUpdates(t.Context(), 999, 1, update))
-	require.NoError(t, segment.ApplyUpdates(t.Context(), 999, 1, update))
-	update.Assignments[0].Literal.GetScalarValue().Data = &schemapb.ValueField_IntData{IntData: 43}
-	require.Error(t, segment.ApplyUpdates(t.Context(), 999, 1, update), "conflicting replay must cross the native status boundary")
 	pk := storage.NewInt64PrimaryKeys(1)
 	pk.Append(storage.NewInt64PrimaryKey(10))
 	deleteResult, err := segment.Delete(context.Background(), &segcore.DeleteRequest{

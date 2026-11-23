@@ -3,7 +3,6 @@ package queryresource
 import (
 	"context"
 	"io"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,26 +14,15 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/growingruntime"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
-	"github.com/milvus-io/milvus/internal/util/initcore"
-	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestManagerSharesDefaultBuildersAndLazilyAllocatesRefs(t *testing.T) {
@@ -593,9 +581,7 @@ func (m *blockingQueryRuntimeModule) Prepare(ctx context.Context, _ walview.VCha
 	return ctx.Err()
 }
 
-func (*blockingQueryRuntimeModule) ApplyLiveEvent(context.Context, walview.VChannelResourceEvent) error {
-	return nil
-}
+func (*blockingQueryRuntimeModule) ApplyLiveEvent(context.Context, walview.VChannelResourceEvent) {}
 
 func (*blockingQueryRuntimeModule) Advance(qviews.DataVersion) {}
 
@@ -625,9 +611,7 @@ func (m *gatedQueryRuntimeModule) Prepare(ctx context.Context, _ walview.VChanne
 	}
 }
 
-func (*gatedQueryRuntimeModule) ApplyLiveEvent(context.Context, walview.VChannelResourceEvent) error {
-	return nil
-}
+func (*gatedQueryRuntimeModule) ApplyLiveEvent(context.Context, walview.VChannelResourceEvent) {}
 
 func (*gatedQueryRuntimeModule) Advance(qviews.DataVersion) {}
 
@@ -651,9 +635,7 @@ func (*versionedQueryRuntimeModule) Prepare(context.Context, walview.VChannelWAL
 	return nil
 }
 
-func (*versionedQueryRuntimeModule) ApplyLiveEvent(context.Context, walview.VChannelResourceEvent) error {
-	return nil
-}
+func (*versionedQueryRuntimeModule) ApplyLiveEvent(context.Context, walview.VChannelResourceEvent) {}
 
 func (*versionedQueryRuntimeModule) Advance(qviews.DataVersion) {}
 
@@ -875,176 +857,4 @@ func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onR
 	}
 	m.mu.Unlock()
 	return m.prepareViewRef(ctx, key, ref, runtime, onReady)
-}
-
-type gatedMutationBuilder struct {
-	release chan struct{}
-	entered chan struct{}
-}
-
-func (b gatedMutationBuilder) NewRuntime() (QueryRuntimeModule, error) {
-	return &gatedMutationModule{builder: b}, nil
-}
-
-type gatedMutationModule struct {
-	recordingModule
-	builder gatedMutationBuilder
-}
-
-func (m *gatedMutationModule) ApplyLiveEvent(ctx context.Context, event walview.VChannelResourceEvent) error {
-	if event.Message != nil {
-		close(m.builder.entered)
-		<-m.builder.release
-	}
-	return nil
-}
-
-func TestLiveApplyFailureRetiresOnlyFailedGeneration(t *testing.T) {
-	scheduler := nodescheduler.New(2)
-	defer scheduler.Close()
-	dispatcher := NewDispatcher(1)
-	defer dispatcher.Close()
-	builder := gatedMutationBuilder{make(chan struct{}), make(chan struct{})}
-	manager := NewManager(Config{Scheduler: scheduler, Dispatcher: dispatcher, Builders: []QueryRuntimeModuleBuilder{builder, NewGrowingRuntimeModuleBuilder(nil)}})
-	defer manager.Close()
-	wait := func(c chan struct{}) {
-		t.Helper()
-		select {
-		case <-c:
-		case <-time.After(3 * time.Second):
-			t.Fatal("missing lifecycle callback")
-		}
-	}
-	paramtable.Init()
-	initcore.InitExecExpressionFunctionFactory()
-	require.NoError(t, initcore.InitLocalChunkManager(filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)))
-	require.NoError(t, initcore.InitMmapManager(paramtable.Get(), 1))
-	require.NoError(t, initcore.InitTieredStorage(paramtable.Get()))
-	schema := mock_segcore.GenTestCollectionSchema("runtime-replacement", schemapb.DataType_Int64, false)
-	collection, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{CollectionID: 1, Schema: schema})
-	require.NoError(t, err)
-	defer collection.Release()
-	insert, err := mock_segcore.GenInsertMsg(collection, 10, 100, 1)
-	require.NoError(t, err)
-	var k, field int64
-	for _, f := range schema.Fields {
-		if f.GetIsPrimaryKey() {
-			for _, data := range insert.FieldsData {
-				if data.FieldId == f.FieldID {
-					k = data.GetScalars().GetLongData().Data[0]
-				}
-			}
-		}
-		if f.DataType == schemapb.DataType_Int32 {
-			field = f.FieldID
-		}
-	}
-	insert.ShardName = "v1"
-	insert.CollectionID, insert.PartitionID, insert.SegmentID = 1, 10, 100
-	ins := message.NewInsertMessageBuilderV1().WithVChannel("v1").WithHeader(&message.InsertMessageHeader{CollectionId: 1, Partitions: []*messagespb.PartitionSegmentAssignment{{PartitionId: 10, Rows: 1, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 100}}}}).WithBody(insert.InsertRequest).MustBuildMutable().WithTimeTick(10).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(10))
-	updateBody := func(value int32) *messagespb.UpdateMessageBody {
-		return &messagespb.UpdateMessageBody{PartitionId: 10, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{k}}}}, Assignments: []*messagespb.UpdateAssignment{{FieldId: field, Literal: &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_ScalarValue{ScalarValue: &schemapb.ValueField{Data: &schemapb.ValueField_IntData{IntData: value}}}}}}}
-	}
-	update := message.NewUpdateMessageBuilderV2().WithVChannel("v1").WithHeader(&messagespb.UpdateMessageHeader{CollectionId: 1}).WithBody(updateBody(216)).MustBuildMutable().WithTimeTick(40).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(40))
-	summary := walsummary.NewManager(walsummary.ManagerConfig{})
-	summary.ObserveMessage(t.Context(), ins)
-	stream := walsummary.NewStream(summary)
-	defer stream.Close()
-	var through atomic.Uint64
-	var captures atomic.Int32
-	capture := func(*viewpb.QueryViewMeta) (walview.VChannelWALView, bool) {
-		captures.Add(1)
-		return walview.VChannelWALView{CollectionID: 1, VChannel: "v1", Schema: schema, BaseGrowingTimeTick: max(10, through.Load()), BaseTransformTimeTick: through.Load(), TransformLogStream: stream, SegmentSnapshot: walview.VisibleSegmentSnapshot{Segments: []walview.VisibleSegment{{SegmentID: 100, PartitionID: 10, Schema: schema, Data: walview.SegmentSnapshotData{InsertMessages: []message.ImmutableMessage{ins}}}}}}, true
-	}
-	acquire := func(version int64, floor uint64) (qviews.QueryViewKey, chan struct{}) {
-		meta, key := testManagerQueryViewMetaAndKey(version)
-		meta.ReadAdmissionFloor = &viewpb.QueryPlanMVCC{GrowingTimetick: floor}
-		ready, failed := make(chan struct{}), make(chan struct{})
-		manager.AcquireLocked(snview.AcquireResource{Key: key, Meta: meta, OnReady: func() { close(ready) }, OnRuntimeFailed: func() { close(failed) }}, capture)
-		wait(ready)
-		return key, failed
-	}
-	first, failed1 := acquire(1, 0)
-	second, failed2 := acquire(2, 0)
-	old, ok := manager.QueryRuntime(first)
-	require.True(t, ok)
-	handles, err := old.AcquireGrowingSegmentHandles(t.Context(), first.QueryViewVersion.DataVersion, 0, nil)
-	require.NoError(t, err)
-	require.Len(t, handles, 1)
-	defer handles[0].Release()
-	// Corrupt only the old resident store: the retained WAL contains the valid
-	// value. The real native applier will reject the conflicting replay.
-	require.NoError(t, handles[0].Segment().ApplyUpdates(t.Context(), 40, 0, updateBody(999)))
-	summary.ObserveMessage(t.Context(), update)
-	through.Store(40)
-	manager.ObserveEvent(t.Context(), walview.VChannelResourceEvent{Message: update})
-	wait(builder.entered)
-	var ran atomic.Bool
-	manager.ObserveEvent(t.Context(), walview.VChannelResourceEvent{Barrier: func() { ran.Store(true) }})
-	close(builder.release)
-	wait(failed1)
-	wait(failed2)
-	require.False(t, ran.Load())
-	_, ok = manager.QueryRuntime(first)
-	require.False(t, ok)
-	third, failed3 := acquire(3, 40)
-	current, ok := manager.QueryRuntime(third)
-	require.True(t, ok)
-	require.NotSame(t, old, current)
-	require.EqualValues(t, 2, captures.Load())
-	restored, err := current.AcquireGrowingSegmentHandles(t.Context(), third.QueryViewVersion.DataVersion, 40, nil)
-	require.NoError(t, err)
-	require.Len(t, restored, 1)
-	defer restored[0].Release()
-	encoded, err := proto.Marshal(&planpb.PlanNode{Node: &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{Limit: 1}}, OutputFieldIds: []int64{field}})
-	require.NoError(t, err)
-	plan, err := segcore.NewRetrievePlan(restored[0].Collection(), encoded, 40, 100, 0, 0, 0)
-	require.NoError(t, err)
-	defer plan.Delete()
-	result, err := restored[0].Segment().RetrieveByOffsets(t.Context(), &segcore.RetrievePlanWithOffsets{RetrievePlan: plan, Offsets: []int64{0}})
-	require.NoError(t, err)
-	defer result.Release()
-	values, err := result.GetResult()
-	require.NoError(t, err)
-	var actual []int32
-	for _, data := range values.GetFieldsData() {
-		if data.FieldId == field {
-			actual = data.GetScalars().GetIntData().GetData()
-		}
-	}
-	require.Equal(t, []int32{216}, actual)
-	restored[0].Release()
-	handles[0].Release()
-	// The replacement has now excluded G < 40. A late View on this same
-	// DataVersion must fail preparation while the serving View stays usable.
-	meta, late := testManagerQueryViewMetaAndKey(3)
-	late.QueryViewVersion.QueryVersion++
-	meta.Version = late.QueryViewVersion.IntoProto()
-	meta.ReadAdmissionFloor = &viewpb.QueryPlanMVCC{GrowingTimetick: 39}
-	prepared := make(chan bool, 1)
-	manager.AcquireLocked(snview.AcquireResource{
-		Key: late, Meta: meta,
-		OnReady: func() { prepared <- true }, OnUnrecoverable: func() { prepared <- false },
-	}, capture)
-	select {
-	case ready := <-prepared:
-		require.False(t, ready)
-	case <-time.After(3 * time.Second):
-		t.Fatal("late View did not finish preparation")
-	}
-	healthy, err := current.AcquireGrowingSegmentHandles(t.Context(), third.QueryViewVersion.DataVersion, 40, nil)
-	require.NoError(t, err)
-	require.Len(t, healthy, 1)
-	healthy[0].Release()
-	manager.runtimeFailed(old)
-	select {
-	case <-failed3:
-		t.Fatal("obsolete runtime failed replacement")
-	default:
-	}
-	for _, key := range []qviews.QueryViewKey{first, second, third, late} {
-		dropped := make(chan struct{})
-		manager.Release(snview.ReleaseResource{Key: key, OnDropped: func() { close(dropped) }})
-		wait(dropped)
-	}
 }

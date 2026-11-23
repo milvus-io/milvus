@@ -5,7 +5,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -153,14 +152,4 @@ func TestQueryViewBuilderPreservesSegmentTransformStarts(t *testing.T) {
 	result := NewQueryViewAtCoordBuilder(1, view, "v1").SetAssignments(map[int64]map[int64][]int64{100: {1: {20, 10}}}).Build()
 	require.Equal(t, uint64(40), result.Meta.TransformStartAfterTimetick)
 	require.Equal(t, []int64{4, 3}, result.QueryNode[0].Partitions[0].SegmentManifestVersions)
-}
-
-func TestReadAdmissionFollowsExactDataAndPlacementRecovery(t *testing.T) {
-	floor := &viewpb.QueryPlanMVCC{GrowingTimetick: 120, TransformingTimetick: 140}
-	shard := &viewpb.DataViewOfShard{Vchannel: "v", ReadAdmissionFloor: floor}
-	view := NewQueryViewAtCoordBuilder(1, &viewpb.DataViewOfCollection{CollectionId: 42, DataVersion: &viewpb.DataVersion{StreamingVersion: 1}, Shards: []*viewpb.DataViewOfShard{shard}}, "v").Build()
-	require.True(t, proto.Equal(floor, view.GetMeta().GetReadAdmissionFloor()))
-	clone := NewQueryViewAtCoordBuilderFromView(view).Build()
-	view.Meta.ReadAdmissionFloor.GrowingTimetick = 30
-	require.True(t, proto.Equal(floor, clone.GetMeta().GetReadAdmissionFloor()))
 }

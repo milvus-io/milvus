@@ -92,7 +92,7 @@ func TestSNHandler_AcquireSearchSegmentTasksWaitsRuntimeAndReleasesViewRef(t *te
 	assert.Equal(t, 1, handle.releaseCount)
 }
 
-func TestSNHandler_IgnoreGrowingStillRequiresServingView(t *testing.T) {
+func TestSNHandler_AcquireSearchSegmentTasksSkipsIgnoreGrowingSubSearch(t *testing.T) {
 	h := &SNQueryViewHandler{}
 	tasks, err := h.AcquireSearchSegmentTasks(
 		context.Background(),
@@ -103,8 +103,9 @@ func TestSNHandler_IgnoreGrowingStillRequiresServingView(t *testing.T) {
 		nil,
 	)
 
-	require.Error(t, err)
-	require.Nil(t, tasks)
+	require.NoError(t, err)
+	require.NotNil(t, tasks)
+	assert.Empty(t, tasks.Tasks())
 }
 
 func TestSNHandler_AcquireQuerySegmentTasksWaitsRuntimeAndReleasesViewRef(t *testing.T) {
@@ -192,7 +193,7 @@ func (r *mockQueryRuntime) WaitMVCCVisible(_ context.Context, growingTimetick ui
 	return r.waitErr
 }
 
-func (r *mockQueryRuntime) AcquireGrowingSegmentHandles(_ context.Context, dataVersion qviews.DataVersion, growingTS uint64, partitionIDs []int64) ([]GrowingSegmentHandle, error) {
+func (r *mockQueryRuntime) AcquireGrowingSegmentHandles(_ context.Context, dataVersion qviews.DataVersion, partitionIDs []int64) ([]GrowingSegmentHandle, error) {
 	r.dataVersion = dataVersion
 	r.partitionIDs = append([]int64(nil), partitionIDs...)
 	return r.handles, r.handleErr
@@ -283,7 +284,7 @@ func TestSNTasksRequirePartitionResolutionBeforeAcquiringHandles(t *testing.T) {
 					}
 					return []int64{10}, nil
 				}).Build()
-				mockey.Mock((*mockQueryRuntime).AcquireGrowingSegmentHandles).To(func(_ *mockQueryRuntime, _ context.Context, _ qviews.DataVersion, _ uint64, partitions []int64) ([]GrowingSegmentHandle, error) {
+				mockey.Mock((*mockQueryRuntime).AcquireGrowingSegmentHandles).To(func(_ *mockQueryRuntime, _ context.Context, _ qviews.DataVersion, partitions []int64) ([]GrowingSegmentHandle, error) {
 					require.True(t, resolved)
 					require.Equal(t, []int64{10}, partitions)
 					acquired = true
