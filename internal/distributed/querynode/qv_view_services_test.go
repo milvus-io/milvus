@@ -68,7 +68,7 @@ func TestLazyQNSegmentManagerNilCallbacksUseNodeScheduler(t *testing.T) {
 
 func TestRegisterQueryViewServers(t *testing.T) {
 	server := grpc.NewServer()
-	registerQueryViewServers(server, noopQNSegmentManager{}, 100)
+	registerQueryViewServers(server, noopQNSegmentManager{}, nil)
 
 	services := server.GetServiceInfo()
 	_, ok := services["milvus.proto.view.ViewSyncService"]

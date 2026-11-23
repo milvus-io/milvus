@@ -52,6 +52,7 @@ type SearchTask struct {
 	ctx              context.Context
 	collection       *segments.Collection
 	segmentManager   *segments.Manager
+	selected         []segments.Segment // pinned by the QueryView caller until Wait returns
 	req              *querypb.SearchRequest
 	result           *internalpb.SearchResults
 	merged           bool
@@ -156,8 +157,15 @@ func (t *SearchTask) PreExecute() error {
 	return nil
 }
 
+// NewSearchTaskOnSegments binds execution to the caller's pinned view.
+func NewSearchTaskOnSegments(ctx context.Context, collection *segments.Collection, selected []segments.Segment, req *querypb.SearchRequest, serverID int64) *SearchTask {
+	t := NewSearchTask(ctx, collection, nil, req, serverID)
+	t.selected = selected
+	return t
+}
+
 func (t *SearchTask) Execute() error {
-	return t.execute(nil)
+	return t.execute(t.selected)
 }
 
 // TODO(#40451): move selected-segment search and reduction into the shared
@@ -482,6 +490,10 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 }
 
 func (t *SearchTask) canMerge(other *SearchTask) bool {
+	// Even equal segment IDs may refer to handles from different view versions.
+	if t.selected != nil || other.selected != nil {
+		return false
+	}
 	var (
 		nq        = t.nq
 		topk      = t.topk

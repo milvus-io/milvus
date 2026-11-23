@@ -31,11 +31,23 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
+
+func TestPinnedViewSearchCannotMerge(t *testing.T) {
+	req := &querypb.SearchRequest{Req: &internalpb.SearchRequest{Nq: 1, Topk: 1}, DmlChannels: []string{"v1"}, SegmentIDs: []int64{10}}
+	pinned := NewSearchTaskOnSegments(t.Context(), nil, []segments.Segment{nil}, req, 1)
+	otherView := NewSearchTaskOnSegments(t.Context(), nil, []segments.Segment{nil}, req, 1)
+	legacy := NewSearchTask(t.Context(), nil, nil, req, 1)
+	require.False(t, pinned.MergeWith(otherView))
+	require.False(t, pinned.MergeWith(legacy))
+	require.False(t, legacy.MergeWith(pinned))
+	require.True(t, legacy.MergeWith(NewSearchTask(t.Context(), nil, nil, req, 1)))
+}
 
 func TestTakeForOutputRequestDecision(t *testing.T) {
 	t.Run("request limit", func(t *testing.T) {

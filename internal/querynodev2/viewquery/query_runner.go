@@ -7,20 +7,24 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type QueryTaskRunner interface {
 	Query(ctx context.Context, collection *segments.Collection, selected []segments.Segment, req *querypb.QueryRequest, serverID int64) (*internalpb.RetrieveResults, error)
 }
 
-type queryTaskRunner struct{}
+type queryTaskRunner struct{ schedule ScheduleRead }
 
 func (r queryTaskRunner) Query(ctx context.Context, collection *segments.Collection, selected []segments.Segment, req *querypb.QueryRequest, serverID int64) (*internalpb.RetrieveResults, error) {
-	task := tasks.NewQueryTask(ctx, collection, nil, req)
-	if err := task.PreExecute(); err != nil {
-		return nil, err
+	task := tasks.NewQueryTaskOnSegments(ctx, collection, selected, req)
+	var err error
+	if paramtable.Get().QueryNodeCfg.MaxQueueWaitRatio.GetAsFloat() > 0 {
+		err = r.schedule(task)
+	} else if err = task.PreExecute(); err == nil {
+		err = task.Execute()
 	}
-	if err := task.ExecuteOnSegments(selected); err != nil {
+	if err != nil {
 		return nil, err
 	}
 	return task.Result(), nil

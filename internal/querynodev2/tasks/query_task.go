@@ -66,6 +66,7 @@ type QueryTask struct {
 	ctx            context.Context
 	collection     *segments.Collection
 	segmentManager *segments.Manager
+	selected       []segments.Segment // pinned by the QueryView caller until Wait returns
 	req            *querypb.QueryRequest
 	plan           *planpb.PlanNode // used by RunQNQueryPipeline for reduce
 	queryChain     *chain.QueryChainPlan
@@ -141,9 +142,16 @@ func (t *QueryTask) SearchResult() *internalpb.SearchResults {
 	return nil
 }
 
+// NewQueryTaskOnSegments binds execution to the caller's pinned view.
+func NewQueryTaskOnSegments(ctx context.Context, collection *segments.Collection, selected []segments.Segment, req *querypb.QueryRequest) *QueryTask {
+	t := NewQueryTask(ctx, collection, nil, req)
+	t.selected = selected
+	return t
+}
+
 // Execute the task, only call once.
 func (t *QueryTask) Execute() error {
-	return t.execute(nil)
+	return t.execute(t.selected)
 }
 
 // TODO(#40451): move selected-segment retrieval and reduction into the shared

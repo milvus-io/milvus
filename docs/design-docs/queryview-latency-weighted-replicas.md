@@ -126,6 +126,13 @@ has waited more than half of the new task's limit. Already-expired tasks fail
 as expired rather than overloaded, and tasks waiting beyond their limit by
 dequeue time are refused then (`read_task_queue_duration{outcome="overloaded"}`).
 
+With a positive ratio, QueryNode also submits QueryView Search and Query tasks
+to its read scheduler. The view retains its selected segment handles until
+the task completes or the queue refuses it. The scheduler executes those
+exact handles and keeps each view's Search separate from other tasks. With
+the default zero ratio, QueryView continues to execute directly. StreamingNode
+growing reads use their own executor.
+
 **One extra attempt, then the refusal goes to the client.** Across both the
 default router (`executeShard`) and the adaptive selector (`executeAdaptiveShard`),
 a shard read gets at most one extra attempt on another replica across hedging

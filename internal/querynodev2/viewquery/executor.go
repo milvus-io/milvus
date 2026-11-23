@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
+	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 )
 
@@ -15,11 +16,15 @@ type DirectSegmentTaskExecutor struct {
 	queryRunner  QueryTaskRunner
 }
 
-func NewDirectSegmentTaskExecutor(serverID int64) *DirectSegmentTaskExecutor {
+// ScheduleRead submits to the QueryNode read queue and waits for completion.
+// The caller owns the selected segment handles throughout this call.
+type ScheduleRead func(scheduler.Task) error
+
+func NewDirectSegmentTaskExecutor(serverID int64, schedule ScheduleRead) *DirectSegmentTaskExecutor {
 	return &DirectSegmentTaskExecutor{
 		serverID:     serverID,
-		searchRunner: searchTaskRunner{},
-		queryRunner:  queryTaskRunner{},
+		searchRunner: searchTaskRunner{schedule: schedule},
+		queryRunner:  queryTaskRunner{schedule: schedule},
 	}
 }
 
