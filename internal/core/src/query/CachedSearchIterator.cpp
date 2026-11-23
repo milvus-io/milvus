@@ -14,6 +14,7 @@
 #include <exception>
 #include <iterator>
 #include <memory>
+#include <numeric>
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -41,7 +42,9 @@ CachedSearchIterator::CachedSearchIterator(
     const milvus::index::IVectorReader& reader,
     const knowhere::DataSetPtr& query_ds,
     const SearchInfo& search_info,
-    const BitsetView& bitset) {
+    const BitsetView& bitset,
+    PkAccessor pk_accessor)
+    : pk_lookup_(std::move(pk_accessor)) {
     if (query_ds == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Query dataset is nullptr, cannot initialize iterator");
@@ -142,7 +145,9 @@ CachedSearchIterator::CachedSearchIterator(
     const std::map<std::string, std::string>& index_info,
     const BitsetView& bitset,
     const milvus::DataType& data_type,
-    bool element_nullable) {
+    bool element_nullable,
+    PkAccessor pk_accessor)
+    : pk_lookup_(std::move(pk_accessor)) {
     if (vec_data == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Vector data is nullptr, cannot initialize iterator");
@@ -269,7 +274,9 @@ CachedSearchIterator::CachedSearchIterator(
     const std::map<std::string, std::string>& index_info,
     const BitsetView& bitset,
     const milvus::DataType& data_type,
-    milvus::OpContext* op_context) {
+    milvus::OpContext* op_context,
+    PkAccessor pk_accessor)
+    : pk_lookup_(std::move(pk_accessor)) {
     if (column == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Column is nullptr, cannot initialize iterator");
@@ -389,6 +396,7 @@ std::optional<CachedSearchIterator::DisIdPair>
 CachedSearchIterator::GetNextValidResult(
     const size_t iterator_idx,
     const std::optional<float>& last_bound,
+    const std::optional<PkType>& last_pk,
     const std::optional<float>& radius,
     const std::optional<float>& range_filter) {
     auto& iterator = iterators_[iterator_idx];
@@ -412,7 +420,7 @@ CachedSearchIterator::GetNextValidResult(
                       next.what());
         }
         auto result = ConvertIteratorResult(next.value());
-        if (IsValid(result, last_bound, radius, range_filter)) {
+        if (IsValid(result, last_bound, last_pk, radius, range_filter)) {
             return result;
         }
     }
@@ -424,34 +432,44 @@ void
 CachedSearchIterator::MergeChunksResults(
     size_t query_idx,
     const std::optional<float>& last_bound,
+    const std::optional<PkType>& last_pk,
     const std::optional<float>& radius,
     const std::optional<float>& range_filter,
     std::vector<DisIdPair>& rst) {
     auto& heap = chunked_heaps_[query_idx];
+    std::optional<float> cut_dist = std::nullopt;
 
     if (heap.empty()) {
         for (size_t chunk_id = 0; chunk_id < num_chunks_; ++chunk_id) {
             const size_t iterator_idx = query_idx + chunk_id * nq_;
             if (auto next_result = GetNextValidResult(
-                    iterator_idx, last_bound, radius, range_filter);
+                    iterator_idx, last_bound, last_pk, radius, range_filter);
                 next_result.has_value()) {
                 heap.emplace(iterator_idx, next_result.value());
             }
         }
     }
 
-    while (!heap.empty() && rst.size() < batch_size_) {
+    while (!heap.empty()) {
         const auto [iterator_idx, cur_rst] = heap.top();
+        if (cut_dist.has_value() && cur_rst.first > cut_dist.value()) {
+            // Boundary tie group is complete; the rest belongs to the next
+            // page.
+            break;
+        }
         heap.pop();
 
         // last_bound may change between NextBatch calls, discard any invalid results
-        if (!IsValid(cur_rst, last_bound, radius, range_filter)) {
+        if (!IsValid(cur_rst, last_bound, last_pk, radius, range_filter)) {
             continue;
         }
         rst.emplace_back(cur_rst);
+        if (!cut_dist.has_value() && rst.size() >= batch_size_) {
+            cut_dist = rst[batch_size_ - 1].first;
+        }
 
         if (auto next_result = GetNextValidResult(
-                iterator_idx, last_bound, radius, range_filter);
+                iterator_idx, last_bound, last_pk, radius, range_filter);
             next_result.has_value()) {
             heap.emplace(iterator_idx, next_result.value());
         }
@@ -461,20 +479,30 @@ CachedSearchIterator::MergeChunksResults(
 std::vector<CachedSearchIterator::DisIdPair>
 CachedSearchIterator::GetBatchedNextResults(size_t query_idx,
                                             const SearchInfo& search_info) {
-    auto last_bound = ConvertIncomingDistance(
-        search_info.iterator_v2_info_.value().last_bound);
+    const auto& iterator_v2_info = search_info.iterator_v2_info_.value();
+    auto last_bound = ConvertIncomingDistance(iterator_v2_info.last_bound);
+    auto last_pk =
+        DecodePkValue(iterator_v2_info.last_primary_key,
+                      iterator_v2_info.primary_key_type);
     auto radius = ConvertIncomingDistance(
         index::GetValueFromConfig<float>(search_info.search_params_, RADIUS));
     auto range_filter =
         ConvertIncomingDistance(index::GetValueFromConfig<float>(
             search_info.search_params_, RANGE_FILTER));
 
-    std::vector<DisIdPair> rst;
-    rst.reserve(batch_size_);
+    std::vector<DisIdPair> collected;
+    collected.reserve(batch_size_ * 2);
 
     if (num_chunks_ == 1) {
         auto& iterator = iterators_[query_idx];
-        while (rst.size() < batch_size_) {
+        // The knowhere stream yields rows in distance order but in an
+        // unspecified order within a group of equal distances. Pull enough rows
+        // so the collected set contains the whole boundary tie group (all rows
+        // tied at the distance of the batch cut); sorting by (score, pk) below
+        // then makes the page a strict prefix of the (score, pk) order, which
+        // the continuation cursor can resume exactly.
+        std::optional<float> cut_dist = std::nullopt;
+        while (true) {
             auto has_next = iterator->HasNext();
             if (!has_next.has_value()) {
                 ThrowInfo(KnowhereStatusToErrorCode(has_next.error()),
@@ -491,23 +519,66 @@ CachedSearchIterator::GetBatchedNextResults(size_t query_idx,
                           next.what());
             }
             auto result = ConvertIteratorResult(next.value());
-            if (IsValid(result, last_bound, radius, range_filter)) {
-                rst.emplace_back(result);
+            if (cut_dist.has_value() && result.first > cut_dist.value()) {
+                // Boundary tie group is complete; this row belongs to the next
+                // page.
+                break;
+            }
+            if (!IsValid(result, last_bound, last_pk, radius, range_filter)) {
+                continue;
+            }
+            collected.emplace_back(result);
+            if (!cut_dist.has_value() && collected.size() >= batch_size_) {
+                // The batch cut lands at this distance; keep pulling until the
+                // next row is strictly farther, so tied rows at the cut are all
+                // collected and ordered by pk.
+                cut_dist = collected[batch_size_ - 1].first;
             }
         }
     } else {
-        MergeChunksResults(query_idx, last_bound, radius, range_filter, rst);
+        MergeChunksResults(
+            query_idx, last_bound, last_pk, radius, range_filter, collected);
     }
-    std::sort(rst.begin(), rst.end());
+
+    // Order the batch by (distance, primary key) so consecutive pages
+    // partition the global (score, pk) order exactly.
+    if (pk_lookup_) {
+        std::vector<PkType> pks;
+        pks.reserve(collected.size());
+        for (const auto& r : collected) {
+            auto pk = pk_lookup_(r.second);
+            pks.push_back(pk.has_value() ? *pk : PkType{});
+        }
+        std::vector<size_t> idx(collected.size());
+        std::iota(idx.begin(), idx.end(), 0);
+        std::stable_sort(idx.begin(), idx.end(), [&](size_t a, size_t b) {
+            if (collected[a].first != collected[b].first) {
+                return collected[a].first < collected[b].first;
+            }
+            return ComparePk(pks[a], pks[b]) < 0;
+        });
+        std::vector<DisIdPair> sorted;
+        sorted.reserve(collected.size());
+        for (auto i : idx) {
+            sorted.push_back(collected[i]);
+        }
+        collected.swap(sorted);
+    } else {
+        std::sort(collected.begin(), collected.end());
+    }
+
+    if (collected.size() > batch_size_) {
+        collected.resize(batch_size_);
+    }
     if (sign_ == -1) {
-        std::for_each(rst.begin(), rst.end(), [this](DisIdPair& x) {
+        std::for_each(collected.begin(), collected.end(), [this](DisIdPair& x) {
             x.first = x.first * sign_;
         });
     }
-    while (rst.size() < batch_size_) {
-        rst.emplace_back(1.0f / 0.0f, -1);
+    while (collected.size() < batch_size_) {
+        collected.emplace_back(1.0f / 0.0f, -1);
     }
-    return rst;
+    return collected;
 }
 
 void
@@ -561,6 +632,53 @@ CachedSearchIterator::Init(const SearchInfo& search_info) {
             ErrorCode::UnexpectedError,
             "Number of queries is greater than 1, cannot initialize iterator");
     }
+}
+
+std::optional<PkType>
+CachedSearchIterator::DecodePkValue(
+    const std::optional<std::string>& raw,
+    const std::optional<milvus::DataType>& pk_type) {
+    if (!raw.has_value() || raw->empty() || !pk_type.has_value()) {
+        return std::nullopt;
+    }
+    switch (*pk_type) {
+        case DataType::INT64: {
+            if (raw->size() != sizeof(int64_t)) {
+                return std::nullopt;
+            }
+            // 8-byte big-endian.
+            uint64_t be = 0;
+            for (size_t i = 0; i < sizeof(int64_t); ++i) {
+                be = (be << 8) | static_cast<uint8_t>((*raw)[i]);
+            }
+            return PkType{static_cast<int64_t>(be)};
+        }
+        case DataType::VARCHAR:
+        case DataType::STRING: {
+            return PkType{*raw};
+        }
+        default: {
+            return std::nullopt;
+        }
+    }
+}
+
+int
+CachedSearchIterator::ComparePk(const PkType& lhs, const PkType& rhs) {
+    if (std::holds_alternative<int64_t>(lhs) &&
+        std::holds_alternative<int64_t>(rhs)) {
+        auto l = std::get<int64_t>(lhs);
+        auto r = std::get<int64_t>(rhs);
+        return l < r ? -1 : (l > r ? 1 : 0);
+    }
+    if (std::holds_alternative<std::string>(lhs) &&
+        std::holds_alternative<std::string>(rhs)) {
+        const auto& l = std::get<std::string>(lhs);
+        const auto& r = std::get<std::string>(rhs);
+        return l < r ? -1 : (l > r ? 1 : 0);
+    }
+    // Mixed/monostate pks: order monostate first, then int64, then string.
+    return lhs.index() < rhs.index() ? -1 : (lhs.index() > rhs.index() ? 1 : 0);
 }
 
 }  // namespace milvus::query

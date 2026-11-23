@@ -16,6 +16,7 @@
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "index/contracts/query/IVectorReader.h"
+#include "query/CachedSearchIterator.h"
 #include "query/helper.h"
 
 namespace milvus::query {
@@ -26,6 +27,7 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
               const SearchInfo& search_conf,
               const BitsetView& bitset,
               SearchResult& search_result,
-              bool is_sparse = false);
+              bool is_sparse = false,
+              PkAccessor pk_accessor = nullptr);
 
 }  // namespace milvus::query

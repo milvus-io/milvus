@@ -24,6 +24,7 @@
 #include "common/protobuf_utils.h"
 #include "index/contracts/query/IVectorReader.h"
 #include "mmap/ChunkedColumnInterface.h"
+#include "query/CachedSearchIterator.h"
 
 namespace milvus::query {
 
@@ -35,7 +36,8 @@ SearchOnSealedIndex(const FieldMeta& field,
                     const size_t* query_offsets,
                     int64_t num_queries,
                     const BitsetView& view,
-                    SearchResult& search_result);
+                    SearchResult& search_result,
+                    PkAccessor pk_accessor = nullptr);
 
 void
 SearchOnSealedColumn(const FieldMeta& field,
@@ -48,7 +50,8 @@ SearchOnSealedColumn(const FieldMeta& field,
                      int64_t row_count,
                      const BitsetView& bitset,
                      milvus::OpContext* op_context,
-                     SearchResult& result);
+                     SearchResult& result,
+                     PkAccessor pk_accessor = nullptr);
 
 inline void
 SearchOnSealedIndex(const Schema& schema,
@@ -58,9 +61,17 @@ SearchOnSealedIndex(const Schema& schema,
                     const size_t* offsets,
                     int64_t nq,
                     const BitsetView& bits,
-                    SearchResult& result) {
-    SearchOnSealedIndex(
-        schema[info.field_id_], reader, info, data, offsets, nq, bits, result);
+                    SearchResult& result,
+                    PkAccessor pk_accessor = nullptr) {
+    SearchOnSealedIndex(schema[info.field_id_],
+                        reader,
+                        info,
+                        data,
+                        offsets,
+                        nq,
+                        bits,
+                        result,
+                        std::move(pk_accessor));
 }
 
 inline void
@@ -74,7 +85,8 @@ SearchOnSealedColumn(const Schema& schema,
                      int64_t rows,
                      const BitsetView& bits,
                      milvus::OpContext* ctx,
-                     SearchResult& result) {
+                     SearchResult& result,
+                     PkAccessor pk_accessor = nullptr) {
     SearchOnSealedColumn(schema[info.field_id_],
                          column,
                          info,
@@ -85,7 +97,8 @@ SearchOnSealedColumn(const Schema& schema,
                          rows,
                          bits,
                          ctx,
-                         result);
+                         result,
+                         std::move(pk_accessor));
 }
 
 }  // namespace milvus::query

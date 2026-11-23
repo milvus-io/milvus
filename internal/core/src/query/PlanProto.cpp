@@ -265,6 +265,15 @@ ProtoParser::ParseSearchInfo(const planpb::VectorANNS& anns_proto) {
             search_info.iterator_v2_info_->last_bound =
                 iterator_v2_info_proto.last_bound();
         }
+        if (iterator_v2_info_proto.has_last_primary_key()) {
+            search_info.iterator_v2_info_->last_primary_key =
+                iterator_v2_info_proto.last_primary_key();
+        }
+        if (iterator_v2_info_proto.has_primary_key_type()) {
+            search_info.iterator_v2_info_->primary_key_type =
+                static_cast<milvus::DataType>(
+                    iterator_v2_info_proto.primary_key_type());
+        }
     }
 
     return search_info;
