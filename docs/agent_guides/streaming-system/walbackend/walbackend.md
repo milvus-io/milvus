@@ -47,6 +47,13 @@ Other historical handles are retained until auto closes; there is no idle evicti
 The current handle is not duplicated in the historical map, and every owned
 handle closes once.
 
+Woodpecker's physical RO adapter retains its LogHandle while opening readers and
+while scanners remain alive. RO Close rejects new readers but defers releasing
+the LogHandle until the last scanner closes. This stops the SDK's background
+cleanup goroutine without interrupting historical scans during RO-to-RW
+replacement. A failed writer open closes the newly acquired LogHandle before
+returning the original error; auto's retry policy is unchanged.
+
 Physical Open runs outside the current-writer mutex and serializes acquisition
 to avoid duplicate writers fencing one another. Waiting for acquisition is
 cancellable, so closing a reader does not wait for another caller's slow Open.

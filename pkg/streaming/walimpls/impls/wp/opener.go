@@ -42,6 +42,10 @@ func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimp
 		p, err = l.OpenLogWriter(ctx)
 		if err != nil {
 			mlog.Error(ctx, "failed to open log writer", mlog.String("log_name", opt.Channel.Name), mlog.Err(err))
+			// A failed writer never takes ownership of the log handle.
+			if closeErr := l.Close(context.Background()); closeErr != nil {
+				mlog.Warn(ctx, "failed to close log after writer open failure", mlog.String("log_name", opt.Channel.Name), mlog.Err(closeErr))
+			}
 			return nil, err
 		}
 		mlog.Info(ctx, "finish to open log writer", mlog.String("log_name", opt.Channel.Name))

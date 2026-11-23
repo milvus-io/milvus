@@ -43,10 +43,16 @@ map. RO handles are never used for append: when a backend previously opened for
 historical reads becomes the writer, acquire an RW handle, replace the cached RO
 handle and close it. Physical RO handles do not own shared opener resources or
 scanner connections; existing scanners continue independently and close their own
-resources on handoff or subscription shutdown. A failed RW open leaves the RO
+resources on handoff or subscription shutdown. The Woodpecker adapter pins its
+RO LogHandle during reader creation and for each scanner's lifetime. Retiring
+the RO owner rejects new readers and releases the LogHandle after the last
+scanner closes, including failed reader-open cleanup. A failed writer open
+closes its newly acquired LogHandle without changing the returned error or
+retry policy. A failed RW open leaves the RO
 handle in place. A prepared target is owned by the map until selected as current.
 Other historical handles remain cached for reuse until auto closes, which closes
-them and current exactly once. There is no idle eviction or reference counting.
+them and current exactly once. Auto has no idle eviction or reference counting;
+the Woodpecker reader pins stay within its physical adapter.
 A reader-only auto has an RO current handle and does not admit writes.
 
 ## Durable link and target position
@@ -222,6 +228,17 @@ WAB eviction may fall back through an old LastConfirmed
 and follow the same chain. Missing retained history is an error, not permission
 to jump to the current writer. Truncation uses the checkpoint's backend and never
 invalidates an uncompleted recovery prefix merely because writes switched.
+
+Operations must keep the backends and records required by supported historical
+and resume positions readable. Returning to A after A-to-B-to-A does not make B
+safe to decommission: a recovery probe can carry an older LastConfirmed position,
+and a consumer reconnecting from it traverses B again before TimeTick filtering
+discards already processed messages. This extra replay is accepted for the
+maintenance operation; no probe-specific resume compatibility path is added.
+Retired Woodpecker tails may remain stored when no subsequent Truncate reaches
+them. Their storage cost is accepted for historical-read safety; reclamation
+requires a separate lifecycle policy, not a final truncate inferred solely from
+the RecoveryStorage checkpoint crossing a backend boundary.
 
 ## Startup recovery
 

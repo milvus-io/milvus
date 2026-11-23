@@ -2,6 +2,7 @@ package wp
 
 import (
 	"context"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/zilliztech/woodpecker/common/werr"
@@ -23,6 +24,11 @@ type walImpl struct {
 	*helper.WALHelper
 	p wp.LogWriter
 	l wp.LogHandle
+
+	// RO handles can be retired while their scanners are still consuming.
+	mu      sync.Mutex
+	closed  bool
+	readers int
 }
 
 func (w *walImpl) WALName() message.WALName {
@@ -76,11 +82,25 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (walimpls.S
 		from.EntryId = id.logMsgId.EntryId + 1
 	}
 
+	var release func()
+	if w.p == nil {
+		w.mu.Lock()
+		if w.closed {
+			w.mu.Unlock()
+			return nil, merr.WrapErrServiceUnavailableMsg("woodpecker read-only WAL closed")
+		}
+		w.readers++
+		w.mu.Unlock()
+		release = w.releaseReader
+	}
 	reader, err := w.l.OpenLogReader(ctx, &from, opt.Name)
 	if err != nil {
+		if release != nil {
+			release()
+		}
 		return nil, err
 	}
-	return newScanner(opt.Name, reader), nil
+	return newScanner(opt.Name, reader, release), nil
 }
 
 func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {
@@ -93,10 +113,37 @@ func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {
 
 func (w *walImpl) Close() {
 	if w.p == nil {
+		w.mu.Lock()
+		if w.closed {
+			w.mu.Unlock()
+			return
+		}
+		w.closed = true
+		closeLog := w.readers == 0
+		w.mu.Unlock()
+		if closeLog {
+			w.closeLog()
+		}
 		return
 	}
 	closeWriterErr := w.p.Close(context.Background())
 	if closeWriterErr != nil {
 		w.Log().Warn(context.TODO(), "close woodpecker writer err", mlog.Err(closeWriterErr))
+	}
+}
+
+func (w *walImpl) releaseReader() {
+	w.mu.Lock()
+	w.readers--
+	closeLog := w.closed && w.readers == 0
+	w.mu.Unlock()
+	if closeLog {
+		w.closeLog()
+	}
+}
+
+func (w *walImpl) closeLog() {
+	if err := w.l.Close(context.Background()); err != nil {
+		w.Log().Warn(context.TODO(), "close woodpecker log handle err", mlog.Err(err))
 	}
 }

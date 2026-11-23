@@ -10,6 +10,7 @@ import (
 	"github.com/zilliztech/woodpecker/woodpecker"
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -29,20 +30,37 @@ func TestReadOnlyOpenPreservesWriter(t *testing.T) {
 	opt := &walimpls.OpenOption{Channel: types.PChannelInfo{Name: uniqueWpPChannel("auto-tail"), Term: 1, AccessMode: types.AccessModeRW}}
 	w, err := o.Open(ctx, opt)
 	require.NoError(t, err)
-	_, err = w.Append(ctx, message.CreateTestEmptyInsertMesage(1, nil))
+	first, err := w.Append(ctx, message.CreateTestEmptyInsertMesage(1, nil))
 	require.NoError(t, err)
 	roOpt := *opt
 	roOpt.Channel.AccessMode = types.AccessModeRO
 	reader, err := o.Open(ctx, &roOpt)
 	require.NoError(t, err)
 	require.Nil(t, reader.(*walImpl).p, "historical scanner must not acquire/fence a writer")
+	s, err := reader.Read(ctx, walimpls.ReadOption{DeliverPolicy: options.DeliverPolicyStartFrom(first)})
+	require.NoError(t, err)
+	defer s.Close()
 	reader.Close()
-	_, err = w.Append(ctx, message.CreateTestEmptyInsertMesage(1, nil))
+	second, err := w.Append(ctx, message.CreateTestEmptyInsertMesage(2, nil))
 	require.NoError(t, err, "opening/closing read-only handle cannot fence the active writer")
 	w.Close()
 	w, err = o.Open(ctx, opt)
 	require.NoError(t, err)
 	defer w.Close()
+	third, err := w.Append(ctx, message.CreateTestEmptyInsertMesage(3, nil))
+	require.NoError(t, err)
+	for _, id := range []message.MessageID{first, second, third} {
+		select {
+		case msg, ok := <-s.Chan():
+			require.True(t, ok, "retiring the RO owner must not interrupt its scanner")
+			require.True(t, id.EQ(msg.MessageID()))
+		case <-ctx.Done():
+			t.Fatal("historical scanner stalled after RO close and writer replacement")
+		}
+	}
+	require.NoError(t, s.Close())
+	_, err = w.Append(ctx, message.CreateTestEmptyInsertMesage(4, nil))
+	require.NoError(t, err, "releasing the retired RO log cannot fence the replacement writer")
 	// Metadata and fencing failures must not yield a usable handle.
 	client := o.(*openerImpl).c
 	patch := mockey.Mock(mockey.GetMethod(client, "LogExists")).Return(false, context.DeadlineExceeded).Build()

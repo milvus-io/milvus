@@ -206,7 +206,8 @@ func (w *WAL) Truncate(ctx context.Context, id message.MessageID) error {
 		return err
 	}
 	// Historical read handles must not acquire a writer just to perform GC.
-	// Retention remains responsible for those logs until an owned handle exists.
+	// Retired tails may remain stored; reclaiming them needs a separate policy
+	// that accounts for historical readers, not just the recovery checkpoint.
 	if b.Channel().AccessMode != types.AccessModeRW {
 		return nil
 	}
