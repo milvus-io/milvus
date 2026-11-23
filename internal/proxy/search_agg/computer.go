@@ -377,7 +377,7 @@ func (c *SearchAggregationComputer) updateMetrics(bucket *bucketState, ref reduc
 		}
 
 		if err := plan.aggregate.UpdateState(targets, agg.NewFieldValue(raw)); err != nil {
-			return merr.WrapErrServiceInternalMsg("metric %q update failed: %v", plan.alias, err)
+			return merr.Wrapf(err, "metric %q update failed", plan.alias)
 		}
 	}
 	return nil
@@ -442,7 +442,7 @@ func finalizeMetrics(plans []metricPlan, states map[string][]*agg.FieldValue) (m
 		}
 		value, err := plan.aggregate.Terminate(slots)
 		if err != nil {
-			return nil, merr.WrapErrServiceInternalMsg("metric %q: %v", plan.alias, err)
+			return nil, merr.Wrapf(err, "metric %q", plan.alias)
 		}
 		metrics[plan.alias] = value
 	}

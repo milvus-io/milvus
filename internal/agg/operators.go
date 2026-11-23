@@ -24,6 +24,14 @@ func terminateAvg(slots []*FieldValue) (any, error) {
 	if sum == nil || count == nil || sum.IsNull() || count.IsNull() {
 		return nil, nil
 	}
+	if countI, ok := integerValue(count.Value()); ok {
+		if countI == 0 {
+			return nil, nil
+		}
+		if result, ok := integerAverage(sum.Value(), countI); ok {
+			return result, nil
+		}
+	}
 	sumF, err := fieldValueToFloat64(sum.Value())
 	if err != nil {
 		return nil, err
@@ -81,11 +89,15 @@ func (sum *SumAggregate) UpdateState(slots []*FieldValue, new *FieldValue) error
 	if len(slots) != 1 {
 		return merr.WrapErrParameterInvalidMsg("aggregate expects 1 accumulator slot, got %d", len(slots))
 	}
-	return sum.Update(slots[0], new)
+	return accumulateNumericState(slots[0], new)
 }
 
 func (sum *SumAggregate) Terminate(slots []*FieldValue) (any, error) {
-	return terminateSingleSlot(slots)
+	value, err := terminateSingleSlot(slots)
+	if err != nil {
+		return nil, err
+	}
+	return finalizeNumericSum(value)
 }
 
 func (sum *SumAggregate) ToPB() *planpb.Aggregate {
@@ -176,7 +188,7 @@ func (avg *AvgAggregate) UpdateState(slots []*FieldValue, new *FieldValue) error
 	if len(slots) != 2 {
 		return merr.WrapErrParameterInvalidMsg("avg expects 2 accumulator slots, got %d", len(slots))
 	}
-	if err := avg.sum.Update(slots[0], new); err != nil {
+	if err := avg.sum.UpdateState(slots[:1], new); err != nil {
 		return err
 	}
 	if new == nil || new.IsNull() {

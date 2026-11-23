@@ -293,6 +293,10 @@ var (
 	// retired or became unavailable. It does not imply collection release.
 	ErrQueryViewNotReady = newMilvusError("query view not ready", 2202, true)
 
+	// The aggregate result cannot be represented by the response type. This is
+	// a non-retryable execution failure, not a malformed request parameter.
+	ErrAggregateOverflow = newMilvusError("aggregate result overflow", 2203, false)
+
 	// Compaction
 	ErrCompactionReadDeltaLogErr                  = newMilvusError("fail to read delta log", 2300, false)
 	ErrIllegalCompactionPlan                      = newMilvusError("compaction plan illegal", 2301, false)
