@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
@@ -181,12 +182,8 @@ func (c *consumerImpl) recvLoop() (err error) {
 				if c.txnBuilder != nil {
 					panic("unreachable code: txn builder should be nil if we receive a non-txn message")
 				}
-				if result := c.msgHandler.Handle(message.HandleParam{
-					Ctx:     c.ctx,
-					Message: newImmutableMsg,
-				}); result.Error != nil {
-					c.logger.Warn("message handle canceled", zap.Error(err))
-					return errors.Wrapf(result.Error, "At Handler")
+				if err := c.handleMessage(newImmutableMsg); err != nil {
+					return err
 				}
 			}
 		case *streamingpb.ConsumeResponse_Close:
@@ -251,13 +248,7 @@ func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) error {
 			c.logger.Warn("failed to build txn message", zap.Any("messageID", commitMsg.MessageID()), zap.Error(err))
 			return nil
 		}
-		if result := c.msgHandler.Handle(message.HandleParam{
-			Ctx:     c.ctx,
-			Message: msg,
-		}); result.Error != nil {
-			c.logger.Warn("message handle canceled at txn", zap.Error(result.Error))
-			return errors.Wrapf(result.Error, "At Handler Of Txn")
-		}
+		return c.handleMessage(msg)
 	default:
 		if c.txnBuilder == nil {
 			panic("unreachable code: txn builder should not be nil if we receive a non-begin txn message")
@@ -265,4 +256,18 @@ func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) error {
 		c.txnBuilder.Add(msg)
 	}
 	return nil
+}
+
+func (c *consumerImpl) handleMessage(msg message.ImmutableMessage) error {
+	param := message.HandleParam{Ctx: c.ctx, Message: msg}
+	for {
+		result := c.msgHandler.Handle(param)
+		if result.Error != nil {
+			return merr.Wrapf(result.Error, "handle %s message", msg.MessageType())
+		}
+		if result.MessageHandled {
+			return nil
+		}
+		// The handler drained an older pending pack. Offer the same message again.
+	}
 }
