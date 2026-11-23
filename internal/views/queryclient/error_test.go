@@ -178,9 +178,13 @@ func TestPublicQueryEntrypointsNormalizeEarlyErrors(t *testing.T) {
 func TestToMilvusErrorFormatsRPCContext(t *testing.T) {
 	for _, tc := range []struct{ method, role, prefix string }{
 		{viewpb.ViewQueryService_SearchOnView_FullMethodName, "querynode", "fail to search on QueryNode 11: "},
+		{viewpb.ViewQueryService_SearchOnViewStream_FullMethodName, "querynode", "fail to search on QueryNode 11: "},
 		{viewpb.ViewQueryService_QueryOnView_FullMethodName, "querynode", "fail to query on QueryNode 11: "},
+		{viewpb.ViewQueryService_QueryOnViewStream_FullMethodName, "querynode", "fail to query on QueryNode 11: "},
 		{viewpb.ViewQueryService_StatisticsOnView_FullMethodName, "querynode", "fail to get statistics on QueryNode 11: "},
 		{viewpb.ViewQueryService_SearchOnView_FullMethodName, "streamingnode", "fail to search on StreamingNode 11: "},
+		{viewpb.ViewQueryService_SearchOnViewStream_FullMethodName, "streamingnode", "fail to search on StreamingNode 11: "},
+		{viewpb.ViewQueryService_QueryOnViewStream_FullMethodName, "streamingnode", "fail to query on StreamingNode 11: "},
 		{viewpb.QueryPlanService_GetQueryPlan_FullMethodName, "streamingnode", "fail to get query plan on StreamingNode 11: "},
 		{viewpb.QueryPlanService_GetMVCCTimestamp_FullMethodName, "streamingnode", "fail to get MVCC timestamp on StreamingNode 11: "},
 		{"unknown", "querynode", ""},
