@@ -1235,6 +1235,11 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	// Use the dbName parameter (resolved from the request) for consistency
 	// with resp.DbName; the model's DBName may not always be in sync.
 	resp.Schema.DbName = dbName
+	// Hide legacy create-only directives (such as preserve_field_ids persisted
+	// on v3.0.0–v3.0.6) from DescribeCollection and snapshots without mutating
+	// collInfo.Properties in MetaTable.
+	properties := stripCreateOnlyProperties(collInfo.Properties)
+	resp.Schema.Properties = properties
 	resp.CollectionID = collInfo.CollectionID
 	resp.VirtualChannelNames = collInfo.VirtualChannelNames
 	resp.PhysicalChannelNames = collInfo.PhysicalChannelNames
@@ -1251,7 +1256,7 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	resp.Aliases = aliases
 	resp.StartPositions = collInfo.StartPositions
 	resp.CollectionName = resp.Schema.Name
-	resp.Properties = collInfo.Properties
+	resp.Properties = properties
 	resp.NumPartitions = int64(len(collInfo.Partitions))
 	resp.DbId = collInfo.DBID
 	resp.UpdateTimestamp = collInfo.UpdateTimestamp

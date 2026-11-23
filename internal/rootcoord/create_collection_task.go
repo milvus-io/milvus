@@ -462,10 +462,12 @@ func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema 
 			{Key: common.MaxLengthKey, Value: fmt.Sprintf("%d", paramtable.Get().ProxyCfg.MaxVarCharLength.GetAsInt())},
 		},
 	})
-	t.Req.Properties = append(t.Req.Properties, &commonpb.KeyValuePair{
-		Key:   common.PartitionKeyIsolationKey,
-		Value: "true",
-	})
+	if !hasIsolation {
+		t.Req.Properties = append(t.Req.Properties, &commonpb.KeyValuePair{
+			Key:   common.PartitionKeyIsolationKey,
+			Value: "true",
+		})
+	}
 	mlog.Info(ctx, "added namespace field",
 		mlog.String("collectionName", t.Req.CollectionName),
 		mlog.String("fieldName", common.NamespaceFieldName))
@@ -593,19 +595,20 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 		return err
 	}
 
-	// if schema comes from restore snapshot
+	// if schema comes from restore snapshot or preserve_field_ids=true
 	preservedDynamicFieldID := int64(-1)
 	preservedNamespaceFieldID := int64(-1)
 	if t.preserveFieldID {
-		mlog.Info(ctx, "preserve field IDs from schema during create collection", mlog.String("collection", t.Req.CollectionName))
+		mlog.Info(ctx, "preserve field IDs from schema during create collection", mlog.FieldCollectionName(t.Req.CollectionName))
+		if err := validatePreservedFieldIDs(t.body.CollectionSchema); err != nil {
+			return err
+		}
+		if err := validatePreservedMaxFieldID(t.Req.GetProperties()); err != nil {
+			return err
+		}
 		fields := make([]*schemapb.FieldSchema, 0)
 		// filter out system fields
 		for _, field := range t.body.CollectionSchema.Fields {
-			if field.Name != RowIDFieldName && field.GetFieldID() == 0 {
-				mlog.Info(context.TODO(), "field id 0 is not allowed when preserve field ids", mlog.String("field", field.Name))
-				return merr.WrapErrParameterInvalidMsg("field id 0 is not allowed when preserve field ids, field: %s", field.Name)
-			}
-
 			if field.GetName() == MetaFieldName {
 				preservedDynamicFieldID = field.GetFieldID()
 				continue
@@ -641,14 +644,22 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	if t.preserveFieldID {
 		// cause dynamic field is system field without internal id allocation
 		// we need to restore its field id here
+		namespaceCreated := false
 		for _, field := range t.body.CollectionSchema.Fields {
 			if field.GetName() == MetaFieldName {
 				field.FieldID = preservedDynamicFieldID
 			}
 
 			if field.GetName() == NamespaceFieldName {
+				namespaceCreated = true
 				field.FieldID = preservedNamespaceFieldID
 			}
+		}
+		if err := checkPreservedNamespaceFieldID(namespaceCreated, preservedNamespaceFieldID); err != nil {
+			return err
+		}
+		if err := resolvePreservedFunctionFieldIDs(t.body.CollectionSchema); err != nil {
+			return err
 		}
 	} else {
 		if err := t.assignFieldAndFunctionID(t.body.CollectionSchema); err != nil {
@@ -665,8 +676,10 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
 	}
 
-	// Set properties for persistent
-	t.body.CollectionSchema.Properties = updateMaxFieldIDProperty(t.Req.GetProperties(), maxAssignedFieldIDFromSchema(t.body.CollectionSchema))
+	// Set persistent collection properties. Request-only directives such as
+	// preserve_field_ids are stripped before entering the WAL message.
+	persistedProperties := stripCreateOnlyProperties(t.Req.GetProperties())
+	t.body.CollectionSchema.Properties = updateMaxFieldIDProperty(persistedProperties, maxAssignedFieldIDFromSchema(t.body.CollectionSchema))
 	t.body.CollectionSchema.Version = 0
 	t.appendSysFields(t.body.CollectionSchema)
 	return nil
@@ -804,7 +817,7 @@ func (t *createCollectionTask) validateIfCollectionExists(ctx context.Context) e
 	existedCollInfo, err := t.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err == nil {
 		newCollInfo := newCollectionModel(t.header, t.body, 0)
-		if !existedCollInfo.Equal(*newCollInfo) && !t.matchesExistingMilvusTable(existedCollInfo, newCollInfo) {
+		if !existedCollInfo.Equal(*newCollInfo) && !t.matchesPreUpgradePreservedCollection(existedCollInfo, newCollInfo) && !t.matchesExistingMilvusTable(existedCollInfo, newCollInfo) {
 			return merr.WrapErrParameterInvalidMsg("create duplicate collection with different parameters, collection: %s", t.Req.GetCollectionName())
 		}
 		return errIgnoredCreateCollection
@@ -813,7 +826,8 @@ func (t *createCollectionTask) validateIfCollectionExists(ctx context.Context) e
 }
 
 func (t *createCollectionTask) matchesExistingMilvusTable(existing, candidate *model.Collection) bool {
-	if !typeutil.NewStorageColumnResolver(t.body.GetCollectionSchema()).IsMilvusTable() ||
+	if t.preserveFieldID ||
+		!typeutil.NewStorageColumnResolver(t.body.GetCollectionSchema()).IsMilvusTable() ||
 		existing.ExternalSource != candidate.ExternalSource ||
 		existing.ExternalSpec != candidate.ExternalSpec ||
 		len(existing.Fields) != len(candidate.Fields) {
