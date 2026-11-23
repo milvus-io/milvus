@@ -1,3 +1,5 @@
+use icu_properties::props::{ExtendedPictographic, RegionalIndicator};
+use icu_properties::CodePointSetData;
 use icu_segmenter::options::WordBreakOptions;
 use icu_segmenter::WordSegmenter;
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
@@ -48,11 +50,15 @@ impl IcuTokenizer {
 
     fn tokenize(&self, text: &str) -> Vec<Token> {
         let segmenter = self.segmenter.as_borrowed();
+        let pictographs = CodePointSetData::new::<ExtendedPictographic>();
+        let regional_indicators = CodePointSetData::new::<RegionalIndicator>();
         let mut tokens = Vec::new();
         let mut offset_from = 0;
         for offset_to in segmenter.segment_str(text).skip(1) {
             let segment = &text[offset_from..offset_to];
-            if segment.chars().any(char::is_alphanumeric) {
+            if segment.chars().any(|ch| {
+                ch.is_alphanumeric() || pictographs.contains(ch) || regional_indicators.contains(ch)
+            }) {
                 tokens.push(Token {
                     text: segment.to_string(),
                     offset_from,
@@ -79,11 +85,26 @@ impl Tokenizer for IcuTokenizer {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Range;
+
     use tantivy::tokenizer::{TokenStream, Tokenizer};
+
+    fn assert_tokens(input: &str, expected: &[(&str, usize, usize, Range<usize>)]) {
+        let mut tokenizer = super::IcuTokenizer::new();
+        let mut stream = tokenizer.token_stream(input);
+        for (text, position, position_length, offsets) in expected {
+            assert!(stream.advance(), "missing {text:?} in {input:?}");
+            let token = stream.token();
+            assert_eq!(token.text, *text, "{input:?}");
+            assert_eq!(token.position, *position, "{input:?}");
+            assert_eq!(token.position_length, *position_length, "{input:?}");
+            assert_eq!(&(token.offset_from..token.offset_to), offsets, "{input:?}");
+        }
+        assert!(!stream.advance(), "extra token in {input:?}");
+    }
 
     #[test]
     fn test_icu_word_positions_and_offsets() {
-        let mut tokenizer = super::IcuTokenizer::new();
         for (input, expected) in [
             (
                 "home  workout",
@@ -96,24 +117,31 @@ mod tests {
             (" \t!?", [].as_slice()),
             ("", [].as_slice()),
         ] {
-            let mut stream = tokenizer.token_stream(input);
-            let mut tokens = Vec::new();
-            while stream.advance() {
-                tokens.push(stream.token().clone());
-            }
-            let actual: Vec<_> = tokens
-                .iter()
-                .map(|token| {
-                    (
-                        token.text.as_str(),
-                        token.position,
-                        token.position_length,
-                        token.offset_from..token.offset_to,
-                    )
-                })
-                .collect();
-            assert_eq!(actual, expected, "{input:?}");
+            assert_tokens(input, expected);
         }
+    }
+
+    #[test]
+    fn test_icu_emoji_positions_and_offsets() {
+        assert_tokens(
+            "love it 😍🔥 so good",
+            &[
+                ("love", 0, 1, 0..4),
+                ("it", 1, 1, 5..7),
+                ("😍", 2, 1, 8..12),
+                ("🔥", 3, 1, 12..16),
+                ("so", 4, 1, 17..19),
+                ("good", 5, 1, 20..24),
+            ],
+        );
+        assert_tokens(
+            "👩🏽‍💻 👍🏽 🇹🇭",
+            &[
+                ("👩🏽‍💻", 0, 1, 0..15),
+                ("👍🏽", 1, 1, 16..24),
+                ("🇹🇭", 2, 1, 25..33),
+            ],
+        );
     }
 
     #[test]
