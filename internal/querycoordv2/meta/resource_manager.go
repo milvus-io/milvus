@@ -1258,9 +1258,11 @@ func (rm *ResourceManager) CheckNodesInResourceGroup(ctx context.Context) {
 	defer rm.rwmutex.Unlock()
 
 	// clean stopping/offline nodes
+	// Use GetAllNodes (bypasses NodeFilter) so offline nodes absent from nodeMgr
+	// are not hidden by AcceptNode and still get unassigned from the RG.
 	assignedNodes := typeutil.NewUniqueSet()
 	for _, rg := range rm.groups {
-		for _, node := range rg.GetNodes() {
+		for _, node := range rg.GetAllNodes() {
 			assignedNodes.Insert(node)
 			info := rm.nodeMgr.Get(node)
 			if info == nil {

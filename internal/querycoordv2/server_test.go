@@ -1698,3 +1698,80 @@ func TestSessionAddEventReplacesNodeInResourceGroup(t *testing.T) {
 	assert.Equal(t, 0, downCalls)
 	assert.Equal(t, "rg1", rm.GetResourceGroupByNodeID(20))
 }
+
+func TestRewatchNodesColdStartWithNodeFilter(t *testing.T) {
+	ctx := context.Background()
+	catalog := metastoreMocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().GetResourceGroups(mock.Anything).Return([]*querypb.ResourceGroup{
+		{
+			Name: meta.DefaultResourceGroupName,
+			Config: &rgpb.ResourceGroupConfig{
+				Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
+				Limits:   &rgpb.ResourceGroupLimit{NodeNum: 10000},
+			},
+		},
+		{
+			Name:  "rg_filtered",
+			Nodes: []int64{10},
+			Config: &rgpb.ResourceGroupConfig{
+				Requests: &rgpb.ResourceGroupLimit{NodeNum: 1},
+				Limits:   &rgpb.ResourceGroupLimit{NodeNum: 1},
+				NodeFilter: &rgpb.ResourceGroupNodeFilter{
+					NodeLabels: []*commonpb.KeyValuePair{
+						{Key: "role", Value: "search"},
+					},
+				},
+			},
+		},
+	}, nil)
+	catalog.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	// Simulate QueryCoord cold start: nodeMgr is initially empty while rg_filtered still has node 10 persisted.
+	nodeMgr := session.NewNodeManager()
+	rm := meta.NewResourceManager(catalog, nodeMgr)
+	assert.NoError(t, rm.Recover(ctx))
+	assert.Equal(t, "rg_filtered", rm.GetResourceGroupByNodeID(10))
+
+	server := &Server{
+		ctx:                 ctx,
+		nodeMgr:             nodeMgr,
+		meta:                &meta.Meta{ResourceManager: rm},
+		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
+		qviewsRuntime:       &qviewsRuntime{},
+	}
+
+	oldSess := createTestSession(10, "10.0.0.1:21123", false)
+	oldSess.ServerLabels = map[string]string{"role": "search"}
+	newSess := createTestSession(20, "10.0.0.1:21123", false)
+	newSess.ServerLabels = map[string]string{"role": "search"}
+
+	err := server.rewatchNodes(map[string]*sessionutil.Session{
+		"querynode-10": oldSess,
+		"querynode-20": newSess,
+	})
+	assert.NoError(t, err)
+
+	assert.Nil(t, nodeMgr.Get(10), "stale node 10 should not enter nodeMgr")
+	assert.NotNil(t, nodeMgr.Get(20), "newer node 20 should be added to nodeMgr")
+
+	rg := rm.GetResourceGroup(ctx, "rg_filtered")
+	assert.NotContains(t, rg.GetAllNodes(), int64(10), "stale node 10 must be evicted from rg_filtered physical nodes")
+	assert.Empty(t, rm.GetResourceGroupByNodeID(10))
+	assert.ElementsMatch(t, []int64{20}, rg.GetAllNodes())
+	assert.Equal(t, "rg_filtered", rm.GetResourceGroupByNodeID(20), "new node 20 should take the slot in rg_filtered")
+
+	// Delayed SessionDelEvent for node 10 must be a clean no-op.
+	downCalls := 0
+	mockRMDown := mockey.Mock((*meta.ResourceManager).HandleNodeDown).To(func(_ *meta.ResourceManager, _ context.Context, _ int64) {
+		downCalls++
+	}).Build()
+	defer mockRMDown.UnPatch()
+
+	server.handleSessionEvent(&sessionutil.SessionEvent{
+		EventType: sessionutil.SessionDelEvent,
+		Session:   oldSess,
+	})
+	assert.Equal(t, 0, downCalls)
+	assert.Equal(t, "rg_filtered", rm.GetResourceGroupByNodeID(20))
+}

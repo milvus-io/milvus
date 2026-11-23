@@ -780,7 +780,11 @@ func (s *Server) dedupSessionsByAddress(sessions map[string]*sessionutil.Session
 }
 
 // rewatchNodes is used to re-watch nodes when querycoord restart or reconnect to etcd
-// Note: may apply same node multiple times, so rewatchNodes must be idempotent
+// Note: may apply same node multiple times, so rewatchNodes must be idempotent.
+// If a newer same-address node shuts down gracefully (revoking its session) while an
+// already-evicted older node's etcd lease is still alive, a reconnect rewatchNodes may
+// transiently re-add the older node; the subsequent SessionDelEvent on lease expiry will
+// remove it cleanly because it is back in nodeMgr.
 func (s *Server) rewatchNodes(sessions map[string]*sessionutil.Session) error {
 	s.watchNodesMu.Lock()
 	defer s.watchNodesMu.Unlock()
