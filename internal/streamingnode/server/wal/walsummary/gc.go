@@ -123,7 +123,11 @@ func (m *Manager) GCOnce(ctx context.Context) error {
 	m.chunkIndex.removePrefix(len(released))
 	m.manifestVersion++
 	m.notifyReadersLocked()
-	task := &summaryGCTask{manager: m, chunks: released}
+	task := &summaryGCTask{
+		manager: m, chunks: released,
+		retirementVersion: m.manifestVersion, readers: m.readers,
+	}
+	m.readers = nil
 	m.gcTask = task
 	m.mu.Unlock()
 	m.scheduleManifest()
@@ -171,7 +175,11 @@ func (m *Manager) gcSnapshot() (*streamingpb.PChannelSummaryManifest, error) {
 type summaryGCTask struct {
 	manager *Manager
 	chunks  []*streamingpb.PChannelSummaryChunkRef
-	done    atomic.Bool
+	// Only one truncate is pending. Earlier epochs have already drained before
+	// this batch is created; later readers cannot acquire this retired prefix.
+	retirementVersion uint64
+	readers           *atomic.Int64
+	done              atomic.Bool
 }
 
 func (t *summaryGCTask) Done() bool { return t.done.Load() }
@@ -179,7 +187,7 @@ func (t *summaryGCTask) Execute(ctx context.Context) error {
 	if t.Done() {
 		return nil
 	}
-	if _, err := t.manager.gcSnapshot(); err != nil {
+	if err := t.ready(); err != nil {
 		t.done.Store(!errors.Is(err, nodescheduler.ErrDelay))
 		return err
 	}
@@ -200,6 +208,40 @@ func (t *summaryGCTask) Execute(ctx context.Context) error {
 	}
 	t.done.Store(true)
 	return nil
+}
+
+// ready waits for this truncate, not for subsequent appends to be published or
+// subsequent suffix readers to finish. Neither can revive a retired prefix.
+func (t *summaryGCTask) ready() error {
+	m := t.manager
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.terminalErr != nil {
+		return m.terminalErr
+	}
+	if !m.manifestPublished || m.publishedVersion < t.retirementVersion ||
+		(t.readers != nil && t.readers.Load() != 0) {
+		return nodescheduler.ErrDelay
+	}
+	return nil
+}
+
+// pinRead registers before acquiring any object references. A truncate between
+// registration and snapshot acquisition only makes the batch wait conservatively.
+// The returned release must run after all shared object loads have joined.
+func (m *Manager) pinRead() func() {
+	m.readMu.RLock()
+	m.mu.Lock()
+	if m.readers == nil {
+		m.readers = &atomic.Int64{}
+	}
+	readers := m.readers
+	readers.Add(1)
+	m.mu.Unlock()
+	return func() {
+		readers.Add(-1)
+		m.readMu.RUnlock()
+	}
 }
 
 type summaryOrphanGCTask struct {

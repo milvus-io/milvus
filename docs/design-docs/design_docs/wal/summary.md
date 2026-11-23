@@ -375,7 +375,9 @@ The old `streaming.summary.maxBytesPerPChannel` key and internal chunk-count pol
 are removed, with no compatibility fallback. Configuration is captured at WAL open.
 Nonpositive GC intervals disable the respective loop; zero bytes/duration remove
 that retention floor, never the DataView, idempotency or publication protections.
-Production wiring clamps negative byte/duration values to zero. GC runs in a
+Byte capacity accepts a nonnegative integer with an optional binary K/KB, M/MB
+or G/GB suffix; invalid or overflowing values prevent WAL opening instead of
+silently becoming zero. Production wiring clamps negative duration values to zero. GC runs in a
 separate cancellable worker, independently of persistence and incoming traffic.
 
 Publication is scheduled independently of the RecoveryStorage checkpoint tick.
@@ -413,6 +415,22 @@ Stop on the first failed condition; never skip a pinned chunk. The entire scan
 produces one retirement list and one manifest revision, followed by asynchronous
 physical deletion of that list. Whole-chunk granularity can keep bytes above the
 configured floor indefinitely. No object-store orphan listing occurs in this path.
+
+Only one prefix deletion batch is pending at a time. Each batch records its
+retirement manifest version and the reader epoch active before truncation.
+Deletion requires that version (or a later one) to have been published and those
+readers to have exited. Later appends need not be published, and later suffix
+readers do not delay the batch. Transform and idempotency readers share this pin;
+all asynchronous loads finish before releasing it. Missing objects count as
+successful deletes, including object stores returning `ErrIoKeyNotFound`.
+
+Coord may omit a collection whose lock is held by a concurrent catalog update.
+The caller retains its previous DataView frontier or collection-origin pin for
+omitted entries. A blocked head chunk still blocks the entire suffix.
+
+Orphan scanning retains its independent periodic schedule and conservative
+global reader/publication checks. There is no startup sweep; repeated owner
+lifetimes shorter than its interval may starve orphan collection by design.
 
 Idempotency protection shares recovery's durable selection: walk newest chunks
 within `streaming.idempotency.ttlPerPChannel`, charging encoded Insert/Idempotency

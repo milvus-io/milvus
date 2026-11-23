@@ -21,6 +21,7 @@ import (
 	"math"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -58,9 +59,11 @@ type Manager struct {
 	dataViewRetention map[string]uint64 // per-VChannel exclusive starts; unknown channels stay at zero
 
 	mu sync.Mutex
-	// Readers pin a local snapshot against physical GC. Cross-owner fencing is
-	// deliberately left to the GC design TODO.
+	// Orphan scans require a globally drained reader snapshot. Prefix truncation
+	// instead rotates readers, so new suffix readers cannot starve its deletion.
+	// Cross-owner fencing is deliberately left to the GC design TODO.
 	readMu                sync.RWMutex
+	readers               *atomic.Int64 // current read epoch; rotated under mu at truncate
 	publishMu             sync.Mutex
 	cfg                   ManagerConfig
 	pending               []stagedRecord
@@ -528,8 +531,7 @@ func (m *Manager) ReadIdempotencyEntriesOfVChannels(
 	// separately, a flush completing in between would pop a sealed chunk from
 	// the queue after the manifest read missed it, and its records would be in
 	// neither half.
-	m.readMu.RLock()
-	defer m.readMu.RUnlock()
+	defer m.pinRead()()
 	m.mu.Lock()
 	inMemory := make(map[string][][]*stagedRecord, len(vchannels))
 	for _, vchannel := range vchannels {

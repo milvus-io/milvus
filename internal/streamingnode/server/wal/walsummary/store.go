@@ -272,7 +272,7 @@ func (s *Store) ReadIdempotencySectionsOfChunk(
 // object.
 func (s *Store) DeleteChunk(ctx context.Context, generation uint64, term int64) error {
 	key := buildChunkKey(s.chunkManager, s.pchannel, generation, term)
-	if err := s.chunkManager.Remove(ctx, key); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := s.chunkManager.Remove(ctx, key); err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, merr.ErrIoKeyNotFound) {
 		return merr.Wrapf(err, "failed to delete summary chunk %s", key)
 	}
 	return nil
@@ -437,7 +437,7 @@ func (s *Store) DeleteManifestsBelowTerm(ctx context.Context, belowTerm int64, c
 		if err != nil || term < 0 || term >= belowTerm || !orphanOldEnough(info.ModifyTime, cutoff) {
 			return true
 		}
-		if err := s.chunkManager.Remove(ctx, info.FilePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := s.chunkManager.Remove(ctx, info.FilePath); err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, merr.ErrIoKeyNotFound) {
 			deleteErr = merr.Wrapf(err, "failed to delete superseded summary manifest %s", info.FilePath)
 			return false
 		}

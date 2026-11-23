@@ -83,10 +83,13 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 	if err := conc.BlockOnAll(fVChannel, fSegment); err != nil {
 		return err
 	}
-	summaryManager := r.newSummaryManager(moduleapi.Runtime{
+	summaryManager, err := r.newSummaryManager(moduleapi.Runtime{
 		Scheduler: r.taskScheduler,
 		Notifier:  r,
 	})
+	if err != nil {
+		return err
+	}
 	if err := summaryManager.Restore(ctx); err != nil {
 		return merr.Wrap(err, "restore pchannel summary")
 	}

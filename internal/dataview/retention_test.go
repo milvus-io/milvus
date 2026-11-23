@@ -3,12 +3,41 @@ package dataview
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestDataViewRetentionSkipsLockedCollections(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m := newManager(t.Context(), &fakeDataViewCatalog{}, nil)
+		for _, event := range []CreateCollectionDataViewEvent{
+			{CollectionID: 1, VChannels: []string{"other_1v0"}, TransformStarts: map[string]uint64{"other_1v0": 10}},
+			{CollectionID: 2, VChannels: []string{"p_2v0"}, TransformStarts: map[string]uint64{"p_2v0": 20}},
+			{CollectionID: 3, VChannels: []string{"p_3v0"}, TransformStarts: map[string]uint64{"p_3v0": 30}},
+		} {
+			_, err := m.OnCreateCollection(t.Context(), event)
+			require.NoError(t, err)
+		}
+		m.states[1].mu.Lock()
+		m.states[2].mu.Lock()
+		done := make(chan map[string]uint64, 1)
+		go func() { done <- m.DataViewRetention("p") }()
+		synctest.Wait()
+		m.states[1].mu.Unlock()
+		m.states[2].mu.Unlock()
+		select {
+		case result := <-done:
+			require.Equal(t, map[string]uint64{"p_3v0": 30}, result)
+		default:
+			t.Fatal("retention RPC waited for a collection lock")
+		}
+		require.Equal(t, map[string]uint64{"p_2v0": 20, "p_3v0": 30}, m.DataViewRetention("p"))
+	})
+}
 
 func TestDataViewRetentionOldestVersion(t *testing.T) {
 	catalog := &fakeDataViewCatalog{}

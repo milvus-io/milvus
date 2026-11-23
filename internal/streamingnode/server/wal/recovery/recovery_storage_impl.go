@@ -316,7 +316,11 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 
 // newSummaryManager creates the pchannel-scoped WALSummary manager and wires
 // it to the recovery runtime.
-func (r *recoveryStorageImpl) newSummaryManager(runtime moduleapi.Runtime) *walsummary.Manager {
+func (r *recoveryStorageImpl) newSummaryManager(runtime moduleapi.Runtime) (*walsummary.Manager, error) {
+	retentionBytes, err := parseSummaryRetentionBytes(paramtable.Get().StreamingCfg.SummaryMaxRetentionBytes.GetValue())
+	if err != nil {
+		return nil, err
+	}
 	return walsummary.NewManager(walsummary.ManagerConfig{
 		PChannel: r.channel.Name,
 		Term:     r.channel.Term,
@@ -328,7 +332,7 @@ func (r *recoveryStorageImpl) newSummaryManager(runtime moduleapi.Runtime) *wals
 		Runtime:                runtime,
 		FlushMaxBytes:          uint64(paramtable.Get().StreamingCfg.FlushL0MaxSize.GetAsSize()),
 		CacheMaxBytes:          uint64(max(0, paramtable.Get().StreamingCfg.SummaryCacheBytesPerPChannel.GetAsSize())),
-		MaxRetentionBytes:      uint64(max(0, paramtable.Get().StreamingCfg.SummaryMaxRetentionBytes.GetAsSize())),
+		MaxRetentionBytes:      retentionBytes,
 		MaxRetentionDuration:   max(0, paramtable.Get().StreamingCfg.SummaryMaxRetentionDuration.GetAsDurationByParse()),
 		GCInterval:             paramtable.Get().StreamingCfg.SummaryGCIntervalDuration.GetAsDurationByParse(),
 		OrphanGCInterval:       paramtable.Get().StreamingCfg.SummaryOrphanGCIntervalDuration.GetAsDurationByParse(),
@@ -340,7 +344,7 @@ func (r *recoveryStorageImpl) newSummaryManager(runtime moduleapi.Runtime) *wals
 				r.onFatal(merr.Wrap(err, "WAL summary persistence stopped"))
 			}
 		},
-	})
+	}), nil
 }
 
 func (r *recoveryStorageImpl) NotifyModuleUpdated(moduleapi.ModuleName) {

@@ -64,8 +64,7 @@ func (m *Manager) ReadIdempotencyRecovery(ctx context.Context, config idempotenc
 		return nil, nil
 	}
 	from := idempotencyCutoff(now, config.TTL)
-	m.readMu.RLock()
-	defer m.readMu.RUnlock()
+	defer m.pinRead()()
 	hot, chunks := m.planIdempotencyRecovery(from, uint64(config.MaxSize))
 
 	out := &idempotencyview.RecoverySnapshot{VChannels: make(map[string]*idempotencyview.Snapshot)}

@@ -10501,7 +10501,7 @@ If the binary size of l0 segment is greater than this size, it will be flushed.`
 		Version:      "3.1.0",
 		DefaultValue: "4GB",
 		Export:       true,
-		Doc:          "Retained WALSummary object capacity per PChannel. Regular GC runs only above this size and never removes a whole chunk if the remaining size would fall below it. Applied when the WAL opens.",
+		Doc:          "Retained WALSummary object capacity per PChannel. Regular GC runs only above this size and never removes a whole chunk if the remaining size would fall below it. Nonnegative integer with optional binary K/KB, M/MB or G/GB suffix. Zero disables only the capacity floor; invalid values prevent WAL opening. Applied when the WAL opens.",
 	}
 	p.SummaryMaxRetentionBytes.Init(base.mgr)
 	p.SummaryMaxRetentionDuration = ParamItem{

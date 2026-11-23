@@ -19,7 +19,11 @@ func (m *dataViewManager) DataViewRetention(pchannel string) map[string]uint64 {
 
 	frontiers := make(map[string]uint64)
 	for _, state := range states {
-		state.mu.Lock()
+		if !state.mu.TryLock() {
+			// A flush may hold this lock across catalog I/O. Omit the collection:
+			// the caller keeps its previous (monotonic) frontier or origin pin.
+			continue
+		}
 		var oldest *versionEntry
 		for _, entry := range state.versions {
 			if oldest == nil || compareDataVersion(entry.view.GetDataVersion(), oldest.view.GetDataVersion()) < 0 {

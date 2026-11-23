@@ -12,6 +12,8 @@ import (
 )
 
 // These interface adapters are patched with mockey in tests of the new RPC.
+// generate-mockery-types filters their generated counterparts and EXPECT helpers
+// with scripts/mockery_adapter_filter, keeping these methods authoritative.
 func (*MixCoord) GetDataViewRetention(context.Context, *datapb.GetDataViewRetentionRequest) (*datapb.GetDataViewRetentionResponse, error) {
 	return nil, merr.Wrap(merr.ErrServiceUnimplemented, "GetDataViewRetention is not configured by this test")
 }
