@@ -311,6 +311,27 @@ func (s *NumCombineExprTestSuite) TestExecute_Sum() {
 	s.InDelta(3.5, result.Value(2), 0.001)
 }
 
+func (s *NumCombineExprTestSuite) TestExecute_DistanceBoost() {
+	scores := s.createFloat32ChunkedArray([]float32{-8, -8, -8, -8, -8, -8, 0})
+	defer scores.Release()
+	factors := s.createNullableFloat32ChunkedArray(
+		[]float32{4, 1, math.SmallestNonzeroFloat32, 0, -2, 0, 4},
+		[]bool{true, true, true, true, true, false, true},
+	)
+	defer factors.Release()
+
+	expr, err := NewNumCombineExpr(ModeMultiply, nil, WithDistanceBoost(), WithNullPolicy(NumCombineNullSkip))
+	s.Require().NoError(err)
+
+	outputs, err := expr.Execute(types.NewFuncContext(s.pool), []*arrow.Chunked{scores, factors})
+	s.Require().NoError(err)
+	defer outputs[0].Release()
+
+	result := outputs[0].Chunk(0).(*array.Float32)
+	s.Zero(result.NullN())
+	s.Equal([]float32{-2, -8, -math.MaxFloat32, 0, 16, -8, 0}, result.Float32Values())
+}
+
 func (s *NumCombineExprTestSuite) TestExecute_Max() {
 	col1 := s.createFloat32ChunkedArray([]float32{1.0, 5.0, 3.0})
 	defer col1.Release()

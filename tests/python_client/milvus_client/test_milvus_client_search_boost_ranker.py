@@ -659,13 +659,13 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
     def test_search_boost_ranker_l2_multiply_correctness(self):
         """
         target: verify boost_mode=multiply can improve a deterministic L2 result
-        method: multiply row 3's L2 distance by 0.25 to move it ahead of row 2
+        method: divide row 3's L2 distance by 4 to move it ahead of row 2
         expected: returned distances match boosted L2 distances and are sorted ascending
         """
         client = self._client()
         collection_name, _ = self._prepare_deterministic_collection(client, metric_type="L2")
         try:
-            boost_fn = self._make_boost_function(weight="0.25", filter_expr=f"{self.int64_field_name} == 3")
+            boost_fn = self._make_boost_function(weight="4.0", filter_expr=f"{self.int64_field_name} == 3")
             fs = self._make_function_score(boost_fn, params={"boost_mode": "multiply"})
 
             actual_ids, actual_scores = self._search_boost_correctness(client, collection_name, fs)

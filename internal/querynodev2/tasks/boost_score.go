@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 )
 
 const (
@@ -87,6 +88,7 @@ type preparedBoostScore struct {
 	scorers      []*planpb.ScoreFunction
 	functionMode string
 	boostMode    string
+	metricType   string
 }
 
 func prepareBoostScore(plan *planpb.PlanNode) (*preparedBoostScore, error) {
@@ -106,6 +108,7 @@ func prepareBoostScore(plan *planpb.PlanNode) (*preparedBoostScore, error) {
 		scorers:      plan.GetScorers(),
 		functionMode: functionMode,
 		boostMode:    boostMode,
+		metricType:   plan.GetVectorAnns().GetQueryInfo().GetMetricType(),
 	}, nil
 }
 
@@ -127,6 +130,7 @@ func buildBoostScoreChain(
 	scoreFunc boostScoreFunc,
 	functionMode string,
 	boostMode string,
+	distanceMetric bool,
 ) (*chain.FuncChain, error) {
 	boostChain := chain.NewFuncChainWithAllocator(defaultAllocator).
 		SetName("l0-rerank").
@@ -142,7 +146,7 @@ func buildBoostScoreChain(
 		return nil, err
 	}
 
-	if err := appendFinalBoostScore(boostChain, functionScoreCol, boostMode); err != nil {
+	if err := appendFinalBoostScore(boostChain, functionScoreCol, boostMode, distanceMetric); err != nil {
 		return nil, err
 	}
 
@@ -182,8 +186,12 @@ func appendFunctionScoreColumn(boostChain *chain.FuncChain, boostScoreColumns []
 	return functionScoreColumn, nil
 }
 
-func appendFinalBoostScore(boostChain *chain.FuncChain, functionScoreCol string, boostMode string) error {
-	finalCombineExpr, err := expr.NewNumCombineExpr(boostMode, nil, expr.WithNullPolicy(expr.NumCombineNullSkip))
+func appendFinalBoostScore(boostChain *chain.FuncChain, functionScoreCol string, boostMode string, distanceMetric bool) error {
+	options := []expr.NumCombineOption{expr.WithNullPolicy(expr.NumCombineNullSkip)}
+	if distanceMetric && boostMode == expr.ModeMultiply {
+		options = append(options, expr.WithDistanceBoost())
+	}
+	finalCombineExpr, err := expr.NewNumCombineExpr(boostMode, nil, options...)
 	if err != nil {
 		return err
 	}
@@ -213,6 +221,14 @@ func (t *SearchTask) applyPreparedBoostScores(segDFs []*chain.DataFrame, prepare
 		return nil
 	}
 
+	metricType := prepared.metricType
+	if searchReq != nil {
+		// Segcore resolves the metric from the field index, including when
+		// the serialized request omits it.
+		metricType = searchReq.Plan().GetMetricType()
+	}
+	distanceMetric := metricType != "" && !metric.PositivelyRelated(metricType)
+
 	scoreFunc := segments.AsyncComputeScorerScoresOnChunkedOffsets
 	return executeL0RerankChains(t.ctx, segDFs, func(_ context.Context, i int, df *chain.DataFrame) (*chain.FuncChain, error) {
 		return buildBoostScoreChain(
@@ -223,6 +239,7 @@ func (t *SearchTask) applyPreparedBoostScores(segDFs []*chain.DataFrame, prepare
 			scoreFunc,
 			prepared.functionMode,
 			prepared.boostMode,
+			distanceMetric,
 		)
 	}, "boost_score")
 }

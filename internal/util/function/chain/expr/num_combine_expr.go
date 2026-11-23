@@ -75,9 +75,10 @@ const (
 
 type NumCombineExpr struct {
 	BaseExpr
-	mode       string               // combine mode: multiply, sum, max, min, avg, weighted
-	weights    []float64            // weights for weighted mode
-	nullPolicy NumCombineNullPolicy // null handling policy
+	mode          string               // combine mode: multiply, sum, max, min, avg, weighted
+	weights       []float64            // weights for weighted mode
+	nullPolicy    NumCombineNullPolicy // null handling policy
+	distanceBoost bool
 }
 
 type NumCombineOption func(*NumCombineExpr)
@@ -85,6 +86,14 @@ type NumCombineOption func(*NumCombineExpr)
 func WithNullPolicy(policy NumCombineNullPolicy) NumCombineOption {
 	return func(s *NumCombineExpr) {
 		s.nullPolicy = policy
+	}
+}
+
+// WithDistanceBoost makes two-input multiplication divide a negated distance
+// by a positive, finite boost factor.
+func WithDistanceBoost() NumCombineOption {
+	return func(s *NumCombineExpr) {
+		s.distanceBoost = true
 	}
 }
 
@@ -348,6 +357,13 @@ func newNumericReader(arr arrow.Array) (numericReader, bool) {
 func (s *NumCombineExpr) combine(values []float64, weights []float64) float64 {
 	switch s.mode {
 	case ModeMultiply:
+		if s.distanceBoost && len(values) == 2 {
+			score, boost := values[0], values[1]
+			if boost > 0 && !math.IsInf(boost, 0) && !math.IsInf(score, 0) {
+				// Keep finite scores representable as Float32 for tiny factors.
+				return max(score/boost, -math.MaxFloat32)
+			}
+		}
 		result := 1.0
 		for _, v := range values {
 			result *= v

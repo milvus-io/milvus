@@ -216,6 +216,7 @@ func TestBuildBoostScoreChainSkipsFunctionCombineForSingleScorer(t *testing.T) {
 		segments.ComputeScorerScoresOnChunkedOffsets,
 		expr.ModeSum,
 		expr.ModeMultiply,
+		false,
 	)
 	require.NoError(t, err)
 
@@ -250,6 +251,7 @@ func TestBuildBoostScoreChainCombinesMultipleScorers(t *testing.T) {
 		segments.ComputeScorerScoresOnChunkedOffsets,
 		expr.ModeSum,
 		expr.ModeMultiply,
+		false,
 	)
 	require.NoError(t, err)
 
@@ -370,6 +372,48 @@ func TestApplyBoostScoresNoScorersNoop(t *testing.T) {
 	require.Same(t, df, segDFs[0])
 }
 
+func TestApplyBoostScoresPromotesDistanceMatches(t *testing.T) {
+	for _, tc := range []struct {
+		metric    string
+		near, far float32
+	}{
+		{metric.L2, -1, -2},
+		{metric.HAMMING, -3, -6},
+		{metric.JACCARD, -0.5, -0.75},
+	} {
+		t.Run(tc.metric, func(t *testing.T) {
+			withBoostScoreCheckedAllocator(t)
+
+			oldFactory := boostScoreRunnerFactory
+			boostScoreRunnerFactory = mockBoostScoreRunnerFactory(boostScoreOutput{
+				scores:   []float32{0, 4},
+				hasScore: []bool{false, true},
+			})
+			defer func() { boostScoreRunnerFactory = oldFactory }()
+
+			df := makeBoostScoreTestDF(t,
+				[]int64{1, 2}, []float32{tc.near, tc.far}, []int64{10, 20}, []int64{2})
+			segDFs := []*chain.DataFrame{df}
+			defer func() { segDFs[0].Release() }()
+
+			task := makeBoostScoreTestTask(t, &planpb.PlanNode{
+				Node: &planpb.PlanNode_VectorAnns{
+					VectorAnns: &planpb.VectorANNS{
+						QueryInfo: &planpb.QueryInfo{MetricType: tc.metric},
+					},
+				},
+				Scorers: []*planpb.ScoreFunction{{Weight: 4}},
+			})
+
+			require.NoError(t, task.applyBoostScores(segDFs, []segments.Segment{nil}, nil))
+			ids := segDFs[0].Column(types.IDFieldName).Chunk(0).(*array.Int64)
+			scores := segDFs[0].Column(types.ScoreFieldName).Chunk(0).(*array.Float32)
+			require.Equal(t, []int64{2, 1}, ids.Int64Values())
+			require.InDeltaSlice(t, []float32{tc.far / 4, tc.near}, scores.Float32Values(), 1e-6)
+		})
+	}
+}
+
 func TestApplyBoostScoresDistanceMetricKeepsInternalScoreDescending(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
 
@@ -408,10 +452,10 @@ func TestApplyBoostScoresDistanceMetricKeepsInternalScoreDescending(t *testing.T
 	scores := result.Column(types.ScoreFieldName).Chunk(0).(*array.Float32)
 	require.Equal(t, int64(1), ids.Value(0))
 	require.InDelta(t, 0.0, scores.Value(0), 1e-6)
-	require.Equal(t, int64(3), ids.Value(1))
-	require.InDelta(t, -0.2, scores.Value(1), 1e-6)
-	require.Equal(t, int64(2), ids.Value(2))
-	require.InDelta(t, -0.4, scores.Value(2), 1e-6)
+	require.Equal(t, int64(2), ids.Value(1))
+	require.InDelta(t, -0.4, scores.Value(1), 1e-6)
+	require.Equal(t, int64(3), ids.Value(2))
+	require.InDelta(t, -3.2, scores.Value(2), 1e-6)
 }
 
 func TestApplyBoostScoresDistanceMetricSumKeepsInternalScoreDescending(t *testing.T) {
@@ -815,6 +859,7 @@ func TestBuildBoostScoreChainPropagatesBuilderErrors(t *testing.T) {
 		segments.ComputeScorerScoresOnChunkedOffsets,
 		expr.ModeSum,
 		expr.ModeMultiply,
+		false,
 	)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "runner is nil")
@@ -825,7 +870,7 @@ func TestBuildBoostScoreChainPropagatesBuilderErrors(t *testing.T) {
 	require.Contains(t, err.Error(), "invalid mode")
 
 	chainWithBadBoostMode := chain.NewFuncChainWithAllocator(defaultAllocator)
-	err = appendFinalBoostScore(chainWithBadBoostMode, boostScoreColumn(0), "bad-mode")
+	err = appendFinalBoostScore(chainWithBadBoostMode, boostScoreColumn(0), "bad-mode", false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid mode")
 }
