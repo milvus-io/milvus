@@ -613,7 +613,7 @@ func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context, rgName stri
 	// clean up the freeze node that has been removed from session.
 	// Use the full session view (all resource groups) instead of nodeStatus:
 	// nodeStatus only contains nodes of the primary/fallback resource group
-	// (see filterStreamingNodeStatusByResourceGroupHint), so a frozen node in
+	// (see CollectAllStatus), so a frozen node in
 	// another resource group would otherwise be wrongly unfrozen.
 	// Run before marking frozen nodes below so the marking uses the
 	// post-cleanup freeze set. Non-fatal: a transient failure to get the

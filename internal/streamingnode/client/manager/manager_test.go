@@ -3,13 +3,16 @@ package manager
 import (
 	"context"
 	"fmt"
+	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/resolver"
 
@@ -21,10 +24,14 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
+	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
+	sresolver "github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/proto/mock_streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	pkginterceptor "github.com/milvus-io/milvus/pkg/v3/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -488,4 +495,331 @@ func TestDial(t *testing.T) {
 	assert.NotNil(t, client)
 	time.Sleep(100 * time.Millisecond)
 	client.Close()
+}
+
+func TestCollectAllStatusFallbackWhenPrimaryUnhealthyOrUnreachable(t *testing.T) {
+	newClient := func() (*managerClientImpl, *mock_resolver.MockResolver, *mock_streamingpb.MockStreamingNodeManagerServiceClient) {
+		rb := mock_resolver.NewMockBuilder(t)
+		managerService := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeManagerServiceClient](t)
+		m := &managerClientImpl{
+			lifetime:     typeutil.NewLifetime(),
+			stopped:      make(chan struct{}),
+			rb:           rb,
+			service:      managerService,
+			probeTimeout: 100 * time.Millisecond,
+		}
+		r := mock_resolver.NewMockResolver(t)
+		rb.EXPECT().Resolver().Return(r)
+		client := mock_streamingpb.NewMockStreamingNodeManagerServiceClient(t)
+		managerService.EXPECT().GetService(mock.Anything).Return(client, nil)
+		t.Cleanup(func() {
+			managerService.EXPECT().Close().Return()
+			rb.EXPECT().Close().Return()
+			m.Close()
+		})
+		return m, r, client
+	}
+
+	t.Run("fallback to backup rg when primary returns rpc error", func(t *testing.T) {
+		m, r, client := newClient()
+		r.EXPECT().GetLatestState(mock.Anything).Return(newVersionedStateWithRG(1, map[uint64]serverInfo{
+			7: {resourceGroup: "rg1"},
+			6: {resourceGroup: "rg2"},
+		}), nil)
+
+		var probed []int64
+		var mu sync.Mutex
+		client.EXPECT().CollectStatus(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, _ *streamingpb.StreamingNodeManagerCollectStatusRequest, _ ...grpc.CallOption) (*streamingpb.StreamingNodeManagerCollectStatusResponse, error) {
+				id, ok := contextutil.GetPickServerID(ctx)
+				require.True(t, ok)
+				mu.Lock()
+				probed = append(probed, id)
+				mu.Unlock()
+				if id == 7 {
+					return nil, status.NewIgnoreOperation("node not match")
+				}
+				return &streamingpb.StreamingNodeManagerCollectStatusResponse{}, nil
+			})
+
+		nodes, err := m.CollectAllStatus(context.Background(), "rg1")
+		require.NoError(t, err)
+		require.Len(t, nodes, 1)
+		require.Contains(t, nodes, int64(6))
+		require.NoError(t, nodes[6].Err)
+		require.Equal(t, []int64{7, 6}, probed)
+	})
+
+	t.Run("fallback to backup rg when primary has only stopping nodes", func(t *testing.T) {
+		m, r, client := newClient()
+		calls := 0
+		r.EXPECT().GetLatestState(mock.Anything).RunAndReturn(func(context.Context) (discoverer.VersionedState, error) {
+			calls++
+			if calls == 1 {
+				return newVersionedStateWithRG(1, map[uint64]serverInfo{
+					7: {resourceGroup: "rg1"},
+					6: {resourceGroup: "rg2"},
+				}), nil
+			}
+			return newVersionedStateWithRG(2, map[uint64]serverInfo{
+				7: {resourceGroup: "rg1", stopping: true},
+				6: {resourceGroup: "rg2"},
+			}), nil
+		})
+		client.EXPECT().CollectStatus(mock.Anything, mock.Anything).Return(&streamingpb.StreamingNodeManagerCollectStatusResponse{}, nil)
+
+		nodes, err := m.CollectAllStatus(context.Background(), "rg1")
+		require.NoError(t, err)
+		require.Len(t, nodes, 1)
+		require.Contains(t, nodes, int64(6))
+		require.NoError(t, nodes[6].Err)
+	})
+
+	t.Run("keep primary rg when at least one primary node is healthy", func(t *testing.T) {
+		m, r, client := newClient()
+		r.EXPECT().GetLatestState(mock.Anything).Return(newVersionedStateWithRG(1, map[uint64]serverInfo{
+			7: {resourceGroup: "rg1"},
+			8: {resourceGroup: "rg1"},
+			6: {resourceGroup: "rg2"},
+		}), nil)
+
+		var probed []int64
+		var mu sync.Mutex
+		client.EXPECT().CollectStatus(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, _ *streamingpb.StreamingNodeManagerCollectStatusRequest, _ ...grpc.CallOption) (*streamingpb.StreamingNodeManagerCollectStatusResponse, error) {
+				id, ok := contextutil.GetPickServerID(ctx)
+				require.True(t, ok)
+				mu.Lock()
+				probed = append(probed, id)
+				mu.Unlock()
+				if id == 7 {
+					return nil, errors.New("unreachable")
+				}
+				return &streamingpb.StreamingNodeManagerCollectStatusResponse{}, nil
+			})
+
+		nodes, err := m.CollectAllStatus(context.Background(), "rg1")
+		require.NoError(t, err)
+		require.Len(t, nodes, 1)
+		require.Contains(t, nodes, int64(8))
+		require.NotContains(t, probed, int64(6))
+	})
+
+	t.Run("return empty without hanging when all rgs fail", func(t *testing.T) {
+		m, r, client := newClient()
+		r.EXPECT().GetLatestState(mock.Anything).Return(newVersionedStateWithRG(1, map[uint64]serverInfo{
+			7: {resourceGroup: "rg1"},
+			6: {resourceGroup: "rg2"},
+		}), nil)
+		client.EXPECT().CollectStatus(mock.Anything, mock.Anything).Return(nil, errors.New("unreachable"))
+
+		nodes, err := m.CollectAllStatus(context.Background(), "rg1")
+		require.NoError(t, err)
+		require.Empty(t, nodes)
+	})
+}
+
+type fakeStreamingManagerServer struct {
+	streamingpb.UnimplementedStreamingNodeManagerServiceServer
+	collectCalls atomic.Int64
+	removeCalls  atomic.Int64
+}
+
+func (s *fakeStreamingManagerServer) CollectStatus(context.Context, *streamingpb.StreamingNodeManagerCollectStatusRequest) (*streamingpb.StreamingNodeManagerCollectStatusResponse, error) {
+	s.collectCalls.Add(1)
+	return &streamingpb.StreamingNodeManagerCollectStatusResponse{}, nil
+}
+
+func (s *fakeStreamingManagerServer) Remove(context.Context, *streamingpb.StreamingNodeManagerRemoveRequest) (*streamingpb.StreamingNodeManagerRemoveResponse, error) {
+	s.removeCalls.Add(1)
+	return &streamingpb.StreamingNodeManagerRemoveResponse{}, nil
+}
+
+type testManagerResolverBuilder struct {
+	mu      sync.RWMutex
+	state   discoverer.VersionedState
+	cc      resolver.ClientConn
+	version int64
+}
+
+func (b *testManagerResolverBuilder) Build(_ resolver.Target, cc resolver.ClientConn, _ resolver.BuildOptions) (resolver.Resolver, error) {
+	b.mu.Lock()
+	b.cc = cc
+	state := b.state
+	b.mu.Unlock()
+	if len(state.State.Addresses) > 0 {
+		_ = cc.UpdateState(state.State)
+	}
+	return b, nil
+}
+
+func (b *testManagerResolverBuilder) Scheme() string {
+	return "test-sn-manager"
+}
+
+func (b *testManagerResolverBuilder) ResolveNow(resolver.ResolveNowOptions) {}
+
+func (b *testManagerResolverBuilder) Close() {}
+
+func (b *testManagerResolverBuilder) Resolver() sresolver.Resolver {
+	return b
+}
+
+func (b *testManagerResolverBuilder) GetLatestState(context.Context) (discoverer.VersionedState, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.state, nil
+}
+
+func (b *testManagerResolverBuilder) Watch(ctx context.Context, _ func(discoverer.VersionedState) error) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (b *testManagerResolverBuilder) UpdateServers(servers map[uint64]struct {
+	addr          string
+	resourceGroup string
+},
+) {
+	b.mu.Lock()
+	b.version++
+	addrs := make([]resolver.Address, 0, len(servers))
+	for serverID, info := range servers {
+		session := &sessionutil.SessionRaw{
+			ServerID: int64(serverID),
+			Address:  info.addr,
+			ServerLabels: map[string]string{
+				sessionutil.LabelResourceGroup: info.resourceGroup,
+			},
+		}
+		addrs = append(addrs, resolver.Address{
+			Addr:               info.addr,
+			Attributes:         attributes.WithServerID(new(attributes.Attributes), int64(serverID)),
+			BalancerAttributes: attributes.WithSession(new(attributes.Attributes), session),
+		})
+	}
+	state := discoverer.VersionedState{
+		Version: typeutil.VersionInt64(b.version),
+		State:   resolver.State{Addresses: addrs},
+	}
+	b.state = state
+	cc := b.cc
+	b.mu.Unlock()
+	if cc != nil {
+		_ = cc.UpdateState(state.State)
+	}
+}
+
+func startTestSNManagerServer(t *testing.T, serverID int64) (string, *fakeStreamingManagerServer) {
+	t.Helper()
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	svc := &fakeStreamingManagerServer{}
+	srv := grpc.NewServer(
+		grpc.ChainUnaryInterceptor(
+			streamingserviceinterceptor.NewServiceUnaryServerInterceptor(),
+			pkginterceptor.ServerIDValidationUnaryServerInterceptor(func() int64 { return serverID }),
+		),
+	)
+	streamingpb.RegisterStreamingNodeManagerServiceServer(srv, svc)
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(func() {
+		srv.Stop()
+		_ = lis.Close()
+	})
+	return lis.Addr().String(), svc
+}
+
+func newClosedTCPAddr(t *testing.T) string {
+	t.Helper()
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := lis.Addr().String()
+	require.NoError(t, lis.Close())
+	return addr
+}
+
+func TestCollectAllStatusAndRemoveRealGRPC(t *testing.T) {
+	paramtable.Init()
+
+	rb := &testManagerResolverBuilder{}
+	dialTimeout := paramtable.Get().StreamingNodeGrpcClientCfg.DialTimeout.GetAsDuration(time.Millisecond)
+	dialOptions := getDialOptions(rb)
+	conn := lazygrpc.NewConn(func(ctx context.Context) (*grpc.ClientConn, error) {
+		ctx, cancel := context.WithTimeout(ctx, dialTimeout)
+		defer cancel()
+		return grpc.DialContext(ctx, rb.Scheme()+":///streamingnode", dialOptions...)
+	})
+	m := &managerClientImpl{
+		lifetime:     typeutil.NewLifetime(),
+		stopped:      make(chan struct{}),
+		rb:           rb,
+		service:      lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingNodeManagerServiceClient),
+		probeTimeout: 150 * time.Millisecond,
+	}
+	defer m.Close()
+
+	rg2Addr, rg2Svc := startTestSNManagerServer(t, 6)
+	deadAddr := newClosedTCPAddr(t)
+
+	// 1. Stale primary RG1 registration pointing to an unreachable port while RG2 is healthy:
+	// CollectAllStatus must fail over to RG2 after probeTimeout without blocking indefinitely.
+	rb.UpdateServers(map[uint64]struct {
+		addr          string
+		resourceGroup string
+	}{
+		7: {addr: deadAddr, resourceGroup: "rg1"},
+		6: {addr: rg2Addr, resourceGroup: "rg2"},
+	})
+
+	start := time.Now()
+	nodes, err := m.CollectAllStatus(context.Background(), "rg1")
+	elapsed := time.Since(start)
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	require.Contains(t, nodes, int64(6))
+	require.Less(t, elapsed, 2*time.Second)
+	require.GreaterOrEqual(t, rg2Svc.collectCalls.Load(), int64(1))
+
+	// 2. Stale primary RG1 registration whose pod IP now serves a restarted StreamingNode (serverID=10):
+	// CollectStatus hits ErrNodeNotMatch and must immediately fall back to RG2.
+	restartedRG1Addr, restartedRG1Svc := startTestSNManagerServer(t, 10)
+	rb.UpdateServers(map[uint64]struct {
+		addr          string
+		resourceGroup string
+	}{
+		7: {addr: restartedRG1Addr, resourceGroup: "rg1"},
+		6: {addr: rg2Addr, resourceGroup: "rg2"},
+	})
+
+	// Remove for stale serverID=7 hitting serverID=10 returns nil via SkippedOperation.
+	// Wait briefly until SubConn 7 connects to restartedRG1Addr.
+	require.Eventually(t, func() bool {
+		removeCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		err := m.Remove(removeCtx, types.PChannelInfoAssigned{
+			Channel: types.PChannelInfo{Name: "ch1", Term: 4, AccessMode: types.AccessModeRW},
+			Node:    types.StreamingNodeInfo{ServerID: 7, Address: restartedRG1Addr},
+		})
+		return err == nil
+	}, 3*time.Second, 20*time.Millisecond)
+	require.Zero(t, restartedRG1Svc.removeCalls.Load())
+
+	fallbackStart := time.Now()
+	nodes, err = m.CollectAllStatus(context.Background(), "rg1")
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	require.Contains(t, nodes, int64(6))
+	require.Less(t, time.Since(fallbackStart), 100*time.Millisecond)
+
+	// 3. Remove for a disappeared session (serverID=99) must return ErrNotAlive immediately:
+	// ErrSubConnNotExist is returned as a status error from Pick, so gRPC drops it instead
+	// of retrying through the service-level UNAVAILABLE retryPolicy.
+	removeStart := time.Now()
+	err = m.Remove(context.Background(), types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "ch1", Term: 4, AccessMode: types.AccessModeRW},
+		Node:    types.StreamingNodeInfo{ServerID: 99, Address: deadAddr},
+	})
+	require.ErrorIs(t, err, types.ErrNotAlive)
+	require.Less(t, time.Since(removeStart), 200*time.Millisecond)
 }

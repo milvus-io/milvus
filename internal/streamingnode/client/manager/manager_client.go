@@ -37,7 +37,7 @@ type ManagerClient interface {
 	GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error)
 
 	// CollectAllStatus collects status of selected streamingnode, such as load balance attributes.
-	// The resourceGroupHint is preferred when it has discovered nodes; otherwise another resource group is selected before RPC.
+	// The resourceGroupHint is preferred when it has reachable healthy nodes; otherwise another discovered resource group is tried.
 	CollectAllStatus(ctx context.Context, resourceGroupHint string) (map[int64]*types.StreamingNodeStatus, error)
 
 	// Assign a wal instance for the channel on streaming node of given server id.
@@ -68,10 +68,11 @@ func NewManagerClient(etcdCli *clientv3.Client) ManagerClient {
 		)
 	})
 	return &managerClientImpl{
-		lifetime: typeutil.NewLifetime(),
-		stopped:  make(chan struct{}),
-		rb:       rb,
-		service:  lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingNodeManagerServiceClient),
+		lifetime:     typeutil.NewLifetime(),
+		stopped:      make(chan struct{}),
+		rb:           rb,
+		service:      lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingNodeManagerServiceClient),
+		probeTimeout: defaultCollectStatusProbeTimeout,
 	}
 }
 

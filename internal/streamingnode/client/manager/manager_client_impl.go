@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -21,13 +22,23 @@ import (
 
 var _ ManagerClient = (*managerClientImpl)(nil)
 
+const defaultCollectStatusProbeTimeout = 2 * time.Second
+
 // managerClientImpl implements ManagerClient.
 type managerClientImpl struct {
 	lifetime *typeutil.Lifetime
 	stopped  chan struct{}
 
-	rb      resolver.Builder
-	service lazygrpc.Service[streamingpb.StreamingNodeManagerServiceClient]
+	rb           resolver.Builder
+	service      lazygrpc.Service[streamingpb.StreamingNodeManagerServiceClient]
+	probeTimeout time.Duration
+}
+
+func (c *managerClientImpl) getProbeTimeout() time.Duration {
+	if c.probeTimeout > 0 {
+		return c.probeTimeout
+	}
+	return defaultCollectStatusProbeTimeout
 }
 
 func (c *managerClientImpl) WatchNodeChanged(ctx context.Context) (<-chan struct{}, error) {
@@ -83,8 +94,9 @@ func (c *managerClientImpl) GetAllStreamingNodes(ctx context.Context) (map[int64
 }
 
 // CollectAllStatus collects status in underlying streamingnodes.
-// If resourceGroupHint has discovered nodes, only nodes in that resource group are collected.
-// Otherwise, it falls back to another discovered resource group.
+// If resourceGroupHint has discovered nodes, it probes that resource group first.
+// If the selected resource group yields no healthy nodes (e.g., unreachable or stale registrations),
+// it falls back across remaining discovered resource groups.
 func (c *managerClientImpl) CollectAllStatus(ctx context.Context, resourceGroupHint string) (map[int64]*types.StreamingNodeStatus, error) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("manager client is closing")
@@ -99,16 +111,59 @@ func (c *managerClientImpl) CollectAllStatus(ctx context.Context, resourceGroupH
 	if len(state.State.Addresses) == 0 {
 		return make(map[int64]*types.StreamingNodeStatus), nil
 	}
-	resourceGroupHint = filterStreamingNodeStatusByResourceGroupHint(state, resourceGroupHint)
 
-	// Collect status from the selected resource group only. The hint fallback
-	// is decided from service discovery before RPC to avoid broadcasting to
-	// resource groups that will not be used for WAL balance.
-	result, err := c.getAllStreamingNodeStatus(ctx, state, resourceGroupHint)
-	if err != nil {
-		return nil, err
+	effectiveHint := effectiveResourceGroupHintForCollectAllStatus(state, resourceGroupHint)
+	if effectiveHint == "" {
+		result, err := c.getAllStreamingNodeStatus(ctx, state, "")
+		if err != nil {
+			return nil, err
+		}
+		return c.annotateLatestSessionState(ctx, state, result)
 	}
 
+	remainingStatsByRG := groupStreamingNodeSessionStatsByResourceGroup(state)
+	var fallbackResult map[int64]*types.StreamingNodeStatus
+	for len(remainingStatsByRG) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		targetRG, ok := selectResourceGroupForProbe(remainingStatsByRG, effectiveHint)
+		if !ok {
+			break
+		}
+		delete(remainingStatsByRG, targetRG)
+
+		result, err := c.getAllStreamingNodeStatus(ctx, state, targetRG)
+		if err != nil {
+			return nil, err
+		}
+		if len(result) > 0 {
+			result, err = c.annotateLatestSessionState(ctx, state, result)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if len(fallbackResult) == 0 {
+			fallbackResult = result
+		}
+		if hasHealthyStreamingNode(result) {
+			return result, nil
+		}
+		mlog.Warn(ctx, "no healthy streaming node in resource group, trying fallback",
+			mlog.String("resourceGroup", targetRG),
+			mlog.Int("probedCount", len(result)))
+	}
+	if fallbackResult != nil {
+		return fallbackResult, nil
+	}
+	return make(map[int64]*types.StreamingNodeStatus), nil
+}
+
+func (c *managerClientImpl) annotateLatestSessionState(
+	ctx context.Context,
+	state discoverer.VersionedState,
+	result map[int64]*types.StreamingNodeStatus,
+) (map[int64]*types.StreamingNodeStatus, error) {
 	// Collect status may cost some time, so we need to check the lifetime again.
 	newState, err := c.rb.Resolver().GetLatestState(ctx)
 	if err != nil {
@@ -127,19 +182,22 @@ func (c *managerClientImpl) CollectAllStatus(ctx context.Context, resourceGroupH
 	return result, nil
 }
 
-func filterStreamingNodeStatusByResourceGroupHint(state discoverer.VersionedState, resourceGroupHint string) string {
-	resourceGroupHint = effectiveResourceGroupHintForCollectAllStatus(state, resourceGroupHint)
-	if resourceGroupHint == "" {
-		return ""
+func hasHealthyStreamingNode(nodes map[int64]*types.StreamingNodeStatus) bool {
+	for _, node := range nodes {
+		if node != nil && node.IsHealthy() {
+			return true
+		}
 	}
-	statsByRG := groupStreamingNodeSessionStatsByResourceGroup(state)
-	if _, ok := statsByRG[resourceGroupHint]; ok {
-		return resourceGroupHint
+	return false
+}
+
+func selectResourceGroupForProbe(statsByRG map[string]resourceGroupSessionStats, preferredRG string) (string, bool) {
+	if preferredRG != "" {
+		if _, ok := statsByRG[preferredRG]; ok {
+			return preferredRG, true
+		}
 	}
-	if fallbackRG, ok := chooseFallbackResourceGroup(statsByRG); ok {
-		return fallbackRG
-	}
-	return ""
+	return chooseFallbackResourceGroup(statsByRG)
 }
 
 func effectiveResourceGroupHintForCollectAllStatus(state discoverer.VersionedState, resourceGroupHint string) string {
@@ -216,13 +274,15 @@ func (c *managerClientImpl) getAllStreamingNodeStatus(ctx context.Context, state
 			continue
 		}
 		g.Go(func() error {
-			ctx := contextutil.WithPickServerID(ctx, serverID)
-			resp, err := manager.CollectStatus(ctx, &streamingpb.StreamingNodeManagerCollectStatusRequest{})
+			probeCtx, cancel := context.WithTimeout(ctx, c.getProbeTimeout())
+			defer cancel()
+			probeCtx = contextutil.WithPickServerID(probeCtx, serverID)
+			resp, err := manager.CollectStatus(probeCtx, &streamingpb.StreamingNodeManagerCollectStatusRequest{})
 			mu.Lock()
 			defer mu.Unlock()
 
 			if err != nil {
-				mlog.Warn(ctx, "collect status failed, skip", mlog.Int64("serverID", serverID), mlog.Err(err))
+				mlog.Warn(probeCtx, "collect status failed, skip", mlog.Int64("serverID", serverID), mlog.Err(err))
 				return err
 			}
 			result[serverID] = &types.StreamingNodeStatus{
@@ -233,11 +293,14 @@ func (c *managerClientImpl) getAllStreamingNodeStatus(ctx context.Context, state
 				Metrics: types.NewStreamingNodeBalanceAttrsFromProto(resp.Metrics),
 				Err:     err,
 			}
-			mlog.Debug(ctx, "collect status success", mlog.Int64("serverID", serverID), mlog.Any("status", resp))
+			mlog.Debug(probeCtx, "collect status success", mlog.Int64("serverID", serverID), mlog.Any("status", resp))
 			return nil
 		})
 	}
 	g.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 
