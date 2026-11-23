@@ -327,13 +327,6 @@ func (s *L0WriteBufferSuite) SetupTest() {
 	s.allocator.AllocOneF = func() (int64, error) { return int64(tsoutil.ComposeTSByTime(time.Now())), nil }
 }
 
-func (s *L0WriteBufferSuite) newTextMetaCache(schema *schemapb.CollectionSchema) *metacache.MockMetaCache {
-	mc := metacache.NewMockMetaCache(s.T())
-	mc.EXPECT().GetSchema(mock.Anything).Return(schema).Maybe()
-	mc.EXPECT().Collection().Return(s.collID).Maybe()
-	return mc
-}
-
 func (s *L0WriteBufferSuite) newTextRealMetaCache(schema *schemapb.CollectionSchema) metacache.MetaCache {
 	return metacache.NewMetaCache(&datapb.ChannelWatchInfo{
 		Schema: schema,
@@ -346,12 +339,27 @@ func (s *L0WriteBufferSuite) newTextRealMetaCache(schema *schemapb.CollectionSch
 	}, metacache.NewBM25StatsFactory)
 }
 
+// createTextSegment models the CreateSegment WAL event that precedes inserts.
+func (s *L0WriteBufferSuite) createTextSegment(wb WriteBuffer, segmentID int64) {
+	s.T().Helper()
+	s.Require().NoError(wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
+		SegmentID: segmentID, PartitionID: 0, StartPos: &msgpb.MsgPosition{Timestamp: 100},
+		SchemaVersion: 100, StorageVersion: storage.StorageV3,
+	}))
+}
+
 func (s *L0WriteBufferSuite) TestBufferData() {
 	s.Run("normal_run", func() {
 		paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
 		defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
 
-		wb, err := NewL0WriteBuffer(s.channelName, s.metacache, s.syncMgr, &writeBufferOption{
+		metaCache := metacache.NewMetaCache(&datapb.ChannelWatchInfo{
+			Schema: s.collSchema,
+			Vchan:  &datapb.VchannelInfo{CollectionID: s.collID, ChannelName: s.channelName},
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat {
+			return pkoracle.NewBloomFilterSet()
+		}, metacache.NewBM25StatsFactory)
+		wb, err := NewL0WriteBuffer(s.channelName, metaCache, s.syncMgr, &writeBufferOption{
 			idAllocator: s.allocator,
 		})
 		s.NoError(err)
@@ -359,9 +367,10 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 		pks, msg := s.composeInsertMsg(1000, 10, 128, schemapb.DataType_Int64)
 		delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
 
-		s.metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false).Once()
-		s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
-		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
+		// The CreateSegment WAL event establishes the storage version before inserts.
+		s.Require().NoError(wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
+			SegmentID: 1000, StorageVersion: storage.StorageV2,
+		}))
 
 		metrics.DataNodeFlowGraphBufferDataSize.Reset()
 		insertData, err := PrepareInsert(s.collSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
@@ -369,7 +378,7 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 		err = wb.BufferData(insertData, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
 		s.NoError(err)
 
-		value, err := metrics.DataNodeFlowGraphBufferDataSize.GetMetricWithLabelValues(paramtable.GetStringNodeID(), fmt.Sprint(s.metacache.Collection()))
+		value, err := metrics.DataNodeFlowGraphBufferDataSize.GetMetricWithLabelValues(paramtable.GetStringNodeID(), fmt.Sprint(metaCache.Collection()))
 		s.NoError(err)
 		s.MetricsEqual(value, 5616)
 
@@ -388,23 +397,17 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 
 	s.Run("no_usable_source_buffers_payload", func() {
 		textSchema := s.textSchema()
-		metacache := s.newTextMetaCache(textSchema)
+		metacache := s.newTextRealMetaCache(textSchema)
 		wb, err := NewL0WriteBuffer(s.channelName, metacache, s.syncMgr, &writeBufferOption{
 			idAllocator: s.allocator,
 		})
 		s.NoError(err)
 
+		s.createTextSegment(wb, 1000)
+
 		_, msg := s.composeTextInsertMsg(1000, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
 		s.NoError(err)
-
-		// GetSegmentByID is invoked three times per BufferData on the first
-		// insert: (1) decideGrowingFlushSource reads the sticky flushSourceMode,
-		// (2) growingSourceBaseOffset reads the row counter, (3) CreateNewGrowingSegment
-		// checks for prior existence.
-		metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false).Times(3)
-		metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
-		metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 		err = wb.BufferData(insertData, nil, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
 		s.NoError(err)
@@ -418,7 +421,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 
 	s.Run("usable_source_records_progress_and_pins_checkpoint", func() {
 		textSchema := s.textSchema()
-		mc := s.newTextMetaCache(textSchema)
+		mc := s.newTextRealMetaCache(textSchema)
 		var resolvedSegmentID int64
 		var resolvedTargetOffset int64
 		resolveCalls := 0
@@ -437,28 +440,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		})
 		s.NoError(err)
 
+		s.createTextSegment(wb, 1001)
+
 		_, msg := s.composeTextInsertMsg(1001, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
 		s.NoError(err)
-
-		segmentInfo := metacache.NewSegmentInfo(&datapb.SegmentInfo{
-			ID:             1001,
-			PartitionID:    10,
-			CollectionID:   s.collID,
-			InsertChannel:  s.channelName,
-			StartPosition:  &msgpb.MsgPosition{Timestamp: 100},
-			State:          commonpb.SegmentState_Growing,
-			StorageVersion: storage.StorageV3,
-			SchemaVersion:  100,
-		}, pkoracle.NewBloomFilterSet(), nil, nil)
-
-		// growingSourceBaseOffset and CreateNewGrowingSegment see a new
-		// segment; recordGrowingSourceProgress and triggerSync see the segment
-		// created by AddSegment.
-		mc.EXPECT().GetSegmentByID(int64(1001)).Return(nil, false).Times(3)
-		mc.EXPECT().GetSegmentByID(int64(1001)).Return(segmentInfo, true).Times(2)
-		mc.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
-		mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 		err = wb.BufferData(insertData, nil, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
 		s.NoError(err)
@@ -483,6 +469,8 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 			},
 		})
 		s.NoError(err)
+
+		s.createTextSegment(wb, 1101)
 
 		_, msg := s.composeTextInsertMsg(1101, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
@@ -524,6 +512,8 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		})
 		s.NoError(err)
 
+		s.createTextSegment(wb, 1102)
+
 		_, msg := s.composeTextInsertMsg(1102, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
 		s.NoError(err)
@@ -556,6 +546,8 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		})
 		s.NoError(err)
 
+		s.createTextSegment(wb, 1103)
+
 		_, msg := s.composeTextInsertMsg(1103, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
 		s.NoError(err)
@@ -577,7 +569,7 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 
 	s.Run("pending_source_records_progress_instead_of_falling_back_to_writebuffer", func() {
 		textSchema := s.textSchema()
-		mc := s.newTextMetaCache(textSchema)
+		mc := s.newTextRealMetaCache(textSchema)
 		wb, err := NewL0WriteBuffer(s.channelName, mc, s.syncMgr, &writeBufferOption{
 			idAllocator:                s.allocator,
 			growingSourceRetryInterval: time.Hour,
@@ -587,28 +579,11 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		})
 		s.NoError(err)
 
+		s.createTextSegment(wb, 1002)
+
 		_, msg := s.composeTextInsertMsg(1002, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
 		s.NoError(err)
-
-		segmentInfo := metacache.NewSegmentInfo(&datapb.SegmentInfo{
-			ID:             1002,
-			PartitionID:    10,
-			CollectionID:   s.collID,
-			InsertChannel:  s.channelName,
-			StartPosition:  &msgpb.MsgPosition{Timestamp: 100},
-			State:          commonpb.SegmentState_Growing,
-			StorageVersion: storage.StorageV3,
-			SchemaVersion:  100,
-		}, pkoracle.NewBloomFilterSet(), nil, nil)
-
-		// growingSourceBaseOffset and CreateNewGrowingSegment see a new
-		// segment; recordGrowingSourceProgress and triggerSync see the segment
-		// created by AddSegment.
-		mc.EXPECT().GetSegmentByID(int64(1002)).Return(nil, false).Times(3)
-		mc.EXPECT().GetSegmentByID(int64(1002)).Return(segmentInfo, true).Times(2)
-		mc.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
-		mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
 		err = wb.BufferData(insertData, nil, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 100)
 		s.NoError(err)
@@ -631,6 +606,8 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 			},
 		})
 		s.NoError(err)
+
+		s.createTextSegment(wb, 1003)
 
 		_, msg := s.composeTextInsertMsg(1003, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
@@ -691,6 +668,8 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 		})
 		s.NoError(err)
 
+		s.createTextSegment(wb, 1009)
+
 		_, msg := s.composeTextInsertMsg(1009, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
 		s.NoError(err)
@@ -719,6 +698,8 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 			},
 		})
 		s.NoError(err)
+
+		s.createTextSegment(wb, 1007)
 
 		_, msg := s.composeTextInsertMsg(1007, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
@@ -770,6 +751,8 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 			},
 		})
 		s.NoError(err)
+
+		s.createTextSegment(wb, 1006)
 
 		_, msg := s.composeTextInsertMsg(1006, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
@@ -874,6 +857,8 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				}), nil
 			}).Twice()
 
+		s.createTextSegment(wb, 1013)
+
 		_, msg := s.composeTextInsertMsg(1013, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
 		s.NoError(err)
@@ -939,6 +924,8 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 					return struct{}{}, nil
 				}), nil
 			}).Twice()
+
+		s.createTextSegment(wb, 1010)
 
 		_, msg := s.composeTextInsertMsg(1010, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
@@ -1014,6 +1001,8 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				}), nil
 			}).Once()
 
+		s.createTextSegment(wb, 1014)
+
 		_, msg := s.composeTextInsertMsg(1014, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
 		s.NoError(err)
@@ -1088,6 +1077,8 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				}), nil
 			}).Once()
 
+		s.createTextSegment(wb, 1011)
+
 		_, msg := s.composeTextInsertMsg(1011, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
 		s.NoError(err)
@@ -1149,6 +1140,8 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 					return struct{}{}, err
 				}), nil
 			}).Twice()
+
+		s.createTextSegment(wb, 1008)
 
 		_, msg := s.composeTextInsertMsg(1008, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
@@ -1247,6 +1240,8 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 				}), nil
 			}).Twice()
 
+		s.createTextSegment(wb, 1012)
+
 		_, msg := s.composeTextInsertMsg(1012, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
 		s.NoError(err)
@@ -1287,6 +1282,8 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 			},
 		})
 		s.NoError(err)
+
+		s.createTextSegment(wb, 1005)
 
 		_, msg := s.composeTextInsertMsg(1005, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
@@ -1350,6 +1347,8 @@ func (s *L0WriteBufferSuite) TestBufferDataGrowingSourceMode() {
 			},
 		})
 		s.NoError(err)
+
+		s.createTextSegment(wb, 1004)
 
 		_, msg := s.composeTextInsertMsg(1004, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
@@ -1429,6 +1428,8 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 				}), nil
 			}).Once()
 
+		s.createTextSegment(wb, 1200)
+
 		_, msg := s.composeTextInsertMsg(1200, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
 		s.NoError(err)
@@ -1488,6 +1489,8 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 				}), nil
 			}).Once()
 
+		s.createTextSegment(wb, 1203)
+
 		_, msg := s.composeTextInsertMsg(1203, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
 		s.NoError(err)
@@ -1529,6 +1532,8 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 			},
 		})
 		s.NoError(err)
+
+		s.createTextSegment(wb, 1201)
 
 		_, msg := s.composeTextInsertMsg(1201, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
@@ -1597,6 +1602,8 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 		})
 		s.NoError(err)
 
+		s.createTextSegment(wb, 1202)
+
 		_, msg := s.composeTextInsertMsg(1202, 10)
 		insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
 		s.NoError(err)
@@ -1655,6 +1662,7 @@ func (s *L0WriteBufferSuite) TestGetGrowingFlushProgress() {
 		s.NoError(err)
 
 		for _, segmentID := range []int64{1205, 1206} {
+			s.createTextSegment(wb, segmentID)
 			_, msg := s.composeTextInsertMsg(segmentID, 10)
 			insertData, err := PrepareInsert(textSchema, s.pkSchema, []*msgstream.InsertMsg{msg})
 			s.NoError(err)

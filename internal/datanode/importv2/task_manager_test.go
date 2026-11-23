@@ -251,3 +251,27 @@ func TestTaskManagerRemoveCancelsRunningTask(t *testing.T) {
 		}
 	}
 }
+
+func TestTaskManagerFailureCancelsReadersAndKeepsOriginalReason(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager := NewTaskManager()
+	task := &ImportTask{
+		ImportTaskV2: &datapb.ImportTaskV2{TaskID: 1, State: datapb.ImportTaskStateV2_InProgress},
+		ctx:          ctx, cancel: cancel,
+	}
+	manager.Add(task)
+	siblingExited := make(chan struct{})
+	go func() {
+		defer close(siblingExited)
+		<-ctx.Done()
+		manager.Update(1, UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(ctx.Err().Error()))
+	}()
+	manager.Update(1, UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason("source object is corrupt"))
+	<-siblingExited
+	assert.ErrorIs(t, ctx.Err(), context.Canceled)
+	assert.Equal(t, "source object is corrupt", manager.Get(1).GetReason())
+	// Late completion cannot revive the canceled task either.
+	manager.Update(1, UpdateState(datapb.ImportTaskStateV2_Completed))
+	assert.Equal(t, datapb.ImportTaskStateV2_Failed, manager.Get(1).GetState())
+}

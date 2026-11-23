@@ -210,7 +210,7 @@ func benchmarkMixBloomSizing(b *testing.B, config bloomSizingBenchConfig) {
 		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 10000, End: 100000},
 		PreAllocatedLogIDs:     &datapb.IDRange{Begin: 100000, End: math.MaxInt64},
 	}
-	require.Equal(b, params.UseMergeSort, canMergeSort(plan, params), "compaction branch must match the requested path")
+	require.Equal(b, params.UseMergeSort, compaction.CanMergeSort(plan, params), "compaction branch must match the requested path")
 	b.Logf("merge_sort=%t batch_bytes=%d target_bytes=%d", params.UseMergeSort, params.BinLogMaxSize, maxSize)
 	task := NewMixCompactionTask(ctx, io, cm, plan, params, []int64{100})
 	defer task.cancel()

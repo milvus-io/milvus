@@ -96,7 +96,7 @@ func (f *commonSegmentNodeFilter) FilterNodes(ctx context.Context, nodes []int64
 }
 
 // commonChannelNodeFilter is a reusable node filter for channel assignment
-// It filters out SQN nodes (if enabled), nodes with version < 2.4, and non-normal nodes
+// It keeps SQNs and, unless assignment is forced, filters out unavailable nodes.
 type commonChannelNodeFilter struct {
 	nodeManager *session.NodeManager
 }
@@ -106,10 +106,10 @@ func newCommonChannelNodeFilter(nodeManager *session.NodeManager) nodeFilter {
 	return &commonChannelNodeFilter{nodeManager: nodeManager}
 }
 
-// FilterNodes filters nodes for channel assignment considering SQN, version, and state
+// FilterNodes keeps SQNs and checks node availability unless assignment is forced.
 func (f *commonChannelNodeFilter) FilterNodes(ctx context.Context, nodes []int64, forceAssign bool) []int64 {
-	// Filter SQN if streaming service is enabled
-	nodes = filterSQNIfStreamingServiceEnabled(nodes)
+	// Only SQNs can receive channels.
+	nodes = filterStreamingQueryNodes(nodes)
 
 	if forceAssign {
 		return nodes

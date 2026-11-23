@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
@@ -61,7 +62,7 @@ func TestReshardTaskWaitsForPreReshardingJobState(t *testing.T) {
 
 			// Must not call fail(): that would hit UpdateTask/UpdateJob, which the
 			// mock is not set up for, and the mock would fail the test.
-			task.CreateTaskOnWorker(1, nil)
+			task.CreateTaskOnWorker(1, nil, taskresource.Default())
 			require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
 		})
 	}

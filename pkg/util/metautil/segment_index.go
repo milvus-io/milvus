@@ -5,8 +5,18 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
+
+// CopiedIndexMemSize uses the serialized size for results from older workers
+// that did not report the memory size separately.
+func CopiedIndexMemSize(index *datapb.VectorScalarIndexInfo) uint64 {
+	if index != nil && index.MemSize != nil {
+		return index.GetMemSize()
+	}
+	return uint64(index.GetIndexSize())
+}
 
 // IndexPathBuilder constructs object storage paths for index files.
 // All index file path construction MUST go through this builder.

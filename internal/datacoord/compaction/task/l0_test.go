@@ -44,24 +44,27 @@ import (
 
 func TestL0CompactionUsesUnpublishedMembersFromMetaInterface(t *testing.T) {
 	mt := NewMockCompactionMeta(t)
-	mt.EXPECT().CompactionContext().Return(t.Context()).Twice()
-	mt.EXPECT().UnpublishedSegmentMembers(mock.Anything, int64(1)).Return(typeutil.NewUniqueSet(10)).Once()
+	mt.EXPECT().CompactionContext().Return(t.Context()).Times(4)
+	mt.EXPECT().UnpublishedSegmentMembers(mock.Anything, int64(1)).Return(typeutil.NewUniqueSet(10)).Twice()
 	mt.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(_ context.Context, filters ...meta.SegmentFilter) []*meta.SegmentInfo {
 			var selected []*meta.SegmentInfo
 			for _, id := range []int64{10, 11} {
-				segment := meta.NewSegmentInfo(&datapb.SegmentInfo{ID: id, CollectionID: 1, PartitionID: 2, InsertChannel: "ch", State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1})
+				segment := meta.NewSegmentInfo(&datapb.SegmentInfo{ID: id, CollectionID: 1, PartitionID: 2, InsertChannel: "ch", State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, Stats: &datapb.Statistics{StatsBinlogSize: 128 << 20}})
 				if filters[0].Match(segment) && filters[1].Match(segment) {
 					selected = append(selected, segment)
 				}
 			}
 			return selected
-		}).Once()
+		}).Twice()
 	task := NewL0CompactionTask(&datapb.CompactionTask{CollectionID: 1, PartitionID: 2, Channel: "ch", Pos: &msgpb.MsgPosition{Timestamp: 100}}, nil, mt, nil)
 	selected, _, err := task.SelectFlushedSegment()
 	require.NoError(t, err)
 	require.Len(t, selected, 1)
 	require.Equal(t, int64(11), selected[0].GetID())
+	resource := task.GetTaskResource()
+
+	require.EqualValues(t, 128<<20, resource.Memory, "pricing must exclude the same unpublished target as dispatch")
 }
 
 func TestL0CompactionCommitsDeltalogsToV3Manifest(t *testing.T) {
