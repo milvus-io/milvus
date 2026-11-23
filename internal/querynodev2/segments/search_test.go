@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -456,4 +458,70 @@ func (suite *SearchSuite) TestSearchSegmentsGateRetryObeysContext() {
 
 func TestSearch(t *testing.T) {
 	suite.Run(t, new(SearchSuite))
+}
+
+// requireSegmentStages checks the stages one segment search recorded: the
+// segment search itself and the operators of its plan, timed in segcore and
+// read back through cgo, whose self times fit inside the segment search.
+func (suite *SearchSuite) requireSegmentStages(profile *searchprofile.Recorder, segmentID int64) {
+	stages := map[string]searchprofile.Stage{}
+	for _, s := range profile.Stages() {
+		stages[s.Name] = s
+	}
+	seg, ok := stages[searchprofile.QNSegmentSearch]
+	suite.Require().True(ok, "missing %s in %s", searchprofile.QNSegmentSearch, searchprofile.Format(profile.Stages()))
+	suite.EqualValues(1, seg.Count)
+	suite.Equal(segmentID, seg.MaxID)
+
+	var opSum int64
+	for name, s := range stages {
+		if strings.HasPrefix(name, searchprofile.OperatorPrefix) {
+			opSum += s.SumUs
+			suite.Equal(segmentID, s.MaxID, name)
+		}
+	}
+	suite.Contains(stages, searchprofile.OperatorPrefix+"PhyVectorSearchNode")
+	suite.Contains(stages, searchprofile.OperatorPrefix+"PhyMvccNode")
+	suite.LessOrEqual(opSum, seg.SumUs)
+}
+
+func (suite *SearchSuite) TestSearchSealedRecordsOperatorStages() {
+	profile := searchprofile.NewRecorder(1)
+	ctx := searchprofile.WithRecorder(context.Background(), profile)
+	searchReq, err := mock_segcore.GenSearchPlanAndRequests(suite.collection.GetCCollection(), []int64{suite.sealed.ID()}, mock_segcore.IndexFaissIDMap, 10)
+	suite.Require().NoError(err)
+
+	_, segments, err := SearchHistorical(ctx, suite.manager, searchReq, suite.collectionID, nil, []int64{suite.sealed.ID()})
+	suite.Require().NoError(err)
+	suite.manager.Segment.Unpin(segments)
+	suite.requireSegmentStages(profile, suite.sealed.ID())
+}
+
+func (suite *SearchSuite) TestSearchGrowingRecordsOperatorStages() {
+	profile := searchprofile.NewRecorder(1)
+	ctx := searchprofile.WithRecorder(context.Background(), profile)
+	// MaxTimestamp mvcc, so the growing rows are visible and the plan runs.
+	searchReq, err := mock_segcore.GenSearchPlanAndRequestsWithTopK(suite.collection.GetCCollection(), []int64{suite.growing.ID()}, 1, 10)
+	suite.Require().NoError(err)
+
+	_, segments, err := SearchStreaming(ctx, suite.manager, searchReq, suite.collectionID, []int64{suite.partitionID}, []int64{suite.growing.ID()})
+	suite.Require().NoError(err)
+	suite.manager.Segment.Unpin(segments)
+	suite.requireSegmentStages(profile, suite.growing.ID())
+}
+
+// A segment with no row visible at the query timestamp returns before any
+// operator runs, so only the segment search is recorded.
+func (suite *SearchSuite) TestSearchNothingVisibleRecordsNoOperators() {
+	profile := searchprofile.NewRecorder(1)
+	ctx := searchprofile.WithRecorder(context.Background(), profile)
+	searchReq, err := mock_segcore.GenSearchPlanAndRequests(suite.collection.GetCCollection(), []int64{suite.growing.ID()}, mock_segcore.IndexFaissIDMap, 1)
+	suite.Require().NoError(err)
+
+	_, segments, err := SearchStreaming(ctx, suite.manager, searchReq, suite.collectionID, []int64{suite.partitionID}, []int64{suite.growing.ID()})
+	suite.Require().NoError(err)
+	suite.manager.Segment.Unpin(segments)
+	stages := profile.Stages()
+	suite.Require().Len(stages, 1)
+	suite.Equal(searchprofile.QNSegmentSearch, stages[0].Name)
 }

@@ -567,6 +567,7 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
         op_context.storage_usage.scanned_cold_bytes.load();
     search_result_opt_->search_storage_cost_.scanned_total_bytes =
         op_context.storage_usage.scanned_total_bytes.load();
+    search_result_opt_->operator_costs_ = query_context->get_operator_costs();
 }
 
 }  // namespace milvus::query

@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <exception>
 #include <memory>
 #include <string>
@@ -339,12 +340,28 @@ Driver::Next(std::shared_ptr<BlockingState>& blocking_state) {
         throw ExecOperatorException(err_msg);                         \
     }
 
+// TimeOperator returns a guard that adds the time until it is destroyed to
+// op's cost in query_context. Only GetOutput is timed: it is where every
+// search operator does its work, AddInput only stores the input.
+static auto
+TimeOperator(QueryContext* query_context, const Operator* op) {
+    auto start = std::chrono::steady_clock::now();
+    return folly::makeGuard([query_context, op, start]() {
+        query_context->AddOperatorCost(
+            op->get_operator_type(),
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - start)
+                .count());
+    });
+}
+
 StopReason
 Driver::RunInternal(std::shared_ptr<Driver>& self,
                     std::shared_ptr<BlockingState>& blocking_state,
                     RowVectorPtr& result) {
     try {
         initializeOperators();
+        auto query_context = get_task()->query_context().get();
         if (ENABLE_DRIVER_PREFETCH.load(std::memory_order_relaxed)) {
             std::call_once(self->once_, [self]() { self->PrefetchAsync(); });
         }
@@ -383,6 +400,7 @@ Driver::RunInternal(std::shared_ptr<Driver>& self,
                     if (needs_input) {
                         RowVectorPtr result;
                         {
+                            auto timer = TimeOperator(query_context, op);
                             CALL_OPERATOR(
                                 result = op->GetOutput(), op, "GetOutput");
                             if (result) {
@@ -424,6 +442,7 @@ Driver::RunInternal(std::shared_ptr<Driver>& self,
                     }
                 } else {
                     {
+                        auto timer = TimeOperator(query_context, op);
                         CALL_OPERATOR(
                             result = op->GetOutput(), op, "GetOutput");
                         if (result) {

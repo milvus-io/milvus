@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
@@ -161,6 +162,11 @@ type SearchTask struct {
 	storageCost  segcore.StorageCost
 	traceEnabled bool
 
+	// createdAt and profile time this request's stages; the nodes that serve
+	// it report theirs with their results.
+	createdAt time.Time
+	profile   *searchprofile.Recorder
+
 	aggCtx *search_agg.SearchAggregationContext
 
 	// Old SDK sent only singular group_by_field; output must downgrade plural→singular.
@@ -228,12 +234,20 @@ func NewSearchTask(ctx context.Context, node taskmodel.TaskNode, sched *schedule
 		enableMaterializedView: paramtable.Get().CommonCfg.EnableMaterializedView.GetAsBool(),
 		mustUsePartitionKey:    paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool(),
 		chMgr:                  node.ChMgr(),
+		createdAt:              time.Now(),
+		profile:                searchprofile.NewRecorder(paramtable.GetNodeID()),
 	}
 }
 
 // Result returns the search result after execution.
 func (t *SearchTask) Result() *milvuspb.SearchResults {
 	return t.result
+}
+
+// StageCosts returns how long each stage of the request took, on this Proxy
+// and on the nodes that served it.
+func (t *SearchTask) StageCosts() []searchprofile.Stage {
+	return t.profile.Stages()
 }
 
 // StorageCost returns the storage cost reported by the last execution.
@@ -291,6 +305,9 @@ func (t *SearchTask) CanSkipAllocTimestamp() bool {
 }
 
 func (t *SearchTask) PreExecute(ctx context.Context) (retErr error) {
+	t.profile.ObserveSince(searchprofile.ProxyQueue, t.createdAt, 0)
+	preExecuteStart := time.Now()
+	defer t.profile.ObserveSince(searchprofile.ProxyPreExecute, preExecuteStart, 0)
 	// Flushed however PreExecute ends: a request the Proxy rejects still asked
 	// for the feature, which is what the counters record, and the parse that
 	// marks a feature can be the very step that fails. countFeatures is what
@@ -1507,6 +1524,8 @@ func (t *SearchTask) Execute(ctx context.Context) error {
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute search %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
+	executeStart := time.Now()
+	defer t.profile.ObserveSince(searchprofile.ProxyExecute, executeStart, 0)
 
 	t.queryChannelsNode = typeutil.NewConcurrentMap[string, int64]()
 	if t.viewQueryClient != nil {
@@ -1591,6 +1610,11 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 	var lastErr error
 	var retryErrors []error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
+		// The client records each shard's stages, and its work nodes' with their
+		// responses, into attemptProfile before reducing them away. Only the
+		// attempt whose results are kept is merged into the request's profile.
+		attemptProfile := t.profile.Child()
+		ctx := searchprofile.WithRecorder(ctx, attemptProfile)
 		result, err := legacy.Search(ctx, &queryclient.LegacySearchRequest{
 			Req:                    searchRequest,
 			BarrierMVCC:            t.MvccTimestamp,
@@ -1616,6 +1640,7 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 				t.resultBuf.Insert(searchResult)
 			}
 			t.queryViewPlans = append([]queryclient.ShardPlan{}, result.Plans...)
+			t.profile.Merge(attemptProfile.Stages())
 			return nil
 		}
 
@@ -1687,6 +1712,7 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 		t.isRecallEvaluation = isRecallEvaluation
 		t.storageCost = storageCost
 		t.queryViewPlans = append([]queryclient.ShardPlan{}, plans...)
+		t.profile.Merge(attemptProfile.Stages())
 		return nil
 	}
 	return QueryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), lastErr)
@@ -2111,6 +2137,8 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 	defer func() {
 		tr.CtxElapse(ctx, "done")
 	}()
+	postExecuteStart := time.Now()
+	defer t.profile.ObserveSince(searchprofile.ProxyPostExecute, postExecuteStart, 0)
 	log := mlog.With(mlog.Int64("nq", t.GetNq()))
 
 	execBits := t.reducedFeatureBits

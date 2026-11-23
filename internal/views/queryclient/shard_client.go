@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/searchprofile"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
@@ -51,6 +52,7 @@ type workerReduceStream[T any] struct {
 	node         qviews.WorkNode
 	shardID      qviews.ShardID
 	onFirstChunk func(T) // Adds attempt-local Search filter metadata exactly once.
+	onChunk      func(T) // Sees every Chunk before the reducer, e.g. to take the node's stages out.
 }
 
 func (s *workerReduceStream[T]) Recv() (T, error) {
@@ -58,11 +60,41 @@ func (s *workerReduceStream[T]) Recv() (T, error) {
 	if err != nil && !errors.Is(err, io.EOF) {
 		return chunk, &workNodeFailure{node: s.node, shardID: s.shardID, err: err}
 	}
+	if err == nil && s.onChunk != nil {
+		s.onChunk(chunk)
+	}
 	if err == nil && s.onFirstChunk != nil {
 		s.onFirstChunk(chunk)
 		s.onFirstChunk = nil
 	}
 	return chunk, err
+}
+
+// profiledSearchStream merges the stages of the shard attempt that produced
+// its results into the request's profile, once, when the stream ends or is
+// closed: a reducer may stop reading a child before its EOF, but always
+// closes it. A shard retries only before it returns its first Chunk, so the
+// attempt current at that point is the one whose results were used; if the
+// request fails, the caller drops its stages altogether.
+type profiledSearchStream struct {
+	searchreducestream.ReduceStream
+	merge func()
+	once  sync.Once
+}
+
+func (s *profiledSearchStream) Recv() (*internalpb.SearchResults, error) {
+	chunk, err := s.ReduceStream.Recv()
+	if errors.Is(err, io.EOF) {
+		s.once.Do(s.merge)
+	}
+	return chunk, err
+}
+
+func (s *profiledSearchStream) Close() error {
+	// Close first, so that receives still in flight have taken their stages.
+	err := s.ReduceStream.Close()
+	s.once.Do(s.merge)
+	return err
 }
 
 // shardReduceStream can replace a failed vchannel attempt only before returning
@@ -187,12 +219,19 @@ type ShardQueryRequest struct {
 // Replica resolution is handled internally. Results are fed into the provided reducer.
 // Returns the ShardPlan for potential requery.
 func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchRequest) (*ShardPlan, error) {
+	profile := searchprofile.FromContext(ctx)
 	var stage twoStageSearch
+	// attempt holds the stages of the current shard attempt. A retry replaces
+	// it, so on return it holds the attempt whose results the reducer kept;
+	// if Search fails, the caller drops the request's stages altogether.
+	var attempt *searchprofile.Recorder
+	defer func() { profile.Merge(attempt.Stages()) }()
 	return s.executeShard(ctx, req.VChannel, &shardExecParams{
 		collectionID:     req.Req.CollectionID,
 		consistencyLevel: req.Req.ConsistencyLevel,
 		mvcc:             req.MVCC,
 		barrierMVCC:      req.BarrierMVCC,
+		profile:          profile,
 		buildPlanReq: func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
 				CollectionId: req.Req.CollectionID,
@@ -205,9 +244,11 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 		},
 		beforeDispatch: func(ctx context.Context, response *viewpb.GetQueryPlanResponse, shardID qviews.ShardID) error {
 			stage = twoStageSearch{}
+			attempt = profile.Child()
 			return s.prepareTwoStageSearch(ctx, response, shardID, req.TotalChannelNum, &stage)
 		},
 		dispatchNode: func(ctx context.Context, node qviews.WorkNode, plan *viewpb.QueryPlan, shardID qviews.ShardID) error {
+			rpcStart := time.Now()
 			resp, err := s.queryServiceClient.SearchOnView(ctx, node, &viewpb.SearchOnViewRequest{
 				ExecutionOptions: stage.options,
 				LegacyReq:        legacySearchRequestForNode(plan, node),
@@ -220,11 +261,24 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 			if err != nil {
 				return err
 			}
+			// Taken out of the Status before the reducer, so that the node's
+			// stages do not travel further with its result.
+			attempt.ObserveSince(searchprofile.ProxyShardRPC, rpcStart, workNodeID(node))
+			attempt.Merge(searchprofile.Take(resp.GetLegacyResults().GetStatus()))
 			stage.mergeFeatures(node, resp)
 			return req.Reducer.Add(shardID, resp)
 		},
 		resetShard: req.Reducer.ResetShard,
 	})
+}
+
+// workNodeID returns the node ID of a QueryNode, or 0 for a StreamingNode,
+// which is addressed by its pchannel.
+func workNodeID(node qviews.WorkNode) int64 {
+	if qn, ok := node.(qviews.QueryNode); ok {
+		return qn.ID
+	}
+	return 0
 }
 
 // SearchStreams returns one per-vchannel ReduceStream per sub-search, or one
@@ -240,6 +294,10 @@ func (s *shardViewQueryClient) SearchStreams(
 	if ctx.Err() != nil {
 		return nil, nil, ctx.Err()
 	}
+	profile := searchprofile.FromContext(ctx)
+	// attempts holds the stages of the current shard attempt, one Recorder per
+	// sub-search; profiledSearchStream merges the one whose results were kept.
+	var attempts []*searchprofile.Recorder
 	// Copy the request without setup coordination so the retry closure cannot retain it.
 	setupCtx, registerCancel := req.setupCtx, req.registerCancel
 	request := *req
@@ -278,6 +336,7 @@ func (s *shardViewQueryClient) SearchStreams(
 			retryErrors:      req.retryErrors,
 			retryState:       retry,
 			cancelStreams:    cancelWorkers,
+			profile:          profile,
 			buildPlanReq: func(shardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
 				return &viewpb.GetQueryPlanRequest{
 					CollectionId: req.Req.GetCollectionID(), ShardId: shardID.IntoProto(), PartitionIds: req.Req.GetPartitionIDs(),
@@ -311,7 +370,9 @@ func (s *shardViewQueryClient) SearchStreams(
 				// Workers of each sub-search share one context for this vchannel attempt.
 				workerContexts = make([]context.Context, len(requests))
 				workerCancels = make([]context.CancelFunc, len(requests))
+				attempts = make([]*searchprofile.Recorder, len(requests))
 				for i := range requests {
+					attempts[i] = profile.Child()
 					workerContexts[i], workerCancels[i] = context.WithCancel(ctx) //nolint:gosec // G118: the shard stream owns the cancel after setup; failures cancel it earlier.
 					if registerCancel != nil {
 						registerCancel(workerCancels[i])
@@ -334,6 +395,7 @@ func (s *shardViewQueryClient) SearchStreams(
 					}
 					workerRequest := proto.Clone(plannedRequest).(*internalpb.SearchRequest)
 					workerRequest.MvccTimestamp = legacyMVCCForNode(plan.GetMvcc(), node)
+					opened := time.Now()
 					stream, err := s.queryServiceClient.SearchOnViewStream(workerContexts[index], node, &viewpb.SearchOnViewRequest{
 						LegacyReq: workerRequest, SegmentSelection: segmentSelection, ShardId: shardID.IntoProto(),
 						Version: plan.Version, Mvcc: plan.GetMvcc(), StreamChunkBytes: int64(chunkBytes), ExecutionOptions: stage.options,
@@ -345,8 +407,18 @@ func (s *shardViewQueryClient) SearchStreams(
 						return merr.WrapErrServiceInternalMsg("SearchOnViewStream returned a nil stream for work node %s", node.String())
 					}
 					mu.Lock()
+					attempt := attempts[index]
 					child := &workerReduceStream[*internalpb.SearchResults]{
 						ReduceStream: stream, node: node, shardID: shardID,
+						// The node attaches its stages to its first Chunk, sent after its
+						// search finished. They are taken out before the reducer, so they go
+						// no further, and the RPC is timed from opening to that Chunk.
+						onChunk: func(chunk *internalpb.SearchResults) {
+							if stages := searchprofile.Take(chunk.GetStatus()); len(stages) > 0 {
+								attempt.ObserveSince(searchprofile.ProxyShardRPC, opened, workNodeID(node))
+								attempt.Merge(stages)
+							}
+						},
 					}
 					if stage.filters != nil {
 						// Include filter costs and feature bits once per worker, not once per Chunk.
@@ -401,6 +473,14 @@ func (s *shardViewQueryClient) SearchStreams(
 	if planCtx == nil {
 		planCtx = ctx
 	}
+	profiled := func(index int, stream searchreducestream.ReduceStream) searchreducestream.ReduceStream {
+		return &profiledSearchStream{ReduceStream: stream, merge: func() {
+			// No Recorder when the attempt dispatched to no work node.
+			if index < len(attempts) {
+				profile.Merge(attempts[index].Stages())
+			}
+		}}
+	}
 	if req.Req.GetIsAdvanced() {
 		streams, cancels, plan, err := open(planCtx, registerCancel)
 		if err != nil {
@@ -410,6 +490,7 @@ func (s *shardViewQueryClient) SearchStreams(
 			streams[i] = &shardReduceStream[*internalpb.SearchResults]{
 				stream: streams[i], ctx: ctx, cancel: cancels[i], plan: plan,
 			}
+			streams[i] = profiled(i, streams[i])
 		}
 		return streams, plan, nil
 	}
@@ -430,6 +511,7 @@ func (s *shardViewQueryClient) SearchStreams(
 			return next[0], cancels[0], nextPlan, nil
 		},
 	}
+	streams[0] = profiled(0, streams[0])
 	return streams, plan, nil
 }
 
@@ -599,6 +681,7 @@ type shardExecParams struct {
 	retryErrors      []error                   // Worker failures from previous whole-Proxy attempts.
 	retryState       *shardRetryState          // Streaming keeps setup and receive retries in one budget.
 	cancelStreams    func()                    // Cancels worker opens in a failed streaming attempt.
+	profile          *searchprofile.Recorder   // When set, records how long each GetQueryPlan took.
 	// buildPlanReq creates the GetQueryPlanRequest for a target shard.
 	buildPlanReq func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest
 	// consumeResponse accepts inline SN results before worker dispatch.
@@ -718,7 +801,9 @@ func (s *shardViewQueryClient) executeShard(
 
 		// Phase 1: GetQueryPlan with consistency routing.
 		planReq := params.buildPlanReq(targetShardID)
+		planStart := time.Now()
 		response, err := s.executeGetQueryPlan(ctx, targetShardID, planReq, params)
+		params.profile.ObserveSince(searchprofile.ProxyQueryPlan, planStart, 0)
 		if err != nil {
 			if retryableQueryError(err) {
 				retry.lastErr = err
