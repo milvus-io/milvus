@@ -190,13 +190,6 @@ func TestHybridSubFunctionScoreRejected(t *testing.T) {
 		message string
 	}{
 		{
-			name: "empty function score",
-			mutate: func(r *milvuspb.HybridSearchRequest) {
-				r.Requests[1].FunctionScore = &schemapb.FunctionScore{}
-			},
-			message: "must contain at least one boost function",
-		},
-		{
 			name: "nil function",
 			mutate: func(r *milvuspb.HybridSearchRequest) {
 				r.Requests[1].FunctionScore = &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{nil}}
@@ -260,6 +253,24 @@ func TestHybridSubFunctionScoreRejected(t *testing.T) {
 			assert.ErrorContains(t, err, "sub-search[1]")
 			assert.ErrorContains(t, err, tc.message)
 		})
+	}
+}
+
+// TestHybridSubFunctionScoreEmptyIsNoop checks that an empty (non-nil)
+// function_score on a sub-request is treated like an omitted one.
+func TestHybridSubFunctionScoreEmptyIsNoop(t *testing.T) {
+	paramtable.Init()
+
+	request := newSubBoostHybridRequest(t)
+	request.Requests[1].FunctionScore = &schemapb.FunctionScore{}
+	task, err := newSubBoostSearchTask(t, request)
+	require.NoError(t, err)
+
+	functionScore, err := task.hybridSubFunctionScore(1, task.request.GetSubReqs()[1])
+	require.NoError(t, err)
+	assert.Nil(t, functionScore)
+	for i := range task.SubReqs {
+		assert.Empty(t, subSearchPlan(t, task, i).GetScorers())
 	}
 }
 

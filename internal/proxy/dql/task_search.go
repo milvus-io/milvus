@@ -259,7 +259,14 @@ func (t *SearchTask) hybridSubFunctionScore(index int, subReq *milvuspb.SubSearc
 		return nil, merr.WrapErrServiceInternalMsg(
 			"sub-search[%d] is not paired with its hybrid search sub-request", index)
 	}
-	return t.hybridSubSearches[index].functionScore, nil
+	functionScore := t.hybridSubSearches[index].functionScore
+	if len(functionScore.GetFunctions()) == 0 {
+		// An empty function_score was a no-op before sub-request boost was
+		// supported. Keep it a no-op so clients that send an empty message
+		// instead of omitting the field keep working.
+		return nil, nil
+	}
+	return functionScore, nil
 }
 
 // validateHybridSubFunctionScore checks the function_score set on one
@@ -267,10 +274,6 @@ func (t *SearchTask) hybridSubFunctionScore(index int, subReq *milvuspb.SubSearc
 // sub-search hits on the QueryNode before fusion. Other rerankers would be
 // dropped, because the proxy reranks with the top-level ranker only.
 func validateHybridSubFunctionScore(index int, functionScore *schemapb.FunctionScore, subReq *milvuspb.SubSearchRequest, topLevel *schemapb.FunctionScore) error {
-	if len(functionScore.GetFunctions()) == 0 {
-		return merr.WrapErrParameterInvalidMsg(
-			"sub-search[%d] function_score must contain at least one boost function", index)
-	}
 	for i, function := range functionScore.GetFunctions() {
 		if function == nil {
 			return merr.WrapErrParameterInvalidMsg(
