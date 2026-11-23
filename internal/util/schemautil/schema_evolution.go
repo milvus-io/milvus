@@ -358,6 +358,9 @@ func validateAddedEvolutionField(field *schemapb.FieldSchema, newSchema *schemap
 	if field.GetIsDynamic() {
 		return nil
 	}
+	if field.GetExternalField() == "" && typeutil.IsExternalCollection(newSchema) {
+		return merr.WrapErrParameterInvalidMsg("add field operation on external collection requires external_field mapping, field name = %s", name)
+	}
 	if !field.GetNullable() && field.GetDefaultValue() == nil {
 		return merr.WrapErrParameterInvalidMsg("cannot add non-nullable field %q without a default value", name)
 	}

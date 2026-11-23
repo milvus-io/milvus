@@ -19,7 +19,6 @@ package querycoordv2
 import (
 	"context"
 	"sync"
-	"time"
 
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
@@ -28,10 +27,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -113,179 +110,6 @@ func (s *Server) getCollectionSegmentInfo(ctx context.Context, collection int64)
 	}
 
 	return lo.Values(infos)
-}
-
-// generate balance segment task and submit to scheduler
-// if sync is true, this func call will wait task to finish, until reach the segment task timeout
-// if copyMode is true, this func call will generate a load segment task, instead a balance segment task
-func (s *Server) balanceSegments(ctx context.Context,
-	collectionID int64,
-	replica *meta.Replica,
-	srcNode int64,
-	dstNodes []int64,
-	segments []*meta.Segment,
-	sync bool,
-	copyMode bool,
-) error {
-	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
-	policy := balancer.GetAssignPolicy()
-	plans := policy.AssignSegment(ctx, collectionID, segments, dstNodes, true)
-	for i := range plans {
-		plans[i].From = srcNode
-		plans[i].Replica = replica
-	}
-	tasks := make([]task.Task, 0, len(plans))
-	for _, plan := range plans {
-		mlog.Info(context.TODO(), "manually balance segment...",
-			mlog.Int64("replica", plan.Replica.GetID()),
-			mlog.String("channel", plan.Segment.InsertChannel),
-			mlog.Int64("from", plan.From),
-			mlog.Int64("to", plan.To),
-			mlog.Int64("segmentID", plan.Segment.GetID()),
-		)
-		actions := make([]task.Action, 0)
-		loadAction := task.NewSegmentActionWithScope(plan.To, task.ActionTypeGrow, plan.Segment.GetInsertChannel(), plan.Segment.GetID(), querypb.DataScope_Historical, int(plan.Segment.GetNumOfRows()))
-		actions = append(actions, loadAction)
-		if !copyMode {
-			// if in copy mode, the release action will be skip
-			releaseAction := task.NewSegmentActionWithScope(plan.From, task.ActionTypeReduce, plan.Segment.GetInsertChannel(), plan.Segment.GetID(), querypb.DataScope_Historical, int(plan.Segment.GetNumOfRows()))
-			actions = append(actions, releaseAction)
-		}
-
-		t, err := task.NewSegmentTask(s.ctx,
-			Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
-			utils.ManualBalance,
-			collectionID,
-			plan.Replica,
-			commonpb.LoadPriority_LOW, // Manual balance is not urgent
-			actions...,
-		)
-		if err != nil {
-			mlog.Warn(context.TODO(), "create segment task for balance failed",
-				mlog.Int64("replica", plan.Replica.GetID()),
-				mlog.String("channel", plan.Segment.InsertChannel),
-				mlog.Int64("from", plan.From),
-				mlog.Int64("to", plan.To),
-				mlog.Int64("segmentID", plan.Segment.GetID()),
-				mlog.Err(err),
-			)
-			continue
-		}
-		t.SetReason("manual balance")
-		// set manual balance to normal, to avoid manual balance be canceled by other segment task
-		t.SetPriority(task.TaskPriorityNormal)
-		err = s.taskScheduler.Add(t)
-		if err != nil {
-			t.Cancel(err)
-			mlog.Info(context.TODO(), "skip balance segment task", mlog.Int64("segmentID", plan.Segment.GetID()), mlog.Err(err))
-			continue
-		}
-		tasks = append(tasks, t)
-	}
-
-	if sync {
-		// This bound exists for a different reason than the task's own
-		// deadline: a task only gets its real deadline once it's actually
-		// admitted by the executor (see Task.ActivateDeadline). If the target
-		// node's executor stays saturated, the task can sit rejected in the
-		// queue indefinitely without ever being admitted, and callers commonly
-		// pass no deadline of their own (e.g. pymilvus defaults to
-		// timeout=None) -- so without a bound here, this handler could hang
-		// forever. SegmentTaskTimeout is a reasonable ceiling for "how long
-		// this synchronous call is willing to wait" independent of whether it
-		// matches the task's own execution budget.
-		waitCtx, cancel := context.WithTimeout(ctx, Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond))
-		defer cancel()
-		err := task.Wait(waitCtx, tasks...)
-		if err != nil {
-			msg := "failed to wait all balance task finished"
-			mlog.Warn(ctx, msg, mlog.Err(err))
-			return merr.Wrapf(err, "%s", msg)
-		}
-	}
-
-	return nil
-}
-
-// generate balance channel task and submit to scheduler
-// if sync is true, this func call will wait task to finish, until reach the channel task timeout
-// if copyMode is true, this func call will generate a load channel task, instead a balance channel task
-func (s *Server) balanceChannels(ctx context.Context,
-	collectionID int64,
-	replica *meta.Replica,
-	srcNode int64,
-	dstNodes []int64,
-	channels []*meta.DmChannel,
-	sync bool,
-	copyMode bool,
-) error {
-	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
-	policy := balancer.GetAssignPolicy()
-	plans := policy.AssignChannel(ctx, collectionID, channels, dstNodes, true)
-	for i := range plans {
-		plans[i].From = srcNode
-		plans[i].Replica = replica
-	}
-
-	tasks := make([]task.Task, 0, len(plans))
-	for _, plan := range plans {
-		mlog.Info(context.TODO(), "manually balance channel...",
-			mlog.Int64("replica", plan.Replica.GetID()),
-			mlog.String("channel", plan.Channel.GetChannelName()),
-			mlog.Int64("from", plan.From),
-			mlog.Int64("to", plan.To),
-		)
-
-		actions := make([]task.Action, 0)
-		loadAction := task.NewChannelAction(plan.To, task.ActionTypeGrow, plan.Channel.GetChannelName())
-		actions = append(actions, loadAction)
-		if !copyMode {
-			// if in copy mode, the release action will be skip
-			releaseAction := task.NewChannelAction(plan.From, task.ActionTypeReduce, plan.Channel.GetChannelName())
-			actions = append(actions, releaseAction)
-		}
-		t, err := task.NewChannelTask(s.ctx,
-			Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond),
-			utils.ManualBalance,
-			collectionID,
-			plan.Replica,
-			actions...,
-		)
-		if err != nil {
-			mlog.Warn(context.TODO(), "create channel task for balance failed",
-				mlog.Int64("replica", plan.Replica.GetID()),
-				mlog.String("channel", plan.Channel.GetChannelName()),
-				mlog.Int64("from", plan.From),
-				mlog.Int64("to", plan.To),
-				mlog.Err(err),
-			)
-			continue
-		}
-		t.SetReason("manual balance")
-		// set manual balance channel to high, to avoid manual balance be canceled by other channel task
-		t.SetPriority(task.TaskPriorityHigh)
-		err = s.taskScheduler.Add(t)
-		if err != nil {
-			t.Cancel(err)
-			mlog.Info(context.TODO(), "skip balance channel task", mlog.String("channel", plan.Channel.GetChannelName()), mlog.Err(err))
-			continue
-		}
-		tasks = append(tasks, t)
-	}
-
-	if sync {
-		// See the matching comment in balanceSegments.
-		waitCtx, cancel := context.WithTimeout(ctx, Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond))
-		defer cancel()
-		err := task.Wait(waitCtx, tasks...)
-		if err != nil {
-			msg := "failed to wait all balance task finished"
-			mlog.Warn(ctx, msg, mlog.Err(err))
-			return merr.Wrapf(err, "%s", msg)
-		}
-	}
-
-	return nil
 }
 
 func getMetrics[T any](ctx context.Context, s *Server, req *milvuspb.GetMetricsRequest) ([]T, error) {

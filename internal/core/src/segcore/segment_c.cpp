@@ -581,20 +581,18 @@ CheckExternalFieldsInLoadedManifest(
             continue;
         }
         const auto& field_meta = schema->operator[](field_id);
-        auto column_name = schema->GetPhysicalColumnName(field_id);
         // External output may be served through take(), so "ready" here means
         // the loaded manifest contains the storage column. It intentionally
         // does not require field data or index accessibility.
-        if (!segment->HasColumnInLoadedManifest(column_name)) {
+        if (!segment->HasFieldInLoadedManifest(field_id)) {
             throw milvus::SegcoreError(
                 milvus::FieldNotLoaded,
                 fmt::format(
-                    "external field \"{}\" (storage column \"{}\") is not "
+                    "external field \"{}\" is not "
                     "available in the current loaded external collection "
                     "manifest; run RefreshExternalCollection and reload the "
                     "collection before accessing this field",
-                    field_meta.get_name().get(),
-                    column_name));
+                    field_meta.get_name().get()));
         }
     }
 }

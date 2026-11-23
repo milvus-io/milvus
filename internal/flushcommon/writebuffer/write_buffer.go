@@ -21,7 +21,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -1379,25 +1378,7 @@ func (wb *writeBufferBase) resolveNewGrowingSegmentStorageVersion(info CreateGro
 	case storage.StorageV2, storage.StorageV3:
 		return info.StorageVersion, nil
 	case storage.StorageV1:
-		if streamingutil.IsStreamingServiceEnabled() {
-			return 0, merr.WrapErrServiceInternalMsg("missing storage version for streaming growing segment, segmentID=%d", info.SegmentID)
-		}
-		inferred := storage.StorageV2
-		reason := "default non-streaming storage version"
-		if typeutil.HasTextField(wb.metaCache.GetSchema(0)) {
-			inferred = storage.StorageV3
-			reason = "TEXT field requires StorageV3"
-		} else if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
-			inferred = storage.StorageV3
-			reason = "common.storage.useLoonFFI enabled"
-		}
-		mlog.Warn(context.TODO(), "infer missing storage version for non-streaming growing segment",
-			mlog.FieldSegmentID(info.SegmentID),
-			mlog.Int64("collectionID", wb.collectionID),
-			mlog.String("channel", wb.channelName),
-			mlog.Int64("inferredStorageVersion", inferred),
-			mlog.String("reason", reason))
-		return inferred, nil
+		return 0, merr.WrapErrServiceInternalMsg("missing storage version for streaming growing segment, segmentID=%d", info.SegmentID)
 	default:
 		return 0, merr.WrapErrServiceInternalMsg("unsupported storage version for growing segment, segmentID=%d storageVersion=%d",
 			info.SegmentID, info.StorageVersion)

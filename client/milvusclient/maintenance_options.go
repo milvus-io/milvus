@@ -46,6 +46,7 @@ func (opt *loadCollectionOption) Request() *milvuspb.LoadCollectionRequest {
 		LoadFields:           opt.loadFields,
 		SkipLoadDynamicField: opt.skipLoadDynamicField,
 		ResourceGroups:       opt.resourceGroups,
+		Refresh:              opt.isRefresh,
 	}
 	if opt.warmupHint {
 		req.LoadParams = map[string]string{"warmup_hint": "true"}

@@ -20,15 +20,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/importv3"
+	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	importv3pb "github.com/milvus-io/milvus/pkg/v3/proto/importv3pb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -45,10 +48,13 @@ type importV3FakeTask struct {
 	result   any
 }
 
-func (t *importV3FakeTask) TaskID() int64                   { return t.taskID }
-func (t *importV3FakeTask) RunID() int64                    { return t.runID }
-func (t *importV3FakeTask) Kind() string                    { return t.kind }
-func (t *importV3FakeTask) Slot() int64                     { return t.slot }
+func (t *importV3FakeTask) TaskID() int64 { return t.taskID }
+func (t *importV3FakeTask) RunID() int64  { return t.runID }
+func (t *importV3FakeTask) Kind() string  { return t.kind }
+func (t *importV3FakeTask) Slot() int64   { return t.slot }
+func (t *importV3FakeTask) Resource() taskcommon.Resource {
+	return taskcommon.Resource{CPU: 1, Memory: 1}
+}
 func (t *importV3FakeTask) Progress() importv3.TaskProgress { return t.progress }
 func (t *importV3FakeTask) Execute(context.Context) (any, error) {
 	return t.result, nil
@@ -66,7 +72,7 @@ func (importV3StorageFactory) NewChunkManager(context.Context, *indexpb.StorageC
 func newImportV3ServicesNode(t *testing.T, started bool) (*DataNode, *importv3.Scheduler) {
 	t.Helper()
 	paramtable.Init()
-	scheduler := importv3.NewScheduler(context.Background(), func() int64 { return 100 }, importv3.NewMetrics(1))
+	scheduler := importv3.NewScheduler(context.Background(), func() taskcommon.Resource { return taskcommon.Resource{Memory: 100} }, importv3.NewMetrics(1))
 	if started {
 		done := make(chan struct{})
 		go func() {
@@ -126,7 +132,7 @@ func TestSubmitReshardTaskValidatesRequest(t *testing.T) {
 
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
-	status, err := node.submitReshardTask(canceled, validReshardRequest())
+	status, err := node.submitReshardTask(canceled, validReshardRequest(), taskcommon.Resource{CPU: 1, Memory: 1})
 	require.NoError(t, err)
 	require.False(t, merr.Ok(status))
 
@@ -139,7 +145,7 @@ func TestSubmitReshardTaskValidatesRequest(t *testing.T) {
 	}
 	for name, req := range cases {
 		t.Run(name, func(t *testing.T) {
-			status, err := node.submitReshardTask(ctx, req)
+			status, err := node.submitReshardTask(ctx, req, taskcommon.Resource{CPU: 1, Memory: 1})
 			require.NoError(t, err)
 			require.False(t, merr.Ok(status))
 			require.Contains(t, status.GetReason(), "invalid or incomplete ReshardTask request")
@@ -151,7 +157,7 @@ func TestSubmitReshardTaskValidatesRequest(t *testing.T) {
 // request is handed to the scheduler, where it waits as Pending.
 func TestSubmitReshardTaskQueuesValidRequest(t *testing.T) {
 	node, scheduler := newImportV3ServicesNode(t, false)
-	status, err := node.submitReshardTask(context.Background(), validReshardRequest())
+	status, err := node.submitReshardTask(context.Background(), validReshardRequest(), taskcommon.Resource{CPU: 1, Memory: 1})
 	require.NoError(t, err)
 	require.True(t, merr.Ok(status))
 	snapshot, ok := scheduler.Query(2, 3)
@@ -174,14 +180,14 @@ func TestSubmitImportTaskV3ValidatesRequest(t *testing.T) {
 	}
 	for name, req := range cases {
 		t.Run(name, func(t *testing.T) {
-			status, err := node.submitImportTaskV3(ctx, req)
+			status, err := node.submitImportTaskV3(ctx, req, taskcommon.Resource{CPU: 1, Memory: 1})
 			require.NoError(t, err)
 			require.False(t, merr.Ok(status))
 			require.Contains(t, status.GetReason(), "invalid or incomplete ImportTaskV3 request")
 		})
 	}
 
-	status, err := node.submitImportTaskV3(ctx, validImportV3Request())
+	status, err := node.submitImportTaskV3(ctx, validImportV3Request(), taskcommon.Resource{CPU: 1, Memory: 1})
 	require.NoError(t, err)
 	require.True(t, merr.Ok(status))
 }
@@ -301,4 +307,49 @@ func TestQueryImportV3WorkerTaskErrors(t *testing.T) {
 		require.False(t, merr.Ok(resp.GetStatus()))
 		require.Contains(t, resp.GetStatus().GetReason(), "invalid V3 task type")
 	})
+}
+
+func TestCreateTaskNormalizesLegacyV3PriceAtIngress(t *testing.T) {
+	capacity := taskcommon.Resource{CPU: 8, Memory: 1024}
+	capacityMock := mockey.Mock(taskCapacityForMachine).Return(capacity).Build()
+	defer capacityMock.UnPatch()
+	slotMock := mockey.Mock(index.CalculateNodeSlots).Return(int64(64)).Build()
+	defer slotMock.UnPatch()
+	reshard := validReshardRequest()
+	reshard.Slot = 16
+	importReq := validImportV3Request()
+	importReq.Slot = 16
+	requests := []struct {
+		kind    taskcommon.Type
+		payload proto.Message
+	}{
+		{taskcommon.PreImportV3, &datapb.PreImportRequest{TaskID: 2, TaskSlot: 16, StorageConfig: &indexpb.StorageConfig{}}},
+		{taskcommon.Reshard, reshard},
+		{taskcommon.ImportV3, importReq},
+	}
+	for _, request := range requests {
+		for _, price := range []string{"missing", "zero", "explicit"} {
+			t.Run(request.kind+"/"+price, func(t *testing.T) {
+				node := newResourceTestNode(t)
+				node.storageFactory = importV3StorageFactory{}
+				properties := taskcommon.NewProperties(map[string]string{})
+				properties.AppendType(request.kind)
+				properties.AppendTaskID(2)
+				properties.AppendTaskSlot(16)
+				want := taskcommon.Resource{CPU: 2, Memory: 256}
+				if price == "zero" {
+					properties.AppendTaskResource(taskcommon.Resource{})
+				}
+				if price == "explicit" {
+					want = taskcommon.Resource{CPU: 3, Memory: 123}
+					properties.AppendTaskResource(want)
+				}
+				payload, err := proto.Marshal(request.payload)
+				require.NoError(t, err)
+				status, err := node.CreateTask(context.Background(), &workerpb.CreateTaskRequest{Properties: properties, Payload: payload})
+				require.NoError(t, merr.CheckRPCCall(status, err))
+				require.Equal(t, want, node.importV3Scheduler.Resource())
+			})
+		}
+	}
 }

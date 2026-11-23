@@ -219,6 +219,7 @@ func TestChannelsHeap(t *testing.T) {
 }
 
 func TestDmlChannels(t *testing.T) {
+	useStreamingBootstrap(t)
 	const (
 		dmlChanPrefix      = "rootcoord-dml"
 		totalDmlChannelNum = 2
@@ -267,6 +268,7 @@ func TestDmlChannels(t *testing.T) {
 }
 
 func TestDmChannelsFailure(t *testing.T) {
+	useStreamingBootstrap(t)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	t.Run("Test newDmlChannels", func(t *testing.T) {

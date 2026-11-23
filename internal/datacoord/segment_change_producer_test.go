@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -352,7 +353,7 @@ func TestSegmentChangeCopyPublication(t *testing.T) {
 	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskCompleted, copyMeta.GetTask(t.Context(), task.GetTaskId()).GetState())
 	require.NoError(t, copyMeta.UpdateTask(t.Context(), task.GetTaskId(), copysegment.UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskInProgress), copysegment.UpdateCopyTaskCleanup(true)))
 	ct := task.(*copysegment.Task)
-	ct.CreateTaskOnWorker(1, session.NewMockCluster(t))
+	ct.CreateTaskOnWorker(1, session.NewMockCluster(t), taskcommon.Resource{CPU: 1, Memory: 64 << 20})
 	ct.QueryTaskOnWorker(session.NewMockCluster(t))
 	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskCompleted, ct.GetState(), "accepted files must not be copied again after worker/task-state loss")
 	inspector := newSegmentChangeInspector(t.Context(), m, meta.NewMockAllocator(t))

@@ -757,7 +757,7 @@ func buildTargetManifestIndexes(
 			IndexVersion:              info.GetVersion(),
 			NumRows:                   numRows,
 			SerializedSize:            info.GetIndexSize(),
-			MemSize:                   info.GetIndexSize(),
+			MemSize:                   int64(metautil.CopiedIndexMemSize(info)),
 			CurrentIndexVersion:       info.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: info.GetCurrentScalarIndexVersion(),
 			IndexStorePathVersion:     info.GetIndexStorePathVersion(),
@@ -1150,6 +1150,10 @@ func buildIndexInfoFromSource(
 			IndexName:                 srcIndex.GetIndexName(),
 			IndexType:                 srcIndex.GetIndexType(),
 			IndexStorePathVersion:     srcIndex.GetIndexStorePathVersion(),
+		}
+		// Older snapshots have no separately recorded estimate.
+		if memSize := srcIndex.GetMemSize(); memSize > 0 {
+			indexInfos[buildID].MemSize = proto.Uint64(memSize)
 		}
 		if target.IndexStorePathVersion != nil {
 			indexInfos[buildID].IndexStorePathVersion = target.GetIndexStorePathVersion()

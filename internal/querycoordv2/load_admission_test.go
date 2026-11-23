@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -139,7 +138,7 @@ func (f *admissionFixture) loadedIn(t *testing.T, collectionID int64, rgNames ..
 	}
 }
 
-// withStreamingQueryNodes turns the streaming service on and makes the
+// withStreamingQueryNodes makes the
 // streaming node manager answer from byRG, so a test can state which resource
 // group holds which streaming query nodes without one running. The
 // cluster-wide set is derived from byRG: the two are the same nodes.
@@ -148,7 +147,6 @@ func withStreamingQueryNodes(byRG map[string]typeutil.UniqueSet) func() {
 	for _, nodes := range byRG {
 		all.Insert(nodes.Collect()...)
 	}
-	enabled := mockey.Mock(streamingutil.IsStreamingServiceEnabled).Return(true).Build()
 	byGroup := mockey.Mock((*snmanager.StreamingNodeManager).GetStreamingQueryNodeIDsByResourceGroup).
 		Return(byRG).Build()
 	cluster := mockey.Mock((*snmanager.StreamingNodeManager).GetStreamingQueryNodeIDs).
@@ -156,7 +154,6 @@ func withStreamingQueryNodes(byRG map[string]typeutil.UniqueSet) func() {
 	return func() {
 		cluster.UnPatch()
 		byGroup.UnPatch()
-		enabled.UnPatch()
 	}
 }
 
@@ -207,8 +204,8 @@ func (f *admissionFixture) loadPartitions(t *testing.T, req *querypb.LoadPartiti
 }
 
 // theFormsOnlyStreamingNode is the streaming side of a form's instance: one
-// streaming node, for DDL and the write ahead log, in a group of its own that
-// holds no replica. Every query cluster is a group of regular query nodes.
+// streaming node in a separate group. Load admission checks the QueryNodes
+// in the requested resource groups independently of delegator placement.
 func theFormsOnlyStreamingNode() map[string]typeutil.UniqueSet {
 	return map[string]typeutil.UniqueSet{"internal": typeutil.NewUniqueSet(7)}
 }
@@ -364,8 +361,8 @@ func TestAScopedExpansionAskingMoreReplicasThanTheGroupHasQueryNodesIsRefused(t 
 
 // A group with enough query nodes admits the expansion, exactly as a first
 // load into it would be admitted - and with a form installed it is admitted
-// although the whole instance runs one streaming node: a form's delegators
-// go onto the replicas' own query nodes (UseStreamingQueryNodeAsDelegator).
+// although the whole instance runs one streaming node. This is an admission
+// policy independent of delegator placement.
 func TestAScopedExpansionIntoAGroupWithEnoughNodesIsAdmitted(t *testing.T) {
 	setForm(t, true)
 	f := newAdmissionFixture(t)

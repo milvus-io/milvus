@@ -89,16 +89,26 @@ func (c *indexTaskCounts) adjustTask(task *model.SegmentIndex, delta int64) {
 	if task == nil {
 		return
 	}
-	key := [2]int64{task.CollectionID, task.IndexID}
+	c.adjustIndex(task.CollectionID, task.IndexID, task.IndexState, task.IsDeleted, task.IndexSerializedSize, delta)
+}
+
+func (c *indexTaskCounts) adjustSummary(summary *model.SegmentIndexSummary, delta int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.adjustIndex(summary.CollectionID, summary.IndexID, summary.IndexState, summary.IsDeleted, summary.IndexSerializedSize, delta)
+}
+
+func (c *indexTaskCounts) adjustIndex(collectionID, indexID int64, state commonpb.IndexState, deleted bool, serializedSize uint64, delta int64) {
+	key := [2]int64{collectionID, indexID}
 	active := c.active[key]
 	stats := c.byIndex[key]
-	if slot := indexTaskStateSlot(task.IndexState); slot >= 0 && !task.IsDeleted {
+	if slot := indexTaskStateSlot(state); slot >= 0 && !deleted {
 		stats.counts[slot] += delta
 		if active {
 			c.total[slot] += delta
 		}
 	}
-	size := delta * int64(task.IndexSerializedSize)
+	size := delta * int64(serializedSize)
 	stats.size += size
 	if stats == (indexTaskStats{}) {
 		delete(c.byIndex, key)
@@ -109,7 +119,7 @@ func (c *indexTaskCounts) adjustTask(task *model.SegmentIndex, delta int64) {
 		c.byIndex[key] = stats
 	}
 	if active && size != 0 {
-		c.addActiveSize(task.CollectionID, size)
+		c.addActiveSize(collectionID, size)
 	}
 }
 

@@ -1,11 +1,15 @@
 package planparserv2
 
 import (
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
+	"weak"
 
 	"github.com/antlr4-go/antlr/v4"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	antlrparser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 )
@@ -305,4 +309,132 @@ func Test_poolParserBuildParseTrees(t *testing.T) {
 
 	putParser(parser)
 	putLexer(lexer)
+}
+
+func waitWeakCollected[T any](t *testing.T, w weak.Pointer[T], label string) {
+	t.Helper()
+	for range 10 {
+		runtime.GC()
+		if w.Value() == nil {
+			return
+		}
+	}
+	require.Nil(t, w.Value(), "%s remained reachable after GC", label)
+}
+
+// Test_putParserDetachesSimulatorReferences pins a pooled parser across a large
+// SLL/LL parse and verifies putParser detaches the input stream, parse tree, and
+// recognition errors so nothing from the completed request stays reachable through
+// the simulator.
+func Test_putParserDetachesSimulatorReferences(t *testing.T) {
+	resetLexerPool()
+	resetParserPool()
+
+	largeExpr := `userId NOT IN [` + strings.Repeat(`"1000000000000000001",`, 5000) + `"1000000000000000002"]`
+	var pinnedParser *antlrparser.PlanParser
+	var pinnedLexer *antlrparser.PlanLexer
+	var weakStream weak.Pointer[antlr.InputStream]
+	var weakAST weak.Pointer[antlrparser.ExprContext]
+
+	func() {
+		stream := antlr.NewInputStream(largeExpr)
+		weakStream = weak.Make(stream)
+		listener := &errorListenerImpl{}
+		pinnedLexer = getLexer(stream, listener)
+		pinnedParser = getParser(pinnedLexer, listener)
+
+		ast := parseExpr(pinnedParser, listener)
+		require.NoError(t, listener.Error())
+		if exprCtx, ok := ast.(*antlrparser.ExprContext); ok {
+			weakAST = weak.Make(exprCtx)
+		}
+		putParser(pinnedParser)
+		putLexer(pinnedLexer)
+	}()
+
+	waitWeakCollected(t, weakStream, "large InputStream after putParser")
+	if weakAST != (weak.Pointer[antlrparser.ExprContext]{}) {
+		waitWeakCollected(t, weakAST, "large AST after putParser")
+	}
+	runtime.KeepAlive(pinnedParser)
+	runtime.KeepAlive(pinnedLexer)
+}
+
+// Test_putParserDetachesSyntaxErrorReferences verifies that returning a parser
+// after a syntax error (including Stage-2 LL fallback) detaches the exception's
+// offending token, input stream, and rule context.
+func Test_putParserDetachesSyntaxErrorReferences(t *testing.T) {
+	resetLexerPool()
+	resetParserPool()
+
+	largeInvalidExpr := `userId NOT IN [` + strings.Repeat(`"1000000000000000001",`, 2000) + `== ]`
+	var pinnedParser *antlrparser.PlanParser
+	var pinnedLexer *antlrparser.PlanLexer
+	var weakStream weak.Pointer[antlr.InputStream]
+
+	func() {
+		stream := antlr.NewInputStream(largeInvalidExpr)
+		weakStream = weak.Make(stream)
+		listener := &errorListenerImpl{}
+		pinnedLexer = getLexer(stream, listener)
+		pinnedParser = getParser(pinnedLexer, listener)
+
+		_ = parseExpr(pinnedParser, listener)
+		require.Error(t, listener.Error())
+
+		putParser(pinnedParser)
+		putLexer(pinnedLexer)
+	}()
+
+	waitWeakCollected(t, weakStream, "invalid InputStream after putParser")
+	require.Nil(t, pinnedParser.GetError())
+	require.Nil(t, pinnedLexer.GetError())
+	runtime.KeepAlive(pinnedParser)
+	runtime.KeepAlive(pinnedLexer)
+}
+
+// Test_cachedASTDoesNotRetainSubsequentLargeParse reproduces the cross-root interaction
+// between exprCache (#53754) and parser pooling (#55605): a cached small AST keeps its
+// creating PlanParser alive via ExprContext.parser. Reusing that PlanParser for an
+// uncached large expression must not keep the large expression alive through the cached AST.
+func Test_cachedASTDoesNotRetainSubsequentLargeParse(t *testing.T) {
+	resetLexerPool()
+	resetParserPool()
+	configureExprCacheWithBytes(t, "true", "16", "1048576", "4096")
+
+	smallAST, err := handleInternal("id == 1")
+	require.NoError(t, err)
+	require.True(t, exprCache().cache.Contains("id == 1"))
+
+	// Reuse the exact parser referenced by the cached small AST for an oversized
+	// expression that is too large to enter exprCache.
+	reusedParser, ok := smallAST.GetParser().(*antlrparser.PlanParser)
+	require.True(t, ok)
+
+	largeExpr := `userId NOT IN [` + strings.Repeat(`"1000000000000000001",`, 5000) + `"1000000000000000002"]`
+	var weakLargeStream weak.Pointer[antlr.InputStream]
+	func() {
+		stream := antlr.NewInputStream(largeExpr)
+		weakLargeStream = weak.Make(stream)
+		listener := &errorListenerImpl{}
+		lexer := getLexer(stream, listener)
+		defer putLexer(lexer)
+
+		reusedParser.RemoveErrorListeners()
+		reusedParser.AddErrorListener(listener)
+		reusedParser.BuildParseTrees = true
+		reusedParser.SetInputStream(antlr.NewCommonTokenStream(lexer, antlr.TokenDefaultChannel))
+		reusedParser.GetInterpreter().SetPredictionMode(antlr.PredictionModeLL)
+
+		_ = parseExpr(reusedParser, listener)
+		require.NoError(t, listener.Error())
+		putParser(reusedParser)
+	}()
+
+	waitWeakCollected(t, weakLargeStream, "large InputStream must not be pinned by cached small AST")
+
+	// The cached small AST must remain valid and reusable.
+	cachedAgain, err := handleInternal("id == 1")
+	require.NoError(t, err)
+	require.Same(t, smallAST, cachedAgain)
 }
