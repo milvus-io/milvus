@@ -22,6 +22,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -46,5 +47,9 @@ type Task interface {
 	PostExecute(context.Context) error
 	Reset()
 	GetSlot() int64
+	// GetResource is the accepted CPU/memory price. CreateTask normalizes older
+	// coordinators' scalar slots at RPC ingress. The queue books this price
+	// unchanged until native execution and input cleanup finish.
+	GetResource() taskcommon.Resource
 	IsVectorIndex() bool
 }

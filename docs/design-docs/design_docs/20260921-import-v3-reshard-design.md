@@ -400,27 +400,31 @@ job, and committed vchannels are never rolled back.
 
 ## DataNode Worker Scheduling
 
-- **Slot scheduler** (`internal/datanode/importv3/scheduler.go`) owns both the
-  admission policy and the run registry, so `Submit`/`Query`/`Drop` and the
-  DataCoord-facing answers all read one place. Admission is pure: a submitted
-  task queues until `used + slot <= capacity`; queued slots count as used in
-  `QuerySlot` so DataCoord stops water-filling the node. A queued task answers
-  `Pending` (never "not found"), so DataCoord waits for its slot instead of
-  retrying elsewhere. A task whose own slot exceeds capacity runs alone once the
-  node is otherwise idle.
-- The registry holds every run in one insertion-ordered map keyed by
-  `(task_id, run_id)` and fences by `run_id`: same run ⇒ idempotent; older run ⇒
-  stale no-op; newer run ⇒ cancel/replace (the superseded run stays in the
-  registry, hidden from `Query`, until its closure exits, so its slot keeps
-  charging). Worker errors map to `Retry` (ctx canceled or non-terminal) or
-  `Failed` (terminal denylist `common.IsTerminalImportV3Err`), classified once
-  at the worker; DataCoord trusts the state and never reinterprets `reason`.
-- An admission pass takes one lock: it reads the used slots, picks the pending
-  runs that fit (in Submit order), marks them running and computes the
-  queue/state gauges under that lock, then hands them to the executor pool
-  outside it, so a full pool never stalls the loop. The loop is level-triggered
-  (a one-second ticker plus a coalescing wakeup), so a missed or duplicated
-  wakeup cannot corrupt the outcome.
+- The scheduler (`internal/datanode/importv3/scheduler.go`) owns its run registry
+  and memory admission independently of index/stats/analyze. It captures the
+  supplied Resource at Submit, charges its memory when admitted, and releases
+  execution memory only when the pool closure exits. Pending resources remain
+  visible in QuerySlot but do not consume execution memory, so queued work
+  cannot prevent its own execution. CreateTask converts older coordinators'
+  scalar slots at RPC ingress; local admission uses memory only.
+- DataCoord owns overall worker placement. If no worker has enough available
+  memory, the head task can run exclusively on an explicitly idle worker,
+  including when its estimate exceeds every worker's total memory. If no worker
+  is eligible, it blocks subsequent dispatches. This guarantees scheduling
+  progress, not that an oversized task fits physical RAM.
+- The registry holds runs in an insertion-ordered map keyed by `(task_id, run_id)`.
+  A duplicate current run is idempotent; a stale run is a no-op; a newer run
+  cancels/replaces the current run. A completed Retry attempt with the same run
+  ID can be submitted again. Superseded runs remain hidden from Query but keep
+  their resource booking until their closures exit. Worker errors are classified
+  once at the worker; DataCoord trusts the state and never reinterprets `reason`.
+- An admission pass takes the registry lock, sums memory of admitted unfinished
+  runs, and scans pending runs in Submit order. It admits runs that fit and can
+  admit one oversized run when no execution memory is in use. It updates state
+  and queue gauges under the lock, then submits to the executor pool outside it,
+  so pool backpressure does not hold up registry RPCs. The executor pool retains
+  its concurrency limit. A one-second ticker and coalescing wakeup trigger the
+  loop; a missed or duplicated wakeup cannot corrupt the outcome.
 
 ## Failure, Retry and Recovery
 
