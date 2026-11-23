@@ -170,6 +170,54 @@ func (s *RefreshExternalCollectionTaskSuite) TestTaskLifecycle() {
 	s.Equal(int64(1), task.GetSlot())
 }
 
+func (s *RefreshExternalCollectionTaskSuite) TestPreExecuteResolvesMilvusTableSourceColumnsOnce() {
+	ctx := context.Background()
+	source := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 103, Name: "source_pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "source_value", DataType: schemapb.DataType_Int64},
+	}}
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID: s.collectionID, ExternalSource: "s3://bucket/snapshot.json",
+		ExternalSpec: `{"format":"milvus-table"}`, TargetRowsPerSegment: 1000,
+		StorageConfig: &indexpb.StorageConfig{StorageType: "local"},
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: "pk", ExternalField: "source_pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 103, Name: "value", ExternalField: "source_value", DataType: schemapb.DataType_Int64},
+		}},
+	}
+	reads := 0
+	read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).To(
+		func(src, spec string, cfg *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (*datapb.SnapshotMetadata, error) {
+			reads++
+			s.Equal(req.GetExternalSource(), src)
+			return &datapb.SnapshotMetadata{Collection: &datapb.CollectionDescription{Schema: source}}, nil
+		}).Build()
+	defer read.UnPatch()
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	s.Require().NoError(task.PreExecute(ctx))
+	s.Equal([]string{"103", "101", "1"}, task.columns)
+	s.Equal(1, reads)
+	pk, err := task.getMilvusTableSourcePKField()
+	s.Require().NoError(err)
+	s.Equal(int64(103), pk.GetFieldID())
+	s.Equal(1, reads)
+	s.Equal(int64(101), req.GetSchema().GetFields()[0].GetFieldID())
+	fragments := []packed.Fragment{{
+		FilePath: "source-manifest", RowCount: 3,
+		Properties: map[string]string{"opaque": "kept"},
+	}}
+	fetch := mockey.Mock(packed.FetchFragmentsFromExternalSourceWithRange).Return(fragments, nil).Build()
+	defer fetch.UnPatch()
+	req.ExploreManifestPath = "explore-manifest"
+	bound, err := task.fetchFragmentsFromExternalSource(ctx)
+	s.Require().NoError(err)
+	s.Require().Len(bound, 1)
+	s.JSONEq(`{"1":"1","101":"103","103":"101"}`, bound[0].Properties["milvus_table.field_id_mapping"])
+	s.Equal("kept", bound[0].Properties["opaque"])
+	s.NotContains(fragments[0].Properties, "milvus_table.field_id_mapping")
+	s.Equal(1, reads)
+}
+
 func (s *RefreshExternalCollectionTaskSuite) TestPreExecuteClonesSchemaBeforeFillingExternalMetadata() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2620,7 +2668,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestBuildCurrentSegmentFragments() 
 		}).Build()
 	defer mockBuild.UnPatch()
 
-	got, err := task.buildCurrentSegmentFragments()
+	got, err := task.buildCurrentSegmentFragments(ctx)
 	s.NoError(err)
 	s.Equal(expected, got)
 	s.Equal([]string{"text_col"}, gotColumns)
@@ -3899,6 +3947,53 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Empt
 	s.Len(result, 1)
 	s.Equal(int64(100), result[0].GetNumOfRows())
 	s.Equal(datapb.SegmentLevel_L1, result[0].GetLevel())
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PreservesSchemaVersion() {
+	paramtable.Init()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema: &schemapb.CollectionSchema{
+			Version: 8,
+			Fields: []*schemapb.FieldSchema{
+				// Sampling is independent of the schema version carried by the segment.
+				{FieldID: 100, Name: "text", ExternalField: "text_col"},
+			},
+		},
+	}
+
+	task := s.newTask(ctx, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (string, error) {
+			return fmt.Sprintf("%s/manifest.json", basePath), nil
+		}).Build()
+	defer m1.UnPatch()
+
+	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
+		Return(map[string]int64{"text_col": 64}, nil).Build()
+	defer m2.UnPatch()
+
+	// Newly imported segments must satisfy the schema materialization barrier.
+	fragments := []packed.Fragment{
+		{FragmentID: 1, RowCount: 100},
+	}
+
+	result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+	s.Require().NoError(err)
+	s.Require().Len(result, 1)
+	s.Equal(int32(8), result[0].GetSchemaVersion())
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_ContextCanceledInLoops() {

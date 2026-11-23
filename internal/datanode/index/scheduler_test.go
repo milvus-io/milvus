@@ -49,6 +49,7 @@ func TestGetStateFromError(t *testing.T) {
 			{"conversion budget exceeded", 2003, indexpb.JobState_JobStateFailed},
 			{"allocation failed", 2034, indexpb.JobState_JobStateRetry},
 			{"other configuration error", 2006, indexpb.JobState_JobStateRetry},
+			{"mapped field awaiting external refresh", 2027, indexpb.JobState_JobStateRetry},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				// Preserve the code through the same wrapper used by index builds.

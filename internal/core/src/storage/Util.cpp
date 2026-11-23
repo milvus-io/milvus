@@ -1815,6 +1815,7 @@ IterateFieldDataFromManifest(
     auto loon_manifest = GetLoonManifest(manifest_path, loon_ffi_properties);
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
+    const auto field_id_mapping = ReadMilvusTableFieldIdMapping(*column_groups);
 
     // Determine the column name to use. New index-build callers pass the
     // storage column mapping through FileManagerContext. The fallback keeps
@@ -1835,6 +1836,32 @@ IterateFieldDataFromManifest(
         column_name = std::to_string(field_meta.field_id);
     }
 
+    const auto missing_field = [&]() {
+        // External mappings become readable only after explicit refresh.
+        // Silent empty return allows index builders to synthesize NULL/default
+        // rows; report a retriable error instead so they retry the refreshed
+        // manifest.
+        if (is_external) {
+            ThrowInfo(FieldNotLoaded,
+                      "mapped external field {} ({}) is not available in the "
+                      "current segment manifest; run RefreshExternalCollection "
+                      "before accessing this field",
+                      field_meta.field_id,
+                      ext_field);
+        }
+    };
+
+    if (field_id_mapping != nullptr) {
+        is_external = true;
+        const auto mapped =
+            field_id_mapping->physical_columns.find(field_meta.field_id);
+        if (mapped == field_id_mapping->physical_columns.end()) {
+            missing_field();
+            return;
+        }
+        column_name = mapped->second;
+    }
+
     // TODO remove manual check after loon support read null for non-exists field
     auto column_exists = [&](const std::string& name) {
         for (size_t i = 0; i < column_groups->size(); i++) {
@@ -1848,6 +1875,7 @@ IterateFieldDataFromManifest(
     };
     bool field_exists = column_exists(column_name);
     if (!field_exists) {
+        missing_field();
         return;
     }
 

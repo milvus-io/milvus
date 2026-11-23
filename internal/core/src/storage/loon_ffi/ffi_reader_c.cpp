@@ -16,6 +16,8 @@
 #include <exception>
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "PluginInterface.h"
@@ -68,12 +70,81 @@ GetLoonReader(
     auto result = arrow::ImportSchema(schema);
     AssertInfo(result.ok(), "Import arrow schema failed");
     auto arrow_schema = result.ValueOrDie();
+    auto bound_columns = std::make_shared<std::vector<std::string>>(
+        needed_columns, needed_columns + needed_columns_size);
+    const auto mapping = ReadMilvusTableFieldIdMapping(*column_groups);
+    if (mapping != nullptr) {
+        std::vector<std::shared_ptr<arrow::Field>> projected_fields;
+        std::unordered_set<std::string> seen_physical;
+        if (bound_columns->empty()) {
+            projected_fields.reserve(arrow_schema->num_fields());
+            seen_physical.reserve(arrow_schema->num_fields());
+            for (const auto& field : arrow_schema->fields()) {
+                const auto target_id = TryParseCanonicalFieldID(field->name());
+                if (!target_id.has_value()) {
+                    ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                              "Arrow schema field '{}' is not a canonical "
+                              "field ID",
+                              field->name());
+                }
+                const auto physical =
+                    mapping->physical_columns.find(*target_id);
+                if (physical == mapping->physical_columns.end()) {
+                    ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                              "Arrow schema field '{}' is absent from field ID "
+                              "mapping",
+                              field->name());
+                }
+                if (!seen_physical.insert(physical->second).second) {
+                    ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                              "Duplicate mapped physical column '{}'",
+                              physical->second);
+                }
+                projected_fields.push_back(field->WithName(physical->second));
+            }
+        } else {
+            std::unordered_map<std::string, std::shared_ptr<arrow::Field>>
+                fields_by_name;
+            fields_by_name.reserve(arrow_schema->num_fields());
+            for (const auto& field : arrow_schema->fields()) {
+                if (!fields_by_name.emplace(field->name(), field).second) {
+                    ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                              "Duplicate field '{}' in Arrow schema",
+                              field->name());
+                }
+            }
+            projected_fields.reserve(bound_columns->size());
+            seen_physical.reserve(bound_columns->size());
+            for (auto& column : *bound_columns) {
+                const auto target_id = TryParseCanonicalFieldID(column);
+                if (!target_id.has_value()) {
+                    ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                              "Requested target column '{}' is not a canonical "
+                              "field ID",
+                              column);
+                }
+                const auto physical =
+                    mapping->physical_columns.find(*target_id);
+                if (physical == mapping->physical_columns.end()) {
+                    ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                              "Requested target column '{}' is absent from "
+                              "field ID mapping",
+                              column);
+                }
+                const auto field_it = fields_by_name.find(column);
+                if (field_it != fields_by_name.end() &&
+                    seen_physical.insert(physical->second).second) {
+                    projected_fields.push_back(
+                        field_it->second->WithName(physical->second));
+                }
+                column = physical->second;
+            }
+        }
+        arrow_schema = arrow::schema(std::move(projected_fields),
+                                     arrow_schema->metadata());
+    }
     auto reader = milvus_storage::api::Reader::create(
-        column_groups,
-        arrow_schema,
-        std::make_shared<std::vector<std::string>>(
-            needed_columns, needed_columns + needed_columns_size),
-        *properties);
+        column_groups, arrow_schema, bound_columns, *properties);
 
     // Configure CMEK decryption if plugin context is provided
     if (c_plugin_context != nullptr) {
