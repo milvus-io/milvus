@@ -26,9 +26,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/internal/views/coord/balancer"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -60,6 +60,8 @@ func TestDropLoadConfigV2AckCallbackUpdatesQViewsRuntime(t *testing.T) {
 	require.NoError(t, runtime.loadManager.UpdateLoadConfig(ctx, buildAlterLoadConfigBroadcastResult(100)))
 	require.Contains(t, runtime.loadConfigStore.Snapshot().ConfigsMap(), int64(100))
 	fakeBalancer.triggers = nil
+	shard := qviews.ShardID{ReplicaID: 1000, VChannel: "p_100v0"}
+	runtime.shardViewRegistry.Ensure(shard)
 
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 	s := &Server{qviewsRuntime: runtime}
@@ -67,7 +69,8 @@ func TestDropLoadConfigV2AckCallbackUpdatesQViewsRuntime(t *testing.T) {
 	require.NoError(t, s.dropLoadConfigV2AckCallback(ctx, buildDropLoadConfigBroadcastResult(100)))
 
 	assert.NotContains(t, runtime.loadConfigStore.Snapshot().ConfigsMap(), int64(100))
-	assert.Equal(t, []balancer.TriggerScope{{DirtyCollections: []int64{100}}}, fakeBalancer.triggers)
+	assert.Nil(t, runtime.shardViewRegistry.Get(shard))
+	assert.Empty(t, fakeBalancer.triggers, "withdrawal must complete without scheduling placement")
 }
 
 func buildDropLoadConfigBroadcastResult(collectionID int64) message.BroadcastResultDropLoadConfigMessageV2 {

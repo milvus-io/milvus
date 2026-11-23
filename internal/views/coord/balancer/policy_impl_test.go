@@ -45,7 +45,7 @@ func upStats(version qviews.DataVersion, placements ...testSegmentPlacement) *co
 	)
 }
 
-func TestDefaultBalancePolicy_ReleaseResidualShard(t *testing.T) {
+func TestDefaultBalancePolicy_SkipsWithdrawnCollection(t *testing.T) {
 	shardID := qviews.ShardID{ReplicaID: 10, VChannel: "by-dev-rootcoord-dml_0_1v0"}
 	c := balancercache.New(policyTestConfig())
 	c.PublishShard(shardID, testShardStats(nil, 0, placement(101, 1, 1, coordview.SegmentStateUp)))
@@ -53,8 +53,7 @@ func TestDefaultBalancePolicy_ReleaseResidualShard(t *testing.T) {
 	plan := NewDefaultBalancePolicy().Plan(c, []qviews.ShardID{shardID, shardID})
 
 	require.Empty(t, plan.Prepares)
-	assert.Equal(t, []qviews.ShardID{shardID}, plan.Releases)
-	require.True(t, plan.ReleaseControls[shardID].GetPreemptServingLease())
+	require.Empty(t, plan.Releases)
 }
 
 func TestDefaultBalancePolicy_MandatoryInitialLoadAllocatesLargestRowCountFirst(t *testing.T) {
@@ -618,8 +617,11 @@ func TestReleaseControlDistinguishesCollectionAndReplicaRemoval(t *testing.T) {
 				c.PublishLoadConfig(1, nil, 2)
 			}
 			plan := NewDefaultBalancePolicy().Plan(c, []qviews.ShardID{shard})
-			require.Contains(t, plan.Releases, shard)
-			require.Equal(t, collectionReleased, plan.ReleaseControls[shard].GetPreemptServingLease())
+			if collectionReleased {
+				require.Empty(t, plan.Releases)
+			} else {
+				require.Contains(t, plan.Releases, shard)
+			}
 		})
 	}
 }

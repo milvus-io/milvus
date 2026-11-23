@@ -78,7 +78,7 @@ func TestFaultDiscoveryAdmitsColdCollectionBeforeRangeCompletes(t *testing.T) {
 			cfg.ShardBatchSize = 8
 			c.UpdateBalanceConfig(cfg)
 			var batches [][]qviews.ShardID
-			b := NewDefaultBalancer(c, &coordview.ShardViewRegistry{}, completionTestPolicy(func(_ balancercache.Reader, batch []qviews.ShardID) *BalancePlan {
+			b := NewDefaultBalancer(c, &coordview.ShardViewRegistry{}, balancePolicyFunc(func(_ balancercache.Reader, batch []qviews.ShardID) *BalancePlan {
 				batches = append(batches, batch)
 				return nil
 			}), nil)
@@ -104,39 +104,6 @@ func TestFaultDiscoveryAdmitsColdCollectionBeforeRangeCompletes(t *testing.T) {
 	}
 }
 
-func TestReleaseCompletionSpansDiscoverySlicesAndWorkerBatches(t *testing.T) {
-	c := balancercache.New(nil)
-	t.Cleanup(c.Close)
-	count := 2*discoveryShardLimit + 1
-	for i := 0; i < count; i++ {
-		c.PublishShard(qviews.ShardID{ReplicaID: 10, VChannel: fmt.Sprintf("p_1v%d", i)}, &coordview.ShardStats{})
-	}
-	c.MarkReady()
-	cfg := DefaultBalanceConfig()
-	cfg.ShardBatchSize = 7
-	c.UpdateBalanceConfig(cfg)
-	seen := make(map[qviews.ShardID]bool)
-	policy := completionTestPolicy(func(_ balancercache.Reader, dirty []qviews.ShardID) *BalancePlan {
-		require.LessOrEqual(t, len(dirty), 7)
-		for _, id := range dirty {
-			require.False(t, seen[id])
-			seen[id] = true
-		}
-		return nil
-	})
-	b := NewDefaultBalancer(c, &coordview.ShardViewRegistry{}, policy, nil)
-	f := b.TriggerWithCompletion(TriggerScope{DirtyCollections: []int64{1}})
-	for range count {
-		require.NoError(t, b.Reconcile(t.Context()))
-		if f.Ready() {
-			break
-		}
-	}
-	require.True(t, f.Ready())
-	require.NoError(t, f.Get())
-	require.Len(t, seen, count)
-}
-
 func TestActiveCollectionRediscoversSupersedingPublication(t *testing.T) {
 	c := scanTestCache(discoveryShardLimit + 1)
 	t.Cleanup(c.Close)
@@ -158,7 +125,7 @@ func TestActiveCollectionRediscoversSupersedingPublication(t *testing.T) {
 // A blocked resident refresh must hold neither the node publisher nor the
 // collection producer. Wait for startup discovery before publishing node loss.
 func TestNodeRefreshDoesNotBlockColdCollection(t *testing.T) {
-	c := balancercache.New(nil)
+	c := newTestCache(cfgFor(1, 10, nil, nil))
 	t.Cleanup(c.Close)
 	c.MarkReady()
 	hot := cacheShard(1, 10)
@@ -168,7 +135,7 @@ func TestNodeRefreshDoesNotBlockColdCollection(t *testing.T) {
 	startup, admitted := make(chan struct{}), make(chan struct{})
 	started := sync.OnceFunc(func() { close(startup) })
 	accepted := sync.OnceFunc(func() { close(admitted) })
-	b := NewDefaultBalancer(c, &coordview.ShardViewRegistry{}, completionTestPolicy(func(_ balancercache.Reader, ids []qviews.ShardID) *BalancePlan {
+	b := NewDefaultBalancer(c, &coordview.ShardViewRegistry{}, balancePolicyFunc(func(_ balancercache.Reader, ids []qviews.ShardID) *BalancePlan {
 		if slices.Contains(ids, hot) {
 			started()
 		}
@@ -192,7 +159,7 @@ func TestNodeRefreshDoesNotBlockColdCollection(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("worker did not start")
 	}
-	go func() { defer close(done); c.PublishLoadConfig(1, cfgFor(1, 10, nil, nil), 1) }()
+	go func() { defer close(done); c.PublishLoadConfig(1, cfgFor(1, 10, nil, nil), 2) }()
 	defer func() { close(resume); <-done }()
 	<-locked
 	notified := make(chan struct{})
@@ -233,7 +200,7 @@ func TestOverlappingSourcesReplanWithoutDuplicatePreparing(t *testing.T) {
 	defer unblock()
 	policy := NewDefaultBalancePolicy()
 	passes, prepares := 0, 0
-	b := NewDefaultBalancer(c, reg, completionTestPolicy(func(r balancercache.Reader, ids []qviews.ShardID) *BalancePlan {
+	b := NewDefaultBalancer(c, reg, balancePolicyFunc(func(r balancercache.Reader, ids []qviews.ShardID) *BalancePlan {
 		plan := policy.Plan(r, ids)
 		passes++
 		prepares += len(plan.Prepares)
@@ -287,7 +254,7 @@ func TestLocalBatchRepairsTargetDuringNodeLoss(t *testing.T) {
 	c.PublishShard(id, stats)
 	c.MarkReady()
 	require.EqualValues(t, 100, c.GetNode(2).TargetContribution(id))
-	b := NewDefaultBalancer(c, &coordview.ShardViewRegistry{}, completionTestPolicy(func(r balancercache.Reader, _ []qviews.ShardID) *BalancePlan {
+	b := NewDefaultBalancer(c, &coordview.ShardViewRegistry{}, balancePolicyFunc(func(r balancercache.Reader, _ []qviews.ShardID) *BalancePlan {
 		require.True(t, r.(*planningContext).deferOptimization)
 		require.EqualValues(t, 100, r.GetNode(1).TargetContribution(id))
 		require.Zero(t, r.GetNode(2).TargetContribution(id))

@@ -81,7 +81,7 @@ func (b *DefaultBalancer) recoverPublishedSchemas(ctx context.Context, p *planni
 			continue
 		}
 		manager := b.viewRegistry.Get(id)
-		if manager == nil {
+		if manager == nil || configForShard(b.cache, id) != cfg {
 			continue
 		}
 		recovery := manager.PublishedRecovery(p.targetSchemaVersion(cfg.CollectionID))

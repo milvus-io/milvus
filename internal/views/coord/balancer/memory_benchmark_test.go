@@ -68,8 +68,8 @@ func BenchmarkMemoryPlan(b *testing.B) {
 					if (mode == "move" || mode == "loss") && len(plan.Prepares) == 0 {
 						b.Fatal("expected preparation")
 					}
-					if mode == "release" && len(plan.Releases) != len(dirty) {
-						b.Fatal("missing release")
+					if mode == "release" && len(plan.Releases) != 0 {
+						b.Fatal("placement scheduled an explicit release")
 					}
 				}
 			})

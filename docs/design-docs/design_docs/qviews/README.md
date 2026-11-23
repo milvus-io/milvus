@@ -359,7 +359,7 @@ Loaded → Release
 partition/field/index requirements and replica constraints. Index DDL publishes
 new versions for loaded collections. QueryViews retain exact LoadInfo references
 through final cleanup; recovery rebuilds those references before history GC.
-Release withdraws placement intent, drains reconciliation and all Views, then
+Release withdraws placement intent, requests teardown on resident shard managers and waits for final removal, then
 deletes every LoadInfo version. Legacy metadata migration and physical-object
 GC remain separate concerns.
 

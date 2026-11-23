@@ -189,10 +189,9 @@ On recovery, rebuild all persisted View references before enabling GC. Merely
 loading current configuration is insufficient to decide which historical
 versions are unreferenced.
 
-Release stops new View planning for the collection and joins the next pending
-background reconciliation batch. Concurrent releases share that batch's
-completion, which drains any planning that captured the old intent. Each release
-then waits for its own QueryViews to complete node cleanup and durable removal.
+Release withdraws the collection's load intent and directly requests teardown
+on its resident shard managers. The callback waits for those managers to finish
+node cleanup and durable removal.
 It deletes **all** CollectionLoadConfig versions and
 completes the Release workflow. There is no retained maximum, inactive version
 or LoadInfo tombstone after Release. DropCollection likewise does not retain a
@@ -201,7 +200,7 @@ load version after its cleanup finishes.
 The existing durable DropLoadConfig broadcast owns Release completion and
 retries after failure. Startup recovers persisted requirements and View references,
 then starts worker synchronization and callback replay. A retried Release withdraws
-the recovered load intent and drains any reconciliation that already observed it.
+the recovered load intent and repeats the registry release request.
 It does not require a separate pending-release scan or an additional persisted
 intent flag. Callback completion waits for final deletion; Broadcaster retains the
 collection lock so a later Load cannot overtake cleanup. Startup must not wait for
@@ -238,14 +237,11 @@ Key source packages: `internal/views/coord/loadmgr/`,
 
 ### Serving-lease preemption on explicit release
 
-StopPlanning publishes the absence of collection load intent and triggers the
-Balancer. Its release plan carries QueryViewControl.preempt_serving_lease for
-all residual shards of unloaded collections. This includes
-old Views already waiting in Down. The ordinary balancer RequestRelease entry
-retains its lease semantics for replica retirement. Balancer applies the controlled release through the shard manager, including
-already-Down Views. DDL callbacks only withdraw intent and wait; they never
-modify View state directly. DropCollection shares the DropLoadConfig callback. Final registry removal and LoadConfig deletion remain
-the release completion fence.
+StopPlanning synchronously publishes the withdrawal. The registry snapshots
+resident managers and requests release with `preempt_serving_lease`, including
+for old Views already in Down. Replica retirement retains ordinary lease
+protection. DropCollection shares the DropLoadConfig callback. Final registry
+removal and LoadConfig deletion precede the acknowledgement.
 
 ### AutoLoad source
 

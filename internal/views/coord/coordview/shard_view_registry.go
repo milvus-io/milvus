@@ -147,11 +147,21 @@ var registryEnsure = stage.New("coord", "apply", "ensure")
 // Ensure returns the ShardViewManager for shardID, creating a fresh one if
 // none exists. Safe to call repeatedly.
 func (r *ShardViewRegistry) Ensure(shardID qviews.ShardID) *ShardViewManager {
+	return r.EnsureIf(shardID, nil)
+}
+
+// EnsureIf checks the immutable desired load snapshot under the same lock that
+// orders registration against the release caller's resident snapshot. The
+// predicate must not take a publisher lock or call back into the registry.
+func (r *ShardViewRegistry) EnsureIf(shardID qviews.ShardID, current func() bool) *ShardViewManager {
 	timer := registryEnsure.Begin()
 	defer timer.End(nil)
 	// Fast path: already present.
 	r.mu.RLock()
 	if mgr, ok := r.shards[shardID]; ok {
+		if current != nil && !current() {
+			mgr = nil
+		}
 		r.mu.RUnlock()
 		return mgr
 	}
@@ -163,6 +173,10 @@ func (r *ShardViewRegistry) Ensure(shardID qviews.ShardID) *ShardViewManager {
 	stats := emptyShardStats()
 
 	r.mu.Lock()
+	if current != nil && !current() {
+		r.mu.Unlock()
+		return nil
+	}
 	// Re-check under the write lock.
 	if mgr, ok := r.shards[shardID]; ok {
 		r.mu.Unlock()
@@ -319,6 +333,31 @@ func (r *ShardViewRegistry) CollectionShards(collectionID int64) []qviews.ShardI
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return maps.Keys(r.collectionShards[collectionID])
+}
+
+// HasCollectionShards checks final removal without copying the remaining shard IDs.
+func (r *ShardViewRegistry) HasCollectionShards(collectionID int64) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.collectionShards[collectionID]) != 0
+}
+
+// RequestCollectionRelease captures the withdrawn collection's managers under
+// the lock shared with EnsureIf. Manager transitions run outside that lock.
+func (r *ShardViewRegistry) RequestCollectionRelease(ctx context.Context, collectionID int64) error {
+	r.mu.RLock()
+	managers := make([]*ShardViewManager, 0, len(r.collectionShards[collectionID]))
+	for id := range r.collectionShards[collectionID] {
+		managers = append(managers, r.shards[id])
+	}
+	r.mu.RUnlock()
+	control := &viewpb.QueryViewControl{PreemptServingLease: true}
+	for _, manager := range managers {
+		if err := manager.RequestReleaseWithControl(ctx, control); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // NodeShards returns the resident shards with placements on nodeID.

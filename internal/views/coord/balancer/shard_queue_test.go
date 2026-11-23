@@ -14,31 +14,19 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 func TestShardQueueReprioritizesAndDeduplicates(t *testing.T) {
 	a, b, c := cacheShard(1, 10), cacheShard(2, 20), cacheShard(3, 30)
 	q := shardQueue{items: make(map[qviews.ShardID]*queuedShard)}
-	wait := syncutil.NewFuture[error]()
-	q.submit([]scoredShard{{a, 10}, {b, -5}, {c, 0}}, 1, &shardCompletion{future: wait})
-	q.submit([]scoredShard{{a, -8}, {b, 0}}, 3, nil)
-	q.submit([]scoredShard{{a, 18}, {b, -5}}, 2, nil)
+	q.submit([]scoredShard{{a, 10}, {b, -5}, {c, 0}}, 1)
+	q.submit([]scoredShard{{a, -8}, {b, 0}}, 3)
+	q.submit([]scoredShard{{a, 18}, {b, -5}}, 2)
 	require.Len(t, q.items, 3)
-	first, groups := q.take(2)
+	first := q.take(2)
 	require.Equal(t, []qviews.ShardID{b, c}, first, "equal scores retain arrival order")
-	for group, n := range groups {
-		group.finish(n, context.DeadlineExceeded)
-	}
-	require.False(t, wait.Ready())
-	second, groups := q.take(2)
+	second := q.take(2)
 	require.Equal(t, []qviews.ShardID{a}, second)
-	for group, n := range groups {
-		group.finish(n, nil)
-	}
-	result, err := wait.GetWithContext(t.Context())
-	require.NoError(t, err)
-	require.ErrorIs(t, result, context.DeadlineExceeded)
 	require.Empty(t, q.items)
 }
 
@@ -54,7 +42,7 @@ func TestPriorityBatchColdQueryDuringTenThousandRecoveries(t *testing.T) {
 	}
 	cold := cacheShard(2, 20)
 	var batches [][]qviews.ShardID
-	policy := completionTestPolicy(func(_ balancercache.Reader, dirty []qviews.ShardID) *BalancePlan {
+	policy := balancePolicyFunc(func(_ balancercache.Reader, dirty []qviews.ShardID) *BalancePlan {
 		batches = append(batches, dirty)
 		if len(batches) == 1 {
 			auto := cfgFor(2, 20, nil, nil)
@@ -98,7 +86,7 @@ func TestPeriodicProducerUpdatesQueueDuringPlacement(t *testing.T) {
 	id := cacheShard(1, 10)
 	started, gate := make(chan struct{}), make(chan struct{})
 	var first sync.Once
-	policy := completionTestPolicy(func(_ balancercache.Reader, _ []qviews.ShardID) *BalancePlan {
+	policy := balancePolicyFunc(func(_ balancercache.Reader, _ []qviews.ShardID) *BalancePlan {
 		first.Do(func() {
 			close(started)
 			<-gate

@@ -113,18 +113,26 @@ func (p *planningContext) GetNode(id int64) *balancercache.NodeEntry {
 func (p *planningContext) GetBalanceConfig() *BalanceConfig { return p.config }
 func (p *planningContext) NodesMap() map[int64]*BalanceNode { return p.nodes }
 func (p *planningContext) collectionForShard(id qviews.ShardID) *balancercache.CollectionEntry {
+	return collectionForShard(p, id)
+}
+
+func collectionForShard(reader balancercache.Reader, id qviews.ShardID) *balancercache.CollectionEntry {
 	collectionID, ok := parseShardCollection(id)
 	if !ok {
-		collectionID, ok = p.CollectionForReplica(id.ReplicaID)
+		collectionID, ok = reader.CollectionForReplica(id.ReplicaID)
 	}
 	if !ok {
 		return nil
 	}
-	return p.GetCollection(collectionID)
+	return reader.GetCollection(collectionID)
 }
 
 func (p *planningContext) ConfigForShard(id qviews.ShardID) *loadmgr.LoadConfig {
-	if collection := p.collectionForShard(id); collection != nil && collection.LoadConfig() != nil && findReplica(collection.LoadConfig(), id.ReplicaID) != nil {
+	return configForShard(p, id)
+}
+
+func configForShard(reader balancercache.Reader, id qviews.ShardID) *loadmgr.LoadConfig {
+	if collection := collectionForShard(reader, id); collection != nil && collection.LoadConfig() != nil && findReplica(collection.LoadConfig(), id.ReplicaID) != nil {
 		return collection.LoadConfig()
 	}
 	return nil

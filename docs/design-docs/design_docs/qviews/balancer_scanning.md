@@ -92,26 +92,14 @@ After a shard is dequeued, overlapping notifications can cause another policy
 evaluation. A valid Preparing or Ready for the current schema suppresses a new
 prepare; an invalid Preparing placement or obsolete schema permits replacement.
 
-Collection release uses a completion barrier. The serial placement worker expands one slice of the released
-scope after the preceding apply, so it sees managers created during that apply.
-Callers that join the same pending notification share one future. The future
-collects errors and completes when all its selected shards have had a pass.
-Notifications arriving during execution join a successor pass.
-QueryCoord owns the batch wait, using the request context and the runtime's
-existing `readyChanges.Done()` signal. Canceling a caller affects only its wait; the pass
-uses the controller context. Runtime shutdown wakes pending batch waiters,
-including before recovery finishes. Final shard-removal waiting uses the request
-context and collection removal notifications.
-
-Collection release joins a batch after withdrawing load intent, so completion
-also drains any older pass that could still accept a Preparing view. It then
-waits for that collection's final shard removal before deleting LoadInfo and
-acknowledging the broadcast. Batch completion alone does not certify node
-cleanup, and a failed pass returns its error to the waiting callbacks for retry.
+Explicit collection release withdraws load intent and directly requests teardown
+from that collection's resident managers. Its callback waits for final registry
+removal using collection-specific notifications, request cancellation and runtime
+shutdown. Planning and apply errors for other shards remain local to their pass.
+The scheduler validates current load intent before admitting a Preparing view.
 
 Input and topology changes submit fresh work. The periodic scan revisits
-shards after transient metadata or apply failures. Completion callers receive
-the error of their attempted pass. The worker retains no failed plan.
+shards after transient metadata or apply failures.
 
 Layout cleanup is scoped to changed/visited collections. Configuration removal
 discards that collection's layout even after its cache entry disappears, without
@@ -167,6 +155,6 @@ independent of these settings.
 - `internal/views/coord/balancer/scan_test.go`: collection boundaries, residual
   shards, event interleaving, layout removal and discovery during node loss.
 - `internal/views/coord/balancer/shard_queue_test.go` exercises reprioritization,
-  completion across batches, a 10,000-shard backlog, and periodic scoring during placement.
+  a 10,000-shard backlog, and periodic scoring during placement.
 - Existing coordinator component integration and schema-recovery tests cover
   the retained load-config, registry, persistence, and recovery boundaries.

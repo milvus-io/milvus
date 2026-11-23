@@ -148,7 +148,7 @@ func BenchmarkCacheScanBatchPlan(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				reader := newPlanningContext(c)
-				for slice := range controller.discover([]TriggerScope{{NodeChanged: true}}) {
+				for slice := range controller.discover(TriggerScope{NodeChanged: true}) {
 					p.Plan(reader, slice.ids)
 					break
 				}

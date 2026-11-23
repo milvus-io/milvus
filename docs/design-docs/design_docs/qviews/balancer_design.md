@@ -158,15 +158,14 @@ The target control flow is schematic:
 producers: local changes | topology changes | full scans
            discover and score slices independently, upsert into the same heap
 
-worker:   advance pending release discovery after the previous apply
-          take the highest-priority shard batch
+worker:   take the highest-priority shard batch
           read current inputs, classify shards and calculate placements
           apply releases and prepares, then take the next batch
 ```
 
 A new publication can requeue a shard that is already being planned. Failed
 metadata reads and apply operations are reconsidered on input changes and
-periodic scans. Release completion observes any preceding in-flight batch.
+periodic scans. Explicit collection release runs in the DDL callback.
 A periodic cache scan cannot repair an update that the upstream never published.
 
 #### Scope Resolution
@@ -174,19 +173,18 @@ A periodic cache scan cannot repair an update that the upstream never published.
 Scope resolution uses cache keys and indexes:
 
 - A collection scope combines configured replicas × DataView vchannels with
-  resident shards, including residual views after desired configuration removal.
+  resident shards of a loaded collection, including replicas removed by scale-down.
 - A direct shard scope targets that ShardID.
 - A node-loss/Stopping scope expands through its placed-shard index and the
   affected RG collection index, since replica quotas also change.
 - Node addition or recovery expands to desired collections in its RG; a new
   node has no placements to discover through the placed-shard index.
 - RG reassignment covers both the old and new groups.
-- Full scope combines all desired collections and all residual resident shards.
+- Full scope combines all desired collections and their resident shards.
   An unkeyed node notification or an unresolvable legacy scope may fall back
   to this full scope without rebuilding the cache.
 
-Shard details are obtained from retained CollectionEntry references. Missing
-LoadConfig means release only after source readiness is known. Desired config
+Shard details are obtained from retained CollectionEntry references. Collection discovery skips shards whose load intent has been withdrawn. Desired config
 with a missing/unready DataView waits or retries, rather than releasing views.
 
 #### External System Integration
@@ -477,10 +475,10 @@ WAL ack of CChannel AlterLoadConfig broadcast
 
 WAL ack of CChannel DropLoadConfig broadcast
         → CollectionLoadManager.ReleaseCollection(msg.Header())
-         ├── LoadConfigStore.Remove(collID)
-         └── store hook: publish cache, then enqueue collID
-         // ShardViewRegistry cleanup via reconcile: Phase 1
-         // sees "desired absent + current exists" → actionRelease
+         ├── LoadConfigStore.StopPlanning(collID) publishes intent withdrawal
+         ├── RequestCollectionRelease(collID) starts resident manager teardown
+         ├── wait for final collection shard removal
+         └── LoadConfigStore.Remove(collID) deletes historical requirements
 ```
 
 `AlterLoadConfig` and `DropLoadConfig` are CChannel-only broadcasts. Coord uses the
@@ -508,22 +506,12 @@ The periodically retried cluster configuration is its reconciliation source.
 External `UpdateLoadConfig` requests also acquire the collection guard and apply
 through the manager directly; they do not create another WAL operation.
 
-**Release semantics (Option A)**: `ReleaseCollection` removes LoadConfig; its
-source hook clears the cache desired field and enqueues the collection. Orphan
-views are detected by Phase 1 and released via `RequestRelease`. No separate
-"releasing" desired state is needed; crash recovery uses the same reconciliation.
-Registry presence, rather than an Up version or QN placement, identifies residual
-shards: SN-only Down/Unrecoverable views also require RequestRelease.
-
-The DropLoadConfig acknowledgement waits for a serialized Balancer pass and
-then for all collection shard managers to leave the Registry. The pass drains
-any preparation planned against the old desired state; final Registry removal
-requires node cleanup and durable QueryView deletion. The collection broadcast
-lock remains held until acknowledgement completes, so ReleaseCollection returns
-success only after cleanup and a subsequent load cannot overlap the old replica.
-An already-absent LoadConfig still takes the same cleanup barrier under the
-collection lock. Cancellation does not report successful release or undo the
-durable release intent. SN serving leases and active references remain respected.
+**Release semantics.** The DropLoadConfig acknowledgement holds the collection
+broadcast lock while it withdraws desired state, requests release on every
+resident manager, and waits for node cleanup and durable QueryView deletion.
+The registry also includes SN-only Down and Unrecoverable views. An idempotent
+release or replay repeats the same request. A subsequent load may proceed once
+the callback removes the historical LoadConfigs and releases the broadcast lock.
 
 **Load status derivation**: `LoadStatus` and `LoadPercentage` are derived from view states:
 
@@ -605,8 +593,8 @@ its active target requires Must convergence. For other dirty shards:
 
 | Condition (checked in order) | Action |
 |---|---|
-| Desired absent, current exists | **Release** |
-| Both absent | **None** |
+| Replica removed from a loaded collection, current exists | **Release** |
+| Collection load intent withdrawn | **None** (DDL owns cleanup) |
 | Desired present, no Up view, Preparing exists | **None** (avoid stacking) |
 | Desired present, no Up view or only Unrecoverable state | **Must** (initial load or post-Unrecoverable) |
 | Current Up view and a Preparing view exists | **None** (avoid stacking; retry latest state after the in-flight view finishes) |
@@ -1042,7 +1030,7 @@ accounting, failure-reuse, and scale checks are listed in
 
 ### 10.4 Cache Publication and Batch Accounting
 
-1. Cache scopes cover dirty collection/shard/node events and residual releases;
+1. Cache scopes cover dirty collection/shard/node events and removed replicas;
    a new node with no placements still triggers its RG's desired collections.
 2. Each retained object stays immutable across concurrent source publications.
    Concurrent updates to different fields do not overwrite one another.
@@ -1351,12 +1339,10 @@ permanent pin and does not assert that retained old-view resources are gone.
 
 ## Explicit collection teardown control
 
-A release plan carries optional QueryViewControl per shard, selected from the
-same planning snapshot as the release action. An absent collection LoadConfig
-after source readiness marks all residual shards for preempt_serving_lease,
-including already-Down Views. A missing replica inside a still-loaded collection
-or a suspended replica retains ordinary serving-lease protection. ConfigForShard
-alone cannot distinguish these reasons: policy inspects the collection-level
-LoadConfig. Balancer applies this control through RequestReleaseWithControl.
-DropLoadConfig only withdraws load intent and triggers reconciliation; its ACK
-callback retains the existing synchronous cleanup wait and final config removal.
+Explicit collection release sends `preempt_serving_lease` through
+`ShardViewRegistry.RequestCollectionRelease`, including for already-Down views.
+Replica scale-down and suspension retain the ordinary serving lease.
+A prepare validates its planned LoadInfoVersion and replica membership against
+current intent while the registry lock orders manager registration with the
+release snapshot. A previously admitted manager rejects preparation once marked
+for release, including after an unlocked reference acquisition.

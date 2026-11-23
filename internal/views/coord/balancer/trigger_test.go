@@ -43,7 +43,7 @@ func TestResolveCacheScope(t *testing.T) {
 		})
 	}
 	c.PublishLoadConfig(1, nil, 2)
-	require.ElementsMatch(t, []qviews.ShardID{a, residual}, discoveredIDs(c, TriggerScope{DirtyCollections: []int64{1}}), "release retains actual shards without expanding removed replicas")
+	require.Empty(t, discoveredIDs(c, TriggerScope{DirtyCollections: []int64{1}}), "explicit release bypasses shard discovery")
 }
 
 func setOf[T comparable](values ...T) map[T]struct{} {
@@ -57,7 +57,7 @@ func setOf[T comparable](values ...T) map[T]struct{} {
 func discoveredIDs(c *balancercache.Cache, scope TriggerScope) []qviews.ShardID {
 	b := &DefaultBalancer{cache: c}
 	found := make(map[qviews.ShardID]struct{})
-	for part := range b.discover([]TriggerScope{scope}) {
+	for part := range b.discover(scope) {
 		for _, id := range part.ids {
 			found[id] = struct{}{}
 		}

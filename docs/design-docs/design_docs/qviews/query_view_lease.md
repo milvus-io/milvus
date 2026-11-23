@@ -116,10 +116,10 @@ ViewSync; claims about automatic handoff additionally require cluster evidence.
 
 ## Explicit collection teardown control
 
-Balancer attaches `QueryViewMeta.control.preempt_serving_lease` to Down when
-collection load intent has been withdrawn. Replica removal or suspension with
-collection intent still present uses ordinary Down. DDL callbacks only withdraw
-intent and wait for cleanup; they do not change Views directly.
+After withdrawing collection load intent, the DDL callback requests release
+on the resident managers with `QueryViewMeta.control.preempt_serving_lease`.
+Managers apply the control to Down. Replica removal and suspension use
+ordinary Down.
 
 Coordinator's `EnterDownWithControl` handles both Up -> Down and an already
 published Down. Strengthening control persists and resends Down even without a

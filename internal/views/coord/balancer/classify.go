@@ -17,8 +17,7 @@ const (
 	// actionNone: nothing to do for this shard in this batch.
 	actionNone actionKind = iota
 
-	// actionRelease: desired state is absent but current views exist.
-	// The Policy emits a Release in the plan; no allocation needed.
+	// actionRelease drains a removed or safely suspended replica of a loaded collection.
 	actionRelease
 
 	// actionMust: a new view must be generated (e.g., initial load,
@@ -36,14 +35,14 @@ const (
 //
 // The decision rules, in order:
 //
-//  1. Desired absent + current exists     → Release
+//  1. Replica removed from a loaded collection + current exists → Release
 //  2. Desired present + no Up view        → Must unless Preparing exists
 //  3. Already has a Preparing view        → None (avoid stacking)
 //  4. Current DataVersion < DataView DV   → Must (data changed)
 //  5. Current view references an unavailable node → Must (node lost)
 //  6. LoadInfoVersion differs            → Must
 //  7. Otherwise                           → MayOptimize
-func classifyShard(snap balanceInput, shardID qviews.ShardID) actionKind {
+func classifyShard(snap *planningContext, shardID qviews.ShardID) actionKind {
 	desired := snap.ConfigForShard(shardID)
 	stats := snap.GetShardStats(shardID)
 	hasUpView := stats != nil && stats.UpVersion != nil
@@ -53,11 +52,11 @@ func classifyShard(snap balanceInput, shardID qviews.ShardID) actionKind {
 		hasAnyView = true
 	}
 
-	// 1. Desired absent → release any residual views.
+	// Full collection release is handled by DDL. Here we only drain a removed replica.
 	if desired == nil {
 		// Registry presence also covers SN-only Down/Unrecoverable views,
 		// whose stats contain neither an Up version nor QN placements.
-		if stats != nil {
+		if collection := snap.collectionForShard(shardID); stats != nil && collection != nil && collection.LoadConfig() != nil {
 			return actionRelease
 		}
 		return actionNone

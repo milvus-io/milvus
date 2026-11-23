@@ -109,6 +109,14 @@ func (s *balanceSimulation) replicas(id int64, groups []string) {
 	}
 	if len(groups) == 0 {
 		s.cache.PublishLoadConfig(id, nil, version)
+		// Model the explicit DDL release of resident managers.
+		if c != nil {
+			for shard := range c.RangeShards {
+				delete(s.views, shard.ID())
+				s.cache.PublishShard(shard.ID(), nil)
+				s.counters.Releases++
+			}
+		}
 		return
 	}
 	cfg := &loadmgr.LoadConfig{CollectionID: id, PartitionIDs: []int64{1}}

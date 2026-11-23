@@ -10,7 +10,6 @@ import (
 
 	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 const (
@@ -42,13 +41,12 @@ func discoveryKey(scope TriggerScope) (scopeKey, bool) {
 }
 
 type discoveryScope struct {
-	scopes     []TriggerScope
-	skip       map[qviews.ShardID]struct{}
-	active     bool
-	repeat     bool
-	remaining  func() (discoverySlice, bool)
-	stop       func()
-	completion *shardCompletion
+	scope     TriggerScope
+	skip      map[qviews.ShardID]struct{}
+	active    bool
+	repeat    bool
+	remaining func() (discoverySlice, bool)
+	stop      func()
 }
 
 type discoverySlice struct {
@@ -65,8 +63,7 @@ const (
 	topologyChanges
 	periodicScan
 	producerCount
-	workerRelease                 = producerCount // the placement worker advances release cursors
-	anySource     discoverySource = -1
+	anySource discoverySource = -1
 )
 
 type scopeQueue struct {
@@ -77,26 +74,24 @@ type scopeQueue struct {
 
 type discovery struct {
 	mu              sync.Mutex
-	queues          [producerCount + 1]scopeQueue
+	queues          [producerCount]scopeQueue
 	pending         map[scopeKey]*discoveryScope
-	release         *discoveryScope
 	nextSync        discoverySource
 	refreshingNodes atomic.Int64 // node walks with target accounting still in progress
 }
 
-func newDiscovery(work chan struct{}) *discovery {
+func newDiscovery() *discovery {
 	d := &discovery{pending: make(map[scopeKey]*discoveryScope)}
 	for i := range producerCount {
 		d.queues[i].signal = make(chan struct{}, 1)
 	}
-	d.queues[workerRelease].signal = work
 	return d
 }
 
 func (d *discovery) add(source discoverySource, scope TriggerScope) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	job := &discoveryScope{scopes: []TriggerScope{scope}}
+	job := &discoveryScope{scope: scope}
 	if key, ok := discoveryKey(scope); ok {
 		if existing := d.pending[key]; existing != nil {
 			existing.repeat = existing.active
@@ -121,30 +116,8 @@ func (d *discovery) layout(collections []int64, selected []qviews.ShardID) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	q := &d.queues[localChanges]
-	q.fresh.PushBack(&discoveryScope{scopes: []TriggerScope{{DirtyCollections: collections}}, skip: skip})
+	q.fresh.PushBack(&discoveryScope{scope: TriggerScope{DirtyCollections: collections}, skip: skip})
 	wakeBalancer(q.signal)
-}
-
-func (d *discovery) completion(scopes []TriggerScope) *syncutil.Future[error] {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.release == nil {
-		// The producer owns one reference until the last slice is submitted.
-		d.release = &discoveryScope{completion: &shardCompletion{future: syncutil.NewFuture[error](), remaining: 1}}
-	}
-	for _, scope := range scopes {
-		d.release.scopes = append(d.release.scopes, cloneScope(scope))
-	}
-	wakeBalancer(d.queues[workerRelease].signal)
-	return d.release.completion.future
-}
-
-func cloneScope(s TriggerScope) TriggerScope {
-	s.DirtyCollections = slices.Clone(s.DirtyCollections)
-	s.DirtyNodes = slices.Clone(s.DirtyNodes)
-	s.DirtyShards = slices.Clone(s.DirtyShards)
-	s.DirtyResourceGroups = slices.Clone(s.DirtyResourceGroups)
-	return s
 }
 
 // When called synchronously before Start, rotate over the same source queues.
@@ -165,11 +138,6 @@ func (d *discovery) next(source discoverySource) (*discoveryScope, discoverySour
 }
 
 func (d *discovery) take(source discoverySource) *discoveryScope {
-	if source == workerRelease && d.release != nil && d.queues[source].resumed.Len() == 0 {
-		job := d.release
-		d.release = nil
-		return job
-	}
 	q := &d.queues[source]
 	if q.resumed.Len() > 0 && (q.resumeNext || q.fresh.Len() == 0) {
 		q.resumeNext = false
@@ -185,20 +153,16 @@ func (d *discovery) take(source discoverySource) *discoveryScope {
 }
 
 func (d *discovery) finish(source discoverySource, job *discoveryScope) {
-	if job.completion != nil {
-		job.completion.finish(1, nil)
-		return
-	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if job.repeat {
 		d.queues[source].restart(job)
 		return
 	}
-	if len(job.scopes[0].DirtyNodes) > 0 {
+	if len(job.scope.DirtyNodes) > 0 {
 		d.refreshingNodes.Add(-1)
 	}
-	if key, ok := discoveryKey(job.scopes[0]); ok && job.skip == nil {
+	if key, ok := discoveryKey(job.scope); ok && job.skip == nil {
 		delete(d.pending, key)
 	}
 }
@@ -211,7 +175,7 @@ func (q *scopeQueue) restart(job *discoveryScope) {
 }
 
 // Release suspended iterator stacks on Stop. A restart rediscovers unfinished
-// scopes against current cache state and retains any release completion.
+// scopes against current cache state.
 func (d *discovery) suspend() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -228,15 +192,12 @@ func (d *discovery) suspend() {
 
 // The scanner and radix indexes pin immutable roots. No cache lock survives a
 // yield, including when a slice ends in the middle of a replica's channels.
-func (b *DefaultBalancer) discover(scopes []TriggerScope) iter.Seq[discoverySlice] {
+func (b *DefaultBalancer) discover(scope TriggerScope) iter.Seq[discoverySlice] {
 	return func(yield func(discoverySlice) bool) {
 		walk := scopeWalk{balancer: b, yield: yield}
-		for _, scope := range scopes {
-			if !walk.visitScope(scope) {
-				return
-			}
+		if walk.visitScope(scope) {
+			yield(discoverySlice{ids: walk.ids, last: true})
 		}
-		yield(discoverySlice{ids: walk.ids, last: true})
 	}
 }
 
@@ -268,12 +229,10 @@ func (w *scopeWalk) visitCollection(id int64) bool {
 	c := w.balancer.cache.GetCollection(id)
 	if c == nil || c.LoadConfig() == nil {
 		w.balancer.pruneLayout(id)
-	}
-	if c == nil {
 		return w.step()
 	}
 	cfg, data := c.LoadConfig(), c.DataView()
-	if cfg != nil && data != nil {
+	if data != nil {
 		for _, replica := range cfg.Replicas {
 			for _, shard := range data.Shards {
 				if !w.emit(qviews.ShardID{ReplicaID: replica.ReplicaID, VChannel: shard.VChannel}) {
@@ -284,7 +243,7 @@ func (w *scopeWalk) visitCollection(id int64) bool {
 	}
 	for resident := range c.RangeShards {
 		shard := resident.ID()
-		if cfg != nil && data != nil && data.Shard(shard.VChannel) != nil && findReplica(cfg, shard.ReplicaID) != nil {
+		if data != nil && data.Shard(shard.VChannel) != nil && findReplica(cfg, shard.ReplicaID) != nil {
 			if !w.step() {
 				return false
 			}
@@ -373,7 +332,7 @@ func (b *DefaultBalancer) dispatch(source discoverySource) int {
 			return seen
 		})
 	}
-	b.submitShards(slice.ids, job.completion)
+	b.submitShards(slice.ids)
 	if slice.last {
 		b.discovery.finish(source, job)
 	} else {
@@ -386,11 +345,11 @@ func (b *DefaultBalancer) dispatch(source discoverySource) int {
 }
 
 func (b *DefaultBalancer) nextSlice(job *discoveryScope) discoverySlice {
-	if ids := job.scopes[0].DirtyShards; job.completion == nil && len(ids) > 0 && len(ids) <= discoveryShardLimit {
+	if ids := job.scope.DirtyShards; len(ids) > 0 && len(ids) <= discoveryShardLimit {
 		return discoverySlice{ids: ids, last: true}
 	}
 	if job.remaining == nil {
-		job.remaining, job.stop = iter.Pull(b.discover(job.scopes))
+		job.remaining, job.stop = iter.Pull(b.discover(job.scope))
 	}
 	// discover yields a final slice even for an empty scope.
 	slice, _ := job.remaining()

@@ -223,5 +223,5 @@ func takeScanRequest(b *DefaultBalancer) bool {
 		return false
 	}
 	b.discovery.finish(source, job)
-	return job.scopes[0].NodeChanged
+	return job.scope.NodeChanged
 }
