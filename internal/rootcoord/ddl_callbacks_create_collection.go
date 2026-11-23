@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type collectionDataViewCreator interface {
@@ -55,7 +54,12 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 	if req.GetShardsNum() <= 0 {
 		req.ShardsNum = common.DefaultShardsNum
 	}
-	if _, err := typeutil.GetPartitionKeyFieldSchema(schema); err == nil {
+	preserveFieldID, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(util.PreserveFieldIdsKey, req.GetProperties())
+	if !exist {
+		preserveFieldID = "false"
+	}
+	preserveFieldIDs := preserveFieldID == "true"
+	if hasCreateCollectionPartitionKey(schema, req.GetProperties(), preserveFieldIDs) {
 		if req.GetNumPartitions() <= 0 {
 			req.NumPartitions = common.DefaultPartitionsWithPartitionKey
 		}
@@ -71,10 +75,6 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 	defer broadcaster.Close()
 
 	// prepare and validate the creation collection message.
-	preserveFieldID, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(util.PreserveFieldIdsKey, req.GetProperties())
-	if !exist {
-		preserveFieldID = "false"
-	}
 	createCollectionTask := createCollectionTask{
 		Core:   c,
 		Req:    req,
@@ -84,7 +84,7 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 			CollectionName:   req.GetCollectionName(),
 			CollectionSchema: schema,
 		},
-		preserveFieldID: preserveFieldID == "true",
+		preserveFieldID: preserveFieldIDs,
 	}
 	if err := createCollectionTask.Prepare(ctx); err != nil {
 		createCollectionTask.releaseFileResources()
