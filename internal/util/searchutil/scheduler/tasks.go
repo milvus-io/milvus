@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 const (
@@ -87,6 +88,9 @@ type queuedTask struct {
 	// with that value at push time, so they must be debited with the same
 	// value regardless of how many members survive.
 	accountedNQ int64
+	// maxWait is how long the task may wait in the queue before the node
+	// counts as overloaded for it. Zero means no limit.
+	maxWait time.Duration
 }
 
 // countedNQ returns the NQ to debit from the waiting counters for this task.
@@ -104,7 +108,54 @@ func newQueuedTask(task Task, enqueueTime time.Time) *queuedTask {
 	return &queuedTask{
 		Task:        task,
 		enqueueTime: enqueueTime,
+		maxWait:     maxQueueWait(task, enqueueTime),
 	}
+}
+
+// maxQueueWait returns how long task may wait in the queue: maxQueueWaitRatio
+// of the time it has left when it is queued, at most maxQueueWait. A task
+// without a deadline gets maxQueueWait. Zero means no limit, which is the case
+// when maxQueueWaitRatio is not positive.
+func maxQueueWait(task Task, now time.Time) time.Duration {
+	cfg := &paramtable.Get().QueryNodeCfg
+	ratio := cfg.MaxQueueWaitRatio.GetAsFloat()
+	if ratio <= 0 {
+		return 0
+	}
+	limit := cfg.MaxQueueWait.GetAsDurationByParse()
+	if deadline, ok := task.Context().Deadline(); ok {
+		// A task about to expire still gets a positive limit: zero would mean
+		// no limit. One that has expired is not queued, see
+		// handleAddTaskRequest.
+		byDeadline := max(time.Duration(float64(deadline.Sub(now))*ratio), time.Nanosecond)
+		if limit <= 0 || byDeadline < limit {
+			limit = byDeadline
+		}
+	}
+	return max(limit, 0)
+}
+
+// queueWaitAdmitShare is the share of its queue wait limit that the task at
+// the head of the queue may have waited for a new task to be let in behind
+// it. With the whole limit the head would wait for about the limit all the
+// time, and nearly every new task would be let in only to be refused when it
+// leaves the queue, having waited for nothing.
+const queueWaitAdmitShare = 0.5
+
+// mustWaitTooLong reports whether a task queued at now behind head, the task
+// that leaves the queue next, would wait for longer than it may. It is judged
+// by how long head has waited so far: a measured time, where an estimate from
+// the queue length and the pace of the workers would multiply the errors of
+// both.
+func (t *queuedTask) mustWaitTooLong(head *queuedTask, now time.Time) bool {
+	return t.valid() && t.maxWait > 0 && head.valid() &&
+		head.queueDuration(now) > time.Duration(float64(t.maxWait)*queueWaitAdmitShare)
+}
+
+// overloaded reports whether the task has waited in the queue for longer than
+// it may.
+func (t *queuedTask) overloaded(now time.Time) bool {
+	return t.valid() && t.maxWait > 0 && t.queueDuration(now) > t.maxWait
 }
 
 func (t *queuedTask) queueDuration(now time.Time) time.Duration {

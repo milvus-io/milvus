@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -52,8 +53,18 @@ type ChannelWorkload struct {
 	// replica: the request kind and consistency level, e.g. "search/Strong".
 	// Balancers that learn from outcomes keep statistics per channel and class.
 	StatsClass string
-	// Hedgeable tells that Exec calls CommitAttempt before it publishes a
-	// result, so that two attempts of the channel may run at once.
+	// Hedgeable tells that the request may get one extra attempt on another
+	// replica, and one only: a hedge when its attempt on the first replica is
+	// slow, or an attempt that takes its place when the first replica refuses
+	// it as overloaded. When that attempt is refused too, the request ends
+	// with the refusal. Exec must call CommitAttempt before it publishes a
+	// result, as two attempts of the channel may run at once.
+	//
+	// Without it a refusal ends the request at once. The Proxy sets it for
+	// searches and queries at every consistency level.
+	//
+	// A replica that fails otherwise (it is down, the connection breaks) is
+	// not concerned: the request moves on to the other replicas as before.
 	Hedgeable bool
 }
 
@@ -282,6 +293,21 @@ func (lb *LBPolicyImpl) selectCandidate(ctx context.Context, balancer LBBalancer
 	return candidateNodes[targetNodeID], true, nil
 }
 
+// everyLeaderExcluded tells whether the request has no replica of the channel
+// left to try, by the cached shard leaders.
+func (lb *LBPolicyImpl) everyLeaderExcluded(ctx context.Context, workload ChannelWorkload, excludeNodes *typeutil.UniqueSet) bool {
+	leaders, err := lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, true)
+	if err != nil {
+		return false
+	}
+	for _, leader := range leaders {
+		if !excludeNodes.Contain(leader.NodeID) {
+			return false
+		}
+	}
+	return len(leaders) > 0
+}
+
 // ExecuteWithRetry will choose a qn to execute the workload, and retry if failed, until reach the max retryTimes.
 func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWorkload) error {
 	log := log.Ctx(ctx).With(
@@ -291,8 +317,18 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	var lastErr error
 	balancer, lw := snapshotBalancer(lb.getBalancer())
 	excludeNodes := typeutil.NewUniqueSet()
-	hedgedOnce := false
-	tryExecute := func() (bool, error) {
+	// Under every policy, a replica that refuses the request as overloaded is
+	// not asked again by the RPC client, see isOverloadErr.
+	ctx = grpcclient.WithFailFastOnOverload(ctx)
+	// overloadErr is the refusal of an overloaded replica, when an attempt of
+	// this request met one. refused tells whether the last attempt did.
+	var overloadErr error
+	refused := false
+	// extraUsed tells that the request has had its one extra attempt, see
+	// ChannelWorkload.Hedgeable.
+	extraUsed := false
+	tryOnce := func() (bool, error) {
+		refused = false
 		targetNode, selectedByBalancer, err := lb.selectNodeWithPolicy(ctx, balancer, lw, workload, &excludeNodes)
 		if err != nil {
 			log.Warn("failed to select node for shard",
@@ -306,14 +342,17 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			return true, err
 		}
 		attemptStart := time.Now()
-		if workload.Hedgeable && !hedgedOnce {
+		if workload.Hedgeable && !extraUsed {
 			if delay, ok := lb.hedging.HedgeDelay(statsKey(workload)); ok {
 				shouldRetry, hedged, err := lb.executeHedged(ctx, workload, balancer, lw, targetNode, selectedByBalancer, attemptStart, delay, &excludeNodes)
 				if hedged {
-					hedgedOnce = true
+					extraUsed = true
 				}
 				if err != nil {
 					lastErr = err
+					if isOverloadErr(err) {
+						overloadErr, refused = err, true
+					}
 				}
 				return shouldRetry, err
 			}
@@ -354,6 +393,9 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			}
 			excludeNodes.Insert(targetNode.NodeID)
 			lastErr = errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode.NodeID, workload.Channel)
+			if isOverloadErr(err) {
+				overloadErr, refused = lastErr, true
+			}
 			return true, lastErr
 		}
 
@@ -361,6 +403,27 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			lb.hedging.ObserveRequest(statsKey(workload), time.Since(attemptStart))
 		}
 		return true, nil
+	}
+	tryExecute := func() (bool, error) {
+		for {
+			again, err := tryOnce()
+			if !again || !refused || ctx.Err() != nil {
+				return again, err
+			}
+			// Refused for overload. The request ends with the refusal when
+			// it may not have an extra attempt, has had it, or no other
+			// replica is left: it is not tried on a third replica, nor are
+			// the shard leaders refreshed to go around again, which would
+			// add to the queues that refused it. The client may try again.
+			if !workload.Hedgeable || extraUsed || lb.everyLeaderExcluded(ctx, workload, &excludeNodes) {
+				return false, overloadErr
+			}
+			// The extra attempt takes the place of the refused one. The
+			// replica is excluded for the request and there is nothing to
+			// wait for: go on at once, whatever the retry interval of the
+			// policy.
+			extraUsed = true
+		}
 	}
 
 	shardLeaders, err := lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, true)
@@ -416,7 +479,9 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 		})
 	}
 
-	wg, _ := errgroup.WithContext(ctx)
+	// The request fails with its first failed channel: stop the work for the
+	// other channels then, rather than finish it for a result nobody gets.
+	wg, ctx := errgroup.WithContext(ctx)
 	// Launch a goroutine for each channel
 	for _, channel := range channelList {
 		wg.Go(func() error {

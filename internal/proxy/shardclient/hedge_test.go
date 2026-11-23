@@ -434,3 +434,248 @@ func TestExecutePassesStatsClass(t *testing.T) {
 	_, ok := h.policy.hedging.keys[hedgeTestKey]
 	assert.True(t, ok)
 }
+
+// overloadErr is the refusal of an overloaded replica as the Proxy gets it:
+// through a response status.
+func overloadErr() error {
+	return merr.Error(merr.Status(merr.WrapErrTooManyRequests(200, "read task queue")))
+}
+
+func (h *hedgeHarness) failures(node int64) int {
+	h.balancer.mu.Lock()
+	defer h.balancer.mu.Unlock()
+	return h.balancer.replicas[replicaKey{hedgeTestKey, node}].failures
+}
+
+// request runs one channel request that may get an extra attempt, or not.
+func (h *hedgeHarness) request(extra bool, delay func(call int32, node int64) (time.Duration, error)) error {
+	return h.policy.ExecuteWithRetry(context.Background(), ChannelWorkload{
+		Channel: hedgeTestChannel, Nq: 1, StatsClass: hedgeTestClass, Hedgeable: extra, Exec: h.exec(delay),
+	})
+}
+
+func (h *hedgeHarness) nodes() []int64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]int64(nil), h.callNodes...)
+}
+
+// A request that may get an extra attempt and is refused by its first replica
+// as overloaded goes to another replica at once. The refusal does not count
+// against the replica.
+func TestOverloadGetsOneExtraAttempt(t *testing.T) {
+	h := newHedgeHarness(t, 1, 2, 3)
+	h.warm(1, 2, 3)
+	start := time.Now()
+	err := h.request(true, func(call int32, _ int64) (time.Duration, error) {
+		if call == 1 {
+			return 0, overloadErr()
+		}
+		return 0, nil
+	})
+	require.NoError(t, err)
+	assert.Less(t, time.Since(start), time.Second)
+	nodes := h.nodes()
+	require.Len(t, nodes, 2)
+	assert.NotEqual(t, nodes[0], nodes[1])
+	assert.Equal(t, 0, h.failures(nodes[0]))
+}
+
+// When the extra attempt is refused too, the request ends with the refusal:
+// it is not tried on a third replica, and the shard leaders are not refreshed
+// to go around again.
+func TestOverloadTwiceEndsRequest(t *testing.T) {
+	h := newHedgeHarness(t, 1, 2, 3)
+	h.warm(1, 2, 3)
+	err := h.request(true, func(int32, int64) (time.Duration, error) { return 0, overloadErr() })
+	assert.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+	nodes := h.nodes()
+	require.Len(t, nodes, 2)
+	assert.NotEqual(t, nodes[0], nodes[1])
+	assert.Zero(t, h.uncached.Load())
+	assert.Equal(t, 0, h.failures(nodes[0]))
+	assert.Equal(t, 0, h.failures(nodes[1]))
+}
+
+// A request that may not get an extra attempt ends with the first refusal.
+func TestOverloadWithoutExtraAttemptEndsRequest(t *testing.T) {
+	h := newHedgeHarness(t, 1, 2)
+	h.warm(1, 2)
+	err := h.request(false, func(int32, int64) (time.Duration, error) { return 0, overloadErr() })
+	assert.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+	assert.Len(t, h.nodes(), 1)
+	assert.Zero(t, h.uncached.Load())
+}
+
+// With a single replica there is no other replica for the extra attempt.
+func TestOverloadOnSingleReplicaEndsRequest(t *testing.T) {
+	h := newHedgeHarness(t, 1)
+	h.warm(1)
+	err := h.request(true, func(int32, int64) (time.Duration, error) { return 0, overloadErr() })
+	assert.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+	assert.Len(t, h.nodes(), 1)
+	assert.Zero(t, h.uncached.Load())
+}
+
+// A hedge is the extra attempt: when the first replica is slow and both
+// attempts are refused in the end, the request ends, with a third replica
+// left untried.
+func TestOverloadAfterHedgeEndsRequest(t *testing.T) {
+	h := newHedgeHarness(t, 1, 2, 3)
+	h.warm(1, 2, 3)
+	err := h.request(true, func(call int32, _ int64) (time.Duration, error) {
+		if call == 1 {
+			return 80 * time.Millisecond, overloadErr()
+		}
+		return 100 * time.Millisecond, overloadErr()
+	})
+	assert.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+	assert.Len(t, h.nodes(), 2)
+}
+
+// A refused hedge leaves the first attempt to answer.
+func TestOverloadedHedgeLeavesPrimary(t *testing.T) {
+	h := newHedgeHarness(t, 1, 2)
+	h.warm(1, 2)
+	_, err := h.run(func(call int32, _ int64) (time.Duration, error) {
+		if call == 1 {
+			return 80 * time.Millisecond, nil
+		}
+		return 0, overloadErr()
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), h.calls.Load())
+	assert.Equal(t, 1, h.publishedCount())
+}
+
+// A replica that is down does not use up the extra attempt: the request moves
+// on as it did before, and a refusal after that still gets its extra attempt.
+func TestFailedReplicaDoesNotUseTheExtraAttempt(t *testing.T) {
+	h := newHedgeHarness(t, 1, 2, 3)
+	h.warm(1, 2, 3)
+	err := h.request(true, func(call int32, _ int64) (time.Duration, error) {
+		switch call {
+		case 1:
+			return 0, merr.ErrServiceUnavailable
+		case 2:
+			return 0, overloadErr()
+		}
+		return 0, nil
+	})
+	require.NoError(t, err)
+	assert.Len(t, h.nodes(), 3)
+}
+
+// Without an extra attempt, a replica that is down and one that is overloaded
+// end the request as overloaded.
+func TestOverloadAfterFailedReplicaEndsRequest(t *testing.T) {
+	h := newHedgeHarness(t, 1, 2, 3)
+	h.warm(1, 2, 3)
+	err := h.request(false, func(call int32, _ int64) (time.Duration, error) {
+		if call == 1 {
+			return 0, merr.ErrServiceUnavailable
+		}
+		return 0, overloadErr()
+	})
+	assert.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+	assert.Len(t, h.nodes(), 2)
+}
+
+// A request fails with its first failed channel, and stops the work for its
+// other channels then.
+func TestExecuteCancelsOtherChannelsOnFailure(t *testing.T) {
+	paramtable.Init()
+	mgr := NewMockShardClientManager(t)
+	mgr.EXPECT().GetShardLeaderList(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return([]string{"ch-a", "ch-b"}, nil)
+	mgr.EXPECT().GetShard(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return([]NodeInfo{{NodeID: 1, Address: "localhost", Serviceable: true}}, nil).Maybe()
+	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(mocks.NewMockQueryNodeClient(t), nil).Maybe()
+	policy := NewLBPolicyImpl(mgr)
+	balancer := NewLatencyWeightedBalancer(mgr)
+	policy.getBalancer = func() LBBalancer { return balancer }
+
+	canceled := atomic.NewBool(false)
+	start := time.Now()
+	err := policy.Execute(context.Background(), CollectionWorkLoad{
+		Nq: 1,
+		Exec: func(ctx context.Context, _ UniqueID, _ types.QueryNodeClient, channel string) error {
+			if channel == "ch-a" {
+				return overloadErr()
+			}
+			select {
+			case <-ctx.Done():
+				canceled.Store(true)
+				return ctx.Err()
+			case <-time.After(10 * time.Second):
+				return nil
+			}
+		},
+	})
+	assert.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+	assert.True(t, canceled.Load())
+	assert.Less(t, time.Since(start), 5*time.Second)
+}
+
+// The handling of an overloaded replica does not depend on the replica
+// selection policy: the extra attempt goes to the next replica at once, also
+// when less than the retry interval of the policy is left of the request,
+// and the request ends when that attempt is refused too.
+func TestOverloadUnderEveryPolicy(t *testing.T) {
+	paramtable.Init()
+	for name, newBalancer := range map[string]func(ShardClientMgr) LBBalancer{
+		"round_robin": func(ShardClientMgr) LBBalancer { return NewRoundRobinBalancer() },
+		"look_aside":  func(mgr ShardClientMgr) LBBalancer { return NewLookAsideBalancer(mgr) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var uncached atomic.Int32
+			mgr := NewMockShardClientManager(t)
+			mgr.EXPECT().GetShard(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+				Run(func(_ context.Context, withCache bool, _ string, _ string, _ int64, _ string) {
+					if !withCache {
+						uncached.Inc()
+					}
+				}).Return([]NodeInfo{
+				{NodeID: 1, Address: "localhost", Serviceable: true},
+				{NodeID: 2, Address: "localhost", Serviceable: true},
+				{NodeID: 3, Address: "localhost", Serviceable: true},
+			}, nil).Maybe()
+			mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(mocks.NewMockQueryNodeClient(t), nil).Maybe()
+			policy := NewLBPolicyImpl(mgr)
+			balancer := newBalancer(mgr)
+			policy.getBalancer = func() LBBalancer { return balancer }
+
+			run := func(extra bool, refusals int) ([]int64, error) {
+				var nodes []int64
+				// less than the 200ms the policy waits before a retry
+				ctx, cancel := context.WithTimeout(context.Background(), 180*time.Millisecond)
+				defer cancel()
+				err := policy.ExecuteWithRetry(ctx, ChannelWorkload{
+					Channel: hedgeTestChannel, Nq: 1, Hedgeable: extra,
+					Exec: func(_ context.Context, node UniqueID, _ types.QueryNodeClient, _ string) error {
+						nodes = append(nodes, node)
+						if len(nodes) <= refusals {
+							return overloadErr()
+						}
+						return nil
+					},
+				})
+				return nodes, err
+			}
+
+			nodes, err := run(true, 1)
+			require.NoError(t, err)
+			require.Len(t, nodes, 2)
+			assert.NotEqual(t, nodes[0], nodes[1])
+
+			nodes, err = run(true, 3)
+			assert.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+			assert.Len(t, nodes, 2)
+
+			nodes, err = run(false, 3)
+			assert.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+			assert.Len(t, nodes, 1)
+			assert.Zero(t, uncached.Load())
+		})
+	}
+}
