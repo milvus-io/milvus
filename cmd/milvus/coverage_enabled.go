@@ -25,12 +25,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
-func startServerCoverage(args []string) {
-	// Only the actual server process owns the output, never its supervisor
-	// or a short-lived version/stop command.
-	if len(args) < 3 || args[1] != "run" {
-		return
-	}
+func startServerCoverage() {
+	// Invoked from run.execute after CLI flag and role validation, so only an
+	// actual server process owns the coverage output directory.
 	ctx := context.TODO()
 	if err := coverage.Start(ctx); err != nil {
 		mlog.Fatal(ctx, "initialize server coverage", mlog.Err(err))

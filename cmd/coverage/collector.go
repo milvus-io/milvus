@@ -49,16 +49,17 @@ func start(ctx context.Context, root string, dump func() error) error {
 	if !filepath.IsAbs(root) {
 		return merr.WrapErrParameterInvalidMsg("MILVUS_COVERAGE_DIR must be absolute")
 	}
-	for key, value := range map[string]string{
-		"GCOV_PREFIX":       filepath.Join(root, "cpp"),
-		"GCOV_PREFIX_STRIP": "0",
-		"GCOV_ERROR_FILE":   filepath.Join(root, "gcov-errors.log"),
-	} {
-		if existing := os.Getenv(key); existing != "" && existing != value {
-			return merr.WrapErrParameterInvalidMsg("%s must be %q for server coverage", key, value)
-		}
-		if err := os.Setenv(key, value); err != nil {
-			return err
+	gcovEnv := []struct {
+		key   string
+		value string
+	}{
+		{"GCOV_PREFIX", filepath.Join(root, "cpp")},
+		{"GCOV_PREFIX_STRIP", "0"},
+		{"GCOV_ERROR_FILE", filepath.Join(root, "gcov-errors.log")},
+	}
+	for _, entry := range gcovEnv {
+		if existing := os.Getenv(entry.key); existing != "" && existing != entry.value {
+			return merr.WrapErrParameterInvalidMsg("%s must be %q for server coverage", entry.key, entry.value)
 		}
 	}
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -89,6 +90,11 @@ func start(ctx context.Context, root string, dump func() error) error {
 	// Verify actual Go instrumentation before publishing the ready marker.
 	if err := c.writeMeta(filepath.Join(root, "go")); err != nil {
 		return merr.Wrap(err, "server was not built with Go coverage")
+	}
+	for _, entry := range gcovEnv {
+		if err := os.Setenv(entry.key, entry.value); err != nil {
+			return err
+		}
 	}
 	_, writeErr := ready.WriteString(strconv.Itoa(os.Getpid()))
 	if err := merr.Combine(writeErr, ready.Close()); err != nil {
@@ -134,7 +140,7 @@ func (c *collector) handle(ctx context.Context, id string) {
 		mlog.Warn(ctx, "claim coverage snapshot", mlog.Err(err))
 	} else if err := c.snapshot(run); err != nil {
 		mlog.Warn(ctx, "export coverage snapshot", mlog.Err(err))
-		if writeErr := os.WriteFile(filepath.Join(run, "error"), []byte(err.Error()), 0o600); writeErr != nil {
+		if writeErr := writeFileAtomic(filepath.Join(run, "error"), []byte(err.Error()), 0o600); writeErr != nil {
 			mlog.Warn(ctx, "write coverage failure marker", mlog.Err(writeErr))
 		}
 	}
@@ -158,9 +164,9 @@ func (c *collector) snapshot(run string) error {
 		return c.nativeError
 	}
 	cppRoot := filepath.Join(c.root, "cpp")
-	previous, err := gcdaTimes(cppRoot)
+	previous, err := markExistingGCDA(cppRoot)
 	if err != nil {
-		return merr.Wrap(err, "inspect C++ counters before dump")
+		return merr.Wrap(err, "prepare C++ counters before dump")
 	}
 	errorFile := filepath.Join(c.root, "gcov-errors.log")
 	if err := os.WriteFile(errorFile, nil, 0o600); err != nil {
@@ -185,8 +191,12 @@ func (c *collector) snapshot(run string) error {
 		c.nativeError = merr.Wrap(err, "inspect C++ counters after dump")
 		return c.nativeError
 	}
-	if len(current) == 0 || len(current) < len(previous) {
+	if len(current) < len(previous) {
 		c.nativeError = merr.WrapErrServiceInternalMsg("C++ dump produced fewer .gcda files than before")
+		return c.nativeError
+	}
+	if len(current) == 0 {
+		c.nativeError = merr.WrapErrServiceInternalMsg("C++ dump produced no .gcda files")
 		return c.nativeError
 	}
 	for path, oldTime := range previous {
@@ -227,11 +237,37 @@ func (c *collector) snapshot(run string) error {
 	if err != nil {
 		return err
 	}
-	temp := filepath.Join(run, "done.json.tmp")
-	if err := os.WriteFile(temp, manifest, 0o600); err != nil {
+	return writeFileAtomic(filepath.Join(run, "done.json"), manifest, 0o600)
+}
+
+func markExistingGCDA(root string) (map[string]time.Time, error) {
+	previous, err := gcdaTimes(root)
+	if err != nil {
+		return nil, err
+	}
+	// Backdate existing .gcda files so a rewrite within the same coarse
+	// filesystem mtime tick still advances strictly past the baseline.
+	for path, modTime := range previous {
+		baseline := modTime.Truncate(time.Second).Add(-2 * time.Second)
+		if err := os.Chtimes(path, baseline, baseline); err != nil {
+			return nil, err
+		}
+		previous[path] = baseline
+	}
+	return previous, nil
+}
+
+func writeFileAtomic(path string, data []byte, perm fs.FileMode) error {
+	temp := path + ".tmp"
+	if err := os.WriteFile(temp, data, perm); err != nil {
+		_ = os.Remove(temp)
 		return err
 	}
-	return os.Rename(temp, filepath.Join(run, "done.json"))
+	if err := os.Rename(temp, path); err != nil {
+		_ = os.Remove(temp)
+		return err
+	}
+	return nil
 }
 
 func gcdaTimes(root string) (map[string]time.Time, error) {

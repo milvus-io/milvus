@@ -23,15 +23,6 @@ SONIC_PLUGIN_SYNC_TAG := bytedance_tango
 SONIC_PLUGIN_SYNC_LDFLAG := -checklinkname=0
 MILVUS_GO_BUILD_TAGS := dynamic,sonic,with_jemalloc,$(SONIC_PLUGIN_SYNC_TAG)
 
-# Instrument the server used by SDK/REST E2E tests; normal builds are unchanged.
-USE_SERVER_COVERAGE ?= OFF
-export USE_SERVER_COVERAGE
-SERVER_COVERAGE_GO_FLAGS :=
-ifeq ($(USE_SERVER_COVERAGE),ON)
-	MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),servercoverage
-	SERVER_COVERAGE_GO_FLAGS := -cover -covermode=atomic -coverpkg=github.com/milvus-io/milvus/...,command-line-arguments
-endif
-
 INSTALL_PATH := $(PWD)/bin
 LIBRARY_PATH := $(PWD)/lib
 PGO_PATH := $(PWD)/configs/pgo
@@ -94,6 +85,26 @@ endif
 	export CC CXX MILVUS_LLVM_ROOT
 	MILVUS_GO_BUILD_TAGS := dynamic,sonic,$(SONIC_PLUGIN_SYNC_TAG)
 	TSAN_GO_LDFLAGS := -linkmode=external
+endif
+
+# Instrument the server used by SDK/REST E2E tests; normal builds are unchanged.
+USE_SERVER_COVERAGE ?= OFF
+export USE_SERVER_COVERAGE
+ifneq ($(USE_SERVER_COVERAGE),ON)
+ifneq ($(USE_SERVER_COVERAGE),OFF)
+$(error USE_SERVER_COVERAGE must be ON or OFF)
+endif
+endif
+SERVER_COVERAGE_GO_FLAGS :=
+ifeq ($(USE_SERVER_COVERAGE),ON)
+ifneq ($(OS),Linux)
+$(error USE_SERVER_COVERAGE currently requires Linux)
+endif
+ifeq ($(USE_TSAN),ON)
+$(error USE_SERVER_COVERAGE and USE_TSAN are mutually exclusive)
+endif
+	MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),servercoverage
+	SERVER_COVERAGE_GO_FLAGS := -cover -covermode=atomic -coverpkg=github.com/milvus-io/milvus/...,command-line-arguments
 endif
 
 use_dynamic_simd = ON
@@ -165,6 +176,9 @@ unexport WITH_GPU
 ifneq ($(filter ON on TRUE True true 1,$(WITH_GPU)),)
     ifeq ($(USE_TSAN),ON)
         $(error USE_TSAN does not support GPU builds)
+    endif
+    ifeq ($(USE_SERVER_COVERAGE),ON)
+        $(error USE_SERVER_COVERAGE does not support GPU builds)
     endif
     ifneq ($(index_engine),cardinal)
         MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),cuda

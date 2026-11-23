@@ -12,12 +12,23 @@ if ! go version -m bin/milvus | grep -F -- '-cover=true' >/dev/null; then
     echo 'The server must be built with USE_SERVER_COVERAGE=ON' >&2
     exit 1
 fi
-if ! go version -m bin/milvus | grep -E 'build[[:space:]]+-tags=.*servercoverage' >/dev/null; then
+if ! go version -m bin/milvus | grep -E 'build[[:space:]]+-tags=([^[:space:]]*,)?servercoverage(,|$)' >/dev/null; then
     echo 'The server coverage build tag is missing' >&2
     exit 1
 fi
-if ! nm -D lib/libmilvus_core.so | grep -F 'MilvusDumpCoverage' >/dev/null; then
-    echo 'libmilvus_core.so does not contain the server coverage hook' >&2
+core_lib=""
+for candidate in lib/libmilvus_core.so internal/core/output/lib/libmilvus_core.so; do
+    if [[ -f "$candidate" ]]; then
+        core_lib="$candidate"
+        break
+    fi
+done
+if [[ -z "$core_lib" ]]; then
+    echo 'libmilvus_core.so was not found; build Milvus with USE_SERVER_COVERAGE=ON first' >&2
+    exit 1
+fi
+if ! nm -D "$core_lib" | grep -F 'MilvusDumpCoverage' >/dev/null; then
+    echo "$core_lib does not contain the server coverage hook" >&2
     exit 1
 fi
 if [[ -e "$output/coverage" ]]; then
@@ -34,6 +45,10 @@ while IFS= read -r -d '' file; do
 done < <(find "$source_root/cmake_build" -type f -name '*.gcno' -print0)
 if [[ "$count" == 0 ]]; then
     echo 'The C++ build contains no coverage metadata (.gcno files)' >&2
+    exit 1
+fi
+if [[ ! -f cmake_build/CMakeCache.txt ]]; then
+    echo 'cmake_build/CMakeCache.txt is missing; run the C++ coverage build first' >&2
     exit 1
 fi
 compiler=$(sed -n 's/^CMAKE_CXX_COMPILER:[^=]*=//p' cmake_build/CMakeCache.txt)

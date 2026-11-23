@@ -12,6 +12,7 @@ cat > "$work/bin/coverage-covdata" <<'TOOL'
 #!/usr/bin/env bash
 set -eu
 if [[ -n "${FAIL_COVDATA:-}" ]]; then exit 1; fi
+echo 'covdata diagnostic noise on stdout'
 for arg in "$@"; do
     case "$arg" in -o=*) printf 'mode: atomic\n' > "${arg#-o=}" ;; esac
 done
@@ -88,4 +89,28 @@ if "$work/bin/coverage-export" ../escape "$work/metadata" > "$work/invalid.out" 
     echo 'Accepted an invalid snapshot ID' >&2; exit 1
 fi
 test ! -s "$work/invalid.out"
+
+new_process preflight
+if "$work/bin/coverage-export" "$id" "$work/nonexistent-metadata" > "$work/preflight.out" 2> "$work/stderr.log"; then
+    echo 'Accepted missing metadata directory' >&2; exit 1
+fi
+test ! -s "$work/preflight.out"
+test ! -e "$MILVUS_COVERAGE_DIR/requests/$id"
+test ! -e "$MILVUS_COVERAGE_DIR/runs/$id"
+
+new_process exited_server
+(
+    for ((i=0; i<200; i++)); do
+        [[ ! -f "$MILVUS_COVERAGE_DIR/requests/$id" ]] || exit 0
+        sleep 0.02
+    done
+) &
+server_pid=$!
+printf '%s' "$server_pid" > "$MILVUS_COVERAGE_DIR/ready"
+if "$work/bin/coverage-export" "$id" "$work/metadata" > "$work/exited.out" 2> "$work/stderr.log"; then
+    echo 'Accepted a server process that exited mid-snapshot' >&2; exit 1
+fi
+wait "$server_pid" || true
+test ! -s "$work/exited.out"
+grep -F 'exited before completing' "$work/stderr.log" >/dev/null
 echo 'Server coverage exporter protocol tests passed'

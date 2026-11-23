@@ -92,7 +92,7 @@ func TestSnapshotFailuresNeverPublishCompletion(t *testing.T) {
 	}{
 		{"Go metadata", func(c *collector) { c.writeMeta = func(string) error { return os.ErrPermission } }, "Go metadata"},
 		{"Go counters", func(c *collector) { c.writeCounters = func(string) error { return os.ErrPermission } }, "Go counters"},
-		{"missing native counters", func(c *collector) { c.dump = func() error { return nil } }, "fewer .gcda"},
+		{"missing native counters", func(c *collector) { c.dump = func() error { return nil } }, "no .gcda files"},
 		{"native dump error", func(c *collector) {
 			c.dump = func() error {
 				if err := os.WriteFile(filepath.Join(c.root, "gcov-errors.log"), []byte("profiling: permission denied"), 0o600); err != nil {
@@ -234,6 +234,11 @@ func TestStartDoesNotModifyAnOwnedDirectory(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "go")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("modified owned directory before claiming it: %v", err)
 	}
+	for _, key := range []string{"GCOV_PREFIX", "GCOV_PREFIX_STRIP", "GCOV_ERROR_FILE"} {
+		if got := os.Getenv(key); got != "" {
+			t.Fatalf("start mutated %s=%q on owned directory", key, got)
+		}
+	}
 }
 
 func TestServeProcessesOnlyValidRegularRequests(t *testing.T) {
@@ -285,8 +290,17 @@ func TestServeProcessesOnlyValidRegularRequests(t *testing.T) {
 func TestRepeatedSnapshotsKeepPreviousData(t *testing.T) {
 	c := fixture(t)
 	first := requestSnapshot(t, c, strings.Repeat("1", 32))
+	gcda := filepath.Join(c.root, "cpp", "probe.gcda")
+	firstInfo, err := os.Stat(gcda)
+	if err != nil {
+		t.Fatal(err)
+	}
 	c.dump = func() error {
-		if err := os.WriteFile(filepath.Join(c.root, "cpp", "probe.gcda"), []byte("updated data"), 0o600); err != nil {
+		if err := os.WriteFile(gcda, []byte("updated data"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// Simulate a coarse filesystem clock where two rewrites share the same mtime tick.
+		if err := os.Chtimes(gcda, firstInfo.ModTime(), firstInfo.ModTime()); err != nil {
 			t.Fatal(err)
 		}
 		return nil

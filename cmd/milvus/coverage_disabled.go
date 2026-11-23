@@ -18,4 +18,4 @@
 
 package milvus
 
-func startServerCoverage(_ []string) {}
+func startServerCoverage() {}

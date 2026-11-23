@@ -1,8 +1,8 @@
 # Server coverage uses GCC's gcov runtime, including its explicit dump API.
 if (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR
     NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR
-    NOT CMAKE_C_COMPILER_ID STREQUAL "GNU" OR WITH_GPU OR WITH_CUVS)
-    message(FATAL_ERROR "BUILD_SERVER_COVERAGE requires a Linux CPU build with GCC")
+    NOT CMAKE_C_COMPILER_ID STREQUAL "GNU" OR WITH_GPU OR WITH_CUVS OR USE_TSAN)
+    message(FATAL_ERROR "BUILD_SERVER_COVERAGE requires a Linux CPU build with GCC (without USE_TSAN)")
 endif()
 
 add_compile_options(

@@ -38,7 +38,7 @@ In a configured Milvus Linux build environment:
 ```bash
 # Use a dedicated build tree; do not reuse libraries from an ordinary build.
 jobs=8 CMAKE_BUILD_PARALLEL_LEVEL=8 CARGO_BUILD_JOBS=4 \
-  make USE_SERVER_COVERAGE=ON
+  make install USE_SERVER_COVERAGE=ON
 bash scripts/package_server_coverage.sh /tmp/milvus-coverage-build
 ```
 
@@ -107,14 +107,18 @@ Create an empty file `requests/<id>`, where `<id>` is 32 lowercase hexadecimal
 characters. The collector processes requests serially and creates an exclusive
 `runs/<id>` directory. The same ID cannot overwrite a previous snapshot.
 
-The collector writes Go metadata/counters, explicitly dumps the C++ runtime,
-flushes libgcov diagnostics, and checks that every previous `.gcda` file was
-rewritten and the file count did not drop. It then copies `.gcda` files
-preserving their paths. `done.json` is atomically
-published only after these steps succeed; otherwise `error` describes the
-failure. The caller must treat missing completion as failure/timeout. A native
-dump error permanently rejects subsequent snapshots from that process because
-the failed interval may have been lost.
+The collector writes Go metadata/counters, backdates existing `.gcda` mtimes
+before dumping, explicitly dumps the C++ runtime, flushes libgcov diagnostics,
+and checks that every previous `.gcda` file was rewritten and the file count
+did not drop. It then copies `.gcda` files preserving their paths. `done.json`
+and `error` markers are atomically published via rename; `done.json` appears
+only after all steps succeed. The caller must treat missing completion as
+failure/timeout. A native dump error permanently rejects subsequent snapshots
+from that process because the failed interval may have been lost. Note that
+on the very first snapshot (when no prior `.gcda` files exist), a partial write
+where libgcov reports open failures only to `stderr` cannot be distinguished by
+the collector from unexecuted units; ensure adequate disk space and check
+server `stderr` if native coverage looks unexpectedly low.
 
 The exporter converts Go data into `go.out`, pairs C++ counters with `.gcno`
 files, and produces gcov JSON, including units with no hits. It archives these

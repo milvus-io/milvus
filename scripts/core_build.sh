@@ -196,6 +196,7 @@ parameter:
 environment:
 TANTIVY_ANALYZER_REMOTE_TLS: ON/OFF (default: ON). Set OFF for FIPS builds that must not link rustls/ring
   (disables Lindera online dictionary download and gRPC tokenizer TLS).
+USE_SERVER_COVERAGE: ON/OFF (default: OFF). Instrument the server for E2E coverage (Linux CPU/GCC only).
 
 usage:
 ./core_build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f \${TANTIVY_FEATURES} [-x \${INDEX_ENGINE}] [-G \${WITH_GPU}] [-u] [-l] [-c] [-z] [-m] [-e] [-h] [-b] [-o] [-R \${WITH_CRT}]
@@ -224,6 +225,23 @@ if [[ "${USE_TSAN}" == "ON" ]]; then
   fi
 fi
 export USE_TSAN
+
+USE_SERVER_COVERAGE="${USE_SERVER_COVERAGE:-OFF}"
+case "${USE_SERVER_COVERAGE}" in
+  ON|OFF) ;;
+  *) echo "ERROR: USE_SERVER_COVERAGE must be ON or OFF" >&2; exit 1 ;;
+esac
+if [[ "${USE_SERVER_COVERAGE}" == "ON" ]]; then
+  if [[ "${USE_TSAN}" == "ON" || "${WITH_GPU}" == "ON" ]]; then
+    echo "ERROR: USE_SERVER_COVERAGE cannot be combined with ThreadSanitizer or GPU builds" >&2
+    exit 1
+  fi
+  if [[ "$(uname -s)" != "Linux" ]]; then
+    echo "ERROR: USE_SERVER_COVERAGE currently requires Linux" >&2
+    exit 1
+  fi
+fi
+export USE_SERVER_COVERAGE
 
 # Azure SDK build has been removed as we now use Arrow with Azure support directly
 
