@@ -940,11 +940,6 @@ func (sm *Manager) finishRestoreSnapshot(
 	rollback RollbackFunc,
 	validateResources ValidateResourcesFunc,
 ) (jobID int64, err error) {
-	if Params.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() {
-		if err := validateSummarySnapshot(ctx, sm.meta, snapshotData, foreignConfig); err != nil {
-			return 0, err
-		}
-	}
 	if sm.CollectionRestorer != nil {
 		return sm.broadcastRestoreCollection(ctx, snapshotData, snapshotName, sourceCollectionID, targetCollectionName, targetDbName, pinID, external, snapshotS3Location, externalSpec)
 	}

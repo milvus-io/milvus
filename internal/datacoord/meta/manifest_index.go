@@ -23,17 +23,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
-	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -187,8 +183,8 @@ func (m *Meta) SubmitManifestIndexRead(ctx context.Context, io *packed.ManifestI
 }
 
 // validateManifestIndexPublishable is the writer-side twin of
-// manifestIndexFilePathInfo: an entry the fail-closed readers (GC's
-// retraction resolve, the startup reload) would refuse can neither be served
+// manifestIndexFilePathInfo: an entry the fail-closed readers (GC and
+// index load) would refuse can neither be served
 // nor retired, so no writer may commit one. It applies the exact reader
 // predicate rather than restating the field checks, so writer and readers
 // cannot drift apart.
@@ -199,130 +195,6 @@ func ValidateManifestIndexPublishable(segmentID int64, manifestIndex packed.Mani
 			segmentID, manifestIndex.IndexID, manifestIndex.BuildID, manifestIndex.IndexName)
 	}
 	return nil
-}
-
-// reloadSegmentIndexesFromManifests rebuilds completed index records from
-// retained StorageV3 manifests marked manifest_has_index. Dropped compaction
-// parents still need their indexes for query fallback and orphan-GC protection.
-// Recovery is independent of the current write-mode switch: records published
-// while the switch was on must remain visible after it is turned off. Existing
-// etcd rows win on buildID conflicts, so active, failed, fake-finished, and
-// record-resident results stay authoritative.
-//
-// A manifest that cannot be read fails startup. Skipping it would
-// leave meta silently incomplete, and a silently incomplete indexMeta is not
-// merely "that segment looks unindexed": garbage collection treats an absent
-// SegmentIndex as proof the artifact is garbage. recycleUnusedIndexFilesV0's
-// CheckCleanSegmentIndex miss path deletes the whole buildID prefix with no
-// time tolerance, and the default storePathVersion 0 puts index files exactly
-// under the index_files/ prefix it walks. One transient object-store error
-// would therefore destroy live index files that the manifest still references.
-// Failing to start is recoverable; that is not.
-func (m *Meta) ReloadSegmentIndexesFromManifests(ctx context.Context) error {
-	record := timerecord.NewTimeRecorder("indexMeta-reloadFromManifests")
-	segments := m.SelectSegments(ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
-		return (IsSegmentHealthy(segment) || segment.GetState() == commonpb.SegmentState_Dropped) &&
-			segment.GetStorageVersion() >= storage.StorageV3 &&
-			segment.GetManifestHasIndex() && segment.GetLevel() != datapb.SegmentLevel_L0
-	}))
-	for _, segment := range segments {
-		if segment.GetManifestPath() == "" {
-			return merr.Wrapf(merr.ErrDataIntegrity,
-				"segment %d is marked manifest_has_index but has no manifest path", segment.GetID())
-		}
-	}
-	if len(segments) == 0 {
-		mlog.Info(ctx, "no segment manifests to recover indexes from")
-		return nil
-	}
-
-	storageConfig := CreateStorageConfig()
-	rootPath := storageConfig.GetRootPath()
-	if m.ChunkManager != nil {
-		rootPath = m.ChunkManager.RootPath()
-	}
-	concurrency := min(len(segments), SegmentIndexManifestReadConcurrency())
-	reader := m.newManifestIndexReader(ctx, segments, concurrency, storageConfig)
-	defer reader.Close()
-	installed := 0
-	var emptyMarkers []UpdateOperator
-	flushMarkers := func(markers []UpdateOperator) error {
-		if len(markers) == 0 {
-			return nil
-		}
-		return m.UpdateSegmentsInfo(ctx, markers...)
-	}
-	for {
-		result, err := reader.next()
-		if err != nil {
-			return merr.Wrap(err, "recover segment indexes from manifests")
-		}
-		if result == nil {
-			break
-		}
-		indexes, removed, err := m.recoverManifestIndexes(ctx, result.request.segment, result.entries, result.err, rootPath)
-		if err != nil {
-			return merr.Wrap(err, "recover segment indexes from manifests")
-		}
-		if len(indexes) == 0 && !removed {
-			emptyMarkers = append(emptyMarkers, ClearEmptyManifestIndexMarker(result.request.segment.GetID(), result.request.segment.GetManifestPath()))
-			if len(emptyMarkers) == reader.limit {
-				if err := flushMarkers(emptyMarkers); err != nil {
-					return merr.Wrap(err, "persist empty manifest index markers")
-				}
-				emptyMarkers = nil
-			}
-		}
-		for _, segIdx := range indexes {
-			if m.IndexCatalog.HasBuildInfo(segIdx.BuildID) {
-				continue
-			}
-			m.IndexCatalog.UpdateSegmentIndex(segIdx)
-			installed++
-		}
-	}
-	if installed > 0 {
-		// Off the startup path, which must not wait for reloadFromKV's publication.
-		go m.IndexCatalog.PublishStoredIndexSizes()
-	}
-	if err := flushMarkers(emptyMarkers); err != nil {
-		return merr.Wrap(err, "persist empty manifest index markers")
-	}
-
-	mlog.Info(ctx, "recovered segment indexes from manifests",
-		mlog.Int("manifestsRead", len(segments)), mlog.Int("recoveredIndexes", installed),
-		mlog.Duration("duration", record.ElapseSpan()))
-	return nil
-}
-
-// recoverManifestIndexes validates a completed read. Missing dropped manifests
-// retain their catalog row for GC; any other unreadable manifest fails startup.
-func (m *Meta) recoverManifestIndexes(ctx context.Context, segment *SegmentInfo, entries []packed.ManifestIndexInfo, err error, rootPath string) ([]*model.SegmentIndex, bool, error) {
-	if err != nil {
-		if segment.GetState() == commonpb.SegmentState_Dropped && m.ChunkManager != nil {
-			manifestFile, pathErr := packed.ManifestFilePath(segment.GetManifestPath())
-			if pathErr != nil {
-				return nil, false, merr.Wrap(pathErr, "resolve dropped segment manifest during recovery")
-			}
-			exists, existErr := m.ChunkManager.Exist(ctx, manifestFile)
-			if existErr != nil {
-				return nil, false, merr.Wrap(existErr, "check dropped segment manifest during recovery")
-			}
-			if !exists {
-				return nil, true, nil
-			}
-		}
-		return nil, false, retry.Unrecoverable(merr.Wrapf(err, "recover segment %d indexes from manifest %s", segment.GetID(), segment.GetManifestPath()))
-	}
-	indexes := make([]*model.SegmentIndex, 0, len(entries))
-	for _, entry := range entries {
-		if _, ok := ManifestIndexFilePathInfoForSegment(rootPath, segment.SegmentInfo, entry); !ok {
-			return nil, false, merr.Wrapf(merr.ErrDataIntegrity,
-				"segment %d manifest holds an unusable index entry: indexID %d buildID %d", segment.GetID(), entry.IndexID, entry.BuildID)
-		}
-		indexes = append(indexes, segmentIndexFromManifest(segment, entry))
-	}
-	return indexes, false, nil
 }
 
 // segmentIndexFromManifest projects a manifest index entry back into the

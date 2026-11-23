@@ -1361,11 +1361,9 @@ func (gc *GarbageCollector) GetDroppedSegmentIndexFiles(ctx context.Context, io 
 		}
 	}
 
-	// A dropped StorageV3 segment can hold both kinds of index metadata at
-	// once - a manifest-only entry published while the etcd write switch was
-	// off, and a record-only one whose build finished after the drop - so the
-	// delete list is always the union of records and manifest, mirroring
-	// recycleUnusedSegIndexes.
+	// A dropped StorageV3 segment can have both catalog-backed indexes and
+	// published artifacts. The manifest still supplies the retry list after
+	// dropped-segment GC retires the summaries.
 	segment := gc.Meta.GetSegment(ctx, segmentID)
 	manifestIndexFiles, blocked, err := gc.getManifestIndexFiles(ctx, io, segment)
 	if err != nil {
@@ -2085,7 +2083,7 @@ func (gc *GarbageCollector) recycleRecordOnlySegmentIndex(ctx context.Context, o
 	locks.Lock(item.summary.SegmentID)
 	defer locks.Unlock(item.summary.SegmentID)
 	current := gc.Meta.GetSegment(ctx, item.summary.SegmentID)
-	if current != nil && (meta.IsSegmentHealthy(current) || meta.IsSegmentIndexRollbackRetained(current)) &&
+	if current != nil && (meta.IsSegmentHealthy(current) || current.GetState() == commonpb.SegmentState_Dropped) &&
 		(observed == nil || current.GetManifestPath() != observed.GetManifestPath() ||
 			current.GetManifestHasIndex() != observed.GetManifestHasIndex()) {
 		mlog.RatedInfo(ctx, rate.Limit(10), "segment manifest changed during index GC; retry selection",
@@ -2266,6 +2264,8 @@ func (gc *GarbageCollector) getLatestSegmentIndexSummaryForGC(candidate *model.S
 // v0 paths are rooted by buildID, so the first-level directory can be parsed and
 // checked against index meta directly.
 func (gc *GarbageCollector) RecycleUnusedIndexFilesV0(ctx context.Context) {
+	var summaryBuilds typeutil.UniqueSet
+	var summaryVersion uint64
 	start := time.Now()
 	log := mlog.With(mlog.String("gcName", "recycleUnusedIndexFilesV0"), mlog.Time("startAt", start))
 	log.Info(ctx, "start recycleUnusedIndexFilesV0...")
@@ -2300,6 +2300,20 @@ func (gc *GarbageCollector) RecycleUnusedIndexFilesV0(ctx context.Context) {
 			return true
 		}
 		if segIdx == nil {
+			// A migrated build can still have readers of its source layout.
+			// Publication installs the summary and advances the generation
+			// before the task lookup can miss.
+			version := gc.Option.IndexMeta.SummaryRetirementVersion()
+			if summaryBuilds == nil || summaryVersion != version {
+				summaryBuilds = gc.artifactSummaryBuildIDs(ctx)
+				summaryVersion = version
+			}
+			if ctx.Err() != nil {
+				return false
+			}
+			if summaryBuilds.Contain(buildID) {
+				return true
+			}
 			// buildID no longer exists in meta. Orphan buildID walk has no collection context,
 			// so IsBuildIDGCBlocked(-1, buildID) fail-closes on ANY unloaded RefIndex globally.
 			if snapshotMeta != nil && snapshotMeta.IsBuildIDGCBlocked(-1, buildID) {

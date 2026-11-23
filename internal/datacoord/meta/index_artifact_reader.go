@@ -42,7 +42,7 @@ func (m *Meta) ResolveSegmentIndexes(ctx context.Context, segment *datapb.Segmen
 }
 
 // MergeSegmentIndexSummaries projects the selected segment inventory without I/O.
-// A finished task for the same build supplies its own metadata and files.
+// A finished catalog record for the same or a newer build supplies its files.
 func MergeSegmentIndexSummaries(segment *datapb.SegmentInfo, records map[int64]*model.SegmentIndex, live func(int64) bool) (map[int64]*model.SegmentIndex, map[int64]int64, error) {
 	if records == nil {
 		records = make(map[int64]*model.SegmentIndex, len(segment.GetIndexSummaries()))
@@ -61,9 +61,9 @@ func MergeSegmentIndexSummaries(segment *datapb.SegmentInfo, records map[int64]*
 			return nil, nil, merr.Wrapf(merr.ErrDataIntegrity, "duplicate index summary for segment %d", segment.GetID())
 		}
 		seen[id] = struct{}{}
-		// A finished row can carry the files for this exact build. If its
-		// completion raced the earlier task snapshot, the pinned summary wins.
-		if task := records[id]; task != nil && task.BuildID == summary.GetBuildId() && task.IndexState == commonpb.IndexState_Finished {
+		// A finished record can replace an older manifest artifact or carry
+		// the source files of a build whose migration just committed.
+		if task := records[id]; task != nil && task.BuildID >= summary.GetBuildId() && task.IndexState == commonpb.IndexState_Finished {
 			continue
 		}
 		records[id] = SegmentIndexFromSummary(segment, summary)

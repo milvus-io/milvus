@@ -211,6 +211,36 @@ func TestCommitSegmentManifestAllowsOmittedExpectedManifest(t *testing.T) {
 	require.True(t, updated.GetIsImporting())
 }
 
+func TestCommitSegmentManifestFencesLegacyAdoptionAfterEmptyIndexCompletion(t *testing.T) {
+	ctx := t.Context()
+	mt, err := NewMemoryMeta(t)
+	require.NoError(t, err)
+	base := "/tmp/milvus/insert_log/1/10/210"
+	current := packed.MarshalManifestPath(base, 7)
+	next := packed.MarshalManifestPath(base, 8)
+	require.NoError(t, mt.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 210, State: commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3, ManifestPath: current,
+		IndexSummaries: []*datapb.SegmentIndexSummary{{IndexId: 1, FieldId: 2, BuildId: 3}},
+	})))
+
+	// An empty index completion updated the inventory without advancing the
+	// manifest, so the legacy payload's base CAS by itself would succeed.
+	commit := SegmentManifestCommit{
+		SegmentID: 210, ExpectedManifest: current, RequireNoIndexInventory: true,
+		Mutation: ManifestMutation{Type: ManifestMutationNoop, ManifestPath: next},
+	}
+	require.ErrorIs(t, mt.CommitSegmentManifest(ctx, commit), merr.ErrServiceUnimplemented)
+	require.Equal(t, current, mt.GetSegment(ctx, 210).GetManifestPath())
+
+	commit.RequireNoIndexInventory = false
+	require.NoError(t, mt.CommitSegmentManifest(ctx, commit))
+	segment := mt.GetSegment(ctx, 210)
+	require.Equal(t, next, segment.GetManifestPath())
+	require.Len(t, segment.GetIndexSummaries(), 1)
+	require.EqualValues(t, 3, segment.GetIndexSummaries()[0].GetBuildId())
+}
+
 func TestCommitSegmentManifestCreatesSegmentWithInitialPointer(t *testing.T) {
 	meta, err := NewMemoryMeta(t)
 	require.NoError(t, err)

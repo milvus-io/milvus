@@ -5125,7 +5125,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// V3 delta happy path: ops (add) generate a ManifestMutationCommitUpdates
 	// commit carrying the column-group descriptor, with no source-version pin.
 	testDeltaAdd := func(t *testing.T, summaries bool) {
-		setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentIndexSummariesEnabled, strconv.FormatBool(summaries))
+		setSegmentChangeTestParam(t, &Params.DataCoordCfg.WriteSegmentIndexToManifest, strconv.FormatBool(summaries))
 		ctx := context.Background()
 		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
@@ -6369,6 +6369,7 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 			broker: mockBroker,
 		})
 		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server.meta.Segments = meta.NewSegmentsInfo(server.meta.MetaStore)
 
 		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
 			CollectionId: 100,
@@ -6396,6 +6397,7 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 			broker: mockBroker,
 		}, &meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server.meta.Segments = meta.NewSegmentsInfo(server.meta.MetaStore)
 
 		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
 			CollectionId: 100,
@@ -6433,6 +6435,7 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 			broker: mockBroker,
 		}, &meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server.meta.Segments = meta.NewSegmentsInfo(server.meta.MetaStore)
 
 		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
 			CollectionId: 100,
@@ -6479,6 +6482,7 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 			broker: mockBroker,
 		}, &meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server.meta.Segments = meta.NewSegmentsInfo(server.meta.MetaStore)
 
 		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
 			CollectionId: 100,

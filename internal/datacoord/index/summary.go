@@ -17,25 +17,17 @@
 package index
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func (m *IndexMeta) UsesSegmentSummaries() bool { return m != nil && m.summarySource != nil }
 
 // UseSegmentSummaries runs once during recovery, before metadata is published.
 func (m *IndexMeta) UseSegmentSummaries(source metacache.MetaView) error {
-	for _, record := range m.SegmentBuildInfo.List() {
-		if record.IndexState == commonpb.IndexState_Finished {
-			segment, exists := source.GetSegment(record.SegmentID)
-			if !exists || segment.GetState() == commonpb.SegmentState_Dropped || !m.IsIndexExist(record.CollectionID, record.IndexID) {
-				continue
-			}
-			return merr.Wrapf(merr.ErrDataIntegrity, "summary mode cannot recover completed task row %d", record.BuildID)
-		}
+	if m.summarySource != nil {
+		return nil
 	}
 	m.summarySource = source
 	for _, segment := range source.GetAllSegments() {
@@ -69,4 +61,27 @@ func (m *IndexMeta) AccountCopiedIndexes(segment *datapb.SegmentInfo) {
 		m.taskCounts.adjustSummary(model.SegmentIndexSummaryFromProto(segment, summary), 1)
 	}
 	m.taskCounts.publishStoredSizes()
+}
+
+// completedIndexSummaryForIndex returns the published completion for one index.
+func (m *IndexMeta) completedIndexSummaryForIndex(segmentID, indexID int64) (*model.SegmentIndexSummary, bool) {
+	if !m.UsesSegmentSummaries() {
+		return nil, false
+	}
+	segment, ok := m.summarySource.GetSegment(segmentID)
+	if !ok {
+		return nil, false
+	}
+	for _, summary := range segment.GetIndexSummaries() {
+		if summary.GetIndexId() == indexID {
+			return model.SegmentIndexSummaryFromProto(segment, summary), true
+		}
+	}
+	return nil, false
+}
+
+// SummaryRetirementVersion changes before a catalog build disappears from
+// the task map. The build-rooted orphan scan uses it to refresh its protection.
+func (m *IndexMeta) SummaryRetirementVersion() uint64 {
+	return m.summaryRetirementVersion.Load()
 }

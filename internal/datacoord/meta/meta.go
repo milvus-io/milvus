@@ -251,24 +251,14 @@ func NewMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		mt.CompactionProtection = protection
 	}
 
-	// Recovery follows the durable storage location, not the current write
-	// mode. A segment marked manifest_has_index may contain records published
-	// while the switch was previously on, so it must still be loaded after the
-	// switch is turned off. Unmarked clusters perform no manifest reads.
-	if paramtable.Get().DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() {
-		source, ok := mt.IndexCatalog.(interface {
-			UseSegmentSummaries(metacache.MetaView) error
-		})
-		if !ok {
-			return nil, merr.Wrap(merr.ErrServiceUnimplemented, "index catalog does not support segment summaries")
-		}
+	// Index inventory is recovered from catalog rows and segment summaries in
+	// both write modes. Manifest files are opened only by artifact consumers.
+	if source, ok := mt.IndexCatalog.(interface {
+		UseSegmentSummaries(metacache.MetaView) error
+	}); ok {
 		if err := source.UseSegmentSummaries(mt.MetaStore); err != nil {
 			return nil, err
 		}
-	} else if err := mt.ReloadSegmentIndexesFromManifests(ctx); err != nil {
-		// Object-store reads have already retried per segment. Re-entering
-		// initMeta's metastore retry would reread every successful manifest.
-		return nil, retry.Unrecoverable(err)
 	}
 
 	// Segment change groups load AFTER segments are in memory: the recovery
@@ -593,9 +583,6 @@ func (m *Meta) GetAllCollectionNumRows() map[int64]int64 {
 
 // AddSegment records segment info, persisting info into kv store
 func (m *Meta) AddSegment(ctx context.Context, segment *SegmentInfo) error {
-	if paramtable.Get().DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() && segment.GetLevel() != datapb.SegmentLevel_L0 && segment.GetStorageVersion() != storage.StorageV3 {
-		return merr.Wrap(merr.ErrServiceUnimplemented, "segment index summaries require StorageV3 segments")
-	}
 	mlog.Info(ctx, "meta update: adding segment - Start", mlog.Int64("segmentID", segment.GetID()))
 	defer m.LockSegments(segment.GetID())()
 	if info := m.Segments.GetSegment(segment.GetID()); info != nil {
@@ -1772,19 +1759,6 @@ func UpdateManifestHasIndex(segmentID int64) UpdateOperator {
 	}
 }
 
-// clearEmptyManifestIndexMarker applies a verified empty index section only to
-// the pointer that was read. A changed pointer must retain its own marker.
-func ClearEmptyManifestIndexMarker(segmentID int64, expectedManifest string) UpdateOperator {
-	return func(pack *UpdateSegmentPack) bool {
-		segment := pack.Get(segmentID)
-		if segment == nil || !packed.SameManifestPath(segment.GetManifestPath(), expectedManifest) || !segment.GetManifestHasIndex() {
-			return false
-		}
-		segment.ManifestHasIndex = false
-		return true
-	}
-}
-
 func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperator {
 	return func(modPack *UpdateSegmentPack) bool {
 		// Inspect the pending value without registering a write for a stale/no-op
@@ -1821,6 +1795,10 @@ func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperato
 					mlog.Int64("currentVer", currentVer),
 					mlog.Int64("incomingVer", manifestVersion))
 			}
+			return false
+		}
+		if segment.GetManifestHasIndex() || len(segment.GetIndexSummaries()) != 0 {
+			mlog.Warn(modPack.Meta.Ctx, "manifest adoption skipped after index publication", mlog.FieldSegmentID(segmentID))
 			return false
 		}
 		modPack.Get(segmentID).ManifestPath = packed.MarshalManifestPath(basePath, manifestVersion)

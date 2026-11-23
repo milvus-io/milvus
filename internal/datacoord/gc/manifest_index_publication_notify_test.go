@@ -60,16 +60,16 @@ func captureUnlockedManifestNotifications(t *testing.T, m *meta.Meta) *[]string 
 }
 
 func TestManifestIndexMigrationNotifiesOnlyCommittedRevision(t *testing.T) {
-	for _, name := range []string{"backfill", "rollback", "gc"} {
+	for _, name := range []string{"backfill", "gc"} {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			var m *meta.Meta
 			var kv *index.FailBackfillCatalogKV
 			if name != "backfill" {
-				m, _, _, kv = index.RollbackFixture(t)
+				m, _, _, kv = index.PublishedBackfillFixture(t)
 			} else {
 				meta.WithSegmentIndexManifestWrites(t, false)
-				index.WithManifestIndexRollback(t, false)
+
 				meta.NewFakeManifestStore(t)
 				kv = &index.FailBackfillCatalogKV{MetaMemoryKV: meta.NewMetaMemoryKV()}
 				m = index.BootMigrationMeta(t, metastorekv.NewCatalog(kv, "", ""), meta.RestartCollID)
@@ -77,15 +77,12 @@ func TestManifestIndexMigrationNotifiesOnlyCommittedRevision(t *testing.T) {
 			}
 			paths := captureUnlockedManifestNotifications(t, m)
 			migrate := func() error {
-				if name == "rollback" {
-					_, err := m.RollbackSegmentIndexes(ctx, NewGCManifestReadIO(t), meta.RestartSegID, meta.RestartBuildID)
-					return err
-				}
 				if name == "gc" {
-					record, ok := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
-					require.True(t, ok)
+					segment := m.GetSegment(context.Background(), meta.RestartSegID)
+					require.Len(t, segment.GetIndexSummaries(), 1)
+					summary := model.SegmentIndexSummaryFromProto(segment.SegmentInfo, segment.GetIndexSummaries()[0])
 					gc := &GarbageCollector{Meta: m, Option: GcOption{IndexMeta: m.IndexCatalog.(*index.IndexMeta)}}
-					_, err := gc.commitManifestIndexRetractions(ctx, []segmentIndexGCItem{{summary: model.SummarizeSegmentIndex(record)}})
+					_, err := gc.commitManifestIndexRetractions(ctx, []segmentIndexGCItem{{summary: summary}})
 					return err
 				}
 				return index.NewMigrationBackfillInspector(ctx, m).BackfillIndexesForTest(ctx, meta.RestartSegID, meta.RestartBuildID)
@@ -105,16 +102,16 @@ func TestManifestIndexMigrationNotifiesOnlyCommittedRevision(t *testing.T) {
 }
 
 func TestManifestIndexGCNotifiesAfterBatchUnlock(t *testing.T) {
-	m, _, _, _ := index.RollbackFixture(t)
+	m, _, _, _ := index.PublishedBackfillFixture(t)
 	paths := captureUnlockedManifestNotifications(t, m)
-	record, ok := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
-	require.True(t, ok)
+	segment := m.GetSegment(context.Background(), meta.RestartSegID)
+	require.Len(t, segment.GetIndexSummaries(), 1)
+	summary := model.SegmentIndexSummaryFromProto(segment.SegmentInfo, segment.GetIndexSummaries()[0])
 	gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
 	t.Cleanup(gc.Close)
-	gc.recycleManifestSegmentIndexes(context.Background(), []segmentIndexGCItem{{summary: model.SummarizeSegmentIndex(record)}})
+	gc.recycleManifestSegmentIndexes(context.Background(), []segmentIndexGCItem{{summary: summary}})
 	require.Equal(t, []string{m.GetSegment(context.Background(), meta.RestartSegID).GetManifestPath()}, *paths)
-	_, ok = m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
-	require.False(t, ok)
+	require.Empty(t, m.GetSegment(context.Background(), meta.RestartSegID).GetIndexSummaries())
 }
 
 func TestCopyResultNotifiesAfterUnlockDespiteTaskCompletionFailure(t *testing.T) {

@@ -35,39 +35,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 )
 
-func TestEmptyManifestMarkerNormalizedAcrossRestarts(t *testing.T) {
-	meta.MockManifestIndexSubmissions(t)
-	ctx := context.Background()
-	catalog := catalogkv.NewCatalog(meta.NewMetaMemoryKV(), "", "")
-	m, _ := BootMetaForRestart(t, catalog, 300)
-	manifest := packed.MarshalManifestPath("/tmp/test-restart/insert_log/300/30/8001", 1)
-	require.NoError(t, m.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
-		ID: 8001, CollectionID: 300, PartitionID: 30, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3, ManifestPath: manifest, ManifestHasIndex: true,
-	})))
-	reads := 0
-	reader := mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
-		reads++
-		return nil, nil
-	}).Build()
-	defer reader.UnPatch()
-	failure := mockey.Mock((*catalogkv.Catalog).AlterSegments).Return(merr.ErrServiceUnavailable).Build()
-	t.Cleanup(func() { failure.UnPatch() })
-	require.ErrorIs(t, m.ReloadSegmentIndexesFromManifests(ctx), merr.ErrServiceUnavailable)
-	failure.UnPatch()
-	require.True(t, m.GetSegment(ctx, 8001).GetManifestHasIndex())
-	reads = 0
-	first, _ := BootMetaForRestart(t, catalog, 300)
-	require.False(t, first.GetSegment(ctx, 8001).GetManifestHasIndex())
-	require.Equal(t, 1, reads)
-	second, _ := BootMetaForRestart(t, catalog, 300)
-	require.False(t, second.GetSegment(ctx, 8001).GetManifestHasIndex())
-	require.Equal(t, 1, reads, "subsequent startup must not read historical empty manifests")
-	// A stale normalization may not clear a replacement pointer's marker.
-	require.NoError(t, second.UpdateSegmentsInfo(ctx, meta.UpdateManifest(8001, packed.MarshalManifestPath("/tmp/test-restart/insert_log/300/30/8001", 2)), meta.UpdateManifestHasIndex(8001)))
-	require.NoError(t, second.UpdateSegmentsInfo(ctx, meta.ClearEmptyManifestIndexMarker(8001, manifest)))
-	require.True(t, second.GetSegment(ctx, 8001).GetManifestHasIndex())
-}
-
 func TestManifestLastIndexDropClearsMarkerAtomically(t *testing.T) {
 	ctx := context.Background()
 	catalog := catalogkv.NewCatalog(meta.NewMetaMemoryKV(), "", "")

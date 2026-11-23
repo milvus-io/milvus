@@ -75,8 +75,8 @@ vector/scalar index builds select `IndexStorePathVersion=2` and write to
 `<manifest base>/_index/<build>/<version>/<file>`. This includes new indexes on
 legacy local segments: they follow that existing manifest base. Disabling the
 switch preserves the existing version-0/1 layout selection for new tasks.
-New or updated index entries must stay inside that `_index` directory; parent
-traversal and external namespaces are errors. Existing entries are not migrated.
+New or updated index entries must stay inside that `_index` directory. Parent
+traversal and external namespaces are errors.
 Builds retain their creation-time publication mode across switch changes and
 restarts: version 2 finishes in the manifest, while version 0/1 finishes in etcd.
 Readers and cleanup use each artifact's persisted version.
@@ -96,27 +96,27 @@ Generation-zero backend/legacy entries retain `seg_<segment_id>.cache`.
 The cache manager removes `.cache` files on rebuild and does not restore them
 across restarts. These files are not manifests or DataCoord GC objects.
 
-## New-cluster index summary mode
+## Segment index summaries
 
-`dataCoord.index.segmentIndexSummariesEnabled` selects an immutable mode at
-initial startup of an empty cluster. Completed vector/scalar index inventory
-lives in `SegmentInfo.index_summaries`; file lists remain in segment manifests
-and are read on demand. Active and pending-cleanup tasks retain catalog rows.
-Manifest publication updates the pointer and summary and retires the task in
-one catalog transaction. An artifact-free completion retains a summary without
-creating a manifest index entry. GC must consult the current manifest after an
-active-task lookup misses; absence from the task table does not prove orphanhood.
-A new snapshot blocks index reclamation in its collection from revision selection
-through pin publication. Queued deletes check snapshot pins again before removing
-files. Dropped-segment GC clears completed index readiness before deleting files
-and retains the manifest and any task rows for retry.
-Referenced snapshots in summary mode record the selected manifest revisions and
-build IDs without opening segment manifests. Restore and export resolve the
-selected build IDs using those revisions. Exported bundles carry explicit index
-file paths.
-Historical migration, rollback, incompatible snapshot restore and direct manifest
-version adoption are unsupported in this mode. See the
-[index summary design](../../design-docs/design_docs/20261110-segment-index-summary.md).
+DataCoord recovers completed vector and scalar index inventory from catalog
+rows and SegmentInfo summaries. Manifest-backed completions publish the pointer
+and summary and retire the task in one catalog transaction. An artifact-free
+completion records a summary without creating a manifest entry. The write
+switch chooses placement for newly created tasks and controls forward migration.
+Consumers combine existing records and summaries independently of the switch.
+
+GC checks the current manifest after a task lookup misses. A new snapshot
+blocks index reclamation from revision selection through pin publication.
+Queued deletes check pins again before removing files. Dropped-segment GC
+clears index readiness before removing files and keeps the manifest and task
+rows for retry.
+
+Referenced snapshots retain explicit catalog-backed index files and the
+selected revision and BuildID of each manifest-backed artifact. Restore and
+export resolve those BuildIDs from their pinned manifests. Exported bundles
+carry explicit paths.
+
+See the [index summary design](../../design-docs/design_docs/20261110-segment-index-summary.md).
 
 ## Local upgrade compatibility
 
@@ -246,10 +246,9 @@ test. Report which versions, layouts, and failure cases were actually exercised.
 
 Backfill copies the explicit index files from path version 0/1 into the existing
 segment manifest base's `_index/<build>/<version>` and atomically publishes path
-version 2 with catalog-row retirement. Rollback copies v2 files to the
-collection-rooted `index_v1` namespace before restoring a path-version-1 catalog
-row and retracting the manifest entry. Existing v0/v1 rollback records keep their
-layout. Build IDs and file keys are unchanged.
+version 2 and its summary with catalog-row retirement. Build IDs and file keys
+are unchanged. Disabling publication stops forward migration and leaves the
+existing layouts readable.
 
 Copies use object-storage server-side Copy operations, concurrently with a shared
 bounded budget; no download/upload or local migration fallback is permitted.

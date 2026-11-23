@@ -1,40 +1,40 @@
-# Segment index summaries for new clusters
+# Segment index summaries
 
 Related issue: #53047.
 
 ## Goal and scope
 
-Keep completed index inventory in SegmentInfo and artifact details in the
-segment manifest. Do not reconstruct completed SegmentIndex objects at startup.
-Collection index definitions and active or pending-cleanup build tasks remain
-coordinator metadata. The default mode retains existing behavior.
+DataCoord recovers index inventory from the catalog. Each completed index is
+represented by an existing SegmentIndex row or a SegmentInfo summary. The file
+list for a summary with artifacts lives in the associated manifest revision.
+A segment may have both representations for different builds during migration.
 
-Completed inventory has one publication mode: legacy mode retains completed
-SegmentIndex records and does not write summaries; summary mode writes summaries
-and retires completed records. Manifest artifact entries remain in both modes.
+`dataCoord.index.writeSegmentIndexToManifest` selects the publication layout
+for new StorageV3 tasks and enables forward migration. It requires Loon FFI and
+takes effect on startup. An in-flight task keeps its persisted layout.
+Turning the switch off stops forward migration and sends new builds to etcd.
+Existing summaries stay readable. StorageV1/V2 and L0 retain their catalog
+paths.
 
-The new mode is selected only when an empty cluster first starts and is persisted
-in the metadata namespace. Subsequent starts must select the same mode. Existing
-clusters cannot enable it, and summary-mode clusters cannot disable it. Manifest
-publication and `common.storage.useLoonFFI=true` are required. Summary mode
-pins the storage, publication, backfill and rollback settings at startup.
-Historical migration, rollback and conversion of incompatible snapshots are
-outside this version. Legacy direct manifest-version adoption (BatchUpdateManifest
-and pre-baked backfill results) is rejected before publication because it cannot
-update index inventory or fence active builds. Structured backfill remains
-supported by the commit framework.
+During a mixed-binary rollout, set the switch to false and upgrade every
+coordinator, DataNode and QueryNode before enabling migration. Disabling the
+switch does not recreate catalog rows for completed summaries. Released
+upgrade sources store their completed indexes in catalog rows.
 
-Enable at the first startup with both index migration switches disabled:
+## Forward migration
 
-```yaml
-dataCoord:
-  index:
-    segmentIndexSummariesEnabled: true
-    writeSegmentIndexToManifest: true
-```
+The existing DataCoord inspector selects eligible Finished catalog records and
+groups them by segment. Each artifact is copied server-side into the segment's
+`_index` directory. The new manifest pointer, summaries and deletion of the
+corresponding records commit atomically. Artifact-free completions need only a
+catalog transaction. Batches respect the existing copy and catalog limits. An
+uncommitted batch retains its catalog records for retry. Restart scans the
+remaining records.
 
-The durable selection is `datacoord-meta/index-metadata-mode`. A restart with a
-different selection fails before recovery or background work starts.
+Existing local artifact files that need relocation remain catalog-backed.
+Readers always combine the catalog records and summaries. After publish, GC
+protects the old and new layout for live builds and keeps snapshot pins
+effective across placement changes.
 
 ## Metadata and publication
 
@@ -51,7 +51,7 @@ removal must not replace or erase a newer build. Data replacement invalidates
 summaries under the same segment lock as the manifest change.
 
 `GetAllSegmentIndexSummaries` returns a separate in-memory inventory type for
-both legacy and summary modes. It contains collection/partition/segment/index/build
+both catalog records and manifest-backed builds. It contains collection/partition/segment/index/build
 identity, task state, deletion state, artifact presence, sizes and engine versions, including active and
 pending-cleanup tasks. It has no file metadata and performs no manifest I/O.
 Summary lookup, deletion staging and accounting consume this inventory directly.
@@ -61,14 +61,14 @@ Consumers that need files resolve task records or the owning manifest explicitly
 a task record takes precedence when the same BuildID also has a persisted summary.
 
 Readiness, build deduplication, progress and compaction decisions use summaries
-plus active tasks. Load responses resolve artifact details from the exact manifest
+plus catalog records. Load responses resolve artifact details from the exact manifest
 revision paired with the segment snapshot. Load also reads live finished task
 rows, such as a build that completes after its segment is dropped. Batch reads
 share the manifest I/O budget and preserve empty results for missing segments.
 Manifest read failures propagate.
 
 Resource preflight requests an index projection alongside `GetSegmentInfo`.
-In summary mode the projection combines the returned segment's summaries with
+The projection combines the returned segment's summaries with
 live index definitions and finished tasks. Artifact presence, memory size and
 build row count suffice for estimation. A response entry with zero indexes is
 a complete projection. A missing entry uses `GetIndexInfos` for compatibility.
@@ -76,14 +76,14 @@ New summaries retain the build's row count. For summaries written before that
 field existed, estimates use the segment's persisted row count. Full load
 responses still resolve manifest-backed indexes from the manifest.
 
-For an ordinary StorageV3 QueryView segment in summary mode, QueryNode can
+For an ordinary StorageV3 QueryView segment, QueryNode can
 request local index resolution. DataCoord returns the summaries, retained
 finished tasks, manifest pointer and matching replay cursor from the accepted
 snapshot without opening the manifest. QueryNode opens that revision once per
 preparation and uses it for index artifacts, column groups, delta paths and stats.
 The manifest closes when preparation ends. Read states of the same revision
 share the imported column groups. The View's index definitions supply its load
-parameters. A finished task for the same build supplies the artifact metadata.
+parameters. A finished catalog record for the same or a newer build supplies the artifact metadata.
 Complete snapshots remain available for older consumers, external collections,
 StorageV2 and diagnostics.
 
@@ -100,19 +100,18 @@ A pending snapshot blocks new index deletions in its collection and waits for
 already admitted deletions to finish before selecting revisions. The block lasts
 until publication installs the build pins or snapshot creation fails.
 
-Snapshot creation collects build IDs from the selected segments' summaries and
-persists them with the snapshot's exact manifest pointers. The snapshot metadata
+Snapshot creation captures explicit Finished catalog records and the BuildIDs
+of manifest-backed summaries with the snapshot's exact manifest pointers. The snapshot metadata
 marks that manifest-backed file records are deferred. Summaries without files
 remain explicit completion records. Restore and export use DataCoord's shared
 manifest read limit to resolve deferred records from those versions and verify
 that every captured build is accounted for. The self-contained export writes
 the complete file list with rewritten paths.
 
-Copy/restore verifies compatibility before creating work or copying files.
-Compatible targets publish their manifest and summaries before becoming visible.
-For older snapshots, restore checks incomplete index inventories against the pinned
-manifest and the snapshot's live definitions. An entry for a dropped index does not require files
-in the snapshot. Workers that do not report a separate copied-index memory
+Copy/restore validates the worker result against the placement recorded at dispatch.
+Targets publish their manifest and summaries or retain catalog records before
+becoming visible. Legacy snapshots can supply explicit index files in either
+catalog-backed layout. Workers that do not report a separate copied-index memory
 estimate retain the serialized-size fallback.
 L0 delete segments keep their existing format. When a snapshot captures no
 index definitions, physical manifest entries left by dropped indexes are
@@ -124,31 +123,12 @@ The mode and physical index inventory are local cluster state. CDC continues to
 replicate logical index DDL; each cluster constructs its own segments, build IDs
 and artifacts. No new replicated side effect or WAL message is introduced.
 
-## Stack and validation
+## Validation
 
-1. Add the default-off immutable mode and all summary writes: normal and empty
-   completion, replacement/invalidation, retirement, and copy/restore publication.
-   Legacy mode retains completed SegmentIndex records without summaries; summary
-   mode publishes summaries and retires completed records. Include the metadata
-   access needed to validate writes, and test persistence, failure and restart.
-2. Adapt consumers: readiness, scheduling, progress, compaction, load responses,
-   snapshot extraction and GC. Read artifact details from the pinned manifest on
-   demand, without rebuilding a resident completed-index cache. Validate consumers
-   against the first layer's publications, including read failures and cleanup races.
-
-Use the matching Milvus development container for generation, formatting, builds
-and tests. Check catalog failure leaves both pointer and summaries unchanged;
-repeated completion, drop/recreate, empty completion, restart, data replacement,
-snapshot pins, incompatible restore, bounded manifest reads and memory retention.
-Report source-traced paths separately from executed integration evidence.
-
-Executed validation in the matching development container:
-
-- Native C++ build and standard Go protobuf generation passed.
-- Full DataCoord index and metadata package tests passed.
-- Focused summary/publication, GC, copy, restore, catalog and configuration tests
-  passed, including failed catalog publication and the task-retirement GC race.
-- The full paramtable suite is blocked by its existing storage-I/O test using
-  `/var/lib/milvus/data` on the read-only container root; focused mode tests passed.
-
-Live-cluster end-to-end build/load/restart and memory benchmarks have not run.
+Exercise restart with manifest index reads disabled, mixed catalog and summary
+reads and snapshots, a switch change with in-flight builds and copy tasks,
+atomic catalog failure and retry, source artifact retention during and after
+migration, and data replacement and index deletion races. Use the matching
+Milvus development container for focused Go and native checks. A live upgrade
+should also exercise coordinator failover and QueryNode load with real object
+storage.

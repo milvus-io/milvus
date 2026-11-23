@@ -71,7 +71,7 @@ func (m *Meta) copyMigratedIndexFiles(ctx context.Context, segment *SegmentInfo,
 		return merr.Wrap(merr.ErrServiceUnimplemented, "index artifact migration requires object storage server-side copy")
 	}
 	m.manifestCopyOnce.Do(func() {
-		// A process-wide budget, shared by both inspectors and every segment.
+		// A process-wide budget, shared across segment migrations.
 		// Reuse the existing storage I/O concurrency and connection limits.
 		m.manifestCopyLimit = SegmentIndexManifestReadConcurrency()
 		m.manifestCopySlots = semaphore.NewWeighted(int64(m.manifestCopyLimit))

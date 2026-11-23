@@ -7,6 +7,11 @@
 - **Depends on:** [StorageV3 Manifest Index Publication](20260811-storagev3-manifest-index-publication.md),
   [DataCoord Segment-Scoped Manifest Commit Framework](20260817-datacoord-segment-manifest-commit.md)
 
+The [current segment index summary design](20261110-segment-index-summary.md)
+supersedes this document's activation, recovery and reverse-migration rules.
+It retains the forward copy and atomic publication protocol. The sections below
+record the original design.
+
 ## Summary
 
 `dataCoord.index.writeSegmentIndexToManifest` changes where a completed
@@ -14,7 +19,7 @@ StorageV3 index artifact is made durable. It does not by itself move indexes
 that finished while the switch was off: those artifacts still have a finished
 `SegmentIndex` row in etcd and no entry in their segment manifest.
 
-The optional manifest index backfill migrates that historical state. For each
+The original manifest index backfill migrates that historical state. For each
 eligible record it uses one ordinary `CommitSegmentManifest` operation to:
 
 1. copy the explicit artifact files into the segment `_index` namespace with

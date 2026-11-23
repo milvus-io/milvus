@@ -62,13 +62,15 @@ func TestGarbageCollector_RefreshManifestAfterTaskCompletion(t *testing.T) {
 				if !injected {
 					injected = true
 					// GC captured placement before this task completion and index drop.
-					index.PublishRestartTask(t, m, mDomains.IndexMeta)
 					job, ok := original(im, id)
 					require.True(t, ok)
+					job = model.CloneSegmentIndex(job)
+					job.IndexFileKeys = []string{"0", "1"}
 					files = gc.GetAllIndexFilesOfIndex(job)
 					for file := range files {
 						require.NoError(t, m.ChunkManager.Write(ctx, file, []byte("index")))
 					}
+					index.PublishRestartTask(t, m, mDomains.IndexMeta)
 					require.NoError(t, im.RemoveIndex(ctx, meta.RestartCollID, meta.RestartIndexID))
 				}
 				return original(im, id)

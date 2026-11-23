@@ -22,8 +22,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// segmentIndexSummaries returns the current build per index ID. A retained task
-// takes precedence over a completed summary for the same index ID.
+// segmentIndexSummaries returns the newest build per index ID. For the same
+// build, a retained task takes precedence until retirement.
 func (m *IndexMeta) segmentIndexSummaries(segmentID int64) map[int64]*model.SegmentIndexSummary {
 	usesSummaries := m.UsesSegmentSummaries()
 	if usesSummaries {
@@ -50,7 +50,9 @@ func (m *IndexMeta) segmentIndexSummaries(segmentID int64) map[int64]*model.Segm
 	}
 	if tasks != nil {
 		tasks.Range(func(id int64, task *model.SegmentIndex) bool {
-			summaries[id] = model.SummarizeSegmentIndex(task)
+			if current := summaries[id]; current == nil || task.BuildID >= current.BuildID {
+				summaries[id] = model.SummarizeSegmentIndex(task)
+			}
 			return true
 		})
 	}

@@ -591,7 +591,18 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 		snapshotTs = min(snapshotTs, position.GetTimestamp())
 	}
 
-	indexes := h.s.indexMeta.GetIndexesForCollection(collectionID, "")
+	// Capture catalog tasks before selecting their segment revisions. Publication
+	// makes the summary visible before retiring the corresponding task.
+	candidateSegments := h.s.meta.SnapshotCandidateSegments(collectionID)
+	summaryMode := h.s.indexMeta.UsesSegmentSummaries()
+	var indexes []*model.Index
+	var tasks map[int64]map[int64]*model.SegmentIndex
+	if summaryMode {
+		ids := lo.Map(candidateSegments, func(segment *meta.SegmentInfo, _ int) int64 { return segment.GetID() })
+		indexes, tasks = h.s.indexMeta.GetQueryViewIndexSnapshot(collectionID, ids)
+	} else {
+		indexes = h.s.indexMeta.GetIndexesForCollection(collectionID, "")
+	}
 	indexInfos := lo.FilterMap(indexes, func(idx *model.Index, _ int) (*indexpb.IndexInfo, bool) {
 		return &indexpb.IndexInfo{
 			IndexID:         idx.IndexID,
@@ -605,10 +616,16 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 		}, true
 	})
 
-	// get segment info
-	candidateSegments := h.s.meta.SnapshotCandidateSegments(collectionID)
 	segments := make([]*meta.SegmentInfo, 0, len(candidateSegments))
-	for _, info := range candidateSegments {
+	for _, candidate := range candidateSegments {
+		info := candidate
+		if summaryMode {
+			info = h.s.meta.GetSegment(ctx, candidate.GetID())
+			if info == nil || info.GetState() == commonpb.SegmentState_Dropped || info.GetIsImporting() ||
+				info.GetState() == commonpb.SegmentState_Importing {
+				return nil, merr.WrapErrServiceNotReadyMsg("snapshot segment %d changed during capture", candidate.GetID())
+			}
+		}
 		segmentHasData := len(info.GetBinlogs()) > 0 || len(info.GetDeltalogs()) > 0
 		if !segmentHasData {
 			segmentHasData, err = meta.HasCommittedManifest(info)
@@ -664,7 +681,6 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 		segInfo.Deltalogs = append(segInfo.GetDeltalogs(), deltalogs...)
 	})
 
-	summaryMode := h.s.indexMeta.UsesSegmentSummaries()
 	var indexDefinitions map[int64]*indexpb.IndexInfo
 	if summaryMode {
 		indexDefinitions = lo.SliceToMap(indexInfos, func(info *indexpb.IndexInfo) (int64, *indexpb.IndexInfo) {
@@ -677,7 +693,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 		var indexFiles []*indexpb.IndexFilePathInfo
 		if summaryMode {
 			var buildIDs []int64
-			indexFiles, buildIDs, err = collectSnapshotIndexSummaries(segInfo, indexDefinitions)
+			indexFiles, buildIDs, err = collectSnapshotIndexSummaries(segInfo, indexDefinitions, tasks[segInfo.GetID()], h.s.meta.ChunkManager.RootPath())
 			manifestBuildIDs = append(manifestBuildIDs, buildIDs...)
 		} else {
 			indexFiles, err = uncompressIndexFiles(h, segInfo)
@@ -743,14 +759,17 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 	}, nil
 }
 
-func collectSnapshotIndexSummaries(segment *datapb.SegmentInfo, definitions map[int64]*indexpb.IndexInfo) ([]*indexpb.IndexFilePathInfo, []int64, error) {
-	records, artifacts, err := meta.MergeSegmentIndexSummaries(segment, nil, func(id int64) bool { return definitions[id] != nil })
+func collectSnapshotIndexSummaries(segment *datapb.SegmentInfo, definitions map[int64]*indexpb.IndexInfo, tasks map[int64]*model.SegmentIndex, rootPath string) ([]*indexpb.IndexFilePathInfo, []int64, error) {
+	records, artifacts, err := meta.MergeSegmentIndexSummaries(segment, tasks, func(id int64) bool { return definitions[id] != nil })
 	if err != nil {
 		return nil, nil, err
 	}
-	var emptyCompletions []*indexpb.IndexFilePathInfo
+	var explicit []*indexpb.IndexFilePathInfo
 	buildIDs := make([]int64, 0, len(artifacts))
 	for id, record := range records {
+		if record.IndexState != commonpb.IndexState_Finished || definitions[id] == nil {
+			continue
+		}
 		if _, hasArtifact := artifacts[id]; hasArtifact {
 			buildIDs = append(buildIDs, record.BuildID)
 			continue
@@ -760,9 +779,13 @@ func collectSnapshotIndexSummaries(segment *datapb.SegmentInfo, definitions map[
 		params = append(params, common.CloneKeyValuePairs(definition.GetTypeParams())...)
 		info := indexFilePathInfo(segment.GetID(), record, definition, params)
 		info.IndexName = definition.GetIndexName()
-		emptyCompletions = append(emptyCompletions, info)
+		info.IndexFilePaths, err = meta.SegmentIndexFilePaths(rootPath, record, segment)
+		if err != nil {
+			return nil, nil, err
+		}
+		explicit = append(explicit, info)
 	}
-	return emptyCompletions, buildIDs, nil
+	return explicit, buildIDs, nil
 }
 
 func uncompressJSONStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStats *datapb.JsonKeyStats) *datapb.JsonKeyStats {

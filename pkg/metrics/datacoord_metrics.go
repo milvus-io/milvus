@@ -557,32 +557,6 @@ var (
 			Help:      "number of segment index catalog records handled by manifest backfill, by outcome",
 		}, []string{statusLabelName})
 
-	DataCoordManifestIndexRollbackPending = prometheus.NewGauge(prometheus.GaugeOpts{
-		Namespace: milvusNamespace, Subsystem: typeutil.DataCoordRole,
-		Name: "manifest_index_rollback_pending_segments",
-		Help: "number of candidate segments in the current rollback record scan before batch limiting",
-	})
-	DataCoordManifestIndexRollbackPendingRecords = prometheus.NewGauge(prometheus.GaugeOpts{
-		Namespace: milvusNamespace, Subsystem: typeutil.DataCoordRole,
-		Name: "manifest_index_rollback_pending_records",
-		Help: "number of in-memory segment index records still known to lack a catalog row",
-	})
-	DataCoordManifestIndexRollbackReady = prometheus.NewGauge(prometheus.GaugeOpts{
-		Namespace: milvusNamespace, Subsystem: typeutil.DataCoordRole,
-		Name: "manifest_index_rollback_ready",
-		Help: "one after an active complete scan finds no manifest-resident in-memory index records; zero otherwise",
-	})
-	DataCoordManifestIndexRollbackRecords = prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: milvusNamespace, Subsystem: typeutil.DataCoordRole,
-		Name: "manifest_index_rollback_records_total",
-		Help: "number of segment index records successfully restored to etcd by rollback",
-	})
-	DataCoordManifestIndexRollbackAttempts = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Namespace: milvusNamespace, Subsystem: typeutil.DataCoordRole,
-		Name: "manifest_index_rollback_segments_total",
-		Help: "number of segment rollback attempts by outcome",
-	}, []string{statusLabelName})
-
 	DataCoordSnapshotExportJobLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -640,11 +614,6 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordSnapshotExportJobLatency)
 	registry.MustRegister(DataCoordManifestIndexBackfillPending)
 	registry.MustRegister(DataCoordManifestIndexBackfillRecords)
-	registry.MustRegister(DataCoordManifestIndexRollbackPending)
-	registry.MustRegister(DataCoordManifestIndexRollbackPendingRecords)
-	registry.MustRegister(DataCoordManifestIndexRollbackReady)
-	registry.MustRegister(DataCoordManifestIndexRollbackRecords)
-	registry.MustRegister(DataCoordManifestIndexRollbackAttempts)
 	registerStreamingCoord(registry)
 }
 

@@ -2507,10 +2507,6 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 }
 
 func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdateManifestRequest) (*commonpb.Status, error) {
-	if Params.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() {
-		return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "direct manifest version adoption is unsupported in segment index summary mode; use structured backfill")), nil
-	}
-
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -2536,6 +2532,10 @@ func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdat
 
 	items := make([]*messagespb.BatchUpdateManifestItem, 0, len(req.GetItems()))
 	for _, item := range req.GetItems() {
+		segment := s.meta.GetSegment(ctx, item.GetSegmentId())
+		if segment != nil && (segment.GetManifestHasIndex() || len(segment.GetIndexSummaries()) != 0) {
+			return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "direct manifest adoption cannot preserve the published index inventory; use structured backfill")), nil
+		}
 		items = append(items, &messagespb.BatchUpdateManifestItem{
 			SegmentId:       item.GetSegmentId(),
 			ManifestVersion: item.GetManifestVersion(),

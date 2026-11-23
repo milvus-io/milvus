@@ -55,15 +55,16 @@ func TestManifestIndexBackfillGCRechecksLegacyObservation(t *testing.T) {
 	require.NoError(t, index.NewMigrationBackfillInspector(ctx, m).BackfillIndexesForTest(ctx, meta.RestartSegID, meta.RestartBuildID))
 	require.NoError(t, m.IndexCatalog.(*index.IndexMeta).MarkIndexAsDeleted(ctx, meta.RestartCollID, []int64{meta.RestartIndexID}))
 	gc.recycleRecordOnlySegmentIndex(ctx, observed, item)
-	_, exists := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
+	summary, exists := m.IndexCatalog.(*index.IndexMeta).GetSegmentIndexSummary(meta.RestartSegID, meta.RestartBuildID)
 	require.True(t, exists, "stale GC must preserve the driver of manifest retraction")
+	require.True(t, summary.HasArtifact)
 	for file := range item.files {
 		present, err := m.ChunkManager.Exist(ctx, file)
 		require.NoError(t, err)
 		assert.True(t, present, "recheck precedes deletion")
 	}
 	gc.RecycleUnusedSegIndexes(ctx, nil)
-	_, exists = m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
+	_, exists = m.IndexCatalog.(*index.IndexMeta).GetSegmentIndexSummary(meta.RestartSegID, meta.RestartBuildID)
 	assert.False(t, exists)
 	published := m.GetSegment(ctx, meta.RestartSegID)
 	assert.Empty(t, store.BackfillEntriesAt(published.GetManifestPath()))
@@ -76,8 +77,7 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
 	} {
 		t.Run(layout.String(), func(t *testing.T) {
-			meta.WithSegmentIndexManifestWrites(t, false)
-			index.WithManifestIndexBackfillEnabled(t, true)
+			meta.WithSegmentIndexManifestWrites(t, true)
 			ctx := context.TODO()
 			root := t.TempDir()
 			for item, value := range map[*paramtable.ParamItem]string{
@@ -160,12 +160,18 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 			assert.Equal(t, published, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath())
 			meta.WithSegmentIndexManifestWrites(t, false)
 			restarted := boot()
+
+			segment := restarted.GetSegment(ctx, meta.RestartSegID)
+
+			inventory, err := restarted.ResolveSegmentIndexes(ctx, segment.SegmentInfo, nil, nil)
+			require.NoError(t, err)
 			for _, record := range []*model.SegmentIndex{first, second} {
-				recovered, ok := restarted.IndexCatalog.(*index.IndexMeta).GetIndexJob(record.BuildID)
-				require.True(t, ok)
+				recovered := inventory[record.IndexID]
+				require.NotNil(t, recovered)
+				require.Equal(t, record.BuildID, recovered.BuildID)
 				assert.Equal(t, record.IndexFileKeys, recovered.IndexFileKeys)
 				assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, recovered.IndexStorePathVersion)
-				assert.True(t, index.IndexManifestPublished(t, restarted.IndexCatalog.(*index.IndexMeta), record.BuildID))
+				assert.False(t, restarted.IndexCatalog.HasBuildInfo(record.BuildID))
 			}
 			_, pending := index.NewMigrationBackfillInspector(ctx, restarted).ScanForTest(ctx)
 			assert.Zero(t, pending)

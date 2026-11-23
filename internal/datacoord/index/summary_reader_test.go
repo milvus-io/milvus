@@ -31,9 +31,9 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestSummaryModeRecoveryDoesNotCreateBuildRecords(t *testing.T) {
@@ -57,11 +57,6 @@ func TestSummaryModeRecoveryDoesNotCreateBuildRecords(t *testing.T) {
 }
 
 func TestSummaryModeRestartDoesNotReadCompletedManifests(t *testing.T) {
-	params := paramtable.Get()
-	key := params.DataCoordCfg.SegmentIndexSummariesEnabled.Key
-	previous := params.DataCoordCfg.SegmentIndexSummariesEnabled.GetValue()
-	params.Save(key, "true")
-	t.Cleanup(func() { params.Save(key, previous) })
 	meta.WithSegmentIndexManifestWrites(t, true)
 	manifests := meta.NewFakeManifestStore(t)
 	catalog := datacoord.NewCatalog(meta.NewMetaMemoryKV(), "", "")
@@ -91,7 +86,7 @@ func TestSummaryModeEmptyCompletionConsumers(t *testing.T) {
 	require.NoError(t, dm.IndexMeta.CreateIndex(ctx, &model.Index{CollectionID: 1, IndexID: 10, FieldID: 100}))
 	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3})))
 	require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
-	require.NoError(t, dm.IndexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{SegmentID: 3, CollectionID: 1, PartitionID: 2, IndexID: 10, BuildID: 20, IndexState: commonpb.IndexState_InProgress}))
+	require.NoError(t, dm.IndexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{SegmentID: 3, CollectionID: 1, PartitionID: 2, IndexID: 10, BuildID: 20, IndexState: commonpb.IndexState_InProgress, IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED}))
 	require.NoError(t, mt.FinishTask(ctx, &workerpb.IndexTaskInfo{BuildID: 20, State: commonpb.IndexState_Finished}))
 	require.Equal(t, []int64{3}, dm.IndexMeta.GetIndexedSegments(1, []int64{3}, []int64{100}))
 	records, err := mt.ResolveSegmentIndexes(ctx, mt.GetSegment(ctx, 3).SegmentInfo, nil, nil)
@@ -157,14 +152,20 @@ func TestSummaryModeReaderDuringTaskRetirement(t *testing.T) {
 		ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3,
 	})))
 	view := &pausedSummaryView{MetaView: mt.MetaStore, started: make(chan struct{}), resume: make(chan struct{})}
-	require.NoError(t, im.UseSegmentSummaries(view))
+	im.summarySource = view
 	require.NoError(t, im.AddSegmentIndex(ctx, &model.SegmentIndex{
 		SegmentID: 3, CollectionID: 1, PartitionID: 2, IndexID: 10, BuildID: 20, IndexState: commonpb.IndexState_InProgress,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
 	}))
 
 	result := make(chan map[int64]*model.SegmentIndexSummary, 1)
 	go func() { result <- im.GetSegmentIndexSummaries(1, 3) }()
-	<-view.started
+	select {
+	case <-view.started:
+	case <-time.After(time.Second):
+		close(view.resume)
+		t.Fatal("reader did not enter the summary view")
+	}
 	finished := make(chan error, 1)
 	go func() {
 		finished <- mt.FinishTask(ctx, &workerpb.IndexTaskInfo{BuildID: 20, State: commonpb.IndexState_Finished})

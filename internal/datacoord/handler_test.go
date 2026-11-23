@@ -2800,15 +2800,20 @@ func TestServerHandler_GetCollectionWaitsForApply(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 }
 
-func TestGenSnapshot_SummaryIndexesNeedNoManifestRead(t *testing.T) {
+func TestGenSnapshot_MixedIndexesNeedNoManifestRead(t *testing.T) {
 	ctx := t.Context()
 	mt, dm, err := index.NewMemoryMetaWithIndex(t)
 	require.NoError(t, err)
-	require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
+	mt.ChunkManager = storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	handler := &ServerHandler{s: &Server{ctx: ctx, meta: mt, domainMetas: domainMetas{indexMeta: dm.IndexMeta}}}
 	seedCollections(handler.s, &meta.CollectionInfo{ID: 1, Schema: meta.NewTestSchema(), Partitions: []int64{2}})
 	require.NoError(t, dm.IndexMeta.CreateIndex(ctx, &model.Index{CollectionID: 1, IndexID: 4, FieldID: 100, IndexName: "vector"}))
 	require.NoError(t, dm.IndexMeta.CreateIndex(ctx, &model.Index{CollectionID: 1, IndexID: 6, FieldID: 101, IndexName: "empty"}))
+	require.NoError(t, dm.IndexMeta.CreateIndex(ctx, &model.Index{CollectionID: 1, IndexID: 10, FieldID: 103, IndexName: "legacy"}))
+	require.NoError(t, dm.IndexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+		SegmentID: 3, CollectionID: 1, PartitionID: 2, IndexID: 10, BuildID: 11, IndexVersion: 1,
+		IndexState: commonpb.IndexState_Finished, IndexFileKeys: []string{"legacy.bin"},
+	}))
 
 	pinned := packed.MarshalManifestPath(t.TempDir(), 1)
 	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
@@ -2833,9 +2838,18 @@ func TestGenSnapshot_SummaryIndexesNeedNoManifestRead(t *testing.T) {
 	require.Equal(t, []int64{5}, snapshot.BuildIDs)
 	require.Len(t, snapshot.Segments, 1)
 	require.Equal(t, pinned, snapshot.Segments[0].GetManifestPath())
-	require.Len(t, snapshot.Segments[0].GetIndexFiles(), 1)
-	empty := snapshot.Segments[0].GetIndexFiles()[0]
-	require.EqualValues(t, 7, empty.GetBuildID())
-	require.Equal(t, "empty", empty.GetIndexName())
-	require.Empty(t, empty.GetIndexFilePaths())
+	require.Len(t, snapshot.Segments[0].GetIndexFiles(), 2)
+	for _, info := range snapshot.Segments[0].GetIndexFiles() {
+		switch info.GetBuildID() {
+		case 7:
+			require.Equal(t, "empty", info.GetIndexName())
+			require.Empty(t, info.GetIndexFilePaths())
+		case 11:
+			require.Equal(t, "legacy", info.GetIndexName())
+			require.Len(t, info.GetIndexFilePaths(), 1)
+			require.Contains(t, info.GetIndexFilePaths()[0], "index_files/11/1/2/3/legacy.bin")
+		default:
+			t.Fatalf("unexpected explicit index build %d", info.GetBuildID())
+		}
+	}
 }

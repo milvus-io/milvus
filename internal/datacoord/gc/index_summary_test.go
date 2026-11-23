@@ -42,16 +42,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestSummaryGCKeepsPublishedArtifactAcrossRestart(t *testing.T) {
 	ctx := t.Context()
-	params := paramtable.Get()
-	key := params.DataCoordCfg.SegmentIndexSummariesEnabled.Key
-	previous := params.DataCoordCfg.SegmentIndexSummariesEnabled.GetValue()
-	params.Save(key, "true")
-	t.Cleanup(func() { params.Save(key, previous) })
 
 	root := t.TempDir()
 	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: root}

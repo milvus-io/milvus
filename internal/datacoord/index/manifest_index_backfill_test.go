@@ -37,10 +37,87 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+func TestManifestIndexBackfillPersistsSummariesAcrossRestart(t *testing.T) {
+	ctx := t.Context()
+	meta.WithSegmentIndexManifestWrites(t, true)
+	store := meta.NewFakeManifestStore(t)
+	kv := &FailBackfillCatalogKV{MetaMemoryKV: meta.NewMetaMemoryKV()}
+	catalog := metastorekv.NewCatalog(kv, "", "")
+	mt := BootMigrationMeta(t, catalog, meta.RestartCollID)
+	im := mt.IndexCatalog.(*IndexMeta)
+	SeedLegacyBackfillRecord(t, mt, meta.RestartSegID, meta.RestartBuildID)
+	emptySegment, emptyBuild := int64(meta.RestartSegID+1), int64(meta.RestartBuildID+1)
+	SeedLegacyBackfillRecord(t, mt, emptySegment, emptyBuild)
+	require.NoError(t, im.FinishTask(&workerpb.IndexTaskInfo{BuildID: emptyBuild, State: commonpb.IndexState_Finished}))
+	beforeBackfill := mt.GetSegment(ctx, meta.RestartSegID).SegmentInfo
+	emptyBase := mt.GetSegment(ctx, emptySegment).GetManifestPath()
+
+	inspector := NewMigrationBackfillInspector(ctx, mt)
+	kv.FailAtomicUpdate = true
+	require.True(t, inspector.runOnce(ctx))
+	require.Equal(t, beforeBackfill.GetManifestPath(), mt.GetSegment(ctx, meta.RestartSegID).GetManifestPath())
+
+	rows, err := catalog.ListSegmentIndexes(ctx, meta.RestartCollID)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+
+	kv.FailAtomicUpdate = false
+	require.True(t, inspector.runOnce(ctx))
+	require.False(t, inspector.runOnce(ctx))
+	rows, err = catalog.ListSegmentIndexes(ctx, meta.RestartCollID)
+	require.NoError(t, err)
+	require.Empty(t, rows)
+	require.False(t, im.HasBuildInfo(meta.RestartBuildID))
+	require.False(t, im.HasBuildInfo(emptyBuild))
+	segment := mt.GetSegment(ctx, meta.RestartSegID)
+
+	require.Len(t, segment.GetIndexSummaries(), 1)
+	require.True(t, segment.GetIndexSummaries()[0].GetHasArtifact())
+
+	empty := mt.GetSegment(ctx, emptySegment)
+	require.Equal(t, emptyBase, empty.GetManifestPath())
+
+	require.False(t, empty.GetManifestHasIndex())
+	require.Len(t, empty.GetIndexSummaries(), 1)
+	require.False(t, empty.GetIndexSummaries()[0].GetHasArtifact())
+
+	legacyIndex := model.CloneIndex(im.GetIndexesForCollection(meta.RestartCollID, "vec_idx")[0])
+	legacyIndex.IndexID++
+	legacyIndex.IndexName = "legacy"
+	require.NoError(t, im.CreateIndex(ctx, legacyIndex))
+	legacyBuild := emptyBuild + 1
+	legacyLayout := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
+	require.NoError(t, im.AddSegmentIndex(ctx, &model.SegmentIndex{
+		CollectionID: meta.RestartCollID, PartitionID: RestartPartID, SegmentID: meta.RestartSegID,
+		IndexID: legacyIndex.IndexID, BuildID: legacyBuild, IndexState: commonpb.IndexState_InProgress,
+		IndexStorePathVersion: legacyLayout,
+	}))
+	require.NoError(t, mt.FinishTask(ctx, &workerpb.IndexTaskInfo{
+		BuildID: legacyBuild, State: commonpb.IndexState_Finished, IndexFileKeys: []string{"legacy.bin"},
+		IndexStorePathVersion: legacyLayout,
+	}))
+
+	meta.WithSegmentIndexManifestWrites(t, false)
+	before := store.ReadCount
+	restarted := BootMigrationMeta(t, catalog, meta.RestartCollID)
+	require.Equal(t, before, store.ReadCount)
+
+	afterRestart := restarted.GetSegment(ctx, meta.RestartSegID)
+
+	restartedIndex := restarted.IndexCatalog.(*IndexMeta)
+	records, err := restarted.ResolveSegmentIndexes(ctx, afterRestart.SegmentInfo,
+		restartedIndex.GetSegmentIndexTasks(meta.RestartCollID, meta.RestartSegID), nil)
+	require.NoError(t, err)
+	require.Equal(t, []string{"0", "1"}, records[meta.RestartIndexID].IndexFileKeys)
+	require.Equal(t, []string{"legacy.bin"}, records[legacyIndex.IndexID].IndexFileKeys)
+	require.Equal(t, legacyLayout, records[legacyIndex.IndexID].IndexStorePathVersion)
+	require.False(t, restarted.IndexCatalog.HasBuildInfo(meta.RestartBuildID))
+}
+
 func TestManifestIndexBackfillBatchesWholeSegment(t *testing.T) {
 	for _, txnLimit := range []int{128, 3} {
 		t.Run(fmt.Sprintf("txn_%d", txnLimit), func(t *testing.T) {
-			meta.WithSegmentIndexManifestWrites(t, false)
+			meta.WithSegmentIndexManifestWrites(t, true)
 			store := meta.NewFakeManifestStore(t)
 			ctx := context.Background()
 			kv := &FailBackfillCatalogKV{MetaMemoryKV: meta.NewMetaMemoryKV()}
@@ -81,8 +158,11 @@ func TestManifestIndexBackfillBatchesWholeSegment(t *testing.T) {
 			published := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
 			require.Len(t, store.BackfillEntriesAt(published), 5)
 			restarted := BootMigrationMeta(t, catalog, meta.RestartCollID)
+			segment := restarted.GetSegment(ctx, meta.RestartSegID)
+
+			require.Len(t, segment.GetIndexSummaries(), len(records))
 			for _, record := range records {
-				assert.True(t, IndexManifestPublished(t, restarted.IndexCatalog.(*IndexMeta), record.BuildID))
+				require.False(t, restarted.IndexCatalog.HasBuildInfo(record.BuildID))
 			}
 		})
 	}
@@ -90,7 +170,6 @@ func TestManifestIndexBackfillBatchesWholeSegment(t *testing.T) {
 
 func TestManifestIndexBackfillMovesCatalogRowAtomically(t *testing.T) {
 	meta.WithSegmentIndexManifestWrites(t, false)
-	WithManifestIndexBackfillEnabled(t, true)
 	store := meta.NewFakeManifestStore(t)
 	ctx := context.TODO()
 
@@ -118,6 +197,7 @@ func TestManifestIndexBackfillMovesCatalogRowAtomically(t *testing.T) {
 	// Backfill follows the new exclusive placement and therefore runs only in
 	// manifest-publication mode.
 	meta.WithSegmentIndexManifestWrites(t, true)
+	m = BootMigrationMeta(t, catalog, meta.RestartCollID)
 	inspector := NewMigrationBackfillInspector(ctx, m)
 	inspector.runOnce(ctx)
 
@@ -135,8 +215,7 @@ func TestManifestIndexBackfillMovesCatalogRowAtomically(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, persisted, "the manifest pointer and row deletion must commit together")
 	_, ok = m.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID)
-	assert.True(t, ok, "backfill changes durable placement, not the live DataCoord view")
-	assert.True(t, IndexManifestPublished(t, m.IndexCatalog.(*IndexMeta), meta.RestartBuildID))
+	assert.False(t, ok, "persisted summaries replace completed task records")
 	assert.False(t, beforePublication.ManifestPublished, "publication must not mutate a reader's snapshot")
 
 	// Convergence is process-local immediately; a second tick creates no new
@@ -145,47 +224,31 @@ func TestManifestIndexBackfillMovesCatalogRowAtomically(t *testing.T) {
 	assert.Equal(t, published, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath())
 	assert.Equal(t, 0, inspector.lastPending)
 
-	// And it is reconstructed exactly after failover from durable source
-	// placement, without a persisted per-build marker.
+	// Failover starts with complete inventory from the catalog.
 	restarted := BootMigrationMeta(t, catalog, meta.RestartCollID)
-	recovered, ok := restarted.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID)
-	require.True(t, ok)
+
+	segment := restarted.GetSegment(ctx, meta.RestartSegID)
+	inventory, err := restarted.ResolveSegmentIndexes(ctx, segment.SegmentInfo, nil, nil)
+	require.NoError(t, err)
+	recovered := inventory[meta.RestartIndexID]
+	require.NotNil(t, recovered)
 	assert.Equal(t, commonpb.IndexState_Finished, recovered.IndexState)
 	assert.Equal(t, []string{"0", "1"}, recovered.IndexFileKeys)
-	assert.True(t, IndexManifestPublished(t, restarted.IndexCatalog.(*IndexMeta), meta.RestartBuildID))
 	_, pending := NewMigrationBackfillInspector(ctx, restarted).scan(ctx)
 	assert.Zero(t, pending)
 }
 
-func TestManifestIndexBackfillRequiresBothSwitches(t *testing.T) {
-	t.Run("migration disabled", func(t *testing.T) {
-		meta.WithSegmentIndexManifestWrites(t, false)
-		WithManifestIndexBackfillEnabled(t, false)
-		store := meta.NewFakeManifestStore(t)
-		ctx := context.TODO()
-		m := BootMigrationMeta(t, metastorekv.NewCatalog(meta.NewMetaMemoryKV(), "", ""), meta.RestartCollID)
-		SeedLegacyBackfillRecord(t, m, meta.RestartSegID, meta.RestartBuildID)
-		base := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
+func TestManifestIndexBackfillRequiresPublication(t *testing.T) {
+	meta.WithSegmentIndexManifestWrites(t, false)
+	store := meta.NewFakeManifestStore(t)
+	ctx := t.Context()
+	m := BootMigrationMeta(t, metastorekv.NewCatalog(meta.NewMetaMemoryKV(), "", ""), meta.RestartCollID)
+	SeedLegacyBackfillRecord(t, m, meta.RestartSegID, meta.RestartBuildID)
+	base := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
 
-		meta.WithSegmentIndexManifestWrites(t, true)
-		NewMigrationBackfillInspector(ctx, m).runOnce(ctx)
-		assert.Equal(t, base, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath())
-		assert.Empty(t, store.BackfillEntriesAt(base))
-	})
-
-	t.Run("manifest publication disabled", func(t *testing.T) {
-		meta.WithSegmentIndexManifestWrites(t, false)
-		WithManifestIndexBackfillEnabled(t, true)
-		store := meta.NewFakeManifestStore(t)
-		ctx := context.TODO()
-		m := BootMigrationMeta(t, metastorekv.NewCatalog(meta.NewMetaMemoryKV(), "", ""), meta.RestartCollID)
-		SeedLegacyBackfillRecord(t, m, meta.RestartSegID, meta.RestartBuildID)
-		base := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
-
-		NewMigrationBackfillInspector(ctx, m).runOnce(ctx)
-		assert.Equal(t, base, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath())
-		assert.Empty(t, store.BackfillEntriesAt(base))
-	})
+	NewMigrationBackfillInspector(ctx, m).runOnce(ctx)
+	assert.Equal(t, base, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath())
+	assert.Empty(t, store.BackfillEntriesAt(base))
 }
 
 func TestManifestIndexBackfillBatchRotatesPastFailures(t *testing.T) {
@@ -253,23 +316,22 @@ func TestManifestIndexBackfillSkipsTaskOnlyAndManifestOnlyRecords(t *testing.T) 
 		IndexState:    commonpb.IndexState_Finished,
 		IndexFileKeys: []string{"0"},
 	}
-	assert.True(t, segmentIndexNeedsManifestBackfill(base))
+	assert.True(t, catalogBackfillCandidate(base))
 
 	for name, mutate := range map[string]func(*model.SegmentIndex){
-		"deleted":       func(index *model.SegmentIndex) { index.IsDeleted = true },
-		"in progress":   func(index *model.SegmentIndex) { index.IndexState = commonpb.IndexState_InProgress },
-		"failed":        func(index *model.SegmentIndex) { index.IndexState = commonpb.IndexState_Failed },
-		"fake finished": func(index *model.SegmentIndex) { index.IndexFileKeys = nil },
+		"deleted":     func(index *model.SegmentIndex) { index.IsDeleted = true },
+		"in progress": func(index *model.SegmentIndex) { index.IndexState = commonpb.IndexState_InProgress },
+		"failed":      func(index *model.SegmentIndex) { index.IndexState = commonpb.IndexState_Failed },
 	} {
 		t.Run(name, func(t *testing.T) {
 			candidate := model.CloneSegmentIndex(base)
 			mutate(candidate)
-			assert.False(t, segmentIndexNeedsManifestBackfill(candidate))
+			assert.False(t, catalogBackfillCandidate(candidate))
 		})
 	}
 
 	base.ManifestPublished = true
-	assert.False(t, segmentIndexNeedsManifestBackfill(base),
+	assert.False(t, catalogBackfillCandidate(base),
 		"a manifest-resident record has no catalog row to migrate")
 }
 
@@ -287,19 +349,10 @@ func TestManifestIndexBackfillIgnoresCopiedManifestRecord(t *testing.T) {
 		StorageVersion:   storage.StorageV3,
 		ManifestPath:     packed.MarshalManifestPath("/tmp/test-backfill/copied", 1),
 		ManifestHasIndex: true,
+		IndexSummaries: []*datapb.SegmentIndexSummary{{
+			IndexId: meta.RestartIndexID, FieldId: meta.RestartFieldID, BuildId: meta.RestartBuildID, HasArtifact: true,
+		}},
 	})))
-	require.NoError(t, m.IndexCatalog.(*IndexMeta).AddSegmentIndexFromManifest(ctx, &model.SegmentIndex{
-		CollectionID:          meta.RestartCollID,
-		PartitionID:           RestartPartID,
-		SegmentID:             meta.RestartSegID,
-		NumRows:               1000,
-		IndexID:               meta.RestartIndexID,
-		BuildID:               meta.RestartBuildID,
-		IndexVersion:          1,
-		IndexState:            commonpb.IndexState_Finished,
-		IndexFileKeys:         []string{"0"},
-		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
-	}))
 
 	work, pending := NewMigrationBackfillInspector(ctx, m).scan(ctx)
 	assert.Empty(t, work)
@@ -311,7 +364,6 @@ func TestManifestIndexBackfillIgnoresCopiedManifestRecord(t *testing.T) {
 
 func TestManifestIndexBackfillCatalogFailureKeepsRowAndPointer(t *testing.T) {
 	meta.WithSegmentIndexManifestWrites(t, false)
-	WithManifestIndexBackfillEnabled(t, true)
 	store := meta.NewFakeManifestStore(t)
 	ctx := context.TODO()
 
@@ -450,7 +502,7 @@ func TestManifestIndexBackfillScanDoesNotDuplicateArtifactMetadata(t *testing.T)
 	meta.NewFakeManifestStore(t)
 	ctx := context.Background()
 	m := BootMigrationMeta(t, metastorekv.NewCatalog(meta.NewMetaMemoryKV(), "", ""), meta.RestartCollID)
-	SetRollbackTestParam(t, &Params.DataCoordCfg.ManifestIndexBackfillBatchSize, "1")
+	SetMigrationTestParam(t, &Params.DataCoordCfg.ManifestIndexBackfillBatchSize, "1")
 	keys := make([]string, 65536)
 	for idx := range keys {
 		keys[idx] = "index-file"
