@@ -18,12 +18,15 @@ package index
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -40,15 +43,16 @@ func TestSummaryModeRecoveryDoesNotCreateBuildRecords(t *testing.T) {
 	require.NoError(t, dm.IndexMeta.CreateIndex(ctx, &model.Index{CollectionID: 1, IndexID: 10, FieldID: 100}))
 	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 3, CollectionID: 1, IndexSummaries: []*datapb.SegmentIndexSummary{{IndexId: 10, FieldId: 100, BuildId: 20, HasArtifact: true, SerializedSize: 500}}})))
 	require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
-	records := dm.IndexMeta.GetSegmentIndexes(1, 3)
-	require.EqualValues(t, 20, records[10].BuildID)
-	require.True(t, records[10].HasArtifact())
-	require.Empty(t, records[10].IndexFileKeys)
+	summaries := dm.IndexMeta.GetSegmentIndexSummaries(1, 3)
+	require.Contains(t, summaries, int64(10))
+	require.EqualValues(t, 20, summaries[10].BuildID)
+	require.True(t, summaries[10].HasArtifact)
+	require.Empty(t, dm.IndexMeta.GetSegmentIndexTasks(1, 3))
 	require.False(t, dm.IndexMeta.HasBuildInfo(20))
 	require.Zero(t, dm.IndexMeta.SegmentIndexes.Len())
 	require.Empty(t, dm.IndexMeta.GetUnindexedSegments(1, []int64{3}))
 	require.Empty(t, dm.IndexMeta.GetUnIndexedSegmentIDsForIndexTask(1, []int64{3}).Collect())
-	_, err = mt.ReadCompletedIndexes(ctx, mt.GetSegment(ctx, 3).SegmentInfo)
+	_, err = mt.ResolveSegmentIndexes(ctx, mt.GetSegment(ctx, 3).SegmentInfo, nil, nil)
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 }
 
@@ -71,10 +75,10 @@ func TestSummaryModeRestartDoesNotReadCompletedManifests(t *testing.T) {
 	require.False(t, recoveredDM.IndexMeta.HasBuildInfo(meta.RestartBuildID))
 	require.Zero(t, recoveredDM.IndexMeta.SegmentIndexes.Len())
 	require.Equal(t, []int64{meta.RestartSegID}, recoveredDM.IndexMeta.GetIndexedSegments(meta.RestartCollID, []int64{meta.RestartSegID}, []int64{meta.RestartFieldID}))
-	_, err := recovered.ReadCompletedIndexes(t.Context(), recovered.GetSegment(t.Context(), meta.RestartSegID).SegmentInfo)
+	_, err := recovered.ResolveSegmentIndexes(t.Context(), recovered.GetSegment(t.Context(), meta.RestartSegID).SegmentInfo, nil, nil)
 	require.Error(t, err)
 	manifests.ResumeReads()
-	records, err := recovered.ReadCompletedIndexes(t.Context(), recovered.GetSegment(t.Context(), meta.RestartSegID).SegmentInfo)
+	records, err := recovered.ResolveSegmentIndexes(t.Context(), recovered.GetSegment(t.Context(), meta.RestartSegID).SegmentInfo, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, []string{"0", "1"}, records[meta.RestartIndexID].IndexFileKeys)
 	require.False(t, recoveredDM.IndexMeta.HasBuildInfo(meta.RestartBuildID))
@@ -90,10 +94,95 @@ func TestSummaryModeEmptyCompletionConsumers(t *testing.T) {
 	require.NoError(t, dm.IndexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{SegmentID: 3, CollectionID: 1, PartitionID: 2, IndexID: 10, BuildID: 20, IndexState: commonpb.IndexState_InProgress}))
 	require.NoError(t, mt.FinishTask(ctx, &workerpb.IndexTaskInfo{BuildID: 20, State: commonpb.IndexState_Finished}))
 	require.Equal(t, []int64{3}, dm.IndexMeta.GetIndexedSegments(1, []int64{3}, []int64{100}))
-	records, err := mt.ReadCompletedIndexes(ctx, mt.GetSegment(ctx, 3).SegmentInfo)
+	records, err := mt.ResolveSegmentIndexes(ctx, mt.GetSegment(ctx, 3).SegmentInfo, nil, nil)
 	require.NoError(t, err)
 	require.Contains(t, records, int64(10))
 	require.False(t, records[10].HasArtifact())
 	require.Empty(t, records[10].IndexFileKeys)
 	require.False(t, dm.IndexMeta.HasBuildInfo(20))
+}
+
+func TestSummaryModeIndexStatePreservesFailureReason(t *testing.T) {
+	ctx := t.Context()
+	mt, dm, err := NewMemoryMetaWithIndex(t)
+	require.NoError(t, err)
+	im := dm.IndexMeta
+	require.NoError(t, im.CreateIndex(ctx, &model.Index{CollectionID: 1, IndexID: 10, FieldID: 100}))
+	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3,
+	})))
+	require.NoError(t, im.UseSegmentSummaries(mt.MetaStore))
+	require.NoError(t, im.AddSegmentIndex(ctx, &model.SegmentIndex{
+		SegmentID: 3, CollectionID: 1, PartitionID: 2, IndexID: 10, BuildID: 20, IndexState: commonpb.IndexState_InProgress,
+	}))
+	const reason = "worker lost"
+	require.NoError(t, mt.FinishTask(ctx, &workerpb.IndexTaskInfo{
+		BuildID: 20, State: commonpb.IndexState_Failed, FailReason: reason,
+	}))
+
+	single := im.GetSegmentIndexState(1, 3, 10)
+	require.Equal(t, commonpb.IndexState_Failed, single.GetState())
+	require.Equal(t, reason, single.GetFailReason())
+	batch := im.GetSegmentsIndexStates(1, []int64{3})[3][10]
+	require.Equal(t, commonpb.IndexState_Failed, batch.GetState())
+	require.Equal(t, reason, batch.GetFailReason())
+	require.Empty(t, mt.GetSegment(ctx, 3).GetIndexSummaries())
+}
+
+type pausedSummaryView struct {
+	metacache.MetaView
+	started chan struct{}
+	resume  chan struct{}
+	first   sync.Once
+}
+
+func (v *pausedSummaryView) GetSegment(id int64) (*datapb.SegmentInfo, bool) {
+	segment, found := v.MetaView.GetSegment(id)
+	pause := false
+	v.first.Do(func() { pause = true })
+	if pause {
+		close(v.started)
+		<-v.resume
+	}
+	return segment, found
+}
+
+func TestSummaryModeReaderDuringTaskRetirement(t *testing.T) {
+	ctx := t.Context()
+	mt, dm, err := NewMemoryMetaWithIndex(t)
+	require.NoError(t, err)
+	im := dm.IndexMeta
+	require.NoError(t, im.CreateIndex(ctx, &model.Index{CollectionID: 1, IndexID: 10, FieldID: 100}))
+	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3,
+	})))
+	view := &pausedSummaryView{MetaView: mt.MetaStore, started: make(chan struct{}), resume: make(chan struct{})}
+	require.NoError(t, im.UseSegmentSummaries(view))
+	require.NoError(t, im.AddSegmentIndex(ctx, &model.SegmentIndex{
+		SegmentID: 3, CollectionID: 1, PartitionID: 2, IndexID: 10, BuildID: 20, IndexState: commonpb.IndexState_InProgress,
+	}))
+
+	result := make(chan map[int64]*model.SegmentIndexSummary, 1)
+	go func() { result <- im.GetSegmentIndexSummaries(1, 3) }()
+	<-view.started
+	finished := make(chan error, 1)
+	go func() {
+		finished <- mt.FinishTask(ctx, &workerpb.IndexTaskInfo{BuildID: 20, State: commonpb.IndexState_Finished})
+	}()
+	defer func() {
+		// Let both goroutines exit even when the publication assertion fails.
+		select {
+		case <-view.resume:
+		default:
+			close(view.resume)
+		}
+	}()
+	require.Eventually(t, func() bool {
+		segment, _ := mt.MetaStore.GetSegment(3)
+		return len(segment.GetIndexSummaries()) == 1
+	}, time.Second, time.Millisecond)
+	close(view.resume)
+	require.Contains(t, <-result, int64(10))
+	require.NoError(t, <-finished)
+	require.Equal(t, commonpb.IndexState_Finished, im.GetSegmentIndexSummaries(1, 3)[10].IndexState)
 }

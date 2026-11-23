@@ -8761,6 +8761,15 @@ ChunkedSegmentSealedImpl::Reopen(
     milvus::OpContext* op_ctx,
     const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
     SealedFieldLayoutPtr new_schema) {
+    Reopen(op_ctx, new_load_info, std::move(new_schema), nullptr);
+}
+
+void
+ChunkedSegmentSealedImpl::Reopen(
+    milvus::OpContext* op_ctx,
+    const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
+    SealedFieldLayoutPtr new_schema,
+    std::shared_ptr<milvus_storage::api::ColumnGroups> groups) {
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
 
     auto current = CapturePublishedState();
@@ -8785,7 +8794,11 @@ ChunkedSegmentSealedImpl::Reopen(
     if (read_state_fork_) {
         new_local.RestrictToLoadFields(*target_schema);
     }
-    new_local.InheritCachedColumnGroupsFrom(*current->load_info);
+    if (groups) {
+        new_local.SetCachedColumnGroups(std::move(groups));
+    } else {
+        new_local.InheritCachedColumnGroupsFrom(*current->load_info);
+    }
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::Reopen()");
     current_mutable.ResolveLegacyBinlogChildFields(current_schema, nullptr);
     new_local.ResolveLegacyBinlogChildFields(target_schema, &current_mutable);
@@ -9328,6 +9341,13 @@ ChunkedSegmentSealedImpl::GetCommitTimestamp() const {
 void
 ChunkedSegmentSealedImpl::SetLoadInfo(
     proto::segcore::SegmentLoadInfo load_info) {
+    SetLoadInfo(std::move(load_info), nullptr);
+}
+
+void
+ChunkedSegmentSealedImpl::SetLoadInfo(
+    proto::segcore::SegmentLoadInfo load_info,
+    std::shared_ptr<milvus_storage::api::ColumnGroups> groups) {
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
     auto current = CapturePublishedState();
     auto schema_snapshot = current->fields;
@@ -9339,8 +9359,9 @@ ChunkedSegmentSealedImpl::SetLoadInfo(
     }
     // Do not parse manifest here: Load() must be able to observe a
     // pre-cancelled OpContext before any storage/manifest IO happens.
-    auto published = std::make_shared<const SegmentLoadInfo>(
+    auto published = std::make_shared<SegmentLoadInfo>(
         std::move(load_info), schema_snapshot);
+    published->SetCachedColumnGroups(std::move(groups));
     PublishStateOnline(BuildNextPublishedState(
         current,
         MakeStateDelta(

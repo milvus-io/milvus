@@ -150,7 +150,7 @@ func assertIndexGCReadinessInvalidated(t *testing.T, s *Server, idx *model.Index
 	t.Helper()
 	require.Equal(t, commonpb.IndexState_Unissued, s.indexMeta.GetSegmentIndexState(1, 1, 10).GetState())
 	require.Empty(t, s.indexMeta.GetIndexedSegments(1, []int64{1}, []int64{10}))
-	require.Empty(t, s.indexMeta.GetSegmentIndexes(1, 1))
+	require.Empty(t, s.indexMeta.GetSegmentIndexSummaries(1, 1))
 	require.Nil(t, s.indexMeta.GetSegmentsIndexStates(1, []int64{1})[1][10])
 	require.Len(t, s.indexMeta.GetAllSegmentIndexSummaries(1), 1, "GC retains the durable retry record")
 	require.ElementsMatch(t, []int64{3}, indexServingQueryIDs(s))

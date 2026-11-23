@@ -139,7 +139,10 @@ func GetManifestStats(
 		return nil, merr.WrapErrDataIntegrityMsg("manifest %s returned a nil handle", manifestPath)
 	}
 	defer C.loon_manifest_destroy(cManifest)
+	return manifestStats(cManifest, manifestPath)
+}
 
+func manifestStats(cManifest *C.LoonManifest, manifestPath string) (map[string]ManifestStat, error) {
 	numStats := int(cManifest.stats.num_stats)
 	result := make(map[string]ManifestStat, numStats)
 

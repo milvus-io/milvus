@@ -237,7 +237,7 @@ func TestManifestIndexRollbackPreservesCatalogAndReplacement(t *testing.T) {
 			} else {
 				assert.Equal(t, []*model.SegmentIndex{current}, rows)
 			}
-			assert.Equal(t, current, m.IndexCatalog.(*IndexMeta).GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID)[meta.RestartIndexID])
+			assert.Equal(t, current, m.IndexCatalog.(*IndexMeta).GetSegmentIndexTasks(meta.RestartCollID, meta.RestartSegID)[meta.RestartIndexID])
 		})
 	}
 }
@@ -280,17 +280,17 @@ func TestManifestIndexRollbackRestoresSupersededBuilds(t *testing.T) {
 	require.Len(t, rows, 1)
 	assert.Equal(t, old.BuildID, rows[0].BuildID)
 	assert.Equal(t, current, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath(), "absent old entry requires only an atomic catalog publication")
-	assert.Equal(t, replacement, m.IndexCatalog.(*IndexMeta).GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID)[meta.RestartIndexID])
+	assert.Equal(t, replacement, m.IndexCatalog.(*IndexMeta).GetSegmentIndexTasks(meta.RestartCollID, meta.RestartSegID)[meta.RestartIndexID])
 	inspector.runOnce(ctx)
 	inspector.runOnce(ctx)
 	assert.True(t, inspector.ready)
 	store.FailReadsFrom()
 	restarted := BootMigrationMeta(t, catalog, meta.RestartCollID)
-	assert.Equal(t, replacement.BuildID, restarted.IndexCatalog.(*IndexMeta).GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID)[meta.RestartIndexID].BuildID)
+	assert.Equal(t, replacement.BuildID, restarted.IndexCatalog.(*IndexMeta).GetSegmentIndexTasks(meta.RestartCollID, meta.RestartSegID)[meta.RestartIndexID].BuildID)
 	_, present := restarted.IndexCatalog.(*IndexMeta).GetIndexJob(old.BuildID)
 	assert.True(t, present, "superseded artifact remains durably available to GC")
 	require.NoError(t, restarted.IndexCatalog.(*IndexMeta).RemoveSegmentIndex(ctx, old.BuildID))
-	assert.Equal(t, replacement.BuildID, restarted.IndexCatalog.(*IndexMeta).GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID)[meta.RestartIndexID].BuildID,
+	assert.Equal(t, replacement.BuildID, restarted.IndexCatalog.(*IndexMeta).GetSegmentIndexTasks(meta.RestartCollID, meta.RestartSegID)[meta.RestartIndexID].BuildID,
 		"retiring a restored superseded record must preserve the replacement slot")
 }
 

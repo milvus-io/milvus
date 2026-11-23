@@ -466,7 +466,9 @@ func (sm *Manager) CreateSnapshot(
 	// within the GenSnapshot → SaveSnapshot window, otherwise concurrent compaction
 	// could drop segments that the in-flight snapshot is about to reference, leaving
 	// the freshly-created snapshot immediately broken.
-	sm.snapshotMeta.SetSnapshotPending(collectionID)
+	if !sm.snapshotMeta.SetSnapshotPending(collectionID) {
+		return 0, merr.WrapErrServiceNotReadyMsg("index garbage collection is active for collection %d", collectionID)
+	}
 	defer sm.snapshotMeta.ClearSnapshotPending(collectionID)
 
 	// Allocate snapshot ID

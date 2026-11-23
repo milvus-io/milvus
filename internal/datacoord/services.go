@@ -486,6 +486,16 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			Status: merr.Status(err),
 		}, nil
 	}
+	collectionID := req.GetIndexResourceCollectionId()
+	projectIndexes := collectionID != 0 && s.indexMeta.UsesSegmentSummaries()
+	var indexes []*model.Index
+	var tasks map[int64]map[int64]*model.SegmentIndex
+	if projectIndexes {
+		// A build can publish a summary and retire its task while the response
+		// is assembled. Read tasks first so the later segment snapshot sees
+		// the summary whenever the task has already retired.
+		indexes, tasks = s.indexMeta.GetQueryViewIndexSnapshot(collectionID, req.GetSegmentIDs())
+	}
 	infos := make([]*datapb.SegmentInfo, 0, len(req.GetSegmentIDs()))
 	channelCPs := make(map[string]*msgpb.MsgPosition)
 
@@ -529,6 +539,13 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	}
 	resp.Infos = infos
 	resp.ChannelCheckpoint = channelCPs
+	if projectIndexes {
+		var err error
+		resp.IndexResourceInfo, err = projectIndexResourceInfo(collectionID, infos, indexes, tasks)
+		if err != nil {
+			resp.Status = merr.Status(err)
+		}
+	}
 	return resp, nil
 }
 

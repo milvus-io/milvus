@@ -871,6 +871,7 @@ func (gc *GarbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 			return true
 		}
 
+		var indexCollectionID, indexBuildID int64
 		rel, underInsert := strings.CutPrefix(chunkInfo.FilePath, insertPrefix)
 		parts := strings.SplitN(rel, "/", 5)
 		if underInsert && len(parts) >= 4 && parts[3] == "_index" {
@@ -883,6 +884,7 @@ func (gc *GarbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 				valid++
 				return true
 			}
+			indexCollectionID, indexBuildID = collectionID, buildID
 			if !canReclaimIndex(chunkInfo.FilePath, collectionID, segmentID, buildID) {
 				valid++
 				return true
@@ -953,6 +955,16 @@ func (gc *GarbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 		file := chunkInfo.FilePath
 
 		future := gc.Option.RemoveObjectPool.Submit(func() (struct{}, error) {
+			if indexBuildID != 0 {
+				release, ok := gc.guardIndexGC(indexCollectionID)
+				if !ok {
+					return struct{}{}, nil
+				}
+				defer release()
+				if snapshotMeta != nil && snapshotMeta.IsBuildIDGCBlocked(indexCollectionID, indexBuildID) {
+					return struct{}{}, nil
+				}
+			}
 			logger := logger.With(mlog.String("file", file))
 			logger.Info(ctx, "garbageCollector recycleUnusedBinlogFiles remove file...")
 
@@ -1257,6 +1269,15 @@ func (gc *GarbageCollector) RecycleDroppedSegment(ctx context.Context, io *packe
 		return
 	}
 
+	release, ok := gc.guardIndexGC(segment.GetCollectionID())
+	if !ok {
+		return
+	}
+	defer release()
+	if gc.Option.SnapshotMeta != nil && gc.Option.IndexMeta.UsesSegmentSummaries() &&
+		gc.Option.SnapshotMeta.IsSegmentGCBlocked(segment.GetCollectionID(), segmentID) {
+		return
+	}
 	segIndexes, indexFiles, blockReason := gc.GetDroppedSegmentIndexFiles(ctx, io, segmentID)
 	switch blockReason {
 	case gcBlockedBySnapshot:
@@ -1272,6 +1293,13 @@ func (gc *GarbageCollector) RecycleDroppedSegment(ctx context.Context, io *packe
 	if err := gc.markSegmentIndexesDeleted(ctx, segIndexes); err != nil {
 		log.Warn(ctx, "GC segment index tasks failed to mark deleted, wait to retry", mlog.Err(err))
 		return
+	}
+
+	if gc.Option.IndexMeta.UsesSegmentSummaries() {
+		if err := gc.Meta.RetireDroppedSegmentIndexSummariesLocked(ctx, segmentID); err != nil {
+			log.Warn(ctx, "GC failed to retire index summaries, wait to retry", mlog.Err(err))
+			return
+		}
 	}
 
 	cloned := segment.Clone()
@@ -1575,6 +1603,9 @@ func (gc *GarbageCollector) removeDroppedSegmentIndexMeta(ctx context.Context, s
 		return nil
 	}
 	for _, segIdx := range segIndexes {
+		if gc.Option.IndexMeta.UsesSegmentSummaries() && !gc.Option.IndexMeta.HasBuildInfo(segIdx.BuildID) {
+			continue
+		}
 		if err := gc.removeIndexRecordLocked(ctx, segIdx); err != nil {
 			return err
 		}
@@ -1927,10 +1958,22 @@ func (gc *GarbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 	candidates []*model.SegmentIndexSummary, signal <-chan gcCmd,
 ) {
 	segment := gc.Meta.GetSegment(ctx, segmentID)
+	indexMeta := gc.Option.IndexMeta
+	usesSummaries := indexMeta.UsesSegmentSummaries()
 	summaries := make([]*model.SegmentIndexSummary, 0, len(candidates))
 	for _, candidate := range candidates {
 		if ctx.Err() != nil {
 			return
+		}
+		if candidate == nil || gc.collectionGCPaused(candidate.CollectionID) {
+			continue
+		}
+		gc.ackSignal(signal)
+		// Live summary-only builds can skip the linear search of the segment's
+		// summaries. Tasks still refresh before checking the index definition.
+		if usesSummaries && segment != nil && !indexMeta.HasBuildInfo(candidate.BuildID) &&
+			indexMeta.IsIndexExist(candidate.CollectionID, candidate.IndexID) {
+			continue
 		}
 		// GetAllSegIndexes returns a point-in-time snapshot. Refresh by buildID
 		// before making deletion decisions so GC does not act on stale task state
@@ -1939,14 +1982,7 @@ func (gc *GarbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 		if !ok {
 			continue
 		}
-		if gc.collectionGCPaused(segIdx.CollectionID) {
-			continue
-		}
-		gc.ackSignal(signal)
-
-		// 1. segment belongs to is deleted.
-		// 2. index is deleted.
-		if segment != nil && gc.Option.IndexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
+		if segment != nil && indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
 			continue
 		}
 		// Non-terminal tasks may still be writing index files or updating meta.
@@ -2056,6 +2092,14 @@ func (gc *GarbageCollector) recycleRecordOnlySegmentIndex(ctx context.Context, o
 			mlog.FieldSegmentID(item.summary.SegmentID), mlog.FieldBuildID(item.summary.BuildID))
 		return
 	}
+	release, ok := gc.guardIndexGC(item.summary.CollectionID)
+	if !ok {
+		return
+	}
+	defer release()
+	if gc.Option.SnapshotMeta != nil && gc.Option.SnapshotMeta.IsBuildIDGCBlocked(item.summary.CollectionID, item.summary.BuildID) {
+		return
+	}
 	log := segmentIndexGCLog(item)
 	log.Info(ctx, "GC Segment Index file start...")
 	if err := gc.RemoveObjectFiles(ctx, item.files); err != nil {
@@ -2078,6 +2122,11 @@ func (gc *GarbageCollector) recycleManifestSegmentIndexes(ctx context.Context, i
 	locks := gc.Meta.GetSegmentManifestLocks()
 	locks.Lock(items[0].summary.SegmentID)
 	defer locks.Unlock(items[0].summary.SegmentID)
+	release, ok := gc.guardIndexGC(items[0].summary.CollectionID)
+	if !ok {
+		return
+	}
+	defer release()
 	// Serialize file retirement with migration copies and publication.
 	// One segment pointer PUT shares the atomic transaction with every
 	// defensive SegmentIndex DELETE. Keep each chunk within the configured
@@ -2092,6 +2141,9 @@ func (gc *GarbageCollector) recycleManifestSegmentIndexes(ctx context.Context, i
 		end := min(start+maxBatch, len(items))
 		ready := make([]segmentIndexGCItem, 0, end-start)
 		for _, item := range items[start:end] {
+			if gc.Option.SnapshotMeta != nil && gc.Option.SnapshotMeta.IsBuildIDGCBlocked(item.summary.CollectionID, item.summary.BuildID) {
+				continue
+			}
 			log := segmentIndexGCLog(item)
 			log.Info(ctx, "GC Segment Index file start...")
 			if err := gc.RemoveObjectFiles(ctx, item.files); err != nil {
@@ -2407,6 +2459,7 @@ func (gc *GarbageCollector) newIndexFileReclaimChecker(ctx context.Context) func
 		recorded   map[string]struct{} // Finished record: only unlisted files are garbage
 	}
 	var current *buildDecision
+	var manifest indexManifestCache
 
 	decide := func(collectionID, segmentID, buildID int64) *buildDecision {
 		if current != nil && current.buildID == buildID {
@@ -2436,7 +2489,7 @@ func (gc *GarbageCollector) newIndexFileReclaimChecker(ctx context.Context) func
 			if segment != nil && (segment.GetState() == commonpb.SegmentState_Importing || segment.GetIsImporting()) {
 				return d
 			}
-			d.recorded, d.reclaimAll = gc.referencedSummaryBuild(ctx, segment, buildID)
+			d.recorded, d.reclaimAll = gc.referencedSummaryBuild(ctx, &manifest, segment, buildID)
 			return d
 		}
 		if segIdx == nil {
@@ -2457,11 +2510,10 @@ func (gc *GarbageCollector) newIndexFileReclaimChecker(ctx context.Context) func
 
 	return func(file string, collectionID, segmentID, buildID int64) bool {
 		d := decide(collectionID, segmentID, buildID)
-		if d.reclaimAll {
-			return true
-		}
 		_, listed := d.recorded[file]
-		return d.recorded != nil && !listed
+		reclaim := d.reclaimAll || d.recorded != nil && !listed
+		// Protection can change after the task lookup or the cached decision.
+		return reclaim && (snapshotMeta == nil || !snapshotMeta.IsBuildIDGCBlocked(collectionID, buildID))
 	}
 }
 
@@ -2498,6 +2550,14 @@ func (gc *GarbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
 			return true
 		}
 		futures = append(futures, gc.Option.RemoveObjectPool.Submit(func() (struct{}, error) {
+			release, ok := gc.guardIndexGC(collectionID)
+			if !ok {
+				return struct{}{}, nil
+			}
+			defer release()
+			if gc.Option.SnapshotMeta != nil && gc.Option.SnapshotMeta.IsBuildIDGCBlocked(collectionID, buildID) {
+				return struct{}{}, nil
+			}
 			if err := gc.Option.Cli.Remove(ctx, file); err != nil {
 				log.Warn(ctx, "recycleUnusedIndexFiles remove file failed", mlog.String("file", file), mlog.Err(err))
 				return struct{}{}, err

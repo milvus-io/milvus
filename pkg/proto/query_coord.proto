@@ -345,6 +345,7 @@ message GetQueryViewSegmentLoadInfoRequest {
     common.MsgBase base = 1;
     int64 collectionID = 2;
     repeated int64 segmentIDs = 3;
+    bool resolve_manifest_indexes_locally = 4;
 }
 
 message GetQueryViewSegmentLoadInfoResponse {
@@ -359,6 +360,13 @@ message QueryViewSegmentLoadInfoResult {
     int64 segmentID = 1;
     common.Status status = 2;
     SegmentLoadInfo load_info = 3;
+    // Presence selects local resolution, even when both lists are empty.
+    QueryViewManifestIndexes manifest_indexes = 4;
+}
+
+message QueryViewManifestIndexes {
+    repeated data.SegmentIndexSummary summaries = 1;
+    repeated index.IndexFilePathInfo finished_tasks = 2;
 }
 
 message GetShardLeadersRequest {
@@ -520,6 +528,8 @@ message FieldIndexInfo {
     int64 index_store_version = 12 [deprecated = true];
     int32 current_scalar_index_version = 13;
     index.IndexStorePathVersion index_store_path_version = 14;
+    // Resource estimates can describe an artifact without sending its file paths.
+    optional bool has_artifact = 15;
 }
 
 message JsonStatsInfo {

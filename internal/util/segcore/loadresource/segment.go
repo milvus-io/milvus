@@ -166,6 +166,13 @@ func ResolveSegmentEstimateLogs(schema *schemapb.CollectionSchema, loadInfo *que
 	return binlogs, deltalogs
 }
 
+func hasIndexArtifact(info *querypb.FieldIndexInfo) bool {
+	if info != nil && info.HasArtifact != nil {
+		return info.GetHasArtifact()
+	}
+	return len(info.GetIndexFilePaths()) > 0
+}
+
 func EstimateSegmentFinalResource(ctx context.Context, schema *schemapb.CollectionSchema, loadInfo *querypb.SegmentLoadInfo, options SegmentFinalEstimateOptions, runner Runner) (SegmentResourceUsage, error) {
 	if schema == nil {
 		return SegmentResourceUsage{}, merr.WrapErrServiceInternalMsg("collection schema is nil")
@@ -189,7 +196,7 @@ func EstimateSegmentFinalResource(ctx context.Context, schema *schemapb.Collecti
 	}
 
 	for _, fieldIndexInfo := range loadInfo.GetIndexInfos() {
-		if len(fieldIndexInfo.GetIndexFilePaths()) == 0 {
+		if !hasIndexArtifact(fieldIndexInfo) {
 			continue
 		}
 
@@ -352,7 +359,7 @@ func EstimateSegmentLoadingResource(ctx context.Context, schema *schemapb.Collec
 	// PART 1: calculate size of indexes
 	for _, fieldIndexInfo := range loadInfo.IndexInfos {
 		fieldID := fieldIndexInfo.GetFieldID()
-		if len(fieldIndexInfo.GetIndexFilePaths()) > 0 {
+		if hasIndexArtifact(fieldIndexInfo) {
 			fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
 			if err != nil {
 				// field might have been dropped, skip its index

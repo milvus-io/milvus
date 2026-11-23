@@ -15,6 +15,7 @@
 package packed
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"strconv"
@@ -75,6 +76,21 @@ func NewStatsResolverFromLoadInfo(loadInfo *querypb.SegmentLoadInfo) *StatsResol
 		textStatsLogs: loadInfo.GetTextStatsLogs(),
 		jsonKeyStats:  loadInfo.GetJsonKeyStatsLogs(),
 	}
+}
+
+// WithLoadManifest reuses the stats decoded for this load operation.
+func (r *StatsResolver) WithLoadManifest(ctx context.Context) *StatsResolver {
+	return r.WithManifest(LoadManifestFromContext(ctx, r.manifestPath))
+}
+
+// WithManifest uses the provided revision if it matches the load info.
+func (r *StatsResolver) WithManifest(manifest *LoadManifest) *StatsResolver {
+	if manifest.Matches(r.manifestPath) {
+		r.manifestStats = manifest.stats
+		r.manifestErr = nil
+		r.manifestLoaded = true
+	}
+	return r
 }
 
 // NewStatsResolverFromSegmentInfo creates a fully-populated StatsResolver from a

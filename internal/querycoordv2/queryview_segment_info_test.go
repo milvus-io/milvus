@@ -24,8 +24,8 @@ import (
 
 type segmentInfoMixCoord struct{ types.MixCoord }
 
-func (m *segmentInfoMixCoord) GetQueryViewSegmentLoadInfos(ctx context.Context, cid int64, ids []int64) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
-	return m.MixCoord.GetQueryViewSegmentLoadInfos(ctx, cid, ids)
+func (m *segmentInfoMixCoord) GetQueryViewSegmentLoadInfos(ctx context.Context, cid int64, ids []int64, local bool) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
+	return m.MixCoord.GetQueryViewSegmentLoadInfos(ctx, cid, ids, local)
 }
 
 func TestQueryViewSegmentInfo(t *testing.T) {
@@ -51,7 +51,8 @@ func TestQueryViewSegmentInfo(t *testing.T) {
 		mockey.Mock((*coordview.ShardViewRegistry).SnapshotForCollection).To(func(_ *coordview.ShardViewRegistry, _ int64) *coordview.ShardViewSnapshot {
 			return coordview.NewShardViewSnapshot(1, stats)
 		}).Build(),
-		mockey.Mock((*segmentInfoMixCoord).GetQueryViewSegmentLoadInfos).To(func(_ *segmentInfoMixCoord, _ context.Context, cid int64, ids []int64) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
+		mockey.Mock((*segmentInfoMixCoord).GetQueryViewSegmentLoadInfos).To(func(_ *segmentInfoMixCoord, _ context.Context, cid int64, ids []int64, local bool) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
+			require.False(t, local)
 			reads++
 			result := make([]*querypb.QueryViewSegmentLoadInfoResult, 0, len(ids))
 			for _, id := range ids {

@@ -14,6 +14,7 @@ type SegmentIndexSummary struct {
 	IndexID                   int64
 	BuildID                   int64
 	IndexState                commonpb.IndexState
+	FailReason                string // From the retained task record.
 	IsDeleted                 bool
 	HasArtifact               bool
 	IndexVersion              int64
@@ -22,28 +23,33 @@ type SegmentIndexSummary struct {
 	CurrentIndexVersion       int32
 	CurrentScalarIndexVersion int32
 	IndexType                 string
+	NumRows                   int64
 }
 
 func SummarizeSegmentIndex(record *SegmentIndex) *SegmentIndexSummary {
 	return &SegmentIndexSummary{
 		CollectionID: record.CollectionID, PartitionID: record.PartitionID,
 		SegmentID: record.SegmentID, IndexID: record.IndexID, BuildID: record.BuildID,
-		IndexState: record.IndexState, IsDeleted: record.IsDeleted,
+		IndexState: record.IndexState, FailReason: record.FailReason, IsDeleted: record.IsDeleted,
 		HasArtifact:  record.HasArtifact(),
 		IndexVersion: record.IndexVersion, IndexSerializedSize: record.IndexSerializedSize, IndexMemSize: record.IndexMemSize,
 		CurrentIndexVersion: record.CurrentIndexVersion, CurrentScalarIndexVersion: record.CurrentScalarIndexVersion,
-		IndexType: record.IndexType,
+		IndexType: record.IndexType, NumRows: record.NumRows,
 	}
 }
 
 func SegmentIndexSummaryFromProto(segment *datapb.SegmentInfo, summary *datapb.SegmentIndexSummary) *SegmentIndexSummary {
+	numRows := segment.GetNumOfRows()
+	if summary.NumRows != nil {
+		numRows = summary.GetNumRows()
+	}
 	return &SegmentIndexSummary{
 		CollectionID: segment.GetCollectionID(), PartitionID: segment.GetPartitionID(), SegmentID: segment.GetID(),
 		IndexID: summary.GetIndexId(), BuildID: summary.GetBuildId(), IndexState: commonpb.IndexState_Finished,
 		HasArtifact: summary.GetHasArtifact(), IndexVersion: summary.GetIndexVersion(),
 		IndexSerializedSize: summary.GetSerializedSize(), IndexMemSize: summary.GetMemSize(),
 		CurrentIndexVersion: summary.GetVectorEngineVersion(), CurrentScalarIndexVersion: summary.GetScalarEngineVersion(),
-		IndexType: summary.GetIndexType(),
+		IndexType: summary.GetIndexType(), NumRows: numRows,
 	}
 }
 
@@ -53,6 +59,6 @@ func MarshalSegmentIndexSummary(record *SegmentIndexSummary, fieldID int64) *dat
 		HasArtifact: record.HasArtifact, IndexVersion: record.IndexVersion,
 		SerializedSize: record.IndexSerializedSize, MemSize: record.IndexMemSize,
 		VectorEngineVersion: record.CurrentIndexVersion, ScalarEngineVersion: record.CurrentScalarIndexVersion,
-		IndexType: record.IndexType,
+		IndexType: record.IndexType, NumRows: &record.NumRows,
 	}
 }

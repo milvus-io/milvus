@@ -441,7 +441,7 @@ func TestIndexInspector_ProcessIndexSegmentsCreatesIndex(t *testing.T) {
 	inspector.processIndexSegments(ctx, false)
 
 	assert.Empty(t, inspector.popIndexSegments(true))
-	assert.Contains(t, im.GetSegmentIndexes(collID, segID), indexID)
+	assert.Contains(t, im.GetSegmentIndexTasks(collID, segID), indexID)
 }
 
 func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *testing.T) {
@@ -862,7 +862,7 @@ func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {
 	err := inspector.createIndexForSegment(ctx, mt.GetCollection(segment.CollectionID), segment, 5)
 	assert.NoError(t, err)
 
-	segIndexes := im.GetSegmentIndexes(segment.CollectionID, segment.ID)
+	segIndexes := im.GetSegmentIndexTasks(segment.CollectionID, segment.ID)
 	segIdx, ok := segIndexes[5]
 	assert.True(t, ok)
 	assert.Equal(t, "DISKANN", segIdx.IndexType)
@@ -935,7 +935,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 
 		err := inspector.createIndexesForSegment(ctx, segment)
 		assert.NoError(t, err)
-		assert.Contains(t, im.GetSegmentIndexes(collID, segment.GetID()), UniqueID(5))
+		assert.Contains(t, im.GetSegmentIndexTasks(collID, segment.GetID()), UniqueID(5))
 	})
 
 	t.Run("build non function output index", func(t *testing.T) {
@@ -959,7 +959,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 
 		err := inspector.createIndexesForSegment(ctx, segment)
 		assert.NoError(t, err)
-		assert.Contains(t, im.GetSegmentIndexes(collID, segment.GetID()), UniqueID(7))
+		assert.Contains(t, im.GetSegmentIndexTasks(collID, segment.GetID()), UniqueID(7))
 	})
 
 	// A segment behind the collection schema version defers every index,
@@ -985,7 +985,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 
 		err := inspector.createIndexesForSegment(ctx, segment)
 		assert.NoError(t, err)
-		segIndexes := im.GetSegmentIndexes(collID, segment.GetID())
+		segIndexes := im.GetSegmentIndexTasks(collID, segment.GetID())
 		assert.NotContains(t, segIndexes, UniqueID(8))
 		assert.NotContains(t, segIndexes, UniqueID(9))
 	})
@@ -1012,7 +1012,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 
 		err := inspector.createIndexesForSegment(ctx, segment)
 		assert.NoError(t, err)
-		assert.NotContains(t, im.GetSegmentIndexes(unresolvableCollID, segment.GetID()), UniqueID(10))
+		assert.NotContains(t, im.GetSegmentIndexTasks(unresolvableCollID, segment.GetID()), UniqueID(10))
 	})
 
 	t.Run("defer index build when indexed field is unknown to schema", func(t *testing.T) {
@@ -1034,7 +1034,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 
 		err := inspector.createIndexesForSegment(ctx, segment)
 		assert.NoError(t, err)
-		assert.NotContains(t, im.GetSegmentIndexes(collID, segment.GetID()), UniqueID(11))
+		assert.NotContains(t, im.GetSegmentIndexTasks(collID, segment.GetID()), UniqueID(11))
 	})
 
 	t.Run("create V3 function output index when segment schema is caught up", func(t *testing.T) {
@@ -1064,7 +1064,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 
 		err := inspector.createIndexesForSegment(ctx, segment)
 		assert.NoError(t, err)
-		assert.Contains(t, im.GetSegmentIndexes(collID, segment.GetID()), UniqueID(12))
+		assert.Contains(t, im.GetSegmentIndexTasks(collID, segment.GetID()), UniqueID(12))
 	})
 
 	t.Run("skip V3 function output index when segment schema is behind", func(t *testing.T) {
@@ -1090,7 +1090,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 
 		err := inspector.createIndexesForSegment(ctx, segment)
 		assert.NoError(t, err)
-		assert.NotContains(t, im.GetSegmentIndexes(collID, segment.GetID()), UniqueID(13))
+		assert.NotContains(t, im.GetSegmentIndexTasks(collID, segment.GetID()), UniqueID(13))
 	})
 
 	t.Run("create V3 function output index when segment schema is ahead", func(t *testing.T) {
@@ -1120,7 +1120,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 
 		err := inspector.createIndexesForSegment(ctx, segment)
 		assert.NoError(t, err)
-		assert.Contains(t, im.GetSegmentIndexes(collID, segment.GetID()), UniqueID(14))
+		assert.Contains(t, im.GetSegmentIndexTasks(collID, segment.GetID()), UniqueID(14))
 	})
 }
 

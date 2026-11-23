@@ -124,9 +124,10 @@ type SegmentLoadInfoProvider interface {
 // SegmentLoadInfoSnapshot binds the physical base and its certified replay
 // cursor. The resource owner retains it across physical preparation retries.
 type SegmentLoadInfoSnapshot struct {
-	CollectionID int64
-	SegmentID    int64
-	LoadInfo     *querypb.SegmentLoadInfo
+	CollectionID    int64
+	SegmentID       int64
+	LoadInfo        *querypb.SegmentLoadInfo
+	ManifestIndexes *querypb.QueryViewManifestIndexes
 }
 
 type PhysicalSegmentLoader interface {

@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	qvtransformlogbuffer "github.com/milvus-io/milvus/internal/querynodev2/transformlogbuffer"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
@@ -32,7 +33,7 @@ func NewQueryViewSegmentManager(ctx context.Context, manager *segments.Manager, 
 	collectionRuntime := newQueryViewCollectionRuntimeManager(meta, streaming.WAL().SchemaClient())
 	return qnview.NewSegmentResourceManager(ctx, nodeScheduler, physicalLoader,
 		newQueryViewSegmentResourceEstimator(loader), metadata,
-		qvtransformlogbuffer.NewConfigured(ctx, streams), collectionRuntime)
+		qvtransformlogbuffer.NewConfigured(ctx, streams), collectionRuntime, packed.OpenLoadManifest)
 }
 
 func newQueryViewPhysicalSegmentLoader(segments qvSegmentManager, loader qvSegmentLoader) *queryViewPhysicalSegmentLoader {

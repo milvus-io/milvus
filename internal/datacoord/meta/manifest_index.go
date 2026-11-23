@@ -18,8 +18,6 @@ package meta
 
 import (
 	"context"
-	"path"
-	"strings"
 
 	"golang.org/x/sync/semaphore"
 
@@ -133,67 +131,11 @@ func SegmentIndexFilePaths(rootPath string, segIdx *model.SegmentIndex, segment 
 	return builder.BuildFilePaths(segIdx.IndexFileKeys), nil
 }
 
-// manifestIndexFilePathInfo projects one manifest index entry into the load
-// metadata QueryNode consumes. It returns false for an entry that cannot
-// produce a safe file list, which the caller treats as "no manifest artifact".
-func manifestIndexFilePathInfo(segmentID int64, manifestIndex packed.ManifestIndexInfo) (*indexpb.IndexFilePathInfo, bool) {
-	if manifestIndex.Path == "" || manifestIndex.IndexName == "" || manifestIndex.IndexType == "" ||
-		manifestIndex.IndexStorePathVersion < indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED ||
-		manifestIndex.NumRows < 0 || manifestIndex.SerializedSize < 0 || manifestIndex.MemSize < 0 ||
-		len(manifestIndex.IndexFileKeys) == 0 {
-		return nil, false
-	}
-
-	filePaths := make([]string, 0, len(manifestIndex.IndexFileKeys))
-	for _, fileKey := range manifestIndex.IndexFileKeys {
-		// Index file keys are plain file names under Path. Reject anything that
-		// could escape the artifact directory of a manifest we did not write.
-		if fileKey == "" || path.IsAbs(fileKey) || path.Base(fileKey) != fileKey || fileKey == "." || fileKey == ".." {
-			return nil, false
-		}
-		if metautil.IsSegmentRooted(manifestIndex.IndexStorePathVersion) {
-			filePaths = append(filePaths, strings.TrimRight(manifestIndex.Path, "/")+"/"+fileKey)
-		} else {
-			filePaths = append(filePaths, path.Join(manifestIndex.Path, fileKey))
-		}
-	}
-
-	return &indexpb.IndexFilePathInfo{
-		SegmentID:                 segmentID,
-		FieldID:                   manifestIndex.FieldID,
-		IndexID:                   manifestIndex.IndexID,
-		BuildID:                   manifestIndex.BuildID,
-		IndexName:                 manifestIndex.IndexName,
-		IndexType:                 manifestIndex.IndexType,
-		IndexParams:               []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: manifestIndex.IndexType}},
-		IndexFilePaths:            filePaths,
-		SerializedSize:            uint64(manifestIndex.SerializedSize),
-		MemSize:                   uint64(manifestIndex.MemSize),
-		IndexVersion:              manifestIndex.IndexVersion,
-		NumRows:                   manifestIndex.NumRows,
-		CurrentIndexVersion:       manifestIndex.CurrentIndexVersion,
-		CurrentScalarIndexVersion: manifestIndex.CurrentScalarIndexVersion,
-		IndexStorePathVersion:     manifestIndex.IndexStorePathVersion,
-	}, true
-}
-
-// manifestIndexFilePathInfoForSegment validates resolved reader paths against the
-// owning segment and storage root. Writers use manifestIndexFilePathInfo for
-// staged relative paths, before milvus-storage resolves them.
 func ManifestIndexFilePathInfoForSegment(rootPath string, segment *datapb.SegmentInfo,
 	entry packed.ManifestIndexInfo,
 ) (*indexpb.IndexFilePathInfo, bool) {
-	expected := metautil.NewIndexPathBuilder(rootPath, entry.IndexStorePathVersion,
-		segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(),
-		entry.BuildID, entry.IndexVersion).WithManifestPath(segment.GetManifestPath()).BuildPrefix()
-	if metautil.IsSegmentRooted(entry.IndexStorePathVersion) {
-		if entry.Path != expected {
-			return nil, false
-		}
-	} else if path.Clean(entry.Path) != expected {
-		return nil, false
-	}
-	return manifestIndexFilePathInfo(segment.GetID(), entry)
+	return packed.ManifestIndexFilePathInfoForSegment(rootPath, segment.GetManifestPath(),
+		segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), entry)
 }
 
 // Bound outstanding reads by both the configured scan concurrency and the
@@ -251,7 +193,7 @@ func (m *Meta) SubmitManifestIndexRead(ctx context.Context, io *packed.ManifestI
 // predicate rather than restating the field checks, so writer and readers
 // cannot drift apart.
 func ValidateManifestIndexPublishable(segmentID int64, manifestIndex packed.ManifestIndexInfo) error {
-	if _, ok := manifestIndexFilePathInfo(segmentID, manifestIndex); !ok {
+	if _, ok := packed.ManifestIndexFilePathInfo(segmentID, manifestIndex); !ok {
 		return merr.WrapErrServiceInternalMsg(
 			"refusing to publish unusable index entry for segment %d: indexID %d buildID %d indexName %q",
 			segmentID, manifestIndex.IndexID, manifestIndex.BuildID, manifestIndex.IndexName)

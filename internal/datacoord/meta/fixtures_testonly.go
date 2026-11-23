@@ -1740,7 +1740,7 @@ func NewTestGroup() *model.SegmentChangeGroup {
 	}
 }
 
-func (*MockMixCoord) GetQueryViewSegmentLoadInfos(context.Context, int64, []int64) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
+func (*MockMixCoord) GetQueryViewSegmentLoadInfos(context.Context, int64, []int64, bool) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
 	panic("patch GetQueryViewSegmentLoadInfos with mockey")
 }
 

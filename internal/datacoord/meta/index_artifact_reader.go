@@ -21,48 +21,74 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// ReadCompletedIndexes resolves only the immutable revision paired with segment.
-// Its returned file lists belong to this call and are never installed in meta.
-func (m *Meta) ReadCompletedIndexes(ctx context.Context, segment *datapb.SegmentInfo) (map[int64]*model.SegmentIndex, error) {
-	records := make(map[int64]*model.SegmentIndex, len(segment.GetIndexSummaries()))
-	needManifest := false
-	fields := make(map[int64]int64, len(segment.GetIndexSummaries()))
-	for _, summary := range segment.GetIndexSummaries() {
-		if summary.GetBuildId() <= 0 || summary.GetIndexId() <= 0 {
-			return nil, merr.Wrapf(merr.ErrDataIntegrity, "invalid index summary for segment %d", segment.GetID())
-		}
-		if _, exists := records[summary.GetIndexId()]; exists {
-			return nil, merr.Wrapf(merr.ErrDataIntegrity, "duplicate index summary for segment %d", segment.GetID())
-		}
-		records[summary.GetIndexId()] = SegmentIndexFromSummary(segment, summary)
-		fields[summary.GetIndexId()] = summary.GetFieldId()
-		needManifest = needManifest || summary.GetHasArtifact()
-	}
-	if !needManifest {
-		return records, nil
-	}
-	if segment.GetManifestPath() == "" || !segment.GetManifestHasIndex() {
-		return nil, merr.Wrapf(merr.ErrDataIntegrity, "segment %d has index artifacts without a manifest", segment.GetID())
+// ResolveSegmentIndexes combines live task rows with the completed artifacts in
+// the selected segment revision. The caller transfers ownership of the task map.
+func (m *Meta) ResolveSegmentIndexes(ctx context.Context, segment *datapb.SegmentInfo, records map[int64]*model.SegmentIndex, live func(int64) bool) (map[int64]*model.SegmentIndex, error) {
+	records, artifacts, err := MergeSegmentIndexSummaries(segment, records, live)
+	if err != nil || len(artifacts) == 0 {
+		return records, err
 	}
 	entries, err := m.ReadManifestIndexesWithIO(ctx, nil, segment.GetManifestPath(), CreateStorageConfig())
 	if err != nil {
 		return nil, merr.Wrapf(err, "read index artifacts for segment %d", segment.GetID())
 	}
-	resolved := make(map[int64]bool)
-	for _, entry := range entries {
-		record, ok := records[entry.IndexID]
-		if !ok || !record.ArtifactPresent {
+	return resolveSegmentIndexEntries(m.ChunkManager.RootPath(), segment, records, artifacts, entries)
+}
+
+// MergeSegmentIndexSummaries projects the selected segment inventory without I/O.
+// A finished task for the same build supplies its own metadata and files.
+func MergeSegmentIndexSummaries(segment *datapb.SegmentInfo, records map[int64]*model.SegmentIndex, live func(int64) bool) (map[int64]*model.SegmentIndex, map[int64]int64, error) {
+	if records == nil {
+		records = make(map[int64]*model.SegmentIndex, len(segment.GetIndexSummaries()))
+	}
+	artifacts := make(map[int64]int64)
+	seen := make(map[int64]struct{}, len(segment.GetIndexSummaries()))
+	for _, summary := range segment.GetIndexSummaries() {
+		if summary.GetBuildId() <= 0 || summary.GetIndexId() <= 0 {
+			return nil, nil, merr.Wrapf(merr.ErrDataIntegrity, "invalid index summary for segment %d", segment.GetID())
+		}
+		id := summary.GetIndexId()
+		if live != nil && !live(id) {
 			continue
 		}
-		if resolved[entry.IndexID] || entry.BuildID != record.BuildID || entry.IndexVersion != record.IndexVersion || entry.FieldID != fields[entry.IndexID] {
+		if _, exists := seen[id]; exists {
+			return nil, nil, merr.Wrapf(merr.ErrDataIntegrity, "duplicate index summary for segment %d", segment.GetID())
+		}
+		seen[id] = struct{}{}
+		// A finished row can carry the files for this exact build. If its
+		// completion raced the earlier task snapshot, the pinned summary wins.
+		if task := records[id]; task != nil && task.BuildID == summary.GetBuildId() && task.IndexState == commonpb.IndexState_Finished {
+			continue
+		}
+		records[id] = SegmentIndexFromSummary(segment, summary)
+		if summary.GetHasArtifact() {
+			artifacts[id] = summary.GetFieldId()
+		}
+	}
+	if len(artifacts) != 0 && (segment.GetManifestPath() == "" || !segment.GetManifestHasIndex()) {
+		return nil, nil, merr.Wrapf(merr.ErrDataIntegrity, "segment %d has index artifacts without a manifest", segment.GetID())
+	}
+	return records, artifacts, nil
+}
+
+func resolveSegmentIndexEntries(root string, segment *datapb.SegmentInfo, records map[int64]*model.SegmentIndex, artifacts map[int64]int64, entries []packed.ManifestIndexInfo) (map[int64]*model.SegmentIndex, error) {
+	resolved := make(map[int64]bool)
+	for _, entry := range entries {
+		fieldID, needsArtifact := artifacts[entry.IndexID]
+		if !needsArtifact {
+			continue
+		}
+		record := records[entry.IndexID]
+		if resolved[entry.IndexID] || entry.BuildID != record.BuildID || entry.IndexVersion != record.IndexVersion || entry.FieldID != fieldID {
 			return nil, merr.Wrapf(merr.ErrDataIntegrity, "manifest index identity disagrees with summary for segment %d index %d", segment.GetID(), entry.IndexID)
 		}
-		if _, valid := ManifestIndexFilePathInfoForSegment(m.ChunkManager.RootPath(), segment, entry); !valid {
+		if _, valid := ManifestIndexFilePathInfoForSegment(root, segment, entry); !valid {
 			return nil, merr.Wrapf(merr.ErrDataIntegrity, "invalid manifest index for segment %d index %d", segment.GetID(), entry.IndexID)
 		}
 		loaded := segmentIndexFromManifest(&SegmentInfo{SegmentInfo: segment}, entry)
@@ -70,9 +96,9 @@ func (m *Meta) ReadCompletedIndexes(ctx context.Context, segment *datapb.Segment
 		records[entry.IndexID] = loaded
 		resolved[entry.IndexID] = true
 	}
-	for id, record := range records {
-		if record.ArtifactPresent && !resolved[id] {
-			return nil, merr.Wrapf(merr.ErrDataIntegrity, "manifest missing summary build %d for segment %d", record.BuildID, segment.GetID())
+	for id := range artifacts {
+		if !resolved[id] {
+			return nil, merr.Wrapf(merr.ErrDataIntegrity, "manifest missing summary build %d for segment %d", records[id].BuildID, segment.GetID())
 		}
 	}
 	return records, nil
@@ -80,9 +106,10 @@ func (m *Meta) ReadCompletedIndexes(ctx context.Context, segment *datapb.Segment
 
 // SegmentIndexFromSummary carries coordinator decisions without any file keys.
 func SegmentIndexFromSummary(segment *datapb.SegmentInfo, summary *datapb.SegmentIndexSummary) *model.SegmentIndex {
+	inventory := model.SegmentIndexSummaryFromProto(segment, summary)
 	return &model.SegmentIndex{
 		SegmentID: segment.GetID(), CollectionID: segment.GetCollectionID(), PartitionID: segment.GetPartitionID(),
-		NumRows: segment.GetNumOfRows(), IndexID: summary.GetIndexId(), BuildID: summary.GetBuildId(),
+		NumRows: inventory.NumRows, IndexID: summary.GetIndexId(), BuildID: summary.GetBuildId(),
 		IndexVersion: summary.GetIndexVersion(), IndexState: commonpb.IndexState_Finished,
 		IndexSerializedSize: summary.GetSerializedSize(), IndexMemSize: summary.GetMemSize(),
 		CurrentIndexVersion: summary.GetVectorEngineVersion(), CurrentScalarIndexVersion: summary.GetScalarEngineVersion(),

@@ -18,6 +18,7 @@ package querycoordv2
 
 import (
 	"context"
+	"maps"
 	"strconv"
 	"time"
 
@@ -296,14 +297,23 @@ func (s *Server) requiredLoadResourceByRG(ctx context.Context, req *job.AlterLoa
 	})
 	// Recovery info only carries compact segment metadata, while resource
 	// estimation needs the complete binlog and statistics payload.
-	segments, err = s.broker.GetSegmentInfo(ctx, segmentIDs...)
+	segments, indexes, err := s.broker.GetSegmentInfoForResourceEstimation(ctx, collectionID, segmentIDs...)
 	if err != nil {
 		return nil, err
 	}
 
-	indexes, err := getIndexInfoBySegments(ctx, s.broker, collectionID, segmentIDs)
+	legacyIDs := lo.Filter(segmentIDs, func(id int64, _ int) bool {
+		_, projected := indexes[id]
+		return !projected
+	})
+	legacy, err := getIndexInfoBySegments(ctx, s.broker, collectionID, legacyIDs)
 	if err != nil {
 		return nil, err
+	}
+	if indexes == nil {
+		indexes = legacy
+	} else {
+		maps.Copy(indexes, legacy)
 	}
 
 	expectedUsage, err := estimateLoadResourceForLoadConfig(

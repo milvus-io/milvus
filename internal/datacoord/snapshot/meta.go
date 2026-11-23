@@ -214,6 +214,10 @@ type SnapshotMeta struct {
 	// These are therefore maintained as two independent sets of precise state under the
 	// same lock, rebuilt atomically by rebuildAllSegmentProtection.
 	SegmentProtectionMu sync.RWMutex
+
+	// In-flight index reclamation by collection, protected by SegmentProtectionMu.
+	activeIndexGC map[int64]int
+
 	// ===== Compaction protection (TTL-bound) =====
 	// segmentProtectionUntil: segmentID -> latest active protection expiry (Unix seconds).
 	// When multiple active-TTL snapshots reference the same segment, the latest expiry wins.
@@ -543,23 +547,28 @@ func (sm *SnapshotMeta) SaveSnapshot(ctx context.Context, snapshot *snapshotstor
 	// Without this, after restart the RefIndex loaded from S3 would have nil segmentIDs,
 	// causing GC to skip snapshot protection and delete referenced files.
 	segmentIDs := make([]int64, 0, len(snapshot.Segments))
-	buildIDs := make([]int64, 0)
+	builds := typeutil.NewUniqueSet()
+	if snapshot.IndexFilesFromManifest {
+		builds.Insert(snapshot.BuildIDs...)
+	}
 	for _, segment := range snapshot.Segments {
 		segmentIDs = append(segmentIDs, segment.GetSegmentId())
 		for _, indexFile := range segment.GetIndexFiles() {
-			buildIDs = append(buildIDs, indexFile.GetBuildID())
+			builds.Insert(indexFile.GetBuildID())
 		}
 		for _, textIndex := range segment.GetTextIndexFiles() {
 			if textIndex.GetBuildID() != 0 {
-				buildIDs = append(buildIDs, textIndex.GetBuildID())
+				builds.Insert(textIndex.GetBuildID())
 			}
 		}
 		for _, jsonKeyIndex := range segment.GetJsonKeyIndexFiles() {
 			if jsonKeyIndex.GetBuildID() != 0 {
-				buildIDs = append(buildIDs, jsonKeyIndex.GetBuildID())
+				builds.Insert(jsonKeyIndex.GetBuildID())
 			}
 		}
 	}
+	buildIDs := builds.Collect()
+	slices.Sort(buildIDs)
 	snapshot.SegmentIDs = segmentIDs
 	snapshot.BuildIDs = buildIDs
 
@@ -970,6 +979,11 @@ func (sm *SnapshotMeta) ReadSnapshotData(ctx context.Context, collectionID int64
 	// Step 3: Merge S3 location from memory into returned data
 	snapshotData.SnapshotInfo.S3Location = snapshotInfo.S3Location
 
+	if includeSegments && snapshotData.IndexFilesFromManifest {
+		if err := snapshotstorage.ResolveSnapshotIndexFiles(ctx, snapshotData, meta.CreateStorageConfig()); err != nil {
+			return nil, err
+		}
+	}
 	return snapshotData, nil
 }
 
@@ -1011,6 +1025,9 @@ func (sm *SnapshotMeta) ReadAndValidateExternalSnapshotDataWithChunkManager(
 		return nil, err
 	}
 	if includeSegments {
+		if err := snapshotstorage.ResolveSnapshotIndexFiles(ctx, snapshotData, storageConfig); err != nil {
+			return nil, err
+		}
 		if err := snapshotstorage.ValidateExternalSnapshotDataFiles(
 			ctx,
 			cm,
@@ -1251,15 +1268,40 @@ func (sm *SnapshotMeta) GetSnapshotByBuildID(buildID UniqueID) []UniqueID {
 	return snapshotIDs
 }
 
-// SetSnapshotPending marks a collection as having a pending snapshot creation.
-// This blocks compaction commit for the collection to prevent segment state changes
-// during the window between GenSnapshot and SaveSnapshot.
-func (sm *SnapshotMeta) SetSnapshotPending(collectionID int64) {
+// TryGuardIndexGC excludes new snapshot selections until the caller releases
+// the guard. The caller must still check the pins for the objects it deletes.
+func (sm *SnapshotMeta) TryGuardIndexGC(collectionID int64) (release func(), ok bool) {
 	sm.SegmentProtectionMu.Lock()
 	defer sm.SegmentProtectionMu.Unlock()
+	if sm.SnapshotPendingCollections.Contain(collectionID) {
+		return nil, false
+	}
+	if sm.activeIndexGC == nil {
+		sm.activeIndexGC = make(map[int64]int)
+	}
+	sm.activeIndexGC[collectionID]++
+	return func() {
+		sm.SegmentProtectionMu.Lock()
+		defer sm.SegmentProtectionMu.Unlock()
+		sm.activeIndexGC[collectionID]--
+		if sm.activeIndexGC[collectionID] == 0 {
+			delete(sm.activeIndexGC, collectionID)
+		}
+	}, true
+}
+
+// SetSnapshotPending blocks compaction commit and new index reclamation until
+// snapshot creation ends. An already-running deletion makes the caller retry.
+func (sm *SnapshotMeta) SetSnapshotPending(collectionID int64) bool {
+	sm.SegmentProtectionMu.Lock()
+	defer sm.SegmentProtectionMu.Unlock()
+	if sm.activeIndexGC[collectionID] != 0 {
+		return false
+	}
 	sm.SnapshotPendingCollections.Insert(collectionID)
 	mlog.Info(context.TODO(), "collection marked as snapshot pending, compaction blocked",
 		mlog.Int64("collectionID", collectionID))
+	return true
 }
 
 // ClearSnapshotPending removes the pending snapshot mark for a collection.

@@ -17,27 +17,62 @@
 package index
 
 import (
-	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// segmentIndexRecords is a request-scoped projection, never a resident cache.
-func (m *IndexMeta) segmentIndexRecords(segmentID int64) (*typeutil.ConcurrentMap[int64, *model.SegmentIndex], bool) {
-	active, found := m.SegmentIndexes.Get(segmentID)
-	if !m.UsesSegmentSummaries() {
-		return active, found
+// segmentIndexSummaries returns the current build per index ID. A retained task
+// takes precedence over a completed summary for the same index ID.
+func (m *IndexMeta) segmentIndexSummaries(segmentID int64) map[int64]*model.SegmentIndexSummary {
+	usesSummaries := m.UsesSegmentSummaries()
+	if usesSummaries {
+		// Completion publishes the summary before retiring the task under this lock.
+		locks := m.getSegmentIndexMapLocks()
+		locks.RLock(segmentID)
+		defer locks.RUnlock(segmentID)
 	}
-	records := typeutil.NewConcurrentMap[int64, *model.SegmentIndex]()
-	if segment, ok := m.summarySource.GetSegment(segmentID); ok {
-		for _, summary := range segment.GetIndexSummaries() {
-			records.Insert(summary.GetIndexId(), meta.SegmentIndexFromSummary(segment, summary))
+	var tasks *typeutil.ConcurrentMap[int64, *model.SegmentIndex]
+	if m.SegmentIndexes != nil {
+		tasks, _ = m.SegmentIndexes.Get(segmentID)
+	}
+	var segment *datapb.SegmentInfo
+	if usesSummaries {
+		segment, _ = m.summarySource.GetSegment(segmentID)
+	}
+	completed := segment.GetIndexSummaries()
+	if tasks == nil && len(completed) == 0 {
+		return nil
+	}
+	summaries := make(map[int64]*model.SegmentIndexSummary, len(completed))
+	for _, summary := range completed {
+		summaries[summary.GetIndexId()] = model.SegmentIndexSummaryFromProto(segment, summary)
+	}
+	if tasks != nil {
+		tasks.Range(func(id int64, task *model.SegmentIndex) bool {
+			summaries[id] = model.SummarizeSegmentIndex(task)
+			return true
+		})
+	}
+	return summaries
+}
+
+// GetSegmentIndexSummaries returns the current builds for live index definitions.
+func (m *IndexMeta) GetSegmentIndexSummaries(collectionID, segmentID int64) map[int64]*model.SegmentIndexSummary {
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
+	indexes := m.Indexes[collectionID]
+	if len(indexes) == 0 {
+		return nil
+	}
+	summaries := m.segmentIndexSummaries(segmentID)
+	for id, summary := range summaries {
+		index := indexes[id]
+		if index == nil || index.IsDeleted || summary.IsDeleted {
+			delete(summaries, id)
 		}
 	}
-	if found {
-		active.Range(func(id int64, record *model.SegmentIndex) bool { records.Insert(id, record); return true })
-	}
-	return records, records.Len() != 0
+	return summaries
 }
 
 // GetSegmentIndexSummary returns detached inventory and task state without file metadata.

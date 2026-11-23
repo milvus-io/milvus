@@ -1784,6 +1784,7 @@ func syncVectorScalarIndexesWithSummary(ctx context.Context, result *datapb.Copy
 				VectorEngineVersion: indexInfo.GetCurrentIndexVersion(),
 				ScalarEngineVersion: indexInfo.GetCurrentScalarIndexVersion(),
 				IndexType:           indexInfo.GetIndexType(),
+				NumRows:             &numRows,
 			})
 			continue
 		}
@@ -2014,6 +2015,9 @@ func loadCopySnapshot(ctx context.Context, job CopySegmentJob, snapshots Snapsho
 				job.GetSnapshotS3Location(),
 				true,
 			)
+			if err == nil {
+				err = snapshotstorage.ResolveSnapshotIndexFiles(ctx, loaded, resolved.ForeignStorageConfig)
+			}
 		} else {
 			loaded, err = snapshots.ReadSnapshotData(ctx, job.GetSourceCollectionId(), job.GetSnapshotName(), true)
 		}

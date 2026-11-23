@@ -48,28 +48,34 @@ func TestSegmentResourceDroppedWaitsForPhysicalRelease(t *testing.T) {
 	})
 }
 
+type closingTestRegistration struct {
+	instantTransformRegistration
+	entered      chan struct{}
+	visible      chan struct{}
+	unregistered chan struct{}
+}
+
+func (r *closingTestRegistration) Unregister() {
+	close(r.unregistered)
+}
+
+func (r *closingTestRegistration) WaitTransformVisible(ctx context.Context, _ uint64) error {
+	close(r.entered)
+	select {
+	case <-r.visible:
+		return nil
+	case <-r.unregistered:
+		return context.Canceled
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func TestSegmentResourceClosingPreservesQueryMVCCWait(t *testing.T) {
 	mockey.PatchConvey("Closing cancels preparation but keeps the registration until the pinned query finishes", t, func() {
 		f := setupResourceTest(t, nil)
-		caughtUp := make(chan struct{})
-		close(caughtUp)
-		f.registerMock.Return(&fakeTransformRegistration{waitCh: caughtUp}, nil)
-		unregistered := make(chan struct{})
-		mockey.Mock((*fakeTransformRegistration).Unregister).To(func(*fakeTransformRegistration) {
-			close(unregistered)
-		}).Build()
-		entered, visible := make(chan struct{}), make(chan struct{})
-		mockey.Mock((*fakeTransformRegistration).WaitTransformVisible).To(func(_ *fakeTransformRegistration, ctx context.Context, _ uint64) error {
-			close(entered)
-			select {
-			case <-visible:
-				return nil
-			case <-unregistered:
-				return context.Canceled
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}).Build()
+		entered, visible, unregistered := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		f.registerMock.Return(&closingTestRegistration{entered: entered, visible: visible, unregistered: unregistered}, nil)
 		req := f.acquire(1, 1, 1)
 		f.await(t, 1)
 		acquired := make(chan struct{})

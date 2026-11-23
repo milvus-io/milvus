@@ -462,8 +462,11 @@ check so a retry can discover newly available artifacts. Ready bindings do not
 poll. This fallback does not add notifications for physical changes that do not
 create a new View. `GetQueryViewSegmentLoadInfo` is a unary batch request for Segment IDs
 in one Collection. It returns one result per distinct requested ID, including a
-per-Segment status and, on success, a complete current SegmentLoadInfo. Collection
-index definitions are included once for the batch. The response-level status is
+per-Segment status and, on success, the current SegmentLoadInfo. For ordinary
+StorageV3 segments in summary mode, a capable QueryNode can receive summaries
+and retained finished tasks and resolve index files from the same manifest it
+uses for column groups, deltas and stats. Collection index definitions are
+included once for the batch. The response-level status is
 reserved for request-wide failures; a missing Segment or an uncertified replay
 cursor must not discard successful siblings. An empty ID list succeeds with no
 results. It does not promise historical SegmentInfo lookup. Manifest,

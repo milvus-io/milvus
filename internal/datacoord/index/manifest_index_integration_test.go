@@ -202,11 +202,11 @@ func TestReloadSegmentIndexesFromManifests(t *testing.T) {
 	m, mDomains := setupManifestReloadMeta(t)
 	mockReloadManifestEntry(t, 5100)
 
-	require.Empty(t, mDomains.IndexMeta.GetSegmentIndexes(100, 5001))
+	require.Empty(t, mDomains.IndexMeta.GetSegmentIndexTasks(100, 5001))
 
 	require.NoError(t, m.ReloadSegmentIndexesFromManifests(context.TODO()))
 
-	segIdxes := mDomains.IndexMeta.GetSegmentIndexes(100, 5001)
+	segIdxes := mDomains.IndexMeta.GetSegmentIndexTasks(100, 5001)
 	require.Len(t, segIdxes, 1)
 	recovered := segIdxes[500]
 	require.NotNil(t, recovered)
@@ -258,7 +258,7 @@ func TestReloadSegmentIndexesFromManifests_EtcdRecordWins(t *testing.T) {
 
 	require.NoError(t, m.ReloadSegmentIndexesFromManifests(context.TODO()))
 
-	recovered := mDomains.IndexMeta.GetSegmentIndexes(100, 5001)[500]
+	recovered := mDomains.IndexMeta.GetSegmentIndexTasks(100, 5001)[500]
 	require.NotNil(t, recovered)
 	assert.Equal(t, []string{"from-etcd"}, recovered.IndexFileKeys)
 	assert.EqualValues(t, 77, recovered.NodeID, "task history must survive the manifest projection")
@@ -278,7 +278,7 @@ func TestReloadSegmentIndexesFromManifests_UnreadableManifestFailsStartup(t *tes
 
 	err := m.ReloadSegmentIndexesFromManifests(context.TODO())
 	require.Error(t, err, "a transient manifest read failure must not be swallowed")
-	assert.Empty(t, mDomains.IndexMeta.GetSegmentIndexes(100, 5001))
+	assert.Empty(t, mDomains.IndexMeta.GetSegmentIndexTasks(100, 5001))
 }
 
 // The same failure must abort newMeta rather than yielding a usable meta with
@@ -327,7 +327,7 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 	metrics.DataCoordStoredIndexFilesSize.Reset()
 	_, restartedDomains := BootMetaForRestart(t, catalog, meta.RestartCollID)
 
-	recovered := restartedDomains.IndexMeta.GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID)
+	recovered := restartedDomains.IndexMeta.GetSegmentIndexTasks(meta.RestartCollID, meta.RestartSegID)
 	require.Len(t, recovered, 1, "the index must come back from the manifest alone")
 	segIdx := recovered[meta.RestartIndexID]
 	require.NotNil(t, segIdx)
@@ -538,7 +538,7 @@ func TestReloadRejectsUnusableManifestIndexEntry(t *testing.T) {
 	err := m.ReloadSegmentIndexesFromManifests(context.TODO())
 	require.Error(t, err, "a manifest entry that no other consumer would accept must fail startup, not install silently")
 	assert.Contains(t, err.Error(), "unusable index entry")
-	assert.Empty(t, mDomains.IndexMeta.GetSegmentIndexes(100, 5001))
+	assert.Empty(t, mDomains.IndexMeta.GetSegmentIndexTasks(100, 5001))
 }
 
 // seedUnpublishedBuild is seedRestartFixture up to but not including the

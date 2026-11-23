@@ -2,6 +2,7 @@ package qnview
 
 import (
 	"context"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,6 +15,8 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -92,7 +95,7 @@ func setupResourceTest(t *testing.T, prepare func(CollectionRuntime) error) *res
 	f.registerMock = mockey.Mock((*fakeTransformLogBuffer).RegisterSegment).Return(instantTransformRegistration{}, nil).Build()
 	scheduler := nodescheduler.New(2)
 	t.Cleanup(scheduler.Close)
-	f.manager = NewSegmentResourceManager(t.Context(), scheduler, &resourceTestLoader{}, nil, &resourceTestMetadata{}, &fakeTransformLogBuffer{}, &fakeQueryViewCollectionRuntimeManager{})
+	f.manager = NewSegmentResourceManager(t.Context(), scheduler, &resourceTestLoader{}, nil, &resourceTestMetadata{}, &fakeTransformLogBuffer{}, &fakeQueryViewCollectionRuntimeManager{}, nil)
 	return f
 }
 
@@ -411,5 +414,133 @@ func TestSegmentResourceManagerListsQueryViewCollections(t *testing.T) {
 		require.Equal(t, []int64{testCollectionID}, f.manager.CollectionIDs())
 		f.drop(t, second)
 		require.Empty(t, f.manager.CollectionIDs())
+	})
+}
+
+func TestSegmentResourceSharesOpenedManifestAcrossPreparations(t *testing.T) {
+	mockey.PatchConvey("a new revision opens once and same-revision preparations share it", t, func() {
+		dir := t.TempDir()
+		config := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+		first, err := packed.CreateManifestForSegment(filepath.Join(dir, "segment"), []string{"100"}, "parquet",
+			[]packed.Fragment{{FilePath: filepath.Join(dir, "segment", "data.parquet"), EndRow: 10}}, config)
+		require.NoError(t, err)
+		artifact := packed.ManifestIndexInfo{
+			ColumnName: "100", IndexName: "vector", IndexType: "HNSW", FieldID: 100, IndexID: 5,
+			BuildID: 30, IndexVersion: 1, Path: "30/1", IndexFileKeys: []string{"index.bin"},
+			IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+		}
+		first, err = packed.CommitManifestUpdates(first, config, &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{artifact}})
+		require.NoError(t, err)
+		artifact.BuildID, artifact.Path = 31, "31/1"
+		second, err := packed.CommitManifestUpdates(first, config, &packed.ManifestUpdates{
+			Indexes:   []packed.ManifestIndexInfo{artifact},
+			DeltaLogs: []packed.DeltaLogEntry{{Path: "delta.parquet", NumEntries: 1}},
+		})
+		require.NoError(t, err)
+		_, firstVersion, err := packed.UnmarshalManifestPath(first)
+		require.NoError(t, err)
+		_, secondVersion, err := packed.UnmarshalManifestPath(second)
+		require.NoError(t, err)
+
+		f := setupResourceTest(t, nil)
+		defer f.manager.Close()
+		f.dependencyMock.To(func(_ *fakeQueryViewCollectionRuntimeManager, _ context.Context, view *qviews.QueryViewAtQueryNode) (CollectionRuntimeGuard, bool, error) {
+			version := view.IntoProto().Meta.SchemaVersion
+			return &fakeCollectionRuntimeGuard{
+				schemaVersion: int64(version), schema: &schemapb.CollectionSchema{Version: version},
+				updatedIndexes: []*indexpb.IndexInfo{{IndexID: 5, FieldID: 100}},
+			}, false, nil
+		})
+		var prepared []*querypb.SegmentLoadInfo
+		f.prepareMock.To(func(_ *resourceTestLoader, _ context.Context, _ TransformSegment, _ segments.ReadState, _ CollectionRuntime, snapshot SegmentLoadInfoSnapshot) (segments.ReadState, error) {
+			prepared = append(prepared, snapshot.LoadInfo)
+			return &resourceTestRead{}, nil
+		})
+		f.getMock.UnPatch()
+		mockey.Mock((*resourceTestMetadata).GetQueryViewSegmentLoadInfo).To(func(_ *resourceTestMetadata, _ context.Context, collectionID, segmentID int64) (SegmentLoadInfoSnapshot, error) {
+			snapshot := resourceSnapshot(collectionID, segmentID, f.manifest.Load())
+			snapshot.LoadInfo.ManifestPath = first
+			buildID := int64(30)
+			if f.manifest.Load() == secondVersion {
+				snapshot.LoadInfo.ManifestPath = second
+				snapshot.LoadInfo.TransformStartAfterTimetick = 55
+				buildID = 31
+			}
+			snapshot.ManifestIndexes = &querypb.QueryViewManifestIndexes{Summaries: []*datapb.SegmentIndexSummary{{
+				IndexId: 5, FieldId: 100, BuildId: buildID, IndexVersion: 1, HasArtifact: true,
+			}}}
+			return snapshot, nil
+		}).Build()
+
+		var opened []*packed.LoadManifest
+		var failedOnce bool
+		failed := make(chan struct{})
+		retryOpen := make(chan struct{})
+		f.manager.openManifest = func(ctx context.Context, path string, _ *indexpb.StorageConfig) (*packed.LoadManifest, error) {
+			if packed.SameManifestPath(path, second) {
+				if !failedOnce {
+					failedOnce = true
+					close(failed)
+					return nil, merr.ErrServiceUnavailable
+				}
+				select {
+				case <-retryOpen:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+			manifest, err := packed.OpenLoadManifest(ctx, path, config)
+			opened = append(opened, manifest)
+			return manifest, err
+		}
+		f.manifest.Store(firstVersion)
+		one := f.request(1, 1, 1)
+		one.View.Partitions[0].SegmentManifestVersions = []int64{firstVersion}
+		f.manager.Acquire(one)
+		f.await(t, 1)
+		require.Len(t, opened, 1)
+		require.Len(t, prepared, 1)
+		require.EqualValues(t, 30, prepared[0].GetIndexInfos()[0].GetBuildID())
+		require.True(t, opened[0].Native() != nil)
+
+		two := f.request(2, 2, 2)
+		two.View.Partitions[0].SegmentManifestVersions = []int64{firstVersion}
+		f.manager.Acquire(two)
+		f.await(t, 2)
+		require.Len(t, opened, 1)
+		require.Len(t, prepared, 2)
+		require.EqualValues(t, 30, prepared[1].GetIndexInfos()[0].GetBuildID())
+
+		f.manifest.Store(secondVersion)
+		three := f.request(3, 3, 3)
+		three.View.Partitions[0].SegmentManifestVersions = []int64{secondVersion}
+		f.manager.Acquire(three)
+		select {
+		case <-failed:
+		case <-time.After(5 * time.Second):
+			t.Fatal("new revision was not prepared")
+		}
+		require.Empty(t, f.ready)
+		f.manager.mu.Lock()
+		previousRead := f.manager.views[one.Key].bindings[1000].prepared
+		f.manager.mu.Unlock()
+		require.NotNil(t, previousRead)
+		require.Equal(t, firstVersion, previousRead.manifest)
+		require.True(t, opened[0].Native() != nil)
+
+		close(retryOpen)
+		f.await(t, 3)
+		require.Len(t, opened, 2)
+		require.Len(t, prepared, 3)
+		require.EqualValues(t, 31, prepared[2].GetIndexInfos()[0].GetBuildID())
+		require.EqualValues(t, 55, prepared[2].GetTransformStartAfterTimetick())
+		require.True(t, opened[0].Native() == nil)
+		require.Len(t, opened[1].DeltaPaths(), 1)
+
+		f.drop(t, three)
+		f.drop(t, two)
+		f.drop(t, one)
+		f.manager.Close()
+		require.True(t, opened[1].Native() == nil)
 	})
 }

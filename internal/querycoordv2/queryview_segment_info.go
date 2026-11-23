@@ -66,7 +66,7 @@ func (s *Server) queryViewCollectionSegmentInfo(ctx context.Context, collectionI
 		var err error
 		if len(ids) > 0 {
 			// MixCoord dispatches this directly to its local DataCoord metadata.
-			metadata, _, err = s.mixCoord.GetQueryViewSegmentLoadInfos(ctx, collectionID, ids)
+			metadata, _, err = s.mixCoord.GetQueryViewSegmentLoadInfos(ctx, collectionID, ids, false)
 		}
 		current, currentVersion := store.GetConfigWithVersion(collectionID)
 		// Stats are immutable publications. Compare scoped pointers, not the

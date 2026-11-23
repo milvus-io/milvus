@@ -152,24 +152,21 @@ func GetDeltaLogPathsFromManifest(
 	if err != nil {
 		return nil, err
 	}
-	if len(deltaLogs) == 0 {
-		return nil, nil
-	}
+	return deltaLogPaths(deltaLogs), nil
+}
+
+func deltaLogPaths(deltaLogs []*datapb.FieldBinlog) []string {
 	var paths []string
 	for _, deltaLog := range deltaLogs {
 		for _, binlog := range deltaLog.GetBinlogs() {
-			// Metadata integrity is checked by the decoder above; this view
-			// only excludes valid zero-entry markers that have no file to read.
-			if binlog.GetEntriesNum() == 0 {
-				continue
+			// The decoder has already validated the metadata. Zero-entry
+			// markers carry replay metadata but have no file to load.
+			if binlog.GetEntriesNum() > 0 {
+				paths = append(paths, binlog.GetLogPath())
 			}
-			paths = append(paths, binlog.GetLogPath())
 		}
 	}
-	if len(paths) == 0 {
-		return nil, nil
-	}
-	return paths, nil
+	return paths
 }
 
 // validateDeltaLogMetadata distinguishes a legitimate zero-entry marker from

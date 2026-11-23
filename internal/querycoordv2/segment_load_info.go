@@ -19,7 +19,7 @@ func (s *Server) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.G
 		resp.Status = merr.Status(merr.WrapErrServiceNotReadyMsg("segment metadata provider is not initialized"))
 		return resp, nil
 	}
-	infos, indexes, err := s.mixCoord.GetQueryViewSegmentLoadInfos(ctx, req.GetCollectionID(), req.GetSegmentIDs())
+	infos, indexes, err := s.mixCoord.GetQueryViewSegmentLoadInfos(ctx, req.GetCollectionID(), req.GetSegmentIDs(), req.GetResolveManifestIndexesLocally())
 	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil

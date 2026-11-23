@@ -139,7 +139,7 @@ func TestSeparateLoadInfoV2LegacyStatsRoot(t *testing.T) {
 						107: {FieldID: 107, BuildID: 11, Version: 1, JsonKeyStatsDataFormat: 3, Files: []string{"meta.json", "shared_key_index/0", "shredding_data/0/0"}},
 					},
 				}
-				_, _, textStats, _, jsonStats, textBases, jsonBases := separateLoadInfoV2(loadInfo, &schemapb.CollectionSchema{})
+				_, _, textStats, _, jsonStats, textBases, jsonBases := separateLoadInfoV2(context.Background(), loadInfo, &schemapb.CollectionSchema{})
 				assert.Equal(t, backend.root+"/text_log/10/1/2/3/4/106", textBases[106])
 				assert.Equal(t, backend.root+"/json_stats/3/11/1/2/3/4/107", jsonBases[107])
 				assert.Equal(t, loadInfo.TextStatsLogs, textStats)
@@ -3123,7 +3123,7 @@ func TestSeparateLoadInfoV2_ExternalFieldIndexNotSkipped(t *testing.T) {
 		BinlogPaths: []*datapb.FieldBinlog{},
 	}
 
-	indexedFieldInfos, fieldBinlogs, _, _, _, _, _ := separateLoadInfoV2(loadInfo, schema)
+	indexedFieldInfos, fieldBinlogs, _, _, _, _, _ := separateLoadInfoV2(context.Background(), loadInfo, schema)
 
 	// External field indexes should be included (not skipped)
 	assert.Len(t, indexedFieldInfos, 0, "no binlog paths means no indexed field infos via binlog matching")
@@ -3167,7 +3167,7 @@ func TestSeparateLoadInfoV2_MixedExternalAndNormalFields(t *testing.T) {
 		},
 	}
 
-	indexedFieldInfos, fieldBinlogs, _, _, _, _, _ := separateLoadInfoV2(loadInfo, schema)
+	indexedFieldInfos, fieldBinlogs, _, _, _, _, _ := separateLoadInfoV2(context.Background(), loadInfo, schema)
 
 	// Normal field 103 has binlog + index → indexed
 	assert.Len(t, indexedFieldInfos, 1)

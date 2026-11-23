@@ -50,17 +50,17 @@ func TestReadCompletedIndexesUsesSelectedManifest(t *testing.T) {
 		return []packed.ManifestIndexInfo{entry}, nil
 	}).Build()
 	defer read.UnPatch()
-	records, err := mt.ReadCompletedIndexes(t.Context(), segment)
+	records, err := mt.ResolveSegmentIndexes(t.Context(), segment, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, []string{"index"}, records[4].IndexFileKeys)
 	records[4].IndexFileKeys[0] = "changed"
 	require.True(t, segment.IndexSummaries[0].GetHasArtifact())
 	entry.BuildID = 6
-	_, err = mt.ReadCompletedIndexes(t.Context(), segment)
+	_, err = mt.ResolveSegmentIndexes(t.Context(), segment, nil, nil)
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 	read.UnPatch()
 	failed := mockey.Mock(packed.GetManifestIndexInfosAsync).Return(nil, merr.ErrServiceUnavailable).Build()
 	defer failed.UnPatch()
-	_, err = mt.ReadCompletedIndexes(t.Context(), segment)
+	_, err = mt.ResolveSegmentIndexes(t.Context(), segment, nil, nil)
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 }

@@ -3,6 +3,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"github.com/samber/lo"
 
@@ -10,17 +11,16 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func (s *Server) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
+func (s *Server) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64, resolveManifestIndexesLocally bool) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return nil, nil, err
 	}
@@ -31,37 +31,57 @@ func (s *Server) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID 
 		return nil, nil, nil
 	}
 
+	localIndexes := false
+	if resolveManifestIndexesLocally && s.indexMeta.UsesSegmentSummaries() {
+		collection := s.meta.GetCollection(collectionID)
+		localIndexes = collection != nil && collection.Schema != nil && !typeutil.IsExternalCollection(collection.Schema)
+	}
+
 	indexes, segmentIndexes := s.indexMeta.GetQueryViewIndexSnapshot(collectionID, segmentIDs)
 	indexInfos := packQueryViewCollectionIndexInfos(indexes)
 	results := make([]*querypb.QueryViewSegmentLoadInfoResult, 0, len(segmentIDs))
 	seen := make(map[int64]struct{}, len(segmentIDs))
+	liveIndexes := lo.SliceToMap(indexInfos, func(index *indexpb.IndexInfo) (int64, *indexpb.IndexInfo) {
+		return index.GetIndexID(), index
+	})
 	for _, segmentID := range segmentIDs {
 		if _, ok := seen[segmentID]; ok {
 			continue
 		}
 		seen[segmentID] = struct{}{}
-		info, err := s.getQueryViewSegmentLoadInfo(ctx, collectionID, segmentID, indexInfos, segmentIndexes[segmentID])
-		results = append(results, &querypb.QueryViewSegmentLoadInfoResult{SegmentID: segmentID, Status: merr.Status(err), LoadInfo: info})
+		info, indexes, err := s.getQueryViewSegmentLoadInfo(ctx, collectionID, segmentID, liveIndexes, segmentIndexes[segmentID], localIndexes)
+		results = append(results, &querypb.QueryViewSegmentLoadInfoResult{
+			SegmentID: segmentID, Status: merr.Status(err), LoadInfo: info, ManifestIndexes: indexes,
+		})
 	}
 	return results, indexInfos, nil
 }
 
-func (s *Server) getQueryViewSegmentLoadInfo(ctx context.Context, collectionID, segmentID int64, indexInfos []*indexpb.IndexInfo, segmentIndexes map[int64]*model.SegmentIndex) (*querypb.SegmentLoadInfo, error) {
+func (s *Server) getQueryViewSegmentLoadInfo(ctx context.Context, collectionID, segmentID int64, indexInfos map[int64]*indexpb.IndexInfo, segmentIndexes map[int64]*model.SegmentIndex, localIndexes bool) (*querypb.SegmentLoadInfo, *querypb.QueryViewManifestIndexes, error) {
 	segment := s.meta.GetSegment(ctx, segmentID)
 	if segment == nil {
-		return nil, merr.WrapErrSegmentNotFound(segmentID, "missing segment info for query view")
+		return nil, nil, merr.WrapErrSegmentNotFound(segmentID, "missing segment info for query view")
 	}
 	if segment.GetCollectionID() != collectionID {
-		return nil, merr.WrapErrSegmentNotFound(segmentID, fmt.Sprintf("segment does not belong to collection %d", collectionID))
+		return nil, nil, merr.WrapErrSegmentNotFound(segmentID, fmt.Sprintf("segment does not belong to collection %d", collectionID))
 	}
 	if segment.GetTransformStartAfterTimetick() == 0 {
-		return nil, merr.WrapErrServiceNotReadyMsg("segment %d has no certified transform replay cursor", segmentID)
+		return nil, nil, merr.WrapErrServiceNotReadyMsg("segment %d has no certified transform replay cursor", segmentID)
 	}
+	var manifestIndexes *querypb.QueryViewManifestIndexes
 	if s.indexMeta.UsesSegmentSummaries() {
 		var err error
-		segmentIndexes, err = s.meta.ReadCompletedIndexes(ctx, segment.SegmentInfo)
+		if localIndexes && segment.GetStorageVersion() == storage.StorageV3 &&
+			segment.GetLevel() != datapb.SegmentLevel_L0 && segment.GetManifestPath() != "" {
+			manifestIndexes, err = s.packQueryViewManifestIndexes(segment.SegmentInfo, indexInfos, segmentIndexes)
+			segmentIndexes = nil
+		} else {
+			segmentIndexes, err = s.meta.ResolveSegmentIndexes(ctx, segment.SegmentInfo, segmentIndexes, func(indexID int64) bool {
+				return indexInfos[indexID] != nil
+			})
+		}
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	cloned := segment.Clone()
@@ -69,12 +89,42 @@ func (s *Server) getQueryViewSegmentLoadInfo(ctx context.Context, collectionID, 
 	// Expand compressed log IDs on the snapshot, preserving the compact
 	// representation in the metadata cache.
 	if err := binlog.DecompressBinLogs(cloned.SegmentInfo); err != nil {
-		return nil, merr.Wrapf(err, "expand query view binlogs for segment %d", segmentID)
+		return nil, nil, merr.Wrapf(err, "expand query view binlogs for segment %d", segmentID)
 	}
-	return s.packQueryViewSegmentLoadInfo(cloned.SegmentInfo, indexInfos, segmentIndexes)
+	info, err := s.packQueryViewSegmentLoadInfo(cloned.SegmentInfo, indexInfos, segmentIndexes)
+	return info, manifestIndexes, err
 }
 
-func (s *Server) packQueryViewSegmentLoadInfo(segment *datapb.SegmentInfo, indexInfos []*indexpb.IndexInfo, segmentIndexes map[int64]*model.SegmentIndex) (*querypb.SegmentLoadInfo, error) {
+// packQueryViewManifestIndexes uses the same pinned inventory and task
+// precedence as the full response. Only retained task rows need file paths.
+func (s *Server) packQueryViewManifestIndexes(segment *datapb.SegmentInfo, definitions map[int64]*indexpb.IndexInfo, tasks map[int64]*model.SegmentIndex) (*querypb.QueryViewManifestIndexes, error) {
+	live := func(id int64) bool { return definitions[id] != nil }
+	records, _, err := meta.MergeSegmentIndexSummaries(segment, maps.Clone(tasks), live)
+	if err != nil {
+		return nil, err
+	}
+	result := &querypb.QueryViewManifestIndexes{}
+	for _, summary := range segment.GetIndexSummaries() {
+		if live(summary.GetIndexId()) {
+			result.Summaries = append(result.Summaries, summary)
+		}
+	}
+	for id, task := range tasks {
+		definition := definitions[id]
+		if definition == nil || task.IndexState != commonpb.IndexState_Finished || records[id] != task {
+			continue
+		}
+		artifact := indexFilePathInfo(segment.GetID(), task, definition, nil)
+		artifact.IndexFilePaths, err = meta.SegmentIndexFilePaths(s.meta.ChunkManager.RootPath(), task, segment)
+		if err != nil {
+			return nil, merr.Wrap(err, "resolve query view index files")
+		}
+		result.FinishedTasks = append(result.FinishedTasks, artifact)
+	}
+	return result, nil
+}
+
+func (s *Server) packQueryViewSegmentLoadInfo(segment *datapb.SegmentInfo, indexInfos map[int64]*indexpb.IndexInfo, segmentIndexes map[int64]*model.SegmentIndex) (*querypb.SegmentLoadInfo, error) {
 	fieldIndexes, err := s.packQueryViewFieldIndexInfos(segment, segmentIndexes, indexInfos)
 	if err != nil {
 		return nil, err
@@ -112,13 +162,10 @@ func (s *Server) packQueryViewSegmentLoadInfo(segment *datapb.SegmentInfo, index
 	return loadInfo, nil
 }
 
-func (s *Server) packQueryViewFieldIndexInfos(segment *datapb.SegmentInfo, segmentIndexes map[int64]*model.SegmentIndex, collectionIndexes []*indexpb.IndexInfo) ([]*querypb.FieldIndexInfo, error) {
+func (s *Server) packQueryViewFieldIndexInfos(segment *datapb.SegmentInfo, segmentIndexes map[int64]*model.SegmentIndex, collectionIndexByID map[int64]*indexpb.IndexInfo) ([]*querypb.FieldIndexInfo, error) {
 	if len(segmentIndexes) == 0 {
 		return nil, nil
 	}
-	collectionIndexByID := lo.SliceToMap(collectionIndexes, func(index *indexpb.IndexInfo) (int64, *indexpb.IndexInfo) {
-		return index.GetIndexID(), index
-	})
 	infos := make([]*querypb.FieldIndexInfo, 0, len(segmentIndexes))
 	for _, segmentIndex := range segmentIndexes {
 		if segmentIndex.IndexState != commonpb.IndexState_Finished {
@@ -128,48 +175,13 @@ func (s *Server) packQueryViewFieldIndexInfos(segment *datapb.SegmentInfo, segme
 		if !ok {
 			continue
 		}
-		indexParams := common.CloneKeyValuePairs(collectionIndex.GetIndexParams())
-		indexParams = append(indexParams, common.CloneKeyValuePairs(collectionIndex.GetTypeParams())...)
-		for _, param := range indexParams {
-			if param.Key == common.IndexTypeKey && segmentIndex.IndexType != "" && segmentIndex.IndexType != param.Value {
-				param.Value = segmentIndex.IndexType
-				break
-			}
-		}
-		indexName := collectionIndex.GetIndexName()
-		if segmentIndex.IndexType != "" && segmentIndex.IndexType != indexName {
-			indexName = segmentIndex.IndexType
-		}
-		params := funcutil.KeyValuePair2Map(indexParams)
-		for _, kv := range collectionIndex.GetUserIndexParams() {
-			if indexparams.IsConfigableIndexParam(kv.GetKey()) {
-				params[kv.GetKey()] = kv.GetValue()
-			}
-		}
-		indexParams = funcutil.Map2KeyValuePair(params)
-		indexParams = append(indexParams, &commonpb.KeyValuePair{
-			Key:   common.LoadPriorityKey,
-			Value: commonpb.LoadPriority_HIGH.String(),
-		})
+		artifact := indexFilePathInfo(segment.GetID(), segmentIndex, collectionIndex, nil)
 		filePaths, err := meta.SegmentIndexFilePaths(s.meta.ChunkManager.RootPath(), segmentIndex, segment)
 		if err != nil {
 			return nil, merr.Wrap(err, "resolve query view index files")
 		}
-		infos = append(infos, &querypb.FieldIndexInfo{
-			FieldID:                   collectionIndex.GetFieldID(),
-			EnableIndex:               true,
-			IndexName:                 indexName,
-			IndexID:                   segmentIndex.IndexID,
-			BuildID:                   segmentIndex.BuildID,
-			IndexParams:               indexParams,
-			IndexFilePaths:            filePaths,
-			IndexSize:                 int64(segmentIndex.IndexMemSize),
-			IndexVersion:              segmentIndex.IndexVersion,
-			NumRows:                   segmentIndex.NumRows,
-			CurrentIndexVersion:       segmentIndex.CurrentIndexVersion,
-			CurrentScalarIndexVersion: segmentIndex.CurrentScalarIndexVersion,
-			IndexStorePathVersion:     segmentIndex.IndexStorePathVersion,
-		})
+		artifact.IndexFilePaths = filePaths
+		infos = append(infos, segmentutil.PackQueryViewFieldIndexInfo(collectionIndex, artifact))
 	}
 	return infos, nil
 }

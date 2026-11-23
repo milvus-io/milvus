@@ -24,12 +24,16 @@ import "C"
 
 import (
 	"io/fs"
+	"path"
 	"sort"
 	"strings"
 	"unsafe"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 )
 
 // ManifestIndexDir is the manifest-relative directory index artifact paths are
@@ -78,6 +82,69 @@ type ManifestIndexInfo struct {
 	IndexStorePathVersion     indexpb.IndexStorePathVersion
 	IndexFileKeys             []string
 	Properties                map[string]string
+}
+
+// ManifestIndexFilePathInfo projects one manifest index entry into the load
+// metadata QueryNode consumes. It returns false for an entry that cannot
+// produce a safe file list, which the caller treats as "no manifest artifact".
+func ManifestIndexFilePathInfo(segmentID int64, manifestIndex ManifestIndexInfo) (*indexpb.IndexFilePathInfo, bool) {
+	if manifestIndex.Path == "" || manifestIndex.IndexName == "" || manifestIndex.IndexType == "" ||
+		manifestIndex.IndexStorePathVersion < indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED ||
+		manifestIndex.NumRows < 0 || manifestIndex.SerializedSize < 0 || manifestIndex.MemSize < 0 ||
+		len(manifestIndex.IndexFileKeys) == 0 {
+		return nil, false
+	}
+
+	filePaths := make([]string, 0, len(manifestIndex.IndexFileKeys))
+	for _, fileKey := range manifestIndex.IndexFileKeys {
+		// Index file keys are plain file names under Path. Reject anything that
+		// could escape the artifact directory of a manifest we did not write.
+		if fileKey == "" || path.IsAbs(fileKey) || path.Base(fileKey) != fileKey || fileKey == "." || fileKey == ".." {
+			return nil, false
+		}
+		if metautil.IsSegmentRooted(manifestIndex.IndexStorePathVersion) {
+			filePaths = append(filePaths, strings.TrimRight(manifestIndex.Path, "/")+"/"+fileKey)
+		} else {
+			filePaths = append(filePaths, path.Join(manifestIndex.Path, fileKey))
+		}
+	}
+
+	return &indexpb.IndexFilePathInfo{
+		SegmentID:                 segmentID,
+		FieldID:                   manifestIndex.FieldID,
+		IndexID:                   manifestIndex.IndexID,
+		BuildID:                   manifestIndex.BuildID,
+		IndexName:                 manifestIndex.IndexName,
+		IndexType:                 manifestIndex.IndexType,
+		IndexParams:               []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: manifestIndex.IndexType}},
+		IndexFilePaths:            filePaths,
+		SerializedSize:            uint64(manifestIndex.SerializedSize),
+		MemSize:                   uint64(manifestIndex.MemSize),
+		IndexVersion:              manifestIndex.IndexVersion,
+		NumRows:                   manifestIndex.NumRows,
+		CurrentIndexVersion:       manifestIndex.CurrentIndexVersion,
+		CurrentScalarIndexVersion: manifestIndex.CurrentScalarIndexVersion,
+		IndexStorePathVersion:     manifestIndex.IndexStorePathVersion,
+	}, true
+}
+
+// ManifestIndexFilePathInfoForSegment validates resolved reader paths against the
+// owning segment and storage root. Writers use ManifestIndexFilePathInfo for
+// staged relative paths, before milvus-storage resolves them.
+func ManifestIndexFilePathInfoForSegment(rootPath string, manifestPath string, collectionID, partitionID, segmentID int64,
+	entry ManifestIndexInfo,
+) (*indexpb.IndexFilePathInfo, bool) {
+	expected := metautil.NewIndexPathBuilder(rootPath, entry.IndexStorePathVersion,
+		collectionID, partitionID, segmentID,
+		entry.BuildID, entry.IndexVersion).WithManifestPath(manifestPath).BuildPrefix()
+	if metautil.IsSegmentRooted(entry.IndexStorePathVersion) {
+		if entry.Path != expected {
+			return nil, false
+		}
+	} else if path.Clean(entry.Path) != expected {
+		return nil, false
+	}
+	return ManifestIndexFilePathInfo(segmentID, entry)
 }
 
 // DropIndexEntry removes one index's metadata from a manifest revision.

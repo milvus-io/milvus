@@ -18,8 +18,11 @@ package meta
 
 import (
 	"context"
+	"slices"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -64,6 +67,65 @@ func (m *Meta) RetireIndexSummaryLocked(ctx context.Context, segmentID, buildID 
 	}()
 	if err == nil && observe != nil {
 		observe()
+	}
+	return err
+}
+
+// RetireDroppedSegmentIndexSummariesLocked removes the readiness inventory in one
+// catalog update. The caller holds the segment manifest lock; the manifest and
+// task rows remain available to retry file cleanup.
+func (m *Meta) RetireDroppedSegmentIndexSummariesLocked(ctx context.Context, segmentID int64) error {
+	segment := m.Segments.GetSegment(segmentID)
+	if segment == nil || len(segment.GetIndexSummaries()) == 0 {
+		return nil
+	}
+	ids := make([]int64, 0, len(segment.GetIndexSummaries()))
+	for _, summary := range segment.GetIndexSummaries() {
+		ids = append(ids, summary.GetBuildId())
+	}
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
+	m.IndexCatalog.LockBuildIDs(ids)
+	defer m.IndexCatalog.UnlockBuildIDs(ids)
+
+	retired := make(map[int64]*StagedSegmentIndexMutation, len(ids))
+	for _, id := range ids {
+		staged, err := m.IndexCatalog.StageSegmentIndexMutation(SegmentIndexMutation{
+			Type: SegmentIndexRemove, SegmentID: segmentID, BuildID: id,
+		})
+		if err != nil {
+			return err
+		}
+		if staged.Summary != nil && staged.Record == nil {
+			retired[id] = staged
+		}
+	}
+	if len(retired) == 0 {
+		return nil
+	}
+
+	err := func() error {
+		defer m.LockSegments(segmentID)()
+		current := m.Segments.GetSegment(segmentID)
+		if current == nil || current.GetState() != commonpb.SegmentState_Dropped {
+			return merr.WrapErrServiceNotReadyMsg("segment %d is no longer dropped during index retirement", segmentID)
+		}
+		updated := current.Clone()
+		updated.IndexSummaries = slices.DeleteFunc(updated.IndexSummaries, func(summary *datapb.SegmentIndexSummary) bool {
+			_, remove := retired[summary.GetBuildId()]
+			return remove
+		})
+		if err := m.Catalog.Update(ctx, metastore.UpdateSegment(updated.SegmentInfo)); err != nil {
+			return merr.Wrap(err, "retire dropped segment index summaries")
+		}
+		m.Segments.SetSegment(segmentID, updated)
+		for _, staged := range retired {
+			staged.Install()
+		}
+		return nil
+	}()
+	if err == nil {
+		m.IndexCatalog.PublishStoredIndexSizes()
 	}
 	return err
 }

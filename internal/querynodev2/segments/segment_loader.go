@@ -703,7 +703,7 @@ func (loader *segmentLoader) LoadBloomFilterSetWithSchema(ctx context.Context, s
 	// Calculate total memory size needed for bloom filters (PK stats)
 	var totalMemorySize int64
 	for _, info := range infos {
-		memSize, _ := packed.NewStatsResolverFromLoadInfo(info).BloomFilterMemorySize(pkFieldID)
+		memSize, _ := packed.NewStatsResolverFromLoadInfo(info).WithLoadManifest(ctx).BloomFilterMemorySize(pkFieldID)
 		totalMemorySize += memSize
 	}
 
@@ -738,7 +738,7 @@ func (loader *segmentLoader) LoadBloomFilterSetWithSchema(ctx context.Context, s
 		bfs := bfSets[idx]
 
 		mlog.Debug(ctx, "loading bloom filter for remote...")
-		pkStatsBinlogs, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BloomFilterPaths(pkFieldID)
+		pkStatsBinlogs, err := packed.NewStatsResolverFromLoadInfo(loadInfo).WithLoadManifest(ctx).BloomFilterPaths(pkFieldID)
 		if err != nil {
 			return err
 		}
@@ -823,7 +823,7 @@ func detectVirtualPKCollisions(segmentID int64, infos []*querypb.SegmentLoadInfo
 	return collisions
 }
 
-func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) (
+func separateLoadInfoV2(ctx context.Context, loadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) (
 	map[int64]*IndexedFieldInfo, // indexed info
 	[]*datapb.FieldBinlog, // fields info
 	map[int64]*datapb.TextIndexStats, // text indexed info
@@ -947,7 +947,7 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 		}
 	}
 
-	statsResult := packed.NewStatsResolverFromLoadInfo(loadInfo).TextAndJSONIndexStatsWithBasePaths()
+	statsResult := packed.NewStatsResolverFromLoadInfo(loadInfo).WithLoadManifest(ctx).TextAndJSONIndexStatsWithBasePaths()
 	textIndexedInfo := statsResult.TextIndexStats
 	jsonKeyIndexInfo := statsResult.JSONKeyStats
 	textBasePaths := statsResult.TextBasePaths
@@ -1022,7 +1022,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	tr := timerecord.NewTimeRecorder("segmentLoader.loadSealedSegment")
 	if mlog.LevelEnabled(mlog.DebugLevel) {
 		collection := segment.GetCollection()
-		indexedFieldInfos, _, textIndexes, unindexedTextFields, jsonKeyStats, _, _ := separateLoadInfoV2(loadInfo, collection.Schema())
+		indexedFieldInfos, _, textIndexes, unindexedTextFields, jsonKeyStats, _, _ := separateLoadInfoV2(ctx, loadInfo, collection.Schema())
 
 		mlog.Debug(ctx, "Start loading fields...",
 			mlog.Int("indexedFields count", len(indexedFieldInfos)),
@@ -1420,9 +1420,15 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 			}
 		} else {
 			// V3: delta data lives in manifest.
-			paths, err := packed.GetDeltaLogPathsFromManifest(manifestPath, createStorageConfig(), common.TalonStageManifest)
-			if err != nil {
-				return err
+			var paths []string
+			if manifest := packed.LoadManifestFromContext(ctx, manifestPath); manifest != nil {
+				paths = manifest.DeltaPaths()
+			} else {
+				var err error
+				paths, err = packed.GetDeltaLogPathsFromManifest(manifestPath, createStorageConfig(), common.TalonStageManifest)
+				if err != nil {
+					return err
+				}
 			}
 			if err := readPaths(paths,
 				storage.WithStorageConfig(createStorageConfig()),

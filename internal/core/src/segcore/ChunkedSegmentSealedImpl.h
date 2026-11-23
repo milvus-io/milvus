@@ -319,10 +319,20 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
            SealedFieldLayoutPtr fields);
 
     void
+    Reopen(milvus::OpContext* op_ctx,
+           const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
+           SealedFieldLayoutPtr fields,
+           std::shared_ptr<milvus_storage::api::ColumnGroups> groups);
+
+    void
     LazyCheckSchema(SchemaPtr sch, milvus::OpContext* op_ctx) override;
 
     void
     SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info) override;
+
+    void
+    SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info,
+                std::shared_ptr<milvus_storage::api::ColumnGroups> groups);
 
     void
     SetCommitTimestamp(uint64_t ts) override;

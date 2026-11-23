@@ -49,8 +49,15 @@ func (gc *GarbageCollector) removeIndexRecordLocked(ctx context.Context, record 
 	return gc.Option.IndexMeta.RemoveSegmentIndex(ctx, record.BuildID)
 }
 
+// Each orphan traversal keeps only the most recently read manifest revision.
+type indexManifestCache struct {
+	path    string
+	byBuild map[int64][]packed.ManifestIndexInfo
+	failed  bool
+}
+
 // referencedSummaryBuild fails closed on every manifest read/validation error.
-func (gc *GarbageCollector) referencedSummaryBuild(ctx context.Context, segment *meta.SegmentInfo, buildID int64) (map[string]struct{}, bool) {
+func (gc *GarbageCollector) referencedSummaryBuild(ctx context.Context, cache *indexManifestCache, segment *meta.SegmentInfo, buildID int64) (map[string]struct{}, bool) {
 	if segment == nil {
 		return nil, true
 	}
@@ -60,15 +67,20 @@ func (gc *GarbageCollector) referencedSummaryBuild(ctx context.Context, segment 
 	if !segment.GetManifestHasIndex() {
 		return nil, true
 	}
-	entries, err := gc.Meta.ReadManifestIndexesWithIO(ctx, nil, segment.GetManifestPath(), meta.CreateStorageConfig())
-	if err != nil {
+	if cache.byBuild == nil || cache.path != segment.GetManifestPath() {
+		path := segment.GetManifestPath()
+		entries, err := gc.Meta.ReadManifestIndexesWithIO(ctx, nil, path, meta.CreateStorageConfig())
+		*cache = indexManifestCache{path: path, byBuild: make(map[int64][]packed.ManifestIndexInfo), failed: err != nil}
+		for _, entry := range entries {
+			cache.byBuild[entry.BuildID] = append(cache.byBuild[entry.BuildID], entry)
+		}
+	}
+	if cache.failed {
 		return nil, false
 	}
+
 	var files map[string]struct{}
-	for _, entry := range entries {
-		if entry.BuildID != buildID {
-			continue
-		}
+	for _, entry := range cache.byBuild[buildID] {
 		info, ok := meta.ManifestIndexFilePathInfoForSegment(gc.Option.Cli.RootPath(), segment.SegmentInfo, entry)
 		if !ok {
 			return nil, false
@@ -84,4 +96,14 @@ func (gc *GarbageCollector) referencedSummaryBuild(ctx context.Context, segment 
 		return files, false
 	}
 	return nil, true
+}
+
+// guardIndexGC spans the final pin check and object deletion, including deletes
+// dispatched after the scan has advanced. A pending snapshot owns its selected
+// revisions until its durable pins are installed.
+func (gc *GarbageCollector) guardIndexGC(collectionID int64) (func(), bool) {
+	if gc.Option.SnapshotMeta == nil || !gc.Option.IndexMeta.UsesSegmentSummaries() {
+		return func() {}, true
+	}
+	return gc.Option.SnapshotMeta.TryGuardIndexGC(collectionID)
 }

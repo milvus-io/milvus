@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/metastore"
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -107,7 +108,7 @@ func TestSummaryGCKeepsPublishedArtifactAcrossRestart(t *testing.T) {
 	require.False(t, recoveredIndex.HasBuildInfo(5))
 	segment := recovered.GetSegment(ctx, 3)
 	require.Equal(t, pinned, segment.GetManifestPath())
-	indexes, err := recovered.ReadCompletedIndexes(ctx, segment.SegmentInfo)
+	indexes, err := recovered.ResolveSegmentIndexes(ctx, segment.SegmentInfo, nil, nil)
 	require.NoError(t, err)
 	require.Contains(t, indexes, int64(4))
 	require.Equal(t, []string{"index.bin"}, indexes[4].IndexFileKeys)
@@ -142,6 +143,12 @@ func TestSummaryGCProtectsManifestWithoutResidentBuild(t *testing.T) {
 	require.False(t, reclaim(path.Join(entry.Path, "index"), 1, 3, 5))
 	require.True(t, reclaim(path.Join(entry.Path, "obsolete"), 1, 3, 5))
 	require.True(t, reclaim(path.Join(base, "_index/6/1/orphan"), 1, 3, 6))
+	require.Equal(t, 1, read.Times(), "adjacent builds share the immutable manifest read")
+	latest := mt.GetSegment(ctx, 3).Clone()
+	latest.ManifestPath = packed.MarshalManifestPath(base, 2)
+	mt.MetaStore.PutSegment(latest.SegmentInfo)
+	require.False(t, reclaim(path.Join(entry.Path, "index"), 1, 3, 5))
+	require.Equal(t, 2, read.Times(), "a new revision requires a fresh read")
 	require.False(t, dm.IndexMeta.HasBuildInfo(5))
 	require.True(t, reclaim(path.Join(root, "insert_log/1/2/99/_index/100/1/orphan"), 1, 99, 100))
 	read.UnPatch()
@@ -259,4 +266,109 @@ func TestSummaryGCLoadsFileDetailsExplicitly(t *testing.T) {
 			require.False(t, dm.IndexMeta.HasBuildInfo(5))
 		})
 	}
+}
+
+func TestSummaryGCRechecksPinAfterTaskLookup(t *testing.T) {
+	mt, dm, err := newMemoryMetaWithSnapshot(t)
+	require.NoError(t, err)
+	ctx := t.Context()
+	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3,
+		ManifestPath: packed.MarshalManifestPath("files/insert_log/1/2/3", 1), ManifestHasIndex: true,
+	})))
+	require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
+	lookup := mockey.Mock((*index.IndexMeta).CheckCleanSegmentIndex).To(func(_ *index.IndexMeta, buildID int64) (bool, *model.SegmentIndex) {
+		dm.SnapshotMeta.RegisterSnapshotProtection(&datapb.SnapshotInfo{Id: 42, CollectionId: 1}, []int64{3}, []int64{buildID})
+		mt.MetaStore.PutSegment(&datapb.SegmentInfo{
+			ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3,
+			ManifestPath: packed.MarshalManifestPath("files/insert_log/1/2/3", 2),
+		})
+		return true, nil
+	}).Build()
+	defer lookup.UnPatch()
+
+	gc := &GarbageCollector{Meta: mt, Option: GcTestDomainOption(dm, GcOption{})}
+	reclaim := gc.newIndexFileReclaimChecker(ctx)
+	require.False(t, reclaim("files/insert_log/1/2/3/_index/5/1/index", 1, 3, 5))
+	require.False(t, reclaim("files/insert_log/1/2/3/_index/5/1/index", 1, 3, 5))
+	require.Equal(t, 1, lookup.Times())
+}
+
+func TestSummaryGCRetiresDroppedIndexReadinessBeforeFileRemoval(t *testing.T) {
+	mt, dm, err := newMemoryMetaWithSnapshot(t)
+	require.NoError(t, err)
+	ctx := t.Context()
+	im := dm.IndexMeta
+	for i := int64(10); i <= 11; i++ {
+		require.NoError(t, im.CreateIndex(ctx, &model.Index{CollectionID: 1, IndexID: i, FieldID: i + 90}))
+	}
+	manifest := packed.MarshalManifestPath(path.Join(t.TempDir(), "insert_log/1/2/3"), 1)
+	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Dropped, StorageVersion: storage.StorageV3,
+		ManifestPath: manifest, ManifestHasIndex: true,
+		IndexSummaries: []*datapb.SegmentIndexSummary{
+			{IndexId: 10, BuildId: 20, FieldId: 100, HasArtifact: true},
+			{IndexId: 11, BuildId: 21, FieldId: 101, HasArtifact: true},
+		},
+	})))
+	require.NoError(t, im.UseSegmentSummaries(mt.MetaStore))
+	require.Equal(t, []int64{3}, im.GetIndexedSegments(1, []int64{3}, []int64{100, 101}))
+	discover := mockey.Mock((*GarbageCollector).GetDroppedSegmentIndexFiles).To(
+		func(_ *GarbageCollector, _ context.Context, _ *packed.ManifestIOContext, segmentID int64) ([]*model.SegmentIndexSummary, map[string]struct{}, GcBlockReason) {
+			return im.GetAllSegmentIndexSummaries(segmentID), map[string]struct{}{"index": {}}, GcNotBlocked
+		}).Build()
+	defer discover.UnPatch()
+	remove := mockey.Mock((*GarbageCollector).RemoveDroppedSegmentFiles).To(
+		func(_ *GarbageCollector, _ context.Context, _ *meta.SegmentInfo, files map[string]struct{}) error {
+			require.Contains(t, files, "index")
+			require.Empty(t, im.GetIndexedSegments(1, []int64{3}, []int64{100, 101}))
+			return merr.ErrServiceUnavailable
+		}).Build()
+	defer remove.UnPatch()
+	gc := &GarbageCollector{Meta: mt, Option: GcTestDomainOption(dm, GcOption{})}
+	io := NewGCManifestReadIO(t)
+	failedWrite := mockey.Mock((*kvdatacoord.Catalog).Update).To(
+		func(_ *kvdatacoord.Catalog, _ context.Context, _ ...metastore.UpdateAction) error {
+			return merr.ErrServiceUnavailable
+		}).Build()
+	gc.RecycleDroppedSegment(ctx, io, 3)
+	failedWrite.UnPatch()
+	require.Zero(t, remove.Times())
+	require.Len(t, mt.GetSegment(ctx, 3).GetIndexSummaries(), 2)
+
+	gc.RecycleDroppedSegment(ctx, io, 3)
+	require.Empty(t, mt.GetSegment(ctx, 3).GetIndexSummaries())
+	persisted, err := mt.Catalog.ListSegments(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, persisted, 1)
+	require.Empty(t, persisted[0].GetIndexSummaries())
+	require.Equal(t, manifest, persisted[0].GetManifestPath())
+	gc.RecycleDroppedSegment(ctx, io, 3)
+	require.Equal(t, 2, remove.Times(), "the retained manifest allows retrying a failed delete")
+}
+
+func TestSummaryGCDeletionGuardRespectsPendingAndCommittedSnapshot(t *testing.T) {
+	_, dm, err := newMemoryMetaWithSnapshot(t)
+	require.NoError(t, err)
+	sm := dm.SnapshotMeta
+	release, ok := sm.TryGuardIndexGC(1)
+	require.True(t, ok)
+	require.False(t, sm.SetSnapshotPending(1), "snapshot selection retries while a delete is in flight")
+	require.False(t, sm.IsCollectionCompactionBlocked(1))
+	release()
+
+	require.True(t, sm.SetSnapshotPending(1))
+	t.Cleanup(func() { sm.ClearSnapshotPending(1) })
+	_, ok = sm.TryGuardIndexGC(1)
+	require.False(t, ok)
+	release, ok = sm.TryGuardIndexGC(2)
+	require.True(t, ok)
+	release()
+
+	sm.RegisterSnapshotProtection(&datapb.SnapshotInfo{Id: 42, CollectionId: 1}, []int64{3}, []int64{5})
+	sm.ClearSnapshotPending(1)
+	release, ok = sm.TryGuardIndexGC(1)
+	require.True(t, ok)
+	defer release()
+	require.True(t, sm.IsBuildIDGCBlocked(1, 5), "a queued deletion must observe the committed pin")
 }

@@ -443,6 +443,89 @@ func (_c *MockBroker_GetSegmentInfo_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// GetSegmentInfoForResourceEstimation provides a mock function with given fields: ctx, collectionID, segmentIDs
+func (_m *MockBroker) GetSegmentInfoForResourceEstimation(ctx context.Context, collectionID int64, segmentIDs ...int64) ([]*datapb.SegmentInfo, map[int64][]*querypb.FieldIndexInfo, error) {
+	_va := make([]interface{}, len(segmentIDs))
+	for _i := range segmentIDs {
+		_va[_i] = segmentIDs[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, collectionID)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSegmentInfoForResourceEstimation")
+	}
+
+	var r0 []*datapb.SegmentInfo
+	var r1 map[int64][]*querypb.FieldIndexInfo
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, ...int64) ([]*datapb.SegmentInfo, map[int64][]*querypb.FieldIndexInfo, error)); ok {
+		return rf(ctx, collectionID, segmentIDs...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, ...int64) []*datapb.SegmentInfo); ok {
+		r0 = rf(ctx, collectionID, segmentIDs...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*datapb.SegmentInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, ...int64) map[int64][]*querypb.FieldIndexInfo); ok {
+		r1 = rf(ctx, collectionID, segmentIDs...)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(map[int64][]*querypb.FieldIndexInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(2).(func(context.Context, int64, ...int64) error); ok {
+		r2 = rf(ctx, collectionID, segmentIDs...)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// MockBroker_GetSegmentInfoForResourceEstimation_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSegmentInfoForResourceEstimation'
+type MockBroker_GetSegmentInfoForResourceEstimation_Call struct {
+	*mock.Call
+}
+
+// GetSegmentInfoForResourceEstimation is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - segmentIDs ...int64
+func (_e *MockBroker_Expecter) GetSegmentInfoForResourceEstimation(ctx interface{}, collectionID interface{}, segmentIDs ...interface{}) *MockBroker_GetSegmentInfoForResourceEstimation_Call {
+	return &MockBroker_GetSegmentInfoForResourceEstimation_Call{Call: _e.mock.On("GetSegmentInfoForResourceEstimation",
+		append([]interface{}{ctx, collectionID}, segmentIDs...)...)}
+}
+
+func (_c *MockBroker_GetSegmentInfoForResourceEstimation_Call) Run(run func(ctx context.Context, collectionID int64, segmentIDs ...int64)) *MockBroker_GetSegmentInfoForResourceEstimation_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]int64, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(int64)
+			}
+		}
+		run(args[0].(context.Context), args[1].(int64), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockBroker_GetSegmentInfoForResourceEstimation_Call) Return(_a0 []*datapb.SegmentInfo, _a1 map[int64][]*querypb.FieldIndexInfo, _a2 error) *MockBroker_GetSegmentInfoForResourceEstimation_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *MockBroker_GetSegmentInfoForResourceEstimation_Call) RunAndReturn(run func(context.Context, int64, ...int64) ([]*datapb.SegmentInfo, map[int64][]*querypb.FieldIndexInfo, error)) *MockBroker_GetSegmentInfoForResourceEstimation_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListIndexes provides a mock function with given fields: ctx, collectionID
 func (_m *MockBroker) ListIndexes(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, error) {
 	ret := _m.Called(ctx, collectionID)

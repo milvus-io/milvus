@@ -320,10 +320,10 @@ func (i *IndexInspector) createIndexesForSegment(ctx context.Context, segment *m
 	}
 
 	indexes := i.indexMeta.GetIndexesForCollection(segment.CollectionID, "")
-	indexIDToSegIndexes := i.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
+	indexSummaries := i.indexMeta.GetSegmentIndexSummaries(segment.CollectionID, segment.ID)
 
 	for _, index := range indexes {
-		if _, ok := indexIDToSegIndexes[index.IndexID]; ok {
+		if _, ok := indexSummaries[index.IndexID]; ok {
 			continue
 		}
 		collection, ok := i.CanCreateIndexForSegment(ctx, segment, index)
@@ -494,7 +494,7 @@ func (i *IndexInspector) estimateIndexFieldSize(ctx context.Context, coll *meta.
 func (i *IndexInspector) reloadFromMeta() {
 	segments := i.meta.GetAllSegmentsUnsafe()
 	for _, segment := range segments {
-		for _, segIndex := range i.indexMeta.GetSegmentIndexes(segment.GetCollectionID(), segment.ID) {
+		for _, segIndex := range i.indexMeta.GetSegmentIndexTasks(segment.GetCollectionID(), segment.ID) {
 			if segIndex.IsDeleted || (segIndex.IndexState != commonpb.IndexState_Unissued &&
 				segIndex.IndexState != commonpb.IndexState_Retry &&
 				segIndex.IndexState != commonpb.IndexState_InProgress) {
