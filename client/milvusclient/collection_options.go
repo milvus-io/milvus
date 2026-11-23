@@ -243,13 +243,24 @@ type DescribeCollectionOption interface {
 }
 
 type describeCollectionOption struct {
-	name string
+	name   string
+	dbName string
 }
 
 func (opt *describeCollectionOption) Request() *milvuspb.DescribeCollectionRequest {
 	return &milvuspb.DescribeCollectionRequest{
 		CollectionName: opt.name,
+		DbName:         opt.dbName,
 	}
+}
+
+// withDBName pins the describe request to the given database. It is used by
+// the collection cache to fetch the schema for the database recorded in the
+// cache key instead of the connection's current database, which may have
+// changed by the time the RPC is sent.
+func (opt *describeCollectionOption) withDBName(dbName string) *describeCollectionOption {
+	opt.dbName = dbName
+	return opt
 }
 
 // NewDescribeCollectionOption composes a describeCollectionOption with provided collection name.
