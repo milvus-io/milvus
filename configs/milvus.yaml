@@ -453,6 +453,9 @@ rootCoord:
 
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:
+  pkUpdate:
+    enabled: false # Admit new requests only. Accepted updates must remain replayable and readable when disabled. Requires compatible consumers.
+    maxPkCount: 10000 # Submitted PKs before routing, including duplicates. Must be positive; invalid values use 10000. Independent of byte limits.
   # Whether Proxy keeps the legacy row-based size packing before sending messages to StreamingNode.
   # Keep this enabled until chunk writing is enabled and observed on every StreamingNode that can own a pchannel.
   # For migration, enable streaming.splitChunkSN first, then disable proxy.splitChunk. Both parameters support live refresh.
