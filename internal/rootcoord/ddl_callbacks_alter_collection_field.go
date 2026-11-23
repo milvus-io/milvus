@@ -61,8 +61,7 @@ func validateAlterCollectionFieldAnalyzerMutation(schema *schemapb.CollectionSch
 	if !typeutil.IsStringType(field.GetDataType()) {
 		return merr.WrapErrParameterInvalidMsg("can not alter analyzer params for non-string field %s", fieldName)
 	}
-	fieldHelper := typeutil.CreateFieldSchemaHelper(field)
-	if fieldHelper.EnableMatch() ||
+	if typeutil.IsTextMatchEnabled(field) ||
 		typeutil.IsBm25FunctionInputField(schema, field) ||
 		typeutil.IsMinHashFunctionInputField(schema, field) {
 		return merr.WrapErrParameterInvalidMsg(
