@@ -58,16 +58,22 @@ add_custom_target(tantivy_build
         VERBATIM
 )
 
-# Set the installed library path
-set(INSTALLED_LIB_FILE "${TANTIVY_LIB_DIR}/${TANTIVY_NAME}")
+# Only C++ targets link the static library, so keep the linked copy in the
+# build tree instead of ${TANTIVY_LIB_DIR}. That directory is the libdir of the
+# pkg-config files cgo uses, and since Go 1.26.11 cgo rejects any library under
+# it that carries LLVM bitcode (.llvmbc on ELF, __LLVM on Mach-O), which this
+# Rust static library does.
+set(LINKED_LIB_FILE "${CMAKE_CURRENT_BINARY_DIR}/${TANTIVY_NAME}")
+# Earlier builds installed the library into ${TANTIVY_LIB_DIR}; remove it.
+set(LEGACY_INSTALLED_LIB_FILE "${TANTIVY_LIB_DIR}/${TANTIVY_NAME}")
 
-# Install tantivy library and headers to output directory. copy_if_different
-# keeps downstream C++ targets fresh when Cargo has no work to do.
+# Install tantivy headers to output directory. copy_if_different keeps
+# downstream C++ targets fresh when Cargo has no work to do.
 add_custom_target(install_tantivy_target
-        COMMENT "Installing tantivy binding to ${TANTIVY_LIB_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${TANTIVY_LIB_DIR}
+        COMMENT "Installing tantivy binding"
         COMMAND ${CMAKE_COMMAND} -E make_directory ${TANTIVY_INCLUDE_DIR}
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${LIB_FILE} ${TANTIVY_LIB_DIR}/
+        COMMAND ${CMAKE_COMMAND} -E rm -f ${LEGACY_INSTALLED_LIB_FILE}
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${LIB_FILE} ${LINKED_LIB_FILE}
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${LIB_HEADER_FOLDER}/tantivy-binding.h ${TANTIVY_INCLUDE_DIR}/
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${GREP_HEADER} ${TANTIVY_INCLUDE_DIR}/
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-wrapper.h ${TANTIVY_INCLUDE_DIR}/
@@ -79,7 +85,7 @@ add_custom_target(install_tantivy_target
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/phrase_match.h ${TANTIVY_INCLUDE_DIR}/
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/time_recorder.h ${TANTIVY_INCLUDE_DIR}/
         DEPENDS tantivy_build
-        BYPRODUCTS ${INSTALLED_LIB_FILE} ${TANTIVY_INCLUDE_DIR}/milvus_grep.h
+        BYPRODUCTS ${LINKED_LIB_FILE} ${TANTIVY_INCLUDE_DIR}/milvus_grep.h
         VERBATIM
 )
 
@@ -91,7 +97,7 @@ add_dependencies(tantivy_binding
 set_target_properties(tantivy_binding
         PROPERTIES
         IMPORTED_GLOBAL TRUE
-        IMPORTED_LOCATION "${TANTIVY_LIB_DIR}/${TANTIVY_NAME}"
+        IMPORTED_LOCATION "${LINKED_LIB_FILE}"
         INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_INSTALL_PREFIX}/include")
 
 # TODO: move these below tests to ut.
