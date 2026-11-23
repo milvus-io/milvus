@@ -818,7 +818,7 @@ class TestGroupSearch(TestMilvusClientV2Base):
             check_items={"nq": 1, "limit": total_count},
         )[0]
         hit_num = len(set(total_res[0].ids).intersection(set(all_pages_ids)))
-        hit_rate = round(hit_num / (limit * page_rounds), 3)
+        hit_rate = hit_num / total_count
         assert hit_rate >= 0.8
         log.info(f"search pagination with groupby hit_rate: {hit_rate}")
         grpby_field_values = []
@@ -1320,3 +1320,80 @@ class TestSearchGroupByIndependent(TestMilvusClientV2Base):
             assert groupby_top_distance >= normal_top_distance - epsilon, (
                 f"GroupBy search should return result with distance >= normal search for {metric} metric"
             )
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize(
+        "sealed_ids, appended_ids, group_limit, group_size, offset, exclude_id, expected_ids",
+        [
+            pytest.param([1, 2, 3, 4], [], 1, 2, 0, None, [1, 3], id="single-segment"),
+            pytest.param([1, 2], [3], 1, 2, 0, None, [1, 3], id="no-competing-group"),
+            pytest.param([1, 2], [3, 4], 1, 2, 0, None, [1, 3], id="better-member-in-second-segment"),
+            pytest.param([1, 2], [3, 4], 1, 2, 0, 2, [1, 3], id="filter-leaves-exactly-two"),
+            pytest.param([1, 2], [4], 1, 2, 0, 2, [1], id="only-one-eligible-member"),
+            pytest.param([1, 2, 8], [3, 4], 1, 3, 0, None, [1, 3, 2], id="group-size-three"),
+            pytest.param([1, 4, 6], [3, 5, 7], 2, 2, 0, None, [1, 3, 4, 7], id="second-ranked-group"),
+            pytest.param([1, 4, 6], [3, 5, 7], 1, 2, 1, None, [4, 7], id="second-page"),
+        ],
+    )
+    def test_search_group_by_exact_members(
+        self, sealed_ids, appended_ids, group_limit, group_size, offset, exclude_id, expected_ids
+    ):
+        """
+        target: Return the best eligible members of each global group (#55665).
+        method: Seal the first batch, append to the loaded collection, then compare plain and grouped FLAT searches.
+        expected: Group membership, order and IP scores match the known rows, including legitimately short groups.
+        """
+        client = self._client()
+        name = cf.gen_collection_name_by_testcase_name()
+        schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("grp", DataType.INT64)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=2)
+        self.create_collection(client, name, schema=schema, num_shards=1)
+
+        # (group, IP score against [1, 0]); all scores are distinct.
+        catalog = {
+            1: (1, 1.0),
+            2: (1, 0.80),
+            3: (1, 0.95),
+            4: (2, 0.99),
+            5: (3, 0.98),
+            6: (2, 0.79),
+            7: (2, 0.92),
+            8: (1, 0.75),
+        }
+        rows = {pk: {"id": pk, "grp": grp, "vec": [score, 0.0]} for pk, (grp, score) in catalog.items()}
+        self.insert(client, name, [rows[pk] for pk in sealed_ids])
+        self.flush(client, name)
+        indexes = self.prepare_index_params(client)[0]
+        indexes.add_index("vec", index_type="FLAT", metric_type="IP")
+        self.create_index(client, name, index_params=indexes)
+        self.load_collection(client, name)
+        if appended_ids:
+            self.insert(client, name, [rows[pk] for pk in appended_ids])
+
+        params = dict(
+            data=[[1.0, 0.0]],
+            anns_field="vec",
+            search_params={"metric_type": "IP"},
+            filter="" if exclude_id is None else f"id != {exclude_id}",
+            consistency_level="Strong",
+            output_fields=["grp"],
+        )
+        eligible = [pk for pk in sealed_ids + appended_ids if pk != exclude_id]
+        plain = self.search(client, name, limit=len(sealed_ids) + len(appended_ids), **params)[0][0]
+        assert plain.ids == sorted(eligible, key=lambda pk: catalog[pk][1], reverse=True)
+
+        hits = self.search(
+            client,
+            name,
+            limit=group_limit,
+            offset=offset,
+            group_by_field="grp",
+            group_size=group_size,
+            strict_group_size=True,
+            **params,
+        )[0][0]
+        assert hits.ids == expected_ids
+        assert [hit.entity.get("grp") for hit in hits] == [catalog[pk][0] for pk in expected_ids]
+        assert hits.distances == pytest.approx([catalog[pk][1] for pk in expected_ids], abs=1e-6)
