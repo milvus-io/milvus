@@ -315,24 +315,30 @@ func (r *RateCollector) rate(label string, duration time.Duration, now time.Time
 
 // update would update position and clear old values.
 func (r *RateCollector) update(now time.Time) {
-	duration := now.Sub(r.last)
-	if duration/r.granularity == 0 {
+	granularity := int64(r.granularity)
+	steps := int64(now.Sub(r.last)) / granularity
+	if steps <= 0 {
 		return
 	}
 
-	shift := func() {
-		if r.position = r.position + 1; r.position >= int(r.window/r.granularity) {
-			r.position = 0
+	bucketCount := int64(r.window) / granularity
+	if steps >= bucketCount {
+		for _, buckets := range r.values {
+			clear(buckets)
 		}
-		for rt := range r.values {
-			r.values[rt][r.position] = 0
+		r.position = (r.position + int(steps%bucketCount)) % int(bucketCount)
+	} else {
+		for range steps {
+			r.position++
+			if r.position == int(bucketCount) {
+				r.position = 0
+			}
+			for _, buckets := range r.values {
+				buckets[r.position] = 0
+			}
 		}
-		r.last = r.last.Add(r.granularity)
 	}
-
-	for i := 0; i < int(duration/r.granularity); i++ {
-		shift()
-	}
+	r.last = r.last.Add(time.Duration(steps * granularity))
 }
 
 // nolint
