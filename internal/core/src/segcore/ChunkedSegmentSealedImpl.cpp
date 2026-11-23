@@ -2543,6 +2543,12 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
                 dropped_fields.push_back(field_id.get());
                 continue;
             }
+            // A schema-only reopen may revisit the same external manifest.
+            // Keep columns that the staged runtime already owns.
+            if (!is_replace &&
+                committer.runtime()->fields.count(field_id) != 0) {
+                continue;
+            }
             field_ids.emplace_back(field_id);
         }
         if (!dropped_fields.empty()) {

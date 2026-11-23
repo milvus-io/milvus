@@ -2640,6 +2640,59 @@ TEST_F(MilvusTableManifestLoadTest, ReopenLoadsNewlyBoundField) {
     EXPECT_EQ(values->scalars().string_data().data(0), "refreshed");
 }
 
+TEST(ExternalParquetManifestLoad, SchemaOnlyReopenReusesLoadedColumns) {
+    const FieldId number(100), extra(101), pk(102);
+    auto source_schema = std::make_shared<Schema>();
+    source_schema->AddField(FieldMeta(FieldName("number"),
+                                      number,
+                                      DataType::INT64,
+                                      false,
+                                      std::nullopt,
+                                      "number"));
+    source_schema->set_external_source("s3://test-bucket/data");
+    source_schema->set_external_spec(R"({"format":"parquet"})");
+    const auto path = UniqueManifestTestPath("external_parquet_schema_reopen");
+    StorageV2TempDirGuard dir_guard(GetDefaultArrowFileSystem(), path);
+    milvus::test::V3SegmentTestData data(
+        source_schema, 1, 8, 1, TestLocalPath, path, "number");
+
+    auto schema = std::make_shared<Schema>(*source_schema);
+    schema->AddField(
+        FieldName("virtual_pk"), pk, DataType::INT64, false, std::nullopt);
+    schema->set_primary_field_id(pk);
+    schema->set_schema_version(1);
+    constexpr int64_t segment_id = 3194;
+    ChunkedSegmentSealedImpl segment(
+        schema, nullptr, SegcoreConfig::default_config(), segment_id);
+    proto::segcore::SegmentLoadInfo info;
+    info.set_segmentid(segment_id);
+    info.set_collectionid(1);
+    info.set_partitionid(1);
+    info.set_num_of_rows(8);
+    info.set_storageversion(STORAGE_V3);
+    info.set_manifest_path(data.ManifestPathJson());
+    segment.SetLoadInfo(info);
+    milvus::tracer::TraceContext trace_ctx;
+    segment.Load(trace_ctx, nullptr);
+    auto before = segment.TestGetPublishedStateSnapshot();
+    auto loaded_column = before->runtime->fields.at(number);
+
+    auto new_schema = std::make_shared<Schema>(*schema);
+    new_schema->AddField(FieldMeta(FieldName("extra"),
+                                   extra,
+                                   DataType::INT64,
+                                   true,
+                                   std::nullopt,
+                                   "extra"));
+    new_schema->set_schema_version(2);
+
+    ASSERT_NO_THROW(segment.Reopen(new_schema));
+    auto after = segment.TestGetPublishedStateSnapshot();
+    EXPECT_TRUE(after->schema->has_field(extra));
+    EXPECT_FALSE(after->load_info->HasFieldInLoadedManifest(extra));
+    EXPECT_EQ(after->runtime->fields.at(number), loaded_column);
+}
+
 TEST(LazyManifest, ExternalMappedColumnsStayColdUntilRead) {
     LazyColumnGroupGuard lazy_group_guard(true);
     auto policies =
