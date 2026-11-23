@@ -78,14 +78,14 @@ NewSealedSegmentWithCollection(CCollection collection,
 
 CStatus
 NewSealedSegmentWithManifest(CCollection collection,
-                               int64_t segment_id,
-                               CSegmentInterface* output,
-                               bool sorted,
-                               const uint8_t* load_blob,
-                               int64_t load_length,
-                               const int64_t* load_fields,
-                               int64_t field_count,
-                               const void* manifest);
+                             int64_t segment_id,
+                             CSegmentInterface* output,
+                             bool sorted,
+                             const uint8_t* load_blob,
+                             int64_t load_length,
+                             const int64_t* load_fields,
+                             int64_t field_count,
+                             const void* manifest);
 
 /**
  * @brief Dispatch a segment manage load task.
@@ -182,13 +182,13 @@ AsyncReopenSealedSegmentWithCollection(CTraceContext trace,
 
 CFuture*
 AsyncReopenSealedSegmentWithManifest(CTraceContext trace,
-                                       CSegmentInterface segment,
-                                       CCollection collection,
-                                       const uint8_t* load_blob,
-                                       int64_t load_length,
-                                       const int64_t* load_fields,
-                                       int64_t load_field_count,
-                                       const void* manifest);
+                                     CSegmentInterface segment,
+                                     CCollection collection,
+                                     const uint8_t* load_blob,
+                                     int64_t load_length,
+                                     const int64_t* load_fields,
+                                     int64_t load_field_count,
+                                     const void* manifest);
 
 // Return a read-only sealed facade. Retain c_segment until deleting the facade.
 CStatus

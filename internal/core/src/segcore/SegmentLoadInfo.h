@@ -413,6 +413,16 @@ class SegmentLoadInfo {
 
     SegmentLoadInfo() = delete;
 
+    // Full Load/Reopen have a fresh proto. Bind the layout before selecting
+    // fields or converting index metadata from that proto.
+    static std::pair<SegmentLoadInfo, SealedFieldLayoutPtr>
+    PrepareForLoad(
+        const ProtoType& info,
+        SealedFieldLayoutPtr fields,
+        const SegmentLoadInfo& current,
+        bool restrict_to_load_fields = false,
+        std::shared_ptr<milvus_storage::api::ColumnGroups> groups = nullptr);
+
     explicit SegmentLoadInfo(const ProtoType& info, SchemaPtr schema)
         : SegmentLoadInfo(info,
                           std::make_shared<const SealedFieldLayout>(
@@ -658,15 +668,6 @@ class SegmentLoadInfo {
                    field_ids_.begin(), field_ids_.end(), field_id);
     }
 
-    // QueryView forks own an exact load scope; ordinary segments retain their
-    // existing lazy-column behavior.
-    void
-    RestrictToLoadFields(const SealedFieldLayout& fields) {
-        restrict_load_fields_ = true;
-        SetFieldSelection(fields);
-        PruneRuntimeStateNotInSchema();
-    }
-
     [[nodiscard]] int64_t
     GetEstimatedBytesPerRow() const {
         return info_.estimated_bytes_per_row();
@@ -862,6 +863,11 @@ class SegmentLoadInfo {
         std::shared_ptr<milvus_storage::api::ColumnGroups> groups) {
         column_groups_ = std::move(groups);
     }
+
+    // Bind the logical layout to this immutable manifest revision before diffing
+    // or publishing its reader. Legacy manifests keep identity mapping.
+    SealedFieldLayoutPtr
+    BindManifestFields(const SealedFieldLayoutPtr& fields) const;
 
     // Checks the already cached manifest column groups. It intentionally does
     // not parse the manifest on demand because query paths call this method.
@@ -1196,6 +1202,9 @@ class SegmentLoadInfo {
         const SealedFieldLayoutPtr& fields) const;
 
  private:
+    explicit SegmentLoadInfo(const ProtoType& info) : info_(info) {
+    }
+
     void
     SetFieldSelection(const SealedFieldLayout& fields) {
         external_ = fields.is_external_collection();

@@ -207,7 +207,8 @@ ImportLoadColumnGroups(const void* manifest) {
     }
     auto groups = std::make_shared<milvus_storage::api::ColumnGroups>();
     auto status = milvus_storage::column_groups_import(
-        &static_cast<const LoonManifest*>(manifest)->column_groups, groups.get());
+        &static_cast<const LoonManifest*>(manifest)->column_groups,
+        groups.get());
     if (!status.ok()) {
         const auto error = milvus_storage::ToSegcoreError(status);
         ThrowInfo(error.get_error_code(),
@@ -226,21 +227,27 @@ NewSealedSegmentWithCollection(CCollection collection,
                                int64_t load_length,
                                const int64_t* load_fields,
                                int64_t field_count) {
-    return NewSealedSegmentWithManifest(
-        collection, segment_id, output, sorted, load_blob, load_length,
-        load_fields, field_count, nullptr);
+    return NewSealedSegmentWithManifest(collection,
+                                        segment_id,
+                                        output,
+                                        sorted,
+                                        load_blob,
+                                        load_length,
+                                        load_fields,
+                                        field_count,
+                                        nullptr);
 }
 
 CStatus
 NewSealedSegmentWithManifest(CCollection collection,
-                               int64_t segment_id,
-                               CSegmentInterface* output,
-                               bool sorted,
-                               const uint8_t* load_blob,
-                               int64_t load_length,
-                               const int64_t* load_fields,
-                               int64_t field_count,
-                               const void* manifest) {
+                             int64_t segment_id,
+                             CSegmentInterface* output,
+                             bool sorted,
+                             const uint8_t* load_blob,
+                             int64_t load_length,
+                             const int64_t* load_fields,
+                             int64_t field_count,
+                             const void* manifest) {
     SCOPE_CGO_CALL_METRIC();
     try {
         auto* col = static_cast<milvus::segcore::Collection*>(collection);
@@ -303,20 +310,25 @@ AsyncReopenSealedSegmentWithCollection(CTraceContext trace,
                                        int64_t load_length,
                                        const int64_t* load_fields,
                                        int64_t load_field_count) {
-    return AsyncReopenSealedSegmentWithManifest(
-        trace, c_segment, c_collection, load_blob, load_length, load_fields,
-        load_field_count, nullptr);
+    return AsyncReopenSealedSegmentWithManifest(trace,
+                                                c_segment,
+                                                c_collection,
+                                                load_blob,
+                                                load_length,
+                                                load_fields,
+                                                load_field_count,
+                                                nullptr);
 }
 
 CFuture*
 AsyncReopenSealedSegmentWithManifest(CTraceContext trace,
-                                       CSegmentInterface c_segment,
-                                       CCollection c_collection,
-                                       const uint8_t* load_blob,
-                                       int64_t load_length,
-                                       const int64_t* load_fields,
-                                       int64_t load_field_count,
-                                       const void* manifest) {
+                                     CSegmentInterface c_segment,
+                                     CCollection c_collection,
+                                     const uint8_t* load_blob,
+                                     int64_t load_length,
+                                     const int64_t* load_fields,
+                                     int64_t load_field_count,
+                                     const void* manifest) {
     try {
         auto* collection =
             static_cast<milvus::segcore::Collection*>(c_collection);
@@ -608,20 +620,18 @@ CheckExternalFieldsInLoadedManifest(
             continue;
         }
         const auto& field_meta = schema->operator[](field_id);
-        auto column_name = schema->GetPhysicalColumnName(field_id);
         // External output may be served through take(), so "ready" here means
         // the loaded manifest contains the storage column. It intentionally
         // does not require field data or index accessibility.
-        if (!segment->HasColumnInLoadedManifest(column_name)) {
+        if (!segment->HasFieldInLoadedManifest(field_id)) {
             throw milvus::SegcoreError(
                 milvus::FieldNotLoaded,
                 fmt::format(
-                    "external field \"{}\" (storage column \"{}\") is not "
+                    "external field \"{}\" is not "
                     "available in the current loaded external collection "
                     "manifest; run RefreshExternalCollection and reload the "
                     "collection before accessing this field",
-                    field_meta.get_name().get(),
-                    column_name));
+                    field_meta.get_name().get()));
         }
     }
 }

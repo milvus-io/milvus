@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metacache"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -80,6 +81,17 @@ func TestSummaryModeEmptyCompletion(t *testing.T) {
 	recorder := &indexDataViewRecorder{}
 	mt.DataViewManager = recorder
 	result := &workerpb.IndexTaskInfo{BuildID: 20, State: commonpb.IndexState_Finished}
+	// A local completion uses its scheduling context to publish the summary.
+	localCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	canceledWrite := mockey.Mock((*datacoord.Catalog).Update).To(func(_ *datacoord.Catalog, writeCtx context.Context, _ ...metastore.UpdateAction) error {
+		return writeCtx.Err()
+	}).Build()
+	defer canceledWrite.UnPatch()
+	require.ErrorIs(t, task.updateStateWithMeta(localCtx, indexpb.JobState_JobStateFinished, ""), context.Canceled)
+	require.True(t, dm.IndexMeta.HasBuildInfo(20))
+	require.Empty(t, mt.GetSegment(ctx, 3).GetIndexSummaries())
+	canceledWrite.UnPatch()
 	failure := mockey.Mock((*datacoord.Catalog).Update).Return(merr.ErrServiceUnavailable).Build()
 	defer failure.UnPatch()
 	err = task.SetJobInfo(result)
@@ -89,7 +101,7 @@ func TestSummaryModeEmptyCompletion(t *testing.T) {
 	require.Empty(t, recorder.calls)
 	require.Equal(t, commonpb.IndexState_InProgress, task.IndexState)
 	failure.UnPatch()
-	require.NoError(t, task.SetJobInfo(result))
+	require.NoError(t, task.updateStateWithMeta(ctx, indexpb.JobState_JobStateFinished, ""))
 	require.Equal(t, []int64{1}, recorder.calls)
 	require.Equal(t, commonpb.IndexState_Finished, task.IndexState)
 	require.False(t, dm.IndexMeta.HasBuildInfo(20))

@@ -364,9 +364,13 @@ func WriteSegmentIndexToManifest() bool {
 }
 
 func (m *IndexMeta) alterSegmentIndexes(segIdxes []*model.SegmentIndex) error {
-	err := m.Catalog.AlterSegmentIndexes(m.ctx, segIdxes)
+	return m.alterSegmentIndexesWithContext(m.ctx, segIdxes)
+}
+
+func (m *IndexMeta) alterSegmentIndexesWithContext(ctx context.Context, segIdxes []*model.SegmentIndex) error {
+	err := m.Catalog.AlterSegmentIndexes(ctx, segIdxes)
 	if err != nil {
-		mlog.Error(context.TODO(), "failed to alter segments index in meta store", mlog.Int("segment indexes num", len(segIdxes)),
+		mlog.Error(ctx, "failed to alter segments index in meta store", mlog.Int("segment indexes num", len(segIdxes)),
 			mlog.Err(err))
 		return err
 	}
@@ -1267,27 +1271,32 @@ func (m *IndexMeta) UpdateVersion(buildID, nodeID UniqueID) error {
 }
 
 func (m *IndexMeta) UpdateIndexState(buildID UniqueID, state commonpb.IndexState, failReason string) error {
+	return m.UpdateIndexStateWithContext(m.ctx, buildID, state, failReason)
+}
+
+// UpdateIndexStateWithContext allows local completion to bound catalog writes.
+func (m *IndexMeta) UpdateIndexStateWithContext(ctx context.Context, buildID UniqueID, state commonpb.IndexState, failReason string) error {
 	m.KeyLock.Lock(buildID)
 	defer m.KeyLock.Unlock(buildID)
 
 	segIdx, ok := m.SegmentBuildInfo.Get(buildID)
 	if !ok {
-		mlog.Warn(m.ctx, "there is no index with buildID", mlog.Int64("buildID", buildID))
+		mlog.Warn(ctx, "there is no index with buildID", mlog.FieldBuildID(buildID))
 		return merr.WrapErrServiceInternalMsg("there is no index with buildID: %d", buildID)
 	}
 
 	updateFunc := func(segIdx *model.SegmentIndex) error {
 		segIdx.IndexState = state
 		segIdx.FailReason = failReason
-		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
+		return m.alterSegmentIndexesWithContext(ctx, []*model.SegmentIndex{segIdx})
 	}
 
 	if err := m.updateSegIndexMeta(segIdx, updateFunc); err != nil {
-		mlog.Warn(m.ctx, "failed to update index meta", mlog.Int64("buildID", buildID), mlog.Err(err))
+		mlog.Warn(ctx, "failed to update index meta", mlog.FieldBuildID(buildID), mlog.Err(err))
 		return err
 	}
 
-	mlog.Info(m.ctx, "update index task state success", mlog.Int64("buildID", buildID),
+	mlog.Info(ctx, "update index task state success", mlog.FieldBuildID(buildID),
 		mlog.String("state", state.String()), mlog.String("fail reason", failReason))
 	return nil
 }

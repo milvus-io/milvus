@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
@@ -72,6 +73,78 @@ func TestConsumer(t *testing.T) {
 	c.consumer.Close()
 	<-c.consumer.Done()
 	assert.NoError(t, c.consumer.Error())
+}
+
+func TestRemoteConsumerWithPendingMsgPack(t *testing.T) {
+	for _, kind := range []string{"delete", "transaction"} {
+		t.Run(kind, func(t *testing.T) {
+			h := adaptor.NewMsgPackAdaptorHandler()
+			// Cancel the previous consumer while its pack has no reader.
+			oldCtx, cancel := context.WithCancel(t.Context())
+			cancel()
+			lastConfirmed := rmq.NewRmqID(1)
+			pending := message.CreateTestInsertMessage(t, 1, 1, 60, lastConfirmed).IntoImmutableMessage(rmq.NewRmqID(60))
+			result := h.Handle(message.HandleParam{Ctx: oldCtx, Message: pending})
+			require.True(t, result.MessageHandled)
+			require.ErrorIs(t, result.Error, context.Canceled)
+
+			var frames []*streamingpb.ConsumeResponse
+			addFrame := func(tt uint64, msg message.MutableMessage) {
+				immutable := msg.WithTimeTick(tt).WithLastConfirmed(lastConfirmed).IntoImmutableMessage(rmq.NewRmqID(int64(tt)))
+				frames = append(frames, consumeResponse(immutable))
+			}
+			del := message.NewDeleteMessageBuilderV1().WithVChannel("v1").
+				WithHeader(&message.DeleteMessageHeader{}).WithBody(&msgpb.DeleteRequest{}).MustBuildMutable()
+			if kind == "transaction" {
+				txn := message.TxnContext{TxnID: 1, Keepalive: time.Second}
+				begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("v1").
+					WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable()
+				commit := message.NewCommitTxnMessageBuilderV2().WithVChannel("v1").
+					WithHeader(&message.CommitTxnMessageHeader{BodyCnt: 1}).WithBody(&message.CommitTxnMessageBody{}).MustBuildMutable()
+				addFrame(58, begin.WithTxnContext(txn))
+				addFrame(59, del.WithTxnContext(txn))
+				addFrame(61, commit.WithTxnContext(txn))
+			} else {
+				addFrame(61, del)
+			}
+			addFrame(68, message.CreateTestInsertMessage(t, 1, 1, 68, lastConfirmed))
+
+			client := handshakeClient(t, func(stream streamingpb.StreamingNodeHandlerService_ConsumeServer) error {
+				created := firstHandshakeResponse()
+				created.GetCreate().WalName = lastConfirmed.WALName().String()
+				if err := stream.Send(created); err != nil {
+					return err
+				}
+				if _, err := stream.Recv(); err != nil {
+					return err
+				}
+				if err := stream.Send(successfulHandshakeResponse()); err != nil {
+					return err
+				}
+				for _, frame := range frames {
+					if err := stream.Send(frame); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+			opts := handshakeOptions(h)
+			opts.DeliverPolicy = options.DeliverPolicyStartFrom(lastConfirmed)
+			opts.DeliverFilters = []options.DeliverFilter{options.DeliverFilterTimeTickGT(60)}
+			ctx, stop := context.WithTimeout(t.Context(), 5*time.Second)
+			defer stop()
+			c, err := CreateConsumer(ctx, opts, client)
+			require.NoError(t, err)
+			var ticks []uint64
+			for pack := range h.Chan() {
+				for _, msg := range pack.Msgs {
+					ticks = append(ticks, msg.GetTimestamp())
+				}
+			}
+			require.NoError(t, c.Error())
+			require.Equal(t, []uint64{60, 61, 68}, ticks)
+		})
+	}
 }
 
 func TestConsumerWithCancellation(t *testing.T) {
@@ -380,7 +453,10 @@ func newMockedConsumerImpl(t *testing.T, ctx context.Context, h message.Handler)
 func newConsumeResponse(id message.MessageID, msg message.MutableMessage) *streamingpb.ConsumeResponse {
 	msg.WithTimeTick(tsoutil.ComposeTSByTime(time.Now()))
 	msg.WithLastConfirmed(walimplstest.NewTestMessageID(0))
-	immutableMsg := msg.IntoImmutableMessage(id)
+	return consumeResponse(msg.IntoImmutableMessage(id))
+}
+
+func consumeResponse(immutableMsg message.ImmutableMessage) *streamingpb.ConsumeResponse {
 	return &streamingpb.ConsumeResponse{
 		Response: &streamingpb.ConsumeResponse_Consume{
 			Consume: &streamingpb.ConsumeMessageReponse{

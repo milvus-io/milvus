@@ -1314,6 +1314,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
     first.talon_mode = 2;
     first.talon_small_read_threshold = 65536;
     first.talon_coordinator = "127.0.0.1:7000";
+    first.talon_namespace = "cluster-dedicated-standard-all";
     first.talon_block_size = 8388608;
     first.talon_max_idle_per_addr = 32;
     first.talon_enable_for_external_table = true;
@@ -1322,6 +1323,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
     auto second = first;
     second.talon_mode = 1;
     second.talon_coordinator = "127.0.0.1:7001";
+    second.talon_namespace.clear();
     const auto second_properties =
         MakeInternalPropertiesFromStorageConfig(ToCStorageConfig(second));
     for (const auto& [properties, expected] :
@@ -1335,6 +1337,9 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
         EXPECT_EQ(static_cast<uint32_t>(config.talon_mode),
                   expected.talon_mode);
         EXPECT_EQ(config.talon_coordinator, expected.talon_coordinator);
+        EXPECT_EQ(config.talon_namespace, expected.talon_namespace);
+        EXPECT_EQ(ToStorageV2FSCacheKey(expected).talon_namespace,
+                  expected.talon_namespace);
         EXPECT_EQ(config.talon_small_read_threshold, 65536);
         EXPECT_EQ(config.talon_block_size, 8388608);
         EXPECT_EQ(config.talon_max_idle_per_addr, 32);
@@ -1371,6 +1376,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
                           external ? mode : 0);
                 EXPECT_EQ(resolved->talon_small_read_threshold, 65536);
                 EXPECT_EQ(resolved->talon_coordinator, "127.0.0.1:7000");
+                EXPECT_EQ(resolved->talon_namespace, first.talon_namespace);
                 EXPECT_EQ(resolved->talon_block_size, 8388608);
                 EXPECT_EQ(resolved->talon_max_idle_per_addr, 32);
                 ::InjectExternalSpecProperties(
@@ -1399,6 +1405,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
             old_properties, defaults)
             .ok());
     EXPECT_EQ(defaults.talon_mode, milvus_storage::TalonMode::Disabled);
+    EXPECT_TRUE(defaults.talon_namespace.empty());
     EXPECT_EQ(defaults.talon_small_read_threshold, 524288);
 
     // The configured 512 KiB default is forwarded like any other value.

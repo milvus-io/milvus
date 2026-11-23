@@ -339,6 +339,10 @@ func (p *ComponentParam) CleanEvent() {
 type commonConfig struct {
 	ClusterPrefix ParamItem `refreshable:"false"`
 
+	CloudClusterID    ParamItem `refreshable:"false"`
+	CloudInstanceType ParamItem `refreshable:"false"`
+	CloudClassType    ParamItem `refreshable:"false"`
+
 	RootCoordTimeTick   ParamItem `refreshable:"true"`
 	RootCoordStatistics ParamItem `refreshable:"true"`
 	RootCoordDml        ParamItem `refreshable:"false"`
@@ -537,6 +541,27 @@ func (p *commonConfig) ResolveLoadAdmissionLimits(asyncEnabled bool) (budgetByte
 	return resolve(&p.LoadTransientBudgetBytes), resolve(&p.LoadAdmissionSlots)
 }
 
+// TalonNamespace returns the cloud namespace shared by Talon reads and prewarming.
+// An empty cluster ID selects Talon's default namespace.
+func (p *commonConfig) TalonNamespace() string {
+	clusterID := p.CloudClusterID.GetValue()
+	if clusterID == "" {
+		return ""
+	}
+	namespaceType := "others"
+	switch {
+	case p.CloudInstanceType.GetValue() == "VectorLake":
+		namespaceType = "VectorLake"
+	case p.CloudClassType.GetValue() == "Tiered":
+		namespaceType = "Tiered"
+	}
+	caseMode := "meta"
+	if p.StorageTalonEnabledStages.GetAsUint32() == common.TalonStagesAll {
+		caseMode = "all"
+	}
+	return strings.Join([]string{clusterID, namespaceType, caseMode}, "-")
+}
+
 func (p *commonConfig) init(base *BaseTable) {
 	// must init cluster prefix first
 	p.ClusterPrefix = ParamItem{
@@ -552,6 +577,34 @@ To share a Pulsar instance among multiple Milvus instances, consider changing th
 		Export:       true,
 	}
 	p.ClusterPrefix.Init(base.mgr)
+
+	p.CloudClusterID = ParamItem{
+		Key:          "common.cloud.clusterId",
+		Version:      "3.0.1",
+		DefaultValue: "",
+		Forbidden:    true,
+		Doc:          "Cloud cluster ID. Leave empty to use Talon's default namespace. Otherwise Talon uses <clusterId>-<type>-<case-mode>, with all for enabledStages=all and meta for manifest, load_open, or both.",
+		Export:       true,
+	}
+	p.CloudClusterID.Init(base.mgr)
+	p.CloudInstanceType = ParamItem{
+		Key:          "common.cloud.instanceType",
+		Version:      "3.0.1",
+		DefaultValue: "",
+		Forbidden:    true,
+		Doc:          "Cloud instance type. VectorLake selects the VectorLake namespace type regardless of classType.",
+		Export:       true,
+	}
+	p.CloudInstanceType.Init(base.mgr)
+	p.CloudClassType = ParamItem{
+		Key:          "common.cloud.classType",
+		Version:      "3.0.1",
+		DefaultValue: "",
+		Forbidden:    true,
+		Doc:          "Cloud class type. For non-VectorLake instances, Talon uses Tiered when classType is Tiered and others otherwise.",
+		Export:       true,
+	}
+	p.CloudClassType.Init(base.mgr)
 
 	pulsarPartitionKeyword := "-partition-"
 	chanNamePrefix := func(prefix string) string {
@@ -1650,6 +1703,7 @@ Rows whose child elements are all null are always promoted to row-level null for
 		Key:          "common.storage.talon.enabledStages",
 		Version:      "3.0.1",
 		DefaultValue: "all",
+		Forbidden:    true,
 		Doc:          "Comma-separated Talon read stages: all preserves unrestricted routing; load_open enables QueryNode milvus-storage reader-open metadata, including footers; manifest enables QueryNode segment-manifest reads during load. Combine load_open,manifest to enable both. Other reads use origin storage when stages are restricted. Cannot combine all with other stages. Requires a restart.",
 		Formatter: func(value string) string {
 			mask, ok := common.ParseTalonEnabledStages(value)
@@ -2863,8 +2917,10 @@ type proxyConfig struct {
 	// WAL payload chunking rollout switch.
 	SplitChunkProxy ParamItem `refreshable:"true"`
 
-	ExprParseCacheEnabled    ParamItem `refreshable:"false"`
-	ExprParseCacheMaxEntries ParamItem `refreshable:"false"`
+	ExprParseCacheEnabled       ParamItem `refreshable:"false"`
+	ExprParseCacheMaxEntries    ParamItem `refreshable:"false"`
+	ExprParseCacheMaxBytes      ParamItem `refreshable:"false"`
+	ExprParseCacheMaxEntryBytes ParamItem `refreshable:"false"`
 
 	TimeTickInterval               ParamItem `refreshable:"false"`
 	HealthCheckTimeout             ParamItem `refreshable:"true"`
@@ -2971,6 +3027,26 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.ExprParseCacheMaxEntries.Init(base.mgr)
+
+	p.ExprParseCacheMaxBytes = ParamItem{
+		Key:          "proxy.exprParseCache.maxBytes",
+		Version:      "3.0.6",
+		DefaultValue: "67108864",
+		Formatter:    positiveProxyLimitFormatter("67108864"),
+		Doc:          "Maximum aggregate retained byte budget of cached expression parse trees and parsing errors per process. Non-positive or invalid values use 67108864 (64 MiB). Entries retain the existing maxEntries and 10-minute TTL bounds. Restart required.",
+		Export:       true,
+	}
+	p.ExprParseCacheMaxBytes.Init(base.mgr)
+
+	p.ExprParseCacheMaxEntryBytes = ParamItem{
+		Key:          "proxy.exprParseCache.maxEntryBytes",
+		Version:      "3.0.6",
+		DefaultValue: "8388608",
+		Formatter:    positiveProxyLimitFormatter("8388608"),
+		Doc:          "Maximum estimated retained byte cost for a single expression parse cache entry. Non-positive or invalid values use 8388608 (8 MiB), clamped to proxy.exprParseCache.maxBytes. Larger expressions still parse normally without being cached. Restart required.",
+		Export:       true,
+	}
+	p.ExprParseCacheMaxEntryBytes.Init(base.mgr)
 
 	p.SplitChunkProxy = ParamItem{
 		Key:          "proxy.splitChunk",
@@ -6909,6 +6985,20 @@ type dataCoordConfig struct {
 	StatsTaskSlotUsage                   ParamItem `refreshable:"true"`
 	AnalyzeTaskSlotUsage                 ParamItem `refreshable:"true"`
 
+	// Two-dimensional task pricing (dataCoord.taskResource.*). CPU in cores,
+	// memory as a multiplier of the input size or an absolute size.
+	TaskResourceVectorIndexCPU           ParamItem `refreshable:"true"`
+	TaskResourceAnalyzeCPU               ParamItem `refreshable:"true"`
+	TaskResourceClusteringCompactionCPU  ParamItem `refreshable:"true"`
+	TaskResourceDefaultCPU               ParamItem `refreshable:"true"`
+	TaskResourceIndexMemoryFactor        ParamItem `refreshable:"true"`
+	TaskResourceStatsMemoryFactor        ParamItem `refreshable:"true"`
+	TaskResourceL0CompactionMemoryFactor ParamItem `refreshable:"true"`
+	TaskResourceAnalyzeMemoryFactor      ParamItem `refreshable:"true"`
+	TaskResourceImportMemoryFactor       ParamItem `refreshable:"true"`
+	TaskResourceMinTaskMemory            ParamItem `refreshable:"true"`
+	TaskResourceExternalRefreshMemory    ParamItem `refreshable:"true"`
+
 	EnableSortCompaction       ParamItem `refreshable:"true"`
 	TaskCheckInterval          ParamItem `refreshable:"true"`
 	SortCompactionTriggerCount ParamItem `refreshable:"true"`
@@ -8872,6 +8962,105 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 		},
 	}
 	p.AnalyzeTaskSlotUsage.Init(base.mgr)
+
+	p.TaskResourceVectorIndexCPU = ParamItem{
+		Key:          "dataCoord.taskResource.vectorIndexCPU",
+		Version:      "3.0.1",
+		DefaultValue: "8",
+		Doc:          "cpu cores a vector index build task is expected to use; used by DataCoord to place tasks across DataNodes",
+		Export:       false,
+	}
+	p.TaskResourceVectorIndexCPU.Init(base.mgr)
+
+	p.TaskResourceAnalyzeCPU = ParamItem{
+		Key:          "dataCoord.taskResource.analyzeCPU",
+		Version:      "3.0.1",
+		DefaultValue: "8",
+		Doc:          "cpu cores an analyze task is expected to use",
+		Export:       false,
+	}
+	p.TaskResourceAnalyzeCPU.Init(base.mgr)
+
+	p.TaskResourceClusteringCompactionCPU = ParamItem{
+		Key:          "dataCoord.taskResource.clusteringCompactionCPU",
+		Version:      "3.0.1",
+		DefaultValue: "8",
+		Doc:          "cpu cores a clustering compaction task is expected to use",
+		Export:       false,
+	}
+	p.TaskResourceClusteringCompactionCPU.Init(base.mgr)
+
+	p.TaskResourceDefaultCPU = ParamItem{
+		Key:          "dataCoord.taskResource.defaultCPU",
+		Version:      "3.0.1",
+		DefaultValue: "1",
+		Doc:          "cpu cores every other task type (scalar index, stats, mix/l0/sort compaction, import, copy segment, external refresh) is expected to use",
+		Export:       false,
+	}
+	p.TaskResourceDefaultCPU.Init(base.mgr)
+
+	p.TaskResourceIndexMemoryFactor = ParamItem{
+		Key:          "dataCoord.taskResource.indexMemoryFactor",
+		Version:      "3.0.1",
+		DefaultValue: "2",
+		Doc:          "memory of an index build task = indexed field size * this factor",
+		Export:       false,
+	}
+	p.TaskResourceIndexMemoryFactor.Init(base.mgr)
+
+	p.TaskResourceStatsMemoryFactor = ParamItem{
+		Key:          "dataCoord.taskResource.statsMemoryFactor",
+		Version:      "3.0.1",
+		DefaultValue: "2",
+		Doc:          "memory of a stats task (text match, bm25, json key index) = size of the fields it indexes * this factor; of a sort compaction = segment size * this factor",
+		Export:       false,
+	}
+	p.TaskResourceStatsMemoryFactor.Init(base.mgr)
+
+	p.TaskResourceL0CompactionMemoryFactor = ParamItem{
+		Key:          "dataCoord.taskResource.l0CompactionMemoryFactor",
+		Version:      "3.0.1",
+		DefaultValue: "2",
+		Doc:          "memory of an l0 compaction task = total delta log size of its input segments * this factor + the stats log size of the target segments the deletes are applied to",
+		Export:       false,
+	}
+	p.TaskResourceL0CompactionMemoryFactor.Init(base.mgr)
+
+	p.TaskResourceAnalyzeMemoryFactor = ParamItem{
+		Key:          "dataCoord.taskResource.analyzeMemoryFactor",
+		Version:      "3.0.1",
+		DefaultValue: "2",
+		Doc:          "memory of an analyze task = size of the clustering-key field in its input segments * this factor",
+		Export:       false,
+	}
+	p.TaskResourceAnalyzeMemoryFactor.Init(base.mgr)
+
+	p.TaskResourceImportMemoryFactor = ParamItem{
+		Key:          "dataCoord.taskResource.importMemoryFactor",
+		Version:      "3.0.1",
+		DefaultValue: "2",
+		Doc:          "memory of an import task = files * per-file read buffer * this factor; the factor covers the batch that is being serialized and uploaded while the next one is read",
+		Export:       false,
+	}
+	p.TaskResourceImportMemoryFactor.Init(base.mgr)
+
+	p.TaskResourceMinTaskMemory = ParamItem{
+		Key:          "dataCoord.taskResource.minTaskMemory",
+		Version:      "3.0.1",
+		DefaultValue: "64m",
+		Doc:          "lower bound of the memory estimate of any task, so that no task is ever placed as if it were free",
+		Export:       false,
+	}
+	p.TaskResourceMinTaskMemory.Init(base.mgr)
+
+	p.TaskResourceExternalRefreshMemory = ParamItem{
+		Key:          "dataCoord.taskResource.externalRefreshMemory",
+		Version:      "3.0.1",
+		DefaultValue: "1g",
+		Doc:          "memory of a refresh external collection task; it does not scale with an input DataCoord can size, so it is a fixed budget",
+		Export:       false,
+	}
+	p.TaskResourceExternalRefreshMemory.Init(base.mgr)
 
 	p.EnableSortCompaction = ParamItem{
 		Key:          "dataCoord.sortCompaction.enable",

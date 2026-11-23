@@ -107,6 +107,10 @@ func NewTalonClient(config *indexpb.StorageConfig, concurrency int) (*TalonClien
 	// Raw Talon needs no filesystem, credentials, or filesystem-routing mode.
 	keys := []string{"fs.talon.coordinator"}
 	values := []string{config.GetTalonCoordinator()}
+	if namespace := config.GetTalonNamespace(); namespace != "" {
+		keys = append(keys, "fs.talon.namespace")
+		values = append(values, namespace)
+	}
 	for _, property := range []struct {
 		key   string
 		value uint32

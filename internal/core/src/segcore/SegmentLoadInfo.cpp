@@ -37,6 +37,27 @@
 
 namespace milvus::segcore {
 
+std::pair<SegmentLoadInfo, SealedFieldLayoutPtr>
+SegmentLoadInfo::PrepareForLoad(
+    const ProtoType& info,
+    SealedFieldLayoutPtr fields,
+    const SegmentLoadInfo& current,
+    bool restrict_to_load_fields,
+    std::shared_ptr<milvus_storage::api::ColumnGroups> groups) {
+    SegmentLoadInfo prepared(info);
+    if (groups) {
+        prepared.SetCachedColumnGroups(std::move(groups));
+    } else {
+        prepared.InheritCachedColumnGroupsFrom(current);
+    }
+    fields = prepared.BindManifestFields(fields);
+    prepared.restrict_load_fields_ =
+        restrict_to_load_fields || fields->HasExplicitLoadScope();
+    prepared.SetFieldSelection(*fields);
+    prepared.BuildCache(fields);
+    return {std::move(prepared), std::move(fields)};
+}
+
 std::shared_ptr<milvus_storage::api::ColumnGroups>
 SegmentLoadInfo::GetColumnGroups() const {
     auto manifest_path = GetManifestPath();
@@ -56,6 +77,18 @@ SegmentLoadInfo::GetColumnGroups() const {
     column_groups_ = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
     return column_groups_;
+}
+
+SealedFieldLayoutPtr
+SegmentLoadInfo::BindManifestFields(const SealedFieldLayoutPtr& fields) const {
+    if (!fields->is_external_collection() || !HasManifestPath()) {
+        return fields;
+    }
+    auto groups = GetColumnGroups();
+    auto mapping = IsMilvusTableExternalSpec(fields->get_external_spec())
+                       ? ResolveMilvusTableFieldIdMapping(*groups)
+                       : ReadMilvusTableFieldIdMapping(*groups);
+    return fields->WithManifestMapping(std::move(mapping));
 }
 
 void

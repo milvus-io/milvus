@@ -55,6 +55,9 @@ type MemoryAllocator interface {
 
 	// Release releases memory of the specified size
 	Release(taskID int64, size int64)
+
+	// Used returns the bytes currently reserved by import and pre-import readers.
+	Used() int64
 }
 
 type memoryAllocator struct {
@@ -179,6 +182,13 @@ func reserveSnapshotRead(ctx context.Context, taskID, preferredRowBuffer int64) 
 		return 0, 0, nil, err
 	}
 	return rowBuffer, budget, func() { allocator.Release(taskID, rowBuffer+budget) }, nil
+}
+
+// Used returns the bytes currently reserved by import and pre-import readers.
+func (ma *memoryAllocator) Used() int64 {
+	ma.mutex.RLock()
+	defer ma.mutex.RUnlock()
+	return ma.usedMemory
 }
 
 // Release releases memory of the specified size

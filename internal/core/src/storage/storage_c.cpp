@@ -116,6 +116,9 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
                 ? c_storage_config.talon_coordinator
                 : "";
         storage_config.talon_block_size = c_storage_config.talon_block_size;
+        if (c_storage_config.talon_namespace != nullptr) {
+            storage_config.talon_namespace = c_storage_config.talon_namespace;
+        }
         storage_config.talon_max_idle_per_addr =
             c_storage_config.talon_max_idle_per_addr;
         storage_config.talon_enable_for_external_table =

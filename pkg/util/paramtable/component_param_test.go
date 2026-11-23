@@ -360,6 +360,8 @@ func TestExprCacheConfig(t *testing.T) {
 		fallback int
 	}{
 		{&params.ExprParseCacheMaxEntries, 1024},
+		{&params.ExprParseCacheMaxBytes, 67108864},
+		{&params.ExprParseCacheMaxEntryBytes, 8388608},
 	} {
 		t.Run(tc.item.Key, func(t *testing.T) {
 			require.Equal(t, tc.fallback, tc.item.GetAsInt())
@@ -556,6 +558,22 @@ func TestComponentParam_StorageIopsParams(t *testing.T) {
 func TestComponentParam_StorageTalonParams(t *testing.T) {
 	params := &ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil)))
+	assert.Empty(t, params.CommonCfg.TalonNamespace())
+	require.NoError(t, params.Save("common.cloud.clusterId", "cluster-1"))
+	for _, tc := range []struct{ instanceType, classType, want string }{
+		{"", "", "others"},
+		{"Dedicated", "Tiered", "Tiered"},
+		{"VectorLake", "Standard", "VectorLake"},
+		{"Tiered", "VectorLake", "others"},
+		{"VectorLake", "Tiered", "VectorLake"},
+	} {
+		require.NoError(t, params.Save("common.cloud.instanceType", tc.instanceType))
+		require.NoError(t, params.Save("common.cloud.classType", tc.classType))
+		assert.Equal(t, "cluster-1-"+tc.want+"-all", params.CommonCfg.TalonNamespace(),
+			"instanceType=%q, classType=%q", tc.instanceType, tc.classType)
+	}
+	require.NoError(t, params.Reset("common.cloud.clusterId"))
+	assert.Empty(t, params.CommonCfg.TalonNamespace())
 	assert.False(t, params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool())
 	assert.Equal(t, uint32(524288), params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32())
 	for _, tc := range []struct {
@@ -602,14 +620,15 @@ func TestComponentParam_StorageTalonEnabledStages(t *testing.T) {
 		name   string
 		stages string
 		mask   uint32
+		suffix string
 	}{
-		{name: "default", mask: ^uint32(0)},
-		{name: "all", stages: "all", mask: ^uint32(0)},
-		{name: "load_open", stages: "load_open", mask: 1},
-		{name: "trimmed", stages: " load_open ", mask: 1},
-		{name: "repeated", stages: "load_open,load_open", mask: 1},
-		{name: "manifest", stages: "manifest", mask: 2},
-		{name: "combined", stages: "load_open,manifest", mask: 3},
+		{name: "default", mask: ^uint32(0), suffix: "all"},
+		{name: "all", stages: "all", mask: ^uint32(0), suffix: "all"},
+		{name: "load_open", stages: "load_open", mask: 1, suffix: "meta"},
+		{name: "trimmed", stages: " load_open ", mask: 1, suffix: "meta"},
+		{name: "repeated", stages: "load_open,load_open", mask: 1, suffix: "meta"},
+		{name: "manifest", stages: "manifest", mask: 2, suffix: "meta"},
+		{name: "combined", stages: "load_open,manifest", mask: 3, suffix: "meta"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil))
@@ -619,6 +638,11 @@ func TestComponentParam_StorageTalonEnabledStages(t *testing.T) {
 			params := &ComponentParam{}
 			params.Init(base)
 			assert.Equal(t, tc.mask, params.CommonCfg.StorageTalonEnabledStages.GetAsUint32())
+			require.NoError(t, params.Save("common.cloud.instanceType", "dedicated"))
+			require.NoError(t, params.Save("common.cloud.classType", "standard"))
+			assert.Empty(t, params.CommonCfg.TalonNamespace())
+			require.NoError(t, params.Save("common.cloud.clusterId", "cluster-1"))
+			assert.Equal(t, "cluster-1-others-"+tc.suffix, params.CommonCfg.TalonNamespace())
 			// Parsing the stage policy must not rewrite the mode that is sent
 			// alongside it in StorageConfig.
 			for _, mode := range []uint32{0, 1, 2} {
@@ -1728,6 +1752,18 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100, Params.MaxSegmentsPerCopyTask.GetAsInt())
 		params.Save("dataCoord.import.maxSegmentsPerCopyTask", "200")
 		assert.Equal(t, 200, Params.MaxSegmentsPerCopyTask.GetAsInt())
+
+		assert.Equal(t, int64(8), Params.TaskResourceVectorIndexCPU.GetAsInt64())
+		assert.Equal(t, int64(8), Params.TaskResourceAnalyzeCPU.GetAsInt64())
+		assert.Equal(t, int64(8), Params.TaskResourceClusteringCompactionCPU.GetAsInt64())
+		assert.Equal(t, int64(1), Params.TaskResourceDefaultCPU.GetAsInt64())
+		assert.Equal(t, 2.0, Params.TaskResourceIndexMemoryFactor.GetAsFloat())
+		assert.Equal(t, 2.0, Params.TaskResourceStatsMemoryFactor.GetAsFloat())
+		assert.Equal(t, 2.0, Params.TaskResourceL0CompactionMemoryFactor.GetAsFloat())
+		assert.Equal(t, 2.0, Params.TaskResourceAnalyzeMemoryFactor.GetAsFloat())
+		assert.Equal(t, 2.0, Params.TaskResourceImportMemoryFactor.GetAsFloat())
+		assert.Equal(t, int64(64)<<20, Params.TaskResourceMinTaskMemory.GetAsSize())
+		assert.Equal(t, int64(1)<<30, Params.TaskResourceExternalRefreshMemory.GetAsSize())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {

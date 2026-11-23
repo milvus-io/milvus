@@ -31,9 +31,11 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -63,9 +65,14 @@ type indexBuildTask struct {
 	handler                   meta.Handler
 	chunkManager              storage.ChunkManager
 	indexEngineVersionManager IndexEngineVersionManager
+
+	resource taskresource.Cache
 }
 
-var _ globalTask.Task = (*indexBuildTask)(nil)
+var (
+	_ globalTask.Task            = (*indexBuildTask)(nil)
+	_ globalTask.CoordinatorTask = (*indexBuildTask)(nil)
+)
 
 var errVectorArrayFieldBinlogNotFound = errors.New("vector array field binlog not found")
 
@@ -114,6 +121,68 @@ func (it *indexBuildTask) GetTaskID() int64 {
 	return it.BuildID
 }
 
+// GetTaskResource prices the build by the bytes of the indexed field. It walks
+// meta once and caches the answer only when the answer is exact.
+//
+// The distinction that matters is transient-vs-permanent. A collection whose
+// schema is not cached yet, or an index whose params have not been read back
+// yet, are both states that resolve on their own, and both would otherwise be
+// cached as a wrong answer for the task's lifetime: without a schema
+// taskresource.EstimateFieldSize cannot tell the indexed field from any other and charges
+// the whole segment (10-50x for one field of a wide collection), and without an
+// index type a vector build would be frozen at the scalar CPU request. So those
+// two states answer with the whole segment, which bounds any one field of it,
+// and do not cache: the exact field size replaces the bound next round.
+//
+// The whole-segment bound is deliberately an over-estimate rather than the
+// floor. The task is placed on whatever this returns, so the fallback must err
+// towards refusing a worker, never towards a worker accepting more than it can
+// hold. Inputs gone for good answer with an uncached floor. Target liveness
+// is checked before the cache; CompleteOnCoordinator retires obsolete work
+// before admission, and dispatch repeats that check for concurrent drops.
+func (it *indexBuildTask) GetTaskResource() taskcommon.Resource {
+	// Target liveness is not immutable: check before consulting the cached price.
+	segment := it.meta.GetHealthySegment(context.TODO(), it.SegmentID)
+	if segment == nil ||
+		!it.indexMeta.IsIndexExist(it.CollectionID, it.IndexID) {
+		return taskresource.Default()
+	}
+	return it.resource.Get(func() (taskcommon.Resource, bool) {
+		// GetIndexType answers the invalidIndex sentinel, not "", when the params
+		// carry no index_type -- which is exactly what an index whose params have
+		// not been read back yet looks like.
+		indexParams := it.indexMeta.GetIndexParams(it.CollectionID, it.IndexID)
+		indexType := meta.GetIndexType(indexParams)
+		coll := it.meta.GetCollection(it.CollectionID)
+		if coll == nil || coll.Schema == nil {
+			if indexType == indexparamcheck.IndexFMINDEX {
+				// The index params do not need the schema. An FM-index peaks at
+				// several times its field, above the generic factor on the whole
+				// segment, so bound it with the FM-index model on the field's
+				// upper bound without a schema: its recorded size, or the whole
+				// segment.
+				fieldID := it.indexMeta.GetFieldIDByIndexID(it.CollectionID, it.IndexID)
+				bound := taskresource.EstimateFieldSize(segment, nil, fieldID)
+				return taskresource.FMIndex(EstimateFMIndexBuildPeakBytes(bound, segment.GetNumOfRows(), indexParams)), false
+			}
+			return taskresource.Index(taskresource.EstimateSegmentSize(segment, nil), false), false
+		}
+		if indexType == "" || indexType == meta.InvalidIndexType {
+			return taskresource.Index(taskresource.EstimateSegmentSize(segment, coll.Schema), false), false
+		}
+		isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
+		fieldID := it.indexMeta.GetFieldIDByIndexID(it.CollectionID, it.IndexID)
+		fieldSize := taskresource.EstimateFieldSize(segment, coll.Schema, fieldID)
+		if fieldSize <= 0 {
+			return taskresource.Default(), false
+		}
+		if indexType == indexparamcheck.IndexFMINDEX {
+			return taskresource.FMIndex(EstimateFMIndexBuildPeakBytes(fieldSize, segment.GetNumOfRows(), indexParams)), true
+		}
+		return taskresource.Index(fieldSize, isVectorIndex), true
+	})
+}
+
 func (it *indexBuildTask) GetTaskSlot() int64 {
 	return it.taskSlot
 }
@@ -144,15 +213,19 @@ func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
 }
 
 func (it *indexBuildTask) UpdateStateWithMeta(state indexpb.JobState, failReason string) error {
+	return it.updateStateWithMeta(it.indexMeta.ctx, state, failReason)
+}
+
+func (it *indexBuildTask) updateStateWithMeta(ctx context.Context, state indexpb.JobState, failReason string) error {
 	if it.indexMeta.UsesSegmentSummaries() && state == indexpb.JobState_JobStateFinished {
-		return it.SetJobInfo(&workerpb.IndexTaskInfo{BuildID: it.BuildID, State: commonpb.IndexState_Finished})
+		return it.finishUnpublishedTask(ctx, &workerpb.IndexTaskInfo{BuildID: it.BuildID, State: commonpb.IndexState_Finished})
 	}
-	if err := it.indexMeta.UpdateIndexState(it.BuildID, commonpb.IndexState(state), failReason); err != nil {
+	if err := it.indexMeta.UpdateIndexStateWithContext(ctx, it.BuildID, commonpb.IndexState(state), failReason); err != nil {
 		return err
 	}
 	it.SetState(state, failReason)
 	if state == indexpb.JobState_JobStateFinished {
-		it.meta.RecomputeDataView(it.meta.Ctx, it.CollectionID)
+		it.meta.RecomputeDataView(ctx, it.CollectionID)
 	}
 	return nil
 }
@@ -172,12 +245,18 @@ func (it *indexBuildTask) SetJobInfo(result *workerpb.IndexTaskInfo) error {
 		return err
 	}
 	if !published {
-		if err := it.meta.FinishTask(it.meta.Ctx, result); err != nil {
-			return err
-		}
+		return it.finishUnpublishedTask(it.meta.Ctx, result)
 	}
-	if !published && result.GetState() == commonpb.IndexState_Finished {
-		it.meta.RecomputeDataView(it.meta.Ctx, it.CollectionID)
+	it.SetState(indexpb.JobState(result.GetState()), result.GetFailReason())
+	return nil
+}
+
+func (it *indexBuildTask) finishUnpublishedTask(ctx context.Context, result *workerpb.IndexTaskInfo) error {
+	if err := it.meta.FinishTask(ctx, result); err != nil {
+		return err
+	}
+	if result.GetState() == commonpb.IndexState_Finished {
+		it.meta.RecomputeDataView(ctx, it.CollectionID)
 	}
 	it.SetState(indexpb.JobState(result.GetState()), result.GetFailReason())
 	return nil
@@ -297,16 +376,85 @@ func (it *indexBuildTask) dropAndResetTaskOnWorker(cluster session.Cluster, reas
 	it.resetTask(reason)
 }
 
-func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
-	ctx := context.TODO()
-	log := mlog.With(mlog.Int64("taskID", it.BuildID), mlog.Int64("segmentID", it.SegmentID))
+// indexBuildPreparation contains only live inputs for a real worker build.
+type indexBuildPreparation struct {
+	segment     *meta.SegmentInfo
+	segIndex    *model.SegmentIndex
+	indexParams []*commonpb.KeyValuePair
+	indexType   string
+}
+
+// CanCompleteOnCoordinator uses cached metadata only. Schema lookup, request
+// preparation and persistence stay off the scheduling goroutine.
+func (it *indexBuildTask) CanCompleteOnCoordinator() bool {
+	segIndex, exists := it.indexMeta.GetIndexJob(it.BuildID)
+	if !exists {
+		return true
+	}
+	segment := it.meta.GetSegment(context.TODO(), segIndex.SegmentID)
+	if _, dropped := it.droppedTargetReason(segment, segIndex); dropped {
+		return true
+	}
+	indexType := meta.GetIndexType(it.indexMeta.GetIndexParams(segIndex.CollectionID, segIndex.IndexID))
+	if isNoTrainIndex(indexType) {
+		return true
+	}
+	collection := it.meta.GetCollection(segIndex.CollectionID)
+	if collection == nil {
+		return false
+	}
+	fieldID := it.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID)
+	for _, field := range typeutil.GetAllFieldSchemas(collection.Schema) {
+		if field.GetFieldID() != fieldID {
+			continue
+		}
+		// Array indexes use element counts; leave their preparation to dispatch.
+		if typeutil.IsVectorArrayType(field.GetDataType()) {
+			return false
+		}
+		rows := effectiveIndexRows(segment, segIndex.NumRows, field)
+		return rows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64()
+	}
+	return false
+}
+
+func (it *indexBuildTask) CompleteOnCoordinator(ctx context.Context) globalTask.CoordinatorResult {
+	if it.prepareForWorker(ctx) != nil {
+		return globalTask.LocalNeedsWorker
+	}
+	switch it.GetTaskState() {
+	case taskcommon.None, taskcommon.Failed, taskcommon.Finished:
+		return globalTask.LocalCompleted
+	default:
+		return globalTask.LocalRetry
+	}
+}
+
+// effectiveIndexRows applies the same nullable-vector rule during cached
+// classification and worker preparation. A missing NullCounts entry means the
+// field was added after this segment was flushed, so every row reads as null.
+func effectiveIndexRows(segment *meta.SegmentInfo, rows int64, field *schemapb.FieldSchema) int64 {
+	if !field.GetNullable() || !typeutil.IsVectorType(field.GetDataType()) {
+		return rows
+	}
+	nullCount, exists := segment.EnsureStats().GetNullCounts()[field.GetFieldID()]
+	if !exists {
+		return 0
+	}
+	return rows - nullCount
+}
+
+// prepareForWorker is shared with dispatch so target liveness and nullable /
+// vector-array thresholds are rechecked after placement, without two rules.
+func (it *indexBuildTask) prepareForWorker(ctx context.Context) *indexBuildPreparation {
+	log := mlog.With(mlog.FieldTaskID(it.BuildID), mlog.FieldSegmentID(it.SegmentID))
 
 	// Check if task exists in meta
 	segIndex, exist := it.indexMeta.GetIndexJob(it.BuildID)
 	if !exist || segIndex == nil {
 		log.Info(ctx, "index task has not exist in meta table, removing task")
 		it.SetState(indexpb.JobState_JobStateNone, "index task has not exist in meta table")
-		return
+		return nil
 	}
 
 	// Check segment health and index existence
@@ -314,7 +462,7 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	if reason, dropped := it.droppedTargetReason(segment, segIndex); dropped {
 		log.Info(ctx, "task is no need to build index, marking it failed", mlog.String("reason", reason))
 		it.abortForDroppedTarget(ctx, reason)
-		return
+		return nil
 	}
 
 	// Handle special cases for certain index types or small segments
@@ -325,74 +473,62 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	isVectorArrayIndex := false
 	isEmbeddingListIndex := false
 	skipVectorArrayThreshold := false
-	if fieldID := it.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID); fieldID > 0 {
-		if collectionInfo, err := it.handler.GetCollection(ctx, segIndex.CollectionID); err == nil {
-			for _, f := range typeutil.GetAllFieldSchemas(collectionInfo.Schema) {
-				if f.FieldID == fieldID {
-					if f.GetNullable() && typeutil.IsVectorType(f.GetDataType()) {
-						// Derive valid rows from the persisted Statistics NullCounts
-						// instead of iterating field binlogs.
-						nullCount, ok := segment.EnsureStats().GetNullCounts()[fieldID]
-						if !ok {
-							// NullCounts carries an entry for every field present
-							// in the segment's data (zero included). A missing key
-							// means the field was added to the schema after this
-							// segment was flushed: every row reads as null, so
-							// there is nothing to index.
-							log.Info(ctx, "field has no NullCounts entry, treating all rows as null",
-								mlog.Int64("fieldID", fieldID))
-							nullCount = segIndex.NumRows
-						}
-						effectiveRows = segIndex.NumRows - nullCount
-					}
-					isVectorArrayIndex = typeutil.IsVectorArrayType(f.GetDataType())
-					isEmbeddingListIndex = isVectorArrayIndex && isEmbeddingListMetric(indexParams)
-					validElements, exact := exactVectorArrayValidElementCount(segment, f)
-					if exact {
-						estimatedVectorArrayVectors = validElements
-						log.Info(ctx, "vector array valid element count from segment statistics",
-							mlog.Int64("fieldID", f.GetFieldID()),
-							mlog.Int64("validElements", validElements))
-					}
-					if isVectorArrayIndex && !exact {
-						estimate, err := estimateVectorArrayElementCountForIndexBuild(segment.SegmentInfo, collectionInfo.Schema, f)
-						if err != nil {
-							failReason := "failed to estimate vector array element count, count is unknown: " + err.Error()
-							log.Warn(ctx, "failed to estimate vector array element count",
-								mlog.Int64("fieldID", f.GetFieldID()),
-								mlog.String("fieldName", f.GetName()),
-								mlog.String("failReason", failReason),
-								mlog.Err(err))
-							if updateErr := it.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, failReason); updateErr != nil {
-								log.Warn(ctx, "failed to update vector array index task state to Failed",
-									mlog.String("failReason", failReason),
-									mlog.Err(updateErr))
-							}
-							return
-						}
-						estimatedVectorArrayVectors = estimate.vectorCount
-						if estimate.emptyOnStaleSchema {
-							effectiveRows = 0
-							log.Info(ctx, "vector array field binlog is absent on stale schema segment, treating as empty field",
-								mlog.Int64("fieldID", f.GetFieldID()),
-								mlog.String("fieldName", f.GetName()),
-								mlog.Int32("segmentSchemaVersion", segment.GetSchemaVersion()),
-								mlog.Int32("collectionSchemaVersion", collectionInfo.Schema.GetVersion()))
-						}
-						if estimate.manifestBacked {
-							// Recovered StorageV3 segment: the element count can't be derived
-							// from the empty in-memory binlog arrays. Skip the element-count
-							// threshold so DataCoord doesn't fake-finish/block a build that the
-							// manifest-aware worker can complete.
-							skipVectorArrayThreshold = true
-							log.Info(ctx, "vector array element count unknown for manifest-backed segment, skipping element-count threshold",
-								mlog.Int64("fieldID", f.GetFieldID()),
-								mlog.String("fieldName", f.GetName()),
-								mlog.String("manifestPath", segment.GetManifestPath()))
-						}
-					}
-					break
+	if fieldID := it.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID); fieldID > 0 && !isNoTrainIndex(indexType) {
+		collectionInfo, err := it.handler.GetCollection(ctx, segIndex.CollectionID)
+		if err != nil {
+			log.Warn(ctx, "failed to get collection for index preparation, will retry", mlog.Err(err))
+			return nil
+		}
+		for _, f := range typeutil.GetAllFieldSchemas(collectionInfo.Schema) {
+			if f.FieldID == fieldID {
+				effectiveRows = effectiveIndexRows(segment, segIndex.NumRows, f)
+				isVectorArrayIndex = typeutil.IsVectorArrayType(f.GetDataType())
+				isEmbeddingListIndex = isVectorArrayIndex && isEmbeddingListMetric(indexParams)
+				validElements, exact := exactVectorArrayValidElementCount(segment, f)
+				if exact {
+					estimatedVectorArrayVectors = validElements
+					log.Info(ctx, "vector array valid element count from segment statistics",
+						mlog.FieldFieldID(f.GetFieldID()),
+						mlog.Int64("validElements", validElements))
 				}
+				if isVectorArrayIndex && !exact {
+					estimate, err := estimateVectorArrayElementCountForIndexBuild(segment.SegmentInfo, collectionInfo.Schema, f)
+					if err != nil {
+						failReason := "failed to estimate vector array element count, count is unknown: " + err.Error()
+						log.Warn(ctx, "failed to estimate vector array element count",
+							mlog.FieldFieldID(f.GetFieldID()),
+							mlog.String("fieldName", f.GetName()),
+							mlog.String("failReason", failReason),
+							mlog.Err(err))
+						if updateErr := it.updateStateWithMeta(ctx, indexpb.JobState_JobStateFailed, failReason); updateErr != nil {
+							log.Warn(ctx, "failed to update vector array index task state to Failed",
+								mlog.String("failReason", failReason),
+								mlog.Err(updateErr))
+						}
+						return nil
+					}
+					estimatedVectorArrayVectors = estimate.vectorCount
+					if estimate.emptyOnStaleSchema {
+						effectiveRows = 0
+						log.Info(ctx, "vector array field binlog is absent on stale schema segment, treating as empty field",
+							mlog.FieldFieldID(f.GetFieldID()),
+							mlog.String("fieldName", f.GetName()),
+							mlog.Int32("segmentSchemaVersion", segment.GetSchemaVersion()),
+							mlog.Int32("collectionSchemaVersion", collectionInfo.Schema.GetVersion()))
+					}
+					if estimate.manifestBacked {
+						// Recovered StorageV3 segment: the element count can't be derived
+						// from the empty in-memory binlog arrays. Skip the element-count
+						// threshold so DataCoord doesn't fake-finish/block a build that the
+						// manifest-aware worker can complete.
+						skipVectorArrayThreshold = true
+						log.Info(ctx, "vector array element count unknown for manifest-backed segment, skipping element-count threshold",
+							mlog.FieldFieldID(f.GetFieldID()),
+							mlog.String("fieldName", f.GetName()),
+							mlog.String("manifestPath", segment.GetManifestPath()))
+					}
+				}
+				break
 			}
 		}
 	}
@@ -424,12 +560,25 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 		now := time.Now()
 		it.SetTaskTime(taskcommon.TimeStart, now)
 		it.SetTaskTime(taskcommon.TimeEnd, now)
-		if err := it.UpdateStateWithMeta(indexpb.JobState_JobStateFinished, "fake finished index success"); err != nil {
+		if err := it.updateStateWithMeta(ctx, indexpb.JobState_JobStateFinished, "fake finished index success"); err != nil {
 			log.Warn(ctx, "failed to mark index task as finished", mlog.Err(err))
-			return
+			return nil
 		}
+		return nil
+	}
+
+	return &indexBuildPreparation{segment: segment, segIndex: segIndex, indexParams: indexParams, indexType: indexType}
+}
+
+func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+	ctx := context.TODO()
+	prepared := it.prepareForWorker(ctx)
+	if prepared == nil {
 		return
 	}
+	segment, segIndex := prepared.segment, prepared.segIndex
+	indexParams, indexType := prepared.indexParams, prepared.indexType
+	log := mlog.With(mlog.FieldTaskID(it.BuildID), mlog.FieldSegmentID(it.SegmentID))
 
 	// Create job request
 	req, err := it.prepareJobRequest(ctx, segment, segIndex, indexParams, indexType)
@@ -451,7 +600,7 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	}()
 
 	// Send request to worker
-	if err = cluster.CreateIndex(nodeID, req); err != nil {
+	if err = cluster.CreateIndex(nodeID, req, resource); err != nil {
 		log.Warn(ctx, "failed to send job to worker", mlog.Err(err))
 		return
 	}
@@ -907,7 +1056,7 @@ func (it *indexBuildTask) abortInflightTask(ctx context.Context, cluster session
 // re-enqueue it. On a meta write failure the state is left untouched so the
 // next round retries.
 func (it *indexBuildTask) abortForDroppedTarget(ctx context.Context, reason string) {
-	if err := it.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, reason); err != nil {
+	if err := it.updateStateWithMeta(ctx, indexpb.JobState_JobStateFailed, reason); err != nil {
 		mlog.Warn(ctx, "failed to persist aborted index task state, will retry",
 			mlog.Int64("taskID", it.BuildID), mlog.String("reason", reason), mlog.Err(err))
 	}

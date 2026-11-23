@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -342,11 +341,9 @@ func (p *ScoreBasedAssignPolicy) AssignChannel(
 		// Balance scenario: prefer WAL location but can fall back to score-based
 		// Handle WAL location for streaming service
 		targetNode = nil
-		if streamingutil.IsStreamingServiceEnabled() {
-			nodeID := snmanager.StaticStreamingNodeManager.GetWALLocated(c.GetChannelName())
-			if item, ok := nodeItemsMap[nodeID]; ok {
-				targetNode = item
-			}
+		nodeID := snmanager.StaticStreamingNodeManager.GetWALLocated(c.GetChannelName())
+		if item, ok := nodeItemsMap[nodeID]; ok {
+			targetNode = item
 		}
 
 		if targetNode == nil {

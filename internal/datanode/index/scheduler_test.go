@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -50,6 +51,7 @@ func TestGetStateFromError(t *testing.T) {
 			{"conversion budget exceeded", merr.CodeUnsupported, indexpb.JobState_JobStateFailed},
 			{"allocation failed", merr.CodeMemAllocateFailed, indexpb.JobState_JobStateRetry},
 			{"other configuration error", merr.CodeConfigInvalid, indexpb.JobState_JobStateRetry},
+			{"mapped field awaiting external refresh", merr.CodeFieldNotLoaded, indexpb.JobState_JobStateRetry},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				// Preserve the code through the same wrapper used by index builds.
@@ -181,6 +183,7 @@ type stagectx struct {
 	curstate     fakeTaskState
 	state2cancel fakeTaskState
 	ch           chan struct{}
+	closed       bool
 }
 
 var _ context.Context = &stagectx{}
@@ -189,10 +192,14 @@ func (s *stagectx) Deadline() (time.Time, bool) {
 	return time.Now(), false
 }
 
+// Done cancels the context once the task reaches state2cancel. It is called
+// more than once per stage (the slot gate's Acquire and processTask's wrap
+// both look at it), so the close is guarded.
 func (s *stagectx) Done() <-chan struct{} {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.curstate == s.state2cancel {
+	if s.curstate == s.state2cancel && !s.closed {
+		s.closed = true
 		close(s.ch)
 	}
 	return s.ch
@@ -241,6 +248,10 @@ func (t *fakeTask) Ctx() context.Context {
 
 func (t *fakeTask) GetSlot() int64 {
 	return 1
+}
+
+func (t *fakeTask) GetResource() taskcommon.Resource {
+	return taskcommon.Resource{CPU: 1, Memory: 100}
 }
 
 func (t *fakeTask) OnEnqueue(ctx context.Context) error {
@@ -318,9 +329,9 @@ func newTask(cancelStage fakeTaskState, reterror map[fakeTaskState]error, expect
 
 func TestIndexTaskQueueBudget(t *testing.T) {
 	t.Run("weighted queue budget transfers at dispatch", func(t *testing.T) {
-		sched := NewTaskScheduler(context.Background())
+		sched := newTestTaskScheduler(context.Background())
 		t.Cleanup(sched.Close)
-		sched.totalSlots = func() int64 { return 128 }
+		sched.capacity = func() taskcommon.Resource { return taskcommon.Resource{Memory: 128} }
 		first := &pipelineTestTask{id: "first", slots: 96, ctx: context.Background()}
 		second := &pipelineTestTask{id: "second", slots: 32, ctx: context.Background()}
 		require.NoError(t, sched.TaskQueue.Enqueue(first))
@@ -336,20 +347,20 @@ func TestIndexTaskQueueBudget(t *testing.T) {
 		used, queued = sched.TaskQueue.GetSlotUsage()
 		require.EqualValues(t, 96, used)
 		require.EqualValues(t, 32, queued)
-		sched.finishAdmission(first.Name())
-		sched.releaseSlots(first.Name())
+		sched.finishAdmission(first)
+		sched.releaseResources(first)
 		require.Same(t, second, sched.TaskQueue.PopUnissuedTask(true))
-		sched.finishAdmission(second.Name())
-		sched.releaseSlots(second.Name())
+		sched.finishAdmission(second)
+		sched.releaseResources(second)
 		used, queued = sched.TaskQueue.GetSlotUsage()
 		require.Zero(t, used)
 		require.Zero(t, queued)
 	})
 
 	t.Run("one oversized task can enter an empty queue", func(t *testing.T) {
-		sched := NewTaskScheduler(context.Background())
+		sched := newTestTaskScheduler(context.Background())
 		t.Cleanup(sched.Close)
-		sched.totalSlots = func() int64 { return 128 }
+		sched.capacity = func() taskcommon.Resource { return taskcommon.Resource{Memory: 128} }
 		ctx, cancel := context.WithCancel(context.Background())
 		t.Cleanup(cancel)
 		large := &pipelineTestTask{id: "large", slots: 256, ctx: ctx}
@@ -365,9 +376,9 @@ func TestIndexTaskQueueBudget(t *testing.T) {
 	})
 
 	t.Run("concurrent receivers share one queue budget", func(t *testing.T) {
-		sched := NewTaskScheduler(context.Background())
+		sched := newTestTaskScheduler(context.Background())
 		t.Cleanup(sched.Close)
-		sched.totalSlots = func() int64 { return 128 }
+		sched.capacity = func() taskcommon.Resource { return taskcommon.Resource{Memory: 128} }
 		var accepted atomic.Int32
 		var wg sync.WaitGroup
 		for id := range 16 {
@@ -393,26 +404,110 @@ func TestIndexTaskQueueBudget(t *testing.T) {
 }
 
 func TestIndexTaskQueueReleasesSlotsAfterTaskReset(t *testing.T) {
-	scheduler := NewTaskScheduler(context.Background())
+	scheduler := newTestTaskScheduler(context.Background())
 	t.Cleanup(scheduler.Close)
-	scheduler.totalSlots = func() int64 { return 1 }
+	scheduler.capacity = func() taskcommon.Resource { return taskcommon.Resource{Memory: 1} }
 	task := &fakeTask{id: 1, ctx: context.Background()}
-	assert.True(t, scheduler.acquireSlots(task))
+	assert.True(t, scheduler.acquireTestResources(task))
 	scheduler.TaskQueue.AddActiveTask(task)
-	name := task.Name()
-	// Slot ownership belongs to the queue key, even after task cleanup changes
-	// the fields used to compute its name.
+	// Ownership belongs to the execution even after cleanup changes its name.
 	task.id = 0
-	assert.Same(t, task, scheduler.TaskQueue.PopActiveTask(name))
+	scheduler.TaskQueue.MarkInactive(task)
+	scheduler.finishAdmission(task)
+	scheduler.releaseResources(task)
 	assert.Zero(t, scheduler.TaskQueue.GetUsingSlot())
 	assert.Empty(t, scheduler.pendingTasks)
+}
+
+func TestIndexTaskQueue_Resource(t *testing.T) {
+	paramtable.Init()
+
+	sched := newTestTaskScheduler(context.Background())
+	t.Cleanup(sched.Close)
+	queue := sched.TaskQueue.(*IndexTaskQueue)
+	task := newTask(fakeTaskSavedIndexes, nil, indexpb.JobState_JobStateFinished)
+
+	assert.NoError(t, queue.Enqueue(task))
+	// Reset() balances the _taskwg.Add(1) that OnEnqueue did, so the other
+	// tests in this package that wait on _taskwg are unaffected.
+	defer task.Reset()
+
+	// Slots are charged when a task is dispatched, so an enqueued task shows up
+	// as queued demand. Its cpu/memory is booked from the moment the node
+	// accepts it, which is what the coordinator subtracts from. It is booked
+	// inside addUnissuedTask, before the scheduler can see the task, so a
+	// release can never run ahead of it.
+	_, queued := queue.GetSlotUsage()
+	assert.Equal(t, int64(1), queued)
+	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 100}, queue.GetUsingResource())
+
+	queue.AddActiveTask(task)
+	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 100}, queue.GetUsingResource())
+
+	// Removing the registry entry does not return accepted CPU/memory: that
+	// booking belongs to the execution and is returned after cleanup.
+	queue.MarkInactive(task)
+	assert.Equal(t, int64(0), queue.GetUsingSlot())
+	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 100}, queue.GetUsingResource())
+	sched.releaseResources(task)
+	assert.Equal(t, taskcommon.Resource{}, queue.GetUsingResource())
+
+	// A task the queue rejects books nothing.
+	queue.unissuedTasks.PushBack(task)
+	queue.maxTaskNum = 1
+	rejected := newTask(fakeTaskSavedIndexes, nil, indexpb.JobState_JobStateFinished)
+	assert.Error(t, queue.addUnissuedTask(rejected))
+	assert.Equal(t, taskcommon.Resource{}, queue.GetUsingResource())
+	queue.unissuedTasks.Init()
+}
+
+// A dropped task whose native build ignores cancellation keeps running while
+// DataCoord dispatches the same clusterID/taskID again. Both executions are
+// booked and tracked independently, even though their names match.
+// Each must return its own booking when it finishes, whichever order they
+// finish in, or the node reports less free memory than it has until restart.
+func TestIndexTaskQueue_SameNameOverlapReleasesEachBooking(t *testing.T) {
+	paramtable.Init()
+
+	for _, newerFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("newerFinishesFirst=%v", newerFirst), func(t *testing.T) {
+			sched := newTestTaskScheduler(context.Background())
+			t.Cleanup(sched.Close)
+			sched.capacity = func() taskcommon.Resource { return taskcommon.Resource{Memory: 1600} }
+			queue := sched.TaskQueue.(*IndexTaskQueue)
+
+			older := newTask(fakeTaskSavedIndexes, nil, indexpb.JobState_JobStateFinished).(*fakeTask)
+			newer := newTask(fakeTaskSavedIndexes, nil, indexpb.JobState_JobStateFinished).(*fakeTask)
+			newer.id = older.id
+			require.Equal(t, older.Name(), newer.Name())
+
+			require.NoError(t, queue.Enqueue(older))
+			require.Same(t, older, queue.PopUnissuedTask(true))
+			olderExec := sched.beginTask(older)
+
+			require.NoError(t, queue.Enqueue(newer))
+			require.Same(t, newer, queue.PopUnissuedTask(true))
+			newerExec := sched.beginTask(newer)
+			assert.Equal(t, taskcommon.Resource{CPU: 2, Memory: 200}, queue.GetUsingResource())
+
+			first, second := olderExec, newerExec
+			if newerFirst {
+				first, second = newerExec, olderExec
+			}
+			sched.finishTask(first, nil)
+			assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 100}, queue.GetUsingResource())
+			sched.finishTask(second, nil)
+			assert.Equal(t, taskcommon.Resource{}, queue.GetUsingResource())
+			assert.Zero(t, queue.GetUsingSlot())
+		})
+	}
 }
 
 func TestIndexTaskScheduler(t *testing.T) {
 	paramtable.Init()
 
-	scheduler := NewTaskScheduler(context.TODO())
-	scheduler.totalSlots = func() int64 { return 1024 }
+	scheduler := newTestTaskScheduler(context.TODO())
+	scheduler.capacity = func() taskcommon.Resource { return taskcommon.Resource{Memory: 102400} }
 	scheduler.Start()
 
 	tasks := make([]Task, 0)
@@ -439,8 +534,8 @@ func TestIndexTaskScheduler(t *testing.T) {
 	assert.Equal(t, tasks[len(tasks)-1].GetState(), tasks[len(tasks)-1].(*fakeTask).expectedState)
 	assert.Equal(t, tasks[len(tasks)-1].Ctx().(*stagectx).curstate, fakeTaskState(fakeTaskSavedIndexes))
 
-	scheduler = NewTaskScheduler(context.TODO())
-	scheduler.totalSlots = func() int64 { return 1024 }
+	scheduler = newTestTaskScheduler(context.TODO())
+	scheduler.capacity = func() taskcommon.Resource { return taskcommon.Resource{Memory: 102400} }
 	tasks = make([]Task, 0, 1024)
 	for i := 0; i < 1024; i++ {
 		tasks = append(tasks, newTask(fakeTaskSavedIndexes, nil, indexpb.JobState_JobStateFinished))
@@ -478,7 +573,7 @@ func newSchedulerIndexBuildTask(t *testing.T, manager *TaskManager, buildID int6
 	manager.LoadOrStoreIndexTask(req.GetClusterID(), req.GetBuildID(), &IndexTaskInfo{
 		State: commonpb.IndexState_InProgress,
 	})
-	return NewIndexBuildTask(ctx, cancel, req, nil, manager, nil)
+	return NewIndexBuildTask(ctx, cancel, req, nil, manager, nil, taskcommon.Resource{})
 }
 
 func TestIndexTaskSchedulerRecordsIndexTaskCost(t *testing.T) {
@@ -643,4 +738,33 @@ func TestIndexTaskSchedulerCostExcludesPipelineWaits(t *testing.T) {
 	require.GreaterOrEqual(t, info.ExecEndMs, info.ExecStartMs)
 	require.LessOrEqual(t, info.ExecEndMs, uploadStart.UnixMilli())
 	require.Equal(t, 1, elapsed.Times())
+}
+
+// Every index-family task reports exactly the cpu/memory its constructor was
+// handed -- the estimate DataCoord put in the CreateTask properties -- and
+// nothing when the coordinator predates them.
+func TestIndexTaskGetResource(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager := NewTaskManager(ctx)
+	want := taskcommon.Resource{CPU: 2, Memory: 1 << 30}
+
+	assert.Equal(t, want, NewIndexBuildTask(ctx, cancel,
+		&workerpb.CreateJobRequest{}, nil, manager, nil, want).GetResource())
+	assert.Equal(t, want, NewStatsTask(ctx, cancel,
+		&workerpb.CreateStatsRequest{}, manager, nil, nil, want).GetResource())
+	assert.Equal(t, want, NewAnalyzeTask(ctx, cancel,
+		&workerpb.AnalyzeRequest{}, manager, nil, want).GetResource())
+
+	// A coordinator that predates the properties books nothing.
+	assert.True(t, NewIndexBuildTask(ctx, cancel,
+		&workerpb.CreateJobRequest{}, nil, manager, nil, taskcommon.Resource{}).GetResource().IsZero())
+	assert.True(t, NewStatsTask(ctx, cancel,
+		&workerpb.CreateStatsRequest{}, manager, nil, nil, taskcommon.Resource{}).GetResource().IsZero())
+	assert.True(t, NewAnalyzeTask(ctx, cancel,
+		&workerpb.AnalyzeRequest{}, manager, nil, taskcommon.Resource{}).GetResource().IsZero())
+}
+
+func newTestTaskScheduler(ctx context.Context) *TaskScheduler {
+	return NewTaskScheduler(ctx, func() taskcommon.Resource { return taskcommon.Resource{Memory: 102400} })
 }
