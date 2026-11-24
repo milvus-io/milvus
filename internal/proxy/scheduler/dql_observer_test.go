@@ -22,7 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -39,18 +39,26 @@ type observedTask struct {
 
 func (t *observedTask) IsSubTask() bool      { return t.subtask }
 func (t *observedTask) IsInternalTask() bool { return t.internal }
+
 func TestDQLStageFollowsOnlyAcceptedExternalTasks(t *testing.T) {
 	paramtable.Init()
 	for _, tc := range []struct {
 		name                    string
+		msgType                 commonpb.MsgType
 		internal, subtask, full bool
+		wantPhases              bool
 	}{
-		{"external", false, false, false}, {"requery", false, true, false}, {"search-by-pk", true, false, false}, {"full", false, false, true},
+		{name: "search", msgType: commonpb.MsgType_Search, wantPhases: true},
+		{name: "retrieve", msgType: commonpb.MsgType_Retrieve, wantPhases: true},
+		{name: "requery", msgType: commonpb.MsgType_Retrieve, subtask: true},
+		{name: "internal read", msgType: commonpb.MsgType_Retrieve, internal: true},
+		{name: "upsert", msgType: commonpb.MsgType_Upsert},
+		{name: "full", msgType: commonpb.MsgType_Retrieve, full: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			observer := &phaseObserver{}
 			task := &observedTask{mockDqlTask: newMockDqlTask(extension.WithDQLObserver(context.Background(), observer)), internal: tc.internal, subtask: tc.subtask}
-			task.name = taskmodel.QueryTaskName
+			task.tType = tc.msgType
 			queue := newBaseTaskQueue(newMockTsoAllocator())
 			if tc.full {
 				queue.SetMaxTaskNum(0)
@@ -62,10 +70,10 @@ func TestDQLStageFollowsOnlyAcceptedExternalTasks(t *testing.T) {
 			queue.PopUnissuedTask()
 			(&TaskScheduler{}).processTask(task, queue)
 			require.NoError(t, task.WaitToFinish())
-			if tc.internal || tc.subtask {
-				require.Empty(t, observer.phases)
-			} else {
+			if tc.wantPhases {
 				require.Equal(t, []string{"queue", "execute"}, observer.phases)
+			} else {
+				require.Empty(t, observer.phases)
 			}
 		})
 	}

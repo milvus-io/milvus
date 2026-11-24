@@ -29,6 +29,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/proxy/reqregistry"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
@@ -859,5 +860,6 @@ func observeDQLTask(t taskmodel.Task) bool {
 	if internal, ok := t.(interface{ IsInternalTask() bool }); ok && internal.IsInternalTask() {
 		return false
 	}
-	return !t.IsSubTask() && (t.Name() == taskmodel.SearchTaskName || t.Name() == taskmodel.QueryTaskName)
+	msgType := t.Type()
+	return !t.IsSubTask() && (msgType == commonpb.MsgType_Search || msgType == commonpb.MsgType_Retrieve)
 }
