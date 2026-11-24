@@ -18,6 +18,7 @@ package importutilv2
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -31,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -183,11 +184,18 @@ func TestPackedBackupReaderPassesSourceContext(t *testing.T) {
 		{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
 	}}
 	file := &internalpb.ImportFile{Paths: []string{prefix}}
-	options := Options{{Key: BackupFlag, Value: "true"}, {Key: StorageVersion, Value: "2"}}
+	artifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":17}`))
+	options := Options{
+		{Key: BackupFlag, Value: "true"},
+		{Key: StorageVersion, Value: "2"},
+		{Key: EZK, Value: artifact},
+	}
 	config := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
-	source := &indexcgopb.StoragePluginContext{EncryptionZoneId: 17, EncryptionKey: "c291cmNl"}
+	pluginContext := []*commonpb.KeyValuePair{
+		{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:c291cmNl"},
+	}
 
-	reader, err := NewReader(ctx, cm, schema, file, options, 1024, config, source)
+	reader, err := NewReader(ctx, cm, schema, file, options, 1024, config, pluginContext)
 	require.NoError(t, err)
 	defer reader.Close()
 	_, err = reader.Read()

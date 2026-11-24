@@ -78,6 +78,9 @@ func TestRegisterImportCipherContexts(t *testing.T) {
 			t.Cleanup(SetTestCipher(c))
 			source, target, err := ParseImportCipherContexts(tc.artifact, tc.props, tc.wire, collectionID)
 			require.NoError(t, err)
+			gotSource, err := GetImportSourcePluginContext(tc.artifact, tc.wire)
+			require.NoError(t, err)
+			require.Equal(t, source, gotSource)
 			var want []map[string]string
 			if tc.wantSource {
 				require.Equal(t, "b2xk", source.GetEncryptionKey())

@@ -30,13 +30,11 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
-	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 )
 
 func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedWriter, error) {
@@ -128,9 +126,6 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 		status = C.NewPackedWriter(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnGroups, &cPackedWriter, pluginContextPtr)
 	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
-		if errors.Is(err, merr.ErrSegcoreUnsupported) || merr.GetErrorType(err) == merr.InputError {
-			return nil, retry.Unrecoverable(err)
-		}
 		return nil, err
 	}
 	return &PackedWriter{cPackedWriter: cPackedWriter}, nil

@@ -157,7 +157,7 @@ func TestImportDispatchStopsOnEZKError(t *testing.T) {
 				catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{{
 					JobID: 1, TaskID: 2, State: datapb.ImportTaskStateV2_Pending,
 				}}, nil)
-				alloc.EXPECT().AllocN(mock.Anything).Return(10, 20, nil).Once()
+				alloc.EXPECT().AllocN(mock.Anything).Return(10, 20, nil)
 				cluster.EXPECT().CreateImport(int64(11), mock.Anything, mock.Anything).Return(workerOffline).Once()
 			}
 			im, err := NewImportMeta(ctx, catalog, alloc, nil)

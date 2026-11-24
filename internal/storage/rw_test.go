@@ -335,20 +335,6 @@ func (s *PackedBinlogRecordSuite) TestReaderExplicitPluginContext() {
 		s.ErrorIs(err, merr.ErrServiceUnavailable)
 		s.Nil(rr)
 	})
-
-	s.Run("explicit_nil_skips_target_schema_encryption", func() {
-		cipher := mock_hook.NewMockCipher(s.T())
-		s.T().Cleanup(hookutil.SetTestCipher(cipher))
-		// No GetUnsafeKey call should occur when explicit nil pluginContext is supplied.
-		rr, err := NewBinlogRecordReader(s.ctx, nil, s.schema,
-			WithVersion(StorageV1),
-			WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) { return nil, nil }),
-			WithPluginContext(nil),
-		)
-		s.NoError(err)
-		s.NotNil(rr)
-		s.NoError(rr.Close())
-	})
 }
 
 func (s *PackedBinlogRecordSuite) TestConvertArrowSchemaError() {

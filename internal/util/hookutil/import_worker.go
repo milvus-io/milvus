@@ -18,7 +18,6 @@ package hookutil
 
 import (
 	"encoding/base64"
-	"strings"
 
 	"github.com/cockroachdb/errors"
 
@@ -26,6 +25,24 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
+
+// GetImportSourcePluginContext extracts the backup source cipher context from the
+// request's plugin context. When present, the source entry always precedes the target.
+func GetImportSourcePluginContext(artifact string, pluginContext []*commonpb.KeyValuePair) (*indexcgopb.StoragePluginContext, error) {
+	if artifact == "" {
+		return nil, nil
+	}
+	id, err := GetEzIDByImportEzk(artifact)
+	if err != nil {
+		return nil, merr.WrapErrImportFailed(err.Error())
+	}
+	for _, entry := range pluginContext {
+		if entry.GetKey() == CipherConfigUnsafeEZK {
+			return importCipherEntry(entry, "source", id, 0)
+		}
+	}
+	return nil, merr.WrapErrImportFailed("missing source import cipher context")
+}
 
 // ParseImportCipherContexts reads the ordered source and target snapshots without
 // consulting or updating the worker's keys. A plaintext side has no wire entry.
@@ -98,18 +115,7 @@ func classifyImportRegistrationError(err error) error {
 		merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) {
 		return err
 	}
-
-	// The worker plugin reports local keyset parsing and merge failures as plain errors.
-	message := err.Error()
-	if strings.Contains(message, "conflicting key ID ") || strings.Contains(message, "conflicting ordinary key ID ") {
-		return merr.WrapErrImportFailed("conflicting key ID in import keyset")
-	}
-	if merr.GetErrorType(err) == merr.InputError ||
-		strings.Contains(message, "CipherPlugin: cannot parse ezk, ezID=") ||
-		strings.Contains(message, "CipherPlugin: cannot register ezk, ezID=") {
-		return merr.WrapErrImportFailed("invalid import keyset")
-	}
-	return err
+	return merr.WrapErrImportFailed(err.Error())
 }
 
 func importCipherEntry(entry *commonpb.KeyValuePair, role string, expectedID, collectionID int64) (*indexcgopb.StoragePluginContext, error) {

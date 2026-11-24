@@ -328,10 +328,6 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 		return merr.Status(err), nil
 	}
 
-	if err := registerImportCipherContexts(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID()); err != nil {
-		return merr.Status(err), nil
-	}
-
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
 		log.Error("create chunk manager failed", zap.String("bucket", req.GetStorageConfig().GetBucketName()),
@@ -371,9 +367,6 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 		return merr.Status(err), nil
 	}
 
-	if err := registerImportCipherContexts(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID()); err != nil {
-		return merr.Status(err), nil
-	}
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
 		log.Error("create chunk manager failed", zap.String("bucket", req.GetStorageConfig().GetBucketName()),
@@ -561,10 +554,16 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
+		if err := registerImportCipherContexts(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID()); err != nil {
+			return merr.Status(err), nil
+		}
 		return node.PreImport(ctx, req)
 	case taskcommon.Import:
 		req := &datapb.ImportRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
+			return merr.Status(err), nil
+		}
+		if err := registerImportCipherContexts(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.ImportV2(ctx, req)

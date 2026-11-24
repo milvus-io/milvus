@@ -19,14 +19,15 @@ package importutilv2
 import (
 	"context"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/csv"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/json"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/numpy"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -53,7 +54,7 @@ func NewReader(ctx context.Context,
 	options Options,
 	bufferSize int,
 	storageConfig *indexpb.StorageConfig,
-	source *indexcgopb.StoragePluginContext,
+	pluginContext []*commonpb.KeyValuePair,
 ) (Reader, error) {
 	if IsBackup(options) {
 		tsStart, tsEnd, err := ParseTimeRange(options)
@@ -62,6 +63,11 @@ func NewReader(ctx context.Context,
 		}
 		paths := importFile.GetPaths()
 		storageVersion, err := GetStorageVersion(options)
+		if err != nil {
+			return nil, err
+		}
+		importEz, _ := GetEZK(options)
+		source, err := hookutil.GetImportSourcePluginContext(importEz, pluginContext)
 		if err != nil {
 			return nil, err
 		}

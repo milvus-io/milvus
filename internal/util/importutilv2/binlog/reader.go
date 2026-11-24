@@ -128,7 +128,9 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 			return r.multiReadWithRetry(ctx, paths)
 		}),
 		storage.WithStorageConfig(storageConfig),
-		storage.WithPluginContext(source),
+	}
+	if source != nil {
+		rwOptions = append(rwOptions, storage.WithPluginContext(source))
 	}
 
 	rr, err := storage.NewBinlogRecordReader(r.ctx, binlogs, r.schema, rwOptions...)

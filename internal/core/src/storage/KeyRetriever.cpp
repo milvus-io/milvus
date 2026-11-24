@@ -2,7 +2,6 @@
 
 #include <exception>
 #include <mutex>
-#include <new>
 
 #include "arrow/io/caching.h"
 #include "common/EasyAssert.h"
@@ -56,16 +55,8 @@ RegisterReaderKeys(const CPluginContext* context) {
     if (!cipher) {
         ThrowInfo(Unsupported, "missing cipher plugin");
     }
-    try {
-        cipher->RegisterReadKeyset(
-            context->ez_id, context->collection_id, context->key);
-    } catch (const SegcoreError&) {
-        throw;
-    } catch (const std::bad_alloc&) {
-        throw;
-    } catch (const std::exception&) {
-        ThrowInfo(InvalidParameter, "cipher plugin rejected the reader keyset");
-    }
+    cipher->RegisterReadKeyset(
+        context->ez_id, context->collection_id, context->key);
 }
 
 std::pair<std::string, std::string>
@@ -81,17 +72,8 @@ GetWriterEncryptionParams(const CPluginContext* context) {
         ThrowInfo(Unsupported, "missing cipher plugin");
     }
 
-    std::pair<std::shared_ptr<plugin::IEncryptor>, std::string> keys;
-    try {
-        keys = cipher->GetEncryptorForKeyset(
-            context->ez_id, context->collection_id, context->key);
-    } catch (const SegcoreError&) {
-        throw;
-    } catch (const std::bad_alloc&) {
-        throw;
-    } catch (const std::exception&) {
-        ThrowInfo(InvalidParameter, "cipher plugin rejected the writer keyset");
-    }
+    auto keys = cipher->GetEncryptorForKeyset(
+        context->ez_id, context->collection_id, context->key);
     if (!keys.first) {
         ThrowInfo(InvalidParameter, "cipher plugin returned no encryptor");
     }

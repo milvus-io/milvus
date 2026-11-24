@@ -800,97 +800,87 @@ func TestDataNodeImportCipherContext(t *testing.T) {
 		{"L0PreImport", taskcommon.PreImport, true},
 		{"L0Import", taskcommon.Import, true},
 	} {
-		for _, transport := range []string{"direct RPC", "CreateTask"} {
-			t.Run(scenario.name+"/"+transport, func(t *testing.T) {
-				options := []*commonpb.KeyValuePair{
-					{Key: importutilv2.BackupFlag, Value: "true"},
-					{Key: importutilv2.EZK, Value: artifact},
-				}
-				if scenario.l0 {
-					options = append(options, &commonpb.KeyValuePair{Key: importutilv2.L0Import, Value: "true"})
-				}
-				cipher := &workerImportCipher{}
-				t.Cleanup(hookutil.SetTestCipher(cipher))
-				node := &DataNode{
-					ctx: ctx, lifetime: lifetime.NewLifetime(commonpb.StateCode_Healthy),
-					importTaskMgr: importv2.NewTaskManager(), storageFactory: NewChunkMgrFactory(),
-				}
-				submit := func(entries []*commonpb.KeyValuePair) (*commonpb.Status, error) {
-					var payload proto.Message
-					if scenario.taskType == taskcommon.PreImport {
-						req := &datapb.PreImportRequest{
-							TaskID: taskID, Schema: schema, Options: options,
-							StorageConfig: config, PluginContext: entries,
-						}
-						if transport == "direct RPC" {
-							return node.PreImport(ctx, req)
-						}
-						payload = req
-					} else {
-						req := &datapb.ImportRequest{
-							TaskID: taskID, Schema: schema, Options: options,
-							StorageVersion: storage.StorageV2, StorageConfig: config, PluginContext: entries,
-						}
-						if transport == "direct RPC" {
-							return node.ImportV2(ctx, req)
-						}
-						payload = req
+		t.Run(scenario.name, func(t *testing.T) {
+			options := []*commonpb.KeyValuePair{
+				{Key: importutilv2.BackupFlag, Value: "true"},
+				{Key: importutilv2.EZK, Value: artifact},
+			}
+			if scenario.l0 {
+				options = append(options, &commonpb.KeyValuePair{Key: importutilv2.L0Import, Value: "true"})
+			}
+			cipher := &workerImportCipher{}
+			t.Cleanup(hookutil.SetTestCipher(cipher))
+			node := &DataNode{
+				ctx: ctx, lifetime: lifetime.NewLifetime(commonpb.StateCode_Healthy),
+				importTaskMgr: importv2.NewTaskManager(), storageFactory: NewChunkMgrFactory(),
+			}
+			submit := func(entries []*commonpb.KeyValuePair) (*commonpb.Status, error) {
+				var payload proto.Message
+				if scenario.taskType == taskcommon.PreImport {
+					payload = &datapb.PreImportRequest{
+						TaskID: taskID, Schema: schema, Options: options,
+						StorageConfig: config, PluginContext: entries,
 					}
-					data, err := proto.Marshal(payload)
-					require.NoError(t, err)
-					return node.CreateTask(ctx, &workerpb.CreateTaskRequest{
-						Properties: map[string]string{taskcommon.TypeKey: scenario.taskType}, Payload: data,
-					})
-				}
-				status, err := submit(wire[:2])
-				require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrImportFailed)
-				require.Nil(t, node.importTaskMgr.Get(taskID))
-				require.Empty(t, cipher.registered)
-
-				restore := hookutil.SetTestCipher(nil)
-				status, err = submit(wire)
-				restore()
-				require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrServiceUnavailable)
-				require.True(t, status.GetRetriable())
-				require.Nil(t, node.importTaskMgr.Get(taskID))
-
-				cipher.targetErr = merr.WrapErrServiceUnavailable("target key cache unavailable")
-				status, err = submit(wire)
-				require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrServiceUnavailable)
-				require.True(t, status.GetRetriable())
-				require.Nil(t, node.importTaskMgr.Get(taskID))
-				require.Empty(t, cipher.registered)
-
-				cipher.targetErr = errors.New("init key manager failed: CipherPlugin: cannot parse ezk, ezID=7, err=invalid keyset")
-				status, err = submit(wire)
-				require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrImportFailed)
-				require.Contains(t, status.GetReason(), "invalid import keyset")
-				require.Nil(t, node.importTaskMgr.Get(taskID))
-				require.Empty(t, cipher.registered)
-
-				cipher.targetErr = nil
-				cipher.sourceErr = errors.New("init key manager failed: CipherPlugin: cannot register ezk, ezID=7, err=conflicting key ID 24 for ezID=7")
-				status, err = submit(wire)
-				require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrImportFailed)
-				require.Contains(t, status.GetReason(), "conflicting key ID")
-				require.Nil(t, node.importTaskMgr.Get(taskID))
-				require.Equal(t, []map[string]string{target}, cipher.registered)
-
-				cipher.registered = nil
-				cipher.sourceErr = nil
-				status, err = submit(wire)
-				require.NoError(t, merr.CheckRPCCall(status, err))
-				task := node.importTaskMgr.Get(taskID)
-				require.NotNil(t, task)
-				if scenario.l0 {
-					if scenario.taskType == taskcommon.PreImport {
-						require.Equal(t, importv2.L0PreImportTaskType, task.GetType())
-					} else {
-						require.Equal(t, importv2.L0ImportTaskType, task.GetType())
+				} else {
+					payload = &datapb.ImportRequest{
+						TaskID: taskID, Schema: schema, Options: options,
+						StorageVersion: storage.StorageV2, StorageConfig: config, PluginContext: entries,
 					}
 				}
-				require.Equal(t, []map[string]string{target, source}, cipher.registered)
-			})
-		}
+				data, err := proto.Marshal(payload)
+				require.NoError(t, err)
+				return node.CreateTask(ctx, &workerpb.CreateTaskRequest{
+					Properties: map[string]string{taskcommon.TypeKey: scenario.taskType}, Payload: data,
+				})
+			}
+			status, err := submit(wire[:2])
+			require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrImportFailed)
+			require.Nil(t, node.importTaskMgr.Get(taskID))
+			require.Empty(t, cipher.registered)
+
+			restore := hookutil.SetTestCipher(nil)
+			status, err = submit(wire)
+			restore()
+			require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrServiceUnavailable)
+			require.True(t, status.GetRetriable())
+			require.Nil(t, node.importTaskMgr.Get(taskID))
+
+			cipher.targetErr = merr.WrapErrServiceUnavailable("target key cache unavailable")
+			status, err = submit(wire)
+			require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrServiceUnavailable)
+			require.True(t, status.GetRetriable())
+			require.Nil(t, node.importTaskMgr.Get(taskID))
+			require.Empty(t, cipher.registered)
+
+			cipher.targetErr = errors.New("init key manager failed: CipherPlugin: cannot parse ezk, ezID=7, err=invalid keyset")
+			status, err = submit(wire)
+			require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrImportFailed)
+			require.Contains(t, status.GetReason(), "invalid keyset")
+			require.Nil(t, node.importTaskMgr.Get(taskID))
+			require.Empty(t, cipher.registered)
+
+			cipher.targetErr = nil
+			cipher.sourceErr = errors.New("init key manager failed: CipherPlugin: cannot register ezk, ezID=7, err=conflicting key ID 24 for ezID=7")
+			status, err = submit(wire)
+			require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrImportFailed)
+			require.Contains(t, status.GetReason(), "conflicting key ID")
+			require.Nil(t, node.importTaskMgr.Get(taskID))
+			require.Equal(t, []map[string]string{target}, cipher.registered)
+
+			cipher.registered = nil
+			cipher.sourceErr = nil
+			status, err = submit(wire)
+			require.NoError(t, merr.CheckRPCCall(status, err))
+			task := node.importTaskMgr.Get(taskID)
+			require.NotNil(t, task)
+			if scenario.l0 {
+				if scenario.taskType == taskcommon.PreImport {
+					require.Equal(t, importv2.L0PreImportTaskType, task.GetType())
+				} else {
+					require.Equal(t, importv2.L0ImportTaskType, task.GetType())
+				}
+			}
+			require.Equal(t, []map[string]string{target, source}, cipher.registered)
+		})
 	}
 }

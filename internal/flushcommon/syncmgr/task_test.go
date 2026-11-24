@@ -220,13 +220,13 @@ func (s *SyncTaskSuite) TestEncryptedWriteRejectsMissingUnsafeKey() {
 		s.ErrorIs(err, merr.ErrServiceUnavailable)
 	})
 
-	s.Run("empty_unsafe_key_retries_under_policy", func() {
+	s.Run("empty_unsafe_key", func() {
 		cipher := mock_hook.NewMockCipher(s.T())
-		cipher.EXPECT().GetUnsafeKey(int64(17), s.collectionID).Return(nil).Twice()
+		cipher.EXPECT().GetUnsafeKey(int64(17), s.collectionID).Return(nil).Once()
 		s.T().Cleanup(hookutil.SetTestCipher(cipher))
 
 		pack := new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()})
-		task := s.getSuiteSyncTask(pack).WithWriteRetryOptions(retry.Attempts(2), retry.Sleep(0))
+		task := s.getSuiteSyncTask(pack).WithWriteRetryOptions(retry.Attempts(1))
 		err := task.Run(context.Background())
 		s.ErrorIs(err, merr.ErrServiceUnavailable)
 	})

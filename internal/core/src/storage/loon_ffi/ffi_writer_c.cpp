@@ -43,8 +43,5 @@ GetEncParams(CPluginContext* c_plugin_context,
 
     } catch (const std::exception& e) {
         return milvus::FailureCStatus(&e);
-    } catch (...) {
-        return milvus::FailureCStatus(milvus::UnexpectedError,
-                                      "Unknown exception");
     }
 }

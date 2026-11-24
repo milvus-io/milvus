@@ -67,9 +67,8 @@ type rwOptions struct {
 	columnGroups        []storagecommon.ColumnGroup
 	collectionID        int64
 	storageConfig       *indexpb.StorageConfig
-	neededFields             typeutil.Set[int64]
-	pluginContext            *indexcgopb.StoragePluginContext
-	hasExplicitPluginContext bool
+	neededFields        typeutil.Set[int64]
+	pluginContext       *indexcgopb.StoragePluginContext
 }
 
 func (o *rwOptions) validate() error {
@@ -169,7 +168,6 @@ func WithNeededFields(neededFields typeutil.Set[int64]) RwOption {
 func WithPluginContext(pluginContext *indexcgopb.StoragePluginContext) RwOption {
 	return func(options *rwOptions) {
 		options.pluginContext = pluginContext
-		options.hasExplicitPluginContext = true
 	}
 }
 
@@ -255,20 +253,18 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 
 	binlogReaderOpts := []BinlogReaderOption{}
 	var pluginContext *indexcgopb.StoragePluginContext
-	if rwOptions.hasExplicitPluginContext {
-		if rwOptions.pluginContext != nil {
-			if rwOptions.version == StorageV1 {
-				if !hookutil.IsClusterEncryptionEnabled() {
-					return nil, merr.WrapErrServiceUnavailable(fmt.Sprintf("cipher plugin is not enabled for ezID=%d, collectionID=%d",
-						rwOptions.pluginContext.GetEncryptionZoneId(), rwOptions.pluginContext.GetCollectionId()))
-				}
-				binlogReaderOpts = append(binlogReaderOpts, WithReaderDecryptionContext(
-					rwOptions.pluginContext.GetEncryptionZoneId(),
-					rwOptions.pluginContext.GetCollectionId(),
-				))
-			} else {
-				pluginContext = rwOptions.pluginContext
+	if rwOptions.pluginContext != nil {
+		if rwOptions.version == StorageV1 {
+			if !hookutil.IsClusterEncryptionEnabled() {
+				return nil, merr.WrapErrServiceUnavailable(fmt.Sprintf("cipher plugin is not enabled for ezID=%d, collectionID=%d",
+					rwOptions.pluginContext.GetEncryptionZoneId(), rwOptions.pluginContext.GetCollectionId()))
 			}
+			binlogReaderOpts = append(binlogReaderOpts, WithReaderDecryptionContext(
+				rwOptions.pluginContext.GetEncryptionZoneId(),
+				rwOptions.pluginContext.GetCollectionId(),
+			))
+		} else {
+			pluginContext = rwOptions.pluginContext
 		}
 	} else if hookutil.IsClusterEncryptionEnabled() {
 		ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID)

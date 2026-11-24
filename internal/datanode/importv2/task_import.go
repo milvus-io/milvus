@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -166,14 +165,6 @@ func (t *ImportTask) Clone() Task {
 }
 
 func (t *ImportTask) Execute() []*conc.Future[any] {
-	req := t.req
-	artifact, _ := importutilv2.GetEZK(req.GetOptions())
-	source, _, err := hookutil.ParseImportCipherContexts(artifact, t.GetSchema().GetProperties(), req.GetPluginContext(), t.GetCollectionID())
-	if err != nil {
-		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
-		return []*conc.Future[any]{conc.Go(func() (any, error) { return nil, err })}
-	}
-
 	bufferSize := t.GetBufferSize()
 	log.Info("start to import", WrapLogFields(t,
 		zap.Int64("bufferSize", bufferSize),
@@ -182,9 +173,10 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		zap.Any("schema", t.GetSchema()),
 	)...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
+	req := t.req
 
 	fn := func(file *internalpb.ImportFile) error {
-		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, req.GetOptions(), int(bufferSize), req.GetStorageConfig(), source)
+		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, req.GetOptions(), int(bufferSize), req.GetStorageConfig(), req.GetPluginContext())
 		if err != nil {
 			log.Warn("new reader failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())

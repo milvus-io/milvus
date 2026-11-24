@@ -120,9 +120,6 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
-    } catch (...) {
-        return milvus::FailureCStatus(milvus::UnexpectedError,
-                                      "Unknown exception");
     }
 }
 
@@ -187,9 +184,6 @@ NewPackedWriter(struct ArrowSchema* schema,
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
-    } catch (...) {
-        return milvus::FailureCStatus(milvus::UnexpectedError,
-                                      "Unknown exception");
     }
 }
 
