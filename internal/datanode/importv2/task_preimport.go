@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -138,6 +139,13 @@ func (t *PreImportTask) Clone() Task {
 }
 
 func (t *PreImportTask) Execute() []*conc.Future[any] {
+	artifact, _ := importutilv2.GetEZK(t.options)
+	source, _, err := hookutil.ParseImportCipherContexts(artifact, t.GetSchema().GetProperties(), t.req.GetPluginContext(), t.GetCollectionID())
+	if err != nil {
+		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+		return []*conc.Future[any]{conc.Go(func() (any, error) { return nil, err })}
+	}
+
 	bufferSize := int(t.GetBufferSize())
 	log.Info("start to preimport", WrapLogFields(t,
 		zap.Int("bufferSize", bufferSize),
@@ -152,7 +160,7 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 		})
 
 	fn := func(i int, file *internalpb.ImportFile) error {
-		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, t.options, bufferSize, t.req.GetStorageConfig())
+		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, t.options, bufferSize, t.req.GetStorageConfig(), source)
 		if err != nil {
 			log.Warn("new reader failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())

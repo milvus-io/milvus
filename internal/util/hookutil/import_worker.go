@@ -18,6 +18,9 @@ package hookutil
 
 import (
 	"encoding/base64"
+	"strings"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
@@ -40,7 +43,7 @@ func ParseImportCipherContexts(artifact string, properties, pluginContext []*com
 	if artifact != "" {
 		id, err := GetEzIDByImportEzk(artifact)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, merr.WrapErrImportFailed(err.Error())
 		}
 		// The wire context contains the source zone, but no source collection ID.
 		source, err = importCipherEntry(next(), "source", id, 0)
@@ -50,7 +53,7 @@ func ParseImportCipherContexts(artifact string, properties, pluginContext []*com
 	}
 	targetID, hasTarget, err := parseTargetEzID(properties)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, merr.WrapErrImportFailed(err.Error())
 	}
 	if hasTarget {
 		target, err = importCipherEntry(next(), "target", targetID, collectionID)
@@ -68,29 +71,45 @@ func RegisterImportCipherContexts(
 	artifact string,
 	properties, pluginContext []*commonpb.KeyValuePair,
 	collectionID int64,
-	registerNativeRead func(ezID int64, key string) error,
 ) error {
 	source, target, err := ParseImportCipherContexts(artifact, properties, pluginContext, collectionID)
 	if err != nil {
 		return err
 	}
 	if (source != nil || target != nil) && !IsClusterEncryptionEnabled() {
-		return errCipherPluginMissing
+		return merr.WrapErrServiceUnavailableErr(errCipherPluginMissing, "cannot register import cipher contexts")
+	}
+	// Register the authoritative target before checking a same-zone source.
+	if target != nil {
+		if err := CreateLocalEZ(target.GetEncryptionZoneId(), target.GetEncryptionKey()); err != nil {
+			return classifyImportRegistrationError(err)
+		}
 	}
 	if source != nil {
 		if err := RegisterLocalImportEZ(source.GetEncryptionZoneId(), source.GetEncryptionKey()); err != nil {
-			return err
+			return classifyImportRegistrationError(err)
 		}
-		if registerNativeRead != nil {
-			if err := registerNativeRead(source.GetEncryptionZoneId(), source.GetEncryptionKey()); err != nil {
-				return err
-			}
-		}
-	}
-	if target != nil {
-		return CreateLocalEZ(target.GetEncryptionZoneId(), target.GetEncryptionKey())
 	}
 	return nil
+}
+
+func classifyImportRegistrationError(err error) error {
+	if errors.Is(err, merr.ErrImportFailed) || errors.Is(err, merr.ErrServiceUnavailable) ||
+		merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) {
+		return err
+	}
+
+	// The worker plugin reports local keyset parsing and merge failures as plain errors.
+	message := err.Error()
+	if strings.Contains(message, "conflicting key ID ") || strings.Contains(message, "conflicting ordinary key ID ") {
+		return merr.WrapErrImportFailed("conflicting key ID in import keyset")
+	}
+	if merr.GetErrorType(err) == merr.InputError ||
+		strings.Contains(message, "CipherPlugin: cannot parse ezk, ezID=") ||
+		strings.Contains(message, "CipherPlugin: cannot register ezk, ezID=") {
+		return merr.WrapErrImportFailed("invalid import keyset")
+	}
+	return err
 }
 
 func importCipherEntry(entry *commonpb.KeyValuePair, role string, expectedID, collectionID int64) (*indexcgopb.StoragePluginContext, error) {

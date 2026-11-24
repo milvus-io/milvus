@@ -200,3 +200,16 @@ func (suite *PackedTestSuite) TestImportWriterRequiresImportCipher() {
 	suite.Nil(writer)
 	suite.NoFileExists(path)
 }
+
+func (suite *PackedTestSuite) TestImportWriterRejectsEmptyKeyset() {
+	path := filepath.Join(suite.T().TempDir(), "encrypted.parquet")
+	groups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}}}
+	target := &indexcgopb.StoragePluginContext{EncryptionZoneId: 17, CollectionId: 23}
+
+	writer, err := NewPackedWriter([]string{path}, suite.schema, 1<<20, 0, groups, nil, target)
+	suite.Require().ErrorContains(err, "missing writer keyset")
+	suite.ErrorIs(err, merr.ErrSegcore)
+	suite.False(retry.IsRecoverable(err))
+	suite.Nil(writer)
+	suite.NoFileExists(path)
+}

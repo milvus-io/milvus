@@ -159,21 +159,6 @@ func PutOrRefPluginContext(ez *hookutil.EZ, key string) error {
 	return nil
 }
 
-func RegisterReadPluginContext(ez *hookutil.EZ, key string) error {
-	log.Info("RegisterReadPluginContext",
-		zap.Int64("ez_id", ez.EzID),
-		zap.Int64("collection_id", ez.CollectionID))
-	ckey := C.CString(key)
-	defer C.free(unsafe.Pointer(ckey))
-	pluginContext := C.CPluginContext{
-		ez_id:         C.int64_t(ez.EzID),
-		collection_id: C.int64_t(ez.CollectionID),
-		key:           ckey,
-	}
-	cstatus := C.RegisterReadPluginContext(pluginContext)
-	return ConsumeCStatusIntoError(&cstatus)
-}
-
 func UnRefPluginContext(ez *hookutil.EZ) error {
 	log.Info("UnRefPluginContext",
 		zap.Int64("ez_id", ez.EzID),

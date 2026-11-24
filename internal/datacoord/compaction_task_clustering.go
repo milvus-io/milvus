@@ -387,7 +387,9 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 			Manifest:            segInfo.GetManifestPath(),
 		})
 	}
-	WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan)
+	if err := WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan); err != nil {
+		return nil, err
+	}
 	log.Info("Compaction handler build clustering compaction plan", zap.Any("PreAllocatedLogIDs", logIDRange))
 	return plan, nil
 }

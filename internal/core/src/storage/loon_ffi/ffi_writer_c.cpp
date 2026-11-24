@@ -18,6 +18,18 @@
 #include "storage/KeyRetriever.h"
 #include "monitor/scope_metric.h"
 
+/**
+ * @brief Retrieves encryption parameters for CMEK.
+ *
+ * @details Calls milvus::storage::GetWriterEncryptionParams(c_plugin_context)
+ * to derive and validate the encryption key and encoded metadata from the
+ * supplied writer keyset. Keyset-aware plugins do this without updating cached
+ * ordinary keys. Copies the parameters into *out_key and *out_meta with strdup
+ * for the caller to free. Converts C++ exceptions to CStatus using
+ * milvus::FailureCStatus(&e).
+ *
+ * @see GetEncParams declaration in ffi_writer_c.h for parameter documentation
+ */
 CStatus
 GetEncParams(CPluginContext* c_plugin_context,
              char** out_key,
@@ -31,5 +43,8 @@ GetEncParams(CPluginContext* c_plugin_context,
 
     } catch (const std::exception& e) {
         return milvus::FailureCStatus(&e);
+    } catch (...) {
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "Unknown exception");
     }
 }

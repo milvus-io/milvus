@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -46,7 +47,6 @@ type reader struct {
 	bufferSize    int
 	retryAttempts uint
 	storageConfig *indexpb.StorageConfig
-	importEz      string
 	deleteData    map[any]typeutil.Timestamp // pk2ts
 	insertLogs    map[int64][]string         // fieldID (or fieldGroupID if storage v2) -> binlogs
 
@@ -63,7 +63,7 @@ func NewReader(ctx context.Context,
 	tsStart,
 	tsEnd uint64,
 	bufferSize int,
-	importEz string,
+	source *indexcgopb.StoragePluginContext,
 ) (*reader, error) {
 	systemFieldsAbsent := true
 	for _, field := range schema.Fields {
@@ -83,17 +83,16 @@ func NewReader(ctx context.Context,
 		fileSize:       atomic.NewInt64(0),
 		bufferSize:     bufferSize,
 		storageConfig:  storageConfig,
-		importEz:       importEz,
 		retryAttempts:  paramtable.Get().CommonCfg.StorageReadRetryAttempts.GetAsUint(),
 	}
-	err := r.init(paths, tsStart, tsEnd, storageConfig, importEz)
+	err := r.init(paths, tsStart, tsEnd, storageConfig, source)
 	if err != nil {
 		return nil, err
 	}
 	return r, nil
 }
 
-func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *indexpb.StorageConfig, importEZ string) error {
+func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *indexpb.StorageConfig, source *indexcgopb.StoragePluginContext) error {
 	if tsStart != 0 || tsEnd != math.MaxUint64 {
 		r.filters = append(r.filters, FilterWithTimeRange(tsStart, tsEnd))
 	}
@@ -129,6 +128,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 			return r.multiReadWithRetry(ctx, paths)
 		}),
 		storage.WithStorageConfig(storageConfig),
+		storage.WithPluginContext(source),
 	}
 
 	rr, err := storage.NewBinlogRecordReader(r.ctx, binlogs, r.schema, rwOptions...)

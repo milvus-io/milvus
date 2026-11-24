@@ -204,10 +204,6 @@ func (s *SyncTaskSuite) TestEncryptedWriteRejectsMissingUnsafeKey() {
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg}).Maybe()
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Maybe()
 
-	cipher := mock_hook.NewMockCipher(s.T())
-	cipher.EXPECT().GetUnsafeKey(int64(17), s.collectionID).Return(nil).Once()
-	s.T().Cleanup(hookutil.SetTestCipher(cipher))
-
 	schema := s.schema
 	s.schema = &schemapb.CollectionSchema{
 		Name:       schema.GetName(),
@@ -216,10 +212,24 @@ func (s *SyncTaskSuite) TestEncryptedWriteRejectsMissingUnsafeKey() {
 	}
 	defer func() { s.schema = schema }()
 
-	pack := new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()})
-	task := s.getSuiteSyncTask(pack).WithWriteRetryOptions(retry.Attempts(1))
-	err := task.Run(context.Background())
-	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	s.Run("missing_cipher_plugin", func() {
+		s.T().Cleanup(hookutil.SetTestCipher(nil))
+		pack := new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()})
+		task := s.getSuiteSyncTask(pack).WithWriteRetryOptions(retry.Attempts(1))
+		err := task.Run(context.Background())
+		s.ErrorIs(err, merr.ErrServiceUnavailable)
+	})
+
+	s.Run("empty_unsafe_key_retries_under_policy", func() {
+		cipher := mock_hook.NewMockCipher(s.T())
+		cipher.EXPECT().GetUnsafeKey(int64(17), s.collectionID).Return(nil).Twice()
+		s.T().Cleanup(hookutil.SetTestCipher(cipher))
+
+		pack := new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()})
+		task := s.getSuiteSyncTask(pack).WithWriteRetryOptions(retry.Attempts(2), retry.Sleep(0))
+		err := task.Run(context.Background())
+		s.ErrorIs(err, merr.ErrServiceUnavailable)
+	})
 }
 
 func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"strconv"
 	"testing"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -40,12 +42,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mocks/github.com/milvus-io/milvus-proto/go-api/v2/mock_hook"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type importRequestCipher struct {
 	*mock_hook.MockCipher
 	resolve func(artifact string) (int64, []byte, error)
+}
+
+func (*importRequestCipher) Backup(int64) (string, error) {
+	panic("dispatch should resolve the supplied backup")
 }
 
 func (c *importRequestCipher) ResolveImportEZ(artifact string) (int64, []byte, error) {
@@ -118,6 +125,7 @@ func TestImportRequestsCarrySourceAndTargetEZKs(t *testing.T) {
 func TestImportDispatchStopsOnEZKError(t *testing.T) {
 	ctx := context.Background()
 	backup := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":73}`))
+	schema := &schemapb.CollectionSchema{Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "91"}}}
 	for _, state := range []internalpb.ImportJobState{internalpb.ImportJobState_PreImporting, internalpb.ImportJobState_Importing} {
 		t.Run(state.String(), func(t *testing.T) {
 			var sourceErr error
@@ -131,13 +139,13 @@ func TestImportDispatchStopsOnEZKError(t *testing.T) {
 
 			catalog := mocks.NewDataCoordCatalog(t)
 			catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{{
-				JobID: 1, State: state, DataTs: 100, Options: []*commonpb.KeyValuePair{{Key: importutilv2.EZK, Value: backup}},
+				JobID: 1, Schema: schema, State: state, DataTs: 100, Options: []*commonpb.KeyValuePair{{Key: importutilv2.EZK, Value: backup}},
 			}}, nil)
 			catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(errors.New("catalog unavailable")).Once()
 			catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
 			cluster := session.NewMockCluster(t)
 			alloc := allocator.NewMockAllocator(t)
-			workerOffline := errors.New("worker unavailable")
+			workerOffline := merr.Error(merr.Status(merr.WrapErrServiceUnavailable("worker unavailable")))
 			if state == internalpb.ImportJobState_PreImporting {
 				catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{{
 					JobID: 1, TaskID: 2, State: datapb.ImportTaskStateV2_Pending,
@@ -149,7 +157,7 @@ func TestImportDispatchStopsOnEZKError(t *testing.T) {
 				catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{{
 					JobID: 1, TaskID: 2, State: datapb.ImportTaskStateV2_Pending,
 				}}, nil)
-				alloc.EXPECT().AllocN(mock.Anything).Return(10, 20, nil)
+				alloc.EXPECT().AllocN(mock.Anything).Return(10, 20, nil).Once()
 				cluster.EXPECT().CreateImport(int64(11), mock.Anything, mock.Anything).Return(workerOffline).Once()
 			}
 			im, err := NewImportMeta(ctx, catalog, alloc, nil)
@@ -158,6 +166,7 @@ func TestImportDispatchStopsOnEZKError(t *testing.T) {
 			transients := []error{
 				context.Canceled,
 				context.DeadlineExceeded,
+				io.ErrUnexpectedEOF,
 				merr.ErrServiceUnavailable,
 				merr.WrapErrServiceInternalErr(merr.ErrServiceUnavailable, "KMS client failed"),
 				status.Error(codes.Unavailable, "source temporarily unavailable"),
@@ -172,26 +181,143 @@ func TestImportDispatchStopsOnEZKError(t *testing.T) {
 			}
 
 			sourceErr = nil
+			cipher.EXPECT().GetUnsafeKey(int64(91), task.GetCollectionID()).Return(nil).Once()
+			task.CreateTaskOnWorker(10, cluster)
+			require.Equal(t, state, im.GetJob(ctx, 1).GetState())
+			require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+			catalog.AssertNotCalled(t, "SaveImportJob", mock.Anything, mock.Anything)
+
+			cipher.EXPECT().GetUnsafeKey(int64(91), task.GetCollectionID()).Return([]byte("new")).Once()
 			task.CreateTaskOnWorker(11, cluster)
 			require.Equal(t, state, im.GetJob(ctx, 1).GetState())
+			require.EqualValues(t, 1, task.GetTaskVersion())
 
 			sourceErr = errors.New("source KMS denied Decrypt")
-			_, err = getImportPluginContext(im.GetJob(ctx, 1), task.GetCollectionID())
+			job := im.GetJob(ctx, 1)
+			_, err = getImportPluginContext(job.GetOptions(), job.GetSchema().GetProperties(), task.GetCollectionID())
 			require.True(t, errors.Is(err, merr.ErrImportFailed))
 			require.ErrorIs(t, err, sourceErr)
 			task.CreateTaskOnWorker(12, cluster)
 			require.Equal(t, state, im.GetJob(ctx, 1).GetState())
 			task.CreateTaskOnWorker(12, cluster)
-			job := im.GetJob(ctx, 1)
+			job = im.GetJob(ctx, 1)
 			require.Equal(t, internalpb.ImportJobState_Failed, job.GetState())
 			require.Contains(t, job.GetReason(), sourceErr.Error())
 
 			// The scheduler can revisit a pending task before the import checker fails it.
 			sourceErr = nil
 			task.CreateTaskOnWorker(13, cluster)
-			require.Equal(t, len(transients)+4, resolves)
+			require.Equal(t, len(transients)+5, resolves)
 		})
 	}
+}
+
+func TestWrapStoragePluginContext(t *testing.T) {
+	const collectionID = 7
+	properties := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "91"}}
+	for _, req := range []interface {
+		proto.Message
+		GetPluginContext() []*commonpb.KeyValuePair
+	}{
+		&datapb.CompactionPlan{}, &workerpb.CreateJobRequest{}, &workerpb.AnalyzeRequest{}, &workerpb.CreateStatsRequest{},
+	} {
+		t.Run(string(req.ProtoReflect().Descriptor().Name()), func(t *testing.T) {
+			cipher := mock_hook.NewMockCipher(t)
+			t.Cleanup(hookutil.SetTestCipher(cipher))
+			cipher.EXPECT().GetUnsafeKey(int64(91), int64(collectionID)).Return(nil).Once()
+			require.ErrorIs(t, WrapPluginContext(collectionID, properties, req), merr.ErrServiceUnavailable)
+			require.Empty(t, req.GetPluginContext())
+
+			cipher.EXPECT().GetUnsafeKey(int64(91), int64(collectionID)).Return([]byte("new")).Once()
+			require.NoError(t, WrapPluginContext(collectionID, properties, req))
+			require.Equal(t, []*commonpb.KeyValuePair{{Key: hookutil.CipherConfigUnsafeEZK, Value: "91:bmV3"}}, req.GetPluginContext())
+		})
+	}
+}
+
+func TestCompactionTasksRetryTemporaryPluginContextError(t *testing.T) {
+	const collectionID = 7
+	const ezID = 91
+	schema := &schemapb.CollectionSchema{
+		Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: strconv.Itoa(ezID)}},
+	}
+
+	t.Run("mix_compaction", func(t *testing.T) {
+		cipher := mock_hook.NewMockCipher(t)
+		t.Cleanup(hookutil.SetTestCipher(cipher))
+		cipher.EXPECT().GetUnsafeKey(int64(ezID), int64(collectionID)).Return(nil).Once()
+
+		compMeta := NewMockCompactionMeta(t)
+		compMeta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            200,
+			CollectionID:  collectionID,
+			Level:         datapb.SegmentLevel_L1,
+			InsertChannel: "ch-1",
+			State:         commonpb.SegmentState_Flushed,
+			Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(101, 1)},
+		}}).Once()
+		alloc := allocator.NewMockAllocator(t)
+		alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil).Once()
+
+		task := newMixCompactionTask(&datapb.CompactionTask{
+			PlanID:        1,
+			TriggerID:     2,
+			CollectionID:  collectionID,
+			PartitionID:   10,
+			Channel:       "ch-1",
+			Type:          datapb.CompactionType_MixCompaction,
+			State:         datapb.CompactionTaskState_pipelining,
+			InputSegments: []int64{200},
+			Schema:        schema,
+		}, alloc, compMeta, newMockVersionManager())
+
+		cluster := session.NewMockCluster(t)
+		task.CreateTaskOnWorker(11, cluster)
+		require.Equal(t, datapb.CompactionTaskState_pipelining, task.GetTaskProto().GetState())
+		compMeta.AssertNotCalled(t, "SaveCompactionTask", mock.Anything, mock.Anything)
+	})
+
+	t.Run("l0_compaction", func(t *testing.T) {
+		cipher := mock_hook.NewMockCipher(t)
+		t.Cleanup(hookutil.SetTestCipher(cipher))
+		cipher.EXPECT().GetUnsafeKey(int64(ezID), int64(collectionID)).Return(nil).Once()
+
+		compMeta := NewMockCompactionMeta(t)
+		compMeta.EXPECT().GetHealthySegment(mock.Anything, int64(300)).Return(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            300,
+			CollectionID:  collectionID,
+			Level:         datapb.SegmentLevel_L0,
+			InsertChannel: "ch-1",
+			State:         commonpb.SegmentState_Flushed,
+			Deltalogs:     []*datapb.FieldBinlog{getFieldBinlogIDs(101, 1)},
+		}}).Once()
+		compMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return([]*SegmentInfo{{SegmentInfo: &datapb.SegmentInfo{
+			ID:            301,
+			CollectionID:  collectionID,
+			Level:         datapb.SegmentLevel_L1,
+			InsertChannel: "ch-1",
+			State:         commonpb.SegmentState_Flushed,
+		}}}).Once()
+		alloc := allocator.NewMockAllocator(t)
+		alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil).Once()
+
+		task := newL0CompactionTask(&datapb.CompactionTask{
+			PlanID:        2,
+			TriggerID:     3,
+			CollectionID:  collectionID,
+			PartitionID:   10,
+			Channel:       "ch-1",
+			Type:          datapb.CompactionType_Level0DeleteCompaction,
+			State:         datapb.CompactionTaskState_pipelining,
+			InputSegments: []int64{300},
+			Schema:        schema,
+		}, alloc, compMeta)
+
+		cluster := session.NewMockCluster(t)
+		task.CreateTaskOnWorker(11, cluster)
+		require.Equal(t, datapb.CompactionTaskState_pipelining, task.GetTaskProto().GetState())
+		compMeta.AssertNotCalled(t, "SaveCompactionTask", mock.Anything, mock.Anything)
+	})
 }
 
 func TestImportDispatchStopsOnWorkerCipherRejection(t *testing.T) {

@@ -149,13 +149,19 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 			tsTo = ts
 		}
 	}
+	ez := hookutil.GetEzByCollProperties(bw.schema.GetProperties(), pack.collectionID)
 	var pluginContextPtr *indexcgopb.StoragePluginContext
-	if hookutil.IsClusterEncryptionEnabled() {
-		ez := hookutil.GetEzByCollProperties(bw.schema.GetProperties(), pack.collectionID)
-		if ez != nil {
+	var logs map[int64]*datapb.FieldBinlog
+	var manifestPath string
+
+	if err := retry.Do(ctx, func() error {
+		if ez != nil && pluginContextPtr == nil {
+			if !hookutil.IsClusterEncryptionEnabled() {
+				return merr.WrapErrServiceUnavailable(fmt.Sprintf("cipher plugin is not enabled for ezID=%d, collectionID=%d", ez.EzID, ez.CollectionID))
+			}
 			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
 			if len(unsafe) == 0 {
-				return nil, "", merr.WrapErrServiceUnavailable(fmt.Sprintf("cannot get encryption key for ezID=%d, collectionID=%d", ez.EzID, ez.CollectionID))
+				return merr.WrapErrServiceUnavailable(fmt.Sprintf("cannot get encryption key for ezID=%d, collectionID=%d", ez.EzID, ez.CollectionID))
 			}
 			pluginContext := indexcgopb.StoragePluginContext{
 				EncryptionZoneId: ez.EzID,
@@ -164,11 +170,6 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 			}
 			pluginContextPtr = &pluginContext
 		}
-	}
-	var logs map[int64]*datapb.FieldBinlog
-	var manifestPath string
-
-	if err := retry.Do(ctx, func() error {
 		var err error
 		logs, manifestPath, err = bw.writeInsertsIntoStorage(ctx, pluginContextPtr, pack, rec, tsFrom, tsTo)
 		if err != nil {

@@ -47,14 +47,11 @@ var (
 	errCipherPluginMissing = errors.New("cipher plugin is missing")
 )
 
-type BackupInterface interface {
+type EZBackupCipher interface {
 	Backup(ezID int64) (string, error)
-}
 
-// ImportResolverInterface unwraps the supplied backup using the source KMS on each
-// call. It returns the original EZ ID and raw keyset without publishing either
-// to the ordinary EZ cache.
-type ImportResolverInterface interface {
+	// ResolveImportEZ unwraps a backup using the source KMS and returns its
+	// original EZ ID and raw keyset without publishing it to the ordinary cache.
 	ResolveImportEZ(artifact string) (int64, []byte, error)
 }
 
@@ -310,17 +307,13 @@ func RemoveEZByDBProperties(dbProperties []*commonpb.KeyValuePair) error {
 	return RemoveEZ(ezID)
 }
 
-// GetStoragePluginContext returns the local plugin context for RPC from datacoord to datanode
-func GetStoragePluginContext(collProps []*commonpb.KeyValuePair, collectionID int64) []*commonpb.KeyValuePair {
-	if ez := GetEzByCollProperties(collProps, collectionID); ez != nil {
-		pluginContext, err := GetPluginContext(ez.EzID, ez.CollectionID)
-		if err != nil {
-			log.Error("failed to get plugin context", zap.Error(err))
-			return nil
-		}
-		return pluginContext
+// GetStoragePluginContext returns the target encryption context for a worker RPC.
+func GetStoragePluginContext(collProps []*commonpb.KeyValuePair, collectionID int64) ([]*commonpb.KeyValuePair, error) {
+	id, hasTarget, err := parseTargetEzID(collProps)
+	if err != nil || !hasTarget {
+		return nil, err
 	}
-	return nil
+	return GetPluginContext(id, collectionID)
 }
 
 // GetImportStoragePluginContext builds the ordered source and target entries for one dispatch.

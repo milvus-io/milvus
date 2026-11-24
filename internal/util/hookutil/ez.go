@@ -72,7 +72,7 @@ func ParseEzIDFromProperties(properties []*commonpb.KeyValuePair) (int64, bool) 
 	return 0, false
 }
 
-// parseTargetEzID requires at most one positive encryption zone ID on import target schemas.
+// parseTargetEzID requires at most one positive encryption zone ID on the target schema.
 func parseTargetEzID(properties []*commonpb.KeyValuePair) (int64, bool, error) {
 	var id int64
 	var found bool
@@ -148,7 +148,7 @@ func BackupEZ(ezID int64) (string, error) {
 		return "", errCipherPluginMissing
 	}
 
-	backupProvider, ok := cipher.(BackupInterface)
+	backupProvider, ok := cipher.(EZBackupCipher)
 	if !ok {
 		return "", merr.WrapErrServiceInternalMsg("cipher plugin does not support backup operation")
 	}
@@ -159,12 +159,12 @@ func BackupEZ(ezID int64) (string, error) {
 func GetPluginContext(ezID int64, collectionID int64) ([]*commonpb.KeyValuePair, error) {
 	cipher := GetCipher()
 	if cipher == nil {
-		return nil, nil
+		return nil, errCipherPluginMissing
 	}
 
 	key := cipher.GetUnsafeKey(ezID, collectionID)
 	if len(key) == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("cannot get ez key for ezID=%d, collectionID=%d", ezID, collectionID)
+		return nil, merr.WrapErrServiceUnavailable(fmt.Sprintf("cannot get ez key for ezID=%d, collectionID=%d", ezID, collectionID))
 	}
 
 	return []*commonpb.KeyValuePair{encodeEZContext(ezID, key)}, nil
@@ -182,7 +182,7 @@ func ResolveImportEZ(artifact string) ([]*commonpb.KeyValuePair, error) {
 	if cipher == nil {
 		return nil, errCipherPluginMissing
 	}
-	resolver, ok := cipher.(ImportResolverInterface)
+	resolver, ok := cipher.(EZBackupCipher)
 	if !ok {
 		return nil, merr.WrapErrServiceInternalMsg("cipher plugin does not support ResolveImportEZ")
 	}

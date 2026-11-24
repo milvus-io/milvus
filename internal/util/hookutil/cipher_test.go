@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -268,13 +269,15 @@ func (s *CipherSuite) TestAsMessageConfig() {
 }
 
 func (s *CipherSuite) TestGetStoragePluginContext() {
+	properties := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "1"}}
 	storeCipher(nil)
-	result := GetStoragePluginContext([]*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "1"}}, 2)
+	result, err := GetStoragePluginContext(properties, 2)
+	s.ErrorIs(err, errCipherPluginMissing)
 	s.Nil(result)
 
 	InitTestCipher()
-	properties := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "1"}}
-	result = GetStoragePluginContext(properties, 2)
+	result, err = GetStoragePluginContext(properties, 2)
+	s.Require().NoError(err)
 	s.NotNil(result)
 	s.Equal(1, len(result))
 	s.Equal(CipherConfigUnsafeEZK, result[0].Key)
@@ -284,7 +287,8 @@ func (s *CipherSuite) TestGetStoragePluginContext() {
 	s.Equal("1", parts[0])
 	s.Equal(base64.StdEncoding.EncodeToString([]byte("unsafe key")), parts[1])
 
-	result = GetStoragePluginContext([]*commonpb.KeyValuePair{}, 2)
+	result, err = GetStoragePluginContext(nil, 2)
+	s.NoError(err)
 	s.Nil(result)
 }
 
@@ -504,6 +508,11 @@ func (s *CipherSuite) TestBackupEZ() {
 	_, err = BackupEZ(123)
 	s.Error(err)
 	s.Contains(err.Error(), "does not support backup operation")
+
+	storeCipher(importResolverCipher{})
+	backup, err := BackupEZ(123)
+	s.NoError(err)
+	s.Equal("test-backup", backup)
 }
 
 func (s *CipherSuite) TestBackupEZKFromDBProperties() {
@@ -535,6 +544,10 @@ func (s *CipherSuite) TestBackupEZKFromDBProperties() {
 type importResolverCipher struct {
 	testCipher
 	resolve func(string) (int64, []byte, error)
+}
+
+func (importResolverCipher) Backup(int64) (string, error) {
+	return "test-backup", nil
 }
 
 func (c importResolverCipher) ResolveImportEZ(artifact string) (int64, []byte, error) {
@@ -603,6 +616,7 @@ func (s *CipherSuite) TestImportTargetEZKRequired() {
 	}})
 	artifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":123}`))
 	result, err = GetImportStoragePluginContext(artifact, target, 7)
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
 	s.ErrorContains(err, "target EZK")
 	s.Nil(result)
 
@@ -715,7 +729,13 @@ func (s *CipherSuite) TestRemoveEZ() {
 func (s *CipherSuite) TestGetPluginContext() {
 	storeCipher(nil)
 	result, err := GetPluginContext(123, 456)
-	s.NoError(err)
+	s.ErrorIs(err, errCipherPluginMissing)
+	s.Nil(result)
+
+	storeCipher(importResolverCipher{})
+	result, err = GetPluginContext(123, 456)
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	s.ErrorContains(err, "ezID=123, collectionID=456")
 	s.Nil(result)
 
 	InitTestCipher()

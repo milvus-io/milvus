@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"io"
 	"math"
 	"path"
 	"path/filepath"
@@ -84,6 +85,7 @@ func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 			JobID:        job.GetJobID(),
 			TaskID:       idStart + int64(i),
 			CollectionID: job.GetCollectionID(),
+			NodeID:       NullNodeID,
 			State:        datapb.ImportTaskStateV2_Pending,
 			FileStats:    fileStats,
 			CreatedTime:  time.Now().Format("2006-01-02T15:04:05Z07:00"),
@@ -291,7 +293,7 @@ func handleImportRequestError(task ImportTask, im ImportMeta, cause error) (fail
 // because this branch's cockroachdb/errors does not traverse Unwrap() []error,
 // and checks each ErrorClassifier layer so an inner retriable error isn't masked.
 func isTemporaryImportContextError(err error) bool {
-	if merr.IsCanceledOrTimeout(err) {
+	if merr.IsCanceledOrTimeout(err) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return true
 	}
 	for ; err != nil; err = errors.Unwrap(err) {
@@ -322,9 +324,9 @@ func isTemporaryImportContextError(err error) bool {
 	return false
 }
 
-func getImportPluginContext(job ImportJob, collectionID int64) ([]*commonpb.KeyValuePair, error) {
-	artifact, _ := importutilv2.GetEZK(job.GetOptions())
-	pluginContext, err := hookutil.GetImportStoragePluginContext(artifact, job.GetSchema().GetProperties(), collectionID)
+func getImportPluginContext(options, properties []*commonpb.KeyValuePair, collectionID int64) ([]*commonpb.KeyValuePair, error) {
+	artifact, _ := importutilv2.GetEZK(options)
+	pluginContext, err := hookutil.GetImportStoragePluginContext(artifact, properties, collectionID)
 	if err != nil {
 		if isTemporaryImportContextError(err) {
 			return nil, err
@@ -335,16 +337,12 @@ func getImportPluginContext(job ImportJob, collectionID int64) ([]*commonpb.KeyV
 }
 
 func AssemblePreImportRequest(task ImportTask, job ImportJob) (*datapb.PreImportRequest, error) {
-	pluginContext, err := getImportPluginContext(job, task.GetCollectionID())
-	if err != nil {
-		return nil, err
-	}
 	importFiles := lo.Map(task.(*preImportTask).GetFileStats(),
 		func(fileStats *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 			return fileStats.GetImportFile()
 		})
 
-	return &datapb.PreImportRequest{
+	req := &datapb.PreImportRequest{
 		JobID:         task.GetJobID(),
 		TaskID:        task.GetTaskID(),
 		CollectionID:  task.GetCollectionID(),
@@ -355,8 +353,11 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) (*datapb.PreImport
 		Options:       job.GetOptions(),
 		TaskSlot:      task.GetTaskSlot(),
 		StorageConfig: createStorageConfig(),
-		PluginContext: pluginContext,
-	}, nil
+	}
+	if err := WrapPluginContext(req.GetCollectionID(), req.GetSchema().GetProperties(), req); err != nil {
+		return nil, err
+	}
+	return req, nil
 }
 
 func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc allocator.Allocator) (*datapb.ImportRequest, error) {
@@ -372,6 +373,29 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 			Vchannel:    segment.GetInsertChannel(),
 		})
 	}
+	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
+		return fileStat.GetImportFile()
+	})
+
+	req := &datapb.ImportRequest{
+		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
+		JobID:           task.GetJobID(),
+		TaskID:          task.GetTaskID(),
+		CollectionID:    task.GetCollectionID(),
+		PartitionIDs:    job.GetPartitionIDs(),
+		Vchannels:       job.GetVchannels(),
+		Schema:          job.GetSchema(),
+		Files:           importFiles,
+		Options:         job.GetOptions(),
+		RequestSegments: requestSegments,
+		StorageConfig:   createStorageConfig(),
+		TaskSlot:        task.GetTaskSlot(),
+		StorageVersion:  storage.StorageV2,
+	}
+	if err := WrapPluginContext(req.GetCollectionID(), req.GetSchema().GetProperties(), req); err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	ts := job.GetDataTs()
@@ -409,32 +433,9 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		zap.Uint64("ts", ts))...,
 	)
 
-	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
-		return fileStat.GetImportFile()
-	})
-
-	pluginContext, err := getImportPluginContext(job, task.GetCollectionID())
-	if err != nil {
-		return nil, err
-	}
-	return &datapb.ImportRequest{
-		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
-		JobID:           task.GetJobID(),
-		TaskID:          task.GetTaskID(),
-		CollectionID:    task.GetCollectionID(),
-		PartitionIDs:    job.GetPartitionIDs(),
-		Vchannels:       job.GetVchannels(),
-		Schema:          job.GetSchema(),
-		Files:           importFiles,
-		Options:         job.GetOptions(),
-		Ts:              ts,
-		IDRange:         &datapb.IDRange{Begin: idBegin, End: idEnd},
-		RequestSegments: requestSegments,
-		StorageConfig:   createStorageConfig(),
-		TaskSlot:        task.GetTaskSlot(),
-		StorageVersion:  storage.StorageV2,
-		PluginContext:   pluginContext,
-	}, nil
+	req.Ts = ts
+	req.IDRange = &datapb.IDRange{Begin: idBegin, End: idEnd}
+	return req, nil
 }
 
 func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats, segmentMaxSize int) [][]*datapb.ImportFileStats {

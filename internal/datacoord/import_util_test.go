@@ -77,6 +77,9 @@ func TestImportUtil_NewPreImportTasks(t *testing.T) {
 	tasks, err := NewPreImportTasks(fileGroups, job, alloc, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(tasks))
+	for _, task := range tasks {
+		assert.Equal(t, int64(NullNodeID), task.GetNodeID())
+	}
 }
 
 func TestImportUtil_NewImportTasks(t *testing.T) {

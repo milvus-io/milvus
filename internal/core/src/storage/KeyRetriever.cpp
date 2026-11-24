@@ -2,6 +2,7 @@
 
 #include <exception>
 #include <mutex>
+#include <new>
 
 #include "arrow/io/caching.h"
 #include "common/EasyAssert.h"
@@ -48,32 +49,59 @@ RegisterReaderKeys(const CPluginContext* context) {
     if (!context) {
         return;
     }
+    if (!context->key || !*context->key) {
+        ThrowInfo(InvalidParameter, "missing reader keyset");
+    }
     auto cipher = PluginLoader::GetInstance().getCipherPlugin();
     if (!cipher) {
         ThrowInfo(Unsupported, "missing cipher plugin");
     }
-    AssertInfo(context->key && *context->key, "missing reader keyset");
-    cipher->RegisterReadKeyset(
-        context->ez_id, context->collection_id, context->key);
+    try {
+        cipher->RegisterReadKeyset(
+            context->ez_id, context->collection_id, context->key);
+    } catch (const SegcoreError&) {
+        throw;
+    } catch (const std::bad_alloc&) {
+        throw;
+    } catch (const std::exception&) {
+        ThrowInfo(InvalidParameter, "cipher plugin rejected the reader keyset");
+    }
 }
 
 std::pair<std::string, std::string>
 GetWriterEncryptionParams(const CPluginContext* context) {
-    AssertInfo(context != nullptr, "c_plugin_context is nullptr");
+    if (context == nullptr) {
+        ThrowInfo(InvalidParameter, "c_plugin_context is nullptr");
+    }
+    if (!context->key || !*context->key) {
+        ThrowInfo(InvalidParameter, "missing writer keyset");
+    }
     auto cipher = PluginLoader::GetInstance().getCipherPlugin();
     if (!cipher) {
         ThrowInfo(Unsupported, "missing cipher plugin");
     }
-    AssertInfo(context->key && *context->key, "missing writer keyset");
-    auto keys = cipher->GetEncryptorForKeyset(
-        context->ez_id, context->collection_id, context->key);
-    AssertInfo(keys.first != nullptr, "cipher plugin returned no encryptor");
+
+    std::pair<std::shared_ptr<plugin::IEncryptor>, std::string> keys;
+    try {
+        keys = cipher->GetEncryptorForKeyset(
+            context->ez_id, context->collection_id, context->key);
+    } catch (const SegcoreError&) {
+        throw;
+    } catch (const std::bad_alloc&) {
+        throw;
+    } catch (const std::exception&) {
+        ThrowInfo(InvalidParameter, "cipher plugin rejected the writer keyset");
+    }
+    if (!keys.first) {
+        ThrowInfo(InvalidParameter, "cipher plugin returned no encryptor");
+    }
     auto footer_key = keys.first->GetKey();
     auto length = footer_key.size();
-    AssertInfo(!keys.second.empty() &&
-                   keys.second.find('\0') == std::string::npos &&
-                   (length == 16 || length == 24 || length == 32),
-               "cipher plugin returned unusable encryption parameters");
+    if (keys.second.empty() || keys.second.find('\0') != std::string::npos ||
+        (length != 16 && length != 24 && length != 32)) {
+        ThrowInfo(InvalidParameter,
+                  "cipher plugin returned unusable encryption parameters");
+    }
     auto metadata =
         EncodeKeyMetadata(context->ez_id, context->collection_id, keys.second);
     return {std::move(footer_key), std::move(metadata)};

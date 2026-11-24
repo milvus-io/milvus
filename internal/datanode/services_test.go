@@ -24,7 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -42,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -763,15 +761,19 @@ func (s *DataNodeServicesSuite) TestDropTask() {
 
 type workerImportCipher struct {
 	hook.Cipher
-	registered []string
-	err        error
+	registered []map[string]string
+	targetErr  error
+	sourceErr  error
 }
 
 func (c *workerImportCipher) Init(cfg map[string]string) error {
-	if c.err != nil {
-		return c.err
+	if _, source := cfg[hookutil.CipherConfigImportEZ]; source && c.sourceErr != nil {
+		return c.sourceErr
 	}
-	c.registered = append(c.registered, cfg[hookutil.CipherConfigImportEZ]+":"+cfg[hookutil.CipherConfigUnsafeEZK])
+	if _, target := cfg[hookutil.CipherConfigCreateEZ]; target && c.targetErr != nil {
+		return c.targetErr
+	}
+	c.registered = append(c.registered, cfg)
 	return nil
 }
 
@@ -785,6 +787,8 @@ func TestDataNodeImportCipherContext(t *testing.T) {
 		{Key: "other.plugin", Value: "context"},
 		{Key: hookutil.CipherConfigUnsafeEZK, Value: "7:bmV3"},
 	}
+	target := map[string]string{hookutil.CipherConfigCreateEZ: "7", hookutil.CipherConfigUnsafeEZK: "bmV3"}
+	source := map[string]string{hookutil.CipherConfigImportEZ: "7", hookutil.CipherConfigUnsafeEZK: "b2xk"}
 	config := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
 	for _, scenario := range []struct {
 		name     string
@@ -807,16 +811,6 @@ func TestDataNodeImportCipherContext(t *testing.T) {
 				}
 				cipher := &workerImportCipher{}
 				t.Cleanup(hookutil.SetTestCipher(cipher))
-				var nativeRegistered []string
-				var nativeErr error
-				nativePatch := mockey.Mock(segcore.RegisterReadPluginContext).To(func(ez *hookutil.EZ, key string) error {
-					if nativeErr != nil {
-						return nativeErr
-					}
-					nativeRegistered = append(nativeRegistered, string(rune('0'+ez.EzID))+":"+key)
-					return nil
-				}).Build()
-				defer nativePatch.UnPatch()
 				node := &DataNode{
 					ctx: ctx, lifetime: lifetime.NewLifetime(commonpb.StateCode_Healthy),
 					importTaskMgr: importv2.NewTaskManager(), storageFactory: NewChunkMgrFactory(),
@@ -852,27 +846,38 @@ func TestDataNodeImportCipherContext(t *testing.T) {
 				require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrImportFailed)
 				require.Nil(t, node.importTaskMgr.Get(taskID))
 				require.Empty(t, cipher.registered)
-				require.Empty(t, nativeRegistered)
 
-				cipher.err = errors.New("incompatible historical read keys")
+				restore := hookutil.SetTestCipher(nil)
 				status, err = submit(wire)
-				require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrImportFailed)
-				require.Contains(t, status.GetReason(), "incompatible historical read keys")
+				restore()
+				require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrServiceUnavailable)
+				require.True(t, status.GetRetriable())
+				require.Nil(t, node.importTaskMgr.Get(taskID))
+
+				cipher.targetErr = merr.WrapErrServiceUnavailable("target key cache unavailable")
+				status, err = submit(wire)
+				require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrServiceUnavailable)
+				require.True(t, status.GetRetriable())
 				require.Nil(t, node.importTaskMgr.Get(taskID))
 				require.Empty(t, cipher.registered)
-				require.Empty(t, nativeRegistered)
 
-				cipher.err = nil
-				nativeErr = errors.New("missing native cipher plugin")
+				cipher.targetErr = errors.New("init key manager failed: CipherPlugin: cannot parse ezk, ezID=7, err=invalid keyset")
 				status, err = submit(wire)
 				require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrImportFailed)
-				require.Contains(t, status.GetReason(), "missing native cipher plugin")
+				require.Contains(t, status.GetReason(), "invalid import keyset")
 				require.Nil(t, node.importTaskMgr.Get(taskID))
-				require.Equal(t, []string{"7:b2xk"}, cipher.registered)
-				require.Empty(t, nativeRegistered)
+				require.Empty(t, cipher.registered)
+
+				cipher.targetErr = nil
+				cipher.sourceErr = errors.New("init key manager failed: CipherPlugin: cannot register ezk, ezID=7, err=conflicting key ID 24 for ezID=7")
+				status, err = submit(wire)
+				require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrImportFailed)
+				require.Contains(t, status.GetReason(), "conflicting key ID")
+				require.Nil(t, node.importTaskMgr.Get(taskID))
+				require.Equal(t, []map[string]string{target}, cipher.registered)
 
 				cipher.registered = nil
-				nativeErr = nil
+				cipher.sourceErr = nil
 				status, err = submit(wire)
 				require.NoError(t, merr.CheckRPCCall(status, err))
 				task := node.importTaskMgr.Get(taskID)
@@ -884,8 +889,7 @@ func TestDataNodeImportCipherContext(t *testing.T) {
 						require.Equal(t, importv2.L0ImportTaskType, task.GetType())
 					}
 				}
-				require.Equal(t, []string{"7:b2xk", ":bmV3"}, cipher.registered)
-				require.Equal(t, []string{"7:b2xk"}, nativeRegistered)
+				require.Equal(t, []map[string]string{target, source}, cipher.registered)
 			})
 		}
 	}

@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -79,7 +80,6 @@ func TestRegisterImportCipherContexts(t *testing.T) {
 			require.NoError(t, err)
 			var want []map[string]string
 			if tc.wantSource {
-				want = append(want, map[string]string{CipherConfigImportEZ: "7", CipherConfigUnsafeEZK: "b2xk"})
 				require.Equal(t, "b2xk", source.GetEncryptionKey())
 			} else {
 				require.Nil(t, source)
@@ -92,19 +92,13 @@ func TestRegisterImportCipherContexts(t *testing.T) {
 			} else {
 				require.Nil(t, target)
 			}
+			if tc.wantSource {
+				want = append(want, map[string]string{CipherConfigImportEZ: "7", CipherConfigUnsafeEZK: "b2xk"})
+			}
 			require.Empty(t, c.calls)
-			var nativeReads []string
-			err = RegisterImportCipherContexts(tc.artifact, tc.props, tc.wire, collectionID, func(ezID int64, key string) error {
-				nativeReads = append(nativeReads, string(rune('0'+ezID))+":"+key)
-				return nil
-			})
+			err = RegisterImportCipherContexts(tc.artifact, tc.props, tc.wire, collectionID)
 			require.NoError(t, err)
 			require.Equal(t, want, c.calls)
-			if tc.wantSource {
-				require.Equal(t, []string{"7:b2xk"}, nativeReads)
-			} else {
-				require.Empty(t, nativeReads)
-			}
 		})
 	}
 }
@@ -145,35 +139,33 @@ func TestRegisterImportCipherContextsRejectsInvalidRequest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := &importReadCipher{}
 			t.Cleanup(SetTestCipher(c))
-			err := RegisterImportCipherContexts(tc.artifact, tc.props, tc.entries, collectionID, nil)
-			require.Error(t, err)
+			err := RegisterImportCipherContexts(tc.artifact, tc.props, tc.entries, collectionID)
+			require.ErrorIs(t, err, merr.ErrImportFailed)
 			require.NotContains(t, err.Error(), "secret")
 			require.Empty(t, c.calls)
 		})
 	}
 	t.Run("disabled cipher", func(t *testing.T) {
 		t.Cleanup(SetTestCipher(nil))
-		err := RegisterImportCipherContexts(artifact, nil, wire("7:b2xk"), collectionID, nil)
-		require.Error(t, err)
-		err = RegisterImportCipherContexts("", zone("8"), wire("8:bmV3"), collectionID, nil)
-		require.Error(t, err)
-		err = RegisterImportCipherContexts("", nil, nil, collectionID, nil)
+		err := RegisterImportCipherContexts(artifact, nil, wire("7:b2xk"), collectionID)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		err = RegisterImportCipherContexts("", zone("8"), wire("8:bmV3"), collectionID)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		err = RegisterImportCipherContexts("", nil, nil, collectionID)
 		require.NoError(t, err)
 	})
 	t.Run("incompatible cached read key", func(t *testing.T) {
-		conflict := errors.New("read key conflict")
+		conflict := errors.New("CipherPlugin: cannot register ezk, ezID=7, err=conflicting key ID 24 for ezID=7")
 		t.Cleanup(SetTestCipher(&importReadCipher{err: conflict}))
-		err := RegisterImportCipherContexts(artifact, nil, wire("7:b2xk"), collectionID, nil)
-		require.ErrorIs(t, err, conflict)
+		err := RegisterImportCipherContexts(artifact, nil, wire("7:b2xk"), collectionID)
+		require.ErrorIs(t, err, merr.ErrImportFailed)
 	})
-	t.Run("native read registration failure stops before target", func(t *testing.T) {
-		nativeErr := errors.New("missing native cipher plugin")
-		c := &importReadCipher{}
+	t.Run("target failure stops before source", func(t *testing.T) {
+		targetErr := merr.WrapErrServiceUnavailable("target key cache unavailable")
+		c := &importReadCipher{err: targetErr}
 		t.Cleanup(SetTestCipher(c))
-		err := RegisterImportCipherContexts(artifact, zone("8"), wire("7:b2xk", "8:bmV3"), collectionID, func(int64, string) error {
-			return nativeErr
-		})
-		require.ErrorIs(t, err, nativeErr)
-		require.Equal(t, []map[string]string{{CipherConfigImportEZ: "7", CipherConfigUnsafeEZK: "b2xk"}}, c.calls)
+		err := RegisterImportCipherContexts(artifact, zone("7"), wire("7:b2xk", "7:bmV3"), collectionID)
+		require.ErrorIs(t, err, targetErr)
+		require.Equal(t, []map[string]string{{CipherConfigCreateEZ: "7", CipherConfigUnsafeEZK: "bmV3"}}, c.calls)
 	})
 }

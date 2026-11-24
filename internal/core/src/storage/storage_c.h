@@ -56,9 +56,6 @@ CStatus
 PutOrRefPluginContext(CPluginContext c_plugin_context);
 
 CStatus
-RegisterReadPluginContext(CPluginContext c_plugin_context);
-
-CStatus
 UnRefPluginContext(CPluginContext c_plugin_context);
 
 #ifdef __cplusplus

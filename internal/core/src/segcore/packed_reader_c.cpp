@@ -83,6 +83,9 @@ NewPackedReaderWithStorageConfig(char** paths,
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
+    } catch (...) {
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "Unknown exception");
     }
 }
 
@@ -119,6 +122,9 @@ NewPackedReader(char** paths,
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
+    } catch (...) {
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "Unknown exception");
     }
 }
 

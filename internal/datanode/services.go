@@ -23,7 +23,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -36,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -310,18 +308,9 @@ func (node *DataNode) FlushChannels(ctx context.Context, req *datapb.FlushChanne
 	return merr.Success(), nil
 }
 
-func importCipherFailureStatus(err error) *commonpb.Status {
-	if !errors.Is(err, merr.ErrImportFailed) {
-		err = merr.WrapErrImportFailed(err.Error())
-	}
-	return merr.Status(err)
-}
-
 func registerImportCipherContexts(options, properties, pluginContext []*commonpb.KeyValuePair, collectionID int64) error {
 	artifact, _ := importutilv2.GetEZK(options)
-	return hookutil.RegisterImportCipherContexts(artifact, properties, pluginContext, collectionID, func(ezID int64, key string) error {
-		return segcore.RegisterReadPluginContext(&hookutil.EZ{EzID: ezID}, key)
-	})
+	return hookutil.RegisterImportCipherContexts(artifact, properties, pluginContext, collectionID)
 }
 
 func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportRequest) (*commonpb.Status, error) {
@@ -340,7 +329,7 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 	}
 
 	if err := registerImportCipherContexts(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID()); err != nil {
-		return importCipherFailureStatus(err), nil
+		return merr.Status(err), nil
 	}
 
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
@@ -383,7 +372,7 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 	}
 
 	if err := registerImportCipherContexts(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID()); err != nil {
-		return importCipherFailureStatus(err), nil
+		return merr.Status(err), nil
 	}
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
