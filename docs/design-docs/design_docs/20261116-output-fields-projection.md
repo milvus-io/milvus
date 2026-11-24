@@ -2,7 +2,7 @@
 
 - **Created:** 2026-11-16
 - **Author(s):** @czs007
-- **Status:** Draft for discussion; not implemented
+- **Status:** Draft for discussion. Steps 1–7 of the implementation sequence are implemented in a draft pull request; step 8 (`having`) is not implemented
 - **Component:** Parser / Proxy / QueryNode / SDK
 - **Related Issues:** [#50923](https://github.com/milvus-io/milvus/issues/50923), [#55091](https://github.com/milvus-io/milvus/issues/55091)
 - **Related Design:** [#55119](https://github.com/milvus-io/milvus/pull/55119) (Boost scoring in Query)
@@ -31,8 +31,12 @@ same grammar rule, alias table, projection list, and segcore output points.
 
 Both Query and Search are covered.
 
-This document owns the grammar, the name-resolution scopes, and the virtual
-column contract. #55119 (ranked Query) and #50923 (expression engine) consume
+Aggregation queries additionally get a `having` parameter: a predicate over
+group-by fields, aggregates, and their aliases that removes groups after the
+aggregation is complete (see "HAVING").
+
+This document owns the grammar, the name-resolution scopes, the virtual
+column contract, and the `having` contract. #55119 (ranked Query) and #50923 (expression engine) consume
 them.
 
 ## Terminology
@@ -100,11 +104,13 @@ In scope:
 
 - Grammar entry rule for one `output_fields` item, with mandatory `AS` for
   aliases.
-- Alias table and two name-resolution scopes.
+- Alias table and the name-resolution scopes.
 - Four virtual columns, in Query and Search, and three per-sub-request
   columns in hybrid search: `$score(x)`, `$distance(x)`, `$rank(x)`.
 - A projection list in the query plan, request-local IDs for virtual
   columns, and their output from segcore to the client.
+- `having` on Query with aggregation or GROUP BY: grammar entry rule, name
+  resolution, evaluation at the proxy.
 
 Non-goals:
 
@@ -119,7 +125,15 @@ Non-goals:
 - Removing or renaming the existing built-in `distance` / `score` key of a
   Search hit. This step only adds columns.
 - SQL statements, a SQL endpoint, or any statement-level grammar.
-- GROUP BY / HAVING name resolution (#50923 phase 3).
+- Aliases and `$distance` in Boost rule filters and in the inputs of rerank
+  functions and function chains. The scoring scope in "Names and scopes"
+  states the rule; the implementation is part of #50923.
+- Aliases as GROUP BY keys (`group_by_fields` naming an alias). Group keys
+  are stored fields.
+- Ordering by an aggregate or by its alias. It is rejected today
+  (`internal/proxy/dql/task_query.go:333`) and stays rejected in this step.
+- `having` or an equivalent bucket filter in Search (`search_aggregation`,
+  grouping search).
 
 ## Public API
 
@@ -209,11 +223,13 @@ selectItem
   `aggregationPattern` (`internal/agg/aggregate.go:25`,
   `(?i)^(sum|count|avg|min|max)\s*\(\s*([\w\*]*)\s*\)$`), called from
   `util_dql.go:221`, `task_query.go:333`, and `feature_usage_hooks.go:557`.
-  `Plan.g4` has no generic call rule, only fixed forms such as
-  `TEXTMATCH(...)`. Add an aggregate-call alternative whose argument is a
-  field name or `*`; the function name is matched case-insensitively and is a
-  contextual keyword, so fields named `count`, `sum`, … stay usable. The
-  three call sites take the parsed form instead of calling the regex. Every
+  The generic call rule of `Plan.g4` (`Identifier '(' expr, … ')'`) parses
+  `sum(price)` as an expression but cannot parse `count(*)`, because `*` is
+  not an expression. Add an aggregate-call alternative to `selectItem`, ahead
+  of the expression alternative, whose argument is a field name, `*`, or
+  empty; the function name is an `Identifier` that the visitor matches
+  case-insensitively, so fields named `count`, `sum`, … stay usable. The
+  binder takes the parsed form instead of calling the regex. Every
   string the regex accepts today must parse to the same (operator, argument)
   pair and keep the same output column name; this includes the empty argument
   (`count()`), which `[\w\*]*` matches.
@@ -224,12 +240,23 @@ selectItem
 
 ## Names and scopes
 
-Two scopes, the model already written in #55119:
+Four scopes, ordered by when the clause runs. A clause can reference a name
+only if the value exists before the clause runs:
 
 | Scope | Clauses | Visible names |
 |---|---|---|
-| Input | `filter`, Boost rule filters, the expression inside each `output_fields` item | Stored fields and dynamic-field keys. No aliases. |
+| Input | `filter`, the expression inside each `output_fields` item | Stored fields and dynamic-field keys. No aliases. |
+| Scoring | Boost rule filters, inputs of rerank functions and function chains | Aliases of items that do not depend on `$score`, then `$distance`, then stored fields and dynamic-field keys. Not `$score`, `$score(x)`, `$rank(x)`, or an alias of them: these clauses produce the score. |
 | Output | `order_by`, `post_filter` (#55119) | Aliases first, then virtual columns, then stored fields |
+| Group output | `having` | Aliases first, then group-by fields, then aggregate calls. Nothing else; see "HAVING". |
+
+The scoring scope is defined here and is not implemented in this step: Boost
+rule filters and function inputs keep resolving names as stored fields and
+dynamic-field keys, as today. With identity projections an alias in these
+clauses is a second name for a stored field and adds no capability. The
+scope is implemented together with expressions (#50923), when
+`price * 0.8 AS discounted` gives an alias a value that no stored field has,
+and with `$distance` as a function input.
 
 Rules:
 
@@ -241,7 +268,11 @@ Rules:
 - Final output column names must be unique. `["a AS x", "b AS x"]` and
   `["a", "b AS a"]` are errors. A dynamic key written explicitly in
   `output_fields` counts as an output name: with `c` not a schema field,
-  `["title AS c", "c"]` is an error.
+  `["title AS c", "c"]` is an error. The rule applies to names the request
+  chooses, that is, when at least one of the two items is an alias or a
+  virtual column. Two plain items can also share a name: a stored field
+  `title` and the explicit dynamic key `$meta["title"]`. That request is
+  accepted today and returns the stored field, and it stays accepted.
 - An alias cannot start with `$`.
 - A dynamic-field key cannot take an alias in this step. Both `color AS c`
   and `$meta["color"] AS c` are errors, including the case where the alias
@@ -356,6 +387,28 @@ The two names are separate concepts and are not interchangeable:
   the row's vector (`L2`, `IP`, `COSINE`, `HAMMING`, `JACCARD`, and the other
   vector metrics). It exists only when the `anns_field` is searched with a
   vector metric.
+
+Neither name means "exact" or "approximate":
+
+- `$score` is computed, not estimated. With a rerank, Boost, or fusion it is
+  the output of that formula.
+- `$distance` is the value the vector search returned. It is not recomputed
+  from the stored vectors. Its precision is the precision of the index: an
+  index that searches quantized codes returns the distance computed on those
+  codes, unless the search refines the candidates. Example: `IVF_RABITQ`
+  searches the quantized index and applies the refine step only when the
+  request sets `refine_k` and the index was built with a refine index
+  (knowhere `0184cb42`, `src/index/ivf/ivf.cc:1026`-`:1053`). An exact
+  distance for every returned row is a different feature: an expression over
+  the stored vector and a query vector (#50923 phase 1).
+
+Before this design the two concepts were one value under two client names
+(see Motivation). Two properties of that value are internal and are not
+visible in `$distance`: segcore negates the distance of smaller-is-better
+metrics so that every metric sorts the same way, and the proxy restores the
+sign; a weighted fusion passes each sub-request's value through a
+normalization function, after which the vector distance is not recoverable
+from the fused score.
 
 Full-text search is a Search on a sparse vector field with metric `BM25`.
 BM25 is a relevance score, not a vector metric, so `$distance` is an error
@@ -558,6 +611,183 @@ column carried by the worker, the same mechanism as single-vector Search.
 
 These columns get request-local IDs like every other virtual column (see
 "Protocol"). They are evaluated at the proxy and are not sent to QueryNodes.
+
+## HAVING
+
+`filter` removes rows before the aggregation. An aggregation query has no way
+to remove groups after it: a request for "categories with more than 10
+products" returns every category, and the client drops the rest. `having` is
+the predicate that runs on the aggregated groups.
+
+```python
+client.query(
+    collection_name="products",
+    filter="price > 100",
+    group_by_fields=["category"],
+    output_fields=["category", "count(*) AS n", "avg(price) AS avg_price"],
+    having="n > 10 and avg_price < 500",
+    limit=20,
+)
+# -> [{"category": "kitchen", "n": 37, "avg_price": 212.4}, ...]
+```
+
+Order of evaluation: `filter` → GROUP BY and aggregates → `having` →
+`order_by` → `offset` / `limit`. `limit` counts the groups that passed
+`having`.
+
+### Request
+
+- A new key `having` in the Query `query_params`, next to `group_by_fields`
+  and `order_by_fields` (`internal/proxy/dql/keys.go:60`). The value is one
+  expression string. REST adds `having` to the Query request body.
+- `having` requires an aggregation query: `group_by_fields` is set or
+  `output_fields` contains an aggregate. Otherwise the request is an error.
+  Without GROUP BY the aggregation has one group, and `having` returns that
+  row or no row.
+
+### Names
+
+A name in `having` is resolved in the group output scope, in this order:
+
+1. **An alias** defined in `output_fields`, of an aggregate
+   (`count(*) AS n`) or of a group-by field (`category AS c`).
+2. **A group-by field**, by its schema name.
+3. **An aggregate call** written out: `count(*)`, `sum(price)`, `avg(price)`,
+   `min(price)`, `max(price)`, with the same forms that `output_fields`
+   accepts. The aggregate does not have to be in `output_fields`:
+   `having="sum(price) > 1000"` with `output_fields=["category", "count(*)"]`
+   is valid. The binder adds it to the plan as an aggregate that is computed
+   and not returned, the same way it adds a `$distance` item for
+   `$distance(x)`.
+
+Any other name is an error at the proxy: a stored field that is not a group
+key (it has no single value per group), a dynamic-field key, a virtual
+column. A name that matches nothing never falls back to a dynamic key.
+
+Why `having` sees aliases while `filter` does not: the three ambiguities
+listed in "Why `filter` does not see aliases" all come from the input scope
+resolving unknown names to stored data. The group output scope has no such
+fallback. A name there is an alias, a group key, or an error, so adding a
+field to the collection later cannot change the meaning of an existing
+`having`. An alias equal to the name of a group-by field cannot occur when
+that field is returned under its own name, because output names are unique;
+when the field is returned only under another alias, the alias takes
+precedence, as in the output scope.
+
+### Expression
+
+The filter expression grammar with a different operand set. `Plan.g4` gets a
+third entry rule, `havingExpr : expr EOF`, and one more `expr` alternative
+for `Identifier '(' '*' ')'`, because `count(*)` is not an expression today
+(see "Grammar"). In the `having` visitor a call whose name is one of the five
+aggregate functions (matched case-insensitively) with a field name, `*`, or
+no argument is an aggregate reference; every other call is rejected. The
+`filter` visitor rejects the new alternative.
+
+Supported in this step:
+
+| Kind | Forms |
+|---|---|
+| Comparison | `==`, `!=`, `<`, `<=`, `>`, `>=`; range `a < x < b` |
+| Logical | `and` / `&&`, `or` / `\|\|`, `not` / `!` |
+| Arithmetic on numeric operands | `+`, `-`, `*`, `/`, `%` |
+| Membership | `in [...]`, `not in [...]` |
+| NULL test | `is null`, `is not null` |
+| String on a group key | `like` |
+
+Not supported in `having`: JSON and array functions, text match, geometry
+and timestamp functions, expression templates over vectors. They are rejected
+with a message naming the construct.
+
+Types are checked when the request is bound. Operand types: `count` is
+Int64; `sum` is Int64 or Double; `avg` is Double; `min` / `max` have the type
+of the field; a group key has the type of the field
+(`getAggregateResultType`, `internal/agg/aggregate_reducer.go:156`). The
+expression must be boolean. A comparison between a numeric and a string
+operand is an error.
+
+A group is returned when the predicate is true. When an operand is NULL
+(`min(price)` of a group whose prices are all NULL, a NULL group key) a
+comparison is NULL, `and` / `or` follow three-valued logic, and a group whose
+predicate is NULL is not returned. `is null` tests the operand directly. Its
+operand is a name in the existing grammar (`Plan.g4:70`), so an aggregate is
+tested through its alias: `min(price) AS lo` with `having="lo is null"`.
+
+### Evaluation
+
+`having` is evaluated at the proxy, on the result of the final group merge.
+An aggregate value of a group is final only after every segment, QueryNode,
+and shard has contributed to it, so the predicate cannot run earlier: a
+group with `count(*) = 3` in each of four segments passes `count(*) > 10`
+only after the merge.
+
+Today's proxy pipelines (`internal/proxy/dql/query_pipeline.go:60`):
+
+```
+aggregation:             reduce_by_groups -> slice
+aggregation + order_by:  reduce_by_groups(raw) -> order -> slice -> agg_remap
+```
+
+With `having`:
+
+```
+reduce_by_groups(raw) -> having -> [order] -> slice -> agg_remap
+```
+
+- **The `having` operator.** Input: the reducer's raw layout
+  `[group columns..., aggregate columns...]`. It evaluates the bound
+  predicate once per group and keeps the groups where it is true. `avg` is
+  stored in the raw layout as a sum column and a count column and is
+  finalized in the remap step today (`ComputeAvgFromSumAndCount`,
+  `query_pipeline.go:307`); the operator finalizes it before evaluating the
+  predicate.
+- **Evaluator.** The proxy has no evaluator for a parsed expression over
+  result columns. The function chain's `FilterOp`
+  (`internal/util/function/chain/operator_filter.go`) filters a DataFrame by
+  one registered function and is not a general expression evaluator. This
+  step adds one in Go for the operator set above, over `schemapb.FieldData`
+  columns with NULL support. The bound form is the existing `planpb.Expr`;
+  an alias, a group key, and an aggregate reference are each bound to a
+  column position in the raw layout. `post_filter` (#55119) does not use it: a
+  row's score in a ranked Query is final inside the segment, so #55119
+  evaluates `post_filter` in segcore before candidate retention.
+- **No group truncation below the proxy.** A component that drops groups
+  before the final merge may drop a group that would pass `having`. Two
+  places truncate today: segcore keeps the per-segment `limit` of an
+  aggregation with ORDER BY when the order covers every group key
+  (`internal/core/src/query/PlanProto.cpp:675`), and the group reducer stops
+  admitting new groups at `groupLimit`
+  (`internal/agg/aggregate_reducer.go:418`). With `having`, the proxy sends
+  the plan without a limit and builds its reducer with no group limit;
+  `offset` and `limit` are applied by the slice operator after `having`.
+- **Hidden aggregates.** An aggregate referenced only in `having` is appended
+  to the plan's aggregate list after the user's aggregates. QueryNodes
+  compute it like any other; the remap step does not copy it to the output.
+- **Cost.** Every group of the filtered data reaches the proxy, as in an
+  aggregation query without `limit` today. The predicate adds one pass over
+  the groups.
+
+No change to QueryNode Go code, segcore, or `milvus-proto` messages: the key
+travels in the existing `query_params`, and the plan uses existing fields.
+
+### Other systems
+
+Checked 2026-11-20 against the raw documentation source of each project.
+
+| System | Group filter | Aliases in it |
+|---|---|---|
+| PostgreSQL | `HAVING` | Not visible: "An output column's name can be used to refer to the column's value in ORDER BY and GROUP BY clauses, but not in the WHERE or HAVING clauses; there you must write out the expression instead" |
+| DuckDB | `HAVING` | Visible; listed among its extensions to SQL: "Column aliases in `WHERE`, `GROUP BY`, and `HAVING`" (`docs/2.0/sql/dialect/friendly_sql.md`) |
+| Elasticsearch | `bucket_selector` pipeline aggregation: "executes a script which determines whether the current bucket will be retained in the parent multi-bucket aggregation" | Metrics are referenced by the user-given aggregation name through `buckets_path` |
+
+Elasticsearch documents the same evaluation point as this design: "The
+bucket_selector aggregation, like all pipeline aggregations, executes after
+all other sibling aggregations. This means that using the bucket_selector
+aggregation to filter the returned buckets in the response does not save on
+execution time running the aggregations."
+
+This design accepts both forms, the alias (DuckDB, Elasticsearch) and the
+written-out aggregate (PostgreSQL).
 
 ## Design
 
@@ -763,7 +993,10 @@ Changes:
   then, and a Query has no distance. The Search plan carries the projection
   items even when stored output fields are left to the requery. Add a step
   that selects the projection-item columns from the reduced result in the
-  final ID order and appends them to the requery fields. Element-level results
+  final ID order and appends them to the requery fields. With streaming
+  reduce ([#55219](https://github.com/milvus-io/milvus/pull/55219)) the proxy
+  pipeline starts after candidate reduction, so the columns are recorded from
+  the reduced result before the pipeline runs. Element-level results
   key on (primary key, element index), as `hybridAssembleOperator` does.
 - **Search with ORDER BY** (`searchWithOrderByPipe`, `search_pipeline.go:3619`).
   This pipeline always requeries and then reorders every `FieldsData` column
@@ -809,6 +1042,11 @@ it, but no writer was found in this repository. This design does not use it.
 
 - **Old requests.** Unchanged. Items without `AS` and without `$` resolve
   exactly as before.
+- **Error text for names that do not parse.** An item that does not match
+  `selectItem` keeps the message it has today, with the parser's message
+  appended: `parse output field name failed: <item>: …` on a collection with
+  a dynamic field, `field <item> not exist: …` otherwise. Existing client
+  tests match on these texts.
 - **Explicit `$meta["key"]` items.** The output name changes from the raw
   string to the key. Measured on 2026-11-17 against a local build of master with
   pymilvus 3.1.0rc100, collection with a dynamic field
@@ -831,6 +1069,10 @@ it, but no writer was found in this repository. This design does not use it.
   every node is old.
 - **Old proxy, new SDK.** `$seg_id` is not a valid identifier for the old
   parser; the request fails with a parse error.
+- **`having` on an old proxy.** An old proxy does not read the `having` key
+  of `query_params` and returns every group without an error. The server
+  cannot detect this case. SDK documentation states the minimum server
+  version for `having`.
 - **Server-returned output name list.** `QueryResults.output_fields` and
   `SearchResultData.output_fields` must list the final output names (aliases
   applied, virtual columns included). Search sets it from the user's raw list
@@ -910,12 +1152,19 @@ it, but no writer was found in this repository. This design does not use it.
 6. segcore: raw-distance vector and export; Search `$distance`;
    `$distance AS distance`.
 7. Hybrid search `$score(x)`, `$distance(x)`, `$rank(x)`.
+8. `having`: entry rule and `count(*)` operand; binder for the group output
+   scope with hidden aggregates; proxy expression evaluator; `having`
+   operator in the aggregation pipelines; no limit below the proxy when
+   `having` is present. SDK and REST parameter.
 
-Steps 2–7 are independently shippable.
+Steps 2–8 are independently shippable.
 
 ## Test plan
 
-Design only; nothing below has been run.
+Steps 1–7 are implemented and were tested on development builds (x86-64 and
+arm64) with unit tests and end-to-end cases written from the list below. Not
+run: a mixed-version cluster and a deployment with several QueryNodes. The
+HAVING cases have not been run.
 
 - **Aggregates in the grammar.** Every form accepted by the current regex:
   each of the five functions, mixed case, spaces inside and around the
@@ -972,6 +1221,20 @@ Design only; nothing below has been run.
   with and without requery; aliases `distance` / `score` rejected on the
   argument forms; single-vector Search with `$distance(anns_field)` and
   `$distance(0)`.
+- **HAVING.** Alias of an aggregate; alias of a group key; group key by
+  name; written-out aggregate that is and is not in `output_fields` (the
+  hidden one is absent from the result); each of the five aggregates,
+  including `avg`; every operator in the table; type errors at bind time;
+  NULL aggregate and NULL group key (group dropped unless `is null`);
+  stored non-group field, dynamic key, and virtual column rejected; `having`
+  without aggregation rejected; without GROUP BY (one row or none);
+  groups spread over several segments, QueryNodes, and shards where no
+  single part satisfies the predicate and the merged value does; with
+  `order_by` on group keys; `limit` / `offset` count groups after `having`,
+  including the case where the first `limit` groups in order all fail the
+  predicate; result equal to client-side filtering of the same query without
+  `having`; requests without `having` byte-identical and still truncated at
+  the segment.
 - **Compatibility.** Requests without the new syntax are byte-identical;
   mixed-version cluster fails closed; pymilvus row and hit decoding.
 
@@ -994,3 +1257,6 @@ Design only; nothing below has been run.
 - [Weaviate additional properties](https://docs.weaviate.io/weaviate/api/graphql/additional-properties)
 - [Qdrant hybrid queries](https://qdrant.tech/documentation/search/hybrid-queries/), [qdrant#10282](https://github.com/qdrant/qdrant/issues/10282)
 - [pgvector README](https://github.com/pgvector/pgvector/blob/master/README.md)
+- [PostgreSQL SELECT](https://www.postgresql.org/docs/current/sql-select.html)
+- [DuckDB friendly SQL](https://github.com/duckdb/duckdb-web/blob/main/docs/2.0/sql/dialect/friendly_sql.md)
+- [Elasticsearch bucket selector aggregation](https://github.com/elastic/elasticsearch/blob/main/docs/reference/aggregations/search-aggregations-pipeline-bucket-selector-aggregation.md)
