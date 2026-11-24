@@ -53,6 +53,9 @@ struct BruteForceIndexParams {
 };
 
 struct SearchInfo {
+    // The request outputs $distance: an operator that rewrites the result
+    // scores records the vector-search distance first.
+    bool keep_raw_distance_{false};
     int64_t topk_{0};
     int64_t group_size_{1};
     bool strict_group_size_{false};

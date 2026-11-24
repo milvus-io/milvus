@@ -195,7 +195,7 @@ func (s *SearchInfo) DetermineSearchType(hasFilter bool) internalpb.SearchType {
 // Supports JSON subfield paths: metadata["price"]:asc, metadata["user"]["score"]:desc
 // Supports dynamic fields: age:desc (maps to $meta["age"])
 // Validates that fields exist in schema and are sortable types.
-func parseOrderByFields(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema) ([]OrderByField, error) {
+func parseOrderByFields(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, projections ...*outputProjection) ([]OrderByField, error) {
 	orderByStr, err := funcutil.GetAttrByKeyFromRepeatedKV(OrderByFieldsKey, searchParamsPair)
 	if err != nil || orderByStr == "" {
 		return nil, nil
@@ -225,6 +225,12 @@ func parseOrderByFields(searchParamsPair []*commonpb.KeyValuePair, schema *schem
 		}
 		if fieldSpec == "" {
 			return nil, merr.WrapErrParameterInvalidMsg("empty field name in order_by_fields")
+		}
+		// Output scope: an alias resolves to the stored field it names.
+		for _, projection := range projections {
+			if source, ok := projection.sourceOf(fieldSpec); ok {
+				fieldSpec = source
+			}
 		}
 
 		ascending := true
@@ -491,7 +497,7 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 }
 
 // parseSearchInfo returns QueryInfo and offset
-func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, rankParams *rankParams, largeTopKEnabled bool) (*SearchInfo, error) {
+func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, rankParams *rankParams, largeTopKEnabled bool, projections ...*outputProjection) (*SearchInfo, error) {
 	var topK int64
 	isAdvanced := rankParams != nil
 	externalLimit := rankParams.GetLimit() + rankParams.GetOffset()
@@ -640,7 +646,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	}
 
 	// 7. parse order_by_fields
-	orderByFields, err := parseOrderByFields(searchParamsPair, schema)
+	orderByFields, err := parseOrderByFields(searchParamsPair, schema, projections...)
 	if err != nil {
 		return nil, err
 	}

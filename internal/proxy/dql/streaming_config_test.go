@@ -282,9 +282,10 @@ func TestStreamingReductionSchemaCoverage(t *testing.T) {
 			other:     `dsl placeholder_group dsl_type partitionIDs field_id ignore_growing analyzer_name`,
 		},
 		{
-			message:   &planpb.PlanNode{},
-			reduction: `vector_anns query output_field_ids dynamic_fields scorers score_option querynode_function_chains`,
-			other:     `predicates plan_options namespace`,
+			message: &planpb.PlanNode{},
+			reduction: `vector_anns query output_field_ids dynamic_fields scorers score_option querynode_function_chains
+				projection_items`,
+			other: `predicates plan_options namespace`,
 		},
 		{
 			message:   &planpb.QueryPlanNode{},

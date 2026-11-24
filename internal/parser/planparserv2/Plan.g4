@@ -1,5 +1,18 @@
 grammar Plan;
 
+// Entry rule for one element of output_fields. The filter entry rule is expr.
+// AS is mandatory in front of an alias. The aggregate alternative comes first
+// so that "sum(price)" is an aggregate call, not the generic Call expression.
+selectItem:
+	MUL                                                                                                     # SelectStar
+	| aggregateCall (AS alias=fieldName)?                                                                   # SelectAggregate
+	| expr (AS alias=fieldName)?                                                                            # SelectExpr;
+
+// The function name is checked by the visitor (count, sum, avg, min, max in any
+// casing), which keeps these names usable as field names.
+aggregateCall:
+	function=Identifier '(' (arg=fieldName | star=MUL)? ')';
+
 expr:
   fieldName (op1=(ADD | SUB) INTERVAL interval_string=StringLiteral)? op2=(LT | LE | GT | GE | EQ | NE) ISO compare_string=StringLiteral # TimestamptzCompareForward
 	| ISO compare_string=StringLiteral op2=(LT | LE | GT | GE | EQ | NE) fieldName (op1=(ADD | SUB) INTERVAL interval_string=StringLiteral)? # TimestamptzCompareReverse
@@ -10,6 +23,7 @@ expr:
 	| RawStringLiteral										                                                # RawString
 	| (fieldName|Meta)           			      							                                # Identifier
 	| JSONIdentifier                                                                                        # JSONIdentifier
+	| name=(VSCORE | VDISTANCE | VRANK | VSEGID | VSEGOFFSET) ('(' (argField=fieldName | argIndex=IntegerConstant) ')')?  # VirtualColumn
 	| StructFieldIdentifier                                                                                 # StructField
 	| StructIndexFieldIdentifier                                                                            # StructIndexField
 	| StructSubFieldIdentifier                                                                              # StructSubField
@@ -61,6 +75,7 @@ expr:
 // option names continue to use Identifier rather than this rule.
 fieldName:
 	Identifier
+	| AS
 	| ISO
 	| INTERVAL
 	| MINIMUM_SHOULD_MATCH
@@ -118,6 +133,7 @@ INTERVAL: 'interval' | 'INTERVAL';
 ISO: 'iso' | 'ISO';
 MINIMUM_SHOULD_MATCH: 'minimum_should_match' | 'MINIMUM_SHOULD_MATCH';
 THRESHOLD: 'threshold' | 'THRESHOLD';
+AS: 'as' | 'AS';
 REGEXMATCH: '=~';
 REGEXNOTMATCH: '!~';
 ASSIGN: '=';
@@ -180,6 +196,11 @@ FloatingConstant:
 
 Identifier: Nondigit (Nondigit | Digit)*;
 Meta: '$meta';
+VSCORE: '$score';
+VDISTANCE: '$distance';
+VRANK: '$rank';
+VSEGID: '$seg_id';
+VSEGOFFSET: '$seg_offset';
 
 StringLiteral: EncodingPrefix? ('"' DoubleSCharSequence? '"' | '\'' SingleSCharSequence? '\'');
 RawStringLiteral: [rR] ('"' DoubleRChar* '"' | '\'' SingleRChar* '\'');

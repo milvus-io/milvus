@@ -105,6 +105,18 @@ BuildEmptyRetrieveBatch(milvus::query::RetrievePlan* plan, int64_t total_rows) {
     arrays.reserve(plan->field_ids_.size());
 
     for (auto field_id : plan->field_ids_) {
+        if (auto item = plan->FindProjectionItem(field_id)) {
+            auto arrow_type = arrow::int64();
+            ARROW_ASSIGN_OR_RAISE(auto arr, arrow::MakeEmptyArray(arrow_type));
+            fields.push_back(
+                MilvusField(milvus::query::ProjectionItemName(*item),
+                            arrow_type,
+                            false,
+                            field_id,
+                            milvus::DataType::INT64));
+            arrays.push_back(std::move(arr));
+            continue;
+        }
         if (milvus::SystemProperty::Instance().IsSystem(field_id)) {
             auto arrow_type = arrow::int64();
             ARROW_ASSIGN_OR_RAISE(auto arr, arrow::MakeEmptyArray(arrow_type));
@@ -157,9 +169,14 @@ BuildRetrieveFieldsBatch(
             return arrow::Status::Invalid(
                 "missing ordered field data for field id ", field_id.get());
         }
-        if (milvus::SystemProperty::Instance().IsSystem(field_id)) {
-            auto name = field_id.get() == 0 ? std::string("RowID")
-                                            : std::string("Timestamp");
+        const auto* projection_item = plan->FindProjectionItem(field_id);
+        if (projection_item != nullptr ||
+            milvus::SystemProperty::Instance().IsSystem(field_id)) {
+            auto name =
+                projection_item != nullptr
+                    ? milvus::query::ProjectionItemName(*projection_item)
+                    : (field_id.get() == 0 ? std::string("RowID")
+                                           : std::string("Timestamp"));
             ARROW_ASSIGN_OR_RAISE(
                 auto converted,
                 FieldDataToArrow(name, *it->second, total_rows));
@@ -259,13 +276,17 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
             // Check the aggregate for all winning segments before reading any
             // output fields. Reuse ordinary Retrieve's per-field statistics.
             int64_t estimated_size = 0;
+            const auto stored_field_ids = plan->StoredFieldIds();
+            const auto projection_row_size = static_cast<int64_t>(
+                plan->projection_items_.size() * sizeof(int64_t));
             for (const auto& [segment_index, selected] : segment_fields) {
                 if (selected.segment_offsets.empty()) {
                     continue;
                 }
                 milvus::futures::throwIfCancelled(cancel_token);
                 estimated_size +=
-                    selected.segment->get_fields_avg_size(plan->field_ids_) *
+                    (selected.segment->get_fields_avg_size(stored_field_ids) +
+                     projection_row_size) *
                     static_cast<int64_t>(selected.segment_offsets.size());
             }
             if (estimated_size > max_output_size) {
@@ -293,6 +314,13 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                 auto snapshot = materialized.segment->CaptureReadSnapshot();
                 auto fetch_one = [&](FieldId field_id,
                                      milvus::OpContext* field_ctx) {
+                    if (auto item = plan->FindProjectionItem(field_id)) {
+                        return milvus::query::BuildPlacementProjectionColumn(
+                            *item,
+                            materialized.segment->get_segment_id(),
+                            materialized.segment_offsets.data(),
+                            materialized.segment_offsets.size());
+                    }
                     if (milvus::SystemProperty::Instance().IsSystem(field_id)) {
                         auto system_type = milvus::SystemProperty::Instance()
                                                .GetSystemFieldType(field_id);
@@ -362,7 +390,8 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
             // MergeDataArray scatters rows into final order.
             for (auto& [segment_index, materialized] : segment_fields) {
                 for (auto field_id : plan->field_ids_) {
-                    if (milvus::SystemProperty::Instance().IsSystem(field_id)) {
+                    if (milvus::SystemProperty::Instance().IsSystem(field_id) ||
+                        plan->FindProjectionItem(field_id) != nullptr) {
                         continue;
                     }
                     auto& field_meta = plan->schema_->operator[](field_id);
@@ -395,7 +424,8 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
             // Merge into ordered fields.
             std::map<FieldId, std::unique_ptr<DataArray>> ordered_fields;
             for (auto field_id : plan->field_ids_) {
-                if (milvus::SystemProperty::Instance().IsSystem(field_id)) {
+                if (milvus::SystemProperty::Instance().IsSystem(field_id) ||
+                    plan->FindProjectionItem(field_id) != nullptr) {
                     auto merged = std::make_unique<DataArray>();
                     merged->set_field_id(field_id.get());
                     merged->set_type(milvus::proto::schema::DataType::Int64);

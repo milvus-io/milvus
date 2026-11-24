@@ -403,6 +403,9 @@ func (t *SearchTask) materializeAndAssignResult(
 	if err := lateMaterializeOutputFields(t.ctx, results, plan, reduced.Sources, searchResultData); err != nil {
 		return err
 	}
+	if err := t.placement.appendColumns(i, reduced.Sources, searchResultData); err != nil {
+		return err
+	}
 	return t.encodeAndAssignReducedResult(i, searchResultData, metricType, tr, relatedDataSize)
 }
 

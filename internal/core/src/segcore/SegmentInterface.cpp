@@ -59,17 +59,28 @@ namespace milvus::segcore {
 namespace {
 
 void
-FillEmptyRetrieveFields(const Schema& schema,
+FillEmptyRetrieveFields(const query::RetrievePlan& plan,
                         const std::vector<FieldId>& field_ids,
                         proto::segcore::RetrieveResults& results,
                         int64_t segment_id,
                         milvus::OpContext* op_ctx,
                         bool ignore_non_pk = false,
                         bool fill_ids = false) {
+    const Schema& schema = *plan.schema_;
     auto fields_data = results.mutable_fields_data();
     auto ids = results.mutable_ids();
     auto pk_field_id = schema.get_primary_field_id();
     for (auto field_id : field_ids) {
+        if (auto item = plan.FindProjectionItem(field_id)) {
+            // A virtual column is part of the output only, like any non-pk
+            // field: it is skipped while candidates are being selected.
+            if (!ignore_non_pk) {
+                fields_data->AddAllocated(query::BuildPlacementProjectionColumn(
+                                              *item, segment_id, nullptr, 0)
+                                              .release());
+            }
+            continue;
+        }
         const bool is_system = SystemProperty::Instance().IsSystem(field_id);
         const bool is_pk =
             pk_field_id.has_value() && pk_field_id.value() == field_id;
@@ -316,6 +327,10 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
     int64_t output_data_size = 0;
     if (!candidates && result_rows > 0) {
         for (auto field_id : plan->field_ids_) {
+            if (plan->FindProjectionItem(field_id) != nullptr) {
+                output_data_size += sizeof(int64_t) * result_rows;
+                continue;
+            }
             output_data_size += get_field_avg_size(field_id) * result_rows;
         }
     }
@@ -494,13 +509,18 @@ SegmentInternalInterface::FillOrderByResult(
 
     std::vector<FieldId> fields_to_fetch(deferred.begin(), deferred.end());
     for (auto field_id : plan->field_ids_) {
-        if (SystemProperty::Instance().IsSystem(field_id)) {
+        if (SystemProperty::Instance().IsSystem(field_id) ||
+            plan->FindProjectionItem(field_id) != nullptr) {
             fields_to_fetch.push_back(field_id);
         }
     }
 
     auto fetch_one = [this, plan, &offset_data, topk_count](
                          FieldId field_id, milvus::OpContext* field_ctx) {
+        if (auto item = plan->FindProjectionItem(field_id)) {
+            return query::BuildPlacementProjectionColumn(
+                *item, get_segment_id(), offset_data.data(), topk_count);
+        }
         if (SystemProperty::Instance().IsSystem(field_id)) {
             auto system_type =
                 SystemProperty::Instance().GetSystemFieldType(field_id);
@@ -549,11 +569,8 @@ SegmentInternalInterface::FillOrderByResult(
     };
 
     if (topk_count == 0) {
-        FillEmptyRetrieveFields(*plan->schema_,
-                                fields_to_fetch,
-                                *results,
-                                get_segment_id(),
-                                op_ctx);
+        FillEmptyRetrieveFields(
+            *plan, fields_to_fetch, *results, get_segment_id(), op_ctx);
     } else {
         auto fetched_fields = FetchOutputFields(
             fields_to_fetch, get_segment_id(), op_ctx, fetch_one);
@@ -604,7 +621,7 @@ SegmentInternalInterface::FillTargetEntry(
     tracer::AutoSpan span("FillTargetEntry", tracer::GetRootSpan());
 
     if (size == 0) {
-        FillEmptyRetrieveFields(*plan->schema_,
+        FillEmptyRetrieveFields(*plan,
                                 plan->field_ids_,
                                 *results,
                                 get_segment_id(),
@@ -660,6 +677,10 @@ SegmentInternalInterface::FillTargetEntry(
 
     auto fetch_one = [this, plan, offsets, size, snapshot](
                          FieldId field_id, milvus::OpContext* field_ctx) {
+        if (auto item = plan->FindProjectionItem(field_id)) {
+            return query::BuildPlacementProjectionColumn(
+                *item, get_segment_id(), offsets, size);
+        }
         if (SystemProperty::Instance().IsSystem(field_id)) {
             auto system_type =
                 SystemProperty::Instance().GetSystemFieldType(field_id);
@@ -712,7 +733,8 @@ SegmentInternalInterface::FillTargetEntry(
                                           fetched.scanned_remote_bytes);
         results->set_scanned_total_bytes(results->scanned_total_bytes() +
                                          fetched.scanned_total_bytes);
-        if (SystemProperty::Instance().IsSystem(field_id)) {
+        if (SystemProperty::Instance().IsSystem(field_id) ||
+            plan->FindProjectionItem(field_id) != nullptr) {
             fields_data->AddAllocated(col.release());
             continue;
         }

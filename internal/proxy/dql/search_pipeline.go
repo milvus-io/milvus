@@ -199,6 +199,7 @@ type searchReduceOperator struct {
 	queryInfos          []*planpb.QueryInfo
 	collSchema          *schemapb.CollectionSchema
 	isSearchAggregation bool
+	virtualStash        *virtualColumnStash
 }
 
 const reduceOffsetParamKey = "reduce_offset"
@@ -224,6 +225,7 @@ func newSearchReduceOperator(t *SearchTask, params map[string]any) (operator, er
 		queryInfos:          t.queryInfos,
 		collSchema:          t.schema.CollectionSchema,
 		isSearchAggregation: t.aggCtx != nil,
+		virtualStash:        t.getVirtualColumnStash(),
 	}, nil
 }
 
@@ -239,7 +241,10 @@ func (op *searchReduceOperator) run(ctx context.Context, span trace.Span, inputs
 		return nil, err
 	}
 	fillFieldNames(op.collSchema, result.GetResults())
-	return []any{[]*milvuspb.SearchResults{result}, []searchScoreInfo{newSearchScoreInfo(metricType, op.scoreRewritten)}}, nil
+	reduced := []*milvuspb.SearchResults{result}
+	scoreInfos := []searchScoreInfo{newSearchScoreInfo(metricType, op.scoreRewritten)}
+	op.virtualStash.capture(reduced, scoreInfos)
+	return []any{reduced, scoreInfos}, nil
 }
 
 type hybridSearchReduceOperator struct {
@@ -251,6 +256,7 @@ type hybridSearchReduceOperator struct {
 	partitionIDs       []int64
 	queryInfos         []*planpb.QueryInfo
 	collSchema         *schemapb.CollectionSchema
+	virtualStash       *virtualColumnStash
 }
 
 func newHybridSearchReduceOperator(t *SearchTask, _ map[string]any) (operator, error) {
@@ -267,6 +273,7 @@ func newHybridSearchReduceOperator(t *SearchTask, _ map[string]any) (operator, e
 		partitionIDs:       t.GetPartitionIDs(),
 		queryInfos:         t.queryInfos,
 		collSchema:         t.schema.CollectionSchema,
+		virtualStash:       t.getVirtualColumnStash(),
 	}, nil
 }
 
@@ -315,18 +322,21 @@ func (op *hybridSearchReduceOperator) run(ctx context.Context, span trace.Span, 
 		scoreInfos = append(scoreInfos, newSearchScoreInfo(subMetricType, scoreRewrittenAt(op.scoresRewritten, index)))
 		multipleMilvusResults[index] = result
 	}
+	op.virtualStash.capture(multipleMilvusResults, scoreInfos)
 	return []any{multipleMilvusResults, scoreInfos}, nil
 }
 
 type elementBestCollapseOperator struct {
 	configs            []elementCollapseConfig
 	elementLevelHybrid bool
+	virtualStash       *virtualColumnStash
 }
 
 func newElementBestCollapseOperator(t *SearchTask, _ map[string]any) (operator, error) {
 	return &elementBestCollapseOperator{
 		configs:            t.hybridCollapseConfigs(),
 		elementLevelHybrid: t.hybridElementLevel,
+		virtualStash:       t.getVirtualColumnStash(),
 	}, nil
 }
 
@@ -411,6 +421,9 @@ func (op *elementBestCollapseOperator) run(ctx context.Context, span trace.Span,
 			return nil, err
 		}
 	}
+	// The fusion ranks the collapsed results, so the per-sub-request columns
+	// are taken from them.
+	op.virtualStash.capture(collapsed, scoreInfos)
 	return []any{collapsed}, nil
 }
 
@@ -1845,6 +1858,10 @@ type endOperator struct {
 	outputFieldNames []string
 	fieldSchemas     []*schemapb.FieldSchema
 	roundDecimal     int64
+	// virtualColumnIDs are the output IDs of the virtual columns computed on
+	// the QueryNodes. Their columns have no schema entry.
+	virtualColumnIDs []int64
+	virtualStash     *virtualColumnStash
 }
 
 func newEndOperator(t *SearchTask, _ map[string]any) (operator, error) {
@@ -1856,6 +1873,8 @@ func newEndOperator(t *SearchTask, _ map[string]any) (operator, error) {
 		outputFieldNames: t.translatedOutputFields,
 		fieldSchemas:     typeutil.GetAllFieldSchemas(t.schema.CollectionSchema),
 		roundDecimal:     roundDecimal,
+		virtualColumnIDs: t.outputProjection.queryNodeItemIDs(true),
+		virtualStash:     t.getVirtualColumnStash(),
 	}, nil
 }
 
@@ -1871,8 +1890,14 @@ func (op *endOperator) run(ctx context.Context, span trace.Span, inputs ...any) 
 		}
 	}
 	result.Results.FieldsData = lo.Filter(result.Results.FieldsData, func(field *schemapb.FieldData, _ int) bool {
-		return lo.Contains(op.outputFieldNames, field.FieldName)
+		return lo.Contains(op.outputFieldNames, field.FieldName) || lo.Contains(op.virtualColumnIDs, field.GetFieldId())
 	})
+	// Columns that a later pipeline node dropped (a requery replaces
+	// fields_data) are restored from the reduced Search results.
+	if err := op.virtualStash.carry(result.GetResults()); err != nil {
+		return nil, err
+	}
+	roundVirtualFloatColumns(result.GetResults(), op.virtualColumnIDs, op.roundDecimal)
 	allSearchCount := aggregatedAllSearchCount(inputs[1].([]*milvuspb.SearchResults))
 	result.GetResults().AllSearchCount = allSearchCount
 	roundSearchScores(result.GetResults(), op.roundDecimal)

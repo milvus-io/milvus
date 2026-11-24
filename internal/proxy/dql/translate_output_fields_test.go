@@ -214,7 +214,8 @@ func TestTranslateOutputFields(t *testing.T) {
 		outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"$meta[\"A\"]", idFieldName}, schema, true)
 		assert.NoError(t, err)
 		assert.ElementsMatch(t, []string{common.MetaFieldName}, outputFields)
-		assert.ElementsMatch(t, []string{"$meta[\"A\"]"}, userOutputFields)
+		// The output name of the explicit form is the key, as for the bare form.
+		assert.ElementsMatch(t, []string{"A"}, userOutputFields)
 		assert.ElementsMatch(t, []string{"A"}, userDynamicFields)
 		assert.True(t, requestedPK)
 

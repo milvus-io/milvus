@@ -1035,8 +1035,15 @@ WorthCarryingAsArrow(const milvus::DataArray& fd) {
 // Moving rather than copying is what the aliasing depends on: Swap transfers
 // the inner buffers, so the payload is never duplicated and its address is the
 // one Arrow will point at.
+// Projection items (virtual columns) stay in the header like system fields:
+// they have no schema entry for the Arrow conversion to look up.
 std::shared_ptr<RetrieveUserColumns>
-PartitionRetrieveResult(milvus::proto::segcore::RetrieveResults* results) {
+PartitionRetrieveResult(milvus::proto::segcore::RetrieveResults* results,
+                        const milvus::query::RetrievePlan* plan) {
+    auto stays_in_header = [plan](milvus::FieldId field_id) {
+        return milvus::SystemProperty::Instance().IsSystem(field_id) ||
+               plan->FindProjectionItem(field_id) != nullptr;
+    };
     auto holder = std::make_shared<RetrieveUserColumns>();
     auto* fields_data = results->mutable_fields_data();
     milvus::proto::segcore::RetrieveResults retained;
@@ -1061,8 +1068,7 @@ PartitionRetrieveResult(milvus::proto::segcore::RetrieveResults* results) {
     // is something this function can repair.
     bool any_retained = false;
     for (const auto& fd : *fields_data) {
-        if (milvus::SystemProperty::Instance().IsSystem(
-                milvus::FieldId(fd.field_id())) ||
+        if (stays_in_header(milvus::FieldId(fd.field_id())) ||
             !WorthCarryingAsArrow(fd)) {
             any_retained = true;
             break;
@@ -1076,8 +1082,7 @@ PartitionRetrieveResult(milvus::proto::segcore::RetrieveResults* results) {
         const bool force_retain = !any_retained && first;
         first = false;
 
-        if (force_retain ||
-            milvus::SystemProperty::Instance().IsSystem(field_id) ||
+        if (force_retain || stays_in_header(field_id) ||
             !WorthCarryingAsArrow(fd)) {
             retained.mutable_fields_data()->Add()->Swap(&fd);
             continue;
@@ -1436,7 +1441,7 @@ AsyncRetrieveAsArrow(CTraceContext c_trace,
             // the user columns' protobuf buffers, so those buffers must already
             // be owned by something that outlives the export. Partitioning
             // afterwards would free them while Arrow still referenced them.
-            auto user_columns = PartitionRetrieveResult(results.get());
+            auto user_columns = PartitionRetrieveResult(results.get(), plan);
             auto batch_result =
                 BuildRetrieveUserColumnBatch(user_columns, plan, total_rows);
             // Classify at the throw site. The copy paths -- every nullable

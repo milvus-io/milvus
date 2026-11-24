@@ -21,7 +21,7 @@ var contextualKeywordNames = []string{
 	"match_all", "match_any", "match_least", "match_most", "match_exact",
 	"st_equals", "st_touches", "st_overlaps", "st_crosses", "st_contains",
 	"st_intersects", "st_within", "st_dwithin", "st_isvalid",
-	"iso", "interval", "minimum_should_match", "threshold",
+	"iso", "interval", "minimum_should_match", "threshold", "as",
 }
 
 const contextualKeywordFieldID int64 = 2000

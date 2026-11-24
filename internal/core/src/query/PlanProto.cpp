@@ -1281,6 +1281,8 @@ ProtoParser::CreatePlanImpl(const proto::plan::PlanNode& plan_node_proto) {
     for (const auto& dynamic_field : plan_node_proto.dynamic_fields()) {
         plan->target_dynamic_fields_.push_back(dynamic_field);
     }
+    plan->projection_items_ = ProjectionItemsFromProto(plan_node_proto);
+    plan->plan_node_->search_info_.keep_raw_distance_ = plan->OutputsDistance();
 
     return plan;
 }
@@ -1313,6 +1315,14 @@ ProtoParser::CreateRetrievePlanImpl(
     }
     for (const auto& dynamic_field : plan_node_proto.dynamic_fields()) {
         retrieve_plan->target_dynamic_fields_.push_back(dynamic_field);
+    }
+    retrieve_plan->projection_items_ =
+        ProjectionItemsFromProto(plan_node_proto);
+    for (const auto& item : retrieve_plan->projection_items_) {
+        AssertInfo(IsPlacementProjectionItem(item),
+                   "virtual column {} is not available in a query",
+                   ProjectionItemName(item));
+        retrieve_plan->field_ids_.push_back(item.output_id);
     }
     return retrieve_plan;
 }
