@@ -47,6 +47,7 @@
 #include "cachinglayer/lrucache/DList.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/AsyncLoadExecutor.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/ThreadPools.h"
 
@@ -746,6 +747,282 @@ TEST_F(LoadAdmissionControllerAsyncTest, LeaseDestructorReleasesBudget) {
 
     EXPECT_TRUE(budget_.TryAcquire({1, 1}, LoadAdmissionPriority::High));
     budget_.Release({1, 1});
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest, WeightedRoundsIncludeUrgent) {
+    budget_.SetCapacitySlots(1);
+    auto running = folly::coro::blockingWait(
+        budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::High));
+    const auto restore =
+        folly::makeGuard([] { SetAsyncLoadSchedulingWeights(32, 8, 1); });
+    for (const auto weights :
+         {std::array{32, 8, 1}, std::array{2, 3, 1}, std::array{1, 1, 1}}) {
+        SetAsyncLoadSchedulingWeights(weights[0], weights[1], weights[2]);
+        std::array<std::vector<AsyncAcquireReturn>, 3> pending;
+        for (size_t priority = 0; priority < 3; ++priority) {
+            for (int i = 0; i < weights[priority] * 2; ++i) {
+                pending[priority].push_back(budget_.AcquireAsync(
+                    {0, 1},
+                    static_cast<LoadAdmissionPriority>(priority),
+                    {},
+                    i + 1));
+            }
+        }
+        std::array<size_t, 3> next{};
+        running.Release();
+        for (int round = 0; round < 2; ++round) {
+            for (size_t priority = 0; priority < 3; ++priority) {
+                for (int i = 0; i < weights[priority]; ++i) {
+                    for (size_t other = 0; other < 3; ++other) {
+                        if (next[other] < pending[other].size()) {
+                            EXPECT_EQ(pending[other][next[other]].isReady(),
+                                      other == priority);
+                        }
+                    }
+                    running = folly::coro::blockingWait(
+                        std::move(pending[priority][next[priority]++]));
+                    if (round != 1 || priority != 2 || i != weights[2] - 1) {
+                        running.Release();
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest, CancelDoesNotSpendUrgentQuota) {
+    SetAsyncLoadSchedulingWeights(1, 1, 1);
+    const auto restore =
+        folly::makeGuard([] { SetAsyncLoadSchedulingWeights(32, 8, 1); });
+    budget_.SetCapacitySlots(1);
+    auto running = folly::coro::blockingWait(
+        budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::High));
+    folly::CancellationSource cancel;
+    auto cancelled = budget_.AcquireAsync(
+        {0, 1}, LoadAdmissionPriority::Urgent, cancel.getToken(), 1);
+    auto urgent =
+        budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::Urgent, {}, 2);
+    auto high = budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::High);
+    cancel.requestCancellation();
+    EXPECT_THROW(folly::coro::blockingWait(std::move(cancelled)),
+                 folly::OperationCancelled);
+    running.Release();
+    EXPECT_TRUE(urgent.isReady());
+    EXPECT_FALSE(high.isReady());
+    folly::coro::blockingWait(std::move(urgent)).Release();
+    EXPECT_TRUE(high.isReady());
+    folly::coro::blockingWait(std::move(high)).Release();
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest,
+       SelectedHeadRetainsTurnUntilCapacityOrCancellation) {
+    SetAsyncLoadSchedulingWeights(1, 1, 1);
+    const auto restore =
+        folly::makeGuard([] { SetAsyncLoadSchedulingWeights(32, 8, 1); });
+    budget_.SetCapacitySlots(2);
+    budget_.SetCapacityBytes(10);
+    auto running = folly::coro::blockingWait(
+        budget_.AcquireAsync({10, 1}, LoadAdmissionPriority::High));
+    folly::CancellationSource cancel;
+    auto urgent = budget_.AcquireAsync(
+        {1, 2}, LoadAdmissionPriority::Urgent, cancel.getToken(), 1);
+    auto high = budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::High);
+    budget_.NotifyCapacityUpdated();
+    EXPECT_FALSE(urgent.isReady());
+    EXPECT_FALSE(high.isReady());
+    EXPECT_FALSE(budget_.TryAcquire({0, 1}, LoadAdmissionPriority::Low));
+    // Cancelling the resource-blocked selected head makes another class runnable.
+    cancel.requestCancellation();
+    EXPECT_THROW(folly::coro::blockingWait(std::move(urgent)),
+                 folly::OperationCancelled);
+    EXPECT_TRUE(high.isReady());
+    auto high_lease = folly::coro::blockingWait(std::move(high));
+    auto low = budget_.AcquireAsync({11, 2}, LoadAdmissionPriority::Low);
+    running.Release();
+    EXPECT_FALSE(
+        low.isReady());  // Oversize bytes still obey the joint slot limit.
+    high_lease.Release();
+    EXPECT_TRUE(low.isReady());
+    folly::coro::blockingWait(std::move(low)).Release();
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest,
+       UrgentSequenceAndFifoSurviveCancellation) {
+    budget_.SetCapacitySlots(1);
+    auto running = folly::coro::blockingWait(
+        budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::High));
+    auto later =
+        budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::Urgent, {}, 20);
+    auto first =
+        budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::Urgent, {}, 10);
+    auto tie =
+        budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::Urgent, {}, 10);
+    auto unspecified =
+        budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::Urgent);
+    running.Release();
+    EXPECT_TRUE(first.isReady());
+    EXPECT_FALSE(tie.isReady());
+    folly::coro::blockingWait(std::move(first)).Release();
+    EXPECT_TRUE(tie.isReady());
+    EXPECT_FALSE(later.isReady());
+    folly::coro::blockingWait(std::move(tie)).Release();
+    EXPECT_TRUE(later.isReady());
+    EXPECT_FALSE(unspecified.isReady());
+    folly::coro::blockingWait(std::move(later)).Release();
+    EXPECT_TRUE(unspecified.isReady());
+    folly::coro::blockingWait(std::move(unspecified)).Release();
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest, ReconfigurationResetsPendingRound) {
+    budget_.SetCapacitySlots(1);
+    SetAsyncLoadSchedulingWeights(1, 1, 1);
+    const auto restore =
+        folly::makeGuard([] { SetAsyncLoadSchedulingWeights(32, 8, 1); });
+    auto running = folly::coro::blockingWait(
+        budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::High));
+    auto urgent = budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::Urgent);
+    auto urgent2 = budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::Urgent);
+    auto high = budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::High);
+    running.Release();
+    running = folly::coro::blockingWait(std::move(urgent));
+    // The old round would choose HIGH next; the native setter starts a new one.
+    SetAsyncLoadSchedulingWeights(0, 1, 1);  // Invalid input restores 32:8:1.
+    running.Release();
+    EXPECT_TRUE(urgent2.isReady());
+    EXPECT_FALSE(high.isReady());
+    folly::coro::blockingWait(std::move(urgent2)).Release();
+    EXPECT_TRUE(high.isReady());
+    folly::coro::blockingWait(std::move(high)).Release();
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest, EmptyUrgentClassKeepsHighLowShares) {
+    budget_.SetCapacitySlots(1);
+    auto running = folly::coro::blockingWait(
+        budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::High));
+    std::vector<AsyncAcquireReturn> high;
+    for (int i = 0; i < 9; ++i) {
+        high.push_back(
+            budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::High));
+    }
+    auto low = budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::Low);
+    running.Release();
+    for (int i = 0; i < 8; ++i) {
+        EXPECT_TRUE(high[i].isReady());
+        EXPECT_FALSE(low.isReady());
+        folly::coro::blockingWait(std::move(high[i])).Release();
+    }
+    EXPECT_TRUE(low.isReady());
+    EXPECT_FALSE(high[8].isReady());
+    folly::coro::blockingWait(std::move(low)).Release();
+    folly::coro::blockingWait(std::move(high[8])).Release();
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest,
+       MetadataUsesBoundUrgentDespiteHighWireFallback) {
+    budget_.SetCapacitySlots(1);
+    auto running = folly::coro::blockingWait(
+        budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::High));
+    folly::ManualExecutor executor;
+    auto urgent =
+        AcquireMetadataLoadSlotAsync(proto::common::LoadPriority::HIGH, {})
+            .scheduleOn(
+                ResolveAsyncLoadExecutor(folly::getKeepAliveToken(&executor),
+                                         AsyncLoadPriority::Urgent,
+                                         17))
+            .start();
+    executor.drain();
+    auto high =
+        budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::High, {}, 1);
+    budget_.UpdateMetrics();
+    const auto queued = ScrapeAdmissionMetrics();
+    EXPECT_EQ(FindAdmissionSample(
+                  queued, "pending_requests", {"priority=\"urgent\""}),
+              1);
+    running.Release();
+    executor.drain();
+    EXPECT_TRUE(urgent.isReady());
+    EXPECT_FALSE(high.isReady());
+    std::move(urgent).get().Release();
+    EXPECT_TRUE(high.isReady());
+    folly::coro::blockingWait(std::move(high)).Release();
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest,
+       NewArrivalsCannotStealPendingClassTurns) {
+    budget_.SetCapacitySlots(1);
+    SetAsyncLoadSchedulingWeights(1, 1, 1);
+    const auto restore =
+        folly::makeGuard([] { SetAsyncLoadSchedulingWeights(32, 8, 1); });
+    auto running = folly::coro::blockingWait(
+        budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::High));
+    auto u1 =
+        budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::Urgent, {}, 1);
+    auto u2 =
+        budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::Urgent, {}, 2);
+    auto h1 = budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::High, {}, 1);
+    auto h2 = budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::High, {}, 20);
+    auto l1 = budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::Low, {}, 1);
+    auto l2 = budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::Low, {}, 2);
+    running.Release();
+    for (int i = 0; i < 100; ++i) {
+        // Zero-slot probes fit, but cannot bypass numbered pending work or steal a turn.
+        EXPECT_FALSE(budget_.TryAcquire({0, 0}, LoadAdmissionPriority::Urgent));
+        EXPECT_FALSE(budget_.TryAcquire({0, 0}, LoadAdmissionPriority::Low));
+    }
+    auto new_urgent =
+        budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::Urgent);
+    auto new_high =
+        budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::High, {}, 10);
+    const std::array order{
+        &u1, &h1, &l1, &u2, &new_high, &l2, &new_urgent, &h2};
+    for (size_t i = 0; i < order.size(); ++i) {
+        for (size_t j = i; j < order.size(); ++j) {
+            EXPECT_EQ(order[j]->isReady(), i == j);
+        }
+        folly::coro::blockingWait(std::move(*order[i])).Release();
+    }
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest,
+       ImmediateAdmissionWakesNextQuotaClass) {
+    budget_.SetCapacitySlots(1);
+    SetAsyncLoadSchedulingWeights(1, 1, 1);
+    const auto restore =
+        folly::makeGuard([] { SetAsyncLoadSchedulingWeights(32, 8, 1); });
+    folly::CancellationSource cancel;
+    auto blocked = budget_.AcquireAsync(
+        {0, 2}, LoadAdmissionPriority::Urgent, cancel.getToken(), 2);
+    auto high = budget_.AcquireAsync({0, 0}, LoadAdmissionPriority::High);
+    EXPECT_FALSE(high.isReady());
+    // Older same-class work may bypass the newer resource-blocked head. Spending
+    // the last Urgent credit must wake High without waiting for this lease to release.
+    auto older =
+        budget_.AcquireAsync({0, 0}, LoadAdmissionPriority::Urgent, {}, 1);
+    EXPECT_TRUE(older.isReady());
+    EXPECT_TRUE(high.isReady());
+    folly::coro::blockingWait(std::move(high)).Release();
+    folly::coro::blockingWait(std::move(older)).Release();
+    cancel.requestCancellation();
+    EXPECT_THROW(folly::coro::blockingWait(std::move(blocked)),
+                 folly::OperationCancelled);
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest,
+       SharedWeightSetterWakesNewlySelectedClass) {
+    budget_.SetCapacitySlots(1);
+    folly::CancellationSource cancel;
+    auto high = budget_.AcquireAsync(
+        {0, 2}, LoadAdmissionPriority::High, cancel.getToken());
+    budget_.NotifyCapacityUpdated();  // HIGH owns the resource-blocked turn.
+    auto urgent = budget_.AcquireAsync({0, 1}, LoadAdmissionPriority::Urgent);
+    EXPECT_FALSE(urgent.isReady());
+    SetAsyncLoadSchedulingWeights(
+        32, 8, 1);  // Reset chooses URGENT and must wake it.
+    EXPECT_TRUE(urgent.isReady());
+    folly::coro::blockingWait(std::move(urgent)).Release();
+    cancel.requestCancellation();
+    EXPECT_THROW(folly::coro::blockingWait(std::move(high)),
+                 folly::OperationCancelled);
 }
 
 TEST_F(LoadAdmissionControllerAsyncTest, GrantsHighPriorityBeforeLowPriority) {

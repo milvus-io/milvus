@@ -16,8 +16,8 @@ loads within their priority and retain FIFO order. Ordering applies to pending
 work; it neither preempts running tasks nor guarantees completion order across
 multiple workers. A continuously ready class receives its turn even under sustained URGENT traffic.
 These are task-count shares, not CPU-time shares or completion-time guarantees.
-Admission remains strict HIGH/LOW, so CPU progress alone does not ensure
-end-to-end loading progress.
+Admission uses the same configured weights in independent request-count rounds;
+CPU and admission counters are separate. Neither share measures bytes or CPU time.
 
 ## Sequence ownership and propagation
 
@@ -77,12 +77,26 @@ the adapter preserves metadata for subsequent admission and ASYNC_LOAD work.
 
 ## I/O admission
 
-The admission controller keeps separate HIGH/LOW queues, each represented by a
-multimap keyed by sequence. Equal keys retain insertion order. Queued requests
-reserve no resources. An older request may use available capacity ahead of a
-newer pending request, but cannot bypass an earlier/equal sequence or a higher
-priority. Cancellation removes the exact queued iterator; terminal promises are
-fulfilled outside the controller lock as before.
+The admission controller keeps URGENT/HIGH/LOW queues, each represented by a
+multimap keyed by sequence. Equal keys retain insertion order. Selection uses
+weighted request-count rounds, default 32:8:1, independently of CPU task rounds.
+Empty classes forfeit quota; an empty pending set resets to URGENT. Successful
+admissions consume one quota regardless of bytes/slots; cancellation and failed
+capacity checks consume none. Queued requests reserve no resources.
+
+The selected head retains its turn when either resource is unavailable. Other
+classes cannot bypass it even with smaller requests. This deliberately trades
+utilization and urgent latency for eventual progress of resource-heavy heads.
+A request above the slot limit needs cancellation or a capacity increase; it can
+block all classes. Within the selected class an older sequence can still use
+capacity before a newer blocked request; equal/newer sequences cannot bypass.
+Capacity changes and cancellation re-evaluate the selected head. Admitted work
+is never preempted, including after a capacity reduction.
+
+Cancellation removes the exact queued iterator; terminal promises are fulfilled
+outside controller/configuration locks. The native scheduling-weight setter
+updates both schedulers and resets both rounds; pending work is then reconsidered.
+The QueryNode config remains startup-only, without a new watcher.
 
 Enqueue is O(log N); removing the head or a known cancellation iterator is
 amortized O(1). For the executor, enqueue into a ready group and reservation from
@@ -122,9 +136,18 @@ is automatically promoted. On the default pool these map to Folly HI/MID/LO;
 `getNumPriorities()` returns 3. External executors retain the old HIGH-to-HI
 mapping, so three distinct classes are only guaranteed on ASYNC_LOAD.
 
-The existing admission controller and its two-class mapping are unchanged.
-Search's context propagation and resource priority require separate integration
-before claiming production URGENT behavior.
+Executor adapters retain local Urgent/High/Low metadata separately from Folly's
+numeric priority (custom pools can collapse High and Urgent). Legacy executor
+rebinding and explicit async executor switches retain Urgent alongside the
+sequence. Without an Urgent binding, the explicit wire High/Low still wins,
+including deliberate demotion. The local enum overload can explicitly demote
+Urgent. Field, index payload and metadata admission preserve the Urgent marker;
+otherwise they use the explicit wire High/Low class. Admission metrics add `priority="urgent"` without changing the existing high/low series.
+
+No production caller currently selects `AsyncLoadPriority::Urgent`. Search is
+not promoted by this change; its request-context entry point still needs separate
+integration. Tests can explicitly bind an Urgent executor and exercise admission,
+but this is not evidence of end-to-end Urgent Search behavior.
 
 CPU selection adds no clock read, allocation, or new lock. It reuses the existing
 reservation lock and scans at most three classes. Each heap reserves using the
@@ -150,7 +173,17 @@ The native setter also applies to an already initialized pool without replacing
 it, but no configuration watcher is registered for this POC.
 
 Use identical async-load settings, input, worker count and admission limits
-for both runs. CPU weights affect only competing ready classes; admission still
-uses HIGH/LOW and load_seq. Search is not assigned to URGENT by this setting.
+for both runs. CPU and admission weights affect their independently competing classes; each
+retains sequence/FIFO ordering within a class. Search is not assigned to URGENT by this setting.
 If all real load tasks are HIGH, changing URGENT's weight alone cannot provide
 an URGENT-versus-load latency comparison.
+
+## Admission verification
+
+The two focused production test translation units were compiled into a standalone
+runner with real controller, executor, metadata API and resource-controller
+implementations: 66 tests passed, including 20 shuffled repetitions (1,320
+executions). Coverage includes three-class shares, sequence/FIFO, cancellation,
+resource-blocked heads, empty classes, concurrent arrivals, native weight updates
+and executor-to-metadata Urgent propagation. This is not a full `all_tests` build
+or cluster Urgent Search E2E; no production Urgent entry point is introduced.

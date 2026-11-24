@@ -36,6 +36,7 @@
 #include "folly/executors/thread_factory/NamedThreadFactory.h"
 #include "folly/executors/thread_factory/PriorityThreadFactory.h"
 #include "storage/ThreadPools.h"
+#include "storage/LoadAdmissionController.h"
 
 namespace milvus::storage {
 namespace {
@@ -67,7 +68,8 @@ class LoadExecutor final : public folly::Executor {
     static folly::Executor::KeepAlive<>
     Create(folly::Executor::KeepAlive<> executor,
            int8_t priority,
-           uint64_t sequence);
+           uint64_t sequence,
+           AsyncLoadPriority load_priority);
 
     void
     add(folly::Func func) override {
@@ -79,6 +81,11 @@ class LoadExecutor final : public folly::Executor {
         } else {
             executor_->add(std::move(func));
         }
+    }
+
+    AsyncLoadPriority
+    Priority() const noexcept {
+        return load_priority_;
     }
 
     uint64_t
@@ -95,9 +102,11 @@ class LoadExecutor final : public folly::Executor {
     LoadExecutor(folly::Executor::KeepAlive<> executor,
                  int8_t priority,
                  uint64_t sequence,
-                 std::shared_ptr<LoadTaskGroup> group)
+                 std::shared_ptr<LoadTaskGroup> group,
+                 AsyncLoadPriority load_priority)
         : executor_(std::move(executor)),
           priority_(priority),
+          load_priority_(load_priority),
           sequence_(sequence),
           group_(std::move(group)) {
     }
@@ -118,6 +127,7 @@ class LoadExecutor final : public folly::Executor {
     std::atomic<size_t> references_{1};
     folly::Executor::KeepAlive<> executor_;
     const int8_t priority_;
+    const AsyncLoadPriority load_priority_;
     const uint64_t sequence_;
     const std::shared_ptr<LoadTaskGroup> group_;
 };
@@ -438,20 +448,25 @@ class PriorityThreadPoolExecutor final : public folly::CPUThreadPoolExecutor {
 folly::Executor::KeepAlive<>
 LoadExecutor::Create(folly::Executor::KeepAlive<> executor,
                      int8_t priority,
-                     uint64_t sequence) {
+                     uint64_t sequence,
+                     AsyncLoadPriority load_priority) {
     std::shared_ptr<LoadTaskGroup> group;
     if (auto* pool =
             dynamic_cast<PriorityThreadPoolExecutor*>(executor.get())) {
         group = pool->GetGroup(priority, sequence);
     }
-    return makeKeepAlive(new LoadExecutor(
-        std::move(executor), priority, sequence, std::move(group)));
+    return makeKeepAlive(new LoadExecutor(std::move(executor),
+                                          priority,
+                                          sequence,
+                                          std::move(group),
+                                          load_priority));
 }
 
 // Keeps configuration lazy and serializes resizes separately from executor
 // acquisition, so a finishing worker can acquire a keep-alive during shrink.
 struct DefaultExecutorState {
     std::mutex configure_mutex;
+    std::mutex weights_mutex;
     std::mutex executor_mutex;
     int initial_threads = std::max(
         1, std::min(milvus::CPU_NUM, DEFAULT_THREAD_POOL_MAX_THREADS_SIZE));
@@ -505,11 +520,20 @@ SetAsyncLoadSchedulingWeights(int urgent, int high, int low) {
                                     static_cast<size_t>(low)}
             : std::array<size_t, 3>{32, 8, 1};
     auto& state = GetDefaultExecutorState();
-    std::lock_guard lock(state.executor_mutex);
-    if (state.executor) {
-        state.executor->SetWeights(weights);
+    auto& admission = LoadAdmissionController::GetInstance();
+    {
+        std::lock_guard weights_lock(state.weights_mutex);
+        {
+            std::lock_guard lock(state.executor_mutex);
+            if (state.executor) {
+                state.executor->SetWeights(weights);
+            }
+            state.weights = weights;
+        }
+        admission.SetSchedulingWeights(weights);
     }
-    state.weights = weights;
+    // Promise completion may resume inline: hold no configuration lock here.
+    admission.NotifyCapacityUpdated();
 }
 
 void
@@ -576,19 +600,31 @@ ResolveAsyncLoadExecutor(folly::Executor::KeepAlive<> executor,
         dynamic_cast<PriorityThreadPoolExecutor*>(executor.get()) == nullptr) {
         priority = folly::Executor::HI_PRI;
     }
-    return LoadExecutor::Create(std::move(executor), priority, sequence_id);
+    return LoadExecutor::Create(
+        std::move(executor), priority, sequence_id, load_priority);
 }
 
 folly::Executor::KeepAlive<>
 ResolveAsyncLoadExecutor(folly::Executor::KeepAlive<> executor,
                          milvus::proto::common::LoadPriority priority,
                          uint64_t sequence_id) {
+    const auto local_priority =
+        ResolveAsyncLoadPriority(executor.get(), priority);
     return ResolveAsyncLoadExecutor(
-        std::move(executor),
-        priority == milvus::proto::common::LoadPriority::LOW
-            ? AsyncLoadPriority::Low
-            : AsyncLoadPriority::High,
-        sequence_id);
+        std::move(executor), local_priority, sequence_id);
+}
+
+AsyncLoadPriority
+ResolveAsyncLoadPriority(
+    const folly::Executor* executor,
+    milvus::proto::common::LoadPriority fallback) noexcept {
+    const auto* bound = dynamic_cast<const LoadExecutor*>(executor);
+    if (bound && bound->Priority() == AsyncLoadPriority::Urgent) {
+        return AsyncLoadPriority::Urgent;
+    }
+    return fallback == milvus::proto::common::LoadPriority::LOW
+               ? AsyncLoadPriority::Low
+               : AsyncLoadPriority::High;
 }
 
 uint64_t

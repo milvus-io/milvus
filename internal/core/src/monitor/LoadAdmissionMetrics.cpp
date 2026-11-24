@@ -21,10 +21,15 @@
 
 namespace milvus::monitor {
 namespace {
+const std::map<std::string, std::string> urgent_label{{"priority", "urgent"}};
 const std::map<std::string, std::string> high_label{{"priority", "high"}};
 const std::map<std::string, std::string> low_label{{"priority", "low"}};
+const std::map<std::string, std::string> urgent_admitted_label{
+    {"priority", "urgent"}, {"outcome", "admitted"}};
 const std::map<std::string, std::string> high_admitted_label{
     {"priority", "high"}, {"outcome", "admitted"}};
+const std::map<std::string, std::string> urgent_cancelled_label{
+    {"priority", "urgent"}, {"outcome", "cancelled"}};
 const std::map<std::string, std::string> high_cancelled_label{
     {"priority", "high"}, {"outcome", "cancelled"}};
 const std::map<std::string, std::string> low_admitted_label{
@@ -79,6 +84,9 @@ DEFINE_PROMETHEUS_GAUGE(internal_load_admission_capacity_slots,
 DEFINE_PROMETHEUS_GAUGE_FAMILY(
     internal_load_admission_pending_requests,
     "[cpp]Queued load requests holding no reservation");
+DEFINE_PROMETHEUS_GAUGE(internal_load_admission_pending_requests_urgent,
+                        internal_load_admission_pending_requests,
+                        urgent_label);
 DEFINE_PROMETHEUS_GAUGE(internal_load_admission_pending_requests_high,
                         internal_load_admission_pending_requests,
                         high_label);
@@ -89,6 +97,9 @@ DEFINE_PROMETHEUS_GAUGE(internal_load_admission_pending_requests_low,
 DEFINE_PROMETHEUS_GAUGE_FAMILY(
     internal_load_admission_oldest_wait_seconds,
     "[cpp]Age in seconds of the oldest queued load request; zero when empty");
+DEFINE_PROMETHEUS_GAUGE(internal_load_admission_oldest_wait_seconds_urgent,
+                        internal_load_admission_oldest_wait_seconds,
+                        urgent_label);
 DEFINE_PROMETHEUS_GAUGE(internal_load_admission_oldest_wait_seconds_high,
                         internal_load_admission_oldest_wait_seconds,
                         high_label);
@@ -101,9 +112,19 @@ DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(
     "[cpp]Seconds from enqueue to admission or cancellation decision; excludes "
     "immediate requests and resumption delay");
 DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_load_admission_queue_wait_seconds_urgent_admitted,
+    internal_load_admission_queue_wait_seconds,
+    urgent_admitted_label,
+    queue_wait_buckets);
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_load_admission_queue_wait_seconds_high_admitted,
     internal_load_admission_queue_wait_seconds,
     high_admitted_label,
+    queue_wait_buckets);
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_load_admission_queue_wait_seconds_urgent_cancelled,
+    internal_load_admission_queue_wait_seconds,
+    urgent_cancelled_label,
     queue_wait_buckets);
 DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_load_admission_queue_wait_seconds_high_cancelled,

@@ -366,7 +366,8 @@ ReadEntryVector(bool use_async,
     co_return co_await folly::coro::co_withExecutor(
         storage::ResolveAsyncLoadExecutor(
             storage::LocalFileIOPool::GetInstance().GetExecutor(),
-            priority,
+            storage::ResolveAsyncLoadPriority(
+                co_await folly::coro::co_current_executor, priority),
             storage::GetAsyncLoadSequence(
                 co_await folly::coro::co_current_executor)),
         run_io());
@@ -436,7 +437,8 @@ MapEntry(bool use_async,
     co_return co_await folly::coro::co_withExecutor(
         storage::ResolveAsyncLoadExecutor(
             storage::LocalFileIOPool::GetInstance().GetExecutor(),
-            priority,
+            storage::ResolveAsyncLoadPriority(
+                co_await folly::coro::co_current_executor, priority),
             storage::GetAsyncLoadSequence(
                 co_await folly::coro::co_current_executor)),
         run_io());

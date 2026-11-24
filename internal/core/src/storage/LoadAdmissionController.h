@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -28,13 +29,11 @@
 #include "folly/coro/Promise.h"
 #include "folly/synchronization/Baton.h"
 #include "storage/ThreadPools.h"
+#include "storage/AsyncLoadExecutor.h"
 
 namespace milvus::storage {
 
-enum class LoadAdmissionPriority {
-    High,
-    Low,
-};
+using LoadAdmissionPriority = AsyncLoadPriority;
 
 // Maps a load thread-pool priority to the load admission class.
 [[nodiscard]] constexpr LoadAdmissionPriority
@@ -86,9 +85,10 @@ class LoadAdmissionLease {
 // Jointly admits transient bytes and slots held by submitted load work. Zero
 // capacity disables that dimension's limit. Oversized byte requests may run
 // when no other bytes are reserved, but must still satisfy the slot limit.
-// High priority precedes low priority; each class uses sequence_id then FIFO.
-// Unspecified sequences follow numbered loads within their priority. Sustained high
-// priority traffic may starve low priority work. Waiters reserve neither resource.
+// Urgent/High/Low use weighted request-count rounds (default 32:8:1).
+// Each class uses sequence_id then FIFO; unspecified sequences follow numbered
+// loads. Empty classes forfeit quota. A selected head that cannot fit retains its
+// turn, preventing resource-heavy requests from starvation. Waiters reserve neither resource.
 // A weighted request above the total slot capacity waits for a capacity increase
 // or cancellation; callers must size requests to permit progress.
 class LoadAdmissionController {
@@ -159,6 +159,14 @@ class LoadAdmissionController {
     UpdateMetrics() const;
 
  private:
+    friend void
+    SetAsyncLoadSchedulingWeights(int urgent, int high, int low);
+
+    // Shares the executor weights and resets the round. The shared setter calls
+    // NotifyCapacityUpdated after releasing its configuration lock.
+    void
+    SetSchedulingWeights(std::array<size_t, 3> weights);
+
     using Clock = std::chrono::steady_clock;
     struct PendingAdmission;
     using PendingQueue =
@@ -208,7 +216,14 @@ class LoadAdmissionController {
     CanAdmitImmediatelyLocked(
         LoadAdmissionPriority priority,
         LoadAdmissionRequest request,
-        uint64_t sequence_id = std::numeric_limits<uint64_t>::max()) const;
+        uint64_t sequence_id = std::numeric_limits<uint64_t>::max());
+
+    // Includes an optional immediate candidate; returns 3 when all queues are empty.
+    size_t
+    SelectPriorityLocked(size_t candidate = 3);
+
+    void
+    ResetRoundIfIdleLocked();
 
     // Transfers the single node prepared outside mu_ into its priority queue.
     void
@@ -250,8 +265,10 @@ class LoadAdmissionController {
     size_t capacity_bytes_{0};
     size_t capacity_slots_{0};
     bool slot_policy_update_pending_{false};
-    PendingQueue high_pending_;
-    PendingQueue low_pending_;
+    std::array<PendingQueue, 3> pending_;
+    std::array<size_t, 3> weights_{32, 8, 1};
+    size_t next_priority_{0};
+    size_t remaining_{32};
 };
 
 }  // namespace milvus::storage

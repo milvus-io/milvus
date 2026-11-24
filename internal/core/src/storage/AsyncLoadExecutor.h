@@ -33,7 +33,8 @@ SetAsyncLoadThreadPoolSize(int threads);
 [[nodiscard]] int
 GetAsyncLoadThreadPoolSize();
 
-// Sets task-count weights in URGENT/HIGH/LOW order without creating the pool.
+// Sets CPU task-count and admission request-count weights in URGENT/HIGH/LOW
+// order without creating the pool. Both schedulers reset their quota rounds.
 // Non-positive values restore 32:8:1. Existing queues start a fresh quota round.
 void
 SetAsyncLoadSchedulingWeights(int urgent, int high, int low);
@@ -42,8 +43,15 @@ SetAsyncLoadSchedulingWeights(int urgent, int high, int low);
 [[nodiscard]] uint64_t
 GetAsyncLoadSequence(const folly::Executor* executor) noexcept;
 
-// CPU scheduling classes; independent of the two-class wire/admission priority.
+// Local CPU and admission classes; the wire enum remains High/Low.
 enum class AsyncLoadPriority { Urgent, High, Low };
+
+// Preserves a local Urgent binding, including on custom executors. Otherwise
+// respects the explicit wire High/Low argument, including deliberate demotion.
+// Use the AsyncLoadPriority overload to explicitly demote a bound Urgent task.
+[[nodiscard]] AsyncLoadPriority
+ResolveAsyncLoadPriority(const folly::Executor* executor,
+                         milvus::proto::common::LoadPriority fallback) noexcept;
 
 // Binds priority and sequence_id to every submission/resumption. The default pool
 // uses configured URGENT:HIGH:LOW task quotas (default 32:8:1), skipping empty classes.

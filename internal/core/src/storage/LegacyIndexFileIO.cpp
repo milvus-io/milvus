@@ -139,9 +139,8 @@ Admit(size_t bytes,
     try {
         co_return co_await LoadAdmissionController::GetInstance().AcquireAsync(
             {bytes, 1},
-            priority == proto::common::LoadPriority::LOW
-                ? LoadAdmissionPriority::Low
-                : LoadAdmissionPriority::High,
+            ResolveAsyncLoadPriority(co_await folly::coro::co_current_executor,
+                                     priority),
             token,
             GetAsyncLoadSequence(co_await folly::coro::co_current_executor));
     } catch (const folly::OperationCancelled&) {
@@ -621,7 +620,8 @@ StreamLegacyIndexFilesAsync(std::span<const LegacyIndexFile> files,
     }
     auto executor = ResolveAsyncLoadExecutor(
         {},
-        priority,
+        ResolveAsyncLoadPriority(co_await folly::coro::co_current_executor,
+                                 priority),
         GetAsyncLoadSequence(co_await folly::coro::co_current_executor));
     if (files.size() == 1 &&
         (!files.front().info.raw_payload ||

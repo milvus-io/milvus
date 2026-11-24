@@ -35,11 +35,46 @@
 #include "folly/coro/Task.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
 #include "gtest/gtest.h"
+#include "folly/executors/ManualExecutor.h"
 
 namespace milvus::storage {
 namespace {
 
 #ifdef __linux__
+TEST(AsyncLoadExecutorTest, LocalPrioritySurvivesLegacyRebinding) {
+    folly::ManualExecutor custom;
+    auto urgent = ResolveAsyncLoadExecutor(
+        folly::getKeepAliveToken(&custom), AsyncLoadPriority::Urgent, 42);
+    EXPECT_EQ(ResolveAsyncLoadPriority(urgent.get(),
+                                       proto::common::LoadPriority::LOW),
+              AsyncLoadPriority::Urgent);
+    EXPECT_EQ(GetAsyncLoadSequence(urgent.get()), 42);
+    auto rebound = ResolveAsyncLoadExecutor(urgent.copy(),
+                                            proto::common::LoadPriority::HIGH);
+    EXPECT_EQ(ResolveAsyncLoadPriority(rebound.get(),
+                                       proto::common::LoadPriority::HIGH),
+              AsyncLoadPriority::Urgent);
+    EXPECT_EQ(GetAsyncLoadSequence(rebound.get()), 42);
+    auto high = ResolveAsyncLoadExecutor(folly::getKeepAliveToken(&custom),
+                                         AsyncLoadPriority::High);
+    EXPECT_EQ(
+        ResolveAsyncLoadPriority(high.get(), proto::common::LoadPriority::HIGH),
+        AsyncLoadPriority::High);
+    auto demoted =
+        ResolveAsyncLoadExecutor(high.copy(), proto::common::LoadPriority::LOW);
+    EXPECT_EQ(ResolveAsyncLoadPriority(demoted.get(),
+                                       proto::common::LoadPriority::LOW),
+              AsyncLoadPriority::Low);
+    auto explicit_demotion =
+        ResolveAsyncLoadExecutor(urgent.copy(), AsyncLoadPriority::Low);
+    EXPECT_EQ(ResolveAsyncLoadPriority(explicit_demotion.get(),
+                                       proto::common::LoadPriority::LOW),
+              AsyncLoadPriority::Low);
+    EXPECT_EQ(
+        ResolveAsyncLoadPriority(nullptr, proto::common::LoadPriority::LOW),
+        AsyncLoadPriority::Low);
+}
+
 TEST(AsyncLoadExecutorTest, DefaultWorkersUseNice19ForBothPriorities) {
     const int caller_nice = getpriority(PRIO_PROCESS, 0);
     auto worker_nice = [](folly::Executor::KeepAlive<> executor) {

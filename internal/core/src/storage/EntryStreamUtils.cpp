@@ -28,8 +28,8 @@ AcquireMetadataLoadSlotAsync(proto::common::LoadPriority priority,
     try {
         co_return co_await LoadAdmissionController::GetInstance().AcquireAsync(
             {0, 1},
-            LoadAdmissionPriorityForThreadPool(
-                milvus::PriorityForLoad(priority)),
+            ResolveAsyncLoadPriority(co_await folly::coro::co_current_executor,
+                                     priority),
             token,
             GetAsyncLoadSequence(co_await folly::coro::co_current_executor));
     } catch (const folly::OperationCancelled&) {

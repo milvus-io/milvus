@@ -108,6 +108,7 @@ LoadAdmissionController::AcquireAsync(
     }
     auto [promise, future] =
         folly::coro::makePromiseContract<LoadAdmissionLease>();
+    PendingResolution resolution;
     bool admitted = false;
     bool cancelled = false;
     {
@@ -116,6 +117,7 @@ LoadAdmissionController::AcquireAsync(
         if (!cancelled &&
             CanAdmitImmediatelyLocked(priority, request, sequence_id)) {
             ReserveLocked(request);
+            resolution = TakeAdmittedLocked();
             admitted = true;
         }
     }
@@ -125,6 +127,7 @@ LoadAdmissionController::AcquireAsync(
     }
     if (admitted) {
         promise.trySetValue(LoadAdmissionLease(this, request));
+        ResolvePending(std::move(resolution));
         return std::move(future);
     }
 
@@ -155,6 +158,7 @@ LoadAdmissionController::AcquireAsync(
             // the waiter and callback were being prepared outside the lock.
             if (CanAdmitImmediatelyLocked(priority, request, sequence_id)) {
                 MarkAdmittedLocked(*pending);
+                resolution = TakeAdmittedLocked();
                 admitted = true;
             } else {
                 EnqueuePendingLocked(prepared, priority);
@@ -164,6 +168,7 @@ LoadAdmissionController::AcquireAsync(
 
     if (admitted) {
         FulfillAdmission(std::move(pending));
+        ResolvePending(std::move(resolution));
     }
     return std::move(future);
 }
@@ -180,6 +185,8 @@ LoadAdmissionController::AcquireUntil(
     const LoadAdmissionRequest request,
     const LoadAdmissionPriority priority,
     const folly::CancellationToken& cancellation_token) {
+    PendingResolution resolution;
+    bool admitted = false;
     {
         std::lock_guard lock(mu_);
         if (cancellation_token.isCancellationRequested()) {
@@ -187,8 +194,14 @@ LoadAdmissionController::AcquireUntil(
         }
         if (CanAdmitImmediatelyLocked(priority, request)) {
             ReserveLocked(request);
-            return true;
+            resolution = TakeAdmittedLocked();
+            admitted = true;
         }
+    }
+
+    if (admitted) {
+        ResolvePending(std::move(resolution));
+        return true;
     }
 
     auto pending = std::make_shared<PendingAdmission>();
@@ -206,12 +219,12 @@ LoadAdmissionController::AcquireUntil(
                 });
     }
 
-    bool admitted = false;
     {
         std::lock_guard lock(mu_);
         if (pending->state != PendingAdmission::State::Cancelled) {
             if (CanAdmitImmediatelyLocked(priority, request)) {
                 MarkAdmittedLocked(*pending);
+                resolution = TakeAdmittedLocked();
                 admitted = true;
             } else {
                 EnqueuePendingLocked(prepared, priority);
@@ -221,6 +234,7 @@ LoadAdmissionController::AcquireUntil(
 
     if (admitted) {
         FulfillAdmission(pending);
+        ResolvePending(std::move(resolution));
     }
     // Always pair the terminal-state winner's post with one wait, including
     // cancellation during callback construction and admission before wait.
@@ -233,12 +247,17 @@ LoadAdmissionController::AcquireUntil(
 bool
 LoadAdmissionController::TryAcquire(const LoadAdmissionRequest request,
                                     const LoadAdmissionPriority priority) {
-    std::lock_guard lock(mu_);
-    if (CanAdmitImmediatelyLocked(priority, request)) {
+    PendingResolution resolution;
+    {
+        std::lock_guard lock(mu_);
+        if (!CanAdmitImmediatelyLocked(priority, request)) {
+            return false;
+        }
         ReserveLocked(request);
-        return true;
+        resolution = TakeAdmittedLocked();
     }
-    return false;
+    ResolvePending(std::move(resolution));
+    return true;
 }
 
 void
@@ -362,6 +381,18 @@ LoadAdmissionController::RefreshSlotPolicy() {
 }
 
 void
+LoadAdmissionController::SetSchedulingWeights(std::array<size_t, 3> weights) {
+    std::lock_guard lock(mu_);
+    weights_ =
+        std::all_of(
+            weights.begin(), weights.end(), [](size_t w) { return w > 0; })
+            ? weights
+            : std::array<size_t, 3>{32, 8, 1};
+    next_priority_ = 0;
+    remaining_ = weights_[0];
+}
+
+void
 LoadAdmissionController::NotifyCapacityUpdated() {
     PendingResolution resolution;
     {
@@ -378,8 +409,10 @@ LoadAdmissionController::UpdateMetrics() const {
         size_t capacity_bytes;
         size_t reserved_slots;
         size_t capacity_slots;
+        size_t urgent_pending;
         size_t high_pending;
         size_t low_pending;
+        double urgent_oldest_wait;
         double high_oldest_wait;
         double low_oldest_wait;
     } snapshot;
@@ -397,16 +430,22 @@ LoadAdmissionController::UpdateMetrics() const {
                     capacity_bytes_,
                     inflight_slots_,
                     capacity_slots_,
-                    high_pending_.size(),
-                    low_pending_.size(),
-                    oldest_wait(high_pending_),
-                    oldest_wait(low_pending_)};
+                    pending_[0].size(),
+                    pending_[1].size(),
+                    pending_[2].size(),
+                    oldest_wait(pending_[0]),
+                    oldest_wait(pending_[1]),
+                    oldest_wait(pending_[2])};
     }
     using namespace milvus::monitor;
     internal_load_admission_reserved_bytes.Set(snapshot.reserved_bytes);
     internal_load_admission_capacity_bytes.Set(snapshot.capacity_bytes);
     internal_load_admission_reserved_slots.Set(snapshot.reserved_slots);
     internal_load_admission_capacity_slots.Set(snapshot.capacity_slots);
+    internal_load_admission_pending_requests_urgent.Set(
+        snapshot.urgent_pending);
+    internal_load_admission_oldest_wait_seconds_urgent.Set(
+        snapshot.urgent_oldest_wait);
     internal_load_admission_pending_requests_high.Set(snapshot.high_pending);
     internal_load_admission_pending_requests_low.Set(snapshot.low_pending);
     internal_load_admission_oldest_wait_seconds_high.Set(
@@ -440,27 +479,51 @@ LoadAdmissionController::CanAcquireCapacityLocked(
            bytes <= capacity_bytes - inflight_bytes_;
 }
 
+void
+LoadAdmissionController::ResetRoundIfIdleLocked() {
+    if (pending_[0].empty() && pending_[1].empty() && pending_[2].empty()) {
+        next_priority_ = 0;
+        remaining_ = weights_[0];
+    }
+}
+
+size_t
+LoadAdmissionController::SelectPriorityLocked(size_t candidate) {
+    for (size_t i = 0; i < pending_.size() + 1; ++i) {
+        if (remaining_ != 0 && (!pending_[next_priority_].empty() ||
+                                next_priority_ == candidate)) {
+            return next_priority_;
+        }
+        next_priority_ = (next_priority_ + 1) % pending_.size();
+        remaining_ = weights_[next_priority_];
+    }
+    return pending_.size();
+}
+
 bool
 LoadAdmissionController::CanAdmitImmediatelyLocked(
     const LoadAdmissionPriority priority,
     const LoadAdmissionRequest request,
-    const uint64_t sequence_id) const {
+    const uint64_t sequence_id) {
     if (!CanAcquireCapacityLocked(request)) {
         return false;
     }
-    if (priority == LoadAdmissionPriority::High) {
-        return high_pending_.empty() ||
-               high_pending_.begin()->first > sequence_id;
+    ResetRoundIfIdleLocked();
+    const auto index = static_cast<size_t>(priority);
+    auto& queue = pending_[index];
+    if (SelectPriorityLocked(index) != index ||
+        (!queue.empty() && queue.begin()->first <= sequence_id)) {
+        return false;
     }
-    return high_pending_.empty() &&
-           (low_pending_.empty() || low_pending_.begin()->first > sequence_id);
+    --remaining_;
+    ResetRoundIfIdleLocked();
+    return true;
 }
 
 void
 LoadAdmissionController::EnqueuePendingLocked(
     PendingQueue& prepared, const LoadAdmissionPriority priority) {
-    auto& queue =
-        priority == LoadAdmissionPriority::High ? high_pending_ : low_pending_;
+    auto& queue = pending_[static_cast<size_t>(priority)];
     const auto position = prepared.begin();
     const auto pending = position->second;
     pending->queued_at = Clock::now();
@@ -487,22 +550,25 @@ LoadAdmissionController::PendingResolution
 LoadAdmissionController::TakeAdmittedLocked() {
     PendingResolution resolution;
 
-    const auto admit_queue = [this, &resolution](auto& queue) {
-        while (!queue.empty()) {
-            auto& pending = *queue.begin()->second;
-            if (!CanAcquireCapacityLocked(pending.request)) {
-                break;
-            }
-            pending.queue = nullptr;
-            MarkAdmittedLocked(pending);
-            auto node = queue.extract(queue.begin());
-            node.key() = resolution.admitted.size();
-            resolution.admitted.insert(std::move(node));
+    while (true) {
+        const auto priority = SelectPriorityLocked();
+        if (priority == pending_.size()) {
+            ResetRoundIfIdleLocked();
+            break;
         }
-    };
-    admit_queue(high_pending_);
-    if (high_pending_.empty()) {
-        admit_queue(low_pending_);
+        auto& queue = pending_[priority];
+        auto& pending = *queue.begin()->second;
+        // Keep the selected head's turn until capacity is released, increased,
+        // or the waiter is cancelled. Do not spend quota on a failed admission.
+        if (!CanAcquireCapacityLocked(pending.request)) {
+            break;
+        }
+        --remaining_;
+        pending.queue = nullptr;
+        MarkAdmittedLocked(pending);
+        auto node = queue.extract(queue.begin());
+        node.key() = resolution.admitted.size();
+        resolution.admitted.insert(std::move(node));
     }
     if (!resolution.admitted.empty()) {
         // Timestamp the batch decision under mu_, excluding notification and
@@ -540,12 +606,17 @@ LoadAdmissionController::ObserveQueueWait(const PendingAdmission& pending,
     const bool high = pending.priority == LoadAdmissionPriority::High;
     const bool admitted = pending.state == PendingAdmission::State::Admitted;
     auto& histogram =
-        high ? (admitted
-                    ? internal_load_admission_queue_wait_seconds_high_admitted
-                    : internal_load_admission_queue_wait_seconds_high_cancelled)
-             : (admitted
-                    ? internal_load_admission_queue_wait_seconds_low_admitted
-                    : internal_load_admission_queue_wait_seconds_low_cancelled);
+        pending.priority == LoadAdmissionPriority::Urgent
+            ? (admitted
+                   ? internal_load_admission_queue_wait_seconds_urgent_admitted
+                   : internal_load_admission_queue_wait_seconds_urgent_cancelled)
+        : high
+            ? (admitted
+                   ? internal_load_admission_queue_wait_seconds_high_admitted
+                   : internal_load_admission_queue_wait_seconds_high_cancelled)
+            : (admitted
+                   ? internal_load_admission_queue_wait_seconds_low_admitted
+                   : internal_load_admission_queue_wait_seconds_low_cancelled);
     histogram.Observe(
         std::chrono::duration<double>(finished_at - pending.queued_at).count());
 }
