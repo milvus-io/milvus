@@ -913,4 +913,19 @@ TEST(Query, VectorArrayElementLevelInference) {
             ParsePlaceholderGroup(plan.get(), ph_raw.SerializeAsString()),
             std::exception);
     }
+
+    // Case 5: element-level query vectors must have the element dimension
+    for (auto wrong_dim : {dim / 2, dim * 2}) {
+        auto plan = make_plan("COSINE");
+        std::vector<float> wrong_vec =
+            generate_float_vector(num_queries, wrong_dim);
+        auto ph_raw = CreatePlaceholderGroupFromBlob(
+            num_queries, wrong_dim, wrong_vec.data());
+        try {
+            ParsePlaceholderGroup(plan.get(), ph_raw.SerializeAsString());
+            FAIL() << "expected DimNotMatch for query dim " << wrong_dim;
+        } catch (const SegcoreError& e) {
+            EXPECT_EQ(e.get_error_code(), ErrorCode::DimNotMatch);
+        }
+    }
 }
