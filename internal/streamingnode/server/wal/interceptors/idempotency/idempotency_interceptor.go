@@ -156,16 +156,13 @@ func (impl *idempotencyInterceptor) DoAppend(ctx context.Context, msg message.Mu
 	if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
 		impl.replicatedMu.Lock()
 		defer impl.replicatedMu.Unlock()
-		// The inner interceptor switches role before the final WAL append.
 		id, err := append(ctx, msg)
-		if message.MustAsMutableAlterReplicateConfigMessageV2(msg).Header().Ignore {
+		if err != nil || message.MustAsMutableAlterReplicateConfigMessageV2(msg).Header().Ignore {
 			return id, err
 		}
 		impl.topologyGeneration++
-		if err == nil {
-			// The WAL lock interceptor has aborted every session on this PChannel.
-			impl.txnInsertResultBuffers.Clear()
-		}
+		// The WAL lock interceptor has aborted every session on this PChannel.
+		impl.txnInsertResultBuffers.Clear()
 		return id, err
 	}
 	replicated := msg.ReplicateHeader() != nil

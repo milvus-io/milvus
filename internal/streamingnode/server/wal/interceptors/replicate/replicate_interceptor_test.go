@@ -18,7 +18,6 @@ import (
 func TestReplicateInterceptor(t *testing.T) {
 	manager := mock_replicates.NewMockReplicatesManager(t)
 	acker := mock_replicates.NewMockReplicateAcker(t)
-	manager.EXPECT().SwitchReplicateMode(mock.Anything, mock.Anything).Return(nil)
 	manager.EXPECT().BeginReplicateMessage(mock.Anything, mock.Anything).Return(acker, nil)
 	acker.EXPECT().Ack(mock.Anything).Return()
 
