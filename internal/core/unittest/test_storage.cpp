@@ -878,11 +878,6 @@ TEST(StorageConfig, PackedWriterPreservesChecksum) {
         const auto c_config = config;
         const auto properties =
             MakeInternalPropertiesFromStorageConfig(c_config);
-        milvus_storage::ArrowFileSystemConfig expected;
-        ASSERT_TRUE(
-            milvus_storage::ArrowFileSystemConfig::create_file_system_config(
-                properties, expected)
-                .ok());
 
         // Filesystem creation precedes schema import. An invalid schema stops
         // the writer before any object-store IO, while its cached config remains observable.
@@ -903,13 +898,17 @@ TEST(StorageConfig, PackedWriterPreservesChecksum) {
         FreeErrorStatus(status);
         EXPECT_EQ(writer, nullptr);
 
-        const auto suffix = "#" + expected.GetCacheKey();
-        const auto entries =
-            milvus_storage::FilesystemCache::getInstance().list();
-        EXPECT_TRUE(std::any_of(
-            entries.begin(),
-            entries.end(),
-            [&](const auto& entry) { return entry.first.ends_with(suffix); }))
+        // The writer cached a filesystem for exactly this config if looking
+        // the config up returns an entry that was listed before the lookup.
+        auto& cache = milvus_storage::FilesystemCache::getInstance();
+        const auto entries = cache.list();
+        const auto cached = cache.get(properties);
+        ASSERT_TRUE(cached.ok()) << cached.status().ToString();
+        EXPECT_TRUE(std::any_of(entries.begin(),
+                                entries.end(),
+                                [&](const auto& entry) {
+                                    return entry.second == cached.ValueOrDie();
+                                }))
             << "writer did not use the requested checksum setting: " << enabled;
     }
 }
