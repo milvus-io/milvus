@@ -9,6 +9,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -24,6 +25,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -1165,4 +1170,30 @@ func TestPrepareInsertMaterializesLegacyBM25Output(t *testing.T) {
 	assert.Equal(t, int64(3), result[0].bm25Stats[102].NumRow())
 	assert.NotNil(t, insertMsg.GetFieldsData()[2])
 	assert.Equal(t, int64(102), insertMsg.GetFieldsData()[2].GetFieldId())
+}
+
+func TestPrepareInsertBindsNewWALPrimaryKey(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: common.RowIDField, Name: "RowID", DataType: schemapb.DataType_Int64},
+		{FieldID: common.TimeStampField, Name: "Timestamp", DataType: schemapb.DataType_Int64},
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_VarChar, IsPrimaryKey: true},
+	}}
+	mutable := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&messagespb.UpsertMessageHeader{CollectionId: 1, Partitions: []*messagespb.PartitionSegmentAssignment{{PartitionId: 10, Rows: 2, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 100}}}}).WithBody(&messagespb.UpsertMessageBody{Rows: &messagespb.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"a", "b"}}}}, RowIdsEncoding: &messagespb.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: []int64{1001, 1002}}}}}).MustBuildMutable()
+	pack, err := adaptor.NewMsgPackFromMessage(mutable.WithTimeTick(20).WithLastConfirmed(rmq.NewRmqID(1)).IntoImmutableMessage(rmq.NewRmqID(2)))
+	require.NoError(t, err)
+	require.Len(t, pack.Msgs, 1)
+	insert := pack.Msgs[0].(*msgstream.InsertMsg)
+	require.NotNil(t, insert.StandalonePrimaryKeys)
+	require.Empty(t, insert.FieldsData)
+	// The actual persistence preparation must supply the PK column. The test
+	// deliberately does not call MaterializePrimaryKey itself.
+	prepared, err := PrepareInsert(schema, schema.Fields[2], []*msgstream.InsertMsg{insert})
+	require.NoError(t, err)
+	require.Len(t, prepared, 1)
+	require.Nil(t, insert.StandalonePrimaryKeys)
+	require.Equal(t, int64(2), prepared[0].rowNum)
+	require.Equal(t, map[string]int64{"a": 20, "b": 20}, prepared[0].strPKTs)
+	require.Equal(t, []int64{1001, 1002}, prepared[0].data[0].Data[common.RowIDField].GetDataRows())
+	require.Equal(t, []string{"a", "b"}, prepared[0].pkField[0].GetDataRows())
+	require.Equal(t, []int64{20, 20}, prepared[0].tsField[0].GetDataRows())
 }

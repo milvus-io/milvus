@@ -111,7 +111,7 @@ func (m *delegatorMsgstreamAdaptor) Seek(ctx context.Context, msgPositions []*ms
 			// only consume messages with timestamp >= position timestamp
 			options.DeliverFilterTimeTickGTE(position.GetTimestamp()),
 			// only consume insert, delete, schema change, and manual flush messages
-			options.DeliverFilterMessageType(message.MessageTypeInsert, message.MessageTypeDelete, message.MessageTypeSchemaChange, message.MessageTypeAlterCollection, message.MessageTypeManualFlush),
+			options.DeliverFilterMessageType(message.MessageTypeInsert, message.MessageTypeUpsert, message.MessageTypeDelete, message.MessageTypeSchemaChange, message.MessageTypeAlterCollection, message.MessageTypeManualFlush),
 		},
 		MessageHandler: handler,
 	})
