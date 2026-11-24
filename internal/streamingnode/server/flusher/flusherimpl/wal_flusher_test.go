@@ -294,3 +294,13 @@ func newMockWAL(t *testing.T, maybe bool) *mock_wal.MockWAL {
 	}
 	return w
 }
+
+func TestDispatchRejectsUnknownCreateSegmentStorageVersion(t *testing.T) {
+	msg := message.NewCreateSegmentMessageBuilderV2().WithVChannel("v1").
+		WithHeader(&message.CreateSegmentMessageHeader{SegmentId: 42, StorageVersion: 3}).
+		WithBody(&message.CreateSegmentMessageBody{}).MustBuildMutable().
+		WithTimeTick(2).WithLastConfirmed(rmq.NewRmqID(1)).IntoImmutableMessage(rmq.NewRmqID(2))
+	flusher := &WALFlusherImpl{}
+	require.ErrorIs(t, flusher.dispatch(msg), merr.ErrServiceUnimplemented)
+	require.Zero(t, flusher.lastDispatchTimeTick)
+}

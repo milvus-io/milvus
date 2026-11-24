@@ -39,8 +39,8 @@ import (
 )
 
 const (
-	StorageV1 int64 = 0
-	StorageV2 int64 = 2
+	StorageV1 = storagecommon.StorageV1
+	StorageV2 = storagecommon.StorageV2
 )
 
 type (
