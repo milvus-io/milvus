@@ -64,7 +64,8 @@ func Hash32Bytes(b []byte) (uint32, error) {
 func Hash32Uint64(v uint64) (uint32, error) {
 	var b [8]byte
 	common.Endian.PutUint64(b[:], v)
-	return Hash32Bytes(b[:])
+	// The string form does not escape, so b stays on the stack.
+	return murmur3.StringSum32(string(b[:])) & 0x7fffffff, nil
 }
 
 // Hash32Int64 hashing an int64 number to uint32
