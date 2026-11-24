@@ -4363,6 +4363,7 @@ func TestPartialUpdateAutoIDDestinationSnapshotFromQueryRPC(t *testing.T) {
 			queryCalls := 0
 			query := mockey.Mock((*mockUpsertNode).query).To(func(_ *mockUpsertNode, ctx context.Context, qt *dql.QueryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 				queryCalls++
+				require.True(t, qt.IsInternalTask())
 				qt.SetTs(50)
 				for _, execute := range []func(context.Context) error{qt.PreExecute, qt.Execute, qt.PostExecute} {
 					if err := execute(ctx); err != nil {
