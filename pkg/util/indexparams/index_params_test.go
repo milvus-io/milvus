@@ -23,12 +23,111 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestDiskIndexParameterPrecedence(t *testing.T) {
+	for _, auto := range []bool{false, true} {
+		t.Run(strconv.FormatBool(auto), func(t *testing.T) {
+			var params paramtable.ComponentParam
+			params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+			require.NoError(t, params.Save(params.AutoIndexConfig.Enable.Key, strconv.FormatBool(auto)))
+			require.NoError(t, params.Save(params.AutoIndexConfig.IndexParams.Key,
+				`{"index_type":"DISKANN","max_degree":56,"search_list_size":100}`))
+			require.NoError(t, params.Save(params.AutoIndexConfig.ExtraParams.Key,
+				`{"build_ratio":"{\"pq_code_budget_gb\":0.1875,\"num_threads\":1.25}","prepare_ratio":"{\"search_cache_budget_gb\":0.225}"}`))
+			input := map[string]string{
+				MaxDegreeKey: "32", SearchListSizeKey: "64", PQCodeBudgetRatioKey: "0.0625",
+				NumBuildThreadRatioKey: "0.5", SearchCacheBudgetRatioKey: "0.2", "quant_type": "PQ",
+			}
+			// Generic deployment defaults must not replace either SDK or legacy server values.
+			for _, key := range []string{MaxDegreeKey, SearchListSizeKey, PQCodeBudgetRatioKey, NumBuildThreadRatioKey, SearchCacheBudgetRatioKey} {
+				require.NoError(t, params.Save("knowhere.DISKANN.build."+key, "999"))
+			}
+			want := map[string]string{}
+			for key, value := range input {
+				want[key] = value
+			}
+			if auto {
+				want[MaxDegreeKey], want[SearchListSizeKey] = "56", "100"
+				want[PQCodeBudgetRatioKey], want[NumBuildThreadRatioKey], want[SearchCacheBudgetRatioKey] = "0.187500", "1.250000", "0.225000"
+			}
+			require.NoError(t, FillDiskIndexParams(&params, input))
+			_, err := params.KnowhereConfig.MergeIndexParams("DISKANN", paramtable.BuildStage, input)
+			require.NoError(t, err)
+			assert.Equal(t, want, input)
+			pairs := make([]*commonpb.KeyValuePair, 0, len(input))
+			for key, value := range input {
+				pairs = append(pairs, &commonpb.KeyValuePair{Key: key, Value: value})
+			}
+			pairs, err = UpdateDiskIndexBuildParams(&params, pairs)
+			require.NoError(t, err)
+			input = funcutil.KeyValuePair2Map(pairs)
+			assert.Equal(t, want, input)
+			require.NoError(t, SetDiskIndexBuildParams(input, 4<<30))
+			cacheRatio, err := strconv.ParseFloat(want[SearchCacheBudgetRatioKey], 64)
+			require.NoError(t, err)
+			cacheBudget, err := strconv.ParseFloat(input[SearchCacheBudgetKey], 64)
+			require.NoError(t, err)
+			assert.InDelta(t, 4*cacheRatio, cacheBudget, 1e-6)
+			pqRatio, err := strconv.ParseFloat(want[PQCodeBudgetRatioKey], 64)
+			require.NoError(t, err)
+			pqBudget, err := strconv.ParseFloat(input[PQCodeBudgetKey], 64)
+			require.NoError(t, err)
+			assert.InDelta(t, 4*pqRatio, pqBudget, 1e-6)
+			threadRatio, err := strconv.ParseFloat(want[NumBuildThreadRatioKey], 64)
+			require.NoError(t, err)
+			assert.Equal(t, strconv.Itoa(int(float32(hardware.GetCPUNum())*float32(threadRatio))), input[NumBuildThreadKey])
+			assert.Equal(t, want[MaxDegreeKey], input[MaxDegreeKey])
+			assert.Equal(t, want[SearchListSizeKey], input[SearchListSizeKey])
+		})
+	}
+	t.Run("missing values use legacy server settings", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		require.NoError(t, params.Save(params.CommonCfg.PQCodeBudgetGBRatio.Key, "0.25"))
+		require.NoError(t, params.Save("knowhere.DISKANN.build.pq_code_budget_gb_ratio", "0.125"))
+		input := map[string]string{}
+		require.NoError(t, FillDiskIndexParams(&params, input))
+		_, err := params.KnowhereConfig.MergeIndexParams("DISKANN", paramtable.BuildStage, input)
+		require.NoError(t, err)
+		assert.Equal(t, "0.25", input[PQCodeBudgetRatioKey])
+		assert.Equal(t, params.CommonCfg.MaxDegree.GetValue(), input[MaxDegreeKey])
+	})
+	t.Run("zero and empty values are present", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		input := map[string]string{MaxDegreeKey: "", SearchListSizeKey: "0", PQCodeBudgetRatioKey: "0", NumBuildThreadRatioKey: "0", SearchCacheBudgetRatioKey: "0"}
+		require.NoError(t, FillDiskIndexParams(&params, input))
+		assert.Equal(t, "", input[MaxDegreeKey])
+		assert.Equal(t, "0", input[SearchListSizeKey])
+		pairs := []*commonpb.KeyValuePair{{Key: SearchCacheBudgetRatioKey, Value: "0"}}
+		pairs, err := UpdateDiskIndexBuildParams(&params, pairs)
+		require.NoError(t, err)
+		assert.Equal(t, "0", GetIndexParams(pairs, SearchCacheBudgetRatioKey))
+	})
+}
+
+func TestDiskIndexRejectsMalformedRatios(t *testing.T) {
+	for _, key := range []string{PQCodeBudgetRatioKey, NumBuildThreadRatioKey, SearchCacheBudgetRatioKey} {
+		for _, value := range []string{"true", "<nil>", "abc", ""} {
+			t.Run(key+"/"+value, func(t *testing.T) {
+				var params paramtable.ComponentParam
+				params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+				err := FillDiskIndexParams(&params, map[string]string{key: value, "quant_type": "RABITQ"})
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				assert.Contains(t, err.Error(), key)
+			})
+		}
+	}
+}
 
 func TestDiskIndexParams(t *testing.T) {
 	t.Run("fill index params without auto index param", func(t *testing.T) {

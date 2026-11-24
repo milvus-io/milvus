@@ -19,7 +19,6 @@ package ddl
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -430,28 +429,17 @@ func (cit *CreateIndexTask) parseIndexParams(ctx context.Context) error {
 		if !exist {
 			return merr.WrapErrParameterMissingMsg("IndexType not specified")
 		}
-		pqBudget, pqBudgetFromSDK := indexParamsMap[indexparams.PQCodeBudgetRatioKey]
+		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
+			if err := indexparams.FillDiskIndexParams(paramtable.Get(), indexParamsMap); err != nil {
+				return err
+			}
+		}
 		//  index parameters defined in the YAML file are merged with the user-provided parameters during create stage
 		if paramtable.Get().KnowhereConfig.Enable.GetAsBool() {
 			var err error
 			indexParamsMap, err = paramtable.Get().KnowhereConfig.MergeIndexParams(indexType, paramtable.BuildStage, indexParamsMap)
 			if err != nil {
 				return err
-			}
-		}
-		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
-			err := indexparams.FillDiskIndexParams(paramtable.Get(), indexParamsMap)
-			if err != nil {
-				return err
-			}
-			// Preserve only an explicit request value; keep server-side precedence unchanged.
-			if pqBudgetFromSDK && !paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
-				// The build-parameter bridge parses this value for every DISKANN codec.
-				if _, err := strconv.ParseFloat(pqBudget, 64); err != nil {
-					return merr.WrapErrParameterInvalidMsg("invalid float value, key: '%s', value: '%s'",
-						indexparams.PQCodeBudgetRatioKey, pqBudget)
-				}
-				indexParamsMap[indexparams.PQCodeBudgetRatioKey] = pqBudget
 			}
 		}
 		metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]

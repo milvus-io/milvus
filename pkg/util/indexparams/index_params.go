@@ -173,8 +173,9 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 	var pqCodeBudgetGBRatio string
 	var buildNumThreadsRatio string
 	var searchCacheBudgetGBRatio string
+	autoIndex := params.AutoIndexConfig.Enable.GetAsBool()
 
-	if params.AutoIndexConfig.Enable.GetAsBool() {
+	if autoIndex {
 		indexParams := params.AutoIndexConfig.IndexParams.GetAsJSONMap()
 		var ok bool
 		maxDegree, ok = indexParams[MaxDegreeKey]
@@ -200,11 +201,23 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 		searchCacheBudgetGBRatio = params.CommonCfg.SearchCacheBudgetGBRatio.GetValue()
 	}
 
-	indexParams[MaxDegreeKey] = maxDegree
-	indexParams[SearchListSizeKey] = searchListSize
-	indexParams[PQCodeBudgetRatioKey] = pqCodeBudgetGBRatio
-	indexParams[NumBuildThreadRatioKey] = buildNumThreadsRatio
-	indexParams[SearchCacheBudgetRatioKey] = searchCacheBudgetGBRatio
+	// The build bridge parses caller-supplied ratios for every codec.
+	for _, key := range []string{PQCodeBudgetRatioKey, NumBuildThreadRatioKey, SearchCacheBudgetRatioKey} {
+		if value, exists := indexParams[key]; exists && !autoIndex {
+			if _, err := strconv.ParseFloat(value, 64); err != nil {
+				return merr.WrapErrParameterInvalidMsg("invalid float value, key: '%s', value: '%s'", key, value)
+			}
+		}
+	}
+	for key, value := range map[string]string{
+		MaxDegreeKey: maxDegree, SearchListSizeKey: searchListSize,
+		PQCodeBudgetRatioKey: pqCodeBudgetGBRatio, NumBuildThreadRatioKey: buildNumThreadsRatio,
+		SearchCacheBudgetRatioKey: searchCacheBudgetGBRatio,
+	} {
+		if _, exists := indexParams[key]; !exists || autoIndex {
+			indexParams[key] = value
+		}
+	}
 
 	return nil
 }
@@ -218,8 +231,15 @@ func GetIndexParams(indexParams []*commonpb.KeyValuePair, key string) string {
 	return ""
 }
 
-// UpdateDiskIndexBuildParams update index params for `buildIndex` (override search cache size in `CreateIndex`)
+// UpdateDiskIndexBuildParams fills a missing build-cache ratio; AutoIndex remains server-controlled.
 func UpdateDiskIndexBuildParams(params *paramtable.ComponentParam, indexParams []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
+	if !params.AutoIndexConfig.Enable.GetAsBool() {
+		for _, param := range indexParams {
+			if param.GetKey() == SearchCacheBudgetRatioKey {
+				return indexParams, nil
+			}
+		}
+	}
 	existedVal := GetIndexParams(indexParams, SearchCacheBudgetRatioKey)
 
 	var searchCacheBudgetGBRatio string

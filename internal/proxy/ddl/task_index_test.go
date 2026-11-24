@@ -563,6 +563,46 @@ func Test_parseIndexParamsRejectsFinalIndexParamsOverLimit(t *testing.T) {
 	assert.Contains(t, err.Error(), "index params size")
 }
 
+func Test_parseIndexParams_DiskANNBuildParameterPrecedence(t *testing.T) {
+	for _, codec := range []string{"PQ", "RABITQ"} {
+		for key, value := range map[string]any{
+			indexparams.MaxDegreeKey: 32, indexparams.SearchListSizeKey: 64,
+			indexparams.PQCodeBudgetRatioKey: 0.0625, indexparams.NumBuildThreadRatioKey: 0.5,
+			indexparams.SearchCacheBudgetRatioKey: 0.2,
+		} {
+			t.Run(codec+"/"+key, func(t *testing.T) {
+				params := paramtable.Get()
+				for _, name := range []string{params.AutoIndexConfig.Enable.Key, params.KnowhereConfig.Enable.Key} {
+					t.Cleanup(func() { params.Reset(name) })
+				}
+				require.NoError(t, params.Save(params.AutoIndexConfig.Enable.Key, "false"))
+				require.NoError(t, params.Save(params.KnowhereConfig.Enable.Key, "true"))
+				requestJSON, err := json.Marshal(map[string]any{key: value, "quant_type": codec})
+				require.NoError(t, err)
+				task := &CreateIndexTask{
+					fieldSchema: &schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
+					req: &milvuspb.CreateIndexRequest{ExtraParams: []*commonpb.KeyValuePair{
+						{Key: common.IndexTypeKey, Value: "DISKANN"},
+						{Key: common.MetricTypeKey, Value: "L2"},
+						{Key: common.ParamsKey, Value: string(requestJSON)},
+					}},
+				}
+				require.NoError(t, task.parseIndexParams(context.Background()))
+				want, err := funcutil.JSONToMap(string(requestJSON))
+				require.NoError(t, err)
+				assert.Equal(t, want[key], funcutil.KeyValuePair2Map(task.newIndexParams)[key])
+				prepared, err := indexparams.UpdateDiskIndexBuildParams(params, task.newIndexParams)
+				require.NoError(t, err)
+				built := funcutil.KeyValuePair2Map(prepared)
+				assert.Equal(t, want[key], built[key])
+				require.NoError(t, indexparams.SetDiskIndexBuildParams(built, 4<<30))
+				assert.Equal(t, want[key], built[key])
+			})
+		}
+	}
+}
+
 func Test_parseIndexParams_DiskANNPQBudget(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

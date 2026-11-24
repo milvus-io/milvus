@@ -14,31 +14,55 @@ class DISKANN:
         # Default value: 100
         {"description": "Minimum Boundary Test", "params": {"search_list_size": 1}, "expected": success},
         {"description": "Large Value Test", "params": {"search_list_size": 10000}, "expected": success},
-        {"description": "Out of Range Test - Negative", "params": {"search_list_size": -1}, "expected": success},
+        {
+            "description": "Out of Range Test - Negative",
+            "params": {"search_list_size": -1},
+            "expected": {"err_code": 1100, "err_msg": "param 'search_list_size'"},
+        },
         {"description": "String Type Test", "params": {"search_list_size": "100"}, "expected": success},
         {"description": "Float Type Test", "params": {"search_list_size": 100.0}, "expected": success},
-        {"description": "Boolean Type Test", "params": {"search_list_size": True}, "expected": success},
-        {"description": "None Type Test", "params": {"search_list_size": None}, "expected": success},
+        {
+            "description": "Boolean Type Test",
+            "params": {"search_list_size": True},
+            "expected": {"err_code": 1100, "err_msg": "invalid integer value"},
+        },
+        {
+            "description": "None Type Test",
+            "params": {"search_list_size": None},
+            "expected": {"err_code": 1100, "err_msg": "invalid integer value"},
+        },
         # search_cache_budget_gb_ratio
-        # Type: Float Range: [0.0, 0.3)
+        # Type: Non-negative float (validated by Knowhere; 0.3 is not an upper limit)
         # Default value: 0.10
         # TODO: runt he minium bourndary test after issue #43176 fixed
         # {"description": "Minimum Boundary Test", "params": {"search_cache_budget_gb_ratio": 0.0}, "expected": success},
-        {"description": "Maximum Boundary Test", "params": {"search_cache_budget_gb_ratio": 0.3}, "expected": success},
+        {
+            "description": "Valid Positive Value Test",
+            "params": {"search_cache_budget_gb_ratio": 0.3},
+            "expected": success,
+        },
         {"description": "Default value Test", "params": {"search_cache_budget_gb_ratio": 0.1}, "expected": success},
         {
             "description": "Out of Range Test - Negative",
             "params": {"search_cache_budget_gb_ratio": -0.1},
-            "expected": success,
+            "expected": {"err_code": 1100, "err_msg": "param 'search_cache_budget_gb_ratio'"},
         },
         {
-            "description": "Out of Range Test - Too Large",
+            "description": "Positive Ratio Above 0.3 Test",
             "params": {"search_cache_budget_gb_ratio": 0.31},
             "expected": success,
         },
         {"description": "String Type Test", "params": {"search_cache_budget_gb_ratio": "0.2"}, "expected": success},
-        {"description": "Boolean Type Test", "params": {"search_cache_budget_gb_ratio": True}, "expected": success},
-        {"description": "None Type Test", "params": {"search_cache_budget_gb_ratio": None}, "expected": success},
+        {
+            "description": "Boolean Type Test",
+            "params": {"search_cache_budget_gb_ratio": True},
+            "expected": {"err_code": 1100, "err_msg": "invalid float value"},
+        },
+        {
+            "description": "None Type Test",
+            "params": {"search_cache_budget_gb_ratio": None},
+            "expected": {"err_code": 1100, "err_msg": "invalid float value"},
+        },
         # pq_code_budget_gb_ratio
         # Type: Positive float (validated by Knowhere; 0.25 is not an upper limit)
         # Default value: 0.125
@@ -78,11 +102,23 @@ class DISKANN:
         {"description": "Maximum Boundary Test", "params": {"max_degree": 512}, "expected": success},
         {"description": "Default value Test", "params": {"max_degree": 56}, "expected": success},
         {"description": "Large Value Test", "params": {"max_degree": 128}, "expected": success},
-        {"description": "Out of Range Test - Negative", "params": {"max_degree": -1}, "expected": success},
+        {
+            "description": "Out of Range Test - Negative",
+            "params": {"max_degree": -1},
+            "expected": {"err_code": 1100, "err_msg": "param 'max_degree'"},
+        },
         {"description": "String Type Test", "params": {"max_degree": "32"}, "expected": success},
         {"description": "Float Type Test", "params": {"max_degree": 32.0}, "expected": success},
-        {"description": "Boolean Type Test", "params": {"max_degree": True}, "expected": success},
-        {"description": "None Type Test", "params": {"max_degree": None}, "expected": success},
+        {
+            "description": "Boolean Type Test",
+            "params": {"max_degree": True},
+            "expected": {"err_code": 1100, "err_msg": "invalid integer value"},
+        },
+        {
+            "description": "None Type Test",
+            "params": {"max_degree": None},
+            "expected": {"err_code": 1100, "err_msg": "invalid integer value"},
+        },
         # 组合参数
         {
             "description": "Optimal Performance Combination Test",
