@@ -905,6 +905,72 @@ func TestOrderedGroupReduceStreamRejectsMalformedPartials(t *testing.T) {
 	}
 }
 
+func TestOrderedGroupReduceStreamRejectsUnorderedKeys(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
+	}}
+	request := &internalpb.RetrieveRequest{
+		GroupByFieldIds: []int64{100},
+		Aggregates:      []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}},
+	}
+	for _, test := range []struct {
+		name      string
+		chunks    []*internalpb.RetrieveResults
+		chunkSize int
+		wantFirst []int64
+	}{
+		{
+			name:      "out_of_order_in_chunk",
+			chunks:    []*internalpb.RetrieveResults{newGroupQueryTestChunk([]int64{2, 1}, []int64{20, 10})},
+			chunkSize: 64,
+		},
+		{
+			name:      "duplicate_in_chunk",
+			chunks:    []*internalpb.RetrieveResults{newGroupQueryTestChunk([]int64{1, 1, 2}, []int64{10, 20, 30})},
+			chunkSize: 64,
+		},
+		{
+			name: "duplicate_across_chunks",
+			chunks: []*internalpb.RetrieveResults{
+				newGroupQueryTestChunk([]int64{1}, []int64{10}),
+				newGroupQueryTestChunk([]int64{1}, []int64{20}),
+			},
+			chunkSize: 1,
+			wantFirst: []int64{1},
+		},
+		{
+			name: "out_of_order_across_chunks",
+			chunks: []*internalpb.RetrieveResults{
+				newGroupQueryTestChunk([]int64{2}, []int64{20}),
+				newGroupQueryTestChunk([]int64{1}, []int64{10}),
+			},
+			chunkSize: 1,
+			wantFirst: []int64{2},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recvs := make([]queryTestRecv, 0, len(test.chunks))
+			for _, c := range test.chunks {
+				recvs = append(recvs, queryTestRecv{chunk: c})
+			}
+			child := &queryTestStream{recv: recvs}
+			stream, err := NewReduceStream(request, schema, []ReduceStream{child}, test.chunkSize)
+			require.NoError(t, err)
+			if len(test.wantFirst) > 0 {
+				first, err := stream.Recv()
+				require.NoError(t, err)
+				require.Equal(t, test.wantFirst, first.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+			}
+			chunk, err := stream.Recv()
+			require.Nil(t, chunk)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			require.Equal(t, 1, child.closeCount())
+			require.Nil(t, stream.(*OrderedReduceStream).groups)
+		})
+	}
+}
+
 func makeTimestampField(timestamps []int64) *schemapb.FieldData {
 	return &schemapb.FieldData{
 		Type: schemapb.DataType_Int64, FieldName: "timestamp", FieldId: common.TimeStampField,

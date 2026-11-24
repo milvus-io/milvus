@@ -38,6 +38,7 @@ type orderedGroups struct {
 	produced  int64                   // Complete groups, including those skipped by the client offset.
 	limit     int64                   // Internal offset + limit; nonpositive means unbounded.
 	maxGroups int64                   // Enforced for groups visited, without scanning an unread tail.
+	lastGroup *internalpb.RetrieveResults
 }
 
 func newOrderedGroups(req *internalpb.RetrieveRequest, schema *schemapb.CollectionSchema) (*orderedGroups, error) {
@@ -112,6 +113,9 @@ func (g *orderedGroups) appendNext(ready []*orderedChildBuffer, out *internalpb.
 			first = candidate
 		}
 	}
+	if g.lastGroup != nil && g.compare(first, queryReduceUnit{result: g.lastGroup, rowIndex: 0}) <= 0 {
+		return merr.WrapErrServiceInternalMsg("GROUP BY child streams are not strictly ordered by group key")
+	}
 	var merged *agg.Row
 	for _, b := range ready {
 		if g.compare(b.front(), first) != 0 {
@@ -141,7 +145,17 @@ func (g *orderedGroups) appendNext(ready []*orderedChildBuffer, out *internalpb.
 	if out.FieldsData == nil {
 		out.FieldsData = typeutil.PrepareResultFieldData(first.result.FieldsData, 0)
 	}
-	return agg.AssembleSingleRow(len(out.FieldsData), merged, out.FieldsData)
+	if err := agg.AssembleSingleRow(len(out.FieldsData), merged, out.FieldsData); err != nil {
+		return err
+	}
+	lastGroup := &internalpb.RetrieveResults{
+		FieldsData: typeutil.PrepareResultFieldData(out.FieldsData, 1),
+	}
+	if err := agg.AssembleSingleRow(len(lastGroup.FieldsData), merged, lastGroup.FieldsData); err != nil {
+		return err
+	}
+	g.lastGroup = lastGroup
+	return nil
 }
 
 func (s *OrderedReduceStream) recvGroups() (*internalpb.RetrieveResults, error) {
