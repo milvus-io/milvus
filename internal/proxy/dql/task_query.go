@@ -85,6 +85,7 @@ type QueryTask struct {
 	fastSkip           bool
 	node               taskmodel.TaskNode
 
+	internalTask         bool
 	reQuery              bool
 	allQueryCnt          int64
 	totalRelatedDataSize int64
@@ -1177,6 +1178,11 @@ func (t *QueryTask) formatTimeFields(ctx context.Context) error {
 	}
 	return nil
 }
+
+// MarkInternal excludes synthesized reads from request-level phase observation.
+func (t *QueryTask) MarkInternal() { t.internalTask = true }
+
+func (t *QueryTask) IsInternalTask() bool { return t.internalTask || t.reQuery }
 
 func (t *QueryTask) IsSubTask() bool {
 	return t.reQuery
