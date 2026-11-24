@@ -62,7 +62,6 @@ func TestQuotaCenter(t *testing.T) {
 	core.tsoAllocator = newMockTsoAllocator()
 
 	pcm := proxyutil.NewMockProxyClientManager(t)
-	pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Maybe()
 
 	dc := mocks.NewMixCoord(t)
 	dc.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(&metricsinfo.DataCoordTopology{}, nil).Maybe()
@@ -157,7 +156,6 @@ func TestQuotaCenter(t *testing.T) {
 
 		dc2.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(&metricsinfo.QueryCoordTopology{}, nil).Once()
 		dc2.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(&metricsinfo.DataCoordTopology{}, nil).Once()
-		pcm2.EXPECT().GetProxyMetrics(mock.Anything).Return([]*milvuspb.GetMetricsResponse{}, nil).Once()
 
 		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(nil, errors.New("mock error")).Once()
 		quotaCenter := NewQuotaCenter(pcm2, dc2, core.tsoAllocator, meta)
@@ -190,7 +188,6 @@ func TestQuotaCenter(t *testing.T) {
 		}
 		dc2.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(queryCoordTopology, nil).Once()
 		dc2.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(&metricsinfo.DataCoordTopology{}, nil).Once()
-		pcm2.EXPECT().GetProxyMetrics(mock.Anything).Return([]*milvuspb.GetMetricsResponse{}, nil).Once()
 		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return([]*model.Database{
 			{
 				ID:   1,
@@ -224,7 +221,6 @@ func TestQuotaCenter(t *testing.T) {
 			},
 		}
 		dc2.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(dataCoordTopology, nil).Once()
-		pcm2.EXPECT().GetProxyMetrics(mock.Anything).Return([]*milvuspb.GetMetricsResponse{}, nil).Once()
 		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return([]*model.Database{
 			{
 				ID:   1,
@@ -1215,7 +1211,6 @@ func (s *QuotaCenterSuite) TestSyncMetricsSuccess() {
 	defer call.Unset()
 
 	s.Run("querycoord_cluster", func() {
-		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Once()
 		qc.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(s.getEmptyDCTopology(), nil).Once()
 
 		qcTopology := &metricsinfo.QueryCoordTopology{
@@ -1243,7 +1238,6 @@ func (s *QuotaCenterSuite) TestSyncMetricsSuccess() {
 	})
 
 	s.Run("datacoord_cluster", func() {
-		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Once()
 		qc.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(s.getEmptyQCTopology(), nil).Once()
 
 		dcTopology := &metricsinfo.DataCoordTopology{
@@ -1285,7 +1279,6 @@ func (s *QuotaCenterSuite) TestSyncMetricsFailure() {
 	defer call.Unset()
 
 	s.Run("querycoord_failure", func() {
-		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Once()
 		qc.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(s.getEmptyDCTopology(), nil).Once()
 		qc.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(nil, errors.New("mock")).Once()
 
@@ -1296,37 +1289,9 @@ func (s *QuotaCenterSuite) TestSyncMetricsFailure() {
 	})
 
 	s.Run("datacoord_failure", func() {
-		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Once()
 		qc.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(s.getEmptyQCTopology(), nil).Once()
 
 		qc.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(nil, errors.New("mocked")).Once()
-
-		quotaCenter := NewQuotaCenter(pcm, qc, core.tsoAllocator, meta)
-		err := quotaCenter.collectMetrics()
-		s.Error(err)
-	})
-
-	s.Run("proxy_manager_return_failure", func() {
-		qc.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(s.getEmptyQCTopology(), nil).Once()
-		qc.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(s.getEmptyDCTopology(), nil).Once()
-
-		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, errors.New("mocked")).Once()
-
-		quotaCenter := NewQuotaCenter(pcm, qc, core.tsoAllocator, meta)
-		err := quotaCenter.collectMetrics()
-		s.Error(err)
-	})
-
-	s.Run("proxy_manager_bad_response", func() {
-		qc.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(s.getEmptyQCTopology(), nil).Once()
-		qc.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(s.getEmptyDCTopology(), nil).Once()
-
-		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return([]*milvuspb.GetMetricsResponse{
-			{
-				Status:   merr.Status(nil),
-				Response: "abc",
-			},
-		}, nil).Once()
 
 		quotaCenter := NewQuotaCenter(pcm, qc, core.tsoAllocator, meta)
 		err := quotaCenter.collectMetrics()
@@ -1356,9 +1321,6 @@ func (s *QuotaCenterSuite) TestNodeOffline() {
 	metrics.RootCoordTtDelay.Reset()
 	Params.Save(Params.QuotaConfig.TtProtectionEnabled.Key, "true")
 	defer Params.Reset(Params.QuotaConfig.TtProtectionEnabled.Key)
-
-	// proxy
-	pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil)
 
 	// qc first time
 	qcMetrics := &metricsinfo.QueryCoordTopology{
@@ -1704,14 +1666,73 @@ func TestCheckDiskQuota(t *testing.T) {
 			checkRate(quotaCenter.rateLimiter.GetPartitionLimiters(4, 40, 400), configQuotaValue)
 		}
 	})
+}
 
-	t.Run("get quota center metrics", func(t *testing.T) {
-		meta := mockrootcoord.NewIMetaTable(t)
-		quotaCenter := newQuotaCenterForTesting(t, ctx, meta)
-		metrics := quotaCenter.getQuotaMetrics()
-		assert.Equal(t, commonpb.ErrorCode_Success, metrics.Status.ErrorCode)
-		assert.NotEqual(t, "", metrics.MetricsInfo)
+func TestQuotaCenterGetQuotaMetrics(t *testing.T) {
+	proxyMetrics := &metricsinfo.ProxyQuotaMetrics{
+		Rms:          []metricsinfo.RateMetric{{Label: "search", Rate: 12}},
+		QueueMetrics: []metricsinfo.TaskQueueMetrics{{Type: "query", PendingCount: 3}},
+	}
+	response, err := metricsinfo.MarshalComponentInfos(&metricsinfo.ProxyInfos{
+		BaseComponentInfos: metricsinfo.BaseComponentInfos{ID: 5},
+		QuotaMetrics:       proxyMetrics,
 	})
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name        string
+		responses   []*milvuspb.GetMetricsResponse
+		fetchErr    error
+		wantProxies map[int64]*metricsinfo.ProxyQuotaMetrics
+	}{
+		{
+			name:        "available",
+			responses:   []*milvuspb.GetMetricsResponse{{Status: merr.Success(), Response: response}},
+			wantProxies: map[int64]*metricsinfo.ProxyQuotaMetrics{5: proxyMetrics},
+		},
+		{
+			name:        "unavailable",
+			fetchErr:    merr.ErrServiceNotReady,
+			wantProxies: map[int64]*metricsinfo.ProxyQuotaMetrics{},
+		},
+		{
+			name:        "deadline exceeded",
+			fetchErr:    context.DeadlineExceeded,
+			wantProxies: map[int64]*metricsinfo.ProxyQuotaMetrics{},
+		},
+		{
+			name:        "malformed response",
+			responses:   []*milvuspb.GetMetricsResponse{{Status: merr.Success(), Response: "invalid JSON"}},
+			wantProxies: map[int64]*metricsinfo.ProxyQuotaMetrics{},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			proxies := proxyutil.NewMockProxyClientManager(t)
+			quotaCenter := &QuotaCenter{
+				proxies:          proxies,
+				queryNodeMetrics: map[int64]*metricsinfo.QueryNodeQuotaMetrics{1: {LoadedBinlogSize: 100}},
+				dataNodeMetrics:  map[int64]*metricsinfo.DataNodeQuotaMetrics{2: {Effect: metricsinfo.NodeEffect{NodeID: 2}}},
+				dataCoordMetrics: &metricsinfo.DataCoordQuotaMetrics{TotalBinlogSize: 200},
+			}
+			proxies.EXPECT().GetProxyMetrics(mock.Anything).Run(func(ctx context.Context) {
+				require.True(t, quotaCenter.lock.TryLock(), "Proxy metrics RPC must run outside the quota lock")
+				quotaCenter.lock.Unlock()
+				_, hasDeadline := ctx.Deadline()
+				require.True(t, hasDeadline)
+			}).Return(tc.responses, tc.fetchErr).Once()
+
+			core := &Core{quotaCenter: quotaCenter}
+			response, err := core.GetQuotaMetrics(context.Background(), &internalpb.GetQuotaMetricsRequest{})
+			require.NoError(t, err)
+			require.NoError(t, merr.Error(response.GetStatus()))
+			var got metricsinfo.QuotaCenterMetrics
+			require.NoError(t, metricsinfo.UnmarshalComponentInfos(response.GetMetricsInfo(), &got))
+			assert.Equal(t, quotaCenter.queryNodeMetrics, got.QueryNodeMetrics)
+			assert.Equal(t, quotaCenter.dataNodeMetrics, got.DataNodeMetrics)
+			assert.Equal(t, quotaCenter.dataCoordMetrics, got.DataCoordMetrics)
+			assert.Equal(t, tc.wantProxies, got.ProxyMetrics)
+		})
+	}
 }
 
 func TestTORequestLimiter(t *testing.T) {

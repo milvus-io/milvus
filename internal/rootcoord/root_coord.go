@@ -3404,7 +3404,7 @@ func isVisibleCollectionForCurUser(collectionName string, visibleCollections typ
 }
 
 func (c *Core) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
-	return c.quotaCenter.getQuotaMetrics(), nil
+	return c.quotaCenter.getQuotaMetrics(ctx), nil
 }
 
 func (c *Core) BackupEzk(ctx context.Context, req *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {

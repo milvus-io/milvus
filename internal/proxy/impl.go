@@ -6662,10 +6662,9 @@ func (node *Proxy) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuota
 
 	metricsResp, err := node.mixCoord.GetQuotaMetrics(ctx, req)
 	if err != nil {
-		mlog.Warn(context.TODO(), "GetQuotaMetrics fail",
+		mlog.Warn(ctx, "GetQuotaMetrics fail",
 			mlog.Err(err))
-		metricsResp.Status = merr.Status(err)
-		return metricsResp, nil
+		return &internalpb.GetQuotaMetricsResponse{Status: merr.Status(err)}, nil
 	}
 	err = merr.Error(metricsResp.GetStatus())
 	if err != nil {
