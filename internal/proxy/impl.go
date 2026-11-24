@@ -2701,6 +2701,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 // un-optimized retry, the recall-evaluation ground truth, a retry.Handle
 // re-entry -- and those runs must not move the feature counters again.
 func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool, countFeatures bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
+	ctx, finishAttempt := extension.BeginDQLAttempt(ctx)
+	defer finishAttempt()
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.SearchLabel).
@@ -2959,6 +2961,8 @@ func (l *hybridSearchRequestExprLogger) String() string {
 // countFeatures carries the same meaning as in search: only the first task
 // built for a user request moves the feature counters.
 func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool, countFeatures bool) (*milvuspb.SearchResults, bool, bool, error) {
+	ctx, finishAttempt := extension.BeginDQLAttempt(ctx)
+	defer finishAttempt()
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.HybridSearchLabel).
@@ -3709,6 +3713,8 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 }
 
 func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+	ctx, finishAttempt := extension.BeginDQLAttempt(ctx)
+	defer finishAttempt()
 	qt := NewQueryTask(ctx, node, request, nil, &internalpb.RetrieveRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
