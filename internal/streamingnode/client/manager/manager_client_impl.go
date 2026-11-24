@@ -149,7 +149,14 @@ func (c *managerClientImpl) CollectAllStatus(ctx context.Context, resourceGroupH
 				if hasHealthyStreamingNode(primaryResult) {
 					return primaryResult, nil
 				}
-				result = applyLatestSessionState(latestState, primaryLatestState, result)
+				if len(primaryResult) == 0 {
+					result, primaryLatestState, err = c.annotateLatestSessionState(ctx, latestState, result)
+					if err != nil {
+						return nil, err
+					}
+				} else {
+					result = applyLatestSessionState(latestState, primaryLatestState, result)
+				}
 				if hasHealthyStreamingNode(result) {
 					return result, nil
 				}
@@ -179,7 +186,7 @@ func (c *managerClientImpl) probeAndAnnotateResourceGroup(
 		return nil, discoverer.VersionedState{}, err
 	}
 	if len(result) == 0 {
-		return result, discoverer.VersionedState{}, nil
+		return result, state, nil
 	}
 	return c.annotateLatestSessionState(ctx, state, result)
 }
@@ -197,12 +204,19 @@ func (c *managerClientImpl) annotateLatestSessionState(
 	return applyLatestSessionState(state, newState, result), newState, nil
 }
 
+func hasNewerStateVersion(prevState, newState discoverer.VersionedState) bool {
+	if prevState.Version == nil || newState.Version == nil {
+		return false
+	}
+	return newState.Version.GT(prevState.Version)
+}
+
 func applyLatestSessionState(
 	prevState discoverer.VersionedState,
 	newState discoverer.VersionedState,
 	result map[int64]*types.StreamingNodeStatus,
 ) map[int64]*types.StreamingNodeStatus {
-	if len(result) == 0 || !newState.Version.GT(prevState.Version) {
+	if len(result) == 0 || !hasNewerStateVersion(prevState, newState) {
 		return result
 	}
 	newSession := newState.Sessions()
@@ -221,7 +235,7 @@ func hasNewHealthySessionInResourceGroup(
 	latestState discoverer.VersionedState,
 	resourceGroup string,
 ) bool {
-	if !latestState.Version.GT(prevState.Version) {
+	if !hasNewerStateVersion(prevState, latestState) {
 		return false
 	}
 	prevSessions := prevState.Sessions()

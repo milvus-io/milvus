@@ -643,7 +643,53 @@ func TestCollectAllStatusFallbackWhenPrimaryUnhealthyOrUnreachable(t *testing.T)
 		require.Len(t, nodes, 1)
 		require.Contains(t, nodes, int64(8))
 		require.NoError(t, nodes[8].Err)
-		require.Equal(t, []int64{7, 6, 7, 8}, probed)
+		require.Len(t, probed, 4)
+		require.Equal(t, []int64{7, 6}, probed[:2])
+		require.ElementsMatch(t, []int64{7, 8}, probed[2:])
+	})
+
+	t.Run("keep healthy backup rg when newly registered primary node fails re-probe", func(t *testing.T) {
+		m, r, client := newClient()
+		stateCalls := 0
+		r.EXPECT().GetLatestState(mock.Anything).RunAndReturn(func(context.Context) (discoverer.VersionedState, error) {
+			stateCalls++
+			if stateCalls == 1 {
+				return newVersionedStateWithRG(1, map[uint64]serverInfo{
+					7: {resourceGroup: "rg1"},
+					6: {resourceGroup: "rg2"},
+				}), nil
+			}
+			return newVersionedStateWithRG(2, map[uint64]serverInfo{
+				7: {resourceGroup: "rg1"},
+				8: {resourceGroup: "rg1"},
+				6: {resourceGroup: "rg2"},
+			}), nil
+		})
+
+		var probed []int64
+		var mu sync.Mutex
+		client.EXPECT().CollectStatus(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, _ *streamingpb.StreamingNodeManagerCollectStatusRequest, _ ...grpc.CallOption) (*streamingpb.StreamingNodeManagerCollectStatusResponse, error) {
+				id, ok := contextutil.GetPickServerID(ctx)
+				require.True(t, ok)
+				mu.Lock()
+				probed = append(probed, id)
+				mu.Unlock()
+				if id != 6 {
+					return nil, errors.New("unreachable")
+				}
+				return &streamingpb.StreamingNodeManagerCollectStatusResponse{}, nil
+			})
+
+		nodes, err := m.CollectAllStatus(context.Background(), "rg1")
+		require.NoError(t, err)
+		require.Len(t, nodes, 1)
+		require.Contains(t, nodes, int64(6))
+		require.NoError(t, nodes[6].Err)
+		require.Equal(t, 3, stateCalls)
+		require.Len(t, probed, 4)
+		require.Equal(t, []int64{7, 6}, probed[:2])
+		require.ElementsMatch(t, []int64{7, 8}, probed[2:])
 	})
 
 	t.Run("return empty without hanging when all rgs fail", func(t *testing.T) {
