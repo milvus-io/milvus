@@ -3,6 +3,7 @@ package shard
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
@@ -16,11 +17,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/shard/mock_shards"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -1000,4 +1004,88 @@ func TestDropPartitionUpdatesManagerAfterAppend(t *testing.T) {
 			require.Equal(t, []string{"append", "drop"}, events)
 		})
 	}
+}
+
+func TestCreateSegmentSchemaDDLOrdering(t *testing.T) {
+	paramtable.Init()
+	resource.InitForTest(t)
+	cfg := paramtable.Get()
+	cfg.Save(cfg.CommonCfg.UseLoonFFI.Key, "false")
+	defer cfg.Reset(cfg.CommonCfg.UseLoonFFI.Key)
+
+	// Control when each worker's request reaches the interceptor.
+	pending := make(chan message.MutableMessage, 1)
+	appended := make(chan uint64)
+	transport := mock_wal.NewMockWAL(t)
+	patch := mockey.Mock((*mock_wal.MockWAL).Append).To(func(_ *mock_wal.MockWAL, _ context.Context, msg message.MutableMessage) (*wal.AppendResult, error) {
+		pending <- msg
+		tick := <-appended
+		return &wal.AppendResult{MessageID: rmq.NewRmqID(int64(tick)), TimeTick: tick}, nil
+	}).Build()
+	defer patch.UnPatch()
+	defer close(appended)
+	future := syncutil.NewFuture[wal.WAL]()
+	future.Set(transport)
+	old := &schemapb.CollectionSchema{Version: 5, Fields: []*schemapb.FieldSchema{{FieldID: 100, IsPrimaryKey: true, DataType: schemapb.DataType_Int64}}}
+	const channel = "p0_1v0"
+	manager := shards.RecoverShardManager(&shards.ShardManagerRecoverParam{
+		ChannelInfo: types.PChannelInfo{Name: "p0", Term: 1}, WAL: future,
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+			Checkpoint: &recovery.WALCheckpoint{TimeTick: 1},
+			WritePathRecovery: &moduleapi.WritePathRecoveryModuleSnapshot{VChannels: map[string]moduleapi.VChannelWritePathRecoveryState{
+				channel: {VChannel: channel, CollectionID: 1, PartitionIDs: []int64{10, 11}, Schema: old},
+			}},
+		},
+	})
+	defer manager.Close()
+	i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{ShardManager: manager})
+	defer i.Close()
+
+	beginAllocation := func(partition int64) message.MutableMessage {
+		t.Helper()
+		_, err := manager.AssignSegment(&shards.AssignSegmentRequest{CollectionID: 1, PartitionID: partition, TimeTick: 20, ModifiedMetrics: stats.ModifiedMetrics{Rows: 1, BinarySize: 16}})
+		require.ErrorIs(t, err, shards.ErrWaitForNewSegment)
+		select {
+		case msg := <-pending:
+			return msg
+		case <-time.After(5 * time.Second):
+			t.Fatal("allocation worker did not submit CreateSegment")
+			return nil
+		}
+	}
+	appendCreate := func(msg message.MutableMessage, tick uint64, version int32, format int64) int64 {
+		t.Helper()
+		var segmentID int64
+		_, err := i.DoAppend(t.Context(), msg.WithTimeTick(tick).WithLastConfirmedUseMessageID(), func(_ context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			h := message.MustAsMutableCreateSegmentMessageV2(msg).Header()
+			require.Equal(t, version, h.GetSchemaVersion())
+			require.Equal(t, format, h.GetStorageVersion())
+			segmentID = h.GetSegmentId()
+			return rmq.NewRmqID(int64(tick)), nil
+		})
+		require.NoError(t, err)
+		appended <- tick
+		return segmentID
+	}
+
+	before := appendCreate(beginAllocation(10), 25, 5, storage.StorageV2)
+	pendingAtDDL := beginAllocation(11)
+	updated := proto.CloneOf(old)
+	updated.Version = 6
+	updated.Fields = append(updated.Fields, &schemapb.FieldSchema{FieldID: 125, DataType: schemapb.DataType_Text})
+	ddl := message.NewAlterCollectionMessageBuilderV2().WithVChannel(channel).
+		WithHeader(&message.AlterCollectionMessageHeader{CollectionId: 1, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionSchema}}}).
+		WithBody(&message.AlterCollectionMessageBody{Updates: &message.AlterCollectionMessageUpdates{Schema: updated}}).
+		MustBuildMutable().WithTimeTick(30)
+	_, err := i.DoAppend(t.Context(), ddl, func(_ context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		require.Equal(t, []int64{before}, message.MustAsMutableAlterCollectionMessageV2(msg).Header().GetFlushedSegmentIds())
+		return rmq.NewRmqID(30), nil
+	})
+	require.NoError(t, err)
+
+	after := appendCreate(pendingAtDDL, 40, 6, storage.StorageV3)
+	assignment, err := manager.AssignSegment(&shards.AssignSegmentRequest{CollectionID: 1, PartitionID: 11, TimeTick: 50, ModifiedMetrics: stats.ModifiedMetrics{Rows: 1, BinarySize: 16}})
+	require.NoError(t, err)
+	require.Equal(t, after, assignment.SegmentID)
+	assignment.Ack()
 }
