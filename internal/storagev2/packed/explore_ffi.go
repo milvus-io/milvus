@@ -351,7 +351,7 @@ func ExploreFilesReturnManifestPath(
 			return nil, "", merr.Wrap(err, "inject extfs")
 		}
 		resolveSourcePath := func(sourcePath string) (string, error) {
-			return resolveExternalSourcePath(sourcePath, cProperties, extfs)
+			return resolveMilvusTableSourcePath(sourcePath, cProperties, extfs)
 		}
 		fileInfos, err := buildMilvusTableFileInfosFromSnapshotMetadata(
 			metadataBytes,
