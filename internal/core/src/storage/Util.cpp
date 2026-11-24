@@ -4963,17 +4963,17 @@ ProjectExternalStructColumn(const std::shared_ptr<arrow::Array>& input,
     if (!field_meta.is_external_field() || !logical_parent.has_value()) {
         return input;
     }
-    auto external_path = ParseStructSubFieldPath(field_meta.get_external_field());
+    auto external_path =
+        ParseStructSubFieldPath(field_meta.get_external_field());
     const std::string parent_name = external_path.has_value()
                                         ? external_path->first
                                         : logical_parent.value();
     const std::string child_name =
-        external_path.has_value()
-            ? external_path->second
-            : field_meta.get_name().get().substr(
-                  logical_parent->size() + 1,
-                  field_meta.get_name().get().size() - logical_parent->size() -
-                      2);
+        external_path.has_value() ? external_path->second
+                                  : field_meta.get_name().get().substr(
+                                        logical_parent->size() + 1,
+                                        field_meta.get_name().get().size() -
+                                            logical_parent->size() - 2);
     if (!input) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "missing Struct column {}",
@@ -4987,8 +4987,8 @@ ProjectExternalStructColumn(const std::shared_ptr<arrow::Array>& input,
          tid == arrow::Type::FIXED_SIZE_LIST) &&
         children.size() == 1 && children.front() &&
         children.front()->type->id() == arrow::Type::STRUCT;
-    if (physical_column_name != parent_name &&
-        tid != arrow::Type::STRUCT && !list_of_struct) {
+    if (physical_column_name != parent_name && tid != arrow::Type::STRUCT &&
+        !list_of_struct) {
         return input;
     }
     auto valid = input->ValidateFull();

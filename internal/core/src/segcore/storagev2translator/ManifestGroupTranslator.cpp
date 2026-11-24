@@ -178,15 +178,14 @@ ManifestGroupTranslator::ManifestGroupTranslator(
             auto logical = ParseStructSubFieldPath(it->second.get_name().get());
             auto external =
                 ParseStructSubFieldPath(it->second.get_external_field());
-            AssertInfo(
-                (it->second.get_data_type() == DataType::ARRAY ||
-                 it->second.get_data_type() == DataType::VECTOR_ARRAY) &&
-                    logical.has_value() && external.has_value() &&
-                    external->first == parent &&
-                    external->second == logical->second,
-                "invalid Struct projection child {} for parent {}",
-                id.get(),
-                parent);
+            AssertInfo((it->second.get_data_type() == DataType::ARRAY ||
+                        it->second.get_data_type() == DataType::VECTOR_ARRAY) &&
+                           logical.has_value() && external.has_value() &&
+                           external->first == parent &&
+                           external->second == logical->second,
+                       "invalid Struct projection child {} for parent {}",
+                       id.get(),
+                       parent);
         }
     }
     auto rows_result = chunk_reader_->get_chunk_rows();

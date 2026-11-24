@@ -570,8 +570,9 @@ Schema::GetOrdinaryStructProjections(
         const auto parent_id = struct_field_ids_.at(name);
         const auto ext_parent_it = struct_external_fields_.find(name);
         const std::string& ext_parent =
-            ext_parent_it != struct_external_fields_.end() ? ext_parent_it->second
-                                                           : name;
+            ext_parent_it != struct_external_fields_.end()
+                ? ext_parent_it->second
+                : name;
         AssertInfo(
             !has_field(parent_id) && registered_ids.insert(parent_id).second,
             "invalid or duplicate Struct parent field id {}",

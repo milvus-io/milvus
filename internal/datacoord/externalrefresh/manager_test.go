@@ -1721,6 +1721,7 @@ func TestRefreshMilvusTableStructMismatchPreservesSegments(t *testing.T) {
 	schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{{Name: "items", FieldID: 110, Fields: []*schemapb.FieldSchema{{Name: "items[renamed]", ExternalField: "items[value]", FieldID: 111, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}}}}
 	source := testMilvusTableRefreshSchema(false)
 	source.StructArrayFields = []*schemapb.StructArrayFieldSchema{proto.Clone(schema.StructArrayFields[0]).(*schemapb.StructArrayFieldSchema)}
+	schema.StructArrayFields[0].ExternalField = "items"
 	source.StructArrayFields[0].Fields[0].Name = "items[value]"
 	source.StructArrayFields[0].Fields[0].ExternalField = ""
 	data, err := protojson.Marshal(&datapb.SnapshotMetadata{Collection: &datapb.CollectionDescription{Schema: source}})
@@ -1742,7 +1743,7 @@ func TestRefreshMilvusTableStructMismatchPreservesSegments(t *testing.T) {
 	job, err := manager.GetJobProgress(ctx, jobID)
 	require.NoError(t, err)
 	require.Equal(t, indexpb.JobState_JobStateFailed, job.GetState())
-	require.Contains(t, job.GetFailReason(), "struct")
+	require.Contains(t, job.GetFailReason(), `struct child "items[renamed]" must map to "items[renamed]"; external_field="items[value]"`)
 	require.Empty(t, job.GetTaskIds())
 	require.Empty(t, refreshMeta.GetTasksByJobID(jobID))
 	require.Zero(t, scheduler.GetEnqueueCount())
@@ -1752,12 +1753,13 @@ func TestRefreshMilvusTableStructMismatchPreservesSegments(t *testing.T) {
 }
 
 func TestValidateMilvusTableRefreshStructIdentity(t *testing.T) {
-	for _, change := range []string{"none", "rename", "type", "missing", "added", "parent_added", "parent_added_to_scalar_projection", "parent_missing", "unselected_changed", "unselected_removed", "nullable", "field_id"} {
+	for _, change := range []string{"none", "rename", "type", "missing", "added", "parent_added", "parent_added_to_scalar_projection", "parent_missing", "mapping_missing", "unselected_changed", "unselected_removed", "nullable", "field_id"} {
 		t.Run(change, func(t *testing.T) {
 			source := testMilvusTableRefreshSchema(false)
 			source.StructArrayFields = []*schemapb.StructArrayFieldSchema{{Name: "items", FieldID: 110, Fields: []*schemapb.FieldSchema{{Name: "items[value]", FieldID: 111, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}}}}
 			target := testMilvusTableTargetRefreshSchema()
 			target.StructArrayFields = []*schemapb.StructArrayFieldSchema{proto.Clone(source.StructArrayFields[0]).(*schemapb.StructArrayFieldSchema)}
+			target.StructArrayFields[0].ExternalField = "items"
 			target.StructArrayFields[0].Fields[0].ExternalField = "items[value]"
 			source.StructArrayFields[0].Fields = append(source.StructArrayFields[0].Fields, &schemapb.FieldSchema{Name: "items[ignored]", FieldID: 113, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64})
 			// Snapshot metadata retains provenance that the public target schema omits.
@@ -1782,6 +1784,8 @@ func TestValidateMilvusTableRefreshStructIdentity(t *testing.T) {
 				if change == "parent_added_to_scalar_projection" {
 					target.StructArrayFields = nil
 				}
+			case "mapping_missing":
+				target.StructArrayFields[0].ExternalField = ""
 			case "parent_missing":
 				source.StructArrayFields = nil
 			case "unselected_changed":
@@ -1799,9 +1803,12 @@ func TestValidateMilvusTableRefreshStructIdentity(t *testing.T) {
 			switch change {
 			case "none", "added", "parent_added", "parent_added_to_scalar_projection", "unselected_changed", "unselected_removed", "field_id":
 				require.NoError(t, err)
+			case "mapping_missing":
+				require.ErrorIs(t, err, errMilvusTableRefreshSchemaInvalid)
+				require.ErrorContains(t, err, `target struct "items" must set external_field mapping`)
 			case "parent_missing":
 				require.ErrorIs(t, err, errMilvusTableRefreshSchemaInvalid)
-				require.ErrorContains(t, err, `target struct "items" is missing from the source snapshot`)
+				require.ErrorContains(t, err, `target struct "items" (external_field="items") is missing from the source snapshot`)
 			default:
 				require.ErrorIs(t, err, errMilvusTableRefreshSchemaInvalid)
 			}

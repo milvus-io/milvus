@@ -77,8 +77,9 @@ ParseStructSubFieldPath(std::string_view path) {
         left + 2 >= path.size()) {
         return std::nullopt;
     }
-    return std::make_pair(std::string(path.substr(0, left)),
-                          std::string(path.substr(left + 1, path.size() - left - 2)));
+    return std::make_pair(
+        std::string(path.substr(0, left)),
+        std::string(path.substr(left + 1, path.size() - left - 2)));
 }
 
 inline std::optional<std::string>
