@@ -145,7 +145,7 @@ variable-width distributions are not a strict bound.
 | Import / preimport | File reader buffers and snapshot delete budgets; import includes importMemoryFactor |
 | Import V3 reshard / merge | Existing reshardmem working-set model |
 | Preimport V3 | Number of files x base buffer |
-| Copy segment | Memory floor for streaming copies |
+| Snapshot export / restore copy | copySegmentMemory |
 | External refresh | externalRefreshMemory |
 
 Field-width helpers live under internal/datacoord/fieldsize. Metadata size
@@ -183,7 +183,7 @@ and TEXT LOBs can exceed this estimate and require measurement-based tuning.
 The existing refreshable `dataCoord.taskResource.*` settings remain: vectorIndexCPU
 8, analyzeCPU 8, clusteringCompactionCPU 8, defaultCPU 1; indexMemoryFactor,
 statsMemoryFactor, l0CompactionMemoryFactor, analyzeMemoryFactor and
-importMemoryFactor each 2; minTaskMemory 64MB; externalRefreshMemory 1GB.
+importMemoryFactor each 2; minTaskMemory 64MB; copySegmentMemory and externalRefreshMemory each 1GB.
 
 Regression tests cover exact selected-price propagation, memory-only admission,
 task bookings across scheduling rounds, exclusive progress and FIFO blocking, local

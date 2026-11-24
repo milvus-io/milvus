@@ -17,7 +17,7 @@ func TestStopClosesPartiallyInitializedManagers(t *testing.T) {
 	for _, state := range []commonpb.StateCode{commonpb.StateCode_Initializing, commonpb.StateCode_Abnormal} {
 		t.Run(state.String(), func(t *testing.T) {
 			collector := gc.NewGarbageCollector(nil, nil, gc.GcOption{})
-			exports := snapshot.NewSnapshotExportManager(context.Background(), nil, nil)
+			exports := snapshot.NewSnapshotExportManager(context.Background(), nil, nil, nil, nil)
 			s := &Server{garbageCollector: collector, snapshotExportManager: exports}
 			s.stateCode.Store(state)
 			require.NoError(t, s.Stop())
