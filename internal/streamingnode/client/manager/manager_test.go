@@ -605,6 +605,47 @@ func TestCollectAllStatusFallbackWhenPrimaryUnhealthyOrUnreachable(t *testing.T)
 		require.NotContains(t, probed, int64(6))
 	})
 
+	t.Run("re-probe primary rg when a new primary node registers during fallback", func(t *testing.T) {
+		m, r, client := newClient()
+		stateCalls := 0
+		r.EXPECT().GetLatestState(mock.Anything).RunAndReturn(func(context.Context) (discoverer.VersionedState, error) {
+			stateCalls++
+			if stateCalls == 1 {
+				return newVersionedStateWithRG(1, map[uint64]serverInfo{
+					7: {resourceGroup: "rg1"},
+					6: {resourceGroup: "rg2"},
+				}), nil
+			}
+			return newVersionedStateWithRG(2, map[uint64]serverInfo{
+				7: {resourceGroup: "rg1"},
+				8: {resourceGroup: "rg1"},
+				6: {resourceGroup: "rg2"},
+			}), nil
+		})
+
+		var probed []int64
+		var mu sync.Mutex
+		client.EXPECT().CollectStatus(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, _ *streamingpb.StreamingNodeManagerCollectStatusRequest, _ ...grpc.CallOption) (*streamingpb.StreamingNodeManagerCollectStatusResponse, error) {
+				id, ok := contextutil.GetPickServerID(ctx)
+				require.True(t, ok)
+				mu.Lock()
+				probed = append(probed, id)
+				mu.Unlock()
+				if id == 7 {
+					return nil, status.NewIgnoreOperation("node not match")
+				}
+				return &streamingpb.StreamingNodeManagerCollectStatusResponse{}, nil
+			})
+
+		nodes, err := m.CollectAllStatus(context.Background(), "rg1")
+		require.NoError(t, err)
+		require.Len(t, nodes, 1)
+		require.Contains(t, nodes, int64(8))
+		require.NoError(t, nodes[8].Err)
+		require.Equal(t, []int64{7, 6, 7, 8}, probed)
+	})
+
 	t.Run("return empty without hanging when all rgs fail", func(t *testing.T) {
 		m, r, client := newClient()
 		r.EXPECT().GetLatestState(mock.Anything).Return(newVersionedStateWithRG(1, map[uint64]serverInfo{
@@ -772,8 +813,10 @@ func TestCollectAllStatusAndRemoveRealGRPC(t *testing.T) {
 		6: {addr: rg2Addr, resourceGroup: "rg2"},
 	})
 
+	collectDeadCtx, cancelCollectDead := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelCollectDead()
 	start := time.Now()
-	nodes, err := m.CollectAllStatus(context.Background(), "rg1")
+	nodes, err := m.CollectAllStatus(collectDeadCtx, "rg1")
 	elapsed := time.Since(start)
 	require.NoError(t, err)
 	require.Len(t, nodes, 1)
@@ -805,8 +848,10 @@ func TestCollectAllStatusAndRemoveRealGRPC(t *testing.T) {
 	}, 3*time.Second, 20*time.Millisecond)
 	require.Zero(t, restartedRG1Svc.removeCalls.Load())
 
+	fallbackCtx, cancelFallback := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelFallback()
 	fallbackStart := time.Now()
-	nodes, err = m.CollectAllStatus(context.Background(), "rg1")
+	nodes, err = m.CollectAllStatus(fallbackCtx, "rg1")
 	require.NoError(t, err)
 	require.Len(t, nodes, 1)
 	require.Contains(t, nodes, int64(6))
@@ -815,8 +860,10 @@ func TestCollectAllStatusAndRemoveRealGRPC(t *testing.T) {
 	// 3. Remove for a disappeared session (serverID=99) must return ErrNotAlive immediately:
 	// ErrSubConnNotExist is returned as a status error from Pick, so gRPC drops it instead
 	// of retrying through the service-level UNAVAILABLE retryPolicy.
+	removeDeadCtx, cancelRemoveDead := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelRemoveDead()
 	removeStart := time.Now()
-	err = m.Remove(context.Background(), types.PChannelInfoAssigned{
+	err = m.Remove(removeDeadCtx, types.PChannelInfoAssigned{
 		Channel: types.PChannelInfo{Name: "ch1", Term: 4, AccessMode: types.AccessModeRW},
 		Node:    types.StreamingNodeInfo{ServerID: 99, Address: deadAddr},
 	})

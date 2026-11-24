@@ -7,6 +7,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
@@ -114,15 +115,13 @@ func (c *managerClientImpl) CollectAllStatus(ctx context.Context, resourceGroupH
 
 	effectiveHint := effectiveResourceGroupHintForCollectAllStatus(state, resourceGroupHint)
 	if effectiveHint == "" {
-		result, err := c.getAllStreamingNodeStatus(ctx, state, "")
-		if err != nil {
-			return nil, err
-		}
-		return c.annotateLatestSessionState(ctx, state, result)
+		result, _, err := c.probeAndAnnotateResourceGroup(ctx, state, "")
+		return result, err
 	}
 
 	remainingStatsByRG := groupStreamingNodeSessionStatsByResourceGroup(state)
 	var fallbackResult map[int64]*types.StreamingNodeStatus
+	reprobedNewPrimary := false
 	for len(remainingStatsByRG) > 0 {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -133,20 +132,31 @@ func (c *managerClientImpl) CollectAllStatus(ctx context.Context, resourceGroupH
 		}
 		delete(remainingStatsByRG, targetRG)
 
-		result, err := c.getAllStreamingNodeStatus(ctx, state, targetRG)
+		result, latestState, err := c.probeAndAnnotateResourceGroup(ctx, state, targetRG)
 		if err != nil {
 			return nil, err
-		}
-		if len(result) > 0 {
-			result, err = c.annotateLatestSessionState(ctx, state, result)
-			if err != nil {
-				return nil, err
-			}
 		}
 		if len(fallbackResult) == 0 {
 			fallbackResult = result
 		}
 		if hasHealthyStreamingNode(result) {
+			if targetRG != effectiveHint && !reprobedNewPrimary && hasNewHealthySessionInResourceGroup(state, latestState, effectiveHint) {
+				reprobedNewPrimary = true
+				primaryResult, primaryLatestState, err := c.probeAndAnnotateResourceGroup(ctx, latestState, effectiveHint)
+				if err != nil {
+					return nil, err
+				}
+				if hasHealthyStreamingNode(primaryResult) {
+					return primaryResult, nil
+				}
+				result = applyLatestSessionState(latestState, primaryLatestState, result)
+				if hasHealthyStreamingNode(result) {
+					return result, nil
+				}
+				fallbackResult = result
+				state = primaryLatestState
+				continue
+			}
 			return result, nil
 		}
 		mlog.Warn(ctx, "no healthy streaming node in resource group, trying fallback",
@@ -159,27 +169,79 @@ func (c *managerClientImpl) CollectAllStatus(ctx context.Context, resourceGroupH
 	return make(map[int64]*types.StreamingNodeStatus), nil
 }
 
+func (c *managerClientImpl) probeAndAnnotateResourceGroup(
+	ctx context.Context,
+	state discoverer.VersionedState,
+	resourceGroup string,
+) (map[int64]*types.StreamingNodeStatus, discoverer.VersionedState, error) {
+	result, err := c.getAllStreamingNodeStatus(ctx, state, resourceGroup)
+	if err != nil {
+		return nil, discoverer.VersionedState{}, err
+	}
+	if len(result) == 0 {
+		return result, discoverer.VersionedState{}, nil
+	}
+	return c.annotateLatestSessionState(ctx, state, result)
+}
+
 func (c *managerClientImpl) annotateLatestSessionState(
 	ctx context.Context,
 	state discoverer.VersionedState,
 	result map[int64]*types.StreamingNodeStatus,
-) (map[int64]*types.StreamingNodeStatus, error) {
+) (map[int64]*types.StreamingNodeStatus, discoverer.VersionedState, error) {
 	// Collect status may cost some time, so we need to check the lifetime again.
 	newState, err := c.rb.Resolver().GetLatestState(ctx)
 	if err != nil {
-		return nil, err
+		return nil, discoverer.VersionedState{}, err
 	}
-	if newState.Version.GT(state.Version) {
-		newSession := newState.Sessions()
-		for serverID := range result {
-			if session, ok := newSession[serverID]; !ok {
-				result[serverID].Err = types.ErrNotAlive
-			} else if session.Stopping {
-				result[serverID].Err = types.ErrStopping
-			}
+	return applyLatestSessionState(state, newState, result), newState, nil
+}
+
+func applyLatestSessionState(
+	prevState discoverer.VersionedState,
+	newState discoverer.VersionedState,
+	result map[int64]*types.StreamingNodeStatus,
+) map[int64]*types.StreamingNodeStatus {
+	if len(result) == 0 || !newState.Version.GT(prevState.Version) {
+		return result
+	}
+	newSession := newState.Sessions()
+	for serverID := range result {
+		if session, ok := newSession[serverID]; !ok {
+			result[serverID].Err = types.ErrNotAlive
+		} else if session.Stopping {
+			result[serverID].Err = types.ErrStopping
 		}
 	}
-	return result, nil
+	return result
+}
+
+func hasNewHealthySessionInResourceGroup(
+	prevState discoverer.VersionedState,
+	latestState discoverer.VersionedState,
+	resourceGroup string,
+) bool {
+	if !latestState.Version.GT(prevState.Version) {
+		return false
+	}
+	prevSessions := prevState.Sessions()
+	for serverID, session := range latestState.Sessions() {
+		if normalizedResourceGroupName(session) != resourceGroup || session.Stopping {
+			continue
+		}
+		if prevSession, ok := prevSessions[serverID]; !ok || prevSession.Address != session.Address {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizedResourceGroupName(session *sessionutil.SessionRaw) string {
+	rg := session.GetResourceGroupName()
+	if rg == "" {
+		return common.DefaultResourceGroupName
+	}
+	return rg
 }
 
 func hasHealthyStreamingNode(nodes map[int64]*types.StreamingNodeStatus) bool {
@@ -205,8 +267,7 @@ func effectiveResourceGroupHintForCollectAllStatus(state discoverer.VersionedSta
 		return resourceGroupHint
 	}
 	for _, session := range state.Sessions() {
-		rg := session.GetResourceGroupName()
-		if rg == "" || rg == common.DefaultResourceGroupName {
+		if normalizedResourceGroupName(session) == common.DefaultResourceGroupName {
 			return common.DefaultResourceGroupName
 		}
 	}
@@ -221,10 +282,7 @@ type resourceGroupSessionStats struct {
 func groupStreamingNodeSessionStatsByResourceGroup(state discoverer.VersionedState) map[string]resourceGroupSessionStats {
 	statsByRG := make(map[string]resourceGroupSessionStats)
 	for serverID, session := range state.Sessions() {
-		rg := session.GetResourceGroupName()
-		if rg == "" {
-			rg = common.DefaultResourceGroupName
-		}
+		rg := normalizedResourceGroupName(session)
 		stats := statsByRG[rg]
 		stats.count++
 		if serverID > stats.maxServerID {
@@ -266,10 +324,7 @@ func (c *managerClientImpl) getAllStreamingNodeStatus(ctx context.Context, state
 	for serverID, session := range state.Sessions() {
 		serverID := serverID
 		address := session.Address
-		rg := session.GetResourceGroupName()
-		if rg == "" {
-			rg = common.DefaultResourceGroupName
-		}
+		rg := normalizedResourceGroupName(session)
 		if resourceGroup != "" && rg != resourceGroup {
 			continue
 		}
