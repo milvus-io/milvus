@@ -95,16 +95,17 @@ func (suite *DistControllerTestSuite) TestStart() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
+	pullCalled := atomic.NewBool(false)
 	dispatchCalled := atomic.NewBool(false)
 	suite.mockCluster.EXPECT().GetDataDistribution(mock.Anything, mock.Anything, mock.Anything).Return(
 		&querypb.GetDataDistributionResponse{Status: merr.Success(), NodeID: 1},
 		nil,
-	)
+	).Run(func(context.Context, int64, *querypb.GetDataDistributionRequest) { pullCalled.Store(true) })
 	suite.mockScheduler.EXPECT().Dispatch(int64(1)).Run(func(node int64) { dispatchCalled.Store(true) })
 	suite.controller.StartDistInstance(context.TODO(), 1)
 	suite.Eventually(
 		func() bool {
-			return dispatchCalled.Load()
+			return pullCalled.Load() && dispatchCalled.Load()
 		},
 		10*time.Second,
 		500*time.Millisecond,

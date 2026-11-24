@@ -442,7 +442,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "flush").Observe(float64(flushCost.Milliseconds()))
 	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "compress").Observe(float64(compressCost.Milliseconds()))
 
-	isNamespaceSorted := t.plan.GetSchema().GetEnableNamespace()
+	isNamespaceSorted := common.UsesNamespacePartitionKey(t.plan.GetSchema())
 	isSorted := !isNamespaceSorted
 	res := []*datapb.CompactionSegment{
 		{

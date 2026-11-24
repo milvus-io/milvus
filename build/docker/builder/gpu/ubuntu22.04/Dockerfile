@@ -36,7 +36,7 @@ RUN apt-get update && apt-get install -y gcc-12 g++-12 && cd /usr/bin \
 
 
 # Install go
-RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.26.10.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.26.11.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go
 # Install conan
 # Install rust
 RUN curl https://sh.rustup.rs -sSf | \

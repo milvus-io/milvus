@@ -6,7 +6,7 @@
 // "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,33 +16,29 @@
 
 #pragma once
 
-#include "common/EasyAssert.h"
-#include "google/cloud/status.h"
+#include <cstdint>
 
 namespace milvus::storage {
 
-inline bool
-IsRetryableGcpStatus(google::cloud::StatusCode code) {
-    switch (code) {
-        case google::cloud::StatusCode::kDeadlineExceeded:
-        case google::cloud::StatusCode::kResourceExhausted:
-        case google::cloud::StatusCode::kInternal:
-        case google::cloud::StatusCode::kUnavailable:
-            return true;
-        default:
-            return false;
-    }
-}
+inline constexpr int64_t kDefaultLoadFieldDataReadWindowSizeBytes =
+    16LL * 1024 * 1024;
 
-inline ErrorCode
-GcpNativeStatusToErrorCode(google::cloud::StatusCode code) {
-    if (IsRetryableGcpStatus(code)) {
-        return ErrorCode::GcpNativeError;
-    }
-    if (code == google::cloud::StatusCode::kNotFound) {
-        return ErrorCode::ObjectNotExist;
-    }
-    return ErrorCode::UnexpectedError;
-}
+// Selects asynchronous storage reads for supported field-data and index loaders.
+[[nodiscard]] bool
+LoadAsyncReadEnabled();
+
+// Selects the load mode and refreshes its overhead policy.
+// Call only while loading and resource-limit updates are quiescent; rebuild
+// readers that captured the previous mode before resuming loading.
+void
+SetLoadAsyncReadEnabled(bool enabled);
+
+// Returns the process-wide Storage V3 field-data read-window size in bytes.
+[[nodiscard]] int64_t
+LoadFieldDataReadWindowSizeBytes();
+
+// Sets the read-window size; non-positive values restore the default.
+void
+SetLoadFieldDataReadWindowSizeBytes(int64_t bytes);
 
 }  // namespace milvus::storage

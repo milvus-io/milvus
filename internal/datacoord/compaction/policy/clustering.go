@@ -149,7 +149,7 @@ func (policy *ClusteringCompactionPolicy) TriggerOneCollection(ctx context.Conte
 		return nil, 0, err
 	}
 
-	namespaceEnabled := collection.Schema.GetEnableNamespace()
+	requireNamespaceSorted := common.UsesNamespacePartitionKey(collection.Schema)
 	partSegments := meta.GetSegmentsChanPart(policy.Meta, collectionID, meta.SegmentFilterFunc(func(segment *meta.SegmentInfo) bool {
 		return meta.IsSegmentHealthy(segment) &&
 			meta.IsFlushed(segment) &&
@@ -157,7 +157,7 @@ func (policy *ClusteringCompactionPolicy) TriggerOneCollection(ctx context.Conte
 			!segment.GetIsImporting() && // not importing now
 			segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
 			!segment.GetIsInvisible() &&
-			(!namespaceEnabled || segment.GetIsSortedByNamespace()) &&
+			(!requireNamespaceSorted || segment.GetIsSortedByNamespace()) &&
 			!policy.Meta.IsSegmentCompactionProtected(segment.GetID()) // not protected by snapshot
 	}))
 

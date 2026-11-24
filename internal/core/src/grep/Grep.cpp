@@ -90,6 +90,8 @@ ToOptions(const MatchOptions& options) {
     MgGrepMatchOptions out{};
     out.has_max_count = options.max_count.has_value();
     out.max_count = options.max_count.value_or(0);
+    out.before_context = options.before_context;
+    out.after_context = options.after_context;
     switch (options.pattern_kind) {
         case PatternKind::Regex:
             out.pattern_kind = MG_GREP_PATTERN_REGEX;
@@ -204,8 +206,8 @@ GetLine(const MgGrepResult* handle, size_t text, size_t line) {
                         "line index out of range");
     }
     const auto& value = result.lines[line];
-    if ((value.content.len && !value.content.data) || !value.span_count ||
-        !value.spans) {
+    if ((value.content.len && !value.content.data) ||
+        (value.span_count && !value.spans)) {
         throw GrepError(Status::InternalError,
                         Operation::ReadResult,
                         "invalid Grep line view");
@@ -374,6 +376,10 @@ Result::LineNumber(size_t text, size_t line) const {
 uint64_t
 Result::LineStartOffset(size_t text, size_t line) const {
     return GetLine(handle_.get(), text, line).line_start_offset;
+}
+bool
+Result::IsMatch(size_t text, size_t line) const {
+    return GetLine(handle_.get(), text, line).is_match;
 }
 size_t
 Result::SpanCount(size_t text, size_t line) const {

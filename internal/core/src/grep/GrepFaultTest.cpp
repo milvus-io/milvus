@@ -45,7 +45,8 @@ struct MgGrepPlan {};
 struct MgGrepSession {};
 struct MgGrepResult {
     MgGrepSpan span{0, 1};
-    MgGrepLine line{{reinterpret_cast<const uint8_t*>("a"), 1}, &span, 1, 1, 0};
+    MgGrepLine line{
+        {reinterpret_cast<const uint8_t*>("a"), 1}, &span, 1, 1, 0, true};
     std::vector<MgGrepTextResult> texts;
     MgGrepBatchView view{};
 };
