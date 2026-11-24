@@ -62,6 +62,130 @@ func TestPlacementFootprintsSurviveRowFallback(t *testing.T) {
 	require.Equal(t, []int64{2}, c.GetCollection(1).GetShard(id).PreparingNodes())
 }
 
+func TestPlacementReusesUnchangedFootprints(t *testing.T) {
+	c := New(nil)
+	id := cacheShard(1, 10)
+	c.PublishShard(id, &coordview.ShardStats{
+		PreparingNodes: []int64{1, 2},
+		ResidentNodes:  []int64{1, 2},
+	})
+	before := c.GetCollection(1)
+
+	reordered := &coordview.ShardStats{
+		PreparingNodes: []int64{2, 1},
+		ResidentNodes:  []int64{2, 1},
+	}
+	c.PublishShard(id, reordered)
+	current := c.GetCollection(1)
+	require.Same(t, reordered, current.GetShard(id).Stats())
+	require.Same(t, before.placements.tree, current.placements.tree)
+
+	key := coordview.ResourceKey{PartitionID: 1, SegmentID: 100, DataVersion: qviews.DataVersion{StreamingVersion: 1}, LoadInfoVersion: 1}
+	progress := *reordered
+	progress.Resources = map[int64]map[coordview.ResourceKey]struct{}{1: {key: {}}}
+	c.PublishShard(id, &progress)
+	current = c.GetCollection(1)
+	require.True(t, current.PlacementNode(1).HasResource(key))
+	require.False(t, before.PlacementNode(1).HasResource(key))
+	require.Same(t, before.PlacementNode(1).replicas.tree, current.PlacementNode(1).replicas.tree)
+	require.Same(t, before.PlacementNode(2), current.PlacementNode(2))
+
+	promoted := progress
+	promoted.UpNodes = []int64{1}
+	promoted.PreparingNodes = []int64{2}
+	c.PublishShard(id, &promoted)
+	after := c.GetCollection(1)
+	replicaKey := idKey(id.ReplicaID)
+	ref, found := after.PlacementNode(1).replicas.get(replicaKey[:])
+	require.True(t, found)
+	require.Equal(t, ReplicaFootprint{ReplicaID: id.ReplicaID, Up: 1, Resident: 1}, ref)
+	previousRef, found := current.PlacementNode(1).replicas.get(replicaKey[:])
+	require.True(t, found)
+	require.Equal(t, ReplicaFootprint{ReplicaID: id.ReplicaID, Preparing: 1, Resident: 1}, previousRef)
+	require.Same(t, current.PlacementNode(2), after.PlacementNode(2))
+
+	moved := promoted
+	moved.UpNodes = []int64{3}
+	moved.ResidentNodes = []int64{2, 3}
+	moved.Resources = map[int64]map[coordview.ResourceKey]struct{}{3: {key: {}}}
+	c.PublishShard(id, &moved)
+	current = c.GetCollection(1)
+	require.Nil(t, current.PlacementNode(1))
+	require.Same(t, after.PlacementNode(2), current.PlacementNode(2))
+	require.True(t, current.PlacementNode(3).HasResource(key))
+	ref, found = current.PlacementNode(3).replicas.get(replicaKey[:])
+	require.True(t, found)
+	require.Equal(t, ReplicaFootprint{ReplicaID: id.ReplicaID, Up: 1, Resident: 1}, ref)
+}
+
+func BenchmarkCachePublishShardPlacement(b *testing.B) {
+	id := cacheShard(1, 10)
+	version := &qviews.QueryViewVersion{DataVersion: qviews.DataVersion{StreamingVersion: 1}, QueryVersion: 1}
+	preparing := cacheStats(100, 1, 100, coordview.SegmentStatePreparing, true)
+	preparing.PreparingVersion = version
+	preparing.PreparingNodes = []int64{1}
+	preparing.ResidentNodes = []int64{1}
+
+	unchanged := *preparing
+	resourceReady := cacheStats(100, 1, 100, coordview.SegmentStateReady, true)
+	resourceReady.PreparingVersion = version
+	resourceReady.PreparingNodes = preparing.PreparingNodes
+	resourceReady.ResidentNodes = preparing.ResidentNodes
+	key := coordview.ResourceKey{PartitionID: 1, SegmentID: 100, DataVersion: version.DataVersion, LoadInfoVersion: 1}
+	resourceReady.Resources = map[int64]map[coordview.ResourceKey]struct{}{1: {key: {}}}
+
+	up := cacheStats(100, 1, 100, coordview.SegmentStateUp, true)
+	up.UpVersion = version
+	up.UpNodes = []int64{1}
+	up.ResidentNodes = preparing.ResidentNodes
+	up.Resources = resourceReady.Resources
+
+	loadedOn := func(viewVersion *qviews.QueryViewVersion, nodes ...int64) *coordview.ShardStats {
+		stats := &coordview.ShardStats{
+			UpVersion:     viewVersion,
+			UpNodes:       nodes,
+			ResidentNodes: nodes,
+			Segments:      make(map[int64]*coordview.SegmentStats, len(nodes)),
+			Resources:     make(map[int64]map[coordview.ResourceKey]struct{}, len(nodes)),
+		}
+		for i, node := range nodes {
+			segmentKey := key
+			segmentKey.SegmentID += int64(i)
+			stats.Resources[node] = map[coordview.ResourceKey]struct{}{segmentKey: {}}
+			stats.Segments[segmentKey.SegmentID] = &coordview.SegmentStats{
+				SegmentID: segmentKey.SegmentID, PartitionID: segmentKey.PartitionID, LogicalSize: 100,
+				Nodes: map[int64]coordview.SegmentState{node: coordview.SegmentStateUp},
+			}
+		}
+		return stats
+	}
+	movedVersion := *version
+	movedVersion.QueryVersion++
+
+	for _, tc := range []struct {
+		name     string
+		old, new *coordview.ShardStats
+	}{
+		{"unchanged_placement", preparing, &unchanged},
+		{"resource_readiness_change", preparing, resourceReady},
+		{"preparing_up_transition", resourceReady, up},
+		{"one_node_migration", loadedOn(version, 1, 2, 3, 4), loadedOn(&movedVersion, 1, 2, 3, 5)},
+		{"load_and_final_release", nil, resourceReady},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			c := New(nil)
+			previous, next := tc.old, tc.new
+			c.PublishShard(id, previous)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				c.PublishShard(id, next)
+				previous, next = next, previous
+			}
+		})
+	}
+}
+
 func TestNodeLossInvalidatesUnplacedCollections(t *testing.T) {
 	c := New(nil)
 	c.PublishLoadConfig(1, cacheConfig(1, 10), 1)
