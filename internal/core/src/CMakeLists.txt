@@ -204,16 +204,6 @@ set(LINK_TARGETS
     ${CONAN_TARGETS}
     )
 
-if(ENABLE_AZURE_FS)
-    set(AZURE_BUILD_DIR ON)
-    # Arrow already includes Azure SDK when built with_azure=True
-    # No need to link additional azure_blob_chunk_manager
-endif()
-
-if (ENABLE_GCP_NATIVE)
-    set(LINK_TARGETS ${LINK_TARGETS} gcp-native-storage)
-endif()
-
 target_link_libraries(milvus_core ${LINK_TARGETS})
 milvus_check_aws_runtime(milvus_core)
 if(TARGET milvus-storage_aws_runtime_check)

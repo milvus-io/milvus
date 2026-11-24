@@ -3820,7 +3820,7 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     // create field data
     std::string root_path = TestLocalPath;
     auto storage_config = gen_local_storage_config(root_path);
-    auto cm = CreateChunkManager(storage_config);
+    auto cm = storage::CreateChunkManager(storage_config);
     auto fs = milvus::storage::InitArrowFileSystem(storage_config);
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
@@ -4100,7 +4100,7 @@ TEST_P(SealedVectorArrayTest, DISABLED_BulkSubscriptVectorArrayFromIndex) {
     // prepare field data and binlog
     std::string root_path = TestLocalPath;
     auto storage_config = gen_local_storage_config(root_path);
-    auto cm = CreateChunkManager(storage_config);
+    auto cm = storage::CreateChunkManager(storage_config);
     auto fs = milvus::storage::InitArrowFileSystem(storage_config);
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
@@ -4299,7 +4299,7 @@ TEST(SealedVectorArrayNullable,
 
     std::string root_path = TestLocalPath;
     auto storage_config = gen_local_storage_config(root_path);
-    auto cm = CreateChunkManager(storage_config);
+    auto cm = storage::CreateChunkManager(storage_config);
     auto fs = milvus::storage::InitArrowFileSystem(storage_config);
     auto field_data = storage::CreateFieldData(
         DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, true, dim);
@@ -4421,7 +4421,7 @@ TEST(SealedVectorArrayNullable,
 
     std::string root_path = TestLocalPath;
     auto storage_config = gen_local_storage_config(root_path);
-    auto cm = CreateChunkManager(storage_config);
+    auto cm = storage::CreateChunkManager(storage_config);
     auto fs = milvus::storage::InitArrowFileSystem(storage_config);
     auto field_data = storage::CreateFieldData(
         DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, true, dim);
@@ -4541,7 +4541,7 @@ TEST(SealedVectorArrayFallback,
 
     std::string root_path = TestLocalPath;
     auto storage_config = gen_local_storage_config(root_path);
-    auto cm = CreateChunkManager(storage_config);
+    auto cm = storage::CreateChunkManager(storage_config);
     auto fs = milvus::storage::InitArrowFileSystem(storage_config);
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
@@ -4673,7 +4673,7 @@ TEST_P(SealedVectorArrayTest, DISABLED_BulkSubscriptVectorArrayFromDiskIndex) {
     // prepare field data and binlog
     std::string root_path = TestLocalPath;
     auto storage_config = gen_local_storage_config(root_path);
-    auto cm = CreateChunkManager(storage_config);
+    auto cm = storage::CreateChunkManager(storage_config);
     auto fs = milvus::storage::InitArrowFileSystem(storage_config);
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;

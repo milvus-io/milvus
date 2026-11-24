@@ -86,9 +86,9 @@ class PackedScalarLoadRoutingTest : public ::testing::Test {
             std::filesystem::temp_directory_path().string(),
             "scalar-load-route-XXXXXX",
             "scalar load routing test");
-        storage::StorageConfig config;
-        config.storage_type = "local";
-        config.root_path = root_->Path();
+        auto config = std::make_shared<milvus_storage::api::Properties>();
+        (*config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+        (*config)[PROPERTY_FS_ROOT_PATH] = std::string(root_->Path());
         storage::FieldDataMeta field{1, 2, 3, 101};
         field.field_schema.set_data_type(proto::schema::DataType::Int32);
         context_ =
