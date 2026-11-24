@@ -958,6 +958,27 @@ func (opt *updateOption) WithAssignment(fieldName string, literal *schemapb.Upda
 	return opt
 }
 
+// WithInt64 sets an INT64 field to value for every selected primary key.
+func (opt *updateOption) WithInt64(fieldName string, value int64) *updateOption {
+	return opt.WithAssignment(fieldName, &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_ScalarValue{
+		ScalarValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: value}},
+	}})
+}
+
+// WithVarchar sets a VARCHAR field to value for every selected primary key.
+func (opt *updateOption) WithVarchar(fieldName, value string) *updateOption {
+	return opt.WithAssignment(fieldName, &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_ScalarValue{
+		ScalarValue: &schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: value}},
+	}})
+}
+
+// WithVarcharArray replaces the entire ARRAY<VARCHAR> value. An empty slice sets an empty array.
+func (opt *updateOption) WithVarcharArray(fieldName string, values []string) *updateOption {
+	return opt.WithAssignment(fieldName, &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_ArrayValue{
+		ArrayValue: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: values}}},
+	}})
+}
+
 func (opt *updateOption) WithNull(fieldName string) *updateOption {
 	return opt.WithAssignment(fieldName, &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_SetNull{SetNull: true}})
 }
