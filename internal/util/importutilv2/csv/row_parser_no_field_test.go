@@ -25,8 +25,9 @@ import (
 )
 
 // A CSV header that names no field of the collection is rejected up front
-// instead of producing rows of nulls and defaults. The dynamic field column
-// counts as data.
+// instead of producing rows of nulls and defaults. With a dynamic field every
+// column counts as data: the columns that are not in the schema are written
+// into the dynamic field.
 func TestNewRowParserRejectsHeaderWithNoCollectionField(t *testing.T) {
 	collection := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 100, Name: "id", IsPrimaryKey: true, AutoID: true, DataType: schemapb.DataType_Int64},
@@ -43,4 +44,12 @@ func TestNewRowParserRejectsHeaderWithNoCollectionField(t *testing.T) {
 		&schemapb.FieldSchema{FieldID: 102, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true})}
 	_, err = NewRowParser(dynamic, []string{"$meta"}, "")
 	require.NoError(t, err)
+
+	// columns unknown to the schema only: they are the dynamic field's data
+	parser, err := NewRowParser(dynamic, []string{"color", "size"}, "")
+	require.NoError(t, err)
+	row, err := parser.Parse([]string{"red", "3"})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"color":"red","size":"3"}`, string(row[102].([]byte)))
+	require.Nil(t, row[101])
 }
