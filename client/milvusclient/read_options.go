@@ -950,6 +950,9 @@ func (opt *queryOption) WithSkipRLS(skip bool) *queryOption {
 // the expression form. The marshal fails — and Request() returns the error —
 // when vector contains NaN/Inf, which the server would reject anyway.
 func (opt *queryOption) WithCalcDistance(params map[string]any) *queryOption {
+	// A prior failed marshal (e.g. a NaN/Inf reference) must not poison this
+	// builder forever: reset the error so a corrected call can recover.
+	opt.err = nil
 	// json.Marshal encodes []byte as a base64 string, which the server's
 	// parseCalcDistance would read as the expression form; rewrite it to the
 	// numeric-slice wire contract for BinaryVector references before encoding.

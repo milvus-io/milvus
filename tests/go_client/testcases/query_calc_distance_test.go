@@ -298,14 +298,16 @@ func TestCalcDistanceVectorTypes(t *testing.T) {
 		require.InEpsilon(t, 12, d[1], 1e-3)
 
 		// JACCARD against the same rows: row0 identical -> 0;
-		// row1: intersect=4, union=16 -> 1 - 4/16 = 0.75
+		// row1: intersect=4, union=16 -> 1 - 4/16 = 0.75.
+		// A []byte reference (the natural Go type for a binary vector) exercises
+		// the WithCalcDistance base64-rewrite path end to end.
 		result, err = mc.Query(ctx, client.NewQueryOption(n).
 			WithFilter("pk >= 0").
 			WithOutputFields("pk").
 			WithCalcDistance(map[string]any{
 				"metric_type": "JACCARD",
 				"field":       "vec",
-				"vector":      []float32{15, 170},
+				"vector":      []byte{15, 170},
 				"output_name": "distance",
 			}))
 		require.NoError(t, err)

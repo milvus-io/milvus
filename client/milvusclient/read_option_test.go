@@ -362,6 +362,22 @@ func (s *SearchOptionSuite) TestQueryCalcDistance() {
 		WithCalcDistance(map[string]any{"vector": []float32{float32(math.NaN())}}).
 		Request()
 	s.Error(err)
+
+	// a corrected WithCalcDistance call after a failed marshal must recover:
+	// the stale err is cleared so Request() succeeds again
+	queryReq, err = NewQueryOption("collection").
+		WithCalcDistance(map[string]any{"vector": []float32{float32(math.NaN())}}).
+		WithCalcDistance(map[string]any{
+			"metric_type": "IP",
+			"field":       "vec",
+			"vector":      []float32{1, 2, 3, 4},
+			"output_name": "distance",
+		}).
+		Request()
+	s.Require().NoError(err)
+	raw, ok = entity.KvPairsMap(queryReq.GetQueryParams())["calc_distance"]
+	s.Require().True(ok)
+	s.Contains(raw, `"vector":[1,2,3,4]`)
 }
 
 func (s *SearchOptionSuite) TestPlaceHolder() {

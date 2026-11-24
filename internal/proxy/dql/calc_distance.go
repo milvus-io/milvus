@@ -585,8 +585,13 @@ func (t *QueryTask) resolveExpressionVector(ctx context.Context, expr string, ou
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		RetrieveRequest: &internalpb.RetrieveRequest{
+			// Carry the outer task's BeginTs: QueryTask.SetTs keeps a
+			// reQuery task's existing timestamp, so without it the scheduler
+			// would assign a fresh (newer) TSO and the reference vector would
+			// be read at a different snapshot than the rows it scores.
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
+				commonpbutil.WithTimeStamp(t.BeginTs()),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
 			ReqID:            paramtable.GetNodeID(),
