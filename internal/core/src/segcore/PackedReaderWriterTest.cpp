@@ -342,8 +342,9 @@ TEST_F(CPackedImportTest, ReportsWriterKeysetErrors) {
     auto bad_enc = GetEncParams(&target, &enc_key, &enc_meta);
     EXPECT_EQ(bad_enc.error_code, milvus::ErrorCode::InvalidParameter);
     if (bad_enc.error_msg != nullptr) {
-        EXPECT_THAT(bad_enc.error_msg,
-                    ::testing::HasSubstr("cipher plugin returned no encryptor"));
+        EXPECT_THAT(
+            bad_enc.error_msg,
+            ::testing::HasSubstr("cipher plugin returned no encryptor"));
     }
     EXPECT_FALSE(CheckStatus(bad_enc));
     EXPECT_EQ(enc_key, nullptr);

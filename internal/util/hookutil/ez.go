@@ -23,6 +23,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
@@ -171,6 +173,32 @@ func GetPluginContext(ezID int64, collectionID int64) ([]*commonpb.KeyValuePair,
 	return []*commonpb.KeyValuePair{encodeEZContext(ezID, key)}, nil
 }
 
+func isTemporaryError(err error) bool {
+	for err != nil {
+		if tmp, ok := err.(interface{ Temporary() bool }); ok && tmp.Temporary() {
+			return true
+		}
+		if joined, ok := err.(interface{ Unwrap() []error }); ok {
+			for _, cause := range joined.Unwrap() {
+				if isTemporaryError(cause) {
+					return true
+				}
+			}
+			return false
+		}
+		if next := errors.Unwrap(err); next != nil {
+			err = next
+			continue
+		}
+		if causer, ok := err.(interface{ Cause() error }); ok {
+			err = causer.Cause()
+			continue
+		}
+		break
+	}
+	return false
+}
+
 func ResolveImportEZ(artifact string) ([]*commonpb.KeyValuePair, error) {
 	if artifact == "" {
 		return nil, nil
@@ -189,6 +217,9 @@ func ResolveImportEZ(artifact string) ([]*commonpb.KeyValuePair, error) {
 	}
 	ezID, key, err := resolver.ResolveImportEZ(artifact)
 	if err != nil {
+		if !merr.IsRetryableErr(err) && !merr.IsCanceledOrTimeout(err) && isTemporaryError(err) {
+			return nil, merr.WrapErrServiceUnavailableErr(err, "failed to resolve source EZK")
+		}
 		return nil, merr.Wrap(err, "failed to resolve source EZK")
 	}
 	if ezID <= 0 || len(key) == 0 {

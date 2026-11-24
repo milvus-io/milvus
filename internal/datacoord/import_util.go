@@ -326,6 +326,30 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 			Vchannel:    segment.GetInsertChannel(),
 		})
 	}
+	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
+		return fileStat.GetImportFile()
+	})
+
+	req := &datapb.ImportRequest{
+		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
+		JobID:           task.GetJobID(),
+		TaskID:          task.GetTaskID(),
+		CollectionID:    task.GetCollectionID(),
+		PartitionIDs:    job.GetPartitionIDs(),
+		Vchannels:       job.GetVchannels(),
+		Schema:          job.GetSchema(),
+		Files:           importFiles,
+		Options:         job.GetOptions(),
+		RequestSegments: requestSegments,
+		StorageConfig:   createStorageConfig(),
+		TaskSlot:        task.GetTaskSlot(),
+		StorageVersion:  storage.StorageV2,
+	}
+	// Resolve and validate cipher contexts before allocating timestamps/IDs so retries do not waste ranges.
+	if err := WrapPluginContext(req.GetCollectionID(), req.GetSchema().GetProperties(), req); err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	ts := job.GetDataTs()
@@ -363,30 +387,8 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		zap.Uint64("ts", ts))...,
 	)
 
-	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
-		return fileStat.GetImportFile()
-	})
-
-	req := &datapb.ImportRequest{
-		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
-		JobID:           task.GetJobID(),
-		TaskID:          task.GetTaskID(),
-		CollectionID:    task.GetCollectionID(),
-		PartitionIDs:    job.GetPartitionIDs(),
-		Vchannels:       job.GetVchannels(),
-		Schema:          job.GetSchema(),
-		Files:           importFiles,
-		Options:         job.GetOptions(),
-		Ts:              ts,
-		IDRange:         &datapb.IDRange{Begin: idBegin, End: idEnd},
-		RequestSegments: requestSegments,
-		StorageConfig:   createStorageConfig(),
-		TaskSlot:        task.GetTaskSlot(),
-		StorageVersion:  storage.StorageV2,
-	}
-	if err := WrapPluginContext(req.GetCollectionID(), req.GetSchema().GetProperties(), req); err != nil {
-		return nil, err
-	}
+	req.Ts = ts
+	req.IDRange = &datapb.IDRange{Begin: idBegin, End: idEnd}
 	return req, nil
 }
 

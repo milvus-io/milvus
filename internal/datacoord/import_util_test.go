@@ -1654,6 +1654,14 @@ func TestImportRequestsCarrySourceAndTargetEZKs(t *testing.T) {
 	}
 }
 
+type temporaryImportError struct {
+	msg       string
+	temporary bool
+}
+
+func (e temporaryImportError) Error() string   { return e.msg }
+func (e temporaryImportError) Temporary() bool { return e.temporary }
+
 func TestImportDispatchRetriesOnEZKError(t *testing.T) {
 	ctx := context.Background()
 	backup := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":73}`))
@@ -1686,7 +1694,6 @@ func TestImportDispatchRetriesOnEZKError(t *testing.T) {
 				catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{{
 					JobID: 1, TaskID: 2, State: datapb.ImportTaskStateV2_Pending,
 				}}, nil)
-				alloc.EXPECT().AllocN(mock.Anything).Return(10, 20, nil)
 			}
 			im, err := NewImportMeta(ctx, catalog, alloc, nil)
 			require.NoError(t, err)
@@ -1700,7 +1707,14 @@ func TestImportDispatchRetriesOnEZKError(t *testing.T) {
 				require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
 			}
 
-			// Retryable errors keep task pending even past maxImportDispatchRetries.
+			// Transient Temporary() source errors and retryable target errors keep task pending past maxImportDispatchRetries.
+			sourceErr = temporaryImportError{msg: "source KMS throttled", temporary: true}
+			for i := 0; i < 2; i++ {
+				task.CreateTaskOnWorker(10, cluster)
+				require.Equal(t, state, im.GetJob(ctx, 1).GetState())
+				require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+			}
+
 			sourceErr = nil
 			cipher.EXPECT().GetUnsafeKey(int64(91), task.GetCollectionID()).Return(nil).Twice()
 			for i := 0; i < 2; i++ {
@@ -1709,6 +1723,8 @@ func TestImportDispatchRetriesOnEZKError(t *testing.T) {
 				require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
 			}
 			catalog.AssertNotCalled(t, "SaveImportJob", mock.Anything, mock.Anything)
+			alloc.AssertNotCalled(t, "AllocTimestamp", mock.Anything)
+			alloc.AssertNotCalled(t, "AllocN", mock.Anything)
 
 			// Non-retryable source error fails the job once retries are exhausted.
 			sourceErr = errors.New("source KMS denied Decrypt")
@@ -1723,6 +1739,61 @@ func TestImportDispatchRetriesOnEZKError(t *testing.T) {
 			require.Equal(t, resolvesBefore, resolves)
 		})
 	}
+}
+
+func TestAssembleImportRequestSkipsAllocOnPluginContextError(t *testing.T) {
+	backup := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":73}`))
+	schema := &schemapb.CollectionSchema{Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "91"}}}
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 1, CollectionID: 7, Schema: schema,
+		Options: []*commonpb.KeyValuePair{{Key: importutilv2.EZK, Value: backup}},
+	}}
+
+	t.Run("source_resolve_error", func(t *testing.T) {
+		cipher := &importRequestCipher{
+			MockCipher: mock_hook.NewMockCipher(t),
+			resolve: func(string) (int64, []byte, error) {
+				return 0, nil, temporaryImportError{msg: "source KMS throttled", temporary: true}
+			},
+		}
+		t.Cleanup(hookutil.SetTestCipher(cipher))
+
+		im := NewMockImportMeta(t)
+		im.EXPECT().GetJob(mock.Anything, int64(1)).Return(job)
+		imp := &importTask{importMeta: im}
+		imp.task.Store(&datapb.ImportTaskV2{JobID: 1, CollectionID: 7})
+		alloc := allocator.NewMockAllocator(t)
+
+		req, err := AssembleImportRequest(imp, job, nil, alloc)
+		require.Nil(t, req)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		require.True(t, merr.IsRetryableErr(err))
+		alloc.AssertNotCalled(t, "AllocTimestamp", mock.Anything)
+		alloc.AssertNotCalled(t, "AllocN", mock.Anything)
+	})
+
+	t.Run("target_key_unavailable", func(t *testing.T) {
+		cipher := &importRequestCipher{
+			MockCipher: mock_hook.NewMockCipher(t),
+			resolve: func(string) (int64, []byte, error) {
+				return 73, []byte("old"), nil
+			},
+		}
+		t.Cleanup(hookutil.SetTestCipher(cipher))
+		cipher.EXPECT().GetUnsafeKey(int64(91), int64(7)).Return(nil).Once()
+
+		im := NewMockImportMeta(t)
+		im.EXPECT().GetJob(mock.Anything, int64(1)).Return(job)
+		imp := &importTask{importMeta: im}
+		imp.task.Store(&datapb.ImportTaskV2{JobID: 1, CollectionID: 7})
+		alloc := allocator.NewMockAllocator(t)
+
+		req, err := AssembleImportRequest(imp, job, nil, alloc)
+		require.Nil(t, req)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		alloc.AssertNotCalled(t, "AllocTimestamp", mock.Anything)
+		alloc.AssertNotCalled(t, "AllocN", mock.Anything)
+	})
 }
 
 func TestWrapStoragePluginContext(t *testing.T) {

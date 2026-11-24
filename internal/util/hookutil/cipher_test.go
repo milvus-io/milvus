@@ -557,6 +557,14 @@ func (c importResolverCipher) ResolveImportEZ(artifact string) (int64, []byte, e
 
 func (importResolverCipher) GetUnsafeKey(int64, int64) []byte { return nil }
 
+type temporaryError struct {
+	msg       string
+	temporary bool
+}
+
+func (e temporaryError) Error() string   { return e.msg }
+func (e temporaryError) Temporary() bool { return e.temporary }
+
 func (s *CipherSuite) TestImportEZ() {
 	result, err := ResolveImportEZ("")
 	s.NoError(err)
@@ -602,8 +610,41 @@ func (s *CipherSuite) TestImportEZ() {
 	resolveErr = denied
 	result, err = ResolveImportEZ(artifact)
 	s.ErrorIs(err, denied)
+	s.False(merr.IsRetryableErr(err))
 	s.Nil(result)
-	s.Equal([]string{artifact, rotated, artifact}, calls)
+
+	transient := temporaryError{msg: "source KMS throttled", temporary: true}
+	resolveErr = errors.Wrap(transient, "kms call failed")
+	result, err = ResolveImportEZ(artifact)
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	s.ErrorIs(err, transient)
+	s.True(merr.IsRetryableErr(err))
+	s.Nil(result)
+
+	nonTransient := temporaryError{msg: "permanent error", temporary: false}
+	resolveErr = nonTransient
+	result, err = ResolveImportEZ(artifact)
+	s.ErrorIs(err, nonTransient)
+	s.NotErrorIs(err, merr.ErrServiceUnavailable)
+	s.False(merr.IsRetryableErr(err))
+	s.Nil(result)
+
+	rateLimit := merr.WrapErrTooManyRequests(10)
+	resolveErr = rateLimit
+	result, err = ResolveImportEZ(artifact)
+	s.ErrorIs(err, merr.ErrServiceTooManyRequests)
+	s.NotErrorIs(err, merr.ErrServiceUnavailable)
+	s.True(merr.IsRetryableErr(err))
+	s.Nil(result)
+
+	resolveErr = fmt.Errorf("rpc call: %w", context.DeadlineExceeded)
+	result, err = ResolveImportEZ(artifact)
+	s.ErrorIs(err, context.DeadlineExceeded)
+	s.True(merr.IsCanceledOrTimeout(err))
+	s.NotErrorIs(err, merr.ErrServiceUnavailable)
+	s.Nil(result)
+
+	s.Equal([]string{artifact, rotated, artifact, artifact, artifact, artifact, artifact}, calls)
 }
 
 func (s *CipherSuite) TestImportTargetEZKRequired() {
