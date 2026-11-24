@@ -1542,17 +1542,9 @@ func verifyCopiedManifestIndexOwnership(result *datapb.CopySegmentResult, task C
 			return nil, merr.WrapErrServiceInternalMsg("copied manifest contains unacknowledged indexes")
 		}
 	}
-	// A pre-upgrade copy may already have written flat entries, including when
-	// installation resumes after a restart. Validate their ownership above, but
-	// retain them only as historical manifest contents, never physical records.
-	if indexMeta != nil {
-		isFlat := indexMeta.JSONFlatIndexFilter(task.GetCollectionId())
-		for buildID, indexID := range publishedBuilds {
-			if isFlat(definitions[indexID]) {
-				delete(publishedBuilds, buildID)
-			}
-		}
-	}
+	// A pre-upgrade copy may already have published flat artifacts. Install
+	// every verified build so GC retains its files before and after manifest
+	// recovery. Physical-load filtering must not remove artifact ownership.
 	return publishedBuilds, nil
 }
 

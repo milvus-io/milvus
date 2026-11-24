@@ -72,7 +72,8 @@ func (m *Meta) LoadableProjection(ctx context.Context, collectionID int64, previ
 
 	var indexes []*model.Index
 	if m.IndexCatalog != nil {
-		indexes = m.IndexCatalog.GetPhysicalIndexesForCollection(collectionID)
+		// Let the state check distinguish confirmed flat from a cold schema.
+		indexes = m.IndexCatalog.GetIndexesForCollection(collectionID, "")
 	}
 	collection := m.GetCollection(collectionID)
 	requireSorted := EnableSortCompaction() && (collection == nil || !collection.IsExternal())

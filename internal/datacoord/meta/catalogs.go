@@ -100,6 +100,9 @@ type SegmentIndexCatalog interface {
 
 	// HasIndex reports whether the collection has an index.
 	HasIndex(collectionID int64) bool
+	// GetIndexesForCollection includes all live definitions, even when the
+	// field schema is unavailable and physical classification must wait.
+	GetIndexesForCollection(collID UniqueID, indexName string) []*model.Index
 	// GetPhysicalIndexesForCollection excludes logical-only index definitions.
 	GetPhysicalIndexesForCollection(collID UniqueID) []*model.Index
 	// GetIndexedSegments returns the segments in segmentIDs whose indexes on

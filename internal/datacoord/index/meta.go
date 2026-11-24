@@ -724,12 +724,20 @@ func (m *IndexMeta) AlterIndex(ctx context.Context, indexes ...*model.Index) err
 
 // AddSegmentIndex adds the index meta corresponding the indexBuildID to meta table.
 func (m *IndexMeta) AddSegmentIndex(ctx context.Context, segIndex *model.SegmentIndex) error {
+	switch m.indexKindByID(segIndex.CollectionID, segIndex.IndexID) {
+	case indexLogicalOnlyJSONFlat:
+		return nil
+	case indexUnknown:
+		return merr.Wrap(merr.ErrServiceUnavailable, "index field schema is not visible yet")
+	}
 	return m.addSegmentIndex(ctx, segIndex, true)
 }
 
 // AddSegmentIndexFromManifest installs a completed index already made durable
 // by a copied segment's published manifest. Copy targets use fresh build IDs,
 // so there is no prior etcd task row to retire.
+// Retain ownership even for retired or currently unclassifiable definitions:
+// these files already exist, unlike a new build admitted by AddSegmentIndex.
 func (m *IndexMeta) AddSegmentIndexFromManifest(ctx context.Context, segIndex *model.SegmentIndex) error {
 	if segIndex == nil {
 		return merr.WrapErrServiceInternalMsg("manifest-resident segment index is nil")
@@ -742,12 +750,6 @@ func (m *IndexMeta) AddSegmentIndexFromManifest(ctx context.Context, segIndex *m
 }
 
 func (m *IndexMeta) addSegmentIndex(ctx context.Context, segIndex *model.SegmentIndex, persist bool) error {
-	switch m.indexKindByID(segIndex.CollectionID, segIndex.IndexID) {
-	case indexLogicalOnlyJSONFlat:
-		return nil
-	case indexUnknown:
-		return merr.Wrap(merr.ErrServiceUnavailable, "index field schema is not visible yet")
-	}
 	buildID := segIndex.BuildID
 
 	m.KeyLock.Lock(buildID)
@@ -1234,6 +1236,25 @@ func (m *IndexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map
 	return m.getSegmentIndexes(collectionID, segID, m.indexClassifier(collectionID))
 }
 
+// getCurrentSegmentIndexTasks snapshots current task slots without the physical
+// load filter. Recovery and build deduplication must see cold-schema and retired
+// flat tasks, but must not revive superseded builds retained for garbage collection.
+func (m *IndexMeta) getCurrentSegmentIndexTasks(segID UniqueID) []*model.SegmentIndex {
+	locks := m.getSegmentIndexMapLocks()
+	locks.Lock(segID)
+	defer locks.Unlock(segID)
+	if m.SegmentIndexes == nil {
+		return nil
+	}
+	var tasks []*model.SegmentIndex
+	if records, ok := m.SegmentIndexes.Get(segID); ok {
+		for _, record := range records.Values() {
+			tasks = append(tasks, model.CloneSegmentIndex(record))
+		}
+	}
+	return tasks
+}
+
 // GetAllSegmentIndexSummaries returns detached inventory for active, completed and
 // deleted builds, including builds whose index definition has been deleted.
 // It performs no I/O and exposes no file metadata.
@@ -1437,7 +1458,7 @@ func (m *IndexMeta) UpdateIndexStateWithContext(ctx context.Context, buildID Uni
 // retireJSONFlatTask removes an artifact-free pending build after its worker
 // has been canceled. Keep completed/history records and their file ownership.
 // Downgrade recreates missing builds from the retained collection definition.
-func (m *IndexMeta) retireJSONFlatTask(buildID UniqueID) error {
+func (m *IndexMeta) retireJSONFlatTask(ctx context.Context, buildID UniqueID) error {
 	m.KeyLock.Lock(buildID)
 	defer m.KeyLock.Unlock(buildID)
 	segIdx, ok := m.SegmentBuildInfo.Get(buildID)
@@ -1454,7 +1475,7 @@ func (m *IndexMeta) retireJSONFlatTask(buildID UniqueID) error {
 	if len(segIdx.IndexFileKeys) != 0 || segIdx.ManifestPublished {
 		return nil
 	}
-	return m.removeSegmentIndex(m.ctx, segIdx)
+	return m.removeSegmentIndex(ctx, segIdx)
 }
 
 func (m *IndexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {

@@ -406,6 +406,12 @@ func (it *indexBuildTask) CanCompleteOnCoordinator() bool {
 	if _, dropped := it.droppedTargetReason(segment, segIndex); dropped {
 		return true
 	}
+	switch it.indexMeta.indexKindByID(segIndex.CollectionID, segIndex.IndexID) {
+	case indexLogicalOnlyJSONFlat:
+		return it.NodeID == 0 // Assigned work still needs worker cancellation.
+	case indexUnknown:
+		return false
+	}
 	indexType := meta.GetIndexType(it.indexMeta.GetIndexParams(segIndex.CollectionID, segIndex.IndexID))
 	if isNoTrainIndex(indexType) {
 		return true
@@ -430,7 +436,12 @@ func (it *indexBuildTask) CanCompleteOnCoordinator() bool {
 }
 
 func (it *indexBuildTask) CompleteOnCoordinator(ctx context.Context) globalTask.CoordinatorResult {
-	if it.prepareForWorker(ctx) != nil {
+	if it.indexMeta.isJSONFlatIndexByID(it.CollectionID, it.IndexID) {
+		if it.NodeID != 0 {
+			return globalTask.LocalNeedsWorker
+		}
+		it.retireJSONFlatTask(ctx, nil)
+	} else if it.prepareForWorker(ctx) != nil {
 		return globalTask.LocalNeedsWorker
 	}
 	switch it.GetTaskState() {
@@ -476,15 +487,11 @@ func (it *indexBuildTask) prepareForWorker(ctx context.Context) *indexBuildPrepa
 		return nil
 	}
 
-	if it.indexMeta.isJSONFlatIndexByID(segIndex.CollectionID, segIndex.IndexID) {
-		it.retireJSONFlatTask(ctx, cluster)
-		return
-	}
-
 	// A recovered JSON-cast task must wait for local schema visibility before
 	// either physical dispatch or the small-segment completion path.
-	if it.indexMeta.indexKindByID(segIndex.CollectionID, segIndex.IndexID) == indexUnknown {
-		return
+	switch it.indexMeta.indexKindByID(segIndex.CollectionID, segIndex.IndexID) {
+	case indexLogicalOnlyJSONFlat, indexUnknown:
+		return nil
 	}
 
 	// Handle special cases for certain index types or small segments
@@ -594,6 +601,10 @@ func (it *indexBuildTask) prepareForWorker(ctx context.Context) *indexBuildPrepa
 
 func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 	ctx := context.TODO()
+	if it.indexMeta.isJSONFlatIndexByID(it.CollectionID, it.IndexID) {
+		it.retireJSONFlatTask(ctx, cluster)
+		return
+	}
 	prepared := it.prepareForWorker(ctx)
 	if prepared == nil {
 		return
@@ -1103,7 +1114,7 @@ func (it *indexBuildTask) retireJSONFlatTask(ctx context.Context, cluster sessio
 			return
 		}
 	}
-	if err := it.indexMeta.retireJSONFlatTask(it.BuildID); err != nil {
+	if err := it.indexMeta.retireJSONFlatTask(ctx, it.BuildID); err != nil {
 		mlog.Warn(ctx, "failed to retire JSON flat task, will retry", mlog.FieldBuildID(it.BuildID), mlog.Err(err))
 		return
 	}

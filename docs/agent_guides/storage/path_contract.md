@@ -80,6 +80,10 @@ traversal and external namespaces are errors. Existing entries are not migrated.
 Builds retain their creation-time publication mode across switch changes and
 restarts: version 2 finishes in the manifest, while version 0/1 finishes in etcd.
 Readers and cleanup use each artifact's persisted version.
+Copy-result admission retains ownership for every verified artifact already
+published in the target manifest, including historical JSON flat builds. Query
+load filtering must not remove those records: orphan GC needs them until the
+artifact is retired, and restart can recover them from the manifest.
 Resolving v2 index files requires the owning segment's manifest base; load and
 snapshot consumers report missing or invalid metadata instead of guessing the
 canonical base. Snapshot generation uses its selected segment metadata.

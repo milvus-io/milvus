@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 func (s *CopySegmentTaskSuite) newCopiedJSONFlatManifestFixture() (CopySegmentTask, CopySegmentMeta, *meta.Meta, *index.IndexMeta, *datapb.QueryCopySegmentResponse, []packed.ManifestIndexInfo) {
@@ -60,7 +61,7 @@ func (s *CopySegmentTaskSuite) newCopiedJSONFlatManifestFixture() (CopySegmentTa
 	return task, copies, m, im, resp, entries
 }
 
-func (s *CopySegmentTaskSuite) TestCopyManifestIgnoresHistoricalJSONFlatArtifacts() {
+func (s *CopySegmentTaskSuite) TestCopyManifestRetainsHistoricalJSONFlatOwnership() {
 	meta.DrainBuildIndexChForTest()
 	defer meta.DrainBuildIndexChForTest()
 	meta.DrainStatsBuildChForTest()
@@ -71,11 +72,13 @@ func (s *CopySegmentTaskSuite) TestCopyManifestIgnoresHistoricalJSONFlatArtifact
 		acknowledged       bool
 		admitted           bool
 		artifactProperties bool
+		summaryMode        bool
 	}{
 		{name: "legacy result"},
 		{name: "acknowledged result", acknowledged: true},
 		{name: "artifact properties", acknowledged: true, artifactProperties: true},
 		{name: "restart after target finalization", acknowledged: true, admitted: true},
+		{name: "segment summaries", acknowledged: true, summaryMode: true},
 	} {
 		s.Run(scenario.name, func() {
 			ctx := context.Background()
@@ -89,9 +92,18 @@ func (s *CopySegmentTaskSuite) TestCopyManifestIgnoresHistoricalJSONFlatArtifact
 				// Artifact properties are independent of collection index parameters.
 				entries[1].Properties = map[string]string{common.JSONCastTypeKey: "DOUBLE"}
 			}
+			if scenario.summaryMode {
+				s.Require().NoError(im.UseSegmentSummaries(m.MetaStore))
+				entries[0].Path = "files/insert_log/100/10/2001/_index/9001/0"
+				entries[1].Path = "files/insert_log/100/10/2001/_index/9002/0"
+				for i := range entries {
+					entries[i].IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+					result.IndexInfos[entries[i].BuildID].IndexStorePathVersion = entries[i].IndexStorePathVersion
+				}
+			}
 			if scenario.admitted {
 				// Finalization follows index installation; replay must retain that state.
-				s.Require().NoError(syncVectorScalarIndexes(ctx, result, task, m, im, copies, map[int64]int64{9001: 300}))
+				s.Require().NoError(syncVectorScalarIndexes(ctx, result, task, m, im, copies, map[int64]int64{9001: 300, 9002: 301}))
 				s.Require().NoError(copies.UpdateTask(ctx, task.GetTaskId(), UpdateCopyTaskCleanup(true)))
 				s.Require().NoError(m.UpdateSegmentsInfo(ctx,
 					meta.UpdateStatusOperator(2001, commonpb.SegmentState_Flushed),
@@ -109,10 +121,34 @@ func (s *CopySegmentTaskSuite) TestCopyManifestIgnoresHistoricalJSONFlatArtifact
 			s.False(task.GetCleanupRequired())
 			s.Equal(commonpb.SegmentState_Flushed, m.GetSegment(ctx, 2001).GetState())
 			s.Len(im.GetIndexesForCollection(100, "json_flat"), 1)
-			_, flatInstalled := im.GetIndexJob(9002)
-			s.False(flatInstalled, "historical flat files must not become a physical SegmentIndex")
-			_, vectorInstalled := im.GetIndexJob(9001)
-			s.True(vectorInstalled, "ordinary indexes must still be installed")
+			if scenario.summaryMode {
+				summaries := m.GetSegment(ctx, 2001).GetIndexSummaries()
+				s.Require().Len(summaries, 2)
+				byBuild := make(map[int64]*datapb.SegmentIndexSummary)
+				for _, summary := range summaries {
+					byBuild[summary.GetBuildId()] = summary
+				}
+				s.Require().Contains(byBuild, int64(9002))
+				s.True(byBuild[9002].GetHasArtifact())
+				persisted, err := m.Catalog.ListSegments(ctx, 100)
+				s.Require().NoError(err)
+				s.Require().Len(persisted, 1)
+				s.Require().Len(persisted[0].GetIndexSummaries(), len(summaries))
+				for _, summary := range persisted[0].GetIndexSummaries() {
+					s.True(proto.Equal(byBuild[summary.GetBuildId()], summary), "durable summary must match build %d", summary.GetBuildId())
+				}
+			} else {
+				flat, flatInstalled := im.GetIndexJob(9002)
+				s.Require().True(flatInstalled, "published flat artifacts need an ownership record for GC")
+				s.True(flat.ManifestPublished)
+				s.Equal(commonpb.IndexState_Finished, flat.IndexState)
+				s.Equal([]string{"json-flat.bin"}, flat.IndexFileKeys)
+				_, vectorInstalled := im.GetIndexJob(9001)
+				s.True(vectorInstalled, "ordinary indexes must still be installed")
+			}
+			physical := im.GetPhysicalIndexesForCollection(100)
+			s.Require().Len(physical, 1)
+			s.EqualValues(300, physical[0].IndexID, "flat ownership must not enable physical loading")
 		})
 	}
 }

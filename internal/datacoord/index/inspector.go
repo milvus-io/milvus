@@ -324,7 +324,7 @@ func (i *IndexInspector) createIndexesForSegment(ctx context.Context, segment *m
 	// Deduplicate against current records, not the physical projection: an
 	// unknown record must remain present if schema visibility changes at admission.
 	indexIDsWithBuild := typeutil.NewUniqueSet()
-	for _, record := range i.indexMeta.GetAllSegmentIndexes(segment.ID) {
+	for _, record := range i.indexMeta.getCurrentSegmentIndexTasks(segment.ID) {
 		if !record.IsDeleted {
 			indexIDsWithBuild.Insert(record.IndexID)
 		}
@@ -511,7 +511,7 @@ func (i *IndexInspector) reloadFromMeta() {
 	// admission still requires a confirmed physical definition.
 	segments := i.meta.GetAllSegmentsUnsafe()
 	for _, segment := range segments {
-		for _, segIndex := range i.indexMeta.GetAllSegmentIndexes(segment.ID) {
+		for _, segIndex := range i.indexMeta.getCurrentSegmentIndexTasks(segment.ID) {
 			if segIndex.IsDeleted || (segIndex.IndexState != commonpb.IndexState_Unissued &&
 				segIndex.IndexState != commonpb.IndexState_Retry &&
 				segIndex.IndexState != commonpb.IndexState_InProgress) {

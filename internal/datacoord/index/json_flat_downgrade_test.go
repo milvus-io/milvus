@@ -78,14 +78,14 @@ func TestJSONFlatRetirementRetriesAndRestarts(t *testing.T) {
 	recovered.QueryTaskOnWorker(worker)
 	_, ok := m.GetIndexJob(1000)
 	require.False(t, ok)
-	assert.Empty(t, m.GetAllSegmentIndexes(100))
+	assert.Empty(t, m.GetAllSegmentIndexSummaries(100))
 	assert.Equal(t, commonpb.IndexState(indexpb.JobState_JobStateNone), recovered.IndexState)
 	// Restart has nothing to recover; new-version inspection must not recreate
 	// the deleted task. Downgrade uses the retained collection definition.
 	inspector.reloadFromMeta()
 	scheduler.AssertNumberOfCalls(t, "Enqueue", 1)
 	require.NoError(t, inspector.createIndexesForSegment(ctx, mt.GetSegment(ctx, 100)))
-	assert.Empty(t, m.GetAllSegmentIndexes(100))
+	assert.Empty(t, m.GetAllSegmentIndexSummaries(100))
 	assert.Len(t, m.GetIndexesForCollection(1, ""), 1)
 }
 
@@ -98,7 +98,7 @@ func TestJSONFlatRetirementPreservesArtifactOwnership(t *testing.T) {
 				IndexState: state, IndexFileKeys: []string{"historical-file"}, FailReason: "original", IndexVersion: 7,
 			}
 			m.updateSegmentIndex(model.CloneSegmentIndex(original))
-			require.NoError(t, m.retireJSONFlatTask(1000))
+			require.NoError(t, m.retireJSONFlatTask(context.Background(), 1000))
 			got, _ := m.GetIndexJob(1000)
 			assert.Equal(t, model.CloneSegmentIndex(original), got)
 		})
@@ -123,7 +123,7 @@ func TestJSONFlatRetirementPreservesTerminalTasks(t *testing.T) {
 			// even when their reason happens to match the API deprecation hint.
 			scheduler := task.NewMockGlobalScheduler(t)
 			(&IndexInspector{ctx: context.Background(), meta: mt, indexMeta: m, scheduler: scheduler}).reloadFromMeta()
-			require.NoError(t, m.retireJSONFlatTask(1000))
+			require.NoError(t, m.retireJSONFlatTask(context.Background(), 1000))
 			got, ok := m.GetIndexJob(1000)
 			require.True(t, ok)
 			assert.Equal(t, model.CloneSegmentIndex(original), got)

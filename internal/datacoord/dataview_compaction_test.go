@@ -23,12 +23,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/gc"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/dataview"
 	datacatalog "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -224,4 +226,36 @@ func compactionChildren(segments []*meta.SegmentInfo) map[int64][]int64 {
 		}
 	}
 	return children
+}
+
+// Readiness must retain an ambiguous JSON-cast definition until its field is known.
+func TestDataViewCompactionAdmissionWaitsForJSONCastSchema(t *testing.T) {
+	for _, fieldType := range []schemapb.DataType{schemapb.DataType_Int64, schemapb.DataType_JSON} {
+		t.Run(fieldType.String(), func(t *testing.T) {
+			m := compactionAdmissionMeta(t)
+			im := m.IndexCatalog.(*index.IndexMeta)
+			im.Indexes[1] = map[int64]*model.Index{10: {
+				CollectionID: 1, FieldID: 3, IndexID: 10, IndexName: "candidate",
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "INVERTED"},
+					{Key: common.JSONCastTypeKey, Value: "JSON"},
+				},
+			}}
+			var schema *schemapb.CollectionSchema
+			im.SetCollectionSchemaGetter(func(int64) *schemapb.CollectionSchema { return schema })
+			m.Segments.SetSegment(1, admissionSegment(1))
+			before := admissionRecompute(t, m, 1)
+			m.Segments.SetSegment(2, admissionSegment(2, 1))
+			admissionRetire(m, 1)
+			require.Equal(t, before, admissionRecompute(t, m, 1), "a cold schema must not admit the unindexed output")
+			schema = &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 3, DataType: fieldType}}}
+			if fieldType == schemapb.DataType_Int64 {
+				require.Equal(t, before, admissionRecompute(t, m, 1), "JSON extras do not make an INT64 index logical-only")
+				admissionFinishIndexes(m, 2, 10)
+			} else {
+				require.Empty(t, im.GetAllSegmentIndexSummaries(2), "confirmed flat needs no fake-finished build")
+			}
+			admissionRecompute(t, m, 2)
+		})
+	}
 }

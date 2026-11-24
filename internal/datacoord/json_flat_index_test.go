@@ -65,7 +65,7 @@ func TestJSONFlatIndexLogicalAndPhysicalViews(t *testing.T) {
 	assert.Empty(t, m.GetIndexesForCollection(1, "missing"))
 	assert.False(t, m.HasIndex(1))
 	assert.Empty(t, m.GetSegmentIndexes(1, 100))
-	assert.Len(t, m.GetAllSegmentIndexes(100), 1)
+	assert.Len(t, m.GetAllSegmentIndexSummaries(100), 1)
 	assert.Empty(t, m.GetUnIndexedSegmentIDsForIndexTask(1, []int64{100, 101}))
 	assert.Empty(t, m.GetUnindexedSegments(1, []int64{100, 101}))
 	assert.Equal(t, commonpb.IndexState_Finished, m.GetSegmentIndexState(1, 100, 10).GetState())
@@ -111,7 +111,7 @@ func TestJSONFlatIndexLogicalAndPhysicalViews(t *testing.T) {
 	flat.IsDeleted = false
 	// Even a direct late producer cannot add a new physical record.
 	require.NoError(t, m.AddSegmentIndex(context.Background(), &model.SegmentIndex{CollectionID: 1, SegmentID: 101, IndexID: 10, BuildID: 1002}))
-	assert.Empty(t, m.GetAllSegmentIndexes(101))
+	assert.Empty(t, m.GetAllSegmentIndexSummaries(101))
 
 	typed := model.CloneIndex(flat)
 	typed.IndexID, typed.IndexName = 11, "typed"

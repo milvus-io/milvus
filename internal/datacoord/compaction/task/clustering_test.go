@@ -1316,3 +1316,35 @@ func (s *ClusteringCompactionTaskSuite) TestRetryableWorkerFailureRequeueIsRecov
 		s.NoError(task.doCompact(9, cluster, task.GetTaskResource()))
 	})
 }
+
+func (s *ClusteringCompactionTaskSuite) TestProcessIndexingWaitsForJSONCastSchema() {
+	setSegmentChangeTestParam(s.T(), &Params.DataCoordCfg.SegmentChangeEnabled, "false")
+	for _, fieldType := range []schemapb.DataType{schemapb.DataType_Int64, schemapb.DataType_JSON} {
+		s.Run(fieldType.String(), func() {
+			task := s.generateBasicTask(false)
+			s.Require().NoError(task.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_indexing)))
+			s.Require().NoError(s.dm.indexMeta.CreateIndex(context.Background(), &model.Index{
+				CollectionID: 1, FieldID: 3, IndexID: 3, IndexName: "candidate",
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "INVERTED"},
+					{Key: common.JSONCastTypeKey, Value: "JSON"},
+				},
+			}))
+			var schema *schemapb.CollectionSchema
+			s.dm.indexMeta.SetCollectionSchemaGetter(func(int64) *schemapb.CollectionSchema { return schema })
+			s.False(task.Process(), "missing schema must not complete clustering")
+			s.Equal(datapb.CompactionTaskState_indexing, task.GetTaskProto().GetState())
+			schema = &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 3, DataType: fieldType}}}
+			if fieldType == schemapb.DataType_Int64 {
+				s.False(task.Process(), "ordinary scalar index still needs a completed build")
+				for _, segmentID := range task.GetTaskProto().GetResultSegments() {
+					s.dm.indexMeta.UpdateSegmentIndex(&model.SegmentIndex{
+						CollectionID: 1, SegmentID: segmentID, IndexID: 3, IndexState: commonpb.IndexState_Finished,
+					})
+				}
+			}
+			s.True(task.Process())
+			s.Equal(datapb.CompactionTaskState_completed, task.GetTaskProto().GetState())
+		})
+	}
+}

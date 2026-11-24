@@ -78,7 +78,7 @@ func TestJSONFlatIndexRecoveryRemovesPendingBuildForDowngrade(t *testing.T) {
 	recovered.QueryTaskOnWorker(cluster)
 	_, ok := m.GetIndexJob(1000)
 	require.False(t, ok)
-	assert.Empty(t, m.GetAllSegmentIndexes(100))
+	assert.Empty(t, m.GetAllSegmentIndexSummaries(100))
 
 	// A late completion cannot publish files even after recovery retired the worker.
 	require.NoError(t, recovered.SetJobInfo(&workerpb.IndexTaskInfo{BuildID: 1000, State: commonpb.IndexState_Finished, IndexFileKeys: []string{"late-file"}}))
@@ -111,10 +111,10 @@ func TestJSONFlatIndexRecoveryRemovesUndispatchedBuilds(t *testing.T) {
 			if nodeID != 0 {
 				worker.EXPECT().DropIndex(nodeID, int64(1000)).Return(nil).Once()
 			}
-			recovered.CreateTaskOnWorker(20, worker)
+			recovered.CreateTaskOnWorker(20, worker, recovered.GetTaskResource())
 			_, ok := m.GetIndexJob(1000)
 			require.False(t, ok)
-			assert.Empty(t, m.GetAllSegmentIndexes(100))
+			assert.Empty(t, m.GetAllSegmentIndexSummaries(100))
 		})
 	}
 }
@@ -128,7 +128,7 @@ func TestJSONFlatIndexColdSchemaDefersBeforeCreatingBuild(t *testing.T) {
 	handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&meta.CollectionInfo{ID: 1, Schema: jsonFlatTestSchema()}, nil)
 	segment := &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 100, CollectionID: 1, State: commonpb.SegmentState_Flushed, IsSorted: true}}
 	require.NoError(t, (&IndexInspector{meta: mt, indexMeta: m, Handler: handler}).createIndexesForSegment(context.Background(), segment))
-	assert.Empty(t, m.GetAllSegmentIndexes(100))
+	assert.Empty(t, m.GetAllSegmentIndexSummaries(100))
 }
 
 func TestJSONFlatIndexUsesBoundCollectionSchemaCache(t *testing.T) {
@@ -197,7 +197,7 @@ func TestJSONFlatIndexManifestMigrationDirections(t *testing.T) {
 			_, err := im.StageSegmentIndexMutation(mutation)
 			im.UnlockBuildIDs([]int64{1010})
 			assert.ErrorIs(t, err, wantErr)
-			assert.Len(t, im.GetAllSegmentIndexes(100), 3)
+			assert.Len(t, im.GetAllSegmentIndexSummaries(100), 3)
 			assert.Len(t, im.GetIndexesForCollection(1, ""), 3)
 			// Ordinary typed and scalar indexes still have a migratable artifact.
 			for _, buildID := range []int64{1011, 1012} {
@@ -256,7 +256,7 @@ func TestJSONFlatIndexManifestMigrationRetriesColdSchema(t *testing.T) {
 				assert.Equal(t, 2, pending)
 				assert.True(t, backfill.runOnce(ctx), "unresolved records must stay on the retry loop")
 			}
-			assert.Len(t, im.GetAllSegmentIndexes(100), 2)
+			assert.Len(t, im.GetAllSegmentIndexSummaries(100), 2)
 			schema = jsonFlatTestSchema()
 			if published {
 				work, pending := rollback.scan(ctx)
@@ -505,7 +505,7 @@ func TestJSONFlatClassificationVisibility(t *testing.T) {
 					assert.Equal(t, commonpb.IndexState_Unissued, im.GetSegmentIndexState(1, 100, 10).GetState())
 					assert.Error(t, im.AddSegmentIndex(context.Background(), &model.SegmentIndex{CollectionID: 1, SegmentID: 101, IndexID: 10, BuildID: 1001}))
 				}
-				assert.Len(t, im.GetAllSegmentIndexes(100), 1, "raw ownership is retained")
+				assert.Len(t, im.GetAllSegmentIndexSummaries(100), 1, "raw ownership is retained")
 			}
 		})
 	}
@@ -534,7 +534,7 @@ func TestJSONFlatFilterInIndexedSegments(t *testing.T) {
 				// No allocator or scheduler: any new placeholder/build is a failure.
 				inspector := &IndexInspector{indexMeta: im, Handler: handler}
 				require.NoError(t, inspector.createIndexesForSegment(context.Background(), segment))
-				assert.Empty(t, im.GetAllSegmentIndexes(segment.ID))
+				assert.Empty(t, im.GetAllSegmentIndexSummaries(segment.ID))
 				continue
 			}
 			im.updateSegmentIndex(&model.SegmentIndex{CollectionID: 1, SegmentID: 100, IndexID: 11, BuildID: 1001, IndexState: commonpb.IndexState_Failed})
@@ -561,7 +561,7 @@ func TestJSONFlatColdTaskCannotBuildOrPublish(t *testing.T) {
 	build := NewIndexBuildTask(model.CloneSegmentIndex(record), 1, mt, im, nil, nil, nil)
 	// No handler, catalog or worker calls are allowed while the schema is cold,
 	// even with zero rows (which would otherwise take the fake-finish path).
-	build.CreateTaskOnWorker(20, session.NewMockCluster(t))
+	build.CreateTaskOnWorker(20, session.NewMockCluster(t), build.GetTaskResource())
 	result := &workerpb.IndexTaskInfo{BuildID: 1000, State: commonpb.IndexState_Finished, IndexFileKeys: []string{"late-file"}}
 	require.ErrorIs(t, im.FinishTask(result), merr.ErrServiceUnavailable)
 	require.ErrorIs(t, build.SetJobInfo(result), merr.ErrServiceUnavailable)
@@ -571,7 +571,7 @@ func TestJSONFlatColdTaskCannotBuildOrPublish(t *testing.T) {
 	schema = jsonFlatTestSchema()
 	require.NoError(t, build.SetJobInfo(result))
 	require.NoError(t, im.AddSegmentIndex(context.Background(), &model.SegmentIndex{CollectionID: 1, SegmentID: 101, IndexID: 10, BuildID: 1001}))
-	assert.Empty(t, im.GetAllSegmentIndexes(101))
+	assert.Empty(t, im.GetAllSegmentIndexSummaries(101))
 	unchanged, _ = im.GetIndexJob(1000)
 	assert.Equal(t, record, unchanged, "late flat completion cannot publish files")
 }
@@ -587,6 +587,7 @@ func TestJSONFlatInspectorDeduplicatesAcrossSchemaVisibility(t *testing.T) {
 		deletedRecord     bool
 		deletedDefinition bool
 		unrelatedRecord   bool
+		supersededRecord  bool
 		wantNew           bool
 	}{
 		{name: "scalar extras finished", state: commonpb.IndexState_Finished},
@@ -596,6 +597,7 @@ func TestJSONFlatInspectorDeduplicatesAcrossSchemaVisibility(t *testing.T) {
 		{name: "physical finished", physical: true, state: commonpb.IndexState_Finished},
 		{name: "physical unissued", physical: true, state: commonpb.IndexState_Unissued},
 		{name: "deleted record permits build", deletedRecord: true, wantNew: true},
+		{name: "superseded record does not block replacement", deletedRecord: true, supersededRecord: true, wantNew: true},
 		{name: "unrelated record permits build", unrelatedRecord: true, wantNew: true},
 		{name: "missing record permits build", noRecord: true, wantNew: true},
 		{name: "deleted definition stays retired", deletedDefinition: true},
@@ -623,6 +625,9 @@ func TestJSONFlatInspectorDeduplicatesAcrossSchemaVisibility(t *testing.T) {
 			var schema *schemapb.CollectionSchema
 			im.SetCollectionSchemaGetter(func(int64) *schemapb.CollectionSchema { return schema })
 			var original *model.SegmentIndex
+			if scenario.supersededRecord {
+				im.updateSegmentIndex(&model.SegmentIndex{CollectionID: 1, SegmentID: 100, IndexID: 10, BuildID: 999, IndexState: commonpb.IndexState_Unissued})
+			}
 			if !scenario.noRecord {
 				original = &model.SegmentIndex{CollectionID: 1, SegmentID: 100, IndexID: 10, BuildID: 1000, IndexState: scenario.state, IsDeleted: scenario.deletedRecord, IndexFileKeys: []string{"retained-file"}}
 				if scenario.unrelatedRecord {
@@ -670,7 +675,7 @@ func TestJSONFlatInspectorDeduplicatesAcrossSchemaVisibility(t *testing.T) {
 			if scenario.wantNew && (original == nil || scenario.unrelatedRecord) {
 				expectedRecords++
 			}
-			records := im.GetAllSegmentIndexes(100)
+			records := im.getCurrentSegmentIndexTasks(100)
 			require.Len(t, records, expectedRecords)
 			for _, record := range records {
 				if record.IndexID == definition.IndexID {
@@ -684,4 +689,82 @@ func TestJSONFlatInspectorDeduplicatesAcrossSchemaVisibility(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestJSONFlatRecoveryDoesNotReviveSupersededBuild(t *testing.T) {
+	im := NewSegmentIndexMeta(nil)
+	im.updateCollectionIndex(jsonFlatDefinition())
+	im.updateSegmentIndex(&model.SegmentIndex{CollectionID: 1, SegmentID: 100, IndexID: 10, BuildID: 999, IndexState: commonpb.IndexState_Unissued})
+	im.updateSegmentIndex(&model.SegmentIndex{CollectionID: 1, SegmentID: 100, IndexID: 10, BuildID: 1000, IndexState: commonpb.IndexState_Finished, IndexFileKeys: []string{"flat.bin"}})
+	store := metacache.NewMetaStore(nil)
+	mt := &meta.Meta{IndexCatalog: im, MetaStore: store, Segments: meta.NewSegmentsInfo(store)}
+	mt.Segments.SetSegment(100, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 100, CollectionID: 1, State: commonpb.SegmentState_Flushed}})
+	scheduler := task.NewMockGlobalScheduler(t)
+	(&IndexInspector{meta: mt, indexMeta: im, scheduler: scheduler}).reloadFromMeta()
+	scheduler.AssertNotCalled(t, "Enqueue", mock.Anything)
+	require.Len(t, im.GetAllSegmentIndexSummaries(100), 2, "retain superseded ownership for garbage collection")
+}
+
+func TestJSONFlatManifestOwnershipDoesNotAdmitNewBuilds(t *testing.T) {
+	for _, schemaVisible := range []bool{false, true} {
+		t.Run(strconv.FormatBool(schemaVisible), func(t *testing.T) {
+			im := NewSegmentIndexMeta(nil)
+			im.updateCollectionIndex(jsonFlatDefinition())
+			if schemaVisible {
+				im.SetCollectionSchemaGetter(func(int64) *schemapb.CollectionSchema { return jsonFlatTestSchema() })
+			}
+			record := &model.SegmentIndex{
+				CollectionID: 1, SegmentID: 100, IndexID: 10, BuildID: 1000,
+				IndexState: commonpb.IndexState_Finished, IndexFileKeys: []string{"flat.bin"},
+			}
+			require.NoError(t, im.AddSegmentIndexFromManifest(context.Background(), record))
+			owned, ok := im.GetIndexJob(1000)
+			require.True(t, ok)
+			require.True(t, owned.ManifestPublished)
+			require.Equal(t, record.IndexFileKeys, owned.IndexFileKeys)
+			require.Empty(t, im.GetPhysicalIndexesForCollection(1))
+			pending := &model.SegmentIndex{CollectionID: 1, SegmentID: 101, IndexID: 10, BuildID: 1001}
+			err := im.AddSegmentIndex(context.Background(), pending)
+			if schemaVisible {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+			}
+			_, exists := im.GetIndexJob(1001)
+			require.False(t, exists, "ownership recovery must not enable new flat builds")
+			require.Error(t, im.AddSegmentIndexFromManifest(context.Background(), pending))
+			pending.IndexState = commonpb.IndexState_Finished
+			require.Error(t, im.AddSegmentIndexFromManifest(context.Background(), pending), "no fake-finished manifest records")
+		})
+	}
+}
+
+func TestJSONFlatCoordinatorRetirementAfterSchedulerRebase(t *testing.T) {
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().DropSegmentIndex(mock.Anything, int64(1), int64(0), int64(100), int64(1000)).Return(merr.ErrServiceUnavailable).Once()
+	catalog.EXPECT().DropSegmentIndex(mock.Anything, int64(1), int64(0), int64(100), int64(1000)).Return(nil).Once()
+	im := NewSegmentIndexMeta(catalog)
+	im.updateCollectionIndex(jsonFlatDefinition())
+	var schema *schemapb.CollectionSchema
+	im.SetCollectionSchemaGetter(func(int64) *schemapb.CollectionSchema { return schema })
+	record := &model.SegmentIndex{CollectionID: 1, SegmentID: 100, IndexID: 10, BuildID: 1000, IndexState: commonpb.IndexState_Unissued}
+	im.updateSegmentIndex(record)
+	mt := meta.NewEmptyTestMeta()
+	mt.IndexCatalog = im
+	mt.Segments.SetSegment(100, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 100, CollectionID: 1, State: commonpb.SegmentState_Flushed}))
+	build := NewIndexBuildTask(model.CloneSegmentIndex(record), 1, mt, im, nil, nil, nil)
+	require.False(t, build.CanCompleteOnCoordinator(), "cold schema must not fake-finish even a zero-row task")
+	require.Equal(t, task.LocalRetry, build.CompleteOnCoordinator(context.Background()))
+	schema = jsonFlatTestSchema()
+	build.NodeID = 20
+	require.False(t, build.CanCompleteOnCoordinator())
+	require.Equal(t, task.LocalNeedsWorker, build.CompleteOnCoordinator(context.Background()), "assigned work must be canceled first")
+	build.NodeID = 0
+	require.True(t, build.CanCompleteOnCoordinator())
+	require.Equal(t, task.LocalRetry, build.CompleteOnCoordinator(context.Background()))
+	_, exists := im.GetIndexJob(1000)
+	require.True(t, exists, "catalog failure preserves the pending record")
+	require.Equal(t, task.LocalCompleted, build.CompleteOnCoordinator(context.Background()))
+	_, exists = im.GetIndexJob(1000)
+	require.False(t, exists, "unassigned retirement needs no worker resources")
 }

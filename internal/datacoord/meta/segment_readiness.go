@@ -112,7 +112,9 @@ func (m *Meta) PrepareReadiness(collection *CollectionInfo) *segmentReadiness {
 		r.HasIndex = true
 		r.TargetFieldIDs = append(r.TargetFieldIDs, vectorFieldIDs...)
 		if len(vectorFieldIDs) == 0 || Params.DataCoordCfg.DVForceAllIndexReady.GetAsBool() {
-			for _, index := range m.IndexCatalog.GetPhysicalIndexesForCollection(collection.ID) {
+			// Keep unresolved definitions in this prepared target set. Their
+			// classification may become physical after the schema cache warms.
+			for _, index := range m.IndexCatalog.GetIndexesForCollection(collection.ID, "") {
 				r.TargetFieldIDs = append(r.TargetFieldIDs, index.FieldID)
 			}
 		}
