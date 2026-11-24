@@ -229,6 +229,15 @@ message CostAggregation {
   int64 serviceTime = 2;
   int64 totalNQ = 3;
   int64 totalRelatedDataSize = 4;
+  QueryReadUsage query_read_usage = 5;
+}
+
+// QueryReadUsage contains the data-plane portion of a metered Query. Presence
+// distinguishes a measured zero from a result without metering support.
+message QueryReadUsage {
+  uint64 data_bytes = 1;
+  // Keep the bits by field until Proxy combines all participating segments.
+  map<int64, uint64> validity_bits = 2;
 }
 
 message RetrieveRequest {
@@ -264,6 +273,7 @@ message RetrieveRequest {
   // When 2, delegator can skip plan unmarshal for segment filter optimization.
   int32 pk_filter = 26;
   int32 schema_version = 27;
+  bool collect_query_read_usage = 28;
 }
 
 // Element indices for element-level query results

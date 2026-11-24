@@ -427,6 +427,7 @@ message PlanOption {
    // interim index, ...) the request used, for the feature usage report.
    // Set by the Proxy only on requests it counts.
    bool collect_feature_bits = 2;
+   bool collect_query_read_usage = 3;
 };
 
 message PlanNode {

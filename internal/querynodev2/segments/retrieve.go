@@ -37,8 +37,9 @@ import (
 )
 
 type RetrieveSegmentResult struct {
-	Result  *segcorepb.RetrieveResults
-	Segment Segment
+	ReadUsage *internalpb.QueryReadUsage
+	Result    *segcorepb.RetrieveResults
+	Segment   Segment
 
 	// Record carries candidate offsets in QueryScan mode, or user output
 	// columns when the ordinary Arrow transport was used;
@@ -65,7 +66,8 @@ func ReleaseRecords(results []RetrieveSegmentResult) {
 type RetrieveOption func(*retrieveOptions)
 
 type retrieveOptions struct {
-	forceArrow bool
+	forceArrow      bool
+	predicateFields []int64
 }
 
 // WithArrowTransport makes the retrieve take the Arrow path whatever
@@ -73,6 +75,11 @@ type retrieveOptions struct {
 // Arrow (shouldUseArrowTransport).
 func WithArrowTransport() RetrieveOption {
 	return func(o *retrieveOptions) { o.forceArrow = true }
+}
+
+// WithQueryPredicateFields passes the planned predicate reads to each selected segment.
+func WithQueryPredicateFields(fields []int64) RetrieveOption {
+	return func(o *retrieveOptions) { o.predicateFields = fields }
 }
 
 // retrieveOnSegments performs retrieve on listed segments
@@ -95,11 +102,15 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 	}
 
 	retriever := func(ctx context.Context, s Segment) error {
+		usage, unlock, err := collectPredicateReadUsage(s, o.predicateFields)
+		defer unlock()
+		if err != nil {
+			return err
+		}
 		tr := timerecord.NewTimeRecorder("retrieveOnSegments")
 		var (
 			result *segcorepb.RetrieveResults
 			record arrow.Record
-			err    error
 		)
 		if useArrow {
 			result, record, err = s.RetrieveArrow(ctx, plan)
@@ -135,9 +146,10 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 			}
 		}
 		resultCh <- RetrieveSegmentResult{
-			Result:  result,
-			Segment: s,
-			Record:  record,
+			ReadUsage: usage,
+			Result:    result,
+			Segment:   s,
+			Record:    record,
 		}
 		metrics.QueryNodeSQSegmentLatency.WithLabelValues(paramtable.GetStringNodeID(),
 			contextutil.GetQueryLabel(ctx), label).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)

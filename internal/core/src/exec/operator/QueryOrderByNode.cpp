@@ -59,6 +59,11 @@ PhyQueryOrderByNode::PhyQueryOrderByNode(
         column_types_.push_back(output_type->column_type(i));
     }
 
+    const auto* query_context =
+        operator_context_->get_exec_context()->get_query_context();
+    const bool collect_usage =
+        query_context->get_plan_options().collect_query_read_usage;
+
     // Build sort key infos with proper column index mapping
     // Use field name to find the column index in output_type
     std::vector<SortKeyInfo> sort_key_infos;
@@ -72,6 +77,9 @@ PhyQueryOrderByNode::PhyQueryOrderByNode(
         int32_t col_idx =
             static_cast<int32_t>(output_type->GetChildIndex(key->name()));
 
+        if (collect_usage) {
+            metered_key_columns_.push_back(col_idx);
+        }
         sort_key_infos.emplace_back(
             col_idx, order.ascending, order.nulls_first);
 
@@ -124,6 +132,14 @@ PhyQueryOrderByNode::AddInput(RowVectorPtr& input) {
                "expected ({})",
                columns.size(),
                column_types_.size());
+
+    if (!metered_key_columns_.empty()) {
+        auto* query_context =
+            operator_context_->get_exec_context()->get_query_context();
+        for (auto index : metered_key_columns_) {
+            query_context->RecordQueryOperatorInput(*columns[index]);
+        }
+    }
 
     // Add rows to sort buffer
     auto num_rows = static_cast<vector_size_t>(input->size());

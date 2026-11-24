@@ -218,6 +218,27 @@ class ColumnVector final : public SimpleVector {
         return valid_values_[index];
     }
 
+    uint64_t
+    LogicalPayloadBytes() const {
+        const auto valid_count = size() - nullCount();
+        if (valid_count == 0) {
+            return 0;
+        }
+        if (!IsVariableDataType(type())) {
+            return values_->DataSize(0) * valid_count;
+        }
+        if (valid_count == size()) {
+            return values_->DataSize();
+        }
+        uint64_t bytes = 0;
+        for (size_t i = 0; i < size(); ++i) {
+            if (valid_values_[i]) {
+                bytes += values_->DataSize(i);
+            }
+        }
+        return bytes;
+    }
+
     void*
     GetRawData() const {
         return values_->Data();

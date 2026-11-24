@@ -266,12 +266,14 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	// The delegator fixed this snapshot before querying any segments. Reading
 	// tSafe again here could report a newer snapshot than the returned data.
 	resp.MvccTimestamp = req.GetReq().GetMvccTimestamp()
+	readUsage := resp.GetCostAggregation().GetQueryReadUsage()
 	resp.CostAggregation = segmentutil.AggregateWorkerCosts(results,
 		func(result *internalpb.RetrieveResults) (int64, *internalpb.CostAggregation) {
 			return result.GetBase().GetSourceID(), result.GetCostAggregation()
 		},
 		paramtable.GetNodeID(),
 		paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool())
+	resp.CostAggregation.QueryReadUsage = readUsage
 	tr.CtxElapse(ctx, fmt.Sprintf("do query with channel done , vChannel = %s, segmentIDs = %v",
 		channel,
 		req.GetSegmentIDs(),

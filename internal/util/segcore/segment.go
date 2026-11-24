@@ -153,6 +153,19 @@ func (s *cSegmentImpl) MemSize() int64 {
 	return int64(cMemSize)
 }
 
+// GrowingFieldMemoryBytes reads a single snapshot for all requested fields.
+func GrowingFieldMemoryBytes(segment CSegment, fields []int64) []uint64 {
+	s, ok := segment.(*cSegmentImpl)
+	if !ok || s == nil || len(fields) == 0 {
+		return nil
+	}
+	bytes := make([]uint64, len(fields))
+	read := C.GetGrowingFieldMemoryBytes(
+		s.ptr, (*C.int64_t)(unsafe.Pointer(&fields[0])), C.int64_t(len(fields)), (*C.uint64_t)(unsafe.Pointer(&bytes[0])),
+	)
+	return bytes[:read]
+}
+
 // HasRawData checks if the segment has raw data.
 func (s *cSegmentImpl) HasRawData(fieldID int64) bool {
 	ret := C.HasRawData(s.ptr, C.int64_t(fieldID))

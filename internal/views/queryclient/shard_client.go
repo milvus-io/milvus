@@ -463,7 +463,7 @@ func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest
 			if err != nil {
 				return err
 			}
-			if isEmptySuccessfulQueryResponse(resp) {
+			if !req.Req.GetCollectQueryReadUsage() && isEmptySuccessfulQueryResponse(resp) {
 				return nil
 			}
 			return req.Reducer.Add(shardID, resp)

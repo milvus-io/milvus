@@ -1134,6 +1134,13 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
                       insert_data.size());
     ASSERT_EQ(res.error_code, Success);
 
+    const int64_t field_id = schema->get_primary_field_id()->get();
+    const int64_t fields[] = {field_id, field_id, 123456};
+    uint64_t bytes[3] = {};
+    EXPECT_EQ(GetGrowingFieldMemoryBytes(segment, fields, 3, bytes), 2);
+    EXPECT_EQ(bytes[0], N * sizeof(int64_t));
+    EXPECT_EQ(bytes[0], bytes[1]);
+
     DeleteCollection(collection);
     DeleteSegment(segment);
 }

@@ -53,6 +53,17 @@ PhyAggregationNode::initialize() {
 
 void
 PhyAggregationNode::AddInput(RowVectorPtr& input) {
+    auto* query_context =
+        operator_context_->get_exec_context()->get_query_context();
+    if (query_context->get_plan_options().collect_query_read_usage) {
+        // The preceding ProjectNode materializes each group or aggregate
+        // source column once, after MVCC and the predicate.
+        for (const auto& child : input->childrens()) {
+            const auto* column = dynamic_cast<const ColumnVector*>(child.get());
+            AssertInfo(column != nullptr, "invalid aggregation input column");
+            query_context->RecordQueryOperatorInput(*column);
+        }
+    }
     grouping_set_->addInput(input);
     numInputRows_ += input->size();
 }

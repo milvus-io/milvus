@@ -26,8 +26,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/reduce"
@@ -126,6 +128,7 @@ type QueryTask struct {
 	mustUsePartitionKey  bool
 	resolvedTimezoneStr  string
 	storageCost          segcore.StorageCost
+	usageBytes           int64
 	aggregationFieldMap  *agg.AggregationFieldMap
 	chMgr                channelmgr.ChannelsMgr
 }
@@ -204,6 +207,11 @@ func (t *QueryTask) Request() *milvuspb.QueryRequest {
 // StorageCost returns the storage cost reported by the last execution.
 func (t *QueryTask) StorageCost() segcore.StorageCost {
 	return t.storageCost
+}
+
+// UsageBytes returns the chargeable bytes for the completed Query.
+func (t *QueryTask) UsageBytes() int64 {
+	return t.usageBytes
 }
 
 // ReQuery reports whether this task was built as a requery of an earlier search.
@@ -994,6 +1002,12 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed")
 	}
 	t.plan.Namespace = NamespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
+	if t.GetCollectQueryReadUsage() {
+		if t.plan.PlanOptions == nil {
+			t.plan.PlanOptions = &planpb.PlanOption{}
+		}
+		t.plan.PlanOptions.CollectQueryReadUsage = true
+	}
 
 	t.SerializedExprPlan, _, err = MarshalPlanWithMembershipFilterSizeLimit(t.plan, 0)
 	if err != nil {
@@ -1101,7 +1115,7 @@ func (t *QueryTask) Execute(ctx context.Context) error {
 	path, err := executePathQuery, error(nil)
 	// Materialize currently routes through the legacy delegator. QueryView
 	// requests must retain their View-bound execution and requery snapshots.
-	if t.viewQueryClient == nil && paramtable.Get().ProxyCfg.MaterializeEnabled.GetAsBool() && t.materializeInScope() {
+	if !t.GetCollectQueryReadUsage() && t.viewQueryClient == nil && paramtable.Get().ProxyCfg.MaterializeEnabled.GetAsBool() && t.materializeInScope() {
 		path, err = t.executeMaterialize(ctx)
 	} else {
 		err = t.executeWorkload(ctx, t.queryShard)
@@ -1172,7 +1186,7 @@ func (t *QueryTask) executeWorkload(ctx context.Context, exec shardclient.Execut
 func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 	legacy := t.viewQueryClient.Legacy()
 	// Refresh applies to new requests, not retries. Retained-plan requery stays on Batch.
-	enableReduceStream := t.queryViewPlans == nil && paramtable.Get().ProxyCfg.EnableReduceStream.GetAsBool()
+	enableReduceStream := !t.GetCollectQueryReadUsage() && t.queryViewPlans == nil && paramtable.Get().ProxyCfg.EnableReduceStream.GetAsBool()
 	reduceStreamChunkBytes := paramtable.Get().ProxyCfg.ReduceStreamChunkBytes.GetAsInt()
 	request := &queryclient.LegacyQueryRequest{
 		Req: t.RetrieveRequest, Plans: t.queryViewPlans, Schema: t.schema.CollectionSchema,
@@ -1283,6 +1297,15 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 			return true
 		})
 	}
+	var readUsage *internalpb.QueryReadUsage
+	if t.GetCollectQueryReadUsage() {
+		readUsage = &internalpb.QueryReadUsage{}
+		for _, result := range toReduceResults {
+			if err := querymeter.AddReadUsage(readUsage, result.GetCostAggregation().GetQueryReadUsage()); err != nil {
+				return err
+			}
+		}
+	}
 	recordExecFeatures(!t.internalTask && t.plan.GetPlanOptions().GetCollectFeatureBits(), execBits, t.storageCost.ScannedRemoteBytes)
 
 	metrics.ProxyDecodeResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.getQueryLabel()).Observe(0.0)
@@ -1359,6 +1382,22 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 	}
 	if err := t.formatTimeFields(ctx); err != nil {
 		return err
+	}
+	if readUsage != nil {
+		returnedBytes, err := storage.LogicalQueryResultBytes(t.result.GetFieldsData(), t.schema.CollectionSchema)
+		if err != nil {
+			return err
+		}
+		// The element offsets are returned INT64 values alongside the fields.
+		for _, indices := range t.result.GetElementIndices() {
+			if err := querymeter.AddDataBytes(readUsage, 8*uint64(len(indices.GetIndices().GetData()))); err != nil {
+				return err
+			}
+		}
+		t.usageBytes, err = querymeter.BillableBytes(readUsage, returnedBytes)
+		if err != nil {
+			return err
+		}
 	}
 	if t.executePath != "" {
 		// After the reduce: Query reduces across shards here, Materialize

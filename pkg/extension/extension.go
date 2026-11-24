@@ -34,18 +34,20 @@ import (
 )
 
 var (
-	installedHook      atomic.Pointer[hookBox]
-	installedEngine    atomic.Pointer[engineBox]
-	installedQueryHook atomic.Pointer[queryHookBox]
-	installedCipher    atomic.Pointer[cipherBox]
-	formInstalled      atomic.Bool
+	installedHook        atomic.Pointer[hookBox]
+	installedEngine      atomic.Pointer[engineBox]
+	installedQueryHook   atomic.Pointer[queryHookBox]
+	installedCipher      atomic.Pointer[cipherBox]
+	formInstalled        atomic.Bool
+	requestUsageReporter atomic.Pointer[requestUsageReporterBox]
 )
 
 type (
-	hookBox      struct{ hook hook.Hook }
-	engineBox    struct{ engine CoordinatorEngine }
-	queryHookBox struct{ hook QueryHook }
-	cipherBox    struct{ cipher hook.Cipher }
+	hookBox                 struct{ hook hook.Hook }
+	engineBox               struct{ engine CoordinatorEngine }
+	queryHookBox            struct{ hook QueryHook }
+	cipherBox               struct{ cipher hook.Cipher }
+	requestUsageReporterBox struct{ reporter hook.Extension }
 )
 
 // SetHook installs a compiled-in request hook. hookutil uses it and ignores
@@ -65,6 +67,24 @@ func SetHook(h hook.Hook) {
 func InstalledHook() hook.Hook {
 	if b := installedHook.Load(); b != nil {
 		return b.hook
+	}
+	return nil
+}
+
+// SetRequestUsageReporter installs the distribution's opt-in request usage
+// reporter. Passing nil restores the ordinary reporting path.
+func SetRequestUsageReporter(reporter hook.Extension) {
+	if reporter == nil {
+		requestUsageReporter.Store(nil)
+		return
+	}
+	requestUsageReporter.Store(&requestUsageReporterBox{reporter: reporter})
+}
+
+// RequestUsageReporter returns the reporter to use for an entire RPC.
+func RequestUsageReporter() hook.Extension {
+	if box := requestUsageReporter.Load(); box != nil {
+		return box.reporter
 	}
 	return nil
 }

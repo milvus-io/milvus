@@ -1588,6 +1588,20 @@ GetMemoryUsageInBytes(CSegmentInterface c_segment) {
 }
 
 int64_t
+GetGrowingFieldMemoryBytes(CSegmentInterface c_segment,
+                           const int64_t* fields,
+                           int64_t field_count,
+                           uint64_t* bytes) {
+    SCOPE_CGO_CALL_METRIC();
+    auto segment = dynamic_cast<milvus::segcore::SegmentGrowingImpl*>(
+        static_cast<milvus::segcore::SegmentInterface*>(c_segment));
+    if (segment == nullptr) {
+        return 0;
+    }
+    return segment->GetFieldMemoryBytes(fields, field_count, bytes);
+}
+
+int64_t
 GetRowCount(CSegmentInterface c_segment) {
     SCOPE_CGO_CALL_METRIC();
 

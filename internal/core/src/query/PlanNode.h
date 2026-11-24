@@ -35,6 +35,7 @@ struct PlanOptions {
     // every copy of the options (query contexts, compiled expressions) so all
     // segments of the request record into one set.
     std::shared_ptr<FeatureRecorder> feature_recorder;
+    bool collect_query_read_usage = false;
 };
 
 // Base of all Nodes

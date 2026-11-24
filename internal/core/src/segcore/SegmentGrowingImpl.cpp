@@ -97,6 +97,7 @@
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
 #include "milvus-storage/lob_column/lob_column_reader.h"
+#include "milvus-storage/lob_column/lob_reference.h"
 #include "segcore/TextColumnCache.h"
 #include "storage/StatusToErrorCode.h"
 
@@ -1833,6 +1834,8 @@ SegmentGrowingImpl::Insert(
         }
 
         stats_.mem_size += field_data_size;
+        RecordFieldMemoryBytes(
+            field_id, reserved_offset, num_rows, field_data_size);
     }
 
     // step 4: set pks to offset
@@ -2009,6 +2012,56 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
 }
 
 void
+SegmentGrowingImpl::RecordFieldMemoryBytes(FieldId field_id,
+                                           int64_t begin,
+                                           int64_t rows,
+                                           uint64_t bytes) {
+    if (rows == 0) {
+        return;
+    }
+    std::lock_guard lock(field_memory_mutex_);
+    auto& usage = field_memory_usage_[field_id];
+    if (usage.unknown || begin < usage.end) {
+        return;
+    }
+    if (begin != usage.end) {
+        usage.pending.try_emplace(begin, begin + rows, bytes);
+        return;
+    }
+    usage.end = begin + rows;
+    usage.bytes += bytes;
+    while (!usage.pending.empty() &&
+           usage.pending.begin()->first == usage.end) {
+        const auto [end, range_bytes] = usage.pending.begin()->second;
+        usage.end = end;
+        usage.bytes += range_bytes;
+        usage.pending.erase(usage.pending.begin());
+    }
+}
+
+int64_t
+SegmentGrowingImpl::GetFieldMemoryBytes(const int64_t* fields,
+                                        int64_t field_count,
+                                        uint64_t* bytes) const {
+    std::lock_guard lock(field_memory_mutex_);
+    const auto visible_rows = get_row_count();
+    for (int64_t index = 0; index < field_count; ++index) {
+        if (visible_rows == 0) {
+            bytes[index] = 0;
+            continue;
+        }
+        const auto it = field_memory_usage_.find(FieldId(fields[index]));
+        if (it == field_memory_usage_.end() || it->second.unknown ||
+            it->second.end < visible_rows) {
+            return index;
+        }
+        // Batches can already be resident while the index is publishing them.
+        bytes[index] = it->second.bytes;
+    }
+    return field_count;
+}
+
+void
 SegmentGrowingImpl::load_field_data_common(
     FieldId field_id,
     size_t reserved_offset,
@@ -2153,8 +2206,43 @@ SegmentGrowingImpl::load_field_data_common(
             num_rows);
     }
 
-    // update the mem size
     stats_.mem_size += storage::GetByteSizeOfFieldDatas(field_data);
+    uint64_t payload_bytes = 0;
+    bool payload_known = true;
+    for (const auto& data : field_data) {
+        if (field_meta.get_data_type() != DataType::TEXT ||
+            !text_is_remote_lob_ref) {
+            payload_bytes += data->DataSize();
+            continue;
+        }
+        const auto* values = static_cast<const std::string*>(data->Data());
+        for (int64_t row = 0; row < data->get_num_rows(); ++row) {
+            if (field_meta.is_nullable() && !data->is_valid(row)) {
+                continue;
+            }
+            const auto& value = values[row];
+            if (value.empty() ||
+                !milvus_storage::lob_column::IsInlineData(
+                    reinterpret_cast<const uint8_t*>(value.data()))) {
+                // A remote reference does not contain the original length.
+                payload_known = false;
+                break;
+            }
+            payload_bytes += value.size() - 1;
+        }
+        if (!payload_known) {
+            break;
+        }
+    }
+    if (payload_known) {
+        RecordFieldMemoryBytes(
+            field_id, reserved_offset, num_rows, payload_bytes);
+    } else {
+        std::lock_guard lock(field_memory_mutex_);
+        auto& usage = field_memory_usage_[field_id];
+        usage.unknown = true;
+        usage.pending.clear();
+    }
 
     LOG_INFO("segment {} loads field {} done",
              this->get_segment_id(),
@@ -4687,6 +4775,8 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta,
                     spillover->WriteAndEncode(value.data(), value.size()));
             }
             text_column->set_data_raw(offset, refs.data(), count);
+            RecordFieldMemoryBytes(
+                field_id, offset, count, count * value.size());
         }
     } else {
         std::shared_ptr<StructElementOffsetsGrowing> struct_offsets;
@@ -4784,6 +4874,11 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta,
             segcore_config_.get_enable_geometry_cache() && missing > 0) {
             BuildGeometryCacheForInsert(field_id, data.get(), filled, missing);
         }
+        RecordFieldMemoryBytes(
+            field_id,
+            filled,
+            missing,
+            GetRawDataSizeOfDataArray(data.get(), field_meta, missing));
     }
 
     LOG_INFO("fill empty field {} (data type {}) for growing segment {} done",

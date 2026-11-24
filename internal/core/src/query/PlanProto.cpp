@@ -105,6 +105,8 @@ ProtoParser::PlanOptionsFromProto(
     const proto::plan::PlanOption& plan_option_proto,
     PlanOptions& plan_options) {
     plan_options.expr_use_json_stats = plan_option_proto.expr_use_json_stats();
+    plan_options.collect_query_read_usage =
+        plan_option_proto.collect_query_read_usage();
     if (plan_option_proto.collect_feature_bits()) {
         plan_options.feature_recorder = std::make_shared<FeatureRecorder>();
     }

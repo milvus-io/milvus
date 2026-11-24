@@ -307,6 +307,8 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
 
     retrieve_results.segment_ = (void*)this;
     results->set_has_more_result(retrieve_results.has_more_result);
+    results->set_query_operator_input_bytes(
+        retrieve_results.query_operator_input_bytes);
     results->set_scanned_remote_bytes(
         retrieve_results.retrieve_storage_cost_.scanned_remote_bytes);
     results->set_scanned_total_bytes(

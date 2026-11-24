@@ -27,6 +27,7 @@ var (
 	RequestDataSizeKey = "request_data_size"
 	ResultDataSizeKey  = "result_data_size"
 	RelatedDataSizeKey = "related_data_size"
+	BytesKey           = "bytes"
 	SuccessCntKey      = "success_cnt"
 	FailCntKey         = "fail_cnt"
 	RelatedCntKey      = "related_cnt"

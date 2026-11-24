@@ -189,7 +189,11 @@ func (s *Server) queryOnView(ctx context.Context, req *viewpb.QueryOnViewRequest
 	}
 	defer tasks.Release()
 	if len(tasks.Tasks()) == 0 {
-		return &viewpb.QueryOnViewResponse{LegacyResults: emptyQueryResults()}, nil
+		empty := emptyQueryResults()
+		if req.GetLegacyReq().GetCollectQueryReadUsage() {
+			empty.CostAggregation.QueryReadUsage = &internalpb.QueryReadUsage{}
+		}
+		return &viewpb.QueryOnViewResponse{LegacyResults: empty}, nil
 	}
 
 	result, err := s.scheduler.Query(ctx, tasks)

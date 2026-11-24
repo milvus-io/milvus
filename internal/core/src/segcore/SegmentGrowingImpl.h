@@ -279,6 +279,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return stats_.mem_size.load() + deleted_record_.mem_size();
     }
 
+    // Returns the index of the first unknown field, or field_count.
+    int64_t
+    GetFieldMemoryBytes(const int64_t* fields,
+                        int64_t field_count,
+                        uint64_t* bytes) const;
+
     int64_t
     get_row_count() const override {
         return insert_record_.ack_responder_.GetAck();
@@ -990,6 +996,23 @@ class SegmentGrowingImpl : public SegmentGrowing {
     int64_t id_;
 
     SegmentStats stats_{};
+
+    void
+    RecordFieldMemoryBytes(FieldId field_id,
+                           int64_t begin,
+                           int64_t rows,
+                           uint64_t bytes);
+
+    // Keep one total per column. Only out-of-order batches need per-range
+    // state. The total must cover exactly the published row prefix.
+    struct FieldMemoryUsage {
+        int64_t end = 0;
+        uint64_t bytes = 0;
+        bool unknown = false;
+        std::map<int64_t, std::pair<int64_t, uint64_t>> pending;
+    };
+    mutable std::mutex field_memory_mutex_;
+    std::unordered_map<FieldId, FieldMemoryUsage> field_memory_usage_;
 
     // milvus storage internal api reader instance
     std::unique_ptr<milvus_storage::api::Reader> reader_;

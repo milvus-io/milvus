@@ -512,7 +512,7 @@ func (c *legacyClient) queryRetainedPlans(ctx context.Context, req *LegacyQueryR
 				if err != nil {
 					return err
 				}
-				if isEmptySuccessfulQueryResponse(response) {
+				if !req.Req.GetCollectQueryReadUsage() && isEmptySuccessfulQueryResponse(response) {
 					return nil
 				}
 				return collector.Add(plan.ShardID, response)

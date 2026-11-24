@@ -3712,10 +3712,17 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 
 	rateCol.Add(internalpb.RateType_DQLQuery.String(), 1, subLabel)
 
+	reporter := extension.RequestUsageReporter()
+	iterator, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, request.GetQueryParams())
+	isIterator, _ := strconv.ParseBool(iterator)
+	if isIterator || len(request.GetFunctionChains()) > 0 {
+		reporter = nil
+	}
 	var result *milvuspb.QueryResults
+	var usageBytes int64
 	err := node.retryDQL(ctx, request.GetDbName(), request.GetCollectionName(), request.GetQueryParams(), func(ctx context.Context) (bool, error) {
 		var err error
-		result, err = node.executeQuery(ctx, request)
+		result, usageBytes, err = node.executeQuery(ctx, request, reporter != nil)
 		return false, merr.CheckRPCCall(result, err)
 	})
 	if err != nil {
@@ -3728,10 +3735,24 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	if status := finishRequest(ctx, entry, result.GetStatus()); !merr.Ok(status) {
 		return &milvuspb.QueryResults{Status: status}, nil
 	}
+	if reporter != nil {
+		if err := ctx.Err(); err != nil {
+			return &milvuspb.QueryResults{Status: merr.Status(err)}, nil
+		}
+		username := GetCurUserFromContextOrDefault(ctx)
+		value := reporter.Report(map[string]any{
+			hookutil.OpTypeKey:   hookutil.OpTypeQuery,
+			hookutil.DatabaseKey: request.GetDbName(),
+			hookutil.UsernameKey: username,
+			hookutil.BytesKey:    usageBytes,
+		})
+		SetReportValue(result.GetStatus(), value)
+		metrics.ProxyReportValue.WithLabelValues(paramtable.GetStringNodeID(), hookutil.OpTypeQuery, request.GetDbName(), username).Add(float64(value))
+	}
 	return result, nil
 }
 
-func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequest, collectUsage bool) (*milvuspb.QueryResults, int64, error) {
 	ctx, finishAttempt := extension.BeginDQLAttempt(ctx)
 	defer finishAttempt()
 	qt := NewQueryTask(ctx, node, request, nil, &internalpb.RetrieveRequest{
@@ -3739,15 +3760,16 @@ func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequ
 			commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
-		ReqID:            paramtable.GetNodeID(),
-		ConsistencyLevel: request.ConsistencyLevel,
-		QueryLabel:       metrics.QueryLabel,
+		ReqID:                 paramtable.GetNodeID(),
+		ConsistencyLevel:      request.ConsistencyLevel,
+		QueryLabel:            metrics.QueryLabel,
+		CollectQueryReadUsage: collectUsage,
 	}, node.GetMetaCache(), paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool())
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.QueryResults{
 			Status: merr.Status(err),
-		}, nil
+		}, 0, nil
 	}
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Query")
@@ -3773,10 +3795,15 @@ func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequ
 	}
 
 	if err != nil || !merr.Ok(res.Status) {
-		return res, err
+		return res, 0, err
 	}
 
 	mlog.Debug(ctx, rpcDone(method))
+
+	if collectUsage {
+		SetStorageCost(res.Status, storageCost)
+		return res, qt.UsageBytes(), nil
+	}
 
 	username := GetCurUserFromContextOrDefault(ctx)
 	nodeID := paramtable.GetStringNodeID()
@@ -3796,7 +3823,7 @@ func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequ
 		r, _ := protojson.Marshal(res)
 		mlog.Debug(ctx, "Count result", mlog.String("result", string(r)))
 	}
-	return res, nil
+	return res, 0, nil
 }
 
 // CreateAlias create alias for collection, then you can search the collection with alias.

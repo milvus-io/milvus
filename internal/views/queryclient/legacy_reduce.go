@@ -24,7 +24,11 @@ func (c *legacyQueryCollector) Reduce(ctx context.Context, req *LegacyQueryReque
 	for _, plan := range plans {
 		inputs := c.results[plan.ShardID.String()]
 		if len(inputs) == 0 {
-			inputs = []*internalpb.RetrieveResults{{Status: merr.Success()}}
+			empty := &internalpb.RetrieveResults{Status: merr.Success()}
+			if req.Req.GetCollectQueryReadUsage() {
+				empty.CostAggregation = &internalpb.CostAggregation{QueryReadUsage: &internalpb.QueryReadUsage{}}
+			}
+			inputs = []*internalpb.RetrieveResults{empty}
 		}
 		hasAggregation := len(req.Req.GetGroupByFieldIds()) > 0 || len(req.Req.GetAggregates()) > 0
 		var result *internalpb.RetrieveResults
@@ -40,7 +44,9 @@ func (c *legacyQueryCollector) Reduce(ctx context.Context, req *LegacyQueryReque
 			for _, input := range inputs {
 				costs = append(costs, input.GetCostAggregation())
 			}
+			readUsage := result.GetCostAggregation().GetQueryReadUsage()
 			result.CostAggregation = mergeLegacyCosts(costs)
+			result.CostAggregation.QueryReadUsage = readUsage
 		}
 		result.FeatureBits |= executionSummaryFeatureBits(plan.ExecutionSummary)
 		result.MvccTimestamp = max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick())

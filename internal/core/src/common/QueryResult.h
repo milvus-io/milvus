@@ -441,6 +441,7 @@ using SearchResultOpt = std::optional<SearchResult>;
 
 struct RetrieveResult {
     RetrieveResult() = default;
+    uint64_t query_operator_input_bytes = 0;
 
  public:
     int64_t total_data_cnt_;
