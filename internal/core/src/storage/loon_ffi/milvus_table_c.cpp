@@ -1056,7 +1056,12 @@ loon_milvus_table_append_source_manifests(LoonTransactionHandle transaction,
 // source use it to keep source paths on the external source storage.
 extern "C" int
 MilvusTablePathRoutesToClusterStorage(const char* path) {
-    return path != nullptr && RoutesToClusterStorage(path) ? 1 : 0;
+    try {
+        return path != nullptr && RoutesToClusterStorage(path) ? 1 : 0;
+    } catch (...) {
+        // Treat a path that cannot be checked as one to reject.
+        return 1;
+    }
 }
 
 // Resolves source column-group files as the target manifest records them, so

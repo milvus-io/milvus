@@ -550,18 +550,22 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_Milvus
 		}).Build()
 	defer mockDeltalogReader.UnPatch()
 
+	// The source primary keys are read through the milvus-table source reader,
+	// which resolves the source column groups against the external source.
 	readerErr := fmt.Errorf("stop after extfs capture")
 	var gotExtfs packed.ExternalSpecContext
-	mockReader := mockey.Mock(storage.NewManifestReaderWithExtfs).
+	var gotManifest string
+	mockReader := mockey.Mock(packed.NewMilvusTableSourceFFIPackedReader).
 		To(func(
-			manifest string,
-			schema *schemapb.CollectionSchema,
-			bufferSize int64,
-			storageConfig *indexpb.StorageConfig,
-			storagePluginContext *indexcgopb.StoragePluginContext,
+			manifestPath string,
+			_ *arrow.Schema,
+			_ []string,
+			_ int64,
+			_ *indexpb.StorageConfig,
+			_ *indexcgopb.StoragePluginContext,
 			extfs packed.ExternalSpecContext,
-			_ ...storage.RwOption,
-		) (*storage.ManifestReader, error) {
+		) (*packed.FFIPackedReader, error) {
+			gotManifest = manifestPath
 			gotExtfs = extfs
 			return nil, readerErr
 		}).Build()
@@ -600,6 +604,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_Milvus
 		}},
 	}})
 	s.ErrorIs(err, readerErr)
+	s.Equal(sourceManifest, gotManifest)
 	s.Equal(packed.ExternalSpecContext{
 		CollectionID: s.collectionID,
 		Source:       metadataPath,
@@ -1389,4 +1394,45 @@ func readInt64Deltalog(t *testing.T, storageConfig *indexpb.StorageConfig, path 
 
 func testVirtualPK(segmentID int64, offset int64) int64 {
 	return ((segmentID & 0xFFFFFFFF) << 32) | (offset & 0xFFFFFFFF)
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestPrepareMilvusTableDeltalogFragments_RejectsDeltalogOutsideExternalSource() {
+	task := &RefreshExternalCollectionTask{
+		req: &datapb.RefreshExternalCollectionTaskRequest{
+			CollectionID:   s.collectionID,
+			ExternalSource: "s3://source-bucket/snapshots/10/metadata/20.json",
+			ExternalSpec:   `{"format":"milvus-table","extfs":{"cloud_provider":"aws","region":"us-west-2","access_key_id":"ak","access_key_value":"sk"}}`,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				},
+			},
+			StorageConfig: &indexpb.StorageConfig{StorageType: "local"},
+		},
+	}
+	fragmentWithDeltalog := func(logPath string) []packed.Fragment {
+		return []packed.Fragment{{
+			FragmentID: 1,
+			FilePath:   `{"base_path":"s3://source-bucket/files/insert_log/1/2/20","ver":1}`,
+			RowCount:   10,
+			Deltalogs: []*datapb.FieldBinlog{{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{{LogPath: logPath, LogID: 7, EntriesNum: 1}},
+			}},
+		}}
+	}
+
+	const localDeltalog = "/var/lib/milvus/data/delta_log/1/2/20/7"
+	fragments, err := task.prepareMilvusTableDeltalogFragments(fragmentWithDeltalog(localDeltalog))
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.ErrorContains(err, "external source storage: "+localDeltalog)
+	s.Nil(fragments)
+
+	const sourceDeltalog = "s3://source-bucket/files/delta_log/1/2/20/7"
+	fragments, err = task.prepareMilvusTableDeltalogFragments(fragmentWithDeltalog(sourceDeltalog))
+	s.NoError(err)
+	s.Require().Len(fragments, 1)
+	s.Require().Len(fragments[0].Deltalogs, 1)
+	s.Require().Len(fragments[0].Deltalogs[0].GetBinlogs(), 1)
+	s.Equal(sourceDeltalog, fragments[0].Deltalogs[0].GetBinlogs()[0].GetLogPath())
 }
