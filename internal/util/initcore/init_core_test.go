@@ -412,7 +412,7 @@ func TestRegisterQueryNodeLoadConfigCatchesUp(t *testing.T) {
 	pt := &paramtable.ComponentParam{}
 	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
 	item := &pt.QueryNodeCfg.LoadAsyncReadEnabled
-	assert.NoError(t, pt.Save(item.Key, "true"))
+	assert.NoError(t, pt.Save(item.Key, "false"))
 
 	var applied atomic.Bool
 	registerQueryNodeLoadConfig(t.Context(), pt, func(enabled bool, budgetBytes, slots int64) error {
@@ -427,10 +427,10 @@ func TestRegisterQueryNodeLoadConfigCatchesUp(t *testing.T) {
 
 		return nil
 	})
-	assert.True(t, applied.Load())
-
-	assert.NoError(t, pt.Save(item.Key, "false"))
 	assert.False(t, applied.Load())
+
+	assert.NoError(t, pt.Reset(item.Key))
+	assert.True(t, applied.Load())
 }
 
 func TestLazyColumnGroupHotUpdate(t *testing.T) {

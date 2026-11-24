@@ -56,7 +56,7 @@ const (
 	// Load admission defaults apply only when async loading is enabled and the
 	// corresponding parameter is absent. Explicit values, including 0, win.
 	DefaultLoadTransientBudgetBytes       = 2 * 1024 * 1024 * 1024
-	DefaultLoadAdmissionSlotsPerCPU       = 2
+	DefaultLoadAdmissionSlotsPerCPU       = 10
 	DefaultJSONStatsBuildMaxInflightBytes = 512 * 1024 * 1024
 	// DefaultLoadFieldDataReadWindowSizeBytes is the default threshold
 	// for a Storage V3 field-data async read window.
@@ -6343,7 +6343,7 @@ user-task-polling:
 			`field-data and index loaders. Each ` +
 			`window, batch, or stream slice reserves one slot together with its ` +
 			`transient bytes until its temporary data is released after consumption ` +
-			`or finalization. When unset, defaults to twice the CPU count reported ` +
+			`or finalization. When unset, defaults to ten times the CPU count reported ` +
 			`by Milvus at initialization with queryNode.segcore.load.asyncReadEnabled ` +
 			`enabled, otherwise 0. Explicit values apply regardless of that switch; ` +
 			`0 disables the slot limit. Async metadata operations also reserve one slot.`,
@@ -6384,7 +6384,7 @@ user-task-polling:
 	p.LoadAsyncReadEnabled = ParamItem{
 		Key:          "queryNode.segcore.load.asyncReadEnabled",
 		Version:      "3.0.1",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          "Enable asynchronous storage reads for supported field data and index loaders. Change this setting by restarting QueryNode; existing translators retain their mode.",
 		Export:       false,
 	}

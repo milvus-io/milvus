@@ -65,7 +65,7 @@ func TestQueryNodeLoadConfigPublishesNativeLimits(t *testing.T) {
 	enabledKey := pt.QueryNodeCfg.LoadAsyncReadEnabled.Key
 	bytesKey := pt.QueryNodeCfg.LoadTransientBudgetBytes.Key
 	slotsKey := pt.QueryNodeCfg.LoadAdmissionSlots.Key
-	cpuSlots := int64(2 * hardware.GetCPUNum())
+	cpuSlots := int64(10 * hardware.GetCPUNum())
 	expect := func(wantBytes, wantSlots int64) {
 		t.Helper()
 		gotBytes, gotSlots := nativeLoadAdmissionLimits(t)
@@ -73,7 +73,9 @@ func TestQueryNodeLoadConfigPublishesNativeLimits(t *testing.T) {
 		assert.Equal(t, wantSlots, gotSlots)
 	}
 
-	registerQueryNodeLoadConfig(t.Context(), pt, applyQueryNodeLoadConfig)
+	require.NoError(t, registerQueryNodeLoadConfig(t.Context(), pt, applyQueryNodeLoadConfig))
+	expect(2*1024*1024*1024, cpuSlots)
+	require.NoError(t, pt.Save(enabledKey, "false"))
 	expect(0, 0)
 	// A value equal to ParamItem.DefaultValue is still explicit. It must take
 	// effect even though the legacy-mode effective default was unlimited.
@@ -100,8 +102,10 @@ func TestQueryNodeLoadConfigPublishesNativeLimits(t *testing.T) {
 	expect(1234, cpuSlots)
 	require.NoError(t, pt.Remove(bytesKey))
 	expect(2*1024*1024*1024, cpuSlots)
-	require.NoError(t, pt.Reset(enabledKey))
+	require.NoError(t, pt.Save(enabledKey, "false"))
 	expect(0, 0)
+	require.NoError(t, pt.Reset(enabledKey))
+	expect(2*1024*1024*1024, cpuSlots)
 }
 
 func TestCommonCoreCallbacksDoNotOwnLoadAdmission(t *testing.T) {
@@ -211,7 +215,7 @@ func TestQueryNodeLoadConfigInvalidLimitsStayBounded(t *testing.T) {
 		require.NoError(t, pt.Save(pt.QueryNodeCfg.LoadAsyncReadEnabled.Key, enabled))
 		bytes, slots := nativeLoadAdmissionLimits(t)
 		assert.EqualValues(t, paramtable.DefaultLoadTransientBudgetBytes, bytes)
-		assert.EqualValues(t, 2*hardware.GetCPUNum(), slots)
+		assert.EqualValues(t, 10*hardware.GetCPUNum(), slots)
 	}
 }
 

@@ -754,7 +754,7 @@ func TestQueryNodeLoadConfigKeys(t *testing.T) {
 		removedKey string
 		value      string
 	}{
-		{&cfg.LoadAsyncReadEnabled, "queryNode.segcore.load.asyncReadEnabled", "queryNode.segcore.storageV2.enableAsyncLoad", "true"},
+		{&cfg.LoadAsyncReadEnabled, "queryNode.segcore.load.asyncReadEnabled", "queryNode.segcore.storageV2.enableAsyncLoad", "false"},
 		{&cfg.LoadExecutorThreads, "queryNode.segcore.load.executorThreads", "queryNode.segcore.storageV2.asyncLoadThreadPoolSize", "3"},
 		{&cfg.LoadTransientBudgetBytes, "queryNode.segcore.load.admission.transientBudgetBytes", "common.loadTransientBudgetBytes", "1234"},
 		{&cfg.LoadAdmissionSlots, "queryNode.segcore.load.admission.slots", "common.loadAdmissionSlots", "9"},
@@ -946,9 +946,11 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, "queryNode.segcore.load.asyncReadEnabled", item.Key)
 		assert.False(t, item.Export)
-		assert.False(t, item.GetAsBool())
+		assert.True(t, item.GetAsBool())
 
-		params.Save(item.Key, "true")
+		require.NoError(t, params.Save(item.Key, "false"))
+		assert.False(t, item.GetAsBool())
+		require.NoError(t, params.Reset(item.Key))
 		assert.True(t, item.GetAsBool())
 	})
 
@@ -987,9 +989,9 @@ func TestComponentParam(t *testing.T) {
 
 		assert.False(t, Params.LoadAdmissionSlots.Export)
 		defer params.Reset(Params.LoadAdmissionSlots.Key)
-		assert.Equal(t, int64(2*hardware.GetCPUNum()), Params.LoadAdmissionSlots.GetAsInt64())
+		assert.Equal(t, int64(10*hardware.GetCPUNum()), Params.LoadAdmissionSlots.GetAsInt64())
 		params.Save(Params.LoadAdmissionSlots.Key, "-1")
-		assert.Equal(t, int64(2*hardware.GetCPUNum()), Params.LoadAdmissionSlots.GetAsInt64())
+		assert.Equal(t, int64(10*hardware.GetCPUNum()), Params.LoadAdmissionSlots.GetAsInt64())
 		params.Save(Params.LoadAdmissionSlots.Key, "16")
 		assert.Equal(t, int64(16), Params.LoadAdmissionSlots.GetAsInt64())
 		params.Save(Params.LoadAdmissionSlots.Key, "0")

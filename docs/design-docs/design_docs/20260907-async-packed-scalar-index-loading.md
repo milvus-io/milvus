@@ -108,7 +108,8 @@ parsers where applicable.
 ## Selection and executor ownership
 
 `queryNode.segcore.load.asyncReadEnabled` selects the loading path and defaults
-to false. The setting belongs to QueryNode loading and is independent of the
+to true. Set it explicitly to false and restart QueryNode to use synchronous
+reads. The setting belongs to QueryNode loading and is independent of the
 persisted storage format; packed scalar files use format V3.
 
 A cache translator captures the global flag in `FileManagerContext` when it is
@@ -243,14 +244,14 @@ admission, and target lifetime:
 Admission limits temporary bytes and task slots across field and index loads.
 `queryNode.segcore.load.admission.transientBudgetBytes` and `queryNode.segcore.load.admission.slots` are
 refreshable. With async enabled and no explicit overrides, the existing defaults
-are 2 GiB and twice the initialized CPU count. Zero disables the respective limit.
+are 2 GiB and ten times the initialized CPU count. Zero disables the respective limit.
 
 The effective `queryNode.segcore.load.admission.slots` value depends on whether it is explicitly
 configured:
 
 | Slot configuration | Synchronous loading | Asynchronous loading |
 | --- | --- | --- |
-| Unset | 0 (unlimited) | Twice the CPU count reported by Milvus at initialization |
+| Unset | 0 (unlimited) | Ten times the CPU count reported by Milvus at initialization |
 | Explicit positive N | N | N |
 | Explicit 0 | Unlimited | Unlimited |
 
