@@ -1661,7 +1661,9 @@ func TestImportDispatchRetriesOnEZKError(t *testing.T) {
 	for _, state := range []internalpb.ImportJobState{internalpb.ImportJobState_PreImporting, internalpb.ImportJobState_Importing} {
 		t.Run(state.String(), func(t *testing.T) {
 			var sourceErr error
+			var resolves int
 			cipher := &importRequestCipher{MockCipher: mock_hook.NewMockCipher(t), resolve: func(artifact string) (int64, []byte, error) {
+				resolves++
 				require.Equal(t, backup, artifact)
 				return 73, []byte("old"), sourceErr
 			}}
@@ -1671,6 +1673,7 @@ func TestImportDispatchRetriesOnEZKError(t *testing.T) {
 			catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{{
 				JobID: 1, Schema: schema, State: state, DataTs: 100, Options: []*commonpb.KeyValuePair{{Key: importutilv2.EZK, Value: backup}},
 			}}, nil)
+			catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
 			cluster := session.NewMockCluster(t)
 			alloc := allocator.NewMockAllocator(t)
 			if state == internalpb.ImportJobState_PreImporting {
@@ -1689,18 +1692,35 @@ func TestImportDispatchRetriesOnEZKError(t *testing.T) {
 			require.NoError(t, err)
 			task := im.GetTask(ctx, 2)
 
-			// Source resolve failure keeps task pending without dispatching.
-			sourceErr = errors.New("source KMS unavailable")
-			task.CreateTaskOnWorker(10, cluster)
-			require.Equal(t, state, im.GetJob(ctx, 1).GetState())
-			require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+			// Non-retryable errors tolerate up to maxImportDispatchRetries-1 retries.
+			sourceErr = errors.New("source KMS denied Decrypt")
+			for i := 0; i < maxImportDispatchRetries-1; i++ {
+				task.CreateTaskOnWorker(10, cluster)
+				require.Equal(t, state, im.GetJob(ctx, 1).GetState())
+				require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+			}
 
-			// Target missing unsafe key keeps task pending without dispatching.
+			// Retryable errors keep task pending even past maxImportDispatchRetries.
 			sourceErr = nil
-			cipher.EXPECT().GetUnsafeKey(int64(91), task.GetCollectionID()).Return(nil).Once()
+			cipher.EXPECT().GetUnsafeKey(int64(91), task.GetCollectionID()).Return(nil).Twice()
+			for i := 0; i < 2; i++ {
+				task.CreateTaskOnWorker(10, cluster)
+				require.Equal(t, state, im.GetJob(ctx, 1).GetState())
+				require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+			}
+			catalog.AssertNotCalled(t, "SaveImportJob", mock.Anything, mock.Anything)
+
+			// Non-retryable source error fails the job once retries are exhausted.
+			sourceErr = errors.New("source KMS denied Decrypt")
 			task.CreateTaskOnWorker(10, cluster)
-			require.Equal(t, state, im.GetJob(ctx, 1).GetState())
-			require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+			job := im.GetJob(ctx, 1)
+			require.Equal(t, internalpb.ImportJobState_Failed, job.GetState())
+			require.Contains(t, job.GetReason(), sourceErr.Error())
+
+			// Once failed, subsequent scheduler visits stop calling ResolveImportEZ.
+			resolvesBefore := resolves
+			task.CreateTaskOnWorker(10, cluster)
+			require.Equal(t, resolvesBefore, resolves)
 		})
 	}
 }

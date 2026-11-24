@@ -109,16 +109,18 @@ func (p *preImportTask) GetTaskVersion() int64 {
 func (p *preImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	log.Info("processing pending preimport task...", WrapTaskLog(p)...)
 	job := p.importMeta.GetJob(context.TODO(), p.GetJobID())
+	if job == nil || job.GetState() == internalpb.ImportJobState_Failed || job.GetState() == internalpb.ImportJobState_Completed {
+		return
+	}
 	req, err := AssemblePreImportRequest(p, job)
 	if err != nil {
-		log.Warn("assemble preimport request failed", WrapTaskLog(p, zap.Error(err))...)
+		handleImportDispatchError(p, p.importMeta, &p.retryTimes, err)
 		return
 	}
 
 	err = cluster.CreatePreImport(nodeID, req, p.GetTaskSlot())
 	if err != nil {
-		log.Warn("preimport failed", WrapTaskLog(p, zap.Error(err))...)
-		p.retryTimes++
+		handleImportDispatchError(p, p.importMeta, &p.retryTimes, err)
 		return
 	}
 	err = p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(),
