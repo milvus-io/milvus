@@ -31,6 +31,13 @@ func receiver(fn *ast.FuncDecl) string {
 	if ptr, ok := typ.(*ast.StarExpr); ok {
 		typ = ptr.X
 	}
+	// Generic receivers wrap the base type name in an instantiation expression.
+	switch instantiated := typ.(type) {
+	case *ast.IndexExpr:
+		typ = instantiated.X
+	case *ast.IndexListExpr:
+		typ = instantiated.X
+	}
 	return typ.(*ast.Ident).Name
 }
 

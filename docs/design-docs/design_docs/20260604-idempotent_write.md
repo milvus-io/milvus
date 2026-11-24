@@ -115,7 +115,7 @@ Legacy global or collection enable settings have no effect.
 | `streaming.idempotency.ttlPerPChannel` | `1h` | Idle TTL for committed records in a PChannel. Duplicate access refreshes it in memory; recovery uses original commit time. |
 | `streaming.idempotency.maxSizePerPChannel` | `256MB` | Estimated record bytes shared across all VChannels in one PChannel, evicted by last access. Recovery plans newest chunks by encoded Insert + Idempotency section bytes, including one boundary chunk. |
 | `streaming.idempotency.bestEffortMinCountPerVChannel` | `16` | Soft per-VChannel count preference under capacity pressure; TTL and PChannel capacity override it. Recovery reserves no minimum. |
-| `streaming.summary.maxBytesPerPChannel` | `4GB` | Shared WALSummary retained-object byte budget per pchannel. GC-eligible chunks remain retained until this budget is exceeded; `0` disables the byte bound. |
+| `streaming.summary.maxRetentionBytes` | `4GB` | Per-PChannel retained-object byte floor for WALSummary GC. Regular prefix GC runs only above this size and preserves at least this many bytes after whole-chunk deletion. `0` removes only the byte floor; age, DataView and idempotency recovery protections still apply. |
 | `streaming.idempotency.maxKeyLength` | `256` | Maximum accepted explicit key length in bytes. |
 
 Idempotency retention is captured when a WAL opens; these three settings are
