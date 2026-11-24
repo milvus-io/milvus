@@ -190,6 +190,10 @@ class CachedSearchIterator {
                                     std::vector<IterIdDisIdPair>,
                                     IterIdDisIdPairComparator>>
         chunked_heaps_;
+    // Lookahead and overflow tie-group candidates already pulled from
+    // iterators_ during an earlier NextBatch() on the same instance, kept in
+    // (dist, pk[, elem_idx]) order per query_idx.
+    std::vector<std::vector<DisIdPair>> buffered_results_;
 
     inline bool
     IsValid(const DisIdPair& result,

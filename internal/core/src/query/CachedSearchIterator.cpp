@@ -439,6 +439,9 @@ CachedSearchIterator::MergeChunksResults(
     std::vector<DisIdPair>& rst) {
     auto& heap = chunked_heaps_[query_idx];
     std::optional<float> cut_dist = std::nullopt;
+    if (rst.size() >= batch_size_) {
+        cut_dist = rst[batch_size_ - 1].first;
+    }
 
     if (heap.empty()) {
         for (size_t chunk_id = 0; chunk_id < num_chunks_; ++chunk_id) {
@@ -492,51 +495,70 @@ CachedSearchIterator::GetBatchedNextResults(size_t query_idx,
     std::vector<DisIdPair> collected;
     collected.reserve(batch_size_ * 2);
 
-    if (num_chunks_ == 1) {
-        auto& iterator = iterators_[query_idx];
-        // The knowhere stream yields rows in distance order but in an
-        // unspecified order within a group of equal distances. Pull enough rows
-        // so the collected set contains the whole boundary tie group (all rows
-        // tied at the distance of the batch cut); sorting by (score, pk[,
-        // elem_idx]) below then makes the page a strict prefix of that order,
-        // which the continuation cursor can resume exactly.
-        std::optional<float> cut_dist = std::nullopt;
-        while (true) {
-            auto has_next = iterator->HasNext();
-            if (!has_next.has_value()) {
-                ThrowInfo(KnowhereStatusToErrorCode(has_next.error()),
-                          "knowhere iterator HasNext failed: {}",
-                          has_next.what());
-            }
-            if (!has_next.value()) {
-                break;
-            }
-            auto next = iterator->Next();
-            if (!next.has_value()) {
-                ThrowInfo(KnowhereStatusToErrorCode(next.error()),
-                          "knowhere iterator Next failed: {}",
-                          next.what());
-            }
-            auto result = ConvertIteratorResult(next.value());
-            if (cut_dist.has_value() && result.first > cut_dist.value()) {
-                // Boundary tie group is complete; this row belongs to the next
-                // page.
-                break;
-            }
-            if (!IsValid(result, last_bound, last_key, radius, range_filter)) {
-                continue;
-            }
-            collected.emplace_back(result);
-            if (!cut_dist.has_value() && collected.size() >= batch_size_) {
-                // The batch cut lands at this distance; keep pulling until the
-                // next row is strictly farther, so tied rows at the cut are all
-                // collected and ordered by tie-break key.
+    auto& pending = buffered_results_[query_idx];
+    for (const auto& item : pending) {
+        if (IsValid(item, last_bound, last_key, radius, range_filter)) {
+            collected.emplace_back(item);
+        }
+    }
+    pending.clear();
+
+    const bool tie_group_complete =
+        collected.size() >= batch_size_ &&
+        collected.back().first > collected[batch_size_ - 1].first;
+
+    if (!tie_group_complete) {
+        if (num_chunks_ == 1) {
+            auto& iterator = iterators_[query_idx];
+            // The knowhere stream yields rows in distance order but in an
+            // unspecified order within a group of equal distances. Pull enough
+            // rows so the collected set contains the whole boundary tie group
+            // (all rows tied at the distance of the batch cut); sorting by
+            // (score, pk[, elem_idx]) below then makes the page a strict prefix
+            // of that order, which the continuation cursor can resume exactly.
+            std::optional<float> cut_dist = std::nullopt;
+            if (collected.size() >= batch_size_) {
                 cut_dist = collected[batch_size_ - 1].first;
             }
+            while (true) {
+                auto has_next = iterator->HasNext();
+                if (!has_next.has_value()) {
+                    ThrowInfo(KnowhereStatusToErrorCode(has_next.error()),
+                              "knowhere iterator HasNext failed: {}",
+                              has_next.what());
+                }
+                if (!has_next.value()) {
+                    break;
+                }
+                auto next = iterator->Next();
+                if (!next.has_value()) {
+                    ThrowInfo(KnowhereStatusToErrorCode(next.error()),
+                              "knowhere iterator Next failed: {}",
+                              next.what());
+                }
+                auto result = ConvertIteratorResult(next.value());
+                if (cut_dist.has_value() && result.first > cut_dist.value()) {
+                    // Boundary tie group is complete; buffer this lookahead
+                    // row for subsequent NextBatch() calls on this instance.
+                    pending.emplace_back(result);
+                    break;
+                }
+                if (!IsValid(
+                        result, last_bound, last_key, radius, range_filter)) {
+                    continue;
+                }
+                collected.emplace_back(result);
+                if (!cut_dist.has_value() && collected.size() >= batch_size_) {
+                    // The batch cut lands at this distance; keep pulling until
+                    // the next row is strictly farther, so tied rows at the cut
+                    // are all collected and ordered by tie-break key.
+                    cut_dist = collected[batch_size_ - 1].first;
+                }
+            }
+        } else {
+            MergeChunksResults(
+                query_idx, last_bound, last_key, radius, range_filter, collected);
         }
-    } else {
-        MergeChunksResults(
-            query_idx, last_bound, last_key, radius, range_filter, collected);
     }
 
     // Order the batch by (distance, pk[, elem_idx]) so consecutive pages
@@ -584,6 +606,9 @@ CachedSearchIterator::GetBatchedNextResults(size_t query_idx,
     }
 
     if (collected.size() > batch_size_) {
+        pending.insert(pending.begin(),
+                       std::make_move_iterator(collected.begin() + batch_size_),
+                       std::make_move_iterator(collected.end()));
         collected.resize(batch_size_);
     }
     if (sign_ == -1) {
@@ -649,6 +674,7 @@ CachedSearchIterator::Init(const SearchInfo& search_info) {
             ErrorCode::UnexpectedError,
             "Number of queries is greater than 1, cannot initialize iterator");
     }
+    buffered_results_.resize(nq_);
 }
 
 std::optional<PkType>
