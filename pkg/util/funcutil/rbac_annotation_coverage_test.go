@@ -76,8 +76,8 @@ var rbacAnnotationAllowlist = map[protoreflect.Name]string{
 	"GetFlushAllState": "async global flush status polling",
 	// GetImportState delegates persisted resource authorization to Proxy.GetImportProgress.
 	"GetImportState": "resource authorization in Proxy.GetImportProgress",
-	// GetMetrics is a diagnostics endpoint for system metrics.
-	"GetMetrics": "system metrics diagnostics",
+	// GetMetrics reports cluster-wide diagnostics and requires a cluster-admin grant in Proxy.
+	"GetMetrics": "cluster-admin authorization in Proxy.GetMetrics",
 	// GetPersistentSegmentInfo explicitly requires collection GetStatistics in Proxy.
 	"GetPersistentSegmentInfo": "explicit collection GetStatistics authorization",
 	// GetQuerySegmentInfo explicitly requires collection GetStatistics in Proxy.
