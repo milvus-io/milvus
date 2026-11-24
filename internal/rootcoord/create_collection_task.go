@@ -925,7 +925,8 @@ func collectAnalyzerInfos(collSchema *schemapb.CollectionSchema) ([]*querypb.Ana
 // enable_analyzer=true. Analyzer params are ignored while analyzer is disabled.
 func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema, analyzerInfos *[]*querypb.AnalyzerInfo) error {
 	h := typeutil.CreateFieldSchemaHelper(fieldSchema)
-	active := h.EnableMatch() || typeutil.IsBm25FunctionInputField(collSchema, fieldSchema)
+	matchEnabled := typeutil.IsTextMatchEnabled(fieldSchema)
+	active := matchEnabled || typeutil.IsBm25FunctionInputField(collSchema, fieldSchema)
 	if active && !h.EnableAnalyzer() {
 		return merr.WrapErrParameterInvalidMsg("field %s which has enable_match or is input of BM25 function must also enable_analyzer", fieldSchema.Name)
 	}
@@ -934,7 +935,7 @@ func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schema
 	}
 
 	if params, ok := h.GetMultiAnalyzerParams(); ok {
-		if h.EnableMatch() {
+		if matchEnabled {
 			return merr.WrapErrParameterInvalidMsg("multi analyzer now only support for bm25, but now field %s enable match", fieldSchema.Name)
 		}
 		if h.HasAnalyzerParams() {
