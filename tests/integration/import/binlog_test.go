@@ -122,8 +122,7 @@ func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
 				{
 					name: "array_required_to_nullable", sourceElement: schemapb.DataType_FloatVector,
 					targetElement: schemapb.DataType_FloatVector, targetElementNullable: true,
-					// Nullable elements in the target are already rejected by the Proxy import gate.
-					admissionErr: "element-nullable or nested Array field group.vectors is not supported",
+					admissionErr: "vector element nullable mismatch",
 				},
 				{name: "ascii_boundary", text: "abcdef", sourceLength: 6, sourceNullable: true, targetNullable: true},
 				{name: "utf8_boundary", text: "中文", sourceLength: 6, sourceNullable: true, targetNullable: true},

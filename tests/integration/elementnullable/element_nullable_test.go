@@ -324,20 +324,10 @@ func (s *ElementNullableSuite) TestInsertValidationAndImport() {
 		})
 	}
 
-	// Binlog (backup) imports cannot fill element-nullable or nested Array
-	// sub-fields. A NumPy file named after the struct is rejected by the
-	// importer before it reads the file, so the job fails with that message.
+	// NumPy files cannot carry struct data. A file named after the struct is
+	// rejected by the importer before it reads the file, so the job fails with
+	// that message.
 	resp, err := s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
-		CollectionName: name, PartitionName: "_default",
-		Files:   []*internalpb.ImportFile{{Paths: []string{"backup/insert_log/", "backup/delta_log/"}}},
-		Options: []*commonpb.KeyValuePair{kv("backup", "true")},
-	})
-	s.Require().NoError(err)
-	err = merr.Error(resp.GetStatus())
-	s.Require().ErrorIs(err, merr.ErrParameterInvalid)
-	s.Contains(err.Error(), "binlog import (backup restore) into a collection with element-nullable or nested Array field items.ints is not supported")
-
-	resp, err = s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: name,
 		Files:          []*internalpb.ImportFile{{Paths: []string{"numpy/pk.npy", "numpy/embedding.npy", "numpy/" + structName + ".npy"}}},
 	})
