@@ -40,6 +40,7 @@
 #include <vector>
 
 #include "index/ParamUtils.h"
+#include "index/IndexLoadUtils.h"
 #include "index/scalar/PackedDirectoryLoad.h"
 #include <array>
 #include "common/Consts.h"
@@ -62,6 +63,34 @@ namespace milvus::index {
 namespace {
 
 using inverted_params::IsSupportedType;
+
+constexpr std::string_view kV3NestedKey = "is_nested";
+
+void
+ValidatePackedNested(const nlohmann::json& metadata,
+                     const Config& params,
+                     bool runtime_nested) {
+    if (metadata.contains(kV3NestedKey)) {
+        const auto persisted =
+            ReadRequiredIndexMeta<bool>(metadata, kV3NestedKey.data());
+        if (persisted != runtime_nested) {
+            ThrowInfo(DataFormatBroken,
+                      "inverted persisted nested flag disagrees with runtime");
+        }
+        return;
+    }
+    if (runtime_nested) {
+        const auto scalar_version =
+            GetValueFromConfig<int32_t>(params, SCALAR_INDEX_ENGINE_VERSION)
+                .value_or(1);
+        if (scalar_version < 4) {
+            ThrowInfo(DataFormatBroken,
+                      "legacy nested inverted index (version {}) lacks "
+                      "persisted nested metadata",
+                      scalar_version);
+        }
+    }
+}
 
 /**
  * @brief Normalized runtime field semantics used to interpret persisted data.
@@ -560,6 +589,11 @@ InvertedIndexLoader::Create(OpenedIndexSource source,
     if (const auto* legacy =
             std::get_if<LegacyIndexSource>(&*loader->source_)) {
         (void)ReadPersistedEntries(*legacy->source);
+    } else if (const auto* packed =
+                   std::get_if<PackedIndexSource>(&*loader->source_)) {
+        const auto runtime = ParseRuntimeParams(loader->options_.params);
+        ValidatePackedNested(
+            packed->Metadata(), loader->options_.params, runtime.nested);
     }
     co_return loader;
 }
@@ -670,6 +704,7 @@ InvertedIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     IndexLoadPlan plan;
     plan.load_context = state;
     state->runtime = ParseRuntimeParams(opts.params);
+    ValidatePackedNested(metadata, opts.params, state->runtime.nested);
     state->effective = ResolveLoadOptions(opts);
     state->projection = PreparePackedJsonProjectedOpen(
         kFamily, directory, metadata, opts, plan);

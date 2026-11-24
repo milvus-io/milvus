@@ -3979,6 +3979,11 @@ class SegmentExpr : public Expr {
             index_path_detail::NeedsCandidateRefine(req.reader, reader_caps);
         selected_element_level_result_ =
             selected_reader_->CoordDomain() == index::Domain::Element;
+        if (req.require_nested && !selected_element_level_result_) {
+            ClearSelectedIndex();
+            exec_path_ = ExprExecPath::RawData;
+            return false;
+        }
         if (needs_refine && !req.accepts_candidates) {
             ClearSelectedIndex();
             exec_path_ = ExprExecPath::RawData;
@@ -4081,6 +4086,7 @@ class SegmentExpr : public Expr {
             .json_array_cast = is_json_contains_,
             .accepts_candidates = true,
             .has_offset_input = has_offset_input_,
+            .require_nested = IsElementLevelExpression(),
         };
     }
 

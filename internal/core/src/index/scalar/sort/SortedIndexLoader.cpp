@@ -242,18 +242,17 @@ ReadStringMeta(bool use_async, storage::FileSource& source) {
     co_return result;
 }
 
-// Reject conflicting persisted/runtime domains; use runtime metadata when
-// legacy data omits it.
+// Reject conflicting persisted/runtime domains; legacy artifacts without
+// persisted nested metadata are always row-domain.
 void
 ResolveNested(CommonMeta& meta, bool runtime_nested) {
-    if (meta.has_nested && meta.nested != runtime_nested) {
+    if (meta.nested != runtime_nested) {
         ThrowInfo(DataFormatBroken,
                   "sorted persisted nested value {} disagrees with runtime "
                   "value {}",
                   meta.nested,
                   runtime_nested);
     }
-    meta.nested = runtime_nested;
 }
 
 // Enforce the int32 coordinate domain used by sorted reverse offsets.

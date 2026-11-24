@@ -987,11 +987,10 @@ BitmapIndexLoader::PreparePackedState(
     meta.has_nested = metadata.contains(kV3NestedKey);
     if (meta.has_nested)
         meta.nested = ReadRequiredIndexMeta<bool>(metadata, "is_nested");
-    if (meta.has_nested && meta.nested != params.nested) {
+    if (meta.nested != params.nested) {
         ThrowInfo(DataFormatBroken,
                   "bitmap persisted nested flag disagrees with runtime");
     }
-    meta.nested = params.nested;
     ValidateMeta(meta, params);
     state.layout =
         meta.index_length <=
@@ -1034,11 +1033,10 @@ BitmapIndexLoader::Create(OpenedIndexSource source,
         }
         auto& meta = state->meta;
         meta = co_await ReadMeta(legacy.use_async, *legacy.source);
-        if (meta.has_nested && meta.nested != params.nested) {
+        if (meta.nested != params.nested) {
             ThrowInfo(DataFormatBroken,
                       "bitmap persisted nested flag disagrees with runtime");
         }
-        meta.nested = params.nested;
         ValidateMeta(meta, params);
         state->layout =
             meta.index_length <=

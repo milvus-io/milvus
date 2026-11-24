@@ -821,4 +821,35 @@ TEST(JsonFlatPrefixSelectionTest, LongerRootBreaksEqualScoreTie) {
     EXPECT_TRUE(decision.key->identity == narrow.key.identity);
 }
 
+TEST(IndexPathSelectionTest, RequireNestedRejectsRowDomainIndex) {
+    const FieldId field_id(101);
+    exec::ExprIndexRequirement requirement{
+        .field_id = field_id,
+        .reader = exec::RequiredReader::Predicate,
+        .value_type = DataType::VARCHAR,
+        .require_nested = true,
+    };
+    segcore::IndexCapabilityEntry row_entry{
+        .key = {field_id, segcore::IndexIdentity::PreBuiltIndex(1)},
+        .family = index::families::kBitmap,
+        .value_type = DataType::VARCHAR,
+        .caps = {.predicate = true, .nested = false, .exact = true},
+    };
+    const auto rejected = exec::DetermineExecPath(
+        requirement, segcore::FieldIndexCapability(field_id, {row_entry}));
+    EXPECT_EQ(rejected.path, exec::ExprExecPath::RawData);
+    EXPECT_FALSE(rejected.key.has_value());
+
+    auto nested_entry = row_entry;
+    nested_entry.key.identity = segcore::IndexIdentity::PreBuiltIndex(2);
+    nested_entry.caps.nested = true;
+    nested_entry.caps.exact = false;
+    const auto accepted = exec::DetermineExecPath(
+        requirement,
+        segcore::FieldIndexCapability(field_id, {row_entry, nested_entry}));
+    EXPECT_EQ(accepted.path, exec::ExprExecPath::ScalarIndex);
+    ASSERT_TRUE(accepted.key.has_value());
+    EXPECT_TRUE(accepted.key->identity == nested_entry.key.identity);
+}
+
 }  // namespace milvus::test

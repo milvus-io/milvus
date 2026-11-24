@@ -30,6 +30,8 @@
 namespace milvus::index {
 namespace {
 
+constexpr std::string_view kV3NestedKey = "is_nested";
+
 std::vector<std::filesystem::path>
 IndexFiles(const std::string& directory) {
     auto files = storage::ListLocalFiles(
@@ -56,8 +58,11 @@ CreateInvertedIndexDirectory(const std::string& parent) {
 
 InvertedIndexArtifact::InvertedIndexArtifact(
     std::shared_ptr<storage::LocalDirectory> directory,
-    std::vector<size_t> null_offsets)
-    : directory_(std::move(directory)), null_offsets_(std::move(null_offsets)) {
+    std::vector<size_t> null_offsets,
+    bool nested)
+    : directory_(std::move(directory)),
+      null_offsets_(std::move(null_offsets)),
+      nested_(nested) {
     AssertInfo(directory_ != nullptr,
                "inverted artifact requires an owned directory");
 }
@@ -87,6 +92,7 @@ InvertedIndexArtifact::SerializeImpl(Output& sink) const {
         sink.PutMeta(std::string(FILE_NAMES), nlohmann::json(file_names));
         sink.PutMeta(std::string(HAS_NULL),
                      nlohmann::json(!null_offsets_.empty()));
+        sink.PutMeta(std::string(kV3NestedKey), nlohmann::json(nested_));
     }
 
     storage::WriteEntriesFromLocalFiles(sink, files);

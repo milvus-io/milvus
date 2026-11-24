@@ -714,4 +714,21 @@ TEST(IndexInventoryTest, EagerAndLazyProjectionMetadataMatchesAcrossClones) {
     EXPECT_EQ(ResolvedIndexes(lazy).front(), ResolvedIndexes(clone).front());
 }
 
+TEST(IndexInventoryTest, SkippedLazyEntryResolvesToEmptyCapabilityAndNullReader) {
+    auto entry = TestEntry();
+    IndexInventory inventory;
+    int calls = 0;
+    auto reg_entry = LazyEntry(entry, [&](OpContext*) {
+        ++calls;
+        return IndexInventory::ResolvedData{"", DataType::NONE, {}, nullptr};
+    });
+    inventory.Register(reg_entry);
+    const auto caps = inventory.ResolveCapability(nullptr, entry.key.field_id);
+    EXPECT_TRUE(caps.empty());
+    EXPECT_EQ(calls, 1);
+    EXPECT_EQ(inventory.CreateIndexReader(nullptr, entry.key), nullptr);
+    reg_entry->CancelWarmup();
+    EXPECT_EQ(inventory.Drop(entry.key), reg_entry);
+}
+
 }  // namespace milvus::segcore

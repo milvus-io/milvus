@@ -1,5 +1,6 @@
 #include "segcore/indexing/SealedIndexLoader.h"
 
+#include <cstring>
 #include <filesystem>
 #include <limits>
 #include <optional>
@@ -12,7 +13,10 @@
 #include "common/resource_c.h"
 #include "fmt/core.h"
 #include "glog/logging.h"
+#include <yaml-cpp/yaml.h>
+
 #include "index/Families.h"
+#include "index/IndexLoadUtils.h"
 #include "index/IndexTypeAdapter.h"
 #include "index/LoadResource.h"
 #include "index/PackedIndexLoad.h"
@@ -234,6 +238,98 @@ SealedIndexLoader::SealedIndexLoader(
                 std::move(config_), *source);
         }
     }
+    if (nested && !IsVectorDataType(index_load_info_.field_type)) {
+        auto read_legacy_entry = [&](std::string_view name) {
+            if (*file_manager_context_.use_async_load) {
+                return folly::coro::blockingWait(folly::coro::co_withExecutor(
+                    storage::ResolveAsyncLoadExecutor({}, priority),
+                    prepared_legacy_source_->ReadEntryAsync(name, true)));
+            }
+            return prepared_legacy_source_->ReadEntry(name);
+        };
+        const auto is_compatible_nested = [&]() -> bool {
+            if (packed_source) {
+                const auto& metadata = packed_source->Metadata();
+                if (resolved_family == index::families::kBitmap ||
+                    resolved_family == index::families::kSort) {
+                    return metadata.contains("is_nested") &&
+                           index::ReadRequiredIndexMeta<bool>(metadata,
+                                                              "is_nested");
+                }
+                if (resolved_family == index::families::kInverted) {
+                    if (metadata.contains("is_nested")) {
+                        return index::ReadRequiredIndexMeta<bool>(metadata,
+                                                                  "is_nested");
+                    }
+                    return scalar_version >= 4;
+                }
+                return true;
+            }
+            if (resolved_family == index::families::kBitmap) {
+                if (!prepared_legacy_source_->HasEntry(
+                        index::BITMAP_INDEX_META)) {
+                    return false;
+                }
+                const auto encoded =
+                    read_legacy_entry(index::BITMAP_INDEX_META);
+                const std::string text(encoded.begin(), encoded.end());
+                try {
+                    const auto json = nlohmann::json::parse(text);
+                    return json.contains("is_nested_index") &&
+                           json.at("is_nested_index").get<bool>();
+                } catch (const nlohmann::json::parse_error&) {
+                    try {
+                        const auto yaml = YAML::Load(text);
+                        const auto node = yaml["is_nested_index"];
+                        return node && node.as<bool>();
+                    } catch (const YAML::Exception& error) {
+                        ThrowInfo(DataFormatBroken,
+                                  "invalid bitmap V1/V2 metadata: {}",
+                                  error.what());
+                    }
+                } catch (const nlohmann::json::exception& error) {
+                    ThrowInfo(DataFormatBroken,
+                              "invalid bitmap V1/V2 metadata: {}",
+                              error.what());
+                }
+            }
+            if (resolved_family == index::families::kSort) {
+                if (!prepared_legacy_source_->HasEntry("is_nested_index")) {
+                    return false;
+                }
+                const auto encoded = read_legacy_entry("is_nested_index");
+                if (encoded.size() != sizeof(bool)) {
+                    ThrowInfo(DataFormatBroken,
+                              "invalid sorted legacy nested metadata size: {}",
+                              encoded.size());
+                }
+                bool nested_flag = false;
+                std::memcpy(&nested_flag, encoded.data(), sizeof(bool));
+                return nested_flag;
+            }
+            if (resolved_family == index::families::kInverted) {
+                return scalar_version >= 4;
+            }
+            return true;
+        }();
+        if (!is_compatible_nested) {
+            skipped_incompatible_nested_ = true;
+            family_ = std::move(resolved_family);
+            value_type_ = value_type;
+            caps_ = {};
+            prepared_legacy_source_.reset();
+            LOG_WARN(
+                "skip incompatible legacy nested scalar index: segment={}, "
+                "field={}, index_id={}, family={}, scalar_version={}",
+                index_load_info_.segment_id,
+                index_load_info_.field_id,
+                index_load_info_.index_id,
+                family_,
+                scalar_version);
+            return;
+        }
+    }
+
     const auto loader_entry =
         index::LoaderRegistry::Instance().Lookup(resolved_family);
     AssertInfo(static_cast<bool>(loader_entry),
@@ -346,6 +442,9 @@ SealedIndexLoader::EstimatedResources() const {
 
 index::IndexPtr
 SealedIndexLoader::CreateIndex(milvus::OpContext* ctx) {
+    if (skipped_incompatible_nested_) {
+        return nullptr;
+    }
     // Release preparation metadata after this attempt, including early failure.
     auto prepared_source = std::move(prepared_legacy_source_);
     int64_t segment_id = std::stoll(index_load_info_.segment_id);

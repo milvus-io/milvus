@@ -111,6 +111,11 @@ struct ExprIndexRequirement {
     // (`has_offset_input_`). Some paths are unavailable then — e.g. today's
     // `CanUseNgramIndex()` (exec/expression/UnaryExpr.cpp:2346) refuses.
     bool has_offset_input{false};
+
+    // Element-level predicates (e.g., MATCH_ANY on StructArray sub-fields)
+    // require an element-domain index (`caps.nested == true`). Legacy
+    // row-domain indexes must not be selected and must fall back to RawData.
+    bool require_nested{false};
 };
 
 struct ExecPathDecision {
@@ -297,6 +302,7 @@ DetermineExecPath(const ExprIndexRequirement& req,
         if (entry.key.field_id != req.field_id ||
             (req.requires_flat_json_index &&
              !index_path_detail::IsFlatJsonIndex(entry)) ||
+            (req.require_nested && !entry.caps.nested) ||
             !index_path_detail::ReaderMatches(req, entry) ||
             (needs_refine && !req.accepts_candidates) ||
             (req.has_offset_input && req.reader == RequiredReader::Ngram) ||

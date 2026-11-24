@@ -58,6 +58,10 @@ class SealedIndexLoader {
     Caps() const noexcept {
         return caps_;
     }
+    bool
+    IsSkipped() const noexcept {
+        return skipped_incompatible_nested_;
+    }
 
     cachinglayer::LoadingResourceUsage
     EstimatedResources() const;
@@ -112,6 +116,7 @@ class SealedIndexLoader {
     // Consumed by the first index creation attempt.
     std::shared_ptr<storage::V1RemoteSource> prepared_legacy_source_;
     bool lazy_load_{false};
+    bool skipped_incompatible_nested_{false};
     milvus::cachinglayer::Meta meta_;
 };
 }  // namespace milvus::segcore

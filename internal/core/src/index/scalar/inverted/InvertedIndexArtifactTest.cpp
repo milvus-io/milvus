@@ -332,5 +332,76 @@ TEST(InvertedIndexArtifactTest, InvalidEnginePayloadIsRejected) {
                        [&] { static_cast<void>(OpenV3(backend, persisted)); });
 }
 
+TEST(InvertedIndexArtifactTest, V3PublishesNestedMetadata) {
+    {
+        const auto& backend =
+            ScalarReaderBackends().Get<int64_t>("InvertedInt64");
+        auto artifact = BuildInverted(backend, true);
+        const auto persisted = SerializeV3(*artifact);
+        EXPECT_EQ(persisted.metadata.at("is_nested"), false);
+    }
+    {
+        const auto& backend =
+            ScalarReaderBackends().Get<int64_t>("InvertedInt64Nested");
+        ScalarTestData<int64_t> data({1, 2, 2, 3});
+        data.domain = Domain::Element;
+        data.validity_present = false;
+        const ScalarTestInput<int64_t> input(data);
+        auto artifact = backend.Build(input.View(), {.row_count = 4});
+        const auto persisted = SerializeV3(*artifact);
+        EXPECT_EQ(persisted.metadata.at("is_nested"), true);
+
+        const auto legacy = SerializeV1V2(*artifact);
+        EXPECT_FALSE(legacy.entries.contains("is_nested"));
+        EXPECT_FALSE(legacy.entries.contains("is_nested_index"));
+    }
+}
+
+TEST(InvertedIndexArtifactTest, V3NestedMetadataValidationAndLegacyVersionGate) {
+    const auto& backend =
+        ScalarReaderBackends().Get<int64_t>("InvertedInt64Nested");
+    ScalarTestData<int64_t> data({1, 2, 2, 3});
+    data.domain = Domain::Element;
+    data.validity_present = false;
+    const ScalarTestInput<int64_t> input(data);
+    auto artifact = backend.Build(input.View(), {.row_count = 4});
+    const auto baseline = SerializeV3(*artifact);
+
+    {
+        auto disagreed = baseline;
+        disagreed.metadata["is_nested"] = false;
+        ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
+            static_cast<void>(OpenV3(backend, disagreed));
+        });
+    }
+
+    {
+        auto missing_meta = baseline;
+        missing_meta.metadata.erase("is_nested");
+        auto open_with_version = [&](int32_t scalar_version) {
+            auto input_stream = std::make_shared<storage::RemoteInputStream>(
+                std::make_shared<arrow::io::BufferReader>(
+                    MakePackedArtifactBuffer(missing_meta)));
+            auto source = storage::IndexEntryReader::Open(
+                input_stream, input_stream->Size());
+            storage::LoadOptions options;
+            options.params = backend.LoadParams({.row_count = 4});
+            options.params[SCALAR_INDEX_ENGINE_VERSION] = scalar_version;
+            return LoaderRegistry::Instance()
+                .Lookup(families::kInverted)
+                .Load({OpenedIndexSource{PackedIndexSource{
+                           std::shared_ptr<storage::IndexEntryReader>(
+                               std::move(source))}},
+                       options,
+                       TestIndexCacheConfig()});
+        };
+        ExpectSegcoreError(ErrorCode::DataFormatBroken,
+                           [&] { static_cast<void>(open_with_version(3)); });
+        auto loaded = open_with_version(4);
+        ASSERT_NE(loaded, nullptr);
+        EXPECT_EQ(loaded->Metadata().domain, Domain::Element);
+    }
+}
+
 }  // namespace
 }  // namespace milvus::index::test

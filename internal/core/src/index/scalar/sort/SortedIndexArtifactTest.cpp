@@ -239,6 +239,36 @@ TEST(SortedIndexArtifactTest, NestedMetadataDisagreementIsRejected) {
                        [&] { static_cast<void>(OpenV3(backend, persisted)); });
 }
 
+TEST(SortedIndexArtifactTest, MissingNestedMetadataDefaultsToRowDomain) {
+    {
+        const auto& backend =
+            ScalarReaderBackends().Get<int64_t>("SortedInt64NonNull");
+        ScalarTestData<int64_t> data({1, 2, 3});
+        data.validity_present = false;
+        auto artifact = BuildSorted(backend, std::move(data));
+        auto persisted = SerializeV3(*artifact);
+        persisted.metadata.erase(std::string(sort_format::kNested));
+
+        auto reader = OpenV3(backend, persisted);
+        ASSERT_NE(reader, nullptr);
+        EXPECT_EQ(reader->CoordDomain(), Domain::Row);
+    }
+    {
+        const auto& backend =
+            ScalarReaderBackends().Get<int64_t>("SortedInt64Nested");
+        ScalarTestData<int64_t> data({1, 2, 3});
+        data.domain = Domain::Element;
+        data.validity_present = false;
+        auto artifact = BuildSorted(backend, std::move(data));
+        auto persisted = SerializeV3(*artifact);
+        persisted.metadata.erase(std::string(sort_format::kNested));
+
+        ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
+            static_cast<void>(OpenV3(backend, persisted));
+        });
+    }
+}
+
 TEST(SortedIndexArtifactTest, NumericCountDisagreementIsRejected) {
     const auto& backend =
         ScalarReaderBackends().Get<int64_t>("SortedInt64NonNull");

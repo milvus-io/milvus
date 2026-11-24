@@ -282,6 +282,36 @@ TEST(BitmapIndexArtifactTest, NestedMetadataDisagreementIsRejected) {
                        [&] { static_cast<void>(OpenV3(backend, persisted)); });
 }
 
+TEST(BitmapIndexArtifactTest, MissingNestedMetadataDefaultsToRowDomain) {
+    {
+        const auto& backend =
+            ScalarReaderBackends().Get<int64_t>("BitmapInt64NonNull");
+        ScalarTestData<int64_t> data({1, 2, 3});
+        data.validity_present = false;
+        auto artifact = BuildBitmap(backend, std::move(data));
+        auto persisted = SerializeV3(*artifact);
+        persisted.metadata.erase("is_nested");
+
+        auto reader = OpenV3(backend, persisted);
+        ASSERT_NE(reader, nullptr);
+        EXPECT_EQ(reader->CoordDomain(), Domain::Row);
+    }
+    {
+        const auto& backend =
+            ScalarReaderBackends().Get<int64_t>("BitmapInt64Nested");
+        ScalarTestData<int64_t> data({1, 2, 3});
+        data.domain = Domain::Element;
+        data.validity_present = false;
+        auto artifact = BuildBitmap(backend, std::move(data));
+        auto persisted = SerializeV3(*artifact);
+        persisted.metadata.erase("is_nested");
+
+        ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
+            static_cast<void>(OpenV3(backend, persisted));
+        });
+    }
+}
+
 TEST(BitmapIndexArtifactTest, TruncatedPostingPayloadIsRejected) {
     const auto& backend =
         ScalarReaderBackends().Get<int64_t>("BitmapInt64NonNull");

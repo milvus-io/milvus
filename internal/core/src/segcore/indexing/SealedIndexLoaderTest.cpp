@@ -25,6 +25,7 @@
 #include "index/contracts/Registry.h"
 #include "index/contracts/build/ScalarBuildInput.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
+#include "index/test_utils/ArtifactTestUtils.h"
 #include "segcore/Types.h"
 #include "segcore/indexing/SealedIndexLoader.h"
 #include "storage/MemFileManagerImpl.h"
@@ -271,6 +272,176 @@ TEST_F(SealedIndexLoaderTest, PackedScalarLoadRequiresActualFileMetadata) {
             EXPECT_NE(std::string(error.what()).find("one V3 file"),
                       std::string::npos);
         }
+    }
+}
+
+TEST_F(SealedIndexLoaderTest,
+       SkipsLegacyStructSubFieldIndexesAndAcceptsCompatibleOnes) {
+    const std::vector<std::string_view> values{
+        "alpha", "beta", "beta", "gamma"};
+    const index::ScalarBuildBatch<std::string_view> batch{values, {}};
+    storage::MemFileManagerImpl manager(context_);
+
+    auto write_v3 = [&](const std::string& file_name,
+                        const storage::Artifact& artifact,
+                        std::optional<index::ScalarIndexType> hybrid_selector,
+                        bool strip_is_nested) {
+        index::test::TestArtifactData data = index::test::SerializeV3(artifact);
+        if (strip_is_nested) {
+            data.metadata.erase("is_nested");
+        }
+        if (hybrid_selector.has_value()) {
+            data.metadata[index::INDEX_TYPE] =
+                static_cast<uint8_t>(*hybrid_selector);
+        }
+        auto writer = manager.CreateIndexEntryWriterUnified(file_name);
+        for (const auto& [entry_name, bytes] : data.entries) {
+            writer->WriteEntry(entry_name, bytes.data(), bytes.size());
+        }
+        for (const auto& [key, val] : data.metadata) {
+            writer->PutMeta(key, val);
+        }
+        writer->Finish();
+        return std::pair<std::string, int64_t>{
+            manager.GetRemoteIndexObjectPrefix() + "/" + file_name,
+            static_cast<int64_t>(writer->GetTotalBytesWritten())};
+    };
+
+    auto build_artifact = [&](const std::string& family, bool nested) {
+        const Config params{{index::FIELD_ID, int64_t{101}},
+                            {"field_type", DataType::ARRAY},
+                            {"value_type", DataType::VARCHAR},
+                            {"element_type", DataType::VARCHAR},
+                            {"nested", nested},
+                            {"nullable", false}};
+        auto builder =
+            index::BuilderRegistry<
+                index::ScalarBuildInput<std::string_view>>::Instance()
+                .Create(family, params);
+        return std::move(*builder).Build({std::span(&batch, 1)});
+    };
+
+    // 1. Legacy V3 HYBRID->BITMAP, BITMAP, SORT, and INVERTED (v3) without
+    // is_nested on StructArray sub-field must be skipped cleanly.
+    struct LegacyCase {
+        std::string name;
+        std::string index_type;
+        std::string build_family;
+        std::optional<index::ScalarIndexType> hybrid_selector;
+        int scalar_version;
+        bool strip_is_nested;
+        bool expect_skipped;
+    };
+    const std::vector<LegacyCase> cases = {
+        {"LegacyBitmap",
+         index::BITMAP_INDEX_TYPE,
+         index::families::kBitmap,
+         std::nullopt,
+         3,
+         true,
+         true},
+        {"LegacyHybridBitmap",
+         index::HYBRID_INDEX_TYPE,
+         index::families::kBitmap,
+         index::ScalarIndexType::BITMAP,
+         3,
+         true,
+         true},
+        {"LegacySort",
+         index::ASCENDING_SORT,
+         index::families::kSort,
+         std::nullopt,
+         3,
+         true,
+         true},
+        {"LegacyInvertedV3",
+         index::INVERTED_INDEX_TYPE,
+         index::families::kInverted,
+         std::nullopt,
+         3,
+         true,
+         true},
+        {"LegacyInvertedV4",
+         index::INVERTED_INDEX_TYPE,
+         index::families::kInverted,
+         std::nullopt,
+         4,
+         true,
+         false},
+        {"NewInvertedV3WithMeta",
+         index::INVERTED_INDEX_TYPE,
+         index::families::kInverted,
+         std::nullopt,
+         3,
+         false,
+         false},
+    };
+
+    for (const auto& tc : cases) {
+        SCOPED_TRACE(tc.name);
+        auto artifact = build_artifact(tc.build_family, true);
+        const auto [remote_file, bytes] =
+            write_v3(tc.name + ".v3",
+                     *artifact,
+                     tc.hybrid_selector,
+                     tc.strip_is_nested);
+        auto info = Info();
+        info.index_files = {remote_file};
+        info.index_size = bytes;
+        info.index_params[index::INDEX_TYPE] = tc.index_type;
+        info.index_params[index::SCALAR_INDEX_ENGINE_VERSION] =
+            std::to_string(tc.scalar_version);
+        Config config(info.index_params);
+        config["nested"] = true;
+        SealedIndexLoader loader(
+            &info, tracer::TraceContext{}, context_, config);
+        EXPECT_EQ(loader.IsSkipped(), tc.expect_skipped);
+        auto index = loader.CreateIndex(nullptr);
+        if (tc.expect_skipped) {
+            EXPECT_EQ(index, nullptr);
+            EXPECT_FALSE(loader.Caps().predicate);
+            EXPECT_FALSE(loader.Caps().pattern_match);
+            EXPECT_FALSE(loader.Caps().nested);
+        } else {
+            ASSERT_NE(index, nullptr);
+            auto reader = index->CreateReader(nullptr);
+            ASSERT_NE(reader, nullptr);
+            EXPECT_EQ(reader->CoordDomain(), index::Domain::Element);
+        }
+    }
+
+    // 2. Ordinary (non-struct) scalar/ARRAY without is_nested remains usable
+    // as Row.
+    {
+        const Config scalar_params{{"field_type", DataType::VARCHAR},
+                                   {"value_type", DataType::VARCHAR},
+                                   {"nested", false},
+                                   {"nullable", false}};
+        auto builder =
+            index::BuilderRegistry<
+                index::ScalarBuildInput<std::string_view>>::Instance()
+                .Create(index::families::kBitmap, scalar_params);
+        auto artifact = std::move(*builder).Build({std::span(&batch, 1)});
+        const auto [remote_file, bytes] =
+            write_v3("OrdinaryScalarBitmap.v3",
+                     *artifact,
+                     index::ScalarIndexType::BITMAP,
+                     true);
+        auto info = Info();
+        info.field_type = DataType::VARCHAR;
+        info.element_type = DataType::NONE;
+        info.index_files = {remote_file};
+        info.index_size = bytes;
+        Config config(info.index_params);
+        config["nested"] = false;
+        SealedIndexLoader loader(
+            &info, tracer::TraceContext{}, context_, config);
+        EXPECT_FALSE(loader.IsSkipped());
+        auto index = loader.CreateIndex(nullptr);
+        ASSERT_NE(index, nullptr);
+        auto reader = index->CreateReader(nullptr);
+        ASSERT_NE(reader, nullptr);
+        EXPECT_EQ(reader->CoordDomain(), index::Domain::Row);
     }
 }
 
