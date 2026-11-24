@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -86,6 +87,11 @@ type VertexAIEmbeddingProvider struct {
 	timeoutMs int64
 	extraInfo *models.ModelExtraInfo
 }
+
+// vertexAILocationPattern matches a Google Cloud location ID such as
+// us-central1. The location becomes part of the request host name, so it may
+// only contain the characters of a DNS label.
+var vertexAILocationPattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
 
 func isGeminiModel(modelName string) bool {
 	return strings.HasPrefix(modelName, "gemini-embedding-2")
@@ -176,6 +182,9 @@ func NewVertexAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 	url := params[models.URLParamKey]
 	geminiURL := ""
 	if url == "" {
+		if !vertexAILocationPattern.MatchString(location) {
+			return nil, merr.WrapErrParameterInvalidMsg("[%s param's value: %s] is not a valid VertexAI location", models.LocationParamKey, location)
+		}
 		if gemini {
 			geminiURL = fmt.Sprintf("https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/publishers/google/models/%s:embedContent", location, projectID, location, modelName)
 		} else {

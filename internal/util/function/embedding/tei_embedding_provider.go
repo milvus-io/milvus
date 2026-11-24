@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/tei"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -82,7 +83,8 @@ func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *
 		}
 	}
 
-	apiKey, _, err := models.ParseAKAndURL(credentials, functionSchema.Params, params, "", extraInfo)
+	confPrefix := paramtable.Get().FunctionCfg.TextEmbeddingProviders.KeyPrefix + teiProvider
+	apiKey, err := models.ParseAKForEndpoint(credentials, functionSchema.Params, params, "", extraInfo, endpoint, confPrefix)
 	if err != nil {
 		return nil, err
 	}

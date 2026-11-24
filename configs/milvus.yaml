@@ -1784,6 +1784,7 @@ function:
         url:  # Your siliconflow embedding url, Default is the official embedding url
       tei:
         credential:  # The name in the crendential configuration item
+        credential_endpoints:  # Endpoints (scheme://host[:port] with an ASCII host, path ignored; a YAML list or a comma-separated string) allowed to receive a credential configured on the server, whether named by this provider's credential item or by the credential param of a function. A function that would send such a credential to any other endpoint is rejected.
         enable: true # Whether to enable TEI model service
       vertexai:
         credential:  # The name in the crendential configuration item
@@ -1814,9 +1815,11 @@ function:
           url:  # Your siliconflow rerank url, Default is the official rerank url
         tei:
           credential:  # The name in the crendential configuration item
+          credential_endpoints:  # Endpoints (scheme://host[:port] with an ASCII host, path ignored; a YAML list or a comma-separated string) allowed to receive a credential configured on the server, whether named by this provider's credential item or by the credential param of a function. A function that would send such a credential to any other endpoint is rejected.
           enable: true # Whether to enable TEI rerank service
         vllm:
           credential:  # The name in the crendential configuration item
+          credential_endpoints:  # Endpoints (scheme://host[:port] with an ASCII host, path ignored; a YAML list or a comma-separated string) allowed to receive a credential configured on the server, whether named by this provider's credential item or by the credential param of a function. A function that would send such a credential to any other endpoint is rejected.
           enable: true # Whether to enable vllm rerank service
         voyageai:
           credential:  # The name in the crendential configuration item

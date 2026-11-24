@@ -112,7 +112,7 @@ func rerankProviderCases() []rerankProviderCase {
 				return `{"results":` + renderItems(pairs, "index", "relevance_score") + `}`
 			},
 			newProvider: func(url string) (ModelProvider, error) {
-				return newVllmProvider(endpointParams(url), nil, creds())
+				return newVllmProvider(endpointParams(url), map[string]string{models.CredentialEndpointsConfKey: url}, creds())
 			},
 		},
 		{
@@ -121,7 +121,7 @@ func rerankProviderCases() []rerankProviderCase {
 				return renderItems(pairs, "index", "score")
 			},
 			newProvider: func(url string) (ModelProvider, error) {
-				return newTeiProvider(endpointParams(url), nil, creds())
+				return newTeiProvider(endpointParams(url), map[string]string{models.CredentialEndpointsConfKey: url}, creds())
 			},
 		},
 	}

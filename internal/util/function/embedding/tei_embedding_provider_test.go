@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -77,7 +78,8 @@ func createTEIProvider(url string, schema *schemapb.FieldSchema, providerName st
 	}
 	switch providerName {
 	case teiProvider:
-		return NewTEIEmbeddingProvider(schema, functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: 5})
+		conf := map[string]string{models.CredentialEndpointsConfKey: url}
+		return NewTEIEmbeddingProvider(schema, functionSchema, conf, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: 5})
 	default:
 		return nil, errors.New("Unknow provider")
 	}
@@ -161,7 +163,8 @@ func (s *TEITextEmbeddingProviderSuite) TestNewTEIEmbeddingProvider() {
 		},
 	}
 	batchFactor := 5
-	provider, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: batchFactor})
+	conf := map[string]string{models.CredentialEndpointsConfKey: "http://mymock.com"}
+	provider, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, conf, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: batchFactor})
 	s.NoError(err)
 	s.Equal(provider.FieldDim(), int64(4))
 	s.True(provider.MaxBatch() == 32*batchFactor)
@@ -169,36 +172,90 @@ func (s *TEITextEmbeddingProviderSuite) TestNewTEIEmbeddingProvider() {
 	// Invalid truncate
 	{
 		functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: models.TruncateParamKey, Value: "Invalid"})
-		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
+		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, conf, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 		s.Error(err)
 	}
 	// Invalid truncationDirection
 	{
 		functionSchema.Params[2] = &commonpb.KeyValuePair{Key: models.TruncateParamKey, Value: "true"}
 		functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: models.TruncationDirectionParamKey, Value: "Invalid"})
-		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
+		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, conf, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 		s.Error(err)
 	}
 
 	// truncationDirection
 	{
 		functionSchema.Params[3] = &commonpb.KeyValuePair{Key: models.TruncationDirectionParamKey, Value: "Left"}
-		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
+		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, conf, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 		s.NoError(err)
 	}
 
 	// Invalid max batch
 	{
 		functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: models.MaxClientBatchSizeParamKey, Value: "Invalid"})
-		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
+		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, conf, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 		s.Error(err)
 	}
 
 	// Valid max batch
 	{
 		functionSchema.Params[4] = &commonpb.KeyValuePair{Key: models.MaxClientBatchSizeParamKey, Value: "128"}
-		pv, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: batchFactor})
+		pv, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, conf, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: batchFactor})
 		s.NoError(err)
 		s.True(pv.MaxBatch() == 128*batchFactor)
 	}
+}
+
+func (s *TEITextEmbeddingProviderSuite) TestCredentialOnlySentToListedEndpoint() {
+	var hits atomic.Int32
+	var authHeader atomic.Value
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		authHeader.Store(r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusOK)
+		data, _ := json.Marshal([][]float32{{0.1, 0.1, 0.1, 0.1}})
+		w.Write(data)
+	}))
+	defer ts.Close()
+
+	creds := credentials.NewCredentials(map[string]string{"mock.apikey": "mock", "other.apikey": "other"})
+	newProvider := func(conf map[string]string, params ...*commonpb.KeyValuePair) (*TeiEmbeddingProvider, error) {
+		functionSchema := &schemapb.FunctionSchema{
+			Name:             "test",
+			Type:             schemapb.FunctionType_TextEmbedding,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"vector"},
+			Params:           append([]*commonpb.KeyValuePair{{Key: models.EndpointParamKey, Value: ts.URL}}, params...),
+		}
+		return NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, conf, creds, &models.ModelExtraInfo{BatchFactor: 1})
+	}
+	embed := func(provider *TeiEmbeddingProvider) string {
+		_, err := provider.CallEmbedding(context.Background(), []string{"sentence"}, models.InsertMode)
+		s.NoError(err)
+		return authHeader.Load().(string)
+	}
+
+	// a credential named in the function params, endpoint not listed
+	_, err := newProvider(map[string]string{}, &commonpb.KeyValuePair{Key: models.CredentialParamKey, Value: "other"})
+	s.ErrorContains(err, models.CredentialEndpointsConfKey)
+	_, err = newProvider(map[string]string{models.CredentialEndpointsConfKey: "http://tei.internal:8080"}, &commonpb.KeyValuePair{Key: models.CredentialParamKey, Value: "other"})
+	s.ErrorContains(err, models.CredentialEndpointsConfKey)
+	// the provider credential configured in milvus.yaml, endpoint not listed
+	_, err = newProvider(map[string]string{models.CredentialParamKey: "mock"})
+	s.ErrorContains(err, models.CredentialEndpointsConfKey)
+	s.Equal(int32(0), hits.Load())
+
+	// no credential: the endpoint is called without an Authorization header
+	provider, err := newProvider(map[string]string{})
+	s.NoError(err)
+	s.Equal("", embed(provider))
+
+	// listed endpoint: the credential is attached
+	provider, err = newProvider(map[string]string{models.CredentialParamKey: "mock", models.CredentialEndpointsConfKey: ts.URL})
+	s.NoError(err)
+	s.Equal("Bearer mock", embed(provider))
+	provider, err = newProvider(map[string]string{models.CredentialEndpointsConfKey: "http://tei.internal:8080," + ts.URL + "/"}, &commonpb.KeyValuePair{Key: models.CredentialParamKey, Value: "other"})
+	s.NoError(err)
+	s.Equal("Bearer other", embed(provider))
+	s.Equal(int32(3), hits.Load())
 }
