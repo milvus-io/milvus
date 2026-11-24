@@ -85,6 +85,9 @@ message SearchIteratorV2Info {
   optional bytes last_primary_key = 4;
   // schema.DataType of the collection primary key field (INT64 or VARCHAR).
   optional int32 primary_key_type = 5;
+  // Tie-break continuation for element-level (ArrayOfVector) searches: element
+  // index within the parent row of the last returned item.
+  optional int32 last_element_index = 6;
 }
 
 message QueryInfo {

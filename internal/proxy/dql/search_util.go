@@ -419,34 +419,80 @@ func isSortableFieldType(dataType schemapb.DataType) bool {
 }
 
 // searchIteratorCursorVersion prefixes the opaque cursor token returned to the
-// SDK for SearchIterator v2. The token encodes the last returned (bound, pk)
-// so the next page resumes exactly after it; the SDK echoes it verbatim.
-const searchIteratorCursorVersion = "c1"
+// SDK for SearchIterator v2. The token encodes the last returned (bound, pk[,
+// element_index]) so the next page resumes exactly after it; the SDK echoes it
+// verbatim.
+const (
+	searchIteratorCursorVersion = "c1"
+	cursorFlagHasPK             = 1 << 0
+	cursorFlagHasElemIdx        = 1 << 1
+)
 
-// encodeSearchIterCursor packs (last_bound, pk_type, pk_bytes) into the opaque
-// cursor token: version, 4-byte little-endian float bound, 1-byte pk type,
-// then the pk bytes (INT64 -> 8-byte big-endian; VARCHAR/String -> raw bytes).
-func encodeSearchIterCursor(bound float32, pkType schemapb.DataType, pkBytes []byte) string {
-	buf := make([]byte, 5, 5+len(pkBytes))
+// encodeSearchIterCursor packs (last_bound, pk_type, pk_bytes, elem_idx) into
+// the opaque cursor token: 4-byte little-endian float bound, 1-byte flags
+// (hasPK / hasElemIdx), 1-byte pk type, optional 4-byte little-endian element
+// index, and optional pk bytes (INT64 -> 8-byte big-endian; VARCHAR/String ->
+// raw bytes).
+func encodeSearchIterCursor(bound float32, pkType schemapb.DataType, hasPK bool, pkBytes []byte, elemIdx *int32) string {
+	extra := len(pkBytes)
+	if elemIdx != nil {
+		extra += 4
+	}
+	buf := make([]byte, 6, 6+extra)
 	binary.LittleEndian.PutUint32(buf, math.Float32bits(bound))
-	buf[4] = byte(pkType)
-	buf = append(buf, pkBytes...)
+	var flags byte
+	if hasPK {
+		flags |= cursorFlagHasPK
+	}
+	if elemIdx != nil {
+		flags |= cursorFlagHasElemIdx
+	}
+	buf[4] = flags
+	buf[5] = byte(pkType)
+	if elemIdx != nil {
+		var elemBuf [4]byte
+		binary.LittleEndian.PutUint32(elemBuf[:], uint32(*elemIdx))
+		buf = append(buf, elemBuf[:]...)
+	}
+	if hasPK {
+		buf = append(buf, pkBytes...)
+	}
 	return searchIteratorCursorVersion + ":" + base64.RawStdEncoding.EncodeToString(buf)
 }
 
 // decodeSearchIterCursor parses a cursor token produced by encodeSearchIterCursor.
 // Returns ok=false for legacy UUID tokens and malformed input.
-func decodeSearchIterCursor(token string) (bound float32, pkType schemapb.DataType, pkBytes []byte, ok bool) {
+func decodeSearchIterCursor(token string) (bound float32, pkType schemapb.DataType, hasPK bool, pkBytes []byte, elemIdx *int32, ok bool) {
 	prefix := searchIteratorCursorVersion + ":"
 	if !strings.HasPrefix(token, prefix) {
-		return 0, 0, nil, false
+		return 0, 0, false, nil, nil, false
 	}
 	raw, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(token, prefix))
-	if err != nil || len(raw) < 5 {
-		return 0, 0, nil, false
+	if err != nil || len(raw) < 6 {
+		return 0, 0, false, nil, nil, false
 	}
 	bound = math.Float32frombits(binary.LittleEndian.Uint32(raw[:4]))
-	return bound, schemapb.DataType(raw[4]), raw[5:], true
+	flags := raw[4]
+	if flags&^(cursorFlagHasPK|cursorFlagHasElemIdx) != 0 {
+		return 0, 0, false, nil, nil, false
+	}
+	pkType = schemapb.DataType(raw[5])
+	pos := 6
+	if flags&cursorFlagHasElemIdx != 0 {
+		if len(raw) < pos+4 {
+			return 0, 0, false, nil, nil, false
+		}
+		v := int32(binary.LittleEndian.Uint32(raw[pos : pos+4]))
+		elemIdx = &v
+		pos += 4
+	}
+	if flags&cursorFlagHasPK != 0 {
+		hasPK = true
+		pkBytes = raw[pos:]
+	} else if pos != len(raw) {
+		return 0, 0, false, nil, nil, false
+	}
+	return bound, pkType, hasPK, pkBytes, elemIdx, true
 }
 
 // isValidSearchIterToken accepts both legacy UUID session tokens and cursor
@@ -455,7 +501,7 @@ func isValidSearchIterToken(token string) bool {
 	if _, err := uuid.Parse(token); err == nil {
 		return true
 	}
-	_, _, _, ok := decodeSearchIterCursor(token)
+	_, _, _, _, _, ok := decodeSearchIterCursor(token)
 	return ok
 }
 
@@ -467,28 +513,42 @@ func int64ToBigEndianBytes(v int64) []byte {
 	return buf
 }
 
-// lastPagePkBytes returns the primary key of the last row of the page, in the
-// wire encoding expected by the continuation cursor. Returns nil for an empty
-// page (the cursor then only carries the bound).
-func lastPagePkBytes(results *schemapb.SearchResultData, pkType schemapb.DataType) []byte {
+// lastPageCursorState returns the primary key (and optional element index for
+// element-level searches) of the last item of the page in the wire encoding
+// expected by the continuation cursor. Returns hasPK=false for an empty page.
+func lastPageCursorState(results *schemapb.SearchResultData) (hasPK bool, pkBytes []byte, elemIdx *int32) {
 	if results == nil || results.Ids == nil {
-		return nil
+		return false, nil, nil
 	}
+	idCount := 0
 	if intId := results.Ids.GetIntId(); intId != nil {
 		data := intId.GetData()
 		if len(data) == 0 {
-			return nil
+			return false, nil, nil
 		}
-		return int64ToBigEndianBytes(data[len(data)-1])
-	}
-	if strId := results.Ids.GetStrId(); strId != nil {
+		idCount = len(data)
+		pkBytes = int64ToBigEndianBytes(data[idCount-1])
+		hasPK = true
+	} else if strId := results.Ids.GetStrId(); strId != nil {
 		data := strId.GetData()
 		if len(data) == 0 {
-			return nil
+			return false, nil, nil
 		}
-		return []byte(data[len(data)-1])
+		idCount = len(data)
+		pkBytes = []byte(data[idCount-1])
+		hasPK = true
 	}
-	return nil
+	if !hasPK {
+		return false, nil, nil
+	}
+	if results.ElementIndices != nil {
+		elems := results.ElementIndices.GetData()
+		if len(elems) == idCount {
+			v := int32(elems[idCount-1])
+			elemIdx = &v
+		}
+	}
+	return true, pkBytes, elemIdx
 }
 
 func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupByFieldId int64, isIterator bool, offset int64, queryTopK *int64, largeTopKEnabled bool) (*planpb.SearchIteratorV2Info, error) {
@@ -561,13 +621,19 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 	}
 
 	// Decode the cursor token returned by the previous page. When present it
-	// carries the authoritative (last_bound, last_primary_key) continuation, so
-	// rows tied at the page-boundary distance are not skipped or repeated.
-	if bound, pkType, pkBytes, ok := decodeSearchIterCursor(token); ok {
+	// carries the authoritative (last_bound, last_primary_key[, last_element_index])
+	// continuation, so rows/elements tied at the page-boundary distance are not
+	// skipped or repeated.
+	if bound, pkType, hasPK, pkBytes, elemIdx, ok := decodeSearchIterCursor(token); ok {
 		planIteratorV2Info.LastBound = &bound
-		planIteratorV2Info.LastPrimaryKey = pkBytes
-		pkTypeInt := int32(pkType)
-		planIteratorV2Info.PrimaryKeyType = &pkTypeInt
+		if hasPK {
+			planIteratorV2Info.LastPrimaryKey = pkBytes
+			pkTypeInt := int32(pkType)
+			planIteratorV2Info.PrimaryKeyType = &pkTypeInt
+		}
+		if elemIdx != nil {
+			planIteratorV2Info.LastElementIndex = elemIdx
+		}
 	}
 
 	return planIteratorV2Info, nil

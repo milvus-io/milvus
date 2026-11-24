@@ -4178,6 +4178,25 @@ func ComparePK(pkA, pkB interface{}) bool {
 	return false
 }
 
+// CompareSearchResultTieKey returns true if entry idxA of dataA orders before
+// entry idxB of dataB by (PK, ElementIndex) when scores are equal.
+func CompareSearchResultTieKey(dataA *schemapb.SearchResultData, idxA int64, dataB *schemapb.SearchResultData, idxB int64) bool {
+	pkA := GetPK(dataA.GetIds(), idxA)
+	pkB := GetPK(dataB.GetIds(), idxB)
+	if ComparePK(pkA, pkB) {
+		return true
+	}
+	if ComparePK(pkB, pkA) {
+		return false
+	}
+	elemsA := dataA.GetElementIndices().GetData()
+	elemsB := dataB.GetElementIndices().GetData()
+	if idxA >= 0 && int(idxA) < len(elemsA) && idxB >= 0 && int(idxB) < len(elemsB) {
+		return elemsA[idxA] < elemsB[idxB]
+	}
+	return false
+}
+
 type ResultWithID interface {
 	GetIds() *schemapb.IDs
 	GetHasMoreResult() bool

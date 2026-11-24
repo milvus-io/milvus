@@ -501,11 +501,18 @@ func TestSearchTask_PostExecute(t *testing.T) {
 				qt := createIteratorSearchTask(t, metricType, kRows)
 				err = qt.PostExecute(ctx)
 				assert.NoError(t, err)
-				assert.Equal(t, kToken, qt.result.Results.SearchIteratorV2Results.Token)
+				bound, pkType, hasPK, pkBytes, elemIdx, ok := decodeSearchIterCursor(qt.result.Results.SearchIteratorV2Results.Token)
+				assert.True(t, ok)
+				assert.True(t, hasPK)
+				assert.Equal(t, schemapb.DataType_Int64, pkType)
+				assert.Equal(t, int64ToBigEndianBytes(int64(kRows-1)), pkBytes)
+				assert.Nil(t, elemIdx)
 				if metric.PositivelyRelated(metricType) {
 					assert.Equal(t, float32(1), qt.result.Results.SearchIteratorV2Results.LastBound)
+					assert.Equal(t, float32(1), bound)
 				} else {
 					assert.Equal(t, float32(kRows), qt.result.Results.SearchIteratorV2Results.LastBound)
+					assert.Equal(t, float32(kRows), bound)
 				}
 			}
 		})
@@ -516,11 +523,17 @@ func TestSearchTask_PostExecute(t *testing.T) {
 				qt := createIteratorSearchTask(t, metricType, 0)
 				err = qt.PostExecute(ctx)
 				assert.NoError(t, err)
-				assert.Equal(t, kToken, qt.result.Results.SearchIteratorV2Results.Token)
+				bound, _, hasPK, pkBytes, elemIdx, ok := decodeSearchIterCursor(qt.result.Results.SearchIteratorV2Results.Token)
+				assert.True(t, ok)
+				assert.False(t, hasPK)
+				assert.Nil(t, pkBytes)
+				assert.Nil(t, elemIdx)
 				if metric.PositivelyRelated(metricType) {
 					assert.Equal(t, float32(math.MaxFloat32), qt.result.Results.SearchIteratorV2Results.LastBound)
+					assert.Equal(t, float32(math.MaxFloat32), bound)
 				} else {
 					assert.Equal(t, float32(-math.MaxFloat32), qt.result.Results.SearchIteratorV2Results.LastBound)
+					assert.Equal(t, float32(-math.MaxFloat32), bound)
 				}
 			}
 		})
@@ -533,8 +546,13 @@ func TestSearchTask_PostExecute(t *testing.T) {
 				qt.queryInfos[0].SearchIteratorV2Info.LastBound = &kLastBound
 				err = qt.PostExecute(ctx)
 				assert.NoError(t, err)
-				assert.Equal(t, kToken, qt.result.Results.SearchIteratorV2Results.Token)
+				bound, _, hasPK, pkBytes, elemIdx, ok := decodeSearchIterCursor(qt.result.Results.SearchIteratorV2Results.Token)
+				assert.True(t, ok)
+				assert.False(t, hasPK)
+				assert.Nil(t, pkBytes)
+				assert.Nil(t, elemIdx)
 				assert.Equal(t, kLastBound, qt.result.Results.SearchIteratorV2Results.LastBound)
+				assert.Equal(t, kLastBound, bound)
 			}
 		})
 	})

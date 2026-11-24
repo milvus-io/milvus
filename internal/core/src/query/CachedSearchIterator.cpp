@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <exception>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <numeric>
 
@@ -396,7 +397,7 @@ std::optional<CachedSearchIterator::DisIdPair>
 CachedSearchIterator::GetNextValidResult(
     const size_t iterator_idx,
     const std::optional<float>& last_bound,
-    const std::optional<PkType>& last_pk,
+    const std::optional<TieBreakKey>& last_key,
     const std::optional<float>& radius,
     const std::optional<float>& range_filter) {
     auto& iterator = iterators_[iterator_idx];
@@ -420,7 +421,7 @@ CachedSearchIterator::GetNextValidResult(
                       next.what());
         }
         auto result = ConvertIteratorResult(next.value());
-        if (IsValid(result, last_bound, last_pk, radius, range_filter)) {
+        if (IsValid(result, last_bound, last_key, radius, range_filter)) {
             return result;
         }
     }
@@ -432,7 +433,7 @@ void
 CachedSearchIterator::MergeChunksResults(
     size_t query_idx,
     const std::optional<float>& last_bound,
-    const std::optional<PkType>& last_pk,
+    const std::optional<TieBreakKey>& last_key,
     const std::optional<float>& radius,
     const std::optional<float>& range_filter,
     std::vector<DisIdPair>& rst) {
@@ -443,7 +444,7 @@ CachedSearchIterator::MergeChunksResults(
         for (size_t chunk_id = 0; chunk_id < num_chunks_; ++chunk_id) {
             const size_t iterator_idx = query_idx + chunk_id * nq_;
             if (auto next_result = GetNextValidResult(
-                    iterator_idx, last_bound, last_pk, radius, range_filter);
+                    iterator_idx, last_bound, last_key, radius, range_filter);
                 next_result.has_value()) {
                 heap.emplace(iterator_idx, next_result.value());
             }
@@ -460,7 +461,7 @@ CachedSearchIterator::MergeChunksResults(
         heap.pop();
 
         // last_bound may change between NextBatch calls, discard any invalid results
-        if (!IsValid(cur_rst, last_bound, last_pk, radius, range_filter)) {
+        if (!IsValid(cur_rst, last_bound, last_key, radius, range_filter)) {
             continue;
         }
         rst.emplace_back(cur_rst);
@@ -469,7 +470,7 @@ CachedSearchIterator::MergeChunksResults(
         }
 
         if (auto next_result = GetNextValidResult(
-                iterator_idx, last_bound, last_pk, radius, range_filter);
+                iterator_idx, last_bound, last_key, radius, range_filter);
             next_result.has_value()) {
             heap.emplace(iterator_idx, next_result.value());
         }
@@ -481,9 +482,7 @@ CachedSearchIterator::GetBatchedNextResults(size_t query_idx,
                                             const SearchInfo& search_info) {
     const auto& iterator_v2_info = search_info.iterator_v2_info_.value();
     auto last_bound = ConvertIncomingDistance(iterator_v2_info.last_bound);
-    auto last_pk =
-        DecodePkValue(iterator_v2_info.last_primary_key,
-                      iterator_v2_info.primary_key_type);
+    auto last_key = DecodeLastTieBreakKey(iterator_v2_info);
     auto radius = ConvertIncomingDistance(
         index::GetValueFromConfig<float>(search_info.search_params_, RADIUS));
     auto range_filter =
@@ -498,9 +497,9 @@ CachedSearchIterator::GetBatchedNextResults(size_t query_idx,
         // The knowhere stream yields rows in distance order but in an
         // unspecified order within a group of equal distances. Pull enough rows
         // so the collected set contains the whole boundary tie group (all rows
-        // tied at the distance of the batch cut); sorting by (score, pk) below
-        // then makes the page a strict prefix of the (score, pk) order, which
-        // the continuation cursor can resume exactly.
+        // tied at the distance of the batch cut); sorting by (score, pk[,
+        // elem_idx]) below then makes the page a strict prefix of that order,
+        // which the continuation cursor can resume exactly.
         std::optional<float> cut_dist = std::nullopt;
         while (true) {
             auto has_next = iterator->HasNext();
@@ -524,45 +523,62 @@ CachedSearchIterator::GetBatchedNextResults(size_t query_idx,
                 // page.
                 break;
             }
-            if (!IsValid(result, last_bound, last_pk, radius, range_filter)) {
+            if (!IsValid(result, last_bound, last_key, radius, range_filter)) {
                 continue;
             }
             collected.emplace_back(result);
             if (!cut_dist.has_value() && collected.size() >= batch_size_) {
                 // The batch cut lands at this distance; keep pulling until the
                 // next row is strictly farther, so tied rows at the cut are all
-                // collected and ordered by pk.
+                // collected and ordered by tie-break key.
                 cut_dist = collected[batch_size_ - 1].first;
             }
         }
     } else {
         MergeChunksResults(
-            query_idx, last_bound, last_pk, radius, range_filter, collected);
+            query_idx, last_bound, last_key, radius, range_filter, collected);
     }
 
-    // Order the batch by (distance, primary key) so consecutive pages
-    // partition the global (score, pk) order exactly.
+    // Order the batch by (distance, pk[, elem_idx]) so consecutive pages
+    // partition the global order exactly.
     if (pk_lookup_) {
-        std::vector<PkType> pks;
-        pks.reserve(collected.size());
-        for (const auto& r : collected) {
-            auto pk = pk_lookup_(r.second);
-            pks.push_back(pk.has_value() ? *pk : PkType{});
-        }
-        std::vector<size_t> idx(collected.size());
-        std::iota(idx.begin(), idx.end(), 0);
-        std::stable_sort(idx.begin(), idx.end(), [&](size_t a, size_t b) {
-            if (collected[a].first != collected[b].first) {
-                return collected[a].first < collected[b].first;
+        std::sort(collected.begin(),
+                  collected.end(),
+                  [](const DisIdPair& a, const DisIdPair& b) {
+                      return a.first < b.first;
+                  });
+        for (size_t i = 0; i < collected.size();) {
+            size_t j = i + 1;
+            while (j < collected.size() &&
+                   collected[j].first == collected[i].first) {
+                ++j;
             }
-            return ComparePk(pks[a], pks[b]) < 0;
-        });
-        std::vector<DisIdPair> sorted;
-        sorted.reserve(collected.size());
-        for (auto i : idx) {
-            sorted.push_back(collected[i]);
+            if (j - i > 1) {
+                std::vector<std::optional<TieBreakKey>> keys;
+                keys.reserve(j - i);
+                for (size_t k = i; k < j; ++k) {
+                    keys.push_back(LookupTieBreakKey(collected[k].second));
+                }
+                std::vector<size_t> idx(j - i);
+                std::iota(idx.begin(), idx.end(), 0);
+                std::stable_sort(
+                    idx.begin(), idx.end(), [&](size_t a, size_t b) {
+                        if (!keys[a].has_value() || !keys[b].has_value()) {
+                            return keys[a].has_value() && !keys[b].has_value();
+                        }
+                        return CompareTieBreakKey(*keys[a], *keys[b]) < 0;
+                    });
+                std::vector<DisIdPair> sorted_run;
+                sorted_run.reserve(j - i);
+                for (auto pos : idx) {
+                    sorted_run.push_back(collected[i + pos]);
+                }
+                std::copy(sorted_run.begin(),
+                          sorted_run.end(),
+                          collected.begin() + i);
+            }
+            i = j;
         }
-        collected.swap(sorted);
     } else {
         std::sort(collected.begin(), collected.end());
     }
@@ -610,6 +626,7 @@ CachedSearchIterator::Init(const SearchInfo& search_info) {
                   "Batch size is 0, cannot initialize iterator");
     }
     batch_size_ = iterator_v2_info.batch_size;
+    struct_element_offsets_ = search_info.struct_element_offsets_;
 
     if (search_info.metric_type_.empty()) {
         ThrowInfo(ErrorCode::UnexpectedError,
@@ -638,7 +655,7 @@ std::optional<PkType>
 CachedSearchIterator::DecodePkValue(
     const std::optional<std::string>& raw,
     const std::optional<milvus::DataType>& pk_type) {
-    if (!raw.has_value() || raw->empty() || !pk_type.has_value()) {
+    if (!raw.has_value() || !pk_type.has_value()) {
         return std::nullopt;
     }
     switch (*pk_type) {
@@ -679,6 +696,61 @@ CachedSearchIterator::ComparePk(const PkType& lhs, const PkType& rhs) {
     }
     // Mixed/monostate pks: order monostate first, then int64, then string.
     return lhs.index() < rhs.index() ? -1 : (lhs.index() > rhs.index() ? 1 : 0);
+}
+
+int
+CachedSearchIterator::CompareTieBreakKey(const TieBreakKey& lhs,
+                                         const TieBreakKey& rhs) {
+    const int pk_cmp = ComparePk(lhs.pk, rhs.pk);
+    if (pk_cmp != 0) {
+        return pk_cmp;
+    }
+    if (lhs.elem_idx != rhs.elem_idx) {
+        return lhs.elem_idx < rhs.elem_idx ? -1 : 1;
+    }
+    return 0;
+}
+
+std::optional<CachedSearchIterator::TieBreakKey>
+CachedSearchIterator::DecodeLastTieBreakKey(
+    const SearchIteratorV2Info& info) const {
+    auto pk = DecodePkValue(info.last_primary_key, info.primary_key_type);
+    if (!pk.has_value()) {
+        return std::nullopt;
+    }
+    if (struct_element_offsets_ != nullptr) {
+        if (!info.last_element_index.has_value()) {
+            return std::nullopt;
+        }
+        return TieBreakKey{std::move(*pk), *info.last_element_index};
+    }
+    return TieBreakKey{std::move(*pk), -1};
+}
+
+std::optional<CachedSearchIterator::TieBreakKey>
+CachedSearchIterator::LookupTieBreakKey(int64_t offset) const {
+    if (!pk_lookup_ || offset < 0) {
+        return std::nullopt;
+    }
+    int64_t doc_offset = offset;
+    int32_t elem_idx = -1;
+    if (struct_element_offsets_ != nullptr) {
+        if (offset > std::numeric_limits<int32_t>::max()) {
+            return std::nullopt;
+        }
+        auto [row_id, idx] = struct_element_offsets_->ElementIDToRowID(
+            static_cast<int32_t>(offset));
+        if (row_id < 0) {
+            return std::nullopt;
+        }
+        doc_offset = row_id;
+        elem_idx = idx;
+    }
+    auto pk = pk_lookup_(doc_offset);
+    if (!pk.has_value()) {
+        return std::nullopt;
+    }
+    return TieBreakKey{std::move(*pk), elem_idx};
 }
 
 }  // namespace milvus::query

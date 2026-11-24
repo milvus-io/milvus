@@ -234,9 +234,9 @@ func SelectSearchResultData(dataArray []*schemapb.SearchResultData, resultOffset
 				// A bad case happens where knowhere returns distance == +/-maxFloat32
 				// by mistake.
 				mlog.Warn(context.TODO(), "a bad distance is found, something is wrong here!", mlog.Float32("score", distance))
-			} else if typeutil.ComparePK(
-				typeutil.GetPK(dataArray[i].GetIds(), idx),
-				typeutil.GetPK(dataArray[sel].GetIds(), resultDataIdx)) {
+			} else if typeutil.CompareSearchResultTieKey(
+				dataArray[i], idx,
+				dataArray[sel], resultDataIdx) {
 				sel = i
 				maxDistance = distance
 				resultDataIdx = idx

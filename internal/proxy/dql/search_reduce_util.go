@@ -908,9 +908,9 @@ func selectHighestScoreIndex(ctx context.Context, subSearchResultData []*schemap
 				// A bad case happens where Knowhere returns distance/score == +/-maxFloat32
 				// by mistake.
 				mlog.Error(ctx, "a bad score is returned, something is wrong here!", mlog.Float32("score", sScore))
-			} else if typeutil.ComparePK(
-				typeutil.GetPK(subSearchResultData[i].GetIds(), sIdx),
-				typeutil.GetPK(subSearchResultData[subSearchIdx].GetIds(), resultDataIdx)) {
+			} else if typeutil.CompareSearchResultTieKey(
+				subSearchResultData[i], sIdx,
+				subSearchResultData[subSearchIdx], resultDataIdx) {
 				subSearchIdx = i
 				resultDataIdx = sIdx
 				maxScore = sScore

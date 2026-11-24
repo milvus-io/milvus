@@ -45,6 +45,9 @@ struct SearchIteratorV2Info {
     std::optional<std::string> last_primary_key = std::nullopt;
     // milvus::DataType of the collection primary key field (INT64 or VARCHAR).
     std::optional<milvus::DataType> primary_key_type = std::nullopt;
+    // Element index within the parent row for element-level (ArrayOfVector)
+    // searches, used alongside last_primary_key for tie-break continuation.
+    std::optional<int32_t> last_element_index = std::nullopt;
 };
 
 // Brute-force index params sourced from the collection-level index metadata at

@@ -2238,11 +2238,14 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 	if t.isIterator && len(t.queryInfos) == 1 && t.queryInfos[0] != nil {
 		if iterInfo := t.queryInfos[0].GetSearchIteratorV2Info(); iterInfo != nil {
 			bound := getLastBound(t.result, iterInfo.LastBound, metricType)
+			hasPK, pkBytes, elemIdx := lastPageCursorState(t.result.Results)
 			t.result.Results.SearchIteratorV2Results = &schemapb.SearchIteratorV2Results{
 				Token: encodeSearchIterCursor(
 					bound,
 					primaryFieldSchema.GetDataType(),
-					lastPagePkBytes(t.result.Results, primaryFieldSchema.GetDataType()),
+					hasPK,
+					pkBytes,
+					elemIdx,
 				),
 				LastBound: bound,
 			}
