@@ -275,9 +275,6 @@ func (p *GrpcServerConfig) Init(domain string, base *BaseTable) {
 		Export: true,
 	}
 	p.ServerMaxRecvSize.Init(base.mgr)
-	if p.ServerMaxRecvSize.GetAsInt() <= 0 {
-		panic(merr.WrapErrServiceInternalMsg("%s must be positive", p.ServerMaxRecvSize.Key))
-	}
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "grpc.gracefulStopTimeout",
