@@ -3660,6 +3660,24 @@ func TestProxy_AlterCollectionField_ExternalCollection(t *testing.T) {
 	assert.Contains(t, resp.GetReason(), "alter field operation is not supported for external collection")
 }
 
+func TestProxy_GetQuotaMetricsDeadlineExceeded(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	req := &internalpb.GetQuotaMetricsRequest{}
+	coord := mocks.NewMockMixCoordClient(t)
+	coord.EXPECT().GetQuotaMetrics(mock.Anything, req).RunAndReturn(
+		func(ctx context.Context, _ *internalpb.GetQuotaMetricsRequest, _ ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error) {
+			return nil, ctx.Err()
+		},
+	).Once()
+	node := &Proxy{mixCoord: coord}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	resp, err := node.GetQuotaMetrics(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, merr.TimeoutCode, resp.GetStatus().GetCode())
+}
+
 func TestProxy_GetReplicateConfiguration_Success(t *testing.T) {
 	expectedConfig := &commonpb.ReplicateConfiguration{
 		Clusters: []*commonpb.MilvusCluster{

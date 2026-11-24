@@ -27,6 +27,64 @@
 #include "milvus-storage/lob_column/lob_column_writer.h"
 #include "milvus-storage/lob_column/lob_reference.h"
 
+// Test fixtures export their offsets through the same RecordBatch ABI.
+static CStatus
+ScanGrepByOffsets(void* segment,
+                  const int64_t* offsets,
+                  int64_t size,
+                  const CGrepScanOptions* options,
+                  const uint8_t* patterns,
+                  uint64_t pattern_bytes,
+                  const uint64_t* lengths,
+                  uint32_t pattern_count,
+                  ArrowSchema* out_schema,
+                  ArrowArray* out_array,
+                  void* cancellation_source,
+                  const std::vector<int32_t>& element_counts = {}) {
+    arrow::Int64Builder builder;
+    auto status = builder.AppendValues(offsets, size);
+    EXPECT_TRUE(status.ok());
+    auto values = builder.Finish().ValueOrDie();
+    auto batch = arrow::RecordBatch::Make(
+        arrow::schema({arrow::field("$seg_offset", arrow::int64(), false)}),
+        size,
+        {values});
+    if (!element_counts.empty()) {
+        auto values = std::make_shared<arrow::Int32Builder>();
+        arrow::ListBuilder lists(arrow::default_memory_pool(), values);
+        for (auto count : element_counts) {
+            EXPECT_TRUE(lists.Append().ok());
+            for (int32_t i = 0; i < count; ++i)
+                EXPECT_TRUE(values->Append(i).ok());
+        }
+        batch =
+            batch
+                ->AddColumn(
+                    0,
+                    arrow::field(milvus::segcore::kQueryElementIndicesFieldName,
+                                 arrow::list(arrow::int32())),
+                    lists.Finish().ValueOrDie())
+                .ValueOrDie();
+    }
+    ArrowSchema schema{};
+    ArrowArray array{};
+    EXPECT_TRUE(arrow::ExportRecordBatch(*batch, &array, &schema).ok());
+    const CGrepScanRequest request{
+        *options, patterns, pattern_bytes, lengths, pattern_count};
+    auto result = ScanGrep(segment,
+                           &schema,
+                           &array,
+                           &request,
+                           out_schema,
+                           out_array,
+                           cancellation_source);
+    if (array.release)
+        array.release(&array);
+    if (schema.release)
+        schema.release(&schema);
+    return result;
+}
+
 namespace milvus::segcore {
 namespace {
 struct NgramProbe {
@@ -127,6 +185,7 @@ class GrepScanTest
     std::shared_ptr<storage::LocalDirectory> lob_files;
     std::unique_ptr<SegmentInternalInterface> segment;
     CGrepScanOptions options{};
+    std::vector<int32_t> element_counts;
     void
     SetUp() override {
         schema = std::make_shared<Schema>();
@@ -321,7 +380,8 @@ class GrepScanTest
                               1,
                               &schema,
                               &array,
-                              cancel);
+                              cancel,
+                              element_counts);
         EXPECT_EQ(status.error_code, expected) << status.error_msg;
         if (status.error_code != Success) {
             for (const auto& message : expected_messages) {
@@ -344,6 +404,279 @@ INSTANTIATE_TEST_SUITE_P(SealedAndGrowing,
                          ::testing::Combine(::testing::Bool(),
                                             ::testing::Values(DataType::VARCHAR,
                                                               DataType::TEXT)));
+
+// The threshold counts matcher inputs, not candidate rows or selected elements.
+TEST_P(GrepScanTest, SoftScanThresholdAllowsBatchOvershoot) {
+    Load({"miss", "miss", "timeout", "timeout", "timeout"},
+         {true, true, true, true, true});
+    options.limit = 100;
+    options.batch_size = 3;
+    options.max_scan_rows = 1;
+    element_counts = {1, 1, 5, 1, 1};
+    auto result = Scan({0, 1, 2, 3, 4});
+    ASSERT_NE(result, nullptr);
+    ASSERT_EQ(result->num_rows(), 1);
+    EXPECT_EQ(std::static_pointer_cast<arrow::Int64Array>(result->column(0))
+                  ->Value(0),
+              2);
+    options.max_scan_rows = 0;
+    auto unlimited = Scan({0, 1, 2, 3, 4});
+    ASSERT_EQ(unlimited->num_rows(), 3);
+}
+
+TEST_P(GrepScanTest, SoftScanThresholdSkipsNulls) {
+    Load({"timeout", "miss", "timeout"}, {false, true, true});
+    options.limit = 100;
+    options.batch_size = 1;
+    options.max_scan_rows = 1;
+    auto result = Scan({0, 1, 2});
+    ASSERT_NE(result, nullptr);
+    EXPECT_EQ(result->num_rows(), 0);
+    auto exhausted = Scan({0, 1});
+    ASSERT_NE(exhausted, nullptr);
+    EXPECT_EQ(exhausted->num_rows(), 0);
+    auto after_null = Scan({0, 2, 1});
+    ASSERT_NE(after_null, nullptr);
+    ASSERT_EQ(after_null->num_rows(), 1);
+    EXPECT_EQ(std::static_pointer_cast<arrow::Int64Array>(after_null->column(0))
+                  ->Value(0),
+              1);
+    options.limit = 1;
+    auto satisfied = Scan({2, 1});
+    EXPECT_EQ(satisfied->num_rows(), 1);
+}
+
+TEST_P(GrepScanTest, SoftScanThresholdCountsAfterNgramAndAcrossProbe) {
+    if (std::get<0>(GetParam()))
+        GTEST_SKIP() << "sealed NGRAM routes";
+    std::vector<std::string> texts(2048, "ordinary");
+    texts[1500] = "timeout";
+    texts[1800] = "timeout";
+    std::vector<bool> valid(texts.size(), true);
+    std::vector<int64_t> offsets(texts.size());
+    std::iota(offsets.begin(), offsets.end(), 0);
+    Load(texts, valid);
+    auto probe = AttachNgram(texts, valid);
+    options.limit = 2;
+    options.batch_size = 16;
+    // VARCHAR probes 32 rows before indexing. TEXT indexes immediately.
+    options.max_scan_rows =
+        std::get<1>(GetParam()) == DataType::VARCHAR ? 33 : 1;
+    auto result = Scan(offsets);
+    ASSERT_NE(result, nullptr);
+    ASSERT_EQ(result->num_rows(), 1);
+    EXPECT_EQ(std::static_pointer_cast<arrow::Int64Array>(result->column(0))
+                  ->Value(0),
+              1500);
+    EXPECT_EQ(probe->queries, 1);
+}
+
+TEST_P(GrepScanTest, ContextPreservesRowsAndDetailsAcrossRoutes) {
+    std::vector<std::string> texts(40, "unrelated");
+    texts.back() = "before\ntimeout\nmid\ntimeout timeout\nafter\n";
+    const std::vector<bool> valid(texts.size(), true);
+    Load(texts, valid);
+    options.before_context = 1;
+    options.after_context = 1;
+    options.has_max_count = 1;
+    options.max_count = 1;
+    options.limit = 1;
+    std::vector<int64_t> offsets(texts.size());
+    std::iota(offsets.begin(), offsets.end(), 0);
+    auto raw = Scan(offsets);
+    ASSERT_NE(raw, nullptr);
+    ASSERT_EQ(raw->num_rows(), 1);
+    auto details = std::static_pointer_cast<arrow::BinaryArray>(raw->column(1));
+    const auto lines = nlohmann::json::parse(details->GetString(0));
+    ASSERT_EQ(lines.size(), 3);
+    EXPECT_EQ(lines[0]["content"], "before");
+    EXPECT_EQ(lines[0]["type"], "context");
+    EXPECT_FALSE(lines[0].contains("starts"));
+    EXPECT_FALSE(lines[0].contains("ends"));
+    EXPECT_EQ(lines[1]["starts"], nlohmann::json::array({0}));
+    EXPECT_EQ(lines[1]["line_start_offset"], 7);
+    EXPECT_EQ(lines[2]["content"], "mid");
+    EXPECT_EQ(lines[1]["type"], "match");
+    EXPECT_EQ(lines[2]["type"], "context");
+    EXPECT_FALSE(lines[2].contains("starts"));
+    EXPECT_FALSE(lines[2].contains("ends"));
+    if (!std::get<0>(GetParam())) {
+        auto probe = AttachNgram(texts, valid);
+        auto indexed = Scan(offsets);
+        ASSERT_NE(indexed, nullptr);
+        EXPECT_TRUE(raw->Equals(*indexed));
+        EXPECT_EQ(probe->queries, 1);  // VARCHAR Probe->Index or TEXT Index.
+        auto short_input = Scan({39});
+        ASSERT_NE(short_input, nullptr);
+        EXPECT_EQ(
+            std::static_pointer_cast<arrow::BinaryArray>(short_input->column(1))
+                ->GetString(0),
+            details->GetString(0));
+        EXPECT_EQ(probe->queries,
+                  std::get<1>(GetParam()) == DataType::VARCHAR ? 1 : 2);
+    }
+    // A preceding NULL row must never supply context to a matching document.
+    Load({"private", "timeout", "after"}, {false, true, true});
+    options.before_context = options.after_context = 100;
+    auto single = Scan({0, 1, 2});
+    ASSERT_NE(single, nullptr);
+    ASSERT_EQ(single->num_rows(), 1);
+    EXPECT_EQ(
+        nlohmann::json::parse(
+            std::static_pointer_cast<arrow::BinaryArray>(single->column(1))
+                ->GetString(0))
+            .size(),
+        1);
+}
+
+TEST_P(GrepScanTest, ContextAndLineLocalAnchorSpans) {
+    Load({"starting\nerror error\nworking\nerror again\nfinished",
+          "before\nerror"},
+         {true, true});
+    options.before_context = 1;
+    options.after_context = 1;
+    auto result = Scan({0}, "error");
+    ASSERT_NE(result, nullptr);
+    ASSERT_EQ(result->num_rows(), 1);
+    auto details =
+        std::static_pointer_cast<arrow::BinaryArray>(result->column(1));
+    EXPECT_EQ(nlohmann::json::parse(details->GetString(0)),
+              nlohmann::json::parse(R"([
+                {"type":"context","content":"starting","line_number":1,"line_start_offset":0},
+                {"type":"match","content":"error error","line_number":2,"line_start_offset":9,"starts":[0,6],"ends":[5,11]},
+                {"type":"context","content":"working","line_number":3,"line_start_offset":21},
+                {"type":"match","content":"error again","line_number":4,"line_start_offset":29,"starts":[0],"ends":[5]},
+                {"type":"context","content":"finished","line_number":5,"line_start_offset":41}
+              ])"));
+
+    // Absolute anchors use the selected line, independently of reader buffers.
+    result = Scan({1}, R"(\Aerror)");
+    ASSERT_NE(result, nullptr);
+    ASSERT_EQ(result->num_rows(), 1);
+    details = std::static_pointer_cast<arrow::BinaryArray>(result->column(1));
+    EXPECT_EQ(nlohmann::json::parse(details->GetString(0)),
+              nlohmann::json::parse(R"([
+                {"type":"context","content":"before","line_number":1,"line_start_offset":0},
+                {"type":"match","content":"error","line_number":2,"line_start_offset":7,"starts":[0],"ends":[5]}
+              ])"));
+}
+
+TEST_P(GrepScanTest, ContextBytesFailTheExistingOutputBudget) {
+    Load({std::string(4096, 'x') + "\ntimeout\nafter"}, {true});
+    options.max_result_bytes = 1024;
+    ASSERT_NE(Scan({0}), nullptr);
+    options.before_context = 1;
+    EXPECT_EQ(Scan({0}, "timeout", InvalidParameter), nullptr);
+    // Rust's logical result fits, but escaping context bytes exceeds the
+    // separate JSON output budget in GrepResultBuilder.
+    Load({std::string(300, '\x01') + "\ntimeout"}, {true});
+    EXPECT_EQ(Scan({0}, "timeout", InvalidParameter), nullptr);
+}
+
+TEST_P(GrepScanTest, ElementQuotaPreservesPositionsAcrossRoutes) {
+    const std::vector<std::string> texts = {"ordinary", "timeout", "timeout"};
+    Load(texts, {true, true, true});
+    element_counts = {20, 4, 1};
+    options.limit = 4;
+    auto raw = Scan({0, 1, 2});
+    ASSERT_EQ(raw->num_rows(), 1);
+    EXPECT_EQ(
+        std::static_pointer_cast<arrow::Int64Array>(raw->column(0))->Value(0),
+        1);
+    if (!std::get<0>(GetParam())) {
+        AttachNgram(texts, {true, true, true});
+        auto indexed = Scan({0, 1, 2});
+        EXPECT_TRUE(raw->Equals(*indexed));
+    }
+}
+
+TEST_P(GrepScanTest, ElementQuotaAccumulatesAcrossReadBatches) {
+    Load({"timeout A", "ordinary", "timeout B", "timeout C"},
+         {true, true, true, true});
+    element_counts = {2, 20, 3, 1};
+    options.limit = 4;
+    for (int64_t batch_size : {1, 2}) {
+        options.batch_size = batch_size;
+        auto result = Scan({0, 1, 2, 3});
+        ASSERT_NE(result, nullptr);
+        ASSERT_EQ(result->num_rows(), 2);
+        auto positions =
+            std::static_pointer_cast<arrow::Int64Array>(result->column(0));
+        EXPECT_EQ(positions->Value(0), 0);
+        EXPECT_EQ(positions->Value(1), 2);
+        auto details =
+            std::static_pointer_cast<arrow::BinaryArray>(result->column(1));
+        EXPECT_NE(std::string(details->GetView(1)).find("timeout B"),
+                  std::string::npos);
+    }
+}
+
+TEST_P(GrepScanTest, ElementQuotaUsesInputPositionsForRepeatedOffsets) {
+    const std::vector<std::string> texts = {
+        "ordinary", "timeout A", "timeout B"};
+    Load(texts, {true, true, true});
+    // The same physical row contributes one element and then four, according
+    // to its immediate input position. Physical-row or compact indices are wrong.
+    const std::vector<int64_t> offsets = {2, 0, 2, 1};
+    element_counts = {1, 20, 4, 1};
+    options.limit = 4;
+    auto expected = Scan(offsets);
+    ASSERT_NE(expected, nullptr);
+    ASSERT_EQ(expected->num_rows(), 2);
+    auto positions =
+        std::static_pointer_cast<arrow::Int64Array>(expected->column(0));
+    EXPECT_EQ(positions->Value(0), 0);
+    EXPECT_EQ(positions->Value(1), 2);
+    if (!std::get<0>(GetParam())) {
+        AttachNgram(texts, {true, true, true});
+        auto indexed = Scan(offsets);
+        ASSERT_NE(indexed, nullptr);
+        EXPECT_TRUE(expected->Equals(*indexed));
+    }
+}
+
+TEST_P(GrepScanTest, ElementQuotaProbeSwitchesToIndex) {
+    if (std::get<0>(GetParam()) || std::get<1>(GetParam()) != DataType::VARCHAR)
+        GTEST_SKIP() << "sealed VARCHAR Probe to Index route";
+    std::vector<std::string> texts(66, "ordinary");
+    texts[64] = "timeout A";
+    texts[65] = "timeout B";
+    std::vector<bool> valid(texts.size(), true);
+    std::vector<int64_t> offsets(texts.size());
+    std::iota(offsets.begin(), offsets.end(), 0);
+    Load(texts, valid);
+    element_counts.assign(texts.size(), 1);
+    element_counts[64] = 4;
+    options.limit = 4;
+    options.batch_size = 128;
+    auto raw = Scan(offsets);
+    ASSERT_NE(raw, nullptr);
+    auto probe = AttachNgram(texts, valid);
+    auto indexed = Scan(offsets);
+    ASSERT_NE(indexed, nullptr);
+    EXPECT_EQ(probe->queries, 1);
+    EXPECT_EQ(probe->input_rows,
+              (std::vector<int64_t>(offsets.begin() + 32, offsets.end())));
+    ASSERT_EQ(indexed->num_rows(), 1);
+    EXPECT_EQ(std::static_pointer_cast<arrow::Int64Array>(indexed->column(0))
+                  ->Value(0),
+              64);
+    EXPECT_TRUE(raw->Equals(*indexed));
+}
+
+TEST_P(GrepScanTest, ElementQuotaAvoidsMatchingUnreadSuffix) {
+    Load({"ordinary", "timeout", std::string(1, static_cast<char>(0xff))},
+         {true, true, true});
+    element_counts = {20, 4, 1};
+    options.limit = 4;
+    // All texts fit the read batch. Sending the suffix to Rust would fail UTF-8
+    // validation, proving that early exit bounds matching, not just output.
+    auto result = Scan({0, 1, 2});
+    ASSERT_EQ(result->num_rows(), 1);
+    // With one more element requested, the same suffix must reach the matcher.
+    options.limit = 5;
+    EXPECT_EQ(Scan({0, 1, 2}, "timeout", DataFormatBroken), nullptr);
+}
 
 TEST_P(GrepScanTest, MaxCountIsPerRecordAndIndependentOfQueryLimit) {
     const std::vector<std::string> texts = {
@@ -370,7 +703,7 @@ TEST_P(GrepScanTest, MaxCountIsPerRecordAndIndependentOfQueryLimit) {
             auto details =
                 std::static_pointer_cast<arrow::BinaryArray>(result->column(1));
             const auto expected = nlohmann::json::parse(
-                R"([{"content":"error error","line_number":2,"line_start_offset":5,"starts":[0,6],"ends":[5,11]}])");
+                R"([{"type":"match","content":"error error","line_number":2,"line_start_offset":5,"starts":[0,6],"ends":[5,11]}])");
             EXPECT_EQ(nlohmann::json::parse(details->GetString(0)), expected);
             EXPECT_EQ(nlohmann::json::parse(details->GetString(1)), expected);
             options.max_count = 0;
@@ -385,8 +718,27 @@ TEST_P(GrepScanTest, MaxCountIsPerRecordAndIndependentOfQueryLimit) {
     }
 }
 
-TEST_P(GrepScanTest,
-       MaxCountZeroSkipsIndexAndUnreadableLobButValidatesPattern) {
+TEST_P(GrepScanTest, MaxCountZeroSkipsInvalidPattern) {
+    options.has_max_count = 1;
+    options.max_count = 0;
+    for (auto pattern : {"[", "error"}) {
+        auto result = Scan({0, 2, 3}, pattern);
+        ASSERT_NE(result, nullptr);
+        EXPECT_EQ(result->num_rows(), 0);
+        ASSERT_EQ(result->num_columns(), 2);
+        EXPECT_EQ(result->column(0)->type_id(), arrow::Type::INT64);
+        EXPECT_EQ(result->column(1)->type_id(), arrow::Type::BINARY);
+    }
+    folly::CancellationSource cancel;
+    cancel.requestCancellation();
+    Scan({0}, "[", FollyCancel, &cancel);
+    options.max_count = 1;
+    Scan({0}, "[", InvalidParameter);
+    options.has_max_count = 0;
+    Scan({0}, "[", InvalidParameter);
+}
+
+TEST_P(GrepScanTest, MaxCountZeroSkipsIndexUnreadableLobAndCompilation) {
     if (std::get<0>(GetParam()) || std::get<1>(GetParam()) != DataType::TEXT)
         GTEST_SKIP() << "sealed LOB";
     const uint8_t uuid[16] = {};
@@ -405,7 +757,10 @@ TEST_P(GrepScanTest,
     ASSERT_NE(result, nullptr);
     EXPECT_EQ(result->num_rows(), 0);
     EXPECT_EQ(probe->queries, 0);
-    Scan({0}, "[", InvalidParameter);
+    auto invalid_pattern = Scan({0}, "[");
+    ASSERT_NE(invalid_pattern, nullptr);
+    EXPECT_EQ(invalid_pattern->num_rows(), 0);
+    EXPECT_EQ(probe->queries, 0);
     folly::CancellationSource cancel;
     cancel.requestCancellation();
     Scan({0}, "error", FollyCancel, &cancel);
@@ -984,11 +1339,11 @@ TEST_P(GrepScanTest, OriginalLineCoordinates) {
     EXPECT_EQ(
         nlohmann::json::parse(details->GetString(0)),
         nlohmann::json::parse(
-            R"([{"content":"foo","line_number":3,"line_start_offset":9,"starts":[0],"ends":[3]},{"content":"foo","line_number":5,"line_start_offset":18,"starts":[0],"ends":[3]}])"));
+            R"([{"type":"match","content":"foo","line_number":3,"line_start_offset":9,"starts":[0],"ends":[3]},{"type":"match","content":"foo","line_number":5,"line_start_offset":18,"starts":[0],"ends":[3]}])"));
     EXPECT_EQ(
         nlohmann::json::parse(details->GetString(1)),
         nlohmann::json::parse(
-            R"([{"content":"foo","line_number":1,"line_start_offset":0,"starts":[0],"ends":[3]}])"));
+            R"([{"type":"match","content":"foo","line_number":1,"line_start_offset":0,"starts":[0],"ends":[3]}])"));
 }
 
 TEST_P(GrepScanTest, JSONDocumentsAndSpans) {
@@ -1004,11 +1359,11 @@ TEST_P(GrepScanTest, JSONDocumentsAndSpans) {
     EXPECT_EQ(
         nlohmann::json::parse(details->GetString(0)),
         nlohmann::json::parse(
-            R"([{"content":"foo bar foo","line_number":1,"line_start_offset":0,"starts":[0,8],"ends":[3,11]},{"content":"hello foo","line_number":2,"line_start_offset":12,"starts":[6],"ends":[9]}])"));
+            R"([{"type":"match","content":"foo bar foo","line_number":1,"line_start_offset":0,"starts":[0,8],"ends":[3,11]},{"type":"match","content":"hello foo","line_number":2,"line_start_offset":12,"starts":[6],"ends":[9]}])"));
     EXPECT_EQ(
         nlohmann::json::parse(details->GetString(1)),
         nlohmann::json::parse(
-            R"([{"content":"foo","line_number":1,"line_start_offset":0,"starts":[0],"ends":[3]}])"));
+            R"([{"type":"match","content":"foo","line_number":1,"line_start_offset":0,"starts":[0],"ends":[3]}])"));
     auto empty = Scan({1}, "foo");
     ASSERT_NE(empty, nullptr);
     EXPECT_EQ(empty->num_rows(), 0);

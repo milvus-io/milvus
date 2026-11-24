@@ -23,8 +23,33 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestIsTextMatchEnabled(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		dataType schemapb.DataType
+		values   []string
+		want     bool
+	}{
+		{name: "missing", dataType: schemapb.DataType_VarChar},
+		{name: "invalid", dataType: schemapb.DataType_VarChar, values: []string{"true", "invalid"}},
+		{name: "last disables", dataType: schemapb.DataType_VarChar, values: []string{"true", "false"}},
+		{name: "last enables", dataType: schemapb.DataType_Text, values: []string{"false", "1"}, want: true},
+		{name: "legacy string", dataType: schemapb.DataType_String, values: []string{"true"}, want: true},
+		{name: "non-string", dataType: schemapb.DataType_JSON, values: []string{"true"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			field := &schemapb.FieldSchema{DataType: tc.dataType}
+			for _, value := range tc.values {
+				field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{Key: common.EnableMatchKey, Value: value})
+			}
+			require.Equal(t, tc.want, IsTextMatchEnabled(field))
+		})
+	}
+}
 
 func TestValidateArrayElementType(t *testing.T) {
 	for _, dataType := range []schemapb.DataType{

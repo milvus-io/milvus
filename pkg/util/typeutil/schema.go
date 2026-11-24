@@ -581,11 +581,11 @@ func (helper *SchemaHelper) GetStructArrayFieldFromName(fieldName string) *schem
 }
 
 func (helper *SchemaHelper) IsFieldTextMatchEnabled(fieldId int64) bool {
-	sche, err := helper.GetFieldFromID(fieldId)
+	field, err := helper.GetFieldFromID(fieldId)
 	if err != nil {
 		return false
 	}
-	return CreateFieldSchemaHelper(sche).EnableMatch()
+	return IsTextMatchEnabled(field)
 }
 
 func (helper *SchemaHelper) getDefaultJSONField(fieldName string) (*schemapb.FieldSchema, error) {

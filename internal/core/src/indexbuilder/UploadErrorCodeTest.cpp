@@ -36,12 +36,14 @@
 #include "indexbuilder/BuildSession.h"
 #include "indexbuilder/index_c.h"
 #include "indexbuilder/test_utils/SourceBuildTestUtils.h"
+#include "milvus-storage/properties.h"
 #include "segcore/json_stats/JsonKeyStats.h"
 #include "segcore/json_stats/bson_inverted.h"
 #include "simdjson/padded_string.h"
 #include "storage/ChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/LocalChunkManagerSingleton.h"
+#include "storage/Util.h"
 
 namespace milvus::indexbuilder::test {
 namespace {
@@ -170,9 +172,9 @@ class UploadErrorCodeTest : public SourceBuildTest {
  protected:
     storage::FileManagerContext
     Context(DataType type, int64_t build_id) const {
-        storage::StorageConfig config;
-        config.storage_type = "local";
-        config.root_path = directory_->Path();
+        const auto config = std::make_shared<milvus_storage::api::Properties>();
+        (*config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+        (*config)[PROPERTY_FS_ROOT_PATH] = directory_->Path();
         storage::FieldDataMeta field{1, 2, build_id, 100};
         field.field_schema.set_fieldid(100);
         field.field_schema.set_name("value");

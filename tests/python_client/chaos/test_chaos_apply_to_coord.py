@@ -46,15 +46,18 @@ class TestChaosApply:
         if connections.has_connection("default") is False:
             raise Exception("no connections")
 
-    def teardown(self):
-        chaos_res = CusResource(
-            kind=self.chaos_config["kind"],
-            group=constants.CHAOS_GROUP,
-            version=constants.CHAOS_VERSION,
-            namespace=constants.CHAOS_NAMESPACE,
-        )
-        meta_name = self.chaos_config.get("metadata", None).get("name", None)
-        chaos_res.delete(meta_name, raise_ex=False)
+    def teardown_method(self):
+        chaos_config = getattr(self, "chaos_config", None)
+        if chaos_config:
+            chaos_res = CusResource(
+                kind=chaos_config["kind"],
+                group=constants.CHAOS_GROUP,
+                version=constants.CHAOS_VERSION,
+                namespace=constants.CHAOS_NAMESPACE,
+            )
+            meta_name = chaos_config.get("metadata", {}).get("name", None)
+            if meta_name:
+                chaos_res.delete(meta_name, raise_ex=False)
         sleep(2)
 
     def test_chaos_apply(self, chaos_type, role_type, target_component, chaos_duration, chaos_interval):

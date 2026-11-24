@@ -83,6 +83,7 @@ func newTalonPrewarm(ctx context.Context, p *paramtable.ComponentParam, supplier
 		BucketName:          p.MinioCfg.BucketName.GetValue(),
 		CloudProvider:       p.MinioCfg.CloudProvider.GetValue(),
 		TalonCoordinator:    coordinator,
+		TalonNamespace:      p.CommonCfg.TalonNamespace(),
 		TalonBlockSize:      p.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
 		TalonMaxIdlePerAddr: p.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
 	}, 1)

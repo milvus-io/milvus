@@ -55,6 +55,13 @@ type createCollectionTask struct {
 	header          *message.CreateCollectionMessageHeader
 	body            *message.CreateCollectionRequest
 	preserveFieldID bool
+	// allowStructSubFieldOriginMarker accepts the internal origin marker on
+	// struct sub-fields. Only restore from a snapshot sets it: that restore
+	// copies segments as they are, so the sub-fields added after their struct
+	// still lack columns in old segments and must keep the marker. Every
+	// CreateCollection request, with or without preserve_field_ids, is rejected
+	// when it carries the marker.
+	allowStructSubFieldOriginMarker bool
 
 	// heldFileResourceIds tracks file resources whose refCnt was incremented
 	// during validation, to be released if the task fails before Broadcast.
@@ -187,8 +194,14 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
-	if err := rejectStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
-		return err
+	if t.allowStructSubFieldOriginMarker {
+		if err := validateRestoredStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
+			return err
+		}
+	} else {
+		if err := rejectStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
+			return err
+		}
 	}
 	// A restored collection (preserveFieldID) keeps its stored schema, whose
 	// sub-fields may carry enable_match or enable_analyzer from an earlier
@@ -541,6 +554,7 @@ func createMilvusTableSnapshotStorageConfig() *indexpb.StorageConfig {
 			TalonEnabledStages:          params.CommonCfg.StorageTalonEnabledStages.GetAsUint32(),
 			TalonSmallReadThreshold:     params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
 			TalonCoordinator:            params.CommonCfg.StorageTalonCoordinator.GetValue(),
+			TalonNamespace:              params.CommonCfg.TalonNamespace(),
 			TalonBlockSize:              params.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
 			TalonMaxIdlePerAddr:         params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
 			TalonEnableForExternalTable: params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool(),
@@ -569,6 +583,7 @@ func createMilvusTableSnapshotStorageConfig() *indexpb.StorageConfig {
 		TalonEnabledStages:          params.CommonCfg.StorageTalonEnabledStages.GetAsUint32(),
 		TalonSmallReadThreshold:     params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
 		TalonCoordinator:            params.CommonCfg.StorageTalonCoordinator.GetValue(),
+		TalonNamespace:              params.CommonCfg.TalonNamespace(),
 		TalonBlockSize:              params.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
 		TalonMaxIdlePerAddr:         params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
 		TalonEnableForExternalTable: params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool(),
@@ -936,7 +951,8 @@ func collectAnalyzerInfos(collSchema *schemapb.CollectionSchema) ([]*querypb.Ana
 // enable_analyzer=true. Analyzer params are ignored while analyzer is disabled.
 func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema, analyzerInfos *[]*querypb.AnalyzerInfo) error {
 	h := typeutil.CreateFieldSchemaHelper(fieldSchema)
-	active := h.EnableMatch() || typeutil.IsBm25FunctionInputField(collSchema, fieldSchema)
+	matchEnabled := typeutil.IsTextMatchEnabled(fieldSchema)
+	active := matchEnabled || typeutil.IsBm25FunctionInputField(collSchema, fieldSchema)
 	if active && !h.EnableAnalyzer() {
 		return merr.WrapErrParameterInvalidMsg("field %s which has enable_match or is input of BM25 function must also enable_analyzer", fieldSchema.Name)
 	}
@@ -945,7 +961,7 @@ func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schema
 	}
 
 	if params, ok := h.GetMultiAnalyzerParams(); ok {
-		if h.EnableMatch() {
+		if matchEnabled {
 			return merr.WrapErrParameterInvalidMsg("multi analyzer now only support for bm25, but now field %s enable match", fieldSchema.Name)
 		}
 		if h.HasAnalyzerParams() {
