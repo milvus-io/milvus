@@ -268,19 +268,21 @@ func (w *FFISegmentWriter) Close() (WriterOutput, error) {
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, err
 	}
-	output := &SegmentOutput{cOutput: cOutput, rowsWritten: int64(cOutput.rows_written)}
-	var count C.size_t
-	stats := C.loon_segment_writer_get_text_column_stats(w.handle, &count)
-	if count > 0 {
-		output.textLogicalBytes = make(map[int64]uint64, count)
-		for _, stat := range unsafe.Slice(stats, count) {
+	var textLogicalBytes map[int64]uint64
+	summaries := unsafe.Slice(cOutput.text_summaries, cOutput.num_text_summaries)
+	if len(summaries) > 0 {
+		textLogicalBytes = make(map[int64]uint64, len(summaries))
+		for _, summary := range summaries {
 			// A failed Write can advance a LOB counter before the batch is accepted.
-			if stat.total_entries == cOutput.rows_written && stat.total_bytes >= 0 {
-				output.textLogicalBytes[int64(stat.field_id)] = uint64(stat.total_bytes)
+			if summary.total_entries == cOutput.rows_written && summary.total_bytes >= 0 {
+				textLogicalBytes[int64(summary.field_id)] = uint64(summary.total_bytes)
 			}
 		}
 	}
-	return output, nil
+	// The writer owns the summary array and is destroyed when Close returns.
+	cOutput.text_summaries = nil
+	cOutput.num_text_summaries = 0
+	return &SegmentOutput{cOutput: cOutput, rowsWritten: int64(cOutput.rows_written), textLogicalBytes: textLogicalBytes}, nil
 }
 
 // buildCSegmentWriterConfig converts Go config to C config.
