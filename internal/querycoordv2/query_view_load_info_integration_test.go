@@ -12,16 +12,19 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metacache/metacachetest"
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	coordMocks "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/types"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -98,10 +101,9 @@ func TestQueryViewLoadInfoInitializationAndRecovery(t *testing.T) {
 func TestDefaultQViewsRuntimeSources(t *testing.T) {
 	mockey.PatchConvey("initial topology and metadata callbacks", t, func() {
 		mockey.Mock(channel.GetClusterChannels).Return(message.ClusterChannels{Channels: []string{"p"}}).Build()
-		mockey.Mock(broadcast.GetPendingSchemaTarget).Return(nil, nil).Build()
 		allocate := mockey.Mock((*coordMocks.MixCoord).AllocID).Return(&rootcoordpb.AllocIDResponse{Status: merr.Success(), ID: 42}, nil).Build()
 		describe := mockey.Mock((*meta.CoordinatorBroker).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
-			VirtualChannelNames: []string{"p_1v0"}, Schema: &schemapb.CollectionSchema{Version: 3},
+			VirtualChannelNames: []string{"p_1v0"},
 		}, nil).Build()
 		client, _ := kvfactory.GetEtcdAndPath()
 		deps := newDefaultQViewsRuntimeDependencies(nil, nil, client, nil, &coordMocks.MixCoord{})
@@ -115,22 +117,73 @@ func TestDefaultQViewsRuntimeSources(t *testing.T) {
 		channels, err := deps.vchannels(t.Context(), 1)
 		require.NoError(t, err)
 		require.Equal(t, []string{"p_1v0"}, channels)
-		published, err := deps.publishedSchemaVersion(t.Context(), 1)
-		require.NoError(t, err)
-		preparing, err := deps.schemaVersion(t.Context(), 1)
-		require.NoError(t, err)
-		require.EqualValues(t, 3, published)
-		require.Equal(t, published, preparing)
-
 		allocate.Return(nil, context.Canceled)
 		describe.Return(nil, context.Canceled)
 		_, err = deps.loadConfigDependencies.AllocateVersion(t.Context())
 		require.ErrorIs(t, err, context.Canceled)
 		_, err = deps.vchannels(t.Context(), 1)
 		require.ErrorIs(t, err, context.Canceled)
-		_, err = deps.publishedSchemaVersion(t.Context(), 1)
-		require.ErrorIs(t, err, context.Canceled)
-		_, err = deps.schemaVersion(t.Context(), 1)
-		require.ErrorIs(t, err, context.Canceled)
 	})
+}
+
+func TestReconcileSchemaVersionProvider(t *testing.T) {
+	const collectionID int64 = 1
+	for _, tc := range []struct {
+		name             string
+		published        int32
+		pending          *schemapb.CollectionSchema
+		pendingErr       error
+		absent, dropping bool
+		wantVersion      int32
+		wantErr          error
+	}{
+		{name: "steady state", published: 3, wantVersion: 3},
+		{name: "legacy version zero"},
+		{name: "pending target", published: 3, pending: &schemapb.CollectionSchema{Version: 4}, wantVersion: 4},
+		{name: "publication overtakes pending read", published: 5, pending: &schemapb.CollectionSchema{Version: 4}, wantVersion: 5},
+		{name: "broadcaster recovering", published: 3, pendingErr: merr.ErrServiceNotReady, wantErr: merr.ErrServiceNotReady},
+		{name: "missing collection", absent: true, wantErr: merr.ErrCollectionNotFound},
+		{name: "dropping collection", dropping: true, wantErr: merr.ErrCollectionNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := metacachetest.NewMetaStore()
+			state := etcdpb.CollectionState_CollectionCreated
+			if tc.dropping {
+				state = etcdpb.CollectionState_CollectionDropping
+			}
+			if !tc.absent {
+				store.PutCollection(&metacache.CollectionInfo{
+					ID: collectionID, State: state, Schema: &schemapb.CollectionSchema{Version: tc.published},
+				})
+			}
+			collections := meta.NewCollectionManager(nil, store)
+			var steps []string
+			patch := mockey.Mock(broadcast.GetPendingSchemaTarget).To(func(id int64) (*broadcaster.SchemaTarget, error) {
+				require.Equal(t, collectionID, id)
+				steps = append(steps, "pending")
+				if tc.pending == nil {
+					return nil, tc.pendingErr
+				}
+				return &broadcaster.SchemaTarget{CollectionID: id, Schema: tc.pending}, nil
+			}).Build()
+			t.Cleanup(func() { patch.UnPatch() })
+			readVersion := reconcileSchemaVersionProvider(func(id int64) (*metacache.CollectionInfo, error) {
+				steps = append(steps, "read")
+				return collections.GetCollectionInfo(id)
+			}, func(id int64, version int32) {
+				require.Equal(t, collectionID, id)
+				require.Equal(t, tc.published, version)
+				steps = append(steps, "publish")
+			})
+
+			version, err := readVersion(t.Context(), collectionID)
+			require.ErrorIs(t, err, tc.wantErr)
+			require.Equal(t, tc.wantVersion, version)
+			if tc.absent || tc.dropping {
+				require.Equal(t, []string{"pending", "read"}, steps)
+			} else {
+				require.Equal(t, []string{"pending", "read", "publish"}, steps)
+			}
+		})
+	}
 }

@@ -35,7 +35,7 @@ func (s *CommonSuite) TestRetryIfSchemaError() {
 	defer cancel()
 	s.Run("normal_no_error", func() {
 		counter := atomic.Int32{}
-		err := s.client.retryIfSchemaError(ctx, "test_coll", func(ctx context.Context) (uint64, error) {
+		err := s.client.retryIfSchemaError(ctx, "default", "test_coll", func(ctx context.Context) (uint64, error) {
 			counter.Add(1)
 			return 10, nil
 		})
@@ -45,7 +45,7 @@ func (s *CommonSuite) TestRetryIfSchemaError() {
 
 	s.Run("other_error", func() {
 		counter := atomic.Int32{}
-		err := s.client.retryIfSchemaError(ctx, "test_coll", func(ctx context.Context) (uint64, error) {
+		err := s.client.retryIfSchemaError(ctx, "default", "test_coll", func(ctx context.Context) (uint64, error) {
 			counter.Add(1)
 			return 10, merr.WrapErrServiceInternal("mocked")
 		})
@@ -55,7 +55,7 @@ func (s *CommonSuite) TestRetryIfSchemaError() {
 
 	s.Run("transient_schema_err", func() {
 		counter := atomic.Int32{}
-		err := s.client.retryIfSchemaError(ctx, "test_coll", func(ctx context.Context) (uint64, error) {
+		err := s.client.retryIfSchemaError(ctx, "default", "test_coll", func(ctx context.Context) (uint64, error) {
 			epoch := counter.Load()
 			counter.Add(1)
 			if epoch == 0 {
@@ -69,7 +69,7 @@ func (s *CommonSuite) TestRetryIfSchemaError() {
 
 	s.Run("consistent_schema_err", func() {
 		counter := atomic.Int32{}
-		err := s.client.retryIfSchemaError(ctx, "test_coll", func(ctx context.Context) (uint64, error) {
+		err := s.client.retryIfSchemaError(ctx, "default", "test_coll", func(ctx context.Context) (uint64, error) {
 			counter.Add(1)
 			return 10, merr.WrapErrCollectionSchemaMisMatch("mocked")
 		})

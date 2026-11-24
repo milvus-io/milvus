@@ -43,8 +43,11 @@ func (c *Client) Search(ctx context.Context, option SearchOption, callOptions ..
 	defer func() {
 		c.recordOperation("Search", collectionName, startTime, err)
 	}()
+	db := c.getCurrentDB()
+	req.DbName = db
+	req.GuaranteeTimestamp = c.guaranteeTimestamp(newCollectionCacheKey(db, collectionName), req.GetConsistencyLevel(), req.GetUseDefaultConsistency())
 
-	collection, err := c.getCollection(ctx, collectionName)
+	collection, err := c.getCollectionInDB(ctx, db, collectionName)
 	if err != nil {
 		return nil, err
 	}
@@ -375,8 +378,11 @@ func (c *Client) Query(ctx context.Context, option QueryOption, callOptions ...g
 	defer func() {
 		c.recordOperation("Query", collectionName, startTime, err)
 	}()
+	db := c.getCurrentDB()
+	req.DbName = db
+	req.GuaranteeTimestamp = c.guaranteeTimestamp(newCollectionCacheKey(db, collectionName), req.GetConsistencyLevel(), req.GetUseDefaultConsistency())
 
-	collection, err := c.getCollection(ctx, collectionName)
+	collection, err := c.getCollectionInDB(ctx, db, collectionName)
 	if err != nil {
 		return resultSet, err
 	}
@@ -439,8 +445,11 @@ func (c *Client) HybridSearch(ctx context.Context, option HybridSearchOption, ca
 	defer func() {
 		c.recordOperation("HybridSearch", collectionName, startTime, err)
 	}()
+	db := c.getCurrentDB()
+	req.DbName = db
+	req.GuaranteeTimestamp = c.guaranteeTimestamp(newCollectionCacheKey(db, collectionName), req.GetConsistencyLevel(), req.GetUseDefaultConsistency())
 
-	collection, err := c.getCollection(ctx, collectionName)
+	collection, err := c.getCollectionInDB(ctx, db, collectionName)
 	if err != nil {
 		return nil, err
 	}

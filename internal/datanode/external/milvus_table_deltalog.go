@@ -157,7 +157,7 @@ type milvusTableSourceDeltalogDeletes struct {
 
 // getMilvusTableSourceManifestDeltalogs reads source segment deltas from the
 // StorageV3 manifest and caches a deep copy by manifest path for the refresh
-// task lifetime.
+// task lifetime. Only manifests whose mapped columns exist enter the cache.
 func (t *RefreshExternalCollectionTask) getMilvusTableSourceManifestDeltalogs(
 	manifestPath string,
 ) ([]*datapb.FieldBinlog, error) {
@@ -173,7 +173,12 @@ func (t *RefreshExternalCollectionTask) getMilvusTableSourceManifestDeltalogs(
 	t.milvusTableSourceDeltalogsMu.Unlock()
 
 	extfs := t.milvusTableExternalSpecContext()
-	deltalogs, err := packed.GetDeltaLogsFromManifestWithExtfs(manifestPath, t.req.GetStorageConfig(), extfs)
+	resolver := typeutil.NewStorageColumnResolver(t.req.GetSchema(), typeutil.WithStorageColumnExternalSpec(extfs.Spec))
+	columns := resolver.SourceDataColumnNames()
+	if t.milvusTableFieldIDMapping != nil {
+		columns = t.columns
+	}
+	deltalogs, err := packed.GetMilvusTableSourceDeltalogs(manifestPath, t.req.GetStorageConfig(), extfs, columns)
 	if err != nil {
 		return nil, merr.Wrapf(err, "read milvus-table source manifest deltalogs %s", manifestPath)
 	}
@@ -377,17 +382,10 @@ func (t *RefreshExternalCollectionTask) getMilvusTableSourcePKField() (*schemapb
 	}
 	t.milvusTableSourcePKFieldMu.Unlock()
 
-	extfs := t.milvusTableExternalSpecContext()
-	metadata, err := packed.ReadMilvusTableSnapshotMetadata(
-		t.req.GetExternalSource(),
-		t.req.GetExternalSpec(),
-		t.req.GetStorageConfig(),
-		extfs,
-	)
+	sourceSchema, err := t.getMilvusTableSourceSchema()
 	if err != nil {
 		return nil, err
 	}
-	sourceSchema := metadata.GetCollection().GetSchema()
 	sourcePKField, err := typeutil.GetPrimaryFieldSchema(sourceSchema)
 	if err != nil {
 		return nil, merr.Wrap(err, "milvus-table source schema primary key")

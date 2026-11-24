@@ -155,10 +155,15 @@ TEST_F(BuildSessionTest, ScalarAndTextManifestInputsKeepTalonConfiguration) {
                 }
                 info.set_manifest("manifest-for-configuration");
                 auto* config = info.mutable_storage_config();
+                config->set_use_crc32c_checksum(true);
+                config->set_max_connections(37);
+                config->set_request_timeout_ms(17000);
+                config->set_ssl_tls_min_version("1.3");
                 config->set_talon_mode(2);
                 config->set_talon_enabled_stages(stages);
                 config->set_talon_small_read_threshold(123);
                 config->set_talon_coordinator("coordinator:1234");
+                config->set_talon_namespace("request-namespace");
                 config->set_talon_block_size(456);
                 config->set_talon_max_idle_per_addr(7);
                 config->set_talon_enable_for_external_table(external_enabled);
@@ -168,6 +173,18 @@ TEST_F(BuildSessionTest, ScalarAndTextManifestInputsKeepTalonConfiguration) {
                 const auto props =
                     prepared.file_manager_context.loon_ffi_properties;
                 ASSERT_NE(props, nullptr);
+                EXPECT_EQ(prepared.file_manager_context.chunkManagerPtr
+                              ->GetRootPath(),
+                          config->root_path());
+                milvus_storage::ArrowFileSystemConfig fs_config;
+                ASSERT_TRUE(milvus_storage::ArrowFileSystemConfig::
+                                create_file_system_config(props, fs_config)
+                                    .ok());
+                EXPECT_EQ(fs_config.root_path, "/");
+                EXPECT_TRUE(fs_config.use_crc32c_checksum);
+                EXPECT_EQ(fs_config.max_connections, 37);
+                EXPECT_EQ(fs_config.request_timeout_ms, 17000);
+                EXPECT_EQ(fs_config.tls_min_version, "1.3");
                 for (const auto& [key, value] :
                      std::vector<std::pair<const char*, uint32_t>>{
                          {PROPERTY_FS_TALON_SMALL_READ_THRESHOLD, 123},
@@ -183,6 +200,9 @@ TEST_F(BuildSessionTest, ScalarAndTextManifestInputsKeepTalonConfiguration) {
                     props, PROPERTY_FS_TALON_COORDINATOR);
                 ASSERT_TRUE(coordinator.ok());
                 EXPECT_EQ(*coordinator, "coordinator:1234");
+                EXPECT_EQ(std::get<std::string>(
+                              props->at(PROPERTY_FS_TALON_NAMESPACE)),
+                          "request-namespace");
                 auto external = milvus_storage::api::GetValue<std::string>(
                     props, "milvus.talon.external_mode");
                 ASSERT_TRUE(external.ok());
