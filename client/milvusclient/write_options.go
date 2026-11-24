@@ -918,3 +918,50 @@ func NewDeleteOption(collectionName string) *deleteOption {
 		templateParams: make(map[string]any),
 	}
 }
+
+// UpdateOption selects primary keys and one shared set of literal
+// assignments. Validation of field types and request limits belongs to Proxy.
+type UpdateOption interface {
+	Request() (*milvuspb.UpdateRequest, error)
+}
+
+type updateOption struct {
+	request milvuspb.UpdateRequest
+}
+
+// NewUpdateOption creates a PK-update request. Without WithPartition,
+// the request applies to every partition. Values and key slices are borrowed;
+// do not mutate them until Client.Update returns.
+func NewUpdateOption(collectionName string) *updateOption {
+	return &updateOption{request: milvuspb.UpdateRequest{CollectionName: collectionName}}
+}
+
+func (opt *updateOption) WithPartition(partitionName string) *updateOption {
+	opt.request.PartitionName = partitionName
+	return opt
+}
+
+func (opt *updateOption) WithInt64IDs(ids []int64) *updateOption {
+	opt.request.PrimaryKeys = &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}}
+	return opt
+}
+
+func (opt *updateOption) WithStringIDs(ids []string) *updateOption {
+	opt.request.PrimaryKeys = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: ids}}}
+	return opt
+}
+
+// WithAssignment appends one typed literal assignment. Repeating a field is
+// rejected by Proxy; neither assignments nor primary keys are deduplicated here.
+func (opt *updateOption) WithAssignment(fieldName string, literal *schemapb.UpdateLiteral) *updateOption {
+	opt.request.Assignments = append(opt.request.Assignments, &milvuspb.UpdateAssignment{FieldName: fieldName, Literal: literal})
+	return opt
+}
+
+func (opt *updateOption) WithNull(fieldName string) *updateOption {
+	return opt.WithAssignment(fieldName, &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_SetNull{SetNull: true}})
+}
+
+func (opt *updateOption) Request() (*milvuspb.UpdateRequest, error) {
+	return &opt.request, nil
+}

@@ -19,9 +19,11 @@ package milvusclient
 import (
 	"context"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
@@ -176,5 +178,40 @@ func (c *Client) Upsert(ctx context.Context, option UpsertOption, callOptions ..
 		})
 	})
 	c.recordOperation("Upsert", collectionName, startTime, err)
+	return result, err
+}
+
+type UpdateResult struct {
+	// UpdateCount counts submitted PKs, not matched physical rows. A missing PK
+	// is not inserted; query visibility follows the server's apply frontier.
+	UpdateCount  int64
+	Acknowledged bool
+	Timestamp    uint64
+}
+
+// Update applies literals without fetching existing rows or requiring a
+// loaded collection. It does not retry schema mismatches or transport failures:
+// another VChannel may already have committed, or a response may be lost after
+// commit. Reissuing the request could overwrite a later writer's value.
+func (c *Client) Update(ctx context.Context, option UpdateOption, callOptions ...grpc.CallOption) (UpdateResult, error) {
+	startTime := time.Now()
+	result := UpdateResult{}
+	req, err := option.Request()
+	defer func() { c.recordOperation("Update", req.GetCollectionName(), startTime, err) }()
+	if err != nil {
+		return result, err
+	}
+	// Override the client-wide retry interceptor for this non-idempotent RPC.
+	callOptions = append(slices.Clone(callOptions), grpc_retry.Disable())
+	err = c.callService(func(service milvuspb.MilvusServiceClient) error {
+		resp, err := service.Update(ctx, req, callOptions...)
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+		result.UpdateCount = resp.GetUpdateCnt()
+		result.Acknowledged = resp.GetAcknowledged()
+		result.Timestamp = resp.GetTimestamp()
+		return nil
+	})
 	return result, err
 }
