@@ -49,6 +49,8 @@ ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
 ENV LD_PRELOAD=/milvus/lib/libjemalloc.so
 ENV MALLOC_CONF=background_thread:true
+# Milvus provides task-level parallelism; keep BLAS calls single-threaded by default.
+ENV OPENBLAS_NUM_THREADS=1
 ENV OPENSSL_MODULES=/milvus/lib/ossl-modules
 
 # Generate fipsmodule.cnf for FIPS module integrity self-test.
