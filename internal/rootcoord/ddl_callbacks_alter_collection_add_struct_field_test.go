@@ -48,7 +48,7 @@ func TestAlignMilvusTableAddedStructFields(t *testing.T) {
 				Fields:       []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", ExternalField: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
 			}
 			parent := &schemapb.StructArrayFieldSchema{
-				FieldID: 110, Name: "clips", Nullable: true,
+				FieldID: 110, Name: "clips", ExternalField: "clips", Nullable: true,
 				Fields: []*schemapb.FieldSchema{{FieldID: 111, Name: "clips[base]", ExternalField: "clips[base]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true}},
 			}
 			if addChild {
@@ -289,7 +289,7 @@ func TestAlignMilvusTableAddedStructFieldsDefersSnapshotBinding(t *testing.T) {
 		Name: "target", ExternalSource: "s3://bucket/old-snapshot",
 		ExternalSpec: `{"format":"milvus-table","extfs":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true"}}`,
 		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
-			FieldID: 110, Name: "items", Nullable: true,
+			FieldID: 110, Name: "items", ExternalField: "items", Nullable: true,
 			Fields: []*schemapb.FieldSchema{{FieldID: 111, Name: "items[a]", ExternalField: "items[a]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true}},
 		}},
 	}

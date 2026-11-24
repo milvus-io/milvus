@@ -312,6 +312,12 @@ func TestMilvusTableAdmitsStructDDL(t *testing.T) {
 			for _, field := range coll.Fields {
 				field.ExternalField = field.Name
 			}
+			for _, sf := range coll.StructArrayFields {
+				sf.ExternalField = sf.Name
+				for _, child := range sf.Fields {
+					child.ExternalField = child.Name
+				}
+			}
 			before := proto.Clone(coll.ToCollectionSchemaPB())
 			meta := &MetaTable{}
 			read := mockey.Mock((*MetaTable).GetCollectionByName).Return(coll, nil).Build()
@@ -337,7 +343,7 @@ func TestMilvusTableAdmitsStructDDL(t *testing.T) {
 				err = core.broadcastAlterCollectionForAddStructField(context.Background(), &milvuspb.AddCollectionStructFieldRequest{
 					DbName: "db", CollectionName: coll.Name,
 					StructArrayFieldSchema: &schemapb.StructArrayFieldSchema{
-						Name: "added", Nullable: true,
+						Name: "added", ExternalField: "added", Nullable: true,
 						Fields: []*schemapb.FieldSchema{{
 							Name: "value", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
 							TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},

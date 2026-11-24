@@ -4668,7 +4668,7 @@ func TestRefreshExternalCollectionMilvusTableMappedStructSubField(t *testing.T) 
 		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).
 			WithDim(dim).WithExternalField("embedding")).
 		WithField(entity.NewField().WithName("metadata").WithDataType(entity.FieldTypeArray).
-			WithElementType(entity.FieldTypeStruct).WithMaxCapacity(8).WithStructSchema(targetStruct))
+			WithElementType(entity.FieldTypeStruct).WithMaxCapacity(8).WithExternalField("metadata").WithStructSchema(targetStruct))
 	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(targetName, targetSchema)))
 	t.Cleanup(func() { _ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(targetName)) })
 	refresh, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(targetName))
@@ -5138,6 +5138,9 @@ func TestMilvusTableStructSchemaEvolutionSnapshot(t *testing.T) {
 			for _, field := range targetSchema.Fields {
 				field.ExternalField = field.Name
 			}
+			for _, parent := range targetSchema.StructArrayFields {
+				parent.ExternalField = parent.Name
+			}
 			encoded, err := proto.Marshal(targetSchema)
 			require.NoError(t, err)
 			status, err := targetClient.GetService().CreateCollection(ctx, &milvuspb.CreateCollectionRequest{CollectionName: target, Schema: encoded, ShardsNum: 1})
@@ -5158,7 +5161,11 @@ func TestMilvusTableStructSchemaEvolutionSnapshot(t *testing.T) {
 					return addClient.AddCollectionField(ctx, client.NewAddCollectionFieldOption(name, addedChild("clips[note]")))
 				}
 				children := entity.NewStructSchema().WithField(addedChild("note"))
-				return addClient.AddCollectionStructField(ctx, client.NewAddCollectionStructFieldOption(name, structField("refresh_meta", children)))
+				sf := structField("refresh_meta", children)
+				if name == target {
+					sf.WithExternalField("refresh_meta")
+				}
+				return addClient.AddCollectionStructField(ctx, client.NewAddCollectionStructFieldOption(name, sf))
 			}
 			if scenario != "source_adds_struct" {
 				// Declare before either source schema or the bound snapshot contains it.
@@ -5375,7 +5382,7 @@ func TestOrdinaryExternalStructProjection(t *testing.T) {
 						schema := entity.NewSchema().WithName(name).WithExternalSource(uri).WithExternalSpec(spec).
 							WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
 							WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(2).WithExternalField("embedding")).
-							WithField(entity.NewField().WithName("clips").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeStruct).WithMaxCapacity(4).WithNullable(true).WithStructSchema(children))
+							WithField(entity.NewField().WithName("clips").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeStruct).WithMaxCapacity(4).WithNullable(true).WithExternalField("clips").WithStructSchema(children))
 						require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(name, schema).
 							WithProperty("warmup.scalarField", "disable").WithProperty("warmup.vectorField", "disable").
 							WithProperty("warmup.scalarIndex", "disable").WithProperty("warmup.vectorIndex", "disable")))
@@ -5505,7 +5512,7 @@ func TestOrdinaryExternalStructInvalidSource(t *testing.T) {
 				schema := entity.NewSchema().WithName(name).WithExternalSource(source).WithExternalSpec(ordinaryStructSpec(cfg, format)).
 					WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
 					WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(2).WithExternalField("embedding")).
-					WithField(entity.NewField().WithName("clips").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeStruct).WithMaxCapacity(4).WithNullable(true).WithStructSchema(children))
+					WithField(entity.NewField().WithName("clips").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeStruct).WithMaxCapacity(4).WithNullable(true).WithExternalField("clips").WithStructSchema(children))
 				require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(name, schema)))
 				t.Cleanup(func() {
 					require.NoError(t, mc.DropCollection(context.Background(), client.NewDropCollectionOption(name)))
@@ -5549,29 +5556,29 @@ func TestOrdinaryExternalStructNestedValues(t *testing.T) {
 			schema := entity.NewSchema().WithName(name).WithExternalSource(source).WithExternalSpec(ordinaryStructSpec(cfg, format)).
 				WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
 				WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(2).WithExternalField("embedding")).
-				WithField(entity.NewField().WithName("clips").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeStruct).WithMaxCapacity(4).WithNullable(true).WithStructSchema(children))
+				WithField(entity.NewField().WithName("renamed_clips").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeStruct).WithMaxCapacity(4).WithNullable(true).WithExternalField("clips").WithStructSchema(children))
 			require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(name, schema).
 				WithProperty("warmup.scalarField", "disable").WithProperty("warmup.vectorField", "disable").WithProperty("warmup.scalarIndex", "disable").WithProperty("warmup.vectorIndex", "disable")))
 			t.Cleanup(func() {
 				require.NoError(t, mc.DropCollection(context.Background(), client.NewDropCollectionOption(name)))
 			})
 			refreshAndWait(ctx, t, mc, name)
-			task, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(name, "clips[vec]", index.NewAutoIndex(entity.L2)))
+			task, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(name, "renamed_clips[vec]", index.NewAutoIndex(entity.L2)))
 			require.NoError(t, err)
 			require.NoError(t, task.Await(ctx))
 			indexAndLoadCollection(ctx, t, mc, name, "embedding")
 			score, extraScore := int64(20), int64(40)
 			expected := map[string]interface{}{"score": []*int64{nil, &score, &extraScore}, "tags": [][]int64{{}, {1, 2}, {}}, "vec": []entity.FloatVector{{2, 1}, {3, 1}, nil}}
-			rows, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter("id == 2").WithOutputFields("clips").WithConsistencyLevel(entity.ClStrong))
+			rows, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter("id == 2").WithOutputFields("renamed_clips").WithConsistencyLevel(entity.ClStrong))
 			require.NoError(t, err)
 			require.Equal(t, 1, rows.ResultCount)
-			value, err := rows.GetColumn("clips").Get(0)
+			value, err := rows.GetColumn("renamed_clips").Get(0)
 			require.NoError(t, err)
 			require.Equal(t, expected, value)
-			nullArrayRow, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter("id == 3").WithOutputFields("clips").WithConsistencyLevel(entity.ClStrong))
+			nullArrayRow, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter("id == 3").WithOutputFields("renamed_clips").WithConsistencyLevel(entity.ClStrong))
 			require.NoError(t, err)
 			require.Equal(t, 1, nullArrayRow.ResultCount)
-			nullArrayValue, err := nullArrayRow.GetColumn("clips").Get(0)
+			nullArrayValue, err := nullArrayRow.GetColumn("renamed_clips").Get(0)
 			require.NoError(t, err)
 			lastScore := int64(30)
 			require.Equal(t, map[string]interface{}{"score": []*int64{&lastScore}, "tags": [][]int64{nil}, "vec": []entity.FloatVector{{4, 1}}}, nullArrayValue)
@@ -5583,7 +5590,7 @@ func TestOrdinaryExternalStructNestedValues(t *testing.T) {
 			}{
 				{"$[score] IS NULL", 2, 0}, {"ARRAY_CONTAINS($[tags], 2)", 2, 1}, {"$[tags] IS NULL", 3, 0}, {"$[vec] IS NULL", 2, 2},
 			} {
-				filtered, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter("element_filter(clips, "+tc.expr+")").WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
+				filtered, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter("element_filter(renamed_clips, "+tc.expr+")").WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
 				require.NoError(t, err)
 				require.Equal(t, 1, filtered.ResultCount)
 				id, err := filtered.GetColumn("id").GetAsInt64(0)
@@ -5591,7 +5598,7 @@ func TestOrdinaryExternalStructNestedValues(t *testing.T) {
 				require.Equal(t, tc.id, id)
 				require.Equal(t, [][]int64{{tc.offset}}, filtered.QueryElementOffsets)
 			}
-			hits, err := mc.Search(ctx, client.NewSearchOption(name, 1, []entity.Vector{entity.FloatVector{2, 1}}).WithANNSField("clips[vec]").WithOutputFields("id", "clips").WithConsistencyLevel(entity.ClStrong))
+			hits, err := mc.Search(ctx, client.NewSearchOption(name, 1, []entity.Vector{entity.FloatVector{2, 1}}).WithANNSField("renamed_clips[vec]").WithOutputFields("id", "renamed_clips").WithConsistencyLevel(entity.ClStrong))
 			require.NoError(t, err)
 			require.Len(t, hits, 1)
 			require.Equal(t, 1, hits[0].ResultCount)
@@ -5599,12 +5606,12 @@ func TestOrdinaryExternalStructNestedValues(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, int64(2), id)
 			require.Equal(t, []int64{0}, hits[0].ElementOffsets)
-			value, err = hits[0].GetColumn("clips").Get(0)
+			value, err = hits[0].GetColumn("renamed_clips").Get(0)
 			require.NoError(t, err)
 			require.Equal(t, expected, value)
 			// The third element has a null vector and must not become a hit.
 			allHits, err := mc.Search(ctx, client.NewSearchOption(name, 10, []entity.Vector{entity.FloatVector{2, 1}}).
-				WithANNSField("clips[vec]").WithFilter("id == 2").WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
+				WithANNSField("renamed_clips[vec]").WithFilter("id == 2").WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
 			require.NoError(t, err)
 			require.Len(t, allHits, 1)
 			require.Equal(t, 2, allHits[0].ResultCount)

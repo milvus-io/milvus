@@ -51,9 +51,11 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 	}
 
 	schema := coll.ToCollectionSchemaPB()
+	isExternal := typeutil.IsExternalCollection(schema)
+	isMilvusTable := typeutil.NewStorageColumnResolver(schema).IsMilvusTable()
 	// Ordinary external Struct projection is supported at creation time only.
 	// Keep additive DDL restricted to snapshot-backed milvus-table schemas.
-	if typeutil.IsExternalCollection(schema) && !typeutil.NewStorageColumnResolver(schema).IsMilvusTable() {
+	if isExternal && !isMilvusTable {
 		return merr.WrapErrParameterInvalidMsg("external collection %s does not support adding struct fields", coll.Name)
 	}
 
@@ -61,6 +63,13 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 		return merr.WrapErrParameterInvalidMsg("struct array field schema is nil")
 	}
 	structArrayField := proto.Clone(req.GetStructArrayFieldSchema()).(*schemapb.StructArrayFieldSchema)
+	if isMilvusTable {
+		if structArrayField.GetExternalField() == "" {
+			return merr.WrapErrParameterInvalidMsg("struct field '%s' in external collection %s must have external_field mapping", structArrayField.GetName(), coll.Name)
+		}
+	} else if structArrayField.GetExternalField() != "" {
+		return merr.WrapErrParameterInvalidMsg("external_field is not supported for struct field in non-external collection %s", coll.Name)
+	}
 	if err := normalizeAndCheckAddedStructField(structArrayField); err != nil {
 		return err
 	}
@@ -179,10 +188,18 @@ func alignMilvusTableAddedStructFields(ctx context.Context, coll *model.Collecti
 		}
 	}
 	for _, parent := range schema.GetStructArrayFields() {
+		parentExt := parent.GetExternalField()
+		if parentExt == "" {
+			parentExt = parent.GetName()
+		}
 		for _, child := range parent.GetFields() {
 			name := storedRootStructSubFieldName(parent.GetName(), child.GetName())
 			if _, exists := oldChildren[name]; !exists {
-				child.ExternalField = name
+				shortName, err := typeutil.ExtractStructFieldName(name)
+				if err != nil {
+					shortName = child.GetName()
+				}
+				child.ExternalField = storedRootStructSubFieldName(parentExt, shortName)
 			}
 		}
 	}

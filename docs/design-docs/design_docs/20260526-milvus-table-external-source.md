@@ -127,8 +127,9 @@ with its assigned IDs.
 Every newly imported segment carries the refresh task's schema version.
 
 The target may omit ordinary non-key source fields and select a subset of a
-Struct's children. Struct parents and selected children retain source names and
-shape; each selected child has an independent target ID. Every mapped source
+Struct's children. Struct parents map to source structs via `external_field`
+(supporting parent renaming), while selected children retain source child names
+and shape; each selected child has an independent target ID. Every mapped source
 column must physically exist in each live source segment. Adding an unmapped
 ordinary source field does not prevent refresh.
 

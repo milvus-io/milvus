@@ -5727,9 +5727,19 @@ func TestIsExternalCollection(t *testing.T) {
 	}
 	assert.True(t, IsExternalCollection(schema))
 
-	// schema with both ExternalSource and ExternalField set
-	schema.ExternalSource = "s3://bucket/path"
-	assert.True(t, IsExternalCollection(schema))
+	// schema with StructArrayFields + ExternalSpec but no ExternalField set must NOT be external
+	structOnlyNoExt := &schemapb.CollectionSchema{
+		ExternalSource: "s3://bucket/path",
+		ExternalSpec:   `{"format":"parquet"}`,
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{Name: "items", Fields: []*schemapb.FieldSchema{{Name: "score", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}}},
+		},
+	}
+	assert.False(t, IsExternalCollection(structOnlyNoExt))
+
+	// schema with StructArrayField.ExternalField set is external
+	structOnlyNoExt.StructArrayFields[0].ExternalField = "raw_items"
+	assert.True(t, IsExternalCollection(structOnlyNoExt))
 }
 
 func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
@@ -5919,9 +5929,17 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 	t.Run("struct fields supported", func(t *testing.T) {
 		schema := buildSchema()
 		schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
-			{Name: "struct_field", Fields: []*schemapb.FieldSchema{{Name: "nested", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}}},
+			{Name: "struct_field", ExternalField: "struct_field", Fields: []*schemapb.FieldSchema{{Name: "nested", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}}},
 		}
 		assert.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
+	})
+
+	t.Run("struct fields require explicit external_field", func(t *testing.T) {
+		schema := buildSchema()
+		schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
+			{Name: "struct_field", Fields: []*schemapb.FieldSchema{{Name: "nested", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}}},
+		}
+		assert.ErrorContains(t, NormalizeAndValidateExternalCollectionSchema(schema), "must have external_field mapping")
 	})
 
 	t.Run("primary key disabled for non milvus table", func(t *testing.T) {
@@ -7877,7 +7895,7 @@ func TestMilvusTableStructProjectionAdmission(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		ExternalSource: "s3://bucket/snapshot.json", ExternalSpec: `{"format":"milvus-table"}`,
 		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
-			Name: "items", FieldID: 102,
+			Name: "items", FieldID: 102, ExternalField: "items",
 			Fields: []*schemapb.FieldSchema{child},
 		}},
 	}
@@ -7900,10 +7918,17 @@ func TestMilvusTableStructProjectionCompatibility(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "independent IDs", mutate: func(*schemapb.CollectionSchema) {}},
+		{name: "renamed parent with external_field", mutate: func(s *schemapb.CollectionSchema) {
+			s.StructArrayFields[0].Name = "renamed_items"
+			s.StructArrayFields[0].ExternalField = "items"
+			s.StructArrayFields[0].Fields[0].Name = "renamed_items[value]"
+			s.StructArrayFields[0].Fields[0].ExternalField = "items[value]"
+		}},
 		{name: "incompatible leaf", mutate: func(s *schemapb.CollectionSchema) {
 			s.StructArrayFields[0].Fields[0].ElementType = schemapb.DataType_Double
 		}, wantErr: true},
-		{name: "missing parent", mutate: func(s *schemapb.CollectionSchema) { s.StructArrayFields[0].Name = "other" }, wantErr: true},
+		{name: "missing parent", mutate: func(s *schemapb.CollectionSchema) { s.StructArrayFields[0].ExternalField = "other" }, wantErr: true},
+		{name: "empty parent external_field", mutate: func(s *schemapb.CollectionSchema) { s.StructArrayFields[0].ExternalField = "" }, wantErr: true},
 		{name: "incompatible shape", mutate: func(s *schemapb.CollectionSchema) { s.StructArrayFields[0].Nullable = true }, wantErr: true},
 		{name: "missing leaf", mutate: func(s *schemapb.CollectionSchema) { s.StructArrayFields[0].Fields[0].ExternalField = "items[missing]" }, wantErr: true},
 		{name: "duplicate leaf", mutate: func(s *schemapb.CollectionSchema) {
@@ -7913,6 +7938,7 @@ func TestMilvusTableStructProjectionCompatibility(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			target := proto.Clone(source).(*schemapb.CollectionSchema)
 			target.StructArrayFields[0].FieldID = 110
+			target.StructArrayFields[0].ExternalField = "items"
 			target.StructArrayFields[0].Fields = target.StructArrayFields[0].Fields[:1]
 			target.StructArrayFields[0].Fields[0].FieldID = 111
 			target.StructArrayFields[0].Fields[0].ExternalField = "items[value]"
@@ -7968,7 +7994,13 @@ func TestMilvusTableStructFieldIdentity(t *testing.T) {
 			}{
 				{"same_definition", func(s *schemapb.CollectionSchema) {}, false},
 				{"renamed_child", func(s *schemapb.CollectionSchema) { s.StructArrayFields[0].Fields[0].Name = "items[cost]" }, true},
-				{"renamed_parent", func(s *schemapb.CollectionSchema) { s.StructArrayFields[0].Name = "products" }, true},
+				{"missing_source_parent", func(s *schemapb.CollectionSchema) { s.StructArrayFields[0].ExternalField = "products" }, true},
+				{"renamed_parent_valid", func(s *schemapb.CollectionSchema) {
+					s.StructArrayFields[0].Name = "products"
+					s.StructArrayFields[0].ExternalField = "items"
+					s.StructArrayFields[0].Fields[0].Name = "products[price]"
+					s.StructArrayFields[0].Fields[0].ExternalField = "items[price]"
+				}, false},
 				{"missing_child", func(s *schemapb.CollectionSchema) { s.StructArrayFields[0].Fields = nil }, true},
 				{"extra_child", func(s *schemapb.CollectionSchema) {
 					f := proto.Clone(s.StructArrayFields[0].Fields[0]).(*schemapb.FieldSchema)
@@ -7990,6 +8022,7 @@ func TestMilvusTableStructFieldIdentity(t *testing.T) {
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					target := proto.Clone(source).(*schemapb.CollectionSchema)
+					target.StructArrayFields[0].ExternalField = "items"
 					target.StructArrayFields[0].Fields[0].ExternalField = "items[price]"
 					tc.mutate(target)
 					original := proto.Clone(target)
@@ -8022,6 +8055,7 @@ func TestMilvusTableStructSubsetIdentity(t *testing.T) {
 					}
 					target := proto.Clone(source).(*schemapb.CollectionSchema)
 					// Select non-contiguous children in a different order from the source.
+					target.StructArrayFields[0].ExternalField = "items"
 					children := target.StructArrayFields[0].Fields
 					target.StructArrayFields[0].Fields = []*schemapb.FieldSchema{children[2], children[0]}
 					for _, field := range GetAllFieldSchemas(target) {
@@ -8084,6 +8118,7 @@ func TestMilvusTableStructOriginMarkerIdentity(t *testing.T) {
 					}},
 				}}}
 				target := proto.Clone(source).(*schemapb.CollectionSchema)
+				target.StructArrayFields[0].ExternalField = "items"
 				original := source.StructArrayFields[0].Fields[0]
 				selected := target.StructArrayFields[0].Fields[0]
 				selected.ExternalField = selected.Name
@@ -8130,7 +8165,7 @@ func TestMilvusTableStructAutomaticMapping(t *testing.T) {
 					name = "items[price]"
 				}
 				child := &schemapb.FieldSchema{Name: name, FieldID: 102, ExternalField: explicit, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float}
-				schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/snapshot.json", ExternalSpec: `{"format":"milvus-table"}`, StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", FieldID: 101, Fields: []*schemapb.FieldSchema{child}}}}
+				schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/snapshot.json", ExternalSpec: `{"format":"milvus-table"}`, StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", ExternalField: "items", FieldID: 101, Fields: []*schemapb.FieldSchema{child}}}}
 				original := proto.Clone(schema)
 				err := NormalizeAndValidateExternalCollectionSchema(schema)
 				if explicit == "items[other]" {
@@ -8148,7 +8183,7 @@ func TestMilvusTableStructAutomaticMapping(t *testing.T) {
 		}
 	}
 	t.Run("failure_leaves_implicit_mapping_unchanged", func(t *testing.T) {
-		schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/snapshot.json", ExternalSpec: `{"format":"milvus-table"}`, StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", Fields: []*schemapb.FieldSchema{
+		schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/snapshot.json", ExternalSpec: `{"format":"milvus-table"}`, StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", ExternalField: "items", Fields: []*schemapb.FieldSchema{
 			{Name: "value", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
 			{Name: "bad", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, AutoID: true},
 		}}}}
@@ -8170,7 +8205,7 @@ func TestMilvusTableNativeListFieldValidation(t *testing.T) {
 					Name: "target", ExternalSource: "s3://bucket/snapshot.json",
 					ExternalSpec: fmt.Sprintf(`{"format":%q}`, format),
 					StructArrayFields: []*schemapb.StructArrayFieldSchema{{
-						Name: "items", FieldID: 100,
+						Name: "items", FieldID: 100, ExternalField: "items",
 						Fields: []*schemapb.FieldSchema{{
 							Name: "items[value]", FieldID: 101, ExternalField: "items[value]",
 							DataType: dataType, ElementType: elementType, ElementNullable: true,
@@ -8193,7 +8228,7 @@ func TestMilvusTableNativeListFieldValidation(t *testing.T) {
 			Name: "items[value]", DataType: schemapb.DataType_Array,
 			ElementType: schemapb.DataType_Array, ElementNullable: true,
 		}
-		schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{{Name: "items", Fields: []*schemapb.FieldSchema{field}}}
+		schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{{Name: "items", ExternalField: "items", Fields: []*schemapb.FieldSchema{field}}}
 		require.ErrorContains(t, validateExternalFieldTypeForSchema(schema, field), "must specify type_schema")
 	})
 }
@@ -8213,11 +8248,11 @@ func TestOrdinaryExternalStructAutomaticMapping(t *testing.T) {
 	for _, format := range []string{"parquet", "vortex", "lance-table", "iceberg-table"} {
 		t.Run(format, func(t *testing.T) {
 			child := &schemapb.FieldSchema{Name: "score", FieldID: 102, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}
-			parent := &schemapb.StructArrayFieldSchema{Name: "items", FieldID: 101, Fields: []*schemapb.FieldSchema{child}}
+			parent := &schemapb.StructArrayFieldSchema{Name: "items", ExternalField: "raw_items", FieldID: 101, Fields: []*schemapb.FieldSchema{child}}
 			schema := &schemapb.CollectionSchema{Name: "external_struct", ExternalSource: "s3://bucket/data", ExternalSpec: fmt.Sprintf(`{"format":%q}`, format), StructArrayFields: []*schemapb.StructArrayFieldSchema{parent}}
 			require.True(t, IsExternalCollection(schema))
 			require.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
-			require.Equal(t, "items[score]", child.GetExternalField())
+			require.Equal(t, "raw_items[score]", child.GetExternalField())
 			require.True(t, parent.GetNullable())
 			require.True(t, child.GetNullable())
 			require.NoError(t, ValidateExternalCollectionResolvedSchema(schema))
@@ -8227,29 +8262,29 @@ func TestOrdinaryExternalStructAutomaticMapping(t *testing.T) {
 }
 
 func TestOrdinaryExternalStructPhysicalColumns(t *testing.T) {
-	a := &schemapb.FieldSchema{Name: "items[a]", FieldID: 102, ExternalField: "items[a]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}
-	b := &schemapb.FieldSchema{Name: "items[b]", FieldID: 103, ExternalField: "items[b]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar}
-	schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/data", ExternalSpec: `{"format":"parquet"}`, StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", FieldID: 101, Fields: []*schemapb.FieldSchema{a, b}}}}
+	a := &schemapb.FieldSchema{Name: "items[a]", FieldID: 102, ExternalField: "raw_items[a]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}
+	b := &schemapb.FieldSchema{Name: "items[b]", FieldID: 103, ExternalField: "raw_items[b]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar}
+	schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/data", ExternalSpec: `{"format":"parquet"}`, StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", ExternalField: "raw_items", FieldID: 101, Fields: []*schemapb.FieldSchema{a, b}}}}
 	resolver := NewStorageColumnResolver(schema)
-	require.Equal(t, []string{"items"}, resolver.SourceDataColumnNames())
+	require.Equal(t, []string{"raw_items"}, resolver.SourceDataColumnNames())
 	for _, field := range []*schemapb.FieldSchema{a, b} {
 		column, ok := resolver.SourceDataColumnName(field)
 		require.True(t, ok)
-		require.Equal(t, "items", column)
+		require.Equal(t, "raw_items", column)
 		column, ok = resolver.ManifestStoredColumnName(field)
 		require.True(t, ok)
-		require.Equal(t, "items", column)
+		require.Equal(t, "raw_items", column)
 	}
 }
 
 func TestOrdinaryExternalStructRejectsRemappingWithoutMutation(t *testing.T) {
 	for _, validate := range []func(*schemapb.CollectionSchema) error{NormalizeAndValidateExternalCollectionSchema, ValidateExternalCollectionResolvedSchema} {
-		schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/data", ExternalSpec: `{"format":"parquet"}`, StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", Fields: []*schemapb.FieldSchema{
+		schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/data", ExternalSpec: `{"format":"parquet"}`, StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", ExternalField: "items", Fields: []*schemapb.FieldSchema{
 			{Name: "a", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
 			{Name: "b", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ExternalField: "items[renamed]"},
 		}}}}
 		before := proto.Clone(schema)
-		require.ErrorContains(t, validate(schema), "must retain its source name")
+		require.ErrorContains(t, validate(schema), "must map to")
 		require.True(t, proto.Equal(before, schema))
 	}
 }
@@ -8262,8 +8297,8 @@ func TestOrdinaryExternalStructRejectsParentColumnAlias(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			schema := &schemapb.CollectionSchema{
 				ExternalSource: "s3://bucket/data", ExternalSpec: `{"format":"parquet"}`,
-				Fields: []*schemapb.FieldSchema{{Name: "raw", FieldID: 103, DataType: schemapb.DataType_JSON, ExternalField: "items"}},
-				StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", FieldID: 101, Fields: []*schemapb.FieldSchema{{
+				Fields: []*schemapb.FieldSchema{{Name: "raw", FieldID: 103, DataType: schemapb.DataType_JSON, ExternalField: "raw_items"}},
+				StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", ExternalField: "raw_items", FieldID: 101, Fields: []*schemapb.FieldSchema{{
 					Name: "score", FieldID: 102, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
 				}}}},
 			}
@@ -8278,7 +8313,7 @@ func TestMilvusTableStructParentColumnAliasUsesIndependentFieldIDs(t *testing.T)
 	schema := &schemapb.CollectionSchema{
 		ExternalSource: "s3://bucket/snapshot.json", ExternalSpec: `{"format":"milvus-table"}`,
 		Fields: []*schemapb.FieldSchema{{Name: "raw", FieldID: 103, DataType: schemapb.DataType_JSON, ExternalField: "items"}},
-		StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", FieldID: 101, Fields: []*schemapb.FieldSchema{{
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", ExternalField: "items", FieldID: 101, Fields: []*schemapb.FieldSchema{{
 			Name: "score", FieldID: 102, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
 		}}}},
 	}
@@ -8293,6 +8328,7 @@ func TestValidateMilvusTableRefreshSchemaAllowsNewSourceStructs(t *testing.T) {
 	target.Fields[0].ExternalField = "id"
 	target.StructArrayFields = target.StructArrayFields[:1]
 	target.StructArrayFields[0].FieldID = 130
+	target.StructArrayFields[0].ExternalField = "items"
 	target.StructArrayFields[0].Fields[0].FieldID = 131
 	target.StructArrayFields[0].Fields[0].ExternalField = "items[value]"
 	require.NoError(t, ValidateMilvusTableSchemaIdentity(target, source))

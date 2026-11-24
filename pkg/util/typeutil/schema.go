@@ -3049,7 +3049,8 @@ func GetAllFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldSche
 	return all
 }
 
-// IsExternalCollection includes implicit same-name Struct mappings when an external spec is supplied.
+// IsExternalCollection reports whether any field or Struct parent declares an
+// external_field mapping.
 func IsExternalCollection(schema *schemapb.CollectionSchema) bool {
 	if schema == nil {
 		return false
@@ -3059,7 +3060,12 @@ func IsExternalCollection(schema *schemapb.CollectionSchema) bool {
 			return true
 		}
 	}
-	return len(schema.GetStructArrayFields()) > 0 && schema.GetExternalSpec() != ""
+	for _, structField := range schema.GetStructArrayFields() {
+		if structField.GetExternalField() != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // GetVectorFieldSchemas get vector fields schema from collection schema.
@@ -3252,37 +3258,53 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 	return nil
 }
 
-// externalStructMappings validates logical child paths before any schema mutation.
+// externalStructMappings validates Struct parent and child external_field
+// mappings before any schema mutation. Every Struct parent in an external
+// collection must explicitly set external_field.
 func externalStructMappings(schema *schemapb.CollectionSchema) (map[*schemapb.FieldSchema]string, error) {
 	mappings := make(map[*schemapb.FieldSchema]string)
 	isMilvusTable := isMilvusTableStorageSpec(schema.GetExternalSpec())
+	seenParentExt := make(map[string]string, len(schema.GetStructArrayFields()))
 	for _, parent := range schema.GetStructArrayFields() {
+		parentExt := parent.GetExternalField()
+		if parentExt == "" {
+			return nil, merr.WrapErrParameterInvalidMsg("struct field '%s' in external collection %s must have external_field mapping", parent.GetName(), schema.GetName())
+		}
+		if prev, dup := seenParentExt[parentExt]; dup {
+			return nil, merr.WrapErrParameterInvalidMsg("external_field %q is mapped by multiple struct fields: %q and %q", parentExt, prev, parent.GetName())
+		}
+		seenParentExt[parentExt] = parent.GetName()
 		if !isMilvusTable {
 			// A parent Arrow column can back its children, but cannot also be
 			// interpreted as an unrelated top-level scalar or JSON field.
 			for _, field := range schema.GetFields() {
-				if field.GetExternalField() != "" && field.GetExternalField() == parent.GetName() {
-					return nil, merr.WrapErrParameterInvalidMsg("external_field %q on field %q conflicts with Struct parent %q", field.GetExternalField(), field.GetName(), parent.GetName())
+				if field.GetExternalField() != "" && field.GetExternalField() == parentExt {
+					return nil, merr.WrapErrParameterInvalidMsg("external_field %q on field %q conflicts with Struct parent %q (external_field=%q)", field.GetExternalField(), field.GetName(), parent.GetName(), parentExt)
 				}
 			}
 		}
 		for _, field := range parent.GetFields() {
-			name := field.GetName()
-			if !IsStructSubField(name) {
-				name = ConcatStructFieldName(parent.GetName(), name)
-			} else if !strings.HasPrefix(name, parent.GetName()+"[") || !strings.HasSuffix(name, "]") {
-				return nil, merr.WrapErrParameterInvalidMsg("struct %q child %q has an invalid source path", parent.GetName(), field.GetName())
+			shortName := field.GetName()
+			if IsStructSubField(shortName) {
+				prefix := parent.GetName() + "["
+				if !strings.HasPrefix(shortName, prefix) || !strings.HasSuffix(shortName, "]") {
+					return nil, merr.WrapErrParameterInvalidMsg("struct %q child %q has an invalid source path", parent.GetName(), field.GetName())
+				}
+				shortName = shortName[len(prefix) : len(shortName)-1]
 			}
-			if field.GetExternalField() != "" && field.GetExternalField() != name {
-				return nil, merr.WrapErrParameterInvalidMsg("struct %q child %q must retain its source name; external_field=%q", parent.GetName(), field.GetName(), field.GetExternalField())
+			expectedExt := ConcatStructFieldName(parentExt, shortName)
+			if field.GetExternalField() != "" && field.GetExternalField() != expectedExt {
+				return nil, merr.WrapErrParameterInvalidMsg("struct %q child %q must map to %q; external_field=%q", parent.GetName(), field.GetName(), expectedExt, field.GetExternalField())
 			}
-			mappings[field] = name
+			mappings[field] = expectedExt
 		}
 	}
 	return mappings, nil
 }
 
-// externalStructParent uses schema membership rather than parsing arbitrary source column names.
+// externalStructParent returns the physical external column name of the Struct
+// parent that owns field, using schema membership rather than parsing arbitrary
+// source column names.
 func externalStructParent(schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) string {
 	if field == nil {
 		return ""
@@ -3290,6 +3312,9 @@ func externalStructParent(schema *schemapb.CollectionSchema, field *schemapb.Fie
 	for _, parent := range schema.GetStructArrayFields() {
 		for _, child := range parent.GetFields() {
 			if child == field || (field.GetFieldID() != 0 && child.GetFieldID() == field.GetFieldID()) {
+				if parent.GetExternalField() != "" {
+					return parent.GetExternalField()
+				}
 				return parent.GetName()
 			}
 		}
@@ -3456,20 +3481,31 @@ func ValidateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema
 	}
 	targetParents := make(map[string]string)
 	seenParents := make(map[string]bool)
+	seenSourceParents := make(map[string]string)
 	for _, parent := range target.GetStructArrayFields() {
-		original, ok := sourceStructs[parent.GetName()]
+		sourceParentName := parent.GetExternalField()
+		if sourceParentName == "" {
+			return merr.WrapErrParameterInvalidMsg("target struct %q must set external_field mapping to a source snapshot struct", parent.GetName())
+		}
+		original, ok := sourceStructs[sourceParentName]
 		if !ok {
-			return merr.WrapErrParameterInvalidMsg("target struct %q is missing from the source snapshot", parent.GetName())
+			return merr.WrapErrParameterInvalidMsg("target struct %q (external_field=%q) is missing from the source snapshot", parent.GetName(), sourceParentName)
 		}
 		if seenParents[parent.GetName()] {
 			return merr.WrapErrParameterInvalidMsg("duplicate target struct %q", parent.GetName())
 		}
 		seenParents[parent.GetName()] = true
+		if prev, dup := seenSourceParents[sourceParentName]; dup {
+			return merr.WrapErrParameterInvalidMsg("source snapshot struct %q is mapped by multiple target structs: %q and %q", sourceParentName, prev, parent.GetName())
+		}
+		seenSourceParents[sourceParentName] = parent.GetName()
 		if len(parent.GetFields()) == 0 {
 			return merr.WrapErrParameterInvalidMsg("target struct %q must select at least one source child", parent.GetName())
 		}
 		left := proto.Clone(parent).(*schemapb.StructArrayFieldSchema)
 		right := proto.Clone(original).(*schemapb.StructArrayFieldSchema)
+		left.Name, right.Name = "", ""
+		left.ExternalField, right.ExternalField = "", ""
 		left.Fields, right.Fields = nil, nil
 		left.Description, right.Description = "", ""
 		left.TypeParams = normalizeMilvusTableKVPairs(left.TypeParams)
@@ -3479,12 +3515,19 @@ func ValidateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema
 			return merr.WrapErrParameterInvalidMsg("struct definition mismatch for %q", parent.GetName())
 		}
 		for _, field := range parent.GetFields() {
-			targetParents[field.GetName()] = parent.GetName()
+			targetParents[field.GetName()] = sourceParentName
 		}
 	}
 	for _, field := range GetAllFieldSchemas(target) {
-		if parent := targetParents[field.GetName()]; parent != "" && field.GetName() != field.GetExternalField() {
-			return merr.WrapErrParameterInvalidMsg("struct %q child %q must retain its source name; external_field=%q", parent, field.GetName(), field.GetExternalField())
+		if sourceParent := targetParents[field.GetName()]; sourceParent != "" {
+			shortName, err := ExtractStructFieldName(field.GetName())
+			if err != nil {
+				return merr.WrapErrParameterInvalidMsg("struct child %q has an invalid name", field.GetName())
+			}
+			expectedExt := ConcatStructFieldName(sourceParent, shortName)
+			if field.GetExternalField() != expectedExt {
+				return merr.WrapErrParameterInvalidMsg("struct child %q must map to %q; external_field=%q", field.GetName(), expectedExt, field.GetExternalField())
+			}
 		}
 		if targetParents[field.GetName()] != sourceParents[field.GetExternalField()] {
 			return merr.WrapErrParameterInvalidMsg("source struct membership mismatch for field %q", field.GetName())

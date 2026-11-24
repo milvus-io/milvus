@@ -11,11 +11,15 @@ representation or the milvus-table identity contract.
 
 ## Mapping contract
 
-A target Struct parent selects the same-named top-level source column. Target
-children select same-named source children; selecting a subset is allowed.
-Child external_field values are canonical parent[child] paths. Parent and child
-renaming is unsupported. Top-level aliases of a selected Struct parent column
-are rejected, while sibling children may share that physical column.
+Every external collection Struct parent (`StructArrayFieldSchema`) must
+explicitly set `external_field` to the top-level source column name (parent
+renaming is supported; `IsExternalCollection` checks `FieldSchema.external_field`
+and `StructArrayFieldSchema.external_field` directly with no spec-based
+fallback). Target children select same-named source children under that parent;
+selecting a subset is allowed. Child `external_field` values are canonical
+`<parent_external_field>[<child>]` paths. Child renaming is unsupported.
+Top-level aliases of a selected Struct parent's `external_field` column are
+rejected, while sibling children share that physical column.
 
 | Arrow source | Milvus StructArray row |
 | --- | --- |
@@ -69,7 +73,8 @@ Refresh preserves existing external-source publication and segment replacement
 semantics. Replacement data must satisfy the selected child schema. Virtual PKs
 are stable within a retained segment and across reload; replacing segments can
 change them. Ordinary inner collections and numeric milvus-table mappings must
-retain their existing behavior. No SDK or protobuf wire change is required.
+retain their existing behavior. `StructArrayFieldSchema.external_field` is added
+in `milvus-proto` and plumbed through Go SDK and RESTful v2 APIs.
 
 ## CDC boundary
 

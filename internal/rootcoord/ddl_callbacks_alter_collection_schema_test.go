@@ -2519,10 +2519,12 @@ func TestDDLCallbacksOrdinaryExternalRejectsAddStructSubField(t *testing.T) {
 	name := "externalStruct" + funcutil.RandomString(10)
 	status, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{DbName: dbName})
 	require.NoError(t, merr.CheckRPCCall(status, err))
+	profileStruct := newRootAddStructFieldSchema("profile")
+	profileStruct.ExternalField = "profile"
 	schema := &schemapb.CollectionSchema{
 		Name:           name,
 		ExternalSource: "s3://bucket/data", ExternalSpec: `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`,
-		StructArrayFields: []*schemapb.StructArrayFieldSchema{newRootAddStructFieldSchema("profile")},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{profileStruct},
 	}
 	for _, field := range schema.StructArrayFields[0].Fields {
 		field.Nullable = true

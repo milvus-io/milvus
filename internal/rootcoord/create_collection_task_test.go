@@ -1904,6 +1904,7 @@ func TestPrepareSchemaMilvusTableStruct(t *testing.T) {
 				target.Fields[0].FieldID = 0
 				target.Fields[0].ExternalField = "pk"
 				target.StructArrayFields[0].FieldID = 0
+				target.StructArrayFields[0].ExternalField = "items"
 				child := target.StructArrayFields[0].Fields[0]
 				child.FieldID, child.ExternalField = 0, ""
 				for _, replay := range []bool{false, true} {
@@ -3473,7 +3474,7 @@ func Test_createCollectionTask_prepareSchema_structSubFieldTextMatch(t *testing.
 }
 
 func TestPrepareSchemaOrdinaryExternalStruct(t *testing.T) {
-	for _, mapping := range []string{"", "items[other]"} {
+	for _, mapping := range []string{"", "raw_items[other]"} {
 		t.Run(fmt.Sprintf("mapping=%s", mapping), func(t *testing.T) {
 			read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).Return(nil, merr.ErrServiceInternal).Build()
 			defer read.UnPatch()
@@ -3484,13 +3485,13 @@ func TestPrepareSchemaOrdinaryExternalStruct(t *testing.T) {
 					{Name: common.VirtualPKFieldName, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 					{Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec", TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
 				},
-				StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", Fields: []*schemapb.FieldSchema{{Name: "items[score]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ExternalField: mapping, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}}}}},
+				StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", ExternalField: "raw_items", Fields: []*schemapb.FieldSchema{{Name: "items[score]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ExternalField: mapping, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}}}}},
 			}
 			task := &createCollectionTask{Req: &milvuspb.CreateCollectionRequest{CollectionName: schema.Name}, body: &message.CreateCollectionRequest{CollectionSchema: schema}}
 			err := task.prepareSchema(context.Background())
 			require.Zero(t, read.Times(), "ordinary source must not read Milvus snapshot metadata")
 			if mapping != "" {
-				require.ErrorContains(t, err, "must retain its source name")
+				require.ErrorContains(t, err, "must map to")
 				return
 			}
 			require.NoError(t, err)
@@ -3498,7 +3499,8 @@ func TestPrepareSchemaOrdinaryExternalStruct(t *testing.T) {
 			child := parent.GetFields()[0]
 			require.True(t, parent.GetNullable())
 			require.True(t, child.GetNullable())
-			require.Equal(t, "items[score]", child.GetExternalField())
+			require.Equal(t, "raw_items", parent.GetExternalField())
+			require.Equal(t, "raw_items[score]", child.GetExternalField())
 			require.GreaterOrEqual(t, parent.GetFieldID(), int64(StartOfUserFieldID))
 			require.Greater(t, child.GetFieldID(), parent.GetFieldID())
 			pk, err := typeutil.GetPrimaryFieldSchema(schema)

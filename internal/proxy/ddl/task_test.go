@@ -1829,7 +1829,7 @@ func TestCreateCollectionTaskMilvusTableStruct(t *testing.T) {
 						{Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec", TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
 					},
 					StructArrayFields: []*schemapb.StructArrayFieldSchema{{
-						Name: "items", Nullable: true,
+						Name: "items", ExternalField: "items", Nullable: true,
 						Fields: []*schemapb.FieldSchema{{
 							Name: "value", DataType: dataType, ElementType: elementType,
 							ElementNullable: elementNullable, TypeParams: params,
@@ -2054,8 +2054,9 @@ func TestCreateCollectionTaskExternalCollection(t *testing.T) {
 		schema := buildExternalSchema()
 		schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
 			{
-				FieldID: 3,
-				Name:    "struct_array_field",
+				FieldID:       3,
+				Name:          "struct_array_field",
+				ExternalField: "struct_array_field",
 				Fields: []*schemapb.FieldSchema{
 					{
 						FieldID:     4,
@@ -8729,7 +8730,7 @@ func TestAlterCollectionSchemaTask_StructSubFieldAdd(t *testing.T) {
 		schema.ExternalSpec = `{"format":"milvus-table"}`
 		field := newField("profile[c]")
 		field.ExternalField = "profile[other]"
-		require.ErrorContains(t, preExecute(schema, field, nil, ""), "must retain its source name")
+		require.ErrorContains(t, preExecute(schema, field, nil, ""), "must map to")
 	})
 	t.Run("non nullable parent", func(t *testing.T) {
 		field := newField("profile[c]")
@@ -9089,14 +9090,14 @@ func withCollectionWithoutVectorDisabled(fn func()) {
 }
 
 func TestCreateCollectionTaskOrdinaryExternalStruct(t *testing.T) {
-	for _, mapping := range []string{"", "items[other]"} {
+	for _, mapping := range []string{"", "raw_items[other]"} {
 		t.Run(fmt.Sprintf("mapping=%s", mapping), func(t *testing.T) {
 			ctx := context.Background()
 			schema := &schemapb.CollectionSchema{
 				Name: "external_struct", ExternalSource: "s3://bucket/data",
 				ExternalSpec:      `{"format":"parquet","extfs":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true"}}`,
 				Fields:            []*schemapb.FieldSchema{{Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec", TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}}},
-				StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", Fields: []*schemapb.FieldSchema{{Name: "score", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ExternalField: mapping, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}}}}},
+				StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", ExternalField: "raw_items", Fields: []*schemapb.FieldSchema{{Name: "score", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ExternalField: mapping, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}}}}},
 			}
 			encoded, err := proto.Marshal(schema)
 			require.NoError(t, err)
@@ -9104,7 +9105,7 @@ func TestCreateCollectionTaskOrdinaryExternalStruct(t *testing.T) {
 			require.NoError(t, task.OnEnqueue())
 			err = task.PreExecute(ctx)
 			if mapping != "" {
-				require.ErrorContains(t, err, "must retain its source name")
+				require.ErrorContains(t, err, "must map to")
 				return
 			}
 			require.NoError(t, err)
@@ -9114,8 +9115,9 @@ func TestCreateCollectionTaskOrdinaryExternalStruct(t *testing.T) {
 			child := parent.GetFields()[0]
 			require.True(t, parent.GetNullable())
 			require.True(t, child.GetNullable())
+			require.Equal(t, "raw_items", parent.GetExternalField())
 			require.Equal(t, "items[score]", child.GetName())
-			require.Equal(t, "items[score]", child.GetExternalField())
+			require.Equal(t, "raw_items[score]", child.GetExternalField())
 			pk, err := typeutil.GetPrimaryFieldSchema(resolved)
 			require.NoError(t, err)
 			require.Equal(t, common.VirtualPKFieldName, pk.GetName())

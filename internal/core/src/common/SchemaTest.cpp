@@ -780,16 +780,17 @@ TEST_F(SchemaTest, BracketFieldWithoutStructKeepsLiteralPhysicalName) {
     field->set_element_type(milvus::proto::schema::DataType::Int64);
     auto* parent = source.add_struct_array_fields();
     parent->set_name("items");
+    parent->set_external_field("raw_items");
     parent->set_fieldid(200);
     auto* registered = parent->add_fields();
     registered->set_fieldid(201);
     registered->set_name("items[value]");
-    registered->set_external_field(registered->name());
+    registered->set_external_field("raw_items[value]");
     registered->set_data_type(milvus::proto::schema::DataType::Array);
     registered->set_element_type(milvus::proto::schema::DataType::Int64);
     auto schema = Schema::ParseFrom(source);
     EXPECT_EQ(schema->GetPhysicalColumnName(FieldId(101)), "items[score]");
-    EXPECT_EQ(schema->GetPhysicalColumnName(FieldId(201)), "items");
+    EXPECT_EQ(schema->GetPhysicalColumnName(FieldId(201)), "raw_items");
 }
 
 TEST_F(SchemaTest, OrdinaryStructProjectionSelectionAndCopy) {

@@ -373,8 +373,12 @@ func prepareAlterSchemaAddStructSubField(coll *model.Collection, plan *schemauti
 	}
 	validationField := field
 	if typeutil.NewStorageColumnResolver(coll.ToCollectionSchemaPB()).IsMilvusTable() {
+		parentExt := parent.ExternalField
+		if parentExt == "" {
+			parentExt = parent.Name
+		}
 		if field.GetExternalField() == "" {
-			field.ExternalField = storedRootStructSubFieldName(parent.Name, originalName)
+			field.ExternalField = storedRootStructSubFieldName(parentExt, originalName)
 		}
 		validationField = typeutil.Clone(field)
 		validationField.ExternalField = ""

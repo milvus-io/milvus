@@ -5659,6 +5659,7 @@ TEST(SchemaExternalColumns, OrdinaryStructChildrenSharePhysicalParent) {
     pk->set_is_primary_key(true);
     auto* parent = source.add_struct_array_fields();
     parent->set_name("items");
+    parent->set_external_field("raw_items");
     parent->set_fieldid(200);
     for (int64_t i = 0; i < 2; ++i) {
         auto* child = parent->add_fields();
@@ -5667,28 +5668,28 @@ TEST(SchemaExternalColumns, OrdinaryStructChildrenSharePhysicalParent) {
         child->set_data_type(milvus::proto::schema::DataType::Array);
         child->set_element_type(milvus::proto::schema::DataType::Int64);
         child->set_nullable(true);
-        child->set_external_field(child->name());
+        child->set_external_field(i == 0 ? "raw_items[a]" : "raw_items[b]");
     }
     auto schema = Schema::ParseFrom(source);
     EXPECT_EQ(*schema->GetExternalColumnNames(),
-              std::vector<std::string>{"items"});
-    EXPECT_EQ(schema->GetPhysicalColumnName(FieldId(101)), "items");
-    EXPECT_EQ(schema->GetPhysicalColumnName(FieldId(102)), "items");
+              std::vector<std::string>{"raw_items"});
+    EXPECT_EQ(schema->GetPhysicalColumnName(FieldId(101)), "raw_items");
+    EXPECT_EQ(schema->GetPhysicalColumnName(FieldId(102)), "raw_items");
     const auto projections =
         schema->GetOrdinaryStructProjections(schema->get_field_ids());
     ASSERT_EQ(projections.size(), 1);
-    EXPECT_EQ(projections.at("items").parent_field_id, FieldId(200));
-    EXPECT_EQ(projections.at("items").child_field_ids,
+    EXPECT_EQ(projections.at("raw_items").parent_field_id, FieldId(200));
+    EXPECT_EQ(projections.at("raw_items").child_field_ids,
               (std::vector<FieldId>{FieldId(101), FieldId(102)}));
     milvus::proto::schema::FieldSchema field;
     field.set_name("items[a]");
     field.set_fieldid(101);
     field.set_data_type(milvus::proto::schema::DataType::Array);
     field.set_element_type(milvus::proto::schema::DataType::Int64);
-    field.set_external_field("items[a]");
+    field.set_external_field("raw_items[a]");
     auto mapping = milvus::ResolvePhysicalColumnMapping(false, field);
     EXPECT_EQ(mapping.schema_column_name, "items[a]");
-    EXPECT_EQ(mapping.storage_column_name, "items");
+    EXPECT_EQ(mapping.storage_column_name, "raw_items");
     EXPECT_TRUE(mapping.is_external_column);
     EXPECT_EQ(
         milvus::ResolvePhysicalColumnMapping(true, field).storage_column_name,

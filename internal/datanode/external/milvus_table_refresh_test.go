@@ -1367,7 +1367,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableRep
 						{FieldID: 100, Name: "id", ExternalField: "pk", IsPrimaryKey: !scenario.virtualPK, DataType: schemapb.DataType_Int64},
 						{FieldID: 101, Name: common.MetaFieldName, ExternalField: common.MetaFieldName, IsDynamic: true, DataType: schemapb.DataType_JSON},
 					},
-					StructArrayFields: []*schemapb.StructArrayFieldSchema{{FieldID: 102, Name: "items", Fields: []*schemapb.FieldSchema{{
+					StructArrayFields: []*schemapb.StructArrayFieldSchema{{FieldID: 102, Name: "items", ExternalField: "items", Fields: []*schemapb.FieldSchema{{
 						FieldID: 103, Name: "items[value]", ExternalField: "items[value]", DataType: schemapb.DataType_Array,
 						ElementType: schemapb.DataType_Int64, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "4"}},
 					}}}},
@@ -1516,7 +1516,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTablePro
 	}
 	source := makeManifest("source", []string{"1", "100", "102", "103"})
 	target := makeManifest("target", []string{"1", "100", "102"})
-	schema := &schemapb.CollectionSchema{Version: 2, ExternalSpec: `{"format":"milvus-table"}`, Fields: []*schemapb.FieldSchema{{Name: "id", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "id"}}, StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "clips", FieldID: 101, Nullable: true, Fields: []*schemapb.FieldSchema{
+	schema := &schemapb.CollectionSchema{Version: 2, ExternalSpec: `{"format":"milvus-table"}`, Fields: []*schemapb.FieldSchema{{Name: "id", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "id"}}, StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "clips", ExternalField: "clips", FieldID: 101, Nullable: true, Fields: []*schemapb.FieldSchema{
 		{Name: "clips[base]", ExternalField: "clips[base]", FieldID: 102, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
 		{Name: "clips[note]", ExternalField: "clips[note]", FieldID: 103, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true},
 	}}}}

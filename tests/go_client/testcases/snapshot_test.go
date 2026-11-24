@@ -3441,6 +3441,7 @@ func TestMilvusTableStructSnapshot(t *testing.T) {
 				}
 			}
 			for _, parent := range schema.StructArrayFields {
+				parent.ExternalField = parent.Name
 				for _, field := range parent.Fields {
 					field.ExternalField = ""
 				}
@@ -3749,7 +3750,7 @@ func TestMilvusTableStructArraySnapshot(t *testing.T) {
 						child.FieldID, child.ExternalField = 0, ""
 						selected = append(selected, child)
 					}
-					parent.FieldID, parent.Fields = 0, selected
+					parent.FieldID, parent.ExternalField, parent.Fields = 0, parent.Name, selected
 					require.Len(t, selected, 3)
 					encoded, err := proto.Marshal(mapped)
 					require.NoError(t, err)
@@ -3879,6 +3880,7 @@ func TestMilvusTableAddedStructFieldSnapshot(t *testing.T) {
 					}
 					parent := targetSchema.StructArrayFields[0]
 					parent.FieldID = 0
+					parent.ExternalField = parent.Name
 					parent.Fields = []*schemapb.FieldSchema{proto.Clone(added).(*schemapb.FieldSchema)}
 					parent.Fields[0].FieldID = 0
 					encoded, err := proto.Marshal(targetSchema)
@@ -4195,7 +4197,7 @@ func testMilvusTableVectorArraySnapshot[V entity.Vector](t *testing.T, vector fu
 								require.Equal(t, elementNullable, field.GetElementNullable())
 							}
 						}
-						parent.FieldID, parent.Fields = 0, selected
+						parent.FieldID, parent.ExternalField, parent.Fields = 0, parent.Name, selected
 						require.Len(t, parent.Fields, 2)
 					}
 					encoded, err := proto.Marshal(schema)
