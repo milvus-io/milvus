@@ -22,7 +22,7 @@ require (
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12
 	github.com/klauspost/compress v1.20.2
-	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261105020509-3c2afcbf9ce6
+	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261124082406-5b47f1d4dc26
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/prometheus/client_golang v1.23.2
@@ -259,5 +259,3 @@ replace (
 replace github.com/hamba/avro/v2 => github.com/iskorotkov/avro/v2 v2.33.0
 
 replace go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc => go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.60.0 // v0.61.0 removed the UnaryServerInterceptor used by etcd v3.5.x and woodpecker
-
-replace github.com/milvus-io/milvus-proto/go-api/v3 => github.com/MrPresent-Han/milvus-proto/go-api/v3 v3.0.0-20261123095423-d077a651d492
