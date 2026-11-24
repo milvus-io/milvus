@@ -581,11 +581,11 @@ func (helper *SchemaHelper) GetStructArrayFieldFromName(fieldName string) *schem
 }
 
 func (helper *SchemaHelper) IsFieldTextMatchEnabled(fieldId int64) bool {
-	sche, err := helper.GetFieldFromID(fieldId)
+	field, err := helper.GetFieldFromID(fieldId)
 	if err != nil {
 		return false
 	}
-	return CreateFieldSchemaHelper(sche).EnableMatch()
+	return IsTextMatchEnabled(field)
 }
 
 func (helper *SchemaHelper) getDefaultJSONField(fieldName string) (*schemapb.FieldSchema, error) {
@@ -3049,17 +3049,18 @@ func GetAllFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldSche
 	return all
 }
 
-// IsExternalCollection returns true when schema has external field mappings.
+// IsExternalCollection also recognizes unsupported Struct-only external schemas
+// so admission checks cannot be bypassed by omitting top-level mappings.
 func IsExternalCollection(schema *schemapb.CollectionSchema) bool {
 	if schema == nil {
 		return false
 	}
-	for _, field := range schema.GetFields() {
+	for _, field := range GetAllFieldSchemas(schema) {
 		if field.GetExternalField() != "" {
 			return true
 		}
 	}
-	return false
+	return len(schema.GetStructArrayFields()) > 0 && schema.GetExternalSpec() != "" && isMilvusTableStorageSpec(schema.GetExternalSpec())
 }
 
 // GetVectorFieldSchemas get vector fields schema from collection schema.
@@ -3148,6 +3149,9 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 		if err != nil {
 			return err
 		}
+	}
+	if isMilvusTable && hasFunctionOutput(schema) {
+		return merr.WrapErrParameterInvalidMsg("milvus-table external collection %s does not support function output fields", schema.GetName())
 	}
 	allowRealPrimaryKey := hasUserPrimaryKey(schema) && isMilvusTable
 
@@ -3258,6 +3262,23 @@ func isExternalGeneratedField(schema *schemapb.CollectionSchema, field *schemapb
 	return IsFunctionOutputField(schema, field)
 }
 
+func hasFunctionOutput(schema *schemapb.CollectionSchema) bool {
+	if schema == nil {
+		return false
+	}
+	for _, field := range schema.GetFields() {
+		if IsFunctionOutputField(schema, field) {
+			return true
+		}
+	}
+	for _, fn := range schema.GetFunctions() {
+		if len(fn.GetOutputFieldNames()) > 0 || len(fn.GetOutputFieldIds()) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // ValidateExternalCollectionResolvedSchema checks external-collection
 // constraints after RootCoord has resolved field IDs and function output IDs.
 // At this point generated function outputs can be matched by their field-ID
@@ -3272,6 +3293,9 @@ func ValidateExternalCollectionResolvedSchema(schema *schemapb.CollectionSchema)
 	}
 	if len(schema.GetStructArrayFields()) > 0 {
 		return merr.WrapErrParameterInvalidMsg("external collection %s does not support struct fields", schema.GetName())
+	}
+	if NewStorageColumnResolver(schema).IsMilvusTable() && hasFunctionOutput(schema) {
+		return merr.WrapErrParameterInvalidMsg("milvus-table external collection %s does not support function output fields", schema.GetName())
 	}
 	generatedColumns := externalGeneratedColumnOwners(schema)
 	externalFieldOwners := make(map[string][]*schemapb.FieldSchema)
@@ -3335,13 +3359,12 @@ func isExternalSystemOrVirtualField(name string) bool {
 
 // ValidateMilvusTableSchemaIdentity checks that every target milvus-table data
 // field maps to exactly one source snapshot data field through ExternalField.
-// Source function outputs are optional source columns: a target ordinary field
-// may map to them, but a target function output remains target-local and is
-// regenerated during refresh. Create-time validation may ignore field IDs so
-// RootCoord can copy them from the snapshot; refresh-time validation must
-// require field IDs to prevent reading source manifests through a mismatched
-// target schema.
-func ValidateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema, requireFieldID bool) error {
+// Target Struct fields and target function output fields are unsupported.
+// Unmapped source fields are optional. Source function outputs are optional
+// source columns: a target ordinary field may map to them. Target and source
+// field IDs are independent. Refresh checks source field ID stability against
+// persisted manifest bindings separately from this logical schema validation.
+func ValidateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema) error {
 	if target == nil {
 		return merr.WrapErrParameterInvalidMsg("target schema is nil")
 	}
@@ -3353,13 +3376,18 @@ func ValidateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema
 			target.GetEnableDynamicField(), source.GetEnableDynamicField())
 	}
 
+	if len(target.GetStructArrayFields()) > 0 {
+		return merr.WrapErrParameterInvalidMsg("milvus-table external collection %s does not support struct fields", target.GetName())
+	}
+	if hasFunctionOutput(target) {
+		return merr.WrapErrParameterInvalidMsg("milvus-table external collection %s does not support function output fields", target.GetName())
+	}
+
 	targetFields := milvusTableMappableUserFieldMap(target)
-	requiredSourceFields := milvusTableMappableUserFieldMap(source)
 	allSourceFields := milvusTableUserFieldMap(source)
 	targetFieldCount := milvusTableMappableUserFieldCount(target)
-	requiredSourceFieldCount := milvusTableMappableUserFieldCount(source)
-	if targetFieldCount < requiredSourceFieldCount || targetFieldCount > len(allSourceFields) {
-		return merr.WrapErrParameterInvalidMsg("user field count mismatch: target=%d source=%d", targetFieldCount, requiredSourceFieldCount)
+	if targetFieldCount != len(targetFields) {
+		return merr.WrapErrParameterInvalidMsg("duplicate target field names")
 	}
 	targetUsesVirtualPK := milvusTableUsesVirtualPrimaryKey(target)
 	mappedSourceFields := make(map[string]string, len(targetFields))
@@ -3378,12 +3406,15 @@ func ValidateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema
 				sourceName, owner, targetName)
 		}
 		mappedSourceFields[sourceName] = targetName
-		if err := validateMilvusTableFieldIdentity(targetField, sourceField, requireFieldID, targetUsesVirtualPK, IsFunctionOutputField(source, sourceField)); err != nil {
+		if err := validateMilvusTableFieldIdentity(targetField, sourceField, targetUsesVirtualPK, IsFunctionOutputField(source, sourceField)); err != nil {
 			return merr.Wrapf(err, "field %q mapped to source field %q", targetName, sourceName)
 		}
 	}
-	for sourceName := range requiredSourceFields {
-		if _, ok := mappedSourceFields[sourceName]; !ok {
+	for sourceName, sourceField := range allSourceFields {
+		if !sourceField.GetIsPrimaryKey() && !sourceField.GetIsPartitionKey() && !sourceField.GetIsClusteringKey() {
+			continue
+		}
+		if _, mapped := mappedSourceFields[sourceName]; !mapped {
 			return merr.WrapErrParameterInvalidMsg("source snapshot field %q is not mapped by target schema", sourceName)
 		}
 	}
@@ -3489,8 +3520,9 @@ func (r *StorageColumnResolver) SourceDataColumnName(field *schemapb.FieldSchema
 	return "", false
 }
 
-// SourceDataColumnNames returns all top-level source columns required by the
-// external refresh path.
+// SourceDataColumnNames returns the top-level physical columns required by refresh.
+// Milvus-table uses numeric field IDs and includes insert timestamps when
+// retaining a source primary key.
 func (r *StorageColumnResolver) SourceDataColumnNames() []string {
 	if r == nil || r.schema == nil {
 		return nil
@@ -3603,24 +3635,19 @@ func milvusTableUsesVirtualPrimaryKey(schema *schemapb.CollectionSchema) bool {
 	return false
 }
 
-func validateMilvusTableFieldIdentity(target, source *schemapb.FieldSchema, requireFieldID bool, targetUsesVirtualPK bool, sourceFunctionOutputAsDataField bool) error {
-	if requireFieldID && target.GetFieldID() != source.GetFieldID() {
-		return merr.WrapErrParameterInvalidMsg("field_id mismatch: target=%d source=%d", target.GetFieldID(), source.GetFieldID())
-	}
+func validateMilvusTableFieldIdentity(target, source *schemapb.FieldSchema, targetUsesVirtualPK bool, sourceFunctionOutputAsDataField bool) error {
 	sourcePKAsDataField := targetUsesVirtualPK && source.GetIsPrimaryKey() && !target.GetIsPrimaryKey()
-	targetComparable := comparableMilvusTableField(target, requireFieldID, sourcePKAsDataField, false)
-	sourceComparable := comparableMilvusTableField(source, requireFieldID, sourcePKAsDataField, sourceFunctionOutputAsDataField)
+	targetComparable := comparableMilvusTableField(target, sourcePKAsDataField, false)
+	sourceComparable := comparableMilvusTableField(source, sourcePKAsDataField, sourceFunctionOutputAsDataField)
 	if !proto.Equal(targetComparable, sourceComparable) {
 		return merr.WrapErrParameterInvalidMsg("definition mismatch between target and source snapshot schema")
 	}
 	return nil
 }
 
-func comparableMilvusTableField(field *schemapb.FieldSchema, keepFieldID bool, sourcePKAsDataField bool, sourceFunctionOutputAsDataField bool) *schemapb.FieldSchema {
+func comparableMilvusTableField(field *schemapb.FieldSchema, sourcePKAsDataField bool, sourceFunctionOutputAsDataField bool) *schemapb.FieldSchema {
 	clone := proto.Clone(field).(*schemapb.FieldSchema)
-	if !keepFieldID {
-		clone.FieldID = 0
-	}
+	clone.FieldID = 0
 	if sourcePKAsDataField {
 		clone.IsPrimaryKey = false
 		clone.AutoID = false

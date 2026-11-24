@@ -6,13 +6,14 @@ Tests verify public API results and invalid-parameter errors with Strong
 consistency. No external corpus or special server configuration is required.
 """
 
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common.common_type import CaseLabel
-from pymilvus import DataType, FunctionChain, FunctionChainStage, MilvusException
+from pymilvus import DataType, FunctionChain, FunctionChainStage, MilvusException, StructFieldSchema
 from pymilvus.exceptions import ParamError
 
 
@@ -47,6 +48,7 @@ def _literal_details(text, pattern="timeout"):
         if starts:
             details.append(
                 {
+                    "type": "match",
                     "content": line,
                     "line_number": line_number,
                     "line_start_offset": line_start_offset,
@@ -58,10 +60,46 @@ def _literal_details(text, pattern="timeout"):
     return details
 
 
+def _literal_context_details(text, before=0, after=0, max_count=None, pattern="timeout"):
+    """Union windows around the first max_count hits; keep all original spans.
+
+    Matches inside the final after-context retain spans but do not open another
+    window. This oracle does not parse rg arguments or reproduce its scanner.
+    """
+    matches = _literal_details(text, pattern)
+    anchors = matches if max_count is None else matches[:max_count]
+    if not anchors:
+        return []
+    lines = text.split("\n")
+    if text.endswith("\n"):
+        lines.pop()
+    selected = set()
+    for match in anchors:
+        index = match["line_number"] - 1
+        selected.update(range(max(0, index - before), min(len(lines), index + after + 1)))
+    by_number = {match["line_number"]: match for match in matches}
+    result, offset = [], 0
+    for index, content in enumerate(lines):
+        if index in selected:
+            result.append(
+                by_number.get(
+                    index + 1,
+                    {
+                        "type": "context",
+                        "content": content,
+                        "line_number": index + 1,
+                        "line_start_offset": offset,
+                    },
+                )
+            )
+        offset += len(content.encode("utf-8")) + 1
+    return result
+
+
 class TestMilvusClientGrep(TestMilvusClientV2Base):
     output_fields = ["id", "text", "revision", "note", "metadata", "numbers", "vector"]
 
-    def _create(self, client, text_type=DataType.VARCHAR, string_pk=False):
+    def _create(self, client, text_type=DataType.VARCHAR, string_pk=False, **kwargs):
         name = cf.gen_unique_str("grep_query")
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         pk_options = {"max_length": 64} if string_pk else {}
@@ -75,7 +113,7 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=2)
         index = client.prepare_index_params()
         index.add_index(field_name="vector", index_type="FLAT", metric_type="L2")
-        self.create_collection(client, name, schema=schema, index_params=index, consistency_level="Strong")
+        self.create_collection(client, name, schema=schema, index_params=index, consistency_level="Strong", **kwargs)
         return name
 
     @staticmethod
@@ -115,6 +153,78 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
         # Compare full rows in returned order: sorting actual rows would hide
         # pagination bugs, and checking only IDs would miss late-read misalignment.
         assert list(actual) == expected
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("text_type", [DataType.VARCHAR, DataType.TEXT])
+    @pytest.mark.parametrize("sealed", [False, True], ids=["growing", "sealed"])
+    def test_grep_element_filter_paging(self, text_type, sealed):
+        """Element lists, complete arrays and Grep details share document selection."""
+        client = self._client()
+        name = cf.gen_unique_str("grep_elements")
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=2)
+        schema.add_field("text", text_type, **({"max_length": 1024} if text_type == DataType.VARCHAR else {}))
+        items = StructFieldSchema()
+        items.name = "items"
+        items.max_capacity = 10
+        items.add_field("price", DataType.INT64)
+        schema.add_struct_field(items)
+        indexes = client.prepare_index_params()
+        indexes.add_index(field_name="vector", index_type="FLAT", metric_type="L2")
+        self.create_collection(client, name, schema=schema, index_params=indexes, consistency_level="Strong")
+        prices = {
+            1: [90, 90, 90, 90, 90, 90],
+            2: [10, 60, 70, 20, 30, 80],
+            3: [60, 20, 30, 70],
+            4: [10, 20],
+        }
+        rows = {
+            pk: {
+                "id": pk,
+                "text": "ordinary" if pk == 1 else f"timeout doc{pk}",
+                "items": [{"price": price} for price in values],
+            }
+            for pk, values in prices.items()
+        }
+        self.insert(client, name, [dict(row, vector=[0.0, 1.0]) for row in rows.values()])
+        if sealed:
+            self.flush(client, name)
+            self.release_collection(client, name)
+            self.load_collection(client, name)
+
+        # The first document has enough elements to fill a page but fails Grep.
+        # The last matches Grep but has no selected elements.
+        selected = [(2, 1), (2, 2), (2, 5), (3, 0), (3, 3)]
+        for limit, offset in [(None, 0), (1, 0), (2, 0), (4, 0), (3, 1), (2, 3), (2, 20)]:
+            actual = self._query(
+                client,
+                name,
+                filter="element_filter(items, $[price] > 50)",
+                output_fields=["id", "text", "items"],
+                limit=limit,
+                offset=offset,
+                ignore_growing=sealed,
+            )
+            page = selected[offset:] if limit is None else selected[offset : offset + limit]
+            expected = [dict(rows[pk], offset=index, matches=_literal_details(rows[pk]["text"])) for pk, index in page]
+            # Compare full rows in returned order, including repeated document
+            # arrays and document-specific details for every selected element.
+            assert list(actual) == expected, (limit, offset, actual)
+
+        for arguments, threshold in [("-F -e absent", 50), ("-F -e timeout", 100)]:
+            assert (
+                self._query(
+                    client,
+                    name,
+                    arguments=arguments,
+                    filter=f"element_filter(items, $[price] > {threshold})",
+                    output_fields=["id", "text", "items"],
+                    limit=4,
+                    ignore_growing=sealed,
+                )
+                == []
+            )
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("text_type", [DataType.VARCHAR, DataType.TEXT])
@@ -266,6 +376,51 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
         name = self._create(client)
         assert self._query(client, name, limit=10) == []
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("sealed", [False, True], ids=["growing", "sealed"])
+    @pytest.mark.parametrize("fixed", [False, True], ids=["regex", "literal"])
+    def test_grep_boundary_last_option_wins(self, sealed, fixed):
+        client = self._client()
+        name = self._create(client)
+        texts = ["timeout", "a timeout b", "timeouts", "timeout_code", " timeout ", "timeout\nmiss"]
+        rows = [self._row(i + 1, text) for i, text in enumerate(texts)]
+        self.insert(client, name, rows)
+        if sealed:
+            self.flush(client, name)
+            self.release_collection(client, name)
+            self.load_collection(client, name)
+        for flags, ids in [
+            ("-w -x", [1, 6]),
+            ("-x -w", [1, 2, 5, 6]),
+            ("-wx", [1, 6]),
+            ("-xw", [1, 2, 5, 6]),
+            ("--word-regexp --line-regexp", [1, 6]),
+            ("--line-regexp --word-regexp", [1, 2, 5, 6]),
+            ("-x --word-regexp -x", [1, 6]),
+            ("-w --line-regexp -w", [1, 2, 5, 6]),
+        ]:
+            arguments = f"{'-F ' if fixed else ''}{flags} -e timeout"
+            actual = self._query(client, name, arguments=arguments, limit=10, ignore_growing=sealed)
+            self._assert_rows(actual, [row for row in rows if row["id"] in ids])
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("text_type", [DataType.VARCHAR, DataType.TEXT])
+    def test_grep_short_equals_values(self, text_type):
+        client = self._client()
+        name = self._create(client, text_type)
+        texts = ["timeout", "=timeout", "TIMEOUT", "other"]
+        self.insert(client, name, [self._row(i, text) for i, text in enumerate(texts)])
+        for arguments, ids in [
+            ("-e=timeout", [0, 1]),
+            ("-e==timeout", [1]),
+            ("-e =timeout", [1]),
+            ("-Fie=timeout", [0, 1, 2]),
+            ("-e=", [0, 1, 2, 3]),
+            ("-e= -m=+0", []),
+        ]:
+            actual = self._query(client, name, arguments=arguments, output_fields=["id"], export=False, limit=10)
+            assert list(actual) == [{"id": pk} for pk in ids], arguments
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_grep_concurrent_requests(self):
         """Different patterns, caps and output names must not share request state."""
@@ -296,9 +451,18 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
     @pytest.mark.parametrize(
         "arguments,reason,code",
         [
-            ("-C 1 -e timeout", "unsupported grep option", 1100),
+            ("-U -e timeout", "unsupported grep option", 1100),
+            ("-A-1 -e timeout", "unsigned decimal integer", 1100),
+            ("-B++1 -e timeout", "unsigned decimal integer", 1100),
+            ("--after-context=abc -e timeout", "unsigned decimal integer", 1100),
+            ("--context= -e timeout", "unsigned decimal integer", 1100),
+            ("-C18446744073709551616 -e timeout", "unsigned decimal integer", 1100),
+            ("-e timeout -B", "requires a count", 1101),
+            ("-e timeout --before-context", "requires a count", 1101),
             ("timeout", "requires -e/--regexp", 1100),
             ("-e", "requires a pattern", 1101),
+            ("-m0 -e", "requires a pattern", 1101),
+            ("-m0 -e timeout --unknown", "unsupported grep option", 1100),
             ("", "requires at least one", 1101),
             ("-m -e timeout", "unsigned decimal integer", 1100),
             ("-e timeout -m", "requires a count", 1101),
@@ -306,7 +470,6 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
             ("--max-count=abc -e timeout", "unsigned decimal integer", 1100),
             ("--max-count=18446744073709551616 -e timeout", "unsigned decimal integer", 1100),
             ('-e "timeout', "unclosed quote", 1100),
-            ("-w -x -e timeout", "cannot be combined", 1100),
             ("-e timeout -- file.txt", "positional arguments", 1100),
             ('-e "["', "invalid regex", 2042),
             (r'-e "(?=timeout)"', "invalid regex", 2042),
@@ -355,7 +518,20 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
             self._row(4, "timeout final", 4),
         ]
         self.insert(client, name, rows)
-        for option, max_count in [("-m 1", 1), ("--max-count=1", 1), ("-m 2", 2), ("-m 0", 0)]:
+        for option, max_count in [
+            ("-m 1", 1),
+            ("--max-count=1", 1),
+            ("-m 2", 2),
+            ("-m 0", 0),
+            ("-m +1", 1),
+            ("-m+1", 1),
+            ("--max-count +1", 1),
+            ("--max-count=+1", 1),
+            ("-m+0", 0),
+            ("-m+0002", 2),
+            ("-m=1", 1),
+            ("-m=+0", 0),
+        ]:
             expected = []
             for row in rows:
                 details = _literal_details(row["text"])[:max_count]
@@ -366,6 +542,190 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
                 assert list(actual) == expected[offset : offset + limit], (option, limit, offset)
             actual = self._query(client, name, arguments=f"{option} -F -e timeout", export=False, limit=10)
             assert list(actual) == [{key: value for key, value in row.items() if key != "matches"} for row in expected]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("text_type", [DataType.VARCHAR, DataType.TEXT])
+    @pytest.mark.parametrize("sealed", [False, True], ids=["growing", "sealed"])
+    def test_grep_max_count_zero_skips_regex_compilation(self, text_type, sealed):
+        client = self._client()
+        name = self._create(client, text_type)
+        self.insert(client, name, [self._row(0, "timeout")])
+        if sealed:
+            self.flush(client, name)
+            self.release_collection(client, name)
+            self.load_collection(client, name)
+        for arguments in [
+            '-m 0 -e "["',
+            '--max-count=+0 -e "["',
+            '-m1 -m0 -C+1 -e "["',
+            '-m0 -e "a\nb"',
+            '-e "a\nb" --max-count=+0',
+            '-Fm1 -e="a\nb" -m=0',
+        ]:
+            actual = self._query(client, name, arguments=arguments, limit=10, ignore_growing=sealed)
+            assert list(actual) == []
+        for arguments in ['-e "a\nb"', '-m1 -e "a\nb"', '-m0 -e "a\nb" -m1']:
+            with pytest.raises(MilvusException, match="literal LF"):
+                client.query(
+                    name,
+                    filter="revision >= 0",
+                    output_fields=["id"],
+                    function_chains=[_grep_chain(arguments)],
+                    limit=10,
+                    ignore_growing=sealed,
+                    consistency_level="Strong",
+                    timeout=120,
+                )
+        for arguments in ['-m1 -e "["', '-m0 -m1 -e "["', '-e "["']:
+            with pytest.raises(MilvusException, match="invalid regex"):
+                client.query(
+                    name,
+                    filter="revision >= 0",
+                    output_fields=["id"],
+                    function_chains=[_grep_chain(arguments)],
+                    limit=10,
+                    ignore_growing=sealed,
+                    consistency_level="Strong",
+                    timeout=120,
+                )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("text_type", [DataType.VARCHAR, DataType.TEXT])
+    @pytest.mark.parametrize("phase", ["growing", "sealed", "sealed_ngram"])
+    def test_grep_context(self, text_type, phase):
+        """Public JSON results, original byte coordinates and document paging."""
+        client = self._client()
+        name = self._create(client, text_type, num_shards=1)
+        # Exceed the default scalar-index build threshold. Put misses before
+        # hits so small Query limits cannot accidentally cap candidate rows.
+        rows = [self._row(i, "ordinary") for i in range(2048)]
+        texts = [
+            None,
+            "",
+            "\n",
+            "ordinary\nsame\nordinary",
+            "timeout first\nsame\nlast",
+            "before\nsame\ntimeout timeout\nsame\nlast",
+            "前文\r\n\n超时 timeout\n后文\x00\nsame\nsame\ntimeout last\n尾\n",
+            "timeout\nx\ntimeout\nx\ntimeout\nend",
+            "timeout\nmiddle\nmiddle\nmiddle\nmiddle\ntimeout",
+            "字" * 4096 + "\ntimeout\n尾",
+            "only context\n",
+        ]
+        rows += [self._row(2048 + i, text) for i, text in enumerate(texts)]
+        self.insert(client, name, rows)
+        sealed = phase != "growing"
+        if sealed:
+            self.flush(client, name)
+            self.release_collection(client, name)
+            if phase == "sealed_ngram":
+                indexes = client.prepare_index_params()
+                indexes.add_index(
+                    field_name="text",
+                    index_name="text_ngram",
+                    index_type="NGRAM",
+                    params={"min_gram": 3, "max_gram": 4},
+                )
+                self.create_index(client, name, indexes, timeout=180)
+                deadline = time.monotonic() + 180
+                while True:
+                    info = client.describe_index(name, "text_ngram", timeout=30)
+                    assert info["index_type"] == "NGRAM", info
+                    assert info["state"] != "Failed", info
+                    if (
+                        info["state"] == "Finished"
+                        and int(info["indexed_rows"]) == len(rows)
+                        and int(info["pending_index_rows"]) == 0
+                    ):
+                        break
+                    assert time.monotonic() < deadline, info
+                    time.sleep(0.5)
+            self.load_collection(client, name, timeout=180)
+        historical = client.query(
+            name,
+            filter="id >= 0",
+            output_fields=["count(*)"],
+            consistency_level="Strong",
+            ignore_growing=True,
+            timeout=120,
+        )
+        assert historical[0]["count(*)"] == (len(rows) if sealed else 0)
+
+        cases = [
+            ("-A 1", 0, 1, None),
+            ("-A +1", 0, 1, None),
+            ("-B+1", 1, 0, None),
+            ("-C+1", 1, 1, None),
+            ("-A=1", 0, 1, None),
+            ("-B=+1", 1, 0, None),
+            ("-C=1", 1, 1, None),
+            ("--after-context=+2 --before-context +1", 1, 2, None),
+            ("--context=+2 -A+0", 2, 0, None),
+            ("--after-context=2", 0, 2, None),
+            ("-B1", 1, 0, None),
+            ("--before-context 2", 2, 0, None),
+            ("-C 2", 2, 2, None),
+            ("--context=1", 1, 1, None),
+            ("-FC1", 1, 1, None),
+            ("-C0", 0, 0, None),
+            ("-A0 -C2", 2, 0, None),
+            ("-C2 -A0", 2, 0, None),
+            ("-B0 -C2", 0, 2, None),
+            ("-C2 -B0", 0, 2, None),
+            ("-A1 -A2 -B1 -C3 -C1", 1, 2, None),
+            ("-m1 -C2", 2, 2, 1),
+            ("-C2 -m0", 2, 2, 0),
+            ("-C18446744073709551615", 2**64 - 1, 2**64 - 1, None),
+        ]
+        for options, before, after, max_count in cases:
+            expected = []
+            for row in rows:
+                details = _literal_context_details(row["text"], before, after, max_count)
+                if details:
+                    expected.append(dict(row, matches=details))
+            for limit, offset in [(None, 0), (1, 0), (2, 1)]:
+                actual = self._query(
+                    client,
+                    name,
+                    arguments=f"{options} -F -e timeout",
+                    limit=limit,
+                    offset=offset,
+                    ignore_growing=sealed,
+                )
+                page = expected[offset:] if limit is None else expected[offset : offset + limit]
+                assert list(actual) == page, (phase, options, limit, offset)
+
+        # Hiding the detail column must not alter the selected documents.
+        expected = [row for row in rows if _literal_details(row["text"])][1:3]
+        actual = self._query(
+            client, name, arguments="-C2 -F -e timeout", export=False, limit=2, offset=1, ignore_growing=sealed
+        )
+        assert list(actual) == expected
+        # An actual zero-width match has a span; it is not a context line.
+        actual = self._query(
+            client,
+            name,
+            arguments="-C2 -e '^$'",
+            filter="id == 2050",
+            output_fields=["id"],
+            limit=1,
+            ignore_growing=sealed,
+        )
+        assert list(actual) == [
+            {
+                "id": 2050,
+                "matches": [
+                    {
+                        "type": "match",
+                        "content": "",
+                        "line_number": 1,
+                        "line_start_offset": 0,
+                        "starts": [0],
+                        "ends": [0],
+                    }
+                ],
+            }
+        ]
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("text_type", [DataType.VARCHAR, DataType.TEXT])
@@ -404,6 +764,7 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
                         "id": i,
                         "matches": [
                             {
+                                "type": "match",
                                 "content": text,
                                 "line_number": 1,
                                 "line_start_offset": 0,
@@ -436,7 +797,14 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
         name = self._create(client, text_type)
         texts = [None, "", "\n", "é中\n", "\n\n", "x\r\n"]
         self.insert(client, name, [self._row(i, text) for i, text in enumerate(texts)])
-        empty_line = {"content": "", "line_number": 1, "line_start_offset": 0, "starts": [0], "ends": [0]}
+        empty_line = {
+            "type": "match",
+            "content": "",
+            "line_number": 1,
+            "line_start_offset": 0,
+            "starts": [0],
+            "ends": [0],
+        }
         second_empty_line = dict(empty_line, line_number=2, line_start_offset=1)
         blank = [{"id": 2, "matches": [empty_line]}, {"id": 4, "matches": [empty_line, second_empty_line]}]
         empty_pattern = [
@@ -444,20 +812,88 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
             {
                 "id": 3,
                 "matches": [
-                    {"content": "é中", "line_number": 1, "line_start_offset": 0, "starts": [0, 2, 5], "ends": [0, 2, 5]}
+                    {
+                        "type": "match",
+                        "content": "é中",
+                        "line_number": 1,
+                        "line_start_offset": 0,
+                        "starts": list(range(6)),
+                        "ends": list(range(6)),
+                    }
                 ],
             },
             blank[1],
             {
                 "id": 5,
                 "matches": [
-                    {"content": "x\r", "line_number": 1, "line_start_offset": 0, "starts": [0, 1, 2], "ends": [0, 1, 2]}
+                    {
+                        "type": "match",
+                        "content": "x\r",
+                        "line_number": 1,
+                        "line_start_offset": 0,
+                        "starts": [0, 1, 2],
+                        "ends": [0, 1, 2],
+                    }
                 ],
             },
         ]
         for arguments, expected in [('-e ""', empty_pattern), ('-e "^$"', blank)]:
             actual = self._query(client, name, arguments=arguments, output_fields=["id"], limit=10)
             assert list(actual) == expected, (arguments, actual)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("text_type", [DataType.VARCHAR, DataType.TEXT])
+    def test_grep_line_local_anchor_and_eof_spans(self, text_type):
+        client = self._client()
+        name = self._create(client, text_type)
+        texts = ["ab", "ab\n", "prefix\nerror\nlast\n", "prefix\nerror"]
+        self.insert(client, name, [self._row(i, text) for i, text in enumerate(texts)])
+        for pk, arguments, content, line_number, line_offset, starts, ends in [
+            (0, '-e ""', "ab", 1, 0, [0, 1, 2], [0, 1, 2]),
+            (1, '-e ""', "ab", 1, 0, [0, 1, 2], [0, 1, 2]),
+            (0, '-e "$"', "ab", 1, 0, [2], [2]),
+            (2, r'-e "\Aerror"', "error", 2, 7, [0], [5]),
+            (3, r'-e "\Aerror"', "error", 2, 7, [0], [5]),
+        ]:
+            result = self._query(
+                client, name, filter=f"id == {pk}", arguments=arguments, output_fields=["id"], limit=10
+            )
+            assert list(result) == [
+                {
+                    "id": pk,
+                    "matches": [
+                        {
+                            "type": "match",
+                            "content": content,
+                            "line_number": line_number,
+                            "line_start_offset": line_offset,
+                            "starts": starts,
+                            "ends": ends,
+                        }
+                    ],
+                }
+            ]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("text_type", [DataType.VARCHAR, DataType.TEXT])
+    def test_grep_byte_mode_spans(self, text_type):
+        client = self._client()
+        name = self._create(client, text_type)
+        self.insert(client, name, [self._row(0, "é中a"), self._row(1, "before\né中a\nafter")])
+        hit = {"type": "match", "content": "é中a", "line_number": 1, "line_start_offset": 0, "starts": [1], "ends": [2]}
+        for context in [0, 1]:
+            middle = [dict(hit, line_number=2, line_start_offset=7)]
+            if context:
+                middle = [
+                    {"type": "context", "content": "before", "line_number": 1, "line_start_offset": 0},
+                    *middle,
+                    {"type": "context", "content": "after", "line_number": 3, "line_start_offset": 14},
+                ]
+            expected = [{"id": 0, "matches": [hit]}, {"id": 1, "matches": middle}]
+            actual = self._query(
+                client, name, arguments=rf'-C{context} -e "(?-u:\xA9)"', output_fields=["id"], limit=10
+            )
+            assert list(actual) == expected
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("text_type", [DataType.VARCHAR, DataType.TEXT])

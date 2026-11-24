@@ -133,6 +133,9 @@ func TestGCSEndpointSourcePaths(t *testing.T) {
 		spec := marshalBrokerSpec(t, FormatParquet, extfs)
 		for _, source := range []string{
 			"gs://storage.googleapis.com/events/",
+			"gs://storage.googleapis.com/events%2D2026/file.parquet",
+			"gs://storage.googleapis.com/events%2F",
+			"gcs://storage.googleapis.com/events%2Ffile",
 			"gs://storage.googleapis.com:443/events/",
 			"gcs://STORAGE.GOOGLEAPIS.COM:443/events/dir/file.parquet",
 			"gs://storage.googleapis.com:8443/events/file.parquet",
@@ -143,7 +146,7 @@ func TestGCSEndpointSourcePaths(t *testing.T) {
 		for _, source := range []string{
 			"gs://storage.googleapis.com/events", "gcs://storage.googleapis.com:443/events",
 			"gs://storage.googleapis.com", "gs://storage.googleapis.com/",
-			"gs://storage.googleapis.com//dir", "gs://storage.googleapis.com/events%2Ffile",
+			"gs://storage.googleapis.com//dir", "gs://storage.googleapis.com/%2Ffile",
 			"gs://storage.googleapis.com/events?query=/private", "gs://storage.googleapis.com/events#fragment/",
 		} {
 			err := ValidateSourceAndSpec(source, spec, allowed)

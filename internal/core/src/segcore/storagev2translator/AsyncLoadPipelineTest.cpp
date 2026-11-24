@@ -351,7 +351,7 @@ class FakeChunkReader : public milvus_storage::api::ChunkReader {
     ChunkReadFuture
     get_chunks_async(const std::vector<int64_t>& chunk_indices,
                      size_t parallelism,
-                     folly::CancellationToken) override {
+                     folly::CancellationToken /*cancellation*/) override {
         async_calls_.fetch_add(1);
         called_on_executor_.store(executor_ && executor_->IsRunning());
         parallelism_.store(parallelism);
@@ -515,7 +515,7 @@ class DeferredWindowReader : public FakeChunkReader {
     ChunkReadFuture
     get_chunks_async(const std::vector<int64_t>& indices,
                      size_t,
-                     folly::CancellationToken) override {
+                     folly::CancellationToken /*cancellation*/) override {
         requests.push_back(indices);
         promises.emplace_back();
         return promises.back().getSemiFuture();
@@ -561,7 +561,7 @@ class FakeReader final : public milvus_storage::api::Reader {
     get_chunk_reader_async(
         const int64_t column_group_index,
         const std::shared_ptr<std::vector<std::string>>& needed_columns,
-        folly::CancellationToken) const override {
+        folly::CancellationToken /*cancellation*/) const override {
         auto pending =
             std::make_shared<PendingOpen>(column_group_index, needed_columns);
         auto future = pending->promise.getSemiFuture();

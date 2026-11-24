@@ -51,15 +51,14 @@ class BlockingCallTracker {
     ObserveCall() {
         std::unique_lock<std::mutex> lock(mutex_);
         ++calls_;
-        entered_ = true;
         cv_.notify_all();
         cv_.wait(lock, [&] { return released_; });
     }
 
     bool
-    WaitForEntered(std::chrono::milliseconds timeout) {
+    WaitForCalls(int count, std::chrono::milliseconds timeout) {
         std::unique_lock<std::mutex> lock(mutex_);
-        return cv_.wait_for(lock, timeout, [&] { return entered_; });
+        return cv_.wait_for(lock, timeout, [&] { return calls_ >= count; });
     }
 
     void
@@ -80,7 +79,6 @@ class BlockingCallTracker {
  private:
     mutable std::mutex mutex_;
     std::condition_variable cv_;
-    bool entered_{false};
     bool released_{false};
     int calls_{0};
 };
@@ -105,15 +103,20 @@ class InstrumentedLobColumnReader : public LobColumnReader {
 
     arrow::Result<std::vector<std::vector<uint8_t>>>
     ReadBatchData(const std::vector<EncodedRef>& encoded_refs) override {
-        tracker_->ObserveCall();
-        return std::vector<std::vector<uint8_t>>(encoded_refs.size(),
-                                                 Bytes("mock-text"));
+        return arrow::Status::NotImplemented("sync batch must not be called");
     }
 
     folly::SemiFuture<arrow::Result<std::vector<std::string>>>
-    ReadBatchAsync(const std::vector<EncodedRef>&) override {
-        return folly::makeSemiFuture(arrow::Result<std::vector<std::string>>(
-            arrow::Status::NotImplemented("unexpected async read")));
+    ReadBatchAsync(const std::vector<EncodedRef>& refs) override {
+        return folly::makeSemiFuture().deferValue(
+            [tracker = tracker_,
+             count = refs.size(),
+             caller = std::this_thread::get_id()](
+                folly::Unit) -> arrow::Result<std::vector<std::string>> {
+                EXPECT_EQ(std::this_thread::get_id(), caller);
+                tracker->ObserveCall();
+                return std::vector<std::string>(count, "mock-text");
+            });
     }
 
     arrow::Result<std::shared_ptr<arrow::BinaryArray>>
@@ -169,70 +172,21 @@ MakeLobReference() {
 
 template <typename Task>
 void
-ExpectTaskUsesCachedReaderLock(
-    const std::shared_ptr<CachedTextLobReader>& cached_reader,
-    const std::shared_ptr<BlockingCallTracker>& tracker,
-    Task task) {
-    constexpr auto kBlockedCheck = std::chrono::seconds(1);
-    constexpr auto kTimeout = std::chrono::seconds(5);
-
-    std::unique_lock<std::mutex> reader_lock(cached_reader->mutex);
-    auto started = std::make_shared<std::promise<void>>();
-    auto done = std::make_shared<std::promise<void>>();
-    auto started_future = started->get_future();
-    auto done_future = done->get_future();
-
-    std::thread worker([started, done, task = std::move(task)]() mutable {
-        try {
-            started->set_value();
-            task();
-            done->set_value();
-        } catch (...) {
-            done->set_exception(std::current_exception());
-        }
-    });
-
-    if (started_future.wait_for(kTimeout) != std::future_status::ready) {
-        tracker->Release();
-        worker.detach();
-        FAIL() << "read worker did not start";
-    }
-
-    if (tracker->WaitForEntered(kBlockedCheck)) {
-        tracker->Release();
-        reader_lock.unlock();
-        worker.join();
-        FAIL() << "read reached LobColumnReader while cached reader mutex "
-                  "was held";
-    }
-
-    reader_lock.unlock();
-
-    if (!tracker->WaitForEntered(kTimeout)) {
-        tracker->Release();
-        worker.detach();
-        FAIL() << "read did not reach LobColumnReader after cached reader "
-                  "mutex was released";
-    }
-
+ExpectConcurrentReads(const std::shared_ptr<BlockingCallTracker>& tracker,
+                      Task task,
+                      const std::shared_ptr<TextColumnCache>& cache) {
+    auto first = std::async(std::launch::async, task);
+    auto second = std::async(std::launch::async, task);
+    const bool overlapping = tracker->WaitForCalls(2, std::chrono::seconds(5));
+    // Eviction must not invalidate either admitted read.
+    cache->Clear();
     tracker->Release();
-
-    if (done_future.wait_for(kTimeout) != std::future_status::ready) {
-        worker.detach();
-        FAIL() << "read did not complete after LobColumnReader was released";
-    }
-
-    worker.join();
-    try {
-        done_future.get();
-    } catch (const std::exception& ex) {
-        FAIL() << ex.what();
-    } catch (...) {
-        FAIL() << "unknown exception";
-    }
+    EXPECT_TRUE(overlapping);
+    EXPECT_NO_THROW(first.get());
+    EXPECT_NO_THROW(second.get());
 }
 
-TEST(TextColumnCache, ReadBatchSerializesCallsOnCachedReader) {
+TEST(TextColumnCache, ReadBatchAllowsConcurrentCallsOnCachedReader) {
     auto tracker = std::make_shared<BlockingCallTracker>();
     auto factory_calls = std::make_shared<std::atomic<int>>(0);
     auto cache = std::make_shared<TextColumnCache>(
@@ -243,22 +197,26 @@ TEST(TextColumnCache, ReadBatchSerializesCallsOnCachedReader) {
     auto refs =
         std::make_shared<std::vector<EncodedRef>>(std::vector<EncodedRef>{
             {ref->data(), ref->size()}, {ref->data(), ref->size()}});
-    auto texts = std::make_shared<std::vector<std::string>>();
 
     auto cached_reader =
         cache->GetOrCreateReader(lob_base_path, nullptr, properties);
     ASSERT_NE(cached_reader, nullptr);
 
-    ExpectTaskUsesCachedReaderLock(cached_reader, tracker, [=] {
-        *texts = cache->ReadBatch(lob_base_path, nullptr, properties, *refs);
-    });
+    ExpectConcurrentReads(
+        tracker,
+        [=] {
+            auto result =
+                cache->ReadBatch(lob_base_path, nullptr, properties, *refs);
+            EXPECT_EQ(result,
+                      (std::vector<std::string>{"mock-text", "mock-text"}));
+        },
+        cache);
 
-    EXPECT_EQ(*texts, (std::vector<std::string>{"mock-text", "mock-text"}));
     EXPECT_EQ(factory_calls->load(std::memory_order_relaxed), 1);
-    EXPECT_EQ(tracker->CallCount(), 1);
+    EXPECT_EQ(tracker->CallCount(), 2);
 }
 
-TEST(TextColumnCache, ReadBatchIntoSerializesCallsOnCachedReader) {
+TEST(TextColumnCache, ReadBatchIntoAllowsConcurrentCallsOnCachedReader) {
     auto tracker = std::make_shared<BlockingCallTracker>();
     auto factory_calls = std::make_shared<std::atomic<int>>(0);
     auto cache = std::make_shared<TextColumnCache>(
@@ -269,25 +227,87 @@ TEST(TextColumnCache, ReadBatchIntoSerializesCallsOnCachedReader) {
     auto refs =
         std::make_shared<std::vector<EncodedRef>>(std::vector<EncodedRef>{
             {ref->data(), ref->size()}, {ref->data(), ref->size()}});
-    auto dst =
-        std::make_shared<google::protobuf::RepeatedPtrField<std::string>>();
-    dst->Add();
-    dst->Add();
 
     auto cached_reader =
         cache->GetOrCreateReader(lob_base_path, nullptr, properties);
     ASSERT_NE(cached_reader, nullptr);
 
-    ExpectTaskUsesCachedReaderLock(cached_reader, tracker, [=] {
-        cache->ReadBatchInto(
-            lob_base_path, nullptr, properties, *refs, dst.get());
-    });
+    ExpectConcurrentReads(
+        tracker,
+        [=] {
+            google::protobuf::RepeatedPtrField<std::string> local_dst;
+            local_dst.Add();
+            local_dst.Add();
+            cache->ReadBatchInto(
+                lob_base_path, nullptr, properties, *refs, &local_dst);
+            EXPECT_EQ(local_dst.Get(0), "mock-text");
+            EXPECT_EQ(local_dst.Get(1), "mock-text");
+        },
+        cache);
 
-    ASSERT_EQ(dst->size(), 2);
-    EXPECT_EQ(dst->Get(0), "mock-text");
-    EXPECT_EQ(dst->Get(1), "mock-text");
     EXPECT_EQ(factory_calls->load(std::memory_order_relaxed), 1);
-    EXPECT_EQ(tracker->CallCount(), 1);
+    EXPECT_EQ(tracker->CallCount(), 2);
+}
+
+class FailingAsyncReader : public InstrumentedLobColumnReader {
+ public:
+    explicit FailingAsyncReader(int mode)
+        : InstrumentedLobColumnReader(std::make_shared<BlockingCallTracker>()),
+          mode_(mode) {
+    }
+
+    folly::SemiFuture<arrow::Result<std::vector<std::string>>>
+    ReadBatchAsync(const std::vector<EncodedRef>&) override {
+        return folly::makeSemiFuture().deferValue(
+            [mode = mode_](
+                folly::Unit) -> arrow::Result<std::vector<std::string>> {
+                if (mode == 0) {
+                    return milvus_storage::MakeExtendError(
+                        milvus_storage::ExtendStatusCode::
+                            StorageTransientTimeout,
+                        "async storage timeout");
+                }
+                if (mode == 1) {
+                    throw SegcoreError(ErrorCode::StorageTransientError,
+                                       "async backend exception");
+                }
+                throw std::bad_alloc();
+            });
+    }
+
+ private:
+    int mode_;
+};
+
+TEST(TextColumnCache, PreservesAsyncErrorsForBothReadAPIs) {
+    for (int mode = 0; mode < 3; ++mode) {
+        TextColumnCache cache(
+            TextColumnCacheConfig{},
+            [mode](std::shared_ptr<arrow::fs::FileSystem>,
+                   const LobColumnConfig&)
+                -> arrow::Result<std::unique_ptr<LobColumnReader>> {
+                return std::unique_ptr<LobColumnReader>(
+                    std::make_unique<FailingAsyncReader>(mode));
+            });
+        auto raw = MakeLobReference();
+        std::vector<EncodedRef> refs{{raw.data(), raw.size()}};
+        for (bool into : {false, true}) {
+            try {
+                if (into) {
+                    google::protobuf::RepeatedPtrField<std::string> dst;
+                    dst.Add();
+                    cache.ReadBatchInto("lob", nullptr, nullptr, refs, &dst);
+                } else {
+                    cache.ReadBatch("lob", nullptr, nullptr, refs);
+                }
+                FAIL() << "expected async failure";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(),
+                          mode == 2 ? ErrorCode::MemAllocateFailed
+                                    : ErrorCode::StorageTransientError);
+            }
+        }
+    }
 }
 
 TEST(TextColumnCache, SharesPropertiesWithReader) {

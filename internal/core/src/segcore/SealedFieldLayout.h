@@ -23,6 +23,7 @@
 #include "common/Schema.h"
 #include "segcore/LoadScope.h"
 #include "common/IndexMeta.h"
+#include "storage/loon_ffi/util.h"
 
 namespace milvus::segcore {
 
@@ -30,23 +31,32 @@ namespace milvus::segcore {
 // values remain in Schema; published reads retain this owner, not copied fields.
 class SealedFieldLayout {
  public:
-    SealedFieldLayout(std::shared_ptr<const Schema> schema,
-                      LoadScope scope,
-                      IndexMetaPtr indexes = nullptr)
+    SealedFieldLayout(
+        std::shared_ptr<const Schema> schema,
+        LoadScope scope,
+        IndexMetaPtr indexes = nullptr,
+        std::shared_ptr<const MilvusTableFieldIdMapping> mapping = nullptr)
         : schema_(std::move(schema)),
           index_meta_(std::move(indexes)),
+          mapping_(std::move(mapping)),
           scope_(scope.WithDependencies(*schema_)) {
         std::unordered_set<std::string> external_columns;
         external_columns_ = std::make_shared<std::vector<std::string>>();
         for (auto id : schema_->get_field_ids()) {
             const auto& meta = (*schema_)[id];
-            auto name = schema_->GetPhysicalColumnName(id);
+            const bool selected = !scope_.IsExplicit() || scope_.Requires(id);
+            // ALTER may publish the logical field before explicit refresh.
+            // Keep this manifest's readable projection; never synthesize data.
+            if (!HasManifestBinding(id)) {
+                continue;
+            }
+            auto name = get_storage_column_name(id);
             const bool vortex = meta.get_local_format() == LOCAL_FORMAT_VORTEX;
             auto [it, inserted] = vortex_columns_.emplace(name, vortex);
             if (!inserted) {
                 it->second = it->second && vortex;
             }
-            if (scope_.IsExplicit() && !scope_.Requires(id)) {
+            if (!selected) {
                 continue;
             }
             field_ids_.push_back(id);
@@ -67,7 +77,13 @@ class SealedFieldLayout {
     std::shared_ptr<const SealedFieldLayout>
     WithIndexMeta(IndexMetaPtr indexes) const {
         return std::make_shared<const SealedFieldLayout>(
-            schema_, scope_, std::move(indexes));
+            schema_, scope_, std::move(indexes), mapping_);
+    }
+    std::shared_ptr<const SealedFieldLayout>
+    WithManifestMapping(
+        std::shared_ptr<const MilvusTableFieldIdMapping> mapping) const {
+        return std::make_shared<const SealedFieldLayout>(
+            schema_, scope_, index_meta_, std::move(mapping));
     }
     bool
     Matches(const SchemaPtr& schema,
@@ -99,16 +115,16 @@ class SealedFieldLayout {
     }
     bool
     IsFieldInLoadScope(FieldId id) const {
-        return scope_.Requires(id);
+        return scope_.Requires(id) && HasManifestBinding(id);
     }
     bool
     ShouldPreload(FieldId id) const {
-        return scope_.ShouldPreload(id);
+        return scope_.ShouldPreload(id) && HasManifestBinding(id);
     }
     bool
     ShouldLoadField(FieldId id) const {
-        return scope_.ShouldPreload(id) && (id.get() < START_USER_FIELDID ||
-                                            schema_->ShouldLoadRawField(id));
+        return ShouldPreload(id) && (id.get() < START_USER_FIELDID ||
+                                     schema_->ShouldLoadRawField(id));
     }
     bool
     is_external_collection() const {
@@ -132,7 +148,7 @@ class SealedFieldLayout {
     }
     bool
     has_field(FieldId id) const {
-        return schema_->has_field(id) &&
+        return schema_->has_field(id) && HasManifestBinding(id) &&
                (!scope_.IsExplicit() || scope_.Requires(id));
     }
     const auto&
@@ -199,10 +215,27 @@ class SealedFieldLayout {
     }
     std::string
     get_storage_column_name(FieldId id) const {
+        if (mapping_ && schema_->IsExternalManifestStoredField(id)) {
+            auto it = mapping_->physical_columns.find(id.get());
+            if (it == mapping_->physical_columns.end()) {
+                ThrowInfo(FieldNotLoaded,
+                          "external field {} has no binding in the loaded "
+                          "manifest; refresh the collection",
+                          id.get());
+            }
+            return it->second;
+        }
         return schema_->GetPhysicalColumnName(id);
     }
     std::vector<FieldId>
     ResolveColumnFieldIds(const std::string& name) const {
+        if (mapping_) {
+            auto it = mapping_->target_fields.find(name);
+            if (it != mapping_->target_fields.end()) {
+                return {FieldId(it->second)};
+            }
+            return {};
+        }
         return schema_->ResolveColumnFieldIds(name);
     }
     bool
@@ -264,8 +297,15 @@ class SealedFieldLayout {
     }
 
  private:
+    bool
+    HasManifestBinding(FieldId id) const {
+        return !mapping_ || !schema_->IsExternalDataField(id) ||
+               mapping_->physical_columns.count(id.get()) != 0;
+    }
+
     std::shared_ptr<const Schema> schema_;
     IndexMetaPtr index_meta_;
+    std::shared_ptr<const MilvusTableFieldIdMapping> mapping_;
     LoadScope scope_;
     std::vector<FieldId> field_ids_;
     std::unordered_map<std::string, bool> vortex_columns_;

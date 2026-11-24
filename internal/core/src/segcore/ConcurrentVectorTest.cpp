@@ -118,6 +118,105 @@ TEST(ConcurrentVector, JsonInsertAcrossChunks) {
     }
 }
 
+// VARCHAR and GEOMETRY rows are moved into the chunk like JSON rows. The rows
+// are longer than the small-string buffer, so a move hands over the heap
+// allocation.
+TEST(ConcurrentVector, StringInsertAcrossChunks) {
+    milvus::FieldMeta field_meta(milvus::FieldName("varchar"),
+                                 milvus::FieldId(101),
+                                 milvus::DataType::VARCHAR,
+                                 65535,
+                                 false,
+                                 std::nullopt);
+    std::vector<std::string> rows;
+    for (int i = 0; i < 10; ++i) {
+        rows.push_back(std::to_string(i) + std::string(40 + i * 10, 'x'));
+    }
+    milvus::DataArray first;
+    milvus::DataArray second;
+    for (int i = 0; i < 10; ++i) {
+        auto& batch = i < 3 ? first : second;
+        batch.mutable_scalars()->mutable_string_data()->add_data(rows[i]);
+    }
+
+    ConcurrentVector<std::string> c_vec(4);
+    VectorBase& base = c_vec;
+    base.set_data_raw(0, 3, &first, field_meta);
+    base.set_data_raw(3, 7, &second, field_meta);
+
+    ASSERT_EQ(c_vec.num_chunk(), 3);
+    for (int i = 0; i < 10; ++i) {
+        ASSERT_EQ(c_vec.view_element(i), rows[i]);
+    }
+    // The payload is only read.
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_EQ(first.scalars().string_data().data(i), rows[i]);
+    }
+}
+
+TEST(ConcurrentVector, GeometryInsertAcrossChunks) {
+    milvus::FieldMeta field_meta(milvus::FieldName("geometry"),
+                                 milvus::FieldId(101),
+                                 milvus::DataType::GEOMETRY,
+                                 false,
+                                 std::nullopt);
+    std::vector<std::string> rows;
+    for (int i = 0; i < 10; ++i) {
+        rows.push_back(std::to_string(i) + std::string(40 + i * 10, 'g'));
+    }
+    milvus::DataArray first;
+    milvus::DataArray second;
+    for (int i = 0; i < 10; ++i) {
+        auto& batch = i < 3 ? first : second;
+        batch.mutable_scalars()->mutable_geometry_data()->add_data(rows[i]);
+    }
+
+    ConcurrentVector<std::string> c_vec(4);
+    VectorBase& base = c_vec;
+    base.set_data_raw(0, 3, &first, field_meta);
+    base.set_data_raw(3, 7, &second, field_meta);
+
+    ASSERT_EQ(c_vec.num_chunk(), 3);
+    for (int i = 0; i < 10; ++i) {
+        ASSERT_EQ(c_vec.view_element(i), rows[i]);
+    }
+}
+
+// A payload with fewer rows than the count to write is rejected before any row
+// is moved.
+TEST(ConcurrentVector, ShortStringPayloadIsRejected) {
+    milvus::FieldMeta field_meta(milvus::FieldName("varchar"),
+                                 milvus::FieldId(101),
+                                 milvus::DataType::VARCHAR,
+                                 65535,
+                                 false,
+                                 std::nullopt);
+    milvus::DataArray data;
+    data.mutable_scalars()->mutable_string_data()->add_data("only row");
+
+    ConcurrentVector<std::string> c_vec(4);
+    VectorBase& base = c_vec;
+    ASSERT_ANY_THROW(base.set_data_raw(0, 2, &data, field_meta));
+}
+
+// A payload with more rows than the count to write is as misaligned, so it is
+// rejected rather than cut to the count.
+TEST(ConcurrentVector, LongStringPayloadIsRejected) {
+    milvus::FieldMeta field_meta(milvus::FieldName("varchar"),
+                                 milvus::FieldId(101),
+                                 milvus::DataType::VARCHAR,
+                                 65535,
+                                 false,
+                                 std::nullopt);
+    milvus::DataArray data;
+    data.mutable_scalars()->mutable_string_data()->add_data("first row");
+    data.mutable_scalars()->mutable_string_data()->add_data("second row");
+
+    ConcurrentVector<std::string> c_vec(4);
+    VectorBase& base = c_vec;
+    ASSERT_ANY_THROW(base.set_data_raw(0, 1, &data, field_meta));
+}
+
 TEST(ConcurrentVector, TestMultithreads) {
     auto dim = 8;
     constexpr int threads = 16;

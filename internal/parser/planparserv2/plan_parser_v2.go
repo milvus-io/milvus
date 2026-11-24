@@ -89,6 +89,7 @@ func parseExpr(parser *planparserv2.PlanParser, listener *errorListenerImpl) pla
 		// precedence stack, error handler) while preserving BuildParseTrees.
 		parser.SetInputStream(tokens)
 	}
+	parser.SetError(nil)
 	parser.RemoveErrorListeners()
 	parser.AddErrorListener(listener)
 	parser.SetErrorHandler(antlr.NewDefaultErrorStrategy())
@@ -98,9 +99,9 @@ func parseExpr(parser *planparserv2.PlanParser, listener *errorListenerImpl) pla
 
 func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 	c := exprCache()
-	cacheable := c.cache != nil
+	cacheable := c.enabled()
 	if cacheable {
-		if val, ok := c.cache.Get(exprStr); ok {
+		if val, ok := c.get(exprStr); ok {
 			switch v := val.(type) {
 			case planparserv2.IExprContext:
 				return v, nil
@@ -115,7 +116,7 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 	// Note that the errors will be cached, too.
 	defer func() {
 		if cacheable && err != nil {
-			c.cache.Add(exprStr, err)
+			c.add(exprStr, err, estimateErrorCacheBytes(exprStr, err))
 		}
 	}()
 	exprNormal := convertHanToASCII(exprStr)
@@ -123,11 +124,13 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 
 	inputStream := antlr.NewInputStream(exprNormal)
 	lexer := getLexer(inputStream, listener)
+	defer putLexer(lexer)
 	if err = listener.Error(); err != nil {
 		return
 	}
 
 	parser := getParser(lexer, listener)
+	defer putParser(parser)
 	if err = listener.Error(); err != nil {
 		return
 	}
@@ -143,12 +146,12 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 		return
 	}
 
-	// lexer & parser won't be used by this thread, can be put into pool.
-	putLexer(lexer)
-	putParser(parser)
-
 	if cacheable {
-		c.cache.Add(exprStr, ast)
+		tokenCount := 0
+		if ts, ok := parser.GetTokenStream().(*antlr.CommonTokenStream); ok {
+			tokenCount = len(ts.GetAllTokens())
+		}
+		c.add(exprStr, ast, estimateASTCacheBytes(exprStr, exprNormal, tokenCount))
 	}
 	return
 }

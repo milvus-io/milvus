@@ -207,9 +207,10 @@ path and the options, so no per-file source spec travels in the plan. The
 fragment schema (`importutilv2.FragmentSchema`), the segment schema
 (`typeutil.AppendSystemFields`) and the sort order (`importutilv2.SortFieldIDs`)
 are all derived on the DataNode; DataCoord calls the same helpers for slot
-sizing. The sort order is `[PK]`, or
-`[partition key, PK]` for namespace collections; Int64 ascending, VarChar
-byte-lexicographic ascending, no hidden tie-breakers.
+sizing. Namespace collections in `partition_key` mode (the default) sort by
+`[partition key, PK]`. All other collections, including `namespace.mode=partition`,
+sort by `[PK]`. Int64 keys sort in ascending order, VarChar keys in ascending
+byte-lexicographic order, with no hidden tie-breakers.
 
 The task's slot is re-derived at dispatch (`reshardSlot`/`importSlot`), not
 persisted on the task record, from `reshardmem.Model.WorkingSet` at
@@ -377,8 +378,9 @@ ordered fragment readers
   and the Go TEXT-decode segment reader has no FFI entry point for one, so an
   encrypted TEXT segment would be written but never read back. `TODO:`
   re-enable TEXT encryption once the read chain supports decryption.
-- `sorted=true` for ordinary, `namespace_sorted=true` for namespace. Importing
-  goes straight to `IndexBuilding` (no post-import Sorting).
+- Set `sorted=true` for `[PK]` order or `namespace_sorted=true` for
+  `[partition key, PK]` order. Importing goes straight to `IndexBuilding`
+  (no post-import Sorting).
 - A lazy final writer means a plan that produces no rows creates no writer; the
   result is `ImportTaskV3Result{rows=0}` with no output.
 

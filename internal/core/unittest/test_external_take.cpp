@@ -3555,22 +3555,47 @@ TEST(InjectExtfsAllowlist, EndpointURLSelectsExplicitEndpointMode) {
 }
 
 TEST(InjectExtfsAllowlist, ExplicitBucketMustMatchResolvedSource) {
-    for (const auto* source : {"s3://events/key",
-                               "s3://events?query/part",
-                               "s3://events#fragment",
-                               "s3://s3.amazonaws.com/events/key",
-                               "s3://s3.amazonaws.com/%65vents/key",
-                               "s3://s3.amazonaws.com/events%2Fkey"}) {
+    for (const auto* source :
+         {"s3://events/key",
+          "s3://events?query/part",
+          "s3://events#fragment",
+          "s3://s3.amazonaws.com/events/key",
+          "s3://s3.amazonaws.com/%65vents/key",
+          "s3://s3.amazonaws.com/events%2Fkey",
+          "gs://storage.googleapis.com/events%2D2026/key"}) {
         SCOPED_TRACE(source);
-        nlohmann::json spec = {{"extfs",
-                                {{"cloud_provider", "aws"},
-                                 {"region", "us-west-2"},
-                                 {"bucket_name", "events"}}}};
-        milvus_storage::api::Properties props;
-        InjectExternalSpecProperties(props, 42, source, spec.dump());
-        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
-                  "events");
+        const std::string expected_bucket =
+            std::string(source).find("2026") != std::string::npos
+                ? "events-2026"
+                : "events";
+        nlohmann::json spec = {
+            {"extfs",
+             {{"cloud_provider",
+               std::string(source).rfind("gs://", 0) == 0 ? "gcp" : "aws"},
+              {"region", "us-west-2"}}}};
+        for (bool explicit_bucket : {false, true}) {
+            auto candidate = spec;
+            if (explicit_bucket) {
+                candidate["extfs"]["bucket_name"] = expected_bucket;
+            }
+            milvus_storage::api::Properties props;
+            InjectExternalSpecProperties(props, 42, source, candidate.dump());
+            EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
+                      expected_bucket);
+            if (std::string(source).find("amazonaws.com") !=
+                    std::string::npos ||
+                std::string(source).find("googleapis.com") !=
+                    std::string::npos) {
+                auto config = milvus_storage::FilesystemCache::resolve_config(
+                    std::make_shared<const milvus_storage::api::Properties>(
+                        props),
+                    source);
+                ASSERT_TRUE(config.ok()) << config.status();
+                EXPECT_EQ(config->bucket_name, expected_bucket);
+            }
+        }
         spec["extfs"]["bucket_name"] = "archive";
+        milvus_storage::api::Properties props;
         try {
             InjectExternalSpecProperties(props, 42, source, spec.dump());
             FAIL() << "expected bucket mismatch";
@@ -5263,18 +5288,26 @@ TEST(InjectExtfsAllowlist, AzureBrokerIamAndTargetModes) {
              {"azure://core.windows.net/%63ontainer/path",
               "azure://core.windows.net/container%2Fpath"}) {
             SCOPED_TRACE(source);
-            milvus_storage::api::Properties encoded;
-            if (iam) {
-                EXPECT_ANY_THROW(InjectExternalSpecProperties(
-                    encoded, 42, source, valid.dump()));
-            } else {
-                InjectExternalSpecProperties(encoded, 42, source, valid.dump());
-                auto resolved = milvus_storage::FilesystemCache::resolve_config(
-                    std::make_shared<const milvus_storage::api::Properties>(
-                        encoded),
-                    source);
-                ASSERT_TRUE(resolved.ok()) << resolved.status();
-                EXPECT_EQ(resolved->bucket_name, "container");
+            for (bool explicit_bucket : {false, true}) {
+                auto candidate = valid;
+                if (!explicit_bucket) {
+                    candidate["extfs"].erase("bucket_name");
+                }
+                milvus_storage::api::Properties encoded;
+                if (iam) {
+                    EXPECT_ANY_THROW(InjectExternalSpecProperties(
+                        encoded, 42, source, candidate.dump()));
+                } else {
+                    InjectExternalSpecProperties(
+                        encoded, 42, source, candidate.dump());
+                    auto resolved =
+                        milvus_storage::FilesystemCache::resolve_config(
+                            std::make_shared<
+                                const milvus_storage::api::Properties>(encoded),
+                            source);
+                    ASSERT_TRUE(resolved.ok()) << resolved.status();
+                    EXPECT_EQ(resolved->bucket_name, "container");
+                }
             }
         }
         for (const auto* key : {"access_key_id", "region"}) {

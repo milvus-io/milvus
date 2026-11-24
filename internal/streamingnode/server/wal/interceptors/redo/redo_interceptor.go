@@ -44,7 +44,7 @@ func (r *redoAppendInterceptor) DoAppend(ctx context.Context, msg message.Mutabl
 		if errors.As(err, &preparation) {
 			// The inner chain has released its locks, TimeTick acker and
 			// transaction admission before joining preparation.
-			if err := prepareRunner(ctx, preparation); err != nil {
+			if err := interceptors.WaitOutsideAppend(ctx, func() error { return prepareRunner(ctx, preparation) }); err != nil {
 				return nil, err
 			}
 			continue
@@ -99,14 +99,20 @@ func (r *redoAppendInterceptor) waitUntilGrowingSegmentReady(ctx context.Context
 				return err
 			}
 			select {
-			case <-ctx.Done():
-				return ctx.Err()
 			case <-ready:
-				// do nothing
-				return nil
-			case <-r.gracefulStop:
-				return status.NewOnShutdownError("redo interceptor is on shutdown")
+				continue
+			default:
 			}
+			return interceptors.WaitOutsideAppend(ctx, func() error {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-ready:
+					return nil
+				case <-r.gracefulStop:
+					return status.NewOnShutdownError("redo interceptor is on shutdown")
+				}
+			})
 		}
 	}
 	return nil

@@ -35,8 +35,6 @@
 
 #include <folly/ScopeGuard.h>
 
-#include "aws/core/client/ClientConfiguration.h"
-#include "azure/storage/common/storage_exception.hpp"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/Schema.h"
@@ -60,24 +58,13 @@
 #include "storage/RecordBatchSize.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
-#include "storage/azure/AzureChunkManager.h"
 #include "milvus-storage/thread_pool.h"
 #include "storage/loon_ffi/external_spec_c.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
-#include "storage/gcp-native-storage/GcpNativeChunkManager.h"
-#include "storage/minio/MinioChunkManager.h"
 #include "storage/storage_c.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
-
-// Test-only subclass that exposes the protected ApplyChecksumConfigOverrides
-// and NeedChecksumOverride helpers so we can assert their behavior directly.
-class TestableMinioChunkManager : public milvus::storage::MinioChunkManager {
- public:
-    using MinioChunkManager::ApplyChecksumConfigOverrides;
-    using MinioChunkManager::NeedChecksumOverride;
-};
 
 using namespace std;
 using namespace milvus;
@@ -197,128 +184,6 @@ TEST_F(StorageTest, ReadMediumTypeRejectsForeignMagicNumber) {
     // The valid magic number still parses.
     EXPECT_NO_THROW(milvus::storage::ReadMediumType(
         make_reader(milvus::storage::MAGIC_NUM)));
-}
-
-TEST_F(StorageTest, S3ErrorClassification) {
-    constexpr auto kNoCode = Aws::Http::HttpResponseCode::REQUEST_NOT_MADE;
-
-    // The transient-vs-permanent decision is delegated to the AWS SDK's
-    // ShouldRetry() flag (passed here as the bool): whatever the SDK marks
-    // retryable becomes the retriable S3Error, the rest UnexpectedError.
-    for (auto error : {Aws::S3::S3Errors::THROTTLING,
-                       Aws::S3::S3Errors::REQUEST_EXPIRED,
-                       Aws::S3::S3Errors::REQUEST_TIME_TOO_SKEWED}) {
-        EXPECT_EQ(S3ErrorToErrorCode(error, kNoCode, /*should_retry=*/true),
-                  ErrorCode::S3Error);
-    }
-    for (auto error : {Aws::S3::S3Errors::ACCESS_DENIED,
-                       Aws::S3::S3Errors::SIGNATURE_DOES_NOT_MATCH,
-                       Aws::S3::S3Errors::INVALID_REQUEST}) {
-        EXPECT_EQ(S3ErrorToErrorCode(error, kNoCode, /*should_retry=*/false),
-                  ErrorCode::UnexpectedError);
-    }
-
-    // Specific permanent codes are decided by error identity and ignore the
-    // retry flag (a NoSuchBucket must not be retried even if flagged retryable).
-    EXPECT_EQ(
-        S3ErrorToErrorCode(
-            Aws::S3::S3Errors::NO_SUCH_BUCKET, kNoCode, /*should_retry=*/true),
-        ErrorCode::BucketInvalid);
-    EXPECT_EQ(
-        S3ErrorToErrorCode(
-            Aws::S3::S3Errors::NO_SUCH_KEY, kNoCode, /*should_retry=*/true),
-        ErrorCode::ObjectNotExist);
-    EXPECT_EQ(S3ErrorToErrorCode(Aws::S3::S3Errors::RESOURCE_NOT_FOUND,
-                                 kNoCode,
-                                 /*should_retry=*/true),
-              ErrorCode::ObjectNotExist);
-
-    // UNKNOWN (unmappable, e.g. S3-compatible services) falls back to the HTTP
-    // status rather than the SDK retry flag.
-    EXPECT_EQ(
-        S3ErrorToErrorCode(Aws::S3::S3Errors::UNKNOWN,
-                           Aws::Http::HttpResponseCode::SERVICE_UNAVAILABLE,
-                           /*should_retry=*/false),
-        ErrorCode::S3Error);
-    EXPECT_EQ(S3ErrorToErrorCode(Aws::S3::S3Errors::UNKNOWN,
-                                 Aws::Http::HttpResponseCode::FORBIDDEN,
-                                 /*should_retry=*/false),
-              ErrorCode::UnexpectedError);
-}
-
-TEST_F(StorageTest, GcpNativeErrorClassification) {
-    for (auto status : {google::cloud::StatusCode::kDeadlineExceeded,
-                        google::cloud::StatusCode::kResourceExhausted,
-                        google::cloud::StatusCode::kInternal,
-                        google::cloud::StatusCode::kUnavailable}) {
-        EXPECT_EQ(GcpNativeStatusToErrorCode(status),
-                  ErrorCode::GcpNativeError);
-    }
-
-    EXPECT_EQ(GcpNativeStatusToErrorCode(google::cloud::StatusCode::kNotFound),
-              ErrorCode::ObjectNotExist);
-    for (auto status : {google::cloud::StatusCode::kCancelled,
-                        google::cloud::StatusCode::kAborted,
-                        google::cloud::StatusCode::kInvalidArgument,
-                        google::cloud::StatusCode::kPermissionDenied,
-                        google::cloud::StatusCode::kFailedPrecondition,
-                        google::cloud::StatusCode::kUnauthenticated}) {
-        EXPECT_EQ(GcpNativeStatusToErrorCode(status),
-                  ErrorCode::UnexpectedError);
-    }
-
-    try {
-        SegcoreError cause(ErrorCode::GcpNativeError, "transient");
-        ThrowGcpNativeError("test", cause, "params");
-        FAIL() << "expected SegcoreError";
-    } catch (const SegcoreError& error) {
-        EXPECT_EQ(error.get_error_code(), ErrorCode::GcpNativeError);
-    }
-
-    try {
-        std::runtime_error cause("invalid credentials");
-        ThrowGcpNativeError("test", cause, "params");
-        FAIL() << "expected SegcoreError";
-    } catch (const SegcoreError& error) {
-        EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
-    }
-}
-
-TEST_F(StorageTest, AzureErrorClassification) {
-    using Azure::Core::Http::HttpStatusCode;
-
-    EXPECT_EQ(AzureHttpStatusToErrorCode(HttpStatusCode::NotFound),
-              ErrorCode::ObjectNotExist);
-    for (auto status : {HttpStatusCode::RequestTimeout,
-                        HttpStatusCode::TooManyRequests,
-                        HttpStatusCode::InternalServerError,
-                        HttpStatusCode::BadGateway,
-                        HttpStatusCode::ServiceUnavailable,
-                        HttpStatusCode::GatewayTimeout}) {
-        EXPECT_EQ(AzureHttpStatusToErrorCode(status), ErrorCode::S3Error);
-    }
-    for (auto status : {HttpStatusCode::BadRequest,
-                        HttpStatusCode::Unauthorized,
-                        HttpStatusCode::Forbidden,
-                        HttpStatusCode::Conflict}) {
-        EXPECT_EQ(AzureHttpStatusToErrorCode(status),
-                  ErrorCode::UnexpectedError);
-    }
-
-    Azure::Storage::StorageException not_found("not found");
-    not_found.StatusCode = HttpStatusCode::NotFound;
-    EXPECT_EQ(AzureExceptionToErrorCode(not_found), ErrorCode::ObjectNotExist);
-
-    Azure::Core::Http::TransportException transport("network failure");
-    EXPECT_EQ(AzureExceptionToErrorCode(transport), ErrorCode::S3Error);
-    Azure::Core::OperationCancelledException timeout("deadline exceeded");
-    EXPECT_EQ(AzureExceptionToErrorCode(timeout), ErrorCode::S3Error);
-
-    std::runtime_error invalid_credentials("invalid credentials");
-    EXPECT_EQ(AzureExceptionToErrorCode(invalid_credentials),
-              ErrorCode::UnexpectedError);
-    SegcoreError coded(ErrorCode::ObjectNotExist, "missing object");
-    EXPECT_EQ(AzureExceptionToErrorCode(coded), ErrorCode::ObjectNotExist);
 }
 
 TEST_F(StorageTest, TextFieldDataFromManifestResolvesLobRefs) {
@@ -997,17 +862,20 @@ TEST_F(StorageTest, InitExternalIopsConfig) {
 }
 
 TEST(StorageConfig, PackedWriterPreservesChecksum) {
-    StorageConfig config;
+    CStorageConfig config{};
     config.storage_type = "remote";
     config.address = "http://127.0.0.1:9000";
+    config.access_key_id = "minioadmin";
+    config.access_key_value = "minioadmin";
     config.region = "us-east-1";
-    config.bucket_name =
+    const auto bucket_name =
         "writer-checksum-" +
         std::to_string(
             std::chrono::steady_clock::now().time_since_epoch().count());
+    config.bucket_name = bucket_name.c_str();
     for (const bool enabled : {false, true}) {
         config.use_crc32c_checksum = enabled;
-        const auto c_config = ToCStorageConfig(config);
+        const auto c_config = config;
         const auto properties =
             MakeInternalPropertiesFromStorageConfig(c_config);
         milvus_storage::ArrowFileSystemConfig expected;
@@ -1061,9 +929,12 @@ TEST(StorageTalonConfig, StageMaskTestsRequestedBits) {
 }
 
 TEST(StorageTalonConfig, OrdinaryFilesystemUsesConfiguredStages) {
-    StorageConfig config;
+    CStorageConfig config{};
     config.storage_type = "remote";
     config.address = "http://127.0.0.1:9000";
+    config.bucket_name = "a-bucket";
+    config.access_key_id = "minioadmin";
+    config.access_key_value = "minioadmin";
     config.region = "us-east-1";
     // A non-AWS provider disables AWS instance metadata during client construction.
     config.cloud_provider = "aliyun";
@@ -1073,8 +944,7 @@ TEST(StorageTalonConfig, OrdinaryFilesystemUsesConfiguredStages) {
         for (const uint32_t mode : {0, 1, 2}) {
             config.talon_mode = mode;
             config.talon_enabled_stages = stages;
-            const auto fs =
-                StorageV2FSCache::Instance().Get(ToStorageV2FSCacheKey(config));
+            const auto fs = InitArrowFileSystem(MakeStorageProperties(config));
             ASSERT_NE(fs, nullptr);
             const auto observable =
                 std::dynamic_pointer_cast<milvus_storage::Observable>(fs);
@@ -1115,21 +985,14 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
             for (const auto& stage : cases) {
                 for (const uint32_t mode : {0, 1, 2}) {
                     for (const bool external : {false, true}) {
-                        StorageConfig input;
+                        CStorageConfig input{};
                         input.storage_type = storage_type;
                         input.talon_mode = mode;
                         input.talon_enabled_stages = stage.mask;
                         input.talon_coordinator = "127.0.0.1:7000";
                         input.talon_enable_for_external_table = external;
-                        const auto c_config = ToCStorageConfig(input);
-                        EXPECT_EQ(c_config.talon_mode, mode);
-                        EXPECT_EQ(c_config.crt_queue_sizes, 0);
-                        EXPECT_EQ(c_config.talon_enabled_stages, stage.mask);
-                        const auto key = ToStorageV2FSCacheKey(input);
-                        EXPECT_EQ(key.talon_mode, mode);
-                        EXPECT_EQ(key.talon_enabled_stages, stage.mask);
                         LoonFFIPropertiesSingleton singleton;
-                        singleton.Init(c_config);
+                        singleton.Init(input);
                         const auto base = singleton.GetProperties();
                         const auto original = *base;
                         EXPECT_FALSE(std::get<bool>(
@@ -1218,12 +1081,12 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
 
     // Concurrent first lookups must publish a single immutable snapshot.
     {
-        StorageConfig input;
+        CStorageConfig input{};
         input.storage_type = "remote";
         input.talon_mode = 1;
         input.talon_enabled_stages = kTalonStageLoadOpen | kTalonStageManifest;
         LoonFFIPropertiesSingleton singleton;
-        singleton.Init(ToCStorageConfig(input));
+        singleton.Init(input);
         singleton.SetArrowReaderConfig(32 * 1024, 4 * 1024 * 1024);
         const PropertiesOptions first_options{.talon_stage =
                                                   kTalonStageLoadOpen};
@@ -1292,12 +1155,12 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
 
     // With only manifest enabled, all and manifest resolve to the same policy.
     {
-        StorageConfig input;
+        CStorageConfig input{};
         input.storage_type = "remote";
         input.talon_mode = 1;
         input.talon_enabled_stages = kTalonStageManifest;
         LoonFFIPropertiesSingleton singleton;
-        singleton.Init(ToCStorageConfig(input));
+        singleton.Init(input);
         const auto manifest =
             singleton.GetProperties({.talon_stage = kTalonStageManifest});
         EXPECT_NE(manifest.get(), singleton.GetProperties().get());
@@ -1309,21 +1172,23 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
             singleton.GetProperties().get());
     }
 
-    StorageConfig first;
+    CStorageConfig first{};
     first.storage_type = "remote";
     first.talon_mode = 2;
     first.talon_small_read_threshold = 65536;
     first.talon_coordinator = "127.0.0.1:7000";
+    first.talon_namespace = "cluster-dedicated-standard-all";
     first.talon_block_size = 8388608;
     first.talon_max_idle_per_addr = 32;
     first.talon_enable_for_external_table = true;
     const auto first_properties =
-        MakeInternalPropertiesFromStorageConfig(ToCStorageConfig(first));
+        MakeInternalPropertiesFromStorageConfig(first);
     auto second = first;
     second.talon_mode = 1;
     second.talon_coordinator = "127.0.0.1:7001";
+    second.talon_namespace = "";
     const auto second_properties =
-        MakeInternalPropertiesFromStorageConfig(ToCStorageConfig(second));
+        MakeInternalPropertiesFromStorageConfig(second);
     for (const auto& [properties, expected] :
          {std::pair{first_properties, first},
           std::pair{second_properties, second}}) {
@@ -1335,6 +1200,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
         EXPECT_EQ(static_cast<uint32_t>(config.talon_mode),
                   expected.talon_mode);
         EXPECT_EQ(config.talon_coordinator, expected.talon_coordinator);
+        EXPECT_EQ(config.talon_namespace, expected.talon_namespace);
         EXPECT_EQ(config.talon_small_read_threshold, 65536);
         EXPECT_EQ(config.talon_block_size, 8388608);
         EXPECT_EQ(config.talon_max_idle_per_addr, 32);
@@ -1348,15 +1214,16 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
                 input.storage_type = storage_type;
                 input.talon_mode = mode;
                 input.talon_enable_for_external_table = external;
-                auto properties = MakeInternalPropertiesFromStorageConfig(
-                    ToCStorageConfig(input));
+                auto properties =
+                    MakeInternalPropertiesFromStorageConfig(input);
                 milvus_storage::ArrowFileSystemConfig internal_config;
                 ASSERT_TRUE(
                     milvus_storage::ArrowFileSystemConfig::
                         create_file_system_config(properties, internal_config)
                             .ok());
-                EXPECT_EQ(static_cast<uint32_t>(internal_config.talon_mode),
-                          input.storage_type == "local" ? 0 : mode);
+                EXPECT_EQ(
+                    static_cast<uint32_t>(internal_config.talon_mode),
+                    std::string_view(input.storage_type) == "local" ? 0 : mode);
                 ::InjectExternalSpecProperties(
                     *properties, 42, "s3://s3.amazonaws.com/bucket/data/", "");
                 EXPECT_EQ(std::get<std::string>(
@@ -1371,6 +1238,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
                           external ? mode : 0);
                 EXPECT_EQ(resolved->talon_small_read_threshold, 65536);
                 EXPECT_EQ(resolved->talon_coordinator, "127.0.0.1:7000");
+                EXPECT_EQ(resolved->talon_namespace, first.talon_namespace);
                 EXPECT_EQ(resolved->talon_block_size, 8388608);
                 EXPECT_EQ(resolved->talon_max_idle_per_addr, 32);
                 ::InjectExternalSpecProperties(
@@ -1399,12 +1267,13 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
             old_properties, defaults)
             .ok());
     EXPECT_EQ(defaults.talon_mode, milvus_storage::TalonMode::Disabled);
+    EXPECT_TRUE(defaults.talon_namespace.empty());
     EXPECT_EQ(defaults.talon_small_read_threshold, 524288);
 
     // The configured 512 KiB default is forwarded like any other value.
     // Zero remains unset; it does not introduce a Milvus default at this boundary.
     for (const uint32_t threshold : {0, 524288, 1048576}) {
-        auto config = ToCStorageConfig(first);
+        auto config = first;
         config.talon_small_read_threshold = threshold;
         const auto expected_threshold =
             threshold == 0 ? uint32_t{524288} : threshold;
@@ -1863,9 +1732,9 @@ TEST_F(StorageUtilTest, CreateArrowScalarFromDefaultValue) {
 TEST_F(StorageUtilTest, TestInitArrowFileSystem) {
     // Test local storage configuration
     {
-        StorageConfig local_config;
-        local_config.storage_type = "local";
-        local_config.root_path = TestLocalPath;
+        auto local_config = std::make_shared<milvus_storage::api::Properties>();
+        (*local_config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+        (*local_config)[PROPERTY_FS_ROOT_PATH] = std::string(TestLocalPath);
 
         auto fs = InitArrowFileSystem(local_config);
         ASSERT_NE(fs, nullptr);
@@ -1873,23 +1742,23 @@ TEST_F(StorageUtilTest, TestInitArrowFileSystem) {
 
     // // Test remote storage configuration (Azure)
     // {
-    //     StorageConfig remote_config;
-    //     remote_config.storage_type = "remote";
-    //     remote_config.cloud_provider = "azure";
-    //     remote_config.address = "core.windows.net";
-    //     remote_config.bucket_name = "test-bucket";
-    //     remote_config.access_key_id = "test-access-key";
-    //     remote_config.access_key_value = "test-access-value";
-    //     remote_config.root_path = "/tmp/milvus/remote_data";
-    //     remote_config.iam_endpoint = "";
-    //     remote_config.log_level = "error";
-    //     remote_config.region = "";
-    //     remote_config.useSSL = false;
-    //     remote_config.sslCACert = "";
-    //     remote_config.useIAM = false;
-    //     remote_config.useVirtualHost = false;
-    //     remote_config.requestTimeoutMs = 30000;
-    //     remote_config.gcp_credential_json = "";
+    //     auto remote_config = std::make_shared<milvus_storage::api::Properties>();
+    //     (*remote_config)[PROPERTY_FS_STORAGE_TYPE] = std::string("remote");
+    //     (*remote_config)[PROPERTY_FS_CLOUD_PROVIDER] = std::string("azure");
+    //     (*remote_config)[PROPERTY_FS_ADDRESS] = std::string("core.windows.net");
+    //     (*remote_config)[PROPERTY_FS_BUCKET_NAME] = std::string("test-bucket");
+    //     (*remote_config)[PROPERTY_FS_ACCESS_KEY_ID] = std::string("test-access-key");
+    //     (*remote_config)[PROPERTY_FS_ACCESS_KEY_VALUE] = std::string("test-access-value");
+    //     (*remote_config)[PROPERTY_FS_ROOT_PATH] = std::string("/tmp/milvus/remote_data");
+    //     (*remote_config)[PROPERTY_FS_IAM_ENDPOINT] = std::string("");
+    //     (*remote_config)[PROPERTY_FS_LOG_LEVEL] = std::string("error");
+    //     (*remote_config)[PROPERTY_FS_REGION] = std::string("");
+    //     (*remote_config)[PROPERTY_FS_USE_SSL] = bool(false);
+    //     (*remote_config)[PROPERTY_FS_SSL_CA_CERT] = std::string("");
+    //     (*remote_config)[PROPERTY_FS_USE_IAM] = bool(false);
+    //     (*remote_config)[PROPERTY_FS_USE_VIRTUAL_HOST] = bool(false);
+    //     (*remote_config)[PROPERTY_FS_REQUEST_TIMEOUT_MS] = int64_t(30000);
+    //     (*remote_config)[PROPERTY_FS_GCP_CREDENTIAL_JSON] = std::string("");
 
     //     auto fs = InitArrowFileSystem(remote_config);
     //     ASSERT_NE(fs, nullptr);
@@ -1966,57 +1835,4 @@ TEST_F(StorageUtilTest, NormalizePath) {
     EXPECT_EQ(NormalizePath(boost::filesystem::path("a/b c/d")), "a/b c/d");
     EXPECT_EQ(NormalizePath(boost::filesystem::path("./.")), ".");
     EXPECT_EQ(NormalizePath(boost::filesystem::path("./..")), "..");
-}
-
-TEST(MinioChecksumConfig, OverridesAreWhenRequired) {
-    // Regression guard: AWS SDK C++ 1.11.x defaults the checksum policy to
-    // WHEN_SUPPORTED, which makes the V4 signer switch PutObject uploads to
-    // aws-chunked + STREAMING-UNSIGNED-PAYLOAD-TRAILER. Aliyun OSS rejects
-    // that combination (x-oss-ec=0017-00000804). MinioChunkManager must
-    // override both directions to WHEN_REQUIRED so the SDK only adds
-    // checksums when the operation model demands them.
-
-    // Aws::Client::ClientConfiguration's default ctor reads SDK globals
-    // (logger / http client factory) set up by Aws::InitAPI; without it the
-    // ctor segfaults. Use MinioChunkManager's idempotent init helper so we
-    // share init_count_ with any production code paths in the same binary.
-    // Balance this test's initialization after config is destroyed. Leaving
-    // CRT worker threads alive lets them log during shared-library teardown.
-    struct SdkGuard : TestableMinioChunkManager {
-        SdkGuard() {
-            InitSDKAPIDefault("info");
-        }
-        ~SdkGuard() override {
-            ShutdownSDKAPI();
-        }
-    } init_guard;
-
-    Aws::Client::ClientConfiguration config;
-    // Sanity check: the SDK defaults are WHEN_SUPPORTED for both directions.
-    EXPECT_EQ(config.checksumConfig.requestChecksumCalculation,
-              Aws::Client::RequestChecksumCalculation::WHEN_SUPPORTED);
-    EXPECT_EQ(config.checksumConfig.responseChecksumValidation,
-              Aws::Client::ResponseChecksumValidation::WHEN_SUPPORTED);
-
-    TestableMinioChunkManager::ApplyChecksumConfigOverrides(config);
-
-    EXPECT_EQ(config.checksumConfig.requestChecksumCalculation,
-              Aws::Client::RequestChecksumCalculation::WHEN_REQUIRED);
-    EXPECT_EQ(config.checksumConfig.responseChecksumValidation,
-              Aws::Client::ResponseChecksumValidation::WHEN_REQUIRED);
-}
-
-TEST(MinioChecksumConfig, NeedChecksumOverrideDispatch) {
-    using Mgr = TestableMinioChunkManager;
-
-    // Non-AWS S3-compatible backends need the override.
-    EXPECT_TRUE(Mgr::NeedChecksumOverride("gcp"));
-    EXPECT_TRUE(Mgr::NeedChecksumOverride("aliyun"));
-    EXPECT_TRUE(Mgr::NeedChecksumOverride("tencent"));
-    EXPECT_TRUE(Mgr::NeedChecksumOverride("huawei"));
-
-    // AWS S3 / MinIO accept the default WHEN_SUPPORTED behavior.
-    EXPECT_FALSE(Mgr::NeedChecksumOverride("aws"));
-    EXPECT_FALSE(Mgr::NeedChecksumOverride(""));
-    EXPECT_FALSE(Mgr::NeedChecksumOverride("unknown"));
 }

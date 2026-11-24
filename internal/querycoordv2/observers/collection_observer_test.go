@@ -23,6 +23,7 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -31,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
-	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -69,11 +69,10 @@ type CollectionObserverSuite struct {
 	proxyManager *proxyutil.MockProxyClientManager
 
 	// Dependencies
-	dist              *meta.DistributionManager
-	meta              *meta.Meta
-	targetMgr         *meta.TargetManager
-	targetObserver    *TargetObserver
-	checkerController *checkers.CheckerController
+	dist           *meta.DistributionManager
+	meta           *meta.Meta
+	targetMgr      *meta.TargetManager
+	targetObserver *TargetObserver
 
 	nodeMgr *session.NodeManager
 
@@ -213,7 +212,6 @@ func (suite *CollectionObserverSuite) SetupTest() {
 		suite.cluster,
 		suite.nodeMgr,
 	)
-	suite.checkerController = &checkers.CheckerController{}
 
 	mockCluster := session.NewMockCluster(suite.T())
 	mockCluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
@@ -224,7 +222,6 @@ func (suite *CollectionObserverSuite) SetupTest() {
 		suite.meta,
 		suite.targetMgr,
 		suite.targetObserver,
-		suite.checkerController,
 		suite.proxyManager,
 	)
 
@@ -620,6 +617,46 @@ func (suite *CollectionObserverSuite) load(collection int64) {
 	suite.targetMgr.UpdateCollectionNextTarget(ctx, collection)
 
 	suite.ob.LoadCollection(context.Background(), collection)
+}
+
+func TestCollectionObserverRecoveryAndPartitionTasksWithoutCheckers(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	store := metacache.NewMetaStore(nil)
+	nodes := session.NewNodeManager()
+	m := meta.NewMeta(nil, nil, nodes, store)
+	require.NoError(t, m.PutCollectionWithoutSave(ctx, &meta.Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: 100},
+	}))
+	require.NoError(t, m.PutPartitionWithoutSave(ctx,
+		&meta.Partition{
+			PartitionLoadInfo: &querypb.PartitionLoadInfo{CollectionID: 100, PartitionID: 11},
+			LoadPercentage:    100,
+		},
+		&meta.Partition{
+			PartitionLoadInfo: &querypb.PartitionLoadInfo{CollectionID: 100, PartitionID: 12},
+		},
+	))
+	ob := NewCollectionObserver(meta.NewDistributionManager(nodes), m,
+		meta.NewTargetManager(nil, m, store), nil, nil)
+
+	// Recovery still registers collection work without a checker controller.
+	recovered, ok := ob.loadTasks.Get("LoadCollection_100")
+	require.True(t, ok)
+	require.Equal(t, LoadTask{LoadType: querypb.LoadType_LoadCollection, CollectionID: 100}, recovered)
+	ob.loadTasks.Remove("LoadCollection_100")
+
+	// A completed partition must finish independently of other unloaded partitions.
+	ob.LoadPartitions(ctx, 100, []int64{11})
+	pending, ok := ob.loadTasks.Get("LoadPartition_100_[11]")
+	require.True(t, ok)
+	require.Equal(t, LoadTask{LoadType: querypb.LoadType_LoadPartition, CollectionID: 100, PartitionIDs: []int64{11}}, pending)
+	// Collection metadata can disappear before the queued work is observed.
+	ob.LoadCollection(ctx, 999)
+	ob.observeLoadStatus(ctx)
+	_, ok = ob.loadTasks.Get("LoadPartition_100_[11]")
+	require.False(t, ok)
+	require.EqualValues(t, 0, m.GetPartition(ctx, 12).LoadPercentage)
 }
 
 func TestCollectionObserver(t *testing.T) {

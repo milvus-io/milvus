@@ -42,16 +42,21 @@ func (h *FieldSchemaHelper) GetDim() (int64, error) {
 	return getDim(h.indexParams)
 }
 
-func (h *FieldSchemaHelper) EnableMatch() bool {
-	if !IsStringType(h.schema.GetDataType()) {
+// IsTextMatchEnabled reports whether the field enables text matching.
+func IsTextMatchEnabled(field *schemapb.FieldSchema) bool {
+	if !IsStringType(field.GetDataType()) {
 		return false
 	}
-	s, err := h.typeParams.Get("enable_match")
-	if err != nil {
-		return false
+	params := field.GetTypeParams()
+	// Repeated keys use the last value, as in the parameter map.
+	for i := len(params) - 1; i >= 0; i-- {
+		param := params[i]
+		if param.GetKey() == common.EnableMatchKey {
+			enabled, err := strconv.ParseBool(param.GetValue())
+			return err == nil && enabled
+		}
 	}
-	enable, err := strconv.ParseBool(s)
-	return err == nil && enable
+	return false
 }
 
 func (h *FieldSchemaHelper) EnableJSONKeyStatsIndex() bool {

@@ -205,6 +205,48 @@ func TestMergeByPKWithOffsetsOperator_ElementLevel_LimitByElementCount(t *testin
 	assert.Len(t, merged.Selections, 2)
 }
 
+func TestMergeByPKWithOffsetsOperator_ElementLevel_EmptySegments(t *testing.T) {
+	for _, emptyFirst := range []bool{true, false} {
+		name := "empty_last"
+		if emptyFirst {
+			name = "empty_first"
+		}
+		t.Run(name, func(t *testing.T) {
+			empty := &segcorepb.RetrieveResults{
+				FieldsData:   []*schemapb.FieldData{makeSegcoreTsField(nil)},
+				ElementLevel: true,
+			}
+			nonempty := &segcorepb.RetrieveResults{
+				Ids:            makeSegcoreIntIDs([]int64{1, 2, 3}),
+				Offset:         []int64{10, 20, 30},
+				FieldsData:     []*schemapb.FieldData{makeSegcoreTsField([]int64{1, 1, 1})},
+				ElementLevel:   true,
+				ElementIndices: []*segcorepb.ElementIndices{makeElementIndices(1, 3), makeElementIndices(0, 2, 4), makeElementIndices(0)},
+			}
+			results := []*segcorepb.RetrieveResults{nonempty, empty}
+			segmentIndex := 0
+			if emptyFirst {
+				results = []*segcorepb.RetrieveResults{empty, nonempty}
+				segmentIndex = 1
+			}
+			// Four elements require two documents; counting documents instead
+			// would incorrectly retain PK=3. Exact element trimming happens later.
+			op := NewMergeByPKWithOffsetsOperator(4, reduce.IReduceNoOrder)
+			outs, err := op.Run(context.Background(), nil, results)
+			require.NoError(t, err)
+			merged := outs[0].(*MergedResultWithOffsets)
+			require.True(t, merged.ElementLevel)
+			require.Equal(t, []int64{1, 2}, merged.IDs.GetIntId().GetData())
+			require.Len(t, merged.Selections, 2)
+			for i, selection := range merged.Selections {
+				assert.Equal(t, segmentIndex, selection.SegmentIndex)
+				assert.Equal(t, nonempty.Offset[i], selection.Offset)
+				assert.Equal(t, nonempty.ElementIndices[i].GetIndices(), selection.ElementIndices.GetIndices())
+			}
+		})
+	}
+}
+
 func TestMergeByPKWithOffsetsOperator_ElementLevel_DupPK_HigherTsWins(t *testing.T) {
 	ctx := context.Background()
 	op := NewMergeByPKWithOffsetsOperator(100, reduce.IReduceNoOrder)

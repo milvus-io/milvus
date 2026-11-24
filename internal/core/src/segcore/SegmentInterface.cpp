@@ -279,16 +279,17 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                "invalid retrieve mode");
     if (candidates) {
         AssertInfo(limit_size > 0, "candidate byte budget must be positive");
-        AssertInfo(plan->max_candidate_rows_ >= 0,
-                   "candidate row cap must be non-negative");
         AssertInfo(plan->plan_node_ && plan->plan_node_->plannodes_,
                    "candidate retrieval requires a plan node");
         if (plan->plan_node_->has_order_by_ ||
             plan->plan_node_->query_iterator_cursor_.has_value() ||
-            dynamic_cast<const plan::MvccNode*>(
-                plan->plan_node_->plannodes_.get()) == nullptr) {
+            (dynamic_cast<const plan::MvccNode*>(
+                 plan->plan_node_->plannodes_.get()) == nullptr &&
+             dynamic_cast<const plan::ElementFilterBitsNode*>(
+                 plan->plan_node_->plannodes_.get()) == nullptr)) {
             ThrowInfo(NotImplemented,
-                      "candidate retrieval supports only plain document Query");
+                      "candidate retrieval supports only plain or "
+                      "element-filter Query");
         }
     }
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
@@ -300,8 +301,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                        entity_ttl_physical_time_us);
     visitor.SetReadSchema(plan->schema_);
     if (candidates) {
-        visitor.SetRetrieveCandidateBudget(limit_size,
-                                           plan->max_candidate_rows_);
+        visitor.SetRetrieveCandidateBudget(limit_size);
     }
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
 
@@ -329,20 +329,6 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
     results->mutable_offset()->Add(retrieve_results.result_offsets_.begin(),
                                    retrieve_results.result_offsets_.end());
 
-    if (candidates) {
-        // Grep only needs segment-local offsets; defer all field reads.
-        milvus::futures::throwIfCancelled(cancel_token);
-        if (results->ByteSizeLong() > static_cast<uint64_t>(limit_size)) {
-            ThrowInfo(InvalidParameter,
-                      "grep candidate result exceeds the retrieve byte budget "
-                      "(limit={} bytes); add a more selective filter or "
-                      "configure function.grep.maxScanRows "
-                      "(a row cap may produce incomplete results)",
-                      limit_size);
-        }
-        return results;
-    }
-
     // Element-level query support: serialize element_level flag and element_indices
     if (retrieve_results.element_level_) {
         results->set_element_level(true);
@@ -352,6 +338,18 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
             elem_indices->mutable_indices()->Add(indices.begin(),
                                                  indices.end());
         }
+    }
+
+    if (candidates) {
+        // Carry offsets and optional element lists; defer all field reads.
+        milvus::futures::throwIfCancelled(cancel_token);
+        if (results->ByteSizeLong() > static_cast<uint64_t>(limit_size)) {
+            ThrowInfo(InvalidParameter,
+                      "grep candidate result exceeds the retrieve byte budget "
+                      "(limit={} bytes); add a more selective filter",
+                      limit_size);
+        }
+        return results;
     }
 
     std::chrono::high_resolution_clock::time_point get_target_entry_start =

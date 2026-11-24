@@ -132,9 +132,11 @@ func streamingMilvusError(code streamingpb.StreamingCode, cause string) error {
 func formatRPCContext(err error, info *viewpb.RPCRequestContext) error {
 	var operation string
 	switch info.Method {
-	case viewpb.ViewQueryService_SearchOnView_FullMethodName:
+	case viewpb.ViewQueryService_SearchOnView_FullMethodName,
+		viewpb.ViewQueryService_SearchOnViewStream_FullMethodName:
 		operation = "search"
-	case viewpb.ViewQueryService_QueryOnView_FullMethodName:
+	case viewpb.ViewQueryService_QueryOnView_FullMethodName,
+		viewpb.ViewQueryService_QueryOnViewStream_FullMethodName:
 		operation = "query"
 	case viewpb.ViewQueryService_StatisticsOnView_FullMethodName:
 		operation = "get statistics"

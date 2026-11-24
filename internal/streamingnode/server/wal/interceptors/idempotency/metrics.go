@@ -41,9 +41,18 @@ func observeWindowEviction(vchannel string, count int) {
 // do not accumulate forever in the registry as the interceptor tears down. The
 // series are keyed by (node_id, vchannel); vchannel encodes its pchannel.
 func deleteWindowMetrics(vchannel string) {
+	deleteWindowGauges(vchannel)
+	deleteWindowCounters(vchannel)
+}
+
+func deleteWindowGauges(vchannel string) {
 	nodeID := paramtable.GetStringNodeID()
 	metrics.WALIdempotencyWindowEntries.DeleteLabelValues(nodeID, vchannel)
 	metrics.WALIdempotencyWindowInflight.DeleteLabelValues(nodeID, vchannel)
+}
+
+func deleteWindowCounters(vchannel string) {
+	nodeID := paramtable.GetStringNodeID()
 	metrics.WALIdempotencyDuplicateTotal.DeleteLabelValues(nodeID, vchannel)
 	metrics.WALIdempotencyEvictionTotal.DeleteLabelValues(nodeID, vchannel)
 }

@@ -22,6 +22,7 @@
 #include <nlohmann/json.hpp>
 #include <stdint.h>
 #include <algorithm>
+#include <charconv>
 #include <initializer_list>
 #include <map>
 #include <memory>
@@ -53,6 +54,7 @@
 #include "storage/loon_ffi/external_spec_c.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
+#include "storage/Util.h"
 #include "storage/loon_ffi/loon_error_code.h"
 
 using json = nlohmann::json;
@@ -61,6 +63,190 @@ namespace {
 std::mutex broker_policy_mutex;
 std::optional<std::unordered_set<std::string>> broker_allowed_endpoints;
 }  // namespace
+
+std::optional<int64_t>
+TryParseCanonicalFieldID(std::string_view value) {
+    if (value.empty()) {
+        return std::nullopt;
+    }
+    int64_t field_id = -1;
+    const auto parsed =
+        std::from_chars(value.data(), value.data() + value.size(), field_id);
+    if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() ||
+        field_id < 0 || std::to_string(field_id) != value) {
+        return std::nullopt;
+    }
+    return field_id;
+}
+
+namespace {
+int64_t
+ParseCanonicalFieldID(const std::string& value) {
+    const auto field_id = TryParseCanonicalFieldID(value);
+    if (!field_id.has_value()) {
+        ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                  "Invalid field ID mapping value '{}': expected canonical "
+                  "nonnegative int64",
+                  value);
+    }
+    return *field_id;
+}
+
+json
+ParseFieldIDMappingJSON(const std::string& text) {
+    std::unordered_set<std::string> keys;
+    auto callback = [&keys](
+                        int depth, json::parse_event_t event, json& parsed) {
+        if (depth == 1 && event == json::parse_event_t::key &&
+            !keys.insert(parsed.get<std::string>()).second) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "Duplicate field ID mapping key");
+        }
+        return true;
+    };
+    try {
+        auto result = json::parse(text, callback);
+        if (!result.is_object()) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "Field ID mapping must be an object");
+        }
+        return result;
+    } catch (const nlohmann::json::exception& e) {
+        ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                  "Invalid field ID mapping JSON: {}",
+                  e.what());
+    }
+}
+}  // namespace
+
+MilvusTableFieldIdMapping
+ParseMilvusTableFieldIdMapping(const std::string& encoded) {
+    const auto parsed = ParseFieldIDMappingJSON(encoded);
+    MilvusTableFieldIdMapping mapping;
+    for (auto it = parsed.begin(); it != parsed.end(); ++it) {
+        const auto target_id = ParseCanonicalFieldID(it.key());
+        if (!it.value().is_string()) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "source field ID for target {} must be a string",
+                      it.key());
+        }
+        const auto& physical = it.value().get_ref<const std::string&>();
+        (void)ParseCanonicalFieldID(physical);
+        mapping.physical_columns.emplace(target_id, physical);
+        if (!mapping.target_fields.emplace(physical, target_id).second) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "duplicate source field ID {}",
+                      physical);
+        }
+    }
+    return mapping;
+}
+
+std::shared_ptr<const MilvusTableFieldIdMapping>
+ResolveMilvusTableFieldIdMapping(
+    const milvus_storage::api::ColumnGroups& column_groups) {
+    if (auto mapping = ReadMilvusTableFieldIdMapping(column_groups)) {
+        return mapping;
+    }
+    auto identity = std::make_shared<MilvusTableFieldIdMapping>();
+    for (const auto& group : column_groups) {
+        for (const auto& column : group->columns) {
+            const auto id = ParseCanonicalFieldID(column);
+            identity->physical_columns.emplace(id, column);
+            identity->target_fields.emplace(column, id);
+        }
+    }
+    return identity;
+}
+
+std::shared_ptr<const MilvusTableFieldIdMapping>
+ReadMilvusTableFieldIdMapping(
+    const milvus_storage::api::ColumnGroups& column_groups) {
+    std::shared_ptr<MilvusTableFieldIdMapping> mapping;
+    bool saw_unmapped_nonempty = false;
+    for (const auto& group : column_groups) {
+        if (group == nullptr) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "Null column group in field ID mapping");
+        }
+        std::optional<MilvusTableFieldIdMapping> group_mapping;
+        bool any_property = false;
+        bool any_missing = false;
+        for (const auto& file : group->files) {
+            const auto property =
+                file.properties.find(kMilvusTableFieldIdMappingProperty);
+            if (property == file.properties.end()) {
+                any_missing = true;
+                continue;
+            }
+            any_property = true;
+            auto parsed = ParseMilvusTableFieldIdMapping(property->second);
+            if (group_mapping.has_value() &&
+                group_mapping->physical_columns != parsed.physical_columns) {
+                ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                          "Column group files disagree on field ID mapping");
+            }
+            group_mapping = std::move(parsed);
+        }
+        if (any_property && any_missing) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "Column group files have incomplete field ID mapping "
+                      "properties");
+        }
+        if (!any_property) {
+            if (!group->files.empty() || !group->columns.empty()) {
+                saw_unmapped_nonempty = true;
+            }
+            continue;
+        }
+        if (group_mapping->physical_columns.empty() &&
+            !group->columns.empty()) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "Nonempty column group has an empty field ID mapping");
+        }
+        if (!mapping) {
+            mapping = std::make_shared<MilvusTableFieldIdMapping>();
+        }
+        std::unordered_set<std::string> mapped_group_columns;
+        for (const auto& [target_id, physical] :
+             group_mapping->physical_columns) {
+            if (physical.empty() ||
+                std::find(group->columns.begin(),
+                          group->columns.end(),
+                          physical) == group->columns.end()) {
+                ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                          "Mapped physical column '{}' is absent from its "
+                          "column group",
+                          physical);
+            }
+            mapped_group_columns.insert(physical);
+            auto [physical_it, inserted] =
+                mapping->physical_columns.emplace(target_id, physical);
+            if (!inserted && physical_it->second != physical) {
+                ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                          "Target field {} has conflicting physical columns",
+                          target_id);
+            }
+            auto [target_it, target_inserted] =
+                mapping->target_fields.emplace(physical, target_id);
+            if (!target_inserted && target_it->second != target_id) {
+                ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                          "Physical column '{}' maps to multiple target fields",
+                          physical);
+            }
+        }
+        if (mapped_group_columns.size() != group->columns.size()) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "Column group field ID mapping does not cover every "
+                      "physical column");
+        }
+    }
+    if (mapping != nullptr && saw_unmapped_nonempty) {
+        ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                  "Column group has no field ID mapping");
+    }
+    return mapping;
+}
 
 arrow::Result<std::string>
 NormalizeBrokerEndpoint(const std::string& raw) {
@@ -202,175 +388,143 @@ IsCredentialBrokerEndpoint(const std::string& endpoint) {
 }
 
 std::shared_ptr<milvus_storage::api::Properties>
-MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
-    auto properties_map = std::make_shared<milvus_storage::api::Properties>();
-
-    // Add non-null string fields
-    if (c_storage_config.address != nullptr) {
-        milvus_storage::api::SetValue(
-            *properties_map, PROPERTY_FS_ADDRESS, c_storage_config.address);
+MakeStorageProperties(CStorageConfig config) {
+    auto properties = std::make_shared<milvus_storage::api::Properties>();
+    // C/protobuf inputs are already typed. Preserve their values, including
+    // the configured ChunkManager root, until the filesystem boundary.
+    const std::pair<const char*, const char*> strings[] = {
+        {PROPERTY_FS_ADDRESS, config.address},
+        {PROPERTY_FS_BUCKET_NAME, config.bucket_name},
+        {PROPERTY_FS_ACCESS_KEY_ID, config.access_key_id},
+        {PROPERTY_FS_ACCESS_KEY_VALUE, config.access_key_value},
+        {PROPERTY_FS_ROOT_PATH, config.root_path},
+        {PROPERTY_FS_STORAGE_TYPE, config.storage_type},
+        {PROPERTY_FS_CLOUD_PROVIDER, config.cloud_provider},
+        {PROPERTY_FS_IAM_ENDPOINT, config.iam_endpoint},
+        {PROPERTY_FS_LOG_LEVEL, config.log_level},
+        {PROPERTY_FS_REGION, config.region},
+        {PROPERTY_FS_SSL_CA_CERT, config.sslCACert},
+        {PROPERTY_FS_GCP_CREDENTIAL_JSON, config.gcp_credential_json},
+        {PROPERTY_FS_TLS_MIN_VERSION, config.tls_min_version},
+        {PROPERTY_FS_TALON_COORDINATOR, config.talon_coordinator},
+    };
+    for (const auto& [key, value] : strings) {
+        if (value != nullptr) {
+            (*properties)[key] = std::string(value);
+        }
     }
-    if (c_storage_config.bucket_name != nullptr) {
-        milvus_storage::api::SetValue(*properties_map,
-                                      PROPERTY_FS_BUCKET_NAME,
-                                      c_storage_config.bucket_name);
+    if (config.talon_namespace != nullptr &&
+        config.talon_namespace[0] != '\0') {
+        (*properties)[PROPERTY_FS_TALON_NAMESPACE] =
+            std::string(config.talon_namespace);
     }
-    if (c_storage_config.access_key_id != nullptr) {
-        milvus_storage::api::SetValue(*properties_map,
-                                      PROPERTY_FS_ACCESS_KEY_ID,
-                                      c_storage_config.access_key_id);
+    (*properties)[PROPERTY_FS_USE_SSL] = config.useSSL;
+    (*properties)[PROPERTY_FS_USE_IAM] = config.useIAM;
+    (*properties)[PROPERTY_FS_USE_VIRTUAL_HOST] = config.useVirtualHost;
+    (*properties)[PROPERTY_FS_USE_CUSTOM_PART_UPLOAD] =
+        config.use_custom_part_upload;
+    (*properties)[PROPERTY_FS_REQUEST_TIMEOUT_MS] = config.requestTimeoutMs;
+    (*properties)[PROPERTY_FS_USE_CRC32C_CHECKSUM] = config.use_crc32c_checksum;
+    if (config.max_connections > 0) {
+        (*properties)[PROPERTY_FS_MAX_CONNECTIONS] = config.max_connections;
     }
-    if (c_storage_config.access_key_value != nullptr) {
-        milvus_storage::api::SetValue(*properties_map,
-                                      PROPERTY_FS_ACCESS_KEY_VALUE,
-                                      c_storage_config.access_key_value);
-    }
-    const std::string storage_type = c_storage_config.storage_type != nullptr
-                                         ? c_storage_config.storage_type
-                                         : "";
-    if (c_storage_config.root_path != nullptr || storage_type == "local") {
-        const std::string root_path = c_storage_config.root_path != nullptr
-                                          ? c_storage_config.root_path
-                                          : "";
-        milvus_storage::api::SetValue(
-            *properties_map,
-            PROPERTY_FS_ROOT_PATH,
-            LoonFSRootPath(storage_type, root_path).c_str());
-    }
-    if (c_storage_config.storage_type != nullptr) {
-        milvus_storage::api::SetValue(*properties_map,
-                                      PROPERTY_FS_STORAGE_TYPE,
-                                      c_storage_config.storage_type);
-    }
-    if (c_storage_config.cloud_provider != nullptr) {
-        milvus_storage::api::SetValue(*properties_map,
-                                      PROPERTY_FS_CLOUD_PROVIDER,
-                                      c_storage_config.cloud_provider);
-    }
-    if (c_storage_config.iam_endpoint != nullptr) {
-        milvus_storage::api::SetValue(*properties_map,
-                                      PROPERTY_FS_IAM_ENDPOINT,
-                                      c_storage_config.iam_endpoint);
-    }
-    if (c_storage_config.log_level != nullptr) {
-        milvus_storage::api::SetValue(
-            *properties_map, PROPERTY_FS_LOG_LEVEL, "Warn");
-    }
-    if (c_storage_config.region != nullptr) {
-        milvus_storage::api::SetValue(
-            *properties_map, PROPERTY_FS_REGION, c_storage_config.region);
-    }
-    if (c_storage_config.sslCACert != nullptr) {
-        milvus_storage::api::SetValue(*properties_map,
-                                      PROPERTY_FS_SSL_CA_CERT,
-                                      c_storage_config.sslCACert);
-    }
-    if (c_storage_config.gcp_credential_json != nullptr) {
-        milvus_storage::api::SetValue(*properties_map,
-                                      PROPERTY_FS_GCP_CREDENTIAL_JSON,
-                                      c_storage_config.gcp_credential_json);
-    }
-
-    // Add boolean fields
-    milvus_storage::api::SetValue(*properties_map,
-                                  PROPERTY_FS_USE_SSL,
-                                  c_storage_config.useSSL ? "true" : "false");
-    milvus_storage::api::SetValue(*properties_map,
-                                  PROPERTY_FS_USE_IAM,
-                                  c_storage_config.useIAM ? "true" : "false");
-    milvus_storage::api::SetValue(
-        *properties_map,
-        PROPERTY_FS_USE_VIRTUAL_HOST,
-        c_storage_config.useVirtualHost ? "true" : "false");
-    milvus_storage::api::SetValue(
-        *properties_map,
-        PROPERTY_FS_USE_CUSTOM_PART_UPLOAD,
-        c_storage_config.use_custom_part_upload ? "true" : "false");
-
-    // Preserve SDK I/O until CRT honors the configured TLS minimum.
-    (*properties_map)[PROPERTY_FS_S3_USE_CRT] = false;
-
-    // Add integer fields
-    milvus_storage::api::SetValue(
-        *properties_map,
-        PROPERTY_FS_REQUEST_TIMEOUT_MS,
-        std::to_string(c_storage_config.requestTimeoutMs).c_str());
-    // Absent when unset: leave the key absent so milvus-storage applies its
-    // registered default instead of taking an explicit 0.
-    if (c_storage_config.max_connections > 0) {
-        milvus_storage::api::SetValue(
-            *properties_map,
-            PROPERTY_FS_MAX_CONNECTIONS,
-            std::to_string(c_storage_config.max_connections).c_str());
-    }
-
-    (*properties_map)[PROPERTY_FS_S3_CRT_QUEUE_SIZES] =
-        c_storage_config.crt_queue_sizes > 0
-            ? c_storage_config.crt_queue_sizes
+    (*properties)[PROPERTY_FS_S3_USE_CRT] = false;
+    (*properties)[PROPERTY_FS_S3_CRT_QUEUE_SIZES] =
+        config.crt_queue_sizes > 0
+            ? config.crt_queue_sizes
             : milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                   .GetS3CrtQueueSizes();
-
-    if (c_storage_config.tls_min_version != nullptr) {
-        std::string tls_ver(c_storage_config.tls_min_version);
-        if (!tls_ver.empty() && tls_ver != "default") {
-            milvus_storage::api::SetValue(*properties_map,
-                                          PROPERTY_FS_TLS_MIN_VERSION,
-                                          c_storage_config.tls_min_version);
-        }
-    }
-
-    milvus_storage::api::SetValue(
-        *properties_map,
-        PROPERTY_FS_USE_CRC32C_CHECKSUM,
-        c_storage_config.use_crc32c_checksum ? "true" : "false");
-
-    const bool is_local =
-        c_storage_config.storage_type != nullptr &&
-        std::string_view(c_storage_config.storage_type) == "local";
-    // Default properties serve arbitrary operations. Only unrestricted policy
-    // enables their FS; load readers select their own mode and file policy later.
-    const uint32_t data_mode = (c_storage_config.talon_enabled_stages == 0 ||
-                                c_storage_config.talon_enabled_stages ==
-                                    milvus::storage::kTalonStagesAll)
-                                   ? c_storage_config.talon_mode
-                                   : 0;
+    // Shared filesystems serve arbitrary operations. Restricted stage masks
+    // enable Talon only in the stage-specific properties selected by readers.
+    const uint32_t data_mode =
+        config.talon_enabled_stages == 0 ||
+                config.talon_enabled_stages == milvus::storage::kTalonStagesAll
+            ? config.talon_mode
+            : 0;
+    (*properties)[PROPERTY_FS_TALON_MODE] = data_mode;
+    (*properties)[PROPERTY_FS_TALON_OPEN_ONLY] = false;
     const std::pair<const char*, uint32_t> talon_values[] = {
-        {PROPERTY_FS_TALON_MODE, data_mode},
         {PROPERTY_FS_TALON_SMALL_READ_THRESHOLD,
-         c_storage_config.talon_small_read_threshold},
-        {PROPERTY_FS_TALON_BLOCK_SIZE, c_storage_config.talon_block_size},
-        {PROPERTY_FS_TALON_MAX_IDLE_PER_ADDR,
-         c_storage_config.talon_max_idle_per_addr}};
-    // Ordinary callers retain unrestricted file behavior; a QN load copy may
-    // select the immutable open-only filesystem policy below.
-    (*properties_map)[PROPERTY_FS_TALON_OPEN_ONLY] = false;
-    // Keep the External Table policy alongside ordinary filesystem properties.
-    // This Milvus-only key is consumed below, including for local primary storage.
-    (*properties_map)["milvus.talon.external_mode"] = std::to_string(
-        c_storage_config.talon_enable_for_external_table ? data_mode : 0);
+         config.talon_small_read_threshold},
+        {PROPERTY_FS_TALON_BLOCK_SIZE, config.talon_block_size},
+        {PROPERTY_FS_TALON_MAX_IDLE_PER_ADDR, config.talon_max_idle_per_addr},
+    };
     for (const auto& [key, value] : talon_values) {
-        const bool is_mode = std::string_view(key) == PROPERTY_FS_TALON_MODE;
-        if (!is_mode && value == 0) {
-            continue;  // Unset in older StorageConfig messages: use storage defaults.
+        if (value > 0) {
+            (*properties)[key] = value;
         }
-        (*properties_map)[key] = is_mode && is_local ? uint32_t{0} : value;
     }
-    if (c_storage_config.talon_coordinator != nullptr) {
-        (*properties_map)[PROPERTY_FS_TALON_COORDINATOR] =
-            std::string(c_storage_config.talon_coordinator);
-    }
-
-    // Carry the configured arrow reader prebuffer limits into every
-    // freshly-built properties map. Index build (index_c.cpp) and the FFI
-    // readers construct properties per task through this helper instead of
-    // going through LoonFFIPropertiesSingleton's cached map, so without this
-    // the common.arrow.reader.* configuration never reaches those reads and
-    // external-table index builds are stuck with arrow's default range
-    // coalescing (effectively one in-flight S3 range per file).
+    // Preserve the external-table policy even when the primary is local.
+    (*properties)["milvus.talon.external_mode"] =
+        std::to_string(config.talon_enable_for_external_table ? data_mode : 0);
     milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-        .ApplyArrowReaderConfig(*properties_map);
+        .ApplyArrowReaderConfig(*properties);
+    return properties;
+}
 
-    return properties_map;
+std::shared_ptr<milvus_storage::api::Properties>
+MakeInternalProperties(
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties) {
+    const auto storage_type = milvus::storage::GetStorageProperty<std::string>(
+        properties, PROPERTY_FS_STORAGE_TYPE);
+    auto result =
+        std::make_shared<milvus_storage::api::Properties>(*properties);
+    if (storage_type == "local") {
+        // Keys already include localStorage.path; do not prepend it twice.
+        (*result)[PROPERTY_FS_ROOT_PATH] = std::string(kLoonLocalFSRootPath);
+        (*result)[PROPERTY_FS_TALON_MODE] = uint32_t{0};
+    }
+    if (storage_type == "minio") {
+        (*result)[PROPERTY_FS_STORAGE_TYPE] = std::string("remote");
+    }
+    const auto provider = milvus::storage::GetStorageProperty<std::string>(
+        properties, PROPERTY_FS_CLOUD_PROVIDER);
+    if ((storage_type == "remote" || storage_type == "minio") &&
+        provider == "gcpnative") {
+        // Reject before filesystem creation so every C++ entry point reports
+        // a configuration error, rather than a generic Arrow Invalid status.
+        ThrowInfo(milvus::ErrorCode::ConfigInvalid,
+                  "Unsupported cloud provider: gcpnative; the legacy GCP "
+                  "native backend has been removed");
+    }
+    if (provider.empty()) {
+        (*result)[PROPERTY_FS_CLOUD_PROVIDER] = std::string("aws");
+    }
+    const auto address = milvus::storage::GetStorageProperty<std::string>(
+        properties, PROPERTY_FS_ADDRESS);
+    if (provider != "azure" &&
+        !milvus::storage::GetStorageProperty<bool>(properties,
+                                                   PROPERTY_FS_USE_SSL) &&
+        !address.empty() && address.find("://") == std::string::npos) {
+        (*result)[PROPERTY_FS_ADDRESS] = "http://" + address;
+    }
+    const auto tls = milvus::storage::GetStorageProperty<std::string>(
+        properties, PROPERTY_FS_TLS_MIN_VERSION);
+    if (tls.empty() || tls == "default") {
+        result->erase(PROPERTY_FS_TLS_MIN_VERSION);
+    }
+    // Older protobuf producers send zero for unset optional tuning fields.
+    for (const auto* key : {PROPERTY_FS_MAX_CONNECTIONS,
+                            PROPERTY_FS_TALON_SMALL_READ_THRESHOLD,
+                            PROPERTY_FS_TALON_BLOCK_SIZE,
+                            PROPERTY_FS_TALON_MAX_IDLE_PER_ADDR}) {
+        if (milvus::storage::GetStorageProperty<uint32_t>(properties, key) ==
+            0) {
+            result->erase(key);
+        }
+    }
+    (*result)[PROPERTY_FS_S3_USE_CRT] = false;
+    if (!result->contains(PROPERTY_FS_S3_CRT_QUEUE_SIZES)) {
+        (*result)[PROPERTY_FS_S3_CRT_QUEUE_SIZES] =
+            milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                .GetS3CrtQueueSizes();
+    }
+    return result;
+}
+
+std::shared_ptr<milvus_storage::api::Properties>
+MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
+    return MakeInternalProperties(MakeStorageProperties(c_storage_config));
 }
 
 // kAllowedExtfsSpecKeys is the C++-side defense-in-depth allowlist for extfs
@@ -1063,28 +1217,27 @@ InjectExternalSpecProperties(
         const bool bucket_in_host = !uri_host_is_cloud_endpoint &&
                                     !derived.empty() &&
                                     StripURIScheme(derived) != host;
-        if (spec_bucket_name && !spec_bucket_name->empty()) {
-            // StorageUri::Parse decodes the path before splitting out the bucket.
-            auto source_bucket =
-                bucket_in_host ? host : arrow::util::UriUnescape(path_bucket);
-            source_bucket = source_bucket.substr(0, source_bucket.find('/'));
-            if (*spec_bucket_name != source_bucket) {
+        // StorageUri::Parse decodes the path before splitting out the bucket.
+        auto source_bucket =
+            bucket_in_host ? host : arrow::util::UriUnescape(path_bucket);
+        source_bucket = source_bucket.substr(0, source_bucket.find('/'));
+        if (spec_bucket_name && !spec_bucket_name->empty() &&
+            *spec_bucket_name != source_bucket) {
+            return arrow::Status::Invalid(
+                "extfs.bucket_name must match the bucket in "
+                "external_source");
+        }
+        if (!bucket_in_host && !path_bucket.empty()) {
+            if (spec_cp == "azure" && !broker_endpoint.empty() && use_iam &&
+                path_bucket != source_bucket) {
                 return arrow::Status::Invalid(
-                    "extfs.bucket_name must match the bucket in "
-                    "external_source");
+                    "Azure broker IAM requires an unescaped source "
+                    "container");
             }
-            if (!bucket_in_host) {
-                if (spec_cp == "azure" && !broker_endpoint.empty() && use_iam &&
-                    path_bucket != source_bucket) {
-                    return arrow::Status::Invalid(
-                        "Azure broker IAM requires an unescaped source "
-                        "container");
-                }
-                milvus_storage::api::SetValue(
-                    properties,
-                    (extfs_prefix + "bucket_name").c_str(),
-                    source_bucket.c_str());
-            }
+            milvus_storage::api::SetValue(
+                properties,
+                (extfs_prefix + "bucket_name").c_str(),
+                source_bucket.c_str());
         }
         if (bucket_in_host) {
             milvus_storage::api::SetValue(
@@ -1137,6 +1290,7 @@ InjectExternalSpecProperties(
                             PROPERTY_FS_TALON_OPEN_ONLY,
                             PROPERTY_FS_TALON_SMALL_READ_THRESHOLD,
                             PROPERTY_FS_TALON_COORDINATOR,
+                            PROPERTY_FS_TALON_NAMESPACE,
                             PROPERTY_FS_TALON_BLOCK_SIZE,
                             PROPERTY_FS_TALON_MAX_IDLE_PER_ADDR}) {
         const auto* source_key = std::string_view(key) == PROPERTY_FS_TALON_MODE
@@ -1262,38 +1416,6 @@ LoonFSRootPath(const std::string& storage_type, const std::string& root_path) {
         return kLoonLocalFSRootPath;
     }
     return root_path;
-}
-
-CStorageConfig
-ToCStorageConfig(const milvus::storage::StorageConfig& config) {
-    return CStorageConfig{config.address.c_str(),
-                          config.bucket_name.c_str(),
-                          config.access_key_id.c_str(),
-                          config.access_key_value.c_str(),
-                          config.root_path.c_str(),
-                          config.storage_type.c_str(),
-                          config.cloud_provider.c_str(),
-                          config.iam_endpoint.c_str(),
-                          config.log_level.c_str(),
-                          config.region.c_str(),
-                          config.useSSL,
-                          config.sslCACert.c_str(),
-                          config.useIAM,
-                          config.useVirtualHost,
-                          config.requestTimeoutMs,
-                          config.gcp_credential_json.c_str(),
-                          false,  // this field does not exist in StorageConfig
-                          config.max_connections,
-                          config.tls_min_version.c_str(),
-                          config.use_crc32c_checksum,
-                          config.talon_mode,
-                          config.talon_small_read_threshold,
-                          config.talon_coordinator.c_str(),
-                          config.talon_block_size,
-                          config.talon_max_idle_per_addr,
-                          config.talon_enable_for_external_table,
-                          0,  // CRT queue tuning is node-local.
-                          config.talon_enabled_stages};
 }
 
 std::optional<LoonManifestPath>

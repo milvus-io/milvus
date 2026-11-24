@@ -251,7 +251,7 @@ class CountingChunkReader : public milvus_storage::api::ChunkReader {
                      folly::CancellationToken cancellation) override {
         async_calls_.fetch_add(1);
         return inner_->get_chunks_async(
-            chunk_indices, parallelism, std::move(cancellation));
+            chunk_indices, parallelism, cancellation);
     }
 
     arrow::Result<std::vector<uint64_t>>

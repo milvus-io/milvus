@@ -274,7 +274,7 @@ func TestColumnGroupEntriesFromCValidatesNativeArrays(t *testing.T) {
 
 func TestRefreshMilvusTableManifestErrorsReturnEmptyResult(t *testing.T) {
 	oldManifest := MarshalManifestPath("files/refresh_errors/seg1", 1)
-	for _, stage := range []string{"invalid path", "canceled", "columns", "stats", "indexes", "index path", "transaction"} {
+	for _, stage := range []string{"invalid path", "canceled", "stats", "indexes", "index path", "transaction"} {
 		t.Run(stage, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -286,12 +286,6 @@ func TestRefreshMilvusTableManifestErrorsReturnEmptyResult(t *testing.T) {
 				cancel()
 			}
 			failure := merr.WrapErrStorageMsg("injected %s failure", stage)
-			var columns []string
-			if stage == "columns" {
-				columns = []string{"101"}
-				patch := mockey.Mock(readManifestColumnGroupEntries).Return(nil, failure).Build()
-				defer patch.UnPatch()
-			}
 			readPatch := mockey.Mock(GetManifestStats).
 				To(func(_ string, _ *indexpb.StorageConfig, _ ...uint32) (map[string]ManifestStat, error) {
 					if stage == "stats" {
@@ -324,7 +318,7 @@ func TestRefreshMilvusTableManifestErrorsReturnEmptyResult(t *testing.T) {
 					return "", failure
 				}).Build()
 			defer commitPatch.UnPatch()
-			result, err := RefreshMilvusTableManifest(ctx, manifest, nil, nil, nil, ExternalSpecContext{}, columns, nil)
+			result, err := RefreshMilvusTableManifest(ctx, manifest, nil, nil, nil, ExternalSpecContext{}, nil)
 			switch stage {
 			case "invalid path":
 				require.ErrorIs(t, err, merr.ErrDataIntegrity)
@@ -399,7 +393,7 @@ func TestRefreshMilvusTableManifestSingleCommit(t *testing.T) {
 				newDelta := path.Join(base, "_delta/new")
 				result, err := RefreshMilvusTableManifest(context.Background(), oldManifest, []string{"pk", "ts"},
 					[]Fragment{{FilePath: source, EndRow: 1, RowCount: 1}}, cfg,
-					ExternalSpecContext{MilvusTablePKMode: mode}, nil, []DeltaLogEntry{{Path: newDelta, NumEntries: 3}})
+					ExternalSpecContext{MilvusTablePKMode: mode}, []DeltaLogEntry{{Path: newDelta, NumEntries: 3}})
 				require.NoError(t, err)
 				require.Equal(t, 1, reads)
 				readPatch.UnPatch()
@@ -488,7 +482,7 @@ func TestRefreshMilvusTableManifestRetainsRemoteIndexPaths(t *testing.T) {
 			defer commitPatch.UnPatch()
 			// Keep path validation real: invalid retained entries must fail before
 			// opening a transaction, rather than escaping _index through "..".
-			result, err := RefreshMilvusTableManifest(context.Background(), oldManifest, nil, nil, nil, ExternalSpecContext{}, nil, nil)
+			result, err := RefreshMilvusTableManifest(context.Background(), oldManifest, nil, nil, nil, ExternalSpecContext{}, nil)
 			if tc.wantErr {
 				require.ErrorIs(t, err, merr.ErrServiceInternal)
 				require.ErrorContains(t, err, "outside segment index directory")
@@ -549,7 +543,7 @@ func TestRefreshMilvusTableManifestPreparationFailureDoesNotCommit(t *testing.T)
 				defer readPatch.UnPatch()
 			}
 			result, err := RefreshMilvusTableManifest(ctx, oldManifest, []string{"pk", "ts"},
-				[]Fragment{{FilePath: source, EndRow: 1, RowCount: 1}}, cfg, ExternalSpecContext{}, nil, nil)
+				[]Fragment{{FilePath: source, EndRow: 1, RowCount: 1}}, cfg, ExternalSpecContext{}, nil)
 			require.Error(t, err)
 			require.Equal(t, MilvusTableRefreshResult{}, result)
 			_, oldVersion, err := UnmarshalManifestPath(oldManifest)

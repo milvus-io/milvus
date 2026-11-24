@@ -604,13 +604,8 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 			return merr.WrapErrParameterInvalidMsg("extfs.bucket_name must match the bucket in external_source")
 		}
 		if requiresBucketPath {
-			// Injection normally extracts the bucket from the raw URI.
-			// An explicit matching bucket lets storage use its decoded path.
-			path := u.EscapedPath()
-			if bucket != "" {
-				path = u.Path
-			}
-			bucket, _, hasSeparator := strings.Cut(strings.TrimPrefix(path, "/"), "/")
+			// StorageUri::Parse decodes the path before splitting out the bucket.
+			bucket, _, hasSeparator := strings.Cut(strings.TrimPrefix(u.Path, "/"), "/")
 			if bucket == "" || !hasSeparator {
 				return merr.WrapErrParameterInvalidMsg("endpoint-form source requires /<bucket>/[<path>]; add a trailing slash for a bucket root")
 			}

@@ -811,9 +811,7 @@ func TestS3ProviderEndpointBucketRoot(t *testing.T) {
 					root := tc.scheme + "://" + tc.host + port + "/events"
 					require.ErrorContains(t, ValidateSourceAndSpec(root, spec), "trailing slash")
 					require.NoError(t, ValidateSourceAndSpec(root+"/", spec))
-					if bucket != "" {
-						require.NoError(t, ValidateSourceAndSpec(root+"%2F", spec))
-					}
+					require.NoError(t, ValidateSourceAndSpec(root+"%2F", spec))
 				}
 			}
 		})
