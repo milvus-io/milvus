@@ -265,8 +265,10 @@ func TestConsoleSlowQueryRootBoundToRole(t *testing.T) {
 
 func TestConsoleConnectedClientsScopedToCaller(t *testing.T) {
 	manager := connection.GetManager()
-	manager.Register(context.Background(), 990001, &commonpb.ClientInfo{SdkType: "Golang", User: "alice", Host: "alice-host"})
-	manager.Register(context.Background(), 990002, &commonpb.ClientInfo{SdkType: "Golang", User: "bob", Host: "bob-host"})
+	// The manager is process-wide and has no removal API; a distinct SDK type
+	// keeps these entries from satisfying other tests' assertions.
+	manager.Register(context.Background(), 990001, &commonpb.ClientInfo{SdkType: "console-scope-test", User: "alice", Host: "alice-host"})
+	manager.Register(context.Background(), 990002, &commonpb.ClientInfo{SdkType: "console-scope-test", User: "bob", Host: "bob-host"})
 	for _, caller := range consoleCallers {
 		t.Run(caller.name, func(t *testing.T) {
 			c, w := newConsoleRequest(t, caller, "/", mhttp.ClusterClientsPath)
@@ -286,6 +288,7 @@ func TestConsoleConnectedClientsScopedToCaller(t *testing.T) {
 			for _, client := range got {
 				require.Equal(t, caller.username, client.GetUser())
 			}
+			require.Contains(t, w.Body.String(), "alice-host", "the caller's own connections stay visible")
 			require.NotContains(t, w.Body.String(), "bob-host")
 		})
 	}
