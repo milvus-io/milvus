@@ -131,7 +131,6 @@ func (t *BumpSchemaVersionTask) BuildCompactionRequest() (*datapb.CompactionPlan
 		PreAllocatedSegmentIDs:    taskProto.GetPreAllocatedSegmentIDs(),
 		SlotUsage:                 t.GetSlotUsage(),
 		MaxSize:                   taskProto.GetMaxSize(),
-		MaxSegmentRows:            taskProto.GetMaxSegmentRows(),
 		JsonParams:                compactionParams,
 		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
 		EnableManifestDelta:       true,

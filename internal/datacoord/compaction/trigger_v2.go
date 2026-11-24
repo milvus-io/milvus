@@ -826,9 +826,7 @@ func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx co
 		totalRows += s.NumOfRows
 	}
 	expectedSize := policy.GetExpectedSegmentSize(m.indexMeta, collection.ID, collection.Schema)
-	maxRows := policy.GetSegmentMaxRows()
-	totalSize := policy.RowCappedSize(cv.GetTotalSize(), totalRows, expectedSize, maxRows)
-	planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(m.allocator, totalSize, float64(expectedSize))
+	planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(m.allocator, cv.GetTotalSize(), float64(expectedSize))
 	if err != nil {
 		log.Warn(ctx, "Failed to submit compaction view to scheduler because allocate id fail", mlog.Err(err))
 		return
@@ -850,7 +848,6 @@ func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx co
 		TotalRows:              totalRows,
 		LastStateStartTime:     now,
 		MaxSize:                expectedSize,
-		MaxSegmentRows:         maxRows,
 		PreAllocatedSegmentIDs: preAllocatedSegmentIDs,
 	}
 	err = m.inspector.EnqueueCompaction(task)
