@@ -22,6 +22,10 @@ import (
 	"time"
 )
 
+// credentialEndpointsDoc documents the credential_endpoints item of the providers
+// whose endpoint is set in the function params.
+const credentialEndpointsDoc = "Endpoints (scheme://host[:port] with an ASCII host, path ignored; a YAML list or a comma-separated string) allowed to receive a credential configured on the server, whether named by this provider's credential item or by the credential param of a function. A function that would send such a credential to any other endpoint is rejected."
+
 type functionConfig struct {
 	GrepMaxArgumentBytes          ParamItem  `refreshable:"true"`
 	GrepMaxRegexBytes             ParamItem  `refreshable:"true"`
@@ -186,6 +190,8 @@ func (p *functionConfig) init(base *BaseTable) {
 				return "Whether to enable TEI model service"
 			case "tei.credential":
 				return "The name in the crendential configuration item"
+			case "tei.credential_endpoints":
+				return credentialEndpointsDoc
 			case "azure_openai.credential":
 				return "The name in the crendential configuration item"
 			case "azure_openai.url":
@@ -269,10 +275,14 @@ func (p *functionConfig) init(base *BaseTable) {
 			switch key {
 			case "tei.credential":
 				return "The name in the crendential configuration item"
+			case "tei.credential_endpoints":
+				return credentialEndpointsDoc
 			case "tei.enable":
 				return "Whether to enable TEI rerank service"
 			case "vllm.credential":
 				return "The name in the crendential configuration item"
+			case "vllm.credential_endpoints":
+				return credentialEndpointsDoc
 			case "vllm.enable":
 				return "Whether to enable vllm rerank service"
 			case "siliconflow.credential":

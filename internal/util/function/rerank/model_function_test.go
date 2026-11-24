@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -495,5 +496,78 @@ func (s *RerankModelSuite) TestCallAli() {
 		scores, err := provder.Rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
 		s.NoError(err)
 		s.Equal([]float32{0.0, 0.1, 0.2}, scores)
+	}
+}
+
+// TestCredentialOnlySentToListedEndpoint covers the providers whose endpoint is
+// set in the function params, through NewModelProvider, which both collection
+// rerank functions and rerank functions passed with a search request use.
+func (s *RerankModelSuite) TestCredentialOnlySentToListedEndpoint() {
+	setProviderConf := func(conf map[string]string) {
+		paramtable.Get().FunctionCfg.RerankModelProviders.GetFunc = func() map[string]string {
+			return conf
+		}
+	}
+	defer setProviderConf(map[string]string{})
+
+	for _, tc := range []struct {
+		provider string
+		response string
+	}{
+		{teiProviderName, `[{"index": 0, "score": 0.5}]`},
+		{vllmProviderName, `{"results": [{"index": 0, "relevance_score": 0.5}]}`},
+	} {
+		var hits atomic.Int32
+		var authHeader atomic.Value
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits.Add(1)
+			authHeader.Store(r.Header.Get("Authorization"))
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(tc.response))
+		}))
+		params := func(extra ...*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+			return append([]*commonpb.KeyValuePair{
+				{Key: providerParamName, Value: tc.provider},
+				{Key: models.EndpointParamKey, Value: ts.URL},
+			}, extra...)
+		}
+		rerank := func(provider ModelProvider) string {
+			scores, err := provider.Rerank(context.Background(), "query", []string{"doc"})
+			s.NoError(err)
+			s.Equal([]float32{0.5}, scores)
+			return authHeader.Load().(string)
+		}
+		named := &commonpb.KeyValuePair{Key: models.CredentialParamKey, Value: "mock"}
+
+		// a credential named in the function params, endpoint not listed
+		setProviderConf(map[string]string{})
+		_, err := NewModelProvider(params(named), &models.ModelExtraInfo{})
+		s.ErrorContains(err, models.CredentialEndpointsConfKey, tc.provider)
+		setProviderConf(map[string]string{tc.provider + ".credential_endpoints": "http://localhost:1"})
+		_, err = NewModelProvider(params(named), &models.ModelExtraInfo{})
+		s.ErrorContains(err, models.CredentialEndpointsConfKey, tc.provider)
+		// the provider credential configured in milvus.yaml, endpoint not listed
+		setProviderConf(map[string]string{tc.provider + ".credential": "mock"})
+		_, err = NewModelProvider(params(), &models.ModelExtraInfo{})
+		s.ErrorContains(err, models.CredentialEndpointsConfKey, tc.provider)
+		s.Equal(int32(0), hits.Load(), tc.provider)
+
+		// no credential: the endpoint is called without an Authorization header
+		setProviderConf(map[string]string{})
+		provider, err := NewModelProvider(params(), &models.ModelExtraInfo{})
+		s.NoError(err, tc.provider)
+		s.Equal("", rerank(provider), tc.provider)
+
+		// listed endpoint: the credential is attached
+		setProviderConf(map[string]string{tc.provider + ".credential": "mock", tc.provider + ".credential_endpoints": ts.URL})
+		provider, err = NewModelProvider(params(), &models.ModelExtraInfo{})
+		s.NoError(err, tc.provider)
+		s.Equal("Bearer mock", rerank(provider), tc.provider)
+		setProviderConf(map[string]string{tc.provider + ".credential_endpoints": ts.URL})
+		provider, err = NewModelProvider(params(named), &models.ModelExtraInfo{})
+		s.NoError(err, tc.provider)
+		s.Equal("Bearer mock", rerank(provider), tc.provider)
+		s.Equal(int32(3), hits.Load(), tc.provider)
+		ts.Close()
 	}
 }

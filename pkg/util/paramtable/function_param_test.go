@@ -37,6 +37,7 @@ func TestFunctionConfig(t *testing.T) {
 	keys := []string{
 		"tei.enable",
 		"tei.credential",
+		"tei.credential_endpoints",
 		"azure_openai.credential",
 		"azure_openai.url",
 		"azure_openai.resource_name",
@@ -76,8 +77,10 @@ func TestFunctionConfig(t *testing.T) {
 	keys = []string{
 		"tei.enable",
 		"tei.credential",
+		"tei.credential_endpoints",
 		"vllm.enable",
 		"vllm.credential",
+		"vllm.credential_endpoints",
 		"cohere.credential",
 		"cohere.url",
 		"cohere.enable",

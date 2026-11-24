@@ -90,7 +90,7 @@ func createVertexAIProvider(url string, schema *schemapb.FieldSchema) (textEmbed
 		OutputFieldIds:   []int64{102},
 		Params: []*commonpb.KeyValuePair{
 			{Key: models.ModelNameParamKey, Value: TestModel},
-			{Key: models.LocationParamKey, Value: "mock_local"},
+			{Key: models.LocationParamKey, Value: "us-central1"},
 			{Key: models.ProjectIDParamKey, Value: "mock_id"},
 			{Key: models.TaskTypeParamKey, Value: vertexAICodeRetrival},
 			{Key: models.URLParamKey, Value: url},
@@ -262,6 +262,48 @@ func (s *VertexAITextEmbeddingProviderSuite) TestNewVertexAIEmbeddingProvider() 
 	s.NoError(err)
 	s.True(provider.MaxBatch() > 0)
 	s.Equal(provider.FieldDim(), int64(4))
+}
+
+func (s *VertexAITextEmbeddingProviderSuite) TestLocationValidation() {
+	newProvider := func(modelName string, location string, conf map[string]string) error {
+		functionSchema := &schemapb.FunctionSchema{
+			Name:             "test",
+			Type:             schemapb.FunctionType_TextEmbedding,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"vector"},
+			Params: []*commonpb.KeyValuePair{
+				{Key: models.ModelNameParamKey, Value: modelName},
+				{Key: models.LocationParamKey, Value: location},
+				{Key: models.ProjectIDParamKey, Value: "mock_id"},
+			},
+		}
+		mockClient := vertexai.NewVertexAIEmbedding("mock_url", []byte{1, 2, 3}, "mock scope", "mock token")
+		_, err := NewVertexAIEmbeddingProvider(s.schema.Fields[2], functionSchema, mockClient, conf, credentials.NewCredentials(map[string]string{}), &models.ModelExtraInfo{BatchFactor: 1})
+		return err
+	}
+	for _, modelName := range []string{TestModel, "gemini-embedding-2-preview"} {
+		for _, location := range []string{"us-central1", "europe-west4", "asia-northeast1", "us", "US-CENTRAL1"} {
+			s.NoError(newProvider(modelName, location, map[string]string{}), location)
+		}
+		for _, location := range []string{
+			"evil.com/x?",
+			"evil.com#",
+			"x@evil.com/",
+			"us-central1.evil.com",
+			"us-central1-aiplatform.googleapis.com.evil.com/",
+			"evil.com:443/",
+			"mock_local",
+			"-us",
+			"us-",
+			"us central1",
+			"us-central1\\evil.com",
+		} {
+			err := newProvider(modelName, location, map[string]string{})
+			s.ErrorContains(err, "is not a valid VertexAI location", location)
+		}
+		// the location is not part of the request URL when the url is configured
+		s.NoError(newProvider(modelName, "not a location", map[string]string{models.URLParamKey: "https://vertexai.example.com"}))
+	}
 }
 
 func (s *VertexAITextEmbeddingProviderSuite) TestGeminiEmbedding() {
