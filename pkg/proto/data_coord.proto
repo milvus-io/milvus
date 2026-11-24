@@ -2023,6 +2023,11 @@ message RestoreSnapshotInfo {
   uint64 time_cost = 7; // time cost in milliseconds
   uint64 start_time = 8; // start time in milliseconds since Unix epoch
   int64 db_id = 9; // database id of the target collection
+  // Collection the snapshot was taken from, for authorizing the job against
+  // the collection its restore was authorized on. Zero for external restores,
+  // whose snapshot comes from another cluster.
+  int64 source_collection_id = 10;
+  bool external = 11; // restored from an external snapshot
 }
 
 message DescribeSnapshotRequest {

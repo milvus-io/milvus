@@ -20,6 +20,7 @@ import (
 	"context"
 	"strconv"
 
+	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -401,6 +402,17 @@ func (node *Proxy) GetRestoreSnapshotState(ctx context.Context, req *milvuspb.Ge
 	if err := t.WaitToFinish(); err != nil {
 		log.Warn(ctx, "GetRestoreSnapshotState failed to WaitToFinish",
 			mlog.Err(err))
+		// DataCoord reports an absent job as ImportSysFailed. Hide its
+		// existence exactly as for a job outside the caller's grants.
+		if !authorizationDisabled() && errors.Is(err, merr.ErrImportSysFailed) {
+			err = restoreJobDenied()
+		}
+		return &milvuspb.GetRestoreSnapshotStateResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	if err := node.authorizeRestoreSnapshotJob(ctx, t.JobInfo()); err != nil {
+		log.Info(ctx, "GetRestoreSnapshotState not authorized", mlog.Err(err))
 		return &milvuspb.GetRestoreSnapshotStateResponse{
 			Status: merr.Status(err),
 		}, nil

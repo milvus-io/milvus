@@ -1164,6 +1164,26 @@ func TestSnapshotManager_BuildRestoreInfo(t *testing.T) {
 	assert.Equal(t, uint64(2000), result.GetTimeCost()) // 2 seconds = 2000 ms
 }
 
+// Proxy authorizes a restore job through the collection its snapshot was
+// taken from, so that collection must be reported, except for an external
+// snapshot, whose recorded collection ID belongs to another cluster.
+func TestSnapshotManager_BuildRestoreInfo_Source(t *testing.T) {
+	sm := &Manager{}
+
+	local := sm.buildRestoreInfo(&copysegment.Job{CopySegmentJob: &datapb.CopySegmentJob{
+		JobId: 1, CollectionId: 200, SourceCollectionId: 100,
+	}})
+	assert.Equal(t, int64(100), local.GetSourceCollectionId())
+	assert.False(t, local.GetExternal())
+
+	external := sm.buildRestoreInfo(&copysegment.Job{CopySegmentJob: &datapb.CopySegmentJob{
+		JobId: 2, CollectionId: 200, SourceCollectionId: 100, External: true,
+	}})
+	assert.Zero(t, external.GetSourceCollectionId())
+	assert.True(t, external.GetExternal())
+	assert.Equal(t, int64(200), external.GetCollectionId())
+}
+
 func TestSnapshotManager_BuildChannelMapping_Success(t *testing.T) {
 	ctx := context.Background()
 
