@@ -52,6 +52,7 @@ struct LoadIndexInfo {
     std::vector<std::string> index_files;
     index::IndexBasePtr index;
     index::CacheIndexBasePtr cache_index;
+    bool skipped{false};
     std::string uri;
     IndexVersion index_engine_version;
     proto::schema::FieldSchema schema;
@@ -93,6 +94,7 @@ struct LoadIndexInfo {
           index_files(other.index_files),
           index(nullptr),
           cache_index(nullptr),
+          skipped(other.skipped),
           uri(other.uri),
           index_engine_version(other.index_engine_version),
           schema(other.schema),
@@ -124,6 +126,7 @@ struct LoadIndexInfo {
             index_files = other.index_files;
             index = nullptr;
             cache_index = nullptr;
+            skipped = other.skipped;
             uri = other.uri;
             index_engine_version = other.index_engine_version;
             schema = other.schema;

@@ -16,6 +16,7 @@
 #include <folly/ScopeGuard.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
+#include <yaml-cpp/yaml.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <iosfwd>
@@ -43,6 +44,9 @@
 #include "index/ScalarIndex.h"
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexSort.h"
+#include "segcore/Types.h"
+#include "segcore/Utils.h"
+#include "segcore/default_fs.h"
 #include "common/StructElementOffsets.h"
 #include "indexbuilder/IndexCreatorBase.h"
 #include "indexbuilder/IndexFactory.h"
@@ -54,6 +58,7 @@
 #include "storage/FileManager.h"
 #include "storage/IndexEntryReader.h"
 #include "storage/IndexEntryWriter.h"
+#include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
 #include "storage/PluginLoader.h"
@@ -1894,4 +1899,284 @@ TEST(BitmapIndexArrayNestedTest,
     }
 
     boost::filesystem::remove_all(root_path);
+}
+
+TEST(BitmapIndexArrayNestedTest,
+     MissingIsNestedDefaultsToFalseForBitmapAndSort) {
+    proto::schema::FieldSchema int_schema;
+    int_schema.set_name("struct_array[sub_int]");
+    int_schema.set_data_type(proto::schema::DataType::Array);
+    int_schema.set_element_type(proto::schema::DataType::Int32);
+    int_schema.set_nullable(false);
+
+    auto field_meta = storage::FieldDataMeta{1, 2, 3, 101, int_schema};
+    auto index_meta = storage::IndexMeta{3, 101, 3142, 3142};
+
+    auto root_path =
+        fmt::format("{}/missing_is_nested_defaults_false", TestLocalPath);
+    boost::filesystem::remove_all(root_path);
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = root_path;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+
+    std::vector<ScalarFieldProto> scalar_arrays(3);
+    scalar_arrays[0].mutable_int_data()->add_data(1);
+    scalar_arrays[1].mutable_int_data()->add_data(2);
+    scalar_arrays[2].mutable_int_data()->add_data(3);
+    std::vector<milvus::Array> arrays;
+    for (const auto& sa : scalar_arrays) {
+        arrays.emplace_back(sa);
+    }
+    auto field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::NONE, false);
+    field_data->FillFieldData(arrays.data(), arrays.size());
+
+    // 1. V2 BitmapIndex without "is_nested_index" defaults to false.
+    {
+        auto build_bitmap =
+            std::make_unique<index::BitmapIndex<int32_t>>(ctx, true);
+        build_bitmap->BuildWithFieldData({field_data});
+        auto bin = build_bitmap->Serialize({});
+        auto meta_buf = bin.GetByName(index::BITMAP_INDEX_META);
+        ASSERT_NE(meta_buf, nullptr);
+        auto node = YAML::Load(std::string(
+            reinterpret_cast<const char*>(meta_buf->data.get()),
+            meta_buf->size));
+        node.remove("is_nested_index");
+        const auto stripped_meta = YAML::Dump(node);
+        std::shared_ptr<uint8_t[]> stripped_buf(
+            new uint8_t[stripped_meta.size()]);
+        memcpy(stripped_buf.get(), stripped_meta.data(), stripped_meta.size());
+
+        knowhere::BinarySet stripped_bin;
+        stripped_bin.Append(
+            index::BITMAP_INDEX_META, stripped_buf, stripped_meta.size());
+        stripped_bin.Append(index::BITMAP_INDEX_DATA,
+                            bin.GetByName(index::BITMAP_INDEX_DATA));
+
+        auto loaded = std::make_unique<index::BitmapIndex<int32_t>>(ctx, true);
+        loaded->Load(stripped_bin, {});
+        EXPECT_FALSE(loaded->IsNestedIndex());
+    }
+
+    // 2. V2 ScalarIndexSort without "is_nested_index" defaults to false.
+    {
+        auto build_sort =
+            std::make_unique<index::ScalarIndexSort<int32_t>>(ctx, true);
+        build_sort->BuildWithFieldData({field_data});
+        auto bin = build_sort->Serialize({});
+        knowhere::BinarySet stripped_bin;
+        for (const auto& [name, val] : bin.binary_map_) {
+            if (name != "is_nested_index") {
+                stripped_bin.Append(name, val);
+            }
+        }
+        auto loaded =
+            std::make_unique<index::ScalarIndexSort<int32_t>>(ctx, true);
+        Config cfg;
+        cfg[index::ENABLE_MMAP] = false;
+        loaded->Load(stripped_bin, cfg);
+        EXPECT_FALSE(loaded->IsNestedIndex());
+    }
+
+    // 3. V3 HybridScalarIndex->BITMAP stripped of "is_nested" reports
+    // IsNestedIndex() == false even when constructed with is_nested_index=true.
+    {
+        auto build_bitmap =
+            std::make_unique<index::BitmapIndex<int32_t>>(ctx, true);
+        build_bitmap->BuildWithFieldData({field_data});
+        auto stats = build_bitmap->UploadUnified({});
+        ASSERT_EQ(stats->GetIndexFiles().size(), 1);
+        const std::string packed_path = stats->GetIndexFiles()[0];
+
+        storage::MemFileManagerImpl fm(ctx);
+        auto input = fm.OpenInputStream(packed_path);
+        auto reader = storage::IndexEntryReader::Open(input, input->Size(), 1);
+        ASSERT_NE(reader, nullptr);
+
+        const std::string stripped_name = "stripped_hybrid_bitmap.v3";
+        auto writer = fm.CreateIndexEntryWriterUnified(stripped_name);
+        for (const auto& entry_name : reader->GetEntryNames()) {
+            if (entry_name == storage::MILVUS_V3_META_ENTRY_NAME) {
+                continue;
+            }
+            auto entry = reader->ReadEntry(entry_name);
+            writer->WriteEntry(entry_name, entry.data.data(), entry.data.size());
+        }
+        writer->PutMeta(index::BITMAP_INDEX_LENGTH,
+                        reader->GetMeta<size_t>(index::BITMAP_INDEX_LENGTH));
+        writer->PutMeta(index::BITMAP_INDEX_NUM_ROWS,
+                        reader->GetMeta<size_t>(index::BITMAP_INDEX_NUM_ROWS));
+        writer->PutMeta(
+            index::INDEX_TYPE,
+            static_cast<uint8_t>(index::ScalarIndexType::BITMAP));
+        writer->Finish();
+        const std::string stripped_path =
+            fm.GetRemoteIndexObjectPrefix() + "/" + stripped_name;
+
+        storage::FileManagerContext load_ctx(
+            field_meta, index_meta, chunk_manager, fs);
+        load_ctx.set_for_loading_index(true);
+        auto loaded =
+            std::make_unique<index::HybridScalarIndex<int32_t>>(7, load_ctx, true);
+        Config cfg;
+        cfg["index_files"] = std::vector<std::string>{stripped_path};
+        cfg[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+        loaded->LoadUnified(cfg);
+        EXPECT_FALSE(loaded->IsNestedIndex());
+    }
+
+    boost::filesystem::remove_all(root_path);
+}
+
+TEST(BitmapIndexArrayNestedTest,
+     LoadIndexDataSkipsLegacyStructSubFieldIndexesAndAcceptsCompatible) {
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    auto chunk_manager =
+        storage::RemoteChunkManagerSingleton::GetInstance()
+            .GetRemoteChunkManager();
+    ASSERT_NE(chunk_manager, nullptr);
+
+    proto::schema::FieldSchema struct_schema;
+    struct_schema.set_name("struct_array[sub_str]");
+    struct_schema.set_data_type(proto::schema::DataType::Array);
+    struct_schema.set_element_type(proto::schema::DataType::VarChar);
+    struct_schema.set_nullable(false);
+
+    auto field_meta = storage::FieldDataMeta{1, 2, 3, 101, struct_schema};
+    auto index_meta = storage::IndexMeta{3, 101, 3143, 3143};
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+    storage::MemFileManagerImpl fm(ctx);
+    std::vector<std::string> created_files;
+    auto cleanup = folly::makeGuard([&]() {
+        for (const auto& path : created_files) {
+            chunk_manager->Remove(path);
+        }
+    });
+
+    auto make_packed_empty = [&](const std::string& filename,
+                                 const nlohmann::json& metas) {
+        auto writer = fm.CreateIndexEntryWriterUnified(filename);
+        writer->WriteEntry("dummy", "x", 1);
+        for (const auto& [k, v] : metas.items()) {
+            writer->PutMeta(k, v);
+        }
+        writer->Finish();
+        const std::string remote_path =
+            fm.GetRemoteIndexObjectPrefix() + "/" + filename;
+        created_files.push_back(remote_path);
+        return std::pair<std::string, int64_t>{
+            remote_path,
+            static_cast<int64_t>(writer->GetTotalBytesWritten())};
+    };
+
+    struct Case {
+        std::string name;
+        std::string index_type;
+        int scalar_version;
+        nlohmann::json metas;
+        bool expect_skipped;
+    };
+    const std::vector<Case> cases = {
+        {"legacy_hybrid_bitmap",
+         index::HYBRID_INDEX_TYPE,
+         3,
+         {{index::INDEX_TYPE,
+           static_cast<uint8_t>(index::ScalarIndexType::BITMAP)},
+          {index::BITMAP_INDEX_LENGTH, 1}},
+         true},
+        {"legacy_bitmap",
+         index::BITMAP_INDEX_TYPE,
+         3,
+         {{index::BITMAP_INDEX_LENGTH, 1}},
+         true},
+        {"legacy_stlsort",
+         index::ASCENDING_SORT,
+         3,
+         {{"version", 1}},
+         true},
+        {"legacy_inverted_v3",
+         index::INVERTED_INDEX_TYPE,
+         3,
+         {{"file_names", nlohmann::json::array({"meta.json"})}},
+         true},
+        {"legacy_inverted_v4",
+         index::INVERTED_INDEX_TYPE,
+         4,
+         {{"file_names", nlohmann::json::array({"meta.json"})}},
+         false},
+        {"new_inverted_v3",
+         index::INVERTED_INDEX_TYPE,
+         3,
+         {{"file_names", nlohmann::json::array({"meta.json"})},
+          {"is_nested", true}},
+         false},
+    };
+
+    for (const auto& tc : cases) {
+        SCOPED_TRACE(tc.name);
+        const auto [path, size] =
+            make_packed_empty(tc.name + ".v3", tc.metas);
+        segcore::LoadIndexInfo info{};
+        info.collection_id = 1;
+        info.partition_id = 2;
+        info.segment_id = 3;
+        info.field_id = 101;
+        info.field_type = DataType::ARRAY;
+        info.element_type = DataType::VARCHAR;
+        info.schema = struct_schema;
+        info.index_id = 3143;
+        info.index_build_id = 3143;
+        info.index_version = 3143;
+        info.index_size = size;
+        info.num_rows = 10;
+        info.index_files = {path};
+        info.index_params = {
+            {index::INDEX_TYPE, tc.index_type},
+            {index::SCALAR_INDEX_ENGINE_VERSION,
+             std::to_string(tc.scalar_version)},
+            {milvus::LOAD_PRIORITY, "HIGH"}};
+
+        tracer::TraceContext trace_ctx{};
+        segcore::LoadIndexData(trace_ctx, &info);
+        EXPECT_EQ(info.skipped, tc.expect_skipped);
+        if (tc.expect_skipped) {
+            EXPECT_EQ(info.cache_index, nullptr);
+        } else {
+            EXPECT_NE(info.cache_index, nullptr);
+        }
+    }
+
+    // Ordinary (non-struct) ARRAY field without is_nested is never skipped.
+    {
+        proto::schema::FieldSchema array_schema = struct_schema;
+        array_schema.set_name("regular_array");
+        const auto [path, size] = make_packed_empty(
+            "regular_array_bitmap.v3", {{index::BITMAP_INDEX_LENGTH, 1}});
+        segcore::LoadIndexInfo info{};
+        info.collection_id = 1;
+        info.partition_id = 2;
+        info.segment_id = 3;
+        info.field_id = 101;
+        info.field_type = DataType::ARRAY;
+        info.element_type = DataType::VARCHAR;
+        info.schema = array_schema;
+        info.index_id = 3143;
+        info.index_build_id = 3143;
+        info.index_version = 3143;
+        info.index_size = size;
+        info.num_rows = 10;
+        info.index_files = {path};
+        info.index_params = {
+            {index::INDEX_TYPE, index::BITMAP_INDEX_TYPE},
+            {index::SCALAR_INDEX_ENGINE_VERSION, "3"},
+            {milvus::LOAD_PRIORITY, "HIGH"}};
+        tracer::TraceContext trace_ctx{};
+        segcore::LoadIndexData(trace_ctx, &info);
+        EXPECT_FALSE(info.skipped);
+        EXPECT_NE(info.cache_index, nullptr);
+    }
 }

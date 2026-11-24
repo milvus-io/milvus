@@ -10,6 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <boost/container/vector.hpp>
+#include <boost/filesystem/operations.hpp>
+#include <fmt/core.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <stdint.h>
@@ -40,6 +42,11 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
+#include "storage/ChunkManager.h"
+#include "storage/IndexEntryReader.h"
+#include "storage/IndexEntryWriter.h"
+#include "storage/Util.h"
+#include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
@@ -610,4 +617,118 @@ TEST(ArrayInvertedIndexRegression,
                 << "nested=" << nested_index << ", mixed row=" << row;
         }
     }
+}
+
+TEST(ArrayInvertedIndexRegression, V3PublishesNestedMetadataAndVersionGate) {
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("struct_array[sub_int]");
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::Int64);
+    field_schema.set_nullable(false);
+
+    auto field_meta = storage::FieldDataMeta{1, 2, 3, 101, field_schema};
+    auto index_meta = storage::IndexMeta{3, 101, 4101, 4101};
+
+    auto root_path =
+        fmt::format("{}/inverted_v3_nested_meta_gate", TestLocalPath);
+    boost::filesystem::remove_all(root_path);
+    storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = root_path;
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+
+    const std::vector<boost::container::vector<int64_t>> arrays = {
+        {10, 20}, {30}, {20, 40}};
+    auto build_index = std::make_unique<index::InvertedIndexTantivy<int64_t>>(
+        milvus::index::TANTIVY_INDEX_LATEST_VERSION, ctx, false, true, true);
+    Config build_cfg;
+    build_cfg["is_array"] = true;
+    build_cfg["is_nested_index"] = true;
+    build_index->BuildWithRawDataForUT(
+        arrays.size(), arrays.data(), build_cfg);
+    auto stats = build_index->UploadUnified({});
+    ASSERT_EQ(stats->GetIndexFiles().size(), 1);
+    const std::string packed_path = stats->GetIndexFiles()[0];
+
+    storage::MemFileManagerImpl fm(ctx);
+    auto input = fm.OpenInputStream(packed_path);
+    auto reader =
+        storage::IndexEntryReader::Open(input, input->Size(), 1);
+    ASSERT_NE(reader, nullptr);
+    ASSERT_TRUE(reader->HasMeta("is_nested"));
+    EXPECT_TRUE(reader->GetMeta<bool>("is_nested"));
+
+    // Write a stripped V3 copy without "is_nested" to simulate legacy v3/v4 files.
+    const std::string stripped_name = "stripped_inverted.v3";
+    auto writer = fm.CreateIndexEntryWriterUnified(stripped_name);
+    for (const auto& entry_name : reader->GetEntryNames()) {
+        if (entry_name == storage::MILVUS_V3_META_ENTRY_NAME) {
+            continue;
+        }
+        auto entry = reader->ReadEntry(entry_name);
+        writer->WriteEntry(
+            entry_name, entry.data.data(), entry.data.size());
+    }
+    writer->PutMeta("file_names",
+                    reader->GetMeta<std::vector<std::string>>("file_names"));
+    writer->PutMeta("has_null", reader->GetMeta<bool>("has_null"));
+    writer->Finish();
+    const std::string stripped_path =
+        fm.GetRemoteIndexObjectPrefix() + "/" + stripped_name;
+
+    ctx.set_for_loading_index(true);
+    // Stripped V3 with scalar_index_engine_version=3 falls back to non-nested.
+    {
+        Config cfg;
+        cfg["index_files"] = std::vector<std::string>{stripped_path};
+        cfg[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
+        cfg[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 3;
+        auto loaded = std::make_unique<index::InvertedIndexTantivy<int64_t>>(
+            milvus::index::TANTIVY_INDEX_LATEST_VERSION,
+            ctx,
+            false,
+            true,
+            true);
+        loaded->LoadUnified(cfg);
+        EXPECT_FALSE(loaded->IsNestedIndex());
+    }
+
+    // Stripped V3 with scalar_index_engine_version=4 remains element-level.
+    {
+        Config cfg;
+        cfg["index_files"] = std::vector<std::string>{stripped_path};
+        cfg[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
+        cfg[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 4;
+        auto loaded = std::make_unique<index::InvertedIndexTantivy<int64_t>>(
+            milvus::index::TANTIVY_INDEX_LATEST_VERSION,
+            ctx,
+            false,
+            true,
+            true);
+        loaded->LoadUnified(cfg);
+        EXPECT_TRUE(loaded->IsNestedIndex());
+    }
+
+    // New V3 with "is_nested"=true preserves element-level even at version=3.
+    {
+        Config cfg;
+        cfg["index_files"] = std::vector<std::string>{packed_path};
+        cfg[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
+        cfg[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 3;
+        auto loaded = std::make_unique<index::InvertedIndexTantivy<int64_t>>(
+            milvus::index::TANTIVY_INDEX_LATEST_VERSION,
+            ctx,
+            false,
+            true,
+            false);
+        loaded->LoadUnified(cfg);
+        EXPECT_TRUE(loaded->IsNestedIndex());
+    }
+
+    boost::filesystem::remove_all(root_path);
 }

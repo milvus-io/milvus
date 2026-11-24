@@ -432,6 +432,7 @@ HybridScalarIndex<T>::Load(const BinarySet& binary_set, const Config& config) {
     LOG_INFO("load hybrid index with internal index:{}",
              ToString(internal_index_type_));
     index->Load(binary_set, config);
+    is_nested_index_ = index->IsNestedIndex();
 
     is_built_ = true;
     ComputeByteSize();
@@ -464,6 +465,7 @@ HybridScalarIndex<T>::Load(milvus::tracer::TraceContext ctx,
     LOG_INFO("load hybrid index with internal index:{}",
              ToString(internal_index_type_));
     index->Load(ctx, config);
+    is_nested_index_ = index->IsNestedIndex();
 
     is_built_ = true;
     ComputeByteSize();
@@ -531,6 +533,7 @@ HybridScalarIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
 
     auto index = GetInternalIndex();
     index->LoadEntries(reader, config);
+    is_nested_index_ = index->IsNestedIndex();
 
     is_built_ = true;
     ComputeByteSize();

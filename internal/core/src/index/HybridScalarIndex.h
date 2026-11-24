@@ -78,7 +78,8 @@ class HybridScalarIndex : public ScalarIndex<T> {
 
     bool
     IsNestedIndex() const override {
-        return is_nested_index_;
+        return internal_index_ != nullptr ? internal_index_->IsNestedIndex()
+                                          : is_nested_index_;
     }
 
     void

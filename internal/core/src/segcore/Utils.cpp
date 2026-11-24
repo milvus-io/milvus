@@ -14,10 +14,13 @@
 
 #include <cxxabi.h>
 #include <folly/ExceptionWrapper.h>
+#include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <exception>
+#include <filesystem>
 #include <memory>
 #include <numeric>
 #include <optional>
@@ -57,11 +60,234 @@
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
 #include "storage/FileManager.h"
+#include "storage/IndexEntryReader.h"
+#include "storage/MemFileManagerImpl.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 
 namespace milvus::segcore {
+
+namespace {
+
+std::optional<milvus::index::ScalarIndexType>
+ParsePackedScalarTypeFromFileName(const std::string& filename) {
+    const std::string prefix = "milvus_packed_";
+    const std::string suffix = "_index.v3";
+    if (filename.size() < prefix.size() + suffix.size() ||
+        filename.compare(0, prefix.size(), prefix) != 0 ||
+        filename.compare(
+            filename.size() - suffix.size(), suffix.size(), suffix) != 0) {
+        return std::nullopt;
+    }
+    auto type_str = filename.substr(
+        prefix.size(), filename.size() - prefix.size() - suffix.size());
+    if (type_str == "stlsort") {
+        return milvus::index::ScalarIndexType::STLSORT;
+    }
+    if (type_str == "inverted") {
+        return milvus::index::ScalarIndexType::INVERTED;
+    }
+    if (type_str == "bitmap") {
+        return milvus::index::ScalarIndexType::BITMAP;
+    }
+    if (type_str == "marisa") {
+        return milvus::index::ScalarIndexType::MARISA;
+    }
+    return std::nullopt;
+}
+
+std::string
+BasenameOf(const std::string& path) {
+    return std::filesystem::path(path).filename().string();
+}
+
+const std::string*
+FindFileByBasename(const std::vector<std::string>& files,
+                   std::string_view basename) {
+    for (const auto& f : files) {
+        if (BasenameOf(f) == basename) {
+            return &f;
+        }
+    }
+    return nullptr;
+}
+
+bool
+IsCompatibleLegacyNestedScalarIndex(
+    const milvus::segcore::LoadIndexInfo* load_index_info,
+    const milvus::index::CreateIndexInfo& index_info,
+    const Config& config,
+    const milvus::storage::FileManagerContext& file_manager_context) {
+    if (!milvus::IsStructSubField(load_index_info->schema.name()) ||
+        milvus::IsVectorDataType(load_index_info->field_type)) {
+        return true;
+    }
+
+    const auto& index_files = load_index_info->index_files;
+    const auto scalar_version = index_info.scalar_index_engine_version;
+    const bool is_v3 = scalar_version >= 3 && index_files.size() == 1 &&
+                       file_manager_context.fs != nullptr;
+
+    if (is_v3) {
+        milvus::storage::MemFileManagerImpl file_manager(file_manager_context);
+        auto input = file_manager.OpenInputStream(index_files[0]);
+        AssertInfo(input != nullptr,
+                   "failed to open packed scalar index file: {}",
+                   index_files[0]);
+        auto reader = milvus::storage::IndexEntryReader::Open(
+            input,
+            input->Size(),
+            file_manager_context.fieldDataMeta.collection_id);
+        AssertInfo(reader != nullptr,
+                   "failed to open IndexEntryReader for packed scalar index: {}",
+                   index_files[0]);
+
+        auto physical_type = milvus::index::ScalarIndexType::NONE;
+        if (index_info.index_type == milvus::index::HYBRID_INDEX_TYPE) {
+            if (reader->HasMeta(milvus::index::INDEX_TYPE)) {
+                physical_type = static_cast<milvus::index::ScalarIndexType>(
+                    reader->GetMeta<uint8_t>(milvus::index::INDEX_TYPE));
+            } else {
+                if (auto parsed = ParsePackedScalarTypeFromFileName(
+                        BasenameOf(index_files[0]))) {
+                    physical_type = *parsed;
+                }
+                if (physical_type == milvus::index::ScalarIndexType::NONE) {
+                    if (reader->HasMeta("version") ||
+                        reader->HasMeta("index_length")) {
+                        physical_type = milvus::index::ScalarIndexType::STLSORT;
+                    } else if (reader->HasMeta("file_names")) {
+                        physical_type =
+                            milvus::index::ScalarIndexType::INVERTED;
+                    } else if (reader->HasMeta(
+                                   milvus::index::BITMAP_INDEX_LENGTH)) {
+                        physical_type = milvus::index::ScalarIndexType::BITMAP;
+                    }
+                }
+            }
+        } else if (index_info.index_type == milvus::index::BITMAP_INDEX_TYPE) {
+            physical_type = milvus::index::ScalarIndexType::BITMAP;
+        } else if (index_info.index_type == milvus::index::ASCENDING_SORT) {
+            physical_type = milvus::index::ScalarIndexType::STLSORT;
+        } else if (index_info.index_type ==
+                   milvus::index::INVERTED_INDEX_TYPE) {
+            physical_type = milvus::index::ScalarIndexType::INVERTED;
+        }
+
+        if (physical_type == milvus::index::ScalarIndexType::BITMAP ||
+            physical_type == milvus::index::ScalarIndexType::STLSORT) {
+            return reader->HasMeta("is_nested") &&
+                   reader->GetMeta<bool>("is_nested");
+        }
+        if (physical_type == milvus::index::ScalarIndexType::INVERTED) {
+            if (reader->HasMeta("is_nested")) {
+                return reader->GetMeta<bool>("is_nested");
+            }
+            return scalar_version >= 4;
+        }
+        return true;
+    }
+
+    if (index_files.empty() || file_manager_context.chunkManagerPtr == nullptr) {
+        return true;
+    }
+
+    milvus::storage::MemFileManagerImpl file_manager(file_manager_context);
+    auto load_priority =
+        milvus::index::GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+
+    auto load_single_entry = [&](const std::string& remote_path,
+                                 const std::string& entry_name) {
+        auto index_datas = file_manager.LoadIndexToMemory(
+            std::vector<std::string>{remote_path}, load_priority);
+        knowhere::BinarySet binary_set;
+        milvus::index::AssembleIndexDatas(index_datas, binary_set);
+        return binary_set.GetByName(entry_name);
+    };
+
+    auto physical_type = milvus::index::ScalarIndexType::NONE;
+    if (index_info.index_type == milvus::index::HYBRID_INDEX_TYPE) {
+        if (const auto* type_file =
+                FindFileByBasename(index_files, milvus::index::INDEX_TYPE)) {
+            auto buf =
+                load_single_entry(*type_file, milvus::index::INDEX_TYPE);
+            if (buf != nullptr && buf->size == sizeof(uint8_t)) {
+                uint8_t raw_type = 0;
+                std::memcpy(&raw_type, buf->data.get(), sizeof(uint8_t));
+                physical_type =
+                    static_cast<milvus::index::ScalarIndexType>(raw_type);
+            }
+        }
+    } else if (index_info.index_type == milvus::index::BITMAP_INDEX_TYPE) {
+        physical_type = milvus::index::ScalarIndexType::BITMAP;
+    } else if (index_info.index_type == milvus::index::ASCENDING_SORT) {
+        physical_type = milvus::index::ScalarIndexType::STLSORT;
+    } else if (index_info.index_type == milvus::index::INVERTED_INDEX_TYPE) {
+        physical_type = milvus::index::ScalarIndexType::INVERTED;
+    }
+
+    if (physical_type == milvus::index::ScalarIndexType::BITMAP) {
+        const auto* meta_file =
+            FindFileByBasename(index_files, milvus::index::BITMAP_INDEX_META);
+        if (meta_file == nullptr) {
+            return false;
+        }
+        auto buf =
+            load_single_entry(*meta_file, milvus::index::BITMAP_INDEX_META);
+        if (buf == nullptr) {
+            return false;
+        }
+        const std::string text(reinterpret_cast<const char*>(buf->data.get()),
+                               buf->size);
+        try {
+            const auto j = nlohmann::json::parse(text);
+            return j.contains("is_nested_index") &&
+                   j.at("is_nested_index").get<bool>();
+        } catch (const nlohmann::json::parse_error&) {
+            try {
+                const auto node = YAML::Load(text);
+                const auto nested_node = node["is_nested_index"];
+                return nested_node && nested_node.as<bool>();
+            } catch (const YAML::Exception& error) {
+                ThrowInfo(DataFormatBroken,
+                          "invalid bitmap V1/V2 metadata: {}",
+                          error.what());
+            }
+        } catch (const nlohmann::json::exception& error) {
+            ThrowInfo(DataFormatBroken,
+                      "invalid bitmap V1/V2 metadata: {}",
+                      error.what());
+        }
+    }
+
+    if (physical_type == milvus::index::ScalarIndexType::STLSORT) {
+        const auto* nested_file =
+            FindFileByBasename(index_files, "is_nested_index");
+        if (nested_file == nullptr) {
+            return false;
+        }
+        auto buf = load_single_entry(*nested_file, "is_nested_index");
+        if (buf == nullptr || buf->size != sizeof(bool)) {
+            ThrowInfo(DataFormatBroken,
+                      "invalid sorted legacy nested metadata size: {}",
+                      buf != nullptr ? buf->size : 0);
+        }
+        bool nested_flag = false;
+        std::memcpy(&nested_flag, buf->data.get(), sizeof(bool));
+        return nested_flag;
+    }
+
+    if (physical_type == milvus::index::ScalarIndexType::INVERTED) {
+        return scalar_version >= 4;
+    }
+
+    return true;
+}
+
+}  // namespace
 
 namespace {
 
@@ -1673,6 +1899,24 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
     milvus::storage::FileManagerContext file_manager_context(
         field_meta, index_meta, remote_chunk_manager, fs);
     file_manager_context.set_for_loading_index(true);
+
+    if (!IsCompatibleLegacyNestedScalarIndex(
+            load_index_info, index_info, config, file_manager_context)) {
+        LOG_WARN(
+            "skip incompatible legacy nested scalar index: collection={}, "
+            "segment={}, field={}, index_id={}, index_type={}, "
+            "scalar_version={}",
+            load_index_info->collection_id,
+            load_index_info->segment_id,
+            load_index_info->field_id,
+            load_index_info->index_id,
+            index_info.index_type,
+            index_info.scalar_index_engine_version);
+        load_index_info->skipped = true;
+        load_index_info->cache_index = nullptr;
+        return;
+    }
+    load_index_info->skipped = false;
 
     // use cache layer to load vector/scalar index
     std::unique_ptr<milvus::cachinglayer::Translator<milvus::index::IndexBase>>

@@ -397,13 +397,15 @@ StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
         }
     }
 
-    // Deserialize is_nested_index (optional for backward compatibility)
+    // Deserialize is_nested_index (missing on legacy artifacts -> row domain)
     auto is_nested_data = binary_set.GetByName("is_nested_index");
     if (is_nested_data != nullptr) {
         bool loaded_is_nested_index = false;
         milvus::fastmem::FastMemcpy(
             &loaded_is_nested_index, is_nested_data->data.get(), sizeof(bool));
-        is_nested_index_ = is_nested_index_ || loaded_is_nested_index;
+        is_nested_index_ = loaded_is_nested_index;
+    } else {
+        is_nested_index_ = false;
     }
 
     auto version_data = binary_set.GetByName("version");
@@ -621,7 +623,7 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
                               SERIALIZATION_VERSION));
     }
     total_num_rows_ = reader.GetMeta<size_t>("num_rows");
-    is_nested_index_ = is_nested_index_ || reader.GetMeta<bool>("is_nested");
+    is_nested_index_ = reader.GetMeta<bool>("is_nested", false);
 
     const auto expected_valid_bitset_size = (total_num_rows_ + 7) / 8;
     AssertInfo(
