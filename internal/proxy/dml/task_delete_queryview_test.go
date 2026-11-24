@@ -218,8 +218,11 @@ func TestComplexDeleteQueryViewReplansEachAttempt(t *testing.T) {
 	}).Build()
 	defer produce.UnPatch()
 
+	coord := mocks.NewMockMixCoordClient(t)
+	coord.EXPECT().GetQueryViewLoadInfo(mock.Anything, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 10}).
+		Return(&querypb.GetQueryViewLoadInfoResponse{Status: merr.Success(), PartitionIDs: []int64{12, 13}}, nil).Once()
 	runner := &DeleteRunner{
-		node: &mockUpsertNode{retryOnce: true}, metaCache: cache,
+		node: &mockUpsertNode{retryOnce: true, mixCoord: coord}, metaCache: cache,
 		req: &milvuspb.DeleteRequest{
 			DbName: "db", CollectionName: "tenant", Expr: "value < {limit}",
 			ExprTemplateValues: map[string]*schemapb.TemplateValue{"limit": {Val: &schemapb.TemplateValue_Int64Val{Int64Val: 3}}},
@@ -244,7 +247,7 @@ func TestComplexDeleteQueryViewReplansEachAttempt(t *testing.T) {
 	require.EqualValues(t, 7, reads[0].Req.GetSchemaVersion())
 	require.EqualValues(t, 8, reads[1].Req.GetSchemaVersion())
 	require.Equal(t, []int64{11}, reads[0].Req.GetPartitionIDs())
-	require.Empty(t, reads[1].Req.GetPartitionIDs())
+	require.Equal(t, []int64{12, 13}, reads[1].Req.GetPartitionIDs())
 	require.Same(t, current.CollectionSchema, reads[1].Schema)
 	require.Greater(t, reads[1].BarrierMVCC, reads[0].BarrierMVCC)
 	require.Equal(t, reads[1].BarrierMVCC, reads[1].Req.GetGuaranteeTimestamp())

@@ -19,6 +19,7 @@ package proxy
 import (
 	"context"
 	"net"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -33,6 +34,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -463,7 +465,8 @@ type dqlRetryServer struct {
 	queries   atomic.Int32
 	failPhase string
 	// retrieved is what QueryOnView returns.
-	retrieved *schemapb.IDs
+	retrieved         *schemapb.IDs
+	servingPartitions []int64
 }
 
 func (s *dqlRetryServer) failure(phase string) error {
@@ -493,7 +496,20 @@ func (s *dqlRetryServer) GetQueryPlan(_ context.Context, req *viewpb.GetQueryPla
 	if search := req.GetLegacySearchRequest(); search != nil {
 		plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: search}
 	} else {
-		plan.Request = &viewpb.QueryPlan_LegacyRetrieveRequest{LegacyRetrieveRequest: req.GetLegacyRetrieveRequest()}
+		retrieve := req.GetLegacyRetrieveRequest()
+		if s.servingPartitions != nil {
+			// Resolve an unscoped read against the leased View, as the WAL planner does.
+			retrieve = proto.Clone(retrieve).(*internalpb.RetrieveRequest)
+			if len(retrieve.GetPartitionIDs()) == 0 {
+				retrieve.PartitionIDs = slices.Clone(s.servingPartitions)
+			}
+			for _, id := range retrieve.GetPartitionIDs() {
+				if !slices.Contains(s.servingPartitions, id) {
+					return nil, viewerror.NewGRPCStatusFromError(merr.WrapErrPartitionNotLoaded(id)).Err()
+				}
+			}
+		}
+		plan.Request = &viewpb.QueryPlan_LegacyRetrieveRequest{LegacyRetrieveRequest: retrieve}
 	}
 	return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
 }
@@ -547,10 +563,11 @@ func (c *dqlRetryServiceClient) QueryOnView(ctx context.Context, _ qviews.WorkNo
 
 type dqlRetryClient struct {
 	queryclient.Client
-	server      *dqlRetryServer
-	coordinator *mocks.MockMixCoordClient
-	checks      atomic.Int32
-	loads       atomic.Int32
+	server           *dqlRetryServer
+	coordinator      *mocks.MockMixCoordClient
+	activePartitions []int64
+	checks           atomic.Int32
+	loads            atomic.Int32
 }
 
 func (c *dqlRetryClient) ResolveVChannels(context.Context, int64) ([]string, error) {
@@ -607,11 +624,12 @@ func newDQLRetryProxy(t *testing.T, phase string) (*Proxy, *dqlRetryClient) {
 	t.Cleanup(func() { rateCol = oldRateCol })
 	client := newDQLRetryClient(t, phase, coordinator)
 	client.coordinator = coordinator
+	client.activePartitions = []int64{11}
 	loadInfo := mockey.Mock((*mocks.MockMixCoordClient).GetQueryViewLoadInfo).To(func(_ *mocks.MockMixCoordClient, _ context.Context, _ *querypb.GetQueryViewLoadInfoRequest, _ ...grpc.CallOption) (*querypb.GetQueryViewLoadInfoResponse, error) {
 		if !client.server.loaded.Load() {
 			return nil, merr.WrapErrCollectionNotLoaded(100)
 		}
-		return &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success()}, nil
+		return &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success(), PartitionIDs: client.activePartitions}, nil
 	}).Build()
 	t.Cleanup(func() { loadInfo.UnPatch() })
 	node.viewQueryClient = client
