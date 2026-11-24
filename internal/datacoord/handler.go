@@ -910,7 +910,7 @@ func uncompressJSONStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStat
 }
 
 func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*indexpb.IndexFilePathInfo {
-	segIdxes := h.s.indexMeta.GetSegmentIndexesUnsafe(collectionID, segID)
+	segIdxes := h.s.indexMeta.GetSegmentIndexes(collectionID, segID)
 	indexesFiles := make([]*indexpb.IndexFilePathInfo, 0)
 	for _, segIdx := range segIdxes {
 		if segIdx.IndexState == commonpb.IndexState_Finished {

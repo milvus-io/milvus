@@ -181,6 +181,21 @@ TEST_F(DetermineExecPathTest, DetermineExecPath_NoIndex) {
         << "No index => use_index_=false => CanExecuteAllAtOnce=false";
 }
 
+TEST_F(DetermineExecPathTest,
+       VarcharTermWithoutIndexSkipsIndexCapabilityCheck) {
+    auto segment = CreateSegmentNoIndex();
+    proto::plan::GenericValue value;
+    value.set_string_val("unindexed");
+    auto term_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(varchar_no_index_fid_, DataType::VARCHAR),
+        std::vector<proto::plan::GenericValue>{value});
+    auto compiled = Compile({term_expr}, segment.get());
+    ASSERT_EQ(compiled.size(), 1);
+    // The FMINDEX equality-op check requires a pinned scalar index. A raw
+    // VARCHAR term must never enter that check or access pinned_index_[0].
+    EXPECT_FALSE(compiled[0]->CanExecuteAllAtOnce());
+}
+
 // --------------------------------------------------------------------------
 // Group 2: DetermineExecPath — With Index
 // --------------------------------------------------------------------------

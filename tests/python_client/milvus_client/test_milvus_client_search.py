@@ -3947,8 +3947,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nullable", [True, False])
-    @pytest.mark.parametrize("json_flat_index", [True, False])
-    def test_milvus_client_search_null_expr_json(self, nullable, json_flat_index):
+    def test_milvus_client_search_null_expr_json(self, nullable):
         """
         target: test search with null expression on json fields
         method: create connection, collection, insert and search
@@ -3967,20 +3966,12 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         schema.add_field(nullable_field_name, DataType.JSON, nullable=nullable)
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
-        if json_flat_index:
-            index_params.add_index(field_name=nullable_field_name, index_name="json_index", index_type="INVERTED",
-                                params={"json_cast_type": "json",
-                                        "json_path": f"{nullable_field_name}['a']['b']"})
-            index_params.add_index(field_name=nullable_field_name, index_name="json_index_1", index_type="INVERTED",
-                                params={"json_cast_type": "json",
-                                        "json_path": f"{nullable_field_name}['a']['c']"})
-        else:
-            index_params.add_index(field_name=nullable_field_name, index_name="json_index", index_type="INVERTED",
-                                params={"json_cast_type": "double",
-                                        "json_path": f"{nullable_field_name}['a']['b']"})
-            index_params.add_index(field_name=nullable_field_name, index_name="json_index_1", index_type="INVERTED",
-                                params={"json_cast_type": "varchar",
-                                        "json_path": f"{nullable_field_name}['a']['c']"})
+        index_params.add_index(field_name=nullable_field_name, index_name="json_index", index_type="INVERTED",
+                            params={"json_cast_type": "double",
+                                    "json_path": f"{nullable_field_name}['a']['b']"})
+        index_params.add_index(field_name=nullable_field_name, index_name="json_index_1", index_type="INVERTED",
+                            params={"json_cast_type": "varchar",
+                                    "json_path": f"{nullable_field_name}['a']['c']"})
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
@@ -4191,7 +4182,6 @@ _json_path_index_params = [
     pytest.param(("INVERTED", "BOOL"), id="INVERTED_BOOL"),
     pytest.param(("INVERTED", "DOUBLE"), id="INVERTED_DOUBLE"),
     pytest.param(("INVERTED", "VARCHAR"), id="INVERTED_VARCHAR"),
-    pytest.param(("INVERTED", "JSON"), id="INVERTED_JSON"),
     pytest.param(
         ("STL_SORT", "DOUBLE"),
         marks=pytest.mark.requires_scalar_index_version(4),

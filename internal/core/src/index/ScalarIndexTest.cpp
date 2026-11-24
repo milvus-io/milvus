@@ -40,7 +40,6 @@
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
 #include "index/InvertedIndexTantivy.h"
-#include "index/JsonFlatIndex.h"
 #include "index/ScalarIndex.h"
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexSort.h"
@@ -684,8 +683,6 @@ static_assert(
     HasRowCountIsNotNull<milvus::index::HybridScalarIndex<int64_t>>::value);
 static_assert(
     HasRowCountIsNotNull<milvus::index::InvertedIndexTantivy<int64_t>>::value);
-static_assert(HasRowCountIsNotNull<
-              milvus::index::JsonFlatIndexQueryExecutor<std::string>>::value);
 static_assert(
     HasRowCountIsNotNull<milvus::index::ScalarIndexSort<int64_t>>::value);
 static_assert(HasRowCountIsNotNull<milvus::index::StringIndexMarisa>::value);

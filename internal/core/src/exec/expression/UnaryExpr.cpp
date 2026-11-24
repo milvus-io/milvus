@@ -256,18 +256,15 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     case proto::plan::GenericValue::ValCase::kBoolVal:
                         result = ExecRangeVisitorImplForIndex<bool>();
                         break;
-                    case proto::plan::GenericValue::ValCase::kInt64Val:
-                        if (PinnedJsonIndexIsFlat()) {
-                            result = ExecRangeVisitorImplForIndex<int64_t>();
-                        } else {
-                            proto::plan::GenericValue double_val;
-                            double_val.set_float_val(
-                                static_cast<double>(expr_->val_.int64_val()));
-                            value_arg_.SetValue<double>(double_val);
-                            arg_inited_ = true;
-                            result = ExecRangeVisitorImplForIndex<double>();
-                        }
+                    case proto::plan::GenericValue::ValCase::kInt64Val: {
+                        proto::plan::GenericValue double_val;
+                        double_val.set_float_val(
+                            static_cast<double>(expr_->val_.int64_val()));
+                        value_arg_.SetValue<double>(double_val);
+                        arg_inited_ = true;
+                        result = ExecRangeVisitorImplForIndex<double>();
                         break;
+                    }
                     case proto::plan::GenericValue::ValCase::kFloatVal:
                         result = ExecRangeVisitorImplForIndex<double>();
                         break;
@@ -854,8 +851,7 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
                 }
             }
             return res;
-        },
-        IndexValidityMode::Default);
+        });
     if (reverse) {
         auto column = std::dynamic_pointer_cast<ColumnVector>(batch_res);
         AssertInfo(column != nullptr && column->IsBitmap(),
@@ -1209,20 +1205,6 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
     return res_vec;
 }
 
-std::pair<std::string, std::string>
-PhyUnaryRangeFilterExpr::SplitAtFirstSlashDigit(std::string input) {
-    // Find pattern /\d+ (slash followed by ASCII digits) without regex
-    // Use explicit ASCII range check to avoid locale-dependent std::isdigit behavior
-    auto is_ascii_digit = [](char c) { return c >= '0' && c <= '9'; };
-    for (size_t i = 0; i < input.size(); ++i) {
-        if (input[i] == '/' && i + 1 < input.size() &&
-            is_ascii_digit(input[i + 1])) {
-            return {input.substr(0, i), input.substr(i)};
-        }
-    }
-    return {input, ""};
-}
-
 template <typename ExprValueType>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
@@ -1240,12 +1222,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
     } else if (cached_index_chunk_id_ != 0 &&
                segment_->type() == SegmentType::Sealed) {
         auto cache_compute_start = CacheClock::now();
-        auto pointerpath = milvus::Json::pointer(expr_->column_.nested_path_);
-        auto pointerpair = SplitAtFirstSlashDigit(pointerpath);
-        std::string pointer = pointerpair.first;
-        size_t array_index = pointerpair.second.empty()
-                                 ? INVALID_ARRAY_INDEX
-                                 : std::stoi(pointerpair.second);
+        // Integer path components are excluded by CanUseJsonStatsAtInit.
+        // Digit-leading object keys are strings, not array offsets; preserve
+        // the complete escaped JSON pointer for the stats lookup.
+        const auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+        const size_t array_index = INVALID_ARRAY_INDEX;
 
         ExprValueType val = GetValueFromProto<ExprValueType>(expr_->val_);
         // for NotEqual: compute Equal and flip the result
@@ -2129,9 +2110,7 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
     if (data_type == DataType::JSON &&
         expr_->val_.val_case() ==
             proto::plan::GenericValue::ValCase::kInt64Val &&
-        !IsInt64SafeForJsonDoubleIndex(expr_->val_.int64_val()) &&
-        expr_->op_type_ != proto::plan::OpType::Equal &&
-        expr_->op_type_ != proto::plan::OpType::NotEqual) {
+        !IsInt64SafeForJsonDoubleIndex(expr_->val_.int64_val())) {
         exec_path_ = ExprExecPath::RawData;
         return;
     }
@@ -2227,15 +2206,6 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
         }
         case DataType::JSON: {
             const auto val_case = expr_->val_.val_case();
-            if (val_case == proto::plan::GenericValue::ValCase::kInt64Val &&
-                !IsInt64SafeForJsonDoubleIndex(expr_->val_.int64_val())) {
-                const auto is_equality =
-                    expr_->op_type_ == proto::plan::OpType::Equal ||
-                    expr_->op_type_ == proto::plan::OpType::NotEqual;
-                can_use = PinnedJsonIndexIsFlat() && is_equality;
-                break;
-            }
-
             auto val_type = FromValCase(val_case);
             switch (val_type) {
                 case DataType::STRING:

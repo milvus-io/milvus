@@ -13,10 +13,12 @@
 #include <simdjson.h>
 
 #include <algorithm>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/Json.h"
 #include "common/JsonCastType.h"
@@ -74,6 +76,54 @@ MakeTestContext(int64_t field_id = 101) {
 }
 
 }  // namespace
+
+TEST(JsonPathIndexTest, JsonDocumentCastHasNoPhysicalIndex) {
+    auto& factory = IndexFactory::GetInstance();
+    auto context = MakeTestContext();
+    for (const auto* index_type : {INVERTED_INDEX_TYPE,
+                                   NGRAM_INDEX_TYPE,
+                                   ASCENDING_SORT,
+                                   BITMAP_INDEX_TYPE,
+                                   HYBRID_INDEX_TYPE}) {
+        CreateIndexInfo info{};
+        info.field_type = DataType::JSON;
+        info.index_type = index_type;
+        info.json_cast_type = JsonCastType::FromString("JSON");
+        try {
+            static_cast<void>(factory.CreateIndex(info, context));
+            FAIL() << "JSON document cast must not create a physical index";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::Unsupported);
+        }
+
+        const std::map<std::string, std::string> params{
+            {INDEX_TYPE, index_type},
+            {JSON_CAST_TYPE, "JSON"},
+            {SCALAR_INDEX_ENGINE_VERSION, "3"},
+        };
+        try {
+            static_cast<void>(factory.ScalarIndexLoadResource(
+                DataType::JSON, 3, 0, params, false, 1));
+            FAIL() << "JSON document cast must not estimate a physical index";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::Unsupported);
+        }
+        try {
+            static_cast<void>(factory.ScalarIndexLoadResource(
+                DataType::JSON,
+                3,
+                0,
+                params,
+                false,
+                1,
+                {"/missing-json-document-index"},
+                context));
+            FAIL() << "JSON document cast must fail before reading index files";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::Unsupported);
+        }
+    }
+}
 
 // ============================================================
 // 1. ConvertJsonToTypedFieldData tests
