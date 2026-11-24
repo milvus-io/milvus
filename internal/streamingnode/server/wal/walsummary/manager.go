@@ -141,9 +141,8 @@ func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessa
 
 	idempotency, insert := insertSummaryOf(msg)
 	var entry *streamingpb.TransformLogEntry
-	// Barriers only advance the consumer window; Summary stores Delete payloads,
-	// not payload-free BarrierEntries.
-	if messageutil.ClassifyTransformLogMessage(msg) == messageutil.TransformLogKindDelete {
+	// Persist delete and update payloads. Barriers only advance the consumer window.
+	if messageutil.ClassifyTransformLogMessage(msg).HasPayload() {
 		entry = messageutil.BuildTransformLogEntry(msg, messageutil.TransformEntryOption{})
 	}
 	m.mu.Lock()
@@ -376,7 +375,7 @@ func (m *Manager) writeChunk(ctx context.Context, sc *SealedChunk) error {
 		for _, record := range staged {
 			if record.entry != nil {
 				cs.Transform = append(cs.Transform, &streamingpb.VChannelSummaryTransformRecord{
-					TimeTick: record.timeTick, Delete: record.entry.GetDelete(),
+					TimeTick: record.timeTick, Delete: record.entry.GetDelete(), Mutations: record.entry.GetMutations(),
 				})
 			}
 			if record.insert != nil {

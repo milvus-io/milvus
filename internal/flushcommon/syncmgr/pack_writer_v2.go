@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storage/deltacodec"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -122,7 +124,12 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 		mlog.Error(ctx, "failed to process stats blob", mlog.Err(err))
 		return
 	}
-	if deltas, err = bw.writeDelta(ctx, pack); err != nil {
+	if pack.mutationDelta != nil {
+		deltas, err = bw.writeMutationDelta(ctx, pack)
+	} else {
+		deltas, err = bw.writeDelta(ctx, pack)
+	}
+	if err != nil {
 		mlog.Error(ctx, "failed to process delta blob", mlog.Err(err))
 		return
 	}
@@ -345,4 +352,31 @@ func (bw *BulkPackWriterV2) serializeBinlog(_ context.Context, pack *SyncPack) (
 		field2Col[field.FieldID] = c
 	}
 	return storage.NewSimpleArrowRecord(rec, field2Col), nil
+}
+
+func (bw *BulkPackWriterV2) writeMutationDelta(ctx context.Context, pack *SyncPack) (*datapb.FieldBinlog, error) {
+	id, err := bw.allocator.AllocOne()
+	if err != nil {
+		return nil, err
+	}
+	key := metautil.BuildDeltaLogPath(bw.chunkManager.RootPath(), pack.collectionID, pack.partitionID, pack.segmentID, id)
+	plugin, err := bw.getPluginContext(pack.collectionID)
+	if err != nil {
+		return nil, err
+	}
+	size, err := storage.WriteMutationDelta(ctx, key, *pack.mutationDelta, bw.storageConfig, plugin)
+	if err != nil {
+		return nil, err
+	}
+	bw.sizeWritten += size
+	counts := &datapb.DeltaMutationCounts{}
+	for _, r := range pack.mutationDelta.Rows {
+		n := int64(messageutil.PrimaryKeyCount(r.PrimaryKeys))
+		if r.Operation == deltacodec.Delete {
+			counts.DeleteKeys += n
+		} else {
+			counts.UpdateKeys += n
+		}
+	}
+	return &datapb.FieldBinlog{FieldID: 0, Binlogs: []*datapb.Binlog{{MutationCounts: counts, EntriesNum: int64(len(pack.mutationDelta.Rows)), TimestampFrom: pack.tsFrom, TimestampTo: pack.tsTo, LogPath: key, LogSize: size, MemorySize: int64(pack.mutationBytes)}}}, nil
 }
