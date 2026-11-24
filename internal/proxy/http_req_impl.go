@@ -17,6 +17,7 @@
 package proxy
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -113,7 +115,17 @@ func getClusterInfo(node *Proxy) gin.HandlerFunc {
 }
 
 func getConnectedClients(c *gin.Context) {
+	user, admin, err := consoleCaller(c)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{mhttp.HTTPReturnMessage: err.Error()})
+		return
+	}
 	clients := connection.GetManager().List()
+	if !consoleSeesAllUsers(user, admin) {
+		clients = lo.Filter(clients, func(client *commonpb.ClientInfo, _ int) bool {
+			return client.GetUser() == user
+		})
+	}
 	ret, err := json.Marshal(clients)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
@@ -151,7 +163,17 @@ func getDependencies(c *gin.Context) {
 
 func getSlowQuery(node *Proxy) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		user, admin, err := consoleCaller(c)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{mhttp.HTTPReturnMessage: err.Error()})
+			return
+		}
 		slowQueries := node.slowQueries.Values()
+		if !consoleSeesAllUsers(user, admin) {
+			slowQueries = lo.Filter(slowQueries, func(query *metricsinfo.SlowQuery, _ int) bool {
+				return query.User == user
+			})
+		}
 		ret, err := json.Marshal(slowQueries)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
@@ -228,6 +250,59 @@ func getDataComponentMetrics(node *Proxy, metricsType string, customParams ...*c
 	}
 }
 
+// consoleCaller resolves who calls a console route. admin is set for a request
+// that passed the management gate, which keeps the operator view. Otherwise
+// user is the caller verified by the metrics-port authentication (never a value
+// from raw HTTP headers), or "" while authorization is disabled.
+//
+// With the management gate disabled, the console also accepts ordinary
+// authenticated users, so routes that return user objects must scope them to
+// the caller. A missing caller is rejected while authorization is enabled: an
+// unscoped request would otherwise see every object.
+func consoleCaller(c *gin.Context) (user string, admin bool, err error) {
+	if _, ok := mhttp.AuthenticatedAdminFromContext(c.Request.Context()); ok {
+		return "", true, nil
+	}
+	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		return "", false, nil
+	}
+	user = c.GetString("username")
+	if user == "" {
+		return "", false, merr.WrapErrPrivilegeNotPermitted("console request requires an authenticated user")
+	}
+	return user, false, nil
+}
+
+// consoleSeesAllUsers reports whether the caller sees the entries of every
+// user in what the Proxy records itself (slow queries, connected clients).
+// Others see only the entries recorded under their own name.
+func consoleSeesAllUsers(user string, admin bool) bool {
+	if admin || !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		return true
+	}
+	return user == util.UserRoot && !Params.CommonCfg.RootShouldBindRole.GetAsBool()
+}
+
+// consoleCallerContext returns the context a console handler uses for the
+// metadata RPCs that RootCoord filters by the caller's object visibility, and
+// whether the request passed the management gate.
+//
+// A request that passed the management gate forwards no data-plane identity,
+// so RootCoord returns every object. Any other request carries the verified
+// caller: RootCoord treats a call without a user as intra-cluster and returns
+// every object.
+func consoleCallerContext(c *gin.Context, dbName string) (context.Context, bool, error) {
+	user, admin, err := consoleCaller(c)
+	if err != nil {
+		return nil, false, err
+	}
+	ctx := c.Request.Context()
+	if admin {
+		return ctx, true, nil
+	}
+	return NewContextWithMetadata(ctx, user, dbName), false, nil
+}
+
 // The Get request should be used to get the query parameters, not the body, such as Javascript
 // fetch API only support GET request with query parameter.
 func listCollection(node *Proxy) gin.HandlerFunc {
@@ -239,7 +314,14 @@ func listCollection(node *Proxy) gin.HandlerFunc {
 			dbName = defaultDB
 		}
 
-		rootCollectionListResp, err := rootCoord.ShowCollections(c, &milvuspb.ShowCollectionsRequest{
+		ctx, _, err := consoleCallerContext(c, dbName)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{mhttp.HTTPReturnMessage: err.Error()})
+			return
+		}
+		ctx = AppendUserInfoForRPC(ctx)
+
+		rootCollectionListResp, err := rootCoord.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_ShowCollections,
 			},
@@ -253,7 +335,9 @@ func listCollection(node *Proxy) gin.HandlerFunc {
 			return
 		}
 
-		queryCollectionListResp, err := queryCoord.ShowLoadCollections(c, &querypb.ShowCollectionsRequest{
+		// QueryCoord does not filter by caller; only the load state of the
+		// collections RootCoord returned above is reported.
+		queryCollectionListResp, err := queryCoord.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_ShowCollections,
 			},
@@ -327,17 +411,13 @@ func describeCollection(node *Proxy) gin.HandlerFunc {
 			return
 		}
 
-		ctx := c.Request.Context()
+		ctx, admin, err := consoleCallerContext(c, dbName)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{mhttp.HTTPReturnMessage: err.Error()})
+			return
+		}
 		localVisibility := false
-		if _, admin := mhttp.AuthenticatedAdminFromContext(ctx); !admin {
-			// With the management gate disabled, this route also accepts
-			// ordinary authenticated users. Preserve their object visibility;
-			// raw HTTP headers must not choose the forwarded identity.
-			ctx = NewContextWithMetadata(ctx, c.GetString("username"), dbName)
-			if err := checkDescribeCollectionUser(ctx); err != nil {
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{mhttp.HTTPReturnMessage: err.Error()})
-				return
-			}
+		if !admin {
 			localVisibility = localCollectionVisibilityEnabled()
 			if !localVisibility {
 				ctx = DescribeCollectionRPCContext(ctx)
@@ -440,7 +520,12 @@ func describeCollection(node *Proxy) gin.HandlerFunc {
 
 func listDatabase(node types.ProxyComponent) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		showDatabaseResp, err := node.ListDatabases(c, &milvuspb.ListDatabasesRequest{
+		ctx, _, err := consoleCallerContext(c, "")
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{mhttp.HTTPReturnMessage: err.Error()})
+			return
+		}
+		showDatabaseResp, err := node.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_ListDatabases,
 			},
@@ -478,7 +563,12 @@ func describeDatabase(node types.ProxyComponent) gin.HandlerFunc {
 			return
 		}
 
-		describeDatabaseResp, err := node.DescribeDatabase(c, &milvuspb.DescribeDatabaseRequest{
+		ctx, _, err := consoleCallerContext(c, dbName)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{mhttp.HTTPReturnMessage: err.Error()})
+			return
+		}
+		describeDatabaseResp, err := node.DescribeDatabase(ctx, &milvuspb.DescribeDatabaseRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_DescribeDatabase,
 			},
