@@ -3084,6 +3084,20 @@ func (suite *ServiceSuite) TestRunAnalyzer() {
 		suite.Require().NoError(err)
 		suite.Require().Error(merr.Error(resp.GetStatus()))
 	})
+
+	suite.Run("inline analyzer cannot read local files outside allowed directories", func() {
+		for _, path := range []string{"/etc/passwd", "/dev/zero"} {
+			params := fmt.Sprintf(`{"tokenizer": "standard", "filter": [{"type": "synonym", "synonyms_file": {"type": "local", "path": %q}}]}`, path)
+			resp, err := suite.node.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+				AnalyzerParams: params,
+				Placeholder:    [][]byte{[]byte("root")},
+			})
+			suite.Require().NoError(err)
+			suite.Require().Error(merr.Error(resp.GetStatus()), path)
+			suite.Contains(resp.GetStatus().GetReason(), "allowed_local_resource_dirs", path)
+			suite.NotContains(resp.GetStatus().GetReason(), "root:x", path)
+		}
+	})
 }
 
 func (suite *ServiceSuite) TestValidateAnalyzer() {

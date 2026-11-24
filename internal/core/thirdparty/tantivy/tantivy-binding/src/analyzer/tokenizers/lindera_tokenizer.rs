@@ -14,15 +14,13 @@ use lindera::token_filter::korean_keep_tags::KoreanKeepTagsTokenFilter;
 use lindera::token_filter::korean_stop_tags::KoreanStopTagsTokenFilter;
 use lindera::token_filter::BoxTokenFilter as LTokenFilter;
 
-use lindera::dictionary::{
-    load_user_dictionary_from_bin, load_user_dictionary_from_csv, Dictionary, UserDictionary,
-};
+use lindera::dictionary::{load_user_dictionary_from_csv, Dictionary, UserDictionary};
 use lindera_dictionary::viterbi::Lattice;
 
 use crate::analyzer::dict::lindera::load_dictionary_from_kind;
 use crate::analyzer::options::{
-    get_lindera_download_url, get_options, get_resource_path, FileResourcePathHelper,
-    DEFAULT_DICT_PATH_KEY,
+    check_resource_file, get_lindera_download_url, get_options, get_resource_path,
+    read_resource_file, FileResourcePathHelper, DEFAULT_DICT_PATH_KEY,
 };
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
@@ -371,6 +369,8 @@ fn fetch_lindera_user_dict(
     let ext = path.extension().and_then(|e| e.to_str());
     let user_dict = match ext {
         Some("csv") => {
+            // Lindera opens the CSV itself; check type and size first.
+            check_resource_file(path.as_path(), "lindera user dict file")?;
             load_user_dictionary_from_csv(kind.clone(), path.as_path()).map_err(|e| {
                 TantivyBindingError::InvalidArgument(format!(
                     "lindera load user dict csv failed: {:?}",
@@ -378,12 +378,15 @@ fn fetch_lindera_user_dict(
                 ))
             })?
         }
-        Some("bin") => load_user_dictionary_from_bin(path.as_path()).map_err(|e| {
-            TantivyBindingError::InvalidArgument(format!(
-                "lindera load user dict bin failed: {:?}",
-                e
-            ))
-        })?,
+        Some("bin") => {
+            let data = read_resource_file(path.as_path(), "lindera user dict file")?;
+            UserDictionary::load(&data).map_err(|e| {
+                TantivyBindingError::InvalidArgument(format!(
+                    "lindera load user dict bin failed: {:?}",
+                    e
+                ))
+            })?
+        }
         _ => {
             return Err(TantivyBindingError::InvalidArgument(format!(
                 "lindera user dict file extension must be csv or bin, got {:?}",
@@ -564,14 +567,15 @@ fn fetch_lindera_token_filter(
 #[cfg(test)]
 mod tests {
     use super::{get_sentence_split_chars, LinderaTokenizer, DEFAULT_SENTENCE_SPLIT_CHARS};
-    use crate::analyzer::options::{FileResourcePathHelper, ResourceInfo};
+    use crate::analyzer::options::test_util::helper_allowing;
+    use crate::analyzer::options::FileResourcePathHelper;
     use serde_json as json;
     use std::io::Write;
-    use std::sync::Arc;
     use tantivy::tokenizer::Tokenizer;
 
+    // User dictionaries in these tests are written under the temp directory.
     fn default_helper() -> FileResourcePathHelper {
-        FileResourcePathHelper::new(Arc::new(ResourceInfo::new()))
+        helper_allowing(&[std::env::temp_dir()])
     }
 
     #[test]

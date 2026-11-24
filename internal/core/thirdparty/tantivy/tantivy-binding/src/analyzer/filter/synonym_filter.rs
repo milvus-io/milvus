@@ -1,10 +1,56 @@
-use crate::analyzer::options::{get_resource_path, FileResourcePathHelper};
+use crate::analyzer::options::{get_resource_path, read_resource_file, FileResourcePathHelper};
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
 use std::collections::{HashMap, HashSet};
 use std::io::BufRead;
 use std::sync::Arc;
 use tantivy::tokenizer::{Token, TokenFilter, TokenStream, Tokenizer};
+
+// Why a synonym rule could not be parsed. It carries no rule text, so a rule
+// read from a file can be reported without echoing the file content.
+#[derive(Debug, PartialEq)]
+enum SynonymRowError {
+    EscapeAtEnd,
+    InvalidEscape(char),
+    MultipleMapping,
+    SpaceBetweenWords,
+}
+
+impl SynonymRowError {
+    // Message for a rule given inline in the analyzer params.
+    fn inline_message(&self, row: &str) -> String {
+        match self {
+            SynonymRowError::EscapeAtEnd => format!("invalid synonym escaped in the end: {}", row),
+            SynonymRowError::InvalidEscape(c) => {
+                format!("invalid synonym escaped: \\{} in {}", c, row)
+            }
+            SynonymRowError::MultipleMapping => format!(
+                "read synonym dict failed, has more than one \"=>\" in {}",
+                row
+            ),
+            SynonymRowError::SpaceBetweenWords => format!(
+                "read synonym dict failed, has space between words {}, please use \\ to escape space",
+                row
+            ),
+        }
+    }
+
+    // Message for a rule read from a file: line number only.
+    fn file_message(&self, line: usize) -> String {
+        let reason = match self {
+            SynonymRowError::EscapeAtEnd => "invalid escape at the end of the rule",
+            SynonymRowError::InvalidEscape(_) => "invalid escape sequence",
+            SynonymRowError::MultipleMapping => "more than one \"=>\"",
+            SynonymRowError::SpaceBetweenWords => {
+                "space between words, please use \\ to escape space"
+            }
+        };
+        format!(
+            "read synonyms dict file failed at line {}: {}",
+            line, reason
+        )
+    }
+}
 
 pub struct SynonymDictBuilder {
     dict: HashMap<String, HashSet<String>>,
@@ -61,7 +107,7 @@ impl SynonymDictBuilder {
     // "=>", ",", " " are special characters, should be escaped with "\" if you want to use them as normal characters
     // synonyms dict don't support space between words, please use "\" to escape space
     // TODO: synonyms group support space between words
-    fn add_row(&mut self, str: &str) -> Result<()> {
+    fn add_row(&mut self, str: &str) -> std::result::Result<(), SynonymRowError> {
         let mut is_mapping = false;
         let mut space_flag = false;
         let mut left: Vec<String> = Vec::new();
@@ -74,10 +120,7 @@ impl SynonymDictBuilder {
             // handle escape
             if chars[i] == '\\' {
                 if i + 1 >= chars.len() {
-                    return Err(TantivyBindingError::InvalidArgument(format!(
-                        "invalid synonym escaped in the end: {}",
-                        str
-                    )));
+                    return Err(SynonymRowError::EscapeAtEnd);
                 }
                 if chars[i + 1] == ',' || chars[i + 1] == '\\' || chars[i + 1] == ' ' {
                     current.push(chars[i + 1]);
@@ -92,11 +135,7 @@ impl SynonymDictBuilder {
                     continue;
                 }
 
-                return Err(TantivyBindingError::InvalidArgument(format!(
-                    "invalid synonym escaped: \\{} in {}",
-                    chars[i + 1],
-                    str,
-                )));
+                return Err(SynonymRowError::InvalidEscape(chars[i + 1]));
             }
 
             // handle space
@@ -130,10 +169,7 @@ impl SynonymDictBuilder {
             // handle mapping
             if chars[i] == '=' && i + 1 < chars.len() && chars[i + 1] == '>' {
                 if is_mapping {
-                    return Err(TantivyBindingError::InvalidArgument(format!(
-                        "read synonym dict failed, has more than one \"=>\" in {}",
-                        str,
-                    )));
+                    return Err(SynonymRowError::MultipleMapping);
                 } else {
                     is_mapping = true;
                     if !current.is_empty() {
@@ -147,10 +183,7 @@ impl SynonymDictBuilder {
             }
 
             if space_flag {
-                return Err(TantivyBindingError::InvalidArgument(format!(
-                    "read synonym dict failed, has space between words {}, please use \\ to escape space",
-                    str,
-                )));
+                return Err(SynonymRowError::SpaceBetweenWords);
             }
 
             current.push(chars[i]);
@@ -227,17 +260,20 @@ impl SynonymFilter {
                         "create synonym filter failed, item in `synonyms` must be string"
                             .to_string(),
                     ))?;
-                    builder.add_row(s)
+                    builder
+                        .add_row(s)
+                        .map_err(|e| TantivyBindingError::InvalidArgument(e.inline_message(s)))
                 })?;
         }
 
         if let Some(file_params) = params.get("synonyms_file") {
             let path = get_resource_path(helper, file_params, "synonyms dict file")?;
-            let file = std::fs::File::open(path)?;
-            let reader = std::io::BufReader::new(file);
-            for line in reader.lines() {
+            let data = read_resource_file(&path, "synonyms dict file")?;
+            for (line_index, line) in data.lines().enumerate() {
                 if let Ok(row_data) = line {
-                    builder.add_row(&row_data)?;
+                    builder.add_row(&row_data).map_err(|e| {
+                        TantivyBindingError::InvalidArgument(e.file_message(line_index + 1))
+                    })?;
                 } else {
                     return Err(TantivyBindingError::InternalError(format!(
                         "read synonyms dict file failed, error: {}",
@@ -348,13 +384,14 @@ impl<T: TokenStream> TokenStream for SynonymFilterStream<T> {
 #[cfg(test)]
 mod tests {
     use super::SynonymFilter;
+    use crate::analyzer::options::test_util::{assert_invalid_argument, assert_not_allowed};
+    use crate::analyzer::options::test_util::{helper_allowing, test_data_dir};
     use crate::analyzer::options::{FileResourcePathHelper, ResourceInfo};
     use crate::analyzer::tokenizers::standard_builder;
     use crate::log::init_log;
 
     use serde_json as json;
     use std::collections::HashSet;
-    use std::path::Path;
     use std::sync::Arc;
 
     #[test]
@@ -391,8 +428,7 @@ mod tests {
     #[test]
     fn test_synonym_filter_with_file() {
         init_log();
-        let file_dir = Path::new(file!()).parent().unwrap();
-        let synonyms_path = file_dir.join("../data/test/synonyms_dict.txt");
+        let synonyms_path = test_data_dir().join("synonyms_dict.txt");
         let synonyms_path_str = synonyms_path.to_string_lossy().to_string();
         let params = format!(
             r#"{{
@@ -404,7 +440,7 @@ mod tests {
             }}"#
         );
         let json_params = json::from_str::<json::Value>(&params).unwrap();
-        let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        let mut helper = helper_allowing(&[test_data_dir()]);
         let filter = SynonymFilter::from_json(json_params.as_object().unwrap(), &mut helper);
         assert!(filter.is_ok(), "error: {}", filter.err().unwrap());
         let builder = standard_builder().filter(filter.unwrap());
@@ -424,5 +460,65 @@ mod tests {
                 .collect::<HashSet<&str>>(),
             HashSet::from(["distance", "range", "span", "length", "interval", "gap"])
         );
+    }
+
+    fn synonym_file_params(path: &str) -> json::Value {
+        json::json!({
+            "type": "synonym",
+            "synonyms_file": {"type": "local", "path": path}
+        })
+    }
+
+    #[test]
+    fn test_synonym_file_errors_do_not_contain_file_content() {
+        init_log();
+        let dir = tempfile::tempdir().unwrap();
+        let cases = [
+            "good, rule\nroot:x:0:0:root:/root:/bin/bash secret-value\n",
+            "good, rule\nsecret => a => b\n",
+            "good, rule\nsecret\\x\n",
+            "good, rule\nsecret\\\n",
+        ];
+        for (i, content) in cases.iter().enumerate() {
+            let path = dir.path().join(format!("synonyms_{}.txt", i));
+            std::fs::write(&path, content).unwrap();
+            let params = synonym_file_params(path.to_str().unwrap());
+            let mut helper = helper_allowing(&[dir.path()]);
+            let err = SynonymFilter::from_json(params.as_object().unwrap(), &mut helper)
+                .err()
+                .unwrap();
+            let msg = err.to_string();
+            assert_invalid_argument(&err, &msg);
+            assert!(msg.contains("line 2"), "{}", msg);
+            assert!(!msg.contains("secret"), "{}", msg);
+            assert!(!msg.contains("root"), "{}", msg);
+        }
+    }
+
+    #[test]
+    fn test_synonym_inline_errors_keep_rule_text() {
+        init_log();
+        let params = json::json!({"type": "synonym", "synonyms": ["a b, c"]});
+        let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        let err = SynonymFilter::from_json(params.as_object().unwrap(), &mut helper)
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("a b, c"), "{}", err);
+    }
+
+    #[test]
+    fn test_synonym_file_outside_allowed_dirs_is_rejected() {
+        init_log();
+        let allowed = tempfile::tempdir().unwrap();
+        // A real dictionary outside the allowed directories is rejected too.
+        let outside = test_data_dir().join("synonyms_dict.txt");
+        for path in ["/etc/passwd", outside.to_str().unwrap(), "/dev/zero"] {
+            let params = synonym_file_params(path);
+            let mut helper = helper_allowing(&[allowed.path()]);
+            let err = SynonymFilter::from_json(params.as_object().unwrap(), &mut helper)
+                .err()
+                .unwrap();
+            assert_not_allowed(&err, path);
+        }
     }
 }

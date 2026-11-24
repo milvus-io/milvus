@@ -1,5 +1,6 @@
 // resource options
 use super::common::*;
+use super::resource_file::LocalPathPolicy;
 use super::runtime_option::get_options;
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
@@ -153,6 +154,7 @@ pub trait FileResourcePathBuilder {
 pub struct FileResourcePathHelper {
     builder: Arc<dyn FileResourcePathBuilder>,
     ids: HashSet<i64>,
+    local_policy: LocalPathPolicy,
 }
 
 impl FileResourcePathHelper {
@@ -160,16 +162,25 @@ impl FileResourcePathHelper {
         Self {
             builder,
             ids: HashSet::new(),
+            local_policy: global_local_policy(),
         }
     }
 
     pub fn from_json(value: &json::Value) -> Result<Self> {
         let info = ResourceInfo::from_json(value)?;
         let builder: Arc<dyn FileResourcePathBuilder> = Arc::new(info);
-        Ok(Self {
-            builder,
-            ids: HashSet::new(),
-        })
+        Ok(Self::new(builder))
+    }
+
+    /// Replaces the directories that `local` resource paths may point into.
+    pub fn with_local_policy(mut self, policy: LocalPathPolicy) -> Self {
+        self.local_policy = policy;
+        self
+    }
+
+    /// Resolves a `local` resource path; see LocalPathPolicy::resolve.
+    pub fn resolve_local_path(&self, path: &str, resource_key: &str) -> Result<PathBuf> {
+        self.local_policy.resolve(path, resource_key)
     }
 
     pub fn get_resource_file_path(
@@ -187,4 +198,8 @@ impl FileResourcePathHelper {
     pub fn get_resource_ids(self) -> Vec<i64> {
         self.ids.into_iter().collect()
     }
+}
+
+fn global_local_policy() -> LocalPathPolicy {
+    LocalPathPolicy::from_option(get_options(ALLOWED_LOCAL_RESOURCE_DIRS_KEY).as_ref())
 }

@@ -36,6 +36,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
@@ -6612,6 +6613,14 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 		}, nil
 	}
 
+	var err error
+	ctx, err = authorizeRunAnalyzerCollection(ctx, req, node.GetMetaCache)
+	if err != nil {
+		return &milvuspb.RunAnalyzerResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
 	// build and run analyzer at any streaming node/query node
 	// if collection and field not set
 	if req.GetCollectionName() == "" {
@@ -6656,6 +6665,31 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 		}, nil
 	}
 	return task.Result(), nil
+}
+
+// authorizeRunAnalyzerCollection requires Search on the collection when
+// RunAnalyzer uses a collection field's analyzer. The meta cache lets the
+// check resolve aliases the same way Search does.
+func authorizeRunAnalyzerCollection(ctx context.Context, req *milvuspb.RunAnalyzerRequest, getMetaCache func() Cache) (context.Context, error) {
+	if req.GetCollectionName() == "" {
+		return ctx, nil
+	}
+
+	nextCtx, err := PrivilegeInterceptorWithMetaCache(getMetaCache)(ctx, &milvuspb.SearchRequest{
+		DbName:         req.GetDbName(),
+		CollectionName: req.GetCollectionName(),
+	})
+	if err == nil {
+		return nextCtx, nil
+	}
+	if grpcstatus.Code(err) == codes.PermissionDenied {
+		return ctx, merr.WrapErrPrivilegeNotPermitted(
+			"RunAnalyzer requires %s on collection %s",
+			commonpb.ObjectPrivilege_PrivilegeSearch.String(),
+			req.GetCollectionName(),
+		)
+	}
+	return ctx, err
 }
 
 func (node *Proxy) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {

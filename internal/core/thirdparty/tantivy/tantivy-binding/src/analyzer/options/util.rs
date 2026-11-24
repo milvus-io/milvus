@@ -1,6 +1,7 @@
 use serde_json as json;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
+use super::resource_file::check_remote_file_name;
 use super::resource_info::FileResourcePathHelper;
 use crate::error::{Result, TantivyBindingError};
 
@@ -46,7 +47,7 @@ pub fn get_resource_path(
             }
 
             let path_str = path.as_str().unwrap();
-            Ok(Path::new(path_str).to_path_buf())
+            helper.resolve_local_path(path_str, resource_key)
         }
         "remote" => {
             let resource_name = params
@@ -77,7 +78,11 @@ pub fn get_resource_path(
                     resource_key
                 )))?;
 
-            helper.get_resource_file_path(resource_name, file_name)
+            let path = helper.get_resource_file_path(resource_name, file_name)?;
+            // Keep runtime lookups, which do not check the registered name,
+            // inside the resource directory.
+            check_remote_file_name(file_name, resource_key)?;
+            Ok(path)
         }
         other => Err(TantivyBindingError::InvalidArgument(format!(
             "unsupported file type {} of {}",
