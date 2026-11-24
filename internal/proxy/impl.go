@@ -3713,9 +3713,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	rateCol.Add(internalpb.RateType_DQLQuery.String(), 1, subLabel)
 
 	reporter := extension.RequestUsageReporter()
-	iterator, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, request.GetQueryParams())
-	isIterator, _ := strconv.ParseBool(iterator)
-	if isIterator || len(request.GetFunctionChains()) > 0 {
+	if len(request.GetFunctionChains()) > 0 {
 		reporter = nil
 	}
 	var result *milvuspb.QueryResults

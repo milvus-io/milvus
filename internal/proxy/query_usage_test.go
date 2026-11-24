@@ -23,6 +23,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
@@ -57,6 +58,7 @@ func TestQueryReportsOneUsageValue(t *testing.T) {
 		extension.SetRequestUsageReporter(reporter)
 		t.Cleanup(func() { extension.SetRequestUsageReporter(oldReporter) })
 		mockey.Mock((*Proxy).ensureCollectionReady).Return(nil).Build()
+		usageBytes := int64(73)
 		var execErr error
 		var cancel context.CancelFunc
 		mockey.Mock((*Proxy).executeQuery).To(func(_ *Proxy, _ context.Context, _ *milvuspb.QueryRequest, metered bool) (*milvuspb.QueryResults, int64, error) {
@@ -64,7 +66,7 @@ func TestQueryReportsOneUsageValue(t *testing.T) {
 			if cancel != nil {
 				cancel()
 			}
-			return &milvuspb.QueryResults{Status: merr.Status(execErr)}, 73, execErr
+			return &milvuspb.QueryResults{Status: merr.Status(execErr)}, usageBytes, execErr
 		}).Build()
 
 		response, err := node.Query(t.Context(), request)
@@ -88,5 +90,18 @@ func TestQueryReportsOneUsageValue(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, merr.Ok(response.GetStatus()))
 		require.Len(t, reporter.reports, 1)
+
+		cancel = nil
+		request.QueryParams = []*commonpb.KeyValuePair{{Key: IteratorField, Value: "true"}}
+		for i, pageBytes := range []int64{90, 20} {
+			request.GuaranteeTimestamp = uint64(i) * 100
+			usageBytes = pageBytes
+			response, err = node.Query(t.Context(), request)
+			require.NoError(t, err)
+			require.True(t, merr.Ok(response.GetStatus()))
+			require.Len(t, reporter.reports, i+2)
+			page := reporter.reports[i+1].(map[string]any)
+			require.Equal(t, pageBytes, page["bytes"])
+		}
 	})
 }

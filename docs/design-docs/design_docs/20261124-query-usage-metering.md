@@ -1,6 +1,6 @@
 # Query usage metering
 
-AgentBase uses a distribution-installed reporter to record one `bytes` value at Proxy for each successful ordinary Query. The external Query response keeps its existing format.
+AgentBase uses a distribution-installed reporter to record one `bytes` value at Proxy for each successful Query RPC, including a QueryIterator page. The external Query response keeps its existing format.
 
 | Contribution | Measurement |
 | --- | --- |
@@ -13,4 +13,4 @@ Sealed workers read the field totals bound to the selected manifest revision and
 
 Proxy adds successful shard contributions and the returned values. It reports once after the request succeeds. A failed or canceled request emits no usage. Empty shard results retain their usage.
 
-The first change uses the unary Query path for metered requests so it can receive complete usage from all selected workers. QueryIterator, Grep, Search and HybridSearch have their own request accounting.
+The first change uses the unary Query path for metered requests so it can receive complete usage from all selected workers. Each successful QueryIterator page is measured independently. Grep, Search and HybridSearch have their own request accounting.
