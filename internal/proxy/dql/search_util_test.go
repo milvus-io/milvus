@@ -377,6 +377,7 @@ func TestParseGroupByInfoLegacyFieldPrecedence(t *testing.T) {
 	assert.Equal(t, []int64{101, 102}, info.groupByFieldIds)
 	assert.Equal(t, []string{"brand", "category"}, info.groupByFieldNames)
 }
+
 func TestSearchIteratorV2CursorRoundTrip(t *testing.T) {
 	t.Run("int64 row cursor", func(t *testing.T) {
 		res := &schemapb.SearchResultData{
