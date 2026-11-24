@@ -71,11 +71,7 @@ const (
 
 var Params *paramtable.ComponentParam = paramtable.Get()
 
-var (
-	// errPredicateNotMet marks deterministic predicate mismatches inside write transaction builds.
-	errPredicateNotMet = errors.New("predicate not met")
-	errBuildAbort      = errors.New("deterministic build error")
-)
+var errBuildAbort = errors.New("deterministic build error")
 
 func wrapWriteBuildErr(reason string, err error) error {
 	wrapped := merr.WrapErrIoFailedReason(reason, err.Error())
@@ -86,7 +82,7 @@ func wrapWriteBuildErr(reason string, err error) error {
 }
 
 func markPredicateNotMet(err error) error {
-	return markBuildAbort(errors.Mark(err, errPredicateNotMet))
+	return markBuildAbort(errors.Mark(err, predicates.ErrNotMet))
 }
 
 func markBuildAbort(err error) error {
@@ -507,12 +503,15 @@ func (kv *txnTiKV) RemoveWithPrefix(ctx context.Context, prefix string) error {
 	return nil
 }
 
-// guardsUnwrittenKey reports whether a value predicate targets a key for which
-// written returns false.
+// guardsUnwrittenKey reports whether a value or existence predicate targets a
+// key for which written returns false.
 func guardsUnwrittenKey(preds []predicates.Predicate, written func(key string) bool) bool {
 	for _, pred := range preds {
-		if pred.Target() == predicates.PredTargetValue && !written(pred.Key()) {
-			return true
+		switch pred.Target() {
+		case predicates.PredTargetValueEqual, predicates.PredTargetKeyExist, predicates.PredTargetKeyNotExist:
+			if !written(pred.Key()) {
+				return true
+			}
 		}
 	}
 	return false
@@ -521,8 +520,8 @@ func guardsUnwrittenKey(preds []predicates.Predicate, written func(key string) b
 // beginPredicateTxn prepares txn for preds. TiKV transactions are optimistic,
 // and an optimistic transaction detects a conflict only on the keys that it
 // writes or locks; even a key locked without a write conflicts with every
-// later transaction that locks it. When a value predicate targets a key that
-// the call does not write, as a guard on another record, the transaction
+// later transaction that locks it. When a value or existence predicate
+// targets a key that the call does not write, as a guard on another record, the transaction
 // becomes pessimistic and takes a pessimistic lock on every predicate key at a
 // fresh timestamp. Concurrent guarded writes then wait for each other instead
 // of failing, and a concurrent change of a guarded key either waits for the
@@ -570,11 +569,9 @@ func (kv *txnTiKV) beginPredicateTxn(ctx context.Context, txn *transaction.KVTxn
 func checkPredicateShapes(preds []predicates.Predicate) error {
 	for _, pred := range preds {
 		switch pred.Target() {
-		case predicates.PredTargetValue:
-		case predicates.PredTargetKeyExistence:
-			if pred.Type() != predicates.PredTypeNotExist {
-				return markBuildAbort(merr.WrapErrParameterInvalid("valid key existence predicate type", fmt.Sprintf("%d", pred.Type())))
-			}
+		case predicates.PredTargetValueEqual, predicates.PredTargetKeyNotExist, predicates.PredTargetKeyExist:
+		case predicates.PredTargetUnchangedSince:
+			return errUnchangedSinceUnsupported()
 		default:
 			return markBuildAbort(merr.WrapErrParameterInvalid("valid predicate target", fmt.Sprintf("%d", pred.Target())))
 		}
@@ -590,7 +587,7 @@ func checkPredicateShapes(preds []predicates.Predicate) error {
 func (kv *txnTiKV) checkPredicates(ctx context.Context, txn *transaction.KVTxn, preds []predicates.Predicate, locked map[string]tikv.ReturnedValue) error {
 	for _, pred := range preds {
 		switch pred.Target() {
-		case predicates.PredTargetValue:
+		case predicates.PredTargetValueEqual:
 			val, exists, err := kv.readPredicateTarget(ctx, txn, pred, locked)
 			if err != nil {
 				return err
@@ -601,22 +598,28 @@ func (kv *txnTiKV) checkPredicates(ctx context.Context, txn *transaction.KVTxn, 
 			if !pred.IsTrue(decodeValue(val)) {
 				return markPredicateNotMet(merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue())))
 			}
-		case predicates.PredTargetKeyExistence:
-			if pred.Type() != predicates.PredTypeNotExist {
-				return markBuildAbort(merr.WrapErrParameterInvalid("valid key existence predicate type", fmt.Sprintf("%d", pred.Type())))
-			}
+		case predicates.PredTargetKeyNotExist, predicates.PredTargetKeyExist:
+			wantExists := pred.Target() == predicates.PredTargetKeyExist
 			_, exists, err := kv.readPredicateTarget(ctx, txn, pred, locked)
 			if err != nil {
 				return err
 			}
-			if exists {
-				return markPredicateNotMet(merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s exists", pred.Key())))
+			if exists != wantExists {
+				return markPredicateNotMet(merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, exists=%t", pred.Key(), exists)))
 			}
+		case predicates.PredTargetUnchangedSince:
+			return errUnchangedSinceUnsupported()
 		default:
 			return markBuildAbort(merr.WrapErrParameterInvalid("valid predicate target", fmt.Sprintf("%d", pred.Target())))
 		}
 	}
 	return nil
+}
+
+// errUnchangedSinceUnsupported rejects a revision guard: this KV reports no
+// revision to read at, so no caller holds one to guard with.
+func errUnchangedSinceUnsupported() error {
+	return markBuildAbort(merr.Wrap(merr.ErrServiceUnimplemented, "tikv kv has no revision to guard a write with"))
 }
 
 // readPredicateTarget reads the target key of pred inside txn, or from locked
@@ -1006,7 +1009,7 @@ func (kv *txnTiKV) CompareVersionAndSwap(ctx context.Context, key string, versio
 		return false, err
 	}
 	err := kv.MultiSaveAndRemove(ctx, map[string]string{key: target}, nil, predicates.KeyNotExist(key))
-	if errors.Is(err, errPredicateNotMet) {
+	if errors.Is(err, predicates.ErrNotMet) {
 		return false, nil
 	}
 	return err == nil, err

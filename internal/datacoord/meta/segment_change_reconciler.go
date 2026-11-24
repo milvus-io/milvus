@@ -42,9 +42,10 @@ func RetrySegmentChangeRecovery(ctx context.Context, reconcile func() error) err
 
 // reconcileSegmentChangeGroups runs with no RPCs, task workers, GC, or DataView
 // manager active. It must finish before RecoverManager projects SegmentMeta:
-// an interrupted chunked publish can leave visible members and retired parents
-// without its final group/DataView commit marker. Projecting that intermediate
-// state would make a partial batch a new committed snapshot.
+// an interrupted publish can leave visible members, retired parents and the
+// DataView without the terminal group record, which lands in a later Update.
+// Projecting that intermediate state would make a partial batch a new
+// committed snapshot.
 func (m *Meta) ReconcileSegmentChangeGroups(ctx context.Context, alloc allocator.Allocator, live dataview.CollectionRecoveryValidator) error {
 	if m.DataViewManager != nil {
 		return merr.WrapErrServiceInternalMsg("segment change recovery must precede DataView recovery")
@@ -54,7 +55,12 @@ func (m *Meta) ReconcileSegmentChangeGroups(ctx context.Context, alloc allocator
 		return merr.WrapErrServiceInternalMsg("segment change recovery requires a collection recovery validator")
 	}
 	sort.Slice(groups, func(i, j int) bool { return groups[i].GroupID < groups[j].GroupID })
+	// One drop removes every group of a collection: skip its other groups.
+	dropped := make(map[int64]struct{})
 	for _, g := range groups {
+		if _, ok := dropped[g.CollectionID]; ok {
+			continue
+		}
 		keep, err := live(ctx, g.CollectionID)
 		if err != nil {
 			return err
@@ -63,6 +69,7 @@ func (m *Meta) ReconcileSegmentChangeGroups(ctx context.Context, alloc allocator
 			if err := m.DropSegmentChangeGroupsOfCollection(ctx, g.CollectionID); err != nil {
 				return err
 			}
+			dropped[g.CollectionID] = struct{}{}
 			continue
 		}
 		switch g.State {
@@ -319,9 +326,9 @@ func (m *Meta) validateSegmentChangeVisibilityLocked(segments map[int64]*Segment
 		}
 		allowed := false
 		for _, action := range actions {
-			entry, ok := action.Entry.(metastore.SegmentChangeGroupEntry)
-			if ok && action.Type == metastore.ActionUpdate && entry.Group != nil &&
-				entry.Group.GroupID == owner && entry.Group.State == model.SegmentChangeStateCommitted {
+			entry, ok := action.Entry.(*model.SegmentChangeGroup)
+			if ok && action.Type == metastore.ActionUpdate && entry != nil &&
+				entry.GroupID == owner && entry.State == model.SegmentChangeStateCommitted {
 				allowed = true
 				break
 			}

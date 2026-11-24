@@ -18,6 +18,7 @@ package meta
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -37,7 +38,7 @@ import (
 // This file implements the meta-layer of SegmentChangeGroup, the atomic
 // publication unit of batch segment changes. The in-memory table lives on
 // `meta` and is guarded by meta.groupMu: the group record composes into the
-// same catalog txn as segment writes (see UpdateSegmentsInfoAndChangeGroups),
+// same composite write as segment writes (see UpdateSegmentsInfoAndChangeGroups),
 // which take it after the writer locks of their segments. This is the layer that later batch pipelines
 // (import, compaction, copy, ...) call to stage and publish their outputs, and
 // that the DataView integration (PR #52537) extends by composing a DataView
@@ -56,9 +57,18 @@ func WrapErrSegmentChangeGroupNotFound(groupID int64) error {
 // — is a data-integrity violation and is reported as an error so recovery can
 // fail closed instead of silently picking a winner.
 func (m *Meta) loadSegmentChangeGroups(ctx context.Context) (map[int64]*model.SegmentChangeGroup, map[int64]int64, map[int64]int64, error) {
-	groups, err := m.Catalog.ListSegmentChangeGroups(ctx)
+	// The catalog fails closed on a malformed record and names its key: a
+	// group record is the sole owner of its staged members' visibility
+	// (SegmentInfo has no change_group_id field), so skipping a bad key would
+	// orphan its members.
+	listed, err := m.Catalog.List(ctx, metastore.SegmentGroupType, nil, metastore.ListOptions{})
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	groups := make([]*model.SegmentChangeGroup, 0, len(listed.Values))
+	// List returns values of the type's Go type only.
+	for _, v := range listed.Values {
+		groups = append(groups, v.(*model.SegmentChangeGroup))
 	}
 	byID := make(map[int64]*model.SegmentChangeGroup, len(groups))
 	staged := make(map[int64]int64)
@@ -580,12 +590,31 @@ func (m *Meta) DeleteSegmentChangeGroup(ctx context.Context, collectionID, group
 
 // DropSegmentChangeGroupsOfCollection removes every group of one collection.
 // GC calls it once RootCoord has dropped the collection and all its segments
-// are recycled.
+// are recycled. It deletes the groups the catalog holds, not the ones in
+// memory: a write that timed out but landed leaves a group only in the
+// catalog. The catalog has no prefix delete, so it lists the keys of the
+// collection's groups, without decoding them so a corrupt record does not
+// block the cleanup, and deletes them in one Update.
 func (m *Meta) DropSegmentChangeGroupsOfCollection(ctx context.Context, collectionID int64) error {
 	m.groupMu.Lock()
 	defer m.groupMu.Unlock()
-	if err := m.Catalog.DropSegmentChangeGroups(ctx, collectionID); err != nil {
+	stored, err := m.Catalog.List(ctx, metastore.SegmentGroupType,
+		[]string{strconv.FormatInt(collectionID, 10)}, metastore.ListOptions{KeysOnly: true})
+	if err != nil {
 		return err
+	}
+	if len(stored.Coordinates) > 0 {
+		actions := make([]metastore.UpdateAction, 0, len(stored.Coordinates))
+		for _, coord := range stored.Coordinates {
+			groupID, err := strconv.ParseInt(coord[1], 10, 64)
+			if err != nil {
+				return merr.WrapErrDataIntegrityMsg("segment change group key %v of collection %d has no group ID", coord, collectionID)
+			}
+			actions = append(actions, metastore.DeleteSegmentChangeGroup(collectionID, groupID))
+		}
+		if err := m.Catalog.Update(ctx, actions...); err != nil {
+			return err
+		}
 	}
 	for groupID, group := range m.segmentChangeGroups {
 		if group.CollectionID != collectionID {
@@ -608,8 +637,9 @@ func (m *Meta) DropSegmentChangeGroupsOfCollection(ctx context.Context, collecti
 }
 
 // UpdateSegmentsInfoAndChangeGroups applies segment operators and composes the
-// given group actions into the SAME catalog txn, then applies the memory
-// effects of both. This is the composite write of the batch publication
+// given group actions into the same write (terminal groups and group deletes
+// in a second Update after the rest), applying the memory effects of each
+// Update as it lands. This is the composite write of the batch publication
 // protocol (without a DataView snapshot):
 //
 //   - STAGED creation: create the staged members (IsInvisible=true,
@@ -629,14 +659,13 @@ func (m *Meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 	return m.updateSegmentsInfoAndChangeGroups(ctx, nil, groupActions, operators...)
 }
 
-// UpdateSegmentsInfoAndChangeGroupsAndDataView is the batch atomic publication
-// write: SegmentMeta operators + group actions + a DataView snapshot all land
-// in the SAME catalog txn, so a group's members flip visible, its superseded
-// parents retire, the group record reaches COMMITTED, and the new DataView
-// snapshot (compact_version +1) become visible together — the view never
-// observes a half-published batch. The DataView action is commit-marked and
-// ordered with the terminal group actions, so on the over-limit fallback both
-// land in the final guarded txn after every member/superseded op. dataView may
+// UpdateSegmentsInfoAndChangeGroupsAndDataView is the batch publication
+// write: SegmentMeta operators, the DataView snapshot (compact_version +1)
+// and alive group actions land in one Update, so a group's members flip
+// visible and its superseded parents retire together with the new snapshot;
+// the terminal group record, the visibility marker of the publication, lands
+// in a second Update after it. A crash or failure between the two leaves an
+// interrupted publish that recovery completes. dataView may
 // be nil to commit SegmentMeta + groups alone (the dataview-less form).
 func (m *Meta) UpdateSegmentsInfoAndChangeGroupsAndDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection, groupActions []metastore.UpdateAction, operators ...UpdateOperator) error {
 	return m.updateSegmentsInfoAndChangeGroups(ctx, dataView, groupActions, operators...)
@@ -689,12 +718,12 @@ func (m *Meta) updateSegmentChanges(ctx context.Context, dataView *viewpb.DataVi
 func (m *Meta) segmentChangeReferences(ctx context.Context, groupActions []metastore.UpdateAction) UpdateOperator {
 	return func(pack *UpdateSegmentPack) bool {
 		for _, action := range groupActions {
-			entry, ok := action.Entry.(metastore.SegmentChangeGroupEntry)
+			entry, ok := action.Entry.(*model.SegmentChangeGroup)
 			if !ok {
 				continue // The common validator rejects foreign entries.
 			}
-			g := entry.Group
-			if g == nil {
+			g := entry
+			if action.Type == metastore.ActionDelete {
 				g = m.GetSegmentChangeGroup(ctx, 0, entry.GroupID)
 			}
 			if g != nil {
@@ -724,9 +753,10 @@ func (m *Meta) updateSegmentChangesLocked(ctx context.Context, dataView *viewpb.
 
 func (m *Meta) applySegmentChangesLocked(ctx context.Context, dataView *viewpb.DataViewOfCollection, groupActions []metastore.UpdateAction, replacement *model.SegmentChangeGroup, recovery bool, updatePack *UpdateSegmentPack) error {
 	for _, action := range groupActions {
-		if _, ok := action.Entry.(metastore.SegmentChangeGroupEntry); !ok {
+		if g, ok := action.Entry.(*model.SegmentChangeGroup); !ok || g == nil {
 			return merr.WrapErrServiceInternalMsg(
-				"UpdateSegmentsInfoAndChangeGroups only accepts segment change group actions, got %T", action.Entry)
+				"UpdateSegmentsInfoAndChangeGroups only accepts non-nil segment change group actions, got %T",
+				action.Entry)
 		}
 	}
 	m.ensureSegmentChangeGroupStoreLocked()
@@ -765,48 +795,49 @@ func (m *Meta) applySegmentChangesLocked(ctx context.Context, dataView *viewpb.D
 	// group — not the original caller record.
 	normalized := make([]metastore.UpdateAction, 0, len(groupActions))
 	for _, action := range groupActions {
-		entry := action.Entry.(metastore.SegmentChangeGroupEntry)
+		entry := action.Entry.(*model.SegmentChangeGroup)
 		switch action.Type {
 		case metastore.ActionUpdate:
-			if entry.Group == nil {
+			if entry == nil {
 				return merr.WrapErrServiceInternalMsg("segment change group action carries a nil group")
 			}
-			if err := entry.Group.Validate(); err != nil {
+			if err := entry.Validate(); err != nil {
 				return err
 			}
-			if _, dup := seenGroupIDs[entry.Group.GroupID]; dup {
+			if _, dup := seenGroupIDs[entry.GroupID]; dup {
 				return merr.WrapErrDataIntegrityMsg(
-					"duplicate segment change group %d in one composite write", entry.Group.GroupID)
+					"duplicate segment change group %d in one composite write", entry.GroupID)
 			}
-			seenGroupIDs[entry.Group.GroupID] = struct{}{}
-			if m.segmentChangeGroups[entry.Group.GroupID] == nil {
-				if err := m.validateSegmentChangeGroupOwnershipAgainstLocked(entry.Group, claimedStaged, claimedSuperseded); err != nil {
+			seenGroupIDs[entry.GroupID] = struct{}{}
+			if m.segmentChangeGroups[entry.GroupID] == nil {
+				if err := m.validateSegmentChangeGroupOwnershipAgainstLocked(entry, claimedStaged, claimedSuperseded); err != nil {
 					return err
 				}
 				// Persist the L0-exemption decision (C11) and fold this group's
 				// claims so a sibling action in the same txn sees them.
-				m.stampSupersededL0ExemptionsLocked(entry.Group)
-				for _, id := range entry.Group.NewSegmentIDs {
-					claimedStaged[id] = entry.Group.GroupID
+				m.stampSupersededL0ExemptionsLocked(entry)
+				for _, id := range entry.NewSegmentIDs {
+					claimedStaged[id] = entry.GroupID
 				}
-				for _, id := range entry.Group.SupersededSegmentIDs {
-					if containsInt64(entry.Group.SupersededL0SegmentIDs, id) {
+				for _, id := range entry.SupersededSegmentIDs {
+					if containsInt64(entry.SupersededL0SegmentIDs, id) {
 						continue
 					}
-					claimedSuperseded[id] = entry.Group.GroupID
+					claimedSuperseded[id] = entry.GroupID
 				}
-			} else if replacement != nil && replacement == entry.Group {
+			} else if replacement != nil && replacement == entry {
 				// Validated by the sort materialization caller under groupMu
 				// and the input/output writer locks.
-			} else if err := m.validateSegmentChangeGroupTransitionLocked(entry.Group); err != nil {
+			} else if err := m.validateSegmentChangeGroupTransitionLocked(entry); err != nil {
 				return err
 			} else {
 				// C25: merge the transition onto the stored record so a
 				// caller-rebuilt group cannot zero the record-owned immutable
 				// fields (PartitionID/SourceJobID/CreateTS/...).
-				entry.Group = mergeTransitionOntoRecord(m.segmentChangeGroups[entry.Group.GroupID], entry.Group)
+				entry = mergeTransitionOntoRecord(m.segmentChangeGroups[entry.GroupID], entry)
 			}
-			normalized = append(normalized, metastore.UpdateAction{Type: action.Type, Entry: entry})
+			action.Entry = entry
+			normalized = append(normalized, action)
 		case metastore.ActionDelete:
 			if current := m.segmentChangeGroups[entry.GroupID]; current != nil && !current.IsTerminal() {
 				return merr.WrapErrDataIntegrityMsg(
@@ -826,11 +857,11 @@ func (m *Meta) applySegmentChangesLocked(ctx context.Context, dataView *viewpb.D
 	deletedGroups := make(map[int64]struct{})
 	newPredecessors := make(map[int64]struct{})
 	for _, action := range groupActions {
-		entry := action.Entry.(metastore.SegmentChangeGroupEntry)
+		entry := action.Entry.(*model.SegmentChangeGroup)
 		if action.Type == metastore.ActionUpdate {
-			savedGroups[entry.Group.GroupID] = entry.Group
-			if entry.Group.PreviousGroupID != 0 {
-				newPredecessors[entry.Group.PreviousGroupID] = struct{}{}
+			savedGroups[entry.GroupID] = entry
+			if entry.PreviousGroupID != 0 {
+				newPredecessors[entry.PreviousGroupID] = struct{}{}
 			}
 		} else {
 			deletedGroups[entry.GroupID] = struct{}{}
@@ -856,17 +887,17 @@ func (m *Meta) applySegmentChangesLocked(ctx context.Context, dataView *viewpb.D
 	// its pending marker wins; one that starts after this check waits for the
 	// write and selects the committed SegmentMeta state.
 	for _, action := range groupActions {
-		entry := action.Entry.(metastore.SegmentChangeGroupEntry)
-		if action.Type != metastore.ActionUpdate || entry.Group == nil ||
-			entry.Group.State != model.SegmentChangeStateCommitted {
+		entry := action.Entry.(*model.SegmentChangeGroup)
+		if action.Type != metastore.ActionUpdate || entry == nil ||
+			entry.State != model.SegmentChangeStateCommitted {
 			continue
 		}
-		if !recovery && (entry.Group.Source == model.SegmentChangeSourceMixCompaction ||
-			entry.Group.Source == model.SegmentChangeSourceSortCompaction ||
-			entry.Group.Source == model.SegmentChangeSourceClustering ||
-			entry.Group.Source == model.SegmentChangeSourceBumpSchema) &&
-			m.IsCollectionCompactionBlocked(entry.Group.CollectionID) {
-			return merr.WrapErrServiceUnavailableMsg("segment change group %d publish is waiting for collection snapshot protection", entry.Group.GroupID)
+		if !recovery && (entry.Source == model.SegmentChangeSourceMixCompaction ||
+			entry.Source == model.SegmentChangeSourceSortCompaction ||
+			entry.Source == model.SegmentChangeSourceClustering ||
+			entry.Source == model.SegmentChangeSourceBumpSchema) &&
+			m.IsCollectionCompactionBlocked(entry.CollectionID) {
+			return merr.WrapErrServiceUnavailableMsg("segment change group %d publish is waiting for collection snapshot protection", entry.GroupID)
 		}
 	}
 
@@ -874,7 +905,7 @@ func (m *Meta) applySegmentChangesLocked(ctx context.Context, dataView *viewpb.D
 		return err
 	}
 	for _, action := range groupActions {
-		entry := action.Entry.(metastore.SegmentChangeGroupEntry)
+		entry := action.Entry.(*model.SegmentChangeGroup)
 		if action.Type == metastore.ActionDelete {
 			if _, referenced := newPredecessors[entry.GroupID]; referenced {
 				return merr.WrapErrDataIntegrityMsg("segment change group %d cannot be deleted while a successor is saved in the same write", entry.GroupID)
@@ -882,10 +913,10 @@ func (m *Meta) applySegmentChangesLocked(ctx context.Context, dataView *viewpb.D
 			if err := m.validateSegmentChangeGroupDeletionLocked(m.segmentChangeGroups[entry.GroupID], updatePack.Segments); err != nil {
 				return err
 			}
-		} else if m.segmentChangeGroups[entry.Group.GroupID] == nil {
-			for _, id := range entry.Group.NewSegmentIDs {
-				if seg := updatePack.Segments[id]; seg != nil && ((!seg.GetIsInvisible() && !isEmptySegmentChangeOutput(seg)) || seg.GetCollectionID() != entry.Group.CollectionID || seg.GetLevel() == datapb.SegmentLevel_L0) {
-					return merr.WrapErrDataIntegrityMsg("segment change group %d registration must keep member %d invisible in its own collection", entry.Group.GroupID, id)
+		} else if m.segmentChangeGroups[entry.GroupID] == nil {
+			for _, id := range entry.NewSegmentIDs {
+				if seg := updatePack.Segments[id]; seg != nil && ((!seg.GetIsInvisible() && !isEmptySegmentChangeOutput(seg)) || seg.GetCollectionID() != entry.CollectionID || seg.GetLevel() == datapb.SegmentLevel_L0) {
+					return merr.WrapErrDataIntegrityMsg("segment change group %d registration must keep member %d invisible in its own collection", entry.GroupID, id)
 				}
 			}
 		}
@@ -957,44 +988,44 @@ func (m *Meta) applySegmentChangesLocked(ctx context.Context, dataView *viewpb.D
 		}
 	}
 	for _, action := range groupActions {
-		entry, ok := action.Entry.(metastore.SegmentChangeGroupEntry)
-		if !ok || action.Type != metastore.ActionUpdate || entry.Group == nil ||
-			entry.Group.State != model.SegmentChangeStateCommitted {
+		entry, ok := action.Entry.(*model.SegmentChangeGroup)
+		if !ok || action.Type != metastore.ActionUpdate || entry == nil ||
+			entry.State != model.SegmentChangeStateCommitted {
 			continue
 		}
-		if dataView != nil && dataView.GetCollectionId() != entry.Group.CollectionID {
-			return merr.WrapErrDataIntegrityMsg("segment change group %d publish: DataView belongs to another collection", entry.Group.GroupID)
+		if dataView != nil && dataView.GetCollectionId() != entry.CollectionID {
+			return merr.WrapErrDataIntegrityMsg("segment change group %d publish: DataView belongs to another collection", entry.GroupID)
 		}
-		for _, id := range entry.Group.NewSegmentIDs {
+		for _, id := range entry.NewSegmentIDs {
 			segment, ok := updatePack.Segments[id]
 			if !ok {
 				return merr.WrapErrDataIntegrityMsg(
 					"segment change group %d publish: member %d is absent from meta or was dropped by a stale operation (externally dropped?)",
-					entry.Group.GroupID, id)
+					entry.GroupID, id)
 			}
-			if segment.GetCollectionID() != entry.Group.CollectionID || segment.GetLevel() == datapb.SegmentLevel_L0 {
-				return merr.WrapErrDataIntegrityMsg("segment change group %d publish: member %d is not a loadable member of this collection", entry.Group.GroupID, id)
+			if segment.GetCollectionID() != entry.CollectionID || segment.GetLevel() == datapb.SegmentLevel_L0 {
+				return merr.WrapErrDataIntegrityMsg("segment change group %d publish: member %d is not a loadable member of this collection", entry.GroupID, id)
 			}
 			if isEmptySegmentChangeOutput(segment) {
 				if segment.GetState() != commonpb.SegmentState_Dropped {
-					return merr.WrapErrDataIntegrityMsg("segment change group %d publish: zero-row output %d must be retired", entry.Group.GroupID, id)
+					return merr.WrapErrDataIntegrityMsg("segment change group %d publish: zero-row output %d must be retired", entry.GroupID, id)
 				}
 				if _, present := viewMembers[id]; present {
-					return merr.WrapErrDataIntegrityMsg("segment change group %d publish: zero-row output %d must be absent from DataView", entry.Group.GroupID, id)
+					return merr.WrapErrDataIntegrityMsg("segment change group %d publish: zero-row output %d must be absent from DataView", entry.GroupID, id)
 				}
 				continue
 			}
 			if segment.GetNumOfRows() <= 0 || segment.GetState() == commonpb.SegmentState_Dropped || segment.GetIsImporting() {
-				return merr.WrapErrDataIntegrityMsg("segment change group %d publish: member %d is not a nonempty loadable output", entry.Group.GroupID, id)
+				return merr.WrapErrDataIntegrityMsg("segment change group %d publish: member %d is not a nonempty loadable output", entry.GroupID, id)
 			}
 			if segment.GetIsInvisible() {
 				return merr.WrapErrDataIntegrityMsg(
 					"segment change group %d publish: member %d is still invisible (no visibility flip in this write)",
-					entry.Group.GroupID, id)
+					entry.GroupID, id)
 			}
 			if dataView != nil {
-				if _, present := viewMembers[id]; !present || dataView.GetCollectionId() != entry.Group.CollectionID {
-					return merr.WrapErrDataIntegrityMsg("segment change group %d publish: nonempty output %d must be present in its collection DataView", entry.Group.GroupID, id)
+				if _, present := viewMembers[id]; !present || dataView.GetCollectionId() != entry.CollectionID {
+					return merr.WrapErrDataIntegrityMsg("segment change group %d publish: nonempty output %d must be present in its collection DataView", entry.GroupID, id)
 				}
 			}
 		}
@@ -1003,9 +1034,9 @@ func (m *Meta) applySegmentChangesLocked(ctx context.Context, dataView *viewpb.D
 		// the same rows, duplicating query results, and the terminal group can
 		// never repair it. Each parent must either already be Dropped in meta
 		// (the idempotent skip) or be dropped by this write's operators.
-		for _, id := range entry.Group.SupersededSegmentIDs {
-			if inMeta := m.Segments.GetSegment(id); inMeta != nil && inMeta.GetCollectionID() != entry.Group.CollectionID {
-				return merr.WrapErrDataIntegrityMsg("segment change group %d publish: superseded parent %d belongs to another collection", entry.Group.GroupID, id)
+		for _, id := range entry.SupersededSegmentIDs {
+			if inMeta := m.Segments.GetSegment(id); inMeta != nil && inMeta.GetCollectionID() != entry.CollectionID {
+				return merr.WrapErrDataIntegrityMsg("segment change group %d publish: superseded parent %d belongs to another collection", entry.GroupID, id)
 			}
 			// tedxu: a superseded parent that is gone from meta entirely — the
 			// drop/truncate + GC cycle ran while the group was STAGED/READY —
@@ -1019,7 +1050,7 @@ func (m *Meta) applySegmentChangesLocked(ctx context.Context, dataView *viewpb.D
 			if !ok || segment.GetState() != commonpb.SegmentState_Dropped {
 				return merr.WrapErrDataIntegrityMsg(
 					"segment change group %d publish: superseded parent %d must be retired (Dropped) by this write",
-					entry.Group.GroupID, id)
+					entry.GroupID, id)
 			}
 		}
 	}
@@ -1035,14 +1066,14 @@ func (m *Meta) applySegmentChangesLocked(ctx context.Context, dataView *viewpb.D
 	memberIDs := make(map[int64]struct{})
 	supersededIDs := make(map[int64]struct{})
 	for _, action := range groupActions {
-		entry, ok := action.Entry.(metastore.SegmentChangeGroupEntry)
-		if !ok || action.Type != metastore.ActionUpdate || entry.Group == nil {
+		entry, ok := action.Entry.(*model.SegmentChangeGroup)
+		if !ok || action.Type != metastore.ActionUpdate || entry == nil {
 			continue
 		}
-		for _, id := range entry.Group.NewSegmentIDs {
+		for _, id := range entry.NewSegmentIDs {
 			memberIDs[id] = struct{}{}
 		}
-		for _, id := range entry.Group.SupersededSegmentIDs {
+		for _, id := range entry.SupersededSegmentIDs {
 			supersededIDs[id] = struct{}{}
 		}
 	}
@@ -1075,8 +1106,8 @@ func (m *Meta) applySegmentChangesLocked(ctx context.Context, dataView *viewpb.D
 	// orphan group (recoverable as FAILED), never invisible members with no
 	// owner.
 	for _, action := range groupActions {
-		entry, ok := action.Entry.(metastore.SegmentChangeGroupEntry)
-		if !ok || action.Type != metastore.ActionUpdate || entry.Group == nil || entry.Group.IsTerminal() {
+		entry, ok := action.Entry.(*model.SegmentChangeGroup)
+		if !ok || action.Type != metastore.ActionUpdate || entry == nil || entry.IsTerminal() {
 			continue
 		}
 		actions = append(actions, action)
@@ -1091,16 +1122,13 @@ func (m *Meta) applySegmentChangesLocked(ctx context.Context, dataView *viewpb.D
 			Entry: metastore.SegmentEntry{Segment: segment.SegmentInfo, Binlogs: binlogs, AlterEncoding: true},
 		})
 	}
-	// TERMINAL group actions (COMMITTED publish / FAILED / ABORTED) come LAST:
-	// the kv dispatch commit-marks them, so the fallback flush lands them after
-	// every non-commit op as the visibility marker.
 	var publishedStats []*datapb.PartitionStatsInfo
 	for _, action := range groupActions {
-		entry, ok := action.Entry.(metastore.SegmentChangeGroupEntry)
-		if ok && entry.Group != nil && entry.Group.State == model.SegmentChangeStateCommitted && entry.Group.PartitionStats != nil {
-			info := entry.Group.Clone().PartitionStats
+		entry, ok := action.Entry.(*model.SegmentChangeGroup)
+		if ok && entry != nil && entry.State == model.SegmentChangeStateCommitted && entry.PartitionStats != nil {
+			info := entry.Clone().PartitionStats
 			info.SegmentIDs = nil
-			for _, id := range entry.Group.NewSegmentIDs {
+			for _, id := range entry.NewSegmentIDs {
 				if seg := updatePack.Segments[id]; seg != nil && !isEmptySegmentChangeOutput(seg) {
 					info.SegmentIDs = append(info.SegmentIDs, id)
 				}
@@ -1118,30 +1146,29 @@ func (m *Meta) applySegmentChangesLocked(ctx context.Context, dataView *viewpb.D
 			actions = append(actions, metastore.AddPartitionStats(info), metastore.SavePartitionStatsVersion(info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel(), info.GetVersion()))
 		}
 	}
-	for _, action := range groupActions {
-		entry, ok := action.Entry.(metastore.SegmentChangeGroupEntry)
-		if !ok || action.Type != metastore.ActionUpdate || entry.Group == nil || !entry.Group.IsTerminal() {
-			continue
-		}
-		actions = append(actions, action)
-	}
-	// The DataView snapshot action is commit-marked (see kv_catalog.update.go)
-	// and belongs with the terminal group actions as the final visibility
-	// marker: on the over-limit fallback both land in the last guarded txn
-	// after every member/superseded op, so a visible snapshot implies the whole
-	// batch (SegmentMeta + group record) is committed. Order between the two
-	// commit-marked actions is irrelevant — the final txn applies them
-	// atomically.
+	// The DataView snapshot action is commit-marked (see kv_catalog.update.go):
+	// on the over-limit fallback it lands in the last txn of this Update,
+	// after every member/superseded op.
 	if dataView != nil {
 		actions = append(actions, metastore.SaveDataView(dataView))
 	}
-	// Deletes are commit-marked removals; append them last for a deterministic
-	// recorded order.
+	// TERMINAL group actions (COMMITTED publish / FAILED / ABORTED) and group
+	// deletes are the visibility marker of the whole write: they go in a
+	// second Update, after the first one landed. A crash between the two
+	// leaves an alive group whose members and DataView already landed; the
+	// reconciler completes it (a READY group with visible members is an
+	// interrupted publish).
+	var final []metastore.UpdateAction
 	for _, action := range groupActions {
-		if _, ok := action.Entry.(metastore.SegmentChangeGroupEntry); !ok || action.Type != metastore.ActionDelete {
-			continue
+		entry, ok := action.Entry.(*model.SegmentChangeGroup)
+		if ok && action.Type == metastore.ActionUpdate && entry != nil && entry.IsTerminal() {
+			final = append(final, action)
 		}
-		actions = append(actions, action)
+	}
+	for _, action := range groupActions {
+		if _, ok := action.Entry.(*model.SegmentChangeGroup); ok && action.Type == metastore.ActionDelete {
+			final = append(final, action)
+		}
 	}
 
 	// The composite write must keep retrying: catalog.Update is an idempotent
@@ -1150,23 +1177,40 @@ func (m *Meta) applySegmentChangesLocked(ctx context.Context, dataView *viewpb.D
 	// effects — same as the flush semantics (UpdateSegmentsInfoAndDataView).
 	// retry.Do short-circuits InputError-typed errors unless an explicit
 	// RetryErr predicate is supplied, so AttemptAlways alone is not enough.
-	if err := retry.Do(ctx, func() error {
-		return m.Catalog.Update(ctx, actions...)
-	}, retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second),
-		retry.RetryErr(func(error) bool { return true })); err != nil {
-		mlog.Error(ctx, "meta update: update segments info and segment change groups failed",
-			mlog.Int("segments", len(updatePack.Segments)),
-			mlog.Int("groupActions", len(groupActions)),
-			mlog.Err(err))
+	update := func(batch []metastore.UpdateAction) error {
+		if len(batch) == 0 {
+			return nil
+		}
+		err := retry.Do(ctx, func() error {
+			return m.Catalog.Update(ctx, batch...)
+		}, retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second),
+			retry.RetryErr(func(error) bool { return true }))
+		if err != nil {
+			mlog.Error(ctx, "meta update: update segments info and segment change groups failed",
+				mlog.Int("segments", len(updatePack.Segments)),
+				mlog.Int("groupActions", len(groupActions)),
+				mlog.Err(err))
+		}
 		return err
 	}
-	// Apply memory status after a successful meta update; the MetaStore
-	// emits segment metrics as segments are installed.
+	// Memory follows each Update as it lands, so a failure of the second one
+	// leaves memory where the catalog is: an interrupted publish, as recovery
+	// would load it. The MetaStore emits segment metrics as segments are
+	// installed.
+	if err := update(actions); err != nil {
+		return err
+	}
 	m.Segments.PublishSegments(lo.Values(updatePack.Segments))
 	for _, info := range publishedStats {
 		m.PartitionStats.ApplySavedPartitionStatsLocked(info, info.GetVersion())
 	}
-	for _, action := range groupActions {
+	for _, action := range actions {
+		m.applySegmentChangeGroupActionMemoryLocked(action)
+	}
+	if err := update(final); err != nil {
+		return err
+	}
+	for _, action := range final {
 		m.applySegmentChangeGroupActionMemoryLocked(action)
 	}
 	return nil
@@ -1175,37 +1219,37 @@ func (m *Meta) applySegmentChangesLocked(ctx context.Context, dataView *viewpb.D
 // applySegmentChangeGroupActionMemoryLocked folds one group action into the
 // in-memory table and the staged-member reverse index. The caller holds groupMu.
 func (m *Meta) applySegmentChangeGroupActionMemoryLocked(action metastore.UpdateAction) {
-	entry, ok := action.Entry.(metastore.SegmentChangeGroupEntry)
+	entry, ok := action.Entry.(*model.SegmentChangeGroup)
 	if !ok {
 		return
 	}
 	m.ensureSegmentChangeGroupStoreLocked()
 	switch action.Type {
 	case metastore.ActionUpdate:
-		if entry.Group == nil {
+		if entry == nil {
 			return
 		}
-		previous := m.segmentChangeGroups[entry.Group.GroupID]
-		if previous == nil || previous.PreviousGroupID != entry.Group.PreviousGroupID {
+		previous := m.segmentChangeGroups[entry.GroupID]
+		if previous == nil || previous.PreviousGroupID != entry.PreviousGroupID {
 			if previous != nil {
 				m.changeGroupPredecessorReferenceLocked(previous.PreviousGroupID, -1)
 			}
-			m.changeGroupPredecessorReferenceLocked(entry.Group.PreviousGroupID, 1)
+			m.changeGroupPredecessorReferenceLocked(entry.PreviousGroupID, 1)
 		}
-		m.dropGroupReferencesLocked(entry.Group.GroupID)
-		m.segmentChangeGroups[entry.Group.GroupID] = entry.Group.Clone()
-		if entry.Group.State == model.SegmentChangeStateStaged || entry.Group.State == model.SegmentChangeStateReady {
-			for _, id := range entry.Group.NewSegmentIDs {
-				m.stagedSegmentToGroup[id] = entry.Group.GroupID
+		m.dropGroupReferencesLocked(entry.GroupID)
+		m.segmentChangeGroups[entry.GroupID] = entry.Clone()
+		if entry.State == model.SegmentChangeStateStaged || entry.State == model.SegmentChangeStateReady {
+			for _, id := range entry.NewSegmentIDs {
+				m.stagedSegmentToGroup[id] = entry.GroupID
 			}
-			for _, id := range entry.Group.SupersededSegmentIDs {
+			for _, id := range entry.SupersededSegmentIDs {
 				// C11: skip L0-exempt superseded parents using the PERSISTED
 				// decision, not a live segment-level lookup (the segment may
 				// already be GC'd).
-				if containsInt64(entry.Group.SupersededL0SegmentIDs, id) {
+				if containsInt64(entry.SupersededL0SegmentIDs, id) {
 					continue
 				}
-				m.supersededSegmentToGroup[id] = entry.Group.GroupID
+				m.supersededSegmentToGroup[id] = entry.GroupID
 			}
 		}
 	case metastore.ActionDelete:

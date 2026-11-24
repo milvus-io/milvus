@@ -163,17 +163,17 @@ type MetaReloadSuite struct {
 
 func (suite *MetaReloadSuite) SetupTest() {
 	catalog := mocks2.NewDataCoordCatalog(suite.T())
-	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().List(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(metastore.ListResult{}, nil).Maybe()
 	suite.catalog = catalog
 }
 
 func (suite *MetaReloadSuite) resetMock() {
 	suite.catalog.ExpectedCalls = nil
-	// newMeta calls ListSegmentChangeGroups (group recovery) on every
+	// newMeta scans segment change groups (group recovery) on every
 	// construction; SetupTest runs once per test method, not per subtest, so
 	// resetMock must re-register this default or the subtests that reach
 	// loadSegmentChangeGroups fail on an unexpected call (C12).
-	suite.catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	suite.catalog.EXPECT().List(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(metastore.ListResult{}, nil).Maybe()
 }
 
 func (suite *MetaReloadSuite) TestReloadFromKV() {
@@ -186,7 +186,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
-		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
@@ -206,7 +205,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
-		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
@@ -227,7 +225,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		brk := broker.NewMockBroker(suite.T())
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
-		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return([]*datapb.CompactionTarget{
 			{
@@ -271,7 +268,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		brk := broker.NewMockBroker(suite.T())
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
-		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
@@ -285,12 +281,18 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.Error(err)
 	})
 
-	suite.Run("ListAnalyzeTasks_fail", func() {
+	suite.Run("ListAnalyzeTask_fail", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
+		// The analyze task list fails; every other List (segment change
+		// groups) keeps the default. The typed expectation goes first so it
+		// wins over the default registered by resetMock.
+		suite.catalog.ExpectedCalls = nil
+		suite.catalog.EXPECT().List(mock.Anything, metastore.AnalyzeTaskType, mock.Anything, mock.Anything).
+			Return(metastore.ListResult{}, errors.New("mock"))
+		suite.catalog.EXPECT().List(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(metastore.ListResult{}, nil).Maybe()
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
-		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
@@ -309,7 +311,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		brk := broker.NewMockBroker(suite.T())
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
-		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, errors.New("mock"))
@@ -328,7 +329,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		brk := broker.NewMockBroker(suite.T())
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
-		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
@@ -347,7 +347,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		brk := broker.NewMockBroker(suite.T())
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
-		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
@@ -366,7 +365,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		brk := broker.NewMockBroker(suite.T())
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
-		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
@@ -385,7 +383,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		brk := broker.NewMockBroker(suite.T())
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
-		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
@@ -1175,7 +1172,7 @@ func (suite *MetaBasicSuite) TestCompleteMixCompactionMutation_UsesCompositeUpda
 	// still called AlterSegments directly (the old two-call path), mockery
 	// would fail the test with an unexpected-call panic.
 	catalog := mocks2.NewDataCoordCatalog(suite.T())
-	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().List(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(metastore.ListResult{}, nil).Maybe()
 	var gotActions []metastore.UpdateAction
 	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, actions ...metastore.UpdateAction) error {
@@ -1234,7 +1231,7 @@ func (suite *MetaBasicSuite) TestBatchSaveDropSegments_UsesCompositeUpdate() {
 	// batchSaveDropSegments still called it directly (the old two-call path),
 	// mockery would fail the test with an unexpected-call panic.
 	catalog := mocks2.NewDataCoordCatalog(suite.T())
-	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().List(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(metastore.ListResult{}, nil).Maybe()
 	var gotActions []metastore.UpdateAction
 	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, actions ...metastore.UpdateAction) error {
@@ -1956,7 +1953,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 func (suite *MetaBasicSuite) TestSetSegment() {
 	mt := suite.meta
 	catalog := mocks2.NewDataCoordCatalog(suite.T())
-	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().List(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(metastore.ListResult{}, nil).Maybe()
 	mt.Catalog = catalog
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

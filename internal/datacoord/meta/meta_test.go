@@ -2192,7 +2192,7 @@ func TestUpdateChannelCheckpoint_DifferentChannelsPersistConcurrently(t *testing
 	)
 
 	catalog := mocks2.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().List(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(metastore.ListResult{}, nil).Maybe()
 	channel1Entered := make(chan struct{})
 	releaseChannel1 := make(chan struct{})
 	channel2Entered := make(chan struct{})
@@ -2275,7 +2275,7 @@ func TestUpdateChannelCheckpoints_SerializesWithSingleUpdateOnSameChannel(t *tes
 	const channel = "channel-1"
 
 	catalog := mocks2.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().List(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(metastore.ListResult{}, nil).Maybe()
 	batchEntered := make(chan struct{})
 	releaseBatch := make(chan struct{})
 	singleEntered := make(chan struct{})
@@ -2514,7 +2514,7 @@ func TestChannelCP(t *testing.T) {
 func Test_meta_GcConfirm(t *testing.T) {
 	m := &Meta{}
 	catalog := mocks2.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().List(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(metastore.ListResult{}, nil).Maybe()
 	m.Catalog = catalog
 	m.MetaStore = metacache.NewMetaStore(catalog)
 

@@ -39,7 +39,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -1636,91 +1635,6 @@ func TestCatalog_Import(t *testing.T) {
 		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(mockErr)
 		kc.MetaKv = txn
 		err = kc.DropImportTask(context.TODO(), it.GetTaskID())
-		assert.Error(t, err)
-	})
-}
-
-func TestCatalog_AnalyzeTask(t *testing.T) {
-	kc := &Catalog{}
-	mockErr := errors.New("mock error")
-
-	t.Run("ListAnalyzeTasks", func(t *testing.T) {
-		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
-		kc.MetaKv = txn
-
-		tasks, err := kc.ListAnalyzeTasks(context.Background())
-		assert.Error(t, err)
-		assert.Nil(t, tasks)
-
-		task := &indexpb.AnalyzeTask{
-			CollectionID:  1,
-			PartitionID:   2,
-			FieldID:       3,
-			FieldName:     "vector",
-			FieldType:     schemapb.DataType_FloatVector,
-			TaskID:        4,
-			Version:       1,
-			SegmentIDs:    nil,
-			NodeID:        1,
-			State:         indexpb.JobState_JobStateFinished,
-			FailReason:    "",
-			Dim:           8,
-			CentroidsFile: "centroids",
-		}
-		value, err := proto.Marshal(task)
-		assert.NoError(t, err)
-
-		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
-			return f([]byte("key1"), value)
-		})
-		kc.MetaKv = txn
-
-		tasks, err = kc.ListAnalyzeTasks(context.Background())
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(tasks))
-
-		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
-			return f([]byte("key1"), []byte("1234"))
-		})
-		kc.MetaKv = txn
-
-		tasks, err = kc.ListAnalyzeTasks(context.Background())
-		assert.Error(t, err)
-		assert.Nil(t, tasks)
-	})
-
-	t.Run("SaveAnalyzeTask", func(t *testing.T) {
-		task := &indexpb.AnalyzeTask{
-			CollectionID:  1,
-			PartitionID:   2,
-			FieldID:       3,
-			FieldName:     "vector",
-			FieldType:     schemapb.DataType_FloatVector,
-			TaskID:        4,
-			Version:       1,
-			SegmentIDs:    nil,
-			NodeID:        1,
-			State:         indexpb.JobState_JobStateFinished,
-			FailReason:    "",
-			Dim:           8,
-			CentroidsFile: "centroids",
-		}
-
-		txn := mocks.NewMetaKv(t)
-		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		kc.MetaKv = txn
-
-		err := kc.SaveAnalyzeTask(context.Background(), task)
-		assert.NoError(t, err)
-
-		txn = mocks.NewMetaKv(t)
-		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
-		kc.MetaKv = txn
-
-		err = kc.SaveAnalyzeTask(context.Background(), task)
 		assert.Error(t, err)
 	})
 }

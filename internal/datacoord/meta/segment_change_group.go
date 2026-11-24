@@ -254,9 +254,9 @@ func (m *Meta) PublishGroup(ctx context.Context, g *model.SegmentChangeGroup, al
 		}
 	}
 
-	// Phase 4: one catalog txn (SegmentMeta operators + group action + DataView
-	// snapshot). The composite write owns ordering (members before superseded,
-	// terminal group + DataView commit-marked last) and the C3 checks (every
+	// Phase 4: the composite write (SegmentMeta operators + DataView snapshot,
+	// then the terminal group in a second Update). It owns ordering (members
+	// before superseded, the terminal group last) and the C3 checks (every
 	// member flipped visible, every superseded retired).
 	if err := m.commitSegmentChangeGroup(ctx, g, commitTs, view, extraOperators...); err != nil {
 		if abortView != nil {

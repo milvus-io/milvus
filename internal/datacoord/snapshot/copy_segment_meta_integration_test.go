@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -35,7 +36,7 @@ import (
 // job to Completed with PinId>0 unpins the source snapshot exactly once.
 func TestUpdateJobStateAndReleaseRef_UnpinsOnTerminal(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().List(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(metastore.ListResult{}, nil).Maybe()
 	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	snapMeta := &SnapshotMeta{}
@@ -87,7 +88,7 @@ func TestUpdateJobStateAndReleaseRef_UnpinsOnTerminal(t *testing.T) {
 // before the pin refactor (PinId=0) skip Unpin and do not panic on nil snapshotMeta.
 func TestUpdateJobStateAndReleaseRef_SkipsUnpinForLegacyJob(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().List(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(metastore.ListResult{}, nil).Maybe()
 	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	unpinCalled := false
@@ -130,7 +131,7 @@ func TestUpdateJobStateAndReleaseRef_SkipsUnpinForLegacyJob(t *testing.T) {
 // The pin is expected to self-expire via TTL — failing the state machine would double-drive it.
 func TestUpdateJobStateAndReleaseRef_UnpinErrorSwallowed(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().List(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(metastore.ListResult{}, nil).Maybe()
 	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	unpinCalls := 0

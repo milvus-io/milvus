@@ -2380,21 +2380,26 @@ func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 
 	store.RemoveCollection(123)
 	store.RemoveCollection(124)
+	// 123 has one stored segment change group, so dropping its meta writes
+	// the catalog
+	catalog.EXPECT().List(mock.Anything, metastore.SegmentGroupType, []string{"123"}, metastore.ListOptions{KeysOnly: true}).
+		Return(metastore.ListResult{Coordinates: [][]string{{"123", "7"}}}, nil).Maybe()
+	dropGroup := metastore.DeleteSegmentChangeGroup(123, 7)
 	t.Run("drop collection meta fail keeps channel cp", func(t *testing.T) {
-		catalog.EXPECT().DropSegmentChangeGroups(mock.Anything, int64(123)).Return(errors.New("mock error")).Once()
+		catalog.EXPECT().Update(mock.Anything, dropGroup).Return(errors.New("mock error")).Once()
 		gc.RecycleChannelCPMeta(context.TODO(), nil)
 		assert.Equal(t, 4, len(m.MetaStore.GetChannelCheckpoints()))
 	})
 
 	t.Run("drop channel cp fail", func(t *testing.T) {
-		catalog.EXPECT().DropSegmentChangeGroups(mock.Anything, int64(123)).Return(nil).Once()
+		catalog.EXPECT().Update(mock.Anything, dropGroup).Return(nil).Once()
 		catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(errors.New("mock error")).Twice()
 		gc.RecycleChannelCPMeta(context.TODO(), nil)
 		assert.Equal(t, 4, len(m.MetaStore.GetChannelCheckpoints()))
 	})
 
 	t.Run("channel cp gc ok", func(t *testing.T) {
-		catalog.EXPECT().DropSegmentChangeGroups(mock.Anything, int64(123)).Return(nil).Once()
+		catalog.EXPECT().Update(mock.Anything, dropGroup).Return(nil).Once()
 		catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Twice()
 		gc.RecycleChannelCPMeta(context.TODO(), nil)
 		// 123's checkpoints are GC'd (its segments are all recycled); 124's

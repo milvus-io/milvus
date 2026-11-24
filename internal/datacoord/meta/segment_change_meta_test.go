@@ -299,7 +299,7 @@ func TestMeta_UpdateSegmentsInfoAndChangeGroupsAndDataView_Publish(t *testing.T)
 	require.NotNil(t, view)
 
 	// Publish: member flip + commit_ts + superseded Dropped + group COMMITTED +
-	// the DataView snapshot, all in one catalog txn.
+	// the DataView snapshot, in one composite write.
 	committed := ready.Clone()
 	committed.State = model.SegmentChangeStateCommitted
 	committed.CommitTS = 500

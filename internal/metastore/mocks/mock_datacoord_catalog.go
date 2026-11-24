@@ -1088,53 +1088,6 @@ func (_c *DataCoordCatalog_DropSegment_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
-// DropSegmentChangeGroups provides a mock function with given fields: ctx, collectionID
-func (_m *DataCoordCatalog) DropSegmentChangeGroups(ctx context.Context, collectionID int64) error {
-	ret := _m.Called(ctx, collectionID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for DropSegmentChangeGroups")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
-		r0 = rf(ctx, collectionID)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// DataCoordCatalog_DropSegmentChangeGroups_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropSegmentChangeGroups'
-type DataCoordCatalog_DropSegmentChangeGroups_Call struct {
-	*mock.Call
-}
-
-// DropSegmentChangeGroups is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collectionID int64
-func (_e *DataCoordCatalog_Expecter) DropSegmentChangeGroups(ctx interface{}, collectionID interface{}) *DataCoordCatalog_DropSegmentChangeGroups_Call {
-	return &DataCoordCatalog_DropSegmentChangeGroups_Call{Call: _e.mock.On("DropSegmentChangeGroups", ctx, collectionID)}
-}
-
-func (_c *DataCoordCatalog_DropSegmentChangeGroups_Call) Run(run func(ctx context.Context, collectionID int64)) *DataCoordCatalog_DropSegmentChangeGroups_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64))
-	})
-	return _c
-}
-
-func (_c *DataCoordCatalog_DropSegmentChangeGroups_Call) Return(_a0 error) *DataCoordCatalog_DropSegmentChangeGroups_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *DataCoordCatalog_DropSegmentChangeGroups_Call) RunAndReturn(run func(context.Context, int64) error) *DataCoordCatalog_DropSegmentChangeGroups_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // DropSegmentIndex provides a mock function with given fields: ctx, collID, partID, segID, buildID
 func (_m *DataCoordCatalog) DropSegmentIndex(ctx context.Context, collID int64, partID int64, segID int64, buildID int64) error {
 	ret := _m.Called(ctx, collID, partID, segID, buildID)
@@ -1328,6 +1281,73 @@ func (_c *DataCoordCatalog_GcConfirm_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
+// Get provides a mock function with given fields: ctx, t, coordinate
+func (_m *DataCoordCatalog) Get(ctx context.Context, t *metastore.ModelType, coordinate []string) (interface{}, metastore.Revision, error) {
+	ret := _m.Called(ctx, t, coordinate)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Get")
+	}
+
+	var r0 interface{}
+	var r1 metastore.Revision
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, *metastore.ModelType, []string) (interface{}, metastore.Revision, error)); ok {
+		return rf(ctx, t, coordinate)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *metastore.ModelType, []string) interface{}); ok {
+		r0 = rf(ctx, t, coordinate)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(interface{})
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *metastore.ModelType, []string) metastore.Revision); ok {
+		r1 = rf(ctx, t, coordinate)
+	} else {
+		r1 = ret.Get(1).(metastore.Revision)
+	}
+
+	if rf, ok := ret.Get(2).(func(context.Context, *metastore.ModelType, []string) error); ok {
+		r2 = rf(ctx, t, coordinate)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// DataCoordCatalog_Get_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Get'
+type DataCoordCatalog_Get_Call struct {
+	*mock.Call
+}
+
+// Get is a helper method to define mock.On call
+//   - ctx context.Context
+//   - t *metastore.ModelType
+//   - coordinate []string
+func (_e *DataCoordCatalog_Expecter) Get(ctx interface{}, t interface{}, coordinate interface{}) *DataCoordCatalog_Get_Call {
+	return &DataCoordCatalog_Get_Call{Call: _e.mock.On("Get", ctx, t, coordinate)}
+}
+
+func (_c *DataCoordCatalog_Get_Call) Run(run func(ctx context.Context, t *metastore.ModelType, coordinate []string)) *DataCoordCatalog_Get_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*metastore.ModelType), args[2].([]string))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_Get_Call) Return(_a0 interface{}, _a1 metastore.Revision, _a2 error) *DataCoordCatalog_Get_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *DataCoordCatalog_Get_Call) RunAndReturn(run func(context.Context, *metastore.ModelType, []string) (interface{}, metastore.Revision, error)) *DataCoordCatalog_Get_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCurrentPartitionStatsVersion provides a mock function with given fields: ctx, collID, partID, vChannel
 func (_m *DataCoordCatalog) GetCurrentPartitionStatsVersion(ctx context.Context, collID int64, partID int64, vChannel string) (int64, error) {
 	ret := _m.Called(ctx, collID, partID, vChannel)
@@ -1387,29 +1407,27 @@ func (_c *DataCoordCatalog_GetCurrentPartitionStatsVersion_Call) RunAndReturn(ru
 	return _c
 }
 
-// ListAnalyzeTasks provides a mock function with given fields: ctx
-func (_m *DataCoordCatalog) ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error) {
-	ret := _m.Called(ctx)
+// List provides a mock function with given fields: ctx, t, coordinate, opts
+func (_m *DataCoordCatalog) List(ctx context.Context, t *metastore.ModelType, coordinate []string, opts metastore.ListOptions) (metastore.ListResult, error) {
+	ret := _m.Called(ctx, t, coordinate, opts)
 
 	if len(ret) == 0 {
-		panic("no return value specified for ListAnalyzeTasks")
+		panic("no return value specified for List")
 	}
 
-	var r0 []*indexpb.AnalyzeTask
+	var r0 metastore.ListResult
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) ([]*indexpb.AnalyzeTask, error)); ok {
-		return rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *metastore.ModelType, []string, metastore.ListOptions) (metastore.ListResult, error)); ok {
+		return rf(ctx, t, coordinate, opts)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) []*indexpb.AnalyzeTask); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, *metastore.ModelType, []string, metastore.ListOptions) metastore.ListResult); ok {
+		r0 = rf(ctx, t, coordinate, opts)
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*indexpb.AnalyzeTask)
-		}
+		r0 = ret.Get(0).(metastore.ListResult)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, *metastore.ModelType, []string, metastore.ListOptions) error); ok {
+		r1 = rf(ctx, t, coordinate, opts)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1417,30 +1435,33 @@ func (_m *DataCoordCatalog) ListAnalyzeTasks(ctx context.Context) ([]*indexpb.An
 	return r0, r1
 }
 
-// DataCoordCatalog_ListAnalyzeTasks_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListAnalyzeTasks'
-type DataCoordCatalog_ListAnalyzeTasks_Call struct {
+// DataCoordCatalog_List_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'List'
+type DataCoordCatalog_List_Call struct {
 	*mock.Call
 }
 
-// ListAnalyzeTasks is a helper method to define mock.On call
+// List is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *DataCoordCatalog_Expecter) ListAnalyzeTasks(ctx interface{}) *DataCoordCatalog_ListAnalyzeTasks_Call {
-	return &DataCoordCatalog_ListAnalyzeTasks_Call{Call: _e.mock.On("ListAnalyzeTasks", ctx)}
+//   - t *metastore.ModelType
+//   - coordinate []string
+//   - opts metastore.ListOptions
+func (_e *DataCoordCatalog_Expecter) List(ctx interface{}, t interface{}, coordinate interface{}, opts interface{}) *DataCoordCatalog_List_Call {
+	return &DataCoordCatalog_List_Call{Call: _e.mock.On("List", ctx, t, coordinate, opts)}
 }
 
-func (_c *DataCoordCatalog_ListAnalyzeTasks_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_ListAnalyzeTasks_Call {
+func (_c *DataCoordCatalog_List_Call) Run(run func(ctx context.Context, t *metastore.ModelType, coordinate []string, opts metastore.ListOptions)) *DataCoordCatalog_List_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run(args[0].(context.Context), args[1].(*metastore.ModelType), args[2].([]string), args[3].(metastore.ListOptions))
 	})
 	return _c
 }
 
-func (_c *DataCoordCatalog_ListAnalyzeTasks_Call) Return(_a0 []*indexpb.AnalyzeTask, _a1 error) *DataCoordCatalog_ListAnalyzeTasks_Call {
+func (_c *DataCoordCatalog_List_Call) Return(_a0 metastore.ListResult, _a1 error) *DataCoordCatalog_List_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *DataCoordCatalog_ListAnalyzeTasks_Call) RunAndReturn(run func(context.Context) ([]*indexpb.AnalyzeTask, error)) *DataCoordCatalog_ListAnalyzeTasks_Call {
+func (_c *DataCoordCatalog_List_Call) RunAndReturn(run func(context.Context, *metastore.ModelType, []string, metastore.ListOptions) (metastore.ListResult, error)) *DataCoordCatalog_List_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2373,64 +2394,6 @@ func (_c *DataCoordCatalog_ListReshardTasks_Call) RunAndReturn(run func(context.
 	return _c
 }
 
-// ListSegmentChangeGroups provides a mock function with given fields: ctx
-func (_m *DataCoordCatalog) ListSegmentChangeGroups(ctx context.Context) ([]*model.SegmentChangeGroup, error) {
-	ret := _m.Called(ctx)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ListSegmentChangeGroups")
-	}
-
-	var r0 []*model.SegmentChangeGroup
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) ([]*model.SegmentChangeGroup, error)); ok {
-		return rf(ctx)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context) []*model.SegmentChangeGroup); ok {
-		r0 = rf(ctx)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*model.SegmentChangeGroup)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// DataCoordCatalog_ListSegmentChangeGroups_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListSegmentChangeGroups'
-type DataCoordCatalog_ListSegmentChangeGroups_Call struct {
-	*mock.Call
-}
-
-// ListSegmentChangeGroups is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *DataCoordCatalog_Expecter) ListSegmentChangeGroups(ctx interface{}) *DataCoordCatalog_ListSegmentChangeGroups_Call {
-	return &DataCoordCatalog_ListSegmentChangeGroups_Call{Call: _e.mock.On("ListSegmentChangeGroups", ctx)}
-}
-
-func (_c *DataCoordCatalog_ListSegmentChangeGroups_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_ListSegmentChangeGroups_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
-	})
-	return _c
-}
-
-func (_c *DataCoordCatalog_ListSegmentChangeGroups_Call) Return(_a0 []*model.SegmentChangeGroup, _a1 error) *DataCoordCatalog_ListSegmentChangeGroups_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *DataCoordCatalog_ListSegmentChangeGroups_Call) RunAndReturn(run func(context.Context) ([]*model.SegmentChangeGroup, error)) *DataCoordCatalog_ListSegmentChangeGroups_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // ListSegmentIndexes provides a mock function with given fields: ctx, collectionID
 func (_m *DataCoordCatalog) ListSegmentIndexes(ctx context.Context, collectionID int64) ([]*model.SegmentIndex, error) {
 	ret := _m.Called(ctx, collectionID)
@@ -2764,53 +2727,6 @@ func (_c *DataCoordCatalog_RemoveDroppedChannelFlags_Call) Return(_a0 int, _a1 e
 }
 
 func (_c *DataCoordCatalog_RemoveDroppedChannelFlags_Call) RunAndReturn(run func(context.Context) (int, error)) *DataCoordCatalog_RemoveDroppedChannelFlags_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// SaveAnalyzeTask provides a mock function with given fields: ctx, task
-func (_m *DataCoordCatalog) SaveAnalyzeTask(ctx context.Context, task *indexpb.AnalyzeTask) error {
-	ret := _m.Called(ctx, task)
-
-	if len(ret) == 0 {
-		panic("no return value specified for SaveAnalyzeTask")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.AnalyzeTask) error); ok {
-		r0 = rf(ctx, task)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// DataCoordCatalog_SaveAnalyzeTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveAnalyzeTask'
-type DataCoordCatalog_SaveAnalyzeTask_Call struct {
-	*mock.Call
-}
-
-// SaveAnalyzeTask is a helper method to define mock.On call
-//   - ctx context.Context
-//   - task *indexpb.AnalyzeTask
-func (_e *DataCoordCatalog_Expecter) SaveAnalyzeTask(ctx interface{}, task interface{}) *DataCoordCatalog_SaveAnalyzeTask_Call {
-	return &DataCoordCatalog_SaveAnalyzeTask_Call{Call: _e.mock.On("SaveAnalyzeTask", ctx, task)}
-}
-
-func (_c *DataCoordCatalog_SaveAnalyzeTask_Call) Run(run func(ctx context.Context, task *indexpb.AnalyzeTask)) *DataCoordCatalog_SaveAnalyzeTask_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*indexpb.AnalyzeTask))
-	})
-	return _c
-}
-
-func (_c *DataCoordCatalog_SaveAnalyzeTask_Call) Return(_a0 error) *DataCoordCatalog_SaveAnalyzeTask_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *DataCoordCatalog_SaveAnalyzeTask_Call) RunAndReturn(run func(context.Context, *indexpb.AnalyzeTask) error) *DataCoordCatalog_SaveAnalyzeTask_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3815,6 +3731,56 @@ func (_c *DataCoordCatalog_UpdateCompactionTargetState_Call) Return(_a0 error) *
 }
 
 func (_c *DataCoordCatalog_UpdateCompactionTargetState_Call) RunAndReturn(run func(context.Context, int64, datapb.TargetState, uint64) error) *DataCoordCatalog_UpdateCompactionTargetState_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Watch provides a mock function with given fields: ctx, t, coordinate, opts, fn
+func (_m *DataCoordCatalog) Watch(ctx context.Context, t *metastore.ModelType, coordinate []string, opts metastore.WatchOptions, fn func(metastore.EventBatch) error) error {
+	ret := _m.Called(ctx, t, coordinate, opts, fn)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Watch")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *metastore.ModelType, []string, metastore.WatchOptions, func(metastore.EventBatch) error) error); ok {
+		r0 = rf(ctx, t, coordinate, opts, fn)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_Watch_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Watch'
+type DataCoordCatalog_Watch_Call struct {
+	*mock.Call
+}
+
+// Watch is a helper method to define mock.On call
+//   - ctx context.Context
+//   - t *metastore.ModelType
+//   - coordinate []string
+//   - opts metastore.WatchOptions
+//   - fn func(metastore.EventBatch) error
+func (_e *DataCoordCatalog_Expecter) Watch(ctx interface{}, t interface{}, coordinate interface{}, opts interface{}, fn interface{}) *DataCoordCatalog_Watch_Call {
+	return &DataCoordCatalog_Watch_Call{Call: _e.mock.On("Watch", ctx, t, coordinate, opts, fn)}
+}
+
+func (_c *DataCoordCatalog_Watch_Call) Run(run func(ctx context.Context, t *metastore.ModelType, coordinate []string, opts metastore.WatchOptions, fn func(metastore.EventBatch) error)) *DataCoordCatalog_Watch_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*metastore.ModelType), args[2].([]string), args[3].(metastore.WatchOptions), args[4].(func(metastore.EventBatch) error))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_Watch_Call) Return(_a0 error) *DataCoordCatalog_Watch_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_Watch_Call) RunAndReturn(run func(context.Context, *metastore.ModelType, []string, metastore.WatchOptions, func(metastore.EventBatch) error) error) *DataCoordCatalog_Watch_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -15,13 +15,15 @@
 // limitations under the License.
 
 // Package txn provides a shared composite-op builder and commit executor for
-// metastore KV catalogs. Callers accumulate Save/Remove/RemovePrefix ops (plus
+// metastore KV catalogs. Callers accumulate Save/Remove ops (plus
 // a trailing set of "commit" ops that mark the composite write visible) into a
 // Builder, then hand it to Commit, which either applies everything atomically
-// in a single guarded etcd txn, or - when the op set exceeds the txn size
+// in a single etcd txn, or - when the op set exceeds the txn size
 // limit - flushes the non-commit ops in caller-recorded order via chunked
-// batches and applies the commit ops as the final guarded txn.
+// batches and applies the commit ops as the final txn.
 package txn
+
+import "github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 
 // opKind identifies the kind of a single recorded operation.
 type opKind int
@@ -29,10 +31,9 @@ type opKind int
 const (
 	opPut opKind = iota
 	opDel
-	opDelPrefix
 )
 
-// op is a single recorded Save/Remove/RemovePrefix (or Commit* variant) call.
+// op is a single recorded Save/Remove (or Commit* variant) call.
 type op struct {
 	key    string
 	value  string
@@ -41,18 +42,14 @@ type op struct {
 }
 
 // Builder accumulates an ordered set of KV ops, to be applied by Commit.
-// Order across Save/Remove/RemovePrefix calls is preserved, since it matters
-// for the non-atomic fallback path (see Commit).
+// Order across Save/Remove calls is preserved, since it matters for the
+// non-atomic fallback path (see Commit).
 type Builder struct {
-	ops  []op
-	cond *valueCond // optional guard of the whole commit (see CommitSaveIfValue).
-}
-
-// valueCond is the guard of a conditional commit: every op of the commit
-// applies only when the current value of key equals oldValue at commit time.
-type valueCond struct {
-	key      string
-	oldValue string
+	ops []op
+	// readRevision, when positive, guards every op (see GuardUnchangedSince).
+	readRevision int64
+	// require holds extra predicates of the whole commit (see Require).
+	require []predicates.Predicate
 }
 
 // New returns an empty Builder.
@@ -70,43 +67,30 @@ func (b *Builder) Remove(key string) {
 	b.ops = append(b.ops, op{key: key, kind: opDel})
 }
 
-// RemovePrefix records a prefix delete.
-//
-// Asymmetry to know before mixing: an op set that combines exact removals
-// (Remove) and prefix removals (RemovePrefix) commits fine on the chunked
-// fallback path (each kind is flushed with its own method) but is REJECTED on
-// the atomic path (commitAtomic) - a single etcd txn cannot express both
-// without widening the exact deletes to prefixes. So the same mixed set may
-// succeed or error depending only on whether it fits the txn limit. No Update
-// caller emits RemovePrefix today; if one does, either keep exact and prefix
-// removals in separate Update calls, or teach commitAtomic to split them.
-func (b *Builder) RemovePrefix(prefix string) {
-	b.ops = append(b.ops, op{key: prefix, kind: opDelPrefix})
-}
-
 // CommitSave records a put that also serves as a visibility marker: in the
 // fallback (non-atomic) path, all CommitSave/CommitRemove ops are applied
-// together in the final guarded txn, after every non-commit op has been
+// together in the final txn, after every non-commit op has been
 // flushed.
 func (b *Builder) CommitSave(key, value string) {
 	b.ops = append(b.ops, op{key: key, value: value, kind: opPut, commit: true})
 }
 
-// CommitSaveIfValue records a CommitSave that is also guarded: the whole
-// commit applies only when the current value of key equals oldValue at commit
-// time — an atomic check-and-set on the value. It backs the single-point
-// compare-and-swap of the consume-checkpoint advancement, so a publisher of
-// an older term can never advance the checkpoint past a newer takeover.
+// GuardUnchangedSince makes the whole write conditional on a read at
+// revision: it applies only when no key it writes changed after revision, and
+// fails with an error matching predicates.ErrNotMet otherwise. A guarded
+// write is never chunked: Commit applies it in one txn or fails without
+// writing.
 //
-// Precondition: at most one conditional commit op per builder (a second call
-// panics); the guarded key must already exist (an absent key fails the value
-// comparison — use a version-based CAS to create it).
-func (b *Builder) CommitSaveIfValue(key, oldValue, newValue string) {
-	if b.cond != nil {
-		panic("txn: at most one conditional commit op per builder")
-	}
-	b.cond = &valueCond{key: key, oldValue: oldValue}
-	b.CommitSave(key, newValue)
+// A key deleted after revision has no revision left to compare, so the guard
+// alone passes for it; Require predicates.KeyExist for a key that must still
+// be there.
+func (b *Builder) GuardUnchangedSince(revision int64) {
+	b.readRevision = revision
+}
+
+// Require adds preds to the predicates the whole write is conditional on.
+func (b *Builder) Require(preds ...predicates.Predicate) {
+	b.require = append(b.require, preds...)
 }
 
 // CommitRemove records an exact-key delete that also serves as a visibility

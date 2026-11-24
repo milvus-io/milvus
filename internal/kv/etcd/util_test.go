@@ -18,32 +18,6 @@ type EtcdKVUtilSuite struct {
 	suite.Suite
 }
 
-func (s *EtcdKVUtilSuite) TestParsePredicateType() {
-	type testCase struct {
-		tag           string
-		pt            predicates.PredicateType
-		expectResult  string
-		expectSucceed bool
-	}
-
-	cases := []testCase{
-		{tag: "equal", pt: predicates.PredTypeEqual, expectResult: "=", expectSucceed: true},
-		{tag: "zero_value", pt: 0, expectResult: "", expectSucceed: false},
-	}
-
-	for _, tc := range cases {
-		s.Run(tc.tag, func() {
-			result, err := parsePredicateType(tc.pt)
-			if tc.expectSucceed {
-				s.NoError(err)
-				s.Equal(tc.expectResult, result)
-			} else {
-				s.Error(err)
-			}
-		})
-	}
-}
-
 func (s *EtcdKVUtilSuite) TestParsePredicates() {
 	type testCase struct {
 		tag           string
@@ -52,15 +26,19 @@ func (s *EtcdKVUtilSuite) TestParsePredicates() {
 	}
 
 	badPredicate := predicates.NewMockPredicate(s.T())
+	badPredicate.EXPECT().Key().Return("a")
 	badPredicate.EXPECT().Target().Return(0)
-	badExistencePredicate := predicates.NewMockPredicate(s.T())
-	badExistencePredicate.EXPECT().Target().Return(predicates.PredTargetKeyExistence)
-	badExistencePredicate.EXPECT().Type().Return(0)
+	badRevisionPredicate := predicates.NewMockPredicate(s.T())
+	badRevisionPredicate.EXPECT().Key().Return("a")
+	badRevisionPredicate.EXPECT().Target().Return(predicates.PredTargetUnchangedSince)
+	badRevisionPredicate.EXPECT().TargetValue().Return("7")
 
 	cases := []testCase{
 		{tag: "normal_value_equal", input: []predicates.Predicate{predicates.ValueEqual("a", "b")}, expectSucceed: true},
 		{tag: "key_not_exist", input: []predicates.Predicate{predicates.KeyNotExist("a")}, expectSucceed: true},
-		{tag: "key_existence_bad_type", input: []predicates.Predicate{badExistencePredicate}, expectSucceed: false},
+		{tag: "key_exist", input: []predicates.Predicate{predicates.KeyExist("a")}, expectSucceed: true},
+		{tag: "unchanged_since", input: []predicates.Predicate{predicates.UnchangedSince("a", 7)}, expectSucceed: true},
+		{tag: "unchanged_since_bad_revision", input: []predicates.Predicate{badRevisionPredicate}, expectSucceed: false},
 		{tag: "empty_input", input: nil, expectSucceed: true},
 		{tag: "bad_predicates", input: []predicates.Predicate{badPredicate}, expectSucceed: false},
 	}
@@ -84,6 +62,14 @@ func (s *EtcdKVUtilSuite) TestParseKeyNotExistPredicate() {
 	s.Require().Len(result, 1)
 	expected := clientv3.Compare(clientv3.CreateRevision(util.GetPath("root", "a")), "=", 0)
 	s.Equal(expected, result[0])
+}
+
+func (s *EtcdKVUtilSuite) TestParseRevisionPredicates() {
+	result, err := parsePredicates("root", predicates.KeyExist("a"), predicates.UnchangedSince("a", 7))
+	s.Require().NoError(err)
+	s.Require().Len(result, 2)
+	s.Equal(clientv3.Compare(clientv3.CreateRevision(util.GetPath("root", "a")), ">", 0), result[0])
+	s.Equal(clientv3.Compare(clientv3.ModRevision(util.GetPath("root", "a")), "<", 8), result[1])
 }
 
 func (s *EtcdKVUtilSuite) TestGetContextWithTimeout() {

@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -49,7 +50,7 @@ func (s *AnalyzeMetaSuite) Test_AnalyzeMeta() {
 	s.initParams()
 
 	catalog := mocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return([]*indexpb.AnalyzeTask{
+	catalog.EXPECT().List(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(metastore.ListResult{Values: analyzeTaskEntries([]*indexpb.AnalyzeTask{
 		{
 			CollectionID: s.collectionID,
 			PartitionID:  s.partitionID,
@@ -98,9 +99,9 @@ func (s *AnalyzeMetaSuite) Test_AnalyzeMeta() {
 			TaskID:       6,
 			State:        indexpb.JobState_JobStateFailed,
 		},
-	}, nil)
+	})}, nil)
 
-	catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().Update(mock.Anything, mock.Anything).Return(nil)
 
 	ctx := context.Background()
 
@@ -160,13 +161,13 @@ func (s *AnalyzeMetaSuite) Test_failCase() {
 	s.initParams()
 
 	catalog := mocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, errors.New("error")).Once()
+	catalog.EXPECT().List(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(metastore.ListResult{}, errors.New("error")).Once()
 	ctx := context.Background()
 	am, err := NewAnalyzeMeta(ctx, catalog)
 	s.Error(err)
 	s.Nil(am)
 
-	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return([]*indexpb.AnalyzeTask{
+	catalog.EXPECT().List(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(metastore.ListResult{Values: analyzeTaskEntries([]*indexpb.AnalyzeTask{
 		{
 			CollectionID: s.collectionID,
 			PartitionID:  s.partitionID,
@@ -183,13 +184,13 @@ func (s *AnalyzeMetaSuite) Test_failCase() {
 			TaskID:       2,
 			State:        indexpb.JobState_JobStateFinished,
 		},
-	}, nil)
+	})}, nil)
 	am, err = NewAnalyzeMeta(ctx, catalog)
 	s.NoError(err)
 	s.NotNil(am)
 	s.Equal(2, len(am.GetAllTasks()))
 
-	catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(errors.New("error"))
+	catalog.EXPECT().Update(mock.Anything, mock.Anything).Return(errors.New("error"))
 	s.Run("AddAnalyzeTask", func() {
 		t := &indexpb.AnalyzeTask{
 			CollectionID: s.collectionID,
@@ -251,4 +252,13 @@ func (s *AnalyzeMetaSuite) Test_failCase() {
 
 func TestAnalyzeMeta(t *testing.T) {
 	suite.Run(t, new(AnalyzeMetaSuite))
+}
+
+// analyzeTaskEntries is what the catalog's List returns for tasks.
+func analyzeTaskEntries(tasks []*indexpb.AnalyzeTask) []any {
+	listed := make([]any, 0, len(tasks))
+	for _, task := range tasks {
+		listed = append(listed, task)
+	}
+	return listed
 }

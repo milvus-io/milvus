@@ -42,9 +42,34 @@ import (
 // when SegmentEntry.AlterEncoding is set. Entries this catalog does not own,
 // or Type/Entry combinations it does not implement, are a caller programming
 // error and are rejected with a ServiceInternal error and no write.
+//
+// A metastore.UnchangedSince action guards every key the Update writes, the
+// legacy entries' keys included, against a change after the read revision
+// (txn.Builder GuardUnchangedSince); a model type value saved with
+// ActionUpdate must also still exist. An unmet guard fails with an error
+// matching predicates.ErrNotMet.
 func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction) error {
+	_, revisioned := kc.MetaKv.(revisionLoader)
+	readRevision, err := precondition(actions, revisioned)
+	if err != nil {
+		return err
+	}
 	b := txn.New()
+	if readRevision > 0 {
+		b.GuardUnchangedSince(int64(readRevision))
+	}
 	for _, action := range actions {
+		if _, ok := action.Entry.(metastore.Precondition); ok {
+			continue
+		}
+		// Values of registered model types are generic (model.go);
+		// only the types not migrated yet keep a case below.
+		if generic, err := applyGeneric(b, action, readRevision > 0); generic {
+			if err != nil {
+				return err
+			}
+			continue
+		}
 		switch e := action.Entry.(type) {
 		case metastore.SegmentEntry:
 			if err := kc.applySegmentEntry(ctx, b, action.Type, e, publishesSegmentVersion(e.Segment, actions)); err != nil {
@@ -125,11 +150,6 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			default:
 				return unsupportedAction(action)
 			}
-		case metastore.AnalyzeTaskEntry:
-			if action.Type != metastore.ActionDelete {
-				return unsupportedAction(action)
-			}
-			b.Remove(buildAnalyzeTaskKey(e.TaskID))
 		case metastore.DataViewEntry:
 			if action.Type != metastore.ActionAdd {
 				return unsupportedAction(action)
@@ -151,7 +171,7 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			// marks the DataView key as the visibility point of the whole
 			// composite write: in the over-limit fallback, every SegmentMeta op
 			// recorded before it is flushed first and the DataView lands in the
-			// final guarded txn, so a visible DataView implies its SegmentMeta
+			// final txn, so a visible DataView implies its SegmentMeta
 			// is committed.
 			b.CommitSave(key, string(value))
 		case metastore.PartitionStatsVersionEntry:
@@ -179,45 +199,10 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			case metastore.ActionDelete:
 				// CommitRemove marks the partition-stats info removal as the
 				// visibility point for a partition-stats-and-analyze-task
-				// cleanup: the AnalyzeTaskEntry removal and any
+				// cleanup: the analyze task removal and any
 				// PartitionStatsVersionEntry rollback above must land before it
 				// on the ordered fallback path.
 				b.CommitRemove(buildPartitionStatsInfoPath(e.Info))
-			default:
-				return unsupportedAction(action)
-			}
-		case metastore.SegmentChangeGroupEntry:
-			switch action.Type {
-			case metastore.ActionUpdate:
-				// Same encoding as catalog.SaveSegmentChangeGroup.
-				if e.Group == nil {
-					return merr.WrapErrServiceInternalMsg("datacoord catalog: nil segment change group in UpdateAction")
-				}
-				value, err := model.MarshalSegmentChangeGroup(e.Group)
-				if err != nil {
-					return err
-				}
-				if e.Group.IsTerminal() {
-					// Terminal states (COMMITTED/FAILED/ABORTED) are the
-					// visibility marker of the composite write: CommitSave lands
-					// the record LAST in the chunked-fallback flush, so a visible
-					// terminal record implies every non-commit op (member flips,
-					// superseded retirement) already landed.
-					b.CommitSave(buildSegmentChangeGroupKey(e.Group.CollectionID, e.Group.GroupID), string(value))
-				} else {
-					// ALIVE states (STAGED/READY) are NOT a commit marker (C13):
-					// for STAGED creation the group record must land BEFORE its
-					// staged members in the fallback flush, otherwise a crash
-					// between the two leaves invisible members with no group
-					// record — unrecoverable without SegmentInfo.change_group_id.
-					// Plain in-order Save lets the caller control that ordering.
-					b.Save(buildSegmentChangeGroupKey(e.Group.CollectionID, e.Group.GroupID), string(value))
-				}
-			case metastore.ActionDelete:
-				// CommitRemove marks the group removal as the visibility point:
-				// the group must land last when its members/superseded
-				// retirement are composed before it on the ordered fallback path.
-				b.CommitRemove(buildSegmentChangeGroupKey(e.CollectionID, e.GroupID))
 			default:
 				return unsupportedAction(action)
 			}
@@ -232,6 +217,30 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 		return txn.CommitWithoutFallback(ctx, kc.MetaKv, b)
 	}
 	return txn.Commit(ctx, kc.MetaKv, b)
+}
+
+// precondition returns the read revision of the UnchangedSince action among
+// actions, 0 when there is none. More than one, or a revision that is not
+// positive, is a caller programming error; on a backend that reports no
+// revision (revisioned false, Get returns 0) a guard is unimplemented.
+func precondition(actions []metastore.UpdateAction, revisioned bool) (metastore.Revision, error) {
+	var revision metastore.Revision
+	count := 0
+	for _, action := range actions {
+		if p, ok := action.Entry.(metastore.Precondition); ok {
+			revision = p.ReadRevision
+			count++
+		}
+	}
+	switch {
+	case count > 1:
+		return 0, merr.WrapErrServiceInternalMsg("datacoord catalog: %d UnchangedSince actions in one Update", count)
+	case count == 1 && !revisioned:
+		return 0, merr.Wrap(merr.ErrServiceUnimplemented, "meta kv backend reports no revision to guard a write with")
+	case count == 1 && revision <= 0:
+		return 0, merr.WrapErrServiceInternalMsg("datacoord catalog: UnchangedSince needs a positive revision, got %d", revision)
+	}
+	return revision, nil
 }
 
 func containsSegmentIndexUpdate(actions []metastore.UpdateAction) bool {

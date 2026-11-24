@@ -76,7 +76,7 @@ func TestCommit_FallbackPutBatchesPreserveOrder(t *testing.T) {
 		batches = append(batches, kvs)
 		return nil
 	}).Twice()
-	// commit marker (final guarded txn); the fallback needs a commit op so
+	// commit marker (final txn); the fallback needs a commit op so
 	// total>limit routes through the chunked flush.
 	tk.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
@@ -91,36 +91,6 @@ func TestCommit_FallbackPutBatchesPreserveOrder(t *testing.T) {
 		{"k1": "1", "k2": "2"},
 		{"k3": "3"},
 	}, batches)
-}
-
-// TestCommit_AtomicMixedRemovalsRejected proves FIX 2: a single etcd txn
-// cannot express both exact and prefix deletes via MultiSaveAndRemoveWithPrefix
-// (which deletes every listed key by prefix). Mixing them in the atomic path
-// must return an error and issue no KV call at all.
-func TestCommit_AtomicMixedRemovalsRejected(t *testing.T) {
-	tk := kvmocks.NewTxnKV(t) // no EXPECT: any KV call fails the test
-	tk.EXPECT().MaxTxnOps().Return(64).Maybe()
-
-	b := New()
-	b.Save("a", "1")
-	b.Remove("coll-1")
-	b.RemovePrefix("coll-1/")
-	assert.Error(t, Commit(context.Background(), tk, b))
-}
-
-// TestCommit_AtomicOnlyPrefixRemoval covers the prefix-only atomic path: it
-// must route through MultiSaveAndRemoveWithPrefix with exactly the prefix
-// removals (no exact removals folded in).
-func TestCommit_AtomicOnlyPrefixRemoval(t *testing.T) {
-	tk := kvmocks.NewTxnKV(t)
-	tk.EXPECT().MaxTxnOps().Return(64).Maybe()
-	tk.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything,
-		map[string]string{"a": "1"}, []string{"pfx"}).Return(nil).Once()
-
-	b := New()
-	b.Save("a", "1")
-	b.RemovePrefix("pfx")
-	assert.NoError(t, Commit(context.Background(), tk, b))
 }
 
 // TestCommit_FallbackPreservesOrderAcrossKinds is a self-review addition (not
@@ -159,7 +129,7 @@ func TestCommit_FallbackPreservesOrderAcrossKinds(t *testing.T) {
 }
 
 // TestCommit_FallbackExceedsCommitLimit is a self-review addition. When the
-// commit-marked ops cannot fit in a single guarded txn even after the
+// commit-marked ops cannot fit in a single txn even after the
 // non-commit ops are chunked away, Commit must reject the request rather
 // than silently split the commit set (which would defeat the "commit ops
 // apply atomically" guarantee).
@@ -192,62 +162,9 @@ func TestCommit_NonPositiveLimit(t *testing.T) {
 	assert.Error(t, Commit(context.Background(), tk, b))
 }
 
-// TestCommit_ConditionalCommitAtomic proves CommitSaveIfValue attaches the
-// value-equality predicate to the single atomic txn: the commit only applies
-// while the current value of the guarded key equals oldValue.
-func TestCommit_ConditionalCommitAtomic(t *testing.T) {
-	tk := kvmocks.NewTxnKV(t)
-	tk.EXPECT().MaxTxnOps().Return(64).Maybe()
-	tk.EXPECT().MultiSaveAndRemove(mock.Anything,
-		map[string]string{"cp": "new"}, []string(nil), mock.Anything).
-		RunAndReturn(func(_ context.Context, _ map[string]string, _ []string, preds ...predicates.Predicate) error {
-			require.Len(t, preds, 1)
-			assert.Equal(t, "cp", preds[0].Key())
-			assert.Equal(t, "old", preds[0].TargetValue())
-			return nil
-		}).Once()
-
-	b := New()
-	b.CommitSaveIfValue("cp", "old", "new")
-	assert.NoError(t, Commit(context.Background(), tk, b))
-}
-
-// TestCommit_ConditionalCommitFallback proves the guard survives the chunked
-// fallback: the predicate rides on the final commit txn, after the non-commit
-// ops were flushed.
-func TestCommit_ConditionalCommitFallback(t *testing.T) {
-	tk := kvmocks.NewTxnKV(t)
-	tk.EXPECT().MaxTxnOps().Return(2).Maybe()
-	tk.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil).Maybe()
-	tk.EXPECT().MultiSaveAndRemove(mock.Anything,
-		map[string]string{"cp": "new"}, []string(nil), mock.Anything).
-		RunAndReturn(func(_ context.Context, _ map[string]string, _ []string, preds ...predicates.Predicate) error {
-			require.Len(t, preds, 1)
-			assert.Equal(t, "cp", preds[0].Key())
-			assert.Equal(t, "old", preds[0].TargetValue())
-			return nil
-		}).Once()
-
-	b := New()
-	b.Save("c1", "x")
-	b.Save("c2", "y")
-	b.CommitSaveIfValue("cp", "old", "new")
-	assert.NoError(t, Commit(context.Background(), tk, b))
-}
-
-// TestCommit_SingleConditionalCommit proves the single-conditional precondition
-// of CommitSaveIfValue: a second conditional commit op is a programming error.
-func TestCommit_SingleConditionalCommit(t *testing.T) {
-	b := New()
-	b.CommitSaveIfValue("cp1", "old", "new")
-	assert.Panics(t, func() {
-		b.CommitSaveIfValue("cp2", "old", "new")
-	})
-}
-
 // TestCommit_FallbackSkipsEmptyTrailingCommit proves FIX 2: when the
 // fallback path has zero commit-marked ops (e.g. the DataCoord over-limit
-// case, which never attaches commit markers), the final guarded txn is pure
+// case, which never attaches commit markers), the final txn is pure
 // overhead - an empty MultiSaveAndRemove round trip - and must be skipped
 // once the non-commit ops are flushed.
 func TestCommit_FallbackSkipsEmptyTrailingCommit(t *testing.T) {
@@ -262,4 +179,66 @@ func TestCommit_FallbackSkipsEmptyTrailingCommit(t *testing.T) {
 	b.Save("k2", "2")
 	b.Save("k3", "3")
 	assert.NoError(t, Commit(context.Background(), tk, b)) // limit=2 forces fallback, no commit ops
+}
+
+// TestCommit_GuardedByReadRevision pins the read-modify-write guard: one
+// mod-revision predicate per written key (deduplicated), plus the required
+// predicates, in one atomic txn.
+func TestCommit_GuardedByReadRevision(t *testing.T) {
+	tk := kvmocks.NewTxnKV(t)
+	tk.EXPECT().MaxTxnOps().Return(64).Maybe()
+	tk.EXPECT().MultiSaveAndRemove(mock.Anything,
+		map[string]string{"a": "2"}, []string{"b"}, mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ map[string]string, _ []string, preds ...predicates.Predicate) error {
+			require.Len(t, preds, 3)
+			assert.Equal(t, predicates.PredTargetKeyExist, preds[0].Target())
+			assert.Equal(t, "a", preds[0].Key())
+			for i, key := range []string{"a", "b"} {
+				p := preds[i+1]
+				assert.Equal(t, predicates.PredTargetUnchangedSince, p.Target())
+				assert.Equal(t, key, p.Key())
+				assert.Equal(t, int64(7), p.TargetValue())
+			}
+			return nil
+		}).Once()
+
+	b := New()
+	b.GuardUnchangedSince(7)
+	b.Require(predicates.KeyExist("a"))
+	b.Save("a", "1")
+	b.Save("a", "2")
+	b.Remove("b")
+	assert.NoError(t, Commit(context.Background(), tk, b))
+}
+
+// TestCommit_GuardedNeverChunks proves a guarded write fails without writing
+// when it does not fit one txn, instead of taking the chunked fallback that
+// cannot hold its predicates.
+func TestCommit_GuardedNeverChunks(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		limit int
+		build func(b *Builder)
+	}{
+		{"ops over the limit", 2, func(b *Builder) {
+			b.Save("a", "1")
+			b.Save("b", "1")
+			b.Save("c", "1")
+		}},
+		{"predicates over the limit", 2, func(b *Builder) {
+			b.Require(predicates.KeyExist("a"), predicates.KeyExist("b"))
+			b.Save("a", "1")
+			b.Save("b", "1")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// no write EXPECT: any write fails the test
+			tk := kvmocks.NewTxnKV(t)
+			tk.EXPECT().MaxTxnOps().Return(tc.limit).Maybe()
+			b := New()
+			b.GuardUnchangedSince(7)
+			tc.build(b)
+			assert.Error(t, Commit(context.Background(), tk, b))
+		})
+	}
 }
