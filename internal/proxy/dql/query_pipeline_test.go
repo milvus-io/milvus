@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func testSchema() *schemapb.CollectionSchema {
@@ -398,6 +399,58 @@ func TestNewQueryPipeline_GroupByOrderBy(t *testing.T) {
 	assert.NotNil(t, result)
 	// After agg remap: should have user's output_fields [val, count(*)]
 	assert.Equal(t, 2, len(result.GetFieldsData()))
+}
+
+func TestNewQueryPipeline_UnlimitedOrderByWithOffset(t *testing.T) {
+	schema := testSchema()
+
+	t.Run("order_by", func(t *testing.T) {
+		orderByFields := []*orderby.OrderByField{
+			orderby.NewOrderByField(101, "val", schemapb.DataType_Int64, orderby.WithAscending(false)),
+		}
+		pipeline, err := NewQueryPipeline(schema, typeutil.Unlimited, 2, reduce.IReduceNoOrder, orderByFields, nil, nil, nil, []int64{100, 101})
+		require.NoError(t, err)
+
+		r := &internalpb.RetrieveResults{
+			Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4}}}},
+			FieldsData: []*schemapb.FieldData{
+				makeTestInt64Field(100, "pk", []int64{1, 2, 3, 4}),
+				makeTestInt64Field(101, "val", []int64{10, 40, 20, 30}),
+			},
+		}
+		result, err := pipeline.Execute(context.Background(), []*internalpb.RetrieveResults{r})
+		require.NoError(t, err)
+		assert.Equal(t, []int64{20, 10}, result.GetFieldsData()[1].GetScalars().GetLongData().GetData())
+	})
+
+	t.Run("group_by_order_by", func(t *testing.T) {
+		countAggs, err := agg.NewAggregate("count", 500, "count(*)", 0)
+		require.NoError(t, err)
+		aggsBases := make([]agg.AggregateBase, len(countAggs))
+		copy(aggsBases, countAggs)
+		outputMap, err := agg.NewAggregationFieldMap([]string{"val", "count(*)"}, []string{"val"}, aggsBases)
+		require.NoError(t, err)
+
+		orderByFields := []*orderby.OrderByField{
+			orderby.NewOrderByField(500, "count(*)", schemapb.DataType_Int64, orderby.WithAscending(false)),
+		}
+		pipeline, err := NewQueryPipeline(
+			schema, typeutil.Unlimited, 2, reduce.IReduceNoOrder,
+			orderByFields, []int64{101}, []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 500}}, outputMap, nil,
+		)
+		require.NoError(t, err)
+
+		r := &internalpb.RetrieveResults{
+			FieldsData: []*schemapb.FieldData{
+				makeTestInt64Field(101, "val", []int64{10, 20, 30, 40}),
+				makeTestInt64Field(500, "count", []int64{2, 5, 4, 1}),
+			},
+		}
+		result, err := pipeline.Execute(context.Background(), []*internalpb.RetrieveResults{r})
+		require.NoError(t, err)
+		assert.Equal(t, []int64{10, 40}, result.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+		assert.Equal(t, []int64{2, 1}, result.GetFieldsData()[1].GetScalars().GetLongData().GetData())
+	})
 }
 
 func TestGroupByLimitPreservesAggregateAcrossWorkers(t *testing.T) {

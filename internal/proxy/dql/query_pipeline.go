@@ -135,7 +135,7 @@ func buildOrderByPipeline(
 ) *queryutil.Pipeline {
 	b := queryutil.NewPipelineBuilder("proxy-query-orderby")
 	b.Add(queryutil.OpConcatAndCheckPK, in(), ch(chanReduced), queryutil.NewConcatAndCheckPKOperator(schema))
-	b.Add(queryutil.OpOrderByLimit, ch(chanReduced), ch(chanSorted), queryutil.NewOrderByLimitOperator(orderByFields, offset+limit))
+	b.Add(queryutil.OpOrderByLimit, ch(chanReduced), ch(chanSorted), queryutil.NewOrderByLimitOperator(orderByFields, orderTopK(limit, offset)))
 	b.Add(queryutil.OpSlice, ch(chanSorted), ch(chanSliced), queryutil.NewSliceOperator(limit, offset))
 
 	// Remap by FieldID: select and reorder fields to match user's output_fields.
@@ -177,10 +177,17 @@ func buildGroupByOrderByPipeline(
 
 	b := queryutil.NewPipelineBuilder("proxy-query-groupby-orderby")
 	b.Add(queryutil.OpReduceByGroups, in(), ch(chanReduced), newRawReduceByGroupsOperator(schema, groupByFieldIDs, aggregates))
-	b.Add(queryutil.OpOrderByLimit, ch(chanReduced), ch(chanSorted), queryutil.NewOrderByLimitOperatorWithPositions(orderByFields, positions, offset+limit))
+	b.Add(queryutil.OpOrderByLimit, ch(chanReduced), ch(chanSorted), queryutil.NewOrderByLimitOperatorWithPositions(orderByFields, positions, orderTopK(limit, offset)))
 	b.Add(queryutil.OpSlice, ch(chanSorted), ch(chanSliced), queryutil.NewSliceOperator(limit, offset))
 	b.Add(queryutil.OpRemap, ch(chanSliced), out(), newAggRemapOperator(outputMap))
 	return b.Build(), nil
+}
+
+func orderTopK(limit, offset int64) int64 {
+	if limit <= 0 {
+		return typeutil.Unlimited
+	}
+	return offset + limit
 }
 
 // Channel helper functions for readability.
