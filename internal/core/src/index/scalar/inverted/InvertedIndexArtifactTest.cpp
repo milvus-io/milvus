@@ -357,7 +357,8 @@ TEST(InvertedIndexArtifactTest, V3PublishesNestedMetadata) {
     }
 }
 
-TEST(InvertedIndexArtifactTest, V3NestedMetadataValidationAndLegacyVersionGate) {
+TEST(InvertedIndexArtifactTest,
+     V3NestedMetadataValidationAndLegacyVersionGate) {
     const auto& backend =
         ScalarReaderBackends().Get<int64_t>("InvertedInt64Nested");
     ScalarTestData<int64_t> data({1, 2, 2, 3});
@@ -382,8 +383,8 @@ TEST(InvertedIndexArtifactTest, V3NestedMetadataValidationAndLegacyVersionGate) 
             auto input_stream = std::make_shared<storage::RemoteInputStream>(
                 std::make_shared<arrow::io::BufferReader>(
                     MakePackedArtifactBuffer(missing_meta)));
-            auto source = storage::IndexEntryReader::Open(
-                input_stream, input_stream->Size());
+            auto source = storage::IndexEntryReader::Open(input_stream,
+                                                          input_stream->Size());
             storage::LoadOptions options;
             options.params = backend.LoadParams({.row_count = 4});
             options.params[SCALAR_INDEX_ENGINE_VERSION] = scalar_version;

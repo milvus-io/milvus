@@ -1278,13 +1278,13 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(
                 owned_runtime = CloneRuntimeResourceState(snapshot->runtime);
                 target_runtime = owned_runtime.get();
             }
-            for (auto& retired :
-                 erase_index_entries(target_runtime->indexes,
-                                     field_id,
-                                     [](const IndexRegistration& entry) {
-                                         return !is_vector_registration(entry) &&
-                                                !is_text_registration(entry);
-                                     })) {
+            for (auto& retired : erase_index_entries(
+                     target_runtime->indexes,
+                     field_id,
+                     [](const IndexRegistration& entry) {
+                         return !is_vector_registration(entry) &&
+                                !is_text_registration(entry);
+                     })) {
                 retire_indexing(std::move(retired));
             }
             lck.unlock();

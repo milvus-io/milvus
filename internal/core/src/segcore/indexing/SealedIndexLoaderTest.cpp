@@ -380,11 +380,8 @@ TEST_F(SealedIndexLoaderTest,
     for (const auto& tc : cases) {
         SCOPED_TRACE(tc.name);
         auto artifact = build_artifact(tc.build_family, true);
-        const auto [remote_file, bytes] =
-            write_v3(tc.name + ".v3",
-                     *artifact,
-                     tc.hybrid_selector,
-                     tc.strip_is_nested);
+        const auto [remote_file, bytes] = write_v3(
+            tc.name + ".v3", *artifact, tc.hybrid_selector, tc.strip_is_nested);
         auto info = Info();
         info.index_files = {remote_file};
         info.index_size = bytes;

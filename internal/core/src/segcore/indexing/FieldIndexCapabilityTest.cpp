@@ -714,7 +714,8 @@ TEST(IndexInventoryTest, EagerAndLazyProjectionMetadataMatchesAcrossClones) {
     EXPECT_EQ(ResolvedIndexes(lazy).front(), ResolvedIndexes(clone).front());
 }
 
-TEST(IndexInventoryTest, SkippedLazyEntryResolvesToEmptyCapabilityAndNullReader) {
+TEST(IndexInventoryTest,
+     SkippedLazyEntryResolvesToEmptyCapabilityAndNullReader) {
     auto entry = TestEntry();
     IndexInventory inventory;
     int calls = 0;

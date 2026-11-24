@@ -4737,8 +4737,10 @@ TEST_F(MatchExprTest, SkippedAndRowDomainLegacyIndexFallsBackToRawData) {
         auto context = std::make_shared<exec::QueryContext>(
             DEAFULT_QUERY_ID, sealed, N_, MAX_TIMESTAMP);
         context->set_read_snapshot(sealed->CaptureReadSnapshot());
-        auto result = query::ExecPlanNodeVisitor::ExecuteTask(fragment, context);
-        auto col = std::dynamic_pointer_cast<ColumnVector>(result->childrens()[0]);
+        auto result =
+            query::ExecPlanNodeVisitor::ExecuteTask(fragment, context);
+        auto col =
+            std::dynamic_pointer_cast<ColumnVector>(result->childrens()[0]);
         ASSERT_NE(col, nullptr);
         BitsetTypeView excluded(col->GetRawData(), col->size());
         ASSERT_EQ(excluded.size(), N_);
@@ -4766,7 +4768,8 @@ TEST_F(MatchExprTest, SkippedAndRowDomainLegacyIndexFallsBackToRawData) {
         skipped_info.index_engine_version = 3;
         skipped_info.num_rows = N_;
         skipped_info.skipped = true;
-        skipped_info.index_params = {{index::INDEX_TYPE, index::HYBRID_INDEX_TYPE}};
+        skipped_info.index_params = {
+            {index::INDEX_TYPE, index::HYBRID_INDEX_TYPE}};
         sealed->LoadIndex(skipped_info);
         EXPECT_FALSE(sealed->HasIndex(sub_str_fid_));
         run_and_verify();
@@ -4782,9 +4785,11 @@ TEST_F(MatchExprTest, SkippedAndRowDomainLegacyIndexFallsBackToRawData) {
         lazy_info.index_id = 9002;
         lazy_info.index_engine_version = 3;
         lazy_info.num_rows = N_;
-        lazy_info.index_params = {{index::INDEX_TYPE, index::HYBRID_INDEX_TYPE}};
+        lazy_info.index_params = {
+            {index::INDEX_TYPE, index::HYBRID_INDEX_TYPE}};
         lazy_info.lazy_index_factory = [](OpContext*) {
-            return IndexInventory::ResolvedData{"", DataType::NONE, {}, nullptr};
+            return IndexInventory::ResolvedData{
+                "", DataType::NONE, {}, nullptr};
         };
         sealed->TestLoadIndex(lazy_info, true, nullptr);
         run_and_verify();
@@ -4805,14 +4810,13 @@ TEST_F(MatchExprTest, SkippedAndRowDomainLegacyIndexFallsBackToRawData) {
         }
         auto field = std::make_shared<FieldData<Array>>(DataType::ARRAY, false);
         field->FillFieldData(arrays.data(), arrays.size());
-        auto row_opened =
-            test::expr_index::BuildIndex(sub_str_fid_,
-                                         DataType::ARRAY,
-                                         index::BITMAP_INDEX_TYPE,
-                                         {field},
-                                         Config::object(),
-                                         DataType::VARCHAR,
-                                         /*nested=*/false);
+        auto row_opened = test::expr_index::BuildIndex(sub_str_fid_,
+                                                       DataType::ARRAY,
+                                                       index::BITMAP_INDEX_TYPE,
+                                                       {field},
+                                                       Config::object(),
+                                                       DataType::VARCHAR,
+                                                       /*nested=*/false);
         LoadIndexInfo row_info{};
         row_info.field_id = sub_str_fid_.get();
         row_info.field_type = DataType::ARRAY;
