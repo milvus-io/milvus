@@ -2509,7 +2509,7 @@ func validateAlterAnalyzerFieldParam(collSchema *schemapb.CollectionSchema, fiel
 		return merr.WrapErrParameterInvalidMsg("can not alter analyzer params for non-string field %s", fieldName)
 	}
 
-	if typeutil.CreateFieldSchemaHelper(field).EnableMatch() ||
+	if typeutil.IsTextMatchEnabled(field) ||
 		typeutil.IsBm25FunctionInputField(collSchema, field) ||
 		typeutil.IsMinHashFunctionInputField(collSchema, field) {
 		return merr.WrapErrParameterInvalidMsg(

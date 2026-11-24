@@ -18,6 +18,7 @@ package grep
 
 import (
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -27,6 +28,8 @@ func FuzzParse(f *testing.F) {
 	for _, seed := range []string{`-e ""`, `-Fiea.b`, `-i -e "user_id=\d+\b"`, `-e 'a\b'`, "-e \xff", `-w -x -e a`, `-e --`, "-e a\\"} {
 		f.Add(seed)
 	}
+	f.Add("-m0 -e 'a\nb'")
+	f.Add("-m1 -C+2 -e hit")
 	f.Fuzz(func(t *testing.T, input string) {
 		const maxArgumentBytes int64 = 4096
 		spec, err := Parse(input, maxArgumentBytes)
@@ -40,6 +43,16 @@ func FuzzParse(f *testing.F) {
 			t.Fatal("invalid successful result")
 		}
 		var args []string
+		count, capped := spec.MaxCount()
+		if capped {
+			args = append(args, "-m", strconv.FormatUint(count, 10))
+		}
+		if before := spec.BeforeContext(); before != 0 {
+			args = append(args, "-B", strconv.FormatUint(before, 10))
+		}
+		if after := spec.AfterContext(); after != 0 {
+			args = append(args, "-A", strconv.FormatUint(after, 10))
+		}
 		if spec.PatternKind() == PatternLiteral {
 			args = append(args, "-F")
 		}
@@ -55,7 +68,8 @@ func FuzzParse(f *testing.F) {
 		total := 0
 		for i := 0; i < spec.PatternCount(); i++ {
 			p := spec.Pattern(i)
-			if !utf8.ValidString(p) || strings.ContainsAny(p, "\x00\n") {
+			if !utf8.ValidString(p) || strings.ContainsRune(p, '\x00') ||
+				(strings.ContainsRune(p, '\n') && (!capped || count != 0)) {
 				t.Fatal("invalid normalized pattern")
 			}
 			total += len(p)

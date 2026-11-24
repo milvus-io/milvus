@@ -61,7 +61,7 @@ func TestPartitionManagerLogging(t *testing.T) {
 	}
 	for _, manager := range managers {
 		require.Same(t, parent, manager.Logger())
-		manager.asyncAllocSegment(0, false)
+		manager.asyncAllocSegment()
 		manager.asyncFlushSegment(ctx, segment)
 	}
 	for range 4 {
@@ -75,7 +75,7 @@ func TestPartitionManagerLogging(t *testing.T) {
 	canceledCtx, cancel := context.WithCancel(ctx)
 	cancel()
 	for _, manager := range managers {
-		manager.asyncAllocSegment(0, false)
+		manager.asyncAllocSegment()
 		manager.wal = syncutil.NewFuture[wal.WAL]()
 		manager.asyncFlushSegment(canceledCtx, segment)
 	}

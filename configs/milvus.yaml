@@ -151,12 +151,10 @@ minio:
   # aliyun (ecs): https://www.alibabacloud.com/help/en/elastic-compute-service/latest/attach-an-instance-ram-role
   useIAM: false
   # Cloud Provider of S3. Supports: "aws", "gcp", "aliyun".
-  # Cloud Provider of Google Cloud Storage. Supports: "gcpnative".
   # You can use "aws" for other cloud provider supports S3 API with signature v4, e.g.: minio
   # You can use "gcp" for other cloud provider supports S3 API with signature v2
   # You can use "aliyun" for other cloud provider uses virtual host style bucket
-  # You can use "gcpnative" for the Google Cloud Platform provider. Uses service account credentials
-  # for authentication.
+  # The legacy "gcpnative" provider is not supported by C++ storage.
   # When useIAM enabled, only "aws", "gcp", "aliyun" is supported for now
   cloudProvider: aws
   # The JSON content contains the gcs service account credentials.
@@ -765,9 +763,6 @@ queryNode:
     mutatePoolSizeFactor: 2 # size factor (CPUNum * factor) of the online-write cgo pool for segment insert/delete; isolated from the load/management pool so segment loading cannot starve online writes
     dynamicPoolSizeFactor: 1 # size factor (CPUNum * factor) of the dynamic cgo pool for segment create/release/statistics/index-info
     deletePoolSizeFactor: 1 # size factor (CPUNum * factor) of the DeleteBatch dispatch pool
-    storageV2:
-      cellTargetSizeBytes: 4194304 # Target average byte size per storage v2 cache cell. Parquet row groups are greedily packed so that rgs_per_cell * avg_row_group_size ≈ this target. Each cell always contains at least one row group and cells never cross file boundaries. Tune larger for bigger batch IO (fewer cells) or smaller to get finer cache granularity. Default 4 MiB.
-      asyncLoadReadWindowSizeBytes: 16777216 # Target estimated loaded-byte threshold for one Storage V3 async read window. Each window contains at least one cell, so an oversized cell may exceed the threshold. The value must be positive. Default 16 MiB.
     deleteDumpBatchSize: 10000 # Batch size for delete snapshot dump in segcore.
   fmindexCostRatio: 0.001 # FM-index count-first guard threshold. An FMINDEX-accelerated LIKE (prefix/infix/suffix and general LIKE with interior wildcards) runs through the index only when occ * sa_sample_rate < fmindexCostRatio * total_tokens; otherwise it falls back to the raw-data scan (all paths are exact, this only picks the cheaper one). For the anchored forms the index answer is exact; for general LIKE it is candidate generation followed by an exact recheck of the candidate rows on the original VARCHAR data. The bound prices only FM locate, not the recheck bytes, so it stays row-length invariant only for the anchored forms; very long rows with unselective fragments may be routed to a path slower than the scan. Must be in (0, 1]; larger favors the index. Default 0.001 is the conservative crossover measured in benchmarks.
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
@@ -1316,6 +1311,10 @@ internaltls:
   sni: localhost # The server name indication (SNI) for internal TLS, should be the same as the name provided by the certificates ref: https://en.wikipedia.org/wiki/Server_Name_Indication
 
 common:
+  cloud:
+    clusterId:  # Cloud cluster ID. Leave empty to use Talon's default namespace. Otherwise Talon uses <clusterId>-<type>-<case-mode>, with all for enabledStages=all and meta for manifest, load_open, or both.
+    instanceType:  # Cloud instance type. VectorLake selects the VectorLake namespace type regardless of classType.
+    classType:  # Cloud class type. For non-VectorLake instances, Talon uses Tiered when classType is Tiered and others otherwise.
   defaultPartitionName: _default # Name of the default partition when a collection is created
   defaultIndexName: _default_idx # Name of the index when it is created with name unspecified
   indexSliceSize: 16 # Index slice size in MB
@@ -1340,7 +1339,6 @@ common:
   storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote], value minio is deprecated, use remote instead
   storage:
     manifestTransactionRetryLimit: 10 # Maximum number of retry attempts for V3 storage manifest transaction commits on optimistic concurrency conflicts
-    useArrowFileSystemChunkManager: false # Whether segcore routes chunk manager IO (segment load, index build/load) through the milvus-storage Arrow FileSystem, unified with storage v2. Applies to both remote and local storage types; when false, the legacy chunk managers are used. Not effective for cloudProvider=gcpnative, which always uses the legacy implementation.
     stv2:
       splitSystemColumn:
         enabled: true # enable split system column policy in storage v2
@@ -1954,7 +1952,7 @@ function:
     maxRegexBytes: 10485760 # Regex engine compiled-program size budget in bytes. Invalid or non-positive values fall back to 10485760. Changes apply to newly prepared operators.
     maxDFACacheBytes: 8388608 # Regex engine DFA cache budget in bytes; not an aggregate process memory limit. Invalid or non-positive values fall back to 8388608. Changes apply to newly prepared operators.
     batchSize: 128 # Candidate text rows per Grep read batch, independent of the matching limit. Invalid or non-positive configuration falls back to 128. Changes apply to newly prepared operators.
-    maxScanRows: 0 # Maximum candidate offsets returned per segment for Grep after filter and MVCC. 0 disables the row cap; invalid or negative configuration falls back to 0. A positive cap truncates candidate selection and logs a warning when more candidates may remain; Grep results may be incomplete. Changes apply to newly enabled candidate plans.
+    maxScanRows: 0 # Soft threshold for text rows scanned by Grep per segment. 0 disables it; invalid or negative configuration falls back to 0. Checked between batches, so scans may exceed the threshold. NGRAM-rejected rows and NULLs do not count; Probe scans do. Candidate offsets remain complete. Stopping with unread candidates may produce incomplete results. Changes apply to newly prepared Grep operators.
   model:
     requestTimeout: 30s # Global timeout for external model requests, e.g. 30s. Function param timeout_ms overrides it.
   textEmbedding:

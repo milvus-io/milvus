@@ -133,6 +133,25 @@ func TestGetFilesystemMetricsWithConfig_RemoteSDK(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, metrics, "origin")
 
+	config.TalonMode = 1
+	for _, namespace := range []string{"cluster-1-dedicated-standard-all", "cluster-2-dedicated-standard-all"} {
+		config.TalonNamespace = namespace
+		metrics, err = GetFilesystemMetricsWithConfig(config)
+		require.NoError(t, err)
+		require.Contains(t, metrics, "talon")
+	}
+	entries, err := ListFilesystemMetrics()
+	require.NoError(t, err)
+	talonFilesystems := 0
+	for _, entry := range entries {
+		if entry.Source == "talon" && strings.Contains(entry.DisplayKey, "/"+config.BucketName+"?talon=") {
+			talonFilesystems++
+		}
+	}
+	require.Equal(t, 2, talonFilesystems)
+
+	config.TalonMode = 0
+	config.TalonNamespace = ""
 	config.TalonSmallReadThreshold = 0
 	config.TalonBlockSize = 0
 	config.TalonMaxIdlePerAddr = 0

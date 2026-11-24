@@ -68,7 +68,7 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "storage/LoadAdmissionController.h"
 #include "folly/coro/BlockingWait.h"
 #include "storage/Util.h"
@@ -187,18 +187,18 @@ class GrowingManifestLoadTest : public ::testing::TestWithParam<bool> {
  protected:
     void
     SetUp() override {
-        async_enabled_ = storagev2translator::StorageV2AsyncLoadEnabled();
+        async_enabled_ = storage::LoadAsyncReadEnabled();
         auto& admission = storage::LoadAdmissionController::GetInstance();
         bytes_ = admission.CapacityBytes();
         slots_ = admission.CapacitySlots();
-        storagev2translator::SetStorageV2AsyncLoadEnabled(GetParam());
+        storage::SetLoadAsyncReadEnabled(GetParam());
         admission.SetCapacityBytes(0);
         admission.SetCapacitySlots(0);
     }
 
     void
     TearDown() override {
-        storagev2translator::SetStorageV2AsyncLoadEnabled(async_enabled_);
+        storage::SetLoadAsyncReadEnabled(async_enabled_);
         auto& admission = storage::LoadAdmissionController::GetInstance();
         admission.SetCapacityBytes(bytes_);
         admission.SetCapacitySlots(slots_);
@@ -270,13 +270,10 @@ TEST_P(GrowingManifestLoadTest, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
     milvus::tracer::TraceContext trace_ctx;
     // Force multiple async windows; synchronous recovery uses the sealed batch
     // target and should merge the small groups, including the checkpoint tail.
-    const auto window_bytes =
-        storagev2translator::StorageV2AsyncLoadReadWindowSizeBytes();
-    storagev2translator::SetStorageV2AsyncLoadReadWindowSizeBytes(1);
-    auto restore_window = folly::makeGuard([&] {
-        storagev2translator::SetStorageV2AsyncLoadReadWindowSizeBytes(
-            window_bytes);
-    });
+    const auto window_bytes = storage::LoadFieldDataReadWindowSizeBytes();
+    storage::SetLoadFieldDataReadWindowSizeBytes(1);
+    auto restore_window = folly::makeGuard(
+        [&] { storage::SetLoadFieldDataReadWindowSizeBytes(window_bytes); });
     const auto high_tasks =
         milvus::monitor::internal_storage_pool_task_submitted_total_high
             .Value();

@@ -19,6 +19,7 @@ package segments
 import (
 	"context"
 	"runtime"
+	"time"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -64,6 +66,10 @@ func RunQueryScanPipeline(ctx context.Context, req *querypb.QueryRequest, schema
 			}
 		}
 	}()
+	// One observation for all segment chains, matching L0 rerank's task-level
+	// wall time. Includes segment preparation, pool waits and read-gate retries;
+	// excludes the subsequent cross-segment merge and output materialization.
+	start := time.Now()
 	group, runCtx := errgroup.WithContext(ctx)
 	group.SetLimit(runtime.GOMAXPROCS(0))
 	for i := range results {
@@ -74,7 +80,15 @@ func RunQueryScanPipeline(ctx context.Context, req *querypb.QueryRequest, schema
 			return err
 		})
 	}
-	if err = group.Wait(); err != nil {
+	err = group.Wait()
+	status := metrics.SuccessLabel
+	if err != nil {
+		status = metrics.FailLabel
+	}
+	metrics.QueryNodeFunctionChainLatency.WithLabelValues(
+		paramtable.GetStringNodeID(), metrics.FunctionChainLevelQueryScan, status,
+	).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
+	if err != nil {
 		return nil, err
 	}
 	segs := make([]Segment, 0, len(results))
@@ -101,9 +115,10 @@ func RunQueryScanPipeline(ctx context.Context, req *querypb.QueryRequest, schema
 		}
 		outputFields = append(outputFields, field)
 	}
+	elementLevel := len(scanned) > 0 && scanned[0].HasColumn(types.QueryElementIndicesFieldName)
 	var finalFrame *chain.DataFrame
 	if len(valid) == 0 {
-		finalFrame, err = emptyQueryFrame(schema, outputFields, outputSchema)
+		finalFrame, err = emptyQueryFrame(schema, outputFields, outputSchema, elementLevel)
 	} else {
 		selected, mergeErr := mergeQueryScanResults(valid, req.GetReq().GetLimit(), reduce.ToReduceType(req.GetReq().GetReduceType()))
 		if mergeErr != nil {
@@ -111,7 +126,7 @@ func RunQueryScanPipeline(ctx context.Context, req *querypb.QueryRequest, schema
 		}
 		defer selected.Frame.Release()
 		if selected.Frame.NumRows() == 0 {
-			finalFrame, err = emptyQueryFrame(schema, outputFields, outputSchema)
+			finalFrame, err = emptyQueryFrame(schema, outputFields, outputSchema, elementLevel)
 		} else {
 			finalFrame, err = materializeQueryFrame(ctx, segs, plan, selected, outputFields)
 		}
@@ -147,7 +162,7 @@ func RunQueryScanPipeline(ctx context.Context, req *querypb.QueryRequest, schema
 
 // emptyQueryFrame preserves the complete export schema even when no segment
 // produced rows. It uses the same column names and physical types as a populated DF.
-func emptyQueryFrame(schema *schemapb.CollectionSchema, outputs []*schemapb.FieldSchema, computed *arrow.Schema) (*chain.DataFrame, error) {
+func emptyQueryFrame(schema *schemapb.CollectionSchema, outputs []*schemapb.FieldSchema, computed *arrow.Schema, elementLevel bool) (*chain.DataFrame, error) {
 	var pk *schemapb.FieldSchema
 	for _, field := range schema.GetFields() {
 		if field.IsPrimaryKey {
@@ -160,6 +175,12 @@ func emptyQueryFrame(schema *schemapb.CollectionSchema, outputs []*schemapb.Fiel
 	}
 	builder := chain.NewDataFrameBuilder().SetChunkSizes([]int64{0})
 	defer builder.Release()
+	if elementLevel {
+		col := arrow.NewChunked(arrow.ListOf(arrow.PrimitiveTypes.Int32), nil)
+		if err := builder.AddColumns([]string{types.QueryElementIndicesFieldName}, []*arrow.Chunked{col}); err != nil {
+			return nil, err
+		}
+	}
 	add := func(name string, field *schemapb.FieldSchema) error {
 		dtype, err := arrowconv.NativeColumnType(field)
 		if err != nil {
@@ -198,7 +219,7 @@ type queryScanGrepSegment struct {
 	segmentType SegmentType
 }
 
-func (s *queryScanGrepSegment) ScanGrep(ctx context.Context, offsets *array.Int64, req native.ScanRequest) (*native.ScanResult, error) {
+func (s *queryScanGrepSegment) ScanGrep(ctx context.Context, input arrow.Record, req native.ScanRequest) (*native.ScanResult, error) {
 	return retrySegmentReadGate(ctx, s.segmentType, func() (*native.ScanResult, error) {
 		var result *native.ScanResult
 		_, err := GetChainPool().Submit(func() (any, error) {
@@ -206,7 +227,7 @@ func (s *queryScanGrepSegment) ScanGrep(ctx context.Context, offsets *array.Int6
 				return nil, err
 			}
 			var err error
-			result, err = s.Segment.ScanGrep(ctx, offsets, req)
+			result, err = s.Segment.ScanGrep(ctx, input, req)
 			return nil, err
 		}).Await()
 		if err != nil {
@@ -248,6 +269,32 @@ func queryScanNativeSegment(segment Segment) (segcore.CSegment, SegmentType, err
 	return csegment, segmentType, nil
 }
 
+// importQueryScanCandidates borrows the native record and retains its arrays.
+// Element mode remains explicit even for typed zero-row candidate lists.
+func importQueryScanCandidates(input RetrieveSegmentResult) (*chain.DataFrame, error) {
+	columns := []arrow.Field{{Name: types.SegOffsetFieldName, Type: arrow.PrimitiveTypes.Int64}}
+	if input.Result.GetElementLevel() {
+		columns = append(columns, arrow.Field{Name: types.QueryElementIndicesFieldName, Type: arrow.ListOf(arrow.PrimitiveTypes.Int32)})
+	}
+	builder := chain.NewDataFrameBuilder()
+	defer builder.Release()
+	for _, field := range columns {
+		col, err := queryScanColumn(input.Record, field.Name)
+		if err != nil {
+			return nil, err
+		}
+		if !arrow.TypeEqual(col.DataType(), field.Type) {
+			return nil, merr.WrapErrServiceInternalMsg("candidate column %s must be %s", field.Name, field.Type)
+		}
+		builder.SetChunkSizes([]int64{int64(col.Len())})
+		col.Retain()
+		if err := builder.AddColumnFromChunks(field.Name, []arrow.Array{col}); err != nil {
+			return nil, err
+		}
+	}
+	return builder.Build(), nil
+}
+
 func runQueryScanSegment(ctx context.Context, fieldID, queryLimit int64, repr *chain.ChainRepr,
 	input RetrieveSegmentResult, plan *segcore.RetrievePlan,
 ) (*chain.DataFrame, error) {
@@ -267,17 +314,10 @@ func runQueryScanSegment(ctx context.Context, fieldID, queryLimit int64, repr *c
 	if err != nil {
 		return nil, err
 	}
-	candidateOffsets, err := queryScanColumn(input.Record, types.SegOffsetFieldName)
+	frame, err := importQueryScanCandidates(input)
 	if err != nil {
 		return nil, err
 	}
-	frameBuilder := chain.NewDataFrameBuilder().SetChunkSizes([]int64{int64(candidateOffsets.Len())})
-	defer frameBuilder.Release()
-	candidateOffsets.Retain() // The builder consumes its reference; input.Record still owns one.
-	if err := frameBuilder.AddColumnFromChunks(types.SegOffsetFieldName, []arrow.Array{candidateOffsets}); err != nil {
-		return nil, err
-	}
-	frame := frameBuilder.Build()
 	defer frame.Release()
 	output, err := fc.ExecuteWithOptions(ctx, chain.ExecuteOptions{
 		EnableColumnPruning: true,

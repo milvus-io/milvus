@@ -21,7 +21,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -89,35 +91,25 @@ func TestCanMergeSort(t *testing.T) {
 func TestCanMergeSortMatchesMergeKey(t *testing.T) {
 	params := Params{UseMergeSort: true, MaxSegmentMergeSort: 30}
 
-	t.Run("namespace enabled rejects pk-only sorted segment", func(t *testing.T) {
-		plan := &datapb.CompactionPlan{
-			Schema: &schemapb.CollectionSchema{EnableNamespace: true},
-			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-				{SegmentID: 1, IsSorted: true, IsSortedByNamespace: false},
-			},
-		}
-		assert.False(t, CanMergeSort(plan, params))
-	})
-
-	t.Run("namespace enabled accepts namespace-sorted segment", func(t *testing.T) {
-		plan := &datapb.CompactionPlan{
-			Schema: &schemapb.CollectionSchema{EnableNamespace: true},
-			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-				{SegmentID: 1, IsSorted: false, IsSortedByNamespace: true},
-			},
-		}
-		assert.True(t, CanMergeSort(plan, params))
-	})
-
-	t.Run("namespace disabled rejects namespace-sorted segment", func(t *testing.T) {
-		plan := &datapb.CompactionPlan{
-			Schema: &schemapb.CollectionSchema{EnableNamespace: false},
-			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-				{SegmentID: 1, IsSorted: false, IsSortedByNamespace: true},
-			},
-		}
-		assert.False(t, CanMergeSort(plan, params))
-	})
+	for _, tc := range []struct {
+		name            string
+		schema          *schemapb.CollectionSchema
+		namespaceSorted bool
+	}{
+		{"ordinary", &schemapb.CollectionSchema{}, false},
+		{"default namespace", &schemapb.CollectionSchema{EnableNamespace: true}, true},
+		{"partition namespace", &schemapb.CollectionSchema{
+			EnableNamespace: true,
+			Properties:      []*commonpb.KeyValuePair{{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition}},
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := &datapb.CompactionPlan{Schema: tc.schema, SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{IsSorted: true}}}
+			assert.Equal(t, !tc.namespaceSorted, CanMergeSort(plan, params))
+			plan.SegmentBinlogs[0] = &datapb.CompactionSegmentBinlogs{IsSortedByNamespace: true}
+			assert.Equal(t, tc.namespaceSorted, CanMergeSort(plan, params))
+		})
+	}
 
 	t.Run("mixed flags rejected when one does not match", func(t *testing.T) {
 		plan := &datapb.CompactionPlan{

@@ -308,7 +308,7 @@ func selectColumn(ctx *types.FuncContext, col *arrow.Chunked, selection *RowSele
 				chunks[i] = array.NewSlice(input, 0, 0)
 				continue
 			}
-			// Keep the legacy scalar-type dispatch: TakeArray in our pinned Arrow
+			// Use direct scalar/List<Int32> selection: TakeArray in our pinned Arrow
 			// v17 fork has quadratic allocation/copy costs for strings and lists.
 			// Reconsider TakeArray after upgrading Arrow with the performance fixes
 			// in apache/arrow-go#557 and #573 (released in v18.5.0).

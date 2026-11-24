@@ -1,6 +1,6 @@
 # Grep NGRAM Index Acceleration
 
-Created: 2026-11-03. Updated: 2026-11-09.
+Created: 2026-11-03. Updated: 2026-11-16.
 
 This document describes the current implementation and is the single maintained reference for Grep/NGRAM index design. Grep arguments, matching results, and the overall QueryScan protocol are covered by the [Grep integration design](20261008-segcore-grep-ripgrep-integration.md). Historical proposals and development logs are excluded; measured performance and its verification limits are summarized in Section 7.
 
@@ -65,7 +65,7 @@ The tree contains `True`, `Literal`, `And`, and `Or`. A Literal denotes a case-s
 | Repetition with minimum at least one | Inner necessary condition; the repetition count may be omitted |
 | Empty expression, assertion, or character class without a useful bounded expansion | True |
 
-Small character classes and case variants may be enumerated within the budget. Dropping some AND constraints is safe; dropping a viable OR branch is not. If an OR branch cannot be represented, the condition must be conservatively weakened. Regex validation and final matcher compilation still run: extraction fallback must not make an invalid pattern acceptable.
+Small character classes and case variants may be enumerated within the budget. Dropping some AND constraints is safe; dropping a viable OR branch is not. If an OR branch cannot be represented, the condition must be conservatively weakened. When matching is requested, regex validation and final matcher compilation still run: extraction fallback must not make an invalid pattern acceptable. A final `-m 0` bypasses compilation and extraction entirely in the segment adapter.
 
 ### 3.1 Extraction and Encoding Budgets
 
@@ -184,7 +184,8 @@ These budgets are C++ implementation constants, not paramtable settings or RPC/C
 - The Index path collects candidate offsets per window rather than materializing every candidate offset at once. Ordinary Scan/Index raw reads still use window-sized batches and are not uniformly capped by the remaining limit; Rust matching stops according to the remaining quota.
 - Owned TEXT reads deduplicate repeated physical offsets within a batch, then map the fetched values back to all input positions.
 - After candidate generation, `index.reset()` releases the reader pin while the candidate bitmap remains independently owned. RAII releases resources on early return or exceptions; the sealed read lease continues to cover raw reads.
-- `-m` caps matching lines per record, not index candidate count or the Query limit. `-m 0` returns an empty result after validating and compiling the pattern, without index lookup or raw reads. Positive values retain the routing described above.
+- `-m` caps matching lines that open context windows per record, not index candidate count or the Query limit. Matches in pending after-context retain rg JSON submatches without extending the window. A final `-m 0` returns a typed empty result after argument/request validation but before regex compilation, index lookup or raw reads; invalid regex syntax and literal LF are skipped in this case. Cancellation checks remain active. Positive values retain the routing described above.
+- `-A/-B/-C` only expand the returned lines within matching documents. They do not change necessary conditions, NGRAM candidate selection or Probe eligibility. Context is read from each candidate's original text and charged to the existing output budget. See [Grep context lines](20261008-segcore-grep-ripgrep-integration.md#context-lines--a---b---c).
 
 Code: [SegmentGrep.cpp](../../../internal/core/src/grep/SegmentGrep.cpp).
 
@@ -193,6 +194,11 @@ Code: [SegmentGrep.cpp](../../../internal/core/src/grep/SegmentGrep.cpp).
 [QueryScan](../../../internal/querynodev2/segments/query_scan.go) runs an independent chain for each segment with the same request limit, waits for completion, and then merges results. Reaching the global limit does not immediately cancel other segments. Therefore, at most one NGRAM lookup per native call does not mean at most one lookup per request.
 
 ## 7. Performance Test Results
+
+These are historical measurements from the earlier NGRAM work. They predate
+the current context, rg JSON submatch and scanning-path changes, and are not
+performance or validation results for the current PR HEAD. New performance
+claims require fresh measurements with identified source revisions and inputs.
 
 ### 7.1 Measurement Method
 

@@ -1,7 +1,7 @@
 # Grep: QueryScan Execution and ripgrep Integration
 
 - **Created:** 2026-10-08
-- **Updated:** 2026-11-04
+- **Updated:** 2026-11-18
 - **Scope:** Current Grep implementation: matching engine, QueryScan execution,
   in-process Arrow transport and distributed computed results.
 - **Engine dependency:** ripgrep `15.2.0`, commit `e89fff89ac9af12e8d4ce9d5fd07beb408ca730f`
@@ -15,8 +15,9 @@ worker merges those rows, retrieves ordinary output fields for winners, and
 exports one protobuf result. In-process row data uses Arrow; RPC uses protobuf.
 
 Proxy forwards raw arguments. QueryNode validates the single-Grep chain and
-binds each segment; native code compiles one matcher and creates one session per
-segment call. GrepOp returns row selection and JSON details. The pipeline reads
+binds each segment; unless the final `-m` is zero, native code compiles one
+matcher and creates one session per segment call. GrepOp returns row selection
+and JSON details. The pipeline reads
 identities separately afterward. Each sealed native Grep call acquires its own
 read lease and captures its own snapshot. Candidate, identity and output reads
 do not share a request-owned snapshot object. Sealed segments may use NGRAM candidate bitmaps and bounded probing before
@@ -38,7 +39,7 @@ remains separate because it also serves other operators.
 - [Engine ownership](#6-ownership-and-concurrency)
 - [Budgets and failure semantics](#7-budgets-cancellation-and-failure-semantics)
 - [Verification](#11-verification)
-- [Planned element_filter support](#13-planned-support-element_filter-with-grep)
+- [element_filter support](#13-element_filter-with-grep)
 
 ## 1. Motivation and Integration Context
 
@@ -75,13 +76,13 @@ input; values are never concatenated across records. C++ skips database NULLs
 and retains the mapping from batch positions to segment offsets.
 
 The request supplies an rg-style `arguments` string and a separate field name.
-Supported flags are repeated `-e`, `-F`, `-i`/`-s`, `-w`/`-x`, and `-m`, including the
+Supported flags are repeated `-e`, `-F`, `-i`/`-s`, `-w`/`-x`, `-m`, and `-A`/`-B`/`-C`, including the
 exact aliases in [the argument grammar](#51-argument-string-grammar-and-whitelist).
 Parsing and compilation happen on the execution node. The matcher performs no
 file traversal, external command execution, network access or terminal output.
 
 Matching is LF line-oriented. Matching details include line numbers and line
-start byte offsets within the field. Context, multiline, smart case, CRLF normalization,
+start byte offsets within the field. Context lines are supported; multiline, smart case, CRLF normalization,
 fragment-only output,
 inversion, counts, PCRE2, transcoding and replacement are unsupported. The
 parser rejects unlisted flags, including flags whose supplied value would make
@@ -110,7 +111,7 @@ Rust 1.89 toolchain at the independent-build level.
 | `grep` | 0.4.1 | Facade used by `milvus-grep-core` |
 | `grep-matcher` | 0.1.9 | Matching interface and occurrence enumeration |
 | `grep-regex` | 0.1.14 | Pattern compilation and matching |
-| `grep-searcher` | 0.1.17 | Retained facade dependency; unused by the current matching path |
+| `grep-searcher` | 0.1.17 | In-memory line search, context windows, limits and coordinates |
 | `grep-cli` | 0.1.12 | Retained default dependency |
 | `grep-printer` | 0.3.1 | Retained default dependency |
 | `grep-pcre2` | 0.1.10 | Optional; not enabled in version one |
@@ -133,7 +134,7 @@ dependency graph. Refer to the selected
 [upstream MIT notice](https://github.com/BurntSushi/ripgrep/blob/e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/LICENSE-MIT)
 for project-wide third-party distribution notices; no local copy is maintained.
 
-Parameter tokenization, whitelist enforcement, conflicts and normalization
+Parameter tokenization, whitelist enforcement, precedence and normalization
 belong in shared Go code called by the query execution entry. Rust owns engine validation, compilation and matching.
 The core manifest records the upstream revision; both the standalone and binding
 lockfiles pin the resolved source and transitive dependencies.
@@ -186,15 +187,17 @@ milvus-grep-core = { path = "../../grep" }
 grep = { git = "https://github.com/BurntSushi/ripgrep.git", rev = "e89fff89ac9af12e8d4ce9d5fd07beb408ca730f" }
 ```
 
-Matching uses `grep::matcher` and `grep::regex`; the facade also retains the
-Searcher dependency. The default facade features do not launch the CLI or
-expose all of its behaviors.
+Matching uses `grep::matcher`, `grep::regex` and `grep::searcher`. Every request
+uses Searcher for line traversal, context windows and match limits, including
+requests without context. A Sink enumerates line-local spans and produces Milvus
+results. The default facade features do not launch the CLI or expose all of its
+behaviors.
 
 The pinned upstream command-line parser lives in the executable's private
 `crates/core/flags` module, not in the facade's public API. `grep::cli` is not
 an argument parser for rg. Milvus does not export or depend on that parser.
 The pure Go package `internal/util/function/grep` implements the argument grammar below: tokenize the
-string, check each option occurrence against the whitelist, validate conflicts,
+string, check each option occurrence against the whitelist, apply precedence,
 and produce typed patterns/options. The Query protocol carries the original
 argument string. There is no shell, rg configuration loading,
 process argv access, or upstream `HiArgs` construction on this path.
@@ -235,7 +238,7 @@ handles do not enter the distributed Query protocol.
 
 QueryScan runs Grep after filter/MVCC produces candidate offsets. Native code reads matching text in batches; the Go chain handles offsets and matching details. Only matching rows receive PK/timestamp lookup. The worker merges by PK/timestamp, reads ordinary output_fields for winners, then exports one protobuf result. Candidates, identities and details use in-process Arrow; RPC uses protobuf.
 
-Query accepts one QueryScan chain containing exactly one independent Grep operator. It declares one schema VarChar/Text input and one detail output. The text field is a native read dependency; the runtime DataFrame contains only `$seg_offset`. Dynamic fields, expression children, multiple Grep operators and subsequent operators are unsupported. Count, aggregation, GROUP BY, ORDER BY, element-level Query and Query iterator are excluded.
+Query accepts one QueryScan chain containing exactly one independent Grep operator. It declares one schema VarChar/Text input and one detail output. The text field is a native read dependency; the runtime DataFrame carries `$seg_offset` and, for element-level Query, `$query_element_indices`. Dynamic fields, expression children, multiple Grep operators and subsequent operators are unsupported. Document-level Grep can accompany `element_filter`; matching struct-array element text remains outside this scope. Count, aggregation, GROUP BY, ORDER BY and Query iterator are excluded.
 
 `output_columns` controls detail export; a chain exporting columns must have a name. Computed names cannot collide with collection or system fields. The protobuf stage is `FunctionChainStageQueryScan`, and the Go stage is `query_scan`. Static preparation validates structure, fields and output schema. Each segment creates its own chain/GrepOp, parses arguments and binds the segment. Native code compiles a matcher and creates a session per segment call, reusing them across that call's text batches.
 
@@ -265,9 +268,9 @@ This example illustrates FunctionChain fields, not SDK invocation syntax:
 }
 ```
 
-Grep accepts only `arguments`. `QueryScanBuildContext.QueryLimit` supplies the worker Query limit, including the offset allowance prepared by Proxy, as the per-segment native match cap. The example uses a worker cap of 25; Proxy applies offset=5 and limit=20. Unlimited (-1) maps to MaxInt64. The cap counts matching documents, not lines or spans. Cross-segment deduplication and final paging can still return fewer documents than requested.
+Grep accepts only `arguments`. `QueryScanBuildContext.QueryLimit` supplies the worker Query limit, including the offset allowance prepared by Proxy, as the per-segment native match cap. The example uses a worker cap of 25; Proxy applies offset=5 and limit=20. Unlimited (-1) maps to MaxInt64. In document mode the cap counts matching documents, not lines or spans; element mode counts selected elements and retains complete document results until final trimming (Section 13). Cross-segment deduplication and final paging can still return fewer results than requested.
 
-Candidate retrieval uses the candidate row cap and byte budget, without truncating at the Query limit. `function.grep.maxScanRows=0` leaves candidate row count uncapped; a positive value selects an ordered prefix. When more candidates may remain, HasMoreResult is retained and a warning is logged, so enabling this cap can make results incomplete. The flag is aggregated downstream; it does not represent an extra Grep probe of unread text.
+Candidate retrieval retains all filter/MVCC candidates subject to its byte budget, without truncating at the Query limit. `function.grep.maxScanRows` is a soft threshold for text rows scanned per segment, checked between read batches; the last batch may exceed it. Zero disables the threshold. NGRAM-rejected rows and NULLs do not count; Probe scans count toward the same threshold. The threshold is an internal scan-loop guard; it does not add result metadata or change HasMoreResult. Stopping with unread candidates can produce incomplete results. No extra probe is performed to determine whether unread candidates actually match.
 
 Public computed output uses `QueryResults.fields_data`, identified by field name and aligned with ordinary result rows. Internal retrieve results keep computed columns in `computed_results`. Span endpoints use Int64.
 
@@ -286,7 +289,7 @@ Assume Grep reads `message`, exports `matches`, and the ordinary output projecti
 
 The entry point is [RunQueryScanPipeline](../../../internal/querynodev2/segments/query_scan.go), selected by [QueryTask](../../../internal/querynodev2/tasks/query_task.go) when a query chain exists.
 
-**1. Retrieve offsets.** After filter/MVCC, candidate mode retains the existing `find_first_n` PK traversal order, without the ordinary Query limit. `maxScanRows` and the candidate byte budget still apply; offsets are not re-sorted by physical position.
+**1. Retrieve offsets.** After filter/MVCC, candidate mode retains the existing `find_first_n` PK traversal order, without the ordinary Query limit. The candidate byte budget still applies; offsets are not re-sorted by physical position.
 
 ```text
 RetrieveSegmentResult
@@ -295,7 +298,7 @@ RetrieveSegmentResult
 └─ Record: non-null $seg_offset: Int64[N]
 ```
 
-The chain receives one logical chunk containing only offsets. Segment identity lives in the execution binding, not in a per-row column. An offset is meaningful only within its segment. No PK, timestamp, text or output columns are exported yet, although candidate traversal can internally access PK metadata. Native code may construct protobuf repeated data internally, but the QueryScan C++/Go boundary exports row data through Arrow C Data and keeps only scalar statistics in the protobuf header. See [ExecPlanNodeVisitor.cpp](../../../internal/core/src/query/ExecPlanNodeVisitor.cpp), [segment_c.cpp](../../../internal/core/src/segcore/segment_c.cpp) and [retrieve_arrow_result.go](../../../internal/util/segcore/retrieve_arrow_result.go).
+The chain receives one logical chunk containing `$seg_offset` and, in element mode, `$query_element_indices: List<Int32>`. The data-flow table and examples in this section use document mode; element mode retains the companion list through the same stages. Segment identity lives in the execution binding, not in a per-row column. An offset is meaningful only within its segment. No PK, timestamp, text or output columns are exported yet, although candidate traversal can internally access PK metadata. Native code may construct protobuf repeated data internally, but the QueryScan C++/Go boundary exports row data through Arrow C Data and keeps only scalar statistics in the protobuf header. See [ExecPlanNodeVisitor.cpp](../../../internal/core/src/query/ExecPlanNodeVisitor.cpp), [segment_c.cpp](../../../internal/core/src/segcore/segment_c.cpp) and [retrieve_arrow_result.go](../../../internal/util/segcore/retrieve_arrow_result.go).
 
 **2. Grep output.** The native runner reads text in batches using offsets; it does not build a complete Go `message` column. Its Arrow output is:
 
@@ -304,19 +307,33 @@ positions: Int64[M]
 details: Binary[M]  // milvus.data_type = JSON
 ```
 
-Positions are strictly increasing indices into the immediate input offset array, not physical offsets. Each Binary details row encodes a JSON array of matching-line objects. Content is the matching line, not necessarily the whole document. Paired starts/ends describe `[start, end)` UTF-8 byte ranges relative to that line, not character indices. Each line also includes `line_number` (one-based within the original field) and `line_start_offset` (zero-based UTF-8 byte offset within that field). Preceding unmatched lines, empty lines and newline bytes count toward these coordinates. LF separates lines; CR is preserved, and a terminal LF does not create an extra line. Add `line_start_offset` to a span endpoint to obtain its field-relative byte offset. Coordinates reset for each field value.
+Positions are strictly increasing indices into the immediate input offset array, not physical offsets. Each Binary details row encodes a JSON array of matching and requested context lines. Every line has an explicit `type`: `"match"` or `"context"`. Matching lines always include paired `starts`/`ends` arrays (possibly empty); context lines omit both arrays. Overlapping context windows share lines, which appear once in original order with no per-match ownership. Content is one complete line, not necessarily the whole document. Paired starts/ends describe `[start, end)` UTF-8 byte ranges relative to that line, not character indices. Each line also includes `line_number` (one-based within the original field) and `line_start_offset` (zero-based UTF-8 byte offset within that field). Preceding unmatched lines, empty lines and newline bytes count toward these coordinates. LF separates lines; CR is preserved, and a terminal LF does not create an extra line. Add `line_start_offset` to a span endpoint to obtain its field-relative byte offset. Coordinates reset for each field value.
 
 ```text
 input offsets = [12, 37, 90]
 positions     = [0, 2]
 details       = [
-  [{content: "foo bar foo", line_number: 1, line_start_offset: 0, starts: [0, 8], ends: [3, 11]}],
-  [{content: "foo", line_number: 1, line_start_offset: 0, starts: [0],    ends: [3]}]
+  [{type: "match", content: "foo bar foo", line_number: 1, line_start_offset: 0, starts: [0, 8], ends: [3, 11]}],
+  [{type: "match", content: "foo", line_number: 1, line_start_offset: 0, starts: [0],    ends: [3]}]
 ]
 
 After chain selection:
 $seg_offset = [12, 90]
 matches     = [first document's details, second document's details]
+```
+
+For `-C1 -e error`, `starting\nerror error\nworking\nerror again\nfinished`
+produces the following single document value. The middle context line belongs
+to both windows and is emitted only once:
+
+```json
+[
+  {"type":"context","content":"starting","line_number":1,"line_start_offset":0},
+  {"type":"match","content":"error error","line_number":2,"line_start_offset":9,"starts":[0,6],"ends":[5,11]},
+  {"type":"context","content":"working","line_number":3,"line_start_offset":21},
+  {"type":"match","content":"error again","line_number":4,"line_start_offset":29,"starts":[0],"ends":[5]},
+  {"type":"context","content":"finished","line_number":5,"line_start_offset":41}
+]
 ```
 
 [GrepOp.Execute](../../../internal/util/function/chain/operator_grep.go) returns positions as RowSelection and retains details directly as the named JSON Binary output column. Positions do not remain a DataFrame column. If details are not declared as exported output, pruning can discard them while preserving selection. The native type is in [native/types.go](../../../internal/util/function/grep/native/types.go); construction and import validation are in [SegmentGrep.cpp](../../../internal/core/src/grep/SegmentGrep.cpp) and [grep.go](../../../internal/util/segcore/grep.go).
@@ -385,8 +402,8 @@ or collection field ID:
 
 ```text
 ComputedResults[column named matches].Scalars.JsonData.Data
-├─ document 0: [{"content":"foo bar foo","line_number":1,"line_start_offset":0,"starts":[0,8],"ends":[3,11]}]
-└─ document 1: [{"content":"foo","line_number":1,"line_start_offset":0,"starts":[0],"ends":[3]}]
+├─ document 0: [{"type":"match","content":"foo bar foo","line_number":1,"line_start_offset":0,"starts":[0,8],"ends":[3,11]}]
+└─ document 1: [{"type":"match","content":"foo","line_number":1,"line_start_offset":0,"starts":[0],"ends":[3]}]
 ```
 
 Each entry is one UTF-8 JSON byte string. Zero-row responses retain an empty
@@ -633,10 +650,18 @@ produces the following logical spec (field identity is resolved by GrepOp on Que
 | `-s` | `--case-sensitive` | Case-sensitive; also the default |
 | `-w` | `--word-regexp` | Word boundary mode |
 | `-x` | `--line-regexp` | Whole-line boundary mode |
-| `-m COUNT` | `--max-count COUNT` | Keep the first COUNT matching lines per field value; omitted means unlimited |
+| `-m COUNT` | `--max-count COUNT` | Limit matching lines that open context windows; pending after-context can contain additional matches; omitted means unlimited |
+| `-A COUNT` | `--after-context COUNT` | Include COUNT following lines |
+| `-B COUNT` | `--before-context COUNT` | Include COUNT preceding lines |
+| `-C COUNT` | `--context COUNT` | Default both context sides to COUNT; explicit -A/-B take precedence |
 
-Support attached `-ePATTERN`, `--regexp=PATTERN`, `-mCOUNT`, and `--max-count=COUNT`. Short flags can be grouped
-(e.g. `-Fi` or `-im2`); `e` and `m` consume the remainder of their token or the next token.
+Support attached `-ePATTERN`, `--regexp=PATTERN`, `-mCOUNT`, and `--max-count=COUNT`. Context counts also support attached short values (`-C2`) and long `=COUNT` values. Short flags can be grouped
+(e.g. `-Fi` or `-im2`); `e`, `m`, `A`, `B`, and `C` consume the remainder of their token or the next token.
+Attached short values also accept one leading `=` separator: `-e=foo`,
+`-m=+1`, `-A=1`, `-B=1`, `-C=1`, and grouped forms such as `-Fie=foo`.
+Strip only that separator: `-e==foo` and `-e =foo` both search for `=foo`.
+`-e=` supplies an empty pattern; `-m=` supplies an invalid empty count and
+must not consume the following token as its value.
 The next token after a separated `-e` is always its value, even if it starts
 with `-`: `-e -C` searches for the pattern `-C`, not context. A missing next token
 is an error. Boolean flags take no values; `--ignore-case=false` is invalid.
@@ -646,11 +671,13 @@ Repeated `-e` appends patterns, including empty ones; `-e ""` is valid. Patterns
 are compiled as one ordered OR expression, not searched independently. Repeated
 `-F`, `-w`, or `-x` is idempotent. For `-i`/`-s`, the last occurrence wins.
 For repeated `-m`/`--max-count`, the last occurrence wins. COUNT is a decimal
-uint64 (0 through 18446744073709551615); negative, signed, fractional, empty,
-overflowing and non-decimal values are rejected. A missing value is a typed
+uint64 (0 through 18446744073709551615), with one optional leading `+` as in rg
+(`-m +1`, `-m+1`, `--max-count=+1`). Negative, fractional, empty, overflowing,
+non-decimal and multiple-sign values are rejected. A missing value is a typed
 ParameterMissing error; a malformed value is ParameterInvalid.
-Combining `-w` and `-x` is an error, irrespective of order, rather than inheriting
-rg's precedence. `--` ends options, but all following positional tokens are
+For `-w`/`-x` (including their long aliases and grouped short forms), the last
+occurrence wins, matching rg: `-wx` selects whole-line mode and `-xw` selects
+word mode. `--` ends options, but all following positional tokens are
 rejected. A final bare `--` is allowed if a pattern was already supplied.
 There is no positional pattern, filename, executable name, or implicit empty
 pattern. Use `-e` for every pattern.
@@ -660,7 +687,7 @@ at the execution node as typed request-input errors. The diagnostic names the of
 option and reason; do not parse error messages for control flow. These Go
 parsing failures do not cross the Rust C API. There is no best-effort
 acceptance, ignored option, or fallback to ordinary Query. An unsupported flag
-fails even if its value would disable its effect, such as `-C 0`.
+fails even if its value would disable its effect, such as `--max-columns 0`.
 
 | Actual argument string | First-phase outcome |
 |---|---|
@@ -668,9 +695,10 @@ fails even if its value would disable its effect, such as `-C 0`.
 | `-F -e 'a.b' -e timeout` | Accepted; two literal patterns |
 | `-i -s -e error` | Accepted; case-sensitive |
 | `-e ""` | Accepted; explicit empty pattern |
-| `-i -C 2 -e "user_id=[0-9]{3,6}\b.*timeout"` | Error: context is outside the initial scope |
+| `-i -C 2 -e "user_id=[0-9]{3,6}\b.*timeout"` | Accepted; includes two context lines on each side |
 | `-P -e error` / `-U -e error` / `-S -e error` | Error: unsupported option |
-| `-w -x -e error` | Error: conflicting boundary modes |
+| `-w -x -e error` / `-wx -e error` | Accepted; whole-line matching |
+| `-x -w -e error` / `-xw -e error` | Accepted; word matching |
 | `-e` / `-e "unterminated` / `-e error app.log` | Error: missing value, unclosed quote, or positional token |
 | `-e '['` | Error: invalid regex (`MG_GREP_INVALID_PATTERN`) |
 
@@ -705,26 +733,30 @@ Spec, but native compilation rejects it before matching.
 
 #### Per-field matching-line cap (`-m` / `--max-count`)
 
-`-m M` is independent of Query limit/offset. Query limit counts matching records;
+`-m M` is independent of Query limit/offset. Query limit counts matching records
+in document mode and selected elements in element mode;
 `-m` keeps the first M matching LF-delimited lines of each field value. Every
-retained line includes all of its spans; multiple patterns or occurrences on
+retained matching line includes line-local spans; multiple patterns or occurrences on
 one line still count as one line. Line numbers and byte offsets refer to the
 original field and are not renumbered after skipped lines. Counters reset for
 every input, including repeated segment offsets, and across native batches.
-Without `-m`, all matching lines are returned as before. Context and multiline
-options remain unsupported.
+Without `-m`, all matching lines are returned as before. Context is emitted around retained matching lines; multiline matching remains unsupported.
 
 The count is matching configuration, not a service resource budget. Rust stops
-before matching the next line once the cap is reached; retained output still
+opening new context windows once the cap is reached, but emits pending after-context and highlights any matches there without extending the window; retained output still
 has to fit the existing byte budget, and errors never become partial success.
 The memory-only API continues to validate all supplied input UTF-8 before any
 matching, including bytes beyond the matching-line cap, and cancellation remains
 observable. This cap does not promise to avoid UTF-8 validation or LOB reads
 already performed by the segment adapter.
 
-`-m 0` still parses and compiles the pattern, then the segment adapter returns
-a typed empty result without querying NGRAM or reading field values. It does
-not hide invalid regexes or an already-cancelled request. Positive `-m` values
+`-m 0` still parses arguments, but the segment adapter returns a typed empty
+result before regex compilation, without querying NGRAM or reading field values.
+Like rg, it accepts an otherwise invalid regex such as `[` or a pattern
+containing literal LF when the final matching-line cap is zero. Literal-LF
+validation therefore follows parsing of all `-m` occurrences; a later positive
+cap restores rejection. Argument syntax, UTF-8/NUL validation and cancellation checks still
+apply. Positive `-m` values
 do not change NGRAM necessary conditions or bounded VARCHAR prefix-scan
 eligibility. The prefix row budget uses Query's record limit, not the per-field
 matching-line cap; a separate byte budget also bounds the prefix. There is no
@@ -735,10 +767,22 @@ proto change is needed. Go Spec, the Go/C++ scan options, and C++/Rust match
 options carry the count and its presence. The generated Rust C header and all
 native/Go consumers must be rebuilt together because this is a same-build ABI.
 
+#### Context lines (`-A` / `-B` / `-C`)
+
+Context is per field value, in original line order, with overlapping windows
+merged and each line emitted at most once. Context counts accept one optional
+leading `+`, like `-m`; zero disables that side. Repeated flags use their last value.
+Explicit `-A` and `-B` override their side of `-C` regardless of order.
+Context lines omit `starts`/`ends`; matching lines carry line-local spans,
+including legal zero-length matches at the line end.
+`-m` counts matching lines that open windows; pending after-context is still emitted after
+the cap, and matches there retain spans without extending the window (ripgrep semantics). Context never selects a nonmatching document or changes NGRAM candidates.
+All context bytes and metadata count toward existing result budgets.
+
 ### 5.2 Normalized Spec and Input Contract
 
 The normalized matching options are `pattern_kind` (regex/literal), `case_mode`
-(sensitive/insensitive), `boundary` (none/word/line), and optional `max_count`.
+(sensitive/insensitive), `boundary` (none/word/line), and optional `max_count`, plus unsigned `before_context` and `after_context` counts (default zero).
 The in-process C ABIs represent presence separately as `has_max_count` (0/1),
 so explicit zero and unlimited remain distinct. Zero initialization selects
 regex, case-sensitive, no boundary or matching-line-count restriction. Reject unknown enum
@@ -746,15 +790,17 @@ values when constructing the Go specification and at the Rust compile boundary.
 Word mode uses the pinned builder's
 Unicode word matching semantics; it is not a tokenizer or Chinese segmentation.
 
-The shared builder fixes Unicode on, LF line-oriented matching, and disables
+The shared builder defaults to Unicode, uses LF line-oriented matching, and disables
 cross-line search. Set the matcher line terminator to LF and configure line
-anchors consistently. No literal LF is accepted in a normalized pattern;
+anchors consistently. Literal LF is rejected unless the final `-m` is zero
+(in which case the pattern is never compiled or executed);
 regex expressions requiring LF are rejected by the line matcher builder.
 Character classes follow that builder's line-terminator restriction. Literal
 mode treats backslashes as ordinary pattern bytes after argument tokenization.
-In regex mode, reject Unicode-disabling inline constructs with syntax-aware
-validation; other inline flags follow the pinned builder and cannot enable
-cross-line scanning. Engine validation and execution use the same compiled matcher.
+Unicode is enabled by default. Regex inline flags, including scoped or global
+`(?-u)`, follow the pinned rg builder; byte mode can match part of a UTF-8
+character but cannot enable cross-line scanning. Engine validation and execution
+use the same compiled matcher.
 
 `MgGrepBytes` is length-delimited, not a C string. Patterns and field values
 must be valid UTF-8. Normalized patterns cannot contain literal NUL (consistent
@@ -785,26 +831,44 @@ The Rust/C API has one output shape:
   empty-content line, which an empty pattern selects with span `[0, 0]`.
 - Matching and occurrence enumeration use the same logical line boundaries.
   The matcher runs on the complete logical line, not a cropped matching
-  fragment. Line anchors and absolute anchors are evaluated against that input.
+  fragment, after removing its terminal LF. `\A`/`\z` refer to this logical
+  line's start/end, not the entire field or a reader buffer. Searcher retains
+  its upstream anchor-aware fallback for line selection; span enumeration uses
+  only the selected line. Preceding/following lines and context options cannot
+  change that line's spans.
 - Enumerate the combined matcher in non-overlapping order, retaining upstream
-  tie/alternative order and empty-after-nonempty suppression. Omit any empty
-  occurrence inside a UTF-8 code point. Continue enumeration to subsequent
-  boundaries without duplication or looping. Nonempty span endpoints must also
-  be valid character boundaries. These are acceptance requirements, not an
-  assumption that `grep-regex`'s byte-oriented empty iterator already does it.
+  tie/alternative order and empty-after-nonempty suppression. Preserve its byte
+  offsets without rg JSON printer filtering. Retain legal zero-length matches
+  at the line end, regardless of terminal LF. Empty matches and byte-mode
+  nonempty matches may start or end inside
+  a UTF-8 code point. For example, `(?-u:\xA9)` matches `[1, 2)` in `é`.
+  The full returned line content remains valid UTF-8; consumers must interpret
+  spans as byte ranges, not character indices or independently valid strings.
 - Each selected logical line appears once, with all eligible spans; retain
   identical content from different lines as distinct entries in line order.
-  Every returned line has at least one span, including an empty span where
-  appropriate. `line_count > 0` is the record selection decision.
+  Matching lines carry `type: "match"` and line-local `starts`/`ends` arrays,
+  including zero-length EOF matches. Context lines carry `type: "context"`
+  and omit both arrays. Consumers use the explicit type rather than inferring
+  line identity from span count; the JSON boundary still accepts empty match
+  arrays for compatibility. A nonempty result always contains at least one selected
+  matching line, so `line_count > 0` remains the record selection decision.
 - Spans satisfy `0 <= start <= end <= content.len` and address UTF-8 bytes of
   that line's returned content. They are not original-field offsets.
   `line_number` is one-based within the original field; `line_start_offset`
   is its zero-based UTF-8 byte offset, including preceding newline bytes.
   Count unmatched and empty lines too, and reset coordinates for each input.
-  Do not duplicate matched text or return roles or field identifiers.
-- Success includes matching lines up to the explicit per-field `-m` cap,
-  with all spans on each retained line, for every input in the batch. Without
-  that cap all matching lines are retained; there is no silent budget truncation. The C++
+  Do not duplicate matched text or return field identifiers.
+- Success includes the windows around the first `-m` matching lines, with all
+  line-local spans on retained matching lines and no span fields on nonmatching context lines.
+  Following rg/Searcher, lines reported as matches inside pending after-context
+  retain spans without extending the window, so the returned matching-line count
+  can exceed `-m`. This is not guaranteed for every pattern: with `\A`/`\z`,
+  Searcher's anchor-aware fallback can report a trailing line as `context`, even
+  when it matches in isolation. Context callbacks are preserved without spans;
+  they are not reclassified by line-local matching. For example, `-m 1 -A 2
+  -e '\Aerror'` on `error\nerror\nx` returns line 1 as `match` with span `[0, 5)`,
+  and lines 2 and 3 as `context` without spans.
+  Without that cap all matching lines are retained; there is no silent budget truncation. The C++
   runner caps the number of inputs in each call by the remaining Query match
   quota, so it never needs to truncate a returned record. Resource failure,
   deadline and cancellation produce no Result.
@@ -828,7 +892,7 @@ into the other.
 | Default `.` behavior | Cannot cross a line boundary | Can match LF (`dot_nl` is enabled) |
 | Result | Matching rows and optional JSON line details | Boolean predicate selecting rows |
 
-Grep enables Unicode matching in the Rust engine. RE2 uses UTF-8 encoding,
+Grep enables Unicode matching by default in the Rust engine. RE2 uses UTF-8 encoding,
 but that does not make its character-class or word-boundary semantics
 equivalent to Grep's. Interpret each pattern according to its own engine and
 options. See [Grep matcher configuration](../../../internal/core/thirdparty/grep/src/plan.rs),
@@ -854,13 +918,76 @@ Use both conditions when both are intended. Repeating a Grep pattern in a
 automatic index prefilter for Grep must retain all possible Grep matches;
 extra candidates may be removed by the final Grep evaluation.
 
+### 5.5 Compatibility Boundary with rg
+
+The reference is ripgrep 15.2.0 at revision
+`e89fff89ac9af12e8d4ce9d5fd07beb408ca730f`, using its default regex engine
+in non-multiline search mode. Compatibility applies to the options in Section
+5.1 and patterns admitted by the input contract. It does not promise every rg
+CLI feature or the same outer JSON schema. Line selection and coordinates
+follow the supported non-multiline search rules. Span enumeration deliberately
+uses independent logical lines rather than rg JSON's printer buffer context.
+
+For differential tests, treat each non-NULL field value as an independent
+regular-file input and run rg with `--no-config --no-mmap --text --encoding none`. These flags fix
+the reference environment; they are not additional accepted Milvus arguments.
+Pass already-tokenized patterns/options as argv entries, without shell
+expansion. Compare results only for the same input values and effective options.
+
+| Area | Contract |
+|---|---|
+| Supported options | Match rg's pattern combination, case modes, word/line modes, matching-line cap and context windows. The last `-i`/`-s`, `-w`/`-x`, or repeated `-m` wins. Explicit `-A`/`-B` override their side of `-C`; counts accept one optional leading `+`. |
+| Zero matching-line cap | After argument and request validation, a final `-m 0` returns an empty result without regex compilation. Thus `-m 0 -e '['` succeeds with no matches, while `-m 0 -m 1 -e '['` reports an invalid regex. Cancellation and service validation remain Milvus concerns. |
+| Matching and byte offsets | Follow the pinned rg matcher, including Unicode-disabling inline flags and empty/nonempty matches inside UTF-8 characters. Forward upstream search hints so rg chooses its own anchor-aware fallback. |
+| Text input | Patterns and stored field values must be valid UTF-8. Preserve BOM and NUL in field content; do not sniff encodings, transcode, or apply binary-file detection. LF separates lines; retain CR. Byte-mode matching does not relax input UTF-8 validation. |
+| Result representation | Return explicit match/context types and original line coordinates. Enumerate spans on the line content without terminal LF, retaining zero-length matches at its end. Context lines omit span arrays. |
+| Database execution | Apply filter/MVCC, Query limit/offset, element pagination and configured resource limits according to the Milvus query contract. These are outside rg CLI equivalence. A configured soft text-scan threshold can make results incomplete; see [request and row limits](#request-and-row-limits). |
+
+Intentional differences from rg JSON's printer:
+
+- The empty pattern on both `"ab"` and `"ab\n"` returns `[0,0)`, `[1,1)`,
+  and `[2,2)`. `$` on either input returns `[2,2)`. A legal empty match at
+  the logical line's end is not filtered out.
+- `\Aerror`, `error\z`, and `\Aerror\z` on both `"prefix\nerror"` and
+  `"prefix\nerror\nlast\n"` return `[0,5)` on the `error` line. Reader-buffer
+  position does not change the spans, and `-A/-B/-C` do not change them either.
+- Unicode and explicit byte-mode matching still use the pinned engine's byte
+  offsets. `(?-u:\xA9)` on `é` continues to return `[1,2)`. Empty-match
+  enumeration may also visit byte positions inside a UTF-8 character; this
+  change does not add a Unicode-boundary filter.
+- Milvus preserves BOM/NUL and requires valid UTF-8 input. Compare rg using the
+  explicit text/encoding settings above, not its default file handling.
+
+Validation separates line selection/context/coordinates from span semantics.
+Common patterns retain differential tests against rg JSON. Anchor and EOF
+cases use explicit Milvus expectations, including long prefixes beyond reader
+buffer sizes, terminal-LF variants, context windows, and Session reuse after
+budget errors. Service-level tests exercise growing, sealed and NGRAM routes.
+Record concrete runs rather than claiming untested combinations or deployments.
+
 ## 6. Ownership and Concurrency
 
 The [Go segcore adapter](../../../internal/util/segcore/grep.go) flattens parsed
 patterns into a byte buffer and lengths array, then passes them with scalar
-options to the synchronous `ScanGrepByOffsets` call. `runtime.KeepAlive` keeps
-the borrowed Go inputs alive through that call. No Go struct containing nested
-Go pointers is passed as a Rust ABI view.
+options in a `CGrepScanRequest` to the synchronous `ScanGrep` call. Go pins the pattern and length backing buffers with `runtime.Pinner` while passing this pointer-containing request. `runtime.KeepAlive` keeps
+the borrowed Go inputs alive through that call. The C++/Rust ABI views are assembled in native memory; Rust does not retain the Go request or its buffers.
+
+The candidate input is an Arrow RecordBatch exported through the C Data
+Interface. GrepOp references the DataFrame's existing single-chunk columns;
+export/import shares their buffers without copying column payloads. The native
+entry requires exactly one non-null `$seg_offset: Int64` column, looked up by
+name. Other columns, including `$query_element_indices: List<Int32>`, travel in
+the same record. The element column supplies per-document result contributions;
+other companion columns are ignored until a consumer needs them. Future
+consumers can read additional named columns without extending the C argument list.
+
+C++ import consumes the exported descriptors and releases the imported record
+before the synchronous call returns. Go defers release of any unconsumed
+schema/array descriptors on early failure. Native code never retains input
+buffers after return. Outputs still contain positions and details; the chain
+applies positions to all original columns rather than returning companion
+columns from C++ again. Sliced arrays retain their offsets and immediate-input
+position semantics.
 
 The [segment adapter](../../../internal/core/src/grep/SegmentGrep.cpp) reconstructs
 C++ string views. [Grep.cpp](../../../internal/core/src/grep/Grep.cpp) builds
@@ -948,11 +1075,11 @@ failure propagates as `std::bad_alloc` to the existing cgo OOM handler.
 | function.grep.maxRegexBytes | Native regex compilation budget | 10485760 |
 | function.grep.maxDFACacheBytes | Native DFA cache budget | 8388608 |
 | function.grep.batchSize | Candidate rows per text read batch | 128 |
-| function.grep.maxScanRows | Candidate rows per segment; 0 is uncapped | 0 |
+| function.grep.maxScanRows | Soft text rows scanned per segment, checked between batches; 0 is uncapped | 0 |
 | QuotaConfig.MaxOutputSize | Native matching-result byte budget; separately used for combined ordinary and computed output checks | Shared configuration |
 | Request context | Execution deadline and cancellation | Request-defined |
 
-The function settings are refreshable and fall back to defaults for invalid or out-of-range values. Operators and candidate plans read settings at their respective preparation boundaries. Ordinary scan/index read batches are independent of remaining match quota; Probe may use smaller reads bounded by that quota. Native matching stops at input exhaustion or its record cap. See [function_param.go](../../../pkg/util/paramtable/function_param.go), [operator_grep.go](../../../internal/util/function/chain/operator_grep.go) and [SegmentGrep.cpp](../../../internal/core/src/grep/SegmentGrep.cpp).
+The function settings are refreshable and fall back to defaults for invalid or out-of-range values. Operators snapshot Grep settings at preparation. Ordinary scan/index read batches are independent of remaining match quota; Probe may use smaller reads bounded by that quota. Native matching stops at input exhaustion, its record cap, or the soft scan threshold between batches. See [function_param.go](../../../pkg/util/paramtable/function_param.go), [operator_grep.go](../../../internal/util/function/chain/operator_grep.go) and [SegmentGrep.cpp](../../../internal/core/src/grep/SegmentGrep.cpp).
 
 The NGRAM-specific eligibility rules, bounded VARCHAR prefix scanning with row
 and byte budgets, and candidate ownership are maintained in the
@@ -985,8 +1112,12 @@ between calls when the Query match cap is reached; it never turns a budget or
 execution failure into partial success. Resource exhaustion,
 invalid input and cancellation discard that call's output and return
 `*out_result=NULL`. No details are silently truncated to fit a budget. Success
-returns matching lines up to the requested per-field `-m` cap and all spans
-on each retained line, for every input field in that batch. If a
+returns the requested matching/context windows, including line-local spans on lines
+reported as matches by rg/Searcher in trailing context even after `-m` is reached.
+For `\A`/`\z` patterns, the anchor-aware fallback can instead report such a line
+as `context`, with no spans, even if it matches in isolation (see Section 5.3).
+Context consumes the same
+result budget and does not extend the match cap. If a
 later batch fails, the caller fails the request rather than publishing earlier batches as a
 complete success. Soft detail truncation is unsupported.
 
@@ -997,8 +1128,8 @@ cancellation before execution cannot be lost, and future executions on that
 Session also return CANCELLED. There is no reset operation; use a new Session
 for a new task. C++ does not share an atomic memory layout with Rust.
 
-Check cancellation at validation loops, text boundaries and Matcher call
-boundaries. The final cancellation check before publishing a
+Check cancellation at validation loops, text boundaries, Sink callbacks and
+Matcher call boundaries. Upstream newline/context scans cannot be preempted mid-call. The final cancellation check before publishing a
 result is the success linearization point; later cancellation does not revoke
 an already completed result. A cancellation callback must retain the Session
 until it returns. Freeing a handle is not cancellation.
@@ -1013,7 +1144,8 @@ Compilation is bounded by service compile limits. Hard preemptive timeout is
 not promised.
 
 A cancelling Matcher wrapper must check before/after matching calls, including
-candidate searches and detail enumeration. Test cancellation on long fields and expensive
+candidate searches and detail enumeration. Searcher's internal line traversal
+is not independently polled in fixed-size chunks. Test cancellation on long fields and expensive
 patterns before accepting a service latency objective.
 
 ### 7.3 Errors and Milvus Classification
@@ -1080,11 +1212,24 @@ not cross it. Abort and allocation failure cannot all be claimed recoverable.
 
 ## 8. Memory-Only Execution and Upstream Dependencies
 
-The current core implements the equivalent line adapter described in Section
-5.3: scan LF boundaries in bounded chunks, match each complete logical line
-through `grep::matcher::Matcher`, and collect owned line/span results. It
-does not construct a Searcher, transcode input, inspect BOM/binary markers,
-map files, print, or write files. The engine handle and buffer lifetimes are
+Every Session owns a `grep::searcher::Searcher` and uses `search_slice` over
+in-memory field values, including when both context counts are zero (`-C 0`).
+Searcher owns line traversal, context window merging, `-m`, line numbers and
+offsets. There is no separate no-context loop, absolute-anchor reader path,
+lazy Searcher wrapper, or single-line shortcut. The Sink always enumerates
+spans against the selected logical line without its terminal LF and accounts
+for owned result allocations. This favors sparse matching in long multi-line
+fields; dense matches and short fields can cost more than the removed direct
+loop. See Section 7.2 for cooperative cancellation boundaries.
+The matcher adapter forwards `find_candidate_line`,
+`line_terminator` and `non_matching_bytes` to the pinned rg matcher, allowing
+upstream to choose fast candidate scanning or its anchor-aware fallback.
+The adapter does not override upstream candidate scanning based on observed
+match density. It checks cancellation around matcher calls and retains typed
+failures across Searcher's formatted error boundary.
+Searcher is configured without BOM sniffing, binary
+detection, transcoding or multiline mode. The core does not map files, print,
+or write files. The engine handle and buffer lifetimes are
 defined in [ownership and concurrency](#6-ownership-and-concurrency).
 
 The facade retains I/O-related source and dependencies. `encoding_rs`,
@@ -1171,18 +1316,23 @@ internal/core/output/unittest/all_tests --gtest_filter='Grep.*:GrepFault.*:*Grep
 
 ### Acceptance Cases
 
-The original matrix below covers phase one. Context, multiline, fragments and
+Context acceptance cases should cover VARCHAR/TEXT in growing, sealed and
+sealed-NGRAM collections, including overlapping windows, field boundaries,
+flag precedence, original line/span coordinates, result budgets and interactions
+with `-m`. These are validation requirements, not a record of completed runs.
+
+The original matrix below covers phase one. Multiline, fragments and
 count-only output remain unsupported. Per-field `-m` coverage additionally
 checks numeric syntax/presence, repeated flags, zero/unlimited, per-record and
-per-batch reset, full spans and coordinates, Query record limits, NGRAM/probe
+per-batch reset, line-local spans and coordinates, Query record limits, NGRAM/probe
 paths, unreadable LOB avoidance for zero, and failure/cancellation preservation.
 
 | Area | Required cases |
 |---|---|
 | Argument parsing | Every short/long alias; grouped flags; attached/separated values; literal backslashes; single/double quotes; empty token; Unicode; repeated patterns; last-wins case mode; `--`; all rejected examples in Section 5.1 |
-| Rejection | Unsupported flags including no-op values, positional paths, missing values, malformed quotes, conflicting boundaries, invalid UTF-8/NUL, invalid regex; no execution Plan published on compilation failure |
-| Pattern semantics | Regex/literal, ordered OR, case modes, word/line boundaries, inline flags, forbidden Unicode disabling and literal LF, line/absolute anchors |
-| Text/results | Empty field, blank line, trailing LF, retained CR, unterminated final line, NUL/BOM, invalid UTF-8, all occurrences, empty matches on UTF-8 boundaries, identical lines retained, exact content-relative spans |
+| Rejection | Unsupported flags including no-op values, positional paths, missing values, malformed quotes, invalid UTF-8/NUL; invalid regex when compilation is required; no execution Plan published on compilation failure |
+| Pattern semantics | Regex/literal, ordered OR, case modes, word/line boundaries, Unicode/byte-mode inline flags, literal LF rejected unless the final `-m` is zero, line/absolute anchors |
+| Text/results | Empty field, blank line, trailing LF, retained CR, unterminated final line, NUL/BOM, invalid UTF-8 input, all occurrences, empty and nonempty matches inside UTF-8 characters, identical lines retained, exact content-relative byte spans |
 | Limits | Arguments byte limit, configurable compile/cache limits, metadata-only batches, result bytes, checked arithmetic, cancellation at native entry and during execution |
 | Lifecycle | Compile retains no caller pointers; Plan release before Session; inputs/Session released before Result view; independent Sessions; synchronized cancellation/free |
 | Failure | Whole-batch failure on any invalid input, budget, cancel or deadline; sticky cancellation; panic poisoning; no unwind across ABI; no partial result publication |
@@ -1194,7 +1344,7 @@ Use a standalone search probe to trace file/network/process activity after
 initialization, with relevant detailed logs suppressed. Separate loader,
 allocator, and input page-fault effects from active external operations.
 
-Measured NGRAM and bounded VARCHAR prefix-scan results, including their distinct baselines and timing scopes, are maintained in [the NGRAM design, Section 7: Performance Test Results](20261103-grep-ngram-index.md#7-performance-test-results). The benchmark dimensions below remain acceptance targets rather than completed measurements.
+Historical NGRAM and bounded VARCHAR prefix-scan results, including their distinct baselines and timing scopes, are maintained in [the NGRAM design, Section 7: Performance Test Results](20261103-grep-ngram-index.md#7-performance-test-results). They predate this PR's context and JSON-submatch changes and do not validate the current HEAD. The benchmark dimensions below remain acceptance targets rather than completed measurements.
 
 Benchmark short/long records, low/high match density, multiple batch sizes,
 and concurrent Sessions. Measure Proxy forwarding, execution-side parsing/compilation, and steady-state
@@ -1211,7 +1361,7 @@ consumer; successful matching alone does not establish error or retry behavior.
 - Compare Arrow merge with the protobuf reducer for Int64/string PKs, duplicate
   replacement, timestamp ties, unsorted offsets, empty inputs, reduction modes
   and bounded/unbounded limits.
-- Exercise C++/Go candidate and identity export/import, capped/empty candidates,
+- Exercise C++/Go candidate and identity export/import, complete/empty candidates,
   one-shot import, cancellation and record access after native wrapper release.
 - Check final PK/detail alignment through worker export, RPC serialization,
   delegator merge and Proxy paging, including reordered computed columns.
@@ -1233,10 +1383,10 @@ consumer; successful matching alone does not establish error or retry behavior.
 The selected ripgrep revision, local path dependency, single Rust static artifact
 and memory-only C boundary are fixed by this design.
 
-## 13. Planned Support: element_filter with Grep
+## 13. element_filter with Grep
 
-A future version will support combining `element_filter` with QueryScan Grep.
-This is planned work; the current implementation rejects element-level Query.
+QueryScan accepts document-level Grep alongside `element_filter`. The candidate,
+chain and result-export behavior and validation requirements are described below.
 
 The initial scope is document-level Grep on a schema VarChar/Text field alongside
 element filtering of a struct array. For example, `element_filter` may select
@@ -1248,11 +1398,11 @@ elements is a separate extension.
 
 ### DataFrame representation and selection
 
-Keep one DataFrame row per document. Add the reserved system column
-`$query_element_indices: List<Int32>` only for element-level QueryScan. Each
-list contains the matching struct-array element indices for that document;
-its outer rows align with `$seg_offset`. Keep the existing Search system column
-`$element_indices: Int32` and its import, merge and export contracts unchanged.
+Each DataFrame row represents one document. Element-level QueryScan includes
+the reserved system column `$query_element_indices: List<Int32>`. Each list
+contains the matching struct-array element indices for that document; its outer
+rows align with `$seg_offset`. The existing Search system column
+`$element_indices: Int32` retains its separate import, merge and export contracts.
 
 ```text
 candidate frame:
@@ -1269,35 +1419,102 @@ candidate frame:
   IDs + FieldsData + ElementLevel + ElementIndices + ComputedResults
 ```
 
-The new column is a companion column before merge. Grep consumes only offsets
-and returns its existing RowSelection; the framework applies that selection to
-all retained input columns. QueryScan already uses `KeepAllSystemColumns`, so
-registering the new name as a system column preserves it through pruning.
-`withQueryIdentities` and materialization retain input columns. No Grep-specific
-index-list selection or separate offset-to-indices sidecar is needed.
+The element-index column is retained alongside offsets before merge. GrepOp
+passes the input Arrow Record to native `ScanGrep`: offsets identify the text
+rows, and element-list lengths determine each matching document's quota
+contribution. GrepOp returns a RowSelection; the framework applies it to all
+retained input columns. `KeepAllSystemColumns` preserves the element-index
+column through pruning, and `withQueryIdentities` and materialization retain
+it. No separate Grep-specific index-list selection or offset-to-indices sidecar
+is needed.
 
 System-column retention and Arrow row-selection support are separate concerns.
-The current `dispatchPickByIndices` in `operator_base.go` supports scalar and
-binary arrays, but not Arrow List arrays. Extend the common selection path for
-`List<Int32>`, including empty selections and chunk boundaries, before enabling
-this feature. Avoid relying on the pinned Arrow v17 generic Take path without
-checking its list-copy/allocation cost. Grep's native document-field read and
-matching interfaces remain unchanged.
+`dispatchPickByIndices` in `operator_base.go` supports scalar and Binary arrays
+and dispatches List arrays to `pickInt32Lists`. That helper accepts only Int32
+children, preserves list and child validity, handles sliced inputs and repeated
+positions, and checks selected-value counts against Arrow's Int32 offset
+capacity. It copies selected values without using generic Arrow Take. Other
+List child types and Struct index selections remain unsupported. The Rust
+matcher still searches document-field text; element lists affect the native
+adapter's quota accounting, not the regex input.
 
 ### Candidate retrieval and limits
 
-- Extend native candidate retrieval and Arrow export to carry the element-level
-  mode and each candidate document's indices alongside offsets. The current
-  candidate return precedes element-index serialization; preserve the metadata
-  before that return and import it as the new system column.
-- Use element-level candidate selection without applying the final Query limit
-  before Grep. Earlier documents can fail Grep while later candidates match.
-  Define candidate document/element count bounds explicitly and charge the
-  index lists as well as offsets against the candidate byte budget.
-- Keep the native Grep matching-document cap distinct from element pagination.
-  Verify its interaction with deduplication and cross-segment limits before
-  choosing the cap for element-level requests; passing an element limit does
-  not make native Grep count elements.
+#### Native candidate selection
+
+Both document-level and element-level candidate branches in
+`ExecPlanNodeVisitor.cpp` bypass the final Query limit when
+`retrieve_candidate_budget_` is set. The element branch passes
+`segcore::Unlimited` to `find_first_n_element` for QueryScan candidates and
+retains `node.limit_` for ordinary element-level Query. The existing
+`find_first_n_element` implementation maps the element bitmap to document
+offsets and per-document element-index lists.
+
+```cpp
+auto limit = retrieve_candidate_budget_
+                 ? segcore::Unlimited
+                 : node.limit_;
+auto [doc_offsets, element_indices, has_more] =
+    segment->find_first_n_element(limit, view,
+                                 struct_element_offsets.get(),
+                                 node.query_iterator_cursor_);
+```
+
+Candidate offsets and their complete element-index lists are retained together. `maxScanRows` does not truncate either vector: it applies in native Grep after optional NGRAM filtering and counts scanned documents, not selected elements. The final candidate payload-size check includes offsets and element lists. Construction-time memory bounds remain deferred; the serialized protobuf budget is not a bound on peak allocation or Arrow Int32 list storage.
+
+Do not stop candidate extraction after collecting the final Query limit's
+number of elements: earlier documents may all fail Grep while later ones match.
+
+#### Native result and Arrow export
+
+`SegmentInterface::Retrieve` serializes `element_level` and element-index
+lists before the candidate-only early return, while deferring PK, timestamp
+and projected-field reads. The final candidate payload-size check includes
+the element-list payload. Empty element-level results preserve their mode,
+including the visitor's no-result path.
+
+`ExportQueryScanResult` exports `$seg_offset: Int64` and, for element-level
+candidates, `$query_element_indices: List<Int32>`. For example, lists `[1, 3]`
+and `[0, 2, 5]` have Arrow list offsets `[0, 2, 5]` and child values
+`[1, 3, 0, 2, 5]`. The exporter constructs owned, non-null Arrow lists and child
+values, validates document/list alignment and nonnegative indices, and checks
+that child counts fit Int32 list offsets. Empty element-level candidates retain
+a typed zero-row List column. After export, the protobuf header's element lists
+are cleared to avoid duplicate row payload; mode and statistics are retained.
+
+#### Go candidate import
+
+`runQueryScanSegment` calls `importQueryScanCandidates` to construct its input
+frame. The importer always requires `$seg_offset: Int64`; when the result's
+`ElementLevel` flag is true, it also requires the unique
+`$query_element_indices: List<Int32>` column. Common lookup and layout checks
+validate column presence, row alignment and absence of outer nulls; the importer
+also checks the Arrow type. It trusts native construction for element values
+and retains incoming arrays without copying their payload. Ordinary document
+candidates import offsets only. Empty element candidates keep the typed List
+column, which the common RowSelection path preserves.
+
+#### Grep execution cap
+
+The native runner uses the worker Query limit (including user offset) as an
+output quota. Without an element column, each matching document contributes one.
+With `$query_element_indices`, each matching document contributes its Arrow
+List length. NULL and nonmatching texts contribute zero. No additional count
+array is constructed. Element counting stays in the native adapter; the Rust
+matching API receives document text and does not receive element lists.
+
+Matching groups are bounded by the sum of possible contributions, saturated at
+the remaining quota. The actual counter advances only for selected documents.
+The boundary document retains all its details and selected elements; exact
+list trimming remains downstream. NGRAM-refined batches resolve contributions
+through original input positions. Probe and the outer scan loop use the same
+remaining quota. Text reads can still prefetch a larger batch; this change
+bounds matching and does not promise that all prefetched I/O is avoided.
+
+This optimization is scoped to a single segment. It adds no continuation or
+cross-segment refill protocol. Duplicate-PK version replacement across segments
+can reduce the final element count after local early exit; this remains outside
+this optimization's guarantee. Unlimited retains its existing behavior.
 
 ### Merge, pagination and export
 
@@ -1308,13 +1525,28 @@ replacement must select the new row's element list and Grep details together.
 Equal-timestamp duplicates retain the existing tie behavior; this design does
 not introduce unioning of element lists across duplicate document versions.
 
-For ordinary QueryScan, each selected document contributes one to the limit.
-For element-level QueryScan, it contributes the length of its index list.
-Adjust that count when replacing a selected version. A worker merge may retain
-the complete index list of the final document that reaches the limit, leaving
-precise trimming to the existing element-level pagination path. Verify that
-Delegator/Proxy reduction uses the same element-count semantics and that the
-user offset is applied only at the intended final paging boundary.
+`mergeQueryScanResults` counts one unit per document in ordinary mode and the
+selected element-list length in element mode. Only PK winners contribute;
+replacing a version subtracts its old count and adds the new count. Stop when
+the accumulated units reach the worker limit (including the final offset
+allowance), subject to the existing reduce mode. Unlimited/ignore-limit modes
+retain their behavior. Keep the boundary document's complete list and details;
+exact list trimming remains downstream. Validate consistent element mode and
+List<Int32> schemas across frames, including empty frames. Read lengths through
+Arrow list offsets so sliced lists are counted correctly.
+
+The existing `gatherQueryFrames` gathers every column from the winning row;
+no separate list merge or per-element row expansion is introduced. Preserve
+typed columns and mode for zero-row results. Avoiding excess document winners
+reduces field materialization and computed payloads entering the output budget.
+This does not change the existing accounting of retained Arrow backing buffers;
+a slice can still retain more bytes than its visible rows.
+
+Final element-count reduction and exact list trimming use the existing
+Delegator/Proxy queryutil path. The user offset is applied only at the intended
+final paging boundary. The boundary document can still carry more elements
+than the worker quota; downstream paging trims it without changing the chosen
+version or detaching its computed details.
 
 For example, lists `[1, 2, 5]` and `[0, 3]` with final limit 4 and offset 0
 become `[1, 2, 5]` and `[0]`. Both documents retain their document-level Grep
@@ -1336,11 +1568,39 @@ reduce the full-array response amplification.
 
 ### Enablement and validation
 
-Remove the QueryScan element-level restriction only after candidate export,
-List selection, merge accounting and result export are supported end to end.
-Keep the restrictions on struct-array Grep inputs, ORDER BY, aggregation and
-Query iterator. Update the current supported-scope section when implementation
-lands; until then this section describes planned behavior only.
+QueryScan accepts `element_filter` with document-level Grep. Struct-array
+Grep inputs, ORDER BY, aggregation and Query iterator remain unsupported, as
+specified in the supported-scope section.
+
+Regression requirements for the implemented path:
+
+1. Verify system-column retention and common List<Int32> row selection. Cover
+   sparse, repeated, out-of-order and empty selections, sliced lists, chunk
+   boundaries and source-array release. Verify pruning, identity attachment and
+   late materialization preserve the column.
+2. Verify native element candidate extraction, result serialization,
+   Arrow export and Go import, including growing/sealed
+   candidates, complete lists, the final-limit bypass, soft text-scan thresholds, byte-budget
+   failures, typed empty results and ownership after native result release.
+3. Validate element frames in `mergeQueryScanResults` and gather their lists
+   with winning documents and details. Count selected elements toward the worker
+   limit in element mode, preserving complete boundary lists. Cover multiple
+   segments, duplicate PKs, timestamp replacement, equal-timestamp ties, sliced
+   lists, empty frames, offset paging and output-budget checks before field reads.
+4. Verify that `ToRetrieveResults` emits ElementLevel/ElementIndices, preserves
+   document-row alignment with IDs, ordinary fields and computed details, and
+   excludes the system column from FieldData. Exercise downstream element
+   pagination with constructed results.
+5. Verify admission checks and native candidate plan guards, and exercise the
+   complete path through live end-to-end tests.
+
+QueryTask already forwards ElementLevel, ElementIndices and ComputedResults.
+Delegator/Proxy reducers and final public conversion already support element
+metadata and document-aligned computed columns. Reuse them; change downstream
+code only if combined-path verification exposes a gap. Public QueryResults
+contains document-sized fields and per-document element-index lists, with no
+new public element-level flag. This design and its test list are not evidence
+that the combined path has already passed validation.
 
 Cover:
 
@@ -1350,7 +1610,7 @@ Cover:
 - Full, sparse and empty List row selections, column pruning and chunk handling.
 - Limits/offsets within a document, across documents and across shards.
 - Version replacement with different element counts, preserving detail alignment.
-- Empty results, candidate budget exhaustion and document-cap behavior.
+- Empty results, candidate budget exhaustion and soft text-scan threshold behavior.
 - Unchanged document-level Grep and existing Search `$element_indices` behavior.
 - Live PyMilvus decoding of element offsets, complete requested arrays and shared
   document-level Grep details, for both growing and sealed segments.

@@ -150,7 +150,6 @@ type QuotaCenter struct {
 	// metrics
 	queryNodeMetrics map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics
 	dataNodeMetrics  map[UniqueID]*metricsinfo.DataNodeQuotaMetrics
-	proxyMetrics     map[UniqueID]*metricsinfo.ProxyQuotaMetrics
 	dataCoordMetrics *metricsinfo.DataCoordQuotaMetrics
 	diskMu           sync.Mutex // guards dataCoordMetrics and totalBinlogSize
 	totalBinlogSize  int64
@@ -383,7 +382,6 @@ func (q *QuotaCenter) stop() {
 func (q *QuotaCenter) clearMetrics() {
 	q.dataNodeMetrics = make(map[UniqueID]*metricsinfo.DataNodeQuotaMetrics, 0)
 	q.queryNodeMetrics = make(map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics, 0)
-	q.proxyMetrics = make(map[UniqueID]*metricsinfo.ProxyQuotaMetrics, 0)
 	q.collectionIDToDBID = typeutil.NewConcurrentMap[int64, int64]()
 	q.collections = typeutil.NewConcurrentMap[string, int64]()
 	q.dbs = typeutil.NewConcurrentMap[string, int64]()
@@ -615,19 +613,6 @@ func (q *QuotaCenter) collectMetrics() error {
 
 		return nil
 	})
-	// get Proxies metrics
-	group.Go(func() error {
-		ret, err := getProxyMetrics(ctx, q.proxies)
-		if err != nil {
-			return err
-		}
-		for _, proxyMetric := range ret {
-			if proxyMetric.QuotaMetrics != nil {
-				q.proxyMetrics[proxyMetric.ID] = proxyMetric.QuotaMetrics
-			}
-		}
-		return nil
-	})
 	group.Go(func() error {
 		dbs, err := q.meta.ListDatabases(ctx, typeutil.MaxTimestamp)
 		if err != nil {
@@ -854,20 +839,6 @@ func (q *QuotaCenter) forceDenyReading(errorCode commonpb.ErrorCode, cluster boo
 				mlog.String("denyReason", denyReason))
 		}
 	}
-}
-
-// getRealTimeRate return real time rate in Proxy.
-func (q *QuotaCenter) getRealTimeRate(label string) float64 {
-	var rate float64
-	for _, metric := range q.proxyMetrics {
-		for _, r := range metric.Rms {
-			if r.Label == label {
-				rate += r.Rate
-				break
-			}
-		}
-	}
-	return rate
 }
 
 // guaranteeMinRate make sure the rate will not be less than the min rate.
@@ -1893,14 +1864,28 @@ func (q *QuotaCenter) GetDatabaseLimiters(dbID int64) *rlinternal.RateLimiterNod
 	return q.rateLimiter.GetDatabaseLimiters(dbID)
 }
 
-func (q *QuotaCenter) getQuotaMetrics() *internalpb.GetQuotaMetricsResponse {
+func (q *QuotaCenter) getQuotaMetrics(ctx context.Context) *internalpb.GetQuotaMetricsResponse {
+	// Proxy throughput and queue metrics are only used by this diagnostic API.
+	proxyCtx, cancel := context.WithTimeout(ctx, GetMetricsTimeout)
+	proxies, err := getProxyMetrics(proxyCtx, q.proxies)
+	cancel()
+	if err != nil {
+		mlog.Warn(ctx, "failed to collect Proxy quota metrics", mlog.Err(err))
+	}
+	proxyMetrics := make(map[UniqueID]*metricsinfo.ProxyQuotaMetrics, len(proxies))
+	for _, proxy := range proxies {
+		if proxy.QuotaMetrics != nil {
+			proxyMetrics[proxy.ID] = proxy.QuotaMetrics
+		}
+	}
+
 	q.lock.RLock()
 	defer q.lock.RUnlock()
 
 	quotaCenterMetrics := &metricsinfo.QuotaCenterMetrics{
 		QueryNodeMetrics: q.queryNodeMetrics,
 		DataNodeMetrics:  q.dataNodeMetrics,
-		ProxyMetrics:     q.proxyMetrics,
+		ProxyMetrics:     proxyMetrics,
 		DataCoordMetrics: q.dataCoordMetrics,
 	}
 

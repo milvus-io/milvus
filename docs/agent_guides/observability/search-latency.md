@@ -47,7 +47,7 @@ first use, with no label-map construction on the observation hot path.
 
 On master, the coroutine-based async load pipeline also records
 `manifest_load_cells` and `manifest_build_chunk`. Its reader, admission, and
-executor internals bypass the legacy `LoadCellBatchAsync`/`get_chunks` path, so
+executor internals bypass the legacy `LoadCellBatchesAsync`/`get_chunks` path, so
 `load_batch_budget_wait`, `load_batch_queue`, and `manifest_read_batch` describe
 only calls that enter those legacy functions. Missing samples from those three
 stages do not mean async reads had no I/O or waiting.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/idempotencyview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
@@ -60,6 +61,12 @@ L:
 			// Filter after scanner ordering and transaction assembly so older txn
 			// fragments can still contribute to a commit beyond the checkpoint.
 			if msg.TimeTick() > recoveryTimeTick {
+				if msg.MessageType() == message.MessageTypeCreateSegment {
+					header := message.MustAsImmutableCreateSegmentMessageV2(msg).Header()
+					if err := storagecommon.ValidateSegmentStorageVersion(header.GetSegmentId(), header.GetStorageVersion()); err != nil {
+						return nil, err
+					}
+				}
 				r.observeMessage(ctx, msg)
 			}
 			if msg.MessageType() == message.MessageTypeRecoveryBarrier &&
