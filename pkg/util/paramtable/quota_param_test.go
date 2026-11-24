@@ -232,6 +232,8 @@ func TestQuotaParam(t *testing.T) {
 		assert.Equal(t, defaultHighWaterLevel, qc.DataNodeMemoryHighWaterLevel.GetAsFloat())
 		assert.Equal(t, defaultLowWaterLevel, qc.QueryNodeMemoryLowWaterLevel.GetAsFloat())
 		assert.Equal(t, defaultHighWaterLevel, qc.QueryNodeMemoryHighWaterLevel.GetAsFloat())
+		assert.Equal(t, defaultLowWaterLevel, qc.QueryNodeMemoryAvgLowWaterLevel.GetAsFloat())
+		assert.Equal(t, defaultHighWaterLevel, qc.QueryNodeMemoryAvgHighWaterLevel.GetAsFloat())
 		assert.Equal(t, false, qc.GrowingSegmentsSizeProtectionEnabled.GetAsBool())
 		assert.Equal(t, 0.5, qc.GrowingSegmentsSizeMinRateRatio.GetAsFloat())
 		assert.Equal(t, 0.2, qc.GrowingSegmentsSizeLowWaterLevel.GetAsFloat())
@@ -239,6 +241,35 @@ func TestQuotaParam(t *testing.T) {
 		assert.Equal(t, true, qc.DiskProtectionEnabled.GetAsBool())
 		assert.Equal(t, defaultMax, qc.DiskQuota.GetAsFloat())
 		assert.Equal(t, defaultMax, qc.DiskQuotaPerCollection.GetAsFloat())
+	})
+
+	t.Run("test query node avg memory water level", func(t *testing.T) {
+		params.Init(NewBaseTable(SkipRemote(true)))
+		qc := &params.QuotaConfig
+		lowKey := params.QuotaConfig.QueryNodeMemoryAvgLowWaterLevel.Key
+		highKey := params.QuotaConfig.QueryNodeMemoryAvgHighWaterLevel.Key
+		defer params.Reset(lowKey)
+		defer params.Reset(highKey)
+		tests := []struct {
+			name         string
+			low          string
+			high         string
+			expectedLow  float64
+			expectedHigh float64
+		}{
+			{"valid", "0.6", "0.8", 0.6, 0.8},
+			{"low out of range", "0", "0.9", defaultLowWaterLevel, 0.9},
+			{"high out of range", "0.6", "1.1", 0.6, defaultHighWaterLevel},
+			{"high below low", "0.8", "0.75", 0.8, defaultHighWaterLevel},
+		}
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				params.Save(lowKey, test.low)
+				params.Save(highKey, test.high)
+				assert.Equal(t, test.expectedLow, qc.QueryNodeMemoryAvgLowWaterLevel.GetAsFloat())
+				assert.Equal(t, test.expectedHigh, qc.QueryNodeMemoryAvgHighWaterLevel.GetAsFloat())
+			})
+		}
 	})
 
 	t.Run("test limit reading", func(t *testing.T) {

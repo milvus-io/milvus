@@ -765,6 +765,93 @@ func TestQuotaCenter(t *testing.T) {
 		paramtable.Get().Reset(Params.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key)
 	})
 
+	t.Run("test QueryNode average MemoryFactor factors", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
+		quotaCenter := NewQuotaCenter(pcm, dc, core.tsoAllocator, meta)
+
+		params := paramtable.Get()
+		params.Save(Params.QuotaConfig.QueryNodeMemoryAvgLowWaterLevel.Key, "0.7")
+		params.Save(Params.QuotaConfig.QueryNodeMemoryAvgHighWaterLevel.Key, "0.8")
+		params.Save(Params.QuotaConfig.QueryNodeMemoryLowWaterLevel.Key, "0.9")
+		params.Save(Params.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key, "0.95")
+		defer params.Reset(Params.QuotaConfig.QueryNodeMemoryAvgLowWaterLevel.Key)
+		defer params.Reset(Params.QuotaConfig.QueryNodeMemoryAvgHighWaterLevel.Key)
+		defer params.Reset(Params.QuotaConfig.QueryNodeMemoryLowWaterLevel.Key)
+		defer params.Reset(Params.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key)
+
+		type node struct {
+			used        uint64
+			total       uint64
+			collections []int64
+		}
+		tests := []struct {
+			name     string
+			nodes    []node
+			expected map[int64]float64
+		}{
+			{
+				name:     "below avg low",
+				nodes:    []node{{60, 100, []int64{1}}, {70, 100, []int64{1}}},
+				expected: map[int64]float64{},
+			},
+			{
+				name:     "avg between low and high",
+				nodes:    []node{{70, 100, []int64{1}}, {80, 100, []int64{1}}},
+				expected: map[int64]float64{1: 0.5},
+			},
+			{
+				name:     "avg at high denies writing",
+				nodes:    []node{{75, 100, []int64{1}}, {85, 100, []int64{1}}},
+				expected: map[int64]float64{1: 0},
+			},
+			{
+				name:     "weighted by node memory",
+				nodes:    []node{{50, 100, []int64{1}}, {255, 300, []int64{1}}},
+				expected: map[int64]float64{1: 0.375},
+			},
+			{
+				name:     "per collection nodes",
+				nodes:    []node{{60, 100, []int64{1, 2}}, {90, 100, []int64{2}}},
+				expected: map[int64]float64{2: 0.5},
+			},
+			{
+				name:     "max check wins over avg",
+				nodes:    []node{{20, 100, []int64{1}}, {94, 100, []int64{1}}},
+				expected: map[int64]float64{1: 0.2},
+			},
+			{
+				name:     "avg check wins over max",
+				nodes:    []node{{65, 100, []int64{1}}, {91, 100, []int64{1}}},
+				expected: map[int64]float64{1: 0.2},
+			},
+		}
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				quotaCenter.queryNodeMetrics = make(map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics)
+				for i, n := range test.nodes {
+					nodeID := UniqueID(i + 1)
+					quotaCenter.queryNodeMetrics[nodeID] = &metricsinfo.QueryNodeQuotaMetrics{
+						Hms: metricsinfo.HardwareMetrics{
+							MemoryUsage: n.used,
+							Memory:      n.total,
+						},
+						Effect: metricsinfo.NodeEffect{
+							NodeID:        nodeID,
+							CollectionIDs: n.collections,
+						},
+					}
+				}
+				quotaCenter.dataNodeMetrics = nil
+				factors := quotaCenter.getMemoryFactor()
+				assert.Equal(t, len(test.expected), len(lo.PickBy(factors, func(_ int64, f float64) bool { return f < 1 })))
+				for collection, expected := range test.expected {
+					assert.InDelta(t, expected, factors[collection], 0.001, "collection %d", collection)
+				}
+			})
+		}
+	})
+
 	t.Run("test GrowingSegmentsSize factors", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
