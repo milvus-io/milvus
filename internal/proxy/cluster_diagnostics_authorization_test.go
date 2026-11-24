@@ -210,7 +210,7 @@ func TestConsoleMetricsRequireClusterAdmin(t *testing.T) {
 		coll     []commonpb.ObjectPrivilege
 		status   int
 	}{
-		{"no_verified_caller", "", nil, nil, http.StatusUnauthorized},
+		{"no_verified_caller", "", nil, nil, http.StatusForbidden},
 		{"no_grants", "no_roles", nil, nil, http.StatusForbidden},
 		{"collection_admin", "reader", nil, builtinPrivileges(util.CollectionAdminPrivileges), http.StatusForbidden},
 		{"cluster_read_write", "reader", builtinPrivileges(util.ClusterReadWritePrivileges), nil, http.StatusForbidden},

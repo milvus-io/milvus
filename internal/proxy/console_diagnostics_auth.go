@@ -41,8 +41,8 @@ const consoleUsernameKey = "username"
 // and such requests pass. Without it, the console admits any authenticated
 // user while authorization is enabled; only an authenticated caller holding a
 // cluster admin grant passes. A request that carries no verified caller is
-// refused rather than treated as internal. Nothing changes with both gates
-// off.
+// refused (403, like the other console routes) rather than treated as
+// internal. Nothing changes with both gates off.
 func ConsoleDiagnosticsAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if _, ok := mhttp.AuthenticatedAdminFromContext(c.Request.Context()); ok {
@@ -63,17 +63,25 @@ func ConsoleDiagnosticsAuthMiddleware() gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		user := c.GetString(consoleUsernameKey)
+		if user == "" {
+			// Refused the way other console routes refuse a request without a
+			// verified caller.
+			err := merr.WrapErrPrivilegeNotPermitted("console request requires an authenticated user")
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				mhttp.HTTPReturnCode:    merr.Code(err),
+				mhttp.HTTPReturnMessage: err.Error(),
+			})
+			return
+		}
 		// Build the caller's identity from what the port authenticated, on a
 		// fresh incoming context so that nothing the request itself carries
 		// can name the user.
 		ctx := metadata.NewIncomingContext(c.Request.Context(), metadata.MD{})
-		ctx = NewContextWithMetadata(ctx, c.GetString(consoleUsernameKey), "")
+		ctx = NewContextWithMetadata(ctx, user, "")
 		if err := authorizeClusterDiagnostics(ctx, nil, c.FullPath()); err != nil {
 			status := http.StatusInternalServerError
-			switch {
-			case errors.Is(err, merr.ErrPrivilegeNotAuthenticated):
-				status = http.StatusUnauthorized
-			case errors.Is(err, merr.ErrPrivilegeNotPermitted):
+			if errors.Is(err, merr.ErrPrivilegeNotPermitted) {
 				status = http.StatusForbidden
 			}
 			c.AbortWithStatusJSON(status, gin.H{
