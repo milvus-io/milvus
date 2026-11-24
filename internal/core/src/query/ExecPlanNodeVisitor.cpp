@@ -322,6 +322,7 @@ ExecPlanNodeVisitor::setupRetrieveResult(
                 tmp_retrieve_result.field_data_[i] = std::move(data_array);
             }
         }
+        tmp_retrieve_result.has_more_result = false;
         retrieve_result_opt_ = std::move(tmp_retrieve_result);
         return;
     }
