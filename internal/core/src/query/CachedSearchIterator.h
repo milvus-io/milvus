@@ -173,13 +173,13 @@ class CachedSearchIterator {
         if (last_bound.has_value()) {
             if (dist < last_bound.value()) {
                 is_valid = false;
-            } else if (dist == last_bound.value() && last_pk.has_value()) {
+            } else if (dist == last_bound.value()) {
                 // Rows tied at the page boundary distance: keep only rows whose
                 // primary key is greater than the cursor's, so each tied row is
-                // returned exactly once across pages. Without a pk accessor the
-                // tie identity is unknown, so keep the legacy strict behavior
-                // and drop the tied row.
-                if (!pk_lookup_) {
+                // returned exactly once across pages. Without a continuation PK
+                // or pk accessor, tie identity is unknown, so keep the legacy
+                // strict behavior (dist > last_bound) and drop the tied row.
+                if (!last_pk.has_value() || !pk_lookup_) {
                     is_valid = false;
                 } else {
                     auto pk = pk_lookup_(result.second);
