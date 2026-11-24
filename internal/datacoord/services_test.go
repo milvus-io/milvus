@@ -6429,10 +6429,7 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 			}).Build()
 		defer mockBroadcastPatch.UnPatch()
 
-		server := seedCollections(&Server{
-			broker: mockBroker,
-		}, &meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
-		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server := newBatchUpdateManifestServer(t, mockBroker, &datapb.SegmentInfo{ID: 1, CollectionID: 100})
 
 		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
 			CollectionId: 100,
@@ -6445,6 +6442,62 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 		assert.Error(t, merr.Error(resp))
 	})
 
+	for _, tc := range []struct {
+		name  string
+		items []*datapb.BatchUpdateManifestItem
+	}{
+		{
+			name: "segment_of_another_collection_rejected",
+			items: []*datapb.BatchUpdateManifestItem{
+				{SegmentId: 1, ManifestVersion: 10},
+				{SegmentId: 3, ManifestVersion: 999999},
+			},
+		},
+		{
+			name: "segment_not_found_rejected",
+			items: []*datapb.BatchUpdateManifestItem{
+				{SegmentId: 1, ManifestVersion: 10},
+				{SegmentId: 4, ManifestVersion: 10},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+
+			wal := mock_streaming.NewMockWALAccesser(t)
+			wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Maybe()
+			streaming.SetWALForTest(wal)
+
+			// No Broadcast expectation: the whole batch must be rejected
+			// before anything is broadcast.
+			bapi := mock_broadcaster.NewMockBroadcastAPI(t)
+			bapi.EXPECT().Close().Return()
+
+			mockBroadcastPatch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+				func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+					return bapi, nil
+				}).Build()
+			defer mockBroadcastPatch.UnPatch()
+
+			// Segment 1 belongs to collection 100, segment 3 to collection
+			// 200, segment 4 does not exist.
+			server := newBatchUpdateManifestServer(t, broker.NewMockBroker(t),
+				&datapb.SegmentInfo{ID: 1, CollectionID: 100},
+				&datapb.SegmentInfo{ID: 3, CollectionID: 200},
+			)
+
+			resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
+				CollectionId: 100,
+				Items:        tc.items,
+			})
+
+			assert.NoError(t, err)
+			err = merr.Error(resp)
+			assert.ErrorIs(t, err, merr.ErrSegmentNotFound)
+			assert.Equal(t, merr.InputError, merr.GetErrorType(err))
+		})
+	}
+
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
 
@@ -6456,17 +6509,22 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 		streaming.SetWALForTest(wal)
 
 		// Mock broadcaster
+		var broadcasted message.BroadcastMutableMessage
 		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
-		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(&types2.BroadcastAppendResult{
-			BroadcastID: 1,
-			AppendResults: map[string]*types2.AppendResult{
-				"by-dev-rootcoord-dml_0": {
-					MessageID:              rmq.NewRmqID(1),
-					TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
-					LastConfirmedMessageID: rmq.NewRmqID(1),
-				},
-			},
-		}, nil)
+		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, msg message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+				broadcasted = msg
+				return &types2.BroadcastAppendResult{
+					BroadcastID: 1,
+					AppendResults: map[string]*types2.AppendResult{
+						"by-dev-rootcoord-dml_0": {
+							MessageID:              rmq.NewRmqID(1),
+							TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
+							LastConfirmedMessageID: rmq.NewRmqID(1),
+						},
+					},
+				}, nil
+			})
 		bapi.EXPECT().Close().Return()
 
 		mockBroadcastPatch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
@@ -6475,10 +6533,10 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 			}).Build()
 		defer mockBroadcastPatch.UnPatch()
 
-		server := seedCollections(&Server{
-			broker: mockBroker,
-		}, &meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
-		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server := newBatchUpdateManifestServer(t, mockBroker,
+			&datapb.SegmentInfo{ID: 1, CollectionID: 100},
+			&datapb.SegmentInfo{ID: 2, CollectionID: 100},
+		)
 
 		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
 			CollectionId: 100,
@@ -6490,11 +6548,48 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.True(t, merr.Ok(resp))
+		require.NotNil(t, broadcasted)
+		msg, err := message.AsMutableBatchUpdateManifestMessageV2(broadcasted)
+		require.NoError(t, err)
+		assert.Equal(t, int64(100), msg.Header().GetCollectionId())
+		items := msg.MustBody().GetItems()
+		require.Len(t, items, 2)
+		assert.Equal(t, int64(1), items[0].GetSegmentId())
+		assert.Equal(t, int64(10), items[0].GetManifestVersion())
+		assert.Equal(t, int64(2), items[1].GetSegmentId())
+		assert.Equal(t, int64(20), items[1].GetManifestVersion())
 	})
+}
+
+// newBatchUpdateManifestServer returns a healthy server whose meta holds
+// collections 100 and 200 and the given segments.
+func newBatchUpdateManifestServer(t *testing.T, b broker.Broker, segments ...*datapb.SegmentInfo) *Server {
+	server := seedCollections(&Server{broker: b},
+		&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_collection"}},
+		&meta.CollectionInfo{ID: 200, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "other_collection"}},
+	)
+	server.meta.Segments = meta.NewSegmentsInfo(server.meta.MetaStore)
+	for _, segment := range segments {
+		segment.State = commonpb.SegmentState_Flushed
+		server.meta.Segments.SetSegment(segment.GetID(), meta.NewSegmentInfo(segment))
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	return server
 }
 
 func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 	ms := metacache.NewMetaStore(nil)
+	// Segments 1 and 2 belong to collection 100, segment 3 to collection 200.
+	// Every subtest builds its SegmentsInfo over this store.
+	seeded := meta.NewSegmentsInfo(ms)
+	for _, segment := range []*datapb.SegmentInfo{
+		{ID: 1, CollectionID: 100, State: commonpb.SegmentState_Flushed},
+		{ID: 2, CollectionID: 100, State: commonpb.SegmentState_Flushed},
+		{ID: 3, CollectionID: 200, State: commonpb.SegmentState_Flushed},
+	} {
+		seeded.SetSegment(segment.GetID(), meta.NewSegmentInfo(segment))
+	}
+
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
 
@@ -6725,6 +6820,177 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 		// ambiguous item is skipped, only the valid V3 item becomes an operator
 		assert.Equal(t, 1, capturedOps)
 	})
+
+	t.Run("items_outside_message_collection_are_skipped", func(t *testing.T) {
+		ctx := context.Background()
+
+		registry.ResetRegistration()
+		meta.DrainBuildIndexChForTest()
+		defer meta.DrainBuildIndexChForTest()
+
+		var capturedOps int
+		mockUpdate := mockey.Mock((*meta.Meta).UpdateSegmentsInfo).To(
+			func(m *meta.Meta, ctx context.Context, operators ...meta.UpdateOperator) error {
+				capturedOps = len(operators)
+				return nil
+			}).Build()
+		defer mockUpdate.UnPatch()
+
+		server := &Server{
+			ctx:  ctx,
+			meta: &meta.Meta{Segments: meta.NewSegmentsInfo(ms)},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+		RegisterDDLCallbacks(server)
+
+		msg := message.NewBatchUpdateManifestMessageBuilderV2().
+			WithHeader(&message.BatchUpdateManifestMessageHeader{
+				CollectionId: 100,
+			}).
+			WithBody(&message.BatchUpdateManifestMessageBody{
+				Items: []*messagespb.BatchUpdateManifestItem{
+					{SegmentId: 3, ManifestVersion: 999999}, // collection 200
+					{SegmentId: 4, ManifestVersion: 999999}, // not in meta
+					{
+						SegmentId: 3, // collection 200, V2 payload
+						V2ColumnGroups: &messagespb.BatchUpdateManifestV2ColumnGroups{
+							ColumnGroups: map[int64]*datapb.FieldBinlog{
+								200: {FieldID: 200, Binlogs: []*datapb.Binlog{{LogID: 7}}},
+							},
+						},
+					},
+					{SegmentId: 1, ManifestVersion: 15}, // collection 100
+				},
+			}).
+			WithBroadcast([]string{"control_channel"}).
+			MustBuildBroadcast()
+
+		err := registry.CallMessageAckCallback(ctx, msg, map[string]*message.AppendResult{
+			"control_channel": {
+				MessageID:              rmq.NewRmqID(1),
+				LastConfirmedMessageID: rmq.NewRmqID(1),
+				TimeTick:               1,
+			},
+		})
+		assert.NoError(t, err)
+		// Only the item of segment 1 becomes an operator.
+		assert.Equal(t, 1, capturedOps)
+		meta.AssertBuildIndexEvents(t, 1)
+	})
+}
+
+// TestServer_BatchUpdateManifest_SegmentOwnership drives the RPC entry and the
+// ack callback against a real in-memory meta: a request may only advance the
+// manifest of segments of its own collection.
+func TestServer_BatchUpdateManifest_SegmentOwnership(t *testing.T) {
+	ctx := context.Background()
+
+	registry.ResetRegistration()
+	meta.DrainBuildIndexChForTest()
+	defer meta.DrainBuildIndexChForTest()
+
+	m, err := meta.NewMemoryMeta(t)
+	require.NoError(t, err)
+	m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "owner_collection"}})
+	m.AddCollection(&meta.CollectionInfo{ID: 200, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "other_collection"}})
+	addSegment := func(segmentID, collectionID int64) {
+		require.NoError(t, m.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             segmentID,
+			CollectionID:   collectionID,
+			PartitionID:    1,
+			InsertChannel:  "ch",
+			State:          commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath(fmt.Sprintf("insert_log/%d/1/%d", collectionID, segmentID), 1),
+		})))
+	}
+	addSegment(1, 100)
+	addSegment(2, 200)
+	manifestVersion := func(segmentID int64) int64 {
+		_, version, err := packed.UnmarshalManifestPath(m.GetSegment(ctx, segmentID).GetManifestPath())
+		require.NoError(t, err)
+		return version
+	}
+
+	server := &Server{ctx: ctx, meta: m}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	RegisterDDLCallbacks(server)
+
+	controlChannel := "by-dev-rootcoord-dml_0"
+	wal := mock_streaming.NewMockWALAccesser(t)
+	wal.EXPECT().ControlChannel().Return(controlChannel).Maybe()
+	streaming.SetWALForTest(wal)
+
+	var broadcasted []message.BroadcastMutableMessage
+	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
+	bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, msg message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+			broadcasted = append(broadcasted, msg)
+			return &types2.BroadcastAppendResult{BroadcastID: uint64(len(broadcasted))}, nil
+		}).Maybe()
+	bapi.EXPECT().Close().Return().Maybe()
+	mockBroadcastPatch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			return bapi, nil
+		}).Build()
+	defer mockBroadcastPatch.UnPatch()
+
+	ack := func(msg message.BroadcastMutableMessage) {
+		require.NoError(t, registry.CallMessageAckCallback(ctx, msg, map[string]*message.AppendResult{
+			controlChannel: {
+				MessageID:              rmq.NewRmqID(1),
+				LastConfirmedMessageID: rmq.NewRmqID(1),
+				TimeTick:               1,
+			},
+		}))
+	}
+	update := func(items ...*datapb.BatchUpdateManifestItem) error {
+		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{CollectionId: 100, Items: items})
+		require.NoError(t, err)
+		return merr.Error(resp)
+	}
+
+	// A segment of the request's collection is updated.
+	require.NoError(t, update(&datapb.BatchUpdateManifestItem{SegmentId: 1, ManifestVersion: 5}))
+	require.Len(t, broadcasted, 1)
+	ack(broadcasted[0])
+	assert.Equal(t, int64(5), manifestVersion(1))
+
+	// A batch naming a segment of another collection is rejected as a whole:
+	// nothing is broadcast and neither segment changes.
+	err = update(
+		&datapb.BatchUpdateManifestItem{SegmentId: 1, ManifestVersion: 6},
+		&datapb.BatchUpdateManifestItem{SegmentId: 2, ManifestVersion: 999999},
+	)
+	assert.ErrorIs(t, err, merr.ErrSegmentNotFound)
+	assert.Len(t, broadcasted, 1)
+	assert.Equal(t, int64(5), manifestVersion(1))
+	assert.Equal(t, int64(1), manifestVersion(2))
+
+	// So is a batch naming a segment that does not exist.
+	err = update(
+		&datapb.BatchUpdateManifestItem{SegmentId: 1, ManifestVersion: 6},
+		&datapb.BatchUpdateManifestItem{SegmentId: 3, ManifestVersion: 6},
+	)
+	assert.ErrorIs(t, err, merr.ErrSegmentNotFound)
+	assert.Len(t, broadcasted, 1)
+	assert.Equal(t, int64(5), manifestVersion(1))
+
+	// A message that already carries a segment of another collection (one
+	// broadcast before the entry check existed) only updates its own
+	// collection's segment when acked.
+	ack(message.NewBatchUpdateManifestMessageBuilderV2().
+		WithHeader(&message.BatchUpdateManifestMessageHeader{CollectionId: 100}).
+		WithBody(&message.BatchUpdateManifestMessageBody{
+			Items: []*messagespb.BatchUpdateManifestItem{
+				{SegmentId: 2, ManifestVersion: 999999},
+				{SegmentId: 1, ManifestVersion: 7},
+			},
+		}).
+		WithBroadcast([]string{controlChannel}).
+		MustBuildBroadcast())
+	assert.Equal(t, int64(1), manifestVersion(2))
+	assert.Equal(t, int64(7), manifestVersion(1))
 }
 
 // --- Test RefreshExternalCollection ---
