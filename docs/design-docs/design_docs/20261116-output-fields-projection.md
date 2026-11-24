@@ -2,7 +2,7 @@
 
 - **Created:** 2026-11-16
 - **Author(s):** @czs007
-- **Status:** Draft for discussion. Steps 1–7 of the implementation sequence are implemented in a draft pull request; step 8 (`having`) is not implemented
+- **Status:** Draft for discussion. Steps 1–7 of the implementation sequence are implemented in draft PR [#55950](https://github.com/milvus-io/milvus/pull/55950); step 8 (`having`) is not implemented
 - **Component:** Parser / Proxy / QueryNode / SDK
 - **Related Issues:** [#50923](https://github.com/milvus-io/milvus/issues/50923), [#55091](https://github.com/milvus-io/milvus/issues/55091)
 - **Related Design:** [#55119](https://github.com/milvus-io/milvus/pull/55119) (Boost scoring in Query)
