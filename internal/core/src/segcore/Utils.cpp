@@ -44,6 +44,7 @@
 #include "glog/logging.h"
 #include "google/protobuf/descriptor.h"
 #include "index/Index.h"
+#include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
 #include "index/Meta.h"
 #include "index/ScalarIndex.h"
@@ -70,43 +71,11 @@ namespace milvus::segcore {
 
 namespace {
 
-std::optional<milvus::index::ScalarIndexType>
-ParsePackedScalarTypeFromFileName(const std::string& filename) {
-    const std::string prefix = "milvus_packed_";
-    const std::string suffix = "_index.v3";
-    if (filename.size() < prefix.size() + suffix.size() ||
-        filename.compare(0, prefix.size(), prefix) != 0 ||
-        filename.compare(
-            filename.size() - suffix.size(), suffix.size(), suffix) != 0) {
-        return std::nullopt;
-    }
-    auto type_str = filename.substr(
-        prefix.size(), filename.size() - prefix.size() - suffix.size());
-    if (type_str == "stlsort") {
-        return milvus::index::ScalarIndexType::STLSORT;
-    }
-    if (type_str == "inverted") {
-        return milvus::index::ScalarIndexType::INVERTED;
-    }
-    if (type_str == "bitmap") {
-        return milvus::index::ScalarIndexType::BITMAP;
-    }
-    if (type_str == "marisa") {
-        return milvus::index::ScalarIndexType::MARISA;
-    }
-    return std::nullopt;
-}
-
-std::string
-BasenameOf(const std::string& path) {
-    return std::filesystem::path(path).filename().string();
-}
-
 const std::string*
 FindFileByBasename(const std::vector<std::string>& files,
                    std::string_view basename) {
     for (const auto& f : files) {
-        if (BasenameOf(f) == basename) {
+        if (std::filesystem::path(f).filename().string() == basename) {
             return &f;
         }
     }
@@ -145,27 +114,10 @@ IsCompatibleLegacyNestedScalarIndex(
 
         auto physical_type = milvus::index::ScalarIndexType::NONE;
         if (index_info.index_type == milvus::index::HYBRID_INDEX_TYPE) {
-            if (reader->HasMeta(milvus::index::INDEX_TYPE)) {
-                physical_type = static_cast<milvus::index::ScalarIndexType>(
-                    reader->GetMeta<uint8_t>(milvus::index::INDEX_TYPE));
-            } else {
-                if (auto parsed = ParsePackedScalarTypeFromFileName(
-                        BasenameOf(index_files[0]))) {
-                    physical_type = *parsed;
-                }
-                if (physical_type == milvus::index::ScalarIndexType::NONE) {
-                    if (reader->HasMeta("version") ||
-                        reader->HasMeta("index_length")) {
-                        physical_type = milvus::index::ScalarIndexType::STLSORT;
-                    } else if (reader->HasMeta("file_names")) {
-                        physical_type =
-                            milvus::index::ScalarIndexType::INVERTED;
-                    } else if (reader->HasMeta(
-                                   milvus::index::BITMAP_INDEX_LENGTH)) {
-                        physical_type = milvus::index::ScalarIndexType::BITMAP;
-                    }
-                }
-            }
+            physical_type =
+                milvus::index::IndexFactory::ResolveHybridPackedIndexType(
+                    *reader, index_files)
+                    .value_or(milvus::index::ScalarIndexType::NONE);
         } else if (index_info.index_type == milvus::index::BITMAP_INDEX_TYPE) {
             physical_type = milvus::index::ScalarIndexType::BITMAP;
         } else if (index_info.index_type == milvus::index::ASCENDING_SORT) {
@@ -210,17 +162,10 @@ IsCompatibleLegacyNestedScalarIndex(
 
     auto physical_type = milvus::index::ScalarIndexType::NONE;
     if (index_info.index_type == milvus::index::HYBRID_INDEX_TYPE) {
-        if (const auto* type_file =
-                FindFileByBasename(index_files, milvus::index::INDEX_TYPE)) {
-            auto buf =
-                load_single_entry(*type_file, milvus::index::INDEX_TYPE);
-            if (buf != nullptr && buf->size == sizeof(uint8_t)) {
-                uint8_t raw_type = 0;
-                std::memcpy(&raw_type, buf->data.get(), sizeof(uint8_t));
-                physical_type =
-                    static_cast<milvus::index::ScalarIndexType>(raw_type);
-            }
-        }
+        physical_type =
+            milvus::index::IndexFactory::ResolveHybridInternalIndexType(
+                index_files, file_manager_context)
+                .value_or(milvus::index::ScalarIndexType::NONE);
     } else if (index_info.index_type == milvus::index::BITMAP_INDEX_TYPE) {
         physical_type = milvus::index::ScalarIndexType::BITMAP;
     } else if (index_info.index_type == milvus::index::ASCENDING_SORT) {

@@ -53,6 +53,17 @@ class IndexFactory {
     static bool
     CanUseIndexRawDataForField(DataType field_type, bool has_raw_data);
 
+    static std::optional<ScalarIndexType>
+    ResolveHybridPackedIndexType(const storage::IndexEntryReader& reader,
+                                 const std::vector<std::string>& index_files);
+
+    static std::optional<ScalarIndexType>
+    ResolveHybridInternalIndexType(
+        const std::vector<std::string>& index_files,
+        const storage::FileManagerContext& file_manager_context,
+        std::optional<storage::EntryStreamLoadInfo>* stream_load_info =
+            nullptr);
+
     LoadResourceRequest
     IndexLoadResource(DataType field_type,
                       DataType element_type,

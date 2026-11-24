@@ -2075,40 +2075,138 @@ TEST(BitmapIndexArrayNestedTest,
 
     struct Case {
         std::string name;
+        std::string file_name;
         std::string index_type;
         int scalar_version;
         nlohmann::json metas;
         bool expect_skipped;
     };
     const std::vector<Case> cases = {
-        {"legacy_hybrid_bitmap",
+        {"legacy_hybrid_bitmap_missing_nested",
+         "legacy_hybrid_bitmap_missing_nested.v3",
          index::HYBRID_INDEX_TYPE,
          3,
          {{index::INDEX_TYPE,
            static_cast<uint8_t>(index::ScalarIndexType::BITMAP)},
           {index::BITMAP_INDEX_LENGTH, 1}},
          true},
+        {"legacy_hybrid_bitmap_false_nested",
+         "legacy_hybrid_bitmap_false_nested.v3",
+         index::HYBRID_INDEX_TYPE,
+         3,
+         {{index::INDEX_TYPE,
+           static_cast<uint8_t>(index::ScalarIndexType::BITMAP)},
+          {index::BITMAP_INDEX_LENGTH, 1},
+          {"is_nested", false}},
+         true},
+        {"new_hybrid_bitmap_true_nested",
+         "new_hybrid_bitmap_true_nested.v3",
+         index::HYBRID_INDEX_TYPE,
+         3,
+         {{index::INDEX_TYPE,
+           static_cast<uint8_t>(index::ScalarIndexType::BITMAP)},
+          {index::BITMAP_INDEX_LENGTH, 1},
+          {"is_nested", true}},
+         false},
+        {"legacy_hybrid_stlsort_missing_nested",
+         "legacy_hybrid_stlsort_missing_nested.v3",
+         index::HYBRID_INDEX_TYPE,
+         3,
+         {{index::INDEX_TYPE,
+           static_cast<uint8_t>(index::ScalarIndexType::STLSORT)},
+          {"version", 1}},
+         true},
+        {"new_hybrid_stlsort_true_nested",
+         "new_hybrid_stlsort_true_nested.v3",
+         index::HYBRID_INDEX_TYPE,
+         3,
+         {{index::INDEX_TYPE,
+           static_cast<uint8_t>(index::ScalarIndexType::STLSORT)},
+          {"version", 1},
+          {"is_nested", true}},
+         false},
+        {"legacy_hybrid_inverted_v3",
+         "legacy_hybrid_inverted_v3.v3",
+         index::HYBRID_INDEX_TYPE,
+         3,
+         {{index::INDEX_TYPE,
+           static_cast<uint8_t>(index::ScalarIndexType::INVERTED)},
+          {"file_names", nlohmann::json::array({"meta.json"})}},
+         true},
+        {"legacy_hybrid_inverted_v4",
+         "legacy_hybrid_inverted_v4.v3",
+         index::HYBRID_INDEX_TYPE,
+         4,
+         {{index::INDEX_TYPE,
+           static_cast<uint8_t>(index::ScalarIndexType::INVERTED)},
+          {"file_names", nlohmann::json::array({"meta.json"})}},
+         false},
+        {"new_hybrid_inverted_v3",
+         "new_hybrid_inverted_v3.v3",
+         index::HYBRID_INDEX_TYPE,
+         3,
+         {{index::INDEX_TYPE,
+           static_cast<uint8_t>(index::ScalarIndexType::INVERTED)},
+          {"file_names", nlohmann::json::array({"meta.json"})},
+          {"is_nested", true}},
+         false},
+        {"legacy_hybrid_packed_filename_fallback_missing",
+         "milvus_packed_stlsort_index.v3",
+         index::HYBRID_INDEX_TYPE,
+         3,
+         {{"version", 1}},
+         true},
+        {"legacy_hybrid_packed_filename_fallback_nested",
+         "milvus_packed_stlsort_index.v3",
+         index::HYBRID_INDEX_TYPE,
+         3,
+         {{"version", 1}, {"is_nested", true}},
+         false},
         {"legacy_bitmap",
+         "legacy_bitmap.v3",
          index::BITMAP_INDEX_TYPE,
          3,
          {{index::BITMAP_INDEX_LENGTH, 1}},
          true},
+        {"new_bitmap",
+         "new_bitmap.v3",
+         index::BITMAP_INDEX_TYPE,
+         3,
+         {{index::BITMAP_INDEX_LENGTH, 1}, {"is_nested", true}},
+         false},
         {"legacy_stlsort",
+         "legacy_stlsort.v3",
          index::ASCENDING_SORT,
          3,
          {{"version", 1}},
          true},
+        {"new_stlsort",
+         "new_stlsort.v3",
+         index::ASCENDING_SORT,
+         3,
+         {{"version", 1}, {"is_nested", true}},
+         false},
         {"legacy_inverted_v3",
+         "legacy_inverted_v3.v3",
          index::INVERTED_INDEX_TYPE,
          3,
          {{"file_names", nlohmann::json::array({"meta.json"})}},
          true},
         {"legacy_inverted_v4",
+         "legacy_inverted_v4.v3",
          index::INVERTED_INDEX_TYPE,
          4,
          {{"file_names", nlohmann::json::array({"meta.json"})}},
          false},
+        {"legacy_inverted_v4_explicit_false",
+         "legacy_inverted_v4_explicit_false.v3",
+         index::INVERTED_INDEX_TYPE,
+         4,
+         {{"file_names", nlohmann::json::array({"meta.json"})},
+          {"is_nested", false}},
+         true},
         {"new_inverted_v3",
+         "new_inverted_v3.v3",
          index::INVERTED_INDEX_TYPE,
          3,
          {{"file_names", nlohmann::json::array({"meta.json"})},
@@ -2116,10 +2214,23 @@ TEST(BitmapIndexArrayNestedTest,
          false},
     };
 
-    for (const auto& tc : cases) {
+    for (size_t i = 0; i < cases.size(); ++i) {
+        const auto& tc = cases[i];
         SCOPED_TRACE(tc.name);
-        const auto [path, size] =
-            make_packed_empty(tc.name + ".v3", tc.metas);
+        const int64_t id = 3143 + static_cast<int64_t>(i);
+        storage::FileManagerContext case_ctx(
+            field_meta, storage::IndexMeta{3, 101, id, id}, chunk_manager, fs);
+        storage::MemFileManagerImpl case_fm(case_ctx);
+        auto writer = case_fm.CreateIndexEntryWriterUnified(tc.file_name);
+        writer->WriteEntry("dummy", "x", 1);
+        for (const auto& [k, v] : tc.metas.items()) {
+            writer->PutMeta(k, v);
+        }
+        writer->Finish();
+        const std::string path =
+            case_fm.GetRemoteIndexObjectPrefix() + "/" + tc.file_name;
+        created_files.push_back(path);
+
         segcore::LoadIndexInfo info{};
         info.collection_id = 1;
         info.partition_id = 2;
@@ -2128,11 +2239,12 @@ TEST(BitmapIndexArrayNestedTest,
         info.field_type = DataType::ARRAY;
         info.element_type = DataType::VARCHAR;
         info.schema = struct_schema;
-        info.index_id = 3143;
-        info.index_build_id = 3143;
-        info.index_version = 3143;
-        info.index_size = size;
+        info.index_id = id;
+        info.index_build_id = id;
+        info.index_version = id;
+        info.index_size = static_cast<int64_t>(writer->GetTotalBytesWritten());
         info.num_rows = 10;
+        info.warmup_policy = "disable";
         info.index_files = {path};
         info.index_params = {
             {index::INDEX_TYPE, tc.index_type},
@@ -2169,6 +2281,7 @@ TEST(BitmapIndexArrayNestedTest,
         info.index_version = 3143;
         info.index_size = size;
         info.num_rows = 10;
+        info.warmup_policy = "disable";
         info.index_files = {path};
         info.index_params = {
             {index::INDEX_TYPE, index::BITMAP_INDEX_TYPE},
@@ -2178,5 +2291,250 @@ TEST(BitmapIndexArrayNestedTest,
         segcore::LoadIndexData(trace_ctx, &info);
         EXPECT_FALSE(info.skipped);
         EXPECT_NE(info.cache_index, nullptr);
+    }
+}
+
+TEST(BitmapIndexArrayNestedTest,
+     LoadIndexDataV1V2SkipsLegacyStructSubFieldIndexesAndAcceptsCompatible) {
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    auto chunk_manager =
+        storage::RemoteChunkManagerSingleton::GetInstance()
+            .GetRemoteChunkManager();
+    ASSERT_NE(chunk_manager, nullptr);
+
+    proto::schema::FieldSchema struct_schema;
+    struct_schema.set_name("struct_array[sub_str]");
+    struct_schema.set_data_type(proto::schema::DataType::Array);
+    struct_schema.set_element_type(proto::schema::DataType::VarChar);
+    struct_schema.set_nullable(false);
+
+    std::vector<std::string> created_files;
+    auto cleanup = folly::makeGuard([&]() {
+        for (const auto& path : created_files) {
+            chunk_manager->Remove(path);
+        }
+    });
+
+    auto make_str_buf = [](const std::string& text) {
+        std::shared_ptr<uint8_t[]> buf(new uint8_t[text.size()]);
+        memcpy(buf.get(), text.data(), text.size());
+        return std::pair<std::shared_ptr<uint8_t[]>, size_t>{buf, text.size()};
+    };
+    auto make_bool_buf = [](bool val) {
+        std::shared_ptr<uint8_t[]> buf(new uint8_t[sizeof(bool)]);
+        memcpy(buf.get(), &val, sizeof(bool));
+        return buf;
+    };
+    auto make_u8_buf = [](uint8_t val) {
+        std::shared_ptr<uint8_t[]> buf(new uint8_t[sizeof(uint8_t)]);
+        buf[0] = val;
+        return buf;
+    };
+
+    struct LegacyCase {
+        std::string name;
+        std::string index_type;
+        bool use_struct_schema;
+        std::optional<index::ScalarIndexType> hybrid_selector;
+        std::optional<std::string> bitmap_meta_text;
+        std::optional<bool> sort_nested_flag;
+        bool expect_skipped;
+    };
+    const std::string yaml_no_nested =
+        "bitmap_index_length: 1\nbitmap_index_num_rows: 10\n";
+    const std::string yaml_nested_false =
+        "bitmap_index_length: 1\nbitmap_index_num_rows: 10\nis_nested_index: false\n";
+    const std::string yaml_nested_true =
+        "bitmap_index_length: 1\nbitmap_index_num_rows: 10\nis_nested_index: true\n";
+    const std::string json_nested_true =
+        nlohmann::json{{index::BITMAP_INDEX_LENGTH, 1},
+                       {index::BITMAP_INDEX_NUM_ROWS, 10},
+                       {"is_nested_index", true}}
+            .dump();
+
+    const std::vector<LegacyCase> cases = {
+        {"hybrid_bitmap_missing_meta",
+         index::HYBRID_INDEX_TYPE,
+         true,
+         index::ScalarIndexType::BITMAP,
+         std::nullopt,
+         std::nullopt,
+         true},
+        {"hybrid_bitmap_yaml_missing_nested",
+         index::HYBRID_INDEX_TYPE,
+         true,
+         index::ScalarIndexType::BITMAP,
+         yaml_no_nested,
+         std::nullopt,
+         true},
+        {"hybrid_bitmap_yaml_nested_false",
+         index::HYBRID_INDEX_TYPE,
+         true,
+         index::ScalarIndexType::BITMAP,
+         yaml_nested_false,
+         std::nullopt,
+         true},
+        {"hybrid_bitmap_yaml_nested_true",
+         index::HYBRID_INDEX_TYPE,
+         true,
+         index::ScalarIndexType::BITMAP,
+         yaml_nested_true,
+         std::nullopt,
+         false},
+        {"hybrid_bitmap_json_nested_true",
+         index::HYBRID_INDEX_TYPE,
+         true,
+         index::ScalarIndexType::BITMAP,
+         json_nested_true,
+         std::nullopt,
+         false},
+        {"hybrid_stlsort_missing_nested",
+         index::HYBRID_INDEX_TYPE,
+         true,
+         index::ScalarIndexType::STLSORT,
+         std::nullopt,
+         std::nullopt,
+         true},
+        {"hybrid_stlsort_nested_false",
+         index::HYBRID_INDEX_TYPE,
+         true,
+         index::ScalarIndexType::STLSORT,
+         std::nullopt,
+         false,
+         true},
+        {"hybrid_stlsort_nested_true",
+         index::HYBRID_INDEX_TYPE,
+         true,
+         index::ScalarIndexType::STLSORT,
+         std::nullopt,
+         true,
+         false},
+        {"hybrid_inverted_v2",
+         index::HYBRID_INDEX_TYPE,
+         true,
+         index::ScalarIndexType::INVERTED,
+         std::nullopt,
+         std::nullopt,
+         true},
+        {"bitmap_missing_meta",
+         index::BITMAP_INDEX_TYPE,
+         true,
+         std::nullopt,
+         std::nullopt,
+         std::nullopt,
+         true},
+        {"bitmap_yaml_missing_nested",
+         index::BITMAP_INDEX_TYPE,
+         true,
+         std::nullopt,
+         yaml_no_nested,
+         std::nullopt,
+         true},
+        {"bitmap_yaml_nested_true",
+         index::BITMAP_INDEX_TYPE,
+         true,
+         std::nullopt,
+         yaml_nested_true,
+         std::nullopt,
+         false},
+        {"stlsort_missing_nested",
+         index::ASCENDING_SORT,
+         true,
+         std::nullopt,
+         std::nullopt,
+         std::nullopt,
+         true},
+        {"stlsort_nested_true",
+         index::ASCENDING_SORT,
+         true,
+         std::nullopt,
+         std::nullopt,
+         true,
+         false},
+        {"inverted_v2",
+         index::INVERTED_INDEX_TYPE,
+         true,
+         std::nullopt,
+         std::nullopt,
+         std::nullopt,
+         true},
+        {"regular_array_bitmap_v2",
+         index::BITMAP_INDEX_TYPE,
+         false,
+         std::nullopt,
+         yaml_no_nested,
+         std::nullopt,
+         false},
+    };
+
+    for (size_t i = 0; i < cases.size(); ++i) {
+        const auto& tc = cases[i];
+        SCOPED_TRACE(tc.name);
+        proto::schema::FieldSchema schema = struct_schema;
+        if (!tc.use_struct_schema) {
+            schema.set_name("regular_array");
+        }
+        const int64_t id = 3200 + static_cast<int64_t>(i);
+        storage::FieldDataMeta fm_meta{1, 2, 3, 101, schema};
+        storage::IndexMeta idx_meta{3, 101, id, id};
+        storage::FileManagerContext case_ctx(fm_meta, idx_meta, chunk_manager, fs);
+        storage::MemFileManagerImpl case_fm(case_ctx);
+
+        knowhere::BinarySet bin;
+        if (tc.hybrid_selector.has_value()) {
+            bin.Append(index::INDEX_TYPE,
+                       make_u8_buf(static_cast<uint8_t>(*tc.hybrid_selector)),
+                       sizeof(uint8_t));
+        }
+        if (tc.bitmap_meta_text.has_value()) {
+            auto [buf, sz] = make_str_buf(*tc.bitmap_meta_text);
+            bin.Append(index::BITMAP_INDEX_META, buf, sz);
+        }
+        if (tc.sort_nested_flag.has_value()) {
+            bin.Append("is_nested_index",
+                       make_bool_buf(*tc.sort_nested_flag),
+                       sizeof(bool));
+        }
+        // Keep at least one dummy entry so V1/V2 index_files is non-empty.
+        auto [dummy_buf, dummy_sz] = make_str_buf("placeholder");
+        bin.Append("dummy_entry", dummy_buf, dummy_sz);
+
+        ASSERT_TRUE(case_fm.AddFile(bin));
+        std::vector<std::string> remote_files;
+        int64_t total_size = 0;
+        for (const auto& [path, sz] : case_fm.GetRemotePathsToFileSize()) {
+            remote_files.push_back(path);
+            created_files.push_back(path);
+            total_size += sz;
+        }
+
+        segcore::LoadIndexInfo info{};
+        info.collection_id = 1;
+        info.partition_id = 2;
+        info.segment_id = 3;
+        info.field_id = 101;
+        info.field_type = DataType::ARRAY;
+        info.element_type = DataType::VARCHAR;
+        info.schema = schema;
+        info.index_id = id;
+        info.index_build_id = id;
+        info.index_version = id;
+        info.index_size = total_size;
+        info.num_rows = 10;
+        info.warmup_policy = "disable";
+        info.index_files = std::move(remote_files);
+        info.index_params = {
+            {index::INDEX_TYPE, tc.index_type},
+            {index::SCALAR_INDEX_ENGINE_VERSION, "2"},
+            {milvus::LOAD_PRIORITY, "HIGH"}};
+
+        tracer::TraceContext trace_ctx{};
+        segcore::LoadIndexData(trace_ctx, &info);
+        EXPECT_EQ(info.skipped, tc.expect_skipped);
+        if (tc.expect_skipped) {
+            EXPECT_EQ(info.cache_index, nullptr);
+        } else {
+            EXPECT_NE(info.cache_index, nullptr);
+        }
     }
 }
