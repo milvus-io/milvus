@@ -24,7 +24,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -41,6 +43,8 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache/metacachetest"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -543,6 +547,108 @@ func (s *ImportCheckerSuite) TestCheckFailure() {
 	s.checker.CheckFailedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	tasks = s.importMeta.GetTaskByJob(context.TODO(), s.jobID, bulkimport.WithStates(datapb.ImportTaskStateV2_Failed))
 	s.Equal(1, len(tasks))
+}
+
+func TestSnapshotImportTaskFailureDoesNotPublishPartialOutput(t *testing.T) {
+	ctx := t.Context()
+	const (
+		jobID        int64 = 1
+		collectionID int64 = 100
+		partitionID  int64 = 101
+		taskA        int64 = 10
+		taskB        int64 = 20
+		segmentA     int64 = 1001
+		segmentB     int64 = 1002
+		existingID   int64 = 1003
+		nodeID       int64 = 7
+	)
+
+	mt, err := meta.NewMemoryMeta(t)
+	require.NoError(t, err)
+	for _, id := range []int64{segmentA, segmentB} {
+		require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: id, CollectionID: collectionID, PartitionID: partitionID, InsertChannel: "v1",
+			State: commonpb.SegmentState_Importing, IsImporting: true, StorageVersion: storage.StorageV3,
+		})))
+	}
+	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: existingID, CollectionID: collectionID, PartitionID: partitionID, InsertChannel: "v1",
+		State: commonpb.SegmentState_Flushed, NumOfRows: 1, CommitTimestamp: 50,
+		StorageVersion: storage.StorageV3, ManifestPath: packed.MarshalManifestPath("files/insert_log/100/101/1003", 1),
+	})))
+	existing := mt.GetSegment(ctx, existingID).Clone()
+	canLoad, err := isQueryRecoverableSegment(existing)
+	require.NoError(t, err)
+	require.True(t, canLoad, "the existing segment is the visibility control")
+	// Seed the tasks in the catalog and use the normal loader to attach their dependencies.
+	for _, ids := range [][2]int64{{taskA, segmentA}, {taskB, segmentB}} {
+		require.NoError(t, mt.Catalog.SaveImportTask(ctx, &datapb.ImportTaskV2{
+			JobID: jobID, TaskID: ids[0], NodeID: nodeID, CollectionID: collectionID,
+			State: datapb.ImportTaskStateV2_InProgress, SegmentIDs: []int64{ids[1]},
+		}))
+	}
+	imports, err := bulkimport.NewImportMeta(ctx, mt.Catalog, nil, mt)
+	require.NoError(t, err)
+	require.NoError(t, imports.AddJob(ctx, &bulkimport.Job{
+		ImportJob: &datapb.ImportJob{
+			JobID: jobID, CollectionID: collectionID, PartitionIDs: []int64{partitionID},
+			Vchannels: []string{"v1"}, State: internalpb.ImportJobState_Importing,
+			Options: append(bulkimport.SnapshotImportTestOptions(), &commonpb.KeyValuePair{
+				Key: importutilv2.AutoCommitKey, Value: "false",
+			}),
+			CommitByCoordinator: true,
+		},
+		Tr: timerecord.NewTimeRecorder("snapshot import"),
+	}))
+	checker := &bulkimport.Checker{Ctx: ctx, Meta: mt, ImportMeta: imports}
+	workers := session.NewMockCluster(t)
+	outputManifest := packed.MarshalManifestPath("files/insert_log/100/101/1001", 1)
+	workers.EXPECT().QueryImport(nodeID, &datapb.QueryImportRequest{JobID: jobID, TaskID: taskA}).
+		Return(&datapb.QueryImportResponse{
+			State: datapb.ImportTaskStateV2_Completed,
+			ImportSegmentsInfo: []*datapb.ImportSegmentInfo{{
+				SegmentID: segmentA, ImportedRows: 4, ManifestPath: outputManifest,
+				Stats: &datapb.Statistics{TimestampFrom: 100, TimestampTo: 103},
+			}},
+		}, nil).Once()
+	imports.GetTask(ctx, taskA).QueryTaskOnWorker(workers)
+	require.Equal(t, datapb.ImportTaskStateV2_Completed, imports.GetTask(ctx, taskA).GetState())
+	output := mt.GetSegment(ctx, segmentA)
+	require.Equal(t, int64(4), output.GetNumOfRows())
+	require.Equal(t, outputManifest, output.GetManifestPath())
+	require.Equal(t, commonpb.SegmentState_Flushed, output.GetState())
+	require.True(t, output.GetIsImporting())
+	checker.CheckImportingJob(imports.GetJob(ctx, jobID))
+	require.Equal(t, internalpb.ImportJobState_Importing, imports.GetJob(ctx, jobID).GetState())
+
+	const failure = "second snapshot import task could not read its source"
+	workers.EXPECT().QueryImport(nodeID, &datapb.QueryImportRequest{JobID: jobID, TaskID: taskB}).
+		Return(&datapb.QueryImportResponse{State: datapb.ImportTaskStateV2_Failed, Reason: failure}, nil).Once()
+	imports.GetTask(ctx, taskB).QueryTaskOnWorker(workers)
+	failedJob := imports.GetJob(ctx, jobID)
+	require.Equal(t, internalpb.ImportJobState_Failed, failedJob.GetState())
+	require.Equal(t, failure, failedJob.GetReason())
+	checker.CheckFailedJob(failedJob)
+	require.Equal(t, datapb.ImportTaskStateV2_Failed, imports.GetTask(ctx, taskA).GetState())
+	require.Equal(t, datapb.ImportTaskStateV2_Failed, imports.GetTask(ctx, taskB).GetState())
+
+	server := &Server{meta: mt, importMeta: imports}
+	server.UpdateStateCode(commonpb.StateCode_Healthy)
+	status, err := server.CommitImport(ctx, &datapb.CommitImportRequest{JobId: jobID})
+	require.NoError(t, err)
+	commitErr := merr.Error(status)
+	require.ErrorIs(t, commitErr, merr.ErrImportFailed)
+	require.ErrorContains(t, commitErr, "expected Uncommitted")
+	require.False(t, imports.GetJob(ctx, jobID).GetCommitBroadcastStarted())
+	for _, id := range []int64{segmentA, segmentB} {
+		segment := mt.GetSegment(ctx, id)
+		require.Zero(t, segment.GetCommitTimestamp())
+		canLoad, err := isQueryRecoverableSegment(segment)
+		require.NoError(t, err)
+		require.True(t, !canLoad || segment.GetState() == commonpb.SegmentState_Dropped,
+			"query recovery must exclude segment %d", id)
+	}
+	require.True(t, proto.Equal(existing.SegmentInfo, mt.GetSegment(ctx, existingID).SegmentInfo))
 }
 
 func (s *ImportCheckerSuite) TestCheckGC() {
