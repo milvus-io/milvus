@@ -635,6 +635,14 @@ type GetRestoreSnapshotStateTask struct {
 	ctx      context.Context
 	mixCoord types.MixCoordClient
 	result   *milvuspb.GetRestoreSnapshotStateResponse
+	// info is the job as DataCoord reported it, including the identities the
+	// public response omits, so that the caller can authorize the job.
+	info *datapb.RestoreSnapshotInfo
+}
+
+// JobInfo returns the job DataCoord reported, or nil if Execute did not get one.
+func (grst *GetRestoreSnapshotStateTask) JobInfo() *datapb.RestoreSnapshotInfo {
+	return grst.info
 }
 
 func (grst *GetRestoreSnapshotStateTask) TraceCtx() context.Context {
@@ -703,6 +711,7 @@ func (grst *GetRestoreSnapshotStateTask) Execute(ctx context.Context) error {
 
 	// Convert datapb.RestoreSnapshotInfo to milvuspb.RestoreSnapshotInfo
 	info := result.GetInfo()
+	grst.info = info
 	var milvusInfo *milvuspb.RestoreSnapshotInfo
 	if info != nil {
 		dbName, collectionName := resolveCollectionNames(ctx, grst.GetMetaCache(), info.GetCollectionId())
