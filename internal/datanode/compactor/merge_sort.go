@@ -178,12 +178,12 @@ func mergeSortMultipleSegments(ctx context.Context,
 	}
 
 	res := writer.GetCompactionSegments()
-	lineage.finish(res)
 	isNamespaceSorted := plan.GetSchema().GetEnableNamespace()
 	for _, seg := range res {
 		seg.IsSorted = !isNamespaceSorted
 		seg.IsSortedByNamespace = isNamespaceSorted
 	}
+	lineage.finish(res)
 
 	var (
 		deletedRowCount            int
