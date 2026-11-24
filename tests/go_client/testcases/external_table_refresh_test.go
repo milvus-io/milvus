@@ -3795,6 +3795,12 @@ func waitRefreshTerminal(t *testing.T, ctx context.Context, mc *base.MilvusClien
 }
 
 func TestRefreshExternalCollectionMilvusTableSnapshot(t *testing.T) {
+	// Skip in 3.0 Go SDK E2E: this test toggles dataCoord.compaction.bumpSchemaVersion.enabled
+	// via the standalone management HTTP endpoint (/management/config/alter on port 9091).
+	// Distributed Go SDK CI shards do not expose that management route through the SDK
+	// service address and fail setup with HTTP 404.
+	t.Skip("skip in 3.0 Go SDK CI: requires /management/config/alter on port 9091, which returns HTTP 404 in distributed Go SDK CI")
+
 	ctx := hp.CreateContext(t, 12*time.Minute)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	// Keep the negative snapshot deterministic; backfill is enabled below.
