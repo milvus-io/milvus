@@ -66,8 +66,8 @@ func ReleaseRecords(results []RetrieveSegmentResult) {
 type RetrieveOption func(*retrieveOptions)
 
 type retrieveOptions struct {
-	forceArrow      bool
-	predicateFields []int64
+	forceArrow        bool
+	plannedReadFields []int64
 }
 
 // WithArrowTransport makes the retrieve take the Arrow path whatever
@@ -77,9 +77,9 @@ func WithArrowTransport() RetrieveOption {
 	return func(o *retrieveOptions) { o.forceArrow = true }
 }
 
-// WithQueryPredicateFields passes the planned predicate reads to each selected segment.
-func WithQueryPredicateFields(fields []int64) RetrieveOption {
-	return func(o *retrieveOptions) { o.predicateFields = fields }
+// WithPlannedReadFields passes the planned column reads to each selected segment.
+func WithPlannedReadFields(fields []int64) RetrieveOption {
+	return func(o *retrieveOptions) { o.plannedReadFields = fields }
 }
 
 // retrieveOnSegments performs retrieve on listed segments
@@ -102,7 +102,7 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 	}
 
 	retriever := func(ctx context.Context, s Segment) error {
-		usage, unlock, err := collectPredicateReadUsage(s, o.predicateFields)
+		usage, unlock, err := collectPlannedReadUsage(s, o.plannedReadFields)
 		defer unlock()
 		if err != nil {
 			return err

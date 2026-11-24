@@ -93,7 +93,7 @@ func testRealQueryTask(t *testing.T, enableScan bool) {
 		}
 		data, err := proto.Marshal(p)
 		require.NoError(t, err)
-		req := &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{Base: &commonpb.MsgBase{}, CollectionID: 100, PartitionIDs: []int64{10}, SerializedExprPlan: data, MvccTimestamp: typeutil.MaxTimestamp, Limit: queryLimit, OutputFieldsId: []int64{100, textFieldID, 1}}, SegmentIDs: segmentIDs, Scope: querypb.DataScope_Streaming}
+		req := &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{Base: &commonpb.MsgBase{}, CollectionID: 100, PartitionIDs: []int64{10}, SerializedExprPlan: data, MvccTimestamp: typeutil.MaxTimestamp, Limit: queryLimit, OutputFieldsId: []int64{100, textFieldID, 1}, CollectQueryReadUsage: withChain}, SegmentIDs: segmentIDs, Scope: querypb.DataScope_Streaming}
 		task := NewQueryTask(ctx, collection, manager, req)
 		if err = task.PreExecute(); err != nil {
 			task.scheduleSpan.End()
@@ -189,6 +189,8 @@ func testRealQueryTask(t *testing.T, enableScan bool) {
 		for _, arguments := range []string{"-e timeout", "-e no_matches"} {
 			result, err := run(arguments, true)
 			require.NoError(t, err)
+			// Matching rows and a zero-row result both use the two full columns.
+			require.EqualValues(t, 62, result.GetCostAggregation().GetQueryReadUsage().GetDataBytes())
 			chunks, err := queryreducestream.SplitRetrieveResult(result, 1)
 			require.NoError(t, err)
 			var rows []queryutil.RowRef

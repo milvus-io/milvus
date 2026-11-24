@@ -49,20 +49,20 @@ func TestCollectSealedPredicateReadUsage(t *testing.T) {
 	}
 	read := &sealedReadState{Segment: segment, fieldSizes: sealedQueryFieldSizes(info)}
 
-	usage, unlock, err := collectPredicateReadUsage(read, []int64{100, 101, 100})
+	usage, unlock, err := collectPlannedReadUsage(read, []int64{100, 101, 100})
 	unlock()
 	require.NoError(t, err)
 	bytes, err := querymeter.BillableBytes(usage, 0)
 	require.NoError(t, err)
 	require.EqualValues(t, 66, bytes)
 
-	_, unlock, err = collectPredicateReadUsage(read, []int64{102})
+	_, unlock, err = collectPlannedReadUsage(read, []int64{102})
 	unlock()
 	require.ErrorContains(t, err, "segment 7 field 102")
 
 	info.ManifestPath = packed.MarshalManifestPath("segments/7", 11)
 	read.fieldSizes = sealedQueryFieldSizes(info)
-	_, unlock, err = collectPredicateReadUsage(read, []int64{100})
+	_, unlock, err = collectPlannedReadUsage(read, []int64{100})
 	unlock()
 	require.ErrorContains(t, err, "sealed manifest")
 }

@@ -3713,9 +3713,6 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	rateCol.Add(internalpb.RateType_DQLQuery.String(), 1, subLabel)
 
 	reporter := extension.RequestUsageReporter()
-	if len(request.GetFunctionChains()) > 0 {
-		reporter = nil
-	}
 	var result *milvuspb.QueryResults
 	var usageBytes int64
 	err := node.retryDQL(ctx, request.GetDbName(), request.GetCollectionName(), request.GetQueryParams(), func(ctx context.Context) (bool, error) {

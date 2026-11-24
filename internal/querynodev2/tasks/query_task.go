@@ -192,7 +192,12 @@ func (t *QueryTask) execute(selected []segments.Segment) error {
 			predicate = t.plan.GetPredicates()
 		}
 		fields := querymeter.PredicateFieldIDs(predicate)
-		opts = append(opts, segments.WithQueryPredicateFields(fields))
+		if t.queryChain != nil {
+			// QueryScan currently accepts one Grep operator. Its text read is
+			// independent of the predicates that select its candidate rows.
+			fields = append(fields, t.queryChain.InputPlan.Inputs[0].SourceFieldID)
+		}
+		opts = append(opts, segments.WithPlannedReadFields(fields))
 	}
 	if selected != nil {
 		results, err = segments.RetrieveSelectedSegments(t.ctx, retrievePlan, t.req, selected, opts...)

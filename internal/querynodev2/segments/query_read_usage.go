@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func collectPredicateReadUsage(segment Segment, fields []int64) (*internalpb.QueryReadUsage, func(), error) {
+func collectPlannedReadUsage(segment Segment, fields []int64) (*internalpb.QueryReadUsage, func(), error) {
 	unlock := func() {}
 	if len(fields) == 0 {
 		return nil, unlock, nil
