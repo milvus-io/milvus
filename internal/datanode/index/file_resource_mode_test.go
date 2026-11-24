@@ -125,8 +125,9 @@ func TestStatsCreateTextIndexUsesActualFileResourceMode(t *testing.T) {
 				},
 			}
 			taskManager := NewTaskManager(ctx)
-			taskManager.LoadOrStoreStatsTask(req.GetClusterID(), req.GetTaskID(), &StatsTaskInfo{})
-			task := NewStatsTask(ctx, cancel, req, taskManager, nil, nil, taskcommon.Resource{})
+			attempt := &StatsTaskInfo{}
+			taskManager.LoadOrStoreStatsTask(req.GetClusterID(), req.GetTaskID(), attempt)
+			task := NewStatsTask(ctx, cancel, req, taskManager, attempt, nil, nil, taskcommon.Resource{})
 
 			err := task.createTextIndex(ctx, req.GetStorageConfig(), 1, 2, 3, 1, 1, req.GetInsertLogs())
 			require.NoError(t, err)

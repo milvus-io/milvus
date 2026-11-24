@@ -529,7 +529,7 @@ func TestQuerySlotIncludesQueueBudget(t *testing.T) {
 		task := index.NewIndexBuildTask(ctx, cancel, &workerpb.CreateJobRequest{
 			ClusterID: "queue-budget", BuildID: id, TaskSlot: 64,
 			IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "STL_SORT"}},
-		}, nil, node.taskManager, nil, taskcommon.Resource{})
+		}, nil, node.taskManager, nil, nil, taskcommon.Resource{})
 		require.NoError(t, node.taskScheduler.TaskQueue.Enqueue(task))
 		resp, err := node.QuerySlot(ctx, &datapb.QuerySlotRequest{})
 		require.NoError(t, err)
@@ -883,9 +883,10 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 	})
 
 	s.Run("query index task with cost", func() {
-		s.node.taskManager.LoadOrStoreIndexTask("cluster-0", 101, &index.IndexTaskInfo{State: commonpb.IndexState_InProgress})
-		s.node.taskManager.StoreIndexTaskExecutionStart("cluster-0", 101, 100, 3)
-		s.node.taskManager.StoreIndexTaskExecutionEndWithState("cluster-0", 101, 180, 80, commonpb.IndexState_Finished, "")
+		attempt := &index.IndexTaskInfo{State: commonpb.IndexState_InProgress}
+		s.node.taskManager.LoadOrStoreIndexTask("cluster-0", 101, attempt)
+		s.node.taskManager.StoreIndexTaskExecutionStart("cluster-0", 101, attempt, 100, 3)
+		s.node.taskManager.StoreIndexTaskExecutionEndWithState("cluster-0", 101, attempt, 180, 80, commonpb.IndexState_Finished, "")
 
 		req := &workerpb.QueryTaskRequest{
 			Properties: map[string]string{

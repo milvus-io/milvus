@@ -347,6 +347,7 @@ func (node *DataNode) Stop() error {
 
 		if node.taskScheduler != nil {
 			node.taskScheduler.Close()
+			node.taskScheduler.Wait()
 		}
 
 		index.CloseSegcore()
