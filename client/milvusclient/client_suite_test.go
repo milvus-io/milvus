@@ -65,6 +65,12 @@ func (s *MockSuiteBase) SetupTest() {
 			grpc.WithBlock(),
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 			grpc.WithContextDialer(s.mockDialer),
+			// The mock server delivers errors as bare Go errors, which gRPC maps
+			// to a retryable status code. Disable the transport-level retry for
+			// mocked tests so an error-returning expectation is consumed exactly
+			// once; the rate-limit retry stays active. Production clients keep
+			// the transport retry enabled.
+			grpc.WithDefaultCallOptions(retryTransportDisabledOption{}),
 		},
 	})
 	s.Require().NoError(err)

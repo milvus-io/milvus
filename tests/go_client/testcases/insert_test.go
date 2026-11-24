@@ -944,10 +944,14 @@ func TestFlushRate(t *testing.T) {
 	errs := make([]error, cnt)
 	wg := &sync.WaitGroup{}
 	wg.Add(cnt)
+	// The SDK retries Milvus rate-limit errors by default (matching
+	// pymilvus/C++/Java), which would mask the server-side limiter this test
+	// verifies. Opt out per call so the rate-limit rejection surfaces.
+	flushCtx := context.WithValue(ctx, client.RetryOnRateLimit, false)
 	for i := 0; i < cnt; i++ {
 		go func(i int) {
 			defer wg.Done()
-			_, err := mc.Flush(ctx, client.NewFlushOption(schema.CollectionName))
+			_, err := mc.Flush(flushCtx, client.NewFlushOption(schema.CollectionName))
 			errs[i] = err
 		}(i)
 	}

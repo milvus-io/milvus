@@ -23,14 +23,13 @@ import (
 	"strconv"
 	"time"
 
-	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
 
 const (
@@ -197,19 +196,90 @@ func clientRequestIDFromContext(ctx context.Context) string {
 	return id
 }
 
-// ref: https://github.com/grpc-ecosystem/go-grpc-middleware
-
 type ctxKey int
 
 const (
 	RetryOnRateLimit ctxKey = iota
 )
 
-// RetryOnRateLimitInterceptor returns a new retrying unary client interceptor.
-func RetryOnRateLimitInterceptor(maxRetry uint, maxBackoff time.Duration, backoffFunc grpc_retry.BackoffFuncContext) grpc.UnaryClientInterceptor {
+// BackoffFuncContext returns the backoff duration to wait before a retry
+// attempt.
+type BackoffFuncContext func(ctx context.Context, attempt uint) time.Duration
+
+// retryDisabledOption is a grpc.CallOption that disables the client retry
+// interceptor entirely for a single call (e.g. the telemetry heartbeat, which
+// must be best-effort).
+type retryDisabledOption struct {
+	grpc.EmptyCallOption
+}
+
+// retryTransportDisabledOption disables only the transport-level retry for a
+// single call while keeping the rate-limit retry. The mock-server test client
+// uses it so mocked error-returning expectations are consumed exactly once.
+type retryTransportDisabledOption struct {
+	grpc.EmptyCallOption
+}
+
+// retryBackoffKey carries an optional per-call backoff function that overrides
+// the client-wide retry backoff (e.g. Flush paces its retries at 1s to match
+// the server's default flush rate limit of 1 request/sec per collection).
+type retryBackoffKey struct{}
+
+// withRetryBackoff returns a context carrying a per-call backoff function used
+// by the retry interceptor instead of the client-wide one.
+func withRetryBackoff(ctx context.Context, f func(attempt uint) time.Duration) context.Context {
+	return context.WithValue(ctx, retryBackoffKey{}, f)
+}
+
+// retryOptions extracts the per-call retry control options from the call
+// options.
+func retryOptions(opts []grpc.CallOption) (disabled, transportDisabled bool) {
+	for _, o := range opts {
+		switch o.(type) {
+		case retryDisabledOption:
+			disabled = true
+		case retryTransportDisabledOption:
+			transportDisabled = true
+		}
+	}
+	return
+}
+
+// isRetriableTransportErr reports whether a transport error carries a gRPC
+// status code the client retries. Context errors (Canceled / DeadlineExceeded)
+// are never retried.
+func isRetriableTransportErr(err error) bool {
+	code := status.Code(err)
+	if code == codes.Canceled || code == codes.DeadlineExceeded {
+		return false
+	}
+	for _, c := range retryableCodes {
+		if c == code {
+			return true
+		}
+	}
+	return false
+}
+
+// RetryInterceptor returns the SDK's retry interceptor: a single loop that
+// retries both retriable transport errors (gRPC status codes in
+// retryableCodes) and Milvus application-level rate-limit statuses, sharing one
+// attempt budget and one backoff sequence, mirroring the pymilvus / C++ / Java
+// SDKs. Retry is disabled per call with a retryDisabledOption call option, the
+// transport retry with a retryTransportDisabledOption, and the rate-limit retry
+// with a context carrying RetryOnRateLimit=false.
+func RetryInterceptor(maxRetry uint, maxBackoff time.Duration, backoffFunc BackoffFuncContext) grpc.UnaryClientInterceptor {
 	return func(parentCtx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		if maxRetry == 0 {
+		disabled, transportDisabled := retryOptions(opts)
+		if maxRetry == 0 || disabled {
 			return invoker(parentCtx, method, req, reply, cc, opts...)
+		}
+		// A per-call backoff carried in the context overrides the client-wide
+		// one for both transport and rate-limit retries.
+		if f, ok := parentCtx.Value(retryBackoffKey{}).(func(attempt uint) time.Duration); ok {
+			backoffFunc = func(ctx context.Context, attempt uint) time.Duration {
+				return f(attempt)
+			}
 		}
 		var lastErr error
 		for attempt := uint(0); attempt < maxRetry; attempt++ {
@@ -218,11 +288,34 @@ func RetryOnRateLimitInterceptor(maxRetry uint, maxBackoff time.Duration, backof
 				return err
 			}
 			lastErr = invoker(parentCtx, method, req, reply, cc, opts...)
-			rspStatus := getResultStatus(reply)
-			if retryOnRateLimit(parentCtx) && rspStatus.GetErrorCode() == commonpb.ErrorCode_RateLimit {
+			if lastErr != nil {
+				// Transport failure: retry only retriable codes. The reply
+				// object is reused across attempts, so only inspect it when the
+				// call succeeded (lastErr == nil) to avoid misreading a stale
+				// rate-limit status from an earlier attempt.
+				if parentCtx.Err() != nil {
+					return lastErr
+				}
+				if !transportDisabled && isRetriableTransportErr(lastErr) {
+					continue
+				}
+				return lastErr
+			}
+			// The call succeeded at the gRPC level: retry only when the reply
+			// carries a rate-limit status.
+			if retryOnRateLimit(parentCtx) && isRateLimitStatus(getResultStatus(reply)) {
 				continue
 			}
-			return lastErr
+			return nil
+		}
+		if lastErr == nil && isRateLimitStatus(getResultStatus(reply)) {
+			// The budget was exhausted while the server kept rejecting with a
+			// rate-limit status (gRPC OK). Surface it as a merr error so a
+			// persistently rate-limited call is not silently swallowed by paths
+			// that do not inspect the reply status, and callers can still
+			// classify it via merr code 8. This is the only retry layer, so
+			// nothing above will re-retry the error.
+			return merr.Error(getResultStatus(reply))
 		}
 		return lastErr
 	}
@@ -236,24 +329,38 @@ func retryOnRateLimit(ctx context.Context) bool {
 	return retry
 }
 
+// rateLimitModernCode is the modern Milvus error code for rate limit, shared
+// with the server-side merr partition table (legacy code 49 /
+// ErrorCode_RateLimit maps to modern code 8).
+const rateLimitModernCode int32 = 8
+
+// isRateLimitStatus reports whether the returned status is a Milvus rate-limit
+// error, matching the other SDKs which check both the legacy code
+// (ErrorCode_RateLimit) and the modern code (8).
+func isRateLimitStatus(s *commonpb.Status) bool {
+	if s == nil {
+		return false
+	}
+	return s.GetErrorCode() == commonpb.ErrorCode_RateLimit || s.GetCode() == rateLimitModernCode
+}
+
+// statusProvider matches the generated protobuf response types that embed a
+// *commonpb.Status. Nearly every Milvus response carries one, so a generic
+// assertion keeps the rate-limit retry working across all RPCs instead of a
+// hard-coded subset.
+type statusProvider interface {
+	GetStatus() *commonpb.Status
+}
+
 // getResultStatus returns status of response.
 func getResultStatus(reply interface{}) *commonpb.Status {
-	switch r := reply.(type) {
-	case *commonpb.Status:
+	if r, ok := reply.(*commonpb.Status); ok {
 		return r
-	case *milvuspb.MutationResult:
-		return r.GetStatus()
-	case *milvuspb.BoolResponse:
-		return r.GetStatus()
-	case *milvuspb.SearchResults:
-		return r.GetStatus()
-	case *milvuspb.QueryResults:
-		return r.GetStatus()
-	case *milvuspb.FlushResponse:
-		return r.GetStatus()
-	default:
-		return nil
 	}
+	if sp, ok := reply.(statusProvider); ok {
+		return sp.GetStatus()
+	}
+	return nil
 }
 
 func contextErrToGrpcErr(err error) error {
@@ -267,7 +374,7 @@ func contextErrToGrpcErr(err error) error {
 	}
 }
 
-func waitRetryBackoff(parentCtx context.Context, attempt uint, maxBackoff time.Duration, backoffFunc grpc_retry.BackoffFuncContext) (time.Duration, error) {
+func waitRetryBackoff(parentCtx context.Context, attempt uint, maxBackoff time.Duration, backoffFunc BackoffFuncContext) (time.Duration, error) {
 	var waitTime time.Duration
 	if attempt > 0 {
 		waitTime = backoffFunc(parentCtx, attempt)

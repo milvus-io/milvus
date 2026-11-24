@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -823,7 +822,7 @@ func (m *ClientTelemetryManager) sendHeartbeat() {
 	// Telemetry is best-effort: opt out of the client-wide retry interceptor so a failing
 	// heartbeat costs exactly one RPC instead of up to 6 with backoff. The next heartbeat
 	// is the retry.
-	resp, err := m.client.telemetryService.ClientHeartbeat(ctx, req, grpc_retry.Disable())
+	resp, err := m.client.telemetryService.ClientHeartbeat(ctx, req, retryDisabledOption{})
 	if err != nil {
 		m.setLastHeartbeatError(err)
 		// Unimplemented means *this* server does not offer the service. That may be the

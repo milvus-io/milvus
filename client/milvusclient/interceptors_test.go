@@ -45,10 +45,10 @@ func resetMockInvokeTimes() {
 	mockInvokeTimes = 0
 }
 
-func TestRateLimitInterceptor(t *testing.T) {
+func TestRetryInterceptor(t *testing.T) {
 	maxRetry := uint(3)
 	maxBackoff := 3 * time.Second
-	inter := RetryOnRateLimitInterceptor(maxRetry, maxBackoff, func(ctx context.Context, attempt uint) time.Duration {
+	inter := RetryInterceptor(maxRetry, maxBackoff, func(ctx context.Context, attempt uint) time.Duration {
 		return 60 * time.Millisecond * time.Duration(math.Pow(2, float64(attempt)))
 	})
 
@@ -58,10 +58,12 @@ func TestRateLimitInterceptor(t *testing.T) {
 	mockInvokerReply = &commonpb.Status{ErrorCode: commonpb.ErrorCode_RateLimit}
 	resetMockInvokeTimes()
 	err := inter(ctx, "", nil, mockInvokerReply, nil, mockInvoker)
-	assert.NoError(t, err)
+	// the retry budget is exhausted (every attempt rejected), so the
+	// interceptor surfaces the rate-limit error instead of returning nil
+	assert.Error(t, err)
 	assert.Equal(t, maxRetry, uint(mockInvokeTimes))
 
-	// without retry
+	// without rate-limit retry
 	ctx1 := context.WithValue(ctx, RetryOnRateLimit, false)
 	resetMockInvokeTimes()
 	err = inter(ctx1, "", nil, mockInvokerReply, nil, mockInvoker)

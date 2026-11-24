@@ -20,14 +20,12 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"math"
 	"os"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
-	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -112,16 +110,9 @@ func (c *Client) dialOptions() []grpc.DialOption {
 	options = append(options, DefaultGrpcOpts...)
 	options = append(options, c.config.DialOptions...)
 
-	options = append(options,
-		grpc.WithChainUnaryInterceptor(grpc_retry.UnaryClientInterceptor(
-			grpc_retry.WithMax(6),
-			grpc_retry.WithBackoff(func(attempt uint) time.Duration {
-				return 60 * time.Millisecond * time.Duration(math.Pow(3, float64(attempt)))
-			}),
-			grpc_retry.WithCodes(codes.Unavailable, codes.ResourceExhausted)),
-
-		// c.getRetryOnRateLimitInterceptor(),
-		))
+	options = append(options, grpc.WithChainUnaryInterceptor(
+		c.config.getRetryInterceptor(),
+	))
 
 	options = append(options, grpc.WithChainUnaryInterceptor(
 		c.MetadataUnaryInterceptor(),

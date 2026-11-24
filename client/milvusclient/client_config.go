@@ -13,6 +13,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/keepalive"
 )
 
@@ -24,6 +25,66 @@ const (
 )
 
 var regexValidScheme = regexp.MustCompile(`^https?:\/\/`)
+
+// Retry policy numbers shared with the pymilvus, C++ and Java SDKs. All three
+// baselines apply the same default profile: at most 75 attempts, an initial
+// 10ms backoff multiplied by 3 per attempt, capped at 3s, and no overall
+// timeout by default. Against a persistently failing server a call made with
+// context.Background() can therefore hold for roughly 3.5 minutes (sum of the
+// 75 backoffs) before surfacing the error; pass a context with a deadline
+// (e.g. context.WithTimeout) to bound the whole retry window.
+const (
+	defaultRetryTimes          = 75
+	defaultRetryInitialBackoff = 10 * time.Millisecond
+	defaultRetryMaxBackoff     = 3 * time.Second
+	defaultRetryMultiplier     = 3
+)
+
+// retryableCodes lists the gRPC status codes the retry interceptor retries at
+// the transport level. It mirrors the shared retry policy of the pymilvus, C++
+// and Java SDKs, which retry every code except DEADLINE_EXCEEDED,
+// PERMISSION_DENIED, UNAUTHENTICATED, INVALID_ARGUMENT, ALREADY_EXISTS,
+// RESOURCE_EXHAUSTED and UNIMPLEMENTED. Two adjustments are made: Canceled and
+// DeadlineExceeded are context errors that are never retried, even though
+// pymilvus's ignore set does not include Canceled; and the Milvus
+// application-level rate limit is retried by the same interceptor through the
+// reply status rather than the gRPC RESOURCE_EXHAUSTED status code.
+//
+// The widened set targets genuine transport failures. Real Milvus delivers
+// application errors embedded in resp.Status (gRPC OK), so these codes are
+// rarely surfaced for business RPCs; still, retrying an ambiguous transport
+// failure on a non-idempotent write (Insert/Upsert/Delete) is at-least-once.
+// Callers that need to bound the retry window should pass a context deadline,
+// and callers that need a specific call not to be retried can pass a
+// retryDisabledOption (or retryTransportDisabledOption) call option. Flush
+// stays on the standard retry policy, matching pymilvus, which wraps its flush
+// RPC with retry_on_rpc_failure.
+var retryableCodes = []codes.Code{
+	codes.Unknown,
+	codes.NotFound,
+	codes.FailedPrecondition,
+	codes.Aborted,
+	codes.OutOfRange,
+	codes.Internal,
+	codes.Unavailable,
+	codes.DataLoss,
+}
+
+// retryBackoff returns the exponential backoff for the given retry attempt,
+// aligned with the other SDKs: initialBackoff * multiplier^(attempt-1), capped
+// at maxBackoff (the first retry waits 10ms, the second 30ms, ...). The capped
+// loop avoids the duration overflow a raw power computation would hit for large
+// attempts.
+func retryBackoff(attempt uint, maxBackoff time.Duration) time.Duration {
+	wait := defaultRetryInitialBackoff
+	for i := uint(1); i < attempt && wait < maxBackoff; i++ {
+		wait *= defaultRetryMultiplier
+	}
+	if wait > maxBackoff {
+		return maxBackoff
+	}
+	return wait
+}
 
 // DefaultGrpcOpts is GRPC options for milvus client.
 var DefaultGrpcOpts = []grpc.DialOption{
@@ -61,7 +122,7 @@ type ClientConfig struct {
 
 	DialOptions []grpc.DialOption // Dial options for GRPC.
 
-	RetryRateLimit *RetryRateLimitOption // option for retry on rate limit inteceptor
+	RetryRateLimit *RetryRateLimitOption // option for the retry interceptor (shared transport + rate-limit budget)
 
 	DisableConn bool
 
@@ -73,6 +134,10 @@ type ClientConfig struct {
 	flags         uint64 // internal flags
 }
 
+// RetryRateLimitOption configures the client's retry interceptor: the shared
+// transport + rate-limit retry budget. MaxRetry is the maximum number of
+// attempts, MaxBackoff caps the exponential backoff. MaxRetry=0 disables retry
+// entirely.
 type RetryRateLimitOption struct {
 	MaxRetry   uint
 	MaxBackoff time.Duration
@@ -122,20 +187,21 @@ func (c *ClientConfig) setServerInfo(serverInfo string) {
 	c.ServerVersion = serverInfo
 }
 
-func (c *ClientConfig) getRetryOnRateLimitInterceptor() grpc.UnaryClientInterceptor {
+func (c *ClientConfig) getRetryInterceptor() grpc.UnaryClientInterceptor {
 	if c.RetryRateLimit == nil {
 		c.RetryRateLimit = c.defaultRetryRateLimitOption()
 	}
 
-	return RetryOnRateLimitInterceptor(c.RetryRateLimit.MaxRetry, c.RetryRateLimit.MaxBackoff, func(ctx context.Context, attempt uint) time.Duration {
-		return 10 * time.Millisecond * time.Duration(math.Pow(3, float64(attempt)))
+	return RetryInterceptor(c.RetryRateLimit.MaxRetry, c.RetryRateLimit.MaxBackoff, func(ctx context.Context, attempt uint) time.Duration {
+		// honor a caller-configured MaxBackoff above or below the parity 3s cap
+		return retryBackoff(attempt, c.RetryRateLimit.MaxBackoff)
 	})
 }
 
 func (c *ClientConfig) defaultRetryRateLimitOption() *RetryRateLimitOption {
 	return &RetryRateLimitOption{
-		MaxRetry:   75,
-		MaxBackoff: 3 * time.Second,
+		MaxRetry:   defaultRetryTimes,
+		MaxBackoff: defaultRetryMaxBackoff,
 	}
 }
 

@@ -244,10 +244,28 @@ func (t *FlushTask) GetFlushStats() (segIDs []int64, flushSegIDs []int64, flushT
 	return t.segmentIDs, t.flusheSegIDs, t.flushTs, t.channelCheckpoints
 }
 
+// flushRetryBackoff is the retry backoff for Flush, mirroring pymilvus which
+// decorates its flush RPC with @retry_on_rpc_failure(initial_back_off=1): the
+// first retry waits 1s and subsequent retries wait 3s (the 1s * 3 multiplier
+// immediately reaches the 3s cap). Flush is a heavy operation, so its retries
+// are throttled harder than the default 10ms profile.
+func flushRetryBackoff(attempt uint) time.Duration {
+	if attempt <= 1 {
+		return time.Second
+	}
+	return defaultRetryMaxBackoff
+}
+
 func (c *Client) Flush(ctx context.Context, option FlushOption, callOptions ...grpc.CallOption) (*FlushTask, error) {
 	req := option.Request()
 	collectionName := option.CollectionName()
 	var task *FlushTask
+
+	// Flush retries with a 1s initial backoff, matching pymilvus which wraps its
+	// flush RPC with @retry_on_rpc_failure(initial_back_off=1). This paces the
+	// retries against the server's default flush rate limit of 1 request/sec per
+	// collection.
+	ctx = withRetryBackoff(ctx, flushRetryBackoff)
 
 	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.Flush(ctx, req, callOptions...)
