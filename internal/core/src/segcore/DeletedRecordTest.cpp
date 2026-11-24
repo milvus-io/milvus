@@ -1454,11 +1454,12 @@ TEST(DeleteMVCC, GrowingSegmentOutOfOrderDeleteKeepsRowCount) {
     int64_t N = 10;
     auto dataset = DataGen(schema, N);
     auto pks = dataset.get_col<int64_t>(pk);
+    InsertRecordProto insert_record(*dataset.raw_);
     segment->Insert(0,
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    std::make_shared<InsertRecordProto>(*dataset.raw_));
+                    &insert_record);
 
     auto delete_pk = [&](int64_t delete_pk, Timestamp ts) {
         auto ids = std::make_unique<IdArray>();
@@ -1477,11 +1478,12 @@ TEST(DeleteMVCC, GrowingSegmentOutOfOrderDeleteKeepsRowCount) {
 
     // an unsorted batch on a fresh growing segment
     auto fresh = CreateGrowingSegment(schema, empty_index_meta);
+    InsertRecordProto fresh_insert_record(*dataset.raw_);
     fresh->Insert(0,
                   N,
                   dataset.row_ids_.data(),
                   dataset.timestamps_.data(),
-                  std::make_shared<InsertRecordProto>(*dataset.raw_));
+                  &fresh_insert_record);
     auto ids = std::make_unique<IdArray>();
     std::vector<Timestamp> tss = {50, 20, 35};
     for (size_t i = 0; i < tss.size(); ++i) {

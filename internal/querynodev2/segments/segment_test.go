@@ -556,6 +556,7 @@ func (suite *SegmentSuite) TestLoadDeltaData_OutOfOrderKeepsEarliestDelete() {
 	retrieve := func() []int64 {
 		plan, err := mock_segcore.GenSimpleRetrievePlan(suite.collection.GetCCollection())
 		suite.Require().NoError(err)
+		defer plan.Delete()
 		res, err := sealed.Retrieve(ctx, plan)
 		suite.Require().NoError(err)
 		return res.GetIds().GetIntId().GetData()
