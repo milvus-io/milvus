@@ -281,7 +281,7 @@ func (c *StatisticsCollector) Digest(
 		for _, l := range delta.GetBinlogs() {
 			c.deltaBinlogSize += l.GetMemorySize()
 			c.deltaBinlogCount++
-			c.deleteNumRows += l.DeleteKeyCount()
+			c.deleteNumRows += DeleteKeyCount(l)
 			if f := l.GetTimestampFrom(); f > 0 && (c.deltaTimestampFrom == 0 || f < c.deltaTimestampFrom) {
 				c.deltaTimestampFrom = f
 			}
@@ -732,13 +732,21 @@ func buildValidElementCounts(binlogs []*datapb.FieldBinlog) map[int64]int64 {
 	return counts
 }
 
+// DeleteKeyCount returns the logical delete count for legacy and typed delta files.
+func DeleteKeyCount(binlog *datapb.Binlog) int64 {
+	if counts := binlog.GetMutationCounts(); counts != nil {
+		return counts.GetDeleteKeys()
+	}
+	return binlog.GetEntriesNum()
+}
+
 // AccumulateDeltaStatistics adds physical file size/count and logical deletes
 // for the supplied deltalogs, preserving previously observed timestamp bounds.
 func AccumulateDeltaStatistics(s *datapb.Statistics, deltalogs []*datapb.FieldBinlog) {
 	for _, fb := range deltalogs {
 		for _, file := range fb.GetBinlogs() {
 			s.DeltaBinlogSize += file.GetMemorySize()
-			s.DeleteNumRows += file.DeleteKeyCount()
+			s.DeleteNumRows += DeleteKeyCount(file)
 			s.DeltaBinlogCount++
 			if ts := file.GetTimestampFrom(); ts > 0 && (s.DeltaTimestampFrom == 0 || ts < s.DeltaTimestampFrom) {
 				s.DeltaTimestampFrom = ts

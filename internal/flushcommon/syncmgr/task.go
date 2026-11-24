@@ -199,7 +199,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 
 	var deletes, updates int64
 	for _, binlog := range t.deltaBinlog.GetBinlogs() {
-		deletes += binlog.DeleteKeyCount()
+		deletes += storage.DeleteKeyCount(binlog)
 		updates += binlog.GetMutationCounts().GetUpdateKeys()
 	}
 	nodeID, collection := paramtable.GetStringNodeID(), fmt.Sprint(t.collectionID)
