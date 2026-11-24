@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <folly/CancellationToken.h>
 #include <folly/FBVector.h>
 #include <gtest/gtest.h>
 #include "monitor/Monitor.h"
@@ -4026,5 +4027,81 @@ TEST(Growing, InsertRejectsShortValidDataForNullableVarchar) {
         FAIL() << "expected short valid_data to be rejected";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
+    }
+}
+
+TEST(Growing, SearchIteratorV2TiePkOpContextPropagation) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 2, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+
+    auto data = segcore::DataGen(schema, 4);
+    const std::array<int64_t, 4> pks = {40, 10, 30, 20};
+    for (auto& fd : *data.raw_->mutable_fields_data()) {
+        if (fd.field_id() == pk.get()) {
+            auto* longs = fd.mutable_scalars()->mutable_long_data();
+            longs->Clear();
+            longs->mutable_data()->Add(pks.begin(), pks.end());
+        } else if (fd.field_id() == vec.get()) {
+            auto* floats = fd.mutable_vectors()->mutable_float_vector();
+            floats->clear_data();
+            for (int i = 0; i < 4; ++i) {
+                floats->add_data(1.0f);
+                floats->add_data(0.0f);
+            }
+        }
+    }
+
+    auto growing_base = CreateGrowingSegment(schema, empty_index_meta);
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(growing_base.get());
+    ASSERT_NE(growing, nullptr);
+    auto reserved = growing->PreInsert(4);
+    growing->Insert(reserved,
+                    4,
+                    data.row_ids_.data(),
+                    data.timestamps_.data(),
+                    data.SharedRaw());
+
+    SearchInfo info;
+    info.field_id_ = vec;
+    info.metric_type_ = knowhere::metric::L2;
+    info.topk_ = 2;
+    info.active_count_ = 4;
+    info.search_params_ =
+        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
+    info.iterator_v2_info_ = SearchIteratorV2Info{"", 2};
+
+    const std::array<float, 2> query_vec = {1.0f, 0.0f};
+    folly::CancellationSource cancel_source;
+    milvus::OpContext op_ctx(cancel_source.getToken());
+    SearchResult result;
+    query::SearchOnGrowing(*growing,
+                           info,
+                           query_vec.data(),
+                           nullptr,
+                           1,
+                           MAX_TIMESTAMP,
+                           BitsetView{},
+                           &op_ctx,
+                           result);
+    ASSERT_EQ(result.seg_offsets_, (std::vector<int64_t>{1, 3}));
+
+    cancel_source.requestCancellation();
+    SearchResult cancelled_result;
+    try {
+        query::SearchOnGrowing(*growing,
+                               info,
+                               query_vec.data(),
+                               nullptr,
+                               1,
+                               MAX_TIMESTAMP,
+                               BitsetView{},
+                               &op_ctx,
+                               cancelled_result);
+        FAIL() << "Expected SegcoreError when OpContext is cancelled";
+    } catch (const SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), ErrorCode::FollyCancel);
     }
 }

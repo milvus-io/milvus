@@ -107,37 +107,29 @@ SetSearchOnGrowingAfterChunkSnapshotHookForTest(
 
 namespace {
 
-// Resolve the primary key of a growing-segment row via the same bulk_subscript
-// path the reduce pipeline uses to fill search-result primary keys.
-std::optional<PkType>
-LookupGrowingPk(const segcore::SegmentGrowingImpl& segment, int64_t offset) {
-    if (offset < 0) {
-        return std::nullopt;
+PkAccessor
+MakePkAccessor(const segcore::SegmentGrowingImpl& segment,
+               const Schema& schema,
+               const SearchInfo& info,
+               milvus::OpContext* op_context,
+               SearchResult& search_result) {
+    if (!info.iterator_v2_info_.has_value()) {
+        return nullptr;
     }
-    auto schema = segment.get_schema_snapshot();
-    auto pk_field_id_opt = schema->get_primary_field_id();
+    auto pk_field_id_opt = schema.get_primary_field_id();
     if (!pk_field_id_opt.has_value()) {
-        return std::nullopt;
+        return nullptr;
     }
-    milvus::OpContext local_ctx;
-    auto field_data = segment.bulk_subscript(
-        &local_ctx, pk_field_id_opt.value(), &offset, 1);
-    if (field_data == nullptr) {
-        return std::nullopt;
-    }
-    std::vector<PkType> pks(1);
-    segcore::ParsePksFromFieldData(pks, *field_data);
-    return pks[0];
+    return [&segment,
+            pk_field_id = pk_field_id_opt.value(),
+            op_context,
+            &search_result](int64_t offset) -> std::optional<PkType> {
+        return segcore::LookupSegmentPk(
+            segment, pk_field_id, offset, op_context, search_result);
+    };
 }
 
 }  // namespace
-
-PkAccessor
-MakePkAccessor(const segcore::SegmentGrowingImpl& segment) {
-    return [&segment](int64_t offset) -> std::optional<PkType> {
-        return LookupGrowingPk(segment, offset);
-    };
-}
 
 void
 SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
@@ -247,13 +239,15 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 std::make_shared<index::GrowingIndexSnapshotPin>(
                     std::move(index_pin));
         }
-        SearchOnIndex(search_dataset,
-                      *reader,
-                      search_conf,
-                      bitset,
-                      search_result,
-                      is_sparse,
-                      MakePkAccessor(segment));
+        SearchOnIndex(
+            search_dataset,
+            *reader,
+            search_conf,
+            bitset,
+            search_result,
+            is_sparse,
+            MakePkAccessor(
+                segment, *schema, search_conf, op_context, search_result));
         // A growing segment's only vector index is the interim index.
         search_result.used_interim_index_ = true;
         register_vector_search_provider();
@@ -378,16 +372,17 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         // reads the same generation the scan below would have. Reading the
         // live container instead would assert once try_remove_chunks has
         // reclaimed it -- reclamation no longer waits for a chunk lock.
-        CachedSearchIterator cached_iter(search_dataset,
-                                         vec_ptr,
-                                         chunks,
-                                         active_count,
-                                         info,
-                                         index_info,
-                                         search_bitset,
-                                         iter_data_type,
-                                         has_element_id_mapping,
-                                         MakePkAccessor(segment));
+        CachedSearchIterator cached_iter(
+            search_dataset,
+            vec_ptr,
+            chunks,
+            active_count,
+            info,
+            index_info,
+            search_bitset,
+            iter_data_type,
+            has_element_id_mapping,
+            MakePkAccessor(segment, *schema, info, op_context, search_result));
         cached_iter.NextBatch(info, search_result);
         FinalizeVectorSearchOffsets(search_result,
                                     info.struct_element_offsets_.get());

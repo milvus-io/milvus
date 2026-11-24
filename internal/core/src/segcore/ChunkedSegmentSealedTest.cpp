@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <fmt/core.h>
+#include <folly/CancellationToken.h>
 #include <folly/FBVector.h>
 #include <folly/ScopeGuard.h>
 #include <stdlib.h>
@@ -3415,4 +3416,70 @@ TEST(test_chunk_segment, VortexNestedArrayOutputMatchesBulkArrayValueAt) {
     EXPECT_EQ(view0.array_at(0).get_data_unchecked<int64_t>(0), 1);
     EXPECT_FALSE(view0.array_at(0).is_valid(1));
     EXPECT_TRUE(view0.array_at(2).empty());
+}
+
+TEST(test_chunk_segment, SearchIteratorV2TiePkOpContextPropagation) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 2, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+
+    auto data = segcore::DataGen(schema, 4);
+    const std::array<int64_t, 4> pks = {40, 10, 30, 20};
+    for (auto& fd : *data.raw_->mutable_fields_data()) {
+        if (fd.field_id() == pk.get()) {
+            auto* longs = fd.mutable_scalars()->mutable_long_data();
+            longs->Clear();
+            longs->mutable_data()->Add(pks.begin(), pks.end());
+        } else if (fd.field_id() == vec.get()) {
+            auto* floats = fd.mutable_vectors()->mutable_float_vector();
+            floats->clear_data();
+            for (int i = 0; i < 4; ++i) {
+                floats->add_data(1.0f);
+                floats->add_data(0.0f);
+            }
+        }
+    }
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, data);
+    ASSERT_NE(segment, nullptr);
+
+    SearchInfo search_info;
+    search_info.field_id_ = vec;
+    search_info.metric_type_ = knowhere::metric::L2;
+    search_info.topk_ = 2;
+    search_info.search_params_ =
+        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
+    search_info.iterator_v2_info_ = SearchIteratorV2Info{"", 2};
+
+    const std::array<float, 2> query_vec = {1.0f, 0.0f};
+    folly::CancellationSource cancel_source;
+    milvus::OpContext op_ctx(cancel_source.getToken());
+    SearchResult result;
+    segment->vector_search(search_info,
+                           query_vec.data(),
+                           nullptr,
+                           1,
+                           MAX_TIMESTAMP,
+                           BitsetView{},
+                           &op_ctx,
+                           result);
+    ASSERT_EQ(result.seg_offsets_, (std::vector<int64_t>{1, 3}));
+
+    cancel_source.requestCancellation();
+    SearchResult cancelled_result;
+    try {
+        segment->vector_search(search_info,
+                               query_vec.data(),
+                               nullptr,
+                               1,
+                               MAX_TIMESTAMP,
+                               BitsetView{},
+                               &op_ctx,
+                               cancelled_result);
+        FAIL() << "Expected SegcoreError when OpContext is cancelled";
+    } catch (const SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), ErrorCode::FollyCancel);
+    }
 }

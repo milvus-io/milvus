@@ -4216,22 +4216,13 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
     if (search_info.iterator_v2_info_.has_value()) {
         auto pk_field_id_opt = snapshot->fields->get_primary_field_id();
         if (pk_field_id_opt.has_value()) {
-            pk_accessor =
-                [this, pk_field_id = pk_field_id_opt.value()](
-                    int64_t offset) -> std::optional<PkType> {
-                    if (offset < 0) {
-                        return std::nullopt;
-                    }
-                    milvus::OpContext local_ctx;
-                    auto field_data = this->bulk_subscript(
-                        &local_ctx, pk_field_id, &offset, 1);
-                    if (field_data == nullptr) {
-                        return std::nullopt;
-                    }
-                    std::vector<PkType> pks(1);
-                    ParsePksFromFieldData(pks, *field_data);
-                    return pks[0];
-                };
+            pk_accessor = [this,
+                           pk_field_id = pk_field_id_opt.value(),
+                           op_context,
+                           &output](int64_t offset) -> std::optional<PkType> {
+                return LookupSegmentPk(
+                    *this, pk_field_id, offset, op_context, output);
+            };
         }
     }
 
