@@ -91,7 +91,7 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 			fields = (*C.int64_t)(unsafe.Pointer(&req.LoadFields[0]))
 		}
 		if req.ExplicitLoadScope && req.SegmentType == SegmentTypeSealed {
-			status = C.NewSealedSegmentWithManifest(req.Collection.rawPointer(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted), (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)), fields, C.int64_t(len(req.LoadFields)), req.LoadManifest.Native())
+			status = C.NewSealedSegmentWithCollection(req.Collection.rawPointer(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted), (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)), fields, C.int64_t(len(req.LoadFields)), req.LoadManifest.Native())
 		} else {
 			// Legacy load fields control preloading; they are not an immutable
 			// QueryView field selection. Preserve lazy loading and schema evolution.
@@ -407,7 +407,7 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	var future cgo.Future
 	if req.Collection != nil {
 		future = cgo.Async(ctx, func() cgo.CFuturePtr {
-			return (cgo.CFuturePtr)(C.AsyncReopenSealedSegmentWithManifest(
+			return (cgo.CFuturePtr)(C.AsyncReopenSealedSegmentWithCollection(
 				traceCtx.ctx, s.ptr, req.Collection.rawPointer(),
 				(*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)),
 				loadFields, C.int64_t(len(req.LoadFields)), manifest.Native(),

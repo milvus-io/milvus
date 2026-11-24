@@ -7,7 +7,8 @@ Related issue: #53047.
 Keep completed index inventory in SegmentInfo and artifact details in the
 segment manifest. Do not reconstruct completed SegmentIndex objects at startup.
 Collection index definitions and active or pending-cleanup build tasks remain
-coordinator metadata. The default mode retains existing behavior.
+coordinator metadata. The default mode retains its index metadata source and
+publication behavior.
 
 Completed inventory has one publication mode: legacy mode retains completed
 SegmentIndex records and does not write summaries; summary mode writes summaries
@@ -84,8 +85,15 @@ preparation and uses it for index artifacts, column groups, delta paths and stat
 The manifest closes when preparation ends. Read states of the same revision
 share the imported column groups. The View's index definitions supply its load
 parameters. A finished task for the same build supplies the artifact metadata.
-Complete snapshots remain available for older consumers, external collections,
-StorageV2 and diagnostics.
+Complete load metadata remains available for older consumers, external
+collections and StorageV2. In summary mode, segment diagnostics use the
+selected segment's summaries and finished tasks directly. Full metadata batches
+use the shared manifest I/O limit and return per-segment errors.
+
+Manifest reuse also applies to ordinary non-L0 StorageV3 QueryView loads when
+summary mode is off. The default `common.storage.useLoonFFI=true` allows
+QueryNode to share the selected revision for column groups, delta paths and stats.
+Those loads use DataCoord's index file paths from the complete load metadata.
 
 ## Cleanup and restore
 
@@ -107,6 +115,12 @@ remain explicit completion records. Restore and export use DataCoord's shared
 manifest read limit to resolve deferred records from those versions and verify
 that every captured build is accounted for. The self-contained export writes
 the complete file list with rewritten paths.
+
+To move a summary-mode snapshot to a version without manifest-backed snapshot
+support, export it on the source version and restore the self-contained bundle.
+The referenced snapshot's V6 metadata uses `index_files_from_manifest` to mark
+the deferred files. Older readers ignore that field and can accept the snapshot
+without copying its index artifacts, causing the target to rebuild them.
 
 Copy/restore verifies compatibility before creating work or copying files.
 Compatible targets publish their manifest and summaries before becoming visible.

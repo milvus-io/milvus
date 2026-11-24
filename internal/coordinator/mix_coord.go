@@ -1665,8 +1665,8 @@ func (s *mixCoordImpl) DataViewProvider() balancer.DataViewProvider {
 	return s.datacoordServer.DataViewProvider()
 }
 
-func (s *mixCoordImpl) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64, resolveManifestIndexesLocally bool) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
-	return s.datacoordServer.GetQueryViewSegmentLoadInfos(ctx, collectionID, segmentIDs, resolveManifestIndexesLocally)
+func (s *mixCoordImpl) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64, indexMode types.QueryViewIndexMode) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
+	return s.datacoordServer.GetQueryViewSegmentLoadInfos(ctx, collectionID, segmentIDs, indexMode)
 }
 
 func (s *mixCoordImpl) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {

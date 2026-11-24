@@ -3,6 +3,7 @@ package querycoordv2
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -19,7 +20,11 @@ func (s *Server) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.G
 		resp.Status = merr.Status(merr.WrapErrServiceNotReadyMsg("segment metadata provider is not initialized"))
 		return resp, nil
 	}
-	infos, indexes, err := s.mixCoord.GetQueryViewSegmentLoadInfos(ctx, req.GetCollectionID(), req.GetSegmentIDs(), req.GetResolveManifestIndexesLocally())
+	indexMode := types.QueryViewIndexFull
+	if req.GetResolveManifestIndexesLocally() {
+		indexMode = types.QueryViewIndexResolveLocally
+	}
+	infos, indexes, err := s.mixCoord.GetQueryViewSegmentLoadInfos(ctx, req.GetCollectionID(), req.GetSegmentIDs(), indexMode)
 	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil

@@ -39,11 +39,11 @@ import (
 const (
 	// SnapshotFormatVersion identifies snapshots written by this implementation.
 	// Future readers must retain V0-V5 binary decoding and V6 OCF support.
-	// Future writers must preserve compatibility with V6 readers: keep OCF
+	// Portable bundles must preserve compatibility with V6 readers: keep OCF
 	// framing and supported codecs, preserve existing field names, types and
-	// meanings, and make new fields safe to ignore. Embedded schemas only
-	// describe encoding; incompatible restore semantics need explicit reader
-	// handling before a future writer format is introduced.
+	// meanings, and make new fields safe to ignore. Referenced snapshots that
+	// defer index files to the segment manifest require a reader that supports
+	// that metadata. Export them before restoring on older readers.
 	SnapshotFormatVersion = 6
 	// SelfDescribingManifestVersion is the first format requiring OCF manifests.
 	// It must remain 6 when SnapshotFormatVersion increases, so V6 OCF manifests

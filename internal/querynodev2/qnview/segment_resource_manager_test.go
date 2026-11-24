@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type resourceTestLoader struct{ PhysicalSegmentLoader }
@@ -545,6 +546,79 @@ func TestSegmentResourceSharesManifestWithinPreparation(t *testing.T) {
 		f.drop(t, three)
 		f.drop(t, two)
 		f.drop(t, one)
+	})
+}
+
+func TestSegmentResourceLoadsStorageV3WithoutIndexSummaries(t *testing.T) {
+	mockey.PatchConvey("legacy index metadata and a shared StorageV3 manifest", t, func() {
+		params := paramtable.Get()
+		require.False(t, params.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool())
+		require.True(t, params.CommonCfg.UseLoonFFI.GetAsBool())
+		dir := t.TempDir()
+		base := filepath.Join(dir, "segment")
+		config := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+		path, err := packed.CreateManifestForSegment(base, []string{"100"}, "parquet",
+			[]packed.Fragment{{FilePath: filepath.Join(base, "data.parquet"), EndRow: 10}}, config)
+		require.NoError(t, err)
+		delta := filepath.Join(base, "delta.parquet")
+		path, err = packed.CommitManifestUpdates(path, config, &packed.ManifestUpdates{
+			DeltaLogs: []packed.DeltaLogEntry{{Path: delta, NumEntries: 1}},
+		})
+		require.NoError(t, err)
+		_, version, err := packed.UnmarshalManifestPath(path)
+		require.NoError(t, err)
+
+		f := setupResourceTest(t, nil)
+		defer f.manager.Close()
+		f.manifest.Store(version)
+		legacyIndex := &querypb.FieldIndexInfo{IndexID: 5, FieldID: 100, BuildID: 30, IndexFilePaths: []string{"index_v1/legacy"}}
+		f.dependencyMock.To(func(_ *fakeQueryViewCollectionRuntimeManager, _ context.Context, view *qviews.QueryViewAtQueryNode) (CollectionRuntimeGuard, bool, error) {
+			version := view.IntoProto().Meta.SchemaVersion
+			return &fakeCollectionRuntimeGuard{
+				schemaVersion: int64(version), schema: &schemapb.CollectionSchema{Version: version},
+				updatedIndexes: []*indexpb.IndexInfo{{IndexID: 5, FieldID: 100}},
+			}, false, nil
+		})
+		f.getMock.To(func(_ *resourceTestMetadata, _ context.Context, collectionID, segmentID int64) (SegmentLoadInfoSnapshot, error) {
+			snapshot := resourceSnapshot(collectionID, segmentID, version)
+			snapshot.LoadInfo.ManifestPath = path
+			snapshot.LoadInfo.IndexInfos = []*querypb.FieldIndexInfo{legacyIndex}
+			return snapshot, nil
+		})
+		var opened, loadManifest, readManifest *packed.LoadManifest
+		var openCount int
+		var loadIndexes, readIndexes []*querypb.FieldIndexInfo
+		f.manager.openManifest = func(ctx context.Context, path string, _ *indexpb.StorageConfig) (*packed.LoadManifest, error) {
+			openCount++
+			var err error
+			opened, err = packed.OpenLoadManifest(ctx, path, config)
+			return opened, err
+		}
+		f.loadMock.To(func(_ *resourceTestLoader, ctx context.Context, info *querypb.SegmentLoadInfo, _ CollectionRuntime) (TransformSegment, error) {
+			loadManifest = packed.LoadManifestFromContext(ctx, info.GetManifestPath())
+			loadIndexes = info.GetIndexInfos()
+			return &fakeTransformSegment{id: info.SegmentID, partitionID: info.PartitionID}, nil
+		})
+		f.prepareMock.To(func(_ *resourceTestLoader, ctx context.Context, _ TransformSegment, _ segments.ReadState, _ CollectionRuntime, snapshot SegmentLoadInfoSnapshot) (segments.ReadState, error) {
+			readManifest = packed.LoadManifestFromContext(ctx, snapshot.LoadInfo.GetManifestPath())
+			readIndexes = snapshot.LoadInfo.GetIndexInfos()
+			return &resourceTestRead{}, nil
+		})
+		req := f.request(1, 1, 1)
+		req.View.Partitions[0].SegmentManifestVersions = []int64{version}
+		f.manager.Acquire(req)
+		f.await(t, 1)
+		require.Equal(t, 1, openCount)
+		require.NotNil(t, opened)
+		require.Same(t, opened, loadManifest)
+		require.Same(t, opened, readManifest)
+		require.Equal(t, []string{delta}, opened.DeltaPaths())
+		require.Len(t, loadIndexes, 1)
+		require.Equal(t, legacyIndex.GetIndexFilePaths(), loadIndexes[0].GetIndexFilePaths())
+		require.Len(t, readIndexes, 1)
+		require.Equal(t, legacyIndex.GetBuildID(), readIndexes[0].GetBuildID())
+		require.Nil(t, opened.Native())
+		f.drop(t, req)
 	})
 }
 

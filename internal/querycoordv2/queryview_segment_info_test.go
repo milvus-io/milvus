@@ -24,8 +24,8 @@ import (
 
 type segmentInfoMixCoord struct{ types.MixCoord }
 
-func (m *segmentInfoMixCoord) GetQueryViewSegmentLoadInfos(ctx context.Context, cid int64, ids []int64, local bool) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
-	return m.MixCoord.GetQueryViewSegmentLoadInfos(ctx, cid, ids, local)
+func (m *segmentInfoMixCoord) GetQueryViewSegmentLoadInfos(ctx context.Context, cid int64, ids []int64, mode types.QueryViewIndexMode) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
+	return m.MixCoord.GetQueryViewSegmentLoadInfos(ctx, cid, ids, mode)
 }
 
 func TestQueryViewSegmentInfo(t *testing.T) {
@@ -51,8 +51,8 @@ func TestQueryViewSegmentInfo(t *testing.T) {
 		mockey.Mock((*coordview.ShardViewRegistry).SnapshotForCollection).To(func(_ *coordview.ShardViewRegistry, _ int64) *coordview.ShardViewSnapshot {
 			return coordview.NewShardViewSnapshot(1, stats)
 		}).Build(),
-		mockey.Mock((*segmentInfoMixCoord).GetQueryViewSegmentLoadInfos).To(func(_ *segmentInfoMixCoord, _ context.Context, cid int64, ids []int64, local bool) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
-			require.False(t, local)
+		mockey.Mock((*segmentInfoMixCoord).GetQueryViewSegmentLoadInfos).To(func(_ *segmentInfoMixCoord, _ context.Context, cid int64, ids []int64, mode types.QueryViewIndexMode) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
+			require.Equal(t, types.QueryViewIndexMetadataOnly, mode)
 			reads++
 			result := make([]*querypb.QueryViewSegmentLoadInfoResult, 0, len(ids))
 			for _, id := range ids {
@@ -132,6 +132,8 @@ func TestQueryViewSegmentInfo(t *testing.T) {
 		require.Equal(t, int64(103), resp.Infos[0].GetSegmentID())
 		require.Equal(t, []int64{20, 30}, resp.Infos[0].GetNodeIds())
 		require.Equal(t, int64(100), resp.Infos[0].GetNumRows())
+		require.Equal(t, "FLAT", resp.Infos[0].GetIndexName())
+		require.EqualValues(t, 7, resp.Infos[0].GetIndexID())
 	})
 	t.Run("handoff during metadata read", func(t *testing.T) {
 		reads = 0

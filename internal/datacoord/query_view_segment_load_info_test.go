@@ -2,9 +2,13 @@ package datacoord
 
 import (
 	"context"
+	"strconv"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -15,10 +19,12 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/segcore/loadresource"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -33,7 +39,7 @@ func TestQueryViewSegmentLoadInfoPreservesV3ResourceStatistics(t *testing.T) {
 			}},
 		},
 	}
-	info, err := (&Server{}).packQueryViewSegmentLoadInfo(segment, nil, nil)
+	info, err := (&Server{}).packQueryViewSegmentLoadInfo(segment, nil, nil, true)
 	require.NoError(t, err)
 	require.True(t, proto.Equal(segment.GetStats(), info.GetStats()))
 	require.Empty(t, info.GetBinlogPaths())
@@ -55,7 +61,7 @@ func TestQueryViewSegmentLoadInfoRejectsUnknownReplayCursor(t *testing.T) {
 	defer patchSegment.UnPatch()
 	s := &Server{meta: m, domainMetas: domainMetas{indexMeta: im}}
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
-	infos, indexes, err := s.GetQueryViewSegmentLoadInfos(context.Background(), 1, []int64{10}, false)
+	infos, indexes, err := s.GetQueryViewSegmentLoadInfos(context.Background(), 1, []int64{10}, types.QueryViewIndexFull)
 	require.NoError(t, err)
 	require.Len(t, infos, 1)
 	require.ErrorIs(t, merr.Error(infos[0].GetStatus()), merr.ErrServiceNotReady)
@@ -82,7 +88,7 @@ func TestQueryViewSegmentLoadInfoBatchIsolation(t *testing.T) {
 	im := &index.IndexMeta{}
 	s := &Server{meta: &meta.Meta{IndexCatalog: im}, domainMetas: domainMetas{indexMeta: im}}
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
-	results, indexes, err := s.GetQueryViewSegmentLoadInfos(t.Context(), 1, []int64{2, 3, 4, 1, 1}, false)
+	results, indexes, err := s.GetQueryViewSegmentLoadInfos(t.Context(), 1, []int64{2, 3, 4, 1, 1}, types.QueryViewIndexFull)
 	require.NoError(t, err)
 	require.Len(t, results, 4)
 	require.ErrorIs(t, merr.Error(results[0].Status), merr.ErrServiceNotReady)
@@ -94,7 +100,7 @@ func TestQueryViewSegmentLoadInfoBatchIsolation(t *testing.T) {
 	require.Len(t, indexes, 1)
 	require.Equal(t, 1, patchIndexes.Times())
 	require.Equal(t, 4, patchSegment.Times())
-	results, indexes, err = s.GetQueryViewSegmentLoadInfos(t.Context(), 1, nil, false)
+	results, indexes, err = s.GetQueryViewSegmentLoadInfos(t.Context(), 1, nil, types.QueryViewIndexFull)
 	require.NoError(t, err)
 	require.Empty(t, results)
 	require.Empty(t, indexes)
@@ -121,7 +127,7 @@ func TestQueryViewSegmentLoadInfoIndexPaths(t *testing.T) {
 				IndexState: commonpb.IndexState_Finished, IndexStorePathVersion: tc.version,
 				IndexFileKeys: []string{"index.bin", "index.meta"},
 			}}
-			info, err := s.packQueryViewSegmentLoadInfo(segment, indexes, segmentIndexes)
+			info, err := s.packQueryViewSegmentLoadInfo(segment, indexes, segmentIndexes, true)
 			require.NoError(t, err)
 			require.Len(t, info.IndexInfos, 1)
 			require.Equal(t, []string{tc.prefix + "/index.bin", tc.prefix + "/index.meta"}, info.IndexInfos[0].IndexFilePaths)
@@ -132,17 +138,17 @@ func TestQueryViewSegmentLoadInfoIndexPaths(t *testing.T) {
 			// even when their owning segment has no usable manifest.
 			segment.ManifestPath = "invalid"
 			segmentIndexes[5].IndexState = commonpb.IndexState_InProgress
-			info, err = s.packQueryViewSegmentLoadInfo(segment, indexes, segmentIndexes)
+			info, err = s.packQueryViewSegmentLoadInfo(segment, indexes, segmentIndexes, true)
 			require.NoError(t, err)
 			require.Empty(t, info.IndexInfos)
 			segmentIndexes[5].IndexState = commonpb.IndexState_Finished
-			info, err = s.packQueryViewSegmentLoadInfo(segment, nil, segmentIndexes)
+			info, err = s.packQueryViewSegmentLoadInfo(segment, nil, segmentIndexes, true)
 			require.NoError(t, err)
 			require.Empty(t, info.IndexInfos)
 
 			// A finished index with no file keys needs no path resolution.
 			segmentIndexes[5].IndexFileKeys = nil
-			info, err = s.packQueryViewSegmentLoadInfo(segment, indexes, segmentIndexes)
+			info, err = s.packQueryViewSegmentLoadInfo(segment, indexes, segmentIndexes, true)
 			require.NoError(t, err)
 			require.Len(t, info.IndexInfos, 1)
 			require.Empty(t, info.IndexInfos[0].IndexFilePaths)
@@ -176,7 +182,7 @@ func TestQueryViewSegmentLoadInfoManifestErrorIsolation(t *testing.T) {
 	im := &index.IndexMeta{}
 	s := &Server{meta: &meta.Meta{IndexCatalog: im, ChunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files"))}, domainMetas: domainMetas{indexMeta: im}}
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
-	results, indexes, err := s.GetQueryViewSegmentLoadInfos(t.Context(), 1, []int64{1, 2, 3, 4}, false)
+	results, indexes, err := s.GetQueryViewSegmentLoadInfos(t.Context(), 1, []int64{1, 2, 3, 4}, types.QueryViewIndexFull)
 	require.NoError(t, err)
 	require.Len(t, results, 4)
 	require.Len(t, indexes, 1)
@@ -287,8 +293,8 @@ func TestQueryViewNegotiatesLocalManifestIndexesWithoutCoordinatorRead(t *testin
 		},
 	}
 	definitions := []*model.Index{
-		{CollectionID: 1, IndexID: 5, FieldID: 100},
-		{CollectionID: 1, IndexID: 6, FieldID: 101},
+		{CollectionID: 1, IndexID: 5, FieldID: 100, IndexName: "vector"},
+		{CollectionID: 1, IndexID: 6, FieldID: 101, IndexName: "retained"},
 	}
 	collection := &meta.CollectionInfo{Schema: &schemapb.CollectionSchema{}}
 	defer mockey.Mock((*index.IndexMeta).UsesSegmentSummaries).Return(true).Build().UnPatch()
@@ -324,7 +330,7 @@ func TestQueryViewNegotiatesLocalManifestIndexesWithoutCoordinatorRead(t *testin
 	}}, nil).Build()
 	defer open.UnPatch()
 
-	local, _, err := s.GetQueryViewSegmentLoadInfos(t.Context(), 1, []int64{segmentID, 11, 404}, true)
+	local, _, err := s.GetQueryViewSegmentLoadInfos(t.Context(), 1, []int64{segmentID, 11, 404}, types.QueryViewIndexResolveLocally)
 	require.NoError(t, err)
 	require.Zero(t, open.Times())
 	require.NoError(t, merr.Error(local[0].GetStatus()))
@@ -339,7 +345,21 @@ func TestQueryViewNegotiatesLocalManifestIndexesWithoutCoordinatorRead(t *testin
 	require.Nil(t, local[1].GetManifestIndexes())
 	require.ErrorIs(t, merr.Error(local[2].GetStatus()), merr.ErrSegmentNotFound)
 
-	full, _, err := s.GetQueryViewSegmentLoadInfos(t.Context(), 1, []int64{segmentID}, false)
+	diagnostics, _, err := s.GetQueryViewSegmentLoadInfos(t.Context(), 1, []int64{segmentID}, types.QueryViewIndexMetadataOnly)
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(diagnostics[0].GetStatus()))
+	require.Zero(t, open.Times())
+	require.Nil(t, diagnostics[0].GetManifestIndexes())
+	diagnosticIndexes := diagnostics[0].GetLoadInfo().GetIndexInfos()
+	require.Len(t, diagnosticIndexes, 2)
+	names := make(map[int64]string)
+	for _, info := range diagnosticIndexes {
+		names[info.GetBuildID()] = info.GetIndexName()
+		require.Empty(t, info.GetIndexFilePaths())
+	}
+	require.Equal(t, map[int64]string{30: "vector", 31: "retained"}, names)
+
+	full, _, err := s.GetQueryViewSegmentLoadInfos(t.Context(), 1, []int64{segmentID}, types.QueryViewIndexFull)
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(full[0].GetStatus()))
 	require.Equal(t, 1, open.Times())
@@ -353,9 +373,94 @@ func TestQueryViewNegotiatesLocalManifestIndexesWithoutCoordinatorRead(t *testin
 	require.Equal(t, local[0].GetManifestIndexes().GetFinishedTasks()[0].GetIndexFilePaths(), files[31])
 
 	collection.Schema = &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{ExternalField: "source_column"}}}
-	external, _, err := s.GetQueryViewSegmentLoadInfos(t.Context(), 1, []int64{segmentID}, true)
+	external, _, err := s.GetQueryViewSegmentLoadInfos(t.Context(), 1, []int64{segmentID}, types.QueryViewIndexResolveLocally)
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(external[0].GetStatus()))
 	require.Nil(t, external[0].GetManifestIndexes())
 	require.Equal(t, 2, open.Times())
+}
+
+func TestQueryViewFullManifestReadsAreBoundedAndIsolated(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	segments := make(map[int64]*meta.SegmentInfo)
+	paths := make(map[string]int64)
+	for _, id := range []int64{1, 2, 3} {
+		path := packed.MarshalManifestPath("files/segment/"+strconv.FormatInt(id, 10), 7)
+		paths[path] = id
+		segments[id] = &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: id, CollectionID: 1, PartitionID: 2, StorageVersion: storage.StorageV3,
+			ManifestPath: path, TransformStartAfterTimetick: 100, ManifestHasIndex: true,
+			IndexSummaries: []*datapb.SegmentIndexSummary{{
+				IndexId: 5, FieldId: 100, BuildId: id + 10, IndexVersion: 4, HasArtifact: true,
+			}},
+		}}
+	}
+	defer mockey.Mock((*index.IndexMeta).UsesSegmentSummaries).Return(true).Build().UnPatch()
+	defer mockey.Mock((*meta.Meta).GetCollection).Return(&meta.CollectionInfo{
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{ExternalField: "source_column"}}},
+	}).Build().UnPatch()
+	defer mockey.Mock((*index.IndexMeta).GetQueryViewIndexSnapshot).Return(
+		[]*model.Index{{CollectionID: 1, IndexID: 5, FieldID: 100}}, nil,
+	).Build().UnPatch()
+	defer mockey.Mock((*meta.Meta).GetSegment).To(func(_ *meta.Meta, _ context.Context, id int64) *meta.SegmentInfo {
+		return segments[id]
+	}).Build().UnPatch()
+	defer mockey.Mock(meta.SegmentIndexManifestReadConcurrency).Return(2).Build().UnPatch()
+
+	var concurrent atomic.Int32
+	var reachedLimit, exceededLimit atomic.Bool
+	twoReaders := make(chan struct{})
+	defer mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(ctx context.Context, _ *packed.ManifestIOContext, path string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+		active := concurrent.Add(1)
+		defer concurrent.Add(-1)
+		if active > 2 {
+			exceededLimit.Store(true)
+		}
+		if active == 2 && reachedLimit.CompareAndSwap(false, true) {
+			close(twoReaders)
+		}
+		select {
+		case <-twoReaders:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		id := paths[path]
+		if id == 2 {
+			return nil, merr.WrapErrStorage(packed.ErrLoonPermanent, "get loaded manifest")
+		}
+		base, _, err := packed.UnmarshalManifestPath(path)
+		if err != nil {
+			return nil, err
+		}
+		return []packed.ManifestIndexInfo{{
+			IndexID: 5, FieldID: 100, BuildID: id + 10, IndexVersion: 4, IndexName: "vector", IndexType: "HNSW",
+			Path: base + "/_index/" + strconv.FormatInt(id+10, 10) + "/4", IndexFileKeys: []string{"index.bin"},
+			IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+		}}, nil
+	}).Build().UnPatch()
+
+	im := &index.IndexMeta{}
+	s := &Server{
+		meta:        &meta.Meta{ChunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files"))},
+		domainMetas: domainMetas{indexMeta: im},
+	}
+	s.UpdateStateCode(commonpb.StateCode_Healthy)
+	results, _, err := s.GetQueryViewSegmentLoadInfos(ctx, 1, []int64{2, 1, 3, 1, 404}, types.QueryViewIndexResolveLocally)
+	require.NoError(t, err)
+	require.True(t, reachedLimit.Load())
+	require.False(t, exceededLimit.Load())
+	require.Len(t, results, 4)
+	require.Equal(t, []int64{2, 1, 3, 404}, lo.Map(results, func(result *querypb.QueryViewSegmentLoadInfoResult, _ int) int64 {
+		return result.GetSegmentID()
+	}))
+	require.ErrorIs(t, merr.Error(results[0].GetStatus()), merr.ErrStorage)
+	require.ErrorIs(t, merr.Error(results[3].GetStatus()), merr.ErrSegmentNotFound)
+	for _, result := range results[1:3] {
+		require.NoError(t, merr.Error(result.GetStatus()))
+		require.Nil(t, result.GetManifestIndexes())
+		require.Len(t, result.GetLoadInfo().GetIndexInfos(), 1)
+		require.Equal(t, result.GetSegmentID()+10, result.GetLoadInfo().GetIndexInfos()[0].GetBuildID())
+		require.Len(t, result.GetLoadInfo().GetIndexInfos()[0].GetIndexFilePaths(), 1)
+	}
 }

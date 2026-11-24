@@ -672,7 +672,7 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 			IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
 		}))
 
-		infos, indexInfos, err := svr.GetQueryViewSegmentLoadInfos(context.Background(), collectionID, []int64{segmentID}, false)
+		infos, indexInfos, err := svr.GetQueryViewSegmentLoadInfos(context.Background(), collectionID, []int64{segmentID}, types.QueryViewIndexFull)
 
 		require.NoError(t, err)
 		require.Len(t, infos, 1)
@@ -773,7 +773,7 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 		).Build()
 		defer getSegmentIndexesMock.UnPatch()
 
-		infos, indexInfos, err := svr.GetQueryViewSegmentLoadInfos(context.Background(), collectionID, []int64{segmentID}, false)
+		infos, indexInfos, err := svr.GetQueryViewSegmentLoadInfos(context.Background(), collectionID, []int64{segmentID}, types.QueryViewIndexFull)
 
 		require.NoError(t, err)
 		require.Len(t, infos, 1)
@@ -791,7 +791,7 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
-		results, _, err := svr.GetQueryViewSegmentLoadInfos(context.Background(), 100, []int64{404}, false)
+		results, _, err := svr.GetQueryViewSegmentLoadInfos(context.Background(), 100, []int64{404}, types.QueryViewIndexFull)
 
 		require.NoError(t, err)
 		require.Len(t, results, 1)
@@ -825,7 +825,7 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 			JsonKeyStats:                map[int64]*datapb.JsonKeyStats{fieldID: jsonPlaceholder},
 			InsertChannel:               "vchan",
 		})))
-		infos, _, err := svr.GetQueryViewSegmentLoadInfos(context.Background(), collectionID, []int64{segmentID}, false)
+		infos, _, err := svr.GetQueryViewSegmentLoadInfos(context.Background(), collectionID, []int64{segmentID}, types.QueryViewIndexFull)
 
 		require.NoError(t, err)
 		require.Len(t, infos, 1)
