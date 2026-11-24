@@ -17,6 +17,7 @@ PACKAGES = {
     "onetbb": ["libtbb.so*"],
     "geos": ["libgeos.so*", "libgeos_c.so*"],
     "gtest": ["libgtest.so*", "libgtest_main.so*"],
+    "arrow": ["libarrow.so*", "libparquet.so*"],
 }
 FLAGS = {
     "tools.build:cflags": ["-g", "-fno-omit-frame-pointer", "-fsanitize=thread"],
@@ -46,6 +47,7 @@ def profile(all_dependencies=False):
     lines += [
         "",
         "[options]",
+        "arrow/*:shared=True",
         "geos/*:shared=True",
         "gtest/*:shared=True",
         "openblas/*:use_openmp=False",

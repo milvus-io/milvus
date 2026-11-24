@@ -121,6 +121,12 @@ class ArtifactTests(unittest.TestCase):
         actual = subprocess.check_output([str(self.lib / "llvm-symbolizer")], text=True)
         self.assertEqual(actual, str(tool_dir))
 
+    def test_profile_configures_shared_arrow_with_tsan(self):
+        profile = tsan.profile()
+        self.assertIn("arrow/*:shared=True\n", profile)
+        self.assertIn("arrow/*:compiler=clang\n", profile)
+        self.assertEqual(tsan.PACKAGES["arrow"], ["libarrow.so*", "libparquet.so*"])
+
 
 @unittest.skipUnless(
     shutil.which("conan"), "Conan 2 is required for package identity checks"
