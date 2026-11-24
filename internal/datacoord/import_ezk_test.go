@@ -19,16 +19,12 @@ package datacoord
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
-	"io"
 	"strconv"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -58,10 +54,6 @@ func (*importRequestCipher) Backup(int64) (string, error) {
 func (c *importRequestCipher) ResolveImportEZ(artifact string) (int64, []byte, error) {
 	return c.resolve(artifact)
 }
-
-type temporaryImportTestError struct{ error }
-
-func (temporaryImportTestError) Temporary() bool { return true }
 
 func TestImportRequestsCarrySourceAndTargetEZKs(t *testing.T) {
 	backup := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":73}`))
@@ -122,16 +114,14 @@ func TestImportRequestsCarrySourceAndTargetEZKs(t *testing.T) {
 	}
 }
 
-func TestImportDispatchStopsOnEZKError(t *testing.T) {
+func TestImportDispatchRetriesOnEZKError(t *testing.T) {
 	ctx := context.Background()
 	backup := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":73}`))
 	schema := &schemapb.CollectionSchema{Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "91"}}}
 	for _, state := range []internalpb.ImportJobState{internalpb.ImportJobState_PreImporting, internalpb.ImportJobState_Importing} {
 		t.Run(state.String(), func(t *testing.T) {
 			var sourceErr error
-			var resolves int
 			cipher := &importRequestCipher{MockCipher: mock_hook.NewMockCipher(t), resolve: func(artifact string) (int64, []byte, error) {
-				resolves++
 				require.Equal(t, backup, artifact)
 				return 73, []byte("old"), sourceErr
 			}}
@@ -141,73 +131,36 @@ func TestImportDispatchStopsOnEZKError(t *testing.T) {
 			catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{{
 				JobID: 1, Schema: schema, State: state, DataTs: 100, Options: []*commonpb.KeyValuePair{{Key: importutilv2.EZK, Value: backup}},
 			}}, nil)
-			catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(errors.New("catalog unavailable")).Once()
-			catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
 			cluster := session.NewMockCluster(t)
 			alloc := allocator.NewMockAllocator(t)
-			workerOffline := merr.Error(merr.Status(merr.WrapErrServiceUnavailable("worker unavailable")))
 			if state == internalpb.ImportJobState_PreImporting {
 				catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{{
 					JobID: 1, TaskID: 2, State: datapb.ImportTaskStateV2_Pending,
 				}}, nil)
 				catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-				cluster.EXPECT().CreatePreImport(int64(11), mock.Anything, mock.Anything).Return(workerOffline).Once()
 			} else {
 				catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 				catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{{
 					JobID: 1, TaskID: 2, State: datapb.ImportTaskStateV2_Pending,
 				}}, nil)
 				alloc.EXPECT().AllocN(mock.Anything).Return(10, 20, nil)
-				cluster.EXPECT().CreateImport(int64(11), mock.Anything, mock.Anything).Return(workerOffline).Once()
 			}
 			im, err := NewImportMeta(ctx, catalog, alloc, nil)
 			require.NoError(t, err)
 			task := im.GetTask(ctx, 2)
-			transients := []error{
-				context.Canceled,
-				context.DeadlineExceeded,
-				io.ErrUnexpectedEOF,
-				merr.ErrServiceUnavailable,
-				merr.WrapErrServiceInternalErr(merr.ErrServiceUnavailable, "KMS client failed"),
-				status.Error(codes.Unavailable, "source temporarily unavailable"),
-				temporaryImportTestError{errors.New("source KMS throttled Decrypt")},
-			}
-			for _, transient := range transients {
-				sourceErr = fmt.Errorf("%w: %w", errors.New("decrypt failed"), transient)
-				task.CreateTaskOnWorker(10, cluster)
-				require.Equal(t, state, im.GetJob(ctx, 1).GetState())
-				require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
-				catalog.AssertNotCalled(t, "SaveImportJob", mock.Anything, mock.Anything)
-			}
 
+			// Source resolve failure keeps task pending without dispatching.
+			sourceErr = errors.New("source KMS unavailable")
+			task.CreateTaskOnWorker(10, cluster)
+			require.Equal(t, state, im.GetJob(ctx, 1).GetState())
+			require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+
+			// Target missing unsafe key keeps task pending without dispatching.
 			sourceErr = nil
 			cipher.EXPECT().GetUnsafeKey(int64(91), task.GetCollectionID()).Return(nil).Once()
 			task.CreateTaskOnWorker(10, cluster)
 			require.Equal(t, state, im.GetJob(ctx, 1).GetState())
 			require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
-			catalog.AssertNotCalled(t, "SaveImportJob", mock.Anything, mock.Anything)
-
-			cipher.EXPECT().GetUnsafeKey(int64(91), task.GetCollectionID()).Return([]byte("new")).Once()
-			task.CreateTaskOnWorker(11, cluster)
-			require.Equal(t, state, im.GetJob(ctx, 1).GetState())
-			require.EqualValues(t, 1, task.GetTaskVersion())
-
-			sourceErr = errors.New("source KMS denied Decrypt")
-			job := im.GetJob(ctx, 1)
-			_, err = getImportPluginContext(job.GetOptions(), job.GetSchema().GetProperties(), task.GetCollectionID())
-			require.True(t, errors.Is(err, merr.ErrImportFailed))
-			require.ErrorIs(t, err, sourceErr)
-			task.CreateTaskOnWorker(12, cluster)
-			require.Equal(t, state, im.GetJob(ctx, 1).GetState())
-			task.CreateTaskOnWorker(12, cluster)
-			job = im.GetJob(ctx, 1)
-			require.Equal(t, internalpb.ImportJobState_Failed, job.GetState())
-			require.Contains(t, job.GetReason(), sourceErr.Error())
-
-			// The scheduler can revisit a pending task before the import checker fails it.
-			sourceErr = nil
-			task.CreateTaskOnWorker(13, cluster)
-			require.Equal(t, len(transients)+5, resolves)
 		})
 	}
 }
@@ -318,47 +271,4 @@ func TestCompactionTasksRetryTemporaryPluginContextError(t *testing.T) {
 		require.Equal(t, datapb.CompactionTaskState_pipelining, task.GetTaskProto().GetState())
 		compMeta.AssertNotCalled(t, "SaveCompactionTask", mock.Anything, mock.Anything)
 	})
-}
-
-func TestImportDispatchStopsOnWorkerCipherRejection(t *testing.T) {
-	// Exercise the error delivered by the CreateTask RPC status round trip.
-	rejected := merr.Error(merr.Status(merr.WrapErrImportFailed("incompatible historical read keys")))
-	for _, state := range []internalpb.ImportJobState{internalpb.ImportJobState_PreImporting, internalpb.ImportJobState_Importing} {
-		t.Run(state.String(), func(t *testing.T) {
-			job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, State: state, DataTs: 100}}
-			im := NewMockImportMeta(t)
-			im.EXPECT().GetJob(mock.Anything, int64(1)).Return(job)
-			im.EXPECT().UpdateJob(mock.Anything, int64(1), mock.Anything, mock.Anything).
-				Return(errors.New("catalog unavailable")).Once()
-			im.EXPECT().UpdateJob(mock.Anything, int64(1), mock.Anything, mock.Anything).
-				Run(func(_ context.Context, _ int64, actions ...UpdateJobAction) {
-					for _, apply := range actions {
-						apply(job)
-					}
-				}).Return(nil).Once()
-			cluster := session.NewMockCluster(t)
-			var task ImportTask
-			if state == internalpb.ImportJobState_PreImporting {
-				pre := &preImportTask{importMeta: im}
-				pre.task.Store(&datapb.PreImportTask{JobID: 1, TaskID: 2})
-				cluster.EXPECT().CreatePreImport(int64(11), mock.Anything, mock.Anything).Return(rejected).Twice()
-				task = pre
-			} else {
-				alloc := allocator.NewMockAllocator(t)
-				alloc.EXPECT().AllocN(mock.Anything).Return(10, 20, nil).Twice()
-				imp := &importTask{importMeta: im, alloc: alloc}
-				imp.task.Store(&datapb.ImportTaskV2{JobID: 1, TaskID: 2})
-				cluster.EXPECT().CreateImport(int64(11), mock.Anything, mock.Anything).Return(rejected).Twice()
-				task = imp
-			}
-			task.CreateTaskOnWorker(11, cluster)
-			require.Equal(t, state, job.GetState())
-			require.EqualValues(t, 1, task.GetTaskVersion())
-			task.CreateTaskOnWorker(11, cluster)
-			require.Equal(t, internalpb.ImportJobState_Failed, job.GetState())
-			require.Contains(t, job.GetReason(), "incompatible historical read keys")
-			require.EqualValues(t, 1, task.GetTaskVersion())
-			task.CreateTaskOnWorker(11, cluster)
-		})
-	}
 }

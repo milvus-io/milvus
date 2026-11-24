@@ -854,7 +854,7 @@ func TestDataNodeImportCipherContext(t *testing.T) {
 
 			cipher.targetErr = errors.New("init key manager failed: CipherPlugin: cannot parse ezk, ezID=7, err=invalid keyset")
 			status, err = submit(wire)
-			require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrImportFailed)
+			require.Error(t, merr.CheckRPCCall(status, err))
 			require.Contains(t, status.GetReason(), "invalid keyset")
 			require.Nil(t, node.importTaskMgr.Get(taskID))
 			require.Empty(t, cipher.registered)
@@ -862,7 +862,7 @@ func TestDataNodeImportCipherContext(t *testing.T) {
 			cipher.targetErr = nil
 			cipher.sourceErr = errors.New("init key manager failed: CipherPlugin: cannot register ezk, ezID=7, err=conflicting key ID 24 for ezID=7")
 			status, err = submit(wire)
-			require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrImportFailed)
+			require.Error(t, merr.CheckRPCCall(status, err))
 			require.Contains(t, status.GetReason(), "conflicting key ID")
 			require.Nil(t, node.importTaskMgr.Get(taskID))
 			require.Equal(t, []map[string]string{target}, cipher.registered)

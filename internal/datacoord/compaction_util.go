@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -53,14 +54,16 @@ func PreAllocateBinlogIDs(allocator allocator.Allocator, segmentInfos []*Segment
 func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, msg proto.Message) error {
 	switch msg := msg.(type) {
 	case *datapb.ImportRequest:
-		pluginContext, err := getImportPluginContext(msg.GetOptions(), properties, collectionID)
+		artifact, _ := importutilv2.GetEZK(msg.GetOptions())
+		pluginContext, err := hookutil.GetImportStoragePluginContext(artifact, properties, collectionID)
 		if err != nil {
 			return err
 		}
 		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 		return nil
 	case *datapb.PreImportRequest:
-		pluginContext, err := getImportPluginContext(msg.GetOptions(), properties, collectionID)
+		artifact, _ := importutilv2.GetEZK(msg.GetOptions())
+		pluginContext, err := hookutil.GetImportStoragePluginContext(artifact, properties, collectionID)
 		if err != nil {
 			return err
 		}

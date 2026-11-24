@@ -161,7 +161,7 @@ func TestRegisterImportCipherContextsRejectsInvalidRequest(t *testing.T) {
 		conflict := errors.New("CipherPlugin: cannot register ezk, ezID=7, err=conflicting key ID 24 for ezID=7")
 		t.Cleanup(SetTestCipher(&importReadCipher{err: conflict}))
 		err := RegisterImportCipherContexts(artifact, nil, wire("7:b2xk"), collectionID)
-		require.ErrorIs(t, err, merr.ErrImportFailed)
+		require.ErrorIs(t, err, conflict)
 	})
 	t.Run("target failure stops before source", func(t *testing.T) {
 		targetErr := merr.WrapErrServiceUnavailable("target key cache unavailable")

@@ -133,19 +133,15 @@ func (t *importTask) GetTaskSlot() int64 {
 func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	log.Info("processing pending import task...", WrapTaskLog(t)...)
 	job := t.importMeta.GetJob(context.TODO(), t.GetJobID())
-	if job == nil || job.GetState() == internalpb.ImportJobState_Failed || job.GetState() == internalpb.ImportJobState_Completed {
-		return
-	}
 	req, err := AssembleImportRequest(t, job, t.meta, t.alloc)
 	if err != nil {
-		handleImportRequestError(t, t.importMeta, err)
+		log.Warn("assemble import request failed", WrapTaskLog(t, zap.Error(err))...)
 		return
 	}
 	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())
 	if err != nil {
-		if !handleImportRequestError(t, t.importMeta, err) {
-			t.retryTimes++
-		}
+		log.Warn("import failed", WrapTaskLog(t, zap.Error(err))...)
+		t.retryTimes++
 		return
 	}
 	err = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),

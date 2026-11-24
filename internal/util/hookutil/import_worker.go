@@ -19,8 +19,6 @@ package hookutil
 import (
 	"encoding/base64"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -99,23 +97,15 @@ func RegisterImportCipherContexts(
 	// Register the authoritative target before checking a same-zone source.
 	if target != nil {
 		if err := CreateLocalEZ(target.GetEncryptionZoneId(), target.GetEncryptionKey()); err != nil {
-			return classifyImportRegistrationError(err)
+			return err
 		}
 	}
 	if source != nil {
 		if err := RegisterLocalImportEZ(source.GetEncryptionZoneId(), source.GetEncryptionKey()); err != nil {
-			return classifyImportRegistrationError(err)
+			return err
 		}
 	}
 	return nil
-}
-
-func classifyImportRegistrationError(err error) error {
-	if errors.Is(err, merr.ErrImportFailed) || errors.Is(err, merr.ErrServiceUnavailable) ||
-		merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) {
-		return err
-	}
-	return merr.WrapErrImportFailed(err.Error())
 }
 
 func importCipherEntry(entry *commonpb.KeyValuePair, role string, expectedID, collectionID int64) (*indexcgopb.StoragePluginContext, error) {

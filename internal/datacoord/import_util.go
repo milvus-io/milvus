@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"io"
 	"math"
 	"path"
 	"path/filepath"
@@ -31,15 +30,12 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -275,65 +271,6 @@ func AllocImportSegment(ctx context.Context,
 		zap.String("level", level.String()))
 
 	return segment, nil
-}
-
-func handleImportRequestError(task ImportTask, im ImportMeta, cause error) (failed bool) {
-	log.Warn("failed to dispatch import request", WrapTaskLog(task, zap.Error(cause))...)
-	if !errors.Is(cause, merr.ErrImportFailed) {
-		return false
-	}
-	if err := im.UpdateJob(context.TODO(), task.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(cause.Error())); err != nil {
-		log.Warn("failed to update import job", zap.Int64("jobID", task.GetJobID()), zap.Error(err))
-		return false
-	}
-	return true
-}
-
-// isTemporaryImportContextError walks single and Go 1.20 multi-unwrap chains
-// because this branch's cockroachdb/errors does not traverse Unwrap() []error,
-// and checks each ErrorClassifier layer so an inner retriable error isn't masked.
-func isTemporaryImportContextError(err error) bool {
-	if merr.IsCanceledOrTimeout(err) || errors.Is(err, io.ErrUnexpectedEOF) {
-		return true
-	}
-	for ; err != nil; err = errors.Unwrap(err) {
-		if joined, ok := err.(interface{ Unwrap() []error }); ok {
-			for _, cause := range joined.Unwrap() {
-				if isTemporaryImportContextError(cause) {
-					return true
-				}
-			}
-			return false
-		}
-		if _, ok := err.(merr.ErrorClassifier); ok && merr.IsRetryableErr(err) {
-			return true
-		}
-		if rpc, ok := err.(interface{ GRPCStatus() *status.Status }); ok {
-			switch rpc.GRPCStatus().Code() {
-			case codes.Unavailable, codes.DeadlineExceeded, codes.Canceled:
-				return true
-			}
-		}
-		if timeout, ok := err.(interface{ Timeout() bool }); ok && timeout.Timeout() {
-			return true
-		}
-		if temporary, ok := err.(interface{ Temporary() bool }); ok && temporary.Temporary() {
-			return true
-		}
-	}
-	return false
-}
-
-func getImportPluginContext(options, properties []*commonpb.KeyValuePair, collectionID int64) ([]*commonpb.KeyValuePair, error) {
-	artifact, _ := importutilv2.GetEZK(options)
-	pluginContext, err := hookutil.GetImportStoragePluginContext(artifact, properties, collectionID)
-	if err != nil {
-		if isTemporaryImportContextError(err) {
-			return nil, err
-		}
-		return nil, merr.Mark(merr.Wrap(err, "failed to prepare import encryption context"), merr.ErrImportFailed)
-	}
-	return pluginContext, nil
 }
 
 func AssemblePreImportRequest(task ImportTask, job ImportJob) (*datapb.PreImportRequest, error) {
