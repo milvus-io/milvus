@@ -111,7 +111,7 @@ func (s *CommonSuite) TestParseAKForEndpoint() {
 	s.Equal("", apiKey)
 
 	// a credential named in the function params is only resolved for a listed endpoint
-	conf := map[string]string{CredentialEndpointsConfKey: "http://tei.internal:8080, https://tei.example.com"}
+	conf := map[string]string{CredentialEndpointsConfKey: "http://tei.internal:8080, https://tei.example.com"} // #nosec G101 -- endpoint list, not a credential.
 	apiKey, err = ParseAKForEndpoint(creds, namedParams, conf, "", extraInfo, "http://tei.internal:8080/some/path", "test.provider")
 	s.NoError(err)
 	s.Equal("named-key", apiKey)
@@ -121,7 +121,7 @@ func (s *CommonSuite) TestParseAKForEndpoint() {
 	s.ErrorContains(err, CredentialEndpointsConfKey)
 
 	// the provider credential from milvus.yaml follows the same rule
-	conf = map[string]string{CredentialParamKey: "conf", CredentialEndpointsConfKey: "https://tei.example.com"}
+	conf = map[string]string{CredentialParamKey: "conf", CredentialEndpointsConfKey: "https://tei.example.com"} // #nosec G101 -- endpoint list, not a credential.
 	apiKey, err = ParseAKForEndpoint(creds, nil, conf, "", extraInfo, "https://tei.example.com", "test.provider")
 	s.NoError(err)
 	s.Equal("conf-key", apiKey)

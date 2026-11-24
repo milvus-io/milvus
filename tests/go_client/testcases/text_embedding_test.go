@@ -321,7 +321,7 @@ func TestInsertWithTruncateParams(t *testing.T) {
 
 				t.Logf("Successfully inserted %d documents with truncate=%v, direction=%s", len(documents), tc.truncate, tc.truncationDirection)
 			} else {
-				common.CheckErr(t, err, false, "Payload Too Large")
+				common.CheckErr(t, err, false, "status code: 413")
 			}
 		})
 	}

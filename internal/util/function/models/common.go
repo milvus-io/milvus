@@ -165,6 +165,7 @@ const (
 	// CredentialEndpointsConfKey is the provider configuration item (milvus.yaml)
 	// that lists the endpoints allowed to receive a credential configured on the
 	// server, for providers whose endpoint is set in the function params.
+	// #nosec G101 -- configuration key name, not a credential.
 	CredentialEndpointsConfKey string = "credential_endpoints"
 )
 
