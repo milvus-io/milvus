@@ -36,9 +36,12 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -91,6 +94,167 @@ func TestTaskResource_IndexVarCharColumnGroup(t *testing.T) {
 	it := bigFixtureIndexTask(mt, im)
 	assert.Equal(t, want, it.GetTaskResource())
 	assert.Equal(t, want, it.GetTaskResource()) // Cached estimate keeps the same cap.
+}
+
+func TestNgramManifestPricingAndPlacement(t *testing.T) {
+	paramtable.Init()
+	fixture := meta.NewLocalPackedFixture(t, false)
+	mt, im := fixtureIndexMeta(t, taskresource.NewFixtureMeta(true))
+	idx := im.Indexes[1][4]
+	idx.FieldID = 102
+	idx.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexNGRAM}}
+	schema := taskresource.FixtureSchema()
+	field := schema.Fields[2]
+	field.DataType = schemapb.DataType_Text
+	taskresource.PutFixtureSchema(mt, schema)
+	ctx := context.Background()
+	handler := meta.NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(mt.GetCollection(1), nil)
+	job, ok := im.GetIndexJob(5)
+	require.True(t, ok)
+	it := NewIndexBuildTask(job, 1, mt, im, handler, fixture.Cm, NewIndexEngineVersionManager())
+
+	const recorded = int64(223 << 20)
+	setManifest := func(path string) {
+		taskresource.UpdateFixtureSegment(mt, func(seg *datapb.SegmentInfo) {
+			seg.ManifestPath = path
+			seg.Stats.LoadResource = &datapb.LoadResourceStatistics{ColumnGroups: []*datapb.ColumnGroupStatistics{
+				{FieldIds: []int64{102}, MemorySize: recorded},
+			}}
+		})
+	}
+	// An unavailable revision must retry, including after task reconstruction
+	// when the collection schema is still being populated.
+	setManifest(packed.MarshalManifestPath(t.TempDir(), 99))
+	taskresource.DropFixtureSchema(mt)
+	require.True(t, it.CanCompleteOnCoordinator())
+	require.Equal(t, globalTask.LocalRetry, it.CompleteOnCoordinator(ctx))
+	taskresource.PutFixtureSchema(mt, schema)
+	require.True(t, it.CanCompleteOnCoordinator())
+
+	// This real manifest has out-of-line TEXT in field 101 only.
+	setManifest(fixture.PhysicalManifest)
+	require.Equal(t, globalTask.LocalNeedsWorker, it.CompleteOnCoordinator(ctx))
+	require.False(t, it.CanCompleteOnCoordinator())
+	oldPrice := taskresource.Index(recorded, false)
+	require.Equal(t, oldPrice, it.GetTaskResource())
+
+	files := []packed.LobFileInfo{
+		{FieldID: 102, Path: "lobs/a", TotalRows: 500, ValidRows: 500, FileSizeBytes: 400 << 20},
+		{FieldID: 102, Path: "lobs/b", TotalRows: 300, ValidRows: 200, FileSizeBytes: 268 << 20},
+	}
+	manifest, err := packed.AddLobFilesToTransaction(fixture.PhysicalManifest, meta.CreateStorageConfig(), files)
+	require.NoError(t, err)
+	setManifest(manifest)
+	cluster := session.NewMockCluster(t)
+	it.CreateTaskOnWorker(1, cluster, oldPrice)
+	require.Zero(t, it.GetTaskVersion(), "an unpriced revision must not reach dispatch")
+	require.True(t, it.CanCompleteOnCoordinator())
+
+	// All 34 old estimates fit a 20 GiB worker. Keep admitted jobs running
+	// across scheduling rounds so the test observes the actual admission limit.
+	const builds = 34
+	const capacity = int64(20 << 30)
+	want := taskresource.Index(recorded+(668<<20), false)
+	require.Less(t, builds*oldPrice.Memory, capacity)
+	limit := int(capacity / want.Memory)
+	require.Equal(t, 11, limit)
+	var used, fullRounds atomic.Int64
+	cluster.EXPECT().QuerySlot().RunAndReturn(func() map[int64]*session.WorkerSlots {
+		free := capacity - used.Load()
+		if free < want.Memory {
+			fullRounds.Add(1)
+		}
+		return map[int64]*session.WorkerSlots{1: {
+			NodeID: 1, TotalCPU: 4, AvailableCPU: 4, TotalMemory: capacity, AvailableMemory: free, Idle: free == capacity,
+		}}
+	}).Maybe()
+	cluster.EXPECT().CreateIndex(int64(1), mock.MatchedBy(func(req *workerpb.CreateJobRequest) bool {
+		return req.FieldID == 102 && req.Manifest == mt.GetSegment(ctx, req.SegmentID).GetManifestPath()
+	}), want).Run(func(_ int64, _ *workerpb.CreateJobRequest, price taskcommon.Resource) {
+		used.Add(price.Memory)
+	}).Return(nil).Times(limit)
+	cluster.EXPECT().QueryIndex(int64(1), mock.Anything).RunAndReturn(func(_ int64, req *workerpb.QueryJobsRequest) (*workerpb.IndexJobResults, error) {
+		return &workerpb.IndexJobResults{Results: []*workerpb.IndexTaskInfo{
+			{BuildID: req.TaskIDs[0], State: commonpb.IndexState_InProgress},
+		}}, nil
+	}).Maybe()
+	scheduler := globalTask.NewGlobalTaskScheduler(ctx, cluster)
+	scheduler.Enqueue(it)
+	for n := int64(1); n < builds; n++ {
+		segment := mt.Segments.GetSegment(job.SegmentID).Clone()
+		segment.ID += n
+		base := fmt.Sprintf("%s/insert_log/1/2/%d", fixture.LegacyRoot, segment.ID)
+		segment.ManifestPath, err = packed.AddLobFilesToTransaction(packed.MarshalManifestPath(base, 0), meta.CreateStorageConfig(), files)
+		require.NoError(t, err)
+		mt.Segments.SetSegment(segment.ID, segment)
+		next := model.CloneSegmentIndex(job)
+		next.BuildID += n
+		next.SegmentID = segment.ID
+		im.SegmentBuildInfo.Add(model.CloneSegmentIndex(next))
+		scheduler.Enqueue(NewIndexBuildTask(next, 1, mt, im, handler, fixture.Cm, it.indexEngineVersionManager))
+	}
+	scheduler.Start()
+	defer scheduler.Stop()
+	require.Eventually(t, func() bool {
+		return fullRounds.Load() >= 2 && scheduler.GetPendingTaskCount(taskcommon.Index) == builds-limit
+	}, 10*time.Second, 10*time.Millisecond)
+	require.Equal(t, int64(limit)*want.Memory, used.Load())
+}
+
+func TestNgramPricingWithPendingSchema(t *testing.T) {
+	paramtable.Init()
+	mt, im := fixtureIndexMeta(t, taskresource.NewFixtureMeta(true))
+	idx := im.Indexes[1][4]
+	idx.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexNGRAM}}
+	idx.FieldID = 102
+	schema := taskresource.FixtureSchema()
+	schema.Fields = schema.Fields[:2]
+	taskresource.PutFixtureSchema(mt, schema)
+	handler := meta.NewNMockHandler(t)
+	// The cached schema can lag the schema returned for preparation.
+	handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(mt.GetCollection(1), nil).Once()
+	job, _ := im.GetIndexJob(5)
+	it := NewIndexBuildTask(job, 1, mt, im, handler, nil, nil)
+	require.True(t, it.CanCompleteOnCoordinator())
+	require.Equal(t, globalTask.LocalRetry, it.CompleteOnCoordinator(context.Background()))
+	target := &meta.CollectionInfo{ID: 1, Schema: taskresource.FixtureSchema()}
+	handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(target, nil).Once()
+	require.Equal(t, globalTask.LocalNeedsWorker, it.CompleteOnCoordinator(context.Background()))
+	require.False(t, it.CanCompleteOnCoordinator())
+	require.Equal(t, taskresource.Index(taskresource.EstimateFieldSize(mt.Segments.GetSegment(3), target.Schema, 102), false), it.GetTaskResource())
+}
+
+func TestNgramManifestPricingScope(t *testing.T) {
+	paramtable.Init()
+	for _, tc := range []struct {
+		name      string
+		dataType  schemapb.DataType
+		indexType string
+		version   int64
+		external  bool
+	}{
+		{"varchar", schemapb.DataType_VarChar, indexparamcheck.IndexNGRAM, storage.StorageV3, false},
+		{"json", schemapb.DataType_JSON, indexparamcheck.IndexNGRAM, storage.StorageV3, false},
+		{"inverted", schemapb.DataType_Text, "INVERTED", storage.StorageV3, false},
+		{"v2", schemapb.DataType_Text, indexparamcheck.IndexNGRAM, storage.StorageV2, false},
+		{"external", schemapb.DataType_Text, indexparamcheck.IndexNGRAM, storage.StorageV3, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mt, im := fixtureIndexMeta(t, taskresource.NewFixtureMeta(true))
+			idx := im.Indexes[1][4]
+			idx.FieldID = 102
+			idx.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: tc.indexType}}
+			schema := taskresource.FixtureSchema()
+			schema.Fields[2].DataType = tc.dataType
+			if tc.external {
+				schema.Fields[2].ExternalField = "body"
+			}
+			taskresource.PutFixtureSchema(mt, schema)
+			taskresource.UpdateFixtureSegment(mt, func(seg *datapb.SegmentInfo) { seg.StorageVersion = tc.version })
+			require.False(t, bigFixtureIndexTask(mt, im).CanCompleteOnCoordinator())
+		})
+	}
 }
 
 func TestTaskResource_IndexScalar(t *testing.T) {

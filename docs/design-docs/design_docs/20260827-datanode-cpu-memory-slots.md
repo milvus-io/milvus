@@ -148,6 +148,13 @@ variable-width distributions are not a strict bound.
 | Copy segment | Memory floor for streaming copies |
 | External refresh | externalRefreshMemory |
 
+For a StorageV3 NGRAM build on Milvus-written TEXT, DataCoord adds the indexed
+field's manifest LOB payload bytes to its field-size estimate before applying
+`indexMemoryFactor`. The column group can store references while the index
+reader materializes their text. The task caches the price for that manifest
+revision and retries a failed manifest read before worker placement. Counting
+a whole reused LOB file can overestimate the text referenced by one segment.
+
 Field-width helpers live under internal/datacoord/fieldsize. Metadata size
 estimation reuses FixedFieldWidth, but legacy scalar-slot estimates remain in the
 index/stats inspectors and use meta.EstimateFieldsReadSize with
