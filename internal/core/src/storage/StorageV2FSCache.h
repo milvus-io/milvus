@@ -47,6 +47,11 @@ class StorageV2FSCache {
         uint32_t max_connections = 100;
         std::string tls_min_version = "";
         bool use_crc32c_checksum = false;
+        uint32_t talon_mode = 0;
+        uint32_t talon_small_read_threshold = 0;
+        std::string talon_coordinator = "";
+        uint32_t talon_block_size = 0;
+        uint32_t talon_max_idle_per_addr = 0;
     };
 
  public:

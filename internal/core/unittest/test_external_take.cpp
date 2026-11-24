@@ -4391,7 +4391,8 @@ TEST(InjectExtfsAllowlist, BrokerIamPolicyAndLegacyAliases) {
         InitCredentialBrokerPolicy(std::string(R"(["file:///tmp/broker"])"))
             .ok());
     for (const auto& cloud : {"aws", "aliyun", "tencent"}) {
-        milvus_storage::api::Properties props;
+        milvus_storage::api::Properties props{
+            {"milvus.talon.external_mode", std::string("2")}};
         auto spec = nlohmann::json{{"format", "parquet"},
                                    {"extfs",
                                     {{"cloud_provider", cloud},
@@ -4413,6 +4414,7 @@ TEST(InjectExtfsAllowlist, BrokerIamPolicyAndLegacyAliases) {
         ASSERT_TRUE(config.ok()) << config.status();
         EXPECT_TRUE(config->use_iam);
         EXPECT_TRUE(config->IsAwsCredentialBrokerEnabled());
+        EXPECT_EQ(config->talon_mode, milvus_storage::TalonMode::Disabled);
         EXPECT_EQ(config->credential_endpoint, endpoint);
         spec["extfs"]["credential_endpoint"] = endpoint + "/other";
         EXPECT_ANY_THROW(InjectExternalSpecProperties(
@@ -4429,7 +4431,8 @@ TEST(InjectExtfsAllowlist, BrokerIamPolicyAndLegacyAliases) {
           {"credential_endpoint", endpoint},
           {"azure_credential_endpoint",
            "HTTPS://BROKER.example.com:443/v1/credentials/assume-role"}}}};
-    milvus_storage::api::Properties props;
+    milvus_storage::api::Properties props{
+        {"milvus.talon.external_mode", std::string("2")}};
     InjectExternalSpecProperties(
         props, 42, "azure://core.windows.net/container/path", spec.dump());
     EXPECT_EQ(props.count("extfs.42.credential_endpoint"), 0u);
@@ -4440,6 +4443,7 @@ TEST(InjectExtfsAllowlist, BrokerIamPolicyAndLegacyAliases) {
         props, "azure://core.windows.net/container/path");
     ASSERT_TRUE(config.ok()) << config.status();
     EXPECT_TRUE(config->IsAzureCredentialBrokerEnabled());
+    EXPECT_EQ(config->talon_mode, milvus_storage::TalonMode::Disabled);
     EXPECT_EQ(config->azure_credential_endpoint, endpoint);
     EXPECT_TRUE(config->credential_endpoint.empty());
     spec["extfs"]["azure_credential_endpoint"] = endpoint + "/other";
