@@ -201,6 +201,18 @@ func (c *Client) Update(ctx context.Context, option UpdateOption, callOptions ..
 	if err != nil {
 		return result, err
 	}
+	db := req.GetDbName()
+	if db == "" {
+		// Proxy uses the first database header when the request omits DbName.
+		md, _ := metadata.FromOutgoingContext(ctx)
+		if names := md.Get(databaseHeader); len(names) > 0 {
+			db = names[0]
+		} else {
+			db = c.getCurrentDB()
+			ctx = metadata.AppendToOutgoingContext(ctx, databaseHeader, db)
+		}
+	}
+	key := newCollectionCacheKey(db, req.GetCollectionName())
 	// Override the client-wide retry interceptor for this non-idempotent RPC.
 	callOptions = append(slices.Clone(callOptions), grpc_retry.Disable())
 	err = c.callService(func(service milvuspb.MilvusServiceClient) error {
@@ -211,6 +223,7 @@ func (c *Client) Update(ctx context.Context, option UpdateOption, callOptions ..
 		result.UpdateCount = resp.GetUpdateCnt()
 		result.Acknowledged = resp.GetAcknowledged()
 		result.Timestamp = resp.GetTimestamp()
+		c.collCache.UpdateWriteTs(key, result.Timestamp)
 		return nil
 	})
 	return result, err
