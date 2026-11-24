@@ -313,7 +313,6 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         // can select few elements while still requiring nearly every row.
         if (total_elements > 0 && selected_elements <= total_elements / 20 &&
             selected_row_count <= batch_rows / 20) {
-            inputs_[0]->WaitPrefetch();
             sparse_batch = inputs_[0]->CanUseOffsetsForSequentialBatch();
         }
     }

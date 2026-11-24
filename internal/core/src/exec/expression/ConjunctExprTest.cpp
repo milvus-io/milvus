@@ -66,11 +66,6 @@ class FixedBitmapExpr : public Expr {
         return std::nullopt;
     }
 
-    void
-    SetFirstRow(bool value) {
-        data_[0] = value;
-    }
-
     int eval_count_ = 0;
     int move_count_ = 0;
 
@@ -631,120 +626,13 @@ TEST(ConjunctExprTest, NestedOrSkipKeepsNonnullableNullTailAligned) {
     ExpectTruth(output, 0, Truth::False);
 }
 
-TEST(ConjunctExprTest, ColdSiblingDoesNotBlockFirstBatchAndCatchesUpOnUse) {
-    class GatedLeaf : public FixedBitmapExpr {
-     public:
-        explicit GatedLeaf(bool value)
-            : FixedBitmapExpr(TargetBitmap(1, value), TargetBitmap(1, true)) {
-        }
-        bool
-        PrefetchReady() const override {
-            return ready;
-        }
-        void
-        WaitPrefetch(PrefetchWait mode) override {
-            EXPECT_EQ(mode, PrefetchWait::Demand);
-            EXPECT_TRUE(ready) << "joined before this predicate was consumed";
-            ++joins;
-        }
-        bool ready = false;
-        size_t joins = 0;
-    };
-    for (bool is_and : {true, false}) {
-        auto first = FixedBool(!is_and, true);
-        auto cold = std::make_shared<GatedLeaf>(is_and);
-        auto last = FixedBool(is_and, true);
-        PhyConjunctFilterExpr tree({first, cold, last}, is_and, nullptr);
-        if (is_and) {
-            tree.SetLikeIndices({1, 2});
-            tree.Reorder({0, 1, 2, 3});
-        }
-        QueryContext query("cold_conjunct", nullptr, 1, 0);
-        ExecContext exec(&query);
-        EvalCtx ctx(&exec);
-        VectorPtr result;
-        EXPECT_FALSE(tree.TrySetExecuteAllAtOnce());
-        tree.Eval(ctx, result);
-        tree.Eval(ctx, result);
-        EXPECT_EQ(first->eval_count_, 2);
-        EXPECT_EQ(cold->joins, 0);
-        EXPECT_EQ(cold->move_count_, 0);
-        EXPECT_EQ(cold->eval_count_, 0);
-
-        // The next batch passes the first predicate. Its sibling must start
-        // exactly two batches later, even though it was cold for both skips.
-        first->SetFirstRow(is_and);
-        cold->ready = true;
-        tree.Eval(ctx, result);
-        EXPECT_EQ(cold->move_count_, 2);
-        EXPECT_EQ(cold->eval_count_, 1);
-        auto output = std::dynamic_pointer_cast<ColumnVector>(result);
-        ASSERT_NE(output, nullptr);
-        EXPECT_EQ(TargetBitmapView(output->GetRawData(), 1)[0], is_and);
-        EXPECT_TRUE(TargetBitmapView(output->GetValidRawData(), 1)[0]);
-    }
-}
-
-TEST(ConjunctExprTest, OffsetShortCircuitDoesNotQueueColdSiblingSkips) {
-    class ColdLeaf : public FixedBitmapExpr {
-     public:
-        explicit ColdLeaf(bool value)
-            : FixedBitmapExpr(TargetBitmap(1, value), TargetBitmap(1, true)) {
-        }
-        bool
-        PrefetchReady() const override {
-            return false;
-        }
-        void
-        WaitPrefetch(PrefetchWait) override {
-            ++joins;
-        }
-        size_t joins = 0;
-    };
-    for (bool is_and : {true, false}) {
-        auto first = FixedBool(!is_and, true);
-        auto cold = std::make_shared<ColdLeaf>(is_and);
-        auto last = FixedBool(is_and, true);
-        PhyConjunctFilterExpr tree({first, cold, last}, is_and, nullptr);
-        if (is_and) {
-            tree.SetLikeIndices({1, 2});
-            tree.Reorder({0, 1, 2, 3});
-        }
-        QueryContext query("offset_cold_conjunct", nullptr, 1, 0);
-        ExecContext exec(&query);
-        EvalCtx ctx(&exec);
-        OffsetVector offsets{0};
-        ctx.set_offset_input(&offsets);
-        VectorPtr result;
-        tree.Eval(ctx, result);
-        tree.Eval(ctx, result);
-        EXPECT_EQ(cold->joins, 0);
-        EXPECT_EQ(cold->eval_count_, 0);
-        EXPECT_EQ(last->move_count_, 0);
-
-        // Consuming the previously skipped predicate must not apply deferred
-        // sequential advances accumulated from offset-only evaluations.
-        first->SetFirstRow(is_and);
-        tree.Eval(ctx, result);
-        EXPECT_EQ(cold->joins, 0);
-        EXPECT_EQ(cold->move_count_, 0);
-        EXPECT_EQ(cold->eval_count_, 1);
-        EXPECT_EQ(last->move_count_, 0);
-        auto output = std::dynamic_pointer_cast<ColumnVector>(result);
-        ASSERT_NE(output, nullptr);
-        EXPECT_EQ(TargetBitmapView(output->GetRawData(), 1)[0], is_and);
-        EXPECT_TRUE(TargetBitmapView(output->GetValidRawData(), 1)[0]);
-    }
-}
-
 TEST(ConjunctExprTest, CleanupJoinsSiblingsAfterPrefetchFailure) {
     class JoinProbe : public FixedBitmapExpr {
      public:
         JoinProbe() : FixedBitmapExpr(TargetBitmap(1), TargetBitmap(1)) {
         }
         void
-        WaitPrefetch(PrefetchWait mode) override {
-            EXPECT_EQ(mode, PrefetchWait::Cleanup);
+        WaitPrefetch() override {
             ++joins;
             if (fail) {
                 throw std::runtime_error("injected prefetch failure");
@@ -757,7 +645,7 @@ TEST(ConjunctExprTest, CleanupJoinsSiblingsAfterPrefetchFailure) {
     auto sibling = std::make_shared<JoinProbe>();
     failed->fail = true;
     PhyConjunctFilterExpr tree({failed, sibling}, true, nullptr);
-    EXPECT_THROW(tree.WaitPrefetch(PrefetchWait::Cleanup), std::runtime_error);
+    EXPECT_THROW(tree.WaitPrefetch(), std::runtime_error);
     EXPECT_EQ(failed->joins, 1);
     EXPECT_EQ(sibling->joins, 1);
 }

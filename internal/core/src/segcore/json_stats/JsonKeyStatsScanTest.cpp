@@ -18,7 +18,6 @@
 
 #include <atomic>
 #include <cstring>
-#include <functional>
 #include <future>
 #include <numeric>
 #include <optional>
@@ -88,7 +87,6 @@ struct ScanTrace {
     const void* last_values = nullptr;
     bool fail_pin = false;
     bool reject_multi_cell_loads = false;
-    std::function<void()> after_prefetch;
 };
 
 class CountingChunkTranslator : public TestChunkTranslator {
@@ -163,9 +161,6 @@ class RecordingColumn : public Base {
                    const std::vector<int64_t>& cells) const override {
         ++trace_->prefetch_calls;
         Base::PrefetchChunks(ctx, cells);
-        if (trace_->after_prefetch) {
-            trace_->after_prefetch();
-        }
     }
 
     PinWrapper<Chunk*>
@@ -308,16 +303,13 @@ TEST(JsonStatsPrefetchTest, RepeatedStringPathSharesPhysicalReads) {
                                              "op_s",
                                              operation.column);
 
-    JsonStatsPrefetchBatch batch;
     auto fetch_kind = [&] {
-        stats->PrefetchTypedColumns(
-            nullptr, "/kind", {JSONType::STRING}, &batch);
+        stats->PrefetchTypedColumns(nullptr, "/kind", {JSONType::STRING});
     };
     auto first = std::async(std::launch::async, fetch_kind);
     fetch_kind();
     first.get();
-    EXPECT_EQ(kind.trace->prefetch_calls.load(), 1);
-    EXPECT_EQ(kind.trace->load_calls.load(), 1);
+    EXPECT_EQ(kind.trace->prefetch_calls.load(), 2);
     EXPECT_EQ(kind.trace->loaded_cells.load(), 2);
     EXPECT_EQ(operation.trace->loaded_cells.load(), 0);
 
@@ -333,36 +325,6 @@ TEST(JsonStatsPrefetchTest, RepeatedStringPathSharesPhysicalReads) {
     EXPECT_EQ(kind.trace->loaded_cells.load(), 2);
     stats->PrefetchTypedColumns(
         nullptr, "/commit/operation", {JSONType::STRING});
-    EXPECT_EQ(operation.trace->loaded_cells.load(), 1);
-}
-
-TEST(JsonStatsPrefetchTest, StoppedWorkerLeavesNextProjectionForDemand) {
-    auto kind = MakeColumn<std::string>(
-        {1, 2}, {"a", "b", "c"}, DataType::STRING, false);
-    auto operation = MakeColumn<std::string>(
-        {3}, {"create", "close", "push"}, DataType::STRING, false);
-    auto stats = MakeStats(kind.column);
-    JsonStatsScanTestAccessor::AddProjection(
-        *stats, "/event/kind", JSONType::STRING, "kind_s", kind.column);
-    JsonStatsScanTestAccessor::AddProjection(
-        *stats, "/event/op", JSONType::STRING, "op_s", operation.column);
-    folly::CancellationSource stop;
-    folly::CancellationSource request;
-    OpContext ctx(request.getToken());
-    kind.trace->after_prefetch = [&] { stop.requestCancellation(); };
-    auto pool = std::make_shared<folly::CPUThreadPoolExecutor>(1);
-    PrefetchExecutor executor(pool, stop.getToken());
-    executor.Submit([&] { stats->PrefetchExistsColumns(&ctx, "/event"); })
-        .get();
-    EXPECT_EQ(kind.trace->loaded_cells.load(), 2);
-    EXPECT_EQ(operation.trace->prefetch_calls.load(), 0);
-    EXPECT_FALSE(ctx.cancellation_token.isCancellationRequested());
-    auto reader =
-        stats->CreateShreddingReader("/event/op", JSONType::STRING, 3);
-    ASSERT_NE(reader, nullptr);
-    auto last = reader->Get(&ctx, 2);
-    ASSERT_TRUE(last.has_value());
-    EXPECT_EQ(std::get<std::string>(*last), "push");
     EXPECT_EQ(operation.trace->loaded_cells.load(), 1);
 }
 
@@ -414,6 +376,7 @@ TEST(JsonStatsPrefetchTest, MixedNumberTypesAndMissingProjection) {
     stats->PrefetchTypedColumns(
         nullptr, "/n", {JSONType::INT64, JSONType::DOUBLE});
     EXPECT_EQ(ints.trace->loaded_cells.load(), 1);
+    EXPECT_EQ(doubles.trace->load_calls.load(), 1);
     EXPECT_EQ(doubles.trace->loaded_cells.load(), 2);
     EXPECT_EQ(strings.trace->loaded_cells.load(), 0);
 }

@@ -110,15 +110,6 @@ DiskSlotFile::WriteFileHeader() {
 }
 
 bool
-DiskSlotFile::Contains(const std::string& signature,
-                       int64_t active_count) const {
-    std::shared_lock lock(mutex_);
-    auto it = slot_index_.find(signature);
-    return fd_ >= 0 && it != slot_index_.end() &&
-           it->second->active_count == active_count;
-}
-
-bool
 DiskSlotFile::Get(const std::string& signature,
                   int64_t active_count,
                   TargetBitmap& out_result,

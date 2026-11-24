@@ -161,7 +161,7 @@ PhyGISCoarseConjunctExpr::RunRTreeQuery(GISGroupState::Pred& p) {
 
 void
 PhyGISCoarseConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
-    // Finish path selection before RunRTreeQuery uses the spatial index.
+    // Join this leaf's prefetch before RunRTreeQuery selects the spatial entry.
     WaitPrefetch();
     auto real_batch_size = NextBatchSize();
     if (real_batch_size == 0) {
@@ -357,7 +357,6 @@ PhyGISRefineConjunctExpr::PrefetchRawData() {
 
 void
 PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
-    // Join this predicate's prefetch before reading the raw column.
     WaitPrefetch();
     auto real_batch_size = NextBatchSize();
     if (real_batch_size == 0) {

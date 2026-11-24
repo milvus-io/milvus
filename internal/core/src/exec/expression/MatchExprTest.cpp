@@ -821,7 +821,7 @@ class IndexLikeMatchElementExpr : public RecordingMatchElementExpr {
         return false;
     }
     void
-    WaitPrefetch(exec::PrefetchWait) override {
+    WaitPrefetch() override {
         ++waits;
     }
     int waits = 0;
@@ -3385,9 +3385,9 @@ class SequentialIndexGuard : public exec::Expr {
         return inputs_[0]->CanUseOffsetsForSequentialBatch();
     }
     void
-    WaitPrefetch(exec::PrefetchWait mode) override {
+    WaitPrefetch() override {
         ++waits;
-        inputs_[0]->WaitPrefetch(mode);
+        inputs_[0]->WaitPrefetch();
     }
     int calls = 0;
     int moves = 0;

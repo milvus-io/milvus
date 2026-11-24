@@ -35,7 +35,6 @@
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -101,21 +100,6 @@ struct JsonStatsRowRange {
 std::vector<JsonStatsRowRange>
 CreateJsonStatsRowRanges(const std::vector<FieldDataPtr>& field_datas,
                          int64_t max_rows_per_range);
-
-// One expression set shares a batch across its prefetch workers. Holding a
-// column/slot identity keeps it stable across reopen, without pinning its cells.
-class JsonStatsPrefetchBatch {
- public:
-    bool
-    Claim(std::shared_ptr<const void> resource) {
-        std::lock_guard lock(mutex_);
-        return resources_.insert(std::move(resource)).second;
-    }
-
- private:
-    std::mutex mutex_;
-    std::unordered_set<std::shared_ptr<const void>> resources_;
-};
 
 // Segment-owned JSON shredding layout and per-path statistics, not a scalar
 // predicate index. Execution uses its concrete shredding/shared-data accessors.
@@ -413,13 +397,10 @@ class JsonKeyStats {
     void
     PrefetchTypedColumns(OpContext* ctx,
                          const std::string& pointer,
-                         std::initializer_list<JSONType> types,
-                         JsonStatsPrefetchBatch* batch = nullptr) const;
+                         std::initializer_list<JSONType> types) const;
 
     void
-    PrefetchExistsColumns(OpContext* ctx,
-                          const std::string& pointer,
-                          JsonStatsPrefetchBatch* batch = nullptr) const;
+    PrefetchExistsColumns(OpContext* ctx, const std::string& pointer) const;
 
     bool
     HasAllShreddingFields(const std::string& pointer,
@@ -465,7 +446,7 @@ class JsonKeyStats {
 
  private:
     void
-    PrefetchBsonIndex(OpContext* ctx, JsonStatsPrefetchBatch* batch) const;
+    PrefetchBsonIndex(OpContext* ctx) const;
 
     void
     CollectSingleJsonStatsInfo(std::string_view json_str,

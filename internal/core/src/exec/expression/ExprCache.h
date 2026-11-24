@@ -266,11 +266,6 @@ class ExprResCacheManager {
     std::optional<MaterializationLease>
     TryAcquireMaterialization(int64_t active_count);
 
-    // Metadata-only hint for speculative I/O. The demand reader still
-    // validates and materializes the bitmap, including after eviction.
-    bool
-    HasCachedResult(const Key& key, int64_t active_count) const;
-
     // Try to get cached value. If found, returns true and fills out_value.
     // NOTE: caller must pre-set out_value.active_count for staleness check.
     bool

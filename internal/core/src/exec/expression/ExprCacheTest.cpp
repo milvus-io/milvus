@@ -3766,10 +3766,7 @@ TEST(ExprResCacheManagerV2Test, MemoryModePutGet) {
     v.valid_result = std::make_shared<milvus::TargetBitmap>(MakeBits(512));
     v.active_count = 512;
     v.eval_duration_us = 0;
-    EXPECT_FALSE(mgr.HasCachedResult(k, v.active_count));
     mgr.Put(k, v);
-    EXPECT_TRUE(mgr.HasCachedResult(k, v.active_count));
-    EXPECT_FALSE(mgr.HasCachedResult(k, v.active_count + 1));
 
     // Get it back
     ExprResCacheManager::Value got;
@@ -3872,10 +3869,7 @@ TEST(ExprResCacheManagerV2Test, DiskModePutGet) {
 
     // Keep a reference to the original result for verification
     auto original_result = v.result;
-    EXPECT_FALSE(mgr.HasCachedResult(k, v.active_count));
     mgr.Put(k, v);
-    EXPECT_TRUE(mgr.HasCachedResult(k, v.active_count));
-    EXPECT_FALSE(mgr.HasCachedResult(k, v.active_count + 1));
 
     // Verify disk file was created
     auto seg_path = tmpdir / "seg_200.cache";
@@ -5044,25 +5038,6 @@ TEST_P(ExprCacheGenerationTest,
     EXPECT_FALSE(Hit(next));
     manager_.Put(next, value_);
     EXPECT_TRUE(Hit(next));
-}
-
-TEST_P(ExprCacheGenerationTest, PrefetchProbeUsesCurrentGeneration) {
-    ExprResCacheManager::Key first{
-        73010, "x > 0", std::make_shared<milvus::exec::ExprCacheGeneration>()};
-    ExprResCacheManager::Key next{
-        first.segment_id,
-        first.signature,
-        std::make_shared<milvus::exec::ExprCacheGeneration>()};
-    manager_.Put(first, value_);
-    EXPECT_TRUE(manager_.HasCachedResult(first, value_.active_count));
-    EXPECT_FALSE(manager_.HasCachedResult(next, value_.active_count));
-    EXPECT_FALSE(manager_.HasCachedResult(first, value_.active_count + 1));
-
-    // Publication retires the generation before physical cache detachment.
-    first.generation->Retire();
-    EXPECT_FALSE(manager_.HasCachedResult(first, value_.active_count));
-    manager_.Put(next, value_);
-    EXPECT_TRUE(manager_.HasCachedResult(next, value_.active_count));
 }
 
 TEST_P(ExprCacheGenerationTest, MissingSnapshotBypassesSealedCache) {

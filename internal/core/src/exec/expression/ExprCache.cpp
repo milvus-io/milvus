@@ -519,24 +519,6 @@ ExprResCacheManager::TryAcquireMaterialization(int64_t active_count) {
 }
 
 bool
-ExprResCacheManager::HasCachedResult(const Key& key,
-                                     int64_t active_count) const {
-    std::shared_lock state_lock(state_mutex_);
-    if (!IsEnabled() || (key.generation && key.generation->IsRetired())) {
-        return false;
-    }
-    if (config_.mode == CacheMode::Memory) {
-        return entry_pool_ &&
-               entry_pool_->Lookup(
-                   key.SegmentKey(), key.signature, active_count);
-    }
-    std::shared_lock lock(disk_files_mutex_);
-    auto it = disk_files_.find(key.SegmentKey());
-    return it != disk_files_.end() && it->second &&
-           it->second->Contains(key.signature, active_count);
-}
-
-bool
 ExprResCacheManager::Get(const Key& key, Value& out_value) noexcept {
     bool hit = false;
     if (!RunExprCacheBestEffort([&]() {

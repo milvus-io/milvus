@@ -160,9 +160,9 @@ PhyFilterBitsNode::GetOutput() {
             span.SetAttribute("segment_id", segment->get_segment_id());
         }
     }
-    PrefetchWaitStats prefetch_wait;
     const auto record_result = [&](TargetBitmapView filtered,
-                                   double scalar_work_us) {
+                                   double scalar_work_us,
+                                   double prefetch_wait_us) {
         if (recording) {
             // The bitmap marks excluded rows, including UNKNOWN predicate
             // results. Injected TTL predicates are included; downstream
@@ -171,8 +171,7 @@ PhyFilterBitsNode::GetOutput() {
                 "passed_rows",
                 static_cast<int64_t>(filtered.size() - filtered.count()));
             span.SetAttribute("filter_scalar_work_us", scalar_work_us);
-            span.SetAttribute("prefetch_wait_us",
-                              prefetch_wait.ElapsedMicros());
+            span.SetAttribute("prefetch_wait_us", prefetch_wait_us);
         }
     };
 
@@ -216,19 +215,29 @@ PhyFilterBitsNode::GetOutput() {
                 FeatureBit::ExprCacheHit);
             if (recording) {
                 span.SetAttribute("cache_hit", true);
-                span.SetAttribute("prefetch_wait_us", 0.0);
                 const auto cached = std::static_pointer_cast<ColumnVector>(
                     cached_output->child(0));
                 record_result(
                     TargetBitmapView(cached->GetRawData(), cached->size()),
+                    0.0,
                     0.0);
             }
             return cached_output;
         }
     }
 
-    std::chrono::high_resolution_clock::time_point scalar_start =
-        std::chrono::high_resolution_clock::now();
+    const auto scalar_start = std::chrono::steady_clock::now();
+    const auto record_evaluation = [&](TargetBitmapView filtered) {
+        const auto elapsed_us =
+            std::chrono::duration<double, std::micro>(
+                std::chrono::steady_clock::now() - scalar_start)
+                .count();
+        const double wait_us = exprs_->expr(0)->PrefetchWaitMicros();
+        const double scalar_us = std::max(0.0, elapsed_us - wait_us);
+        milvus::monitor::internal_core_search_latency_scalar.Observe(scalar_us /
+                                                                     1000);
+        record_result(filtered, scalar_us, wait_us);
+    };
 
     EvalCtx eval_ctx(operator_context_->get_exec_context());
 
@@ -237,8 +246,9 @@ PhyFilterBitsNode::GetOutput() {
 
     // optimization: if all expressions can be executed at once,
     // execute in a single pass and flip in-place to avoid bitmap copies.
-    if (exprs_->expr(0)->TrySetExecuteAllAtOnce()) {
+    if (exprs_->CanExecuteAllAtOnce()) {
         tracer::AddEvent("expr_execute_all_at_once");
+        exprs_->SetExecuteAllAtOnce();
 
         exprs_->Eval(0, 1, true, eval_ctx, results_);
         AssertInfo(results_.size() == 1 && results_[0] != nullptr,
@@ -276,16 +286,7 @@ PhyFilterBitsNode::GetOutput() {
         std::vector<VectorPtr> col_res;
         col_res.push_back(std::move(results_[0]));
 
-        std::chrono::high_resolution_clock::time_point scalar_end =
-            std::chrono::high_resolution_clock::now();
-        double scalar_cost =
-            std::chrono::duration<double, std::micro>(scalar_end - scalar_start)
-                .count();
-        scalar_cost =
-            std::max(0.0, scalar_cost - prefetch_wait.ElapsedMicros());
-        milvus::monitor::internal_core_search_latency_scalar.Observe(
-            scalar_cost / 1000);
-        record_result(view, scalar_cost);
+        record_evaluation(view);
 
         return std::make_shared<RowVector>(std::move(col_res));
     }
@@ -349,15 +350,7 @@ PhyFilterBitsNode::GetOutput() {
     std::vector<VectorPtr> col_res;
     col_res.push_back(std::make_shared<ColumnVector>(std::move(bitset),
                                                      std::move(valid_bitset)));
-    std::chrono::high_resolution_clock::time_point scalar_end =
-        std::chrono::high_resolution_clock::now();
-    double scalar_cost =
-        std::chrono::duration<double, std::micro>(scalar_end - scalar_start)
-            .count();
-    scalar_cost = std::max(0.0, scalar_cost - prefetch_wait.ElapsedMicros());
-    milvus::monitor::internal_core_search_latency_scalar.Observe(scalar_cost /
-                                                                 1000);
-    record_result(bitset_view, scalar_cost);
+    record_evaluation(bitset_view);
 
     return std::make_shared<RowVector>(std::move(col_res));
 }

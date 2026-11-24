@@ -42,11 +42,9 @@ namespace milvus {
 namespace exec {
 
 void
-PhyExistsFilterExpr::PrefetchJsonStatsPath(
-    index::JsonKeyStats& stats,
-    const std::string& pointer,
-    index::JsonStatsPrefetchBatch* batch) const {
-    stats.PrefetchExistsColumns(op_ctx_, pointer, batch);
+PhyExistsFilterExpr::PrefetchJsonStatsPath(index::JsonKeyStats& stats,
+                                           const std::string& pointer) const {
+    stats.PrefetchExistsColumns(op_ctx_, pointer);
 }
 
 void

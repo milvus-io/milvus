@@ -253,7 +253,6 @@ Driver::Close() {
         return;
     }
 
-    StopPrefetch();
     auto remove_driver_guard = folly::makeGuard(
         [task = ctx_->task_, this]() { Task::RemoveDriver(task, this); });
     std::exception_ptr close_error;
@@ -453,8 +452,7 @@ Driver::RunInternal(std::shared_ptr<Driver>& self,
 
 void
 Driver::PrefetchAsync() {
-    PrefetchExecutor prefetch_pool(GetPrefetchThreadPool(),
-                                   prefetch_stop_.getToken());
+    auto prefetch_pool = GetPrefetchThreadPool();
     for (auto& op : operators_) {
         op->PrefetchAsync(prefetch_pool);
     }

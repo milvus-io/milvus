@@ -73,8 +73,7 @@ RawExprCacheAdapter::EnsureLookup() {
     std::call_once(lookup_once_, [this]() {
         state_.lookup_state = LookupState::Ineligible;
         try {
-            if (!ExprResCacheManager::IsEnabled() ||
-                !input_->SupportsRawExprCache() || !input_->IsCacheable() ||
+            if (!ExprResCacheManager::IsEnabled() || !input_->IsCacheable() ||
                 !input_->HasExprCacheIdentity() ||
                 input_->GetActiveCount() <= 0) {
                 return;
@@ -82,9 +81,11 @@ RawExprCacheAdapter::EnsureLookup() {
 
             const auto* segment = input_->GetSegment();
             auto& manager = ExprResCacheManager::Instance();
+            // Path selection publishes the reader inspected by SupportsRawExprCache().
             if (segment == nullptr ||
                 !manager.CanCacheSegment(segment->type()) ||
-                input_->GetExecPath() != ExprExecPath::RawData) {
+                input_->GetExecPath() != ExprExecPath::RawData ||
+                !input_->SupportsRawExprCache()) {
                 return;
             }
 
@@ -348,6 +349,7 @@ RawExprCacheAdapter::Eval(EvalCtx& context, VectorPtr& result) {
     // wrapped evaluator would otherwise record for its MoveCursor() guard.
     input_->SetHasOffsetInput(has_offset_input);
 
+    EnsureLookup();
     if (TryServeCacheHit(context, result)) {
         return;
     }
@@ -399,7 +401,6 @@ RawExprCacheAdapter::Eval(EvalCtx& context, VectorPtr& result) {
 
 void
 RawExprCacheAdapter::MoveCursor() {
-    WaitPrefetch();
     if (!has_offset_input_) {
         const auto rows = input_->GetNextBatchSize();
         if (rows > 0) {
@@ -459,48 +460,43 @@ RawExprCacheAdapter::GetColumnInfo() const {
 
 void
 RawExprCacheAdapter::PrefetchAsync(
-    const milvus::PrefetchExecutor& prefetch_pool,
-    std::shared_ptr<index::JsonStatsPrefetchBatch> batch) {
+    const std::shared_ptr<folly::CPUThreadPoolExecutor> prefetch_pool) {
     auto self =
         std::static_pointer_cast<RawExprCacheAdapter>(shared_from_this());
-    prefetch_future_.emplace(
-        prefetch_pool.Submit([self, batch = std::move(batch)]() {
-            if (self->op_ctx_ != nullptr &&
-                self->op_ctx_->cancellation_token.isCancellationRequested()) {
-                return;
+    prefetch_future_.emplace(folly::via(prefetch_pool.get(), [self]() {
+        if (self->op_ctx_ != nullptr &&
+            self->op_ctx_->cancellation_token.isCancellationRequested()) {
+            return;
+        }
+        self->EnsureLookup();
+        if (self->state_.lookup_state != LookupState::Hit) {
+            const bool measure_prefetch =
+                self->state_.lookup_state == LookupState::Miss;
+            // Measure where the work executes: WaitPrefetch() observes only
+            // whatever wait remains when the Driver eventually joins it.
+            const auto prefetch_start = std::chrono::steady_clock::now();
+            self->input_->PrefetchOnCurrentThread();
+            if (measure_prefetch) {
+                self->state_.prefetch_duration_us = std::max<int64_t>(
+                    std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - prefetch_start)
+                        .count(),
+                    1);
             }
-            self->EnsureLookup();
-            if (self->state_.lookup_state != LookupState::Hit) {
-                const bool measure_prefetch =
-                    self->state_.lookup_state == LookupState::Miss;
-                // Measure where the work executes: WaitPrefetch() observes only
-                // whatever wait remains when the Driver eventually joins it.
-                const auto prefetch_start = std::chrono::steady_clock::now();
-                self->input_->PrefetchOnCurrentThread(batch.get());
-                if (measure_prefetch) {
-                    self->state_.prefetch_duration_us = std::max<int64_t>(
-                        std::chrono::duration_cast<std::chrono::microseconds>(
-                            std::chrono::steady_clock::now() - prefetch_start)
-                            .count(),
-                        1);
-                }
-            }
-        }));
+        }
+    }));
 }
 
 void
-RawExprCacheAdapter::WaitPrefetch(PrefetchWait mode) {
-    PrefetchWaitTimer wait_timer;
+RawExprCacheAdapter::WaitPrefetch() {
     if (prefetch_future_.has_value()) {
-        auto future = std::move(*prefetch_future_);
-        prefetch_future_.reset();
-        std::move(future).get();
-    } else if (mode == PrefetchWait::Demand) {
+        JoinPrefetch(prefetch_future_);
+    } else {
         EnsureLookup();
     }
 
     if (state_.lookup_state != LookupState::Hit) {
-        input_->WaitPrefetch(mode);
+        input_->WaitPrefetch();
     }
 }
 

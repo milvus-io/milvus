@@ -59,11 +59,11 @@ namespace milvus {
 namespace exec {
 
 void
-Expr::WaitForPrefetches(const std::vector<ExprPtr>& exprs, PrefetchWait mode) {
+Expr::WaitForPrefetches(const std::vector<ExprPtr>& exprs) {
     std::exception_ptr first_error;
     for (const auto& expr : exprs) {
         try {
-            expr->WaitPrefetch(mode);
+            expr->WaitPrefetch();
         } catch (...) {
             // Other workers still borrow the request's OpContext.
             if (!first_error) {
@@ -77,19 +77,27 @@ Expr::WaitForPrefetches(const std::vector<ExprPtr>& exprs, PrefetchWait mode) {
 }
 
 void
-ExprSet::PrefetchAsync(const PrefetchExecutor& pool) {
-    if (exprs_.size() == 1 && exprs_.front()->GetInputsRef().empty()) {
-        exprs_.front()->PrefetchAsync(pool);
-        return;
+Expr::JoinPrefetch(std::optional<folly::Future<folly::Unit>>& pending) {
+    auto future = std::move(*pending);
+    pending.reset();
+    const auto start = std::chrono::steady_clock::now();
+    std::move(future).get();
+    prefetch_wait_us_ += std::chrono::duration<double, std::micro>(
+                             std::chrono::steady_clock::now() - start)
+                             .count();
+}
+
+double
+Expr::PrefetchWaitMicros() const {
+    double total = prefetch_wait_us_;
+    for (const auto& input : inputs_) {
+        total += input->PrefetchWaitMicros();
     }
-    auto batch = std::make_shared<index::JsonStatsPrefetchBatch>();
-    for (const auto& expr : exprs_) {
-        expr->PrefetchAsync(pool, batch);
-    }
+    return total;
 }
 
 void
-SegmentExpr::PrefetchJsonStats(index::JsonStatsPrefetchBatch* batch) {
+SegmentExpr::PrefetchJsonStats() {
     if (active_count_ == 0 || has_offset_input_ ||
         segment_->type() != SegmentType::Sealed) {
         return;
@@ -99,15 +107,9 @@ SegmentExpr::PrefetchJsonStats(index::JsonStatsPrefetchBatch* batch) {
         return;
     }
     try {
-        if (ExprResCacheManager::IsEnabled() && HasExprCacheIdentity() &&
-            ExprResCacheManager::Instance().HasCachedResult(
-                MakeExprCacheKey(ToString()), active_count_)) {
-            return;
-        }
         auto stats = segment_->GetJsonStats(op_ctx_, field_id_);
-        if (stats && !PrefetchExecutor::IsStopped()) {
-            PrefetchJsonStatsPath(
-                *stats, index::JsonPointer(nested_path_), batch);
+        if (stats) {
+            PrefetchJsonStatsPath(*stats, index::JsonPointer(nested_path_));
         }
     } catch (const std::exception& e) {
         // This is speculative: a preceding predicate may short-circuit.
@@ -120,27 +122,23 @@ SegmentExpr::PrefetchJsonStats(index::JsonStatsPrefetchBatch* batch) {
 
 void
 SegmentExpr::PrefetchJsonStatsPath(index::JsonKeyStats& stats,
-                                   const std::string& pointer,
-                                   index::JsonStatsPrefetchBatch* batch) const {
+                                   const std::string& pointer) const {
     using index::JSONType;
     switch (is_json_contains_ ? DataType::ARRAY : value_type_) {
         case DataType::BOOL:
-            stats.PrefetchTypedColumns(
-                op_ctx_, pointer, {JSONType::BOOL}, batch);
+            stats.PrefetchTypedColumns(op_ctx_, pointer, {JSONType::BOOL});
             break;
         case DataType::INT64:
         case DataType::DOUBLE:
             stats.PrefetchTypedColumns(
-                op_ctx_, pointer, {JSONType::INT64, JSONType::DOUBLE}, batch);
+                op_ctx_, pointer, {JSONType::INT64, JSONType::DOUBLE});
             break;
         case DataType::VARCHAR:
         case DataType::STRING:
-            stats.PrefetchTypedColumns(
-                op_ctx_, pointer, {JSONType::STRING}, batch);
+            stats.PrefetchTypedColumns(op_ctx_, pointer, {JSONType::STRING});
             break;
         case DataType::ARRAY:
-            stats.PrefetchTypedColumns(
-                op_ctx_, pointer, {JSONType::ARRAY}, batch);
+            stats.PrefetchTypedColumns(op_ctx_, pointer, {JSONType::ARRAY});
             break;
         default:
             break;
