@@ -971,6 +971,61 @@ func TestOrderedGroupReduceStreamRejectsUnorderedKeys(t *testing.T) {
 	}
 }
 
+func TestOrderedGroupReduceStreamTerminalEOFAndLateMetadata(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
+	}}
+	request := &internalpb.RetrieveRequest{
+		GroupByFieldIds: []int64{100},
+		Aggregates:      []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}},
+	}
+
+	t.Run("terminal_eof", func(t *testing.T) {
+		first := newGroupQueryTestChunk([]int64{1}, []int64{10})
+		first.AllRetrieveCount = 3
+		child := &queryTestStream{recv: []queryTestRecv{{chunk: first}}}
+		stream, err := NewReduceStream(request, schema, []ReduceStream{child}, 1)
+		require.NoError(t, err)
+		chunk, err := stream.Recv()
+		require.NoError(t, err)
+		require.Equal(t, int64(3), chunk.GetAllRetrieveCount())
+		chunk, err = stream.Recv()
+		require.Nil(t, chunk)
+		require.ErrorIs(t, err, io.EOF)
+		require.Equal(t, 1, child.closeCount())
+	})
+
+	t.Run("late_metadata_not_discarded", func(t *testing.T) {
+		first := newGroupQueryTestChunk([]int64{1}, []int64{10})
+		child := &queryTestStream{recv: []queryTestRecv{{chunk: first}}}
+		stream, err := NewReduceStream(request, schema, []ReduceStream{child}, 1)
+		require.NoError(t, err)
+		_, err = stream.Recv()
+		require.NoError(t, err)
+
+		rs := stream.(*OrderedReduceStream)
+		rs.metadataEmitted = false
+		rs.metadata = &internalpb.RetrieveResults{
+			Status:           merr.Success(),
+			AllRetrieveCount: 5,
+			MvccTimestamp:    42,
+		}
+
+		chunk, err := stream.Recv()
+		require.NoError(t, err)
+		require.Equal(t, int64(5), chunk.GetAllRetrieveCount())
+		require.Equal(t, uint64(42), chunk.GetMvccTimestamp())
+		require.True(t, rs.metadataEmitted)
+		require.Nil(t, rs.metadata)
+		require.Equal(t, 1, child.closeCount())
+
+		chunk, err = stream.Recv()
+		require.Nil(t, chunk)
+		require.ErrorIs(t, err, io.EOF)
+	})
+}
+
 func makeTimestampField(timestamps []int64) *schemapb.FieldData {
 	return &schemapb.FieldData{
 		Type: schemapb.DataType_Int64, FieldName: "timestamp", FieldId: common.TimeStampField,

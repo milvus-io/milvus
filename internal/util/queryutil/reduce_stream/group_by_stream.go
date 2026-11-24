@@ -206,15 +206,26 @@ func (s *OrderedReduceStream) recvGroups() (*internalpb.RetrieveResults, error) 
 		}
 		out.FieldsData = empty.FieldsData
 	}
+	if out.FieldsData == nil {
+		s.finished = true
+		if s.metadata != nil && !s.metadataEmitted {
+			s.attachMetadata(out)
+			if err := s.closeChildren(); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}
+		if err := s.closeChildren(); err != nil {
+			return nil, err
+		}
+		return nil, io.EOF
+	}
 	s.attachMetadata(out)
 	if exhausted || (g.limit > 0 && g.produced == g.limit && len(s.outputChunks) == 0) {
 		s.finished = true
 		if err := s.closeChildren(); err != nil {
 			return nil, err
 		}
-	}
-	if out.FieldsData == nil {
-		return nil, io.EOF
 	}
 	return out, nil
 }
