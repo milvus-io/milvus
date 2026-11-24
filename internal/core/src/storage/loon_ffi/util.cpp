@@ -1196,9 +1196,15 @@ InjectExternalSpecProperties(
                                       (scheme + *final_address).c_str());
     }
 
-    // External Tables share the filesystem tuning, with an independently
-    // configured mode. Local external filesystems never use Talon.
-    const bool external_is_local =
+    // Talon's S3 broker supports target roles only for AWS. Aliyun and
+    // Tencent target roles are handled by the native filesystem in 3.0.
+    const bool native_target_role =
+        !broker_endpoint.empty() &&
+        (spec_cloud_provider == "aliyun" || spec_cloud_provider == "tencent") &&
+        PropertyValueAsString(properties, (extfs_prefix + "use_iam").c_str()) !=
+            "true";
+    const bool origin_only =
+        native_target_role ||
         PropertyValueAsString(
             properties, (extfs_prefix + "storage_type").c_str()) == "local";
     for (const auto* key : {PROPERTY_FS_TALON_MODE,
@@ -1213,13 +1219,7 @@ InjectExternalSpecProperties(
                                      : key;
         const auto value = PropertyValueAsString(properties, source_key);
         const auto extfs_key = ExternalFsPropertyKey(extfs_prefix, key);
-        // Broker-backed external tables acquire and refresh credentials on origin.
-        if (!broker_endpoint.empty()) {
-            properties.erase(extfs_key);
-            if (std::string_view(key) == PROPERTY_FS_TALON_MODE) {
-                properties[extfs_key] = std::string("0");
-            }
-        } else if (external_is_local) {
+        if (origin_only) {
             properties.erase(extfs_key);
         } else if (value.has_value()) {
             properties[extfs_key] = *value;

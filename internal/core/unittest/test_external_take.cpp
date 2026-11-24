@@ -4392,7 +4392,8 @@ TEST(InjectExtfsAllowlist, BrokerIamPolicyAndLegacyAliases) {
             .ok());
     for (const auto& cloud : {"aws", "aliyun", "tencent"}) {
         milvus_storage::api::Properties props{
-            {"milvus.talon.external_mode", std::string("2")}};
+            {"milvus.talon.external_mode", std::string("2")},
+            {PROPERTY_FS_TALON_COORDINATOR, std::string("talon:7000")}};
         auto spec = nlohmann::json{{"format", "parquet"},
                                    {"extfs",
                                     {{"cloud_provider", cloud},
@@ -4414,7 +4415,7 @@ TEST(InjectExtfsAllowlist, BrokerIamPolicyAndLegacyAliases) {
         ASSERT_TRUE(config.ok()) << config.status();
         EXPECT_TRUE(config->use_iam);
         EXPECT_TRUE(config->IsAwsCredentialBrokerEnabled());
-        EXPECT_EQ(config->talon_mode, milvus_storage::TalonMode::Disabled);
+        EXPECT_EQ(config->talon_mode, milvus_storage::TalonMode::SmallReads);
         EXPECT_EQ(config->credential_endpoint, endpoint);
         spec["extfs"]["credential_endpoint"] = endpoint + "/other";
         EXPECT_ANY_THROW(InjectExternalSpecProperties(
@@ -4432,7 +4433,8 @@ TEST(InjectExtfsAllowlist, BrokerIamPolicyAndLegacyAliases) {
           {"azure_credential_endpoint",
            "HTTPS://BROKER.example.com:443/v1/credentials/assume-role"}}}};
     milvus_storage::api::Properties props{
-        {"milvus.talon.external_mode", std::string("2")}};
+        {"milvus.talon.external_mode", std::string("2")},
+        {PROPERTY_FS_TALON_COORDINATOR, std::string("talon:7000")}};
     InjectExternalSpecProperties(
         props, 42, "azure://core.windows.net/container/path", spec.dump());
     EXPECT_EQ(props.count("extfs.42.credential_endpoint"), 0u);
@@ -4443,7 +4445,7 @@ TEST(InjectExtfsAllowlist, BrokerIamPolicyAndLegacyAliases) {
         props, "azure://core.windows.net/container/path");
     ASSERT_TRUE(config.ok()) << config.status();
     EXPECT_TRUE(config->IsAzureCredentialBrokerEnabled());
-    EXPECT_EQ(config->talon_mode, milvus_storage::TalonMode::Disabled);
+    EXPECT_EQ(config->talon_mode, milvus_storage::TalonMode::SmallReads);
     EXPECT_EQ(config->azure_credential_endpoint, endpoint);
     EXPECT_TRUE(config->credential_endpoint.empty());
     spec["extfs"]["azure_credential_endpoint"] = endpoint + "/other";
@@ -4482,12 +4484,31 @@ TEST(InjectExtfsAllowlist, BrokerFormatCompatibility) {
                 format_first["format"] = format;
                 format_first["extfs"] = spec["extfs"];
                 for (const auto& raw : {spec.dump(), format_first.dump()}) {
-                    milvus_storage::api::Properties props;
+                    milvus_storage::api::Properties props{
+                        {"milvus.talon.external_mode", std::string("1")},
+                        {PROPERTY_FS_TALON_COORDINATOR,
+                         std::string("talon:7000")}};
                     EXPECT_NO_THROW(InjectExternalSpecProperties(
                         props, 42, "s3://bucket/path", raw));
                     EXPECT_EQ(std::get<std::string>(
                                   props.at("extfs.42.credential_endpoint")),
                               endpoint);
+                    auto address =
+                        std::get<std::string>(props.at("extfs.42.address"));
+                    if (const auto scheme = address.find("://");
+                        scheme != std::string::npos) {
+                        address.erase(0, scheme + 3);
+                    }
+                    const auto config =
+                        milvus_storage::FilesystemCache::resolve_config(
+                            props, "s3://" + address + "/bucket/path");
+                    ASSERT_TRUE(config.ok()) << config.status();
+                    const bool talon_supported =
+                        iam || std::string_view(cloud) == "aws";
+                    EXPECT_EQ(config->talon_mode,
+                              talon_supported
+                                  ? milvus_storage::TalonMode::Full
+                                  : milvus_storage::TalonMode::Disabled);
                 }
                 spec["extfs"].erase("credential_endpoint");
                 milvus_storage::api::Properties props;
