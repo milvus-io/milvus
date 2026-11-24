@@ -166,7 +166,7 @@ func (s *consoleVisibilitySuite) TestVisibility() {
 			describeDatabase(user, password, ownDB),
 			describeCollection(user, password, ownDB, shared),
 		} {
-			s.Equal(http.StatusUnauthorized, resp.status, string(resp.body))
+			s.Equal(http.StatusForbidden, resp.status, string(resp.body))
 			s.NotContains(string(resp.body), shared)
 		}
 		return
