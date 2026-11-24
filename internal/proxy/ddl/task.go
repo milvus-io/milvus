@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -1907,7 +1908,31 @@ func (t *ShowCollectionsTask) PreExecute(ctx context.Context) error {
 
 func (t *ShowCollectionsTask) Execute(ctx context.Context) error {
 	ctx = AppendUserInfoForRPC(ctx)
-	respFromRootCoord, err := t.mixCoord.ShowCollections(ctx, t.ShowCollectionsRequest)
+	request := t.ShowCollectionsRequest
+	var requestedIDs []UniqueID
+	if t.GetType() == milvuspb.ShowType_InMemory && len(t.CollectionNames) > 0 {
+		// Resolve names, which may be aliases, through the shared cache with
+		// the cluster identity, so that an absent collection fails the same
+		// way however the cache is warmed. Whether the caller may see the
+		// collection is decided below, by RootCoord, never by the cache.
+		metadataCtx := describeCollectionMetadataContext(ctx)
+		requestedIDs = make([]UniqueID, 0, len(t.CollectionNames))
+		collectionNames := make([]string, 0, len(t.CollectionNames))
+		for _, collectionName := range t.CollectionNames {
+			collectionInfo, err := t.GetMetaCache().GetCollectionInfo(metadataCtx, t.GetDbName(), collectionName, 0)
+			if err != nil {
+				mlog.Debug(ctx, "Failed to get collection id.", mlog.String("collectionName", collectionName),
+					mlog.Int64("requestID", t.Base.MsgID), mlog.String("requestType", "showCollections"))
+				return err
+			}
+			requestedIDs = append(requestedIDs, collectionInfo.CollID)
+			collectionNames = append(collectionNames, collectionInfo.Schema.GetName())
+		}
+		// RootCoord selects by collection name, not by alias.
+		request = proto.Clone(request).(*milvuspb.ShowCollectionsRequest)
+		request.CollectionNames = collectionNames
+	}
+	respFromRootCoord, err := t.mixCoord.ShowCollections(ctx, request)
 	if err = merr.CheckRPCCall(respFromRootCoord, err); err != nil {
 		return err
 	}
@@ -1919,12 +1944,14 @@ func (t *ShowCollectionsTask) Execute(ctx context.Context) error {
 			IDs2Names[collectionID] = collectionName
 		}
 		collectionIDs := make([]UniqueID, 0)
-		for _, collectionName := range t.CollectionNames {
-			collectionID, err := t.GetMetaCache().GetCollectionID(ctx, t.GetDbName(), collectionName)
-			if err != nil {
-				mlog.Debug(ctx, "Failed to get collection id.", mlog.String("collectionName", collectionName),
+		for offset, collectionName := range t.CollectionNames {
+			collectionID := requestedIDs[offset]
+			// RootCoord lists only the collections the caller may see. Report
+			// any other one exactly as a collection that does not exist.
+			if _, ok := IDs2Names[collectionID]; !ok {
+				mlog.Debug(ctx, "Collection is not listed for the caller.", mlog.String("collectionName", collectionName),
 					mlog.Int64("requestID", t.Base.MsgID), mlog.String("requestType", "showCollections"))
-				return err
+				return collectionNotFoundByName(t.GetDbName(), collectionName)
 			}
 			collectionIDs = append(collectionIDs, collectionID)
 			IDs2Names[collectionID] = collectionName
@@ -2000,6 +2027,17 @@ func (t *ShowCollectionsTask) Execute(ctx context.Context) error {
 
 func (t *ShowCollectionsTask) PostExecute(ctx context.Context) error {
 	return nil
+}
+
+// collectionNotFoundByName is the error the metadata cache returns for a name
+// that resolves to no collection: RootCoord's not-found error, marked as an
+// input error by the cache.
+func collectionNotFoundByName(dbName, collectionName string) error {
+	if dbName == "" {
+		dbName = util.DefaultDBName
+	}
+	return merr.WrapErrAsInputErrorWhen(merr.WrapErrCollectionNotFoundWithDB(dbName, collectionName),
+		merr.ErrCollectionNotFound)
 }
 
 type AlterCollectionTask struct {
