@@ -162,9 +162,11 @@ func (s *OrderedReduceStream) recvGroups() (*internalpb.RetrieveResults, error) 
 	g := s.groups
 	out := &internalpb.RetrieveResults{Status: merr.Success()}
 	var size int64
-	if len(s.outputChunks) > 0 { // An oversized Unit must be returned alone.
-		out = s.outputChunks[0]
-		s.outputChunks = nil
+	if len(s.outputChunks) > 0 { // Drain split chunks one at a time before pulling more groups.
+		out, s.outputChunks = s.outputChunks[0], s.outputChunks[1:]
+		if len(s.outputChunks) == 0 {
+			s.outputChunks = nil
+		}
 		size = int64(s.chunkBytes)
 	}
 	var sizeRow func(int64) int64

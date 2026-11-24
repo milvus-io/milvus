@@ -1061,6 +1061,46 @@ func TestOrderedGroupReduceStreamLimitValidation(t *testing.T) {
 	require.ErrorIs(t, err, io.EOF)
 }
 
+func TestOrderedGroupReduceStreamDrainsOutputChunksQueue(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
+	}}
+	request := &internalpb.RetrieveRequest{
+		Limit:           2,
+		GroupByFieldIds: []int64{100},
+		Aggregates:      []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}},
+	}
+	child := &queryTestStream{}
+	stream, err := NewReduceStream(request, schema, []ReduceStream{child}, 64)
+	require.NoError(t, err)
+
+	rs := stream.(*OrderedReduceStream)
+	rs.groups.produced = 2
+	rs.outputChunks = []*internalpb.RetrieveResults{
+		newGroupQueryTestChunk([]int64{1}, []int64{10}),
+		newGroupQueryTestChunk([]int64{2}, []int64{20}),
+	}
+
+	first, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{1}, first.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	require.False(t, rs.finished)
+	require.Equal(t, 0, child.closeCount())
+	require.Len(t, rs.outputChunks, 1)
+
+	second, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{2}, second.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	require.True(t, rs.finished)
+	require.Nil(t, rs.outputChunks)
+	require.Equal(t, 1, child.closeCount())
+
+	eofChunk, err := stream.Recv()
+	require.Nil(t, eofChunk)
+	require.ErrorIs(t, err, io.EOF)
+}
+
 func makeTimestampField(timestamps []int64) *schemapb.FieldData {
 	return &schemapb.FieldData{
 		Type: schemapb.DataType_Int64, FieldName: "timestamp", FieldId: common.TimeStampField,
