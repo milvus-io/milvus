@@ -3425,8 +3425,8 @@ TEST(test_chunk_segment, SearchIteratorV2TiePkOpContextPropagation) {
         "vec", DataType::VECTOR_FLOAT, 2, knowhere::metric::L2);
     schema->set_primary_field_id(pk);
 
-    auto data = segcore::DataGen(schema, 4);
-    const std::array<int64_t, 4> pks = {40, 10, 30, 20};
+    auto data = segcore::DataGen(schema, 5);
+    const std::array<int64_t, 5> pks = {40, 10, 30, 20, 99};
     for (auto& fd : *data.raw_->mutable_fields_data()) {
         if (fd.field_id() == pk.get()) {
             auto* longs = fd.mutable_scalars()->mutable_long_data();
@@ -3439,37 +3439,45 @@ TEST(test_chunk_segment, SearchIteratorV2TiePkOpContextPropagation) {
                 floats->add_data(1.0f);
                 floats->add_data(0.0f);
             }
+            floats->add_data(2.0f);
+            floats->add_data(0.0f);
         }
     }
 
     auto segment = CreateSealedWithFieldDataLoaded(schema, data);
     ASSERT_NE(segment, nullptr);
 
-    SearchInfo search_info;
-    search_info.field_id_ = vec;
-    search_info.metric_type_ = knowhere::metric::L2;
-    search_info.topk_ = 2;
-    search_info.search_params_ =
-        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
-    search_info.iterator_v2_info_ = SearchIteratorV2Info{"", 2};
+    auto encode_i64_pk = [](int64_t v) {
+        std::string s(8, '\0');
+        uint64_t u = static_cast<uint64_t>(v);
+        for (int i = 7; i >= 0; --i) {
+            s[i] = static_cast<char>(u & 0xff);
+            u >>= 8;
+        }
+        return s;
+    };
 
     const std::array<float, 2> query_vec = {1.0f, 0.0f};
     folly::CancellationSource cancel_source;
     milvus::OpContext op_ctx(cancel_source.getToken());
-    SearchResult result;
-    segment->vector_search(search_info,
-                           query_vec.data(),
-                           nullptr,
-                           1,
-                           MAX_TIMESTAMP,
-                           BitsetView{},
-                           &op_ctx,
-                           result);
-    ASSERT_EQ(result.seg_offsets_, (std::vector<int64_t>{1, 3}));
-
-    cancel_source.requestCancellation();
-    SearchResult cancelled_result;
-    try {
+    auto run_page = [&](int64_t batch_size,
+                        std::optional<float> last_bound,
+                        std::optional<int64_t> last_pk) {
+        SearchInfo search_info;
+        search_info.field_id_ = vec;
+        search_info.metric_type_ = knowhere::metric::L2;
+        search_info.topk_ = batch_size;
+        search_info.round_decimal_ = -1;
+        search_info.search_params_ =
+            knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
+        SearchIteratorV2Info v2{"", static_cast<uint32_t>(batch_size)};
+        v2.last_bound = last_bound;
+        if (last_pk.has_value()) {
+            v2.last_primary_key = encode_i64_pk(*last_pk);
+            v2.primary_key_type = DataType::INT64;
+        }
+        search_info.iterator_v2_info_ = v2;
+        SearchResult result;
         segment->vector_search(search_info,
                                query_vec.data(),
                                nullptr,
@@ -3477,7 +3485,21 @@ TEST(test_chunk_segment, SearchIteratorV2TiePkOpContextPropagation) {
                                MAX_TIMESTAMP,
                                BitsetView{},
                                &op_ctx,
-                               cancelled_result);
+                               result);
+        return result;
+    };
+
+    EXPECT_EQ(run_page(2, std::nullopt, std::nullopt).seg_offsets_,
+              (std::vector<int64_t>{1, 3}));
+    EXPECT_EQ(run_page(2, 0.0f, 20).seg_offsets_, (std::vector<int64_t>{2, 0}));
+    EXPECT_EQ(run_page(2, 0.0f, 40).seg_offsets_,
+              (std::vector<int64_t>{4, INVALID_SEG_OFFSET}));
+    EXPECT_EQ(run_page(6, std::nullopt, std::nullopt).seg_offsets_,
+              (std::vector<int64_t>{1, 3, 2, 0, 4, INVALID_SEG_OFFSET}));
+
+    cancel_source.requestCancellation();
+    try {
+        run_page(2, std::nullopt, std::nullopt);
         FAIL() << "Expected SegcoreError when OpContext is cancelled";
     } catch (const SegcoreError& e) {
         EXPECT_EQ(e.get_error_code(), ErrorCode::FollyCancel);

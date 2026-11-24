@@ -556,8 +556,12 @@ CachedSearchIterator::GetBatchedNextResults(size_t query_idx,
                 }
             }
         } else {
-            MergeChunksResults(
-                query_idx, last_bound, last_key, radius, range_filter, collected);
+            MergeChunksResults(query_idx,
+                               last_bound,
+                               last_key,
+                               radius,
+                               range_filter,
+                               collected);
         }
     }
 

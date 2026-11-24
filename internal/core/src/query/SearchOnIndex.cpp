@@ -118,8 +118,11 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     }
 
     if (search_conf.iterator_v2_info_.has_value()) {
-        auto iter = CachedSearchIterator(
-            reader, dataset, search_conf, search_bitset, std::move(pk_accessor));
+        auto iter = CachedSearchIterator(reader,
+                                         dataset,
+                                         search_conf,
+                                         search_bitset,
+                                         std::move(pk_accessor));
         iter.NextBatch(search_conf, search_result);
         return;
     }

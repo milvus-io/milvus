@@ -136,8 +136,8 @@ class CachedSearchIterator {
     PkAccessor pk_lookup_ = nullptr;
     // Present for element-level (ArrayOfVector) searches: maps Knowhere's
     // element offset to (doc_id, elem_idx) before invoking pk_lookup_.
-    std::shared_ptr<const milvus::IStructElementOffsets> struct_element_offsets_ =
-        nullptr;
+    std::shared_ptr<const milvus::IStructElementOffsets>
+        struct_element_offsets_ = nullptr;
     int8_t sign_ = 1;
     size_t num_chunks_ = 1;
     size_t nq_ = 0;
