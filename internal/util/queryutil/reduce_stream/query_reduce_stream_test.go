@@ -704,6 +704,7 @@ func TestOrderedGroupReduceStreamEmptyChildren(t *testing.T) {
 				{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
 			}}
 			request := &internalpb.RetrieveRequest{
+				Limit:           typeutil.Unlimited,
 				GroupByFieldIds: []int64{100},
 				Aggregates:      []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 101}},
 			}
@@ -793,7 +794,7 @@ func TestOrderedGroupReduceStreamPartialContracts(t *testing.T) {
 				{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64},
 				{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64, Nullable: true},
 			}}
-			request := &internalpb.RetrieveRequest{GroupByFieldIds: []int64{100}, Aggregates: []*planpb.Aggregate{{Op: test.op, FieldId: 101}}}
+			request := &internalpb.RetrieveRequest{Limit: typeutil.Unlimited, GroupByFieldIds: []int64{100}, Aggregates: []*planpb.Aggregate{{Op: test.op, FieldId: 101}}}
 			if test.average {
 				request.Aggregates = append(request.Aggregates, &planpb.Aggregate{Op: planpb.AggregateOp_count, FieldId: 101})
 			}
@@ -883,7 +884,7 @@ func TestOrderedGroupReduceStreamRejectsMalformedPartials(t *testing.T) {
 				{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64},
 				{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
 			}}
-			request := &internalpb.RetrieveRequest{GroupByFieldIds: []int64{100}, Aggregates: []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}}}
+			request := &internalpb.RetrieveRequest{Limit: typeutil.Unlimited, GroupByFieldIds: []int64{100}, Aggregates: []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}}}
 			payload := newGroupQueryTestChunk([]int64{1}, []int64{2})
 			switch test {
 			case "column_count":
@@ -911,6 +912,7 @@ func TestOrderedGroupReduceStreamRejectsUnorderedKeys(t *testing.T) {
 		{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
 	}}
 	request := &internalpb.RetrieveRequest{
+		Limit:           typeutil.Unlimited,
 		GroupByFieldIds: []int64{100},
 		Aggregates:      []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}},
 	}
@@ -977,6 +979,7 @@ func TestOrderedGroupReduceStreamTerminalEOFAndLateMetadata(t *testing.T) {
 		{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
 	}}
 	request := &internalpb.RetrieveRequest{
+		Limit:           typeutil.Unlimited,
 		GroupByFieldIds: []int64{100},
 		Aggregates:      []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}},
 	}
@@ -1024,6 +1027,38 @@ func TestOrderedGroupReduceStreamTerminalEOFAndLateMetadata(t *testing.T) {
 		require.Nil(t, chunk)
 		require.ErrorIs(t, err, io.EOF)
 	})
+}
+
+func TestOrderedGroupReduceStreamLimitValidation(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
+	}}
+
+	for _, limit := range []int64{0, -2} {
+		request := &internalpb.RetrieveRequest{
+			Limit:           limit,
+			GroupByFieldIds: []int64{100},
+			Aggregates:      []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}},
+		}
+		_, err := NewReduceStream(request, schema, nil, 64)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+	}
+
+	request := &internalpb.RetrieveRequest{
+		Limit:           typeutil.Unlimited,
+		GroupByFieldIds: []int64{100},
+		Aggregates:      []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}},
+		OrderByFields:   []*planpb.OrderByField{{FieldId: 100, Ascending: false}},
+	}
+	child := &queryTestStream{recv: []queryTestRecv{{chunk: newGroupQueryTestChunk([]int64{2, 1}, []int64{20, 10})}}}
+	stream, err := NewReduceStream(request, schema, []ReduceStream{child}, 64)
+	require.NoError(t, err)
+	chunk, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{2, 1}, chunk.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	_, err = stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
 }
 
 func makeTimestampField(timestamps []int64) *schemapb.FieldData {

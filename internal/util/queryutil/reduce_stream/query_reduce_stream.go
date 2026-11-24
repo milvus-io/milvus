@@ -224,8 +224,12 @@ func NewReduceStream(
 	if request.GetIsCount() && len(request.GetGroupByFieldIds()) == 0 {
 		return nil, merr.WrapErrServiceUnimplemented(status.Error(codes.Unimplemented, "Query ReduceStream requires an aggregate plan for count"))
 	}
-	unlimited := request.GetLimit() == typeutil.Unlimited && len(request.GetOrderByFields()) == 0
-	if request.GetLimit() <= 0 && !unlimited && len(request.GetGroupByFieldIds()) == 0 {
+	// Plain ORDER BY streams require a positive top-K (orderByLimit > 0).
+	// Grouped streams merge child heads in key order and allow Unlimited even with ORDER BY.
+	hasGroupBy := len(request.GetGroupByFieldIds()) > 0
+	allowsUnlimited := hasGroupBy || len(request.GetOrderByFields()) == 0
+	isUnlimited := request.GetLimit() == typeutil.Unlimited && allowsUnlimited
+	if request.GetLimit() <= 0 && !isUnlimited {
 		return nil, merr.WrapErrServiceInternalMsg("invalid Query ReduceStream limit %d", request.GetLimit())
 	}
 	if chunkBytes <= 0 {
