@@ -296,7 +296,6 @@ func (node *DataNode) compactionV2(ctx context.Context, req *datapb.CompactionPl
 	}
 	var task compactor.Compactor
 	binlogIO := io.NewBinlogIO(cm)
-	namespaceEnabled := req.GetSchema().GetEnableNamespace()
 	switch req.GetType() {
 	case datapb.CompactionType_Level0DeleteCompaction:
 		task = compactor.NewLevelZeroCompactionTask(
@@ -326,7 +325,7 @@ func (node *DataNode) compactionV2(ctx context.Context, req *datapb.CompactionPl
 		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
 			return merr.Status(merr.WrapErrServiceInternalMsg("invalid pre-allocated segmentID range")), nil
 		}
-		if namespaceEnabled {
+		if common.UsesNamespacePartitionKey(req.GetSchema()) {
 			sortFields, err := importutilv2.SortFieldIDs(req.GetSchema())
 			if err != nil {
 				return merr.Status(err), err

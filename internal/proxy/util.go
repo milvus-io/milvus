@@ -2041,7 +2041,7 @@ func namespaceShardingEnabled(schema *schemapb.CollectionSchema) bool {
 }
 
 func namespacePartitionKeyMode(schema *schemapb.CollectionSchema) bool {
-	return schema != nil && schema.GetEnableNamespace() && common.IsNamespaceModePartitionKey(schema.GetProperties()...)
+	return common.UsesNamespacePartitionKey(schema)
 }
 
 func namespacePartitionKeyModeEnabled(schema *schemapb.CollectionSchema) bool {
