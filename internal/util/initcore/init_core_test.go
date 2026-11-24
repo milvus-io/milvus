@@ -415,6 +415,7 @@ func TestRegisterQueryNodeLoadConfigCatchesUp(t *testing.T) {
 	assert.NoError(t, pt.Save(item.Key, "false"))
 
 	var applied atomic.Bool
+	applied.Store(true)
 	registerQueryNodeLoadConfig(t.Context(), pt, func(enabled bool, budgetBytes, slots int64) error {
 		applied.Store(enabled)
 		if enabled {
