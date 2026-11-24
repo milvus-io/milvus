@@ -2031,6 +2031,10 @@ function:
           url:  # Your voyageai rerank url, Default is the official rerank url
   analyzer:
     local_resource_path: /var/lib/milvus/analyzer
+    # Comma-separated absolute directories that analyzer files of type local may be read from,
+    # for example stop_words_file, synonyms_file, extra_dict_file, user_dict and the grpc tokenizer tls files. local_resource_path is always allowed.
+    # An analyzer that refers to a local file outside these directories is rejected.
+    allowed_local_resource_dirs: /var/lib/milvus/dicts
     concurrency_per_cpu_core: 8 # The concurrency per cpu core for analyzer, pipeline not included
     runner_concurrency: 8 # The concurrency for each function runner to tokenize text
   pyUDF:

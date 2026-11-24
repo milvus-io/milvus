@@ -50,19 +50,17 @@ impl FilterBuilder for StopWordFilter {
 mod tests {
     use super::StopWordFilter;
     use crate::analyzer::filter::FilterBuilder;
-    use crate::analyzer::options::{FileResourcePathHelper, ResourceInfo};
+    use crate::analyzer::options::test_util::assert_not_allowed;
+    use crate::analyzer::options::test_util::{helper_allowing, test_data_dir};
     use crate::analyzer::tokenizers::standard_builder;
     use crate::log::init_log;
     use serde_json as json;
     use std::collections::HashSet;
-    use std::path::Path;
-    use std::sync::Arc;
 
     #[test]
     fn test_stop_words_filter_with_file() {
         init_log();
-        let file_dir = Path::new(file!()).parent().unwrap();
-        let stop_words_path = file_dir.join("../data/test/stop_words_dict.txt");
+        let stop_words_path = test_data_dir().join("stop_words_dict.txt");
         let stop_words_path_str = stop_words_path.to_string_lossy().to_string();
         let params = format!(
             r#"{{
@@ -75,7 +73,7 @@ mod tests {
         );
 
         let json_params = json::from_str::<json::Value>(&params).unwrap();
-        let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        let mut helper = helper_allowing(&[test_data_dir()]);
         let filter = StopWordFilter::from_json(json_params.as_object().unwrap(), &mut helper);
         assert!(filter.is_ok(), "error: {}", filter.err().unwrap());
 
@@ -117,7 +115,7 @@ mod tests {
         );
 
         let json_params = json::from_str::<json::Value>(&params).unwrap();
-        let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        let mut helper = helper_allowing(&[dir.path()]);
         let filter = StopWordFilter::from_json(json_params.as_object().unwrap(), &mut helper);
         assert!(filter.is_ok(), "error: {}", filter.err().unwrap());
 
@@ -132,5 +130,22 @@ mod tests {
         }
 
         assert_eq!(results, vec!["quick".to_string(), "steady".to_string()]);
+    }
+
+    #[test]
+    fn test_stop_words_filter_rejects_device_and_outside_files() {
+        init_log();
+        let allowed = tempfile::tempdir().unwrap();
+        for path in ["/etc/passwd", "/proc/self/environ", "/dev/zero"] {
+            let params = json::json!({
+                "type": "stop_words",
+                "stop_words_file": {"type": "local", "path": path}
+            });
+            let mut helper = helper_allowing(&[allowed.path()]);
+            let err = StopWordFilter::from_json(params.as_object().unwrap(), &mut helper)
+                .err()
+                .unwrap();
+            assert_not_allowed(&err, path);
+        }
     }
 }

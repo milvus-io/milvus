@@ -1,5 +1,5 @@
-use crate::analyzer::options::get_resource_path;
 use crate::analyzer::options::FileResourcePathHelper;
+use crate::analyzer::options::{get_resource_path, read_resource_file};
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
 use std::io::BufRead;
@@ -33,9 +33,8 @@ pub(crate) fn read_line_file(
     key: &str,
 ) -> Result<()> {
     let path = get_resource_path(helper, params, key)?;
-    let file = std::fs::File::open(path)?;
-    let reader = std::io::BufReader::new(file);
-    for (line_index, line) in reader.lines().enumerate() {
+    let data = read_resource_file(&path, key)?;
+    for (line_index, line) in data.lines().enumerate() {
         let mut row_data = line.map_err(|err| {
             TantivyBindingError::InternalError(format!(
                 "read {} file failed, error: {}",
@@ -57,9 +56,9 @@ pub(crate) fn read_line_file(
 #[cfg(test)]
 mod tests {
     use super::read_line_file;
-    use crate::analyzer::options::{FileResourcePathHelper, ResourceInfo};
+    use crate::analyzer::options::test_util::assert_not_allowed;
+    use crate::analyzer::options::test_util::helper_allowing;
     use serde_json as json;
-    use std::sync::Arc;
 
     #[test]
     fn test_read_line_file_strips_utf8_bom_from_first_line() {
@@ -71,11 +70,51 @@ mod tests {
             "type": "local",
             "path": file_path.to_string_lossy()
         });
-        let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        let mut helper = helper_allowing(&[dir.path()]);
         let mut dict = Vec::new();
 
         read_line_file(&mut helper, &mut dict, &params, "test dict file").unwrap();
 
         assert_eq!(dict, vec!["the".to_string(), "and".to_string()]);
+    }
+
+    #[test]
+    fn test_read_line_file_rejects_paths_outside_allowed_dirs() {
+        let allowed = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let outside = other.path().join("words.txt");
+        std::fs::write(&outside, "secret-line\n").unwrap();
+
+        for path in [outside.to_str().unwrap(), "/etc/passwd", "/dev/zero"] {
+            let params = json::json!({"type": "local", "path": path});
+            let mut dict = Vec::new();
+            let err = read_line_file(
+                &mut helper_allowing(&[allowed.path()]),
+                &mut dict,
+                &params,
+                "test dict file",
+            )
+            .unwrap_err();
+            assert_not_allowed(&err, path);
+            assert!(dict.is_empty());
+            assert!(!err.to_string().contains("secret-line"));
+        }
+    }
+
+    #[test]
+    fn test_read_line_file_invalid_utf8_error_has_no_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("words.txt");
+        std::fs::write(&file_path, b"secret-line\nsecret\xff\n").unwrap();
+        let params = json::json!({"type": "local", "path": file_path.to_string_lossy()});
+        let mut dict = Vec::new();
+        let err = read_line_file(
+            &mut helper_allowing(&[dir.path()]),
+            &mut dict,
+            &params,
+            "test dict file",
+        )
+        .unwrap_err();
+        assert!(!err.to_string().contains("secret"), "{}", err);
     }
 }

@@ -70,13 +70,14 @@ pub fn lindera_builder(
 
 pub fn grpc_builder(
     params: Option<&json::Map<String, json::Value>>,
+    helper: &FileResourcePathHelper,
 ) -> Result<TextAnalyzerBuilder> {
     if params.is_none() {
         return Err(TantivyBindingError::InvalidArgument(format!(
             "grpc tokenizer must be customized"
         )));
     }
-    let tokenizer = GrpcTokenizer::from_json(params.unwrap())?;
+    let tokenizer = GrpcTokenizer::from_json(params.unwrap(), helper)?;
     Ok(TextAnalyzer::builder(tokenizer).dynamic())
 }
 
@@ -131,7 +132,7 @@ pub fn get_builder_with_tokenizer(
         "icu" => Ok(icu_builder()),
         "thai" => Ok(thai_builder()),
         "language_identifier" => lang_ident_builder(params_map, helper, fc),
-        "grpc" => grpc_builder(params_map),
+        "grpc" => grpc_builder(params_map, helper),
         other => {
             warn!("unsupported tokenizer: {}", other);
             Err(TantivyBindingError::InvalidArgument(format!(
