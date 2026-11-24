@@ -337,22 +337,39 @@ NormalizeExternalPathForStorage(const std::string& source_path,
     return MakeStorageUri(uri, true);
 }
 
+bool
+HasExternalSource(const char* external_source) {
+    return external_source != nullptr && external_source[0] != '\0';
+}
+
+// milvus-storage reads a path without a URI scheme through this cluster's own
+// storage (the fs.* properties), and a URI only through the extfs.*
+// filesystems; see FilesystemCache::resolve_config. A path named by an
+// external source must never take the first route.
+bool
+RoutesToClusterStorage(const std::string& path) {
+    auto parsed = milvus_storage::StorageUri::Parse(path);
+    return parsed.ok() && parsed.ValueOrDie().IsRelativeUri();
+}
+
+void
+CheckExternalSourcePath(const std::string& resolved_path,
+                        const std::string& source_path) {
+    if (RoutesToClusterStorage(resolved_path)) {
+        throw LoonFFIError(
+            LOON_INVALID_ARGS,
+            milvus::storage::LoonErrCodeToErrorCode(LOON_INVALID_ARGS),
+            "milvus-table source path must be stored in the external "
+            "source storage: " +
+                source_path);
+    }
+}
+
 std::string
-MakeExternalUriForSourcePath(const std::string& source_path,
-                             const char* external_source,
-                             const LoonProperties* properties) {
-    if (source_path.empty()) {
-        return source_path;
-    }
-    auto path_uri = ParseStorageUri(source_path, false);
-    if (path_uri.IsAbsoluteUri()) {
-        return NormalizeExternalPathForStorage(source_path, properties);
-    }
-    if (std::filesystem::path(source_path).is_absolute()) {
-        return source_path;
-    }
-    if (external_source == nullptr || external_source[0] == '\0' ||
-        properties == nullptr) {
+ResolveRelativeSourcePath(const std::string& source_path,
+                          const char* external_source,
+                          const LoonProperties* properties) {
+    if (!HasExternalSource(external_source) || properties == nullptr) {
         ThrowInfo(
             milvus::ErrorCode::UnexpectedError,
             "{}",
@@ -404,6 +421,34 @@ MakeExternalUriForSourcePath(const std::string& source_path,
 
     resolved.bucket_name = source.bucket_name;
     return MakeStorageUri(resolved, false);
+}
+
+// Resolves a path recorded by a milvus-table source to the path the target
+// manifest records. With an external source, the result is always a URI of
+// the external source storage.
+std::string
+MakeExternalUriForSourcePath(const std::string& source_path,
+                             const char* external_source,
+                             const LoonProperties* properties) {
+    if (source_path.empty()) {
+        return source_path;
+    }
+    std::string resolved;
+    auto path_uri = ParseStorageUri(source_path, false);
+    if (path_uri.IsAbsoluteUri()) {
+        resolved = NormalizeExternalPathForStorage(source_path, properties);
+    } else if (std::filesystem::path(source_path).is_absolute()) {
+        // Only a source without external storage, whose manifests are in this
+        // cluster's own storage, may name a local path.
+        resolved = source_path;
+    } else {
+        resolved =
+            ResolveRelativeSourcePath(source_path, external_source, properties);
+    }
+    if (HasExternalSource(external_source)) {
+        CheckExternalSourcePath(resolved, source_path);
+    }
+    return resolved;
 }
 
 uint32_t
@@ -653,12 +698,16 @@ MaterializeColumnGroups(const std::vector<ColumnGroupData>& groups) {
 
 ManifestGuard
 ReadManifestWithFFI(const std::string& manifest_path,
+                    const char* external_source,
                     const LoonProperties* properties) {
     auto parsed = ParseLoonManifestPath(manifest_path);
     if (!parsed.has_value()) {
         ThrowInfo(milvus::ErrorCode::DataFormatBroken,
                   "Invalid source manifest path: {}",
                   manifest_path);
+    }
+    if (HasExternalSource(external_source)) {
+        CheckExternalSourcePath(parsed->base_path, parsed->base_path);
     }
 
     ManifestGuard manifest;
@@ -929,8 +978,8 @@ loon_milvus_table_append_source_manifests(LoonTransactionHandle transaction,
             }
 
             std::string source_manifest_path(source_manifest_paths[i]);
-            auto source_manifest =
-                ReadManifestWithFFI(source_manifest_path, properties);
+            auto source_manifest = ReadManifestWithFFI(
+                source_manifest_path, external_source, properties);
             auto target_groups_data =
                 BuildTargetColumnGroups(source_manifest.manifest->column_groups,
                                         target_column_set,
@@ -992,6 +1041,63 @@ loon_milvus_table_append_source_manifests(LoonTransactionHandle transaction,
         // LOON_GOT_EXCEPTION: Go classifies on it via
         // loon_ffi_is_retryable_errcode, so a transient object-storage
         // failure must not arrive as a permanent one.
+        RETURN_ERROR(e.loon_code(), e.what());
+    } catch (const std::exception& e) {
+        RETURN_EXCEPTION(e.what());
+    } catch (...) {
+        RETURN_EXCEPTION("unknown exception");
+    }
+
+    RETURN_UNREACHABLE();
+}
+
+// Reports whether milvus-storage would read path through this cluster's own
+// storage instead of an external filesystem. Go readers of a milvus-table
+// source use it to keep source paths on the external source storage.
+extern "C" int
+MilvusTablePathRoutesToClusterStorage(const char* path) {
+    return path != nullptr && RoutesToClusterStorage(path) ? 1 : 0;
+}
+
+// Resolves source column-group files as the target manifest records them, so
+// a Go reader of a milvus-table source reads the files the import references.
+// Release out_groups with loon_column_groups_destroy.
+extern "C" LoonFFIResult
+loon_milvus_table_resolve_source_column_groups(
+    const LoonColumnGroups* source_groups,
+    const char* external_source,
+    const LoonProperties* properties,
+    LoonColumnGroups** out_groups) {
+    if (source_groups == nullptr || out_groups == nullptr) {
+        RETURN_ERROR(LOON_INVALID_ARGS,
+                     "source_groups and out_groups must not be null");
+    }
+    *out_groups = nullptr;
+
+    try {
+        milvus_storage::api::ColumnGroups groups;
+        auto status =
+            milvus_storage::column_groups_import(source_groups, &groups);
+        if (!status.ok()) {
+            RETURN_ERROR(LOON_ARROW_ERROR,
+                         "import source column groups: " + status.ToString());
+        }
+        for (auto& group : groups) {
+            if (group == nullptr) {
+                continue;
+            }
+            for (auto& file : group->files) {
+                file.path = MakeExternalUriForSourcePath(
+                    file.path, external_source, properties);
+            }
+        }
+        status = milvus_storage::column_groups_export(groups, out_groups);
+        if (!status.ok()) {
+            RETURN_ERROR(LOON_ARROW_ERROR,
+                         "export source column groups: " + status.ToString());
+        }
+        RETURN_SUCCESS();
+    } catch (const LoonFFIError& e) {
         RETURN_ERROR(e.loon_code(), e.what());
     } catch (const std::exception& e) {
         RETURN_EXCEPTION(e.what());

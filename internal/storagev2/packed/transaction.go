@@ -213,14 +213,25 @@ func GetDeltaLogsFromManifestWithExtfs(
 // GetMilvusTableSourceDeltalogs validates the required physical columns and
 // extracts deletes from the same source manifest read. Kept segments use this
 // path even when no new target manifest is built. Other deltalog readers do not
-// impose a column contract.
+// impose a column contract. With an external source, the manifest and its
+// deltalogs must be stored in the external source storage.
 func GetMilvusTableSourceDeltalogs(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
 	extfs ExternalSpecContext,
 	columns []string,
 ) ([]*datapb.FieldBinlog, error) {
-	return getDeltaLogsFromManifest(manifestPath, storageConfig, extfs, columns)
+	if err := checkMilvusTableSourceManifestPath(manifestPath, extfs); err != nil {
+		return nil, err
+	}
+	deltalogs, err := getDeltaLogsFromManifest(manifestPath, storageConfig, extfs, columns)
+	if err != nil {
+		return nil, err
+	}
+	if err := CheckMilvusTableSourceDeltalogPaths(deltalogs, storageConfig, extfs); err != nil {
+		return nil, err
+	}
+	return deltalogs, nil
 }
 
 func getDeltaLogsFromManifest(
