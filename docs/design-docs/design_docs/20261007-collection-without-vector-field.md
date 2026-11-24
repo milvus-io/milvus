@@ -120,7 +120,7 @@ because each of them reads the current schema:
 |---|---|---|
 | Load needs a vector index | Proxy load task, QueryCoord automatic load | applies from the next load after a vector field is added; stops applying after the last one is dropped |
 | Search is rejected | Proxy search task | follows the schema immediately |
-| Index readiness for handoff and compaction input (Section 3) | computed per evaluation from the schema and the index metadata | the fields to wait for change with the schema; a vector field with no index defined is not waited for |
+| Index readiness of compaction inputs (Section 3) | computed per evaluation from the schema and the index metadata | the fields to wait for change with the schema. An added vector field is waited for: until an index is defined on it and built, compaction has no input (Section 3.4) |
 | Segment row cap (Section 4) | not read from the schema | unchanged by a conversion: segments are sealed, compacted and imported at `maxSize` bytes or `maxRows` rows before and after it |
 
 An earlier revision of #54604 applied the row cap to collections without a
@@ -203,8 +203,11 @@ bounds this (without it a 1 GB segment of narrow rows holds tens of millions
 of rows), but it does not prevent it. A segment above the byte limit is not
 split in the background; a manual compaction splits it at the byte limit
 (Section 6.3). After backfilling a vector into a collection that had none,
-run a manual compaction. Splitting during or after a backfill automatically
-is a follow-up (Section 8).
+create the index on the vector field first and wait for it to be built,
+then run a manual compaction: without the index a compaction has no input
+(Section 3.4; a manual compaction still runs when the collection has no
+index at all). Splitting during or after a backfill automatically is a
+follow-up (Section 8).
 
 **Clients**
 
@@ -271,147 +274,88 @@ switch off before the upgrade avoids even that, but it is optional.
 
 ## 3. Index readiness
 
-### 3.1 Two questions
+### 3.1 Where index readiness is decided
 
-DataCoord has one filter, `FilterInIndexedSegments`: given a set of
-segments, it returns those that are "index ready", meaning the indexes on
-some set of fields are built on the segment. It has six call sites, which
-ask two different questions:
+DataCoord asks whether the indexes of a segment are built in two places.
 
-| Question | Call sites | When a segment is judged not ready |
-|---|---|---|
-| **Handoff**: may the output of a compaction replace its parents and become visible to queries | the channel view QueryCoord pulls, the serving frontier behind `DescribeIndex`, GC of compacted parents | the output stays invisible, queries keep reading the parents, the parents are not collected |
-| **Compaction input**: may a segment be selected as the input of the next compaction | the compaction trigger, the single segment policy, the target reconciler, all when `indexBasedCompaction=true` (the default) | the segment does not take part in compaction for now |
-
-### 3.2 Today's rule, and why it fails without a vector field
-
-Today both questions share one rule: the fields to wait for are all the
-vector fields of the schema, and a segment is ready when the indexes on all
-of them are built. The config `dataCoord.dataview.forceAllIndexReady` is off
-by default; when on, the fields to wait for also include every field of the
-collection that has an index defined.
-
-Without a vector field the list of fields to wait for is empty. The code
-does not define a result for an empty list; it passes the list on to the
-index metadata lookup, and what comes back depends on unrelated details:
-
-- With no index defined on the collection, no segment is ready. Compaction
-  outputs never become visible, parents are never collected, and mix and
-  delete-ratio compaction never have an eligible input.
-- With a scalar index defined, every segment that has had an index task
-  issued counts as ready, whether the index is finished or not.
-
-Neither result is a rule anybody designed.
-
-DataCoord has a second handoff path: segment change staging (#54198, merged
-2026-10-23). The output of a compaction is first registered as a STAGED
-change group, and `PrepareReadiness` decides readiness on the write side
-before the group is published in one step. Its index clause already defines
-a rule for collections without a vector field: wait for every vector index;
-when the collection has no vector field, wait for every field that has an
-index defined instead; with `forceAllIndexReady` on, wait for all of them for
-any collection. The infrastructure of this path is in master, but no
-production code creates a change group yet, so handoff is still decided by
-the read-time filter above.
-
-### 3.3 The new rule
-
-The filter is split into two predicates, one per question of 3.1. Each
-defines which fields it waits for, and both state explicitly that nothing to
-wait for means "no waiting": every flushed segment is returned.
-
-| Predicate | Where the fields to wait for come from | Vector collection | Collection without a vector field |
-|---|---|---|---|
-| `handoffReady` | the vector fields of the schema; when there is none, every field of the collection that has an index defined, from the index metadata | all vector indexes (today's rule); with `forceAllIndexReady` on, all scalar indexes as well (today's rule) | all scalar indexes that are defined; ready immediately when none is |
-| `compactionInputReady` | the vector fields of the schema | the indexes of all vector fields, not the scalar indexes (today's rule) | nothing to wait for, ready immediately |
-
-The rule of `handoffReady` is the one the staging path already defines at the
-end of 3.2; this document brings it to the read-time path. The set of fields
-to wait for is computed by one shared function, `HandoffIndexTargetFields`,
-which both the read-time filter and the staging `PrepareReadiness` call, so
-the two paths give the same answer for the same segment.
-`compactionInputReady` looks at vector fields only. A collection without a
-vector field has no vector index, so its compaction inputs do not wait.
-Segments below `minSegmentNumRowsToEnableIndex` stay exempt in both
-predicates, as today.
-
-### 3.4 What it means for a vector collection
-
-**`compactionInputReady` does not change.** A freshly flushed segment has to
-wait for its vector index before it can be merged. A vector index takes
-minutes to build, and without one search is brute force. If a new segment
-were merged as soon as it is flushed, the output would have to build the
-vector index again, and the data would spend longer without a vector index;
-under continuous writes some segments might never get their index. Building
-first and merging afterwards is what lets the served data converge to an
-indexed state.
-
-**`handoffReady` does not change.** It waits for the vector indexes by
-default and for every defined index when `forceAllIndexReady` is on, exactly
-as today. A review suggested that handoff wait for scalar indexes by default
-too; that is the same as changing the default of `forceAllIndexReady` to
-true and needs no code change. This document does not change the default,
-for the reasons in Section 7; whether to flip it is an open item in
-Section 8.
-
-So index readiness has no behaviour change for a vector collection.
-
-### 3.5 What it means for a collection without a vector field
+**When a compaction output becomes visible to queries.** Since QueryView
+(#52977) this is decided by `Meta.LoadableProjection`. A compaction output
+replaces its parents in the published view when every index defined on the
+collection is `Finished` on it (and it is sorted, where sorting is
+required); until then the parents keep serving. The rule is the same for
+every collection, it does not look at which fields are vectors, and it does
+not read `dataCoord.dataview.forceAllIndexReady`. A collection without a
+vector field needs no change here:
 
 | | No index defined | Scalar indexes defined |
 |---|---|---|
-| `handoffReady` | The output is visible as soon as it is flushed. There is no index to wait for, and queries are brute force anyway. | The output becomes visible when these scalar indexes are built on it; the parents keep serving meanwhile. |
-| `compactionInputReady` | Any flushed segment can be an input | The same; scalar indexes are not waited for |
+| A compaction output of a collection without a vector field becomes visible | as soon as it is written; there is no index to wait for | when the scalar indexes are built on it; the parents serve meanwhile |
 
-**Why handoff waits for scalar indexes.** If it waited for vector indexes
-only, like today's default for vector collections, a collection without a
-vector field would wait for nothing and a compaction output would replace
-its parents as soon as it is flushed. At that moment the parents have their
-scalar indexes and the new segment does not, so queries fall back from the
-index to brute force until the new index is built. The scalar indexes that
-are defined are the only thing such a collection can wait for.
+**The filter `FilterInIndexedSegments`.** Given a set of segments it returns
+those on which the indexes of a set of fields are built. The fields are all
+the vector fields of the schema; with `forceAllIndexReady` on, every field
+that has an index defined as well. Its callers are:
 
-**The cost** mirrors what a vector collection pays for its vector index.
-Publication is later than the flush by one scalar index build (about 8.5 s
-for `INVERTED` on `int32` over 5.5 M rows). A scalar index created while the
-output is building its indexes delays publication by one more build. If a
-scalar index fails permanently on the output, the output stays invisible and
-the parents keep serving. On the staging path that last case is a change
-group in `FAILED` with the parents still published; on the read-time path
-the parents are marked dropped but are not collected, and keep serving. A
-vector collection behaves this way today when a vector index fails.
+| Caller | What the result decides |
+|---|---|
+| The compaction trigger, the single segment policy, the target reconciler (with `indexBasedCompaction=true`, the default) | which segments can be the input of a compaction |
+| Garbage collection of compacted parents | whether a dropped parent can be collected. The parents the published view still serves are kept separately (`dataViewCompactionProtection`) |
+| `DescribeIndex` | which segments count towards the reported build progress |
+| The channel view returned by `GetRecoveryInfo` | used by QueryCoord to estimate the resources of a load |
 
-**Why compaction input does not wait for scalar indexes.**
+### 3.2 The filter without a vector field
 
-- **No benefit to queries.** When an input is merged its indexes are
-  deleted with it, and the output rebuilds every scalar index from scratch.
-  `handoffReady` already guarantees that queries read the parents until the
-  output's indexes are built, so waiting once more on the input side changes
-  nothing a query sees.
-- **No wasted builds.** When an input is compacted away while its index is
-  half built, DataCoord aborts that index task. The extra cost is the half
-  build.
-- **Indexes cannot fall behind.** A scalar index builds in seconds. Once a
-  compaction output reaches the byte target or the row cap (Section 4) it is
-  full and is not merged again, unless there are deletes or TTL to clean up.
-  So the situation of a vector collection, where data keeps being merged and
-  the index never catches up, does not arise.
-- **Waiting would block compaction.** If inputs waited for scalar indexes
-  too, one permanently failing scalar index would keep that segment out of
-  compaction for good, delete-ratio compaction included, and deleted rows
-  would never be reclaimed. Creating a scalar index on a collection that
-  already holds a lot of data would stop compaction of the whole collection
-  until every segment has built it.
-- **Consistent with vector collections.** A vector collection does not wait
-  for scalar indexes on the input side today either; `forceAllIndexReady`
-  affects handoff only.
+Without a vector field the set of fields to wait for is empty. The filter
+does not define a result for an empty set; it passes the set to the index
+metadata lookup, and what comes back depends on unrelated details:
 
-### 3.6 Taken together
+- With no index defined on the collection, no segment is returned.
+  Automatic mix and delete-ratio compaction never have an input, so the
+  small segments of such a collection are never merged and deleted rows are
+  never reclaimed.
+- With a scalar index defined, every segment that has an index task record
+  is returned, whether the index is finished or not.
+
+### 3.3 The rule
+
+One rule is added to the filter: **an empty set of fields means there is
+nothing to wait for, and every flushed or dropped segment is returned.**
 
 | | Vector collection | Collection without a vector field |
 |---|---|---|
-| When a segment can be merged | after its vector index is built | as soon as it is flushed |
-| When the merged result becomes visible | after its vector index is built (unchanged); after all indexes are built with `forceAllIndexReady` on (unchanged) | after its scalar indexes are built; immediately when none is defined |
+| When a segment can be the input of a compaction | after the index of every vector field is built on it (unchanged) | as soon as it is flushed |
+| With `forceAllIndexReady` on | after every defined index is built on it (unchanged) | after every defined index is built on it; as soon as it is flushed when none is defined |
+
+Nothing else in the filter changes, and the filter is not split: its
+callers and `PrepareReadiness` are as on master.
+
+A vector collection waits for its vector index before a segment is merged
+because a vector index takes minutes to build: merging a segment as soon as
+it is flushed would discard the index under construction, and under
+continuous writes the data might never reach an indexed state. A collection
+without a vector field has no such index. Its scalar indexes are not waited
+for on the input side, as for a vector collection today: the output rebuilds
+them, and `LoadableProjection` keeps the parents serving until they are
+built on the output.
+
+### 3.4 A vector field with no index defined
+
+The filter returns no segment when one of the fields it waits for has no
+index defined at all. This is today's behaviour for a vector collection
+created without an index, and after a conversion (Section 2) it applies to
+a collection that gained a vector field:
+
+| State of the collection | Automatic compaction | Manual compaction |
+|---|---|---|
+| No vector field | runs (Section 3.3) | runs |
+| A vector field with no index, and no other index on the collection | no input | runs: a manual compaction does not filter a collection with no index defined |
+| A vector field with no index, and a scalar index on the collection | no input | no input |
+| Every vector field has an index, built on the segment | runs | runs |
+
+So after a vector field is added to a collection, **create an index on it**:
+until the index is defined and built on a segment, compaction does not
+select that segment, and with a scalar index on the collection a manual
+compaction does not either.
 
 ## 4. Segment size
 
@@ -559,8 +503,9 @@ collection, on upgrade or when the value is lowered: a segment above
 it (observed for 30 minutes on the earlier head `1fa020b44e`, by lowering
 the cap of one collection). It is cut at
 `maxRows` only when a compaction rewrites it for another reason: a manual
-compaction, the delete ratio, expiry, clustering, or a schema or storage
-version bump. New segments follow the cap from the start.
+compaction, the delete ratio, expiry, clustering, or a storage version
+upgrade. A schema version bump does not cut: it writes exactly one output
+segment for its input. New segments follow the cap from the start.
 
 #### An absolute number of rows, set for the cluster
 
@@ -600,8 +545,9 @@ step as follows, with no proto change:
 | StreamingNode sealing a growing segment | sealed at `maxSize × seal proportion` bytes; the segment's row limit field exists and is set to infinity for L1 | the row limit is set to `maxRows` (with the same jitter, and **without the seal proportion**); the segment is sealed on bytes or rows, whichever comes first |
 | Mix compaction planners (two-tier and legacy) | judge a segment full by its bytes, and pack small segments up to `expectedSize` with a knapsack | every segment handed to a planner is sized as `max(bytes, rows × expectedSize / maxRows)`. The full check and the packing code do not change |
 | Compaction writer (DataNode) | starts a new output segment when it has written the `max_size` bytes of the plan | the plan also carries `max_segment_rows` (an existing field that only clustering set), and the writer cuts on bytes or rows, whichever comes first |
-| Single segment compaction (delete ratio, expiry, schema version bump) | does not select segments by size; the writer splits the output | the plan carries `max_segment_rows`; the number of pre-allocated output segment IDs is computed from the size as charged above |
-| Clustering compaction | output row limit = `expectedSize` ÷ measured bytes per row of the inputs | bounded by `maxRows` |
+| Single segment compaction (delete ratio, expiry, storage version upgrade) | does not select segments by size; the writer splits the output | the plan carries `max_segment_rows`; the number of pre-allocated output segment IDs is computed from the size as charged above |
+| Schema version bump compaction | writes one output segment for one input segment | unchanged: it does not split, on bytes or on rows |
+| Clustering compaction | the row budget of a bucket = `expectedSize` ÷ measured bytes per row of the inputs; the writer of a bucket cuts on bytes only | the bucket budget is bounded by `maxRows`, and the writer of each bucket, the null bucket included, also cuts at `maxRows` rows, so one key with more rows than the budget does not become one segment above the cap. The cap reaches the DataNode in the compaction parameters, because `max_segment_rows` of a clustering plan is the bucket budget |
 | Import | allocates segments of `expectedSize` bytes per (channel, partition) | the byte target is `min(expectedSize, maxRows × measured bytes per row of this import)`, where the measured value is the total bytes ÷ total rows of the pre-scan |
 
 Why the seal row limit does not take the seal proportion: the proportion
@@ -640,20 +586,21 @@ The steps differ in precision:
 |---|---|
 | Growing segment seal | the StreamingNode counts the rows of every insert message and seals after `maxRows × jitter` (3.6–4.0 M rows by default). It is a soft limit: the insert message that crosses it is still written to the segment, so a segment can exceed it by the rows of one message |
 | Compaction output | exact. The writer counts rows itself and splits the record batch that crosses the limit, so an output holds at most `maxRows` rows |
-| Import | approximate. The **number** of segments is allocated as `total rows / maxRows`, but the DataNode writes each read batch into one of them at random, so the rows of a single segment drift from `maxRows` |
+| Import | `maxRows` plus at most one read batch. The **number** of segments is allocated as `total rows / maxRows`. The DataNode writes each read batch (`dataNode.import.readBufferSizeInMB`, 16 MB by default) into one segment without splitting it, and picks the segment that was assigned the least data so far (#55320), so the segments fill evenly and one exceeds `maxRows` by at most the rows of one batch: 16 MB ÷ bytes per row, about 1.4 M rows for the narrowest rows (12 B) and fewer for wider rows |
 
 Measured (Appendix B.6, local x86 standalone): 10 M rows inserted in batches
 were sealed directly into three segments of 3.75 M, 3.65 M and 2.60 M rows
 (the last is the remainder at flush), with no merge, and a manual compaction
-left the row counts unchanged. 12 M rows imported from one parquet file were
-allocated 3 segments; two runs gave 7.80 M, 2.80 M, 1.40 M rows and 4.20 M,
-4.20 M, 3.61 M rows, depending on which segment each read batch (about 1.4 M
-rows) landed in at random. A manual compaction of the second run cut each
-4.20 M-row segment into 4,000,000 and 197 k rows, and the three full
-segments were not merged again during the following 200 s of automatic
-trigger cycles. The uneven spread of an import
-exists for every collection (in bytes too) and is not introduced by this
-design; where it matters, a later compaction cuts the segment on rows.
+left the row counts unchanged.
+
+Import, measured with automatic compaction off (Section 6.3): with the
+default `maxRows`, 12 M and 20 M rows of 12 B gave segments of 4.20 M rows
+and a remainder, 1.05 × `maxRows`. The excess matters only when `maxRows` is
+smaller than one read batch: with `maxRows` 400 k, 6 M rows of 12 B gave
+segments of 1.40 M rows, one batch each, while rows of 268 B gave segments
+of 420 k rows. A segment above `maxRows` is full to the planners and stays
+as it is until a compaction rewrites it for another reason, which cuts it at
+`maxRows`. Splitting a read batch at write time is a follow-up (Section 8).
 
 Import uses the measured bytes per row instead of a count because it has to
 decide, in bytes and before writing any data, how many segments to allocate,
@@ -723,17 +670,19 @@ existing segments; they are cut when a compaction rewrites them.
   on bytes only. Behaviour is uniform once every role is upgraded.
 - Index readiness of vector collections is unchanged, including the DiskANN
   size rule of sparse-only collections. The meaning of
-  `dataCoord.dataview.forceAllIndexReady` is unchanged; it has no effect on
-  a collection without a vector field, whose handoff already waits for every
-  defined index.
+  `dataCoord.dataview.forceAllIndexReady` is unchanged.
 
 ## 6. Testing
 
 - Unit tests:
   - the predicate itself;
   - every touchpoint of Appendix A, with and without a vector field;
-  - the two readiness predicates with no index, scalar indexes only, and a
-    vector index building or finished;
+  - the index readiness filter without a vector field (no index, a scalar
+    index, `forceAllIndexReady` on) and with one (no index, index building,
+    index finished);
+  - the writer of a clustering bucket cuts at `maxRows`, and does not with
+    the cap off;
+  - a CSV header made of dynamic field columns only is accepted;
   - the row cap is the configured value whatever the schema and whatever
     `maxSize`, and is disabled by 0;
   - no plan is generated to split segments above `maxRows` rows;
@@ -761,7 +710,8 @@ existing segments; they are cut when a compaction rewrites them.
   - after 10 M narrow rows are inserted (dynamic field on), compaction
     outputs stay at or below `maxRows` rows and the IDs of full segments do
     not change over the following automatic trigger cycles; an import of
-    12 M narrow rows produces at least 3 segments; a low-dimensional vector
+    12 M narrow rows produces 3 segments, none above `maxRows` by more than
+    one read batch; a low-dimensional vector
     collection is capped as well;
   - every role restarted with the switch off and on again (Appendix B.4).
 
@@ -884,7 +834,10 @@ standalone, 2026-11-12, each part on a new instance.
 | Go unit tests and `go vet` of `internal/datacoord/compaction/...`, `internal/datacoord/bulkimport`, the StreamingNode shard packages, `internal/proxy/ddl`, `internal/rootcoord/...`, `pkg/util/paramtable`, `pkg/common` | pass |
 | `maxRows` 400 k: a vector field added to a collection without one and nothing written | three segments of 400 k stay three, before and after a manual compaction; 1.2 M more narrow rows give six segments of 400 k, unchanged over the next 120 s |
 | `maxRows` 400 k: both conversion directions with dim 8 vectors | 11 of 11 checks pass, numbers in Section 2 |
-| Row cap script, `maxRows` 400 k and default 4 M | 7 of 8 at both scales. The failing check is "the import leaves rows in at least three segments": three segments were allocated and the DataNode wrote the rows into two of them (8.39 M and 3.61 M at the default scale), which is the random pick of Section 4.2; the manual compaction that follows cuts them to 4.00 M, 4.00 M, 3.61 M, 0.39 M |
+| Row cap script, `maxRows` 400 k and default 4 M | all checks pass at the default scale. At 400 k the 1.2 M-row import file is one read batch and becomes one segment of 1.2 M rows; a manual compaction cuts it to 400 k × 3, unchanged over the next 200 s |
+| Import with automatic compaction off, default `maxRows` (4 M), rows of 12 B | 12 M rows: 4.20 M, 4.20 M, 3.61 M. 20 M rows: 4.20 M × 4, 3.21 M. The largest segment is 1.05 × `maxRows` |
+| The same, `maxRows` 400 k, rows of 12 B (one read batch is about 1.4 M rows) | 1.2 M rows: one segment of 1.2 M. 6 M rows: 1.40 M × 4, 0.40 M: one batch per segment, 3.5 × `maxRows` |
+| The same, `maxRows` 400 k, rows of 268 B (one read batch is 60 k rows) | 1.2 M rows: 420 k, 420 k, 360 k. 4 M rows: 420 k × 6, 400 k, 360 k × 3. The largest segment is 1.05 × `maxRows` |
 | StorageV3 instance, `maxRows` 400 k: BM25 backfill script (4 cases with controls) | pass |
 | Default configuration: `test_milvus_client_vector_field_conversion.py`, `test_milvus_client_collection_without_vector.py`, and the existing `test_milvus_client_alter.py` and `test_milvus_client_compact.py` | 69 passed, 7 skipped by their own marks |
 
@@ -940,18 +893,6 @@ two segment layouts; sparse vectors; a deployment with `maxSize` raised.
   to know it. The schema already carries whether a collection has vectors,
   and it changes with the schema when a collection is converted, so it is
   not needed.
-- **Handoff waits for every defined index for all collections.** This is a
-  review suggestion and is the same as changing the default of
-  `forceAllIndexReady` to true. Compaction outputs of a vector collection
-  would become visible one scalar index build later; a permanently failing
-  scalar index, or a scalar index created during the build, would keep the
-  output invisible or delay it further, which only a vector index can cause
-  today. What it removes is the window in which the output is visible, its
-  scalar index is still building, and scalar filtering on that segment falls
-  back to brute force. This document does not change the default: a
-  collection without a vector field does not need it, and the trade-off for
-  vector collections is for the DataCoord owners to decide separately, after
-  which only the default has to be flipped.
 - **Convert the row cap into a byte target with the row size estimated from
   the schema** (the previous version of this document):
   `expectedSize = min(maxSize, maxRows × estimated bytes per row)`, changing
@@ -1026,13 +967,11 @@ two segment layouts; sparse vectors; a deployment with `maxSize` raised.
   that a QueryNode close to its memory limit may admit a segment that does
   not fit. The formula needs a term "rows × per-row constant", calibrated on
   fixed-width schemas.
-- Whether to change the default of `dataCoord.dataview.forceAllIndexReady`
-  to true so that handoff of vector collections waits for scalar indexes too
-  (Section 7).
 - A backfill writes in place and does not split: a segment of a collection
   without a vector field can exceed the byte limit several times over after
   a function field or an externally backfilled vector is added (Section 2),
-  and only a manual compaction splits it. Either the backfill should split
+  and only a manual compaction splits it, which for an added vector field
+  needs the index to be built first (Section 3.4). Either the backfill should split
   an output above the byte limit, or a compaction policy should pick up
   segments above it. The external backfill of a vector into such a
   collection should be run end to end before it is relied on.
@@ -1040,11 +979,12 @@ two segment layouts; sparse vectors; a deployment with `maxSize` raised.
   search parameter was not compared between the two segment layouts, sparse
   vectors were not measured, and each layout was run once on one machine
   (Appendix B.7).
-- On import the DataNode writes each read batch into one of the allocated
-  segments at random (`PickSegment`); with few batches the rows per segment
-  differ by several times. Choosing the segment with the least data written
-  would bring imported segments close to the target size, for every
-  collection.
+- On import the DataNode writes one read batch into one segment and does
+  not split it, so an imported segment can exceed `maxRows` by the rows of
+  one batch (Section 4.2). With the default configuration this is about 5 %.
+  It is several times `maxRows` only when `maxRows` is set below one batch,
+  or when `dataNode.import.readBufferSizeInMB` is raised on narrow rows.
+  Splitting a batch on rows at write time would remove it.
 - Remove DataCoord's legacy row-based segment allocation: the
   `AssignSegmentID` RPC has no caller on master, and the `AllocSegment`,
   `calBySchemaPolicy` (which derives the maximum rows of a segment from the
@@ -1095,7 +1035,7 @@ from `3df0cbcdd68`.
 | segcore `plan_c.cpp` `CreateSearchPlanByExpr` | asserts that the collection has index meta; always true while a loaded collection had a vector index | Conversion: no index meta is reported as "field index is not loaded", the error of a vector field whose index is not loaded |
 | QueryCoord `collection_readiness.go` `prepareAutoLoadRequest` (`proxy.enableAutoLoad`) | `ErrIndexNotFound` fails the automatic load | fail only if the schema has a vector field |
 | `proxy/task.go:1297`, `:1337` drop struct field / function | `removed >= vectorCount` blocks the drop; always true at 0, so every struct-field and function drop is blocked | `removed > 0 &&`, as RootCoord already does |
-| `datacoord/util.go:77` `FilterInIndexedSegments` (now in `datacoord/index/filter.go`) | with no vector the result depends on unrelated details (Section 3.2) | split into `handoffReady` / `compactionInputReady`; the handoff target fields are shared with the staging `PrepareReadiness` through `HandoffIndexTargetFields` |
+| `datacoord/util.go:77` `FilterInIndexedSegments` (now in `datacoord/index/filter.go`) | with no vector the result depends on unrelated details (Section 3.2) | one rule added: an empty set of fields to wait for returns every flushed or dropped segment (Section 3.3) |
 | `datacoord/index_meta.go:1497` `AllDenseWithDiskIndex` (now in `datacoord/index/meta.go`) | true at 0 dense fields, so a scalar-only collection gets the 2 GB DiskANN target | returns false when there is no vector field at all; a sparse-only collection keeps today's result |
 | `datanode/importv2` Parquet / NumPy / CSV / JSON readers | a file that matches no schema column makes the task loop forever: the reader produces no row and never reaches EOF; a vector field used to prevent this | rejected when the reader is constructed |
 | StreamingNode `segment_limitation_policy.go`; DataCoord `compaction/trigger.go`, `trigger_v2.go`, `compaction/policy/helpers.go`, `clustering.go`, `bulkimport`; DataNode `compactor/segment_writer.go` | seal, full check, split and allocation on bytes only | every collection gets the additional `maxRows` row cap, from the cluster configuration `dataCoord.segment.maxRows` (Section 4.2); `GetExpectedSegmentSize` is unchanged |
@@ -1277,6 +1217,11 @@ segments. The byte target after the conversion is 400 k × 12 B = 4.8 MB and
 14.4 MB / 4.8 MB gives the three segments seen in the DataCoord log. The
 segment count is right and the rows per segment are not, as Section 4.2
 states for the import path; the following compaction cuts at `maxRows`.
+
+The import rows of this table were measured before #55320, when the
+DataNode picked the segment of a batch at random; the uneven 5.60 M, 3.61 M,
+2.80 M of the default scale is that. Section 6.3 has the distribution on the
+current head.
 
 ### B.7 The row cap on narrow rows, with and without a vector field
 
