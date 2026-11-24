@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -1374,7 +1375,7 @@ func (wb *writeBufferBase) resolveNewGrowingSegmentStorageVersion(info CreateGro
 	switch info.StorageVersion {
 	case storage.StorageV2, storage.StorageV3:
 		return info.StorageVersion, nil
-	case storage.StorageV1:
+	case storage.StorageV1, storagecommon.StorageV1LegacyAlias:
 		if streamingutil.IsStreamingServiceEnabled() {
 			return 0, merr.WrapErrServiceInternalMsg("missing storage version for streaming growing segment, segmentID=%d", info.SegmentID)
 		}

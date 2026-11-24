@@ -48,7 +48,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -502,4 +504,22 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 
 func TestDataSyncService(t *testing.T) {
 	suite.Run(t, new(DataSyncServiceSuite))
+}
+
+func TestInitMetaCacheRejectsUnknownStorageVersion(t *testing.T) {
+	segments := []*datapb.SegmentInfo{{ID: 42, StorageVersion: 4}}
+	for _, tc := range []struct {
+		name               string
+		unflushed, flushed []*datapb.SegmentInfo
+	}{
+		{"unflushed", segments, nil},
+		{"flushed", nil, segments},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cache, err := initMetaCache(t.Context(), nil, nil, nil, tc.unflushed, tc.flushed, nil)
+			assert.Nil(t, cache)
+			assert.ErrorIs(t, err, merr.ErrServiceUnimplemented)
+			assert.False(t, retry.IsRecoverable(err))
+		})
+	}
 }
