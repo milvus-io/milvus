@@ -25,11 +25,17 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestUpdateTaskQueueMetricLabel(t *testing.T) {
+	require.Equal(t, "Update", taskmodel.QueueMetricLabel(&UpdateTask{}))
+	require.Equal(t, "Delete", taskmodel.QueueMetricLabel(&DeleteTask{}))
+}
 
 func TestBuildUpdateMessagesMaxInsertSize(t *testing.T) {
 	paramtable.Init()

@@ -74,6 +74,8 @@ func (t *UpdateTask) Result() *milvuspb.MutationResult  { return t.result }
 // commonpb has no PK Update task type. The WAL message type is independently UPDATE.
 func (t *UpdateTask) Type() commonpb.MsgType { return commonpb.MsgType_Undefined }
 
+func (t *UpdateTask) QueueMetricLabel() string { return "Update" }
+
 func (t *UpdateTask) SetChannels() error {
 	if t.request == nil {
 		return merr.WrapErrParameterInvalidMsg("missing update request")

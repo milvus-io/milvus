@@ -513,7 +513,7 @@ func (sched *TaskScheduler) processTaskWithContext(ctx context.Context, t taskmo
 
 	waitDuration := t.GetDurationInQueue()
 	metrics.ProxyReqInQueueLatency.
-		WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.Type().String()).
+		WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), taskmodel.QueueMetricLabel(t)).
 		Observe(float64(waitDuration.Microseconds()) / 1000.0)
 
 	err := t.PreExecute(ctx)

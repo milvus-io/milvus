@@ -964,7 +964,15 @@ func (s *Server) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) (*
 }
 
 func (s *Server) Update(ctx context.Context, request *milvuspb.UpdateRequest) (*milvuspb.MutationResult, error) {
-	return s.proxy.Update(ctx, request)
+	metrics.GetStats(ctx).
+		SetNodeID(paramtable.GetNodeID()).
+		SetInboundLabel(metrics.UpdateLabel).
+		SetDatabaseName(request.GetDbName()).
+		SetCollectionName(request.GetCollectionName())
+	// Enable public writes only after WAL consumers can apply and serve PK updates.
+	return &milvuspb.MutationResult{
+		Status: merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "PK update is unavailable until WAL consumers support it")),
+	}, nil
 }
 
 func (s *Server) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
