@@ -7,16 +7,26 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from statistics import median
 from threading import Barrier, Event
-from time import perf_counter
+from time import perf_counter, monotonic, sleep
 from uuid import uuid4
 
 import pytest
+
+from running_requests_topology import ProxyAuthorizationTopology, run
+
+
 from running_requests_l1_support import (
+    ObservationWindowError,
+    deployment,
+    isolated_workload,
+    shared_dataset,
+    search_collection,
+    workload,
+    workload_baseline,
+    assert_registered,
     QUERY_TIMEOUT,
     TOPK,
-    ObservationWindowError,
     assert_canceled,
-    assert_registered,
     assert_search_baseline,
     assert_unregistered,
     cancel_exact,
@@ -28,7 +38,6 @@ from running_requests_l1_support import (
     search_hits,
     wait_for_records,
 )
-from running_requests_topology import ProxyAuthorizationTopology, run
 from setup_running_requests_l0 import VECTOR_DIMENSION
 from test_running_requests_l0 import assert_all_proxies_answered
 
@@ -37,8 +46,8 @@ pytestmark = pytest.mark.tags("L1")
 
 @pytest.fixture
 def hybrid_workload(request, deployment):
-    import numpy as np
     from pymilvus import AnnSearchRequest, DataType, RRFRanker
+    import numpy as np
 
     uris, _, _, connect = deployment
     client = connect(next(iter(uris)))
@@ -54,14 +63,10 @@ def hybrid_workload(request, deployment):
     for start in range(0, rows, 5000):
         count = min(5000, rows - start)
         vectors_a, vectors_b = random.random((2, count, 128), dtype=np.float32).tolist()
-        client.insert(
-            name,
-            [
-                {"id": start + offset, "vector_a": a, "vector_b": b}
-                for offset, (a, b) in enumerate(zip(vectors_a, vectors_b))
-            ],
-            timeout=60,
-        )
+        client.insert(name, [
+            {"id": start + offset, "vector_a": a, "vector_b": b}
+            for offset, (a, b) in enumerate(zip(vectors_a, vectors_b))
+        ], timeout=60)
     client.flush(name, timeout=120)
     indexes = client.prepare_index_params()
     for field in ("vector_a", "vector_b"):
@@ -74,20 +79,12 @@ def hybrid_workload(request, deployment):
     def query(app=client, *, trim=0, **kwargs):
         requests = [
             AnnSearchRequest(
-                data=data[: nq - trim],
-                anns_field=field,
-                param={"metric_type": "L2"},
-                limit=TOPK,
+                data=data[:nq - trim], anns_field=field, param={"metric_type": "L2"}, limit=TOPK,
             )
             for field, data in zip(("vector_a", "vector_b"), inputs)
         ]
         return app.hybrid_search(
-            name,
-            requests,
-            RRFRanker(),
-            limit=TOPK,
-            timeout=QUERY_TIMEOUT,
-            **kwargs,
+            name, requests, RRFRanker(), limit=TOPK, timeout=QUERY_TIMEOUT, **kwargs,
         )
 
     return name, query
@@ -134,11 +131,8 @@ def test_t02_list_and_cancel_dql(query_type, deployment, request):
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = {key: pool.submit(invoke, call) for key, call in calls.items()}
         snapshot = wait_for_records(
-            records,
-            {(query_type, key) for key in calls},
-            lambda row: (row.type, row.nq),
-            futures.values(),
-            exact=True,
+            records, {(query_type, key) for key in calls},
+            lambda row: (row.type, row.nq), futures.values(), exact=True,
         )
         target, control = (snapshot[query_type, key] for key in (target_key, control_key))
         for row in (target, control):
@@ -192,13 +186,22 @@ def _assert_non_dql_excluded(operation, deployment, request, *, rest=False, lang
         timings = {}
         for request_id, method, start, end in re.findall(
             r"^\[T02-RPC\] \[([0-9a-f]{32})\] \[(Insert|CreateIndex|ListRunningRequests|/v2/vectordb/requests/running/list)\] "
-            r"\[([^\]]+)\] \[([^\]]+)\]$",
-            logs,
-            re.MULTILINE,
+            r"\[([^\]]+)\] \[([^\]]+)\]$", logs, re.MULTILINE,
         ):
-            bounds = tuple(datetime.strptime(value, "%Y/%m/%d %H:%M:%S.%f %z") for value in (start, end))
+            bounds = tuple(datetime.strptime(value, "%Y/%m/%d %H:%M:%S.%f %z")
+                           for value in (start, end))
             timings.setdefault((request_id, method), []).append(bounds)
         return timings
+
+    def wait_timings(expected):
+        # RPC completion can precede access-log visibility. Preserve exact
+        # correlation and overlap assertions after a bounded flush wait.
+        deadline = monotonic() + 15
+        while True:
+            timings = timing_logs()
+            if all(key in timings for key in expected) or monotonic() >= deadline:
+                return timings
+            sleep(0.2)
 
     samplers = 1 if operation == "Insert" else 4
     if language:
@@ -214,7 +217,8 @@ def _assert_non_dql_excluded(operation, deployment, request, *, rest=False, lang
 
         def sample_list(list_id, collection=None, slot=0):
             worker = workers[slot]
-            response = worker.call("list", "a", User=user, Collection=collection or "", RequestID=list_id)
+            response = worker.call("list", "a", User=user, Collection=collection or "",
+                                   RequestID=list_id)
             return complete(worker, response)["requests"]
     elif rest:
         from running_requests_l1_rest_support import post_rest
@@ -224,9 +228,8 @@ def _assert_non_dql_excluded(operation, deployment, request, *, rest=False, lang
             if collection is not None:
                 payload["collectionName"] = collection
             traceparent = f"00-{list_id}-{uuid4().hex[:16]}-01"
-            return post_rest(uris[proxy_a], token, set(uris), "list", payload, headers={"traceparent": traceparent})[
-                "requests"
-            ]
+            return post_rest(uris[proxy_a], token, set(uris), "list", payload,
+                             headers={"traceparent": traceparent})["requests"]
     else:
         operator = connect(proxy_a)
 
@@ -238,7 +241,7 @@ def _assert_non_dql_excluded(operation, deployment, request, *, rest=False, lang
 
     warmup_id = uuid4().hex
     sample_list(warmup_id)
-    assert (warmup_id, list_method) in timing_logs(), f"Missing correlated T02 access log for {list_method}"
+    assert (warmup_id, list_method) in wait_timings({(warmup_id, list_method)}), f"Missing correlated T02 access log for {list_method}"
 
     import numpy as np
     from pymilvus import DataType
@@ -263,7 +266,8 @@ def _assert_non_dql_excluded(operation, deployment, request, *, rest=False, lang
             assert result["insert_count"] == batch_size
         else:
             # The SDK's build polling can outlive the CreateIndex RPC on Proxy.
-            writer.create_index(collection, indexes, sync=False, timeout=QUERY_TIMEOUT, client_request_id=request_id)
+            writer.create_index(collection, indexes, sync=False, timeout=QUERY_TIMEOUT,
+                                client_request_id=request_id)
 
     attempts = 4 if operation == "Insert" else 12
     with ThreadPoolExecutor(max_workers=samplers) as pool:
@@ -296,19 +300,17 @@ def _assert_non_dql_excluded(operation, deployment, request, *, rest=False, lang
             snapshots = {}
             for sample_call in samples:
                 snapshots.update(sample_call.result())
-            timings = timing_logs()
+            timings = wait_timings({(rpc_id, operation)} | {(key, list_method) for key in snapshots})
             spans = timings.get((rpc_id, operation), [])
             assert len(spans) == 1, f"Expected one access log for {operation} {rpc_id}: {spans}"
-            ((rpc_start, rpc_end),) = spans
+            (rpc_start, rpc_end), = spans
             for list_id, snapshot in snapshots.items():
                 bounds = timings.get((list_id, list_method), [])
                 assert len(bounds) == 1, f"Expected one access log for List {list_id}: {bounds}"
-                ((list_start, list_end),) = bounds
+                (list_start, list_end), = bounds
                 if rpc_start < list_start <= list_end < rpc_end:
-                    print(
-                        f"{pod} {operation} {rpc_id}: {rpc_start.isoformat()} → {rpc_end.isoformat()} "
-                        f"List {list_id}: {list_start.isoformat()} → {list_end.isoformat()}"
-                    )
+                    print(f"{pod} {operation} {rpc_id}: {rpc_start.isoformat()} → {rpc_end.isoformat()} "
+                          f"List {list_id}: {list_start.isoformat()} → {list_end.isoformat()}")
                     assert not snapshot, f"Non-DQL collection unexpectedly appeared in List: {snapshot}"
                     return
     raise ObservationWindowError(f"No complete List RPC was within a {operation} RPC on Proxy A")
@@ -329,11 +331,7 @@ def query_data(deployment):
 
 def fetch_rows(client, collection, expr, limit):
     return client.query(
-        collection,
-        filter=expr,
-        output_fields=["id", "vector"],
-        limit=limit,
-        timeout=QUERY_TIMEOUT,
+        collection, filter=expr, output_fields=["id", "vector"], limit=limit, timeout=QUERY_TIMEOUT,
     )
 
 
@@ -368,7 +366,6 @@ def test_t02_query_cancel_with_concurrent_control(deployment, query_data):
     collection, limit = query_data
     target_expr, control_expr = (f"id < {2 * limit} and id % 2 == {parity}" for parity in (0, 1))
     clients = {expr: connect(proxy_a) for expr in (target_expr, control_expr)}
-
     def records():
         return list_complete(operator, set(uris), collection_name=collection, user=user)
 
@@ -383,11 +380,8 @@ def test_t02_query_cancel_with_concurrent_control(deployment, query_data):
         with ThreadPoolExecutor(max_workers=2) as pool:
             futures = {expr: pool.submit(invoke, expr) for expr in clients}
             snapshot = wait_for_records(
-                records,
-                set(clients),
-                lambda row: row.expr if row.type == "Query" else None,
-                futures.values(),
-                exact=True,
+                records, set(clients), lambda row: row.expr if row.type == "Query" else None,
+                futures.values(), exact=True,
             )
             target, control = snapshot[target_expr], snapshot[control_expr]
             for row in (target, control):

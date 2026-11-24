@@ -14,10 +14,21 @@ from uuid import uuid4
 import pytest
 
 
+DEFAULT_RENDERER = (
+    Path.home() / ".codex/plugins/cache/cloud-skills/qa-toolkit/1.0.0/skills"
+    / "vcluster-milvus-deploy/scripts/render_vcluster_values.py"
+)
+
+
 def run(command, *, stdin=None, timeout=30):
     result = subprocess.run(command, input=stdin, text=True, capture_output=True, timeout=timeout)
     if result.returncode:
         # Helm and Kubernetes errors can include rendered values with storage credentials.
+        if "rollout" in command and "status" in command:
+            # This command only emits rollout status (no rendered config).
+            detail = (result.stderr + "\n" + result.stdout).strip()[-3000:]
+            detail = re.sub(r"(?i)(bearer\s+|token[=:]\s*)[^\s]+", r"\1<redacted>", detail)
+            raise RuntimeError(f"Proxy rollout failed (exit {result.returncode}): {detail}")
         raise RuntimeError(f"{Path(command[0]).name} {command[1]} failed (exit {result.returncode})")
     return result.stdout
 
@@ -29,9 +40,7 @@ def forward(kube, pod, port=19530):
         with log.open("w") as output:
             process = subprocess.Popen(
                 [*kube, "port-forward", "--address", "127.0.0.1", pod if "/" in pod else f"pod/{pod}", f":{port}"],
-                stdout=output,
-                stderr=output,
-                text=True,
+                stdout=output, stderr=output, text=True,
             )
         try:
             deadline = time.monotonic() + 30
@@ -60,9 +69,8 @@ def ready_proxy(kube, selector):
 
 def node_id(kube, pod):
     # Startup logs may have rotated on a long-running test instance.
-    metrics = run(
-        [*kube, "exec", pod, "-c", "proxy", "--", "curl", "-fsS", "--max-time", "5", "http://127.0.0.1:9091/metrics"]
-    )
+    metrics = run([*kube, "exec", pod, "-c", "proxy", "--", "curl", "-fsS",
+                   "--max-time", "5", "http://127.0.0.1:9091/metrics"])
     ids = set(re.findall(r'^milvus_proxy_[^\n]*?\bnode_id="(\d+)"', metrics, re.MULTILINE))
     ids.discard("0")  # Metrics emitted before session registration use node ID zero.
     if len(ids) == 1:
@@ -111,8 +119,8 @@ def proxy_topology(*, mixed):
     helm = ["helm", *connection]
     chart = os.environ.get("MILVUS_L1_HELM_CHART", "milvus/milvus")
     chart_args = ["--version", "5.0.22"] if chart == "milvus/milvus" else []
-    renderer = os.environ.get("MILVUS_L1_VALUES_RENDERER")
-    if not renderer or not Path(renderer).is_file():
+    renderer = os.environ.get("MILVUS_L1_VALUES_RENDERER", str(DEFAULT_RENDERER))
+    if not Path(renderer).is_file():
         pytest.fail("Set MILVUS_L1_VALUES_RENDERER to the vcluster Helm values renderer")
     for name in ("ZILLIZ_MINIO_LOCAL_ACCESS_KEY", "ZILLIZ_MINIO_LOCAL_SECRET_KEY"):
         if not os.environ.get(name, "").strip():
@@ -123,56 +131,24 @@ def proxy_topology(*, mixed):
     with ExitStack() as stack:
         folder = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="rr-helm-")))
         values = folder / "values.yaml"
-        render = [
-            sys.executable,
-            renderer,
-            "--name",
-            release,
-            "--namespace",
-            release,
-            "--image",
-            new_image,
-            "--output",
-            str(values),
-        ]
+        render = [sys.executable, renderer, "--name", release, "--namespace", release,
+                  "--image", new_image, "--output", str(values)]
         for secret in os.environ.get("MILVUS_L1_IMAGE_PULL_SECRETS", "").split():
             render.extend(["--pull-secret", secret])
         run(render)
         # User configuration takes precedence over the chart defaults.
         overlay = folder / "topology.json"
         auth = "true" if mixed else "false"
-        overlay.write_text(
-            json.dumps(
-                {
-                    "proxy": {"replicas": 1 if mixed else 2},
-                    "extraConfigFiles": {
-                        "user.yaml": f"common:\n  storage:\n    useLoonFFI: true\n  security:\n    authorizationEnabled: {auth}\n"
-                    },
-                }
-            ),
-            encoding="utf-8",
-        )
+        overlay.write_text(json.dumps({
+            "proxy": {"replicas": 1 if mixed else 2},
+            "extraConfigFiles": {
+                "user.yaml": f"common:\n  storage:\n    useLoonFFI: true\n  security:\n    authorizationEnabled: {auth}\n"
+            },
+        }), encoding="utf-8")
         run([*kubectl, "create", "namespace", release])
         stack.callback(run, [*kubectl, "delete", "namespace", release, "--wait=true", "--timeout=180s"], timeout=195)
-        run(
-            [
-                *helm,
-                "install",
-                release,
-                chart,
-                "-n",
-                release,
-                *chart_args,
-                "-f",
-                str(values),
-                "-f",
-                str(overlay),
-                "--wait",
-                "--timeout",
-                "20m",
-            ],
-            timeout=1220,
-        )
+        run([*helm, "install", release, chart, "-n", release, *chart_args, "-f", str(values),
+             "-f", str(overlay), "--wait", "--timeout", "20m"], timeout=1220)
         pods = ready_proxy(kube, f"{instance},component=proxy")
         if mixed:
             create_old_proxy(kube, release, old_image)
@@ -193,7 +169,7 @@ class ProxyAuthorizationTopology:
             shared = os.environ.get("MILVUS_L1_SHARED_PROXY_DEPLOYMENT") == "1"
         kubeconfig = os.environ.get("MILVUS_L1_KUBECONFIG") or os.environ.get("KUBECONFIG")
         if not kubeconfig and not os.environ.get("KUBERNETES_SERVICE_HOST"):
-            kubeconfig = str(Path.home() / ".kube/config")
+            kubeconfig = str(Path.home() / ".milvus-cell/kubeconfig")
         namespace = os.environ.get("MILVUS_L1_NAMESPACE", "requests-l0-1112")
         release = os.environ.get("MILVUS_L1_RELEASE", "requests-l0")
         self.kube = ["kubectl", *(["--kubeconfig", kubeconfig] if kubeconfig else []), "-n", namespace]
@@ -202,13 +178,8 @@ class ProxyAuthorizationTopology:
         self.configmap = os.environ.get("MILVUS_L1_AUTH_CONFIGMAP", release)
         self.config_key = os.environ.get("MILVUS_L1_AUTH_CONFIG_KEY", "user.yaml")
         primary = os.environ.get("MILVUS_L1_PRIMARY_PROXY_DEPLOYMENT", f"{release}-milvus-proxy")
-        self.deployments = (
-            (primary,)
-            if shared
-            else (
-                primary,
-                f"{release}-milvus-proxy-secondary",
-            )
+        self.deployments = (primary,) if shared else (
+            primary, f"{release}-milvus-proxy-secondary",
         )
 
     def configuration(self):
@@ -221,24 +192,51 @@ class ProxyAuthorizationTopology:
             {"op": "test", "path": f"/data/{key}", "value": expected},
             {"op": "replace", "path": f"/data/{key}", "value": value},
         ]
-        run(
-            [
-                *self.kube,
-                "patch",
-                "configmap",
-                self.configmap,
-                "--type=json",
-                "--patch-file=/dev/stdin",
-            ],
-            stdin=json.dumps(patch),
-        )
+        run([
+            *self.kube, "patch", "configmap", self.configmap, "--type=json", "--patch-file=/dev/stdin",
+        ], stdin=json.dumps(patch))
         if self.configuration() != value:
             raise RuntimeError("The Proxy ConfigMap did not retain the requested configuration")
 
     def restart(self):
         run([*self.kube, "rollout", "restart", "deployment", *self.deployments])
         for name in self.deployments:
-            run([*self.kube, "rollout", "status", f"deployment/{name}", "--timeout=300s"], timeout=315)
+            try:
+                run([*self.kube, "rollout", "status", f"deployment/{name}", "--timeout=300s"], timeout=315)
+            except (RuntimeError, subprocess.TimeoutExpired) as error:
+                diagnostic = self.rollout_diagnostics(name)
+                raise RuntimeError(f"{error}; rollout_evidence={diagnostic}") from error
+
+    def rollout_diagnostics(self, name):
+        # Collect only whitelisted status fields: never serialize Pod spec,
+        # env, mounted configuration, or kubectl credentials.
+        evidence = {"deployment": name}
+        try:
+            resource = json.loads(run([*self.kube, "get", "deployment", name, "-o", "json"]))
+            evidence["generation"] = resource["metadata"]["generation"]
+            evidence["status"] = resource.get("status", {})
+            selector = ",".join(f"{key}={value}" for key, value in resource["spec"]["selector"]["matchLabels"].items())
+            pods = json.loads(run([*self.kube, "get", "pods", "-l", selector, "-o", "json"]))["items"]
+            evidence["pods"] = [{
+                "name": pod["metadata"]["name"],
+                "terminating": bool(pod["metadata"].get("deletionTimestamp")),
+                "phase": pod.get("status", {}).get("phase"),
+                "conditions": [{key: condition.get(key) for key in ("type", "status", "reason")}
+                               for condition in pod.get("status", {}).get("conditions", [])],
+                "containers": [{"name": container["name"], "ready": container["ready"],
+                                "restarts": container.get("restartCount"),
+                                "state": {state: {key: value.get(key) for key in ("reason", "exitCode")}
+                                          for state, value in container.get("state", {}).items()}}
+                               for container in pod.get("status", {}).get("containerStatuses", [])],
+            } for pod in pods]
+        except Exception as error:
+            evidence["collection_error"] = type(error).__name__
+        directory = os.environ.get("RR_ARTIFACTS")
+        if directory:
+            path = Path(directory) / f"t08-rollout-{uuid4().hex}.json"
+            path.write_text(json.dumps(evidence, indent=2))
+            return str(path)
+        return json.dumps(evidence)
 
     @contextmanager
     def two_replicas(self):
@@ -297,7 +295,8 @@ class ProxyAuthorizationTopology:
         resource = ["milvus", self.release]
         value = json.dumps(enabled)
         patch = {"spec": {"config": {"common": {"security": {"authorizationEnabled": enabled}}}}}
-        run([*self.kube, "patch", *resource, "--type=merge", "--patch-file=/dev/stdin"], stdin=json.dumps(patch))
+        run([*self.kube, "patch", *resource, "--type=merge", "--patch-file=/dev/stdin"],
+            stdin=json.dumps(patch))
         deadline = time.monotonic() + 180
         while time.monotonic() < deadline:
             if re.search(rf"(?m)^\s*authorizationEnabled:\s*{value}\s*$", self.configuration()):
@@ -319,8 +318,7 @@ class ProxyAuthorizationTopology:
             return
         disabled, count = re.subn(
             r"(?m)^([ \t]+authorizationEnabled:[ \t]*)true([ \t]*(?:#.*)?)$",
-            r"\g<1>false\2",
-            original,
+            r"\g<1>false\2", original,
         )
         if count != 1 or original != self.configuration():
             raise RuntimeError(f"Expected one unchanged authorizationEnabled: true entry in {self.config_key}")
