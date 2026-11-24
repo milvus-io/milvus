@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 
+	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	mock "github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
@@ -65,6 +66,12 @@ func (s *MockSuiteBase) SetupTest() {
 			grpc.WithBlock(),
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 			grpc.WithContextDialer(s.mockDialer),
+			// The mock server delivers errors as bare Go errors, which gRPC maps
+			// to a retryable status code. Disable the transport-level retry for
+			// mocked tests so an error-returning expectation is consumed exactly
+			// once; the rate-limit retry interceptor stays active. Production
+			// clients keep the transport retry enabled.
+			grpc.WithDefaultCallOptions(grpc_retry.Disable()),
 		},
 	})
 	s.Require().NoError(err)

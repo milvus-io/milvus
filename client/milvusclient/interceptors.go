@@ -30,7 +30,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 )
 
 const (
@@ -211,6 +210,14 @@ func RetryOnRateLimitInterceptor(maxRetry uint, maxBackoff time.Duration, backof
 		if maxRetry == 0 {
 			return invoker(parentCtx, method, req, reply, cc, opts...)
 		}
+		// A per-call backoff carried in the context overrides the client-wide
+		// one. Flush uses this to pace its rate-limit retries at 1s, matching
+		// the server's default flush rate limit (1 request/sec per collection).
+		if f, ok := parentCtx.Value(retryRateLimitBackoffKey{}).(func(attempt uint) time.Duration); ok {
+			backoffFunc = func(ctx context.Context, attempt uint) time.Duration {
+				return f(attempt)
+			}
+		}
 		var lastErr error
 		for attempt := uint(0); attempt < maxRetry; attempt++ {
 			_, err := waitRetryBackoff(parentCtx, attempt, maxBackoff, backoffFunc)
@@ -218,14 +225,48 @@ func RetryOnRateLimitInterceptor(maxRetry uint, maxBackoff time.Duration, backof
 				return err
 			}
 			lastErr = invoker(parentCtx, method, req, reply, cc, opts...)
-			rspStatus := getResultStatus(reply)
-			if retryOnRateLimit(parentCtx) && rspStatus.GetErrorCode() == commonpb.ErrorCode_RateLimit {
+			// Only retry when the call itself succeeded (gRPC OK) and the
+			// response carries a rate-limit status. A transport failure must be
+			// returned immediately: the reply object is reused across attempts,
+			// so a stale rate-limit status from an earlier attempt would
+			// otherwise be misread as a rate limit and the error swallowed by
+			// retrying a dead connection (nested inside the outer transport
+			// retry this could run thousands of attempts).
+			if lastErr == nil && retryOnRateLimit(parentCtx) && isRateLimitStatus(getResultStatus(reply)) {
 				continue
 			}
 			return lastErr
 		}
+		if lastErr == nil {
+			if st := getResultStatus(reply); isRateLimitStatus(st) {
+				// The retry budget was exhausted while the server kept
+				// rejecting with a rate-limit status (gRPC OK). Surface it as
+				// an error so a persistently rate-limited call is not silently
+				// swallowed by paths that do not inspect the reply status. Use
+				// codes.ResourceExhausted -- which the transport retry never
+				// retries -- so the outer grpc_retry interceptor does not
+				// classify this error as retriable and restart the whole
+				// rate-limit loop (a merr error would map to codes.Unknown,
+				// which is in the retryable set).
+				reason := st.GetReason()
+				if reason == "" {
+					reason = "rate limit exceeded"
+				}
+				return status.Error(codes.ResourceExhausted, reason)
+			}
+		}
 		return lastErr
 	}
+}
+
+// retryRateLimitBackoffKey carries an optional per-call backoff function that
+// overrides the client-wide rate-limit retry backoff.
+type retryRateLimitBackoffKey struct{}
+
+// withRateLimitBackoff returns a context carrying a per-call backoff function
+// used by the rate-limit retry interceptor instead of the client-wide one.
+func withRateLimitBackoff(ctx context.Context, f func(attempt uint) time.Duration) context.Context {
+	return context.WithValue(ctx, retryRateLimitBackoffKey{}, f)
 }
 
 func retryOnRateLimit(ctx context.Context) bool {
@@ -236,24 +277,38 @@ func retryOnRateLimit(ctx context.Context) bool {
 	return retry
 }
 
+// rateLimitModernCode is the modern Milvus error code for rate limit, shared
+// with the server-side merr partition table (legacy code 49 /
+// ErrorCode_RateLimit maps to modern code 8).
+const rateLimitModernCode int32 = 8
+
+// isRateLimitStatus reports whether the returned status is a Milvus rate-limit
+// error, matching the other SDKs which check both the legacy code
+// (ErrorCode_RateLimit) and the modern code (8).
+func isRateLimitStatus(s *commonpb.Status) bool {
+	if s == nil {
+		return false
+	}
+	return s.GetErrorCode() == commonpb.ErrorCode_RateLimit || s.GetCode() == rateLimitModernCode
+}
+
+// statusProvider matches the generated protobuf response types that embed a
+// *commonpb.Status. Nearly every Milvus response carries one, so a generic
+// assertion keeps the rate-limit retry working across all RPCs instead of a
+// hard-coded subset.
+type statusProvider interface {
+	GetStatus() *commonpb.Status
+}
+
 // getResultStatus returns status of response.
 func getResultStatus(reply interface{}) *commonpb.Status {
-	switch r := reply.(type) {
-	case *commonpb.Status:
+	if r, ok := reply.(*commonpb.Status); ok {
 		return r
-	case *milvuspb.MutationResult:
-		return r.GetStatus()
-	case *milvuspb.BoolResponse:
-		return r.GetStatus()
-	case *milvuspb.SearchResults:
-		return r.GetStatus()
-	case *milvuspb.QueryResults:
-		return r.GetStatus()
-	case *milvuspb.FlushResponse:
-		return r.GetStatus()
-	default:
-		return nil
 	}
+	if sp, ok := reply.(statusProvider); ok {
+		return sp.GetStatus()
+	}
+	return nil
 }
 
 func contextErrToGrpcErr(err error) error {
