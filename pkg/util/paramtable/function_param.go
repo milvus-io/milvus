@@ -23,6 +23,7 @@ import (
 
 // credentialEndpointsDoc documents the credential_endpoints item of the providers
 // whose endpoint is set in the function params.
+// #nosec G101 -- documentation text, not a credential.
 const credentialEndpointsDoc = "Endpoints (scheme://host[:port] with an ASCII host, path ignored; a YAML list or a comma-separated string) allowed to receive a credential configured on the server, whether named by this provider's credential item or by the credential param of a function. A function that would send such a credential to any other endpoint is rejected."
 
 type functionConfig struct {
