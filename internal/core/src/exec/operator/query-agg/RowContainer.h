@@ -449,28 +449,43 @@ class RowContainer {
     void
     clear() {
         for (auto row : rows_) {
-            for (auto i = 0; i < variable_offsets_.size(); i++) {
-                auto& off = variable_offsets_[i];
-                auto& row_col = columnAt(variable_idxes_[i]);
-                bool isStrNull =
-                    isNullAt(row, row_col.nullByte(), row_col.nullMask());
-                auto str = *reinterpret_cast<std::string**>(row + off);
-                if (!isStrNull && str) {
-                    delete str;
-                    str = nullptr;
-                    *reinterpret_cast<std::string**>(row + off) = nullptr;
-                }
-            }
+            releaseVariableWidthFields(row);
             delete[] row;
         }
         rows_.clear();
         numRows_ = 0;
     }
 
+    /// Frees the strings owned by 'row' (same per-row logic as clear()) and
+    /// re-initializes it, so the row can be reused for another store(). The
+    /// row stays owned by the container.
+    void
+    resetRow(char* row) {
+        AssertInfo(accumulators_.empty(),
+                   "resetRow cannot reset rows with aggregate state");
+        releaseVariableWidthFields(row);
+        initializeRow(row);
+    }
+
     char*
     initializeRow(char* row);
 
  private:
+    void
+    releaseVariableWidthFields(char* row) {
+        for (auto i = 0; i < variable_offsets_.size(); i++) {
+            auto& off = variable_offsets_[i];
+            auto& row_col = columnAt(variable_idxes_[i]);
+            bool isStrNull =
+                isNullAt(row, row_col.nullByte(), row_col.nullMask());
+            auto& str = *reinterpret_cast<std::string**>(row + off);
+            if (!isStrNull && str) {
+                delete str;
+                str = nullptr;
+            }
+        }
+    }
+
     const std::vector<DataType> keyTypes_;
     std::vector<int> variable_offsets_{};
     std::vector<int> variable_idxes_{};
