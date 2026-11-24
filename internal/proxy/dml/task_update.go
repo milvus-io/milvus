@@ -115,7 +115,6 @@ func buildUpdateMessages(collectionID int64, schemaVersion int32, partitionID in
 		typeutil.AppendIDs(groups[hash], ids, i)
 	}
 	var result []message.MutableMessage
-	remaining := params.ProxyGrpcServerCfg.ServerMaxRecvSize.GetAsInt()
 	header := &messagespb.UpdateMessageHeader{CollectionId: collectionID, SchemaVersion: proto.Int32(schemaVersion)}
 	body := &messagespb.UpdateMessageBody{PartitionId: partitionID, Assignments: assignments}
 	fixedBodySize := proto.Size(body)
@@ -152,14 +151,11 @@ func buildUpdateMessages(collectionID int64, schemaVersion int32, partitionID in
 			if err != nil {
 				return nil, err
 			}
-			size := proto.Size(msg.IntoMessageProto())
-			if limit > 0 && size > limit {
-				return nil, merr.Wrapf(merr.ErrParameterTooLarge, "encoded update message is %d bytes, limit is %d bytes", size, limit)
+			if limit > 0 {
+				if size := proto.Size(msg.IntoMessageProto()); size > limit {
+					return nil, merr.Wrapf(merr.ErrParameterTooLarge, "encoded update message is %d bytes, limit is %d bytes", size, limit)
+				}
 			}
-			if size > remaining {
-				return nil, merr.WrapErrParameterTooLarge("prepared update messages exceed the total byte budget")
-			}
-			remaining -= size
 			result = append(result, msg)
 			start = end
 		}
