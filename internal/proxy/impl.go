@@ -4378,6 +4378,11 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 			Status: merr.Status(err),
 		}, nil
 	}
+	if err := authorizeClusterDiagnostics(ctx, req, milvuspb.MilvusService_GetMetrics_FullMethodName); err != nil {
+		return &milvuspb.GetMetricsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
 
 	ret := gjson.Parse(req.GetRequest())
 	metricType, err := metricsinfo.ParseMetricRequestType(ret)
@@ -6653,6 +6658,11 @@ func (node *Proxy) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuota
 	defer sp.End()
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &internalpb.GetQuotaMetricsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	if err := authorizeClusterDiagnostics(ctx, req, getQuotaMetricsFullMethod); err != nil {
 		return &internalpb.GetQuotaMetricsResponse{
 			Status: merr.Status(err),
 		}, nil
