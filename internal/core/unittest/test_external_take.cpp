@@ -4377,6 +4377,8 @@ TEST(InjectExtfsAllowlist, TableSnapshotID) {
             R"({"format":"lance-table","snapshot_id":5320540205222981137})",
             R"({"snapshot_id":"5320540205222981137","format":"lance-table"})",
             R"({"snapshot_id":5320540205222981137,"format":"lance-table"})",
+            R"({"format":"deltalake-table","snapshot_id":"5320540205222981137"})",
+            R"({"snapshot_id":5320540205222981137,"format":"deltalake-table"})",
         }) {
         SCOPED_TRACE(spec);
         milvus_storage::api::Properties props;
@@ -4404,6 +4406,8 @@ TEST(InjectExtfsAllowlist, TableSnapshotIDCAbiRoundTrip) {
             R"({"format":"lance-table","snapshot_id":5320540205222981137})",
             R"({"snapshot_id":"5320540205222981137","format":"lance-table"})",
             R"({"snapshot_id":5320540205222981137,"format":"lance-table"})",
+            R"({"format":"deltalake-table","snapshot_id":"5320540205222981137"})",
+            R"({"snapshot_id":5320540205222981137,"format":"deltalake-table"})",
         }) {
         SCOPED_TRACE(spec);
         LoonProperties properties{};
@@ -4445,6 +4449,8 @@ TEST(InjectExtfsAllowlist, InvalidTableSnapshotIDIsRejected) {
              R"({"format":"lance-table","snapshot_id":"-2"})",
              R"({"snapshot_id":-2,"format":"lance-table"})",
              R"({"snapshot_id":"-2","format":"lance-table"})",
+             R"({"format":"deltalake-table","snapshot_id":-2})",
+             R"({"snapshot_id":"-2","format":"deltalake-table"})",
          }) {
         SCOPED_TRACE(spec);
         milvus_storage::api::Properties props;

@@ -37,12 +37,13 @@ var azureAccountNamePattern = regexp.MustCompile(`^[a-z0-9]{3,24}$`)
 // File formats supported by external collections. Mirror of LOON_FORMAT_*
 // in the C++ FFI layer — keep the two in sync.
 const (
-	FormatParquet      = specutil.FormatParquet
-	FormatLanceTable   = specutil.FormatLanceTable
-	FormatVortex       = specutil.FormatVortex
-	FormatIcebergTable = specutil.FormatIcebergTable
-	FormatPaimonTable  = specutil.FormatPaimonTable
-	FormatMilvusTable  = specutil.FormatMilvusTable
+	FormatParquet        = specutil.FormatParquet
+	FormatLanceTable     = specutil.FormatLanceTable
+	FormatVortex         = specutil.FormatVortex
+	FormatIcebergTable   = specutil.FormatIcebergTable
+	FormatPaimonTable    = specutil.FormatPaimonTable
+	FormatMilvusTable    = specutil.FormatMilvusTable
+	FormatDeltaLakeTable = specutil.FormatDeltaLakeTable
 )
 
 // ExtfsKey* are the canonical spec.extfs key names. Use these instead of
