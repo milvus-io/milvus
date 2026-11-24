@@ -18,26 +18,39 @@ package proxy
 
 import (
 	"context"
+	"encoding/base64"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
 // diagnosticsCoordinator lets "reader" hold the grants a test sets and
 // "operator" hold the built-in admin role.
 type diagnosticsCoordinator struct {
 	*metadataPrivilegeCoordinator
-	quotaCalls int
+	quotaCalls   int
+	metricsCalls int
+}
+
+func (c *diagnosticsCoordinator) GetMetrics(context.Context, *milvuspb.GetMetricsRequest, ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
+	c.metricsCalls++
+	return &milvuspb.GetMetricsResponse{Status: merr.Success(), Response: `{"segments":[]}`}, nil
 }
 
 func (c *diagnosticsCoordinator) ListPolicy(context.Context, *internalpb.ListPolicyRequest, ...grpc.CallOption) (*internalpb.ListPolicyResponse, error) {
@@ -146,4 +159,121 @@ func TestClusterDiagnosticsRequireClusterAdmin(t *testing.T) {
 	t.Cleanup(func() { Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true") })
 	assert.ErrorIs(t, metrics(context.Background()), merr.ErrMetricNotFound)
 	require.NoError(t, quota(context.Background()))
+}
+
+// consoleMetricsPaths are the web console routes that read coordinator
+// metrics.
+var consoleMetricsPaths = []string{
+	mhttp.ClusterInfoPath,
+	mhttp.QCTargetPath, mhttp.QCDistPath, mhttp.QCReplicaPath, mhttp.QCResourceGroupPath, mhttp.QCAllTasksPath, mhttp.QCSegmentsPath,
+	mhttp.QNSegmentsPath, mhttp.QNChannelsPath,
+	mhttp.DCDistPath, mhttp.DCCompactionTasksPath, mhttp.DCImportTasksPath, mhttp.DCBuildIndexTasksPath, mhttp.IndexListPath, mhttp.DCSegmentsPath,
+	mhttp.DNSyncTasksPath, mhttp.DNSegmentsPath, mhttp.DNChannelsPath,
+}
+
+// The console reaches the same cluster-wide data as GetMetrics, and any of
+// these routes can pick another metrics action through its query string. With
+// the management gate off, the console admits every authenticated user, so
+// each route needs the cluster admin grant itself.
+func TestConsoleMetricsRequireClusterAdmin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	base, _ := setupMetadataPrivileges(t)
+	coord := &diagnosticsCoordinator{metadataPrivilegeCoordinator: base}
+	node := &Proxy{mixCoord: coord, metricsCacheManager: metricsinfo.NewMetricsCacheManager()}
+	// Serve /_cluster/info from the cache for the whole test.
+	node.metricsCacheManager.SetRetention(time.Hour)
+	node.metricsCacheManager.UpdateSystemInfoMetrics(&milvuspb.GetMetricsResponse{Status: merr.Success(), Response: `{"nodes_info":[]}`})
+
+	// verified stands in for the metrics port authentication, which stores
+	// the caller it verified under the "username" key.
+	serve := func(verified string, path string, prepare func(*http.Request) *http.Request) *httptest.ResponseRecorder {
+		router := gin.New()
+		group := router.Group("/api/v1", func(c *gin.Context) {
+			if verified != "" {
+				c.Set("username", verified)
+			}
+		})
+		node.RegisterRestRouter(group)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1"+path+"?req_type=dist", nil)
+		if prepare != nil {
+			req = prepare(req)
+		}
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	for _, tc := range []struct {
+		name     string
+		verified string
+		global   []commonpb.ObjectPrivilege
+		coll     []commonpb.ObjectPrivilege
+		status   int
+	}{
+		{"no_verified_caller", "", nil, nil, http.StatusUnauthorized},
+		{"no_grants", "no_roles", nil, nil, http.StatusForbidden},
+		{"collection_admin", "reader", nil, builtinPrivileges(util.CollectionAdminPrivileges), http.StatusForbidden},
+		{"cluster_read_write", "reader", builtinPrivileges(util.ClusterReadWritePrivileges), nil, http.StatusForbidden},
+		{"root", util.UserRoot, nil, nil, http.StatusOK},
+		{"admin_role", "operator", nil, nil, http.StatusOK},
+		{"cluster_admin_group", "reader", builtinPrivileges(util.ClusterAdminPrivileges), nil, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			coord.grantDiagnostics(t, tc.global, tc.coll)
+			for _, path := range consoleMetricsPaths {
+				calls := coord.metricsCalls
+				w := serve(tc.verified, path, nil)
+				require.Equal(t, tc.status, w.Code, "%s: %s", path, w.Body.String())
+				if tc.status != http.StatusOK {
+					assert.Equal(t, calls, coord.metricsCalls, "%s: a refused caller must not reach the coordinator", path)
+					assert.NotContains(t, w.Body.String(), "segments")
+					assert.NotContains(t, w.Body.String(), "nodes_info")
+				}
+			}
+		})
+	}
+
+	t.Run("request_cannot_name_the_caller", func(t *testing.T) {
+		coord.grantDiagnostics(t, nil, nil)
+		rootToken := base64.StdEncoding.EncodeToString([]byte(util.UserRoot + util.CredentialSeparator + "Milvus"))
+		for _, path := range consoleMetricsPaths {
+			w := serve("no_roles", path, func(req *http.Request) *http.Request {
+				req.Header.Set("Authorization", "Basic "+rootToken)
+				req.Header.Set(util.HeaderAuthorize, rootToken)
+				return req
+			})
+			assert.Equal(t, http.StatusForbidden, w.Code, path)
+		}
+	})
+
+	t.Run("management_gate", func(t *testing.T) {
+		require.NoError(t, Params.Save(Params.CommonCfg.AdminAuthEnabled.Key, "true"))
+		mhttp.RegisterManagementVerifier(mhttp.VerifierSlotProxy, func(context.Context, string, string) error { return nil })
+		t.Cleanup(func() {
+			Params.Reset(Params.CommonCfg.AdminAuthEnabled.Key)
+			mhttp.RegisterManagementVerifier(mhttp.VerifierSlotProxy, nil)
+		})
+		coord.grantDiagnostics(t, nil, nil)
+		for _, path := range consoleMetricsPaths {
+			// Mounted without the gate's middleware, a route refuses.
+			assert.Equal(t, http.StatusUnauthorized, serve("", path, nil).Code, path)
+			// A request the gate verified as root passes.
+			w := serve("", path, func(req *http.Request) *http.Request {
+				req.SetBasicAuth(util.UserRoot, "test-only-password")
+				req.Header.Set(mhttp.AdminRequestHeader, "true")
+				decision := mhttp.CheckAdminRequest(req, path, false)
+				require.True(t, decision.Allowed())
+				return decision.AuthenticatedRequest(req)
+			})
+			assert.Equal(t, http.StatusOK, w.Code, path)
+		}
+	})
+
+	t.Run("authorization_disabled", func(t *testing.T) {
+		require.NoError(t, Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "false"))
+		t.Cleanup(func() { Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true") })
+		for _, path := range consoleMetricsPaths {
+			assert.Equal(t, http.StatusOK, serve("", path, nil).Code, path)
+		}
+	})
 }
