@@ -23,9 +23,11 @@ import (
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	walutil "github.com/milvus-io/milvus/internal/util/streamingutil/util"
@@ -37,59 +39,110 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// Update prepares every shard before starting any WAL append. The WAL
-// producer groups fragments on one VChannel into its existing transaction.
-func Update(ctx context.Context, cache Cache, request *milvuspb.UpdateRequest) (*milvuspb.MutationResult, error) {
-	if request == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("missing update request")
+var _ taskmodel.DMLTask = (*UpdateTask)(nil)
+
+type UpdateTask struct {
+	baseTask
+	Condition
+	request *milvuspb.UpdateRequest
+	info    *collectionInfo
+	msgs    []message.MutableMessage
+	result  *milvuspb.MutationResult
+	id      UniqueID
+	ts      Timestamp
+}
+
+func NewUpdateTask(ctx context.Context, cache Cache, request *milvuspb.UpdateRequest) *UpdateTask {
+	return &UpdateTask{
+		baseTask:  baseTask{MetaCache: cache},
+		Condition: NewTaskCondition(ctx),
+		request:   request,
 	}
-	info, err := cache.GetCollectionInfo(ctx, request.GetDbName(), request.GetCollectionName(), 0)
-	if err != nil {
-		return nil, err
+}
+
+func (t *UpdateTask) TraceCtx() context.Context         { return t.Ctx() }
+func (t *UpdateTask) ID() UniqueID                      { return t.id }
+func (t *UpdateTask) SetID(id UniqueID)                 { t.id = id }
+func (t *UpdateTask) BeginTs() Timestamp                { return t.ts }
+func (t *UpdateTask) EndTs() Timestamp                  { return t.ts }
+func (t *UpdateTask) SetTs(ts Timestamp)                { t.ts = ts }
+func (t *UpdateTask) Name() string                      { return "UpdateTask" }
+func (t *UpdateTask) OnEnqueue() error                  { return nil }
+func (t *UpdateTask) PostExecute(context.Context) error { return nil }
+func (t *UpdateTask) Result() *milvuspb.MutationResult  { return t.result }
+
+// commonpb has no PK Update task type. The WAL message type is independently UPDATE.
+func (t *UpdateTask) Type() commonpb.MsgType { return commonpb.MsgType_Undefined }
+
+func (t *UpdateTask) SetChannels() error {
+	if t.request == nil {
+		return merr.WrapErrParameterInvalidMsg("missing update request")
 	}
+	info, err := t.GetMetaCache().GetCollectionInfo(t.Ctx(), t.request.GetDbName(), t.request.GetCollectionName(), 0)
+	t.info = info
+	return err
+}
+
+func (t *UpdateTask) GetChannels() []pChan {
+	if t.info == nil {
+		return nil
+	}
+	return t.info.PChannels
+}
+
+// Prepare every shard before the first WAL append.
+func (t *UpdateTask) PreExecute(ctx context.Context) error {
+	request, info := t.request, t.info
 	schema, err := info.GetWriteSchema(ctx)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	// Namespace collections may route inserts by namespace instead of PK. They
 	// need a namespace-aware mutation contract before this PK-only API can serve them.
 	if schema.GetEnableNamespace() {
-		return nil, merr.WrapErrParameterInvalidMsg("PK-update does not support namespace collections")
+		return merr.WrapErrParameterInvalidMsg("PK-update does not support namespace collections")
 	}
 	if err := validateUpdatePKs(request.GetPrimaryKeys(), schema.CollectionSchema); err != nil {
-		return nil, err
+		return err
 	}
 	assignments, err := validateUpdateAssignments(schema.CollectionSchema, request.GetAssignments())
 	if err != nil {
-		return nil, err
+		return err
 	}
 	partitionID := int64(common.AllPartitionsID)
 	if request.GetPartitionName() != "" {
 		if partitionKey, _ := typeutil.GetPartitionKeyFieldSchema(schema.CollectionSchema); partitionKey != nil {
-			return nil, merr.WrapErrParameterInvalidMsg("cannot specify a partition in partition-key mode")
+			return merr.WrapErrParameterInvalidMsg("cannot specify a partition in partition-key mode")
 		}
-		partitionID, err = cache.GetPartitionID(ctx, request.GetDbName(), request.GetCollectionName(), request.GetPartitionName())
+		partitionID, err = t.GetMetaCache().GetPartitionID(ctx, request.GetDbName(), request.GetCollectionName(), request.GetPartitionName())
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
 	var cipher *message.CipherConfig
 	if hookutil.IsClusterEncryptionEnabled() {
 		cipher = hookutil.GetEzByCollProperties(schema.GetProperties(), info.CollID).AsMessageConfig()
 	}
-	msgs, err := buildUpdateMessages(info.CollID, schema.Version, partitionID, info.VChannels, request.GetPrimaryKeys(), assignments, cipher)
-	if err != nil {
-		return nil, err
-	}
-	resp := streaming.WAL().AppendMessages(ctx, msgs...)
-	invalidateMismatchedWriteSchema(ctx, cache, info.CollID, resp)
+	t.msgs, err = buildUpdateMessages(info.CollID, schema.Version, partitionID, info.VChannels, request.GetPrimaryKeys(), assignments, cipher)
+	return err
+}
+
+func (t *UpdateTask) Execute(ctx context.Context) error {
+	resp := streaming.WAL().AppendMessages(ctx, t.msgs...)
+	invalidateMismatchedWriteSchema(ctx, t.GetMetaCache(), t.info.CollID, resp)
 	if err := resp.UnwrapFirstError(); err != nil {
 		if status.AsStreamingError(err).IsSchemaVersionMismatch() {
-			return nil, merr.ErrCollectionSchemaMismatch
+			return merr.ErrCollectionSchemaMismatch
 		}
-		return nil, err
+		return err
 	}
-	return &milvuspb.MutationResult{Status: merr.Success(), Acknowledged: true, Timestamp: resp.MaxTimeTick(), UpdateCnt: int64(typeutil.GetSizeOfIDs(request.GetPrimaryKeys()))}, nil
+	t.result = &milvuspb.MutationResult{
+		Status:       merr.Success(),
+		Acknowledged: true,
+		Timestamp:    resp.MaxTimeTick(),
+		UpdateCnt:    int64(typeutil.GetSizeOfIDs(t.request.GetPrimaryKeys())),
+	}
+	return nil
 }
 
 func buildUpdateMessages(collectionID int64, schemaVersion int32, partitionID int64, channels []string, ids *schemapb.IDs, assignments []*messagespb.UpdateAssignment, cipher *message.CipherConfig) ([]message.MutableMessage, error) {

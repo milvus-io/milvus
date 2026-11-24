@@ -49,10 +49,14 @@ func (node *Proxy) Update(ctx context.Context, request *milvuspb.UpdateRequest) 
 		return failedMutationResult(err), nil
 	}
 	tr := timerecord.NewTimeRecorder("Update")
-	result, err := dml.Update(ctx, node.GetMetaCache(), request)
-	if err != nil {
+	task := dml.NewUpdateTask(ctx, node.GetMetaCache(), request)
+	if err := node.sched.DmQueue.Enqueue(task); err != nil {
 		return failedMutationResult(err), nil
 	}
+	if err := task.WaitToFinish(); err != nil {
+		return failedMutationResult(err), nil
+	}
+	result := task.Result()
 
 	requestSize := proto.Size(request)
 	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(requestSize))
