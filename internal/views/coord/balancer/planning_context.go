@@ -43,6 +43,7 @@ type planningContext struct {
 	config         *BalanceConfig
 	targets        map[int64][]int64
 	replicaDelta   map[int64]map[int64]int64
+	nodeShardCount map[int64]int // per-node count of shards planned this round, used to break score ties
 	fanouts        map[qviews.ShardID]int
 	search         map[qviews.ShardID]*searchCursor
 }
@@ -55,6 +56,7 @@ func newPlanningContext(reader balancercache.Reader) *planningContext {
 	p.targets = make(map[int64][]int64)
 	p.groupEntries = make(map[string]*balancercache.ResourceGroupEntry)
 	p.replicaDelta = make(map[int64]map[int64]int64)
+	p.nodeShardCount = make(map[int64]int)
 	if p.config == nil {
 		p.config = DefaultBalanceConfig()
 	}
@@ -254,6 +256,10 @@ func (p *planningContext) acceptRows(id qviews.ShardID, rows map[int64]int64) {
 	}
 	for node, count := range rows {
 		delta[node] += count
+		// Count the shard against every node it was planned on this round. Used
+		// as a score tie-breaker so a burst of tiny shards inside the tolerance
+		// band does not all land on the smallest node ID.
+		p.nodeShardCount[node]++
 	}
 }
 
