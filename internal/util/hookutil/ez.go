@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -216,4 +217,102 @@ func GetEzIDByImportEzk(importEzk string) (int64, error) {
 		return 0, merr.WrapErrParameterInvalidMsg("backup EZK must include a positive ez_id")
 	}
 	return ezkData.EzID, nil
+}
+
+// GetImportSourcePluginContext extracts the backup source cipher context from the
+// request's plugin context. When present, the source entry always precedes the target.
+func GetImportSourcePluginContext(artifact string, pluginContext []*commonpb.KeyValuePair) (*indexcgopb.StoragePluginContext, error) {
+	if artifact == "" {
+		return nil, nil
+	}
+	id, err := GetEzIDByImportEzk(artifact)
+	if err != nil {
+		return nil, merr.WrapErrImportFailed(err.Error())
+	}
+	for _, entry := range pluginContext {
+		if entry.GetKey() == CipherConfigUnsafeEZK {
+			return importCipherEntry(entry, "source", id, 0)
+		}
+	}
+	return nil, merr.WrapErrImportFailed("missing source import cipher context")
+}
+
+// ParseImportCipherContexts reads the ordered source and target snapshots without
+// consulting or updating the worker's keys. A plaintext side has no wire entry.
+func ParseImportCipherContexts(artifact string, properties, pluginContext []*commonpb.KeyValuePair, collectionID int64) (source, target *indexcgopb.StoragePluginContext, err error) {
+	next := func() *commonpb.KeyValuePair {
+		for len(pluginContext) > 0 {
+			entry := pluginContext[0]
+			pluginContext = pluginContext[1:]
+			if entry.GetKey() == CipherConfigUnsafeEZK {
+				return entry
+			}
+		}
+		return nil
+	}
+	if artifact != "" {
+		id, err := GetEzIDByImportEzk(artifact)
+		if err != nil {
+			return nil, nil, merr.WrapErrImportFailed(err.Error())
+		}
+		// The wire context contains the source zone, but no source collection ID.
+		source, err = importCipherEntry(next(), "source", id, 0)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	targetID, hasTarget, err := parseTargetEzID(properties)
+	if err != nil {
+		return nil, nil, merr.WrapErrImportFailed(err.Error())
+	}
+	if hasTarget {
+		target, err = importCipherEntry(next(), "target", targetID, collectionID)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	if next() != nil {
+		return nil, nil, merr.WrapErrImportFailed("unexpected import cipher context")
+	}
+	return source, target, nil
+}
+
+func RegisterImportCipherContexts(
+	artifact string,
+	properties, pluginContext []*commonpb.KeyValuePair,
+	collectionID int64,
+) error {
+	source, target, err := ParseImportCipherContexts(artifact, properties, pluginContext, collectionID)
+	if err != nil {
+		return err
+	}
+	if (source != nil || target != nil) && !IsClusterEncryptionEnabled() {
+		return merr.WrapErrServiceUnavailableErr(errCipherPluginMissing, "cannot register import cipher contexts")
+	}
+	// Register the authoritative target before checking a same-zone source.
+	if target != nil {
+		if err := CreateLocalEZ(target.GetEncryptionZoneId(), target.GetEncryptionKey()); err != nil {
+			return err
+		}
+	}
+	if source != nil {
+		if err := RegisterLocalImportEZ(source.GetEncryptionZoneId(), source.GetEncryptionKey()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func importCipherEntry(entry *commonpb.KeyValuePair, role string, expectedID, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
+	if entry == nil {
+		return nil, merr.WrapErrImportFailedMsg("missing %s import cipher context", role)
+	}
+	id, key, err := decodeEZContext(entry.GetValue())
+	if err != nil || id != expectedID {
+		return nil, merr.WrapErrImportFailedMsg("invalid %s import cipher context for zone %d", role, expectedID)
+	}
+	if raw, err := base64.StdEncoding.DecodeString(key); err != nil || len(raw) == 0 {
+		return nil, merr.WrapErrImportFailedMsg("invalid %s import keyset for zone %d", role, expectedID)
+	}
+	return &indexcgopb.StoragePluginContext{EncryptionZoneId: id, CollectionId: collectionID, EncryptionKey: key}, nil
 }

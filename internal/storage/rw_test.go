@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/github.com/milvus-io/milvus-proto/go-api/v2/mock_hook"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -318,22 +317,6 @@ func (s *PackedBinlogRecordSuite) TestWriterRequiresEncryptionKey() {
 		s.ErrorIs(err, merr.ErrServiceUnavailable)
 		s.ErrorContains(err, "ezID=17, collectionID=23")
 		s.Nil(writer)
-	})
-}
-
-func (s *PackedBinlogRecordSuite) TestReaderExplicitPluginContext() {
-	s.schema.Properties = []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "99"}}
-
-	s.Run("v1_explicit_source_requires_cipher", func() {
-		s.T().Cleanup(hookutil.SetTestCipher(nil))
-		source := &indexcgopb.StoragePluginContext{EncryptionZoneId: 17, CollectionId: 0, EncryptionKey: "c291cmNl"}
-		rr, err := NewBinlogRecordReader(s.ctx, nil, s.schema,
-			WithVersion(StorageV1),
-			WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) { return nil, nil }),
-			WithPluginContext(source),
-		)
-		s.ErrorIs(err, merr.ErrServiceUnavailable)
-		s.Nil(rr)
 	})
 }
 

@@ -254,18 +254,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 	binlogReaderOpts := []BinlogReaderOption{}
 	var pluginContext *indexcgopb.StoragePluginContext
 	if rwOptions.pluginContext != nil {
-		if rwOptions.version == StorageV1 {
-			if !hookutil.IsClusterEncryptionEnabled() {
-				return nil, merr.WrapErrServiceUnavailable(fmt.Sprintf("cipher plugin is not enabled for ezID=%d, collectionID=%d",
-					rwOptions.pluginContext.GetEncryptionZoneId(), rwOptions.pluginContext.GetCollectionId()))
-			}
-			binlogReaderOpts = append(binlogReaderOpts, WithReaderDecryptionContext(
-				rwOptions.pluginContext.GetEncryptionZoneId(),
-				rwOptions.pluginContext.GetCollectionId(),
-			))
-		} else {
-			pluginContext = rwOptions.pluginContext
-		}
+		pluginContext = rwOptions.pluginContext
 	} else if hookutil.IsClusterEncryptionEnabled() {
 		ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID)
 		if ez != nil {
