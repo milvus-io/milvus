@@ -22,7 +22,17 @@ package packed
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
 
-CStatus NewPackedFFIReaderWithColumnGroups(
+static inline int packedStreamSchema(struct ArrowArrayStream* stream, struct ArrowSchema* schema) {
+    return stream->get_schema(stream, schema);
+}
+static inline int nextPackedBatch(struct ArrowArrayStream* stream, struct ArrowArray* batch) {
+    return stream->get_next(stream, batch);
+}
+static inline const char* packedStreamError(struct ArrowArrayStream* stream) {
+    return stream->get_last_error(stream);
+}
+
+CStatus NewPackedFFIReaderWithColumnGroupsAndWindow(
     const LoonColumnGroups* column_groups,
     struct ArrowSchema* schema,
     char** needed_columns,
@@ -32,13 +42,14 @@ CStatus NewPackedFFIReaderWithColumnGroups(
     CPluginContext* c_plugin_context,
     int64_t collection_id,
     const char* external_source,
-    const char* external_spec);
+    const char* external_spec, int64_t window_bytes);
 */
 import "C"
 
 import (
 	"context"
 	"io"
+	"syscall"
 	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -129,6 +140,16 @@ func NewFFIPackedReaderWithFragments(
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	extfs ExternalSpecContext,
 ) (*FFIPackedReader, error) {
+	return newFragmentReader(columns, format, fragments, schema, neededColumns, bufferSize, storageConfig, storagePluginContext, extfs, 0)
+}
+
+// NewDeltaFileReader projects one physical file at a time, with an explicit
+// budget for the native reader's row-group working set.
+func NewDeltaFileReader(path string, count int64, columns []string, schema *arrow.Schema, needed []string, window int64, cfg *indexpb.StorageConfig, plugin *indexcgopb.StoragePluginContext) (*FFIPackedReader, error) {
+	return newFragmentReader(columns, "parquet", []Fragment{{FilePath: path, EndRow: count, RowCount: count}}, schema, needed, window, cfg, plugin, ExternalReaderContext{}, window)
+}
+
+func newFragmentReader(columns []string, format string, fragments []Fragment, schema *arrow.Schema, neededColumns []string, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext, extfs ExternalReaderContext, window int64) (*FFIPackedReader, error) {
 	readerFragments, err := resolveFFIReaderFragments(fragments, storageConfig, extfs)
 	if err != nil {
 		return nil, err
@@ -150,7 +171,7 @@ func NewFFIPackedReaderWithFragments(
 			cExternalSource *C.char,
 			cExternalSpec *C.char,
 		) C.CStatus {
-			return C.NewPackedFFIReaderWithColumnGroups(
+			return C.NewPackedFFIReaderWithColumnGroupsAndWindow(
 				cColumnGroups,
 				cSchema,
 				cNeededColumnArray,
@@ -160,7 +181,7 @@ func NewFFIPackedReaderWithFragments(
 				pluginContextPtr,
 				collectionID,
 				cExternalSource,
-				cExternalSpec,
+				cExternalSpec, C.int64_t(window),
 			)
 		})
 }
@@ -234,18 +255,23 @@ func openFFIPackedReader(
 		return nil, merr.WrapErrStorage(err, "failed to get reader stream")
 	}
 
-	// Import the stream as a RecordReader
-	recordReader, err := cdata.ImportCRecordReader(&cStream, schema)
-	if err != nil {
-		C.CloseFFIReader(cPackedReader)
-		return nil, merr.WrapErrStorage(err, "failed to import record reader")
+	// Own the Arrow stream explicitly. The Go Arrow bridge finalizes its
+	// imported stream via GC, which can pin the last sparse batch on early exit.
+	r := &FFIPackedReader{cPackedReader: cPackedReader, stream: &cStream, schema: schema}
+	stream := (*C.struct_ArrowArrayStream)(unsafe.Pointer(r.stream))
+	var actual cdata.CArrowSchema
+	defer cdata.ReleaseCArrowSchema(&actual)
+	if code := C.packedStreamSchema(stream, (*C.struct_ArrowSchema)(unsafe.Pointer(&actual))); code != 0 {
+		err := merr.WrapErrStorage(syscall.Errno(code), "read packed stream schema: %s", C.GoString(C.packedStreamError(stream)))
+		r.Close()
+		return nil, err
 	}
-
-	return &FFIPackedReader{
-		cPackedReader: cPackedReader,
-		recordReader:  recordReader,
-		schema:        schema,
-	}, nil
+	r.streamSchema, err = cdata.ImportCArrowSchema(&actual)
+	if err != nil {
+		r.Close()
+		return nil, merr.WrapErrStorage(err, "import packed stream schema")
+	}
+	return r, nil
 }
 
 func newCPluginContext(storagePluginContext *indexcgopb.StoragePluginContext) (*C.CPluginContext, func()) {
@@ -380,35 +406,42 @@ func resolveFFIReaderFragments(
 }
 
 // ReadNext reads the next record batch from the reader
-func (r *FFIPackedReader) ReadNext() (rec arrow.Record, err error) {
-	if r.recordReader == nil {
+func (r *FFIPackedReader) ReadNext() (arrow.Record, error) {
+	if r.cPackedReader == nil {
 		return nil, io.EOF
 	}
-
-	rec, err = r.recordReader.Read()
-	if err != nil {
-		if err == io.EOF {
-			return nil, io.EOF
-		}
-		return nil, merr.WrapErrStorage(err, "failed to read next record")
+	if r.currentBatch != nil {
+		r.currentBatch.Release()
+		r.currentBatch = nil
 	}
-
+	stream := (*C.struct_ArrowArrayStream)(unsafe.Pointer(r.stream))
+	var batch cdata.CArrowArray
+	cBatch := (*C.struct_ArrowArray)(unsafe.Pointer(&batch))
+	defer cdata.ReleaseCArrowArray(&batch)
+	if code := C.nextPackedBatch(stream, cBatch); code != 0 {
+		return nil, merr.WrapErrStorage(syscall.Errno(code), "read packed record batch: %s", C.GoString(C.packedStreamError(stream)))
+	}
+	if C.ArrowArrayIsReleased(cBatch) != 0 {
+		return nil, io.EOF
+	}
+	rec, err := cdata.ImportCRecordBatchWithSchema(&batch, r.streamSchema)
+	if err != nil {
+		return nil, merr.WrapErrStorage(err, "import packed record batch")
+	}
+	r.currentBatch = rec
 	return rec, nil
 }
 
-// Close closes the FFI reader
+// Close releases the borrowed record, Arrow stream and native reader in order.
 func (r *FFIPackedReader) Close() error {
 	if r.cPackedReader == nil {
 		return nil
 	}
-
-	// no need to manual release current batch
-	// stream reader handles it
-
-	if r.recordReader != nil {
-		r.recordReader = nil
+	if r.currentBatch != nil {
+		r.currentBatch.Release()
+		r.currentBatch = nil
 	}
-
+	C.ArrowArrayStreamRelease((*C.struct_ArrowArrayStream)(unsafe.Pointer(r.stream)))
 	status := C.CloseFFIReader(r.cPackedReader)
 	r.cPackedReader = nil
 	return ConsumeCStatusIntoError(&status)

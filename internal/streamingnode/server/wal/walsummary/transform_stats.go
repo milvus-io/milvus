@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -34,10 +35,23 @@ type TransformStats struct {
 	FirstTimeTick, LastTimeTick uint64
 }
 
+func transformEntryFromRecord(record *streamingpb.VChannelSummaryTransformRecord) *streamingpb.TransformLogEntry {
+	entry := &streamingpb.TransformLogEntry{TimeTick: record.GetTimeTick()}
+	if record.GetMutations() != nil {
+		entry.Entry = &streamingpb.TransformLogEntry_Mutations{Mutations: record.GetMutations()}
+	} else {
+		entry.Entry = &streamingpb.TransformLogEntry_Delete{Delete: record.GetDelete()}
+	}
+	return entry
+}
+
 func transformEntrySize(entry *streamingpb.TransformLogEntry) (uint64, uint64) {
 	var rows uint64
 	for _, block := range entry.GetDelete().GetBlocks() {
 		rows += uint64(len(block.GetPrimaryKeys().GetIntId().GetData()) + len(block.GetPrimaryKeys().GetStrId().GetData()))
+	}
+	for _, block := range entry.GetMutations().GetBlocks() {
+		rows += uint64(messageutil.PrimaryKeyCount(block.GetUpdate().GetPrimaryKeys()) + messageutil.PrimaryKeyCount(block.GetDelete().GetPrimaryKeys()))
 	}
 	return rows, uint64(proto.Size(entry))
 }

@@ -36,6 +36,7 @@ CStatus NewPackedReaderWithProperties(char** paths,
 import "C"
 
 import (
+	"encoding/json"
 	"io"
 	"unsafe"
 
@@ -310,4 +311,33 @@ func GetPackedFileFieldIDs(filePaths []string, storageConfig *indexpb.StorageCon
 		offset += count
 	}
 	return result, nil
+}
+
+// ReadDeltaFooter opens only the Parquet footer using the same storage and
+// key-retrieval path as data reads, including encrypted-footer files.
+func ReadDeltaFooter(path string, cfg *indexpb.StorageConfig, plugin *indexcgopb.StoragePluginContext) (*arrow.Schema, map[string]string, int64, error) {
+	cpath := C.CString(path)
+	defer C.free(unsafe.Pointer(cpath))
+	config, done := newCStorageConfig(cfg)
+	defer done()
+	cipher, done := newCPluginContext(plugin)
+	defer done()
+	var cs cdata.CArrowSchema
+	defer cdata.ReleaseCArrowSchema(&cs)
+	var rows C.int64_t
+	var metadata *C.char
+	st := C.ReadParquetDeltaFooter(cpath, config, cipher, (*C.struct_ArrowSchema)(unsafe.Pointer(&cs)), &rows, &metadata)
+	if err := ConsumeCStatusIntoError(&st); err != nil {
+		return nil, nil, 0, err
+	}
+	defer C.free(unsafe.Pointer(metadata))
+	schema, err := cdata.ImportCArrowSchema(&cs)
+	if err != nil {
+		return nil, nil, 0, merr.Wrap(err, "import delta footer schema")
+	}
+	var fields map[string]string
+	if err := json.Unmarshal([]byte(C.GoString(metadata)), &fields); err != nil {
+		return nil, nil, 0, merr.Wrap(err, "decode delta footer metadata")
+	}
+	return schema, fields, int64(rows), nil
 }

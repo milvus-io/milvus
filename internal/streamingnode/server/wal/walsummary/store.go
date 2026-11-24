@@ -637,7 +637,7 @@ func marshalChunk(
 			}
 			var totalSize uint64
 			for _, record := range records {
-				_, size := transformEntrySize(&streamingpb.TransformLogEntry{TimeTick: record.GetTimeTick(), Entry: &streamingpb.TransformLogEntry_Delete{Delete: record.GetDelete()}})
+				_, size := transformEntrySize(transformEntryFromRecord(record))
 				totalSize += size
 			}
 			transformStart, transformEnd := transformRecordTimetickRange(records)

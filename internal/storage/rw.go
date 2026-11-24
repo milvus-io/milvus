@@ -59,6 +59,7 @@ const (
 )
 
 type rwOptions struct {
+	importDelta         bool
 	version             int64
 	op                  rwOp
 	bufferSize          int64
@@ -214,6 +215,28 @@ func WithNeededFields(neededFields typeutil.Set[int64]) RwOption {
 	return func(options *rwOptions) {
 		options.neededFields = neededFields
 	}
+}
+
+// WithImportDelta requires a delete-only source before reading into a new
+// collection or timestamp domain. V1 deltalogs are intrinsically delete-only.
+func WithImportDelta() RwOption {
+	return func(options *rwOptions) { options.importDelta = true }
+}
+
+// ValidateImportDelta checks a packed source before an import or copy can
+// interpret a typed mutation as a legacy delete or remap its source identity.
+func ValidateImportDelta(path string, cfg *indexpb.StorageConfig) error {
+	schema, footer, _, err := packed.ReadDeltaFooter(path, cfg, nil)
+	if err != nil {
+		return merr.Wrap(err, "read source deltalog footer")
+	}
+	if _, typed := footer["delta_format_version"]; typed {
+		return merr.WrapErrImportFailedMsg("source-history remapping for typed mutation deltas is unsupported")
+	}
+	if len(footer) != 0 || schema.NumFields() != 2 {
+		return merr.WrapErrDataIntegrityMsg("unrecognized import deltalog schema")
+	}
+	return nil
 }
 
 func WithExternalReaderContext(externalReader packed.ExternalReaderContext) RwOption {
@@ -891,6 +914,11 @@ func NewDeltalogReader(
 				}
 				path := paths[pathPos]
 				pathPos++
+				if rwOptions.importDelta {
+					if err := ValidateImportDelta(path, rwOptions.storageConfig); err != nil {
+						return nil, err
+					}
+				}
 				return newPackedRecordReader([]string{path}, schema, rwOptions.bufferSize, rwOptions.storageConfig, nil, rwOptions.externalReader)
 			},
 		}, nil
