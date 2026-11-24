@@ -6,6 +6,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -50,6 +51,9 @@ L:
 			if !ok {
 				// The recovery stream is reach the end, we can stop the recovery.
 				break L
+			}
+			if err := ValidateCreateSegmentStorageVersion(msg); err != nil {
+				return nil, err
 			}
 			r.ObserveMessage(ctx, msg)
 		}
@@ -131,4 +135,14 @@ func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
 		snapshot.AlterWALInfo = &alterWALInfoCopy
 	}
 	return snapshot
+}
+
+// ValidateCreateSegmentStorageVersion checks creation records before either WAL
+// replay consumer can apply them or advance its checkpoint.
+func ValidateCreateSegmentStorageVersion(msg message.ImmutableMessage) error {
+	if msg.MessageType() != message.MessageTypeCreateSegment {
+		return nil
+	}
+	header := message.MustAsImmutableCreateSegmentMessageV2(msg).Header()
+	return storagecommon.ValidateSegmentStorageVersion(header.GetSegmentId(), header.GetStorageVersion())
 }
