@@ -21,6 +21,11 @@ package packed
 #include "milvus-storage/ffi_c.h"
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
+
+// The pre-merge header aliased close to a symbol the merged library omits.
+#ifdef loon_segment_writer_close
+#error "milvus-storage must provide the merged loon_segment_writer_close ABI"
+#endif
 */
 import "C"
 
