@@ -3288,7 +3288,7 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		Version:      "3.0.0",
 		DefaultValue: "false",
 		Doc:          "Admit new literal PK-update requests. Disabling admission does not disable replay, materialization, CDC or reads of accepted updates. Requires compatible consumers.",
-		Export:       true,
+		Export:       false,
 	}
 	p.PKUpdateEnabled.Init(base.mgr)
 

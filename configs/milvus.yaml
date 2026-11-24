@@ -453,9 +453,6 @@ rootCoord:
 
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:
-  pkUpdate:
-    enabled: false # Admit new requests only. Accepted updates must remain replayable and readable when disabled. Requires compatible consumers.
-    maxPkCount: 10000 # Submitted PKs before routing, including duplicates. Must be positive; invalid values use 10000. Independent of byte limits.
   # Whether Proxy keeps the legacy row-based size packing before sending messages to StreamingNode.
   # Keep this enabled until chunk writing is enabled and observed on every StreamingNode that can own a pchannel.
   # For migration, enable streaming.splitChunkSN first, then disable proxy.splitChunk. Both parameters support live refresh.
@@ -489,6 +486,8 @@ proxy:
     allowedChars: $ # Additional characters allowed in role names beyond underscores, letters and numbers. Add '-' to allow hyphens in role names.
   maxTaskNum: 1024 # The maximum number of tasks in the task queue of the proxy.
   enableAutoLoad: false # whether to automatically load an unloaded collection before DQL requests and before writes that read existing rows
+  pkUpdate:
+    maxPkCount: 10000 # Maximum submitted PK count per update request, including duplicates and all VChannels. Must be positive; invalid values fall back to 10000. Message byte limits apply independently.
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
