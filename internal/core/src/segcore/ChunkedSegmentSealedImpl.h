@@ -149,6 +149,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     bool
     HasColumnInLoadedManifest(const std::string& column_name) const override;
 
+    bool
+    HasFieldInLoadedManifest(FieldId field_id) const override;
+
     std::vector<PinWrapper<const index::IndexBase*>>
     PinIndex(milvus::OpContext* op_ctx,
              FieldId field_id,

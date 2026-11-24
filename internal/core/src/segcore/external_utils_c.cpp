@@ -44,6 +44,7 @@
 #include "nlohmann/json.hpp"
 #include "pb/schema.pb.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/util.h"
 
 namespace {
 
@@ -173,6 +174,7 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
 
         // 2. Read manifest → ColumnGroups
         auto cgs = ReadManifestColumnGroupsWithFFI(manifest_path, c_properties);
+        auto mapping = ReadMilvusTableFieldIdMapping(*cgs);
 
         // 3. Determine total rows from column group files
         int64_t total_rows = 0;
@@ -209,6 +211,7 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
         struct SampleField {
             milvus::FieldMeta field_meta;
             std::string column_name;
+            std::string size_key;
         };
         std::vector<SampleField> external_fields;
         if (collection_schema.proto_blob != nullptr &&
@@ -223,37 +226,66 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                 milvus::IsMilvusTableExternalSpec(schema.external_spec());
             external_fields.reserve(schema.fields_size());
             bool uses_external_primary_key = false;
-            for (const auto& field_schema : schema.fields()) {
+            auto append_sample_field = [&](const auto& field_schema) {
                 bool is_milvus_table_data_field =
                     is_milvus_table &&
                     field_schema.fieldid() >= START_USER_FIELDID &&
-                    field_schema.name() != milvus::VIRTUAL_PK_FIELD_NAME;
+                    field_schema.name() != milvus::VIRTUAL_PK_FIELD_NAME &&
+                    !field_schema.is_function_output();
                 if (is_milvus_table_data_field &&
                     field_schema.is_primary_key()) {
                     uses_external_primary_key = true;
                 }
                 if (field_schema.external_field().empty() &&
                     !is_milvus_table_data_field) {
-                    continue;
+                    return;
                 }
                 auto field_meta = milvus::FieldMeta::ParseFrom(field_schema);
                 auto column_name = is_milvus_table_data_field
                                        ? std::to_string(field_schema.fieldid())
                                        : field_meta.get_external_field();
-                external_fields.push_back(
-                    {std::move(field_meta), std::move(column_name)});
+                auto size_key = column_name;
+                if (is_milvus_table_data_field && mapping) {
+                    auto it =
+                        mapping->physical_columns.find(field_schema.fieldid());
+                    if (it == mapping->physical_columns.end()) {
+                        ThrowInfo(milvus::FieldNotLoaded,
+                                  "external field {} has no manifest binding",
+                                  field_schema.fieldid());
+                    }
+                    column_name = it->second;
+                }
+                external_fields.push_back({std::move(field_meta),
+                                           std::move(column_name),
+                                           std::move(size_key)});
+            };
+            for (const auto& field_schema : schema.fields()) {
+                append_sample_field(field_schema);
             }
             if (is_milvus_table && uses_external_primary_key) {
                 // Real-PK milvus-table loading also keeps source insert
                 // timestamps so source deltas can honor delete/reinsert order.
                 // Account for that eager column in the fake binlog memory size.
+                auto ts_size_key = std::to_string(TimestampFieldID.get());
+                auto ts_column_name = ts_size_key;
+                if (mapping) {
+                    auto it =
+                        mapping->physical_columns.find(TimestampFieldID.get());
+                    if (it == mapping->physical_columns.end()) {
+                        ThrowInfo(milvus::FieldNotLoaded,
+                                  "external field {} has no manifest binding",
+                                  TimestampFieldID.get());
+                    }
+                    ts_column_name = it->second;
+                }
                 external_fields.push_back(
                     {milvus::FieldMeta(milvus::FieldName("Timestamp"),
                                        TimestampFieldID,
                                        milvus::DataType::INT64,
                                        false,
                                        std::nullopt),
-                     std::to_string(TimestampFieldID.get())});
+                     std::move(ts_column_name),
+                     std::move(ts_size_key)});
             }
         }
 
@@ -303,7 +335,8 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                         chunked->chunk(c), field_meta);
                     col_bytes += calcArrayDataSize(chunk->data());
                 }
-                sampled_sizes.emplace_back(column_name, col_bytes / num_rows);
+                sampled_sizes.emplace_back(sample_field.size_key,
+                                           col_bytes / num_rows);
             }
         } else {
             int num_cols = table->num_columns();

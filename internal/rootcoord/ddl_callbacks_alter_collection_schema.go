@@ -457,6 +457,9 @@ func buildAlterSchemaAddSchema(coll *model.Collection, plan *schemautil.AlterSch
 
 // broadcastAlterCollectionSchemaDrop handles DropRequest: dropping fields or functions.
 func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcaster broadcaster.BroadcastAPI, coll *model.Collection, req *milvuspb.AlterCollectionSchemaRequest) error {
+	if typeutil.IsExternalCollection(coll.ToCollectionSchemaPB()) {
+		return merr.WrapErrOperationNotSupportedMsg("external collections do not support dropping fields or functions")
+	}
 	dropReq := req.GetAction().GetDropRequest()
 	if dropReq == nil {
 		return merr.WrapErrParameterInvalidMsg("drop_request is nil")
