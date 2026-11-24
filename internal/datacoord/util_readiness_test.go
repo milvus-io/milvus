@@ -32,13 +32,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// Two readiness questions are asked of a segment: may a compaction output
-// replace its parents in the query view (handoff), and may a segment be fed
-// into another compaction. Both wait for the vector indexes; handoff on a
-// collection without a vector field waits for every index defined on it, and
-// with forceAllIndexReady for every index on any collection. With nothing to
-// wait for, both answer yes.
-func TestReadinessFilters(t *testing.T) {
+// FilterInIndexedSegments keeps the segments on which every vector index is
+// built, and with forceAllIndexReady every index. A collection without a
+// vector field has no vector index to wait for: its flushed and dropped
+// segments are returned, with or without an index defined.
+func TestFilterInIndexedSegmentsWithoutVectorField(t *testing.T) {
 	const (
 		vectorField = int64(10)
 		scalarField = int64(20)
@@ -85,47 +83,43 @@ func TestReadinessFilters(t *testing.T) {
 
 	t.Run("no vector field and no index: nothing to wait for", func(t *testing.T) {
 		s := newServer(scalarOnly)
-		require.ElementsMatch(t, []int64{1, 2}, ids(index.FilterInHandoffReadySegments(ctx, s.handler, s.indexMeta, allSegments(s)...)))
-		require.ElementsMatch(t, []int64{1, 2}, ids(index.FilterInCompactionInputReadySegments(ctx, s.handler, s.indexMeta, false, allSegments(s)...)))
+		require.ElementsMatch(t, []int64{1, 2}, ids(index.FilterInIndexedSegments(ctx, s.handler, s.indexMeta, false, allSegments(s)...)))
+		// with skipNoIndexCollection a collection with no index defined is not filtered at all
+		require.ElementsMatch(t, []int64{1, 2, 3}, ids(index.FilterInIndexedSegments(ctx, s.handler, s.indexMeta, true, allSegments(s)...)))
 	})
 
-	t.Run("no vector field with a scalar index: handoff waits, compaction input does not", func(t *testing.T) {
+	t.Run("no vector field with a scalar index in progress: nothing to wait for", func(t *testing.T) {
 		s := newServer(scalarOnly)
-		setIndex(s, scalarField, scalarIndex, map[int64]commonpb.IndexState{1: commonpb.IndexState_Finished, 2: commonpb.IndexState_InProgress})
-		require.ElementsMatch(t, []int64{1}, ids(index.FilterInHandoffReadySegments(ctx, s.handler, s.indexMeta, allSegments(s)...)))
-		require.ElementsMatch(t, []int64{1, 2}, ids(index.FilterInCompactionInputReadySegments(ctx, s.handler, s.indexMeta, false, allSegments(s)...)))
+		setIndex(s, scalarField, scalarIndex, map[int64]commonpb.IndexState{1: commonpb.IndexState_Finished})
+		require.ElementsMatch(t, []int64{1, 2}, ids(index.FilterInIndexedSegments(ctx, s.handler, s.indexMeta, false, allSegments(s)...)))
 	})
 
-	t.Run("vector field without any index: compaction input waits for the index to be defined", func(t *testing.T) {
-		s := newServer(withVector)
-		require.ElementsMatch(t, []int64{1, 2}, ids(index.FilterInHandoffReadySegments(ctx, s.handler, s.indexMeta, allSegments(s)...)))
-		require.Empty(t, index.FilterInCompactionInputReadySegments(ctx, s.handler, s.indexMeta, false, allSegments(s)...))
-		require.ElementsMatch(t, []int64{1, 2}, ids(index.FilterInCompactionInputReadySegments(ctx, s.handler, s.indexMeta, true, allSegments(s)...)))
-	})
-
-	t.Run("vector index built, scalar index in progress: both ready", func(t *testing.T) {
-		s := newServer(withVector)
-		setIndex(s, vectorField, vectorIndex, map[int64]commonpb.IndexState{1: commonpb.IndexState_Finished, 2: commonpb.IndexState_Finished})
-		setIndex(s, scalarField, scalarIndex, map[int64]commonpb.IndexState{1: commonpb.IndexState_Finished, 2: commonpb.IndexState_InProgress})
-		require.ElementsMatch(t, []int64{1, 2}, ids(index.FilterInHandoffReadySegments(ctx, s.handler, s.indexMeta, allSegments(s)...)))
-		require.ElementsMatch(t, []int64{1, 2}, ids(index.FilterInCompactionInputReadySegments(ctx, s.handler, s.indexMeta, false, allSegments(s)...)))
-	})
-
-	t.Run("forceAllIndexReady: handoff waits for the scalar index too", func(t *testing.T) {
+	t.Run("no vector field, forceAllIndexReady: waits for the scalar index", func(t *testing.T) {
 		key := paramtable.Get().DataCoordCfg.DVForceAllIndexReady.Key
 		require.NoError(t, paramtable.Get().Save(key, "true"))
 		t.Cleanup(func() { paramtable.Get().Reset(key) })
+		s := newServer(scalarOnly)
+		setIndex(s, scalarField, scalarIndex, map[int64]commonpb.IndexState{1: commonpb.IndexState_Finished, 2: commonpb.IndexState_InProgress})
+		require.ElementsMatch(t, []int64{1}, ids(index.FilterInIndexedSegments(ctx, s.handler, s.indexMeta, false, allSegments(s)...)))
+	})
+
+	t.Run("vector field without any index: waits for the index to be defined", func(t *testing.T) {
+		s := newServer(withVector)
+		require.Empty(t, ids(index.FilterInIndexedSegments(ctx, s.handler, s.indexMeta, false, allSegments(s)...)))
+		// with skipNoIndexCollection a collection with no index defined is not filtered at all
+		require.ElementsMatch(t, []int64{1, 2, 3}, ids(index.FilterInIndexedSegments(ctx, s.handler, s.indexMeta, true, allSegments(s)...)))
+	})
+
+	t.Run("vector index built, scalar index in progress: ready", func(t *testing.T) {
 		s := newServer(withVector)
 		setIndex(s, vectorField, vectorIndex, map[int64]commonpb.IndexState{1: commonpb.IndexState_Finished, 2: commonpb.IndexState_Finished})
 		setIndex(s, scalarField, scalarIndex, map[int64]commonpb.IndexState{1: commonpb.IndexState_Finished, 2: commonpb.IndexState_InProgress})
-		require.ElementsMatch(t, []int64{1}, ids(index.FilterInHandoffReadySegments(ctx, s.handler, s.indexMeta, allSegments(s)...)))
-		require.ElementsMatch(t, []int64{1, 2}, ids(index.FilterInCompactionInputReadySegments(ctx, s.handler, s.indexMeta, false, allSegments(s)...)))
+		require.ElementsMatch(t, []int64{1, 2}, ids(index.FilterInIndexedSegments(ctx, s.handler, s.indexMeta, false, allSegments(s)...)))
 	})
 
-	t.Run("vector index in progress blocks both", func(t *testing.T) {
+	t.Run("vector index in progress: not ready", func(t *testing.T) {
 		s := newServer(withVector)
 		setIndex(s, vectorField, vectorIndex, map[int64]commonpb.IndexState{1: commonpb.IndexState_Finished, 2: commonpb.IndexState_InProgress})
-		require.ElementsMatch(t, []int64{1}, ids(index.FilterInHandoffReadySegments(ctx, s.handler, s.indexMeta, allSegments(s)...)))
-		require.ElementsMatch(t, []int64{1}, ids(index.FilterInCompactionInputReadySegments(ctx, s.handler, s.indexMeta, false, allSegments(s)...)))
+		require.ElementsMatch(t, []int64{1}, ids(index.FilterInIndexedSegments(ctx, s.handler, s.indexMeta, false, allSegments(s)...)))
 	})
 }

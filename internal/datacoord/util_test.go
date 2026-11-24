@@ -955,11 +955,10 @@ func (suite *UtilSuite) TestMergeFieldBinlogsPreservesColumnGroupMetadata() {
 	suite.Len(result[0].GetBinlogs(), 2)
 }
 
-// TestFilterInCompactionInputReadySegmentsStructVector: a segment is ready as
-// compaction input only when the index of every vector field is Finished,
-// struct vector sub-fields included. A fake-finished build (too few vectors,
-// e.g. all null) is Finished too.
-func TestFilterInCompactionInputReadySegmentsStructVector(t *testing.T) {
+// TestFilterInIndexedSegmentsStructVector: a segment is indexed only when the
+// index of every vector field is Finished, struct vector sub-fields included.
+// A fake-finished build (too few vectors, e.g. all null) is Finished too.
+func TestFilterInIndexedSegmentsStructVector(t *testing.T) {
 	const (
 		collectionID   = int64(1)
 		subVecFieldID  = int64(102)
@@ -1011,7 +1010,7 @@ func TestFilterInCompactionInputReadySegmentsStructVector(t *testing.T) {
 			}
 			im.SegmentIndexes.Insert(segmentID, byIndex)
 		}
-		got := index.FilterInCompactionInputReadySegments(context.Background(), handler, im, false, infos...)
+		got := index.FilterInIndexedSegments(context.Background(), handler, im, false, infos...)
 		gotIDs := make([]int64, 0, len(got))
 		for _, segment := range got {
 			gotIDs = append(gotIDs, segment.GetID())

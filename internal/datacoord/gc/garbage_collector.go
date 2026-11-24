@@ -1098,7 +1098,7 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 			droppedCompactTo[to.GetID()] = to
 		}
 	}
-	indexedSegments := index.FilterInHandoffReadySegments(ctx, gc.handler, gc.Option.IndexMeta, lo.Values(droppedCompactTo)...)
+	indexedSegments := index.FilterInIndexedSegments(ctx, gc.handler, gc.Option.IndexMeta, true, lo.Values(droppedCompactTo)...)
 	if ctx.Err() != nil {
 		return
 	}
