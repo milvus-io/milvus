@@ -635,10 +635,10 @@ queryCoord:
     enabled: false # whether QueryCoord releases collections after the configured time to idle (TTI) or under Worker QN memory pressure; effective only when proxy.enableAutoLoad is true
     ttiSeconds: 3600
     checkIntervalSeconds: 10
-    releaseConcurrency: 64 # maximum concurrent automatic collection releases
+    releaseConcurrency: 16 # maximum concurrent automatic collection releases
     lruHighWatermarkPercentage: 85 # Worker QueryNode pool anonymous resident memory percentage that starts collection LRU release; takes effect on the next scan
     lruLowWatermarkPercentage: 80 # Worker QueryNode pool anonymous resident memory percentage that stops selecting collection LRU releases; must be below the high watermark
-    lruMaxEvictionsPerScan: 64 # maximum collection LRU releases selected per scan, independent of releaseConcurrency
+    lruMaxEvictionsPerScan: 64 # maximum queued and running collection LRU releases across scans
   distRequestTimeout: 5000 # the request timeout for querycoord fetching data distribution from querynodes, in milliseconds
   heatbeatWarningLag: 5000 # the lag value for querycoord report warning when last heatbeat is too old, in milliseconds
   enableDataDistributionDelta: true # whether querycoord requests delta data distribution reports from querynodes

@@ -665,6 +665,50 @@ func TestCollectionUsageTTIDoesNotConsumeLRUQuota(t *testing.T) {
 	require.True(t, manager.s.qviewsRuntime.loadConfigStore.Contains(101))
 }
 
+func TestCollectionUsageBoundsLRUReleasesAcrossScans(t *testing.T) {
+	manager, released, releaseMock, memoryMock := newLRUUsageManager(t, 5)
+	params := &paramtable.Get().QueryCoordCfg
+	setUsageParameter(t, &params.AutoReleaseConcurrency, "1")
+	setUsageParameter(t, &params.AutoReleaseLRUMaxEvictions, "2")
+	gate := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(gate) })
+	t.Cleanup(unblock)
+	releaseMock.To(func(_ *collectionUsageManager, _ context.Context, id int64, _ collectionReleaseReason) error {
+		<-gate
+		manager.s.qviewsRuntime.loadConfigStore.StopPlanning(id)
+		released <- id
+		return nil
+	})
+
+	manager.scan(t.Context())
+	// One LRU release is running and one is queued. Another scan can
+	// enqueue the expired TTI collection but has no LRU capacity.
+	setActivityTime(manager, 104, time.Now().Add(-2*time.Hour))
+	manager.scan(t.Context())
+	memoryMock.Return(map[string]collectionMemoryUsage{"pool": {used: 80, total: 100}})
+	manager.scan(t.Context())
+
+	unblock()
+	waitForReleases(t, manager)
+	require.Len(t, released, 3)
+	require.ElementsMatch(t, []int64{100, 101, 104}, []int64{<-released, <-released, <-released})
+
+	memoryMock.Return(map[string]collectionMemoryUsage{"pool": {used: 90, total: 100}})
+	// A limit change during selection leaves room for only the oldest candidate.
+	broker := meta.NewMockBroker(t)
+	broker.EXPECT().GetCollectionProperties(mock.Anything, mock.Anything).
+		RunAndReturn(func(context.Context, int64) ([]*commonpb.KeyValuePair, error) {
+			return nil, paramtable.Get().Save(params.AutoReleaseLRUMaxEvictions.Key, "1")
+		})
+	manager.s.broker = broker
+	scanAndWait(t, manager)
+	require.Len(t, released, 1)
+	require.EqualValues(t, 102, <-released)
+	scanAndWait(t, manager)
+	require.Len(t, released, 1)
+	require.EqualValues(t, 103, <-released)
+}
+
 func TestCollectionUsageScanFinishesSelectedBatch(t *testing.T) {
 	manager, released, releaseMock, memoryMock := newLRUUsageManager(t, 5)
 	params := &paramtable.Get().QueryCoordCfg
@@ -794,6 +838,7 @@ func TestCollectionUsageReleaseLogs(t *testing.T) {
 
 func TestCollectionUsageLRUFailedReleaseCanBeSelectedAgain(t *testing.T) {
 	manager, _, releaseMock, _ := newLRUUsageManager(t, 1)
+	setUsageParameter(t, &paramtable.Get().QueryCoordCfg.AutoReleaseLRUMaxEvictions, "1")
 	var calls atomic.Int32
 	releaseMock.To(func(_ *collectionUsageManager, _ context.Context, id int64, _ collectionReleaseReason) error {
 		if calls.Add(1) == 1 {
@@ -1011,12 +1056,21 @@ func TestCollectionUsageDiscardsQueuedReleaseAfterReset(t *testing.T) {
 				<-gate
 				return nil
 			})
-			queueTestReleases(manager, 1, 2)
+			setActivityTime(manager, 1, time.Now())
+			setActivityTime(manager, 2, time.Now())
+			manager.queueReleases(t.Context(), []releaseCandidate{
+				{collectionID: 1, reason: releaseReasonMemoryPressure},
+				{collectionID: 2, reason: releaseReasonMemoryPressure},
+			})
 			tc.reset(t, manager)
 			unblock()
 			waitForReleases(t, manager)
 			require.Len(t, calls, 1)
 			require.EqualValues(t, 1, <-calls)
+			manager.mu.Lock()
+			outstanding := manager.lruReleasesOutstanding
+			manager.mu.Unlock()
+			require.Zero(t, outstanding)
 		})
 	}
 }

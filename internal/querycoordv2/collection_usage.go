@@ -19,6 +19,7 @@ package querycoordv2
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -73,6 +74,8 @@ type collectionUsageManager struct {
 	// its queued release, even if the collection is loaded again before dispatch.
 	releasing        map[int64]bool
 	releasesInFlight int
+	// Counts LRU releases from admission until completion or discard.
+	lruReleasesOutstanding int
 
 	stop context.CancelFunc
 	wg   sync.WaitGroup
@@ -197,7 +200,7 @@ func (m *collectionUsageManager) resetUsageLocked() {
 	clear(m.lastActiveAt)
 	clear(m.memoryPressure)
 	for _, candidate := range m.releaseQueue {
-		delete(m.releasing, candidate.collectionID)
+		m.removeReleaseLocked(candidate)
 	}
 	m.releaseQueue = nil
 }
@@ -249,7 +252,10 @@ func (m *collectionUsageManager) scan(ctx context.Context) {
 
 	snapshot := m.s.qviewsRuntime.loadConfigStore.Snapshot()
 	pressure := m.pressuredPools(ctx)
-	limit := paramtable.Get().QueryCoordCfg.AutoReleaseLRUMaxEvictions.GetAsInt()
+	lruLimit := paramtable.Get().QueryCoordCfg.AutoReleaseLRUMaxEvictions.GetAsInt()
+	m.mu.Lock()
+	lruBudget := lruLimit - m.lruReleasesOutstanding
+	m.mu.Unlock()
 	lru := typeutil.NewObjectArrayBasedMaximumHeap(nil, func(candidate releaseCandidate) int64 {
 		return candidate.lastActiveAt.UnixNano()
 	})
@@ -270,9 +276,9 @@ func (m *collectionUsageManager) scan(ctx context.Context) {
 			candidates = append(candidates, candidate)
 			continue
 		}
-		if underMemoryPressure(cfg, pressure) && m.collectionReady(collectionID) {
+		if lruBudget > 0 && underMemoryPressure(cfg, pressure) && m.collectionReady(collectionID) {
 			candidate.reason = releaseReasonMemoryPressure
-			if lru.Len() < limit {
+			if lru.Len() < lruBudget {
 				lru.Push(candidate)
 			} else if candidate.lastActiveAt.Before(lru.Peek().lastActiveAt) {
 				lru.Pop()
@@ -280,9 +286,12 @@ func (m *collectionUsageManager) scan(ctx context.Context) {
 			}
 		}
 	}
+	firstLRU := len(candidates)
 	for lru.Len() > 0 {
 		candidates = append(candidates, lru.Pop())
 	}
+	// Oldest candidates get the remaining budget if it shrank during the scan.
+	slices.Reverse(candidates[firstLRU:])
 	m.queueReleases(ctx, candidates)
 }
 
@@ -367,9 +376,10 @@ func (m *collectionUsageManager) collectionReady(collectionID int64) bool {
 	return loadstatus.Get(runtime.loadConfigStore, runtime.shardViewRegistry, collectionID, coll.VChannelNames).Ready()
 }
 
-// Both TTI and memory-pressure decisions use the scan snapshot. Later queries,
-// TTI changes or lower memory usage do not revoke a selected release.
+// Both TTI and memory-pressure decisions use the scan snapshot. Once queued,
+// a release proceeds even after later queries, TTI changes or lower memory usage.
 func (m *collectionUsageManager) queueReleases(ctx context.Context, candidates []releaseCandidate) {
+	lruLimit := paramtable.Get().QueryCoordCfg.AutoReleaseLRUMaxEvictions.GetAsInt()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if !m.enabled || ctx.Err() != nil {
@@ -380,10 +390,17 @@ func (m *collectionUsageManager) queueReleases(ctx context.Context, candidates [
 		if _, loaded := m.lastActiveAt[id]; !loaded {
 			continue
 		}
-		if _, scheduled := m.releasing[id]; !scheduled {
-			m.releasing[id] = true
-			m.releaseQueue = append(m.releaseQueue, candidate)
+		if _, scheduled := m.releasing[id]; scheduled {
+			continue
 		}
+		if candidate.reason == releaseReasonMemoryPressure {
+			if m.lruReleasesOutstanding >= lruLimit {
+				continue
+			}
+			m.lruReleasesOutstanding++
+		}
+		m.releasing[id] = true
+		m.releaseQueue = append(m.releaseQueue, candidate)
 	}
 	m.dispatchReleasesLocked(ctx)
 }
@@ -394,7 +411,7 @@ func (m *collectionUsageManager) dispatchReleasesLocked(ctx context.Context) {
 		candidate := m.releaseQueue[0]
 		m.releaseQueue = m.releaseQueue[1:]
 		if !m.releasing[candidate.collectionID] {
-			delete(m.releasing, candidate.collectionID)
+			m.removeReleaseLocked(candidate)
 			continue
 		}
 		m.releasesInFlight++
@@ -414,9 +431,16 @@ func (m *collectionUsageManager) runRelease(ctx context.Context, candidate relea
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.releasing, candidate.collectionID)
+	m.removeReleaseLocked(candidate)
 	m.releasesInFlight--
 	m.dispatchReleasesLocked(ctx)
+}
+
+func (m *collectionUsageManager) removeReleaseLocked(candidate releaseCandidate) {
+	delete(m.releasing, candidate.collectionID)
+	if candidate.reason == releaseReasonMemoryPressure {
+		m.lruReleasesOutstanding--
+	}
 }
 
 func (m *collectionUsageManager) initializeLastActiveAt(collectionID int64) {
