@@ -27,7 +27,7 @@ mod session;
 
 pub use condition::LiteralCondition;
 pub use error::{Error, InputKind, LimitKind};
-pub use plan::{Boundary, CaseMode, CompileLimits, MatchOptions, PatternKind, Plan};
+pub use plan::{Boundary, CaseMode, CompileLimits, MatchOptions, PatternKind, Plan, ResultMode};
 pub use result::{BatchResult, Line, Span, TextResult};
 pub use session::{CancellationToken, Session};
 

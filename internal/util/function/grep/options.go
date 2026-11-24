@@ -40,11 +40,21 @@ const (
 	BoundaryLine
 )
 
+// ResultMode selects work and output independently of matching semantics.
+type ResultMode uint32
+
+const (
+	ResultDetails ResultMode = iota
+	ResultCount
+	ResultExists
+)
+
 // Spec is immutable matching configuration produced by Parse. Patterns retain
 // their order and are combined with OR by the Rust engine. Its zero value is
 // not a valid parsed specification. Field identity and budgets belong to the
 // request, not this value.
 type Spec struct {
+	resultMode    ResultMode
 	patterns      []string
 	patternKind   PatternKind
 	caseMode      CaseMode
@@ -63,6 +73,7 @@ func (s Spec) Pattern(index int) string { return s.patterns[index] }
 
 func (s Spec) PatternKind() PatternKind { return s.patternKind }
 func (s Spec) CaseMode() CaseMode       { return s.caseMode }
+func (s Spec) ResultMode() ResultMode   { return s.resultMode }
 func (s Spec) Boundary() Boundary       { return s.boundary }
 
 func (s Spec) BeforeContext() uint64 { return s.beforeContext }

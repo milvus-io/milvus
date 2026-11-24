@@ -17,7 +17,7 @@ use grep::{
     },
 };
 
-use crate::{BatchResult, Error, InputKind, LimitKind, Line, Plan, Span, TextResult};
+use crate::{BatchResult, Error, InputKind, LimitKind, Line, Plan, ResultMode, Span, TextResult};
 
 /// Can be cloned and used concurrently with execution, without aliasing a
 /// mutable Session. Cancellation is sticky and also affects later batches.
@@ -46,13 +46,17 @@ pub struct Session {
 
 impl Session {
     pub fn new(plan: &Plan) -> Self {
-        let (before, after) = plan.context();
+        let (before, after) = if plan.result_mode() == ResultMode::Details {
+            plan.context()
+        } else {
+            (0, 0)
+        };
         let matcher = plan.matcher();
         let searcher = SearcherBuilder::new()
             .before_context(before.min(usize::MAX as u64) as usize)
             .after_context(after.min(usize::MAX as u64) as usize)
             .max_matches(plan.max_count())
-            .line_number(true)
+            .line_number(plan.result_mode() == ResultMode::Details)
             .multi_line(false)
             .binary_detection(BinaryDetection::none())
             .encoding(None)
@@ -142,6 +146,28 @@ impl Session {
         };
         for text in validated {
             control.check()?;
+            if self._plan.result_mode() != ResultMode::Details {
+                let mut summary = TextResult {
+                    complete: true,
+                    ..Default::default()
+                };
+                let limit = if self._plan.result_mode() == ResultMode::Exists {
+                    Some(1)
+                } else {
+                    self._plan.max_count()
+                };
+                matcher.search(
+                    &mut self.searcher,
+                    text.as_bytes(),
+                    SummarySink {
+                        control: &control,
+                        result: &mut summary,
+                        limit,
+                    },
+                )?;
+                texts.push(summary);
+                continue;
+            }
             let mut lines = Vec::new();
             matcher.search(
                 &mut self.searcher,
@@ -154,7 +180,9 @@ impl Session {
                 },
             )?;
             texts.push(TextResult {
+                matched: !lines.is_empty(),
                 lines: lines.into_boxed_slice(),
+                ..Default::default()
             });
         }
         let result = BatchResult {
@@ -164,6 +192,30 @@ impl Session {
         // the owned result. All earlier errors drop the entire local result.
         control.check()?;
         Ok(result)
+    }
+}
+
+// Multi-line search is disabled, so each matched callback is one matching line.
+// Summary modes never enumerate spans, copy text, or allocate line objects.
+struct SummarySink<'a, 'b> {
+    control: &'a Control<'b>,
+    result: &'a mut TextResult,
+    limit: Option<u64>,
+}
+
+impl Sink for SummarySink<'_, '_> {
+    type Error = Error;
+
+    fn matched(&mut self, _: &Searcher, _: &SinkMatch<'_>) -> Result<bool, Error> {
+        self.control.check()?;
+        self.result.matched = true;
+        self.result.count += 1;
+        if self.limit.is_some_and(|limit| self.result.count >= limit) {
+            // Do not scan the tail merely to establish an exact count.
+            self.result.complete = false;
+            return Ok(false);
+        }
+        Ok(true)
     }
 }
 
@@ -251,8 +303,9 @@ impl ResultSink<'_, '_, '_> {
         is_match: bool,
     ) -> Result<bool, Error> {
         self.matcher.control.check()?;
-        let bytes = bytes.strip_suffix(b"\n").unwrap_or(bytes);
         // The full input was already validated; BOM sniffing/transcoding is off.
+        // Preserve the original terminator in output. Span enumeration in
+        // matched() still excludes LF, so anchors and empty matches are unchanged.
         let content = std::str::from_utf8(bytes)
             .map_err(|_| Error::Internal("searcher returned an invalid UTF-8 line"))?;
         let line_number = line_number.ok_or(Error::Internal("searcher omitted line number"))?;
@@ -447,10 +500,7 @@ mod tests {
             self.0.push((
                 mat.line_number().unwrap(),
                 mat.absolute_byte_offset(),
-                mat.bytes()
-                    .strip_suffix(b"\n")
-                    .unwrap_or(mat.bytes())
-                    .to_vec(),
+                mat.bytes().to_vec(),
                 true,
             ));
             Ok(true)
@@ -460,10 +510,7 @@ mod tests {
             self.0.push((
                 ctx.line_number().unwrap(),
                 ctx.absolute_byte_offset(),
-                ctx.bytes()
-                    .strip_suffix(b"\n")
-                    .unwrap_or(ctx.bytes())
-                    .to_vec(),
+                ctx.bytes().to_vec(),
                 false,
             ));
             Ok(true)
@@ -760,10 +807,13 @@ mod tests {
                 .unwrap();
             let lines = &result.texts[0].lines;
             assert_eq!(lines.len(), 3, "{pattern}");
-            for (i, (content, is_match)) in
-                [("error", true), ("error", second_is_match), ("x", false)]
-                    .into_iter()
-                    .enumerate()
+            for (i, (content, is_match)) in [
+                ("error\n", true),
+                ("error\n", second_is_match),
+                ("x", false),
+            ]
+            .into_iter()
+            .enumerate()
             {
                 let line = &lines[i];
                 assert_eq!(&*line.content, content, "{pattern}, line {i}");

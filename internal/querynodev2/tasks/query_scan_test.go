@@ -172,7 +172,7 @@ func testRealQueryTask(t *testing.T, enableScan bool) {
 			require.Equal(t, schemapb.DataType_JSON, result.ComputedResults[0].Type)
 			details := result.ComputedResults[0].GetScalars().GetJsonData().Data
 			require.Len(t, details, 1)
-			require.JSONEq(t, `[{"type":"match","content":"timeout twenty","line_number":1,"line_start_offset":0,"starts":[0],"ends":[7]}]`, string(details[0]))
+			require.JSONEq(t, `{"items":[{"type":"match","line_number":1,"starts":[0],"ends":[7],"text":"timeout twenty","absolute_offset":0}]}`, string(details[0]))
 		})
 	}
 	t.Run("renamed final output", func(t *testing.T) {

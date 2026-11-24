@@ -30,6 +30,8 @@ func FuzzParse(f *testing.F) {
 	}
 	f.Add("-m0 -e 'a\nb'")
 	f.Add("-m1 -C+2 -e hit")
+	f.Add("-cl -C2 -e hit")
+	f.Add("--count -m1 -e hit")
 	f.Fuzz(func(t *testing.T, input string) {
 		const maxArgumentBytes int64 = 4096
 		spec, err := Parse(input, maxArgumentBytes)
@@ -43,6 +45,12 @@ func FuzzParse(f *testing.F) {
 			t.Fatal("invalid successful result")
 		}
 		var args []string
+		switch spec.ResultMode() {
+		case ResultCount:
+			args = append(args, "-c")
+		case ResultExists:
+			args = append(args, "-l")
+		}
 		count, capped := spec.MaxCount()
 		if capped {
 			args = append(args, "-m", strconv.FormatUint(count, 10))

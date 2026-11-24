@@ -90,7 +90,7 @@ func grepTestDetails(t *testing.T, pool memory.Allocator, json string) arrow.Arr
 	return arr
 }
 
-const grepHit = `[{"type":"match","content":"超时 timeout","starts":[7],"ends":[14]}]`
+const grepHit = `{"items":[{"type":"match","starts":[7],"ends":[14],"text":"超时 timeout","line_number":1,"absolute_offset":0}]}`
 
 func grepTestFrame(t *testing.T, pool memory.Allocator, values string) *DataFrame {
 	t.Helper()
@@ -267,7 +267,7 @@ func TestGrepSuccessfulRunnerResultSurvivesCancellation(t *testing.T) {
 	require.ErrorIs(t, ctx.Err(), context.Canceled)
 	require.Equal(t, int64(1), result.NumRows())
 	require.Equal(t, []int64{1}, result.Column(types.SegOffsetFieldName).Chunk(0).(*array.Int64).Int64Values())
-	expected, _, err := grepJSONColumn(pool, strings.NewReader(`[[{"type":"match","content":"超时 timeout","starts":[7],"ends":[14]}]]`))
+	expected, _, err := grepJSONColumn(pool, strings.NewReader(`[{"items":[{"type":"match","starts":[7],"ends":[14],"text":"超时 timeout","line_number":1,"absolute_offset":0}]}]`))
 	require.NoError(t, err)
 	defer expected.Release()
 	require.True(t, array.Equal(expected, result.Column("matches").Chunk(0)))
@@ -345,7 +345,7 @@ func (s *nativeTextTestSegment) ScanGrep(ctx context.Context, input arrow.Record
 		} // predetermined NULL / non-match
 		text := s.label + " timeout"
 		selected = append(selected, i)
-		payload, err := json.Marshal([]grepJSONLine{{Type: "match", Content: text, Starts: []int64{int64(len(s.label) + 1)}, Ends: []int64{int64(len(text))}}})
+		payload, err := json.Marshal(map[string]any{"items": []grepJSONLine{{Type: "match", Content: text, Starts: []int64{int64(len(s.label) + 1)}, Ends: []int64{int64(len(text))}}}})
 		if err != nil {
 			return nil, err
 		}
@@ -548,7 +548,7 @@ func TestGrepArgumentSizeConfiguration(t *testing.T) {
 func TestGrepJSONSelection(t *testing.T) {
 	pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer pool.AssertSize(t, 0)
-	nativeRows := grepTestDetails(t, pool, `[[{"type":"match","content":"skip","starts":[0],"ends":[4]}],[{"type":"match","content":"foo bar foo","starts":[0,8],"ends":[3,11]},{"type":"match","content":"hello foo","starts":[6],"ends":[9]}],[]]`)
+	nativeRows := grepTestDetails(t, pool, `[{"items":[{"type":"match","starts":[0],"ends":[4],"text":"skip","line_number":1,"absolute_offset":0}]},{"items":[{"type":"match","starts":[0,8],"ends":[3,11],"text":"foo bar foo","line_number":1,"absolute_offset":0},{"type":"match","starts":[6],"ends":[9],"text":"hello foo","line_number":1,"absolute_offset":0}]},{"items":[]}]`)
 	sliced := array.NewSlice(nativeRows, 1, 3)
 	column := arrow.NewChunked(sliced.DataType(), []arrow.Array{sliced})
 	sliced.Release()
@@ -558,7 +558,7 @@ func TestGrepJSONSelection(t *testing.T) {
 	column.Release()
 	require.NoError(t, err)
 	defer selected.Release()
-	expected, _, err := grepJSONColumn(pool, strings.NewReader(`[[],[{"type":"match","content":"foo bar foo","starts":[0,8],"ends":[3,11]},{"type":"match","content":"hello foo","starts":[6],"ends":[9]}],[{"type":"match","content":"foo bar foo","starts":[0,8],"ends":[3,11]},{"type":"match","content":"hello foo","starts":[6],"ends":[9]}]]`))
+	expected, _, err := grepJSONColumn(pool, strings.NewReader(`[{"items":[]},{"items":[{"type":"match","starts":[0,8],"ends":[3,11],"text":"foo bar foo","line_number":1,"absolute_offset":0},{"type":"match","starts":[6],"ends":[9],"text":"hello foo","line_number":1,"absolute_offset":0}]},{"items":[{"type":"match","starts":[0,8],"ends":[3,11],"text":"foo bar foo","line_number":1,"absolute_offset":0},{"type":"match","starts":[6],"ends":[9],"text":"hello foo","line_number":1,"absolute_offset":0}]}]`))
 	require.NoError(t, err)
 	defer expected.Release()
 	require.True(t, array.Equal(expected, selected.Chunk(0)))

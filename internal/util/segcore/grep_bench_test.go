@@ -113,7 +113,9 @@ func BenchmarkGrepJSON(b *testing.B) {
 					Starts []int64 `json:"starts"`
 					Ends   []int64 `json:"ends"`
 				}
-				require.NoError(b, json.Unmarshal(probe.Details.(*array.Binary).Value(0), &lines))
+				require.NoError(b, json.Unmarshal(probe.Details.(*array.Binary).Value(0), &struct {
+					Items any `json:"items"`
+				}{Items: &lines}))
 				wantLines, wantSpans := 1, 1
 				if tc.name == "eight_lines_four_spans" {
 					wantLines, wantSpans = 8, 4

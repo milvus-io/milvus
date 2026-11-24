@@ -92,6 +92,21 @@ ToOptions(const MatchOptions& options) {
     out.max_count = options.max_count.value_or(0);
     out.before_context = options.before_context;
     out.after_context = options.after_context;
+    switch (options.result_mode) {
+        case ResultMode::Details:
+            out.result_mode = MG_GREP_RESULT_DETAILS;
+            break;
+        case ResultMode::Count:
+            out.result_mode = MG_GREP_RESULT_COUNT;
+            break;
+        case ResultMode::Exists:
+            out.result_mode = MG_GREP_RESULT_EXISTS;
+            break;
+        default:
+            throw GrepError(Status::InvalidArgument,
+                            Operation::Compile,
+                            "unknown result mode");
+    }
     switch (options.pattern_kind) {
         case PatternKind::Regex:
             out.pattern_kind = MG_GREP_PATTERN_REGEX;
@@ -363,7 +378,15 @@ Result::Deleter::operator()(MgGrepResult* handle) const noexcept {
 }
 bool
 Result::Selected(size_t text) const {
-    return LineCount(text) != 0;
+    return Text(handle_.get(), text).matched;
+}
+uint64_t
+Result::MatchingLineCount(size_t text) const {
+    return Text(handle_.get(), text).count;
+}
+bool
+Result::CountComplete(size_t text) const {
+    return Text(handle_.get(), text).complete;
 }
 size_t
 Result::LineCount(size_t text) const {

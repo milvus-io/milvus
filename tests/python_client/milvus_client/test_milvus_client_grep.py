@@ -35,7 +35,7 @@ def _literal_details(text, pattern="timeout"):
     if text.endswith("\n"):
         lines.pop()
     details = []
-    line_start_offset = 0
+    absolute_offset = 0
     for line_number, line in enumerate(lines, 1):
         content = line.encode("utf-8")
         needle = pattern.encode("utf-8")
@@ -49,14 +49,14 @@ def _literal_details(text, pattern="timeout"):
             details.append(
                 {
                     "type": "match",
-                    "content": line,
+                    "text": line + ("\n" if line_number < len(lines) or text.endswith("\n") else ""),
                     "line_number": line_number,
-                    "line_start_offset": line_start_offset,
+                    "absolute_offset": absolute_offset,
                     "starts": starts,
                     "ends": ends,
                 }
             )
-        line_start_offset += len(content) + 1
+        absolute_offset += len(content) + 1
     return details
 
 
@@ -86,9 +86,11 @@ def _literal_context_details(text, before=0, after=0, max_count=None, pattern="t
                     index + 1,
                     {
                         "type": "context",
-                        "content": content,
+                        "text": content + ("\n" if index + 1 < len(lines) or text.endswith("\n") else ""),
+                        "starts": [],
+                        "ends": [],
                         "line_number": index + 1,
-                        "line_start_offset": offset,
+                        "absolute_offset": offset,
                     },
                 )
             )
@@ -147,12 +149,88 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
             if details:
                 value = dict(row)
                 if export:
-                    value[output] = details
+                    value[output] = {"items": details}
                 expected.append(value)
         expected = expected[offset : None if limit is None else offset + limit]
         # Compare full rows in returned order: sorting actual rows would hide
         # pagination bugs, and checking only IDs would miss late-read misalignment.
         assert list(actual) == expected
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("text_type", [DataType.VARCHAR, DataType.TEXT])
+    @pytest.mark.parametrize("phase", ["growing", "sealed", "sealed_ngram"])
+    def test_grep_count_and_existence(self, text_type, phase):
+        client = self._client()
+        name = self._create(client, text_type)
+        rows = [self._row(i, "ordinary") for i in range(2048)]
+        texts = [None, "", "\n", "before\ntimeout timeout\nmiss\ntimeout\n", "timeout\n", "timeout " * 4000]
+        rows.extend(self._row(2048 + i, text) for i, text in enumerate(texts))
+        if phase == "sealed_ngram":
+            self.release_collection(client, name)
+            index = client.prepare_index_params()
+            index.add_index(
+                field_name="text", index_name="text_ngram", index_type="NGRAM", params={"min_gram": 3, "max_gram": 4}
+            )
+            self.create_index(client, name, index)
+        self.insert(client, name, rows)
+        if phase != "growing":
+            self.flush(client, name)
+            if phase == "sealed_ngram":
+                assert self.wait_for_index_ready(client, name, "text_ngram", timeout=180)
+            self.release_collection(client, name)
+            self.load_collection(client, name)
+        for flags, exists, cap in [
+            ("-c", False, None),
+            ("--count -C100", False, None),
+            ("-c -m1", False, 1),
+            ("-c -m8", False, 8),
+            ("-l", True, None),
+            ("--files-with-matches -C100", True, None),
+            ("-cl", True, None),
+            ("-lc", True, None),
+        ]:
+            expected = []
+            for pk, total in [(2051, 2), (2052, 1), (2053, 1)]:
+                value = (
+                    {}
+                    if exists
+                    else {
+                        "count": total if cap is None else min(total, cap),
+                        "complete": cap is None or total < cap,
+                    }
+                )
+                expected.append({"id": pk, "matches": value})
+            for limit, offset in [(None, 0), (1, 0), (2, 1)]:
+                actual = self._query(
+                    client,
+                    name,
+                    arguments=f"{flags} -F -e timeout -e timeout",
+                    output_fields=["id"],
+                    limit=limit,
+                    offset=offset,
+                    ignore_growing=phase != "growing",
+                )
+                assert (
+                    list(actual) == expected[offset:]
+                    if limit is None
+                    else list(actual) == expected[offset : offset + limit]
+                )
+        for flags in ["-c", "-l"]:
+            assert (
+                list(self._query(client, name, arguments=f"{flags} -m0 -e '['", output_fields=["id"], limit=10)) == []
+            )
+            assert list(self._query(client, name, arguments=f"{flags} -e absent", output_fields=["id"], limit=10)) == []
+        actual = self._query(
+            client, name, arguments='-c -e ""', filter="id >= 2048 and id <= 2052", output_fields=["id"], limit=10
+        )
+        assert list(actual) == [
+            {"id": pk, "matches": {"count": count, "complete": True}} for pk, count in [(2050, 1), (2051, 4), (2052, 1)]
+        ]
+        for flags in ["-c", "-l"]:
+            hidden = self._query(
+                client, name, arguments=f"{flags} -e timeout", output_fields=["id"], export=False, limit=10
+            )
+            assert list(hidden) == [{"id": pk} for pk in [2051, 2052, 2053]]
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("text_type", [DataType.VARCHAR, DataType.TEXT])
@@ -207,10 +285,26 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
                 ignore_growing=sealed,
             )
             page = selected[offset:] if limit is None else selected[offset : offset + limit]
-            expected = [dict(rows[pk], offset=index, matches=_literal_details(rows[pk]["text"])) for pk, index in page]
+            expected = [
+                dict(rows[pk], offset=index, matches={"items": _literal_details(rows[pk]["text"])})
+                for pk, index in page
+            ]
             # Compare full rows in returned order, including repeated document
             # arrays and document-specific details for every selected element.
             assert list(actual) == expected, (limit, offset, actual)
+            for flag in ["-c", "-l"]:
+                summary = self._query(
+                    client,
+                    name,
+                    arguments=f"{flag} -e timeout",
+                    filter="element_filter(items, $[price] > 50)",
+                    output_fields=["id", "text", "items"],
+                    limit=limit,
+                    offset=offset,
+                    ignore_growing=sealed,
+                )
+                payload = {} if flag == "-l" else {"count": 1, "complete": True}
+                assert list(summary) == [dict(rows[pk], offset=index, matches=payload) for pk, index in page]
 
         for arguments, threshold in [("-F -e absent", 50), ("-F -e timeout", 100)]:
             assert (
@@ -452,6 +546,11 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
         "arguments,reason,code",
         [
             ("-U -e timeout", "unsupported grep option", 1100),
+            ("--count=true -e timeout", "does not accept a value", 1100),
+            ("--files-with-matches=1 -e timeout", "does not accept a value", 1100),
+            ("-c -C-1 -e timeout", "unsigned decimal integer", 1100),
+            ("-l -e '['", "invalid regex", 2042),
+            ("-c -e '['", "invalid regex", 2042),
             ("-A-1 -e timeout", "unsigned decimal integer", 1100),
             ("-B++1 -e timeout", "unsigned decimal integer", 1100),
             ("--after-context=abc -e timeout", "unsigned decimal integer", 1100),
@@ -536,7 +635,7 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
             for row in rows:
                 details = _literal_details(row["text"])[:max_count]
                 if details:
-                    expected.append(dict(row, matches=details))
+                    expected.append(dict(row, matches={"items": details}))
             for limit, offset in [(10, 0), (1, 0), (1, 1), (2, 2)]:
                 actual = self._query(client, name, arguments=f"{option} -F -e timeout", limit=limit, offset=offset)
                 assert list(actual) == expected[offset : offset + limit], (option, limit, offset)
@@ -682,7 +781,7 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
             for row in rows:
                 details = _literal_context_details(row["text"], before, after, max_count)
                 if details:
-                    expected.append(dict(row, matches=details))
+                    expected.append(dict(row, matches={"items": details}))
             for limit, offset in [(None, 0), (1, 0), (2, 1)]:
                 actual = self._query(
                     client,
@@ -714,16 +813,18 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
         assert list(actual) == [
             {
                 "id": 2050,
-                "matches": [
-                    {
-                        "type": "match",
-                        "content": "",
-                        "line_number": 1,
-                        "line_start_offset": 0,
-                        "starts": [0],
-                        "ends": [0],
-                    }
-                ],
+                "matches": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "text": "\n",
+                            "line_number": 1,
+                            "absolute_offset": 0,
+                            "starts": [0],
+                            "ends": [0],
+                        }
+                    ]
+                },
             }
         ]
 
@@ -762,16 +863,18 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
                 [
                     {
                         "id": i,
-                        "matches": [
-                            {
-                                "type": "match",
-                                "content": text,
-                                "line_number": 1,
-                                "line_start_offset": 0,
-                                "starts": starts,
-                                "ends": ends,
-                            }
-                        ],
+                        "matches": {
+                            "items": [
+                                {
+                                    "type": "match",
+                                    "text": text,
+                                    "line_number": 1,
+                                    "absolute_offset": 0,
+                                    "starts": starts,
+                                    "ends": ends,
+                                }
+                            ]
+                        },
                     }
                 ]
                 if starts
@@ -799,42 +902,49 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
         self.insert(client, name, [self._row(i, text) for i, text in enumerate(texts)])
         empty_line = {
             "type": "match",
-            "content": "",
+            "text": "\n",
             "line_number": 1,
-            "line_start_offset": 0,
+            "absolute_offset": 0,
             "starts": [0],
             "ends": [0],
         }
-        second_empty_line = dict(empty_line, line_number=2, line_start_offset=1)
-        blank = [{"id": 2, "matches": [empty_line]}, {"id": 4, "matches": [empty_line, second_empty_line]}]
+        second_empty_line = dict(empty_line, line_number=2, absolute_offset=1)
+        blank = [
+            {"id": 2, "matches": {"items": [empty_line]}},
+            {"id": 4, "matches": {"items": [empty_line, second_empty_line]}},
+        ]
         empty_pattern = [
             blank[0],
             {
                 "id": 3,
-                "matches": [
-                    {
-                        "type": "match",
-                        "content": "é中",
-                        "line_number": 1,
-                        "line_start_offset": 0,
-                        "starts": list(range(6)),
-                        "ends": list(range(6)),
-                    }
-                ],
+                "matches": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "text": "é中\n",
+                            "line_number": 1,
+                            "absolute_offset": 0,
+                            "starts": list(range(6)),
+                            "ends": list(range(6)),
+                        }
+                    ]
+                },
             },
             blank[1],
             {
                 "id": 5,
-                "matches": [
-                    {
-                        "type": "match",
-                        "content": "x\r",
-                        "line_number": 1,
-                        "line_start_offset": 0,
-                        "starts": [0, 1, 2],
-                        "ends": [0, 1, 2],
-                    }
-                ],
+                "matches": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "text": "x\r\n",
+                            "line_number": 1,
+                            "absolute_offset": 0,
+                            "starts": [0, 1, 2],
+                            "ends": [0, 1, 2],
+                        }
+                    ]
+                },
             },
         ]
         for arguments, expected in [('-e ""', empty_pattern), ('-e "^$"', blank)]:
@@ -850,9 +960,9 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
         self.insert(client, name, [self._row(i, text) for i, text in enumerate(texts)])
         for pk, arguments, content, line_number, line_offset, starts, ends in [
             (0, '-e ""', "ab", 1, 0, [0, 1, 2], [0, 1, 2]),
-            (1, '-e ""', "ab", 1, 0, [0, 1, 2], [0, 1, 2]),
+            (1, '-e ""', "ab\n", 1, 0, [0, 1, 2], [0, 1, 2]),
             (0, '-e "$"', "ab", 1, 0, [2], [2]),
-            (2, r'-e "\Aerror"', "error", 2, 7, [0], [5]),
+            (2, r'-e "\Aerror"', "error\n", 2, 7, [0], [5]),
             (3, r'-e "\Aerror"', "error", 2, 7, [0], [5]),
         ]:
             result = self._query(
@@ -861,16 +971,18 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
             assert list(result) == [
                 {
                     "id": pk,
-                    "matches": [
-                        {
-                            "type": "match",
-                            "content": content,
-                            "line_number": line_number,
-                            "line_start_offset": line_offset,
-                            "starts": starts,
-                            "ends": ends,
-                        }
-                    ],
+                    "matches": {
+                        "items": [
+                            {
+                                "type": "match",
+                                "text": content,
+                                "line_number": line_number,
+                                "absolute_offset": line_offset,
+                                "starts": starts,
+                                "ends": ends,
+                            }
+                        ]
+                    },
                 }
             ]
 
@@ -880,16 +992,30 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
         client = self._client()
         name = self._create(client, text_type)
         self.insert(client, name, [self._row(0, "é中a"), self._row(1, "before\né中a\nafter")])
-        hit = {"type": "match", "content": "é中a", "line_number": 1, "line_start_offset": 0, "starts": [1], "ends": [2]}
+        hit = {"type": "match", "text": "é中a", "line_number": 1, "absolute_offset": 0, "starts": [1], "ends": [2]}
         for context in [0, 1]:
-            middle = [dict(hit, line_number=2, line_start_offset=7)]
+            middle = [dict(hit, text="é中a\n", line_number=2, absolute_offset=7)]
             if context:
                 middle = [
-                    {"type": "context", "content": "before", "line_number": 1, "line_start_offset": 0},
+                    {
+                        "type": "context",
+                        "text": "before\n",
+                        "line_number": 1,
+                        "absolute_offset": 0,
+                        "starts": [],
+                        "ends": [],
+                    },
                     *middle,
-                    {"type": "context", "content": "after", "line_number": 3, "line_start_offset": 14},
+                    {
+                        "type": "context",
+                        "text": "after",
+                        "line_number": 3,
+                        "absolute_offset": 14,
+                        "starts": [],
+                        "ends": [],
+                    },
                 ]
-            expected = [{"id": 0, "matches": [hit]}, {"id": 1, "matches": middle}]
+            expected = [{"id": 0, "matches": {"items": [hit]}}, {"id": 1, "matches": {"items": middle}}]
             actual = self._query(
                 client, name, arguments=rf'-C{context} -e "(?-u:\xA9)"', output_fields=["id"], limit=10
             )
@@ -932,7 +1058,7 @@ class TestMilvusClientGrep(TestMilvusClientV2Base):
                 for row in rows[2:4]:
                     value = {field: row[field] for field in fields}
                     if export:
-                        value["matches"] = _literal_details(row["text"])
+                        value["matches"] = {"items": _literal_details(row["text"])}
                     expected.append(value)
                 assert list(actual) == expected
 

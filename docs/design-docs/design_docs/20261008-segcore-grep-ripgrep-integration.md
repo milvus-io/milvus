@@ -1,7 +1,7 @@
 # Grep: QueryScan Execution and ripgrep Integration
 
 - **Created:** 2026-10-08
-- **Updated:** 2026-11-18
+- **Updated:** 2026-11-23
 - **Scope:** Current Grep implementation: matching engine, QueryScan execution,
   in-process Arrow transport and distributed computed results.
 - **Engine dependency:** ripgrep `15.2.0`, commit `e89fff89ac9af12e8d4ce9d5fd07beb408ca730f`
@@ -31,6 +31,13 @@ This document is the single Grep reference. The shared
 [Function Chain row-selection contract](20261010-function-chain-row-selection.md)
 remains separate because it also serves other operators.
 
+The details result is now a JSON object containing `items`, as specified in
+[Section 14](#14-result-object-format-and-planned-parameter-extensions).
+Matching-line count (`-c`) and existence (`-l`) modes are implemented; other
+new option aliases in that section remain planned;
+the supported-option whitelist describes the implemented parser. There is no
+legacy-format switch or dual-format implementation.
+
 - [Supported matching scope](#2-goals-and-scope)
 - [Build integration](#3-selected-dependency-and-build-integration)
 - [QueryScan pipeline, Arrow ownership and RPC results](#4-queryscan-execution-and-result-transport)
@@ -40,6 +47,7 @@ remains separate because it also serves other operators.
 - [Budgets and failure semantics](#7-budgets-cancellation-and-failure-semantics)
 - [Verification](#11-verification)
 - [element_filter support](#13-element_filter-with-grep)
+- [Result object and planned parameter extensions](#14-result-object-format-and-planned-parameter-extensions)
 
 ## 1. Motivation and Integration Context
 
@@ -76,7 +84,7 @@ input; values are never concatenated across records. C++ skips database NULLs
 and retains the mapping from batch positions to segment offsets.
 
 The request supplies an rg-style `arguments` string and a separate field name.
-Supported flags are repeated `-e`, `-F`, `-i`/`-s`, `-w`/`-x`, `-m`, and `-A`/`-B`/`-C`, including the
+Supported flags are repeated `-e`, `-F`, `-i`/`-s`, `-w`/`-x`, `-m`, `-A`/`-B`/`-C`, and `-c`/`-l`, including the
 exact aliases in [the argument grammar](#51-argument-string-grammar-and-whitelist).
 Parsing and compilation happen on the execution node. The matcher performs no
 file traversal, external command execution, network access or terminal output.
@@ -84,7 +92,7 @@ file traversal, external command execution, network access or terminal output.
 Matching is LF line-oriented. Matching details include line numbers and line
 start byte offsets within the field. Context lines are supported; multiline, smart case, CRLF normalization,
 fragment-only output,
-inversion, counts, PCRE2, transcoding and replacement are unsupported. The
+inversion, occurrence counts (`--count-matches`), PCRE2, transcoding and replacement are unsupported. The
 parser rejects unlisted flags, including flags whose supplied value would make
 them a no-op. There is no fallback to a different matcher.
 
@@ -238,7 +246,7 @@ handles do not enter the distributed Query protocol.
 
 QueryScan runs Grep after filter/MVCC produces candidate offsets. Native code reads matching text in batches; the Go chain handles offsets and matching details. Only matching rows receive PK/timestamp lookup. The worker merges by PK/timestamp, reads ordinary output_fields for winners, then exports one protobuf result. Candidates, identities and details use in-process Arrow; RPC uses protobuf.
 
-Query accepts one QueryScan chain containing exactly one independent Grep operator. It declares one schema VarChar/Text input and one detail output. The text field is a native read dependency; the runtime DataFrame carries `$seg_offset` and, for element-level Query, `$query_element_indices`. Dynamic fields, expression children, multiple Grep operators and subsequent operators are unsupported. Document-level Grep can accompany `element_filter`; matching struct-array element text remains outside this scope. Count, aggregation, GROUP BY, ORDER BY and Query iterator are excluded.
+Query accepts one QueryScan chain containing exactly one independent Grep operator. It declares one schema VarChar/Text input and one detail output. The text field is a native read dependency; the runtime DataFrame carries `$seg_offset` and, for element-level Query, `$query_element_indices`. Dynamic fields, expression children, multiple Grep operators and subsequent operators are unsupported. Document-level Grep can accompany `element_filter`; matching struct-array element text remains outside this scope. Query `count(*)`, aggregation, GROUP BY, ORDER BY and Query iterator are excluded; Grep `-c` counts lines within each selected text.
 
 `output_columns` controls detail export; a chain exporting columns must have a name. Computed names cannot collide with collection or system fields. The protobuf stage is `FunctionChainStageQueryScan`, and the Go stage is `query_scan`. Static preparation validates structure, fields and output schema. Each segment creates its own chain/GrepOp, parses arguments and binds the segment. Native code compiles a matcher and creates a session per segment call, reusing them across that call's text batches.
 
@@ -307,14 +315,14 @@ positions: Int64[M]
 details: Binary[M]  // milvus.data_type = JSON
 ```
 
-Positions are strictly increasing indices into the immediate input offset array, not physical offsets. Each Binary details row encodes a JSON array of matching and requested context lines. Every line has an explicit `type`: `"match"` or `"context"`. Matching lines always include paired `starts`/`ends` arrays (possibly empty); context lines omit both arrays. Overlapping context windows share lines, which appear once in original order with no per-match ownership. Content is one complete line, not necessarily the whole document. Paired starts/ends describe `[start, end)` UTF-8 byte ranges relative to that line, not character indices. Each line also includes `line_number` (one-based within the original field) and `line_start_offset` (zero-based UTF-8 byte offset within that field). Preceding unmatched lines, empty lines and newline bytes count toward these coordinates. LF separates lines; CR is preserved, and a terminal LF does not create an extra line. Add `line_start_offset` to a span endpoint to obtain its field-relative byte offset. Coordinates reset for each field value.
+Positions are strictly increasing indices into the immediate input offset array, not physical offsets. Each Binary details row encodes a JSON object with an `items` array of matching and requested context lines. Every line has an explicit `type`: `"match"` or `"context"`. Matching lines always include paired `starts`/`ends` arrays (possibly empty); context lines carry two empty arrays. Overlapping context windows share lines, which appear once in original order with no per-match ownership. Each `text` is one complete original line including its terminator, not necessarily the whole document. Paired starts/ends describe `[start, end)` UTF-8 byte ranges relative to that line, not character indices. Each line also includes `line_number` (one-based within the original field) and `absolute_offset` (zero-based UTF-8 byte offset within that field). Preceding unmatched lines, empty lines and newline bytes count toward these coordinates. LF separates lines; CR is preserved, and a terminal LF does not create an extra line. Add `absolute_offset` to a span endpoint to obtain its field-relative byte offset. Coordinates reset for each field value.
 
 ```text
 input offsets = [12, 37, 90]
 positions     = [0, 2]
 details       = [
-  [{type: "match", content: "foo bar foo", line_number: 1, line_start_offset: 0, starts: [0, 8], ends: [3, 11]}],
-  [{type: "match", content: "foo", line_number: 1, line_start_offset: 0, starts: [0],    ends: [3]}]
+  {items: [{type: "match", text: "foo bar foo", line_number: 1, absolute_offset: 0, starts: [0, 8], ends: [3, 11]}]},
+  {items: [{type: "match", text: "foo", line_number: 1, absolute_offset: 0, starts: [0],    ends: [3]}]}
 ]
 
 After chain selection:
@@ -327,13 +335,60 @@ produces the following single document value. The middle context line belongs
 to both windows and is emitted only once:
 
 ```json
-[
-  {"type":"context","content":"starting","line_number":1,"line_start_offset":0},
-  {"type":"match","content":"error error","line_number":2,"line_start_offset":9,"starts":[0,6],"ends":[5,11]},
-  {"type":"context","content":"working","line_number":3,"line_start_offset":21},
-  {"type":"match","content":"error again","line_number":4,"line_start_offset":29,"starts":[0],"ends":[5]},
-  {"type":"context","content":"finished","line_number":5,"line_start_offset":41}
-]
+{
+  "items": [
+    {
+      "type": "context",
+      "line_number": 1,
+      "text": "starting\n",
+      "absolute_offset": 0,
+      "starts": [],
+      "ends": []
+    },
+    {
+      "type": "match",
+      "line_number": 2,
+      "starts": [
+        0,
+        6
+      ],
+      "ends": [
+        5,
+        11
+      ],
+      "text": "error error\n",
+      "absolute_offset": 9
+    },
+    {
+      "type": "context",
+      "line_number": 3,
+      "text": "working\n",
+      "absolute_offset": 21,
+      "starts": [],
+      "ends": []
+    },
+    {
+      "type": "match",
+      "line_number": 4,
+      "starts": [
+        0
+      ],
+      "ends": [
+        5
+      ],
+      "text": "error again\n",
+      "absolute_offset": 29
+    },
+    {
+      "type": "context",
+      "line_number": 5,
+      "text": "finished",
+      "absolute_offset": 41,
+      "starts": [],
+      "ends": []
+    }
+  ]
+}
 ```
 
 [GrepOp.Execute](../../../internal/util/function/chain/operator_grep.go) returns positions as RowSelection and retains details directly as the named JSON Binary output column. Positions do not remain a DataFrame column. If details are not declared as exported output, pruning can discard them while preserving selection. The native type is in [native/types.go](../../../internal/util/function/grep/native/types.go); construction and import validation are in [SegmentGrep.cpp](../../../internal/core/src/grep/SegmentGrep.cpp) and [grep.go](../../../internal/util/segcore/grep.go).
@@ -343,7 +398,8 @@ the decimal Milvus JSON enum. Static planning and runtime output share this
 field declaration. The builder's `SetComputedField` consumes logical type and
 nullability, and empty output frames use the same declaration. Binary columns
 can be selected/reordered without interpreting JSON. The native boundary checks
-JSON match shape once; protobuf export only copies the bytes. Result budgeting
+Arrow layout and selection positions, trusting the native JSON producer. Go
+never decodes the JSON payload; protobuf export only copies the bytes. Result budgeting
 charges encoded JSON size (including escaping) plus 16 bytes per document for
 position, offset and validity allowance.
 
@@ -402,8 +458,8 @@ or collection field ID:
 
 ```text
 ComputedResults[column named matches].Scalars.JsonData.Data
-├─ document 0: [{"type":"match","content":"foo bar foo","line_number":1,"line_start_offset":0,"starts":[0,8],"ends":[3,11]}]
-└─ document 1: [{"type":"match","content":"foo","line_number":1,"line_start_offset":0,"starts":[0],"ends":[3]}]
+├─ document 0: {"items":[{"type":"match","text":"foo bar foo","line_number":1,"absolute_offset":0,"starts":[0,8],"ends":[3,11]}]}
+└─ document 1: {"items":[{"type":"match","text":"foo","line_number":1,"absolute_offset":0,"starts":[0],"ends":[3]}]}
 ```
 
 Each entry is one UTF-8 JSON byte string. Zero-row responses retain an empty
@@ -507,8 +563,9 @@ materialization points that handle IDs and ElementIndices, the reducer gathers
 computed fields using exactly the same rowRef list. Timestamp replacement thus
 selects both normal and computed data from the same version. Sorting applies
 the same permutation; document paging applies the same range. These shared
-reduction helpers also support element-level data, but the QueryScan validator
-rejects element-level requests.
+reduction helpers also support element-level data. QueryScan accepts
+`element_filter` with document-level Grep as described in Section 13; Grep on
+individual struct-array element text remains unsupported.
 
 Payload validation runs once at each reduce ingress, before empty-shard
 filtering and single-input shortcuts, so malformed discarded results are not
@@ -654,6 +711,12 @@ produces the following logical spec (field identity is resolved by GrepOp on Que
 | `-A COUNT` | `--after-context COUNT` | Include COUNT following lines |
 | `-B COUNT` | `--before-context COUNT` | Include COUNT preceding lines |
 | `-C COUNT` | `--context COUNT` | Default both context sides to COUNT; explicit -A/-B take precedence |
+| `-c` | `--count` | Return matching-line count without line details |
+| `-l` | `--files-with-matches` | Return `{}` for each matching text; stop matching at its first matching line |
+
+`-l` takes precedence over `-c` regardless of order. Summary modes validate
+context options but ignore their windows. A capped count has `complete=false`;
+`-m 0` selects nothing in all modes. See Section 14 for output semantics.
 
 Support attached `-ePATTERN`, `--regexp=PATTERN`, `-mCOUNT`, and `--max-count=COUNT`. Context counts also support attached short values (`-C2`) and long `=COUNT` values. Short flags can be grouped
 (e.g. `-Fi` or `-im2`); `e`, `m`, `A`, `B`, and `C` consume the remainder of their token or the next token.
@@ -773,7 +836,7 @@ Context is per field value, in original line order, with overlapping windows
 merged and each line emitted at most once. Context counts accept one optional
 leading `+`, like `-m`; zero disables that side. Repeated flags use their last value.
 Explicit `-A` and `-B` override their side of `-C` regardless of order.
-Context lines omit `starts`/`ends`; matching lines carry line-local spans,
+Context lines carry empty `starts`/`ends` arrays; matching lines carry line-local spans,
 including legal zero-length matches at the line end.
 `-m` counts matching lines that open windows; pending after-context is still emitted after
 the cap, and matches there retain spans without extending the window (ripgrep semantics). Context never selects a nonmatching document or changes NGRAM candidates.
@@ -782,7 +845,9 @@ All context bytes and metadata count toward existing result budgets.
 ### 5.2 Normalized Spec and Input Contract
 
 The normalized matching options are `pattern_kind` (regex/literal), `case_mode`
-(sensitive/insensitive), `boundary` (none/word/line), and optional `max_count`, plus unsigned `before_context` and `after_context` counts (default zero).
+(sensitive/insensitive), `boundary` (none/word/line), `result_mode`
+(details/count/exists), and optional `max_count`, plus unsigned `before_context`
+and `after_context` counts (default zero).
 The in-process C ABIs represent presence separately as `has_max_count` (0/1),
 so explicit zero and unlimited remain distinct. Zero initialization selects
 regex, case-sensitive, no boundary or matching-line-count restriction. Reject unknown enum
@@ -820,15 +885,17 @@ memory extent are caller obligations, not something the ABI can safely probe.
 
 ### 5.3 Matching Line Results
 
-The Rust/C API has one output shape:
-`BatchView -> TextResult[] -> Line[] -> {content, line_number, line_start_offset, Span[]}`.
+The Rust/C API returns one result per input, with an independent selection flag.
+Details mode populates line text, original coordinates and spans. Summary modes
+return no lines; count mode supplies its matching-line count and completeness.
+The following line rules apply to details mode.
 
-- LF separates logical lines. Remove only that terminal LF from `content`;
+- LF separates logical lines. Preserve that terminal LF in returned `content`;
   a preceding CR remains ordinary content. Do not trim whitespace.
   A final unterminated line is searchable. A trailing LF does not invent an
   additional line after EOF. CRLF normalization is unsupported.
 - Empty input has no logical lines and produces no matches. `"\n"` has one
-  empty-content line, which an empty pattern selects with span `[0, 0]`.
+  empty logical line returned as `"\n"`, which an empty pattern selects with span `[0, 0]`.
 - Matching and occurrence enumeration use the same logical line boundaries.
   The matcher runs on the complete logical line, not a cropped matching
   fragment, after removing its terminal LF. `\A`/`\z` refer to this logical
@@ -848,18 +915,19 @@ The Rust/C API has one output shape:
   identical content from different lines as distinct entries in line order.
   Matching lines carry `type: "match"` and line-local `starts`/`ends` arrays,
   including zero-length EOF matches. Context lines carry `type: "context"`
-  and omit both arrays. Consumers use the explicit type rather than inferring
+  and carry empty arrays. Consumers use the explicit type rather than inferring
   line identity from span count; the JSON boundary still accepts empty match
-  arrays for compatibility. A nonempty result always contains at least one selected
-  matching line, so `line_count > 0` remains the record selection decision.
+  arrays because selection and span enumeration are distinct. A nonempty result always contains at least one selected
+  matching line in details mode. Selection is carried independently by `matched`,
+  since count/existence modes return no line objects.
 - Spans satisfy `0 <= start <= end <= content.len` and address UTF-8 bytes of
   that line's returned content. They are not original-field offsets.
-  `line_number` is one-based within the original field; `line_start_offset`
-  is its zero-based UTF-8 byte offset, including preceding newline bytes.
+  `line_number` is one-based within the original field; native `line_start_offset`
+  (JSON `absolute_offset`) is its zero-based UTF-8 byte offset, including preceding newline bytes.
   Count unmatched and empty lines too, and reset coordinates for each input.
   Do not duplicate matched text or return field identifiers.
 - Success includes the windows around the first `-m` matching lines, with all
-  line-local spans on retained matching lines and no span fields on nonmatching context lines.
+  line-local spans on retained matching lines and empty span arrays on nonmatching context lines.
   Following rg/Searcher, lines reported as matches inside pending after-context
   retain spans without extending the window, so the returned matching-line count
   can exceed `-m`. This is not guaranteed for every pattern: with `\A`/`\z`,
@@ -940,7 +1008,7 @@ expansion. Compare results only for the same input values and effective options.
 | Zero matching-line cap | After argument and request validation, a final `-m 0` returns an empty result without regex compilation. Thus `-m 0 -e '['` succeeds with no matches, while `-m 0 -m 1 -e '['` reports an invalid regex. Cancellation and service validation remain Milvus concerns. |
 | Matching and byte offsets | Follow the pinned rg matcher, including Unicode-disabling inline flags and empty/nonempty matches inside UTF-8 characters. Forward upstream search hints so rg chooses its own anchor-aware fallback. |
 | Text input | Patterns and stored field values must be valid UTF-8. Preserve BOM and NUL in field content; do not sniff encodings, transcode, or apply binary-file detection. LF separates lines; retain CR. Byte-mode matching does not relax input UTF-8 validation. |
-| Result representation | Return explicit match/context types and original line coordinates. Enumerate spans on the line content without terminal LF, retaining zero-length matches at its end. Context lines omit span arrays. |
+| Result representation | Return explicit match/context types and original line coordinates. Enumerate spans on the line content without terminal LF, retaining zero-length matches at its end. Returned text retains its terminator; context lines carry empty span arrays. |
 | Database execution | Apply filter/MVCC, Query limit/offset, element pagination and configured resource limits according to the Milvus query contract. These are outside rg CLI equivalence. A configured soft text-scan threshold can make results incomplete; see [request and row limits](#request-and-row-limits). |
 
 Intentional differences from rg JSON's printer:
@@ -1092,6 +1160,12 @@ remain subject to the native Grep result budget.
 Rust `max_result_bytes` accounts for logical result structures, C view arrays,
 owned text and unselected-row metadata. The C++ runner separately charges the
 encoded JSON output, including escaping and per-document Arrow overhead.
+For each selected input, serialize details one item at a time, checking the
+encoded size including the `{"items":[...]}` envelope, commas and per-row Arrow
+allowance before appending each item. Only one item JSON tree is built at a
+time. Count and existence objects are checked after serialization. This avoids
+a full-document JSON tree; native results, individual items and output buffers
+still coexist, so the output budget is not a peak-memory bound.
 
 Compile and result limits are strictly positive and supplied by the service,
 not raw CLI switches. The matching API has no input-byte budget or independent
@@ -1322,7 +1396,8 @@ flag precedence, original line/span coordinates, result budgets and interactions
 with `-m`. These are validation requirements, not a record of completed runs.
 
 The original matrix below covers phase one. Multiline, fragments and
-count-only output remain unsupported. Per-field `-m` coverage additionally
+occurrence-count output remain unsupported; matching-line count and existence
+output are supported. Per-field `-m` coverage additionally
 checks numeric syntax/presence, repeated flags, zero/unlimited, per-record and
 per-batch reset, line-local spans and coordinates, Query record limits, NGRAM/probe
 paths, unreadable LOB avoidance for zero, and failure/cancellation preservation.
@@ -1614,6 +1689,300 @@ Cover:
 - Unchanged document-level Grep and existing Search `$element_indices` behavior.
 - Live PyMilvus decoding of element offsets, complete requested arrays and shared
   document-level Grep details, for both growing and sealed segments.
+
+## 14. Result Object Format and Planned Parameter Extensions
+
+**Status:** Details, matching-line count (`-c`) and existence (`-l`) modes are
+implemented. Other new aliases remain planned; verification is reported separately.
+**Related issue:** [#55532](https://github.com/milvus-io/milvus/issues/55532).
+
+### 14.1 Scope and format selection
+
+Define only the Grep output value here: one JSON object for one selected input
+text. Do not include primary keys, collection/field identities, Query rows,
+element indices, or other database objects in this JSON. Selection and ordinary
+output fields remain the caller's responsibility.
+
+The complete design has three mutually exclusive shapes: details (`items`), count
+(`count`, `complete`), and existence (`{}`). Consumers identify the
+shape from the returned keys; they do not parse the request arguments. Stable
+field meanings, rather than mandatory empty fields in every mode, are the
+common contract. Do not add `mode`, `matched`, `stats`, `display`, `version`,
+or `result_format` fields or parameters.
+
+The former array payload is replaced directly while the feature is in development.
+No compatibility negotiation or old-format fallback is planned. This changes
+application-visible data, examples and tests, even though generic SDK JSON
+decoding needs no format-specific implementation.
+
+Local source inspection found that PyMilvus `grep-patch` (`0e1fff92`) forwards
+both synchronous and asynchronous `grep()` to Query. Non-dynamic JSON values
+are decoded with `orjson.loads` and assigned directly to the output field.
+Go SDK Grep in the `milvus-rg` checkout (`2764784808`) delegates to Query and
+returns `ColumnJSONBytes`. Neither contains a Grep-specific line decoder.
+These observations are source evidence, not a completed new-format SDK test.
+
+### 14.2 Details: ordinary matching and context
+
+```json
+{
+  "items": [
+    {
+      "type": "context",
+      "text": "before\n",
+      "line_number": 1,
+      "absolute_offset": 0,
+      "starts": [],
+      "ends": []
+    },
+    {
+      "type": "match",
+      "text": "error error\n",
+      "line_number": 2,
+      "absolute_offset": 7,
+      "starts": [0, 6],
+      "ends": [5, 11]
+    }
+  ]
+}
+```
+
+Each item always has all six fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `type` | string | `match` or `context` |
+| `text` | string | Original UTF-8 text block, including its original line terminators |
+| `line_number` | integer | One-based number of the first line of the block |
+| `absolute_offset` | integer | Zero-based UTF-8 byte offset of the block within the input |
+| `starts` | integer array | Inclusive match starts relative to the block |
+| `ends` | integer array | Exclusive match ends relative to the block |
+
+`starts` and `ends` must have equal length; pair i is `[starts[i], ends[i])`.
+Require `0 <= start <= end <= UTF8ByteLength(text)`, and retain matcher order.
+Offsets are bytes, not character indices. They may fall inside a UTF-8 code
+point under byte-mode regexes; do not require individual matched slices to be
+valid UTF-8 strings. Zero-length matches remain valid. Context items carry
+empty arrays; use `type`, not array length, to distinguish them.
+
+Items follow original input order, with overlapping context windows deduplicated.
+Details for a selected input contain at least one match item. The initial
+implementation still performs line-oriented matching, with one original line
+per item. A text block may contain multiple lines in a future multiline
+extension without changing the coordinate model; this does not enable `-U` now.
+
+Unlike the former JSON `content`, `text` retains terminal LF and any preceding CR.
+An unterminated final line stays unterminated. Empty input and trailing-LF
+selection semantics remain unchanged; a trailing LF does not invent a line.
+Span enumeration must preserve the existing matching semantics on logical
+line content excluding its terminator. Keeping the terminator in returned
+`text` must not introduce new matches at the newline or shift existing spans.
+
+This borrows ripgrep JSON's original-text-block and byte-coordinate model, but
+uses parallel integer arrays instead of repeated `submatches` objects. Do not
+duplicate matched text in every span. This avoids repeated JSON keys, extra
+objects, and additional matched-fragment encoding. There are no file lifecycle
+events (`begin`, `end`, `summary`) in this per-input value.
+
+### 14.3 Count results
+
+`-c` / `--count` returns only the number of matching lines:
+
+```json
+{
+  "count": 3,
+  "complete": true
+}
+```
+
+Count a line once even if it contains multiple occurrences or matches multiple
+`-e` patterns. Do not count context lines. Return only selected inputs with a
+positive count; do not synthesize zero-count results for nonmatching inputs.
+
+`count` is a nonnegative integer. `complete=true` means the count is exact for
+the entire input. If matching stops upon reaching a positive `-m M` cap, return
+`count=M, complete=false`: M is a lower bound on the full-input count. Do not
+scan further solely to determine whether another match exists. If full search
+completion is known, an exact count may be marked complete. This flag describes
+only the count for this input, not overall Query completeness, candidate scan
+coverage, or pagination.
+
+A final `-m 0` retains the current no-selection behavior and skips matching;
+it does not produce a count object. Invalid arguments still fail validation.
+Timeout, cancellation, allocation failure and output-budget failure remain
+errors, not successful objects with `complete=false`.
+
+`--count-matches` remains a future extension, not part of the initial `-c`
+implementation. It would count occurrences instead of matching lines. Its
+interaction with the matching-line cap and future multiline matching needs
+separate execution design and tests. Do not reinterpret `-c -o` as occurrence
+counting.
+
+The JSON object is extensible: consumers must tolerate unknown additional keys.
+Future extensions may add a `unit` field without removing existing fields or
+changing their types. An absent `unit` retains the current matching-line
+meaning; `-c` must continue to count lines. Occurrence counting must require an
+explicit new option and identify its unit, so existing requests and responses
+retain their meaning.
+
+### 14.4 Existence results
+
+`-l` / `--files-with-matches` returns an empty object for each selected input:
+
+```json
+{}
+```
+
+The presence of a selected result is the evidence of a match. Do not repeat
+that fact as `matched=true`, and do not manufacture an empty object for an
+unselected input. The caller's selection channel must distinguish no match
+from a matching input with no details. The JSON value itself contains no ID.
+
+Stop matching each input on its first matching line, unless a final `-m 0`
+disables selection. Do not collect spans or copy line content. Early matcher
+exit does not guarantee avoidance of prior full-text reads or UTF-8 validation.
+
+Quiet/existence querying uses this mode with a caller-level result limit of
+one; no separate `-q` matcher or JSON shape is needed. This does not promise
+immediate cancellation of every distributed segment once one match is found.
+
+### 14.5 Parameter behavior
+
+The existing argument grammar and lexical validation continue to apply.
+`-c/--count` and `-l/--files-with-matches` are supported. `-n`, `-S`, `-o`,
+`--count-matches` and their aliases remain planned and rejected by the parser.
+
+| Option | Planned effect on the result |
+|---|---|
+| Default | Details object containing `items` |
+| `-A/-B/-C` and existing long aliases | Add context items in details mode |
+| `-n/--line-number` | Accept as no-op; item line numbers are always present |
+| `-S/--smart-case` | Change matching semantics, not the JSON shape |
+| `-o/--only-matching` | Accept as no-op for structured output; callers can extract byte ranges from original text |
+| `-c/--count` | Matching-line count object (`count`, `complete`) |
+| `-l/--files-with-matches` | Empty existence object |
+| `--count-matches` | Future count-object extension; remains unsupported initially |
+
+For `-c` plus `-l`, existence takes precedence independent of argument order.
+Count/existence modes validate context options but do not generate context.
+`-o` never changes selection, context windows, counting units, or coordinates;
+in particular `-o -C 2` still returns requested context in details mode. This
+replaces the earlier discussion of suppressing context or emitting display hints.
+
+The last of `-i`, `-s`, `-S` determines the requested case mode. Smart-case
+must be resolved consistently for both the authoritative matcher and NGRAM
+necessary-condition extraction, including multiple patterns, literal patterns,
+and inline regex flags. If safe pruning cannot be established, conservatively
+disable that pruning rather than risk false negatives.
+
+Existing `-e`, `-F`, `-w/-x`, repeated `-m`, and context precedence remain as
+documented above. In details mode preserve the current `-m`/pending-after-context
+behavior, including matches in the tail that do not open additional windows.
+The count-mode path disables context and therefore counts at most M matching
+lines when capped. Query aggregation (`count(*)`), inversion, multiline, PCRE2,
+CRLF normalization and replacement are not enabled by this format change.
+
+### 14.6 Implementation boundaries and verification
+
+Use internal Details/Count/Exists modes without exposing their enum as a JSON
+field. Separate selected-input state from `line_count > 0`: existence/count
+results have no line objects. A count sink increments matching-line counts;
+an existence sink stops at the first match; neither enumerates spans nor builds
+detail strings. Keep the existing result lifetime, cancellation and byte-budget
+contracts. Charge all encoded JSON and native result metadata to the relevant
+budgets, including `{}` and count objects.
+
+Update Rust result/FFI types and C++ wrappers when implementing additional
+result modes; `SegmentGrep.cpp` owns JSON construction. Go's adapter in
+`internal/util/segcore/grep_result.go` checks Arrow column types, row alignment,
+nullability and selection positions, but does not decode or validate the JSON
+contents. It retains the native Binary array as opaque bytes. There is no
+second UTF-8 scan or per-field/span validation in Go; producer tests and E2E
+verify those contracts. Regenerate the C header from Rust when its API changes;
+do not hand-edit it. Later reducers select the entire payload with the winning
+input version, never sum counts across duplicate versions.
+
+Element-level requests remain supported: this payload describes the document's
+text, not an individual struct-array element. Element expansion may repeat it;
+those repetitions must not be summed as separate text counts. Keep this context
+in API documentation, not as additional database-specific JSON fields.
+
+Verification for the details migration and subsequent parameter extensions:
+
+1. Parser tests for new aliases, grouped flags, value rejection, precedence,
+   count/context combinations, and the final `-m 0` shortcut.
+2. Golden JSON tests for all three shapes; retained LF/CRLF, no trailing LF,
+   Unicode byte coordinates, zero-width matches, context overlap and capped
+   after-context. Verify original-text slicing and equal-length span arrays.
+3. Count/existence tests for empty, NULL and nonmatching inputs, repeated
+   occurrences per line, multiple patterns, exact counts and capped lower
+   bounds. Verify that these modes do not build line content or spans.
+4. Keep Arrow-layout/selection rejection tests and producer-side output-budget
+   tests. Test payload correctness at its native producer. A resource failure or
+   cancellation must not become an existence success or a partial count.
+5. Compare raw scans and NGRAM results for each new matching option, especially
+   smart-case; verify growing/sealed paths, batch boundaries, version selection,
+   element expansion and pagination preserve payload alignment.
+6. Feed actual new-format responses through synchronous/asynchronous PyMilvus
+   and Go SDK Query/Grep paths. Update SDK return documentation, examples and
+   existing array-format tests. SDK source inspection alone is not this test.
+
+The current details examples and contracts in Sections 4 and 5 use the object
+format. Count/existence examples describe the implemented `-c` and `-l` modes.
+The `--count-matches` extension remains a design target. Update the
+supported-option table and verification evidence when extensions are implemented.
+
+### 14.7 Details-format verification (2026-11-20)
+
+The details migration was checked with:
+
+- Standalone Rust suite: 72 tests and one documentation test passed, including
+  original-text/coordinate oracles and differential checks against pinned rg.
+- C11/C++17 native ABI smoke tests: all nine exported entry points passed with
+  the rebuilt Rust archive and generated header.
+- Focused C++ Grep, fault and segment suites compiled from the modified sources:
+  165 tests passed; 75 parameterized cases skipped under their existing
+  segment-type eligibility conditions. These include context, raw/NGRAM routes,
+  byte spans, cancellation/resource errors and exact JSON-envelope budgeting.
+- The complete `milvus_core` target built successfully. Go tests for Grep in
+  segcore and Function Chain, JSON export, and real QueryScan/plain QueryTask
+  passed against that rebuilt library, with `-tags dynamic,test` and
+  `-gcflags="all=-N -l"`.
+- A mocked PyMilvus Query response decoded details objects and empty results
+  through the generic JSON path. The updated Python API regression file passed
+  syntax/style checks; its independent oracle preserves original byte slices.
+
+Live Python API follow-up: all 71 cases in
+`tests/python_client/milvus_client/test_milvus_client_grep.py` passed on an
+isolated standalone with a freshly built Go executable and the rebuilt native
+library (verified in the running process's library mappings). After simplifying
+serialization to a complete object followed by one `dump()`, all 71 cases
+passed again in 109.15 seconds. The 12 focused C++ JSON output, escaping and
+context-budget cases also passed after that change. Each standalone used
+separate ports and temporary local storage, embedded etcd and rocksmq, and was
+stopped after testing.
+
+A multi-process deployment was not tested. This evidence covers the implemented
+details-object format at that revision, not the subsequently implemented
+count/existence modes or other new aliases.
+
+### 14.8 Count/existence verification (2026-11-23)
+
+- 75 Rust tests and one documentation test passed, including per-input/batch
+  counter reset, ignored context, capped lower bounds, empty patterns, and
+  invalid UTF-8, cancellation and budget errors. Large matching lines fit the
+  summary budget without allocating detail lines or spans.
+- C11/C++17 ABI checks passed with regenerated descriptors and summary results.
+- 176 focused C++ tests passed; 75 cases skipped under existing segment-type
+  conditions. Summary cases exercise raw/NGRAM routes and result budgets.
+- Go parser/fuzz seeds, native Grep adapter, Function Chain and real QueryTask
+  regressions passed against the rebuilt library.
+- All 82 Python Grep E2E cases passed on isolated standalone in 130.76 seconds.
+  Coverage includes both aliases, `-l` precedence, `-m`, ignored context,
+  growing/sealed/NGRAM VARCHAR and TEXT, NULL/empty inputs, zero-width matching,
+  hidden output columns, element-level pagination, and error recovery. The
+  instance was stopped after testing. Multi-process testing and performance
+  measurements were not part of this run.
 
 ## References
 

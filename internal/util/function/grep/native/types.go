@@ -83,8 +83,8 @@ func (r *ScanResult) Release() {
 	}
 }
 
-// GrepDetailsType stores one UTF-8 JSON array of matching-line objects per
-// document. The operator declares its Milvus logical type separately as JSON.
+// GrepDetailsType stores one UTF-8 JSON result object per matching document
+// (details, matching-line count, or an empty existence object). The operator declares its Milvus logical type separately as JSON.
 func GrepDetailsType() arrow.DataType {
 	return arrow.BinaryTypes.Binary
 }

@@ -19,6 +19,7 @@
 #include <nlohmann/json.hpp>
 #include "common/CGoCatch.h"
 #include "grep/Grep.h"
+#include "grep/GrepResult.h"
 #include "grep/IndexCondition.h"
 #include "log/Log.h"
 #include "index/contracts/query/INgramReader.h"
@@ -55,8 +56,9 @@ CheckResultBudget(uint64_t total_bytes, uint64_t limit) {
 // Builds the Arrow output and counts its bytes across all input batches.
 class GrepResultBuilder {
  public:
-    explicit GrepResultBuilder(const arrow::ListArray* elements = nullptr)
-        : elements_(elements) {
+    explicit GrepResultBuilder(ResultMode result_mode = ResultMode::Details,
+                               const arrow::ListArray* elements = nullptr)
+        : result_mode_(result_mode), elements_(elements) {
     }
 
     int64_t
@@ -86,48 +88,25 @@ class GrepResultBuilder {
         for (size_t i = 0; i < input_positions.size(); ++i) {
             if (!result.Selected(i))
                 continue;
-            std::string document = "[";
-            for (size_t j = 0; j < result.LineCount(i); ++j) {
-                std::vector<int64_t> starts, ends;
-                const auto count = result.SpanCount(i, j);
-                starts.reserve(count);
-                ends.reserve(count);
-                for (size_t k = 0; k < count; ++k) {
-                    auto hit = result.GetSpan(i, j, k);
-                    AssertInfo(
-                        hit.start <= static_cast<uint64_t>(
-                                         std::numeric_limits<int64_t>::max()) &&
-                            hit.end <= static_cast<uint64_t>(
-                                           std::numeric_limits<int64_t>::max()),
-                        "grep span boundary exceeds Int64");
-                    starts.push_back(static_cast<int64_t>(hit.start));
-                    ends.push_back(static_cast<int64_t>(hit.end));
+            const auto document = [&]() -> GrepResult {
+                switch (result_mode_) {
+                    case ResultMode::Count:
+                        return {GrepCount{result.MatchingLineCount(i),
+                                          result.CountComplete(i)}};
+                    case ResultMode::Exists:
+                        return {GrepExists{}};
+                    default:
+                        return {GrepDetailsView{result, i}};
                 }
-                auto detail = nlohmann::json{
-                    {"type", result.IsMatch(i, j) ? "match" : "context"},
-                    {"content", std::string(result.Content(i, j))},
-                    {"line_number", result.LineNumber(i, j)},
-                    {"line_start_offset", result.LineStartOffset(i, j)}};
-                if (result.IsMatch(i, j)) {
-                    detail["starts"] = std::move(starts);
-                    detail["ends"] = std::move(ends);
-                }
-                auto line = detail.dump();
-                // Charge actual JSON bytes, including escaping/punctuation,
-                // plus position, Binary offset and validity allowance.
-                CheckResultBudget(total_bytes_ + 16 + document.size() +
-                                      (j != 0) + line.size() + 1,
-                                  max_result_bytes);
-                if (j != 0)
-                    document += ',';
-                document += line;
-            }
-            document += ']';
-            CheckResultBudget(total_bytes_ + 16 + document.size(),
-                              max_result_bytes);
+            }();
+            const auto encoded = document.Serialize([&](uint64_t size) {
+                // Include the envelope and per-row Arrow allowance on every
+                // item, before extending the serialized document.
+                CheckResultBudget(total_bytes_ + 16 + size, max_result_bytes);
+            });
             CheckArrow(positions_.Append(input_positions[i]));
-            CheckArrow(details_.Append(document));
-            total_bytes_ += 16 + document.size();
+            CheckArrow(details_.Append(encoded));
+            total_bytes_ += 16 + encoded.size();
             const auto count = Contribution(input_positions[i]);
             matched_units_ += std::min(
                 count, std::numeric_limits<int64_t>::max() - matched_units_);
@@ -154,6 +133,7 @@ class GrepResultBuilder {
     }
 
  private:
+    ResultMode result_mode_;
     const arrow::ListArray* elements_;
     int64_t matched_units_ = 0;
     uint64_t total_bytes_ = 0;
@@ -590,7 +570,8 @@ ExecuteGrepScan(const SegmentInternalInterface* segment,
                    opt.max_scan_rows >= 0,
                "invalid grep service budgets or limit");
     AssertInfo(opt.pattern_kind <= 1 && opt.case_mode <= 1 &&
-                   opt.boundary <= 2 && opt.has_max_count <= 1,
+                   opt.boundary <= 2 && opt.has_max_count <= 1 &&
+                   opt.result_mode <= 2,
                "invalid normalized grep options");
     auto check = [&] {
         if (cancel_token.isCancellationRequested()) {
@@ -626,7 +607,8 @@ ExecuteGrepScan(const SegmentInternalInterface* segment,
          opt.has_max_count ? std::optional<uint64_t>(opt.max_count)
                            : std::nullopt,
          opt.before_context,
-         opt.after_context},
+         opt.after_context,
+         static_cast<grep::ResultMode>(opt.result_mode)},
         {opt.max_regex_bytes, opt.max_dfa_cache_bytes});
     auto session = plan.CreateSession();
     folly::CancellationCallback cancel(
@@ -671,7 +653,8 @@ ExecuteGrepScan(const SegmentInternalInterface* segment,
     const auto* read_column =
         (use_views || borrow_inline_text) ? view_column : nullptr;
     std::vector<int64_t> selected_offsets, original_positions;
-    GrepResultBuilder output(elements);
+    GrepResultBuilder output(static_cast<ResultMode>(opt.result_mode),
+                             elements);
     int64_t begin = 0;
     int64_t window_end = 0;
     int64_t scanned_rows = 0;
