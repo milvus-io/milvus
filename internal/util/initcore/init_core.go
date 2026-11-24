@@ -184,6 +184,8 @@ func initLocalArrowFileSystem(path string, params *paramtable.ComponentParam) er
 	cStorageType := C.CString("local")
 	cTalonCoordinator := C.CString(params.CommonCfg.StorageTalonCoordinator.GetValue())
 	defer C.free(unsafe.Pointer(cTalonCoordinator))
+	cTalonNamespace := C.CString(params.CommonCfg.TalonNamespace())
+	defer C.free(unsafe.Pointer(cTalonNamespace))
 	defer C.free(unsafe.Pointer(cRootPath))
 	defer C.free(unsafe.Pointer(cStorageType))
 	storageConfig := C.CStorageConfig{
@@ -193,6 +195,7 @@ func initLocalArrowFileSystem(path string, params *paramtable.ComponentParam) er
 		talon_enabled_stages:            C.uint32_t(params.CommonCfg.StorageTalonEnabledStages.GetAsUint32()),
 		talon_small_read_threshold:      C.uint32_t(params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32()),
 		talon_coordinator:               cTalonCoordinator,
+		talon_namespace:                 cTalonNamespace,
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
 		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
 		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
@@ -217,6 +220,8 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 	cTLSMinVersion := C.CString(tlsMinVersionForStorage(params.MinioCfg.SslTLSMinVersion.GetValue()))
 	cTalonCoordinator := C.CString(params.CommonCfg.StorageTalonCoordinator.GetValue())
 	defer C.free(unsafe.Pointer(cTalonCoordinator))
+	cTalonNamespace := C.CString(params.CommonCfg.TalonNamespace())
+	defer C.free(unsafe.Pointer(cTalonNamespace))
 	defer C.free(unsafe.Pointer(cAddress))
 	defer C.free(unsafe.Pointer(cBucketName))
 	defer C.free(unsafe.Pointer(cAccessKey))
@@ -256,6 +261,7 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 		talon_enabled_stages:            C.uint32_t(params.CommonCfg.StorageTalonEnabledStages.GetAsUint32()),
 		talon_small_read_threshold:      C.uint32_t(params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32()),
 		talon_coordinator:               cTalonCoordinator,
+		talon_namespace:                 cTalonNamespace,
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
 		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
 		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
@@ -287,6 +293,8 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	cTLSMinVersion := C.CString(tlsMinVersionForStorage(params.MinioCfg.SslTLSMinVersion.GetValue()))
 	cTalonCoordinator := C.CString(params.CommonCfg.StorageTalonCoordinator.GetValue())
 	defer C.free(unsafe.Pointer(cTalonCoordinator))
+	cTalonNamespace := C.CString(params.CommonCfg.TalonNamespace())
+	defer C.free(unsafe.Pointer(cTalonNamespace))
 	defer C.free(unsafe.Pointer(cAddress))
 	defer C.free(unsafe.Pointer(cBucketName))
 	defer C.free(unsafe.Pointer(cAccessKey))
@@ -325,6 +333,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 		talon_enabled_stages:            C.uint32_t(params.CommonCfg.StorageTalonEnabledStages.GetAsUint32()),
 		talon_small_read_threshold:      C.uint32_t(params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32()),
 		talon_coordinator:               cTalonCoordinator,
+		talon_namespace:                 cTalonNamespace,
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
 		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
 		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),

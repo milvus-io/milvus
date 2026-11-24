@@ -76,6 +76,9 @@ StorageV2FSCache::Get(const Key& key) {
                 ? key.talon_mode
                 : uint32_t{0};
         props[PROPERTY_FS_TALON_COORDINATOR] = key.talon_coordinator;
+        if (!key.talon_namespace.empty()) {
+            props[PROPERTY_FS_TALON_NAMESPACE] = key.talon_namespace;
+        }
         if (key.talon_small_read_threshold > 0) {
             props[PROPERTY_FS_TALON_SMALL_READ_THRESHOLD] =
                 key.talon_small_read_threshold;

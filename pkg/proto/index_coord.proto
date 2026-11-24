@@ -260,6 +260,8 @@ message StorageConfig {
     bool talon_enable_for_external_table = 24;
     // Milvus stage mask; absent/zero preserves unrestricted legacy routing.
     uint32 talon_enabled_stages = 25;
+    // Empty selects Talon's default namespace.
+    string talon_namespace = 26;
 }
 
 // Synchronously modify OptionalFieldInfo in index_cgo_msg.proto file

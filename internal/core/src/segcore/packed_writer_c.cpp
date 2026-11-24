@@ -96,6 +96,9 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
                 : "",
             c_storage_config.talon_block_size,
             c_storage_config.talon_max_idle_per_addr,
+            c_storage_config.talon_namespace != nullptr
+                ? c_storage_config.talon_namespace
+                : "",
         });
         if (!trueFs) {
             return milvus::FailureCStatus(

@@ -1020,6 +1020,7 @@ func TestMakePropertiesFromStorageConfig_Talon(t *testing.T) {
 					require.NoError(t, params.Save(params.CommonCfg.StorageTalonEnabledStages.Key, "all"))
 					config := CreateStorageConfig()
 					config.TalonEnabledStages = tc.mask
+					config.TalonNamespace = "request-namespace"
 					config.AccessKeyID = "request-access-key"
 					config.SecretAccessKey = "request-secret-key"
 					original := proto.Clone(config)
@@ -1047,6 +1048,7 @@ func TestMakePropertiesFromStorageConfig_Talon(t *testing.T) {
 						wantOpenOnly = "false"
 					}
 					assert.Equal(t, wantOpenOnly, loonPropertyString(props, "fs.talon.open_only"))
+					assert.Equal(t, "request-namespace", loonPropertyString(props, "fs.talon.namespace"))
 					assert.Equal(t, "request-access-key", loonPropertyString(props, "fs.access_key_id"))
 					assert.Equal(t, "request-secret-key", loonPropertyString(props, "fs.access_key_value"))
 					assert.True(t, proto.Equal(original, config), "conversions must preserve the request")
@@ -1066,8 +1068,10 @@ func TestMakePropertiesFromStorageConfig_Talon(t *testing.T) {
 					require.NoError(t, injectExternalSpecProperties(props, 42, "s3://bucket/data/", `{"format":"parquet"}`))
 					assert.Equal(t, tc.wantExternalMode, loonPropertyString(props, "extfs.42.talon.mode"))
 					assert.Equal(t, "127.0.0.1:7000", loonPropertyString(props, "extfs.42.talon.coordinator"))
+					assert.Equal(t, "request-namespace", loonPropertyString(props, "extfs.42.talon.namespace"))
 					require.NoError(t, injectExternalSpecProperties(props, 42, "s3://bucket/data/", `{"format":"parquet","extfs":{"storage_type":"local"}}`))
 					assert.Empty(t, loonPropertyString(props, "extfs.42.talon.mode"))
+					assert.Empty(t, loonPropertyString(props, "extfs.42.talon.namespace"))
 				})
 			}
 		})

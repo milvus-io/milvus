@@ -62,6 +62,7 @@ get_storage_config(const milvus::proto::clustering::StorageConfig& config) {
     storage_config.talon_small_read_threshold =
         config.talon_small_read_threshold();
     storage_config.talon_coordinator = config.talon_coordinator();
+    storage_config.talon_namespace = config.talon_namespace();
     storage_config.talon_block_size = config.talon_block_size();
     storage_config.talon_max_idle_per_addr = config.talon_max_idle_per_addr();
     storage_config.talon_enable_for_external_table =
@@ -127,6 +128,7 @@ Analyze(CAnalyze* res_analyze,
             storage_config.talon_coordinator,
             storage_config.talon_block_size,
             storage_config.talon_max_idle_per_addr,
+            storage_config.talon_namespace,
         });
 
         milvus::storage::FileManagerContext fileManagerContext(

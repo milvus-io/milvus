@@ -155,6 +155,7 @@ struct StorageConfig {
     uint32_t talon_block_size = 0;
     uint32_t talon_max_idle_per_addr = 0;
     bool talon_enable_for_external_table = false;
+    std::string talon_namespace = "";
 
     std::string
     ToString() const {

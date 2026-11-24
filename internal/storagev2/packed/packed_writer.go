@@ -110,6 +110,7 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 			talon_enabled_stages:            C.uint32_t(storageConfig.GetTalonEnabledStages()),
 			talon_small_read_threshold:      C.uint32_t(storageConfig.GetTalonSmallReadThreshold()),
 			talon_coordinator:               C.CString(storageConfig.GetTalonCoordinator()),
+			talon_namespace:                 C.CString(storageConfig.GetTalonNamespace()),
 			talon_block_size:                C.uint32_t(storageConfig.GetTalonBlockSize()),
 			talon_max_idle_per_addr:         C.uint32_t(storageConfig.GetTalonMaxIdlePerAddr()),
 			talon_enable_for_external_table: C.bool(storageConfig.GetTalonEnableForExternalTable()),
@@ -128,6 +129,7 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
 		defer C.free(unsafe.Pointer(cStorageConfig.tls_min_version))
 		defer C.free(unsafe.Pointer(cStorageConfig.talon_coordinator))
+		defer C.free(unsafe.Pointer(cStorageConfig.talon_namespace))
 		status = C.NewPackedWriterWithStorageConfig(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnSplits, cStorageConfig, &cPackedWriter, pluginContextPtr)
 	} else {
 		status = C.NewPackedWriter(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnSplits, &cPackedWriter, pluginContextPtr)

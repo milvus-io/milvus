@@ -16,7 +16,6 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <atomic>
-#include <barrier>
 #include <chrono>
 #include <thread>
 #include <cstdlib>
@@ -1034,8 +1033,7 @@ TEST(StorageTalonConfig, OrdinaryFilesystemUsesConfiguredStages) {
         for (const uint32_t mode : {0, 1, 2}) {
             config.talon_mode = mode;
             config.talon_enabled_stages = stages;
-            const auto fs =
-                StorageV2FSCache::Instance().Get(ToStorageV2FSCacheKey(config));
+            const auto fs = milvus::storage::InitArrowFileSystem(config);
             ASSERT_NE(fs, nullptr);
             const auto observable =
                 std::dynamic_pointer_cast<milvus_storage::Observable>(fs);
@@ -1085,9 +1083,6 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
                         const auto c_config = ToCStorageConfig(input);
                         EXPECT_EQ(c_config.talon_mode, mode);
                         EXPECT_EQ(c_config.talon_enabled_stages, stage.mask);
-                        const auto key = ToStorageV2FSCacheKey(input);
-                        EXPECT_EQ(key.talon_mode, mode);
-                        EXPECT_EQ(key.talon_enabled_stages, stage.mask);
                         LoonFFIPropertiesSingleton singleton;
                         singleton.Init(c_config);
                         const auto base = singleton.GetProperties();
@@ -1117,12 +1112,12 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
                                                stage.load_open &&
                                                !stage.ordinary && mode != 0;
                         const auto policy = milvus_storage::api::GetValue<bool>(
-                            properties, PROPERTY_FS_TALON_OPEN_ONLY);
+                            *properties, PROPERTY_FS_TALON_OPEN_ONLY);
                         ASSERT_TRUE(policy.ok()) << policy.status().ToString();
                         EXPECT_EQ(*policy, open_only);
                         const auto internal =
                             milvus_storage::FilesystemCache::getInstance()
-                                .resolve_config(properties, "");
+                                .resolve_config(*properties, "");
                         ASSERT_TRUE(internal.ok())
                             << internal.status().ToString();
                         EXPECT_EQ(static_cast<uint32_t>(internal->talon_mode),
@@ -1140,7 +1135,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
                         const auto resolved =
                             milvus_storage::FilesystemCache::getInstance()
                                 .resolve_config(
-                                    external_properties,
+                                    *external_properties,
                                     "s3://s3.amazonaws.com/bucket/data/");
                         ASSERT_TRUE(resolved.ok())
                             << resolved.status().ToString();
@@ -1241,12 +1236,13 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
         EXPECT_NE(singleton.GetProperties(manifest_options).get(),
                   manifest.get());
         EXPECT_EQ(std::get<uint32_t>(manifest->at(PROPERTY_FS_TALON_MODE)), 1);
-        EXPECT_EQ(milvus_storage::api::GetValueNoError<int64_t>(
-                      first, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT),
-                  32 * 1024);
         EXPECT_EQ(
             milvus_storage::api::GetValueNoError<int64_t>(
-                updated, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT),
+                *first, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT),
+            32 * 1024);
+        EXPECT_EQ(
+            milvus_storage::api::GetValueNoError<int64_t>(
+                *updated, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT),
             64 * 1024);
     }
 
@@ -1274,6 +1270,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
     first.talon_mode = 2;
     first.talon_small_read_threshold = 65536;
     first.talon_coordinator = "127.0.0.1:7000";
+    first.talon_namespace = "cluster-dedicated-standard-all";
     first.talon_block_size = 8388608;
     first.talon_max_idle_per_addr = 32;
     first.talon_enable_for_external_table = true;
@@ -1282,6 +1279,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
     auto second = first;
     second.talon_mode = 1;
     second.talon_coordinator = "127.0.0.1:7001";
+    second.talon_namespace.clear();
     const auto second_properties =
         MakeInternalPropertiesFromStorageConfig(ToCStorageConfig(second));
     for (const auto& [properties, expected] :
@@ -1295,6 +1293,9 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
         EXPECT_EQ(static_cast<uint32_t>(config.talon_mode),
                   expected.talon_mode);
         EXPECT_EQ(config.talon_coordinator, expected.talon_coordinator);
+        EXPECT_EQ(config.talon_namespace, expected.talon_namespace);
+        EXPECT_STREQ(ToCStorageConfig(expected).talon_namespace,
+                     expected.talon_namespace.c_str());
         EXPECT_EQ(config.talon_small_read_threshold, 65536);
         EXPECT_EQ(config.talon_block_size, 8388608);
         EXPECT_EQ(config.talon_max_idle_per_addr, 32);
@@ -1331,6 +1332,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
                           external ? mode : 0);
                 EXPECT_EQ(resolved->talon_small_read_threshold, 65536);
                 EXPECT_EQ(resolved->talon_coordinator, "127.0.0.1:7000");
+                EXPECT_EQ(resolved->talon_namespace, first.talon_namespace);
                 EXPECT_EQ(resolved->talon_block_size, 8388608);
                 EXPECT_EQ(resolved->talon_max_idle_per_addr, 32);
                 ::InjectExternalSpecProperties(
@@ -1359,6 +1361,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
             *old_properties, defaults)
             .ok());
     EXPECT_EQ(defaults.talon_mode, milvus_storage::TalonMode::Disabled);
+    EXPECT_TRUE(defaults.talon_namespace.empty());
     EXPECT_EQ(defaults.talon_small_read_threshold, 524288);
 
     // The configured 512 KiB default is forwarded like any other value.

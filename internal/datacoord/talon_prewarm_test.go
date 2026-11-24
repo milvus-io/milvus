@@ -71,6 +71,7 @@ func TestTalonPrewarmConfiguration(t *testing.T) {
 		calls++
 		require.Equal(t, 1, concurrency)
 		require.Equal(t, "coordinator:7000", config.GetTalonCoordinator())
+		require.Equal(t, "cluster-1-VectorLake-meta", config.GetTalonNamespace())
 		return nil, merr.WrapErrServiceInternalMsg("recorded construction")
 	}
 	supplier := func(context.Context) ([]string, error) { return nil, nil }
@@ -86,6 +87,10 @@ func TestTalonPrewarmConfiguration(t *testing.T) {
 	require.Zero(t, calls)
 	require.NoError(t, p.Save(p.CommonCfg.StorageType.Key, "remote"))
 	require.NoError(t, p.Save(p.CommonCfg.StorageTalonCoordinator.Key, "coordinator:7000"))
+	require.NoError(t, p.Save("common.cloud.clusterId", "cluster-1"))
+	require.NoError(t, p.Save("common.cloud.instanceType", "VectorLake"))
+	require.NoError(t, p.Save("common.cloud.classType", "Tiered"))
+	require.NoError(t, p.Save(p.CommonCfg.StorageTalonEnabledStages.Key, "manifest"))
 	require.NoError(t, p.Save(p.MinioCfg.CloudProvider.Key, "aws"))
 	require.NoError(t, p.Save(p.MinioCfg.BucketName.Key, "bucket"))
 	for _, tc := range []struct{ key, value string }{

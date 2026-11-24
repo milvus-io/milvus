@@ -103,6 +103,7 @@ typedef struct CStorageConfig {
     bool talon_enable_for_external_table;
     // Milvus-only stage mask; zero from older initializers means all stages.
     uint32_t talon_enabled_stages;
+    const char* talon_namespace;
 } CStorageConfig;
 
 typedef struct CDiskWriteRateLimiterConfig {

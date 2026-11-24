@@ -18,6 +18,7 @@ package common
 
 import (
 	"encoding/binary"
+	"math"
 	"math/bits"
 	"strconv"
 	"strings"
