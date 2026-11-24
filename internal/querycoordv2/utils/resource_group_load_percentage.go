@@ -179,9 +179,8 @@ import (
 // leaders are dropped before the per-leader resource-group tag is applied.
 // That is a normal product state, not a corner case: UpdateLoadConfig with
 // needWaitRGReady spawns a new group's replicas WithQueryInvisible, and
-// promotion is global and all-or-nothing, so the new group can finish
-// carrying every target of its own while promotion stays blocked on some
-// unrelated replica. It is also exactly the window where the percentage is
+// a collection can finish loading while another collection in the same
+// group still has a pending replica. It is also exactly the window where the percentage is
 // useful -- "how much longer" for a group readiness cannot yet call Ready.
 // A caller acting on 100 alone would cut traffic to a group that cannot
 // answer. TestShardLeaderReadinessByRG_QueryInvisibleReplicaDoesNotCount and
@@ -334,7 +333,7 @@ func ReplicaLoadPercentagesByResourceGroup(
 	}
 
 	// Query-invisible replicas (load-config updates spawn replicas invisible
-	// until every one of them is serviceable) are deliberately included: this
+	// until all pending replicas in their group are serviceable) are deliberately included: this
 	// is a progress figure, and those replicas are exactly the ones whose
 	// progress the load-config path is waiting on.
 	// ShardLeaderReadinessByResourceGroup, by contrast, excludes them to
