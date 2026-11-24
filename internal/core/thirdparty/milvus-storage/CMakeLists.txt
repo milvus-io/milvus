@@ -14,7 +14,7 @@
 # Update milvus-storage_VERSION for the first occurrence
 milvus_add_pkg_config("milvus-storage")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( milvus-storage_VERSION 07f135ea23b6baa921227a9c591746d59649cabe)
+set( milvus-storage_VERSION d6d628e6ce38f80baad853c9f621855f1c5577c1)
 set( GIT_REPOSITORY  "https://github.com/milvus-io/milvus-storage.git")
 message(STATUS "milvus-storage repo: ${GIT_REPOSITORY}")
 message(STATUS "milvus-storage version: ${milvus-storage_VERSION}")
@@ -57,9 +57,6 @@ FetchContent_Declare(
         milvus-storage
         GIT_REPOSITORY  ${GIT_REPOSITORY}
         GIT_TAG         ${milvus-storage_VERSION}
-        # Remove when the pin exposes TEXT counters. FetchContent source-dir
-        # overrides skip PATCH_COMMAND and must supply an already patched tree.
-        PATCH_COMMAND   ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_LIST_DIR}/apply-text-column-stats.cmake
         SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/milvus-storage-src
         BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/milvus-storage-build
         SOURCE_SUBDIR   cpp
