@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
@@ -78,21 +79,24 @@ func (impl *shardInterceptor) handleUpdateMessage(ctx context.Context, msg messa
 			return nil, status.NewInvalidArgument("UPDATE set_null must be true")
 		}
 	}
-	// Enforce the text-update boundary before persistence, including writes
-	// arriving through replication rather than the public Proxy RPC.
+	// Replicated updates bypass the target Proxy's field eligibility checks.
 	if len(body.GetAssignments()) > 0 {
 		schema := impl.shardManager.GetCollectionSchemaSnapshot(h.GetCollectionId())
 		if schema == nil {
 			return nil, status.NewUnrecoverableError("cannot validate UPDATE fields: collection schema is unavailable")
 		}
-		for _, field := range schema.GetFields() {
-			if field.GetDataType() != schemapb.DataType_VarChar || !typeutil.CreateFieldSchemaHelper(field).EnableMatch() {
-				continue
+		fields := lo.KeyBy(typeutil.GetAllFieldSchemas(schema), (*schemapb.FieldSchema).GetFieldID)
+		restricted := typeutil.PKUpdateFieldRestriction(schema)
+		for _, assignment := range body.GetAssignments() {
+			field := fields[assignment.GetFieldId()]
+			if field == nil {
+				return nil, status.NewInvalidArgument("UPDATE references unknown field ID %d", assignment.GetFieldId())
 			}
-			for _, assignment := range body.GetAssignments() {
-				if assignment.GetFieldId() == field.GetFieldID() {
-					return nil, status.NewInvalidArgument("PK-update does not support enable_match VARCHAR field %s", field.GetName())
-				}
+			if restricted(field) {
+				return nil, status.NewInvalidArgument("field %s cannot be updated", field.GetName())
+			}
+			if !typeutil.SupportsPKUpdateType(field) {
+				return nil, status.NewInvalidArgument("field %s has unsupported update type %s", field.GetName(), field.GetDataType())
 			}
 		}
 	}
