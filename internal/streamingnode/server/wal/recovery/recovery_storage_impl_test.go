@@ -100,18 +100,14 @@ func TestConsumeDirtySnapshotRewritesCheckpointOnControlChange(t *testing.T) {
 		TimeTick:  10,
 		Magic:     utility.RecoveryMagicRecoveryStorageV2,
 	}
-	storage.pchannelControl.AlterWalState = &streamingpb.AlterWALState{
-		TargetWalName: commonpb.WALName_Kafka,
-		TimeTick:      10,
-		Stage:         streamingpb.AlterWALStage_FLUSHING,
-	}
+	storage.pchannelControl.ReplicateCheckpoint = &commonpb.ReplicateCheckpoint{ClusterId: "source"}
 	storage.mu.Unlock()
 
 	snapshot := storage.consumeDirtySnapshot()
 	require.NotNil(t, snapshot)
 	require.True(t, snapshot.CheckpointDirty)
-	require.NotNil(t, snapshot.Checkpoint.AlterWalState)
-	require.Equal(t, streamingpb.AlterWALStage_FLUSHING, snapshot.Checkpoint.AlterWalState.GetStage())
+	require.NotNil(t, snapshot.Checkpoint.ReplicateCheckpoint)
+	require.Equal(t, "source", snapshot.Checkpoint.ReplicateCheckpoint.GetClusterId())
 
 	// Consuming again without any further change is a no-op: the position and
 	// the control state both match the last frozen checkpoint.
@@ -128,11 +124,6 @@ func TestConsumeCheckpointEqualComparesControlFields(t *testing.T) {
 		Magic:     utility.RecoveryMagicRecoveryStorageV2,
 	}
 	assert.True(t, consumeCheckpointEqual(base, base.Clone()))
-
-	withAlter := base.Clone()
-	withAlter.AlterWalState = &streamingpb.AlterWALState{Stage: streamingpb.AlterWALStage_FLUSHING}
-	assert.False(t, consumeCheckpointEqual(base, withAlter))
-	assert.True(t, consumeCheckpointEqual(withAlter, withAlter.Clone()))
 
 	withCP := &utility.WALCheckpoint{
 		MessageID:           walimplstest.NewTestMessageID(10),
@@ -615,11 +606,8 @@ func TestBuildInitialRecoverySnapshotUsesCanonicalState(t *testing.T) {
 	assert.NotNil(t, snapshot.WritePathRecovery.VChannels)
 	assert.NotNil(t, snapshot.WritePathRecovery.GrowingSegments)
 	require.NotNil(t, snapshot.PChannelControl)
-	state := snapshot.PChannelControl.GetAlterWalState()
-	assert.Equal(t, streamingpb.AlterWALStage_FLUSHING, state.GetStage())
-	assert.Equal(t, commonpb.WALName_Kafka, state.GetTargetWalName())
-	assert.Equal(t, uint64(20), state.GetTimeTick())
-	assert.Equal(t, "localhost:9092", state.GetConfigs()["bootstrap.servers"])
+	assert.Nil(t, snapshot.PChannelControl.GetAlterWalState())
+	assert.Equal(t, uint64(1), snapshot.Checkpoint.TimeTick, "observing a switch must not rewrite the data checkpoint")
 }
 
 func TestRecoveryStorageConsumeDirtySnapshotDoesNotHoldLockWhileCollectingModules(t *testing.T) {

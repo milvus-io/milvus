@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 var _ walimpls.WALImpls = (*walImpl)(nil)
@@ -61,6 +62,9 @@ func estimatePulsarRecordSize(payload []byte, properties map[string]string) int 
 }
 
 func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls.ScannerImpls, err error) {
+	if _, latest := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_Latest); latest {
+		return nil, merr.WrapErrParameterInvalidMsg("latest delivery policy is deprecated; use All, StartFrom or StartAfter")
+	}
 	topic := w.tenant.MustGetFullTopicName(w.Channel().Name)
 	ch := make(chan pulsar.ReaderMessage, 1)
 	readerOpt := pulsar.ReaderOptions{
@@ -73,8 +77,6 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 	switch t := opt.DeliverPolicy.GetPolicy().(type) {
 	case *streamingpb.DeliverPolicy_All:
 		readerOpt.StartMessageID = pulsar.EarliestMessageID()
-	case *streamingpb.DeliverPolicy_Latest:
-		readerOpt.StartMessageID = pulsar.LatestMessageID()
 	case *streamingpb.DeliverPolicy_StartFrom:
 		id, err := unmarshalMessageID(t.StartFrom.GetId())
 		if err != nil {

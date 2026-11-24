@@ -50,6 +50,7 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeCreateSegment:      impl.handleCreateSegment,
 		message.MessageTypeFlush:              impl.handleFlushSegment,
 		message.MessageTypeFlushAll:           impl.handleFlushAllMessage,
+		message.MessageTypeAlterWAL:           impl.handleFlushAllMessage,
 		message.MessageTypeTruncateCollection: impl.handleTruncateCollectionMessage,
 	}
 }

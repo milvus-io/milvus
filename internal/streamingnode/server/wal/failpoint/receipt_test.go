@@ -28,9 +28,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
 func receiptMessage(vchannel string) message.MutableMessage {
@@ -74,54 +74,49 @@ func TestHitMatchesRequest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			config := receiptConfig(t, msg)
 			tc.change(&config)
-			require.False(t, Hit(t.Context(), writeReceiptConfig(t, config), BeforeIdempotencyAppend, msg, nil, nil))
+			Hit(t.Context(), writeReceiptConfig(t, config), msg, nil, nil)
 			files, err := os.ReadDir(config.Directory)
 			require.NoError(t, err)
 			require.Empty(t, files, "unmatched requests must not claim the point or publish a receipt")
 		})
 	}
-	require.False(t, Hit(t.Context(), filepath.Join(t.TempDir(), "missing"), BeforeIdempotencyAppend, msg, nil, nil))
+	Hit(t.Context(), filepath.Join(t.TempDir(), "missing"), msg, nil, nil)
 }
 
 func TestHitPublishesReceiptOncePerChannel(t *testing.T) {
-	for _, action := range []string{"observe", "error"} {
-		t.Run(action, func(t *testing.T) {
-			msg := receiptMessage("v1")
-			config := receiptConfig(t, msg)
-			config.Action, config.VChannel = action, ""
-			file := writeReceiptConfig(t, config)
-			id := mock_message.NewMockMessageID(t)
-			id.EXPECT().String().Return("message-42").Once()
-			result := &messagespb.IdempotentInsertResult{
-				Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10, 20}}}},
-				RowOffsets: []uint32{1, 3},
-			}
-			require.Equal(t, action == "error", Hit(t.Context(), file, AfterBackendAppend, msg, id, result))
-			files, err := filepath.Glob(filepath.Join(config.Directory, "*.json"))
-			require.NoError(t, err)
-			require.Len(t, files, 1)
-			data, err := os.ReadFile(files[0])
-			require.NoError(t, err)
-			var receipt Receipt
-			require.NoError(t, json.Unmarshal(data, &receipt))
-			require.Equal(t, Receipt{
-				Key: config.Key, VChannel: "v1", MessageType: msg.MessageType().String(),
-				PID: os.Getpid(), MessageID: "message-42", TimeTick: 123,
-				IDs: []int64{10, 20}, Offsets: []uint32{1, 3},
-			}, receipt)
-			require.False(t, Hit(t.Context(), file, AfterBackendAppend, msg, id, result))
-			again, err := os.ReadFile(files[0])
-			require.NoError(t, err)
-			require.Equal(t, data, again, "a retry must not overwrite the original receipt")
-			require.Equal(t, action == "error", Hit(t.Context(), file, AfterBackendAppend, receiptMessage("v2"), nil, nil))
-			files, err = filepath.Glob(filepath.Join(config.Directory, "*.json"))
-			require.NoError(t, err)
-			require.Len(t, files, 2, "another channel must be able to claim the point independently")
-			temporary, err := filepath.Glob(filepath.Join(config.Directory, "*.tmp"))
-			require.NoError(t, err)
-			require.Empty(t, temporary)
-		})
+	msg := receiptMessage("v1")
+	config := receiptConfig(t, msg)
+	config.VChannel = ""
+	file := writeReceiptConfig(t, config)
+	id := walimplstest.NewTestMessageID(42)
+	result := &messagespb.IdempotentInsertResult{
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10, 20}}}},
+		RowOffsets: []uint32{1, 3},
 	}
+	Hit(t.Context(), file, msg, id, result)
+	files, err := filepath.Glob(filepath.Join(config.Directory, "*.json"))
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	data, err := os.ReadFile(files[0])
+	require.NoError(t, err)
+	var receipt Receipt
+	require.NoError(t, json.Unmarshal(data, &receipt))
+	require.Equal(t, Receipt{
+		Key: config.Key, VChannel: "v1", MessageType: msg.MessageType().String(),
+		PID: os.Getpid(), MessageID: id.String(), TimeTick: 123,
+		IDs: []int64{10, 20}, Offsets: []uint32{1, 3},
+	}, receipt)
+	Hit(t.Context(), file, msg, id, result)
+	again, err := os.ReadFile(files[0])
+	require.NoError(t, err)
+	require.Equal(t, data, again, "a retry must not overwrite the original receipt")
+	Hit(t.Context(), file, receiptMessage("v2"), nil, nil)
+	files, err = filepath.Glob(filepath.Join(config.Directory, "*.json"))
+	require.NoError(t, err)
+	require.Len(t, files, 2, "another channel must be able to claim the point independently")
+	temporary, err := filepath.Glob(filepath.Join(config.Directory, "*.tmp"))
+	require.NoError(t, err)
+	require.Empty(t, temporary)
 }
 
 func TestHitPauseReleaseAndCancellation(t *testing.T) {
@@ -137,8 +132,11 @@ func TestHitPauseReleaseAndCancellation(t *testing.T) {
 			file := writeReceiptConfig(t, config)
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			done := make(chan bool, 1)
-			go func() { done <- Hit(ctx, file, BeforeIdempotencyAppend, msg, nil, nil) }()
+			done := make(chan struct{})
+			go func() {
+				Hit(ctx, file, msg, nil, nil)
+				close(done)
+			}()
 			require.Eventually(t, func() bool {
 				files, err := filepath.Glob(filepath.Join(config.Directory, "*.json"))
 				return err == nil && len(files) == 1
@@ -154,8 +152,7 @@ func TestHitPauseReleaseAndCancellation(t *testing.T) {
 				require.NoError(t, os.WriteFile(filepath.Join(config.Directory, "release"), nil, 0o600))
 			}
 			select {
-			case injectError := <-done:
-				require.False(t, injectError)
+			case <-done:
 			case <-time.After(5 * time.Second):
 				t.Fatal("pause did not stop after release or cancellation")
 			}
@@ -165,14 +162,14 @@ func TestHitPauseReleaseAndCancellation(t *testing.T) {
 
 func TestHitRejectsInvalidConfiguration(t *testing.T) {
 	msg := receiptMessage("v1")
-	require.Panics(t, func() { Hit(t.Context(), 42, BeforeIdempotencyAppend, msg, nil, nil) })
+	require.Panics(t, func() { Hit(t.Context(), 42, msg, nil, nil) })
 	malformed := filepath.Join(t.TempDir(), "config.json")
 	require.NoError(t, os.WriteFile(malformed, []byte("{"), 0o600))
-	require.Panics(t, func() { Hit(t.Context(), malformed, BeforeIdempotencyAppend, msg, nil, nil) })
+	require.Panics(t, func() { Hit(t.Context(), malformed, msg, nil, nil) })
 	for _, action := range []string{"unknown", "error"} {
 		config := receiptConfig(t, msg)
 		config.Action = action
 		file := writeReceiptConfig(t, config)
-		require.Panics(t, func() { Hit(t.Context(), file, BeforeIdempotencyAppend, msg, nil, nil) })
+		require.Panics(t, func() { Hit(t.Context(), file, msg, nil, nil) })
 	}
 }
