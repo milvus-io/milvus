@@ -224,16 +224,16 @@ class ColumnVector final : public SimpleVector {
         if (valid_count == 0) {
             return 0;
         }
-        if (!IsVariableDataType(type())) {
-            return values_->DataSize(0) * valid_count;
+        if (!IsStringDataType(type())) {
+            return GetDataTypeSize(type()) * valid_count;
         }
-        if (valid_count == size()) {
-            return values_->DataSize();
-        }
+        // ProjectNode and AggregationNode use different FieldData backing
+        // types for strings. The column values carry the actual lengths in
+        // both cases, independently of storage accounting and capacity.
         uint64_t bytes = 0;
         for (size_t i = 0; i < size(); ++i) {
             if (valid_values_[i]) {
-                bytes += values_->DataSize(i);
+                bytes += ValueAtRef<std::string>(i).size();
             }
         }
         return bytes;
