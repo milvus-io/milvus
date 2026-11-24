@@ -1431,13 +1431,15 @@ class TestSearchGroupByIndependent(TestMilvusClientV2Base):
         self.load_collection(client, name)
 
         deadline = time.monotonic() + 60
+        segments = []
         while True:
-            segments = client.list_loaded_segments(name, timeout=5)
+            remaining = deadline - time.monotonic()
+            assert remaining > 0, f"Timed out waiting for two sealed partitions. Last segments: {segments}"
+            segments = client.list_loaded_segments(name, timeout=remaining)
             partitions = {s.partition_id for s in segments if s.state == SegmentState.Sealed and s.num_rows == 2}
             if len(partitions) == 2:
                 break
-            assert time.monotonic() < deadline, segments
-            time.sleep(0.5)
+            time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
 
         query = dict(
             data=[[1.0, 0.0]], anns_field="vec", search_params={"metric_type": "IP"}, consistency_level="Strong"
