@@ -275,10 +275,13 @@ func AllocImportSegment(ctx context.Context,
 
 const maxImportDispatchRetries = 3
 
-func handleImportDispatchError(task ImportTask, im ImportMeta, retryTimes *int64, cause error) {
+func handleImportDispatchError(task ImportTask, im ImportMeta, nonRetryableFailures *int64, cause error) {
 	log.Warn("failed to dispatch import task", WrapTaskLog(task, zap.Error(cause))...)
-	*retryTimes++
-	if merr.IsRetryableErr(cause) || merr.IsCanceledOrTimeout(cause) || *retryTimes < maxImportDispatchRetries {
+	if merr.IsRetryableErr(cause) || merr.IsCanceledOrTimeout(cause) {
+		return
+	}
+	*nonRetryableFailures++
+	if *nonRetryableFailures < maxImportDispatchRetries {
 		return
 	}
 	if err := im.UpdateJob(context.TODO(), task.GetJobID(),

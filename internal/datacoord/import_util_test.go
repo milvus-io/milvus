@@ -1741,6 +1741,75 @@ func TestImportDispatchRetriesOnEZKError(t *testing.T) {
 	}
 }
 
+func TestImportDispatchCountsOnlyNonRetryableFailures(t *testing.T) {
+	ctx := context.Background()
+	backup := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":73}`))
+	schema := &schemapb.CollectionSchema{Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "91"}}}
+	for _, state := range []internalpb.ImportJobState{internalpb.ImportJobState_PreImporting, internalpb.ImportJobState_Importing} {
+		t.Run(state.String(), func(t *testing.T) {
+			var sourceErr error
+			cipher := &importRequestCipher{MockCipher: mock_hook.NewMockCipher(t), resolve: func(artifact string) (int64, []byte, error) {
+				require.Equal(t, backup, artifact)
+				return 73, []byte("old"), sourceErr
+			}}
+			t.Cleanup(hookutil.SetTestCipher(cipher))
+
+			catalog := mocks.NewDataCoordCatalog(t)
+			catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{{
+				JobID: 1, Schema: schema, State: state, DataTs: 100, Options: []*commonpb.KeyValuePair{{Key: importutilv2.EZK, Value: backup}},
+			}}, nil)
+			catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
+			cluster := session.NewMockCluster(t)
+			alloc := allocator.NewMockAllocator(t)
+			rpcErr := merr.WrapErrNodeNotFound(10)
+			if state == internalpb.ImportJobState_PreImporting {
+				catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{{
+					JobID: 1, TaskID: 2, State: datapb.ImportTaskStateV2_Pending,
+				}}, nil)
+				catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+				cluster.EXPECT().CreatePreImport(int64(10), mock.Anything, mock.Anything).Return(rpcErr).Times(maxImportDispatchRetries)
+			} else {
+				catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+				catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{{
+					JobID: 1, TaskID: 2, State: datapb.ImportTaskStateV2_Pending,
+				}}, nil)
+				alloc.EXPECT().AllocN(mock.Anything).Return(int64(10000), int64(20000), nil).Times(maxImportDispatchRetries)
+				cluster.EXPECT().CreateImport(int64(10), mock.Anything, mock.Anything).Return(rpcErr).Times(maxImportDispatchRetries)
+			}
+			im, err := NewImportMeta(ctx, catalog, alloc, nil)
+			require.NoError(t, err)
+			task := im.GetTask(ctx, 2)
+
+			// Exceed maxImportDispatchRetries with retryable errors first.
+			sourceErr = temporaryImportError{msg: "source KMS throttled", temporary: true}
+			for i := 0; i < maxImportDispatchRetries+1; i++ {
+				task.CreateTaskOnWorker(10, cluster)
+				require.Equal(t, state, im.GetJob(ctx, 1).GetState())
+				require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+				require.Equal(t, int64(0), task.GetTaskVersion())
+			}
+
+			// Prior retryable attempts must not consume the non-retryable failure budget.
+			sourceErr = nil
+			cipher.EXPECT().GetUnsafeKey(int64(91), task.GetCollectionID()).Return([]byte("target-key")).Times(maxImportDispatchRetries)
+			for i := 0; i < maxImportDispatchRetries-1; i++ {
+				task.CreateTaskOnWorker(10, cluster)
+				require.Equal(t, state, im.GetJob(ctx, 1).GetState())
+				require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+				require.Equal(t, int64(i+1), task.GetTaskVersion())
+			}
+			catalog.AssertNotCalled(t, "SaveImportJob", mock.Anything, mock.Anything)
+
+			// Only the maxImportDispatchRetries-th non-retryable failure fails the job.
+			task.CreateTaskOnWorker(10, cluster)
+			job := im.GetJob(ctx, 1)
+			require.Equal(t, internalpb.ImportJobState_Failed, job.GetState())
+			require.Contains(t, job.GetReason(), rpcErr.Error())
+			require.Equal(t, int64(maxImportDispatchRetries), task.GetTaskVersion())
+		})
+	}
+}
+
 func TestAssembleImportRequestSkipsAllocOnPluginContextError(t *testing.T) {
 	backup := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":73}`))
 	schema := &schemapb.CollectionSchema{Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "91"}}}
