@@ -378,3 +378,42 @@ func TestRoundRobinAssignPolicy_AssignChannel_VerifyFrom(t *testing.T) {
 	assert.Equal(t, int64(1), plans[0].To)
 	assert.Equal(t, "channel1", plans[0].Channel.GetChannelName())
 }
+
+// TestRoundRobinAssignPolicy_AssignChannel_ProjectedLoadAcrossCalls verifies that
+// channels planned by earlier collections in the same round are visible to later
+// collections through the shared projectedLoad, so single-channel collections do
+// not all tie on the same load and repeatedly hit the smallest node ID.
+func TestRoundRobinAssignPolicy_AssignChannel_ProjectedLoadAcrossCalls(t *testing.T) {
+	mockScheduler := task.NewMockScheduler(t)
+	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+
+	nodeManager := session.NewNodeManager()
+	for i := int64(1); i <= 3; i++ {
+		nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   i,
+			Address:  "localhost",
+			Hostname: "node",
+			Version:  common.Version,
+		}))
+		nodeManager.Get(i).SetState(session.NodeStateNormal)
+	}
+
+	policy := newRoundRobinAssignPolicy(nodeManager, mockScheduler, nil)
+	projectedLoad := make(map[int64]int)
+
+	newChannel := func(collectionID int64, name string) []*meta.DmChannel {
+		return []*meta.DmChannel{{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: name},
+		}}
+	}
+
+	// Three single-channel collections planned in one Check() round.
+	first := policy.AssignChannelWithProjectedLoad(context.Background(), 100, newChannel(100, "c1"), []int64{1, 2, 3}, true, projectedLoad)
+	second := policy.AssignChannelWithProjectedLoad(context.Background(), 200, newChannel(200, "c2"), []int64{1, 2, 3}, true, projectedLoad)
+	third := policy.AssignChannelWithProjectedLoad(context.Background(), 300, newChannel(300, "c3"), []int64{1, 2, 3}, true, projectedLoad)
+
+	// Without projected load every call would pick node 1 (smallest ID on a tie).
+	assert.Equal(t, int64(1), first[0].To)
+	assert.Equal(t, int64(2), second[0].To)
+	assert.Equal(t, int64(3), third[0].To)
+}
