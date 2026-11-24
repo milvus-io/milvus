@@ -335,7 +335,7 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 	}
 
 	for _, group := range groups {
-		log := mlog.With(
+		log := mlog.WithLazy(
 			mlog.Int64("group.partitionID", group.PartitionID),
 			mlog.String("group.channel", group.ChannelName),
 		)
