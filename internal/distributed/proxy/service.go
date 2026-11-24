@@ -390,7 +390,8 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 			// inbound only
 			WithInboundRecord(milvuspb.MilvusService_Insert_FullMethodName,
 				milvuspb.MilvusService_Delete_FullMethodName,
-				milvuspb.MilvusService_Upsert_FullMethodName)),
+				milvuspb.MilvusService_Upsert_FullMethodName,
+				milvuspb.MilvusService_Update_FullMethodName)),
 	}
 
 	if Params.TLSMode.GetAsInt() == 1 {

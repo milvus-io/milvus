@@ -160,9 +160,6 @@ func validateUpdateAssignments(schema *schemapb.CollectionSchema, assignments []
 			return nil, merr.WrapErrParameterInvalidMsg("duplicate update assignment for field %s", a.GetFieldName())
 		}
 		seen[field.GetFieldID()] = true
-		if field.GetDataType() == schemapb.DataType_VarChar && typeutil.CreateFieldSchemaHelper(field).EnableMatch() {
-			return nil, merr.WrapErrParameterInvalidMsg("PK-update does not support enable_match VARCHAR field %s", field.GetName())
-		}
 		if restricted(field) {
 			return nil, merr.WrapErrParameterInvalidMsg("field %s cannot be updated", field.GetName())
 		}

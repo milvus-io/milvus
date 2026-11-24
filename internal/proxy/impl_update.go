@@ -33,6 +33,12 @@ import (
 
 // Update accepts one literal assignment set for a list of primary keys.
 func (node *Proxy) Update(ctx context.Context, request *milvuspb.UpdateRequest) (*milvuspb.MutationResult, error) {
+	metrics.GetStats(ctx).
+		SetNodeID(paramtable.GetNodeID()).
+		SetInboundLabel(metrics.UpdateLabel).
+		SetDatabaseName(request.GetDbName()).
+		SetCollectionName(request.GetCollectionName())
+
 	if !paramtable.Get().ProxyCfg.PKUpdateEnabled.GetAsBool() {
 		return failedMutationResult(merr.Wrap(merr.ErrServiceUnimplemented, "PK-update admission is disabled (proxy.pkUpdate.enabled=false)")), nil
 	}
