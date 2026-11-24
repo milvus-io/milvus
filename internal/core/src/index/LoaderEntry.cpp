@@ -20,7 +20,7 @@
 #include "folly/ScopeGuard.h"
 #include "folly/coro/BlockingWait.h"
 #include "folly/coro/WithCancellation.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/MemFileManagerImpl.h"
@@ -85,8 +85,10 @@ OpenIndexSource(const IndexLoadRequest& request) {
     const auto priority = Priority(request.options.op_ctx);
     const auto operation_token =
         OperationCancellationToken(request.options.op_ctx);
-    const auto token = folly::cancellation_token_merge(
-        operation_token, co_await folly::coro::co_current_cancellation_token);
+    const auto caller_token =
+        co_await folly::coro::co_current_cancellation_token;
+    const auto token =
+        folly::cancellation_token_merge(operation_token, caller_token);
     storage::ThrowIfCancelled(token, "open index source");
     if (const auto* source = std::get_if<OpenedIndexSource>(&request.source)) {
         // Context binding belongs to the complete loader-creation scope below.
@@ -95,7 +97,7 @@ OpenIndexSource(const IndexLoadRequest& request) {
     }
     const auto& files = std::get<IndexFiles>(request.source);
     const bool use_async = files.context.use_async_load.value_or(
-        segcore::storagev2translator::StorageV2AsyncLoadEnabled());
+        milvus::storage::LoadAsyncReadEnabled());
     if (const auto* legacy =
             std::get_if<LegacyIndexStorageConfig>(&files.storage_config)) {
         // The source retains only token/priority, never this temporary context.
@@ -106,22 +108,14 @@ OpenIndexSource(const IndexLoadRequest& request) {
         auto open_options = request.options;
         open_options.op_ctx = &open_context;
         std::shared_ptr<storage::FileSource> source;
-        if (use_async) {
-            source = co_await folly::coro::co_withCancellation(
-                token,
-                storage::V1RemoteSource::OpenAsync(files.context,
-                                                   files.paths,
-                                                   open_options,
-                                                   legacy->storage_namespace,
-                                                   legacy->layout));
-        } else {
-            source = std::make_shared<storage::V1RemoteSource>(
-                files.context,
-                files.paths,
-                open_options,
-                legacy->storage_namespace,
-                legacy->layout);
-        }
+        source = co_await folly::coro::co_withCancellation(
+            token,
+            storage::V1RemoteSource::OpenAsync(files.context,
+                                               files.paths,
+                                               open_options,
+                                               legacy->storage_namespace,
+                                               legacy->layout,
+                                               use_async));
         storage::ThrowIfCancelled(token, "opened legacy source");
         SetLegacyContext(*source, priority, token);
 
@@ -158,14 +152,23 @@ OpenIndexSource(const IndexLoadRequest& request) {
             PackedIndexSource{std::shared_ptr<storage::AsyncIndexEntryReader>(
                 std::move(source))}};
     }
-    auto input = manager.OpenInputStream(files.paths.front(), is_index_file);
-    AssertInfo(input != nullptr, "Failed to open packed index");
-    auto source = storage::IndexEntryReader::Open(
-        input,
-        input->Size(),
+    const auto pool_priority = milvus::PriorityForLoad(priority);
+    auto open =
+        folly::via(&milvus::ThreadPools::GetExecutor(pool_priority), [&] {
+            auto input =
+                manager.OpenInputStream(files.paths.front(), is_index_file);
+            AssertInfo(input != nullptr, "Failed to open packed index");
+            auto size = input->Size();
+            return std::pair{std::move(input), size};
+        }).semi();
+    auto [input, size] = co_await folly::coro::co_withCancellation(
+        folly::CancellationToken{}, std::move(open));
+    storage::ThrowIfCancelled(token, "open packed index");
+    auto source = co_await storage::IndexEntryReader::OpenAsync(
+        std::move(input),
+        size,
         files.context.fieldDataMeta.collection_id,
-        priority == proto::common::LoadPriority::HIGH ? ThreadPoolPriority::HIGH
-                                                      : ThreadPoolPriority::LOW,
+        pool_priority,
         token);
 
     co_return OpenedIndexSource{PackedIndexSource{
@@ -181,8 +184,10 @@ CreateIndexLoader(const LoaderEntry& loader_entry, IndexLoadRequest request) {
     auto* context = request.options.op_ctx;
     const auto priority = Priority(context);
     const auto operation_token = OperationCancellationToken(context);
-    const auto token = folly::cancellation_token_merge(
-        operation_token, co_await folly::coro::co_current_cancellation_token);
+    const auto caller_token =
+        co_await folly::coro::co_current_cancellation_token;
+    const auto token =
+        folly::cancellation_token_merge(operation_token, caller_token);
     auto source = co_await OpenIndexSource(request);
     SetSourceContext(source, priority, token);
     // Detach the retained source even if family validation throws.
@@ -209,7 +214,7 @@ LoaderEntry::Load(IndexLoadRequest request) const {
     bool use_async;
     if (auto* files = std::get_if<IndexFiles>(&request.source)) {
         use_async = files->context.use_async_load.value_or(
-            segcore::storagev2translator::StorageV2AsyncLoadEnabled());
+            milvus::storage::LoadAsyncReadEnabled());
         // Executor selection and storage opening must use the same snapshot.
         files->context.use_async_load = use_async;
     } else {
