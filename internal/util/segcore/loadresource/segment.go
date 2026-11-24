@@ -688,7 +688,7 @@ func canSkipExternalRawDataLoading(schema *schemapb.CollectionSchema, indexedFie
 			continue
 		}
 		// Local text-index creation reads the source column regardless of warmup.
-		if _, hasTextIndex := textStats[field.GetFieldID()]; !hasTextIndex && typeutil.CreateFieldSchemaHelper(field).EnableMatch() {
+		if _, hasTextIndex := textStats[field.GetFieldID()]; !hasTextIndex && typeutil.IsTextMatchEnabled(field) {
 			return false
 		}
 		// Geometry cache construction reads the source column regardless of warmup.
