@@ -151,7 +151,8 @@ func TestExploreMilvusTableRejectsSnapshotPathsOutsideExternalSource(t *testing.
 				milvusTableTestExternalPrefix + "metadata/10.avro": milvusTableTestSegment(t, tc.segment),
 			})
 			require.ErrorIs(t, err, merr.ErrParameterInvalid)
-			// DataCoord fails a refresh at once only on input errors.
+			// DataCoord fails the refresh at once on an input error instead
+			// of retrying it.
 			require.Equal(t, merr.InputError, merr.GetErrorType(err))
 			require.ErrorContains(t, err, "external source storage: "+tc.badPath)
 			require.Nil(t, infos)
