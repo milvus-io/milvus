@@ -168,6 +168,8 @@ func buildUpdateMessages(collectionID int64, schemaVersion int32, partitionID in
 		typeutil.AppendIDs(groups[hash], ids, i)
 	}
 	var result []message.MutableMessage
+	maxInsertSize := params.QuotaConfig.MaxInsertSize.GetAsInt()
+	remaining := maxInsertSize
 	header := &messagespb.UpdateMessageHeader{CollectionId: collectionID, SchemaVersion: proto.Int32(schemaVersion)}
 	body := &messagespb.UpdateMessageBody{PartitionId: partitionID, Assignments: assignments}
 	fixedBodySize := proto.Size(body)
@@ -204,10 +206,15 @@ func buildUpdateMessages(collectionID int64, schemaVersion int32, partitionID in
 			if err != nil {
 				return nil, err
 			}
-			if limit > 0 {
-				if size := proto.Size(msg.IntoMessageProto()); size > limit {
-					return nil, merr.Wrapf(merr.ErrParameterTooLarge, "encoded update message is %d bytes, limit is %d bytes", size, limit)
+			size := proto.Size(msg.IntoMessageProto())
+			if limit > 0 && size > limit {
+				return nil, merr.Wrapf(merr.ErrParameterTooLarge, "encoded update message is %d bytes, limit is %d bytes", size, limit)
+			}
+			if maxInsertSize != -1 {
+				if size > remaining {
+					return nil, merr.Wrapf(merr.ErrParameterTooLarge, "packed update messages exceed quotaAndLimits.limits.maxInsertSize (%d bytes)", maxInsertSize)
 				}
+				remaining -= size
 			}
 			result = append(result, msg)
 			start = end
