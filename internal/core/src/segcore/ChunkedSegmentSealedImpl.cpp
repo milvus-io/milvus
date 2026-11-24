@@ -2485,16 +2485,20 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     auto load_cg_start = std::chrono::high_resolution_clock::now();
     CheckCancellation(
         op_ctx, id_, "ChunkedSegmentSealedImpl::LoadColumnGroups()");
-    auto properties = std::make_shared<milvus_storage::api::Properties>(
-        *milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-             .GetProperties());
-    auto column_groups = segment_load_info.GetColumnGroups();
+    const auto& storage_properties =
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance();
+    auto properties = storage_properties.GetProperties(
+        {.talon_stage = milvus::storage::kTalonStageLoadOpen});
+    const auto column_groups = segment_load_info.GetColumnGroups();
 
     if (schema_snapshot->is_external_collection()) {
-        InjectExternalSpecProperties(*properties,
+        auto external =
+            std::make_shared<milvus_storage::api::Properties>(*properties);
+        InjectExternalSpecProperties(*external,
                                      segment_load_info.GetCollectionID(),
                                      schema_snapshot->get_external_source(),
                                      schema_snapshot->get_external_spec());
+        properties = std::move(external);
     }
 
     auto needed_columns = segment_load_info.GetExternalColumnNames();
@@ -7688,9 +7692,10 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                               !diff.column_groups_to_lazyload.empty() ||
                               !diff.column_groups_to_lazyreplace.empty();
         if (has_cg_changes) {
-            auto properties =
-                milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-                    .GetProperties();
+            const auto& storage_properties =
+                milvus::storage::LoonFFIPropertiesSingleton::GetInstance();
+            auto properties = storage_properties.GetProperties(
+                {.talon_stage = milvus::storage::kTalonStageLoadOpen});
             auto column_groups = segment_load_info.GetColumnGroups();
             auto arrow_schema = schema_snapshot->ConvertToLoonArrowSchema(
                 /*text_lob_as_binary=*/true);
@@ -8740,7 +8745,7 @@ ChunkedSegmentSealedImpl::InitTextLobPaths(const std::string& manifest_path,
 void
 ChunkedSegmentSealedImpl::LoadColumnGroups(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties,
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties,
     std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
     const SegmentLoadInfo& segment_load_info,
     const SchemaPtr& schema_snapshot,
@@ -8797,7 +8802,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
 void
 ChunkedSegmentSealedImpl::LoadColumnGroup(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties,
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties,
     int64_t index,
     const std::vector<FieldId>& milvus_field_ids,
     const SegmentLoadInfo& segment_load_info,

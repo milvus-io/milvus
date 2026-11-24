@@ -134,6 +134,7 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 			// primary storage is local, so the connection cap still applies.
 			MaxConnections:              uint32(paramtable.Get().MinioCfg.MaxConnections.GetAsInt()),
 			TalonMode:                   paramtable.Get().CommonCfg.StorageTalonMode.GetAsUint32(),
+			TalonEnabledStages:          paramtable.Get().CommonCfg.StorageTalonEnabledStages.GetAsUint32(),
 			TalonSmallReadThreshold:     paramtable.Get().CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
 			TalonCoordinator:            paramtable.Get().CommonCfg.StorageTalonCoordinator.GetValue(),
 			TalonBlockSize:              paramtable.Get().CommonCfg.StorageTalonBlockSize.GetAsUint32(),
@@ -161,6 +162,7 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 			SslTlsMinVersion:            paramtable.Get().MinioCfg.SslTLSMinVersion.GetValue(),
 			UseCrc32CChecksum:           paramtable.Get().MinioCfg.UseCRC32C.GetAsBool(),
 			TalonMode:                   paramtable.Get().CommonCfg.StorageTalonMode.GetAsUint32(),
+			TalonEnabledStages:          paramtable.Get().CommonCfg.StorageTalonEnabledStages.GetAsUint32(),
 			TalonSmallReadThreshold:     paramtable.Get().CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
 			TalonCoordinator:            paramtable.Get().CommonCfg.StorageTalonCoordinator.GetValue(),
 			TalonBlockSize:              paramtable.Get().CommonCfg.StorageTalonBlockSize.GetAsUint32(),

@@ -1310,6 +1310,7 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 				manifestPath,
 				createStorageConfig(),
 				extfs,
+				common.TalonStageManifest,
 			)
 			if err != nil {
 				return err
@@ -1365,7 +1366,7 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 			}
 		} else {
 			// V3: delta data lives in manifest.
-			paths, err := packed.GetDeltaLogPathsFromManifest(manifestPath, createStorageConfig())
+			paths, err := packed.GetDeltaLogPathsFromManifest(manifestPath, createStorageConfig(), common.TalonStageManifest)
 			if err != nil {
 				return err
 			}
@@ -1500,6 +1501,7 @@ func createStorageConfig() *indexpb.StorageConfig {
 			// primary storage is local, so the connection cap still applies.
 			MaxConnections:              uint32(params.MinioCfg.MaxConnections.GetAsInt()),
 			TalonMode:                   params.CommonCfg.StorageTalonMode.GetAsUint32(),
+			TalonEnabledStages:          params.CommonCfg.StorageTalonEnabledStages.GetAsUint32(),
 			TalonSmallReadThreshold:     params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
 			TalonCoordinator:            params.CommonCfg.StorageTalonCoordinator.GetValue(),
 			TalonBlockSize:              params.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
@@ -1527,6 +1529,7 @@ func createStorageConfig() *indexpb.StorageConfig {
 		SslTlsMinVersion:            params.MinioCfg.SslTLSMinVersion.GetValue(),
 		UseCrc32CChecksum:           params.MinioCfg.UseCRC32C.GetAsBool(),
 		TalonMode:                   params.CommonCfg.StorageTalonMode.GetAsUint32(),
+		TalonEnabledStages:          params.CommonCfg.StorageTalonEnabledStages.GetAsUint32(),
 		TalonSmallReadThreshold:     params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
 		TalonCoordinator:            params.CommonCfg.StorageTalonCoordinator.GetValue(),
 		TalonBlockSize:              params.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
