@@ -6403,7 +6403,7 @@ func TestExternalCollectionResolvedSchemaSupportsStructFields(t *testing.T) {
 			Name: "mapped", DataType: schemapb.DataType_Int64, ExternalField: "mapped",
 		}},
 		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
-			Name: "s",
+			Name: "s", ExternalField: "s",
 			Fields: []*schemapb.FieldSchema{{
 				Name: "s[arr]", DataType: schemapb.DataType_Array,
 				ElementType: schemapb.DataType_Int64, ElementNullable: true,
@@ -6416,6 +6416,7 @@ func TestExternalCollectionResolvedSchemaSupportsStructFields(t *testing.T) {
 	schema.ExternalSource = ""
 	schema.ExternalSpec = ""
 	schema.Fields[0].ExternalField = ""
+	schema.StructArrayFields[0].ExternalField = ""
 	require.NoError(t, ValidateExternalCollectionResolvedSchema(schema))
 }
 
