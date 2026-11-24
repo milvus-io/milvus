@@ -168,7 +168,12 @@ func validateUpdateAssignments(schema *schemapb.CollectionSchema, assignments []
 		}
 		literal := proto.Clone(a.GetLiteral()).(*schemapb.UpdateLiteral)
 		if n, ok := literal.GetValue().(*schemapb.UpdateLiteral_SetNull); ok {
-			if !field.GetNullable() || !n.SetNull {
+			if !n.SetNull {
+				return nil, merr.WrapErrParameterInvalidMsg("update set_null must be true for field %s", field.GetName())
+			}
+			if value := fieldvalidator.ScalarDefaultValue(field); value != nil {
+				literal.Value = &schemapb.UpdateLiteral_ScalarValue{ScalarValue: proto.Clone(value).(*schemapb.ValueField)}
+			} else if !field.GetNullable() {
 				return nil, merr.WrapErrParameterInvalidMsg("field %s does not accept this NULL assignment", field.GetName())
 			}
 		} else {

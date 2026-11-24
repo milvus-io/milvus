@@ -979,6 +979,8 @@ func (opt *updateOption) WithVarcharArray(fieldName string, values []string) *up
 	}})
 }
 
+// WithNull writes the field's default value when one is configured. Without a
+// default, it writes NULL to a nullable field and fails for a non-nullable field.
 func (opt *updateOption) WithNull(fieldName string) *updateOption {
 	return opt.WithAssignment(fieldName, &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_SetNull{SetNull: true}})
 }

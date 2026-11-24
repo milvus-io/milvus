@@ -719,6 +719,19 @@ func fillVectorArrayNullValueImpl(array []*schemapb.VectorField, validData []boo
 	return res, nil
 }
 
+// ScalarDefaultValue returns the typed scalar used to fill NULL on writes.
+func ScalarDefaultValue(field *schemapb.FieldSchema) *schemapb.ValueField {
+	value := field.GetDefaultValue()
+	if field.GetDataType() == schemapb.DataType_Timestamptz {
+		if legacy, ok := value.GetData().(*schemapb.ValueField_StringData); ok {
+			// Older schemas store a timestamp string validated at schema creation.
+			micros, _ := timestamptz.ValidateAndReturnUnixMicroTz(legacy.StringData, common.DefaultTimezone)
+			return &schemapb.ValueField{Data: &schemapb.ValueField_TimestamptzData{TimestamptzData: micros}}
+		}
+	}
+	return value
+}
+
 func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema, numRows int) error {
 	if !typeutil.ValidateAndNormalizeFieldDataValidData(field) {
 		return merr.WrapErrParameterInvalidMsg("field %s has different legacy and field-specific valid_data", field.GetFieldName())
@@ -790,26 +803,7 @@ func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.Field
 				return merr.WrapErrParameterInvalid(numRows, len(validData), msg)
 			}
 
-			// Retrieve the default value, which is usually stored as int64 (UTC microseconds).
-			defaultValue := fieldSchema.GetDefaultValue().GetTimestamptzData()
-
-			// If the int64 default value is 0 (which might happen if it was not fully persisted
-			// or if the underlying storage is being checked), attempt to fall back to the string value.
-			if defaultValue == 0 {
-				strDefaultValue := fieldSchema.GetDefaultValue().GetStringData()
-
-				// If a non-empty string default value exists, perform conversion.
-				if len(strDefaultValue) != 0 {
-					// NOTE: The strDefaultValue is guaranteed to be a valid ISO 8601 timestamp string,
-					// as it was validated during collection schema creation (by checkAndRewriteTimestampTzDefaultValue).
-					//
-					// Since the string either contains a UTC offset (e.g., '+08:00') or should be treated
-					// as UTC/the collection's primary timezone, the 'common.DefaultTimezone' passed here
-					// as the fallback timezone is generally inconsequential (negligible)
-					// for the final conversion result in this specific context.
-					defaultValue, _ = timestamptz.ValidateAndReturnUnixMicroTz(strDefaultValue, common.DefaultTimezone)
-				}
-			}
+			defaultValue := ScalarDefaultValue(fieldSchema).GetTimestamptzData()
 			sd.TimestamptzData.Data, err = fillWithDefaultValueImpl(sd.TimestamptzData.Data, defaultValue, validData)
 			if err != nil {
 				return err
