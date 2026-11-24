@@ -83,9 +83,16 @@ func testRealQueryTask(t *testing.T, enableScan bool) {
 	chainName := "scan"
 	outputName := "matches"
 	exportColumns := []string{outputName}
+	var predicate *planpb.Expr
+	var orderBy []*planpb.OrderByField
+	var groupBy []int64
+	var aggregates []*planpb.Aggregate
 	run := func(arguments string, withChain bool) (*internalpb.RetrieveResults, error) {
-		query := &planpb.QueryPlanNode{Limit: queryLimit}
+		query := &planpb.QueryPlanNode{Limit: queryLimit, Predicates: predicate, OrderByFields: orderBy, GroupByFieldIds: groupBy, Aggregates: aggregates}
 		p := &planpb.PlanNode{Node: &planpb.PlanNode_Query{Query: query}, OutputFieldIds: []int64{100, textFieldID, 1}}
+		if predicate != nil {
+			p.PlanOptions = &planpb.PlanOption{CollectQueryReadUsage: true}
+		}
 		if withChain {
 			p.QuerynodeFunctionChains = []*schemapb.FunctionChain{{Name: chainName, Stage: schemapb.FunctionChainStage_FunctionChainStageQueryScan, OutputColumns: exportColumns, Ops: []*schemapb.FunctionChainOp{{Op: "grep", Inputs: []string{"text"}, Outputs: []string{outputName}, Params: map[string]*schemapb.FunctionParamValue{
 				"arguments": {Value: &schemapb.FunctionParamValue_StringValue{StringValue: arguments}},
@@ -93,7 +100,7 @@ func testRealQueryTask(t *testing.T, enableScan bool) {
 		}
 		data, err := proto.Marshal(p)
 		require.NoError(t, err)
-		req := &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{Base: &commonpb.MsgBase{}, CollectionID: 100, PartitionIDs: []int64{10}, SerializedExprPlan: data, MvccTimestamp: typeutil.MaxTimestamp, Limit: queryLimit, OutputFieldsId: []int64{100, textFieldID, 1}, CollectQueryReadUsage: withChain}, SegmentIDs: segmentIDs, Scope: querypb.DataScope_Streaming}
+		req := &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{Base: &commonpb.MsgBase{}, CollectionID: 100, PartitionIDs: []int64{10}, SerializedExprPlan: data, MvccTimestamp: typeutil.MaxTimestamp, Limit: queryLimit, OutputFieldsId: []int64{100, textFieldID, 1}, CollectQueryReadUsage: withChain || predicate != nil, OrderByFields: orderBy, GroupByFieldIds: groupBy, Aggregates: aggregates}, SegmentIDs: segmentIDs, Scope: querypb.DataScope_Streaming}
 		task := NewQueryTask(ctx, collection, manager, req)
 		if err = task.PreExecute(); err != nil {
 			task.scheduleSpan.End()
@@ -150,6 +157,47 @@ func testRealQueryTask(t *testing.T, enableScan bool) {
 				}
 			})
 		}
+		pkGreaterThan := func(value int64) *planpb.Expr {
+			return &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
+				ColumnInfo: &planpb.ColumnInfo{FieldId: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				Op:         planpb.OpType_GreaterThan,
+				Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: value}},
+			}}}
+		}
+		t.Run("metering counts both sides of a short-circuited predicate", func(t *testing.T) {
+			segmentIDs = []int64{100, 101}
+			textMatches := &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
+				ColumnInfo: &planpb.ColumnInfo{FieldId: textFieldID, DataType: schemapb.DataType_VarChar},
+				Op:         planpb.OpType_Equal,
+				Value:      &planpb.GenericValue{Val: &planpb.GenericValue_StringVal{StringVal: "skip"}},
+			}}}
+			predicate = &planpb.Expr{Expr: &planpb.Expr_BinaryExpr{BinaryExpr: &planpb.BinaryExpr{
+				Op: planpb.BinaryExpr_LogicalAnd, Left: pkGreaterThan(100), Right: textMatches,
+			}}}
+			result, err := run("", false)
+			require.NoError(t, err)
+			require.Empty(t, result.GetIds().GetIntId().GetData())
+			require.EqualValues(t, 2*3*8+62, result.GetCostAggregation().GetQueryReadUsage().GetDataBytes())
+		})
+		t.Run("sort measures only the surviving key values", func(t *testing.T) {
+			segmentIDs = []int64{100, 101}
+			predicate = pkGreaterThan(20)
+			orderBy = []*planpb.OrderByField{{FieldId: textFieldID, Ascending: true}}
+			result, err := run("", false)
+			require.NoError(t, err)
+			require.EqualValues(t, 2*3*8+40, result.GetCostAggregation().GetQueryReadUsage().GetDataBytes())
+		})
+		t.Run("grouping and aggregation measure filtered rows before the group sort", func(t *testing.T) {
+			segmentIDs = []int64{100, 101}
+			predicate = pkGreaterThan(20)
+			groupBy = []int64{textFieldID}
+			aggregates = []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 100}}
+			orderBy = []*planpb.OrderByField{{FieldId: textFieldID, Ascending: true}}
+			result, err := run("", false)
+			require.NoError(t, err)
+			// Full PK filter column, filtered text + PK inputs, and the three sort keys.
+			require.EqualValues(t, 2*3*8+40+3*8+40, result.GetCostAggregation().GetQueryReadUsage().GetDataBytes())
+		})
 		return
 	}
 
