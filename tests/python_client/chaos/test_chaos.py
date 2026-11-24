@@ -121,15 +121,18 @@ class TestChaos(TestChaosBase):
         }
         self.health_checkers = checkers
 
-    def teardown(self):
-        chaos_res = CusResource(
-            kind=self._chaos_config["kind"],
-            group=constants.CHAOS_GROUP,
-            version=constants.CHAOS_VERSION,
-            namespace=constants.CHAOS_NAMESPACE,
-        )
-        meta_name = self._chaos_config.get("metadata", None).get("name", None)
-        chaos_res.delete(meta_name, raise_ex=False)
+    def teardown_method(self):
+        chaos_config = getattr(self, "_chaos_config", None)
+        if chaos_config:
+            chaos_res = CusResource(
+                kind=chaos_config["kind"],
+                group=constants.CHAOS_GROUP,
+                version=constants.CHAOS_VERSION,
+                namespace=constants.CHAOS_NAMESPACE,
+            )
+            meta_name = chaos_config.get("metadata", {}).get("name", None)
+            if meta_name:
+                chaos_res.delete(meta_name, raise_ex=False)
         sleep(2)
         log.info(f"Alive threads: {threading.enumerate()}")
 

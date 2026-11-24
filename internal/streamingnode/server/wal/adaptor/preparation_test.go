@@ -9,12 +9,16 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -69,11 +73,16 @@ func installPreparationTestInterceptor(t *testing.T, w *walAdaptorImpl) function
 	redoInterceptor := redo.NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
 		ShardManager: &preparationTestShardManager{},
 	})
-	idempotencyInterceptor := idempotency.NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{})
+	rm, err := replicates.RecoverReplicateManager(&replicates.ReplicateManagerRecoverParam{
+		ChannelInfo: w.Channel(), CurrentClusterID: "local", InitialRecoverSnapshot: &recovery.RecoverySnapshot{},
+	})
+	require.NoError(t, err)
+	param := &interceptors.InterceptorBuildParam{ReplicateManager: rm}
+	idempotencyInterceptor := idempotency.NewInterceptorBuilder().Build(param)
 	t.Cleanup(redoInterceptor.Close)
 	t.Cleanup(idempotencyInterceptor.Close)
 	w.interceptorBuildResult.Interceptor = interceptors.NewChainedInterceptor(
-		idempotencyInterceptor, redoInterceptor, w.interceptorBuildResult.Interceptor, &preparationTestInterceptor{})
+		idempotencyInterceptor, redoInterceptor, w.interceptorBuildResult.Interceptor, replicate.NewInterceptorBuilder().Build(param), &preparationTestInterceptor{})
 	return manager
 }
 
@@ -195,6 +204,66 @@ func TestAppendPreparationReleasesWALLockAndHonorsCancellation(t *testing.T) {
 			require.Zero(t, build.Times())
 		})
 	}
+}
+
+func TestAppendRechecksRoleAfterPreparation(t *testing.T) {
+	mockey.PatchConvey("demotion can finish while owner and duplicate wait", t, func() {
+		var persisted atomic.Int32
+		w := newFenceTestWAL(t, newFirstTimeTickWALImpls(func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			persisted.Add(1)
+			return finishFenceTestAppend(ctx, 1), nil
+		}))
+		manager := installPreparationTestInterceptor(t, w)
+		defer manager.Close()
+		started, resume := make(chan struct{}), make(chan struct{})
+		var once sync.Once
+		release := func() { once.Do(func() { close(resume) }) }
+		defer release()
+		mockey.Mock(fileresource.Acquire).To(func(context.Context, []int64, ...string) (*fileresource.Resources, error) {
+			close(started)
+			<-resume
+			return &fileresource.Resources{}, nil
+		}).Build()
+		mockey.Mock(function.BuildEmbeddingRunner).Return(&preparationTestRunner{}, nil).Build()
+		mockey.Mock((*preparationTestRunner).Close).Return().Build()
+		waiterJoined := make(chan struct{})
+		var original func(*idempotency.PendingEntry, context.Context, message.MutableMessage) idempotency.PendingResult
+		mockey.Mock((*idempotency.PendingEntry).Wait).Origin(&original).To(func(p *idempotency.PendingEntry, ctx context.Context, msg message.MutableMessage) idempotency.PendingResult {
+			close(waiterJoined)
+			return original(p, ctx, msg)
+		}).Build()
+		result := make(chan error, 2)
+		insert := func() {
+			_, err := w.Append(t.Context(), newPreparationTestInsert("same-key"))
+			result <- err
+		}
+		go insert()
+		waitFenceTestSignal(t, started)
+		go insert()
+		waitFenceTestSignal(t, waiterJoined)
+		config := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "local", Pchannels: []string{w.Channel().Name}},
+				{ClusterId: "peer", Pchannels: []string{"peer-channel"}},
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{{SourceClusterId: "peer", TargetClusterId: "local"}},
+		}
+		ddl := make(chan error, 1)
+		go func() {
+			_, err := w.Append(t.Context(), message.NewAlterReplicateConfigMessageBuilderV2().WithAllVChannel().
+				WithHeader(&message.AlterReplicateConfigMessageHeader{ReplicateConfiguration: config}).
+				WithBody(&message.AlterReplicateConfigMessageBody{}).MustBuildMutable())
+			ddl <- err
+		}()
+		require.NoError(t, waitFenceTestError(t, ddl))
+		release()
+		for range 2 {
+			err := waitFenceTestError(t, result)
+			require.Error(t, err)
+			require.True(t, status.AsStreamingError(err).IsReplicateViolation())
+		}
+		require.EqualValues(t, 1, persisted.Load())
+	})
 }
 
 func TestAppendResumesAfterPreparationWithoutCancelingPersistence(t *testing.T) {

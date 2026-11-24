@@ -308,18 +308,21 @@ class BlockingMetadataReader : public milvus_storage::api::Reader {
     }
 
     folly::SemiFuture<OpenResult>
-    get_chunk_reader_async(int64_t index,
-                           const std::shared_ptr<std::vector<std::string>>&
-                               columns) const override {
+    get_chunk_reader_async(
+        int64_t index,
+        const std::shared_ptr<std::vector<std::string>>& columns,
+        folly::CancellationToken cancellation) const override {
         ++async_calls;
         if (!block_next_.exchange(false)) {
-            return reader_->get_chunk_reader_async(index, columns);
+            return reader_->get_chunk_reader_async(
+                index, columns, cancellation);
         }
         auto gate = release_.getSemiFuture();
         started_.set_value();
         return std::move(gate).deferValue(
-            [reader = reader_, index, columns](folly::Unit) {
-                return reader->get_chunk_reader(index, columns);
+            [reader = reader_, index, columns, cancellation](folly::Unit) {
+                return reader->get_chunk_reader_async(
+                    index, columns, cancellation);
             });
     }
 
