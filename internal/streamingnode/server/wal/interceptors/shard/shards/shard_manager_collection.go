@@ -299,3 +299,12 @@ func (m *shardManagerImpl) GetAllCollectionSchemaInfos() map[int64]CollectionSch
 	}
 	return infos
 }
+
+func (m *shardManagerImpl) GetCollectionSchemaSnapshot(collectionID int64) *schemapb.CollectionSchema {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if collection := m.collections[collectionID]; collection != nil {
+		return collection.Schema.GetSchema()
+	}
+	return nil
+}

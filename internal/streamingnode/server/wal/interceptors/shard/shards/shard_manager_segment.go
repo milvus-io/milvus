@@ -12,14 +12,12 @@ import (
 
 // AssignSegmentRequest is a request to allocate segment.
 type AssignSegmentRequest struct {
-	CollectionID      int64
-	PartitionID       int64
-	ModifiedMetrics   stats.ModifiedMetrics
-	RuntimeFlushSize  uint64
-	TimeTick          uint64
-	TxnSession        TxnSession
-	SchemaVersion     int32
-	RequiresStorageV3 bool
+	CollectionID     int64
+	PartitionID      int64
+	ModifiedMetrics  stats.ModifiedMetrics
+	RuntimeFlushSize uint64
+	TimeTick         uint64
+	TxnSession       TxnSession
 }
 
 // AssignSegmentResult is a result of segment allocation.
@@ -127,7 +125,6 @@ func (m *shardManagerImpl) FlushSegment(msg message.ImmutableFlushMessageV2) {
 }
 
 // AssignSegment assigns a segment for a assign segment request.
-// It uses the latest schema version from collection info.
 func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegmentResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -138,12 +135,7 @@ func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegm
 		return nil, ErrPartitionNotFound
 	}
 
-	// Populate SchemaVersion from the current collection info into req.
-	// Callers construct req without knowing the schema version; this is the
-	// single place that resolves and stamps it before forwarding to partitionManager.
 	if info := m.collections[req.CollectionID]; info != nil {
-		req.SchemaVersion = info.SchemaVersion()
-		req.RequiresStorageV3 = info.RequiresStorageV3()
 		req.RuntimeFlushSize = info.RuntimeFlushSize(req.ModifiedMetrics)
 	}
 
