@@ -1316,11 +1316,12 @@ TEST(CacheCompressorTest, OneNullStoresOnlyNullPosition) {
     std::memcpy(&result_size, compressed.data() + 10, sizeof(result_size));
     const size_t valid_offset = 14 + result_size;
     ASSERT_LT(valid_offset, compressed.size());
+    // Inspect the portable payload independently of the cache's read view.
     std::unique_ptr<roaring_bitmap_t, decltype(&roaring_bitmap_free)>
-        encoded_valid(
-            roaring_bitmap_deserialize_safe(compressed.data() + valid_offset,
-                                            compressed.size() - valid_offset),
-            roaring_bitmap_free);
+        encoded_valid(roaring_bitmap_portable_deserialize_safe(
+                          compressed.data() + valid_offset,
+                          compressed.size() - valid_offset),
+                      roaring_bitmap_free);
     ASSERT_NE(encoded_valid, nullptr);
     EXPECT_EQ(roaring_bitmap_get_cardinality(encoded_valid.get()), 1);
     EXPECT_TRUE(roaring_bitmap_contains(encoded_valid.get(), null_row));

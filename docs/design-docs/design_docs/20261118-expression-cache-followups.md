@@ -302,7 +302,39 @@ left the default disk mode without a directory. The fixture now explicitly
 selects memory mode and removes raw data before warming, exercising the
 index-only offset path. Both corrections passed in the main C++ run above.
 
-No deployment E2E, sanitizer run or performance benchmark was performed.
+No Dev CLI deployment E2E, sanitizer run or performance benchmark was performed.
+
+### Portable-payload test correction
+
+For commit `3803a258b0`, retained logs from Dev CLI cloud task
+`cpp-ut-local-lu-zhang-fix-expr-3803a25-742c3adbea4dd926-u59677` show
+269 passed, 3 skipped and 1 failed out of 273 tests across 37 suites.
+The failure is `CacheCompressorTest.OneNullStoresOnlyNullPosition`: its
+independent inspection still calls `roaring_bitmap_deserialize_safe`, although
+`CompressRoaring` now writes portable bytes. The correction uses
+`roaring_bitmap_portable_deserialize_safe`, preserving the cardinality,
+NULL-position and full-decode assertions. Production encoding and read paths
+are unchanged.
+
+Dev CLI cloud task
+`cpp-ut-local-lu-zhang-fix-expr-3803a25-d6faecc5345f299f-u59677`
+validated the local correction on top of `3803a258b0` with `-b master
+--allow-dirty`. It succeeded: 270 passed, 3 skipped and 0 failed out of
+273 selected tests across 37 suites. The previously failing test passed.
+The skips are the memory parameterizations of three disk-only concurrency
+tests; their disk variants passed. One existing disabled test was not run.
+The scope includes cache admission and lifetime, disk reservations, Roaring
+read views, sparse reads, TTL, whole-filter reuse, TextMatch, JSON flat
+expressions, FM index and manifest-reopen invalidation. This is incremental
+Dev CLI cloud validation, not a local test or a new PR Jenkins result.
+
+The [PR Jenkins run for the same commit](https://jenkins-milvus-ci.milvus.io/job/MILVUS-CI-V2-PR-PIPELINES/job/milvus-build-ut-ciloop-pipeline-for-tcus/6465/pipeline-overview/)
+reports successful build, code checks, Go UT and integration tests, with
+23,259 C++ tests passed and 1 failed. Its detailed failure log was not accessible;
+the failure identity above comes from the separate Dev CLI run.
+The PR also reports successful default E2E and Go SDK checks for that commit.
+These Jenkins results do not validate the subsequent test correction and are
+distinct from the Dev CLI runs listed above.
 
 
 ## Separately audited observations (outside these follow-ups)
@@ -327,3 +359,8 @@ No deployment E2E, sanitizer run or performance benchmark was performed.
 Optional asynchronous disk writes are not included. Writes remain synchronous
 on their calling query thread, but no manager lock covers their I/O. No claim
 of measured production hit-rate or latency improvement is made.
+
+Coalescing disk offset reads is explicitly deferred. The offset path still
+issues two 8-byte reads per distinct touched word, plus the slot header read.
+Contiguous-range/page reads and a dense-selection fallback remain a performance
+follow-up; sequential full-bitmap reads are unchanged.
