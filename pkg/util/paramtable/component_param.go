@@ -3297,7 +3297,7 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		Version:      "3.0.0",
 		DefaultValue: "10000",
 		Doc:          "Maximum submitted PK count per update request, including duplicates and all VChannels. Must be positive; invalid values fall back to 10000. Message byte limits apply independently.",
-		Export:       true,
+		Export:       false,
 		Formatter: func(v string) string {
 			count, err := strconv.Atoi(v)
 			if err != nil || count <= 0 {
