@@ -145,6 +145,39 @@ GIT_CONFIG_GLOBAL=/dev/null make -C "${scripts_dir}/.." -n GO=true OS=Linux \
     -o generated-proto -o plan-parser-lib build-cpp-gpu > "${test_root}/make.log" 2>&1
 grep -q 'TANTIVY_ANALYZER_REMOTE_TLS=OFF .*core_build.sh .* -g -T OFF ' "${test_root}/make.log"
 
+# Ordinary Go builds must not materialize Go's default CGO_CXXFLAGS into the
+# environment (which stamps CGO_CXXFLAGS="-O2 -g" into Go buildinfo and breaks
+# plugin artifact verification), while TSan builds must preserve it before
+# appending sanitizer flags.
+mkdir -p "${test_root}/make-bin"
+cat > "${test_root}/make-bin/go" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == env ]]; then
+    case "${2:-}" in
+        CGO_CXXFLAGS) printf '%s\n' '-O2 -g' ;;
+        GOPATH) printf '%s\n' '/tmp/gopath' ;;
+        GOFLAGS) ;;
+    esac
+fi
+EOF
+chmod +x "${test_root}/make-bin/go"
+env -u CGO_CFLAGS -u CGO_CXXFLAGS -u CGO_LDFLAGS \
+    GIT_CONFIG_GLOBAL=/dev/null make -C "${scripts_dir}/.." -n \
+    GO="${test_root}/make-bin/go" OS=Linux USE_TSAN=OFF build-go > "${test_root}/make.log" 2>&1
+grep -q 'CGO_CXXFLAGS="" ' "${test_root}/make.log"
+env -u CGO_CFLAGS -u CGO_CXXFLAGS -u CGO_LDFLAGS \
+    GIT_CONFIG_GLOBAL=/dev/null make -C "${scripts_dir}/.." -n \
+    GO="${test_root}/make-bin/go" OS=Linux USE_TSAN=OFF CGO_CXXFLAGS=-O1 build-go > "${test_root}/make.log" 2>&1
+grep -q 'CGO_CXXFLAGS="-O1" ' "${test_root}/make.log"
+env -u CGO_CFLAGS -u CGO_CXXFLAGS -u CGO_LDFLAGS \
+    GIT_CONFIG_GLOBAL=/dev/null make -C "${scripts_dir}/.." -n \
+    GO="${test_root}/make-bin/go" OS=Linux USE_TSAN=ON build-go > "${test_root}/make.log" 2>&1
+grep -q 'CGO_CXXFLAGS="-O2 -g -fsanitize=thread -g -fno-omit-frame-pointer" ' "${test_root}/make.log"
+env -u CGO_CFLAGS -u CGO_CXXFLAGS -u CGO_LDFLAGS \
+    GIT_CONFIG_GLOBAL=/dev/null make -C "${scripts_dir}/.." -n \
+    GO="${test_root}/make-bin/go" OS=Linux USE_TSAN=ON CGO_CXXFLAGS=-O1 build-go > "${test_root}/make.log" 2>&1
+grep -q 'CGO_CXXFLAGS="-O1 -fsanitize=thread -g -fno-omit-frame-pointer" ' "${test_root}/make.log"
+
 # Exercise the parser's Go and handwritten C++ commands without compiling. This
 # also protects the non-TSan path on systems whose /bin/bash is still Bash 3.2.
 mkdir -p "${test_root}/repo/scripts" "${test_root}/bin" \

@@ -55,8 +55,6 @@ endif
 
 USE_TSAN ?= OFF
 export USE_TSAN
-# Preserve Go's default C++ flags when the caller did not provide an override.
-CGO_CXXFLAGS ?= $(shell $(GO) env CGO_CXXFLAGS)
 ifneq ($(USE_TSAN),ON)
 ifneq ($(USE_TSAN),OFF)
 $(error USE_TSAN must be ON or OFF)
@@ -77,6 +75,9 @@ endif
 ifneq ($(filter -race -race=true,$(GOFLAGS) $(shell $(GO) env GOFLAGS)),)
 $(error USE_TSAN cannot be combined with Go -race)
 endif
+# Preserve Go's default C++ flags before appending TSan flags so ordinary
+# builds do not stamp CGO_CXXFLAGS="-O2 -g" into Go buildinfo.
+	CGO_CXXFLAGS ?= $(shell $(GO) env CGO_CXXFLAGS)
 	override CGO_CFLAGS += -fsanitize=thread -g -fno-omit-frame-pointer
 	override CGO_CXXFLAGS += -fsanitize=thread -g -fno-omit-frame-pointer
 	override CGO_LDFLAGS += -fsanitize=thread -shared-libsan
