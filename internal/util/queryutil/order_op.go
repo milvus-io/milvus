@@ -77,6 +77,10 @@ func (op *OrderByLimitOperator) Run(ctx context.Context, span trace.Span, inputs
 	_, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "OrderByLimitOperator")
 	defer sp.End()
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	result := inputs[0].(*internalpb.RetrieveResults)
 
 	if result == nil || len(result.GetFieldsData()) == 0 {
@@ -106,11 +110,14 @@ func (op *OrderByLimitOperator) Run(ctx context.Context, span trace.Span, inputs
 		return []any{result}, nil
 	}
 
-	k := int(op.topK)
-	if k > 0 && k < rowCount {
+	if op.topK > 0 && op.topK < int64(rowCount) {
+		k := int(op.topK)
 		// Partial sort: use max-heap to select top-K indices, then sort them.
 		// O(N log K) instead of O(N log N).
-		indices := op.partialSort(result, rowCount, k)
+		indices, err := op.partialSort(ctx, result, rowCount, k)
+		if err != nil {
+			return nil, err
+		}
 		sorted, err := op.reorderResult(result, indices)
 		if err != nil {
 			return nil, err
@@ -128,6 +135,9 @@ func (op *OrderByLimitOperator) Run(ctx context.Context, span trace.Span, inputs
 		return op.compareRowsAt(result, indices[i], indices[j]) < 0
 	})
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	sorted, err := op.reorderResult(result, indices)
 	if err != nil {
 		return nil, err
@@ -144,18 +154,26 @@ func (op *OrderByLimitOperator) Run(ctx context.Context, span trace.Span, inputs
 //  3. Extract all K indices from the heap and sort them.
 //
 // Complexity: O(N log K) for selection + O(K log K) for final sort.
-func (op *OrderByLimitOperator) partialSort(result *internalpb.RetrieveResults, rowCount, k int) []int {
+func (op *OrderByLimitOperator) partialSort(ctx context.Context, result *internalpb.RetrieveResults, rowCount, k int) ([]int, error) {
 	h := &maxIndexHeap{
 		indices: make([]int, 0, k),
 		less: func(a, b int) bool {
-			return op.compareRowsAt(result, a, b) < 0
+			cmp := op.compareRowsAt(result, a, b)
+			// Match the full stable sort when rows have equal ORDER BY keys
+			// and no distinct PK tie-breaker (including SQL aggregate rows).
+			return cmp < 0 || (cmp == 0 && a < b)
 		},
 	}
 
 	for i := 0; i < rowCount; i++ {
+		if i&1023 == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		if h.Len() < k {
 			heap.Push(h, i)
-		} else if op.compareRowsAt(result, i, h.indices[0]) < 0 {
+		} else if h.less(i, h.indices[0]) {
 			// Current row is better (smaller) than the worst in heap; replace.
 			h.indices[0] = i
 			heap.Fix(h, 0)
@@ -164,10 +182,10 @@ func (op *OrderByLimitOperator) partialSort(result *internalpb.RetrieveResults, 
 
 	indices := h.indices
 	sort.SliceStable(indices, func(i, j int) bool {
-		return op.compareRowsAt(result, indices[i], indices[j]) < 0
+		return h.less(indices[i], indices[j])
 	})
 
-	return indices
+	return indices, ctx.Err()
 }
 
 // maxIndexHeap is a max-heap of row indices. The "worst" element (largest
