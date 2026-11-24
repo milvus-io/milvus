@@ -521,8 +521,9 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
         TC-L1-01: Drop one vector field and keep another vector field.
 
         target: verify multi-vector collection keeps remaining vector field searchable after dropping one vector field
-        method: create dense1 and dense2, build indexes, drop dense2, then search dense1 and reject dense2/last-vector drop
-        expected: dense2 disappears; dense1 search works; dense2 search fails; dropping dense1 is rejected as last vector field
+        method: create dense1 and dense2, build indexes, drop dense2, search dense1, then drop dense1 too
+        expected: dense2 disappears; dense1 search works; dense2 search fails; dropping dense1 succeeds and
+                  leaves a collection without a vector field
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
