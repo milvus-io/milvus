@@ -16,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <cmath>
 #include <new>
 #include <string>
@@ -97,6 +98,11 @@ GeosPredicateIsTrue(char result, const char* op) {
 inline GEOSContextHandle_t
 InitGEOSContext(const char* purpose) {
     try {
+        // GEOS 3.12's GEOS_init_r() calls geos::util::Interrupt::cancel(),
+        // which writes a process-global non-atomic flag. Serialize context
+        // initialization across threads to avoid a data race.
+        static std::mutex init_mutex;
+        std::lock_guard<std::mutex> lock(init_mutex);
         return GEOS_init_r();
     } catch (const std::bad_alloc&) {
         ThrowInfo(ErrorCode::MemAllocateFailed,
