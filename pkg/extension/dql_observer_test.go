@@ -67,3 +67,22 @@ func TestDQLObserverNestedAttemptsAndRetries(t *testing.T) {
 	ObserveDQLPhase(ctx, "execute")
 	require.Equal(t, []string{"queue", "execute"}, observer.phases)
 }
+
+func TestDQLObserverIgnoresPhasesFromCompletedAttempts(t *testing.T) {
+	observer := &testDQLObserver{}
+	ctx := WithDQLObserver(context.Background(), observer)
+	first, finish := BeginDQLAttempt(ctx)
+	ObserveDQLPhase(first, "queue")
+	finish()
+
+	second, finishSecond := BeginDQLAttempt(ctx)
+	ObserveDQLPhase(second, "queue")
+	// A canceled task can leave its queue after its caller has returned.
+	ObserveDQLPhase(first, "execute")
+	require.Equal(t, []string{"queue", "queue"}, observer.phases)
+	ObserveDQLPhase(second, "execute")
+	finishSecond()
+	ObserveDQLPhase(second, "queue")
+	require.Equal(t, []string{"queue", "queue", "execute"}, observer.phases)
+	require.EqualValues(t, 2, observer.finishes.Load())
+}

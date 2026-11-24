@@ -36,6 +36,11 @@ type (
 	dqlAttemptKey  struct{}
 )
 
+type dqlAttempt struct {
+	mu       sync.Mutex
+	finished bool
+}
+
 // WithDQLObserver attaches an optional observer to an admitted request. Stock
 // Milvus does not install one. No customer identifiers or payload are retained
 // by this interface.
@@ -55,13 +60,17 @@ func BeginDQLAttempt(ctx context.Context) (context.Context, func()) {
 		return ctx, func() {}
 	}
 	finish := observer.BeginAttempt()
-	var once sync.Once
-	return context.WithValue(ctx, dqlAttemptKey{}, true), func() {
-		once.Do(func() {
-			if finish != nil {
-				finish()
-			}
-		})
+	attempt := &dqlAttempt{}
+	return context.WithValue(ctx, dqlAttemptKey{}, attempt), func() {
+		attempt.mu.Lock()
+		defer attempt.mu.Unlock()
+		if attempt.finished {
+			return
+		}
+		attempt.finished = true
+		if finish != nil {
+			finish()
+		}
 	}
 }
 
@@ -70,6 +79,15 @@ func BeginDQLAttempt(ctx context.Context) (context.Context, func()) {
 func ObserveDQLPhase(ctx context.Context, phase string) {
 	if phase != "queue" && phase != "execute" {
 		return
+	}
+	if attempt, ok := ctx.Value(dqlAttemptKey{}).(*dqlAttempt); ok {
+		// A canceled task may leave its queue after its caller has returned.
+		// Serialize phase delivery with completion so it cannot change a retry.
+		attempt.mu.Lock()
+		defer attempt.mu.Unlock()
+		if attempt.finished {
+			return
+		}
 	}
 	if observer, ok := ctx.Value(dqlObserverKey{}).(DQLObserver); ok {
 		observer.SetRequestPhase(phase)

@@ -13,6 +13,8 @@ exporter, new storage, payload capture or metric labels in stock Milvus.
   The retry loop's backoff is outside this interval. This is not QueryNode CPU time.
 - An inherited nested call is part of its outer attempt and is not counted twice.
   Finish is deferred on success and errors, and is idempotent.
+  Phase callbacks are serialized with completion; callbacks from an already
+  completed attempt are ignored, including when a later retry is running.
 - Accepted top-level scheduler tasks report `queue` before becoming visible and
   `execute` when processing begins. Rejected enqueues report neither transition.
 - Requeries and synthesized reads such as search-by-primary-key vector fetching
