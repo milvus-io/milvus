@@ -341,6 +341,22 @@ func (s *SearchOptionSuite) TestQueryCalcDistance() {
 	s.Require().True(ok)
 	s.Contains(raw, `"vector":"pk == 2"`)
 
+	// a []byte binary reference must be encoded as a numeric array, not a
+	// base64 string the server would misread as the expression form
+	queryReq, err = NewQueryOption("collection").
+		WithCalcDistance(map[string]any{
+			"metric_type": "HAMMING",
+			"field":       "vec",
+			"vector":      []byte{15, 170},
+			"output_name": "distance",
+		}).
+		Request()
+	s.Require().NoError(err)
+	raw, ok = entity.KvPairsMap(queryReq.GetQueryParams())["calc_distance"]
+	s.Require().True(ok)
+	s.Contains(raw, `"vector":[15,170]`)
+	s.NotContains(raw, "Fuq=")
+
 	// NaN in the vector cannot be JSON-encoded; Request() must surface the error
 	_, err = NewQueryOption("collection").
 		WithCalcDistance(map[string]any{"vector": []float32{float32(math.NaN())}}).

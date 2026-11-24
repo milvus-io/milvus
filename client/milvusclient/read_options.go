@@ -19,6 +19,7 @@ package milvusclient
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"strconv"
 	"strings"
@@ -942,10 +943,25 @@ func (opt *queryOption) WithSkipRLS(skip bool) *queryOption {
 //	metric_type, field, vector, output_name
 //
 // The map is JSON-marshaled into the request's calc_distance query param
-// verbatim. The vector value may be a []float32 (dense), a map (sparse), or a
-// string (single-row expression). The marshal fails — and Request() returns the
-// error — when vector contains NaN/Inf, which the server would reject anyway.
+// verbatim. The vector value may be a []float32 (dense), a []byte or []int
+// (binary), a map (sparse), or a string (single-row expression). A []byte
+// binary reference is rewritten to a numeric slice before encoding, because
+// json would otherwise base64-mangle it into a string the server misreads as
+// the expression form. The marshal fails — and Request() returns the error —
+// when vector contains NaN/Inf, which the server would reject anyway.
 func (opt *queryOption) WithCalcDistance(params map[string]any) *queryOption {
+	// json.Marshal encodes []byte as a base64 string, which the server's
+	// parseCalcDistance would read as the expression form; rewrite it to the
+	// numeric-slice wire contract for BinaryVector references before encoding.
+	// A shallow copy keeps the caller's map unmodified.
+	if raw, ok := params["vector"].([]byte); ok {
+		vec := make([]int, len(raw))
+		for i, b := range raw {
+			vec[i] = int(b)
+		}
+		params = maps.Clone(params)
+		params["vector"] = vec
+	}
 	s, err := json.Marshal(params)
 	if err != nil {
 		opt.err = err
