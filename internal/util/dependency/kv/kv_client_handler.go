@@ -1,12 +1,13 @@
 package kvfactory
 
 import (
-	"fmt"
+	"context"
+	"errors"
 	"sync"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -17,7 +18,7 @@ var getEtcdAndPathFunction = getEtcdAndPath
 type etcdClientCreator struct {
 	mu       sync.Mutex
 	client   *clientv3.Client
-	rootpath *string
+	rootpath string
 }
 
 // Returns an Etcd client and the metaRootPath, if an error is hit, will panic.
@@ -34,45 +35,45 @@ func CloseEtcdClient() {
 	defer clientCreator.mu.Unlock()
 	if clientCreator.client != nil {
 		err := clientCreator.client.Close()
-		if err != nil {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			panic(err)
 		}
 	}
 	clientCreator.client = nil
-	clientCreator.rootpath = nil
+	clientCreator.rootpath = ""
 }
 
 // Returns an Etcd client and the metaRootPath, if an error is hit, will panic
 func getEtcdAndPath() (*clientv3.Client, string) {
 	clientCreator.mu.Lock()
 	defer clientCreator.mu.Unlock()
-	// If client/path doesn’t exist, create a new one
 	if clientCreator.client == nil {
-		var err error
-		clientCreator.client, err = createEtcdClient()
+		client, err := paramtable.Get().EtcdCfg.NewClient(context.Background())
 		if err != nil {
-			panic(fmt.Errorf("failed to create etcd client: %w", err))
+			panic(merr.Wrap(err, "failed to create etcd client"))
 		}
-		path := paramtable.Get().EtcdCfg.MetaRootPath.GetValue()
-		clientCreator.rootpath = &path
+		clientCreator.setClient(client)
 	}
-	return clientCreator.client, *clientCreator.rootpath
+	return clientCreator.client, clientCreator.rootpath
 }
 
-// Function that calls the Etcd constructor
-func createEtcdClient() (*clientv3.Client, error) {
-	cfg := &paramtable.Get().ServiceParam
-	options := cfg.EtcdCfg.ClientOptions()
-	return etcd.CreateEtcdClient(
-		cfg.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		cfg.EtcdCfg.EtcdEnableAuth.GetAsBool(),
-		cfg.EtcdCfg.EtcdAuthUserName.GetValue(),
-		cfg.EtcdCfg.EtcdAuthPassword.GetValue(),
-		cfg.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		cfg.EtcdCfg.Endpoints.GetAsStrings(),
-		cfg.EtcdCfg.EtcdTLSCert.GetValue(),
-		cfg.EtcdCfg.EtcdTLSKey.GetValue(),
-		cfg.EtcdCfg.EtcdTLSCACert.GetValue(),
-		cfg.EtcdCfg.EtcdTLSMinVersion.GetValue(),
-		options...)
+// InitEtcdClient initializes the shared client before starting any component.
+// Subsequent GetEtcdAndPath calls reuse it throughout the process lifetime.
+func InitEtcdClient(ctx context.Context) error {
+	clientCreator.mu.Lock()
+	defer clientCreator.mu.Unlock()
+	if clientCreator.client != nil {
+		return nil
+	}
+	client, err := paramtable.Get().EtcdCfg.NewClientAtStartup(ctx)
+	if err != nil {
+		return err
+	}
+	clientCreator.setClient(client)
+	return nil
+}
+
+func (creator *etcdClientCreator) setClient(client *clientv3.Client) {
+	creator.rootpath = paramtable.Get().EtcdCfg.MetaRootPath.GetValue()
+	creator.client = client
 }

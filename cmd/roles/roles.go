@@ -389,7 +389,7 @@ func setupPrometheusHTTPServer(r *internalmetrics.MilvusRegistry) {
 	})
 }
 
-func (mr *MilvusRoles) handleSignals() func() {
+func (mr *MilvusRoles) handleSignals(cancelStartup context.CancelFunc) func() {
 	sign := make(chan struct{})
 	done := make(chan struct{})
 
@@ -410,6 +410,7 @@ func (mr *MilvusRoles) handleSignals() func() {
 			case sig := <-sc:
 				mlog.Warn(context.TODO(), "Get signal to exit", mlog.String("signal", sig.String()))
 				mr.once.Do(func() {
+					cancelStartup()
 					close(mr.closed)
 					// reset other signals, only handle SIGINT from now
 					signal.Reset(syscall.SIGQUIT, syscall.SIGHUP, syscall.SIGTERM)
@@ -437,13 +438,18 @@ func (mr *MilvusRoles) componentNum() int {
 
 // Run Milvus components.
 func (mr *MilvusRoles) Run() {
-	// start signal handler, defer close func
-	closeFn := mr.handleSignals()
-	defer closeFn()
-
-	mlog.Info(context.TODO(), "starting running Milvus components")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	// During startup SIGTERM must interrupt synchronous etcd calls too. Once
+	// serving, keep component contexts alive for the ordered graceful shutdown.
+	shutdownCtx, shutdown := context.WithCancel(context.Background())
+	defer shutdown()
+	stopStartupCancellation := context.AfterFunc(shutdownCtx, cancel)
+	defer stopStartupCancellation()
+	closeFn := mr.handleSignals(shutdown)
+	defer closeFn()
+
+	mlog.Info(ctx, "starting running Milvus components")
 
 	mr.printLDPreLoad()
 
@@ -452,19 +458,25 @@ func (mr *MilvusRoles) Run() {
 	thw.Start()
 	defer thw.Stop()
 
-	// only standalone enable localMsg
+	mode := metricsinfo.ClusterDeployMode
 	if mr.Local {
-		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode); err != nil {
-			mlog.Error(context.TODO(), "Failed to set deploy mode: ", mlog.Err(err))
+		mode = metricsinfo.StandaloneDeployMode
+	}
+	if err := os.Setenv(metricsinfo.DeployModeEnvKey, mode); err != nil {
+		mlog.Error(ctx, "failed to set deploy mode", mlog.Err(err))
+	}
+	if mr.Embedded {
+		paramtable.InitWithBaseTable(paramtable.NewBaseTable(paramtable.Files([]string{"embedded-milvus.yaml"})))
+	} else {
+		paramtable.Init()
+	}
+	if err := paramtable.GetBaseTable().WaitForRemoteConfig(ctx); err != nil {
+		if ctx.Err() != nil {
+			return
 		}
-
-		if mr.Embedded {
-			// setup config for embedded milvus
-			paramtable.InitWithBaseTable(paramtable.NewBaseTable(paramtable.Files([]string{"embedded-milvus.yaml"})))
-		} else {
-			paramtable.Init()
-		}
-
+		mlog.Fatal(ctx, "failed to initialize etcd configuration", mlog.String("error", config.RedactedValue))
+	}
+	if mr.Local {
 		params := paramtable.Get()
 		// Recover visible legacy local files before etcd and components start.
 		if !mr.migrateLocalStorageLayoutOrDie(ctx, params) {
@@ -489,16 +501,19 @@ func (mr *MilvusRoles) Run() {
 		paramtable.SetRole(typeutil.StandaloneRole)
 		defer stopRocksmqIfUsed()
 	} else {
-		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode); err != nil {
-			mlog.Error(context.TODO(), "Failed to set deploy mode: ", mlog.Err(err))
-		}
-		paramtable.Init()
 		paramtable.SetRole(mr.ServerType)
 	}
 	metrics.SetCollectionLevelMetricsMode(paramtable.Get().CommonCfg.CollectionLevelMetricsMode.GetValue())
 	mlog.Info(context.TODO(), "configured collection and VChannel metrics",
 		mlog.String("mode", metrics.CollectionLevelMetricsMode()))
 
+	if err := kvfactory.InitEtcdClient(ctx); err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		mlog.Fatal(ctx, "failed to initialize shared etcd client", mlog.String("error", config.RedactedValue))
+	}
+	defer kvfactory.CloseEtcdClient()
 	// Persist immutable configurations at startup, such as mqType paramItem
 	if (mr.EnableRootCoord && mr.EnableDataCoord && mr.EnableQueryCoord) || mr.EnableMixCoord {
 		// Resolve the actual walName instead of default
@@ -626,6 +641,7 @@ func (mr *MilvusRoles) Run() {
 		mlog.Warn(context.TODO(), "Failed to wait for all components ready", mlog.Err(err))
 		return
 	}
+	stopStartupCancellation()
 	mlog.Info(context.TODO(), "All components are ready", mlog.Strings("roles", lo.Keys(componentMap)))
 
 	http.RegisterStopComponent(func(role string) error {
@@ -725,9 +741,6 @@ func (mr *MilvusRoles) Run() {
 		proxy.Stop()
 		mlog.Info(context.TODO(), "proxy stopped!")
 	}
-
-	// close reused etcd client
-	kvfactory.CloseEtcdClient()
 
 	mlog.Info(context.TODO(), "Milvus components graceful stop done")
 }

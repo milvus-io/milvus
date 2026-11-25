@@ -172,7 +172,7 @@ func (bt *BaseTable) init() {
 		}
 	}
 	if !bt.config.skipRemote {
-		bt.initConfigsFromRemote()
+		_ = bt.initConfigsFromRemote(context.Background())
 	}
 }
 
@@ -203,35 +203,24 @@ func (bt *BaseTable) initConfigsFromLocal() {
 	}
 }
 
-func (bt *BaseTable) initConfigsFromRemote() {
+func (bt *BaseTable) initConfigsFromRemote(ctx context.Context) error {
 	refreshInterval := bt.config.refreshInterval
 	etcdConfig := EtcdConfig{}
 	etcdConfig.Init(bt)
 	etcdConfig.Endpoints.PanicIfEmpty = false
 	etcdConfig.RootPath.PanicIfEmpty = false
 	if etcdConfig.Endpoints.GetValue() == "" {
-		return
+		return nil
 	}
 	if etcdConfig.UseEmbedEtcd.GetAsBool() && !etcd.HasServer() {
-		return
+		return nil
 	}
-	etcdCli, err := etcd.CreateEtcdClient(
-		etcdConfig.UseEmbedEtcd.GetAsBool(),
-		etcdConfig.EtcdEnableAuth.GetAsBool(),
-		etcdConfig.EtcdAuthUserName.GetValue(),
-		etcdConfig.EtcdAuthPassword.GetValue(),
-		etcdConfig.EtcdUseSSL.GetAsBool(),
-		etcdConfig.Endpoints.GetAsStrings(),
-		etcdConfig.EtcdTLSCert.GetValue(),
-		etcdConfig.EtcdTLSKey.GetValue(),
-		etcdConfig.EtcdTLSCACert.GetValue(),
-		etcdConfig.EtcdTLSMinVersion.GetValue(),
-		etcd.WithDialTimeout(etcdConfig.DialTimeout.GetAsDuration(time.Millisecond)))
+	etcdCli, err := etcdConfig.NewClient(ctx)
 	if err != nil {
 		// TLS and dial errors can contain protected paths, endpoints, or
 		// transport settings. Keep those details in the in-process error only.
-		mlog.Warn(context.TODO(), "init with etcd client failed", mlog.String("error", config.RedactedValue))
-		return
+		mlog.Warn(ctx, "init with etcd client failed", mlog.String("error", config.RedactedValue))
+		return err
 	}
 	bt.etcdClient = etcdCli
 
@@ -241,11 +230,33 @@ func (bt *BaseTable) initConfigsFromRemote() {
 	}
 	s, err := config.NewEtcdSource(etcdCli, info)
 	if err != nil {
-		mlog.Info(context.TODO(), "init with etcd failed", mlog.Err(err))
-		return
+		mlog.Info(ctx, "init with etcd failed", mlog.Err(err))
+		return err
 	}
-	bt.mgr.AddSource(s)
+	err = bt.mgr.AddSource(s)
 	s.SetEventHandler(bt.mgr)
+	return err
+}
+
+// WaitForRemoteConfig loads a real snapshot before components select a WAL or
+// register sessions. clientv3.New can succeed without contacting etcd.
+func (bt *BaseTable) WaitForRemoteConfig(ctx context.Context) error {
+	if bt.config.skipRemote {
+		return nil
+	}
+	return etcd.RetryAtStartup(ctx, func() error {
+		source, ok := bt.mgr.GetEtcdSource()
+		if !ok {
+			if err := bt.initConfigsFromRemote(ctx); err != nil {
+				return err
+			}
+			source, ok = bt.mgr.GetEtcdSource()
+			if !ok { // No remote source configured, or embedded etcd has yet to start.
+				return nil
+			}
+		}
+		return bt.mgr.LoadEtcdConfigsAtStartup(ctx, source)
+	})
 }
 
 // GetConfigDir returns the config directory
