@@ -32,7 +32,7 @@ target_include_directories(bitmap_range_benchmark PRIVATE
     ${CMAKE_HOME_DIRECTORY}/src/thirdparty
     ${KNOWHERE_INCLUDE_DIR}
     ${MILVUS_STORAGE_INCLUDE_DIR}
-    ${milvus-common_INCLUDE_DIRS})
+    ${MILVUS_COMMON_INCLUDE_DIR})
 target_link_libraries(bitmap_range_benchmark PRIVATE milvus_core milvus_conan_deps benchmark::benchmark)
 if (LINUX)
     # Same XXH symbol collision as the unit-test binaries, see unittest/CMakeLists.txt.
@@ -55,12 +55,6 @@ find_library(BSI_BENCHMARK_FOLLY_LIBRARY
         NO_DEFAULT_PATH
         NO_CACHE
         REQUIRED)
-find_library(BSI_BENCHMARK_MILVUS_COMMON_LIBRARY
-        NAMES milvus-common
-        PATHS "${milvus-common_LIB_DIRS_${BSI_BENCHMARK_BUILD_TYPE}}"
-        NO_DEFAULT_PATH
-        NO_CACHE
-        REQUIRED)
 find_library(BSI_BENCHMARK_FMT_LIBRARY
         NAMES fmt
         PATHS "${fmt_fmt_fmt_LIB_DIRS_${BSI_BENCHMARK_BUILD_TYPE}}"
@@ -72,7 +66,7 @@ target_link_libraries(bit_sliced_index_benchmark PRIVATE
         "$<TARGET_FILE:milvus_core>"
         "$<TARGET_FILE:milvus-storage>"
         "$<TARGET_FILE:knowhere>"
-        "${BSI_BENCHMARK_MILVUS_COMMON_LIBRARY}"
+        milvus-common
         gRPC::grpc++
         Boost::filesystem
         glog::glog

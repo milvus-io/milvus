@@ -41,7 +41,6 @@ class MilvusConan(ConanFile):
         "unordered_dense/4.4.0#6a855c992618cc4c63019109a2e47298",
         "geos/3.12.0#a923af6dc4c18f87a7dfa960118f3166",
         "icu/74.2#cd1937b9561b8950a2ae6311284c5813",
-        "milvus-common/1.0.0-60f998e@milvus/dev#c1fd9fa7f972e6a23faf48c332f43825",
         "libavrocpp/1.12.1.1@milvus/dev#b4854183542196740ec9a004fdfff7ec",
     )
 
@@ -145,7 +144,8 @@ class MilvusConan(ConanFile):
         )
         self.requires("abseil/20250127.0#481edcc75deb0efb16500f511f0f0a1c", force=True)
         self.requires("fmt/11.2.0#eb98daa559c7c59d591f4720dde4cd5c", force=True)
-        # Override milvus-common's older recipe pin to disable automatic exception stack tracing.
+        # Keep the folly revision without automatic exception stack tracing
+        # (it used to override the milvus-common recipe pin).
         self.requires(
             "folly/2026.04.20.00@milvus/dev#fe44332ddb5bb53bb297699d45d29f88",
             force=True,

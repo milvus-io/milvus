@@ -29,6 +29,7 @@ set(FETCHCONTENT_QUIET     OFF)
 # Find pthreads
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
+add_subdirectory(milvus-common)
 add_subdirectory(knowhere)
 
 add_subdirectory(boost_ext)

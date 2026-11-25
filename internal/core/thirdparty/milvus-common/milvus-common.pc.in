@@ -1,0 +1,9 @@
+libdir=@CMAKE_INSTALL_FULL_LIBDIR@
+includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
+
+Name: Milvus Common
+Description: Basic modules for Milvus/Knowhere
+Version: 1.0
+
+Libs: -L${libdir} -lmilvus-common
+Cflags: -I${includedir}

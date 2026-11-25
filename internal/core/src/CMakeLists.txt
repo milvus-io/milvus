@@ -72,7 +72,7 @@ set(CONAN_TARGETS
     abseil::abseil
     mongo::bson_shared
     simde::simde
-    milvus-common::milvus-common
+    milvus-common
     LibLZMA::LibLZMA
     RdKafka::rdkafka++
     googleapis::googleapis

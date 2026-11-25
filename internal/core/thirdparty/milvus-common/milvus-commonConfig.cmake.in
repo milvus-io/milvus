@@ -1,0 +1,16 @@
+# Minimal compatibility config: milvus-common is built from source in
+# thirdparty/milvus-common, but some consumers (vendored knowhere and
+# milvus-storage) still call find_package(milvus-common) and link the
+# namespaced target that the Conan CMakeDeps config used to provide.
+if(NOT TARGET milvus-common)
+    message(FATAL_ERROR "milvus-common target not found; add thirdparty/milvus-common before consuming it")
+endif()
+if(NOT TARGET milvus-common::milvus-common)
+    add_library(milvus-common::milvus-common INTERFACE IMPORTED)
+    target_link_libraries(milvus-common::milvus-common INTERFACE milvus-common)
+    # The source-built target does not carry interface includes; mirror what
+    # the Conan config provided so vendored consumers keep finding headers.
+    set_target_properties(milvus-common::milvus-common PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "@MILVUS_COMMON_INCLUDE_DIR@")
+endif()
+set(milvus-common_INCLUDE_DIRS "@MILVUS_COMMON_INCLUDE_DIR@")
