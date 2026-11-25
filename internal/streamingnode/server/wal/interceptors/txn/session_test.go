@@ -48,12 +48,14 @@ func TestFlushAbortsRecoveredReplicaSessionsByVChannel(t *testing.T) {
 		session.RegisterCleanup(func() { cleaned[id]++ }, 1)
 	}
 	first := m.sessions[1]
-	m.FailTxnAtVChannel("v1")
+	m.FailTxnAtVChannel("v1", 1)
 	require.Equal(t, message.TxnStateRollbacked, first.State())
 	require.True(t, first.IsExpiredOrDone(1), "LastConfirmedMessageID must be able to pass the aborted infinite-lease txn")
 	require.Equal(t, 1, cleaned[1])
 	require.Zero(t, cleaned[2])
 	require.Len(t, m.sessions, 1)
+	_, expiredErr := m.GetSessionOfTxn(1)
+	require.True(t, status.AsStreamingError(expiredErr).IsTxnExpired())
 	select {
 	case <-m.RecoverDone():
 		t.Fatal("the other VChannel still has a recovered transaction")
@@ -68,7 +70,7 @@ func TestFlushAbortsRecoveredReplicaSessionsByVChannel(t *testing.T) {
 		defer m.mu.Unlock()
 		return m.closed != nil
 	}, time.Second, time.Millisecond)
-	m.FailTxnAtVChannel("")
+	m.FailTxnAtVChannel("", 1)
 	require.Equal(t, 1, cleaned[2])
 	require.Empty(t, m.sessions)
 	select {
@@ -76,7 +78,7 @@ func TestFlushAbortsRecoveredReplicaSessionsByVChannel(t *testing.T) {
 	default:
 		t.Fatal("flush must release the recovered-segment flush barrier")
 	}
-	m.FailTxnAtVChannel("")
+	m.FailTxnAtVChannel("", 1)
 	require.Equal(t, map[message.TxnID]int{1: 1, 2: 1}, cleaned)
 	require.NoError(t, <-closing, "flush must wake a concurrently closing manager")
 }
@@ -251,7 +253,7 @@ func TestManagerRecoverAndFailAll(t *testing.T) {
 	}
 
 	first := m.sessions[1]
-	m.FailTxnAtVChannel("v1")
+	m.FailTxnAtVChannel("v1", 1)
 	require.Equal(t, message.TxnStateRollbacked, first.State())
 	require.True(t, first.IsExpiredOrDone(beginMsg1.TimeTick()), "force-fail must resolve the session without waiting for its lease")
 	require.Equal(t, message.TxnStateInFlight, m.sessions[2].State())
@@ -260,7 +262,7 @@ func TestManagerRecoverAndFailAll(t *testing.T) {
 		t.Errorf("txn manager should not be recovered")
 	case <-time.After(1 * time.Millisecond):
 	}
-	m.FailTxnAtVChannel("v2")
+	m.FailTxnAtVChannel("v2", 1)
 	<-m.RecoverDone()
 }
 
@@ -303,7 +305,7 @@ func TestFailAllTransactions(t *testing.T) {
 		<-m.RecoverDone()
 
 		// Should not panic and handle empty case
-		m.FailTxnAtVChannel("")
+		m.FailTxnAtVChannel("", 1)
 	})
 
 	t.Run("RollbackWithActiveSessions", func(t *testing.T) {
@@ -328,7 +330,7 @@ func TestFailAllTransactions(t *testing.T) {
 		m.mu.Unlock()
 
 		// Rollback all in-flight transactions
-		m.FailTxnAtVChannel("")
+		m.FailTxnAtVChannel("", 1)
 
 		// Verify all sessions are cleaned up
 		m.mu.Lock()
@@ -374,7 +376,7 @@ func TestFailAllTransactions(t *testing.T) {
 		session3.AddNewMessageDoneAndKeepalive(0)
 
 		// Rollback all in-flight transactions
-		m.FailTxnAtVChannel("")
+		m.FailTxnAtVChannel("", 1)
 
 		require.Equal(t, message.TxnStateRollbacked, session1.State())
 		require.Equal(t, message.TxnStateCommitted, session2.State())
@@ -410,7 +412,7 @@ func TestFailAllTransactions(t *testing.T) {
 		}
 
 		// Rollback all in-flight transactions
-		m.FailTxnAtVChannel("")
+		m.FailTxnAtVChannel("", 1)
 
 		// Verify all sessions are cleaned up
 		m.mu.Lock()

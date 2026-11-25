@@ -125,7 +125,7 @@ func (s *TxnSession) isExpiredOrDone(ts uint64) bool {
 	// A timeout txn or rollbacked/committed txn should be cleared.
 	// OnCommit and OnRollback session should not be cleared before timeout to
 	// avoid session clear callback to be called too early.
-	return s.expiredTimeTick() <= ts || s.state == message.TxnStateRollbacked || s.state == message.TxnStateCommitted
+	return s.expired || s.expiredTimeTick() <= ts || s.state == message.TxnStateRollbacked || s.state == message.TxnStateCommitted
 }
 
 // expiredTimeTick returns the expired time tick of the session.
@@ -238,14 +238,35 @@ func (s *TxnSession) Cleanup() {
 
 // abort terminates a session under the exclusive WAL lock. Marking the outcome
 // lets LastConfirmedMessageID advance without waiting for the session's lease.
-func (s *TxnSession) abort() {
+func (s *TxnSession) abort() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Never infer a failed Commit from an unresolved admitted state.
+	retryable := s.state == message.TxnStateInFlight || s.state == message.TxnStateOnRollback || s.state == message.TxnStateRollbacked
 	if s.state != message.TxnStateCommitted {
 		s.state = message.TxnStateRollbacked
 	}
 	s.cleanup()
+	return retryable
+}
+
+// cleanupIfExpiredOrDone atomically retires a session and captures whether it
+// definitely did not commit. A caller may already hold this session pointer;
+// marking expiration under the same mutex as commit admission prevents that
+// caller from committing after we publish a retryable terminal result.
+func (s *TxnSession) cleanupIfExpiredOrDone(ts uint64) (cleaned, retryable bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.isExpiredOrDone(ts) {
+		return false, false
+	}
+	if s.state == message.TxnStateInFlight {
+		s.expired = true
+	}
+	retryable = s.state == message.TxnStateInFlight || s.state == message.TxnStateOnRollback || s.state == message.TxnStateRollbacked
+	s.cleanup()
+	return true, retryable
 }
 
 // cleanup calls the cleanup functions.

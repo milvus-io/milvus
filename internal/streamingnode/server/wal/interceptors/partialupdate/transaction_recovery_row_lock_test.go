@@ -298,11 +298,10 @@ func TestPartialUpdateRecoveryCanceledDecodeKeepsDurableBodiesAndCleanup(t *test
 	require.True(t, state.cleanupRegistered, "a failed recovery still needs its session cleanup callback")
 	_, durableBodies := builders[1].Messages()
 	require.Len(t, durableBodies, 1, "an optional PK decode failure must retain durable body data")
-	env.txnManager.FailTxnAtVChannel("v1")
+	env.txnManager.FailTxnAtVChannel("v1", 1)
 	require.Nil(t, env.partial.state.getTxn(1), "session cleanup must remove the incomplete recovery record")
 	_, err := env.txnManager.GetSessionOfTxn(1)
-	requireUnrecoverable(t, err)
-	require.ErrorContains(t, err, "not found")
+	require.True(t, status.AsStreamingError(err).IsTxnExpired(), "%v", err)
 	requireTestRowLocksAvailable(t, env.partial.state.rowLocks, "v1", 10)
 }
 
@@ -326,8 +325,7 @@ func TestPartialUpdateRecoveryCleanupPreservesOriginalLease(t *testing.T) {
 	env.txnManager.CleanupTxnUntil(tsoutil.AddPhysicalDurationOnTs(lastBodyTS, 100*time.Millisecond))
 	require.Nil(t, env.partial.state.getTxn(1), "snapshot recovery must not renew the old lease")
 	_, err = env.txnManager.GetSessionOfTxn(1)
-	requireUnrecoverable(t, err)
-	require.ErrorContains(t, err, "not found")
+	require.True(t, status.AsStreamingError(err).IsTxnExpired(), "%v", err)
 	requireTestRowLocksAvailable(t, env.partial.state.rowLocks, "v1", 10)
 }
 

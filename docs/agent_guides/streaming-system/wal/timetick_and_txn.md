@@ -110,6 +110,32 @@ transactions in its replay range, preserving their original age. Records before
 the checkpoint are not restored: this is best-effort retention, not a durable
 exactly-once window. CDC keeps its source-checkpoint deduplication.
 
+### Definite pre-commit outcome retention
+
+When an InFlight transaction expires or an exclusive operation aborts it,
+TxnManager releases its callbacks and active/recovered registry entries immediately,
+but retains a lightweight terminal record. A later body, Commit or Rollback lookup
+returns TransactionExpired while that record is retained. Cleanup captures the
+outcome and marks expiration under the session mutex, so a request holding an old
+session pointer cannot subsequently admit a Commit. Completed rollbacks and explicit
+Commit rejections retain the same definite failure result. Admitted but unresolved
+Commits and successful Commits never become retryable solely because of cleanup.
+
+This separate cache uses the same tombstoneMaxCount and tombstoneMaxLifetime limits:
+each WAL retains at most the configured number of successful results **and** that
+number of definite failure records. Failure retention starts at the cleanup or
+exclusive-operation TimeTick. The existing TimeTick path ages it; no new timer or
+LCMID pin is introduced. Repeated lookups do not renew retention. A replicated Begin
+with a reused source TxnID clears the old failed-attempt record before registering
+the new session.
+
+Definite failure records are local to the current WAL instance. They are not persisted
+or reconstructed across handoff; nor can they cover uncommitted transactions already
+discarded by recovery before TxnManager construction. Once the evidence is evicted or
+absent after recovery, the server still returns NotFound. This bounded improvement
+does not authorize the producer to reinterpret NotFound or a transport failure as
+expiration.
+
 Transport failures only retry the same message; the producer never infers a
 transaction outcome from a connection error. The server returns TransactionExpired
 only for a definite pre-commit expiration or rejection, allowing the existing

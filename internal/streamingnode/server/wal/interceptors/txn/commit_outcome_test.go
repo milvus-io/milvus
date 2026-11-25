@@ -54,6 +54,5 @@ func TestCommitExpiredAndNotFoundAreDistinct(t *testing.T) {
 	require.True(t, status.AsStreamingError(err).IsTxnExpired())
 	m.CleanupTxnUntil(s.expiredTimeTick())
 	_, err = m.GetSessionOfTxn(s.TxnContext().TxnID)
-	require.ErrorContains(t, err, "not found")
-	require.False(t, status.AsStreamingError(err).IsTxnExpired(), "absence does not establish an outcome")
+	require.True(t, status.AsStreamingError(err).IsTxnExpired(), "cleanup must retain definite expiration")
 }
