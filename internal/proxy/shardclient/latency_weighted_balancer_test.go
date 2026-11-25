@@ -480,3 +480,17 @@ func TestLatencyWeightedRediscoveryAfterHealthyHeartbeat(t *testing.T) {
 		})
 	}
 }
+
+func TestUnknownReplicaPenaltyUsesFallback(t *testing.T) {
+	b, clock := newTestBalancer(t)
+	observe(b, clock, testKey, 1, 50*time.Millisecond, nil)
+	s := b.replicaLocked(testKey, 2)
+	for i := 0; i < failuresBeforePenalty; i++ {
+		s.fail(clock.now(), 5*time.Second, testDecay)
+	}
+	require.Less(t, shares(b, clock, testKey, 1, 2)[1], 0.02)
+	clock.advance(100 * time.Second)
+	observe(b, clock, testKey, 1, 50*time.Millisecond, nil)
+	weights := shares(b, clock, testKey, 1, 2)
+	require.InDelta(t, 0.5, weights[1], 0.001)
+}

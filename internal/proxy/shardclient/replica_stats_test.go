@@ -82,11 +82,11 @@ func TestReplicaStatsPenalty(t *testing.T) {
 	l, _ = s.latency(testEpoch.Add(100*time.Second), testDecay)
 	assert.Less(t, l, 15*time.Millisecond)
 
-	// a penalty alone makes the replica known
+	// A penalty does not supply a successful latency measurement.
 	s2 := &replicaStats{}
 	failInARow(s2, testEpoch, time.Second)
 	_, ok = s2.latency(testEpoch, testDecay)
-	assert.True(t, ok)
+	assert.False(t, ok)
 }
 
 // Failures count only after several in a row; a success in between resets.

@@ -69,6 +69,8 @@ type ChannelWorkload struct {
 }
 
 type CollectionWorkLoad struct {
+	// SkipChannel omits requery channels with no hits before replica selection.
+	SkipChannel    func(string) bool
 	Db             string
 	CollectionName string
 	CollectionID   int64
@@ -293,19 +295,16 @@ func (lb *LBPolicyImpl) selectCandidate(ctx context.Context, balancer LBBalancer
 	return candidateNodes[targetNodeID], true, nil
 }
 
-// everyLeaderExcluded tells whether the request has no replica of the channel
-// left to try, by the cached shard leaders.
-func (lb *LBPolicyImpl) everyLeaderExcluded(ctx context.Context, workload ChannelWorkload, excludeNodes *typeutil.UniqueSet) bool {
+// selectAfterOverload makes one selection from the cached topology. The balancer
+// checks current heartbeat health; failure must not enter refreshing retries.
+func (lb *LBPolicyImpl) selectAfterOverload(ctx context.Context, balancer LBBalancer, lw *LatencyWeightedBalancer, workload ChannelWorkload, excluded *typeutil.UniqueSet) (NodeInfo, bool, error) {
 	leaders, err := lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, true)
 	if err != nil {
-		return false
+		return NodeInfo{}, false, err
 	}
-	for _, leader := range leaders {
-		if !excludeNodes.Contain(leader.NodeID) {
-			return false
-		}
-	}
-	return len(leaders) > 0
+	// Failover candidates must pass the captured balancer's health check.
+	workload.PreferredNodeID = 0
+	return lb.selectCandidate(ctx, balancer, lw, workload, leaders, excluded)
 }
 
 // ExecuteWithRetry will choose a qn to execute the workload, and retry if failed, until reach the max retryTimes.
@@ -329,7 +328,18 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	extraUsed := false
 	tryOnce := func() (bool, error) {
 		refused = false
-		targetNode, selectedByBalancer, err := lb.selectNodeWithPolicy(ctx, balancer, lw, workload, &excludeNodes)
+		var targetNode NodeInfo
+		var selectedByBalancer bool
+		var err error
+		if overloadErr != nil {
+			targetNode, selectedByBalancer, err = lb.selectAfterOverload(ctx, balancer, lw, workload, &excludeNodes)
+			if err != nil {
+				return false, overloadErr
+			}
+			overloadErr = nil
+		} else {
+			targetNode, selectedByBalancer, err = lb.selectNodeWithPolicy(ctx, balancer, lw, workload, &excludeNodes)
+		}
 		if err != nil {
 			log.Warn("failed to select node for shard",
 				zap.Int64("nodeID", targetNode.NodeID),
@@ -369,6 +379,12 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 		client, err := lb.clientMgr.GetClient(ctx, targetNode)
 		if err != nil {
+			if ctx.Err() != nil {
+				if lw != nil && selectedByBalancer {
+					lw.ReleaseSelection(statsKey(workload), targetNode.NodeID)
+				}
+				return false, ctx.Err()
+			}
 			observe(err)
 			log.Warn("search/query channel failed, node not available",
 				zap.Int64("nodeID", targetNode.NodeID),
@@ -415,7 +431,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			// replica is left: it is not tried on a third replica, nor are
 			// the shard leaders refreshed to go around again, which would
 			// add to the queues that refused it. The client may try again.
-			if !workload.Hedgeable || extraUsed || lb.everyLeaderExcluded(ctx, workload, &excludeNodes) {
+			if !workload.Hedgeable || extraUsed {
 				return false, overloadErr
 			}
 			// The extra attempt takes the place of the refused one. The
@@ -464,6 +480,12 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 		return merr.WrapErrCollectionNotLoaded(workload.CollectionID)
 	}
 
+	if workload.SkipChannel != nil {
+		channelList = lo.Filter(channelList, func(channel string, _ int) bool {
+			return !workload.SkipChannel(channel)
+		})
+	}
+
 	// Single channel fast path: skip errgroup/goroutine overhead
 	if len(channelList) == 1 {
 		return lb.ExecuteWithRetry(ctx, ChannelWorkload{
@@ -479,9 +501,9 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 		})
 	}
 
-	// The request fails with its first failed channel: stop the work for the
-	// other channels then, rather than finish it for a result nobody gets.
-	wg, ctx := errgroup.WithContext(ctx)
+	// Keep dispatched RPCs on the caller context during mixed-version upgrades.
+	// Older QueryNodes share cancellation across merged Search requests.
+	var wg errgroup.Group
 	// Launch a goroutine for each channel
 	for _, channel := range channelList {
 		wg.Go(func() error {

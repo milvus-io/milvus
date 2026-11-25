@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -198,4 +199,85 @@ func TestSchedulerRunsTaskThatArrivesAfterIdleTime(t *testing.T) {
 		require.NoError(t, s.Add(task))
 		assert.NoError(t, task.Wait())
 	}
+}
+
+// A worker can become available after the task passed its dequeue check.
+func TestQueueBudgetCheckedAfterWorkerWait(t *testing.T) {
+	setQueueWait(t, "0.1", "20ms")
+	s := newScheduler(newFIFOPolicy()).(*scheduler)
+	s.pool.Release()
+	s.pool = conc.NewPool[any](1)
+	occupied := make(chan struct{})
+	release := make(chan struct{})
+	blocker := s.pool.Submit(func() (any, error) {
+		close(occupied)
+		<-release
+		return nil, nil
+	})
+	<-occupied
+	s.wg.Add(1)
+	go s.exec()
+	executed := false
+	task := newMockTask(mockTaskConfig{executeCost: time.Millisecond, execution: func(context.Context) error {
+		executed = true
+		return nil
+	}})
+	queued := newQueuedTask(task, time.Now())
+	require.False(t, queued.overloaded(time.Now()))
+	s.execChan <- queued
+	// Hold the only worker until the task's budget has actually expired.
+	time.Sleep(30 * time.Millisecond)
+	close(release)
+	_, err := blocker.Await()
+	require.NoError(t, err)
+	require.ErrorIs(t, task.Wait(), merr.ErrServiceTooManyRequests)
+	require.False(t, executed)
+	close(s.execChan)
+	s.wg.Wait()
+	s.pool.Release()
+	s.gpuPool.Release()
+}
+
+func TestMergePreservesAbsoluteQueueExpiry(t *testing.T) {
+	setQueueWait(t, "0.1", "1s")
+	now := time.Now()
+	for _, budgets := range []struct {
+		owner, incoming time.Duration
+		merge           bool
+	}{
+		{100 * time.Millisecond, 30 * time.Millisecond, false},
+		{100 * time.Millisecond, 20 * time.Millisecond, true},
+		{0, 20 * time.Millisecond, false},
+		{0, 0, true},
+	} {
+		q := newMergeTaskQueue("")
+		owner := &queuedTask{Task: newMockTask(mockTaskConfig{mergeAble: true}), enqueueTime: now, maxWait: budgets.owner}
+		incoming := &queuedTask{Task: newMockTask(mockTaskConfig{mergeAble: true}), enqueueTime: now.Add(80 * time.Millisecond), maxWait: budgets.incoming}
+		q.push(owner)
+		require.Equal(t, budgets.merge, q.tryMerge(incoming, 100, 10, -1))
+		if budgets.merge && budgets.owner > 0 {
+			require.False(t, owner.overloaded(now.Add(99*time.Millisecond)))
+			require.True(t, owner.overloaded(now.Add(101*time.Millisecond)))
+		}
+	}
+}
+
+func TestQueueBudgetAfterCanceledOwnerPromotion(t *testing.T) {
+	setQueueWait(t, "0.1", "1s")
+	s := newScheduler(newFIFOPolicy()).(*scheduler)
+	defer s.Stop()
+	now := time.Now()
+	survivor := newMockTask(mockTaskConfig{nq: 2, executeCost: time.Millisecond})
+	owner := newMockTask(mockTaskConfig{nq: 5, prune: func() (Task, int, error) {
+		return survivor, 1, context.Canceled
+	}})
+	require.NoError(t, addAt(s, owner, now))
+	next, nq, _ := s.setupExecListener(nil, now.Add(500*time.Millisecond))
+	require.Same(t, survivor, next.Task)
+	require.EqualValues(t, 5, nq)
+	require.NoError(t, next.Task.Context().Err())
+	s.updateWaitingTaskCounter(-1, -nq)
+	require.Zero(t, s.GetWaitingTaskTotalNQ())
+	require.False(t, next.overloaded(now.Add(900*time.Millisecond)))
+	require.True(t, next.overloaded(now.Add(1100*time.Millisecond)))
 }

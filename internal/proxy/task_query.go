@@ -605,6 +605,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		CollectionName: t.collectionName,
 		Nq:             1,
 		Exec:           t.queryShard,
+		SkipChannel:    t.skipRequeryChannel,
 		PreferredNodes: t.preferredNodes,
 		StatsClass:     "query/" + t.resolvedConsistencyLevel.String(),
 		Hedgeable:      true,
@@ -716,6 +717,11 @@ func (t *queryTask) formatTimeFields(ctx context.Context) error {
 
 func (t *queryTask) IsSubTask() bool {
 	return t.reQuery
+}
+
+func (t *queryTask) skipRequeryChannel(channel string) bool {
+	_, present := t.channelsMvcc[channel]
+	return t.fastSkip && len(t.channelsMvcc) > 0 && !present
 }
 
 func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {

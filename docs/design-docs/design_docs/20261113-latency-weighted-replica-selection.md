@@ -21,7 +21,7 @@ Fast errors also must not make a failing replica look attractive to a
 latency-based selection policy.
 
 This policy combines outcome-based replica selection with one optional hedge
-per retry round. It applies to the existing proxy-to-delegator path. It does
+per channel request. It applies to the existing proxy-to-delegator path. It does
 not solve a shared WAL availability problem, guarantee zero failures, or bound
 additional cluster load under every workload. Current master's QueryView path
 needs a separate implementation.
@@ -70,7 +70,7 @@ Search and Query, including requery and query iterators, opt into hedging.
 Other load-balancer callers receive weighted selection without hedging.
 
 A hedge becomes eligible after the larger of the request class's p99 and
-`hedge.minDelay`, which defaults to 200 milliseconds. The p99 uses successful
+`proxy.hedging.minDelay`, which defaults to 200 milliseconds. The p99 uses successful
 retry-round completion latency until the winning result, not the losing RPC's
 latency or end-to-end latency across retries. Samples come from the latest
 10 seconds, falling back to the latest 100 samples when fewer are recent,
@@ -98,10 +98,9 @@ the other returns `ErrAttemptSuperseded` and contributes only a successful
 latency observation.
 
 Dispatched attempts retain the outer request context. The loser is not
-canceled immediately when one shard obtains a winner: QueryNode may merge
-Search tasks, and the merged execution shares the leading task's context.
-Changing cancellation timing requires separate validation of that downstream
-isolation. A caller-canceled RPC does not invalidate the proxy's shard cache;
+canceled immediately when one shard obtains a winner: older QueryNodes may
+merge Search tasks under the leading task's context. Earlier cancellation
+requires isolation on every receiving QueryNode, including during upgrades. A caller-canceled RPC does not invalidate the proxy's shard cache;
 deadline expiry and transport failures with an active caller retain the
 existing invalidation behavior.
 
@@ -114,20 +113,21 @@ request-rate budget.
 
 ## Configuration and accounting
 
-The selected policy name is fixed at startup. Parameters under
-`proxy.latencyWeighted.` are refreshable:
+These parameters are refreshable and apply to new channel requests.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `enabled` | true | Use weighted selection; false uses look-aside |
-| `decay` | 10s | Latency and penalty decay time constant |
-| `minShare` | 0.001 | Minimum share of eligible candidates |
-| `hedge.enabled` | true | Enable speculative read attempts |
-| `hedge.minDelay` | 200ms | Minimum hedge delay |
-| `hedge.minWinRate` | 0.3 | Threshold for reducing hedges to probes |
+| `proxy.replicaSelectionPolicy` | `look_aside` | Selection policy |
+| `proxy.latencyWeighted.decay` | `10s` | Latency and penalty decay time constant |
+| `proxy.latencyWeighted.minShare` | `0.001` | Minimum candidate share |
+| `proxy.hedging.enabled` | `false` | Enable hedged Search and Query attempts |
+| `proxy.hedging.minDelay` | `200ms` | Minimum hedge delay |
+
+The hedge win-rate threshold is the internal constant
+`defaultHedgeMinWinRate` (`0.3`).
 
 The accounting owner is captured at `ExecuteWithRetry` entry. Changing
-`enabled` affects later calls; in-flight calls keep their original selection,
+`proxy.replicaSelectionPolicy` affects later calls; in-flight calls keep their original selection,
 release, and retry behavior. Weighted reservations are released when the
 attempt completes, including a losing attempt. Look-aside workload is released
 through the exact underlying balancer that reserved it.
@@ -189,7 +189,7 @@ that it is failing.
 
 Under load above what the replicas get done, requests wait in the QueryNode
 read scheduler queue (`queryNode.scheduler.unsolvedQueueSize`, 1024), turning
-excess traffic into long queue latency. Four changes bound the wait of
+excess traffic into long queue latency. The following behavior bounds the wait of
 answered requests and fail the excess fast:
 
 **QueryNode queue wait limit.** `queryNode.scheduler.maxQueueWaitRatio`
@@ -225,9 +225,13 @@ prevents Proxy and Delegator gRPC clients from retrying `ErrServiceTooManyReques
 against the same node, returning the overload status immediately so the caller
 can failover or abort.
 
-**A failed shard stops the others.** `LBPolicyImpl.Execute` uses the
-`errgroup.WithContext` derived `ctx` so the first failed channel cancels
-in-flight attempts on sibling channels instead of finishing wasted work.
+**Dispatched shards retain the caller context.** `LBPolicyImpl.Execute`
+waits for sibling channels using their outer request context. This also keeps
+unfinished hedge attempts alive when the channel fan-out completes. During a
+rolling upgrade, an older QueryNode can share a merged Search's cancellation
+with unrelated callers. Earlier cross-channel cancellation requires every
+receiving QueryNode to provide merged-request cancellation isolation, even
+when hedging and queue protection are disabled.
 
 Regression tests exercise real Search/Query task callbacks and status
 conversion, both error arrival orders, winner metadata, and no new retry after
@@ -235,3 +239,23 @@ all attempts fail. Heartbeat lifecycle tests exercise registration, the failure
 threshold, cleanup, rediscovery, and recovery without manually seeding health
 records. RPC outcomes are controlled in tests; no distributed configuration
 rollout or snapshot-divergence reproduction is claimed.
+
+Requery channels skipped locally are filtered before replica selection. They
+create no replica observations or hedge-delay samples. A request that expires
+while acquiring a client also releases selection accounting without recording
+a replica failure. System errors already observed from an attempt take
+precedence over a later sibling cancellation; InputError keeps its precedence.
+
+Queue wait is checked again when a worker starts, before `PreExecute` and
+`Execute`, including time blocked handing off to the worker pool. The
+`scheduled` queue-duration observation is recorded at that point. Rejection
+occurs when the worker becomes available; queue budgets do not install timers.
+Searches with a positive queue budget merge only when their absolute queue
+expiry times match. This preserves the expiry when cancellation promotes a
+surviving member, at the cost of fewer merge opportunities under queue limits.
+
+Unknown replica latency uses the candidate fallback before applying the current
+failure penalty. A recent penalty still suppresses a replica with no successes;
+a small decayed penalty cannot make an unknown replica appear faster than the
+fallback. Hedge-delay samples continue to be collected while hedging is disabled
+so live enabling can use the observed workload latency.

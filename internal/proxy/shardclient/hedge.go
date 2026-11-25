@@ -24,6 +24,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -147,10 +149,16 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 				defer balancer.CancelWorkload(node.NodeID, workload.Nq)
 			}
 			client, err := lb.clientMgr.GetClient(attemptCtx, node)
+			getClientErr := err != nil
 			if err == nil {
 				err = workload.Exec(attemptCtx, node.NodeID, client, workload.Channel)
 			}
-			feedback.complete(err)
+			if getClientErr && attemptCtx.Err() != nil {
+				// Complete accounting without attributing a local expiry to the replica.
+				feedback.complete(errAttemptNotDispatched)
+			} else {
+				feedback.complete(err)
+			}
 			results <- hedgeResult{node: node.NodeID, latency: time.Since(start), err: err}
 		}()
 		return feedback
@@ -269,7 +277,9 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 				}
 			} else {
 				excludeNodes.Insert(r.node)
-				lastErr = merr.Wrapf(r.err, "failed to search/query delegator %d for channel %s", r.node, workload.Channel)
+				if lastErr == nil || !(merr.IsCanceledOrTimeout(r.err) || status.Code(r.err) == codes.Canceled || status.Code(r.err) == codes.DeadlineExceeded) {
+					lastErr = merr.Wrapf(r.err, "failed to search/query delegator %d for channel %s", r.node, workload.Channel)
+				}
 				if isOverloadErr(r.err) {
 					overloadErr = lastErr
 				}

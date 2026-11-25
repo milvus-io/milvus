@@ -121,7 +121,7 @@ func (s *SchedulerSuite) TestConsumeRecvChan() {
 		scheduler := &scheduler{
 			policy:           newFIFOPolicy(),
 			receiveChan:      ch,
-			execChan:         make(chan Task),
+			execChan:         make(chan *queuedTask),
 			pool:             conc.NewPool[any](10, conc.WithPreAlloc(true)),
 			schedulerCounter: schedulerCounter{},
 			lifetime:         lifetime.NewLifetime(lifetime.Initializing),
@@ -357,7 +357,7 @@ func (s *SchedulerSuite) TestSetupExecListenerRecordsPoppedExpiredTask() {
 	now := time.Now()
 	scheduler := &scheduler{
 		policy:           newFIFOPolicy(),
-		execChan:         make(chan Task),
+		execChan:         make(chan *queuedTask),
 		schedulerCounter: schedulerCounter{},
 	}
 
