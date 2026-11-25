@@ -284,6 +284,32 @@ func TestExpressionDeleteWritesTheRowsItRead(t *testing.T) {
 	require.Equal(t, []int64{1, 2, 3}, env.wal.deleted)
 }
 
+func TestExpressionDeleteDuringPartitionLoad(t *testing.T) {
+	env := newDMLAutoLoadEnv(t, "", false)
+	require.NoError(t, Params.Save(Params.ProxyCfg.EnableAutoLoad.Key, "false"))
+	const p1, p2 int64 = 11, 12
+	env.client.activePartitions = []int64{p1, p2}
+	env.client.server.servingPartitions = []int64{p1}
+	env.client.server.retrieved = &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}
+
+	// The replacement is held in Preparing. Only the previous p1 View can serve.
+	resp := env.delete(t, "id > 0")
+	require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrQueryViewNotReady,
+		"stale view returned delete count %d and appended keys %v", resp.GetDeleteCnt(), env.wal.deleted)
+	require.True(t, resp.GetStatus().GetRetriable())
+	require.Zero(t, resp.GetDeleteCnt())
+	require.Zero(t, env.wal.calls)
+	require.Zero(t, env.client.server.queries.Load())
+
+	env.client.server.servingPartitions = []int64{p1, p2}
+	env.client.server.retrieved = &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2}}}}
+	resp = env.delete(t, "id > 0")
+	require.NoError(t, merr.Error(resp.GetStatus()))
+	require.EqualValues(t, 2, resp.GetDeleteCnt())
+	require.Equal(t, []int64{1, 2}, env.wal.deleted)
+	require.Equal(t, 1, env.wal.calls)
+}
+
 // An invalid expression fails before the read, so it must not load the tenant.
 func TestInvalidExpressionDeleteDoesNotLoad(t *testing.T) {
 	env := newDMLAutoLoadEnv(t, "", false)

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
@@ -765,12 +766,16 @@ func (dr *DeleteRunner) prepareQuery(ctx context.Context) ([]byte, error) {
 	return serializedPlan, nil
 }
 
-func (dr *DeleteRunner) queryByView(ctx context.Context) (*queryclient.LegacyQueryResult, error) {
+func (dr *DeleteRunner) queryByView(ctx context.Context, activePartitions []int64) (*queryclient.LegacyQueryResult, error) {
 	// A delete must retrieve every match, without the ordinary query limit.
 	dr.plan.GetQuery().Limit = typeutil.Unlimited
 	serializedPlan, err := dr.prepareQuery(ctx)
 	if err != nil {
 		return nil, err
+	}
+	partitionIDs := dr.partitionIDs
+	if len(activePartitions) != 0 {
+		partitionIDs = activePartitions
 	}
 	result, err := dr.viewQueryClient.Legacy().Query(ctx, &queryclient.LegacyQueryRequest{
 		Schema:      dr.schema.CollectionSchema,
@@ -784,7 +789,7 @@ func (dr *DeleteRunner) queryByView(ctx context.Context) (*queryclient.LegacyQue
 			ReqID:              paramtable.GetNodeID(),
 			DbID:               dr.dbID,
 			CollectionID:       dr.collectionID,
-			PartitionIDs:       dr.partitionIDs,
+			PartitionIDs:       partitionIDs,
 			SchemaVersion:      dr.schema.GetVersion(),
 			SerializedExprPlan: serializedPlan,
 			OutputFieldsId:     dr.plan.GetOutputFieldIds(),
@@ -795,6 +800,9 @@ func (dr *DeleteRunner) queryByView(ctx context.Context) (*queryclient.LegacyQue
 		},
 	})
 	if err != nil {
+		if len(activePartitions) != 0 && errors.Is(err, merr.ErrPartitionNotLoaded) {
+			err = merr.Wrap(merr.ErrQueryViewNotReady, "serving query view does not cover the delete partition scope")
+		}
 		return nil, dql.QueryViewLoadError(ctx, dr.node, dr.collectionID, dr.partitionIDs, err)
 	}
 	return result, nil
@@ -810,6 +818,7 @@ func (dr *DeleteRunner) complexDeleteByQueryView(ctx context.Context) error {
 	// complete batch before producing any deletes, so query retries have no
 	// write side effects and failed/oversized reads cannot silently delete a prefix.
 	var result *queryclient.LegacyQueryResult
+	var activePartitions []int64
 	err := queryRunner.RetryRead(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), func(ctx context.Context) error {
 		if dr.readAttempted {
 			// Refresh the read schema and rebuild the plan for this collection.
@@ -818,8 +827,20 @@ func (dr *DeleteRunner) complexDeleteByQueryView(ctx context.Context) error {
 			}
 		}
 		dr.readAttempted = true
+		// An unscoped read otherwise inherits the leased View's historical
+		// partitions. Pin the active scope across read retries.
+		if len(dr.partitionIDs) == 0 && len(activePartitions) == 0 {
+			info, err := dr.node.MixCoord().GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: dr.collectionID})
+			if err := merr.CheckRPCCall(info, err); err != nil {
+				return err
+			}
+			activePartitions = info.GetPartitionIDs()
+			if len(activePartitions) == 0 {
+				return merr.Wrap(merr.ErrQueryViewNotReady, "active delete partition scope is empty")
+			}
+		}
 		var err error
-		result, err = dr.queryByView(ctx)
+		result, err = dr.queryByView(ctx, activePartitions)
 		return err
 	})
 	if err != nil {
