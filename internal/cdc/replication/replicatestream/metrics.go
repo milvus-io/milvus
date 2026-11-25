@@ -17,7 +17,7 @@
 package replicatestream
 
 import (
-	"github.com/prometheus/client_golang/prometheus"
+	"sync"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -42,9 +42,18 @@ type msgMetrics struct {
 	tr *timerecord.TimeRecorder
 }
 
+// Serialize changes to the shared gauges with cleanup of the last stream to a target.
+var (
+	connectionMu     sync.Mutex
+	streamsPerTarget = make(map[string]int)
+)
+
 type replicateMetrics struct {
 	replicateInfo *streamingpb.ReplicatePChannelMeta
 	msgsMetrics   *typeutil.ConcurrentMap[string, msgMetrics] // message id -> msgMetrics
+
+	// Guarded by connectionMu. Empty before OnInitiate and after OnClose.
+	connectionStatus string
 }
 
 func NewReplicateMetrics(replicateInfo *streamingpb.ReplicatePChannelMeta) ReplicateMetrics {
@@ -130,46 +139,45 @@ func (m *replicateMetrics) OnConfirmed(msg message.ImmutableMessage) {
 }
 
 func (m *replicateMetrics) OnInitiate() {
-	metrics.CDCStreamRPCConnections.WithLabelValues(
-		m.replicateInfo.GetTargetCluster().GetClusterId(),
-		metrics.CDCStatusDisconnected,
-	).Inc()
+	m.setConnectionStatus(metrics.CDCStatusDisconnected)
 }
 
 func (m *replicateMetrics) OnDisconnect() {
-	targetClusterID := m.replicateInfo.GetTargetCluster().GetClusterId()
-	metrics.CDCStreamRPCConnections.WithLabelValues(
-		targetClusterID,
-		metrics.CDCStatusConnected,
-	).Dec()
-	metrics.CDCStreamRPCConnections.WithLabelValues(
-		targetClusterID,
-		metrics.CDCStatusDisconnected,
-	).Inc()
+	m.setConnectionStatus(metrics.CDCStatusDisconnected)
 }
 
 func (m *replicateMetrics) OnConnect() {
-	targetClusterID := m.replicateInfo.GetTargetCluster().GetClusterId()
-	metrics.CDCStreamRPCConnections.WithLabelValues(
-		targetClusterID,
-		metrics.CDCStatusDisconnected,
-	).Dec()
-	metrics.CDCStreamRPCConnections.WithLabelValues(
-		targetClusterID,
-		metrics.CDCStatusConnected,
-	).Inc()
-
-	metrics.CDCStreamRPCReconnectTimes.WithLabelValues(
-		targetClusterID,
-	).Inc()
+	m.setConnectionStatus(metrics.CDCStatusConnected)
+	metrics.CDCStreamRPCReconnectTimes.WithLabelValues(m.replicateInfo.GetTargetCluster().GetClusterId()).Inc()
 }
 
-// OnClose deletes the connection series of the target cluster.
-// CDCStreamRPCConnections is labeled by (target_cluster, status) only, so
-// this removes the series shared by every channel replicating to that
-// cluster, not just the ones owned by this stream instance.
 func (m *replicateMetrics) OnClose() {
-	metrics.CDCStreamRPCConnections.DeletePartialMatch(prometheus.Labels{
-		metrics.CDCLabelTargetCluster: m.replicateInfo.GetTargetCluster().GetClusterId(),
-	})
+	m.setConnectionStatus("")
+}
+
+func (m *replicateMetrics) setConnectionStatus(status string) {
+	connectionMu.Lock()
+	defer connectionMu.Unlock()
+
+	if m.connectionStatus == status {
+		return
+	}
+	target := m.replicateInfo.GetTargetCluster().GetClusterId()
+	if m.connectionStatus == "" {
+		streamsPerTarget[target]++
+	} else {
+		metrics.CDCStreamRPCConnections.WithLabelValues(target, m.connectionStatus).Dec()
+	}
+	m.connectionStatus = status
+	if status != "" {
+		metrics.CDCStreamRPCConnections.WithLabelValues(target, status).Inc()
+		return
+	}
+
+	streamsPerTarget[target]--
+	if streamsPerTarget[target] == 0 {
+		delete(streamsPerTarget, target)
+		metrics.CDCStreamRPCConnections.DeleteLabelValues(target, metrics.CDCStatusConnected)
+		metrics.CDCStreamRPCConnections.DeleteLabelValues(target, metrics.CDCStatusDisconnected)
+	}
 }
