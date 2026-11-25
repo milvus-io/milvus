@@ -1002,12 +1002,6 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed")
 	}
 	t.plan.Namespace = NamespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
-	if t.GetCollectQueryReadUsage() {
-		if t.plan.PlanOptions == nil {
-			t.plan.PlanOptions = &planpb.PlanOption{}
-		}
-		t.plan.PlanOptions.CollectQueryReadUsage = true
-	}
 
 	t.SerializedExprPlan, _, err = MarshalPlanWithMembershipFilterSizeLimit(t.plan, 0)
 	if err != nil {

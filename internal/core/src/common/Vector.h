@@ -218,27 +218,6 @@ class ColumnVector final : public SimpleVector {
         return valid_values_[index];
     }
 
-    uint64_t
-    LogicalPayloadBytes() const {
-        const auto valid_count = size() - nullCount();
-        if (valid_count == 0) {
-            return 0;
-        }
-        if (!IsStringDataType(type())) {
-            return GetDataTypeSize(type()) * valid_count;
-        }
-        // ProjectNode and AggregationNode use different FieldData backing
-        // types for strings. The column values carry the actual lengths in
-        // both cases, independently of storage accounting and capacity.
-        uint64_t bytes = 0;
-        for (size_t i = 0; i < size(); ++i) {
-            if (valid_values_[i]) {
-                bytes += ValueAtRef<std::string>(i).size();
-            }
-        }
-        return bytes;
-    }
-
     void*
     GetRawData() const {
         return values_->Data();

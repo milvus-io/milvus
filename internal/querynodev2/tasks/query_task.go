@@ -187,11 +187,7 @@ func (t *QueryTask) execute(selected []segments.Segment) error {
 	var readUsage *internalpb.QueryReadUsage
 	if t.req.GetReq().GetCollectQueryReadUsage() {
 		readUsage = &internalpb.QueryReadUsage{}
-		predicate := t.plan.GetQuery().GetPredicates()
-		if predicate == nil {
-			predicate = t.plan.GetPredicates()
-		}
-		fields := querymeter.PredicateFieldIDs(predicate)
+		fields := querymeter.QueryFieldIDs(t.plan)
 		if t.queryChain != nil {
 			// QueryScan currently accepts one Grep operator. Its text read is
 			// independent of the predicates that select its candidate rows.
@@ -225,13 +221,8 @@ func (t *QueryTask) execute(selected []segments.Segment) error {
 	arrowRecords := make([]arrow.Record, 0, len(results))
 	hasArrow := false
 	for _, result := range results {
-		if readUsage != nil {
-			if result.ReadUsage != nil {
-				if err := querymeter.AddReadUsage(readUsage, result.ReadUsage); err != nil {
-					return err
-				}
-			}
-			if err := querymeter.AddDataBytes(readUsage, result.Result.GetQueryOperatorInputBytes()); err != nil {
+		if readUsage != nil && result.ReadUsage != nil {
+			if err := querymeter.AddReadUsage(readUsage, result.ReadUsage); err != nil {
 				return err
 			}
 		}

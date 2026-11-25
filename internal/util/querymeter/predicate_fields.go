@@ -22,6 +22,37 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
 
+// QueryFieldIDs returns the planned predicate, aggregation projection, and
+// sort key columns. Grouping and aggregation share one projection. Sorting
+// contributes its keys separately from that projection and the predicates.
+func QueryFieldIDs(plan *planpb.PlanNode) []int64 {
+	query := plan.GetQuery()
+	predicate := query.GetPredicates()
+	if predicate == nil {
+		predicate = plan.GetPredicates()
+	}
+	fields := PredicateFieldIDs(predicate)
+	projected := make(map[int64]struct{}, len(query.GetGroupByFieldIds())+len(query.GetAggregates()))
+	addInput := func(fieldID int64) {
+		if _, seen := projected[fieldID]; !seen {
+			projected[fieldID] = struct{}{}
+			fields = append(fields, fieldID)
+		}
+	}
+	for _, fieldID := range query.GetGroupByFieldIds() {
+		addInput(fieldID)
+	}
+	for _, aggregate := range query.GetAggregates() {
+		if fieldID := aggregate.GetFieldId(); fieldID != 0 { // COUNT(*) has no input column.
+			addInput(fieldID)
+		}
+	}
+	for _, order := range query.GetOrderByFields() {
+		fields = append(fields, order.GetFieldId())
+	}
+	return fields
+}
+
 // PredicateFieldIDs returns one entry per column reference in the planned
 // predicate. Both sides of a boolean expression count even if the executor
 // can short-circuit, and distinct references to the same field are retained.

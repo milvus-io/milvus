@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -28,7 +27,6 @@
 
 #include "common/Common.h"
 #include "common/Types.h"
-#include "common/Vector.h"
 #include "common/Exception.h"
 #include "common/StructElementOffsets.h"
 #include "common/OpContext.h"
@@ -278,20 +276,6 @@ class QueryContext : public Context {
     }
 
     void
-    RecordQueryOperatorInput(const ColumnVector& column) {
-        const auto bytes = column.LogicalPayloadBytes();
-        AssertInfo(bytes <= std::numeric_limits<uint64_t>::max() -
-                                query_operator_input_bytes_,
-                   "query operator usage exceeds the byte counter");
-        query_operator_input_bytes_ += bytes;
-    }
-
-    uint64_t
-    query_operator_input_bytes() const {
-        return query_operator_input_bytes_;
-    }
-
-    void
     set_struct_name(const std::string& field_name) {
         struct_name_ = field_name;
     }
@@ -429,7 +413,6 @@ class QueryContext : public Context {
 
     // used for save op context
     milvus::OpContext* op_context_{nullptr};
-    uint64_t query_operator_input_bytes_{0};
 
     int32_t consistency_level_ = 0;
 

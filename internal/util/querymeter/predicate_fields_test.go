@@ -42,3 +42,33 @@ func TestPredicateFieldIDs(t *testing.T) {
 	require.Empty(t, PredicateFieldIDs(nil))
 	require.Empty(t, PredicateFieldIDs(&planpb.Expr{Expr: &planpb.Expr_AlwaysTrueExpr{AlwaysTrueExpr: &planpb.AlwaysTrueExpr{}}}))
 }
+
+func TestQueryFieldIDs(t *testing.T) {
+	predicate := &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
+		ColumnInfo: &planpb.ColumnInfo{FieldId: 100},
+		Op:         planpb.OpType_GreaterThan,
+	}}}
+	query := &planpb.QueryPlanNode{
+		Predicates:      predicate,
+		GroupByFieldIds: []int64{101},
+		Aggregates: []*planpb.Aggregate{
+			{Op: planpb.AggregateOp_count},
+			{Op: planpb.AggregateOp_count, FieldId: 101},
+			{Op: planpb.AggregateOp_sum, FieldId: 100},
+			{Op: planpb.AggregateOp_avg, FieldId: 100},
+		},
+		OrderByFields: []*planpb.OrderByField{{FieldId: 101}},
+	}
+	plan := &planpb.PlanNode{
+		Node:           &planpb.PlanNode_Query{Query: query},
+		OutputFieldIds: []int64{102},
+	}
+	// The group and aggregate share a projection. The predicate and sort are independent.
+	require.Equal(t, []int64{100, 101, 100, 101}, QueryFieldIDs(plan))
+
+	query.Predicates = nil
+	require.Equal(t, []int64{101, 100, 101}, QueryFieldIDs(plan))
+	require.Equal(t, []int64{100}, QueryFieldIDs(&planpb.PlanNode{
+		Node: &planpb.PlanNode_Predicates{Predicates: predicate},
+	}))
+}

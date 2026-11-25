@@ -90,9 +90,6 @@ func testRealQueryTask(t *testing.T, enableScan bool) {
 	run := func(arguments string, withChain bool) (*internalpb.RetrieveResults, error) {
 		query := &planpb.QueryPlanNode{Limit: queryLimit, Predicates: predicate, OrderByFields: orderBy, GroupByFieldIds: groupBy, Aggregates: aggregates}
 		p := &planpb.PlanNode{Node: &planpb.PlanNode_Query{Query: query}, OutputFieldIds: []int64{100, textFieldID, 1}}
-		if predicate != nil {
-			p.PlanOptions = &planpb.PlanOption{CollectQueryReadUsage: true}
-		}
 		if withChain {
 			p.QuerynodeFunctionChains = []*schemapb.FunctionChain{{Name: chainName, Stage: schemapb.FunctionChainStage_FunctionChainStageQueryScan, OutputColumns: exportColumns, Ops: []*schemapb.FunctionChainOp{{Op: "grep", Inputs: []string{"text"}, Outputs: []string{outputName}, Params: map[string]*schemapb.FunctionParamValue{
 				"arguments": {Value: &schemapb.FunctionParamValue_StringValue{StringValue: arguments}},
@@ -179,24 +176,28 @@ func testRealQueryTask(t *testing.T, enableScan bool) {
 			require.Empty(t, result.GetIds().GetIntId().GetData())
 			require.EqualValues(t, 2*3*8+62, result.GetCostAggregation().GetQueryReadUsage().GetDataBytes())
 		})
-		t.Run("sort measures only the surviving key values", func(t *testing.T) {
+		t.Run("sort charges whole key columns", func(t *testing.T) {
 			segmentIDs = []int64{100, 101}
-			predicate = pkGreaterThan(20)
 			orderBy = []*planpb.OrderByField{{FieldId: textFieldID, Ascending: true}}
-			result, err := run("", false)
-			require.NoError(t, err)
-			require.EqualValues(t, 2*3*8+40, result.GetCostAggregation().GetQueryReadUsage().GetDataBytes())
+			for _, threshold := range []int64{20, 100} {
+				predicate = pkGreaterThan(threshold)
+				result, err := run("", false)
+				require.NoError(t, err)
+				require.EqualValues(t, 2*3*8+62, result.GetCostAggregation().GetQueryReadUsage().GetDataBytes())
+			}
 		})
-		t.Run("grouping and aggregation measure filtered rows before the group sort", func(t *testing.T) {
+		t.Run("grouping aggregation and sort charge whole columns", func(t *testing.T) {
 			segmentIDs = []int64{100, 101}
-			predicate = pkGreaterThan(20)
 			groupBy = []int64{textFieldID}
 			aggregates = []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 100}}
 			orderBy = []*planpb.OrderByField{{FieldId: textFieldID, Ascending: true}}
-			result, err := run("", false)
-			require.NoError(t, err)
-			// Full PK filter column, filtered text + PK inputs, and the three sort keys.
-			require.EqualValues(t, 2*3*8+40+3*8+40, result.GetCostAggregation().GetQueryReadUsage().GetDataBytes())
+			for _, threshold := range []int64{20, 100} {
+				predicate = pkGreaterThan(threshold)
+				result, err := run("", false)
+				require.NoError(t, err)
+				// PK predicate, shared group and aggregate projection, and text sort key.
+				require.EqualValues(t, 2*3*8+(62+2*3*8)+62, result.GetCostAggregation().GetQueryReadUsage().GetDataBytes())
+			}
 		})
 		return
 	}

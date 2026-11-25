@@ -303,8 +303,6 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
 
     // Do task execution
     auto result = ExecuteTask(plan, query_context);
-    retrieve_result.query_operator_input_bytes =
-        query_context->query_operator_input_bytes();
     setupRetrieveResult(
         result, op_context, node, retrieve_result, segment, query_context);
 }

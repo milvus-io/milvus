@@ -109,7 +109,6 @@ class PhyQueryOrderByNode : public Operator {
 
     // Data types of columns in sort buffer
     std::vector<DataType> column_types_;
-    std::vector<int32_t> metered_key_columns_;
 };
 
 }  // namespace exec
