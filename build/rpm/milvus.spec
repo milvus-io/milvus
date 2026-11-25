@@ -6,6 +6,8 @@
 %global release 1%{?dist}
 %endif
 
+%bcond_without svs
+
 Name:             milvus
 Version:          %{version}
 Release:          %{release}
@@ -77,6 +79,10 @@ for lib in \
     cp -a lib/${lib} %{buildroot}/lib64/milvus/
 done
 
+%if %{with svs}
+cp -a lib/libsvs_runtime.so* %{buildroot}/lib64/milvus/
+%endif
+
 # conf
 install -m 755 configs/milvus.yaml %{buildroot}/etc/milvus/configs/milvus.yaml
 install -m 755 configs/advanced/etcd.yaml %{buildroot}/etc/milvus/configs/advanced/etcd.yaml
@@ -129,6 +135,9 @@ systemctl daemon-reload
 /lib64/milvus/libicudata.so*
 /lib64/milvus/libjemalloc.so*
 /lib64/milvus/libknowhere.so*
+%if %{with svs}
+/lib64/milvus/libsvs_runtime.so*
+%endif
 /lib64/milvus/liblzma.so*
 /lib64/milvus/libmilvus-common.so*
 /lib64/milvus/libmilvus_core.so*
