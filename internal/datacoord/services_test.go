@@ -719,14 +719,14 @@ func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 	seg = s.testServer.meta.GetHealthySegment(context.TODO(), 1)
 	s.NotNil(seg)
 	s.EqualValues(datapb.SegmentLevel_L0, seg.GetLevel())
-	s.Equal(startPosition, seg.GetStartPosition())
+	s.True(proto.Equal(startPosition, seg.GetStartPosition()))
 
 	// Check the catalog too: keeping the boundary only in memory would lose
 	// the L0 delete retention boundary after coordinator recovery.
 	persisted, err := s.testServer.meta.Catalog.ListSegments(ctx, 0)
 	s.Require().NoError(err)
 	s.Require().Len(persisted, 1)
-	s.Equal(startPosition, persisted[0].GetStartPosition())
+	s.True(proto.Equal(startPosition, persisted[0].GetStartPosition()))
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {

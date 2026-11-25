@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -112,6 +114,23 @@ func setIndexParam(indexParams []*commonpb.KeyValuePair, key, value string) {
 			p.Value = value
 		}
 	}
+}
+
+// segmentIndexParams returns indexParams followed by typeParams, with every
+// index_type pair set to indexType when indexType is not empty. The inputs
+// are IndexMeta's shared, read-only lists, so the result is a new list and
+// an overridden pair is a new element.
+func segmentIndexParams(indexParams, typeParams []*commonpb.KeyValuePair, indexType string) []*commonpb.KeyValuePair {
+	params := slices.Concat(indexParams, typeParams)
+	if indexType == "" {
+		return params
+	}
+	for i, p := range params {
+		if p.GetKey() == common.IndexTypeKey && p.GetValue() != indexType {
+			params[i] = &commonpb.KeyValuePair{Key: p.GetKey(), Value: indexType}
+		}
+	}
+	return params
 }
 
 // CreateIndex create an index on collection.
@@ -371,6 +390,18 @@ func UpdateParams(idx *model.Index, from []*commonpb.KeyValuePair, updates []*co
 	})
 }
 
+// sortParamsByKey sorts each of lists by key in place. AlterIndex rebuilds
+// param lists from maps, in random order; sorted, equal param sets become
+// equal lists, which IndexMeta then shares as one canonical list. Each list
+// must be newly built, never one of IndexMeta's shared lists.
+func sortParamsByKey(lists ...[]*commonpb.KeyValuePair) {
+	for _, list := range lists {
+		slices.SortFunc(list, func(a, b *commonpb.KeyValuePair) int {
+			return strings.Compare(a.GetKey(), b.GetKey())
+		})
+	}
+}
+
 func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest) (*commonpb.Status, error) {
 	mlog.Info(context.TODO(), "received AlterIndex request",
 		mlog.Any("params", req.GetParams()),
@@ -414,7 +445,12 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 
 	reqIndexParamMap := funcutil.KeyValuePair2Map(req.GetParams())
 
-	for _, idx := range indexes {
+	// The indexes are shared with IndexMeta; edit shallow copies. The param
+	// lists below are replaced by new lists, never written in place.
+	for i, idx := range indexes {
+		c := *idx
+		idx = &c
+		indexes[i] = idx
 		if len(req.GetParams()) > 0 {
 			fieldSchema, err := schemaHelper.GetFieldFromID(idx.FieldID)
 			if err != nil {
@@ -443,6 +479,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 				mlog.Any("params", newIndexParams),
 			)
 			idx.IndexParams = newIndexParams
+			sortParamsByKey(idx.UserIndexParams, idx.IndexParams)
 		} else if len(req.GetDeleteKeys()) > 0 {
 			// delete user index params
 			newUserIndexParams := index.DeleteParams(idx.UserIndexParams, req.GetDeleteKeys())
@@ -459,6 +496,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 				mlog.Any("params", newIndexParams),
 			)
 			idx.IndexParams = newIndexParams
+			sortParamsByKey(idx.UserIndexParams, idx.IndexParams)
 		}
 
 		if err := indexparamcheck.ValidateIndexParams(idx); err != nil {
@@ -1284,15 +1322,9 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 					if err != nil {
 						return &indexpb.GetIndexInfoResponse{Status: merr.Status(err)}, nil
 					}
-					indexParams := s.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
-					indexParams = append(indexParams, s.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
 					// respect segment-based index type
-					for _, param := range indexParams {
-						if param.Key == common.IndexTypeKey && segIdx.IndexType != "" && segIdx.IndexType != param.Value {
-							param.Value = segIdx.IndexType
-							break
-						}
-					}
+					indexParams := segmentIndexParams(s.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID),
+						s.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID), segIdx.IndexType)
 					indexName := s.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
 					if segIdx.IndexType != "" && segIdx.IndexType != indexName {
 						indexName = segIdx.IndexType

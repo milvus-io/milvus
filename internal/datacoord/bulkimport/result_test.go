@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -218,6 +219,34 @@ func TestImportV3FieldLogicalSizes(t *testing.T) {
 	require.Empty(t, stored.GetBinlogs())
 	require.Contains(t, stored.GetStats().GetFieldLogicalSizes().GetFields(), int64(101))
 	require.True(t, importV3SegmentStatsNonZero(&datapb.Statistics{FieldLogicalSizes: &datapb.FieldLogicalSizes{}}))
+}
+
+// TestApplyImportResultsReplayKeepsNullCounts pins that the coord keeps the
+// null counts of an importing segment, so a replayed result that carries the
+// zero count of a not-nullable field still matches the accepted segment. The
+// commit that clears IsImporting prunes them.
+func TestApplyImportResultsReplayKeepsNullCounts(t *testing.T) {
+	ctx := context.Background()
+	mt, err := meta.NewMemoryMeta(t)
+	require.NoError(t, err)
+	mt.AddCollection(&meta.CollectionInfo{ID: 2, Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "n", DataType: schemapb.DataType_VarChar, Nullable: true},
+	}}})
+	_, err = addImportSegment(ctx, mt, 100, 1, 10, 2, 3, "v0", datapb.SegmentLevel_L1, storage.StorageV2, 4)
+	require.NoError(t, err)
+
+	accepted := []*datapb.ImportTaskV3Result{{Rows: 10, Statistics: &datapb.Statistics{
+		TimestampFrom: 1, TimestampTo: 100, NullCounts: map[int64]int64{100: 0, 101: 3},
+	}}}
+	require.NoError(t, applyImportResults(ctx, mt, 2, 4, []int64{100}, true, false, accepted))
+	require.Equal(t, map[int64]int64{100: 0, 101: 3}, mt.GetSegment(ctx, 100).GetStats().GetNullCounts())
+
+	// Replay of the same result, as after a restart before the task completes.
+	require.NoError(t, applyImportResults(ctx, mt, 2, 4, []int64{100}, true, false, accepted))
+
+	require.NoError(t, mt.UpdateSegmentsInfo(ctx, meta.UpdateIsImporting(100, false)))
+	require.Equal(t, map[int64]int64{101: 3}, mt.GetSegment(ctx, 100).GetStats().GetNullCounts())
 }
 
 func TestValidateReshardManifest(t *testing.T) {

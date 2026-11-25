@@ -47,7 +47,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -431,7 +430,9 @@ func (it *indexBuildTask) CompleteOnCoordinator(ctx context.Context) globalTask.
 }
 
 // effectiveIndexRows applies the same nullable-vector rule during cached
-// classification and worker preparation. A missing NullCounts entry means the
+// classification and worker preparation. NullCounts carries an entry for every
+// nullable field present in the segment's data (zero included); the coord
+// drops only the entries of not-nullable fields. A missing entry means the
 // field was added after this segment was flushed, so every row reads as null.
 func effectiveIndexRows(segment *meta.SegmentInfo, rows int64, field *schemapb.FieldSchema) int64 {
 	if !field.GetNullable() || !typeutil.IsVectorType(field.GetDataType()) {
@@ -791,7 +792,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *meta.S
 	params := indexParams
 	if vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) && Params.KnowhereConfig.Enable.GetAsBool() {
 		var err error
-		params, err = Params.KnowhereConfig.UpdateIndexParams(meta.GetIndexType(params), paramtable.BuildStage, params)
+		params, err = updateBuildIndexParams(meta.GetIndexType(params), params)
 		if err != nil {
 			return nil, merr.WrapErrServiceInternalErr(err, "failed to update index build params")
 		}

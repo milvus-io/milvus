@@ -20,8 +20,10 @@ package index
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
@@ -2825,6 +2827,10 @@ func TestIndexMeta_AllDenseWithDiskIndex(t *testing.T) {
 			IndexParams:  []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexType}},
 		}
 	}
+	deleted := func(index *model.Index) *model.Index {
+		index.IsDeleted = true
+		return index
+	}
 	newIndexMeta := func(indexes ...*model.Index) *IndexMeta {
 		m := &IndexMeta{Indexes: map[UniqueID]map[UniqueID]*model.Index{collectionID: {}}}
 		for _, index := range indexes {
@@ -2836,6 +2842,7 @@ func TestIndexMeta_AllDenseWithDiskIndex(t *testing.T) {
 	pk := &schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
 	scalar := &schemapb.FieldSchema{FieldID: 101, Name: "scalar", DataType: schemapb.DataType_VarChar}
 	topVector := &schemapb.FieldSchema{FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: dimParams}
+	topVector2 := &schemapb.FieldSchema{FieldID: 104, Name: "vec2", DataType: schemapb.DataType_FloatVector, TypeParams: dimParams}
 	sparseVector := &schemapb.FieldSchema{FieldID: 103, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector}
 	subVector := &schemapb.FieldSchema{
 		FieldID:     202,
@@ -2942,6 +2949,54 @@ func TestIndexMeta_AllDenseWithDiskIndex(t *testing.T) {
 			indexes: []*model.Index{newIndex(1, topVector.FieldID, "DISKANN"), newIndex(3, subVector.FieldID, "DISKANN")},
 			want:    true,
 		},
+		{
+			name:   "two dense fields, one DISKANN one HNSW",
+			schema: newSchema(false, topVector, topVector2),
+			indexes: []*model.Index{
+				newIndex(1, topVector.FieldID, "DISKANN"),
+				newIndex(4, topVector2.FieldID, "HNSW"),
+			},
+			want: false,
+		},
+		{
+			name:   "two dense fields, both DISKANN",
+			schema: newSchema(false, topVector, topVector2),
+			indexes: []*model.Index{
+				newIndex(1, topVector.FieldID, "DISKANN"),
+				newIndex(4, topVector2.FieldID, "DISKANN"),
+			},
+			want: true,
+		},
+		{
+			name:    "only DISKANN index is deleted",
+			schema:  newSchema(false, topVector),
+			indexes: []*model.Index{deleted(newIndex(1, topVector.FieldID, "DISKANN"))},
+			want:    false,
+		},
+		{
+			name:   "deleted HNSW alongside live DISKANN",
+			schema: newSchema(false, topVector),
+			indexes: []*model.Index{
+				newIndex(1, topVector.FieldID, "DISKANN"),
+				deleted(newIndex(5, topVector.FieldID, "HNSW")),
+			},
+			want: true,
+		},
+		{
+			name:   "two live indexes on one field, DISKANN and HNSW",
+			schema: newSchema(false, topVector),
+			indexes: []*model.Index{
+				newIndex(1, topVector.FieldID, "DISKANN"),
+				newIndex(5, topVector.FieldID, "HNSW"),
+			},
+			want: false,
+		},
+		{
+			name:    "index of another field only",
+			schema:  newSchema(false, topVector),
+			indexes: []*model.Index{newIndex(4, topVector2.FieldID, "DISKANN")},
+			want:    false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2949,4 +3004,297 @@ func TestIndexMeta_AllDenseWithDiskIndex(t *testing.T) {
 			assert.Equal(t, tt.want, m.AllDenseWithDiskIndex(collectionID, tt.schema))
 		})
 	}
+}
+
+func TestIndexMeta_AllDenseWithDiskIndex_Concurrent(t *testing.T) {
+	const collectionID = int64(100)
+	const fieldID = int64(102)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+		FieldID:    fieldID,
+		Name:       "vec",
+		DataType:   schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+	}}}
+	newIndex := func(indexID int64, indexType string, isDeleted bool) *model.Index {
+		return &model.Index{
+			CollectionID: collectionID,
+			FieldID:      fieldID,
+			IndexID:      indexID,
+			IsDeleted:    isDeleted,
+			IndexParams:  []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexType}},
+		}
+	}
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().AlterIndexes(mock.Anything, mock.Anything).Return(nil).Maybe()
+	m := &IndexMeta{
+		ctx:     context.TODO(),
+		Catalog: catalog,
+		Indexes: map[UniqueID]map[UniqueID]*model.Index{collectionID: {}},
+	}
+	require.NoError(t, m.CreateIndex(context.TODO(), newIndex(1, "DISKANN", false)))
+
+	stop := make(chan struct{})
+	var readers, writers sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					m.AllDenseWithDiskIndex(collectionID, schema)
+				}
+			}
+		}()
+	}
+	writers.Add(3)
+	go func() {
+		defer writers.Done()
+		for i := 0; i < 200; i++ {
+			assert.NoError(t, m.CreateIndex(context.TODO(), newIndex(int64(1000+i), "HNSW", false)))
+		}
+	}()
+	go func() {
+		defer writers.Done()
+		for i := 0; i < 200; i++ {
+			typ := "DISKANN"
+			if i%2 == 0 {
+				typ = "HNSW"
+			}
+			assert.NoError(t, m.AlterIndex(context.TODO(), newIndex(1, typ, false)))
+		}
+	}()
+	go func() {
+		defer writers.Done()
+		for i := 0; i < 200; i++ {
+			assert.NoError(t, m.MarkIndexAsDeleted(context.TODO(), collectionID, []UniqueID{int64(1000 + i)}))
+		}
+	}()
+	writers.Wait()
+	close(stop)
+	readers.Wait()
+}
+
+func newSharedTestIndex(collID, fieldID, indexID int64, name string) *model.Index {
+	return &model.Index{
+		CollectionID:    collID,
+		FieldID:         fieldID,
+		IndexID:         indexID,
+		IndexName:       name,
+		TypeParams:      []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+		IndexParams:     []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}},
+		UserIndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "AUTOINDEX"}},
+	}
+}
+
+func TestIndexMeta_GettersShareStoredIndexes(t *testing.T) {
+	const collID, fieldID, indexID = int64(1), int64(101), int64(11)
+	m := NewSegmentIndexMeta(catalogmocks.NewDataCoordCatalog(t))
+	m.updateCollectionIndex(newSharedTestIndex(collID, fieldID, indexID, "idx"))
+	deleted := newSharedTestIndex(collID, fieldID+1, indexID+1, "deleted")
+	deleted.IsDeleted = true
+	m.updateCollectionIndex(deleted)
+	stored := m.Indexes[collID][indexID]
+
+	only := func(t *testing.T, got []*model.Index, want *model.Index) {
+		require.Len(t, got, 1)
+		assert.Same(t, want, got[0])
+	}
+	tests := []struct {
+		name  string
+		check func(t *testing.T)
+	}{
+		{"GetIndexesForCollection", func(t *testing.T) { only(t, m.GetIndexesForCollection(collID, ""), stored) }},
+		{"GetIndexesByID", func(t *testing.T) { only(t, m.GetIndexesByID(collID, []int64{indexID}), stored) }},
+		{"ListAllIndexes", func(t *testing.T) { only(t, m.ListAllIndexes(), stored) }},
+		{"GetFieldIndexes", func(t *testing.T) { only(t, m.GetFieldIndexes(collID, fieldID, ""), stored) }},
+		{"GetQueryViewIndexSnapshot", func(t *testing.T) {
+			indexes, _ := m.GetQueryViewIndexSnapshot(collID, nil)
+			only(t, indexes, stored)
+		}},
+		{"GetDeletedIndexes", func(t *testing.T) { only(t, m.GetDeletedIndexes(), m.Indexes[collID][indexID+1]) }},
+		{"GetIndexParams", func(t *testing.T) {
+			got := m.GetIndexParams(collID, indexID)
+			require.Len(t, got, 1)
+			assert.Same(t, &stored.IndexParams[0], &got[0])
+		}},
+		{"GetTypeParams", func(t *testing.T) {
+			got := m.GetTypeParams(collID, indexID)
+			require.Len(t, got, 1)
+			assert.Same(t, &stored.TypeParams[0], &got[0])
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, tt.check)
+	}
+}
+
+func TestIndexMeta_StoredParamsAreClipped(t *testing.T) {
+	m := NewSegmentIndexMeta(catalogmocks.NewDataCoordCatalog(t))
+	index := newSharedTestIndex(1, 101, 11, "idx")
+	index.IndexParams = append(make([]*commonpb.KeyValuePair, 0, 8), index.IndexParams...)
+	m.updateCollectionIndex(index)
+
+	params := m.GetIndexParams(1, 11)
+	assert.Equal(t, len(params), cap(params))
+	extended := append(params, &commonpb.KeyValuePair{Key: "k", Value: "v"})
+	assert.NotSame(t, &params[0], &extended[0])
+}
+
+func TestIndexMeta_WritersAreCopyOnWrite(t *testing.T) {
+	const collID, fieldID, indexID = int64(1), int64(101), int64(11)
+	ctx := context.Background()
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().AlterIndexes(mock.Anything, mock.Anything).Return(nil)
+	m := NewSegmentIndexMeta(catalog)
+	m.updateCollectionIndex(newSharedTestIndex(collID, fieldID, indexID, "idx"))
+
+	before := m.GetIndexesForCollection(collID, "")[0]
+	params := m.GetIndexParams(collID, indexID)
+
+	altered := newSharedTestIndex(collID, fieldID, indexID, "idx")
+	altered.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "DISKANN"}}
+	require.NoError(t, m.AlterIndex(ctx, altered))
+	require.NoError(t, m.MarkIndexAsDeleted(ctx, collID, []int64{indexID}))
+
+	assert.False(t, before.IsDeleted)
+	assert.Equal(t, "HNSW", before.IndexParams[0].GetValue())
+	assert.Equal(t, "HNSW", params[0].GetValue())
+	assert.True(t, m.Indexes[collID][indexID].IsDeleted)
+	assert.Equal(t, "DISKANN", m.Indexes[collID][indexID].IndexParams[0].GetValue())
+	assert.Empty(t, m.GetIndexesForCollection(collID, ""))
+}
+
+func TestIndexMeta_MarkIndexAsDeletedSharesParams(t *testing.T) {
+	const collID, fieldID, indexID = int64(1), int64(101), int64(11)
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().AlterIndexes(mock.Anything, mock.Anything).Return(nil)
+	m := NewSegmentIndexMeta(catalog)
+	m.updateCollectionIndex(newSharedTestIndex(collID, fieldID, indexID, "idx"))
+	before := m.Indexes[collID][indexID]
+
+	require.NoError(t, m.MarkIndexAsDeleted(context.Background(), collID, []int64{indexID}))
+
+	after := m.Indexes[collID][indexID]
+	assert.NotSame(t, before, after)
+	assert.False(t, before.IsDeleted)
+	assert.True(t, after.IsDeleted)
+	for _, tt := range []struct {
+		name          string
+		before, after []*commonpb.KeyValuePair
+	}{
+		{"type params", before.TypeParams, after.TypeParams},
+		{"index params", before.IndexParams, after.IndexParams},
+		{"user index params", before.UserIndexParams, after.UserIndexParams},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			require.NotEmpty(t, tt.after)
+			assert.Same(t, &tt.before[0], &tt.after[0])
+		})
+	}
+}
+
+func newInternTestIndex(collID, indexID int64, mmap string) *model.Index {
+	return &model.Index{
+		CollectionID: collID,
+		IndexID:      indexID,
+		TypeParams:   []*commonpb.KeyValuePair{{Key: "dim", Value: "c3-dim-128"}},
+		IndexParams: []*commonpb.KeyValuePair{
+			{Key: "index_type", Value: "c3-HNSW"},
+			{Key: common.MmapEnabledKey, Value: mmap},
+		},
+		UserIndexParams: []*commonpb.KeyValuePair{{Key: "index_type", Value: "c3-HNSW"}},
+	}
+}
+
+func TestUpdateCollectionIndex_SharesParams(t *testing.T) {
+	m := NewSegmentIndexMeta(catalogmocks.NewDataCoordCatalog(t))
+	m.updateCollectionIndex(newInternTestIndex(1, 10, "c3-share"))
+	m.updateCollectionIndex(newInternTestIndex(2, 20, "c3-share"))
+	a, b := m.Indexes[1][10], m.Indexes[2][20]
+	assert.Same(t, a.IndexParams[0], b.IndexParams[0])
+	assert.Same(t, a.IndexParams[1], b.IndexParams[1])
+	assert.Same(t, a.TypeParams[0], b.TypeParams[0])
+	assert.Same(t, a.UserIndexParams[0], b.UserIndexParams[0])
+	assert.Equal(t, "c3-share", a.IndexParams[1].Value)
+}
+
+func TestAlterIndex_DoesNotLeakAcrossCollections(t *testing.T) {
+	ctx := context.Background()
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().AlterIndexes(mock.Anything, mock.Anything).Return(nil)
+	m := NewSegmentIndexMeta(catalog)
+	m.updateCollectionIndex(newInternTestIndex(1, 10, "c3-alter-old"))
+	m.updateCollectionIndex(newInternTestIndex(2, 20, "c3-alter-old"))
+
+	require.NoError(t, m.AlterIndex(ctx, newInternTestIndex(1, 10, "c3-alter-new")))
+
+	mmapOf := func(kvs []*commonpb.KeyValuePair) string {
+		for _, kv := range kvs {
+			if kv.Key == common.MmapEnabledKey {
+				return kv.Value
+			}
+		}
+		return ""
+	}
+	assert.Equal(t, "c3-alter-new", mmapOf(m.GetIndexParams(1, 10)))
+	assert.Equal(t, "c3-alter-old", mmapOf(m.GetIndexParams(2, 20)))
+}
+
+func TestGetIndexesForCollection_SharesCanonicalParams(t *testing.T) {
+	m := NewSegmentIndexMeta(catalogmocks.NewDataCoordCatalog(t))
+	m.updateCollectionIndex(newInternTestIndex(1, 10, "c3-private"))
+	m.updateCollectionIndex(newInternTestIndex(2, 20, "c3-private"))
+
+	a := m.GetIndexesForCollection(1, "")
+	b := m.GetIndexesForCollection(2, "")
+	require.Len(t, a, 1)
+	require.Len(t, b, 1)
+	// Equal params of different collections share one read-only list.
+	assert.Same(t, unsafe.SliceData(a[0].IndexParams), unsafe.SliceData(b[0].IndexParams))
+	assert.Same(t, unsafe.SliceData(a[0].TypeParams), unsafe.SliceData(b[0].TypeParams))
+	assert.Equal(t, len(a[0].IndexParams), cap(a[0].IndexParams))
+}
+
+// TestCanCreateIndex_AutoIndexRewriteDoesNotAlias pins that when checkParams
+// rewrites an auto-index request's IndexParams from the stored (shared,
+// read-only) list, the request gets its own elements: writing them leaves the
+// stored params untouched.
+func TestCanCreateIndex_AutoIndexRewriteDoesNotAlias(t *testing.T) {
+	m := NewSegmentIndexMeta(catalogmocks.NewDataCoordCatalog(t))
+	m.updateCollectionIndex(&model.Index{
+		CollectionID:    1,
+		FieldID:         100,
+		IndexID:         10,
+		IndexName:       "c3-rewrite",
+		IsAutoIndex:     true,
+		IndexParams:     []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "INVERTED"}},
+		UserIndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: common.AutoIndexName}},
+	})
+	stored := m.Indexes[1][10]
+
+	req := &indexpb.CreateIndexRequest{
+		CollectionID:    1,
+		FieldID:         100,
+		IndexName:       "c3-rewrite",
+		IsAutoIndex:     true,
+		IndexParams:     []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "STL_SORT"}},
+		UserIndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: common.AutoIndexName}},
+	}
+	// A request that matches the stored index is reported as ignored.
+	_, err := m.CanCreateIndex(req, false)
+	require.ErrorIs(t, err, ErrIndexOperationIgnored)
+	require.Len(t, req.GetIndexParams(), 1)
+	assert.Equal(t, "INVERTED", req.GetIndexParams()[0].GetValue(), "the request takes the stored params")
+	assert.NotSame(t, stored.IndexParams[0], req.GetIndexParams()[0])
+
+	for i := range req.IndexParams {
+		req.IndexParams[i].Value = "c3-mutated"
+	}
+	assert.Equal(t, "INVERTED", stored.IndexParams[0].GetValue())
+	assert.Equal(t, "INVERTED", m.GetIndexParams(1, 10)[0].GetValue())
 }
