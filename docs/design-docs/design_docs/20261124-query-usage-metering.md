@@ -31,3 +31,7 @@ Each sub-search follows the Search column rules using its own effective NQ. Work
 ## Delete by filter
 
 The internal lookup counts the planned predicate columns for every selected segment, including when no rows match. A primary-key delete that can build its mutation directly has no query read. A successful Delete reports the lookup bytes together with its existing write inputs under `msg_type=delete` on `milvus_proxy_report_value`. Internal lookup rows do not go to the client and contribute no returned-value bytes.
+
+## Conditional Upsert
+
+A `WriteCondition` lookup counts the whole primary-key column used to locate old rows and the whole source column used in the version comparison, in each selected segment. Proxy accumulates successful lookup stages across retries. On a successful Upsert, it reports these read bytes alongside the existing write inputs under `msg_type=upsert` on the same `milvus_proxy_report_value` metric.

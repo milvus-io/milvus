@@ -278,6 +278,8 @@ message RetrieveRequest {
   int32 pk_filter = 26;
   int32 schema_version = 27;
   bool collect_query_read_usage = 28;
+  // Physical columns used by operations above the retrieval plan.
+  repeated int64 query_read_field_ids = 29;
 }
 
 // Element indices for element-level query results

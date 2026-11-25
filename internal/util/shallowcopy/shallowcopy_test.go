@@ -99,10 +99,12 @@ func TestShallowCopyRetrieveRequest(t *testing.T) {
 			EntityTtlPhysicalTime:   888,
 			QueryLabel:              "query",
 			CollectQueryReadUsage:   true,
+			QueryReadFieldIds:       []int64{10},
 		}
 
 		dst := ShallowCopyRetrieveRequest(src, 42)
 		assert.True(t, dst.GetCollectQueryReadUsage())
+		assert.Equal(t, src.GetQueryReadFieldIds(), dst.GetQueryReadFieldIds())
 
 		assert.Equal(t, int64(42), dst.Base.TargetID)
 		assert.Equal(t, int64(100), src.Base.TargetID)

@@ -2544,6 +2544,10 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	)
 
 	it := NewUpsertTask(ctx, node, request, node.rowIDAllocator)
+	usageReporter := extension.RequestUsageReporter()
+	if usageReporter != nil && request.GetWriteCondition() != nil {
+		it.EnableQueryReadUsage()
+	}
 
 	mlog.Debug(context.TODO(), "Enqueue upsert request in Proxy",
 		mlog.Int("len(FieldsData)", len(request.FieldsData)),
@@ -2598,27 +2602,25 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		it.Result().UpsertCnt = int64(request.NumRows)
 	}
 
-	username := GetCurUserFromContextOrDefault(ctx)
 	nodeID := paramtable.GetStringNodeID()
 	dbName := request.DbName
 	collectionName := request.CollectionName
 	requestSize, mutationSize := it.AccountingSizes()
-	v := hookutil.GetExtension().Report(map[string]any{
-		hookutil.OpTypeKey:          hookutil.OpTypeUpsert,
-		hookutil.DatabaseKey:        request.DbName,
-		hookutil.UsernameKey:        username,
+	report := map[string]any{
 		hookutil.RequestDataSizeKey: requestSize,
 		hookutil.SuccessCntKey:      it.Result().UpsertCnt,
 		hookutil.FailCntKey:         len(it.Result().ErrIndex),
-	})
-	SetReportValue(it.Result().GetStatus(), v)
+	}
+	if readBytes, metered := it.QueryReadBytes(); metered {
+		report[hookutil.BytesKey] = readBytes
+	} else {
+		usageReporter = nil
+	}
+	reportMutationUsage(ctx, it.Result().GetStatus(), usageReporter, hookutil.OpTypeUpsert, dbName, report)
 	SetStorageCost(it.Result().GetStatus(), it.StorageCost())
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.StorageCost().ScannedRemoteBytes) / 1024 / 1024)
 		metrics.ProxyScannedTotalMB.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.StorageCost().ScannedTotalBytes) / 1024 / 1024)
-	}
-	if merr.Ok(it.Result().GetStatus()) {
-		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeUpsert, dbName, username).Add(float64(v))
 	}
 
 	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(mutationSize))

@@ -211,27 +211,33 @@ func TestHybridSearchReportsOneUsageValue(t *testing.T) {
 	})
 }
 
-func TestDeleteReportsReadUsageOnMutationMetric(t *testing.T) {
+func TestMutationsReportReadUsageOnSharedMetric(t *testing.T) {
+	for _, op := range []string{hookutil.OpTypeDelete, hookutil.OpTypeUpsert} {
+		t.Run(op, func(t *testing.T) { testMutationReadUsageMetric(t, op) })
+	}
+}
+
+func testMutationReadUsageMetric(t *testing.T, op string) {
 	paramtable.Init()
 	ctx := t.Context()
 	db := t.Name()
 	reporter := &queryUsageReporter{value: 7}
-	counter := metrics.ProxyReportValue.WithLabelValues(paramtable.GetStringNodeID(), hookutil.OpTypeDelete, db, GetCurUserFromContextOrDefault(ctx))
+	counter := metrics.ProxyReportValue.WithLabelValues(paramtable.GetStringNodeID(), op, db, GetCurUserFromContextOrDefault(ctx))
 	before := testutil.ToFloat64(counter)
 	newReport := func() map[string]any {
 		return map[string]any{hookutil.SuccessCntKey: int64(0), hookutil.BytesKey: int64(61)}
 	}
-	reportMutationUsage(ctx, merr.Success(), reporter, hookutil.OpTypeDelete, db, newReport())
+	reportMutationUsage(ctx, merr.Success(), reporter, op, db, newReport())
 	require.Len(t, reporter.reports, 1)
 	report := reporter.reports[0].(map[string]any)
-	require.Equal(t, hookutil.OpTypeDelete, report[hookutil.OpTypeKey])
+	require.Equal(t, op, report[hookutil.OpTypeKey])
 	require.EqualValues(t, 61, report[hookutil.BytesKey])
 	require.Equal(t, before+7, testutil.ToFloat64(counter))
 
-	reportMutationUsage(ctx, merr.Status(merr.ErrServiceUnavailable), reporter, hookutil.OpTypeDelete, db, newReport())
+	reportMutationUsage(ctx, merr.Status(merr.ErrServiceUnavailable), reporter, op, db, newReport())
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
-	reportMutationUsage(canceled, merr.Success(), reporter, hookutil.OpTypeDelete, db, newReport())
+	reportMutationUsage(canceled, merr.Success(), reporter, op, db, newReport())
 	require.Len(t, reporter.reports, 1)
 	require.Equal(t, before+7, testutil.ToFloat64(counter))
 }

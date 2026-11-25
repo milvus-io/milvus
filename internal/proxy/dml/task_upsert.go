@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
+	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -94,6 +95,7 @@ type UpsertTask struct {
 	partialUpdateResultIDs  *schemapb.IDs
 	fieldPartialUpdatePlans map[string]*fieldPartialUpdatePlan
 
+	queryUsage   *querymeter.ReadUsageAccumulator
 	partialState *partialUpsertState
 	storageCost  segcore.StorageCost
 	writeState   requestutil.ConditionalWriteState
@@ -126,6 +128,18 @@ func NewUpsertTask(ctx context.Context, node taskmodel.TaskNode, request *milvus
 		schemaTimestamp: request.SchemaTimestamp,
 		node:            node,
 	}
+}
+
+// EnableQueryReadUsage opts this conditional Upsert into lookup metering.
+func (ut *UpsertTask) EnableQueryReadUsage() {
+	ut.queryUsage = &querymeter.ReadUsageAccumulator{}
+}
+
+func (ut *UpsertTask) QueryReadBytes() (int64, bool) {
+	if ut.queryUsage == nil {
+		return 0, false
+	}
+	return ut.queryUsage.Bytes()
 }
 
 // Result returns the mutation result after execution.
@@ -330,6 +344,17 @@ func retrieveByPKsOnce(ctx context.Context, queryRunner taskmodel.QueryRunner, t
 		MvccTimestamp:    0,
 		QueryLabel:       metrics.UpsertQueryLabel,
 	}, t.GetMetaCache(), false)
+	if t.queryUsage != nil {
+		// The PK predicate locates old rows. The version comparison in Proxy
+		// is a separate planned read of its source column.
+		condition := t.req.GetWriteCondition()
+		field, err := readSchema.SchemaHelper.GetFieldFromName(condition.GetField())
+		if err != nil {
+			return nil, segcore.StorageCost{}, merr.WrapErrServiceInternalMsg("missing conditional upsert read field %q", condition.GetField())
+		}
+		qt.CollectQueryReadUsage = true
+		qt.QueryReadFieldIds = []int64{field.GetFieldID()}
+	}
 	qt.BindReadSchema(t.collectionID, readSchema)
 	qt.SetActualChannelsMvcc(channelReadTs)
 	// The user issued an upsert, not a query: this retrieval reads the rows
@@ -342,6 +367,11 @@ func retrieveByPKsOnce(ctx context.Context, queryRunner taskmodel.QueryRunner, t
 	queryResult, storageCost, err := queryRunner.ExecuteQuery(ctx, qt, sp)
 	if err := merr.CheckRPCCall(queryResult, err); err != nil {
 		return nil, storageCost, err
+	}
+	if t.queryUsage != nil {
+		if err := t.queryUsage.Add(qt.ReadUsage()); err != nil {
+			return nil, storageCost, err
+		}
 	}
 	if t.req.GetPartialUpdate() {
 		if err := t.bindPartialUpdateReadTimestamps(channelReadTs); err != nil {

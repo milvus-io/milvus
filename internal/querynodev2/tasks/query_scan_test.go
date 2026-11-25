@@ -82,6 +82,7 @@ func testRealQueryTask(t *testing.T, enableScan bool) {
 	}
 	segmentIDs := []int64{100, 101}
 	queryLimit := int64(1)
+	var additionalReadFields []int64
 	chainName := "scan"
 	outputName := "matches"
 	exportColumns := []string{outputName}
@@ -99,7 +100,7 @@ func testRealQueryTask(t *testing.T, enableScan bool) {
 		}
 		data, err := proto.Marshal(p)
 		require.NoError(t, err)
-		req := &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{Base: &commonpb.MsgBase{}, CollectionID: 100, PartitionIDs: []int64{10}, SerializedExprPlan: data, MvccTimestamp: typeutil.MaxTimestamp, Limit: queryLimit, OutputFieldsId: []int64{100, textFieldID, 1}, CollectQueryReadUsage: withChain || predicate != nil, OrderByFields: orderBy, GroupByFieldIds: groupBy, Aggregates: aggregates}, SegmentIDs: segmentIDs, Scope: querypb.DataScope_Streaming}
+		req := &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{Base: &commonpb.MsgBase{}, CollectionID: 100, PartitionIDs: []int64{10}, SerializedExprPlan: data, MvccTimestamp: typeutil.MaxTimestamp, Limit: queryLimit, OutputFieldsId: []int64{100, textFieldID, 1}, CollectQueryReadUsage: withChain || predicate != nil, QueryReadFieldIds: additionalReadFields, OrderByFields: orderBy, GroupByFieldIds: groupBy, Aggregates: aggregates}, SegmentIDs: segmentIDs, Scope: querypb.DataScope_Streaming}
 		task := NewQueryTask(ctx, collection, manager, req)
 		if err = task.PreExecute(); err != nil {
 			task.scheduleSpan.End()
@@ -132,6 +133,23 @@ func testRealQueryTask(t *testing.T, enableScan bool) {
 		t.Fatal("text output field is missing")
 	}
 	if !enableScan {
+		t.Run("meters_comparison_source_alongside_lookup_predicate", func(t *testing.T) {
+			predicate = &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
+				ColumnInfo: &planpb.ColumnInfo{FieldId: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				Op:         planpb.OpType_GreaterThan,
+				Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 500}},
+			}}}
+			additionalReadFields = []int64{textFieldID}
+			defer func() {
+				predicate = nil
+				additionalReadFields = nil
+			}()
+			result, err := run("", false)
+			require.NoError(t, err)
+			require.Empty(t, result.GetIds().GetIntId().GetData())
+			want := 48 + len("skiptimeout fortytimeout thirtyskiptimeout fiftytimeout twenty")
+			require.EqualValues(t, want, result.GetCostAggregation().GetQueryReadUsage().GetDataBytes())
+		})
 		t.Run("metered_legacy_stream_with_no_matching_rows", func(t *testing.T) {
 			predicate := &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
 				ColumnInfo: &planpb.ColumnInfo{FieldId: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},

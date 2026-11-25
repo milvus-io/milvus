@@ -187,7 +187,7 @@ func (t *QueryTask) execute(selected []segments.Segment) error {
 	var readUsage *internalpb.QueryReadUsage
 	if t.req.GetReq().GetCollectQueryReadUsage() {
 		readUsage = &internalpb.QueryReadUsage{}
-		fields := querymeter.QueryFieldIDs(t.plan)
+		fields := append(querymeter.QueryFieldIDs(t.plan), t.req.GetReq().GetQueryReadFieldIds()...)
 		if t.queryChain != nil {
 			// QueryScan currently accepts one Grep operator. Its text read is
 			// independent of the predicates that select its candidate rows.

@@ -87,5 +87,6 @@ func ShallowCopyRetrieveRequest(src *internalpb.RetrieveRequest, targetID int64)
 		QueryLabel:                   src.QueryLabel,
 		PkFilter:                     src.PkFilter,
 		CollectQueryReadUsage:        src.CollectQueryReadUsage,
+		QueryReadFieldIds:            src.QueryReadFieldIds,
 	}
 }

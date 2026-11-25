@@ -3591,6 +3591,62 @@ func TestRetrieveByPKsRebuildsEachAttempt(t *testing.T) {
 	require.Zero(t, fakeWAL.appendCalls)
 }
 
+func TestConditionalUpsertReadUsage(t *testing.T) {
+	readSchema := mockey.Mock((*UpsertTask).upsertReadSchema).To(func(task *UpsertTask, _ context.Context, _ []string) (*metacache.SchemaInfo, error) {
+		return task.schema, nil
+	}).Build()
+	defer readSchema.UnPatch()
+
+	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10}, []int64{10}, nil)
+	task.partitionKeyMode = true
+	task.schema, _ = newSchemaInfo(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "version", DataType: schemapb.DataType_Int64},
+	}})
+	task.req.WriteCondition = &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT}
+	task.EnableQueryReadUsage()
+
+	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
+	oldWAL := streaming.WAL()
+	streaming.SetWALForTest(fakeWAL)
+	defer streaming.SetWALForTest(oldWAL)
+	require.NoError(t, task.preparePartialUpdateCASGroups(t.Context()))
+
+	var readErr error
+	executeQuery := mockey.Mock((*mockUpsertNode).query).To(func(_ *mockUpsertNode, _ context.Context, qt *dql.QueryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+		require.True(t, qt.GetCollectQueryReadUsage())
+		require.Equal(t, []int64{101}, qt.GetQueryReadFieldIds())
+		for channel := range task.partialUpdateCASGroups {
+			qt.RecordChannelMvcc(channel, 90)
+		}
+		return &milvuspb.QueryResults{Status: merr.Status(readErr)}, segcore.StorageCost{}, readErr
+	}).Build()
+	defer executeQuery.UnPatch()
+
+	part := &internalpb.QueryReadUsage{DataBytes: 24, ValidityBits: map[int64]uint64{101: 2}}
+	readUsage := mockey.Mock((*dql.QueryTask).ReadUsage).To(func(*dql.QueryTask) *internalpb.QueryReadUsage { return part }).Build()
+	defer readUsage.UnPatch()
+	_, _, err := retrieveByPKs(t.Context(), task, partialUpdateCASIDs([]int64{10}), []string{"*"})
+	require.NoError(t, err)
+	part = &internalpb.QueryReadUsage{DataBytes: 16, ValidityBits: map[int64]uint64{101: 2}}
+	_, _, err = retrieveByPKs(t.Context(), task, partialUpdateCASIDs([]int64{10}), []string{"*"})
+	require.NoError(t, err)
+	bytes, metered := task.QueryReadBytes()
+	require.True(t, metered)
+	require.EqualValues(t, 41, bytes)
+
+	readErr = merr.ErrServiceUnavailable
+	_, _, err = retrieveByPKs(t.Context(), task, partialUpdateCASIDs([]int64{10}), []string{"*"})
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	readErr = nil
+	part = nil
+	_, _, err = retrieveByPKs(t.Context(), task, partialUpdateCASIDs([]int64{10}), []string{"*"})
+	require.ErrorContains(t, err, "did not report read usage")
+	bytes, _ = task.QueryReadBytes()
+	require.EqualValues(t, 41, bytes)
+	require.Zero(t, fakeWAL.appendCalls)
+}
+
 func TestRetrieveByPKsRequiresQueryRunner(t *testing.T) {
 	task := createTestUpdateTask()
 	task.node = &mockTaskNode{}
