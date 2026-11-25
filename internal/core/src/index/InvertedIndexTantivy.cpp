@@ -1018,13 +1018,6 @@ InvertedIndexTantivy<T>::LoadEntries(storage::IndexEntryReader& reader,
     bool has_null = reader.GetMeta<bool>("has_null");
     if (reader.HasMeta("is_nested")) {
         is_nested_index_ = reader.GetMeta<bool>("is_nested");
-    } else if (is_nested_index_) {
-        const auto scalar_version =
-            GetValueFromConfig<int32_t>(config, SCALAR_INDEX_ENGINE_VERSION)
-                .value_or(1);
-        if (scalar_version < 4) {
-            is_nested_index_ = false;
-        }
     }
 
     path_ = disk_file_manager_->GetLocalIndexObjectPrefix();

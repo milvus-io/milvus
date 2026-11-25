@@ -93,6 +93,12 @@ IsCompatibleLegacyNestedScalarIndex(
         return true;
     }
 
+    if (milvus::index::GetValueFromConfig<bool>(
+            config, milvus::index::LEGACY_ROW_DOMAIN_KEY)
+            .value_or(false)) {
+        return false;
+    }
+
     const auto& index_files = load_index_info->index_files;
     const auto scalar_version = index_info.scalar_index_engine_version;
     const bool is_v3 = scalar_version >= 3 && index_files.size() == 1 &&
@@ -137,7 +143,11 @@ IsCompatibleLegacyNestedScalarIndex(
             if (reader->HasMeta("is_nested")) {
                 return reader->GetMeta<bool>("is_nested");
             }
-            return scalar_version >= 4;
+            // V3 packed INVERTED without `is_nested` comes from 3.0.0~3.0.6
+            // (already element-domain); 2.6 stepping-stone writes
+            // `is_nested = false`, and pre-stepping-stone 2.6 indexes carry
+            // `legacy_row_domain = true`.
+            return true;
         }
         return true;
     }

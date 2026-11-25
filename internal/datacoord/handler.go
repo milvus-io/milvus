@@ -938,6 +938,12 @@ func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*
 			if segIdx.IndexType != "" {
 				setIndexParam(indexParams, common.IndexTypeKey, segIdx.IndexType)
 			}
+			if segIdx.LegacyRowDomain {
+				indexParams = append(indexParams[:len(indexParams):len(indexParams)], &commonpb.KeyValuePair{
+					Key:   common.LegacyRowDomainKey,
+					Value: "true",
+				})
+			}
 
 			indexesFiles = append(indexesFiles, &indexpb.IndexFilePathInfo{
 				SegmentID:                 segID,

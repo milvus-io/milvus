@@ -2130,6 +2130,15 @@ TEST(BitmapIndexArrayNestedTest,
          {{index::INDEX_TYPE,
            static_cast<uint8_t>(index::ScalarIndexType::INVERTED)},
           {"file_names", nlohmann::json::array({"meta.json"})}},
+         false},
+        {"legacy_hybrid_inverted_v3_explicit_false",
+         "legacy_hybrid_inverted_v3_explicit_false.v3",
+         index::HYBRID_INDEX_TYPE,
+         3,
+         {{index::INDEX_TYPE,
+           static_cast<uint8_t>(index::ScalarIndexType::INVERTED)},
+          {"file_names", nlohmann::json::array({"meta.json"})},
+          {"is_nested", false}},
          true},
         {"legacy_hybrid_inverted_v4",
          "legacy_hybrid_inverted_v4.v3",
@@ -2189,6 +2198,13 @@ TEST(BitmapIndexArrayNestedTest,
          index::INVERTED_INDEX_TYPE,
          3,
          {{"file_names", nlohmann::json::array({"meta.json"})}},
+         false},
+        {"legacy_inverted_v3_explicit_false",
+         "legacy_inverted_v3_explicit_false.v3",
+         index::INVERTED_INDEX_TYPE,
+         3,
+         {{"file_names", nlohmann::json::array({"meta.json"})},
+          {"is_nested", false}},
          true},
         {"legacy_inverted_v4",
          "legacy_inverted_v4.v3",
@@ -2532,5 +2548,44 @@ TEST(BitmapIndexArrayNestedTest,
         } else {
             EXPECT_NE(info.cache_index, nullptr);
         }
+    }
+}
+
+TEST(BitmapIndexArrayNestedTest, LegacyRowDomainTaggedIndexSkipsWithoutIO) {
+    proto::schema::FieldSchema struct_schema;
+    struct_schema.set_name("struct_array[sub_str]");
+    struct_schema.set_data_type(proto::schema::DataType::Array);
+    struct_schema.set_element_type(proto::schema::DataType::VarChar);
+    struct_schema.set_nullable(false);
+
+    for (const auto& index_type : {index::BITMAP_INDEX_TYPE,
+                                   index::ASCENDING_SORT,
+                                   index::INVERTED_INDEX_TYPE,
+                                   index::HYBRID_INDEX_TYPE}) {
+        SCOPED_TRACE(index_type);
+        segcore::LoadIndexInfo info{};
+        info.collection_id = 1;
+        info.partition_id = 2;
+        info.segment_id = 3;
+        info.field_id = 101;
+        info.field_type = DataType::ARRAY;
+        info.element_type = DataType::VARCHAR;
+        info.schema = struct_schema;
+        info.index_id = 4000;
+        info.index_build_id = 4000;
+        info.index_version = 1;
+        info.index_size = 0;
+        info.num_rows = 10;
+        info.warmup_policy = "disable";
+        info.index_files = {"nonexistent/should_not_open_s3.v3"};
+        info.index_params = {{index::INDEX_TYPE, index_type},
+                             {index::SCALAR_INDEX_ENGINE_VERSION, "3"},
+                             {index::LEGACY_ROW_DOMAIN_KEY, "true"},
+                             {milvus::LOAD_PRIORITY, "HIGH"}};
+
+        tracer::TraceContext trace_ctx{};
+        segcore::LoadIndexData(trace_ctx, &info);
+        EXPECT_TRUE(info.skipped);
+        EXPECT_EQ(info.cache_index, nullptr);
     }
 }

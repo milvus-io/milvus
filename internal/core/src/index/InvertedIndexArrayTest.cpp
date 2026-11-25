@@ -676,10 +676,47 @@ TEST(ArrayInvertedIndexRegression, V3PublishesNestedMetadataAndVersionGate) {
         fm.GetRemoteIndexObjectPrefix() + "/" + stripped_name;
 
     ctx.set_for_loading_index(true);
-    // Stripped V3 with scalar_index_engine_version=3 falls back to non-nested.
+    // Stripped V3 (3.0.0~3.0.6) with scalar_index_engine_version=3 remains
+    // element-level.
     {
         Config cfg;
         cfg["index_files"] = std::vector<std::string>{stripped_path};
+        cfg[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+        cfg[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 3;
+        auto loaded = std::make_unique<index::InvertedIndexTantivy<int64_t>>(
+            milvus::index::TANTIVY_INDEX_LATEST_VERSION,
+            ctx,
+            false,
+            true,
+            true);
+        loaded->LoadUnified(cfg);
+        EXPECT_TRUE(loaded->IsNestedIndex());
+    }
+
+    // Explicit "is_nested"=false (written by 2.6 stepping-stone) overrides
+    // caller's is_nested_index=true and loads as row-domain.
+    {
+        const std::string false_meta_name = "stepping_stone_inverted.v3";
+        auto writer_false = fm.CreateIndexEntryWriterUnified(false_meta_name);
+        for (const auto& entry_name : reader->GetEntryNames()) {
+            if (entry_name == storage::MILVUS_V3_META_ENTRY_NAME) {
+                continue;
+            }
+            auto entry = reader->ReadEntry(entry_name);
+            writer_false->WriteEntry(
+                entry_name, entry.data.data(), entry.data.size());
+        }
+        writer_false->PutMeta(
+            "file_names",
+            reader->GetMeta<std::vector<std::string>>("file_names"));
+        writer_false->PutMeta("has_null", reader->GetMeta<bool>("has_null"));
+        writer_false->PutMeta("is_nested", false);
+        writer_false->Finish();
+        const std::string false_meta_path =
+            fm.GetRemoteIndexObjectPrefix() + "/" + false_meta_name;
+
+        Config cfg;
+        cfg["index_files"] = std::vector<std::string>{false_meta_path};
         cfg[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
         cfg[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 3;
         auto loaded = std::make_unique<index::InvertedIndexTantivy<int64_t>>(

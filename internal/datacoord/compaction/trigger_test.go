@@ -3540,6 +3540,79 @@ func Test_ShouldRebuildSegmentIndex_AutoUpgrade_ScalarUsesCorrectField(t *testin
 	Params.Save("dataCoord.autoUpgradeSegmentIndex", "false")
 }
 
+func Test_ShouldRebuildSegmentIndex_LegacyRowDomain(t *testing.T) {
+	paramtable.Init()
+	Params.Save("dataCoord.autoUpgradeSegmentIndex", "false")
+
+	collID, segID, indexID := int64(1), int64(100), int64(10)
+
+	t.Run("no rebuild while resolved scalar version < 4", func(t *testing.T) {
+		segIdx := &model.SegmentIndex{
+			SegmentID:                 segID,
+			CollectionID:              collID,
+			IndexID:                   indexID,
+			IndexState:                commonpb.IndexState_Finished,
+			IndexFileKeys:             []string{"file1"},
+			CurrentScalarIndexVersion: 3,
+			LegacyRowDomain:           true,
+		}
+		im := index.NewTestIndexMeta(collID, segID, indexID, "BITMAP", segIdx)
+		mockVM := index.NewMockVersionManager(t)
+		mockVM.On("ResolveScalarIndexVersion").Return(int32(3)).Maybe()
+
+		trigger := &compactionTrigger{
+			meta:                      &meta.Meta{IndexCatalog: im, ChannelCPs: meta.NewChannelCps()},
+			indexMeta:                 im,
+			indexEngineVersionManager: mockVM,
+		}
+		segment := &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: segID, CollectionID: collID}}
+		assert.False(t, trigger.ShouldRebuildSegmentIndex(segment))
+	})
+
+	t.Run("triggers rebuild when resolved scalar version >= 4", func(t *testing.T) {
+		segIdx := &model.SegmentIndex{
+			SegmentID:                 segID,
+			CollectionID:              collID,
+			IndexID:                   indexID,
+			IndexState:                commonpb.IndexState_Finished,
+			IndexFileKeys:             []string{"file1"},
+			CurrentScalarIndexVersion: 3,
+			LegacyRowDomain:           true,
+		}
+		im := index.NewTestIndexMeta(collID, segID, indexID, "BITMAP", segIdx)
+		mockVM := index.NewMockVersionManager(t)
+		mockVM.On("ResolveScalarIndexVersion").Return(int32(4)).Maybe()
+
+		trigger := &compactionTrigger{
+			meta:                      &meta.Meta{IndexCatalog: im, ChannelCPs: meta.NewChannelCps()},
+			indexMeta:                 im,
+			indexEngineVersionManager: mockVM,
+		}
+		segment := &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: segID, CollectionID: collID}}
+		assert.True(t, trigger.ShouldRebuildSegmentIndex(segment))
+	})
+
+	t.Run("skips deleted, unfinished, or keyless legacy segment index", func(t *testing.T) {
+		cases := []*model.SegmentIndex{
+			{SegmentID: segID, CollectionID: collID, IndexID: indexID, IndexState: commonpb.IndexState_Finished, IndexFileKeys: []string{"file1"}, LegacyRowDomain: true, IsDeleted: true},
+			{SegmentID: segID, CollectionID: collID, IndexID: indexID, IndexState: commonpb.IndexState_InProgress, IndexFileKeys: []string{"file1"}, LegacyRowDomain: true},
+			{SegmentID: segID, CollectionID: collID, IndexID: indexID, IndexState: commonpb.IndexState_Finished, LegacyRowDomain: true},
+		}
+		for _, segIdx := range cases {
+			im := index.NewTestIndexMeta(collID, segID, indexID, "BITMAP", segIdx)
+			mockVM := index.NewMockVersionManager(t)
+			mockVM.On("ResolveScalarIndexVersion").Return(int32(4)).Maybe()
+			trigger := &compactionTrigger{
+				meta:                      &meta.Meta{IndexCatalog: im, ChannelCPs: meta.NewChannelCps()},
+				indexMeta:                 im,
+				indexEngineVersionManager: mockVM,
+			}
+			segment := &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: segID, CollectionID: collID}}
+			assert.False(t, trigger.ShouldRebuildSegmentIndex(segment))
+		}
+	})
+}
+
 func Test_ShouldRebuildSegmentIndex_ForceRebuild_ScalarUsesCorrectField(t *testing.T) {
 	paramtable.Init()
 	Params.Save("dataCoord.autoUpgradeSegmentIndex", "false")
