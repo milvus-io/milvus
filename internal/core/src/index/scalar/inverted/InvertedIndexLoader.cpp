@@ -66,30 +66,41 @@ using inverted_params::IsSupportedType;
 
 constexpr std::string_view kV3NestedKey = "is_nested";
 
+bool
+IsNestedMetadataCompatible(const nlohmann::json* packed_metadata,
+                           const Config& params,
+                           bool runtime_nested) {
+    if (packed_metadata != nullptr && packed_metadata->contains(kV3NestedKey)) {
+        return ReadRequiredIndexMeta<bool>(
+                   *packed_metadata, kV3NestedKey.data()) == runtime_nested;
+    }
+    if (!runtime_nested) {
+        return true;
+    }
+    const auto scalar_version =
+        GetValueFromConfig<int32_t>(params, SCALAR_INDEX_ENGINE_VERSION)
+            .value_or(1);
+    return scalar_version >= 4;
+}
+
 void
 ValidatePackedNested(const nlohmann::json& metadata,
                      const Config& params,
                      bool runtime_nested) {
-    if (metadata.contains(kV3NestedKey)) {
-        const auto persisted =
-            ReadRequiredIndexMeta<bool>(metadata, kV3NestedKey.data());
-        if (persisted != runtime_nested) {
-            ThrowInfo(DataFormatBroken,
-                      "inverted persisted nested flag disagrees with runtime");
-        }
+    if (IsNestedMetadataCompatible(&metadata, params, runtime_nested)) {
         return;
     }
-    if (runtime_nested) {
-        const auto scalar_version =
-            GetValueFromConfig<int32_t>(params, SCALAR_INDEX_ENGINE_VERSION)
-                .value_or(1);
-        if (scalar_version < 4) {
-            ThrowInfo(DataFormatBroken,
-                      "legacy nested inverted index (version {}) lacks "
-                      "persisted nested metadata",
-                      scalar_version);
-        }
+    if (metadata.contains(kV3NestedKey)) {
+        ThrowInfo(DataFormatBroken,
+                  "inverted persisted nested flag disagrees with runtime");
     }
+    const auto scalar_version =
+        GetValueFromConfig<int32_t>(params, SCALAR_INDEX_ENGINE_VERSION)
+            .value_or(1);
+    ThrowInfo(DataFormatBroken,
+              "legacy nested inverted index (version {}) lacks "
+              "persisted nested metadata",
+              scalar_version);
 }
 
 /**
@@ -596,6 +607,18 @@ InvertedIndexLoader::Create(OpenedIndexSource source,
             packed->Metadata(), loader->options_.params, runtime.nested);
     }
     co_return loader;
+}
+
+folly::coro::Task<bool>
+InvertedIndexLoader::CheckNestedCompatible(const OpenedIndexSource& source,
+                                           const Config& params) {
+    const bool runtime_nested =
+        ReadRequiredNestedParam(params, "inverted loader");
+    const auto* packed = std::get_if<PackedIndexSource>(&source);
+    co_return IsNestedMetadataCompatible(
+        packed != nullptr ? &packed->Metadata() : nullptr,
+        params,
+        runtime_nested);
 }
 
 template <typename T>

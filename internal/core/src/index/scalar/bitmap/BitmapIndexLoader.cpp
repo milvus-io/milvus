@@ -175,6 +175,22 @@ ReadMeta(bool use_async, storage::FileSource& source) {
         co_await source.ReadEntryAsync(BITMAP_INDEX_META, use_async));
 }
 
+bool
+ReadPackedNested(const nlohmann::json& metadata) {
+    if (!metadata.contains(kV3NestedKey)) {
+        return false;
+    }
+    return ReadRequiredIndexMeta<bool>(metadata, kV3NestedKey.data());
+}
+
+void
+ValidateNested(bool persisted_nested, bool runtime_nested) {
+    if (persisted_nested != runtime_nested) {
+        ThrowInfo(DataFormatBroken,
+                  "bitmap persisted nested flag disagrees with runtime");
+    }
+}
+
 // Check the coordinate domain and posting-count bounds before payload
 // allocation.
 void
@@ -985,12 +1001,8 @@ BitmapIndexLoader::PreparePackedState(
         ReadRequiredIndexMeta<size_t>(metadata, BITMAP_INDEX_LENGTH);
     meta.count = ReadRequiredIndexMeta<size_t>(metadata, BITMAP_INDEX_NUM_ROWS);
     meta.has_nested = metadata.contains(kV3NestedKey);
-    if (meta.has_nested)
-        meta.nested = ReadRequiredIndexMeta<bool>(metadata, "is_nested");
-    if (meta.nested != params.nested) {
-        ThrowInfo(DataFormatBroken,
-                  "bitmap persisted nested flag disagrees with runtime");
-    }
+    meta.nested = ReadPackedNested(metadata);
+    ValidateNested(meta.nested, params.nested);
     ValidateMeta(meta, params);
     state.layout =
         meta.index_length <=
@@ -1033,10 +1045,7 @@ BitmapIndexLoader::Create(OpenedIndexSource source,
         }
         auto& meta = state->meta;
         meta = co_await ReadMeta(legacy.use_async, *legacy.source);
-        if (meta.nested != params.nested) {
-            ThrowInfo(DataFormatBroken,
-                      "bitmap persisted nested flag disagrees with runtime");
-        }
+        ValidateNested(meta.nested, params.nested);
         ValidateMeta(meta, params);
         state->layout =
             meta.index_length <=
@@ -1049,6 +1058,22 @@ BitmapIndexLoader::Create(OpenedIndexSource source,
     }
     loader->state_ = std::move(state);
     co_return loader;
+}
+
+folly::coro::Task<bool>
+BitmapIndexLoader::CheckNestedCompatible(const OpenedIndexSource& source,
+                                         const Config& params) {
+    const bool runtime_nested =
+        ReadRequiredNestedParam(params, "bitmap loader");
+    if (const auto* packed = std::get_if<PackedIndexSource>(&source)) {
+        co_return ReadPackedNested(packed->Metadata()) == runtime_nested;
+    }
+    const auto& legacy = std::get<LegacyIndexSource>(source);
+    if (!legacy.source->HasEntry(BITMAP_INDEX_META)) {
+        co_return !runtime_nested;
+    }
+    const auto meta = co_await ReadMeta(legacy.use_async, *legacy.source);
+    co_return meta.nested == runtime_nested;
 }
 
 template <typename T, typename Posting>

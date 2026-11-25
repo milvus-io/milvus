@@ -437,6 +437,21 @@ TEST(RegistryTest, LoaderEntryRequiresBothFunctions) {
     });
 }
 
+TEST(RegistryTest, CheckNestedCompatibleHookOnlyPresentWhereSupported) {
+    EXPECT_EQ((LoaderEntry{&LoaderProbeA::DeriveCaps, &LoaderProbeA::Create})
+                  .check_nested_compatible,
+              nullptr);
+    const auto& registry = LoaderRegistry::Instance();
+    EXPECT_NE(registry.Lookup(families::kBitmap).check_nested_compatible,
+              nullptr);
+    EXPECT_NE(registry.Lookup(families::kSort).check_nested_compatible,
+              nullptr);
+    EXPECT_NE(registry.Lookup(families::kInverted).check_nested_compatible,
+              nullptr);
+    EXPECT_EQ(registry.Lookup(families::kMarisa).check_nested_compatible,
+              nullptr);
+}
+
 TEST(RegistryTest, DuplicateLoaderRegistrationKeepsOriginalEntry) {
     auto& registry = LoaderRegistry::Instance();
     registry.Register<LoaderFailureProbe>();

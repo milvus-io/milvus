@@ -1,6 +1,5 @@
 #include "segcore/indexing/SealedIndexLoader.h"
 
-#include <cstring>
 #include <filesystem>
 #include <limits>
 #include <optional>
@@ -13,16 +12,15 @@
 #include "common/resource_c.h"
 #include "fmt/core.h"
 #include "glog/logging.h"
-#include <yaml-cpp/yaml.h>
 
 #include "index/Families.h"
-#include "index/IndexLoadUtils.h"
 #include "index/IndexTypeAdapter.h"
 #include "index/LoadResource.h"
 #include "index/PackedIndexLoad.h"
 #include "index/LegacyIndexLoad.h"
 #include "folly/ScopeGuard.h"
 #include "folly/coro/BlockingWait.h"
+#include "folly/coro/WithCancellation.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "index/Meta.h"
@@ -238,80 +236,27 @@ SealedIndexLoader::SealedIndexLoader(
                 std::move(config_), *source);
         }
     }
-    if (nested && !IsVectorDataType(index_load_info_.field_type)) {
-        auto read_legacy_entry = [&](std::string_view name) {
-            if (*file_manager_context_.use_async_load) {
-                return folly::coro::blockingWait(folly::coro::co_withExecutor(
-                    storage::ResolveAsyncLoadExecutor({}, priority),
-                    prepared_legacy_source_->ReadEntryAsync(name, true)));
-            }
-            return prepared_legacy_source_->ReadEntry(name);
-        };
-        const auto is_compatible_nested = [&]() -> bool {
-            if (packed_source) {
-                const auto& metadata = packed_source->Metadata();
-                if (resolved_family == index::families::kBitmap ||
-                    resolved_family == index::families::kSort) {
-                    return metadata.contains("is_nested") &&
-                           index::ReadRequiredIndexMeta<bool>(metadata,
-                                                              "is_nested");
-                }
-                if (resolved_family == index::families::kInverted) {
-                    if (metadata.contains("is_nested")) {
-                        return index::ReadRequiredIndexMeta<bool>(metadata,
-                                                                  "is_nested");
-                    }
-                    return scalar_version >= 4;
-                }
-                return true;
-            }
-            if (resolved_family == index::families::kBitmap) {
-                if (!prepared_legacy_source_->HasEntry(
-                        index::BITMAP_INDEX_META)) {
-                    return false;
-                }
-                const auto encoded =
-                    read_legacy_entry(index::BITMAP_INDEX_META);
-                const std::string text(encoded.begin(), encoded.end());
-                try {
-                    const auto json = nlohmann::json::parse(text);
-                    return json.contains("is_nested_index") &&
-                           json.at("is_nested_index").get<bool>();
-                } catch (const nlohmann::json::parse_error&) {
-                    try {
-                        const auto yaml = YAML::Load(text);
-                        const auto node = yaml["is_nested_index"];
-                        return node && node.as<bool>();
-                    } catch (const YAML::Exception& error) {
-                        ThrowInfo(DataFormatBroken,
-                                  "invalid bitmap V1/V2 metadata: {}",
-                                  error.what());
-                    }
-                } catch (const nlohmann::json::exception& error) {
-                    ThrowInfo(DataFormatBroken,
-                              "invalid bitmap V1/V2 metadata: {}",
-                              error.what());
-                }
-            }
-            if (resolved_family == index::families::kSort) {
-                if (!prepared_legacy_source_->HasEntry("is_nested_index")) {
-                    return false;
-                }
-                const auto encoded = read_legacy_entry("is_nested_index");
-                if (encoded.size() != sizeof(bool)) {
-                    ThrowInfo(DataFormatBroken,
-                              "invalid sorted legacy nested metadata size: {}",
-                              encoded.size());
-                }
-                bool nested_flag = false;
-                std::memcpy(&nested_flag, encoded.data(), sizeof(bool));
-                return nested_flag;
-            }
-            if (resolved_family == index::families::kInverted) {
-                return scalar_version >= 4;
-            }
-            return true;
-        }();
+    const auto loader_entry =
+        index::LoaderRegistry::Instance().Lookup(resolved_family);
+    AssertInfo(static_cast<bool>(loader_entry),
+               "no index loader is registered for family {}",
+               resolved_family);
+    if (nested && !IsVectorDataType(index_load_info_.field_type) &&
+        loader_entry.check_nested_compatible != nullptr) {
+        const index::OpenedIndexSource opened_source =
+            packed_source ? index::OpenedIndexSource{*packed_source}
+                          : index::OpenedIndexSource{index::LegacyIndexSource{
+                                prepared_legacy_source_,
+                                *file_manager_context_.use_async_load}};
+        auto check =
+            loader_entry.check_nested_compatible(opened_source, config_);
+        const bool is_compatible_nested =
+            *file_manager_context_.use_async_load
+                ? folly::coro::blockingWait(folly::coro::co_withExecutor(
+                      storage::ResolveAsyncLoadExecutor({}, priority),
+                      folly::coro::co_withCancellation(token,
+                                                       std::move(check))))
+                : folly::coro::blockingWait(std::move(check));
         if (!is_compatible_nested) {
             skipped_incompatible_nested_ = true;
             family_ = std::move(resolved_family);
@@ -330,11 +275,6 @@ SealedIndexLoader::SealedIndexLoader(
         }
     }
 
-    const auto loader_entry =
-        index::LoaderRegistry::Instance().Lookup(resolved_family);
-    AssertInfo(static_cast<bool>(loader_entry),
-               "no index loader is registered for family {}",
-               resolved_family);
     family_ = std::move(resolved_family);
     value_type_ = value_type;
     caps_ = loader_entry.derive_caps(config_);

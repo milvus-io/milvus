@@ -255,6 +255,14 @@ ResolveNested(CommonMeta& meta, bool runtime_nested) {
     }
 }
 
+bool
+ReadPackedNested(const nlohmann::json& metadata) {
+    if (!metadata.contains(sort_format::kNested)) {
+        return false;
+    }
+    return ReadRequiredIndexMeta<bool>(metadata, sort_format::kNested.data());
+}
+
 // Enforce the int32 coordinate domain used by sorted reverse offsets.
 void
 CheckCount(size_t count) {
@@ -803,11 +811,8 @@ SortedIndexLoader::PreparePackedState(const storage::IndexEntryDirectory&,
     state.meta.count =
         ReadRequiredIndexMeta<size_t>(metadata, sort_format::kNumRows.data());
     CheckCount(state.meta.count);
-    if (metadata.contains(sort_format::kNested)) {
-        state.meta.has_nested = true;
-        state.meta.nested =
-            ReadRequiredIndexMeta<bool>(metadata, sort_format::kNested.data());
-    }
+    state.meta.has_nested = metadata.contains(sort_format::kNested);
+    state.meta.nested = ReadPackedNested(metadata);
     ResolveNested(state.meta, state.params.nested);
     const bool string = IsStringDataType(state.params.value_type);
     if (string) {
@@ -851,6 +856,20 @@ SortedIndexLoader::Create(OpenedIndexSource source,
     }
     loader->state_ = std::move(state);
     co_return loader;
+}
+
+folly::coro::Task<bool>
+SortedIndexLoader::CheckNestedCompatible(const OpenedIndexSource& source,
+                                         const Config& params) {
+    const bool runtime_nested =
+        ReadRequiredNestedParam(params, "sorted loader");
+    if (const auto* packed = std::get_if<PackedIndexSource>(&source)) {
+        co_return ReadPackedNested(packed->Metadata()) == runtime_nested;
+    }
+    const auto& legacy = std::get<LegacyIndexSource>(source);
+    const auto persisted = co_await ReadOptionalPod<bool>(
+        legacy.use_async, *legacy.source, sort_format::kLegacyNested);
+    co_return persisted.value_or(false) == runtime_nested;
 }
 
 template <typename T>

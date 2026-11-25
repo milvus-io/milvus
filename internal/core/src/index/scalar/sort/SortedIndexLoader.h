@@ -51,6 +51,14 @@ class SortedIndexLoader final : public IndexLoader {
     DeriveCaps(const Config& index_meta);
 
     /**
+     * @brief Check whether persisted nested metadata matches runtime params
+     * without loading payloads.
+     */
+    static folly::coro::Task<bool>
+    CheckNestedCompatible(const OpenedIndexSource& source,
+                          const Config& params);
+
+    /**
      * @brief Read and retain sorted counts and nesting before payload loading.
      * @param source Opened storage source owned by the resulting loader.
      * @param options Fixed load options without a retained operation context.

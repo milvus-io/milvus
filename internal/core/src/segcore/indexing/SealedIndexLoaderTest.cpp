@@ -10,11 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <yaml-cpp/yaml.h>
 
 #include <barrier>
 #include <filesystem>
 #include <future>
 #include <memory>
+#include <sstream>
 #include <string_view>
 #include <vector>
 
@@ -26,11 +28,13 @@
 #include "index/contracts/build/ScalarBuildInput.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/test_utils/ArtifactTestUtils.h"
+#include "nlohmann/json.hpp"
 #include "segcore/Types.h"
 #include "segcore/indexing/SealedIndexLoader.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/Util.h"
 #include "storage/artifact/Artifact.h"
+#include "storage/artifact/FileSink.h"
 #include "storage/artifact/LocalDirectory.h"
 
 namespace milvus::segcore {
@@ -439,6 +443,180 @@ TEST_F(SealedIndexLoaderTest,
         auto reader = index->CreateReader(nullptr);
         ASSERT_NE(reader, nullptr);
         EXPECT_EQ(reader->CoordDomain(), index::Domain::Row);
+    }
+}
+
+TEST_F(SealedIndexLoaderTest,
+       SkipsLegacyV1V2StructSubFieldIndexesAndAcceptsCompatibleOnes) {
+    const std::vector<std::string_view> values{
+        "alpha", "beta", "beta", "gamma"};
+    const index::ScalarBuildBatch<std::string_view> batch{values, {}};
+
+    auto build_artifact = [&](const std::string& family, bool nested) {
+        const Config params{{index::FIELD_ID, int64_t{101}},
+                            {"field_type", DataType::ARRAY},
+                            {"value_type", DataType::VARCHAR},
+                            {"element_type", DataType::VARCHAR},
+                            {"nested", nested},
+                            {"nullable", false}};
+        auto builder =
+            index::BuilderRegistry<
+                index::ScalarBuildInput<std::string_view>>::Instance()
+                .Create(family, params);
+        return std::move(*builder).Build({std::span(&batch, 1)});
+    };
+
+    enum class MetaMode {
+        Keep,
+        EraseBitmapMeta,
+        StripBitmapNested,
+        JsonBitmapNested,
+        EraseSortNested,
+    };
+
+    struct LegacyV1V2Case {
+        std::string name;
+        std::string index_type;
+        std::string build_family;
+        int scalar_version;
+        MetaMode meta_mode;
+        bool expect_skipped;
+    };
+
+    const std::vector<LegacyV1V2Case> cases = {
+        {"LegacyV2BitmapMissingMeta",
+         index::BITMAP_INDEX_TYPE,
+         index::families::kBitmap,
+         2,
+         MetaMode::EraseBitmapMeta,
+         true},
+        {"LegacyV2BitmapWithoutNestedFlag",
+         index::BITMAP_INDEX_TYPE,
+         index::families::kBitmap,
+         2,
+         MetaMode::StripBitmapNested,
+         true},
+        {"LegacyV2BitmapYamlNested",
+         index::BITMAP_INDEX_TYPE,
+         index::families::kBitmap,
+         2,
+         MetaMode::Keep,
+         false},
+        {"LegacyV2BitmapJsonNested",
+         index::BITMAP_INDEX_TYPE,
+         index::families::kBitmap,
+         2,
+         MetaMode::JsonBitmapNested,
+         false},
+        {"LegacyV2SortWithoutNestedFlag",
+         index::ASCENDING_SORT,
+         index::families::kSort,
+         2,
+         MetaMode::EraseSortNested,
+         true},
+        {"LegacyV2SortWithNestedFlag",
+         index::ASCENDING_SORT,
+         index::families::kSort,
+         2,
+         MetaMode::Keep,
+         false},
+        {"LegacyV2InvertedV2",
+         index::INVERTED_INDEX_TYPE,
+         index::families::kInverted,
+         2,
+         MetaMode::Keep,
+         true},
+    };
+
+    int64_t next_build_id = 100;
+    for (const auto& tc : cases) {
+        auto artifact = build_artifact(tc.build_family, true);
+        index::test::TestArtifactData data =
+            index::test::SerializeV1V2(*artifact);
+        switch (tc.meta_mode) {
+            case MetaMode::Keep:
+                break;
+            case MetaMode::EraseBitmapMeta:
+                data.entries.erase(std::string(index::BITMAP_INDEX_META));
+                break;
+            case MetaMode::StripBitmapNested: {
+                const auto& encoded =
+                    data.entries.at(std::string(index::BITMAP_INDEX_META));
+                const std::string text(encoded.begin(), encoded.end());
+                auto yaml = YAML::Load(text);
+                yaml.remove("is_nested_index");
+                std::stringstream stream;
+                stream << yaml;
+                const auto updated = stream.str();
+                data.entries[std::string(index::BITMAP_INDEX_META)] =
+                    std::vector<uint8_t>(updated.begin(), updated.end());
+                break;
+            }
+            case MetaMode::JsonBitmapNested: {
+                const auto& encoded =
+                    data.entries.at(std::string(index::BITMAP_INDEX_META));
+                const std::string text(encoded.begin(), encoded.end());
+                const auto yaml = YAML::Load(text);
+                const nlohmann::json json{
+                    {index::BITMAP_INDEX_LENGTH,
+                     yaml[index::BITMAP_INDEX_LENGTH].as<size_t>()},
+                    {index::BITMAP_INDEX_NUM_ROWS,
+                     yaml[index::BITMAP_INDEX_NUM_ROWS].as<size_t>()},
+                    {"is_nested_index", true},
+                };
+                const auto updated = json.dump();
+                data.entries[std::string(index::BITMAP_INDEX_META)] =
+                    std::vector<uint8_t>(updated.begin(), updated.end());
+                break;
+            }
+            case MetaMode::EraseSortNested:
+                data.entries.erase("is_nested_index");
+                break;
+        }
+
+        for (const bool async : {false, true}) {
+            SCOPED_TRACE(tc.name + (async ? "_async" : "_sync"));
+            auto case_context = context_;
+            case_context.indexMeta.build_id = next_build_id++;
+            case_context.use_async_load = async;
+            storage::V1DiskSink sink(case_context);
+            for (const auto& [entry_name, bytes] : data.entries) {
+                sink.WriteEntry(entry_name, bytes.data(), bytes.size());
+            }
+            const auto stats = sink.Finish();
+            std::vector<std::string> remote_files;
+            int64_t total_bytes = 0;
+            for (const auto& file : stats.Files()) {
+                remote_files.push_back(file.file_name);
+                total_bytes += static_cast<int64_t>(file.file_size);
+            }
+
+            auto info = Info();
+            info.index_build_id = case_context.indexMeta.build_id;
+            info.index_engine_version = tc.scalar_version;
+            info.index_files = std::move(remote_files);
+            info.index_size = total_bytes;
+            info.index_params[index::INDEX_TYPE] = tc.index_type;
+            info.index_params[index::SCALAR_INDEX_ENGINE_VERSION] =
+                std::to_string(tc.scalar_version);
+            Config config(info.index_params);
+            config["nested"] = true;
+            SealedIndexLoader loader(
+                &info, tracer::TraceContext{}, case_context, config);
+            EXPECT_EQ(loader.IsSkipped(), tc.expect_skipped);
+            auto index = loader.CreateIndex(nullptr);
+            if (tc.expect_skipped) {
+                EXPECT_EQ(index, nullptr);
+                EXPECT_FALSE(loader.Caps().predicate);
+                EXPECT_FALSE(loader.Caps().pattern_match);
+                EXPECT_FALSE(loader.Caps().nested);
+            } else {
+                ASSERT_NE(index, nullptr);
+                auto reader = index->CreateReader(nullptr);
+                ASSERT_NE(reader, nullptr);
+                EXPECT_EQ(reader->CoordDomain(), index::Domain::Element);
+            }
+        }
     }
 }
 
