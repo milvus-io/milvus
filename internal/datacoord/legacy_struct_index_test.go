@@ -355,3 +355,131 @@ func TestLegacyStructArrayScalarIndex_MigrationStatus(t *testing.T) {
 	assert.False(t, status.Ready)
 	assert.Contains(t, status.LastError, "permanent failure")
 }
+
+func TestLegacyStructArrayScalarIndex_BatchedMultiCollectionMigration(t *testing.T) {
+	ctx := context.Background()
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+
+	const (
+		collA           = UniqueID(101)
+		collB           = UniqueID(102)
+		collNoStruct    = UniqueID(103)
+		fieldA          = UniqueID(201)
+		fieldB          = UniqueID(202)
+		fieldNoStruct   = UniqueID(203)
+		indexA          = UniqueID(301)
+		indexB          = UniqueID(302)
+		indexNoStruct   = UniqueID(303)
+		totalTargetRecs = legacyRowDomainMarkBatchSize*2 + 2
+	)
+
+	mt := &meta{
+		segments:    NewSegmentsInfo(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		indexMeta: &indexMeta{
+			ctx:              ctx,
+			catalog:          catalog,
+			keyLock:          lock.NewKeyLock[UniqueID](),
+			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			indexes: map[UniqueID]map[UniqueID]*model.Index{
+				collA:        {indexA: {CollectionID: collA, FieldID: fieldA, IndexID: indexA}},
+				collB:        {indexB: {CollectionID: collB, FieldID: fieldB, IndexID: indexB}},
+				collNoStruct: {indexNoStruct: {CollectionID: collNoStruct, FieldID: fieldNoStruct, IndexID: indexNoStruct}},
+			},
+			segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		},
+	}
+
+	mt.AddCollection(&collectionInfo{
+		ID: collA,
+		Schema: &schemapb.CollectionSchema{
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{FieldID: 1001, Name: "s1", Fields: []*schemapb.FieldSchema{{FieldID: fieldA, Name: "s1[k]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar}}},
+			},
+		},
+	})
+	mt.AddCollection(&collectionInfo{
+		ID: collB,
+		Schema: &schemapb.CollectionSchema{
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{FieldID: 1002, Name: "s2", Fields: []*schemapb.FieldSchema{{FieldID: fieldB, Name: "s2[v]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}}},
+			},
+		},
+	})
+	mt.AddCollection(&collectionInfo{
+		ID: collNoStruct,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{{FieldID: fieldNoStruct, Name: "arr", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}},
+		},
+	})
+
+	for i := 0; i < totalTargetRecs; i++ {
+		cID, idxID := collA, indexA
+		if i%2 == 1 {
+			cID, idxID = collB, indexB
+		}
+		mt.indexMeta.updateSegmentIndex(&model.SegmentIndex{
+			CollectionID: cID,
+			SegmentID:    UniqueID(10000 + i),
+			IndexID:      idxID,
+			BuildID:      UniqueID(20000 + i),
+			IndexState:   commonpb.IndexState_Finished,
+			IndexType:    "BITMAP",
+		})
+	}
+	mt.indexMeta.updateSegmentIndex(&model.SegmentIndex{
+		CollectionID: collNoStruct,
+		SegmentID:    UniqueID(90000),
+		IndexID:      indexNoStruct,
+		BuildID:      UniqueID(90001),
+		IndexState:   commonpb.IndexState_Finished,
+		IndexType:    "INVERTED",
+	})
+
+	var batchSizes []int
+	callNum := 0
+	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, segIdxes []*model.SegmentIndex) error {
+			callNum++
+			batchSizes = append(batchSizes, len(segIdxes))
+			if callNum == 2 {
+				return errors.New("simulated transient etcd error")
+			}
+			return nil
+		}).Times(4)
+
+	// First pass: batch 1 (64) succeeds, batch 2 (64) fails -> stops cleanly.
+	err := mt.markLegacyStructArrayScalarSegmentIndexes(ctx)
+	assert.Error(t, err)
+	assert.Equal(t, []int{legacyRowDomainMarkBatchSize, legacyRowDomainMarkBatchSize}, batchSizes)
+	assert.Equal(t, legacyRowDomainMarkBatchSize, mt.getLegacyStructIndexMigrationStatus().MarkedCount)
+
+	for i := 0; i < totalTargetRecs; i++ {
+		segIdx, ok := mt.indexMeta.segmentBuildInfo.Get(UniqueID(20000 + i))
+		assert.True(t, ok)
+		if i < legacyRowDomainMarkBatchSize {
+			assert.True(t, segIdx.LegacyRowDomain)
+		} else {
+			assert.False(t, segIdx.LegacyRowDomain)
+		}
+	}
+
+	// Retry: marks remaining (batchSize + 2) across 2 batches (64, 2) without duplicating batch 1.
+	assert.NoError(t, mt.markLegacyStructArrayScalarSegmentIndexes(ctx))
+	assert.Equal(t, []int{
+		legacyRowDomainMarkBatchSize,
+		legacyRowDomainMarkBatchSize,
+		legacyRowDomainMarkBatchSize,
+		2,
+	}, batchSizes)
+	assert.Equal(t, totalTargetRecs, mt.getLegacyStructIndexMigrationStatus().MarkedCount)
+
+	for i := 0; i < totalTargetRecs; i++ {
+		segIdx, ok := mt.indexMeta.segmentBuildInfo.Get(UniqueID(20000 + i))
+		assert.True(t, ok)
+		assert.True(t, segIdx.LegacyRowDomain)
+	}
+	nonStructSegIdx, ok := mt.indexMeta.segmentBuildInfo.Get(UniqueID(90001))
+	assert.True(t, ok)
+	assert.False(t, nonStructSegIdx.LegacyRowDomain)
+}

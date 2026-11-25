@@ -501,25 +501,25 @@ func (m *meta) markLegacyStructArrayScalarSegmentIndexes(ctx context.Context) er
 	if m.indexMeta == nil {
 		return nil
 	}
-	totalMarked := 0
+	collFieldIDs := make(map[UniqueID][]UniqueID)
 	for _, coll := range m.GetCollections() {
 		if coll == nil || coll.Schema == nil {
 			continue
 		}
 		fieldIDs := structArrayScalarFieldIDs(coll.Schema)
-		if len(fieldIDs) == 0 {
-			continue
+		if len(fieldIDs) > 0 {
+			collFieldIDs[coll.ID] = fieldIDs
 		}
-		marked, err := m.indexMeta.MarkLegacyRowDomainForFields(ctx, coll.ID, fieldIDs)
-		m.addLegacyStructIndexMarkedCount(marked)
-		totalMarked += marked
-		if err != nil {
-			log.Ctx(ctx).Warn("failed to mark legacy row-domain struct array scalar segment indexes",
-				zap.Int64("collectionID", coll.ID),
-				zap.Int("markedBeforeError", marked),
-				zap.Error(err))
-			return err
-		}
+	}
+	if len(collFieldIDs) == 0 {
+		return nil
+	}
+	totalMarked, err := m.indexMeta.MarkLegacyRowDomainForCollections(ctx, collFieldIDs, m.addLegacyStructIndexMarkedCount)
+	if err != nil {
+		log.Ctx(ctx).Warn("failed to mark legacy row-domain struct array scalar segment indexes",
+			zap.Int("markedBeforeError", totalMarked),
+			zap.Error(err))
+		return err
 	}
 	if totalMarked > 0 {
 		log.Ctx(ctx).Info("marked legacy row-domain struct array scalar segment indexes",

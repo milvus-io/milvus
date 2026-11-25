@@ -20,6 +20,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -139,6 +140,10 @@ func (m *segmentBuildInfo) Remove(key UniqueID) {
 
 func (m *segmentBuildInfo) List() []*model.SegmentIndex {
 	return m.buildID2SegmentIndex.Values()
+}
+
+func (m *segmentBuildInfo) Range(f func(key UniqueID, value *model.SegmentIndex) bool) {
+	m.buildID2SegmentIndex.Range(f)
 }
 
 func (m *segmentBuildInfo) GetTaskStats() []*metricsinfo.IndexTaskStats {
@@ -324,58 +329,124 @@ func (m *indexMeta) MarkLegacyRowDomain(ctx context.Context, buildID UniqueID) e
 	return nil
 }
 
-func (m *indexMeta) MarkLegacyRowDomainForFields(ctx context.Context, collID UniqueID, fieldIDs []UniqueID) (int, error) {
-	if len(fieldIDs) == 0 {
+const (
+	// Keep each migration transaction well below etcd's default max-txn-ops (128)
+	// and 1.5 MiB request size limit.
+	legacyRowDomainMarkBatchSize     = 64
+	legacyRowDomainMarkMaxBatchBytes = 512 * 1024
+)
+
+func (m *indexMeta) MarkLegacyRowDomainForCollections(ctx context.Context, collFieldIDs map[UniqueID][]UniqueID, onBatchMarked func(int)) (int, error) {
+	if len(collFieldIDs) == 0 {
 		return 0, nil
 	}
-	fieldSet := make(map[UniqueID]struct{}, len(fieldIDs))
-	for _, fieldID := range fieldIDs {
-		fieldSet[fieldID] = struct{}{}
-	}
 
+	targetIndexes := make(map[UniqueID]map[UniqueID]struct{})
 	m.fieldIndexLock.RLock()
-	indexSet := make(map[UniqueID]struct{})
-	if collIndexes, ok := m.indexes[collID]; ok {
+	for collID, fieldIDs := range collFieldIDs {
+		if len(fieldIDs) == 0 {
+			continue
+		}
+		collIndexes, ok := m.indexes[collID]
+		if !ok {
+			continue
+		}
+		fieldSet := make(map[UniqueID]struct{}, len(fieldIDs))
+		for _, fieldID := range fieldIDs {
+			fieldSet[fieldID] = struct{}{}
+		}
+		var indexSet map[UniqueID]struct{}
 		for indexID, index := range collIndexes {
 			if index.IsDeleted {
 				continue
 			}
 			if _, match := fieldSet[index.FieldID]; match {
+				if indexSet == nil {
+					indexSet = make(map[UniqueID]struct{})
+				}
 				indexSet[indexID] = struct{}{}
 			}
+		}
+		if len(indexSet) > 0 {
+			targetIndexes[collID] = indexSet
 		}
 	}
 	m.fieldIndexLock.RUnlock()
 
-	if len(indexSet) == 0 {
+	if len(targetIndexes) == 0 {
 		return 0, nil
 	}
 
 	var candidateBuildIDs []UniqueID
-	for _, segIdx := range m.segmentBuildInfo.List() {
-		if segIdx.CollectionID != collID || segIdx.IsDeleted || segIdx.LegacyRowDomain {
-			continue
+	m.segmentBuildInfo.Range(func(buildID UniqueID, segIdx *model.SegmentIndex) bool {
+		if segIdx == nil || segIdx.IsDeleted || segIdx.LegacyRowDomain {
+			return true
 		}
-		if _, match := indexSet[segIdx.IndexID]; match {
-			candidateBuildIDs = append(candidateBuildIDs, segIdx.BuildID)
+		if indexSet, ok := targetIndexes[segIdx.CollectionID]; ok {
+			if _, match := indexSet[segIdx.IndexID]; match {
+				candidateBuildIDs = append(candidateBuildIDs, buildID)
+			}
+		}
+		return true
+	})
+
+	if len(candidateBuildIDs) == 0 {
+		return 0, nil
+	}
+
+	// Acquire per-build locks in deterministic ascending order and deduplicate IDs.
+	slices.Sort(candidateBuildIDs)
+	candidateBuildIDs = slices.Compact(candidateBuildIDs)
+
+	unlockBatch := func(lockedIDs []UniqueID) {
+		for j := len(lockedIDs) - 1; j >= 0; j-- {
+			m.keyLock.Unlock(lockedIDs[j])
 		}
 	}
 
 	marked := 0
-	for _, buildID := range candidateBuildIDs {
-		m.keyLock.Lock(buildID)
-		segIdx, ok := m.segmentBuildInfo.Get(buildID)
-		if ok && !segIdx.IsDeleted && !segIdx.LegacyRowDomain {
+	for i := 0; i < len(candidateBuildIDs); {
+		batch := make([]*model.SegmentIndex, 0, min(legacyRowDomainMarkBatchSize, len(candidateBuildIDs)-i))
+		lockedIDs := make([]UniqueID, 0, cap(batch))
+		batchBytes := 0
+
+		for i < len(candidateBuildIDs) && len(batch) < legacyRowDomainMarkBatchSize {
+			buildID := candidateBuildIDs[i]
+			m.keyLock.Lock(buildID)
+			segIdx, ok := m.segmentBuildInfo.Get(buildID)
+			if !ok || segIdx.IsDeleted || segIdx.LegacyRowDomain {
+				m.keyLock.Unlock(buildID)
+				i++
+				continue
+			}
 			cloned := model.CloneSegmentIndex(segIdx)
 			cloned.LegacyRowDomain = true
-			if err := m.catalog.AlterSegmentIndexes(ctx, []*model.SegmentIndex{cloned}); err != nil {
+			recBytes := proto.Size(model.MarshalSegmentIndexModel(cloned))
+			if len(batch) > 0 && batchBytes+recBytes > legacyRowDomainMarkMaxBatchBytes {
 				m.keyLock.Unlock(buildID)
-				return marked, err
+				break
 			}
-			m.updateSegmentIndex(cloned)
-			marked++
+			batch = append(batch, cloned)
+			lockedIDs = append(lockedIDs, buildID)
+			batchBytes += recBytes
+			i++
 		}
-		m.keyLock.Unlock(buildID)
+
+		if len(batch) == 0 {
+			continue
+		}
+		if err := m.catalog.AlterSegmentIndexes(ctx, batch); err != nil {
+			unlockBatch(lockedIDs)
+			return marked, err
+		}
+		for _, cloned := range batch {
+			m.updateSegmentIndex(cloned)
+		}
+		unlockBatch(lockedIDs)
+		marked += len(batch)
+		if onBatchMarked != nil {
+			onBatchMarked(len(batch))
+		}
 	}
 	return marked, nil
 }
