@@ -38,13 +38,10 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metacache/metacachetest"
 	coordMocks "github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/mocks"
-	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
@@ -477,39 +474,6 @@ func (suite *ServerSuite) hackServer() {
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.server.broker = suite.broker
 	suite.server.targetMgr = meta.NewTargetManager(suite.broker, suite.server.meta, metacache.NewMetaStore(nil))
-	suite.server.taskScheduler = task.NewScheduler(
-		suite.server.ctx,
-		suite.server.meta,
-		suite.server.dist,
-		suite.server.targetMgr,
-		suite.broker,
-		suite.server.cluster,
-		suite.server.nodeMgr,
-	)
-
-	suite.server.distController = dist.NewDistController(
-		suite.server.cluster,
-		suite.server.nodeMgr,
-		suite.server.dist,
-		suite.server.targetMgr,
-		suite.server.taskScheduler,
-		suite.server.leaderCacheObserver.RegisterEvent,
-	)
-	suite.server.targetObserver = observers.NewTargetObserver(
-		suite.server.meta,
-		suite.server.targetMgr,
-		suite.server.dist,
-		suite.server.broker,
-		suite.server.cluster,
-		suite.server.nodeMgr,
-	)
-	suite.server.collectionObserver = observers.NewCollectionObserver(
-		suite.server.dist,
-		suite.server.meta,
-		suite.server.targetMgr,
-		suite.server.targetObserver,
-		suite.server.proxyClientManager,
-	)
 
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	for _, collection := range suite.collections {
@@ -730,25 +694,13 @@ func TestHandleNodeDownMetricsCleanup(t *testing.T) {
 	ctx := context.Background()
 	server := &Server{
 		ctx:                 ctx,
-		taskScheduler:       task.NewScheduler(ctx, nil, nil, nil, nil, nil, nil),
 		dist:                meta.NewDistributionManager(session.NewNodeManager()),
-		distController:      dist.NewDistController(nil, nil, nil, nil, nil, nil),
 		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
 		meta: &meta.Meta{
 			ResourceManager: meta.NewResourceManager(nil, nil),
 		},
 	}
 
-	mockRemoveExecutor := mockey.Mock((task.Scheduler).RemoveExecutor).Return().Build()
-	defer mockRemoveExecutor.UnPatch()
-	mockRemoveByNode := mockey.Mock((task.Scheduler).RemoveByNode).Return().Build()
-	defer mockRemoveByNode.UnPatch()
-	mockDistControllerRemove := mockey.Mock((*dist.ControllerImpl).Remove).Return().Build()
-	defer mockDistControllerRemove.UnPatch()
-	mockRemoveFromManager := mockey.Mock(server.dist.ChannelDistManager.Update).Return().Build()
-	defer mockRemoveFromManager.UnPatch()
-	mockRemoveFromManager = mockey.Mock(server.dist.SegmentDistManager.Update).Return().Build()
-	defer mockRemoveFromManager.UnPatch()
 	mockInvalidateSystemInfoMetrics := mockey.Mock((*metricsinfo.MetricsCacheManager).InvalidateSystemInfoMetrics).Return().Build()
 	defer mockInvalidateSystemInfoMetrics.UnPatch()
 

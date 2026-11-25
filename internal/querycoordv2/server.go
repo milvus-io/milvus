@@ -38,12 +38,10 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
-	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
@@ -98,18 +96,8 @@ type Server struct {
 	nodeMgr          *session.NodeManager
 	queryNodeCreator session.QueryNodeCreator
 
-	// Schedulers
-	taskScheduler task.Scheduler
-
-	// HeartBeat
-	distController dist.Controller
-
 	// Observers
-	collectionObserver   *observers.CollectionObserver
-	targetObserver       *observers.TargetObserver
-	replicaObserver      *observers.ReplicaObserver
 	resourceObserver     *observers.ResourceObserver
-	leaderCacheObserver  *observers.LeaderCacheObserver
 	fileResourceObserver FileResourceObserver
 
 	// Active-standby
@@ -189,7 +177,8 @@ func (s *Server) registerMetricsRequest() {
 	}
 
 	QueryTasksAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-		return s.taskScheduler.GetTasksJSON(), nil
+		// Retain the legacy task-list response now that QueryView owns scheduling.
+		return "[]", nil
 	}
 
 	QueryDistAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
@@ -317,18 +306,6 @@ func (s *Server) initQueryCoord() error {
 	mlog.Info(s.ctx, "init session")
 	s.cluster = session.NewCluster(s.nodeMgr, s.queryNodeCreator)
 
-	// Init schedulers
-	mlog.Info(s.ctx, "init schedulers")
-	s.taskScheduler = task.NewScheduler(
-		s.ctx,
-		s.meta,
-		s.dist,
-		s.targetMgr,
-		s.broker,
-		s.cluster,
-		s.nodeMgr,
-	)
-
 	// init proxy client manager
 	s.proxyClientManager = proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
 	s.proxyWatcher = proxyutil.NewProxyWatcher(
@@ -341,17 +318,6 @@ func (s *Server) initQueryCoord() error {
 
 	// Init observers
 	s.initObserver()
-
-	// Init heartbeat
-	mlog.Info(s.ctx, "init dist controller")
-	s.distController = dist.NewDistController(
-		s.cluster,
-		s.nodeMgr,
-		s.dist,
-		s.targetMgr,
-		s.taskScheduler,
-		s.leaderCacheObserver.RegisterEvent,
-	)
 
 	// Init load status cache
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
@@ -426,33 +392,7 @@ func (s *Server) initMeta() error {
 
 func (s *Server) initObserver() {
 	mlog.Info(s.ctx, "init observers")
-	s.targetObserver = observers.NewTargetObserver(
-		s.meta,
-		s.targetMgr,
-		s.dist,
-		s.broker,
-		s.cluster,
-		s.nodeMgr,
-	)
-	s.collectionObserver = observers.NewCollectionObserver(
-		s.dist,
-		s.meta,
-		s.targetMgr,
-		s.targetObserver,
-		s.proxyClientManager,
-	)
-
-	s.replicaObserver = observers.NewReplicaObserver(
-		s.meta,
-		s.dist,
-		s.targetMgr,
-	)
-
 	s.resourceObserver = observers.NewResourceObserver(s.meta)
-
-	s.leaderCacheObserver = observers.NewLeaderCacheObserver(
-		s.proxyClientManager,
-	)
 
 	if s.fileResourceObserver != nil {
 		s.fileResourceObserver.InitQueryCoord(s.nodeMgr, s.cluster)
@@ -510,10 +450,6 @@ func (s *Server) startServerLoop() {
 }
 
 func (s *Server) Stop() error {
-	// FOLLOW the dependence graph:
-	// task scheduler -> dist controller -> cluster -> session
-	// observers -> dist controller
-
 	if s.collectionUsage != nil {
 		mlog.Info(s.ctx, "stop collection usage manager...")
 		s.collectionUsage.close()
@@ -529,38 +465,15 @@ func (s *Server) Stop() error {
 		s.qviewsRuntime.stop()
 	}
 
-	if s.taskScheduler != nil {
-		mlog.Info(s.ctx, "stop task scheduler...")
-		s.taskScheduler.Stop()
-	}
-
 	mlog.Info(s.ctx, "stop observers...")
-	if s.collectionObserver != nil {
-		s.collectionObserver.Stop()
-	}
-	if s.targetObserver != nil {
-		s.targetObserver.Stop()
-	}
 
 	// save target to meta store, after querycoord restart, make it fast to recover current target
-	// should save target after target observer stop, incase of target changed
 	if s.targetMgr != nil {
 		s.targetMgr.SaveCurrentTarget(s.ctx, s.store)
 	}
 
-	if s.replicaObserver != nil {
-		s.replicaObserver.Stop()
-	}
 	if s.resourceObserver != nil {
 		s.resourceObserver.Stop()
-	}
-	if s.leaderCacheObserver != nil {
-		s.leaderCacheObserver.Stop()
-	}
-
-	if s.distController != nil {
-		mlog.Info(s.ctx, "stop dist controller...")
-		s.distController.Stop()
 	}
 
 	if s.cluster != nil {
@@ -747,45 +660,12 @@ func (s *Server) handleNodeUp(node int64) {
 		return
 	}
 
-	if s.qviewsRuntime != nil {
-		s.meta.HandleNodeUp(s.ctx, node)
-		s.metricsCacheManager.InvalidateSystemInfoMetrics()
-		return
-	}
-
-	// add executor to task scheduler
-	s.taskScheduler.AddExecutor(node)
-
-	// start dist handler
-	s.distController.StartDistInstance(s.ctx, node)
-
-	// need assign to new rg and replica
 	s.meta.HandleNodeUp(s.ctx, node)
-
 	s.metricsCacheManager.InvalidateSystemInfoMetrics()
 }
 
 func (s *Server) handleNodeDown(node int64) {
-	if s.qviewsRuntime != nil {
-		s.meta.HandleNodeDown(context.Background(), node)
-		metrics.QueryCoordLastHeartbeatTimeStamp.DeleteLabelValues(fmt.Sprint(node))
-		s.metricsCacheManager.InvalidateSystemInfoMetrics()
-		return
-	}
-
-	s.taskScheduler.RemoveExecutor(node)
-	s.distController.Remove(node)
-
-	// Clear dist
-	s.dist.ChannelDistManager.Update(node)
-	s.dist.SegmentDistManager.Update(node)
-
-	// Clear tasks
-	s.taskScheduler.RemoveByNode(node)
-
 	s.meta.HandleNodeDown(context.Background(), node)
-
-	// clean node's metrics
 	metrics.QueryCoordLastHeartbeatTimeStamp.DeleteLabelValues(fmt.Sprint(node))
 	s.metricsCacheManager.InvalidateSystemInfoMetrics()
 }
@@ -793,11 +673,6 @@ func (s *Server) handleNodeDown(node int64) {
 func (s *Server) handleNodeStopping(node int64) {
 	// mark node as stopping in node manager
 	s.nodeMgr.Stopping(node)
-
-	if s.qviewsRuntime != nil {
-		s.meta.HandleNodeStopping(context.Background(), node)
-		return
-	}
 
 	// mark node as stopping in resource manager
 	s.meta.HandleNodeStopping(context.Background(), node)

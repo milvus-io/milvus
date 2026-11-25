@@ -21,12 +21,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/blang/semver/v4"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -82,55 +80,6 @@ func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.Target
 				mlog.Int64("segmentID", segmentID),
 				mlog.Err(err))
 			return err
-		}
-	}
-	return nil
-}
-
-func CheckSegmentDataReady(ctx context.Context, collectionID int64, distManager *meta.DistributionManager, targetMgr meta.TargetManagerInterface, scope int32) error {
-	// Check whether segments are fully loaded
-	segmentDist := targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, scope)
-	distSegments := distManager.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID))
-	distBySegmentID := make(map[int64][]*meta.Segment, len(distSegments))
-	for _, segment := range distSegments {
-		distBySegmentID[segment.GetID()] = append(distBySegmentID[segment.GetID()], segment)
-	}
-
-	for segmentID, segmentInfo := range segmentDist {
-		segments := distBySegmentID[segmentID]
-		if len(segments) == 0 {
-			mlog.RatedInfo(context.TODO(), rate.Limit(10), "segment is not available", mlog.Int64("segmentID", segmentID))
-			return merr.WrapErrSegmentLack(segmentID)
-		}
-
-		for _, segment := range segments {
-			cmp, err := packed.CompareManifestPath(segment.ManifestPath, segmentInfo.GetManifestPath())
-			if err != nil {
-				mlog.RatedWarn(context.TODO(), rate.Limit(10), "segment manifest path not comparable",
-					mlog.Int64("segmentID", segmentID),
-					mlog.String("distManifest", segment.ManifestPath),
-					mlog.String("targetManifest", segmentInfo.GetManifestPath()),
-					mlog.Err(err))
-				return err
-			}
-			if cmp < 0 {
-				// dist manifest is older than target, segment data is not ready yet
-				mlog.RatedInfo(context.TODO(), rate.Limit(10), "segment manifest is outdated",
-					mlog.Int64("segmentID", segmentID),
-					mlog.String("distManifest", segment.ManifestPath),
-					mlog.String("targetManifest", segmentInfo.GetManifestPath()))
-				return merr.WrapErrSegmentNotLoaded(segmentID)
-			}
-			// cmp >= 0: dist manifest is same or newer than target.
-			// Still check DataVersion for storage v2 binlog changes that don't move the manifest.
-			// Skip when the QueryNode did not report DataVersion (old node in mixed-version rollout).
-			if segment.DataVersion != nil && *segment.DataVersion < segmentInfo.GetDataVersion() {
-				mlog.RatedInfo(context.TODO(), rate.Limit(10), "segment data version is outdated",
-					mlog.Int64("segmentID", segmentID),
-					mlog.Int32("distDataVersion", *segment.DataVersion),
-					mlog.Int32("targetDataVersion", segmentInfo.GetDataVersion()))
-				return merr.WrapErrSegmentNotLoaded(segmentID)
-			}
 		}
 	}
 	return nil
@@ -322,29 +271,4 @@ func checkCollectionQueryable(ctx context.Context, m *meta.Meta, targetMgr meta.
 	}
 
 	return nil
-}
-
-// GetChannelRWAndRONodesFor260 gets the RW and RO nodes of the channel.
-func GetChannelRWAndRONodesFor260(replica *meta.Replica, nodeManager *session.NodeManager) ([]int64, []int64) {
-	rwNodes, roNodes := replica.GetRWSQNodes(), replica.GetROSQNodes()
-	if rwQueryNodesLessThan260 := filterNodeLessThan260(replica.GetRWNodes(), nodeManager); len(rwQueryNodesLessThan260) > 0 {
-		// Add rwNodes to roNodes to balance channels from querynode to streamingnode forcely.
-		roNodes = append(roNodes, rwQueryNodesLessThan260...)
-		mlog.Debug(context.TODO(), "find querynode need to balance channel to streamingnode", mlog.Int64s("rwQueryNodesLessThan260", rwQueryNodesLessThan260))
-	}
-	roNodes = append(roNodes, replica.GetRONodes()...)
-	return rwNodes, roNodes
-}
-
-// filterNodeLessThan260 filter the query nodes that version is less than 2.6.0
-func filterNodeLessThan260(nodes []int64, nodeManager *session.NodeManager) []int64 {
-	checker := semver.MustParseRange(">=2.6.0-dev")
-	filteredNodes := make([]int64, 0)
-	for _, nodeID := range nodes {
-		if session := nodeManager.Get(nodeID); session != nil && checker(session.Version()) {
-			continue
-		}
-		filteredNodes = append(filteredNodes, nodeID)
-	}
-	return filteredNodes
 }

@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/bytedance/mockey"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -29,14 +28,10 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
-	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
@@ -51,19 +46,14 @@ type OpsServiceSuite struct {
 	suite.Suite
 
 	// Dependencies
-	kv             kv.MetaKv
-	store          metastore.QueryCoordCatalog
-	dist           *meta.DistributionManager
-	meta           *meta.Meta
-	targetMgr      *meta.TargetManager
-	broker         *meta.MockBroker
-	targetObserver *observers.TargetObserver
-	cluster        *session.MockCluster
-	nodeMgr        *session.NodeManager
-	taskScheduler  *task.MockScheduler
-	proxyManager   *proxyutil.MockProxyClientManager
-
-	distController *dist.MockController
+	kv        kv.MetaKv
+	store     metastore.QueryCoordCatalog
+	dist      *meta.DistributionManager
+	meta      *meta.Meta
+	targetMgr *meta.TargetManager
+	broker    *meta.MockBroker
+	cluster   *session.MockCluster
+	nodeMgr   *session.NodeManager
 
 	// Test object
 	server *Server
@@ -71,8 +61,6 @@ type OpsServiceSuite struct {
 
 func (suite *OpsServiceSuite) SetupSuite() {
 	paramtable.Init()
-	suite.proxyManager = proxyutil.NewMockProxyClientManager(suite.T())
-	suite.proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 }
 
 func (suite *OpsServiceSuite) SetupTest() {
@@ -94,19 +82,9 @@ func (suite *OpsServiceSuite) SetupTest() {
 	suite.meta = meta.NewMeta(params.RandomIncrementIDAllocator(), suite.store, suite.nodeMgr, metacache.NewMetaStore(nil))
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta, metacache.NewMetaStore(nil))
-	suite.targetObserver = observers.NewTargetObserver(
-		suite.meta,
-		suite.targetMgr,
-		suite.dist,
-		suite.broker,
-		suite.cluster,
-		suite.nodeMgr,
-	)
 	suite.cluster = session.NewMockCluster(suite.T())
-	suite.taskScheduler = task.NewMockScheduler(suite.T())
 
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
-	suite.distController = dist.NewMockController(suite.T())
 
 	suite.server = &Server{
 		kv:                  suite.kv,
@@ -117,20 +95,10 @@ func (suite *OpsServiceSuite) SetupTest() {
 		meta:                suite.meta,
 		targetMgr:           suite.targetMgr,
 		broker:              suite.broker,
-		targetObserver:      suite.targetObserver,
 		nodeMgr:             suite.nodeMgr,
 		cluster:             suite.cluster,
-		taskScheduler:       suite.taskScheduler,
-		distController:      suite.distController,
 		ctx:                 context.Background(),
 	}
-	suite.server.collectionObserver = observers.NewCollectionObserver(
-		suite.server.dist,
-		suite.server.meta,
-		suite.server.targetMgr,
-		suite.targetObserver,
-		suite.proxyManager,
-	)
 
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
 }

@@ -6,15 +6,6 @@ mockname: "Mock{{.InterfaceName}}"
 outpkg: "{{.PackageName}}"
 dir: "{{.InterfaceDir}}"
 packages:
-  github.com/milvus-io/milvus/internal/querycoordv2/balance:
-    interfaces:
-      Balance:
-        config:
-          filename: "mock_balancer.go"
-          mockname: "MockBalancer"
-  github.com/milvus-io/milvus/internal/querycoordv2/dist:
-    interfaces:
-      Controller:
   github.com/milvus-io/milvus/internal/querycoordv2/meta:
     interfaces:
       Broker:
@@ -25,9 +16,6 @@ packages:
   github.com/milvus-io/milvus/internal/querycoordv2/session:
     interfaces:
       Cluster:
-  github.com/milvus-io/milvus/internal/querycoordv2/task:
-    interfaces:
-      Scheduler:
   github.com/milvus-io/milvus/pkg/v3/proto/querypb:
     interfaces:
       QueryNodeServer:
