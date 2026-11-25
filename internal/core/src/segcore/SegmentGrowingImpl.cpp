@@ -3300,11 +3300,16 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
     const int64_t* seg_offsets,
     int64_t count,
     milvus::proto::schema::SparseFloatArray* output) const {
-    // Pin raw before inspecting the reader. If reclamation wins first the
-    // empty snapshot directs this operation to one fixed reader generation;
-    // otherwise this operation retains and reads the raw generation it saw.
+    // Retain the raw generation for fallback if the index does not cover
+    // this request. A nonempty raw directory can outlive the handoff.
     auto chunks = vec_raw->acquire_chunks();
-    if (!chunks.empty()) {
+    auto pin = growing_indexes_.PinVectorDataForOffsets(
+        op_ctx, field_id, {seg_offsets, static_cast<size_t>(count)});
+    if (!pin) {
+        AssertInfo(
+            !chunks.empty(),
+            "no raw storage covers the requested sparse vectors for field {}",
+            field_id.get());
         const auto physical_offsets =
             MapValidVectorOffsets(*vec_raw, seg_offsets, count);
         const auto* raw_offsets =
@@ -3321,16 +3326,8 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
         return;
     }
 
-    auto pin = PinGrowingIndex(op_ctx, field_id);
-    AssertInfo(pin,
-               "growing sparse vector field {} has neither raw data nor an "
-               "index reader",
-               field_id.get());
-    const auto* reader =
-        dynamic_cast<const index::IVectorReader*>(&pin.Reader());
-    AssertInfo(reader != nullptr && reader->HasRawData(),
-               "growing sparse vector reader for field {} has no raw values",
-               field_id.get());
+    const auto& reader =
+        dynamic_cast<const index::IVectorReader&>(pin.Reader());
     // Nullable row mapping lives inside knowhere's IdMap (#50524), so the
     // reader takes logical row ids directly.
     auto ids = std::make_shared<knowhere::DataSet>();
@@ -3338,7 +3335,7 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
     ids->SetDim(1);
     ids->SetIds(seg_offsets);
     ids->SetIsOwner(false);
-    auto retrieved = reader->GetSparseVector(ids);
+    auto retrieved = reader.GetSparseVector(ids);
     SparseRowsToProto(
         [&](size_t i) { return retrieved.get() + i; }, count, output);
 }
@@ -3393,7 +3390,12 @@ SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
     auto& vec = *vec_ptr;
 
     auto chunks = vec.acquire_chunks();
-    if (!chunks.empty()) {
+    auto pin = growing_indexes_.PinVectorDataForOffsets(
+        op_ctx, field_id, {seg_offsets, static_cast<size_t>(count)});
+    if (!pin) {
+        AssertInfo(!chunks.empty(),
+                   "no raw storage covers the requested vectors for field {}",
+                   field_id.get());
         const auto physical_offsets =
             MapValidVectorOffsets(vec, seg_offsets, count);
         const auto* raw_offsets =
@@ -3408,16 +3410,8 @@ SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
         return;
     }
 
-    auto pin = PinGrowingIndex(op_ctx, field_id);
-    AssertInfo(pin,
-               "growing vector field {} has neither raw data nor an index "
-               "reader",
-               field_id.get());
-    const auto* reader =
-        dynamic_cast<const index::IVectorReader*>(&pin.Reader());
-    AssertInfo(reader != nullptr && reader->HasRawData(),
-               "growing vector reader for field {} has no raw values",
-               field_id.get());
+    const auto& reader =
+        dynamic_cast<const index::IVectorReader&>(pin.Reader());
     // Nullable row mapping lives inside knowhere's IdMap (#50524), so the
     // reader takes logical row ids directly.
     auto ids = std::make_shared<knowhere::DataSet>();
@@ -3425,7 +3419,7 @@ SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
     ids->SetDim(1);
     ids->SetIds(seg_offsets);
     ids->SetIsOwner(false);
-    auto retrieved = reader->GetVector(ids);
+    auto retrieved = reader.GetVector(ids);
     AssertInfo(retrieved.size() == static_cast<size_t>(count * element_sizeof),
                "growing vector reader returned {} bytes, expected {}",
                retrieved.size(),

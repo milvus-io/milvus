@@ -529,22 +529,56 @@ GrowingIndexSet::Has(FieldId field_id) const {
     return appenders_.find(field_id) != appenders_.end();
 }
 
+index::GrowingIndexSnapshotPin
+GrowingIndexSet::Appender::PinOwnedVectorData(milvus::OpContext* op_ctx) const {
+    if (!owner || source_backed) {
+        return {};
+    }
+    auto pin = owner->PinSnapshot(op_ctx);
+    const auto* reader =
+        pin ? dynamic_cast<const index::IVectorReader*>(&pin.Reader())
+            : nullptr;
+    if (reader && reader->HasRawData()) {
+        return pin;
+    }
+    return {};
+}
+
 bool
 GrowingIndexSet::CanReleaseVectorColumn(FieldId field_id,
                                         int64_t visible_row_end) const {
     std::shared_lock lock(mutex_);
     auto it = appenders_.find(field_id);
-    if (it == appenders_.end() || !it->second.owner ||
-        it->second.source_backed) {
+    if (it == appenders_.end()) {
         return false;
     }
-    auto pin = it->second.owner->PinSnapshot();
-    if (!pin || pin.CoveredRowEnd() < visible_row_end) {
-        return false;
+    auto pin = it->second.PinOwnedVectorData(nullptr);
+    return pin && pin.CoveredRowEnd() >= visible_row_end;
+}
+
+index::GrowingIndexSnapshotPin
+GrowingIndexSet::PinVectorDataForOffsets(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    std::span<const int64_t> offsets) const {
+    index::GrowingIndexSnapshotPin pin;
+    {
+        std::shared_lock lock(mutex_);
+        auto it = appenders_.find(field_id);
+        if (it == appenders_.end() || !it->second.owner ||
+            it->second.source_backed) {
+            return {};
+        }
+        it->second.owner->CommitIfNeeded();
+        pin = it->second.PinOwnedVectorData(op_ctx);
     }
-    const auto* reader =
-        dynamic_cast<const index::IVectorReader*>(&pin.Reader());
-    return reader != nullptr && reader->HasRawData();
+    if (pin &&
+        std::none_of(offsets.begin(), offsets.end(), [&](int64_t offset) {
+            return offset < 0 || offset >= pin.CoveredRowEnd();
+        })) {
+        return pin;
+    }
+    return {};
 }
 
 void

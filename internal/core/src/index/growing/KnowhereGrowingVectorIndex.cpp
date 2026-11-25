@@ -33,6 +33,7 @@
 #include "common/EasyAssert.h"
 #include "common/Utils.h"
 #include "index/Families.h"
+#include "index/GrowingIndexCatchupCost.h"
 #include "index/vector/VectorIndexReader.h"
 #include "index/vector/VectorIndexValidDataUtils.h"
 #include "knowhere/comp/index_param.h"
@@ -631,32 +632,31 @@ KnowhereGrowingVectorIndex<T>::BuildAndCatchUp() {
             : std::max<int64_t>(
                   1, (8LL << 20) / sizeof(T) / std::max<int64_t>(dim_, 1));
     int64_t physical = build_threshold_;
-    int64_t drained = 0;
-    double elapsed = 0;
-    const auto fits_budget = [&](int64_t gap) {
-        return gap == 0 ||
-               (gap <= slice && drained > 0 &&
-                gap * elapsed / drained <= async_build_.finalize_budget_ms);
+    GrowingIndexCatchupCost cost;
+    const auto fits_budget = [&](int64_t rows, int64_t vectors) {
+        return rows <= slice && cost.EstimateMs(rows, vectors) <=
+                                    async_build_.finalize_budget_ms;
     };
     const auto drain = [&](int64_t end) {
         const auto begin = Clock::now();
         const auto next = validity_.ValidCountBelow(end);
         AddFromSource(physical, next - physical, logical, end - logical);
-        drained += end - logical;
-        elapsed += ElapsedMs(begin);
+        cost.Observe(end - logical, next - physical, ElapsedMs(begin));
         physical = next;
         logical = end;
     };
 
     while (!task_->cancelled.load()) {
         int64_t target;
+        int64_t target_physical;
         {
             std::lock_guard lock(writer_mutex_);
             target = accepted_row_end_;
+            target_physical = accepted_physical_count_;
         }
         if (logical < target) {
             if (ElapsedMs(catchup_start) >= async_build_.catchup_deadline_ms &&
-                !fits_budget(target - logical)) {
+                !fits_budget(target - logical, target_physical - physical)) {
                 std::lock_guard lock(writer_mutex_);
                 DisableAsyncBuild("catch-up deadline exceeded",
                                   AsyncBuildFailure::kDeadline);
@@ -675,7 +675,8 @@ KnowhereGrowingVectorIndex<T>::BuildAndCatchUp() {
         // nullable IdMap still materializes and consumes a logical bitmap.
         // Drain a null-only tail in the next unlocked slice.
         if (gap != 0 &&
-            (accepted_physical_count_ == physical || !fits_budget(gap))) {
+            (accepted_physical_count_ == physical ||
+             !fits_budget(gap, accepted_physical_count_ - physical))) {
             if (ElapsedMs(catchup_start) >= async_build_.catchup_deadline_ms) {
                 DisableAsyncBuild("catch-up deadline exceeded",
                                   AsyncBuildFailure::kDeadline);

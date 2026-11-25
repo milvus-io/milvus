@@ -2567,6 +2567,45 @@ TEST(GrowingIndexAsyncBuildTest, CatchupRechecksPolicyBetweenStagingSlices) {
            "staging slices";
 }
 
+TEST(GrowingVectorRetrievalTest, CoveredReaderWinsWhileRawChunksRemain) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    ScopedAsyncGrowingBuild async(config, false);
+    ApplyAsyncBuildConfig(config);
+    for (auto type :
+         {DataType::VECTOR_FLOAT, DataType::VECTOR_SPARSE_U32_F32}) {
+        SCOPED_TRACE(static_cast<int>(type));
+        const bool sparse = type == DataType::VECTOR_SPARSE_U32_F32;
+        auto fixture = MakeAsyncBuildFixture(
+            type,
+            sparse ? knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX
+                   : knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+            sparse ? knowhere::metric::IP : knowhere::metric::L2,
+            false);
+        auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+        auto* impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+        ASSERT_NE(impl, nullptr);
+        InsertAsyncBatch(
+            segment.get(), fixture.schema, kAsyncBuildThreshold + 2, 17);
+        auto* column = impl->get_insert_record().get_data_base(fixture.vec);
+        ASSERT_EQ(column->num_chunk(), 0);
+        ASSERT_TRUE(impl->CanReadRawVectorFromIndex(fixture.vec));
+        const int64_t ids[] = {0, 1};
+        auto expected = impl->bulk_subscript(nullptr, fixture.vec, ids, 2);
+        // Give the retained raw directory distinguishable, in-bounds values.
+        // The covered rows must still come from the published reader.
+        auto other = DataGen(fixture.schema, 2, 81);
+        auto raw = other.get_col(fixture.vec);
+        ASSERT_NE(expected->vectors().SerializeAsString(),
+                  raw->vectors().SerializeAsString());
+        column->set_data_raw(0, 2, raw.get(), (*fixture.schema)[fixture.vec]);
+        ASSERT_GT(column->num_chunk(), 0);
+        auto actual = impl->bulk_subscript(nullptr, fixture.vec, ids, 2);
+        EXPECT_EQ(actual->vectors().SerializeAsString(),
+                  expected->vectors().SerializeAsString());
+    }
+}
+
 TEST(GrowingIndexAsyncBuildTest, SparseCrossChunkStagePinsBorrowedPayloads) {
     using Row = knowhere::sparse::SparseRow<SparseValueType>;
     ConcurrentVector<milvus::SparseFloatVector> column(/*size_per_chunk=*/2);

@@ -23,6 +23,7 @@
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -68,6 +69,9 @@ class GrowingIndexSet {
                  std::unique_ptr<index::IGrowingIndex> owner,
                  bool source_backed = false);
 
+        index::GrowingIndexSnapshotPin
+        PinOwnedVectorData(milvus::OpContext* op_ctx) const;
+
         index::ReaderCaps caps;
         std::unique_ptr<index::IGrowingIndex> owner;
         // SCANN_DVR refines through the growing column; other connected
@@ -109,6 +113,12 @@ class GrowingIndexSet {
     // reproduce original values without borrowing the growing column.
     bool
     CanReleaseVectorColumn(FieldId field_id, int64_t visible_row_end) const;
+
+    // Returns a single independent raw-data reader covering all requested IDs.
+    index::GrowingIndexSnapshotPin
+    PinVectorDataForOffsets(milvus::OpContext* op_ctx,
+                            FieldId field_id,
+                            std::span<const int64_t> offsets) const;
 
     // Called under the segment feed mutex. A staged writer can touch raw
     // storage until its input has been accepted by all registered owners.

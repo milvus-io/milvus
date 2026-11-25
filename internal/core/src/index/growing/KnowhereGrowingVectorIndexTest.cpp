@@ -37,6 +37,7 @@
 #include <thread>
 #include <vector>
 
+#include "index/GrowingIndexCatchupCost.h"
 #include "index/growing/KnowhereGrowingVectorIndex.h"
 #include "knowhere/index/index_factory.h"
 #include "monitor/Monitor.h"
@@ -316,6 +317,14 @@ class KnowhereGrowingVectorIndexTest : public ::testing::Test {
     const FieldId field_{101};
 };
 
+TEST_F(KnowhereGrowingVectorIndexTest, VectorDataPinRequiresFullCoverage) {
+    FirstBatch();
+    const std::array<int64_t, 2> covered{2, 0};
+    const std::array<int64_t, 2> partial{4, 0};
+    EXPECT_TRUE(indexes_->PinVectorDataForOffsets(nullptr, field_, covered));
+    EXPECT_FALSE(indexes_->PinVectorDataForOffsets(nullptr, field_, partial));
+}
+
 TEST_F(KnowhereGrowingVectorIndexTest, PinDoesNotWaitForAdd) {
     FirstBatch();
     control_->add.Arm();
@@ -376,6 +385,45 @@ class DeadlineGrowingVectorIndexTest : public AsyncGrowingVectorIndexTest {
                 .catchup_deadline_ms = kDeadlineMs};
     }
 };
+
+TEST(GrowingIndexCatchupCostTest, AccountsForLogicalAndPhysicalWork) {
+    milvus::index::GrowingIndexCatchupCost cost;
+    cost.Observe(1000, 0, 1);
+    EXPECT_GT(cost.EstimateMs(1, 1), 20);
+    cost.Observe(1000, 2, 10);
+    EXPECT_DOUBLE_EQ(cost.EstimateMs(10, 10), 50);
+    EXPECT_DOUBLE_EQ(cost.EstimateMs(1000, 0), 5.5);
+    EXPECT_DOUBLE_EQ(cost.EstimateMs(0, 0), 0);
+}
+
+TEST_F(AsyncGrowingVectorIndexTest, NullOnlySampleCannotBudgetVectorAdd) {
+    int unlocked_rounds = 0;
+    int finalize_attempts = 0;
+    growing_build_test_hook = [&](GrowingBuildPhase phase) {
+        if (phase == GrowingBuildPhase::kAfterCatchupRound) {
+            ++unlocked_rounds;
+        }
+        if (phase == GrowingBuildPhase::kBeforeFinalize &&
+            ++finalize_attempts == 1) {
+            // FirstBatch leaves one trailing null beyond the build prefix.
+            const bool valid = true;
+            owner_->Append(
+                4,
+                VectorBatch<float>{1, source_->values.data() + 4, 2, &valid});
+        }
+    };
+    auto guard = folly::makeGuard([&] {
+        indexes_.reset();
+        growing_build_test_hook = {};
+    });
+    FirstBatch();
+    owner_->Flush();
+    const auto pin = Pin();
+    ASSERT_TRUE(pin);
+    EXPECT_EQ(pin.CoveredRowEnd(), 5);
+    EXPECT_EQ(pin.Reader().Count(), 3);
+    EXPECT_EQ(unlocked_rounds, 2);
+}
 
 TEST_F(DeadlineGrowingVectorIndexTest, NullOnlyFinalizeDeferralHonorsDeadline) {
     int finalize_attempts = 0;
