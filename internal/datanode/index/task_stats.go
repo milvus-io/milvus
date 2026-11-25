@@ -934,6 +934,7 @@ func buildIndexParams(
 		NumRows:                          req.GetNumRows(),
 		InsertFiles:                      files,
 		FieldSchema:                      field,
+		UseS3Crt:                         paramtable.Get().MinioCfg.UseS3CRT.GetAsBool(),
 		StorageConfig:                    storageConfig,
 		CurrentScalarIndexVersion:        common.ClampScalarIndexVersion(req.GetCurrentScalarIndexVersion()),
 		StorageVersion:                   req.GetStorageVersion(),

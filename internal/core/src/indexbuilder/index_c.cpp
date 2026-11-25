@@ -327,8 +327,8 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
         auto field_type = static_cast<milvus::DataType>(
             build_index_info->field_schema().data_type());
 
-        auto storage_config =
-            MakeStorageProperties(build_index_info->storage_config());
+        auto storage_config = MakeStorageProperties(
+            build_index_info->storage_config(), build_index_info->use_s3_crt());
         auto config = get_config(build_index_info);
 
         // init file manager

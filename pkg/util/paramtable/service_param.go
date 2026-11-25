@@ -2067,6 +2067,7 @@ type MinioConfig struct {
 	UseVirtualHost     ParamItem `refreshable:"false"`
 	RequestTimeoutMs   ParamItem `refreshable:"false"`
 	MaxConnections     ParamItem `refreshable:"false"`
+	UseS3CRT           ParamItem `refreshable:"false"`
 	CRTQueueSizes      ParamItem `refreshable:"false"`
 	ListObjectsMaxKeys ParamItem `refreshable:"true"`
 	UseCRC32C          ParamItem `refreshable:"false"`
@@ -2319,6 +2320,15 @@ Leave it empty if you want to use AWS default endpoint`,
 		Doc:          "Maximum concurrent HTTP connections to object storage",
 	}
 	p.MaxConnections.Init(base.mgr)
+
+	p.UseS3CRT = ParamItem{
+		Key:          "minio.useS3CRT",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc:          "Use the AWS CRT S3 client for index builds. Connections with an explicit TLS minimum keep the SDK client. Requires restart.",
+		Export:       true,
+	}
+	p.UseS3CRT.Init(base.mgr)
 
 	p.CRTQueueSizes = ParamItem{
 		Key:          "minio.crt_queue_sizes",

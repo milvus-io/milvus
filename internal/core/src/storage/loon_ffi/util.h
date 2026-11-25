@@ -26,14 +26,15 @@
 
 // Preserve the configured root for ChunkManager key construction.
 std::shared_ptr<milvus_storage::api::Properties>
-MakeStorageProperties(CStorageConfig c_storage_config);
+MakeStorageProperties(CStorageConfig c_storage_config, bool use_s3_crt = false);
 
 // Index-build and clustering protobufs share the storage fields. Reuse the C
 // boundary for owned strings, optional tuning defaults and node-local policy.
 template <typename ProtoStorageConfig>
 std::shared_ptr<milvus_storage::api::Properties>
-MakeStorageProperties(const ProtoStorageConfig& config) {
-    return MakeStorageProperties(CStorageConfig{
+MakeStorageProperties(const ProtoStorageConfig& config,
+                      bool use_s3_crt = false) {
+    const CStorageConfig storage_config{
         .address = config.address().c_str(),
         .bucket_name = config.bucket_name().c_str(),
         .access_key_id = config.access_keyid().c_str(),
@@ -64,7 +65,8 @@ MakeStorageProperties(const ProtoStorageConfig& config) {
         .crt_queue_sizes = 0,
         .talon_enabled_stages = config.talon_enabled_stages(),
         .talon_namespace = config.talon_namespace().c_str(),
-    });
+    };
+    return MakeStorageProperties(storage_config, use_s3_crt);
 }
 
 // Normalize a private copy for Arrow/loon, without modifying shared properties.

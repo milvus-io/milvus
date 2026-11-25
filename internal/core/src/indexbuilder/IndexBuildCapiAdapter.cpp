@@ -404,7 +404,8 @@ AdaptBuildIndexInfo(const proto::indexcgo::BuildIndexInfo& info,
         .json_path = json_path,
     };
 
-    auto storage_config = MakeStorageProperties(info.storage_config());
+    auto storage_config =
+        MakeStorageProperties(info.storage_config(), info.use_s3_crt());
     auto context = MakeFileManagerContext(
         info, storage_config, request.params, field_type);
     return {.request = std::move(request),

@@ -33,6 +33,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestMinioConfig_UseS3CRT(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+	t.Cleanup(base.mgr.Close)
+	var params MinioConfig
+	params.Init(base)
+	require.True(t, params.UseS3CRT.GetAsBool())
+	require.NoError(t, base.Save("minio.useS3CRT", "false"))
+	require.False(t, params.UseS3CRT.GetAsBool())
+}
+
 func TestMinioConfig_MultipartCopyThreshold(t *testing.T) {
 	base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
 	t.Cleanup(base.mgr.Close)

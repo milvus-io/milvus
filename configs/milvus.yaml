@@ -167,6 +167,7 @@ minio:
   region:  # Specify minio storage system location region
   useVirtualHost: false # Whether use virtual host mode for bucket. WARNING: For Aliyun OSS and Tencent COS, this parameter is useless and is set to true by default
   requestTimeoutMs: 10000 # minio timeout for request time in milliseconds
+  useS3CRT: true # Use the AWS CRT S3 client for index builds. Connections with an explicit TLS minimum keep the SDK client. Requires restart.
   crt_queue_sizes: 125 # S3 CRT queue sizes, converted to the SDK throughput target as value * 0.4 Gbps. Requires restart.
   # The maximum number of objects requested per batch in minio ListObjects rpc, 
   # 0 means using oss client by default, decrease these configuration if ListObjects timeout

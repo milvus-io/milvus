@@ -378,6 +378,7 @@ func (it *indexBuildTask) createBuilder(ctx context.Context) error {
 		IndexFilePrefix:           it.req.GetIndexFilePrefix(),
 		InsertFiles:               it.req.GetDataPaths(),
 		FieldSchema:               it.req.GetField(),
+		UseS3Crt:                  paramtable.Get().MinioCfg.UseS3CRT.GetAsBool(),
 		StorageConfig:             storageConfig,
 		IndexParams:               mapToKVPairs(it.newIndexParams),
 		TypeParams:                mapToKVPairs(it.newTypeParams),

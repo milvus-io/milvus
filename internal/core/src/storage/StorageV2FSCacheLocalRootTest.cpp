@@ -95,6 +95,32 @@ TEST(StorageV2FSCacheLocalRootTest, LoonFSRootPathRule) {
     EXPECT_EQ(LoonFSRootPath("", "files"), "files");
 }
 
+TEST(StorageV2FSCacheLocalRootTest, IndexBuildS3CrtPolicy) {
+    CStorageConfig config{};
+    config.storage_type = "minio";
+    config.cloud_provider = "aws";
+    config.useSSL = true;
+    config.tls_min_version = "default";
+    const auto check = [&](bool enabled, bool expected) {
+        const auto raw = MakeStorageProperties(config, enabled);
+        EXPECT_EQ(std::get<bool>(raw->at(PROPERTY_FS_S3_USE_CRT)), expected);
+        const auto normalized = MakeInternalProperties(raw);
+        EXPECT_EQ(std::get<bool>(normalized->at(PROPERTY_FS_S3_USE_CRT)),
+                  expected);
+    };
+    check(false, false);
+    check(true, true);
+    config.tls_min_version = "1.3";
+    check(true, false);
+    config.useSSL = false;
+    check(true, true);
+    config.cloud_provider = "gcp";
+    check(true, false);
+    config.cloud_provider = "";
+    config.storage_type = "local";
+    check(true, false);
+}
+
 TEST(StorageV2FSCacheLocalRootTest, InternalPropertiesUseSlashForLocal) {
     CStorageConfig c_config{};
     c_config.root_path = "/var/lib/milvus/data";

@@ -388,7 +388,7 @@ IsCredentialBrokerEndpoint(const std::string& endpoint) {
 }
 
 std::shared_ptr<milvus_storage::api::Properties>
-MakeStorageProperties(CStorageConfig config) {
+MakeStorageProperties(CStorageConfig config, bool use_s3_crt) {
     auto properties = std::make_shared<milvus_storage::api::Properties>();
     // C/protobuf inputs are already typed. Preserve their values, including
     // the configured ChunkManager root, until the filesystem boundary.
@@ -428,7 +428,17 @@ MakeStorageProperties(CStorageConfig config) {
     if (config.max_connections > 0) {
         (*properties)[PROPERTY_FS_MAX_CONNECTIONS] = config.max_connections;
     }
-    (*properties)[PROPERTY_FS_S3_USE_CRT] = false;
+    const std::string_view provider =
+        config.cloud_provider ? config.cloud_provider : "";
+    const std::string_view storage =
+        config.storage_type ? config.storage_type : "";
+    const std::string_view tls =
+        config.tls_min_version ? config.tls_min_version : "";
+    // An explicit TLS minimum is enforced by the SDK HTTP client factory.
+    (*properties)[PROPERTY_FS_S3_USE_CRT] =
+        use_s3_crt && (storage == "remote" || storage == "minio") &&
+        (provider.empty() || provider == "aws") &&
+        (!config.useSSL || tls.empty() || tls == "default");
     (*properties)[PROPERTY_FS_S3_CRT_QUEUE_SIZES] =
         config.crt_queue_sizes > 0
             ? config.crt_queue_sizes
@@ -513,7 +523,7 @@ MakeInternalProperties(
             result->erase(key);
         }
     }
-    (*result)[PROPERTY_FS_S3_USE_CRT] = false;
+    result->try_emplace(PROPERTY_FS_S3_USE_CRT, false);
     if (!result->contains(PROPERTY_FS_S3_CRT_QUEUE_SIZES)) {
         (*result)[PROPERTY_FS_S3_CRT_QUEUE_SIZES] =
             milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
