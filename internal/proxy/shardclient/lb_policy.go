@@ -85,6 +85,8 @@ type ChannelWorkload struct {
 }
 
 type CollectionWorkLoad struct {
+	// SkipChannel omits requery channels with no hits before replica selection.
+	SkipChannel    func(string) bool
 	Db             string
 	CollectionName string
 	CollectionID   int64
@@ -407,7 +409,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		// poll through a group coming up. shardLeaders itself stays unscoped
 		// (it is also the retry budget, see below).
 		scopedLeaders := FilterByResourceGroup(shardLeaders, workload.ResourceGroup)
-		if len(scopedLeaders) > 0 && requestExcludedNodes.Len() >= len(scopedLeaders) {
+		if overloadErr == nil && len(scopedLeaders) > 0 && requestExcludedNodes.Len() >= len(scopedLeaders) {
 			shardLeaders, err = lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, false)
 			if err != nil {
 				log.Warn(ctx, "failed to refresh shard leaders", mlog.Err(err))
@@ -432,7 +434,17 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		}
 		excludeNodes := typeutil.NewUniqueSet(blacklist...)
 		excludeNodes.Insert(requestExcludedNodes.Collect()...)
-		targetNode, selectedByBalancer, err := lb.selectNode(ctx, balancer, workload, &excludeNodes)
+		var targetNode NodeInfo
+		var selectedByBalancer bool
+		if overloadErr != nil {
+			targetNode, selectedByBalancer, err = lb.selectAfterOverload(ctx, balancer, nil, workload, &excludeNodes)
+			if err != nil {
+				return false, overloadErr
+			}
+			overloadErr = nil
+		} else {
+			targetNode, selectedByBalancer, err = lb.selectNode(ctx, balancer, workload, &excludeNodes)
+		}
 		if err != nil {
 			log.Warn(ctx, "failed to select node for shard",
 				mlog.Int64("nodeID", targetNode.NodeID),
@@ -496,9 +508,8 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			log.Warn(ctx, "search/query channel failed, node not available",
 				mlog.Int64("nodeID", targetNode.NodeID),
 				mlog.Err(err))
-			// Caller cancellation must not blacklist the node. Deadline expiry
-			// can indicate a stalled delegator and keeps the existing policy.
-			if errors.Is(ctx.Err(), context.Canceled) {
+			// A local expiry before dispatch says nothing about node health.
+			if ctx.Err() != nil {
 				return false, err
 			}
 			lb.blacklist.Add(workload.Channel, targetNode.NodeID)
@@ -542,11 +553,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		}
 		return true, nil
 	}
-	tryExecute := lb.executeOverloadAware(ctx, workload, func() *typeutil.UniqueSet {
-		s := typeutil.NewUniqueSet(lb.blacklist.GetBlacklistedNodes(workload.Channel)...)
-		s.Insert(requestExcludedNodes.Collect()...)
-		return &s
-	}, &refused, &extraUsed, &overloadErr, tryOnce)
+	tryExecute := lb.executeOverloadAware(ctx, workload, &refused, &extraUsed, &overloadErr, tryOnce)
 
 	shardLeaders, err = lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, true)
 	if err != nil {
@@ -591,14 +598,20 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 		return merr.WrapErrCollectionNotLoaded(workload.CollectionID)
 	}
 
+	if workload.SkipChannel != nil {
+		channelList = lo.Filter(channelList, func(channel string, _ int) bool {
+			return !workload.SkipChannel(channel)
+		})
+	}
+
 	// Single channel fast path: skip errgroup/goroutine overhead
 	if len(channelList) == 1 {
 		return lb.ExecuteWithRetry(ctx, workload.ForChannel(channelList[0], preferredNodeID(workload, channelList[0])))
 	}
 
-	// The request fails with its first failed channel: stop the work for the
-	// other channels then, rather than finish it for a result nobody gets.
-	wg, ctx := errgroup.WithContext(ctx)
+	// Keep dispatched RPCs on the caller context during mixed-version upgrades.
+	// Older QueryNodes share cancellation across merged Search requests.
+	var wg errgroup.Group
 	for _, channel := range channelList {
 		wg.Go(func() error {
 			return lb.ExecuteWithRetry(ctx, workload.ForChannel(channel, preferredNodeID(workload, channel)))

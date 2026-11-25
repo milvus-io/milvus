@@ -44,6 +44,9 @@ const (
 	maxAttemptPenalty = time.Hour
 )
 
+// errAttemptNotDispatched stays inside local replica feedback accounting.
+var errAttemptNotDispatched = errors.New("attempt not dispatched")
+
 // classifyAttempt tells what the outcome of one attempt says about the replica
 // that served it, and the latency or penalty to record:
 //
@@ -72,7 +75,7 @@ func classifyAttempt(ctx context.Context, start, now time.Time, err error) (atte
 	if merr.GetErrorType(err) == merr.InputError || isOverloadErr(err) {
 		return attemptIgnored, 0
 	}
-	if errors.Is(ctx.Err(), context.Canceled) {
+	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, errAttemptNotDispatched) {
 		return attemptIgnored, 0
 	}
 	return attemptFailed, attemptTimeout(ctx, start, elapsed)

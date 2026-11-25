@@ -121,9 +121,9 @@ will start another round. A buffered result channel and cancellation-aware
 send prevent a late lookup result from blocking or creating a late hedge.
 
 Dispatched primary and hedge attempts keep the outer request context. The
-winner does not immediately cancel the loser: QueryNode can merge Search
-tasks under a leading task's context, so earlier cancellation requires a
-separate cancellation-isolation change. A losing attempt can therefore keep
+winner does not immediately cancel the loser: older QueryNodes can merge
+Search tasks under a leading task's context. Earlier cancellation requires
+cancellation isolation on every receiving QueryNode, including during upgrades. A losing attempt can therefore keep
 running while other shards or Search requery finish.
 
 Search and Query call `CommitAttempt` before writing any successful result.
@@ -207,7 +207,7 @@ more work than it gets done, not that it is failing.
 
 Under load above what the replicas get done, requests wait in the QueryNode
 read scheduler queue (`queryNode.scheduler.unsolvedQueueSize`, 1024), turning
-excess traffic into long queue latency. Four changes bound the wait of
+excess traffic into long queue latency. The following behavior bounds the wait of
 answered requests and fail the excess fast:
 
 **QueryNode queue wait limit.** `queryNode.scheduler.maxQueueWaitRatio`
@@ -243,9 +243,13 @@ prevents Proxy and Delegator gRPC clients from retrying `ErrServiceTooManyReques
 against the same node, returning the overload status immediately so the caller
 can failover or abort.
 
-**A failed shard stops the others.** `LBPolicyImpl.Execute` uses the
-`errgroup.WithContext` derived `ctx` so the first failed channel cancels
-in-flight attempts on sibling channels instead of finishing wasted work.
+**Dispatched shards retain the caller context.** `LBPolicyImpl.Execute`
+waits for sibling channels using their outer request context. This also keeps
+unfinished hedge attempts alive when the channel fan-out completes. During a
+rolling upgrade, an older QueryNode can share a merged Search's cancellation
+with unrelated callers. Earlier cross-channel cancellation requires every
+receiving QueryNode to provide merged-request cancellation isolation, even
+when hedging and queue protection are disabled.
 
 Regression tests exercise real Search/Query task callbacks and status
 conversion, both error arrival orders, winner metadata, and no new retry after
@@ -253,3 +257,23 @@ all attempts fail. Heartbeat lifecycle tests exercise registration, the failure
 threshold, cleanup, rediscovery, and recovery without manually seeding health
 records. RPC outcomes are controlled in tests; no distributed configuration
 rollout or snapshot-divergence reproduction is claimed.
+
+Requery channels skipped locally are filtered before replica selection. They
+create no replica observations or hedge-delay samples. A request that expires
+while acquiring a client also releases selection accounting without recording
+a replica failure. System errors already observed from an attempt take
+precedence over a later sibling cancellation; InputError keeps its precedence.
+
+Queue wait is checked again when a worker starts, before `PreExecute` and
+`Execute`, including time blocked handing off to the worker pool. The
+`scheduled` queue-duration observation is recorded at that point. Rejection
+occurs when the worker becomes available; queue budgets do not install timers.
+Searches with a positive queue budget merge only when their absolute queue
+expiry times match. This preserves the expiry when cancellation promotes a
+surviving member, at the cost of fewer merge opportunities under queue limits.
+
+Unknown replica latency uses the candidate fallback before applying the current
+failure penalty. A recent penalty still suppresses a replica with no successes;
+a small decayed penalty cannot make an unknown replica appear faster than the
+fallback. Hedge-delay samples continue to be collected while hedging is disabled
+so live enabling can use the observed workload latency.

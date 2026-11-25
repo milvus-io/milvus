@@ -183,7 +183,7 @@ func (b *LatencyWeightedBalancer) sharesLocked(now time.Time, key string, candid
 			continue
 		}
 		inflight[i] = s.inflight
-		if latencies[i], known[i] = s.latency(now, cfg.decay); known[i] {
+		if latencies[i], known[i] = s.mean(now, cfg.decay); known[i] {
 			knownSum += latencies[i]
 			knownCount++
 		}
@@ -197,6 +197,9 @@ func (b *LatencyWeightedBalancer) sharesLocked(now time.Time, key string, candid
 		latency := latencies[i]
 		if !known[i] {
 			latency = fallback
+		}
+		if replica := b.replicas[replicaKey{key, candidates[i]}]; replica != nil {
+			latency = max(latency, replica.currentPenalty(now, cfg.decay))
 		}
 		if latency < replicaMinLatency {
 			latency = replicaMinLatency

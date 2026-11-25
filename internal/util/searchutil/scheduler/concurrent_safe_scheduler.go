@@ -38,7 +38,7 @@ func newScheduler(policy schedulePolicy) Scheduler {
 		policy:           policy,
 		receiveChan:      make(chan addTaskReq),
 		clearChan:        make(chan clearQueuedReq),
-		execChan:         make(chan Task),
+		execChan:         make(chan *queuedTask),
 		pool:             conc.NewPool[any](maxReadConcurrency, conc.WithPreAlloc(true)),
 		gpuPool:          conc.NewPool[any](paramtable.Get().QueryNodeCfg.MaxGpuReadConcurrency.GetAsInt(), conc.WithPreAlloc(true)),
 		schedulerCounter: schedulerCounter{},
@@ -67,7 +67,7 @@ type scheduler struct {
 	policy      schedulePolicy
 	receiveChan chan addTaskReq
 	clearChan   chan clearQueuedReq
-	execChan    chan Task
+	execChan    chan *queuedTask
 	pool        *conc.Pool[any]
 	gpuPool     *conc.Pool[any]
 
@@ -164,13 +164,13 @@ func (s *scheduler) schedule() {
 	for {
 		s.setupReadyLenMetric()
 
-		var execChan chan Task
-		var execTask Task
+		var execChan chan *queuedTask
+		var execTask *queuedTask
 		nq := int64(0)
 		now := time.Now()
 		task, nq, execChan = s.setupExecListener(task, now)
 		if task.valid() {
-			execTask = task.Task
+			execTask = task
 		}
 
 		select {
@@ -183,7 +183,7 @@ func (s *scheduler) schedule() {
 				mlog.Info(context.TODO(), "receiveChan closed, processing remaining request")
 				// drain policy maintained task
 				for task.valid() {
-					execChan <- task.Task
+					execChan <- task
 					s.updateWaitingTaskCounter(-1, -nq)
 					task = s.produceExecChan(now)
 				}
@@ -279,12 +279,12 @@ func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64, n
 func (s *scheduler) produceExecChan(now time.Time) *queuedTask {
 	var task *queuedTask
 	for {
-		var execChan chan Task
-		var execTask Task
+		var execChan chan *queuedTask
+		var execTask *queuedTask
 		nq := int64(0)
 		task, nq, execChan = s.setupExecListener(task, now)
 		if task.valid() {
-			execTask = task.Task
+			execTask = task
 		}
 
 		select {
@@ -304,34 +304,49 @@ func (s *scheduler) exec() {
 	defer s.wg.Done()
 	mlog.Info(context.TODO(), "start execute loop")
 	for {
-		t, ok := <-s.execChan
+		queued, ok := <-s.execChan
 		if !ok {
 			mlog.Info(context.TODO(), "scheduler execChan closed, worker exit")
 			return
 		}
-		// Drop the task, or the canceled members of a merged group, if the
-		// cancellation happened between dequeue and execution. Members that
-		// are dropped here have already been completed with their own
-		// context error; the survivors keep running. The cause is logged
-		// because it is what tells a client that went away from a request
-		// that ran out of time.
-		survivor, dropped, cause := pruneCanceled(t)
-		if dropped > 0 {
-			if survivor == nil {
-				mlog.Warn(context.TODO(), "task canceled before executing", mlog.Err(cause))
-				continue
-			}
-			mlog.Warn(context.TODO(), "canceled requests dropped from a search group before executing",
-				mlog.Int("dropped", dropped), mlog.Err(cause))
-		}
-		t = survivor
-		if err := t.PreExecute(); err != nil {
-			mlog.Warn(context.TODO(), "failed to pre-execute task", mlog.Err(err))
-			t.Done(err)
-			continue
-		}
 
-		s.getPool(t).Submit(func() (any, error) {
+		s.getPool(queued.Task).Submit(func() (any, error) {
+			// Drop the task, or the canceled members of a merged group, if the
+			// cancellation happened between dequeue and execution. Members that
+			// are dropped here have already been completed with their own
+			// context error; the survivors keep running. The cause is logged
+			// because it is what tells a client that went away from a request
+			// that ran out of time.
+			survivor, dropped, cause := pruneCanceled(queued.Task)
+			if dropped > 0 {
+				if survivor == nil {
+					mlog.Warn(context.TODO(), "task canceled before executing", mlog.Err(cause))
+					s.recordReadTaskQueueDuration(queued, time.Now(), readTaskQueueOutcomeExpired)
+					return nil, cause
+				}
+				mlog.Warn(context.TODO(), "canceled requests dropped from a search group before executing",
+					mlog.Int("dropped", dropped), mlog.Err(cause))
+			}
+			queued.Task = survivor
+			t := survivor
+			now := time.Now()
+			if queued.cleanupReady(now) {
+				s.recordReadTaskQueueDuration(queued, now, readTaskQueueOutcomeExpired)
+				finishExpiredTask(queued)
+				return nil, nil
+			}
+			if queued.overloaded(now) {
+				s.recordReadTaskQueueDuration(queued, now, readTaskQueueOutcomeOverloaded)
+				finishUnrunTask(queued, overloadedError(queued, queued.queueDuration(now)))
+				return nil, nil
+			}
+			s.recordReadTaskQueueDuration(queued, now, readTaskQueueOutcomeScheduled)
+			if err := t.PreExecute(); err != nil {
+				mlog.Warn(context.TODO(), "failed to pre-execute task", mlog.Err(err))
+				t.Done(err)
+				return nil, err
+			}
+
 			// Update concurrency metric and notify task done.
 			metrics.QueryNodeReadTaskConcurrency.WithLabelValues(paramtable.GetStringNodeID()).Inc()
 			collector.Counter.Inc(metricsinfo.ExecuteQueueType)
@@ -373,8 +388,8 @@ func readTaskExecuteOutcome(err error) string {
 }
 
 // setupExecListener setup the execChan and next task to run.
-func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time) (*queuedTask, int64, chan Task) {
-	var execChan chan Task
+func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time) (*queuedTask, int64, chan *queuedTask) {
+	var execChan chan *queuedTask
 	nq := int64(0)
 	if !lastWaitingTask.valid() {
 		// No task is waiting to send to execChan, schedule a new one from queue.
@@ -428,7 +443,6 @@ func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time
 				lastWaitingTask = nil
 				continue
 			}
-			s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeScheduled)
 			break
 		}
 	}

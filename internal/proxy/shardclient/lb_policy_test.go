@@ -718,7 +718,8 @@ func (s *LBPolicySuite) TestExecuteWithRetryInputErrorSkipsBlacklist() {
 }
 
 // TestExecuteWithRetryCallerTermination distinguishes caller cancellation from
-// deadline expiry and errors returned while the caller context remains active.
+// deadline expiry after dispatch and errors returned with an active caller.
+// Local expiry during GetClient must not blacklist a node that received no RPC.
 func (s *LBPolicySuite) TestExecuteWithRetryCallerTermination() {
 	for _, stage := range []string{"GetClient", "Exec"} {
 		for _, tc := range []struct {
@@ -783,7 +784,7 @@ func (s *LBPolicySuite) TestExecuteWithRetryCallerTermination() {
 				s.Error(err)
 				s.ErrorIs(err, tc.resultErr)
 				s.Equal(tc.contextErr, ctx.Err())
-				if tc.contextErr == context.Canceled {
+				if tc.contextErr == context.Canceled || (stage == "GetClient" && tc.contextErr == context.DeadlineExceeded) {
 					s.Equal(1, clientCount)
 					if stage == "Exec" {
 						s.Equal(1, execCount)

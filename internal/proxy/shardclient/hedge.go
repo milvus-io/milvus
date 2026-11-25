@@ -23,6 +23,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -152,7 +154,12 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 			if err == nil {
 				err = workload.Exec(attemptCtx, node.NodeID, client, workload.Channel)
 			}
-			feedback.complete(err)
+			if getClientErr && attemptCtx.Err() != nil {
+				// Complete accounting without attributing a local expiry to the replica.
+				feedback.complete(errAttemptNotDispatched)
+			} else {
+				feedback.complete(err)
+			}
 			results <- hedgeResult{node: node.NodeID, latency: time.Since(start), err: err, getClientErr: getClientErr}
 		}()
 		return feedback
@@ -272,14 +279,16 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 				}
 			} else {
 				excludeNodes.Insert(r.node)
-				if lw == nil && !errors.Is(ctx.Err(), context.Canceled) {
+				if lw == nil && !errors.Is(ctx.Err(), context.Canceled) && !(r.getClientErr && ctx.Err() != nil) {
 					if r.getClientErr || !merr.IsRetryableErr(r.err) {
 						lb.blacklist.Add(workload.Channel, r.node)
 					} else if requestExcludedNodes != nil {
 						requestExcludedNodes.Insert(r.node)
 					}
 				}
-				lastErr = merr.Wrapf(r.err, "failed to search/query delegator %d for channel %s", r.node, workload.Channel)
+				if lastErr == nil || !(merr.IsCanceledOrTimeout(r.err) || status.Code(r.err) == codes.Canceled || status.Code(r.err) == codes.DeadlineExceeded) {
+					lastErr = merr.Wrapf(r.err, "failed to search/query delegator %d for channel %s", r.node, workload.Channel)
+				}
 				if isOverloadErr(r.err) {
 					overloadErr = lastErr
 				}

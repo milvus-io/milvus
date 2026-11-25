@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -398,4 +399,18 @@ func TestHedgedReadInputErrorWaitsForSibling(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestFastSkipRequeryAvoidsReplicaDispatch(t *testing.T) {
+	paramtable.Init()
+	manager := shardclient.NewMockShardClientManager(t)
+	manager.EXPECT().GetShardLeaderList(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return([]string{"empty-channel"}, nil)
+	policy := shardclient.NewLBPolicyImpl(manager)
+	task := &QueryTask{fastSkip: true, channelsMvcc: map[string]uint64{"hit-channel": 10}}
+	err := policy.Execute(context.Background(), shardclient.CollectionWorkLoad{
+		Nq: 1, Hedgeable: true, StatsClass: "query/Bounded",
+		SkipChannel: task.skipRequeryChannel, Exec: task.queryShard,
+	})
+	require.NoError(t, err)
 }

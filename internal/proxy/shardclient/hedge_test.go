@@ -18,6 +18,7 @@ package shardclient
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"sync"
 	"testing"
@@ -28,12 +29,15 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -641,7 +645,7 @@ func TestOverloadAfterFailedReplicaEndsRequest(t *testing.T) {
 
 // A request fails with its first failed channel, and stops the work for its
 // other channels then.
-func TestExecuteCancelsOtherChannelsOnFailure(t *testing.T) {
+func TestExecutePreservesOtherChannelsOnFailure(t *testing.T) {
 	paramtable.Init()
 	mgr := NewMockShardClientManager(t)
 	mgr.EXPECT().GetShardLeaderList(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
@@ -653,26 +657,26 @@ func TestExecuteCancelsOtherChannelsOnFailure(t *testing.T) {
 	balancer := NewLatencyWeightedBalancer(mgr)
 	policy.getBalancer = func() LBBalancer { return balancer }
 
-	canceled := atomic.NewBool(false)
-	start := time.Now()
+	var siblingContext context.Context
+	entered := make(chan struct{})
+	failed := make(chan struct{})
 	err := policy.Execute(context.Background(), CollectionWorkLoad{
 		Nq: 1,
 		Exec: func(ctx context.Context, _ UniqueID, _ types.QueryNodeClient, channel string) error {
 			if channel == "ch-a" {
+				<-entered
+				close(failed)
 				return overloadErr()
 			}
-			select {
-			case <-ctx.Done():
-				canceled.Store(true)
-				return ctx.Err()
-			case <-time.After(10 * time.Second):
-				return nil
-			}
+			close(entered)
+			<-failed
+			siblingContext = ctx
+			return nil
 		},
 	})
 	assert.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
-	assert.True(t, canceled.Load())
-	assert.Less(t, time.Since(start), 5*time.Second)
+	require.NotNil(t, siblingContext)
+	assert.NoError(t, siblingContext.Err())
 }
 
 // The handling of an overloaded replica does not depend on the replica
@@ -734,6 +738,131 @@ func TestOverloadUnderEveryPolicy(t *testing.T) {
 			assert.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
 			assert.Len(t, nodes, 1)
 			assert.Zero(t, uncached.Load())
+		})
+	}
+}
+
+func TestOverloadUnavailableAlternativeDoesNotRefresh(t *testing.T) {
+	paramtable.Init()
+	for _, weighted := range []bool{false, true} {
+		t.Run(fmt.Sprint(weighted), func(t *testing.T) {
+			mgr := NewMockShardClientManager(t)
+			mgr.EXPECT().GetShard(mock.Anything, true, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+				Return([]NodeInfo{{NodeID: 1, Address: "localhost", Serviceable: true}, {NodeID: 2, Address: "localhost", Serviceable: true}}, nil)
+			mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(mocks.NewMockQueryNodeClient(t), nil).Once()
+			policy := NewLBPolicyImpl(mgr)
+			look := NewLookAsideBalancer(mgr)
+			var balancer LBBalancer = look
+			if weighted {
+				lw := NewLatencyWeightedBalancer(mgr)
+				look = lw.LookAsideBalancer
+				balancer = lw
+			}
+			look.RegisterNodeInfo([]NodeInfo{{NodeID: 2, Address: "localhost"}})
+			metric, _ := look.metricsMap.GetOrInsert(2, &CostMetrics{})
+			metric.unavailable.Store(true)
+			policy.getBalancer = func() LBBalancer { return balancer }
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			err := policy.ExecuteWithRetry(ctx, ChannelWorkload{
+				Channel: "ch", Nq: 1, Hedgeable: true,
+				Exec: func(context.Context, UniqueID, types.QueryNodeClient, string) error { return overloadErr() },
+			})
+			require.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+			require.NoError(t, ctx.Err())
+		})
+	}
+}
+
+func TestSkippedChannelsNeverSelectReplica(t *testing.T) {
+	paramtable.Init()
+	mgr := NewMockShardClientManager(t)
+	mgr.EXPECT().GetShardLeaderList(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return([]string{"empty"}, nil)
+	policy := NewLBPolicyImpl(mgr)
+	err := policy.Execute(context.Background(), CollectionWorkLoad{
+		SkipChannel: func(channel string) bool { return channel == "empty" },
+		Exec: func(context.Context, UniqueID, types.QueryNodeClient, string) error {
+			t.Fatal("skipped channel reached execution")
+			return nil
+		},
+	})
+	require.NoError(t, err)
+}
+
+func TestLocalDeadlineReleasesReplicaWithoutFailure(t *testing.T) {
+	for _, hedged := range []bool{false, true} {
+		t.Run(fmt.Sprint(hedged), func(t *testing.T) {
+			paramtable.Init()
+			pt := paramtable.Get()
+			pt.Save(pt.ProxyCfg.HedgingEnabled.Key, "true")
+			pt.Save(pt.ProxyCfg.HedgingMinDelay.Key, "1ms")
+			t.Cleanup(func() {
+				pt.Reset(pt.ProxyCfg.HedgingEnabled.Key)
+				pt.Reset(pt.ProxyCfg.HedgingMinDelay.Key)
+			})
+			mgr := NewMockShardClientManager(t)
+			mgr.EXPECT().GetShard(mock.Anything, true, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+				Return([]NodeInfo{{NodeID: 1, Address: "localhost", Serviceable: true}}, nil)
+			var ctx context.Context
+			mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Run(func(context.Context, NodeInfo) { <-ctx.Done() }).Return(nil, context.DeadlineExceeded)
+			policy := NewLBPolicyImpl(mgr)
+			balancer := NewLatencyWeightedBalancer(mgr)
+			policy.getBalancer = func() LBBalancer { return balancer }
+			workload := ChannelWorkload{Channel: "ch", Nq: 1, Hedgeable: hedged, Exec: func(context.Context, UniqueID, types.QueryNodeClient, string) error {
+				t.Fatal("deadline expired before dispatch")
+				return nil
+			}}
+			for i := 0; i < 200; i++ {
+				policy.hedging.ObserveRequest(hedgeStatsKey(workload), time.Millisecond)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+			err := policy.ExecuteWithRetry(ctx, workload)
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.Eventually(t, func() bool {
+				balancer.mu.Lock()
+				defer balancer.mu.Unlock()
+				replica := balancer.replicas[replicaKey{statsKey(workload), 1}]
+				return replica != nil && replica.inflight == 0
+			}, time.Second, time.Millisecond)
+			balancer.mu.Lock()
+			defer balancer.mu.Unlock()
+			replica := balancer.replicas[replicaKey{statsKey(workload), 1}]
+			require.NotNil(t, replica)
+			require.Zero(t, replica.failures)
+			require.Zero(t, replica.inflight)
+		})
+	}
+}
+
+func TestHedgeCancellationPreservesSystemError(t *testing.T) {
+	for _, cancellation := range []error{context.Canceled, context.DeadlineExceeded, status.Error(codes.Canceled, "canceled"), status.Error(codes.DeadlineExceeded, "deadline")} {
+		t.Run(cancellation.Error(), func(t *testing.T) {
+			h := newHedgeHarness(t, 1, 2)
+			h.warm(1, 2)
+			hedgeStarted := make(chan struct{})
+			systemErr := merr.WrapErrServiceInternal("primary failed")
+			workload := ChannelWorkload{
+				Channel: hedgeTestChannel, StatsClass: hedgeTestClass, Nq: 1,
+				Exec: func(ctx context.Context, node UniqueID, _ types.QueryNodeClient, _ string) error {
+					if node == 1 {
+						<-hedgeStarted
+						return systemErr
+					}
+					close(hedgeStarted)
+					// Feedback is recorded before the result is sent; allow the event loop
+					// to consume the primary failure before the second result arrives.
+					time.Sleep(30 * time.Millisecond)
+					return cancellation
+				},
+			}
+			requestExcluded, excluded := typeutil.NewUniqueSet(), typeutil.NewUniqueSet()
+			_, sent, err := h.policy.executeHedged(context.Background(), workload, h.balancer, h.balancer,
+				NodeInfo{NodeID: 1, Address: "localhost", Serviceable: true}, false, time.Now(), time.Millisecond,
+				&requestExcluded, &excluded)
+			require.True(t, sent)
+			require.ErrorIs(t, err, systemErr)
 		})
 	}
 }

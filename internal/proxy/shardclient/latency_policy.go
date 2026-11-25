@@ -159,20 +159,16 @@ func (lb *LBPolicyImpl) selectCandidate(ctx context.Context, balancer LBBalancer
 	return candidateNodes[targetNodeID], true, nil
 }
 
-// everyLeaderExcluded tells whether the request has no replica of the channel
-// left to try, by the cached shard leaders (within its resource group scope).
-func (lb *LBPolicyImpl) everyLeaderExcluded(ctx context.Context, workload ChannelWorkload, excludeNodes *typeutil.UniqueSet) bool {
+// selectAfterOverload makes one selection from the cached topology. The balancer
+// checks current heartbeat health; failure must not enter refreshing retries.
+func (lb *LBPolicyImpl) selectAfterOverload(ctx context.Context, balancer LBBalancer, lw *LatencyWeightedBalancer, workload ChannelWorkload, excluded *typeutil.UniqueSet) (NodeInfo, bool, error) {
 	leaders, err := lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, true)
 	if err != nil {
-		return false
+		return NodeInfo{}, false, err
 	}
-	leaders = FilterByResourceGroup(leaders, workload.ResourceGroup)
-	for _, leader := range leaders {
-		if !excludeNodes.Contain(leader.NodeID) {
-			return false
-		}
-	}
-	return len(leaders) > 0
+	// Failover candidates must pass the captured balancer's health check.
+	workload.PreferredNodeID = 0
+	return lb.selectCandidate(ctx, balancer, lw, workload, leaders, excluded)
 }
 
 // executeOverloadAware wraps a single retry attempt so overload refusals switch
@@ -181,7 +177,6 @@ func (lb *LBPolicyImpl) everyLeaderExcluded(ctx context.Context, workload Channe
 func (lb *LBPolicyImpl) executeOverloadAware(
 	ctx context.Context,
 	workload ChannelWorkload,
-	excluded func() *typeutil.UniqueSet,
 	refused *bool,
 	extraUsed *bool,
 	overloadErr *error,
@@ -193,7 +188,7 @@ func (lb *LBPolicyImpl) executeOverloadAware(
 			if !again || !*refused || ctx.Err() != nil {
 				return again, err
 			}
-			if !workload.Hedgeable || *extraUsed || lb.everyLeaderExcluded(ctx, workload, excluded()) {
+			if !workload.Hedgeable || *extraUsed {
 				return false, *overloadErr
 			}
 			*extraUsed = true
@@ -211,7 +206,18 @@ func (lb *LBPolicyImpl) executeWeightedWithRetry(ctx context.Context, workload C
 	extraUsed := false
 	tryOnce := func() (bool, error) {
 		refused = false
-		node, selected, err := lb.selectNodeWithPolicy(ctx, balancer, lw, workload, &excludeNodes)
+		var node NodeInfo
+		var selected bool
+		var err error
+		if overloadErr != nil {
+			node, selected, err = lb.selectAfterOverload(ctx, balancer, lw, workload, &excludeNodes)
+			if err != nil {
+				return false, overloadErr
+			}
+			overloadErr = nil
+		} else {
+			node, selected, err = lb.selectNodeWithPolicy(ctx, balancer, lw, workload, &excludeNodes)
+		}
 		if err != nil {
 			// Preserve the existing scoped retry contract when a group's last
 			// leader disappears after an execution error.
@@ -238,6 +244,12 @@ func (lb *LBPolicyImpl) executeWeightedWithRetry(ctx context.Context, workload C
 			}
 		}
 		client, err := lb.clientMgr.GetClient(ctx, node)
+		if err != nil && ctx.Err() != nil {
+			if selected {
+				lw.ReleaseSelection(statsKey(workload), node.NodeID)
+			}
+			return false, ctx.Err()
+		}
 		if err == nil {
 			err = workload.Exec(ctx, node.NodeID, client, workload.Channel)
 		}
@@ -256,7 +268,7 @@ func (lb *LBPolicyImpl) executeWeightedWithRetry(ctx context.Context, workload C
 		lb.hedging.ObserveRequest(hedgeStatsKey(workload), time.Since(start))
 		return true, nil
 	}
-	tryExecute := lb.executeOverloadAware(ctx, workload, func() *typeutil.UniqueSet { return &excludeNodes }, &refused, &extraUsed, &overloadErr, tryOnce)
+	tryExecute := lb.executeOverloadAware(ctx, workload, &refused, &extraUsed, &overloadErr, tryOnce)
 	leaders, err := lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, true)
 	if err != nil {
 		return err
