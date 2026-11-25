@@ -1282,6 +1282,9 @@ type requeryOperator struct {
 
 	traceCtx         context.Context
 	outputFieldNames []string
+	// projection turns the virtual columns of the requery result into the
+	// request's own columns.
+	projection *outputProjection
 
 	timestamp          uint64
 	dbName             string
@@ -1323,6 +1326,8 @@ func (t *SearchTask) requeryOutputFields() []string {
 			outputFieldNames.Insert(highlightDynFields...)
 		}
 	}
+	// $seg_id and $seg_offset of the result rows, see configureSearch.
+	outputFieldNames.Insert(t.outputProjection.requeryOutputFields()...)
 	return outputFieldNames.Collect()
 }
 
@@ -1351,6 +1356,7 @@ func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
 		queryViewPlans:     t.queryViewPlans,
 		traceCtx:           t.TraceCtx(),
 		outputFieldNames:   t.requeryOutputFields(),
+		projection:         t.outputProjection,
 		timestamp:          t.BeginTs(),
 		dbName:             dbName,
 		collectionName:     collectionName,
@@ -1382,7 +1388,7 @@ func (op *requeryOperator) run(ctx context.Context, span trace.Span, inputs ...a
 	}
 	storageCost.ScannedRemoteBytes += storageCostFromLastOp.ScannedRemoteBytes
 	storageCost.ScannedTotalBytes += storageCostFromLastOp.ScannedTotalBytes
-	return []any{queryResult.GetFieldsData(), storageCost}, nil
+	return []any{op.projection.adoptRequeryColumns(queryResult.GetFieldsData()), storageCost}, nil
 }
 
 func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {

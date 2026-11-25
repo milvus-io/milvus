@@ -22,6 +22,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -584,6 +585,171 @@ func TestVirtualColumnStash(t *testing.T) {
 	require.NoError(t, none.carry(result))
 	require.Nil(t, newVirtualColumnStash(nil, false))
 	require.NotNil(t, newVirtualColumnStash(nil, true))
+}
+
+// A final result that still has the captured rows in the captured order is
+// matched by position; the row index is built only when the rows differ.
+func TestVirtualColumnStashPositionalMatch(t *testing.T) {
+	strIDs := func(ids ...string) *schemapb.IDs {
+		return &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: ids}}}
+	}
+	newStash := func(reduced *schemapb.SearchResultData) *virtualColumnStash {
+		stash := newVirtualColumnStash([]int64{-1000, -1001}, false)
+		stash.capture([]*milvuspb.SearchResults{{Results: reduced}}, nil)
+		return stash
+	}
+	columns := func() []*schemapb.FieldData {
+		return []*schemapb.FieldData{longColumn(-1000, 100, 110, 120, 211, 213), floatColumn(-1001, 0.1, 0.2, 0.3, 0.4, 0.5)}
+	}
+	longs := func(result *schemapb.SearchResultData, i int) []int64 {
+		return result.FieldsData[i].GetScalars().GetLongData().GetData()
+	}
+	floats := func(result *schemapb.SearchResultData, i int) []float32 {
+		return result.FieldsData[i].GetScalars().GetFloatData().GetData()
+	}
+
+	// Same rows, same order: taken by position, no row index.
+	reduced := &schemapb.SearchResultData{Ids: intIDs(10, 11, 12, 11, 13), Topks: []int64{3, 2}, FieldsData: columns()}
+	stash := newStash(reduced)
+	result := &schemapb.SearchResultData{Ids: intIDs(10, 11, 12, 11, 13), Topks: []int64{3, 2}}
+	require.NoError(t, stash.carry(result))
+	require.Equal(t, []int64{100, 110, 120, 211, 213}, longs(result, 0))
+	require.Equal(t, []float32{0.1, 0.2, 0.3, 0.4, 0.5}, floats(result, 1))
+	require.Nil(t, stash.subResults[0].rows)
+	// The carried columns are copies.
+	longs(result, 0)[0] = -1
+	require.Equal(t, int64(100), reduced.FieldsData[0].GetScalars().GetLongData().GetData()[0])
+
+	// The same ids split differently between the queries are different rows.
+	regrouped := &schemapb.SearchResultData{Ids: intIDs(10, 11, 12, 11, 13), Topks: []int64{2, 3}}
+	require.ErrorContains(t, stash.carry(regrouped), "is not in the reduced search result")
+	require.NotNil(t, stash.subResults[0].rows)
+
+	// A pipeline node that reorders the reduced result in place after the
+	// capture does not change what was captured.
+	inPlace := &schemapb.SearchResultData{Ids: intIDs(1, 2, 3), Topks: []int64{3}, FieldsData: []*schemapb.FieldData{longColumn(-1000, 7, 8, 9)}}
+	stash = newStash(inPlace)
+	inPlace.Ids.GetIntId().Data[0], inPlace.Ids.GetIntId().Data[2] = 3, 1
+	inPlace.FieldsData = nil
+	require.NoError(t, stash.carry(inPlace))
+	require.Equal(t, []int64{9, 8, 7}, longs(inPlace, 0))
+
+	// A truncated result (a prefix) is not the same rows; it is matched by key.
+	stash = newStash(&schemapb.SearchResultData{Ids: intIDs(1, 2, 3), Topks: []int64{3}, FieldsData: []*schemapb.FieldData{longColumn(-1000, 7, 8, 9)}})
+	prefix := &schemapb.SearchResultData{Ids: intIDs(1, 2), Topks: []int64{2}}
+	require.NoError(t, stash.carry(prefix))
+	require.Equal(t, []int64{7, 8}, longs(prefix, 0))
+	require.NotNil(t, stash.subResults[0].rows)
+
+	// String primary keys.
+	stash = newStash(&schemapb.SearchResultData{Ids: strIDs("a", "b"), Topks: []int64{2}, FieldsData: []*schemapb.FieldData{longColumn(-1000, 1, 2)}})
+	same := &schemapb.SearchResultData{Ids: strIDs("a", "b"), Topks: []int64{2}}
+	require.NoError(t, stash.carry(same))
+	require.Equal(t, []int64{1, 2}, longs(same, 0))
+	require.Nil(t, stash.subResults[0].rows)
+	swapped := &schemapb.SearchResultData{Ids: strIDs("b", "a"), Topks: []int64{2}}
+	require.NoError(t, stash.carry(swapped))
+	require.Equal(t, []int64{2, 1}, longs(swapped, 0))
+	// Int64 ids never match captured string ids.
+	require.False(t, stash.subResults[0].sameRows(&schemapb.SearchResultData{Ids: intIDs(1, 2), Topks: []int64{2}}))
+
+	// Element-level rows: the element indices are part of the row.
+	elemReduced := &schemapb.SearchResultData{
+		Ids: intIDs(1, 1, 2), Topks: []int64{3}, ElementIndices: &schemapb.LongArray{Data: []int64{0, 4, 1}},
+		FieldsData: []*schemapb.FieldData{longColumn(-1000, 50, 54, 61)},
+	}
+	stash = newStash(elemReduced)
+	elemSame := &schemapb.SearchResultData{Ids: intIDs(1, 1, 2), Topks: []int64{3}, ElementIndices: &schemapb.LongArray{Data: []int64{0, 4, 1}}}
+	require.NoError(t, stash.carry(elemSame))
+	require.Equal(t, []int64{50, 54, 61}, longs(elemSame, 0))
+	require.Nil(t, stash.subResults[0].rows)
+	elemOther := &schemapb.SearchResultData{Ids: intIDs(1, 1, 2), Topks: []int64{3}, ElementIndices: &schemapb.LongArray{Data: []int64{4, 0, 1}}}
+	require.NoError(t, stash.carry(elemOther))
+	require.Equal(t, []int64{54, 50, 61}, longs(elemOther, 0))
+	// A row-level result with the same ids is not the same rows.
+	require.False(t, stash.subResults[0].sameRows(&schemapb.SearchResultData{Ids: intIDs(1, 1, 2), Topks: []int64{3}}))
+
+	// A column shorter than the result is an error, not a panic.
+	short := &schemapb.SearchResultData{Ids: intIDs(1, 2, 3), Topks: []int64{3}, FieldsData: []*schemapb.FieldData{longColumn(-1000, 7, 8)}}
+	stash = newStash(short)
+	require.ErrorContains(t, stash.carry(&schemapb.SearchResultData{Ids: intIDs(1, 2, 3), Topks: []int64{3}}), "holds 2 values")
+}
+
+// Where a Search takes each virtual column from.
+func TestConfigureSearchSources(t *testing.T) {
+	schema := projectionTestSchema(true)
+	bind := func() *outputProjection {
+		b, err := bindOutputFields([]string{"$seg_id", "$seg_id AS sid", "$seg_offset", "$distance", "$score", "$distance AS d"}, schema, true)
+		require.NoError(t, err)
+		return b.projection
+	}
+	planColumns := func(p *outputProjection) []planpb.VirtualColumn {
+		return lo.Map(p.planItems(true), func(item *planpb.ProjectionItem, _ int) planpb.VirtualColumn { return item.GetVirtualColumn() })
+	}
+	segID, segOffset, distance := planpb.VirtualColumn_VirtualColumnSegmentID, planpb.VirtualColumn_VirtualColumnSegmentOffset, planpb.VirtualColumn_VirtualColumnDistance
+
+	// No requery, scores rewritten: everything but $score travels with the rows.
+	p := bind()
+	p.configureSearch(false, false)
+	require.Equal(t, []planpb.VirtualColumn{segID, segID, segOffset, distance, distance}, planColumns(p))
+	require.Empty(t, p.requeryOutputFields())
+	require.Len(t, p.searchRowItemIDs(), 5)
+
+	// Requery: the placement columns leave the Search plan, once per column.
+	p = bind()
+	p.configureSearch(true, false)
+	require.Equal(t, []planpb.VirtualColumn{distance, distance}, planColumns(p))
+	require.Equal(t, []string{"$seg_id", "$seg_offset"}, p.requeryOutputFields())
+	require.Len(t, p.searchRowItemIDs(), 2)
+	// They stay among the columns the end of the pipeline keeps and checks.
+	require.Len(t, p.queryNodeItemIDs(true), 5)
+
+	// Scores are distances: $distance leaves the plan too.
+	p = bind()
+	p.configureSearch(true, true)
+	require.Empty(t, planColumns(p))
+	require.Empty(t, p.searchRowItemIDs())
+	p = bind()
+	p.configureSearch(false, true)
+	require.Equal(t, []planpb.VirtualColumn{segID, segID, segOffset}, planColumns(p))
+
+	// The requery result: one column per virtual column becomes one column
+	// per item, under the item's ID; stored columns pass through.
+	p = bind()
+	p.configureSearch(true, true)
+	requery := []*schemapb.FieldData{
+		stringColumn("title", 101, "a", "b"),
+		{Type: schemapb.DataType_Int64, FieldName: "$seg_id", FieldId: -1000, Field: longColumn(0, 7, 8).Field},
+		{Type: schemapb.DataType_Int64, FieldName: "$seg_offset", FieldId: -1001, Field: longColumn(0, 3, 4).Field},
+	}
+	adopted := p.adoptRequeryColumns(requery)
+	require.Len(t, adopted, 4)
+	require.Equal(t, "title", adopted[0].GetFieldName())
+	byID := lo.SliceToMap(adopted[1:], func(fd *schemapb.FieldData) (int64, []int64) {
+		return fd.GetFieldId(), fd.GetScalars().GetLongData().GetData()
+	})
+	require.Equal(t, map[int64][]int64{-1000: {7, 8}, -1001: {7, 8}, -1002: {3, 4}}, byID)
+	// The final step names them and finds none missing.
+	scores := &schemapb.SearchResultData{Scores: []float32{0.5, 0.25}, FieldsData: adopted}
+	var err error
+	scores.FieldsData, err = p.completeQueryNodeColumns(scores.FieldsData, true, 2)
+	require.NoError(t, err)
+	p.appendSearchScoreColumns(scores)
+	values := map[string]any{}
+	for _, fd := range scores.FieldsData {
+		if fd.GetScalars().GetFloatData() != nil {
+			values[fd.GetFieldName()] = fd.GetScalars().GetFloatData().GetData()
+		}
+	}
+	require.Equal(t, map[string]any{"$distance": []float32{0.5, 0.25}, "$score": []float32{0.5, 0.25}, "d": []float32{0.5, 0.25}}, values)
+
+	// A request without requery columns leaves the fields untouched.
+	p = bind()
+	p.configureSearch(false, false)
+	require.Equal(t, requery, p.adoptRequeryColumns(requery))
+	var none *outputProjection
+	none.configureSearch(true, true)
+	require.Equal(t, requery, none.adoptRequeryColumns(requery))
 }
 
 func floatColumn(id int64, values ...float32) *schemapb.FieldData {

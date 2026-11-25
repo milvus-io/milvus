@@ -18,6 +18,7 @@ package dql
 
 import (
 	"bytes"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -78,7 +79,25 @@ type virtualItem struct {
 	// subRequest is the hybrid sub-request an argument form selects. It is
 	// resolved once the sub-requests are known.
 	subRequest int
+	// source is where a Search takes the column from; see
+	// outputProjection.configureSearch. Query does not use it.
+	source virtualItemSource
 }
+
+// virtualItemSource is where a Search takes a virtual column from.
+type virtualItemSource int
+
+const (
+	// fromSearchRows: the QueryNode computes the column and it travels with
+	// the Search rows in fields_data, as a stored scalar output field does
+	// when the request has no requery.
+	fromSearchRows virtualItemSource = iota
+	// fromRequery: the column is requested in the requery, as a stored
+	// output field is when the request has one.
+	fromRequery
+	// fromFinalScores: the column is the Scores of the final result.
+	fromFinalScores
+)
 
 // text is the item as written in output_fields, without optional whitespace
 // and without the alias.
@@ -99,7 +118,89 @@ func (v *virtualItem) evaluatedAtProxy(isSearch bool) bool {
 	if v.argKind != planparserv2.VirtualColumnNoArg {
 		return true
 	}
-	return isSearch && v.column == planparserv2.VirtualColumnScore
+	return isSearch && (v.column == planparserv2.VirtualColumnScore || v.source == fromFinalScores)
+}
+
+// inSearchPlan reports whether the Search plan asks the QueryNode for the
+// column.
+func (v *virtualItem) inSearchPlan() bool {
+	return !v.evaluatedAtProxy(true) && v.source == fromSearchRows
+}
+
+// configureSearch decides where a Search takes each virtual column from.
+//
+// $seg_id and $seg_offset follow the stored scalar output fields: with a
+// requery they are requested in the requery, which runs on the view of the
+// Search; without one they travel with the Search rows.
+//
+// $distance is the Scores of the final result when nothing between the
+// vector search and the result changes the scores or the order of the rows
+// (scoresAreDistances). Otherwise the QueryNode returns it as a column.
+func (p *outputProjection) configureSearch(needRequery bool, scoresAreDistances bool) {
+	if p == nil {
+		return
+	}
+	for _, v := range p.virtualItems {
+		v.source = fromSearchRows
+		if v.argKind != planparserv2.VirtualColumnNoArg {
+			continue
+		}
+		switch v.column {
+		case planparserv2.VirtualColumnSegID, planparserv2.VirtualColumnSegOffset:
+			if needRequery {
+				v.source = fromRequery
+			}
+		case planparserv2.VirtualColumnDistance:
+			if scoresAreDistances {
+				v.source = fromFinalScores
+			}
+		}
+	}
+}
+
+// requeryOutputFields returns the virtual columns a Search requests in its
+// requery, as output_fields items of that Query.
+func (p *outputProjection) requeryOutputFields() []string {
+	if p == nil {
+		return nil
+	}
+	var names []string
+	for _, v := range p.virtualItems {
+		if v.source == fromRequery && !lo.Contains(names, v.column) {
+			names = append(names, v.column)
+		}
+	}
+	return names
+}
+
+// adoptRequeryColumns turns the virtual columns of a requery result into the
+// columns of this request: the requery returns one column per virtual column,
+// named after it and numbered by the requery's own output IDs; the result
+// holds one column per item instead, under the item's output ID. Items of the
+// same virtual column share the values.
+func (p *outputProjection) adoptRequeryColumns(fields []*schemapb.FieldData) []*schemapb.FieldData {
+	if len(p.requeryOutputFields()) == 0 {
+		return fields
+	}
+	out := make([]*schemapb.FieldData, 0, len(fields)+len(p.virtualItems))
+	for _, fd := range fields {
+		adopted := false
+		for _, v := range p.virtualItems {
+			if v.source != fromRequery || v.column != fd.GetFieldName() {
+				continue
+			}
+			adopted = true
+			out = append(out, &schemapb.FieldData{
+				Type:    v.dataType,
+				FieldId: v.id,
+				Field:   fd.GetField(),
+			})
+		}
+		if !adopted {
+			out = append(out, fd)
+		}
+	}
+	return out
 }
 
 func virtualColumnDataType(column string) schemapb.DataType {
@@ -224,14 +325,16 @@ func (p *outputProjection) virtualItemByID(id int64) *virtualItem {
 	return nil
 }
 
-// appendSearchScoreColumns adds one Float column per bare $score item, filled
-// from the final scores of the result.
+// appendSearchScoreColumns adds one Float column per bare $score item, and
+// per $distance item that configureSearch found equal to it, filled from the
+// final scores of the result.
 func (p *outputProjection) appendSearchScoreColumns(result *schemapb.SearchResultData) {
 	if p == nil || result == nil {
 		return
 	}
 	for _, v := range p.virtualItems {
-		if v.column != planparserv2.VirtualColumnScore || v.argKind != planparserv2.VirtualColumnNoArg {
+		if v.argKind != planparserv2.VirtualColumnNoArg ||
+			(v.column != planparserv2.VirtualColumnScore && v.source != fromFinalScores) {
 			continue
 		}
 		result.FieldsData = append(result.FieldsData, &schemapb.FieldData{
@@ -521,7 +624,7 @@ func (p *outputProjection) planItems(isSearch bool) []*planpb.ProjectionItem {
 	}
 	var items []*planpb.ProjectionItem
 	for _, v := range p.virtualItems {
-		if v.evaluatedAtProxy(isSearch) {
+		if v.evaluatedAtProxy(isSearch) || (isSearch && !v.inSearchPlan()) {
 			continue
 		}
 		items = append(items, &planpb.ProjectionItem{
@@ -555,6 +658,24 @@ func (p *outputProjection) queryNodeItemIDs(isSearch bool) []int64 {
 	var ids []int64
 	for _, v := range p.virtualItems {
 		if !v.evaluatedAtProxy(isSearch) {
+			ids = append(ids, v.id)
+		}
+	}
+	if p.hiddenDistance {
+		ids = append(ids, p.hiddenDistanceID())
+	}
+	return ids
+}
+
+// searchRowItemIDs returns the output IDs of the columns that travel with the
+// Search rows.
+func (p *outputProjection) searchRowItemIDs() []int64 {
+	if p == nil {
+		return nil
+	}
+	var ids []int64
+	for _, v := range p.virtualItems {
+		if v.inSearchPlan() {
 			ids = append(ids, v.id)
 		}
 	}
@@ -687,15 +808,22 @@ func searchRowKeys(data *schemapb.SearchResultData, elementLevel bool) []virtual
 // another segment since the Search, and a Query has no distance).
 type virtualColumnStash struct {
 	columnIDs  []int64
-	subResults []stashedSubResult
+	subResults []*stashedSubResult
 }
 
 // stashedSubResult is one reduced result: one per Search, one per
 // sub-request in hybrid search.
 type stashedSubResult struct {
+	// identity is a copy of the result's ids, topks and element indices as
+	// they were when the result was captured; later pipeline nodes may
+	// reorder or replace the result itself.
+	identity     *schemapb.SearchResultData
+	elementLevel bool
 	// rows maps a row key to its row index. An element-level result is
 	// indexed twice: by (primary key, element index) and, for the first
-	// element of each primary key, by primary key alone.
+	// element of each primary key, by primary key alone. It is built on
+	// first use (rowIndex): a final result that still has the captured rows
+	// in the captured order is matched by position and never needs it.
 	rows    map[virtualColumnRowKey]int
 	columns map[int64]*schemapb.FieldData
 	// scores are the values the sub-request ranked its rows by, in the
@@ -721,14 +849,16 @@ func (s *virtualColumnStash) capture(reduced []*milvuspb.SearchResults, scoreInf
 	if s == nil {
 		return
 	}
-	s.subResults = make([]stashedSubResult, len(reduced))
+	s.subResults = make([]*stashedSubResult, len(reduced))
 	for r, sub := range reduced {
 		data := sub.GetResults()
-		stashed := stashedSubResult{
-			rows:    make(map[virtualColumnRowKey]int),
-			columns: make(map[int64]*schemapb.FieldData),
-			scores:  append(make([]float32, 0, len(data.GetScores())), data.GetScores()...),
-			ranks:   make([]int64, 0, len(data.GetScores())),
+		elementLevel := data.GetElementIndices() != nil
+		stashed := &stashedSubResult{
+			identity:     snapshotRowIdentity(data),
+			elementLevel: elementLevel,
+			columns:      make(map[int64]*schemapb.FieldData),
+			scores:       append(make([]float32, 0, len(data.GetScores())), data.GetScores()...),
+			ranks:        make([]int64, 0, len(data.GetScores())),
 		}
 		if r < len(scoreInfos) {
 			stashed.rewritten = scoreInfos[r].Rewritten
@@ -743,20 +873,65 @@ func (s *virtualColumnStash) capture(reduced []*milvuspb.SearchResults, scoreInf
 				stashed.columns[fd.GetFieldId()] = fd
 			}
 		}
-		elementLevel := data.GetElementIndices() != nil
-		for row, key := range searchRowKeys(data, elementLevel) {
-			if _, ok := stashed.rows[key]; !ok {
-				stashed.rows[key] = row
-			}
-			if elementLevel {
-				rowKey := virtualColumnRowKey{query: key.query, pk: key.pk}
-				if _, ok := stashed.rows[rowKey]; !ok {
-					stashed.rows[rowKey] = row
-				}
-			}
-		}
 		s.subResults[r] = stashed
 	}
+}
+
+// snapshotRowIdentity copies what identifies the rows of a Search result:
+// ids, topks and element indices.
+func snapshotRowIdentity(data *schemapb.SearchResultData) *schemapb.SearchResultData {
+	out := &schemapb.SearchResultData{Topks: append([]int64(nil), data.GetTopks()...)}
+	switch ids := data.GetIds().GetIdField().(type) {
+	case *schemapb.IDs_IntId:
+		out.Ids = &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: append([]int64(nil), ids.IntId.GetData()...)}}}
+	case *schemapb.IDs_StrId:
+		out.Ids = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: append([]string(nil), ids.StrId.GetData()...)}}}
+	}
+	if data.GetElementIndices() != nil {
+		out.ElementIndices = &schemapb.LongArray{Data: append([]int64(nil), data.GetElementIndices().GetData()...)}
+	}
+	return out
+}
+
+// rowIndex returns the map from row key to row index, building it on first
+// use.
+func (sub *stashedSubResult) rowIndex() map[virtualColumnRowKey]int {
+	if sub.rows != nil {
+		return sub.rows
+	}
+	keys := searchRowKeys(sub.identity, sub.elementLevel)
+	sub.rows = make(map[virtualColumnRowKey]int, len(keys))
+	for row, key := range keys {
+		if _, ok := sub.rows[key]; !ok {
+			sub.rows[key] = row
+		}
+		if sub.elementLevel {
+			rowKey := virtualColumnRowKey{query: key.query, pk: key.pk}
+			if _, ok := sub.rows[rowKey]; !ok {
+				sub.rows[rowKey] = row
+			}
+		}
+	}
+	return sub.rows
+}
+
+// sameRows reports whether result holds exactly the captured rows in the
+// captured order, so that row i of result is row i of the captured columns.
+func (sub *stashedSubResult) sameRows(result *schemapb.SearchResultData) bool {
+	if (result.GetElementIndices() != nil) != sub.elementLevel ||
+		!slices.Equal(result.GetTopks(), sub.identity.GetTopks()) ||
+		!slices.Equal(result.GetElementIndices().GetData(), sub.identity.GetElementIndices().GetData()) {
+		return false
+	}
+	switch ids := result.GetIds().GetIdField().(type) {
+	case *schemapb.IDs_IntId:
+		captured, ok := sub.identity.GetIds().GetIdField().(*schemapb.IDs_IntId)
+		return ok && slices.Equal(ids.IntId.GetData(), captured.IntId.GetData())
+	case *schemapb.IDs_StrId:
+		captured, ok := sub.identity.GetIds().GetIdField().(*schemapb.IDs_StrId)
+		return ok && slices.Equal(ids.StrId.GetData(), captured.StrId.GetData())
+	}
+	return false
 }
 
 // carry adds to result every stashed virtual column that it does not hold,
@@ -771,15 +946,20 @@ func (s *virtualColumnStash) carry(result *schemapb.SearchResultData) error {
 	for _, fd := range result.GetFieldsData() {
 		present[fd.GetFieldId()] = true
 	}
-	rowKeys := searchRowKeys(result, result.GetElementIndices() != nil)
+	total := typeutil.GetSizeOfIDs(result.GetIds())
+	// The keys of the result's rows, computed only when a column cannot be
+	// matched by position.
+	var rowKeys []virtualColumnRowKey
+	sameRows := make(map[*stashedSubResult]bool, len(s.subResults))
 	for _, id := range s.columnIDs {
 		if present[id] {
 			continue
 		}
 		var template *schemapb.FieldData
+		var source *stashedSubResult
 		for _, sub := range s.subResults {
 			if fd := sub.columns[id]; fd != nil {
-				template = fd
+				template, source = fd, sub
 				break
 			}
 		}
@@ -788,13 +968,29 @@ func (s *virtualColumnStash) carry(result *schemapb.SearchResultData) error {
 			// follows the pipeline reports it.
 			continue
 		}
+		// The usual case of a plain Search: no node after the reduce
+		// reordered or dropped rows, so the column is taken as it is.
+		same, checked := sameRows[source]
+		if !checked {
+			same = source.sameRows(result)
+			sameRows[source] = same
+		}
+		if same {
+			if out := copyVirtualColumnPrefix(template, id, total); out != nil {
+				result.FieldsData = append(result.FieldsData, out)
+				continue
+			}
+		}
+		if rowKeys == nil {
+			rowKeys = searchRowKeys(result, result.GetElementIndices() != nil)
+		}
 		locate := func(i int, key virtualColumnRowKey) (*schemapb.FieldData, int, error) {
 			for _, sub := range s.subResults {
 				fd := sub.columns[id]
 				if fd == nil {
 					continue
 				}
-				if row, ok := sub.rows[key]; ok {
+				if row, ok := sub.rowIndex()[key]; ok {
 					return fd, row, nil
 				}
 			}
@@ -809,7 +1005,11 @@ func (s *virtualColumnStash) carry(result *schemapb.SearchResultData) error {
 				if err != nil {
 					return err
 				}
-				values[i] = fd.GetScalars().GetLongData().GetData()[row]
+				data := fd.GetScalars().GetLongData().GetData()
+				if row >= len(data) {
+					return merr.WrapErrServiceInternalMsg("virtual column %d holds %d values, row %d requested", id, len(data), row)
+				}
+				values[i] = data[row]
 			}
 			out.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: values}},
@@ -821,7 +1021,11 @@ func (s *virtualColumnStash) carry(result *schemapb.SearchResultData) error {
 				if err != nil {
 					return err
 				}
-				values[i] = fd.GetScalars().GetFloatData().GetData()[row]
+				data := fd.GetScalars().GetFloatData().GetData()
+				if row >= len(data) {
+					return merr.WrapErrServiceInternalMsg("virtual column %d holds %d values, row %d requested", id, len(data), row)
+				}
+				values[i] = data[row]
 			}
 			out.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: values}},
@@ -832,6 +1036,34 @@ func (s *virtualColumnStash) carry(result *schemapb.SearchResultData) error {
 		result.FieldsData = append(result.FieldsData, out)
 	}
 	return nil
+}
+
+// copyVirtualColumnPrefix returns a column holding the first total values of
+// column, or nil when column is shorter than that or not an Int64 or Float
+// column.
+func copyVirtualColumnPrefix(column *schemapb.FieldData, id int64, total int) *schemapb.FieldData {
+	out := &schemapb.FieldData{Type: column.GetType(), FieldId: id}
+	switch data := column.GetScalars().GetData().(type) {
+	case *schemapb.ScalarField_LongData:
+		values := data.LongData.GetData()
+		if len(values) < total {
+			return nil
+		}
+		out.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: append([]int64(nil), values[:total]...)}},
+		}}
+	case *schemapb.ScalarField_FloatData:
+		values := data.FloatData.GetData()
+		if len(values) < total {
+			return nil
+		}
+		out.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: append([]float32(nil), values[:total]...)}},
+		}}
+	default:
+		return nil
+	}
+	return out
 }
 
 // overwriteScoresWithDistance implements "$distance AS distance": the scores
@@ -984,12 +1216,13 @@ func (p *outputProjection) appendSubRequestColumns(result *schemapb.SearchResult
 			return merr.WrapErrServiceInternalMsg("virtual column %s: sub-request %d has no reduced result", v.name, v.subRequest)
 		}
 		sub := stash.subResults[v.subRequest]
+		rows := sub.rowIndex()
 		valid := make([]bool, len(rowKeys))
 		fd := &schemapb.FieldData{Type: v.dataType, FieldName: v.name, FieldId: v.id, ValidData: valid}
 		if v.column == planparserv2.VirtualColumnRank {
 			values := make([]int64, len(rowKeys))
 			for i, key := range rowKeys {
-				if row, ok := sub.rows[key]; ok && row < len(sub.ranks) {
+				if row, ok := rows[key]; ok && row < len(sub.ranks) {
 					values[i], valid[i] = sub.ranks[row], true
 				}
 			}
@@ -1009,7 +1242,7 @@ func (p *outputProjection) appendSubRequestColumns(result *schemapb.SearchResult
 			}
 			values := make([]float32, len(rowKeys))
 			for i, key := range rowKeys {
-				if row, ok := sub.rows[key]; ok && row < len(source) {
+				if row, ok := rows[key]; ok && row < len(source) {
 					values[i], valid[i] = source[row], true
 				}
 			}

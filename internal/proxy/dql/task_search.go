@@ -900,8 +900,9 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 		t.retainRerankDynamicFields(plan)
 		plan.Namespace = NamespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
-		// Virtual columns evaluated on the QueryNode travel with the Search
-		// rows, also when stored output fields are left to a requery.
+		// The scores of a hybrid result come from the fusion, so $distance is
+		// never the final Scores.
+		t.outputProjection.configureSearch(t.needRequery, false)
 		plan.ProjectionItems = t.outputProjection.planItems(true)
 		plan.QuerynodeFunctionChains = querynodeFunctionChains
 
@@ -1257,8 +1258,14 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 			return err
 		}
 	}
-	// Virtual columns evaluated on the QueryNode travel with the Search
-	// rows, also when stored output fields are left to a requery.
+	// The final Scores are the distances of the vector search unless a
+	// rerank, a Boost scorer in the plan (it runs in segcore and leaves no
+	// rerank on the proxy), a score-writing function chain or an aggregation
+	// produces them, or order_by moves the rows.
+	scoresAreDistances := t.rerankMeta == nil && t.request.GetFunctionScore() == nil && len(plan.GetScorers()) == 0 &&
+		t.aggCtx == nil && len(t.orderByFields) == 0 &&
+		!chain.QueryNodeChainsWriteScore(t.request.GetFunctionChains())
+	t.outputProjection.configureSearch(t.needRequery, scoresAreDistances)
 	plan.ProjectionItems = t.outputProjection.planItems(true)
 	plan.QuerynodeFunctionChains = querynodeFunctionChains
 
@@ -2513,7 +2520,7 @@ func (t *SearchTask) OnEnqueue() error {
 // operators fill it and the end operator reads it.
 func (t *SearchTask) getVirtualColumnStash() *virtualColumnStash {
 	if t.virtualColumnStash == nil {
-		t.virtualColumnStash = newVirtualColumnStash(t.outputProjection.queryNodeItemIDs(true), t.outputProjection.hasSubRequestColumns())
+		t.virtualColumnStash = newVirtualColumnStash(t.outputProjection.searchRowItemIDs(), t.outputProjection.hasSubRequestColumns())
 	}
 	return t.virtualColumnStash
 }
