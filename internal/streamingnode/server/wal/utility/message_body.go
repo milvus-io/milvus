@@ -32,6 +32,24 @@ func DecodeDeleteBody(ctx context.Context, msg message.MutableMessage) (*msgpb.D
 	return decodeBody(ctx, "delete", deleteMsg)
 }
 
+type updateBodyKey struct{}
+
+// DecodeUpdateBody returns the read-only UPDATE body and a context for downstream
+// interceptors handling the same message in this append attempt.
+func DecodeUpdateBody(ctx context.Context, update message.MutableUpdateMessageV2) (context.Context, *message.UpdateMessageBody, error) {
+	if err := ctx.Err(); err != nil {
+		return ctx, nil, err
+	}
+	if body, ok := ctx.Value(updateBodyKey{}).(*message.UpdateMessageBody); ok {
+		return ctx, body, nil
+	}
+	body, err := update.Body(ctx)
+	if err != nil {
+		return ctx, nil, err
+	}
+	return context.WithValue(ctx, updateBodyKey{}, body), body, nil
+}
+
 func decodeBody[B proto.Message](ctx context.Context, kind string, msg interface {
 	Body(ctx context.Context) (B, error)
 },

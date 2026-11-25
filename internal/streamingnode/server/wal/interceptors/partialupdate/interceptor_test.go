@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/shard/mock_shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
@@ -912,6 +913,66 @@ func TestPartialUpdateInterceptorRejectsTxnCASAttemptMismatchBeforeAppend(t *tes
 
 	requireUnrecoverable(t, err)
 	require.False(t, called)
+}
+
+func TestUpdateBodyDecodedOncePerAppend(t *testing.T) {
+	const channel = "p1_10v0"
+	header := &message.UpdateMessageHeader{CollectionId: 10, SchemaVersion: proto.Int32(7)}
+	manager := mock_shards.NewMockShardManager(t)
+	manager.EXPECT().CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
+		CollectionId: 10, SchemaVersion: proto.Int32(7),
+	}).Return(int32(7), nil).Twice()
+	manager.EXPECT().GetCollectionSchemaSnapshot(int64(10)).Return(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: 101, DataType: schemapb.DataType_Int64, Nullable: true}},
+	}).Twice()
+	env := newPartialUpdateChainTestEnvWithShardManager(t.Context(), t, nil, func(*txn.TxnManager) shards.ShardManager {
+		return manager
+	}, true)
+
+	var decodes atomic.Int32
+	var unmarshal func([]byte, proto.Message) error
+	patch := mockey.Mock(proto.Unmarshal).Origin(&unmarshal).To(func(data []byte, dst proto.Message) error {
+		if _, ok := dst.(*message.UpdateMessageBody); ok {
+			decodes.Add(1)
+		}
+		return unmarshal(data, dst)
+	}).Build()
+	defer patch.UnPatch()
+
+	for _, tc := range []struct {
+		name string
+		pk   int64
+		txn  bool
+	}{{"ordinary", 7, false}, {"transaction", 9, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := &message.UpdateMessageBody{
+				PartitionId: -1,
+				PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{tc.pk}}}},
+				Assignments: []*messagespb.UpdateAssignment{{FieldId: 101, Literal: &schemapb.UpdateLiteral{
+					Value: &schemapb.UpdateLiteral_SetNull{SetNull: true},
+				}}},
+			}
+			msg := message.NewUpdateMessageBuilderV2().WithVChannel(channel).WithHeader(header).WithBody(body).MustBuildMutable()
+			if tc.txn {
+				begin := message.NewBeginTxnMessageBuilderV2().WithVChannel(channel).
+					WithHeader(&message.BeginTxnMessageHeader{KeepaliveMilliseconds: time.Second.Milliseconds()}).
+					WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable()
+				result, err := env.append(begin, nil)
+				require.NoError(t, err)
+				msg = msg.WithTxnContext(*result.TxnCtx)
+			}
+			before := decodes.Load()
+			_, err := env.append(msg, nil)
+			require.NoError(t, err)
+			if tc.txn {
+				require.False(t, env.hasPKVersionAfter(channel, tc.pk, 0))
+				_, err = env.append(newCommitTxnMessage(channel, msg.TxnContext().TxnID, 0), nil)
+				require.NoError(t, err)
+			}
+			require.True(t, env.hasPKVersionAfter(channel, tc.pk, 0))
+			require.EqualValues(t, 1, decodes.Load()-before)
+		})
+	}
 }
 
 type partialUpdateChainTestEnv struct {

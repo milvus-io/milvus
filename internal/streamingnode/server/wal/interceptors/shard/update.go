@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -55,7 +56,7 @@ func (impl *shardInterceptor) handleUpdateMessage(ctx context.Context, msg messa
 	if err != nil {
 		return nil, status.NewUnrecoverableError("cannot validate update schema: %s", err)
 	}
-	body, err := update.Body(ctx)
+	ctx, body, err := utility.DecodeUpdateBody(ctx, update)
 	if err != nil {
 		if errors.Is(err, message.ErrMalformedBody) {
 			return nil, status.NewInvalidArgument("invalid UPDATE payload: %s", err)

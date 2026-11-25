@@ -431,7 +431,7 @@ func (i *appendInterceptor) Acquire(ctx context.Context, msg message.MutableMess
 	if message.HasPartialUpdateCAS(msg) {
 		return ctx, nil, status.NewUnrecoverableError("partial update CAS message must be transactional")
 	}
-	set, err := i.extractOrdinaryWriteSet(ctx, msg)
+	ctx, set, err := i.extractOrdinaryWriteSet(ctx, msg)
 	if err != nil {
 		return ctx, nil, err
 	}
@@ -440,28 +440,28 @@ func (i *appendInterceptor) Acquire(ctx context.Context, msg message.MutableMess
 	return ctx, release, err
 }
 
-func (i *appendInterceptor) extractOrdinaryWriteSet(ctx context.Context, msg message.BasicMessage) (ordinaryWriteSet, error) {
+func (i *appendInterceptor) extractOrdinaryWriteSet(ctx context.Context, msg message.BasicMessage) (context.Context, ordinaryWriteSet, error) {
 	var set ordinaryWriteSet
 	pks, ok, err := extractPKsFromDeleteWithContext(ctx, msg)
 	if err != nil {
-		return set, err
+		return ctx, set, err
 	}
 	if ok {
 		set.pks = pks
 	} else if collectionID, ok := extractCollectionFenceID(msg); ok {
 		if collectionID == 0 {
-			return set, status.NewUnrecoverableError("partial update collection fence has empty collection id")
+			return ctx, set, status.NewUnrecoverableError("partial update collection fence has empty collection id")
 		}
 		set.fenceCollectionID = collectionID
 	} else if collectionID, ok := extractDropCollectionID(msg); ok {
 		if collectionID == 0 {
-			return set, status.NewUnrecoverableError("partial update dropped collection has empty collection id")
+			return ctx, set, status.NewUnrecoverableError("partial update dropped collection has empty collection id")
 		}
 		set.droppedCollectionID = collectionID
 	} else if msg.MessageType() == message.MessageTypeUpdate {
-		set.pks, err = extractUpdatePKs(ctx, msg)
+		ctx, set.pks, err = extractUpdatePKs(ctx, msg)
 	} else if msg.MessageType() == message.MessageTypeInsert {
 		set.pks, err = extractPKsFromOrdinaryInsertWithContext(ctx, msg, i.pkDescriptorGetter)
 	}
-	return set, err
+	return ctx, set, err
 }

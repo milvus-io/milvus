@@ -82,7 +82,7 @@ func (i *appendInterceptor) recoverBody(ctx context.Context, txnID message.TxnID
 			return err
 		}
 	} else {
-		set, err := i.extractOrdinaryWriteSet(ctx, msg)
+		_, set, err := i.extractOrdinaryWriteSet(ctx, msg)
 		if err != nil {
 			return err
 		}

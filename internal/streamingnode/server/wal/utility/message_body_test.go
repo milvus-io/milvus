@@ -78,6 +78,37 @@ func TestDecodeDeleteBody(t *testing.T) {
 	requireStreamingCode(t, err, streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE, "decode delete body failed")
 }
 
+func TestUpdateBodyAppendScope(t *testing.T) {
+	msg := message.NewUpdateMessageBuilderV2().WithVChannel("p1_10v0").
+		WithHeader(&message.UpdateMessageHeader{CollectionId: 10}).
+		WithBody(&message.UpdateMessageBody{PartitionId: 1}).MustBuildMutable()
+	update := message.MustAsMutableUpdateMessageV2(msg)
+	parent := t.Context()
+	ctx, first, err := DecodeUpdateBody(parent, update)
+	require.NoError(t, err)
+	downstream, again, err := DecodeUpdateBody(ctx, update)
+	require.NoError(t, err)
+	require.Same(t, ctx, downstream)
+	require.Same(t, first, again)
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	_, _, err = DecodeUpdateBody(canceled, update)
+	require.ErrorIs(t, err, context.Canceled)
+
+	update.OverwriteBody(&message.UpdateMessageBody{PartitionId: 2})
+	_, next, err := DecodeUpdateBody(parent, update)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, next.GetPartitionId())
+	require.EqualValues(t, 1, first.GetPartitionId())
+
+	invalid := message.MustAsMutableUpdateMessageV2(corruptBody(msg))
+	unchanged, body, err := DecodeUpdateBody(parent, invalid)
+	require.ErrorIs(t, err, message.ErrMalformedBody)
+	require.Nil(t, body)
+	require.Equal(t, parent, unchanged)
+}
+
 type failingBody struct{ err error }
 
 func (f failingBody) Body(context.Context) (*msgpb.InsertRequest, error) {
