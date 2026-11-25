@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -40,9 +41,13 @@ func TestPreparationSchemaOverlay(t *testing.T) {
 			byID[collection.ID] = collection
 		}
 		require.EqualValues(t, 2, byID[1].Schema.Version)
-		require.Equal(t, "60", byID[1].Properties["collection.ttl.seconds"])
+		ttl, ok := common.GetStringValue(byID[1].Properties, "collection.ttl.seconds")
+		require.True(t, ok)
+		require.Equal(t, "60", ttl)
+		require.NotSame(t, m.GetCollection(1), byID[1])
 		require.Empty(t, m.GetCollection(1).Properties)
 		require.Equal(t, "db", byID[1].DatabaseName)
+		require.Same(t, m.GetCollection(3), byID[3])
 		require.EqualValues(t, 1, byID[3].Schema.Version)
 		require.EqualValues(t, 1, m.GetCollection(1).Schema.Version)
 		require.Len(t, m.GetCollections(), 3, "committed metadata enumeration remains complete")

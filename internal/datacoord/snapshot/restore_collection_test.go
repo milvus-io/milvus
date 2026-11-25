@@ -74,7 +74,7 @@ func TestRestoreCollectionUsesOneBroadcast(t *testing.T) {
 		sm := &Manager{CollectionRestorer: &rootcoord.Core{}, Allocator: &restoreAllocatorTarget{}}
 		job, err := sm.finishRestoreSnapshot(t.Context(), nil, &snapshotstorage.SnapshotData{
 			Collection: &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Name: "source"}, Partitions: map[string]int64{"_default": 1, "p1": 2}},
-		}, "snapshot", 10, "target", "default", 5, false, "", "", nil, nil, nil)
+		}, "snapshot", 10, "target", "default", 5, false, "", "", nil, nil, nil, nil)
 		require.NoError(t, err)
 		require.Equal(t, int64(77), job)
 		require.Equal(t, 1, calls)

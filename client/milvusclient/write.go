@@ -58,6 +58,7 @@ type InsertResult struct {
 func (c *Client) Insert(ctx context.Context, option InsertOption, callOptions ...grpc.CallOption) (InsertResult, error) {
 	startTime := time.Now()
 	collectionName := option.CollectionName()
+	db := c.getCurrentDB()
 	result := InsertResult{}
 	// Scope any non-empty option-level idempotency key onto a per-call child
 	// context. With no option key, preserve any existing outgoing metadata so
@@ -67,8 +68,8 @@ func (c *Client) Insert(ctx context.Context, option InsertOption, callOptions ..
 			ctx = withIdempotencyKey(ctx, key)
 		}
 	}
-	err := c.retryIfSchemaError(ctx, collectionName, func(ctx context.Context) (uint64, error) {
-		collection, err := c.getCollection(ctx, option.CollectionName())
+	err := c.retryIfSchemaError(ctx, db, collectionName, func(ctx context.Context) (uint64, error) {
+		collection, err := c.getCollectionInDB(ctx, db, option.CollectionName())
 		if err != nil {
 			return math.MaxUint64, err
 		}
@@ -77,6 +78,7 @@ func (c *Client) Insert(ctx context.Context, option InsertOption, callOptions ..
 			// return schema mismatch err to retry with newer schema
 			return collection.UpdateTimestamp, merr.WrapErrCollectionSchemaMisMatch(err)
 		}
+		req.DbName = db
 
 		return collection.UpdateTimestamp, c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 			resp, err := milvusService.Insert(ctx, req, callOptions...)
@@ -86,6 +88,7 @@ func (c *Client) Insert(ctx context.Context, option InsertOption, callOptions ..
 				return err
 			}
 
+			c.collCache.UpdateWriteTs(newCollectionCacheKey(db, collectionName), resp.GetTimestamp())
 			result.InsertCount = resp.GetInsertCnt()
 			result.IDs, err = column.IDColumns(collection.Schema, resp.GetIDs(), 0, -1)
 			if err != nil {
@@ -109,6 +112,7 @@ func (c *Client) Delete(ctx context.Context, option DeleteOption, callOptions ..
 	startTime := time.Now()
 	req, err := option.Request()
 	collectionName := req.GetCollectionName()
+	db := c.getCurrentDB()
 	result := DeleteResult{}
 	defer func() {
 		c.recordOperation("Delete", collectionName, startTime, err)
@@ -116,12 +120,14 @@ func (c *Client) Delete(ctx context.Context, option DeleteOption, callOptions ..
 	if err != nil {
 		return result, err
 	}
+	req.DbName = db
 
 	err = c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.Delete(ctx, req, callOptions...)
 		if err = merr.CheckRPCCall(resp, err); err != nil {
 			return err
 		}
+		c.collCache.UpdateWriteTs(newCollectionCacheKey(db, collectionName), resp.GetTimestamp())
 		result.DeleteCount = resp.GetDeleteCnt()
 		return nil
 	})
@@ -136,9 +142,10 @@ type UpsertResult struct {
 func (c *Client) Upsert(ctx context.Context, option UpsertOption, callOptions ...grpc.CallOption) (UpsertResult, error) {
 	startTime := time.Now()
 	collectionName := option.CollectionName()
+	db := c.getCurrentDB()
 	result := UpsertResult{}
-	err := c.retryIfSchemaError(ctx, collectionName, func(ctx context.Context) (uint64, error) {
-		collection, err := c.getCollection(ctx, collectionName)
+	err := c.retryIfSchemaError(ctx, db, collectionName, func(ctx context.Context) (uint64, error) {
+		collection, err := c.getCollectionInDB(ctx, db, collectionName)
 		if err != nil {
 			return math.MaxUint64, err
 		}
@@ -153,11 +160,13 @@ func (c *Client) Upsert(ctx context.Context, option UpsertOption, callOptions ..
 			// return schema mismatch err to retry with newer schema
 			return collection.UpdateTimestamp, merr.WrapErrCollectionSchemaMisMatch(err)
 		}
+		req.DbName = db
 		return collection.UpdateTimestamp, c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 			resp, err := milvusService.Upsert(ctx, req, callOptions...)
 			if err = merr.CheckRPCCall(resp, err); err != nil {
 				return err
 			}
+			c.collCache.UpdateWriteTs(newCollectionCacheKey(db, collectionName), resp.GetTimestamp())
 			result.UpsertCount = resp.GetUpsertCnt()
 			result.IDs, err = column.IDColumns(collection.Schema, resp.GetIDs(), 0, -1)
 			if err != nil {

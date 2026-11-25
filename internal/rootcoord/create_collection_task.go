@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
@@ -54,6 +55,13 @@ type createCollectionTask struct {
 	header          *message.CreateCollectionMessageHeader
 	body            *message.CreateCollectionRequest
 	preserveFieldID bool
+	// allowStructSubFieldOriginMarker accepts the internal origin marker on
+	// struct sub-fields. Only restore from a snapshot sets it: that restore
+	// copies segments as they are, so the sub-fields added after their struct
+	// still lack columns in old segments and must keep the marker. Every
+	// CreateCollection request, with or without preserve_field_ids, is rejected
+	// when it carries the marker.
+	allowStructSubFieldOriginMarker bool
 
 	// heldFileResourceIds tracks file resources whose refCnt was incremented
 	// during validation, to be released if the task fails before Broadcast.
@@ -186,8 +194,14 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
-	if err := rejectStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
-		return err
+	if t.allowStructSubFieldOriginMarker {
+		if err := validateRestoredStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
+			return err
+		}
+	} else {
+		if err := rejectStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
+			return err
+		}
 	}
 	// A restored collection (preserveFieldID) keeps its stored schema, whose
 	// sub-fields may carry enable_match or enable_analyzer from an earlier
@@ -302,7 +316,7 @@ func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.Collect
 }
 
 // assignFunctionIDsFromFieldNames resolves function input/output field IDs
-// after field IDs have been assigned or aligned from a source snapshot.
+// after target field IDs have been assigned.
 func assignFunctionIDsFromFieldNames(schema *schemapb.CollectionSchema) error {
 	name2id := map[string]int64{}
 	for _, field := range schema.GetFields() {
@@ -470,8 +484,8 @@ func (t *createCollectionTask) appendSysFields(schema *schemapb.CollectionSchema
 	})
 }
 
-// prepareMilvusTableSnapshotSchema validates the source snapshot and aligns
-// target field IDs before normal create-collection field ID assignment runs.
+// prepareMilvusTableSnapshotSchema validates logical source compatibility.
+// Target IDs use normal allocation; DataNode binds source IDs in manifests.
 func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Context) error {
 	schema := t.body.CollectionSchema
 	if schema == nil || schema.GetExternalSource() == "" || schema.GetExternalSpec() == "" {
@@ -490,7 +504,7 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 		return nil
 	}
 	if t.preserveFieldID {
-		// DDL replay carries the schema after milvus-table field-ID alignment.
+		// DDL replay already carries its resolved logical schema.
 		// Re-reading the source snapshot here would make RootCoord recovery
 		// depend on the external bucket and credentials still being available.
 		return nil
@@ -506,7 +520,7 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 		},
 	)
 	if err != nil {
-		return merr.Wrap(err, "read milvus-table snapshot metadata for schema alignment")
+		return merr.Wrap(err, "read milvus-table snapshot metadata for schema validation")
 	}
 	sourceSchema := metadata.GetCollection().GetSchema()
 	if sourceSchema == nil {
@@ -518,53 +532,10 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 		// contract, which is not part of the milvus-table snapshot contract.
 		return merr.WrapErrParameterInvalidMsg("milvus-table external collection cannot use an external collection snapshot as source")
 	}
-	if err := typeutil.ValidateMilvusTableSchemaIdentity(schema, sourceSchema, false); err != nil {
+	if err := typeutil.ValidateMilvusTableSchemaIdentity(schema, sourceSchema); err != nil {
 		return merr.Wrap(err, "milvus-table target schema must match source snapshot schema")
 	}
 
-	sourceFields := milvusTableSourceFieldsByName(sourceSchema)
-	nextTargetOnlyFieldID := nextMilvusTableTargetOnlyFieldID(sourceSchema)
-	for _, field := range schema.GetFields() {
-		if field.GetName() == common.VirtualPKFieldName || typeutil.IsFunctionOutputField(schema, field) {
-			// Milvus-table mapped fields must reuse source field IDs because
-			// source manifests store physical columns by field ID. Target-only
-			// fields, including virtual PK and target function outputs, are not
-			// read from the source manifest and therefore need IDs outside the
-			// source snapshot range.
-			field.FieldID = nextTargetOnlyFieldID
-			nextTargetOnlyFieldID++
-			continue
-		}
-		if typeutil.IsExternalSystemOrVirtualField(field.GetName()) {
-			continue
-		}
-		sourceField := sourceFields[field.GetExternalField()]
-		if sourceField == nil {
-			return merr.WrapErrParameterInvalidMsg("milvus-table target field %q maps to missing source field %q", field.GetName(), field.GetExternalField())
-		}
-		field.FieldID = sourceField.GetFieldID()
-	}
-	if err := assignFunctionIDsFromFieldNames(schema); err != nil {
-		return merr.Wrap(err, "align milvus-table function field IDs")
-	}
-	// Newly aligned milvus-table schemas set preserveFieldID below and would
-	// bypass the direct-path ValidateFunction in prepareSchema, so run the
-	// non-runtime function validation here; DDL replay never reaches this
-	// point (it returns early above) and keeps its historical schema unjudged.
-	if err := validator.ValidateFunction(schema, "", true); err != nil {
-		return err
-	}
-	// The target schema is new input; validateSchema skips this check once
-	// preserveFieldID is set below.
-	if err := schemautil.RejectStructSubFieldsTextMatch(schema.GetStructArrayFields()); err != nil {
-		return err
-	}
-	t.preserveFieldID = true
-	t.Req.Properties = upsertCreateCollectionProperty(t.Req.GetProperties(), util.PreserveFieldIdsKey, "true")
-
-	mlog.Info(ctx, "aligned milvus-table external collection field IDs with source snapshot",
-		mlog.String("collection", t.Req.GetCollectionName()),
-		mlog.String("externalSource", schema.GetExternalSource()))
 	return nil
 }
 
@@ -583,6 +554,7 @@ func createMilvusTableSnapshotStorageConfig() *indexpb.StorageConfig {
 			TalonEnabledStages:          params.CommonCfg.StorageTalonEnabledStages.GetAsUint32(),
 			TalonSmallReadThreshold:     params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
 			TalonCoordinator:            params.CommonCfg.StorageTalonCoordinator.GetValue(),
+			TalonNamespace:              params.CommonCfg.TalonNamespace(),
 			TalonBlockSize:              params.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
 			TalonMaxIdlePerAddr:         params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
 			TalonEnableForExternalTable: params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool(),
@@ -611,49 +583,11 @@ func createMilvusTableSnapshotStorageConfig() *indexpb.StorageConfig {
 		TalonEnabledStages:          params.CommonCfg.StorageTalonEnabledStages.GetAsUint32(),
 		TalonSmallReadThreshold:     params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
 		TalonCoordinator:            params.CommonCfg.StorageTalonCoordinator.GetValue(),
+		TalonNamespace:              params.CommonCfg.TalonNamespace(),
 		TalonBlockSize:              params.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
 		TalonMaxIdlePerAddr:         params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
 		TalonEnableForExternalTable: params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool(),
 	}
-}
-
-// nextMilvusTableTargetOnlyFieldID returns the first field ID above all source
-// snapshot IDs so target-only fields cannot collide with source columns.
-func nextMilvusTableTargetOnlyFieldID(schemas ...*schemapb.CollectionSchema) int64 {
-	next := int64(StartOfUserFieldID)
-	for _, schema := range schemas {
-		for _, field := range schema.GetFields() {
-			if field.GetFieldID() >= next {
-				next = field.GetFieldID() + 1
-			}
-		}
-	}
-	return next
-}
-
-// milvusTableSourceFieldsByName indexes source user fields that can be targets
-// of ExternalField mappings.
-func milvusTableSourceFieldsByName(schema *schemapb.CollectionSchema) map[string]*schemapb.FieldSchema {
-	fields := make(map[string]*schemapb.FieldSchema, len(schema.GetFields()))
-	for _, field := range schema.GetFields() {
-		if typeutil.IsExternalSystemOrVirtualField(field.GetName()) {
-			continue
-		}
-		fields[field.GetName()] = field
-	}
-	return fields
-}
-
-// upsertCreateCollectionProperty inserts or updates one create-collection
-// property without disturbing the remaining request properties.
-func upsertCreateCollectionProperty(properties []*commonpb.KeyValuePair, key, value string) []*commonpb.KeyValuePair {
-	for _, property := range properties {
-		if property.GetKey() == key {
-			property.Value = value
-			return properties
-		}
-	}
-	return append(properties, &commonpb.KeyValuePair{Key: key, Value: value})
 }
 
 func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
@@ -889,12 +823,45 @@ func (t *createCollectionTask) validateIfCollectionExists(ctx context.Context) e
 	existedCollInfo, err := t.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err == nil {
 		newCollInfo := newCollectionModel(t.header, t.body, 0)
-		if equal := existedCollInfo.Equal(*newCollInfo); !equal {
+		if !existedCollInfo.Equal(*newCollInfo) && !t.matchesExistingMilvusTable(existedCollInfo, newCollInfo) {
 			return merr.WrapErrParameterInvalidMsg("create duplicate collection with different parameters, collection: %s", t.Req.GetCollectionName())
 		}
 		return errIgnoredCreateCollection
 	}
 	return nil
+}
+
+func (t *createCollectionTask) matchesExistingMilvusTable(existing, candidate *model.Collection) bool {
+	if !typeutil.NewStorageColumnResolver(t.body.GetCollectionSchema()).IsMilvusTable() ||
+		existing.ExternalSource != candidate.ExternalSource ||
+		existing.ExternalSpec != candidate.ExternalSpec ||
+		len(existing.Fields) != len(candidate.Fields) {
+		return false
+	}
+
+	// Pre-upgrade milvus-table collections persisted source-aligned field IDs
+	// with preserve_field_ids=true. Compare using the committed field IDs and
+	// derived properties so identical CreateCollection retries stay idempotent.
+	existingIDs := make(map[string]int64, len(existing.Fields))
+	for _, field := range existing.Fields {
+		existingIDs[field.Name] = field.FieldID
+	}
+	for _, field := range candidate.Fields {
+		id, ok := existingIDs[field.Name]
+		if !ok {
+			return false
+		}
+		field.FieldID = id
+	}
+	schema := candidate.ToCollectionSchemaPB()
+	properties := append([]*commonpb.KeyValuePair(nil), t.Req.GetProperties()...)
+	if preserve, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(util.PreserveFieldIdsKey, existing.Properties); ok && preserve == "true" {
+		if _, requested := funcutil.TryGetAttrByKeyFromRepeatedKV(util.PreserveFieldIdsKey, properties); !requested {
+			properties = append(properties, &commonpb.KeyValuePair{Key: util.PreserveFieldIdsKey, Value: preserve})
+		}
+	}
+	_, candidate.Properties = mustConsumeConsistencyLevel(updateMaxFieldIDProperty(properties, maxAssignedFieldIDFromSchema(schema)))
+	return existing.Equal(*candidate)
 }
 
 func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema, infos *[]*querypb.AnalyzerInfo) error {
@@ -984,7 +951,8 @@ func collectAnalyzerInfos(collSchema *schemapb.CollectionSchema) ([]*querypb.Ana
 // enable_analyzer=true. Analyzer params are ignored while analyzer is disabled.
 func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema, analyzerInfos *[]*querypb.AnalyzerInfo) error {
 	h := typeutil.CreateFieldSchemaHelper(fieldSchema)
-	active := h.EnableMatch() || typeutil.IsBm25FunctionInputField(collSchema, fieldSchema)
+	matchEnabled := typeutil.IsTextMatchEnabled(fieldSchema)
+	active := matchEnabled || typeutil.IsBm25FunctionInputField(collSchema, fieldSchema)
 	if active && !h.EnableAnalyzer() {
 		return merr.WrapErrParameterInvalidMsg("field %s which has enable_match or is input of BM25 function must also enable_analyzer", fieldSchema.Name)
 	}
@@ -993,7 +961,7 @@ func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schema
 	}
 
 	if params, ok := h.GetMultiAnalyzerParams(); ok {
-		if h.EnableMatch() {
+		if matchEnabled {
 			return merr.WrapErrParameterInvalidMsg("multi analyzer now only support for bm25, but now field %s enable match", fieldSchema.Name)
 		}
 		if h.HasAnalyzerParams() {

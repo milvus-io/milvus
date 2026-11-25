@@ -100,18 +100,14 @@ func TestConsumeDirtySnapshotRewritesCheckpointOnControlChange(t *testing.T) {
 		TimeTick:  10,
 		Magic:     utility.RecoveryMagicRecoveryStorageV2,
 	}
-	storage.pchannelControl.AlterWalState = &streamingpb.AlterWALState{
-		TargetWalName: commonpb.WALName_Kafka,
-		TimeTick:      10,
-		Stage:         streamingpb.AlterWALStage_FLUSHING,
-	}
+	storage.pchannelControl.ReplicateCheckpoint = &commonpb.ReplicateCheckpoint{ClusterId: "source"}
 	storage.mu.Unlock()
 
 	snapshot := storage.consumeDirtySnapshot()
 	require.NotNil(t, snapshot)
 	require.True(t, snapshot.CheckpointDirty)
-	require.NotNil(t, snapshot.Checkpoint.AlterWalState)
-	require.Equal(t, streamingpb.AlterWALStage_FLUSHING, snapshot.Checkpoint.AlterWalState.GetStage())
+	require.NotNil(t, snapshot.Checkpoint.ReplicateCheckpoint)
+	require.Equal(t, "source", snapshot.Checkpoint.ReplicateCheckpoint.GetClusterId())
 
 	// Consuming again without any further change is a no-op: the position and
 	// the control state both match the last frozen checkpoint.
@@ -128,11 +124,6 @@ func TestConsumeCheckpointEqualComparesControlFields(t *testing.T) {
 		Magic:     utility.RecoveryMagicRecoveryStorageV2,
 	}
 	assert.True(t, consumeCheckpointEqual(base, base.Clone()))
-
-	withAlter := base.Clone()
-	withAlter.AlterWalState = &streamingpb.AlterWALState{Stage: streamingpb.AlterWALStage_FLUSHING}
-	assert.False(t, consumeCheckpointEqual(base, withAlter))
-	assert.True(t, consumeCheckpointEqual(withAlter, withAlter.Clone()))
 
 	withCP := &utility.WALCheckpoint{
 		MessageID:           walimplstest.NewTestMessageID(10),
@@ -615,11 +606,8 @@ func TestBuildInitialRecoverySnapshotUsesCanonicalState(t *testing.T) {
 	assert.NotNil(t, snapshot.WritePathRecovery.VChannels)
 	assert.NotNil(t, snapshot.WritePathRecovery.GrowingSegments)
 	require.NotNil(t, snapshot.PChannelControl)
-	state := snapshot.PChannelControl.GetAlterWalState()
-	assert.Equal(t, streamingpb.AlterWALStage_FLUSHING, state.GetStage())
-	assert.Equal(t, commonpb.WALName_Kafka, state.GetTargetWalName())
-	assert.Equal(t, uint64(20), state.GetTimeTick())
-	assert.Equal(t, "localhost:9092", state.GetConfigs()["bootstrap.servers"])
+	assert.Nil(t, snapshot.PChannelControl.GetAlterWalState())
+	assert.Equal(t, uint64(1), snapshot.Checkpoint.TimeTick, "observing a switch must not rewrite the data checkpoint")
 }
 
 func TestRecoveryStorageConsumeDirtySnapshotDoesNotHoldLockWhileCollectingModules(t *testing.T) {
@@ -716,6 +704,15 @@ func TestValidateRecoveredViewMetaNormalizesBackwardCompatibleDefaults(t *testin
 
 	require.NoError(t, err)
 	require.NotNil(t, segment.GetPersistedStorage())
+	for _, version := range []int64{0, 1, 2, 3, -1, 4} {
+		segment.StorageVersion = version
+		err := validateRecoveredViewMeta(map[string]*streamingpb.VChannelMeta{"v1": vchannel}, map[int64]*streamingpb.SegmentAssignmentMeta{100: segment}, false)
+		if version < 0 || version > 3 {
+			require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
+		} else {
+			require.NoError(t, err)
+		}
+	}
 }
 
 func TestValidateRecoveredViewMetaAllowsOnlyMigratedLegacySchemaBaseline(t *testing.T) {
@@ -1694,4 +1691,21 @@ func TestRecoverRecoveryStorageContinuesRetainedStream(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("live observation did not continue the retained startup stream")
 	}
+}
+
+func TestRecoveryRejectsUnknownCreateSegmentStorageVersion(t *testing.T) {
+	resource.InitForTest(t)
+	checkpoint := walimplstest.NewTestMessageID(1)
+	rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: checkpoint, TimeTick: 1})
+	defer rs.metrics.Close()
+	defer rs.taskScheduler.Close()
+	stream := &blockingRecoveryStream{ch: make(chan message.ImmutableMessage, 1), closed: make(chan struct{})}
+	stream.ch <- message.NewCreateSegmentMessageBuilderV2().WithVChannel("v1").
+		WithHeader(&message.CreateSegmentMessageHeader{SegmentId: 42, StorageVersion: 4}).
+		WithBody(&message.CreateSegmentMessageBody{}).MustBuildMutable().WithTimeTick(2).
+		WithLastConfirmed(checkpoint).IntoImmutableMessage(walimplstest.NewTestMessageID(2))
+	close(stream.ch)
+	snapshot, err := rs.runBoundedRecovery(t.Context(), &recordingRecoveryStreamBuilder{stream: stream}, newAckTestTimeTickMessage(t, 3, 3))
+	require.Nil(t, snapshot)
+	require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
 }

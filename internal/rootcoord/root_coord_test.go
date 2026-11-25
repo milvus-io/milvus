@@ -1034,6 +1034,7 @@ func TestRootCoord_AllocID(t *testing.T) {
 }
 
 func TestRootCoord_UpdateChannelTimeTick(t *testing.T) {
+	useStreamingBootstrap(t)
 	t.Run("not healthy", func(t *testing.T) {
 		ctx := context.Background()
 		c := newTestCore(withAbnormalCode())
@@ -1371,6 +1372,7 @@ func TestCore_Rbac(t *testing.T) {
 }
 
 func TestCore_sendMinDdlTsAsTt(t *testing.T) {
+	useStreamingBootstrap(t)
 	ticker := newRocksMqTtSynchronizer()
 	ddlManager := newMockDdlTsLockManager()
 	ddlManager.GetMinDdlTsFunc = func() Timestamp {
@@ -1404,6 +1406,7 @@ func TestCore_sendMinDdlTsAsTt(t *testing.T) {
 }
 
 func TestCore_startTimeTickLoop(t *testing.T) {
+	useStreamingBootstrap(t)
 	ticker := newRocksMqTtSynchronizer()
 	ticker.addSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestRootCoordID}})
 	ddlManager := newMockDdlTsLockManager()

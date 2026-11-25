@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
@@ -83,22 +82,25 @@ func TestSnapshotExternalSourceOptions(t *testing.T) {
 
 func TestOrdinarySourceStorageOptions(t *testing.T) {
 	options := externalStorageOptions()
-	assert.NoError(t, ValidateImportSourceRequest(options))
-	assert.NoError(t, ValidateImportSourceOptions(options))
-	// The ACK validates the durable contract before creating a runnable job.
-	assert.NoError(t, ValidateImportPlan([]*internalpb.ImportFile{{Paths: []string{"folder/data.json"}}}, options, nil))
-	assert.ErrorIs(t, ValidateImportPlan([]*internalpb.ImportFile{{Paths: []string{"s3://bucket/data.json"}}}, options, nil), merr.ErrParameterInvalid)
-	assert.ErrorIs(t, ValidateImportPlan([]*internalpb.ImportFile{{Paths: []string{"data.json"}}}, options[:3], nil), merr.ErrParameterInvalid)
+	config, err := GetSourceStorageConfig(options)
+	assert.NoError(t, err)
+	assert.NotNil(t, config)
 	for _, incompatible := range (Options{
 		{Key: BackupFlag, Value: "true"},
 		{Key: L0Import, Value: "true"},
 		{Key: SourceType, Value: SourceTypeSnapshot},
 		{Key: ExternalSpec, Value: `{}`},
+		{Key: SnapshotSourceURI, Value: "s3://source/key"},
+		{Key: SnapshotLayout, Value: "referenced"},
+		{Key: PartitionMapping, Value: `{"A":"B"}`},
 	}) {
-		assert.ErrorContains(t, ValidateImportSourceOptions(append(externalStorageOptions(), incompatible)), "ordinary file imports")
+		_, err := GetSourceStorageConfig(append(externalStorageOptions(), incompatible))
+		assert.ErrorContains(t, err, "ordinary file imports")
 	}
-	assert.Error(t, ValidateImportSourceRequest(append(options, options[0])))
-	assert.Error(t, ValidateImportSourceOptions(append(options, nil)))
+	_, err = GetSourceStorageConfig(append(options, options[0]))
+	assert.Error(t, err)
+	_, err = GetSourceStorageConfig(append(options, nil))
+	assert.Error(t, err)
 	redacted := RedactOptions(append(options, &commonpb.KeyValuePair{Key: "timeout", Value: "1h"}))
 	for _, option := range redacted {
 		if option.Key == "timeout" {

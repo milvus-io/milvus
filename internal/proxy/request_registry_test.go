@@ -31,18 +31,78 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/peer"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/reqregistry"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func kv(key, value string) *commonpb.KeyValuePair {
 	return &commonpb.KeyValuePair{Key: key, Value: value}
+}
+
+// A search that does not declare nq is counted by what it carries, both for the
+// registry and for the rate limiter.
+func TestSearchRequestNq(t *testing.T) {
+	placeholder := func(rows int) *milvuspb.SearchRequest_PlaceholderGroup {
+		values := make([][]byte, rows)
+		for i := range values {
+			values[i] = []byte{0, 0, 0, 0}
+		}
+		blob, err := proto.Marshal(&commonpb.PlaceholderGroup{Placeholders: []*commonpb.PlaceholderValue{
+			{Tag: "$0", Type: commonpb.PlaceholderType_FloatVector, Values: values},
+		}})
+		require.NoError(t, err)
+		return &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: blob}
+	}
+	intIDs := &milvuspb.SearchRequest_Ids{Ids: &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4}}},
+	}}
+
+	assert.Equal(t, int64(0), searchRequestNq(&milvuspb.SearchRequest{}))
+	assert.Equal(t, int64(3), searchRequestNq(&milvuspb.SearchRequest{SearchInput: placeholder(3)}))
+	assert.Equal(t, int64(4), searchRequestNq(&milvuspb.SearchRequest{SearchInput: intIDs}))
+	// a declared nq is taken as it is; the search task checks it
+	assert.Equal(t, int64(7), searchRequestNq(&milvuspb.SearchRequest{Nq: 7, SearchInput: placeholder(3)}))
+	// a malformed group is the search task's to refuse
+	assert.Equal(t, int64(0), searchRequestNq(&milvuspb.SearchRequest{
+		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: []byte{0xff}},
+	}))
+
+	hybrid := &milvuspb.HybridSearchRequest{Requests: []*milvuspb.SearchRequest{
+		{SearchInput: placeholder(2)},
+		{Nq: 5, SearchInput: placeholder(5)},
+	}}
+	assert.Equal(t, int64(7), hybridSearchRequestNq(hybrid))
+
+	assert.Equal(t, int64(3), searchRequestInfo(&milvuspb.SearchRequest{SearchInput: placeholder(3)}).NQ)
+	assert.Equal(t, int64(4), searchRequestInfo(&milvuspb.SearchRequest{SearchInput: intIDs}).NQ)
+	assert.Equal(t, int64(7), hybridSearchRequestInfo(hybrid).NQ)
+
+	// The limiter skips a request that costs 0 tokens, so these have to cost
+	// their rows.
+	cache := NewMockCache(t)
+	cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 100}, nil)
+	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+	_, _, rt, tokens, err := GetRequestInfo(context.Background(), cache, &milvuspb.SearchRequest{
+		DbName: "db", CollectionName: "c", SearchInput: placeholder(3),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, internalpb.RateType_DQLSearch, rt)
+	assert.Equal(t, 3, tokens)
+	_, _, rt, tokens, err = GetRequestInfo(context.Background(), cache, &milvuspb.HybridSearchRequest{
+		DbName: "db", CollectionName: "c", Requests: hybrid.GetRequests(),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, internalpb.RateType_DQLSearch, rt)
+	assert.Equal(t, 7, tokens)
 }
 
 func TestRequestInfoExtraction(t *testing.T) {

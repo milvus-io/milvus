@@ -85,7 +85,7 @@ func TestRejectedCopyCleanupIncludesLegacySibling(t *testing.T) {
 				},
 			}, copies, m, dm.IndexMeta)
 			require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-			require.Empty(t, dm.IndexMeta.GetAllSegmentIndexes(2002))
+			require.Empty(t, dm.IndexMeta.GetAllSegmentIndexSummaries(2002))
 			persisted, err := catalog.ListSegmentIndexes(ctx, 100)
 			require.NoError(t, err)
 			require.Empty(t, persisted)
@@ -103,7 +103,7 @@ func TestRejectedCopyCleanupIncludesLegacySibling(t *testing.T) {
 			require.Nil(t, m.GetSegment(ctx, 2002))
 			rebooted, rebootedDM := snapshot.BootMetaForRestartWithSnapshot(t, catalog, 100)
 			require.Nil(t, rebooted.GetSegment(ctx, 2002))
-			require.Empty(t, rebootedDM.IndexMeta.GetAllSegmentIndexes(2002))
+			require.Empty(t, rebootedDM.IndexMeta.GetAllSegmentIndexSummaries(2002))
 			// Ordinary GC has no SegmentIndex row for this rejected result. The
 			// persisted task plan must retain ownership after both segment rows retire.
 			exists, err := m.ChunkManager.Exist(ctx, artifact)

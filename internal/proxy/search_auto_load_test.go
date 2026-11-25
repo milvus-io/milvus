@@ -595,6 +595,12 @@ func autoLoadTestRow() []*schemapb.FieldData {
 // reports the server's load state.
 func newDQLRetryProxy(t *testing.T, phase string) (*Proxy, *dqlRetryClient) {
 	t.Helper()
+	// The retry fixture only implements the unary QueryView RPCs.
+	params := paramtable.Get()
+	key, old := params.ProxyCfg.EnableReduceStream.Key, params.ProxyCfg.EnableReduceStream.GetValue()
+	t.Cleanup(func() { require.NoError(t, params.Save(key, old)) })
+	require.NoError(t, params.Save(key, "false"))
+
 	node, coordinator := newAutoLoadSchedulingProxy(t)
 	oldRateCol := rateCol
 	require.NoError(t, node.initRateCollector())

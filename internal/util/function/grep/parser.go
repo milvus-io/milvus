@@ -40,26 +40,30 @@ func Parse(arguments string, maxArgumentBytes int64) (*Spec, error) {
 		return nil, err
 	}
 	spec := &Spec{}
+	var before, after *uint64
+	var contextLines uint64
+	setContext := func(flag byte, value string) error {
+		count, err := strconv.ParseUint(strings.TrimPrefix(value, "+"), 10, 64)
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg("grep context count must be an unsigned decimal integer in [0, 18446744073709551615], got %q", value)
+		}
+		switch flag {
+		case 'A':
+			after = &count
+		case 'B':
+			before = &count
+		case 'C':
+			contextLines = count
+		}
+		return nil
+	}
 	setMaxCount := func(value string) error {
-		count, err := strconv.ParseUint(value, 10, 64)
+		// rg accepts one optional leading plus sign for its unsigned count.
+		count, err := strconv.ParseUint(strings.TrimPrefix(value, "+"), 10, 64)
 		if err != nil {
 			return merr.WrapErrParameterInvalidMsg("grep max-count must be an unsigned decimal integer in [0, 18446744073709551615], got %q", value)
 		}
 		spec.maxCount = &count
-		return nil
-	}
-	appendPattern := func(value string) error {
-		if strings.IndexByte(value, '\n') >= 0 {
-			return merr.WrapErrParameterInvalidMsg("grep patterns must not contain literal LF")
-		}
-		spec.patterns = append(spec.patterns, value)
-		return nil
-	}
-	setBoundary := func(boundary Boundary) error {
-		if spec.boundary != BoundaryNone && spec.boundary != boundary {
-			return merr.WrapErrParameterInvalidMsg("grep options -w and -x cannot be combined")
-		}
-		spec.boundary = boundary
 		return nil
 	}
 	for i := 0; i < len(tokens); i++ {
@@ -76,11 +80,32 @@ func Parse(arguments string, maxArgumentBytes int64) (*Spec, error) {
 				return merr.WrapErrParameterMissingMsg("grep option %s requires a pattern", value)
 			}
 			i++ // Consume even an option-looking value such as -C or --.
-			return appendPattern(tokens[i].value)
+			spec.patterns = append(spec.patterns, tokens[i].value)
+			return nil
 		}
 		if strings.HasPrefix(value, "--") {
 			// Value-taking flags consume the next token even if it resembles an option.
 			name, attached, hasValue := strings.Cut(value, "=")
+			if name == "--after-context" || name == "--before-context" || name == "--context" {
+				if !hasValue {
+					if i+1 >= len(tokens) {
+						return nil, merr.WrapErrParameterMissingMsg("grep option %s requires a count", name)
+					}
+					i++
+					attached = tokens[i].value
+				}
+				flag := byte('C')
+				switch name {
+				case "--after-context":
+					flag = 'A'
+				case "--before-context":
+					flag = 'B'
+				}
+				if err := setContext(flag, attached); err != nil {
+					return nil, err
+				}
+				continue
+			}
 			if name == "--max-count" {
 				if !hasValue {
 					if i+1 >= len(tokens) {
@@ -96,7 +121,7 @@ func Parse(arguments string, maxArgumentBytes int64) (*Spec, error) {
 			}
 			if name == "--regexp" {
 				if hasValue {
-					err = appendPattern(attached)
+					spec.patterns = append(spec.patterns, attached)
 				} else {
 					err = consumePattern()
 				}
@@ -121,12 +146,9 @@ func Parse(arguments string, maxArgumentBytes int64) (*Spec, error) {
 			case "--case-sensitive":
 				spec.caseMode = CaseSensitive
 			case "--word-regexp":
-				err = setBoundary(BoundaryWord)
+				spec.boundary = BoundaryWord
 			case "--line-regexp":
-				err = setBoundary(BoundaryLine)
-			}
-			if err != nil {
-				return nil, err
+				spec.boundary = BoundaryLine
 			}
 			continue
 		}
@@ -135,6 +157,19 @@ func Parse(arguments string, maxArgumentBytes int64) (*Spec, error) {
 		}
 		for j := 1; j < len(value); j++ {
 			switch value[j] {
+			case 'A', 'B', 'C':
+				count := value[j+1:]
+				if count == "" {
+					if i+1 >= len(tokens) {
+						return nil, merr.WrapErrParameterMissingMsg("grep option -%c requires a count", value[j])
+					}
+					i++
+					count = tokens[i].value
+				} else {
+					count = strings.TrimPrefix(count, "=")
+				}
+				err = setContext(value[j], count)
+				j = len(value)
 			case 'F':
 				spec.patternKind = PatternLiteral
 			case 'i':
@@ -142,12 +177,12 @@ func Parse(arguments string, maxArgumentBytes int64) (*Spec, error) {
 			case 's':
 				spec.caseMode = CaseSensitive
 			case 'w':
-				err = setBoundary(BoundaryWord)
+				spec.boundary = BoundaryWord
 			case 'x':
-				err = setBoundary(BoundaryLine)
+				spec.boundary = BoundaryLine
 			case 'e':
 				if j+1 < len(value) {
-					err = appendPattern(value[j+1:])
+					spec.patterns = append(spec.patterns, strings.TrimPrefix(value[j+1:], "="))
 				} else {
 					err = consumePattern()
 				}
@@ -160,6 +195,8 @@ func Parse(arguments string, maxArgumentBytes int64) (*Spec, error) {
 					}
 					i++
 					count = tokens[i].value
+				} else {
+					count = strings.TrimPrefix(count, "=")
 				}
 				err = setMaxCount(count)
 				j = len(value)
@@ -174,6 +211,24 @@ func Parse(arguments string, maxArgumentBytes int64) (*Spec, error) {
 	}
 	if len(spec.patterns) == 0 {
 		return nil, merr.WrapErrParameterMissingMsg("grep requires at least one -e/--regexp pattern")
+	}
+	// rg skips pattern validation for a final -m 0. Parse every option first
+	// so later overrides and malformed arguments still take effect.
+	if spec.maxCount == nil || *spec.maxCount != 0 {
+		for _, pattern := range spec.patterns {
+			if strings.IndexByte(pattern, '\n') >= 0 {
+				return nil, merr.WrapErrParameterInvalidMsg("grep patterns must not contain literal LF")
+			}
+		}
+	}
+	// Explicit -A/-B override their side of -C regardless of argument order,
+	// including an explicitly supplied zero (ripgrep context precedence).
+	spec.beforeContext, spec.afterContext = contextLines, contextLines
+	if before != nil {
+		spec.beforeContext = *before
+	}
+	if after != nil {
+		spec.afterContext = *after
 	}
 	return spec, nil
 }

@@ -2041,7 +2041,7 @@ func namespaceShardingEnabled(schema *schemapb.CollectionSchema) bool {
 }
 
 func namespacePartitionKeyMode(schema *schemapb.CollectionSchema) bool {
-	return schema != nil && schema.GetEnableNamespace() && common.IsNamespaceModePartitionKey(schema.GetProperties()...)
+	return common.UsesNamespacePartitionKey(schema)
 }
 
 func namespacePartitionKeyModeEnabled(schema *schemapb.CollectionSchema) bool {
@@ -2305,6 +2305,38 @@ func GetStorageCost(status *commonpb.Status) (int64, int64, float64, bool) {
 	return scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, true
 }
 
+// searchRequestNq returns the number of query rows of a search request as it
+// arrives, before any task has looked at it. The nq field is optional -- older
+// clients and the RESTful API leave it at 0 -- so a request that does not
+// declare it is counted by what it carries: the rows of its placeholder group,
+// or its primary keys when it searches by primary key. Reading the field alone
+// lets such a request through the rate limiter uncharged and lists it with
+// nq 0.
+//
+// A malformed placeholder group counts as 0 here; the search task rejects it.
+func searchRequestNq(req *milvuspb.SearchRequest) int64 {
+	if nq := req.GetNq(); nq != 0 {
+		return nq
+	}
+	if ids := req.GetIds(); ids != nil {
+		return int64(typeutil.GetSizeOfIDs(ids))
+	}
+	rows, err := funcutil.CountPlaceholderGroupValues(req.GetPlaceholderGroup())
+	if err != nil {
+		return 0
+	}
+	return rows
+}
+
+// hybridSearchRequestNq is searchRequestNq summed over the sub-requests.
+func hybridSearchRequestNq(req *milvuspb.HybridSearchRequest) int64 {
+	var nq int64
+	for _, sub := range req.GetRequests() {
+		nq += searchRequestNq(sub)
+	}
+	return nq
+}
+
 // GetRequestInfo returns the quota scope, rate type, and tokens needed by a request.
 // Zero tokens bypass rate limiting and its metrics; the rate type is unused in that case.
 func GetRequestInfo(ctx context.Context, metaCache Cache, req proto.Message) (int64, map[int64][]int64, internalpb.RateType, int, error) {
@@ -2326,14 +2358,10 @@ func GetRequestInfo(ctx context.Context, metaCache Cache, req proto.Message) (in
 		return dbID, collToPartIDs, internalpb.RateType_DMLBulkLoad, proto.Size(r), err
 	case *milvuspb.SearchRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, metaCache, req.(reqPartNames))
-		return dbID, collToPartIDs, internalpb.RateType_DQLSearch, int(r.GetNq()), err
+		return dbID, collToPartIDs, internalpb.RateType_DQLSearch, int(searchRequestNq(r)), err
 	case *milvuspb.HybridSearchRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, metaCache, req.(reqPartNames))
-		nq := 0
-		for _, subReq := range r.GetRequests() {
-			nq += int(subReq.GetNq())
-		}
-		return dbID, collToPartIDs, internalpb.RateType_DQLSearch, nq, err
+		return dbID, collToPartIDs, internalpb.RateType_DQLSearch, int(hybridSearchRequestNq(r)), err
 	case *milvuspb.QueryRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, metaCache, req.(reqPartNames))
 		return dbID, collToPartIDs, internalpb.RateType_DQLQuery, 1, err // think of the query request's nq as 1

@@ -23,12 +23,13 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	qnmanager "github.com/milvus-io/milvus/internal/querynodev2/client/manager"
 	streamingcoordclient "github.com/milvus-io/milvus/internal/streamingcoord/client"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	snhandler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer"
@@ -94,9 +95,35 @@ type qviewsRuntimeDependencies struct {
 	streamingNodeHandler        snhandler.HandlerClient
 	streamingNodeViewSyncClient snhandler.QueryViewSyncClient
 
-	schemaVersion          balancer.SchemaVersionProvider
-	publishedSchemaVersion balancer.SchemaVersionProvider
-	balancerFactory        func(*cache.Cache) qviewsBalancer
+	getCollectionInfo func(int64) (*metacache.CollectionInfo, error)
+	balancerFactory   func(*cache.Cache) qviewsBalancer
+}
+
+func reconcileSchemaVersionProvider(
+	getCollectionInfo func(int64) (*metacache.CollectionInfo, error),
+	publishSchema func(int64, int32),
+) balancer.SchemaVersionProvider {
+	return func(ctx context.Context, id int64) (int32, error) {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+		// An ALTER publishes its schema before retiring its pending target.
+		// Read the target first so a retired target is covered by the published read.
+		target, targetErr := broadcast.GetPendingSchemaTarget(id)
+		collection, err := getCollectionInfo(id)
+		if err != nil {
+			return 0, err
+		}
+		published := collection.Schema.GetVersion()
+		publishSchema(id, published)
+		if targetErr != nil {
+			return 0, targetErr
+		}
+		if target == nil {
+			return published, nil
+		}
+		return max(published, target.Schema.GetVersion()), nil
+	}
 }
 
 func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qviewsRuntime, error) {
@@ -153,18 +180,9 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 
 	loadConfigStore.EnableGC()
 	balanceCache := cache.NewFromSources(balancer.DefaultBalanceConfig(), loadConfigStore, deps.dataViewProvider, shardViewRegistry, nodePublisher)
-	schemaVersion := deps.schemaVersion
-	if deps.publishedSchemaVersion != nil {
-		schemaVersion = func(ctx context.Context, id int64) (int32, error) {
-			published, err := deps.publishedSchemaVersion(ctx, id)
-			if err != nil {
-				return 0, err
-			}
-			// Recovery retains both generations until durable public metadata is
-			// available. Never infer this fence from the pending target.
-			shardViewRegistry.PublishCollectionSchema(id, published)
-			return deps.schemaVersion(ctx, id)
-		}
+	var schemaVersion balancer.SchemaVersionProvider
+	if deps.getCollectionInfo != nil {
+		schemaVersion = reconcileSchemaVersionProvider(deps.getCollectionInfo, shardViewRegistry.PublishCollectionSchema)
 	}
 	balancerController := qviewsBalancer(balancer.NewDefaultBalancer(balanceCache, shardViewRegistry, balancer.NewDefaultBalancePolicy(balancer.WithViewFeedbackReader(feedback)), schemaVersion))
 	if deps.balancerFactory != nil {
@@ -303,26 +321,6 @@ func newDefaultQViewsRuntimeDependencies(
 				return nil, err
 			}
 			return coll.GetVirtualChannelNames(), nil
-		},
-		publishedSchemaVersion: func(ctx context.Context, id int64) (int32, error) {
-			collection, err := broker.DescribeCollection(ctx, id)
-			if err != nil {
-				return 0, err
-			}
-			return collection.GetSchema().GetVersion(), nil
-		},
-		schemaVersion: func(ctx context.Context, id int64) (int32, error) {
-			schema, err := qvresource.PreparationSchema(ctx, id, func(ctx context.Context, id int64) (*schemapb.CollectionSchema, error) {
-				collection, err := broker.DescribeCollection(ctx, id)
-				if err != nil {
-					return nil, err
-				}
-				return collection.GetSchema(), nil
-			})
-			if err != nil {
-				return 0, err
-			}
-			return schema.GetVersion(), nil
 		},
 		queryViewCatalog:            queryview.NewQueryViewCatalog(metaKV, "coord"),
 		queryNodeClient:             queryNodeManager,

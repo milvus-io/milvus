@@ -140,8 +140,6 @@ struct RetrievePlan {
     // retrieval ignores the result limit and returns offsets without field data.
     // Explicit retrieval by offsets continues to use field_ids_ unchanged.
     RetrieveMode mode_{RetrieveMode::Normal};
-    // Maximum selected candidate offsets; zero disables this cap.
-    int64_t max_candidate_rows_{0};
 };
 
 using PlanPtr = std::unique_ptr<Plan>;

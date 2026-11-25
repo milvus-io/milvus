@@ -32,7 +32,7 @@ BUILD_COVERAGE="OFF"
 PROFILING="OFF"
 RUN_CPPLINT="OFF"
 CUDA_COMPILER=${CUDACXX:-/usr/local/cuda/bin/nvcc}
-WITH_GPU=""
+WITH_GPU="OFF"
 WITH_PROMETHEUS="ON"
 CUDA_ARCH="DEFAULT"
 CUSTOM_THIRDPARTY_PATH=""
@@ -114,14 +114,6 @@ usage:
     ;;
   esac
 done
-
-if [[ -z "${WITH_GPU}" ]]; then
-  if [[ "${INDEX_ENGINE}" == "cardinal" ]]; then
-    WITH_GPU="ON"
-  else
-    WITH_GPU="OFF"
-  fi
-fi
 
 if [[ ! -d ${BUILD_OUTPUT_DIR} ]]; then
   mkdir ${BUILD_OUTPUT_DIR}

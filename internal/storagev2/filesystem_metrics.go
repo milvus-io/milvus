@@ -239,6 +239,10 @@ func makePropertiesFromConfig(storageConfig *indexpb.StorageConfig) (C.LoonPrope
 			keys = append(keys, "fs.talon.coordinator")
 			values = append(values, coordinator)
 		}
+		if namespace := storageConfig.GetTalonNamespace(); namespace != "" {
+			keys = append(keys, "fs.talon.namespace")
+			values = append(values, namespace)
+		}
 	}
 
 	count := len(keys)

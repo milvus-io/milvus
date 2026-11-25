@@ -29,8 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
-	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
-	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -64,7 +62,6 @@ type OpsServiceSuite struct {
 	cluster        *session.MockCluster
 	nodeMgr        *session.NodeManager
 	taskScheduler  *task.MockScheduler
-	balancer       balance.Balance
 	proxyManager   *proxyutil.MockProxyClientManager
 
 	distMgr           *meta.DistributionManager
@@ -113,13 +110,6 @@ func (suite *OpsServiceSuite) SetupTest() {
 	suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
-	assign.InitGlobalAssignPolicyFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
-	suite.balancer = balance.NewScoreBasedBalancer(
-		suite.taskScheduler,
-		suite.nodeMgr,
-		suite.dist,
-		suite.targetMgr,
-	)
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 	suite.distMgr = meta.NewDistributionManager(suite.nodeMgr)
 	suite.distController = dist.NewMockController(suite.T())
@@ -149,7 +139,6 @@ func (suite *OpsServiceSuite) SetupTest() {
 		suite.server.meta,
 		suite.server.targetMgr,
 		suite.targetObserver,
-		&checkers.CheckerController{},
 		suite.proxyManager,
 	)
 

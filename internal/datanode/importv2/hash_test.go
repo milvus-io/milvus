@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -28,7 +29,7 @@ import (
 func TestGetRowsStatsMissingPrimaryKey(t *testing.T) {
 	task := NewPreImportTask(&datapb.PreImportRequest{
 		Schema: &schemapb.CollectionSchema{}, PartitionIDs: []int64{1}, Vchannels: []string{"v1"},
-	}, nil, nil)
+	}, nil, nil, taskcommon.Resource{})
 	defer task.Cancel()
 
 	stats, err := GetRowsStats(task, &storage.InsertData{})
@@ -45,11 +46,11 @@ func TestSnapshotImportPartitionKeyRoutingBothPhases(t *testing.T) {
 	partitions, channels := []int64{20, 10}, []string{"v1", "v2"}
 	pre := NewPreImportTask(&datapb.PreImportRequest{
 		Schema: proto.Clone(schema).(*schemapb.CollectionSchema), Options: options, PartitionIDs: partitions, Vchannels: channels,
-	}, nil, nil).(*PreImportTask)
+	}, nil, nil, taskcommon.Resource{}).(*PreImportTask)
 	defer pre.cancel()
 	imp := NewImportTask(&datapb.ImportRequest{
 		Schema: proto.Clone(schema).(*schemapb.CollectionSchema), Options: options, PartitionIDs: partitions, Vchannels: channels,
-	}, nil, nil, nil).(*ImportTask)
+	}, nil, nil, nil, taskcommon.Resource{}).(*ImportTask)
 	defer imp.cancel()
 	require.False(t, pre.GetSchema().GetFields()[0].GetAutoID())
 	require.False(t, imp.GetSchema().GetFields()[0].GetAutoID())
@@ -113,11 +114,11 @@ func TestSnapshotImportPartitionKeyDefaultBothPhases(t *testing.T) {
 					channels := []string{"v1", "v2"}
 					pre := NewPreImportTask(&datapb.PreImportRequest{
 						Schema: proto.Clone(schema).(*schemapb.CollectionSchema), Options: options, PartitionIDs: partitions, Vchannels: channels,
-					}, nil, nil).(*PreImportTask)
+					}, nil, nil, taskcommon.Resource{}).(*PreImportTask)
 					defer pre.cancel()
 					imp := NewImportTask(&datapb.ImportRequest{
 						Schema: proto.Clone(schema).(*schemapb.CollectionSchema), Options: options, PartitionIDs: partitions, Vchannels: channels,
-					}, nil, nil, nil).(*ImportTask)
+					}, nil, nil, nil, taskcommon.Resource{}).(*ImportTask)
 					defer imp.cancel()
 					require.False(t, pre.GetSchema().GetFields()[0].GetAutoID())
 					require.False(t, imp.GetSchema().GetFields()[0].GetAutoID())
@@ -194,7 +195,7 @@ func TestGetRowsStatsPartitionKeyDefaultError(t *testing.T) {
 	}}
 	pre := NewPreImportTask(&datapb.PreImportRequest{
 		Schema: schema, PartitionIDs: []int64{20, 10}, Vchannels: []string{"v1"},
-	}, nil, nil).(*PreImportTask)
+	}, nil, nil, taskcommon.Resource{}).(*PreImportTask)
 	defer pre.cancel()
 	rows := &storage.InsertData{Data: map[int64]storage.FieldData{
 		100: &storage.Int64FieldData{Data: []int64{1, 2}},

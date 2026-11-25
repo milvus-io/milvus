@@ -91,8 +91,11 @@ cannot be done correctly for autoID collections at all.
   sent (`client/milvusclient`), but REST, pymilvus and raw gRPC callers reach the server,
   where it is dropped silently. Deleting the same rows twice is already effectively a
   no-op; `Upsert` needs its delete leg deduped as well, which is a separate design.
-- Cross-cluster dedup. Replicated writes bypass the window entirely (see
-  [Replication and CDC](#replication-and-cdc)).
+- Cross-cluster dedup of replicated writes. A replicated write is never deduplicated
+  against the local window; it is only recorded there, so that a client retry after a
+  planned switchover can reuse the result while the secondary retains the key (see
+  [Replication and CDC](#replication-and-cdc)). Keys that replication had not delivered
+  before a force promote are not recovered.
 - Unbounded retention. Duplicate visibility is a bounded window (see
   [Retention](#retention)).
 
@@ -466,17 +469,75 @@ be recovered from WALSummary.
 
 ## Replication and CDC
 
-Replicated messages **bypass the window entirely**. The replicate stream has its own
+Replicated messages are **recorded in the window but never checked against it**.
+
+The window is never read for a replicated message. The replicate stream has its own
 exactly-once delivery via source-timetick checkpoints, and the idempotency key inside a
 replicated message belongs to the *source* cluster's window history. Deduplicating
 against the local window would silently drop replicated writes whenever the key happens
 to sit in this cluster's window — after a demotion, or after the source released the key
-and a client legally re-issued it.
+and a client legally re-issued it. So a replicated message is appended unconditionally.
 
-The recovery observer applies the same rule: a replicated write becomes a *keyless*
-committed write in Summary, so a foreign key can never materialize a local dedup
-entry. Its local WAL positions still participate in Summary persistence and
-checkpoint gating.
+The window is written after the append. A replicated Insert carries the source's key and
+its `idempotent_result` header; a replicated transaction carries them on its bodies and
+its commit, and the interceptor merges the body results on the commit exactly as it does
+for a native transaction. The recorded entry replaces an entry already held for the key:
+when the source evicted the key and a client legally reused it, the newer write is the one
+a retry must see. The recovery observer applies the same rule, so a window rebuilt from
+Summary carries the replicated keys too, and restore already keeps the newest record per
+key.
+
+During a **planned switchover**, each PChannel appends `AlterReplicateConfig`
+after its preceding replicated writes have updated the window. A client retry on the
+promoted cluster returns the original primary keys if its window still holds the entry.
+Each cluster enforces its own idle TTL and byte budget. A duplicate hit on the old
+primary refreshes only that cluster's entry, so the secondary can evict the key sooner.
+Routing lines up because row *i* goes to shard `i % n` on every attempt and a secondary
+names its VChannels by PChannel index.
+
+A native request releases the role lock while waiting for function resources, segment
+readiness, or another owner of the same key. If the topology changed during the wait,
+the request checks the current role and window again before it can append.
+
+After a **force promote**, replication may also have missed writes. A retry appends
+again when the promoted cluster has no entry for the key.
+
+Recording is best effort. A replicated write must land even when its key cannot be
+remembered. A replicated transaction is recorded only when the buffer holds a result for
+every body, that is, when the buffered count equals the commit's `BodyCnt`. On a restart the
+replicate side recovers an open replicated transaction from the WAL and ignores the resent
+bodies it already holds; the interceptor restores the buffered results of those bodies from
+the same `TxnBuffer`, so the commit still finds every body. The buffer is released only
+after the commit lands, so a rejected commit that the source replays also finds the earlier
+bodies.
+
+A replicated body is buffered with an infinite keepalive, no matter what keepalive the
+source stamped on it. The source owns a replicated transaction's lifecycle, so the buffer
+is reclaimed only once the txn session leaves the txn manager — never by a timetick-based
+expiry. That matters on a restart: the reopened WAL places the vchannel MVCC at the
+recovery timetick, which can sit far beyond a body's timetick plus the source keepalive,
+and would otherwise delete the very results the restore just filled, leaving the commit
+unrecordable and the key forgotten.
+
+When a replicated write lands but cannot be recorded (a malformed result header, an
+incomplete transaction, or a commit without `BodyCnt`), the entry held for its key is
+dropped. That entry describes an older write, for example one the source has since evicted
+before a client legally reused the key, and serving it would answer a retry with another
+write's primary keys. Without the entry the retry appends again, as it did before replicated
+keys were recorded. The interceptor also removes the key from such a write before the
+append, so the WAL holds it as a keyless write. Otherwise Summary would record the key
+with the untrusted result, and a window rebuilt after a restart would serve it again.
+
+During WAL replay, Summary also checks records written by older secondaries. A
+replicated transaction can supply a duplicate result only if its nonzero commit
+body count matches the complete set of insert results. A replicated single insert
+with a malformed result retains its write position as a keyless record.
+
+A known limitation remains. A keyless write does not invalidate older Summary records of
+the same key. If Summary still holds a record of an older write under that key, a window
+rebuilt after a restart serves that record again. This occurs only when the source sends
+a malformed result header, an incomplete transaction, or a legacy commit without
+`BodyCnt`, after eviction and reuse of the key on the source.
 
 ## Reader-side physical dedup
 
@@ -553,7 +614,8 @@ switches, key length validation, autoID routing stability and result merging; wi
 owner/wait/duplicate decisions, cross-VChannel LRU eviction, idle TTL cleanup,
 soft-count preference, original-age restoration, restore-from-snapshot,
 transaction commit dedup with rollback synthesis, expired transaction buffers,
-replicated bypass, and DDL preservation of request history.
+replicated writes recorded without being checked, and DDL preservation of request
+history.
 
 Shared codec, persistence, recovery and GC tests are described in
 [WALSummary validation](wal/summary.md#10-validation-and-source-map).

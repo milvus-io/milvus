@@ -126,11 +126,11 @@ func (m *TaskManager) LoadIndexTaskState(ClusterID string, buildID typeutil.Uniq
 	return task.State
 }
 
-func (m *TaskManager) StoreIndexTaskState(ClusterID string, buildID typeutil.UniqueID, state commonpb.IndexState, failReason string) {
+func (m *TaskManager) StoreIndexTaskState(ClusterID string, buildID typeutil.UniqueID, expected *IndexTaskInfo, state commonpb.IndexState, failReason string) {
 	key := Key{ClusterID: ClusterID, TaskID: buildID}
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
-	if task, ok := m.indexTasks[key]; ok {
+	if task, ok := m.indexTasks[key]; ok && task == expected {
 		mlog.Debug(m.ctx, "store task state", mlog.String("clusterID", ClusterID), mlog.FieldBuildID(buildID),
 			mlog.String("state", state.String()), mlog.String("fail reason", failReason))
 		task.State = state
@@ -138,11 +138,11 @@ func (m *TaskManager) StoreIndexTaskState(ClusterID string, buildID typeutil.Uni
 	}
 }
 
-func (m *TaskManager) StoreIndexTaskExecutionStart(clusterID string, buildID typeutil.UniqueID, startMs int64, costCPUNum int64) {
+func (m *TaskManager) StoreIndexTaskExecutionStart(clusterID string, buildID typeutil.UniqueID, expected *IndexTaskInfo, startMs int64, costCPUNum int64) {
 	key := Key{ClusterID: clusterID, TaskID: buildID}
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
-	if task, ok := m.indexTasks[key]; ok {
+	if task, ok := m.indexTasks[key]; ok && task == expected {
 		task.ExecStartMs = startMs
 		task.CostCPUNum = costCPUNum
 		task.ExecEndMs = 0
@@ -154,11 +154,11 @@ func (m *TaskManager) StoreIndexTaskExecutionStart(clusterID string, buildID typ
 // together with the final task state/failReason in a single critical section, so
 // a concurrent reader can never observe a final cost paired with a stale state
 // (or vice versa).
-func (m *TaskManager) StoreIndexTaskExecutionEndWithState(clusterID string, buildID typeutil.UniqueID, endMs int64, costTimeMs int64, state commonpb.IndexState, failReason string) {
+func (m *TaskManager) StoreIndexTaskExecutionEndWithState(clusterID string, buildID typeutil.UniqueID, expected *IndexTaskInfo, endMs int64, costTimeMs int64, state commonpb.IndexState, failReason string) {
 	key := Key{ClusterID: clusterID, TaskID: buildID}
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
-	if task, ok := m.indexTasks[key]; ok {
+	if task, ok := m.indexTasks[key]; ok && task == expected {
 		mlog.Debug(m.ctx, "store task execution end with state", mlog.String("clusterID", clusterID), mlog.FieldBuildID(buildID),
 			mlog.String("state", state.String()), mlog.String("fail reason", failReason),
 			mlog.Int64("costTimeMs", costTimeMs))
@@ -190,6 +190,7 @@ func (m *TaskManager) GetIndexTaskInfo(clusterID string, buildID typeutil.Unique
 func (m *TaskManager) StoreIndexFilesAndStatistic(
 	ClusterID string,
 	buildID typeutil.UniqueID,
+	expected *IndexTaskInfo,
 	fileKeys []string,
 	serializedSize uint64,
 	memSize uint64,
@@ -200,7 +201,7 @@ func (m *TaskManager) StoreIndexFilesAndStatistic(
 	key := Key{ClusterID: ClusterID, TaskID: buildID}
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
-	if info, ok := m.indexTasks[key]; ok {
+	if info, ok := m.indexTasks[key]; ok && info == expected {
 		info.FileKeys = common.CloneStringList(fileKeys)
 		info.SerializedSize = serializedSize
 		info.MemSize = memSize
@@ -208,6 +209,15 @@ func (m *TaskManager) StoreIndexFilesAndStatistic(
 		info.CurrentScalarIndexVersion = currentScalarIndexVersion
 		info.IndexStorePathVersion = indexStorePathVersion
 		return
+	}
+}
+
+// RemoveIndexTask rolls back registration only if this attempt still owns it.
+func (m *TaskManager) RemoveIndexTask(key Key, expected *IndexTaskInfo) {
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+	if m.indexTasks[key] == expected {
+		delete(m.indexTasks, key)
 	}
 }
 
@@ -270,11 +280,11 @@ func (m *TaskManager) LoadAnalyzeTaskState(clusterID string, taskID typeutil.Uni
 	return task.State
 }
 
-func (m *TaskManager) StoreAnalyzeTaskState(clusterID string, taskID typeutil.UniqueID, state indexpb.JobState, failReason string) {
+func (m *TaskManager) StoreAnalyzeTaskState(clusterID string, taskID typeutil.UniqueID, expected *AnalyzeTaskInfo, state indexpb.JobState, failReason string) {
 	key := Key{ClusterID: clusterID, TaskID: taskID}
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
-	if task, ok := m.analyzeTasks[key]; ok {
+	if task, ok := m.analyzeTasks[key]; ok && task == expected {
 		mlog.Info(m.ctx, "store analyze task state", mlog.String("clusterID", clusterID), mlog.Int64("TaskID", taskID),
 			mlog.String("state", state.String()), mlog.String("fail reason", failReason))
 		task.State = state
@@ -285,12 +295,13 @@ func (m *TaskManager) StoreAnalyzeTaskState(clusterID string, taskID typeutil.Un
 func (m *TaskManager) StoreAnalyzeFilesAndStatistic(
 	ClusterID string,
 	taskID typeutil.UniqueID,
+	expected *AnalyzeTaskInfo,
 	centroidsFile string,
 ) {
 	key := Key{ClusterID: ClusterID, TaskID: taskID}
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
-	if info, ok := m.analyzeTasks[key]; ok {
+	if info, ok := m.analyzeTasks[key]; ok && info == expected {
 		info.CentroidsFile = centroidsFile
 		return
 	}
@@ -309,6 +320,15 @@ func (m *TaskManager) GetAnalyzeTaskInfo(clusterID string, taskID typeutil.Uniqu
 		}
 	}
 	return nil
+}
+
+// RemoveAnalyzeTask rolls back registration only if this attempt still owns it.
+func (m *TaskManager) RemoveAnalyzeTask(key Key, expected *AnalyzeTaskInfo) {
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+	if m.analyzeTasks[key] == expected {
+		delete(m.analyzeTasks, key)
+	}
 }
 
 func (m *TaskManager) DeleteAnalyzeTaskInfos(ctx context.Context, keys []Key) []*AnalyzeTaskInfo {
@@ -522,11 +542,11 @@ func (m *TaskManager) GetStatsTaskState(clusterID string, taskID typeutil.Unique
 	return task.State
 }
 
-func (m *TaskManager) StoreStatsTaskState(clusterID string, taskID typeutil.UniqueID, state indexpb.JobState, failReason string) {
+func (m *TaskManager) StoreStatsTaskState(clusterID string, taskID typeutil.UniqueID, expected *StatsTaskInfo, state indexpb.JobState, failReason string) {
 	key := Key{ClusterID: clusterID, TaskID: taskID}
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
-	if task, ok := m.statsTasks[key]; ok {
+	if task, ok := m.statsTasks[key]; ok && task == expected {
 		mlog.Info(m.ctx, "store stats task state", mlog.String("clusterID", clusterID), mlog.Int64("TaskID", taskID),
 			mlog.String("state", state.String()), mlog.String("fail reason", failReason))
 		task.State = state
@@ -537,6 +557,7 @@ func (m *TaskManager) StoreStatsTaskState(clusterID string, taskID typeutil.Uniq
 func (m *TaskManager) StorePKSortStatsResult(
 	ClusterID string,
 	taskID typeutil.UniqueID,
+	expected *StatsTaskInfo,
 	collID typeutil.UniqueID,
 	partID typeutil.UniqueID,
 	segID typeutil.UniqueID,
@@ -550,7 +571,7 @@ func (m *TaskManager) StorePKSortStatsResult(
 	key := Key{ClusterID: ClusterID, TaskID: taskID}
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
-	if info, ok := m.statsTasks[key]; ok {
+	if info, ok := m.statsTasks[key]; ok && info == expected {
 		info.CollID = collID
 		info.PartID = partID
 		info.SegID = segID
@@ -567,6 +588,7 @@ func (m *TaskManager) StorePKSortStatsResult(
 func (m *TaskManager) StoreStatsTextIndexResult(
 	ClusterID string,
 	taskID typeutil.UniqueID,
+	expected *StatsTaskInfo,
 	collID typeutil.UniqueID,
 	partID typeutil.UniqueID,
 	segID typeutil.UniqueID,
@@ -578,7 +600,7 @@ func (m *TaskManager) StoreStatsTextIndexResult(
 	key := Key{ClusterID: ClusterID, TaskID: taskID}
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
-	if info, ok := m.statsTasks[key]; ok {
+	if info, ok := m.statsTasks[key]; ok && info == expected {
 		info.TextStatsLogs = texIndexLogs
 		info.SegID = segID
 		info.CollID = collID
@@ -592,6 +614,7 @@ func (m *TaskManager) StoreStatsTextIndexResult(
 func (m *TaskManager) StoreJSONKeyStatsResult(
 	clusterID string,
 	taskID typeutil.UniqueID,
+	expected *StatsTaskInfo,
 	collID typeutil.UniqueID,
 	partID typeutil.UniqueID,
 	segID typeutil.UniqueID,
@@ -603,7 +626,7 @@ func (m *TaskManager) StoreJSONKeyStatsResult(
 	key := Key{ClusterID: clusterID, TaskID: taskID}
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
-	if info, ok := m.statsTasks[key]; ok {
+	if info, ok := m.statsTasks[key]; ok && info == expected {
 		info.JSONKeyStatsLogs = jsonKeyIndexLogs
 		info.SegID = segID
 		info.CollID = collID
@@ -622,6 +645,15 @@ func (m *TaskManager) GetStatsTaskInfo(clusterID string, taskID typeutil.UniqueI
 		return info.Clone()
 	}
 	return nil
+}
+
+// RemoveStatsTask rolls back registration only if this attempt still owns it.
+func (m *TaskManager) RemoveStatsTask(key Key, expected *StatsTaskInfo) {
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+	if m.statsTasks[key] == expected {
+		delete(m.statsTasks, key)
+	}
 }
 
 func (m *TaskManager) DeleteStatsTaskInfos(ctx context.Context, keys []Key) []*StatsTaskInfo {

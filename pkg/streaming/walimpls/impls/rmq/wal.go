@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const defaultReadAheadBufferSize = 1024
@@ -49,6 +50,9 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 
 // Read create a scanner to read the wal.
 func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls.ScannerImpls, err error) {
+	if _, latest := opt.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_Latest); latest {
+		return nil, merr.WrapErrParameterInvalidMsg("latest delivery policy is deprecated; use All, StartFrom or StartAfter")
+	}
 	scannerName := opt.Name
 	if opt.ReadAheadBufferSize == 0 {
 		opt.ReadAheadBufferSize = defaultReadAheadBufferSize
@@ -63,8 +67,6 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 	switch opt.DeliverPolicy.GetPolicy().(type) {
 	case *streamingpb.DeliverPolicy_All:
 		consumerOption.SubscriptionInitialPosition = common.SubscriptionPositionEarliest
-	case *streamingpb.DeliverPolicy_Latest:
-		consumerOption.SubscriptionInitialPosition = common.SubscriptionPositionLatest
 	}
 
 	// Subscribe the MQ consumer.

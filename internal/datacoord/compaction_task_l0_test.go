@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -400,17 +401,17 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 				State:         commonpb.SegmentState_Flushed,
 				Deltalogs:     deltaLogs,
 			}}
-		}).Twice()
+		}).Times(4)
 		s.mockCatalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64) error {
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64, _ taskcommon.Resource) error {
 			s.Require().EqualValues(t.GetTaskProto().NodeID, nodeID)
 			s.Require().EqualValues(t.GetTaskProto().GetCollectionID(), collectionID)
 			return errors.New("mock error")
 		})
 
-		t.CreateTaskOnWorker(100, cluster)
+		t.CreateTaskOnWorker(100, cluster, t.GetTaskResource())
 		s.Equal(datapb.CompactionTaskState_pipelining, t.GetTaskProto().State)
 		s.EqualValues(meta.NullNodeID, t.GetTaskProto().NodeID)
 	})
@@ -441,16 +442,16 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 				State:         commonpb.SegmentState_Flushed,
 				Deltalogs:     deltaLogs,
 			}}
-		}).Twice()
+		}).Times(4)
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64) error {
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(nodeID int64, plan *datapb.CompactionPlan, collectionID int64, _ taskcommon.Resource) error {
 			s.Require().EqualValues(t.GetTaskProto().NodeID, nodeID)
 			s.Require().EqualValues(t.GetTaskProto().GetCollectionID(), collectionID)
 			return nil
 		})
 
-		t.CreateTaskOnWorker(100, cluster)
+		t.CreateTaskOnWorker(100, cluster, t.GetTaskResource())
 		s.Equal(datapb.CompactionTaskState_executing, t.GetTaskProto().GetState())
 	})
 

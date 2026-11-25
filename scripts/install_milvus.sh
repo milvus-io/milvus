@@ -58,6 +58,10 @@ if (( ${#svs_files[@]} )); then
     fi
 fi
 shopt -u nullglob
+# The plan parser libraries exist for the C++ unit tests, which link them from
+# internal/core/output/lib. Nothing at runtime loads them, so keep them out of
+# the runtime directory, including copies left there by an older installer.
+rm -f "$LIBRARY_PATH"/libmilvus-planparser*
 cp -r "$PWD/internal/core/output/lib/ossl-modules" "$LIBRARY_PATH" 2>/dev/null || true
 for marker in "$PWD/internal/core/output/lib/milvus-sanitizer" "$PWD/internal/core/output/lib64/milvus-sanitizer"; do
     if [[ -f "$marker" ]]; then

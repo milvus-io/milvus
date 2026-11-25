@@ -4,11 +4,11 @@ import (
 	"context"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/idempotencyview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -34,9 +34,11 @@ func (r *recoveryStorageImpl) runBoundedRecovery(
 
 	r.Logger().Info(context.TODO(), "recover from wal stream...")
 	recoveryTimeTick := r.checkpoint.TimeTick
+	var lastSwitchTick uint64
 	rs := recoveryStreamBuilder.Build(BuildRecoveryStreamParam{
 		StartCheckpoint: r.checkpoint.MessageID,
 		RecoveryBarrier: lastTimeTickMessage,
+		StopAtWALSwitch: true,
 	})
 	r.recoveryStream = rs
 	defer func() {
@@ -60,15 +62,49 @@ L:
 			// Filter after scanner ordering and transaction assembly so older txn
 			// fragments can still contribute to a commit beyond the checkpoint.
 			if msg.TimeTick() > recoveryTimeTick {
+				if msg.MessageType() == message.MessageTypeCreateSegment {
+					header := message.MustAsImmutableCreateSegmentMessageV2(msg).Header()
+					if err := storagecommon.ValidateSegmentStorageVersion(header.GetSegmentId(), header.GetStorageVersion()); err != nil {
+						return nil, err
+					}
+				}
 				r.observeMessage(ctx, msg)
 			}
+			if message.IsWALSwitch(msg) {
+				start, switchErr := message.WALSwitchStart(msg)
+				if switchErr != nil {
+					return nil, switchErr
+				}
+				if start.WALName() != msg.WALName() {
+					if msg.TimeTick() <= lastSwitchTick {
+						return nil, merr.WrapErrDataIntegrityMsg("non-increasing WAL switch boundary during recovery")
+					}
+					lastSwitchTick = msg.TimeTick()
+					switcher, ok := recoveryStreamBuilder.(RecoveryWALSwitcher)
+					if !ok {
+						return nil, merr.WrapErrServiceInternalMsg("recovery stream cannot switch physical WAL")
+					}
+					_ = rs.Close()
+					lastTimeTickMessage, err = switcher.SwitchWAL(ctx, start)
+					if err != nil {
+						return nil, merr.Wrap(err, "open next WAL recovery leg")
+					}
+					rs = recoveryStreamBuilder.Build(BuildRecoveryStreamParam{
+						StartCheckpoint: start, StartAfterCheckpoint: true,
+						RecoveryBarrier: lastTimeTickMessage, StopAtWALSwitch: true,
+					})
+					r.recoveryStream = rs
+					continue
+				}
+			}
 			if msg.MessageType() == message.MessageTypeRecoveryBarrier &&
-				msg.TimeTick() == lastTimeTickMessage.TimeTick() && msg.MessageID().EQ(lastTimeTickMessage.MessageID()) {
+				msg.TimeTick() == lastTimeTickMessage.TimeTick() && msg.WALName() == lastTimeTickMessage.WALName() && msg.MessageID().EQ(lastTimeTickMessage.MessageID()) {
 				break L
 			}
 		}
 	}
 	snapshot = r.buildInitialRecoverySnapshot()
+	snapshot.RecoveryBarrier = lastTimeTickMessage
 	snapshot.TxnBuffer = rs.TxnBuffer()
 	snapshot.SummaryRecovery, err = r.buildIdempotencySnapshots(ctx)
 	if err != nil {
@@ -85,11 +121,6 @@ L:
 		mlog.Int("segments", segmentCount),
 		mlog.String("checkpoint", snapshot.Checkpoint.MessageID.String()),
 		mlog.Uint64("checkpointTimeTick", snapshot.Checkpoint.TimeTick),
-	}
-	if state := snapshot.PChannelControl.GetAlterWalState(); state.GetStage() != streamingpb.AlterWALStage_NONE {
-		logFields = append(logFields,
-			mlog.Stringer("targetWALName", state.GetTargetWalName()),
-		)
 	}
 	r.Logger().Info(context.TODO(), "recovery from wal stream done", logFields...)
 	return snapshot, nil

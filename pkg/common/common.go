@@ -859,18 +859,6 @@ func IsDisableFuncRuntimeCheck(kvs ...*commonpb.KeyValuePair) (bool, error) {
 	return false, nil
 }
 
-func IsPartitionKeyIsolationPropEnabled(props map[string]string) (bool, error) {
-	val, ok := props[PartitionKeyIsolationKey]
-	if !ok {
-		return false, nil
-	}
-	iso, parseErr := strconv.ParseBool(val)
-	if parseErr != nil {
-		return false, merr.WrapErrParameterInvalidMsg("failed to parse partition key isolation property: %v", parseErr)
-	}
-	return iso, nil
-}
-
 func GetNamespaceMode(kvs ...*commonpb.KeyValuePair) string {
 	for _, kv := range kvs {
 		if kv.GetKey() == NamespaceModeKey {
@@ -890,6 +878,12 @@ func IsNamespaceModePartitionKey(kvs ...*commonpb.KeyValuePair) bool {
 
 func IsNamespaceModePartition(kvs ...*commonpb.KeyValuePair) bool {
 	return GetNamespaceMode(kvs...) == NamespaceModePartition
+}
+
+// UsesNamespacePartitionKey reports whether rows carry the namespace as a partition
+// key. In partition mode the physical partition identifies the namespace instead.
+func UsesNamespacePartitionKey(schema *schemapb.CollectionSchema) bool {
+	return schema.GetEnableNamespace() && IsNamespaceModePartitionKey(schema.GetProperties()...)
 }
 
 func ValidateNamespaceMode(kvs ...*commonpb.KeyValuePair) error {
@@ -1162,20 +1156,6 @@ func GetCollectionTTL(kvs []*commonpb.KeyValuePair) (time.Duration, error) {
 	}
 
 	return time.Duration(value) * time.Second, nil
-}
-
-func GetCollectionTTLFromMap(kvs map[string]string) (time.Duration, error) {
-	value, exist := kvs[CollectionTTLConfigKey]
-	if !exist {
-		return -1, nil
-	}
-
-	ttlSeconds, err := strconv.ParseInt(value, 10, 64)
-	if err != nil {
-		return 0, err
-	}
-
-	return time.Duration(ttlSeconds) * time.Second, nil
 }
 
 func CheckNamespace(schema *schemapb.CollectionSchema, namespace *string) error {

@@ -230,8 +230,7 @@ func buildCreateCollectionChildKvs(coll *model.Collection) (map[string]string, e
 	// save fields info to new path.
 	for _, field := range coll.Fields {
 		k := BuildFieldKey(coll.CollectionID, field.FieldID)
-		fieldInfo := model.MarshalFieldModel(field)
-		v, err := proto.Marshal(fieldInfo)
+		v, err := proto.Marshal(field)
 		if err != nil {
 			return nil, err
 		}
@@ -430,7 +429,7 @@ func unmarshalField(value []byte) (*model.Field, error) {
 	if err := proto.Unmarshal(value, info); err != nil {
 		return nil, merr.WrapErrDataIntegrity(err, "unmarshal field metadata")
 	}
-	return model.UnmarshalFieldModel(info), nil
+	return info, nil
 }
 
 func unmarshalStructArrayField(value []byte) (*model.StructArrayField, error) {
@@ -438,7 +437,16 @@ func unmarshalStructArrayField(value []byte) (*model.StructArrayField, error) {
 	if err := proto.Unmarshal(value, info); err != nil {
 		return nil, merr.WrapErrDataIntegrity(err, "unmarshal struct array field metadata")
 	}
-	return model.UnmarshalStructArrayFieldModel(info), nil
+	// info was just decoded and is owned by nobody else, so the model
+	// keeps its sub-fields instead of copying them, as unmarshalField does.
+	return &model.StructArrayField{
+		FieldID:     info.GetFieldID(),
+		Name:        info.GetName(),
+		Description: info.GetDescription(),
+		Fields:      info.GetFields(),
+		TypeParams:  info.GetTypeParams(),
+		Nullable:    info.GetNullable(),
+	}, nil
 }
 
 func unmarshalFunction(value []byte) (*model.Function, error) {
@@ -688,8 +696,7 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 		for _, field := range newColl.Fields {
 			newFieldIDs[field.FieldID] = struct{}{}
 			k := BuildFieldKey(newColl.CollectionID, field.FieldID)
-			fieldInfo := model.MarshalFieldModel(field)
-			v, err := proto.Marshal(fieldInfo)
+			v, err := proto.Marshal(field)
 			if err != nil {
 				return err
 			}

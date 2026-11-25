@@ -534,6 +534,65 @@ func rejectStructSubFieldOriginMarkers(schemas []*schemapb.StructArrayFieldSchem
 	return nil
 }
 
+// validateRestoredStructSubFieldOriginMarkers checks the internal origin marker
+// on restored struct sub-fields (including RestoreExternalSnapshot, which reads
+// schema metadata from a caller-selected URI). Every marked sub-field must be
+// element-nullable with value "true" and have a field ID greater than every
+// unmarked (original) sibling, and every non-empty struct must retain at least
+// one unmarked sub-field so CheckStructKeepsOriginalSubField and old-segment
+// sibling lookup remain valid.
+func validateRestoredStructSubFieldOriginMarkers(schemas []*schemapb.StructArrayFieldSchema) error {
+	for _, structField := range schemas {
+		fields := structField.GetFields()
+		if len(fields) == 0 {
+			continue
+		}
+		hasOriginal := false
+		maxOriginalID := int64(0)
+		var addedFields []*schemapb.FieldSchema
+		for _, field := range fields {
+			marked := false
+			for _, kv := range field.GetTypeParams() {
+				if kv.GetKey() != common.StructSubFieldAddedKey {
+					continue
+				}
+				if kv.GetValue() != "true" {
+					return merr.WrapErrParameterInvalidMsg(
+						"type param %s of field %q must be \"true\", got %q",
+						common.StructSubFieldAddedKey, field.GetName(), kv.GetValue())
+				}
+				marked = true
+			}
+			if !marked {
+				if !hasOriginal || field.GetFieldID() > maxOriginalID {
+					maxOriginalID = field.GetFieldID()
+				}
+				hasOriginal = true
+				continue
+			}
+			if !field.GetElementNullable() {
+				return merr.WrapErrParameterInvalidMsg(
+					"added sub-field %q of struct field %q must set element_nullable=true",
+					field.GetName(), structField.GetName())
+			}
+			addedFields = append(addedFields, field)
+		}
+		if !hasOriginal {
+			return merr.WrapErrParameterInvalidMsg(
+				"struct field %q must keep at least one original sub-field without %s",
+				structField.GetName(), common.StructSubFieldAddedKey)
+		}
+		for _, field := range addedFields {
+			if field.GetFieldID() <= maxOriginalID {
+				return merr.WrapErrParameterInvalidMsg(
+					"added sub-field %q of struct field %q has field ID %d, which must be greater than original sub-field ID %d",
+					field.GetName(), structField.GetName(), field.GetFieldID(), maxOriginalID)
+			}
+		}
+	}
+	return nil
+}
+
 func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) error {
 	for _, schema := range schemas {
 		if len(schema.GetFields()) == 0 {
@@ -786,7 +845,7 @@ func ensureCollectionMaxFieldIDProperty(coll *model.Collection) {
 	if coll == nil {
 		return
 	}
-	coll.Properties = updateMaxFieldIDProperty(coll.Properties, maxAssignedFieldIDFromSchema(coll.ToCollectionSchemaPB()))
+	coll.Properties = updateMaxFieldIDProperty(coll.Properties, maxAssignedFieldIDFromSchema(coll.SchemaView()))
 }
 
 func nextFunctionID(coll *model.Collection) int64 {

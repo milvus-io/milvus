@@ -231,7 +231,7 @@ func (t *compactionTrigger) getCollection(collectionID UniqueID) (*meta.Collecti
 }
 
 func getCompactTime(ts Timestamp, coll *meta.CollectionInfo) (*view.CompactTime, error) {
-	collectionTTL, err := common.GetCollectionTTLFromMap(coll.Properties)
+	collectionTTL, err := common.GetCollectionTTL(coll.Properties)
 	if err != nil {
 		return nil, err
 	}
@@ -345,7 +345,7 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 	}
 
 	for _, group := range groups {
-		log := mlog.With(
+		log := mlog.WithLazy(
 			mlog.Int64("group.partitionID", group.PartitionID),
 			mlog.String("group.channel", group.ChannelName),
 		)
