@@ -29,6 +29,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 )
 
+func TestRegisterMixCoordObjectCounts(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	RegisterMixCoord(registry)
+	count, err := testutil.GatherAndCount(registry,
+		"milvus_rootcoord_database_num",
+		"milvus_rootcoord_num_of_privilege_groups",
+	)
+	require.NoError(t, err)
+	require.Equal(t, 2, count)
+}
+
 func TestRegisterMetrics(t *testing.T) {
 	assert.NotPanics(t, func() {
 		r := prometheus.NewRegistry()
