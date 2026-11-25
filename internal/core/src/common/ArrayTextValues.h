@@ -22,9 +22,9 @@
 
 namespace milvus {
 
-// Borrowed documents in struct element order, consumed before releasing the
+// Borrowed documents in array element order, consumed before releasing the
 // source column pin. Both ARRAY storage representations use the same numbering.
-struct StructTextValues {
+struct ArrayTextValues {
     std::vector<std::string_view> values;
     FixedVector<bool> valid;
 

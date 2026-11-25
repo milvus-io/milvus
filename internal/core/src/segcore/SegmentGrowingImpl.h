@@ -673,9 +673,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
         // of a sub-field that schema dropped must still resolve for it (see
         // Reopen). Field IDs are never reused, so a kept alias cannot answer
         // for a different field.
-        std::shared_lock lock(struct_element_offsets_map_mutex_);
-        auto it = struct_element_offsets_map_.find(field_id);
-        if (it != struct_element_offsets_map_.end()) {
+        std::shared_lock lock(element_offsets_mutex_);
+        auto it = element_offsets_by_field_.find(field_id);
+        if (it != element_offsets_by_field_.end()) {
             return it->second;
         }
         return nullptr;
@@ -994,16 +994,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // milvus storage internal api reader instance
     std::unique_ptr<milvus_storage::api::Reader> reader_;
 
-    // field_id -> StructElementOffsetsGrowing (for fast lookup via GetStructElementOffsets)
-    // Multiple field_ids from the same struct point to the same StructElementOffsetsGrowing
+    // StructArray children share offsets; a top-level ARRAY owns its offsets.
     std::unordered_map<FieldId, std::shared_ptr<StructElementOffsetsGrowing>>
-        struct_element_offsets_map_;
+        element_offsets_by_field_;
 
-    // Representative field_id for each struct (used to extract array lengths during Insert)
-    // One field_id per struct, since all fields in the same struct have identical array lengths
-    std::unordered_set<FieldId> struct_representative_fields_;
+    // One field per group supplies row lengths on insert.
+    std::unordered_set<FieldId> element_offset_representatives_;
 
-    mutable std::shared_mutex struct_element_offsets_map_mutex_;
+    mutable std::shared_mutex element_offsets_mutex_;
 
     // Tracked resource usage for refund-then-charge pattern
     // This stores the last estimated resource usage that was charged to the cache manager

@@ -44,7 +44,7 @@ func (h *FieldSchemaHelper) GetDim() (int64, error) {
 
 func supportsTextAnalysis(field *schemapb.FieldSchema) bool {
 	return IsStringType(field.GetDataType()) || (field.GetDataType() == schemapb.DataType_Array &&
-		field.GetElementType() == schemapb.DataType_VarChar && IsStructSubField(field.GetName()))
+		field.GetElementType() == schemapb.DataType_VarChar)
 }
 
 // IsTextMatchEnabled reports whether the field enables text matching.

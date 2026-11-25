@@ -1039,8 +1039,8 @@ TEST_P(TestLazyManifest, StructOffsetsBuiltBeforePublicationAndDoNotReloadRaw) {
     ASSERT_NE(proxy, nullptr);
     EXPECT_TRUE(proxy->IsLazy());
     EXPECT_TRUE(proxy->IsMaterialized());
-    auto entry = state->runtime->struct_element_offsets_map.at(label);
-    EXPECT_EQ(entry, state->runtime->struct_element_offsets_map.at(score));
+    auto entry = state->runtime->element_offsets_by_field.at(label);
+    EXPECT_EQ(entry, state->runtime->element_offsets_by_field.at(score));
     ASSERT_NE(entry, nullptr);
 
     auto offsets = entry;
@@ -1140,11 +1140,11 @@ TEST_P(TestLazyManifest, LazyManifestMatchCancellationDuringMetadataOpen) {
         auto runtime = sealed->TestCloneMutableRuntimeResourceState();
         // Preserve the cold column rather than using the ordinary raw-column
         // loader, whose size accounting materializes variable-length columns.
-        auto entry = current->runtime->struct_element_offsets_map.at(label);
+        auto entry = current->runtime->element_offsets_by_field.at(label);
         ASSERT_NE(entry, nullptr);
         runtime->fields.insert_or_assign(label, column);
-        runtime->struct_to_element_offsets.insert_or_assign("items", entry);
-        runtime->struct_element_offsets_map.insert_or_assign(label, entry);
+        runtime->element_offsets_by_group.insert_or_assign("items", entry);
+        runtime->element_offsets_by_field.insert_or_assign(label, entry);
         runtime->variable_fields_avg_size.erase(label);
         sealed->TestPublishRuntimeResourceState(std::move(runtime));
         ASSERT_FALSE(proxy->IsMaterialized());

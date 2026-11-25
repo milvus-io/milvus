@@ -43,6 +43,13 @@ func TestValidateStructSubFieldsTextMatch(t *testing.T) {
 
 	match := &commonpb.KeyValuePair{Key: common.EnableMatchKey, Value: "true"}
 	analyzer := &commonpb.KeyValuePair{Key: common.EnableAnalyzerKey, Value: "true"}
+	tags := varcharArray(match, analyzer)
+	tags.Name = "tags"
+	require.NoError(t, ValidateVarCharArrayTextMatch(tags))
+	require.True(t, BuildTextStats(tags))
+	tags.TypeParams = []*commonpb.KeyValuePair{match}
+	require.ErrorContains(t, ValidateVarCharArrayTextMatch(tags), "requires enable_analyzer")
+	require.False(t, BuildTextStats(tags)) // Old schemas may contain only enable_match.
 	enabled := varcharArray(match, analyzer)
 	require.NoError(t, ValidateStructSubFieldsTextMatch(newStruct(enabled)))
 	require.True(t, BuildTextStats(enabled))

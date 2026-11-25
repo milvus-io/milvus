@@ -2345,7 +2345,7 @@ PhyUnaryRangeFilterExpr::ExecTextMatch(const OffsetVector* offsets) {
     const auto mapping =
         elements ? GetStructElementOffsets(field_id_) : nullptr;
     AssertInfo(!elements || mapping,
-               "missing struct element offsets for text field {}",
+               "missing array element offsets for text field {}",
                field_id_.get());
     const auto position = [&](int64_t row) -> int64_t {
         return mapping ? mapping->ElementIDRangeOfRow(row).first : row;
@@ -2386,7 +2386,7 @@ PhyUnaryRangeFilterExpr::ExecTextMatch(const OffsetVector* offsets) {
                 if (elements && segment_->type() == SegmentType::Sealed) {
                     AssertInfo(
                         res.size() == mapping->GetTotalElementCount(),
-                        "text index has {} documents for {} struct elements",
+                        "text index has {} documents for {} array elements",
                         res.size(),
                         mapping->GetTotalElementCount());
                 }

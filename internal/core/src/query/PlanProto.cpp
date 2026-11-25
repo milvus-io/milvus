@@ -1424,8 +1424,16 @@ ProtoParser::ParseMatchExprs(const proto::plan::MatchExpr& expr_pb) {
     auto match_type = expr_pb.match_type();
     auto count = expr_pb.count();
     auto predicate = this->ParseExprs(expr_pb.predicate());
+    std::optional<FieldId> target_field;
+    if (expr_pb.has_target_field_id()) {
+        target_field = FieldId(expr_pb.target_field_id());
+        // Never rebind a stale ID to a same-named field from a newer schema.
+        schema->GetMatchTargetField(*target_field);
+    } else if (struct_name.empty()) {
+        ThrowInfo(ExprInvalid, "MATCH plan has no target field");
+    }
     return std::make_shared<expr::MatchExpr>(
-        struct_name, match_type, count, predicate);
+        struct_name, match_type, count, predicate, target_field);
 }
 
 expr::TypedExprPtr

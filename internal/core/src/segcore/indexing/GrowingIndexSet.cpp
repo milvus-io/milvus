@@ -280,8 +280,8 @@ GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
                 unique_id.c_str(),
                 "milvus_tokenizer",
                 analyzer_params.c_str(),
-                field_meta.is_struct_varchar() ? DataType::VARCHAR
-                                               : field_meta.get_data_type(),
+                field_meta.is_varchar_array() ? DataType::VARCHAR
+                                              : field_meta.get_data_type(),
                 kGrowingTextCommitIntervalMs));
     }
 

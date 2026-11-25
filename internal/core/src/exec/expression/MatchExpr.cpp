@@ -274,11 +274,19 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                       : context.get_exec_context()
                             ->get_query_context()
                             ->get_read_schema();
+    auto target_field = expr_->get_target_field();
     const auto& field_meta =
-        schema->GetFirstArrayFieldInStruct(expr_->get_struct_name());
+        target_field
+            ? schema->GetMatchTargetField(*target_field)
+            : schema->GetFirstArrayFieldInStruct(expr_->get_struct_name());
 
     auto struct_element_offsets =
         segment_chunk_reader_.GetStructElementOffsets(field_meta.get_id());
+    if (target_field && !struct_element_offsets) {
+        ThrowInfo(ExprInvalid,
+                  "MATCH requires element offsets for target field {}",
+                  target_field->get());
+    }
     AssertInfo(struct_element_offsets != nullptr,
                "Struct element offsets not available");
 
