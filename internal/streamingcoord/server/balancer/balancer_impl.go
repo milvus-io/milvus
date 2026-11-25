@@ -398,7 +398,9 @@ func (b *balancerImpl) execute(ready260Future *syncutil.Future[error]) {
 			b.channelMetaManager.TriggerWatchUpdate()
 			// balance triggered by new streaming node changed.
 		case <-b.peers.Changed():
-		// Re-evaluate the absorbing membership and readiness reports.
+			// A node reported a new inventory.
+		case <-b.controller.RetryTimer():
+			// Reissue the desired topology while replicas are converging.
 		case <-channelChanged.WaitChan():
 			// balance triggered by channel changed.
 			channelChanged.Sync()

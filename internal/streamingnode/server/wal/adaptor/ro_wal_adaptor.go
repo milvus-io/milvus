@@ -170,17 +170,20 @@ func (w *roWALAdaptorImpl) markUnavailable(err error) {
 func (w *roWALAdaptorImpl) Close() { w.closeOnce.Do(w.closeReader) }
 
 func (w *roWALAdaptorImpl) closeReader() {
-	w.stopFollowing()
-	if w.readViews != nil {
-		w.availableCancel()
-		w.readViews.CloseForHandoff()
-	}
-
 	// begin to close the wal.
 	w.Logger().Info(context.TODO(), "wal begin to close...")
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
-	w.forceCancelAfterGracefulTimeout()
+	if w.readViews != nil {
+		w.availableCancel()
+		w.readViews.StopQueryAcquisition()
+	} else {
+		w.forceCancelAfterGracefulTimeout()
+	}
+	w.stopFollowing()
 	w.lifetime.Wait()
+	if w.readViews != nil {
+		w.readViews.CloseForHandoff()
+	}
 
 	w.Logger().Info(context.TODO(), "wal begin to close scanners...")
 

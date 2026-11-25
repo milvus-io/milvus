@@ -1,6 +1,6 @@
 # WAL 副本状态机与 Coord 收敛
 
-一个 WALReplicaID 标识一个 PChannel 在一个 StreamingNode 上的一次生命周期。Coord 创建或移除这个身份，为某个成员授予 writer term。SN 持有实际资源，向 Coord 回报这次操作执行到了哪里。客户端经 SN session 发现已经开放的端点。本文给出目标设计；生产 proto 目前仍使用 `PREPARING / READY / UNRECOVERABLE`。[生产协议](../../../../pkg/proto/streaming.proto) · [WAL 多副本工作流](wal-replicas.md)
+一个 WALReplicaID 标识一个 PChannel 在一个 StreamingNode 上的一次生命周期。Coord 创建或移除这个身份，为某个成员授予 writer term。SN 持有实际资源，向 Coord 回报这次操作执行到了哪里。客户端经 SN session 发现已经开放的端点。清单的 `PREPARING` 表示操作尚未结束，`RO`、`RW` 和 `CLOSED` 表示操作完成后的实际状态。只有 `RW` 携带本地生效的 writer term。[生产协议](../../../../pkg/proto/streaming.proto) · [WAL 多副本工作流](wal-replicas.md)
 
 ## 一、先看一个 ID 的一生
 
@@ -109,4 +109,6 @@ Coord 为每个 PChannel 持久化一份 desired topology。成员、writer 或�
 | SN 重新注册，同时 Coord 重启 | 普通独立 SN 重启获得新 NodeID，可据此重新放置。若支持不同注册复用同一 NodeID，须验证 Coord 能跨重启识别注册代际；仅靠数字 NodeID 和新进程的空清单无法安全继承旧生命周期。[注册实现](../../../../internal/util/sessionutil/session_util.go) |
 | 失败持续或全集版本频繁变化 | 可恢复错误在同一操作中退避；反复终结的尝试需限制重规划速率。仍在续租但永久阻塞的节点、始终变化的全集或长期不可用的存储都会延长收敛。一次超时不足以判定旧 writer 已停止。 |
 
-**与工作区实现的差距。** 现有 SN 已能在原地 Promote 失败时返回原 reader，也已有单向 Prepare/Seal。当前清单仍报 Ready 或 Unrecoverable；Coord 按失败的 writer 换任、按节点复用 ID。实现本设计需补足实际角色回报、Closed 的保留与替换、首次公告等待的退出条件，并验证 Seal 不依赖重新追近、显式关闭和重开的顺序。上表属于验收设计，尚未对这些改动执行故障注入。[本地状态收敛](../../../../internal/streamingnode/server/walmanager/replica_sync.go) · [Coord 决策](../../../../internal/streamingcoord/server/balancer/topology/controller.go)
+SN 将已经接受的 Seal 交由本节点生命周期收尾。公告写入暂时失败时，在下一次 Sync 继续收尾。接任者在发出 Seal 前记住源节点和目标 term，丢失响应后可以对同一源直接重发。两端只保留本机在途操作所需的内存状态。进程退出后，存活方按照最新的写授权和 session 恢复。[交接实现](../../../../internal/streamingnode/server/walmanager/replica_handoff.go) · [应答丢失测试](../../../../internal/streamingnode/server/walmanager/replica_handoff_test.go)
+
+Coord 根据当前控制流的完整清单重新规划。稳定的 RO 或 RW 保留副本 ID，Closed 的副本需要新 ID。终态失败的连续重规划受现有 WAL balancer 退避配置限速。等待同一 revision 收敛时，Coord 按 `streaming.walBalancer.backoffMaxInterval` 重发全量 Sync，进度回报不会推迟已经安排的重发。所有角色、任期和移除结果对齐后取消这项重发。空拓扑的重开检查位于规划层，须等存活注册确认排空。[本地状态收敛](../../../../internal/streamingnode/server/walmanager/replica_sync.go) · [Coord 决策](../../../../internal/streamingcoord/server/balancer/topology/controller.go) · [重规划测试](../../../../internal/streamingcoord/server/balancer/topology/controller_test.go)

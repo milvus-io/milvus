@@ -16,11 +16,13 @@ import (
 // until their replacements have acknowledged the requested role.
 func Next(ctx context.Context, current *streamingpb.WALReplicaTopology, writerNode int64,
 	eligible map[int64]*types.StreamingNodeInfoWithResourceGroup, live map[int64]*types.StreamingNodeInfoWithResourceGroup,
-	load map[int64]int, ready map[int64]bool, allocate func(context.Context) (uint64, error),
+	load map[int64]int, reported map[int64]*streamingpb.LocalWALReplica, allocate func(context.Context) (uint64, error),
 ) (*streamingpb.WALReplicaTopology, error) {
 	previous := make(map[int64]*streamingpb.WALReplicaPlacement, len(current.Members))
 	for _, member := range current.Members {
-		previous[member.NodeId] = member
+		if reported[member.WalReplicaId].GetState() != streamingpb.LocalWALReplica_CLOSED {
+			previous[member.NodeId] = member
+		}
 	}
 	selected := make(map[string]int64)
 	for id, node := range eligible {
@@ -51,18 +53,22 @@ func Next(ctx context.Context, current *streamingpb.WALReplicaTopology, writerNo
 			}
 			member = &streamingpb.WALReplicaPlacement{NodeId: id, WalReplicaId: int64(allocated)}
 		}
+		result := reported[member.WalReplicaId]
 		if id == writerNode {
 			next.WriterReplicaId = member.WalReplicaId
+			readyToRetire = readyToRetire && result.GetState() == streamingpb.LocalWALReplica_RW && result.GetWriterTerm() == current.WriterTerm
+		} else {
+			readyToRetire = readyToRetire && result.GetState() == streamingpb.LocalWALReplica_RO
 		}
-		readyToRetire = readyToRetire && ready[member.WalReplicaId]
 		next.Members = append(next.Members, member)
 	}
 	writerChanged := next.WriterReplicaId != current.WriterReplicaId
-	if writerChanged && writerNode != 0 {
+	retryWriter := !writerChanged && reported[next.WriterReplicaId].GetState() == streamingpb.LocalWALReplica_RO
+	if writerNode != 0 && (writerChanged || retryWriter) {
 		next.WriterTerm++
 	}
 	if writerNode != 0 && (!readyToRetire || writerChanged) {
-		for _, member := range current.Members {
+		for _, member := range previous {
 			if _, exists := live[member.NodeId]; !exists {
 				continue
 			}
@@ -72,7 +78,7 @@ func Next(ctx context.Context, current *streamingpb.WALReplicaTopology, writerNo
 		}
 	}
 	slices.SortFunc(next.Members, func(a, b *streamingpb.WALReplicaPlacement) int { return cmp.Compare(a.NodeId, b.NodeId) })
-	if !writerChanged && slices.EqualFunc(next.Members, current.Members, func(a, b *streamingpb.WALReplicaPlacement) bool {
+	if next.WriterTerm == current.WriterTerm && !writerChanged && slices.EqualFunc(next.Members, current.Members, func(a, b *streamingpb.WALReplicaPlacement) bool {
 		return a.WalReplicaId == b.WalReplicaId && a.NodeId == b.NodeId
 	}) {
 		return current, nil

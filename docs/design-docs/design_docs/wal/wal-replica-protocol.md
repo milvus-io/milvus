@@ -1,6 +1,6 @@
 # WAL 多副本协议设计
 
-四个 RPC 属于 StreamingNodeWALReplicaService。现有线上字段见[生产 proto](../../../../pkg/proto/streaming.proto)。本设计对 LocalWALReplica 的调整、当前代码差距和验收条件见[副本状态机与 Coord 收敛](wal-replica-state-machine.md)。下表将 RPC 对应到[多副本工作流](wal-replicas.md)。
+四个 RPC 属于 StreamingNodeWALReplicaService。Sync 传递期望拓扑和实际状态，Watch 同步 checkpoint 和 QueryView，Prepare 与 Seal 协调写权交接。[生产 proto](../../../../pkg/proto/streaming.proto) · [副本状态机与 Coord 收敛](wal-replica-state-machine.md) · [多副本工作流](wal-replicas.md)
 
 | 使用点 | 消息和责任 |
 | --- | --- |
@@ -60,7 +60,7 @@ RO 从 SN catalog 恢复的 Up 走 UpRecovering；Preparing、Down 等在处理�
 
 RW 在串行处理回报时再次核对当前有效 Watch、WALReplicaID、View 键及目标状态；旧流的收包任务即使在换流前已经入队，也要在执行时丢弃。换流的生效点在 RW 安装新 Watch 时。RO 在本地关闭 socket 并不能同步撤销远端已收的 Ready；同键重新获取资源时应先停止本地服务准入，重新就绪前即使收到已持久的 Up，也只能走 UpRecovering。
 
-RW 将参与集合变化、收票和提交决定在同一个 PChannel 上串行处理。持久 Up 或删除旧 Up 的 catalog 事务校验当前拓扑修订和 writer 的 checkpoint fence；校验失败时重新对齐、收票。现有 SaveQueryViews 最终调用 MultiSaveAndRemove，尚未传入上述条件。接入时须让 etcd 在同一次事务里比较拓扑和所有权并保存或删除 View；普通的提交前读取仍留有旧主迟到写入的窗口。事务结果未知时重读相应 View 和授权。现有 SN 状态机产出的待持久化操作由 RW 在通过确认后执行；RO 只执行本地状态及资源转换。
+RW 在当前 PChannel 上串行处理参与集合、收票和提交。通过确认后，CommitReplicaQueryView 读取持久 checkpoint 并核验 writer term。保存 Up 或删除旧 Up 的同一次 etcd 事务比较目标拓扑和读到的 checkpoint，任一发生变化就重新对齐和确认。RO 执行本地资源与状态转换。[提交实现](../../../../internal/metastore/kv/streamingnode/kv_catalog.go) · [副本确认](../../../../internal/streamingnode/server/wal/adaptor/replica_views.go)
 
 等待全部参与者具有可用性代价：任一仍属有效成员的慢 RO 可以延迟新 View 上线；普通 Down 还会等待现有租约。重试超时不构成排空证明。已可读且仍满足 MVCC 的 View 按本地状态继续服务。[现有租约语义](../qviews/query_view_lease.md)
 
@@ -77,7 +77,7 @@ RW 将参与集合变化、收票和提交决定在同一个 PChannel 上串行�
 | Seal 成功 | 关闭 Append 和 Strong 准入、排尽写，确认 session 已改为 RO 或撤下，再返回 SealWALHandoffResponse | 预恢复完成后才请求 SealWALHandoff(P, 8)。核验最新拓扑并 CAS 领取 WALCheckpoint.term，隔离旧后端 writer。 |
 | B 激活 | 继续按本地能力读，发现 B/8 后订阅其 checkpoint 和 QueryView 信号 | 写入本任 RecoveryBarrier，使用原 scanner 观察并完成 writer 恢复；随后开放写入和持久化，发布 B/8。 |
 
-两次 RPC 按调用方 SN 注册身份、本地阶段、PChannel 和目标任期校验，同任期成功效果可重试。 已经发起 Seal 后，A 负责把旧任排空并完成公告更新，B 重试未决的 Seal 或核实其效果。即使旧 RW 公告尚未撤下，也不能要求 A 重新写入近期 TimeTick 才允许这项收尾。A 仍存活而应答丢失时 B 向同一源重试；临时无 RW 路由不足以判定 A 已排空。A 已失去原 session 时改走故障接管。B 未获得写权就只继续读。追近依据在接入时验证。新任期的独占写入依赖底层 WAL fence；各后端的 fence 实现和验证在本 PR 范围之外。Checkpoint 不承担交接切点或选主凭证的职责。
+两次 RPC 按调用方 SN 注册身份、本地阶段、PChannel 和目标任期校验，同任期成功效果可重试。已经发起 Seal 后，A 负责把旧任排空并完成公告更新，B 重试未决的 Seal 或核实其效果。即使旧 RW 公告尚未撤下，也不能要求 A 重新写入近期 TimeTick 才允许这项收尾。A 仍存活而应答丢失时 B 向同一源重试；临时无 RW 路由不足以判定 A 已排空。A 已失去原 session 时改走故障接管。B 未获得写权就只继续读。追近依据在接入时验证。新任期的独占写入依赖底层 WAL fence；各后端的 fence 实现和验证在本 PR 范围之外。Checkpoint 不承担交接切点或选主凭证的职责。
 
 ### AlterWAL 与升主并发
 

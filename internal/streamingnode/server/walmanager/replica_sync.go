@@ -5,13 +5,11 @@ import (
 	"maps"
 	"slices"
 	"sync"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	clientmanager "github.com/milvus-io/milvus/internal/streamingnode/client/manager"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/replica"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -19,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -49,14 +48,21 @@ type replicaTarget struct {
 }
 
 type localReplica struct {
-	operations       sync.Mutex
-	prepared, sealed int64
-	target           replicaTarget
-	instance         wal.WAL
-	id               int64
-	running          bool
-	state            streamingpb.LocalWALReplica_State
-	cancel           context.CancelFunc
+	// opened distinguishes an established replica from a temporary reader owned
+	// by a cold writer Open. Protected by operations.
+	opened bool
+	// Once retirement has started, a newer Sync cannot reopen this ID.
+	closing                   bool
+	operations                sync.Mutex
+	prepared, sealing, sealed int64
+	// Retain an unconfirmed outbound Seal across retries of this promotion.
+	successorSealTerm, successorSealSource int64
+	target                                 replicaTarget
+	instance                               wal.WAL
+	id                                     int64
+	running                                bool
+	state                                  streamingpb.LocalWALReplica_State
+	cancel                                 context.CancelFunc
 }
 
 func newReplicaControl(nodeID int64, opener wal.Opener, advertise func(context.Context, string, *streamingpb.WALAdvertisement) error) *ReplicaControl {
@@ -107,7 +113,7 @@ func (c *ReplicaControl) disconnectLocked() {
 
 func updatePublisher(r *localReplica) {
 	if w, ok := r.instance.(interface{ ReplicaPublisher() *replica.Publisher }); ok && w.ReplicaPublisher() != nil {
-		w.ReplicaPublisher().SetMembers(r.target.topology, r.target.confirmed && r.target.channel.AccessMode == types.AccessModeRW)
+		w.ReplicaPublisher().SetMembers(r.target.topology, r.target.confirmed && r.target.channel.AccessMode == types.AccessModeRW && r.instance.Channel() == r.target.channel)
 	}
 }
 
@@ -147,20 +153,23 @@ func (s *ReplicaControlStream) Sync(req *streamingpb.SyncWALReplicasRequest) (*s
 	}
 	for name, r := range c.locals {
 		next := targets[name]
+		// An ID that has closed can only be removed or replaced. Even a new
+		// term for this ID must replay its Closed result.
+		if r.state == streamingpb.LocalWALReplica_CLOSED && next.channel.WALReplicaID == r.id {
+			r.target = next
+			continue
+		}
 		if r.target.channel != next.channel {
 			r.state = streamingpb.LocalWALReplica_PREPARING
 			if r.running {
 				r.cancel()
 			}
-		} else if r.target.control != next.control && r.state == streamingpb.LocalWALReplica_READY {
-			// Only the advertisement changed; keep any ongoing WAL recovery.
-			r.state = streamingpb.LocalWALReplica_PREPARING
-		} else if next.channel.AccessMode == types.AccessModeRO && next.topology.GetRevision() != r.target.topology.GetRevision() && r.state == streamingpb.LocalWALReplica_UNRECOVERABLE {
+		} else if r.target.control != next.control && r.state == streamingpb.LocalWALReplica_RW {
 			r.state = streamingpb.LocalWALReplica_PREPARING
 		}
 		r.target = next
 		updatePublisher(r)
-		if r.state == streamingpb.LocalWALReplica_READY && !r.instance.IsAvailable() {
+		if (r.state == streamingpb.LocalWALReplica_RW || r.state == streamingpb.LocalWALReplica_RO) && !replicaAvailable(r.instance) {
 			r.state = streamingpb.LocalWALReplica_PREPARING
 		}
 		if r.state == streamingpb.LocalWALReplica_PREPARING && !r.running {
@@ -186,7 +195,11 @@ func (c *ReplicaControl) inventoryLocked() *streamingpb.SyncWALReplicasResponse 
 	response := &streamingpb.SyncWALReplicasResponse{ObservedRevision: c.revision}
 	for _, name := range slices.Sorted(maps.Keys(c.locals)) {
 		r := c.locals[name]
-		response.Replicas = append(response.Replicas, &streamingpb.LocalWALReplica{Pchannel: name, WalReplicaId: r.id, State: r.state})
+		local := &streamingpb.LocalWALReplica{Pchannel: name, WalReplicaId: r.id, State: r.state}
+		if r.state == streamingpb.LocalWALReplica_RW {
+			local.WriterTerm = proto.Int64(r.instance.Channel().Term)
+		}
+		response.Replicas = append(response.Replicas, local)
 	}
 	return response
 }
@@ -205,80 +218,115 @@ func (c *ReplicaControl) startLocked(name string, r *localReplica) {
 		c.mu.Lock()
 		instance := r.instance
 		c.mu.Unlock()
-		w, err := c.reconcile(ctx, name, instance, target)
+		w, err := c.reconcile(ctx, name, r, instance, target)
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		r.instance = w
 		r.running = false
-		if w != nil {
-			r.id = w.Channel().WALReplicaID
-		}
 		if c.closed {
 			return
 		}
-		if target.channel == r.target.channel && err != nil && (errors.Is(err, wal.ErrWriterTermConsumed) ||
-			(target.channel.AccessMode == types.AccessModeRO && target.topology.GetRevision() == r.target.topology.GetRevision() && status.AsStreamingError(err).IsUnrecoverable())) {
-			r.state = streamingpb.LocalWALReplica_UNRECOVERABLE
-		}
-		if target.channel != r.target.channel || (target.control != r.target.control && r.state != streamingpb.LocalWALReplica_UNRECOVERABLE) {
-			c.startLocked(name, r)
+		updatePublisher(r)
+		if err != nil {
+			mlog.Warn(ctx, "failed to reconcile WAL replica", mlog.String("channel", name), mlog.Int64("replicaID", r.id), mlog.Err(err))
+			if target.channel != r.target.channel {
+				c.startLocked(name, r)
+			}
 			return
 		}
-		if c.connection != nil && (err == nil || r.state == streamingpb.LocalWALReplica_UNRECOVERABLE) {
+
+		switch {
+		case w == nil:
+			r.state = streamingpb.LocalWALReplica_CLOSED
+			if nextID := r.target.channel.WALReplicaID; nextID != r.id {
+				delete(c.locals, name)
+				if nextID != 0 {
+					// The replacement has its own lifetime and handoff state.
+					next := &localReplica{id: nextID, target: r.target}
+					c.locals[name] = next
+					c.startLocked(name, next)
+				}
+			}
+		case target.channel != r.target.channel || (w.Channel().AccessMode == types.AccessModeRW && target.control != r.target.control):
+			c.startLocked(name, r)
+		case w.Channel().AccessMode == types.AccessModeRW:
+			r.state = streamingpb.LocalWALReplica_RW
+		default:
+			r.state = streamingpb.LocalWALReplica_RO
+		}
+		if c.connection != nil {
 			select {
 			case c.connection.changed <- struct{}{}:
 			default:
 			}
 		}
-		if err != nil {
-			mlog.Warn(ctx, "failed to reconcile WAL replica", mlog.String("channel", name), mlog.Int64("replicaID", r.id), mlog.Err(err))
-			return
-		}
-		if w == nil {
-			delete(c.locals, name)
-			return
-		}
-		updatePublisher(r)
-		r.state = streamingpb.LocalWALReplica_READY
 	}()
 }
 
-func (c *ReplicaControl) reconcile(ctx context.Context, name string, current wal.WAL, target replicaTarget) (wal.WAL, error) {
+func (c *ReplicaControl) retire(ctx context.Context, name string, r *localReplica, current wal.WAL) (wal.WAL, error) {
+	r.closing = true
+	if current != nil {
+		current.Close()
+	}
+	return nil, c.advertise(ctx, name, nil)
+}
+
+func replicaAvailable(w wal.WAL) bool {
+	if !w.IsAvailable() {
+		return false
+	}
+	if writer, ok := w.(interface{ ReadReplica() wal.WAL }); ok {
+		return writer.ReadReplica().IsAvailable()
+	}
+	return true
+}
+
+func (c *ReplicaControl) demote(ctx context.Context, name string, current wal.WAL) (wal.WAL, error) {
+	writer := current.(interface{ PrepareHandoff(context.Context) error })
+	if err := writer.PrepareHandoff(ctx); err != nil {
+		return current, err
+	}
+	return c.sealWriter(ctx, name, current)
+}
+
+func (c *ReplicaControl) handleUnavailable(ctx context.Context, name string, r *localReplica, current wal.WAL) (wal.WAL, error) {
+	if writer, ok := current.(interface{ ReadReplica() wal.WAL }); ok && r.opened && writer.ReadReplica().IsAvailable() {
+		return c.demote(ctx, name, current)
+	}
+	return c.retire(ctx, name, r, current)
+}
+
+func (c *ReplicaControl) reconcile(ctx context.Context, name string, r *localReplica, current wal.WAL, target replicaTarget) (wal.WAL, error) {
+	// A newer Sync may have superseded this operation while it waited for a
+	// local handoff. Do not begin an obsolete retirement or open.
+	if err := ctx.Err(); err != nil {
+		return current, err
+	}
 	want := target.channel
-	if want.WALReplicaID == 0 || (current != nil && current.Channel().WALReplicaID != want.WALReplicaID) {
-		if current != nil {
-			current.Close()
-			current = nil
+	if r.closing || want.WALReplicaID != r.id {
+		return c.retire(ctx, name, r, current)
+	}
+	if r.sealing != 0 {
+		reader, err := c.finishSeal(ctx, name, r, current)
+		if err != nil {
+			return current, err
 		}
-		if err := c.advertise(ctx, name, nil); err != nil {
-			return nil, err
-		}
-		if want.WALReplicaID == 0 {
-			return nil, nil
-		}
+		current = reader
+	}
+	if current != nil && !replicaAvailable(current) {
+		return c.handleUnavailable(ctx, name, r, current)
 	}
 	if current != nil && current.Channel().AccessMode == types.AccessModeRW && current.Channel() != want {
 		if want.AccessMode == types.AccessModeRO {
 			current.(interface{ ConfirmReplicaTail() }).ConfirmReplicaTail()
 			return current, status.NewIgnoreOperation("awaiting seal of WAL %s", name)
 		}
-		// A successor may have lost its lease while handing off from this node.
-		// Reuse its local read side before claiming the newer authorization.
-		writer := current.(interface {
-			PrepareHandoff(context.Context) error
-			SealHandoff(context.Context) error
-			Demote() wal.WAL
-		})
-		if err := writer.PrepareHandoff(ctx); err != nil {
+		// A successor may have lost its lease before sealing this writer.
+		reader, err := c.demote(ctx, name, current)
+		if err != nil {
 			return current, err
 		}
-		if err := writer.SealHandoff(ctx); err != nil {
-			return current, err
-		}
-		if err := c.advertise(ctx, name, &streamingpb.WALAdvertisement{Pchannel: name, WalReplicaId: want.WALReplicaID}); err != nil {
-			return current, err
-		}
-		current = writer.Demote()
+		current = reader
 	}
 
 	if want.AccessMode == types.AccessModeRW && (current == nil || current.Channel() != want) {
@@ -291,43 +339,13 @@ func (c *ReplicaControl) reconcile(ctx context.Context, name string, current wal
 			read.Term, read.AccessMode = 0, types.AccessModeRO
 			current, err = c.opener.Open(ctx, &wal.OpenOption{Channel: read})
 			if err != nil {
-				return nil, err
+				return c.openFailure(ctx, name, r, nil, err)
 			}
 		}
 		if current != nil {
-			req := &streamingpb.WALHandoffRequest{Pchannel: name, TargetTerm: want.Term}
-			reader := current.(interface {
-				WaitThrough(context.Context, uint64) error
-				Promote(context.Context, types.PChannelInfo, bool, func(context.Context) error) (wal.WAL, error)
-			})
-			if source != 0 {
-				// Old RW forces a physical confirmation on every Sync until seal.
-				// On lease loss or missed ticks return to discovery on the next Sync.
-				ts, err := resource.Resource().TSOAllocator().Allocate(ctx)
-				if err != nil {
-					return current, err
-				}
-				catchup, cancel := context.WithTimeout(ctx, 10*time.Second)
-				err = reader.WaitThrough(catchup, ts)
-				cancel()
-				if err != nil {
-					return current, err
-				}
-				if err = c.peers.Prepare(ctx, source, c.nodeID, req); err != nil {
-					return current, err
-				}
-			}
-			activate := func(ctx context.Context) error {
-				if source != 0 {
-					if err := c.peers.Seal(ctx, source, c.nodeID, req); err != nil {
-						return err
-					}
-				}
-				return c.checkWriter(ctx, want)
-			}
-			writer, err := reader.Promote(ctx, want, source != 0, activate)
+			writer, err := c.prepareSuccessor(ctx, r, current, target, source)
 			if err != nil {
-				return current, err
+				return c.openFailure(ctx, name, r, current, err)
 			}
 			current = writer
 		}
@@ -336,22 +354,15 @@ func (c *ReplicaControl) reconcile(ctx context.Context, name string, current wal
 		var err error
 		current, err = c.opener.Open(ctx, &wal.OpenOption{Channel: want})
 		if err != nil {
-			return nil, err
+			return c.openFailure(ctx, name, r, nil, err)
 		}
 	}
-	if !current.IsAvailable() {
-		if err := c.advertise(ctx, name, nil); err != nil {
-			return current, err
-		}
-		current.Close()
-		if want.AccessMode == types.AccessModeRW {
-			return nil, wal.ErrWriterTermConsumed
-		}
-		return nil, status.NewChannelNotExist(name)
+	if !replicaAvailable(current) {
+		return c.handleUnavailable(ctx, name, r, current)
 	}
-	ad := &streamingpb.WALAdvertisement{Pchannel: name, WalReplicaId: want.WALReplicaID}
-	if want.AccessMode == types.AccessModeRW {
-		ad.WriterTerm = proto.Int64(want.Term)
+	ad := &streamingpb.WALAdvertisement{Pchannel: name, WalReplicaId: r.id}
+	if current.Channel().AccessMode == types.AccessModeRW {
+		ad.WriterTerm = proto.Int64(current.Channel().Term)
 		ad.IsCchannel = target.control
 	}
 	c.mu.Lock()
@@ -359,12 +370,29 @@ func (c *ReplicaControl) reconcile(ctx context.Context, name string, current wal
 		c.mu.Unlock()
 		return current, ctx.Err()
 	}
-	r := c.locals[name]
 	r.instance = current
-	r.id = want.WALReplicaID
 	updatePublisher(r)
 	c.mu.Unlock()
-	return current, c.advertise(ctx, name, ad)
+	if err := c.advertise(ctx, name, ad); err != nil {
+		return current, err
+	}
+	r.opened = true
+	return current, nil
+}
+
+// openFailure reports what remains after an abandoned cold Open or promotion.
+// Recoverable I/O leaves the attempt Preparing and preserves its recovery reader.
+func (c *ReplicaControl) openFailure(ctx context.Context, name string, r *localReplica, reader wal.WAL, err error) (wal.WAL, error) {
+	if !errors.IsAny(err, wal.ErrWriterTermConsumed, merr.ErrDataIntegrity) && !status.AsStreamingError(err).IsUnrecoverable() {
+		return reader, err
+	}
+	mlog.Warn(ctx, "WAL replica open attempt ended", mlog.Int64("replicaID", r.id), mlog.Err(err))
+	if !r.opened || !replicaAvailable(reader) {
+		// The previous role advertisement may have been written despite a
+		// lost reply. Finish withdrawing it before reporting Closed.
+		return c.retire(ctx, name, r, reader)
+	}
+	return reader, nil
 }
 
 func (c *ReplicaControl) checkWriter(ctx context.Context, want types.PChannelInfo) error {
@@ -485,6 +513,10 @@ func (c *ReplicaControl) Handoff(ctx context.Context, req *streamingpb.WALHandof
 		return status.NewInvalidArgument("caller is not the authorized WAL handoff successor")
 	}
 	c.mu.Lock()
+	if c.locals[req.Pchannel] != r {
+		c.mu.Unlock()
+		return status.NewChannelNotExist(req.Pchannel)
+	}
 	current := r.instance
 	accepted := r.target.topology
 	c.mu.Unlock()
@@ -497,11 +529,8 @@ func (c *ReplicaControl) Handoff(ctx context.Context, req *streamingpb.WALHandof
 	if current == nil || current.Channel().AccessMode != types.AccessModeRW || current.Channel().Term >= req.TargetTerm {
 		return status.NewChannelNotExist(req.Pchannel)
 	}
-	writer := current.(interface {
-		PrepareHandoff(context.Context) error
-		SealHandoff(context.Context) error
-	})
 	if !seal {
+		writer := current.(interface{ PrepareHandoff(context.Context) error })
 		if err := writer.PrepareHandoff(ctx); err != nil {
 			return err
 		}
@@ -511,17 +540,9 @@ func (c *ReplicaControl) Handoff(ctx context.Context, req *streamingpb.WALHandof
 	if r.prepared != req.TargetTerm {
 		return status.NewIgnoreOperation("WAL handoff requires a completed prepare")
 	}
-	if err := writer.SealHandoff(ctx); err != nil {
-		return err
-	}
-	ad := &streamingpb.WALAdvertisement{Pchannel: req.Pchannel, WalReplicaId: current.Channel().WALReplicaID}
-	if err := c.advertise(ctx, req.Pchannel, ad); err != nil {
-		return err
-	}
-	reader := current.(interface{ Demote() wal.WAL }).Demote()
-	c.mu.Lock()
-	r.instance = reader
-	c.mu.Unlock()
-	r.sealed = req.TargetTerm
-	return nil
+	// Seal owns the drain once admitted. A lost RPC must not leave a live
+	// writer permanently rejecting appends while still advertising its old term.
+	r.sealing = req.TargetTerm
+	_, err = c.finishSeal(c.ctx, req.Pchannel, r, current)
+	return err
 }

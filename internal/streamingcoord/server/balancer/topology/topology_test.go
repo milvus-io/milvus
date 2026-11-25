@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -16,7 +17,7 @@ func TestTopologyConvergence(t *testing.T) {
 	current := &streamingpb.WALReplicaTopology{Pchannel: "p"}
 	var seq uint64
 	allocate := func(context.Context) (uint64, error) { seq++; return seq, nil }
-	ready := map[int64]bool{}
+	ready := map[int64]*streamingpb.LocalWALReplica{}
 	step := func(writer int64, eligible map[int64]*types.StreamingNodeInfoWithResourceGroup, load map[int64]int) {
 		t.Helper()
 		next, err := Next(t.Context(), current, writer, eligible, nodes, load, ready, allocate)
@@ -31,7 +32,8 @@ func TestTopologyConvergence(t *testing.T) {
 	before := current
 	step(1, nodes, map[int64]int{2: 20})
 	require.Same(t, before, current, "existing readers survive load changes")
-	ready[1], ready[2] = true, true
+	ready[1] = &streamingpb.LocalWALReplica{State: streamingpb.LocalWALReplica_RW, WriterTerm: proto.Int64(current.WriterTerm)}
+	ready[2] = &streamingpb.LocalWALReplica{State: streamingpb.LocalWALReplica_RO}
 	step(2, nodes, nil)
 	require.EqualValues(t, 2, current.WriterReplicaId)
 	require.EqualValues(t, 2, current.WriterTerm)
@@ -41,7 +43,11 @@ func TestTopologyConvergence(t *testing.T) {
 	require.EqualValues(t, 3, current.WriterTerm)
 	require.NotEqual(t, int64(2), current.WriterReplicaId)
 	newWriter := current.WriterReplicaId
-	ready[newWriter] = true
+	ready[1] = &streamingpb.LocalWALReplica{State: streamingpb.LocalWALReplica_RO}
+	ready[newWriter] = &streamingpb.LocalWALReplica{State: streamingpb.LocalWALReplica_RW, WriterTerm: proto.Int64(current.WriterTerm - 1)}
+	step(3, map[int64]*types.StreamingNodeInfoWithResourceGroup{1: nodes[1], 3: nodes[3]}, nil)
+	require.Len(t, current.Members, 3, "a stale serving term cannot retire the old member")
+	ready[newWriter].WriterTerm = proto.Int64(current.WriterTerm)
 	step(3, map[int64]*types.StreamingNodeInfoWithResourceGroup{1: nodes[1], 3: nodes[3]}, nil)
 	require.Len(t, current.Members, 2)
 	require.EqualValues(t, 3, current.Members[1].NodeId)

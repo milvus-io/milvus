@@ -1357,14 +1357,17 @@ message SyncWALReplicasRequest {
 message LocalWALReplica {
     string pchannel = 1;
     int64 wal_replica_id = 2;
-    // Result of applying the target in the response's observed_revision.
-    // A retiring replica remains PREPARING until it drains and disappears.
+    // PREPARING covers an operation in progress. Once it finishes, report
+    // the actual local role, including RO when a promotion was abandoned.
     enum State {
         PREPARING = 0;
-        READY = 1;
-        UNRECOVERABLE = 2;
+        RO = 1;
+        RW = 2;
+        CLOSED = 3;
     }
     State state = 3;
+    // Present only for RW and identifies the term actually serving writes.
+    optional int64 writer_term = 4;
 }
 
 message SyncWALReplicasResponse {

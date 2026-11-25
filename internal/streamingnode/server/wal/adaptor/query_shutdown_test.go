@@ -103,6 +103,7 @@ func newQueryShutdownTestWAL(
 	catalog metastore.StreamingNodeCataLog,
 	resMgr snview.StreamingNodeResourceManager,
 	views []*viewpb.QueryViewOfShard,
+	replicated bool,
 ) *walAdaptorImpl {
 	t.Helper()
 	paramtable.Init()
@@ -120,17 +121,30 @@ func newQueryShutdownTestWAL(
 	param.ShardManager = shardManager
 
 	w := adaptImplsToRWWAL(roWAL, nil, param)
+	owner := roWAL
+	if replicated {
+		w.readSide = adaptImplsToROWAL(newFirstTimeTickWALImpls(nil), func() {})
+		owner = w.readSide
+	}
 	w.queryViewHandler = snview.RecoverPChannelSNQueryViewHandler(
-		roWAL.availableCtx,
+		owner.availableCtx,
 		walImpls.Channel().Name,
 		catalog,
 		resMgr,
 		views,
 	)
+	if replicated {
+		w.readSide.readViews = w.queryViewHandler
+	}
 	return w
 }
 
 func TestWALCloseWakesRecoveryWaitersBeforeResourceRelease(t *testing.T) {
+	t.Run("writer", func(t *testing.T) { testWALCloseWakesRecoveryWaiters(t, false) })
+	t.Run("replicated writer", func(t *testing.T) { testWALCloseWakesRecoveryWaiters(t, true) })
+}
+
+func testWALCloseWakesRecoveryWaiters(t *testing.T, replicated bool) {
 	mockey.PatchConvey("close wakes recovery waiters before lifetime drain and resource release", t, func() {
 		var acquireExited atomic.Bool
 		var released atomic.Int32
@@ -139,7 +153,7 @@ func TestWALCloseWakesRecoveryWaitersBeforeResourceRelease(t *testing.T) {
 			released.Add(1)
 		})
 		recovered := newQueryShutdownTestView("first-time-tick-test_1v0", 1, viewpb.QueryViewState_QueryViewStateUp)
-		w := newQueryShutdownTestWAL(t, nil, resMgr, []*viewpb.QueryViewOfShard{recovered})
+		w := newQueryShutdownTestWAL(t, nil, resMgr, []*viewpb.QueryViewOfShard{recovered}, replicated)
 
 		entered := make(chan struct{})
 		var enterOnce sync.Once
@@ -182,6 +196,29 @@ func TestWALCloseWakesRecoveryWaitersBeforeResourceRelease(t *testing.T) {
 	})
 }
 
+func TestWALDemotePreservesReaderQueryAcquisition(t *testing.T) {
+	mockey.PatchConvey("an Up view and its resources survive writer demotion", t, func() {
+		mockey.Mock((*roWALAdaptorImpl).startFollowing).Return().Build()
+		var released atomic.Int32
+		resMgr := newQueryShutdownTestResMgr(func(snview.ReleaseResource) { released.Add(1) })
+		view := newQueryShutdownTestView("first-time-tick-test_1v0", 1, viewpb.QueryViewState_QueryViewStateUp)
+		w := newQueryShutdownTestWAL(t, nil, resMgr, []*viewpb.QueryViewOfShard{view}, true)
+		key := viewKey(view)
+		acquire, ok := resMgr.getAcquired(key)
+		require.True(t, ok)
+		acquire.OnReady()
+
+		reader := w.Demote()
+		defer reader.Close()
+		require.Same(t, w.readSide, reader)
+		require.True(t, reader.IsAvailable())
+		lease, err := w.readSide.readViews.AcquireUpView(context.Background(), key.ShardID, key.QueryViewVersion)
+		require.NoError(t, err)
+		lease.Release()
+		require.Zero(t, released.Load())
+	})
+}
+
 func TestWALCloseArmsForceCancelBeforeWaitingForShardLocks(t *testing.T) {
 	mockey.PatchConvey("stalled SaveQueryViews under shard lock cannot prevent forced cancellation", t, func() {
 		metaKV := &failingQueryViewMetaKV{entered: make(chan struct{})}
@@ -192,7 +229,7 @@ func TestWALCloseArmsForceCancelBeforeWaitingForShardLocks(t *testing.T) {
 		})
 
 		recovered := newQueryShutdownTestView("first-time-tick-test_1v1", 1, viewpb.QueryViewState_QueryViewStateUp)
-		w := newQueryShutdownTestWAL(t, catalog, resMgr, []*viewpb.QueryViewOfShard{recovered})
+		w := newQueryShutdownTestWAL(t, catalog, resMgr, []*viewpb.QueryViewOfShard{recovered}, false)
 
 		// Prepare a second shard and stall its Up persistence inside ReliableWriteMetaKv
 		// while holding that shard's mutex.

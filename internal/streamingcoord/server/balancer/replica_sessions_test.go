@@ -102,12 +102,14 @@ func (s *balanceStream) Send(req *streamingpb.SyncWALReplicasRequest) error {
 				continue
 			}
 			a := &streamingpb.WALAdvertisement{Pchannel: t.Pchannel, WalReplicaId: m.WalReplicaId}
+			local := &streamingpb.LocalWALReplica{Pchannel: t.Pchannel, WalReplicaId: m.WalReplicaId, State: streamingpb.LocalWALReplica_RO}
 			if m.WalReplicaId == t.WriterReplicaId {
+				local.State, local.WriterTerm = streamingpb.LocalWALReplica_RW, proto.Int64(t.WriterTerm)
 				a.WriterTerm = proto.Int64(t.WriterTerm)
 				a.IsCchannel = t.Pchannel == req.Cchannel.GetPchannel()
 			}
 			ads = append(ads, a)
-			response.Replicas = append(response.Replicas, &streamingpb.LocalWALReplica{Pchannel: t.Pchannel, WalReplicaId: m.WalReplicaId, State: streamingpb.LocalWALReplica_READY})
+			response.Replicas = append(response.Replicas, local)
 		}
 	}
 	s.nodes.mu.Lock()

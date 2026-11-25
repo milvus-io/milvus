@@ -442,6 +442,11 @@ func (w *walAdaptorImpl) AppendAsync(ctx context.Context, msg message.MutableMes
 
 // Close overrides Scanner Close function.
 func (w *walAdaptorImpl) Close() {
+	if w.readSide != nil {
+		// Full retirement also cancels queries using the shared reader. A
+		// demotion closes only the writer and keeps those queries running.
+		w.readSide.availableCancel()
+	}
 	w.closeWriter()
 	if w.readSide != nil {
 		w.readSide.Close()
@@ -460,7 +465,7 @@ func (w *walAdaptorImpl) closeWriter() {
 	// begin to close the wal.
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
 	w.forceCancelAfterGracefulTimeout()
-	if w.queryViewHandler != nil {
+	if w.readSide == nil && w.queryViewHandler != nil {
 		// Recovery waiters hold a lifetime reference. Wake them before waiting
 		// for in-flight operations, without releasing their query resources yet.
 		w.queryViewHandler.StopQueryAcquisition()
