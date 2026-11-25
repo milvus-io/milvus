@@ -18,8 +18,10 @@ package compactor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/samber/lo"
 
@@ -53,6 +55,7 @@ type Executor interface {
 //
 // Once a task reaches completed/failed state, it stays there until removed
 type taskState struct {
+	queuedAt  time.Time
 	compactor Compactor
 	state     datapb.CompactionTaskState
 	result    *datapb.CompactionPlanResult
@@ -65,7 +68,8 @@ type executor struct {
 	tasks map[int64]*taskState // planID -> task state
 
 	// Task queue for pending work
-	taskCh chan Compactor
+	taskCh  chan Compactor
+	stopped chan struct{}
 
 	// Slot tracking for resource management
 	usingSlots int64
@@ -82,6 +86,7 @@ func NewExecutor() *executor {
 	return &executor{
 		tasks:      make(map[int64]*taskState),
 		taskCh:     make(chan Compactor, maxTaskQueueNum),
+		stopped:    make(chan struct{}),
 		usingSlots: 0,
 	}
 }
@@ -115,6 +120,13 @@ func (e *executor) Enqueue(task Compactor, resource taskcommon.Resource) (bool, 
 
 	planID := task.GetPlanID()
 
+	select {
+	case <-e.stopped:
+		e.mu.Unlock()
+		return false, context.Canceled
+	default:
+	}
+
 	// Check for duplicate task
 	if _, exists := e.tasks[planID]; exists {
 		e.mu.Unlock()
@@ -128,6 +140,7 @@ func (e *executor) Enqueue(task Compactor, resource taskcommon.Resource) (bool, 
 	e.usingSlots += getTaskSlotUsage(task)
 	e.usingResource = e.usingResource.Add(resource)
 	e.tasks[planID] = &taskState{
+		queuedAt:  time.Now(),
 		compactor: task,
 		state:     datapb.CompactionTaskState_executing,
 		result:    nil,
@@ -135,8 +148,12 @@ func (e *executor) Enqueue(task Compactor, resource taskcommon.Resource) (bool, 
 	}
 	e.mu.Unlock()
 
-	e.taskCh <- task
-	return true, nil
+	select {
+	case e.taskCh <- task:
+		return true, nil
+	case <-e.stopped:
+		return false, context.Canceled
+	}
 }
 
 // Slots returns the used slots for compaction
@@ -205,10 +222,40 @@ func (e *executor) RemoveTask(planID int64) {
 	}
 }
 
+// cancelQueued claims waiting tasks under the same lock as worker admission.
+func (e *executor) cancelQueued() {
+	e.mu.Lock()
+	select {
+	case <-e.stopped:
+		e.mu.Unlock()
+		return
+	default:
+		close(e.stopped)
+	}
+	now := time.Now()
+	var pending []int64
+	for id, t := range e.tasks {
+		if !t.queuedAt.IsZero() {
+			metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(paramtable.GetStringNodeID(), t.compactor.GetCompactionType().String(), metrics.CancelLabel).Observe(float64(now.Sub(t.queuedAt)) / float64(time.Millisecond))
+			t.queuedAt = time.Time{}
+			pending = append(pending, id)
+		}
+	}
+	e.mu.Unlock()
+	for _, id := range pending {
+		e.completeTask(id, nil)
+	}
+}
+
 func (e *executor) Start(ctx context.Context) {
+	// Pool submission may block while every worker is busy.
+	stop := context.AfterFunc(ctx, e.cancelQueued)
+	defer stop()
+
 	for {
 		select {
 		case <-ctx.Done():
+			e.cancelQueued()
 			return
 		case task := <-e.taskCh:
 			GetExecPool().Submit(func() (any, error) {
@@ -219,17 +266,47 @@ func (e *executor) Start(ctx context.Context) {
 	}
 }
 
+func compactionOutcome(result *datapb.CompactionPlanResult, err error) string {
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, merr.ErrSegcoreFollyCancel):
+		return metrics.CancelLabel
+	case errors.Is(err, context.DeadlineExceeded), result.GetState() == datapb.CompactionTaskState_timeout:
+		return "timeout"
+	case err != nil || result == nil:
+		return metrics.FailLabel
+	case result.GetState() == datapb.CompactionTaskState_completed || result.GetState() == datapb.CompactionTaskState_unknown:
+		return metrics.SuccessLabel
+	default:
+		return metrics.FailLabel
+	}
+}
+
 func (e *executor) executeTask(task Compactor) {
+	planID := task.GetPlanID()
+	e.mu.Lock()
+	state := e.tasks[planID]
+	if state == nil || state.queuedAt.IsZero() {
+		e.mu.Unlock()
+		return
+	}
+	wait := time.Since(state.queuedAt)
+	state.queuedAt = time.Time{}
+	e.mu.Unlock()
+	nodeID, kind := paramtable.GetStringNodeID(), task.GetCompactionType().String()
+	metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(nodeID, kind, "started").Observe(float64(wait) / float64(time.Millisecond))
 	log := mlog.With(
-		mlog.Int64("planID", task.GetPlanID()),
+		mlog.Int64("planID", planID),
 		mlog.Int64("collection", task.GetCollection()),
 		mlog.String("channel", task.GetChannelName()),
-		mlog.String("type", task.GetCompactionType().String()),
+		mlog.String("type", kind),
 	)
 
 	log.Info(context.TODO(), "start to execute compaction")
 
+	started := time.Now()
 	result, err := task.Compact()
+	elapsed := time.Since(started)
+	metrics.DataNodeCompactionLatency.WithLabelValues(nodeID, kind, compactionOutcome(result, err)).Observe(float64(elapsed) / float64(time.Millisecond))
 	if err != nil {
 		log.Warn(context.TODO(), "compaction task failed", mlog.Err(err))
 		// Carry the typed error back to DataCoord instead of reducing it to a
@@ -261,7 +338,7 @@ func (e *executor) executeTask(task Compactor) {
 
 	var entityCount int64
 	var deleteCount int64
-	lo.ForEach(result.Segments, func(seg *datapb.CompactionSegment, _ int) {
+	lo.ForEach(result.GetSegments(), func(seg *datapb.CompactionSegment, _ int) {
 		entityCount += seg.GetNumOfRows()
 		deleteCount += getDataCount(seg.GetDeltalogs())
 	})

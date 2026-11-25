@@ -453,7 +453,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 }
 
 func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
-	durInQueue := t.tr.RecordSpan()
+	t.tr.RecordSpan()
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, fmt.Sprintf("MixCompact-%d", t.GetPlanID()))
 	defer span.End()
 	compactStart := time.Now()
@@ -514,9 +514,6 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	}
 
 	mlog.Info(context.TODO(), "compact done", mlog.Duration("compact elapse", time.Since(compactStart)), mlog.Any("res", res))
-
-	metrics.DataNodeCompactionLatency.WithLabelValues(paramtable.GetStringNodeID(), t.plan.GetType().String()).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
-	metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(durInQueue.Milliseconds()))
 
 	// apply LOB compaction for TEXT columns (REUSE_ALL mode)
 	if err := t.applyLOBCompaction(ctx, res); err != nil {
