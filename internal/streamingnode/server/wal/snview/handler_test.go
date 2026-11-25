@@ -1003,3 +1003,18 @@ func TestSNHandler_Recover_AcquireCallbackFlow(t *testing.T) {
 func (m *mockResourceManager) QueryRuntime(qviews.QueryViewKey) (QueryRuntime, bool) {
 	return m.runtime, m.runtime != nil
 }
+
+func newFullSNViewWithState(version int64, state viewpb.QueryViewState, qnNodeIDs ...int64) qviews.QueryViewAtWorkNode {
+	meta := buildHandlerTestMeta(version)
+	meta.State = state
+	queryNodes := make([]*viewpb.QueryViewOfQueryNode, 0, len(qnNodeIDs))
+	for _, nodeID := range qnNodeIDs {
+		queryNodes = append(queryNodes, &viewpb.QueryViewOfQueryNode{
+			NodeId: nodeID,
+			Partitions: []*viewpb.QueryViewOfPartition{
+				{PartitionId: 10, SegmentIds: []int64{nodeID * 100}},
+			},
+		})
+	}
+	return qviews.NewFullQueryViewAtStreamingNode(meta, &viewpb.QueryViewOfStreamingNode{}, queryNodes)
+}
