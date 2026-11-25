@@ -101,7 +101,7 @@ func (s *shardReduceStream[T]) Recv() (T, error) {
 			s.emitted = true
 			return chunk, nil
 		}
-		if errors.Is(err, io.EOF) || s.emitted || s.restart == nil || !retryableQueryError(err) {
+		if errors.Is(err, io.EOF) || s.emitted || s.restart == nil || (!retryableQueryError(err) && !isOverloadErr(err)) {
 			s.terminal = err
 			break
 		}
@@ -428,7 +428,9 @@ func (s *shardViewQueryClient) SearchStreams(
 	streams[0] = &shardReduceStream[*internalpb.SearchResults]{
 		stream: streams[0], ctx: ctx, cancel: cancel, workerCancel: workerCancels[0], plan: plan,
 		restart: func(err error) (reduce.ReduceStream[*internalpb.SearchResults], context.CancelFunc, *ShardPlan, error) {
-			retry.recordFailure(err)
+			if err := retry.prepareStreamRetry(err); err != nil {
+				return nil, nil, nil, err
+			}
 			next, cancels, nextPlan, err := open(ctx, nil)
 			if err != nil {
 				return nil, nil, nil, err
@@ -588,7 +590,9 @@ func (s *shardViewQueryClient) QueryStream(
 	return &shardReduceStream[*internalpb.RetrieveResults]{
 		stream: stream, ctx: ctx, cancel: cancel, workerCancel: workerCancel, plan: plan,
 		restart: func(err error) (reduce.ReduceStream[*internalpb.RetrieveResults], context.CancelFunc, *ShardPlan, error) {
-			retry.recordFailure(err)
+			if err := retry.prepareStreamRetry(err); err != nil {
+				return nil, nil, nil, err
+			}
 			return open(ctx, nil)
 		},
 	}, plan, nil
@@ -625,12 +629,33 @@ type shardExecParams struct {
 type shardRetryState struct {
 	// Keep the single overload failover budget across pre-output stream restarts.
 	overloadExtraUsed bool
+	pendingOverload   error                   // Receive-phase refusal awaiting its one immediate alternative.
+	lastReplica       int64                   // Most recent replica; the immediate overload alternative excludes its ID.
 	attempt           int                     // Completed attempts, including successful stream openings.
 	lastErr           error                   // Original failure returned when the budget is exhausted.
-	tried             map[qviews.Replica]bool // Batch replica history; true requires a newer plan/session.
+	tried             map[qviews.Replica]bool // Attempted replica versions; true requires a newer plan/session.
 	deadNodes         map[int64]struct{}      // QNs excluded only for missing sessions, not raw Unavailable.
 	sessionChanged    <-chan struct{}         // Wakes routing when excluded worker sessions change.
 	previousReplicas  map[int64]struct{}      // Replicas to defer after earlier whole-Proxy failures.
+}
+
+func (r *shardRetryState) prepareStreamRetry(err error) error {
+	if isOverloadErr(err) {
+		if r.overloadExtraUsed {
+			return err
+		}
+		r.overloadExtraUsed = true
+		r.pendingOverload = err
+		// Keep the refusing version excluded when a later ViewError starts
+		// another retry round, just as setup-phase overload refusals do.
+		for candidate := range r.tried {
+			if candidate.ReplicaID == r.lastReplica {
+				r.tried[candidate] = true
+			}
+		}
+	}
+	r.recordFailure(err)
+	return nil
 }
 
 func (r *shardRetryState) recordFailure(err error) {
@@ -699,8 +724,9 @@ func (s *shardViewQueryClient) executeShard(
 			retry.recordFailure(retryErr)
 		}
 	}
-	var overloadErr error
-	var retryOverload bool
+	overloadErr := retry.pendingOverload
+	retryOverload := overloadErr != nil
+	retry.pendingOverload = nil
 	for ; ; retry.attempt++ {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -714,7 +740,7 @@ func (s *shardViewQueryClient) executeShard(
 		var err error
 		if retryOverload {
 			var found bool
-			candidate, found = route.alternative(0, retry.tried, nil)
+			candidate, found = route.alternative(retry.lastReplica, retry.tried, nil)
 			if !found {
 				return nil, overloadErr
 			}
@@ -739,6 +765,7 @@ func (s *shardViewQueryClient) executeShard(
 			continue
 		}
 		retryOverload = false
+		retry.lastReplica = candidate.ReplicaID
 		targetShardID := qviews.ShardID{ReplicaID: candidate.ReplicaID, VChannel: vchannel}
 
 		// Phase 1: GetQueryPlan with consistency routing.

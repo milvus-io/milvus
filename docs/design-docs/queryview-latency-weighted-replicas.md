@@ -197,12 +197,35 @@ Queue wait is checked again when a worker starts, before `PreExecute` and
 `Execute`, including time blocked handing off to the worker pool. The
 `scheduled` queue-duration observation is recorded at that point. Rejection
 occurs when the worker becomes available; queue budgets do not install timers.
-Searches with a positive queue budget merge only when their absolute queue
-expiry times match. This preserves the expiry when cancellation promotes a
-surviving member, at the cost of fewer merge opportunities under queue limits.
+Compatible legacy Searches may merge with different queue budgets. Each original
+request retains its enqueue time and captured queue limit. At dequeue and worker
+start, cancellation, deadline expiry, and queue-budget expiry remove only the
+affected members; surviving members retain their own budgets after owner
+promotion. Existing NQ, request compatibility, and deadline-gap merge rules still
+apply. Queue-duration observations remain per scheduler entry: a partially
+pruned group does not add a separate observation for every rejected member. Pinned QueryView tasks on master remain separate.
 
 Unknown replica latency uses the candidate fallback before applying the current
 failure penalty. A recent penalty still suppresses a replica with no successes;
 a small decayed penalty cannot make an unknown replica appear faster than the
 fallback. Hedge-delay samples continue to be collected while hedging is disabled
 so live enabling can use the observed workload latency.
+
+## Default behavior and streaming boundary
+
+Queue wait limiting remains disabled by default (`maxQueueWaitRatio=0`), and
+hedging remains disabled by default. Overload propagation and the bounded serial
+failover are active independently of those switches: existing queue-capacity
+refusals can therefore return sooner, with less retry amplification, than before
+this PR. A refusal is a transient capacity signal; bounded failover can trade
+requests that might have succeeded after a longer wait for lower queue latency.
+
+For ordinary Search and Query streams, an overload surfaced by the first
+`Recv()` is eligible for the same single extra attempt as an overload during
+stream setup. The state and exclusions survive stream reopening; a second
+refusal cannot obtain another extra attempt. Once a result chunk has been
+emitted, the stream terminates on error without restarting. Advanced/Hybrid
+Search streams currently have no shard-local receive-phase restart: some child
+streams may already have published results. Their receive-phase overload is
+returned to the caller. Setup-phase failover and the adaptive batch path retain
+their existing bounded retry behavior.

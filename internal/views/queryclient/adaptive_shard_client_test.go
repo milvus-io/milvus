@@ -1107,7 +1107,7 @@ func TestLegacyAdaptiveRoutingUsesBatchWithStreamingAllowed(t *testing.T) {
 	}
 }
 
-func TestOverloadExtraAttemptBudgetSurvivesStreamRestart(t *testing.T) {
+func TestOverloadExtraAttemptBudgetSharedAcrossOpenCalls(t *testing.T) {
 	planner := &adaptiveTestPlanner{plan: func(_ context.Context, shard qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 		return adaptiveTestPlan(shard), nil
 	}}
@@ -1132,8 +1132,8 @@ func TestOverloadExtraAttemptBudgetSurvivesStreamRestart(t *testing.T) {
 	require.Equal(t, int64(2), plan.ShardID.ReplicaID)
 	require.Equal(t, []int64{1, 2}, dispatched)
 
-	// A pre-output receive failure restarts the stream with the same budget,
-	// even when the replica directory has acquired new candidates.
+	// This tests shared opening state only; streaming receive failures are
+	// covered by TestStreamingReceiveOverloadFailover.
 	route := client.replicas.channels["channel"]
 	route.mu.Lock()
 	route.snapshot.Replicas = []qviews.Replica{{ReplicaID: 3}, {ReplicaID: 4}}
