@@ -210,6 +210,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 func (p *ComponentParam) versionGateItems() []*ParamItem {
 	return []*ParamItem{
 		&p.FunctionCfg.EnableWriteBeforeMaterialization,
+		&p.DataCoordCfg.EnableImportV3,
 		&p.DataCoordCfg.ImportEnableIDRangeMsg,
 	}
 }
@@ -7756,12 +7757,23 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 		Key:     "dataCoord.import.enableImportV3",
 		Version: "3.0.0",
 		Doc: "One-way rollout gate for creating ImportTaskV3 jobs from new ordinary or backup import requests. " +
-			"Keep disabled until all DataNodes and all DataCoords that may become active support Import V3. " +
-			"The gate only selects the version for new requests; persisted WAL messages and jobs always resume " +
-			"with their stored version. Disabling the gate again after activation is unsupported.",
-		DefaultValue: "false",
+			"auto: switch on automatically once all online DataNodes, StreamingNodes, and DataCoords reach the " +
+			"gate version and the stability window elapses; false: keep disabled (safe while any older DataNode, " +
+			"StreamingNode, or potentially-active DataCoord is still online); true: force enable and bypass the " +
+			"version gate (safe only once all DataNodes, StreamingNodes, and DataCoords support Import V3, such as " +
+			"when upgrading from a release that already ships V3). The gate only selects the version for new " +
+			"requests; persisted WAL messages and jobs always resume with their stored version. Disabling the " +
+			"gate again after activation is unsupported.",
+		DefaultValue: "auto",
 		PanicIfEmpty: false,
 		Export:       true,
+		VersionGateSwitcher: &VersionGateSwitcher{
+			EnableAutoSwitchValue: "auto",
+			PreSwitchValue:        "false",
+			GateVersion:           "3.0.7",
+			TargetValue:           "true",
+			SwitchDelay:           1 * time.Minute,
+		},
 	}
 	p.EnableImportV3.Init(base.mgr)
 

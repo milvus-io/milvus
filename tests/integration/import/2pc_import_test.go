@@ -46,8 +46,14 @@ type TwoPCImportSuite struct {
 	importSuite
 }
 
-func (s *TwoPCImportSuite) SetupSuite() {
+func (s *TwoPCImportSuite) setupConfig() {
 	s.WithMilvusConfig(paramtable.Get().RootCoordCfg.DmlChannelNum.Key, "4")
+}
+
+func (s *TwoPCImportSuite) SetupSuite() {
+	s.setupConfig()
+	// Retain V2 two-phase-commit coverage while ImportV3TwoPCSuite covers V3.
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.EnableImportV3.Key, "false")
 	s.importSuite.SetupSuite()
 }
 

@@ -761,7 +761,22 @@ func (s *BulkInsertSuite) TestInvalidInput() {
 	mlog.Info(context.TODO(), "Import result", mlog.Any("importResp", importResp))
 }
 
+// BinlogImportSuite exercises the legacy V2 insert_log backup restore path
+// with enableImportV3 explicitly disabled (ImportV3BinlogSuite covers V3).
+type BinlogImportSuite struct {
+	importTestBase
+}
+
+func (s *BinlogImportSuite) SetupSuite() {
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.EnableImportV3.Key, "false")
+	s.importTestBase.SetupSuite()
+}
+
+func TestBinlogImport(t *testing.T) {
+	suite.Run(t, new(BinlogImportSuite))
+}
+
 // Independent L0 import is disabled; retain ordinary binlog restore coverage.
-func (s *BulkInsertSuite) TestBinlogImport_NoDelete() {
+func (s *BinlogImportSuite) TestBinlogImport_NoDelete() {
 	s.runBinlogTest(&DMLGroup{insertRowNums: []int{500, 500, 500}})
 }

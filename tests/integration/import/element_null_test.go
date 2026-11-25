@@ -1196,6 +1196,7 @@ type ElementNullImportSuite struct {
 
 func (s *ElementNullImportSuite) SetupSuite() {
 	s.WithMilvusConfig("mq.type", "woodpecker")
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.EnableImportV3.Key, "false")
 	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.ImportCheckIntervalHigh.Key, "0.1")
 	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.ImportScheduleInterval.Key, "0.1")
 	s.importTestBase.SetupSuite()
