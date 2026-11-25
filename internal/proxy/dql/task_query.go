@@ -1285,7 +1285,6 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 	}
 	recordExecFeatures(!t.internalTask && t.plan.GetPlanOptions().GetCollectFeatureBits(), execBits, t.storageCost.ScannedRemoteBytes)
 
-	metrics.ProxyDecodeResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.getQueryLabel()).Observe(0.0)
 	tr.CtxRecord(ctx, "reduceResultStart")
 
 	// Use the same complete group ordering as segcore, QN, and Delegator.

@@ -2,12 +2,14 @@ package dql
 
 import (
 	"context"
+	"time"
 
 	"go.opentelemetry.io/otel"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -857,7 +859,10 @@ func decodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 		} else if partialSearchResult.SlicedBlob != nil {
 			var partialResultData schemapb.SearchResultData
 			// Decode with the configured fast or standard protobuf decoder.
+			start := time.Now()
 			err := resource.UnmarshalSearchResultData(partialSearchResult.SlicedBlob, &partialResultData)
+			elapsed := time.Since(start)
+			metrics.ProxyDecodeResultLatency.WithLabelValues(paramtable.GetStringNodeID(), metrics.SearchLabel).Observe(float64(elapsed) / float64(time.Millisecond))
 			if err != nil {
 				return nil, err
 			}

@@ -3349,7 +3349,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum(increase(milvus_proxy_sq_decode_result_latency_sum{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])) by (pod, node_id, query_type) / sum(increase(milvus_proxy_sq_decode_resultlatency_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])) by (pod, node_id, query_type)",
+              "expr": "sum(increase(milvus_proxy_sq_decode_result_latency_sum{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])) by (pod, node_id, query_type) / sum(increase(milvus_proxy_sq_decode_result_latency_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])) by (pod, node_id, query_type)",
               "hide": false,
               "legendFormat": "avg-{{pod}}-{{node_id}}-{{query_type}}-decode",
               "range": true,

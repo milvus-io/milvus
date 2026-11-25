@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -523,6 +526,14 @@ func (s *SearchReduceUtilTestSuite) TestReduceMaxSimMetricsComparison() {
 	}
 }
 
+func decodeResultHistogram(t *testing.T, label string) *dto.Histogram {
+	t.Helper()
+	hist := metrics.ProxyDecodeResultLatency.WithLabelValues(paramtable.GetStringNodeID(), label).(prometheus.Metric)
+	var sample dto.Metric
+	require.NoError(t, hist.Write(&sample))
+	return sample.GetHistogram()
+}
+
 func (s *SearchReduceUtilTestSuite) TestDecodeSearchResultsSupportsResultDataAndBlob() {
 	blobData := &schemapb.SearchResultData{
 		NumQueries: 1,
@@ -542,15 +553,30 @@ func (s *SearchReduceUtilTestSuite) TestDecodeSearchResultsSupportsResultDataAnd
 		Topks:      []int64{1},
 	}
 
-	decoded, err := decodeSearchResults(context.Background(), []*internalpb.SearchResults{
-		{ResultData: resultData},
-		{SlicedBlob: blob},
-		{},
+	ctx := context.Background()
+	before := decodeResultHistogram(s.T(), metrics.SearchLabel)
+	decoded, err := decodeSearchResults(ctx, []*internalpb.SearchResults{
+		{ResultData: resultData, SlicedBlob: blob}, {},
 	})
-	s.NoError(err)
-	s.Len(decoded, 2)
+	s.Require().NoError(err)
+	s.Require().Len(decoded, 1)
 	s.Same(resultData, decoded[0])
+	s.Equal(before.GetSampleCount(), decodeResultHistogram(s.T(), metrics.SearchLabel).GetSampleCount())
+
+	decoded, err = decodeSearchResults(ctx, []*internalpb.SearchResults{
+		{ResultData: resultData}, {SlicedBlob: blob}, {SlicedBlob: blob},
+	})
+	s.Require().NoError(err)
+	s.Require().Len(decoded, 3)
 	s.True(proto.Equal(blobData, decoded[1]))
+	s.True(proto.Equal(blobData, decoded[2]))
+	after := decodeResultHistogram(s.T(), metrics.SearchLabel)
+	s.Equal(before.GetSampleCount()+2, after.GetSampleCount())
+	s.Greater(after.GetSampleSum(), before.GetSampleSum())
+
+	_, err = decodeSearchResults(ctx, []*internalpb.SearchResults{{SlicedBlob: []byte{0xff}}})
+	s.Error(err)
+	s.Equal(after.GetSampleCount()+1, decodeResultHistogram(s.T(), metrics.SearchLabel).GetSampleCount())
 }
 
 // TestReduceAdvanceGroupBy_SingleShardScoreNegation verifies that the
