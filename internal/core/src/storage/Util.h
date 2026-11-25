@@ -58,7 +58,6 @@
 #include "storage/PayloadStream.h"
 #include "storage/StatusToErrorCode.h"
 #include "storage/ThreadPools.h"
-#include "storage/StorageV2FSCache.h"
 #include "storage/Types.h"
 
 namespace milvus::storage {
@@ -521,34 +520,32 @@ GetNumRowsForLoadInfo(const LoadFieldDataInfo& load_info);
 void
 ReleaseArrowUnused();
 
+// Properties are built at the C/protobuf boundary, then shared without mutation.
+template <typename T>
+inline T
+GetStorageProperty(
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties,
+    const char* key) {
+    auto value = milvus_storage::api::GetValue<T>(properties, key);
+    if (!value.ok()) {
+        ThrowInfo(ConfigInvalid,
+                  "invalid storage property: {}",
+                  value.status().ToString());
+    }
+    return std::move(*value);
+}
+
 ChunkManagerPtr
-CreateChunkManager(const StorageConfig& storage_config);
+CreateChunkManager(
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties);
 
-// Build a legacy chunk manager (LocalChunkManager / the AWS-SDK based
-// MinioChunkManager family) for this storage config, bypassing the
-// ArrowFileSystem switch. Used both as the fallback inside CreateChunkManager
-// and as the remote control-plane delegate of ArrowFileSystemChunkManager.
-ChunkManagerPtr
-CreateLegacyChunkManager(const StorageConfig& storage_config);
-
-// Process-wide switch selecting the remote ChunkManager backend built by
-// CreateChunkManager: legacy AWS-SDK based managers (default) vs the
-// milvus-storage ArrowFileSystem backed ArrowFileSystemChunkManager.
-// Delivered from Go via SetArrowFileSystemChunkManagerEnabled (storage_c.h),
-// sourced from `common.storage.useArrowFileSystemChunkManager`.
-void
-SetUseArrowFileSystemChunkManager(bool use);
-
-bool
-UseArrowFileSystemChunkManager();
-
-// Translate a segcore StorageConfig into the StorageV2FSCache key used to
-// build/lookup the shared milvus-storage ArrowFileSystem.
-StorageV2FSCache::Key
-ToStorageV2FSCacheKey(const StorageConfig& storage_config);
+arrow::Result<milvus_storage::ArrowFileSystemPtr>
+GetArrowFileSystem(
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties);
 
 milvus_storage::ArrowFileSystemPtr
-InitArrowFileSystem(milvus::storage::StorageConfig storage_config);
+InitArrowFileSystem(
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties);
 
 FieldDataPtr
 CreateFieldData(

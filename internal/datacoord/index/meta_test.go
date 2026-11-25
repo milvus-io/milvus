@@ -2860,6 +2860,8 @@ func TestIndexMeta_AllDenseWithDiskIndex(t *testing.T) {
 		}
 		return schema
 	}
+	deletedDiskIndex := newIndex(1, topVector.FieldID, "DISKANN")
+	deletedDiskIndex.IsDeleted = true
 
 	tests := []struct {
 		name    string
@@ -2888,6 +2890,12 @@ func TestIndexMeta_AllDenseWithDiskIndex(t *testing.T) {
 			name:   "top-level vector without index",
 			schema: newSchema(false, topVector),
 			want:   false,
+		},
+		{
+			name:    "top-level vector with only a deleted DISKANN",
+			schema:  newSchema(false, topVector),
+			indexes: []*model.Index{deletedDiskIndex},
+			want:    false,
 		},
 		{
 			name:    "sparse vector is ignored",

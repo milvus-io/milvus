@@ -31,7 +31,8 @@ services:
       MINIO_ADDRESS: ${MINIO_ADDRESS}
       CONAN_HOME: /home/milvus/.conan2
       AZURE_STORAGE_CONNECTION_STRING: ${AZURITE_CONNECTION_STRING}
-      ENABLE_GCP_NATIVE: ${ENABLE_GCP_NATIVE}
+      MILVUS_TEST_AZURE_FS: "1"
+      AZURITE_ADDRESS: ${AZURITE_ADDRESS:-azurite:10000}
       USE_ASAN: ${USE_ASAN}
     volumes: &builder-volumes
       - .:/go/src/github.com/milvus-io/milvus:delegated
@@ -74,7 +75,8 @@ services:
       MINIO_ADDRESS: ${MINIO_ADDRESS}
       CONAN_HOME: /home/milvus/.conan2
       AZURE_STORAGE_CONNECTION_STRING: ${AZURITE_CONNECTION_STRING}
-      ENABLE_GCP_NATIVE: ${ENABLE_GCP_NATIVE}
+      MILVUS_TEST_AZURE_FS: "1"
+      AZURITE_ADDRESS: ${AZURITE_ADDRESS:-azurite:10000}
     volumes: &builder-volumes-gpu
       - .:/go/src/github.com/milvus-io/milvus:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker-gpu}/${OS_NAME}-ccache:/ccache:delegated

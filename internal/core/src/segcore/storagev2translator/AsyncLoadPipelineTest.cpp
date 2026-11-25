@@ -55,7 +55,7 @@
 #include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/reader.h"
 #include "segcore/storagev2translator/AsyncChunkReader.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/FileWriter.h"
 #include "storage/LocalFileIOPool.h"
@@ -350,7 +350,8 @@ class FakeChunkReader : public milvus_storage::api::ChunkReader {
 
     ChunkReadFuture
     get_chunks_async(const std::vector<int64_t>& chunk_indices,
-                     size_t parallelism) override {
+                     size_t parallelism,
+                     folly::CancellationToken /*cancellation*/) override {
         async_calls_.fetch_add(1);
         called_on_executor_.store(executor_ && executor_->IsRunning());
         parallelism_.store(parallelism);
@@ -512,7 +513,9 @@ class DeferredWindowReader : public FakeChunkReader {
     }
 
     ChunkReadFuture
-    get_chunks_async(const std::vector<int64_t>& indices, size_t) override {
+    get_chunks_async(const std::vector<int64_t>& indices,
+                     size_t,
+                     folly::CancellationToken /*cancellation*/) override {
         requests.push_back(indices);
         promises.emplace_back();
         return promises.back().getSemiFuture();
@@ -555,9 +558,10 @@ class FakeReader final : public milvus_storage::api::Reader {
     }
 
     folly::SemiFuture<ChunkReaderOpenResult>
-    get_chunk_reader_async(const int64_t column_group_index,
-                           const std::shared_ptr<std::vector<std::string>>&
-                               needed_columns) const override {
+    get_chunk_reader_async(
+        const int64_t column_group_index,
+        const std::shared_ptr<std::vector<std::string>>& needed_columns,
+        folly::CancellationToken /*cancellation*/) const override {
         auto pending =
             std::make_shared<PendingOpen>(column_group_index, needed_columns);
         auto future = pending->promise.getSemiFuture();
@@ -1502,26 +1506,29 @@ TEST_F(AsyncLoadPipelineTest, RejectsZeroReadWindow) {
 }
 
 TEST_F(AsyncLoadPipelineTest, AsyncReadWindowConfigRejectsNonPositiveValues) {
-    auto previous = StorageV2AsyncLoadReadWindowSizeBytes();
-    auto restore = folly::makeGuard(
-        [previous]() { SetStorageV2AsyncLoadReadWindowSizeBytes(previous); });
+    auto previous = milvus::storage::LoadFieldDataReadWindowSizeBytes();
+    auto restore = folly::makeGuard([previous]() {
+        milvus::storage::SetLoadFieldDataReadWindowSizeBytes(previous);
+    });
 
-    SetStorageV2AsyncLoadReadWindowSizeBytes(0);
-    EXPECT_EQ(StorageV2AsyncLoadReadWindowSizeBytes(),
-              kDefaultStorageV2AsyncLoadReadWindowSizeBytes);
+    milvus::storage::SetLoadFieldDataReadWindowSizeBytes(0);
+    EXPECT_EQ(milvus::storage::LoadFieldDataReadWindowSizeBytes(),
+              milvus::storage::kDefaultLoadFieldDataReadWindowSizeBytes);
 
-    SetStorageV2AsyncLoadReadWindowSizeBytes(32 * 1024 * 1024);
-    EXPECT_EQ(StorageV2AsyncLoadReadWindowSizeBytes(), 32 * 1024 * 1024);
+    milvus::storage::SetLoadFieldDataReadWindowSizeBytes(32 * 1024 * 1024);
+    EXPECT_EQ(milvus::storage::LoadFieldDataReadWindowSizeBytes(),
+              32 * 1024 * 1024);
 
-    SetStorageV2AsyncLoadReadWindowSizeBytes(-1);
-    EXPECT_EQ(StorageV2AsyncLoadReadWindowSizeBytes(),
-              kDefaultStorageV2AsyncLoadReadWindowSizeBytes);
+    milvus::storage::SetLoadFieldDataReadWindowSizeBytes(-1);
+    EXPECT_EQ(milvus::storage::LoadFieldDataReadWindowSizeBytes(),
+              milvus::storage::kDefaultLoadFieldDataReadWindowSizeBytes);
 }
 
 TEST_F(AsyncLoadPipelineTest, DefaultOptionsUseConfiguredReadWindow) {
-    auto previous = StorageV2AsyncLoadReadWindowSizeBytes();
-    auto restore = folly::makeGuard(
-        [previous]() { SetStorageV2AsyncLoadReadWindowSizeBytes(previous); });
+    auto previous = milvus::storage::LoadFieldDataReadWindowSizeBytes();
+    auto restore = folly::makeGuard([previous]() {
+        milvus::storage::SetLoadFieldDataReadWindowSizeBytes(previous);
+    });
     std::vector<CellSpec> cells{
         {.cid = 0,
          .file_idx = 0,
@@ -1540,7 +1547,7 @@ TEST_F(AsyncLoadPipelineTest, DefaultOptionsUseConfiguredReadWindow) {
          .memory_size = 8},
     };
     auto run = [this, &cells](int64_t window_size) {
-        SetStorageV2AsyncLoadReadWindowSizeBytes(window_size);
+        milvus::storage::SetLoadFieldDataReadWindowSizeBytes(window_size);
         auto reader = std::make_shared<FakeChunkReader>(&executor_);
         auto options = AsyncLoadPipelineOptions{};
         options.executor = folly::getKeepAliveToken(executor_);
@@ -1555,7 +1562,8 @@ TEST_F(AsyncLoadPipelineTest, DefaultOptionsUseConfiguredReadWindow) {
         return reader->AsyncCalls();
     };
 
-    EXPECT_EQ(run(kDefaultStorageV2AsyncLoadReadWindowSizeBytes), 1);
+    EXPECT_EQ(run(milvus::storage::kDefaultLoadFieldDataReadWindowSizeBytes),
+              1);
     EXPECT_EQ(run(1), cells.size());
 }
 

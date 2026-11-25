@@ -693,6 +693,15 @@ func (h *ServerHandler) genSnapshot(ctx context.Context, collectionID UniqueID, 
 		var snapshotStats *datapb.Statistics
 		if segInfo.GetStorageVersion() == storage.StorageV3 && segInfo.GetManifestPath() != "" {
 			snapshotStats = segInfo.GetStats()
+			if snapshotStats.GetFieldLogicalSizes() != nil {
+				snapshotStats = proto.CloneOf(snapshotStats)
+				snapshotStats.FieldLogicalSizes = nil
+			}
+		}
+
+		var fieldSizes *datapb.FieldLogicalSizes
+		if !collInfo.IsExternal() {
+			fieldSizes = meta.SegmentFieldLogicalSizes(segInfo)
 		}
 		segDescList = append(segDescList, &datapb.SegmentDescription{
 			SegmentId:         segInfo.GetID(),
@@ -715,6 +724,7 @@ func (h *ServerHandler) genSnapshot(ctx context.Context, collectionID UniqueID, 
 			ManifestPath:      segInfo.GetManifestPath(),
 			ManifestHasIndex:  proto.Bool(segInfo.GetManifestHasIndex()),
 			Stats:             snapshotStats,
+			FieldLogicalSizes: fieldSizes,
 		})
 	}
 

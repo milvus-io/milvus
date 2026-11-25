@@ -6451,15 +6451,15 @@ func TestValidateMilvusTableSchemaIdentity(t *testing.T) {
 				},
 			},
 		}
-		assert.NoError(t, ValidateMilvusTableSchemaIdentity(target, source, false))
+		assert.NoError(t, ValidateMilvusTableSchemaIdentity(target, source))
 	})
 
 	t.Run("nil schemas rejected", func(t *testing.T) {
-		err := ValidateMilvusTableSchemaIdentity(nil, source, false)
+		err := ValidateMilvusTableSchemaIdentity(nil, source)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "target schema is nil")
 
-		err = ValidateMilvusTableSchemaIdentity(validTarget(), nil, false)
+		err = ValidateMilvusTableSchemaIdentity(validTarget(), nil)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "source snapshot schema is nil")
 	})
@@ -6467,23 +6467,27 @@ func TestValidateMilvusTableSchemaIdentity(t *testing.T) {
 	t.Run("dynamic field mismatch rejected", func(t *testing.T) {
 		target := validTarget()
 		target.EnableDynamicField = true
-		err := ValidateMilvusTableSchemaIdentity(target, source, false)
+		err := ValidateMilvusTableSchemaIdentity(target, source)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "dynamic field setting mismatch")
 	})
 
-	t.Run("user field count mismatch rejected", func(t *testing.T) {
+	t.Run("unmapped ordinary source field is optional", func(t *testing.T) {
 		target := validTarget()
-		target.Fields = target.Fields[:1]
-		err := ValidateMilvusTableSchemaIdentity(target, source, false)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "user field count mismatch")
+		sourceWithExtra := proto.Clone(source).(*schemapb.CollectionSchema)
+		sourceWithExtra.Fields = append(sourceWithExtra.Fields, &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "extra",
+			DataType: schemapb.DataType_Int64,
+		})
+		assert.NoError(t, ValidateMilvusTableSchemaIdentity(target, sourceWithExtra))
+		assert.NoError(t, ValidateMilvusTableSchemaIdentity(target, source))
 	})
 
 	t.Run("target field without mapping rejected", func(t *testing.T) {
 		target := validTarget()
 		target.Fields[1].ExternalField = ""
-		err := ValidateMilvusTableSchemaIdentity(target, source, false)
+		err := ValidateMilvusTableSchemaIdentity(target, source)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "must set external_field mapping")
 	})
@@ -6494,18 +6498,34 @@ func TestValidateMilvusTableSchemaIdentity(t *testing.T) {
 		target.Fields[0].Name = "vec_alias"
 		target.Fields[0].ExternalField = "vec"
 		target.Fields[1].ExternalField = "vec"
-		err := ValidateMilvusTableSchemaIdentity(target, source, false)
+		err := ValidateMilvusTableSchemaIdentity(target, source)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "mapped by multiple target fields")
 	})
 
-	t.Run("unmapped source field rejected", func(t *testing.T) {
+	t.Run("unmapped source primary key rejected with virtual primary key", func(t *testing.T) {
 		target := validTarget()
-		target.Fields[0].Name = "same_name"
-		target.Fields[1].Name = "same_name"
-		err := ValidateMilvusTableSchemaIdentity(target, source, false)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "is not mapped by target schema")
+		target.Fields[0] = &schemapb.FieldSchema{
+			FieldID:      102,
+			Name:         common.VirtualPKFieldName,
+			DataType:     schemapb.DataType_Int64,
+			IsPrimaryKey: true,
+		}
+		err := ValidateMilvusTableSchemaIdentity(target, source)
+		assert.ErrorContains(t, err, `source snapshot field "pk" is not mapped by target schema`)
+	})
+
+	t.Run("unmapped source partition or clustering key rejected", func(t *testing.T) {
+		for _, field := range []*schemapb.FieldSchema{
+			{FieldID: 102, Name: "partition_key", DataType: schemapb.DataType_Int64, IsPartitionKey: true},
+			{FieldID: 102, Name: common.NamespaceFieldName, DataType: schemapb.DataType_VarChar, IsPartitionKey: true},
+			{FieldID: 102, Name: "clustering_key", DataType: schemapb.DataType_Int64, IsClusteringKey: true},
+		} {
+			sourceWithKey := proto.Clone(source).(*schemapb.CollectionSchema)
+			sourceWithKey.Fields = append(sourceWithKey.Fields, field)
+			err := ValidateMilvusTableSchemaIdentity(validTarget(), sourceWithKey)
+			assert.ErrorContains(t, err, fmt.Sprintf("source snapshot field %q is not mapped", field.GetName()))
+		}
 	})
 
 	t.Run("source function output field is not required to be mapped", func(t *testing.T) {
@@ -6525,7 +6545,7 @@ func TestValidateMilvusTableSchemaIdentity(t *testing.T) {
 			},
 		}
 
-		assert.NoError(t, ValidateMilvusTableSchemaIdentity(validTarget(), sourceWithFunctionOutput, false))
+		assert.NoError(t, ValidateMilvusTableSchemaIdentity(validTarget(), sourceWithFunctionOutput))
 	})
 
 	t.Run("ordinary target field can map source function output field", func(t *testing.T) {
@@ -6552,12 +6572,13 @@ func TestValidateMilvusTableSchemaIdentity(t *testing.T) {
 			ExternalField: "sparse",
 		})
 
-		assert.NoError(t, ValidateMilvusTableSchemaIdentity(target, sourceWithFunctionOutput, false))
-		assert.NoError(t, ValidateMilvusTableSchemaIdentity(target, sourceWithFunctionOutput, true))
+		assert.NoError(t, ValidateMilvusTableSchemaIdentity(target, sourceWithFunctionOutput))
 	})
 
-	t.Run("target function output field is not external mapping", func(t *testing.T) {
+	t.Run("target function output field is rejected", func(t *testing.T) {
 		target := validTarget()
+		target.ExternalSource = "s3://bucket/snapshot.json"
+		target.ExternalSpec = `{"format":"milvus-table"}`
 		target.Fields = append(target.Fields, &schemapb.FieldSchema{
 			FieldID:          102,
 			Name:             "sparse",
@@ -6573,7 +6594,40 @@ func TestValidateMilvusTableSchemaIdentity(t *testing.T) {
 			},
 		}
 
-		assert.NoError(t, ValidateMilvusTableSchemaIdentity(target, source, true))
+		err := ValidateMilvusTableSchemaIdentity(target, source)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "does not support function output fields")
+		err = NormalizeAndValidateExternalCollectionSchema(target)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "does not support function output fields")
+		err = ValidateExternalCollectionResolvedSchema(target)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "does not support function output fields")
+	})
+
+	t.Run("target function with output names before normalization is rejected", func(t *testing.T) {
+		target := validTarget()
+		target.ExternalSource = "s3://bucket/snapshot.json"
+		target.ExternalSpec = `{"format":"milvus-table"}`
+		target.Fields = append(target.Fields, &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "sparse",
+			DataType: schemapb.DataType_SparseFloatVector,
+		})
+		target.Functions = []*schemapb.FunctionSchema{
+			{
+				Name:             "bm25",
+				InputFieldNames:  []string{"pk"},
+				OutputFieldNames: []string{"sparse"},
+			},
+		}
+
+		err := NormalizeAndValidateExternalCollectionSchema(target)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "does not support function output fields")
+		err = ValidateMilvusTableSchemaIdentity(target, source)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "does not support function output fields")
 	})
 
 	t.Run("virtual pk maps source pk as data field", func(t *testing.T) {
@@ -6606,33 +6660,27 @@ func TestValidateMilvusTableSchemaIdentity(t *testing.T) {
 				},
 			},
 		}
-		assert.NoError(t, ValidateMilvusTableSchemaIdentity(target, virtualSource, false))
-
-		target.Fields[1].FieldID = 100
-		target.Fields[2].FieldID = 101
-		assert.NoError(t, ValidateMilvusTableSchemaIdentity(target, virtualSource, true))
+		assert.NoError(t, ValidateMilvusTableSchemaIdentity(target, virtualSource))
 	})
 
 	t.Run("source pk cannot map to non pk without virtual pk", func(t *testing.T) {
 		target := validTarget()
 		target.Fields[0].IsPrimaryKey = false
-		err := ValidateMilvusTableSchemaIdentity(target, source, false)
+		err := ValidateMilvusTableSchemaIdentity(target, source)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "definition mismatch")
 	})
 
-	t.Run("refresh time requires field id", func(t *testing.T) {
+	t.Run("independently allocated target field id is accepted", func(t *testing.T) {
 		target := validTarget()
 		target.Fields[1].FieldID = 102
-		err := ValidateMilvusTableSchemaIdentity(target, source, true)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "field_id mismatch")
+		assert.NoError(t, ValidateMilvusTableSchemaIdentity(target, source))
 	})
 
 	t.Run("type mismatch rejected", func(t *testing.T) {
 		target := validTarget()
 		target.Fields[1].TypeParams[0].Value = "32"
-		err := ValidateMilvusTableSchemaIdentity(target, source, false)
+		err := ValidateMilvusTableSchemaIdentity(target, source)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "definition mismatch")
 	})
@@ -6640,7 +6688,7 @@ func TestValidateMilvusTableSchemaIdentity(t *testing.T) {
 	t.Run("missing mapped source field rejected", func(t *testing.T) {
 		target := validTarget()
 		target.Fields[1].ExternalField = "missing_vec"
-		err := ValidateMilvusTableSchemaIdentity(target, source, false)
+		err := ValidateMilvusTableSchemaIdentity(target, source)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "source snapshot schema has no such field")
 	})
@@ -6660,7 +6708,7 @@ func TestValidateMilvusTableSchemaIdentity(t *testing.T) {
 			{Key: common.MaxLengthKey, Value: "16"},
 			{Key: common.DimKey, Value: "16"},
 		}
-		assert.NoError(t, ValidateMilvusTableSchemaIdentity(target, sourceWithParams, true))
+		assert.NoError(t, ValidateMilvusTableSchemaIdentity(target, sourceWithParams))
 	})
 }
 
@@ -7810,4 +7858,67 @@ func TestMergeDynamicJSONKeepsUntouchedValues(t *testing.T) {
 	assert.Contains(t, string(merged), `"untouched":9007199254740993`)
 	assert.Contains(t, string(merged), `"big":12345678901234567890`)
 	assert.Contains(t, string(merged), `"tag":"new"`)
+}
+
+func TestMilvusTableRejectsStructSchema(t *testing.T) {
+	for _, explicitMapping := range []bool{false, true} {
+		for _, validator := range []struct {
+			name  string
+			check func(*schemapb.CollectionSchema) error
+		}{
+			{name: "create normalization", check: NormalizeAndValidateExternalCollectionSchema},
+			{name: "resolved DDL", check: ValidateExternalCollectionResolvedSchema},
+			{name: "snapshot compatibility", check: func(schema *schemapb.CollectionSchema) error {
+				return ValidateMilvusTableSchemaIdentity(schema, proto.Clone(schema).(*schemapb.CollectionSchema))
+			}},
+		} {
+			t.Run(fmt.Sprintf("%s/explicit=%t", validator.name, explicitMapping), func(t *testing.T) {
+				child := &schemapb.FieldSchema{
+					Name: "items[value]", FieldID: 103,
+					DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "8"}},
+				}
+				if explicitMapping {
+					child.ExternalField = child.Name
+				}
+				schema := &schemapb.CollectionSchema{
+					ExternalSource: "s3://bucket/snapshot.json", ExternalSpec: `{"format":"milvus-table"}`,
+					StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+						Name: "items", FieldID: 102, Fields: []*schemapb.FieldSchema{child},
+					}},
+				}
+				before := proto.Clone(schema)
+				require.ErrorContains(t, validator.check(schema), "does not support struct fields")
+				require.True(t, proto.Equal(before, schema), "rejected schema must remain unchanged")
+			})
+		}
+	}
+}
+
+func TestMilvusTableTopLevelProjectionWithSourceStruct(t *testing.T) {
+	source := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{Name: "value", FieldID: 101, DataType: schemapb.DataType_Int64}},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			Name: "items", FieldID: 102, Fields: []*schemapb.FieldSchema{{
+				Name: "items[value]", FieldID: 103, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+			}},
+		}},
+	}
+	target := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+		Name: "projected", FieldID: 201, ExternalField: "value", DataType: schemapb.DataType_Int64,
+	}}}
+	require.NoError(t, ValidateMilvusTableSchemaIdentity(target, source))
+}
+
+func TestMilvusTableRejectsStructLeafAsTopLevelMapping(t *testing.T) {
+	child := &schemapb.FieldSchema{Name: "items[value]", FieldID: 103, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}
+	source := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+		Name: "items", FieldID: 102, Fields: []*schemapb.FieldSchema{child},
+	}}}
+	mapped := proto.Clone(child).(*schemapb.FieldSchema)
+	mapped.Name, mapped.FieldID, mapped.ExternalField = "projected", 201, child.GetName()
+	target := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{mapped}}
+	err := ValidateMilvusTableSchemaIdentity(target, source)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, err, `maps to source field "items[value]", but source snapshot schema has no such field`)
 }

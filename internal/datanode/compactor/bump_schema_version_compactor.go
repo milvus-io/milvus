@@ -898,8 +898,10 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		// stats footprint from the writer's tracked counter. V3 writers
 		// leave statsLog/bm25StatsLogs nil because stats live in the
 		// manifest — the counter is the only correct source.
-		Stats: buildCompactionOutputStats(sortedInsertLogs, nil, writer.GetStatsBlobSize()),
+		Stats: buildCompactionOutputStats(sortedInsertLogs, nil, writer, writtenRows),
 	}
+
+	inheritSingleSourceText(resultSegment, segment, readRows, existingFields, t.plan.GetSchema(), t.lobContext)
 
 	// Merge the source segment's TEXT LOB file references into the output manifest
 	// (REUSE_ALL) BEFORE building the text-match index. createTextIndex reads the TEXT
@@ -1136,13 +1138,19 @@ func (t *bumpSchemaVersionCompactionTask) newV3WriterResult(schema *schemapb.Col
 	writerFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
 	columnGroups = storagecommon.FillColumnGroupFormats(columnGroups, writerFormat)
 	schemaBasedFormats := storagecommon.ColumnGroupFormats(columnGroups, writerFormat)
-	var writer bumpSchemaVersionBatchWriter
+	// Keep the flat physical schema and column-group ordering. The logical
+	// counter also needs the target's struct parents to attribute shared
+	// validity, but must never add their read-only sibling columns.
+	newWriter := storage.NewPartialPackedRecordBatchWriter
 	if schemaContainsTextField(schema) {
-		writer, err = storage.NewPartialPackedRecordBatchWriterWithTextRefsAsBinary(basePath, schema, int64(t.compactionParams.BinLogMaxSize), packed.DefaultMultiPartUploadSize, columnGroups, t.compactionParams.StorageConfig, pluginContext, writerFormat, schemaBasedFormats)
-	} else {
-		writer, err = storage.NewPartialPackedRecordBatchWriter(basePath, schema, int64(t.compactionParams.BinLogMaxSize), packed.DefaultMultiPartUploadSize, columnGroups, t.compactionParams.StorageConfig, pluginContext, writerFormat, schemaBasedFormats)
+		newWriter = storage.NewPartialPackedRecordBatchWriterWithTextRefsAsBinary
 	}
+	writer, err := newWriter(basePath, schema, int64(t.compactionParams.BinLogMaxSize), packed.DefaultMultiPartUploadSize, columnGroups, t.compactionParams.StorageConfig, pluginContext, writerFormat, schemaBasedFormats)
 	if err != nil {
+		return nil, err
+	}
+	if err := writer.SetFieldLogicalSizeSchema(t.plan.GetSchema()); err != nil {
+		writer.Abort()
 		return nil, err
 	}
 	mlog.Info(t.ctx, "schema bump partial manifest writer created",
@@ -1458,14 +1466,15 @@ func (t *bumpSchemaVersionCompactionTask) runAdditivePhysicalReconciliation(ctx 
 		State:  datapb.CompactionTaskState_completed,
 		Segments: []*datapb.CompactionSegment{
 			{
-				SegmentID:      segmentID,
-				NumOfRows:      totalRows,
-				InsertLogs:     newInsertLogs,
-				Channel:        segment.GetInsertChannel(),
-				StorageVersion: writerResult.storageVersion,
-				Manifest:       manifestPath,
-				ManifestDelta:  manifestDelta,
-				BaseManifest:   segment.GetManifest(),
+				SegmentID:                 segmentID,
+				NumOfRows:                 totalRows,
+				InsertLogs:                newInsertLogs,
+				Channel:                   segment.GetInsertChannel(),
+				StorageVersion:            writerResult.storageVersion,
+				Manifest:                  manifestPath,
+				ManifestDelta:             manifestDelta,
+				BaseManifest:              segment.GetManifest(),
+				FieldLogicalSizeUpdateIds: materializationLogicalFieldIDs(t.plan.GetSchema(), outputFieldIDs),
 				// In-place materialization ships an INCREMENT, not an absolute
 				// footprint: DataCoord adds it onto the segment's existing
 				// Stats. Field2StatslogPaths and Deltalogs are deliberately
@@ -1478,6 +1487,7 @@ func (t *bumpSchemaVersionCompactionTask) runAdditivePhysicalReconciliation(ctx 
 					fieldNullCountByField,
 					fieldValidElementsByField,
 					writerResult.statsBlobSize,
+					writerFieldLogicalSizes(writerResult.writer, totalRows),
 				),
 			},
 		},

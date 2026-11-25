@@ -410,7 +410,7 @@ func StatsTargetFields(schema *schemapb.CollectionSchema, subJob indexpb.StatsSu
 	switch subJob {
 	case indexpb.StatsSubJob_TextIndexJob:
 		for _, field := range schema.GetFields() {
-			if typeutil.CreateFieldSchemaHelper(field).EnableMatch() {
+			if typeutil.IsTextMatchEnabled(field) {
 				fields = append(fields, field.GetFieldID())
 			}
 		}

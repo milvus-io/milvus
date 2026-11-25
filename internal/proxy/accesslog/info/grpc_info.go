@@ -54,6 +54,7 @@ type GrpcAccessInfo struct {
 
 	// runtime set info
 	actualConsistencyLevel atomic.Pointer[commonpb.ConsistencyLevel]
+	coldSearchInfo
 }
 
 func NewGrpcAccessInfo(ctx context.Context, grpcInfo *grpc.UnaryServerInfo, req interface{}) *GrpcAccessInfo {

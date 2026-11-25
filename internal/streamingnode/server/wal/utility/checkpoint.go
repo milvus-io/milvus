@@ -14,6 +14,7 @@ const (
 	// TODO(#40451): support mixed-version assignment and rollback after schema alignment;
 	// older StreamingNodes reject recovery magic 3.
 	RecoveryMagicSchemaMetadataAligned int64 = 3 // collection schema metadata was aligned with the coordinator.
+	RecoveryMagicHotWALSwitch          int64 = 4 // linked WAL readers are required before accepting a hot switch.
 )
 
 // NewWALCheckpointFromProto creates a new WALCheckpoint from a protobuf message.
@@ -29,7 +30,6 @@ func NewWALCheckpointFromProto(cp *streamingpb.WALCheckpoint) *WALCheckpoint {
 		ControlCheckpointTimeTick: cp.ControlCheckpointTimeTick,
 		ReplicateConfig:           cp.ReplicateConfig,
 		ReplicateCheckpoint:       cp.ReplicateCheckpoint,
-		AlterWalState:             cp.AlterWalState,
 	}
 }
 
@@ -50,7 +50,6 @@ type WALCheckpoint struct {
 	// Latest pchannel-scoped control state, persisted with its applied frontier.
 	ReplicateConfig     *commonpb.ReplicateConfiguration
 	ReplicateCheckpoint *commonpb.ReplicateCheckpoint
-	AlterWalState       *streamingpb.AlterWALState
 }
 
 // IntoProto converts the WALCheckpoint to a protobuf message.
@@ -66,7 +65,6 @@ func (c *WALCheckpoint) IntoProto() *streamingpb.WALCheckpoint {
 		ControlCheckpointTimeTick: c.ControlCheckpointTimeTick,
 		ReplicateConfig:           c.ReplicateConfig,
 		ReplicateCheckpoint:       c.ReplicateCheckpoint,
-		AlterWalState:             c.AlterWalState,
 	}
 }
 
@@ -83,7 +81,6 @@ func (c *WALCheckpoint) Clone() *WALCheckpoint {
 		ControlCheckpointTimeTick: c.ControlCheckpointTimeTick,
 		ReplicateConfig:           proto.Clone(c.ReplicateConfig).(*commonpb.ReplicateConfiguration),
 		ReplicateCheckpoint:       proto.Clone(c.ReplicateCheckpoint).(*commonpb.ReplicateCheckpoint),
-		AlterWalState:             proto.Clone(c.AlterWalState).(*streamingpb.AlterWALState),
 	}
 }
 
@@ -97,7 +94,6 @@ func (c *WALCheckpoint) ApplyControl(control *streamingpb.PChannelRecoveryContro
 	c.ControlCheckpointTimeTick = control.CheckpointTimeTick
 	c.ReplicateConfig = proto.Clone(control.ReplicateConfig).(*commonpb.ReplicateConfiguration)
 	c.ReplicateCheckpoint = proto.Clone(control.ReplicateCheckpoint).(*commonpb.ReplicateCheckpoint)
-	c.AlterWalState = proto.Clone(control.AlterWalState).(*streamingpb.AlterWALState)
 }
 
 // PChannelControlFromCheckpoint decodes the pchannel-scoped control state
@@ -114,7 +110,6 @@ func PChannelControlFromCheckpoint(cp *WALCheckpoint) *streamingpb.PChannelRecov
 	control.CheckpointTimeTick = max(cp.TimeTick, cp.ControlCheckpointTimeTick)
 	control.ReplicateConfig = proto.Clone(cp.ReplicateConfig).(*commonpb.ReplicateConfiguration)
 	control.ReplicateCheckpoint = proto.Clone(cp.ReplicateCheckpoint).(*commonpb.ReplicateCheckpoint)
-	control.AlterWalState = proto.Clone(cp.AlterWalState).(*streamingpb.AlterWALState)
 	return control
 }
 

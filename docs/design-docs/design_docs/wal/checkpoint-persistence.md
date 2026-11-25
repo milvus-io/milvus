@@ -233,7 +233,7 @@ message WALCheckpoint {
     int64 recovery_magic = 3;
     common.ReplicateConfiguration replicate_config = 4;
     common.ReplicateCheckpoint replicate_checkpoint = 5;
-    AlterWALState alter_wal_state = 6;
+    AlterWALState alter_wal_state = 6 [deprecated = true];
     int64 term = 7;
     uint64 control_checkpoint_time_tick = 8;
 }
@@ -252,8 +252,13 @@ applied frontier is likewise component metadata, not a second global scanner
 or truncation checkpoint. The latest state and its frontier are stored together
 in `WALCheckpoint.control_checkpoint_time_tick`, allowing old control effects
 to be skipped while data components still replay.
-Already-covered AlterWAL events may still advance their persisted stage, after
-the required data checkpoint has been published.
+The legacy AlterWAL stage machine is deprecated and no longer runs. Finish old
+switches before upgrade; the retained proto field does not participate in current
+checkpoint publication. The [hot-switch protocol](alter-wal.md) uses the durable
+log chain to recover the writer and never resets a checkpoint to the target's
+earliest ID.
+Its old-prefix flush is asynchronous and remains gated by this document's
+continuous-prefix publication rules.
 
 `ApplyControl`, proto conversion and cloning preserve the Control frontier.
 Recovery initializes its applied boundary to the maximum of the saved Control

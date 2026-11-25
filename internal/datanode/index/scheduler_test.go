@@ -51,6 +51,7 @@ func TestGetStateFromError(t *testing.T) {
 			{"conversion budget exceeded", merr.CodeUnsupported, indexpb.JobState_JobStateFailed},
 			{"allocation failed", merr.CodeMemAllocateFailed, indexpb.JobState_JobStateRetry},
 			{"other configuration error", merr.CodeConfigInvalid, indexpb.JobState_JobStateRetry},
+			{"mapped field awaiting external refresh", merr.CodeFieldNotLoaded, indexpb.JobState_JobStateRetry},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				// Preserve the code through the same wrapper used by index builds.
@@ -489,11 +490,14 @@ func TestIndexTaskQueue_SameNameOverlapReleasesEachBooking(t *testing.T) {
 			newerExec := sched.beginTask(newer)
 			assert.Equal(t, taskcommon.Resource{CPU: 2, Memory: 200}, queue.GetUsingResource())
 
+			assert.EqualValues(t, 2, queue.GetUsingSlot())
+
 			first, second := olderExec, newerExec
 			if newerFirst {
 				first, second = newerExec, olderExec
 			}
 			sched.finishTask(first, nil)
+			assert.EqualValues(t, 1, queue.GetUsingSlot())
 			assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 100}, queue.GetUsingResource())
 			sched.finishTask(second, nil)
 			assert.Equal(t, taskcommon.Resource{}, queue.GetUsingResource())
@@ -569,10 +573,11 @@ func newSchedulerIndexBuildTask(t *testing.T, manager *TaskManager, buildID int6
 			DataType: schemapb.DataType_Int64,
 		},
 	}
-	manager.LoadOrStoreIndexTask(req.GetClusterID(), req.GetBuildID(), &IndexTaskInfo{
+	attempt := &IndexTaskInfo{
 		State: commonpb.IndexState_InProgress,
-	})
-	return NewIndexBuildTask(ctx, cancel, req, nil, manager, nil, taskcommon.Resource{})
+	}
+	manager.LoadOrStoreIndexTask(req.GetClusterID(), req.GetBuildID(), attempt)
+	return NewIndexBuildTask(ctx, cancel, req, nil, manager, attempt, nil, taskcommon.Resource{})
 }
 
 func TestIndexTaskSchedulerRecordsIndexTaskCost(t *testing.T) {
@@ -749,19 +754,19 @@ func TestIndexTaskGetResource(t *testing.T) {
 	want := taskcommon.Resource{CPU: 2, Memory: 1 << 30}
 
 	assert.Equal(t, want, NewIndexBuildTask(ctx, cancel,
-		&workerpb.CreateJobRequest{}, nil, manager, nil, want).GetResource())
+		&workerpb.CreateJobRequest{}, nil, manager, nil, nil, want).GetResource())
 	assert.Equal(t, want, NewStatsTask(ctx, cancel,
-		&workerpb.CreateStatsRequest{}, manager, nil, nil, want).GetResource())
+		&workerpb.CreateStatsRequest{}, manager, nil, nil, nil, want).GetResource())
 	assert.Equal(t, want, NewAnalyzeTask(ctx, cancel,
-		&workerpb.AnalyzeRequest{}, manager, nil, want).GetResource())
+		&workerpb.AnalyzeRequest{}, manager, nil, nil, want).GetResource())
 
 	// A coordinator that predates the properties books nothing.
 	assert.True(t, NewIndexBuildTask(ctx, cancel,
-		&workerpb.CreateJobRequest{}, nil, manager, nil, taskcommon.Resource{}).GetResource().IsZero())
+		&workerpb.CreateJobRequest{}, nil, manager, nil, nil, taskcommon.Resource{}).GetResource().IsZero())
 	assert.True(t, NewStatsTask(ctx, cancel,
-		&workerpb.CreateStatsRequest{}, manager, nil, nil, taskcommon.Resource{}).GetResource().IsZero())
+		&workerpb.CreateStatsRequest{}, manager, nil, nil, nil, taskcommon.Resource{}).GetResource().IsZero())
 	assert.True(t, NewAnalyzeTask(ctx, cancel,
-		&workerpb.AnalyzeRequest{}, manager, nil, taskcommon.Resource{}).GetResource().IsZero())
+		&workerpb.AnalyzeRequest{}, manager, nil, nil, taskcommon.Resource{}).GetResource().IsZero())
 }
 
 func newTestTaskScheduler(ctx context.Context) *TaskScheduler {

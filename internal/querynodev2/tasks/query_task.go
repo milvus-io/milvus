@@ -168,8 +168,7 @@ func (t *QueryTask) execute(selected []segments.Segment) error {
 	}
 	defer retrievePlan.Delete()
 	if t.queryChain != nil {
-		maxRows := paramtable.Get().FunctionCfg.GrepMaxScanRows.GetAsInt64()
-		if err = retrievePlan.EnableCandidateMode(maxRows); err != nil {
+		if err = retrievePlan.EnableCandidateMode(); err != nil {
 			return err
 		}
 	}

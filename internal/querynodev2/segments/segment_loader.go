@@ -990,9 +990,8 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 	unindexedTextFields := make(map[int64]struct{})
 	// todo(SpadeA): consider struct fields when index is ready
 	for _, field := range schema.GetFields() {
-		h := typeutil.CreateFieldSchemaHelper(field)
 		_, textIndexExist := textIndexedInfo[field.GetFieldID()]
-		if h.EnableMatch() && !textIndexExist {
+		if typeutil.IsTextMatchEnabled(field) && !textIndexExist {
 			unindexedTextFields[field.GetFieldID()] = struct{}{}
 		}
 	}
@@ -1562,6 +1561,7 @@ func createStorageConfig() *indexpb.StorageConfig {
 			TalonEnabledStages:          params.CommonCfg.StorageTalonEnabledStages.GetAsUint32(),
 			TalonSmallReadThreshold:     params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
 			TalonCoordinator:            params.CommonCfg.StorageTalonCoordinator.GetValue(),
+			TalonNamespace:              params.CommonCfg.TalonNamespace(),
 			TalonBlockSize:              params.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
 			TalonMaxIdlePerAddr:         params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
 			TalonEnableForExternalTable: params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool(),
@@ -1590,6 +1590,7 @@ func createStorageConfig() *indexpb.StorageConfig {
 		TalonEnabledStages:          params.CommonCfg.StorageTalonEnabledStages.GetAsUint32(),
 		TalonSmallReadThreshold:     params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
 		TalonCoordinator:            params.CommonCfg.StorageTalonCoordinator.GetValue(),
+		TalonNamespace:              params.CommonCfg.TalonNamespace(),
 		TalonBlockSize:              params.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
 		TalonMaxIdlePerAddr:         params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
 		TalonEnableForExternalTable: params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool(),

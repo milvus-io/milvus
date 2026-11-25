@@ -579,7 +579,7 @@ func (m *Meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 			}
 			return err
 		}
-		updated.ManifestPath = manifestPath
+		moveFieldLogicalSizes(updated.SegmentInfo, manifestPath)
 		for _, staged := range stagedIndexes {
 			if !staged.PublishSummary || staged.Summary == nil {
 				continue
@@ -1621,7 +1621,7 @@ func (m *Meta) publishSegmentManifestOperator(prepared preparedSegmentManifest) 
 			return true
 		}
 		applySegmentCatalogTypedFields(segment, commit.CatalogMutation)
-		segment.ManifestPath = prepared.manifestPath
+		moveFieldLogicalSizes(segment.SegmentInfo, prepared.manifestPath)
 		return true
 	}
 }

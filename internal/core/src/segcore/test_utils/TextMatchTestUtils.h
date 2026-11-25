@@ -42,11 +42,11 @@
 
 namespace milvus::segcore::text_test {
 
-inline storage::StorageConfig
+inline std::shared_ptr<milvus_storage::api::Properties>
 get_default_local_storage_config() {
-    storage::StorageConfig config;
-    config.storage_type = "local";
-    config.root_path = TestRemotePath;
+    auto config = std::make_shared<milvus_storage::api::Properties>();
+    (*config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+    (*config)[PROPERTY_FS_ROOT_PATH] = std::string(TestRemotePath);
     return config;
 }
 

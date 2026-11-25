@@ -175,9 +175,9 @@ std::unique_ptr<JsonKeyStats>
 CreateJsonKeyStatsForCollectTest() {
     milvus::storage::FieldDataMeta field_meta{1, 2, 3, 100, {}};
     milvus::storage::IndexMeta index_meta{3, 100, 1, 1};
-    milvus::storage::StorageConfig storage_config;
-    storage_config.storage_type = "local";
-    storage_config.root_path = TestLocalPath;
+    auto storage_config = std::make_shared<milvus_storage::api::Properties>();
+    (*storage_config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+    (*storage_config)[PROPERTY_FS_ROOT_PATH] = std::string(TestLocalPath);
     auto cm = milvus::storage::CreateChunkManager(storage_config);
     auto fs = milvus::storage::InitArrowFileSystem(storage_config);
     milvus::storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
@@ -638,9 +638,9 @@ TEST(TraverseJsonForBuildStatsTest,
     // We only need an instance to access the private method we exposed.
     milvus::storage::FieldDataMeta field_meta{1, 2, 3, 100, {}};
     milvus::storage::IndexMeta index_meta{3, 100, 1, 1};
-    milvus::storage::StorageConfig storage_config;
-    storage_config.storage_type = "local";
-    storage_config.root_path = TestLocalPath;
+    auto storage_config = std::make_shared<milvus_storage::api::Properties>();
+    (*storage_config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+    (*storage_config)[PROPERTY_FS_ROOT_PATH] = std::string(TestLocalPath);
     auto cm = milvus::storage::CreateChunkManager(storage_config);
     auto fs = milvus::storage::InitArrowFileSystem(storage_config);
     milvus::storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
@@ -679,9 +679,9 @@ TEST(CollectSingleJsonStatsInfoTest, EmptyJsonStringThrows) {
 
     milvus::storage::FieldDataMeta field_meta{1, 2, 3, 100, {}};
     milvus::storage::IndexMeta index_meta{3, 100, 1, 1};
-    milvus::storage::StorageConfig storage_config;
-    storage_config.storage_type = "local";
-    storage_config.root_path = TestLocalPath;
+    auto storage_config = std::make_shared<milvus_storage::api::Properties>();
+    (*storage_config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+    (*storage_config)[PROPERTY_FS_ROOT_PATH] = std::string(TestLocalPath);
     auto cm = milvus::storage::CreateChunkManager(storage_config);
     auto fs = milvus::storage::InitArrowFileSystem(storage_config);
     milvus::storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
@@ -702,9 +702,9 @@ TEST(CollectSingleJsonStatsInfoTest, ParsesJsonWithoutNulTerminator) {
 
     milvus::storage::FieldDataMeta field_meta{1, 2, 3, 100, {}};
     milvus::storage::IndexMeta index_meta{3, 100, 1, 1};
-    milvus::storage::StorageConfig storage_config;
-    storage_config.storage_type = "local";
-    storage_config.root_path = TestLocalPath;
+    auto storage_config = std::make_shared<milvus_storage::api::Properties>();
+    (*storage_config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+    (*storage_config)[PROPERTY_FS_ROOT_PATH] = std::string(TestLocalPath);
     auto cm = milvus::storage::CreateChunkManager(storage_config);
     auto fs = milvus::storage::InitArrowFileSystem(storage_config);
     milvus::storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);

@@ -157,7 +157,7 @@ func (w *MultiSegmentWriter) closeWriter() error {
 			// does not recompute. statsBlobSize is sourced from the
 			// writer's tracked counter (works for V2 array-emitting
 			// writers and V3 manifest-embedded-stats writers alike).
-			Stats: buildCompactionOutputStats(sortedInsertLogs, nil, writer.GetStatsBlobSize()),
+			Stats: buildCompactionOutputStats(sortedInsertLogs, nil, writer.BinlogRecordWriter, rowNum),
 		}
 
 		w.res = append(w.res, result)

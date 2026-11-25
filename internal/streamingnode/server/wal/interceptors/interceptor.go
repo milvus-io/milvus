@@ -2,6 +2,7 @@ package interceptors
 
 import (
 	"context"
+	"sync"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates"
@@ -20,6 +21,23 @@ type (
 	Append = func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error)
 )
 
+type appendWaitKey struct{}
+
+// WithAppendWait lets an outer interceptor suspend its admission lock while
+// an append is waiting outside the WAL mutation path.
+func WithAppendWait(ctx context.Context, wait func(func() error) error) context.Context {
+	return context.WithValue(ctx, appendWaitKey{}, wait)
+}
+
+// WaitOutsideAppend runs a blocking wait after downstream mutation locks have
+// been released. It reports whether admission must be retried.
+func WaitOutsideAppend(ctx context.Context, wait func() error) error {
+	if suspend, ok := ctx.Value(appendWaitKey{}).(func(func() error) error); ok {
+		return suspend(wait)
+	}
+	return wait()
+}
+
 // MessageRowLock coordinates writes before their visibility timestamp is
 // allocated. The lock interceptor calls it under the shard lifecycle lock for
 // every non-replicated message. The returned context may retain decoded write
@@ -32,6 +50,8 @@ type MessageRowLock interface {
 
 // InterceptorBuildParam is the parameter to build a interceptor.
 type InterceptorBuildParam struct {
+	// TimeTickSyncMu orders complete Sync operations before the PChannel append lock.
+	TimeTickSyncMu         sync.Mutex
 	Context                context.Context // WAL-open context for bounded startup recovery; optional in tests.
 	ChannelInfo            types.PChannelInfo
 	WAL                    *syncutil.Future[wal.WAL]    // The wal final object, can be used after interceptor is ready.

@@ -35,7 +35,7 @@
 #include "index/PackedIndexLoad.h"
 #include "index/LegacyIndexLoad.h"
 #include "index/LoadResource.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "index/Utils.h"
 #include "index/contracts/Registry.h"
 #include "log/Log.h"
@@ -117,7 +117,7 @@ TextMatchIndexLoader::TextMatchIndexLoader(
         config_, index::INDEX_FILES);
     file_manager_context_.use_async_load =
         file_manager_context_.use_async_load.value_or(
-            storagev2translator::StorageV2AsyncLoadEnabled());
+            milvus::storage::LoadAsyncReadEnabled());
     index::IndexLoadContext metadata_ctx(
         op_ctx,
         index::GetValueFromConfig<int32_t>(config_, LOAD_PRIORITY).value_or(0));

@@ -60,7 +60,7 @@ This threshold changes resource handling, not the accepted storage format.
 Async inspection starts at most 16 object inspections per batch concurrently,
 independent of the process-wide slot setting, and drains issued I/O on failure.
 All batches now also share `LoadAdmissionController` slots with payload loading;
-`common.loadAdmissionSlots=0` disables only the global slot limit. The per-batch
+`queryNode.segcore.load.admission.slots=0` disables only the global slot limit. The per-batch
 window still applies, but multiple batches can exceed 16 inspections in total.
 Packed V3 stream opening and directory inspection participate too. Directory
 inspection releases its slot before `__meta__` loading acquires its existing

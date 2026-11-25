@@ -254,11 +254,27 @@ func TestUpdateBumpSchemaVersionMaterializationOperatorApplies(t *testing.T) {
 	require.NoError(t, err)
 	addMaterializationSegment(t, mt, packed.MarshalManifestPath("/tmp/milvus/insert_log/1/10/500", 5), 3, func(info *datapb.SegmentInfo) {
 		info.Binlogs = []*datapb.FieldBinlog{{FieldID: 100, Format: "parquet", ChildFields: []int64{100}, Binlogs: []*datapb.Binlog{{LogID: 1}}}}
+		info.NumOfRows = 3
+		info.Stats = storage.BuildStatsFromFieldBinlogs(info.Binlogs, nil, nil, nil)
+		info.Stats.FieldLogicalSizes = &datapb.FieldLogicalSizes{
+			Version: storage.FieldLogicalSizeVersion, RowCount: 3,
+			Fields: map[int64]*datapb.FieldLogicalSize{100: {PayloadBytes: 21}},
+		}
+		info.FieldLogicalSizesManifest = info.ManifestPath
 	})
 
 	newGroups := []*datapb.FieldBinlog{{FieldID: materializationOutputFID, Format: "vortex", ChildFields: []int64{materializationOutputFID}, Binlogs: []*datapb.Binlog{{LogID: 9001, MemorySize: 100}}}}
 	err = mt.UpdateSegmentsInfo(context.Background(), meta.UpdateBumpSchemaVersionMaterializationOperator(
-		materializationSegmentID, 7, newGroups, &datapb.Statistics{InsertBinlogSize: 100},
+		materializationSegmentID, &schemapb.CollectionSchema{Version: 7}, &datapb.CompactionSegment{
+			NumOfRows: 3, InsertLogs: newGroups, FieldLogicalSizeUpdateIds: []int64{materializationOutputFID},
+			Stats: &datapb.Statistics{
+				InsertBinlogSize: 100,
+				FieldLogicalSizes: &datapb.FieldLogicalSizes{
+					Version: storage.FieldLogicalSizeVersion, RowCount: 3,
+					Fields: map[int64]*datapb.FieldLogicalSize{materializationOutputFID: {PayloadBytes: 37}},
+				},
+			},
+		},
 	))
 	require.NoError(t, err)
 
@@ -273,6 +289,10 @@ func TestUpdateBumpSchemaVersionMaterializationOperatorApplies(t *testing.T) {
 	require.Equal(t, []string{"parquet", "vortex"}, updated.GetStats().GetFormats())
 	require.Len(t, updated.GetStats().GetLoadResource().GetColumnGroups(), 2)
 	assert.EqualValues(t, 100, updated.GetStats().GetLoadResource().GetColumnGroups()[1].GetMemorySize())
+	counts := meta.SegmentFieldLogicalSizes(updated.SegmentInfo)
+	require.NotNil(t, counts)
+	assert.EqualValues(t, 21, counts.GetFields()[100].GetPayloadBytes())
+	assert.EqualValues(t, 37, counts.GetFields()[materializationOutputFID].GetPayloadBytes())
 	// Binlogs changed, so querynodes with the segment loaded must Reopen.
 	assert.EqualValues(t, 1, updated.GetDataVersion())
 }
@@ -283,7 +303,7 @@ func TestUpdateBumpSchemaVersionMaterializationOperatorNeverRegressesSchemaVersi
 	addMaterializationSegment(t, mt, packed.MarshalManifestPath("/tmp/milvus/insert_log/1/10/500", 5), 9)
 
 	err = mt.UpdateSegmentsInfo(context.Background(), meta.UpdateBumpSchemaVersionMaterializationOperator(
-		materializationSegmentID, 7, nil, nil,
+		materializationSegmentID, &schemapb.CollectionSchema{Version: 7}, nil,
 	))
 	require.NoError(t, err)
 	assert.EqualValues(t, 9, mt.GetSegment(context.Background(), materializationSegmentID).GetSchemaVersion())
@@ -302,7 +322,7 @@ func TestUpdateBumpSchemaVersionMaterializationOperatorRejectsDroppedGroups(t *t
 	// rather than silently orphan a pre-existing group's data.
 	newGroups := []*datapb.FieldBinlog{{FieldID: materializationOutputFID, ChildFields: []int64{materializationOutputFID}, Binlogs: []*datapb.Binlog{{LogID: 9001}}}}
 	err = mt.UpdateSegmentsInfo(context.Background(), meta.UpdateBumpSchemaVersionMaterializationOperator(
-		materializationSegmentID, 7, newGroups, nil,
+		materializationSegmentID, &schemapb.CollectionSchema{Version: 7}, &datapb.CompactionSegment{InsertLogs: newGroups},
 	))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrServiceInternal)

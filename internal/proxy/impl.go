@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -1015,12 +1016,31 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 		}, nil
 	}
 
-	// Check for external collection - alter collection schema is not supported
 	if typeutil.IsExternalCollection(dresp.GetSchema()) {
-		return &milvuspb.AlterCollectionSchemaResponse{
-			AlterStatus: merr.Status(merr.WrapErrParameterInvalidMsg(
-				"alter collection schema operation is not supported for external collection %s", request.GetCollectionName())),
-		}, nil
+		if !typeutil.NewStorageColumnResolver(dresp.GetSchema()).IsMilvusTable() {
+			// PyMilvus uses this status and reason to fall back to AddCollectionField.
+			return &milvuspb.AlterCollectionSchemaResponse{
+				AlterStatus: merr.Status(merr.WrapErrParameterInvalidMsg(
+					"alter collection schema operation is not supported for external collection %s", request.GetCollectionName())),
+			}, nil
+		}
+		action := request.GetAction()
+		if action == nil {
+			return &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Status(merr.WrapErrParameterInvalidMsg("action is nil"))}, nil
+		}
+		var plan *schemautil.AlterSchemaAddPlan
+		switch op := action.GetOp().(type) {
+		case *milvuspb.AlterCollectionSchemaRequest_Action_AddRequest:
+			plan, err = schemautil.ParseAlterSchemaAddRequest(op.AddRequest)
+			if err != nil {
+				return &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Status(err)}, nil
+			}
+		case nil:
+			return &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Status(merr.WrapErrParameterInvalidMsg("unknown action type in alter collection schema request"))}, nil
+		}
+		if plan == nil || plan.Kind != schemautil.AlterSchemaAddField {
+			return &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Status(merr.WrapErrOperationNotSupportedMsg("external collections support only mapped milvus-table top-level field additions"))}, nil
+		}
 	}
 
 	task := NewAlterCollectionSchemaTask(ctx, node, request, dresp.GetSchema(), dresp.GetProperties(), CheckVecIndexWithDataTypeExist)
@@ -2701,6 +2721,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 // un-optimized retry, the recall-evaluation ground truth, a retry.Handle
 // re-entry -- and those runs must not move the feature counters again.
 func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool, countFeatures bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
+	ctx, finishAttempt := extension.BeginDQLAttempt(ctx)
+	defer finishAttempt()
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.SearchLabel).
@@ -2959,6 +2981,8 @@ func (l *hybridSearchRequestExprLogger) String() string {
 // countFeatures carries the same meaning as in search: only the first task
 // built for a user request moves the feature counters.
 func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool, countFeatures bool) (*milvuspb.SearchResults, bool, bool, error) {
+	ctx, finishAttempt := extension.BeginDQLAttempt(ctx)
+	defer finishAttempt()
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.HybridSearchLabel).
@@ -3709,6 +3733,8 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 }
 
 func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+	ctx, finishAttempt := extension.BeginDQLAttempt(ctx)
+	defer finishAttempt()
 	qt := NewQueryTask(ctx, node, request, nil, &internalpb.RetrieveRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
@@ -6727,10 +6753,9 @@ func (node *Proxy) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuota
 
 	metricsResp, err := node.mixCoord.GetQuotaMetrics(ctx, req)
 	if err != nil {
-		mlog.Warn(context.TODO(), "GetQuotaMetrics fail",
+		mlog.Warn(ctx, "GetQuotaMetrics fail",
 			mlog.Err(err))
-		metricsResp.Status = merr.Status(err)
-		return metricsResp, nil
+		return &internalpb.GetQuotaMetricsResponse{Status: merr.Status(err)}, nil
 	}
 	err = merr.Error(metricsResp.GetStatus())
 	if err != nil {

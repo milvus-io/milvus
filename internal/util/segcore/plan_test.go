@@ -92,20 +92,12 @@ func (suite *PlanSuite) TestCandidateMode() {
 		OutputFieldIds: []int64{100},
 	})
 	suite.Require().NoError(err)
-	for _, maxRows := range []int64{0, 12, -1} {
-		plan, err := segcore.NewRetrievePlan(suite.collection, expr, 100, 0, 0, 0, 0)
-		suite.Require().NoError(err)
-		err = plan.EnableCandidateMode(maxRows)
-		if maxRows >= 0 {
-			suite.NoError(err)
-			suite.True(plan.ShouldIgnoreNonPk())
-			suite.True(plan.IsIgnoreNonPk())
-			plan.SetIgnoreNonPk(false)
-			suite.True(plan.IsIgnoreNonPk())
-		} else {
-			suite.Error(err)
-			suite.False(plan.IsIgnoreNonPk())
-		}
-		plan.Delete()
-	}
+	plan, err := segcore.NewRetrievePlan(suite.collection, expr, 100, 0, 0, 0, 0)
+	suite.Require().NoError(err)
+	defer plan.Delete()
+	suite.Require().NoError(plan.EnableCandidateMode())
+	suite.True(plan.ShouldIgnoreNonPk())
+	suite.True(plan.IsIgnoreNonPk())
+	plan.SetIgnoreNonPk(false)
+	suite.True(plan.IsIgnoreNonPk())
 }

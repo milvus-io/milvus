@@ -11,15 +11,59 @@ The WAL backend is the durable storage layer for WAL entries. Each PChannel maps
 
 ## WALImpls Interface
 
+Normal backend changes are composed by `autowalimpls`; see
+[AlterWAL](../../../design-docs/design_docs/wal/alter-wal.md) for the durable
+link, synchronization boundary and startup chain-recovery protocol. A backend
+switch preserves the outer WAL and its scanners. RecoveryStorage observes the
+original control record for flush/ACK; public subscriptions receive its TimeTick
+confirmation without target/config details. The old AlterWALState reopen protocol
+is deprecated.
+
 All backends implement the same interface:
 - `Append(ctx, msg) → MessageID` — Persist a message and return its backend-specific ID.
-- `Read(ctx, opts) → ScannerImpls` — Create a scanner starting from a delivery policy (earliest, latest, or specific MessageID).
+- `Read(ctx, opts) → ScannerImpls` — Create a scanner starting from a delivery policy (All, StartFrom or StartAfter). Latest is deprecated and returns an error.
 - `Truncate(ctx, messageID)` — Remove messages up to the given ID (log compaction).
+
+## Historical subscriptions and handle lifetime
+
+`All` starts from the earliest retained record in the initially selected physical
+backend (the current backend for autowalimpls), then follows subsequent switch
+links. It does not discover older backends. Use a checkpoint MessageID with
+From/After when the subscription must include history preceding a switch.
+
+From/After subscriptions select the backend encoded in their position and follow
+AlterWAL target anchors. Deployment operations prevent upgrades from overlapping
+AlterWAL and eliminate legacy-switch historical subscription requirements before
+enabling hot switching. No persisted backend-membership compatibility list or
+catalog lookup is added to this read path; see the AlterWAL design.
+
+Auto keeps one current writer and one historical reader handle per backend. Retiring
+an RW handle changes its role to historical reader without reopening it or changing
+its access mode. A later switch back can reuse it. If a backend already has an RO
+reader when it becomes current, its new RW handle replaces the RO handle, which
+is then closed. Physical RO handles do not own shared opener resources or scanner
+connections, so existing scanners continue until their own close or handoff.
+Other historical handles are retained until auto closes; there is no idle eviction.
+The current handle is not duplicated in the historical map, and every owned
+handle closes once.
+
+Woodpecker's physical RO adapter retains its LogHandle while opening readers and
+while scanners remain alive. RO Close rejects new readers but defers releasing
+the LogHandle until the last scanner closes. This stops the SDK's background
+cleanup goroutine without interrupting historical scans during RO-to-RW
+replacement. A failed writer open closes the newly acquired LogHandle before
+returning the original error; auto's retry policy is unchanged.
+
+Physical Open runs outside the current-writer mutex and serializes acquisition
+to avoid duplicate writers fencing one another. Waiting for acquisition is
+cancellable, so closing a reader does not wait for another caller's slow Open.
+Latest is rejected before reader creation; there is no Latest-specific switch
+state or retry loop.
 
 ## Append retry and writer lifetime
 
-The WAL adaptor retries ordinary backend errors without a retry-count or elapsed-time
-limit. One logical append keeps its allocated local TimeTick across backend attempts.
+`autowalimpls` retries ordinary backend errors without a retry-count or elapsed-time
+limit. It pins the physical backend and message for the duration of each retry loop. One logical append keeps its allocated local TimeTick across backend attempts.
 A backend attempt can persist a record and lose its response; retry copies are
 handled by the scanner's physical TimeTick deduplication and chunk assembly.
 
@@ -32,11 +76,25 @@ Recovery, rather than the error result, determines which records became durable.
 
 This contract lets interceptors rely on the existing retry and recovery paths;
 they do not need their own Commit retry state machine or a context-carried callback
-to fence the WAL. `appendOneWithRetry` checks the outer append context itself;
+to fence the WAL. `autowalimpls` checks the WAL-owned append context itself;
 a backend `context.Canceled` or `context.DeadlineExceeded` error alone does not
 end the retry loop. Independent per-attempt cancellation/timeouts on a live writer
 are retried. `ErrFenced` still terminates immediately because write authority is lost.
 Tests should cancel the actual WAL lifecycle when exercising final cancellation.
+
+The adaptor records one trace span around each call into `autowalimpls.Append`
+(one per chunk when chunking is enabled), covering its complete retry sequence.
+No error is injected after a successful auto append: interceptors must finish
+their in-memory transitions once persistence succeeds. Backend lost-acknowledgement
+retry tests inject errors in the mocked physical implementation, after recording
+the message. No observation wrapper or callback is passed into auto.
+Auto owns the checkpoint writer from the start of recovery. RecoveryStorage
+selects each linked writer through `SwitchWriterForRecovery`, then writes its new
+RecoveryBarrier through auto; ordinary historical readers never change the writer.
+The builder does not maintain a second handle cache or transfer writers on completion.
+The adaptor directly calls the same auto WAL. Retry helpers are private to
+`autowalimpls.Append`; there is no separate retry wrapper. Test backends use the
+same auto construction path before recovery.
 
 Validation rejected before backend append is a separate case: no record was written,
 so the relevant producer/transaction protocol handles that rejection directly.
@@ -44,5 +102,6 @@ so the relevant producer/transaction protocol handles that rejection directly.
 ## Key Packages
 
 - `pkg/streaming/walimpls/` — `WALImpls` interface, Kafka/Pulsar/RMQ/Woodpecker implementations
-- `internal/streamingnode/server/wal/adaptor/wal_adaptor.go` — logical append context, backend retry and writer fencing
+- `pkg/streaming/walimpls/impls/autowalimpls/retry.go` — physical retries, backoff, retry metrics and logs
+- `internal/streamingnode/server/wal/adaptor/wal_adaptor.go` — logical append context, outer trace and writer fencing
 - `internal/streamingnode/server/wal/adaptor/scanner_adaptor.go` — consumer ordering, physical deduplication and transaction assembly

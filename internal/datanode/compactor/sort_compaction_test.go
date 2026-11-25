@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
@@ -36,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -235,7 +237,7 @@ func (s *SortCompactionTaskSuite) prepareSortCompactionTask() {
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
 
 	// Initialize segment buffer with test data
-	s.initSegBuffer(1000, segmentID)
+	s.initSegBuffer(int(s.task.plan.GetTotalRows()), segmentID)
 	kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
 	s.Require().NoError(err)
 
@@ -333,6 +335,23 @@ func (s *SortCompactionTaskSuite) TestSortCompactionBasic() {
 	s.Empty(segment.Deltalogs)
 	// delete 5 counts
 	s.Equal(int64(995), segment.GetNumOfRows())
+}
+
+func (s *SortCompactionTaskSuite) TestPartitionNamespaceMarksOutputPKSorted() {
+	s.task.plan.TotalRows = 6 // The fixture deletes the first five rows.
+	s.task.plan.Schema.EnableNamespace = true
+	s.task.plan.Schema.Properties = append(s.task.plan.Schema.Properties, &commonpb.KeyValuePair{
+		Key: common.NamespaceModeKey, Value: common.NamespaceModePartition,
+	})
+	s.prepareSortCompactionTask()
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().Len(result.GetSegments(), 1)
+	segment := result.GetSegments()[0]
+	s.EqualValues(1, segment.GetNumOfRows())
+	s.True(segment.GetIsSorted())
+	s.False(segment.GetIsSortedByNamespace())
 }
 
 func (s *SortCompactionTaskSuite) TestSortCompactionWithBM25() {

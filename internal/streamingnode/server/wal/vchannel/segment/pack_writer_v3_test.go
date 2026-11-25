@@ -21,7 +21,9 @@ import (
 	"math"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -29,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
@@ -36,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
@@ -133,7 +137,7 @@ func buildCrashTestInsertMessage(t *testing.T, vchannel string, collectionID, pa
 	require.NoError(t, err)
 	return mutable.WithTimeTick(timeTick).
 		WithLastConfirmedUseMessageID().
-		IntoImmutableMessage(walimplstest.NewTestMessageID(1))
+		IntoImmutableMessage(rmq.NewRmqID(int64(timeTick)))
 }
 
 func crashTestPack(collectionID, partitionID, segmentID int64, vchannel string, timeTick uint64, schema *schemapb.CollectionSchema, insert message.ImmutableMessage) *flushPack {
@@ -292,4 +296,75 @@ func TestFlushInsertBuffer_V3PersistsBM25Statslogs(t *testing.T) {
 	bm25Entry, ok := stats["bm25.102"]
 	require.True(t, ok, "BM25 stats must be registered in the manifest for the BM25 output field")
 	require.NotEmpty(t, bm25Entry.Paths, "BM25 stats must reference a persisted stats blob")
+	sizes := result.PersistedStorage.GetStatistics().GetFieldLogicalSizes()
+	require.EqualValues(t, 1, sizes.GetRowCount())
+	require.EqualValues(t, 11, sizes.GetFields()[101].GetPayloadBytes())
+	require.EqualValues(t, len(sparseData.Contents[0]), sizes.GetFields()[102].GetPayloadBytes())
+}
+
+func TestFieldLogicalSizesSurviveGrowingCheckpointRetryAndRecovery(t *testing.T) {
+	const collectionID, partitionID, segmentID = 1, 2, 3
+	const channel = "v1"
+	ctx := context.Background()
+	cfg, cm := setupV3TestEnv(t)
+	schema := crashTestSchema()
+	base := storage.SegmentManifestBasePath(cfg.GetRootPath(), collectionID, partitionID, segmentID)
+	meta := &streamingpb.SegmentAssignmentMeta{
+		CollectionId: collectionID, PartitionId: partitionID, SegmentId: segmentID, Vchannel: channel,
+		State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING, StorageVersion: storage.StorageV3,
+		PersistedStorage: &streamingpb.L1SegmentPersistedStorage{ManifestPath: packed.MarshalManifestPath(base, packed.ManifestEarliest)},
+	}
+	config := runtimeConfig{
+		packWriter: NewBulkPackWriter(cm, allocator.NewLocalAllocator(100, math.MaxInt64), cfg),
+		lifecycle:  &segmentLifecycleWriter{}, owner: testSegmentOwner{}, runtime: moduleapi.Runtime{Scheduler: &recordingSegmentScheduler{}},
+	}
+	view := newSegmentViewFromMeta(meta, schema, config)
+	var reports []*streamingpb.L1SegmentPersistedStorage
+	publish := mockey.Mock((*segmentLifecycleWriter).PersistGrowingSegment).To(func(_ *segmentLifecycleWriter, _ context.Context, m *streamingpb.SegmentAssignmentMeta, _, _ *msgpb.MsgPosition) error {
+		reports = append(reports, proto.CloneOf(m.PersistedStorage))
+		if len(reports) == 1 {
+			return context.DeadlineExceeded // The first publication lost its acknowledgement.
+		}
+		return nil
+	}).Build()
+	defer publish.UnPatch()
+
+	observe := func(v *SegmentView, tick uint64) bool {
+		raw := buildCrashTestInsertMessage(t, channel, collectionID, partitionID, segmentID, tick, tick)
+		batches, err := BuildInsertBatches(raw)
+		require.NoError(t, err)
+		owner := message.NewOwnedImmutableMessage(raw, nil)
+		defer owner.Release()
+		handle := owner.Clone()
+		defer handle.Release()
+		return v.ObserveInsert(ctx, handle, batches[segmentID])
+	}
+	flush := func(v *SegmentView) error {
+		v.mu.Lock()
+		tick := v.enqueuePendingFlushChunkLocked()
+		v.mu.Unlock()
+		return v.FlushInsertChunk(ctx, tick)
+	}
+	require.True(t, observe(view, 10))
+	require.ErrorIs(t, flush(view), context.DeadlineExceeded)
+	require.Nil(t, view.ConsumeDirtyAndGetSnapshot())
+	require.NoError(t, view.FlushInsertChunk(ctx, 10))
+	require.Len(t, reports, 2)
+	require.True(t, proto.Equal(reports[0], reports[1]))
+	checkpoint := view.ConsumeDirtyAndGetSnapshot()
+	require.EqualValues(t, 1, checkpoint.GetPersistedStorage().GetStatistics().GetFieldLogicalSizes().GetRowCount())
+	wire, err := proto.Marshal(checkpoint)
+	require.NoError(t, err)
+	var recovered streamingpb.SegmentAssignmentMeta
+	require.NoError(t, proto.Unmarshal(wire, &recovered))
+	view = newSegmentViewFromMeta(&recovered, schema, config)
+	require.False(t, observe(view, 10))
+	require.True(t, observe(view, 20))
+	require.NoError(t, flush(view))
+	final := view.ConsumeDirtyAndGetSnapshot()
+	sizes := buildCommitL1SegmentRequest(1, final).GetStats().GetFieldLogicalSizes()
+	require.EqualValues(t, 2, final.GetStat().GetModifiedRows())
+	require.EqualValues(t, 2, sizes.GetRowCount())
+	require.EqualValues(t, 16, sizes.GetFields()[100].GetPayloadBytes())
+	require.EqualValues(t, 64, sizes.GetFields()[101].GetPayloadBytes())
 }

@@ -28,7 +28,7 @@
 #include "segcore/CacheMetricAttribution.h"
 #include "segcore/Utils.h"
 #include "storage/FileManager.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 
 namespace milvus::segcore::storagev2translator {
 
@@ -59,7 +59,7 @@ JsonStatsTranslator::JsonStatsTranslator(
       info_proto_(std::move(info_proto)),
       chunk_manager_(std::move(chunk_manager)),
       fs_(std::move(fs)),
-      use_async_load_(StorageV2AsyncLoadEnabled()),
+      use_async_load_(milvus::storage::LoadAsyncReadEnabled()),
       key_(fmt::format("seginst_{}_seg_{}_jsonstats_{}_build_{}_version_{}",
                        load_info_.segment_instance_uid,
                        load_info_.segment_id,
