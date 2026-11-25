@@ -301,14 +301,14 @@ func CleanupRootCoordDBMetrics(dbName string) {
 	})
 }
 
-func CleanupRootCoordCollectionMetrics(dbName string, collectionName string) {
+func CleanupRootCoordCollectionMetrics(dbName string, name string) {
 	RootCoordNumEntities.DeletePartialMatch(prometheus.Labels{
 		databaseLabelName: dbName,
-		collectionName:    collectionName,
+		collectionName:    name,
 	})
 
-	RootCoordNumEntities.DeletePartialMatch(prometheus.Labels{
+	RootCoordIndexedNumEntities.DeletePartialMatch(prometheus.Labels{
 		databaseLabelName: dbName,
-		collectionName:    collectionName,
+		collectionName:    name,
 	})
 }
