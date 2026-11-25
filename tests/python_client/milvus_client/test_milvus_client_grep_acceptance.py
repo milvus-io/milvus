@@ -21,8 +21,10 @@ from base.client_v2_base import TestMilvusClientV2Base
 from common.common_type import CaseLabel
 from common.grep_common import (
     assert_results,
+    assert_typed_value,
     basic_rows,
     code_rows,
+    context_line,
     detail,
     expected_literal,
     projected_rows,
@@ -322,17 +324,16 @@ class TestMilvusClientGrepValidationIndependent(TestMilvusClientV2Base):
             ("-P -e error", 1100, "unsupported grep option -P"),
             ("-U -e error", 1100, "unsupported grep option -U"),
             ("--multiline -e error", 1100, 'unsupported grep option "--multiline"'),
-            ("-C 0 -e error", 1100, "unsupported grep option -C"),
+            ("-C -1 -e error", 1100, "grep context count must be an unsigned decimal integer"),
+            ("-B abc -e error", 1100, "grep context count must be an unsigned decimal integer"),
+            ("-e error -A", 1101, "grep option -A requires a count"),
             ("--unknown -e error", 1100, 'unsupported grep option "--unknown"'),
             ("--ignore-case=false -e error", 1100, "does not accept a value"),
             ('-e "error', 1100, "unclosed quote"),
-            ("-w -x -e error", 1100, "-w and -x cannot be combined"),
-            ("-x -w -e error", 1100, "-w and -x cannot be combined"),
             ("-e '['", 2042, "invalid regex"),
             ("-e 'foo\nbar'", 1100, "literal LF"),
             ("-e error\x00", 1100, "must not contain NUL"),
             (r"-e 'foo\nbar'", 2042, "pattern requires a line terminator"),
-            ("-e '(?-u)error'", 2042, "inline Unicode disabling is not supported"),
         ],
     )
     def test_argument_errors_and_recovery(self, grep_client, grep_validation_data, args, code, reason):
@@ -601,7 +602,7 @@ class TestMilvusClientGrepValidationIndependent(TestMilvusClientV2Base):
         """TC-L1-07.
         target: Grep rejects unsupported Query combinations instead of ignoring them.
         method: Establish each ordinary operation's result before adding the chain.
-        expected: Count/aggregate/group/order/element/iterator/Search errors are relevant.
+        expected: Count/aggregate/group/order/iterator/Search errors are relevant.
         """
         client, data = grep_client, grep_complex_data
         name, rows = data["name"], data["rows"]
@@ -635,20 +636,14 @@ class TestMilvusClientGrepValidationIndependent(TestMilvusClientV2Base):
                 {"output_fields": ["id"], "order_by_fields": [{"field": "id", "order": "desc"}], "limit": 100},
                 [{"id": 303}, {"id": 202}, {"id": 101}],
             ),
-            (
-                "element filter",
-                {"filter": "element_filter(parts, $[rank] > 0)", "output_fields": ["id"], "limit": 100},
-                [{"id": pk, "offset": 0} for pk in sorted(ids)],
-            ),
         ]
         chain_error = "Query chains do not support count, aggregation, group-by, order-by or iterator"
         for label, parameters, expected in cases:
             options = {"filter": "id >= 0", **parameters}
-            reason = "QueryScan supports only document-level Query" if label == "element filter" else chain_error
             for phase in ("baseline", "grep", "after grep", "query chain", "after query chain"):
                 log.info(f"Grep combination case={label} phase={phase}")
                 if phase == "grep":
-                    with pytest.raises(MilvusException, match=reason) as caught:
+                    with pytest.raises(MilvusException, match=chain_error) as caught:
                         client.grep(
                             collection_name=name,
                             text_field="content",
@@ -661,7 +656,7 @@ class TestMilvusClientGrepValidationIndependent(TestMilvusClientV2Base):
                         )
                     assert type(caught.value) is MilvusException and caught.value.code == 1100, caught.value
                 elif phase == "query chain":
-                    with pytest.raises(MilvusException, match=reason) as caught:
+                    with pytest.raises(MilvusException, match=chain_error) as caught:
                         client.query(
                             collection_name=name,
                             offset=0,
@@ -677,8 +672,6 @@ class TestMilvusClientGrepValidationIndependent(TestMilvusClientV2Base):
                     )
                     if label == "group by":
                         result.sort(key=lambda row: row["repo"])
-                    elif label == "element filter":
-                        result.sort(key=lambda row: row["id"])
                     assert result == expected, (label, phase, result)
 
         for phase in ("baseline", "query chain", "after query chain"):
@@ -872,11 +865,157 @@ class TestMilvusClientGrepSealedAndGrowing(GrepBase):
 
 
 @pytest.mark.xdist_group("GrepShared")
+class TestMilvusClientGrepElementsSealedAndGrowing(GrepBase):
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("dtype", [DataType.VARCHAR, DataType.TEXT], ids=["VARCHAR", "TEXT"])
+    def test_element_filter_context_paging(self, grep_client, request, dtype):
+        """TC-L1-24. Page selected struct elements across Sealed and Growing documents."""
+        client = grep_client
+        rows = []
+        for pk, content, ranks in [
+            (10, "quiet", [90, 90, 90, 90]),
+            (20, "左\nerr\n尾", [1, 80, 2, 90, 70]),
+            (40, "err but no eligible element", [50, 10]),
+            (30, "中 err\nend", [60, 50, 80]),
+            (50, "quiet too", [80]),
+            (60, "err but empty array", []),
+        ]:
+            row = source_row(pk, content)
+            # All element texts contain 'err', including those in the two quiet documents.
+            parts = [{"text": f"err-{pk}-{i}", "rank": rank} for i, rank in enumerate(ranks)]
+            row.update(parts=parts, meta={}, tags=[], score=None)
+            rows.append(row)
+        data = prepare_collection(client, request, rows, dtype=dtype, state="mixed", complex_fields=True)
+        name = data["name"]
+        assert data["sealed_ids"] == {10, 20, 40}
+        source = {row["id"]: row for row in rows}
+        sealed_hit = detail("err", 2, 4, [(0, 3)])
+        growing_hit = detail("中 err", 1, 0, [(4, 7)])
+        matches = {20: [sealed_hit], 30: [growing_hit]}
+        with_context = {
+            20: [context_line("左", 1, 0), sealed_hit, context_line("尾", 3, 8)],
+            30: [growing_hit, context_line("end", 2, 8)],
+        }
+        full = [(20, 1), (20, 3), (20, 4), (30, 0), (30, 2)]
+        for args, limit, offset, page, hits in [
+            ("-e err", 10, 0, full, matches),
+            ("-C 1 -e err", 10, 0, full, with_context),
+            ("-C 1 -e err", 1, 1, [(20, 3)], with_context),
+            ("-C 1 -e err", 2, 2, [(20, 4), (30, 0)], with_context),
+            ("-C 1 -e err", 2, 4, [(30, 2)], with_context),
+            ("-C 1 -e err", 2, 5, [], with_context),
+        ]:
+            log.info(f"Grep element page args={args!r} limit={limit} offset={offset}")
+            expected = [
+                {
+                    "id": pk,
+                    "offset": i,
+                    "content": source[pk]["content"],
+                    "parts": source[pk]["parts"],
+                    "matches": hits[pk],
+                }
+                for pk, i in page
+            ]
+            grep_rows = client.grep(
+                collection_name=name,
+                text_field="content",
+                args=args,
+                match_field="matches",
+                filter="element_filter(parts, $[rank] > 50)",
+                output_fields=["id", "content", "parts"],
+                limit=limit,
+                offset=offset,
+                consistency_level="Strong",
+                timeout=TIMEOUT,
+            )
+            chain = FunctionChain(FunctionChainStage.QUERY_SCAN, name="grep", output_columns=["matches"])
+            chain.grep("content", arguments=args, output="matches")
+            query_rows = client.query(
+                collection_name=name,
+                function_chains=chain,
+                filter="element_filter(parts, $[rank] > 50)",
+                output_fields=["id", "content", "parts"],
+                limit=limit,
+                offset=offset,
+                consistency_level="Strong",
+                timeout=TIMEOUT,
+            )
+            # Preserve the server's row order and repeated primary keys when checking a page.
+            for entry, actual in [("grep", list(grep_rows)), ("query", list(query_rows))]:
+                assert actual == expected, (entry, args, limit, offset, actual, expected)
+                assert_typed_value(actual, expected)
+        confirm_state(client, name, rows, data["sealed_ids"])
+
+
+@pytest.mark.xdist_group("GrepShared")
 class TestMilvusClientGrepSemanticsSealedAndGrowing(GrepBase):
     """When to add tests here: read-only matching, grammar or coordinate contracts.
 
     Fixture: grep_semantic_data, shared VARCHAR/TEXT collections in both states.
     """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_context_line_windows(self, grep_client, grep_semantic_data):
+        """TC-L1-25. Check directional windows, overlap, document boundaries and byte offsets."""
+        client, data = grep_client, grep_semantic_data
+        name, rows = data["name"], data["rows"]
+        confirm_state(client, name, rows, data["sealed_ids"])
+        # In 601 the two windows share an empty line. In 602 both matches touch a document edge.
+        before = context_line("错🙂", 1, 0)
+        double = detail("err err", 2, 8, [(0, 3), (4, 7)])
+        blank = context_line("", 3, 16)
+        single = detail("err", 4, 17, [(0, 3)])
+        phrase = detail("err err", 2, 8, [(0, 7)])
+        after = context_line("尾", 5, 21)
+        first = detail("err", 1, 0, [(0, 3)])
+        middle = context_line("中", 2, 4)
+        last = detail("err", 3, 8, [(0, 3)])
+
+        matches = {601: [double, single], 602: [first, last]}
+        leading = {601: [before, double, blank, single], 602: [first, middle, last]}
+        trailing = {601: [double, blank, single, after], 602: [first, middle, last]}
+        both = {601: [before, double, blank, single, after], 602: [first, middle, last]}
+        for args, expected in [
+            ("-e err", matches),
+            ("-C 0 -e err", matches),
+            ("-A 1 -e err", trailing),
+            ("-B 1 -e err", leading),
+            ("-A 10 -e 'err err'", {601: [phrase, blank, context_line("err", 4, 17), after]}),
+            ("-B 10 -e 'err err'", {601: [before, phrase]}),
+            ("-C 1 -e err", both),
+            ("--after-context=1 --before-context=1 -e err", both),
+            ("-C 1 -A 0 -e err", leading),
+            ("-m 1 -A 1 -e err", {601: [double, blank], 602: [first, middle]}),
+            ("-C 2 -e absent", {}),
+        ]:
+            log.info(f"Grep context args={args!r}")
+            grep_rows = client.grep(
+                collection_name=name,
+                text_field="content",
+                args=args,
+                match_field="matches",
+                filter="id >= 601 and id <= 603",
+                output_fields=["id", "content"],
+                limit=3,
+                offset=0,
+                consistency_level="Strong",
+                timeout=TIMEOUT,
+            )
+            chain = FunctionChain(FunctionChainStage.QUERY_SCAN, name="grep", output_columns=["matches"])
+            chain.grep("content", arguments=args, output="matches")
+            query_rows = client.query(
+                collection_name=name,
+                function_chains=chain,
+                filter="id >= 601 and id <= 603",
+                output_fields=["id", "content"],
+                limit=3,
+                offset=0,
+                consistency_level="Strong",
+                timeout=TIMEOUT,
+            )
+            assert_results(grep_rows, rows, expected, ["id", "content"])
+            assert_results(query_rows, rows, expected, ["id", "content"])
+        confirm_state(client, name, rows, data["sealed_ids"])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_matching_parameters_and_combinations(self, grep_client, grep_semantic_data):
@@ -918,11 +1057,12 @@ class TestMilvusClientGrepSemanticsSealedAndGrowing(GrepBase):
                     "-F -F -e error",
                     "-e error -e error",
                     "-e error --",
+                    "-e '(?-u)error'",
                 ],
                 literal,
             ),
-            (["-w -e error", "--word-regexp --regexp error", "-w -w -e error"], whole_word),
-            (["-x -e error", "--line-regexp --regexp error", "-x -x -e error"], whole_line),
+            (["-w -e error", "--word-regexp --regexp error", "-w -w -e error", "-x -w -e error"], whole_word),
+            (["-x -e error", "--line-regexp --regexp error", "-x -x -e error", "-w -x -e error"], whole_line),
             (["-F -e 'error timeout'", '-F -e "error timeout"'], expected_literal(basic, "error timeout")),
             (["-F -e error -e a.b"], {**literal, 9: dot[9]}),
         ]
@@ -1076,7 +1216,7 @@ class TestMilvusClientGrepSemanticsSealedAndGrowing(GrepBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_null_empty_lines_and_zero_length_matches(self, grep_client, grep_semantic_data):
         """TC-L1-03.
-        target: Empty matches occur only at valid UTF-8 boundaries on real lines.
+        target: Empty matches retain their byte offsets on real lines.
         method: Check explicit empty pattern, anchors and mixed a* spans.
         expected: NULL/empty field never match; no extra line is invented at EOF.
         """
@@ -1095,8 +1235,8 @@ class TestMilvusClientGrepSemanticsSealedAndGrowing(GrepBase):
                 all_samples,
                 {
                     **empty_lines,
-                    305: [detail("é中", 1, 0, [(0, 0), (2, 2), (5, 5)])],
-                    306: [detail("aé", 1, 0, [(0, 0), (1, 1), (3, 3)])],
+                    305: [detail("é中", 1, 0, [(i, i) for i in range(6)])],
+                    306: [detail("aé", 1, 0, [(i, i) for i in range(4)])],
                 },
             ),
             ("-e '^$'", all_samples, empty_lines),
@@ -1110,7 +1250,7 @@ class TestMilvusClientGrepSemanticsSealedAndGrowing(GrepBase):
                 all_samples,
                 {**empty_lines, 305: [detail("é中", 1, 0, [(5, 5)])], 306: [detail("aé", 1, 0, [(3, 3)])]},
             ),
-            ("-e 'a*'", "id == 306", {306: [detail("aé", 1, 0, [(0, 1), (3, 3)])]}),
+            ("-e 'a*'", "id == 306", {306: [detail("aé", 1, 0, [(0, 1), (2, 2), (3, 3)])]}),
         ]
         output_fields = ["id", "content", "repo", "path", "revision"]
         for args, expr, expected in cases:
@@ -3740,6 +3880,7 @@ class TestMilvusClientGrepMaxCountIndependent(GrepBase):
             ("-e error", all_lines),
             ("-m 0 -e error", {}),
             ("-m 1 -e error", one_line),
+            ("-m +1 -e error", one_line),
             ("-m 2 -e error", two_lines),
             ("-m 18446744073709551615 -e error", all_lines),
             ("-im2 -e error", folded_two_lines),
@@ -3787,7 +3928,7 @@ class TestMilvusClientGrepMaxCountIndependent(GrepBase):
             ('-m "" -e error', 1100, f'{invalid_count}, got ""'),
             ("--max-count= -e error", 1100, f'{invalid_count}, got ""'),
             ("-m -1 -e error", 1100, f'{invalid_count}, got "-1"'),
-            ("-m +1 -e error", 1100, f'{invalid_count}, got "+1"'),
+            ("-m ++1 -e error", 1100, f'{invalid_count}, got "++1"'),
             ("-m 1.5 -e error", 1100, f'{invalid_count}, got "1.5"'),
             ("-m abc -e error", 1100, f'{invalid_count}, got "abc"'),
             ("-m 0x10 -e error", 1100, f'{invalid_count}, got "0x10"'),

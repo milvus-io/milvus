@@ -8,6 +8,7 @@ import pytest
 from common.grep_common import (
     assert_results,
     basic_rows,
+    context_line,
     detail,
     expected_literal,
     literal_details,
@@ -25,10 +26,10 @@ from pymilvus.grpc_gen.common_pb2 import SegmentState
         ("", []),
         ("\n", [detail("", 1, 0, [(0, 0)])]),
         ("\n\n", [detail("", 1, 0, [(0, 0)]), detail("", 2, 1, [(0, 0)])]),
-        ("é中\n", [detail("é中", 1, 0, [(0, 0), (2, 2), (5, 5)])]),
+        ("é中\n", [detail("é中", 1, 0, [(0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5)])]),
     ],
 )
-def test_empty_pattern_utf8_boundaries(text, expected):
+def test_empty_pattern_byte_offsets(text, expected):
     assert literal_details(text, "") == expected
 
 
@@ -48,6 +49,27 @@ def test_manually_reviewed_coordinates():
 def test_reviewed_hit_sets():
     assert set(expected_literal(basic_rows(), "error")) == {1, 3, 4, 5, 6, 11, 12}
     assert set(expected_literal(sparse_rows(), "error")) == {128, 255, 256, 383, 384}
+
+
+@pytest.mark.parametrize("mutation", ["extra_spans", "duplicate_context", "wrong_offset", "wrong_type", "missing_type"])
+def test_context_line_response_contract(mutation):
+    rows = [{"id": 1, "content": "错🙂\n\nerr"}]
+    expected = {1: [context_line("", 2, 8), detail("err", 3, 9, [(0, 3)])]}
+    actual = deepcopy(expected[1])
+    response = [{"id": 1, "matches": actual}]
+    assert_results(response, rows, expected, ["id"])
+    if mutation == "extra_spans":
+        actual[0].update(starts=[], ends=[])
+    elif mutation == "duplicate_context":
+        actual.insert(0, deepcopy(actual[0]))
+    elif mutation == "wrong_offset":
+        actual[0]["line_start_offset"] = 3
+    elif mutation == "wrong_type":
+        actual[0]["type"] = "match"
+    else:
+        del actual[1]["type"]
+    with pytest.raises(AssertionError):
+        assert_results(response, rows, expected, ["id"])
 
 
 @pytest.fixture

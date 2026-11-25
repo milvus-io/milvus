@@ -88,6 +88,7 @@ def semantics_rows():
             "hello\nINFO disk",
         ],
         501: ["-C", r"a\b", "foobar", "error timeout"],
+        601: ["错🙂\nerr err\n\nerr\n尾", "err\n中\nerr", "no match"],
     }
     rows = basic_rows()
     for start, values in groups.items():
@@ -130,6 +131,7 @@ def logical_lines(text):
 
 def detail(line, number, offset, spans):
     return {
+        "type": "match",
         "content": line,
         "line_number": number,
         "line_start_offset": offset,
@@ -138,18 +140,19 @@ def detail(line, number, offset, spans):
     }
 
 
+def context_line(line, number, offset):
+    return {"type": "context", "content": line, "line_number": number, "line_start_offset": offset}
+
+
 def literal_details(text, pattern):
-    """Non-overlapping literal matches, including UTF-8 boundary empty spans."""
+    """Non-overlapping literal matches. An empty pattern matches at each byte offset."""
     needle = pattern.encode("utf-8")
     result = []
     for number, offset, line in logical_lines(text):
         raw = line.encode("utf-8")
         spans = []
         if not needle:
-            boundaries = [0]
-            for char in line:
-                boundaries.append(boundaries[-1] + len(char.encode("utf-8")))
-            spans = [(i, i) for i in boundaries]
+            spans = [(i, i) for i in range(len(raw) + 1)]
         else:
             position = 0
             while (start := raw.find(needle, position)) >= 0:
@@ -216,14 +219,14 @@ def assert_results(results, rows, expected, fields, *, count=None, match_field="
             offset, line = lines[hit["line_number"]]
             assert hit["content"] == line
             assert hit["line_start_offset"] == offset
+            if hit["type"] == "context":
+                assert "starts" not in hit and "ends" not in hit
+                continue
             raw = line.encode("utf-8")
             assert len(hit["starts"]) == len(hit["ends"]) > 0
             previous_end = 0
             for start, end in zip(hit["starts"], hit["ends"], strict=True):
                 assert previous_end <= start <= end <= len(raw)
-                # Decoding prefixes checks boundaries, even for empty spans.
-                raw[:start].decode("utf-8")
-                raw[:end].decode("utf-8")
                 assert raw[start:end] == field_bytes[offset + start : offset + end]
                 previous_end = end
     return by_id
