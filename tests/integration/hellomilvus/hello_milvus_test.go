@@ -19,6 +19,7 @@ package hellomilvus
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -43,6 +44,10 @@ type HelloMilvusSuite struct {
 	vecType    schemapb.DataType
 }
 
+func (s *HelloMilvusSuite) newCollectionName() string {
+	return strings.ReplaceAll(s.T().Name(), "/", "_") + "_" + funcutil.RandomString(16)
+}
+
 func (s *HelloMilvusSuite) run() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -54,7 +59,7 @@ func (s *HelloMilvusSuite) run() {
 		rowNum = 3000
 	)
 
-	collectionName := "TestHelloMilvus" + funcutil.GenRandomStr()
+	collectionName := s.newCollectionName()
 
 	schema := integration.ConstructSchemaOfVecDataType(collectionName, dim, true, s.vecType)
 	marshaledSchema, err := proto.Marshal(schema)

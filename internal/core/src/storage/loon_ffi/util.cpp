@@ -379,12 +379,6 @@ CheckCredentialBrokerEndpoint(const std::string& endpoint) {
     return arrow::Status::OK();
 }
 
-bool
-IsCredentialBrokerEndpoint(const std::string& endpoint) {
-    auto normalized = NormalizeBrokerEndpoint(endpoint);
-    return normalized.ok() && CheckCredentialBrokerEndpoint(*normalized).ok();
-}
-
 std::shared_ptr<milvus_storage::api::Properties>
 MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
     auto properties_map = std::make_shared<milvus_storage::api::Properties>();
@@ -1299,7 +1293,7 @@ InjectExternalSpecProperties(
 
     // Target impersonation and Broker tokens have the same endpoint contract
     // in Go admission and native readers, including persisted specs. Plain IAM
-    // retains GcpCredentialRegistry's operator-trusted endpoint delivery policy.
+    // retains storage's operator-trusted endpoint policy.
     if (spec_cloud_provider == "gcp" &&
         (has_target || !broker_endpoint.empty())) {
         arrow::util::Uri endpoint;

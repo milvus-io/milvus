@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/tests/integration"
@@ -40,9 +39,8 @@ func (s *HelloMilvusSuite) TestJsonEnableDynamicSchema() {
 	c := s.Cluster
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
-	prefix := "TestHelloMilvus"
 	dbName := ""
-	collectionName := prefix + funcutil.GenRandomStr()
+	collectionName := s.newCollectionName()
 	dim := 128
 	rowNum := 100
 
@@ -123,9 +121,8 @@ func (s *HelloMilvusSuite) TestJSON_InsertWithoutDynamicData() {
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
 
-	prefix := "TestHelloMilvus"
 	dbName := ""
-	collectionName := prefix + funcutil.GenRandomStr()
+	collectionName := s.newCollectionName()
 	dim := 128
 	rowNum := 100
 
@@ -213,9 +210,8 @@ func (s *HelloMilvusSuite) TestJSON_DynamicSchemaWithJSON() {
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
 
-	prefix := "TestHelloMilvus"
 	dbName := ""
-	collectionName := prefix + funcutil.GenRandomStr()
+	collectionName := s.newCollectionName()
 	dim := 128
 	rowNum := 100
 
@@ -906,9 +902,8 @@ func (s *HelloMilvusSuite) TestJsonWithEscapeString() {
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
 
-	prefix := "TestHelloMilvus"
 	dbName := ""
-	collectionName := prefix + funcutil.GenRandomStr()
+	collectionName := s.newCollectionName()
 	dim := 128
 	rowNum := 100
 
@@ -1025,9 +1020,8 @@ func (s *HelloMilvusSuite) TestJsonContains() {
 	c := s.Cluster
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
-	prefix := "TestHelloMilvus"
 	dbName := ""
-	collectionName := prefix + funcutil.GenRandomStr()
+	collectionName := s.newCollectionName()
 	dim := 128
 	rowNum := 100
 

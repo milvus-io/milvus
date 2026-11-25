@@ -1254,6 +1254,13 @@ common:
       # Set to 0 to disable the rate ceiling. This is not a strict aggregate limit across all filesystem instances.
       # The default matches the milvus-storage default.
       maxRate: 5000
+    externalVector:
+      # Policy for parent-valid external dense-vector rows containing a mix of valid and null child elements.
+      # Options: error, null. error rejects the row as malformed input; null promotes the whole row to a row-level null when the field is nullable.
+      # Rows whose child elements are all null are always promoted to row-level null for nullable fields, regardless of this setting.
+      partialNullPolicy: error
+    externalSparseVector:
+      conversionMemoryLimit: 268435456 # Positive byte budget for estimated additional buffers per external sparse-vector normalization call. Includes output, Arrow offsets/validity, sorting and encoding scratch; excludes source data, allocator overhead and other concurrent calls. Ordered Binary arrays reused without conversion are exempt. Requires a restart.
     talon:
       mode: 0 # Remote milvus-storage read routing within enabledStages: 0 disables Talon, 1 routes all reads through Talon, and 2 routes only small reads. Requires a restart.
       enabledStages: all # Comma-separated Talon read stages: all preserves unrestricted routing; load_open enables QueryNode milvus-storage reader-open metadata, including footers; manifest enables QueryNode segment-manifest reads during load. Combine load_open,manifest to enable both. Other reads use origin storage when stages are restricted. Cannot combine all with other stages. Requires a restart.
@@ -1262,13 +1269,6 @@ common:
       coordinator:  # Talon coordinator address (host:port), required when Talon mode is 1 or 2. Requires a restart.
       blockSize: 268435456 # Talon block size in bytes; must be greater than 0. Requires a restart.
       maxIdlePerAddr: 256 # Maximum idle TCP connections per peer in each Talon pool. Must be greater than 0; does not limit active connections. Requires a restart.
-    externalVector:
-      # Policy for parent-valid external dense-vector rows containing a mix of valid and null child elements.
-      # Options: error, null. error rejects the row as malformed input; null promotes the whole row to a row-level null when the field is nullable.
-      # Rows whose child elements are all null are always promoted to row-level null for nullable fields, regardless of this setting.
-      partialNullPolicy: error
-    externalSparseVector:
-      conversionMemoryLimit: 268435456 # Positive byte budget for estimated additional buffers per external sparse-vector normalization call. Includes output, Arrow offsets/validity, sorting and encoding scratch; excludes source data, allocator overhead and other concurrent calls. Ordered Binary arrays reused without conversion are exempt. Requires a restart.
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.

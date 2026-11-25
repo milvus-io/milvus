@@ -991,7 +991,10 @@ TEST(StorageConfig, PackedWriterPreservesChecksum) {
                                                        c_config,
                                                        &writer,
                                                        nullptr);
-        EXPECT_NE(status.error_code, Success);
+        EXPECT_EQ(status.error_code, DataFormatBroken) << status.error_msg;
+        ASSERT_NE(status.error_msg, nullptr);
+        EXPECT_NE(std::strstr(status.error_msg, "released ArrowSchema"),
+                  nullptr);
         FreeErrorStatus(status);
         EXPECT_EQ(writer, nullptr);
 

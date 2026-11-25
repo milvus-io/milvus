@@ -46,6 +46,7 @@
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
 #include "milvus-storage/lob_column/lob_reference.h"
+#include "milvus-storage/filesystem/gcp/gcp_broker_credential_provider.h"
 #include "milvus-storage/filesystem/gcp/gcp_credential_provider.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
@@ -4674,8 +4675,10 @@ TEST(InjectExtfsAllowlist, GcpBrokerTargetAndEndpoint) {
     EXPECT_EQ(config->talon_mode, milvus_storage::TalonMode::Full);
     auto provider = milvus_storage::BuildGcpProviderFromConfig(*config);
     ASSERT_TRUE(provider.ok()) << provider.status();
-    EXPECT_TRUE((*provider)->IssuesBearerToken());
-    EXPECT_EQ((*provider)->Identity().find("broker:"), 0u);
+    EXPECT_TRUE((*provider)->GetAWSCredentials().IsEmpty());
+    EXPECT_NE(dynamic_cast<milvus_storage::GcpBrokerCredentialProvider*>(
+                  provider->get()),
+              nullptr);
 
     auto reject = [&](const nlohmann::json& spec) {
         milvus_storage::api::Properties denied;
@@ -4760,10 +4763,14 @@ TEST(InjectExtfsAllowlist, GcpTargetServiceAccountWithOptionalIam) {
         EXPECT_EQ(config->access_key_id, "");
         EXPECT_EQ(config->access_key_value, "");
         EXPECT_EQ(config->talon_mode, milvus_storage::TalonMode::Disabled);
+        EXPECT_EQ(config->gcp_target_service_account, target);
+        EXPECT_TRUE(config->credential_endpoint.empty());
         auto provider = milvus_storage::BuildGcpProviderFromConfig(*config);
         ASSERT_TRUE(provider.ok()) << provider.status();
-        EXPECT_TRUE((*provider)->IssuesBearerToken());
-        EXPECT_EQ((*provider)->Identity(), "impersonate:" + target);
+        EXPECT_TRUE((*provider)->GetAWSCredentials().IsEmpty());
+        EXPECT_EQ(dynamic_cast<milvus_storage::GcpBrokerCredentialProvider*>(
+                      provider->get()),
+                  nullptr);
     }
 }
 
@@ -4936,8 +4943,10 @@ TEST(InjectExtfsAllowlist, GcpBrokerIamProviderAndValidation) {
     EXPECT_EQ(config->talon_mode, milvus_storage::TalonMode::Disabled);
     auto provider = milvus_storage::BuildGcpProviderFromConfig(*config);
     ASSERT_TRUE(provider.ok()) << provider.status();
-    EXPECT_TRUE((*provider)->IssuesBearerToken());
-    EXPECT_EQ((*provider)->Identity(), "broker-iam:" + endpoint);
+    EXPECT_TRUE((*provider)->GetAWSCredentials().IsEmpty());
+    EXPECT_NE(dynamic_cast<milvus_storage::GcpBrokerCredentialProvider*>(
+                  provider->get()),
+              nullptr);
 
     // Without a Broker endpoint the same IAM flag still selects node IAM.
     auto node_config = *config;
@@ -4945,7 +4954,10 @@ TEST(InjectExtfsAllowlist, GcpBrokerIamProviderAndValidation) {
     auto node_provider =
         milvus_storage::BuildGcpProviderFromConfig(node_config);
     ASSERT_TRUE(node_provider.ok()) << node_provider.status();
-    EXPECT_EQ((*node_provider)->Identity(), "iam");
+    EXPECT_TRUE((*node_provider)->GetAWSCredentials().IsEmpty());
+    EXPECT_EQ(dynamic_cast<milvus_storage::GcpBrokerCredentialProvider*>(
+                  node_provider->get()),
+              nullptr);
 
     auto reject = [&](const nlohmann::json& spec) {
         milvus_storage::api::Properties denied;
