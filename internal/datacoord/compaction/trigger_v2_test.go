@@ -111,7 +111,7 @@ func TestCreateCompactionIDBlockRejectsTooLargeBatch(t *testing.T) {
 	defer pt.Reset(pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key)
 
 	mockAlloc := allocator.NewMockAllocator(t)
-	_, err := createCompactionIDBlock(mockAlloc, math.MaxUint32/10+1, 1)
+	_, err := createCompactionIDBlock(context.Background(), mockAlloc, math.MaxUint32/10+1, 1)
 	if err == nil {
 		t.Fatal("expected too-large allocation error")
 	}
@@ -128,7 +128,7 @@ func TestCreateCompactionIDBlockUsesIDExpansionFactor(t *testing.T) {
 	mockAlloc := allocator.NewMockAllocator(t)
 	mockAlloc.EXPECT().AllocN(int64(7)).Return(int64(100), int64(107), nil).Once()
 
-	block, err := createCompactionIDBlock(mockAlloc, 3, 1)
+	block, err := createCompactionIDBlock(context.Background(), mockAlloc, 3, 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

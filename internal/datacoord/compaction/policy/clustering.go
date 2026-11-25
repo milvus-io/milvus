@@ -70,6 +70,9 @@ func (policy *ClusteringCompactionPolicy) Trigger(ctx context.Context) (map[Comp
 	events := make(map[CompactionTriggerType][]view.CompactionView, 0)
 	views := make([]view.CompactionView, 0)
 	for _, collection := range collections {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if collection == nil {
 			continue
 		}
@@ -84,6 +87,9 @@ func (policy *ClusteringCompactionPolicy) Trigger(ctx context.Context) (map[Comp
 		}
 		collectionViews, _, err := policy.TriggerOneCollection(ctx, collection.ID, false)
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
 			// not throw this error because no need to fail because of one collection
 			mlog.Warn(ctx, "fail to trigger collection clustering compaction", mlog.FieldCollectionID(collection.ID), mlog.Err(err))
 		}

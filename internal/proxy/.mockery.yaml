@@ -31,3 +31,8 @@ packages:
         config:
           filename: mock_shardclient_manager.go
           mockname: MockShardClientManager
+  github.com/milvus-io/milvus/internal/proxy/privilege:
+    interfaces:
+      PrivilegeCache:
+        config:
+          filename: mock_cache.go

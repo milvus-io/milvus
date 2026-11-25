@@ -39,14 +39,14 @@ import (
 )
 
 func AddRootUserToAdminRole() {
-	err := privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheAddUserToRole, OpKey: funcutil.EncodeUserRoleCache("root", "admin")})
+	err := privilege.GetPrivilegeCache().RefreshPolicyInfo(context.Background(), typeutil.CacheOp{OpType: typeutil.CacheAddUserToRole, OpKey: funcutil.EncodeUserRoleCache("root", "admin")})
 	if err != nil {
 		panic(err)
 	}
 }
 
 func RemoveRootUserFromAdminRole() {
-	err := privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRemoveUserFromRole, OpKey: funcutil.EncodeUserRoleCache("root", "admin")})
+	err := privilege.GetPrivilegeCache().RefreshPolicyInfo(context.Background(), typeutil.CacheOp{OpType: typeutil.CacheRemoveUserFromRole, OpKey: funcutil.EncodeUserRoleCache("root", "admin")})
 	if err != nil {
 		panic(err)
 	}
