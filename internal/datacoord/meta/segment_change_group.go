@@ -223,6 +223,10 @@ func (m *Meta) PublishGroup(ctx context.Context, g *model.SegmentChangeGroup, al
 			m.groupMu.RUnlock()
 			return err
 		}
+		if groupWritesMemberCommitTS(g) {
+			// Project the cursor that UpdateCommitTimestamp installs in the same transaction.
+			l.TransformStartAfterTimetick = commitTs
+		}
 		loadable = append(loadable, l)
 	}
 	m.groupMu.RUnlock()

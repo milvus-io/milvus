@@ -34,6 +34,21 @@ func GroupHasCommittedImportFence(g *model.SegmentChangeGroup) bool {
 	return groupHasCommittedImportFence(g)
 }
 
+// StagedImportJobID identifies members whose publication still awaits their import job.
+func (m *Meta) StagedImportJobID(segmentID int64) (int64, bool) {
+	m.groupMu.RLock()
+	defer m.groupMu.RUnlock()
+	groupID, ok := m.stagedSegmentToGroup[segmentID]
+	if !ok {
+		return 0, false
+	}
+	group := m.segmentChangeGroups[groupID]
+	if !group.AwaitCommitFence {
+		return 0, false
+	}
+	return group.SourceJobID, true
+}
+
 func (m *Meta) GetProducerChangeGroup(source model.SegmentChangeSource, jobID int64, channel string) *model.SegmentChangeGroup {
 	return m.ProducerChangeGroup(source, jobID, channel)
 }

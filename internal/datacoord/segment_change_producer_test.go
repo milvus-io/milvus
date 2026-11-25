@@ -26,6 +26,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction"
 	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
@@ -35,12 +36,14 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/partitionstats"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -187,13 +190,23 @@ func TestSegmentChangeImportCommittedFenceCannotBeAbandoned(t *testing.T) {
 func TestSegmentChangeImportCallbackPublishesPreparedGroups(t *testing.T) {
 	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
 	callbacks, _, result := newImportCommitCallbackTest(t)
-	m, _, _ := seedMixProducer(t)
-	m.DataViewManager = nil
+	m, err := meta.NewMemoryMeta(t)
+	require.NoError(t, err)
+	manager := dataview.NewManager(m.Catalog.(dataview.Catalog), nil, dataview.WithPendingTransformProjector(func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
+		return pendingTransformBounds(ctx, m, callbacks.importMeta, view)
+	}))
+	_, err = manager.OnCreateCollection(t.Context(), dataview.CreateCollectionDataViewEvent{
+		CollectionID: 100, VChannels: []string{"v1", "v2"}, TransformStarts: map[string]uint64{"v1": 50, "v2": 60},
+	})
+	require.NoError(t, err)
+	m.DataViewManager = manager
+	callbacks.dataViewManager = manager
 	m.AddCollection(&meta.CollectionInfo{ID: 100, Schema: readinessVectorSchema(), VChannelNames: []string{"v1", "v2"}})
 	for id, channel := range map[int64]string{10: "v1", 11: "v1", 20: "v2"} {
 		require.NoError(t, m.AddSegment(t.Context(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: id, CollectionID: 100, PartitionID: 1, InsertChannel: channel, State: commonpb.SegmentState_Flushed, IsImporting: true, IsSorted: true, NumOfRows: 10,
-			Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: id, TimestampTo: 100}}}},
+			CompactionFrom: []int64{id + 100},
+			Binlogs:        []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: id, TimestampTo: 100}}}},
 		})))
 	}
 	callbacks.meta = m
@@ -207,12 +220,35 @@ func TestSegmentChangeImportCallbackPublishesPreparedGroups(t *testing.T) {
 		require.True(t, g.AwaitCommitFence)
 		require.Zero(t, g.CommitTS)
 	}
+	ref, err := manager.Latest(t.Context(), 100)
+	require.NoError(t, err)
+	defer ref.Deref()
+	view := ref.DataView()
+	bounds, err := pendingTransformBounds(t.Context(), m, callbacks.importMeta, view)
+	require.NoError(t, err)
+	require.Equal(t, map[string]uint64{"v1": 50, "v2": 60}, bounds)
+	require.NoError(t, callbacks.importMeta.UpdateJob(t.Context(), 1, func(job bulkimport.ImportJob) {
+		job.(*bulkimport.Job).TransformCommitTimeticks = map[string]uint64{"v1": 200}
+	}))
+	bounds, err = pendingTransformBounds(t.Context(), m, callbacks.importMeta, view)
+	require.NoError(t, err)
+	require.Equal(t, map[string]uint64{"v1": 200, "v2": 60}, bounds)
+	m.MetaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{"v1": {Timestamp: 500}, "v2": {Timestamp: 600}})
+	_, err = transformFrontierBounds(t.Context(), m, callbacks.importMeta, 100)
+	require.ErrorIs(t, err, merr.ErrServiceNotReady)
+	require.NoError(t, callbacks.importMeta.UpdateJob(t.Context(), 1, func(job bulkimport.ImportJob) {
+		job.(*bulkimport.Job).TransformCommitTimeticks = map[string]uint64{"v1": 200, "v2": 300}
+	}))
+	bounds, err = transformFrontierBounds(t.Context(), m, callbacks.importMeta, 100)
+	require.NoError(t, err)
+	require.Equal(t, map[string]uint64{"v1": 200, "v2": 300}, bounds)
 	require.NoError(t, Params.Save(Params.DataCoordCfg.SegmentChangeEnabled.Key, "false"))
 	require.NoError(t, callbacks.ddl.CommitImportV2AckCallback(t.Context(), result),
 		"READY import groups publish in the ack callback without an inspector tick")
 	require.Equal(t, internalpb.ImportJobState_Completed, callbacks.importMeta.GetJob(t.Context(), 1).GetState())
 	for id, ts := range map[int64]uint64{10: 200, 11: 200, 20: 300} {
 		require.Equal(t, ts, m.GetSegment(t.Context(), id).GetCommitTimestamp())
+		require.Equal(t, ts, m.GetSegment(t.Context(), id).GetTransformStartAfterTimetick())
 		require.False(t, m.GetSegment(t.Context(), id).GetIsInvisible())
 	}
 }

@@ -206,6 +206,12 @@ func TestPublishGroup_ImportSetsCommitTS(t *testing.T) {
 	require.NoError(t, err)
 	ctx := context.Background()
 
+	manager := dataview.NewManager(m.Catalog.(dataview.Catalog), nil)
+	m.DataViewManager = manager
+	_, err = manager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{
+		CollectionID: 10, VChannels: []string{"ch-1"}, TransformStarts: map[string]uint64{"ch-1": 1},
+	})
+	require.NoError(t, err)
 	ready := seedPublishMeta(t, m, model.SegmentChangeSourceImportJob)
 	alloc := meta.NewMockAllocator(t)
 	require.NoError(t, m.PublishGroup(ctx, ready, alloc))
@@ -217,6 +223,12 @@ func TestPublishGroup_ImportSetsCommitTS(t *testing.T) {
 	// member binlogs carry TimestampTo=0 so the commit fence passes.
 	require.NotZero(t, member.GetCommitTimestamp(), "import rows become officially present at commit_ts")
 	require.Equal(t, uint64(1), member.GetCommitTimestamp())
+	ref, err := manager.Latest(ctx, 10)
+	require.NoError(t, err)
+	defer ref.Deref()
+	partition := ref.DataView().GetShards()[0].GetPartitions()[0]
+	require.Equal(t, []int64{1001}, partition.GetSegmentIds())
+	require.Equal(t, []uint64{member.GetCommitTimestamp()}, partition.GetSegmentTransformStartAfterTimeticks())
 }
 
 func TestPublishGroup_RejectsNonReady(t *testing.T) {

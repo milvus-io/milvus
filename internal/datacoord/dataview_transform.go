@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"slices"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
@@ -28,6 +29,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+// Staging clears IsImporting before publication. Until then the owning job's
+// per-channel pin covers the member, including any private sort replacement.
+type pinnedImportJobs map[int64][]string
+
+func (jobs pinnedImportJobs) covers(metadata *meta.Meta, segment *meta.SegmentInfo) bool {
+	if len(jobs) == 0 || !segment.GetIsInvisible() {
+		return false
+	}
+	jobID, staged := metadata.StagedImportJobID(segment.GetID())
+	return staged && slices.Contains(jobs[jobID], segment.GetInsertChannel())
+}
 
 // transformFrontierBounds is only used to migrate legacy snapshots without W/A.
 // It captures K before any metadata projection. Including
@@ -49,9 +62,11 @@ func transformFrontierBounds(ctx context.Context, metadata *meta.Meta, imports b
 	}
 	// Read task pins before Segment metadata. A completed task has already
 	// persisted all Segment cursors, so its removal cannot create a gap.
+	jobs := make(pinnedImportJobs)
 	if imports != nil {
 		for _, job := range imports.GetJobBy(ctx, bulkimport.WithCollectionID(collectionID), bulkimport.WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed)) {
 			stored := job.(*bulkimport.Job)
+			jobs[job.GetJobID()] = job.GetVchannels()
 			for _, channel := range job.GetVchannels() {
 				start := stored.GetTransformCommitTimeticks()[channel]
 				if start == 0 {
@@ -62,7 +77,7 @@ func transformFrontierBounds(ctx context.Context, metadata *meta.Meta, imports b
 		}
 	}
 	for _, segment := range metadata.SelectSegments(ctx, meta.WithCollection(collectionID)) {
-		if segment.GetLevel() == datapb.SegmentLevel_L0 || !meta.IsSegmentHealthy(segment) {
+		if segment.GetLevel() == datapb.SegmentLevel_L0 || !meta.IsSegmentHealthy(segment) || jobs.covers(metadata, segment) {
 			continue
 		}
 		start := meta.SegmentTransformStart(segment)
@@ -109,8 +124,10 @@ func pendingTransformBounds(ctx context.Context, metadata *meta.Meta, imports bu
 			bounds[channel] = start
 		}
 	}
+	jobs := make(pinnedImportJobs)
 	if imports != nil {
 		for _, job := range imports.GetJobBy(ctx, bulkimport.WithCollectionID(view.GetCollectionId()), bulkimport.WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed)) {
+			jobs[job.GetJobID()] = job.GetVchannels()
 			for _, channel := range job.GetVchannels() {
 				start := job.(*bulkimport.Job).GetTransformCommitTimeticks()[channel]
 				if start == 0 {
@@ -137,10 +154,9 @@ func pendingTransformBounds(ctx context.Context, metadata *meta.Meta, imports bu
 		if _, ok := selected[segment.GetID()]; ok || segment.GetLevel() == datapb.SegmentLevel_L0 || !meta.IsSegmentHealthy(segment) {
 			continue
 		}
-		if segment.GetIsImporting() {
-			// ImportJob owns the constraint until commit installs the exact
-			// Segment cursor and clears IsImporting. Failed-job leftovers cannot
-			// become visible; they must not block other commits either.
+		if segment.GetIsImporting() || jobs.covers(metadata, segment) {
+			// The active job pins this channel until publication installs the
+			// segment cursor. Failed-job importing leftovers cannot become visible.
 			continue
 		}
 		start := meta.SegmentTransformStart(segment)
