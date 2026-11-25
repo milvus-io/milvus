@@ -70,9 +70,12 @@ if ( NOT knowhere_POPULATED )
                       ${knowhere_BINARY_DIR} )
 endif()
 
-# Install the runtime alongside libknowhere.so. Both fetched and preinstalled
-# SVS packages place their config under lib/cmake/svs_runtime.
 if ( WITH_SVS )
+    # SVS bundles its own fmt headers. Prefer the headers of the fmt library linked by Milvus.
+    target_include_directories(faiss_svs SYSTEM BEFORE INTERFACE
+            "$<TARGET_PROPERTY:fmt::fmt,INTERFACE_INCLUDE_DIRECTORIES>")
+
+    # Both fetched and preinstalled packages provide their config under lib/cmake/svs_runtime.
     get_directory_property(_SVS_CONFIG_DIR DIRECTORY "${knowhere_SOURCE_DIR}" DEFINITION svs_runtime_DIR)
     file(GLOB _SVS_RUNTIME_LIBS "${_SVS_CONFIG_DIR}/../../libsvs_runtime.so*")
     if ( NOT _SVS_RUNTIME_LIBS )
