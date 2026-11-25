@@ -819,3 +819,20 @@ TEST_F(SchemaTest, OrdinaryStructProjectionSelectionAndCopy) {
     EXPECT_TRUE(
         inner->GetOrdinaryStructProjections(inner->get_field_ids()).empty());
 }
+
+// Go's encoding/json reads a lone "Format" as format. A spec with two keys that
+// fold to format is invalid, so it is not a milvus-table spec.
+TEST(SchemaExternalSpec, IsMilvusTableExternalSpecReadsFormatLikeGo) {
+    EXPECT_TRUE(IsMilvusTableExternalSpec(R"({"format":"milvus-table"})"));
+    EXPECT_TRUE(IsMilvusTableExternalSpec(R"({"Format":"milvus-table"})"));
+    EXPECT_TRUE(IsMilvusTableExternalSpec(R"({"\u0066ormat":"milvus-table"})"));
+    EXPECT_FALSE(IsMilvusTableExternalSpec(R"({"format":"parquet"})"));
+    EXPECT_FALSE(IsMilvusTableExternalSpec(R"({"extfs":{}})"));
+    EXPECT_FALSE(IsMilvusTableExternalSpec(
+        R"({"format":"parquet","Format":"milvus-table"})"));
+    EXPECT_FALSE(IsMilvusTableExternalSpec(
+        R"({"Format":"milvus-table","FORMAT":"milvus-table"})"));
+    EXPECT_FALSE(IsMilvusTableExternalSpec(R"({"format":null})"));
+    EXPECT_FALSE(IsMilvusTableExternalSpec("[]"));
+    EXPECT_FALSE(IsMilvusTableExternalSpec(""));
+}

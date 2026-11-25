@@ -323,15 +323,22 @@ func RedactExternalSource(source string) string {
 // RedactExternalSpecForLog preserves approved top-level metadata while
 // replacing the complete extfs authentication/configuration object. Unknown
 // top-level fields are dropped because future extensions may carry secrets.
+// A key that encoding/json reads as an ExternalSpec field, such as a lone
+// "EXTFS", is handled under the field's name. A spec that sets one key twice
+// (see specutil.CheckSpecKeys) returns "<redacted>".
 func RedactExternalSpecForLog(specStr string) string {
 	if specStr == "" {
 		return ""
+	}
+	if specutil.CheckSpecKeys(specStr) != nil {
+		return "<redacted>"
 	}
 
 	var spec map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(specStr), &spec); err != nil {
 		return "<redacted>"
 	}
+	canonicalizeSpecKeys(spec)
 
 	redacted := make(map[string]json.RawMessage, 4)
 	for _, key := range []string{"format", "columns", "snapshot_id"} {
@@ -901,18 +908,25 @@ var awsFamilyScheme = map[string]bool{
 // RedactExternalSpec returns a credential-redacted representation of a
 // validated external spec for user-visible responses. Known secret extfs
 // values (see secretExtfsKeys) are replaced with "***", while unknown fields
-// are preserved as extension metadata. Because unknown pre-validation fields
-// may themselves be sensitive, external-collection request logging uses
-// RedactExternalSpecForLog. On parse failure this returns "<invalid spec>"
-// rather than the raw input.
+// are preserved as extension metadata. A key that encoding/json reads as an
+// ExternalSpec field is shown under the field's name, so the secrets of a lone
+// "EXTFS" are redacted too. Because unknown pre-validation fields may
+// themselves be sensitive, external-collection request logging uses
+// RedactExternalSpecForLog. On parse failure, or for a spec that sets one key
+// twice (see specutil.CheckSpecKeys), this returns "<invalid spec>" rather than
+// the raw input.
 func RedactExternalSpec(specStr string) string {
 	if specStr == "" {
 		return ""
+	}
+	if specutil.CheckSpecKeys(specStr) != nil {
+		return "<invalid spec>"
 	}
 	var spec map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(specStr), &spec); err != nil {
 		return "<invalid spec>"
 	}
+	canonicalizeSpecKeys(spec)
 	if err := normalizeInt64Field(spec, "snapshot_id"); err != nil {
 		return "<invalid spec>"
 	}
@@ -924,6 +938,18 @@ func RedactExternalSpec(specStr string) string {
 		return "<marshal error>"
 	}
 	return string(out)
+}
+
+// canonicalizeSpecKeys renames each top-level key that encoding/json reads as
+// an ExternalSpec field to the field's name. The spec must pass
+// specutil.CheckSpecKeys, so no two keys share a name.
+func canonicalizeSpecKeys(spec map[string]json.RawMessage) {
+	for key, value := range spec {
+		if name := specutil.CanonicalSpecKey(key); name != key {
+			delete(spec, key)
+			spec[name] = value
+		}
+	}
 }
 
 func normalizeInt64Field(spec map[string]json.RawMessage, field string) error {
