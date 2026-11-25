@@ -460,14 +460,15 @@ func encodeSearchIterCursor(bound float32, pkType schemapb.DataType, hasPK bool,
 	return searchIteratorCursorVersion + ":" + base64.RawStdEncoding.EncodeToString(buf)
 }
 
-// decodeSearchIterCursor parses a cursor token produced by encodeSearchIterCursor.
-// Returns ok=false for legacy UUID tokens and malformed input.
-func decodeSearchIterCursor(token string) (bound float32, pkType schemapb.DataType, hasPK bool, pkBytes []byte, elemIdx *int32, ok bool) {
+// decodeSearchIterCursor parses an opaque cursor returned in
+// SearchIteratorV2Results.Cursor and echoed via SearchIterCursorKey.
+// Returns ok=false for malformed input.
+func decodeSearchIterCursor(cursor string) (bound float32, pkType schemapb.DataType, hasPK bool, pkBytes []byte, elemIdx *int32, ok bool) {
 	prefix := searchIteratorCursorVersion + ":"
-	if !strings.HasPrefix(token, prefix) {
+	if !strings.HasPrefix(cursor, prefix) {
 		return 0, 0, false, nil, nil, false
 	}
-	raw, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(token, prefix))
+	raw, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(cursor, prefix))
 	if err != nil || len(raw) < 6 {
 		return 0, 0, false, nil, nil, false
 	}
@@ -495,14 +496,10 @@ func decodeSearchIterCursor(token string) (bound float32, pkType schemapb.DataTy
 	return bound, pkType, hasPK, pkBytes, elemIdx, true
 }
 
-// isValidSearchIterToken accepts both legacy UUID session tokens and cursor
-// tokens produced by this proxy version.
+// isValidSearchIterToken checks whether token is a valid session UUID.
 func isValidSearchIterToken(token string) bool {
-	if _, err := uuid.Parse(token); err == nil {
-		return true
-	}
-	_, _, _, _, _, ok := decodeSearchIterCursor(token)
-	return ok
+	_, err := uuid.Parse(token)
+	return err == nil
 }
 
 // int64ToBigEndianBytes encodes an int64 as 8-byte big-endian, matching the
@@ -620,11 +617,16 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 		planIteratorV2Info.LastBound = &lastBoundFloat32 // escape pointer
 	}
 
-	// Decode the cursor token returned by the previous page. When present it
-	// carries the authoritative (last_bound, last_primary_key[, last_element_index])
-	// continuation, so rows/elements tied at the page-boundary distance are not
-	// skipped or repeated.
-	if bound, pkType, hasPK, pkBytes, elemIdx, ok := decodeSearchIterCursor(token); ok {
+	// Decode the cursor returned by the previous page when the SDK forwards it.
+	// Unlike search_iter_id (which many SDKs cache once on page 1 and keep
+	// constant), search_iter_cursor is updated per page and carries exact
+	// (last_bound, last_primary_key[, last_element_index]) tie state.
+	cursor, _ := funcutil.GetAttrByKeyFromRepeatedKV(SearchIterCursorKey, searchParamsPair)
+	if cursor != "" {
+		bound, pkType, hasPK, pkBytes, elemIdx, ok := decodeSearchIterCursor(cursor)
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("invalid cursor format")
+		}
 		planIteratorV2Info.LastBound = &bound
 		if hasPK {
 			planIteratorV2Info.LastPrimaryKey = pkBytes

@@ -659,7 +659,7 @@ func (s *ElementNullableSuite) vsCheckIterator(ctx context.Context, name string,
 	const batchSize = 2
 	want := model.hits(field, nil, nil)
 	var got []vsHit
-	token, lastBound := "", ""
+	token, lastBound, cursor := "", "", ""
 	var sessionTs uint64
 	for round := 0; ; round++ {
 		s.Require().LessOrEqual(round, len(want)/batchSize+2, "iterator does not terminate")
@@ -669,6 +669,9 @@ func (s *ElementNullableSuite) vsCheckIterator(ctx context.Context, name string,
 		}
 		if token != "" {
 			extra = append(extra, kv(proxy.SearchIterIdKey, token), kv(proxy.SearchIterLastBoundKey, lastBound))
+			if cursor != "" {
+				extra = append(extra, kv(proxy.SearchIterCursorKey, cursor))
+			}
 		}
 		request := vsSearchRequest(name, vsAnns(field), "", true, batchSize, nil, extra...)
 		request.GuaranteeTimestamp = sessionTs
@@ -682,6 +685,7 @@ func (s *ElementNullableSuite) vsCheckIterator(ctx context.Context, name string,
 		s.Require().NotNil(iterator)
 		token = iterator.GetToken()
 		lastBound = strconv.FormatFloat(float64(iterator.GetLastBound()), 'g', -1, 32)
+		cursor = iterator.GetCursor()
 		if len(batch) == 0 {
 			break
 		}

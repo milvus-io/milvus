@@ -379,6 +379,8 @@ func TestParseGroupByInfoLegacyFieldPrecedence(t *testing.T) {
 }
 
 func TestSearchIteratorV2CursorRoundTrip(t *testing.T) {
+	const fixedToken = "123e4567-e89b-12d3-a456-426614174000"
+
 	t.Run("int64 row cursor", func(t *testing.T) {
 		res := &schemapb.SearchResultData{
 			Ids: &schemapb.IDs{
@@ -390,15 +392,17 @@ func TestSearchIteratorV2CursorRoundTrip(t *testing.T) {
 		hasPK, pkBytes, elemIdx := lastPageCursorState(res)
 		require.True(t, hasPK)
 		assert.Nil(t, elemIdx)
-		token := encodeSearchIterCursor(1.25, schemapb.DataType_Int64, hasPK, pkBytes, elemIdx)
+		cursor := encodeSearchIterCursor(1.25, schemapb.DataType_Int64, hasPK, pkBytes, elemIdx)
 
 		var topK int64
 		info, err := parseSearchIteratorV2Info([]*commonpb.KeyValuePair{
 			{Key: SearchIterV2Key, Value: "true"},
-			{Key: SearchIterIdKey, Value: token},
+			{Key: SearchIterIdKey, Value: fixedToken},
+			{Key: SearchIterCursorKey, Value: cursor},
 			{Key: SearchIterBatchSizeKey, Value: "4"},
 		}, 0, true, 0, &topK, false)
 		require.NoError(t, err)
+		assert.Equal(t, fixedToken, info.GetToken())
 		assert.Equal(t, float32(1.25), info.GetLastBound())
 		assert.Equal(t, int64ToBigEndianBytes(42), info.GetLastPrimaryKey())
 		assert.Equal(t, int32(schemapb.DataType_Int64), info.GetPrimaryKeyType())
@@ -417,15 +421,17 @@ func TestSearchIteratorV2CursorRoundTrip(t *testing.T) {
 		require.True(t, hasPK)
 		assert.Empty(t, pkBytes)
 		assert.Nil(t, elemIdx)
-		token := encodeSearchIterCursor(0.5, schemapb.DataType_VarChar, hasPK, pkBytes, elemIdx)
+		cursor := encodeSearchIterCursor(0.5, schemapb.DataType_VarChar, hasPK, pkBytes, elemIdx)
 
 		var topK int64
 		info, err := parseSearchIteratorV2Info([]*commonpb.KeyValuePair{
 			{Key: SearchIterV2Key, Value: "true"},
-			{Key: SearchIterIdKey, Value: token},
+			{Key: SearchIterIdKey, Value: fixedToken},
+			{Key: SearchIterCursorKey, Value: cursor},
 			{Key: SearchIterBatchSizeKey, Value: "2"},
 		}, 0, true, 0, &topK, false)
 		require.NoError(t, err)
+		assert.Equal(t, fixedToken, info.GetToken())
 		assert.NotNil(t, info.LastPrimaryKey)
 		assert.Empty(t, info.GetLastPrimaryKey())
 		assert.Equal(t, int32(schemapb.DataType_VarChar), info.GetPrimaryKeyType())
@@ -436,15 +442,17 @@ func TestSearchIteratorV2CursorRoundTrip(t *testing.T) {
 		assert.False(t, hasPK)
 		assert.Nil(t, pkBytes)
 		assert.Nil(t, elemIdx)
-		token := encodeSearchIterCursor(2.0, schemapb.DataType_VarChar, hasPK, pkBytes, elemIdx)
+		cursor := encodeSearchIterCursor(2.0, schemapb.DataType_VarChar, hasPK, pkBytes, elemIdx)
 
 		var topK int64
 		info, err := parseSearchIteratorV2Info([]*commonpb.KeyValuePair{
 			{Key: SearchIterV2Key, Value: "true"},
-			{Key: SearchIterIdKey, Value: token},
+			{Key: SearchIterIdKey, Value: fixedToken},
+			{Key: SearchIterCursorKey, Value: cursor},
 			{Key: SearchIterBatchSizeKey, Value: "2"},
 		}, 0, true, 0, &topK, false)
 		require.NoError(t, err)
+		assert.Equal(t, fixedToken, info.GetToken())
 		assert.Equal(t, float32(2.0), info.GetLastBound())
 		assert.Nil(t, info.LastPrimaryKey)
 		assert.Nil(t, info.PrimaryKeyType)
@@ -464,32 +472,54 @@ func TestSearchIteratorV2CursorRoundTrip(t *testing.T) {
 		require.True(t, hasPK)
 		require.NotNil(t, elemIdx)
 		assert.Equal(t, int32(2), *elemIdx)
-		token := encodeSearchIterCursor(1.0, schemapb.DataType_Int64, hasPK, pkBytes, elemIdx)
+		cursor := encodeSearchIterCursor(1.0, schemapb.DataType_Int64, hasPK, pkBytes, elemIdx)
 
 		var topK int64
 		info, err := parseSearchIteratorV2Info([]*commonpb.KeyValuePair{
 			{Key: SearchIterV2Key, Value: "true"},
-			{Key: SearchIterIdKey, Value: token},
+			{Key: SearchIterIdKey, Value: fixedToken},
+			{Key: SearchIterCursorKey, Value: cursor},
 			{Key: SearchIterBatchSizeKey, Value: "2"},
 		}, 0, true, 0, &topK, false)
 		require.NoError(t, err)
+		assert.Equal(t, fixedToken, info.GetToken())
 		assert.Equal(t, int64ToBigEndianBytes(5), info.GetLastPrimaryKey())
 		require.NotNil(t, info.LastElementIndex)
 		assert.Equal(t, int32(2), info.GetLastElementIndex())
 	})
 
-	t.Run("legacy uuid token fallback", func(t *testing.T) {
+	t.Run("legacy uuid token fallback without cursor", func(t *testing.T) {
 		var topK int64
 		info, err := parseSearchIteratorV2Info([]*commonpb.KeyValuePair{
 			{Key: SearchIterV2Key, Value: "true"},
-			{Key: SearchIterIdKey, Value: "123e4567-e89b-12d3-a456-426614174000"},
+			{Key: SearchIterIdKey, Value: fixedToken},
 			{Key: SearchIterBatchSizeKey, Value: "3"},
 			{Key: SearchIterLastBoundKey, Value: "1.5"},
 		}, 0, true, 0, &topK, false)
 		require.NoError(t, err)
+		assert.Equal(t, fixedToken, info.GetToken())
 		assert.Equal(t, float32(1.5), info.GetLastBound())
 		assert.Nil(t, info.LastPrimaryKey)
 		assert.Nil(t, info.LastElementIndex)
+	})
+
+	t.Run("cursor passed as token is rejected and malformed cursor fails", func(t *testing.T) {
+		cursor := encodeSearchIterCursor(1.0, schemapb.DataType_Int64, true, int64ToBigEndianBytes(7), nil)
+		var topK int64
+		_, err := parseSearchIteratorV2Info([]*commonpb.KeyValuePair{
+			{Key: SearchIterV2Key, Value: "true"},
+			{Key: SearchIterIdKey, Value: cursor},
+			{Key: SearchIterBatchSizeKey, Value: "3"},
+		}, 0, true, 0, &topK, false)
+		assert.Error(t, err)
+
+		_, err = parseSearchIteratorV2Info([]*commonpb.KeyValuePair{
+			{Key: SearchIterV2Key, Value: "true"},
+			{Key: SearchIterIdKey, Value: fixedToken},
+			{Key: SearchIterCursorKey, Value: "bad-cursor"},
+			{Key: SearchIterBatchSizeKey, Value: "3"},
+		}, 0, true, 0, &topK, false)
+		assert.Error(t, err)
 	})
 
 	t.Run("CompareSearchResultTieKey orders by pk then element index", func(t *testing.T) {

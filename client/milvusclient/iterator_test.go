@@ -292,6 +292,7 @@ func (s *SearchIteratorSuite) TestNext() {
 				SearchIteratorV2Results: &schemapb.SearchIteratorV2Results{
 					Token:     token,
 					LastBound: 0.5,
+					Cursor:    "c1:testcursor",
 				},
 			},
 		}, nil
@@ -316,6 +317,7 @@ func (s *SearchIteratorSuite) TestNext() {
 		s.True(checkSearchParam(sr.GetSearchParams(), IteratorSearchV2Key, "true"))
 		s.True(checkSearchParam(sr.GetSearchParams(), IteratorSearchIDKey, token))
 		s.True(checkSearchParam(sr.GetSearchParams(), IteratorSearchLastBoundKey, "0.5"))
+		s.True(checkSearchParam(sr.GetSearchParams(), IteratorSearchCursorKey, "c1:testcursor"))
 
 		return &milvuspb.SearchResults{
 			Status: merr.Success(),
@@ -521,6 +523,7 @@ func (s *SearchIteratorSuite) TestNextPinsSessionTs() {
 	// second page: request must pin the session ts as guarantee timestamp
 	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 		s.EqualValues(sessionTs, sr.GetGuaranteeTimestamp())
+		s.NotContains(entity.KvPairsMap(sr.GetSearchParams()), IteratorSearchCursorKey)
 		return &milvuspb.SearchResults{
 			Status:    merr.Success(),
 			SessionTs: sessionTs,

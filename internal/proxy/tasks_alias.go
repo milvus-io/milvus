@@ -126,6 +126,7 @@ const (
 	ReduceStopForBestKey   = dql.ReduceStopForBestKey
 	RoundDecimalKey        = dql.RoundDecimalKey
 	SearchIterBatchSizeKey = dql.SearchIterBatchSizeKey
+	SearchIterCursorKey    = dql.SearchIterCursorKey
 	SearchIterIdKey        = dql.SearchIterIdKey
 	SearchIterLastBoundKey = dql.SearchIterLastBoundKey
 	StrictCastKey          = dql.StrictCastKey

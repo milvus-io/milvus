@@ -2240,14 +2240,15 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 			bound := getLastBound(t.result, iterInfo.LastBound, metricType)
 			hasPK, pkBytes, elemIdx := lastPageCursorState(t.result.Results)
 			t.result.Results.SearchIteratorV2Results = &schemapb.SearchIteratorV2Results{
-				Token: encodeSearchIterCursor(
+				Token:     iterInfo.GetToken(),
+				LastBound: bound,
+				Cursor: encodeSearchIterCursor(
 					bound,
 					primaryFieldSchema.GetDataType(),
 					hasPK,
 					pkBytes,
 					elemIdx,
 				),
-				LastBound: bound,
 			}
 		}
 	}

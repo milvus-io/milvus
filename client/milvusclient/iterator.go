@@ -40,6 +40,7 @@ const (
 	IteratorSearchBatchSizeKey = "search_iter_batch_size"
 	IteratorSearchLastBoundKey = "search_iter_last_bound"
 	IteratorSearchIDKey        = "search_iter_id"
+	IteratorSearchCursorKey    = "search_iter_cursor"
 	CollectionIDKey            = `collection_id`
 
 	// Unlimited
@@ -123,6 +124,9 @@ func (it *searchIteratorV2) next(ctx context.Context) (ResultSet, error) {
 		iteratorInfo := resp.GetResults().GetSearchIteratorV2Results()
 		opt.annRequest.WithSearchParam(IteratorSearchIDKey, iteratorInfo.GetToken())
 		opt.annRequest.WithSearchParam(IteratorSearchLastBoundKey, fmt.Sprintf("%v", iteratorInfo.GetLastBound()))
+		if cursor := iteratorInfo.GetCursor(); cursor != "" {
+			opt.annRequest.WithSearchParam(IteratorSearchCursorKey, cursor)
+		}
 
 		resultSets, err := it.client.handleSearchResult(it.schema, req.GetOutputFields(), int(resp.GetResults().GetNumQueries()), resp)
 		if err != nil {
