@@ -345,8 +345,9 @@ class JsonKeyStats {
     }
 
     // Legacy typed string columns cannot distinguish empty strings from null.
-    // Predicates on those paths (including EXISTS on an ancestor) must use raw
-    // JSON until the stats are rebuilt. Shared BSON strings are lossless.
+    // Predicates on those paths (including EXISTS on an ancestor) need raw
+    // JSON, either as a fallback or to recheck ambiguous rows, until the stats
+    // are rebuilt. Shared BSON strings are lossless.
     bool
     CanUseForPath(const std::string& pointer) {
         if (preserves_empty_strings_) {

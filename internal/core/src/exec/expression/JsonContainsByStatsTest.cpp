@@ -2057,17 +2057,25 @@ TEST(JsonStatsExecPathTest, TypedArrayIndexWinsOverJsonStatsForContains) {
 }
 
 TEST(JsonStatsEmptyStringTest, NewAndLegacyStatsAgreeWithRawFilters) {
-    const std::vector<std::string> raw = {R"({"k":"","n":1})",
-                                          R"({"k":"x","n":2})",
-                                          R"({"k":"","n":3})",
-                                          R"({"k":null,"n":4})",
-                                          R"({"n":5})",
-                                          R"({"k":7,"n":6})",
-                                          R"({"k":"y","n":7})",
-                                          R"({"k":"","n":8})",
-                                          R"({"k":"z","n":9})",
-                                          R"({"k":"w","n":10})"};
-    const std::vector<uint8_t> valid{0b01111111, 0b00000011};
+    const std::vector<std::string> pattern = {R"({"k":"","n":1})",
+                                              R"({"k":"x","n":2})",
+                                              R"({"k":"","n":3})",
+                                              R"({"k":null,"n":4})",
+                                              R"({"n":5})",
+                                              R"({"k":7,"n":6})",
+                                              R"({"k":"y","n":7})",
+                                              R"({"k":"","n":8})",
+                                              R"({"k":"z","n":9})",
+                                              R"({"k":"w","n":10})"};
+    // More than one legacy raw-recheck batch, with a partial final batch.
+    std::vector<std::string> raw;
+    std::vector<uint8_t> valid((2050 + 7) / 8, 0);
+    for (size_t i = 0; i < 2050; ++i) {
+        raw.push_back(pattern[i % pattern.size()]);
+        if (i % pattern.size() != 7) {
+            valid[i / 8] |= 1 << (i % 8);
+        }
+    }
     auto schema = std::make_shared<Schema>();
     auto fid = schema->AddDebugField("json", DataType::JSON, true);
     auto make_segment = [&] {
@@ -2087,8 +2095,13 @@ TEST(JsonStatsEmptyStringTest, NewAndLegacyStatsAgreeWithRawFilters) {
         if (legacy) {
             // Reproduce the old physical representation: empty strings became
             // null in /k_STRING, while the original JSON remains unchanged.
-            input[0] = R"({"k":null,"n":1})";
-            input[2] = R"({"k":null,"n":3})";
+            for (size_t i = 0; i < input.size(); ++i) {
+                if (i % pattern.size() == 0) {
+                    input[i] = R"({"k":null,"n":1})";
+                } else if (i % pattern.size() == 2) {
+                    input[i] = R"({"k":null,"n":3})";
+                }
+            }
         }
         auto built = BuildJsonStatsIndex(input,
                                          fid,
@@ -2125,13 +2138,16 @@ TEST(JsonStatsEmptyStringTest, NewAndLegacyStatsAgreeWithRawFilters) {
                                        MakeTestJsonStatsSlot(std::move(stats)));
 
         auto check = [&](const expr::TypedExprPtr& filter) {
-            auto plan = std::make_shared<plan::FilterBitsNode>(
-                DEFAULT_PLANNODE_ID, filter);
-            auto expected = milvus::test::gen_filter_res(
-                plan.get(), raw_segment.get(), raw.size(), MAX_TIMESTAMP);
-            auto actual = milvus::test::gen_filter_res(
-                plan.get(), segment.get(), raw.size(), MAX_TIMESTAMP);
+            milvus::test::ExprBatchSizeGuard batch_size_guard(37);
+            auto expected_batches = milvus::test::EvalExprInBatches(
+                filter, raw_segment.get(), raw.size());
+            auto actual_batches = milvus::test::EvalExprInBatches(
+                filter, segment.get(), raw.size());
+            EXPECT_EQ(actual_batches.batch_sizes, expected_batches.batch_sizes);
+            auto expected = expected_batches.result;
+            auto actual = actual_batches.result;
             ASSERT_EQ(actual->size(), expected->size());
+            ASSERT_EQ(actual->size(), raw.size());
             TargetBitmapView ev(expected->GetValidRawData(), expected->size());
             TargetBitmapView av(actual->GetValidRawData(), actual->size());
             TargetBitmapView er(expected->GetRawData(), expected->size());
@@ -2163,6 +2179,8 @@ TEST(JsonStatsEmptyStringTest, NewAndLegacyStatsAgreeWithRawFilters) {
         EXPECT_EQ(physical.GetExecPath(),
                   legacy ? exec::ExprExecPath::RawData
                          : exec::ExprExecPath::JsonStats);
+        proto::plan::GenericValue other;
+        other.set_string_val("y");
         for (const auto* text : {"", "x"}) {
             proto::plan::GenericValue value;
             value.set_string_val(text);
@@ -2172,14 +2190,74 @@ TEST(JsonStatsEmptyStringTest, NewAndLegacyStatsAgreeWithRawFilters) {
                             proto::plan::OpType::GreaterEqual}) {
                 SCOPED_TRACE(::testing::Message()
                              << "value=" << text << " op=" << op);
-                check(std::make_shared<expr::UnaryRangeFilterExpr>(
+                auto unary = std::make_shared<expr::UnaryRangeFilterExpr>(
                     column,
                     op,
                     value,
-                    std::vector<proto::plan::GenericValue>()));
+                    std::vector<proto::plan::GenericValue>());
+                exec::PhyUnaryRangeFilterExpr physical({},
+                                                       unary,
+                                                       "legacy-string-path",
+                                                       nullptr,
+                                                       segment.get(),
+                                                       raw.size(),
+                                                       raw.size(),
+                                                       0);
+                const bool recheck = op == proto::plan::OpType::Equal &&
+                                     !value.string_val().empty();
+                EXPECT_EQ(physical.GetExecPath(),
+                          !legacy || recheck ? exec::ExprExecPath::JsonStats
+                                             : exec::ExprExecPath::RawData);
+                check(unary);
+                check(std::make_shared<expr::LogicalUnaryExpr>(
+                    expr::LogicalUnaryExpr::OpType::LogicalNot, unary));
             }
-            check(std::make_shared<expr::TermFilterExpr>(
-                column, std::vector<proto::plan::GenericValue>{value}, false));
+            auto term = std::make_shared<expr::TermFilterExpr>(
+                column,
+                std::vector<proto::plan::GenericValue>{value, other},
+                false);
+            exec::PhyTermFilterExpr term_physical({},
+                                                  term,
+                                                  "legacy-term-path",
+                                                  nullptr,
+                                                  segment.get(),
+                                                  raw.size(),
+                                                  MAX_TIMESTAMP,
+                                                  raw.size(),
+                                                  0);
+            EXPECT_EQ(term_physical.GetExecPath(),
+                      !legacy || !value.string_val().empty()
+                          ? exec::ExprExecPath::JsonStats
+                          : exec::ExprExecPath::RawData);
+            check(term);
+            check(std::make_shared<expr::LogicalUnaryExpr>(
+                expr::LogicalUnaryExpr::OpType::LogicalNot, term));
+            // A surrounding NOT must see the repaired validity even through
+            // another logical operator, not only when directly wrapping IN.
+            for (auto op : {expr::LogicalBinaryExpr::OpType::And,
+                            expr::LogicalBinaryExpr::OpType::Or}) {
+                auto combined = std::make_shared<expr::LogicalBinaryExpr>(
+                    op, term, std::make_shared<expr::ExistsExpr>(column));
+                check(std::make_shared<expr::LogicalUnaryExpr>(
+                    expr::LogicalUnaryExpr::OpType::LogicalNot, combined));
+            }
+            auto mixed_term = std::make_shared<expr::TermFilterExpr>(
+                column,
+                std::vector<proto::plan::GenericValue>{value, empty},
+                false);
+            exec::PhyTermFilterExpr mixed_physical({},
+                                                   mixed_term,
+                                                   "legacy-mixed-term-path",
+                                                   nullptr,
+                                                   segment.get(),
+                                                   raw.size(),
+                                                   MAX_TIMESTAMP,
+                                                   raw.size(),
+                                                   0);
+            EXPECT_EQ(mixed_physical.GetExecPath(),
+                      legacy ? exec::ExprExecPath::RawData
+                             : exec::ExprExecPath::JsonStats);
+            check(mixed_term);
             check(std::make_shared<expr::BinaryRangeFilterExpr>(
                 column, value, value, true, true));
         }

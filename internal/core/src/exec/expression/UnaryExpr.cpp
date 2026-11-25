@@ -1508,6 +1508,13 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                 op_ctx_, bson_index_, pointer, shared_executor);
         }
 
+        if constexpr (std::is_same_v<ExprValueType, std::string>) {
+            RecheckLegacyJsonStatsNulls(
+                res_view, valid_res_view, [&val](std::string_view value) {
+                    return value == val;
+                });
+        }
+
         // for NotEqual: flip the result
         if (expr_->op_type_ == proto::plan::OpType::NotEqual) {
             cached_index_chunk_res_->flip();
