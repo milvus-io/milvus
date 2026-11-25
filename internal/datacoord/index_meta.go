@@ -278,6 +278,108 @@ func (m *indexMeta) alterSegmentIndexes(segIdxes []*model.SegmentIndex) error {
 	return nil
 }
 
+func isStructArrayScalarField(schema *schemapb.CollectionSchema, fieldID UniqueID) bool {
+	if schema == nil {
+		return false
+	}
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, subField := range structField.GetFields() {
+			if subField.GetFieldID() == fieldID && subField.GetDataType() == schemapb.DataType_Array {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func structArrayScalarFieldIDs(schema *schemapb.CollectionSchema) []UniqueID {
+	if schema == nil {
+		return nil
+	}
+	var fieldIDs []UniqueID
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, subField := range structField.GetFields() {
+			if subField.GetDataType() == schemapb.DataType_Array {
+				fieldIDs = append(fieldIDs, subField.GetFieldID())
+			}
+		}
+	}
+	return fieldIDs
+}
+
+func (m *indexMeta) MarkLegacyRowDomain(ctx context.Context, buildID UniqueID) error {
+	m.keyLock.Lock(buildID)
+	defer m.keyLock.Unlock(buildID)
+
+	segIdx, ok := m.segmentBuildInfo.Get(buildID)
+	if !ok || segIdx.IsDeleted || segIdx.LegacyRowDomain {
+		return nil
+	}
+	cloned := model.CloneSegmentIndex(segIdx)
+	cloned.LegacyRowDomain = true
+	if err := m.catalog.AlterSegmentIndexes(ctx, []*model.SegmentIndex{cloned}); err != nil {
+		return err
+	}
+	m.updateSegmentIndex(cloned)
+	return nil
+}
+
+func (m *indexMeta) MarkLegacyRowDomainForFields(ctx context.Context, collID UniqueID, fieldIDs []UniqueID) (int, error) {
+	if len(fieldIDs) == 0 {
+		return 0, nil
+	}
+	fieldSet := make(map[UniqueID]struct{}, len(fieldIDs))
+	for _, fieldID := range fieldIDs {
+		fieldSet[fieldID] = struct{}{}
+	}
+
+	m.fieldIndexLock.RLock()
+	indexSet := make(map[UniqueID]struct{})
+	if collIndexes, ok := m.indexes[collID]; ok {
+		for indexID, index := range collIndexes {
+			if index.IsDeleted {
+				continue
+			}
+			if _, match := fieldSet[index.FieldID]; match {
+				indexSet[indexID] = struct{}{}
+			}
+		}
+	}
+	m.fieldIndexLock.RUnlock()
+
+	if len(indexSet) == 0 {
+		return 0, nil
+	}
+
+	var candidateBuildIDs []UniqueID
+	for _, segIdx := range m.segmentBuildInfo.List() {
+		if segIdx.CollectionID != collID || segIdx.IsDeleted || segIdx.LegacyRowDomain {
+			continue
+		}
+		if _, match := indexSet[segIdx.IndexID]; match {
+			candidateBuildIDs = append(candidateBuildIDs, segIdx.BuildID)
+		}
+	}
+
+	marked := 0
+	for _, buildID := range candidateBuildIDs {
+		m.keyLock.Lock(buildID)
+		segIdx, ok := m.segmentBuildInfo.Get(buildID)
+		if ok && !segIdx.IsDeleted && !segIdx.LegacyRowDomain {
+			cloned := model.CloneSegmentIndex(segIdx)
+			cloned.LegacyRowDomain = true
+			if err := m.catalog.AlterSegmentIndexes(ctx, []*model.SegmentIndex{cloned}); err != nil {
+				m.keyLock.Unlock(buildID)
+				return marked, err
+			}
+			m.updateSegmentIndex(cloned)
+			marked++
+		}
+		m.keyLock.Unlock(buildID)
+	}
+	return marked, nil
+}
+
 func (m *indexMeta) updateIndexMeta(index *model.Index, updateFunc func(clonedIndex *model.Index) error) error {
 	return updateFunc(model.CloneIndex(index))
 }

@@ -110,13 +110,6 @@ const (
 	// - Packed single-file index layout (file format v3) becomes the default
 	// - HYBRID/AUTOINDEX high-cardinality scalar indexes switched from
 	//   INVERTED to STL_SORT
-	//
-	// WARNING: 2.6 must NOT bump CurrentScalarIndexEngineVersion or
-	// MaximumScalarIndexEngineVersion to >= 4. Doing so would require
-	// backporting all v4 scalar index features to 2.6, and 3.0+ relies on
-	// version >= 4 to recognize legacy element-level INVERTED indexes that lack
-	// persisted is_nested metadata during upgrades from 2.6.
-	// See https://github.com/milvus-io/milvus/issues/55534#issuecomment-7125456548.
 	MinimalScalarIndexEngineVersion = int32(0)
 	CurrentScalarIndexEngineVersion = int32(3)
 	MaximumScalarIndexEngineVersion = int32(3)
@@ -292,6 +285,7 @@ const (
 	BitmapCardinalityLimitKey         = "bitmap_cardinality_limit"
 	HybridLowCardinalityIndexTypeKey  = "hybrid_low_cardinality_index_type"
 	HybridHighCardinalityIndexTypeKey = "hybrid_high_cardinality_index_type"
+	LegacyRowDomainKey                = "legacy_row_domain"
 	IgnoreGrowing                     = "ignore_growing"
 	ConsistencyLevel                  = "consistency_level"
 	HintsKey                          = "hints"

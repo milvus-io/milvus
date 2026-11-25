@@ -410,6 +410,12 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	}
 
 	schema := collectionInfo.Schema
+	if !segIndex.LegacyRowDomain && isStructArrayScalarField(schema, fieldID) {
+		if err := it.meta.indexMeta.MarkLegacyRowDomain(ctx, segIndex.BuildID); err != nil {
+			return nil, err
+		}
+		segIndex.LegacyRowDomain = true
+	}
 	var field *schemapb.FieldSchema
 
 	allFields := typeutil.GetAllFieldSchemas(schema)

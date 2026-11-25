@@ -24,6 +24,7 @@ import (
 	"math"
 	"path"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -85,6 +86,22 @@ type CompactionMeta interface {
 
 var _ CompactionMeta = (*meta)(nil)
 
+type LegacyStructIndexMigrationState string
+
+const (
+	LegacyStructIndexMigrationPending   LegacyStructIndexMigrationState = "Pending"
+	LegacyStructIndexMigrationRunning   LegacyStructIndexMigrationState = "Running"
+	LegacyStructIndexMigrationCompleted LegacyStructIndexMigrationState = "Completed"
+	LegacyStructIndexMigrationFailed    LegacyStructIndexMigrationState = "Failed"
+)
+
+type LegacyStructIndexMigrationStatus struct {
+	State       LegacyStructIndexMigrationState `json:"state"`
+	Ready       bool                            `json:"ready"`
+	MarkedCount int                             `json:"marked_count"`
+	LastError   string                          `json:"last_error,omitempty"`
+}
+
 type meta struct {
 	ctx     context.Context
 	catalog metastore.DataCoordCatalog
@@ -106,6 +123,9 @@ type meta struct {
 	// File Resource Meta
 	resourceMeta map[string]*model.FileResource
 	resourceLock lock.RWMutex
+
+	legacyStructIndexMigrationMu sync.RWMutex
+	legacyStructIndexMigration   LegacyStructIndexMigrationStatus
 }
 
 func (m *meta) GetIndexMeta() *indexMeta {
@@ -420,6 +440,92 @@ func (m *meta) GetCollection(collectionID UniqueID) *collectionInfo {
 // GetCollections returns collections from local cache
 func (m *meta) GetCollections() []*collectionInfo {
 	return m.collections.Values()
+}
+
+func (m *meta) setLegacyStructIndexMigrationRunning() {
+	m.legacyStructIndexMigrationMu.Lock()
+	defer m.legacyStructIndexMigrationMu.Unlock()
+	m.legacyStructIndexMigration.State = LegacyStructIndexMigrationRunning
+	m.legacyStructIndexMigration.Ready = false
+}
+
+func (m *meta) setLegacyStructIndexMigrationError(err error) {
+	if err == nil {
+		return
+	}
+	m.legacyStructIndexMigrationMu.Lock()
+	defer m.legacyStructIndexMigrationMu.Unlock()
+	m.legacyStructIndexMigration.State = LegacyStructIndexMigrationRunning
+	m.legacyStructIndexMigration.Ready = false
+	m.legacyStructIndexMigration.LastError = err.Error()
+}
+
+func (m *meta) setLegacyStructIndexMigrationFailed(err error) {
+	m.legacyStructIndexMigrationMu.Lock()
+	defer m.legacyStructIndexMigrationMu.Unlock()
+	m.legacyStructIndexMigration.State = LegacyStructIndexMigrationFailed
+	m.legacyStructIndexMigration.Ready = false
+	if err != nil {
+		m.legacyStructIndexMigration.LastError = err.Error()
+	}
+}
+
+func (m *meta) setLegacyStructIndexMigrationCompleted() {
+	m.legacyStructIndexMigrationMu.Lock()
+	defer m.legacyStructIndexMigrationMu.Unlock()
+	m.legacyStructIndexMigration.State = LegacyStructIndexMigrationCompleted
+	m.legacyStructIndexMigration.Ready = true
+	m.legacyStructIndexMigration.LastError = ""
+}
+
+func (m *meta) addLegacyStructIndexMarkedCount(delta int) {
+	if delta == 0 {
+		return
+	}
+	m.legacyStructIndexMigrationMu.Lock()
+	defer m.legacyStructIndexMigrationMu.Unlock()
+	m.legacyStructIndexMigration.MarkedCount += delta
+}
+
+func (m *meta) getLegacyStructIndexMigrationStatus() LegacyStructIndexMigrationStatus {
+	m.legacyStructIndexMigrationMu.RLock()
+	defer m.legacyStructIndexMigrationMu.RUnlock()
+	status := m.legacyStructIndexMigration
+	if status.State == "" {
+		status.State = LegacyStructIndexMigrationPending
+	}
+	return status
+}
+
+func (m *meta) markLegacyStructArrayScalarSegmentIndexes(ctx context.Context) error {
+	if m.indexMeta == nil {
+		return nil
+	}
+	totalMarked := 0
+	for _, coll := range m.GetCollections() {
+		if coll == nil || coll.Schema == nil {
+			continue
+		}
+		fieldIDs := structArrayScalarFieldIDs(coll.Schema)
+		if len(fieldIDs) == 0 {
+			continue
+		}
+		marked, err := m.indexMeta.MarkLegacyRowDomainForFields(ctx, coll.ID, fieldIDs)
+		m.addLegacyStructIndexMarkedCount(marked)
+		totalMarked += marked
+		if err != nil {
+			log.Ctx(ctx).Warn("failed to mark legacy row-domain struct array scalar segment indexes",
+				zap.Int64("collectionID", coll.ID),
+				zap.Int("markedBeforeError", marked),
+				zap.Error(err))
+			return err
+		}
+	}
+	if totalMarked > 0 {
+		log.Ctx(ctx).Info("marked legacy row-domain struct array scalar segment indexes",
+			zap.Int("markedCount", totalMarked))
+	}
+	return nil
 }
 
 func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {

@@ -83,7 +83,8 @@ const (
 
 	DataGCPath = "/management/data_gc"
 
-	ReplicaLoadConfigCompliancePath = "/management/replica/loadconfig/compliance"
+	ReplicaLoadConfigCompliancePath      = "/management/replica/loadconfig/compliance"
+	LegacyStructIndexMigrationStatusPath = "/management/datacoord/legacy_struct_index/status"
 )
 
 // for WebUI restful api root path

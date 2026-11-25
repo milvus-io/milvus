@@ -854,6 +854,7 @@ InvertedIndexTantivy<T>::WriteEntries(storage::IndexEntryWriter* writer) {
 
     writer->PutMeta("file_names", file_names);
     writer->PutMeta("has_null", has_null);
+    writer->PutMeta("is_nested", false);
 
     for (const auto& file_path : files) {
         auto file_name = file_path.filename().string();
