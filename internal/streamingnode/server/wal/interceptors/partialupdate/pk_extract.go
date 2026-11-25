@@ -54,32 +54,30 @@ func extractPKsFromDeleteWithContext(ctx context.Context, msg message.BasicMessa
 }
 
 // extractUpdatePKs uses the decoded body for both live and recovered writes.
-func extractUpdatePKs(ctx context.Context, msg message.BasicMessage) (context.Context, primarykey.Keys, error) {
+func extractUpdatePKs(ctx context.Context, msg message.BasicMessage) (primarykey.Keys, error) {
 	if immutable, ok := msg.(message.ImmutableMessage); ok {
 		update, err := message.AsImmutableUpdateMessageV2(immutable)
 		if err != nil {
-			return ctx, primarykey.Keys{}, status.NewUnrecoverableError("decode recovered update failed: %v", err)
+			return primarykey.Keys{}, status.NewUnrecoverableError("decode recovered update failed: %v", err)
 		}
 		body, err := decodeRecoveredBody(ctx, "update", update)
 		if err != nil {
-			return ctx, primarykey.Keys{}, err
+			return primarykey.Keys{}, err
 		}
-		keys, err := primarykey.KeysOfIDs(body.GetPrimaryKeys())
-		return ctx, keys, err
+		return primarykey.KeysOfIDs(body.GetPrimaryKeys())
 	}
 	update, err := message.AsMutableUpdateMessageV2(msg.(message.MutableMessage))
 	if err != nil {
-		return ctx, primarykey.Keys{}, status.NewInvalidArgument("invalid UPDATE message: %s", err)
+		return primarykey.Keys{}, status.NewInvalidArgument("invalid UPDATE message: %s", err)
 	}
-	ctx, body, err := utility.DecodeUpdateBody(ctx, update)
+	body, err := update.Body(ctx)
 	if errors.Is(err, message.ErrMalformedBody) {
-		return ctx, primarykey.Keys{}, status.NewInvalidArgument("invalid UPDATE payload: %s", err)
+		return primarykey.Keys{}, status.NewInvalidArgument("invalid UPDATE payload: %s", err)
 	}
 	if err != nil {
-		return ctx, primarykey.Keys{}, err
+		return primarykey.Keys{}, err
 	}
-	keys, err := primarykey.KeysOfIDs(body.GetPrimaryKeys())
-	return ctx, keys, err
+	return primarykey.KeysOfIDs(body.GetPrimaryKeys())
 }
 
 // extractPKsFromInsert extracts the PK column identified by fieldID from one

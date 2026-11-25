@@ -169,8 +169,8 @@ func buildUpdateMessages(collectionID int64, schemaVersion int32, partitionID in
 	var result []message.MutableMessage
 	maxInsertSize := params.QuotaConfig.MaxInsertSize.GetAsInt()
 	remaining := maxInsertSize
-	header := &messagespb.UpdateMessageHeader{CollectionId: collectionID, SchemaVersion: proto.Int32(schemaVersion)}
-	body := &messagespb.UpdateMessageBody{PartitionId: partitionID, Assignments: assignments}
+	header := &messagespb.UpdateMessageHeader{CollectionId: collectionID, SchemaVersion: proto.Int32(schemaVersion), PartitionId: partitionID}
+	body := &messagespb.UpdateMessageBody{Assignments: assignments}
 	fixedBodySize := proto.Size(body)
 	// All length-delimited fields on the PK path have one-byte tags.
 	fieldOverhead := protowire.SizeTag(1) + protowire.SizeVarint(uint64(limit))

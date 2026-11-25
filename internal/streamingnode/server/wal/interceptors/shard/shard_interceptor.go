@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -82,9 +83,6 @@ func (impl *shardInterceptor) Name() string {
 
 // DoAppend assigns segment for every partition in the message.
 func (impl *shardInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (msgID message.MessageID, err error) {
-	if msg.MessageType() == message.MessageTypeUpdate && (funcutil.IsControlChannel(msg.VChannel()) || msg.IsPChannelLevel()) {
-		return nil, status.NewInvalidArgument("PK-update requires a business VChannel")
-	}
 	op, ok := impl.ops[msg.MessageType()]
 	if ok && (!funcutil.IsControlChannel(msg.VChannel()) || msg.IsPChannelLevel()) {
 		// If the message type is registered in the interceptor, use the registered operation.
@@ -301,6 +299,40 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 	}
 
 	impl.shardManager.ApplyDelete(deleteMessage)
+	return appendOp(ctx, msg)
+}
+
+func (impl *shardInterceptor) handleUpdateMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	update, err := message.AsMutableUpdateMessageV2(msg)
+	if err != nil {
+		return nil, status.NewInvalidArgument("invalid UPDATE message: %s", err)
+	}
+	h := update.Header()
+	if h.SchemaVersion == nil {
+		return nil, status.NewInvalidArgument("UPDATE requires an explicit schema version")
+	}
+	if h.GetCollectionId() <= 0 || funcutil.GetCollectionIDFromVChannel(msg.VChannel()) != h.GetCollectionId() {
+		return nil, status.NewInvalidArgument("UPDATE collection does not match its VChannel")
+	}
+	// Reuse the existing explicit-version checker; no insert or segment
+	// allocation occurs. The enclosing WAL lock fences concurrent schema DDL.
+	version, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
+		CollectionId: h.GetCollectionId(), SchemaVersion: h.SchemaVersion,
+	})
+	if errors.Is(err, shards.ErrCollectionSchemaVersionNotMatch) {
+		return nil, status.NewSchemaVersionMismatch("update schema version %d differs from current version %d", h.GetSchemaVersion(), version)
+	}
+	if err != nil {
+		return nil, status.NewUnrecoverableError("cannot validate update schema: %s", err)
+	}
+	if partitionID := h.GetPartitionId(); partitionID != common.AllPartitionsID {
+		if partitionID <= 0 {
+			return nil, status.NewInvalidArgument("invalid UPDATE partition scope")
+		}
+		if err := impl.shardManager.CheckIfPartitionExists(shards.PartitionUniqueKey{CollectionID: h.GetCollectionId(), PartitionID: partitionID}); err != nil {
+			return nil, status.NewUnrecoverableError("cannot validate update partition: %s", err)
+		}
+	}
 	return appendOp(ctx, msg)
 }
 

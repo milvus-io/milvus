@@ -60,8 +60,9 @@ func TestBuildUpdateMessagesMaxInsertSize(t *testing.T) {
 		FieldId: 101,
 		Literal: &schemapb.UpdateLiteral{Value: &schemapb.UpdateLiteral_ScalarValue{ScalarValue: value}},
 	}}
+	const partitionID int64 = 20
 	build := func(channels []string) ([]message.MutableMessage, error) {
-		return buildUpdateMessages(10, 7, -1, channels, ids, assignments, nil)
+		return buildUpdateMessages(10, 7, partitionID, channels, ids, assignments, nil)
 	}
 
 	for _, tc := range []struct {
@@ -79,6 +80,7 @@ func TestBuildUpdateMessagesMaxInsertSize(t *testing.T) {
 			require.Greater(t, len(msgs), 1)
 			total := 0
 			for _, msg := range msgs {
+				require.Equal(t, partitionID, message.MustAsMutableUpdateMessageV2(msg).Header().GetPartitionId())
 				total += proto.Size(msg.IntoMessageProto())
 			}
 

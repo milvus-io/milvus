@@ -251,10 +251,12 @@ message DeleteMessageHeader {
     uint64 rows = 2;
 }
 
-// Identity and schema fencing only; PKs and assignments remain encrypted body data.
+// Routing and schema metadata; PKs and assignments stay in the payload.
 message UpdateMessageHeader {
     int64 collection_id = 1;
     optional int32 schema_version = 2;
+    // AllPartitionsID (-1) or a concrete partition ID. No implicit zero scope.
+    int64 partition_id = 3;
 }
 
 message UpdateAssignment {
@@ -263,8 +265,8 @@ message UpdateAssignment {
 }
 
 message UpdateMessageBody {
-    // AllPartitionsID (-1) or a concrete partition ID. No implicit zero scope.
-    int64 partition_id = 1;
+    reserved 1; // Former partition_id; scope is carried in UpdateMessageHeader.
+    reserved "partition_id";
     schema.IDs primary_keys = 2;
     repeated UpdateAssignment assignments = 3;
 }

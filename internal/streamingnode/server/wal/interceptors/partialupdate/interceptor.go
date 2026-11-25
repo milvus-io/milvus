@@ -158,7 +158,7 @@ func (i *appendInterceptor) appendWrite(
 	} else {
 		set, cached := ctx.Value(ordinaryWriteSetContextKey{}).(ordinaryWriteSet)
 		if !cached {
-			ctx, set, err = i.extractOrdinaryWriteSet(ctx, msg)
+			set, err = i.extractOrdinaryWriteSet(ctx, msg)
 			if err != nil {
 				return nil, err
 			}

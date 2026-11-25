@@ -917,14 +917,11 @@ func TestPartialUpdateInterceptorRejectsTxnCASAttemptMismatchBeforeAppend(t *tes
 
 func TestUpdateBodyDecodedOncePerAppend(t *testing.T) {
 	const channel = "p1_10v0"
-	header := &message.UpdateMessageHeader{CollectionId: 10, SchemaVersion: proto.Int32(7)}
 	manager := mock_shards.NewMockShardManager(t)
 	manager.EXPECT().CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{
 		CollectionId: 10, SchemaVersion: proto.Int32(7),
-	}).Return(int32(7), nil).Twice()
-	manager.EXPECT().GetCollectionSchemaSnapshot(int64(10)).Return(&schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{{FieldID: 101, DataType: schemapb.DataType_Int64, Nullable: true}},
-	}).Twice()
+	}).Return(int32(7), nil).Times(3)
+	manager.EXPECT().CheckIfPartitionExists(shards.PartitionUniqueKey{CollectionID: 10, PartitionID: 20}).Return(nil).Once()
 	env := newPartialUpdateChainTestEnvWithShardManager(t.Context(), t, nil, func(*txn.TxnManager) shards.ShardManager {
 		return manager
 	}, true)
@@ -940,19 +937,28 @@ func TestUpdateBodyDecodedOncePerAppend(t *testing.T) {
 	defer patch.UnPatch()
 
 	for _, tc := range []struct {
-		name string
-		pk   int64
-		txn  bool
-	}{{"ordinary", 7, false}, {"transaction", 9, true}} {
+		name        string
+		pk          int64
+		txn         bool
+		replicated  bool
+		partitionID int64
+	}{
+		{name: "ordinary", pk: 7, partitionID: -1},
+		{name: "transaction", pk: 9, txn: true, partitionID: 20},
+		{name: "replicated", pk: 11, replicated: true, partitionID: -1},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
+			header := &message.UpdateMessageHeader{CollectionId: 10, SchemaVersion: proto.Int32(7), PartitionId: tc.partitionID}
 			body := &message.UpdateMessageBody{
-				PartitionId: -1,
 				PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{tc.pk}}}},
 				Assignments: []*messagespb.UpdateAssignment{{FieldId: 101, Literal: &schemapb.UpdateLiteral{
 					Value: &schemapb.UpdateLiteral_SetNull{SetNull: true},
 				}}},
 			}
 			msg := message.NewUpdateMessageBuilderV2().WithVChannel(channel).WithHeader(header).WithBody(body).MustBuildMutable()
+			if tc.replicated {
+				msg.WithReplicateHeader(newChainTestReplicateHeader(1, 100))
+			}
 			if tc.txn {
 				begin := message.NewBeginTxnMessageBuilderV2().WithVChannel(channel).
 					WithHeader(&message.BeginTxnMessageHeader{KeepaliveMilliseconds: time.Second.Milliseconds()}).
