@@ -71,10 +71,7 @@ func (t *UpdateTask) OnEnqueue() error                  { return nil }
 func (t *UpdateTask) PostExecute(context.Context) error { return nil }
 func (t *UpdateTask) Result() *milvuspb.MutationResult  { return t.result }
 
-// commonpb has no PK Update task type. The WAL message type is independently UPDATE.
-func (t *UpdateTask) Type() commonpb.MsgType { return commonpb.MsgType_Undefined }
-
-func (t *UpdateTask) QueueMetricLabel() string { return "Update" }
+func (t *UpdateTask) Type() commonpb.MsgType { return commonpb.MsgType_Update }
 
 func (t *UpdateTask) SetChannels() error {
 	if t.request == nil {

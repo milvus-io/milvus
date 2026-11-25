@@ -60,14 +60,6 @@ type Task interface {
 	GetDurationInExecuting() time.Duration
 }
 
-// QueueMetricLabel returns the operation name used by the queue-latency histogram.
-func QueueMetricLabel(t Task) string {
-	if task, ok := t.(interface{ QueueMetricLabel() string }); ok {
-		return task.QueueMetricLabel()
-	}
-	return t.Type().String()
-}
-
 // BaseTask is embedded by concrete task structs to provide the common
 // meta-cache accessor and queue/execute timing bookkeeping.
 type BaseTask struct {
