@@ -20,12 +20,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // A text-only WAL insert must use the same resource-backed runner both in live
 // consumption and recovery. No legacy global file inventory is installed here.
 func TestOracleOwnsRemoteSynonymResources(t *testing.T) {
 	root := t.TempDir()
+	paramtable.Init()
+	previousRoot := paramtable.Get().CommonCfg.FileResourceAllowedPath.SwapTempValue(root)
+	t.Cleanup(func() { paramtable.Get().CommonCfg.FileResourceAllowedPath.SwapTempValue(previousRoot) })
 	require.NoError(t, analyzer.InitOptions())
 	cm := storage.NewLocalChunkManager()
 	file := filepath.Join(root, "synonyms.txt")

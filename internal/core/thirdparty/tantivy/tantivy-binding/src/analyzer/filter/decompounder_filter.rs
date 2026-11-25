@@ -74,7 +74,10 @@ mod tests {
     fn test_decompounder_filter_with_file() {
         init_log();
         let file_dir = Path::new(file!()).parent().unwrap();
-        let decompounder_path = file_dir.join("../data/test/decompounder_dict.txt");
+        let decompounder_path = file_dir
+            .join("../data/test/decompounder_dict.txt")
+            .canonicalize()
+            .unwrap();
         let decompounder_path_str = decompounder_path.to_string_lossy().to_string();
         let params = format!(
             r#"{{
@@ -88,6 +91,7 @@ mod tests {
         let json_params = json::from_str::<json::Value>(&params).unwrap();
         // let filter = SplitCompoundWords::from_dictionary(vec!["bank", "note"]);
         let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        helper.test_root = Some(decompounder_path.parent().unwrap().to_path_buf());
         let filter = SplitCompoundWords::from_json(json_params.as_object().unwrap(), &mut helper);
         assert!(filter.is_ok(), "error: {}", filter.err().unwrap());
         let builder = standard_builder().filter(filter.unwrap());

@@ -17,9 +17,12 @@
 package paramtable
 
 import (
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type functionConfig struct {
@@ -32,7 +35,8 @@ type functionConfig struct {
 	ModelRequestTimeout           ParamItem  `refreshable:"true"`
 	TextEmbeddingProviders        ParamGroup `refreshable:"true"`
 	RerankModelProviders          ParamGroup `refreshable:"true"`
-	LocalResourcePath             ParamItem  `refreshable:"true"`
+	LocalResourcePath             ParamItem  `refreshable:"false"`
+	AnalyzerMaxDictSize           ParamItem  `refreshable:"false"`
 	LinderaDownloadUrls           ParamGroup `refreshable:"true"`
 	ZillizProviders               ParamGroup `refreshable:"true"`
 	AnalyzerConcurrencyPerCPUCore ParamItem  `refreshable:"true"`
@@ -311,8 +315,33 @@ func (p *functionConfig) init(base *BaseTable) {
 		Version:      "2.5.16",
 		Export:       true,
 		DefaultValue: "/var/lib/milvus/analyzer",
+		Forbidden:    true,
+		Doc:          "Absolute directory containing operator-provided analyzer dictionaries. Symbolic links below it are rejected. Restart required.",
+		Formatter: func(value string) string {
+			if !filepath.IsAbs(value) || filepath.Clean(value) == "/" {
+				panic(merr.WrapErrParameterInvalidMsg("function.analyzer.local_resource_path must be an absolute non-root directory"))
+			}
+			return filepath.Clean(value)
+		},
 	}
 	p.LocalResourcePath.Init(base.mgr)
+
+	p.AnalyzerMaxDictSize = ParamItem{
+		Key:          "function.analyzer.max_dict_size",
+		Version:      "3.0",
+		DefaultValue: "67108864",
+		Doc:          "Maximum bytes read from each local or file-resource analyzer dictionary. Must be positive; restart required.",
+		Export:       true,
+		Forbidden:    true,
+		Formatter: func(value string) string {
+			size, err := strconv.ParseUint(value, 10, 63)
+			if err != nil || size == 0 {
+				panic(merr.WrapErrParameterInvalidMsg("function.analyzer.max_dict_size must be a positive byte count"))
+			}
+			return value
+		},
+	}
+	p.AnalyzerMaxDictSize.Init(base.mgr)
 
 	p.LinderaDownloadUrls = ParamGroup{
 		KeyPrefix: "function.analyzer.lindera.download_urls.",

@@ -1494,7 +1494,8 @@ common:
       queryNode: sync # File resource mode for query node, options: [sync, close]. Default is sync.
       dataNode: sync # File resource mode for data node, options: [sync, ref, close]. Default is sync.
       proxy: close # File resource mode for proxy, options: [sync, close]. Default is close.
-    maxFileSize: 0 # Maximum size of a single file resource accepted by AddFileResource. Set to 0 to disable the admission limit.
+    allowedPath: "" # Required complete object-key prefix or absolute local directory. Empty disables file resource access. Restart required.
+    maxFileSize: 64m # Maximum bytes per file resource at admission and download; must be positive.
     downloadTimeout: 5m # Timeout for downloading a single file resource. It accepts duration strings such as 30s or 5m.
     cacheTtl: 15m # Idle lease for on-demand analyzer resource files after their last consumer releases them. Accepts duration strings such as 30s or 15m; 0s disables retention. Takes effect on restart.
   groupBy:
@@ -2030,7 +2031,8 @@ function:
           enable: true # Whether to enable voyageai model service
           url:  # Your voyageai rerank url, Default is the official rerank url
   analyzer:
-    local_resource_path: /var/lib/milvus/analyzer
+    local_resource_path: /var/lib/milvus/analyzer # Absolute directory for local dictionaries; symlinks within it are refused. Restart required.
+    max_dict_size: 67108864 # Maximum bytes read per local or file-resource dictionary (64 MiB); must be positive. Restart required.
     concurrency_per_cpu_core: 8 # The concurrency per cpu core for analyzer, pipeline not included
     runner_concurrency: 8 # The concurrency for each function runner to tokenize text
   pyUDF:

@@ -21,8 +21,8 @@ use lindera_dictionary::viterbi::Lattice;
 
 use crate::analyzer::dict::lindera::load_dictionary_from_kind;
 use crate::analyzer::options::{
-    get_lindera_download_url, get_options, get_resource_path, FileResourcePathHelper,
-    DEFAULT_DICT_PATH_KEY,
+    get_lindera_download_url, get_options, get_resource_path, read_resource_file,
+    FileResourcePathHelper, DEFAULT_DICT_PATH_KEY,
 };
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
@@ -369,28 +369,23 @@ fn fetch_lindera_user_dict(
 
     let path = get_resource_path(helper, v, "lindera user dict file")?;
     let ext = path.extension().and_then(|e| e.to_str());
+    if !matches!(ext, Some("csv") | Some("bin")) {
+        return Err(TantivyBindingError::InvalidArgument(
+            "lindera user dict file extension must be csv or bin".into(),
+        ));
+    }
+    let bytes = read_resource_file(helper, v, "lindera user dict file")?;
+    // Lindera accepts a path, so parse a bounded private snapshot, never reopen
+    // the caller's path after checking its size and directory confinement.
+    let mut snapshot = tempfile::NamedTempFile::new()?;
+    std::io::Write::write_all(&mut snapshot, &bytes)?;
     let user_dict = match ext {
-        Some("csv") => {
-            load_user_dictionary_from_csv(kind.clone(), path.as_path()).map_err(|e| {
-                TantivyBindingError::InvalidArgument(format!(
-                    "lindera load user dict csv failed: {:?}",
-                    e
-                ))
-            })?
-        }
-        Some("bin") => load_user_dictionary_from_bin(path.as_path()).map_err(|e| {
-            TantivyBindingError::InvalidArgument(format!(
-                "lindera load user dict bin failed: {:?}",
-                e
-            ))
-        })?,
-        _ => {
-            return Err(TantivyBindingError::InvalidArgument(format!(
-                "lindera user dict file extension must be csv or bin, got {:?}",
-                ext
-            )))
-        }
-    };
+        Some("csv") => load_user_dictionary_from_csv(kind.clone(), snapshot.path()),
+        _ => load_user_dictionary_from_bin(snapshot.path()),
+    }
+    .map_err(|_| {
+        TantivyBindingError::InvalidArgument("lindera user dictionary is invalid".into())
+    })?;
     Ok(Some(user_dict))
 }
 
@@ -571,7 +566,9 @@ mod tests {
     use tantivy::tokenizer::Tokenizer;
 
     fn default_helper() -> FileResourcePathHelper {
-        FileResourcePathHelper::new(Arc::new(ResourceInfo::new()))
+        let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        helper.test_root = Some(std::env::temp_dir());
+        helper
     }
 
     #[test]
@@ -932,6 +929,34 @@ mod tests {
             let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
             assert!(get_sentence_split_chars(&params).is_err());
         }
+    }
+
+    #[test]
+    fn dictionary_snapshot_lindera_parses_and_redacts_errors() {
+        use super::{fetch_lindera_user_dict, DictionaryKind};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("user.csv");
+        let params = json::json!({"user_dict":{"type":"local","path":path}});
+        let mut helper = default_helper();
+        helper.test_root = Some(dir.path().to_path_buf());
+        std::fs::write(&path, "Milvus,custom,Milvus").unwrap();
+        assert!(fetch_lindera_user_dict(
+            &DictionaryKind::IPADIC,
+            params.as_object().unwrap(),
+            &mut helper
+        )
+        .is_ok());
+        std::fs::write(&path, "FILE_SECRET_MARKER,0,0,invalid_cost").unwrap();
+        let error = match fetch_lindera_user_dict(
+            &DictionaryKind::IPADIC,
+            params.as_object().unwrap(),
+            &mut helper,
+        ) {
+            Ok(_) => panic!("invalid dictionary was accepted"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains("lindera user dictionary is invalid"));
+        assert!(!error.contains("FILE_SECRET_MARKER"));
     }
 
     #[test]

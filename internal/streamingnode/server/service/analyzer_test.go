@@ -38,7 +38,10 @@ import (
 func TestAnalyzerPhraseRemoteResources(t *testing.T) {
 	paramtable.Init()
 	require.NoError(t, analyzer.InitOptions())
-	file := filepath.Join(t.TempDir(), "stop.txt")
+	root := t.TempDir()
+	previousRoot := paramtable.Get().CommonCfg.FileResourceAllowedPath.SwapTempValue(root)
+	t.Cleanup(func() { paramtable.Get().CommonCfg.FileResourceAllowedPath.SwapTempValue(previousRoot) })
+	file := filepath.Join(root, "stop.txt")
 	require.NoError(t, os.WriteFile(file, []byte("the\n"), 0o600))
 	resourceID := time.Now().UnixNano()
 	lookups := 0

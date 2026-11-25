@@ -2,12 +2,11 @@ use core::{option::Option::Some, result::Result::Ok};
 use jieba_rs;
 use lazy_static::lazy_static;
 use serde_json as json;
-use std::fs;
 use std::io::BufReader;
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 
-use crate::analyzer::options::{get_resource_path, FileResourcePathHelper};
+use crate::analyzer::options::{read_resource_file, FileResourcePathHelper};
 use crate::error::{Result, TantivyBindingError};
 
 lazy_static! {
@@ -57,7 +56,7 @@ impl TokenStream for JiebaTokenStream {
 fn get_jieba_dict(
     params: &json::Map<String, json::Value>,
     helper: &mut FileResourcePathHelper,
-) -> Result<(Vec<String>, Option<String>, Option<PathBuf>)> {
+) -> Result<(Vec<String>, Option<String>, Option<Vec<u8>>)> {
     let mut words = Vec::<String>::new();
     let mut user_dict = None;
     // use default dict as default system dict
@@ -102,7 +101,7 @@ fn get_jieba_dict(
 
     match params.get("extra_dict_file") {
         Some(v) => {
-            let path = get_resource_path(helper, v, "jieba extra dict file")?;
+            let path = read_resource_file(helper, v, "jieba extra dict file")?;
             user_dict = Some(path)
         }
         _ => {}
@@ -185,14 +184,13 @@ impl JiebaTokenizer {
             tokenizer.add_word(word.as_str(), None, None);
         }
 
-        if user_dict.is_some() {
-            let file = fs::File::open(user_dict.unwrap())?;
-            let mut reader = BufReader::new(file);
-            tokenizer.load_dict(&mut reader).map_err(|e| {
-                TantivyBindingError::InvalidArgument(format!(
-                    "jieba tokenizer load dict file failed with error: {:?}",
-                    e
-                ))
+        if let Some(bytes) = user_dict {
+            let mut reader = std::io::Cursor::new(bytes);
+            tokenizer.load_dict(&mut reader).map_err(|err| match err {
+                jieba_rs::Error::Io(err) => TantivyBindingError::IOError(err),
+                jieba_rs::Error::InvalidDictEntry(_) => TantivyBindingError::InvalidArgument(
+                    "jieba dictionary contains an invalid entry".into(),
+                ),
             })?;
         }
 

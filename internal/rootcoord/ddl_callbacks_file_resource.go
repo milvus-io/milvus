@@ -22,6 +22,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -34,7 +35,8 @@ func (c *Core) broadcastAddFileResource(ctx context.Context, req *milvuspb.AddFi
 	if req.GetPath() == "" {
 		return merr.WrapErrParameterMissing("file resource path")
 	}
-	if exist, err := c.storage.Exist(ctx, req.GetPath()); err != nil {
+	source := fileresource.RestrictSource(c.storage)
+	if exist, err := source.Exist(ctx, req.GetPath()); err != nil {
 		return err
 	} else if !exist {
 		return merr.WrapErrParameterInvalidMsg("file resource path not exist")
@@ -64,7 +66,7 @@ func (c *Core) broadcastAddFileResource(ctx context.Context, req *milvuspb.AddFi
 					// Storage admission must not block unrelated DDL.
 					broadcaster.Close()
 					broadcaster = nil
-					size, err = c.storage.Size(ctx, req.GetPath())
+					size, err = source.Size(ctx, req.GetPath())
 					if err != nil {
 						return err
 					}

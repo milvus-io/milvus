@@ -4,7 +4,7 @@ use super::runtime_option::get_options;
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 pub struct ResourceInfo {
@@ -157,6 +157,23 @@ impl FileResourcePathBuilder for ResourceInfo {
             }
         }
 
+        // Match Go path.Join: an absolute storage root is a cache namespace,
+        // not a replacement for the node's cache root.
+        let namespace = self
+            .storage_name
+            .as_deref()
+            .unwrap_or("")
+            .trim_start_matches('/');
+        if *resource_id <= 0
+            || Path::new(namespace)
+                .components()
+                .any(|part| !matches!(part, Component::Normal(_) | Component::CurDir))
+        {
+            return Err(TantivyBindingError::InternalError(
+                "invalid file resource namespace".into(),
+            ));
+        }
+
         let base_value =
             get_options(RESOURCE_PATH_KEY).ok_or(TantivyBindingError::InternalError(
                 "local_resource_path config not init success".to_string(),
@@ -168,24 +185,18 @@ impl FileResourcePathBuilder for ResourceInfo {
                 "local_resource_path must set as string".to_string(),
             ))?;
 
-        if let Some(storage_name) = &self.storage_name {
-            return Ok((
-                resource_id.clone(),
-                PathBuf::new()
-                    .join(base)
-                    .join(storage_name)
-                    .join(resource_id.to_string())
-                    .join(file_name),
-            ));
+        let base = PathBuf::from(base);
+        let base = if base.is_absolute() {
+            base
         } else {
-            return Ok((
-                resource_id.clone(),
-                PathBuf::new()
-                    .join(base)
-                    .join(resource_id.to_string())
-                    .join(file_name),
-            ));
-        }
+            std::env::current_dir()?.join(base)
+        };
+        Ok((
+            *resource_id,
+            base.join(namespace)
+                .join(resource_id.to_string())
+                .join(file_name),
+        ))
     }
 }
 
@@ -200,6 +211,8 @@ pub trait FileResourcePathBuilder {
 pub struct FileResourcePathHelper {
     builder: Arc<dyn FileResourcePathBuilder>,
     ids: HashSet<i64>,
+    #[cfg(test)]
+    pub test_root: Option<PathBuf>,
 }
 
 impl FileResourcePathHelper {
@@ -207,6 +220,8 @@ impl FileResourcePathHelper {
         Self {
             builder,
             ids: HashSet::new(),
+            #[cfg(test)]
+            test_root: None,
         }
     }
 
@@ -216,6 +231,8 @@ impl FileResourcePathHelper {
         Ok(Self {
             builder,
             ids: HashSet::new(),
+            #[cfg(test)]
+            test_root: None,
         })
     }
 
