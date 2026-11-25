@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -344,11 +345,9 @@ func retrieveByPKsOnce(ctx context.Context, queryRunner taskmodel.QueryRunner, t
 		MvccTimestamp:    0,
 		QueryLabel:       metrics.UpsertQueryLabel,
 	}, t.GetMetaCache(), false)
-	condition := t.req.GetWriteCondition()
-	meterLookup := t.queryUsage != nil && (!t.req.GetPartialUpdate() || condition != nil)
-	if meterLookup {
+	if t.queryUsage != nil {
 		qt.CollectQueryReadUsage = true
-		if condition != nil {
+		if condition := t.req.GetWriteCondition(); condition != nil {
 			// The version comparison in Proxy reads a separate source column.
 			field, err := readSchema.SchemaHelper.GetFieldFromName(condition.GetField())
 			if err != nil {
@@ -370,8 +369,16 @@ func retrieveByPKsOnce(ctx context.Context, queryRunner taskmodel.QueryRunner, t
 	if err := merr.CheckRPCCall(queryResult, err); err != nil {
 		return nil, storageCost, err
 	}
-	if meterLookup {
-		if err := t.queryUsage.Add(qt.ReadUsage()); err != nil {
+	if t.queryUsage != nil {
+		var returnedBytes uint64
+		if t.req.GetPartialUpdate() {
+			// Count the old values in the completed lookup before the merge modifies them.
+			returnedBytes, err = storage.LogicalQueryResultBytes(queryResult.GetFieldsData(), readSchema.CollectionSchema)
+			if err != nil {
+				return nil, storageCost, err
+			}
+		}
+		if err := t.queryUsage.AddWithReturnedBytes(qt.ReadUsage(), returnedBytes); err != nil {
 			return nil, storageCost, err
 		}
 	}

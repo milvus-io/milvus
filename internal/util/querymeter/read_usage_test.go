@@ -45,8 +45,10 @@ func TestReadUsageAccumulatorRejectsIncompleteContribution(t *testing.T) {
 	require.NoError(t, usage.Add(&internalpb.QueryReadUsage{DataBytes: 2, ValidityBits: map[int64]uint64{100: 4}}))
 	require.Error(t, usage.Add(&internalpb.QueryReadUsage{DataBytes: math.MaxInt64}))
 	require.Error(t, usage.Add(nil))
-	require.NoError(t, usage.Add(&internalpb.QueryReadUsage{DataBytes: 3, ValidityBits: map[int64]uint64{100: 4}}))
+	require.Error(t, usage.AddWithReturnedBytes(nil, 100))
+	require.Error(t, usage.AddWithReturnedBytes(&internalpb.QueryReadUsage{DataBytes: 2}, math.MaxUint64))
+	require.NoError(t, usage.AddWithReturnedBytes(&internalpb.QueryReadUsage{DataBytes: 3, ValidityBits: map[int64]uint64{100: 4}}, 8))
 	size, present := usage.Bytes()
 	require.True(t, present)
-	require.EqualValues(t, 6, size)
+	require.EqualValues(t, 14, size)
 }

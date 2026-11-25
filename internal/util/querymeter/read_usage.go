@@ -35,6 +35,11 @@ type ReadUsageAccumulator struct {
 }
 
 func (a *ReadUsageAccumulator) Add(part *internalpb.QueryReadUsage) error {
+	return a.AddWithReturnedBytes(part, 0)
+}
+
+// AddWithReturnedBytes records the planned and returned bytes for one query stage.
+func (a *ReadUsageAccumulator) AddWithReturnedBytes(part *internalpb.QueryReadUsage, returnedBytes uint64) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	total := &internalpb.QueryReadUsage{
@@ -42,6 +47,9 @@ func (a *ReadUsageAccumulator) Add(part *internalpb.QueryReadUsage) error {
 		ValidityBits: maps.Clone(a.total.GetValidityBits()),
 	}
 	if err := AddReadUsage(total, part); err != nil {
+		return err
+	}
+	if err := AddDataBytes(total, returnedBytes); err != nil {
 		return err
 	}
 	bytes, err := BillableBytes(total, 0)

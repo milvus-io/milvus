@@ -2666,10 +2666,18 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 		return task.schema, nil
 	}).Build()
 	defer readSchema.UnPatch()
+	readUsage := mockey.Mock((*dql.QueryTask).ReadUsage).Return(&internalpb.QueryReadUsage{DataBytes: 64}).Build()
+	defer readUsage.UnPatch()
 	for _, partitionKeyMode := range []bool{false, true} {
 		t.Run(fmt.Sprintf("partitionKeyMode=%t", partitionKeyMode), func(t *testing.T) {
 			task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20}, []int64{10, 20}, nil)
 			task.partitionKeyMode = partitionKeyMode
+			task.EnableQueryReadUsage()
+			replacedVector := task.req.GetFieldsData()[2]
+			require.Equal(t, "vector", replacedVector.GetFieldName())
+			oldVector := proto.Clone(replacedVector).(*schemapb.FieldData)
+			oldVector.GetVectors().GetFloatVector().Data = make([]float32, 256)
+			fields := []*schemapb.FieldData{partialUpdateCASPKFieldData([]int64{10, 20}), oldVector}
 			task.upsertMsg.DeleteMsg.PartitionName = "_default"
 			beginTS := task.BeginTs()
 			fakeWAL := newPartialUpdateCASTestWAL(t, 9)
@@ -2687,6 +2695,8 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 				require.Equal(t, commonpb.ConsistencyLevel_Strong, qt.Request().GetConsistencyLevel())
 				require.Equal(t, commonpb.ConsistencyLevel_Strong, qt.GetConsistencyLevel())
 				require.Equal(t, []string{"*"}, qt.Request().GetOutputFields())
+				require.True(t, qt.GetCollectQueryReadUsage())
+				require.Empty(t, qt.GetQueryReadFieldIds())
 				require.Zero(t, qt.Request().GetBase().GetTimestamp())
 				require.Zero(t, qt.Request().GetGuaranteeTimestamp())
 				require.Zero(t, qt.GetMvccTimestamp())
@@ -2701,18 +2711,29 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 					qt.RecordChannelMvcc(channel, 70)
 				}
 				return &milvuspb.QueryResults{
-					Status: merr.Success(), FieldsData: []*schemapb.FieldData{partialUpdateCASPKFieldData([]int64{10, 20})},
+					Status: merr.Success(), FieldsData: fields,
 				}, segcore.StorageCost{}, nil
 			}).Build()
 			defer query.UnPatch()
 
 			result, _, err := retrieveByPKs(context.Background(), task, partialUpdateCASIDs([]int64{10, 20}), []string{"*"})
 			require.NoError(t, err)
-			require.Len(t, result.GetFieldsData(), 1)
+			require.Len(t, result.GetFieldsData(), 2)
+			bytes, metered := task.QueryReadBytes()
+			require.True(t, metered)
+			require.EqualValues(t, 64+2*8+256*4, bytes, "count all returned values including the vector replaced by the request")
 			require.Equal(t, beginTS, task.BeginTs())
 			for _, meta := range task.partialUpdateCASGroups {
 				require.EqualValues(t, 70, meta.GetReadTs())
 			}
+
+			fields = nil
+			result, _, err = retrieveByPKs(t.Context(), task, partialUpdateCASIDs([]int64{30}), []string{"*"})
+			require.NoError(t, err)
+			require.Empty(t, result.GetFieldsData())
+			bytes, metered = task.QueryReadBytes()
+			require.True(t, metered)
+			require.EqualValues(t, 2*64+2*8+256*4, bytes, "a zero-hit lookup only adds the planned read")
 		})
 	}
 }
@@ -3632,13 +3653,16 @@ func TestConditionalUpsertReadUsage(t *testing.T) {
 	require.NoError(t, task.preparePartialUpdateCASGroups(t.Context()))
 
 	var readErr error
+	version := partialUpdateCASPKFieldData([]int64{1, 2})
+	version.FieldName = "version"
+	version.FieldId = 101
 	executeQuery := mockey.Mock((*mockUpsertNode).query).To(func(_ *mockUpsertNode, _ context.Context, qt *dql.QueryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 		require.True(t, qt.GetCollectQueryReadUsage())
 		require.Equal(t, []int64{101}, qt.GetQueryReadFieldIds())
 		for channel := range task.partialUpdateCASGroups {
 			qt.RecordChannelMvcc(channel, 90)
 		}
-		return &milvuspb.QueryResults{Status: merr.Status(readErr)}, segcore.StorageCost{}, readErr
+		return &milvuspb.QueryResults{Status: merr.Status(readErr), FieldsData: []*schemapb.FieldData{version}}, segcore.StorageCost{}, readErr
 	}).Build()
 	defer executeQuery.UnPatch()
 
@@ -3652,7 +3676,7 @@ func TestConditionalUpsertReadUsage(t *testing.T) {
 	require.NoError(t, err)
 	bytes, metered := task.QueryReadBytes()
 	require.True(t, metered)
-	require.EqualValues(t, 41, bytes)
+	require.EqualValues(t, 41+2*2*8, bytes)
 
 	readErr = merr.ErrServiceUnavailable
 	_, _, err = retrieveByPKs(t.Context(), task, partialUpdateCASIDs([]int64{10}), []string{"*"})
@@ -3662,7 +3686,7 @@ func TestConditionalUpsertReadUsage(t *testing.T) {
 	_, _, err = retrieveByPKs(t.Context(), task, partialUpdateCASIDs([]int64{10}), []string{"*"})
 	require.ErrorContains(t, err, "did not report read usage")
 	bytes, _ = task.QueryReadBytes()
-	require.EqualValues(t, 41, bytes)
+	require.EqualValues(t, 41+2*2*8, bytes)
 	require.Zero(t, fakeWAL.appendCalls)
 }
 
