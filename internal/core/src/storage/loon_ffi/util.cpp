@@ -384,7 +384,8 @@ IsCredentialBrokerEndpoint(const std::string& endpoint) {
 }
 
 std::shared_ptr<milvus_storage::api::Properties>
-MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
+MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config,
+                                        bool use_s3_crt) {
     auto properties_map = std::make_shared<milvus_storage::api::Properties>();
 
     // Add non-null string fields
@@ -483,6 +484,7 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
             std::to_string(c_storage_config.max_connections).c_str());
     }
 
+    (*properties_map)[PROPERTY_FS_S3_CRT_ASYNC_READ] = use_s3_crt;
     (*properties_map)[PROPERTY_FS_S3_CRT_QUEUE_SIZES] =
         c_storage_config.crt_queue_sizes > 0
             ? c_storage_config.crt_queue_sizes
@@ -778,6 +780,9 @@ InjectExternalSpecProperties(
     const milvus::storage::ExternalIopsConfig& iops_config) {
     std::string extfs_prefix = std::string(PROPERTY_EXTFS_PREFIX) +
                                std::to_string(collection_id) + ".";
+
+    // External origins select their transport independently of the index bucket.
+    properties[extfs_prefix + "s3.crt_async_read"] = std::string("false");
 
     // Layer 0: zero-init bool fields only (milvus-storage rejects empty
     // strings on enum-constrained keys like cloud_provider).

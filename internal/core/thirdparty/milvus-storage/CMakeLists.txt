@@ -28,6 +28,8 @@ else ()
     set(WITH_AZURE_FS OFF CACHE BOOL "" FORCE )
 endif ()
 
+option(WITH_CRT "Build milvus-storage with AWS S3 CRT support." ON)
+
 # Disable benchmark for milvus-storage (we don't need it and it may have missing deps)
 set(WITH_BENCHMARK OFF CACHE BOOL "" FORCE)
 

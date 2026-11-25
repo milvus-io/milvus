@@ -47,6 +47,7 @@ class StorageV2FSCache {
         uint32_t max_connections = 100;
         std::string tls_min_version = "";
         bool use_crc32c_checksum = false;
+        bool use_s3_crt = false;
     };
 
  public:

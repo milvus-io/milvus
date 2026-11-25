@@ -34,7 +34,8 @@
  * @return Shared pointer to milvus_storage::api::Properties
  */
 std::shared_ptr<milvus_storage::api::Properties>
-MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config);
+MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config,
+                                        bool use_s3_crt = false);
 
 /**
  * @brief fs.root_path handed to the loon / Arrow filesystem for a storage

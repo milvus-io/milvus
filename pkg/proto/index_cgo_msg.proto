@@ -112,6 +112,7 @@ message BuildIndexInfo {
   // External collection fields (empty for regular collections)
   string external_source = 33;
   string external_spec = 34;
+  bool use_s3_crt = 35;
 }
 
 message StoragePluginContext {

@@ -49,6 +49,7 @@
 #include "pb/common.pb.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/schema.pb.h"
+#include "storage/ArrowFileSystemChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/PluginLoader.h"
 #include "storage/Types.h"
@@ -207,13 +208,14 @@ void
 configure_manifest_file_manager_context(
     milvus::storage::FileManagerContext& file_manager_context,
     const milvus::proto::indexcgo::BuildIndexInfo& build_index_info,
-    const milvus::storage::StorageConfig& storage_config) {
+    const milvus::storage::StorageConfig& storage_config,
+    bool use_s3_crt) {
     if (build_index_info.manifest().empty()) {
         return;
     }
 
     auto loon_properties = MakeInternalPropertiesFromStorageConfig(
-        ToCStorageConfig(storage_config));
+        ToCStorageConfig(storage_config), use_s3_crt);
     if (!build_index_info.external_source().empty()) {
         InjectExternalSpecProperties(*loon_properties,
                                      build_index_info.collectionid(),
@@ -241,6 +243,41 @@ configure_manifest_file_manager_context(
             field_info.fieldid(),
             get_storage_column_mapping(field_info, is_milvus_table));
     }
+}
+
+static milvus::storage::FileManagerContext
+make_index_file_manager_context(
+    const milvus::storage::FieldDataMeta& field_meta,
+    const milvus::storage::IndexMeta& index_meta,
+    const milvus::proto::indexcgo::BuildIndexInfo& info) {
+    const auto config = get_storage_config(info.storage_config());
+    auto fs_config = config;
+    const bool s3 =
+        (config.storage_type == "remote" || config.storage_type == "minio") &&
+        (config.cloud_provider.empty() || config.cloud_provider == "aws");
+    if (s3) {
+        // Loon names the S3-compatible filesystem remote/aws.
+        fs_config.storage_type = "remote";
+        fs_config.cloud_provider = "aws";
+    }
+    // The SDK client enforces explicitly configured minimum TLS versions.
+    const bool use_crt = info.use_s3_crt() && s3 &&
+                         (!config.useSSL || config.tls_min_version.empty() ||
+                          config.tls_min_version == "default");
+    auto fs = milvus::storage::InitArrowFileSystem(fs_config, use_crt);
+    milvus::storage::ChunkManagerPtr chunks;
+    if (use_crt) {
+        AssertInfo(fs, "Failed to initialize the index S3 filesystem");
+        chunks = std::make_shared<milvus::storage::ArrowFileSystemChunkManager>(
+            fs, config.bucket_name, config.root_path);
+    } else {
+        chunks = milvus::storage::CreateChunkManager(config);
+    }
+    milvus::storage::FileManagerContext context(
+        field_meta, index_meta, chunks, fs);
+    context.set_stats_base_path(info.stats_base_path());
+    configure_manifest_file_manager_context(context, info, fs_config, use_crt);
+    return context;
 }
 
 milvus::Config
@@ -301,8 +338,6 @@ CreateIndexBuilder(CIndex* res_index,
         auto field_type =
             static_cast<DataType>(build_index_info->field_schema().data_type());
 
-        auto storage_config =
-            get_storage_config(build_index_info->storage_config());
         auto config = get_config(build_index_info);
 
         auto engine_version = build_index_info->current_index_version();
@@ -342,22 +377,8 @@ CreateIndexBuilder(CIndex* res_index,
             build_index_info->dim(),
             index_non_encoding,
             build_index_info->index_store_path_version()};
-        auto chunk_manager =
-            milvus::storage::CreateChunkManager(storage_config);
-        LOG_INFO("create chunk manager success, build_id: {}",
-                 build_index_info->buildid());
-        auto fs = milvus::storage::InitArrowFileSystem(storage_config);
-        LOG_INFO("init arrow file system success, build_id: {}",
-                 build_index_info->buildid());
-
-        milvus::storage::FileManagerContext fileManagerContext(
-            field_meta, index_meta, chunk_manager, fs);
-        if (!build_index_info->stats_base_path().empty()) {
-            fileManagerContext.set_stats_base_path(
-                build_index_info->stats_base_path());
-        }
-        configure_manifest_file_manager_context(
-            fileManagerContext, *build_index_info, storage_config);
+        auto fileManagerContext = make_index_file_manager_context(
+            field_meta, index_meta, *build_index_info);
 
         if (build_index_info->has_storage_plugin_context()) {
             fileManagerContext.set_plugin_context(
@@ -464,8 +485,6 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
         auto field_type = static_cast<milvus::DataType>(
             build_index_info->field_schema().data_type());
 
-        auto storage_config =
-            get_storage_config(build_index_info->storage_config());
         auto config = get_config(build_index_info);
 
         // init file manager
@@ -497,17 +516,8 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
                 : milvus::index::TANTIVY_INDEX_LATEST_VERSION;
         config[milvus::index::TANTIVY_INDEX_VERSION] = tantivy_index_version;
 
-        auto chunk_manager =
-            milvus::storage::CreateChunkManager(storage_config);
-        auto fs = milvus::storage::InitArrowFileSystem(storage_config);
-
-        milvus::storage::FileManagerContext fileManagerContext(
-            field_meta, index_meta, chunk_manager, fs);
-        fileManagerContext.set_stats_base_path(
-            build_index_info->stats_base_path());
-
-        configure_manifest_file_manager_context(
-            fileManagerContext, *build_index_info, storage_config);
+        auto fileManagerContext = make_index_file_manager_context(
+            field_meta, index_meta, *build_index_info);
 
         if (build_index_info->has_storage_plugin_context()) {
             fileManagerContext.set_plugin_context(
@@ -567,8 +577,6 @@ BuildTextIndex(ProtoLayoutInterface result,
         auto field_type = static_cast<milvus::DataType>(
             build_index_info->field_schema().data_type());
 
-        auto storage_config =
-            get_storage_config(build_index_info->storage_config());
         auto config = get_config(build_index_info);
 
         // init file manager
@@ -589,17 +597,8 @@ BuildTextIndex(ProtoLayoutInterface result,
             field_type,
             build_index_info->dim(),
         };
-        auto chunk_manager =
-            milvus::storage::CreateChunkManager(storage_config);
-        auto fs = milvus::storage::InitArrowFileSystem(storage_config);
-
-        milvus::storage::FileManagerContext fileManagerContext(
-            field_meta, index_meta, chunk_manager, fs);
-        fileManagerContext.set_stats_base_path(
-            build_index_info->stats_base_path());
-
-        configure_manifest_file_manager_context(
-            fileManagerContext, *build_index_info, storage_config);
+        auto fileManagerContext = make_index_file_manager_context(
+            field_meta, index_meta, *build_index_info);
 
         if (build_index_info->has_storage_plugin_context()) {
             fileManagerContext.set_plugin_context(

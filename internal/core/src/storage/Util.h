@@ -424,7 +424,8 @@ ChunkManagerPtr
 CreateChunkManager(const StorageConfig& storage_config);
 
 milvus_storage::ArrowFileSystemPtr
-InitArrowFileSystem(milvus::storage::StorageConfig storage_config);
+InitArrowFileSystem(milvus::storage::StorageConfig storage_config,
+                    bool use_s3_crt = false);
 
 FieldDataPtr
 CreateFieldData(

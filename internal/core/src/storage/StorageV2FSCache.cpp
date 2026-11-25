@@ -62,6 +62,7 @@ StorageV2FSCache::Get(const Key& key) {
     props[PROPERTY_FS_MAX_CONNECTIONS] = key.max_connections;
     const auto crt_queue_sizes =
         LoonFFIPropertiesSingleton::GetInstance().GetS3CrtQueueSizes();
+    props[PROPERTY_FS_S3_CRT_ASYNC_READ] = key.use_s3_crt;
     props[PROPERTY_FS_S3_CRT_QUEUE_SIZES] = crt_queue_sizes;
     if (!key.tls_min_version.empty() && key.tls_min_version != "default") {
         props[PROPERTY_FS_TLS_MIN_VERSION] = key.tls_min_version;

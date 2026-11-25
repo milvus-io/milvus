@@ -1281,7 +1281,8 @@ CreateChunkManager(const StorageConfig& storage_config) {
 }
 
 milvus_storage::ArrowFileSystemPtr
-InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
+InitArrowFileSystem(milvus::storage::StorageConfig storage_config,
+                    bool use_s3_crt) {
     StorageV2FSCache::Key conf;
     if (storage_config.storage_type == "local") {
         std::string path(storage_config.root_path);
@@ -1309,6 +1310,7 @@ InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
         conf.max_connections = storage_config.max_connections;
         conf.tls_min_version = storage_config.tls_min_version;
         conf.use_crc32c_checksum = storage_config.use_crc32c_checksum;
+        conf.use_s3_crt = use_s3_crt;
     }
     return StorageV2FSCache::Instance().Get(conf);
 }
