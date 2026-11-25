@@ -35,12 +35,16 @@ import (
 func TestManifestTextSizeCanceledWaitingForAdmission(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
 	base := filepath.Join(cfg.RootPath, "text-size-admission")
-	schema := arrow.NewSchema([]arrow.Field{{Name: "101", Type: arrow.BinaryTypes.String,
-		Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{"101"})}}, nil)
+	schema := arrow.NewSchema([]arrow.Field{{
+		Name: "101", Type: arrow.BinaryTypes.String,
+		Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{"101"}),
+	}}, nil)
 	writer, err := NewFFISegmentWriter(schema, &SegmentWriterConfig{
 		SegmentPath: base, WriterFormat: "parquet",
-		TextColumns: []TextColumnConfig{{FieldID: 101, LobBasePath: filepath.Join(cfg.RootPath, "lobs/101"),
-			InlineThreshold: 64, MaxLobFileBytes: 1 << 20, FlushThresholdBytes: 1 << 20}},
+		TextColumns: []TextColumnConfig{{
+			FieldID: 101, LobBasePath: filepath.Join(cfg.RootPath, "lobs/101"),
+			InlineThreshold: 64, MaxLobFileBytes: 1 << 20, FlushThresholdBytes: 1 << 20,
+		}},
 	}, cfg, nil)
 	require.NoError(t, err)
 	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
