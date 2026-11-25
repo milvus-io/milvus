@@ -106,7 +106,12 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
                 "[StorageV2] Failed to get filesystem");
         }
 
-        auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
+        auto schema_result = arrow::ImportSchema(schema);
+        if (!schema_result.ok()) {
+            auto error = milvus_storage::ToSegcoreError(schema_result.status());
+            return milvus::FailureCStatus(&error);
+        }
+        auto trueSchema = std::move(schema_result).ValueUnsafe();
 
         auto columnGroups =
             *static_cast<std::vector<std::vector<int>>*>(column_splits);
@@ -181,7 +186,12 @@ NewPackedWriter(struct ArrowSchema* schema,
                 "[StorageV2] Failed to get filesystem");
         }
 
-        auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
+        auto schema_result = arrow::ImportSchema(schema);
+        if (!schema_result.ok()) {
+            auto error = milvus_storage::ToSegcoreError(schema_result.status());
+            return milvus::FailureCStatus(&error);
+        }
+        auto trueSchema = std::move(schema_result).ValueUnsafe();
 
         auto columnGroups =
             *static_cast<std::vector<std::vector<int>>*>(column_splits);
